@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import { createJAdapterWithRetry } from '../../jurisdiction/adapter/retry';
+import { createJAdapterWithRetry } from '../../jurisdiction/adapter/core/retry';
 import { createStructuredLogger } from '../../infra/logger';
 import type { JAdapter, JAdapterConfig } from '../../jurisdiction/adapter/types';
 import { safeStringify } from '../../protocol/serialization';

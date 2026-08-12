@@ -11,7 +11,7 @@ import {
   type TxDisputeProofBodyEvidence,
   type TxFinalizationEvidence,
 } from './rpc-public';
-import { watcherErrorDetails } from './rpc-boundary';
+import { watcherErrorDetails } from './rpc/rpc-boundary';
 
 export type WatchedErc20Token = {
   tokenId: number;

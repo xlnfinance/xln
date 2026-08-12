@@ -2,7 +2,7 @@ import type { JAdapter } from '../../../jurisdiction/adapter';
 import { DEV_CHAIN_IDS } from '../../../jurisdiction/adapter';
 import type { JTokenInfo } from '../../../jurisdiction/adapter/types';
 import { defaultTokensForJurisdiction } from '../../../jurisdiction/machine/config/default-tokens';
-import { deployMissingDefaultTokens } from '../../../jurisdiction/adapter/dev-token-deployment';
+import { deployMissingDefaultTokens } from '../../../jurisdiction/adapter/operations/dev-token-deployment';
 import { createStructuredLogger } from '../../../infra/logger';
 import { HUB_REQUIRED_TOKEN_COUNT } from '../health/hub';
 

@@ -4,7 +4,7 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import type { JAdapter } from '../../../jurisdiction/adapter';
 import { normalizeJurisdictionKey, selectWritableJurisdictionKey, type WritableJurisdictionEntry } from '../../../jurisdiction/machine/config/jurisdiction-key';
 import { resolveJurisdictionsJsonPath } from '../../../jurisdiction/adapter/jurisdictions-path';
-import { computeJurisdictionsNetworkVersion } from '../../../jurisdiction/adapter/jurisdictions-version';
+import { computeJurisdictionsNetworkVersion } from '../../../jurisdiction/adapter/core/jurisdictions-version';
 import { toPublicRpcUrl } from '../../../network/p2p/loopback-url';
 import { createStructuredLogger } from '../../../infra/logger';
 import { isRecord } from '../utils';

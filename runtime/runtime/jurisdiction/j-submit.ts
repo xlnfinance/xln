@@ -7,7 +7,7 @@ import type { JAdapter, JSubmitResult } from '../../jurisdiction/adapter/types';
 import { getLocalSignerPrivateKey } from '../../account/crypto';
 import { isBatchEmpty } from '../../jurisdiction/machine/batch';
 import { indexReserveUpdatedEvents } from '../../jurisdiction/machine/events/event-evidence';
-import { classifyJAdapterFailure } from '../../jurisdiction/adapter/failure';
+import { classifyJAdapterFailure } from '../../jurisdiction/adapter/core/failure';
 import { ensureLiveJAdapterForReplica } from '../infra';
 import { getLiveJAdapter } from './live-jadapters';
 import { createStructuredLogger, shortId } from '../../infra/logger';

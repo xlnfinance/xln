@@ -1,0 +1,146 @@
+import {
+  CANONICAL_J_EVENTS,
+  type CanonicalJEvent,
+} from '../../machine/event-catalog';
+import type { RuntimeReplica } from '../../../runtime/types';
+import type { EntityState } from '../../../entity/types';
+import type { JEventIngress } from '../types';
+import { ethers } from 'ethers';
+
+export type CanonicalJEventIngress = JEventIngress & {
+  name: CanonicalJEvent;
+};
+
+const canonicalEventNames = new Set<string>(CANONICAL_J_EVENTS);
+
+export const isCanonicalEvent = (
+  event: JEventIngress,
+): event is CanonicalJEventIngress => canonicalEventNames.has(event.name);
+
+const normalizedId = (value: unknown): string => String(value).toLowerCase();
+
+const hashLadderRouteNamesEntity = (
+  event: CanonicalJEventIngress,
+  entityId: string,
+  state: EntityState | undefined,
+): boolean => {
+  const writer = normalizedId(event.args['entity']);
+  const counterparty = normalizedId(event.args['counterpartyEntity']);
+  if (writer === entityId && counterparty) return true;
+  if (!state) return false;
+  const ladderHash = normalizedId(event.args['ladderHash']);
+  const targetRole = event.args['targetRole'] === true;
+  for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
+    const leg = targetRole ? route.target : route.source;
+    const pull = targetRole ? route.targetPull : route.sourcePull;
+    if (!pull || normalizedId(leg.entityId) !== entityId) continue;
+    if (normalizedId(leg.counterpartyEntityId) !== writer) continue;
+    if (normalizedId(leg.entityId) !== counterparty) continue;
+    const expectedLadder = ethers.keccak256(ethers.solidityPacked(
+      ['bytes32', 'bytes32'],
+      [pull.fullHash, pull.partialRoot],
+    )).toLowerCase();
+    if (expectedLadder === ladderHash) return true;
+  }
+  return false;
+};
+
+const accountSettlementNamesEntity = (
+  event: CanonicalJEventIngress,
+  entityId: string,
+): boolean => {
+  const settledRaw = event.args['settled'] ?? event.args[''] ?? event.args[0] ?? [];
+  const settlements = Array.isArray(settledRaw) ? settledRaw : [];
+  return settlements.some(rawSettlement => {
+    const settlement = rawSettlement as Record<string, unknown> & unknown[];
+    return (
+      normalizedId(settlement[0] ?? settlement['left']) === entityId ||
+      normalizedId(settlement[1] ?? settlement['right']) === entityId
+    );
+  });
+};
+
+/**
+ * One exhaustive fan-out policy for every canonical Jurisdiction event.
+ *
+ * Unknown transport logs are ignored before this boundary. Adding a canonical
+ * event without deciding its Entity audience is a compile-time error here.
+ */
+export const isEventRelevantToEntity = (
+  event: JEventIngress,
+  entityId: string,
+  state?: EntityState,
+): boolean => {
+  if (!isCanonicalEvent(event)) return false;
+
+  const normalizedEntity = normalizedId(entityId);
+  const args = event.args;
+  switch (event.name) {
+    case 'FoundationBootstrapped':
+    case 'EntityRegistered':
+    case 'BoardActivated':
+    case 'SecretRevealed':
+      return true;
+    case 'HashLadderRevealRegistered':
+      // The revealer cannot choose the event audience. The public commitment
+      // identifies the exact opposite Account party through its committed
+      // cross-j route. This prevents both targeted withholding and O(N)
+      // global fanout for monotonically replaceable Target evidence.
+      return hashLadderRouteNamesEntity(event, normalizedEntity, state);
+    case 'CounterDisputeRegistered':
+      return (
+        normalizedId(args['sender']) === normalizedEntity
+        || normalizedId(args['counterentity']) === normalizedEntity
+      );
+    case 'ReserveUpdated':
+      return normalizedId(args['entity']) === normalizedEntity;
+    case 'ExternalWalletSnapshot':
+    case 'ExternalWalletDelta':
+    case 'HankoBatchProcessed':
+    case 'EntityProviderActionExecuted':
+    case 'EntityProviderActionCancelled':
+      return normalizedId(args['entityId']) === normalizedEntity;
+    case 'AccountSettled':
+      return accountSettlementNamesEntity(event, normalizedEntity);
+    case 'DisputeStarted':
+    case 'DisputeFinalized':
+      return (
+        normalizedId(args['sender']) === normalizedEntity ||
+        normalizedId(args['counterentity']) === normalizedEntity
+      );
+    case 'DebtCreated':
+    case 'DebtEnforced':
+    case 'DebtForgiven':
+      return (
+        normalizedId(args['debtor']) === normalizedEntity ||
+        normalizedId(args['creditor']) === normalizedEntity
+      );
+    default: {
+      const unhandledEvent: never = event.name;
+      throw new Error(`J_EVENT_RELEVANCE_UNHANDLED:${String(unhandledEvent)}`);
+    }
+  }
+};
+
+export const collectRelevantJEventReplicaKeys = (
+  env: RuntimeReplica,
+  events: JEventIngress[],
+): string[] => {
+  const canonicalEvents = events.filter(isCanonicalEvent);
+  if (canonicalEvents.length === 0) return [];
+
+  const replicaKeys = new Set<string>();
+  for (const [replicaKey, replica] of env.state.eReplicas?.entries?.() || []) {
+    const [entityIdFromKey] = replicaKey.split(':');
+    const entityId = String(
+      replica?.state?.entityId || replica?.entityId || entityIdFromKey || '',
+    ).toLowerCase();
+    if (
+      entityId &&
+      canonicalEvents.some(event => isEventRelevantToEntity(event, entityId, replica.state))
+    ) {
+      replicaKeys.add(replicaKey);
+    }
+  }
+  return [...replicaKeys].sort();
+};

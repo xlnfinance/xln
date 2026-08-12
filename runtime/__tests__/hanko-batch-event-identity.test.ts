@@ -5,7 +5,7 @@ import { applyHankoBatchProcessedEvent } from '../entity/tx/j-events-batch';
 import { generateLazyEntityId } from '../entity/factory';
 import { prepareSignedBatch } from '../hanko/batch';
 import { createJAdapter } from '../jurisdiction/adapter';
-import { rawEventToJEvents } from '../jurisdiction/adapter/j-event-payloads';
+import { rawEventToJEvents } from '../jurisdiction/adapter/events/j-event-payloads';
 import { createEmptyBatch } from '../jurisdiction/machine/batch';
 import { normalizeJurisdictionEvent } from '../jurisdiction/machine/events/event-normalization';
 import type { EntityState } from '../entity/types';

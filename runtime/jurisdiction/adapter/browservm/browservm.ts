@@ -25,15 +25,15 @@ import type { BrowserVMProvider } from './browservm-provider';
 import {
   assertDepositoryEntityProviderBinding,
   assertJStackAddressMatch,
-} from '../stack-binding';
+} from '../operations/stack-binding';
 import { createBrowserVmHistoryWatcher } from './browservm-history';
 import {
   createBrowserVmSubmitTx,
 } from './browservm-submit';
 import { createBrowserVmStateMethods } from './browservm-state-methods';
 import { createBrowserVmIoMethods } from './browservm-io';
-import { createSignerNonceSequencer } from '../rpc-transaction-sequencer';
-import { prepareDurableEvmTransaction } from '../evm-durable-transaction';
+import { createSignerNonceSequencer } from '../rpc/write/rpc-transaction-sequencer';
+import { prepareDurableEvmTransaction } from '../rpc/write/evm-durable-transaction';
 
 export async function createBrowserVMAdapter(
   config: JAdapterConfig,

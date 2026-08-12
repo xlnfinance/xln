@@ -31,7 +31,7 @@ import {
 import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
 import { createStructuredLogger } from '../infra/logger';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
-import { assertJStackAddressMatch } from '../jurisdiction/adapter/stack-binding';
+import { assertJStackAddressMatch } from '../jurisdiction/adapter/operations/stack-binding';
 import {
   attachLiveJAdapter,
   getLiveJAdapter,

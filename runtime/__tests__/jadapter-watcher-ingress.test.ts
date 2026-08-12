@@ -182,7 +182,7 @@ describe('JAdapter watcher ingress', () => {
 
   test('J-event observation diagnostics use structured logging only', () => {
     const source = readFileSync(
-      join(process.cwd(), 'runtime/jurisdiction/adapter/event-observation.ts'),
+      join(process.cwd(), 'runtime/jurisdiction/adapter/events/event-observation.ts'),
       'utf8',
     );
 
@@ -195,8 +195,8 @@ describe('JAdapter watcher ingress', () => {
 
   test('jadapter ingress depends on the machine queue, not the runtime facade', () => {
     const files = [
-      'history-ingress.ts',
-      'manual-event-ingress.ts',
+      'events/history-ingress.ts',
+      'events/manual-event-ingress.ts',
       'watcher/observe/watcher-cursor.ts',
       'watcher/observe/watcher-event-batch.ts',
     ];
@@ -204,8 +204,9 @@ describe('JAdapter watcher ingress', () => {
       .map(file => readFileSync(join(process.cwd(), 'runtime/jurisdiction/adapter', file), 'utf8'))
       .join('\n');
 
-    expect(source).toContain("from '../../runtime/input-pipeline/input-queue'");
-    expect(source).not.toMatch(/from ['"]\.\.\/runtime(?:\.ts)?['"]/);
+    expect(source).toContain("from '../../../runtime/input-pipeline/input-queue'");
+    expect(source).toContain("from '../../../../runtime/input-pipeline/input-queue'");
+    expect(source).not.toMatch(/from ['"](?:\.\.\/)+runtime(?:\.ts)?['"]/);
   });
 
   test('RPC wallet snapshot reads fail fast on partial RPC errors', () => {

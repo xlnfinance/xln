@@ -506,7 +506,7 @@ const RUNTIME_FILES = {
     'runtime/env-events.ts',
     'infra/logger.ts',
     'jurisdiction/machine/jurisdiction-runtime/index.ts',
-    'jurisdiction/adapter/config.ts',
+    'jurisdiction/adapter/core/config.ts',
     'jurisdiction/machine/jurisdiction-stack.ts',
     'runtime/jurisdiction-api.ts',
     'storage/canonical-hash.ts',

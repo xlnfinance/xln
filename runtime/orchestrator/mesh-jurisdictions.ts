@@ -1,4 +1,4 @@
-import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction/adapter/jurisdiction-loader';
+import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction/adapter/core/jurisdiction-loader';
 import { getJurisdictionIdentityRef } from '../jurisdiction/machine/jurisdiction-runtime';
 import { isLoopbackUrl, normalizeLoopbackUrl, toPublicRpcUrl } from '../network/p2p/loopback-url';
 

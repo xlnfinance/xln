@@ -16,5 +16,5 @@ export type {
   AuthenticatedReceiptRange,
   ReceiptReadProfile,
   RpcBatchCall,
-} from './receipt-reader';
-export { readAuthenticatedLogsForRange, readAuthenticatedReceiptRange } from './receipt-reader';
+} from './receipt/reader';
+export { readAuthenticatedLogsForRange, readAuthenticatedReceiptRange } from './receipt/reader';

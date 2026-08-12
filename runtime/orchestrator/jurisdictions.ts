@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { createJAdapter } from '../jurisdiction/adapter';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
-import { computeJurisdictionsNetworkVersion } from '../jurisdiction/adapter/jurisdictions-version';
+import { computeJurisdictionsNetworkVersion } from '../jurisdiction/adapter/core/jurisdictions-version';
 import { normalizeLoopbackUrl, toPublicRpcUrl } from '../network/p2p/loopback-url';
 import {
   assertCanonicalRpcContractStack,

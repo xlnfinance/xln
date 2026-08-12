@@ -9,10 +9,10 @@ import {
   reconcileCompetingFinalizationReceipt,
   reconcileProcessedBatchFailure,
   selectCompetingFinalization,
-} from '../jurisdiction/adapter/rpc-submission';
-import { createRpcReceiptReaders } from '../jurisdiction/adapter/rpc-receipts';
-import { parseBlockTimestamp } from '../jurisdiction/adapter/rpc-chain-io';
-import type { RpcContractStack } from '../jurisdiction/adapter/rpc-contract-stack';
+} from '../jurisdiction/adapter/rpc/write/rpc-submission';
+import { createRpcReceiptReaders } from '../jurisdiction/adapter/rpc/rpc-receipts';
+import { parseBlockTimestamp } from '../jurisdiction/adapter/rpc/rpc-chain-io';
+import type { RpcContractStack } from '../jurisdiction/adapter/rpc/rpc-contract-stack';
 import type { JSubmitResult } from '../jurisdiction/adapter/types';
 import { createEmptyBatch, encodeJBatch } from '../jurisdiction/machine/batch';
 

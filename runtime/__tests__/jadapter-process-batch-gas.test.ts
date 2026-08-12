@@ -87,10 +87,10 @@ describe('processBatch transformer gas limit', () => {
 
   test('every reachable RPC processBatch path uses the canonical resolver', async () => {
     const writeMethods = await Bun.file(
-      new URL('../jurisdiction/adapter/rpc-write-methods.ts', import.meta.url),
+      new URL('../jurisdiction/adapter/rpc/write/rpc-write-methods.ts', import.meta.url),
     ).text();
     const submission = await Bun.file(
-      new URL('../jurisdiction/adapter/rpc-submission.ts', import.meta.url),
+      new URL('../jurisdiction/adapter/rpc/write/rpc-submission.ts', import.meta.url),
     ).text();
     expect(writeMethods.match(/resolveProcessBatchGasLimit/g)).toHaveLength(3);
     expect(submission.match(/resolveProcessBatchGasLimit/g)).toHaveLength(2);

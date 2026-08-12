@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 import { createJAdapter } from '../jurisdiction/adapter';
 import { prepareSignedBatch } from '../hanko/batch';
 import { createEmptyBatch } from '../jurisdiction/machine/batch';
-import { readAuthenticatedReceiptRange } from '../jurisdiction/adapter/receipt-reader';
+import { readAuthenticatedReceiptRange } from '../jurisdiction/adapter/receipt/reader';
 
 const depositArgument = process.argv.slice(2).find((arg) => arg.startsWith('--deposit-usdt='));
 const withdrawArgument = process.argv.slice(2).find((arg) => arg.startsWith('--withdraw-usdt='));

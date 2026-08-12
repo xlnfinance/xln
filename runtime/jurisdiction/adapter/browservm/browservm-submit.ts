@@ -5,8 +5,8 @@ import { assertEntityProviderActionJTxBinding } from '../../../entity/entity-pro
 import type { JTx } from '../../../types/jurisdiction-runtime';
 import type { BrowserVMProvider } from './browservm-provider';
 import type { JAdapter, JAdapterAddresses, JBatchReceipt, JEvent, JSubmitResult } from '../types';
-import { makeJAdapterFailureResult } from '../failure';
-import { submitDebtEnforcement, submitMint } from '../rpc-submit-basic';
+import { makeJAdapterFailureResult } from '../core/failure';
+import { submitDebtEnforcement, submitMint } from '../rpc/write/rpc-submit-basic';
 
 type BrowserVmSubmitContext = {
   chainId: number;

@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { extractCanonicalDepositoryEventArgs } from './depository-event-codec';
+import { extractCanonicalDepositoryEventArgs } from './events/depository-event-codec';
 import type { JEvent } from './types';
 
 export type JEventLog = {

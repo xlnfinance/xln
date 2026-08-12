@@ -11,8 +11,8 @@ import { ethers } from 'ethers';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { createJAdapter } from '../jurisdiction/adapter';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
-import { loadJurisdictions } from '../jurisdiction/adapter/jurisdiction-loader';
-import { deployMissingDefaultTokens } from '../jurisdiction/adapter/dev-token-deployment';
+import { loadJurisdictions } from '../jurisdiction/adapter/core/jurisdiction-loader';
+import { deployMissingDefaultTokens } from '../jurisdiction/adapter/operations/dev-token-deployment';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { hasCliFlag, readCliOption } from '../config/cli';
 

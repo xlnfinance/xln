@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { isTransientJAdapterStartupError } from '../jurisdiction/adapter/retry';
-import { makeJAdapterFailureResult } from '../jurisdiction/adapter/failure';
+import { isTransientJAdapterStartupError } from '../jurisdiction/adapter/core/retry';
+import { makeJAdapterFailureResult } from '../jurisdiction/adapter/core/failure';
 import { isTransientJSubmitFailure } from '../runtime/jurisdiction/j-submit';
 
 const ethersError = (code: string, message: string): Error & { code: string } =>

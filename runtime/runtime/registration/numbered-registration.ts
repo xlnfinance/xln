@@ -1,7 +1,7 @@
 import { ethers, type TransactionReceipt } from 'ethers';
 
 import { generateNumberedEntityId } from '../../entity/factory';
-import { canonicalJStackAddress } from '../../jurisdiction/adapter/stack-binding';
+import { canonicalJStackAddress } from '../../jurisdiction/adapter/operations/stack-binding';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
 import type { JurisdictionConfig } from '../../entity/types';
 import type { RuntimeReplica } from '../types';

@@ -11,9 +11,9 @@ import {
 import {
   applyJEventsToEnv,
   buildJEventsRuntimeInput,
-} from '../jurisdiction/adapter/manual-event-ingress';
+} from '../jurisdiction/adapter/events/manual-event-ingress';
 import { parseReceiptLogsToJEvents } from '../jurisdiction/adapter/j-event-log-decoder';
-import { bindLocalJEventIngressSource } from '../jurisdiction/adapter/local-ingress-source';
+import { bindLocalJEventIngressSource } from '../jurisdiction/adapter/events/local-ingress-source';
 import { resolveApprovalReceiptLogIndex } from '../jurisdiction/adapter/rpc-public';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, JurisdictionConfig } from '../entity/types';

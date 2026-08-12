@@ -623,7 +623,7 @@ for (const [path, markers] of [
     ["createStructuredLogger('orchestrator.parent_watch')", 'missing_parent_pid', 'parent_pid_missing'],
   ],
   [
-    'runtime/jurisdiction/adapter/config.ts',
+    'runtime/jurisdiction/adapter/core/config.ts',
     [
       "createStructuredLogger('runtime.jurisdiction_config')",
       'JURISDICTIONS_BROWSER_FETCH_FAILED',
@@ -631,7 +631,7 @@ for (const [path, markers] of [
     ],
   ],
   [
-    'runtime/jurisdiction/adapter/jurisdiction-loader.ts',
+    'runtime/jurisdiction/adapter/core/jurisdiction-loader.ts',
     ["createStructuredLogger('runtime.jurisdiction_loader')", 'JURISDICTIONS_CONFIG_MISSING', 'decodeJurisdictionsData'],
   ],
   ['runtime/api/runtime-adapter/server.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
@@ -718,11 +718,11 @@ for (const orchestratorLifecyclePath of [
   assertNotIncludes(readText(orchestratorLifecyclePath), 'console.', orchestratorLifecyclePath);
 }
 
-const jurisdictionConfigPath = 'runtime/jurisdiction/adapter/config.ts';
+const jurisdictionConfigPath = 'runtime/jurisdiction/adapter/core/config.ts';
 const jurisdictionConfig = readText(jurisdictionConfigPath);
 assertNotIncludes(jurisdictionConfig, 'console.', jurisdictionConfigPath);
 
-const jurisdictionLoaderPath = 'runtime/jurisdiction/adapter/jurisdiction-loader.ts';
+const jurisdictionLoaderPath = 'runtime/jurisdiction/adapter/core/jurisdiction-loader.ts';
 const jurisdictionLoader = readText(jurisdictionLoaderPath);
 assertNotIncludes(jurisdictionLoader, 'console.', jurisdictionLoaderPath);
 assertNotIncludes(jurisdictionLoader, 'new Date()', jurisdictionLoaderPath);

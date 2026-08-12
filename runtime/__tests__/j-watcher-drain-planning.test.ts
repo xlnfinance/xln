@@ -5,7 +5,7 @@ import {
   needsJWatcherPoll,
   observeJWatcherDrainProgress,
   type JWatcherDrainStatus,
-} from '../jurisdiction/adapter/backlog-drain';
+} from '../jurisdiction/adapter/operations/backlog-drain';
 
 const status = (overrides: Partial<JWatcherDrainStatus> = {}): JWatcherDrainStatus => ({
   chainId: 31337,

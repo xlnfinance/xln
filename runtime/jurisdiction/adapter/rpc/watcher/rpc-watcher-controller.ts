@@ -5,7 +5,7 @@ import {
   haltProcessForFatalWatcherError,
   watcherErrorDetails,
   watcherErrorMessage,
-} from '../../rpc-boundary';
+} from '../rpc-boundary';
 import { rpcLog } from '../../rpc-public';
 import { getWatcherStartBlock } from '../../watcher';
 import { runWatcherPoll } from './rpc-watcher-poll';

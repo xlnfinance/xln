@@ -45,7 +45,7 @@ that drives them. Read the cascade before the services around it.
 ### 4. External settlement
 
 21. `runtime/jurisdiction/machine/history-consensus/index.ts` — certified J-prefix facts.
-22. `runtime/jurisdiction/adapter/ingress-transform.ts` — external evidence boundary.
+22. `runtime/jurisdiction/adapter/events/ingress-transform.ts` — external evidence boundary.
 23. `runtime/entity/tx/j-events.ts` — certified J effects enter Entity.
 24. `runtime/account/settlement/j-finality.ts` — Account-owned settlement finality.
 25. `runtime/runtime/jurisdiction/j-submit.ts` — durable post-frame submission lifecycle.

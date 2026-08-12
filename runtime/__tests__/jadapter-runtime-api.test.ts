@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { getEntityInfoFromChain } from '../jurisdiction/adapter/runtime-api';
+import { getEntityInfoFromChain } from '../jurisdiction/adapter/core/runtime-api';
 
 test('entity lookup distinguishes transport/config failure from confirmed absence', async () => {
   await expect(getEntityInfoFromChain(

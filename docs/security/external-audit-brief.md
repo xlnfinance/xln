@@ -110,9 +110,9 @@ operational evidence for restart/load stability, not unit-test substitutes.
 - `runtime/storage/read/projections.ts`
 - `runtime/storage/canonical-hash.ts`
 - `runtime/jurisdiction/adapter/rpc.ts`
-- `runtime/jurisdiction/adapter/watcher.ts`
-- `runtime/jurisdiction/adapter/event-observation.ts`
-- `runtime/jurisdiction/adapter/history-ingress.ts`
+- `runtime/jurisdiction/adapter/watcher/index.ts`
+- `runtime/jurisdiction/adapter/events/event-observation.ts`
+- `runtime/jurisdiction/adapter/events/history-ingress.ts`
 - `runtime/extensions/lending.ts`
 - `runtime/types/finance/lending.ts`
 - `runtime/entity/tx/handlers/lending.ts`

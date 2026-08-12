@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const repoRoot = new URL('../..', import.meta.url).pathname;
 const readSource = (path: string): string =>
-  path === 'runtime/jurisdiction/adapter/rpc-adapter.ts'
+  path === 'runtime/jurisdiction/adapter/rpc/rpc-adapter.ts'
     ? [
         'rpc-public.ts',
         'rpc-adapter.ts',
@@ -43,7 +43,7 @@ describe('determinism cleanup lifecycle', () => {
   });
 
   test('rpc adapter close waits for an in-flight watcher poll before returning', () => {
-    const source = readSource('runtime/jurisdiction/adapter/rpc-adapter.ts');
+    const source = readSource('runtime/jurisdiction/adapter/rpc/rpc-adapter.ts');
 
     expect(source).toContain('const inFlight = state.inFlight;');
     expect(source).toContain('this.stopWatching();');
@@ -52,7 +52,7 @@ describe('determinism cleanup lifecycle', () => {
   });
 
   test('rpc watcher cancellation keeps in-flight poll tracked and blocks late event ingress', () => {
-    const source = readSource('runtime/jurisdiction/adapter/rpc-adapter.ts');
+    const source = readSource('runtime/jurisdiction/adapter/rpc/rpc-adapter.ts');
     const stopStart = source.indexOf('stopWatching(): void {');
     const stopEnd = source.indexOf('async stopWatchingAndWait(): Promise<void> {', stopStart);
     const stopSource = source.slice(stopStart, stopEnd);
@@ -102,7 +102,7 @@ describe('determinism cleanup lifecycle', () => {
   });
 
   test('RPC scenarios use explicit polling and a wall-clock-independent chain', () => {
-    const rpcSource = readSource('runtime/jurisdiction/adapter/rpc-adapter.ts');
+    const rpcSource = readSource('runtime/jurisdiction/adapter/rpc/rpc-adapter.ts');
     const bootSource = readSource('runtime/scenarios/boot.ts');
 
     expect(rpcSource).toContain('manualPolling: env.scenarioMode === true,');

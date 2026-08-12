@@ -7,8 +7,8 @@ import {
   requantizeSwapNetAuthorization,
 } from '../account/swap/swap-net-authorization';
 import { createDefaultDelta } from '../account/state/delta';
-import { handleSwapResolve } from '../account/tx/handlers/swap/resolve/index';
-import { handleSwapOffer } from '../account/tx/handlers/swap/offer/index';
+import { handleSwapResolve } from '../account/tx/handlers/swap/resolve';
+import { handleSwapOffer } from '../account/tx/handlers/swap/offer';
 import { decodeAccountTx } from '../account/tx-validation';
 import { validateAccountReplica } from '../account/validation/state-validation';
 import { buildEntityTransactionProposalAction } from '../entity/auth/authorization';

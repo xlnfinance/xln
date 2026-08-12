@@ -3,7 +3,7 @@ import { Depository__factory } from '../../jurisdictions/typechain-types/index.t
 import {
   extractCanonicalDepositoryEventArgs,
   parseKnownDepositoryLog,
-} from '../jurisdiction/adapter/depository-event-codec';
+} from '../jurisdiction/adapter/events/depository-event-codec';
 import { parseReceiptLogsToJEvents } from '../jurisdiction/adapter/j-event-log-decoder';
 
 const iface = Depository__factory.createInterface();

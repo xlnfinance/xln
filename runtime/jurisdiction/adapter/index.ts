@@ -8,6 +8,6 @@
 export * from './types';
 export * from './browservm/browservm-registry';
 export * from './chain-ids';
-export * from './factory';
-export * from './jurisdiction';
-export { debugFundReserves, getEntityInfoFromChain, submitProcessBatch } from './runtime-api';
+export * from './core/factory';
+export * from './core/jurisdiction';
+export { debugFundReserves, getEntityInfoFromChain, submitProcessBatch } from './core/runtime-api';

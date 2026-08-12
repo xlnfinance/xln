@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readJurisdictionsFile } from '../orchestrator/jurisdictions-file';
-import { isActiveJurisdictionStatus } from '../jurisdiction/adapter/config';
+import { isActiveJurisdictionStatus } from '../jurisdiction/adapter/core/config';
 
 const tempRoots: string[] = [];
 

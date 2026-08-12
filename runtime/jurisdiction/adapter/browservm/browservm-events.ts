@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { bytesToHex } from '@ethereumjs/util';
 import type { Address } from '@ethereumjs/util';
-import { extractCanonicalDepositoryEventArgs } from '../depository-event-codec';
+import { extractCanonicalDepositoryEventArgs } from '../events/depository-event-codec';
 import type { JEvent } from '../types';
 
 export type EthereumLog = [

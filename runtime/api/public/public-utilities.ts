@@ -11,7 +11,7 @@ export {
   getEntityInfoFromChain,
   submitProcessBatch,
 } from '../../jurisdiction/adapter';
-export { getAvailableJurisdictions } from '../../jurisdiction/adapter/config';
+export { getAvailableJurisdictions } from '../../jurisdiction/adapter/core/config';
 export {
   createDemoDelta,
   deriveDelta,

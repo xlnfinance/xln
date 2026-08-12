@@ -89,11 +89,11 @@ const onchainHankoDomainPath = 'runtime/hanko/onchain-domain.ts';
 const jBatchPath = 'runtime/jurisdiction/machine/batch/index.ts';
 const rpcAdapterPaths = [
   'runtime/jurisdiction/adapter/rpc-public.ts',
-  'runtime/jurisdiction/adapter/rpc-adapter.ts',
-  'runtime/jurisdiction/adapter/rpc-batch-dispute-debug.ts',
-  'runtime/jurisdiction/adapter/rpc-lifecycle.ts',
-  'runtime/jurisdiction/adapter/rpc-reads.ts',
-  'runtime/jurisdiction/adapter/rpc-wallet-writes.ts',
+  'runtime/jurisdiction/adapter/rpc/rpc-adapter.ts',
+  'runtime/jurisdiction/adapter/rpc/write/rpc-batch-dispute-debug.ts',
+  'runtime/jurisdiction/adapter/rpc/rpc-lifecycle.ts',
+  'runtime/jurisdiction/adapter/rpc/rpc-reads.ts',
+  'runtime/jurisdiction/adapter/rpc/wallet/rpc-wallet-writes.ts',
 ];
 const rpcAdapterPath = rpcAdapterPaths.join(', ');
 const depositoryPath = 'jurisdictions/contracts/Depository.sol';

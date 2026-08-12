@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { createHash } from 'node:crypto';
-import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
+import { drainJWatcherBacklog } from '../jurisdiction/adapter/operations/backlog-drain';
 import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { compareStableText, safeStringify } from '../protocol/serialization';

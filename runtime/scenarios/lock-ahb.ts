@@ -27,7 +27,7 @@ import { ethers } from 'ethers';
 import { createRngFromEnv } from './seeded-rng';
 import { generateLazyEntityId } from '../entity/factory';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
-import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
+import { drainJWatcherBacklog } from '../jurisdiction/adapter/operations/backlog-drain';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 import { htlcRouteConvergenceCycleBudget } from './test-economy';
 import { readEntityFrameEventMessages } from '../entity/frame-events';

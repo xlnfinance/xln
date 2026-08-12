@@ -22,9 +22,9 @@ import {
   readVisibleHubProfiles,
   type VisibleHubProfile,
 } from './hub-visible-profiles';
-import { deployMissingDefaultTokens } from '../jurisdiction/adapter/dev-token-deployment';
+import { deployMissingDefaultTokens } from '../jurisdiction/adapter/operations/dev-token-deployment';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
-import { assertJStackAddressMatch } from '../jurisdiction/adapter/stack-binding';
+import { assertJStackAddressMatch } from '../jurisdiction/adapter/operations/stack-binding';
 import { attachLiveJAdapter, getLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 import {
   normalizeJurisdictionKey,
@@ -45,7 +45,7 @@ import { startParentLivenessWatch } from '../infra/process/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { quiesceNodeRuntime } from './node-runtime-quiesce';
 import { applyJEventsToEnv } from '../jurisdiction/adapter/watcher';
-import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
+import { drainJWatcherBacklog } from '../jurisdiction/adapter/operations/backlog-drain';
 import { createRelayStore } from '../network/relay/store';
 import { safeStringify } from '../protocol/serialization';
 import { writeDurableFile } from '../storage/fs-durability';

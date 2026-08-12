@@ -19,9 +19,9 @@ import {
   handleCrossPullProgress,
   handlePullLock,
 } from './handlers/settlement/pull';
-import { handleSwapOffer } from './handlers/swap/offer/index';
-import { handleSwapResolve } from './handlers/swap/resolve/index';
-import { handleCrossSwapFillAck } from './handlers/swap/cross-fill-ack/index';
+import { handleSwapOffer } from './handlers/swap/offer';
+import { handleSwapResolve } from './handlers/swap/resolve';
+import { handleCrossSwapFillAck } from './handlers/swap/cross-fill-ack';
 import { handleSwapCancelRequest } from './handlers/swap/lifecycle/cancel';
 import {
   getSignedSettlementWorkspaceTxError,

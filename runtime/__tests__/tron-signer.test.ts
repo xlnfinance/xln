@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createRequire } from 'node:module';
 import { ethers } from 'ethers';
 import { createXlnJsonRpcProvider, resolveJAdapterPrivateKey } from '../jurisdiction/adapter';
-import { createTronSigner, TronSigner } from '../jurisdiction/adapter/tron-signer';
+import { createTronSigner, TronSigner } from '../jurisdiction/adapter/operations/tron-signer';
 
 const PRIVATE_KEY = `0x${'11'.repeat(32)}`;
 // Match the production boundary. TronWeb 6.4's published ESM protobuf bundle

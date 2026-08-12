@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
-import { readAndAssertRpcChainId } from '../jurisdiction/adapter/rpc-network';
+import { readAndAssertRpcChainId } from '../jurisdiction/adapter/rpc/rpc-network';
 
 const servers: Array<ReturnType<typeof Bun.serve>> = [];
 
