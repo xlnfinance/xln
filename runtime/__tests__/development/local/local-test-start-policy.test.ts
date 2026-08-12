@@ -86,7 +86,7 @@ test('local prod startup reports a post-lease port race without killing the owne
     fetch: () => new Response('foreign-alive'),
   });
   try {
-    const result = await run('bash', ['scripts/start-server.sh'], {
+    const result = await run('bash', ['scripts/operations/start-server.sh'], {
       ...stripLocalTestLeaseEnv(process.env),
       ...buildInheritedLocalTestLeaseEnv(lease, repoRoot),
       XLN_RDB_ROOT: join(root, 'rdb'),

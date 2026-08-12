@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO_ROOT="${XLN_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+REPO_ROOT="${XLN_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 JDB_ROOT="${XLN_JDB_ROOT:-$REPO_ROOT/data}"
 BUDGET_GIB="${ANVIL_STORAGE_BUDGET_GIB:-10}"
 BUDGET_KIB=$((BUDGET_GIB * 1024 * 1024))

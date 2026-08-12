@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$REPO_ROOT/scripts/lib/port-layout.sh"
 JDB_ROOT="${XLN_JDB_ROOT:-$REPO_ROOT/data}"
 ANVIL_STATE="${ANVIL_STATE:-$JDB_ROOT/anvil-state.json}"
@@ -56,7 +56,7 @@ export TMPDIR="$ANVIL_TMPDIR"
 
 # Create directories if missing
 mkdir -p "$(dirname "$ANVIL_STATE")" "$(dirname "$ANVIL_LOG")" "$ANVIL_TMPDIR"
-"$REPO_ROOT/scripts/enforce-anvil-storage-budget.sh"
+"$REPO_ROOT/scripts/operations/enforce-anvil-storage-budget.sh"
 
 # Reset is intended for local development. Production deploys delete an exact
 # state file before creating PM2 entries without destructive arguments.

@@ -467,7 +467,7 @@ describe('production startup wiring', () => {
   });
 
   test('start-server exposes the secondary Tron RPC to the orchestrator and children', () => {
-    const script = readFileSync(join(repoRoot, 'scripts/start-server.sh'), 'utf8');
+    const script = readFileSync(join(repoRoot, 'scripts/operations/start-server.sh'), 'utf8');
     expect(script).toContain('RPC2_PORT="${ANVIL2_PORT:-$(xln_rpc2_port)}"');
     expect(script).toContain('export ANVIL_RPC2="${ANVIL_RPC2:-http://127.0.0.1:${RPC2_PORT}}"');
     expect(script).toContain('export RPC_TRON="${RPC_TRON:-$ANVIL_RPC2}"');
@@ -1406,12 +1406,12 @@ describe('production startup wiring', () => {
 
   test('deploy starts and checks the production Tron chain', () => {
     const deploy = readPlatformDeploy();
-    const startServer = readFileSync(join(repoRoot, 'scripts/start-server.sh'), 'utf8');
-    const bootstrapMonitor = readFileSync(join(repoRoot, 'scripts/watch-prod-bootstrap.ts'), 'utf8');
+    const startServer = readFileSync(join(repoRoot, 'scripts/operations/start-server.sh'), 'utf8');
+    const bootstrapMonitor = readFileSync(join(repoRoot, 'scripts/deployment/watch-prod-bootstrap.ts'), 'utf8');
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
-    expect(deploy).toContain('start_production_anvil anvil2 scripts/start-anvil2.sh');
+    expect(deploy).toContain('start_production_anvil anvil2 scripts/operations/start-anvil2.sh');
     expect(deploy).toContain('wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"');
     expect(deploy).toContain('wait_for_public_rpc_chain "/rpc2" "0x7a6a"');
     expect(bootstrapMonitor).toContain('http://127.0.0.1:8080/api/health');
@@ -1423,7 +1423,7 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('location ~ ^/rpc[2-8]$');
     expect(deploy).toContain('public /rpc must proxy through orchestrator safety filter');
     expect(deploy).toContain('fail_deploy_with_debug "anvil2 did not become ready on :8546"');
-    expect(deploy).toContain('bun scripts/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 0');
+    expect(deploy).toContain('bun scripts/deployment/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 0');
     expect(deploy).toContain('const raw = await Bun.stdin.text();');
     expect(deploy).not.toContain('const raw = process.argv[1] || "";');
     expect(deploy).not.toContain('truncate -s 0');
@@ -1461,16 +1461,16 @@ describe('production startup wiring', () => {
       deploy.indexOf('ensure_production_anvil_memory_restart_disabled()'),
     );
     expect(startAnvil).not.toContain('--max-memory-restart');
-    expect(deploy).toContain('ensure_production_anvil_memory_restart_disabled anvil scripts/start-anvil.sh');
-    expect(deploy).toContain('ensure_production_anvil_memory_restart_disabled anvil2 scripts/start-anvil2.sh');
+    expect(deploy).toContain('ensure_production_anvil_memory_restart_disabled anvil scripts/operations/start-anvil.sh');
+    expect(deploy).toContain('ensure_production_anvil_memory_restart_disabled anvil2 scripts/operations/start-anvil2.sh');
     expect(deploy).toContain(
-      'run_or_fail_deploy "unsafe Anvil PM2 supervision" bun scripts/check-anvil-supervision.ts',
+      'run_or_fail_deploy "unsafe Anvil PM2 supervision" bun scripts/operations/check-anvil-supervision.ts',
     );
     expect(deploy).toContain('wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil-state.json"');
     expect(deploy).toContain('wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil2-state.json"');
     expect(deploy).toContain('pm2 delete xln-server >/dev/null 2>&1 || true');
     expect(deploy).toContain(
-      'run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M',
+      'run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/operations/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M',
     );
     expect(deploy).toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=1');
     expect(deploy).toContain('install -m 600 /dev/null "$XLN_RDB_ROOT/runtime/.mesh-reset-once"');
@@ -1551,7 +1551,7 @@ describe('production startup wiring', () => {
   });
 
   test('prod diagnose accepts the market maker terminal startup phase', () => {
-    const diagnose = readFileSync(join(repoRoot, 'scripts/prod-diagnose.sh'), 'utf8');
+    const diagnose = readFileSync(join(repoRoot, 'scripts/operations/prod-diagnose.sh'), 'utf8');
     expect(diagnose).toContain('payload.marketMaker.startupPhase !== "offers-ready"');
     expect(diagnose).not.toContain('payload.marketMaker.startupPhase !== "ready"');
   });
@@ -2641,8 +2641,8 @@ describe('production startup wiring', () => {
   });
 
   test('secondary anvil uses a persistent Tron chain id and state file', () => {
-    const anvil = readFileSync(join(repoRoot, 'scripts/start-anvil.sh'), 'utf8');
-    const anvil2 = readFileSync(join(repoRoot, 'scripts/start-anvil2.sh'), 'utf8');
+    const anvil = readFileSync(join(repoRoot, 'scripts/operations/start-anvil.sh'), 'utf8');
+    const anvil2 = readFileSync(join(repoRoot, 'scripts/operations/start-anvil2.sh'), 'utf8');
     const jurisdictions = JSON.parse(readFileSync(join(repoRoot, 'jurisdictions/jurisdictions.json'), 'utf8')) as {
       jurisdictions: Record<string, { blockTimeMs?: number }>;
     };

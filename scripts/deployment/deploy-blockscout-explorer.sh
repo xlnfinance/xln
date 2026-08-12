@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BLOCKSCOUT_DIR="$REPO_ROOT/ops/blockscout"
 
 REMOTE_HOST=""
@@ -201,11 +201,11 @@ if [ -n "$REMOTE_HOST" ] && [ "$HOST_LOCAL" -eq 0 ]; then
   require_cmd tar
   require_cmd ssh
   tmp_archive="/tmp/xln-blockscout-$$.tar"
-  tar -C "$REPO_ROOT" -cf "$tmp_archive" ops/blockscout scripts/deploy-blockscout-explorer.sh
+  tar -C "$REPO_ROOT" -cf "$tmp_archive" ops/blockscout scripts/deployment/deploy-blockscout-explorer.sh
   ssh "$REMOTE_HOST" "mkdir -p /root/xln"
   cat "$tmp_archive" | ssh "$REMOTE_HOST" "tar -C /root/xln -xf -"
   rm -f "$tmp_archive"
-  ssh "$REMOTE_HOST" "cd /root/xln && bash scripts/deploy-blockscout-explorer.sh --host-local --domain '$DOMAIN' --proxy-port '$PROXY_PORT' --project-name '$PROJECT_NAME'"
+  ssh "$REMOTE_HOST" "cd /root/xln && bash scripts/deployment/deploy-blockscout-explorer.sh --host-local --domain '$DOMAIN' --proxy-port '$PROXY_PORT' --project-name '$PROJECT_NAME'"
   exit 0
 fi
 

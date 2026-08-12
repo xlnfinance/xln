@@ -65,9 +65,9 @@ const [{ chromium }, { expect }, { Wallet }] = await Promise.all([
   import('@playwright/test'),
   import('ethers'),
 ]);
-const { gotoApp, createRuntimeIdentity } = await import('../tests/utils/e2e-demo-users');
-const { connectRuntimeToHubWithCredit } = await import('../tests/utils/e2e-connect');
-const { getHealth } = await import('../tests/utils/e2e-baseline');
+const { gotoApp, createRuntimeIdentity } = await import('../../tests/utils/e2e-demo-users');
+const { connectRuntimeToHubWithCredit } = await import('../../tests/utils/e2e-connect');
+const { getHealth } = await import('../../tests/utils/e2e-baseline');
 
 async function fetchJson<T>(path: string, timeoutMs = fetchTimeoutMs): Promise<T> {
   const controller = new AbortController();

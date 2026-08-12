@@ -5,7 +5,7 @@ import {
   isProductionHealthUnavailableExpired,
   isProductionBootstrapReady,
   summarizeProductionBootstrap,
-} from '../../../../scripts/watch-prod-bootstrap';
+} from '../../../../scripts/deployment/watch-prod-bootstrap';
 
 const healthy = () => ({
   coreOk: true,

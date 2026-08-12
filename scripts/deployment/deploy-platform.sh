@@ -340,7 +340,7 @@ wait_for_public_rpc_placeholder() {
 }
 
 wait_for_main_stack() {
-  bun scripts/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 0
+  bun scripts/deployment/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 0
 }
 
 wait_for_http_status() {
@@ -1077,7 +1077,7 @@ if [ "${free_kb:-0}" -lt $((10 * 1024 * 1024)) ]; then
   logger -t xln-storage-guard "low disk free: ${free_kb}KB"
 fi
 
-if ! XLN_JDB_ROOT=/var/lib/xln/jdb ANVIL_STORAGE_BUDGET_GIB=10 /root/xln/scripts/enforce-anvil-storage-budget.sh >/dev/null 2>&1; then
+if ! XLN_JDB_ROOT=/var/lib/xln/jdb ANVIL_STORAGE_BUDGET_GIB=10 /root/xln/scripts/operations/enforce-anvil-storage-budget.sh >/dev/null 2>&1; then
   logger -t xln-storage-guard "anvil storage exceeded 10GiB after temp cleanup"
 fi
 
@@ -1159,10 +1159,10 @@ run_local_deploy() {
       run_or_fail_deploy "failed to enforce nginx site consistency" ensure_production_nginx_site_consistency
       run_or_fail_deploy "failed to pause production explorer backend" pause_production_explorer_backend
       mkdir -p logs
-      pkill -TERM -f 'scripts/start-custody.sh' >/dev/null 2>&1 || true
+      pkill -TERM -f 'scripts/operations/start-custody.sh' >/dev/null 2>&1 || true
       pkill -TERM -f 'runtime/scripts/operations/custody/start-custody-prod.ts' >/dev/null 2>&1 || true
       sleep 1
-      pkill -KILL -f 'scripts/start-custody.sh' >/dev/null 2>&1 || true
+      pkill -KILL -f 'scripts/operations/start-custody.sh' >/dev/null 2>&1 || true
       pkill -KILL -f 'runtime/scripts/operations/custody/start-custody-prod.ts' >/dev/null 2>&1 || true
 
       lsof -ti TCP:8087 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
@@ -1226,37 +1226,37 @@ run_local_deploy() {
         lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
         pm2 delete anvil >/dev/null 2>&1 || true
         pm2 delete anvil2 >/dev/null 2>&1 || true
-        start_production_anvil anvil scripts/start-anvil.sh
-        start_production_anvil anvil2 scripts/start-anvil2.sh
+        start_production_anvil anvil scripts/operations/start-anvil.sh
+        start_production_anvil anvil2 scripts/operations/start-anvil2.sh
       else
         export XLN_MESH_PRESERVE_STATE_ON_RESET=1
         echo "[deploy] restarting production services without resetting anvil/runtime state"
         if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
           pm2 delete anvil >/dev/null 2>&1 || true
-          start_production_anvil anvil scripts/start-anvil.sh
+          start_production_anvil anvil scripts/operations/start-anvil.sh
         fi
         if ! wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"; then
           pm2 delete anvil2 >/dev/null 2>&1 || true
-          start_production_anvil anvil2 scripts/start-anvil2.sh
+          start_production_anvil anvil2 scripts/operations/start-anvil2.sh
         fi
       fi
       run_or_fail_deploy "failed to disable primary Anvil memory-triggered restart" \
-        ensure_production_anvil_memory_restart_disabled anvil scripts/start-anvil.sh
+        ensure_production_anvil_memory_restart_disabled anvil scripts/operations/start-anvil.sh
       run_or_fail_deploy "failed to disable secondary Anvil memory-triggered restart" \
-        ensure_production_anvil_memory_restart_disabled anvil2 scripts/start-anvil2.sh
+        ensure_production_anvil_memory_restart_disabled anvil2 scripts/operations/start-anvil2.sh
       if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
         fail_deploy_with_debug "anvil did not become ready on :8545"
       fi
       if ! wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"; then
         fail_deploy_with_debug "anvil2 did not become ready on :8546"
       fi
-      run_or_fail_deploy "unsafe Anvil PM2 supervision" bun scripts/check-anvil-supervision.ts
+      run_or_fail_deploy "unsafe Anvil PM2 supervision" bun scripts/operations/check-anvil-supervision.ts
       run_or_fail_deploy "primary Anvil did not persist a valid checkpoint" wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil-state.json"
       run_or_fail_deploy "secondary Anvil did not persist a valid checkpoint" wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil2-state.json"
 
       export XLN_PROD_DEPLOY_STARTED_AT_MS="$(bun -e 'console.log(Date.now())')"
-      run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
-      run_or_fail_deploy "failed to start xln-watchtower via pm2" pm2 start scripts/start-watchtower.sh --name xln-watchtower --interpreter bash --max-memory-restart 256M
+      run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/operations/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
+      run_or_fail_deploy "failed to start xln-watchtower via pm2" pm2 start scripts/operations/start-watchtower.sh --name xln-watchtower --interpreter bash --max-memory-restart 256M
       if ! wait_for_watchtower; then
         fail_deploy_with_debug "official watchtower did not become healthy"
       fi
@@ -1276,7 +1276,7 @@ run_local_deploy() {
       # Recreate from the wrapper on every non-fresh deploy. Restarting the existing PM2
       # entry can preserve an old direct command/env and silently drop wrapper defaults.
       pm2 delete xln-server >/dev/null 2>&1 || true
-      run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
+      run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/operations/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
     fi
     pm2 save
   else

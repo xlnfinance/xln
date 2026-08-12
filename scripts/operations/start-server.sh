@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/lib/start-common.sh"
@@ -103,7 +103,7 @@ export XLN_MIN_DISK_FREE_BYTES=${XLN_MIN_DISK_FREE_BYTES:-$((5 * 1024 * 1024 * 1
 # QA evidence root: persistent on prod (outside the /root/xln checkout that the
 # canonical platform deploy hard-resets + git-cleans), and the local .logs dir for dev. Detected
 # by checkout path so the same script works on the Mac and on the server. Run artifacts
-# + the history DB are uploaded here by scripts/deploy-qa-evidence.sh (bun run deploy:qa),
+# + the history DB are uploaded here by scripts/deployment/deploy-qa-evidence.sh (bun run deploy:qa),
 # decoupled from the code deploy.
 if [ -z "${QA_EVIDENCE_ROOT:-}" ]; then
   if [ "$REPO_ROOT" = "/root/xln" ]; then
@@ -128,7 +128,7 @@ if [ "${available_kb:-0}" -lt "$required_kb" ]; then
 fi
 
 if [[ "$XLN_START_ASSERT_ONLY_ACTIVE" -ne 1 ]]; then
-  xln_kill_by_pattern "scripts/start-custody.sh" start-server
+  xln_kill_by_pattern "scripts/operations/start-custody.sh" start-server
   xln_kill_by_pattern "runtime/scripts/operations/custody/start-custody-prod.ts" start-server
   xln_kill_by_pattern "runtime/api/server/index.ts --port ${XLN_MESH_CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${XLN_MESH_CUSTODY_DAEMON_PORT}" start-server
   xln_kill_by_port "$XLN_MESH_CUSTODY_PORT" start-server

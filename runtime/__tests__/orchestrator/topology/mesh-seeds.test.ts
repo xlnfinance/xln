@@ -29,7 +29,7 @@ describe('mesh operator seed derivation', () => {
 
   test('production mesh startup contains no public child runtime seeds', () => {
     const orchestrator = readFileSync('runtime/orchestrator/orchestrator.ts', 'utf8');
-    const startup = readFileSync('scripts/start-server.sh', 'utf8');
+    const startup = readFileSync('scripts/operations/start-server.sh', 'utf8');
     const devStartup = readFileSync('scripts/dev/run-dev.sh', 'utf8');
     expect(orchestrator).not.toContain("seed: 'xln-mesh-mm'");
     expect(orchestrator).not.toContain("seed: 'xln-mesh-custody-seed'");

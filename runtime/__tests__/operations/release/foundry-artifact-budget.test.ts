@@ -68,7 +68,7 @@ describe('Foundry artifact budget', () => {
     chmodSync(join(fakeBin, 'du'), 0o755);
 
     const startedAt = Date.now();
-    const result = spawnSync(join(repoRoot, 'scripts/enforce-anvil-storage-budget.sh'), [], {
+    const result = spawnSync(join(repoRoot, 'scripts/operations/enforce-anvil-storage-budget.sh'), [], {
       env: {
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH || ''}`,

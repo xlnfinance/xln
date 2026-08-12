@@ -6,11 +6,11 @@
 # Curated story screenshots (tests/e2e/screenshots) are tracked in git and ship via
 # `bun run deploy` — they are intentionally NOT handled here.
 #
-# The prod runtime reads this root via QA_EVIDENCE_ROOT (see scripts/start-server.sh),
+# The prod runtime reads this root via QA_EVIDENCE_ROOT (see scripts/operations/start-server.sh),
 # so uploaded runs/videos appear at https://xln.finance/qa without restarting anything.
 #
 # Usage:
-#   ./scripts/deploy-qa-evidence.sh [--remote host] [--evidence-root path]
+#   ./scripts/deployment/deploy-qa-evidence.sh [--remote host] [--evidence-root path]
 #                                   [--run ID]... [--latest N] [--db-only] [--dry-run]
 #
 # Defaults: --remote root@xln.finance, --evidence-root /root/xln-qa-evidence.
@@ -19,7 +19,7 @@ set -euo pipefail
 
 REMOTE_HOST="root@xln.finance"
 REMOTE_ROOT="/root/xln-qa-evidence"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LOCAL_ROOT="${QA_EVIDENCE_ROOT:-$REPO_ROOT/.logs}"
 RUNS=()
 LATEST=0

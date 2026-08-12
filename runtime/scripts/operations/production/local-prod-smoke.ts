@@ -973,7 +973,7 @@ const main = async (): Promise<void> => {
     writeFileSync(resetMarker, 'local-prod-smoke fresh bootstrap\n');
     recordStage('reset:armed', { resetMarker });
   }
-  startManaged('anvil', 'scripts/start-anvil.sh', useSnapshotTemplate ? [] : ['--reset'], {
+  startManaged('anvil', 'scripts/operations/start-anvil.sh', useSnapshotTemplate ? [] : ['--reset'], {
     XLN_PORT_BASE: String(portBase),
     ANVIL_STATE: join(workDir, 'anvil-state.json'),
     ANVIL_LOG: join(workDir, 'anvil.log'),
@@ -984,7 +984,7 @@ const main = async (): Promise<void> => {
   // Anvil persists state through a process-global Foundry temp directory.
   // Starting two stateful chains concurrently can collide on the same
   // timestamp-derived temp path and kill both before either binds its port.
-  startManaged('anvil2', 'scripts/start-anvil2.sh', useSnapshotTemplate ? [] : ['--reset'], {
+  startManaged('anvil2', 'scripts/operations/start-anvil2.sh', useSnapshotTemplate ? [] : ['--reset'], {
     XLN_PORT_BASE: String(portBase),
     ANVIL2_STATE: join(workDir, 'anvil2-state.json'),
     ANVIL2_LOG: join(workDir, 'anvil2.log'),
@@ -992,7 +992,7 @@ const main = async (): Promise<void> => {
   });
   await waitForRpc(rpc2Port, '0x7a6a', 'Tron');
 
-  startManaged('server', 'scripts/start-server.sh', [], {
+  startManaged('server', 'scripts/operations/start-server.sh', [], {
     ...buildInheritedLocalTestLeaseEnv(localTestLease, repoRoot),
     XLN_SERVER_PORT: String(apiPort),
     XLN_RDB_ROOT: workDir,

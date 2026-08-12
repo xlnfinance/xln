@@ -154,7 +154,7 @@ Expose it through nginx if a public `/relay` endpoint is still required.
 Typical local/prod-like bootstrap:
 
 ```bash
-pm2 start scripts/start-anvil.sh --name xln-anvil --interpreter bash
+pm2 start scripts/operations/start-anvil.sh --name xln-anvil --interpreter bash
 pm2 save
 ```
 

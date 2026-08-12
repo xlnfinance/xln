@@ -17,7 +17,7 @@ describe('version injection provenance', () => {
     tempRoots.push(cwd);
     const child = Bun.spawn([
       process.execPath,
-      resolve(ROOT, 'scripts/inject-version.ts'),
+      resolve(ROOT, 'scripts/build/inject-version.ts'),
     ], {
       cwd,
       env: { ...process.env, GIT_DIR: join(cwd, 'missing.git') },

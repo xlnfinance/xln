@@ -77,7 +77,6 @@ export type FolderWidth = Readonly<{
 
 export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
   'jurisdictions/contracts': 16,
-  scripts: 25,
   'scripts/dev': 12,
 };
 

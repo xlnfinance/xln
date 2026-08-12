@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { validateAnvilSupervision } from '../../../../scripts/check-anvil-supervision';
+import { validateAnvilSupervision } from '../../../../scripts/operations/check-anvil-supervision';
 
 const healthyEntries = () => ['anvil', 'anvil2'].map((name, index) => ({
   name,
