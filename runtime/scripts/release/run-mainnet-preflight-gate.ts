@@ -101,8 +101,8 @@ export const buildMainnetPreflightSteps = (
       command: [
         'bun test',
         'runtime/__tests__/finance/state/derive-delta-property.test.ts',
-        'runtime/__tests__/env-events-audit-commit.test.ts',
-        'runtime/__tests__/capped-testnet-gate.test.ts',
+        'runtime/__tests__/runtime/observability/env-events-audit-commit.test.ts',
+        'runtime/__tests__/operations/release/capped-testnet-gate.test.ts',
         'runtime/__tests__/operations/health/prod-health-smoke.test.ts',
       ].join(' '),
       timeoutMs: 240_000,

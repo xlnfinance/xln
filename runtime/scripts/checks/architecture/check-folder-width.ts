@@ -11,9 +11,7 @@ export type FolderWidth = Readonly<{
   files: number;
 }>;
 
-export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
-  'runtime/__tests__': 46,
-};
+export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {};
 
 export const collectFolderWidths = (root: string, directory = root): FolderWidth[] => {
   const entries = readdirSync(directory, { withFileTypes: true });

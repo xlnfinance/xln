@@ -1,0 +1,217 @@
+import { describe, expect, test } from 'bun:test';
+import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../../../runtime';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { encodeBoard, hashBoard } from '../../../entity/factory';
+import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
+import { cloneEntityState } from '../../../entity/state-clone';
+import { handleSetHubConfigEntityTx } from '../../../entity/tx/handlers/account/lifecycle/admin';
+import type { ConsensusConfig, EntityState } from '../../../entity/types';
+import type { HubRebalanceConfig } from '../../../types/finance/rebalance';
+
+const ENTITY_SEED = 'entity-hub-profile-test-seed';
+const SIGNER_LABEL = 'signer-1';
+const TEST_RUN_ID = `${Date.now().toString(36)}-${process.pid}`;
+let envCounter = 0;
+const TEST_JURISDICTION = {
+  address: 'rpc://entity-hub-profile',
+  name: 'Testnet',
+  chainId: 31337,
+  entityProviderAddress: '0x00000000000000000000000000000000000000e1',
+  depositoryAddress: '0x00000000000000000000000000000000000000d1',
+};
+
+const buildConsensusConfig = (signerId: string): ConsensusConfig => ({
+  mode: 'proposer-based',
+  threshold: 1n,
+  validators: [signerId],
+  shares: { [signerId]: 1n },
+  jurisdiction: TEST_JURISDICTION,
+});
+
+const findEntityState = (env: ReturnType<typeof createEmptyEnv>, entityId: string): EntityState => {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
+    if (replicaKey.startsWith(`${entityId}:`)) {
+      return replica.state;
+    }
+  }
+  throw new Error(`ENTITY_STATE_NOT_FOUND: ${entityId}`);
+};
+
+const createHubProfileEnv = (label: string): ReturnType<typeof createEmptyEnv> => {
+  const env = createEmptyEnv(`${label}-${TEST_RUN_ID}-${++envCounter}`);
+  env.quietRuntimeLogs = true;
+  return env;
+};
+
+const DEFAULT_HUB_CONFIG: HubRebalanceConfig = {
+  matchingStrategy: 'amount',
+  policyVersion: 1,
+  routingFeePPM: 1000,
+  baseFee: 0n,
+  rebalanceLiquidityFeeBps: 1n,
+  rebalanceTimeoutMs: 10 * 60 * 1000,
+};
+
+describe('entity hub profile classification', () => {
+  test('hub status is explicit state, not implied by hub config alone', async () => {
+    const env = createHubProfileEnv('entity-hub-profile-runtime');
+    env.activeJurisdiction = TEST_JURISDICTION.name;
+    env.state.jReplicas.set(TEST_JURISDICTION.name, {
+      name: TEST_JURISDICTION.name,
+      blockNumber: 0n,
+      stateRoot: new Uint8Array(32),
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: 0,
+      position: { x: 0, y: 0, z: 0 },
+      contracts: { depository: TEST_JURISDICTION.depositoryAddress, entityProvider: TEST_JURISDICTION.entityProviderAddress },
+      contracts: {
+        account: '0x00000000000000000000000000000000000000a1',
+        depository: TEST_JURISDICTION.depositoryAddress,
+        entityProvider: TEST_JURISDICTION.entityProviderAddress,
+        deltaTransformer: '0x00000000000000000000000000000000000000f1',
+      },
+      rpcs: [TEST_JURISDICTION.address],
+      chainId: TEST_JURISDICTION.chainId,
+    });
+    const signerKey = deriveSignerKeySync(ENTITY_SEED, SIGNER_LABEL);
+    const signerId = deriveSignerAddressSync(ENTITY_SEED, SIGNER_LABEL).toLowerCase();
+    registerSignerKey(env, signerId, signerKey);
+
+    const config = buildConsensusConfig(signerId);
+    const entityId = hashBoard(encodeBoard(config));
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId,
+        data: {
+          config,
+          isProposer: true,
+          profileName: 'Test Entity',
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env);
+    await processRuntime(env);
+
+    const stateBefore = findEntityState(env, entityId);
+    expect(stateBefore.profile.isHub).toBe(false);
+    expect(buildLocalEntityProfile(env, stateBefore, 1).metadata.isHub).toBe(false);
+
+    const configOnlyState = cloneEntityState(stateBefore);
+    configOnlyState.hubRebalanceConfig = { ...DEFAULT_HUB_CONFIG };
+    expect(buildLocalEntityProfile(env, configOnlyState, 2).metadata.isHub).toBe(false);
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'setHubConfig',
+          data: { ...DEFAULT_HUB_CONFIG },
+        }],
+      }],
+    });
+    await processRuntime(env);
+
+    const stateAfter = findEntityState(env, entityId);
+    expect(stateAfter.profile.isHub).toBe(true);
+    expect(stateAfter.hubRebalanceConfig).not.toHaveProperty('rebalanceBaseFee');
+    expect(stateAfter.hubRebalanceConfig).not.toHaveProperty('c2rWithdrawSoftLimit');
+    expect(stateAfter.hubRebalanceConfig).not.toHaveProperty('rebalanceGasFee');
+    expect(buildLocalEntityProfile(env, stateAfter, 3).metadata.isHub).toBe(true);
+    expect(env.gossip.getHubs().some((profile) => profile.entityId === entityId)).toBe(true);
+    expect(() => handleSetHubConfigEntityTx(env, stateAfter, {
+      type: 'setHubConfig',
+      data: { rebalanceBaseFee: 1n },
+    })).toThrow('HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN:rebalanceBaseFee');
+    expect(() => handleSetHubConfigEntityTx(env, stateAfter, {
+      type: 'setHubConfig',
+      data: { c2rWithdrawSoftLimit: 1n },
+    })).toThrow('HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN:c2rWithdrawSoftLimit');
+    expect(() => handleSetHubConfigEntityTx(env, stateAfter, {
+      type: 'setHubConfig',
+      data: { rebalanceGasFee: 0n },
+    })).toThrow('HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN:rebalanceGasFee');
+  });
+
+  test('hub gossip metadata carries stable hub name across display profile updates', async () => {
+    const env = createHubProfileEnv('entity-hub-profile-hub-name-runtime');
+    env.activeJurisdiction = TEST_JURISDICTION.name;
+    env.state.jReplicas.set(TEST_JURISDICTION.name, {
+      name: TEST_JURISDICTION.name,
+      blockNumber: 0n,
+      stateRoot: new Uint8Array(32),
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: 0,
+      position: { x: 0, y: 0, z: 0 },
+      contracts: { depository: TEST_JURISDICTION.depositoryAddress, entityProvider: TEST_JURISDICTION.entityProviderAddress },
+      contracts: {
+        account: '0x00000000000000000000000000000000000000a1',
+        depository: TEST_JURISDICTION.depositoryAddress,
+        entityProvider: TEST_JURISDICTION.entityProviderAddress,
+        deltaTransformer: '0x00000000000000000000000000000000000000f1',
+      },
+      rpcs: [TEST_JURISDICTION.address],
+      chainId: TEST_JURISDICTION.chainId,
+    });
+    const signerKey = deriveSignerKeySync(`${ENTITY_SEED}-hub-name`, SIGNER_LABEL);
+    const signerId = deriveSignerAddressSync(`${ENTITY_SEED}-hub-name`, SIGNER_LABEL).toLowerCase();
+    registerSignerKey(env, signerId, signerKey);
+
+    const config = buildConsensusConfig(signerId);
+    const entityId = hashBoard(encodeBoard(config));
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId,
+        data: { config, isProposer: true, profileName: 'H1' },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env);
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId,
+        entityTxs: [{ type: 'setHubConfig', data: { ...DEFAULT_HUB_CONFIG, hubName: 'H1' } }],
+      }],
+    });
+    await processRuntime(env);
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'profile-update',
+          data: {
+            profile: {
+              entityId,
+              name: 'Renamed Hub Display',
+              avatar: '',
+              bio: '',
+              website: '',
+            },
+          },
+        }],
+      }],
+    });
+    await processRuntime(env);
+
+    const stateAfterRename = findEntityState(env, entityId);
+    const profile = buildLocalEntityProfile(env, stateAfterRename, 4);
+    expect(profile.name).toBe('Renamed Hub Display');
+    expect(profile.metadata.hubName).toBe('H1');
+    expect(profile.metadata.isHub).toBe(true);
+  });
+});

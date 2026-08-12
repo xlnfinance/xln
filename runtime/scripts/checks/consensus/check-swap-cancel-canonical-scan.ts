@@ -5,12 +5,12 @@ import { readFileSync } from 'node:fs';
 const readText = (path: string): string => {
   if (path !== 'runtime/__tests__/audit-failfast-regressions.test.ts') return readFileSync(path, 'utf8');
   return [
-    'runtime/__tests__/audit-failfast-regressions-part-1.test.ts',
-    'runtime/__tests__/audit-failfast-regressions-part-2.test.ts',
-    'runtime/__tests__/audit-failfast-regressions-part-3.test.ts',
-    'runtime/__tests__/audit-failfast-regressions-part-4.test.ts',
-    'runtime/__tests__/audit-failfast-regressions-part-5.test.ts',
-    'runtime/__tests__/audit-failfast-regressions-part-6.test.ts',
+    'runtime/__tests__/testing/audit/audit-failfast-regressions-part-1.test.ts',
+    'runtime/__tests__/testing/audit/audit-failfast-regressions-part-2.test.ts',
+    'runtime/__tests__/testing/audit/audit-failfast-regressions-part-3.test.ts',
+    'runtime/__tests__/testing/audit/audit-failfast-regressions-part-4.test.ts',
+    'runtime/__tests__/testing/audit/audit-failfast-regressions-part-5.test.ts',
+    'runtime/__tests__/testing/audit/audit-failfast-regressions-part-6.test.ts',
   ].map(file => readFileSync(file, 'utf8')).join('\n');
 };
 

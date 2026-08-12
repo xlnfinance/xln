@@ -101,12 +101,12 @@ const readText = (path: string): string => {
       'runtime/orchestrator/bootstrap/bootstrap-timeline-stages.ts',
     ],
     'runtime/__tests__/audit-failfast-regressions.test.ts': [
-      'runtime/__tests__/audit-failfast-regressions-part-1.test.ts',
-      'runtime/__tests__/audit-failfast-regressions-part-2.test.ts',
-      'runtime/__tests__/audit-failfast-regressions-part-3.test.ts',
-      'runtime/__tests__/audit-failfast-regressions-part-4.test.ts',
-      'runtime/__tests__/audit-failfast-regressions-part-5.test.ts',
-      'runtime/__tests__/audit-failfast-regressions-part-6.test.ts',
+      'runtime/__tests__/testing/audit/audit-failfast-regressions-part-1.test.ts',
+      'runtime/__tests__/testing/audit/audit-failfast-regressions-part-2.test.ts',
+      'runtime/__tests__/testing/audit/audit-failfast-regressions-part-3.test.ts',
+      'runtime/__tests__/testing/audit/audit-failfast-regressions-part-4.test.ts',
+      'runtime/__tests__/testing/audit/audit-failfast-regressions-part-5.test.ts',
+      'runtime/__tests__/testing/audit/audit-failfast-regressions-part-6.test.ts',
     ],
     'runtime/__tests__/radapter.test.ts': [
       'runtime/__tests__/api/runtime-adapter/radapter-part-1.test.ts',
@@ -887,7 +887,7 @@ assertNotIncludes(
 );
 
 for (const [path, markers] of [
-  ['runtime/__tests__/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],
+  ['runtime/__tests__/security/policy/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],
   [
     'runtime/__tests__/audit-failfast-regressions.test.ts',
     [
@@ -951,7 +951,7 @@ for (const [path, markers] of [
     ['standalone relay uses structured startup logging', 'relay.standalone'],
   ],
   [
-    'runtime/__tests__/solvency-logging.test.ts',
+    'runtime/__tests__/runtime/observability/solvency-logging.test.ts',
     ['solvency diagnostics use structured logging only', 'runtime.solvency'],
   ],
   [
@@ -963,11 +963,11 @@ for (const [path, markers] of [
     ['uses structured logging without direct console output', 'watchtower.standalone'],
   ],
   [
-    'runtime/__tests__/push-dispute-wake.test.ts',
+    'runtime/__tests__/security/dispute/push-dispute-wake.test.ts',
     ['uses structured logging without direct console output', 'watchtower.dispute_watch'],
   ],
   [
-    'runtime/__tests__/orchestrator-lifecycle-logging.test.ts',
+    'runtime/__tests__/orchestrator/process/orchestrator-lifecycle-logging.test.ts',
     ['orchestrator lifecycle helpers use structured logging without direct console output', 'orchestrator.lifecycle'],
   ],
   [

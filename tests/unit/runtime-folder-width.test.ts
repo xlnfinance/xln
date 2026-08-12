@@ -75,12 +75,10 @@ describe('runtime folder-width invariant', () => {
     expect(collectFolderWidths(root)).toEqual([{ path: '.', files: 1 }]);
   });
 
-  test('the repository has only the exact declared test-folder debt', () => {
+  test('the repository has no folder-width debt', () => {
     const repoRoot = resolve(import.meta.dir, '../..');
     const widths = collectFolderWidths(repoRoot, resolve(repoRoot, 'runtime'));
     expect(evaluateFolderWidths(widths, FOLDER_WIDTH_DEBT)).toEqual([]);
-    expect(widths.filter(entry => entry.files > 10)).toEqual([
-      { path: 'runtime/__tests__', files: 46 },
-    ]);
+    expect(widths.filter(entry => entry.files > 10)).toEqual([]);
   });
 });
