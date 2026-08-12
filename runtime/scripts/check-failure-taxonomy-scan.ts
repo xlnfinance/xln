@@ -12,7 +12,7 @@ import {
   isRuntimeFailureSignal,
   type RuntimeFailureSignal,
 } from '../protocol/errors/failure-taxonomy';
-import { publicAggregatedHealth } from '../api/server/health-redaction';
+import { publicAggregatedHealth } from '../api/server/health/redaction';
 import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
 
 const readText = (path: string): string => {
@@ -490,7 +490,7 @@ assertNotIncludes(marketMakerNode, 'Runtime storage disabled for rebuildable mar
 assertNotIncludes(marketMakerNode, '[MESH-MM] RUNTIME_READY', marketMakerNodePath);
 assertNotIncludes(marketMakerNode, '[MESH-MM] OFFERS_READY', marketMakerNodePath);
 
-const healthRedactionPath = 'runtime/api/server/health-redaction.ts';
+const healthRedactionPath = 'runtime/api/server/health/redaction.ts';
 const healthRedaction = readText(healthRedactionPath);
 for (const marker of [
   'const publicFailureSignal = (value: unknown): Record<string, unknown> | null => {',
@@ -522,9 +522,9 @@ for (const marker of [
 }
 
 for (const [path, markers] of [
-  ['runtime/api/server/faucet-failure.ts', ['classifyRuntimeFaucetFailure', 'failure,']],
-  ['runtime/api/server/offchain-faucet.ts', ['faucetFailureBody']],
-  ['runtime/api/server/reserve-faucet.ts', ['faucetFailureBody']],
+  ['runtime/api/server/faucet/failure.ts', ['classifyRuntimeFaucetFailure', 'failure,']],
+  ['runtime/api/server/faucet/offchain.ts', ['faucetFailureBody']],
+  ['runtime/api/server/faucet/reserve.ts', ['faucetFailureBody']],
   [
     'runtime/api/public/external-wallet-api.ts',
     ["createStructuredLogger('server.external_wallet')", 'faucet.erc20.failed', 'snapshot.failed', 'faucet.gas.failed'],

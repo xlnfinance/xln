@@ -35,12 +35,12 @@ import { createExternalWalletApi } from '../public/external-wallet-api';
 import { maybeHandleQaRequest } from '../../qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../../jurisdiction/adapter';
 import type { JAdapterConfig } from '../../jurisdiction/adapter/types';
-import { createMarketMakerServerState, resetMarketMakerServerState } from './market-maker-health';
+import { createMarketMakerServerState, resetMarketMakerServerState } from './health/market-maker';
 import { serveStaticApp } from './static-assets';
-import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth } from './auth';
-import { resolveSocketPeerAddress } from './health-redaction';
-import { listLocalControlEntities } from './control-entities';
-import { getAccountReplica, getEntityReplicaById } from './entity-lookup';
+import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth } from './control/auth';
+import { resolveSocketPeerAddress } from './health/redaction';
+import { listLocalControlEntities } from './control/entities';
+import { getAccountReplica, getEntityReplicaById } from './entities/lookup';
 import { createRuntimeIngressReceiptStore } from '../../runtime/input-pipeline/ingress-receipts';
 import { createRelayStore, pushDebugEvent, removeClient } from '../../network/relay/store';
 import { openRelayIncidentJournal } from '../../network/relay/incident-journal';
@@ -63,7 +63,7 @@ import { buildMarketSnapshotForReplica, type MarketSnapshotPayload } from '../..
 import { createMarketSubscriptionStack } from '../../network/relay/market/subscriptions';
 import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../../network/relay/market/wire';
 import { JSON_HEADERS, getErrorMessage, resolveRequiredAnvilRpc } from './utils';
-import { enforceFaucetPolicy } from './faucet-policy';
+import { enforceFaucetPolicy } from './faucet/policy';
 import { ethers } from 'ethers';
 import {
   attachRuntimeAdapterTicker,
@@ -78,49 +78,49 @@ import {
   sendEntityInputDirectViaRelaySocketDelivery,
   type RelaySocketData,
   type RelaySocket,
-} from './relay-direct';
-import { createServerRpcMessageHandler } from './rpc-ws';
+} from './network/relay-direct';
+import { createServerRpcMessageHandler } from './network/rpc-ws';
 import {
   isRuntimeTransportReady,
   runtimeTransportStartupResponse,
   type RuntimeTransportBootPhase,
-} from './rpc-startup-gate';
+} from './rpc/startup-gate';
 import {
   buildRuntimeJurisdictionsJson,
   readCanonicalJurisdictionsJson,
   updateJurisdictionsJson,
-} from './jurisdictions';
-import { createTokenCatalogController } from './token-catalog';
-import { buildHubDiscoveryPayload } from './hub-discovery';
-import { buildDebugEntitiesPayload, buildKnownProfileBundle } from './gossip-profiles';
+} from './catalog/jurisdictions';
+import { createTokenCatalogController } from './catalog/tokens';
+import { buildHubDiscoveryPayload } from './network/hub-discovery';
+import { buildDebugEntitiesPayload, buildKnownProfileBundle } from './network/gossip-profiles';
 import { attachLiveJAdapter } from '../../runtime/jurisdiction/live-jadapters';
-import { maybeHandleDebugDumpsRequest } from './debug-dumps';
-import { handleCreditRequest } from './credit-request';
-import { handleLendingStateRequest } from './lending';
-import { handleWatchtowerProxy } from './watchtower-proxy';
-import { handleOffchainFaucet } from './offchain-faucet';
-import { handleReserveFaucet } from './reserve-faucet';
-import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './health-api';
-import { handleRuntimeRpcProxy } from './rpc-proxy';
-import { requiresLocalNodeOperator } from './node-http-access';
-import { handleP2PControl } from './p2p-control';
-import { handleRuntimeInputControl, handleRuntimeInputStatus } from './runtime-input-control';
-import { handleSignerRegistration } from './signer-control';
-import { fetchRpcCode, probeLocalAnvilContractStack } from './stack-probe';
-import { handleRuntimeActivityRequest } from './activity-api';
+import { maybeHandleDebugDumpsRequest } from './health/debug-dumps';
+import { handleCreditRequest } from './faucet/credit';
+import { handleLendingStateRequest } from './entities/lending';
+import { handleWatchtowerProxy } from './rpc/watchtower-proxy';
+import { handleOffchainFaucet } from './faucet/offchain';
+import { handleReserveFaucet } from './faucet/reserve';
+import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './health/api';
+import { handleRuntimeRpcProxy } from './rpc/proxy';
+import { requiresLocalNodeOperator } from './control/node-http-access';
+import { handleP2PControl } from './control/p2p';
+import { handleRuntimeInputControl, handleRuntimeInputStatus } from './control/runtime-input';
+import { handleSignerRegistration } from './control/signer';
+import { fetchRpcCode, probeLocalAnvilContractStack } from './rpc/stack-probe';
+import { handleRuntimeActivityRequest } from './health/activity';
 import {
   createAssistantProxyFromEnv,
   resolveAssistantDirectClientIp,
   resolveAssistantRateClientId,
-} from './assistant-proxy';
-import { selectPredeployedJurisdiction } from './predeployed-jurisdiction';
+} from './assistant/proxy';
+import { selectPredeployedJurisdiction } from './catalog/predeployed-jurisdiction';
 import { getJurisdictionIdentityRef } from '../../jurisdiction/machine/jurisdiction-runtime';
 import { readInheritedChildSecrets } from '../../infra/process/child-secrets';
-import { createLocalPairingController } from './local-pairing';
-import { createGossipProfileAdmission } from './gossip-profile-admission';
+import { createLocalPairingController } from './ownership/local-pairing';
+import { createGossipProfileAdmission } from './network/gossip-admission';
 import { deriveSignerAddressSync } from '../../account/crypto';
-import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';
-import { createBrainVaultOwnerController } from './brainvault-owner';
+import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './ownership/local-runtime';
+import { createBrainVaultOwnerController } from './ownership/brainvault';
 import { dbRootPath } from '../../runtime/platform';
 import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 import type { Server } from 'bun';

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { enforceFaucetPolicy } from '../api/server/faucet-policy';
+import { enforceFaucetPolicy } from '../api/server/faucet/policy';
 
 const request = (path: string, amount?: unknown): Request =>
   new Request(`https://node.test${path}`, {

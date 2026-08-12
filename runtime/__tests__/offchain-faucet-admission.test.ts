@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createDefaultDelta } from '../account/state/delta';
-import { handleOffchainFaucet } from '../api/server/offchain-faucet';
+import { handleOffchainFaucet } from '../api/server/faucet/offchain';
 import {
   describeOffchainFaucetAccountState,
   shouldRejectOffchainFaucetForSettledCapacity,
-} from '../api/server/offchain-faucet-admission';
+} from '../api/server/faucet/offchain-admission';
 import { createRelayStore } from '../network/relay/store';
 import type { AccountFrame, AccountReplica } from '../types/account';
 import type { RuntimeReplica, RuntimeInput } from '../runtime/types';

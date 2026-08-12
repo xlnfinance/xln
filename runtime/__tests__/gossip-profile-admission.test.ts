@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { createGossipProfileAdmission } from '../api/server/gossip-profile-admission';
+import { createGossipProfileAdmission } from '../api/server/network/gossip-admission';
 
 test('public gossip misses have bounded per-client and global admission', () => {
   const admission = createGossipProfileAdmission(1_000, 2, 3);

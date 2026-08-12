@@ -30,7 +30,7 @@ import {
 } from '../runtime.ts';
 import { startStandaloneRelayServer } from '../network/relay/standalone-server';
 import { createLocalDeliveryHandler } from '../network/relay/local-delivery';
-import { getEntityReplicaById } from '../api/server/entity-lookup';
+import { getEntityReplicaById } from '../api/server/entities/lookup';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,

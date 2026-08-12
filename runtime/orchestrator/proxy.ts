@@ -7,7 +7,7 @@ import {
   RequestBodyError,
 } from '../api/public/external-wallet/http';
 import type { HubChild } from './orchestrator-types';
-import { fetchRpcProxyText, readRpcProxyRequest, RpcProxyError } from '../api/server/rpc-proxy-safety';
+import { fetchRpcProxyText, readRpcProxyRequest, RpcProxyError } from '../api/server/rpc/proxy-safety';
 
 type ProxyHubEndpoint =
   | '/api/faucet/offchain';

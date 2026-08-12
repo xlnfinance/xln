@@ -5,7 +5,7 @@ import {
   resolveAssistantDirectClientIp,
   resolveAssistantRateClientId,
   type AssistantProxyConfig,
-} from '../api/server/assistant-proxy';
+} from '../api/server/assistant/proxy';
 
 const config = (overrides: Partial<AssistantProxyConfig> = {}): AssistantProxyConfig => ({
   upstreamUrl: 'http://127.0.0.1:3031',

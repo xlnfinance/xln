@@ -12,7 +12,7 @@ import {
   isAccountWriteLaneIdle,
 } from '../orchestrator/mesh-common';
 import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
-import { getEntityReplicaById } from '../api/server/entity-lookup';
+import { getEntityReplicaById } from '../api/server/entities/lookup';
 import { assert } from './helpers';
 
 const HUB_CREDIT = (n: number) => BigInt(n) * 10n ** 18n;

@@ -1,8 +1,8 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { isLocalOperatorRequest } from '../api/server/health-redaction';
-import { requiresLocalNodeOperator } from '../api/server/node-http-access';
+import { isLocalOperatorRequest } from '../api/server/health/redaction';
+import { requiresLocalNodeOperator } from '../api/server/control/node-http-access';
 import { safeStringify } from '../protocol/serialization';
 
 export const ORCHESTRATOR_JSON_HEADERS: Record<string, string> = {

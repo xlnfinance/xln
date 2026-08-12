@@ -8,7 +8,7 @@ import { ethers } from 'ethers';
 import { startStandaloneRelayServer } from '../network/relay/standalone-server';
 import { main, startP2P, processRuntime, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime.ts';
 import { createLocalDeliveryHandler } from '../network/relay/local-delivery';
-import { getEntityReplicaById } from '../api/server/entity-lookup';
+import { getEntityReplicaById } from '../api/server/entities/lookup';
 import { processUntil } from './helpers';
 import { isLeftEntity, deriveDelta } from '../account/utils';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account/crypto';

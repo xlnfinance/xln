@@ -8,7 +8,7 @@ import {
   hasConnectedEncryptedRelayClient,
   resolveRequestClientIp,
   sendEntityInputDirectViaRelaySocketDelivery,
-} from '../api/server/relay-direct';
+} from '../api/server/network/relay-direct';
 import type { DeliverableEntityInput, RuntimeReplica, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import { createEmptyEnv } from '../runtime';
 import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input/entity-input-envelope-auth.ts';
@@ -82,7 +82,7 @@ describe('relay direct entity delivery', () => {
   });
 
   test('direct relay diagnostics stay machine-readable', () => {
-    const source = readFileSync(new URL('../api/server/relay-direct.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../api/server/network/relay-direct.ts', import.meta.url), 'utf8');
 
     expect(source).not.toContain('[RELAY] Direct dispatch');
     expect(source).not.toContain('console.');

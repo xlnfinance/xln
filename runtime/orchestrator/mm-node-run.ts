@@ -40,11 +40,11 @@ import {
 import { registerEnvChangeCallback } from '../runtime/loop/loop-environment.ts';
 import { ensurePendingNumberedRegistrationsResumed } from '../runtime/registration/numbered-registration-driver';
 import { getReliableOutputIdentity } from '../runtime/routing/output-routing';
-import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../api/server/health-redaction';
+import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../api/server/health/redaction';
 import { createRuntimeIngressReceiptStore } from '../runtime/input-pipeline/ingress-receipts';
 import { readRuntimeSecurityIncidentTelemetry } from '../runtime/observability/security-incidents';
-import { requiresLocalNodeOperator } from '../api/server/node-http-access';
-import { handleRuntimeInputStatus } from '../api/server/runtime-input-control';
+import { requiresLocalNodeOperator } from '../api/server/control/node-http-access';
+import { handleRuntimeInputStatus } from '../api/server/control/runtime-input';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { ReliableDeliveryReceipt, RuntimeReplica } from '../runtime/types';
 import {

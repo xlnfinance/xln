@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { JAdapter } from '../jurisdiction/adapter';
-import { handleReserveFaucet, parseReserveFaucetAmount } from '../api/server/reserve-faucet';
+import { handleReserveFaucet, parseReserveFaucetAmount } from '../api/server/faucet/reserve';
 import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;

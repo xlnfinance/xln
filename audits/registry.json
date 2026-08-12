@@ -196,7 +196,7 @@
       "structuralDebt": 8,
       "sourceGlobs": [
         "runtime/network/**/*.ts",
-        "runtime/api/server/relay-direct.ts",
+        "runtime/api/server/network/relay-direct.ts",
         "runtime/scripts/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
@@ -417,7 +417,7 @@
       "sourceGlobs": [
         "runtime/orchestrator/**/*.ts",
         "scripts/deployment/**/*.sh",
-        "runtime/api/server/health*.ts"
+        "runtime/api/server/health/*.ts"
       ],
       "testGlobs": [
         "runtime/__tests__/**/*health*",
@@ -644,7 +644,7 @@
       ],
       "sourceGlobs": [
         "runtime/network/**/*.ts",
-        "runtime/api/server/relay-direct.ts",
+        "runtime/api/server/network/relay-direct.ts",
         "runtime/scripts/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
@@ -669,7 +669,7 @@
       ],
       "sourceGlobs": [
         "runtime/network/**/*.ts",
-        "runtime/api/server/relay-direct.ts",
+        "runtime/api/server/network/relay-direct.ts",
         "runtime/scripts/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
@@ -694,7 +694,7 @@
       ],
       "sourceGlobs": [
         "runtime/network/**/*.ts",
-        "runtime/api/server/relay-direct.ts",
+        "runtime/api/server/network/relay-direct.ts",
         "runtime/scripts/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
@@ -1078,7 +1078,7 @@
       "sourceGlobs": [
         "runtime/orchestrator/**/*.ts",
         "scripts/deployment/**/*.sh",
-        "runtime/api/server/health*.ts"
+        "runtime/api/server/health/*.ts"
       ],
       "testGlobs": [
         "runtime/__tests__/**/*health*",

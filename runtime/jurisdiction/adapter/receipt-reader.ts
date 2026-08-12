@@ -84,7 +84,7 @@ const parseCanonicalBlock = (raw: unknown, height: number): CanonicalRpcBlock =>
 
 /**
  * A JSON-RPC proxy caps how many calls one batch may carry
- * (`MAX_RPC_PROXY_BATCH_CALLS`, runtime/api/server/rpc-proxy-safety.ts) and
+ * (`MAX_RPC_PROXY_BATCH_CALLS`, runtime/api/server/rpc/proxy-safety.ts) and
  * answers 413 above it, which the watcher treats as fatal. A poll reads its
  * whole block range at once, so send it as several batches instead of letting
  * the range dictate the batch size. Kept as a local constant because the

@@ -1,5 +1,5 @@
 import { safeStringify } from '../protocol/serialization';
-import { requiresLocalNodeOperator } from '../api/server/node-http-access';
+import { requiresLocalNodeOperator } from '../api/server/control/node-http-access';
 import { getStorageHealth } from '../infra/storage-monitor';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
 import type { AggregatedHealth } from './orchestrator-types';

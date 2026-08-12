@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { selectPredeployedJurisdiction } from '../api/server/predeployed-jurisdiction';
+import { selectPredeployedJurisdiction } from '../api/server/catalog/predeployed-jurisdiction';
 
 const complete = (rpc: string, primary = false) => ({
   rpc,

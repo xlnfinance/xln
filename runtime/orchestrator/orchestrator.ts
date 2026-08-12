@@ -39,16 +39,16 @@ import {
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from '../infra/storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { serveStaticApp } from '../api/server/static-assets';
-import { enforceFaucetPolicy } from '../api/server/faucet-policy';
-import { handleWatchtowerProxy } from '../api/server/watchtower-proxy';
+import { enforceFaucetPolicy } from '../api/server/faucet/policy';
+import { handleWatchtowerProxy } from '../api/server/rpc/watchtower-proxy';
 import {
   createAssistantProxyFromEnv,
   resolveAssistantDirectClientIp,
   resolveAssistantRateClientId,
-} from '../api/server/assistant-proxy';
+} from '../api/server/assistant/proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
-import { publicAggregatedHealth, resolveSocketPeerAddress } from '../api/server/health-redaction';
-import { resolveRequestClientIp } from '../api/server/relay-direct';
+import { publicAggregatedHealth, resolveSocketPeerAddress } from '../api/server/health/redaction';
+import { resolveRequestClientIp } from '../api/server/network/relay-direct';
 import {
   isOperatorRequest,
   loadOrCreateOperatorToken,

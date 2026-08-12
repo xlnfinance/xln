@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { handleWatchtowerProxy } from '../api/server/watchtower-proxy';
+import { handleWatchtowerProxy } from '../api/server/rpc/watchtower-proxy';
 
 describe('watchtower same-origin proxy', () => {
   test('allows public recovery discovery and forwards the request', async () => {

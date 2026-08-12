@@ -584,7 +584,7 @@ describe('production startup wiring', () => {
     expect(marketMakerAggregation).toContain('const childReady = marketMakerHealth?.marketMaker?.ok === true;');
     expect(marketMakerAggregation).toContain('if (!marketMakerActive) {');
     expect(marketMakerAggregation).toContain('const ok = !mmEnabled || failure === null;');
-    expect(standaloneServer).toContain("import { selectPredeployedJurisdiction } from './predeployed-jurisdiction';");
+    expect(standaloneServer).toContain("import { selectPredeployedJurisdiction } from './catalog/predeployed-jurisdiction';");
     expect(standaloneServer).toContain(
       "const predeployedJurisdictionKey = String(process.env['XLN_PREDEPLOYED_JURISDICTION_KEY'] || '').trim();",
     );
@@ -726,7 +726,7 @@ describe('production startup wiring', () => {
       'utf8',
     );
     const bootstrapHub = readFileSync(join(repoRoot, 'scripts/bootstrap-hub.ts'), 'utf8');
-    const serverJurisdictions = readFileSync(join(repoRoot, 'runtime/api/server/jurisdictions.ts'), 'utf8');
+    const serverJurisdictions = readFileSync(join(repoRoot, 'runtime/api/server/catalog/jurisdictions.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
     const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime/transactions/tx-handlers.ts'), 'utf8');
     const jurisdictionImport = readFileSync(join(repoRoot, 'runtime/runtime/jurisdiction/jurisdiction-import.ts'), 'utf8');
@@ -2244,7 +2244,7 @@ describe('production startup wiring', () => {
       .map(file => readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8'))
       .join('\n');
     const types = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-types.ts'), 'utf8');
-    const healthRedaction = readFileSync(join(repoRoot, 'runtime/api/server/health-redaction.ts'), 'utf8');
+    const healthRedaction = readFileSync(join(repoRoot, 'runtime/api/server/health/redaction.ts'), 'utf8');
 
     expect(types).toContain('failure: RuntimeFailureSignal | null;');
     expect(bootstrapTimeline).toContain('classifyRuntimeBootstrapStageFailure');
@@ -2613,7 +2613,7 @@ describe('production startup wiring', () => {
     expect(paymentPanel).toContain('refreshPaymentRuntimeGossip');
     expect(xlnStore).toContain('/api/gossip/profile?entityId=');
     expect(xlnStore).toContain('export async function refreshPaymentRuntimeGossip');
-    expect(debugApi).toContain("import { buildKnownProfileBundle } from '../api/server/gossip-profiles';");
+    expect(debugApi).toContain("import { buildKnownProfileBundle } from '../api/server/network/gossip-profiles';");
     expect(debugApi).toContain("if (deps.pathname === '/api/gossip/profile')");
     expect(debugApi).toContain('const bundle = buildKnownProfileBundle({');
     expect(debugApi).toContain('relayStore: deps.relayStore');

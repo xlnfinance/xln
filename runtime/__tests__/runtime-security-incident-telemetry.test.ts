@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { publicAggregatedHealth, publicLocalHubHealth } from '../api/server/health-redaction';
+import { publicAggregatedHealth, publicLocalHubHealth } from '../api/server/health/redaction';
 import { createRelayStore } from '../network/relay/store';
 import { createEmptyEnv } from '../runtime';
 import {

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { buildRuntimeJurisdictionsJson, updateJurisdictionsJson } from '../api/server/jurisdictions';
+import { buildRuntimeJurisdictionsJson, updateJurisdictionsJson } from '../api/server/catalog/jurisdictions';
 
 const tempRoots: string[] = [];
 

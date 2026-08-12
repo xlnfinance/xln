@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildLocalRuntimeOwner } from '../api/server/local-runtime-owner';
+import { buildLocalRuntimeOwner } from '../api/server/ownership/local-runtime';
 
 const SIGNER = `0x${'11'.repeat(20)}`;
 const DEPOSITORY = `0x${'22'.repeat(20)}`;

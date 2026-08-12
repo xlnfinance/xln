@@ -280,12 +280,12 @@ const sendEntityInputSource = runtimeRouting.slice(sendEntityInputStart, sendEnt
 assertNotIncludes(sendEntityInputSource, 'return true', runtimeRoutingPath);
 assertNotIncludes(sendEntityInputSource, 'return false', runtimeRoutingPath);
 
-const relayDirectTs = readText('runtime/api/server/relay-direct.ts');
-assertNotIncludes(relayDirectTs, '[RELAY] Direct dispatch', 'runtime/api/server/relay-direct.ts');
-assertNotIncludes(relayDirectTs, 'console.', 'runtime/api/server/relay-direct.ts');
-assertIncludes(relayDirectTs, 'relay.direct.target_key_missing', 'runtime/api/server/relay-direct.ts');
-assertIncludes(relayDirectTs, 'relay.direct.source_key_missing', 'runtime/api/server/relay-direct.ts');
-assertIncludes(relayDirectTs, 'relay.direct.send_failed', 'runtime/api/server/relay-direct.ts');
+const relayDirectTs = readText('runtime/api/server/network/relay-direct.ts');
+assertNotIncludes(relayDirectTs, '[RELAY] Direct dispatch', 'runtime/api/server/network/relay-direct.ts');
+assertNotIncludes(relayDirectTs, 'console.', 'runtime/api/server/network/relay-direct.ts');
+assertIncludes(relayDirectTs, 'relay.direct.target_key_missing', 'runtime/api/server/network/relay-direct.ts');
+assertIncludes(relayDirectTs, 'relay.direct.source_key_missing', 'runtime/api/server/network/relay-direct.ts');
+assertIncludes(relayDirectTs, 'relay.direct.send_failed', 'runtime/api/server/network/relay-direct.ts');
 
 for (const [path, markers] of [
   ['runtime/__tests__/delivery-result.test.ts', [

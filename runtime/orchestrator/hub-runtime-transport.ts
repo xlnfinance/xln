@@ -26,7 +26,7 @@ import {
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
 import type { RuntimeReplica } from '../runtime/types';
-import type { BrainVaultOwnerController } from '../api/server/brainvault-owner';
+import type { BrainVaultOwnerController } from '../api/server/ownership/brainvault';
 
 export type HubServerSocket = DirectWebSocket &
   RuntimeAdapterSocket & { data?: { type?: string } };

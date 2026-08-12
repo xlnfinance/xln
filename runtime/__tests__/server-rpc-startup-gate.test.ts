@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { isRuntimeTransportReady, runtimeTransportStartupResponse } from '../api/server/rpc-startup-gate';
+import { isRuntimeTransportReady, runtimeTransportStartupResponse } from '../api/server/rpc/startup-gate';
 
 test('Runtime transport rejects every pre-ready and failed startup phase without queueing', () => {
   for (const phase of ['starting', 'runtime', 'bootstrap', 'failed'] as const) {

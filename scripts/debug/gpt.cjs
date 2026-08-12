@@ -162,7 +162,7 @@ const CORE_FILES = {
     'extensions/lending.ts',                              // Hub lending pool math, terms, ids, memos
     'types/finance/lending.ts',                // Lending pool/loan state model
     'entity/tx/handlers/lending.ts',           // Lending offer/borrow/repay entity tx handlers
-    'api/server/lending.ts',                   // Hub lending API handlers
+    'api/server/entities/lending.ts',          // Hub lending API handlers
     'account/tx/handlers/swap/offer/index.ts',     // Account-level swap offer placement
     'account/tx/handlers/swap/resolve/index.ts',   // Swap settlement / hashladder resolution
     'account/tx/handlers/swap/lifecycle/cancel.ts',    // Swap cancellation
@@ -172,11 +172,11 @@ const CORE_FILES = {
     'network/relay/market/subscriptions.ts',       // Orderbook streaming subscriptions
     'network/relay/market/subscription-limiter.ts', // Stream rate limiting
     'orchestrator/mm-node.ts',               // Market maker bootstrap, quote loop, cross books
-    'api/server/market-maker-health.ts',     // Health/self-test contract for MM books
+    'api/server/health/market-maker.ts',     // Health/self-test contract for MM books
     'orchestrator/mesh-common.ts',           // Bootstrap defaults for hubs/MM/accounts
     'protocol/dispute/arguments.ts',                  // Dispute argument builder/evidence inclusion
     'watchtower/action.ts',                  // Watchtower action decisions
-    'api/server/watchtower-proxy.ts',        // Runtime watchtower proxy API
+    'api/server/rpc/watchtower-proxy.ts',    // Runtime watchtower proxy API
 
     'account/tx/apply.ts',   // Account transaction dispatcher
     'account/tx/handlers/balance/add-delta.ts', // Delta addition (payment processing)
@@ -378,11 +378,11 @@ const CROSS_FILES = {
     'orchestrator/mesh-common.ts',
     'orchestrator/mesh-jurisdictions.ts',
     'orchestrator/jurisdictions.ts',
-    'api/server/market-maker-health.ts',
-    'api/server/jurisdictions.ts',
+    'api/server/health/market-maker.ts',
+    'api/server/catalog/jurisdictions.ts',
     'protocol/dispute/arguments.ts',
     'watchtower/action.ts',
-    'api/server/watchtower-proxy.ts',
+    'api/server/rpc/watchtower-proxy.ts',
   ],
   docs: [
     'readme.md',
@@ -584,7 +584,7 @@ const ORDERBOOK_FILES = {
     'network/relay/market/subscriptions.ts',
     'orchestrator/mm-node.ts',
     'orchestrator/mm-transport.ts',
-    'api/server/market-maker-health.ts',
+    'api/server/health/market-maker.ts',
   ],
   docs: [
     'status.md',
@@ -649,7 +649,7 @@ const SWAP_FILES = {
     'orderbook/core.ts',
     'orderbook/validity.ts',
     'network/relay/market/snapshot.ts',
-    'api/server/market-maker-health.ts',
+    'api/server/health/market-maker.ts',
   ]),
   docs: [
     'status.md',
@@ -1146,7 +1146,7 @@ Read these together:
 - \`runtime/extensions/lending.ts\`
 - \`runtime/types/finance/lending.ts\`
 - \`runtime/entity/tx/handlers/lending.ts\`
-- \`runtime/api/server/lending.ts\`
+- \`runtime/api/server/entities/lending.ts\`
 - \`frontend/src/lib/components/Entity/LendingPanel.svelte\`
 - \`runtime/__tests__/lending.test.ts\`
 - \`tests/e2e-lending.spec.ts\`
@@ -1157,7 +1157,7 @@ The test market maker must prepublish same-chain books and ETH/TRON cross-chain
 books before user swaps run. Empty books are a setup failure, not a user-flow
 failure. Health/self-test lives in:
 - \`runtime/orchestrator/mm-node.ts\`
-- \`runtime/api/server/market-maker-health.ts\`
+- \`runtime/api/server/health/market-maker.ts\`
 - \`runtime/network/relay/market/subscriptions.ts\`
 - \`tests/e2e-cross-j-swap.spec.ts\` ("market maker prepublishes...")
 
@@ -1238,11 +1238,11 @@ xln/
       account/tx/handlers/swap/cross-fill-ack/index.ts ${fileSizes['runtime/account/tx/handlers/swap/cross-fill-ack/index.ts'] || '?'} lines - Fill ACK processing
       relay/market-subscriptions.ts ${fileSizes['runtime/network/relay/market/subscriptions.ts'] || '?'} lines - Book streaming
       orchestrator/mm-node.ts     ${fileSizes['runtime/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
-      server/market-maker-health.ts ${fileSizes['runtime/api/server/market-maker-health.ts'] || '?'} lines - MM readiness health
+      server/health/market-maker.ts ${fileSizes['runtime/api/server/health/market-maker.ts'] || '?'} lines - MM readiness health
       lending.ts                  ${fileSizes['runtime/extensions/lending.ts'] || '?'} lines - Lending math and ids
       types/finance/lending.ts    ${fileSizes['runtime/types/finance/lending.ts'] || '?'} lines - Lending state types
       entity/tx/handlers/lending.ts ${fileSizes['runtime/entity/tx/handlers/lending.ts'] || '?'} lines - Lending tx handlers
-      server/lending.ts           ${fileSizes['runtime/api/server/lending.ts'] || '?'} lines - Lending API handlers
+      server/entities/lending.ts ${fileSizes['runtime/api/server/entities/lending.ts'] || '?'} lines - Lending API handlers
 
     entity/tx/
       apply.ts                   ${fileSizes['runtime/entity/tx/apply.ts'] || '?'} lines - Entity tx dispatcher

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { handleLendingStateRequest } from '../api/server/lending';
+import { handleLendingStateRequest } from '../api/server/entities/lending';
 import type { RuntimeReplica } from '../runtime/types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;

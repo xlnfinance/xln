@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { Profile } from '../entity/profile';
 import { createRelayStore, storeVerifiedGossipProfile } from '../network/relay/store';
 import { createEmptyEnv } from '../runtime';
-import { handleRuntimeHealth, type RuntimeHealthCacheEntry, type RuntimeHealthDeps } from '../api/server/health-api';
-import { createMarketMakerServerState } from '../api/server/market-maker-health';
+import { handleRuntimeHealth, type RuntimeHealthCacheEntry, type RuntimeHealthDeps } from '../api/server/health/api';
+import { createMarketMakerServerState } from '../api/server/health/market-maker';
 import { acquireRuntimeFrameWriter } from '../runtime/frame/lifecycle/writer-lock';
 import {
   buildCryptographicProfileFixture,

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { deriveBrainVaultNative } from '../../brainvault/native';
 import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/spec';
 import { validateRuntimeAdapterWireMessage } from '../../runtime/api/runtime-adapter/wire-schema';
-import { createBrainVaultOwnerController } from '../../runtime/api/server/brainvault-owner';
+import { createBrainVaultOwnerController } from '../../runtime/api/server/ownership/brainvault';
 import type { EntityReplica, RuntimeInput, RuntimeReplica } from '../../runtime/runtime/types';
 
 test('native node backend reproduces the frozen V1 browser wallet', async () => {

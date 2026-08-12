@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 
 import { verifyRuntimeAdapterAuthCredential } from '../api/runtime-adapter/security/auth';
-import { createLocalPairingController, isTrustedLocalPairingOrigin } from '../api/server/local-pairing';
+import { createLocalPairingController, isTrustedLocalPairingOrigin } from '../api/server/ownership/local-pairing';
 import type { RuntimeReplica } from '../runtime/types';
 
 const CONTROL_TOKEN = 'control-token-that-is-longer-than-thirty-two-bytes';

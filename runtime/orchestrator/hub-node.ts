@@ -3,7 +3,7 @@ import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createExternalWalletApi } from '../api/public/external-wallet-api';
-import { createBrainVaultOwnerController, type BrainVaultOwnerController } from '../api/server/brainvault-owner';
+import { createBrainVaultOwnerController, type BrainVaultOwnerController } from '../api/server/ownership/brainvault';
 import { hasCliFlag, readCliOption } from '../config/cli';
 import { readBooleanEnv } from '../config/environment';
 import { normalizeRuntimeId } from '../network/p2p/auth/runtime-id';
@@ -65,8 +65,8 @@ import { readInheritedChildSecrets, resolveChildSecret } from '../infra/process/
 import { findMissingRpcContractCode } from './contract-readiness';
 import { readJurisdictionsFile } from './jurisdictions-file';
 import { getTokenIdsForJurisdiction } from '../account/utils';
-import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../api/server/health-redaction';
-import { requiresLocalNodeOperator } from '../api/server/node-http-access';
+import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../api/server/health/redaction';
+import { requiresLocalNodeOperator } from '../api/server/control/node-http-access';
 import {
   deriveRuntimeAdapterCapabilityToken,
   registerRuntimeAdapterAuthSeed,
@@ -83,14 +83,14 @@ import {
   forgetRuntimeAdapterClient,
 } from '../api/runtime-adapter/server';
 import { redactTokenBearingUrlForLog } from './runtime-import-log';
-import { handleLendingStateRequest } from '../api/server/lending';
-import { handleRuntimeActivityRequest } from '../api/server/activity-api';
-import { handleReserveFaucet } from '../api/server/reserve-faucet';
-import { handleOffchainFaucet } from '../api/server/offchain-faucet';
-import { enforceFaucetPolicy } from '../api/server/faucet-policy';
+import { handleLendingStateRequest } from '../api/server/entities/lending';
+import { handleRuntimeActivityRequest } from '../api/server/health/activity';
+import { handleReserveFaucet } from '../api/server/faucet/reserve';
+import { handleOffchainFaucet } from '../api/server/faucet/offchain';
+import { enforceFaucetPolicy } from '../api/server/faucet/policy';
 import { createRuntimeIngressReceiptStore } from '../runtime/input-pipeline/ingress-receipts';
 import { readRuntimeSecurityIncidentTelemetry } from '../runtime/observability/security-incidents';
-import { handleRuntimeInputStatus } from '../api/server/runtime-input-control';
+import { handleRuntimeInputStatus } from '../api/server/control/runtime-input';
 import {
   getActiveJAdapter,
   getP2PState,
