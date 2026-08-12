@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { decodeRuntimeInput } from '../runtime/input-schema';
+import { decodeRuntimeInput } from '../../../runtime/input-schema';
 
 test('RuntimeInput decoder owns the exact envelope and RuntimeTx boundary', () => {
   expect(() => decodeRuntimeInput({

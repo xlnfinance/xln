@@ -1,25 +1,25 @@
 import { describe, expect, test } from 'bun:test';
-import { readEntityFrameEventMessages } from '../entity/frame-events';
+import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 
 import {
   ACCOUNT_MAINTENANCE_INTERVAL_MS,
   HUB_REBALANCE_INTERVAL_MS,
   initCrontab,
   scheduleHook,
-} from '../entity/scheduler';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { buildSignedEntityCommand } from '../entity/command';
-import { signedEntityCommandTx } from '../entity/command/command-codec';
-import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
-import { generateLazyEntityId } from '../entity/factory';
-import { applyEntityFrame, applyEntityInput } from '../entity/consensus/index';
+} from '../../../entity/scheduler';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { buildSignedEntityCommand } from '../../../entity/command';
+import { signedEntityCommandTx } from '../../../entity/command/command-codec';
+import { deriveLocalEntityCryptoKeys } from '../../../entity/auth/crypto';
+import { generateLazyEntityId } from '../../../entity/factory';
+import { applyEntityFrame, applyEntityInput } from '../../../entity/consensus/index';
 import {
   createEmptyEnv,
   hasRuntimeWork,
   processRuntime,
   registerRuntimeFrameCommitCallback,
   waitForRuntimeWorkDrained,
-} from '../runtime';
+} from '../../../runtime';
 import {
   assertScheduledWakeTxAuthorized,
   collectDueScheduledWakeJobs,
@@ -27,28 +27,28 @@ import {
   entityNeedsPeriodicWake,
   getNextScheduledWakeTimestamp,
   refreshScheduledWakeIndex,
-} from '../runtime/input-pipeline/scheduled-wake';
+} from '../../../runtime/input-pipeline/scheduled-wake';
 import {
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   type ScheduledWakeTx,
-} from '../entity/scheduler/scheduled-wake-validation';
-import { safeStringify } from '../protocol/serialization';
-import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import { computeCanonicalEntityHash } from '../storage/canonical-hash';
-import type { EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeInput } from '../runtime/types';
+} from '../../../entity/scheduler/scheduled-wake-validation';
+import { safeStringify } from '../../../protocol/serialization';
+import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
+import { computeCanonicalEntityHash } from '../../../storage/canonical-hash';
+import type { EntityReplica, EntityState } from '../../../entity/types';
+import type { RuntimeInput } from '../../../runtime/types';
 import {
   buildCanonicalRuntimeStateSnapshot,
   buildDurableRuntimeMempool,
   restoreDurableRuntimeSnapshot,
-} from '../storage/wal/snapshot';
+} from '../../../storage/wal/snapshot';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
-} from '../entity/profile/profile-encryption';
-import { buildLocalEntityProfile } from '../network/p2p/gossip/helper';
-import { computeProfileHash } from '../entity/profile/profile-signing';
-import { makeAccount } from './helpers/cross-j';
+} from '../../../entity/profile/profile-encryption';
+import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
+import { computeProfileHash } from '../../../entity/profile/profile-signing';
+import { makeAccount } from '../../helpers/cross-j';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 const signerId = (byte: string): string => `0x${byte.repeat(20)}`;

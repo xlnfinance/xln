@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { deriveSignerAddressSync } from '../account/crypto';
-import { deriveEncryptionKeyPair } from '../protocol/crypto/p2p-crypto';
-import { RuntimeWsClient } from '../network/p2p/ws-client';
-import { canonicalizeRuntimeWsAudience, deserializeWsMessage, serializeWsMessage } from '../network/p2p/ws-protocol';
-import { startStandaloneRelayServer, type StandaloneRelayServer } from '../network/relay/standalone-server';
-import { createEmptyEnv } from '../runtime';
-import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input/entity-input-envelope-auth.ts';
-import { RETRYABLE_INGRESS_BACKPRESSURE } from '../network/p2p/ingress-backpressure';
+import { deriveSignerAddressSync } from '../../../account/crypto';
+import { deriveEncryptionKeyPair } from '../../../protocol/crypto/p2p-crypto';
+import { RuntimeWsClient } from '../../../network/p2p/ws-client';
+import { canonicalizeRuntimeWsAudience, deserializeWsMessage, serializeWsMessage } from '../../../network/p2p/ws-protocol';
+import { startStandaloneRelayServer, type StandaloneRelayServer } from '../../../network/relay/standalone-server';
+import { createEmptyEnv } from '../../../runtime';
+import { signRuntimeEntityInputsEnvelope } from '../../../runtime/entity-input/entity-input-envelope-auth.ts';
+import { RETRYABLE_INGRESS_BACKPRESSURE } from '../../../network/p2p/ingress-backpressure';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
 const SEED_A = 'runtime-ws-recovery-client-a';

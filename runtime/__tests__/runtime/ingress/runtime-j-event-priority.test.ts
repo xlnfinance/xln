@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
-import { prioritizeJEventFrame } from '../runtime';
-import type { EntityInput, EntityFrame } from '../entity/types';
-import type { RuntimeInput } from '../runtime/types';
-import type { EntityTx } from '../types/entity-tx';
+import { prioritizeJEventFrame } from '../../../runtime';
+import type { EntityInput, EntityFrame } from '../../../entity/types';
+import type { RuntimeInput } from '../../../runtime/types';
+import type { EntityTx } from '../../../types/entity-tx';
 
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;

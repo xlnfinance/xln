@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test';
 
-import { deriveSignerAddressSync } from '../account/crypto';
-import type { EntityReplica, EntityState } from '../entity/types';
-import type { JAdapter } from '../jurisdiction/adapter/types';
-import { createEmptyEnv } from '../runtime';
-import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
-import { registerCommittedSingleSignerWallets } from '../runtime/recovery/recovery-infra';
-import type { JReplica } from '../types/jurisdiction-runtime';
+import { deriveSignerAddressSync } from '../../../account/crypto';
+import type { EntityReplica, EntityState } from '../../../entity/types';
+import type { JAdapter } from '../../../jurisdiction/adapter/types';
+import { createEmptyEnv } from '../../../runtime';
+import { attachLiveJAdapter } from '../../../runtime/jurisdiction/live-jadapters';
+import { registerCommittedSingleSignerWallets } from '../../../runtime/recovery/recovery-infra';
+import type { JReplica } from '../../../types/jurisdiction-runtime';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const depositoryAddress = `0x${'dd'.repeat(20)}`;

@@ -4,7 +4,7 @@ import {
   assertRuntimeCommandReady,
   inferRuntimeLifecyclePhase,
   transitionRuntimeLifecycle,
-} from '../runtime/lifecycle';
+} from '../../../runtime/lifecycle';
 import {
   createEmptyEnv,
   resumeRuntimeAfterPersistenceQuiesce,
@@ -12,8 +12,8 @@ import {
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
   waitForRuntimeProcessingIdle,
-} from '../runtime';
-import type { RuntimeReplica } from '../runtime/types';
+} from '../../../runtime';
+import type { RuntimeReplica } from '../../../runtime/types';
 
 describe('runtime lifecycle', () => {
   test('uses one explicit phase as the lifecycle source of truth', () => {

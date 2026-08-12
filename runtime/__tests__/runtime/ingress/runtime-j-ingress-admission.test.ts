@@ -6,10 +6,10 @@ import {
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
   createEmptyEnv,
   validateRuntimeInputAdmission,
-} from '../runtime';
-import type { JTx } from '../types/jurisdiction-runtime';
-import type { RuntimeInput } from '../runtime/types';
-import { MAX_ENTITY_FRAME_J_RANGE_BYTES } from '../jurisdiction/machine/range-budget';
+} from '../../../runtime';
+import type { JTx } from '../../../types/jurisdiction-runtime';
+import type { RuntimeInput } from '../../../runtime/types';
+import { MAX_ENTITY_FRAME_J_RANGE_BYTES } from '../../../jurisdiction/machine/range-budget';
 
 const jurisdiction = 'Testnet';
 const tx = (): JTx => ({

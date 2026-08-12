@@ -2,11 +2,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'fs';
 import { join } from 'path';
 
-import { generateLazyEntityId } from '../entity/factory';
-import { initCrontab } from '../entity/scheduler';
-import { dbRootPath } from '../runtime/platform';
-import { safeStringify } from '../protocol/serialization';
-import { cloneIsolatedRuntimeSnapshot } from '../runtime/input-pipeline/input-clone';
+import { generateLazyEntityId } from '../../../entity/factory';
+import { initCrontab } from '../../../entity/scheduler';
+import { dbRootPath } from '../../../runtime/platform';
+import { safeStringify } from '../../../protocol/serialization';
+import { cloneIsolatedRuntimeSnapshot } from '../../../runtime/input-pipeline/input-clone';
 import {
   closeInfraDb,
   closeRuntimeDb,
@@ -21,33 +21,33 @@ import {
   processRuntime,
   registerRuntimeFrameCommitCallback,
   validateRuntimeInputAdmission,
-} from '../runtime';
+} from '../../../runtime';
 import {
   createReliableDeliveryReceipt,
   getInputReliableIdentity,
-} from '../runtime/reliable/reliable-delivery.ts';
-import { decodeBuffer, encodeBuffer } from '../storage/codec/codec';
-import { KEY_HEAD } from '../storage/keys';
-import { readStorageHead } from '../storage';
+} from '../../../runtime/reliable/reliable-delivery.ts';
+import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
+import { KEY_HEAD } from '../../../storage/keys';
+import { readStorageHead } from '../../../storage';
 import {
   authorizeRestoredRuntimeInput,
   buildCanonicalEntityReplicaSnapshot,
   buildDurableRuntimeMempool,
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../storage/wal/snapshot';
-import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
-import type { AccountInput } from '../types/account';
-import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../runtime/types';
-import { enableStrictScenario } from '../scenarios/harness/helpers';
+} from '../../../storage/wal/snapshot';
+import { transitionRuntimeLifecycle } from '../../../runtime/lifecycle';
+import type { AccountInput } from '../../../types/account';
+import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../../runtime/types';
+import { enableStrictScenario } from '../../../scenarios/harness/helpers';
 import {
   buildEntityHashesToSign,
   cloneAccountInputWithoutPostCommitHankos,
-} from '../entity/consensus/input/hanko-witness';
-import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/machine/registration-evidence';
-import { readStorageFrameRecord } from '../storage/read/read';
-import { createTestJReplica } from './helpers/j-replica';
+} from '../../../entity/consensus/input/hanko-witness';
+import { markLocalJAuthorityRuntimeTx } from '../../../jurisdiction/machine/registration-evidence';
+import { readStorageFrameRecord } from '../../../storage/read/read';
+import { createTestJReplica } from '../../helpers/j-replica';
 
 const TEST_RUN_ID = `${process.pid}-${Date.now()}`;
 const cleanupNamespaces: string[] = [];

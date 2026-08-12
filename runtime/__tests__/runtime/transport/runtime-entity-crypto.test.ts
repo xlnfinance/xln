@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
-import { clearSignerKeys, deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { clearSignerKeys, deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import {
   assertLocalEntityCryptoKeys,
   assertPersistedLocalEntityCryptoKeys,
   deriveLocalEntityCryptoKeys,
   requireEntityEncryptionPrivateKey,
-} from '../entity/auth/crypto';
-import { createEmptyEnv, generateLazyEntityId } from '../runtime';
-import { applyRuntimeTx } from '../runtime/transactions/tx-handlers';
+} from '../../../entity/auth/crypto';
+import { createEmptyEnv, generateLazyEntityId } from '../../../runtime';
+import { applyRuntimeTx } from '../../../runtime/transactions/tx-handlers';
 
 const testJurisdiction = {
   address: `0x${'22'.repeat(20)}`,

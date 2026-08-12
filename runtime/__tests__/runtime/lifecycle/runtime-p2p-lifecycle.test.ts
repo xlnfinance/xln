@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { detachRuntimeP2P } from '../runtime/infrastructure/p2p-lifecycle';
-import type { RuntimeReplica } from '../runtime/types';
+import { detachRuntimeP2P } from '../../../runtime/infrastructure/p2p-lifecycle';
+import type { RuntimeReplica } from '../../../runtime/types';
 
 test('runtime p2p lifecycle diagnostics use structured logging', () => {
   const source = readFileSync(join(process.cwd(), 'runtime/runtime/infrastructure/p2p-lifecycle.ts'), 'utf8');

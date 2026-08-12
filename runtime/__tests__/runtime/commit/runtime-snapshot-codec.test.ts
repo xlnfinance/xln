@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createEmptyEnv } from '../runtime';
+import { createEmptyEnv } from '../../../runtime';
 import {
   buildCanonicalEnvSnapshot,
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../storage/wal/snapshot';
+} from '../../../storage/wal/snapshot';
 
 describe('runtime snapshot codec', () => {
   test('time-machine snapshots preserve complete runtime input and routed output metadata', () => {

@@ -302,7 +302,7 @@ for (const [path, markers] of [
     'delivery retry and terminal decisions stay behind shared helpers',
     'delivery outcome decisions stay behind shared helpers',
   ]],
-  ['runtime/__tests__/runtime-output-routing.test.ts', [
+  ['runtime/__tests__/runtime/transport/runtime-output-routing.test.ts', [
     'ROUTE_P2P_INVALID_DELIVERY_RESULT',
     'ROUTE_SEND_NOT_DELIVERED',
   ]],

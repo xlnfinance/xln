@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { TIMING } from '../config/constants';
-import { initCrontab, scheduleHook } from '../entity/scheduler';
-import { generateLazyEntityId } from '../entity/factory';
-import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../entity/auth/crypto';
-import { processEventBatch } from '../jurisdiction/adapter/watcher';
-import { createRuntimeIngressReceiptStore } from '../runtime/input-pipeline/ingress-receipts';
-import { buildJEventRangeData } from './helpers/j-history';
-import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { TIMING } from '../../../config/constants';
+import { initCrontab, scheduleHook } from '../../../entity/scheduler';
+import { generateLazyEntityId } from '../../../entity/factory';
+import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../../../entity/auth/crypto';
+import { processEventBatch } from '../../../jurisdiction/adapter/watcher';
+import { createRuntimeIngressReceiptStore } from '../../../runtime/input-pipeline/ingress-receipts';
+import { buildJEventRangeData } from '../../helpers/j-history';
+import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-history';
 import {
   createEmptyEnv,
   enqueueRuntimeInput,
@@ -17,16 +17,16 @@ import {
   processRuntime,
   registerRuntimeFrameCommitCallback,
   startRuntimeLoop,
-} from '../runtime';
-import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import type { AccountState } from '../types/account';
-import type { EntityReplica, JurisdictionConfig } from '../entity/types';
-import type { RuntimeReplica } from '../runtime/types';
-import type { JurisdictionEvent } from '../types/jurisdiction-events';
-import { getWallClockMs } from '../infra/time';
-import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
-import type { JAdapter } from '../jurisdiction/adapter/types';
-import { applyEntityInputFrameCap, applyEntityTxFrameCap } from '../runtime/loop/loop-work.ts';
+} from '../../../runtime';
+import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
+import type { AccountState } from '../../../types/account';
+import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
+import type { RuntimeReplica } from '../../../runtime/types';
+import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
+import { getWallClockMs } from '../../../infra/time';
+import { attachLiveJAdapter } from '../../../runtime/jurisdiction/live-jadapters';
+import type { JAdapter } from '../../../jurisdiction/adapter/types';
+import { applyEntityInputFrameCap, applyEntityTxFrameCap } from '../../../runtime/loop/loop-work.ts';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,

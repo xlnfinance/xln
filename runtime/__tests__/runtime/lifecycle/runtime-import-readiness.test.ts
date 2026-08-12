@@ -3,9 +3,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   classifyRuntimeImportReadinessReason,
   classifyRuntimeMarketMakerFailure,
-} from '../protocol/errors/failure-taxonomy';
-import { resolveRuntimeImportReadiness } from '../orchestrator/runtime/runtime-import-readiness';
-import type { AggregatedHealth } from '../orchestrator/orchestrator-types';
+} from '../../../protocol/errors/failure-taxonomy';
+import { resolveRuntimeImportReadiness } from '../../../orchestrator/runtime/runtime-import-readiness';
+import type { AggregatedHealth } from '../../../orchestrator/orchestrator-types';
 
 const baseReadyHealth = (): Pick<AggregatedHealth,
   'systemOk' |

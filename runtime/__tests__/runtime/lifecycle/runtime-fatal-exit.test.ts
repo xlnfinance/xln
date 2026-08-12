@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test';
 import { join } from 'path';
 
-const fixture = join(import.meta.dir, 'fixtures/process/runtime-fatal-exit-child.ts');
+const fixture = join(import.meta.dir, '..', '..', 'fixtures/process/runtime-fatal-exit-child.ts');
 
 test('an unhandled Node Runtime error always terminates the child process', async () => {
   const child = Bun.spawn({
     cmd: [process.execPath, fixture],
-    cwd: join(import.meta.dir, '..', '..'),
+    cwd: join(import.meta.dir, '..', '..', '..', '..'),
     env: { ...process.env },
     stdout: 'pipe',
     stderr: 'pipe',

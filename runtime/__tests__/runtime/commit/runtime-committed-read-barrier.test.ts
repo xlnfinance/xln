@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createEmptyEnv } from '../runtime';
-import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/security/auth';
-import { decodeRuntimeAdapterBrowserMessage } from '../api/runtime-adapter/codec';
-import { handleRuntimeAdapterMessage } from '../api/runtime-adapter/server';
+import { createEmptyEnv } from '../../../runtime';
+import { deriveRuntimeAdapterCapabilityToken } from '../../../api/runtime-adapter/security/auth';
+import { decodeRuntimeAdapterBrowserMessage } from '../../../api/runtime-adapter/codec';
+import { handleRuntimeAdapterMessage } from '../../../api/runtime-adapter/server';
 import {
   acquireRuntimeCommittedRead,
   acquireRuntimeFrameWriter,
   withRuntimeCommittedRead,
-} from '../runtime/frame/lifecycle/writer-lock';
+} from '../../../runtime/frame/lifecycle/writer-lock';
 
 const radapterAuthSeed = process.env['XLN_RADAPTER_AUTH_SEED'] || 'seed';
 process.env['XLN_RADAPTER_AUTH_SEED'] = radapterAuthSeed;

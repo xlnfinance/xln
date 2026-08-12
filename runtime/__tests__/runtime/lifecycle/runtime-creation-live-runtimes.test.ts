@@ -11,7 +11,7 @@ import {
   normalizeBrainVaultShardTimeSample,
   normalizeMnemonicPhrase,
   parseLiveRuntimeChoices,
-} from '../../frontend/src/lib/components/Views/runtime-creation-model';
+} from '../../../../frontend/src/lib/components/Views/runtime-creation-model';
 
 describe('runtime creation live runtime discovery', () => {
   const token = `xlnra1.full.${Date.now() + 60_000}.aud.kid.jti.sig`;

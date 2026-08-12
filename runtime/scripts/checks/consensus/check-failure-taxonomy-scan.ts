@@ -902,7 +902,7 @@ for (const [path, markers] of [
       "expect(localBug.failureKind).toBe('local-bug')",
     ],
   ],
-  ['runtime/__tests__/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
+  ['runtime/__tests__/runtime/lifecycle/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
   [
     'runtime/__tests__/health-redaction.test.ts',
     ['public aggregated health strips child process ids', 'Latest /api/health child refresh window'],
@@ -917,7 +917,7 @@ for (const [path, markers] of [
     ['entity consensus core uses structured logging only', 'frame.profile'],
   ],
   [
-    'runtime/__tests__/runtime-entity-input-logging.test.ts',
+    'runtime/__tests__/runtime/ingress/runtime-entity-input-logging.test.ts',
     ['runtime entity input j-output collection logs stay behind structured debug logging', 'inputs.profile'],
   ],
   [
@@ -947,7 +947,7 @@ for (const [path, markers] of [
     ['relay router and local delivery verbose diagnostics use structured logging', 'relay.local_delivery'],
   ],
   [
-    'runtime/__tests__/runtime-ws-recovery.test.ts',
+    'runtime/__tests__/runtime/transport/runtime-ws-recovery.test.ts',
     ['standalone relay uses structured startup logging', 'relay.standalone'],
   ],
   [

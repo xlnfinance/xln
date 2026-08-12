@@ -2,26 +2,26 @@ import { describe, expect, test } from 'bun:test';
 import { rmSync } from 'fs';
 import { join } from 'path';
 
-import { deriveSignerAddressSync } from '../account/crypto';
+import { deriveSignerAddressSync } from '../../../account/crypto';
 import {
   closeInfraDb,
   closeRuntimeDb,
   createEmptyEnv,
   loadEnvFromDB,
-} from '../runtime';
-import { createFrameExecutionState } from '../runtime/frame/input/execution-state';
-import { handleRuntimeFrameStorageFailure } from '../runtime/frame/lifecycle/storage-failure';
-import { createRuntimeFrameTransaction } from '../runtime/frame/transaction';
-import { dbRootPath } from '../runtime/platform';
-import { ensureRuntimeInfrastructure } from '../runtime/infrastructure/runtime-infrastructure';
-import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
+} from '../../../runtime';
+import { createFrameExecutionState } from '../../../runtime/frame/input/execution-state';
+import { handleRuntimeFrameStorageFailure } from '../../../runtime/frame/lifecycle/storage-failure';
+import { createRuntimeFrameTransaction } from '../../../runtime/frame/transaction';
+import { dbRootPath } from '../../../runtime/platform';
+import { ensureRuntimeInfrastructure } from '../../../runtime/infrastructure/runtime-infrastructure';
+import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
 import {
   buildRuntimeFrameCommitProofExpectation,
   classifyRuntimeFrameCommitProof,
-} from '../storage/commit/commit';
-import { buildDurableRuntimeMachineSnapshot } from '../storage/wal/snapshot';
+} from '../../../storage/commit/commit';
+import { buildDurableRuntimeMachineSnapshot } from '../../../storage/wal/snapshot';
 
-const fixture = join(import.meta.dir, 'fixtures/storage/runtime-storage-timeout-child.ts');
+const fixture = join(import.meta.dir, '..', '..', 'fixtures/storage/runtime-storage-timeout-child.ts');
 
 const removeRuntimeStorage = (runtimeId: string): void => {
   const base = join(dbRootPath, runtimeId);
@@ -221,7 +221,7 @@ test('real write timeout makes mutated RAM unreadable until restart loads WAL tr
 
   const child = Bun.spawn({
     cmd: [process.execPath, fixture, seed],
-    cwd: join(import.meta.dir, '..', '..'),
+    cwd: join(import.meta.dir, '..', '..', '..', '..'),
     env: { ...process.env, XLN_DB_PATH: dbRootPath },
     stdout: 'pipe',
     stderr: 'pipe',

@@ -3,19 +3,19 @@ import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { loadGossipProfilesFromInfraDb } from '../runtime/infrastructure/gossip-store';
+import { loadGossipProfilesFromInfraDb } from '../../../runtime/infrastructure/gossip-store';
 import {
   getRuntimeInfraDb,
   tryOpenRuntimeInfraDb,
-} from '../runtime/loop/loop-infrastructure.ts';
-import { serializeTaggedJson } from '../protocol/serialization';
-import { clearGossip, closeInfraDb, createEmptyEnv } from '../runtime';
-import { resolveDbPath } from '../storage/runtime-dbs';
-import type { RuntimeReplica } from '../runtime/types';
+} from '../../../runtime/loop/loop-infrastructure.ts';
+import { serializeTaggedJson } from '../../../protocol/serialization';
+import { clearGossip, closeInfraDb, createEmptyEnv } from '../../../runtime';
+import { resolveDbPath } from '../../../storage/runtime-dbs';
+import type { RuntimeReplica } from '../../../runtime/types';
 import {
   buildCryptographicProfileFixture,
   deriveSingleSignerFixtureEntityId,
-} from './helpers/cryptographic-profile';
+} from '../../helpers/cryptographic-profile';
 
 const keyText = (key: Buffer | string): string => Buffer.isBuffer(key) ? key.toString() : String(key);
 

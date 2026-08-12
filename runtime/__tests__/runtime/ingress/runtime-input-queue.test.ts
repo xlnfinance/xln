@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { enqueueRuntimeInputsWithDeps } from '../runtime/input-pipeline/input-queue';
-import { LIMITS } from '../config/constants';
-import type { RuntimeReplica } from '../runtime/types';
+import { enqueueRuntimeInputsWithDeps } from '../../../runtime/input-pipeline/input-queue';
+import { LIMITS } from '../../../config/constants';
+import type { RuntimeReplica } from '../../../runtime/types';
 
 const makeEnv = (): RuntimeReplica => ({
   state: {

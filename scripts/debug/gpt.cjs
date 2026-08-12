@@ -524,8 +524,8 @@ const RUNTIME_FILES = {
   tests: [
     'runtime/__tests__/ids.test.ts',
     'runtime/__tests__/account/consensus/account-frame-integrity.test.ts',
-    'runtime/__tests__/runtime-output-routing.test.ts',
-    'runtime/__tests__/runtime-ingress-timestamp.test.ts',
+    'runtime/__tests__/runtime/transport/runtime-output-routing.test.ts',
+    'runtime/__tests__/runtime/ingress/runtime-ingress-timestamp.test.ts',
     'runtime/__tests__/j-batch-reserve-availability.test.ts',
     'runtime/__tests__/multi-jurisdiction-entity.test.ts',
     'runtime/__tests__/serialization-utils.test.ts',

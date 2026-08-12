@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { routeInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../runtime/routing/entity-routing';
+import { routeInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../../../runtime/routing/entity-routing';
 import {
   buildPendingNetworkOutputs,
   buildRouteOutputKey,
@@ -11,12 +11,12 @@ import {
   rescheduleDeferredOutputs,
   sendEntityInputWithRouting as sendEntityInputWithRoutingRaw,
   splitPendingOutputsByRetryWindow,
-} from '../runtime/routing/output-routing';
-import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../protocol/payments/delivery-result';
-import type { DeliverableEntityInput, RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
-import type { EntityLeaderTimeoutVote } from '../entity/types';
-import { getWallClockMs } from '../infra/time';
-import { deriveSignerAddressSync } from '../account/crypto';
+} from '../../../runtime/routing/output-routing';
+import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../../../protocol/payments/delivery-result';
+import type { DeliverableEntityInput, RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../../../runtime/types';
+import type { EntityLeaderTimeoutVote } from '../../../entity/types';
+import { getWallClockMs } from '../../../infra/time';
+import { deriveSignerAddressSync } from '../../../account/crypto';
 
 const withRuntimeOwner = (env: RuntimeReplica): RuntimeReplica => {
   const seed = `runtime-output-routing:${String(env.runtimeId || 'anonymous')}`;

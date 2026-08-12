@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { runtimeInputRequiresOutboxCapacity } from '../runtime/admission';
-import type { RoutedEntityInput } from '../runtime/types';
+import { runtimeInputRequiresOutboxCapacity } from '../../../runtime/admission';
+import type { RoutedEntityInput } from '../../../runtime/types';
 
 const input = (type: string): RoutedEntityInput => ({
   entityId: `0x${'11'.repeat(32)}`,

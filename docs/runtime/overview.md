@@ -108,7 +108,7 @@ generic base class.
 
 ## Executable reading traces
 
-- `runtime/__tests__/runtime-frame-atomicity.test.ts` — mutation/WAL/read
+- `runtime/__tests__/runtime/commit/runtime-frame-atomicity.test.ts` — mutation/WAL/read
   barriers and input recovery.
 - `runtime/scripts/operations/persistence/persistence-simultaneous-proposal-smoke.ts` — Account
   collision, rollback ordering, and LEFT wins.

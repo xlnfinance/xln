@@ -3,11 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { safeParse, safeStringify } from '../protocol/serialization';
+import { safeParse, safeStringify } from '../../../protocol/serialization';
 import {
   buildRuntimeStateDiffReport,
   buildRuntimeStateDiffReportFromJson,
-} from '../qa/tools/runtime-state-diff';
+} from '../../../qa/tools/runtime-state-diff';
 
 describe('runtime state diff', () => {
   test('canonical hashes ignore object and Map insertion order', () => {
