@@ -58,6 +58,9 @@ import type { EntityState, HashToSign, JurisdictionConfig } from '../../../entit
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { createDefaultDelta } from '../../../account/state/delta';
+import { LIMITS, TOKENS } from '../../../config/constants';
+import { getDefaultCreditLimit } from '../../../account/utils';
+import { projectAccountAfterSettlement } from '../../../account/settlement/settlement-projection';
 import {
   addReplica,
   addr,
@@ -911,6 +914,38 @@ describe('atomic settlement Account transition', () => {
     expect(canAutoApproveWorkspace(pureForgiveness.state.settlementWorkspace!, false)).toBe(false);
   });
 
+  test('settlement ops reject token ids outside the canonical Account domain', async () => {
+    const account = makeAccount(LEFT, RIGHT);
+    const result = await upsert(account, {
+      revision: 1,
+      ops: [{ type: 'forgive', tokenId: TOKENS.MAX_TOKEN_ID + 1 }],
+      executorIsLeft: true,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('SETTLEMENT_TOKEN_INVALID');
+    expect(account.state.settlementWorkspace).toBeUndefined();
+  });
+
+  test('settlement projection bounds new token rows and preserves default credit policy', () => {
+    const account = makeAccount(LEFT, RIGHT);
+    const projected = projectAccountAfterSettlement(account, [], [9]);
+    const projectedDelta = projected.state.deltas.get(9);
+    const defaultCredit = getDefaultCreditLimit(9);
+    expect(projectedDelta?.leftCreditLimit).toBe(defaultCredit);
+    expect(projectedDelta?.rightCreditLimit).toBe(defaultCredit);
+    expect(account.state.deltas.has(9)).toBe(false);
+
+    for (let tokenId = 2; tokenId <= LIMITS.MAX_ACCOUNT_TOKEN_ROWS; tokenId += 1) {
+      account.state.deltas.set(tokenId, createDefaultDelta(tokenId));
+    }
+    expect(account.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
+    expect(() => projectAccountAfterSettlement(account, [], [TOKENS.MAX_TOKEN_ID]))
+      .toThrow('ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert');
+    expect(account.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
+    expect(account.state.deltas.has(TOKENS.MAX_TOKEN_ID)).toBe(false);
+  });
+
   test('pure forgiveness pre-signs a post-settlement proof containing the newly observed token slot', async () => {
     const jurisdiction = makeJurisdiction('settlement-forgiveness-proof', 31337, 'a8', 'b9');
     const state = makeState(LEFT, addr('38'), jurisdiction, RIGHT);
@@ -1689,6 +1724,35 @@ describe('atomic settlement Account transition', () => {
     expect(account.state.jNonce).toBe(0);
     expect(account.state.deltas.get(1)?.collateral).toBe(0n);
     expect(account.state.settlementWorkspace).toBeDefined();
+  });
+
+  test('AccountSettled finality rejects out-of-domain tokens before mutation', () => {
+    const account = makeAccount(LEFT, RIGHT);
+    const event = accountSettledEvent(1);
+    event.data.tokenId = TOKENS.MAX_TOKEN_ID + 1;
+    event.data.collateral = '99';
+
+    expect(() => applyFinalizedAccountJEvents(account, RIGHT, [event], TEST_DELTA_TRANSFORMER))
+      .toThrow('SETTLEMENT_TOKEN_INVALID:AccountSettled');
+    expect(account.state.jNonce).toBe(0);
+    expect(account.state.deltas.has(event.data.tokenId)).toBe(false);
+  });
+
+  test('AccountSettled finality rejects cumulative token-row overflow atomically', () => {
+    const account = makeAccount(LEFT, RIGHT);
+    for (let tokenId = 2; tokenId <= LIMITS.MAX_ACCOUNT_TOKEN_ROWS; tokenId += 1) {
+      account.state.deltas.set(tokenId, createDefaultDelta(tokenId));
+    }
+    const event = accountSettledEvent(1);
+    event.data.tokenId = TOKENS.MAX_TOKEN_ID;
+    event.data.collateral = '99';
+
+    expect(() => applyFinalizedAccountJEvents(account, RIGHT, [event], TEST_DELTA_TRANSFORMER))
+      .toThrow('ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert');
+    expect(account.state.jNonce).toBe(0);
+    expect(account.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
+    expect(account.state.deltas.has(TOKENS.MAX_TOKEN_ID)).toBe(false);
+    expect(account.state.deltas.get(1)?.collateral).toBe(0n);
   });
 
   test('matching AccountSettled nonce clears the workspace and activates its next proof', async () => {

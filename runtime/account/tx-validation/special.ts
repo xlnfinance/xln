@@ -6,6 +6,7 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 import { validateAccountTxDataFields } from './fields';
+import { assertSettlementTokenId } from '../../protocol/settlement/operations';
 
 const validateCloseProof = (value: unknown, code: string): void => {
   const proof = validateAccountTxDataFields(value, {
@@ -108,6 +109,7 @@ const validateSettlementOps = (value: unknown, code: string): void => {
     const op = requireBoundaryRecord(raw, opCode);
     if (op['type'] === 'forgive') {
       validateAccountTxDataFields(op, { required: { type: 'string', tokenId: 'integer' } }, opCode);
+      assertSettlementTokenId(op['tokenId'], opCode);
       return;
     }
     if (op['type'] === 'r2c' || op['type'] === 'c2r' || op['type'] === 'r2r') {
@@ -116,6 +118,7 @@ const validateSettlementOps = (value: unknown, code: string): void => {
         { required: { type: 'string', tokenId: 'integer', amount: 'bigint' } },
         opCode,
       );
+      assertSettlementTokenId(op['tokenId'], opCode);
       return;
     }
     if (op['type'] !== 'rawDiff') throw new Error(`${opCode}_TYPE`);
@@ -125,6 +128,7 @@ const validateSettlementOps = (value: unknown, code: string): void => {
         collateralDiff: 'bigint', ondeltaDiff: 'bigint',
       },
     }, opCode);
+    assertSettlementTokenId(op['tokenId'], opCode);
   });
 };
 

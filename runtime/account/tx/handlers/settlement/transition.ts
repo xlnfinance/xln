@@ -4,7 +4,11 @@ import type { AccountReplica, AccountState, AccountTx, SettlementDiff, Settlemen
 import { cloneAccountReplica } from '../../../state/state-clone';
 import { computeCanonicalMerkleRoot } from '../../../commitment/state-root';
 import { deriveDelta } from '../../../utils';
-import { compileOps, getMinimumSafeSettlementNonce } from '../../../../protocol/settlement/operations';
+import {
+  assertSettlementTokenId,
+  compileOps,
+  getMinimumSafeSettlementNonce,
+} from '../../../../protocol/settlement/operations';
 import { createStructuredLogger } from '../../../../infra/logger';
 import { addHold, getHold, releaseHold } from '../../hold-utils';
 import {
@@ -74,9 +78,7 @@ const assertWorkspaceHash = (value: string, context: string): string => {
 const assertSettlementOps = (ops: readonly SettlementOp[]): void => {
   if (!Array.isArray(ops) || ops.length === 0) throw new Error('SETTLEMENT_WORKSPACE_OPS_EMPTY');
   for (const [index, op] of ops.entries()) {
-    if (!Number.isSafeInteger(op.tokenId) || op.tokenId < 0) {
-      throw new Error(`SETTLEMENT_WORKSPACE_TOKEN_INVALID:index=${index}:token=${String(op.tokenId)}`);
-    }
+    assertSettlementTokenId(op.tokenId, `workspace-op=${index}`);
     if (op.type === 'r2c' || op.type === 'c2r' || op.type === 'r2r') {
       if (typeof op.amount !== 'bigint' || op.amount <= 0n) {
         throw new Error(`SETTLEMENT_WORKSPACE_AMOUNT_INVALID:index=${index}`);

@@ -11,11 +11,24 @@
  */
 
 import type { AccountReplica, SettlementOp, SettlementDiff } from '../../types/account';
+import { TOKENS } from '../../config/constants';
 
 const INT256_MIN = -(1n << 255n);
 const INT256_MAX = (1n << 255n) - 1n;
 const MAX_SETTLEMENT_DIFFS = 32;
 const MAX_SETTLEMENT_FORGIVENESS_IDS = 32;
+
+export const assertSettlementTokenId = (value: unknown, context: string): number => {
+  if (
+    typeof value !== 'number'
+    || !Number.isSafeInteger(value)
+    || value < 0
+    || value > TOKENS.MAX_TOKEN_ID
+  ) {
+    throw new Error(`SETTLEMENT_TOKEN_INVALID:${context}:${String(value)}`);
+  }
+  return value;
+};
 
 /**
  * Cooperative settlement and both sides' dispute proofs share the Account
@@ -105,7 +118,8 @@ export function compileOps(
     return diff;
   };
 
-  for (const op of ops) {
+  for (const [index, op] of ops.entries()) {
+    assertSettlementTokenId(op.tokenId, `op=${index}`);
     if (op.type === 'forgive') {
       forgiveTokenIds.push(op.tokenId);
       continue;

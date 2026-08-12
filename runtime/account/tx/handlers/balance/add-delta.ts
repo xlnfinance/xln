@@ -4,7 +4,7 @@
  */
 
 import type { AccountState, AccountTx } from '../../../../types/account';
-import { createDefaultDelta } from '../../../state/delta';
+import { ensureDelta } from '../../delta-utils';
 
 export function handleAddDelta(
   account: AccountState,
@@ -13,12 +13,17 @@ export function handleAddDelta(
   const { tokenId } = accountTx.data;
   const events: string[] = [];
 
-  // Check if delta already exists
-  if (account.deltas.has(tokenId)) {
-    return { success: true, events }; // Idempotent - not an error
+  const existed = account.deltas.has(tokenId);
+  try {
+    // A zero-valued row is omitted from AccountFrame.deltas, so frame-shape
+    // validation alone cannot stop a signed peer from exhausting this map.
+    // Keep the bounded insertion at the mutation sink and reject it as data.
+    ensureDelta(account, tokenId);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith('ACCOUNT_DELTA_')) throw error;
+    return { success: false, events: [error.message], error: error.message };
   }
-
-  account.deltas.set(tokenId, createDefaultDelta(tokenId));
+  if (existed) return { success: true, events };
 
   events.push(`➕ Added token ${tokenId} to account`);
   return { success: true, events };

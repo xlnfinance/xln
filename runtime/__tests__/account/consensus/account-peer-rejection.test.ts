@@ -14,7 +14,8 @@ import { applyMergedEntityInputs } from '../../../runtime/input-pipeline/entity-
 import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
 import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
-import { LIMITS } from '../../../config/constants';
+import { LIMITS, TOKENS } from '../../../config/constants';
+import { createDefaultDelta } from '../../../account/state/delta';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
@@ -211,6 +212,64 @@ describe('typed Account peer rejection', () => {
 
     expect(rejected.rejected?.code).toBe('ACCOUNT_PEER_FRAME_HANKO_INVALID');
     expect(safeStringify(account)).toBe(before);
+  });
+
+  test('signed zero-row add_delta poison is rejected without throw or mutation', async () => {
+    const cases = [
+      {
+        name: 'token domain',
+        account: createAccount(),
+        tokenId: TOKENS.MAX_TOKEN_ID + 1,
+      },
+      {
+        name: 'row capacity',
+        account: createAccount(),
+        tokenId: LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1,
+      },
+    ];
+    for (const candidate of cases) {
+      if (candidate.name === 'row capacity') {
+        for (let tokenId = 1; tokenId <= LIMITS.MAX_ACCOUNT_TOKEN_ROWS; tokenId += 1) {
+          candidate.account.state.deltas.set(tokenId, createDefaultDelta(tokenId));
+        }
+        candidate.account.currentFrame.accountStateRoot = computeAccountStateRoot(candidate.account.state);
+      }
+      const poisonedState = structuredClone(candidate.account.state);
+      poisonedState.deltas.set(candidate.tokenId, createDefaultDelta(candidate.tokenId));
+      const frame = {
+        height: 1,
+        timestamp: 0,
+        jHeight: 0,
+        accountTxs: [{ type: 'add_delta' as const, data: { tokenId: candidate.tokenId } }],
+        prevFrameHash: 'genesis',
+        accountStateRoot: computeAccountStateRoot(poisonedState),
+        // Zero rows are deliberately absent from this projection.
+        deltas: [],
+        stateHash: '',
+        byLeft: false,
+      };
+      frame.stateHash = await createFrameHash(frame);
+      const input: Extract<AccountInput, { kind: 'frame' }> = {
+        kind: 'frame',
+        fromEntityId: candidate.account.proofHeader.toEntity,
+        toEntityId: candidate.account.proofHeader.fromEntity,
+        domain: { ...candidate.account.state.domain },
+        disputeConfig: { ...candidate.account.state.disputeConfig },
+        watchSeed: candidate.account.state.watchSeed,
+        proposal: { frame, frameHanko: `0x${'66'.repeat(65)}` },
+      };
+      const context = withVerifier(
+        createAccountConsensusContext(createEmptyEnv(`account-peer-${candidate.name}`)),
+        async (_hanko, _hash, expectedEntityId) => ({ valid: true, entityId: expectedEntityId }),
+      );
+      const before = safeStringify(candidate.account);
+
+      const result = await applyAccountInput(context, candidate.account, input);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('ACCOUNT_DELTA_');
+      expect(safeStringify(candidate.account)).toBe(before);
+    }
   });
 
   test('local verifier failure is never downgraded to a peer rejection', async () => {

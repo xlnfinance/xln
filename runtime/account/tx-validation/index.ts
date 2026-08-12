@@ -12,6 +12,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
+import { TOKENS } from '../../config/constants';
 
 const ACCOUNT_TX_SIMPLE_SCHEMAS = {
   ...ACCOUNT_TX_PAYMENT_SCHEMAS,
@@ -53,11 +54,17 @@ function assertDecodedAccountTx(
   requireExactBoundaryKeys(tx, ['type', 'data'], [], `${code}_FIELDS`);
   const type = tx['type'];
   if (typeof type !== 'string') throw new Error(`${code}_TYPE`);
-  requireBoundaryRecord(tx['data'], `${code}_DATA`);
-  if (validateSpecialAccountTxData(type, tx['data'], `${code}_DATA`)) return;
+  const data = requireBoundaryRecord(tx['data'], `${code}_DATA`);
+  if (validateSpecialAccountTxData(type, data, `${code}_DATA`)) return;
   if (!isSimpleAccountTxType(type)) throw new Error(`${code}_TYPE_UNKNOWN:${type}`);
   const schema: AccountTxDataSchema = ACCOUNT_TX_SIMPLE_SCHEMAS[type];
-  validateAccountTxDataFields(tx['data'], schema, `${code}_DATA`);
+  validateAccountTxDataFields(data, schema, `${code}_DATA`);
+  if (type === 'add_delta') {
+    const tokenId = data['tokenId'];
+    if (typeof tokenId !== 'number' || tokenId < 0 || tokenId > TOKENS.MAX_TOKEN_ID) {
+      throw new Error(`${code}_DATA_TOKENID_DOMAIN`);
+    }
+  }
 }
 
 export const decodeAccountTx = (

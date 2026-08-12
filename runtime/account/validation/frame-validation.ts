@@ -6,6 +6,7 @@ import {
   validateString,
 } from '../../protocol/boundary/validation-primitives';
 import { assertAccountFrameDeltaIntegrity } from '../state/frame';
+import { assertAccountDeltaCapacity } from '../state/delta';
 import { validateDelta } from './delta-validation';
 import { decodeAccountTxs } from '../tx-validation';
 import {
@@ -75,6 +76,8 @@ export const decodeAccountFrame = (
     throw new FinancialDataCorruptionError(`${context}.byLeft must be boolean`);
   }
 
+  const deltas = validateArray(frame['deltas'], `${context}.deltas`);
+  assertAccountDeltaCapacity(deltas.length, `${context}.deltas`);
   const decoded: AccountFrame = {
     height,
     timestamp: requireBoundaryInteger(frame['timestamp'], `${context}.timestamp`),
@@ -93,7 +96,7 @@ export const decodeAccountFrame = (
       height,
       context,
     ),
-    deltas: validateArray(frame['deltas'], `${context}.deltas`).map(
+    deltas: deltas.map(
       (delta, index) => validateDelta(delta, `${context}.deltas[${index}]`),
     ),
     byLeft,

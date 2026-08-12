@@ -1,10 +1,10 @@
 import type { AccountReplica } from '../../../../types/account';
 import type { JurisdictionEvent } from '../../../../types/jurisdiction-events';
-import { getDefaultCreditLimit } from '../../../utils';
 import { clearFinalizedSettlementWorkspace } from '../settlement/transition';
 import { buildAccountProofBody } from '../../../../protocol/dispute/proof-builder';
 import { invalidateAccountMapCommitment } from '../../../commitment/map-commitment';
-import { createDefaultDelta } from '../../../state/delta';
+import { ensureSettlementDelta } from '../../../settlement/settlement-projection';
+import { assertSettlementTokenId } from '../../../../protocol/settlement/operations';
 
 const normalizedEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
@@ -23,23 +23,15 @@ const assertAccountSettledEvent = (
   if (typeof nonce !== 'number' || !Number.isSafeInteger(nonce) || nonce < 0) {
     throw new Error(`ACCOUNT_SETTLED_NONCE_INVALID:${String(nonce)}`);
   }
-  const tokenId = Number(event.data.tokenId);
-  if (!Number.isSafeInteger(tokenId) || tokenId < 0) {
-    throw new Error(`ACCOUNT_SETTLED_TOKEN_INVALID:${String(event.data.tokenId)}`);
-  }
+  assertSettlementTokenId(event.data.tokenId, 'AccountSettled');
   return nonce;
 };
 
 const applyAccountSettledEvent = (account: AccountReplica, event: JurisdictionEvent): void => {
   if (event.type !== 'AccountSettled') return;
   const { tokenId, collateral, ondelta } = event.data;
-  const tokenIdNum = Number(tokenId);
-  let delta = account.state.deltas.get(tokenIdNum);
-  if (!delta) {
-    const limit = getDefaultCreditLimit(tokenIdNum);
-    delta = createDefaultDelta(tokenIdNum, { left: limit, right: limit });
-    account.state.deltas.set(tokenIdNum, delta);
-  }
+  const tokenIdNum = assertSettlementTokenId(tokenId, 'AccountSettled');
+  const delta = ensureSettlementDelta(account, tokenIdNum);
   const previousCollateral = delta.collateral;
   delta.collateral = BigInt(collateral);
   delta.ondelta = BigInt(ondelta);
