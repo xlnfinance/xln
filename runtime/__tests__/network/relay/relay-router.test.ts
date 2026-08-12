@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Profile } from '../../../entity/profile';
 import { relayRoute as productionRelayRoute } from '../../../network/relay/router';
 import { cacheEncryptionKey, createRelayStore, resolveEncryptionPublicKeyHex } from '../../../network/relay/store';
-import { deserializeWsMessage, hashHelloMessage, hashRuntimeWsFrame, makeHelloNonce, type RuntimeWsMessage } from '../../../network/p2p/ws-protocol';
+import { deserializeWsMessage, hashHelloMessage, hashRuntimeWsFrame, type RuntimeWsMessage } from '../../../network/p2p/ws-protocol';
 import { deriveSignerAddressSync, signDigest } from '../../../account/crypto';
 import { encryptJSON, deriveEncryptionKeyPair } from '../../../protocol/crypto/p2p-crypto';
 import { DEFAULT_GOSSIP_BATCH_LIMIT } from '../../../network/p2p/gossip/profile-batch';
@@ -28,6 +28,8 @@ const KEY_B = '0x' + '22'.repeat(32);
 const ENTITY_A = deriveSingleSignerFixtureEntityId(SEED_A, '1');
 const ENTITY_B = deriveSingleSignerFixtureEntityId(SEED_B, '2');
 const ENTITY_C = deriveSingleSignerFixtureEntityId(SEED_C, '3');
+let helloNonceCounter = 0;
+const makeHelloNonce = (): string => `nonce_${helloNonceCounter++}`;
 
 type FakeWs = { label: string; readyState?: number; close?: (code?: number, reason?: string) => void };
 

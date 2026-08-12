@@ -1,4 +1,4 @@
-import type { Profile } from '../../../entity/profile';
+import { isHubProfile, type Profile } from '../../../entity/profile';
 import { compareStableText } from '../../../protocol/serialization';
 
 export type GossipProfileBatchRequest = {
@@ -11,9 +11,6 @@ export type GossipProfileBatchRequest = {
 export const DEFAULT_GOSSIP_BATCH_LIMIT = 1000;
 
 const normalizeEntityId = (entityId: unknown): string => String(entityId || '').toLowerCase();
-
-const isHubProfile = (profile: Profile): boolean =>
-  profile.metadata.isHub === true;
 
 const sortProfilesForBatch = (left: Profile, right: Profile): number => {
   const leftHub = isHubProfile(left);

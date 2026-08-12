@@ -3,11 +3,14 @@ import {
   hashRawHtlcPaymentTx,
   validatePreparedHtlcPayment,
 } from '../../../entity/htlc/payment-admission';
+import { handleHtlcPayment } from '../../../entity/tx/handlers/htlc/payment';
+import type { EntityCandidateEffect } from '../../../entity/types';
+import type { EntityRuntimeContext } from '../../../entity/runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 
 const id = (byte: string): string => `0x${byte.repeat(64)}`;
 
-test('HTLC capacity admission rejects atomically instead of committing a fail-soft no-op', () => {
+test('HTLC admission rejects atomically instead of committing a fail-soft no-op', async () => {
   const source = id('1');
   const nextHop = id('2');
   const tx = {
@@ -39,6 +42,7 @@ test('HTLC capacity admission rejects atomically instead of committing a fail-so
     timestamp: 100,
     htlcRoutes: new Map(),
     accounts: new Map([[nextHop, {
+      status: 'active',
       state: {
         leftEntity: source,
         rightEntity: nextHop,
@@ -74,6 +78,19 @@ test('HTLC capacity admission rejects atomically instead of committing a fail-so
 
   delta.leftCreditLimit = 1n;
   expect(validatePreparedHtlcPayment(state, tx, context)).toBe(prepared);
+
+  const routeCountBeforeFreeze = state.htlcRoutes.size;
+  state.accounts.get(nextHop).status = 'disputed';
+  expect(() => validatePreparedHtlcPayment(state, tx, context))
+    .toThrow(`HTLC_PAYMENT_OUTBOUND_ACCOUNT_UNAVAILABLE:${txHash}`);
+  const effects: EntityCandidateEffect[] = [];
+  await expect(handleHtlcPayment(state, tx, {} as EntityRuntimeContext, effects, false, context))
+    .rejects.toThrow(`HTLC_PAYMENT_OUTBOUND_ACCOUNT_UNAVAILABLE:${txHash}`);
+  expect(state.htlcRoutes.size).toBe(routeCountBeforeFreeze);
+  expect(state.lockBook?.size ?? 0).toBe(0);
+  expect(effects).toEqual([]);
+  expect(delta).toMatchObject({ collateral: 0n, leftHold: 0n, rightHold: 0n });
+  state.accounts.get(nextHop).status = 'active';
 
   state.htlcRoutes.set(prepared.hashlock, { lockId: prepared.lockId });
   expect(() => validatePreparedHtlcPayment(state, tx, context))

@@ -1,6 +1,7 @@
 import { keccak256 } from 'ethers';
 import { getAccountPerspective } from '../../account/state/perspective';
 import { sameAccountStateDomain } from '../../account/commitment/state-root';
+import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dispute/policy';
 import { deriveDelta } from '../../account/utils';
 import { HTLC, LIMITS, TOKENS } from '../../config/constants';
 import { quoteHtlcPaymentRoute, type RoutingProfile } from '../../routing/htlc-quote';
@@ -74,8 +75,8 @@ const uniqueProfile = (profiles: readonly RoutingProfile[], id: string): Routing
 export const hashRawHtlcPaymentTx = (tx: HtlcPaymentTx): string =>
   keccak256(new TextEncoder().encode(encodeCanonicalConsensusValue(tx)));
 
-const randomBytes32Hex = (): string => {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
+const secureRandomBytes32Hex = (): string => {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
   return `0x${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
 };
 
@@ -85,10 +86,10 @@ const randomBytes32Hex = (): string => {
  * ciphertext contains it. Validator replay therefore cannot reconstruct the
  * bearer secret from the shared Entity decryption key.
  */
-export const generateHtlcPaymentPreimage = (): string => randomBytes32Hex();
+export const generateHtlcPaymentPreimage = (): string => secureRandomBytes32Hex();
 
 const generateHtlcEphemeralPrivateKey = (): string => {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
   // Make the serialized private scalar canonical before noble applies the same
   // RFC 7748 clamping internally.
   bytes[0] = bytes[0]! & 248;
@@ -102,8 +103,6 @@ export type MaterializeOriginatedHtlcPaymentsInput = Readonly<{
   profiles: readonly Profile[];
   height: number;
   resolveRoute(tx: HtlcPaymentTx): Promise<readonly string[]>;
-  createPreimage?: () => string;
-  createEphemeralPrivateKey?: (txHash: string, hopIndex: number) => string;
 }>;
 
 export const materializeOriginatedHtlcPayments = async (
@@ -120,7 +119,7 @@ export const materializeOriginatedHtlcPayments = async (
     const route = normalizeRoute(selectedRoute, source, target);
     const txHash = hashRawHtlcPaymentTx(candidate);
     const localSecret = getDeterministicHtlcTestSecret(candidate);
-    const secret = localSecret ?? (input.createPreimage ?? generateHtlcPaymentPreimage)();
+    const secret = localSecret ?? generateHtlcPaymentPreimage();
     if (!/^0x[0-9a-f]{64}$/.test(secret)) throw new Error('HTLC_PAYMENT_PREIMAGE_INVALID');
     const hashlock = hashHtlcSecret(secret).toLowerCase();
     if (candidate.data.hashlock !== undefined && candidate.data.hashlock !== hashlock) {
@@ -166,7 +165,7 @@ export const materializeOriginatedHtlcPayments = async (
       route, secret, publicKeys, domains,
       quote.hopForwardAmounts, candidate.data.description, startedAtMs,
       { rootLockId: lockId, hashlock, tokenId: candidate.data.tokenId, senderLockAmount: quote.senderLockAmount, timelock, revealBeforeHeight },
-      hopIndex => (input.createEphemeralPrivateKey ?? (() => generateHtlcEphemeralPrivateKey()))(txHash, hopIndex),
+      () => generateHtlcEphemeralPrivateKey(),
     );
     originated.push({
       txHash, targetEntityId: target, tokenId: candidate.data.tokenId, recipientAmount: candidate.data.amount,
@@ -297,8 +296,11 @@ export const validatePreparedHtlcPayment = (
     throw new Error(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${prepared.hashlock}`);
   }
   const account = state.accounts.get(prepared.nextHopEntityId);
-  const delta = account?.state.deltas.get(prepared.tokenId);
-  if (!account || !delta || deriveDelta(delta, getAccountPerspective(account.state, state.entityId).iAmLeft).outCapacity < prepared.senderLockAmount) {
+  if (!account || !canProcessAccountTxForDisputeStatus(account.status)) {
+    throw new Error(`HTLC_PAYMENT_OUTBOUND_ACCOUNT_UNAVAILABLE:${txHash}`);
+  }
+  const delta = account.state.deltas.get(prepared.tokenId);
+  if (!delta || deriveDelta(delta, getAccountPerspective(account.state, state.entityId).iAmLeft).outCapacity < prepared.senderLockAmount) {
     throw new Error(`HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT:${txHash}`);
   }
   return prepared;

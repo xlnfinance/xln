@@ -56,8 +56,6 @@ type RuntimeWsMessageType =
   | 'gossip_request'
   | 'gossip_response'
   | 'gossip_announce'
-  | 'gossip_subscribed'
-  | 'gossip_subscribe'
   | 'gossip_update'
   | 'recovery_bundle_request'
   | 'recovery_bundle_response'
@@ -169,8 +167,6 @@ const validateRuntimeWsEnvelope = (value: unknown): RuntimeWsEnvelope => {
     case 'gossip_request':
     case 'gossip_response':
     case 'gossip_announce':
-    case 'gossip_subscribed':
-    case 'gossip_subscribe':
     case 'gossip_update':
       requiredFields(message, ['from', 'payload'], ['id', 'fromEncryptionPubKey', 'to', 'timestamp', 'inReplyTo']);
       break;
@@ -239,8 +235,6 @@ const RUNTIME_WS_MESSAGE_TYPES = new Set<RuntimeWsMessageType>([
   'gossip_request',
   'gossip_response',
   'gossip_announce',
-  'gossip_subscribed',
-  'gossip_subscribe',
   'gossip_update',
   'recovery_bundle_request',
   'recovery_bundle_response',
@@ -347,7 +341,6 @@ export const deserializeWsMessage = (
 };
 
 let messageCounter = 0;
-let helloNonceCounter = 0;
 
 export const makeMessageId = (): string => {
   const id = messageCounter;
@@ -412,10 +405,4 @@ export const hashRuntimeWsFrame = (
   // client frame to the single-use hello nonce and exact endpoint audience.
   const { auth: _auth, ...unsigned } = message;
   return keccak256(toUtf8Bytes(serializeTaggedJson([FRAME_DOMAIN, audience, nonce, authTimestamp, unsigned])));
-};
-
-export const makeHelloNonce = (): string => {
-  const id = helloNonceCounter;
-  helloNonceCounter += 1;
-  return `nonce_${id}`;
 };

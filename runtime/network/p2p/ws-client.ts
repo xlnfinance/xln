@@ -712,7 +712,7 @@ export class RuntimeWsClient {
       await this.options.onGossipRequest?.(msg.from, msg.payload);
       return true;
     }
-    if ((msg.type === 'gossip_response' || msg.type === 'gossip_subscribed') && msg.payload && msg.from) {
+    if (msg.type === 'gossip_response' && msg.payload && msg.from) {
       await this.options.onGossipResponse?.(msg.from, msg.payload);
       return true;
     }
@@ -849,17 +849,6 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
-      timestamp: this.nextMessageTimestamp(),
-      payload,
-    });
-  }
-
-  sendGossipSubscribe(payload: { scope?: 'all'; entityIds?: string[] }): boolean {
-    return this.sendRaw({
-      type: 'gossip_subscribe',
-      id: makeMessageId(),
-      from: this.options.runtimeId,
-      to: this.options.runtimeId, // To relay (self)
       timestamp: this.nextMessageTimestamp(),
       payload,
     });
