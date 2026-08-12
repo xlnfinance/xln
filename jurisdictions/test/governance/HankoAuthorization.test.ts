@@ -3,7 +3,7 @@ import { expect } from "chai";
 import hre from "hardhat";
 const { ethers } = hre;
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers.js";
-import type { Depository, EntityProvider } from "../typechain-types/index.js";
+import type { Depository, EntityProvider } from "../../typechain-types/index.js";
 import {
   addressEntityId,
   buildClaimsHanko,
@@ -15,7 +15,7 @@ import {
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
-} from "./helpers/hanko.ts";
+} from "../helpers/hanko.ts";
 
 const HANKO_ABI = [
   'tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])',

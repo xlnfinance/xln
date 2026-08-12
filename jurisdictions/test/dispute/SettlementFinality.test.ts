@@ -2,7 +2,7 @@ import { loadFixture } from '@nomicfoundation/hardhat-toolbox/network-helpers.js
 import { expect } from 'chai';
 import hre from 'hardhat';
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
-import type { Depository } from '../typechain-types/index.js';
+import type { Depository } from '../../typechain-types/index.js';
 import {
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
@@ -12,7 +12,7 @@ import {
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
-} from './helpers/hanko.ts';
+} from '../helpers/hanko.ts';
 
 const { ethers } = hre;
 const abi = ethers.AbiCoder.defaultAbiCoder();

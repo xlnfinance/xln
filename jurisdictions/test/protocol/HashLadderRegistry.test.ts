@@ -5,7 +5,7 @@ import hre from 'hardhat';
 const { ethers } = hre;
 
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
-import type { Depository } from '../typechain-types/index.js';
+import type { Depository } from '../../typechain-types/index.js';
 
 import {
   buildSingleSignerHanko,
@@ -15,7 +15,7 @@ import {
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
-} from './helpers/hanko.ts';
+} from '../helpers/hanko.ts';
 
 const abi = ethers.AbiCoder.defaultAbiCoder();
 

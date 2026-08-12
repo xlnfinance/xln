@@ -9,7 +9,7 @@ import {
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
-} from './helpers/hanko.ts';
+} from '../helpers/hanko.ts';
 
 const { ethers } = hre;
 

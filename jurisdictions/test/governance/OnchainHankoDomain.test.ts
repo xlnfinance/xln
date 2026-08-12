@@ -9,7 +9,7 @@ import {
   ONCHAIN_HANKO_GOLDEN_HASHES,
   ONCHAIN_HANKO_GOLDEN_PAYLOADS,
   ONCHAIN_HANKO_VECTOR,
-} from '../../tests/fixtures/onchain-hanko-golden.ts';
+} from '../../../tests/fixtures/onchain-hanko-golden.ts';
 
 import {
   BOARD_PROPOSAL_CANCEL_HANKO_DOMAIN,
@@ -38,8 +38,8 @@ import {
   hashFinalDisputeProofHankoPayload,
   hashReleaseControlSharesHankoPayload,
   hashWatchtowerCounterDisputeHankoPayload,
-} from '../../runtime/hanko/onchain-domain.ts';
-import type { EntityProvider } from '../typechain-types/contracts/EntityProvider.ts';
+} from '../../../runtime/hanko/onchain-domain.ts';
+import type { EntityProvider } from '../../typechain-types/contracts/EntityProvider.ts';
 import {
   buildSingleSignerHanko,
   deriveHardhatPrivateKey,
@@ -48,7 +48,7 @@ import {
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
-} from './helpers/hanko.ts';
+} from '../helpers/hanko.ts';
 
 const { ethers } = hre;
 const BOARD_ABI = [

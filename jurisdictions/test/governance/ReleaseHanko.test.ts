@@ -1,12 +1,12 @@
 import { expect } from 'chai';
 import hre from 'hardhat';
-import { deployEntityProvider } from './helpers/hanko.ts';
+import { deployEntityProvider } from '../helpers/hanko.ts';
 
 import {
   createFoundationReleaseBoard,
   signReleaseEnvelope,
   type ReleaseEnvelope,
-} from '../../frontend/src/lib/releases/release-signature.ts';
+} from '../../../frontend/src/lib/releases/release-signature.ts';
 
 const { ethers } = hre;
 const PRIVATE_KEYS = [
