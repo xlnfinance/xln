@@ -89,6 +89,7 @@ const RUNTIME_CORE_TESTS = [
   'tests/unit/resetdb-guard.test.ts',
   'runtime/__tests__/security/watchtower/watchtower-rpc-last-resort.test.ts',
   'runtime/__tests__/security/watchtower/watchtower-restart-resilience.test.ts',
+  'runtime/__tests__/security/policy/terminal-resource-bounds.test.ts',
   'native/__tests__/desktop-security.test.ts',
   'native/__tests__/extension-security.test.ts',
   'native/__tests__/capacitor-config.test.ts',

@@ -24,6 +24,7 @@ import {
 import { normalizeAccountStateDomain } from '../commitment/state-root';
 import { validateSwapHistoryMap } from './swap-history-validation';
 import { assertSwapNetAuthorization } from '../swap/swap-net-authorization';
+import { validateAccountFinancialMaps } from './financial-state-validation';
 
 const LENDING_INTENTS = new Set([
   'fund',
@@ -180,11 +181,8 @@ function assertAccountReplica(
   decodeAccountFrame(account['currentFrame'], `${context}.currentFrame`);
   const deltas = validateMapInstance(state['deltas'], `${context}.state.deltas`);
   assertAccountDeltaCapacity(deltas.size, `${context}.deltas`);
-  validateMapInstance(state['locks'], `${context}.state.locks`);
   validateSwapOffers(state['swapOffers'], `${context}.state.swapOffers`);
-  if (state['pulls'] !== undefined) {
-    validateMapInstance(state['pulls'], `${context}.state.pulls`);
-  }
+  validateAccountFinancialMaps(state, account, context);
   validateSwapHistories(account, context);
   validateLendingIntents(state['lendingIntents'], `${context}.state.lendingIntents`);
   requireBoundaryInteger(account['currentHeight'], `${context}.currentHeight`);
@@ -201,7 +199,6 @@ function assertAccountReplica(
     state['lastFinalizedJHeight'],
     `${context}.lastFinalizedJHeight`,
   );
-  validateMapInstance(account['pendingWithdrawals'], `${context}.pendingWithdrawals`);
   validateRebalanceState(state, account, context);
   for (const [tokenId, delta] of deltas) {
     validateDelta(delta, `${context}.deltas[${String(tokenId)}]`);

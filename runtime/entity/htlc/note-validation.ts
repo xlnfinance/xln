@@ -21,7 +21,7 @@ export const validateHtlcNotes = (value: unknown, context: string): void => {
     if (
       typeof key !== 'string' ||
       key.length > LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH ||
-      (!key.startsWith('hashlock:') && !key.startsWith('lock:')) ||
+      !key.startsWith('hashlock:') ||
       key.endsWith(':')
     ) {
       throw new FinancialDataCorruptionError(

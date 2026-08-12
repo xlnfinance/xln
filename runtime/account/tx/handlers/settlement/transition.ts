@@ -29,6 +29,10 @@ import type {
 
 type SettleTransitionTx = Extract<AccountTx, { type: 'settle_transition' }>;
 type UpsertTransition = Extract<SettleTransitionTx['data'], { kind: 'upsert' }>;
+type SettlementSealNonceRejection = Extract<
+  AccountTxRejection,
+  { kind: 'settlement_seal_nonce_mismatch' }
+>;
 
 export const hasPendingSettlementTransition = (
   account: Pick<AccountReplica, 'mempool' | 'pendingFrame'>,
@@ -46,13 +50,13 @@ const transitionLog = createStructuredLogger('account.settle');
 const WORKSPACE_DOMAIN = 'xln:settlement-workspace:v1';
 
 class SettlementSealNonceMismatchError extends Error {
-  readonly rejection: AccountTxRejection;
+  readonly rejection: SettlementSealNonceRejection;
 
   constructor(
     message: string,
     suppliedNonce: number,
     requiredNonce: number,
-    basis: AccountTxRejection['basis'],
+    basis: SettlementSealNonceRejection['basis'],
   ) {
     super(message);
     this.rejection = {

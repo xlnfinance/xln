@@ -112,6 +112,7 @@ const makeEntity = (): EntityState => ({
   lastFinalizedJHeight: 0,
   jBlockChain: [],
   profile: { name: 'bounds', isHub: false, avatar: '', bio: '', website: '' },
+  entityEncryptionPublicKey: `0x${'77'.repeat(32)}`,
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
   lockBook: new Map(),
@@ -189,7 +190,7 @@ test('swap lifecycle text bounds reject before mutating the projection', () => {
   expect(account.swapOrderHistory?.get(offer.offerId)?.resolves).toHaveLength(0);
 });
 
-test('terminal event consumption removes both validator-local note lookup keys', () => {
+test('terminal event consumption removes the canonical hashlock note', () => {
   const replica = makeReplica();
   const { state } = replica;
   const hashlock = `0x${'99'.repeat(32)}`;
@@ -200,14 +201,11 @@ test('terminal event consumption removes both validator-local note lookup keys',
     outboundLockId: lockId,
     createdTimestamp: 1,
   });
-  replica.htlcNotes = new Map([
-    [`hashlock:${hashlock}`, 'coffee'],
-    [`lock:${lockId}`, 'coffee'],
-  ]);
+  replica.htlcNotes = new Map([[`hashlock:${hashlock}`, 'coffee']]);
 
   terminateHtlcRoute(state, hashlock, 2);
   expect(state.htlcRoutes).toHaveLength(0);
-  expect(replica.htlcNotes).toHaveLength(2);
+  expect(replica.htlcNotes).toHaveLength(1);
   expect(consumeHtlcRuntimeEvent(replica, 'HtlcFailed', { hashlock, lockId })).toEqual({
     hashlock,
     lockId,
@@ -229,10 +227,7 @@ test('timeout terminal activity is emitted before its HTLC notes are removed', (
     outboundLockId: lockId,
     createdTimestamp: 1,
   });
-  replica.htlcNotes = new Map([
-    [`hashlock:${hashlock}`, 'timeout note'],
-    [`lock:${lockId}`, 'timeout note'],
-  ]);
+  replica.htlcNotes = new Map([[`hashlock:${hashlock}`, 'timeout note']]);
   const env = createEmptyEnv('terminal-note-timeout');
   env.state.eReplicas.set(`${replica.entityId}:${replica.signerId}`, replica);
   const candidateEffects: EntityCandidateEffect[] = [];
@@ -259,29 +254,26 @@ test('HTLC note insertion rejects atomically at the Entity cap', () => {
   const replica = makeReplica();
   replica.htlcNotes = new Map(Array.from(
     { length: LIMITS.MAX_ENTITY_HTLC_NOTES },
-    (_, index) => [`lock:${index}` as const, 'note'],
+    (_, index) => [`hashlock:${index}` as const, 'note'],
   ));
   const hashlock = `0x${'de'.repeat(32)}`;
-  const lockId = `0x${'ef'.repeat(32)}`;
 
   expect(() => indexCertifiedEntityFrameNotes(replica, { txs: [{
     type: 'htlcPayment',
     data: {
       targetEntityId: rightEntity, tokenId: 1, amount: 1n, maxSenderDebit: 1n, route: [leftEntity, rightEntity],
-      deliveryMode: 'instant', hashlock, preparedLockId: lockId, description: 'new note',
+      deliveryMode: 'instant', hashlock, description: 'new note',
     },
   }] })).toThrow(
     'ENTITY_HTLC_NOTE_LIMIT_EXCEEDED',
   );
   expect(replica.htlcNotes).toHaveLength(LIMITS.MAX_ENTITY_HTLC_NOTES);
   expect(replica.htlcNotes.has(`hashlock:${hashlock}`)).toBe(false);
-  expect(replica.htlcNotes.has(`lock:${lockId}`)).toBe(false);
 });
 
-test('HTLC note text validation rejects before adding either lookup key', () => {
+test('HTLC note text validation rejects before adding the hashlock key', () => {
   const replica = makeReplica();
   const hashlock = `0x${'12'.repeat(32)}`;
-  const lockId = `0x${'34'.repeat(32)}`;
   expect(() => indexCertifiedEntityFrameNotes(replica, { txs: [{
     type: 'htlcPayment',
     data: {
@@ -292,7 +284,6 @@ test('HTLC note text validation rejects before adding either lookup key', () => 
       route: [leftEntity, rightEntity],
       deliveryMode: 'instant',
       hashlock,
-      preparedLockId: lockId,
       description: 'x'.repeat(LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH + 1),
     },
   }] })).toThrow('ENTITY_HTLC_NOTE_INVALID_LENGTH');
@@ -301,7 +292,6 @@ test('HTLC note text validation rejects before adding either lookup key', () => 
 
 test('certified proposal and executed vote frames index nested HTLC descriptions', () => {
   const hashlock = `0x${'45'.repeat(32)}`;
-  const lockId = `0x${'56'.repeat(32)}`;
   const nestedPayment = {
     type: 'htlcPayment',
     data: {
@@ -312,7 +302,6 @@ test('certified proposal and executed vote frames index nested HTLC descriptions
       route: [leftEntity, rightEntity],
       deliveryMode: 'instant',
       hashlock,
-      preparedLockId: lockId,
       description: 'nested invoice',
     },
   } satisfies EntityTx;
@@ -327,7 +316,6 @@ test('certified proposal and executed vote frames index nested HTLC descriptions
     data: { proposer, action },
   }] });
   expect(proposedReplica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('nested invoice');
-  expect(proposedReplica.htlcNotes?.get(`lock:${lockId}`)).toBe('nested invoice');
 
   const votedReplica = makeReplica();
   const proposalId = `0x${'78'.repeat(32)}`;
@@ -347,7 +335,6 @@ test('certified proposal and executed vote frames index nested HTLC descriptions
     data: { proposalId, voter: proposer, choice: 'yes' },
   }] });
   expect(votedReplica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('nested invoice');
-  expect(votedReplica.htlcNotes?.get(`lock:${lockId}`)).toBe('nested invoice');
 });
 
 test('decode validation rejects oversized swap history, resolve history, and HTLC notes', () => {
@@ -395,9 +382,47 @@ test('decode validation rejects oversized swap history, resolve history, and HTL
   const replica = makeReplica();
   replica.htlcNotes = new Map(Array.from(
     { length: LIMITS.MAX_ENTITY_HTLC_NOTES + 1 },
-    (_, index) => [`lock:${index}` as const, 'note'],
+    (_, index) => [`hashlock:${index}` as const, 'note'],
   ));
   expect(() => validateEntityReplica(replica, 'oversizedHtlcNotes')).toThrow(
     'ENTITY_HTLC_NOTE_LIMIT_EXCEEDED',
+  );
+});
+
+test('decode validation rejects malformed nested financial state', () => {
+  const lockAccount = makeAccount();
+  const lockId = `0x${'71'.repeat(32)}`;
+  lockAccount.state.locks.set(lockId, {
+    lockId,
+    hashlock: `0x${'72'.repeat(32)}`,
+    timelock: 10n,
+    revealBeforeHeight: 1,
+    amount: -1n,
+    tokenId: 1,
+    senderIsLeft: true,
+    createdHeight: 1,
+    createdTimestamp: 1,
+  });
+  expect(() => validateAccountReplica(lockAccount, 'negativeLock')).toThrow(
+    'negativeLock.state.locks',
+  );
+
+  const withdrawalAccount = makeAccount();
+  withdrawalAccount.pendingWithdrawals.set('request-a', {
+    requestId: 'different-request',
+    tokenId: 1,
+    amount: 1n,
+    requestedAt: 1,
+    direction: 'outgoing',
+    status: 'pending',
+  });
+  expect(() => validateAccountReplica(withdrawalAccount, 'misboundWithdrawal')).toThrow(
+    'Map key must equal requestId',
+  );
+
+  const entity = makeEntity();
+  entity.reserves.set(1, -1n);
+  expect(() => validateEntityReplica(makeReplica(entity), 'negativeReserve')).toThrow(
+    'non-negative bigint',
   );
 });

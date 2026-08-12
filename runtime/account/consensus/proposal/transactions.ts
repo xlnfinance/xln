@@ -191,7 +191,7 @@ const classifyFailedTransaction = (
 ): 'deferred' | 'remove' => {
   const { tx, result } = applied;
   if (
-    result.error?.startsWith('SETTLEMENT_SIGNED_ACCOUNT_FROZEN:') ||
+    result.rejection?.kind === 'settlement_signed_account_frozen' ||
     isRefreshableStaleSettlementSeal(machine, tx, result.rejection)
   ) {
     effects.events.push(...result.events);

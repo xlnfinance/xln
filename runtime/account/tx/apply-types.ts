@@ -1,5 +1,5 @@
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
-import type { AccountOutput } from '../../types/account';
+import type { AccountOutput, AccountTx } from '../../types/account';
 
 // Account transitions own these outputs. Entity consumes them to update its
 // orderbook projection, but must not redefine the financial result shape.
@@ -31,12 +31,17 @@ export interface SwapCancelRequestEvent {
   accountId: string;
 }
 
-export type AccountTxRejection = {
-  kind: 'settlement_seal_nonce_mismatch';
-  suppliedNonce: number;
-  requiredNonce: number;
-  basis: 'workspace' | 'account';
-};
+export type AccountTxRejection =
+  | {
+      kind: 'settlement_seal_nonce_mismatch';
+      suppliedNonce: number;
+      requiredNonce: number;
+      basis: 'workspace' | 'account';
+    }
+  | {
+      kind: 'settlement_signed_account_frozen';
+      txType: AccountTx['type'];
+    };
 
 export type ApplyAccountTxResult = {
   success: boolean;

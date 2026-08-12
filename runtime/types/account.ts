@@ -155,8 +155,8 @@ interface CrossJurisdictionSecretRelay {
   targetLockId: string;
 }
 
-/** End-to-end payment notes stored locally by hashlock/lockId for activity rendering. */
-export type HtlcNoteKey = `hashlock:${string}` | `lock:${string}`;
+/** End-to-end payment notes stored locally by the canonical HTLC hashlock. */
+export type HtlcNoteKey = `hashlock:${string}`;
 
 type AccountStatus = 'active' | 'dispute_preparing' | 'disputed';
 

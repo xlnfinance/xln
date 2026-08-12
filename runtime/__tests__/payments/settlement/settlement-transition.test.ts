@@ -1622,6 +1622,10 @@ describe('atomic settlement Account transition', () => {
     }, true, 2_000);
     expect(payment.success).toBe(false);
     expect(payment.error).toBe('SETTLEMENT_SIGNED_ACCOUNT_FROZEN:direct_payment');
+    expect(payment.rejection).toEqual({
+      kind: 'settlement_signed_account_frozen',
+      txType: 'direct_payment',
+    });
     expect(account.state.deltas.get(1)?.offdelta).toBe(beforeOffdelta);
 
     account.status = 'disputed';

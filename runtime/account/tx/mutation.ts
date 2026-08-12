@@ -1,5 +1,4 @@
-import type { AccountReplica, AccountTx } from '../../types/account';
-import type { AccountOutput } from '../../types/account';
+import type { AccountOutput, AccountReplica, AccountTx } from '../../types/account';
 import type { AccountConsensusContext } from '../consensus/context';
 import { getAccountPerspective } from '../state/perspective';
 import type { AccountJClaimSession } from '../j-claims/j-claim-session';
@@ -206,7 +205,14 @@ export const applyAccountTxMutation = async (
     return { success: false, events: [error], error };
   }
   const freezeError = getSignedSettlementWorkspaceTxError(account, tx);
-  if (freezeError) return { success: false, events: [freezeError], error: freezeError };
+  if (freezeError) {
+    return {
+      success: false,
+      events: [freezeError],
+      error: freezeError,
+      rejection: { kind: 'settlement_signed_account_frozen', txType: tx.type },
+    };
+  }
 
   switch (tx.type) {
     case 'add_delta': return handleAddDelta(account.state, tx);

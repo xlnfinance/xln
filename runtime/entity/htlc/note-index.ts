@@ -5,7 +5,6 @@ import type { EntityFrame, EntityReplica } from '../types';
 
 type NoteBinding = Readonly<{
   hashlock: string;
-  lockId?: string;
   description: string;
 }>;
 
@@ -77,7 +76,6 @@ const indexTx = (
   const binding = noteBinding(tx);
   if (binding) {
     putNote(notes, `hashlock:${binding.hashlock}`, binding.description);
-    if (binding.lockId) putNote(notes, `lock:${binding.lockId}`, binding.description);
   }
   for (const nested of nestedEntityTxs(tx, replica)) indexTx(replica, notes, nested);
 };
@@ -114,16 +112,13 @@ export const consumeHtlcRuntimeEvent = (
   eventName: string,
   data: Record<string, unknown>,
 ): Record<string, unknown> => {
-  const lockId = typeof data['lockId'] === 'string' ? data['lockId'] : null;
   const hashlock = typeof data['hashlock'] === 'string' ? data['hashlock'] : null;
   const notes = replica.htlcNotes;
   const description =
     typeof data['description'] === 'string'
       ? data['description']
-      : (lockId ? notes?.get(`lock:${lockId}`) : undefined)
-        ?? (hashlock ? notes?.get(`hashlock:${hashlock}`) : undefined);
+      : (hashlock ? notes?.get(`hashlock:${hashlock}`) : undefined);
   if (notes && TERMINAL_HTLC_EVENTS.has(eventName)) {
-    if (lockId) notes.delete(`lock:${lockId}`);
     if (hashlock) notes.delete(`hashlock:${hashlock}`);
     if (notes.size === 0) delete replica.htlcNotes;
   }

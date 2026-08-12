@@ -177,13 +177,13 @@ test('storage frame integrity commits every named runtime-machine field', () => 
 
   // Current testnet storage checksum golden. Fresh deploys intentionally keep
   // one format instead of a parallel versioned recovery implementation.
-  expect(alpha).toBe('0xb711a92f0823e4baa28163882c6472ab7ce987d67fb0d2ed3c8c62aca5cbd5ee');
+  expect(alpha).toBe('0xa708bb754d32f836d3692453a0bc19e3dcdce71f6b915db98c902b61e8b2f01f');
   expect(alpha).not.toBe(beta);
   const ownUndefined = computeStorageFrameHash({ ...base, runtimeMachine: { hidden: undefined } });
   // Authoritative MessagePack preserves an explicitly named undefined field;
   // it must therefore remain distinguishable from both an empty and an absent
   // runtime-machine record in the WAL integrity preimage.
-  expect(ownUndefined).toBe('0xb8f7ac30f32b382a52f1898cb30a704090f71683c8c124567677aee44c8e701d');
+  expect(ownUndefined).toBe('0x7142fe94d7a74bdd95200b3cca458df4101457bb9e260ab2574244e3bd35ec56');
   expect(ownUndefined).not.toBe(computeStorageFrameHash({ ...base, runtimeMachine: {} }));
   expect(ownUndefined).not.toBe(computeStorageFrameHash(base));
 });
@@ -320,8 +320,8 @@ test('validator-local HTLC notes neither diverge shared storage nor leak into En
   const first = Array.from(env.state.eReplicas.values())[0]!;
   const second = structuredClone(first);
   second.signerId = signerIds[1]!;
-  first.htlcNotes = new Map([[`lock:0x${'33'.repeat(32)}`, 'validator-one']]);
-  second.htlcNotes = new Map([[`lock:0x${'33'.repeat(32)}`, 'validator-two']]);
+  first.htlcNotes = new Map([[`hashlock:0x${'33'.repeat(32)}`, 'validator-one']]);
+  second.htlcNotes = new Map([[`hashlock:0x${'33'.repeat(32)}`, 'validator-two']]);
   env.state.eReplicas.set(`${entityId}:${signerIds[1]}`, second);
 
   expect(computeCanonicalEntityHash(first).hash).toBe(computeCanonicalEntityHash(second).hash);

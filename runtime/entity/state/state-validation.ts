@@ -151,9 +151,9 @@ const validateReserves = (value: unknown, context: string): void => {
         { tokenId },
       );
     }
-    if (typeof amount !== 'bigint') {
+    if (typeof amount !== 'bigint' || amount < 0n) {
       throw new FinancialDataCorruptionError(
-        `Reserve amount for token ${tokenId} must be bigint`,
+        `Reserve amount for token ${tokenId} must be a non-negative bigint`,
         { tokenId, amount },
       );
     }
