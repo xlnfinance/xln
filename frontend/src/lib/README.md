@@ -15,7 +15,7 @@ The frontend is large enough that the immediate win is boundary clarity, not ano
 
 1. Keep payment behavior logic out of giant Svelte files.
 Main target:
-- `components/Entity/PaymentPanel.svelte`
+- `components/Entity/payments/PaymentPanel.svelte`
 
 2. Keep gossip refresh behavior centralized.
 Main targets:

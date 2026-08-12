@@ -134,8 +134,8 @@ test('payment key coverage requires every validator key in a certified profile',
 });
 
 test('PaymentPanel consumes PaymentPanelView instead of owning full env reads', () => {
-  const panel = readFileSync('frontend/src/lib/components/Entity/PaymentPanel.svelte', 'utf8');
-  const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/AccountWorkspaceView.svelte', 'utf8');
+  const panel = readFileSync('frontend/src/lib/components/Entity/payments/PaymentPanel.svelte', 'utf8');
+  const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
   const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
 
   expect(panel).toContain('export let paymentView: PaymentPanelView');

@@ -320,7 +320,7 @@ describe('swap panel helpers', () => {
   });
 
   test('SwapPanel submits the exact Runtime-owned command plan before cross intent', () => {
-    const source = Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte');
+    const source = Bun.file('frontend/src/lib/components/Entity/swap/SwapPanel.svelte');
     return source.text().then(text => {
       expect(text).toContain('activeXlnFunctions.planSwapCommand');
       expect(text).toContain('if (commandPlan.targetSetupInput)');
@@ -338,8 +338,8 @@ describe('swap panel helpers', () => {
 
   test('SwapPanel reads through injected runtime projection instead of owning RuntimeReplica reads', async () => {
     const [panel, workspace, tabs] = await Promise.all([
-      Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte').text(),
-      Bun.file('frontend/src/lib/components/Entity/AccountWorkspaceView.svelte').text(),
+      Bun.file('frontend/src/lib/components/Entity/swap/SwapPanel.svelte').text(),
+      Bun.file('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte').text(),
       Bun.file('frontend/src/lib/components/Entity/EntityPanelTabs.svelte').text(),
     ]);
 
@@ -361,7 +361,7 @@ describe('swap panel helpers', () => {
   });
 
   test('SwapPanel remote swap actions submit through projection-backed command paths', async () => {
-    const panel = await Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte').text();
+    const panel = await Bun.file('frontend/src/lib/components/Entity/swap/SwapPanel.svelte').text();
     const placeStart = panel.indexOf('async function placeSwapOffer()');
     const cancelStart = panel.indexOf('async function cancelSwapOffer(');
     const clearStart = panel.indexOf('async function requestCrossClear(');
@@ -404,8 +404,8 @@ describe('swap panel helpers', () => {
 
   test('SwapPanel keeps amount state only in the parent and parses that source directly', async () => {
     const [panel, ticket] = await Promise.all([
-      Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte').text(),
-      Bun.file('frontend/src/lib/components/Entity/SwapTicket.svelte').text(),
+      Bun.file('frontend/src/lib/components/Entity/swap/SwapPanel.svelte').text(),
+      Bun.file('frontend/src/lib/components/Entity/swap/SwapTicket.svelte').text(),
     ]);
 
     expect(panel).toContain('$: giveAmount = parseDecimalAmountToBigInt(orderAmountInput, giveTokenDecimals);');
@@ -423,7 +423,7 @@ describe('swap panel helpers', () => {
   });
 
   test('SwapTicket makes cross-network online and manual-close risk impossible to omit', async () => {
-    const ticket = await Bun.file('frontend/src/lib/components/Entity/SwapTicket.svelte').text();
+    const ticket = await Bun.file('frontend/src/lib/components/Entity/swap/SwapTicket.svelte').text();
     expect(ticket).toContain("{#if swapRouteMode === 'cross'}");
     expect(ticket).toContain('data-testid="cross-j-safety-banner"');
     expect(ticket).toContain('Stay online for this cross-network swap');
@@ -432,7 +432,7 @@ describe('swap panel helpers', () => {
   });
 
   test('SwapPanel preserves a pinned orderbook level when token sync is idempotent', () => {
-    const source = Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte');
+    const source = Bun.file('frontend/src/lib/components/Entity/swap/SwapPanel.svelte');
     return source.text().then(text => {
       const setTokensStart = text.indexOf('function setSwapTokens');
       const nextFunctionStart = text.indexOf('function buildReverseCrossRouteSelection');

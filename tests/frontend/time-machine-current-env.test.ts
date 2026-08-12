@@ -270,8 +270,8 @@ describe('frontend time-machine current env contract', () => {
 
   test('TimeMachine publishes its selected frame through RuntimeView for browser and remote runtimes', () => {
     const timeMachine = read('frontend/src/lib/view/core/TimeMachine.svelte');
-    const workspace = read('frontend/src/lib/components/Entity/EntityWorkspace.svelte');
-    const chrome = read('frontend/src/lib/components/Entity/EntityPanelChrome.svelte');
+    const workspace = read('frontend/src/lib/components/Entity/workspace/EntityWorkspace.svelte');
+    const chrome = read('frontend/src/lib/components/Entity/workspace/EntityPanelChrome.svelte');
     const xlnStore = read('frontend/src/lib/stores/xlnStore.ts');
 
     expect(timeMachine).toContain('setRuntimeViewAtHeight');

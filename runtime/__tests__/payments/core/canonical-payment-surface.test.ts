@@ -101,7 +101,7 @@ test('each payment operation retains one explicit canonical transaction path', (
   expect(ENTITY_TX_TYPES.includes('lendingRepay')).toBe(true);
   expect(ENTITY_TX_TYPES.includes('lendingClosePosition')).toBe(true);
 
-  const paymentPanel = source('frontend/src/lib/components/Entity/PaymentPanel.svelte');
+  const paymentPanel = source('frontend/src/lib/components/Entity/payments/PaymentPanel.svelte');
   expect(paymentPanel).toContain("const isDirect = deliveryMode === 'direct';");
   expect(paymentPanel).toContain("const isTrusted = deliveryMode === 'trusted';");
   expect(paymentPanel).toContain('const usesDirectPayment = isDirect || isTrusted;');
@@ -124,7 +124,7 @@ test('each payment operation retains one explicit canonical transaction path', (
   expect(source('runtime/entity/tx/handlers/account/lifecycle/admin.ts'))
     .toContain("type: 'set_credit_limit'");
 
-  const lendingPanel = source('frontend/src/lib/components/Entity/LendingPanel.svelte');
+  const lendingPanel = source('frontend/src/lib/components/Entity/payments/LendingPanel.svelte');
   for (const type of ['lendingOffer', 'lendingBorrow', 'lendingRepay']) {
     expect(lendingPanel).toContain(`type: '${type}'`);
   }
@@ -170,7 +170,7 @@ test('four payment modes stay distinct while retired swap alternatives fail loud
     },
   }, 'CANONICAL_SWAP')).toThrow();
 
-  const paymentPanel = source('frontend/src/lib/components/Entity/PaymentPanel.svelte');
+  const paymentPanel = source('frontend/src/lib/components/Entity/payments/PaymentPanel.svelte');
   for (const mode of ['direct', 'instant', 'async', 'trusted']) {
     expect(paymentPanel).toContain(`value: '${mode}'`);
   }

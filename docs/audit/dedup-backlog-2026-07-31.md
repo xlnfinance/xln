@@ -81,7 +81,7 @@ Top 100 simplification targets:
     do not mirror internal helpers or legacy names.
 70. `frontend/src/lib/components/Entity/EntityPanelTabs.svelte` — split Move, account tab content, and shared pickers.
 71. `frontend/src/lib/components/Entity/EntityPanelTabs.svelte` — delete legacy asset tabs after Move fully replaces them.
-72. `frontend/src/lib/components/Entity/SwapPanel.svelte` — split price form, order summary, and submit/review dialog.
+72. `frontend/src/lib/components/Entity/swap/SwapPanel.svelte` — split price form, order summary, and submit/review dialog.
 73. `frontend/src/lib/components/Trading/OrderbookPanel.svelte` — isolate rendering from tick/price conversion helpers.
 74. `frontend/src/lib/stores/vaultStore.ts` — split runtime lifecycle from UI actions and panel convenience methods.
 75. `frontend/src/lib/view/core/TimeMachine.svelte` — hide BrowserVM restore specifics behind one `jadapter`-level time travel abstraction.

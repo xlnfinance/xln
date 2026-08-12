@@ -8,7 +8,7 @@ import {
 } from '@xln/runtime/account/config/dispute-config';
 import { compareStableText } from './swap-formatting';
 import { type PreparedSwapOrderLike } from './swap/swap-order-math';
-import './SwapPanel.css';
+import './swap/SwapPanel.css';
 
 export type BookSide = 'bid' | 'ask';
 

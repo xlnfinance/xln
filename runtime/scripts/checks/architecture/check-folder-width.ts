@@ -78,14 +78,14 @@ export type FolderWidth = Readonly<{
 export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
   brainvault: 11,
   frontend: 11,
-  'frontend/src/lib/components/Entity': 70,
+  'frontend/src/lib/components/Entity': 45,
   'frontend/src/lib/stores': 13,
   'jurisdictions/contracts': 16,
   'jurisdictions/test': 19,
   scripts: 25,
   'scripts/dev': 12,
   tests: 53,
-  'tests/frontend': 70,
+  'tests/frontend': 45,
   'tests/utils': 20,
 };
 

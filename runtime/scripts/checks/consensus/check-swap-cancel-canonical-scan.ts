@@ -53,7 +53,7 @@ const invariantPath = 'runtime/entity/tx/processing/invariant-errors.ts';
 const invariant = readText(invariantPath);
 assertIncludes(invariant, "'SWAP_REQUEST_',", invariantPath);
 
-const frontendPath = 'frontend/src/lib/components/Entity/SwapPanel.svelte';
+const frontendPath = 'frontend/src/lib/components/Entity/swap/SwapPanel.svelte';
 const frontend = readText(frontendPath);
 assertIncludes(frontend, "type: 'proposeCancelSwap'", frontendPath);
 assertIncludes(frontend, 'activeXlnFunctions.planSwapCommand({', frontendPath);

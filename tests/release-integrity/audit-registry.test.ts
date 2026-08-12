@@ -83,7 +83,7 @@ describe('canonical audit registry', () => {
       invariant => invariant.id === 'wallet-frontend.durable-status-truth',
     )!;
     const sources = [
-      'frontend/src/lib/components/Entity/PaymentPanel.svelte',
+      'frontend/src/lib/components/Entity/payments/PaymentPanel.svelte',
       'frontend/src/lib/components/PaymentSpotlight.svelte',
       'frontend/src/lib/stores/network/paymentSpotlightStore.ts',
       'frontend/src/lib/stores/network/paymentTerminalMonitor.ts',
@@ -93,8 +93,8 @@ describe('canonical audit registry', () => {
     const tests = [
       'tests/e2e-payment.spec.ts',
       'tests/frontend/payments/payment-panel-view.test.ts',
-      'tests/frontend/payment-terminal-monitor.test.ts',
-      'tests/frontend/runtime-command-bus.test.ts',
+      'tests/frontend/payments/payment-terminal-monitor.test.ts',
+      'tests/frontend/runtime/runtime-command-bus.test.ts',
       'runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts',
     ];
     const owns = (path: string, globs: readonly string[]): boolean =>

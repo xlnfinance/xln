@@ -113,14 +113,14 @@ describe('repository source folder-width invariant', () => {
     expect(widths.filter(entry => entry.files > 10)).toEqual([
       { path: 'brainvault', files: 11 },
       { path: 'frontend', files: 11 },
-      { path: 'frontend/src/lib/components/Entity', files: 70 },
+      { path: 'frontend/src/lib/components/Entity', files: 45 },
       { path: 'frontend/src/lib/stores', files: 13 },
       { path: 'jurisdictions/contracts', files: 16 },
       { path: 'jurisdictions/test', files: 19 },
       { path: 'scripts', files: 25 },
       { path: 'scripts/dev', files: 12 },
       { path: 'tests', files: 53 },
-      { path: 'tests/frontend', files: 70 },
+      { path: 'tests/frontend', files: 45 },
       { path: 'tests/utils', files: 20 },
     ]);
   });

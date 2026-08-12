@@ -114,7 +114,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/AccountWorkspaceView.svelte',
+    file: 'frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte',
     patterns: [
       "label: 'Pay'",
       '<PaymentPanel',
@@ -123,7 +123,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/SwapPanel.svelte',
+    file: 'frontend/src/lib/components/Entity/swap/SwapPanel.svelte',
     patterns: [
       '<SwapTicket',
       '{placeSwapOffer}',
@@ -136,7 +136,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/SwapTicket.svelte',
+    file: 'frontend/src/lib/components/Entity/swap/SwapTicket.svelte',
     patterns: [
       'data-testid="swap-ticket-from-network"',
       'data-testid="swap-ticket-to-network"',
@@ -154,7 +154,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/SwapOrderList.svelte',
+    file: 'frontend/src/lib/components/Entity/swap/SwapOrderList.svelte',
     patterns: [
       'export let requestCrossClear',
       'data-testid="cross-swap-clear"',
@@ -162,7 +162,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/PaymentPanel.svelte',
+    file: 'frontend/src/lib/components/Entity/payments/PaymentPanel.svelte',
     patterns: [
       'data-testid="payment-amount-input"',
       "type: 'htlcPayment'",

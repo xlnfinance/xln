@@ -4,7 +4,7 @@
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import type { RuntimeAdapterEntitySummary, RuntimeAdapterViewFrame } from '@xln/runtime/api/public/runtime-module';
-  import ActivityHistoryPanel from '$lib/components/Entity/ActivityHistoryPanel.svelte';
+  import ActivityHistoryPanel from '$lib/components/Entity/payments/ActivityHistoryPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
   import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeAdapterHeight, runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';

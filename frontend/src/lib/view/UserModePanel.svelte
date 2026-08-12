@@ -42,7 +42,7 @@
   import { panelBridge } from './utils/panelBridge';
   import { resolveActiveLocalReplica } from './local-runtime-selection';
 
-  import EntityWorkspace from '$lib/components/Entity/EntityWorkspace.svelte';
+  import EntityWorkspace from '$lib/components/Entity/workspace/EntityWorkspace.svelte';
   import { runtimeProjectionMatchesRuntime } from '$lib/components/Entity/entity-workspace';
   import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/runtime-frame-context';
   import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/embedded-runtime-context';

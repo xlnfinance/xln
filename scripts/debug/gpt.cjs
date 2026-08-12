@@ -217,10 +217,10 @@ const CORE_FILES = {
   ],
   swapUi: [
     // Included in default llms.txt because swap UX bugs often come from UI/runtime mismatch
-    'src/lib/components/Entity/SwapPanel.svelte', // Direct same-chain/cross-j swap form and manual route recommendations
+    'src/lib/components/Entity/swap/SwapPanel.svelte', // Direct same-chain/cross-j swap form and manual route recommendations
     'src/lib/components/Trading/OrderbookPanel.svelte', // Orderbook stream/render/click behavior
     'src/lib/components/Entity/routed-swap-planner.ts', // Manual route candidate planner and hop quote estimates
-    'src/lib/components/Entity/LendingPanel.svelte', // Hub lending UI: offer, borrow, repay
+    'src/lib/components/Entity/payments/LendingPanel.svelte', // Hub lending UI: offer, borrow, repay
   ],
   tests: [
     // Behavior contracts: if code and prose disagree, these tests show intended user flow
@@ -398,9 +398,9 @@ const CROSS_FILES = {
     'security/external-audit-brief.md',
   ],
   swapUi: [
-    'src/lib/components/Entity/SwapPanel.svelte',
-    'src/lib/components/Entity/SwapPanel.css',
-    'src/lib/components/Entity/SwapOrderList.svelte',
+    'src/lib/components/Entity/swap/SwapPanel.svelte',
+    'src/lib/components/Entity/swap/SwapPanel.css',
+    'src/lib/components/Entity/swap/SwapOrderList.svelte',
     'src/lib/components/Entity/routed-swap-planner.ts',
     'src/lib/components/Entity/swap-formatting.ts',
     'src/lib/components/Entity/swap/swap-order-history.ts',
@@ -659,8 +659,8 @@ const SWAP_FILES = {
     'security/dispute-two-arguments-spec.md',
   ],
   swapUi: [
-    'src/lib/components/Entity/SwapPanel.svelte',
-    'src/lib/components/Entity/SwapOrderList.svelte',
+    'src/lib/components/Entity/swap/SwapPanel.svelte',
+    'src/lib/components/Entity/swap/SwapOrderList.svelte',
     'src/lib/components/Entity/routed-swap-planner.ts',
     'src/lib/components/Entity/swap-formatting.ts',
     'src/lib/components/Entity/swap/swap-order-history.ts',
@@ -1132,7 +1132,7 @@ same-chain and direct cross-j swaps are the executable surface for this release.
 
 Relevant files:
 - \`frontend/src/lib/components/Entity/routed-swap-planner.ts\`
-- \`frontend/src/lib/components/Entity/SwapPanel.svelte\`
+- \`frontend/src/lib/components/Entity/swap/SwapPanel.svelte\`
 - \`tests/e2e-cross-j-swap.spec.ts\`
 
 ### Hub lending
@@ -1147,7 +1147,7 @@ Read these together:
 - \`runtime/types/finance/lending.ts\`
 - \`runtime/entity/tx/handlers/payments/lending.ts\`
 - \`runtime/api/server/entities/lending.ts\`
-- \`frontend/src/lib/components/Entity/LendingPanel.svelte\`
+- \`frontend/src/lib/components/Entity/payments/LendingPanel.svelte\`
 - \`runtime/__tests__/finance/state/lending.test.ts\`
 - \`tests/e2e-lending.spec.ts\`
 
@@ -1286,10 +1286,10 @@ xln/
     security/external-audit-brief.md    ${fileSizes['docs/security/external-audit-brief.md'] || '?'} lines - External audit brief
 
   frontend swap core/
-    src/lib/components/Entity/SwapPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/SwapPanel.svelte'] || '?'} lines - Swap UI/state machine
+    src/lib/components/Entity/swap/SwapPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/swap/SwapPanel.svelte'] || '?'} lines - Swap UI/state machine
     src/lib/components/Trading/OrderbookPanel.svelte ${fileSizes['frontend/src/lib/components/Trading/OrderbookPanel.svelte'] || '?'} lines - Orderbook stream/render/clicks
     src/lib/components/Entity/routed-swap-planner.ts ${fileSizes['frontend/src/lib/components/Entity/routed-swap-planner.ts'] || '?'} lines - Manual route recommendation planner
-    src/lib/components/Entity/LendingPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/LendingPanel.svelte'] || '?'} lines - Lending offer/borrow/repay UI
+    src/lib/components/Entity/payments/LendingPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/payments/LendingPanel.svelte'] || '?'} lines - Lending offer/borrow/repay UI
 
   behavior tests/
     tests/e2e-swap.spec.ts              ${fileSizes['tests/e2e-swap.spec.ts'] || '?'} lines - Same-chain swap UX contract

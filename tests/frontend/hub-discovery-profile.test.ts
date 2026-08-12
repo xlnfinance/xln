@@ -644,7 +644,7 @@ test('HubDiscoveryPanel renders a supplied projection instead of scanning eRepli
   const source = readFileSync('frontend/src/lib/components/Entity/HubDiscoveryPanel.svelte', 'utf8');
   const profile = readFileSync('frontend/src/lib/components/Entity/hub-discovery-profile.ts', 'utf8');
   const accountOpen = readFileSync('frontend/src/lib/components/Entity/AccountOpenPanel.svelte', 'utf8');
-  const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/AccountWorkspaceView.svelte', 'utf8');
+  const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
   const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
   expect(source).toContain('export let hubDiscoveryProjection');
   expect(source).toContain('export let canOpenAccounts = true');

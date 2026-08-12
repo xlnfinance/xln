@@ -2614,7 +2614,7 @@ describe('production startup wiring', () => {
 
   test('orchestrator exposes the gossip profile bundle endpoint used by payments', () => {
     const debugApi = readFileSync(join(repoRoot, 'runtime/orchestrator/debug-api.ts'), 'utf8');
-    const paymentPanel = readFileSync(join(repoRoot, 'frontend/src/lib/components/Entity/PaymentPanel.svelte'), 'utf8');
+    const paymentPanel = readFileSync(join(repoRoot, 'frontend/src/lib/components/Entity/payments/PaymentPanel.svelte'), 'utf8');
     const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
 
     expect(paymentPanel).not.toContain('/api/gossip/profile?entityId=');

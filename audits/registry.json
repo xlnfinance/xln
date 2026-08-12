@@ -322,7 +322,7 @@
         "runtime/runtime/registration/**/*.ts",
         "runtime/protocol/payments/**/*.ts",
         "runtime/protocol/htlc/**/*.ts",
-        "frontend/src/lib/components/Entity/PaymentPanel.svelte",
+        "frontend/src/lib/components/Entity/payments/PaymentPanel.svelte",
         "frontend/src/lib/components/PaymentSpotlight.svelte",
         "frontend/src/lib/stores/network/paymentSpotlightStore.ts",
         "frontend/src/lib/stores/network/paymentTerminalMonitor.ts",
@@ -335,8 +335,8 @@
         "runtime/scenarios/payments/htlc-*.ts",
         "tests/e2e-payment.spec.ts",
         "tests/frontend/payments/payment-panel-view.test.ts",
-        "tests/frontend/payment-terminal-monitor.test.ts",
-        "tests/frontend/runtime-command-bus.test.ts",
+        "tests/frontend/payments/payment-terminal-monitor.test.ts",
+        "tests/frontend/runtime/runtime-command-bus.test.ts",
         "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ],
       "dependencies": [
@@ -387,8 +387,8 @@
         "frontend/tests/brainvault-*.spec.ts",
         "tests/e2e-payment.spec.ts",
         "tests/frontend/payments/payment-panel-view.test.ts",
-        "tests/frontend/payment-terminal-monitor.test.ts",
-        "tests/frontend/runtime-command-bus.test.ts",
+        "tests/frontend/payments/payment-terminal-monitor.test.ts",
+        "tests/frontend/runtime/runtime-command-bus.test.ts",
         "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ],
       "dependencies": [
@@ -968,7 +968,7 @@
         "runtime/runtime/registration/**/*.ts",
         "runtime/protocol/payments/**/*.ts",
         "runtime/protocol/htlc/**/*.ts",
-        "frontend/src/lib/components/Entity/PaymentPanel.svelte",
+        "frontend/src/lib/components/Entity/payments/PaymentPanel.svelte",
         "frontend/src/lib/components/PaymentSpotlight.svelte",
         "frontend/src/lib/stores/network/paymentSpotlightStore.ts",
         "frontend/src/lib/stores/network/paymentTerminalMonitor.ts",
@@ -981,8 +981,8 @@
         "runtime/scenarios/payments/htlc-*.ts",
         "tests/e2e-payment.spec.ts",
         "tests/frontend/payments/payment-panel-view.test.ts",
-        "tests/frontend/payment-terminal-monitor.test.ts",
-        "tests/frontend/runtime-command-bus.test.ts",
+        "tests/frontend/payments/payment-terminal-monitor.test.ts",
+        "tests/frontend/runtime/runtime-command-bus.test.ts",
         "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ]
     },
@@ -1058,8 +1058,8 @@
         "frontend/tests/brainvault-*.spec.ts",
         "tests/e2e-payment.spec.ts",
         "tests/frontend/payments/payment-panel-view.test.ts",
-        "tests/frontend/payment-terminal-monitor.test.ts",
-        "tests/frontend/runtime-command-bus.test.ts",
+        "tests/frontend/payments/payment-terminal-monitor.test.ts",
+        "tests/frontend/runtime/runtime-command-bus.test.ts",
         "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ]
     },
