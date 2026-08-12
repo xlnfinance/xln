@@ -3,13 +3,13 @@ import {
   projectConsensusPayments,
   type ConsensusPaymentProposalView,
   type EntityConsensusSettingsOptions,
-} from './../entity-consensus-payment-view';
+} from './../core/entity-consensus-payment-view';
 
 export type {
   ConsensusPaymentProposalView,
   ConsensusTokenMetadata,
   EntityConsensusSettingsOptions,
-} from './../entity-consensus-payment-view';
+} from './../core/entity-consensus-payment-view';
 
 export type ConsensusBoardMemberView = {
   signerId: string;

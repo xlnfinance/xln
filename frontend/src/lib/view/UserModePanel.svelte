@@ -43,9 +43,9 @@
   import { resolveActiveLocalReplica } from './local-runtime-selection';
 
   import EntityWorkspace from '$lib/components/Entity/workspace/EntityWorkspace.svelte';
-  import { runtimeProjectionMatchesRuntime } from '$lib/components/Entity/entity-workspace';
-  import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/runtime-frame-context';
-  import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/embedded-runtime-context';
+  import { runtimeProjectionMatchesRuntime } from '$lib/components/Entity/core/entity-workspace';
+  import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/core/runtime-frame-context';
+  import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/core/embedded-runtime-context';
   import OnboardingPanel from '$lib/components/Entity/onboarding/OnboardingPanel.svelte';
   import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';

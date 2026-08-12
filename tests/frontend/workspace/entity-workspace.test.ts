@@ -4,7 +4,7 @@ import {
   buildEntityWorkspaceView,
   resolveEntityWorkspaceCapabilities,
   runtimeProjectionMatchesRuntime,
-} from '../../../frontend/src/lib/components/Entity/entity-workspace';
+} from '../../../frontend/src/lib/components/Entity/core/entity-workspace';
 
 test('runtime projection cannot cross a runtime switch boundary', () => {
   expect(runtimeProjectionMatchesRuntime('runtime-a', 'runtime-a')).toBe(true);
@@ -85,7 +85,7 @@ test('entity workspace shell consumes a projected workspace view instead of trav
 
 test('entity workspace has no separate audit ops or liquidity projection lenses in app flow', () => {
   const workspace = readFileSync('frontend/src/lib/components/Entity/workspace/EntityWorkspace.svelte', 'utf8');
-  const model = readFileSync('frontend/src/lib/components/Entity/entity-workspace.ts', 'utf8');
+  const model = readFileSync('frontend/src/lib/components/Entity/core/entity-workspace.ts', 'utf8');
 
   expect(model).not.toContain("'audit'");
   expect(model).not.toContain("'ops'");
@@ -188,7 +188,7 @@ test('entity workspace view builder projects replica state into capability count
 });
 
 test('entity workspace model does not import full runtime RuntimeReplica', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/entity-workspace.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/components/Entity/core/entity-workspace.ts', 'utf8');
   expect(source).toContain('RuntimeAdapterViewFrame');
   expect(source).not.toContain('RuntimeReplica, EnvSnapshot');
   expect(source).not.toContain('eReplicas');
@@ -301,8 +301,8 @@ test('user mode remote workspace mounts from RuntimeView instead of RuntimeRepli
 });
 
 test('runtime frame context separates projection metadata from embedded RuntimeReplica action context', () => {
-  const runtimeContext = readFileSync('frontend/src/lib/components/Entity/runtime-frame-context.ts', 'utf8');
-  const embeddedContext = readFileSync('frontend/src/lib/components/Entity/embedded-runtime-context.ts', 'utf8');
+  const runtimeContext = readFileSync('frontend/src/lib/components/Entity/core/runtime-frame-context.ts', 'utf8');
+  const embeddedContext = readFileSync('frontend/src/lib/components/Entity/core/embedded-runtime-context.ts', 'utf8');
   const workspace = readFileSync('frontend/src/lib/components/Entity/workspace/EntityWorkspace.svelte', 'utf8');
   const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
 
@@ -313,8 +313,8 @@ test('runtime frame context separates projection metadata from embedded RuntimeR
   expect(runtimeContext).toContain('isLive');
   expect(embeddedContext).toContain('RuntimeReplica, EnvSnapshot');
   expect(embeddedContext).toContain('liveEnvResolver');
-  expect(workspace).toContain('./embedded-runtime-context');
-  expect(tabs).toContain('./embedded-runtime-context');
+  expect(workspace).toContain('../core/embedded-runtime-context');
+  expect(tabs).toContain('../../core/embedded-runtime-context');
   expect(tabs).toContain('$: env = embeddedRuntimeContext.env;');
   expect(tabs).not.toContain('$: env = runtimeFrameContext.env;');
 });

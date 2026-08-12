@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { runtimeAdapterHeight } from '../../frontend/src/lib/stores/runtimeControllerStore';
+import { runtimeAdapterHeight } from '../../../frontend/src/lib/stores/runtimeControllerStore';
 import {
   RuntimeQueryClient,
   clearRuntimeQueryCache,
-} from '../../frontend/src/lib/stores/runtimeQueryClient';
+} from '../../../frontend/src/lib/stores/runtimeQueryClient';
 import {
   runtimeViewHeightRetryDelayMs,
   runtimeViewNeedsHeightRefresh,
@@ -18,13 +18,13 @@ import {
   runtimeViewPublicationMatches,
   runtimeViewSelectionMatches,
   setRuntimeViewActiveEntityId,
-} from '../../frontend/src/lib/stores/runtimeViewStore';
+} from '../../../frontend/src/lib/stores/runtimeViewStore';
 import {
   ensureRuntimeHistoryContext,
   resetRuntimeHistoryFrames,
   runtimeHistoryFrames,
   upsertRuntimeHistoryFrame,
-} from '../../frontend/src/lib/stores/runtimeHistoryStore';
+} from '../../../frontend/src/lib/stores/runtimeHistoryStore';
 
 const readStore = <T>(store: { subscribe: (run: (value: T) => void) => () => void }): T => {
   let current!: T;

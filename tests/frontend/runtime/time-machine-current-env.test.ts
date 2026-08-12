@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { runtimeControllerHandle } from '../../frontend/src/lib/stores/runtimeControllerStore';
-import { runtimeQueryClient } from '../../frontend/src/lib/stores/runtimeQueryClient';
+import { runtimeControllerHandle } from '../../../frontend/src/lib/stores/runtimeControllerStore';
+import { runtimeQueryClient } from '../../../frontend/src/lib/stores/runtimeQueryClient';
 import {
   assertRuntimeViewIsLive,
   normalizeRuntimeViewAtHeight,
@@ -17,7 +17,7 @@ import {
   runtimeViewQueryAtHeight,
   setRuntimeViewPage,
   setRuntimeViewAtHeight,
-} from '../../frontend/src/lib/stores/runtimeViewStore';
+} from '../../../frontend/src/lib/stores/runtimeViewStore';
 
 const repoRoot = process.cwd();
 

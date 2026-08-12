@@ -4,7 +4,7 @@ import type { EntityReplica } from '$lib/types/ui';
 import { entityAvatar as resolveEntityAvatar } from '$lib/utils/identity/avatar';
 import { formatEntityId } from '$lib/utils/format';
 import { getEntityDisplayName, resolveEntityName } from '$lib/utils/identity/entityNaming';
-import { requireTokenDecimals } from './token-metadata';
+import { requireTokenDecimals } from '../token-metadata';
 
 type GossipSource = Parameters<typeof resolveEntityName>[1];
 

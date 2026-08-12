@@ -9,7 +9,7 @@
   import AccountList from '../account/ui/AccountList.svelte';
   import AccountOpenPanel from '../account/ui/AccountOpenPanel.svelte';
   import AccountWorkspaceRail from './AccountWorkspaceRail.svelte';
-  import EntityActivityPanel from '../EntityActivityPanel.svelte';
+  import EntityActivityPanel from '../activity/EntityActivityPanel.svelte';
   import LendingPanel from '../payments/LendingPanel.svelte';
   import LiveRequiredState from './shell/LiveRequiredState.svelte';
   import MoveWorkspace from '../MoveWorkspace.svelte';
@@ -20,7 +20,7 @@
   import SwapPanel from '../swap/SwapPanel.svelte';
   import type { SwapPanelRuntimeView } from '../swap/swap-panel-helpers';
   import type { DisputedAccountView } from '../account/account-dispute-view';
-  import type { EntityActivityAccountOption, EntityActivityRow } from '../entity-activity';
+  import type { EntityActivityAccountOption, EntityActivityRow } from '../activity/entity-activity';
   import type { AccountWorkspaceTab, ConfigureWorkspaceTab } from './entity-panel-routing';
   import {
     emptyHubDiscoveryProjection,

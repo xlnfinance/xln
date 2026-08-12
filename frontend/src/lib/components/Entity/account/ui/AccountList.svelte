@@ -4,7 +4,7 @@
   import { createEventDispatcher } from 'svelte';
   import AccountPreview from './AccountPreview.svelte';
   import { compareStableText } from '$lib/utils/stableSort';
-  import { buildAccountPageView, resolveAccountListEntityName } from '../../account-list-view';
+  import { buildAccountPageView, resolveAccountListEntityName } from '../../core/account-list-view';
 
   export let replica: EntityReplica | null;
   export let selectedAccountId: string | null = null;

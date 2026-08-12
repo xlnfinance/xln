@@ -76,11 +76,9 @@ export type FolderWidth = Readonly<{
 }>;
 
 export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
-  'frontend/src/lib/components/Entity': 20,
   'jurisdictions/contracts': 16,
   scripts: 25,
   'scripts/dev': 12,
-  'tests/frontend': 20,
 };
 
 const normalizeRelativePath = (root: string, path: string): string =>

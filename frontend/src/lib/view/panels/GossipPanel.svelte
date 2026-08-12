@@ -5,7 +5,7 @@
     buildGossipDirectoryViewFromRuntimeEntities,
     emptyGossipDirectoryView,
     type GossipDirectoryProfile,
-  } from '$lib/components/Entity/gossip-directory-view';
+  } from '$lib/components/Entity/activity/gossip-directory-view';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { createRuntimeQueryStore } from '$lib/stores/runtimeQueryClient';
 

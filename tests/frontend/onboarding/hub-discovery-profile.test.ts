@@ -12,7 +12,7 @@ import {
   hubDiscoveryJurisdictionKey,
   hubHasPublishedRuntimeRoute,
   isSameEntityId,
-} from '../../frontend/src/lib/components/Entity/onboarding/hub-discovery-profile';
+} from '../../../frontend/src/lib/components/Entity/onboarding/hub-discovery-profile';
 import { readFileSync } from 'node:fs';
 
 const SOURCE = `0x${'11'.repeat(32)}`;

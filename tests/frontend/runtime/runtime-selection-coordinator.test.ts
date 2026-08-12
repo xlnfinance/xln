@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { coordinateRuntimeSelection } from '../../frontend/src/lib/stores/runtimeStore';
+import { coordinateRuntimeSelection } from '../../../frontend/src/lib/stores/runtimeStore';
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;

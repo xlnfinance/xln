@@ -17,15 +17,15 @@
     buildEntityWorkspaceView,
     runtimeProjectionMatchesRuntime,
     type EntityWorkspaceView,
-  } from '../entity-workspace';
+  } from '../core/entity-workspace';
   import {
     emptyEntityWorkspaceRuntimeFrameContext,
     type EntityWorkspaceRuntimeFrameContext,
-  } from '../runtime-frame-context';
+  } from '../core/runtime-frame-context';
   import {
     emptyEntityWorkspaceEmbeddedRuntimeContext,
     type EntityWorkspaceEmbeddedRuntimeContext,
-  } from '../embedded-runtime-context';
+  } from '../core/embedded-runtime-context';
 
   export let tab: Tab;
   export let hideHeader: boolean = false;

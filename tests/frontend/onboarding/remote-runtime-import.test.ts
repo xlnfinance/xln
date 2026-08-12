@@ -17,19 +17,19 @@ import {
   remoteRuntimeIdForWsUrl,
   parseRemoteRuntimeImportSourcePayload,
   type StoredRemoteRuntimeImportEntry,
-} from '../../frontend/src/lib/utils/onboarding/remoteRuntimeImport';
-import { writeRemoteRuntimeImportSummary } from '../../frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow';
+} from '../../../frontend/src/lib/utils/onboarding/remoteRuntimeImport';
+import { writeRemoteRuntimeImportSummary } from '../../../frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow';
 import {
   LIVE_RUNTIME_DISCOVERY_MAX_RETRIES,
   shouldRetryLiveRuntimeDiscovery,
-} from '../../frontend/src/lib/components/Views/runtime-creation-model';
+} from '../../../frontend/src/lib/components/Views/runtime-creation-model';
 import {
   buildRemoteRuntimeRecoveryPeerSources,
   buildRuntimeWsRecoveryPeerSource,
   buildRuntimeWsRecoveryPeerSources,
   selectPrimaryRemoteEntitySummary,
   selectPrimaryRemoteHubSummary,
-} from '../../frontend/src/lib/utils/onboarding/remoteRuntimeValidation';
+} from '../../../frontend/src/lib/utils/onboarding/remoteRuntimeValidation';
 
 const token = `xlnra1.full.${Date.now() + 60 * 60 * 1000}.aud.kid.jti.sig`;
 

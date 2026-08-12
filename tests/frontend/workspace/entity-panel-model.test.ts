@@ -11,8 +11,8 @@ import {
   isSameJurisdictionEntity,
   isSameJurisdictionEntityInReplicas,
   jurisdictionKey,
-} from '../../../frontend/src/lib/components/Entity/entity-panel-model';
-import { buildAccountPageView, resolveAccountListEntityName } from '../../../frontend/src/lib/components/Entity/account-list-view';
+} from '../../../frontend/src/lib/components/Entity/core/entity-panel-model';
+import { buildAccountPageView, resolveAccountListEntityName } from '../../../frontend/src/lib/components/Entity/core/account-list-view';
 
 describe('entity panel model helpers', () => {
   test('builds stable jurisdiction keys from contract config', () => {

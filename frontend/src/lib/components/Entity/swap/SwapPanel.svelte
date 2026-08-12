@@ -20,7 +20,7 @@ import { unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
 import { prewarmCounterpartyProfiles } from '$lib/utils/runtime/p2pPrefetch';
 import { amountToUsd } from '$lib/utils/assetPricing';
 import { requireTokenDecimals } from '../token-metadata';
-import { buildEntityPanelView } from '../entity-panel-model';
+import { buildEntityPanelView } from '../core/entity-panel-model';
 import { formatEntityId } from '$lib/utils/format';
 import {
   buildSwapPanelRuntimeView,

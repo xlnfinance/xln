@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { buildHierarchicalNavigationView } from '../../frontend/src/lib/components/Navigation/runtime-navigation-view';
+import { buildHierarchicalNavigationView } from '../../../frontend/src/lib/components/Navigation/runtime-navigation-view';
 
 const runtimeA = 'runtime-a';
 const runtimeB = 'runtime-b';
