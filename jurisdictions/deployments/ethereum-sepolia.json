@@ -1,6 +1,7 @@
 {
   "network": "ethereum-sepolia",
   "chainId": 11155111,
+  "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
   "deployer": "0x5D7f16DfD53a208CB521d81Cd9786b05C3FF73F9",
   "foundationRecipient": "0x5D7f16DfD53a208CB521d81Cd9786b05C3FF73F9",
   "entityProviderDeploymentBlock": 11342391,

@@ -42,7 +42,8 @@ import { buildCrossJurisdictionSwapSubmission } from '../../../runtime/jurisdict
 
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 
-import type { AccountTx } from '../../../types/account';
+import type { AccountReplica, AccountTx, SwapOffer } from '../../../types/account';
+import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput, EntityReplica } from '../../../entity/types';
 import type { RuntimeEntityInputsEnvelope, RoutedEntityInput } from '../../../runtime/types';
@@ -101,6 +102,11 @@ const withCanonicalCrossJurisdictionRouteHash = (
 ): CrossJurisdictionSwapRoute => withCanonicalCrossJurisdictionRouteHashCanonical(
   withFixtureDisputeConfig(route),
 );
+
+const installSwapOffer = (account: AccountReplica, offer: SwapOffer): void => {
+  account.state.swapOffers.set(offer.offerId, offer);
+  recordSwapOfferLifecycle(account, offer);
+};
 
 import {
   buildCrossJurisdictionCancelAck,
@@ -409,7 +415,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 1,
       createdTimestamp: 1_000,
     });
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: route.source.tokenId,
       giveAmount: route.source.amount,
@@ -843,7 +849,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'cross-partial-delayed-seed', now: 1_000 },
     );
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: 1,
       giveAmount: 1_000n,
@@ -951,7 +957,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'cross-source-savings-seed', now: 1_000 },
     );
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: 1,
       giveAmount: 1_000n,
@@ -1038,7 +1044,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'cross-terminal-history-seed', now: 1_000 },
     );
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: 1,
       giveAmount: 1_000n,
@@ -1236,7 +1242,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'cross-exact-quarter-seed', now: 1_000 },
     );
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: 2,
       giveAmount: 40_000_000_000_000_000n,
@@ -1509,7 +1515,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       fillNumerator: 1n,
       fillDenominator: 4n,
     };
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: 2,
       giveAmount: 40_000_000_000_000_000n,
@@ -1596,7 +1602,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'cross-sub-lot-dust-seed', now: 1_000 },
     );
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: 2,
       giveAmount: 2n * lot,

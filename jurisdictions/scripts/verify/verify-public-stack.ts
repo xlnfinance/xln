@@ -2,6 +2,8 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { safeStringify } from '../../../runtime/protocol/serialization';
+import { verifyEntityProviderGovernanceDomains } from './entity-provider-domains';
 
 type BuildInfo = Readonly<{
   solcLongVersion: string;
@@ -11,6 +13,7 @@ type BuildInfo = Readonly<{
 
 type DeploymentEvidence = Readonly<{
   chainId: number;
+  rpc?: string;
   contracts: Record<string, string>;
   evmContracts: Record<string, Readonly<{
     address?: string;
@@ -32,6 +35,12 @@ const deployment = JSON.parse(readFileSync(deploymentPath, 'utf8')) as Deploymen
 if (!Number.isSafeInteger(deployment.chainId) || deployment.chainId <= 0) {
   throw new Error(`VERIFY_CHAIN_ID_INVALID:${String(deployment.chainId)}`);
 }
+const rpcUrl = argument('--rpc') || deployment.rpc;
+if (!rpcUrl) throw new Error('VERIFY_RPC_URL_MISSING');
+const entityProviderAddress = deployment.evmContracts.entityProvider?.address
+  || deployment.contracts.entityProvider;
+if (!entityProviderAddress) throw new Error('VERIFY_ENTITY_PROVIDER_ADDRESS_MISSING');
+await verifyEntityProviderGovernanceDomains(rpcUrl, entityProviderAddress);
 
 const targets = [
   ['account', 'contracts/Account.sol:Account'],
@@ -68,7 +77,7 @@ const postVerification = async (
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+      body: safeStringify({
         stdJsonInput: buildInfo.input,
         compilerVersion: buildInfo.solcLongVersion,
         contractIdentifier: identifier,
@@ -78,7 +87,7 @@ const postVerification = async (
   );
   const body = await response.json() as Record<string, unknown>;
   if (!response.ok) {
-    throw new Error(`VERIFY_SUBMIT_FAILED:${identifier}:${response.status}:${JSON.stringify(body)}`);
+    throw new Error(`VERIFY_SUBMIT_FAILED:${identifier}:${response.status}:${safeStringify(body)}`);
   }
   return body;
 };
@@ -92,17 +101,17 @@ const waitForVerification = async (
     const response = await fetch(`https://sourcify.dev/server/v2/verify/${verificationId}`);
     const body = await response.json() as Record<string, unknown>;
     if (!response.ok) {
-      throw new Error(`VERIFY_STATUS_FAILED:${identifier}:${response.status}:${JSON.stringify(body)}`);
+      throw new Error(`VERIFY_STATUS_FAILED:${identifier}:${response.status}:${safeStringify(body)}`);
     }
     if (body['isJobCompleted'] === true) {
       const contract = body['contract'] as { match?: unknown } | undefined;
       if (contract?.match === 'exact_match') return body;
-      throw new Error(`VERIFY_JOB_INEXACT:${identifier}:${JSON.stringify(body)}`);
+      throw new Error(`VERIFY_JOB_INEXACT:${identifier}:${safeStringify(body)}`);
     }
     const status = String(body['status'] || body['jobStatus'] || '').toLowerCase();
     if (/success|verified|complete/.test(status)) return body;
     if (/fail|error/.test(status)) {
-      throw new Error(`VERIFY_JOB_FAILED:${identifier}:${JSON.stringify(body)}`);
+      throw new Error(`VERIFY_JOB_FAILED:${identifier}:${safeStringify(body)}`);
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 2_000));
   }
@@ -118,7 +127,7 @@ const readExistingVerification = async (
   if (response.status === 404) return null;
   const body = await response.json() as Record<string, unknown>;
   if (!response.ok) {
-    throw new Error(`VERIFY_LOOKUP_FAILED:${address}:${response.status}:${JSON.stringify(body)}`);
+    throw new Error(`VERIFY_LOOKUP_FAILED:${address}:${response.status}:${safeStringify(body)}`);
   }
   return body['match'] === 'exact_match' ? body : null;
 };
@@ -145,7 +154,7 @@ for (const [deploymentKey, identifier] of targets) {
   });
 }
 
-console.log(JSON.stringify({
+console.log(safeStringify({
   kind: 'PUBLIC_SOURCE_VERIFICATION',
   chainId: deployment.chainId,
   compiler: buildInfos[0]?.solcLongVersion,

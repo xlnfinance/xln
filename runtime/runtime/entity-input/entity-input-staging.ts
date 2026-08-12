@@ -227,23 +227,30 @@ export const applyExternalEntityInput = async (
   options: RuntimeEntityInputApplyOptions,
   context: RuntimeEntityInputBatchContext,
 ): Promise<void> => {
-  const remote = Boolean(input.from);
   const staged = await stageExternalEntityInput(
     env,
     input,
     inputIndex,
     options,
-    !remote,
+    false,
   );
-  if (remote && isCommittedEntityInput(staged.result.outcome)) {
-    // Remote bytes stay detached until the whole transition succeeds.
+  if (isCommittedEntityInput(staged.result.outcome)) {
+    // Local commands and remote bytes share one isolated candidate boundary.
+    // Expected rejection cannot partially mutate the Runtime-owned Entity State.
     commitEntityFrameCandidateState(staged.result.nextReplica.state);
   }
   collectStagedEntityInput(env, staged, options, context);
   publishStagedEntityNodeChanges(env, [staged]);
 };
 
-export const discardMalformedRemoteEntityInput = (
+/**
+ * Reject a typed command/frame error after isolated Entity application.
+ *
+ * The candidate has no live State or node-cache ownership, so a malformed
+ * local command is no more fatal than malformed peer bytes. Storage failures,
+ * reducer invariants, and unknown bugs retain their distinct fatal classes.
+ */
+export const rejectMalformedEntityInput = (
   env: RuntimeReplica,
   error: unknown,
   inputIndex: number,
@@ -254,7 +261,7 @@ export const discardMalformedRemoteEntityInput = (
     env.scenarioMode ||
     options.isReplay ||
     !(error instanceof RuntimeEntityInputApplyError) ||
-    !error.isDiscardableIngress
+    error.failureKind !== 'malformed-ingress'
   ) {
     return false;
   }
@@ -264,14 +271,17 @@ export const discardMalformedRemoteEntityInput = (
     entityFrameCommitted: false,
     committedAccountFrames: [],
   });
-  entityInputLog.info('entity_input.discarded', {
-    entityId: error.entityId,
-    signerId: error.signerId,
-    sourceRuntimeId: error.sourceRuntimeId,
-    cause:
-      error.cause instanceof Error
-        ? error.cause.message
-        : String(error.cause),
-  });
+  entityInputLog.info(
+    error.isRemoteIngress ? 'entity_input.discarded' : 'entity_input.rejected',
+    {
+      entityId: error.entityId,
+      signerId: error.signerId,
+      sourceRuntimeId: error.sourceRuntimeId,
+      cause:
+        error.cause instanceof Error
+          ? error.cause.message
+          : String(error.cause),
+    },
+  );
   return true;
 };

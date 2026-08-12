@@ -77,8 +77,8 @@
       },
       "explorer": "https://sepolia.etherscan.io",
       "currency": "ETH",
-      "status": "active",
-      "description": "Ethereum Sepolia XLN deployment",
+      "status": "pending",
+      "description": "Ethereum Sepolia deployment requires an EntityProvider V1 governance-domain redeploy",
       "tokens": {
         "USDT": {
           "symbol": "USDT",

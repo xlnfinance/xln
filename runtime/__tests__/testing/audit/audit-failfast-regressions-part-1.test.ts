@@ -1043,7 +1043,7 @@ describe('audit fail-fast regressions', () => {
     expect(env.runtimeMempool?.entityInputs).toHaveLength(1);
   });
 
-  test('remote Entity handler failures are dropped but the same local failure is fatal', async () => {
+  test('malformed frames are isolated while invalid local schema remains fatal', async () => {
     const makeRuntime = (seed: string) => {
       const env = createEmptyEnv(seed);
       const storageBase = resolveDbPath(env);
@@ -1109,6 +1109,64 @@ describe('audit fail-fast regressions', () => {
     const localRetryTypes = (local.env.runtimeMempool?.entityInputs ?? [])
       .flatMap(input => input.entityTxs?.map(tx => tx.type) ?? []);
     expect(localRetryTypes).toContain('definitely_unknown_entity_tx');
+
+    const rejectedLocal = makeRuntime('local-business-rejection-isolated');
+    const rejectedFrameTxs = await buildQuorumAuthorizedFrameTxs(
+      rejectedLocal.env,
+      rejectedLocal.state,
+      [
+        { type: 'chatMessage', data: { message: 'candidate-only mutation' } } as any,
+        {
+          type: 'directPayment',
+          data: {
+            targetEntityId: `0x${'d3'.repeat(32)}`,
+            tokenId: 1,
+            amount: 1n,
+            route: [],
+          },
+        } as any,
+      ],
+    );
+    const rejectedStateBefore = safeStringify(rejectedLocal.state);
+    await expect(
+      processRuntime(rejectedLocal.env, [{
+        entityId: rejectedLocal.entityId,
+        signerId: rejectedLocal.signerId,
+        entityTxs: rejectedFrameTxs,
+      }]),
+    ).resolves.toBe(rejectedLocal.env);
+    const rejectedReplica = rejectedLocal.env.state.eReplicas.get(
+      `${rejectedLocal.entityId}:${rejectedLocal.signerId}`,
+    );
+    expect(safeStringify(rejectedReplica?.state)).toBe(rejectedStateBefore);
+    expect(readEntityFrameEventMessages(rejectedReplica!.state)).toEqual([]);
+    expect(rejectedLocal.env.infrastructure?.halted).not.toBe(true);
+    expect(rejectedLocal.env.runtimeMempool?.entityInputs).toEqual([]);
+
+    const invariantLocal = makeRuntime('local-money-invariant-is-fatal');
+    const invariantFrameTxs = await buildQuorumAuthorizedFrameTxs(
+      invariantLocal.env,
+      invariantLocal.state,
+      [{
+        type: 'placeSwapOffer',
+        data: {
+          counterpartyEntityId: `0x${'d4'.repeat(32)}`,
+          offerId: 'missing-account-offer',
+          giveTokenId: 1,
+          giveAmount: 1n,
+          wantTokenId: 2,
+          wantAmount: 1n,
+        },
+      } as any],
+    );
+    await expect(
+      processRuntime(invariantLocal.env, [{
+        entityId: invariantLocal.entityId,
+        signerId: invariantLocal.signerId,
+        entityTxs: invariantFrameTxs,
+      }]),
+    ).rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:placeSwapOffer');
+    expect(invariantLocal.env.infrastructure?.halted).toBe(true);
 
     const malformed = new RuntimeEntityInputApplyError(
       {

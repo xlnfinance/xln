@@ -10,7 +10,7 @@ import {
 } from '../entity-input/entity-input-contract.ts';
 import {
   applyExternalEntityInput,
-  discardMalformedRemoteEntityInput,
+  rejectMalformedEntityInput,
 } from '../entity-input/entity-input-staging.ts';
 import {
   applyAtomicEntityInputPair,
@@ -61,7 +61,7 @@ export const applyMergedEntityInputs = async (
         await applyExternalEntityInput(env, input, index, options, context);
       } catch (error) {
         if (
-          !discardMalformedRemoteEntityInput(
+          !rejectMalformedEntityInput(
             env,
             error,
             index,

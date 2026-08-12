@@ -122,6 +122,7 @@ export const createEntityProposalFixture = (
       entityId,
       frame.stateRoot,
       frame.authorityRoot,
+      frame.entityContext,
       frame.jPrefixCertificate,
     );
     frame.hashesToSign = buildEntityHashesToSign(entityId, frame.height, frame.hash);

@@ -44,7 +44,8 @@ import { buildCrossJurisdictionSwapSubmission } from '../../../runtime/jurisdict
 
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 
-import type { AccountTx } from '../../../types/account';
+import type { AccountReplica, AccountTx, SwapOffer } from '../../../types/account';
+import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput, EntityReplica } from '../../../entity/types';
 import type { RuntimeEntityInputsEnvelope, RoutedEntityInput } from '../../../runtime/types';
@@ -104,6 +105,11 @@ const withCanonicalCrossJurisdictionRouteHash = (
 ): CrossJurisdictionSwapRoute => withCanonicalCrossJurisdictionRouteHashCanonical(
   withFixtureDisputeConfig(route),
 );
+
+const installSwapOffer = (account: AccountReplica, offer: SwapOffer): void => {
+  account.state.swapOffers.set(offer.offerId, offer);
+  recordSwapOfferLifecycle(account, offer);
+};
 
 import {
   buildCrossJurisdictionCancelAck,
@@ -350,7 +356,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'cross-floor-scaled-source-progress-seed', now: 1_000 },
     );
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: 2,
       giveAmount: sourceTotal,
@@ -493,7 +499,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       filledSourceAmount: cumulativeSource,
       filledTargetAmount: cumulativeTarget,
     };
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: 1,
       giveAmount: sourceTotal,
@@ -1355,7 +1361,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       targetClaimed: 450n,
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: 1,
       giveAmount: 500n,
@@ -1437,7 +1443,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     const account = state.accounts.get(sourceUser)!;
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: 1,
       giveAmount: 500n,
@@ -1527,7 +1533,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       { runtimeSeed: 'cross-cancel-no-swap-resolve', now: 1_000 },
     );
     const account = state.accounts.get(sourceUser)!;
-    account.state.swapOffers.set(route.orderId, {
+    installSwapOffer(account, {
       offerId: route.orderId,
       giveTokenId: 1,
       giveAmount: 1_000n,

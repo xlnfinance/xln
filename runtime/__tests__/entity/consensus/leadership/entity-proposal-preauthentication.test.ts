@@ -112,6 +112,7 @@ describe('Entity proposal pre-authentication', () => {
     const validator = createValidator('2');
     const canonical = await buildHonestProposal();
     canonical.frame.parentFrameHash = `0x${'ab'.repeat(32)}`;
+    canonical.frame.entityContext.parentFrameHash = canonical.frame.parentFrameHash;
     expect((await applyEntityInput(validator.env, validator.replica, {
       entityId,
       signerId: validator.signerId,
@@ -131,6 +132,9 @@ describe('Entity proposal pre-authentication', () => {
     const validator = createValidator('2');
     const invalidLeader = await buildHonestProposal();
     invalidLeader.frame.leader.proposerSignerId = createValidator('3').signerId;
+    invalidLeader.frame.entityContext.proposerSignerId = invalidLeader.frame.leader.proposerSignerId;
+    invalidLeader.frame.entityContext.proposerReplicaId =
+      `${entityId}:${invalidLeader.frame.leader.proposerSignerId}`;
     expect((await applyEntityInput(validator.env, validator.replica, {
       entityId,
       signerId: validator.signerId,
