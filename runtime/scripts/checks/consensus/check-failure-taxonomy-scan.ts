@@ -924,7 +924,7 @@ for (const [path, markers] of [
     'runtime/__tests__/entity/boundaries/entity-input-merge.test.ts',
     ['uses structured logging without direct console output', 'entity.input.merge'],
   ],
-  ['runtime/__tests__/settlement-ops.test.ts', ['SETTLEMENT_UNKNOWN_OP_TYPE', 'without console fallback']],
+  ['runtime/__tests__/payments/settlement/settlement-ops.test.ts', ['SETTLEMENT_UNKNOWN_OP_TYPE', 'without console fallback']],
   [
     'runtime/__tests__/account/transactions/account-followup-logging.test.ts',
     ['account committed followups use structured logging only', 'account.followup'],

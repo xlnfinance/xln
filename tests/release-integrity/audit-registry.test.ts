@@ -66,7 +66,7 @@ describe('canonical audit registry', () => {
       'runtime/extensions/cross-j/index.ts',
       'runtime/jurisdiction/machine/events/event-normalization.ts',
       'runtime/orderbook/swap-execution.ts',
-      'runtime/__tests__/direct-payment-frame-integrity.test.ts',
+      'runtime/__tests__/payments/core/direct-payment-frame-integrity.test.ts',
       'jurisdictions/test/DeltaTransformer.test.ts',
     ]) {
       expect(accountFiles).toContain(coupledPath);

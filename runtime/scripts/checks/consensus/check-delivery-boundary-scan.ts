@@ -293,11 +293,11 @@ assertIncludes(relayDirectTs, 'relay.direct.source_key_missing', 'runtime/api/se
 assertIncludes(relayDirectTs, 'relay.direct.send_failed', 'runtime/api/server/network/relay-direct.ts');
 
 for (const [path, markers] of [
-  ['runtime/__tests__/delivery-result.test.ts', [
+  ['runtime/__tests__/payments/core/delivery-result.test.ts', [
     'delivery result helpers validate the shared delivery contract',
     'undelivered disposition centralizes retry/drop event decisions',
   ]],
-  ['runtime/__tests__/delivery-boundary.test.ts', [
+  ['runtime/__tests__/payments/core/delivery-boundary.test.ts', [
     'raw entity inputs websocket send stays behind the P2P delivery adapter',
     'delivery retry and terminal decisions stay behind shared helpers',
     'delivery outcome decisions stay behind shared helpers',

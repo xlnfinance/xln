@@ -1,5 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+
+const isCrossJReleaseTest = (name: string): boolean => (
+  name.endsWith('.test.ts') &&
+  ['cross-j', 'cross-jurisdiction', 'hash-ladder', 'pull-registry'].some(marker => name.includes(marker))
+);
+
+const collectCrossJReleaseTests = (directory: string): string[] => (
+  readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) return collectCrossJReleaseTests(path);
+    return entry.isFile() && isCrossJReleaseTest(entry.name) ? [path] : [];
+  })
+);
 
 describe('release gate ordering', () => {
   test('runs one full E2E only after every cheaper release check', () => {
@@ -21,6 +34,29 @@ describe('release gate ordering', () => {
     expect(result.exitCode).toBe(0);
     expect(browserE2eCommands).toEqual(['bun run test:e2e:full']);
     expect(commands.at(-1)).toBe('bun run test:e2e:full');
+  });
+
+  test('release runtime core includes the exact recursive cross-j family', () => {
+    const result = Bun.spawnSync({
+      cmd: ['bun', 'runtime/scripts/release/run-release-gate.ts', '--profile=release', '--plan'],
+      cwd: process.cwd(),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const runtimeCoreCommand = result.stdout.toString()
+      .split('\n')
+      .map(line => line.trim())
+      .find(line => line.startsWith('bun test runtime/__tests__'));
+    const plannedFamily = runtimeCoreCommand
+      ?.split(/\s+/)
+      .slice(2)
+      .filter(path => isCrossJReleaseTest(path.split('/').at(-1) ?? ''))
+      .sort();
+    const expectedFamily = collectCrossJReleaseTests('runtime/__tests__').sort();
+
+    expect(result.exitCode).toBe(0);
+    expect(expectedFamily).toHaveLength(19);
+    expect(plannedFamily).toEqual(expectedFamily);
   });
 
   test('publishes only a checked canonical tag through immutable actions', () => {

@@ -80,7 +80,7 @@ describe('runtime folder-width invariant', () => {
     const widths = collectFolderWidths(repoRoot, resolve(repoRoot, 'runtime'));
     expect(evaluateFolderWidths(widths, FOLDER_WIDTH_DEBT)).toEqual([]);
     expect(widths.filter(entry => entry.files > 10)).toEqual([
-      { path: 'runtime/__tests__', files: 333 },
+      { path: 'runtime/__tests__', files: 292 },
     ]);
   });
 });

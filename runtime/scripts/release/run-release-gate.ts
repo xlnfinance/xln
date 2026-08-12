@@ -31,20 +31,27 @@ type StepResult = {
 // sample. Discovering the family makes every new edge-case suite enter the
 // release gate automatically; a static list previously left nine financial
 // suites green locally but invisible to CI/release.
-const CROSS_J_RUNTIME_CORE_TESTS = readdirSync('runtime/__tests__', { withFileTypes: true })
-  .filter(entry => entry.isFile())
-  .map(entry => entry.name)
-  .filter(name =>
-    name.endsWith('.test.ts') &&
-    (
-      name.includes('cross-j') ||
-      name.includes('cross-jurisdiction') ||
-      name.includes('hash-ladder') ||
-      name.includes('pull-registry')
-    )
+const isCrossJRuntimeCoreTest = (name: string): boolean => (
+  name.endsWith('.test.ts') &&
+  (
+    name.includes('cross-j') ||
+    name.includes('cross-jurisdiction') ||
+    name.includes('hash-ladder') ||
+    name.includes('pull-registry')
   )
-  .sort()
-  .map(name => `runtime/__tests__/${name}`);
+);
+
+const collectCrossJRuntimeCoreTests = (directory: string): string[] => (
+  readdirSync(directory, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .flatMap(entry => {
+      const path = `${directory}/${entry.name}`;
+      if (entry.isDirectory()) return collectCrossJRuntimeCoreTests(path);
+      return entry.isFile() && isCrossJRuntimeCoreTest(entry.name) ? [path] : [];
+    })
+);
+
+const CROSS_J_RUNTIME_CORE_TESTS = collectCrossJRuntimeCoreTests('runtime/__tests__').sort();
 
 if (CROSS_J_RUNTIME_CORE_TESTS.length === 0) {
   throw new Error('RELEASE_GATE_CROSS_J_TEST_FAMILY_EMPTY');

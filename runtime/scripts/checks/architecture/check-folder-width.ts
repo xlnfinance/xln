@@ -12,7 +12,7 @@ export type FolderWidth = Readonly<{
 }>;
 
 export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
-  'runtime/__tests__': 333,
+  'runtime/__tests__': 292,
 };
 
 export const collectFolderWidths = (root: string, directory = root): FolderWidth[] => {

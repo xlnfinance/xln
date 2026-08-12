@@ -189,7 +189,7 @@
     "check:no-pre-mainnet-legacy": "bun runtime/scripts/checks/policy/check-no-pre-mainnet-legacy.ts",
     "check:no-legacy": "bun runtime/scripts/checks/policy/check-no-legacy.ts",
     "check:dead-code": "bunx knip --no-progress --include files,dependencies,unlisted,duplicates",
-    "check:canonical-payment-surface": "bun test runtime/__tests__/canonical-payment-surface.test.ts",
+    "check:canonical-payment-surface": "bun test runtime/__tests__/payments/core/canonical-payment-surface.test.ts",
     "check:determinism": "bun runtime/scripts/checks/architecture/check-determinism.ts",
     "check:determinism:static": "bun runtime/scripts/checks/architecture/check-determinism.ts --static-only",
     "check:j-event-catalog": "bun runtime/scripts/checks/consensus/check-j-event-catalog.ts",

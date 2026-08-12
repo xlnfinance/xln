@@ -345,7 +345,7 @@
 - Hub classification is now entity-driven only; MM can no longer be classified as a hub by runtime co-location.
 - Tightened public gossip metadata to the live fields used by routing/signing; dropped fake UI metadata usage (capacity/uptime/region chips).
 - Replaced stale E2E app-ready wait on page globals with visible app mount + scoped runtime-create wait.
-- Verified: bun test runtime/__tests__/relay-router.test.ts runtime/__tests__/routing-metadata.test.ts
+- Verified: bun test runtime/__tests__/relay-router.test.ts runtime/__tests__/payments/core/routing-metadata.test.ts
 - Verified: tests/e2e-payment.spec.ts (isolated)
 - Verified: tests/e2e-custody.spec.ts (isolated)
 - 2026-03-10T19:40:00Z frontend/runtime cleanup continued in small validated batches:
@@ -371,7 +371,7 @@
   - fixed one real bug on the way:
     - [ChatMessages.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/ChatMessages.svelte) now awaits `getXLN()` before calling `queueEntityInput`
   - verified:
-    - `bun test runtime/__tests__/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
+    - `bun test runtime/__tests__/payments/core/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
     - `cd frontend && bunx vite build --mode development`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-193333-245/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-193333-245/e2e-shard-00.log)
@@ -390,7 +390,7 @@
     - signature verification and P2P validation in [profile-signing.ts](/Users/egor/xln/runtime/networking/profile-signing.ts) and [p2p.ts](/Users/egor/xln/runtime/networking/p2p.ts)
     - debug/inspection views and fixtures updated to read `board.validators[0].publicKey`
   - verified once more:
-    - `bun test runtime/__tests__/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
+    - `bun test runtime/__tests__/payments/core/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
     - `cd frontend && bunx vite build --mode development`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-200142-038/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-200142-038/e2e-shard-00.log)
@@ -416,7 +416,7 @@
   - added a focused runtime regression test for the new explicit hub-bit behavior:
     - [entity-hub-profile.test.ts](/Users/egor/xln/runtime/__tests__/entity-hub-profile.test.ts)
   - verified:
-    - `bun test runtime/__tests__/entity-hub-profile.test.ts runtime/__tests__/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
+    - `bun test runtime/__tests__/entity-hub-profile.test.ts runtime/__tests__/payments/core/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
     - `cd frontend && bunx vite build --mode development`
     - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
@@ -441,10 +441,10 @@
     - [AccountPreview.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/AccountPreview.svelte)
     - [EntityPanelTabs.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/EntityPanelTabs.svelte)
   - added a focused runtime regression test:
-    - [routing-metadata.test.ts](/Users/egor/xln/runtime/__tests__/routing-metadata.test.ts)
+    - [routing-metadata.test.ts](/Users/egor/xln/runtime/__tests__/payments/core/routing-metadata.test.ts)
       - profiles carrying `metadata.position` are now rejected with `GOSSIP_PROFILE_METADATA_UNKNOWN_FIELD`
   - re-verified:
-    - `bun test runtime/__tests__/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
+    - `bun test runtime/__tests__/payments/core/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
     - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
     - `cd frontend && bunx vite build --mode development`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
@@ -584,7 +584,7 @@
   - Re-verified:
     - `bun x tsc --noEmit`
     - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
-    - `bun test runtime/__tests__/serialization-utils.test.ts runtime/__tests__/relay-router.test.ts runtime/__tests__/ids.test.ts runtime/__tests__/routing-metadata.test.ts`
+    - `bun test runtime/__tests__/serialization-utils.test.ts runtime/__tests__/relay-router.test.ts runtime/__tests__/ids.test.ts runtime/__tests__/payments/core/routing-metadata.test.ts`
     - targeted isolated E2E rerun:
       - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-ahb-isolated.spec.ts,tests/e2e-swap-isolated.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260311-041231-080/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-041231-080/e2e-shard-00.log)

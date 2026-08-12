@@ -1,0 +1,256 @@
+import { describe, expect, test } from 'bun:test';
+
+import { applyCommand, createBook, type BookState } from '../../../orderbook/core';
+import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
+import { createOrderbookExtState, ORDERBOOK_PRICE_SCALE, replaceOrderbookPair, SWAP_LOT_SCALE } from '../../../orderbook/types';
+import { validateBookAgainstOffers, validateBookStructure, validateEntityOrderbooks } from '../../../orderbook/validity';
+import type { AccountReplica, SwapOffer } from '../../../types/account';
+import type { EntityState } from '../../../entity/types';
+
+const makeOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
+  offerId: 'offer-1',
+  giveTokenId: 2,
+  giveAmount: SWAP_LOT_SCALE,
+  wantTokenId: 1,
+  wantAmount: (SWAP_LOT_SCALE * 1000n) / ORDERBOOK_PRICE_SCALE,
+  priceTicks: 1000n,
+  timeInForce: 0,
+  makerIsLeft: false,
+  createdHeight: 1,
+  ...overrides,
+});
+
+const makeAccount = (offerId: string, offer: SwapOffer): AccountReplica =>
+  ({
+    state: {
+      leftEntity: 'alice',
+      rightEntity: 'hub',
+      domain: {
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+      },
+      watchSeed: `0x${'11'.repeat(32)}`,
+      deltas: new Map(),
+      locks: new Map(),
+      swapOffers: new Map([[offerId, offer]]),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      jNonce: 0,
+    },
+    status: 'active',
+    mempool: [],
+    currentFrame: {
+      height: 0,
+      timestamp: 0,
+      jHeight: 0,
+      accountTxs: [],
+      prevFrameHash: '',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
+      deltas: [],
+      stateHash: '',
+      byLeft: true,
+    },
+    currentHeight: 0,
+    pendingSignatures: [],
+    rollbackCount: 0,
+    proofHeader: { fromEntity: 'alice', toEntity: 'hub', nextProofNonce: 1 },
+    proofBody: { tokenIds: [], deltas: [] },
+    pendingWithdrawals: new Map(),
+    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+  });
+
+const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): EntityState => {
+  const orderbookExt = createOrderbookExtState({
+    entityId: 'hub',
+    name: 'Hub',
+    spreadDistribution: {
+      makerBps: 0,
+      takerBps: 10_000,
+      hubBps: 0,
+      makerReferrerBps: 0,
+      takerReferrerBps: 0,
+    },
+    referenceTokenId: 2,
+    usdQuoteAuthorityEntityId: 'alice',
+    minTradeSize: 0n,
+    supportedPairs: ['1/2'],
+  });
+  replaceOrderbookPair(orderbookExt, '1/2', book);
+
+  return ({
+    entityId: 'hub',
+    height: 1,
+    timestamp: 0,
+    nonces: new Map(),
+    proposals: new Map(),
+    config: {} as EntityState['config'],
+    reserves: new Map(),
+    accounts: new Map([['alice', makeAccount(offerId, offer)]]),
+    lastFinalizedJHeight: 0,
+    jBlockChain: [],
+    profile: { name: 'Hub', isHub: true, avatar: '', bio: '', website: '' },
+    htlcRoutes: new Map(),
+    htlcFeesEarned: 0n,
+    orderbookExt,
+    lockBook: new Map(),
+  }) as EntityState;
+};
+
+describe('orderbook validity', () => {
+  test('accepts structurally valid book and matching open offers', () => {
+    const book = applyCommand(
+      createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
+      {
+        kind: 0,
+        ownerId: 'hub',
+        orderId: 'alice:offer-1',
+        side: 1,
+        tif: 0,
+        postOnly: false,
+        priceTicks: 1000n,
+        qtyLots: 1n,
+      },
+    ).state;
+
+    const state = makeState(book);
+
+    expect(validateBookStructure(book).ok).toBe(true);
+    expect(validateBookAgainstOffers(state).ok).toBe(true);
+    expect(validateEntityOrderbooks(state).ok).toBe(true);
+  });
+
+  test('reports missing, orphaned, and mismatched orders', () => {
+    let book = createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'wrong-owner',
+      orderId: 'alice:offer-1',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 1001n,
+      qtyLots: 1n,
+    }).state;
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'ghost',
+      orderId: 'ghost:offer-x',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 1005n,
+      qtyLots: 1n,
+    }).state;
+
+    const report = validateBookAgainstOffers(makeState(book));
+    expect(report.ok).toBe(false);
+    expect(report.orphanedInBook).toContain('ghost:offer-x');
+    expect(report.mismatched.some((item) => item.swapKey === 'alice:offer-1' && item.field === 'priceTicks')).toBe(true);
+    expect(report.mismatched.some((item) => item.swapKey === 'alice:offer-1' && item.field === 'ownerId')).toBe(true);
+  });
+
+  test('reports invalid open offers that cannot be represented in the book', () => {
+    const book = createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 });
+    const invalidOffer = makeOffer({ giveAmount: SWAP_LOT_SCALE - 1n });
+    const report = validateBookAgainstOffers(makeState(book, 'offer-1', invalidOffer));
+    expect(report.ok).toBe(false);
+    expect(report.invalidOffers).toEqual([{ swapKey: 'alice:offer-1', reason: 'lot-misaligned' }]);
+  });
+
+  test('accepts offers with priceTicks above qty-lot limits', () => {
+    const hugePriceTicks = 5_000_000_000n;
+    const book = applyCommand(
+      createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
+      {
+        kind: 0,
+        ownerId: 'hub',
+        orderId: 'alice:offer-1',
+        side: 1,
+        tif: 0,
+        postOnly: false,
+        priceTicks: hugePriceTicks,
+        qtyLots: 1n,
+      },
+    ).state;
+
+    const report = validateBookAgainstOffers(makeState(book, 'offer-1', makeOffer({ priceTicks: hugePriceTicks })));
+    expect(report.invalidOffers).toEqual([]);
+    expect(report.ok).toBe(true);
+  });
+
+  test('accepts order quantities above the old uint32 lot ceiling', () => {
+    const hugeQtyLots = 0x1_0000_0000n + 123n;
+    const hugeBaseAmount = hugeQtyLots * SWAP_LOT_SCALE;
+    const hugeQuoteAmount = (hugeBaseAmount * 1000n) / ORDERBOOK_PRICE_SCALE;
+    const book = applyCommand(
+      createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
+      {
+        kind: 0,
+        ownerId: 'hub',
+        orderId: 'alice:offer-1',
+        side: 1,
+        tif: 0,
+        postOnly: false,
+        priceTicks: 1000n,
+        qtyLots: hugeQtyLots,
+      },
+    ).state;
+
+    const report = validateBookAgainstOffers(makeState(
+      book,
+      'offer-1',
+      makeOffer({
+        giveAmount: hugeBaseAmount,
+        wantAmount: hugeQuoteAmount,
+      }),
+    ));
+    expect(report.invalidOffers).toEqual([]);
+    expect(report.ok).toBe(true);
+  });
+
+  test('reports broken sparse orderbook pair index entries', () => {
+    const book = applyCommand(
+      createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
+      {
+        kind: 0,
+        ownerId: 'hub',
+        orderId: 'alice:offer-1',
+        side: 1,
+        tif: 0,
+        postOnly: false,
+        priceTicks: 1000n,
+        qtyLots: 1n,
+      },
+    ).state;
+
+    const state = makeState(book);
+    state.orderbookExt!.orderPairs = new Map([
+      ['alice:offer-1', ['9/9']],
+      ['ghost:offer-x', ['4/6']],
+    ]);
+
+    const report = validateBookAgainstOffers(state);
+    expect(report.ok).toBe(false);
+    expect(
+      report.mismatched.some((item) =>
+        item.swapKey === 'alice:offer-1'
+        && item.field === 'pairIndex'
+        && item.expected === '1/2'
+        && item.actual === '9/9',
+      ),
+    ).toBe(true);
+    expect(
+      report.mismatched.some((item) =>
+        item.swapKey === 'ghost:offer-x'
+        && item.field === 'pairIndex'
+        && item.expected === ''
+        && item.actual === '4/6',
+      ),
+    ).toBe(true);
+  });
+});
