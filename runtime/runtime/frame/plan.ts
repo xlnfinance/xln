@@ -3,7 +3,7 @@ import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import type {
   PlannedRemoteOutput,
   RuntimeOutputRoutingDeps,
-} from '../output-routing';
+} from '../routing/output-routing';
 import type { RuntimeProcessProfile } from './process-profile';
 
 const runtimeLog = createStructuredLogger('runtime');

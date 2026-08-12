@@ -1,4 +1,4 @@
-import { markRestoredReliableOutputsDue } from '../../../runtime/output-routing';
+import { markRestoredReliableOutputsDue } from '../../../runtime/routing/output-routing';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { CheckpointRestoreOptions } from '../checkpoint';
 import type { PersistedFrameJournal } from '../../types';

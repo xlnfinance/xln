@@ -1,6 +1,6 @@
-import { clearPendingAuditEvents } from '../../env-events';
+import { clearPendingAuditEvents } from '../../observability/env-events';
 import { transitionRuntimeLifecycle } from '../../lifecycle';
-import { ensureRuntimeInfrastructure } from '../../runtime-infrastructure';
+import { ensureRuntimeInfrastructure } from '../../infrastructure/runtime-infrastructure';
 import type { RuntimeReplica } from '../../types';
 import type { FrameExecutionState } from '../input/execution-state';
 import {

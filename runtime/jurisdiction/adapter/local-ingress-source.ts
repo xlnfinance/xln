@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { JAdapter } from './types';
-import { getLiveJAdapter } from '../../runtime/live-jadapters';
+import { getLiveJAdapter } from '../../runtime/jurisdiction/live-jadapters';
 
 export type LocalJEventIngressSource = JAdapter | JReplica;
 

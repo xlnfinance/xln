@@ -36,7 +36,7 @@ import {
   attachLiveJAdapter,
   getLiveJAdapter,
   getLiveJAdapterEntries,
-} from '../runtime/live-jadapters';
+} from '../runtime/jurisdiction/live-jadapters';
 import { getJurisdictionIdentityRef } from '../jurisdiction/machine/jurisdiction-runtime';
 import { getJurisdictionStackId, requireJurisdictionChainId } from '../jurisdiction/machine/jurisdiction-stack';
 import { type DirectWebSocket } from '../network/p2p/direct-runtime-bun';

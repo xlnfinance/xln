@@ -1,16 +1,16 @@
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from '../../entity/consensus/leader';
 import type { RuntimeReplica, RuntimeInput } from '../types';
 import { copyLocalJAuthorityRuntimeTxAuthorization } from '../../jurisdiction/machine/registration-evidence';
-import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
+import { cloneIsolatedRuntimeInput } from '../input-pipeline/input-clone';
 import { copyDeterministicHtlcTestSecretCapability } from '../../protocol/htlc/test-secret-capability';
-import { copyLocalRuntimeAdapterCommandAuthorization } from '../command-frontier-auth';
+import { copyLocalRuntimeAdapterCommandAuthorization } from '../command/frontier-auth';
 import { copyLocalNumberedRegistrationAuthorization } from '../registration/numbered-registration-auth';
 import { buildCanonicalRuntimeStateSnapshot } from '../../storage/wal/snapshot';
 import { encodeBuffer } from '../../storage/codec';
-import { copyLocalEntityProviderActionRuntimeTxAuthorization } from '../entity-provider-action-submit-auth';
-import { copyLocalJImportResultRuntimeTxAuthorization } from '../jurisdiction-import';
-import { copyLocalJSubmitRuntimeTxAuthorization } from '../j-submit-state';
-import { copyLocalScheduledWakeAuthorization } from '../scheduled-wake';
+import { copyLocalEntityProviderActionRuntimeTxAuthorization } from '../registration/entity-provider-action-submit-auth';
+import { copyLocalJImportResultRuntimeTxAuthorization } from '../jurisdiction/jurisdiction-import';
+import { copyLocalJSubmitRuntimeTxAuthorization } from '../jurisdiction/j-submit-state';
+import { copyLocalScheduledWakeAuthorization } from '../input-pipeline/scheduled-wake';
 
 export const cloneRuntimeFrameMempool = (input: RuntimeInput): RuntimeInput => {
   const cloned = cloneIsolatedRuntimeInput(input);

@@ -7,7 +7,7 @@ import { createJAdapter } from '../jurisdiction/adapter';
 import {
   attachLiveJAdapter,
   getLiveJAdapter,
-} from '../runtime/live-jadapters';
+} from '../runtime/jurisdiction/live-jadapters';
 import {
   applyJEventsToEnv,
   buildJEventsRuntimeInput,

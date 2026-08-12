@@ -2,7 +2,7 @@ import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../../storage
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { RuntimeInput } from '../../runtime/types';
 import type { XlnProtocolVersion } from '../../protocol/version';
-import type { RuntimeIngressReceipt } from '../../runtime/ingress-receipts';
+import type { RuntimeIngressReceipt } from '../../runtime/input-pipeline/ingress-receipts';
 import type {
   NumberedRegistrationCommand,
   NumberedRegistrationCommandResult,

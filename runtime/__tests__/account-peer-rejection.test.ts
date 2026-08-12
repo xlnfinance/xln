@@ -10,7 +10,7 @@ import { safeStringify } from '../protocol/serialization';
 import { createEmptyEnv } from '../runtime';
 import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import { createEntityProposalFixture } from './helpers/entity-proposal-fixture';
-import { applyMergedEntityInputs } from '../runtime/entity-inputs';
+import { applyMergedEntityInputs } from '../runtime/input-pipeline/entity-inputs';
 import { buildSignedEntityCommand } from '../entity/command';
 import { signedEntityCommandTx } from '../entity/command/command-codec';
 import { createDisputeProofHashWithNonce } from '../protocol/dispute/proof-builder';

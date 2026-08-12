@@ -57,8 +57,8 @@ import type { Profile } from '../../entity/profile';
 import {
   projectRuntimeIngressReceiptForWire,
   type RuntimeIngressReceipt,
-} from '../../runtime/ingress-receipts';
-import { calculateSolvency } from '../../runtime/solvency';
+} from '../../runtime/input-pipeline/ingress-receipts';
+import { calculateSolvency } from '../../runtime/finance/solvency';
 import { acquireRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 
 export type RuntimeAdapterResolveContext = {

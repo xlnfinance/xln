@@ -1,16 +1,16 @@
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j/index';
 import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '../jurisdiction/machine/jurisdiction-runtime';
-import { resolveEntityDefaultProposerId } from './entity-output-signer';
+import { resolveEntityDefaultProposerId } from './delivery/entity-output-signer';
 import type { AccountState } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityState } from '../entity/types';
 import type { RuntimeReplica, RuntimeInput } from './types';
 import { getWallClockMs } from '../infra/time';
-import { buildDebtEnforcementRuntimeInputFromProjection } from './debt-enforcement-input';
-import type { DebtEnforcementProjectionRuntimeInputParams } from './debt-enforcement-input';
+import { buildDebtEnforcementRuntimeInputFromProjection } from './transactions/debt-enforcement-input';
+import type { DebtEnforcementProjectionRuntimeInputParams } from './transactions/debt-enforcement-input';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs } from '../extensions/cross-j/market';
-import { getLiveJAdapter } from './live-jadapters';
+import { getLiveJAdapter } from './jurisdiction/live-jadapters';
 
 export function getActiveJAdapter(env: RuntimeReplica): JAdapter | null {
   if (!env.activeJurisdiction) return null;

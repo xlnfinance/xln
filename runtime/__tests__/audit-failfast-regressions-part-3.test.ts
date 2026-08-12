@@ -13,7 +13,7 @@ import {
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../account/commitment/state-root';
 
-import { resolveCertifiedAccountCounterpartyProposer } from '../runtime/account-counterparty-route';
+import { resolveCertifiedAccountCounterpartyProposer } from '../runtime/routing/account-counterparty-route';
 
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 
@@ -177,17 +177,17 @@ import {
 
 import { createJReplica } from '../scenarios/boot';
 
-import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/entity-inputs';
+import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/input-pipeline/entity-inputs';
 
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 
-import { applyStorageChanges } from '../runtime/env-events';
+import { applyStorageChanges } from '../runtime/observability/env-events';
 
-import { submitRuntimeJOutbox } from '../runtime/j-submit';
+import { submitRuntimeJOutbox } from '../runtime/jurisdiction/j-submit';
 
 import { registerStructuredLogSink } from '../infra/logger';
 
-import { buildJSubmitAttemptId, registerPendingCommittedJOutbox } from '../runtime/j-submit-state';
+import { buildJSubmitAttemptId, registerPendingCommittedJOutbox } from '../runtime/jurisdiction/j-submit-state';
 
 import { buffersEqual, safeStringify } from '../protocol/serialization';
 
@@ -247,7 +247,7 @@ import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
   resolveEntityProposerId,
-} from '../runtime/entity-output-signer';
+} from '../runtime/delivery/entity-output-signer';
 
 import { QUOTE_EXPIRY_MS } from '../types/finance/rebalance';
 
@@ -255,7 +255,7 @@ import type { AccountFrame, AccountInput, AccountReplica, AccountState, AccountT
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 import type { JInput } from '../jurisdiction/machine/input';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../types/jurisdiction-events';

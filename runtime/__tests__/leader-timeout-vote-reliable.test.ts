@@ -20,7 +20,7 @@ import { initCrontab } from '../entity/scheduler';
 import {
   createDueScheduledWakeInputs,
   refreshScheduledWakeIndex,
-} from '../runtime/scheduled-wake';
+} from '../runtime/input-pipeline/scheduled-wake';
 import {
   buildPendingNetworkOutputs,
   dispatchEntityOutputs,
@@ -28,7 +28,7 @@ import {
   getReliableOutputIdentity,
   sendEntityInputWithRouting,
   type RuntimeOutputRoutingDeps,
-} from '../runtime/output-routing';
+} from '../runtime/routing/output-routing';
 import {
   applyReliableDeliveryReceipts,
   commitReliableIngress,

@@ -6,8 +6,8 @@ import {
   finalizeReliableIngressCommit,
   registerReliableIngress,
 } from '../runtime/reliable/reliable-delivery.ts';
-import { applyRecoveryRuntimeOutputPlan } from '../runtime/recovery-output';
-import type { RuntimeOutputRoutingDeps } from '../runtime/output-routing';
+import { applyRecoveryRuntimeOutputPlan } from '../runtime/delivery/recovery-output';
+import type { RuntimeOutputRoutingDeps } from '../runtime/routing/output-routing';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { createEmptyEnv } from '../runtime';
 import type { DeliverableEntityInput, RuntimeReplica } from '../runtime/types';

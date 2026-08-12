@@ -1,6 +1,6 @@
 import type { RuntimeReplica, RuntimeInput } from '../../types';
-import { requireRuntimeMempool } from '../../input-queue';
-import { ensureRuntimeInfrastructure } from '../../runtime-infrastructure';
+import { requireRuntimeMempool } from '../../input-pipeline/input-queue';
+import { ensureRuntimeInfrastructure } from '../../infrastructure/runtime-infrastructure';
 import type { FrameExecutionState } from './execution-state';
 import {
   cloneRuntimeFrameMempool,

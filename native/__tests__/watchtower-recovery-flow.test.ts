@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { AbiCoder, HDNodeWallet, Interface, Mnemonic, ParamType, Wallet, getIndexedAccountPath, hexlify, keccak256, solidityPacked, toUtf8Bytes } from 'ethers';
 
 import * as xln from '../../runtime/runtime.ts';
-import { getLiveJAdapter } from '../../runtime/runtime/live-jadapters';
+import { getLiveJAdapter } from '../../runtime/runtime/jurisdiction/live-jadapters';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../runtime/watchtower/standalone-server';
 import {
   buildTowerAppointmentOwnerMessage,

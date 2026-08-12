@@ -41,7 +41,7 @@ import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth 
 import { resolveSocketPeerAddress } from './health-redaction';
 import { listLocalControlEntities } from './control-entities';
 import { getAccountReplica, getEntityReplicaById } from './entity-lookup';
-import { createRuntimeIngressReceiptStore } from '../../runtime/ingress-receipts';
+import { createRuntimeIngressReceiptStore } from '../../runtime/input-pipeline/ingress-receipts';
 import { createRelayStore, pushDebugEvent, removeClient } from '../../network/relay/store';
 import { openRelayIncidentJournal } from '../../network/relay/incident-journal';
 import { maybeHandleRelayDebugRequest } from '../../network/relay/debug-http';
@@ -93,7 +93,7 @@ import {
 import { createTokenCatalogController } from './token-catalog';
 import { buildHubDiscoveryPayload } from './hub-discovery';
 import { buildDebugEntitiesPayload, buildKnownProfileBundle } from './gossip-profiles';
-import { attachLiveJAdapter } from '../../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../../runtime/jurisdiction/live-jadapters';
 import { maybeHandleDebugDumpsRequest } from './debug-dumps';
 import { handleCreditRequest } from './credit-request';
 import { handleLendingStateRequest } from './lending';

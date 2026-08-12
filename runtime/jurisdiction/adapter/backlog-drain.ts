@@ -9,7 +9,7 @@ import {
 } from './watcher';
 import { safeStringify } from '../../protocol/serialization';
 import { scheduler } from 'node:timers/promises';
-import { getLiveJAdapterEntries } from '../../runtime/live-jadapters';
+import { getLiveJAdapterEntries } from '../../runtime/jurisdiction/live-jadapters';
 
 const J_WATCHER_DRAIN_STALL_TIMEOUT_MS = 60_000;
 const J_WATCHER_DRAIN_RETRY_DELAY_MS = 100;

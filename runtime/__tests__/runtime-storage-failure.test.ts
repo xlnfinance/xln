@@ -13,7 +13,7 @@ import { createFrameExecutionState } from '../runtime/frame/input/execution-stat
 import { handleRuntimeFrameStorageFailure } from '../runtime/frame/lifecycle/storage-failure';
 import { createRuntimeFrameTransaction } from '../runtime/frame/transaction';
 import { dbRootPath } from '../runtime/platform';
-import { ensureRuntimeInfrastructure } from '../runtime/runtime-infrastructure';
+import { ensureRuntimeInfrastructure } from '../runtime/infrastructure/runtime-infrastructure';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import {
   buildRuntimeFrameCommitProofExpectation,

@@ -89,7 +89,7 @@ import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry'
 import type { FrameLogEntry } from '../types/logging';
 import type { EntityState } from '../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
-import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
+import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-pipeline/input-clone';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
@@ -123,7 +123,7 @@ import {
   buildDurableRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimeMachineSnapshot,
 } from './wal/snapshot';
-import { buildDurableOutputRetryState } from '../runtime/durable-output-retry';
+import { buildDurableOutputRetryState } from '../runtime/delivery/durable-output-retry';
 import { verifyStorageSnapshotIntegrity } from './verify';
 import {
   validateAccountJClaimNodeValue,

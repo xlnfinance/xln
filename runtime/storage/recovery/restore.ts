@@ -1,15 +1,15 @@
 import { Level } from 'level';
-import { type RuntimeOutputRoutingDeps } from '../../runtime/output-routing';
+import { type RuntimeOutputRoutingDeps } from '../../runtime/routing/output-routing';
 import {
   applyCommittedLocalReliableReceipts,
   applyRecoveryRuntimeOutputPlan,
   hasPendingLocalReliableOutput,
-} from '../../runtime/recovery-output';
+} from '../../runtime/delivery/recovery-output';
 import {
   assertPersistedContractConfigReady,
   reconcileRecoveryInfraEffects,
   registerCommittedSingleSignerWallets,
-} from '../../runtime/recovery-infra';
+} from '../../runtime/recovery/recovery-infra';
 import { rehydrateRestoredRuntimeInfra } from '../../runtime/infra';
 import { runtimeIsBrowser } from '../../infra/process/runtime-process';
 import { assertBrowserVMJurisdiction } from '../../jurisdiction/adapter/browservm/browservm-registry';
@@ -17,7 +17,7 @@ import { replayPersistedRuntimeJournals } from './journal';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../../runtime/types';
 import type { PersistedFrameJournal } from '../types';
 import type { RuntimeRecoveryBundleV1 } from './bundle/types';
-import { loadGossipProfilesFromInfraDb } from '../../runtime/infra-gossip-store';
+import { loadGossipProfilesFromInfraDb } from '../../runtime/infrastructure/gossip-store';
 import type { StorageDbRole } from '../runtime-dbs';
 import {
   decodeCheckpointSnapshot,

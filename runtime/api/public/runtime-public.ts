@@ -4,7 +4,7 @@
  * These helpers do not participate in the Runtime frame transition. Keeping
  * them outside runtime/runtime/composition.ts makes the money-moving path easier to audit.
  */
-export { entityNeedsPeriodicWake } from '../../runtime/wake';
+export { entityNeedsPeriodicWake } from '../../runtime/input-pipeline/wake';
 export * from './public-utilities';
 export { planSwapInboundCapacity, readSwapAccountCapacity } from '../../account/swap/swap-inbound-plan';
 export type {
@@ -17,16 +17,16 @@ export {
   assertCrossJurisdictionSwapTargetReady,
   buildDeterministicSwapOfferId,
   planSwapCommand,
-} from '../../runtime/swap-command-plan';
-export { assertCrossJurisdictionSwapTargetReadyInEnv } from '../../runtime/swap-target-readiness';
+} from '../../runtime/finance/swap-command-plan';
+export { assertCrossJurisdictionSwapTargetReadyInEnv } from '../../runtime/finance/swap-target-readiness';
 export type {
   CrossJurisdictionSwapCommandPlan,
   SameJurisdictionSwapCommandPlan,
   SwapCommandPlan,
   SwapCommandPlanInput,
   SwapCommandPreparedOrder,
-} from '../../runtime/swap-command-plan';
-export { enqueueRuntimeInput } from '../../runtime/input-queue';
+} from '../../runtime/finance/swap-command-plan';
+export { enqueueRuntimeInput } from '../../runtime/input-pipeline/input-queue';
 export { resolveRuntimeAdapterRead, EmbeddedRuntimeAdapter, RemoteRuntimeAdapter } from '../runtime-adapter';
 export type {
   RuntimeAdapter,

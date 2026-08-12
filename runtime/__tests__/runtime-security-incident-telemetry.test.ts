@@ -6,7 +6,7 @@ import { createEmptyEnv } from '../runtime';
 import {
   readRuntimeSecurityIncidentTelemetry,
   recordRuntimeSecurityIncident,
-} from '../runtime/security-incidents';
+} from '../runtime/observability/security-incidents';
 import {
   parseRuntimeSecurityIncidentTelemetry,
   syncRuntimeSecurityTelemetry,

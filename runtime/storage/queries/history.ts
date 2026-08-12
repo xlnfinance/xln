@@ -8,7 +8,7 @@ import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
   cloneIsolatedRuntimeSnapshot,
-} from '../../runtime/input-clone';
+} from '../../runtime/input-pipeline/input-clone';
 import { cloneIsolatedEntityInput } from '../../entity/state/input-clone';
 import {
   buildRuntimeActivityEvents,

@@ -4,8 +4,8 @@ import {
   buildDurableOutputRetryState,
   restoreDurableOutputRetryState,
   validateDurableOutputRetryState,
-} from '../runtime/durable-output-retry';
-import { buildRouteOutputKey } from '../runtime/output-routing';
+} from '../runtime/delivery/durable-output-retry';
+import { buildRouteOutputKey } from '../runtime/routing/output-routing';
 import type { RuntimeReplica, RoutedEntityInput } from '../runtime/types';
 
 describe('durable output retry', () => {

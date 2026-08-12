@@ -1,6 +1,6 @@
-import { materializePendingJurisdictionImportResults } from '../../jurisdiction-import';
-import { submitRuntimeJOutbox, type RuntimeJOutboxQueue } from '../../j-submit';
-import { ensureRuntimeInfrastructure } from '../../runtime-infrastructure';
+import { materializePendingJurisdictionImportResults } from '../../jurisdiction/jurisdiction-import';
+import { submitRuntimeJOutbox, type RuntimeJOutboxQueue } from '../../jurisdiction/j-submit';
+import { ensureRuntimeInfrastructure } from '../../infrastructure/runtime-infrastructure';
 import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import { getWallClockMs } from '../../../infra/time';
@@ -13,7 +13,7 @@ import {
 import type { FrameExecutionState } from '../input/execution-state';
 import type { RuntimeFrameOutputPlan } from '../plan';
 import type { RuntimeProcessProfile } from '../process-profile';
-import type { RuntimeOutputRoutingDeps } from '../../output-routing';
+import type { RuntimeOutputRoutingDeps } from '../../routing/output-routing';
 
 export type CommittedRuntimeEffectDeps = {
   enqueueRuntimeInputs: RuntimeJOutboxQueue;

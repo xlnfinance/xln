@@ -16,13 +16,13 @@ import {
 } from './reliable-frontier.ts';
 import {
   pruneReceiptedReliableOutputs,
-} from '../output-routing.ts';
+} from '../routing/output-routing.ts';
 import {
   ensureReliableState,
   getInputReliableIdentity,
   getReliableDeliveryReceiptValidationError,
 } from './reliable-receipt.ts';
-import { cloneIsolatedRoutedEntityInputs } from '../input-clone.ts';
+import { cloneIsolatedRoutedEntityInputs } from '../input-pipeline/input-clone.ts';
 
 export type ReliableReceiptSenderCheckpoint = {
   pendingNetworkOutputs: RoutedEntityInput[];

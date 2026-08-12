@@ -78,7 +78,7 @@ const entityConsensusPaths = [
   'runtime/entity/consensus/proposal/single-signer-frame.ts',
 ];
 const entityConsensusPath = entityConsensusPaths.join(', ');
-const envEventsPath = 'runtime/runtime/env-events.ts';
+const envEventsPath = 'runtime/runtime/observability/env-events.ts';
 const entityEffectPublicationPath = 'runtime/runtime/entity-input/entity-input-output.ts';
 const entityFramePath = 'runtime/entity/consensus/frame.ts';
 const hankoSigningPath = 'runtime/hanko/signing.ts';

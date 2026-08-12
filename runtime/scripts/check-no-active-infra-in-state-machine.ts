@@ -19,7 +19,7 @@ const TARGETS = [
   'runtime/entity/consensus/state-quota.ts',
   'runtime/entity/consensus/input/consensus.ts',
   'runtime/entity/consensus/frame/application.ts',
-  'runtime/runtime/j-submit.ts',
+  'runtime/runtime/jurisdiction/j-submit.ts',
 ];
 
 const BANNED_PATTERNS: Array<{ pattern: RegExp; label: string }> = [

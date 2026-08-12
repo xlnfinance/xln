@@ -6,7 +6,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import { initCrontab } from '../entity/scheduler';
 import { dbRootPath } from '../runtime/platform';
 import { safeStringify } from '../protocol/serialization';
-import { cloneIsolatedRuntimeSnapshot } from '../runtime/input-clone';
+import { cloneIsolatedRuntimeSnapshot } from '../runtime/input-pipeline/input-clone';
 import {
   closeInfraDb,
   closeRuntimeDb,
@@ -591,7 +591,7 @@ describe('runtime frame atomicity', () => {
 
       expect(failure).toBeInstanceOf(Error);
       expect((failure as Error).message).toBe('RUNTIME_TX_UNKNOWN: deliberatelyInvalidRuntimeTx');
-      expect((failure as Error).stack).toContain('runtime/runtime/tx-handlers.ts');
+      expect((failure as Error).stack).toContain('runtime/runtime/transactions/tx-handlers.ts');
       expect((failure as Error).stack).not.toContain('console.error:');
     } finally {
       restoreStrictScenario();

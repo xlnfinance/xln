@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { collectAppliedAccountSenderHints } from '../runtime/entity-inputs';
+import { collectAppliedAccountSenderHints } from '../runtime/input-pipeline/entity-inputs';
 import type { RoutedEntityInput } from '../runtime/types';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;

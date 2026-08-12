@@ -10,11 +10,11 @@ import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, Runtim
 import type { JInput } from '../../../jurisdiction/machine/input';
 import { DEBUG } from '../../../infra/debug-flags';
 import { getPerfMs } from '../../../infra/time';
-import { attachEventEmitters } from '../../env-events';
-import { applyMergedEntityInputs } from '../../entity-inputs';
-import type { RuntimeEntityRoutingDeps } from '../../entity-routing';
+import { attachEventEmitters } from '../../observability/env-events';
+import { applyMergedEntityInputs } from '../../input-pipeline/entity-inputs';
+import type { RuntimeEntityRoutingDeps } from '../../routing/entity-routing';
 import { applyReliableDeliveryReceipts, type ReliableIngressCommit } from '../../reliable/reliable-delivery.ts';
-import { applyRuntimeTx } from '../../tx-handlers';
+import { applyRuntimeTx } from '../../transactions/tx-handlers';
 import {
   atomicCrossJPairIndexesThatDidNotCommit,
   admitAtomicCrossJAccountInputs,

@@ -24,7 +24,7 @@ import { cacheCommittedAccountJClaimNodeChanges } from '../../entity/account/acc
 import {
   applyStorageChanges,
   publishEntityCandidateEffects,
-} from '../env-events.ts';
+} from '../observability/env-events.ts';
 
 export const recordEntityInputProfile = (
   context: RuntimeEntityInputBatchContext,

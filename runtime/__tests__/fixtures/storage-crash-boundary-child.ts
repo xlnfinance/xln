@@ -56,11 +56,11 @@ import {
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
 } from '../../jurisdiction/machine/j-prefix-consensus';
-import { applyRuntimeStorageChanges } from '../../runtime/env-events';
-import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
-import { collectDueJSubmitRuntimeTxs } from '../../runtime/j-submit-scheduler';
-import { registerPendingCommittedJOutbox } from '../../runtime/j-submit-state';
-import { applyRuntimeTx } from '../../runtime/tx-handlers';
+import { applyRuntimeStorageChanges } from '../../runtime/observability/env-events';
+import { cloneIsolatedRuntimeInput } from '../../runtime/input-pipeline/input-clone';
+import { collectDueJSubmitRuntimeTxs } from '../../runtime/jurisdiction/j-submit-scheduler';
+import { registerPendingCommittedJOutbox } from '../../runtime/jurisdiction/j-submit-state';
+import { applyRuntimeTx } from '../../runtime/transactions/tx-handlers';
 import {
   readStorageHead,
   saveRuntimeFrameToStorage,

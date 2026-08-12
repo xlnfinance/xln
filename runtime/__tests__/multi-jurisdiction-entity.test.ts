@@ -36,7 +36,7 @@ import { installCanonicalRegistrationEvidence } from './helpers/registration-evi
 import { createTestJReplica } from './helpers/j-replica';
 import { resolveDbPath } from '../storage/runtime-dbs';
 import { SigningKey, computeAddress } from 'ethers';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;

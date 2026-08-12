@@ -4,8 +4,8 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import type { EntityReplica, EntityState } from '../entity/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { createEmptyEnv } from '../runtime';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
-import { registerCommittedSingleSignerWallets } from '../runtime/recovery-infra';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
+import { registerCommittedSingleSignerWallets } from '../runtime/recovery/recovery-infra';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const entityId = `0x${'11'.repeat(32)}`;

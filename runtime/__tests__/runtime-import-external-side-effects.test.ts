@@ -10,7 +10,7 @@ import { setScenarioStorageEnabled } from '../scenarios/helpers';
 import {
   buildJurisdictionImportRequestHash,
   normalizeJurisdictionImportRequest,
-} from '../runtime/jurisdiction-import';
+} from '../runtime/jurisdiction/jurisdiction-import';
 import {
   createEmptyEnv,
   closeInfraDb,
@@ -20,7 +20,7 @@ import {
   loadEnvFromDB,
   processRuntime,
 } from '../runtime';
-import { getLiveJAdapter } from '../runtime/live-jadapters';
+import { getLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 
 const TEST_RUN_ID = `${globalThis.process.pid}-${Date.now()}`;
 const cleanupNamespaces: string[] = [];

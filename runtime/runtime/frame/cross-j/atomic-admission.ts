@@ -2,11 +2,11 @@ import { createStructuredLogger } from '../../../infra/logger';
 import { safeStringify } from '../../../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type { RuntimeReplica, RoutedEntityInput } from '../../types';
-import type { RuntimeEntityInputApplyResult } from '../../entity-inputs';
+import type { RuntimeEntityInputApplyResult } from '../../input-pipeline/entity-inputs';
 import {
   selectMatchedCrossJAccountInputPairs,
   selectPotentialCrossJAccountInputPairs,
-} from '../../entity-routing';
+} from '../../routing/entity-routing';
 import {
   recordRejectedAtomicCrossJInputs,
   summarizeAtomicCrossJAccountInput,

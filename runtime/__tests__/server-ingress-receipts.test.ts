@@ -3,7 +3,7 @@ import type { RuntimeInput } from '../runtime/types';
 import {
   createRuntimeIngressReceiptStore,
   fingerprintRuntimeIngressInput,
-} from '../runtime/ingress-receipts';
+} from '../runtime/input-pipeline/ingress-receipts';
 
 describe('runtime ingress receipts', () => {
   test('tracks pending enqueue until the exact runtime input commits', () => {

@@ -7,7 +7,7 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
 } from '../extensions/cross-j';
 import { createEmptyEnv } from '../runtime';
-import { selectMatchedCrossJAccountInputPairs } from '../runtime/entity-routing';
+import { selectMatchedCrossJAccountInputPairs } from '../runtime/routing/entity-routing';
 import type { AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { RoutedEntityInput } from '../runtime/types';

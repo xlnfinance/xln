@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildDebtEnforcementRuntimeInputFromProjection } from '../../runtime/runtime/debt-enforcement-input';
+import { buildDebtEnforcementRuntimeInputFromProjection } from '../../runtime/runtime/transactions/debt-enforcement-input';
 
 describe('debt enforcement RuntimeInput builder', () => {
   test('builds debt enforcement j-input from projection data', () => {

@@ -2,7 +2,7 @@ import type { EntityInputOutcome } from '../../entity/consensus/index.ts';
 import type { EntityTx } from '../../types/entity-tx.ts';
 import type { JInput } from '../../jurisdiction/machine/input.ts';
 import type { RoutedEntityInput } from '../types.ts';
-import type { RuntimeEntityRoutingDeps } from '../entity-routing.ts';
+import type { RuntimeEntityRoutingDeps } from '../routing/entity-routing.ts';
 import {
   classifyEntityInputApplyFailure,
   type EntityInputApplyFailureKind,

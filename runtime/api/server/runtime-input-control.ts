@@ -1,7 +1,7 @@
 import type { RuntimeReplica, RuntimeInput } from '../../runtime/types';
 import { serializeTaggedJson } from '../../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
-import type { createRuntimeIngressReceiptStore } from '../../runtime/ingress-receipts';
+import type { createRuntimeIngressReceiptStore } from '../../runtime/input-pipeline/ingress-receipts';
 import type { parseTaggedControlBody } from './auth';
 import type { enqueueRuntimeInput } from '../../runtime';
 import { decodeRuntimeInput } from '../../runtime/input-schema';

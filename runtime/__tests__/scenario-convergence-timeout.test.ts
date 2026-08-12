@@ -7,7 +7,7 @@ import {
   convergeWithOffline,
   processWithOffline,
 } from '../scenarios/helpers';
-import { buildRouteOutputKey } from '../runtime/output-routing';
+import { buildRouteOutputKey } from '../runtime/routing/output-routing';
 import { registerReliableIngress } from '../runtime/reliable/reliable-delivery.ts';
 import type { DeliverableEntityInput } from '../runtime/types';
 import type { JPrefixAttestation } from '../types/jurisdiction-events';

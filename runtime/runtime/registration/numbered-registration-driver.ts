@@ -1,8 +1,8 @@
 import { requireRuntimeJurisdictionConfigByName } from '../../jurisdiction/machine/jurisdiction-runtime';
 import { registrationEvidenceKey } from '../../jurisdiction/machine/registration-evidence';
-import { enqueueRuntimeInput } from '../input-queue';
+import { enqueueRuntimeInput } from '../input-pipeline/input-queue';
 import { registerEnvChangeCallback, registerRuntimeFrameCommitCallback } from '../loop/loop-environment.ts';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
+import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure';
 import type {
   NumberedRegistrationCommand,
   NumberedRegistrationCommandResult,

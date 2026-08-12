@@ -10,7 +10,7 @@ import {
   registerRecoveryBackupBarrier,
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
-import { getNextJSubmitRetryTimestamp } from '../runtime/j-submit-scheduler';
+import { getNextJSubmitRetryTimestamp } from '../runtime/jurisdiction/j-submit-scheduler';
 import { dbRootPath } from '../runtime/platform';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';
 import { bootScenario, fundEntities, registerEntities } from '../scenarios/boot';
@@ -21,7 +21,7 @@ import {
   findJSubmitCrashReplica,
   processUntilJSubmitCrash,
 } from './fixtures/j-submit-crash-helpers';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 
 type RealCrashBoundary =
   | 'before-intent'

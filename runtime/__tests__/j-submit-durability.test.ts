@@ -1,14 +1,14 @@
-import { MAX_SUBMIT_FAILURE_MESSAGE_CHARS } from '../runtime/submit-identity';
+import { MAX_SUBMIT_FAILURE_MESSAGE_CHARS } from '../runtime/command/submit-identity';
 import { describe, expect, test } from 'bun:test';
 
-import { applyRuntimeTx } from '../runtime/tx-handlers';
+import { applyRuntimeTx } from '../runtime/transactions/tx-handlers';
 import {
   makeJSubmitResultRuntimeTx,
   registerPendingCommittedJOutbox,
-} from '../runtime/j-submit-state';
-import { J_SUBMIT_RESULT_FINGERPRINT_LIMIT } from '../runtime/j-submit-result';
-import { collectDueJSubmitRuntimeTxs } from '../runtime/j-submit-scheduler';
-import { submitRuntimeJOutbox } from '../runtime/j-submit';
+} from '../runtime/jurisdiction/j-submit-state';
+import { J_SUBMIT_RESULT_FINGERPRINT_LIMIT } from '../runtime/jurisdiction/j-submit-result';
+import { collectDueJSubmitRuntimeTxs } from '../runtime/jurisdiction/j-submit-scheduler';
+import { submitRuntimeJOutbox } from '../runtime/jurisdiction/j-submit';
 import { ENTITY_J_SUBMIT_FALLBACK_MS } from '../entity/consensus/leader';
 import { createEmptyBatch } from '../jurisdiction/machine/batch';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';
@@ -21,7 +21,7 @@ import {
   makeJSubmitDurabilityFixture,
   signerId,
 } from './fixtures/j-submit-durability-fixture';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 

@@ -22,7 +22,7 @@ const repoRoot = process.cwd();
 const readRuntimeOutputRoutingBoundary = (): string => {
   const deliveryDir = join(repoRoot, 'runtime/runtime/delivery');
   const paths = [
-    join(repoRoot, 'runtime/runtime/output-routing.ts'),
+    join(repoRoot, 'runtime/runtime/routing/output-routing.ts'),
     ...readdirSync(deliveryDir)
       .filter(file => file.endsWith('.ts'))
       .sort()
@@ -32,7 +32,7 @@ const readRuntimeOutputRoutingBoundary = (): string => {
 };
 
 const readText = (path: string): string => {
-  if (path === 'runtime/runtime/output-routing.ts') return readRuntimeOutputRoutingBoundary();
+  if (path === 'runtime/runtime/routing/output-routing.ts') return readRuntimeOutputRoutingBoundary();
   if (path === 'runtime/orchestrator/mm-node.ts') {
     return ['mm-node.ts', 'mm-node-core.ts', 'mm-node-health.ts', 'mm-node-run.ts']
       .map(file => readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8'))
@@ -211,7 +211,7 @@ for (const [path, markers] of [
     'export const classifyUndeliveredDelivery',
     'export const deliveryFailure',
   ]],
-  ['runtime/runtime/output-routing.ts', [
+  ['runtime/runtime/routing/output-routing.ts', [
     'enqueueEntityInputsDelivery(\n    targetRuntimeId: string,\n    envelope: RuntimeEntityInputsEnvelope,\n    ingressTimestamp?: number,\n  ): DeliveryResult;',
     'export type RuntimeEntityInputRoutingResult = {',
     'delivery: DeliveryResult;',

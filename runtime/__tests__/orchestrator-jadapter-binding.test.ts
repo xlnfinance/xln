@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import type { JAdapter, JAdapterAddresses } from '../jurisdiction/adapter/types';
 import { ensureJurisdictionReplica } from '../orchestrator/mm-node-core';
 import { createEmptyEnv } from '../runtime';
-import { getLiveJAdapter } from '../runtime/live-jadapters';
+import { getLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 import { createTestJReplica } from './helpers/j-replica';
 
 const address = (byte: string): string => `0x${byte.repeat(20)}`;

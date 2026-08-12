@@ -5,7 +5,7 @@ import {
   buildRuntimeSecurityIncidentId,
   recordRuntimeSecurityIncident,
   resolveRuntimeSecurityIncident,
-} from '../runtime/security-incidents';
+} from '../runtime/observability/security-incidents';
 import { createEmptyEnv } from '../runtime';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { validateDurableRuntimeMachineSnapshot } from '../storage/wal/runtime-machine-schema';

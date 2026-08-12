@@ -42,7 +42,7 @@ import {
 import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j';
-import { routeInboundP2PEntityInput } from '../runtime/entity-routing';
+import { routeInboundP2PEntityInput } from '../runtime/routing/entity-routing';
 import {
   buildValidatorEncryptionBoard,
   createLocalValidatorEncryptionAttestation,

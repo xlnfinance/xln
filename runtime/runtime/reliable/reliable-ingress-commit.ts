@@ -27,7 +27,7 @@ import {
   ensureReliableIngressState,
   receiverSourceLaneKeys,
 } from './reliable-ingress-state.ts';
-import { splitRoutedOutputByDeliveryLane } from '../output-routing.ts';
+import { splitRoutedOutputByDeliveryLane } from '../routing/output-routing.ts';
 import {
   createReliableDeliveryReceipt,
   ensureReliableState,

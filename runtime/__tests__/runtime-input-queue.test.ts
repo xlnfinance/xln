@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { enqueueRuntimeInputsWithDeps } from '../runtime/input-queue';
+import { enqueueRuntimeInputsWithDeps } from '../runtime/input-pipeline/input-queue';
 import { LIMITS } from '../config/constants';
 import type { RuntimeReplica } from '../runtime/types';
 
@@ -18,7 +18,7 @@ const makeEnv = (): RuntimeReplica => ({
 } as RuntimeReplica);
 
 test('runtime input queue debug diagnostics use structured logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/runtime/input-queue.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/runtime/input-pipeline/input-queue.ts'), 'utf8');
 
   expect(source).toContain("const runtimeInputQueueLog = createStructuredLogger('runtime.input_queue');");
   expect(source).toContain("runtimeInputQueueLog.info('interesting_entity_inputs'");

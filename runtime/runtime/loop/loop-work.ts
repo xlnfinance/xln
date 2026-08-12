@@ -12,20 +12,20 @@ import {
   getNextNetworkRetryTimestamp,
   hasReadyPendingNetworkOutputs,
   type RuntimeOutputRoutingDeps,
-} from '../output-routing.ts';
+} from '../routing/output-routing.ts';
 import {
   generateHookPingsWithDeps,
   getEarliestWallClockDueTimestampWithDeps,
   getNextWallClockWakeTimestampWithDeps,
   hasDueEntityHooksWithDeps,
-} from '../wake.ts';
-import { requireRuntimeMempool } from '../input-queue.ts';
+} from '../input-pipeline/wake.ts';
+import { requireRuntimeMempool } from '../input-pipeline/input-queue.ts';
 import { ensureRuntimeConfig } from './loop-environment.ts';
 import { enqueueRuntimeInputs } from './loop-infrastructure.ts';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
+import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure.ts';
 import type { EntityInput, EntityReplica } from '../../entity/types.ts';
 import type { RoutedEntityInput, RuntimeReplica, RuntimeInput } from '../types.ts';
-import { atomicCrossJInputCohortKey } from '../entity-routing.ts';
+import { atomicCrossJInputCohortKey } from '../routing/entity-routing.ts';
 
 import { createStructuredLogger } from '../../infra/logger.ts';
 

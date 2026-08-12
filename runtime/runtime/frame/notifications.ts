@@ -1,6 +1,6 @@
 import { createStructuredLogger } from '../../infra/logger';
 import type { RuntimeInput, RuntimeReplica } from '../types';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
+import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure';
 
 const runtimeLog = createStructuredLogger('runtime');
 

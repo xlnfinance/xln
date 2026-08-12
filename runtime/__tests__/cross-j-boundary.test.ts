@@ -10,7 +10,7 @@ import {
   assertCrossJLocalOwnerCohort,
   assertCrossJLocalCohorts,
   assertInboundCrossJRuntimeTopology,
-} from '../runtime/cross-j-topology';
+} from '../runtime/routing/cross-j-topology';
 import { applyPreparedRuntimeFrame } from '../runtime/frame/apply';
 import { createFrameExecutionState } from '../runtime/frame/input/execution-state';
 import { createRuntimeProcessProfile } from '../runtime/frame/process-profile';

@@ -1,12 +1,12 @@
 import { runtimeIsBrowser } from '../infra/process/runtime-process';
-export { getLiveJAdapter, getLiveJAdapterEntries } from './live-jadapters';
+export { getLiveJAdapter, getLiveJAdapterEntries } from './jurisdiction/live-jadapters';
 
 // The testnet exposes one canonical runtime contract. Breaking changes replace
 // v1 in place; there are no compatibility branches inside the state machine.
 export const RUNTIME_SCHEMA_VERSION = 1;
 
 import { assertBrowserVMJurisdiction } from '../jurisdiction/adapter/browservm/browservm-registry';
-import { attachEventEmitters } from './env-events';
+import { attachEventEmitters } from './observability/env-events';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from './types';
 import { createPersistenceQueries } from '../storage/queries';
@@ -15,7 +15,7 @@ import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } fro
 import { createRuntimeLoopApi } from './loop/loop.ts';
 import { createRuntimeRecoveryApi } from '../storage/recovery/restore';
 import { createRuntimeStateApi } from './state-create';
-import { loadGossipProfilesFromInfraDb } from './infra-gossip-store';
+import { loadGossipProfilesFromInfraDb } from './infrastructure/gossip-store';
 import { withStorageConsistentRead } from '../storage/runtime-dbs';
 import {
   createRuntimeCommandApi,
@@ -29,8 +29,8 @@ import {
 } from './frame/cross-j/atomic-admission';
 import { createRuntimeInputReducer } from './frame/input/reducer';
 import { createRuntimeProcessor } from './frame/process';
-import { clearRuntimeDatabases } from './storage-admin';
-import { loadLiveRuntimeFromDB } from './live-restore';
+import { clearRuntimeDatabases } from './infrastructure/storage-admin';
+import { loadLiveRuntimeFromDB } from './recovery/live-restore';
 import {
   bootstrapRuntime,
   type RuntimeCreationOptions,
@@ -145,7 +145,7 @@ export {
   runtimeFrameContainsSubmittedInput,
   runtimeInputParts,
   waitForRuntimeInputCommitted,
-} from './input-completion';
+} from './input-pipeline/input-completion';
 
 export {
   registerRuntimePublishedCallback,

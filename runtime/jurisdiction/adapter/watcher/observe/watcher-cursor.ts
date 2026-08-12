@@ -1,5 +1,5 @@
 import type { RuntimeReplica, RuntimeTx } from '../../../../runtime/types';
-import { enqueueRuntimeInput } from '../../../../runtime/input-queue';
+import { enqueueRuntimeInput } from '../../../../runtime/input-pipeline/input-queue';
 import {
   getEntityCertifiedJAnchor,
   getValidatorJContiguousThroughHeight,

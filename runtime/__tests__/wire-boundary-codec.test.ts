@@ -14,8 +14,8 @@ import {
 import {
   assertRuntimeAdapterCommandTxAuthorized,
   markLocalRuntimeAdapterCommandTx,
-} from '../runtime/command-frontier-auth';
-import { projectRuntimeIngressReceiptForWire } from '../runtime/ingress-receipts';
+} from '../runtime/command/frontier-auth';
+import { projectRuntimeIngressReceiptForWire } from '../runtime/input-pipeline/ingress-receipts';
 import { encodeBinaryPayload } from '../storage/binary-codec';
 import type { RuntimeTx } from '../runtime/types';
 import type { RuntimeAdapterWireMessage } from '../api/runtime-adapter/wire-schema';

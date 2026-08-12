@@ -27,7 +27,7 @@ import {
   entityNeedsPeriodicWake,
   getNextScheduledWakeTimestamp,
   refreshScheduledWakeIndex,
-} from '../runtime/scheduled-wake';
+} from '../runtime/input-pipeline/scheduled-wake';
 import {
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   type ScheduledWakeTx,

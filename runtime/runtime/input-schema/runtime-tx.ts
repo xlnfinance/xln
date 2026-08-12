@@ -1,5 +1,5 @@
-import { validateRuntimeAdapterCommandMarker } from '../command-frontier';
-import { normalizeJurisdictionImportRequest } from '../jurisdiction-import';
+import { validateRuntimeAdapterCommandMarker } from '../command/frontier';
+import { normalizeJurisdictionImportRequest } from '../jurisdiction/jurisdiction-import';
 import type { JurisdictionImportRequest, RuntimeTx } from '../types';
 import { validateBrowserVmState } from './browser';
 import { validateJObservationData } from './j-observation';

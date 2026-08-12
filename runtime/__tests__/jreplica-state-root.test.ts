@@ -11,13 +11,13 @@ import {
   normalizeRestoredJReplicas,
 } from '../runtime/infra';
 import { buildBrowserVMJurisdiction, createJAdapter } from '../jurisdiction/adapter';
-import { applyImportJurisdictionIntent } from '../runtime/jurisdiction-import';
+import { applyImportJurisdictionIntent } from '../runtime/jurisdiction/jurisdiction-import';
 import { createEmptyEnv } from '../runtime';
 import { getJurisdictionIdentityRef } from '../jurisdiction/machine/jurisdiction-runtime';
 import {
   attachLiveJAdapter,
   getLiveJAdapter,
-} from '../runtime/live-jadapters';
+} from '../runtime/jurisdiction/live-jadapters';
 
 const makeJReplica = (overrides: Partial<JReplica> = {}): JReplica => ({
   name: 'arrakis',

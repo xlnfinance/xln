@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { calculateSolvency, verifySolvency } from '../runtime/solvency';
+import { calculateSolvency, verifySolvency } from '../runtime/finance/solvency';
 import type { RuntimeReplica } from '../runtime/types';
 
 const ENTITY_A = `0x${'11'.repeat(32)}`;
@@ -64,7 +64,7 @@ const makeEnv = (): RuntimeReplica => ({
 } as unknown as RuntimeReplica);
 
 test('solvency diagnostics use structured logging only', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/runtime/solvency.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/runtime/finance/solvency.ts'), 'utf8');
 
   expect(source).toContain("const solvencyLog = createStructuredLogger('runtime.solvency');");
   expect(source).toContain("solvencyLog.error('violation'");

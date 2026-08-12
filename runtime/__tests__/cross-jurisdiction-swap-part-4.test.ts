@@ -16,7 +16,7 @@ import {
   getSwapPairPolicyByBaseQuote,
   getTokenIdsForJurisdiction,
 } from '../account/utils';
-import { normalizeEntitySwapTradingPairs } from '../runtime/swap-pairs';
+import { normalizeEntitySwapTradingPairs } from '../runtime/finance/swap-pairs';
 import {
   addr,
   entity,

@@ -17,7 +17,7 @@ import { applyCrossJurisdictionBookProgressToState } from '../entity/tx/handlers
 import { handleSwapResolve } from '../account/tx/handlers/swap/resolve/index';
 
 import { createEmptyEnv } from '../runtime';
-import { publishEntityCandidateEffects } from '../runtime/env-events';
+import { publishEntityCandidateEffects } from '../runtime/observability/env-events';
 
 import { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../extensions/cross-j/fill-ack';
 

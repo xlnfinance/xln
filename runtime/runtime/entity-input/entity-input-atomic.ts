@@ -1,7 +1,7 @@
 import {
   normalizeEntityKey,
   removeRejectedCrossJAccountInputsByIndex,
-} from '../entity-routing.ts';
+} from '../routing/entity-routing.ts';
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
 import {
   accountInputAck,

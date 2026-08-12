@@ -1,10 +1,10 @@
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
-} from '../../runtime/input-clone';
+} from '../../runtime/input-pipeline/input-clone';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { writeRuntimeMetadata } from '../../runtime/loop/loop-environment.ts';
-import { restoreDurableOutputRetryState } from '../../runtime/durable-output-retry';
+import { restoreDurableOutputRetryState } from '../../runtime/delivery/durable-output-retry';
 import type { RuntimeReplica } from '../../runtime/types';
 import {
   authorizeRestoredRuntimeInput,

@@ -3,9 +3,9 @@ import {
   rollbackReliableDeliveryReceipts,
   rollbackReliableIngressCommit,
 } from '../../reliable/reliable-delivery.ts';
-import { requireRuntimeMempool } from '../../input-queue';
+import { requireRuntimeMempool } from '../../input-pipeline/input-queue';
 import { transitionRuntimeLifecycle } from '../../lifecycle';
-import { ensureRuntimeInfrastructure } from '../../runtime-infrastructure';
+import { ensureRuntimeInfrastructure } from '../../infrastructure/runtime-infrastructure';
 import {
   prependOlderRuntimeInput,
 } from '../transaction';

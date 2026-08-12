@@ -17,7 +17,7 @@ import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';
 import { handleRuntimeAdapterMessage } from '../api/runtime-adapter/server';
 import { createJAdapter, createXlnJsonRpcProvider } from '../jurisdiction/adapter';
 import { requireRuntimeJurisdictionConfigByName } from '../jurisdiction/machine/jurisdiction-runtime';
-import { attachLiveJAdapter, getLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter, getLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 import {
   buildNumberedRegistrationRequest,
   prepareNumberedRegistrationIntent,

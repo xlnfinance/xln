@@ -1,7 +1,7 @@
 import type { RuntimeReplica } from '../types.ts';
 import { getWallClockMs } from '../../infra/time.ts';
 import { inferRuntimeLifecyclePhase, transitionRuntimeLifecycle } from '../lifecycle.ts';
-import { requestRuntimeLoopWake, requireRuntimeMempool } from '../input-queue.ts';
+import { requestRuntimeLoopWake, requireRuntimeMempool } from '../input-pipeline/input-queue.ts';
 import {
   waitForRuntimeLoopWake,
   waitForRuntimeLoopWakeOrTimeout,
@@ -12,8 +12,8 @@ import {
   getRemainingRuntimeFrameDelayMs,
 } from './loop-work.ts';
 import { yieldRuntimeIoTurn } from '../platform.ts';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
-import { deleteScheduledWakeIndex, rebuildScheduledWakeIndex } from '../scheduled-wake.ts';
+import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure.ts';
+import { deleteScheduledWakeIndex, rebuildScheduledWakeIndex } from '../input-pipeline/scheduled-wake.ts';
 import {
   startJurisdictionWatchers,
   stopJurisdictionWatchers,

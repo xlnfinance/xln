@@ -20,7 +20,7 @@ import {
   finalizeReliableIngressCommit,
   registerReliableIngress,
 } from '../runtime/reliable/reliable-delivery.ts';
-import { buildPendingNetworkOutputs, getReliableOutputIdentity } from '../runtime/output-routing';
+import { buildPendingNetworkOutputs, getReliableOutputIdentity } from '../runtime/routing/output-routing';
 import { createEmptyEnv } from '../runtime';
 import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import { hydrateAccountDocFromStorage } from '../storage/hydration';

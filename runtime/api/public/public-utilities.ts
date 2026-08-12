@@ -38,7 +38,7 @@ export {
   formatTokenAmount,
   parseTokenAmount,
 } from '../../account/financial-utils';
-export { calculateSolvency, verifySolvency } from '../../runtime/solvency';
+export { calculateSolvency, verifySolvency } from '../../runtime/finance/solvency';
 export { classifyBilateralState, getAccountBarVisual } from '../../account/view-state';
 export { createDefaultDelta } from '../../account/state/delta';
 export { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
@@ -78,4 +78,4 @@ export { clearDatabase } from '../../storage/clear-database';
 export { generateEntityAvatar, generateSignerAvatar, getEntityDisplayInfo, getSignerDisplayInfo, hashToAvatar } from '../../presentation/identity-display';
 export { getEntityShortId } from '../../presentation/identity-display';
 export { safeStringify } from '../../protocol/serialization';
-export { resolveEntityProposerId } from '../../runtime/entity-output-signer';
+export { resolveEntityProposerId } from '../../runtime/delivery/entity-output-signer';

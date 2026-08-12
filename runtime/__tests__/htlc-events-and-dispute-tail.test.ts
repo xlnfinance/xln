@@ -10,7 +10,7 @@ import { applyCommittedAccountFrameFollowups } from '../entity/tx/handlers/accou
 import { applyHtlcSecretFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
 import { handleResolveHtlcLockEntityTx } from '../entity/tx/handlers/htlc-direct';
 import { pruneSettledOriginatedHtlcRoutes } from '../entity/tx/htlc-route-lifecycle';
-import { publishEntityCandidateEffects } from '../runtime/env-events';
+import { publishEntityCandidateEffects } from '../runtime/observability/env-events';
 import { createEmptyEnv } from '../runtime';
 import type { AccountReplica } from '../types/account';
 import type { EntityCandidateEffect, EntityReplica } from '../entity/types';

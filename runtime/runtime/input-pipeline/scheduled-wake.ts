@@ -1,0 +1,298 @@
+import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState } from '../../entity/types';
+import type { RuntimeReplica } from '../types';
+import type { EntityTx } from '../../types/entity-tx';
+import { crontabTaskHasPendingWork } from '../../entity/scheduler';
+import {
+  MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
+  type ScheduledWakeJob,
+  type ScheduledWakeTx,
+} from '../../entity/scheduler/scheduled-wake-validation';
+import { compareStableText } from '../../protocol/serialization';
+import {
+  buildEntityLeaderVoteBody,
+  buildPreparedFrameEvidence,
+  getEntityLeaderTimeoutMs,
+  hasEntityLeaderWork,
+  isEntityActiveLeader,
+  leaderVoteCollectionKey,
+  markLocalEntityLeaderTimeoutVote,
+} from '../../entity/consensus/leader';
+
+type DeadlineEntry = {
+  dueAt: number;
+  entityId: string;
+  signerId: string;
+  generation: number;
+};
+
+type DeadlineIndex = {
+  heap: DeadlineEntry[];
+  generations: Map<string, number>;
+  replicas: Map<string, EntityReplica>;
+  initialized: boolean;
+};
+
+const LOCAL_SCHEDULED_WAKE = Symbol.for('xln.runtime.scheduled-wake.local');
+
+export const copyLocalScheduledWakeAuthorization = (
+  source: EntityTx,
+  target: EntityTx,
+): void => {
+  if (
+    source.type === 'scheduledWake' &&
+    target.type === 'scheduledWake' &&
+    (source as EntityTx & { [LOCAL_SCHEDULED_WAKE]?: boolean })[LOCAL_SCHEDULED_WAKE] === true
+  ) {
+    Object.defineProperty(target, LOCAL_SCHEDULED_WAKE, { value: true, enumerable: false });
+  }
+};
+
+const replicaKey = (entityId: string, signerId: string): string =>
+  `${entityId.toLowerCase()}:${signerId.toLowerCase()}`;
+
+const compareDeadline = (left: DeadlineEntry, right: DeadlineEntry): number =>
+  left.dueAt - right.dueAt ||
+  compareStableText(left.entityId, right.entityId) ||
+  compareStableText(left.signerId, right.signerId) ||
+  left.generation - right.generation;
+
+const heapPush = (heap: DeadlineEntry[], entry: DeadlineEntry): void => {
+  heap.push(entry);
+  let index = heap.length - 1;
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    if (compareDeadline(heap[parent]!, heap[index]!) <= 0) break;
+    [heap[parent], heap[index]] = [heap[index]!, heap[parent]!];
+    index = parent;
+  }
+};
+
+const heapPop = (heap: DeadlineEntry[]): DeadlineEntry | undefined => {
+  const first = heap[0];
+  const last = heap.pop();
+  if (!first || !last || heap.length === 0) return first;
+  heap[0] = last;
+  let index = 0;
+  while (true) {
+    const left = index * 2 + 1;
+    const right = left + 1;
+    let smallest = index;
+    if (left < heap.length && compareDeadline(heap[left]!, heap[smallest]!) < 0) smallest = left;
+    if (right < heap.length && compareDeadline(heap[right]!, heap[smallest]!) < 0) smallest = right;
+    if (smallest === index) break;
+    [heap[index], heap[smallest]] = [heap[smallest]!, heap[index]!];
+    index = smallest;
+  }
+  return first;
+};
+
+const getIndex = (env: RuntimeReplica): DeadlineIndex => {
+  if (!env.infrastructure) env.infrastructure = {};
+  let index = env.infrastructure.scheduledWakeIndex;
+  if (!index) {
+    index = { heap: [], generations: new Map(), replicas: new Map(), initialized: false };
+    env.infrastructure.scheduledWakeIndex = index;
+  }
+  return index;
+};
+
+export const entityNeedsPeriodicWake = (replica: EntityReplica): boolean => {
+  for (const method of replica.state.crontabState?.tasks.keys() ?? []) {
+    if (crontabTaskHasPendingWork(replica.state, method)) return true;
+  }
+  return false;
+};
+
+export const collectDueScheduledWakeJobs = (
+  state: EntityState,
+  now: number,
+  includePeriodicTasks: boolean,
+): ScheduledWakeJob[] => {
+  const jobs: ScheduledWakeJob[] = [];
+  for (const hook of state.crontabState?.hooks?.values() ?? []) {
+    if (hook.triggerAt <= now) jobs.push({ kind: 'hook', id: hook.id, dueAt: hook.triggerAt });
+  }
+  if (includePeriodicTasks) {
+    for (const task of state.crontabState?.tasks?.values() ?? []) {
+      const dueAt = task.lastRun + task.intervalMs;
+      if (
+        task.enabled &&
+        crontabTaskHasPendingWork(state, task.method) &&
+        dueAt <= now
+      ) jobs.push({ kind: 'task', id: task.method, dueAt });
+    }
+  }
+  return jobs.sort((left, right) =>
+    left.dueAt - right.dueAt || compareStableText(left.kind, right.kind) || compareStableText(left.id, right.id));
+};
+
+const nextReplicaDeadline = (replica: EntityReplica): number | null => {
+  if (!isEntityActiveLeader(replica)) {
+    if (!hasEntityLeaderWork(replica)) return null;
+    const voteBody = buildEntityLeaderVoteBody(replica.state);
+    const alreadyVoted = replica.leaderVotes?.get(replica.signerId.toLowerCase());
+    if (alreadyVoted && leaderVoteCollectionKey(alreadyVoted) === leaderVoteCollectionKey(voteBody)) return null;
+    const startedAt = replica.lastConsensusProgressAt ?? replica.state.timestamp;
+    return startedAt + getEntityLeaderTimeoutMs(voteBody.toView);
+  }
+  let next = Infinity;
+  for (const hook of replica.state.crontabState?.hooks?.values() ?? []) {
+    next = Math.min(next, hook.triggerAt);
+  }
+  if (entityNeedsPeriodicWake(replica)) {
+    for (const task of replica.state.crontabState?.tasks?.values() ?? []) {
+      if (!task.enabled) continue;
+      if (!crontabTaskHasPendingWork(replica.state, task.method)) continue;
+      const dueAt = task.lastRun + task.intervalMs;
+      next = Math.min(next, dueAt);
+    }
+  }
+  return Number.isFinite(next) ? next : null;
+};
+
+const refreshReplica = (env: RuntimeReplica, replica: EntityReplica): void => {
+  const index = getIndex(env);
+  const key = replicaKey(replica.entityId, replica.signerId);
+  index.replicas.set(key, replica);
+  const generation = (index.generations.get(key) ?? 0) + 1;
+  index.generations.set(key, generation);
+  const dueAt = nextReplicaDeadline(replica);
+  if (dueAt !== null) {
+    heapPush(index.heap, {
+      dueAt,
+      entityId: replica.entityId,
+      signerId: replica.signerId,
+      generation,
+    });
+  }
+};
+
+export const rebuildScheduledWakeIndex = (env: RuntimeReplica): void => {
+  const index = getIndex(env);
+  index.heap = [];
+  index.generations.clear();
+  index.replicas.clear();
+  index.initialized = true;
+  for (const replica of env.state.eReplicas.values()) refreshReplica(env, replica);
+};
+
+export const refreshScheduledWakeIndex = (env: RuntimeReplica, entityIds?: ReadonlySet<string>): void => {
+  const index = getIndex(env);
+  if (!index.initialized) {
+    rebuildScheduledWakeIndex(env);
+    return;
+  }
+  const normalized = entityIds
+    ? new Set([...entityIds].map(entityId => entityId.toLowerCase()))
+    : null;
+  const liveKeys = new Set<string>();
+  for (const replica of env.state.eReplicas.values()) {
+    const key = replicaKey(replica.entityId, replica.signerId);
+    liveKeys.add(key);
+    const indexedReplica = index.replicas.get(key);
+    if (!indexedReplica || indexedReplica !== replica || !normalized || normalized.has(replica.entityId.toLowerCase())) {
+      refreshReplica(env, replica);
+    }
+  }
+  for (const key of index.replicas.keys()) {
+    if (liveKeys.has(key)) continue;
+    index.replicas.delete(key);
+    // Advance and retain the tombstone. Deleting or merely retaining the old
+    // generation lets a detached replica's heap entry remain valid until the
+    // same signer/entity pair is imported again.
+    index.generations.set(key, (index.generations.get(key) ?? 0) + 1);
+  }
+};
+
+const peekValidDeadline = (env: RuntimeReplica): DeadlineEntry | null => {
+  const index = getIndex(env);
+  if (!index.initialized) rebuildScheduledWakeIndex(env);
+  while (index.heap.length > 0) {
+    const entry = index.heap[0]!;
+    const currentGeneration = index.generations.get(replicaKey(entry.entityId, entry.signerId));
+    if (currentGeneration === entry.generation) return entry;
+    heapPop(index.heap);
+  }
+  return null;
+};
+
+export const getNextScheduledWakeTimestamp = (env: RuntimeReplica): number | null =>
+  peekValidDeadline(env)?.dueAt ?? null;
+
+export const createDueScheduledWakeInputs = (env: RuntimeReplica, now: number): EntityInput[] => {
+  const inputs: EntityInput[] = [];
+  const queued = new Set((env.runtimeMempool?.entityInputs ?? [])
+    .filter(input => input.leaderTimeoutVote || input.entityTxs?.some(tx => tx.type === 'scheduledWake'))
+    .map(input => replicaKey(input.entityId, input.signerId)));
+  for (const replica of env.state.eReplicas.values()) {
+    if (replica.mempool.some(tx => tx.type === 'scheduledWake')) {
+      queued.add(replicaKey(replica.entityId, replica.signerId));
+    }
+  }
+
+  const index = getIndex(env);
+  while (true) {
+    const entry = peekValidDeadline(env);
+    if (!entry || entry.dueAt > now) break;
+    heapPop(index.heap);
+    const key = replicaKey(entry.entityId, entry.signerId);
+    const replica = index.replicas.get(key);
+    if (!replica || queued.has(key)) continue;
+    if (!isEntityActiveLeader(replica)) {
+      if (!hasEntityLeaderWork(replica)) {
+        refreshReplica(env, replica);
+        continue;
+      }
+      const body = buildEntityLeaderVoteBody(replica.state);
+      const preparedFrame = buildPreparedFrameEvidence(replica.lockedFrame);
+      const vote: EntityLeaderTimeoutVote = {
+        ...body,
+        voterId: replica.signerId.toLowerCase(),
+        signature: '',
+        ...(preparedFrame ? { preparedFrame } : {}),
+      };
+      markLocalEntityLeaderTimeoutVote(vote);
+      inputs.push({
+        entityId: replica.entityId,
+        signerId: replica.signerId,
+        leaderTimeoutVote: vote,
+      });
+      queued.add(key);
+      continue;
+    }
+    const dueJobs = collectDueScheduledWakeJobs(replica.state, now, entityNeedsPeriodicWake(replica));
+    if (dueJobs.length === 0) {
+      refreshReplica(env, replica);
+      continue;
+    }
+    // Jobs are advisory diagnostics. Execution recomputes and drains the full
+    // canonical due set from EntityState at frame timestamp.
+    const jobs = dueJobs.slice(0, MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS);
+    const tx: ScheduledWakeTx = {
+      type: 'scheduledWake',
+      data: {
+        version: 1,
+        proposerSignerId: replica.signerId,
+        dueAt: jobs[0]!.dueAt,
+        jobs,
+      },
+    };
+    Object.defineProperty(tx, LOCAL_SCHEDULED_WAKE, { value: true, enumerable: false });
+    inputs.push({ entityId: replica.entityId, signerId: replica.signerId, entityTxs: [tx] });
+    queued.add(key);
+  }
+  return inputs;
+};
+
+export const assertScheduledWakeTxAuthorized = (tx: EntityTx, replay: boolean): void => {
+  if (
+    tx.type !== 'scheduledWake' ||
+    replay ||
+    (tx as EntityTx & { [LOCAL_SCHEDULED_WAKE]?: boolean })[LOCAL_SCHEDULED_WAKE] === true
+  ) return;
+  throw new Error('SCHEDULED_WAKE_EXTERNAL_INGRESS_REJECTED');
+};
+
+export const deleteScheduledWakeIndex = (env: RuntimeReplica): void => {
+  if (env.infrastructure) delete env.infrastructure.scheduledWakeIndex;
+};

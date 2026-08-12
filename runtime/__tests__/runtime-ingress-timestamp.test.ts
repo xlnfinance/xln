@@ -6,7 +6,7 @@ import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
 import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../entity/auth/crypto';
 import { processEventBatch } from '../jurisdiction/adapter/watcher';
-import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
+import { createRuntimeIngressReceiptStore } from '../runtime/input-pipeline/ingress-receipts';
 import { buildJEventRangeData } from './helpers/j-history';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import {
@@ -24,7 +24,7 @@ import type { EntityReplica, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { getWallClockMs } from '../infra/time';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { applyEntityInputFrameCap, applyEntityTxFrameCap } from '../runtime/loop/loop-work.ts';
 

@@ -10,7 +10,7 @@ import type {
   RoutedEntityInput,
 } from '../types.ts';
 import { getReliableIdentityValidationError } from './reliable-frontier.ts';
-import { getReliableOutputIdentity } from '../output-routing.ts';
+import { getReliableOutputIdentity } from '../routing/output-routing.ts';
 
 export const ensureReliableState = (env: RuntimeReplica): NonNullable<RuntimeReplica['infrastructure']> => {
   env.infrastructure ??= {};

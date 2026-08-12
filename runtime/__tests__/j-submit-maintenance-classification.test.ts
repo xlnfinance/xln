@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { splitJOutboxForDurableSubmit } from '../runtime/j-submit-state';
+import { splitJOutboxForDurableSubmit } from '../runtime/jurisdiction/j-submit-state';
 import type { JTx } from '../types/jurisdiction-runtime';
 
 const input = (jTx: JTx) => [{ jurisdictionName: 'Testnet', jTxs: [jTx] }];

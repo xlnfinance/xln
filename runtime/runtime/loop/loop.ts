@@ -3,8 +3,8 @@ import {
   MAX_RUNTIME_J_INPUTS,
   MAX_RUNTIME_J_TXS,
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
-} from '../input-validation.ts';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
+} from '../input-pipeline/input-validation.ts';
+import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure.ts';
 import type { RuntimeReplica, RuntimeInput } from '../types.ts';
 import { closeRuntimeWalDb, closeHistoryViewDb, closeInfraDb, closeStorageDb } from '../../storage/runtime-dbs.ts';
 import {

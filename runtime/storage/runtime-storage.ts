@@ -1,5 +1,5 @@
 import { runtimeIsBrowser } from '../infra/process/runtime-process';
-import { ensureRuntimeInfrastructure } from '../runtime/runtime-infrastructure';
+import { ensureRuntimeInfrastructure } from '../runtime/infrastructure/runtime-infrastructure';
 import type { RuntimeReplica } from '../runtime/types';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 import { createRuntimeStorageCommitApi } from './commit';

@@ -4,7 +4,7 @@ import {
   registerSignerKey,
 } from '../account/crypto';
 import { createStructuredLogger } from '../infra/logger';
-import { attachEventEmitters } from './env-events';
+import { attachEventEmitters } from './observability/env-events';
 import { nodeProcess, runtimeIsBrowser } from '../infra/process/runtime-process';
 import type { RuntimeReplica } from './types';
 import type { TrustedJurisdictionRpcBinding } from './infra';

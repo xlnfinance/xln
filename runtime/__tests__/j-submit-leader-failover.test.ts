@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../runtime';
-import { applyRuntimeTx } from '../runtime/tx-handlers';
+import { applyRuntimeTx } from '../runtime/transactions/tx-handlers';
 import {
   makeJSubmitResultRuntimeTx,
   registerPendingCommittedJOutbox,
-} from '../runtime/j-submit-state';
-import { collectDueJSubmitRuntimeTxs } from '../runtime/j-submit-scheduler';
+} from '../runtime/jurisdiction/j-submit-state';
+import { collectDueJSubmitRuntimeTxs } from '../runtime/jurisdiction/j-submit-scheduler';
 import {
   buildCanonicalEntityReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,

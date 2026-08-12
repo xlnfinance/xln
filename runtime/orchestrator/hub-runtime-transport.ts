@@ -9,7 +9,7 @@ import {
   handleRuntimeAdapterMessage,
   type RuntimeAdapterSocket,
 } from '../api/runtime-adapter/server';
-import type { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
+import type { createRuntimeIngressReceiptStore } from '../runtime/input-pipeline/ingress-receipts';
 import {
   enqueueRuntimeInput,
   handleInboundP2PEntityInputs,

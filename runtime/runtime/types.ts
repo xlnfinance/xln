@@ -34,7 +34,7 @@ import type {
 
 import type { GossipLayer } from '../network/p2p/gossip';
 import type { Profile } from '../entity/profile';
-import type { RuntimeP2PConfig } from './p2p-types';
+import type { RuntimeP2PConfig } from './infrastructure/p2p-types';
 
 import type {
   RuntimeSecurityIncident,
@@ -647,7 +647,7 @@ interface RuntimeInfrastructure {
     targetRuntimeId: string,
     envelope: RuntimeEntityInputsEnvelope,
     ingressTimestamp?: number,
-  ) => import('../runtime/output-routing').RuntimeDirectEntityInputDispatchResult) | null;
+  ) => import('./routing/output-routing').RuntimeDirectEntityInputDispatchResult) | null;
   directReliableReceiptDispatch?: ((
     targetRuntimeId: string,
     receipt: ReliableDeliveryReceipt,
@@ -684,7 +684,7 @@ interface RuntimeInfrastructure {
   };
   runtimeAdapterCommandFrontiers?: Map<
     string,
-    import('./command-frontier').RuntimeAdapterCommandFrontier
+    import('./command/frontier').RuntimeAdapterCommandFrontier
   >;
 }
 

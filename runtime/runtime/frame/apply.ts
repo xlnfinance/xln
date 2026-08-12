@@ -3,7 +3,7 @@ import {
   causalTraceContainsWork,
   summarizeRuntimeAccountCausality,
 } from '../../qa/account-causal-trace';
-import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
+import { cloneIsolatedRuntimeInput } from '../input-pipeline/input-clone';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/machine/input';
 import { getPerfMs } from '../../infra/time';
@@ -14,14 +14,14 @@ import {
 import {
   registerPendingCommittedJOutbox,
   splitJOutboxForDurableSubmit,
-} from '../j-submit-state';
-import { refreshScheduledWakeIndex } from '../scheduled-wake';
+} from '../jurisdiction/j-submit-state';
+import { refreshScheduledWakeIndex } from '../input-pipeline/scheduled-wake';
 import type { FrameExecutionState } from './input/execution-state';
 import {
   ACCOUNT_CAUSAL_TRACE,
   type RuntimeProcessProfile,
 } from './process-profile';
-import { assertCrossJLocalCohorts } from '../cross-j-topology';
+import { assertCrossJLocalCohorts } from '../routing/cross-j-topology';
 
 const runtimeLog = createStructuredLogger('runtime');
 

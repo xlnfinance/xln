@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { applyEntityHeightDurabilityBarrier } from '../runtime/entity-height-barrier';
+import { applyEntityHeightDurabilityBarrier } from '../runtime/input-pipeline/entity-height-barrier';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, EntityFrame } from '../entity/types';
 import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';

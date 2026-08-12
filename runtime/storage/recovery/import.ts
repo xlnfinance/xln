@@ -11,7 +11,7 @@ import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryMatchesCertifiedAnchor,
 } from '../../jurisdiction/machine/local-history';
-import { ensureRuntimeInfrastructure } from '../../runtime/runtime-infrastructure';
+import { ensureRuntimeInfrastructure } from '../../runtime/infrastructure/runtime-infrastructure';
 import type { RuntimeReplica } from '../../runtime/types';
 import { clearDatabase } from '../clear-database';
 import { computeCanonicalEntityHash, computeCanonicalRuntimeStateHash } from '../canonical-hash';

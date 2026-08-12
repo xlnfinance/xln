@@ -45,7 +45,7 @@ import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../api
 import {
   applyRuntimeAdapterCommandMarker,
   MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES,
-} from '../runtime/command-frontier';
+} from '../runtime/command/frontier';
 
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 

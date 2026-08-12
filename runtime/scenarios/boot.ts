@@ -18,7 +18,7 @@ import {
   attachLiveJAdapter,
   getLiveJAdapter,
   getLiveJAdapterEntries,
-} from '../runtime/live-jadapters';
+} from '../runtime/jurisdiction/live-jadapters';
 
 export type { JAdapterMode };
 

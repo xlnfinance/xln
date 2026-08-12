@@ -1,4 +1,4 @@
-import { assertCrossJurisdictionSwapTargetReadyInEnv } from './swap-target-readiness';
+import { assertCrossJurisdictionSwapTargetReadyInEnv } from './finance/swap-target-readiness';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j';
 import { normalizeRuntimeId } from '../network/p2p/auth/runtime-id';
 import type { createRuntimeLoopApi } from './loop/loop.ts';
@@ -10,7 +10,7 @@ import {
   type CrossJurisdictionSwapSubmitResult,
 } from './jurisdiction-api';
 import { assertRuntimeCommandReady } from './lifecycle';
-import { assertCrossJLocalOwnerCohort, requireCrossJRuntimeTopology } from './cross-j-topology';
+import { assertCrossJLocalOwnerCohort, requireCrossJRuntimeTopology } from './routing/cross-j-topology';
 
 type RuntimeCommandDependencies = Pick<
   ReturnType<typeof createRuntimeLoopApi>,

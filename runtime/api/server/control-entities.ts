@@ -1,4 +1,4 @@
-import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
+import { resolveEntityProposerId } from '../../runtime/delivery/entity-output-signer';
 import { compareStableText } from '../../protocol/serialization';
 import type { RuntimeReplica } from '../../runtime/types';
 

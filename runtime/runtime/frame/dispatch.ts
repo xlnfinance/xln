@@ -12,8 +12,8 @@ import {
   rescheduleDeferredOutputs,
   type PlannedRemoteOutput,
   type RuntimeOutputRoutingDeps,
-} from '../output-routing';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
+} from '../routing/output-routing';
+import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure';
 import { finalizeReliableIngressCommit } from '../reliable/reliable-delivery.ts';
 import type { FrameExecutionState } from './input/execution-state';
 

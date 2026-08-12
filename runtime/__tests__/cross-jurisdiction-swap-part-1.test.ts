@@ -122,7 +122,7 @@ import {
 
 import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account/utils';
 
-import { normalizeEntitySwapTradingPairs } from '../runtime/swap-pairs';
+import { normalizeEntitySwapTradingPairs } from '../runtime/finance/swap-pairs';
 
 import { verifyHashLadderBinary } from '../protocol/htlc/hash-ladder';
 
@@ -139,7 +139,7 @@ import { hashCertifiedEntityOutputSemantic } from '../entity/consensus/output/ce
 
 import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../entity/tx/j-events-htlc';
 
-import { applyMergedEntityInputs } from '../runtime/entity-inputs';
+import { applyMergedEntityInputs } from '../runtime/input-pipeline/entity-inputs';
 
 import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matching';
 
@@ -150,7 +150,7 @@ import {
   selectMatchedCrossJAccountInputPairs,
   validateInboundP2PEntityInputsEnvelope,
   type RuntimeEntityRoutingDeps,
-} from '../runtime/entity-routing';
+} from '../runtime/routing/entity-routing';
 
 import {
   buildPendingNetworkOutputs,
@@ -160,7 +160,7 @@ import {
   pruneReceiptedReliableOutputs,
   rescheduleDeferredOutputs,
   splitPendingOutputsByRetryWindow,
-} from '../runtime/output-routing';
+} from '../runtime/routing/output-routing';
 import { groupAtomicCrossJAdmissionOutputs } from '../runtime/delivery/pending';
 
 
@@ -193,9 +193,9 @@ import { assertRuntimeOutputAuthorization } from '../entity/auth/authorization';
 import { getConsumptionNodeStore } from '../entity/consumption/consumption-store';
 import { getAccountJClaimNodeStore } from '../entity/account/account-j-claim-node-store';
 
-import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
+import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-pipeline/input-clone';
 
-import { createDueScheduledWakeInputs } from '../runtime/scheduled-wake';
+import { createDueScheduledWakeInputs } from '../runtime/input-pipeline/scheduled-wake';
 
 import { ACCOUNT_PENDING_RESEND_AFTER_MS } from '../entity/scheduler';
 

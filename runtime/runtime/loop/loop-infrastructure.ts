@@ -3,14 +3,14 @@ import {
   clearRuntimeCleanLogs,
   copyRuntimeCleanLogs,
   getRuntimeCleanLogs,
-} from '../clean-logs.ts';
+} from '../observability/clean-logs.ts';
 import { createStructuredLogger } from '../../infra/logger.ts';
 import {
   enqueueRuntimeInputsWithDeps,
   requestRuntimeLoopWake,
   type RuntimeInputQueueOptions,
-} from '../input-queue.ts';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
+} from '../input-pipeline/input-queue.ts';
+import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure.ts';
 import {
   getRuntimeWalDb,
   getHistoryViewDb,

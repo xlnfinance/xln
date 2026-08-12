@@ -12,7 +12,7 @@ import {
   assertReliableLaneCompatible,
   reliableIdentityExactKey,
 } from './reliable-frontier.ts';
-import { getReliableOutputIdentity } from '../output-routing.ts';
+import { getReliableOutputIdentity } from '../routing/output-routing.ts';
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
 
 const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();

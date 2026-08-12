@@ -2,7 +2,7 @@ import { parseProfile, type Profile } from '../../entity/profile';
 import { validateEntityReplica } from '../../entity/replica/replica-validation';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
-import { cloneIsolatedRuntimeSnapshot } from '../../runtime/input-clone';
+import { cloneIsolatedRuntimeSnapshot } from '../../runtime/input-pipeline/input-clone';
 import { assertAccountJClaimRootsAvailable } from '../../entity/account/account-j-claim-node-store';
 import { assertConsumptionRootsAvailable } from '../../entity/consumption/consumption-store';
 import { assertCertifiedBoardRootsAvailable } from '../../jurisdiction/machine/board-registry';
@@ -16,7 +16,7 @@ import { normalizeDbNamespace } from '../runtime-dbs';
 import { restoreDurableRuntimeSnapshot } from '../wal/snapshot';
 import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
 import { validateJReplicas } from '../wal/runtime-machine-schema/j';
-import { assertCrossJLocalCohorts } from '../../runtime/cross-j-topology';
+import { assertCrossJLocalCohorts } from '../../runtime/routing/cross-j-topology';
 
 type RuntimeModule = typeof import('../../runtime');
 

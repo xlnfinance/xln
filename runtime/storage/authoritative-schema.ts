@@ -3,7 +3,7 @@ import {
 } from '../protocol/boundary-validation';
 import { decodeRuntimeInput } from '../runtime/input-schema';
 import type { RoutedEntityInput } from '../runtime/types';
-import { decodeRoutedEntityInput } from '../runtime/routing-validation';
+import { decodeRoutedEntityInput } from '../runtime/routing/routing-validation';
 import { assertStorageSchemaVersion, STORAGE_FRAME_FORMAT } from './keys';
 import type {
   StorageDiffRecord,
@@ -32,7 +32,7 @@ import {
   validateStorageEntityCoreDocValue,
 } from './schema-state-docs';
 import { validateDurableRuntimeMachineSnapshot } from './wal/runtime-machine-schema';
-import { validateDurableOutputRetryState } from '../runtime/durable-output-retry';
+import { validateDurableOutputRetryState } from '../runtime/delivery/durable-output-retry';
 import { validateRuntimeHistoryRecords } from './history-view-schema';
 
 export * from './schema-state-docs';

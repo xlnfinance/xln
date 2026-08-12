@@ -26,7 +26,7 @@ import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 
 const CHAIN_ID = 31_337;
 const RUNTIME_SEED = 'j-watcher-backlog-drain';

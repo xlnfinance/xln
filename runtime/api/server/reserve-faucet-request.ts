@@ -3,7 +3,7 @@ import type { RuntimeInput, RuntimeReplica } from '../../runtime/types';
 import type { JAdapter } from '../../jurisdiction/adapter';
 import { safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortId } from '../../infra/logger';
-import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
+import { resolveEntityProposerId } from '../../runtime/delivery/entity-output-signer';
 import { formatTimingMs, isEntityId32 } from './utils';
 import { faucetFailureBody } from './faucet-failure';
 import { getFaucetHubProfiles } from './faucet-hubs';

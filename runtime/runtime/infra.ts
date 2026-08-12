@@ -10,7 +10,7 @@ import {
   attachLiveJAdapter,
   detachLiveJAdapter,
   getLiveJAdapter,
-} from './live-jadapters';
+} from './jurisdiction/live-jadapters';
 
 const infraLog = createStructuredLogger('runtime.infra');
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);

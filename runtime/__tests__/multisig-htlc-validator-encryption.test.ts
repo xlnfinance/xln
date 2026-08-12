@@ -103,7 +103,7 @@ import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/machine/event-observation';
 import { buildLocalJPrefixAttestation } from '../jurisdiction/machine/j-prefix-consensus';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
-import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
+import { startRuntimeHistoryTraceForTesting } from '../runtime/observability/history-retention';
 import { validateEntityTx } from '../entity/tx-validation';
 import {
   buildConsensusOutputOrigin,

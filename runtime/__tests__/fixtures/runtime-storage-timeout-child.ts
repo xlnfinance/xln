@@ -5,7 +5,7 @@ import {
 } from '../../runtime';
 import { deriveSignerAddressSync } from '../../account/crypto';
 import { generateLazyEntityId } from '../../entity/factory';
-import { ensureRuntimeInfrastructure } from '../../runtime/runtime-infrastructure';
+import { ensureRuntimeInfrastructure } from '../../runtime/infrastructure/runtime-infrastructure';
 import type { ConsensusConfig, JurisdictionConfig } from '../../entity/types';
 import type { RuntimeTx } from '../../runtime/types';
 import { createTestJReplica } from '../helpers/j-replica';

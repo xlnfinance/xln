@@ -19,7 +19,7 @@ import type { AccountReplica, Delta } from '../types/account';
 import type { EntityInput, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
-import { getLiveJAdapter } from '../runtime/live-jadapters';
+import { getLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
 import type { Profile } from '../entity/profile';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';

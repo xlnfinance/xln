@@ -6,7 +6,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
-import { getLiveJAdapterEntries } from '../runtime/live-jadapters';
+import { getLiveJAdapterEntries } from '../runtime/jurisdiction/live-jadapters';
 import { createHash } from 'node:crypto';
 import { safeStringify } from '../protocol/serialization';
 import { clearSignerKeys } from '../account/crypto';
@@ -16,7 +16,7 @@ import { assertRuntimeIdle } from './helpers';
 import { setEntityFrameHashDebugRecorder, type EntityFrameHashDebugRecord } from '../entity/consensus/frame';
 import { stopManagedScenarioAnvil } from './boot';
 import { buildCanonicalJReplicaSnapshot } from '../storage/wal/snapshot';
-import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
+import { startRuntimeHistoryTraceForTesting } from '../runtime/observability/history-retention';
 import {
   setAccountStateRootDebugRecorder,
   type AccountStateRootDebugRecord,

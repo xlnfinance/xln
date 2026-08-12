@@ -1,5 +1,5 @@
 import type { EnvSnapshot, RuntimeReplica } from '../runtime/types';
-import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
+import { startRuntimeHistoryTraceForTesting } from '../runtime/observability/history-retention';
 
 /**
  * Browser scenario registry.

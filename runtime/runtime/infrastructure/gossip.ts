@@ -1,5 +1,5 @@
 import type { RuntimeReplica } from '../types.ts';
-import { clearInfraGossipProfiles } from '../infra-gossip-store.ts';
+import { clearInfraGossipProfiles } from './gossip-store.ts';
 import {
   drainInfraDbWrites,
   infraGossipDbAccess,

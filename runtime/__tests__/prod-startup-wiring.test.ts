@@ -216,7 +216,7 @@ describe('production startup wiring', () => {
 
   test('canonical runtime commit persists the durable outbox before backup and dispatch', () => {
     const process = readFileSync(join(repoRoot, 'runtime/runtime/frame/process.ts'), 'utf8');
-    const recoveryOutput = readFileSync(join(repoRoot, 'runtime/runtime/recovery-output.ts'), 'utf8');
+    const recoveryOutput = readFileSync(join(repoRoot, 'runtime/runtime/delivery/recovery-output.ts'), 'utf8');
     const postCommit = readFileSync(join(repoRoot, 'runtime/runtime/frame/lifecycle/post-commit.ts'), 'utf8');
     const durableOutbox = recoveryOutput.indexOf('env.pendingNetworkOutputs = buildPendingNetworkOutputs([');
     const save = process.indexOf('const outcome = await deps.storage.saveEnvToDB(');
@@ -525,7 +525,7 @@ describe('production startup wiring', () => {
       'utf8',
     );
     const orchestratorConfig = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-config.ts'), 'utf8');
-    const runtimeEntityRouting = readFileSync(join(repoRoot, 'runtime/runtime/entity-routing.ts'), 'utf8');
+    const runtimeEntityRouting = readFileSync(join(repoRoot, 'runtime/runtime/routing/entity-routing.ts'), 'utf8');
     const runtimeLoopSource = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop.ts'), 'utf8');
     const standaloneServer = readFileSync(join(repoRoot, 'runtime/api/server/index.ts'), 'utf8');
     const custodyBootstrap = readFileSync(join(repoRoot, 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');
@@ -728,8 +728,8 @@ describe('production startup wiring', () => {
     const bootstrapHub = readFileSync(join(repoRoot, 'scripts/bootstrap-hub.ts'), 'utf8');
     const serverJurisdictions = readFileSync(join(repoRoot, 'runtime/api/server/jurisdictions.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
-    const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime/tx-handlers.ts'), 'utf8');
-    const jurisdictionImport = readFileSync(join(repoRoot, 'runtime/runtime/jurisdiction-import.ts'), 'utf8');
+    const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime/transactions/tx-handlers.ts'), 'utf8');
+    const jurisdictionImport = readFileSync(join(repoRoot, 'runtime/runtime/jurisdiction/jurisdiction-import.ts'), 'utf8');
     const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/types.ts'), 'utf8');
     const rpcAdapter = readRpcAdapterSource();
     expect(hubNode).toContain("nodeLog.error('jurisdiction_contracts.code_missing'");
@@ -2493,7 +2493,7 @@ describe('production startup wiring', () => {
       'runtime/orchestrator/daemon-control.ts',
       'runtime/orchestrator/hub-node.ts',
       'runtime/orchestrator/mm-node-core.ts',
-      'runtime/runtime/swap-command-plan.ts',
+      'runtime/runtime/finance/swap-command-plan.ts',
       'frontend/src/lib/components/Entity/onboarding-runtime-input.ts',
       'frontend/src/lib/components/Entity/hub-discovery-profile.ts',
       'frontend/src/lib/components/Entity/swap-panel-core.ts',

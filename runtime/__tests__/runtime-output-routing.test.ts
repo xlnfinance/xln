@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { routeInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../runtime/entity-routing';
+import { routeInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../runtime/routing/entity-routing';
 import {
   buildPendingNetworkOutputs,
   buildRouteOutputKey,
@@ -11,7 +11,7 @@ import {
   rescheduleDeferredOutputs,
   sendEntityInputWithRouting as sendEntityInputWithRoutingRaw,
   splitPendingOutputsByRetryWindow,
-} from '../runtime/output-routing';
+} from '../runtime/routing/output-routing';
 import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../protocol/payments/delivery-result';
 import type { DeliverableEntityInput, RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import type { EntityLeaderTimeoutVote } from '../entity/types';

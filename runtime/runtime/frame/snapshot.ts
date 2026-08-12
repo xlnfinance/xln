@@ -1,4 +1,4 @@
-import { hasRuntimeHistoryTraceForTesting } from '../history-retention';
+import { hasRuntimeHistoryTraceForTesting } from '../observability/history-retention';
 import type { RuntimeReplica, RuntimeInput } from '../types';
 import type { FrameLogEntry } from '../../types/logging';
 import { buildCanonicalEnvSnapshot } from '../../storage/wal/snapshot';

@@ -4,7 +4,7 @@ import { getHealthStatus } from '../api/server/health';
 import { startJurisdictionWatchers } from '../runtime';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 
 const makeEnv = (
   replicas: Array<[string, JReplica, ReturnType<typeof makeAdapter>]>,

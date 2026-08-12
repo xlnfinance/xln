@@ -6,11 +6,11 @@ import type { Profile } from '../../entity/profile';
 import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../../network/relay/store';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { encodeRebalancePolicyMemo } from '../../extensions/rebalance/policy';
-import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
+import { resolveEntityProposerId } from '../../runtime/delivery/entity-output-signer';
 import { getErrorMessage, isEntityId32 } from './utils';
 import { getAccountReplica, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';
 import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
-import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../../runtime/ingress-receipts';
+import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../../runtime/input-pipeline/ingress-receipts';
 import {
   describeOffchainFaucetAccountState,
   shouldRejectOffchainFaucetForSettledCapacity,

@@ -19,7 +19,7 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
-import { applyRuntimeStorageChanges } from '../runtime/env-events';
+import { applyRuntimeStorageChanges } from '../runtime/observability/env-events';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
 import { inspectStorage, saveRuntimeFrameToStorage } from '../storage';
 import {

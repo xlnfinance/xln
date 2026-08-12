@@ -4,7 +4,7 @@ import type { JAdapter } from '../jurisdiction/adapter/types';
 import { waitForJurisdictionAdapter } from '../orchestrator/mm-node';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 
 const adapter = (chainId: number, depository: string): JAdapter => ({
   chainId,

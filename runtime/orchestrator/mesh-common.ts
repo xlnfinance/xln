@@ -7,7 +7,7 @@ import { getBootstrapTokenAmount } from '../jurisdiction/machine/bootstrap-econo
 import { getEntityReplicaById } from '../entity/replica/replica-lookup';
 import { assertEntityProposalAction } from '../entity/auth/authorization';
 import { normalizeSignedEntityCommand } from '../entity/command/command-codec';
-import { getReliableOutputIdentity } from '../runtime/output-routing';
+import { getReliableOutputIdentity } from '../runtime/routing/output-routing';
 export { getEntityReplicaById } from '../entity/replica/replica-lookup';
 export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
 export {

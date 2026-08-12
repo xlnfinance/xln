@@ -1,5 +1,5 @@
 import type { RuntimeReplica, RuntimeTx } from '../../runtime/types';
-import { enqueueRuntimeInput } from '../../runtime/input-queue';
+import { enqueueRuntimeInput } from '../../runtime/input-pipeline/input-queue';
 import { getEntityCertifiedJAnchor } from '../machine/local-history';
 import { getJEventJurisdictionRef } from '../machine/event-observation';
 import { markLocalJAuthorityRuntimeTx } from '../machine/registration-evidence';

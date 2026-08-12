@@ -4,7 +4,7 @@ import { getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
-import type { RuntimeIngressReceipt } from '../runtime/ingress-receipts';
+import type { RuntimeIngressReceipt } from '../runtime/input-pipeline/ingress-receipts';
 import type { ConsensusConfig } from '../entity/types';
 import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';
 import { scaleWholeTokenAmount } from '../types/finance/rebalance';

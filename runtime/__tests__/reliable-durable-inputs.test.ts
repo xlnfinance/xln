@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { mergeDurableReceiptOnlyInputs } from '../runtime/reliable/reliable-durable-inputs.ts';
 import { getInputReliableIdentity } from '../runtime/reliable/reliable-receipt.ts';
 import { reliableIdentityExactKey } from '../runtime/reliable/reliable-frontier.ts';
-import { splitRoutedOutputByDeliveryLane } from '../runtime/output-routing';
+import { splitRoutedOutputByDeliveryLane } from '../runtime/routing/output-routing';
 import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
 import { safeStringify } from '../protocol/serialization';
 import type { RoutedEntityInput } from '../runtime/types';

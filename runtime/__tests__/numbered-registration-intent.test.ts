@@ -27,10 +27,10 @@ import {
 import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
-import { getLiveJAdapter } from '../runtime/live-jadapters';
-import { markLocalRuntimeAdapterCommandTx } from '../runtime/command-frontier-auth';
-import { runtimeAdapterCommandLaneId } from '../runtime/command-frontier';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
+import { getLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
+import { markLocalRuntimeAdapterCommandTx } from '../runtime/command/frontier-auth';
+import { runtimeAdapterCommandLaneId } from '../runtime/command/frontier';
 import { dbRootPath } from '../runtime/platform';
 
 const attach = (

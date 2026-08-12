@@ -9,7 +9,7 @@ import {
 } from '../../../qa/account-causal-trace';
 import { prepareHtlcPaymentEntityInputs } from '../../../entity/htlc/payment-admission';
 import type { RuntimeReplica, RuntimeInput } from '../../types';
-import { applyEntityHeightDurabilityBarrier } from '../../entity-height-barrier';
+import { applyEntityHeightDurabilityBarrier } from '../../input-pipeline/entity-height-barrier';
 import { cloneRuntimeFrameMempool } from '../clone';
 import type { FrameExecutionState } from '../input/execution-state';
 import {

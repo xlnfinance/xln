@@ -12,7 +12,7 @@ import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 
 import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/security/auth';
 import { decodeRuntimeAdapterRequest } from '../api/runtime-adapter/codec';
-import { applyRuntimeAdapterCommandMarker } from '../runtime/command-frontier';
+import { applyRuntimeAdapterCommandMarker } from '../runtime/command/frontier';
 import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';
 import type { RuntimeAdapterReadQuery } from '../api/runtime-adapter/types';
 import { createBook, createOrderbookExtState, DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';

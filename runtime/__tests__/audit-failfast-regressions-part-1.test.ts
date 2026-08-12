@@ -15,7 +15,7 @@ import {
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../account/commitment/state-root';
 
-import { resolveCertifiedAccountCounterpartyProposer } from '../runtime/account-counterparty-route';
+import { resolveCertifiedAccountCounterpartyProposer } from '../runtime/routing/account-counterparty-route';
 
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 
@@ -180,13 +180,13 @@ import {
 
 import { createJReplica } from '../scenarios/boot';
 
-import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/entity-inputs';
+import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/input-pipeline/entity-inputs';
 import { assertExternalEntityInputAllowed } from '../runtime/entity-input/entity-input-admission.ts';
 import { discardRejectedEntityInput } from '../runtime/frame/input/discard';
 
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 
-import { applyStorageChanges } from '../runtime/env-events';
+import { applyStorageChanges } from '../runtime/observability/env-events';
 import {
   resolveDbPath,
   resolveHistoryViewDbPath,
@@ -194,11 +194,11 @@ import {
   resolveStorageDbPath,
 } from '../storage/runtime-dbs';
 
-import { submitRuntimeJOutbox } from '../runtime/j-submit';
+import { submitRuntimeJOutbox } from '../runtime/jurisdiction/j-submit';
 
 import { registerStructuredLogSink } from '../infra/logger';
 
-import { buildJSubmitAttemptId, registerPendingCommittedJOutbox } from '../runtime/j-submit-state';
+import { buildJSubmitAttemptId, registerPendingCommittedJOutbox } from '../runtime/jurisdiction/j-submit-state';
 
 import { buffersEqual, safeStringify } from '../protocol/serialization';
 
@@ -258,7 +258,7 @@ import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
   resolveEntityProposerId,
-} from '../runtime/entity-output-signer';
+} from '../runtime/delivery/entity-output-signer';
 
 import { QUOTE_EXPIRY_MS } from '../types/finance/rebalance';
 

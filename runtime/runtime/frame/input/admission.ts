@@ -1,6 +1,6 @@
 import { createStructuredLogger, logError, shortId } from '../../../infra/logger';
 import { normalizeRuntimeId } from '../../../network/p2p/auth/runtime-id';
-import { decodeRoutedEntityInput } from '../../routing-validation';
+import { decodeRoutedEntityInput } from '../../routing/routing-validation';
 import { validateJInputs } from '../../../storage/wal/runtime-machine-schema/j';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
@@ -12,10 +12,10 @@ import { compareReliableIdentityPosition } from '../../reliable/reliable-frontie
 import {
   validateExternalEntityInputTargets,
   RuntimeEntityInputApplyError,
-} from '../../entity-inputs';
-import { splitRoutedOutputByDeliveryLane } from '../../output-routing';
-import { assertScheduledWakeTxAuthorized } from '../../scheduled-wake';
-import { validateRuntimeInputShapeAndLimits } from '../../input-validation';
+} from '../../input-pipeline/entity-inputs';
+import { splitRoutedOutputByDeliveryLane } from '../../routing/output-routing';
+import { assertScheduledWakeTxAuthorized } from '../../input-pipeline/scheduled-wake';
+import { validateRuntimeInputShapeAndLimits } from '../../input-pipeline/input-validation';
 import { selectPotentialAtomicCrossJInputIndexes } from '../cross-j/atomic-admission';
 
 const runtimeLog = createStructuredLogger('runtime');

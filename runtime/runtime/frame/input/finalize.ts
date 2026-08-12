@@ -12,7 +12,7 @@ import {
 } from '../../reliable/reliable-delivery.ts';
 import { mergeDurableReceiptOnlyInputs } from '../../reliable/reliable-durable-inputs.ts';
 import { reliableIdentityExactKey } from '../../reliable/reliable-frontier.ts';
-import { splitRoutedOutputByDeliveryLane } from '../../output-routing';
+import { splitRoutedOutputByDeliveryLane } from '../../routing/output-routing';
 
 const runtimeLog = createStructuredLogger('runtime');
 

@@ -30,7 +30,7 @@ import {
   hashCertifiedEntityOutputSemantic,
 } from '../entity/consensus/output/certification';
 import { generateLazyEntityId } from '../entity/factory';
-import { applyMergedEntityInputs } from '../runtime/entity-inputs';
+import { applyMergedEntityInputs } from '../runtime/input-pipeline/entity-inputs';
 import { orderReliableEntityInputsWithinSourceLanes } from '../runtime/frame/input/admission';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
@@ -48,7 +48,7 @@ import {
   processRuntime,
 } from '../runtime';
 import { readStorageFrameRecord } from '../storage';
-import { buildRouteOutputKey, getReliableOutputIdentity } from '../runtime/output-routing';
+import { buildRouteOutputKey, getReliableOutputIdentity } from '../runtime/routing/output-routing';
 import { computeAccountStateRoot } from '../account/commitment/state-root';
 import type { DeliverableEntityInput, RuntimeReplica, ReliableDeliveryReceipt } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';

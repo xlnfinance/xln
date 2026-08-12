@@ -4,7 +4,7 @@ import {
   clearPendingAuditEvents,
   flushPendingAuditEvents,
   publishEntityCandidateEffects,
-} from '../runtime/env-events';
+} from '../runtime/observability/env-events';
 import { createEmptyEnv } from '../runtime';
 
 test('every machine event reaches history only after commit flush', () => {

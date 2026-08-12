@@ -1,12 +1,12 @@
 import type { AccountState } from '../../types/account';
 import type { RuntimeInput, RuntimeReplica } from '../../runtime/types';
 import { safeStringify } from '../../protocol/serialization';
-import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
+import { resolveEntityProposerId } from '../../runtime/delivery/entity-output-signer';
 import { getAccountReplica, getEntityOutCapacity, hasAccount } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import { getRequestCreditCap } from './hub-health';
 import { isEntityId32 } from './utils';
-import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../../runtime/ingress-receipts';
+import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../../runtime/input-pipeline/ingress-receipts';
 import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 
 type CreditRequestInput = {

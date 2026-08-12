@@ -17,7 +17,7 @@ import {
   findJSubmitCrashReplica,
   processUntilJSubmitCrash,
 } from './fixtures/j-submit-crash-helpers';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 
 describe('J-submit abort with durable pending attempt', () => {
   let cleanupRuntimeId = '';

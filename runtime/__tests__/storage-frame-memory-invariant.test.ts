@@ -20,7 +20,7 @@ import {
   registerSignerKey,
 } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { recordAccountFrameHistory } from '../runtime/env-events';
+import { recordAccountFrameHistory } from '../runtime/observability/env-events';
 import { closeHistoryViewDb } from '../storage/runtime-dbs';
 import { pruneHistoryBeforeHeight } from '../storage/lifecycle';
 import type { RuntimeReplica } from '../runtime/types';

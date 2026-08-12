@@ -5,7 +5,7 @@ import { canonicalJStackAddress } from '../../jurisdiction/adapter/stack-binding
 import type { JAdapter } from '../../jurisdiction/adapter/types';
 import type { JurisdictionConfig } from '../../entity/types';
 import type { RuntimeReplica } from '../types';
-import { getLiveJAdapterEntries } from '../live-jadapters';
+import { getLiveJAdapterEntries } from '../jurisdiction/live-jadapters';
 
 export const getTrustedRegistrationAdapter = (
   env: RuntimeReplica,

@@ -27,23 +27,23 @@ import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { buildSingleSignerHanko } from '../hanko/batch';
 import {
   applyRetryEntityProviderActionRuntimeTx,
-} from '../runtime/entity-provider-action-submit-state';
+} from '../runtime/registration/entity-provider-action-submit-state';
 import {
   assertEntityProviderActionRuntimeTxAuthorized,
   markLocalEntityProviderActionRuntimeTx,
-} from '../runtime/entity-provider-action-submit-auth';
+} from '../runtime/registration/entity-provider-action-submit-auth';
 import {
   applyRecordEntityProviderActionResultRuntimeTx,
   makeEntityProviderActionResultRuntimeTx,
-} from '../runtime/entity-provider-action-submit-result';
+} from '../runtime/registration/entity-provider-action-submit-result';
 import {
   collectDueEntityProviderActionRuntimeTxs,
   getNextEntityProviderActionRetryTimestamp,
-} from '../runtime/entity-provider-action-submit-scheduler';
+} from '../runtime/registration/entity-provider-action-submit-scheduler';
 import {
   registerPendingCommittedJOutbox,
   splitJOutboxForDurableSubmit,
-} from '../runtime/j-submit-state';
+} from '../runtime/jurisdiction/j-submit-state';
 import { createEmptyEnv } from '../runtime';
 import { createJAdapter } from '../jurisdiction/adapter';
 import {
@@ -61,7 +61,7 @@ import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
 import type { ConsensusConfig, EntityReplica, EntityState } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 import type { EntityTx } from '../types/entity-tx';
 import type { JTx } from '../types/jurisdiction-runtime';
 import { applyJEventRange } from './helpers/j-history';

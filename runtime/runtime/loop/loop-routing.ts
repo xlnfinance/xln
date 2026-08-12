@@ -11,7 +11,7 @@ import {
   type RuntimeInboundEntityInputOptions,
   type RuntimeInboundEntityInputsResult,
   type RuntimeEntityRoutingDeps,
-} from '../entity-routing.ts';
+} from '../routing/entity-routing.ts';
 import { enqueueRuntimeInputs } from './loop-infrastructure.ts';
 import {
   ensureRuntimeGossipProfiles,
@@ -24,10 +24,10 @@ import {
   stopRuntimeP2PAndWait,
   type P2PConfig,
   type RuntimeP2PLifecycleDeps,
-} from '../p2p-lifecycle.ts';
+} from '../infrastructure/p2p-lifecycle.ts';
 import { registerReliableReceiptIngress } from '../reliable/reliable-delivery.ts';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
-import { assertScheduledWakeTxAuthorized } from '../scheduled-wake.ts';
+import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure.ts';
+import { assertScheduledWakeTxAuthorized } from '../input-pipeline/scheduled-wake.ts';
 import { assertRuntimeCommandReady } from '../lifecycle.ts';
 import {
   MAX_RUNTIME_J_INPUT_BYTES,
@@ -35,14 +35,14 @@ import {
   MAX_RUNTIME_J_TXS,
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
   validateRuntimeInputShapeAndLimits,
-} from '../input-validation.ts';
-import { MAX_PENDING_NETWORK_OUTPUTS, sendEntityInputWithRouting } from '../output-routing.ts';
+} from '../input-pipeline/input-validation.ts';
+import { MAX_PENDING_NETWORK_OUTPUTS, sendEntityInputWithRouting } from '../routing/output-routing.ts';
 import { normalizeDbNamespace } from '../../storage/runtime-dbs.ts';
-import { decodeRoutedEntityInput } from '../routing-validation.ts';
+import { decodeRoutedEntityInput } from '../routing/routing-validation.ts';
 import type { EntityInput } from '../../entity/types.ts';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeInput } from '../types.ts';
 import { clearRuntimeGossip } from '../infrastructure/gossip.ts';
-import { assertRuntimeInputCapabilitiesAuthorized } from '../internal-tx-auth.ts';
+import { assertRuntimeInputCapabilitiesAuthorized } from '../transactions/internal-tx-auth.ts';
 import {
   deriveRuntimeId,
   getLocalSignerIdsForEntity,

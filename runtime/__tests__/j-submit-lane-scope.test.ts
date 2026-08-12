@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { applyRuntimeTx } from '../runtime/tx-handlers';
+import { applyRuntimeTx } from '../runtime/transactions/tx-handlers';
 import {
   hasPendingCommittedJBatch,
   registerPendingCommittedJOutbox,
-} from '../runtime/j-submit-state';
-import { collectDueJSubmitRuntimeTxs } from '../runtime/j-submit-scheduler';
+} from '../runtime/jurisdiction/j-submit-state';
+import { collectDueJSubmitRuntimeTxs } from '../runtime/jurisdiction/j-submit-scheduler';
 import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import {
   makeJSubmitDurabilityFixture,

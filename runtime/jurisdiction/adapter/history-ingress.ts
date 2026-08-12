@@ -1,7 +1,7 @@
 import type { JPrefixAttestation } from '../../types/jurisdiction-events';
 import type { EntityInput } from '../../entity/types';
 import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../../runtime/types';
-import { enqueueRuntimeInput } from '../../runtime/input-queue';
+import { enqueueRuntimeInput } from '../../runtime/input-pipeline/input-queue';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { getJEventJurisdictionRef } from '../machine/event-observation';
 import { JBLOCK_LIVENESS_INTERVAL } from '../../entity/types';

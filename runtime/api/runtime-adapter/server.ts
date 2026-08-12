@@ -15,7 +15,7 @@ import {
   projectRuntimeIngressReceiptForWire,
   type RegisterReceiptOptions,
   type RuntimeIngressReceipt,
-} from '../../runtime/ingress-receipts';
+} from '../../runtime/input-pipeline/ingress-receipts';
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './security/rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
@@ -55,8 +55,8 @@ import {
   readRuntimeAdapterCommandFrontier,
   runtimeAdapterCommandLaneId,
   runtimeAdapterOwnerCommandLaneId,
-} from '../../runtime/command-frontier';
-import { markLocalRuntimeAdapterCommandTx } from '../../runtime/command-frontier-auth';
+} from '../../runtime/command/frontier';
+import { markLocalRuntimeAdapterCommandTx } from '../../runtime/command/frontier-auth';
 import { verifyRuntimeAdapterOwnerBinding } from './security/owner-binding';
 import { encodeBinaryPayload } from '../../storage/binary-codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';

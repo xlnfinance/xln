@@ -11,8 +11,8 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getWallClockMs } from '../../infra/time';
-import { validateDeliverableEntityInput } from '../routing-validation';
-import { recordRuntimeSecurityIncident } from '../security-incidents';
+import { validateDeliverableEntityInput } from '../routing/routing-validation';
+import { recordRuntimeSecurityIncident } from '../observability/security-incidents';
 
 import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output/envelope';
 import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
@@ -24,7 +24,7 @@ import {
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 import { reliableReceiptCoversIdentity, senderFrontierKey, senderFrontierKeyForIdentity } from '../reliable/reliable-frontier.ts';
-import { explainCrossJPairing, selectPotentialCrossJAccountInputPairs } from '../entity-routing';
+import { explainCrossJPairing, selectPotentialCrossJAccountInputPairs } from '../routing/entity-routing';
 import {
   accountProposalSettledBySender,
   accountProposalEvidenceRank,

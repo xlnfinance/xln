@@ -14,7 +14,7 @@ import {
   receiverFrontierKey,
   senderFrontierKey,
 } from '../../runtime/reliable/reliable-frontier.ts';
-import { applyRuntimeStorageChanges } from '../../runtime/env-events';
+import { applyRuntimeStorageChanges } from '../../runtime/observability/env-events';
 import { serializeTaggedJson } from '../../protocol/serialization';
 import {
   createCatchupFixtureState,

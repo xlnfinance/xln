@@ -8,7 +8,7 @@ import {
   requireEntityEncryptionPrivateKey,
 } from '../entity/auth/crypto';
 import { createEmptyEnv, generateLazyEntityId } from '../runtime';
-import { applyRuntimeTx } from '../runtime/tx-handlers';
+import { applyRuntimeTx } from '../runtime/transactions/tx-handlers';
 
 const testJurisdiction = {
   address: `0x${'22'.repeat(20)}`,

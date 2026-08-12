@@ -8,7 +8,7 @@ import { createStructuredLogger, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getWallClockMs } from '../../infra/time';
-import { validateDeliverableEntityInput } from '../routing-validation';
+import { validateDeliverableEntityInput } from '../routing/routing-validation';
 import {
   isDeliveryDelivered,
   requireDeliveryDelivered,
@@ -16,7 +16,7 @@ import {
   shouldRetryDelivery,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
-import { selectPotentialCrossJAccountInputPairs } from '../entity-routing';
+import { selectPotentialCrossJAccountInputPairs } from '../routing/entity-routing';
 import {
   buildRouteOutputKey,
   getReliableOutputIdentity,
@@ -42,7 +42,7 @@ import {
   type RuntimeOutputRoutingDeps,
 } from './pending';
 import { planEntityOutputs } from './plan';
-import { recordRuntimeSecurityIncident } from '../security-incidents';
+import { recordRuntimeSecurityIncident } from '../observability/security-incidents';
 
 const routeLog = createStructuredLogger('network.route');
 

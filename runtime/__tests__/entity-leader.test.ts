@@ -38,7 +38,7 @@ import {
 } from '../jurisdiction/machine/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { commitReliableIngress } from '../runtime/reliable/reliable-delivery.ts';
-import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
+import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/input-pipeline/scheduled-wake';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
 import type { ConsensusConfig, EntityReplica, EntityState, EntityFrame } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
@@ -48,7 +48,7 @@ import { validateConsensusConfig } from '../entity/consensus/config-validation';
 import {
   decodeEntityOutput,
   decodeRoutedEntityInput,
-} from '../runtime/routing-validation';
+} from '../runtime/routing/routing-validation';
 import { validateEntityReplica } from '../entity/replica/replica-validation';
 
 const leaderTestJurisdiction = {

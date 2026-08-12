@@ -2,7 +2,7 @@ import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
 import type { RoutedEntityInput } from '../types.ts';
 import { reliableIdentityExactKey } from './reliable-frontier.ts';
 import { getInputReliableIdentity } from './reliable-receipt.ts';
-import { splitRoutedOutputByDeliveryLane } from '../output-routing.ts';
+import { splitRoutedOutputByDeliveryLane } from '../routing/output-routing.ts';
 
 const reliableKeys = (input: RoutedEntityInput): string[] =>
   splitRoutedOutputByDeliveryLane(input).flatMap((lane) => {

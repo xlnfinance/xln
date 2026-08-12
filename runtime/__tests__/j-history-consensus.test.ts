@@ -27,7 +27,7 @@ import {
   signAccountFrame,
   verifyAccountSignature,
 } from '../account/crypto';
-import { applyRuntimeTx } from '../runtime/tx-handlers';
+import { applyRuntimeTx } from '../runtime/transactions/tx-handlers';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/machine/registration-evidence';
 import {
   assertCertifiedJHistoryIntegrity,

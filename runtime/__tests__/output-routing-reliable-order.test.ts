@@ -13,7 +13,7 @@ import {
   sendEntityInputWithRouting,
   splitPendingOutputsByRetryWindow,
   type RuntimeOutputRoutingDeps,
-} from '../runtime/output-routing';
+} from '../runtime/routing/output-routing';
 import {
   applyReliableDeliveryReceipts,
   createReliableDeliveryReceipt,

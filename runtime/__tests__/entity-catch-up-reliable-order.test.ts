@@ -20,7 +20,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { initCrontab } from '../entity/scheduler';
 import { buildQuorumHanko } from '../hanko/signing';
-import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
+import { startRuntimeHistoryTraceForTesting } from '../runtime/observability/history-retention';
 import { buildLocalEntityProfile } from '../network/p2p/gossip/helper';
 import {
   collectLocalProfileEncryptionAnnouncements,
@@ -32,8 +32,8 @@ import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-o
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/machine/registration-evidence';
 import { buildRuntimeRecoveryBundle } from '../storage/recovery/bundle';
-import { applyMergedEntityInputs } from '../runtime/entity-inputs';
-import type { RuntimeEntityRoutingDeps } from '../runtime/entity-routing';
+import { applyMergedEntityInputs } from '../runtime/input-pipeline/entity-inputs';
+import type { RuntimeEntityRoutingDeps } from '../runtime/routing/entity-routing';
 import {
   applyReliableDeliveryReceipts,
   commitReliableIngress,

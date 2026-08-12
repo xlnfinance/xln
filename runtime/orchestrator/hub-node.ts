@@ -25,7 +25,7 @@ import {
 import { deployMissingDefaultTokens } from '../jurisdiction/adapter/dev-token-deployment';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
 import { assertJStackAddressMatch } from '../jurisdiction/adapter/stack-binding';
-import { attachLiveJAdapter, getLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter, getLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 import {
   normalizeJurisdictionKey,
   selectWritableJurisdictionKey,
@@ -88,8 +88,8 @@ import { handleRuntimeActivityRequest } from '../api/server/activity-api';
 import { handleReserveFaucet } from '../api/server/reserve-faucet';
 import { handleOffchainFaucet } from '../api/server/offchain-faucet';
 import { enforceFaucetPolicy } from '../api/server/faucet-policy';
-import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
-import { readRuntimeSecurityIncidentTelemetry } from '../runtime/security-incidents';
+import { createRuntimeIngressReceiptStore } from '../runtime/input-pipeline/ingress-receipts';
+import { readRuntimeSecurityIncidentTelemetry } from '../runtime/observability/security-incidents';
 import { handleRuntimeInputStatus } from '../api/server/runtime-input-control';
 import {
   getActiveJAdapter,

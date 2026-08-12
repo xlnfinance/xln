@@ -3,12 +3,12 @@ import type { RuntimeReplica, EnvSnapshot, RoutedEntityInput, RuntimeInput } fro
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { Profile } from '../../entity/profile';
 import { cloneEntityReplica } from '../../entity/replica/replica-clone';
-import { markRestoredJSubmitRuntimeTxs } from '../../runtime/j-submit-state';
+import { markRestoredJSubmitRuntimeTxs } from '../../runtime/jurisdiction/j-submit-state';
 import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/machine/registration-evidence';
-import { markRestoredJImportResultRuntimeTxs } from '../../runtime/jurisdiction-import';
-import { markRestoredEntityProviderActionRuntimeTxs } from '../../runtime/entity-provider-action-submit-auth';
+import { markRestoredJImportResultRuntimeTxs } from '../../runtime/jurisdiction/jurisdiction-import';
+import { markRestoredEntityProviderActionRuntimeTxs } from '../../runtime/registration/entity-provider-action-submit-auth';
 import { markRestoredNumberedRegistrationTxs } from '../../runtime/registration/numbered-registration-auth';
-import { markRestoredRuntimeAdapterCommandTxs } from '../../runtime/command-frontier-auth';
+import { markRestoredRuntimeAdapterCommandTxs } from '../../runtime/command/frontier-auth';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
@@ -28,8 +28,8 @@ import {
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
-} from '../../runtime/input-clone';
-import { assertRuntimeInputCapabilitiesAuthorized } from '../../runtime/internal-tx-auth';
+} from '../../runtime/input-pipeline/input-clone';
+import { assertRuntimeInputCapabilitiesAuthorized } from '../../runtime/transactions/internal-tx-auth';
 
 export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => {
   markRestoredJSubmitRuntimeTxs(runtimeInput.runtimeTxs);

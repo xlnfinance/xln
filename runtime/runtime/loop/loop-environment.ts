@@ -6,7 +6,7 @@ import {
   readRuntimeEnv,
 } from '../../infra/process/runtime-process.ts';
 import { safeStringify } from '../../protocol/serialization.ts';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
+import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure.ts';
 import type { RuntimeReplica, RuntimeInput } from '../types.ts';
 import {
   getRuntimeCommandReadiness,

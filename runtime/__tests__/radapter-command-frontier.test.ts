@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import {
   applyRuntimeAdapterCommandMarker,
   runtimeAdapterCommandLaneId,
-} from '../runtime/command-frontier';
-import { markLocalRuntimeAdapterCommandTx } from '../runtime/command-frontier-auth';
-import { applyRuntimeTx } from '../runtime/tx-handlers';
+} from '../runtime/command/frontier';
+import { markLocalRuntimeAdapterCommandTx } from '../runtime/command/frontier-auth';
+import { applyRuntimeTx } from '../runtime/transactions/tx-handlers';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { createEmptyEnv } from '../runtime';
 

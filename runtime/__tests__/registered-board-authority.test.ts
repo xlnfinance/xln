@@ -48,8 +48,8 @@ import { foldJHistoryRoot, EMPTY_J_HISTORY_ROOT } from '../jurisdiction/machine/
 import { buildLocalJPrefixAttestation } from '../jurisdiction/machine/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { createEmptyEnv, restoreEnvFromCheckpointSnapshot } from '../runtime';
-import { getReliableOutputIdentity } from '../runtime/output-routing';
-import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
+import { getReliableOutputIdentity } from '../runtime/routing/output-routing';
+import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/input-pipeline/scheduled-wake';
 import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import { cloneEntityState } from '../entity/state-clone';
 import type { ConsensusOutputOrigin, EntityTx } from '../types/entity-tx';

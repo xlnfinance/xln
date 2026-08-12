@@ -1,6 +1,6 @@
 import { createStructuredLogger } from '../../../infra/logger';
 import type { RoutedEntityInput, RuntimeInput, RuntimeReplica } from '../../types';
-import { RuntimeEntityInputApplyError } from '../../entity-inputs';
+import { RuntimeEntityInputApplyError } from '../../input-pipeline/entity-inputs';
 import { ENV_REPLAY_MODE_KEY, readRuntimeMetadata } from '../../loop/loop-environment.ts';
 import { cloneRuntimeFrameMempool } from '../clone';
 

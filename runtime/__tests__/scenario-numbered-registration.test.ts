@@ -10,7 +10,7 @@ import { setScenarioStorageEnabled } from '../scenarios/helpers';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
-import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 
 const attach = (
   env: RuntimeReplica,

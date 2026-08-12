@@ -1226,7 +1226,7 @@ xln/
     runtime/jurisdiction-api.ts  ${fileSizes['runtime/runtime/jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
 
     swap/cross-j/orderbook:
-      runtime/swap-pairs.ts       ${fileSizes['runtime/runtime/swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
+      runtime/finance/swap-pairs.ts ${fileSizes['runtime/runtime/finance/swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
       orderbook/swap-execution.ts           ${fileSizes['runtime/orderbook/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
       extensions/cross-j/index.ts       ${fileSizes['runtime/extensions/cross-j/index.ts'] || '?'} lines - Cross-j route hashes and fill progress
       extensions/cross-j/market.ts ${fileSizes['runtime/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation

@@ -48,7 +48,7 @@ import {
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
 import { generateLazyEntityId } from '../entity/factory';
-import { buildRouteOutputKey } from '../runtime/output-routing';
+import { buildRouteOutputKey } from '../runtime/routing/output-routing';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { StorageEntityCoreDoc, RuntimeFrame } from '../storage/types';
 import type { DeliverableEntityInput } from '../runtime/types';

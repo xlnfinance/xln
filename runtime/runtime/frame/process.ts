@@ -1,20 +1,20 @@
 import { TIMING } from '../../config/constants';
 import { collectDueLocalProfileCertificationInputs } from '../../network/p2p/gossip/local-profile-lifecycle';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
-import { recordRuntimeHistoryTraceForTesting } from '../history-retention';
+import { recordRuntimeHistoryTraceForTesting } from '../observability/history-retention';
 import { createStructuredLogger } from '../../infra/logger';
 import type { createRuntimeLoopApi } from '../loop/loop.ts';
-import { materializePendingJurisdictionImportResults } from '../jurisdiction-import';
-import { requireRuntimeMempool } from '../input-queue';
+import { materializePendingJurisdictionImportResults } from '../jurisdiction/jurisdiction-import';
+import { requireRuntimeMempool } from '../input-pipeline/input-queue';
 import { transitionRuntimeLifecycle } from '../lifecycle';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
+import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure';
 import type { createRuntimeRecoveryApi } from '../../storage/recovery/restore';
 import type { createRuntimeStorageApi } from '../../storage/runtime-storage';
 import { notifyRuntimeSyncAfterCommit } from '../../storage/runtime-storage';
 import type { EntityInput } from '../../entity/types';
 import type { RuntimeInput, RuntimeReplica } from '../types';
 import { getWallClockMs } from '../../infra/time';
-import { clearPendingAuditEvents, flushPendingAuditEvents } from '../env-events';
+import { clearPendingAuditEvents, flushPendingAuditEvents } from '../observability/env-events';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './lifecycle/writer-lock';
 import { createFrameExecutionState, type FrameExecutionState } from './input/execution-state';
 import {
@@ -33,7 +33,7 @@ import { handleRuntimeFrameStorageFailure } from './lifecycle/storage-failure';
 import { runCommittedRuntimeEffects } from './lifecycle/post-commit';
 import { finishRuntimeFrame, handleRuntimeFrameFailure } from './lifecycle/finish';
 import type { RuntimeInputReducer } from './input/reducer';
-import { getLiveJAdapterEntries } from '../live-jadapters';
+import { getLiveJAdapterEntries } from '../jurisdiction/live-jadapters';
 
 const runtimeLog = createStructuredLogger('runtime');
 

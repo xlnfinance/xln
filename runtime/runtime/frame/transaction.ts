@@ -1,8 +1,8 @@
 import type { RuntimeInput, RuntimeReplica } from '../types';
-import { requireRuntimeMempool } from '../input-queue';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
-import { rebuildScheduledWakeIndex } from '../scheduled-wake';
-import { getLiveJAdapterEntries } from '../live-jadapters';
+import { requireRuntimeMempool } from '../input-pipeline/input-queue';
+import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure';
+import { rebuildScheduledWakeIndex } from '../input-pipeline/scheduled-wake';
+import { getLiveJAdapterEntries } from '../jurisdiction/live-jadapters';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { getInputReliableIdentity } from '../reliable/reliable-delivery.ts';
 import { reliableIdentityExactKey } from '../reliable/reliable-frontier.ts';

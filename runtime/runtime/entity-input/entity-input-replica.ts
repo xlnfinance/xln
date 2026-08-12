@@ -3,8 +3,8 @@ import type { EntityInputOutcome } from '../../entity/consensus/index.ts';
 import type { EntityOutput, EntityInput, EntityReplica } from '../../entity/types.ts';
 import type { RoutedEntityInput, RuntimeReplica } from '../types.ts';
 import type { JInput } from '../../jurisdiction/machine/input.ts';
-import { resolveEntityOutputSignerId } from '../entity-output-signer.ts';
-import { decodeEntityOutput } from '../routing-validation.ts';
+import { resolveEntityOutputSignerId } from '../delivery/entity-output-signer.ts';
+import { decodeEntityOutput } from '../routing/routing-validation.ts';
 import { DEBUG } from '../../infra/debug-flags.ts';
 import { logError, shortId } from '../../infra/logger.ts';
 import {
