@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
-import { findValueImportComponents, isValueModuleReference } from './import-cycle-analysis';
+import { findValueImportComponents, isValueModuleReference } from '../../import-cycle-analysis';
 
 const RUNTIME_ROOT = path.resolve('runtime');
 const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;

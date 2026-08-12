@@ -11,11 +11,11 @@ import {
   isDeliveryDelivered,
   isDeliveryResult,
   shouldRetryDelivery,
-} from '../protocol/payments/delivery-result';
+} from '../../../protocol/payments/delivery-result';
 import {
   classifyRelayDeliveryEvent,
-} from '../network/relay/store';
-import { classifyWebSocketSendResult } from '../network/websocket-send-result';
+} from '../../../network/relay/store';
+import { classifyWebSocketSendResult } from '../../../network/websocket-send-result';
 
 const repoRoot = process.cwd();
 

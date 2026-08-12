@@ -30,12 +30,12 @@ const SKIP_PATH_FRAGMENTS = [
   '/generated/',
   '/node_modules/',
   // This checker and its siblings necessarily name the words they forbid.
-  'runtime/scripts/check-no-legacy.ts',
-  'runtime/scripts/check-no-pre-mainnet-legacy.ts',
-  'runtime/scripts/check-canonical-vocabulary.ts',
-  'runtime/scripts/check-failure-taxonomy-scan.ts',
-  'runtime/scripts/check-onchain-hanko-ast.ts',
-  'runtime/scripts/check-consensus-hanko-scan.ts',
+  'runtime/scripts/checks/policy/check-no-legacy.ts',
+  'runtime/scripts/checks/policy/check-no-pre-mainnet-legacy.ts',
+  'runtime/scripts/checks/architecture/check-canonical-vocabulary.ts',
+  'runtime/scripts/checks/consensus/check-failure-taxonomy-scan.ts',
+  'runtime/scripts/checks/contracts/check-onchain-hanko-ast.ts',
+  'runtime/scripts/checks/consensus/check-consensus-hanko-scan.ts',
 ] as const;
 
 const FORBIDDEN = [

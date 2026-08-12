@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import {
   formatQaTestCategoryViolations,
   inspectQaTestCategory,
-} from '../qa/test-categories';
-import { listPlaywrightTestMetadata } from './playwright-test-metadata';
+} from '../../../qa/test-categories';
+import { listPlaywrightTestMetadata } from '../../playwright-test-metadata';
 
 const listSpecs = (root: string): string[] => {
   const specs: string[] = [];

@@ -49,13 +49,13 @@ const runScan = (label: string, script: string): void => {
   }
 };
 
-runScan('contract governance scan', 'runtime/scripts/check-contract-governance-scan.ts');
-runScan('consensus hanko scan', 'runtime/scripts/check-consensus-hanko-scan.ts');
-runScan('runtime failure taxonomy scan', 'runtime/scripts/check-failure-taxonomy-scan.ts');
-runScan('runtime delivery boundary scan', 'runtime/scripts/check-delivery-boundary-scan.ts');
-runScan('canonical identity scan', 'runtime/scripts/check-canonical-identity-scan.ts');
-runScan('canonical fill scan', 'runtime/scripts/check-canonical-fill-scan.ts');
-runScan('swap cancel canonical scan', 'runtime/scripts/check-swap-cancel-canonical-scan.ts');
+runScan('contract governance scan', 'runtime/scripts/checks/contracts/check-contract-governance-scan.ts');
+runScan('consensus hanko scan', 'runtime/scripts/checks/consensus/check-consensus-hanko-scan.ts');
+runScan('runtime failure taxonomy scan', 'runtime/scripts/checks/consensus/check-failure-taxonomy-scan.ts');
+runScan('runtime delivery boundary scan', 'runtime/scripts/checks/consensus/check-delivery-boundary-scan.ts');
+runScan('canonical identity scan', 'runtime/scripts/checks/consensus/check-canonical-identity-scan.ts');
+runScan('canonical fill scan', 'runtime/scripts/checks/consensus/check-canonical-fill-scan.ts');
+runScan('swap cancel canonical scan', 'runtime/scripts/checks/consensus/check-swap-cancel-canonical-scan.ts');
 
 const auditBriefPath = 'docs/security/external-audit-brief.md';
 const auditBrief = readText(auditBriefPath);

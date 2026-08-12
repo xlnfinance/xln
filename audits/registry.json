@@ -197,7 +197,7 @@
       "sourceGlobs": [
         "runtime/network/**/*.ts",
         "runtime/api/server/network/relay-direct.ts",
-        "runtime/scripts/check-delivery-boundary-scan.ts"
+        "runtime/scripts/checks/consensus/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
         "runtime/__tests__/**/*p2p*",
@@ -645,7 +645,7 @@
       "sourceGlobs": [
         "runtime/network/**/*.ts",
         "runtime/api/server/network/relay-direct.ts",
-        "runtime/scripts/check-delivery-boundary-scan.ts"
+        "runtime/scripts/checks/consensus/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
         "runtime/__tests__/**/*p2p*",
@@ -670,7 +670,7 @@
       "sourceGlobs": [
         "runtime/network/**/*.ts",
         "runtime/api/server/network/relay-direct.ts",
-        "runtime/scripts/check-delivery-boundary-scan.ts"
+        "runtime/scripts/checks/consensus/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
         "runtime/__tests__/**/*p2p*",
@@ -695,7 +695,7 @@
       "sourceGlobs": [
         "runtime/network/**/*.ts",
         "runtime/api/server/network/relay-direct.ts",
-        "runtime/scripts/check-delivery-boundary-scan.ts"
+        "runtime/scripts/checks/consensus/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
         "runtime/__tests__/**/*p2p*",

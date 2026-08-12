@@ -68,7 +68,7 @@ describe('determinism cleanup lifecycle', () => {
   });
 
   test('determinism check command exits explicitly after a successful gate', () => {
-    const source = readSource('runtime/scripts/check-determinism.ts');
+    const source = readSource('runtime/scripts/checks/architecture/check-determinism.ts');
 
     expect(source).toContain('main()');
     expect(source).toContain('.then(() =>');

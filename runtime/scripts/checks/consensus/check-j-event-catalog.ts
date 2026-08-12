@@ -1,11 +1,11 @@
 import {
   Depository__factory,
   EntityProvider__factory,
-} from '../../jurisdictions/typechain-types';
+} from '../../../../jurisdictions/typechain-types';
 import {
   DEPOSITORY_J_EVENTS,
   ENTITY_PROVIDER_J_EVENTS,
-} from '../jurisdiction/machine/event-catalog';
+} from '../../../jurisdiction/machine/event-catalog';
 
 type EventPolicy = {
   consensus: readonly string[];

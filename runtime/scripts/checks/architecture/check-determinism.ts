@@ -1,6 +1,6 @@
 import { promises } from 'node:fs';
 import path from 'node:path';
-import { runDeterminismTests } from '../scenarios/runner/determinism';
+import { runDeterminismTests } from '../../../scenarios/runner/determinism';
 
 type Violation = {
   file: string;

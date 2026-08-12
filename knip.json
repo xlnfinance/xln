@@ -5,7 +5,7 @@
     "runtime/api/public/runtime-public.ts",
     "runtime/api/public/runtime-module.ts",
     "runtime/api/server/index.ts",
-    "runtime/scripts/*.ts",
+    "runtime/scripts/**/*.ts",
     "runtime/scenarios/**/*.ts",
     "runtime/__tests__/**/*.test.ts",
     "scripts/**/*.ts",

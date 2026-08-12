@@ -2,7 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 
-import { deliveryFailure, isDeliveryResult } from '../protocol/payments/delivery-result';
+import { deliveryFailure, isDeliveryResult } from '../../../protocol/payments/delivery-result';
 import {
   buildRuntimeFailureSignal,
   classifyRuntimeFaucetFailure,
@@ -11,9 +11,9 @@ import {
   classifyRuntimeTransportFailure,
   isRuntimeFailureSignal,
   type RuntimeFailureSignal,
-} from '../protocol/errors/failure-taxonomy';
-import { publicAggregatedHealth } from '../api/server/health/redaction';
-import { resolveRuntimeImportReadiness } from '../orchestrator/runtime/runtime-import-readiness';
+} from '../../../protocol/errors/failure-taxonomy';
+import { publicAggregatedHealth } from '../../../api/server/health/redaction';
+import { resolveRuntimeImportReadiness } from '../../../orchestrator/runtime/runtime-import-readiness';
 
 const readText = (path: string): string => {
   const splitSources: Record<string, string[]> = {

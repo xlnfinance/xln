@@ -178,7 +178,7 @@ Evidence:
 
 - `applyRuntimeInput`: `runtime/runtime.ts:1573`.
 - Timestamp comment: `runtime/runtime.ts:1714`.
-- Determinism guard: `runtime/scripts/check-determinism.ts`.
+- Determinism guard: `runtime/scripts/checks/architecture/check-determinism.ts`.
 - Cross-j default random order id:
   `runtime/runtime-jurisdiction-api.ts:83-90`.
 
@@ -543,8 +543,8 @@ Evidence:
 - Fast suite: `runtime/scripts/run-all-tests-fast.ts`.
 - Fast e2e target list: `runtime/scripts/run-e2e-fast.ts`.
 - Release gate: `runtime/scripts/run-release-gate.ts`.
-- Determinism guard: `runtime/scripts/check-determinism.ts`.
-- Manual delta guard: `runtime/scripts/check-no-manual-delta-math.ts`.
+- Determinism guard: `runtime/scripts/checks/architecture/check-determinism.ts`.
+- Manual delta guard: `runtime/scripts/checks/policy/check-no-manual-delta-math.ts`.
 
 Risks:
 

@@ -1,6 +1,6 @@
 import { promises } from 'fs';
 import path from 'path';
-import { compareStableText } from '../protocol/serialization';
+import { compareStableText } from '../../../protocol/serialization';
 
 type FileSizeViolation = {
   file: string;

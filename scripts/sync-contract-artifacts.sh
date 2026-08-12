@@ -109,6 +109,6 @@ cd "$ROOT_DIR/frontend"
 "$NODE_BIN" copy-static-files.js
 
 echo "[contracts-sync] verifying compiler immutable metadata parity"
-bun "$ROOT_DIR/runtime/scripts/check-contract-artifact-immutables.ts"
+bun "$ROOT_DIR/runtime/scripts/checks/contracts/check-contract-artifact-immutables.ts"
 
 echo "[contracts-sync] done"

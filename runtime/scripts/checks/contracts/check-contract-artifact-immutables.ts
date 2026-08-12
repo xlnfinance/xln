@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 const buildInfoDir = join(root, 'jurisdictions', 'artifacts', 'build-info');
 const staticDir = join(root, 'frontend', 'static', 'contracts');
 const buildInfos = readdirSync(buildInfoDir)
