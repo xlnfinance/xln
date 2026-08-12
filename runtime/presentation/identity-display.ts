@@ -29,7 +29,7 @@ const DEMO_SIGNERS = {
 const getSignerAddress = (signerId: string): string =>
   DEMO_SIGNERS[signerId as keyof typeof DEMO_SIGNERS]?.address ?? signerId;
 
-const fallbackAvatar = (seed: string, size: number): string => {
+const generateSeedAvatar = (seed: string, size: number): string => {
   let hash = 0;
   for (let index = 0; index < seed.length; index += 1) {
     hash = ((hash << 5) - hash + seed.charCodeAt(index)) & 0xffffffff;
@@ -47,7 +47,7 @@ export const hashToAvatar = (seed: string, size = 40): string => {
     const svg = toSvg(String(seed || '').trim().toLowerCase(), size);
     return `data:image/svg+xml,${encodeURIComponent(svg)}`;
   } catch {
-    return fallbackAvatar(seed, size);
+    return generateSeedAvatar(seed, size);
   }
 };
 

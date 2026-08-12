@@ -11,11 +11,9 @@
 
 import type { AccountState, AccountTx, Delta, HtlcLock } from '../../../../types/account';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
-import { hashEncryptedHtlcLayer, htlcSecretOfferContextHash } from '../../../../protocol/htlc/codec/onion-layer';
-import { validateMultiRecipientCiphertext } from '../../../../protocol/htlc/multi-recipient';
 import { createStructuredLogger, shortHash } from '../../../../infra/logger';
 import { releaseHold } from '../../hold-utils';
-import { isHtlcTimelockExpired } from '../../../htlc-deadline';
+import { isHtlcDeadlineExpired } from '../../../htlc-deadline';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
 
 const htlcResolveLog = createStructuredLogger('account.htlc');
@@ -25,9 +23,8 @@ type HtlcResolveResult = {
   success: boolean;
   events: string[];
   error?: string;
-  outcome?: 'offer' | 'secret' | 'error';
+  outcome?: 'secret' | 'error';
   secret?: string;
-  offerHash?: string;
   hashlock?: string;
   reason?: string;
   amount?: bigint;
@@ -35,86 +32,15 @@ type HtlcResolveResult = {
   description?: string;
 };
 
-function handleHtlcSecretOffer(
-  account: AccountState,
-  lock: HtlcLock,
-  data: Extract<HtlcResolveTx['data'], { outcome: 'offer' }>,
-  byLeft: boolean,
-  events: string[],
-): HtlcResolveResult {
-  if (byLeft === lock.senderIsLeft) {
-    return {
-      success: false,
-      error: 'Only beneficiary can publish an HTLC secret offer',
-      events,
-    };
-  }
-  let offer;
-  try {
-    const payer = lock.senderIsLeft ? account.leftEntity : account.rightEntity;
-    const beneficiary = lock.senderIsLeft ? account.rightEntity : account.leftEntity;
-    offer = validateMultiRecipientCiphertext(
-      data.offer,
-      payer,
-      htlcSecretOfferContextHash(payer, beneficiary, lock),
-    );
-  } catch (error) {
-    return {
-      success: false,
-      error: `Invalid HTLC secret offer: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-      events,
-    };
-  }
-  const offerHash = hashEncryptedHtlcLayer(offer);
-  if (lock.secretOffer) {
-    const committedHash = hashEncryptedHtlcLayer(lock.secretOffer);
-    if (committedHash !== offerHash) {
-      return {
-        success: false,
-        error: 'HTLC secret offer conflicts with committed offer',
-        events,
-      };
-    }
-    return {
-      success: true,
-      events,
-      outcome: 'offer',
-      hashlock: lock.hashlock,
-      offerHash: committedHash,
-    };
-  }
-  lock.secretOffer = offer;
-  events.push(`🔐 HTLC secret offer committed for ${lock.lockId}`);
-  return { success: true, events, outcome: 'offer', hashlock: lock.hashlock, offerHash };
-}
-
 function getHtlcSecretResolveError(
   lock: HtlcLock,
   data: Extract<HtlcResolveTx['data'], { outcome: 'secret' }>,
-  byLeft: boolean,
   currentJHeight: number,
   currentTimestamp: number,
 ): string | undefined {
-  if (currentJHeight > 0 && currentJHeight > lock.revealBeforeHeight) {
-    return `Lock expired by J height: ${currentJHeight} > ${lock.revealBeforeHeight}`;
-  }
-  if (isHtlcTimelockExpired(currentTimestamp, lock.timelock)) {
-    return `Lock expired by time: ${currentTimestamp} >= ${lock.timelock}`;
-  }
-  if ('offerHash' in data) {
-    if (byLeft !== lock.senderIsLeft) {
-      return 'Only payer can accept an HTLC secret offer';
-    }
-    if (!lock.secretOffer) return 'Committed HTLC secret offer required';
-    const committedHash = hashEncryptedHtlcLayer(lock.secretOffer);
-    return data.offerHash.toLowerCase() === committedHash
-      ? undefined
-      : 'HTLC secret offer hash mismatch';
-  }
-  if (lock.secretOffer) {
-    return 'Raw secret cannot bypass a committed HTLC secret offer';
+  if (isHtlcDeadlineExpired(lock, { timestamp: currentTimestamp, jHeight: currentJHeight })) {
+    return `Lock expired: timestamp=${currentTimestamp}/${lock.timelock} `
+      + `jHeight=${currentJHeight}/${lock.revealBeforeHeight}`;
   }
   let computedHash: string;
   try {
@@ -137,9 +63,10 @@ function getHtlcErrorResolveError(
 ): string | undefined {
   const callerIsBeneficiary = byLeft !== lock.senderIsLeft;
   const callerIsPayer = byLeft === lock.senderIsLeft;
-  const expired =
-    (currentJHeight > 0 && currentJHeight > lock.revealBeforeHeight) ||
-    isHtlcTimelockExpired(currentTimestamp, lock.timelock);
+  const expired = isHtlcDeadlineExpired(lock, {
+    timestamp: currentTimestamp,
+    jHeight: currentJHeight,
+  });
   // Before expiry only the beneficiary may cancel. Letting the payer submit an
   // arbitrary error would make the conditional payment revocable on demand.
   if (!callerIsBeneficiary && !(callerIsPayer && expired)) {
@@ -153,7 +80,7 @@ function applyHtlcResolution(
   account: AccountState,
   lock: HtlcLock,
   delta: Delta,
-  data: Exclude<HtlcResolveTx['data'], { outcome: 'offer' }>,
+  data: HtlcResolveTx['data'],
   events: string[],
 ): HtlcResolveResult {
   const releaseSide = lock.senderIsLeft ? 'left' : 'right';
@@ -188,9 +115,6 @@ function applyHtlcResolution(
     outcome: data.outcome,
     hashlock: lock.hashlock,
     ...(data.outcome === 'secret' && 'secret' in data ? { secret: data.secret } : {}),
-    ...(data.outcome === 'secret' && 'offerHash' in data
-      ? { offerHash: data.offerHash }
-      : {}),
     ...(data.outcome === 'secret' ? { amount: lock.amount, tokenId: lock.tokenId } : {}),
     ...(data.outcome === 'error' ? { reason: data.reason || 'unknown' } : {}),
   };
@@ -207,16 +131,12 @@ export async function handleHtlcResolve(
   const events: string[] = [];
   const lock = account.locks.get(lockId);
   if (!lock) return { success: false, error: `Lock ${lockId} not found`, events };
-  if (outcome === 'offer') {
-    return handleHtlcSecretOffer(account, lock, accountTx.data, byLeft, events);
-  }
   const delta = account.deltas.get(lock.tokenId);
   if (!delta) return { success: false, error: `Delta ${lock.tokenId} not found`, events };
   const validationError = outcome === 'secret'
     ? getHtlcSecretResolveError(
         lock,
         accountTx.data,
-        byLeft,
         currentJHeight,
         currentTimestamp,
       )

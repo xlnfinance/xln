@@ -1,9 +1,5 @@
 import { getLiveAccountJClaimAccumulatorStates } from '../../entity/account/account-j-claim-node-store';
 import { getLiveConsumptionAccumulatorStates } from '../../entity/consumption/consumption-store';
-import {
-  assertPersistedLocalEntityCryptoKeys,
-  resolveReplicaEntityCryptoKeys,
-} from '../../entity/auth/crypto';
 import { createReplicaKey, formatReplicaKey } from '../../protocol/identity';
 import {
   assertCertifiedJHistoryIntegrity,
@@ -84,23 +80,11 @@ const installPersistedEntityReplicas = async (
       );
       assertValidatorJHistoryIntegrity(persistedReplicaState, meta?.jHistory);
       const replicaState = cloneEntityState(persistedReplicaState, true);
-      if (requiresExactReplica) {
-        assertPersistedLocalEntityCryptoKeys(env, entityId, signerId, meta!);
-      }
-      const encryptionKeys = resolveReplicaEntityCryptoKeys(
-        env,
-        entityId,
-        signerId,
-        meta?.entityEncPubKey
-          ? { publicKey: meta.entityEncPubKey }
-          : undefined,
-      );
-      // Intermediate historical views intentionally lack validator-local
-      // private keys. Only a live head or certified checkpoint restores them.
+      // Process-local private keys are rederived from the authoritative
+      // Runtime snapshot seed map before this persisted replica is installed.
       const restoredReplica: EntityReplica = {
         entityId,
         signerId,
-        entityEncPubKey: encryptionKeys.publicKey,
         state: replicaState,
         mempool: requiresExactReplica ? meta!.mempool : [],
         isProposer,

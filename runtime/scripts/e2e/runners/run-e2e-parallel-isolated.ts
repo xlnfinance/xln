@@ -1874,6 +1874,8 @@ const runShard = async (
     });
   };
 
+  let cleanupUnhandledError: AggregateError | null = null;
+  const result = await (async (): Promise<RunResult> => {
   try {
     stopFatalMonitor = startFailFastLogMonitor(logPath, (message) => {
       if (!teardownReason) teardownReason = message;
@@ -2436,10 +2438,11 @@ const runShard = async (
     if (cleanupResolution.result && completedResult) {
       Object.assign(completedResult, cleanupResolution.result);
     }
-    if (cleanupResolution.unhandledError) {
-      throw cleanupResolution.unhandledError;
-    }
+    cleanupUnhandledError = cleanupResolution.unhandledError;
   }
+  })();
+  if (cleanupUnhandledError) throw cleanupUnhandledError;
+  return result;
 };
 
 async function main(): Promise<void> {

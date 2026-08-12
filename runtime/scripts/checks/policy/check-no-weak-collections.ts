@@ -8,21 +8,50 @@ type Violation = {
 };
 
 const ROOT = process.cwd();
-const SCAN_ROOTS = ['runtime', 'frontend/src', 'tests', 'scripts'];
+// Every first-party executable/source surface is covered. Keep generated,
+// vendored and historical trees out of the scan instead of weakening the
+// rule with per-file allowlists.
+const SCAN_ROOTS = [
+  'brainvault',
+  'cli',
+  'custody',
+  'debates',
+  'e2e',
+  'frontend/src',
+  'jurisdictions',
+  'native',
+  'ops',
+  'packages',
+  'release',
+  'runtime',
+  'scripts',
+  'tests',
+  'tools',
+  'ui/src',
+];
 const EXCLUDE_PARTS = [
   '/node_modules/',
   '/frontend/build/',
   '/frontend/static/',
+  '/dist/',
+  '/packages/npm/xlnfinance/app/',
   '/test-results/',
   '/playwright-report/',
   '/.logs/',
   '/runtime/typechain/',
+  '/jurisdictions/artifacts/',
+  '/jurisdictions/cache/',
+  '/jurisdictions/lib/',
+  '/native/target/',
 ];
 const WEAK_COLLECTION_PATTERN = new RegExp(`\\b${'Weak'}(?:Map|Set)\\b`);
 
 const toRel = (abs: string): string => path.relative(ROOT, abs).replace(/\\/g, '/');
 const isCodeFile = (rel: string): boolean => /\.(ts|tsx|js|jsx|svelte)$/.test(rel) && !rel.endsWith('.d.ts');
-const shouldSkip = (rel: string): boolean => EXCLUDE_PARTS.some((part) => rel.includes(part));
+const shouldSkip = (rel: string): boolean => {
+  const rooted = `/${rel.replace(/^\/+/, '')}`;
+  return EXCLUDE_PARTS.some((part) => rooted.includes(part));
+};
 
 async function walk(absPath: string): Promise<string[]> {
   const stat = await promises.stat(absPath);

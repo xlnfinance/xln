@@ -5,8 +5,8 @@
     "landing",
     "all-current-user-facing-flows"
   ],
-  "riskCapUsd": 10000,
-  "riskCapEnforcement": "operator_config",
+  "riskCapUsd": null,
+  "riskCapEnforcement": "not_implemented",
   "expectedTowers": 1,
   "expectedHubs": 3,
   "recoverySlaSeconds": 60,

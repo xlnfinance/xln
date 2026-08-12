@@ -1,8 +1,8 @@
 import type { EntityTx, RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
-import { getXLN } from './xln-loader';
+import { getXLN, peekXLN } from './xln-loader';
 import { connectEmbedded, getEmbeddedEnv, requireAdapter } from './adapter';
 import { deriveAddress, derivePrivateKeyBytes } from './keys';
-import { waitFor } from './tx';
+import { DEFAULT_ACCOUNT_DISPUTE_CONFIG, waitFor } from './tx';
 import { useApp, type VaultKind } from './store';
 
 /** Anvil's well-known dev mnemonic — sandbox only, never a real vault. */
@@ -52,8 +52,8 @@ function creditApplied(env: RuntimeReplica, entityId: string, counterpartyId: st
 	const replica = findReplicaState(env, entityId);
 	const account = replica?.state?.accounts?.get?.(counterpartyId);
 	const delta = account?.state?.deltas?.get?.(USDC);
-	if (!delta || !replica) return false;
-	const xln = getXLN();
+	const xln = peekXLN();
+	if (!delta || !replica || !xln) return false;
 	const isLeft = xln.isLeftEntity(entityId, counterpartyId);
 	const derived = xln.deriveDelta(delta, isLeft);
 	return derived.ownCreditLimit + derived.peerCreditLimit >= minTotal;
@@ -164,10 +164,10 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 		if (findReplicaState(env, actor.entityId)) continue;
 		await adapter.send({
 			runtimeTxs: [
-				{
-					type: 'importReplica',
+				xln.importEntity({
 					entityId: actor.entityId,
 					signerId: actor.signerId,
+					entitySeed: seed,
 					data: {
 						isProposer: true,
 						profileName: actor.label,
@@ -186,7 +186,7 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 							},
 						},
 					},
-				},
+				}),
 			],
 			entityInputs: [],
 		});
@@ -222,7 +222,15 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 			continue;
 		}
 		await sendEntity(spoke.entityId, spoke.signerId, [
-			{ type: 'openAccount', data: { targetEntityId: target.entityId, creditAmount: 0n, tokenId: USDC } },
+			{
+				type: 'openAccount',
+				data: {
+					targetEntityId: target.entityId,
+					creditAmount: 0n,
+					tokenId: USDC,
+					disputeConfig: DEFAULT_ACCOUNT_DISPUTE_CONFIG,
+				},
+			},
 		]);
 		await waitFor(
 			() => accountReady(env, spoke.entityId, target.entityId) && accountReady(env, target.entityId, spoke.entityId),

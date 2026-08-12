@@ -19,16 +19,7 @@ const preparedPayment = (): Extract<EntityTx, { type: 'htlcPayment' }> => ({
     maxSenderDebit: 1_025n,
     route: [`0x${'aa'.repeat(32)}`, recipient],
     deliveryMode: 'instant',
-    secret: `0x${'44'.repeat(32)}`,
     hashlock,
-    preparedEnvelope: { nextHop: recipient, innerEnvelope: { ciphertext: 'never-project-me' } },
-    preparedSenderLockAmount: '1025',
-    preparedTotalFee: '25',
-    preparedLockId: `0x${'55'.repeat(32)}`,
-    preparedTimelock: '500',
-    preparedRevealBeforeHeight: 499,
-    preparedRouteProfiles: [],
-    preparedHopForwardAmounts: [],
   },
 });
 
@@ -80,7 +71,7 @@ const replica = (payment: EntityTx): EntityReplica => ({
 }) as EntityReplica;
 
 describe('Entity Consensus payment projection', () => {
-  test('shows exact public prepared payment intent without secret or ciphertext', () => {
+  test('shows only the caller-authorized payment ceiling before frame preparation', () => {
     const view = buildEntityConsensusSettingsView(replica(preparedPayment()), 19, true, {
       resolveTokenMetadata: (tokenId) => tokenId === 7
         ? { symbol: 'USDC', name: 'USD Coin' }
@@ -95,27 +86,27 @@ describe('Entity Consensus payment projection', () => {
       tokenName: 'USD Coin',
       recipientAmount: 1_000n,
       hashlock,
-      totalDebit: 1_025n,
-      totalFee: 25n,
+      maxSenderDebit: 1_025n,
+      maxFee: 25n,
       deliveryMode: 'instant',
     });
-    expect(Object.keys(payment ?? {})).not.toContain('secret');
-    expect(Object.keys(payment ?? {})).not.toContain('preparedEnvelope');
+    expect(Object.keys(payment ?? {})).not.toContain('envelope');
+    expect(Object.keys(payment ?? {})).not.toContain('totalFee');
   });
 
-  test('fails loudly when a prepared payment omits an exact public amount', () => {
+  test('shows that the proposer will derive an omitted hashlock', () => {
     const malformed = preparedPayment();
-    delete malformed.data.preparedTotalFee;
+    delete malformed.data.hashlock;
 
-    expect(() => buildEntityConsensusSettingsView(replica(malformed), 19, true))
-      .toThrow('CONSENSUS_SETTINGS_HTLC_PREPARED_FEE_INVALID:proposal=prop-payment:tx=0');
+    expect(buildEntityConsensusSettingsView(replica(malformed), 19, true)
+      .proposals[0]?.payments[0]?.hashlock).toBeNull();
   });
 
-  test('fails loudly when exact debit does not equal recipient amount plus fee', () => {
+  test('fails loudly when the sender ceiling is below the recipient amount', () => {
     const malformed = preparedPayment();
-    malformed.data.preparedSenderLockAmount = '1026';
+    malformed.data.maxSenderDebit = 999n;
 
     expect(() => buildEntityConsensusSettingsView(replica(malformed), 19, true))
-      .toThrow('CONSENSUS_SETTINGS_HTLC_TOTAL_MISMATCH:proposal=prop-payment:tx=0');
+      .toThrow('CONSENSUS_SETTINGS_HTLC_MAX_SENDER_DEBIT_BELOW_AMOUNT:proposal=prop-payment:tx=0');
   });
 });

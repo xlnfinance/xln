@@ -102,7 +102,7 @@ test('loadGossipProfilesFromInfraDb prunes malformed persisted profile', async (
   }
 });
 
-test('infra gossip restore discovers every durable profile when the legacy index lost a concurrent update', async () => {
+test('infra gossip restore discovers every durable profile when the retired index lost a concurrent update', async () => {
   const firstSeed = 'infra-gossip-index-race-first';
   const secondSeed = 'infra-gossip-index-race-second';
   const firstEntityId = deriveSingleSignerFixtureEntityId(firstSeed);

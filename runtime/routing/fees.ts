@@ -12,9 +12,9 @@ const DIRECTIONAL_UTIL_CAP_PPM = 500_000n; // cap uplift at +50% (1.5x base fee)
 
 const clampNonNegative = (value: bigint): bigint => (value < 0n ? 0n : value);
 
-export const sanitizeFeePPM = (raw: unknown, fallback: number = 1): number => {
+export const sanitizeFeePPM = (raw: unknown, defaultValue: number = 1): number => {
   const n = Number(raw);
-  if (!Number.isFinite(n)) return fallback;
+  if (!Number.isFinite(n)) return defaultValue;
   const v = Math.floor(n);
   if (v < 0) return 0;
   if (v > MAX_ROUTING_FEE_PPM) return MAX_ROUTING_FEE_PPM;

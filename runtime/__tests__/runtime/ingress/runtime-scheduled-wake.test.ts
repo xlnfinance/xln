@@ -10,9 +10,10 @@ import {
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
-import { deriveLocalEntityCryptoKeys } from '../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
 import { generateLazyEntityId } from '../../../entity/factory';
-import { applyEntityFrame, applyEntityInput } from '../../../entity/consensus/index';
+import { applyEntityInput } from '../../../entity/consensus/index';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import {
   createEmptyEnv,
   hasRuntimeWork,
@@ -42,10 +43,6 @@ import {
   buildDurableRuntimeMempool,
   restoreDurableRuntimeSnapshot,
 } from '../../../storage/wal/snapshot';
-import {
-  collectLocalProfileEncryptionAnnouncements,
-  getCompleteProfileEncryptionManifest,
-} from '../../../entity/profile/profile-encryption';
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
 import { computeProfileHash } from '../../../entity/profile/profile-signing';
 import { makeAccount } from '../../helpers/cross-j';
@@ -99,8 +96,8 @@ const attachLocalEntityKeys = (
   env: ReturnType<typeof createEmptyEnv>,
   replica: EntityReplica,
 ): EntityReplica => {
-  const keys = deriveLocalEntityCryptoKeys(env, replica.entityId, replica.signerId);
-  replica.entityEncPubKey = keys.publicKey;
+  const keys = provisionTestEntityEncryptionKey(env, replica.entityId);
+  replica.state.entityEncryptionPublicKey = keys.publicKey;
   return replica;
 };
 
@@ -111,7 +108,7 @@ describe('runtime scheduled wake', () => {
     const env = createEmptyEnv('entity-frame-timestamp-regression');
     env.state.timestamp = 2_100;
 
-    await expect(applyEntityFrame(env, state, [], 1_999)).rejects.toThrow(
+    await expect(applyEntityFrameWithMaterializedTestInfraContext(env, state, [], 1_999)).rejects.toThrow(
       'ENTITY_FRAME_TIMESTAMP_REGRESSION:previous=2000:proposed=1999',
     );
     expect(state.timestamp).toBe(2_000);
@@ -226,7 +223,7 @@ describe('runtime scheduled wake', () => {
       type: 'watchdog',
       data: {},
     });
-    const replica = makeReplica(state, proposer, true);
+    const replica = attachLocalEntityKeys(env, makeReplica(state, proposer, true));
     replica.mempool.push(signedEntityCommandTx(buildSignedEntityCommand(env, state, proposer, [{
       type: 'chat',
       data: { from: proposer, message: 'already waiting' },
@@ -263,10 +260,6 @@ describe('runtime scheduled wake', () => {
     const id = generateLazyEntityId([proposer], 1n).toLowerCase();
     const replica = attachLocalEntityKeys(env, makeReplica(makeState(id, proposer, 1), proposer, true));
     env.state.eReplicas.set(`${id}:${proposer}`, replica);
-    collectLocalProfileEncryptionAnnouncements(env);
-    const manifest = getCompleteProfileEncryptionManifest(env, replica.state);
-    if (!manifest) throw new Error('profile manifest fixture missing');
-    replica.state.profileEncryptionManifest = manifest;
     const profileHash = computeProfileHash(buildLocalEntityProfile(env, replica.state, 1));
     replica.hankoWitness = new Map([[profileHash, {
       hanko: '0x01',
@@ -402,8 +395,8 @@ describe('runtime scheduled wake', () => {
       },
     };
 
-    const proposerResult = await applyEntityFrame(env, state, [tx], env.state.timestamp);
-    const validatorResult = await applyEntityFrame(env, state, [tx], env.state.timestamp);
+    const proposerResult = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [tx], env.state.timestamp);
+    const validatorResult = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [tx], env.state.timestamp);
 
     expect(safeStringify(validatorResult.newState)).toBe(
       safeStringify(proposerResult.newState),
@@ -434,7 +427,7 @@ describe('runtime scheduled wake', () => {
       },
     };
 
-    const result = await applyEntityFrame(env, state, [tx], env.state.timestamp);
+    const result = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [tx], env.state.timestamp);
 
     expect(result.outputs).toEqual([]);
     expect(readEntityFrameEventMessages(result.newState)).toContain(
@@ -471,7 +464,7 @@ describe('runtime scheduled wake', () => {
       },
     };
 
-    const result = await applyEntityFrame(env, state, [tx], env.state.timestamp);
+    const result = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [tx], env.state.timestamp);
 
     expect(result.newState.crontabState?.hooks.size).toBe(0);
   });
@@ -493,7 +486,7 @@ describe('runtime scheduled wake', () => {
       },
     };
 
-    const result = await applyEntityFrame(env, state, [staleWake], env.state.timestamp);
+    const result = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [staleWake], env.state.timestamp);
 
     expect(result.newState.crontabState?.hooks.size).toBe(0);
   });
@@ -515,11 +508,11 @@ describe('runtime scheduled wake', () => {
       },
     };
 
-    await expect(applyEntityFrame(env, state, [
+    await expect(applyEntityFrameWithMaterializedTestInfraContext(env, state, [
       { type: 'chatMessage', data: { message: 'before wake', timestamp: 9_000 } },
       wake,
     ], env.state.timestamp)).rejects.toThrow('SCHEDULED_WAKE_FRAME_ORDER_INVALID');
-    await expect(applyEntityFrame(env, state, [wake, wake], env.state.timestamp)).rejects.toThrow(
+    await expect(applyEntityFrameWithMaterializedTestInfraContext(env, state, [wake, wake], env.state.timestamp)).rejects.toThrow(
       'SCHEDULED_WAKE_FRAME_ORDER_INVALID',
     );
   });
@@ -602,7 +595,7 @@ describe('runtime scheduled wake', () => {
     const [input] = createDueScheduledWakeInputs(env, env.state.timestamp);
     expect(input?.entityTxs[0]?.data.jobs).toHaveLength(MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS);
 
-    const result = await applyEntityFrame(env, state, input!.entityTxs, env.state.timestamp);
+    const result = await applyEntityFrameWithMaterializedTestInfraContext(env, state, input!.entityTxs, env.state.timestamp);
     expect(result.newState.crontabState?.hooks.size).toBe(0);
   });
 

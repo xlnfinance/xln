@@ -1,11 +1,8 @@
-import type { AccountPeerInput, AccountReplica, AccountTx } from '../../../../types/account';
+import type { AccountFrame, AccountPeerInput, AccountReplica, AccountTx } from '../../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../infra/debug-flags';
-import {
-  validateLocalCommittedHtlcLayer,
-} from '../../../htlc/onion-advance';
-import { encryptedHtlcLayer } from '../../../../protocol/htlc/codec/onion-layer';
+import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../../protocol/htlc/codec/onion-layer';
 import {
   armHtlcSecretAckTimeout,
   terminateHtlcRoute,
@@ -16,6 +13,10 @@ import { buildHtlcFinalizedEventPayload } from '../../../../protocol/htlc/events
 import { createStructuredLogger } from '../../../../infra/logger';
 import type { AccountTxTarget } from './orderbook/queue';
 import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
+import type { EntityInfraContext } from '../../../../types/entity/infra-context';
+import { preparedHtlcBindingKey } from '../../../../types/entity/htlc-infra-context';
+import { HTLC } from '../../../../config/constants';
+import { sameAccountStateDomain } from '../../../../account/commitment/state-root';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
@@ -28,6 +29,8 @@ type HtlcFollowupContext = {
   outputs: EntityInput[];
   accountTxs: AccountTxTarget[];
   candidateEffects: EntityCandidateEffect[];
+  infraContext?: EntityInfraContext;
+  consumedPreparedHtlcBindings?: Set<string>;
 };
 
 type RevealedSecret = { secret: string; hashlock: string };
@@ -40,34 +43,89 @@ const getJurisdictionId = (state: EntityState, env: EntityRuntimeContext): strin
   String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 
 /**
- * Consensus replay validates only the public ciphertext and its certified
- * default-proposer recipient. Plaintext decryption is a post-commit local hook
- * which emits a signed htlcOnionAdvance for the next Entity frame.
+ * Account replay validates only canonical opaque bytes and their committed
+ * hash. The owning Entity frame consumes its required prepared context in the
+ * same transition; no post-commit forward action exists.
  */
 export async function applyCommittedHtlcLockFollowup(
   ctx: HtlcFollowupContext,
   accountTx: AccountTx,
+  committedFrame: AccountFrame,
   _committedViaNewFrame: boolean,
 ): Promise<void> {
   if (accountTx.type !== 'htlc_lock') return;
-  const { env, state, input, newState, account } = ctx;
+  const { account } = ctx;
   const lock = account.state.locks.get(accountTx.data.lockId);
   if (!lock || accountTx.data.envelope === undefined) return;
   const layer = encryptedHtlcLayer(accountTx.data.envelope);
   if (!layer) throw new Error(`HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`);
-  if (layer.manifest.entityId.toLowerCase() !== newState.entityId.toLowerCase()) return;
-  try {
-    await validateLocalCommittedHtlcLayer(env, newState, lock, accountTx.data.envelope);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    env.error('network', 'HTLC_ONION_PUBLIC_VALIDATION_FAILED', {
-      lockId: lock.lockId,
-      reason,
-      fromEntityId: input.fromEntityId,
-      toEntityId: input.toEntityId,
-    }, state.entityId);
-    throw new Error(`HTLC_ONION_PUBLIC_VALIDATION_FAILED:${lock.lockId}:${reason}`);
+  if (lock.envelopeHash !== hashEncryptedHtlcLayer(layer)) {
+    throw new Error(`HTLC_ONION_COMMITTED_HASH_MISMATCH:${lock.lockId}`);
   }
+  const prepared = ctx.infraContext?.htlc.entries.find(entry =>
+    entry.binding.accountFrameHash === committedFrame.stateHash.toLowerCase()
+    && entry.binding.lockId === lock.lockId.toLowerCase()
+    && entry.binding.envelopeHash === lock.envelopeHash?.toLowerCase()
+  );
+  if (!prepared) throw new Error(`HTLC_PREPARED_CONTEXT_REQUIRED:${lock.lockId}`);
+  const preparedKey = preparedHtlcBindingKey(prepared.binding);
+  if (!ctx.consumedPreparedHtlcBindings) throw new Error('HTLC_PREPARED_CONSUMPTION_TRACKER_REQUIRED');
+  if (ctx.consumedPreparedHtlcBindings.has(preparedKey)) {
+    throw new Error(`HTLC_PREPARED_CONTEXT_REUSED:${preparedKey}`);
+  }
+  ctx.consumedPreparedHtlcBindings.add(preparedKey);
+  const binding = prepared.binding;
+  if (
+    binding.fromEntityId !== ctx.input.fromEntityId.toLowerCase()
+    || binding.toEntityId !== ctx.input.toEntityId.toLowerCase()
+    || binding.accountHeight !== committedFrame.height
+    || !sameAccountStateDomain(binding.domain, ctx.input.domain)
+    || binding.hashlock !== lock.hashlock.toLowerCase()
+    || binding.tokenId !== lock.tokenId
+    || binding.amount !== lock.amount
+    || binding.timelock !== lock.timelock
+    || binding.revealBeforeHeight !== lock.revealBeforeHeight
+  ) throw new Error(`HTLC_PREPARED_BINDING_MISMATCH:${lock.lockId}`);
+  if (prepared.outcome.kind === 'reject') {
+    ctx.accountTxs.push({
+      accountId: ctx.input.fromEntityId.toLowerCase(),
+      tx: { type: 'htlc_resolve', data: { lockId: lock.lockId, outcome: 'error', reason: prepared.outcome.reason } },
+    });
+    return;
+  }
+  if (prepared.outcome.kind === 'final') {
+    ctx.accountTxs.push({
+      accountId: ctx.input.fromEntityId.toLowerCase(),
+      tx: { type: 'htlc_resolve', data: { lockId: lock.lockId, outcome: 'secret', secret: prepared.outcome.secret } },
+    });
+    return;
+  }
+  const outboundLockId = `${lock.lockId}-fwd`;
+  ctx.newState.htlcRoutes.set(lock.hashlock, {
+    hashlock: lock.hashlock,
+    tokenId: lock.tokenId,
+    amount: lock.amount,
+    inboundEntity: ctx.input.fromEntityId.toLowerCase(),
+    inboundLockId: lock.lockId,
+    outboundEntity: prepared.outcome.nextHopEntityId,
+    outboundLockId,
+    createdTimestamp: ctx.newState.timestamp,
+  });
+  ctx.accountTxs.push({
+    accountId: prepared.outcome.nextHopEntityId,
+    tx: {
+      type: 'htlc_lock',
+      data: {
+        lockId: outboundLockId,
+        hashlock: lock.hashlock,
+        tokenId: lock.tokenId,
+        amount: prepared.outcome.forwardAmount,
+        timelock: lock.timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS),
+        revealBeforeHeight: lock.revealBeforeHeight - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
+        envelope: prepared.outcome.innerEnvelope,
+      },
+    },
+  });
 }
 
 export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {

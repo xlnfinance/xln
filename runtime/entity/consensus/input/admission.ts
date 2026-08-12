@@ -3,7 +3,6 @@ import { nodeProcess } from '../../../infra/process/runtime-process';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareLocallyAuthoredEntityTxs } from '../../command';
 import { appendDefaultProposerCrossJMaterializations } from '../../transition/cross-j-proposer-materialization';
-import { appendDefaultProposerAcceptedHtlcReveals } from '../../transition/htlc-onion-post-commit';
 import { assertLocalJRebroadcastAllowed } from '../../tx/handlers/jurisdiction/j-rebroadcast';
 import { prioritizeScheduledWakeTransactions } from './merge';
 import type { ApplyEntityInputContext } from './types';
@@ -106,18 +105,10 @@ export const admitEntityTransactions = async (
   }
 
   const supplied = entityInput.entityTxs ?? [];
-  const secretAware =
-    localCanPropose && supplied.length > 0
-      ? await appendDefaultProposerAcceptedHtlcReveals(
-          env,
-          workingReplica,
-          supplied,
-        )
-      : supplied;
   const admitted = appendDefaultProposerCrossJMaterializations(
     env,
     workingReplica,
-    secretAware,
+    supplied,
   );
   if (nodeProcess?.env?.['XLN_STORAGE_DEBUG_REPLICA_META'] === '1') {
     entityLog.info('replica_meta.admission_debug', {
@@ -125,7 +116,6 @@ export const admitEntityTransactions = async (
       entityHeight: workingReplica.state.height,
       runtimeHeight: env.state.height,
       supplied: supplied.map(tx => tx.type),
-      secretAware: secretAware.map(tx => tx.type),
       admitted: admitted.map(tx => tx.type),
       mempoolBefore: workingReplica.mempool.map(tx => tx.type),
     });

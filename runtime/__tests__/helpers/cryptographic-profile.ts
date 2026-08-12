@@ -1,4 +1,3 @@
-import { SigningKey, hexlify } from 'ethers';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
@@ -17,7 +16,6 @@ import {
   computeProfileHash,
   computeProfileRouteHash,
 } from '../../entity/profile/profile-signing';
-import { computeValidatorEncryptionAttestationDigest } from '../../protocol/htlc/validator-encryption';
 
 type CryptographicProfileOptions = Readonly<{
   entityId: string;
@@ -35,9 +33,8 @@ type CryptographicProfileOptions = Readonly<{
 
 const fixtureSigner = (signingSeed: string, signerId: string) => {
   const privateKey = deriveSignerKeySync(signingSeed, signerId);
-  const publicKey = new SigningKey(hexlify(privateKey)).publicKey.toLowerCase();
   const signer = deriveSignerAddressSync(signingSeed, signerId).toLowerCase();
-  return { privateKey, publicKey, signer };
+  return { privateKey, signer };
 };
 
 export const deriveSingleSignerFixtureEntityId = (
@@ -45,48 +42,22 @@ export const deriveSingleSignerFixtureEntityId = (
   signerId = '1',
 ): string => generateLazyEntityId([deriveSignerAddressSync(signingSeed, signerId)], 1n).toLowerCase();
 
-const buildAttestedBoard = (options: CryptographicProfileOptions, signerId: string) => {
+const fixtureEncryptionPublicKey = (options: CryptographicProfileOptions, signerId: string) => {
   const signer = fixtureSigner(options.signingSeed, signerId);
   const encryptionPublicKey = pubKeyToHex(deriveEncryptionKeyPair(
-    `${options.signingSeed}:${signerId}:${options.entityId}:validator-encryption`,
+    `${options.signingSeed}:${signerId}:${options.entityId}:entity-encryption`,
   ).publicKey);
-  const attestationBody = {
-    version: 'xln:validator-encryption-key:v1' as const,
-    entityId: options.entityId,
-    signerId: signer.signer,
-    signer: signer.signer,
-    publicKey: signer.publicKey,
-    weight: 1,
-    encryptionPublicKey,
-  };
-  const signature = signDigest(
-    options.signingSeed,
-    signerId,
-    computeValidatorEncryptionAttestationDigest(attestationBody),
-  );
-  return {
-    signer: signer.signer,
-    encryptionPublicKey,
-    board: {
-      threshold: 1,
-      validators: [{
-        signer: signer.signer,
-        signerId: signer.signer,
-        publicKey: signer.publicKey,
-        weight: 1,
-      }],
-      encryptionAttestations: [{ ...attestationBody, signature }],
-    },
-  };
+  return { signer: signer.signer, encryptionPublicKey };
 };
 
 export const buildCryptographicProfileFixture = (
   options: CryptographicProfileOptions,
 ): Profile => {
   const signerId = options.signerId ?? '1';
-  const attested = buildAttestedBoard(options, signerId);
+  const attested = fixtureEncryptionPublicKey(options, signerId);
   const profile: Profile = {
     entityId: options.entityId,
+    entityEncryptionPublicKey: attested.encryptionPublicKey,
     name: options.name,
     avatar: '', bio: '', website: '',
     lastUpdated: options.lastUpdated ?? 1,
@@ -98,7 +69,6 @@ export const buildCryptographicProfileFixture = (
       isHub: options.isHub ?? false,
       routingFeePPM: 1, baseFee: 0n,
       ...(options.jurisdiction ? { jurisdiction: options.jurisdiction } : {}),
-      board: attested.board,
     },
     accounts: options.accounts ?? [],
   };
@@ -122,7 +92,6 @@ export const certifySingleSignerProfileFixture = (
       ...profile.metadata,
       profileHanko: buildSingleSignerHanko(profile.entityId, profileHash, signer.privateKey),
     },
-    runtimeSignerId: signer.signer,
   });
   return canonicalizeProfile({
     ...entityCertified,

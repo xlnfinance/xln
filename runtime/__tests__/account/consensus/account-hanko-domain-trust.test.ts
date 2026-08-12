@@ -1,12 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { SigningKey, computeAddress } from 'ethers';
-
-import { deriveSignerKeySync } from '../../../account/crypto';
 import {
   getAccountStateDomain,
   requireAccountDeltaTransformerAddress,
 } from '../../../account/consensus/helpers';
-import { computeValidatorEncryptionAttestationDigest } from '../../../protocol/htlc/validator-encryption';
 import { createEmptyEnv } from '../../../runtime';
 import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
@@ -36,25 +32,6 @@ const ACCOUNT = {
 const TRUSTED_ACCOUNT = '0x7777777777777777777777777777777777777777';
 const TRUSTED_TRANSFORMER = '0x5555555555555555555555555555555555555555';
 const HOSTILE_TRANSFORMER = '0x6666666666666666666666666666666666666666';
-const HOSTILE_SIGNING_KEY = new SigningKey(
-  `0x${Buffer.from(deriveSignerKeySync('account-hanko-hostile-profile', '1')).toString('hex')}`,
-);
-const HOSTILE_SIGNER = computeAddress(HOSTILE_SIGNING_KEY.publicKey).toLowerCase();
-const HOSTILE_ATTESTATION_BODY = {
-  version: 'xln:validator-encryption-key:v1' as const,
-  entityId: FROM,
-  signerId: HOSTILE_SIGNER,
-  signer: HOSTILE_SIGNER,
-  publicKey: HOSTILE_SIGNING_KEY.publicKey.toLowerCase(),
-  weight: 1,
-  encryptionPublicKey: `0x${'77'.repeat(32)}`,
-};
-const HOSTILE_ATTESTATION = {
-  ...HOSTILE_ATTESTATION_BODY,
-  signature: HOSTILE_SIGNING_KEY.sign(
-    computeValidatorEncryptionAttestationDigest(HOSTILE_ATTESTATION_BODY),
-  ).serialized.toLowerCase(),
-};
 
 const installReplica = (
   env: ReturnType<typeof createEmptyEnv>,
@@ -100,6 +77,7 @@ const installJurisdictionReplica = (
 
 const hostileProfile = (): Profile => ({
   entityId: FROM,
+  entityEncryptionPublicKey: `0x${'77'.repeat(32)}`,
   name: 'Hostile peer metadata',
   avatar: '',
   bio: '',
@@ -116,16 +94,6 @@ const hostileProfile = (): Profile => ({
     routingFeePPM: 0,
     baseFee: 0n,
     jurisdiction: HOSTILE,
-    board: {
-      threshold: 1,
-      validators: [{
-        signer: HOSTILE_SIGNER,
-        weight: 1,
-        signerId: HOSTILE_SIGNER,
-        publicKey: HOSTILE_SIGNING_KEY.publicKey.toLowerCase(),
-      }],
-      encryptionAttestations: [HOSTILE_ATTESTATION],
-    },
   },
 });
 

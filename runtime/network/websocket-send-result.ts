@@ -5,7 +5,7 @@
  * backpressure queue and `0` when the payload was dropped. Browser/client
  * sockets return `void`; test and adapter sockets may return booleans. Keeping
  * this classification in one module prevents a queued financial envelope from
- * being retried through a fallback route and delivered twice.
+ * being retried through a failover route and delivered twice.
  */
 
 export type WebSocketSendResult = boolean | number | void;

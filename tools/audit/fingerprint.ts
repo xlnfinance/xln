@@ -210,7 +210,7 @@ const computeModuleFingerprint = (
   const closure = dependencyClosure(module, modules);
   const files = listModuleFingerprintFiles(root, moduleId, registry, trackedFiles, graph);
   const digest = createHash('sha256');
-  digest.update('audit-module-fingerprint-v3-import-closure\0');
+  digest.update('audit-module-fingerprint-import-closure\0');
   digest.update(JSON.stringify({
     sourceGlobs: [...registry.scope.sourceGlobs].sort(),
     testGlobs: [...registry.scope.testGlobs].sort(),

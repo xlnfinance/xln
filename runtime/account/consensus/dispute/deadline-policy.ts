@@ -1,8 +1,7 @@
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
-import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/codec/onion-layer';
 import type { AccountFrame, AccountState, HtlcLock } from '../../../types/account';
 import type { HankoString } from '../../../types/hanko';
-import { isHtlcTimelockExpired } from '../../htlc-deadline';
+import { isHtlcDeadlineExpired, isHtlcTimelockExpired } from '../../htlc-deadline';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../constants';
 
 export const HTLC_ENFORCEMENT_RESERVE_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
@@ -24,6 +23,7 @@ export type AccountInputSecurityContext = {
 
 export type IncomingDeadlineViolation = {
   reason: string;
+  disposition: 'reject' | 'dispute';
   evidenceSecrets: Array<{ hashlock: string; secret: string }>;
 };
 
@@ -39,11 +39,17 @@ export function isHtlcSecretEnforcementWindowClosed(
   return timestampTooLate || finalizedHeightTooLate;
 }
 
-const deadlineViolation = (reason: string): IncomingDeadlineViolation => ({ reason, evidenceSecrets: [] });
+const rejectedDeadline = (reason: string): IncomingDeadlineViolation => ({
+  reason,
+  disposition: 'reject',
+  evidenceSecrets: [],
+});
+
+const frameClockExpired = (lock: Pick<HtlcLock, 'timelock' | 'revealBeforeHeight'>, frame: AccountFrame): boolean =>
+  isHtlcDeadlineExpired(lock, { timestamp: frame.timestamp, jHeight: frame.jHeight });
 
 // Deadline admission is speculative: a rejected frame must leave the live
-// Account byte-identical. A Map clone alone still aliases HtlcLock values, so
-// simulating an `offer` would otherwise publish secretOffer before consensus.
+// Account byte-identical. A Map clone alone still aliases HtlcLock values.
 const cloneLocks = (account: AccountState): Map<string, HtlcLock> => new Map(
   Array.from(account.locks, ([lockId, lock]) => [lockId, { ...lock }]),
 );
@@ -71,12 +77,16 @@ const inspectHtlcDeadline = (
 ): IncomingDeadlineViolation | undefined => {
   if (tx.type === 'htlc_lock') {
     if (scan.locks.has(tx.data.lockId)) return undefined;
-    const timestampUnsafe =
+    const localTimestampUnsafe =
       tx.data.timelock <= BigInt(scan.context.entityTimestamp + HTLC_ENFORCEMENT_RESERVE_MS);
-    const heightUnsafe = tx.data.revealBeforeHeight <= scan.context.finalizedJHeight;
-    if (timestampUnsafe || heightUnsafe) {
-      return deadlineViolation(
-        `HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT: lock=${tx.data.lockId} localTimestamp=${scan.context.entityTimestamp} localJHeight=${scan.context.finalizedJHeight}`,
+    const localHeightUnsafe = tx.data.revealBeforeHeight <= scan.context.finalizedJHeight;
+    const frameTimestampUnsafe = isHtlcTimelockExpired(scan.frame.timestamp, tx.data.timelock);
+    const frameHeightUnsafe = tx.data.revealBeforeHeight <= scan.frame.jHeight;
+    if (localTimestampUnsafe || localHeightUnsafe || frameTimestampUnsafe || frameHeightUnsafe) {
+      return rejectedDeadline(
+        `HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT: lock=${tx.data.lockId} `
+        + `localTimestamp=${scan.context.entityTimestamp} localJHeight=${scan.context.finalizedJHeight} `
+        + `frameTimestamp=${scan.frame.timestamp} frameJHeight=${scan.frame.jHeight}`,
       );
     }
     scan.locks.set(tx.data.lockId, {
@@ -97,42 +107,41 @@ const inspectHtlcDeadline = (
 
   const lock = scan.locks.get(tx.data.lockId);
   if (!lock) return undefined;
-  if (tx.data.outcome === 'offer') {
-    if (scan.proposerIsLeft === lock.senderIsLeft) {
-      return deadlineViolation(`HTLC_SECRET_OFFER_NOT_BENEFICIARY: lock=${tx.data.lockId}`);
-    }
-    if (lock.secretOffer) {
-      if (hashEncryptedHtlcLayer(lock.secretOffer) !== hashEncryptedHtlcLayer(tx.data.offer)) {
-        return deadlineViolation(`HTLC_SECRET_OFFER_CONFLICT: lock=${tx.data.lockId}`);
-      }
-    } else {
-      lock.secretOffer = tx.data.offer;
-    }
-    return undefined;
-  }
   if (tx.data.outcome === 'secret') {
-    const rawSecret = 'secret' in tx.data ? tx.data.secret : undefined;
-    const acceptedOffer = 'offerHash' in tx.data
-      && Boolean(lock.secretOffer)
-      && tx.data.offerHash.toLowerCase() === hashEncryptedHtlcLayer(lock.secretOffer!);
+    const rawSecret = tx.data.secret;
     const verifiedSecret = validHtlcSecret(lock, rawSecret);
-    if ((verifiedSecret || acceptedOffer) && isHtlcSecretEnforcementWindowClosed(lock, scan.context)) {
+    if (verifiedSecret && isHtlcSecretEnforcementWindowClosed(lock, scan.context)) {
       return {
         reason: `HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT: lock=${tx.data.lockId} reserve=${HTLC_ENFORCEMENT_RESERVE_MS}ms localTimestamp=${scan.context.entityTimestamp}`,
+        disposition: 'dispute',
         evidenceSecrets: rawSecret ? [{ hashlock: lock.hashlock, secret: rawSecret }] : [],
       };
     }
-    if (verifiedSecret || acceptedOffer) scan.locks.delete(tx.data.lockId);
+    if (verifiedSecret && frameClockExpired(lock, scan.frame)) {
+      return rejectedDeadline(
+        `HTLC_SECRET_FRAME_CLOCK_EXPIRED: lock=${tx.data.lockId} `
+        + `frameTimestamp=${scan.frame.timestamp} frameJHeight=${scan.frame.jHeight}`,
+      );
+    }
+    if (verifiedSecret) scan.locks.delete(tx.data.lockId);
     return undefined;
   }
 
   const proposerIsPayer = scan.proposerIsLeft === lock.senderIsLeft;
-  const locallyExpired =
-    scan.context.finalizedJHeight > lock.revealBeforeHeight ||
-    isHtlcTimelockExpired(scan.context.entityTimestamp, lock.timelock);
+  const locallyExpired = isHtlcDeadlineExpired(lock, {
+    timestamp: scan.context.entityTimestamp,
+    jHeight: scan.context.finalizedJHeight,
+  });
   if (proposerIsPayer && !locallyExpired) {
-    return deadlineViolation(
+    return rejectedDeadline(
       `HTLC_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY: lock=${tx.data.lockId} localTimestamp=${scan.context.entityTimestamp} localJHeight=${scan.context.finalizedJHeight}`,
+    );
+  }
+  const expiredInSignedFrame = frameClockExpired(lock, scan.frame);
+  if ((proposerIsPayer || tx.data.reason === 'timeout') && !expiredInSignedFrame) {
+    return rejectedDeadline(
+      `HTLC_TIMEOUT_FRAME_CLOCK_NOT_EXPIRED: lock=${tx.data.lockId} `
+      + `frameTimestamp=${scan.frame.timestamp} frameJHeight=${scan.frame.jHeight}`,
     );
   }
   const beneficiaryRelease = !proposerIsPayer && tx.data.reason !== 'timeout';
@@ -154,7 +163,7 @@ export function getIncomingAccountDeadlineViolation(
   context: AccountInputSecurityContext,
 ): IncomingDeadlineViolation | undefined {
   if (typeof frame.byLeft !== 'boolean') {
-    return deadlineViolation('ACCOUNT_FRAME_PROPOSER_SIDE_MISSING');
+    return rejectedDeadline('ACCOUNT_FRAME_PROPOSER_SIDE_MISSING');
   }
   const scan: DeadlineScan = {
     locks: cloneLocks(account),

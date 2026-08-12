@@ -186,6 +186,19 @@ type OutputEnvelopeGroup = {
 const buildOutputEnvelopeGroups = (
   outputs: PlannedRemoteOutput[],
 ): OutputEnvelopeGroup[] => {
+  const structuralOutputs = outputs.map(({ output }) => ({ ...output, runtimeId: '' }));
+  for (const pair of selectPotentialCrossJAccountInputPairs(structuralOutputs, {
+    allowDifferentSourceRuntimeFrames: true,
+  })) {
+    const sourceRuntimeId = normalizeRuntimeId(outputs[pair.sourceInputIndex]!.targetRuntimeId);
+    const targetRuntimeId = normalizeRuntimeId(outputs[pair.targetInputIndex]!.targetRuntimeId);
+    if (sourceRuntimeId !== targetRuntimeId) {
+      throw new Error(
+        `CROSS_J_RUNTIME_TOPOLOGY_INVALID:${pair.pairKey}:SIBLING_RUNTIME_SPLIT:` +
+        `${sourceRuntimeId}:${targetRuntimeId}`,
+      );
+    }
+  }
   const byTarget = new Map<string, {
     targetRuntimeId: string;
     outputs: DeliverableEntityInput[];

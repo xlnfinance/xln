@@ -1,9 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { marked } from 'marked';
-  import { Braces, Download, GitCommitHorizontal, History, ShieldAlert, ShieldCheck } from 'lucide-svelte';
+  import { Braces, Download, GitCommitHorizontal, ShieldAlert, ShieldCheck } from 'lucide-svelte';
   import {
-    requiresFoundationAttestation,
     verifyReleaseManifestEntry,
     verifyReleaseManifestPolicy,
     verifyReleaseManifestSnapshotBinding,
@@ -59,9 +58,7 @@
   let error = $state('');
 
   let selectedRelease = $derived(manifest?.releases.find((release) => release.version === selectedVersion) ?? null);
-  let selectedVerification = $derived(selectedRelease && !requiresFoundationAttestation(selectedRelease.version)
-    ? 'historical'
-    : selectedRelease?.attestation && verifyReleaseManifestEntry(selectedRelease) ? 'verified' : 'invalid');
+  let selectedVerification = $derived(selectedRelease?.attestation && verifyReleaseManifestEntry(selectedRelease) ? 'verified' : 'invalid');
   let scopes = $derived.by(() => {
     const names = new Set<string>();
     for (const release of manifest?.releases ?? []) Object.keys(release.modules).forEach((name) => names.add(name));
@@ -138,9 +135,7 @@
       if (!verifyReleaseManifestPolicy(loadedManifest)) throw new Error('INVALID FOUNDATION HANKO: release manifest policy');
       const invalidRelease = loadedManifest.releases.find((release) => !verifyReleaseManifestEntry(release));
       if (invalidRelease) throw new Error(`INVALID FOUNDATION HANKO: release ${invalidRelease.version}`);
-      // Every metric rendered by the chart must equal its source snapshot. New
-      // releases additionally require Hanko; historical releases remain visibly
-      // unsigned but still cannot drift independently from their snapshot JSON.
+      // Every metric rendered by the chart must equal its Hanko-bound source snapshot.
       await Promise.all(loadedManifest.releases.map(verifyReleaseSnapshot));
       manifest = loadedManifest;
       await loadRelease(manifest.latest);
@@ -172,8 +167,6 @@
             <ShieldCheck size={14} /> Foundation code root verified
           {:else if selectedVerification === 'invalid'}
             <ShieldAlert size={14} /> Invalid signature
-          {:else}
-            <History size={14} /> Pre-v2 historical · unverified
           {/if}
         </span>
       </div>

@@ -78,7 +78,7 @@ export interface Runtime {
   id: string; // signer EOA (0xABCD...)
   label: string; // user-chosen name ("MyWallet")
   seed: string; // canonical 24-word mnemonic
-  mnemonic12?: string; // optional 12-word compatibility mnemonic
+  mnemonic12?: string; // optional derived 12-word interoperability mnemonic
   devicePassphrase?: string; // optional BrainVault device passphrase (if available)
   protectedSecrets?: ProtectedVaultSecrets;
   signers: Signer[];
@@ -358,8 +358,8 @@ export type RuntimeJReplica = RuntimeReplica['state']['jReplicas'] extends Map<s
 
 export type RuntimeEntityReplica = RuntimeReplica['state']['eReplicas'] extends Map<string, infer T> ? T : never;
 
-export const getJReplicaJurisdictionName = (replica: RuntimeJReplica | null | undefined, fallback = ''): string =>
-  String(replica?.name || fallback || '').trim();
+export const getJReplicaJurisdictionName = (replica: RuntimeJReplica | null | undefined, defaultName = ''): string =>
+  String(replica?.name || defaultName || '').trim();
 
 export const findJReplicaByName = (env: RuntimeReplica, name: string): RuntimeJReplica | undefined => {
   const normalized = normalizeJurisdictionKey(name);
@@ -424,14 +424,14 @@ export const buildSignerEntityConfig = (
   signerAddress: string,
   jReplica: RuntimeJReplica,
   preferredJurisdictionName: string,
-  fallbackChainId: number,
+  defaultChainId: number,
 ): ConsensusConfig => {
   const jurisdictionName = getJReplicaJurisdictionName(jReplica, preferredJurisdictionName);
   if (!jurisdictionName) throw new Error('ENTITY_JURISDICTION_MISSING');
   const depositoryAddress = getJReplicaContractAddress(jReplica, 'depository');
   const entityProviderAddress = getJReplicaContractAddress(jReplica, 'entity_provider');
   const rpcAddress = String(jReplica.rpcs?.[0] || '').trim();
-  const chainId = Number(jReplica.chainId ?? fallbackChainId);
+  const chainId = Number(jReplica.chainId ?? defaultChainId);
   const blockTimeMs = Number(jReplica.blockTimeMs);
   if (!Number.isFinite(chainId) || chainId <= 0) {
     throw new Error(`ENTITY_JURISDICTION_CHAIN_ID_MISSING: ${jurisdictionName}`);
@@ -703,13 +703,13 @@ export const getConfiguredRecoveryTowers = (runtime: Runtime | null | undefined)
       enabled: tower.enabled !== false,
     }))
     .filter(tower => !!tower.url && tower.enabled !== false);
-  const fallback = runtime?.recovery?.useDefaultTowers === false ? [] : buildDefaultRecoveryTowerConfigs();
+  const defaultTowers = runtime?.recovery?.useDefaultTowers === false ? [] : buildDefaultRecoveryTowerConfigs();
   const deduped = new Map<string, RecoveryTowerConfig>();
   for (const tower of explicit) {
     if (!tower.url) continue;
     deduped.set(tower.url, tower);
   }
-  for (const tower of fallback) {
+  for (const tower of defaultTowers) {
     if (!tower.url || deduped.has(tower.url)) continue;
     deduped.set(tower.url, tower);
   }

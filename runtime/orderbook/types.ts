@@ -101,7 +101,7 @@ export function deriveSide(giveTokenId: number, wantTokenId: number): 0 | 1 {
   // 1 = SELL base, 0 = BUY base
   if (giveTokenId === base && wantTokenId === quote) return 1;
   if (giveTokenId === quote && wantTokenId === base) return 0;
-  // Fallback for malformed directions (should not happen in valid swaps)
+  // Sentinel for malformed directions (unreachable for valid swaps).
   return giveTokenId < wantTokenId ? 1 : 0;
 }
 

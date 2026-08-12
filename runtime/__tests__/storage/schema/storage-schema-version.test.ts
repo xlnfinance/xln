@@ -64,7 +64,7 @@ const memoryDb = (entries: Array<[Buffer, unknown]> = []): RuntimeDbLike => {
 const memoryDbWithHead = (head: StorageHead): RuntimeDbLike => memoryDb([[KEY_HEAD, head]]);
 
 describe('storage schema boundary', () => {
-  test('rejects legacy command and incomplete-checkpoint schemas before hydrating entity state', async () => {
+  test('rejects retired command and incomplete-checkpoint schemas before hydrating entity state', async () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(2)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`,
     );
@@ -112,8 +112,8 @@ describe('storage schema boundary', () => {
     );
   });
 
-  test('rejects legacy frame-journal heads instead of relabelling them current', async () => {
-    const legacy: StorageHistoryViewHead = {
+  test('rejects retired frame-journal heads instead of relabelling them current', async () => {
+    const obsoleteHead: StorageHistoryViewHead = {
       schemaVersion: 2,
       latestHeight: 7,
       latestPrunedRuntimeHeight: 0,
@@ -121,26 +121,26 @@ describe('storage schema boundary', () => {
       maxBytes: storageConfig.historyViewMaxBytes,
       retainFrames: storageConfig.historyViewRetainFrames,
     };
-    await expect(readHistoryViewHead(memoryDb([[KEY_HISTORY_VIEW_HEAD, legacy]]), storageConfig)).rejects.toThrow(
+    await expect(readHistoryViewHead(memoryDb([[KEY_HISTORY_VIEW_HEAD, obsoleteHead]]), storageConfig)).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}:boundary=history-view-head`,
     );
   });
 
-  test('rejects legacy heads at recovery, verification, rotation, and inspection boundaries', async () => {
-    const legacyDb = memoryDbWithHead(currentHead(2));
+  test('rejects retired heads at recovery, verification, rotation, and inspection boundaries', async () => {
+    const obsoleteDb = memoryDbWithHead(currentHead(2));
     await expect(
       recoverStorageDbFromHistory({
         db: memoryDb(),
-        walDb: legacyDb,
+        walDb: obsoleteDb,
         config: storageConfig,
       }),
     ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`);
-    await expect(verifyStorageTailIntegrity(legacyDb)).rejects.toThrow(
+    await expect(verifyStorageTailIntegrity(obsoleteDb)).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`,
     );
     await expect(
       seedFreshStorageEpoch({
-        sourceDb: legacyDb,
+        sourceDb: obsoleteDb,
         targetDb: memoryDb(),
         snapshotHeight: 7,
       }),
@@ -149,7 +149,7 @@ describe('storage schema boundary', () => {
       inspectStorage({
         env: {} as RuntimeReplica,
         tryOpenDb: async () => true,
-        getRuntimeDb: () => legacyDb,
+        getRuntimeDb: () => obsoleteDb,
       }),
     ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`);
   });

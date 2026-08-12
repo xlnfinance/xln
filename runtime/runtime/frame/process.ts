@@ -1,5 +1,4 @@
 import { TIMING } from '../../config/constants';
-import { collectDueLocalProfileCertificationInputs } from '../../network/p2p/gossip/local-profile-lifecycle';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { recordRuntimeHistoryTraceForTesting } from '../observability/history-retention';
 import { createStructuredLogger } from '../../infra/logger';
@@ -118,15 +117,7 @@ const collectRuntimeIngress = async (
   });
   profile.mark('jurisdictionImports');
 
-  const profileInputs = collectDueLocalProfileCertificationInputs(
-    env,
-    state.pendingProfileCertificationEntityIds,
-  );
   state.pendingProfileCertificationEntityIds = new Set();
-  if (profileInputs.length > 0) {
-    const profileTimestamp = requireRuntimeMempool(env).queuedAt ?? ingressTimestamp;
-    loop.enqueueRuntimeContinuation(env, profileInputs, undefined, undefined, profileTimestamp);
-  }
   profile.mark('profileCertification');
   profile.mark('enqueue');
 
@@ -367,6 +358,7 @@ const commitRuntimeFrame = async (
       options.appliedInput,
       candidateEnv.pendingNetworkOutputs,
       previewPublishedRuntimeInput(frame.transaction),
+      frame.entityContexts,
     );
     profile.metrics.storageMs = outcome.persistencePerfMs;
     if (outcome.persistencePerfMs) {

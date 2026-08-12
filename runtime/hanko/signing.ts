@@ -11,6 +11,8 @@ import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory'
 import { recoverAddressFromDigestSignature, signDigestBytesWithPrivateKey } from '../account/crypto';
 import { compareStableText } from '../protocol/serialization';
 import {
+  getCertifiedBoardNodeStore,
+  resolveObserverCertifiedBoardRecord,
   resolveUniqueCertifiedRegisteredBoardRecord,
   resolveSigningCertifiedBoardHash,
 } from '../jurisdiction/machine/board-registry';
@@ -41,7 +43,7 @@ const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncod
     return Buffer.from(data);
   }
 
-  // Browser fallback for non-hex
+  // Browser decoding path for non-hex input.
   if (typeof data === 'string') {
     return new TextEncoder().encode(data) as Buffer;
   }
@@ -501,20 +503,37 @@ export async function assertEntityConfigBoardAuthority(
  * @param hankoBytes - ABI-encoded HankoBytes
  * @param hash - Hash that was signed
  * @param expectedEntityId - REQUIRED: Entity that MUST have signed
- * @param env - Runtime env to lookup entity board validators
+ * @param env - Runtime access to immutable certified-board nodes
+ * @param authority - Consensus callers bind an exact observer State/root;
+ * global resolution is reserved for profile/gossip discovery.
  */
 export async function verifyHankoForHash(
   hankoBytes: HankoString,
   hash: string,
   expectedEntityId: string,
   env?: EntityRuntimeContext,
-  authority?: { registeredBoardHash?: string; allowPreviousBoard?: boolean },
+  authority?: {
+    registeredBoardHash?: string;
+    allowPreviousBoard?: boolean;
+    /** Exact Entity-certified registry root for consensus verification. */
+    observerState?: EntityState;
+  },
 ): Promise<{ valid: boolean; entityId: string | null }> {
   try {
     const expectedTarget = encodeQuorumEntityId(expectedEntityId);
     const certifiedRegisteredBoardHash = authority?.registeredBoardHash?.trim().toLowerCase() || null;
+    const resolveAuthorityRecord = (entityId: string) => {
+      if (!env) return null;
+      return authority?.observerState
+        ? resolveObserverCertifiedBoardRecord(
+            authority.observerState,
+            getCertifiedBoardNodeStore(env),
+            entityId,
+          )
+        : resolveUniqueCertifiedRegisteredBoardRecord(env, entityId);
+    };
     if (certifiedRegisteredBoardHash && env) {
-      const record = resolveUniqueCertifiedRegisteredBoardRecord(env, expectedEntityId);
+      const record = resolveAuthorityRecord(expectedEntityId);
       if (!record || record.boardHash !== certifiedRegisteredBoardHash) {
         throw new Error(
           `CERTIFIED_BOARD_AUTHORITY_CURRENT_MISMATCH:${expectedEntityId}:` +
@@ -522,14 +541,18 @@ export async function verifyHankoForHash(
         );
       }
     }
-    const entityTimestampSeconds = env ? Math.floor(env.state.timestamp / 1_000) : 0;
+    const entityTimestampSeconds = authority?.observerState
+      ? Math.floor(authority.observerState.timestamp / 1_000)
+      : env
+        ? Math.floor(env.state.timestamp / 1_000)
+        : 0;
     const verified = verifyCanonicalHanko({
       hanko: hankoBytes,
       digest: hash,
       expectedTargetEntityId: expectedTarget,
       validateBoardAuthority: (entityId, reconstructedBoardHash) => {
       if (!env) return false;
-      const record = resolveUniqueCertifiedRegisteredBoardRecord(env, entityId);
+      const record = resolveAuthorityRecord(entityId);
       if (!record) return false;
       if (entityId === expectedTarget && certifiedRegisteredBoardHash && record.boardHash !== certifiedRegisteredBoardHash) {
         throw new Error(
@@ -565,8 +588,11 @@ export async function verifyHankoForHash(
     if (error instanceof Error && error.message.startsWith('HANKO_')) {
       return { valid: false, entityId: null };
     }
-    console.error(`❌ Hanko verification error:`, error);
-    return { valid: false, entityId: null };
+    // Malformed peer Hanko is an expected authentication rejection above.
+    // Resolver/storage/programming failures are local invariant faults: hiding
+    // them as a bad signature would let validators continue from divergent
+    // authority state and make the same consensus input non-deterministic.
+    throw error;
   }
 }
 
@@ -580,9 +606,14 @@ export async function resolveHankoDefaultProposerSignerId(
   hankoBytes: HankoString,
   hash: string,
   expectedEntityId: string,
-  env: EntityRuntimeContext,
+  env?: EntityRuntimeContext,
+  authority?: {
+    registeredBoardHash?: string;
+    allowPreviousBoard?: boolean;
+    observerState?: EntityState;
+  },
 ): Promise<string> {
-  const verified = await verifyHankoForHash(hankoBytes, hash, expectedEntityId, env);
+  const verified = await verifyHankoForHash(hankoBytes, hash, expectedEntityId, env, authority);
   if (!verified.valid) {
     throw new Error(`HANKO_PROPOSER_AUTHORITY_INVALID:${expectedEntityId}`);
   }

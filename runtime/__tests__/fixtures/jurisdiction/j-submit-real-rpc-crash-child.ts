@@ -6,7 +6,7 @@ import {
 } from '../../../runtime';
 import { deriveSignerAddressSync } from '../../../account/crypto';
 import { getNextJSubmitRetryTimestamp } from '../../../runtime/jurisdiction/j-submit-scheduler';
-import { ENTITY_J_SUBMIT_FALLBACK_MS } from '../../../entity/consensus/leader';
+import { ENTITY_J_SUBMIT_RETRY_MS } from '../../../entity/consensus/leader';
 import { computeCanonicalEntityHash } from '../../../storage/canonical-hash';
 import {
   bootScenario,
@@ -273,7 +273,7 @@ const runRecoverPhase = async (): Promise<void> => {
   const finalRuntimeHeight = restored.state.height;
   const finalEntityHeight = reconciledReplica.state.height;
   const finalTimestamp = restored.state.timestamp;
-  const retryBackoffAt = proof.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS;
+  const retryBackoffAt = proof.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS;
   const resultAttemptId = reconciledReplica.jSubmitState?.lastResultAttemptId;
   assertEqual(resultAttemptId, undefined, 'submit-result-must-not-replace-j-event-authority');
   assertEqual(reconciledReplica.jSubmitState?.submitAttempts, 1, 'no-second-submit-attempt');

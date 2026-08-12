@@ -26,10 +26,9 @@ import { sourceDependencySpecifiers } from '../../tools/frozen-core/core.ts';
 import { RELEASE_EDITORIAL_NOTICE, writeReleaseMarkdown } from '../../tools/release-snapshot/render.ts';
 
 const ROOT = resolve(import.meta.dir, '../..');
-const RELEASE_017 = JSON.parse(readFileSync(resolve(ROOT, 'docs/releases/data/0.1.7.json'), 'utf8')) as ReleaseSnapshot;
-const RELEASE_016 = JSON.parse(readFileSync(resolve(ROOT, 'docs/releases/data/0.1.6.json'), 'utf8')) as ReleaseSnapshot;
+const RELEASE_019 = JSON.parse(readFileSync(resolve(ROOT, 'docs/releases/data/0.1.9.json'), 'utf8')) as ReleaseSnapshot;
 const MANIFEST = JSON.parse(readFileSync(resolve(ROOT, 'docs/releases/manifest.json'), 'utf8')) as ReleaseManifest;
-const MANIFEST_017 = MANIFEST.releases.find((release) => release.version === '0.1.7')!;
+const MANIFEST_019 = MANIFEST.releases.find((release) => release.version === '0.1.9')!;
 
 const PRIVATE_KEYS = [
   `0x${'01'.padStart(64, '0')}`,
@@ -38,7 +37,7 @@ const PRIVATE_KEYS = [
 ];
 const ADDRESSES = PRIVATE_KEYS.map((key) => ethers.computeAddress(new ethers.SigningKey(key).publicKey));
 const ENVELOPE: ReleaseEnvelope = {
-  version: '0.1.7',
+  version: '0.1.9',
   sourceCommit: '0123456789abcdef0123456789abcdef01234567',
   codeSnapshotRoot: `0x${'11'.repeat(32)}`,
   frozenCoreRoot: `0x${'22'.repeat(32)}`,
@@ -131,16 +130,16 @@ describe('Foundation release Hanko', () => {
     expect(isCanonicalFoundationBoard(attackerBoard)).toBe(false);
     expect(verifyReleaseAttestation(attackerAttestation)).toBe(false);
     expect(verifyReleaseAttestation(attackerAttestation, attackerBoard)).toBe(true);
-    expect(verifyReleaseAttestation(RELEASE_017.attestation!)).toBe(false);
+    expect(verifyReleaseAttestation(RELEASE_019.attestation!)).toBe(true);
 
-    const mismatchedEntity = structuredClone(RELEASE_017.attestation!);
+    const mismatchedEntity = structuredClone(RELEASE_019.attestation!);
     mismatchedEntity.board.entityId = `0x${'77'.repeat(32)}`;
     expect(verifyReleaseAttestation(mismatchedEntity)).toBe(false);
   });
 
   test('binds the signed envelope to snapshot claims and recomputes the file Merkle root', () => {
-    expect(computeCodeSnapshotRoot(RELEASE_017.files)).toBe(RELEASE_017.repository.merkleRoot);
-    expect(verifyReleaseSnapshot(RELEASE_017)).toBe(true);
+    expect(computeCodeSnapshotRoot(RELEASE_019.files)).toBe(RELEASE_019.repository.merkleRoot);
+    expect(verifyReleaseSnapshot(RELEASE_019)).toBe(true);
 
     const mutations: Array<(snapshot: ReleaseSnapshot) => void> = [
       (snapshot) => { snapshot.release.version = '0.1.8'; },
@@ -152,26 +151,23 @@ describe('Foundation release Hanko', () => {
       (snapshot) => { snapshot.files[0]!.sha256 = '66'.repeat(32); },
     ];
     for (const mutate of mutations) {
-      const tampered = structuredClone(RELEASE_017);
+      const tampered = structuredClone(RELEASE_019);
       mutate(tampered);
       expect(verifyReleaseSnapshot(tampered)).toBe(false);
     }
   });
 
-  test('keeps historical Hanko immutable but unverified and requires canonical v1 from 0.1.9', () => {
+  test('requires canonical Hanko for every catalog release', () => {
     expect(CURRENT_XLN_RELEASE_VERSION).toBe(readFileSync(resolve(ROOT, 'VERSION'), 'utf8').trim());
     expect(verifyReleaseManifestPolicy(MANIFEST)).toBe(true);
-    expect(verifyReleaseManifestEntry(MANIFEST_017)).toBe(true);
-    expect(verifyReleaseManifestSnapshotBinding(MANIFEST_017, RELEASE_017)).toBe(true);
-    expect(verifyReleaseSnapshot(RELEASE_016)).toBe(true);
-    const manifest016 = MANIFEST.releases.find((release) => release.version === '0.1.6')!;
-    expect(verifyReleaseManifestEntry(manifest016)).toBe(true);
-    expect(verifyReleaseManifestSnapshotBinding(manifest016, RELEASE_016)).toBe(true);
+    expect(verifyReleaseManifestEntry(MANIFEST_019)).toBe(true);
+    expect(verifyReleaseManifestSnapshotBinding(MANIFEST_019, RELEASE_019)).toBe(true);
+    expect(MANIFEST.releases.every((release) => release.attestation)).toBe(true);
 
-    const unsignedSnapshot = structuredClone(RELEASE_017);
+    const unsignedSnapshot = structuredClone(RELEASE_019);
     delete unsignedSnapshot.attestation;
     expect(verifyReleaseSnapshot(unsignedSnapshot)).toBe(false);
-    const unsignedManifest = structuredClone(MANIFEST_017);
+    const unsignedManifest = structuredClone(MANIFEST_019);
     delete unsignedManifest.attestation;
     expect(verifyReleaseManifestEntry(unsignedManifest)).toBe(false);
 
@@ -179,13 +175,13 @@ describe('Foundation release Hanko', () => {
     rolledBack.latest = '0.1.6';
     expect(verifyReleaseManifestPolicy(rolledBack)).toBe(false);
     const stripped = structuredClone(MANIFEST);
-    stripped.releases = stripped.releases.filter((release) => release.version !== '0.1.7');
+    stripped.releases = stripped.releases.filter((release) => release.version !== '0.1.9');
     stripped.latest = '0.1.6';
     expect(verifyReleaseManifestPolicy(stripped)).toBe(false);
 
-    const mutations: Array<(entry: typeof MANIFEST_017) => void> = [
+    const mutations: Array<(entry: typeof MANIFEST_019) => void> = [
       (entry) => { entry.version = '0.1.8'; },
-      (entry) => { entry.tag = 'release-0.1.7'; },
+      (entry) => { entry.tag = 'release-0.1.9'; },
       (entry) => { entry.markdown = '/docs-catalog/releases/0.1.6.md'; },
       (entry) => { entry.snapshot = '/docs-catalog/releases/data/0.1.6.json'; },
       (entry) => { entry.sourceCommit = 'a'.repeat(40); },
@@ -194,31 +190,31 @@ describe('Foundation release Hanko', () => {
       (entry) => { entry.frozenCore!.rootHash = `0x${'99'.repeat(32)}`; },
     ];
     for (const mutate of mutations) {
-      const tampered = structuredClone(MANIFEST_017);
+      const tampered = structuredClone(MANIFEST_019);
       mutate(tampered);
       expect(verifyReleaseManifestEntry(tampered)).toBe(false);
-      expect(verifyReleaseManifestSnapshotBinding(tampered, RELEASE_017)).toBe(false);
+      expect(verifyReleaseManifestSnapshotBinding(tampered, RELEASE_019)).toBe(false);
     }
 
-    const manifestMetricTamper = structuredClone(MANIFEST_017);
+    const manifestMetricTamper = structuredClone(MANIFEST_019);
     manifestMetricTamper.metrics.code += 1;
     expect(verifyReleaseManifestEntry(manifestMetricTamper)).toBe(true);
-    expect(verifyReleaseManifestSnapshotBinding(manifestMetricTamper, RELEASE_017)).toBe(false);
+    expect(verifyReleaseManifestSnapshotBinding(manifestMetricTamper, RELEASE_019)).toBe(false);
 
-    const manifestModuleTamper = structuredClone(MANIFEST_017);
+    const manifestModuleTamper = structuredClone(MANIFEST_019);
     manifestModuleTamper.modules.runtime!.code += 1;
-    expect(verifyReleaseManifestSnapshotBinding(manifestModuleTamper, RELEASE_017)).toBe(false);
+    expect(verifyReleaseManifestSnapshotBinding(manifestModuleTamper, RELEASE_019)).toBe(false);
 
-    const snapshotMetricTamper = structuredClone(RELEASE_017);
+    const snapshotMetricTamper = structuredClone(RELEASE_019);
     snapshotMetricTamper.repository.metrics.code += 1;
     snapshotMetricTamper.tree.metrics.code += 1;
     expect(verifyReleaseSnapshot(snapshotMetricTamper)).toBe(true);
-    expect(verifyReleaseManifestSnapshotBinding(MANIFEST_017, snapshotMetricTamper)).toBe(false);
+    expect(verifyReleaseManifestSnapshotBinding(MANIFEST_019, snapshotMetricTamper)).toBe(false);
 
-    const snapshotModuleTamper = structuredClone(RELEASE_017);
+    const snapshotModuleTamper = structuredClone(RELEASE_019);
     snapshotModuleTamper.tree.children!.find((node) => node.path === 'runtime')!.metrics.code += 1;
     expect(verifyReleaseSnapshot(snapshotModuleTamper)).toBe(true);
-    expect(verifyReleaseManifestSnapshotBinding(MANIFEST_017, snapshotModuleTamper)).toBe(false);
+    expect(verifyReleaseManifestSnapshotBinding(MANIFEST_019, snapshotModuleTamper)).toBe(false);
   });
 
   test('keeps every attested release snapshot bound to its manifest entry', () => {
@@ -235,17 +231,17 @@ describe('Foundation release Hanko', () => {
 
   test('labels mutable release notes outside the verified snapshot boundary', () => {
     const directory = mkdtempSync(join(tmpdir(), 'xln-release-notes-'));
-    const markdownPath = join(directory, '0.1.7.md');
+    const markdownPath = join(directory, '0.1.9.md');
     try {
-      expect(readFileSync(resolve(ROOT, 'docs/releases/0.1.7.md'), 'utf8')).toContain(RELEASE_EDITORIAL_NOTICE);
+      expect(readFileSync(resolve(ROOT, 'docs/releases/0.1.9.md'), 'utf8')).toContain(RELEASE_EDITORIAL_NOTICE);
       const releasesView = readFileSync(resolve(ROOT, 'frontend/src/lib/components/Releases/ReleasesView.svelte'), 'utf8');
       expect(releasesView).toContain('Foundation code root verified');
       expect(releasesView).not.toContain('Foundation verified');
 
-      writeReleaseMarkdown(markdownPath, RELEASE_017);
+      writeReleaseMarkdown(markdownPath, RELEASE_019);
       const edited = readFileSync(markdownPath, 'utf8').replace('Release notes pending.', 'Editorial copy changed later.');
       writeFileSync(markdownPath, edited);
-      writeReleaseMarkdown(markdownPath, RELEASE_017);
+      writeReleaseMarkdown(markdownPath, RELEASE_019);
 
       const rendered = readFileSync(markdownPath, 'utf8');
       expect(rendered).toContain(RELEASE_EDITORIAL_NOTICE);
@@ -262,8 +258,8 @@ describe('Foundation release Hanko', () => {
     const release = (version: string, generatedAt: string) => {
       const envelope: ReleaseEnvelope = {
         version,
-        sourceCommit: version === '0.1.8' ? '8'.repeat(40) : '7'.repeat(40),
-        codeSnapshotRoot: `0x${version === '0.1.8' ? '88' : '77'}`.padEnd(66, version === '0.1.8' ? '8' : '7'),
+        sourceCommit: version === '0.1.10' ? 'a'.repeat(40) : '9'.repeat(40),
+        codeSnapshotRoot: `0x${version === '0.1.10' ? 'aa' : '99'}`.padEnd(66, version === '0.1.10' ? 'a' : '9'),
         frozenCoreRoot: `0x${'55'.repeat(32)}`,
         generatedAt,
       };
@@ -281,14 +277,14 @@ describe('Foundation release Hanko', () => {
         attestation: signReleaseEnvelope(envelope, board, PRIVATE_KEYS),
       };
     };
-    const release017 = release('0.1.7', '2026-07-10T00:00:00.000Z');
-    const release018 = release('0.1.8', '2026-07-11T00:00:00.000Z');
-    const current = { schemaVersion: 1, latest: '0.1.8', releases: [release018, release017] } as const;
-    expect(verifyReleaseManifestPolicy(current, board, '0.1.8')).toBe(true);
+    const release019 = release('0.1.9', '2026-07-10T00:00:00.000Z');
+    const release0110 = release('0.1.10', '2026-07-11T00:00:00.000Z');
+    const current = { schemaVersion: 1, latest: '0.1.10', releases: [release0110, release019] } as const;
+    expect(verifyReleaseManifestPolicy(current, board, '0.1.10')).toBe(true);
     expect(verifyReleaseManifestPolicy(
-      { schemaVersion: 1, latest: '0.1.7', releases: [release017] },
+      { schemaVersion: 1, latest: '0.1.9', releases: [release019] },
       board,
-      '0.1.8',
+      '0.1.10',
     )).toBe(false);
   });
 
@@ -302,14 +298,14 @@ describe('Foundation release Hanko', () => {
         resolve(ROOT, 'tools/foundation-release.ts'),
         'verify',
         `--board=${boardPath}`,
-        `--snapshot=${resolve(ROOT, 'docs/releases/data/0.1.7.json')}`,
+        `--snapshot=${resolve(ROOT, 'docs/releases/data/0.1.9.json')}`,
       ], { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' });
 
       expect(result.exitCode).not.toBe(0);
       expect(new TextDecoder().decode(result.stderr)).toContain('FOUNDATION_RELEASE_BOARD_NOT_TRUSTED');
 
       const tamperedSnapshotPath = join(directory, 'tampered-snapshot.json');
-      const tamperedSnapshot = structuredClone(RELEASE_017);
+      const tamperedSnapshot = structuredClone(RELEASE_019);
       tamperedSnapshot.release.sourceCommit = 'b'.repeat(40);
       writeFileSync(tamperedSnapshotPath, JSON.stringify(tamperedSnapshot));
       const tamperedResult = Bun.spawnSync([
@@ -322,15 +318,19 @@ describe('Foundation release Hanko', () => {
       expect(tamperedResult.exitCode).not.toBe(0);
       expect(new TextDecoder().decode(tamperedResult.stderr)).toContain('RELEASE_ATTESTATION_INVALID');
 
-      const historicalResult = Bun.spawnSync([
+      const unsignedPath = join(directory, 'unsigned-snapshot.json');
+      const unsignedSnapshot = structuredClone(RELEASE_019);
+      delete unsignedSnapshot.attestation;
+      writeFileSync(unsignedPath, JSON.stringify(unsignedSnapshot));
+      const unsignedResult = Bun.spawnSync([
         process.execPath,
         resolve(ROOT, 'tools/foundation-release.ts'),
         'verify',
         `--board=${resolve(ROOT, 'foundation-release-board.json')}`,
-        `--snapshot=${resolve(ROOT, 'docs/releases/data/0.1.6.json')}`,
+        `--snapshot=${unsignedPath}`,
       ], { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' });
-      expect(historicalResult.exitCode).toBe(0);
-      expect(new TextDecoder().decode(historicalResult.stdout)).toContain('Historical unsigned release: 0.1.6');
+      expect(unsignedResult.exitCode).not.toBe(0);
+      expect(new TextDecoder().decode(unsignedResult.stderr)).toContain('RELEASE_ATTESTATION_MISSING');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

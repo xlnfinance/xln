@@ -584,7 +584,7 @@ export const closeStorageDb = async (
   state[fields.dbField] = null;
   state[fields.openField] = null;
   if (role === 'previous') delete state.storageVerifiedPreviousHeight;
-  else delete state.storageVerifiedCurrentHeight;
+  else delete state.storageCurrentProjectionVerified;
   try {
     await db.close();
   } catch (error) {
@@ -745,8 +745,9 @@ const verifyOpenedStorageDb = async (
   db: Level<Buffer, Buffer>,
 ): Promise<void> => {
   assertStorageSafetyOverridesAllowed();
+  if (role === 'current') return;
   const state = deps.ensureRuntimeInfrastructure(env);
-  const verifiedField = role === 'current' ? 'storageVerifiedCurrentHeight' : 'storageVerifiedPreviousHeight';
+  const verifiedField = 'storageVerifiedPreviousHeight';
   const previousVerifiedHeight = Number(state[verifiedField] ?? -1);
   const head = await readStorageHead(db);
   const verified = { latestHeight: Math.max(0, Math.floor(Number(head?.latestHeight ?? 0))) };
@@ -842,7 +843,7 @@ export const rotateStorageEpochDb = async (
     await fs.rename(nextPath, currentPath);
     await fsyncStorageParentDirectory(currentPath);
     await removeStorageRotationMarker(env);
-    delete state.storageVerifiedCurrentHeight;
+    delete state.storageCurrentProjectionVerified;
     delete state.storageVerifiedPreviousHeight;
   })();
   state.storageEpochRotatePromise = rotation;

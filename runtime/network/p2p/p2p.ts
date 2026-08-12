@@ -6,12 +6,12 @@
  */
 
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../../runtime/types';
-import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from '../../entity/profile';
+import { canonicalizeProfile, parseProfile, type Profile } from '../../entity/profile';
 import { RuntimeWsClient } from './ws-client';
 import { canonicalizeRuntimeWsAudience, directRuntimeWsAudience } from './ws-protocol';
 import { buildLocalEntityProfile } from './gossip/helper';
 import { extractEntityId } from '../../protocol/identity';
-import { getSignerPrivateKeyIfAvailable, registerSignerPublicKey } from '../../account/crypto';
+import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../../entity/profile/profile-signing';
 import { inspectHankoForHash } from '../../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../../protocol/crypto/p2p-crypto';
@@ -34,12 +34,6 @@ import {
   isDeliveryDelivered,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
-import {
-  acceptProfileEncryptionAnnouncement,
-  collectLocalProfileEncryptionAnnouncements,
-  getCompleteProfileEncryptionManifest,
-  type ValidatorEncryptionAnnouncement,
-} from '../../entity/profile/profile-encryption';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/entity-input/entity-input-envelope-auth.ts';
 
@@ -109,15 +103,10 @@ type RuntimeP2POptions = {
   onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => void;
   onReliableReceipt?: (from: string, receipt: ReliableDeliveryReceipt) => void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
-  onEncryptionManifestComplete?: (
-    entityId: string,
-    attestations: ValidatorEncryptionAnnouncement['attestation'][],
-  ) => void;
 };
 
 type GossipResponsePayload = {
   profiles: Profile[];
-  encryptionAnnouncements?: ValidatorEncryptionAnnouncement[];
 };
 
 type GossipRefreshMode = 'incremental' | 'full';
@@ -142,8 +131,6 @@ const logSlowBrowserTimer = (label: string, startedAt: number, extra = ''): void
     ...(extra ? { extra } : {}),
   });
 };
-
-const isHexPublicKey = (value: string): boolean => /^0x(?:[0-9a-fA-F]{66}|[0-9a-fA-F]{130})$/.test(value);
 
 type SanitizedIncomingProfile = {
   profile: Profile | null;
@@ -266,7 +253,6 @@ export class RuntimeP2P {
   private onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => void;
   private onReliableReceipt: (from: string, receipt: ReliableDeliveryReceipt) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
-  private onEncryptionManifestComplete: RuntimeP2POptions['onEncryptionManifestComplete'];
   private clients: RuntimeWsClient[] = [];
   private directClients = new Map<string, RuntimeWsClient>();
   private directClientUrls = new Map<string, string>();
@@ -312,7 +298,6 @@ export class RuntimeP2P {
         throw new Error('P2P_RELIABLE_RECEIPT_HANDLER_MISSING');
       });
     this.onGossipProfiles = options.onGossipProfiles;
-    this.onEncryptionManifestComplete = options.onEncryptionManifestComplete;
     if (!this.env.infrastructure) this.env.infrastructure = {};
     this.verifiedProfileRoutes = this.env.infrastructure.verifiedProfileRoutes ?? new Map();
     this.env.infrastructure.verifiedProfileRoutes = this.verifiedProfileRoutes;
@@ -573,13 +558,13 @@ export class RuntimeP2P {
     return route ? { runtimeId: route.runtimeId, lastUpdated: route.lastUpdated } : null;
   }
 
-  private rememberVerifiedProfileRoute(profile: Profile): void {
+  private rememberVerifiedProfileRoute(profile: Profile, runtimeSignerId: string): void {
     const key = profile.entityId.toLowerCase();
     const existing = this.verifiedProfileRoutes.get(key);
     if (existing && existing.lastUpdated >= profile.lastUpdated) return;
     this.verifiedProfileRoutes.set(key, {
       runtimeId: normalizeRuntimeId(profile.runtimeId),
-      runtimeSignerId: String(profile.runtimeSignerId || '').trim().toLowerCase(),
+      runtimeSignerId,
       runtimeEncPubKey: profile.runtimeEncPubKey,
       lastUpdated: profile.lastUpdated,
     });
@@ -631,6 +616,19 @@ export class RuntimeP2P {
       });
     }
     return rows.sort((left, right) => compareStableText(left.runtimeId, right.runtimeId));
+  }
+
+  /** Snapshot unverified transport liveness for proposer-owned frame context. */
+  observeOnlineEntityIds(entityIds: readonly string[]): ReadonlySet<string> {
+    const online = new Set<string>();
+    const relayOpen = this.clients.some(client => client.isOpen());
+    for (const rawEntityId of entityIds) {
+      const entityId = normalizeId(rawEntityId);
+      const route = this.verifiedProfileRoutes.get(entityId);
+      if (!route) continue;
+      if (this.directClients.get(route.runtimeId)?.isOpen() || relayOpen) online.add(entityId);
+    }
+    return online;
   }
 
   private deliverEntityInputs(
@@ -820,16 +818,12 @@ export class RuntimeP2P {
   announceProfilesTo(
     runtimeId: string,
     profiles: Profile[],
-    encryptionAnnouncements: ValidatorEncryptionAnnouncement[] = [],
   ) {
     const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
     if (!normalizedRuntimeId) return;
     const client = this.getActiveClient();
     if (!client) return;
-    client.sendGossipAnnounce(normalizedRuntimeId, {
-      profiles,
-      encryptionAnnouncements,
-    } satisfies GossipResponsePayload);
+    client.sendGossipAnnounce(normalizedRuntimeId, { profiles } satisfies GossipResponsePayload);
   }
 
   isConnected(): boolean {
@@ -1148,10 +1142,9 @@ export class RuntimeP2P {
 
   async announceLocalProfiles() {
     if (this.closing || this.closed) return;
-    const encryptionAnnouncements = this.getLocalEncryptionAnnouncements();
     const profiles = await this.getLocalProfilesForEntities();
     if (this.closing || this.closed) return;
-    if (profiles.length === 0 && encryptionAnnouncements.length === 0) return;
+    if (profiles.length === 0) return;
     for (const profile of profiles) {
       this.env.gossip?.announce?.(profile);
     }
@@ -1159,12 +1152,12 @@ export class RuntimeP2P {
     // ALWAYS announce to relay for storage (relay stores regardless of 'to' field)
     const client = this.getActiveClient();
     if (client) {
-      client.sendGossipAnnounce(this.runtimeId, { profiles, encryptionAnnouncements } satisfies GossipResponsePayload);
+      client.sendGossipAnnounce(this.runtimeId, { profiles } satisfies GossipResponsePayload);
     }
 
     // Also send to specific seeds if configured (for direct peer notification)
     for (const seedId of this.seedRuntimeIds) {
-      this.announceProfilesTo(seedId, profiles, encryptionAnnouncements);
+      this.announceProfilesTo(seedId, profiles);
     }
   }
 
@@ -1215,39 +1208,24 @@ export class RuntimeP2P {
 
   private async announceProfilesNow(entityIds: string[], reason: string) {
     if (this.closing || this.closed) return;
-    const encryptionAnnouncements = this.getLocalEncryptionAnnouncements(entityIds);
     const profiles = await this.getLocalProfilesForEntities(entityIds);
     if (this.closing || this.closed) return;
-    if (profiles.length === 0 && encryptionAnnouncements.length === 0) return;
+    if (profiles.length === 0) return;
     for (const profile of profiles) {
       this.env.gossip?.announce?.(profile);
     }
     const client = this.getActiveClient();
     if (client) {
-      client.sendGossipAnnounce(this.runtimeId, { profiles, encryptionAnnouncements } satisfies GossipResponsePayload);
+      client.sendGossipAnnounce(this.runtimeId, { profiles } satisfies GossipResponsePayload);
     }
     for (const seedId of this.seedRuntimeIds) {
-      this.announceProfilesTo(seedId, profiles, encryptionAnnouncements);
+      this.announceProfilesTo(seedId, profiles);
     }
     p2pLog.debug('profile.announce', {
       reason,
       count: profiles.length,
-      encryptionAttestationCount: encryptionAnnouncements.length,
       entities: profiles.map(profile => shortId(profile.entityId)),
     });
-  }
-
-  private getLocalEncryptionAnnouncements(entityIds?: string[]): ValidatorEncryptionAnnouncement[] {
-    const requested = entityIds && entityIds.length > 0 ? new Set(entityIds.map(normalizeId)) : null;
-    const advertised =
-      this.advertiseEntityIds && this.advertiseEntityIds.length > 0
-        ? new Set(this.advertiseEntityIds.map(normalizeId))
-        : null;
-    const target =
-      requested && advertised
-        ? new Set([...requested].filter(entityId => advertised.has(entityId)))
-        : (requested ?? advertised ?? undefined);
-    return collectLocalProfileEncryptionAnnouncements(this.env, target);
   }
 
   private async getLocalProfilesForEntities(entityIds?: string[]): Promise<Profile[]> {
@@ -1274,15 +1252,6 @@ export class RuntimeP2P {
       if (advertisedSet && !advertisedSet.has(normalizedEntityId)) continue;
       if (targetSet && !targetSet.has(normalizedEntityId)) continue;
       seen.add(normalizedEntityId);
-
-      const encryptionManifest = getCompleteProfileEncryptionManifest(this.env, replica.state);
-      if (!encryptionManifest) {
-        p2pLog.debug('profile.encryption_manifest_pending', {
-          entity: shortId(entityId),
-          signer: shortId(replicaSignerId),
-        });
-        continue;
-      }
 
       // MONOTONIC TIMESTAMP: Ensure timestamp grows even if env.timestamp doesn't change
       // Get last announced timestamp for this entity from gossip
@@ -1314,11 +1283,10 @@ export class RuntimeP2P {
     if (!this.env.gossip?.getProfiles) return;
     const request = payload as GossipProfileBatchRequest;
     const profiles = this.getLocalProfileBatch(request);
-    const encryptionAnnouncements = this.getLocalEncryptionAnnouncements(request.ids);
 
     const client = this.getActiveClient();
     if (!client) return;
-    client.sendGossipResponse(from, { profiles, encryptionAnnouncements } satisfies GossipResponsePayload);
+    client.sendGossipResponse(from, { profiles } satisfies GossipResponsePayload);
   }
 
   private getLocalProfileBatch(request: GossipProfileBatchRequest = {}): Profile[] {
@@ -1329,16 +1297,9 @@ export class RuntimeP2P {
   private handleGossipResponse(from: string, payload: unknown) {
     const response = payload as GossipResponsePayload;
     const profiles = Array.isArray(response?.profiles) ? response.profiles : [];
-    const encryptionAnnouncements = Array.isArray(response?.encryptionAnnouncements)
-      ? response.encryptionAnnouncements
-      : [];
-    if (
-      profiles.length > DEFAULT_GOSSIP_BATCH_LIMIT ||
-      encryptionAnnouncements.length > DEFAULT_GOSSIP_BATCH_LIMIT
-    ) {
+    if (profiles.length > DEFAULT_GOSSIP_BATCH_LIMIT) {
       throw new Error('P2P_GOSSIP_RESPONSE_BATCH_TOO_LARGE');
     }
-    this.applyIncomingEncryptionAnnouncements(from, encryptionAnnouncements);
     this.applyIncomingProfiles(from, profiles).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
     });
@@ -1347,63 +1308,12 @@ export class RuntimeP2P {
   private handleGossipAnnounce(from: string, payload: unknown) {
     const response = payload as GossipResponsePayload;
     const profiles = Array.isArray(response?.profiles) ? response.profiles : [];
-    const encryptionAnnouncements = Array.isArray(response?.encryptionAnnouncements)
-      ? response.encryptionAnnouncements
-      : [];
-    if (
-      profiles.length > DEFAULT_GOSSIP_BATCH_LIMIT ||
-      encryptionAnnouncements.length > DEFAULT_GOSSIP_BATCH_LIMIT
-    ) {
+    if (profiles.length > DEFAULT_GOSSIP_BATCH_LIMIT) {
       throw new Error('P2P_GOSSIP_ANNOUNCE_BATCH_TOO_LARGE');
     }
-    this.applyIncomingEncryptionAnnouncements(from, encryptionAnnouncements);
     this.applyIncomingProfiles(from, profiles).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
     });
-  }
-
-  private applyIncomingEncryptionAnnouncements(from: string, announcements: ValidatorEncryptionAnnouncement[]): void {
-    if (this.closing || this.closed) return;
-    if (announcements.length === 0) return;
-    const localEntities = new Map(
-      [...this.env.state.eReplicas.values()].map(replica => [normalizeId(replica.entityId), replica.state] as const),
-    );
-    for (const announcement of announcements) {
-      if (this.closing || this.closed) return;
-      let entityId = 'unknown';
-      try {
-        if (
-          !announcement ||
-          typeof announcement !== 'object' ||
-          !announcement.board ||
-          typeof announcement.board.entityId !== 'string'
-        ) {
-          throw new Error('PROFILE_ENCRYPTION_ANNOUNCEMENT_MALFORMED');
-        }
-        entityId = normalizeId(announcement.board.entityId);
-        const state = localEntities.get(entityId);
-        if (!state) continue;
-        acceptProfileEncryptionAnnouncement(this.env, announcement);
-        const complete = getCompleteProfileEncryptionManifest(this.env, state);
-        if (complete) {
-          p2pLog.debug('profile.encryption_manifest_complete', {
-            from: shortId(from),
-            entity: shortId(entityId),
-            hash: complete.hash.slice(0, 18),
-            validators: complete.attestations.length,
-          });
-          if (state.profileEncryptionManifest?.hash !== complete.hash) {
-            this.onEncryptionManifestComplete?.(entityId, [...complete.attestations]);
-          }
-        }
-      } catch (error) {
-        p2pLog.warn('profile.encryption_attestation_dropped', {
-          from: shortId(from),
-          entity: shortId(entityId || 'unknown'),
-          reason: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
   }
 
   private async applyIncomingProfiles(from: string, profiles: Profile[]) {
@@ -1460,13 +1370,10 @@ export class RuntimeP2P {
         });
         continue;
       }
+      const result = await verifyProfileSignature(sanitized, this.env);
       {
-        const result = await verifyProfileSignature(sanitized, this.env);
         if (this.closing || this.closed) return;
         if (!result.valid) {
-          const boardValidators = sanitized.metadata.board.validators;
-          const hasBoardKey = boardValidators.some(validator => typeof validator.publicKey === 'string');
-          const entityPublicKey = getBoardPrimaryPublicKey(sanitized.metadata.board, sanitized.entityId);
           let hankoInspect:
             | {
                 recoveredAddresses: string[];
@@ -1494,12 +1401,7 @@ export class RuntimeP2P {
             hash: result.hash ? `${result.hash.slice(0, 18)}..` : undefined,
             signerId: result.signerId,
             hanko: typeof hasHanko === 'string' ? `${hasHanko.slice(0, 30)}..` : Boolean(hasHanko),
-            entityPublicKey: `${entityPublicKey.slice(0, 20)}..`,
-            boardPublicKey: hasBoardKey,
-            validators: boardValidators.length,
-            boardSigners: boardValidators
-              .map(validator => String(validator.signerId || validator.signer))
-              .filter(Boolean),
+            entityPublicKey: `${sanitized.entityEncryptionPublicKey.slice(0, 20)}..`,
             recoveredAddresses: hankoInspect?.recoveredAddresses ?? [],
             reconstructedBoardHash: hankoInspect?.reconstructedBoardHash,
             runtimeId: sanitized.runtimeId,
@@ -1509,16 +1411,8 @@ export class RuntimeP2P {
         }
       }
 
-      for (const validator of sanitized.metadata.board.validators) {
-        const signerId = validator.signer;
-        const publicKey = validator.publicKey;
-        if (signerId && publicKey && isHexPublicKey(publicKey)) {
-          registerSignerPublicKey(this.env, signerId, publicKey);
-        }
-      }
-
       if (this.closing || this.closed) return;
-      this.rememberVerifiedProfileRoute(sanitized);
+      this.rememberVerifiedProfileRoute(sanitized, result.signerId!);
       this.env.gossip?.announce?.(sanitized);
       accepted++;
       acceptedProfiles.push(sanitized);

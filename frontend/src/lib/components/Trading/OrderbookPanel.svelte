@@ -4,7 +4,7 @@
   Displays a real-time orderbook strictly from relay market snapshots.
   We intentionally do not fall back to local env.state.eReplicas here: the relay stream is the
   canonical UI API for combined books, freshness, and multi-hub visibility. Rendering a
-  local fallback after a partial or stale stream would mislabel the screen as an aggregated
+  local reconstruction after a partial or stale stream would mislabel the screen as an aggregated
   combined book while silently dropping hubs. If the requested snapshot set is incomplete,
   we render an explicit syncing state instead of pretending the partial book is complete.
 
@@ -25,6 +25,7 @@
     encodeMarketWireMessage,
     type MarketWireResponse,
   } from '@xln/runtime/network/relay/market/wire';
+  import { normalizeMarketPairId as normalizePairId } from '@xln/runtime/network/relay/market/identifiers';
 
   export let hubId: string = '';
   export let hubIds: string[] = [];
@@ -143,25 +144,6 @@
   let canonicalPair = '1/2';
   let marketInputSignature = '';
   let normalizedSourceHubIds: string[] = [];
-
-  function normalizePairId(value: string): string | null {
-    const trimmed = String(value || '').trim();
-    const match = trimmed.match(/^(\d+)\/(\d+)$/);
-    if (match) {
-      const a = Number(match[1]);
-      const b = Number(match[2]);
-      if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0 || a === b) return null;
-      const left = Math.min(a, b);
-      const right = Math.max(a, b);
-      return `${left}/${right}`;
-    }
-    const crossMatch = trimmed.toLowerCase().match(/^cross:([a-z0-9:._-]+:\d+)\/([a-z0-9:._-]+:\d+)$/);
-    if (!crossMatch || trimmed.length > 256) return null;
-    const left = crossMatch[1] || '';
-    const right = crossMatch[2] || '';
-    if (!left || !right || left === right) return null;
-    return `cross:${left}/${right}`;
-  }
 
   function canonicalPairId(): string {
     return canonicalPair;
@@ -1197,7 +1179,7 @@
                   {#if avatarForSource(sourceId)}
                     <img src={avatarForSource(sourceId)} alt="" class="source-avatar" />
                   {:else}
-                    <span class="source-avatar-fallback">{initialsForSource(sourceId)}</span>
+                    <span class="source-avatar-placeholder">{initialsForSource(sourceId)}</span>
                   {/if}
                 </span>
               {/each}
@@ -1277,7 +1259,7 @@
                   {#if avatarForSource(sourceId)}
                     <img src={avatarForSource(sourceId)} alt="" class="source-avatar" />
                   {:else}
-                    <span class="source-avatar-fallback">{initialsForSource(sourceId)}</span>
+                    <span class="source-avatar-placeholder">{initialsForSource(sourceId)}</span>
                   {/if}
                 </span>
               {/each}
@@ -1565,7 +1547,7 @@
     object-fit: cover;
   }
 
-  .source-avatar-fallback {
+  .source-avatar-placeholder {
     color: #f3d27a;
     font-size: 9px;
     font-weight: 700;

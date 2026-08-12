@@ -93,7 +93,7 @@ test('solvency projection fails loud on malformed amounts', () => {
   expect(() => buildSolvencyProjection(frame)).toThrow('bigint-compatible amount');
 });
 
-test('SolvencyPanel reads adapter solvency-summary with injected env fallback', () => {
+test('SolvencyPanel reads adapter solvency-summary with the injected environment', () => {
   const source = readFileSync('frontend/src/lib/view/panels/solvency/SolvencyPanel.svelte', 'utf8');
   const dockRoot = readFileSync('frontend/src/lib/view/DockRoot.svelte', 'utf8');
   const architect = readFileSync('frontend/src/lib/view/panels/ArchitectPanel.svelte', 'utf8');

@@ -1,5 +1,5 @@
 /**
- * Forbid compatibility vocabulary in production source.
+ * Forbid compatibility vocabulary in all first-party source and tests.
  *
  * XLN is pre-mainnet: there is no deployed population whose data we must keep
  * reading. A word like "legacy" or "backwards compatible" in production is
@@ -23,16 +23,63 @@ type Allowance = {
   reason: string;
 };
 
-const SCAN_ROOTS = ['runtime', 'frontend/src'] as const;
-const SCAN_EXTENSIONS = ['.ts', '.svelte'] as const;
+const SCAN_ROOTS = [
+  '.github',
+  'brainvault',
+  'cli',
+  'custody',
+  'debates',
+  'e2e',
+  'frontend/src',
+  'jurisdictions',
+  'native',
+  'ops',
+  'packages',
+  'release',
+  'runtime',
+  'scripts',
+  'tests',
+  'tools',
+  'ui/src',
+] as const;
+const SCAN_EXTENSIONS = [
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.cjs',
+  '.mjs',
+  '.svelte',
+  '.sol',
+  '.sh',
+  '.py',
+  '.json',
+  '.jsonc',
+  '.yml',
+  '.yaml',
+] as const;
 const SKIP_PATH_FRAGMENTS = [
-  '/__tests__/',
   '/generated/',
   '/node_modules/',
+  '/artifacts/',
+  '/typechain/',
+  '/cache/',
+  '/dist/',
+  '/build/',
+  '/target/',
+  '/forge-out/',
+  '/build-tron/',
+  '/jurisdictions/lib/',
+  '/static/',
+  '/packages/npm/xlnfinance/app/',
+  // Immutable historical evidence records the names that existed at release
+  // time. It is never decoded as live product configuration.
+  '/docs/releases/data/',
+  '/audits/evidence/',
   // This checker and its siblings necessarily name the words they forbid.
   'runtime/scripts/checks/policy/check-no-legacy.ts',
-  'runtime/scripts/checks/policy/check-no-pre-mainnet-legacy.ts',
   'runtime/scripts/checks/architecture/check-canonical-vocabulary.ts',
+  'runtime/scripts/checks/consensus/check-canonical-identity-scan.ts',
   'runtime/scripts/checks/consensus/check-failure-taxonomy-scan.ts',
   'runtime/scripts/checks/contracts/check-onchain-hanko-ast.ts',
   'runtime/scripts/checks/consensus/check-consensus-hanko-scan.ts',
@@ -41,6 +88,7 @@ const SKIP_PATH_FRAGMENTS = [
 const FORBIDDEN = [
   /legacy/i,
   /deprecated/i,
+  /fallback/i,
   /backward\s?compat/i,
   /backwards\s?compat/i,
   /compatibility alias/i,
@@ -52,33 +100,38 @@ const FORBIDDEN = [
   // Anything kept *for* compatibility is kept for no live reason.
   /(?:kept|retained|preserved) for [a-z ]*compat/i,
   /for (?:caller|callsite|call-site|consumer|client) compat/i,
+  // A numbered in-house domain or API implies a retained predecessor. There
+  // is one canonical producer/reader; testnet cutovers replace it atomically.
+  /xln:[^'"\s]+:v[2-9]\b/i,
+  /\b(?:const|function|class|interface|type)\s+\w+(?:V|v)[2-9]\b/,
+  /['"`][^'"`\n]*\/v[2-9](?:\/|[?'"`])/i,
+  // Retired pre-mainnet surfaces are checked here too so compatibility has
+  // one owner and one gate.
+  /\bprocessJBlockEvents\b/,
+  /\bevms\s*:/,
+  /\.evms\b/,
 ] as const;
 
 const ALLOWLIST: readonly Allowance[] = [
+  {
+    file: 'frontend/svelte.config.js',
+    match: "fallback: 'index.html'",
+    reason: 'Exact Svelte adapter-static option name for the SPA shell output.',
+  },
+  {
+    file: 'runtime/__tests__/development/frontend/frontend-check-output.test.ts',
+    match: "fallback: 'index.html'",
+    reason: 'Pins the exact required Svelte adapter-static option above.',
+  },
   {
     file: 'runtime/jurisdiction/adapter/browservm/browservm-provider.ts',
     match: 'createLegacyTx',
     reason: 'Third-party @ethereumjs/tx export name for pre-EIP-2718 transactions.',
   },
   {
-    file: 'runtime/entity/profile/index.ts',
-    match: 'assertNoLegacyProfileFields',
-    reason: 'Enforcement: rejects pre-canonical profile fields rather than reading them.',
-  },
-  {
-    file: 'runtime/account/crypto.ts',
-    match: 'DEPRECATED_SIGNER_PREFIX',
-    reason: 'Enforcement: rejection error code for non-numeric signer ids.',
-  },
-  {
-    file: 'frontend/src/lib/security/vaultProtection.ts',
-    match: 'legacyKeyId',
-    reason: 'BrainVault V1 key derivation; the V1 vault format is a supported protocol input.',
-  },
-  {
-    file: 'frontend/src/lib/components/Landing/content.ts',
-    match: 'Legacy',
-    reason: 'Marketing copy about incumbent payment rails, not a code path.',
+    file: 'jurisdictions/scripts/verify/verify-public-stack.ts',
+    match: 'https://sourcify.dev/server/v2/',
+    reason: 'Sourcify owns and requires this external verification API route.',
   },
 ];
 
@@ -98,7 +151,8 @@ let scanned = 0;
 
 for (const root of SCAN_ROOTS) {
   for (const path of listFiles(root)) {
-    if (SKIP_PATH_FRAGMENTS.some(fragment => path.includes(fragment))) continue;
+    const rootedPath = `/${path.replace(/^\/+/, '')}`;
+    if (SKIP_PATH_FRAGMENTS.some(fragment => rootedPath.includes(fragment))) continue;
     scanned += 1;
     const lines = readFileSync(path, 'utf8').split('\n');
     lines.forEach((line, index) => {
@@ -111,7 +165,7 @@ for (const root of SCAN_ROOTS) {
 
 if (violations.length > 0) {
   throw new Error(
-    'NO_LEGACY_VIOLATION: production source may not carry compatibility vocabulary.\n' +
+    'NO_LEGACY_VIOLATION: first-party source may not carry compatibility vocabulary.\n' +
     'Delete the second code path, or add an exact allowlist entry with a reason.\n' +
     violations.join('\n'),
   );

@@ -23,6 +23,7 @@ import type { JInput } from '../jurisdiction/machine/input';
 import type { RuntimeSecurityIncidentIdentity } from '../protocol/errors/security-incident';
 import type { JurisdictionConfig } from '../protocol/config/jurisdiction-config';
 import type { CrontabState } from './scheduler/types';
+import type { EntityInfraContext } from '../types/entity/infra-context';
 export type { JurisdictionConfig } from '../protocol/config/jurisdiction-config';
 
 export interface ConsensusConfig {
@@ -260,8 +261,8 @@ export interface EntityState {
   jBatchState?: JBatchState;
   /** Bounded current EntityProvider nonce plus at most one committed action. */
   entityProviderActionState?: EntityProviderActionState;
-  /** Entity-consensus-certified public board key manifest; never contains private material. */
-  profileEncryptionManifest?: import('../protocol/htlc/validator-encryption').ValidatorEncryptionManifest;
+  /** One Entity-wide X25519 public key. The private key is Runtime infrastructure only. */
+  entityEncryptionPublicKey: string;
 
   // Public entity-owned profile fields.
   // These are part of consensus state and are the source of truth for gossip.
@@ -383,6 +384,8 @@ export interface EntityFrame {
   authorityRoot: string;
   /** Proposer-chosen deterministic frame time; validators replay with this value. */
   timestamp: number;
+  /** Exact proposer-observed public infrastructure used for deterministic replay. */
+  entityContext: EntityInfraContext;
   txs: EntityTx[];
   /**
    * Deterministic activity produced while replaying `txs`.
@@ -537,12 +540,6 @@ export interface EntityCandidate {
 export interface EntityReplica {
   entityId: string;
   signerId: string;
-  /**
-   * Validator-local X25519 identity. The signed public-key manifest is Entity
-   * consensus state; this derived keypair belongs to one validator replica and
-   * must never enter an Entity frame, State root, or remote replica snapshot.
-  */
-  entityEncPubKey: string;
   state: EntityState;
   mempool: EntityTx[];
   proposal?: EntityFrame;

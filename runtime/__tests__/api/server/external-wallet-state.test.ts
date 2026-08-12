@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { deriveEntityEncryptionPublicKey, provisionEntityEncryptionKey } from '../../../entity/auth/crypto';
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../../../jurisdiction/machine/event-observation';
 import { createEntityFrameHash } from '../../../entity/consensus/frame';
-import { applyJEventRange, type LegacyJEventInput } from '../../helpers/j-history';
+import { applyJEventRange, type TestJEventRangeInput } from '../../helpers/j-history';
 import { buildJEventsRuntimeInput } from '../../../jurisdiction/adapter/watcher';
 import {
   applyRuntimeInput,
@@ -16,6 +17,7 @@ import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../../../st
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
+import { hexlify } from 'ethers';
 
 const TOKEN = '0x2222222222222222222222222222222222222222';
 const SPENDER = '0x3333333333333333333333333333333333333333';
@@ -62,6 +64,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): JReplica =
 
 const makeState = (entityId: string, signerId: string): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
@@ -104,7 +107,7 @@ const buildSignedInput = (
   entityId: string,
   signerId: string,
   event: JurisdictionEvent,
-): LegacyJEventInput => ({
+): TestJEventRangeInput => ({
   from: signerId,
   event,
   events: [event],
@@ -264,12 +267,16 @@ describe('external wallet observed state', () => {
     const source = installJurisdiction(env);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
+    const entityEncryptionPrivateKey = hexlify(deriveSignerKeySync(seed, 'entity-encryption'));
+    const entityEncryptionPublicKey = deriveEntityEncryptionPublicKey(entityEncryptionPrivateKey, entityId);
+    provisionEntityEncryptionKey(env, entityId, entityEncryptionPrivateKey);
+    const seededState = makeState(entityId, signerId);
+    seededState.entityEncryptionPublicKey = entityEncryptionPublicKey;
     const seededReplica: EntityReplica = {
       entityId,
       signerId,
-      entityEncPubKey: '',
       isProposer: true,
-      state: makeState(entityId, signerId),
+      state: seededState,
       mempool: [],
       hankoWitness: new Map(),
     };

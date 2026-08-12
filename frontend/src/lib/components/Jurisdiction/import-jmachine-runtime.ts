@@ -120,14 +120,14 @@ export const buildJMachineImportRuntimeInput = (detail: JMachineCreateDetail): R
 const readImportedContracts = (
   env: RuntimeReplica,
   name: string,
-  fallback?: JMachineConfig['contracts'],
+  configuredContracts?: JMachineConfig['contracts'],
 ): JMachineConfig['contracts'] | undefined => {
   const imported = env.state.jReplicas?.get?.(name);
   const contracts = {
-    depository: String(imported?.contracts?.depository || fallback?.depository || ''),
-    entityProvider: String(imported?.contracts?.entityProvider || fallback?.entityProvider || ''),
-    account: String(imported?.contracts?.account || fallback?.account || ''),
-    deltaTransformer: String(imported?.contracts?.deltaTransformer || fallback?.deltaTransformer || ''),
+    depository: String(imported?.contracts?.depository || configuredContracts?.depository || ''),
+    entityProvider: String(imported?.contracts?.entityProvider || configuredContracts?.entityProvider || ''),
+    account: String(imported?.contracts?.account || configuredContracts?.account || ''),
+    deltaTransformer: String(imported?.contracts?.deltaTransformer || configuredContracts?.deltaTransformer || ''),
   };
   if (!contracts.depository && !contracts.entityProvider && !contracts.account && !contracts.deltaTransformer) return undefined;
   return {

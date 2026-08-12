@@ -534,6 +534,7 @@ const verifySettlementHanko = async (
     {
       ...(boardHash ? { registeredBoardHash: boardHash } : {}),
       allowPreviousBoard,
+      observerState: entityState,
     },
   );
   if (!verified.valid || verified.entityId?.toLowerCase() !== entityId.toLowerCase()) {

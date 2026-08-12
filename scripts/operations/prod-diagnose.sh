@@ -179,7 +179,7 @@ check_jurisdictions() {
       const name = String(item.name || key || "").toLowerCase();
       return Number(item.chainId ?? item.chainID) === chainId && namePattern.test(name);
     });
-    const testnetOk = hasChain(31337, /testnet|arrakis|wakanda/);
+    const testnetOk = hasChain(31337, /testnet|arrakis/);
     const tronOk = hasChain(31338, /tron|rpc2/);
     process.exit(testnetOk && tronOk ? 0 : 1);
   ' "$file"; then

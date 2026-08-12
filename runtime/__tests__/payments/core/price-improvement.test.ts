@@ -118,7 +118,6 @@ function makeAccountMachine(offer: SwapOffer): AccountReplica {
       ]),
       locks: new Map(),
       swapOffers: new Map([[offer.offerId, offer]]),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
@@ -526,7 +525,7 @@ describe('price improvement', () => {
     });
 
     test('handleSwapResolve rejects non-zero fill without exact execution amounts', async () => {
-      const offerId = 'legacy-fill-offer';
+      const offerId = 'retired-fill-offer';
       const giveAmount = 3n * LOT_SCALE;
       const wantAmount = ticksLotsToWei(8700n);
       const offer = committedOffer({

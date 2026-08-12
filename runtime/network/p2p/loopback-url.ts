@@ -26,9 +26,9 @@ export const normalizeLoopbackUrl = (value: string, preferredHost = 'localhost')
   }
 };
 
-export const toPublicRpcUrl = (value: string, fallback = '/rpc'): string => {
+export const toPublicRpcUrl = (value: string, defaultValue = '/rpc'): string => {
   const raw = String(value || '').trim();
-  if (!raw) return fallback;
+  if (!raw) return defaultValue;
   if (raw.startsWith('/')) return raw;
-  return isLoopbackUrl(raw) ? fallback : raw;
+  return isLoopbackUrl(raw) ? defaultValue : raw;
 };

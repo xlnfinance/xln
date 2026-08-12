@@ -383,17 +383,17 @@
       vault?.signers?.[activeSignerIndex]
       || vault?.signers?.[0]
       || null;
-    const fallbackEntityId = String(activeSigner?.entityId || '').trim().toLowerCase();
-    const fallbackSignerId = String(activeSigner?.address || '').trim().toLowerCase();
-    if (!fallbackEntityId || !fallbackSignerId) return;
+    const restoredEntityId = String(activeSigner?.entityId || '').trim().toLowerCase();
+    const restoredSignerId = String(activeSigner?.address || '').trim().toLowerCase();
+    if (!restoredEntityId || !restoredSignerId) return;
 
     // Runtime restore can hydrate signer metadata before env-derived replica selection catches up.
     // Seeding the visible entity from signer metadata avoids booting into an empty shell after
     // device wipe + watchtower restore while still converging to the same replica once env sync finishes.
     viewMode = 'entity';
-    selectedEntityId = fallbackEntityId;
-    selectedSignerId = fallbackSignerId;
-    setRuntimeViewActiveEntityId(fallbackEntityId);
+    selectedEntityId = restoredEntityId;
+    selectedSignerId = restoredSignerId;
+    setRuntimeViewActiveEntityId(restoredEntityId);
   });
 
   // Clear entity/account if jurisdiction filter no longer matches

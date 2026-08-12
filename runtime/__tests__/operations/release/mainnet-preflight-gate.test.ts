@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { MAINNET_GATE } from '../../../scripts/release/mainnet-gate-constants';
 import {
+  assertMainnetFeatureReadiness,
   buildMainnetPreflightSteps,
   parseMainnetPreflightArgs,
 } from '../../../scripts/release/run-mainnet-preflight-gate';
@@ -29,6 +30,21 @@ test('mainnet preflight builds money, recovery, health, and full e2e evidence by
   expect(commands).toContain('bun run test:e2e:full');
   expect(commands).toContain('bun run prod:health:capped-testnet');
   expect(commands.some(command => command.includes('derive-delta-property.test.ts'))).toBe(true);
+});
+
+test('mainnet release remains fail-closed while financial enforcement evidence is missing', () => {
+  expect(assertMainnetFeatureReadiness).toThrow('CAPPED_FINANCIAL_RISK_ENFORCEMENT_MISSING');
+  expect(assertMainnetFeatureReadiness).toThrow('LENDING_BILATERAL_COVENANT_MISSING');
+  expect(assertMainnetFeatureReadiness).toThrow('LENDING_ONCHAIN_MATURITY_DEFAULT_ENFORCEMENT_MISSING');
+});
+
+test('canonical mainnet package gate always includes soak and scale evidence', () => {
+  const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
+    scripts?: Record<string, string>;
+  };
+  expect(pkg.scripts?.['gate:mainnet']).toBe(
+    'bun runtime/scripts/release/run-mainnet-preflight-gate.ts --include-soak --include-scale',
+  );
 });
 
 test('mainnet preflight opts into one-hour soak and bounded radapter scale evidence', () => {

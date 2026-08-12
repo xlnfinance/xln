@@ -770,14 +770,6 @@ export async function gotoApp(
           const debugRoot = target.__xln;
           return debugRoot?.liveRuntimeSnapshot || debugRoot?.env || null;
         },
-        set(value: unknown) {
-          Reflect.defineProperty(target, '__xlnLegacyIsolatedEnv', {
-            configurable: true,
-            enumerable: false,
-            value,
-            writable: true,
-          });
-        },
       });
       localStorage.setItem('xln-api-base-url', configuredApiBaseUrl);
     } catch {

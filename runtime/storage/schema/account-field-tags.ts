@@ -13,7 +13,7 @@ export const STORAGE_ACCOUNT_FIELD_TAG = {
   status: 5, mempool: 6, currentFrame: 7,
   'state.deltas': 8, 'state.locks': 9, 'state.swapOffers': 10,
   'state.pulls': 11, 'state.subcontracts': 12, 'state.lendingIntents': 13,
-  'state.globalCreditLimits': 14,
+  // Tag 14 belonged to retired cross-token credit state. Never reuse persisted tags.
   currentHeight: 15, pendingFrame: 16, pendingSignatures: 17,
   pendingAccountInput: 18, lastOutboundFrameAck: 20,
   pendingForwards: 21, hankoSignature: 22, rollbackCount: 23, lastRollbackFrameHash: 24,

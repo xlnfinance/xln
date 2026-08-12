@@ -10,7 +10,7 @@ export const isRuntimePerfProfileEnabled = (...scopes: string[]): boolean =>
   scopes.some((scope) => readRuntimeEnv(scope) === '1') ||
   readRuntimeEnv('XLN_RUNTIME_PROCESS_PROFILE') === '1';
 
-export const readRuntimePerfSlowMs = (scope: string, fallbackMs: number): number => {
-  const configured = Number(readRuntimeEnv(scope) ?? fallbackMs);
-  return Number.isFinite(configured) && configured >= 0 ? configured : fallbackMs;
+export const readRuntimePerfSlowMs = (scope: string, defaultMs: number): number => {
+  const configured = Number(readRuntimeEnv(scope) ?? defaultMs);
+  return Number.isFinite(configured) && configured >= 0 ? configured : defaultMs;
 };

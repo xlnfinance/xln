@@ -43,7 +43,7 @@ test('JMachine persisted metadata is deterministic and preserves existing create
   expect(existing.createdAt).toBe(99);
 });
 
-test('JMachine config normalization does not depend on wall-clock fallback', () => {
+test('JMachine config normalization does not depend on a wall-clock substitute', () => {
   const config = normalizeJMachineConfig({
     name: 'remote-hub',
     mode: 'rpc',

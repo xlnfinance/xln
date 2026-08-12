@@ -110,22 +110,13 @@ export function buildHubDiscoveryRemoteHubsFromRuntimes(
 ): HubDiscoveryRemoteHub[] {
   return Array.from(runtimes).flatMap((runtime): HubDiscoveryRemoteHub[] => {
     if (runtime.type !== 'remote') return [];
-    const hubEntities = runtime.hubEntities?.length
-      ? runtime.hubEntities
-      : runtime.hubEntityId
-        ? [{
-            entityId: runtime.hubEntityId,
-            label: runtime.hubName || runtime.label,
-            height: 0,
-            ...(runtime.hubJurisdiction ? { jurisdiction: runtime.hubJurisdiction } : {}),
-          }]
-        : [];
+    const hubEntities = runtime.hubEntities ?? [];
     return hubEntities.map((hub) => ({
       entityId: hub.entityId,
-      name: hub.label || runtime.hubName || runtime.label,
+      name: hub.label || runtime.label,
       runtimeId: runtime.id,
       wsUrl: runtime.wsUrl ?? null,
-      ...(hub.jurisdiction ?? runtime.hubJurisdiction ? { jurisdiction: hub.jurisdiction ?? runtime.hubJurisdiction } : {}),
+      ...(hub.jurisdiction ? { jurisdiction: hub.jurisdiction } : {}),
       height: hub.height,
       lastSeen: runtime.lastSynced ?? hub.height,
     }));

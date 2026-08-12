@@ -5,6 +5,9 @@
 Mission: Fintech-grade, deterministic. J/E/A trilayer correctness before features. Pure functions only.
 ALWAYS: `bun run check` before push/merge/release. Test in browser F12 console. Never swallow errors.
 
+The single normative TypeScript and state-machine safety standard is
+[`docs/fints.md`](docs/fints.md). Do not duplicate or weaken its rules in other guides.
+
 ## CANONICAL RUNTIME → ENTITY → ACCOUNT CASCADE
 
 This vocabulary is a protocol invariant, not a stylistic preference:

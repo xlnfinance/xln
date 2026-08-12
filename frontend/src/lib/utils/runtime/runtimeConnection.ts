@@ -37,22 +37,8 @@ export type RemoteRuntimeRequest = {
 };
 
 const RUNTIME_PARAM_KEYS = [
-  'runtime',
-  'adapter',
-  'ws',
-  'runtimeWs',
-  'token',
-  'authKey',
-  'key',
-  'auth',
-  'runtimeList',
-  'runtime-list',
-  'runtimeImport',
   REMOTE_RUNTIME_IMPORT_HASH_PARAM,
   REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
-  'runtimes',
-  'remote-runtimes',
-  'xlnRemoteRuntimes',
 ];
 const PROJECTION_RUNTIME_CONNECT_TIMEOUT_MS = 6_000;
 const PROJECTION_RUNTIME_REQUEST_TIMEOUT_MS = 5_000;
@@ -172,16 +158,7 @@ export function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
 }
 
 export function runtimeImportPayloadFromParams(params: URLSearchParams): string {
-  return String(
-    params.get('runtimeList') ||
-    params.get('runtime-list') ||
-    params.get('runtimeImport') ||
-    params.get(REMOTE_RUNTIME_IMPORT_HASH_PARAM) ||
-    params.get('runtimes') ||
-    params.get('remote-runtimes') ||
-    params.get('xlnRemoteRuntimes') ||
-    '',
-  ).trim();
+  return String(params.get(REMOTE_RUNTIME_IMPORT_HASH_PARAM) || '').trim();
 }
 
 export function runtimeImportSourceFromParams(params: URLSearchParams): string {

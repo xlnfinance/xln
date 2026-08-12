@@ -12,7 +12,7 @@ import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { JEventApplyResult } from '../../entity/tx/j-events-types';
 
-export type LegacyJEventInput = {
+export type TestJEventRangeInput = {
   from: string;
   jurisdictionRef: string;
   event: JurisdictionEvent;
@@ -45,7 +45,7 @@ const signRange = (
 
 export const buildJEventRangeData = (
   state: EntityState,
-  data: LegacyJEventInput,
+  data: TestJEventRangeInput,
   env: RuntimeReplica,
 ): JurisdictionEventData => {
   const events = (data.events ?? [data.event]).map((event, index) => ({
@@ -93,6 +93,6 @@ export const buildJEventRangeData = (
 
 export const applyJEventRange = async (
   state: EntityState,
-  data: LegacyJEventInput,
+  data: TestJEventRangeInput,
   env: RuntimeReplica,
 ): Promise<JEventApplyResult> => applyJEvent(state, buildJEventRangeData(state, data, env), env);

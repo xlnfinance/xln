@@ -592,7 +592,7 @@ describe('external wallet snapshot admission bounds', () => {
     expect(calls).toEqual({ catalog: 0, source: 0, snapshot: 0 });
   });
 
-  test('applies the same cap and validation to catalog fallback', async () => {
+  test('applies the same cap and validation to the default catalog', async () => {
     const catalog = Array.from(
       { length: MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES + 1 },
       (_, index) => ({

@@ -27,33 +27,33 @@ export const handleResolveHtlcLockEntityTx = (
   entityTx: EntityTxOf<'resolveHtlcLock'>,
   mutableFrameState = false,
 ): HtlcEntityTxResult => {
+  const { counterpartyEntityId, lockId, secret } = entityTx.data;
+  const normalizedCounterparty = findAccountKey(entityState, counterpartyEntityId);
+  if (!normalizedCounterparty) {
+    throw new Error(`HTLC_RESOLVE_ACCOUNT_MISSING:${counterpartyEntityId}`);
+  }
+  if (!HEX_32_RE.test(lockId)) {
+    throw new Error(`HTLC_RESOLVE_LOCK_ID_INVALID:${lockId}`);
+  }
+  let expectedHashlock: string;
+  try {
+    expectedHashlock = hashHtlcSecret(secret);
+  } catch (error) {
+    throw new Error('HTLC_RESOLVE_SECRET_INVALID', { cause: error });
+  }
+  const account = entityState.accounts.get(normalizedCounterparty);
+  const lock = account?.state.locks?.get(lockId);
+  if (!lock) {
+    throw new Error(`HTLC_RESOLVE_LOCK_MISSING:${normalizedCounterparty}:${lockId}`);
+  }
+  if (lock.hashlock !== expectedHashlock) {
+    throw new Error(`HTLC_RESOLVE_HASHLOCK_MISMATCH:${lockId}`);
+  }
+
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
-  const { counterpartyEntityId, lockId, secret } = entityTx.data;
-  const normalizedCounterparty = findAccountKey(newState, counterpartyEntityId);
-  if (!normalizedCounterparty) {
-    addMessage(newState, `❌ HTLC resolve failed: no account with ${counterpartyEntityId}`);
-    return { newState, outputs, accountTxs };
-  }
-  if (!HEX_32_RE.test(lockId)) {
-    addMessage(newState, '❌ HTLC resolve failed: invalid lock id');
-    return { newState, outputs, accountTxs };
-  }
-  let expectedHashlock: string | null = null;
-  try {
-    expectedHashlock = hashHtlcSecret(secret);
-  } catch {
-    addMessage(newState, '❌ HTLC resolve failed: invalid secret');
-    return { newState, outputs, accountTxs };
-  }
-  const account = newState.accounts.get(normalizedCounterparty);
-  const lock = account?.state.locks?.get(lockId);
-  if (lock && lock.hashlock !== expectedHashlock) {
-    addMessage(newState, '❌ HTLC resolve failed: secret/hashlock mismatch');
-    return { newState, outputs, accountTxs };
-  }
-  if (lock) persistVerifiedHtlcSecret(newState, normalizedCounterparty, lock, secret);
+  persistVerifiedHtlcSecret(newState, normalizedCounterparty, lock, secret);
   accountTxs.push({
     accountId: normalizedCounterparty,
     tx: {

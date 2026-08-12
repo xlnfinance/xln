@@ -91,52 +91,14 @@ const rejectEmptyAccountInput = (context: AccountInputPhaseContext): never => {
   throw new Error(error);
 };
 
-export const applyAccountConsensusInput = async (context: AccountInputPhaseContext): Promise<AccountConsensusOutcome> => {
-  const { env, accountConsensusContext, state, input, account } = context;
-  const { counterpartyId, createdAccount, effects, options } = context;
-  const incomingAck = accountInputAck(input);
-  const incomingProposal = accountInputProposal(input);
-  const hasConsensusInput =
-    Boolean(incomingAck) ||
-    Boolean(incomingProposal) ||
-    input.kind === 'dispute' ||
-    input.kind === 'board_reseal';
-  if (!hasConsensusInput) {
-    rejectEmptyAccountInput(context);
-  }
-
-  const pendingBeforeTxs = account.pendingFrame?.accountTxs.map(tx => tx.type) ?? [];
-  const inputFrameTxs = incomingProposal?.frame.accountTxs.map(tx => tx.type) ?? [];
-  accountHandlerLog.debug('frame.process', {
-    from: shortId(input.fromEntityId),
-    pending: account.pendingFrame?.height ?? null,
-  });
-  const boardHash = resolveObserverCertifiedBoardHash(
-    state,
-    getCertifiedBoardNodeStore(env),
-    input.fromEntityId,
-  );
-  const result = await applyAccountInput(accountConsensusContext, account, input, {
-    entityTimestamp: state.timestamp,
-    finalizedJHeight: state.lastFinalizedJHeight ?? 0,
-    owningEntityIsHub: Boolean(state.hubRebalanceConfig),
-    verifyHanko: (hanko, hash, expectedEntityId, authority) =>
-      verifyHankoForHash(hanko, hash, expectedEntityId, env, authority),
-    ...(boardHash ? { counterpartyCertifiedBoardHash: boardHash } : {}),
-  });
-  context.checkpointProfile('consensus');
-  logCrossFillAckResult(context, result, pendingBeforeTxs, inputFrameTxs);
-
+const finishAccountConsensusInput = async (
+  context: AccountInputPhaseContext,
+  result: Awaited<ReturnType<typeof applyAccountInput>>,
+): Promise<AccountConsensusOutcome> => {
+  const { env, state, input, account, counterpartyId, createdAccount, effects, options } = context;
   if (result.success) {
     const response = await applySuccessfulAccountInput({
-      env,
-      state,
-      input,
-      account,
-      counterpartyId,
-      createdAccount,
-      result,
-      effects,
+      env, state, input, account, counterpartyId, createdAccount, result, effects,
       ...(options ? { options } : {}),
       checkpointProfile: context.checkpointProfile,
     });
@@ -150,12 +112,7 @@ export const applyAccountConsensusInput = async (context: AccountInputPhaseConte
   }
   if (result.disputeRequired) {
     const unsafe = await handleUnsafeAccountFrame({
-      env,
-      state,
-      input,
-      account,
-      counterpartyId,
-      createdAccount,
+      env, state, input, account, counterpartyId, createdAccount,
       dispute: result.disputeRequired,
       effects,
     });
@@ -189,4 +146,44 @@ export const applyAccountConsensusInput = async (context: AccountInputPhaseConte
   });
   addMessage(state, `❌ ${result.error}`);
   throw new Error(`FRAME_CONSENSUS_FAILED: ${result.error || 'unknown'}`);
+};
+
+export const applyAccountConsensusInput = async (context: AccountInputPhaseContext): Promise<AccountConsensusOutcome> => {
+  const { env, accountConsensusContext, state, input, account } = context;
+  const incomingAck = accountInputAck(input);
+  const incomingProposal = accountInputProposal(input);
+  const hasConsensusInput =
+    Boolean(incomingAck) ||
+    Boolean(incomingProposal) ||
+    input.kind === 'dispute' ||
+    input.kind === 'board_reseal';
+  if (!hasConsensusInput) {
+    rejectEmptyAccountInput(context);
+  }
+
+  const pendingBeforeTxs = account.pendingFrame?.accountTxs.map(tx => tx.type) ?? [];
+  const inputFrameTxs = incomingProposal?.frame.accountTxs.map(tx => tx.type) ?? [];
+  accountHandlerLog.debug('frame.process', {
+    from: shortId(input.fromEntityId),
+    pending: account.pendingFrame?.height ?? null,
+  });
+  const boardHash = resolveObserverCertifiedBoardHash(
+    state,
+    getCertifiedBoardNodeStore(env),
+    input.fromEntityId,
+  );
+  const result = await applyAccountInput(accountConsensusContext, account, input, {
+    entityTimestamp: state.timestamp,
+    finalizedJHeight: state.lastFinalizedJHeight ?? 0,
+    owningEntityIsHub: Boolean(state.hubRebalanceConfig),
+    verifyHanko: (hanko, hash, expectedEntityId, authority) =>
+      verifyHankoForHash(hanko, hash, expectedEntityId, env, {
+        ...authority,
+        observerState: state,
+      }),
+    ...(boardHash ? { counterpartyCertifiedBoardHash: boardHash } : {}),
+  });
+  context.checkpointProfile('consensus');
+  logCrossFillAckResult(context, result, pendingBeforeTxs, inputFrameTxs);
+  return finishAccountConsensusInput(context, result);
 };

@@ -182,7 +182,7 @@ describe('relay direct entity delivery', () => {
     });
   });
 
-  test('falls back instead of claiming delivery for a stale relay client socket', () => {
+  test('fails over instead of claiming delivery for a stale relay client socket', () => {
     const sourceSeed = 'relay-direct-stale-source';
     const targetSeed = 'relay-direct-stale-target';
     const sourceRuntimeId = deriveSignerAddressSync(sourceSeed, '1').toLowerCase();
@@ -216,7 +216,7 @@ describe('relay direct entity delivery', () => {
 
     expect(delivery).toMatchObject({
       outcome: 'deferred',
-      code: 'ROUTE_DIRECT_MISS_FALLBACK',
+      code: 'ROUTE_DIRECT_MISS_FAILOVER',
       retryable: true,
       fatal: false,
       terminal: false,
@@ -226,10 +226,10 @@ describe('relay direct entity delivery', () => {
       event: 'delivery',
       from: sourceRuntimeId,
       to: targetRuntimeId,
-      status: 'direct-miss-fallback',
+      status: 'direct-miss-failover',
       delivery: {
         outcome: 'deferred',
-        code: 'DELIVERY_DIRECT_MISS_FALLBACK',
+        code: 'DELIVERY_DIRECT_MISS_FAILOVER',
         retryable: true,
         fatal: false,
         terminal: false,
@@ -237,7 +237,7 @@ describe('relay direct entity delivery', () => {
     });
   });
 
-  test('falls back when direct relay socket send reports zero bytes', () => {
+  test('fails over when direct relay socket send reports zero bytes', () => {
     const sourceSeed = 'relay-direct-send-false-source';
     const targetSeed = 'relay-direct-send-false-target';
     const sourceRuntimeId = deriveSignerAddressSync(sourceSeed, '1').toLowerCase();
@@ -330,7 +330,7 @@ describe('relay direct entity delivery', () => {
     expect(store.debugEvents.some(event => event.status === 'send-failed')).toBe(false);
   });
 
-  test('falls back with typed delivery event when direct relay socket send throws', () => {
+  test('fails over with typed delivery event when direct relay socket send throws', () => {
     const sourceSeed = 'relay-direct-send-throw-source';
     const targetSeed = 'relay-direct-send-throw-target';
     const sourceRuntimeId = deriveSignerAddressSync(sourceSeed, '1').toLowerCase();
@@ -394,7 +394,7 @@ describe('relay direct entity delivery', () => {
     });
   });
 
-  test('falls back with typed delivery event when the target runtime encryption key is absent', () => {
+  test('fails over with typed delivery event when the target runtime encryption key is absent', () => {
     const sourceSeed = 'relay-direct-missing-target-source';
     const sourceRuntimeId = deriveSignerAddressSync(sourceSeed, '1').toLowerCase();
     const targetRuntimeId = deriveSignerAddressSync('relay-direct-missing-target', '1').toLowerCase();
@@ -435,7 +435,7 @@ describe('relay direct entity delivery', () => {
       event: 'delivery',
       from: sourceRuntimeId,
       to: targetRuntimeId,
-      status: 'direct-miss-fallback',
+      status: 'direct-miss-failover',
       reason: 'ROUTE_DIRECT_TARGET_KEY_MISSING',
       delivery: {
         outcome: 'deferred',
@@ -452,7 +452,7 @@ describe('relay direct entity delivery', () => {
     });
   });
 
-  test('falls back when the source runtime encryption key is absent', () => {
+  test('fails over when the source runtime encryption key is absent', () => {
     const sourceRuntimeId = deriveSignerAddressSync('relay-direct-missing-source', '1').toLowerCase();
     const targetSeed = 'relay-direct-missing-source-target';
     const targetRuntimeId = deriveSignerAddressSync(targetSeed, '1').toLowerCase();
@@ -492,7 +492,7 @@ describe('relay direct entity delivery', () => {
       event: 'delivery',
       from: sourceRuntimeId,
       to: targetRuntimeId,
-      status: 'direct-miss-fallback',
+      status: 'direct-miss-failover',
       reason: 'ROUTE_DIRECT_SOURCE_KEY_MISSING',
       delivery: {
         outcome: 'deferred',

@@ -52,14 +52,6 @@ const recordSwapResolveHistory = (
         ? { comment: data.comment }
         : {}),
     },
-    {
-      giveTokenId: resolve.offer.giveTokenId,
-      giveAmount: resolve.canonicalGiveAmount,
-      wantTokenId: resolve.offer.wantTokenId,
-      wantAmount: resolve.canonicalWantAmount,
-      priceTicks: resolve.canonicalPriceTicks,
-      createdHeight: resolve.offer.createdHeight,
-    },
   );
   if (closeOrder) recordSwapClosedLifecycle(account, resolve.offerId);
 };

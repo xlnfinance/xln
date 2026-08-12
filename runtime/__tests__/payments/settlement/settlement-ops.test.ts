@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { compileOps } from '../../../protocol/settlement/operations';
 import type { SettlementOp } from '../../../types/account';
 
-test('compileOps rejects unknown settlement operation types without console fallback', () => {
+test('compileOps rejects unknown settlement operation types without console substitution', () => {
   const originalWarn = console.warn;
   let warned = false;
   console.warn = () => {
@@ -87,4 +87,9 @@ test('compileOps rejects settlements the Solidity ABI or Account contract cannot
     Array.from({ length: 33 }, (_, tokenId) => ({ type: 'forgive' as const, tokenId })),
     true,
   )).toThrow('SETTLEMENT_FORGIVENESS_LIMIT_EXCEEDED:33:32');
+
+  expect(() => compileOps([
+    { type: 'forgive', tokenId: 7 },
+    { type: 'forgive', tokenId: 7 },
+  ], true)).toThrow('SETTLEMENT_DUPLICATE_FORGIVENESS_TOKEN:7');
 });

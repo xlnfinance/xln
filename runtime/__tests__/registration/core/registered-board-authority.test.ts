@@ -9,10 +9,10 @@ import {
   signDigestBytesWithPrivateKey,
 } from '../../../account/crypto';
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../../../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../../../entity/auth/crypto';
 import { applyEntityInput, selectProposableEntityTxs } from '../../../entity/consensus';
 import {
   buildConsensusOutputOriginForState,
+  assertCertifiedEntityOutputWitnesses,
   hashCertifiedEntityOutputSemantic,
   normalizeConsensusOutputBoardAuthority,
   resolveConsensusOutputBoardAuthority,
@@ -41,7 +41,6 @@ import {
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
 import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../../../entity/profile/profile-signing';
 import type { Profile } from '../../../entity/profile';
-import { computeValidatorEncryptionAttestationDigest } from '../../../protocol/htlc/validator-encryption';
 import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/event-observation';
 import { getJEventJurisdictionRef } from '../../../jurisdiction/machine/event-observation';
 import { foldJHistoryRoot, EMPTY_J_HISTORY_ROOT } from '../../../jurisdiction/machine/history-consensus';
@@ -56,7 +55,7 @@ import type { ConsensusOutputOrigin, EntityTx } from '../../../types/entity-tx';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica, RoutedEntityInput } from '../../../runtime/types';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
-import { addr, entity, makeAccount, makeState } from '../../helpers/cross-j';
+import { addr, entity, makeAccount, makeState, provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 import { buildJEventRangeData } from '../../helpers/j-history';
 
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
@@ -241,15 +240,6 @@ const buildRegisteredProfile = async (): Promise<{
   const encryptionPublicKey = pubKeyToHex(
     deriveEncryptionKeyPair(`${hex(privateKey)}:${registeredEntityId}:profile`).publicKey,
   );
-  const attestationBody = {
-    version: 'xln:validator-encryption-key:v1' as const,
-    entityId: registeredEntityId,
-    signerId: signer,
-    signer,
-    publicKey,
-    weight: 1,
-    encryptionPublicKey,
-  };
   const config = {
     mode: 'proposer-based' as const,
     threshold: 1n,
@@ -262,11 +252,9 @@ const buildRegisteredProfile = async (): Promise<{
   const localEnv = createEmptyEnv('registered-board-authority:local');
   localEnv.runtimeSeed = 'registered-board-authority:runtime';
   registerSignerKey(localEnv, signer, privateKey);
-  const localKeys = deriveLocalEntityCryptoKeys(localEnv, registeredEntityId, signer);
   localEnv.state.eReplicas.set(`${registeredEntityId}:${signer}`, {
     entityId: registeredEntityId,
     signerId: signer,
-    entityEncPubKey: localKeys.publicKey,
     state,
     mempool: [],
     isProposer: true,
@@ -275,6 +263,7 @@ const buildRegisteredProfile = async (): Promise<{
   installEvents(localEnv, state, [event('FoundationBootstrapped', blockHash('31')), event('EntityRegistered', boardHash)]);
   const profile: Profile = {
     entityId: registeredEntityId,
+    entityEncryptionPublicKey: encryptionPublicKey,
     name: 'Registered remote',
     avatar: '', bio: '', website: '', lastUpdated: 1,
     runtimeId: signer,
@@ -289,14 +278,6 @@ const buildRegisteredProfile = async (): Promise<{
         chainId: jurisdiction.chainId,
         depositoryAddress,
         entityProviderAddress,
-      },
-      board: {
-        threshold: 1,
-        validators: [{ signer, signerId: signer, publicKey, weight: 1 }],
-        encryptionAttestations: [{
-          ...attestationBody,
-          signature: signDigest(privateKey, computeValidatorEncryptionAttestationDigest(attestationBody)),
-        }],
       },
     },
     accounts: [],
@@ -727,6 +708,7 @@ describe('registered Entity certified board authority', () => {
     const registration = event('EntityRegistered', oldBoard);
     const rotation = event('BoardActivated', newBoard, { height: 3, previousBoardHash: oldBoard });
     const baseState = makeState(registeredEntityId, signerA, jurisdiction);
+    provisionTestEntityEncryptionKey(env, registeredEntityId);
     env.state.timestamp = baseState.timestamp;
     baseState.config = oldConfig;
     baseState.prevFrameHash = blockHash('aa');
@@ -735,6 +717,7 @@ describe('registered Entity certified board authority', () => {
     certifyEventPrefix(baseState, [foundation, registration]);
     const counterpartyEntityId = generateLazyEntityId([signerC], 1n).toLowerCase();
     const counterpartyState = makeState(counterpartyEntityId, signerC, jurisdiction);
+    provisionTestEntityEncryptionKey(env, counterpartyEntityId);
     env.state.eReplicas.set(`${counterpartyEntityId}:${signerC}`, {
       entityId: counterpartyEntityId,
       signerId: signerC,
@@ -1104,6 +1087,33 @@ describe('registered Entity certified board authority', () => {
     expect((await verifyProfileSignature(profile, remoteObserverEnv(boardHash))).valid).toBe(true);
   });
 
+  test('consensus profile verification uses the exact observer root, not another replica latest root', async () => {
+    const { profile, boardHash } = await buildRegisteredProfile();
+    const env = remoteObserverEnv(boardHash);
+    const observerState = [...env.state.eReplicas.values()][0]!.state;
+    const newerObserver = makeState(entity('98'), addr('98'), jurisdiction);
+    installEvents(env, newerObserver, [
+      event('FoundationBootstrapped', blockHash('31')),
+      event('EntityRegistered', boardHash),
+      event('BoardActivated', blockHash('66'), {
+        height: 3,
+        previousBoardHash: boardHash,
+        previousBoardValidUntil: 1_700_604_800,
+      }),
+    ]);
+    env.state.eReplicas.set(`${newerObserver.entityId}:${addr('98')}`, {
+      entityId: newerObserver.entityId,
+      signerId: addr('98'),
+      entityEncPubKey: '',
+      state: newerObserver,
+      mempool: [],
+      isProposer: true,
+    } as EntityReplica);
+
+    expect((await verifyProfileSignature(profile, env)).valid).toBe(false);
+    expect((await verifyProfileSignature(profile, env, observerState)).valid).toBe(true);
+  });
+
   for (const corruption of ['missing', 'corrupt', 'cycle'] as const) {
     test(`profile verification propagates certified-board ${corruption} corruption`, async () => {
       const { profile, localEnv } = await buildRegisteredProfile();
@@ -1368,6 +1378,7 @@ describe('registered Entity certified board authority', () => {
   test('previous board verifies through nested claims at the exclusive seven-day boundary and survives restore', async () => {
     const { profile, localEnv, boardHash: previousBoardHash, privateKey } = await buildRegisteredProfile();
     const state = [...localEnv.state.eReplicas.values()][0]!.state;
+    const staleObserverState = cloneEntityState(state);
     const currentBoardHash = blockHash('66');
     const previousBoardValidUntil = 1_700_604_800;
     installEvents(localEnv, state, [event('BoardActivated', currentBoardHash, {
@@ -1437,6 +1448,80 @@ describe('registered Entity certified board authority', () => {
       parentEntityId,
       localEnv,
       { allowPreviousBoard: false },
+    )).valid).toBe(false);
+    expect((await verifyHankoForHash(
+      nestedHanko,
+      profileHash,
+      parentEntityId,
+      localEnv,
+      { allowPreviousBoard: false, observerState: staleObserverState },
+    )).valid).toBe(true);
+    expect((await verifyHankoForHash(
+      nestedHanko,
+      profileHash,
+      parentEntityId,
+      localEnv,
+      { allowPreviousBoard: false, observerState: state },
+    )).valid).toBe(false);
+
+    const observerBoundWitnesses: EntityTx[] = [{
+      type: 'accountInput',
+      data: {
+        kind: 'frame',
+        fromEntityId: registeredEntityId,
+        toEntityId: staleObserverState.entityId,
+        domain: { chainId: jurisdiction.chainId, depositoryAddress },
+        disputeConfig: { leftResponseSeconds: 1, rightResponseSeconds: 1 },
+        proposal: {
+          frame: {
+            height: 1,
+            timestamp: staleObserverState.timestamp,
+            jHeight: 0,
+            accountTxs: [],
+            prevFrameHash: blockHash('00'),
+            accountStateRoot: blockHash('01'),
+            stateHash: profileHash,
+            byLeft: true,
+            deltas: [],
+          },
+          frameHanko: hanko,
+        },
+      },
+    }];
+    state.timestamp = previousBoardValidUntil * 1_000;
+    await expect(assertCertifiedEntityOutputWitnesses(
+      observerBoundWitnesses,
+      registeredEntityId,
+      localEnv,
+      staleObserverState,
+      previousBoardHash,
+    )).resolves.toBeUndefined();
+    await expect(assertCertifiedEntityOutputWitnesses(
+      observerBoundWitnesses,
+      registeredEntityId,
+      localEnv,
+      state,
+      currentBoardHash,
+    )).rejects.toThrow('CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID');
+
+    const corruptObserver = cloneEntityState(staleObserverState);
+    corruptObserver.certifiedBoardState = {
+      ...corruptObserver.certifiedBoardState!,
+      stackKey: blockHash('ff'),
+    };
+    await expect(verifyHankoForHash(
+      nestedHanko,
+      profileHash,
+      parentEntityId,
+      localEnv,
+      { observerState: corruptObserver },
+    )).rejects.toThrow('CERTIFIED_BOARD_STACK_MISMATCH');
+    expect((await verifyHankoForHash(
+      '0x01' as import('../../../types/hanko').HankoString,
+      profileHash,
+      parentEntityId,
+      localEnv,
+      { observerState: corruptObserver },
     )).valid).toBe(false);
 
     const restored = await restoreEnvFromCheckpointSnapshot(buildRuntimeCheckpointSnapshot(localEnv), {

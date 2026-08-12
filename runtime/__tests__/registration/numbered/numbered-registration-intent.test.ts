@@ -32,6 +32,8 @@ import { getLiveJAdapter } from '../../../runtime/jurisdiction/live-jadapters';
 import { markLocalRuntimeAdapterCommandTx } from '../../../runtime/command/frontier-auth';
 import { runtimeAdapterCommandLaneId } from '../../../runtime/command/frontier';
 import { dbRootPath } from '../../../runtime/platform';
+import { canonicalEntitySeed } from '../../../runtime/registration/entity-creation';
+import { encodeNumberedRegistrationCalldata } from '../../../runtime/registration/numbered-registration-codec';
 
 const attach = (
   env: RuntimeReplica,
@@ -103,7 +105,7 @@ describe('durable numbered registration intent', () => {
         intentId: ethers.id('numbered-registration:mined-revert'),
         jurisdiction,
         payerSignerId: env.runtimeId,
-        entities: [{ name: 'reverted', validators: [env.runtimeId], threshold: 1n, localSignerId: null }],
+        entities: [{ name: 'reverted', validators: [env.runtimeId], threshold: 1n, localSignerId: null, entitySeed: null }],
       });
       const pending = await prepareNumberedRegistrationIntent(env, adapter, request, async prepared => {
         await commitRuntimeInput(env, {
@@ -178,7 +180,7 @@ describe('durable numbered registration intent', () => {
         intentId: ethers.id('numbered-registration:pending-replacement'),
         jurisdiction,
         payerSignerId: env.runtimeId,
-        entities: [{ name: 'pending', validators: [env.runtimeId], threshold: 1n, localSignerId: null }],
+        entities: [{ name: 'pending', validators: [env.runtimeId], threshold: 1n, localSignerId: null, entitySeed: null }],
       });
       const pending = await prepareNumberedRegistrationIntent(env, adapter, request, async prepared => {
         env.infrastructure ??= {};
@@ -277,7 +279,7 @@ describe('durable numbered registration intent', () => {
         intentId: ethers.id('numbered-registration:cold-replay:intent'),
         jurisdiction,
         payerSignerId: env.runtimeId,
-        entities: [{ name: 'cold-replay', validators: [proposer], threshold: 1n, localSignerId: null }],
+        entities: [{ name: 'cold-replay', validators: [proposer], threshold: 1n, localSignerId: null, entitySeed: null }],
       });
       const pending = await prepareNumberedRegistrationIntent(env, adapter, request, async prepared => {
         await commitRuntimeInput(env, {
@@ -339,8 +341,26 @@ describe('durable numbered registration intent', () => {
         intentId: ethers.id('registration-intent:one'),
         jurisdiction,
         payerSignerId: env.runtimeId,
-        entities: [{ name: 'one', validators: [proposer], threshold: 1n, localSignerId: proposer }],
+        entities: [
+          {
+            name: 'one',
+            validators: [proposer],
+            threshold: 1n,
+            localSignerId: proposer,
+            entitySeed: canonicalEntitySeed(seed),
+          },
+          {
+            name: 'payer-only',
+            validators: [env.runtimeId],
+            threshold: 1n,
+            localSignerId: null,
+            entitySeed: null,
+          },
+        ],
       });
+      expect(request.entities[0]?.entitySeed).toBe(canonicalEntitySeed(seed));
+      expect(encodeNumberedRegistrationCalldata(request))
+        .not.toContain(canonicalEntitySeed(seed).slice(2));
       const beforeFailedCommit = buildDurableRuntimeMachineSnapshot(env);
       const commitFailure = {
         commit: async () => 'rejected' as const,
@@ -372,7 +392,7 @@ describe('durable numbered registration intent', () => {
 
       const sent = await adapter.provider.broadcastTransaction(pending.rawTransaction);
       await sent.wait();
-      expect(await adapter.entityProvider.nextNumber()).toBe(3n);
+      expect(await adapter.entityProvider.nextNumber()).toBe(4n);
 
       await adapter.stopWatchingAndWait();
       const restored = createEmptyEnv(seed);
@@ -388,7 +408,7 @@ describe('durable numbered registration intent', () => {
       }
       const submitted = await submitNumberedRegistrationIntent(adapter, restoredPending);
       expect(submitted.kind).toBe('receipt');
-      expect(await adapter.entityProvider.nextNumber()).toBe(3n);
+      expect(await adapter.entityProvider.nextNumber()).toBe(4n);
 
       await processJEvents(restored);
       if (submitted.kind !== 'receipt') throw new Error('REGISTRATION_INTENT_RECEIPT_MISSING');
@@ -397,12 +417,21 @@ describe('durable numbered registration intent', () => {
         restoredPending,
         submitted,
       );
+      expect(completionTxs.map(tx => tx.type)).toEqual([
+        'importReplica',
+        'resolveNumberedRegistrationIntent',
+      ]);
+      const importTx = completionTxs[0];
+      if (importTx?.type !== 'importReplica') throw new Error('REGISTRATION_INTENT_IMPORT_TX_MISSING');
+      expect(importTx.data.entitySeed).toBe(canonicalEntitySeed(seed));
       await commitRuntimeInput(restored, { runtimeTxs: completionTxs, entityInputs: [] });
       const completed = getNumberedRegistrationRecord(restored, request.intentId);
       if (!completed || completed.status !== 'completed') {
         throw new Error('REGISTRATION_INTENT_COMPLETION_MISSING');
       }
       expect(restored.state.eReplicas.size).toBe(1);
+      expect(restored.infrastructure?.entityEncryptionSeeds?.get(completed.results[0]!.entityId))
+        .toBe(canonicalEntitySeed(seed));
 
       const effects = {
         commit: async (): Promise<void> => {
@@ -417,25 +446,36 @@ describe('durable numbered registration intent', () => {
       const drain = spyOn(effects, 'drain');
       const retried = await runNumberedRegistrationIntent(restored, adapter, request, commit, drain);
       const replica = [...restored.state.eReplicas.values()][0]!;
-      expect(retried).toEqual([{
+      expect(retried[0]).toEqual({
         config: replica.state.config,
         entityNumber: completed.results[0]!.entityNumber,
         entityId: completed.results[0]!.entityId,
-      }]);
+      });
+      expect(retried[1]).toEqual({
+        config: expect.any(Object),
+        entityNumber: completed.results[1]!.entityNumber,
+        entityId: completed.results[1]!.entityId,
+      });
       expect([broadcast.mock.calls.length, commit.mock.calls.length, drain.mock.calls.length]).toEqual([0, 0, 0]);
-      expect(await adapter.entityProvider.nextNumber()).toBe(3n);
+      expect(await adapter.entityProvider.nextNumber()).toBe(4n);
       expect(restored.state.eReplicas.size).toBe(1);
 
       const changed = buildNumberedRegistrationRequest(restored, {
         intentId: request.intentId,
         jurisdiction,
         payerSignerId: request.payerSignerId,
-        entities: [{ name: 'changed', validators: [proposer], threshold: 1n, localSignerId: proposer }],
+        entities: [{
+          name: 'changed',
+          validators: [proposer],
+          threshold: 1n,
+          localSignerId: proposer,
+          entitySeed: canonicalEntitySeed(seed),
+        }],
       });
       await expect(runNumberedRegistrationIntent(restored, adapter, changed, commit, drain))
         .rejects.toThrow('NUMBERED_REGISTRATION_INTENT_PAYLOAD_CONFLICT');
       expect([broadcast.mock.calls.length, commit.mock.calls.length, drain.mock.calls.length]).toEqual([0, 0, 0]);
-      expect(await adapter.entityProvider.nextNumber()).toBe(3n);
+      expect(await adapter.entityProvider.nextNumber()).toBe(4n);
       expect(restored.state.eReplicas.size).toBe(1);
     } finally {
       await adapter.close();
@@ -465,7 +505,7 @@ describe('durable numbered registration intent', () => {
         intentId,
         jurisdiction,
         payerSignerId: env.runtimeId,
-        entities: [{ name: 'one', validators: [proposer], threshold: 1n, localSignerId: null }],
+        entities: [{ name: 'one', validators: [proposer], threshold: 1n, localSignerId: null, entitySeed: null }],
       });
       const pending = await prepareNumberedRegistrationIntent(env, adapter, request, async prepared => {
         await commitRuntimeInput(env, {
@@ -479,7 +519,7 @@ describe('durable numbered registration intent', () => {
         intentId,
         jurisdiction,
         payerSignerId: env.runtimeId,
-        entities: [{ name: 'changed', validators: [proposer], threshold: 1n, localSignerId: null }],
+        entities: [{ name: 'changed', validators: [proposer], threshold: 1n, localSignerId: null, entitySeed: null }],
       });
       await expect(prepareNumberedRegistrationIntent(env, adapter, changed, async () => {
         throw new Error('CHANGED_INTENT_MUST_NOT_ACCEPT');

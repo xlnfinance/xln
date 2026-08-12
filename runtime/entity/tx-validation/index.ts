@@ -1,5 +1,4 @@
 import { decodeAccountPeerInput } from '../../account/validation/input-validation';
-import { assertExactMultiRecipientCiphertextSchema } from '../../protocol/htlc/multi-recipient-schema';
 import type { EntityTx } from '../../types/entity-tx';
 import { assertEntityProposalAction } from '../auth/authorization';
 import { normalizeSignedEntityCommand } from '../command/command-codec';
@@ -136,75 +135,21 @@ const validateScheduledWake = (value: unknown, code: string): void => {
   });
 };
 
-const PREPARED_HTLC_PAYMENT_FIELDS = [
-  'amount', 'deliveryMode', 'description', 'hashlock', 'maxSenderDebit', 'preparedAtEntityHeight',
-  'preparedAtJHeight', 'preparedEnvelope', 'preparedHopForwardAmounts', 'preparedLockId',
-  'preparedRevealBeforeHeight', 'preparedRouteProfiles', 'preparedSenderLockAmount',
-  'preparedTimelock', 'preparedTotalFee', 'route', 'startedAtMs', 'targetEntityId', 'tokenId',
-] as const;
+const HTLC_PAYMENT_FIELDS = ['amount', 'deliveryMode', 'maxSenderDebit', 'route', 'targetEntityId', 'tokenId'] as const;
 
 const validatePreparedHtlcPayment = (value: unknown, code: string): void => {
   const data = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(data, PREPARED_HTLC_PAYMENT_FIELDS, [], `${code}_FIELDS`);
+  requireExactBoundaryKeys(data, HTLC_PAYMENT_FIELDS, ['description', 'hashlock', 'startedAtMs'], `${code}_FIELDS`);
   requireBigInt(data['maxSenderDebit'], `${code}_MAX_SENDER_DEBIT`, 1n);
-  const envelope = requireBoundaryRecord(data['preparedEnvelope'], `${code}_ENVELOPE`);
-  requireExactBoundaryKeys(envelope, ['nextHop', 'innerEnvelope'], [], `${code}_ENVELOPE_FIELDS`);
-  requireString(envelope['nextHop'], `${code}_ENVELOPE_NEXT_HOP`);
-  assertExactMultiRecipientCiphertextSchema(envelope['innerEnvelope']);
-};
-
-const validateHtlcOnionAdvance = (value: unknown, code: string): void => {
-  const data = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(data, [
-    'version', 'proposerSignerId', 'inboundEntityId', 'inboundLockId', 'encryptedLayerHash',
-    'hashlock', 'tokenId', 'amount', 'timelock', 'revealBeforeHeight', 'advance',
-  ], [], `${code}_FIELDS`);
-  if (data['version'] !== 1) throw new Error(`${code}_VERSION`);
-  for (const field of [
-    'proposerSignerId', 'inboundEntityId', 'inboundLockId', 'encryptedLayerHash', 'hashlock',
-  ]) requireString(data[field], `${code}_${field.toUpperCase()}`);
-  requireBoundaryInteger(data['tokenId'], `${code}_TOKEN_ID`);
   requireBigInt(data['amount'], `${code}_AMOUNT`, 1n);
-  requireBigInt(data['timelock'], `${code}_TIMELOCK`, 1n);
-  requireBoundaryInteger(data['revealBeforeHeight'], `${code}_REVEAL_HEIGHT`);
-  const advance = requireBoundaryRecord(data['advance'], `${code}_ADVANCE`);
-  if (advance['kind'] === 'final') {
-    requireExactBoundaryKeys(advance, ['kind', 'secretOffer'], ['description', 'startedAtMs'], `${code}_FINAL_FIELDS`);
-    assertExactMultiRecipientCiphertextSchema(advance['secretOffer']);
-    if (advance['description'] !== undefined) requireString(advance['description'], `${code}_FINAL_DESCRIPTION`);
-    if (advance['startedAtMs'] !== undefined) {
-      requireBoundaryInteger(advance['startedAtMs'], `${code}_FINAL_STARTED_AT`);
-    }
-    return;
-  }
-  if (advance['kind'] === 'acceptOffer') {
-    requireExactBoundaryKeys(advance, ['kind', 'offerHash'], [], `${code}_ACCEPT_FIELDS`);
-    requireString(advance['offerHash'], `${code}_ACCEPT_OFFER_HASH`);
-    return;
-  }
-  if (advance['kind'] === 'revealAccepted') {
-    requireExactBoundaryKeys(
-      advance,
-      ['kind', 'offerHash', 'accountFrameHash', 'accountFrameHeight', 'secret'],
-      [],
-      `${code}_REVEAL_FIELDS`,
-    );
-    requireString(advance['offerHash'], `${code}_REVEAL_OFFER_HASH`);
-    requireString(advance['accountFrameHash'], `${code}_REVEAL_FRAME_HASH`);
-    requireBoundaryInteger(advance['accountFrameHeight'], `${code}_REVEAL_FRAME_HEIGHT`);
-    requireString(advance['secret'], `${code}_REVEAL_SECRET`);
-    return;
-  }
-  if (advance['kind'] !== 'forward') throw new Error(`${code}_ADVANCE_KIND`);
-  requireExactBoundaryKeys(
-    advance,
-    ['kind', 'nextHop', 'forwardAmount', 'innerEnvelope'],
-    [],
-    `${code}_FORWARD_FIELDS`,
-  );
-  requireString(advance['nextHop'], `${code}_FORWARD_NEXT_HOP`);
-  requireBigInt(advance['forwardAmount'], `${code}_FORWARD_AMOUNT`, 1n);
-  assertExactMultiRecipientCiphertextSchema(advance['innerEnvelope']);
+  requireBoundaryInteger(data['tokenId'], `${code}_TOKEN_ID`);
+  requireString(data['targetEntityId'], `${code}_TARGET`);
+  requireString(data['deliveryMode'], `${code}_DELIVERY_MODE`);
+  requireArray(data['route'], `${code}_ROUTE`).forEach((entityId, index) =>
+    requireString(entityId, `${code}_ROUTE_${index}`));
+  if (data['description'] !== undefined) requireString(data['description'], `${code}_DESCRIPTION`);
+  if (data['hashlock'] !== undefined) requireString(data['hashlock'], `${code}_HASHLOCK`);
+  if (data['startedAtMs'] !== undefined) requireBoundaryInteger(data['startedAtMs'], `${code}_STARTED_AT`);
 };
 
 const validateSimpleIdentityTx = (type: string, value: unknown, code: string): boolean => {
@@ -277,7 +222,6 @@ function assertEntityTxRecord(
   else if (type === 'reissueCertifiedOutput') validateReissue(tx['data'], `${code}_DATA`, depth);
   else if (type === 'scheduledWake') validateScheduledWake(tx['data'], `${code}_DATA`);
   else if (type === 'htlcPayment') validatePreparedHtlcPayment(tx['data'], `${code}_DATA`);
-  else if (type === 'htlcOnionAdvance') validateHtlcOnionAdvance(tx['data'], `${code}_DATA`);
   else if (type === 'accountInput') decodeAccountPeerInput(tx['data'], `${code}_DATA`);
   else if (type === 'materializeCrossJurisdictionClear') validateCrossJClearMaterialization(tx['data'], `${code}_DATA`);
   else if (type === 'materializeCrossJurisdictionSwap') validateCrossJMaterialization(tx['data'], `${code}_DATA`);

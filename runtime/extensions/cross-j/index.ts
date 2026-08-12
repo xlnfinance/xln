@@ -133,11 +133,11 @@ type CrossJurisdictionExactFillRatio = {
 
 const readCrossJurisdictionExactFillRatio = (
   input: CrossJurisdictionExactFillRatioInput,
-  fallbackOrderId: string,
+  defaultOrderId: string,
 ): CrossJurisdictionExactFillRatio | undefined => {
   const hasExactFillRatio = input.fillNumerator !== undefined || input.fillDenominator !== undefined;
   if (!hasExactFillRatio) return undefined;
-  const orderId = input.orderId || fallbackOrderId;
+  const orderId = input.orderId || defaultOrderId;
   if (input.fillNumerator === undefined || input.fillDenominator === undefined) {
     throw new Error(`CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:${orderId}`);
   }

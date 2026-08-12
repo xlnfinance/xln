@@ -14,10 +14,8 @@ import {
   tryOpenStorageDb,
 } from '../../../runtime';
 import { deriveSignerAddressSync } from '../../../account/crypto';
-import {
-  deriveLocalEntityCryptoKeys,
-  requireEntityEncryptionPrivateKey,
-} from '../../../entity/auth/crypto';
+import { requireEntityEncryptionPrivateKey } from '../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
 import { ENTITY_FRAME_EVENT_COLLECTOR } from '../../../entity/frame-events';
 import { getEntityLeaderState } from '../../../entity/consensus/leader';
 import { buildJPrefixCertificate } from '../../../jurisdiction/machine/history/j-prefix-consensus';
@@ -224,16 +222,15 @@ describe('real process storage crash recovery', () => {
         const signerA = deriveSignerAddressSync(seed, '1').toLowerCase();
         const signerB = deriveSignerAddressSync(seed, '2').toLowerCase();
         const entityId = generateNumberedEntityId(2).toLowerCase();
-        const expectedKeysA = deriveLocalEntityCryptoKeys(restored, entityId, signerA);
-        const expectedKeysB = deriveLocalEntityCryptoKeys(restored, entityId, signerB);
+        const expectedKeys = provisionTestEntityEncryptionKey(restored, entityId);
         const replica = Array.from(restored.state.eReplicas.values()).find((candidate) => (
           candidate.entityId === entityId && candidate.signerId === signerB
         ));
         expect(replica?.state.height).toBe(0);
         expect(replica && Object.hasOwn(replica.state, 'messages')).toBeFalse();
-        expect(replica?.entityEncPubKey).toBe(expectedKeysB.publicKey);
-        expect(requireEntityEncryptionPrivateKey(restored, entityId, signerB))
-          .toBe(expectedKeysB.privateKey);
+        expect(replica?.state.entityEncryptionPublicKey).toBe(expectedKeys.publicKey);
+        expect(requireEntityEncryptionPrivateKey(restored, entityId))
+          .toBe(expectedKeys.privateKey);
         expect(replica && Object.hasOwn(replica, 'entityEncPrivKey')).toBeFalse();
         expect(replica?.htlcNotes).toBeUndefined();
         expect(replica?.state.leaderState).toBeUndefined();
@@ -289,13 +286,12 @@ describe('real process storage crash recovery', () => {
         expect(submitReplica?.certifiedFrameAnchor?.height).toBe(1);
         expect(submitReplica?.certifiedFrameAnchor?.runtimeCheckpoint)
           .toEqual(replica?.certifiedFrameAnchor?.runtimeCheckpoint);
-        expect(submitReplica?.entityEncPubKey).toBe(expectedKeysA.publicKey);
-        expect(requireEntityEncryptionPrivateKey(restored, entityId, signerA))
-          .toBe(expectedKeysA.privateKey);
+        expect(submitReplica?.state.entityEncryptionPublicKey).toBe(expectedKeys.publicKey);
+        expect(requireEntityEncryptionPrivateKey(restored, entityId))
+          .toBe(expectedKeys.privateKey);
         expect(submitReplica && Object.hasOwn(submitReplica, 'entityEncPrivKey'))
           .toBeFalse();
         expect(submitReplica?.htlcNotes).toBeUndefined();
-        expect(expectedKeysA).not.toEqual(expectedKeysB);
         const certifiedBoardHash = submitReplica
           ? resolveObserverCertifiedBoardHash(
               submitReplica.state,
@@ -342,7 +338,7 @@ describe('real process storage crash recovery', () => {
 
         restored.state.height += 1;
         restored.state.timestamp += 1;
-        await saveEnvToDB(restored, { runtimeTxs: [], entityInputs: [] }, []);
+        await saveEnvToDB(restored, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
         const committedHead = await readStorageHead(getRuntimeWalDb(restored));
         expect(committedHead?.latestHeight).toBe(3);
         const committedFrame = await readStorageFrameRecord(getRuntimeWalDb(restored), 3);
@@ -445,7 +441,7 @@ describe('real process storage crash recovery', () => {
         };
         restored.state.height += 1;
         restored.state.timestamp += 1;
-        await saveEnvToDB(restored, { runtimeTxs: [], entityInputs: [] }, []);
+        await saveEnvToDB(restored, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
 
         expect((await readStorageHead(historyDb))?.latestSnapshotHeight).toBe(3);
         expect(await countSnapshotBodyKeys(historyDb, 1)).toBeGreaterThan(0);

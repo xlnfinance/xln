@@ -7,7 +7,7 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 import { batchOpCount, cloneJBatch } from '../../jurisdiction/machine/batch';
 import { safeStringify } from '../../protocol/serialization';
 import {
-  ENTITY_J_SUBMIT_FALLBACK_MS,
+  ENTITY_J_SUBMIT_RETRY_MS,
   isEntityActiveLeader,
 } from '../../entity/consensus/leader';
 import {
@@ -280,7 +280,7 @@ export const applyRetryJSubmitRuntimeTx = (env: RuntimeReplica, tx: RetryJSubmit
     previous &&
     previous.lastResultOutcome !== 'eventBarrier' &&
     previous.submitAttempts > 0 &&
-    env.state.timestamp < previous.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS
+    env.state.timestamp < previous.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS
   ) return [];
   const witness = replica.hankoWitness?.get(sent.batchHash);
   if (!witness || witness.type !== 'jBatch') {

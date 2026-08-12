@@ -337,17 +337,17 @@ describe('manual J-event ingress source binding', () => {
       process.cwd(),
       'frontend/src/lib/components/Entity/external-wallet-reader.ts',
     ), 'utf8');
-    const snapshotFallbackStart = walletSource.indexOf(
+    const snapshotSubstituteStart = walletSource.indexOf(
       'const response = await fetch(`${apiBase}/api/external-wallet/snapshot`',
     );
-    const snapshotFallbackEnd = walletSource.indexOf('const balanceByToken = new Map(', snapshotFallbackStart);
+    const snapshotSubstituteEnd = walletSource.indexOf('const balanceByToken = new Map(', snapshotSubstituteStart);
     const faucetStart = panelSource.indexOf('async function faucetReserves(');
     const faucetEnd = panelSource.indexOf('async function faucetOffchain(', faucetStart);
-    expect(snapshotFallbackStart).toBeGreaterThan(0);
-    expect(snapshotFallbackEnd).toBeGreaterThan(snapshotFallbackStart);
+    expect(snapshotSubstituteStart).toBeGreaterThan(0);
+    expect(snapshotSubstituteEnd).toBeGreaterThan(snapshotSubstituteStart);
     expect(faucetStart).toBeGreaterThan(0);
     expect(faucetEnd).toBeGreaterThan(faucetStart);
-    expect(walletSource.slice(snapshotFallbackStart, snapshotFallbackEnd)).not.toContain(
+    expect(walletSource.slice(snapshotSubstituteStart, snapshotSubstituteEnd)).not.toContain(
       'applyCanonicalJEventsToActiveEnv',
     );
     expect(panelSource.slice(faucetStart, faucetEnd)).not.toContain(

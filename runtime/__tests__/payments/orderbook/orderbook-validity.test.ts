@@ -33,7 +33,6 @@ const makeAccount = (offerId: string, offer: SwapOffer): AccountReplica =>
       deltas: new Map(),
       locks: new Map(),
       swapOffers: new Map([[offerId, offer]]),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),

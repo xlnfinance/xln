@@ -27,9 +27,9 @@ let cachedPolicyDefaultsByJurisdiction: Map<string, PolicyDefaults> | null = nul
 let policyDefaultsLoadPromise: Promise<Map<string, PolicyDefaults>> | null = null;
 let runtimePolicyDefaults: PolicyDefaults = { ...DEFAULT_POLICY };
 
-const toUsdInt = (value: unknown, fallback: number): number => {
+const toUsdInt = (value: unknown, defaultValue: number): number => {
   const raw = Number(value);
-  if (!Number.isFinite(raw)) return fallback;
+  if (!Number.isFinite(raw)) return defaultValue;
   return Math.max(0, Math.floor(raw));
 };
 
@@ -90,7 +90,7 @@ const loadPolicyDefaultsFromJurisdictions = async (): Promise<Map<string, Policy
         if (nameKey) result.set(nameKey, jurisdictionDefaults);
       }
     } catch {
-      // Keep fallback defaults.
+      // Keep the canonical policy defaults when the optional endpoint is unavailable.
     }
 
     cachedPolicyDefaultsByJurisdiction = result;
@@ -111,16 +111,16 @@ export const hydrateJurisdictionPolicyDefaults = async (jurisdictionName?: strin
 };
 
 export const readSavedCollateralPolicy = (): SavedCollateralPolicy => {
-  const fallback = runtimePolicyDefaults;
-  if (typeof localStorage === 'undefined') return { mode: 'autopilot', ...fallback, timestamp: 0 };
+  const defaults = runtimePolicyDefaults;
+  if (typeof localStorage === 'undefined') return { mode: 'autopilot', ...defaults, timestamp: 0 };
   try {
     const raw = localStorage.getItem(COLLATERAL_POLICY_KEY);
-    if (!raw) return { mode: 'autopilot', ...fallback, timestamp: 0 };
+    if (!raw) return { mode: 'autopilot', ...defaults, timestamp: 0 };
     const parsed = JSON.parse(raw) as Partial<SavedCollateralPolicy>;
 
-    const softLimitUsd = toUsdInt(parsed.softLimitUsd, fallback.softLimitUsd);
-    const hardLimitUsd = toUsdInt(parsed.hardLimitUsd, fallback.hardLimitUsd);
-    const maxFeeUsd = toUsdInt(parsed.maxFeeUsd, fallback.maxFeeUsd);
+    const softLimitUsd = toUsdInt(parsed.softLimitUsd, defaults.softLimitUsd);
+    const hardLimitUsd = toUsdInt(parsed.hardLimitUsd, defaults.hardLimitUsd);
+    const maxFeeUsd = toUsdInt(parsed.maxFeeUsd, defaults.maxFeeUsd);
     const mode = parsed.mode === 'manual' ? 'manual' : 'autopilot';
     const timestamp = Number(parsed.timestamp || 0);
 
@@ -132,17 +132,17 @@ export const readSavedCollateralPolicy = (): SavedCollateralPolicy => {
       timestamp: Number.isFinite(timestamp) ? timestamp : 0,
     };
   } catch {
-    return { mode: 'autopilot', ...fallback, timestamp: 0 };
+    return { mode: 'autopilot', ...defaults, timestamp: 0 };
   }
 };
 
 export const writeSavedCollateralPolicy = (
   policy: Pick<SavedCollateralPolicy, 'mode' | 'softLimitUsd' | 'hardLimitUsd' | 'maxFeeUsd'>,
 ): SavedCollateralPolicy => {
-  const fallback = runtimePolicyDefaults;
-  const softLimitUsd = toUsdInt(policy.softLimitUsd, fallback.softLimitUsd);
-  const hardLimitUsd = toUsdInt(policy.hardLimitUsd, fallback.hardLimitUsd);
-  const maxFeeUsd = toUsdInt(policy.maxFeeUsd, fallback.maxFeeUsd);
+  const defaults = runtimePolicyDefaults;
+  const softLimitUsd = toUsdInt(policy.softLimitUsd, defaults.softLimitUsd);
+  const hardLimitUsd = toUsdInt(policy.hardLimitUsd, defaults.hardLimitUsd);
+  const maxFeeUsd = toUsdInt(policy.maxFeeUsd, defaults.maxFeeUsd);
   const mode = policy.mode === 'manual' ? 'manual' : 'autopilot';
 
   const saved: SavedCollateralPolicy = {

@@ -4,6 +4,7 @@ import type { AccountTx } from '../../types/account';
 import type { EntityFrameEvent, EntityState } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
 import type { JPrefixCertificate } from '../../types/jurisdiction-events';
+import type { EntityInfraContext } from '../../types/entity/infra-context';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
@@ -176,6 +177,31 @@ export const selectEntityFrameTxByteBudget = (txs: EntityTx[]): EntityTx[] => {
   return txs.slice(0, low);
 };
 
+export const assertEntityFrameTotalByteBudget = (input: {
+  prevFrameHash: string;
+  height: number;
+  timestamp: number;
+  txs: EntityTx[];
+  events: EntityFrameEvent[];
+  entityId: string;
+  stateRoot: string;
+  authorityRoot: string;
+  entityContext: EntityInfraContext;
+  jPrefixCertificate?: JPrefixCertificate;
+}): string => {
+  const encoded = encodeCanonicalConsensusValue({
+    domain: 'xln:entity-frame',
+    ...input,
+    txs: input.txs.map(canonicalEntityTxForFrameHash),
+    jPrefixCertificate: input.jPrefixCertificate ?? null,
+  });
+  const frameBytes = new TextEncoder().encode(encoded).byteLength;
+  if (frameBytes > LIMITS.MAX_FRAME_SIZE_BYTES) {
+    throw new Error(`ENTITY_FRAME_TOTAL_BYTE_LIMIT_EXCEEDED:${frameBytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}`);
+  }
+  return encoded;
+};
+
 // Entity-frame hashes are BFT commitments. Validators recompute the frame from
 // txs and sign only if their locally derived state hashes to the proposal hash.
 export function createEntityFrameHashFromStateRoot(
@@ -187,6 +213,7 @@ export function createEntityFrameHashFromStateRoot(
   entityId: string,
   stateRoot: string,
   authorityRoot: string,
+  entityContext: EntityInfraContext,
   jPrefixCertificate?: JPrefixCertificate,
 ): string {
   assertEntityFrameEventByteBudget(events);
@@ -197,18 +224,18 @@ export function createEntityFrameHashFromStateRoot(
     throw new Error(`ENTITY_FRAME_AUTHORITY_ROOT_INVALID:${authorityRoot}`);
   }
   const frameData = {
-    version: 'xln:entity-frame:v1',
     prevFrameHash,
     height,
     timestamp,
-    txs: txs.map(canonicalEntityTxForFrameHash),
+    txs,
     events,
     entityId,
     stateRoot: stateRoot.toLowerCase(),
     authorityRoot: authorityRoot.toLowerCase(),
-    jPrefixCertificate: jPrefixCertificate ?? null,
+    entityContext,
+    ...(jPrefixCertificate ? { jPrefixCertificate } : {}),
   };
-  const encoded = encodeCanonicalConsensusValue(frameData);
+  const encoded = assertEntityFrameTotalByteBudget(frameData);
   const hash = ethers.keccak256(ethers.toUtf8Bytes(encoded));
   if (frameHashDebugRecorder) {
     frameHashDebugRecorder({
@@ -227,6 +254,7 @@ export async function createEntityFrameHash(
   timestamp: number,
   txs: EntityTx[],
   newState: EntityState,
+  entityContext: EntityInfraContext,
   jPrefixCertificate?: JPrefixCertificate,
   events: EntityFrameEvent[] = readEntityFrameEvents(newState),
 ): Promise<string> {
@@ -258,6 +286,7 @@ export async function createEntityFrameHash(
     newState.entityId,
     stateRoot,
     authorityRoot,
+    entityContext,
     jPrefixCertificate,
   );
   return hash;

@@ -374,16 +374,15 @@ test('hub discovery projection exposes same-jurisdiction hub profiles without fu
         lastUpdated: 99,
         runtimeId: RUNTIME,
         runtimeEncPubKey: '',
+        entityEncryptionPublicKey: `0x${'55'.repeat(32)}`,
         publicAccounts: [SOURCE],
         wsUrl: 'ws://127.0.0.1:3333',
         relays: [],
         metadata: {
-          entityEncPubKey: '',
           isHub: true,
           hubName: 'H1',
           routingFeePPM: 17,
           baseFee: 0n,
-          board: { threshold: 1, validators: [] },
           jurisdiction: JURISDICTION,
         },
         accounts: [],
@@ -434,6 +433,7 @@ test('hub discovery committed user role vetoes Hub profile and remote runtime ad
     lastUpdated: 99,
     runtimeId: RUNTIME,
     runtimeEncPubKey: '',
+    entityEncryptionPublicKey: `0x${'55'.repeat(32)}`,
     publicAccounts: [],
     wsUrl: 'ws://127.0.0.1:3333',
     relays: [],
@@ -441,7 +441,6 @@ test('hub discovery committed user role vetoes Hub profile and remote runtime ad
       isHub: true,
       routingFeePPM: 0,
       baseFee: 0n,
-      board: { threshold: 1, validators: [] },
       jurisdiction: JURISDICTION,
     },
     accounts: [],
@@ -527,18 +526,6 @@ test('hub discovery remote hubs are projected from runtime registry outside Enti
       lastSynced: 456,
     },
     {
-      id: 'radapter:ws://127.0.0.1:8093/rpc',
-      type: 'remote',
-      label: 'Legacy Runtime',
-      env: null,
-      wsUrl: 'ws://127.0.0.1:8093/rpc',
-      permissions: 'read',
-      status: 'connected',
-      hubEntityId: `0x${'66'.repeat(32)}`,
-      hubName: 'Legacy H2',
-      hubJurisdiction: JURISDICTION,
-    },
-    {
       id: 'local',
       type: 'local',
       label: 'Local',
@@ -549,7 +536,7 @@ test('hub discovery remote hubs are projected from runtime registry outside Enti
   ];
 
   const hubs = buildHubDiscoveryRemoteHubsFromRuntimes(runtimes as never);
-  expect(hubs).toHaveLength(2);
+  expect(hubs).toHaveLength(1);
   expect(hubs[0]).toMatchObject({
     entityId: HUB,
     name: 'H1',
@@ -558,13 +545,6 @@ test('hub discovery remote hubs are projected from runtime registry outside Enti
     height: 123,
     lastSeen: 456,
   });
-  expect(hubs[1]).toMatchObject({
-    name: 'Legacy H2',
-    runtimeId: 'radapter:ws://127.0.0.1:8093/rpc',
-    wsUrl: 'ws://127.0.0.1:8093/rpc',
-    height: 0,
-  });
-
   const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
   expect(tabs).toContain('buildHubDiscoveryRemoteHubsFromRuntimes($runtimes.values())');
   expect(tabs).not.toContain('remoteHubCandidates = Array.from($runtimes.values()).flatMap');

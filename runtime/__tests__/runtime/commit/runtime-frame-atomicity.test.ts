@@ -28,6 +28,7 @@ import {
 } from '../../../runtime/reliable/reliable-delivery.ts';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
 import { KEY_HEAD } from '../../../storage/keys';
+import { importEntity } from '../../../runtime/registration/entity-creation';
 import { readStorageHead } from '../../../storage';
 import {
   authorizeRestoredRuntimeInput,
@@ -94,10 +95,10 @@ const makeAliasedBoardRuntimeInput = (): {
   return {
     boards,
     runtimeInput: {
-      runtimeTxs: boards.flatMap(config => config.validators.map((signerId, index) => ({
-        type: 'importReplica' as const,
+      runtimeTxs: boards.flatMap(config => config.validators.map((signerId, index) => importEntity({
         entityId: hash(signerId.padStart(2, '0').slice(-2)),
         signerId,
+        entitySeed: `runtime-frame-atomicity:${signerId}`,
         data: {
           config,
           isProposer: index === 0,
@@ -135,6 +136,7 @@ const board = (leader: string, validator: string): ConsensusConfig => ({
 
 const makeEntityState = (entityId: string, config: ConsensusConfig): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
@@ -184,16 +186,16 @@ const importReplicaTx = (slot: string) => {
   const leader = address(`${slot}1`);
   const validator = address(`${slot}2`);
   const config = board(leader, validator);
-  return {
-    type: 'importReplica' as const,
+  return importEntity({
     entityId: generateLazyEntityId(config.validators, config.threshold).toLowerCase(),
     signerId: validator,
+    entitySeed: `runtime-frame-atomicity:${slot}`,
     data: {
       config,
       isProposer: false,
       profileName: `Imported ${slot}`,
     },
-  };
+  });
 };
 
 const localImportReplicaTx = (env: RuntimeReplica, slot: string) => {
@@ -206,16 +208,16 @@ const localImportReplicaTx = (env: RuntimeReplica, slot: string) => {
     shares: { [signerId]: 1n, [coValidatorId]: 1n },
     jurisdiction,
   };
-  return {
-    type: 'importReplica' as const,
+  return importEntity({
     entityId: generateLazyEntityId(config.validators, config.threshold).toLowerCase(),
     signerId,
+    entitySeed: `runtime-frame-atomicity:local:${slot}`,
     data: {
       config,
       isProposer: true,
       profileName: `Local ${slot}`,
     },
-  };
+  });
 };
 
 const exactQueuedInput = (env: RuntimeReplica): RuntimeInput => ({
@@ -321,7 +323,13 @@ describe('runtime frame atomicity', () => {
           stackKey: hash('33'),
           payerSignerId: address('34'),
           entityProviderAddress: jurisdiction.entityProviderAddress,
-          entities: ['first', 'second'].map(name => ({ name, boardHash: hash('35'), config })),
+          entities: ['first', 'second'].map(name => ({
+            name,
+            boardHash: hash('35'),
+            config,
+            localSignerId: null,
+            entitySeed: null,
+          })),
         },
         requestHash: hash('36'),
         rawTransaction: '0x12',
@@ -926,7 +934,7 @@ describe('runtime frame atomicity', () => {
 
     const restored = env.state.eReplicas.get(`${replica.entityId}:${validator}`);
     expect(restored).toBeDefined();
-    expect(safeStringify(restored)).toBe(replicaBefore);
+    expect(safeStringify(buildCanonicalEntityReplicaSnapshot(restored!))).toBe(replicaBefore);
     expect(restored?.mempool).toEqual([]);
     expect(restored?.proposal).toBeUndefined();
     expect(restored?.lockedFrame).toBeUndefined();

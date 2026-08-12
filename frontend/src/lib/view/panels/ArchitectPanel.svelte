@@ -21,6 +21,7 @@
   import type { EntityReplica } from '@xln/runtime/entity/types';
   import type { JAdapter } from '@xln/runtime/jurisdiction/adapter';
   import { defaultAccountDisputeConfigForRoleEvidence } from '@xln/runtime/account/config/dispute-config';
+  import { computeAddress, hexlify } from 'ethers';
   import { activeRuntime as activeRuntimeStore } from '$lib/stores/runtimeStore';
   import { activeRuntime as activeVaultRuntime } from '$lib/stores/vault/vaultStore';
   import SolvencyPanel from './solvency/SolvencyPanel.svelte';
@@ -683,18 +684,15 @@
         const z = jPos.z + (row - 1) * 40;
         const y = jPos.y + 20; // y=320
 
-        const signerId = `${$runtimeFrameEnv.activeJurisdiction}_e${i}`;
-        const encoder = new TextEncoder();
-        const data = encoder.encode(`${$runtimeFrameEnv.activeJurisdiction}:e${i}:${Date.now()}`);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        const entityId = '0x' + hashHex;
+        const entitySeed = resolveRuntimeSeed();
+        if (!entitySeed) throw new Error('ENTITY_IMPORT_RUNTIME_SEED_REQUIRED');
+        const signerId = computeAddress(hexlify(XLN.deriveSignerKeySync(entitySeed, `architect-hub-${i}`))).toLowerCase();
+        const entityId = XLN.generateLazyEntityId([signerId], 1n);
 
-        entities.push({
-          type: 'importReplica',
+        entities.push(XLN.importEntity({
           entityId,
           signerId,
+          entitySeed,
           data: {
             config: {
               mode: 'proposer-based',
@@ -706,7 +704,7 @@
             isProposer: true,
             position: { x, y, z }
           }
-        });
+        }));
       }
 
       // Import all entities
@@ -943,7 +941,9 @@
       if (!xlnomy) throw new Error('Active xlnomy not found');
 
       // Create 100 entities in 10x10 grid
-      const entityInputs = [];
+      const runtimeTxs = [];
+      const entitySeed = resolveRuntimeSeed();
+      if (!entitySeed) throw new Error('ENTITY_IMPORT_RUNTIME_SEED_REQUIRED');
 
       for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
@@ -951,26 +951,23 @@
           const z = (row - 4.5) * 40;
           const y = 50; // Same height
 
-          const signerId = `scale_test_bank_${row}_${col}`;
-          const entityInput = {
-            signerId,
-            runtimeTxs: [{
-              type: 'importReplica',
-              entityState: {
-                nonces: new Map(),
-                accounts: new Map(),
-                reserves: new Map([[0, 100_000n]]), // $100K each
-                position: { x, y, z }
-              }
-            }]
-          };
-
-          entityInputs.push(entityInput);
+          const label = `scale-test-bank-${row}-${col}`;
+          const signerId = computeAddress(hexlify(XLN.deriveSignerKeySync(entitySeed, label))).toLowerCase();
+          const entityId = XLN.generateLazyEntityId([signerId], 1n);
+          runtimeTxs.push(XLN.importEntity({
+            entityId, signerId, entitySeed,
+            data: {
+              isProposer: true,
+              config: { mode: 'proposer-based', threshold: 1n, validators: [signerId], shares: { [signerId]: 1n }, jurisdiction: $runtimeFrameEnv.activeJurisdiction },
+              profileName: label,
+              position: { x, y, z },
+            },
+          }));
         }
       }
 
       // Batch create all 100 entities in ONE frame
-      await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: entityInputs }, 'scale stress test');
+      await ingressRuntimeInput(XLN, { runtimeTxs, entityInputs: [] }, 'scale stress test');
 
       lastAction = ` Created 100 entities! Check FPS overlay (should be 60+)`;
 
@@ -1244,15 +1241,10 @@
       const XLN = await getXLN();
 
       // Generate signerId from xlnomy name + entity name
-      const signerId = `${$runtimeFrameEnv.activeJurisdiction.toLowerCase()}_${newEntityName.toLowerCase()}`;
-
-      // Generate entityId (hash-based for lazy entities)
-      const encoder = new TextEncoder();
-      const data = encoder.encode(`${$runtimeFrameEnv.activeJurisdiction}:${newEntityName}:${Date.now()}`);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      const entityId = '0x' + hashHex; // 32 bytes = 64 hex chars (bytes32)
+      const entitySeed = resolveRuntimeSeed();
+      if (!entitySeed) throw new Error('ENTITY_IMPORT_RUNTIME_SEED_REQUIRED');
+      const signerId = computeAddress(hexlify(XLN.deriveSignerKeySync(entitySeed, `architect-${newEntityName}`))).toLowerCase();
+      const entityId = XLN.generateLazyEntityId([signerId], 1n);
 
       // Random position in 3D space
       const position = {
@@ -1263,10 +1255,10 @@
 
       // Create entity via importReplica RuntimeTx
       await ingressRuntimeInput(XLN, {
-        runtimeTxs: [{
-          type: 'importReplica',
+        runtimeTxs: [XLN.importEntity({
           entityId,
           signerId,
+          entitySeed,
           data: {
             config: {
               mode: 'proposer-based',
@@ -1278,7 +1270,7 @@
             isProposer: true,
             position
           }
-        }],
+        })],
         entityInputs: []
       });
 
@@ -1289,7 +1281,7 @@
       const currentIndex = names.indexOf(newEntityName.toLowerCase());
       newEntityName = currentIndex >= 0 && currentIndex < names.length - 1
         ? (names[currentIndex + 1] || 'entity')
-        : 'entity'; // Fallback
+        : 'entity'; // Canonical default name
 
       publishCurrentEnv();
     } catch (err: any) {

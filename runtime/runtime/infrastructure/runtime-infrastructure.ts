@@ -27,7 +27,6 @@ export const ensureRuntimeInfrastructure = (
       lastP2PConfig: null,
       directEntityInputsDispatch: null,
       directReliableReceiptDispatch: null,
-      canUseConnectedRelayFallback: null,
       recoveryBackupBarrier: null,
     };
   }

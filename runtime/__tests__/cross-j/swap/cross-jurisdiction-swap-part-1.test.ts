@@ -85,7 +85,7 @@ import {
 const TEST_DISPUTE_CONFIG = { leftResponseSeconds: 10, rightResponseSeconds: 10 } as const;
 type TestRouteInput = Omit<CrossJurisdictionSwapRoute, 'sourceDisputeConfig' | 'targetDisputeConfig'>;
 // These historical fixtures all model the same bilateral response policy. The
-// explicit test adapter avoids reintroducing a production default/fallback.
+// Explicit test adapter avoids reintroducing a production substitute.
 const withFixtureDisputeConfig = (route: TestRouteInput): CrossJurisdictionSwapRoute => ({
   ...route,
   sourceDisputeConfig: TEST_DISPUTE_CONFIG,
@@ -174,6 +174,7 @@ import {
   makeJurisdiction,
   makeState,
   partialBinary,
+  provisionTestEntityEncryptionKey,
   registerTestSigner,
   secret,
   prepareJEventInput,
@@ -182,8 +183,12 @@ import {
 import { applyJEventRange, buildJEventRangeData } from '../../helpers/j-history';
 
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
+import type { Profile } from '../../../entity/profile';
+import { computeProfileHash, computeProfileRouteHash, verifyProfileSignature } from '../../../entity/profile/profile-signing';
+import { canonicalizeProfile } from '../../../entity/profile';
+import { buildSingleSignerHanko } from '../../../hanko/batch';
+import { getSignerPrivateKey, signDigest } from '../../../account/crypto';
 
-import { collectLocalProfileEncryptionAnnouncements } from '../../../entity/profile/profile-encryption';
 
 import { LIMITS } from '../../../config/constants';
 
@@ -237,6 +242,44 @@ const registerVerifiedOwnerRoute = (
     runtimeSignerId: signerId.toLowerCase(),
     runtimeEncPubKey: '',
     lastUpdated: env.state.timestamp,
+  });
+};
+
+const registerCryptographicallyVerifiedProfileRoute = async (
+  env: ReturnType<typeof createEmptyEnv>,
+  profile: Profile,
+): Promise<void> => {
+  const verification = await verifyProfileSignature(profile);
+  if (!verification.valid || !verification.signerId) {
+    throw new Error(
+      `TEST_PROFILE_ROUTE_INVALID:entity=${profile.entityId}:reason=${verification.reason ?? 'unknown'}`,
+    );
+  }
+  env.infrastructure!.verifiedProfileRoutes ??= new Map();
+  env.infrastructure!.verifiedProfileRoutes.set(profile.entityId.toLowerCase(), {
+    runtimeId: profile.runtimeId.toLowerCase(),
+    runtimeSignerId: verification.signerId.toLowerCase(),
+    runtimeEncPubKey: profile.runtimeEncPubKey,
+    lastUpdated: profile.lastUpdated,
+  });
+};
+
+const certifyNamedSignerProfile = (
+  env: ReturnType<typeof createEmptyEnv>,
+  profile: Profile,
+  signerId: string,
+): Profile => {
+  const privateKey = getSignerPrivateKey(env, signerId);
+  const entityCertified = canonicalizeProfile({
+    ...profile,
+    metadata: {
+      ...profile.metadata,
+      profileHanko: buildSingleSignerHanko(profile.entityId, computeProfileHash(profile), privateKey),
+    },
+  });
+  return canonicalizeProfile({
+    ...entityCertified,
+    runtimeSignature: signDigest(env, signerId, computeProfileRouteHash(entityCertified)),
   });
 };
 
@@ -918,6 +961,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     sourceState.crossJurisdictionSwaps?.set(intent.orderId, intent);
     addReplica(env, sourceState, sourceHubSigner);
     addReplica(env, targetState, targetHubSigner);
+    registerVerifiedOwnerRoute(env, sourceUser, sourceUserSigner, env.runtimeId!);
+    registerVerifiedOwnerRoute(env, targetUser, targetUserSigner, env.runtimeId!);
     const prepared = buildPreparedCrossJurisdictionRoute(intent, {
       runtimeSeed: seed,
       now: env.state.timestamp,
@@ -990,6 +1035,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     registerTestSigner(saturatedEnv, seed, '2');
     saturatedEnv.gossip = env.gossip;
     saturatedEnv.state.eReplicas = new Map([...env.state.eReplicas].map(([key, replica]) => [key, cloneEntityReplica(replica)]));
+    provisionTestEntityEncryptionKey(saturatedEnv, sourceHub);
+    provisionTestEntityEncryptionKey(saturatedEnv, targetHub);
     const saturatedTarget = saturatedEnv.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)!;
     saturatedTarget.mempool = Array.from({ length: LIMITS.MEMPOOL_SIZE }, () => ({
       type: 'chatMessage' as const,
@@ -1173,14 +1220,42 @@ describe('cross-jurisdiction hashledger swap', () => {
     addReplica(hubEnv, targetHubState, targetHubSigner);
     addReplica(hubEnv, sourceHubBState, sourceHubBSigner);
     addReplica(hubEnv, targetHubBState, targetHubBSigner);
-    collectLocalProfileEncryptionAnnouncements(hubEnv, new Set([sourceHub, targetHub, sourceHubB, targetHubB]));
-    collectLocalProfileEncryptionAnnouncements(userEnv, new Set([sourceUser, targetUser]));
-    const sourceHubProfile = buildLocalEntityProfile(hubEnv, sourceHubState);
-    const targetHubProfile = buildLocalEntityProfile(hubEnv, targetHubState);
-    const sourceHubBProfile = buildLocalEntityProfile(hubEnv, sourceHubBState);
-    const targetHubBProfile = buildLocalEntityProfile(hubEnv, targetHubBState);
-    const sourceUserProfile = buildLocalEntityProfile(userEnv, sourceUserState);
-    const targetUserProfile = buildLocalEntityProfile(userEnv, targetUserState);
+    const sourceHubProfile = certifyNamedSignerProfile(
+      hubEnv,
+      buildLocalEntityProfile(hubEnv, sourceHubState),
+      sourceHubSigner,
+    );
+    const targetHubProfile = certifyNamedSignerProfile(
+      hubEnv,
+      buildLocalEntityProfile(hubEnv, targetHubState),
+      targetHubSigner,
+    );
+    const sourceHubBProfile = certifyNamedSignerProfile(
+      hubEnv,
+      buildLocalEntityProfile(hubEnv, sourceHubBState),
+      sourceHubBSigner,
+    );
+    const targetHubBProfile = certifyNamedSignerProfile(
+      hubEnv,
+      buildLocalEntityProfile(hubEnv, targetHubBState),
+      targetHubBSigner,
+    );
+    const sourceUserProfile = certifyNamedSignerProfile(
+      userEnv,
+      buildLocalEntityProfile(userEnv, sourceUserState),
+      sourceUserSigner,
+    );
+    const targetUserProfile = certifyNamedSignerProfile(
+      userEnv,
+      buildLocalEntityProfile(userEnv, targetUserState),
+      targetUserSigner,
+    );
+    for (const profile of [sourceHubProfile, targetHubProfile, sourceHubBProfile, targetHubBProfile]) {
+      await registerCryptographicallyVerifiedProfileRoute(userEnv, profile);
+    }
+    for (const profile of [sourceUserProfile, targetUserProfile]) {
+      await registerCryptographicallyVerifiedProfileRoute(hubEnv, profile);
+    }
     userEnv.gossip = {
       getProfiles: () => [sourceHubProfile, targetHubProfile, sourceHubBProfile, targetHubBProfile],
     } as typeof userEnv.gossip;
@@ -1489,7 +1564,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(registerTestSigner(concurrentUserEnv, seed, 'target-user')).toBe(targetUserSigner);
     addReplica(concurrentUserEnv, cloneEntityState(liveSourceUserState), sourceUserSigner);
     addReplica(concurrentUserEnv, cloneEntityState(liveTargetUserState), targetUserSigner);
-    collectLocalProfileEncryptionAnnouncements(concurrentUserEnv, new Set([sourceUser, targetUser]));
     concurrentUserEnv.gossip = userEnv.gossip;
 
     const admittedConcurrentRetries = await admitAtomicCrossJAccountInputs(
@@ -1502,24 +1576,27 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(admittedConcurrentRetries.inputs.map(input => input.sourceRuntimeFrame?.height).sort())
       .toEqual([42, 42, 43, 43]);
     const concurrentApplyCounts = new Map<string, number>();
-    const concurrentApply = await applyMergedEntityInputs(
-      concurrentUserEnv,
-      admittedConcurrentRetries.inputs,
-      [],
-      {
+    const concurrentEntityOutbox: RoutedEntityInput[] = [];
+    for (const sourceRuntimeHeight of [42, 43]) {
+      const cohort = admittedConcurrentRetries.inputs.filter(
+        input => input.sourceRuntimeFrame?.height === sourceRuntimeHeight,
+      );
+      expect(cohort).toHaveLength(2);
+      const concurrentApply = await applyMergedEntityInputs(concurrentUserEnv, cohort, [], {
         isReplay: false,
         routingDeps: makeLocalCrossJRoutingDeps(),
         beforeEntityApply: entityId => {
           concurrentApplyCounts.set(entityId, (concurrentApplyCounts.get(entityId) ?? 0) + 1);
         },
-      },
-    );
-    expect(concurrentApply.rejectedAtomicPairs).toEqual([]);
+      });
+      expect(concurrentApply.rejectedAtomicPairs).toEqual([]);
+      concurrentEntityOutbox.push(...concurrentApply.entityOutbox);
+    }
     expect(concurrentApplyCounts).toEqual(new Map([
       [sourceUser, 2],
       [targetUser, 2],
     ]));
-    expect(concurrentApply.entityOutbox).toHaveLength(4);
+    expect(concurrentEntityOutbox).toHaveLength(4);
     const concurrentSourceState = concurrentUserEnv.state.eReplicas
       .get(`${sourceUser}:${sourceUserSigner}`)!.state;
     const concurrentTargetState = concurrentUserEnv.state.eReplicas

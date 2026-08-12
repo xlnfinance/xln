@@ -14,8 +14,8 @@ export const JSON_HEADERS = {
   'Content-Type': 'application/json',
 } as const;
 
-export const getErrorMessage = (error: unknown, fallback = 'Unknown error'): string =>
-  error instanceof Error ? error.message : typeof error === 'string' && error.length > 0 ? error : fallback;
+export const getErrorMessage = (error: unknown, defaultMessage = 'Unknown error'): string =>
+  error instanceof Error ? error.message : typeof error === 'string' && error.length > 0 ? error : defaultMessage;
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;

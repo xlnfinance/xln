@@ -221,12 +221,6 @@ function assertEntityReplicaMetadata(
 ): asserts replica is Record<string, unknown> & EntityReplicaMetadata {
   const entityId = validateString(replica['entityId'], `${context}.entityId`);
   validateString(replica['signerId'], `${context}.signerId`);
-  const publicKey = replica['entityEncPubKey'];
-  if (typeof publicKey !== 'string') {
-    throw new FinancialDataCorruptionError(
-      `${context}.entityEncPubKey must be a string`,
-    );
-  }
   const state = validateEntityState(replica['state'], `${context}.state`);
   if (state.entityId !== entityId) {
     throw new FinancialDataCorruptionError(

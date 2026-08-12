@@ -11,9 +11,9 @@ export type AssistantProxyConfig = Readonly<{
   streamTimeoutMs: number;
 }>;
 
-const readPositiveEnv = (name: string, fallback: number): number => {
+const readPositiveEnv = (name: string, defaultValue: number): number => {
   const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
+  if (!raw) return defaultValue;
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
   return value;

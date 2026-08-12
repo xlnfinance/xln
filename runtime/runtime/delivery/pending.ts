@@ -7,12 +7,14 @@ import type {
   RuntimeEntityInputsEnvelope,
 } from '../types';
 import { createStructuredLogger } from '../../infra/logger';
-import { keccak256, toUtf8Bytes } from 'ethers';
+import { keccak256, recoverAddress, toUtf8Bytes } from 'ethers';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getWallClockMs } from '../../infra/time';
 import { validateDeliverableEntityInput } from '../routing/routing-validation';
 import { recordRuntimeSecurityIncident } from '../observability/security-incidents';
+import { computeProfileRouteHash } from '../../entity/profile/profile-signing';
+import { ACCOUNT_PENDING_STALE_WARNING_MS } from '../../entity/scheduler/config/timing';
 
 import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output/envelope';
 import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
@@ -147,6 +149,52 @@ const logIncompleteAtomicUnitParked = (
       allPending.filter(output => isCrossJAdmissionProposal(output)).slice(0, 6),
     ),
   });
+};
+
+const incompleteAtomicUnitRecoveryDeadline = (
+  unit: { outputs: readonly RoutedEntityInput[] },
+): number => {
+  const output = unit.outputs[0];
+  if (!output) return 0;
+  // A marker is assigned only after a complete pair has been formed. Seeing
+  // one marked leg alone therefore cannot be an ordinary adjacent-frame wait:
+  // a splitter, corrupt snapshot, or partial mutation destroyed an atomic
+  // transport unit. Wake immediately so the applying loop fails loud.
+  if (output.atomicCrossJurisdictionPair) return 0;
+  const timestamp = output.sourceRuntimeFrame?.timestamp;
+  if (typeof timestamp !== 'number' || !Number.isSafeInteger(timestamp) || timestamp < 0) return 0;
+  const deadline = timestamp + ACCOUNT_PENDING_STALE_WARNING_MS;
+  return Number.isSafeInteger(deadline) ? deadline : 0;
+};
+
+const assertIncompleteAtomicUnitRecoverable = (
+  env: RuntimeReplica,
+  unit: { outputs: readonly RoutedEntityInput[] },
+  nowMs: number,
+): void => {
+  const output = unit.outputs[0];
+  if (!output) throw new Error('CROSS_J_ATOMIC_COHORT_EMPTY');
+  const marker = output.atomicCrossJurisdictionPair;
+  if (marker) {
+    throw new Error(
+      `CROSS_J_ATOMIC_COHORT_ORPHANED:${marker.phase}:${shortPairKey(marker.pairKey)}`,
+    );
+  }
+  const deadline = incompleteAtomicUnitRecoveryDeadline(unit);
+  if (deadline > nowMs) return;
+  recordRuntimeSecurityIncident(env, {
+    domain: 'cross-j',
+    code: 'CROSS_J_INCOMPLETE_COHORT_DROPPED',
+    source: 'local-consensus',
+    severity: 'critical',
+    summary: 'Incomplete cross-j proposal cohort exceeded the Account pending-frame liveness window',
+    entityId: output.entityId,
+  });
+  throw new Error(
+    `CROSS_J_ATOMIC_COHORT_RECOVERY_EXPIRED:` +
+    `sourceHeight=${String(output.sourceRuntimeFrame?.height)}:` +
+    `deadline=${deadline}:now=${nowMs}`,
+  );
 };
 
 export const MAX_PENDING_NETWORK_OUTPUTS = 10_000;
@@ -601,13 +649,6 @@ export const enqueueP2PEntityInputsDelivery = (
   );
 };
 
-const readBoardValidatorSignerId = (validator: unknown): string => {
-  if (typeof validator === 'string') return validator.trim();
-  if (!validator || typeof validator !== 'object') return '';
-  const raw = validator as { signerId?: unknown; signer?: unknown };
-  return String(raw.signerId || raw.signer || '').trim();
-};
-
 export const resolveGossipBoardSignerIds = (env: RuntimeReplica, entityId: string): string[] => {
   const targetEntityId = String(entityId || '')
     .trim()
@@ -619,9 +660,12 @@ export const resolveGossipBoardSignerIds = (env: RuntimeReplica, entityId: strin
         .trim()
         .toLowerCase() === targetEntityId,
   );
-  const validators = profile?.metadata?.board?.validators;
-  if (!Array.isArray(validators) || validators.length === 0) return [];
-  return validators.map(readBoardValidatorSignerId).filter(Boolean);
+  if (!profile?.runtimeSignature) return [];
+  try {
+    return [recoverAddress(computeProfileRouteHash(profile), profile.runtimeSignature).toLowerCase()];
+  } catch {
+    return [];
+  }
 };
 
 export const splitPendingOutputsByRetryWindow = (
@@ -653,6 +697,7 @@ export const splitPendingOutputsByRetryWindow = (
     if (unit.atomic) {
       if (!unit.complete) {
         logIncompleteAtomicUnitParked(env, unit, orderedPending);
+        assertIncompleteAtomicUnitRecoverable(env, unit, nowMs);
         waiting.push(...unit.outputs);
         continue;
       }
@@ -717,7 +762,13 @@ export const getNextNetworkRetryTimestamp = (env: RuntimeReplica, deps: RuntimeO
     return 0;
   let nextRetryAt = Infinity;
   const blockedUntilByReliableLane = new Map<string, number>();
-  const retryScheduledOutputs = groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(pending)).flatMap(unit => {
+  const atomicUnits = groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(pending));
+  for (const unit of atomicUnits) {
+    if (unit.atomic && !unit.complete) {
+      nextRetryAt = Math.min(nextRetryAt, incompleteAtomicUnitRecoveryDeadline(unit));
+    }
+  }
+  const retryScheduledOutputs = atomicUnits.flatMap(unit => {
     if (!unit.atomic) return unit.outputs;
     if (!unit.complete) return [];
     const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);

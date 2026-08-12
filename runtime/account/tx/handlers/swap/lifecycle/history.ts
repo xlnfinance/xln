@@ -5,16 +5,16 @@ import {
 } from '../../../../../extensions/cross-j/index';
 import { LIMITS } from '../../../../../config/constants';
 
-function ensureSwapOrderHistory(account: AccountReplica): Map<string, SwapOrderHistoryEntry> {
+function requireSwapOrderHistory(account: AccountReplica): Map<string, SwapOrderHistoryEntry> {
   if (!(account.swapOrderHistory instanceof Map)) {
-    account.swapOrderHistory = new Map();
+    throw new Error('ACCOUNT_SWAP_HISTORY_MAP_REQUIRED');
   }
   return account.swapOrderHistory;
 }
 
-function ensureSwapClosedOrders(account: AccountReplica): Map<string, SwapOrderHistoryEntry> {
+function requireSwapClosedOrders(account: AccountReplica): Map<string, SwapOrderHistoryEntry> {
   if (!(account.swapClosedOrders instanceof Map)) {
-    account.swapClosedOrders = new Map();
+    throw new Error('ACCOUNT_SWAP_CLOSED_MAP_REQUIRED');
   }
   return account.swapClosedOrders;
 }
@@ -48,15 +48,15 @@ const byOldestLifecycle = (
 };
 
 function pruneTerminalSwapHistory(account: AccountReplica): void {
-  const terminalHistory = Array.from(ensureSwapOrderHistory(account).entries())
+  const terminalHistory = Array.from(requireSwapOrderHistory(account).entries())
     .filter(([offerId]) => !account.state.swapOffers.has(offerId))
     .sort(byOldestLifecycle);
   const excessHistory = terminalHistory.length - LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY;
   for (const [offerId] of terminalHistory.slice(0, Math.max(0, excessHistory))) {
-    account.swapOrderHistory!.delete(offerId);
+    account.swapOrderHistory.delete(offerId);
   }
 
-  const closedOrders = ensureSwapClosedOrders(account);
+  const closedOrders = requireSwapClosedOrders(account);
   const excessClosed = closedOrders.size - LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY;
   if (excessClosed <= 0) return;
   for (const [offerId] of Array.from(closedOrders.entries()).sort(byOldestLifecycle).slice(0, excessClosed)) {
@@ -75,7 +75,7 @@ export function recordSwapOfferLifecycle(
   ) {
     throw new Error(`ACCOUNT_SWAP_HISTORY_OFFER_ID_INVALID:${offer.offerId.length}`);
   }
-  const history = ensureSwapOrderHistory(account);
+  const history = requireSwapOrderHistory(account);
   if (history.has(offer.offerId)) return;
   history.set(offer.offerId, {
     offerId: offer.offerId,
@@ -99,8 +99,8 @@ export function recordSwapCancelRequested(
   offerId: string,
   currentHeight: number,
 ): void {
-  const entry = ensureSwapOrderHistory(account).get(offerId);
-  if (!entry) return;
+  const entry = requireSwapOrderHistory(account).get(offerId);
+  if (!entry) throw new Error(`ACCOUNT_SWAP_HISTORY_MISSING:${offerId}`);
   entry.cancelRequested = true;
   entry.lastUpdatedHeight = currentHeight;
 }
@@ -110,37 +110,14 @@ export function recordSwapResolveLifecycle(
   offerId: string,
   currentHeight: number,
   resolve: SwapOrderResolveHistoryEntry,
-  fallbackOffer?: {
-    giveTokenId: number;
-    giveAmount: bigint;
-    wantTokenId: number;
-    wantAmount: bigint;
-    priceTicks?: bigint;
-    createdHeight?: number;
-  },
 ): void {
   if ((resolve.comment?.length ?? 0) > LIMITS.MAX_ACCOUNT_SWAP_HISTORY_TEXT) {
     throw new Error(`ACCOUNT_SWAP_HISTORY_COMMENT_TOO_LONG:${resolve.comment!.length}`);
   }
-  const history = ensureSwapOrderHistory(account);
-  let entry = history.get(offerId);
+  const history = requireSwapOrderHistory(account);
+  const entry = history.get(offerId);
   if (!entry) {
-    if (!fallbackOffer) return;
-    entry = {
-      offerId,
-      giveTokenId: fallbackOffer.giveTokenId,
-      giveAmount: fallbackOffer.giveAmount,
-      originalGiveAmount: fallbackOffer.giveAmount,
-      wantTokenId: fallbackOffer.wantTokenId,
-      wantAmount: fallbackOffer.wantAmount,
-      originalWantAmount: fallbackOffer.wantAmount,
-      ...(fallbackOffer.priceTicks !== undefined ? { priceTicks: fallbackOffer.priceTicks } : {}),
-      createdHeight: fallbackOffer.createdHeight ?? currentHeight,
-      cancelRequested: false,
-      lastUpdatedHeight: currentHeight,
-      resolves: [],
-    };
-    history.set(offerId, entry);
+    throw new Error(`ACCOUNT_SWAP_HISTORY_MISSING:${offerId}`);
   }
   entry.originalGiveAmount ??= entry.giveAmount;
   entry.originalWantAmount ??= entry.wantAmount;
@@ -155,9 +132,9 @@ export function recordSwapClosedLifecycle(
   account: AccountReplica,
   offerId: string,
 ): void {
-  const historyEntry = ensureSwapOrderHistory(account).get(offerId);
-  if (!historyEntry) return;
-  const closedOrders = ensureSwapClosedOrders(account);
+  const historyEntry = requireSwapOrderHistory(account).get(offerId);
+  if (!historyEntry) throw new Error(`ACCOUNT_SWAP_HISTORY_MISSING:${offerId}`);
+  const closedOrders = requireSwapClosedOrders(account);
   // Open lifecycle and terminal history are separate state owners. Reusing
   // the mutable cross-j route here creates an alias across two Account maps;
   // that alias has caused Bun's composite structuredClone to fail after a

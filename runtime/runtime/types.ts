@@ -151,19 +151,37 @@ export type PendingJurisdictionImport = {
   request: JurisdictionImportRequest;
 };
 
-export type NumberedRegistrationDefinition = Readonly<{
+type NumberedRegistrationEntityOwnership =
+  | Readonly<{
+      /** This Runtime only pays the on-chain registration and imports no replica. */
+      localSignerId: null;
+      entitySeed: null;
+    }>
+  | Readonly<{
+      /** Local validator whose signer key is already installed in this Runtime. */
+      localSignerId: string;
+      /**
+       * Canonical shared 64-byte Entity seed. Every validator importing this
+       * Entity must receive these exact bytes or the import fails loudly.
+       */
+      entitySeed: string;
+    }>;
+
+type NumberedRegistrationDefinitionBase = Readonly<{
   name: string;
   validators: ReadonlyArray<string | Readonly<{ name: string; weight: number | bigint }>>;
   threshold: bigint;
-  localSignerId: string | null;
   profileName?: string;
   position?: { x: number; y: number; z: number; jurisdiction?: string };
 }>;
 
+export type NumberedRegistrationDefinition =
+  NumberedRegistrationDefinitionBase & NumberedRegistrationEntityOwnership;
+
 type NumberedRegistrationCommandEntity = Readonly<
-  Omit<NumberedRegistrationDefinition, 'validators'> & {
+  Omit<NumberedRegistrationDefinitionBase, 'validators'> & {
     validators: ReadonlyArray<Readonly<{ name: string; weight: number }>>;
-  }
+  } & NumberedRegistrationEntityOwnership
 >;
 
 export type NumberedRegistrationCommand = Readonly<{
@@ -186,15 +204,13 @@ export type NumberedRegistrationCommandResult = Readonly<{
   }>>;
 }>;
 
-type NumberedRegistrationEntityPlan = {
+type NumberedRegistrationEntityPlan = Readonly<{
   name: string;
   boardHash: string;
   config: ConsensusConfig;
-  /** Local replica owner, or null when this Runtime only pays to register another board. */
-  localSignerId: string | null;
   profileName?: string;
   position?: { x: number; y: number; z: number; jurisdiction?: string };
-};
+}> & NumberedRegistrationEntityOwnership;
 
 export type NumberedRegistrationRequest = {
   version: 1;
@@ -303,6 +319,11 @@ export type RuntimeTx =
       data: {
         config: ConsensusConfig;
         isProposer: boolean;
+        /**
+         * Canonical 64-byte Entity seed committed to Runtime history by owner decision.
+         * Disclosure of a WAL/export therefore compromises the Entity key and historical onions.
+         */
+        entitySeed: string;
         profileName?: string;
         position?: { x: number; y: number; z: number; jurisdiction?: string };
       };
@@ -482,8 +503,10 @@ export interface RuntimeState {
 
 /** One live Runtime instance: committed State plus local machine machinery. */
 interface RuntimeInfrastructure {
-  /** Validator-local secrets; never enter Runtime State, WAL, or history. */
+  /** Derived Entity secrets keyed by canonical entityId; source seeds live in Runtime history. */
   entityEncryptionPrivateKeys?: Map<string, string>;
+  /** Canonical import seeds retained in authoritative snapshots after WAL compaction. */
+  entityEncryptionSeeds?: Map<string, string>;
   /**
    * Process-local chain clients, keyed by canonical jurisdiction name.
    *
@@ -541,6 +564,7 @@ interface RuntimeInfrastructure {
   /** Reliable identities detached into the frame currently owned by the single writer. */
   inFlightReliableInputKeys?: Set<string>;
   p2p?: RuntimeP2P | null | undefined;
+  observeOnlineEntityIds?: (entityIds: readonly string[]) => ReadonlySet<string>;
   pendingP2PConfig?: RuntimeP2PConfig | null;
   lastP2PConfig?: RuntimeP2PConfig | null;
   envChangeCallbacks?: Set<(state: RuntimeReplica) => void>;
@@ -549,7 +573,7 @@ interface RuntimeInfrastructure {
   storageDbOpenPromise?: Promise<boolean> | null | undefined;
   storagePreviousDb?: Level<Buffer, Buffer> | null | undefined;
   storagePreviousDbOpenPromise?: Promise<boolean> | null | undefined;
-  storageVerifiedCurrentHeight?: number;
+  storageCurrentProjectionVerified?: boolean;
   storageVerifiedPreviousHeight?: number;
   storageVerifiedWalHeight?: number;
   storageEpochRotatePromise?: Promise<void> | null;
@@ -657,7 +681,6 @@ interface RuntimeInfrastructure {
    * server/relay process with a cached encryption key. This is local socket
    * delivery capability, not permission to queue arbitrary public relay hops.
    */
-  canUseConnectedRelayFallback?: ((targetRuntimeId: string) => boolean) | null;
   /**
    * Optional post-commit backup barrier. If present, runtime holds remote
    * side effects until this callback confirms external recovery storage for

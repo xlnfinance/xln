@@ -1,10 +1,9 @@
 import {
-  normalizeMarketEntityId,
-  normalizeMarketPairId,
   RPC_MARKET_DEFAULT_DEPTH,
   RPC_MARKET_MAX_DEPTH,
   RPC_MARKET_PUBLISH_MS,
 } from './snapshot';
+import { normalizeMarketEntityId, normalizeMarketPairId } from './identifiers';
 import {
   cleanupSubscription,
   ensurePublisher,

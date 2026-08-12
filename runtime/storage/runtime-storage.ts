@@ -69,7 +69,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     runtimeId?: string | null,
     runtimeSeed?: string | null,
     targetHeightOverride?: number,
-    options: { prunedTargetReturnsNull?: boolean } = {},
+    options: import('./recovery/journal/replay').ReplayOptions = {},
   ) =>
     loadPersistedRuntime(
       deps,

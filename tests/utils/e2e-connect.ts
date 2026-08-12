@@ -430,22 +430,8 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
             return false;
           }
 
-          const openState = hubCard.locator('.connection-state').filter({ hasText: /^Open$/i }).first();
-          if (await openState.isVisible().catch(() => false)) {
-            lastUiState = 'open-legacy-awaiting-committed-card';
-            return false;
-          }
-
-          const openingState = hubCard.locator('.connection-state').filter({ hasText: /^Opening$/i }).first();
-          if (await openingState.isVisible().catch(() => false)) {
-            lastUiState = 'opening-legacy-awaiting-committed-card';
-            return false;
-          }
-
           const connectByTestId = hubCard.getByTestId('hub-connect-button').first();
-          const connectButton = await connectByTestId.isVisible().catch(() => false)
-            ? connectByTestId
-            : hubCard.getByRole('button', { name: /Connect/i }).first();
+          const connectButton = connectByTestId;
           if (
             await connectButton.isVisible().catch(() => false)
             && await connectButton.isEnabled().catch(() => false)
@@ -964,9 +950,9 @@ async function selectConfigureAccount(page: Page, hubId: string): Promise<void> 
   if (await option.isVisible().catch(() => false)) {
     await option.dispatchEvent('mousedown');
   } else {
-    const fallbackOption = page.locator('.dropdown-item').filter({ hasText: hubId }).first();
-    await expect(fallbackOption).toBeVisible({ timeout: 20_000 });
-    await fallbackOption.dispatchEvent('mousedown');
+    const matchedOption = page.locator('.dropdown-item').filter({ hasText: hubId }).first();
+    await expect(matchedOption).toBeVisible({ timeout: 20_000 });
+    await matchedOption.dispatchEvent('mousedown');
   }
   await expect(selector.locator('.closed-trigger').first()).toContainText(hubId.slice(0, 10), { timeout: 20_000 });
 }

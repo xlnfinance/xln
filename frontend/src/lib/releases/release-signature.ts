@@ -227,23 +227,6 @@ function modulesEqual(left: Record<string, ReleaseMetricsClaim>, right: Record<s
     leftNames.every((name, index) => name === rightNames[index] && metricsEqual(left[name]!, right[name]!));
 }
 
-export function requiresFoundationAttestation(version: string): boolean {
-  const parts = semverParts(version);
-  if (!parts) return true;
-  const minimum = [0, 1, 9];
-  for (let index = 0; index < minimum.length; index += 1) {
-    if (parts[index]! !== minimum[index]!) return parts[index]! > minimum[index]!;
-  }
-  return true;
-}
-
-const hasHistoricalHankoRecord = (version: string): boolean => {
-  const parts = semverParts(version);
-  if (!parts) return false;
-  return compareReleaseVersions(version, '0.1.7') >= 0 &&
-    compareReleaseVersions(version, '0.1.9') < 0;
-};
-
 function trustedBoardHash(expectedBoard: FoundationReleaseBoard | string): string {
   if (typeof expectedBoard === 'string') {
     if (!ethers.isHexString(expectedBoard, 32)) throw new Error('RELEASE_TRUSTED_BOARD_INVALID');
@@ -348,20 +331,9 @@ export function verifyReleaseSnapshot(
     if (!hasCanonicalSnapshotIdentity(snapshot) ||
       !metricsEqual(snapshot.repository.metrics, snapshot.tree.metrics) ||
       !snapshotModules(snapshot)) return false;
-    if (!requiresFoundationAttestation(snapshot.release.version) &&
-      !hasHistoricalHankoRecord(snapshot.release.version)) return true;
     if (typeof snapshot.repository.merkleRoot !== 'string') return false;
     const computedRoot = computeCodeSnapshotRoot(snapshot.files);
     if (computedRoot !== snapshot.repository.merkleRoot.toLowerCase()) return false;
-    // Historical attestations remain immutable catalog evidence, but their
-    // pre-canonical wire format is never treated as current authorization.
-    if (!requiresFoundationAttestation(snapshot.release.version)) {
-      return Boolean(snapshot.attestation && snapshot.frozenCore && envelopeMatches(snapshot.attestation, {
-        ...snapshot.release,
-        codeSnapshotRoot: computedRoot,
-        frozenCoreRoot: snapshot.frozenCore.rootHash,
-      }));
-    }
     if (!snapshot.attestation || !snapshot.frozenCore ||
       !verifyReleaseAttestation(snapshot.attestation, expectedBoard)) return false;
     return envelopeMatches(snapshot.attestation, {
@@ -381,16 +353,6 @@ export function verifyReleaseManifestEntry(
   try {
     if (!hasCanonicalManifestIdentity(entry) || !metricEntries(entry.metrics)) return false;
     if (!entry.modules || Object.values(entry.modules).some((metrics) => !metricEntries(metrics))) return false;
-    if (!requiresFoundationAttestation(entry.version)) {
-      if (!hasHistoricalHankoRecord(entry.version)) return true;
-      return Boolean(entry.attestation && entry.codeSnapshotRoot && entry.frozenCore && envelopeMatches(entry.attestation, {
-        version: entry.version,
-        sourceCommit: entry.sourceCommit,
-        generatedAt: entry.generatedAt,
-        codeSnapshotRoot: entry.codeSnapshotRoot,
-        frozenCoreRoot: entry.frozenCore.rootHash,
-      }));
-    }
     if (!entry.attestation || !entry.codeSnapshotRoot || !entry.frozenCore ||
       !verifyReleaseAttestation(entry.attestation, expectedBoard)) return false;
     return envelopeMatches(entry.attestation, {
@@ -417,8 +379,7 @@ export function verifyReleaseManifestPolicy(
     const highest = [...versions].sort(compareReleaseVersions).at(-1);
     if (!highest || highest !== manifest.latest) return false;
     if (compareReleaseVersions(manifest.latest, minimumLatest) < 0) return false;
-    const v2Releases = manifest.releases.filter((release) => requiresFoundationAttestation(release.version));
-    if (v2Releases.length > 0 && v2Releases.some((release) => !release.attestation)) return false;
+    if (manifest.releases.some((release) => !release.attestation)) return false;
     return manifest.releases.every((release) => verifyReleaseManifestEntry(release, expectedBoard));
   } catch {
     return false;
@@ -441,9 +402,6 @@ export function verifyReleaseManifestSnapshotBinding(
     !modulesEqual(entry.modules, modules)) return false;
   const entryAttestation = entry.attestation;
   const snapshotAttestation = snapshot.attestation;
-  if (!entryAttestation && !snapshotAttestation) {
-    return true;
-  }
   return Boolean(entryAttestation && snapshotAttestation &&
     entryAttestation.envelopeHash.toLowerCase() === snapshotAttestation.envelopeHash.toLowerCase());
 }

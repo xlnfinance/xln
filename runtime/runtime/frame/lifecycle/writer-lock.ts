@@ -53,7 +53,7 @@ const finishFrameWriterQueueEntry = (state: RuntimeLifecycleState): void => {
 export const acquireRuntimeCommittedRead = async (
   env: RuntimeReplica,
 ): Promise<() => void> => {
-  // The barrier belongs to the live Runtime replica. A detached fallback
+  // The barrier belongs to the live Runtime replica. A detached substitute
   // object would let a writer miss an already-active reader on a fresh Runtime.
   const state = ensureRuntimeInfrastructure(env);
   while (state.frameWritersDrained || state.processingPromise) {

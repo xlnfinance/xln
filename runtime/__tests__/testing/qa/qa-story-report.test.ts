@@ -426,22 +426,22 @@ test('qa regression report compares latest run against previous same code head a
   expect(report.comparisons.find(item => item.kind === 'last-green-main')?.comparedRunId).toBe('green-main-regression');
 });
 
-test('qa severity model normalizes legacy runs and gates release manifests', () => {
-  const legacy = benchmarkRun('severity-legacy', 1000, 800);
-  expect(legacy.severity).toBe('OK');
-  expect(legacy.reason).toBe('QA run is green');
-  expect(legacy.shards[0]?.severity).toBe('OK');
-  expect(legacy.browserHealth?.severity).toBe('OK');
+test('qa severity model normalizes unannotated runs and gates release manifests', () => {
+  const unannotated = benchmarkRun('severity-unannotated', 1000, 800);
+  expect(unannotated.severity).toBe('OK');
+  expect(unannotated.reason).toBe('QA run is green');
+  expect(unannotated.shards[0]?.severity).toBe('OK');
+  expect(unannotated.browserHealth?.severity).toBe('OK');
 
-  const degraded = compareQaBenchmarkRuns(benchmarkRun('severity-slower', 1300, 1100), legacy);
+  const degraded = compareQaBenchmarkRuns(benchmarkRun('severity-slower', 1300, 1100), unannotated);
   expect(degraded.severity).toBe('DEGRADED');
-  expect(degraded.reason).toContain('% vs severity-legacy');
+  expect(degraded.reason).toContain('% vs severity-unannotated');
 
-  const missingSeverity = { ...legacy, manifestVersion: 3 } as Record<string, unknown>;
+  const missingSeverity = { ...unannotated, manifestVersion: 3 } as Record<string, unknown>;
   delete missingSeverity['severity'];
   expect(() => assertQaReleaseRunSeverity(missingSeverity as QaRunManifest)).toThrow('QA_RUN_SEVERITY_REQUIRED');
 
-  const missingReason = { ...legacy, manifestVersion: 3 } as Record<string, unknown>;
+  const missingReason = { ...unannotated, manifestVersion: 3 } as Record<string, unknown>;
   delete missingReason['reason'];
   expect(() => assertQaReleaseRunSeverity(missingReason as QaRunManifest)).toThrow('QA_RUN_REASON_REQUIRED');
 
@@ -777,7 +777,7 @@ test('readQaRun surfaces corrupt manifests as failed redacted evidence', async (
   }
 });
 
-test('readQaRun keeps empty legacy log directories as unknown zero-shard evidence', async () => {
+test('readQaRun keeps empty retired log directories as unknown zero-shard evidence', async () => {
   const runId = '20000101-000005-129';
   const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
   await rm(runDir, { recursive: true, force: true });

@@ -283,7 +283,7 @@
   - [frontend/src/lib/stores/vaultStore.ts](/Users/egor/xln/frontend/src/lib/stores/vaultStore.ts) now registers per-runtime env change callbacks for created, restored, selected, and DB-refreshed runtimes; local runtime UIs no longer rely on DB polling alone to reflect committed frames
   - that fix closed the custody withdraw bug where the persisted frame journal advanced but the wallet DOM stayed stale until a manual refresh/tab cycle
   - [frontend/src/lib/components/Entity/AccountPreview.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/AccountPreview.svelte) now exposes stable `data-counterparty-id` / `data-owner-entity-id` hooks so E2E reads the exact visible account card instead of guessing the selected one
-  - [tests/utils/e2e-account-ui.ts](/Users/egor/xln/tests/utils/e2e-account-ui.ts) now reads rendered outbound/inbound values from visible HTML per specific counterparty card and prints the visible card set on timeout
+  - [tests/utils/runtime/e2e-account-ui.ts](/Users/egor/xln/tests/utils/runtime/e2e-account-ui.ts) now reads rendered outbound/inbound values from visible HTML per specific counterparty card and prints the visible card set on timeout
   - [tests/e2e-custody.spec.ts](/Users/egor/xln/tests/e2e-custody.spec.ts) now waits for the real recipient-side persisted milestone (`HtlcReceived`) and confirms the visible wallet hub account grows after custody withdrawal
   - removed normal-path UI noise:
     - [frontend/src/routes/app/+page.svelte](/Users/egor/xln/frontend/src/routes/app/+page.svelte) no longer logs app init start/success on every load
@@ -316,7 +316,7 @@
   - [tests/e2e-dispute.spec.ts](/Users/egor/xln/tests/e2e-dispute.spec.ts) now clears any stale `sentBatch` latch before reload, which fixed the aggregate-only replay failure after the post-dispute `c2r` path
   - [tests/e2e-rebalance-bar.spec.ts](/Users/egor/xln/tests/e2e-rebalance-bar.spec.ts) no longer filters replicas by `runtimeId===signerId` and no longer depends on page-global `deriveDelta` in the fixed state readers; rebalance assertions now see the same secured state the user sees
   - cleaned E2E helpers/UI evidence:
-    - [tests/utils/e2e-account-ui.ts](/Users/egor/xln/tests/utils/e2e-account-ui.ts) is the shared rendered-account reader for visible outbound/inbound checks
+    - [tests/utils/runtime/e2e-account-ui.ts](/Users/egor/xln/tests/utils/runtime/e2e-account-ui.ts) is the shared rendered-account reader for visible outbound/inbound checks
     - [tests/e2e-swap.spec.ts](/Users/egor/xln/tests/e2e-swap.spec.ts), [tests/e2e-ahb-payment.spec.ts](/Users/egor/xln/tests/e2e-ahb-payment.spec.ts), [tests/e2e-runtime-persistence.spec.ts](/Users/egor/xln/tests/e2e-runtime-persistence.spec.ts), and [tests/e2e-ahb-isolated.spec.ts](/Users/egor/xln/tests/e2e-ahb-isolated.spec.ts) were kept aligned with the same DOM/persisted-truth standard
   - isolated mesh/server support kept with the suite:
     - [runtime/server.ts](/Users/egor/xln/runtime/server.ts), [runtime/scripts/e2e-hub-node.ts](/Users/egor/xln/runtime/scripts/e2e-hub-node.ts), [runtime/scripts/e2e-mesh-control.ts](/Users/egor/xln/runtime/scripts/e2e-mesh-control.ts), [runtime/scenarios/boot.ts](/Users/egor/xln/runtime/scenarios/boot.ts)

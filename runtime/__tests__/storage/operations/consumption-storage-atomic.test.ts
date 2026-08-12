@@ -11,6 +11,7 @@ import {
   registerSignerKey,
 } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import {
   applyConsumptionOutput,
   createEmptyConsumptionAccumulator,
@@ -109,8 +110,7 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
     },
   } as JReplica);
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId,
       data: {
@@ -123,7 +123,7 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
           jurisdiction,
         },
       },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env, []);
@@ -181,6 +181,7 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
   const historyDb = makeAtomicMemoryDb();
   const historyViewDb = makeAtomicMemoryDb();
   await saveRuntimeFrameToStorage({
+    entityContexts: new Map(),
     env,
     tryOpenDb: async () => true,
     getRuntimeDb: () => currentDb,

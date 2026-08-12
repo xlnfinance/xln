@@ -7,7 +7,6 @@ import {
   validateObject,
   validateString,
 } from '../../protocol/boundary/validation-primitives';
-import { validatePersistedValidatorEncryptionManifest } from '../../protocol/htlc/validator-encryption';
 import type { ConsensusConfig, EntityState } from '../types';
 import { assertEntityAccountCountWithinLimit } from '../account/account-capacity';
 import { validateEntityAccountMetadata } from '../account/account-metadata-validation';
@@ -18,26 +17,6 @@ import { validateExternalWalletState } from '../auth/external-wallet-validation'
 import { validateEntityProposals } from './proposal-validation';
 import { validateCrontabState } from '../scheduler/validation';
 
-const validateProfileEncryption = (
-  entity: Record<string, unknown>,
-  config: ConsensusConfig,
-  context: string,
-): void => {
-  if (entity['profileEncryptionManifest'] === undefined) return;
-  try {
-    validatePersistedValidatorEncryptionManifest(
-      validateString(entity['entityId'], `${context}.entityId`),
-      config,
-      entity['profileEncryptionManifest'] as never,
-    );
-  } catch (error) {
-    throw new FinancialDataCorruptionError(
-      `${context}.profileEncryptionManifest invalid: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-};
 
 const validateLeaderState = (
   value: unknown,
@@ -242,7 +221,15 @@ function assertEntityState(
   const config = validateConsensusConfig(entity['config'], `${context}.config`);
   validateEntityCommandState(entity, config, context);
   validateEntityProposals(entity['proposals'], context);
-  validateProfileEncryption(entity, config, context);
+  const entityEncryptionPublicKey = validateString(
+    entity['entityEncryptionPublicKey'],
+    `${context}.entityEncryptionPublicKey`,
+  );
+  if (!/^0x[0-9a-f]{64}$/.test(entityEncryptionPublicKey)) {
+    throw new FinancialDataCorruptionError(
+      `${context}.entityEncryptionPublicKey must be canonical X25519 hex`,
+    );
+  }
   validateLeaderState(entity['leaderState'], config, context);
   validateReserves(entity['reserves'], context);
   validateAccounts(entity['accounts'], entityId, context);

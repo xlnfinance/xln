@@ -8,7 +8,7 @@ export function readCliOption(
 export function readCliOption(
   args: readonly string[],
   name: string,
-  fallback: string,
+  defaultValue: string,
 ): string;
 /**
  * Decode one CLI option. A present option is operator intent, therefore a
@@ -17,7 +17,7 @@ export function readCliOption(
 export function readCliOption(
   args: readonly string[],
   name: string,
-  fallback?: string,
+  defaultValue?: string,
 ): string | undefined {
   const equalsValues = args
     .map(argument => optionWithEquals(argument, name))
@@ -33,7 +33,7 @@ export function readCliOption(
     if (value.length === 0) throw new Error(`CLI_OPTION_VALUE_MISSING:${name}`);
     return value;
   }
-  if (indexes.length === 0) return fallback;
+  if (indexes.length === 0) return defaultValue;
   const value = args[indexes[0]! + 1];
   if (!value || value.startsWith('--')) {
     throw new Error(`CLI_OPTION_VALUE_MISSING:${name}`);

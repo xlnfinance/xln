@@ -12,6 +12,7 @@ import {
   tryOpenRuntimeWalDb,
   tryOpenHistoryViewDb,
 } from '../../../runtime';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
@@ -21,6 +22,7 @@ import {
 import {
   applyEntityFrame,
 } from '../../../entity/consensus';
+import { materializeEntityInfraContext } from '../../../entity/consensus/proposal/infra-context';
 import { buildCollectiveEntityProposalTx } from '../../../entity/auth/authorization';
 import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
@@ -197,7 +199,14 @@ const certifyNextFrame = async (
 ): Promise<{ state: EntityState; link: CertifiedEntityFrameLink }> => {
   const height = state.height + 1;
   const timestamp = env.state.timestamp;
-  const applied = await applyEntityFrame(env, state, txs, timestamp);
+  const entityContext = await materializeEntityInfraContext(env, {
+    entityId: state.entityId,
+    signerId: signerA,
+    state,
+    mempool: [],
+    isProposer: true,
+  }, txs);
+  const applied = await applyEntityFrame(env, state, entityContext, txs, timestamp);
   const postStateWithoutHead: EntityState = {
     ...applied.newState,
     entityId: state.entityId,
@@ -219,6 +228,7 @@ const certifyNextFrame = async (
     state.entityId,
     stateRoot,
     authorityRoot,
+    entityContext,
   );
   const hashesToSign = buildEntityHashesToSign(
     state.entityId,
@@ -235,6 +245,7 @@ const certifyNextFrame = async (
         timestamp,
         txs,
         events: applied.events,
+        entityContext,
         hash,
         stateRoot,
         authorityRoot,
@@ -305,8 +316,7 @@ await installCanonicalRegistrationEvidence(
   { activationHeight: 2 },
 );
 enqueueRuntimeInput(env, {
-  runtimeTxs: [signerA, signerB].map((signerId, index) => ({
-    type: 'importReplica' as const,
+  runtimeTxs: [signerA, signerB].map((signerId, index) => createTestEntityImportRuntimeTx(env, {
     entityId,
     signerId,
     data: {
@@ -450,6 +460,7 @@ if (!recoveryLagMode && !recoveryBoardRootLagMode) {
   env.runtimeConfig.storage = { ...env.runtimeConfig.storage, enabled: true };
   applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
   await saveRuntimeFrameToStorage({
+    entityContexts: new Map(),
     env,
     currentFrameInput: { runtimeTxs: [], entityInputs: [] },
     tryOpenDb: tryOpenStorageDb,
@@ -553,6 +564,7 @@ if (recoveryLagMode || recoveryBoardRootLagMode) {
   await closeInfraDb(env);
 } else {
   await saveRuntimeFrameToStorage({
+    entityContexts: new Map(),
     env,
     // WAL stores causal inputs, not a duplicate full RuntimeReplica. The live mutation
     // above deliberately bypasses process() so this crash fixture must provide

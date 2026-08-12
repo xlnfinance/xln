@@ -73,6 +73,7 @@ const cloneProposedEntityFrame = (
       stateRoot: frame.stateRoot,
       authorityRoot: frame.authorityRoot,
       timestamp: frame.timestamp,
+      entityContext: structuredClone(frame.entityContext),
       txs: cloneIsolatedEntityTxs(frame.txs),
       events: structuredClone(frame.events),
       hash: frame.hash,

@@ -3,9 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
-DEV_CHILD_COMMAND="\"$REPO_ROOT/scripts/dev/run-dev-child.sh\""
-CONCURRENTLY_JS="$REPO_ROOT/node_modules/concurrently/dist/bin/concurrently.js"
-
 source "$REPO_ROOT/scripts/lib/port-layout.sh"
 source "$REPO_ROOT/scripts/lib/start-common.sh"
 source "$REPO_ROOT/scripts/dev/process-owner.sh"
@@ -47,7 +44,6 @@ if [[ ! "$DEV_SHUTDOWN_TIMEOUT_MS" =~ ^[1-9][0-9]*$ ]]; then
   echo "DEV_SHUTDOWN_TIMEOUT_INVALID:${DEV_SHUTDOWN_TIMEOUT_MS}" >&2
   exit 1
 fi
-DEV_OUTER_KILL_TIMEOUT_MS=$((DEV_SHUTDOWN_TIMEOUT_MS + 10000))
 
 DEV_WEB_SCHEME=http
 if [[ "${XLN_VITE_FORCE_HTTP:-0}" != "1" ]]; then
@@ -76,24 +72,7 @@ export DEV_DATA_ROOT XLN_RDB_ROOT XLN_JDB_ROOT XLN_STORAGE_HISTORY_PATH XLN_STOR
 export DEV_RUNTIME_BUNDLE_PATH DEV_STARTED_AT_MS DEV_READY_TIMEOUT_MS DEV_SHUTDOWN_TIMEOUT_MS DEV_CUSTODY_SCHEME DEV_RELAY_WEB_URLS
 export XLN_DEV_SHUTDOWN_TIMEOUT_MS="$DEV_SHUTDOWN_TIMEOUT_MS"
 
-dev_supervisor_pid=''
 dev_cleanup_started=0
-
-stop_dev_supervisor() {
-  [[ -n "$dev_supervisor_pid" ]] || return 0
-  kill -0 "$dev_supervisor_pid" 2>/dev/null || { wait "$dev_supervisor_pid" 2>/dev/null || true; return 0; }
-  kill -TERM "$dev_supervisor_pid" 2>/dev/null || true
-  local attempts=50
-  while kill -0 "$dev_supervisor_pid" 2>/dev/null && [[ "$attempts" -gt 0 ]]; do
-    sleep 0.1
-    attempts=$((attempts - 1))
-  done
-  if kill -0 "$dev_supervisor_pid" 2>/dev/null; then
-    echo "[dev] force-stopping process supervisor pid=${dev_supervisor_pid}" >&2
-    kill -KILL "$dev_supervisor_pid" 2>/dev/null || true
-  fi
-  wait "$dev_supervisor_pid" 2>/dev/null || true
-}
 
 cleanup_dev_stack() {
   local exit_status="$?"
@@ -104,7 +83,6 @@ cleanup_dev_stack() {
   if [[ -f "$XLN_DEV_OWNER_FILE" ]]; then
     stop_owned_dev_processes "$XLN_DEV_OWNER_FILE" "$XLN_DEV_PID_DIR" "$REPO_ROOT" || cleanup_status=$?
   fi
-  stop_dev_supervisor
   if [[ "$cleanup_status" -eq 0 ]]; then
     rm -f "$XLN_DEV_PID_DIR"/*.pid "$XLN_DEV_OWNER_FILE"
   else
@@ -160,18 +138,4 @@ if [[ "$DEV_VERBOSE" != "1" ]]; then
   echo "anvil2 logs            ${DEV_LOG_DIR}/anvil-${RPC2_PORT}.log"
 fi
 
-set +e
-bun --no-orphans "$CONCURRENTLY_JS" \
-  --kill-others \
-  --kill-timeout "$DEV_OUTER_KILL_TIMEOUT_MS" \
-  --names 'ANVIL,ANVIL2,STACK' \
-  -c 'magenta,cyan,blue' \
-  "${DEV_CHILD_COMMAND} anvil" \
-  "${DEV_CHILD_COMMAND} anvil2" \
-  "${DEV_CHILD_COMMAND} stack" &
-dev_supervisor_pid=$!
-wait "$dev_supervisor_pid"
-concurrently_status=$?
-dev_supervisor_pid=''
-set -e
-exit "$concurrently_status"
+bun scripts/dev/supervise-dev.ts

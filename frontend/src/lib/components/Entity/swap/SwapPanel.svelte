@@ -377,22 +377,22 @@ function isHubAccount(accountIdValue: string): boolean {
   return swapRuntimeView.isHubEntity(normalized);
 }
 $: hubAccountIds = accountIds.filter((id) => isHubAccount(id)).slice(0, 10);
-$: fallbackHubAccountId = firstAvailableHubId(hubAccountIds, [counterpartyId], isHubAccount);
-$: if (!resolveHubIdCandidate(selectedBookAccountId, hubAccountIds, isHubAccount) && fallbackHubAccountId) {
-  selectedBookAccountId = fallbackHubAccountId;
+$: defaultHubAccountId = firstAvailableHubId(hubAccountIds, [counterpartyId], isHubAccount);
+$: if (!resolveHubIdCandidate(selectedBookAccountId, hubAccountIds, isHubAccount) && defaultHubAccountId) {
+  selectedBookAccountId = defaultHubAccountId;
 }
-$: if (!resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) && fallbackHubAccountId) {
-  createOrderAccountId = fallbackHubAccountId;
+$: if (!resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) && defaultHubAccountId) {
+  createOrderAccountId = defaultHubAccountId;
 }
 $: if (orderbookScopeMode === 'selected' && selectedBookAccountId) {
   createOrderAccountId = selectedBookAccountId;
 }
 $: activeOrderAccountId =
   orderbookScopeMode === 'aggregated'
-    ? resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) || fallbackHubAccountId
+    ? resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) || defaultHubAccountId
     : resolveHubIdCandidate(selectedBookAccountId, hubAccountIds, isHubAccount) ||
       resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) ||
-      fallbackHubAccountId;
+      defaultHubAccountId;
 $: {
   const nextKey = `${runtimeHeight}:${sourceEntityIdValue}:${activeOrderAccountId}`;
   if (nextKey !== orderAccountProjectionKey) {
@@ -409,7 +409,7 @@ $: {
 }
 $: activeBookHubId = (() => {
   const sourceHubId = String(
-    activeOrderAccountId || selectedRouteOption?.sourceHubEntityId || fallbackHubAccountId || selectedBookAccountId || createOrderAccountId || '',
+    activeOrderAccountId || selectedRouteOption?.sourceHubEntityId || defaultHubAccountId || selectedBookAccountId || createOrderAccountId || '',
   )
     .trim()
     .toLowerCase();
@@ -451,8 +451,8 @@ function accountLabel(accountIdValue: string): string {
   const resolved = swapRuntimeView.entityNames.get(normalized) || '';
   return resolved || formatEntityId(accountIdValue);
 }
-function toErrorMessage(error: unknown, fallback = 'Unknown error'): string {
-  return error instanceof Error && error.message ? error.message : fallback;
+function toErrorMessage(error: unknown, defaultMessage = 'Unknown error'): string {
+  return error instanceof Error && error.message ? error.message : defaultMessage;
 }
 function logSwapDiagnostic(message: string, error: unknown, details: Record<string, unknown> = {}): void {
   errorLog.log(message, 'Swap Panel', {
@@ -790,7 +790,7 @@ function buildCrossTargetOptions(
       .map((id) => String(id || '').trim())
       .filter((id) => id && isHubAccount(id))
       .sort(compareStableText);
-    const fallbackHub = findHubProfileForJurisdiction(targetJurisdiction)?.entityId || '';
+    const defaultHub = findHubProfileForJurisdiction(targetJurisdiction)?.entityId || '';
     const targetHubIds = Array.from(
       new Set(
         [
@@ -798,7 +798,7 @@ function buildCrossTargetOptions(
           ...findHubProfilesForJurisdiction(targetJurisdiction)
             .map((profile) => String(profile.entityId || '').trim())
             .filter(Boolean),
-          ...(fallbackHub ? [fallbackHub] : []),
+          ...(defaultHub ? [defaultHub] : []),
         ]
           .map((id) => id.toLowerCase())
           .filter(Boolean),
@@ -1229,8 +1229,8 @@ $: if (giveTokenOptions.length > 0 && !giveTokenOptions.some((token) => String(t
   selectedOrderLevel = null;
 }
 $: if (wantTokenOptions.length > 0 && !wantTokenOptions.some((token) => String(token.tokenId) === String(wantTokenId))) {
-  const fallbackWant = wantTokenOptions.find((token) => String(token.tokenId) !== String(giveTokenId)) || wantTokenOptions[0];
-  wantTokenId = String(fallbackWant?.tokenId || '');
+  const defaultWant = wantTokenOptions.find((token) => String(token.tokenId) !== String(giveTokenId)) || wantTokenOptions[0];
+  wantTokenId = String(defaultWant?.tokenId || '');
   selectedOrderLevel = null;
 }
 $: derivedTokenPairValue = (() => {
@@ -1240,15 +1240,15 @@ $: derivedTokenPairValue = (() => {
   return `${oriented.baseTokenId}/${oriented.quoteTokenId}`;
 })();
 $: selectedPair = derivedTokenPairValue ? pairOptions.find((option) => option.value === derivedTokenPairValue) || null : null;
-function fallbackCounterToken(tokenIdValue: number): number | null {
+function alternateCounterToken(tokenIdValue: number): number | null {
   if (!Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return null;
   const pair = selectedPair;
   if (pair) {
     if (tokenIdValue === pair.baseTokenId) return pair.quoteTokenId;
     if (tokenIdValue === pair.quoteTokenId) return pair.baseTokenId;
   }
-  const fallback = wantTokenOptions.find((token) => token.tokenId !== tokenIdValue) || swapTokenOptions.find((token) => token.tokenId !== tokenIdValue);
-  return fallback?.tokenId ?? null;
+  const alternate = wantTokenOptions.find((token) => token.tokenId !== tokenIdValue) || swapTokenOptions.find((token) => token.tokenId !== tokenIdValue);
+  return alternate?.tokenId ?? null;
 }
 function setSwapTokens(nextGiveToken: number, nextWantToken: number, allowSameToken = false): void {
   if (!Number.isFinite(nextGiveToken) || !Number.isFinite(nextWantToken)) return;
@@ -1262,12 +1262,12 @@ function setSwapTokens(nextGiveToken: number, nextWantToken: number, allowSameTo
     return;
   }
   if (nextGiveToken === nextWantToken && !allowSameToken && liveSelectedRouteValue === 'same') {
-    const fallbackWantToken = fallbackCounterToken(nextGiveToken);
-    if (!fallbackWantToken || fallbackWantToken === nextGiveToken) {
+    const alternateWantToken = alternateCounterToken(nextGiveToken);
+    if (!alternateWantToken || alternateWantToken === nextGiveToken) {
       submitError = 'Sell token and Buy token must be different.';
       return;
     }
-    nextWantToken = fallbackWantToken;
+    nextWantToken = alternateWantToken;
   }
   const oriented = resolvePairOrientation(nextGiveToken, nextWantToken);
   tradeSide = nextGiveToken === oriented.baseTokenId ? 'sell-base' : 'buy-base';
@@ -1370,8 +1370,8 @@ function buildReverseCrossRouteSelection(): {
   };
 }
 function computeCurrentReceiveAmountForFlip(): bigint {
-  const fallbackAmount = canonicalWantAmount > 0n ? canonicalWantAmount : wantAmount;
-  if (!parsedOrderbookPair) return fallbackAmount;
+  const defaultAmount = canonicalWantAmount > 0n ? canonicalWantAmount : wantAmount;
+  if (!parsedOrderbookPair) return defaultAmount;
   const currentGiveAmount = parseDecimalAmountToBigInt(orderAmountInput, getTokenDecimals(giveToken));
   const explicitPriceTicks =
     selectedOrderLevel?.inputPriceTicks && selectedOrderLevel.inputPriceTicks > 0n
@@ -1379,7 +1379,7 @@ function computeCurrentReceiveAmountForFlip(): bigint {
       : selectedOrderLevel?.priceTicks && selectedOrderLevel.priceTicks > 0n
         ? selectedOrderLevel.priceTicks
         : limitPriceTicks;
-  if (currentGiveAmount <= 0n || !explicitPriceTicks || explicitPriceTicks <= 0n) return fallbackAmount;
+  if (currentGiveAmount <= 0n || !explicitPriceTicks || explicitPriceTicks <= 0n) return defaultAmount;
   const activeMode = orderMode !== 'none' ? orderMode : tradeSide;
   const currentWantAmount =
     activeMode === 'sell-base'
@@ -1395,7 +1395,7 @@ function computeCurrentReceiveAmountForFlip(): bigint {
           getTokenDecimals(parsedOrderbookPair.baseTokenId),
           getTokenDecimals(parsedOrderbookPair.quoteTokenId),
         );
-  if (currentWantAmount <= 0n) return fallbackAmount;
+  if (currentWantAmount <= 0n) return defaultAmount;
   return prepareCanonicalOrder(currentGiveAmount, currentWantAmount)?.effectiveWant ?? currentWantAmount;
 }
 function flipSwapTokens(): void {
@@ -2660,8 +2660,8 @@ function formatAmount(amount: bigint, tokenIdValue: number): string {
 function formatAmountForInput(amount: bigint, tokenIdValue: number): string {
   return formatSwapTokenAmountForInput(amount, getTokenDecimals(tokenIdValue));
 }
-function parseDisplayPriceTicks(displayPrice: string, fallbackPriceTicks: bigint): bigint {
-  return parseSwapDisplayPriceTicks(displayPrice, fallbackPriceTicks);
+function parseDisplayPriceTicks(displayPrice: string, defaultPriceTicks: bigint): bigint {
+  return parseSwapDisplayPriceTicks(displayPrice, defaultPriceTicks);
 }
 function stepPrice(direction: 1 | -1): void {
   const current = parseDecimalAmountToBigInt(priceRatioInput || '0', ORDERBOOK_PRICE_DECIMALS);

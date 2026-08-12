@@ -68,7 +68,7 @@ export const isNonMutatingEntityWakeOutput = (output: EntityOutput): output is N
   output.hashPrecommitFrame === undefined &&
   output.leaderTimeoutVote === undefined;
 
-export const buildConsensusOutputOrigin = (
+const buildConsensusOutputOrigin = (
   sourceEntityId: string,
   height: number,
   frameHash: string,
@@ -553,14 +553,12 @@ export const assertCertifiedEntityOutputWitnesses = async (
   entityTxs: EntityTx[],
   sourceEntityId: string,
   env: EntityRuntimeContext,
-  observerState?: EntityState,
+  observerState: EntityState,
   authorityBoardHash?: string,
 ): Promise<void> => {
   const registeredBoardHash =
     authorityBoardHash ??
-    (observerState
-      ? resolveObserverCertifiedBoardHash(observerState, getCertifiedBoardNodeStore(env), sourceEntityId)
-      : null);
+    resolveObserverCertifiedBoardHash(observerState, getCertifiedBoardNodeStore(env), sourceEntityId);
   const witnesses = entityTxs.flatMap(tx => (tx.type === 'accountInput' ? collectAccountInputWitnesses(tx.data) : []));
   for (const witness of witnesses) {
     const verified = await verifyHankoForHash(
@@ -568,7 +566,10 @@ export const assertCertifiedEntityOutputWitnesses = async (
       witness.hash,
       sourceEntityId,
       env,
-      registeredBoardHash ? { registeredBoardHash } : undefined,
+      {
+        ...(registeredBoardHash ? { registeredBoardHash } : {}),
+        observerState,
+      },
     );
     if (!verified.valid) {
       throw new Error(`CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID:${witness.context}:${witness.hash}`);
@@ -651,7 +652,10 @@ export const verifyCertifiedEntityOutput = async (
     outputHash,
     origin.sourceEntityId,
     env,
-    registeredBoardHash ? { registeredBoardHash } : undefined,
+    {
+      ...(registeredBoardHash ? { registeredBoardHash } : {}),
+      observerState,
+    },
   );
   if (!verified.valid) {
     throw new Error(`CONSENSUS_OUTPUT_HANKO_INVALID:${origin.sourceEntityId}:${origin.height}:${origin.outputIndex}`);

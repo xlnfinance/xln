@@ -189,11 +189,11 @@ test('relay delivery events expose typed retry and fatal semantics', () => {
   const store = createRelayStore('relay-test');
   pushDebugEvent(store, {
     event: 'delivery',
-    status: 'direct-miss-fallback',
+    status: 'direct-miss-failover',
   });
   expect(store.debugEvents.at(-1)?.delivery).toMatchObject({
     outcome: 'deferred',
-    code: 'DELIVERY_DIRECT_MISS_FALLBACK',
+    code: 'DELIVERY_DIRECT_MISS_FAILOVER',
     retryable: true,
     fatal: false,
   });

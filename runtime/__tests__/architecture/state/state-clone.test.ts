@@ -21,9 +21,10 @@ import {
   computeCanonicalEntityConsensusStateHashCold,
 } from '../../../entity/consensus/state-root';
 import {
-  applyEntityFrame,
   applyRuntimeOwnedEntityFrame,
 } from '../../../entity/consensus/frame/application';
+import { materializeEntityInfraContext } from '../../../entity/consensus/proposal/infra-context';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import { EntityCandidateMap } from '../../../entity/state/candidate-map';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import {
@@ -130,7 +131,6 @@ const makeCanonicalAccountFixture = () => ({
       crossJurisdiction: makeCrossJurisdictionRoute(),
     }]]),
     pulls: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
@@ -196,6 +196,7 @@ const makeProjectionReplica = () => ({
   isProposer: false,
   state: {
     entityId: `0x${'aa'.repeat(32)}`,
+    entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
     height: 0,
     timestamp: 1,
     nonces: new Map(),
@@ -405,15 +406,21 @@ describe('state cloning', () => {
     const isolatedSource = makeProjectionReplica().state as EntityState;
     const ownedSource = cloneTrustedEntityState(isolatedSource);
 
-    const isolated = await applyEntityFrame(
+    const isolated = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       isolatedSource,
       [],
       env.state.timestamp,
     );
+    const ownedContext = await materializeEntityInfraContext(env, {
+      ...makeProjectionReplica(),
+      state: ownedSource,
+      isProposer: true,
+    }, []);
     const owned = await applyRuntimeOwnedEntityFrame(
       env,
       ownedSource,
+      ownedContext,
       [],
       env.state.timestamp,
     );

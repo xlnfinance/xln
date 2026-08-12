@@ -32,7 +32,7 @@ import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { withDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
 import { startRuntimeHistoryTraceForTesting } from '../../runtime/observability/history-retention';
 import { ethers } from 'ethers';
-import { quoteHtlcPaymentRoute } from '../../entity/htlc/payment-admission';
+import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
 
 const USDC = 1;
 const convergeScenario = (env: RuntimeReplica, maxCycles = 15): Promise<void> => converge(env, maxCycles);

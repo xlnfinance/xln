@@ -191,7 +191,6 @@ import { canonicalDisputeFinalizationEvidenceHash } from '../../../jurisdiction/
 
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
 
-import { collectLocalProfileEncryptionAnnouncements } from '../../../entity/profile/profile-encryption';
 
 import { LIMITS } from '../../../config/constants';
 
@@ -772,7 +771,9 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(buffered.newState.crossJurisdictionSwaps?.get(route.orderId)?.pendingTargetRegistryReveal).toBeUndefined();
     expect(buffered.newState.jBatchState?.batch.hashLadderRegistrations).toHaveLength(1);
 
-    const terminalRoute = buffered.newState.crossJurisdictionSwaps?.get(route.orderId)!;
+    const terminalRoute = buffered.newState.crossJurisdictionSwaps?.get(route.orderId);
+    expect(terminalRoute).toBeDefined();
+    if (!terminalRoute) throw new Error('expected buffered cross-jurisdiction route');
     terminalRoute.status = 'settled';
     const delayed = await applyEntityTx(env, buffered.newState, {
       type: 'crossJurisdictionSalvage',

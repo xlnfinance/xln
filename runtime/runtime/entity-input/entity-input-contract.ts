@@ -13,6 +13,7 @@ import {
   readRuntimePerfSlowMs,
 } from '../../infra/performance/runtime-flags.ts';
 import { createStructuredLogger } from '../../infra/logger.ts';
+import type { EntityInfraContext } from '../../types/entity/infra-context.ts';
 
 export const entityInputLog = createStructuredLogger('runtime.entity_inputs');
 
@@ -36,6 +37,7 @@ export const entityInputSlowMs = (): number =>
   readRuntimePerfSlowMs('XLN_ENTITY_INPUT_SLOW_MS', ENTITY_INPUT_SLOW_MS);
 
 export interface RuntimeEntityInputApplyResult {
+  entityContexts: Map<string, EntityInfraContext>;
   entityOutbox: RoutedEntityInput[];
   appliedEntityInputs: RoutedEntityInput[];
   inputOutcomes: Array<{
@@ -132,6 +134,7 @@ export interface RuntimeEntityInputApplyOptions {
 }
 
 export type RuntimeEntityInputBatchContext = {
+  entityContexts: Map<string, EntityInfraContext>;
   entityOutbox: RoutedEntityInput[];
   appliedEntityInputs: RoutedEntityInput[];
   inputOutcomes: RuntimeEntityInputApplyResult['inputOutcomes'];
@@ -149,6 +152,7 @@ export type RuntimeEntityInputBatchContext = {
 export const createRuntimeEntityInputBatchContext = (
   initialJOutbox: JInput[],
 ): RuntimeEntityInputBatchContext => ({
+  entityContexts: new Map(),
   entityOutbox: [],
   appliedEntityInputs: [],
   inputOutcomes: [],

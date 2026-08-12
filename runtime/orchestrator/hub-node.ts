@@ -385,8 +385,8 @@ type JurisdictionImportDiagnostics = {
 
 const argsRaw = process.argv.slice(2);
 
-const getArg = (name: string, fallback = ''): string =>
-  readCliOption(argsRaw, name, fallback);
+const getArg = (name: string, defaultValue = ''): string =>
+  readCliOption(argsRaw, name, defaultValue);
 
 const hasFlag = (name: string): boolean => hasCliFlag(argsRaw, name);
 
@@ -395,10 +395,10 @@ const readRpcUrls = (): Record<number, string> => {
   for (let index = 1; index <= 8; index += 1) {
     const flag = index === 1 ? '--rpc-url' : `--rpc${index}-url`;
     const envName = index === 1 ? 'ANVIL_RPC' : `ANVIL_RPC${index}`;
-    const fallback = index === 1
+    const defaultRpcUrl = index === 1
       ? process.env['ANVIL_RPC'] || ''
       : process.env[envName] || process.env[`RPC${index}`] || process.env[`XLN_RPC${index}_URL`] || '';
-    urls[index] = getArg(flag, index === 2 ? (process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || fallback) : fallback);
+    urls[index] = getArg(flag, index === 2 ? (process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || defaultRpcUrl) : defaultRpcUrl);
   }
   return urls;
 };
@@ -640,7 +640,7 @@ const resolveOperatorAppUrl = (): string => {
 };
 
 const buildRuntimeAdminUrl = (env: RuntimeReplica): string | null => {
-  const seed = resolveRuntimeAdapterAuthSeed(env);
+  const seed = resolveRuntimeAdapterAuthSeed();
   if (!seed) return null;
   const runtimeAdapterUrl = new URL(directWsUrl);
   runtimeAdapterUrl.port = String(resolvedArgs.apiPort);
@@ -1022,14 +1022,14 @@ type ImportedJurisdictionContracts = {
 const getImportedJurisdictionContracts = (
   env: RuntimeReplica,
   jurisdictionName: string,
-  fallback?: JurisdictionConfig['contracts'],
+  configuredContracts?: JurisdictionConfig['contracts'],
 ): ImportedJurisdictionContracts => {
   const replica = env.state.jReplicas?.get(jurisdictionName);
   const depositoryAddress = String(
-    replica?.contracts?.depository || fallback?.depository || '',
+    replica?.contracts?.depository || configuredContracts?.depository || '',
   ).trim();
   const entityProviderAddress = String(
-    replica?.contracts?.entityProvider || fallback?.entityProvider || '',
+    replica?.contracts?.entityProvider || configuredContracts?.entityProvider || '',
   ).trim();
   const chainId = Number(replica?.chainId);
   return {
@@ -1481,7 +1481,7 @@ const buildAggregateReserveHealth = (
 const buildHubBootstrapReserveHealth = (
   env: RuntimeReplica,
   primaryEntityId: string | null,
-  fallbackCatalog: JTokenInfo[],
+  defaultCatalog: JTokenInfo[],
   hubEntities: HubBootstrapEntry[] = [],
 ): BootstrapReserveHealth => {
   const entries = hubEntities.length > 0
@@ -1496,7 +1496,7 @@ const buildHubBootstrapReserveHealth = (
         }]
       : [];
   const entities = entries.map((entry) => {
-    const catalog = tokenCatalogsByEntityId.get(normalizeEntityId(entry.entityId)) ?? fallbackCatalog;
+    const catalog = tokenCatalogsByEntityId.get(normalizeEntityId(entry.entityId)) ?? defaultCatalog;
     const health = getReserveHealth(env, entry.entityId, catalog);
     return {
       entityId: entry.entityId,
@@ -2315,7 +2315,6 @@ const handleHubHttpRequest = async (
 
 type MeshBootstrapMilestones = {
   gossipReady: boolean;
-  directPeerGraceLogged: boolean;
   accountsReady: boolean;
   creditReady: boolean;
   reserveReady: boolean;
@@ -2415,14 +2414,10 @@ const advanceHubMeshBootstrap = async (
   if (!directHubPeersReady(input.env, peers)) {
     const waitedMs = Date.now() - input.totalStartedAt;
     if (waitedMs < HUB_DIRECT_LINK_BOOTSTRAP_GRACE_MS) return;
-    if (!input.milestones.directPeerGraceLogged) {
-      input.milestones.directPeerGraceLogged = true;
-      nodeLog.warn('mesh.direct_peers.grace_expired', {
-        waitedMs,
-        graceMs: HUB_DIRECT_LINK_BOOTSTRAP_GRACE_MS,
-        peers: peers.length,
-      });
-    }
+    // Relay is the canonical availability path after the bounded direct-link
+    // preference window. Do not log this once per hub: the owning orchestrator
+    // publishes the single mesh-wide direct-link baseline and still enforces
+    // XLN_REQUIRE_DIRECT_BASELINE when strict direct readiness is required.
     input.markProgress('direct-peers:relayed');
   }
   const { openInputs, creditInputs } = planMeshBootstrapInputs(
@@ -2721,7 +2716,6 @@ const createHubMeshBootstrapController = (
     const totalStartedAt = startTiming('mesh_ready_total');
     const milestones: MeshBootstrapMilestones = {
       gossipReady: false,
-      directPeerGraceLogged: false,
       accountsReady: false,
       creditReady: false,
       reserveReady: false,

@@ -21,12 +21,12 @@ describe('local runtime Entity selection', () => {
     })).toBe(expected);
   });
 
-  test('UserModePanel wires the exact selector and has no first-replica fallback', () => {
+  test('UserModePanel wires the exact selector and has no first-replica inference', () => {
     const source = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
     expect(source).toContain('resolveActiveLocalReplica(currentFrame.state.eReplicas, activeSigner)');
     expect(source).not.toContain('firstReplicaInFrame');
     expect(source).toContain('setRuntimeViewActiveEntityId(selectedEntityId);');
-    expect(source).toContain('setRuntimeViewActiveEntityId(fallbackEntityId);');
+    expect(source).toContain('setRuntimeViewActiveEntityId(restoredEntityId);');
     expect(source).toContain('setRuntimeViewActiveEntityId(entityId);');
   });
 });

@@ -114,7 +114,6 @@ test('each payment operation retains one explicit canonical transaction path', (
     .toContain("type: 'htlc_lock'");
   expect(source('runtime/entity/tx/handlers/payments/swap-requests.ts'))
     .toContain("type: 'swap_offer'");
-  expect(source('runtime/entity/consensus/frame/application.ts')).not.toContain('Fallback:');
 
   const crossJurisdiction = source('runtime/entity/tx/handlers/cross-j/setup.ts');
   expect(crossJurisdiction).toContain("{ type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } }");
@@ -183,7 +182,6 @@ test('same-j offers are projected only by the counterparty matcher', () => {
   expect(frameApplication).toContain("entityLog.debug('orderbook.skip_local_maker'");
   expect(frameApplication).toContain('if (!currentEntityState.orderbookExt) return;');
   expect(frameApplication).not.toContain('ORDERBOOK_EXTENSION_REQUIRED_FOR_MATCHING');
-  expect(frameApplication).not.toContain('Fallback:');
 });
 
 test('public proof smoke exercises only the canonical timed dispute path', () => {

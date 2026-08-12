@@ -333,11 +333,6 @@ const mutations: Mutation[] = [
     mutate: ({ doc }) => { doc.proofHeader.nextProofNonce = -1; },
   },
   {
-    name: 'negative global credit limit',
-    expected: 'reject',
-    mutate: ({ doc }) => { doc.state.globalCreditLimits.peerLimit = -1n; },
-  },
-  {
     name: 'unrelated storage-key endpoint control',
     expected: 'reject',
     mutate: (value) => { value.counterparty = digest('96'); },
@@ -408,9 +403,9 @@ describe('persisted AccountReplica semantic boundary', () => {
     expect(deriveDelta(admitted.state.deltas.get(1)!, true).outCapacity).toBe(baseline);
   });
 
-  test('the audited matrix remains 36 rejects plus 2 design-valid accepts', () => {
-    expect(mutations).toHaveLength(38);
-    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(36);
+  test('the audited matrix remains 35 rejects plus 2 design-valid accepts', () => {
+    expect(mutations).toHaveLength(37);
+    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(35);
     expect(mutations.filter(({ expected }) => expected === 'accept')).toHaveLength(2);
   });
 

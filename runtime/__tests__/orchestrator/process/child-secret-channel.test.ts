@@ -58,7 +58,7 @@ describe('orchestrator child secret channel', () => {
       "const radapterAuthSeed = resolveChildSecret(secrets, 'radapterAuthSeed', process.env['XLN_RADAPTER_AUTH_SEED'] || '');",
       'registerRuntimeAdapterAuthSeed(radapterAuthSeed);',
       "delete process.env['XLN_RADAPTER_AUTH_SEED'];",
-      "process.stdout.write(JSON.stringify({ seed, authSeedMatches: resolveRuntimeAdapterAuthSeed(null) === radapterAuthSeed, keep: process.env['KEEP_FOR_CHILD'] || '', root: process.env['XLN_MESH_ROOT_SEED'] || '', custody: process.env['CUSTODY_SEED'] || '', daemon: process.env['CUSTODY_DAEMON_RUNTIME_SEED'] || '', auth: process.env['CUSTODY_DAEMON_AUTH_SEED'] || '', radapter: process.env['XLN_RADAPTER_AUTH_SEED'] || '' }));",
+      "process.stdout.write(JSON.stringify({ seed, authSeedMatches: resolveRuntimeAdapterAuthSeed() === radapterAuthSeed, keep: process.env['KEEP_FOR_CHILD'] || '', root: process.env['XLN_MESH_ROOT_SEED'] || '', custody: process.env['CUSTODY_SEED'] || '', daemon: process.env['CUSTODY_DAEMON_RUNTIME_SEED'] || '', auth: process.env['CUSTODY_DAEMON_AUTH_SEED'] || '', radapter: process.env['XLN_RADAPTER_AUTH_SEED'] || '' }));",
     ].join('');
     const child = spawn(process.execPath, ['-e', code], {
       cwd: process.cwd(),

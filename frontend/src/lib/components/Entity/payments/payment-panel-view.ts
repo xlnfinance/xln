@@ -84,6 +84,7 @@ function projectSummaryProfile(summary: RuntimeAdapterEntitySummary): GossipProf
   const jurisdiction = projectSummaryJurisdiction(summary);
   return {
     entityId,
+    entityEncryptionPublicKey: '',
     name: String(summary.label || entityId),
     avatar: '',
     bio: '',
@@ -98,7 +99,6 @@ function projectSummaryProfile(summary: RuntimeAdapterEntitySummary): GossipProf
       isHub: summary.isHub === true,
       routingFeePPM: 0,
       baseFee: 0n,
-      board: { threshold: 0, validators: [], encryptionAttestations: [] },
       ...(jurisdiction ? { jurisdiction } : {}),
     },
     accounts: [],

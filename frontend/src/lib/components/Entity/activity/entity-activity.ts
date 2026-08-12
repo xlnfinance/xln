@@ -103,26 +103,26 @@ function activityAccountLabel(counterpartyId: string, activeEnv: GossipSource): 
   return resolveEntityName(raw, activeEnv) || formatEntityId(raw);
 }
 
-function initialsFor(name: string, fallback: string): string {
+function initialsFor(name: string, defaultInitials: string): string {
   return name
     .split(/[\s_-]+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() || '')
-    .join('') || fallback;
+    .join('') || defaultInitials;
 }
 
 function activityEntityName(
   entityIdRaw: unknown,
-  fallback: string,
+  defaultName: string,
   options: BuildEntityActivityRowsOptions,
 ): string {
   const entityId = String(entityIdRaw || '').trim();
-  if (!entityId) return fallback;
+  if (!entityId) return defaultName;
   return getEntityDisplayName(entityId, {
     source: options.activeEnv,
     selfEntityId: options.replica?.state?.entityId || options.tabEntityId,
-    fallback,
+    defaultLabel: defaultName,
   });
 }
 
@@ -142,7 +142,7 @@ function frameActorMeta(
     ? getEntityDisplayName(actorEntityId, {
         source: options.activeEnv,
         selfEntityId: localEntityId,
-        fallback: actorEntityId,
+        defaultLabel: actorEntityId,
       })
     : 'System';
   const actorAvatar = actorEntityId ? resolveEntityAvatar(options.activeXlnFunctions, actorEntityId) : '';

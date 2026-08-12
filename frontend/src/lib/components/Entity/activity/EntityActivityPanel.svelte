@@ -50,7 +50,7 @@
             {#if row.actorAvatar}
               <img class="entity-activity-avatar" src={row.actorAvatar} alt="" />
             {:else}
-              <div class="entity-activity-avatar entity-activity-avatar-fallback">{row.actorInitials}</div>
+              <div class="entity-activity-avatar entity-activity-avatar-placeholder">{row.actorInitials}</div>
             {/if}
             <div class="entity-activity-author-meta">
               <div class="entity-activity-author-name">{row.actorName}</div>
@@ -170,7 +170,7 @@
     flex-shrink: 0;
   }
 
-  .entity-activity-avatar-fallback {
+  .entity-activity-avatar-placeholder {
     display: inline-flex;
     align-items: center;
     justify-content: center;

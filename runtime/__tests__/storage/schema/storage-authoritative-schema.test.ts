@@ -137,6 +137,17 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       canonicalEntityHashes: [],
       runtimeStateHash: hash,
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
+      entityContexts: new Map([[`0x${'aa'.repeat(32)}:signer-b`, {
+        version: 1,
+        proposerReplicaId: `0x${'aa'.repeat(32)}:signer-a`,
+        entityId: `0x${'aa'.repeat(32)}`,
+        proposerSignerId: 'signer-a',
+        parentFrameHash: 'genesis',
+        height: 1,
+        gossipProfiles: [],
+        peerAssertions: [],
+        htlc: { version: 1, entries: [], originated: [] },
+      }]]),
       historyRecords: [],
       activityLogs: [],
       runtimeMachine,
@@ -426,6 +437,17 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       canonicalEntityHashes: [],
       runtimeStateHash: hash,
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
+      entityContexts: new Map([[`0x${'aa'.repeat(32)}:signer-b`, {
+        version: 1,
+        proposerReplicaId: `0x${'aa'.repeat(32)}:signer-a`,
+        entityId: `0x${'aa'.repeat(32)}`,
+        proposerSignerId: 'signer-a',
+        parentFrameHash: 'genesis',
+        height: 1,
+        gossipProfiles: [],
+        peerAssertions: [],
+        htlc: { version: 1, entries: [], originated: [] },
+      }]]),
       historyRecords: [],
       activityLogs: [],
       runtimeMachine,
@@ -442,6 +464,8 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       validateStorageFrameRecordValue,
     );
     expect(computeStorageFrameHash(decoded)).toBe(frame.frameHash);
+    expect(decoded.entityContexts.get(`0x${'aa'.repeat(32)}:signer-b`)?.peerAssertions)
+      .toEqual([]);
     const restored = createEmptyEnv('storage-runtime-machine-roundtrip-restored');
     restoreDurableRuntimeSnapshot(restored, decoded.runtimeMachine!);
     expect(restored.infrastructure?.pendingCommittedJOutbox).toEqual(

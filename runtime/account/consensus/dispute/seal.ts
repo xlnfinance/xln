@@ -111,12 +111,12 @@ export const validateCounterpartyDisputeSeal = async (
     seal.hanko,
     expectedHash,
     input.fromEntityId,
-    securityContext.counterpartyCertifiedBoardHash
-      ? {
-          registeredBoardHash: securityContext.counterpartyCertifiedBoardHash,
-          allowPreviousBoard,
-        }
-      : undefined,
+    {
+      ...(securityContext.counterpartyCertifiedBoardHash
+        ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash }
+        : {}),
+      allowPreviousBoard,
+    },
   );
   if (!valid) {
     throw new AccountPeerEvidenceError(

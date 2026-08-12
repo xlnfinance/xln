@@ -75,31 +75,18 @@ const validateSwapHistories = (
   account: Record<string, unknown>,
   context: string,
 ): void => {
-  if (account['swapOrderHistory'] !== undefined) {
-    validateSwapHistoryMap(
-      account['swapOrderHistory'],
-      `${context}.swapOrderHistory`,
-      LIMITS.MAX_ACCOUNT_SWAP_OFFERS + LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY,
-      'ACCOUNT_SWAP_HISTORY_LIMIT_EXCEEDED',
-    );
-  }
-  if (account['swapClosedOrders'] !== undefined) {
-    validateSwapHistoryMap(
-      account['swapClosedOrders'],
-      `${context}.swapClosedOrders`,
-      LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY,
-      'ACCOUNT_TERMINAL_SWAP_HISTORY_LIMIT_EXCEEDED',
-    );
-  }
-};
-
-const validateCreditLimits = (value: unknown, context: string): void => {
-  const limits = validateObject(value, context);
-  for (const side of ['ownLimit', 'peerLimit'] as const) {
-    if (typeof limits[side] !== 'bigint') {
-      throw new FinancialDataCorruptionError(`${context}.${side} must be bigint`);
-    }
-  }
+  validateSwapHistoryMap(
+    account['swapOrderHistory'],
+    `${context}.swapOrderHistory`,
+    LIMITS.MAX_ACCOUNT_SWAP_OFFERS + LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY,
+    'ACCOUNT_SWAP_HISTORY_LIMIT_EXCEEDED',
+  );
+  validateSwapHistoryMap(
+    account['swapClosedOrders'],
+    `${context}.swapClosedOrders`,
+    LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY,
+    'ACCOUNT_TERMINAL_SWAP_HISTORY_LIMIT_EXCEEDED',
+  );
 };
 
 const validatePendingSignatures = (
@@ -200,7 +187,6 @@ function assertAccountReplica(
   }
   validateSwapHistories(account, context);
   validateLendingIntents(state['lendingIntents'], `${context}.state.lendingIntents`);
-  validateCreditLimits(state['globalCreditLimits'], `${context}.state.globalCreditLimits`);
   requireBoundaryInteger(account['currentHeight'], `${context}.currentHeight`);
   validatePendingAccountResend(account, context);
   validatePendingSignatures(account, context);

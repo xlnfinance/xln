@@ -91,9 +91,6 @@ export const assertEntityCommandAuthorBindings = (authorSignerId: string, txs: E
   };
   for (const tx of txs) {
     if (tx.type === 'chat') assertBound('chat.from', tx.data.from);
-    if (tx.type === 'htlcOnionAdvance') {
-      assertBound('htlcOnionAdvance.proposerSignerId', tx.data.proposerSignerId);
-    }
     if (tx.type === 'materializeCrossJurisdictionSwap') {
       assertBound('materializeCrossJurisdictionSwap.proposerSignerId', tx.data.proposerSignerId);
     }

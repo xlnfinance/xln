@@ -12,6 +12,7 @@ import {
 } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { buildCanonicalEnvSnapshot } from '../../../storage/wal/snapshot';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import {
   appendRecentRuntimeSnapshot,
   RECENT_RUNTIME_HISTORY_LIMIT,
@@ -75,8 +76,7 @@ test('production RuntimeReplica retains only the bounded canonical debug tail', 
     },
   });
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId: signer,
       data: {
@@ -89,7 +89,7 @@ test('production RuntimeReplica retains only the bounded canonical debug tail', 
           jurisdiction,
         },
       },
-    }],
+    })],
     entityInputs: [],
   });
 
@@ -105,8 +105,7 @@ test('production RuntimeReplica retains only the bounded canonical debug tail', 
   const secondSigner = deriveSignerAddressSync(seed, '2');
   const secondEntityId = generateLazyEntityId([secondSigner], 1n).toLowerCase();
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId: secondEntityId,
       signerId: secondSigner,
       data: {
@@ -119,7 +118,7 @@ test('production RuntimeReplica retains only the bounded canonical debug tail', 
           jurisdiction,
         },
       },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env, []);

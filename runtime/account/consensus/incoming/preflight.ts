@@ -53,8 +53,11 @@ const verifyIncomingFrameHanko = async (
     receivedFrame.stateHash,
     input.fromEntityId,
     securityContext.counterpartyCertifiedBoardHash
-      ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash }
-      : undefined,
+      ? {
+          registeredBoardHash: securityContext.counterpartyCertifiedBoardHash,
+          allowPreviousBoard: false,
+        }
+      : { allowPreviousBoard: false },
   );
   if (!valid || !recoveredEntityId) {
     return rejectAccountPeerInput(
@@ -218,6 +221,13 @@ const validateIncomingFrameDeadline = (
 
   const violation = getIncomingAccountDeadlineViolation(account.state, receivedFrame, securityContext);
   if (!violation) return undefined;
+  if (violation.disposition === 'reject') {
+    return rejectAccountPeerInput(
+      'ACCOUNT_PEER_FRAME_DEADLINE_INVALID',
+      violation.reason,
+      events,
+    );
+  }
   const proposal = accountInputProposal(input);
   if (!proposal?.frameHanko) {
     throw new Error('INBOUND_ACCOUNT_FRAME_HANKO_MISSING_AFTER_PREFLIGHT');

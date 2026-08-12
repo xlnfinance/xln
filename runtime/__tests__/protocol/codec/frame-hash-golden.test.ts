@@ -13,6 +13,7 @@ import {
 import type { AccountFrame } from '../../../types/account';
 import type { EntityState } from '../../../entity/types';
 import type { EntityTx } from '../../../types/entity-tx';
+import type { EntityInfraContext } from '../../../types/entity/infra-context';
 
 // Intentional testnet reset: Account frame/state integrity commitments use the
 // native-SHA integrity helper; Ethereum-facing proof hashes remain Keccak.
@@ -22,9 +23,23 @@ const ACCOUNT_FRAME_GOLDEN_HASH = '0x15cd826cf4c3d968ec506d1ec758c7529963079ca1f
 // Intentional testnet reset: Entity Accounts are committed through the
 // persistent radix-Merkle section. Every projected AccountReplica leaf remains
 // bound, while unchanged accounts no longer require O(total accounts) hashing.
-const ENTITY_STATE_ROOT_GOLDEN_HASH = '0x71ad20cd92f748524f8a14f447a24518465511fb6bfbc95d153d0181230b6509';
+const ENTITY_STATE_ROOT_GOLDEN_HASH = '0xbe665e28bcef220761ba4c6ac89bd0482680c9f88b28514ca5082c8fb75a19c5';
 const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0xa7c4fd7139d47d2567c6a97c7d7d06bc6d60fc4481acbe8155584f3573b520bd';
-const ENTITY_FRAME_GOLDEN_HASH = '0x26f4b8223b76f72b13abadead0e98187d1f0cbd00b4215dc9fc310b5bcaa6c6d';
+// Intentional testnet reset: the canonical Entity frame commits the exact infra context,
+// while Entity state commits its shared encryption public key.
+const ENTITY_FRAME_GOLDEN_HASH = '0x005a2b9ff5a5dd148ff87e91fbe005f358b6d99c0432f0b404ef9076a016f3a1';
+
+const makeEntityContextFixture = (): EntityInfraContext => ({
+  version: 1,
+  proposerReplicaId: `0x${'aa'.repeat(32)}:0x${'01'.repeat(20)}`,
+  entityId: `0x${'aa'.repeat(32)}`,
+  proposerSignerId: `0x${'01'.repeat(20)}`,
+  parentFrameHash: `0x${'22'.repeat(32)}`,
+  height: 4,
+  gossipProfiles: [],
+  peerAssertions: [],
+  htlc: { version: 1, entries: [], originated: [] },
+});
 
 const makeAccountFrameFixture = (): AccountFrame => ({
   height: 7,
@@ -54,6 +69,7 @@ const makeAccountFrameFixture = (): AccountFrame => ({
 
 const makeEntityStateFixture = (accountHash: string): EntityState => ({
   entityId: `0x${'aa'.repeat(32)}`,
+  entityEncryptionPublicKey: `0x${'55'.repeat(32)}`,
   height: 3,
   timestamp: 1_700_000_000_123,
   nonces: new Map(),
@@ -116,10 +132,11 @@ describe('frame hash golden fixtures', () => {
       1_700_000_000_456,
       entityTxs,
       entityState,
+      makeEntityContextFixture(),
     );
     expect(frameHash).toBe(ENTITY_FRAME_GOLDEN_HASH);
 
-    // Isolate the canonical v1 authority commitment: state root, events, tx bytes and
+    // Isolate the canonical context + authority commitment: state root, events, tx bytes and
     // every other frame field stay fixed while only authorityRoot is corrupt.
     const authorityTamperedHash = createEntityFrameHashFromStateRoot(
       `0x${'22'.repeat(32)}`,
@@ -130,6 +147,7 @@ describe('frame hash golden fixtures', () => {
       entityState.entityId,
       ENTITY_STATE_ROOT_GOLDEN_HASH,
       `0x${'ff'.repeat(32)}`,
+      makeEntityContextFixture(),
     );
     expect(authorityTamperedHash).not.toBe(ENTITY_FRAME_GOLDEN_HASH);
   });

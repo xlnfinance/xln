@@ -20,6 +20,7 @@ import {
   registerSignerKey,
 } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { recordAccountFrameHistory } from '../../../runtime/observability/env-events';
 import { closeHistoryViewDb } from '../../../storage/runtime-dbs';
 import { pruneHistoryBeforeHeight } from '../../../storage/database/lifecycle';
@@ -82,8 +83,7 @@ test('live Entity memory keeps only the post-checkpoint tail while LevelDB keeps
     },
   } as JReplica);
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId,
       data: {
@@ -96,7 +96,7 @@ test('live Entity memory keeps only the post-checkpoint tail while LevelDB keeps
           jurisdiction,
         },
       },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env, []);
@@ -161,7 +161,7 @@ test('certified history fork aborts before authoritative HEAD advances', async (
     source: 'peerCommit',
     frame,
   });
-  await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+  await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
   expect(await getPersistedLatestHeight(env)).toBe(1);
 
   env.state.height = 2;
@@ -173,7 +173,7 @@ test('certified history fork aborts before authoritative HEAD advances', async (
     source: 'ackCommit',
     frame: { ...frame, stateHash: `0x${'ff'.repeat(32)}` },
   });
-  await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []))
+  await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map()))
     .rejects.toThrow('STORAGE_CERTIFIED_FRAME_CONFLICT');
   expect(await getPersistedLatestHeight(env)).toBe(1);
 

@@ -7,6 +7,7 @@ import { Home } from './screens/Home';
 import { Accounts } from './screens/Accounts';
 import { AccountDetail } from './screens/AccountDetail';
 import { Pay } from './screens/Pay';
+import { Swap } from './screens/Swap';
 import { Receive } from './screens/Receive';
 import { ActivityScreen } from './screens/Activity';
 import { SettingsScreen } from './screens/Settings';
@@ -31,6 +32,7 @@ export default function App() {
 				<Route path="/accounts" element={<Accounts />} />
 				<Route path="/accounts/:counterpartyId" element={<AccountDetail />} />
 				<Route path="/pay" element={<Pay />} />
+				<Route path="/swap" element={<Swap />} />
 				<Route path="/receive" element={<Receive />} />
 				<Route path="/activity" element={<ActivityScreen />} />
 				<Route path="/settings" element={<SettingsScreen />} />

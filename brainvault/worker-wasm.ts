@@ -1,5 +1,5 @@
 /**
- * Bun worker transport for the Wasm compatibility backend.
+ * Bun worker transport for the portable Wasm backend.
  * All cryptographic choices remain in spec.ts/kdf.ts; this file only moves one
  * indexed shard across a worker-thread boundary and returns strict hex.
  */

@@ -49,7 +49,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const normalizeAccess = (value: unknown): RemoteRuntimeImportAccess => {
   const raw = String(value || '').trim().toLowerCase();
-  if (raw === 'admin' || raw === 'full' || raw === 'write') return 'admin';
+  if (raw === 'admin') return 'admin';
   throw new Error(`REMOTE_RUNTIME_IMPORT_ACCESS_INVALID:${raw || 'missing'}`);
 };
 
@@ -91,7 +91,7 @@ export const readRemoteRuntimeTokenAudience = (token: string): string => {
 
 export const readRemoteRuntimeTokenAccess = (token: string): RemoteRuntimeImportAccess | '' => {
   const role = String(token || '').trim().split('.')[1]?.trim().toLowerCase();
-  if (role === 'full' || role === 'admin' || role === 'write') return 'admin';
+  if (role === 'full' || role === 'admin') return 'admin';
   return '';
 };
 
@@ -148,25 +148,24 @@ export const describeRemoteRuntimeImportError = (
 
 const entryFromUnknown = (value: unknown, index: number): RemoteRuntimeImportEntry => {
   if (!isRecord(value)) throw new Error(`REMOTE_RUNTIME_IMPORT_ENTRY_INVALID:${index + 1}`);
-  const wsUrl = normalizeRemoteRuntimeWsUrl(String(value['wsUrl'] || value['ws'] || value['url'] || '').trim());
-  const token = String(value['token'] || value['authKey'] || value['key'] || '').trim();
+  const wsUrl = normalizeRemoteRuntimeWsUrl(String(value['wsUrl'] || '').trim());
+  const token = String(value['token'] || '').trim();
   if (!token.startsWith('xlnra1.')) throw new Error(`REMOTE_RUNTIME_IMPORT_TOKEN_INVALID:${index + 1}`);
   if (readRemoteRuntimeTokenAccess(token) !== 'admin') {
     throw new Error(`REMOTE_RUNTIME_IMPORT_ADMIN_TOKEN_REQUIRED:${index + 1}`);
   }
-  const access = normalizeAccess(value['access'] || value['role'] || value['mode']);
-  const label = String(value['label'] || value['name'] || new URL(wsUrl).host || `runtime ${index + 1}`).trim();
+  const access = normalizeAccess(value['access']);
+  const label = String(value['label'] || new URL(wsUrl).host || `runtime ${index + 1}`).trim();
   const entry = { label, access, wsUrl, token };
   assertRemoteRuntimeTokenFresh(entry);
   return entry;
 };
 
 const rawImportEntriesFromUnknown = (value: unknown): unknown[] => {
-  const source = isRecord(value) && isRecord(value['manifest']) ? value['manifest'] : value;
-  const entries = Array.isArray(source)
-    ? source
-    : isRecord(source) && Array.isArray(source['entries'])
-      ? source['entries']
+  const entries = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value['entries'])
+      ? value['entries']
       : [];
   if (entries.length === 0) throw new Error('REMOTE_RUNTIME_IMPORT_ENTRIES_MISSING');
   return entries;
@@ -253,8 +252,8 @@ const storedHubFieldsFromSource = (source: Record<string, unknown>): Pick<
 };
 
 export const parseRemoteRuntimeImportSourcePayload = (value: unknown): RemoteRuntimeImportEntry[] => {
-  const source = isRecord(value) && isRecord(value['manifest']) ? value['manifest'] : value;
-  return entriesFromJson(source);
+  if (!isRecord(value) || !isRecord(value['manifest'])) throw new Error('REMOTE_RUNTIME_IMPORT_MANIFEST_MISSING');
+  return entriesFromJson(value['manifest']);
 };
 
 const tokenizeImportLine = (line: string): string[] => {
@@ -269,7 +268,7 @@ const entryFromLine = (line: string, index: number): RemoteRuntimeImportEntry =>
   const parts = tokenizeImportLine(line);
   const wsIndex = parts.findIndex(part => /^(wss?|https?):\/\//i.test(part));
   const tokenIndex = parts.findIndex(part => part.startsWith('xlnra1.'));
-  const accessIndex = parts.findIndex(part => /^(admin|full|write)$/i.test(part));
+  const accessIndex = parts.findIndex(part => /^admin$/i.test(part));
   if (wsIndex < 0) throw new Error(`REMOTE_RUNTIME_IMPORT_WS_MISSING:${index + 1}`);
   if (tokenIndex < 0) throw new Error(`REMOTE_RUNTIME_IMPORT_TOKEN_MISSING:${index + 1}`);
   if (accessIndex < 0) throw new Error(`REMOTE_RUNTIME_IMPORT_ACCESS_MISSING:${index + 1}`);
@@ -304,33 +303,7 @@ export const parseRemoteRuntimeImportText = (text: string): RemoteRuntimeImportE
 export const parseRemoteRuntimeImportPayload = (payload: string): RemoteRuntimeImportEntry[] => {
   const raw = String(payload || '').trim();
   if (!raw) throw new Error('REMOTE_RUNTIME_IMPORT_PAYLOAD_EMPTY');
-  const candidates = [
-    raw,
-    (() => {
-      try {
-        return decodeURIComponent(raw);
-      } catch {
-        return '';
-      }
-    })(),
-    (() => {
-      try {
-        return decodeBase64UrlUtf8(raw);
-      } catch {
-        return '';
-      }
-    })(),
-  ].filter(Boolean);
-
-  let lastError: unknown = null;
-  for (const candidate of candidates) {
-    try {
-      return parseRemoteRuntimeImportText(candidate);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error('REMOTE_RUNTIME_IMPORT_PAYLOAD_INVALID');
+  return parseRemoteRuntimeImportText(decodeBase64UrlUtf8(raw));
 };
 
 export const limitRemoteRuntimeImportEntries = <T extends RemoteRuntimeImportEntry>(entries: T[]): T[] => {

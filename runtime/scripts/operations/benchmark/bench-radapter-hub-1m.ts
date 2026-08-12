@@ -98,23 +98,23 @@ type TimedEvent = {
 
 const argv = process.argv.slice(2);
 
-const readArg = (name: string, fallback: string): string => {
+const readArg = (name: string, defaultValue: string): string => {
   const eq = argv.find((arg) => arg.startsWith(`${name}=`));
   if (eq) return eq.slice(name.length + 1);
   const idx = argv.indexOf(name);
-  return idx >= 0 ? argv[idx + 1] ?? fallback : fallback;
+  return idx >= 0 ? argv[idx + 1] ?? defaultValue : defaultValue;
 };
 
 const hasFlag = (name: string): boolean => argv.includes(name) || argv.includes(`${name}=1`) || argv.includes(`${name}=true`);
 
-const readInt = (name: string, fallback: number): number => {
-  const parsed = Number.parseInt(readArg(name, String(fallback)), 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+const readInt = (name: string, defaultValue: number): number => {
+  const parsed = Number.parseInt(readArg(name, String(defaultValue)), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : defaultValue;
 };
 
-const readFloat = (name: string, fallback: number): number => {
-  const parsed = Number.parseFloat(readArg(name, String(fallback)));
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+const readFloat = (name: string, defaultValue: number): number => {
+  const parsed = Number.parseFloat(readArg(name, String(defaultValue)));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : defaultValue;
 };
 
 const formatBytes = (value: number): string => {
@@ -246,7 +246,6 @@ const makeAccount = async (
       deltas: new Map(),
       locks: new Map(),
       swapOffers: new Map(),
-      globalCreditLimits: { ownLimit: 1_000_000_000n, peerLimit: 1_000_000_000n },
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -257,6 +256,8 @@ const makeAccount = async (
     },
     status: 'active',
     mempool: [],
+    swapOrderHistory: new Map(),
+    swapClosedOrders: new Map(),
     currentFrame: {
       height,
       timestamp,
@@ -285,6 +286,7 @@ const makeAccount = async (
 
 const makeHubState = (entityId: string, height: number, timestamp: number): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'11'.repeat(32)}`,
   height,
   timestamp,
   nonces: new Map(),
@@ -343,7 +345,6 @@ const makeEnv = (seed: string, entityId: string, state: EntityState): RuntimeRep
         [`${entityId}:bench-signer`, {
           entityId,
           signerId: 'bench-signer',
-          entityEncPubKey: 'bench-pub',
           mempool: [],
           isProposer: true,
           state,

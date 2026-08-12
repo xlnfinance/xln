@@ -73,7 +73,7 @@ await prepareCatchupFixtureReplica(
 applyRuntimeStorageChanges(env, [{ family: 'entity', entityId: authorityState.entityId }]);
 env.state.height = 1;
 env.state.timestamp = 1;
-await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
 env.state.height = 2;
 env.state.timestamp = 2;
 
@@ -168,6 +168,6 @@ env.pendingNetworkOutputs = [{
   },
 } satisfies DeliverableEntityInput];
 
-await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, env.pendingNetworkOutputs);
+await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, env.pendingNetworkOutputs, undefined, new Map());
 process.kill(process.pid, 'SIGKILL');
 throw new Error('SIGKILL did not stop reliable frontier crash child');

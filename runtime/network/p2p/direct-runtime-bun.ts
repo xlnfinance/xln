@@ -264,7 +264,7 @@ const sendEntityInputsDelivery = (
     context,
     targetRuntimeId,
     'ROUTE_DIRECT_TARGET_RUNTIME_INVALID',
-    'ROUTE_DIRECT_MISS_FALLBACK',
+    'ROUTE_DIRECT_MISS_FAILOVER',
   );
   if (!('session' in target)) return target;
   const peerKey = normalizeEncryptionPubKey(target.session.peerEncryptionPubKey);
@@ -309,7 +309,7 @@ const sendReliableReceiptDelivery = (
     context,
     targetRuntimeId,
     'ROUTE_DIRECT_RECEIPT_TARGET_RUNTIME_INVALID',
-    'ROUTE_DIRECT_RECEIPT_MISS_FALLBACK',
+    'ROUTE_DIRECT_RECEIPT_MISS_FAILOVER',
   );
   if (!('session' in target)) return target;
   const attempt = trySend(target.session.ws, signSessionFrame(context, target.session, {

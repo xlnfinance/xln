@@ -7,6 +7,7 @@ import type { AccountReplica, AccountTx } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
 import type { AccountConsensusContext } from '../consensus/context';
 import type { AccountJClaimSession } from '../j-claims/j-claim-session';
+import type { HtlcEnforcementClock } from '../htlc-deadline';
 import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../commitment/map-commitment';
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
@@ -106,6 +107,7 @@ export async function applyAccountTx(
   consensusContext?: AccountConsensusContext,
   jClaimSession?: AccountJClaimSession,
   counterpartyCertifiedBoardHash?: string,
+  htlcEnforcementClock?: HtlcEnforcementClock,
 ): Promise<ApplyAccountTxResult> {
   const deltaKeysBeforeMutation = swapDeltaKeys(account, accountTx);
   const candidateEffects: AccountOutput[] = [];
@@ -120,6 +122,7 @@ export async function applyAccountTx(
     jClaimSession,
     counterpartyCertifiedBoardHash,
     candidateEffects,
+    htlcEnforcementClock,
   );
   if (result.success) {
     invalidateCommittedMapsForTx(account, accountTx, deltaKeysBeforeMutation);

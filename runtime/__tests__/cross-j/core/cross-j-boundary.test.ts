@@ -261,11 +261,12 @@ describe('cross-j runtime boundary', () => {
           jOutbox: [],
           reliableIngressCommits: [],
           immediateReliableReceipts: [],
+          entityContexts: new Map(),
         }),
       },
     );
     await expect(apply()).rejects.toThrow('CROSS_J_LOCAL_SIBLING_MISSING');
     addRouteOwner(env, TARGET_USER, targetSigner, TARGET_HUB, liveRoute);
-    await expect(apply()).resolves.toMatchObject({ entityOutbox: [], jOutbox: [] });
+    expect(await apply()).toMatchObject({ entityOutbox: [], jOutbox: [] });
   });
 });

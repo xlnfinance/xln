@@ -771,7 +771,7 @@ describe('direct runtime websocket route', () => {
       entityInputs: [outboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
     })).toMatchObject({
       outcome: 'deferred',
-      code: 'ROUTE_DIRECT_MISS_FALLBACK',
+      code: 'ROUTE_DIRECT_MISS_FAILOVER',
       retryable: true,
       fatal: false,
       terminal: false,
@@ -854,7 +854,7 @@ describe('direct runtime websocket route', () => {
     };
     expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
       outcome: 'deferred',
-      code: 'ROUTE_DIRECT_MISS_FALLBACK',
+      code: 'ROUTE_DIRECT_MISS_FAILOVER',
       retryable: true,
       terminal: false,
     });

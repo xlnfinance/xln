@@ -194,9 +194,9 @@ const DEFAULT_AUTO_RESET_GRACE_MS = 5_000;
 const DEFAULT_ISOLATED_READY_TIMEOUT_MS = 15_000;
 const ISOLATED_STACK = process.env.E2E_ISOLATED_STACK === '1' || process.env.E2E_ISOLATED_BASELINE_READY === '1';
 
-const parsePositiveInteger = (value: string | undefined, fallback: number): number => {
+const parsePositiveInteger = (value: string | undefined, defaultValue: number): number => {
   const parsed = Number(value || '');
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : defaultValue;
 };
 
 const ISOLATED_READY_TIMEOUT_MS = parsePositiveInteger(

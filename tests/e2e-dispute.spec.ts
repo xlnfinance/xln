@@ -1431,7 +1431,7 @@ test.describe('E2E Dispute Flow', () => {
     } catch (error) {
       const debug = await readDisputeDebug(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`disputeStart not observed via UI click. fallback=${message} debug=${JSON.stringify(debug)}`);
+      throw new Error(`disputeStart not observed via UI click. cause=${message} debug=${JSON.stringify(debug)}`);
     }
     await timedStep('dispute.wait_batch_queue_dispute_start', async () => {
       await expect.poll(async () => {

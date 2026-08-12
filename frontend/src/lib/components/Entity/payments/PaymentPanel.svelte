@@ -28,7 +28,7 @@
   import { parseTokenAmountInput, tokenAmountInputErrorMessage } from '../assets/token-amount-input';
   import { requireTokenDecimals } from '../token-metadata';
   import {
-    hasCertifiedEntityEncryptionManifest,
+    hasCertifiedEntityEncryptionKey,
     findProfileByEntityId,
     normalizeEntityId,
     quoteHop,
@@ -378,7 +378,7 @@
     // Routeability is a transport/security property, not a display-metadata property.
     // A hop is routeable iff we can encrypt for it and it is hub-like when profile exists.
     if (paymentView.blockedCounterpartyIds.has(normalizeEntityId(entity))) return false;
-    if (!hasCertifiedEntityEncryptionManifest(currentReplicas, getGossipProfiles(), entity)) return false;
+    if (!hasCertifiedEntityEncryptionKey(currentReplicas, getGossipProfiles(), entity)) return false;
     const profile = getGossipProfileByEntityId(entity);
     if (!profile) return true; // allow local+gossip mixed discovery; key coverage is enforced above
     return profile.metadata.isHub === true;
@@ -641,7 +641,7 @@
       const msg = `Recipient ${targetEntityId} has no downloaded gossip profile`;
       return { code: 'PAYMENT_PREFLIGHT_PROFILE_MISSING', message: msg };
     }
-    if (!hasCertifiedEntityEncryptionManifest(currentReplicas, profiles, targetEntityId)) {
+    if (!hasCertifiedEntityEncryptionKey(currentReplicas, profiles, targetEntityId)) {
       const msg = `Recipient ${targetEntityId} profile has no encryption key`;
       return { code: 'PAYMENT_PREFLIGHT_KEY_MISSING', message: msg, details: { targetProfile } };
     }
@@ -698,7 +698,7 @@
   function getMissingRouteKeys(path: string[]): string[] {
     const missingSet = new Set<string>();
     for (const hopEntity of path.slice(1)) {
-      if (!hasCertifiedEntityEncryptionManifest(currentReplicas, getGossipProfiles(), hopEntity)) {
+      if (!hasCertifiedEntityEncryptionKey(currentReplicas, getGossipProfiles(), hopEntity)) {
         missingSet.add(hopEntity);
       }
     }

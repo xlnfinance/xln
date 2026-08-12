@@ -48,6 +48,7 @@ const frameBodyAndLeaderMatchesLocalReplay = (
       replica.state.entityId,
       candidate.stateRoot,
       candidate.authorityRoot,
+      candidate.entityContext,
       candidate.jPrefixCertificate,
     );
     if (recomputed !== candidate.hash) return false;

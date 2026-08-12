@@ -102,8 +102,11 @@ const verifyPendingAckCertificate = async (
     frameHash,
     expectedEntity,
     securityContext.counterpartyCertifiedBoardHash
-      ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash }
-      : undefined,
+      ? {
+          registeredBoardHash: securityContext.counterpartyCertifiedBoardHash,
+          allowPreviousBoard: false,
+        }
+      : { allowPreviousBoard: false },
   );
   if (!verified.valid) {
     return {

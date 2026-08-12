@@ -51,12 +51,12 @@ type EntityNameOptions = {
   source: GossipSource;
   selfEntityId?: string | null;
   selfLabel?: string;
-  fallback?: string;
+  defaultLabel?: string;
 };
 
 export function getEntityDisplayName(entityId: string, options: EntityNameOptions): string {
   const raw = String(entityId || '').trim();
-  if (!raw) return options.fallback || 'Unknown';
+  if (!raw) return options.defaultLabel || 'Unknown';
   const normalized = normalizeId(raw);
 
   const selfEntityId = String(options.selfEntityId || '').trim();

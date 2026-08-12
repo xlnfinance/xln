@@ -23,7 +23,6 @@ export const relayTimelineTone = (event: RelayTimelineEvent): RelayTimelineTone 
     if (delivery.outcome === 'queued' || delivery.outcome === 'deferred') return 'warning';
     return 'neutral';
   }
-
   if (event.status === 'rejected' || event.status === 'local-delivery-failed') return 'error';
   if (event.status === 'queued') return 'warning';
   return 'neutral';

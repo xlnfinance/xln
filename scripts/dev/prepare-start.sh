@@ -35,10 +35,6 @@ case "$DEV_DATA_ROOT" in
     ;;
 esac
 
-if [[ ! -f "$ROOT_DIR/node_modules/concurrently/dist/bin/concurrently.js" ]]; then
-  echo "DEV_DEPENDENCIES_MISSING:root; run: bun install --frozen-lockfile" >&2
-  exit 1
-fi
 if [[ ! -x "$ROOT_DIR/frontend/node_modules/.bin/vite" \
   || ! -f "$ROOT_DIR/frontend/node_modules/@sveltejs/kit/svelte-kit.js" \
   || ! -f "$ROOT_DIR/frontend/node_modules/@sveltejs/vite-plugin-svelte/package.json" \

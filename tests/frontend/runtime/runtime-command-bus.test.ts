@@ -805,7 +805,7 @@ test('server-side faucet requests publish upstream runtime ingress receipts when
   expect(assetsSource).toContain('ready={activeIsLive}');
 });
 
-test('ui mutation surfaces do not use legacy enqueue entrypoints', () => {
+test('ui mutation surfaces do not use retired enqueue entrypoints', () => {
   const files = frontendSourceFiles('frontend/src/lib')
     .filter((file) => !file.startsWith('frontend/src/lib/stores/'));
 

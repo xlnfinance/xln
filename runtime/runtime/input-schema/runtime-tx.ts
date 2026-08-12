@@ -110,9 +110,18 @@ const validateImportReplica = (tx: Record<string, unknown>, code: string): void 
   requireString(tx['entityId'], `${code}_ENTITY`);
   requireString(tx['signerId'], `${code}_SIGNER`);
   const data = requireBoundaryRecord(tx['data'], `${code}_DATA`);
-  requireExactBoundaryKeys(data, ['config', 'isProposer'], ['profileName', 'position'], `${code}_DATA_FIELDS`);
+  requireExactBoundaryKeys(
+    data,
+    ['config', 'isProposer', 'entitySeed'],
+    ['profileName', 'position'],
+    `${code}_DATA_FIELDS`,
+  );
   validateConsensusConfig(data['config'], `${code}_DATA_CONFIG`);
   requireBoolean(data['isProposer'], `${code}_DATA_PROPOSER`);
+  requireString(data['entitySeed'], `${code}_DATA_ENTITY_SEED`);
+  if (!/^0x[0-9a-f]{128}$/.test(data['entitySeed'] as string)) {
+    throw new Error(`${code}_DATA_ENTITY_SEED_CANONICAL`);
+  }
   if (data['profileName'] !== undefined) requireString(data['profileName'], `${code}_DATA_PROFILE`);
   if (data['position'] !== undefined) validateEntityPosition(data['position'], `${code}_DATA_POSITION`);
 };

@@ -52,14 +52,14 @@ export const HUB_NAMES = ['H1', 'H2', 'H3'] as const;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
 const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
-const getArg = (name: string, fallback = ''): string =>
-  readCliOption(argsRaw, name, fallback);
+const getArg = (name: string, defaultValue = ''): string =>
+  readCliOption(argsRaw, name, defaultValue);
 
 const hasFlag = (name: string): boolean => hasCliFlag(argsRaw, name);
 
-const normalizeWsBaseUrl = (raw: string, fallbackHost: string, fallbackPort: number): string => {
-  const fallback = `ws://${fallbackHost}:${fallbackPort}`;
-  const value = String(raw || '').trim() || fallback;
+const normalizeWsBaseUrl = (raw: string, defaultHost: string, defaultPort: number): string => {
+  const defaultValue = `ws://${defaultHost}:${defaultPort}`;
+  const value = String(raw || '').trim() || defaultValue;
   const parsed = new URL(value);
   if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
   if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
@@ -72,8 +72,8 @@ const normalizeWsBaseUrl = (raw: string, fallbackHost: string, fallbackPort: num
   return parsed.toString().replace(/\/+$/, '');
 };
 
-const normalizeWsUrl = (raw: string, fallback: string, label: string): string => {
-  const value = String(raw || '').trim() || fallback;
+const normalizeWsUrl = (raw: string, defaultValue: string, label: string): string => {
+  const value = String(raw || '').trim() || defaultValue;
   const parsed = new URL(value);
   if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
   if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
@@ -100,10 +100,10 @@ export const parseArgs = (): Args => {
   }
   const dbRoot = getArg('--db-root', join(process.cwd(), '.e2e-mesh-db'));
   const publicWsBaseUrl = normalizeWsBaseUrl(getArg('--public-ws-base-url', ''), host, port);
-  const fallbackRelayUrl = new URL(publicWsBaseUrl);
-  fallbackRelayUrl.pathname = '/relay';
-  fallbackRelayUrl.search = '';
-  fallbackRelayUrl.hash = '';
+  const defaultRelayUrl = new URL(publicWsBaseUrl);
+  defaultRelayUrl.pathname = '/relay';
+  defaultRelayUrl.search = '';
+  defaultRelayUrl.hash = '';
   const relayAudienceUrls = String(getArg('--relay-web-urls', ''))
     .split(',')
     .map(value => value.trim())
@@ -113,16 +113,16 @@ export const parseArgs = (): Args => {
   for (const index of RPC_PROXY_INDEXES) {
     const flag = index === 1 ? '--rpc-url' : `--rpc${index}-url`;
     const envName = index === 1 ? 'ANVIL_RPC' : `ANVIL_RPC${index}`;
-    const fallback = index === 1
+    const defaultRpcUrl = index === 1
       ? process.env['ANVIL_RPC'] || 'http://localhost:8545'
       : process.env[envName] || process.env[`RPC${index}`] || process.env[`XLN_RPC${index}_URL`] || '';
-    const raw = getArg(flag, index === 2 ? (process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || fallback) : fallback);
+    const raw = getArg(flag, index === 2 ? (process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || defaultRpcUrl) : defaultRpcUrl);
     rpcUrls[index] = raw ? normalizeLoopbackUrl(raw) : '';
   }
   return {
     host,
     port,
-    relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || ''), fallbackRelayUrl.toString(), '--relay-url'),
+    relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || ''), defaultRelayUrl.toString(), '--relay-url'),
     relayAudienceUrls,
     publicWsBaseUrl,
     nodeApiPortBase,

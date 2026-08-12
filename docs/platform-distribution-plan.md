@@ -17,7 +17,7 @@ screenshots at iPhone/laptop/wide viewports, and `bun run check`.
 | Surface | Build | Distribution | Update path |
 | --- | --- | --- | --- |
 | Web | Static `/app` | `xln.finance/app` | Reload; server code remains mutable |
-| Local runtime | Bun daemon + static wallet | `bunx xlnfinance` | `bunx xlnfinance update` |
+| Local runtime | Bun daemon + static wallet | versioned GitHub Release archive | Explicit immutable versioned install |
 | Desktop | Hardened Electron shell | GitHub Releases, then signed installers | Signed release feed |
 | iPhone/iPad | Capacitor iOS | TestFlight, then App Store | App Store |
 | Android | Capacitor Android | APK + Play internal testing | Google Play |

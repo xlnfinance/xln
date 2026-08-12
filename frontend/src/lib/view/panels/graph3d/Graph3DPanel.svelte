@@ -158,7 +158,7 @@ let container: HTMLDivElement;
 let scene: THREE.Scene;
 let graphWorld: THREE.Group;
 let camera: THREE.PerspectiveCamera;
-let renderer: THREE.WebGLRenderer | any; // WebGPURenderer fallback
+let renderer: THREE.WebGLRenderer | any; // Selected WebGL or WebGPU renderer
 let controls: any;
 let raycaster: THREE.Raycaster;
 let mouse: THREE.Vector2;
@@ -1286,7 +1286,7 @@ function createEntityNode(profile: any, index: number, total: number, forceLayou
     replica,
     userPosition: graphPositionOverrides.get(profile.entityId),
     persistedPosition: $entityPositions.get(profile.entityId),
-    fallbackJurisdiction: env?.activeJurisdiction || "default",
+    defaultJurisdiction: env?.activeJurisdiction || "default",
     resolveJMachinePosition: (jurisdictionName) => {
       const stored = env?.state.jReplicas?.get(jurisdictionName)?.position;
       if (stored) return stored;

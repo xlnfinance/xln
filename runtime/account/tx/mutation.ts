@@ -3,6 +3,7 @@ import type { AccountOutput } from '../../types/account';
 import type { AccountConsensusContext } from '../consensus/context';
 import { getAccountPerspective } from '../state/perspective';
 import type { AccountJClaimSession } from '../j-claims/j-claim-session';
+import type { HtlcEnforcementClock } from '../htlc-deadline';
 import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute/policy';
 import type { ApplyAccountTxResult } from './apply-types';
 import { handleAddDelta } from './handlers/balance/add-delta';
@@ -40,6 +41,7 @@ type MutationContext = {
   consensusContext?: AccountConsensusContext;
   jClaimSession?: AccountJClaimSession;
   counterpartyCertifiedBoardHash?: string;
+  htlcEnforcementClock?: HtlcEnforcementClock;
   candidateEffects: AccountOutput[];
   myEntityId: string;
   counterparty: string;
@@ -115,12 +117,16 @@ const applyHtlcResolve = async (context: MutationContext): Promise<ApplyAccountT
   if (context.tx.type !== 'htlc_resolve') {
     throw new Error('ACCOUNT_TX_ROUTE_MISMATCH:htlc_resolve');
   }
+  const clock = context.htlcEnforcementClock ?? {
+    timestamp: context.timestamp,
+    jHeight: context.jHeight,
+  };
   const result = await handleHtlcResolve(
     context.account.state,
     context.tx,
     context.byLeft,
-    context.jHeight,
-    context.timestamp,
+    clock.jHeight,
+    clock.timestamp,
   );
   return {
     success: result.success,
@@ -158,9 +164,11 @@ const applyJEventClaim = (context: MutationContext): ApplyAccountTxResult => {
 
 /**
  * This is the only transaction router inside Account consensus. Each handler
- * receives the same frame-controlled timestamp/J-height and mutates only this
- * Account. Never substitute `account.currentHeight`: HTLC and cross-j expiry
- * domains are finalized jurisdiction height.
+ * receives the signed frame timestamp/J-height and mutates only this Account.
+ * Incoming HTLCs alone receive the parent Entity enforcement clock already
+ * used by peer-frame preflight, so admission and mutation cannot disagree.
+ * Never substitute `account.currentHeight`: HTLC and cross-j expiry domains
+ * use finalized jurisdiction height.
  */
 export const applyAccountTxMutation = async (
   account: AccountReplica,
@@ -173,6 +181,7 @@ export const applyAccountTxMutation = async (
   jClaimSession: AccountJClaimSession | undefined,
   counterpartyCertifiedBoardHash: string | undefined,
   candidateEffects: AccountOutput[],
+  htlcEnforcementClock?: HtlcEnforcementClock,
 ): Promise<ApplyAccountTxResult> => {
   const myEntityId = account.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(account.state, myEntityId);
@@ -186,6 +195,7 @@ export const applyAccountTxMutation = async (
     ...(consensusContext ? { consensusContext } : {}),
     ...(jClaimSession ? { jClaimSession } : {}),
     ...(counterpartyCertifiedBoardHash ? { counterpartyCertifiedBoardHash } : {}),
+    ...(htlcEnforcementClock ? { htlcEnforcementClock } : {}),
     candidateEffects,
     myEntityId,
     counterparty,
@@ -215,7 +225,14 @@ export const applyAccountTxMutation = async (
     case 'rebalance_policy': return handleRebalancePolicy(account.state, tx, byLeft, timestamp);
     case 'j_event_claim': return applyJEventClaim(context);
     case 'htlc_lock':
-      return handleHtlcLock(account, tx, byLeft, timestamp, jHeight, isValidation);
+      return handleHtlcLock(
+        account,
+        tx,
+        byLeft,
+        context.htlcEnforcementClock?.timestamp ?? timestamp,
+        context.htlcEnforcementClock?.jHeight ?? jHeight,
+        isValidation,
+      );
     case 'htlc_resolve': return applyHtlcResolve(context);
     case 'cross_pull_lock': return handlePullLock(account.state, tx, byLeft, jHeight, timestamp);
     case 'cross_pull_close': return handleCrossPullClose(account.state, tx, byLeft, timestamp);

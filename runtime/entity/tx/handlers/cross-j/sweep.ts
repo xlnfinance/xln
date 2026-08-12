@@ -35,7 +35,7 @@ const refreshSweepRoute = (
   const offerRoute = findCrossJurisdictionOfferRoute(state, orderId);
   if (!offerRoute) return storedRoute;
   // A conflicting Account/Entity route is consensus corruption, not a cleanup
-  // condition. Sweeping a fallback copy could close the wrong financial leg.
+  // condition. Sweeping a detached copy could close the wrong financial leg.
   const route = mergeCrossJurisdictionRoute(
     storedRoute,
     withCanonicalCrossJurisdictionRouteHash(offerRoute.route),

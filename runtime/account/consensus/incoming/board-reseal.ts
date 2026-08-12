@@ -130,12 +130,12 @@ const verifyBoardResealWitnesses = async (
   HandleAccountInputResult
   | { verifiedDispute?: ValidatedCounterpartyDisputeSeal }
 > => {
-  const frameAuthority = securityContext.counterpartyCertifiedBoardHash
-    ? {
-        registeredBoardHash: securityContext.counterpartyCertifiedBoardHash,
-        allowPreviousBoard: false,
-      }
-    : undefined;
+  const frameAuthority = {
+    ...(securityContext.counterpartyCertifiedBoardHash
+      ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash }
+      : {}),
+    allowPreviousBoard: false,
+  };
   const verifiedFrame = await securityContext.verifyHanko(
     reseal.frameHanko!,
     metadata.currentFrameHash,

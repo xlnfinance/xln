@@ -13,8 +13,8 @@ const validPolicy = (): CappedTestnetPolicy => ({
   $schema: MAINNET_GATE_LABELS.cappedPolicySchema,
   name: MAINNET_GATE_LABELS.cappedPolicyName,
   scope: ['landing', 'all-current-user-facing-flows'],
-  riskCapUsd: MAINNET_GATE.cappedRiskUsd,
-  riskCapEnforcement: 'operator_config',
+  riskCapUsd: null,
+  riskCapEnforcement: 'not_implemented',
   expectedTowers: MAINNET_GATE.expectedTowers,
   expectedHubs: MAINNET_GATE.expectedHubs,
   recoverySlaSeconds: MAINNET_GATE.recoverySlaSeconds,
@@ -28,14 +28,17 @@ const validPolicy = (): CappedTestnetPolicy => ({
   soakMinutes: MAINNET_GATE.soakMinutes,
 });
 
-test('capped testnet policy accepts the agreed launch envelope', () => {
-  expect(validateCappedTestnetPolicy(validPolicy())).toEqual([]);
+test('capped testnet policy fails closed until the cap has executable enforcement', () => {
+  expect(validateCappedTestnetPolicy(validPolicy())).toEqual([
+    'CAPPED_TESTNET_EXECUTABLE_RISK_CAP_ENFORCEMENT_MISSING',
+  ]);
 });
 
-test('capped testnet policy rejects uncapped risk and weak exceptions', () => {
+test('capped testnet policy rejects operator-only cap claims and weak exceptions', () => {
   const policy = {
     ...validPolicy(),
     riskCapUsd: 10_001,
+    riskCapEnforcement: 'operator_config',
     exceptionPolicy: {
       p0: 'owner_signoff_required',
       p1: 'forbidden',
@@ -44,7 +47,10 @@ test('capped testnet policy rejects uncapped risk and weak exceptions', () => {
     },
   };
 
-  expect(validateCappedTestnetPolicy(policy)).toContain('POLICY_RISK_CAP_INVALID:10001');
+  expect(validateCappedTestnetPolicy(policy)).toContain('POLICY_UNENFORCED_RISK_CAP_CLAIM:10001');
+  expect(validateCappedTestnetPolicy(policy)).toContain(
+    'POLICY_RISK_CAP_ENFORCEMENT_MUST_ADMIT_MISSING:operator_config',
+  );
   expect(validateCappedTestnetPolicy(policy)).toContain('POLICY_P0_EXCEPTION_INVALID');
 });
 

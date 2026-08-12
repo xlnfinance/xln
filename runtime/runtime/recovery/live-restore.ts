@@ -15,6 +15,7 @@ export type RuntimeLiveRestoreDeps = {
     runtimeId?: string | null,
     runtimeSeed?: string | null,
     fromSnapshotHeight?: number,
+    options?: Record<string, never>,
   ): Promise<{ env: RuntimeReplica } | null>;
   rehydrate(
     env: RuntimeReplica,
@@ -33,7 +34,7 @@ export const loadLiveRuntimeFromDB = async (
     const snapshotHeight = Number.isFinite(options?.fromSnapshotHeight)
       ? Math.floor(Number(options?.fromSnapshotHeight))
       : undefined;
-    const restored = await deps.loadByReplay(runtimeId, runtimeSeed, snapshotHeight);
+    const restored = await deps.loadByReplay(runtimeId, runtimeSeed, snapshotHeight, {});
     const env = restored?.env ?? null;
     if (!env) return null;
 

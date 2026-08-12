@@ -7,10 +7,11 @@ import {
   registerSignerKey,
   signAccountFrame,
 } from '../../../account/crypto';
-import { deriveLocalEntityCryptoKeys } from '../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
 import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
-import { applyEntityFrame, selectPreparedFrameFromCertificate } from '../../../entity/consensus';
+import { selectPreparedFrameFromCertificate } from '../../../entity/consensus';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import { createEntityFrameHashFromStateRoot } from '../../../entity/consensus/frame';
 import {
   buildEntityLeaderCertificate,
@@ -27,6 +28,7 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { initCrontab } from '../../../entity/scheduler';
 import { applyRuntimeTx } from '../../../runtime/transactions/tx-handlers';
 import { createEmptyEnv } from '../../../runtime';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
 import { decodeBuffer } from '../../../storage/codec/codec';
 import {
@@ -108,9 +110,10 @@ const certifyNextFrame = async (
   preState: EntityState,
   txs: EntityTx[],
 ): Promise<{ state: EntityState; link: CertifiedEntityFrameLink }> => {
+  preState.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, preState.entityId).publicKey;
   const timestamp = preState.timestamp + 100;
   const height = preState.height + 1;
-  const applied = await applyEntityFrame(env, preState, txs, timestamp);
+  const applied = await applyEntityFrameWithMaterializedTestInfraContext(env, preState, txs, timestamp);
   const postStateWithoutHead: EntityState = {
     ...applied.newState,
     entityId: preState.entityId,
@@ -131,6 +134,7 @@ const certifyNextFrame = async (
     preState.entityId,
     stateRoot,
     authorityRoot,
+    applied.entityContext,
   );
   const hashesToSign = [{ hash, type: 'entityFrame' as const, context: `entity-frame:${height}` }];
   const signature = await signAccountFrame(env, signerId, hash);
@@ -140,6 +144,7 @@ const certifyNextFrame = async (
     timestamp,
     txs,
     events: applied.events,
+    entityContext: applied.entityContext,
     hash,
     stateRoot,
     authorityRoot,
@@ -165,7 +170,8 @@ const installReplica = (
     lineage?: CertifiedEntityFrameLink[];
   } = {},
 ): EntityReplica => {
-  const keys = deriveLocalEntityCryptoKeys(env, state.entityId, signerId);
+  const keys = provisionTestEntityEncryptionKey(env, state.entityId);
+  state.entityEncryptionPublicKey = keys.publicKey;
   const replica: EntityReplica = {
     entityId: state.entityId,
     signerId,
@@ -400,15 +406,14 @@ describe('certified Entity storage lineage', () => {
     );
     const stateRootBefore = computeCanonicalEntityConsensusStateHash(state);
 
-    await applyRuntimeTx(env, {
-      type: 'importReplica',
+    await applyRuntimeTx(env, createTestEntityImportRuntimeTx(env, {
       entityId: state.entityId,
       signerId,
       data: {
         config: structuredClone(state.config),
-        isProposer: false,
+        isProposer: true,
       },
-    });
+    }));
 
     expect(state.swapTradingPairs).toEqual([]);
     expect(() => buildCertifiedEntityLineagePlan(env)).not.toThrow();
@@ -432,15 +437,14 @@ describe('certified Entity storage lineage', () => {
     delete replica.certifiedFrameAnchor;
     const stateRootBefore = computeCanonicalEntityConsensusStateHash(state);
 
-    await applyRuntimeTx(env, {
-      type: 'importReplica',
+    await applyRuntimeTx(env, createTestEntityImportRuntimeTx(env, {
       entityId: state.entityId,
       signerId,
       data: {
         config: structuredClone(state.config),
-        isProposer: false,
+        isProposer: true,
       },
-    });
+    }));
 
     expect(env.state.eReplicas.get(`${state.entityId}:${signerId}`)?.certifiedFrameLineage)
       .toHaveLength(1);
@@ -488,34 +492,33 @@ describe('certified Entity storage lineage', () => {
       contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
     } as JReplica);
     genesis.config.jurisdiction = jurisdiction;
+    genesis.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, genesis.entityId).publicKey;
     const replica = installReplica(env, signerId, genesis, {
       anchor: genesisAnchor(genesis),
     });
     const stateRootBefore = computeCanonicalEntityConsensusStateHash(genesis);
 
-    await applyRuntimeTx(env, {
-      type: 'importReplica',
+    await applyRuntimeTx(env, createTestEntityImportRuntimeTx(env, {
       entityId: genesis.entityId,
       signerId,
       data: {
         config: structuredClone(genesis.config),
-        isProposer: false,
+        isProposer: true,
       },
-    });
+    }));
 
     expect(replica.state.swapTradingPairs).toEqual([]);
     expect(computeCanonicalEntityConsensusStateHash(replica.state)).toBe(stateRootBefore);
     expect(() => buildCertifiedEntityLineagePlan(env)).not.toThrow();
 
-    await expect(applyRuntimeTx(env, {
-      type: 'importReplica',
+    await expect(applyRuntimeTx(env, createTestEntityImportRuntimeTx(env, {
       entityId: genesis.entityId,
       signerId,
       data: {
         config: { ...structuredClone(genesis.config), mode: 'gossip-based' },
-        isProposer: false,
+        isProposer: true,
       },
-    })).rejects.toThrow('IMPORT_REPLICA_CONFIG_CHECKPOINT_MISMATCH');
+    }))).rejects.toThrow('IMPORT_REPLICA_CONFIG_CHECKPOINT_MISMATCH');
     expect(computeCanonicalEntityConsensusStateHash(replica.state)).toBe(stateRootBefore);
   });
 
@@ -525,15 +528,14 @@ describe('certified Entity storage lineage', () => {
     );
     const stateRootBefore = computeCanonicalEntityConsensusStateHash(state);
 
-    await expect(applyRuntimeTx(env, {
-      type: 'importReplica',
+    await expect(applyRuntimeTx(env, createTestEntityImportRuntimeTx(env, {
       entityId: state.entityId,
       signerId,
       data: {
         config: { ...structuredClone(state.config), mode: 'gossip-based' },
-        isProposer: false,
+        isProposer: true,
       },
-    })).rejects.toThrow('IMPORT_REPLICA_CONFIG_CHECKPOINT_MISMATCH');
+    }))).rejects.toThrow('IMPORT_REPLICA_CONFIG_CHECKPOINT_MISMATCH');
     expect(computeCanonicalEntityConsensusStateHash(state)).toBe(stateRootBefore);
     expect(() => buildCertifiedEntityLineagePlan(env)).not.toThrow();
   });

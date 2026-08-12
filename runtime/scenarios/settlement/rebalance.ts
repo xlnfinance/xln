@@ -28,7 +28,7 @@ import {
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { deriveDelta } from '../../account/utils';
 import { isLeftEntity } from '../../entity/id';
-import { quoteHtlcPaymentRoute } from '../../entity/htlc/payment-admission';
+import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
 import {
   bindScenarioJReplica,
   createJurisdictionConfig,

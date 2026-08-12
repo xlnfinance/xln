@@ -38,10 +38,11 @@ describe('release source policy', () => {
     }
   });
 
-  test('requires canonical Hanko v1 signing from 0.1.9 onward', () => {
-    expect(() => assertReleaseSigningConfigured('0.1.6')).not.toThrow();
-    expect(() => assertReleaseSigningConfigured('0.1.8')).not.toThrow();
+  test('requires canonical Hanko signing for every release', () => {
+    expect(() => assertReleaseSigningConfigured('0.1.6')).toThrow('RELEASE_SIGNING_KEYS_REQUIRED');
+    expect(() => assertReleaseSigningConfigured('0.1.8')).toThrow('RELEASE_SIGNING_KEYS_REQUIRED');
     expect(() => assertReleaseSigningConfigured('0.1.9')).toThrow('RELEASE_SIGNING_KEYS_REQUIRED');
+    expect(() => assertReleaseSigningConfigured('0.1.6', '/secure/keys.json')).not.toThrow();
     expect(() => assertReleaseSigningConfigured('0.1.9', '/secure/keys.json')).not.toThrow();
   });
 

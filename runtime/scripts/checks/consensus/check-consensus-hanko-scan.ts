@@ -208,8 +208,6 @@ assertOrder(entityConsensus, entityConsensusPath, [
   'if (!isEntityInputWellFormed(input)) {',
 ]);
 assertIncludes(entityConsensus, 'const supplied = entityInput.entityTxs ?? [];', entityConsensusPath);
-assertIncludes(entityConsensus, 'const secretAware =', entityConsensusPath);
-assertIncludes(entityConsensus, 'await appendDefaultProposerAcceptedHtlcReveals(', entityConsensusPath);
 assertIncludes(entityConsensus, 'const admitted = appendDefaultProposerCrossJMaterializations(', entityConsensusPath);
 assertIncludes(entityConsensus, 'workingReplica.mempool = prioritizeScheduledWakeTransactions(', entityConsensusPath);
 assertIncludes(entityConsensus, 'if (!verifyHashPrecommitSignatures(', entityConsensusPath);
@@ -228,12 +226,12 @@ assertOrder(accountFrame, accountFramePath, [
   "['accountStateRoot', frame.accountStateRoot],",
 ]);
 assertOrder(entityFrame, entityFramePath, [
-  'const frameData = {',
-  "version: 'xln:entity-frame:v1',",
-  'txs: txs.map(canonicalEntityTxForFrameHash),',
+  'const encoded = encodeCanonicalConsensusValue({',
+  "domain: 'xln:entity-frame',",
+  'txs: input.txs.map(canonicalEntityTxForFrameHash),',
   'stateRoot: stateRoot.toLowerCase(),',
   'authorityRoot: authorityRoot.toLowerCase(),',
-  'const encoded = encodeCanonicalConsensusValue(frameData);',
+  'const encoded = assertEntityFrameTotalByteBudget(frameData);',
   'const hash = ethers.keccak256(ethers.toUtf8Bytes(encoded));',
   'return hash;',
 ]);

@@ -52,7 +52,7 @@ describe('runtime RPC proxy timeouts', () => {
     const secret = 'sentinel-provider-key';
     const relayStore = createRelayStore('rpc-redaction');
     try {
-      process.env['RPC_UPSTREAM_URL'] = `http://127.0.0.1:8545/v3/${secret}?token=${secret}`;
+      process.env['RPC_UPSTREAM_URL'] = `http://127.0.0.1:8545/rpc/${secret}?token=${secret}`;
       process.env['BLOCK_LOCAL_RPC_PROXY'] = 'true';
       const response = await handleRuntimeRpcProxy({
         req: new Request('http://127.0.0.1/rpc', { method: 'POST', body: '{}' }),
@@ -65,7 +65,7 @@ describe('runtime RPC proxy timeouts', () => {
       const encoded = `${await response.text()}\n${JSON.stringify(relayStore.debugEvents)}`;
       expect(response.status).toBe(503);
       expect(encoded).not.toContain(secret);
-      expect(encoded).not.toContain('/v3/');
+      expect(encoded).not.toContain('/rpc/');
       expect(encoded).toContain('http://127.0.0.1:8545');
     } finally {
       for (const key of keys) {

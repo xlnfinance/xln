@@ -165,7 +165,7 @@ const validateNumberedRegistrationInput = (value: unknown): void => {
     const entity = requireBoundaryRecord(rawEntity, code);
     requireExactBoundaryKeys(
       entity,
-      ['name', 'validators', 'threshold', 'localSignerId'],
+      ['name', 'validators', 'threshold', 'localSignerId', 'entitySeed'],
       ['profileName', 'position'],
       code,
     );
@@ -173,6 +173,10 @@ const validateNumberedRegistrationInput = (value: unknown): void => {
     if (typeof entity['threshold'] !== 'bigint' || entity['threshold'] <= 0n) throw new Error(code);
     if (entity['localSignerId'] !== null) {
       requireBoundedSecretString(entity['localSignerId'], 128, code);
+      requireBoundedSecretString(entity['entitySeed'], 130, code);
+      if (!/^0x[0-9a-f]{128}$/.test(entity['entitySeed'] as string)) throw new Error(code);
+    } else if (entity['entitySeed'] !== null) {
+      throw new Error(code);
     }
     if (entity['profileName'] !== undefined) requireBoundedSecretString(entity['profileName'], 256, code);
     if (

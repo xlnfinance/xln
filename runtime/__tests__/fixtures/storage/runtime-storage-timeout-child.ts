@@ -9,6 +9,7 @@ import { ensureRuntimeInfrastructure } from '../../../runtime/infrastructure/run
 import type { ConsensusConfig, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeTx } from '../../../runtime/types';
 import { createTestJReplica } from '../../helpers/j-replica';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const [seed] = Bun.argv.slice(2);
 if (!seed) throw new Error('runtime storage timeout fixture requires a seed');
@@ -44,12 +45,11 @@ const importTx = (index: string): RuntimeTx => {
     shares: { [signerId]: 1n },
     jurisdiction,
   };
-  return {
-    type: 'importReplica',
+  return createTestEntityImportRuntimeTx(env, {
     entityId: generateLazyEntityId([signerId], 1n).toLowerCase(),
     signerId,
     data: { config, isProposer: true },
-  };
+  });
 };
 
 process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] = '0';

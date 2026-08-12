@@ -51,7 +51,7 @@ const buildJurisdictionMetadata = (jurisdiction: RawHubJurisdiction | undefined)
 export const buildPublicHubDiscoveryPayload = (input: {
   hubChildren: HubChild[];
   relayStore: RelayStore;
-  primaryJurisdictionFallback: PublicHubJurisdiction | null;
+  defaultJurisdiction: PublicHubJurisdiction | null;
   serverTime?: number;
 }): {
   ok: true;
@@ -59,7 +59,7 @@ export const buildPublicHubDiscoveryPayload = (input: {
   serverTime: number;
   hubs: PublicHubDiscoveryHub[];
 } => {
-  const { hubChildren, relayStore, primaryJurisdictionFallback } = input;
+  const { hubChildren, relayStore, defaultJurisdiction } = input;
   const serverTime = input.serverTime ?? Date.now();
   const hubsByEntityId = new Map<string, PublicHubDiscoveryHub>();
   const addHub = (hub: PublicHubDiscoveryHub): void => {
@@ -88,10 +88,10 @@ export const buildPublicHubDiscoveryPayload = (input: {
         : [{
           entityId,
           name: child.name,
-          jurisdictionName: primaryJurisdictionFallback?.name || '',
-          ...(primaryJurisdictionFallback?.chainId !== undefined ? { chainId: primaryJurisdictionFallback.chainId } : {}),
-          ...(primaryJurisdictionFallback?.depositoryAddress ? { depositoryAddress: primaryJurisdictionFallback.depositoryAddress } : {}),
-          ...(primaryJurisdictionFallback?.entityProviderAddress ? { entityProviderAddress: primaryJurisdictionFallback.entityProviderAddress } : {}),
+          jurisdictionName: defaultJurisdiction?.name || '',
+          ...(defaultJurisdiction?.chainId !== undefined ? { chainId: defaultJurisdiction.chainId } : {}),
+          ...(defaultJurisdiction?.depositoryAddress ? { depositoryAddress: defaultJurisdiction.depositoryAddress } : {}),
+          ...(defaultJurisdiction?.entityProviderAddress ? { entityProviderAddress: defaultJurisdiction.entityProviderAddress } : {}),
         }];
       return hubEntities
         .map((entry) => {

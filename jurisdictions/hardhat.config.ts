@@ -66,7 +66,7 @@ const config: HardhatUserConfig = {
       chainId: 1,
       accounts: deployerAccounts(),
     },
-    // Legacy local networks
+    // Local test networks
     ethereum: {
       url: "http://127.0.0.1:8545",
       chainId: 31337,

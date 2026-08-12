@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { keccak256 } from 'ethers';
 
 import {
+  DEFAULT_MAX_WS_MESSAGE_BYTES,
   deserializeWsMessage,
+  resolveRuntimeWsMaxMessageBytes,
   serializeWsMessage,
   serializeWsMessageForDebug,
   type RuntimeWsMessage,
@@ -110,6 +112,18 @@ describe('WebSocket trusted decode boundary', () => {
     process.env['XLN_WS_MAX_MESSAGE_BYTES'] = '4';
     expect(() => deserializeWsMessage(new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff])))
       .toThrow('WS_MESSAGE_TOO_LARGE:bytes=5:max=4');
+  });
+
+  test('uses one exact 32 MiB authenticated cap for direct and relay frame envelopes', () => {
+    delete process.env['XLN_WS_MAX_MESSAGE_BYTES'];
+    expect(resolveRuntimeWsMaxMessageBytes()).toBe(32 * 1024 * 1024);
+    expect(DEFAULT_MAX_WS_MESSAGE_BYTES).toBe(resolveRuntimeWsMaxMessageBytes());
+
+    const atLimit = new Uint8Array(DEFAULT_MAX_WS_MESSAGE_BYTES);
+    atLimit[0] = 0x00;
+    expect(() => deserializeWsMessage(atLimit)).toThrow('WS_WIRE_MESSAGEPACK_REQUIRED');
+    expect(() => deserializeWsMessage(new Uint8Array(DEFAULT_MAX_WS_MESSAGE_BYTES + 1)))
+      .toThrow(`WS_MESSAGE_TOO_LARGE:bytes=${DEFAULT_MAX_WS_MESSAGE_BYTES + 1}:max=${DEFAULT_MAX_WS_MESSAGE_BYTES}`);
   });
 });
 

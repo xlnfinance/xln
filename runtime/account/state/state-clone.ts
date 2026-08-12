@@ -62,22 +62,18 @@ const cloneCrossJurisdictionState = (
     // the Entity root and can conflict with the persisted H0 anchor.
     delete target.state.pulls;
   }
-  if (source.swapOrderHistory instanceof Map) {
-    target.swapOrderHistory = new Map(
-      Array.from(source.swapOrderHistory.entries()).map(([id, entry]) => [
-        id,
-        cloneCrossJurisdictionSwapHistoryRoute(entry),
-      ]),
-    );
-  }
-  if (source.swapClosedOrders instanceof Map) {
-    target.swapClosedOrders = new Map(
-      Array.from(source.swapClosedOrders.entries()).map(([id, entry]) => [
-        id,
-        cloneCrossJurisdictionSwapHistoryRoute(entry),
-      ]),
-    );
-  }
+  target.swapOrderHistory = new Map(
+    Array.from(source.swapOrderHistory.entries()).map(([id, entry]) => [
+      id,
+      cloneCrossJurisdictionSwapHistoryRoute(entry),
+    ]),
+  );
+  target.swapClosedOrders = new Map(
+    Array.from(source.swapClosedOrders.entries()).map(([id, entry]) => [
+      id,
+      cloneCrossJurisdictionSwapHistoryRoute(entry),
+    ]),
+  );
 };
 
 const isProofBody = (value: unknown): value is ProofBodyStruct => {

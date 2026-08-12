@@ -30,7 +30,6 @@ const accountDoc = (large: boolean, status = 'active'): StorageAccountDoc => ({
       { lockId: `lock-${index}`, marker: 'x'.repeat(100) },
     ])),
     swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     leftPendingJClaims: { root: '', count: 0n },
     rightPendingJClaims: { root: '', count: 0n },
     lastFinalizedJHeight: 0,

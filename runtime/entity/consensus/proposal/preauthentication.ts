@@ -96,6 +96,7 @@ export const preauthenticateEntityProposal = (
     context.workingReplica.state.entityId,
     frame.stateRoot,
     frame.authorityRoot,
+    frame.entityContext,
     frame.jPrefixCertificate,
   );
   if (recomputedHash !== frame.hash) {

@@ -18,13 +18,13 @@ describe('entity panel model helpers', () => {
   test('builds stable jurisdiction keys from contract config', () => {
     expect(jurisdictionKey({ chainId: 31337, depositoryAddress: '0xABCDEF', name: 'Ignored' }))
       .toBe('dep:31337:0xabcdef');
-    expect(jurisdictionKey({ chainId: 31338, name: 'Fallback' })).toBe('chain:31338');
+    expect(jurisdictionKey({ chainId: 31338, name: 'Default' })).toBe('chain:31338');
     expect(jurisdictionKey({ name: 'Base Sepolia' })).toBe('base sepolia');
     expect(jurisdictionKey('Testnet')).toBe('testnet');
   });
 
-  test('resolves current entity jurisdiction from replica before active env fallback', () => {
-    const env = { activeJurisdiction: 'Fallback' } as any;
+  test('resolves current entity jurisdiction from replica before the active environment', () => {
+    const env = { activeJurisdiction: 'Default' } as any;
     const replica = {
       state: {
         config: { jurisdiction: { name: 'Configured', chainId: 1 } },
@@ -33,11 +33,11 @@ describe('entity panel model helpers', () => {
 
     expect(getCurrentEntityJurisdictionName(env, replica)).toBe('Configured');
     expect(getCurrentEntityJurisdictionKey(env, replica)).toBe('chain:1');
-    expect(getCurrentEntityJurisdictionName(env, null)).toBe('Fallback');
-    expect(getCurrentEntityJurisdictionKey(env, null)).toBe('fallback');
+    expect(getCurrentEntityJurisdictionName(env, null)).toBe('Default');
+    expect(getCurrentEntityJurisdictionKey(env, null)).toBe('default');
   });
 
-  test('resolves entity jurisdiction from replicas and gossip fallback', () => {
+  test('resolves entity jurisdiction from replicas and then gossip', () => {
     const env = {
       state: { eReplicas: new Map([
         ['alice:signer', {
@@ -185,7 +185,6 @@ describe('entity panel model helpers', () => {
                 deltas: new Map([[1, { offdelta: 10n }]]),
                 locks: new Map(),
                 swapOffers: new Map(),
-                globalCreditLimits: new Map(),
                 lastFinalizedJHeight: 3,
                 requestedRebalance: new Map(),
                 requestedRebalanceFeeState: new Map(),
@@ -206,7 +205,6 @@ describe('entity panel model helpers', () => {
                 deltas: new Map([[1, { offdelta: -2n }]]),
                 locks: new Map(),
                 swapOffers: new Map(),
-                globalCreditLimits: new Map(),
                 lastFinalizedJHeight: 2,
                 requestedRebalance: new Map(),
                 requestedRebalanceFeeState: new Map(),
@@ -373,7 +371,7 @@ describe('entity panel model helpers', () => {
     expect(accountWorkspace).toContain('{entityNames}');
   });
 
-  test('entity header dropdown consumes panel projection without store fallbacks', () => {
+  test('entity header dropdown consumes the canonical panel projection', () => {
     const dropdown = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityDropdown.svelte', 'utf8');
     const chrome = readFileSync('frontend/src/lib/components/Entity/workspace/EntityPanelChrome.svelte', 'utf8');
     const contextSwitcher = readFileSync('frontend/src/lib/components/Entity/workspace/shell/ContextSwitcher.svelte', 'utf8');

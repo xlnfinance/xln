@@ -14,6 +14,8 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../protocol/boundary-validation';
+import { deriveMnemonicCustodySeed } from '../runtime/registration/entity-creation/mnemonic-seed';
+import { importEntity } from '../runtime/registration/entity-creation';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
@@ -145,6 +147,7 @@ export type ManagedEntityIdentity = {
   entityId: string;
   signerId: string;
   privateKeyHex: string;
+  entitySeed: string;
   consensusConfig: ConsensusConfig;
   position: { x: number; y: number; z: number };
   name: string;
@@ -194,6 +197,7 @@ export const deriveManagedEntityIdentity = (config: ManagedEntityConfig): Manage
     entityId: hashBoard(encodeBoard(consensusConfig)),
     signerId,
     privateKeyHex: ethers.hexlify(signerPrivateKey).toLowerCase(),
+    entitySeed: ethers.hexlify(deriveMnemonicCustodySeed(config.seed)).toLowerCase(),
     consensusConfig,
     position: config.position ?? { x: 0, y: 0, z: 0 },
     name: config.name,
@@ -404,17 +408,17 @@ const waitForQueuedRuntimeInputObserved = async (
 
 const buildImportReplicaInput = (identity: ManagedEntityIdentity): RuntimeInput => ({
   runtimeTxs: [
-    {
-      type: 'importReplica',
+    importEntity({
       entityId: identity.entityId,
       signerId: identity.signerId,
+      entitySeed: ethers.getBytes(identity.entitySeed),
       data: {
         config: identity.consensusConfig,
         isProposer: true,
         profileName: identity.name,
         position: identity.position,
       },
-    },
+    }),
   ],
   entityInputs: [],
 });

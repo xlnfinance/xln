@@ -62,10 +62,10 @@ const sameRpc = (left: unknown, right: unknown): boolean => {
   return false;
 };
 
-const resolveRpcUrl = (entryRpc: unknown, fallbackRpcUrl: string): string => {
+const resolveRpcUrl = (entryRpc: unknown, defaultRpcUrl: string): string => {
   const raw = String(entryRpc || '').trim();
-  if (!raw) return fallbackRpcUrl;
-  if (raw.startsWith('/')) return new URL(raw, fallbackRpcUrl).toString();
+  if (!raw) return defaultRpcUrl;
+  if (raw.startsWith('/')) return new URL(raw, defaultRpcUrl).toString();
   return raw;
 };
 
@@ -75,7 +75,7 @@ const optionalContractAddress = (value: unknown): string =>
 const toCliJurisdiction = (
   key: string,
   entry: RawJurisdictionEntry,
-  fallbackRpcUrl: string,
+  defaultRpcUrl: string,
 ): CliJurisdiction => {
   if (!hasRequiredContracts(entry)) {
     throw new Error(`CLI_JURISDICTION_CONTRACTS_INCOMPLETE:${key}`);
@@ -88,7 +88,7 @@ const toCliJurisdiction = (
     key,
     name: String(entry.name || key).trim() || key,
     chainId: Math.floor(chainId),
-    rpcUrl: resolveRpcUrl(entry.rpc, fallbackRpcUrl),
+    rpcUrl: resolveRpcUrl(entry.rpc, defaultRpcUrl),
     contracts: {
       account: optionalContractAddress(entry.contracts?.['account']),
       depository: entry.contracts!['depository'] as string,

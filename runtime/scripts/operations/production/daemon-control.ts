@@ -16,8 +16,8 @@ const inheritedSecrets = readInheritedChildSecrets();
 
 const command = args[0] || '';
 
-const getArg = (name: string, fallback = ''): string =>
-  readCliOption(args, name, fallback);
+const getArg = (name: string, defaultValue = ''): string =>
+  readCliOption(args, name, defaultValue);
 
 const hasFlag = (name: string): boolean => hasCliFlag(args, name);
 

@@ -124,8 +124,8 @@ const readsCommittedState = (node: ts.Expression): boolean => {
 const checkReconstructedComparison = (file: ts.SourceFile): void => {
   for (const coalesce of collect(file, isCoalesce)) {
     if (!readsCommittedState(unwrap(coalesce.left))) continue;
-    const fallbackRoot = accessRoot(unwrap(coalesce.right));
-    if (!fallbackRoot) continue;
+    const substituteRoot = accessRoot(unwrap(coalesce.right));
+    if (!substituteRoot) continue;
 
     // The coalescing result reaches a comparison either directly, or through a
     // const that is compared later in the same function body.
@@ -141,12 +141,12 @@ const checkReconstructedComparison = (file: ts.SourceFile): void => {
         const selfIsResult = self === coalesce ||
           (ts.isIdentifier(self) && names.includes(self.text));
         if (!selfIsResult) continue;
-        if (accessRoot(other) !== fallbackRoot) continue;
+        if (accessRoot(other) !== substituteRoot) continue;
         report(
           file,
           equality,
           'VACUOUS_COMPARISON',
-          `value falls back to \`${fallbackRoot}\` and is then compared against \`${fallbackRoot}\``,
+          `value substitutes \`${substituteRoot}\` and is then compared against \`${substituteRoot}\``,
         );
       }
     }

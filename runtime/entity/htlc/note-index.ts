@@ -43,16 +43,6 @@ const noteBinding = (tx: EntityTx): NoteBinding | null => {
     if (!description || !hashlock) return null;
     return {
       hashlock,
-      ...(tx.data.preparedLockId ? { lockId: tx.data.preparedLockId } : {}),
-      description,
-    };
-  }
-  if (tx.type === 'htlcOnionAdvance' && tx.data.advance.kind === 'final') {
-    const description = tx.data.advance.description?.trim();
-    if (!description) return null;
-    return {
-      hashlock: tx.data.hashlock,
-      lockId: tx.data.inboundLockId,
       description,
     };
   }

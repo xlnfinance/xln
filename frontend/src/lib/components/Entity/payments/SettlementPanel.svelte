@@ -633,8 +633,8 @@
     return `${normalizeEntityId(counterparty)}:${workspace.revision}:${workspace.status}:${nonceAtSign}`;
   }
 
-  function toErrorMessage(err: unknown, fallback = 'Unknown error'): string {
-    return err instanceof Error && err.message ? err.message : fallback;
+  function toErrorMessage(err: unknown, defaultMessage = 'Unknown error'): string {
+    return err instanceof Error && err.message ? err.message : defaultMessage;
   }
 
   function logSettlementDiagnostic(message: string, err: unknown): void {

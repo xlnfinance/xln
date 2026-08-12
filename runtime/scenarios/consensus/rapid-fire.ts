@@ -32,7 +32,8 @@ import { commitRuntimeInput, getOffdelta, converge, assert, enableStrictScenario
 import { generateLazyEntityId } from '../../entity/factory';
 import { DEFAULT_TOKENS } from '../../jurisdiction/machine/config/default-tokens';
 import { isLeftEntity } from '../../account/utils';
-import { quoteHtlcPaymentRoute } from '../../entity/htlc/payment-admission';
+import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
+import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 
 let _process: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;
 
@@ -95,8 +96,7 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   const entities = [alice, hub, bob];
 
   await commitRuntimeInput(env, {
-    runtimeTxs: entities.map(e => ({
-      type: 'importReplica' as const,
+    runtimeTxs: entities.map(e => createTestEntityImportRuntimeTx(env, {
       entityId: e.id,
       signerId: e.signer,
       data: {

@@ -89,8 +89,8 @@
     return base > 0n ? Number((value * 10000n) / base) / 100 : 0;
   }
 
-  function durationMs(name: string, value: number | undefined, fallback: number): number {
-    if (value === undefined) return fallback;
+  function durationMs(name: string, value: number | undefined, defaultValue: number): number {
+    if (value === undefined) return defaultValue;
     if (!Number.isFinite(value) || value < 0) {
       throw new Error(`DeltaCapacityBar ${name} duration must be a finite non-negative number`);
     }

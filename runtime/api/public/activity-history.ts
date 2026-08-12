@@ -51,14 +51,14 @@ const payloadMentionsEntity = (value: unknown, entityId: string, depth = 0): boo
   return Object.values(value as RawRecord).some((item) => payloadMentionsEntity(item, entityId, depth + 1));
 };
 
-const routeCounterparty = (route: unknown, entityId: string, fallback: unknown): string | undefined => {
+const routeCounterparty = (route: unknown, entityId: string, recordedCounterparty: unknown): string | undefined => {
   if (Array.isArray(route)) {
     const normalizedRoute = route.map(normalizeId).filter(Boolean);
     const index = normalizedRoute.indexOf(entityId);
-    if (index >= 0) return normalizedRoute[index + 1] ?? normalizedRoute[index - 1] ?? normalizeId(fallback) ?? undefined;
+    if (index >= 0) return normalizedRoute[index + 1] ?? normalizedRoute[index - 1] ?? normalizeId(recordedCounterparty) ?? undefined;
   }
-  const normalizedFallback = normalizeId(fallback);
-  return normalizedFallback || undefined;
+  const normalizedCounterparty = normalizeId(recordedCounterparty);
+  return normalizedCounterparty || undefined;
 };
 
 const inferDirection = (sourceEntityId: string, targetEntityId: string, viewedEntityId: string): ActivityDirection => {

@@ -23,9 +23,9 @@ const sortJson = (value: unknown): JsonLike => {
 
 export const computeJurisdictionsNetworkVersion = (
   payload: unknown,
-  fallbackVersion = '1',
+  defaultVersion = '1',
 ): string => {
-  const version = isRecord(payload) ? String(payload['version'] || '').trim() || fallbackVersion : fallbackVersion;
+  const version = isRecord(payload) ? String(payload['version'] || '').trim() || defaultVersion : defaultVersion;
   const canonical = JSON.stringify(sortJson(payload));
   const digest = createHash('sha256').update(canonical).digest('hex').slice(0, 12);
   return `v${version}-${digest}`;

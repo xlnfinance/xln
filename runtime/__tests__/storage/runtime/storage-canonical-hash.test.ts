@@ -76,11 +76,11 @@ const makeEnv = (account: AccountReplica, reserves: Array<[number, bigint]>): Ru
       [`${entityId}:${signerIds[0]}`, {
         entityId,
         signerId: signerIds[0]!,
-        entityEncPubKey: '',
         mempool: [],
         isProposer: true,
         state: {
           entityId,
+          entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
           height: 0,
           timestamp: 1234,
           nonces: new Map([['1', 1]]),
@@ -164,6 +164,7 @@ test('storage frame integrity commits every named runtime-machine field', () => 
     postStateHash: `0x${'44'.repeat(32)}`,
     stateHash: `0x${'33'.repeat(32)}`,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    entityContexts: new Map(),
     historyRecords: [],
     activityLogs: [],
     touchedEntities: [],
@@ -388,25 +389,10 @@ test('storage projection round-trip preserves canonical account optional-field s
     root: `0x${'44'.repeat(32)}`,
     count: 1n,
   };
-  state.profileEncryptionManifest = {
-    entityId,
-    threshold: 1,
-    attestations: [{
-      version: 'xln:validator-encryption-key:v1',
-      entityId,
-      signerId: '1',
-      signer: '0x0000000000000000000000000000000000000001',
-      publicKey: `0x04${'33'.repeat(64)}`,
-      weight: 1,
-      encryptionPublicKey: `0x${'55'.repeat(32)}`,
-      signature: `0x${'66'.repeat(65)}`,
-    }],
-    hash: `0x${'77'.repeat(32)}`,
-  };
 
   expect(account.state.pulls).toBeUndefined();
-  expect(account.swapOrderHistory).toBeUndefined();
-  expect(account.swapClosedOrders).toBeUndefined();
+  expect(account.swapOrderHistory).toEqual(new Map());
+  expect(account.swapClosedOrders).toEqual(new Map());
 
   const hydratedState = hydrateEntityStateFromStorage({
     core: projectEntityCoreDoc(state),
@@ -414,15 +400,13 @@ test('storage projection round-trip preserves canonical account optional-field s
     books: new Map(),
   });
 
-  expect(hydratedState.profileEncryptionManifest).toEqual(state.profileEncryptionManifest);
-
   const before = computeCanonicalEntityHash(replica);
   const after = computeCanonicalEntityHash({ ...replica, state: hydratedState });
 
   expect(hydratedState.accounts.get(counterpartyId)?.state.pulls).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.state.domain).toEqual(account.state.domain);
-  expect(hydratedState.accounts.get(counterpartyId)?.swapOrderHistory).toBeUndefined();
-  expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toBeUndefined();
+  expect(hydratedState.accounts.get(counterpartyId)?.swapOrderHistory).toEqual(new Map());
+  expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toEqual(new Map());
   expect(hydratedState.accounts.get(counterpartyId)?.hankoSignature).toBe(account.hankoSignature);
   expect(hydratedState.accounts.get(counterpartyId)?.pendingForwards).toEqual(account.pendingForwards);
   expect(hydratedState.accounts.get(counterpartyId)?.state.lendingIntents).toEqual(account.state.lendingIntents);

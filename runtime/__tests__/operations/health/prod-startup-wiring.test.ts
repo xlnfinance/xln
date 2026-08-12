@@ -348,6 +348,13 @@ describe('production startup wiring', () => {
     expect(deploy).not.toContain('|| [ ! -d frontend/build ]');
     expect(deploy).toContain('PRODUCTION_FRONTEND_ARTIFACT_MISSING');
     expect(deploy).toContain('DEPLOY_PUSH_REQUIRES_REMOTE');
+    expect(deploy).toContain('EXPECTED_DEPLOY_SHA="$(git rev-parse --verify \'HEAD^{commit}\')"');
+    expect(deploy).toContain("git cat-file -e '$EXPECTED_DEPLOY_SHA^{commit}'");
+    expect(deploy).toContain("git merge-base --is-ancestor '$EXPECTED_DEPLOY_SHA' origin/main");
+    expect(deploy).toContain("git checkout -B main '$EXPECTED_DEPLOY_SHA'");
+    expect(deploy).toContain("git reset --hard '$EXPECTED_DEPLOY_SHA'");
+    expect(deploy).not.toContain('git checkout -B main origin/main');
+    expect(deploy).not.toContain('git reset --hard origin/main');
     expect(deploy).not.toContain('remote_cmd="$remote_cmd --frontend"');
     expect(deploy).toContain('frontend artifact installed without runtime restart');
     expect(packageJson.scripts['deploy:prod:frontend']).toContain('--frontend-only');
@@ -664,7 +671,7 @@ describe('production startup wiring', () => {
     expect(snapshotEnrichment).toContain('expectedBidOffers + expectedAskOffers === expectedOffers');
     expect(orchestrator).toContain('syncCanonicalJurisdictionsFromShard(jurisdictionsConfig)');
     expect(orchestrator).toContain(
-      'const primaryJurisdiction = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);',
+      'const primaryJurisdiction = resolvePrimaryHubJurisdiction(jurisdictionsConfig);',
     );
     expect(orchestrator).toContain('jurisdictionId: primaryJurisdiction.key');
     expect(orchestrator).not.toContain("jurisdictionId: 'arrakis'");
@@ -797,7 +804,6 @@ describe('production startup wiring', () => {
     );
     expect(hubNode).toContain('const peerJurisdiction = profile.metadata?.jurisdiction || identity;');
     expect(hubNode).toContain('if (!sameJurisdictionRef(peerJurisdiction, jurisdiction)) return null;');
-    expect(hubNode).not.toContain('sameJurisdictionIdentityOrNameOnlyFallback');
     expect(hubNode).toContain('...hubBootstraps.map(owner =>\n      planSupportPeerInputs(');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
     expect(hubNode).toContain('entityAdapter = getEntityJAdapter(env, entityId);');
@@ -845,7 +851,6 @@ describe('production startup wiring', () => {
     );
     expect(mmNode).toContain('const targetRef = getJurisdictionIdentityRef(target);');
     expect(mmNode).toContain('const replicaRef = getJurisdictionIdentityRef(replica);');
-    expect(mmNode).not.toContain('sameJurisdictionIdentityOrNameOnlyFallback');
     expect(mmNode).toContain(
       'if (hasJurisdictionReplica(env, jurisdiction) && hasLiveJurisdictionAdapter(env, jurisdiction)) return;',
     );
@@ -1440,10 +1445,10 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('echo "[deploy] resetting production anvil + runtime + chain-bound watchtower state"');
     expect(deploy).toContain('export XLN_JDB_ROOT="${XLN_JDB_ROOT:-$XLN_STATE_ROOT/jdb}"');
     expect(deploy).toContain('export XLN_RDB_ROOT="${XLN_RDB_ROOT:-$XLN_STATE_ROOT/rdb}"');
-    expect(deploy).toContain('PRODUCTION_STATE_MIGRATION_COLLISION');
     expect(deploy).toContain('if [ "$PRODUCTION" != "1" ]; then');
-    expect(deploy).toContain('echo "[deploy] preserving checkout state until production migration completes"');
-    expect(deploy).toContain('rmdir data db db-tmp 2>/dev/null || true');
+    expect(deploy).toContain('echo "[deploy] production state remains in the canonical external state root"');
+    expect(deploy).not.toContain('migrate_production_path');
+    expect(deploy).not.toContain('.checkout-state-migrated');
     expect(deploy).toContain('chmod -R go-rwx "$XLN_STATE_ROOT"');
     expect(deploy).toContain('rm -rf "$XLN_RDB_ROOT/runtime/prod-main"');
     expect(deploy).toContain('"$XLN_RDB_ROOT/watchtower/prod-main"');
@@ -1473,17 +1478,13 @@ describe('production startup wiring', () => {
     expect(startServer).toContain('MESH_RESET_CLAIMED');
     expect(startServer).toContain('MESH_RESET_RETRY');
     expect(startServer).toContain('MESH_RESET_FINALIZED');
-    expect(deploy.match(/git clean -fd -e data\/ -e db\/ -e db-tmp\//g)).toHaveLength(2);
-    expect(
-      deploy.match(/if \[ -f \/var\/lib\/xln\/\.checkout-state-migrated \]; then git clean -fd; else/g),
-    ).toHaveLength(2);
+    expect(deploy.match(/git clean -fd/g)).toHaveLength(2);
     expect(deploy).not.toContain('pm2 restart xln-server');
     expect(packageJson.scripts['deploy:prod']).toContain('--reset-mesh');
     expect(packageJson.scripts['deploy:prod']).not.toContain('--code-only');
     expect(packageJson.scripts['deploy:prod:runtime']).toContain('--reset-mesh');
     expect(packageJson.scripts['deploy:prod:runtime']).not.toContain('--code-only');
     expect(packageJson.scripts['deploy:prod:runtime:code']).toBeUndefined();
-    expect(packageJson.scripts['deploy:prod:runtime:reset']).toContain('--reset-mesh');
     expect(packageJson.scripts['deploy:prod:fresh']).toContain('--reset-mesh');
   });
 
@@ -2358,7 +2359,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('--mesh-hub-identities-json');
   });
 
-  test('hub and market maker prefer authenticated direct entity delivery with relay fallback', () => {
+  test('hub and market maker prefer authenticated direct entity delivery with relay failover', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const hubTransport = readFileSync(join(repoRoot, 'runtime/orchestrator/hub/hub-runtime-transport.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
@@ -2406,7 +2407,6 @@ describe('production startup wiring', () => {
     expect(reserveBootstrap).toContain('sameJurisdictionRef(jurisdiction, activeJurisdiction)');
     expect(reserveBootstrap).not.toContain('profile.jurisdictionRef || jurisdictionName');
     expect(reserveBootstrap).not.toContain('jurisdiction.jurisdictionRef || jurisdiction');
-    expect(reserveBootstrap).not.toContain('sameJurisdictionRefOrNameFallback');
     expect(reserveBootstrap).not.toContain('profilesByJurisdiction.has(jurisdictionName)');
     expect(reserveBootstrap).not.toContain('tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
     expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');

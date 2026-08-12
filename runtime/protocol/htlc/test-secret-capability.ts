@@ -40,7 +40,7 @@ export const withDeterministicHtlcTestSecret = (
 };
 
 /** @internal Read only by raw local admission; never serialize its result. */
-export const getDeterministicHtlcTestSecret = (tx: HtlcPaymentTx): string | undefined =>
+const getDeterministicHtlcTestSecret = (tx: HtlcPaymentTx): string | undefined =>
   (tx as CapableHtlcPaymentTx)[TEST_SECRET];
 
 /** Preserve the local capability only across the runtime's private frame clone. */

@@ -868,7 +868,7 @@ const processLastResortAppointment = async (
   const equalNonceLeftOverride =
     finalNonce === accountNonce
     && remedy.latestProof.proposerIsLeft
-    && !Boolean(account.disputeInitialProposerIsLeft);
+    && !account.disputeInitialProposerIsLeft;
   // Mirror Account._registerCounterDispute exactly: a higher nonce wins, and
   // at equal nonce the signed LEFT branch beats an active RIGHT branch. The
   // old >= shortcut silently skipped the one equal-nonce remedy that matters.

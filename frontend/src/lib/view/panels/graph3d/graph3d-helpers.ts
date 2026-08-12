@@ -59,19 +59,12 @@ export function graphJReplicaHeight(replica: GraphJReplicaLike | null | undefine
 }
 
 export function findGraphJReplica(
-  replicas: Map<string, GraphJReplicaLike> | GraphJReplicaLike[] | Array<[string, GraphJReplicaLike]> | null | undefined,
+  replicas: Map<string, GraphJReplicaLike> | null | undefined,
   jurisdictionName: string,
 ): GraphJReplicaLike | undefined {
-  if (replicas instanceof Map) {
-    return replicas.get(jurisdictionName)
-      ?? Array.from(replicas.values()).find((replica) => replica.name === jurisdictionName);
-  }
-  if (!Array.isArray(replicas)) return undefined;
-  for (const entry of replicas) {
-    const replica = Array.isArray(entry) ? entry[1] : entry;
-    if (replica?.name === jurisdictionName) return replica;
-  }
-  return undefined;
+  if (!(replicas instanceof Map)) return undefined;
+  return replicas.get(jurisdictionName)
+    ?? Array.from(replicas.values()).find((replica) => replica.name === jurisdictionName);
 }
 
 const BANK_NAMES: string[] = [];
@@ -254,8 +247,8 @@ export function formatGraphEntityShortName(input: {
       if (normalized.includes(key)) return `${name} (${input.entityId})`;
     }
     const hash = input.entityId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const fallbackBank = BANK_NAMES.length > 0 ? BANK_NAMES[hash % BANK_NAMES.length] : 'Bank';
-    return `${fallbackBank || 'Bank'} (${input.entityId})`;
+    const defaultBank = BANK_NAMES.length > 0 ? BANK_NAMES[hash % BANK_NAMES.length] : 'Bank';
+    return `${defaultBank || 'Bank'} (${input.entityId})`;
   }
   return input.entityId;
 }

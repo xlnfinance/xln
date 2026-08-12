@@ -54,7 +54,6 @@ describe('repository command surface', () => {
       'deploy:prod',
       'deploy:prod:frontend',
       'deploy:prod:runtime',
-      'deploy:prod:runtime:reset',
       'deploy:prod:full',
       'deploy:prod:fresh',
     ]) {
@@ -96,7 +95,7 @@ describe('repository command surface', () => {
     }
   });
 
-  test('retired root and legacy launchers stay absent', () => {
+  test('retired root and retired launchers stay absent', () => {
     for (const retiredPath of [
       'deploy.sh',
       'deploy-contracts.sh',

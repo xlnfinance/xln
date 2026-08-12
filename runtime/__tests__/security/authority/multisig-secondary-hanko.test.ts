@@ -13,10 +13,10 @@ import {
   signAccountFrame,
 } from '../../../account/crypto';
 import {
-  applyEntityFrame,
   applyEntityInput,
   attachTargetConsumptionProofs,
 } from '../../../entity/consensus';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import {
   assertCertifiedEntityOutputWitnesses,
   assignCertifiedOutputIdentities,
@@ -31,7 +31,7 @@ import {
   type HankoWitnessEntry,
 } from '../../../entity/consensus/input/hanko-witness';
 import { generateLazyEntityId } from '../../../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 import { handleExtendCreditEntityTx } from '../../../entity/tx/handlers/account/lifecycle/admin';
 import { buildQuorumHanko, verifyHankoForHash } from '../../../hanko/signing';
 import { createEmptyEnv } from '../../../runtime';
@@ -149,7 +149,6 @@ const createMultisigAccountState = (
     name: jurisdiction.name,
     chainId: jurisdiction.chainId,
     rpcs: [jurisdiction.address!],
-    contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
@@ -174,7 +173,6 @@ const createMultisigAccountState = (
       deltas: new Map(),
       locks: new Map(),
       swapOffers: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
@@ -229,16 +227,16 @@ const createMultisigAccountState = (
     lockBook: new Map(),
     swapTradingPairs: [],
   } as EntityState;
-  const localKeys = deriveLocalEntityCryptoKeys(env, entityId, localSignerId);
+  state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId);
   const replica: EntityReplica = {
     entityId,
     signerId: localSignerId,
-    entityEncPubKey: localKeys.publicKey,
     mempool: [],
     isProposer: localSignerId === authority.validators[0],
     state,
   };
   env.state.eReplicas.set(`${entityId}:${localSignerId}`, replica);
+  const counterpartyEncryptionPublicKey = provisionTestEntityEncryptionKey(env, counterpartyId);
   env.state.eReplicas.set(`${counterpartyId}:${counterpartySigner}`, {
     entityId: counterpartyId,
     signerId: counterpartySigner,
@@ -248,6 +246,7 @@ const createMultisigAccountState = (
     state: {
       ...structuredClone(state),
       entityId: counterpartyId,
+      entityEncryptionPublicKey: counterpartyEncryptionPublicKey,
       config: {
         mode: 'proposer-based',
         threshold: 1n,
@@ -532,7 +531,7 @@ describe('multisig secondary Hanko production', () => {
     expect(proposedTxs.every(tx => tx.type === 'consensusOutput' && tx.data.consumptionProof)).toBe(true);
     expect(getConsumptionNodeStore(source.env).size).toBe(0);
 
-    const replay = await applyEntityFrame(source.env, target.state, proposedTxs, source.env.state.timestamp + 1);
+    const replay = await applyEntityFrameWithMaterializedTestInfraContext(source.env, target.state, proposedTxs, source.env.state.timestamp + 1);
     expect(replay.newState.consumptionAccumulator?.count).toBe(1n);
     expect(replay.consumptionNodeChanges?.newNodes).toHaveLength(1);
     expect(getConsumptionNodeStore(source.env).size).toBe(0);
@@ -755,7 +754,7 @@ describe('multisig secondary Hanko production', () => {
   test('account proposal produces unsigned drafts for the Entity quorum to seal', async () => {
     const { env, state, counterpartyId } = createMultisigAccountState();
 
-    const result = await applyEntityFrame(env, state, [], env.state.timestamp);
+    const result = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [], env.state.timestamp);
     const proposedAccount = result.newState.accounts.get(counterpartyId);
     if (!proposedAccount?.pendingFrame || !proposedAccount.pendingAccountInput) {
       throw new Error('TEST_MULTISIG_ACCOUNT_PROPOSAL_MISSING');
@@ -763,7 +762,7 @@ describe('multisig secondary Hanko production', () => {
     const outboundProposal = accountInputProposal(proposedAccount.pendingAccountInput);
     if (!outboundProposal) throw new Error('TEST_MULTISIG_ACCOUNT_OUTPUT_MISSING');
 
-    expect(result.collectedHashes.map(({ type }) => type)).toEqual(['accountFrame', 'dispute']);
+    expect(result.collectedHashes.map(({ type }) => type)).toEqual(['accountFrame', 'dispute', 'profile']);
     expect(proposedAccount.currentFrameHanko).toBeUndefined();
     expect(proposedAccount.currentDisputeProofHanko).toBeUndefined();
     expect(outboundProposal.frameHanko).toBeUndefined();
@@ -784,6 +783,7 @@ describe('multisig secondary Hanko production', () => {
       'accountFrame',
       'dispute',
       'entityOutput',
+      'profile',
     ]);
     const secondaryHashes = proposalManifest.slice(1).map(({ hash }) => hash);
     expect(secondaryHashes).toEqual([...secondaryHashes].sort());
@@ -922,14 +922,15 @@ describe('multisig secondary Hanko production', () => {
       emittedCertifiedTx.data.targetEntityId,
       witnessTamperedTxs,
     )).toBe(emittedOutputHash);
+    const dedupTarget = proposer.env.state.eReplicas.get(`${proposer.counterpartyId}:${counterpartySigner}`);
+    if (!dedupTarget) throw new Error('TEST_DEDUP_TARGET_MISSING');
     await expect(assertCertifiedEntityOutputWitnesses(
       witnessTamperedTxs,
       proposer.entityId,
       proposer.env,
+      dedupTarget.state,
     )).rejects.toThrow(/CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID/);
 
-    const dedupTarget = proposer.env.state.eReplicas.get(`${proposer.counterpartyId}:${counterpartySigner}`);
-    if (!dedupTarget) throw new Error('TEST_DEDUP_TARGET_MISSING');
     const dedupEntityTxs: EntityTx[] = [await buildCertifiedBoardResealTx(
       proposer,
       dedupTarget.state,
@@ -1063,7 +1064,7 @@ describe('multisig secondary Hanko production', () => {
         },
       }),
     });
-    await expect(applyEntityFrame(
+    await expect(applyEntityFrameWithMaterializedTestInfraContext(
       proposer.env,
       quarantinedDelivery.workingReplica.state,
       [{
@@ -1133,6 +1134,7 @@ describe('multisig secondary Hanko production', () => {
     const targetValidators = ['1', '2'].map(slot =>
       deriveSignerAddressSync(targetSeed, slot).toLowerCase());
     const targetEntityId = generateLazyEntityId(targetValidators, 2n).toLowerCase();
+    const targetEncryptionPublicKey = provisionTestEntityEncryptionKey(source.env, targetEntityId);
     const targetConfig = {
       mode: 'proposer-based' as const,
       threshold: 2n,
@@ -1143,6 +1145,7 @@ describe('multisig secondary Hanko production', () => {
     const targetTemplate: EntityState = {
       ...structuredClone(source.env.state.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`)!.state),
       entityId: targetEntityId,
+      entityEncryptionPublicKey: targetEncryptionPublicKey,
       config: targetConfig,
       accounts: new Map(),
       leaderState: { activeValidatorId: targetValidators[0]!, view: 0, changedAtHeight: 0 },
@@ -1261,7 +1264,7 @@ describe('multisig secondary Hanko production', () => {
     const outputHash = hashCertifiedEntityOutput(origin, source.counterpartyId, entityTxs);
     const outputHanko = await buildExactQuorumHanko(source, outputHash);
 
-    await expect(applyEntityFrame(source.env, targetReplica.state, [{
+    await expect(applyEntityFrameWithMaterializedTestInfraContext(source.env, targetReplica.state, [{
       type: 'consensusOutput',
       data: { origin, outputHanko, targetEntityId: source.counterpartyId, entityTxs },
     }], source.env.state.timestamp + 1)).rejects.toThrow(
@@ -1292,7 +1295,7 @@ describe('multisig secondary Hanko production', () => {
     const outputHash = hashCertifiedEntityOutput(origin, source.counterpartyId, entityTxs);
     const outputHanko = await buildExactQuorumHanko(source, outputHash);
 
-    await expect(applyEntityFrame(source.env, targetReplica.state, [{
+    await expect(applyEntityFrameWithMaterializedTestInfraContext(source.env, targetReplica.state, [{
       type: 'consensusOutput',
       data: { origin, outputHanko, targetEntityId: source.counterpartyId, entityTxs },
     }], source.env.state.timestamp + 1)).rejects.toThrow('CONSUMPTION_PROOF_REQUIRED');

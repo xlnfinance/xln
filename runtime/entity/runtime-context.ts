@@ -34,8 +34,11 @@ export interface EntityRuntimeContext {
     entityConsensusStateWarningBytes?: number;
   } | undefined;
   infrastructure?: {
-    /** Validator-local encryption secrets keyed by `entityId:signerId`. */
+    /** Entity-wide encryption secrets keyed by canonical entityId. */
     entityEncryptionPrivateKeys?: Map<string, string>;
+    entityEncryptionSeeds?: Map<string, string>;
+    /** Proposer-only snapshot of unverified socket liveness; never used implicitly. */
+    observeOnlineEntityIds?: (entityIds: readonly string[]) => ReadonlySet<string>;
     consumptionNodes?: ConsumptionNodeStore;
     pendingConsumptionNodes?: ConsumptionNodeStore;
     pendingConsumptionNodeDeletes?: Set<string>;

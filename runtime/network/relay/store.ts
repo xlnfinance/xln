@@ -115,7 +115,7 @@ const DELIVERY_ACCEPTED_STATUSES = new Set([
 
 const DELIVERY_DEFERRED_STATUSES = new Set([
   'queued',
-  'direct-miss-fallback',
+  'direct-miss-failover',
   'stale-target',
 ]);
 
@@ -189,7 +189,7 @@ export const isRelaySocketOpen = (ws: unknown): boolean => {
 const deliveryCodeFor = (status: string, reason: string): string => {
   if (reason) return normalizeRuntimeFailureCode(reason);
   if (status === 'queued') return 'DELIVERY_QUEUED';
-  if (status === 'direct-miss-fallback') return 'DELIVERY_DIRECT_MISS_FALLBACK';
+  if (status === 'direct-miss-failover') return 'DELIVERY_DIRECT_MISS_FAILOVER';
   if (status === 'stale-target') return 'DELIVERY_STALE_TARGET';
   if (DELIVERY_ACCEPTED_STATUSES.has(status)) return 'DELIVERY_ACCEPTED';
   return `DELIVERY_${normalizeRuntimeFailureCode(status)}`;
@@ -205,7 +205,7 @@ const deliveryFailureCategory = (
     return DELIVERY_FATAL_REASON_PARTS.some((part) => reason.includes(part)) ? 'Contradiction' : 'TransientRace';
   }
   if (DELIVERY_TRANSIENT_REASONS.has(code)) return 'TransientRace';
-  if (code === 'DIRECT_MISS_FALLBACK' || code === 'DELIVERY_DIRECT_MISS_FALLBACK') return 'TransientRace';
+  if (code === 'DIRECT_MISS_FAILOVER' || code === 'DELIVERY_DIRECT_MISS_FAILOVER') return 'TransientRace';
   if (code === 'DELIVERY_STALE_TARGET') return 'TransientRace';
   return 'Contradiction';
 };

@@ -171,10 +171,10 @@
     return String(profile?.name || '').trim() || shortId(entityId);
   }
 
-  function profileIsHub(frame: EnvSnapshot, entityId: string, fallbackName: string): boolean {
+  function profileIsHub(frame: EnvSnapshot, entityId: string, displayedName: string): boolean {
     const target = normalizeId(entityId);
     const profile = (frame.gossip?.profiles || []).find((item) => normalizeId(item.entityId) === target);
-    return profile?.metadata?.isHub === true || /hub/i.test(fallbackName);
+    return profile?.metadata?.isHub === true || /hub/i.test(displayedName);
   }
 
   function countDebts(state: Record<string, unknown>): number {

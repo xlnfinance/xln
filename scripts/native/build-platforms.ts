@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
 	copyFileSync,
 	cpSync,
@@ -15,13 +16,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 type Platform = 'ios' | 'android' | 'desktop' | 'extension';
-type ArtifactStatus = 'built' | 'synced' | 'skipped' | 'reused';
+type ArtifactStatus = 'built' | 'synced' | 'reused';
 type NativeArtifact = {
 	target: Platform | 'runtime' | 'frontend';
 	kind: string;
 	status: ArtifactStatus;
 	path?: string;
-	reason?: string;
+	releaseTrust?: 'signed' | 'signed-notarized';
+	proofPath?: string;
 };
 type NativeBuildOptions = {
 	flags: Set<string>;
@@ -41,7 +43,7 @@ function printHelp(): void {
 	console.log(`XLN native build pipeline
 
 Usage:
-  bun scripts/native/build-platforms.ts [mobile|ios|android|desktop|extension|all] [--open] [--smoke] [--no-build] [--package] [--best-effort]
+  bun scripts/native/build-platforms.ts [mobile|ios|android|desktop|extension|all] [--open] [--smoke] [--no-build] [--package]
 
 Targets:
   mobile     Build/sync iOS + Android from frontend/build
@@ -55,8 +57,7 @@ Flags:
   --no-build     Reuse an existing frontend/build artifact
   --open         Open the native IDE/shell after sync
   --smoke        Launch desktop shell once and exit
-  --package      Produce installable debug/dev packages when platform tooling is installed
-  --best-effort  Continue other targets when mobile platform tooling is unavailable
+  --package      Produce signed release packages; missing signing/notarization fails closed
 
 Examples:
   bun run native:mobile
@@ -133,10 +134,15 @@ function androidEnv(): NodeJS.ProcessEnv {
 	};
 }
 
-function runCapture(command: string, commandArgs: string[], cwd = ROOT): { status: number | null; output: string; error?: Error } {
+function runCapture(
+	command: string,
+	commandArgs: string[],
+	cwd = ROOT,
+	env: NodeJS.ProcessEnv = process.env,
+): { status: number | null; output: string; error?: Error } {
 	const result = spawnSync(command, commandArgs, {
 		cwd,
-		env: command === 'java' ? javaEnv() : process.env,
+		env: command === 'java' ? javaEnv() : env,
 		encoding: 'utf8',
 		stdio: ['ignore', 'pipe', 'pipe'],
 		shell: false,
@@ -168,6 +174,10 @@ export function expandTargets(input: string[]): Platform[] {
 
 export function parseNativeBuildOptions(argv: string[]): NativeBuildOptions {
 	const flags = new Set(argv.filter(arg => arg.startsWith('--')));
+	const allowedFlags = new Set(['--help', '-h', '--no-build', '--open', '--smoke', '--package']);
+	for (const flag of flags) {
+		if (!allowedFlags.has(flag)) throw new Error(`Unknown native flag: ${flag}`);
+	}
 	const tokens = argv.filter(arg => !arg.startsWith('--'));
 	return {
 		flags,
@@ -184,6 +194,12 @@ export function requiredNativeToolCommands(targets: Platform[], flags: Set<strin
 		required.add('java');
 	}
 	if (targets.includes('ios')) required.add('xcodebuild');
+	if (targets.includes('ios') && flags.has('--package')) required.add('codesign');
+	if (targets.includes('desktop') && process.platform === 'darwin') {
+		required.add('codesign');
+		required.add('xcrun');
+		required.add('spctl');
+	}
 	return [...required].sort();
 }
 
@@ -221,21 +237,44 @@ function nativeToolMissingReason(command: string): string {
 function assertNativeToolingAvailable(targets: Platform[], flags: Set<string>): void {
 	const missing = requiredNativeToolCommands(targets, flags).filter(command => !commandAvailable(command));
 	if (missing.length === 0) return;
-	if (flags.has('--best-effort') && flags.has('--package')) {
-		const openRequiresXcode = flags.has('--open') && targets.includes('ios') && missing.includes('xcodebuild');
-		if (!openRequiresXcode) {
-			console.warn(
-				`Native package tooling unavailable for some targets: ${missing.map(nativeToolMissingReason).join(' | ')}`,
-			);
-			console.warn('Continuing because --best-effort was requested.');
-			return;
-		}
-	}
 	throw new Error(
 		`Missing native platform tooling: ${missing.map(nativeToolMissingReason).join(' | ')}. ` +
 		'Install a JDK for Android packaging and full Xcode for iOS packaging/opening, or rerun without --package/--open.',
 	);
 }
+
+const requiredEnvironment = (names: readonly string[]): void => {
+	const missing = names.filter(name => !String(process.env[name] || '').trim());
+	if (missing.length > 0) throw new Error(`NATIVE_RELEASE_CREDENTIALS_MISSING:${missing.join(',')}`);
+};
+
+export const assertNativeReleaseCredentials = (targets: Platform[], flags: Set<string>): void => {
+	if (!flags.has('--package')) return;
+	if (targets.includes('android')) {
+		requiredEnvironment([
+			'XLN_ANDROID_KEYSTORE_PATH',
+			'XLN_ANDROID_KEYSTORE_PASSWORD',
+			'XLN_ANDROID_KEY_ALIAS',
+			'XLN_ANDROID_KEY_PASSWORD',
+			'XLN_ANDROID_SIGNER_CERT_SHA256',
+		]);
+		const keystore = String(process.env.XLN_ANDROID_KEYSTORE_PATH);
+		if (!existsSync(keystore)) throw new Error(`ANDROID_RELEASE_KEYSTORE_MISSING:${keystore}`);
+	}
+	if (targets.includes('ios')) {
+		requiredEnvironment(['XLN_IOS_DEVELOPMENT_TEAM']);
+	}
+	if (targets.includes('desktop') && process.platform === 'darwin') {
+		requiredEnvironment([
+			'XLN_MACOS_CODESIGN_IDENTITY',
+			'XLN_MACOS_NOTARY_KEY_PATH',
+			'XLN_MACOS_NOTARY_KEY_ID',
+			'XLN_MACOS_NOTARY_ISSUER_ID',
+		]);
+		const notaryKey = String(process.env.XLN_MACOS_NOTARY_KEY_PATH);
+		if (!existsSync(notaryKey)) throw new Error(`MACOS_NOTARY_KEY_MISSING:${notaryKey}`);
+	}
+};
 
 function ensureFrontendBuild(flags: Set<string>): NativeArtifact[] {
 	if (flags.has('--no-build')) {
@@ -305,75 +344,138 @@ export function resolveIosXcodebuildProjectArgs(iosAppDir = path.join(FRONTEND, 
 	throw new Error(`Missing iOS Xcode project in ${iosAppDir}`);
 }
 
-function readConfiguredIosDevelopmentTeam(iosAppDir: string): string {
-	const projectFile = path.join(iosAppDir, 'App.xcodeproj/project.pbxproj');
-	if (!existsSync(projectFile)) return '';
-	const project = readFileSync(projectFile, 'utf8');
-	const match = project.match(/DEVELOPMENT_TEAM = ([A-Z0-9]+);/);
-	return match?.[1] || '';
-}
-
-function resolveIosSigningArgs(iosAppDir: string): string[] {
+function resolveIosSigningArgs(): string[] {
 	const envTeam = String(process.env.XLN_IOS_DEVELOPMENT_TEAM || '').trim();
 	if (envTeam) return ['-allowProvisioningUpdates', `DEVELOPMENT_TEAM=${envTeam}`, 'CODE_SIGN_STYLE=Automatic'];
-	if (readConfiguredIosDevelopmentTeam(iosAppDir)) return [];
 	throw new Error(
-		'Missing iOS development team. Set Signing & Capabilities > Team in frontend/ios/App/App.xcodeproj, ' +
-		'or rerun with XLN_IOS_DEVELOPMENT_TEAM=<TEAM_ID> bun run native:ios:package.',
+		'Missing iOS release signing team. Set XLN_IOS_DEVELOPMENT_TEAM=<TEAM_ID> for release packaging.',
 	);
 }
 
-function packageCapacitorPlatform(platform: 'ios' | 'android', flags: Set<string>): NativeArtifact {
+const fileSha256 = (file: string): string => createHash('sha256').update(readFileSync(file)).digest('hex');
+
+const writeReleaseProof = (
+	artifactPath: string,
+	proof: Record<string, unknown>,
+): string => {
+	const proofPath = `${artifactPath}.release-proof.json`;
+	writeFileSync(proofPath, `${JSON.stringify({
+		schema: 'xln:native-release-proof',
+		artifact: path.basename(artifactPath),
+		sha256: fileSha256(artifactPath),
+		version: packageJsonVersion(),
+		release: true,
+		...proof,
+	}, null, 2)}\n`);
+	return proofPath;
+};
+
+const assertCapacitorPackageTools = (platform: 'ios' | 'android'): void => {
 	const requiredTools = platform === 'android' ? ['java', 'android-sdk'] : ['xcodebuild'];
 	const missingTools = requiredTools.filter(tool => !commandAvailable(tool));
 	if (missingTools.length > 0) {
 		const reason = missingTools.map(nativeToolMissingReason).join(' | ');
-		if (flags.has('--best-effort')) {
-			console.warn(`Skipping ${platform} package: ${reason}`);
-			return { target: platform, kind: 'debug-package', status: 'skipped', reason };
-		}
 		throw new Error(`Cannot package ${platform}: ${reason}`);
 	}
+};
 
-	if (platform === 'android') {
-		run('./gradlew', ['assembleDebug'], path.join(FRONTEND, 'android'), androidEnv());
-		const source = path.join(FRONTEND, 'android/app/build/outputs/apk/debug/app-debug.apk');
-		const destination = path.join(DIST_DIR, `android/xln-finance-${packageJsonVersion()}-android-debug.apk`);
-		if (!existsSync(source)) throw new Error(`Android debug APK was not produced at ${source}`);
-		mkdirSync(path.dirname(destination), { recursive: true });
-		copyFileSync(source, destination);
-		return { target: 'android', kind: 'debug-apk', status: 'built', path: destination };
+const androidReleaseVersionCode = (version: string): number => {
+	const parts = version.split('.').map(value => Number(value));
+	if (parts.length !== 3 || !parts.every(Number.isSafeInteger)) {
+		throw new Error(`ANDROID_RELEASE_VERSION_INVALID:${version}`);
 	}
+	return (parts[0]! * 1_000_000) + (parts[1]! * 1_000) + parts[2]!;
+};
 
+const verifyAndroidRelease = (
+	source: string,
+	version: string,
+	env: NodeJS.ProcessEnv,
+): string => {
+	const androidHome = existingAndroidHome();
+	if (!androidHome) throw new Error('ANDROID_RELEASE_SDK_MISSING');
+	const apkSigner = path.join(androidHome, 'build-tools/36.0.0/apksigner');
+	const aapt2 = path.join(androidHome, 'build-tools/36.0.0/aapt2');
+	if (!existsSync(apkSigner)) throw new Error(`ANDROID_APKSIGNER_MISSING:${apkSigner}`);
+	if (!existsSync(aapt2)) throw new Error(`ANDROID_AAPT2_MISSING:${aapt2}`);
+	const signer = runCapture(apkSigner, ['verify', '--verbose', '--print-certs', source], ROOT, env);
+	if (signer.error || signer.status !== 0) throw new Error(`ANDROID_RELEASE_SIGNATURE_INVALID:${signer.output}`);
+	if (/android debug/i.test(signer.output)) throw new Error('ANDROID_RELEASE_DEBUG_CERTIFICATE_FORBIDDEN');
+	const digest = signer.output.match(/certificate SHA-256 digest:\s*([0-9a-f:]+)/i)?.[1]
+		?.replaceAll(':', '').toLowerCase();
+	if (!digest || !/^[0-9a-f]{64}$/.test(digest)) throw new Error('ANDROID_RELEASE_CERTIFICATE_DIGEST_MISSING');
+	const expectedDigest = String(process.env.XLN_ANDROID_SIGNER_CERT_SHA256 || '')
+		.replaceAll(':', '').toLowerCase();
+	if (!/^[0-9a-f]{64}$/.test(expectedDigest) || digest !== expectedDigest) {
+		throw new Error(`ANDROID_RELEASE_CERTIFICATE_MISMATCH:expected=${expectedDigest}:actual=${digest}`);
+	}
+	const badging = runCapture(aapt2, ['dump', 'badging', source], ROOT, env);
+	if (badging.error || badging.status !== 0) throw new Error(`ANDROID_RELEASE_MANIFEST_INVALID:${badging.output}`);
+	if (badging.output.includes('application-debuggable')) throw new Error('ANDROID_RELEASE_DEBUGGABLE_FORBIDDEN');
+	if (!badging.output.includes("package: name='finance.xln.wallet'")) throw new Error('ANDROID_RELEASE_PACKAGE_ID_INVALID');
+	if (!badging.output.includes(`versionName='${version}'`)) throw new Error(`ANDROID_RELEASE_VERSION_MISMATCH:${version}`);
+	return digest;
+};
+
+const packageAndroidRelease = (): NativeArtifact => {
+	const version = packageJsonVersion();
+	const env = {
+		...androidEnv(),
+		XLN_ANDROID_VERSION_NAME: version,
+		XLN_ANDROID_VERSION_CODE: String(androidReleaseVersionCode(version)),
+	};
+	run('./gradlew', ['assembleRelease'], path.join(FRONTEND, 'android'), env);
+	const source = path.join(FRONTEND, 'android/app/build/outputs/apk/release/app-release.apk');
+	if (!existsSync(source)) throw new Error(`Signed Android release APK was not produced at ${source}`);
+	const certificateDigest = verifyAndroidRelease(source, version, env);
+	const destination = path.join(DIST_DIR, `android/xln-finance-${version}-android-release-signed.apk`);
+	mkdirSync(path.dirname(destination), { recursive: true });
+	copyFileSync(source, destination);
+	const proofPath = writeReleaseProof(destination, {
+		platform: 'android', signed: true, notarized: false, debuggable: false,
+		applicationId: 'finance.xln.wallet', signerCertificateSha256: certificateDigest,
+	});
+	return { target: 'android', kind: 'release-apk', status: 'built', path: destination, releaseTrust: 'signed', proofPath };
+};
+
+const packageIosRelease = (): NativeArtifact => {
 	const derivedDataPath = path.join(DIST_DIR, 'ios-derived-data');
 	const iosAppDir = path.join(FRONTEND, 'ios/App');
-	const signingArgs = resolveIosSigningArgs(iosAppDir);
 	rmSync(derivedDataPath, { recursive: true, force: true });
 	run('xcodebuild', [
 		...resolveIosXcodebuildProjectArgs(iosAppDir),
 		'-scheme',
 		'App',
 		'-configuration',
-		'Debug',
+		'Release',
 		'-destination',
 		'generic/platform=iOS',
 		'-derivedDataPath',
 		derivedDataPath,
-		...signingArgs,
+		...resolveIosSigningArgs(),
 		'build',
 	], iosAppDir);
-	const appPath = path.join(derivedDataPath, 'Build/Products/Debug-iphoneos/App.app');
-	if (!existsSync(appPath)) throw new Error(`iOS debug app was not produced at ${appPath}`);
-	return { target: 'ios', kind: 'debug-ios-app', status: 'built', path: appPath };
+	const appPath = path.join(derivedDataPath, 'Build/Products/Release-iphoneos/App.app');
+	if (!existsSync(appPath)) throw new Error(`Signed iOS release app was not produced at ${appPath}`);
+	run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath], ROOT);
+	const signature = runCapture('codesign', ['-dv', '--verbose=4', appPath]);
+	const teamId = signature.output.match(/TeamIdentifier=([A-Z0-9]+)/)?.[1];
+	if (signature.status !== 0 || !teamId || teamId !== String(process.env.XLN_IOS_DEVELOPMENT_TEAM)) {
+		throw new Error(`IOS_RELEASE_SIGNATURE_IDENTITY_INVALID:${signature.output}`);
+	}
+	return { target: 'ios', kind: 'release-ios-app', status: 'built', path: appPath, releaseTrust: 'signed' };
+};
+
+function packageCapacitorPlatform(platform: 'ios' | 'android', _flags: Set<string>): NativeArtifact {
+	assertCapacitorPackageTools(platform);
+	return platform === 'android' ? packageAndroidRelease() : packageIosRelease();
 }
 
 function packageJsonVersion(): string {
-	try {
-		const packageJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { version?: unknown };
-		return String(packageJson.version || '1.0.0');
-	} catch {
-		return '1.0.0';
-	}
+	const packageJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { version?: unknown };
+	const version = String(packageJson.version || '');
+	if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`NATIVE_RELEASE_VERSION_INVALID:${version}`);
+	return version;
 }
 
 function setPlistString(plist: string, key: string, value: string): string {
@@ -421,9 +523,7 @@ function updateDesktopInfoPlist(appPath: string): void {
 
 function packageDesktopApp(): NativeArtifact[] {
 	if (process.platform !== 'darwin') {
-		const reason = `desktop app bundle packaging is implemented for macOS; current platform is ${process.platform}`;
-		console.warn(`Skipping desktop package: ${reason}`);
-		return [{ target: 'desktop', kind: 'desktop-app', status: 'skipped', reason }];
+		throw new Error(`MACOS_RELEASE_REQUIRES_DARWIN:current=${process.platform}`);
 	}
 
 	const electronApp = path.join(ROOT, 'node_modules/electron/dist/Electron.app');
@@ -462,12 +562,54 @@ function packageDesktopApp(): NativeArtifact[] {
 	});
 	updateDesktopInfoPlist(appPath);
 	pruneGeneratedNoise(appPath);
-	const zipPath = path.join(DIST_DIR, 'desktop', `xln-finance-${packageJsonVersion()}-mac-${process.arch}.zip`);
+	const identity = String(process.env.XLN_MACOS_CODESIGN_IDENTITY);
+	run('codesign', ['--deep', '--force', '--options', 'runtime', '--timestamp', '--sign', identity, appPath], ROOT);
+	run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath], ROOT);
+	const submissionZip = path.join(DIST_DIR, 'desktop', `.notary-submission-${process.arch}.zip`);
+	rmSync(submissionZip, { force: true });
+	run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, submissionZip], ROOT);
+	run('xcrun', [
+		'notarytool', 'submit', submissionZip,
+		'--key', String(process.env.XLN_MACOS_NOTARY_KEY_PATH),
+		'--key-id', String(process.env.XLN_MACOS_NOTARY_KEY_ID),
+		'--issuer', String(process.env.XLN_MACOS_NOTARY_ISSUER_ID),
+		'--wait',
+	], ROOT);
+	run('xcrun', ['stapler', 'staple', appPath], ROOT);
+	run('xcrun', ['stapler', 'validate', appPath], ROOT);
+	const assessment = runCapture('spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath]);
+	if (assessment.error || assessment.status !== 0 || !/source=Notarized Developer ID/i.test(assessment.output)) {
+		throw new Error(`MACOS_NOTARIZATION_ASSESSMENT_INVALID:${assessment.output}`);
+	}
+	const signature = runCapture('codesign', ['-dv', '--verbose=4', appPath]);
+	const teamId = signature.output.match(/TeamIdentifier=([A-Z0-9]+)/)?.[1];
+	const identityTeamId = identity.match(/\(([A-Z0-9]+)\)\s*$/)?.[1];
+	if (
+		signature.status !== 0 ||
+		!teamId ||
+		!identity.startsWith('Developer ID Application:') ||
+		identityTeamId !== teamId
+	) {
+		throw new Error(`MACOS_RELEASE_SIGNATURE_IDENTITY_INVALID:${signature.output}`);
+	}
+	rmSync(submissionZip, { force: true });
+	const zipPath = path.join(DIST_DIR, 'desktop', `xln-finance-${packageJsonVersion()}-mac-${process.arch}-signed-notarized.zip`);
 	rmSync(zipPath, { force: true });
 	run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath], ROOT);
+	const proofPath = writeReleaseProof(zipPath, {
+		platform: `macos-${process.arch}`,
+		signed: true,
+		notarized: true,
+		debuggable: false,
+		teamId,
+		codesignIdentity: identity,
+	});
 	return [
-		{ target: 'desktop', kind: 'mac-app', status: 'built', path: appPath },
-		{ target: 'desktop', kind: 'mac-zip', status: 'built', path: zipPath },
+		{ target: 'desktop', kind: 'mac-app', status: 'built', path: appPath, releaseTrust: 'signed-notarized' },
+		{
+			target: 'desktop', kind: 'mac-zip', status: 'built', path: zipPath,
+			releaseTrust: 'signed-notarized', proofPath,
+		},
 	];
 }
 
@@ -561,6 +703,7 @@ async function main(): Promise<void> {
 	}
 
 	assertNativeToolingAvailable(targets, flags);
+	assertNativeReleaseCredentials(targets, flags);
 	const artifacts: NativeArtifact[] = [];
 	artifacts.push(...ensureFrontendBuild(flags));
 	sanitizeNativeWebBuild();

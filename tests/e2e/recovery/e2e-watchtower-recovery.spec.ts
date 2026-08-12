@@ -257,7 +257,7 @@ async function readPrimaryLocalAccountState(page: Page): Promise<{
       };
     }).isolatedEnv;
     const runtimeId = String(env?.runtimeId || '').toLowerCase();
-    const fallback = {
+    const emptySnapshot = {
       runtimeHeight: Number(env?.state?.height || 0),
       hubId: null,
       accountExists: false,
@@ -265,7 +265,7 @@ async function readPrimaryLocalAccountState(page: Page): Promise<{
       hasPendingFrame: false,
       tokenIds: [] as number[],
     };
-    if (!(env?.state?.eReplicas instanceof Map)) return fallback;
+    if (!(env?.state?.eReplicas instanceof Map)) return emptySnapshot;
 
     for (const [key, replica] of env.state.eReplicas.entries()) {
       const [, signerId] = String(key).split(':');
@@ -290,7 +290,7 @@ async function readPrimaryLocalAccountState(page: Page): Promise<{
           best = candidate;
         }
       }
-      if (!best) return fallback;
+      if (!best) return emptySnapshot;
       return {
         runtimeHeight: Number(env?.state?.height || 0),
         hubId: best.hubId,
@@ -300,7 +300,7 @@ async function readPrimaryLocalAccountState(page: Page): Promise<{
         tokenIds: best.tokenIds,
       };
     }
-    return fallback;
+    return emptySnapshot;
   });
 }
 

@@ -239,7 +239,7 @@ describe('JReplica stateRoot semantics', () => {
     }
   }, 30_000);
 
-  test('legacy persisted RPC zero roots normalize to explicit unavailable', () => {
+  test('retired persisted RPC zero roots normalize to explicit unavailable', () => {
     const persisted = {
       jReplicas: new Map<string, unknown>([[
         'arrakis',

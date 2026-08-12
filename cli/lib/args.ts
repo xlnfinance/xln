@@ -43,18 +43,18 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
   return { command, positionals, flags };
 };
 
-export const flagString = (flags: Record<string, string | boolean>, name: string, fallback?: string): string | undefined => {
+export const flagString = (flags: Record<string, string | boolean>, name: string, defaultValue?: string): string | undefined => {
   const value = flags[name];
   if (typeof value === 'string') return value;
-  return fallback;
+  return defaultValue;
 };
 
 export const flagBool = (flags: Record<string, string | boolean>, name: string): boolean =>
   flags[name] === true || flags[name] === 'true' || flags[name] === '1';
 
-export const flagNumber = (flags: Record<string, string | boolean>, name: string, fallback: number): number => {
+export const flagNumber = (flags: Record<string, string | boolean>, name: string, defaultValue: number): number => {
   const value = flags[name];
-  if (typeof value !== 'string') return fallback;
+  if (typeof value !== 'string') return defaultValue;
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(`Invalid --${name}: ${value}`);
   return n;

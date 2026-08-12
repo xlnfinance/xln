@@ -122,6 +122,11 @@
     return id || '';
   }
 
+  function requireSharedEntitySeed(seed: string | undefined): string {
+    if (!seed) throw new Error('NUMBERED_ENTITY_SHARED_SEED_REQUIRED');
+    return seed;
+  }
+
   async function createEntity() {
     if (!selectedJurisdiction) {
       error = 'Select a jurisdiction';
@@ -184,6 +189,12 @@
         const localSignerId = boardMembers.some(
           member => member.name.toLowerCase() === registrationSignerId,
         ) ? registrationSignerId : null;
+        const ownership = localSignerId === null
+          ? { localSignerId: null, entitySeed: null }
+          : {
+              localSignerId,
+              entitySeed: xln.canonicalEntitySeed(requireSharedEntitySeed(vault?.seed)),
+            };
         const registration = await registerActiveNumberedEntities(
           {
             jurisdictionRef: selectedJurisdiction,
@@ -192,7 +203,7 @@
               name: entityName,
               validators: boardMembers,
               threshold: thresholdBigInt,
-              localSignerId,
+              ...ownership,
               profileName: entityName,
             }],
           },
@@ -213,17 +224,18 @@
         (member) => member.toLowerCase() === localSignerId,
       );
       if (entityType === 'lazy' && localBoardIndex >= 0) {
+        if (!vault?.seed) throw new Error('ENTITY_IMPORT_RUNTIME_SEED_REQUIRED');
         await submitRuntimeInput({
-          runtimeTxs: [{
-            type: 'importReplica',
+          runtimeTxs: [xln.importEntity({
             entityId,
             signerId: localSignerId,
+            entitySeed: vault.seed,
             data: {
               config,
               isProposer: localBoardIndex === 0,
               profileName: entityName,
             },
-          }],
+          })],
           entityInputs: [],
         });
         tabOperations.addTab(entityId, localSignerId, selectedJurisdiction);

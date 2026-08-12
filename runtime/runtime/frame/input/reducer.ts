@@ -38,6 +38,7 @@ import {
 } from './finalize';
 import { safeStringify } from '../../../protocol/serialization';
 import { nodeProcess } from '../../../infra/process/runtime-process';
+import type { EntityInfraContext } from '../../../types/entity/infra-context';
 
 const runtimeLog = createStructuredLogger('runtime');
 const APPLY_PROFILE_ENABLED =
@@ -56,6 +57,7 @@ export type RuntimeInputReducerDeps =
   };
 
 type AppliedRuntimeInput = {
+  entityContexts: Map<string, EntityInfraContext>;
   entityOutbox: RoutedEntityInput[];
   mergedInputs: RoutedEntityInput[];
   jOutbox: JInput[];
@@ -291,6 +293,9 @@ const finalizeRuntimeInputApply = (
   );
   profile.mark('durableReceiptInputs');
   return {
+    entityContexts: new Map(
+      [...batch.entityContexts].map(([replicaId, context]) => [replicaId, structuredClone(context)]),
+    ),
     entityOutbox: batch.entityOutbox,
     mergedInputs: batch.appliedEntityInputs,
     jOutbox: batch.jOutbox,

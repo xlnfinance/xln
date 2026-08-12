@@ -7,9 +7,10 @@ export type ConsensusPaymentProposalView = {
   tokenSymbol: string | null;
   tokenName: string | null;
   recipientAmount: bigint;
-  hashlock: string;
-  totalDebit: bigint;
-  totalFee: bigint;
+  /** Optional caller commitment; null means the proposer derives it during frame preparation. */
+  hashlock: string | null;
+  maxSenderDebit: bigint;
+  maxFee: bigint;
   deliveryMode: 'instant' | 'async';
 };
 
@@ -23,21 +24,6 @@ type HtlcPaymentTx = Extract<EntityTx, { type: 'htlcPayment' }>;
 
 const projectionError = (code: string, proposalId: string, txIndex: number): Error =>
   new Error(`${code}:proposal=${proposalId}:tx=${txIndex}`);
-
-const requirePreparedAmount = (
-  value: unknown,
-  code: string,
-  proposalId: string,
-  txIndex: number,
-  allowZero = false,
-): bigint => {
-  if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) {
-    throw projectionError(code, proposalId, txIndex);
-  }
-  const amount = BigInt(value);
-  if (allowZero ? amount < 0n : amount <= 0n) throw projectionError(code, proposalId, txIndex);
-  return amount;
-};
 
 const requireRecipient = (value: unknown, proposalId: string, txIndex: number): string => {
   const recipient = typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -68,7 +54,8 @@ const requireSenderDebitCap = (value: unknown, proposalId: string, txIndex: numb
   return value;
 };
 
-const requireHashlock = (value: unknown, proposalId: string, txIndex: number): string => {
+const projectHashlock = (value: unknown, proposalId: string, txIndex: number): string | null => {
+  if (value === undefined) return null;
   const hashlock = typeof value === 'string' ? value.trim().toLowerCase() : '';
   if (!/^0x[0-9a-f]{64}$/.test(hashlock)) {
     throw projectionError('CONSENSUS_SETTINGS_HTLC_HASHLOCK_INVALID', proposalId, txIndex);
@@ -85,12 +72,6 @@ const requireDeliveryMode = (
     throw projectionError('CONSENSUS_SETTINGS_HTLC_DELIVERY_MODE_INVALID', proposalId, txIndex);
   }
   return value;
-};
-
-const assertPreparedEnvelope = (value: unknown, proposalId: string, txIndex: number): void => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw projectionError('CONSENSUS_SETTINGS_HTLC_PREPARED_ENVELOPE_INVALID', proposalId, txIndex);
-  }
 };
 
 const projectTokenMetadata = (
@@ -110,7 +91,7 @@ const projectTokenMetadata = (
   return { tokenSymbol, tokenName };
 };
 
-const projectPreparedPayment = (
+const projectPendingPayment = (
   proposalId: string,
   tx: HtlcPaymentTx,
   txIndex: number,
@@ -119,21 +100,16 @@ const projectPreparedPayment = (
   const recipientEntityId = requireRecipient(tx.data.targetEntityId, proposalId, txIndex);
   const tokenId = requireTokenId(tx.data.tokenId, proposalId, txIndex);
   const recipientAmount = requireRecipientAmount(tx.data.amount, proposalId, txIndex);
-  const hashlock = requireHashlock(tx.data.hashlock, proposalId, txIndex);
-  const totalDebit = requirePreparedAmount(tx.data.preparedSenderLockAmount, 'CONSENSUS_SETTINGS_HTLC_PREPARED_DEBIT_INVALID', proposalId, txIndex);
+  const hashlock = projectHashlock(tx.data.hashlock, proposalId, txIndex);
   const maxSenderDebit = requireSenderDebitCap(tx.data.maxSenderDebit, proposalId, txIndex);
-  const totalFee = requirePreparedAmount(tx.data.preparedTotalFee, 'CONSENSUS_SETTINGS_HTLC_PREPARED_FEE_INVALID', proposalId, txIndex, true);
-  if (totalDebit !== recipientAmount + totalFee) {
-    throw projectionError('CONSENSUS_SETTINGS_HTLC_TOTAL_MISMATCH', proposalId, txIndex);
+  if (maxSenderDebit < recipientAmount) {
+    throw projectionError('CONSENSUS_SETTINGS_HTLC_MAX_SENDER_DEBIT_BELOW_AMOUNT', proposalId, txIndex);
   }
-  if (totalDebit > maxSenderDebit) {
-    throw projectionError('CONSENSUS_SETTINGS_HTLC_MAX_SENDER_DEBIT_EXCEEDED', proposalId, txIndex);
-  }
+  const maxFee = maxSenderDebit - recipientAmount;
   const deliveryMode = requireDeliveryMode(tx.data.deliveryMode, proposalId, txIndex);
-  assertPreparedEnvelope(tx.data.preparedEnvelope, proposalId, txIndex);
   return {
     recipientEntityId, tokenId, ...projectTokenMetadata(tokenId, options.resolveTokenMetadata),
-    recipientAmount, hashlock, totalDebit, totalFee, deliveryMode,
+    recipientAmount, hashlock, maxSenderDebit, maxFee, deliveryMode,
   };
 };
 
@@ -142,6 +118,6 @@ export const projectConsensusPayments = (
   options: EntityConsensusSettingsOptions,
 ): ConsensusPaymentProposalView[] => proposal.action.type === 'entity_transaction'
   ? proposal.action.data.txs.flatMap((tx, txIndex) => tx.type === 'htlcPayment'
-    ? [projectPreparedPayment(proposal.id, tx, txIndex, options)]
+    ? [projectPendingPayment(proposal.id, tx, txIndex, options)]
     : [])
   : [];

@@ -70,7 +70,6 @@ import {
   type SwapOfferEvent,
 } from '../../tx/handlers/account';
 import { normalizeSwapOfferForOrderbook } from '../../../orderbook/swap-execution';
-import { buildCurrentEntityProfileHashToSign } from '../../tx/handlers/account/lifecycle/profile-certification';
 import { buildSettlementSealDraft } from '../../tx/handlers/payments/settle';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../tx/j-events-htlc/route-lifecycle';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
@@ -88,9 +87,15 @@ import { assertEntityFrameTxByteBudget } from '../frame';
 import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from '../output/certification';
 import { invalidateEntityAccountCommitment } from '../state-root';
 import type { ApplyEntityTxsInOrderContext } from './application-types';
+import { validateEntityInfraContext } from './infra-context-validation';
 import { filterEntityFrameBroadcastContinuations } from '../jurisdiction/broadcast-continuation';
 import { applyEntityTxReturnedEffects } from './tx-effects';
 import { selectSettlementContinuation } from '../account/settlement-continuation';
+import {
+  buildEntityProfileDescriptor,
+  buildChangedEntityProfileHashToSign,
+  computeEntityProfileDescriptorHash,
+} from '../../profile/profile-descriptor';
 
 import {
   entityFrameProfileEnabled,
@@ -306,6 +311,7 @@ const applyRegularEntityTx = async (
   assertEntityTxAuthorization(context, tx);
   const txProfileStartMs = getPerfMs();
   const result = await applyEntityTx(context.env, state, tx, {
+    infraContext: context.entityContext,
     mutableFrameState: true,
     manualBroadcastInInput,
     accountJClaimNodeStore: context.accountJClaimNodeStore,
@@ -945,7 +951,7 @@ async function applySwapCancelRequests(
   if (localBookCancels.length === 0) return;
   // The same bilateral cancel event is visible to the user and matcher. Only
   // the matcher owns the canonical book and may enqueue its swap_resolve.
-  // The removed non-matcher fallback must never be synthesized here.
+  // A non-matcher substitute must never be synthesized here.
   if (!currentEntityState.orderbookExt) return;
 
   const cancelResult = processOrderbookCancels(currentEntityState, localBookCancels);
@@ -1041,6 +1047,7 @@ const initializeEntityFrameState = (
 
 const createEntityFrameApplyContext = (
   env: EntityRuntimeContext,
+  entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
   entityTxs: EntityTx[],
   currentEntityState: EntityState,
   verifiedCertifiedOutputs: ApplyEntityTxsInOrderContext['verifiedCertifiedOutputs'],
@@ -1052,7 +1059,8 @@ const createEntityFrameApplyContext = (
   };
   return {
     env,
-    accountConsensusContext: createAccountConsensusContext(env, accountJClaimNodeStore),
+    entityContext,
+    accountConsensusContext: createAccountConsensusContext(env, accountJClaimNodeStore, currentEntityState),
     entityTxs,
     currentEntityState,
     allOutputs: [],
@@ -1103,10 +1111,21 @@ const primeEntityFrameAccountWork = async (
 const prepareEntityFrameWorkingSet = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
+  entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
   entityTxs: EntityTx[],
   frameTimestamp: number | undefined,
   isolateState: boolean,
 ): Promise<EntityFrameWorkingSet> => {
+  const expectedEntityId = entityState.entityId.trim().toLowerCase();
+  const expectedParentFrameHash = entityState.height === 0 ? 'genesis' : String(entityState.prevFrameHash || '');
+  if (
+    entityContext.entityId !== expectedEntityId ||
+    entityContext.proposerReplicaId !== `${expectedEntityId}:${entityContext.proposerSignerId}` ||
+    entityContext.parentFrameHash !== expectedParentFrameHash ||
+    entityContext.height !== entityState.height + 1
+  ) {
+    throw new Error('ENTITY_INFRA_CONTEXT_BINDING_MISMATCH');
+  }
   assertEntityFrameTxByteBudget(entityTxs);
   assertEntityFrameJRangeBudget(entityTxs);
   assertScheduledWakeFrameOrder(entityTxs);
@@ -1147,6 +1166,7 @@ const prepareEntityFrameWorkingSet = async (
   markFrameProfile('clone');
   const context = createEntityFrameApplyContext(
     env,
+    entityContext,
     entityTxs,
     currentEntityState,
     verifiedCertifiedOutputs,
@@ -1352,13 +1372,17 @@ const logEntityFrameProfile = (
 const applyEntityFrameWithIsolation = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
+  entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
   entityTxs: EntityTx[],
   frameTimestamp: number | undefined,
   isolateState: boolean,
 ): Promise<EntityFrameResult> => {
+  entityContext = validateEntityInfraContext(entityContext);
+  const previousProfileHash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(entityState));
   const working = await prepareEntityFrameWorkingSet(
     env,
     entityState,
+    entityContext,
     entityTxs,
     frameTimestamp,
     isolateState,
@@ -1369,8 +1393,10 @@ const applyEntityFrameWithIsolation = async (
     working.currentEntityState,
   );
   working.markFrameProfile('entityTxLoop');
-  const profileHash = buildCurrentEntityProfileHashToSign(working.currentEntityState);
-  if (profileHash) working.context.collectedHashes.push(profileHash);
+  const appendFinalProfileHash = (state: EntityState): void => {
+    const changed = buildChangedEntityProfileHashToSign(state, entityState.height === 0 ? null : previousProfileHash);
+    if (changed) working.context.collectedHashes.push(changed);
+  };
   if (working.authorityTransitionOnly) {
     working.currentEntityState = assignCertifiedOutputIdentities(
       working.currentEntityState,
@@ -1381,12 +1407,14 @@ const applyEntityFrameWithIsolation = async (
       txs: entityTxs.length,
       finalizedJHeight: working.currentEntityState.lastFinalizedJHeight,
     });
+    appendFinalProfileHash(working.currentEntityState);
     return buildEntityFrameResult(
       working.currentEntityState,
       working.context,
     );
   }
   const post = await applyPostEntityTxPhases(working);
+  appendFinalProfileHash(post.currentEntityState);
   logEntityFrameProfile(working, entityTxs, post);
   return buildEntityFrameResult(
     post.currentEntityState,
@@ -1403,12 +1431,14 @@ const applyEntityFrameWithIsolation = async (
 export const applyEntityFrame = (
   env: EntityRuntimeContext,
   entityState: EntityState,
+  entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
   entityTxs: EntityTx[],
   frameTimestamp?: number,
 ): Promise<EntityFrameResult> =>
   applyEntityFrameWithIsolation(
     env,
     entityState,
+    entityContext,
     entityTxs,
     frameTimestamp,
     true,
@@ -1426,12 +1456,14 @@ export const applyEntityFrame = (
 export const applyRuntimeOwnedEntityFrame = (
   env: EntityRuntimeContext,
   entityState: EntityState,
+  entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
   entityTxs: EntityTx[],
   frameTimestamp?: number,
 ): Promise<EntityFrameResult> =>
   applyEntityFrameWithIsolation(
     env,
     entityState,
+    entityContext,
     entityTxs,
     frameTimestamp,
     false,

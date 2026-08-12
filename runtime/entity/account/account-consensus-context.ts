@@ -47,6 +47,7 @@ const resolveSettlementBoardAuthority = async (
 export const createAccountConsensusContext = (
   env: EntityRuntimeContext,
   jClaimNodeStore: AccountJClaimNodeStore = getAccountJClaimNodeStore(env),
+  observerState?: import('../types').EntityState,
 ): AccountConsensusContext => ({
   runtimeTimestamp: env.state.timestamp,
   quietLogs: env.quietRuntimeLogs === true,
@@ -54,7 +55,10 @@ export const createAccountConsensusContext = (
   jReplicas: env.state.jReplicas,
   jClaimNodeStore,
   verifyHanko: (hanko, hash, expectedEntityId, authority) =>
-    verifyHankoForHash(hanko, hash, expectedEntityId, env, authority),
+    verifyHankoForHash(hanko, hash, expectedEntityId, observerState ? env : undefined, {
+      ...authority,
+      ...(observerState ? { observerState } : {}),
+    }),
   resolveSettlementBoardAuthority: (sourceEntityId, certifiedBoardHash) =>
     resolveSettlementBoardAuthority(env, sourceEntityId, certifiedBoardHash),
 });

@@ -64,8 +64,8 @@ const startTime = Date.now();
 const buildEntityReplicaIndex = (env: RuntimeReplica): Map<string, EntityReplica> => {
   const replicas = new Map<string, EntityReplica>();
   for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-    const fallbackEntityId = String(replicaKey).split(':')[0] || '';
-    const entityId = String(replica.entityId || fallbackEntityId).toLowerCase();
+    const keyedEntityId = String(replicaKey).split(':')[0] || '';
+    const entityId = String(replica.entityId || keyedEntityId).toLowerCase();
     if (!entityId || replicas.has(entityId)) continue;
     replicas.set(entityId, replica);
   }

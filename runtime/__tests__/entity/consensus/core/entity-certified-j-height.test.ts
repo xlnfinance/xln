@@ -141,7 +141,9 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     const proof = finalized.newState.jBatchState?.batch.disputeFinalizations[0];
 
     expect(proof?.finalNonce).toBe(1);
-    const expectedFinalBody = account.disputeProofBodiesByHash?.[initialHash]!;
+    const expectedFinalBody = account.disputeProofBodiesByHash?.[initialHash];
+    expect(expectedFinalBody).toBeDefined();
+    if (!expectedFinalBody) throw new Error('expected dispute proof body fixture');
     expect(proof?.finalProofbody).toEqual({
       ...expectedFinalBody,
       // ABI canonicalization returns uint32 fields as bigint. Compare that

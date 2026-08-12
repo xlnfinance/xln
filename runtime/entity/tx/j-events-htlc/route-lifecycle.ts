@@ -116,9 +116,6 @@ export function pruneSettledOriginatedHtlcRoutes(state: EntityState, timestamp: 
   let pruned = 0;
   for (const [hashlock, route] of state.htlcRoutes.entries()) {
     if (route.inboundEntity || !route.outboundLockId) continue;
-    // A durable Account ACK has accepted the encrypted offer, but the exact
-    // ACK-bound reveal still needs this route in the same Entity replay.
-    if (route.acceptedOfferHash) continue;
     if (accountHasLiveLockReference(state, route.outboundEntity, route.outboundLockId)) continue;
     state.lockBook.delete(route.outboundLockId);
     terminateHtlcRoute(state, hashlock, timestamp);

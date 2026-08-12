@@ -125,7 +125,7 @@ const resolveDepositoryDeployGas = async (
   } catch (error) {
     rpcLog.warn('contracts.deploy.gas_limit_lookup_failed', {
       chainId: config.chainId,
-      fallbackGasLimit: gasLimit.toString(),
+      defaultGasLimit: gasLimit.toString(),
       error: error instanceof Error ? error.message : String(error),
     });
   }

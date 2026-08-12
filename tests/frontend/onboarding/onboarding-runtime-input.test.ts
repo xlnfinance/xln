@@ -214,7 +214,7 @@ test('OnboardingPanel uses injected runtime projection and RuntimeInput helpers'
   expect(parent).toContain('const hubCandidates: OnboardingHubCandidate[] = [];');
 });
 
-test('OnboardingPanel never hides hub discovery or policy fallback failures', () => {
+test('OnboardingPanel never hides hub discovery or default-policy failures', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/onboarding/OnboardingPanel.svelte', 'utf8');
   const inputSource = readFileSync('frontend/src/lib/components/Entity/onboarding/onboarding-runtime-input.ts', 'utf8');
 

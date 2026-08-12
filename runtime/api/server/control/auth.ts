@@ -23,7 +23,7 @@ const verifyDaemonCapability = (
   requiredLevel: RuntimeAdapterAuthLevel,
 ): boolean => {
   if (!env) return false;
-  const auth = verifyRuntimeAdapterAuthCredential(resolveRuntimeAdapterAuthSeed(env), key, {
+  const auth = verifyRuntimeAdapterAuthCredential(resolveRuntimeAdapterAuthSeed(), key, {
     audience: resolveRuntimeAdapterAuthAudience(env),
     revokedTokenIds: runtimeAdapterRevokedTokenIds(),
   });
@@ -98,10 +98,10 @@ const readCappedControlBody = async (req: Request, maxBytes: number): Promise<st
   return new TextDecoder().decode(buffer);
 };
 
-export const getControlBodyErrorStatus = (error: unknown, fallbackStatus: number): number => {
+export const getControlBodyErrorStatus = (error: unknown, defaultStatus: number): number => {
   if (error instanceof ControlBodyTooLargeError) return error.status;
   const message = error instanceof Error ? error.message : String(error);
-  return message.startsWith('CONTROL_BODY_TOO_LARGE') ? 413 : fallbackStatus;
+  return message.startsWith('CONTROL_BODY_TOO_LARGE') ? 413 : defaultStatus;
 };
 
 export const parseTaggedControlBody = async (

@@ -1,163 +1,65 @@
 import { describe, expect, test } from 'bun:test';
 
-import { clearSignerKeys, deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { deriveSignerAddressSync } from '../../../account/crypto';
 import {
   assertLocalEntityCryptoKeys,
-  assertPersistedLocalEntityCryptoKeys,
-  deriveLocalEntityCryptoKeys,
   requireEntityEncryptionPrivateKey,
 } from '../../../entity/auth/crypto';
 import { createEmptyEnv, generateLazyEntityId } from '../../../runtime';
 import { applyRuntimeTx } from '../../../runtime/transactions/tx-handlers';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
-const testJurisdiction = {
-  address: `0x${'22'.repeat(20)}`,
-  name: 'Testnet',
+const jurisdiction = {
+  address: `0x${'22'.repeat(20)}`, name: 'Testnet', chainId: 31337,
   entityProviderAddress: `0x${'22'.repeat(20)}`,
   depositoryAddress: `0x${'11'.repeat(20)}`,
-  chainId: 31337,
 };
 
-const testConfig = (signerId: string) => ({
-  mode: 'proposer-based' as const,
-  threshold: 1n,
-  validators: [signerId],
-  shares: { [signerId]: 1n },
-  jurisdiction: testJurisdiction,
-});
-
-const addTestJurisdiction = (env: ReturnType<typeof createEmptyEnv>): void => {
-  env.activeJurisdiction = testJurisdiction.name;
-  env.state.jReplicas.set(testJurisdiction.name, {
-    name: testJurisdiction.name,
-    blockNumber: 0n,
-    stateRoot: new Uint8Array(32),
-    mempool: [],
-    blockDelayMs: 0,
-    lastBlockTimestamp: 0,
-    position: { x: 0, y: 0, z: 0 },
-    contracts: { depository: testJurisdiction.depositoryAddress, entityProvider: testJurisdiction.entityProviderAddress },
-    contracts: {
-      account: `0x${'33'.repeat(20)}`,
-      depository: testJurisdiction.depositoryAddress,
-      entityProvider: testJurisdiction.entityProviderAddress,
-      deltaTransformer: `0x${'44'.repeat(20)}`,
-    },
-    rpcs: ['http://localhost:8545'],
-    chainId: testJurisdiction.chainId,
+const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): void => {
+  env.activeJurisdiction = jurisdiction.name;
+  env.state.jReplicas.set(jurisdiction.name, {
+    name: jurisdiction.name, blockNumber: 0n, stateRoot: new Uint8Array(32), mempool: [],
+    blockDelayMs: 0, lastBlockTimestamp: 0, position: { x: 0, y: 0, z: 0 },
+    contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
+    chainId: jurisdiction.chainId,
   });
 };
 
 describe('runtime entity crypto', () => {
-  test('canonicalizes stale local encryption private keys when public key still matches', () => {
-    const seed = 'runtime-entity-crypto-canonical-local-private';
-    const env = createEmptyEnv(seed);
-    clearSignerKeys(env);
-    addTestJurisdiction(env);
-    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
+  test('import replay derives the same entity-wide key and stores no private key in state', async () => {
+    const env = createEmptyEnv('runtime-entity-crypto-import');
+    installJurisdiction(env);
+    const signerId = deriveSignerAddressSync('runtime-entity-crypto-import', '1').toLowerCase();
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-    const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
-
-    env.state.eReplicas.set(`${entityId}:${signerId}`, {
-      entityId,
-      signerId,
-      entityEncPubKey: keys.publicKey,
-      isProposer: true,
-      mempool: [],
-      state: {
-        entityId,
-      },
-      hankoWitness: new Map(),
-    } as any);
-
-    assertLocalEntityCryptoKeys(env);
-
-    const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
-    expect(replica?.entityEncPubKey).toBe(keys.publicKey);
-    expect(requireEntityEncryptionPrivateKey(env, entityId, signerId))
-      .toBe(keys.privateKey);
-    expect(replica && Object.hasOwn(replica, 'entityEncPrivKey')).toBeFalse();
-  });
-
-  test('rejects local replicas whose public encryption key belongs to another derivation', () => {
-    const seed = 'runtime-entity-crypto-reject-wrong-public';
-    const env = createEmptyEnv(seed);
-    clearSignerKeys(env);
-    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
-    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-
-    env.state.eReplicas.set(`${entityId}:${signerId}`, {
-      entityId,
-      signerId,
-      entityEncPubKey: `0x${'11'.repeat(32)}`,
-      isProposer: true,
-      mempool: [],
-      state: {
-        entityId,
-      },
-      hankoWitness: new Map(),
-    } as any);
-
-    expect(() => assertLocalEntityCryptoKeys(env)).toThrow('ENTITY_CRYPTO_KEY_MISMATCH');
-  });
-
-  test('validates the persisted public identity without storing its private key', () => {
-    const seed = 'runtime-entity-crypto-reject-persisted-private-corruption';
-    const env = createEmptyEnv(seed);
-    clearSignerKeys(env);
-    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
-    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-    const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
-
-    expect(() => assertPersistedLocalEntityCryptoKeys(env, entityId, signerId, {
-      entityEncPubKey: `0x${'00'.repeat(32)}`,
-    })).toThrow('ENTITY_CRYPTO_KEY_MISMATCH');
-    expect(() => assertPersistedLocalEntityCryptoKeys(env, entityId, signerId, {
-      entityEncPubKey: keys.publicKey,
-    })).not.toThrow();
-  });
-
-  test('direct importReplica canonicalizes stale local private key when public key matches', async () => {
-    const seed = 'runtime-entity-crypto-import-replica-canonical-local-private';
-    const env = createEmptyEnv(seed);
-    clearSignerKeys(env);
-    addTestJurisdiction(env);
-    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
-    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-    const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
-
-    env.state.eReplicas.set(`${entityId}:${signerId}`, {
-      entityId,
-      signerId,
-      entityEncPubKey: keys.publicKey,
-      isProposer: true,
-      mempool: [],
-      state: {
-        entityId,
-        config: testConfig(signerId),
-        swapTradingPairs: [],
-      },
-      hankoWitness: new Map(),
-    } as any);
-
-    await applyRuntimeTx(env, {
-      type: 'importReplica',
-      entityId,
-      signerId,
+    const tx = createTestEntityImportRuntimeTx(env, {
+      entityId, signerId,
       data: {
         isProposer: true,
-        config: testConfig(signerId),
+        config: { mode: 'proposer-based', threshold: 1n, validators: [signerId], shares: { [signerId]: 1n }, jurisdiction },
       },
     });
 
-    const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
-    expect(replica?.entityEncPubKey).toBe(keys.publicKey);
-    expect(requireEntityEncryptionPrivateKey(env, entityId, signerId))
-      .toBe(keys.privateKey);
-    expect(replica && Object.hasOwn(replica, 'entityEncPrivKey')).toBeFalse();
+    await applyRuntimeTx(env, tx);
+    const replica = env.state.eReplicas.get(`${entityId}:${signerId}`)!;
+    expect(requireEntityEncryptionPrivateKey(env, entityId)).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(replica.state.entityEncryptionPublicKey).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(Object.hasOwn(replica.state, 'entityEncryptionPrivateKey')).toBeFalse();
+    expect(() => assertLocalEntityCryptoKeys(env)).not.toThrow();
+  });
+
+  test('state/public-key corruption is rejected against the replay-derived secret', async () => {
+    const env = createEmptyEnv('runtime-entity-crypto-corruption');
+    installJurisdiction(env);
+    const signerId = deriveSignerAddressSync('runtime-entity-crypto-corruption', '1').toLowerCase();
+    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+    await applyRuntimeTx(env, createTestEntityImportRuntimeTx(env, {
+      entityId, signerId,
+      data: {
+        isProposer: true,
+        config: { mode: 'proposer-based', threshold: 1n, validators: [signerId], shares: { [signerId]: 1n }, jurisdiction },
+      },
+    }));
+    env.state.eReplicas.get(`${entityId}:${signerId}`)!.state.entityEncryptionPublicKey = `0x${'11'.repeat(32)}`;
+    expect(() => assertLocalEntityCryptoKeys(env)).toThrow('ENTITY_CRYPTO_KEY_MISMATCH');
   });
 });

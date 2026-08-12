@@ -329,8 +329,8 @@ export function crossOrderbookPairLabel(
   return `${tokenNetworkLabel(baseTokenIdValue, baseJurisdiction, tokenSymbol)} - ${tokenNetworkLabel(quoteTokenIdValue, quoteJurisdiction, tokenSymbol)}`;
 }
 
-export function entityInitials(entityIdValue: string, fallbackLabel = ''): string {
-  const label = String(fallbackLabel || '').trim();
+export function entityInitials(entityIdValue: string, suppliedLabel = ''): string {
+  const label = String(suppliedLabel || '').trim();
   if (label) return label.slice(0, 2).toUpperCase();
   return formatEntityId(entityIdValue).slice(0, 2).toUpperCase();
 }

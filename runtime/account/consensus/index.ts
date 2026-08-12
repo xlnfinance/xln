@@ -241,6 +241,10 @@ const replayIncomingFrameOnClone = async (
       context,
       jClaimSession,
       securityContext.counterpartyCertifiedBoardHash,
+      {
+        timestamp: securityContext.entityTimestamp,
+        jHeight: securityContext.finalizedJHeight,
+      },
     );
     if (!result.success) {
       return {
@@ -379,6 +383,10 @@ const reexecuteIncomingFrame = async (
       context,
       committedJClaims,
       securityContext.counterpartyCertifiedBoardHash,
+      {
+        timestamp: securityContext.entityTimestamp,
+        jHeight: securityContext.finalizedJHeight,
+      },
     );
     candidateEffects.push(...(commitResult.candidateEffects ?? []));
     if (!commitResult.success) {

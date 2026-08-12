@@ -2,7 +2,6 @@
 
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 
 import {
   assertLauncherPortAvailable,
@@ -108,12 +107,6 @@ const showLogs = () => {
   console.log(readFileSync(PATHS.log, 'utf8').split('\n').slice(-120).join('\n'));
 };
 
-const applyLatestUpdate = () => {
-  const result = spawnSync(process.execPath, ['x', 'xlnfinance@latest', '__restart'], { stdio: 'inherit' });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(`XLN_UPDATE_FAILED:${result.status ?? 'unknown'}`);
-};
-
 const main = async () => {
   const command = process.argv[2] || 'start';
   if (command === '--version' || command === '-v' || command === 'version') return console.log(VERSION);
@@ -125,13 +118,8 @@ const main = async () => {
     return console.log('xln daemon is running');
   }
   if (command === 'open') return openWallet();
-  if (command === 'update') return applyLatestUpdate();
   if (command === 'start') return openWallet();
-  if (command === '__restart') {
-    await stopDaemon();
-    return openWallet();
-  }
-  throw new Error(`Unknown command: ${command}. Use start, daemon, open, status, stop, logs, update, or version.`);
+  throw new Error(`Unknown command: ${command}. Use start, daemon, open, status, stop, logs, or version.`);
 };
 
 main().catch((error) => {

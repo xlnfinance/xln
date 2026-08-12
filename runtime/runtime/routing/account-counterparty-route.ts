@@ -1,12 +1,15 @@
 import type { AccountReplica } from '../../types/account';
+import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../types';
-import { resolveHankoDefaultProposerSignerId } from '../../hanko/signing';
+import { resolveObserverCertifiedAccountCounterpartyProposer } from '../../entity/account/account-counterparty-route';
+import { getCertifiedBoardNodeStore } from '../../jurisdiction/machine/board-registry';
 
 const normalize = (value: string): string => String(value || '').trim().toLowerCase();
 
 /** Resolve an established Account lane from the counterparty's certified frame Hanko. */
 export const resolveCertifiedAccountCounterpartyProposer = async (
   env: RuntimeReplica,
+  observerState: EntityState,
   account: AccountReplica,
   counterpartyEntityId: string,
 ): Promise<string | null> => {
@@ -20,5 +23,10 @@ export const resolveCertifiedAccountCounterpartyProposer = async (
   if (!/^0x[0-9a-f]{64}$/.test(frameHash)) {
     throw new Error(`ACCOUNT_COUNTERPARTY_ROUTE_FRAME_HASH_INVALID:${frameHash || 'missing'}`);
   }
-  return resolveHankoDefaultProposerSignerId(hanko, frameHash, counterparty, env);
+  return resolveObserverCertifiedAccountCounterpartyProposer(
+    getCertifiedBoardNodeStore(env),
+    observerState,
+    account,
+    counterparty,
+  );
 };

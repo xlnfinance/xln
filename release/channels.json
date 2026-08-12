@@ -10,8 +10,8 @@
       "trust": "mutable-server-code"
     },
     "launcher": {
-      "entry": "bunx xlnfinance",
-      "update": "bunx xlnfinance update",
+      "entry": "versioned-github-release-archive",
+      "update": "explicit-immutable-versioned-release-install",
       "runtime": "persistent-local-daemon",
       "access": "admin"
     },

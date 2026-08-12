@@ -7,7 +7,6 @@ import {
   causalTraceContainsWork,
   summarizeRuntimeAccountCausality,
 } from '../../../qa/account-causal-trace';
-import { prepareHtlcPaymentEntityInputs } from '../../../entity/htlc/payment-admission';
 import type { RuntimeReplica, RuntimeInput } from '../../types';
 import { applyEntityHeightDurabilityBarrier } from '../../input-pipeline/entity-height-barrier';
 import { cloneRuntimeFrameMempool } from '../clone';
@@ -56,7 +55,6 @@ export const prepareRuntimeFrameInput = async (
   applyEntityHeightDurabilityBarrier(env, input, mempool, timestamp);
   deps.applyEntityTxFrameCap(input, mempool, state.maxEntityTxsPerFrame ?? 0, timestamp);
   deps.applyEntityInputFrameCap(input, mempool, state.maxEntityInputsPerFrame ?? 0, timestamp);
-  input.entityInputs = await prepareHtlcPaymentEntityInputs(env, input.entityInputs);
   frame.inputForRequeue = cloneRuntimeFrameMempool(input);
 
   if (ACCOUNT_CAUSAL_TRACE) {

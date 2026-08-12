@@ -7,7 +7,7 @@
  *   bun run bv -- test secret123 100 --w=64     # Non-interactive (JSON output)
  *   bun test brainvault/core.test.ts            # Run deterministic tests
  *   bun run bv --bench                          # Benchmark performance
- *   bun run bv --lib=wasm                       # Force hash-wasm (slower, compat check)
+ *   bun run bv --lib=wasm                       # Force hash-wasm (slower, parity check)
  *   bun run bv --lib=native                     # Force @node-rs/argon2 (default, faster)
  *   bun run bv --repeat                         # Interactive: require double entry for name/pass
  *   bun run bv --shard-multiplier=4             # Custom KDF mode: 256MB * multiplier per shard
@@ -54,7 +54,7 @@ Flags:
 - --lib=native
   Use @node-rs/argon2 worker (default).
 - --lib=wasm
-  Use hash-wasm worker (slower, compatibility/testing path).
+  Use hash-wasm worker (slower, cross-backend parity/testing path).
 - --w=N
   Number of parallel workers in non-interactive mode (default 64, capped by shard count).
 - --repeat
@@ -78,7 +78,7 @@ Recovery rule:
 - You must use the exact same Name + Passphrase + Shard count + shard-multiplier
   to reproduce the same master key.
 
-Compatibility:
+Wallet interoperability:
 - Resulting PRIMARY/SECONDARY mnemonics can be imported to Ledger/Trezor
   via "Enter recovery phrase/passphrase" flows, and to Rabby / MetaMask, etc.
 - Optional: you can load unpacked Rabby from https://github.com/RabbyHub/Rabby

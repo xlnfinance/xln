@@ -13,7 +13,7 @@ import {
   hashEntityLeaderVoteBody,
 } from '../../../../entity/consensus/leader';
 import { generateLazyEntityId } from '../../../../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../../helpers/cross-j';
 import { initCrontab } from '../../../../entity/scheduler';
 import { dbRootPath } from '../../../../runtime/platform';
 import {
@@ -33,6 +33,7 @@ import {
 } from '../../../../runtime';
 import type { EntityLeaderTimeoutVote, EntityReplica, EntityState, JurisdictionConfig } from '../../../../entity/types';
 import type { RuntimeReplica } from '../../../../runtime/types';
+import { createTestEntityImportRuntimeTx } from '../../../../qa/entity-creation-fixture';
 import { createTestJReplica } from '../../../helpers/j-replica';
 
 const cleanupRuntimeStorage = (runtimeId: string): void => {
@@ -73,11 +74,10 @@ const installVoteTarget = (env: RuntimeReplica): {
     lockBook: new Map(),
     swapTradingPairs: [],
   };
-  const localKeys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
+  state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId);
   const replica: EntityReplica = {
     entityId,
     signerId,
-    entityEncPubKey: localKeys.publicKey,
     state,
     mempool: [],
     isProposer: false,
@@ -163,8 +163,7 @@ describe('leader timeout vote durability', () => {
     const entityId = generateLazyEntityId([signerId, voterId], 2n, env).toLowerCase();
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId,
         data: {
@@ -178,7 +177,7 @@ describe('leader timeout vote durability', () => {
           isProposer: false,
           profileName: 'leader vote durability',
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);

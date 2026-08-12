@@ -5,7 +5,7 @@ import { DeltaBar } from '../components/DeltaBar';
 import { Sheet } from '../components/Sheet';
 import { useAdapterRead } from '../runtime/hooks';
 import { useApp } from '../runtime/store';
-import { sendEntityTxs } from '../runtime/tx';
+import { DEFAULT_ACCOUNT_DISPUTE_CONFIG, sendEntityTxs } from '../runtime/tx';
 import { formatAmount, getTokenMeta, parseAmount } from '../runtime/format';
 import { useAccounts, useEntityCore } from '../runtime/views';
 
@@ -49,7 +49,10 @@ export function Accounts() {
 		try {
 			const creditAmount = creditText.trim() ? parseAmount(creditText, meta.decimals) : 0n;
 			await sendEntityTxs(entityId, core.data.signerId, [
-				{ type: 'openAccount', data: { targetEntityId: targetId, creditAmount, tokenId: selectedTokenId } },
+				{
+					type: 'openAccount',
+					data: { targetEntityId: targetId, creditAmount, tokenId: selectedTokenId, disputeConfig: DEFAULT_ACCOUNT_DISPUTE_CONFIG },
+				},
 			]);
 			toast('Account opening proposed');
 			setOpening(false);
@@ -96,7 +99,7 @@ export function Accounts() {
 							<span style={{ flex: '1 1 100%', marginTop: 10 }}>
 								{token ? (
 									<>
-										<DeltaBar derived={token.derived} signed={token.signed} height={6} />
+										<DeltaBar derived={token.derived} height={6} />
 										<span className="faint" style={{ display: 'block', fontSize: 11, marginTop: 6 }}>
 											{formatAmount(token.derived.outCapacity, tokenMeta.decimals, 2)} spendable ·{' '}
 											{formatAmount(token.derived.inCapacity, tokenMeta.decimals, 2)} receivable · {tokenMeta.symbol}

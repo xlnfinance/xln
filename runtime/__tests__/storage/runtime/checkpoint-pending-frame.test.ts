@@ -16,6 +16,7 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from 
 import { generateLazyEntityId } from '../../../entity/factory';
 import type { RuntimeReplica } from '../../../runtime/types';
 import { createTestJReplica } from '../.././helpers/j-replica';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 function hasPendingBilateralState(env: RuntimeReplica): boolean {
   for (const replica of env.state.eReplicas.values()) {
@@ -84,8 +85,7 @@ describe('checkpoint persistence with pending bilateral state', () => {
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [
-        {
-          type: 'importReplica',
+        createTestEntityImportRuntimeTx(env, {
           entityId: entityA,
           signerId: signerA,
           data: {
@@ -98,9 +98,8 @@ describe('checkpoint persistence with pending bilateral state', () => {
               jurisdiction,
             },
           },
-        },
-        {
-          type: 'importReplica',
+        }),
+        createTestEntityImportRuntimeTx(env, {
           entityId: entityB,
           signerId: signerB,
           data: {
@@ -113,7 +112,7 @@ describe('checkpoint persistence with pending bilateral state', () => {
               jurisdiction,
             },
           },
-        },
+        }),
       ],
       entityInputs: [],
     });

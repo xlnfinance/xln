@@ -102,7 +102,7 @@ describe('deferred Account mempool scheduling', () => {
     expect(hasRuntimeWork(env)).toBe(true);
   });
 
-  test('legacy J-event work cannot wake a permanently closed Account', () => {
+  test('retired J-event work cannot wake a permanently closed Account', () => {
     const { env, account } = frozenRepaymentReplica();
     account.status = 'disputed';
     delete account.activeDispute;

@@ -91,10 +91,10 @@ assertDelivery(delivered, {
 requireCondition(isDeliveryDelivered(delivered), 'accepted delivery must be delivered');
 requireCondition(shouldRetryDelivery(delivered) === false, 'accepted delivery must not retry');
 
-const deferred = deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' });
+const deferred = deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FAILOVER' });
 assertDelivery(deferred, {
   outcome: 'deferred',
-  code: 'ROUTE_DIRECT_MISS_FALLBACK',
+  code: 'ROUTE_DIRECT_MISS_FAILOVER',
   retryable: true,
   fatal: false,
   terminal: false,
@@ -242,7 +242,7 @@ for (const [path, markers] of [
   ]],
   ['runtime/network/p2p/direct-runtime-bun.ts', [
     'sendEntityInputsDelivery: (\n      targetRuntimeId: string,\n      envelope: RuntimeEntityInputsEnvelope,\n      ingressTimestamp?: number,\n    ): DeliveryResult',
-    'ROUTE_DIRECT_MISS_FALLBACK',
+    'ROUTE_DIRECT_MISS_FAILOVER',
     'ROUTE_DIRECT_SEND_FAILED',
   ]],
   ['runtime/network/websocket-send-result.ts', [

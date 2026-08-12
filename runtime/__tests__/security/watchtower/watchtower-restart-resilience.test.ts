@@ -19,6 +19,7 @@ import {
   runWatchtowerSweep,
 } from '../../../watchtower/action';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../../watchtower/standalone-server';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const servers: StandaloneWatchtowerServer[] = [];
@@ -70,8 +71,7 @@ const createBackupAppointment = async () => {
   const jurisdiction = installJurisdiction(env);
   const entityId = generateLazyEntityId([runtimeId], 1n, env).toLowerCase();
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId: runtimeId,
       data: {
@@ -85,7 +85,7 @@ const createBackupAppointment = async () => {
         isProposer: true,
         profileName: 'Watchtower Restart',
       },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env);

@@ -4,11 +4,15 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { probeDevReady } from '../../scripts/dev/wait-dev-ready';
-import { verifyHelloAuth } from '../network/p2p/hello-auth';
+import { probeDevReady, waitForDevReady } from '../../scripts/dev/wait-dev-ready';
+import {
+  initialDevStartupProgressState,
+  reduceDevStartupProgress,
+} from '../../scripts/dev/startup-events';
+import { verifyHelloAuth } from '../network/p2p/auth/hello-auth';
 import { deserializeWsMessage, serializeWsMessage } from '../network/p2p/ws-protocol';
-import { areHubChildrenReady } from '../orchestrator/hub-mesh-readiness';
-import { relayAudienceFromWebUrl, resolveConfiguredRelayAudience } from '../orchestrator/relay-audience';
+import { areHubChildrenReady } from '../orchestrator/hub/hub-mesh-readiness';
+import { relayAudienceFromWebUrl, resolveConfiguredRelayAudience } from '../orchestrator/mesh/relay-audience';
 
 const repoRoot = resolve(import.meta.dir, '../..');
 
@@ -174,6 +178,7 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
     expect(await probeDevReady(input)).toEqual({
       ready: false,
       reason: `${input.relayWebUrls[0]}:wallet-faucet-pipe-404:PUBLIC_FAUCET_DISABLED`,
+      fatal: false,
     });
     publicFaucetEnabled = true;
 
@@ -223,8 +228,89 @@ test('dev readiness rejects a partial runtime-import response before claiming re
       watchtowerUrl: 'http://127.0.0.1:1',
       runtimeBundle: '/missing/runtime.js',
       startedAtMs: Date.now(),
-    })).toEqual({ ready: false, reason: 'market-maker-not-ready' });
+    })).toEqual({ ready: false, reason: 'market-maker-not-ready', fatal: false });
   } finally {
     api.stop(true);
   }
+});
+
+test('dev readiness stops immediately on fatal import state and preserves retry budget', async () => {
+  const input = {
+    apiUrl: 'http://127.0.0.1:1',
+    webUrl: 'http://127.0.0.1:1',
+    relayWebUrls: ['http://127.0.0.1:1'],
+    watchtowerUrl: 'http://127.0.0.1:1',
+    runtimeBundle: '/missing/runtime.js',
+    startedAtMs: 100,
+  };
+  let now = 1_000;
+  let fatalProbes = 0;
+  const fatal = await waitForDevReady(input, 240_000, {
+    now: () => now,
+    sleep: async ms => { now += ms; },
+    probe: async () => {
+      fatalProbes += 1;
+      return { ready: false, reason: 'fatal:child-exited', fatal: true };
+    },
+  });
+  expect(fatal).toEqual({
+    ready: false,
+    reason: 'fatal:child-exited',
+    fatal: true,
+    totalElapsedMs: 900,
+    probeElapsedMs: 0,
+  });
+  expect(fatalProbes).toBe(1);
+
+  now = 1_000;
+  let retryableProbes = 0;
+  const retryable = await waitForDevReady(input, 2_500, {
+    now: () => now,
+    sleep: async ms => { now += ms; },
+    probe: async () => {
+      retryableProbes += 1;
+      return { ready: false, reason: 'market-maker-not-ready', fatal: false };
+    },
+  });
+  expect(retryable).toEqual({
+    ready: false,
+    reason: 'market-maker-not-ready',
+    fatal: false,
+    totalElapsedMs: 3_400,
+    probeElapsedMs: 2_500,
+  });
+  expect(retryableProbes).toBe(3);
+});
+
+test('dev startup progress logs phase changes and one heartbeat per interval', () => {
+  let state = initialDevStartupProgressState();
+  const emit = (reason: string, probeElapsedMs: number): string | null => {
+    const reduced = reduceDevStartupProgress(state, {
+      reason,
+      totalElapsedMs: probeElapsedMs + 5_000,
+      probeElapsedMs,
+    });
+    state = reduced.state;
+    return reduced.line;
+  };
+
+  expect(emit('hub-mesh-not-ready', 0)).toBe(
+    'DEV_PHASE phase=mesh totalElapsedMs=5000 probeElapsedMs=0 reason=hub-mesh-not-ready',
+  );
+  expect(emit('hub-mesh-not-ready', 9_999)).toBeNull();
+  expect(emit('hub-mesh-not-ready', 10_000)).toBe(
+    'DEV_HEARTBEAT phase=mesh totalElapsedMs=15000 probeElapsedMs=10000 reason=hub-mesh-not-ready',
+  );
+  expect(emit('market-maker-not-ready', 10_001)).toBe(
+    'DEV_PHASE phase=market-maker totalElapsedMs=15001 probeElapsedMs=10001 reason=market-maker-not-ready',
+  );
+  expect(emit('bootstrap-reserves-not-ready', 10_002)).toBe(
+    'DEV_PHASE phase=reserves totalElapsedMs=15002 probeElapsedMs=10002 reason=bootstrap-reserves-not-ready',
+  );
+  expect(emit('reset-in-progress', 10_003)).toBe(
+    'DEV_PHASE phase=reset totalElapsedMs=15003 probeElapsedMs=10003 reason=reset-in-progress',
+  );
+  expect(emit('wallet-relay-websocket-error', 10_004)).toBe(
+    'DEV_PHASE phase=relay totalElapsedMs=15004 probeElapsedMs=10004 reason=wallet-relay-websocket-error',
+  );
 });

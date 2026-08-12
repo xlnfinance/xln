@@ -291,7 +291,7 @@ describe('frontend time-machine current env contract', () => {
     const wallet = read('frontend/src/lib/view/UserModePanel.svelte');
 
     // The NetworkMachine scrubber belongs to the dock. Keying it off the global app mode
-    // left the embedded workspace (dock rendered while mode is 'user') on the legacy
+    // left the embedded workspace (dock rendered while mode is 'user') on the retired
     // scrubber, which reads permanently empty in-memory history.
     expect(source).toContain("{#if dockMode && $runtimeGraphScope === 'merged'}");
     expect(dock).toContain('dockMode');
@@ -312,7 +312,7 @@ describe('frontend time-machine current env contract', () => {
     expect(source).toContain('safeSet(timeIndex, 0);\n      safeSet(isLive, false);');
   });
 
-  test('remote TimeMachine deeplinks use RuntimeController identity instead of env fallback', () => {
+  test('remote TimeMachine deeplinks use RuntimeController identity instead of environment inference', () => {
     const source = read('frontend/src/lib/view/core/TimeMachine.svelte');
 
     expect(source).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';");
@@ -337,7 +337,7 @@ describe('frontend time-machine current env contract', () => {
     expect(source).not.toContain('$env.height');
   });
 
-  test('legacy time store uses -1 for live and never stores max index as live', () => {
+  test('time store uses -1 for live and never stores max index as live', () => {
     const source = read('frontend/src/lib/stores/timeStore.ts');
 
     expect(source).not.toContain("import { activeEnv } from './runtimeStore';");
@@ -401,7 +401,7 @@ describe('frontend time-machine current env contract', () => {
     expect(dock).toContain('runtimeFrameIsLive,');
   });
 
-  test('ArchitectPanel resets demo state without reload-page fallback strings', () => {
+  test('ArchitectPanel resets demo state without reload-page substitute strings', () => {
     const architect = read('frontend/src/lib/view/panels/ArchitectPanel.svelte');
 
     expect(architect).toContain('function clearDemoRuntimeState');

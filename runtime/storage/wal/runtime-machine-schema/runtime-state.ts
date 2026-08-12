@@ -111,10 +111,21 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
     'pendingReliableIngress', 'reliableIngressCommitting',
     'runtimeAdapterCommandFrontiers', 'pendingCommittedJOutbox', 'pendingJurisdictionImports',
     'numberedRegistrationIntents', 'certifiedRegistrationEvidence',
+    'entityEncryptionSeeds',
     'certifiedBoardNodes', 'consumptionNodes', 'accountJClaimNodes',
   ], `${code}_FIELDS`);
   for (const field of ['maxEntityInputsPerFrame', 'maxEntityTxsPerFrame']) {
     if (state[field] !== undefined) requireBoundaryInteger(state[field], `${code}_${field.toUpperCase()}`, 1);
+  }
+  if (state['entityEncryptionSeeds'] !== undefined) {
+    for (const [entityId, seed] of requireMap(state['entityEncryptionSeeds'], `${code}_ENTITY_ENCRYPTION_SEEDS`)) {
+      if (typeof entityId !== 'string' || !/^0x[0-9a-f]{64}$/.test(entityId)) {
+        throw new Error(`${code}_ENTITY_ENCRYPTION_SEED_ENTITY_ID`);
+      }
+      if (typeof seed !== 'string' || !/^0x[0-9a-f]{128}$/.test(seed)) {
+        throw new Error(`${code}_ENTITY_ENCRYPTION_SEED_VALUE`);
+      }
+    }
   }
   if (state['pendingAuditEvents'] !== undefined) {
     const events = requireMap(state['pendingAuditEvents'], `${code}_PENDING_AUDIT_EVENTS`);

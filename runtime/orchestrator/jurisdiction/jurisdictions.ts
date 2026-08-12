@@ -175,7 +175,7 @@ export const hasShardRpc2Jurisdiction = (config: OrchestratorJurisdictionsConfig
   }
 };
 
-export const resolvePrimaryHubJurisdictionFallback = (config: OrchestratorJurisdictionsConfig): PrimaryHubJurisdiction | null => {
+export const resolvePrimaryHubJurisdiction = (config: OrchestratorJurisdictionsConfig): PrimaryHubJurisdiction | null => {
   if (!existsSync(config.shardJurisdictionsPath)) return null;
   try {
     const payload = JSON.parse(readFileSync(config.shardJurisdictionsPath, 'utf8')) as ShardJurisdictionsFile;
@@ -488,8 +488,8 @@ export const toPublicJurisdictionsPayload = (
   for (const [key, jurisdiction] of Object.entries(parsed.jurisdictions)) {
     if (!jurisdiction || typeof jurisdiction !== 'object') continue;
     assertPublicActiveRpcDeploymentMetadata(key, jurisdiction);
-    const fallback = resolvePublicRpcPath(config, key, jurisdiction);
-    jurisdiction.rpc = toPublicRpcUrl(String(jurisdiction.rpc || fallback), fallback);
+    const defaultRpcPath = resolvePublicRpcPath(config, key, jurisdiction);
+    jurisdiction.rpc = toPublicRpcUrl(String(jurisdiction.rpc || defaultRpcPath), defaultRpcPath);
   }
   return `${JSON.stringify(parsed, null, 2)}\n`;
 };

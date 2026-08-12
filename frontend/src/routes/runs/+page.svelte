@@ -79,8 +79,8 @@
   const benchmarkAlertCount = $derived(ledger.filter(row => row.benchmarkStatus === 'slower' || row.benchmarkStatus === 'mixed' || row.benchmarkStatus === 'failed').length);
   const browserAlertCount = $derived(ledger.filter(row => row.browserErrors > 0 || row.networkFailures > 0).length);
 
-  function finiteSortValue(value: number | null | undefined, fallback: number): number {
-    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  function finiteSortValue(value: number | null | undefined, defaultValue: number): number {
+    return typeof value === 'number' && Number.isFinite(value) ? value : defaultValue;
   }
 
   function runTimingValue(run: QaRunLedgerEntry, key: RunSortKey): number {

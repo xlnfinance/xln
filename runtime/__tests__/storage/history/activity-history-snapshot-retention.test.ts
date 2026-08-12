@@ -23,6 +23,7 @@ import { readHistoryViewRuntimeActivity } from '../../../storage/history/history
 import { keyHistoryViewRuntimeActivity } from '../../../storage/keys';
 import { readFrameReceipts } from '../../../api/server/network/rpc-ws';
 import { createTestJReplica } from '../.././helpers/j-replica';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const recipientId = `0x${'bb'.repeat(32)}`;
 const hubId = `0x${'cc'.repeat(32)}`;
@@ -73,8 +74,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
     },
   }));
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId,
       data: {
@@ -87,7 +87,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
           jurisdiction,
         },
       },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env, []);
@@ -134,7 +134,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
             },
           }]
         : [];
-      await saveEnvToDB(env, runtimeInput, []);
+      await saveEnvToDB(env, runtimeInput, [], undefined, new Map());
     }
 
     expect(await readPersistedFrameJournal(env, 3)).not.toBeNull();

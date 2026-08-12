@@ -40,9 +40,9 @@ function isAllowedExternalUrl(url) {
 	}
 }
 
-function sanitizeNotificationText(value, fallback, maxLength = 180) {
-	const text = String(value || fallback).replace(/\s+/g, ' ').trim();
-	if (!text) return fallback;
+function sanitizeNotificationText(value, defaultText, maxLength = 180) {
+	const text = String(value || defaultText).replace(/\s+/g, ' ').trim();
+	if (!text) return defaultText;
 	return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 

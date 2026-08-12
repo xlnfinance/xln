@@ -8,6 +8,7 @@ import type {
   ReliableReceiptSenderCheckpoint,
 } from '../../reliable/reliable-delivery.ts';
 import type { RuntimeFrameTransaction } from '../transaction';
+import type { EntityInfraContext } from '../../../types/entity/infra-context';
 
 type RuntimeReceiptDelivery = {
   runtimeId: string;
@@ -41,6 +42,8 @@ export type FrameExecutionState = {
   mutationStarted: boolean;
   inputDrained: boolean;
   inputForRequeue: RuntimeInput | undefined;
+  /** Public Entity-frame context slices collected during this Runtime attempt. */
+  entityContexts: Map<string, EntityInfraContext>;
 };
 
 export const createFrameExecutionState = (): FrameExecutionState => ({
@@ -57,4 +60,5 @@ export const createFrameExecutionState = (): FrameExecutionState => ({
   mutationStarted: false,
   inputDrained: false,
   inputForRequeue: undefined,
+  entityContexts: new Map(),
 });

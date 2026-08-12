@@ -49,7 +49,7 @@ describe('predeployed jurisdiction selection', () => {
 
     expect(() => selectPredeployedJurisdiction({
       jurisdictions: { left: complete('/left'), right: complete('/right') },
-    }, '/no-match')).toThrow('PREDEPLOYED_JURISDICTION_AMBIGUOUS:fallback:2');
+    }, '/no-match')).toThrow('PREDEPLOYED_JURISDICTION_AMBIGUOUS:default:2');
   });
 
   test('ignores a pending same-RPC alias without a complete deployed stack', () => {

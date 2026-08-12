@@ -42,18 +42,6 @@ const assertTxBatch = (value: unknown, stack: Set<unknown>): void => {
         assertNoSecretFields(tx.data, stack);
         continue;
       }
-      if (tx.type === 'htlcOnionAdvance') {
-        if (tx.data.advance.kind === 'revealAccepted') {
-          const { secret, ...publicAdvance } = tx.data.advance;
-          if (!/^0x[0-9a-f]{64}$/i.test(secret)) {
-            throw new Error('HTLC_PAYMENT_SECRET_CONSENSUS_INVALID');
-          }
-          assertNoSecretFields({ ...tx.data, advance: publicAdvance }, stack);
-          continue;
-        }
-        assertNoSecretFields(tx.data, stack);
-        continue;
-      }
       if (tx.type === 'entityCommand') {
         assertTxBatch(tx.data.txs, stack);
         continue;
@@ -73,9 +61,8 @@ const assertTxBatch = (value: unknown, stack: Set<unknown>): void => {
 
 /**
  * The proposer alone knows the preimage before delivery. Consensus commits the
- * public hashlock and exact opaque ciphertext. The sole plaintext exception is
- * revealAccepted, whose reducer requires an exact Account ACK marker already
- * applied earlier in the Entity transition.
+ * public hashlock and exact opaque ciphertext. Plaintext first enters the
+ * bilateral Account transaction authored by the final recipient.
  */
 export const assertNoConsensusVisibleHtlcPaymentSecrets = (
   txs: readonly EntityTx[],

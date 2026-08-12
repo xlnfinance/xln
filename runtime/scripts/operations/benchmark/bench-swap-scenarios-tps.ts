@@ -45,19 +45,19 @@ type ScenarioBenchmarkResult = {
 
 const BASE_PRICE = 25_000_000n;
 
-const argValue = (args: string[], name: string, fallback: string): string => {
+const argValue = (args: string[], name: string, defaultValue: string): string => {
   const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] ?? fallback : fallback;
+  return index >= 0 ? args[index + 1] ?? defaultValue : defaultValue;
 };
 
-const positiveInt = (args: string[], name: string, fallback: number): number => {
-  const value = Number.parseInt(argValue(args, name, String(fallback)), 10);
+const positiveInt = (args: string[], name: string, defaultValue: number): number => {
+  const value = Number.parseInt(argValue(args, name, String(defaultValue)), 10);
   if (!Number.isFinite(value) || value <= 0) throw new Error(`INVALID_ARG:${name}`);
   return value;
 };
 
-const nonNegativeInt = (args: string[], name: string, fallback: number): number => {
-  const value = Number.parseInt(argValue(args, name, String(fallback)), 10);
+const nonNegativeInt = (args: string[], name: string, defaultValue: number): number => {
+  const value = Number.parseInt(argValue(args, name, String(defaultValue)), 10);
   if (!Number.isFinite(value) || value < 0) throw new Error(`INVALID_ARG:${name}`);
   return value;
 };

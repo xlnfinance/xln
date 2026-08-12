@@ -25,7 +25,12 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 
-const DEFAULT_MAX_WS_MESSAGE_BYTES = 1024 * 1024;
+/**
+ * One encrypted 10 MB frame expands to ~13.4 MB in base64. Atomic cross-j
+ * delivery must keep two Account legs in one authenticated envelope, so the
+ * shared direct/relay receiver cap needs room for both plus protocol metadata.
+ */
+export const DEFAULT_MAX_WS_MESSAGE_BYTES = 32 * 1024 * 1024;
 const WS_STRING_FIELD_MAX_BYTES: Readonly<Record<string, number>> = {
   id: 128,
   from: 128,

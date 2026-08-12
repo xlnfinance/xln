@@ -17,7 +17,7 @@ describe('jurisdiction key selection', () => {
     })).toBe('ethereum');
   });
 
-  test('prefers an exact writable rpc match over primary fallback', () => {
+  test('prefers an exact writable rpc match over the primary default', () => {
     expect(selectWritableJurisdictionKey({
       ethereum: {
         primary: true,

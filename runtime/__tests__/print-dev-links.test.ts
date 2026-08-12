@@ -126,17 +126,10 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   const runtimeWatcher = readFileSync(join(repoRoot, 'scripts/dev/watch-runtime-build.sh'), 'utf8');
 
   expect(runDev).not.toContain('XLN_RUNTIME_IMPORT_LOG_URL=1');
-  expect(runDev).toContain('DEV_CHILD_COMMAND="\\"$REPO_ROOT/scripts/dev/run-dev-child.sh\\""');
-  expect(runDev).toContain('"${DEV_CHILD_COMMAND} stack"');
-  expect(devChild).toContain('"${DEV_CHILD_COMMAND} mesh"');
-  expect(devChild).toContain('"${DEV_CHILD_COMMAND} vite-http"');
+  expect(runDev).toContain('bun scripts/dev/supervise-dev.ts');
   expect(runDev).not.toContain('USE_ANVIL=true RUNTIME_VERBOSE_LOGS=');
-  expect(runDev).not.toContain('exec concurrently');
-  expect(runDev).toContain('bun --no-orphans "$CONCURRENTLY_JS"');
-  expect(runDev).toContain('--kill-timeout "$DEV_OUTER_KILL_TIMEOUT_MS"');
+  expect(runDev).not.toContain('concurrently');
   expect(runDev).toContain('trap cleanup_dev_stack EXIT');
-  expect(runDev).toContain('concurrently_status=$?');
-  expect(runDev).toContain('exit "$concurrently_status"');
   expect(devChild).toContain('runtime/orchestrator/orchestrator.ts');
   expect(devChild).toContain('DEV_CHILD_ROLE_UNKNOWN');
   expect(devChild).toContain('set -euo pipefail');
@@ -146,7 +139,6 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   expect(devChild).toContain('XLN_AUTO_PROVISION_EXTERNAL_FAUCET="${XLN_AUTO_PROVISION_EXTERNAL_FAUCET:-1}"');
   expect(devChild).toContain('XLN_REQUIRE_DIRECT_BASELINE=1');
   expect(devChild).toContain('./scripts/dev/watch-runtime-build.sh');
-  expect(devChild).toContain('"${DEV_CHILD_COMMAND} ready"');
   expect(devChild).toContain('scripts/dev/wait-dev-ready.ts');
   expect(runDev).not.toContain('bun build runtime/runtime.ts');
   expect(runDev).toContain('MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"');

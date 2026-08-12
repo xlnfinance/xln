@@ -2,7 +2,7 @@ import { normalizeSubmitId } from '../command/submit-identity';
 import type { EntityReplica } from '../../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../types';
 import { getLocalSignerPrivateKey } from '../../account/crypto';
-import { ENTITY_J_SUBMIT_FALLBACK_MS, isEntityActiveLeader } from '../../entity/consensus/leader';
+import { ENTITY_J_SUBMIT_RETRY_MS, isEntityActiveLeader } from '../../entity/consensus/leader';
 import { isBatchEmpty } from '../../jurisdiction/machine/batch';
 import {
   getMatchingJSubmitState,
@@ -56,7 +56,7 @@ const nextRetryAt = (replica: EntityReplica): number | null => {
   if (local.lastResultOutcome === 'eventBarrier') {
     return local.lastResultAt ?? local.lastSubmittedAt;
   }
-  return local.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS;
+  return local.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS;
 };
 
 export const getNextJSubmitRetryTimestamp = (env: RuntimeReplica): number | null => {

@@ -42,6 +42,7 @@ import {
 } from '../harness/helpers';
 import { createGossipLayer } from '../../network/p2p/gossip';
 import { getTokenInfo } from '../../account/utils';
+import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 import {
   summarizeRuntimeAccountCausality,
   type EntityInputCausalTrace,
@@ -465,8 +466,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   console.log('📦 Adding Bob...');
   const bob = getRegisteredEntity('3');
 
-  await commitRuntimeInput(env, { runtimeTxs: [{
-    type: 'importReplica' as const,
+  await commitRuntimeInput(env, { runtimeTxs: [createTestEntityImportRuntimeTx(env, {
     entityId: bob.id,
     signerId: bob.signer,
     data: {
@@ -480,7 +480,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
         jurisdiction,
       },
     },
-  }], entityInputs: [] });
+  })], entityInputs: [] });
   await converge(env);
   console.log('  ✅ Bob created\n');
 

@@ -51,13 +51,39 @@ jobs:
       - run: bun install --frozen-lockfile
         working-directory: jurisdictions
       - run: bun run release:launcher:verify
-      - run: bun scripts/native/build-platforms.ts desktop extension --package --smoke --no-build
+      - name: Install macOS release signing identity
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          MACOS_NOTARY_KEY_BASE64: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
+        run: |
+          test -n "$MACOS_CERTIFICATE_P12_BASE64"
+          test -n "$MACOS_CERTIFICATE_PASSWORD"
+          test -n "$MACOS_KEYCHAIN_PASSWORD"
+          test -n "$MACOS_NOTARY_KEY_BASE64"
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/macos-signing.p12"
+          printf '%s' "$MACOS_NOTARY_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/xln-signing.keychain-db"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/xln-signing.keychain-db"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/xln-signing.keychain-db"
+          security import "$RUNNER_TEMP/macos-signing.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$RUNNER_TEMP/xln-signing.keychain-db"
+          security set-key-partition-list -S apple-tool:,apple: -k "$MACOS_KEYCHAIN_PASSWORD" "$RUNNER_TEMP/xln-signing.keychain-db"
+          security list-keychains -d user -s "$RUNNER_TEMP/xln-signing.keychain-db"
+      - name: Build signed and notarized macOS release
+        env:
+          XLN_MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          XLN_MACOS_NOTARY_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          XLN_MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          XLN_MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: bun scripts/native/build-platforms.ts desktop extension --package --smoke --no-build
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: distribution-macos
           path: |
             packages/npm/xlnfinance/*.tgz
             native/dist/desktop/*.zip
+            native/dist/desktop/*.release-proof.json
             native/dist/chrome/*.zip
           if-no-files-found: error
 
@@ -83,11 +109,26 @@ jobs:
       - run: bun run build
       - run: bun run build
         working-directory: frontend
-      - run: bun scripts/native/build-platforms.ts android --package --no-build
+      - name: Materialize Android release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/xln-release.keystore"
+      - name: Build signed Android release
+        env:
+          XLN_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/xln-release.keystore
+          XLN_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          XLN_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          XLN_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          XLN_ANDROID_SIGNER_CERT_SHA256: ${{ secrets.ANDROID_SIGNER_CERT_SHA256 }}
+        run: bun scripts/native/build-platforms.ts android --package --no-build
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: distribution-android
-          path: native/dist/android/*.apk
+          path: |
+            native/dist/android/*.apk
+            native/dist/android/*.release-proof.json
           if-no-files-found: error
 
   publish-github:

@@ -1,7 +1,6 @@
 import { normalizeJurisdictionEvent } from '../../jurisdiction/machine/events/event-normalization';
-import { assertExactMultiRecipientCiphertextSchema } from '../../protocol/htlc/multi-recipient-schema';
+import { assertOpaqueHtlcCiphertext } from '../../protocol/htlc/multi-recipient';
 import {
-  requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
@@ -28,36 +27,8 @@ const validateCloseProof = (value: unknown, code: string): void => {
   }
 };
 
-const validateHtlcEnvelope = (value: unknown, code: string): void => {
-  if (typeof value === 'string') return;
-  const envelope = requireBoundaryRecord(value, code);
-  if (Object.hasOwn(envelope, 'version')) {
-    assertExactMultiRecipientCiphertextSchema(envelope);
-    return;
-  }
-  requireExactBoundaryKeys(
-    envelope,
-    [],
-    [
-      'nextHop', 'finalRecipient', 'secretOffer', 'description',
-      'startedAtMs', 'innerEnvelope', 'forwardAmount',
-    ],
-    `${code}_FIELDS`,
-  );
-  for (const field of ['nextHop', 'description', 'forwardAmount']) {
-    if (envelope[field] !== undefined && typeof envelope[field] !== 'string') {
-      throw new Error(`${code}_${field.toUpperCase()}`);
-    }
-  }
-  if (envelope['finalRecipient'] !== undefined && typeof envelope['finalRecipient'] !== 'boolean') {
-    throw new Error(`${code}_FINAL_RECIPIENT`);
-  }
-  if (envelope['startedAtMs'] !== undefined) {
-    requireBoundaryInteger(envelope['startedAtMs'], `${code}_STARTED_AT`);
-  }
-  for (const field of ['secretOffer', 'innerEnvelope']) {
-    if (envelope[field] !== undefined) assertExactMultiRecipientCiphertextSchema(envelope[field]);
-  }
+const validateHtlcEnvelope = (value: unknown): void => {
+  assertOpaqueHtlcCiphertext(value);
 };
 
 const validateHtlcLock = (value: unknown, code: string): void => {
@@ -69,31 +40,14 @@ const validateHtlcLock = (value: unknown, code: string): void => {
     optional: { deliveryMode: 'string', envelope: 'recordOrString' },
     literals: { deliveryMode: ['instant', 'async'] },
   }, code);
-  if (data['envelope'] !== undefined) validateHtlcEnvelope(data['envelope'], `${code}_ENVELOPE`);
+  if (data['envelope'] !== undefined) validateHtlcEnvelope(data['envelope']);
 };
 
 const validateHtlcResolve = (value: unknown, code: string): void => {
   const data = requireBoundaryRecord(value, code);
-  if (data['outcome'] === 'offer') {
-    requireExactBoundaryKeys(data, ['lockId', 'outcome', 'offer'], [], `${code}_FIELDS`);
-    if (typeof data['lockId'] !== 'string') throw new Error(`${code}_LOCK_ID`);
-    assertExactMultiRecipientCiphertextSchema(data['offer']);
-    return;
-  }
   if (data['outcome'] === 'secret') {
-    const hasSecret = Object.hasOwn(data, 'secret');
-    const hasOfferHash = Object.hasOwn(data, 'offerHash');
-    if (hasSecret === hasOfferHash) throw new Error(`${code}_SECRET_VARIANT`);
-    requireExactBoundaryKeys(
-      data,
-      ['lockId', 'outcome', hasSecret ? 'secret' : 'offerHash'],
-      [],
-      `${code}_FIELDS`,
-    );
-    if (
-      typeof data['lockId'] !== 'string' ||
-      typeof data[hasSecret ? 'secret' : 'offerHash'] !== 'string'
-    ) throw new Error(`${code}_SECRET`);
+    requireExactBoundaryKeys(data, ['lockId', 'outcome', 'secret'], [], `${code}_FIELDS`);
+    if (typeof data['lockId'] !== 'string' || typeof data['secret'] !== 'string') throw new Error(`${code}_SECRET`);
     return;
   }
   if (data['outcome'] !== 'error') throw new Error(`${code}_OUTCOME`);

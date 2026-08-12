@@ -91,8 +91,8 @@ describe('mesh jurisdiction config resolution', () => {
 
   test('fails closed when no configured jurisdiction has required contracts', () => {
     withJurisdictions(jurisdictionsDocument({
-        legacyPartial: {
-          name: 'Legacy Partial',
+        incompleteCandidate: {
+          name: 'Incomplete Candidate',
           chainId: 1,
           blockTimeMs: 1_000,
           rpc: '/rpc',

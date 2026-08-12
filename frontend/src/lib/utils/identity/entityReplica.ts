@@ -43,10 +43,10 @@ export function getReplicaForEntity(envLike: EnvLike, entityId: string): EntityR
   return getReplicaEntryForEntity(envLike, entityId)?.[1] ?? null;
 }
 
-export function getSignerIdForEntity(envLike: EnvLike, entityId: string, fallback = '1'): string {
+export function getSignerIdForEntity(envLike: EnvLike, entityId: string, defaultSignerId = '1'): string {
   const key = getReplicaEntryForEntity(envLike, entityId)?.[0];
-  if (!key) return fallback;
-  return String(key).split(':')[1] || fallback;
+  if (!key) return defaultSignerId;
+  return String(key).split(':')[1] || defaultSignerId;
 }
 
 export function requireSignerIdForEntity(envLike: EnvLike, entityId: string, context = 'entity-action'): string {

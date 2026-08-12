@@ -1,5 +1,5 @@
 import { normalizeSubmitId } from '../command/submit-identity';
-import { ENTITY_J_SUBMIT_FALLBACK_MS, isEntityActiveLeader } from '../../entity/consensus/leader';
+import { ENTITY_J_SUBMIT_RETRY_MS, isEntityActiveLeader } from '../../entity/consensus/leader';
 import { getJurisdictionConfigName } from '../../jurisdiction/machine/jurisdiction-runtime';
 import type { EntityReplica } from '../../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../types';
@@ -43,7 +43,7 @@ const nextRetryAt = (replica: EntityReplica): number | null => {
   const local = getMatchingEntityProviderActionSubmitState(replica);
   if (!local || local.submitAttempts <= 0) return 0;
   if (local.terminalFailure) return null;
-  return local.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS;
+  return local.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS;
 };
 
 export const getNextEntityProviderActionRetryTimestamp = (env: RuntimeReplica): number | null => {

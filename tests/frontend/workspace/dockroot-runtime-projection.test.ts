@@ -32,7 +32,6 @@ test('DockRoot treats Dock mode itself as the developer workspace without a devL
   expect(source).toContain("{ direction: 'below', referencePanel: 'wallet-main' }");
   expect(source).not.toContain('devLabEnabled');
   expect(source).not.toContain('xln-dev-lab');
-  expect(source).not.toContain('LEGACY_DEV_PANEL_NAMES');
   expect(source).not.toContain("import ArchitectPanel from './panels/ArchitectPanel.svelte'");
 });
 

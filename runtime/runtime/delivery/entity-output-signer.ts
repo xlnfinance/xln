@@ -1,11 +1,6 @@
-import { accountInputProposal } from '../../account/consensus/flush';
 import { resolveCertifiedAccountCounterpartyProposer } from '../routing/account-counterparty-route';
 import { getLocalSignerPrivateKey } from '../../account/crypto';
 import { getEntityLeaderState, isEntityActiveLeader } from '../../entity/consensus/leader';
-import type { Profile } from '../../entity/profile';
-import { computeHtlcEnvelopeContextHash } from '../../protocol/htlc/codec/envelope';
-import { validateMultiRecipientCiphertext } from '../../protocol/htlc/multi-recipient';
-import { encryptedHtlcLayer } from '../../protocol/htlc/codec/onion-layer';
 import type { AccountPeerInput } from '../../types/account';
 import type { EntityOutput, EntityReplica } from '../../entity/types';
 import type { RuntimeReplica } from '../types';
@@ -70,15 +65,6 @@ export const resolveEntityDefaultProposerId = (
     env.infrastructure?.verifiedProfileRoutes?.get(target)?.runtimeSignerId || '',
   ).trim().toLowerCase();
   if (verifiedSigner) return verifiedSigner;
-  const profile = (env.gossip?.getProfiles?.() as Profile[] | undefined)?.find(
-    candidate => String(candidate.entityId || '').trim().toLowerCase() === target,
-  );
-  const remoteSigner = String(
-    profile?.metadata.board.validators[0]?.signerId ||
-    profile?.metadata.board.validators[0]?.signer ||
-    '',
-  ).trim().toLowerCase();
-  if (remoteSigner) return remoteSigner;
   throw new Error(`DEFAULT_PROPOSER_RESOLUTION_FAILED:${context}:entityId=${entityId}`);
 };
 
@@ -93,9 +79,9 @@ export const resolveEntityDefaultProposerId = (
  */
 export const resolveEntityProposerId = (env: RuntimeReplica, entityId: string, context: string): string => {
   const targetEntityId = String(entityId || '').toLowerCase();
-  let localKeyReplicaFallback: string | null = null;
-  let configFallback: string | null = null;
-  let gossipFallback: string | null = null;
+  let localKeyReplicaCandidate: string | null = null;
+  let configuredLeaderCandidate: string | null = null;
+  let verifiedRouteCandidate: string | null = null;
 
   for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     const keyParts = String(replicaKey).split(':');
@@ -110,30 +96,24 @@ export const resolveEntityProposerId = (env: RuntimeReplica, entityId: string, c
     if (isEntityActiveLeader(replica) && replicaSignerId && getLocalSignerPrivateKey(env, replicaSignerId)) {
       return replicaSignerId;
     }
-    if (!localKeyReplicaFallback && replicaSignerId && getLocalSignerPrivateKey(env, replicaSignerId)) {
-      localKeyReplicaFallback = replicaSignerId;
+    if (!localKeyReplicaCandidate && replicaSignerId && getLocalSignerPrivateKey(env, replicaSignerId)) {
+      localKeyReplicaCandidate = replicaSignerId;
     }
-    if (!configFallback) {
-      configFallback = getEntityLeaderState(replica.state).activeValidatorId || configuredValidators[0] || null;
+    if (!configuredLeaderCandidate) {
+      configuredLeaderCandidate = getEntityLeaderState(replica.state).activeValidatorId || configuredValidators[0] || null;
     }
   }
 
-  if (env.gossip?.getProfiles) {
-    const profile = (env.gossip.getProfiles() as Profile[]).find(
-      candidate => String(candidate.entityId || '').toLowerCase() === targetEntityId,
-    );
-    const firstValidator = profile?.metadata.board?.validators?.[0];
-    gossipFallback = firstValidator?.signerId || firstValidator?.signer || null;
-  }
+  verifiedRouteCandidate = env.infrastructure?.verifiedProfileRoutes?.get(targetEntityId)?.runtimeSignerId ?? null;
 
-  if (localKeyReplicaFallback) return localKeyReplicaFallback;
-  if (configFallback && getLocalSignerPrivateKey(env, configFallback)) {
-    return configFallback;
+  if (localKeyReplicaCandidate) return localKeyReplicaCandidate;
+  if (configuredLeaderCandidate && getLocalSignerPrivateKey(env, configuredLeaderCandidate)) {
+    return configuredLeaderCandidate;
   }
   const replayHint = replayOutputSignerHint(env, targetEntityId);
   if (replayHint) return replayHint;
-  if (gossipFallback) return gossipFallback;
-  if (configFallback) return configFallback;
+  if (verifiedRouteCandidate) return verifiedRouteCandidate;
+  if (configuredLeaderCandidate) return configuredLeaderCandidate;
 
   throw new Error(`SIGNER_RESOLUTION_FAILED: ${context} entityId=${entityId}`);
 };
@@ -155,51 +135,6 @@ const entityOutputAccountInput = (output: EntityOutput): AccountPeerInput | null
     );
   }
   return inputs[0] ?? null;
-};
-
-const encryptedAccountSignerHint = (
-  targetEntityId: string,
-  input: AccountPeerInput,
-): string | null => {
-  const proposal = accountInputProposal(input);
-  if (!proposal) return null;
-  const target = targetEntityId.toLowerCase();
-  const signerIds = new Set<string>();
-  for (const tx of proposal.frame.accountTxs) {
-    if (tx.type !== 'htlc_lock') continue;
-    const encryptedLayer = encryptedHtlcLayer(tx.data.envelope);
-    if (!encryptedLayer) continue;
-    const contextHash = computeHtlcEnvelopeContextHash({
-      entityId: target,
-      lockId: tx.data.lockId,
-      hashlock: tx.data.hashlock,
-      tokenId: tx.data.tokenId,
-      amount: tx.data.amount,
-      timelock: tx.data.timelock,
-      revealBeforeHeight: tx.data.revealBeforeHeight,
-    });
-    const layer = validateMultiRecipientCiphertext(
-      encryptedLayer,
-      target,
-      contextHash,
-    );
-    const signerId = String(layer.recipients[0]?.signerId ?? '')
-      .trim()
-      .toLowerCase();
-    if (!signerId) {
-      throw new Error(
-        `ACCOUNT_OUTPUT_CERTIFIED_SIGNER_MISSING:${tx.data.lockId}`,
-      );
-    }
-    signerIds.add(signerId);
-  }
-  if (signerIds.size > 1) {
-    throw new Error(
-      `ACCOUNT_OUTPUT_CERTIFIED_SIGNER_CONFLICT:${target}:` +
-        [...signerIds].sort().join(','),
-    );
-  }
-  return signerIds.values().next().value ?? null;
 };
 
 /**
@@ -226,27 +161,13 @@ export const resolveEntityOutputSignerId = async (
         `ENTITY_OUTPUT_SOURCE_ACCOUNT_MISSING:${sourceReplica.entityId}:${output.entityId}`,
       );
     }
-    const encryptedSigner = encryptedAccountSignerHint(
-      output.entityId,
-      accountInput,
-    );
     const certifiedSigner = await resolveCertifiedAccountCounterpartyProposer(
       env,
+      sourceReplica.state,
       sourceAccount,
       output.entityId,
     );
-    if (
-      encryptedSigner &&
-      certifiedSigner &&
-      encryptedSigner !== certifiedSigner
-    ) {
-      throw new Error(
-        `ACCOUNT_OUTPUT_SIGNER_HINT_CONFLICT:${output.entityId}:` +
-          `${encryptedSigner}:${certifiedSigner}`,
-      );
-    }
-    const evidenceSigner = encryptedSigner ?? certifiedSigner;
-    if (evidenceSigner) return evidenceSigner;
+    if (certifiedSigner) return certifiedSigner;
   }
 
   return resolveEntityProposerId(

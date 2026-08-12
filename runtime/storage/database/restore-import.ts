@@ -317,6 +317,9 @@ export const replaceRestoredStorageBase = async (
     runtimeStateHash: options.canonicalStateHash,
     runtimeMachine: options.runtimeMachine,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    // Offline document import creates a synthetic Runtime frame with no replayed
+    // Entity proposals; carrying any Entity context here would be fabricated.
+    entityContexts: new Map(),
     historyRecords: [],
     activityLogs: [],
     touchedEntities: Array.from(new Set(options.docs.map(doc => doc.entityId))).sort(),

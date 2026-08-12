@@ -2,14 +2,19 @@
 
 import { stat } from 'node:fs/promises';
 import { deriveSignerAddressSync, signDigest } from '../../runtime/account/crypto';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../../runtime/protocol/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../../runtime/protocol/crypto/p2p-crypto';
 import {
   deserializeWsMessage,
   hashHelloMessage,
   serializeWsMessage,
 } from '../../runtime/network/p2p/ws-protocol';
-import { fetchLoopback, isLoopbackHttps } from '../../runtime/orchestrator/loopback-fetch';
-import { relayAudienceFromWebUrl } from '../../runtime/orchestrator/relay-audience';
+import { fetchLoopback, isLoopbackHttps } from '../../runtime/orchestrator/server/loopback-fetch';
+import { relayAudienceFromWebUrl } from '../../runtime/orchestrator/mesh/relay-audience';
+import {
+  initialDevStartupProgressState,
+  reduceDevStartupProgress,
+  type DevStartupProgress,
+} from './startup-events';
 
 export type DevReadyProbe = {
   apiUrl: string;
@@ -20,7 +25,25 @@ export type DevReadyProbe = {
   startedAtMs: number;
 };
 
-export type DevReadyResult = { ready: true } | { ready: false; reason: string };
+export type DevReadyResult =
+  | { ready: true }
+  | { ready: false; reason: string; fatal: boolean };
+
+export type DevReadyWaitOutcome =
+  | { ready: true; totalElapsedMs: number; probeElapsedMs: number }
+  | {
+    ready: false;
+    reason: string;
+    fatal: boolean;
+    totalElapsedMs: number;
+    probeElapsedMs: number;
+  };
+
+const notReady = (reason: string, fatal = false): DevReadyResult => ({
+  ready: false,
+  reason,
+  fatal,
+});
 
 const fetchWithin = (url: string, init: RequestInit = {}): Promise<Response> =>
   fetchLoopback(url, { ...init, signal: AbortSignal.timeout(2_000) });
@@ -53,9 +76,9 @@ const probeRelayChallenge = (webUrl: string): Promise<DevReadyResult> => new Pro
     settled = true;
     clearTimeout(timer);
     if (result.ready && socket.readyState === WebSocket.OPEN) {
-      const closeFallback = setTimeout(() => resolve(result), 500);
+      const closeDeadline = setTimeout(() => resolve(result), 500);
       socket.onclose = () => {
-        clearTimeout(closeFallback);
+        clearTimeout(closeDeadline);
         resolve(result);
       };
       socket.close(1000, 'dev-ready-complete');
@@ -65,7 +88,7 @@ const probeRelayChallenge = (webUrl: string): Promise<DevReadyResult> => new Pro
     resolve(result);
   };
   const timer = setTimeout(
-    () => finish({ ready: false, reason: 'wallet-relay-challenge-timeout' }),
+    () => finish(notReady('wallet-relay-challenge-timeout')),
     2_000,
   );
   socket.onmessage = event => {
@@ -73,7 +96,7 @@ const probeRelayChallenge = (webUrl: string): Promise<DevReadyResult> => new Pro
       const message = deserializeWsMessage(event.data as ArrayBuffer);
       if (message.type === 'hello_ack') {
         if (message.to !== runtimeId) {
-          finish({ ready: false, reason: 'wallet-relay-auth-runtime-mismatch' });
+          finish(notReady('wallet-relay-auth-runtime-mismatch'));
           return;
         }
         finish({ ready: true });
@@ -81,10 +104,9 @@ const probeRelayChallenge = (webUrl: string): Promise<DevReadyResult> => new Pro
       }
       if (message.type !== 'hello_challenge') return;
       if (message.audience !== expectedAudience) {
-        finish({
-          ready: false,
-          reason: `wallet-relay-audience-mismatch:${String(message.audience || 'missing')}`,
-        });
+        finish(notReady(
+          `wallet-relay-audience-mismatch:${String(message.audience || 'missing')}`,
+        ));
         return;
       }
       const timestamp = Date.now();
@@ -105,10 +127,10 @@ const probeRelayChallenge = (webUrl: string): Promise<DevReadyResult> => new Pro
         },
       }));
     } catch (error) {
-      finish({ ready: false, reason: error instanceof Error ? error.message : String(error) });
+      finish(notReady(error instanceof Error ? error.message : String(error)));
     }
   };
-  socket.onerror = () => finish({ ready: false, reason: 'wallet-relay-websocket-error' });
+  socket.onerror = () => finish(notReady('wallet-relay-websocket-error'));
 });
 
 const probeOffchainFaucetPipe = async (webUrl: string): Promise<DevReadyResult> => {
@@ -117,11 +139,12 @@ const probeOffchainFaucetPipe = async (webUrl: string): Promise<DevReadyResult> 
   const hubs = Array.isArray(hubsBody['hubs']) ? hubsBody['hubs'] : [];
   const hubEntityId = String((hubs[0] as Record<string, unknown> | undefined)?.['entityId'] || '');
   if (!hubsResponse.ok || !/^0x[0-9a-fA-F]{64}$/.test(hubEntityId)) {
-    return { ready: false, reason: `wallet-faucet-hubs-${hubsResponse.status}` };
+    return notReady(`wallet-faucet-hubs-${hubsResponse.status}`);
   }
 
-  // This intentionally invalid user id proves browser proxy -> orchestrator ->
-  // exact hub child routing without enqueueing a financial RuntimeInput.
+  // This intentionally invalid user id proves that the browser proxy reaches
+  // the orchestrator faucet route. Hub execution is covered separately by the
+  // strict runtime-import mesh/gossip/reserve readiness contract.
   const response = await fetchWithin(`${webUrl}/api/faucet/offchain`, {
     method: 'POST',
     headers: {
@@ -138,10 +161,9 @@ const probeOffchainFaucetPipe = async (webUrl: string): Promise<DevReadyResult> 
   const body = await readObject(response);
   return response.status === 400 && body['code'] === 'FAUCET_INVALID_USER_ENTITY_ID'
     ? { ready: true }
-    : {
-        ready: false,
-        reason: `wallet-faucet-pipe-${response.status}:${String(body['code'] || 'missing-code')}`,
-      };
+    : notReady(
+        `wallet-faucet-pipe-${response.status}:${String(body['code'] || 'missing-code')}`,
+      );
 };
 
 export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResult> => {
@@ -149,15 +171,15 @@ export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResul
     const importResponse = await fetchWithin(`${input.apiUrl}/api/runtime-import?access=admin`);
     const importStatus = await readObject(importResponse);
     if (!importResponse.ok || importStatus['ready'] !== true) {
-      return {
-        ready: false,
-        reason: String(importStatus['reason'] || importStatus['error'] || `runtime-import-http-${importResponse.status}`),
-      };
+      return notReady(
+        String(importStatus['reason'] || importStatus['error'] || `runtime-import-http-${importResponse.status}`),
+        importStatus['fatal'] === true,
+      );
     }
 
     const bundle = await stat(input.runtimeBundle);
     if (bundle.size <= 0 || bundle.mtimeMs < input.startedAtMs) {
-      return { ready: false, reason: 'runtime-bundle-not-fresh' };
+      return notReady('runtime-bundle-not-fresh');
     }
 
     const [appResponse, runtimeResponse, watchtowerResponse] = await Promise.all([
@@ -166,33 +188,90 @@ export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResul
       fetchWithin(`${input.watchtowerUrl}/api/tower/healthz`),
     ]);
     await appResponse.body?.cancel();
-    if (!appResponse.ok) return { ready: false, reason: `wallet-http-${appResponse.status}` };
+    if (!appResponse.ok) return notReady(`wallet-http-${appResponse.status}`);
     const runtimeType = runtimeResponse.headers.get('content-type') || '';
     await runtimeResponse.body?.cancel();
     if (!runtimeResponse.ok || !runtimeType.includes('javascript')) {
-      return { ready: false, reason: `runtime-http-${runtimeResponse.status}` };
+      return notReady(`runtime-http-${runtimeResponse.status}`);
     }
     const watchtower = await readObject(watchtowerResponse);
     if (!watchtowerResponse.ok || watchtower['ok'] !== true) {
-      return { ready: false, reason: `watchtower-http-${watchtowerResponse.status}` };
+      return notReady(`watchtower-http-${watchtowerResponse.status}`);
     }
     for (const webUrl of input.relayWebUrls) {
       const relay = await probeRelayChallenge(webUrl);
       if (!relay.ready) {
-        return { ready: false, reason: `${webUrl}:${relay.reason}` };
+        return notReady(`${webUrl}:${relay.reason}`, relay.fatal);
       }
       const faucet = await probeOffchainFaucetPipe(webUrl);
       if (!faucet.ready) {
-        return { ready: false, reason: `${webUrl}:${faucet.reason}` };
+        return notReady(`${webUrl}:${faucet.reason}`, faucet.fatal);
       }
     }
     return { ready: true };
   } catch (error) {
-    return {
-      ready: false,
-      reason: error instanceof Error ? error.message : String(error),
-    };
+    return notReady(error instanceof Error ? error.message : String(error));
   }
+};
+
+type DevReadyWaitDeps = {
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+  probe: (input: DevReadyProbe) => Promise<DevReadyResult>;
+};
+
+const defaultWaitDeps: DevReadyWaitDeps = {
+  now: Date.now,
+  sleep: Bun.sleep,
+  probe: probeDevReady,
+};
+
+export const waitForDevReady = async (
+  input: DevReadyProbe,
+  timeoutMs: number,
+  deps: DevReadyWaitDeps = defaultWaitDeps,
+  onProgress: (progress: DevStartupProgress) => void = () => {},
+): Promise<DevReadyWaitOutcome> => {
+  const probeStartedAtMs = deps.now();
+  const deadline = probeStartedAtMs + timeoutMs;
+  let lastReason = 'not-started';
+  while (deps.now() < deadline) {
+    const result = await deps.probe(input);
+    if (result.ready) {
+      const now = deps.now();
+      return {
+        ready: true,
+        totalElapsedMs: now - input.startedAtMs,
+        probeElapsedMs: now - probeStartedAtMs,
+      };
+    }
+    lastReason = result.reason;
+    const pendingAtMs = deps.now();
+    onProgress({
+      reason: result.reason,
+      totalElapsedMs: pendingAtMs - input.startedAtMs,
+      probeElapsedMs: pendingAtMs - probeStartedAtMs,
+    });
+    if (result.fatal) {
+      const now = deps.now();
+      return {
+        ready: false,
+        reason: result.reason,
+        fatal: true,
+        totalElapsedMs: now - input.startedAtMs,
+        probeElapsedMs: now - probeStartedAtMs,
+      };
+    }
+    await deps.sleep(Math.min(1_000, Math.max(1, deadline - deps.now())));
+  }
+  const now = deps.now();
+  return {
+    ready: false,
+    reason: lastReason,
+    fatal: false,
+    totalElapsedMs: now - input.startedAtMs,
+    probeElapsedMs: now - probeStartedAtMs,
+  };
 };
 
 const flags = new Map<string, string>();
@@ -246,23 +325,23 @@ if (import.meta.main) {
     startedAtMs: numberFlag('--started-at-ms'),
   };
   const timeoutMs = numberFlag('--timeout-ms');
-  const deadline = Date.now() + timeoutMs;
-  let lastReason = 'not-started';
-  let ready = false;
-  while (Date.now() < deadline) {
-    const result = await probeDevReady(input);
-    if (result.ready) {
-      ready = true;
-      break;
-    }
-    lastReason = result.reason;
-    await Bun.sleep(1_000);
-  }
-  const elapsedMs = Date.now() - input.startedAtMs;
-  if (!ready) {
-    console.error(`DEV_NOT_READY elapsedMs=${elapsedMs} reason=${lastReason}`);
+  let progressState = initialDevStartupProgressState();
+  const outcome = await waitForDevReady(input, timeoutMs, defaultWaitDeps, progress => {
+    const reduced = reduceDevStartupProgress(progressState, progress);
+    progressState = reduced.state;
+    if (reduced.line) console.log(reduced.line);
+  });
+  if (!outcome.ready) {
+    console.error(
+      `DEV_NOT_READY totalElapsedMs=${outcome.totalElapsedMs} ` +
+      `probeElapsedMs=${outcome.probeElapsedMs} fatal=${String(outcome.fatal)} ` +
+      `reason=${outcome.reason}`,
+    );
     process.exit(1);
   }
-  console.log(`DEV_READY elapsedMs=${elapsedMs} wallet=${input.webUrl}/app api=${input.apiUrl}`);
+  console.log(
+    `DEV_READY totalElapsedMs=${outcome.totalElapsedMs} ` +
+    `probeElapsedMs=${outcome.probeElapsedMs} wallet=${input.webUrl}/app api=${input.apiUrl}`,
+  );
   await waitForShutdown();
 }

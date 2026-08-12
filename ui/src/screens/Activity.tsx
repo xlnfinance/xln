@@ -38,6 +38,14 @@ export function formatEventAmount(event: ActivityEventView): string | null {
 /** User-relevant money movements; consensus internals stay in dev tools. */
 export const USER_ACTIVITY_TYPES = ['payment', 'htlc', 'swap', 'cross_swap', 'settlement', 'account'];
 
+// Swap handlers emit both a raw internal log line and a structured, formatted
+// entry for the same frame — hide the raw duplicate so each swap action shows once.
+const RAW_SWAP_LOG = /^(?:📊 Swap offer|📨 Swap cancel requested)/;
+
+export function isDisplayableActivityEvent(event: ActivityEventView): boolean {
+	return !RAW_SWAP_LOG.test(String(event.title || ''));
+}
+
 const ALL = 'all';
 
 function FilterChips({
@@ -96,7 +104,9 @@ export function ActivityScreen() {
 	});
 
 	const events = (activity.data?.events ?? []).filter(
-		event => accountFilter === ALL || (event.counterpartyId ?? '').toLowerCase() === accountFilter,
+		event =>
+			(accountFilter === ALL || (event.counterpartyId ?? '').toLowerCase() === accountFilter) &&
+			isDisplayableActivityEvent(event),
 	);
 
 	const entityOptions = [

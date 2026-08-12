@@ -20,7 +20,6 @@ type SpecializedEntityTxType =
   | 'chat'
   | 'consensusOutput'
   | 'entityCommand'
-  | 'htlcOnionAdvance'
   | 'htlcPayment'
   | 'materializeCrossJurisdictionClear'
   | 'materializeCrossJurisdictionSwap'

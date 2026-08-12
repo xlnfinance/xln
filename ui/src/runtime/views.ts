@@ -120,9 +120,70 @@ export function usePortfolio(core: EntityCoreView | null, accounts: AccountView[
 	}, [core, accounts]);
 }
 
-export function displayEntityName(core: EntityCoreView | null, fallbackId: string | null): string {
+export type SwapOfferView = {
+	counterpartyId: string;
+	offerId: string;
+	giveTokenId: number;
+	giveAmount: bigint;
+	wantTokenId: number;
+	wantAmount: bigint;
+	priceTicks: bigint;
+	createdHeight: number;
+	mine: boolean;
+};
+
+type SwapOfferDoc = {
+	offerId: string;
+	giveTokenId: number;
+	giveAmount: bigint;
+	wantTokenId: number;
+	wantAmount: bigint;
+	priceTicks: bigint;
+	createdHeight: number;
+	makerIsLeft: boolean;
+};
+
+type AccountDocWithOffers = AccountDoc & { state: { swapOffers?: Map<string, SwapOfferDoc> } };
+type AccountsPageWithOffers = { items: AccountDocWithOffers[] };
+
+/** Open swap offers across every bilateral account, newest first. */
+export function useOpenSwapOffers(entityId: string | null): { offers: SwapOfferView[]; loading: boolean } {
+	const read = useAdapterRead<AccountsPageWithOffers>(entityId ? `entity/${entityId}/accounts` : null);
+
+	const offers = useMemo<SwapOfferView[]>(() => {
+		if (!read.data?.items || !entityId) return [];
+		const self = entityId.toLowerCase();
+		const out: SwapOfferView[] = [];
+		for (const doc of read.data.items) {
+			const left = String(doc.state?.leftEntity || '').toLowerCase();
+			const right = String(doc.state?.rightEntity || '').toLowerCase();
+			if (!left || !right) continue;
+			const counterpartyId = left === self ? right : left;
+			const isLeft = left === self;
+			for (const offer of doc.state?.swapOffers?.values?.() ?? []) {
+				out.push({
+					counterpartyId,
+					offerId: offer.offerId,
+					giveTokenId: offer.giveTokenId,
+					giveAmount: offer.giveAmount,
+					wantTokenId: offer.wantTokenId,
+					wantAmount: offer.wantAmount,
+					priceTicks: offer.priceTicks,
+					createdHeight: offer.createdHeight,
+					mine: offer.makerIsLeft === isLeft,
+				});
+			}
+		}
+		out.sort((a, b) => b.createdHeight - a.createdHeight);
+		return out;
+	}, [read.data, entityId]);
+
+	return { offers, loading: read.loading };
+}
+
+export function displayEntityName(core: EntityCoreView | null, entityId: string | null): string {
 	const name = String(core?.profile?.name || '').trim();
 	if (name) return name;
-	const id = String(fallbackId || '');
+	const id = String(entityId || '');
 	return id ? `${id.slice(0, 8)}…` : '—';
 }

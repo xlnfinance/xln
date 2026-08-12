@@ -6,12 +6,11 @@ import {
 import { deserializeTaggedJson, serializeTaggedJson } from '../../../protocol/serialization';
 import { XLN_PROTOCOL_VERSION, type XlnProtocolVersion } from '../../../protocol/version';
 import {
-  normalizeMarketEntityId,
-  normalizeMarketPairId,
   RPC_MARKET_MAX_DEPTH,
   type MarketSideLevel,
   type MarketSnapshotPayload,
 } from './snapshot';
+import { normalizeMarketEntityId, normalizeMarketPairId } from './identifiers';
 
 export type MarketMessageType =
   | 'market_subscribe'

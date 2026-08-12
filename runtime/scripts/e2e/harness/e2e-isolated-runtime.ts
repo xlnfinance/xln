@@ -5,6 +5,15 @@ import { freemem, loadavg, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { compareStableText } from '../../../protocol/serialization';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
+import type {
+  QaCodeFingerprint,
+  QaPerfChildSample,
+  QaPerfSample,
+  QaPerfSummary,
+} from '../../../qa/types';
+export type { QaPerfSummary } from '../../../qa/types';
+
+export type E2ECodeFingerprint = QaCodeFingerprint & { buildInputHash: string };
 
 /**
  * Resource isolation and candidate-identity primitives for the E2E runner.
@@ -98,48 +107,6 @@ export const deriveE2EShardPaths = (runRoot: string, shard: number): E2EShardPat
   };
 };
 
-export type QaCodeFingerprint = {
-  gitHead: string | null;
-  gitBranch: string | null;
-  gitStatus: string;
-  dirty: boolean;
-  codeHash: string;
-  buildInputHash: string;
-  computedAt: number;
-  trackedFileCount: number;
-  trackedBytes: number;
-};
-
-type QaPerfChildSample = {
-  name: string;
-  pid: number;
-  cpuPct: number;
-  memPct: number;
-  rssKb: number;
-};
-
-type QaPerfSample = {
-  ts: number;
-  load1: number;
-  load5: number;
-  load15: number;
-  freeMemBytes: number;
-  totalMemBytes: number;
-  runnerRssBytes: number;
-  children: QaPerfChildSample[];
-};
-
-export type QaPerfSummary = {
-  sampleCount: number;
-  avgLoad1: number;
-  peakLoad1: number;
-  minFreeMemBytes: number;
-  maxRunnerRssBytes: number;
-  maxChildCpuPct: number;
-  maxChildRssKb: number;
-  samples: QaPerfSample[];
-};
-
 const spawnText = (cmd: string, args: string[]): string => {
   const result = spawnSync(cmd, args, {
     cwd: process.cwd(),
@@ -231,7 +198,7 @@ export const computeE2ESourceDriftProbe = (files: readonly string[], root = proc
 export const computeRepositorySourceDriftProbe = (): string =>
   computeE2ESourceDriftProbe(listRepositorySourceFiles().filter(isE2ECodeInputPath));
 
-export const computeCodeFingerprint = (): QaCodeFingerprint => {
+export const computeCodeFingerprint = (): E2ECodeFingerprint => {
   const gitHead = spawnText('git', ['rev-parse', 'HEAD']) || null;
   const gitBranch = spawnText('git', ['rev-parse', '--abbrev-ref', 'HEAD']) || null;
   const gitStatus = spawnText('git', ['status', '--short', '--untracked-files=all']);

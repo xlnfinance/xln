@@ -22,10 +22,12 @@ import {
   type RuntimeProcessProfile,
 } from './process-profile';
 import { assertCrossJLocalCohorts } from '../routing/cross-j-topology';
+import type { EntityInfraContext } from '../../types/entity/infra-context';
 
 const runtimeLog = createStructuredLogger('runtime');
 
 export type RuntimeInputApplyResult = {
+  entityContexts: Map<string, EntityInfraContext>;
   entityOutbox: RoutedEntityInput[];
   jOutbox: JInput[];
   appliedRuntimeInput: RuntimeInput;
@@ -58,22 +60,6 @@ const collectChangedEntityIds = (
     entityInput.entityId ? [entityInput.entityId.toLowerCase()] : []),
 ]);
 
-const queueProfileCertification = (
-  env: RuntimeReplica,
-  changedEntityIds: ReadonlySet<string>,
-): void => {
-  const state = env.infrastructure!;
-  const candidates = state.pendingProfileCertificationEntityIds ?? new Set<string>();
-  for (const entityId of changedEntityIds) {
-    const certified = [...env.state.eReplicas.values()].some(
-      replica =>
-        replica.entityId.toLowerCase() === entityId &&
-        Boolean(replica.state.profileEncryptionManifest),
-    );
-    if (!certified) candidates.add(entityId);
-  }
-  state.pendingProfileCertificationEntityIds = candidates;
-};
 
 const recordApplyEgress = (
   profile: RuntimeProcessProfile,
@@ -142,13 +128,15 @@ export const applyPreparedRuntimeFrame = async (
       jOutbox = split.maintenance;
       appliedInput = cloneIsolatedRuntimeInput(result.appliedRuntimeInput);
       frame.reliableIngressCommits = result.reliableIngressCommits;
+      frame.entityContexts = new Map(
+        [...result.entityContexts].map(([replicaId, context]) => [replicaId, structuredClone(context)]),
+      );
       frame.immediateReliableReceiptDeliveries = result.immediateReliableReceipts;
       refreshScheduledWakeIndex(
         env,
         new Set(input.entityInputs.map(entityInput => entityInput.entityId.toLowerCase())),
       );
       changedEntityIds = collectChangedEntityIds(input, result.appliedRuntimeInput);
-      queueProfileCertification(env, changedEntityIds);
       profile.mark('fingerprints');
     } finally {
       deps.setApplyAllowed(env, false);

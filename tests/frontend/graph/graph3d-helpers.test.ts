@@ -26,11 +26,9 @@ const USDC_DECIMALS = 6;
 const getUsdcDecimals = (): number => USDC_DECIMALS;
 
 describe('graph3d helpers', () => {
-  test('finds J replicas in canonical maps and legacy arrays', () => {
+  test('finds J replicas only in the canonical map', () => {
     const tron = { name: 'Tron', blockNumber: 9n };
     expect(findGraphJReplica(new Map([['Tron', tron]]), 'Tron')).toBe(tron);
-    expect(findGraphJReplica([tron], 'Tron')).toBe(tron);
-    expect(findGraphJReplica([['Tron', tron]], 'Tron')).toBe(tron);
     expect(findGraphJReplica(new Map([['Tron', tron]]), 'Testnet')).toBeUndefined();
   });
 

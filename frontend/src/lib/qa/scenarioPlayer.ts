@@ -168,12 +168,12 @@ const pushVideoCue = (
 const pushAuthoredVideoCue = (
   cues: QaScenarioCue[],
   step: QaAuthoredScenarioStep,
-  fallback?: QaScenarioStep,
+  referenceStep?: QaScenarioStep,
 ): boolean => {
-  const fallbackStartMs = hasVideoTiming(fallback) ? Number(fallback.startMs) : null;
-  const fallbackEndMs = hasVideoTiming(fallback) ? Number(fallback.endMs) : null;
-  const startMs = Number.isFinite(Number(step.startMs)) ? Number(step.startMs) : fallbackStartMs;
-  const endMs = Number.isFinite(Number(step.endMs)) ? Number(step.endMs) : fallbackEndMs;
+  const referenceStartMs = hasVideoTiming(referenceStep) ? Number(referenceStep.startMs) : null;
+  const referenceEndMs = hasVideoTiming(referenceStep) ? Number(referenceStep.endMs) : null;
+  const startMs = Number.isFinite(Number(step.startMs)) ? Number(step.startMs) : referenceStartMs;
+  const endMs = Number.isFinite(Number(step.endMs)) ? Number(step.endMs) : referenceEndMs;
   if (startMs === null || endMs === null || endMs < startMs) return false;
   const durationMs = Number.isFinite(Number(step.ms)) ? Number(step.ms) : endMs - startMs;
   const title = cleanScenarioText(step.title) || 'Browser Step';

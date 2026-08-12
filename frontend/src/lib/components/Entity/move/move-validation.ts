@@ -41,8 +41,8 @@ export type MoveValidationContext = {
   allowanceRaw: bigint | null;
 };
 
-function validationErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
+function validationErrorMessage(error: unknown, defaultMessage: string): string {
+  return error instanceof Error && error.message ? error.message : defaultMessage;
 }
 
 export function getMoveValidationErrorForContext(context: MoveValidationContext): string | null {

@@ -59,11 +59,11 @@ export function formatSwapTokenAmountForInput(amount: bigint, tokenDecimals: num
   return frac.length > 0 ? `${whole}.${frac}` : whole;
 }
 
-export function parseSwapDisplayPriceTicks(displayPrice: string, fallbackPriceTicks: bigint): bigint {
+export function parseSwapDisplayPriceTicks(displayPrice: string, defaultPriceTicks: bigint): bigint {
   const normalized = normalizeDisplayPriceForInput(displayPrice);
   const ticks = parseDecimalAmountToBigInt(normalized, ORDERBOOK_PRICE_DECIMALS);
-  if (ticks <= 0n) return fallbackPriceTicks;
-  return ticks > 0n ? ticks : fallbackPriceTicks;
+  if (ticks <= 0n) return defaultPriceTicks;
+  return ticks > 0n ? ticks : defaultPriceTicks;
 }
 
 export function computePriceDeviationBps(limitTicks: bigint, referenceTicks: bigint): bigint {

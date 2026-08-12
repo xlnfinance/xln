@@ -38,6 +38,7 @@ export const buildRecoveryJournalFromStorageFrame = (
   replicaMetaCheckpoint: frame.replicaMetaCheckpoint,
   replicaMetaStateMode: frame.replicaMetaStateMode,
   runtimeInput: frame.runtimeInput,
+  entityContexts: structuredClone(frame.entityContexts),
   ...(frame.pendingRuntimeInput
     ? { pendingRuntimeInput: cloneIsolatedRuntimeInput(frame.pendingRuntimeInput) }
     : {}),

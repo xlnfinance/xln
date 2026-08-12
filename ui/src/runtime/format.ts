@@ -2,15 +2,15 @@ import { peekXLN } from './xln-loader';
 
 export type TokenMeta = { symbol: string; name: string; decimals: number; color: string };
 
-const FALLBACK_TOKEN: TokenMeta = { symbol: '?', name: 'Unknown', decimals: 18, color: '#888888' };
+const UNKNOWN_TOKEN: TokenMeta = { symbol: '?', name: 'Unknown', decimals: 18, color: '#888888' };
 
 export function getTokenMeta(tokenId: number): TokenMeta {
 	const xln = peekXLN();
-	if (!xln) return FALLBACK_TOKEN;
+	if (!xln) return UNKNOWN_TOKEN;
 	try {
 		return xln.getTokenInfo(tokenId);
 	} catch {
-		return FALLBACK_TOKEN;
+		return UNKNOWN_TOKEN;
 	}
 }
 

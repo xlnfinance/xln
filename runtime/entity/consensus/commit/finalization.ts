@@ -234,6 +234,9 @@ export const finalizeCommitNotification = async (
   if (!proof.accepted) return proof.result;
   attachCommitProofsAndOutputs(context, frame, execution, proof.hankos);
   installCommittedState(context, frame, execution, proof.hankos);
+  // Runtime persists the exact proposer-observed context committed by this
+  // frame. A validator must never reconstruct it from its own live gossip.
+  context.entityContext = structuredClone(frame.entityContext);
   if (options.broadcastCommit) {
     const precommitSigners = [...signaturesBySigner.keys()];
     entityLog.debug('commit.notify_validators', {

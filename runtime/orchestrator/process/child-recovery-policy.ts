@@ -46,7 +46,7 @@ export const shouldCaptureUnexpectedChildExit = (
 export const selectChildFailureReason = (
   recentStderr: readonly string[],
   recentStdout: readonly string[],
-  fallback: string,
+  defaultValue: string,
 ): string => {
   const hasStableCode = (line: string): boolean => /\b(?:[A-Z][A-Z0-9]*_)+[A-Z0-9]+\b/.test(line);
   const hasCriticalMessage = (line: string): boolean =>
@@ -63,7 +63,7 @@ export const selectChildFailureReason = (
     ?? [...recentStdout].reverse().find(isMeaningful)
     ?? lastNonNoise(recentStderr)
     ?? lastNonNoise(recentStdout)
-    ?? fallback;
+    ?? defaultValue;
 };
 
 export const decideChildFailure = (

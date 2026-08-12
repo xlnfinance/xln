@@ -13,6 +13,7 @@ import type { JurisdictionConfig, TowerAppointmentV1 } from '../../../api/public
 import { decodeStoredLookupDoc } from '../../../watchtower/store/decode';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../../watchtower/standalone-server';
 import { createTestJReplica } from '../../helpers/j-replica';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const servers: StandaloneWatchtowerServer[] = [];
@@ -70,8 +71,7 @@ const createRuntimeAppointment = async () => {
   const jurisdiction = installJurisdiction(env);
   const entityId = generateLazyEntityId([runtimeId], 1n, env).toLowerCase();
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId: runtimeId,
       data: {
@@ -85,7 +85,7 @@ const createRuntimeAppointment = async () => {
         isProposer: true,
         profileName: 'Watchtower HTTP',
       },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env);
@@ -413,13 +413,13 @@ describe('standalone watchtower service', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         ...appointment,
-        towerMode: 'legacy_mode',
+        towerMode: 'invalid_mode',
       }),
     });
     expect(response.status).toBe(400);
     const payload = await response.json() as { ok: boolean; error?: string };
     expect(payload.ok).toBe(false);
-    expect(String(payload.error || '')).toContain('TOWER_MODE_INVALID:legacy_mode');
+    expect(String(payload.error || '')).toContain('TOWER_MODE_INVALID:invalid_mode');
   });
 
   test('rejects unknown tower mode in the store path', async () => {
@@ -437,8 +437,8 @@ describe('standalone watchtower service', () => {
     const { appointment } = await createRuntimeAppointment();
     await expect(server.store.upsertAppointment({
       ...appointment,
-      towerMode: 'legacy_mode',
-    } as TowerAppointmentV1)).rejects.toThrow('TOWER_MODE_INVALID:legacy_mode');
+      towerMode: 'invalid_mode',
+    } as TowerAppointmentV1)).rejects.toThrow('TOWER_MODE_INVALID:invalid_mode');
   });
 
   test('rejects oversized JSON bodies before request handling', async () => {

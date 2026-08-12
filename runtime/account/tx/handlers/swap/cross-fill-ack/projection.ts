@@ -81,7 +81,7 @@ const recordCrossFillHistory = (
   outcome: FillOutcome,
   height: number,
 ): void => {
-  const { account, tx, offer } = prepared;
+  const { account, tx } = prepared;
   recordSwapResolveLifecycle(
     account,
     tx.data.offerId,
@@ -101,14 +101,6 @@ const recordCrossFillHistory = (
       executionWantAmount:
         tx.data.executionTargetAmount ?? fill.incrementalTargetAmount,
       ...(tx.data.comment ? { comment: tx.data.comment } : {}),
-    },
-    {
-      giveTokenId: offer.giveTokenId,
-      giveAmount: outcome.sourceTotal,
-      wantTokenId: offer.wantTokenId,
-      wantAmount: outcome.targetTotal,
-      priceTicks: offer.priceTicks,
-      createdHeight: offer.createdHeight,
     },
   );
 };

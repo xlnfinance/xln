@@ -47,7 +47,6 @@ const account = (tokenDelta?: Delta): AccountState => ({
   deltas: new Map(tokenDelta ? [[tokenDelta.tokenId, tokenDelta]] : []),
   locks: new Map(),
   swapOffers: new Map(),
-  globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
   currentHeight: 1,
   pendingSignatures: [],
   rollbackCount: 0,

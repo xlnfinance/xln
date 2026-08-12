@@ -99,7 +99,7 @@ export type QaCodeFingerprint = {
   trackedBytes: number;
 };
 
-type QaPerfChildSample = {
+export type QaPerfChildSample = {
   name: string;
   pid: number;
   cpuPct: number;
@@ -107,7 +107,7 @@ type QaPerfChildSample = {
   rssKb: number;
 };
 
-type QaPerfSample = {
+export type QaPerfSample = {
   ts: number;
   load1: number;
   load5: number;

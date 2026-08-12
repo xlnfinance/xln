@@ -57,16 +57,16 @@ import {
 import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../entity/tx/j-events-htlc/route-lifecycle';
 
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../../../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 
 import { isLeftEntity } from '../../../entity/id';
 
 import {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
   MAX_PENDING_CROSS_J_FILL_ACKS,
-  applyEntityFrame,
   applyEntityInput,
 } from '../../../entity/consensus/index';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 
 import { createEntityFrameHash } from '../../../entity/consensus/frame';
 
@@ -243,11 +243,6 @@ import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/codec/onion-layer
 
 import { encodeHtlcSecretOffer, encodeOnionLayer } from '../../../protocol/htlc/codec/onion';
 
-import {
-  computeEntityProfileCertificationHash,
-  computeValidatorEncryptionAttestationDigest,
-  requireCompleteValidatorEncryptionManifest,
-} from '../../../protocol/htlc/validator-encryption';
 
 import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bootstrap-fail-fast';
 
@@ -372,7 +367,6 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       deltas: new Map(),
       locks: new Map(),
       swapOffers: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -383,6 +377,8 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
     },
     status: 'active',
     mempool: [...mempool],
+    swapOrderHistory: new Map(),
+    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -609,6 +605,7 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
 
 const makeEntityState = (entityId: string): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
@@ -1068,11 +1065,10 @@ describe('audit fail-fast regressions', () => {
       const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
       const state = makeEntityState(entityId);
       state.config = makeSingleSignerConfigFor(signerId);
-      const localKeys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
+      state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId);
       env.state.eReplicas.set(`${entityId}:${signerId}`, {
         entityId,
         signerId,
-        entityEncPubKey: localKeys.publicKey,
         mempool: [],
         isProposer: true,
         state,
@@ -1113,7 +1109,6 @@ describe('audit fail-fast regressions', () => {
     const localRetryTypes = (local.env.runtimeMempool?.entityInputs ?? [])
       .flatMap(input => input.entityTxs?.map(tx => tx.type) ?? []);
     expect(localRetryTypes).toContain('definitely_unknown_entity_tx');
-    expect(localRetryTypes).toContain('certifyProfile');
 
     const malformed = new RuntimeEntityInputApplyError(
       {
@@ -1241,10 +1236,9 @@ describe('audit fail-fast regressions', () => {
     const invariantRetryTypes = (invariant.env.runtimeMempool?.entityInputs ?? [])
       .flatMap(input => input.entityTxs?.map(tx => tx.type) ?? []);
     expect(invariantRetryTypes).not.toContain('entityCommand');
-    expect(invariantRetryTypes).not.toContain('certifyProfile');
   });
 
-  test('local signer resolution prefers an available local signer over stale config validator fallback', () => {
+  test('local signer resolution prefers an available local signer over a stale configured validator', () => {
     const env = createEmptyEnv('local-signer-resolution-stale-config');
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
@@ -1262,71 +1256,6 @@ describe('audit fail-fast regressions', () => {
     });
 
     expect(resolveEntityProposerId(env, entityId, 'audit')).toBe(actualSignerId);
-  });
-
-  test('local signer resolution prefers an available local signer over stale gossip board fallback', () => {
-    const env = createEmptyEnv('local-signer-resolution-stale-gossip');
-    env.scenarioMode = false;
-    env.quietRuntimeLogs = true;
-    const { entityId, signerId: actualSignerId } = registerLazySigner('local-signer-resolution-stale-gossip', 'actual');
-    const staleGossipSignerId = `0x${'9b'.repeat(20)}`;
-    const state = makeEntityState(entityId);
-    state.config = makeSingleSignerConfigFor(actualSignerId);
-    env.state.eReplicas.set(`${entityId}:${actualSignerId}`, {
-      entityId,
-      signerId: actualSignerId,
-      entityEncPubKey: '',
-      mempool: [],
-      isProposer: true,
-      state,
-    });
-    env.gossip = {
-      getProfiles: () => [
-        {
-          entityId,
-          metadata: {
-            board: {
-              validators: [{ signerId: staleGossipSignerId }],
-            },
-          },
-        },
-      ],
-    } as RuntimeReplica['gossip'];
-
-    expect(resolveEntityProposerId(env, entityId, 'audit')).toBe(actualSignerId);
-  });
-
-  test('remote signer resolution trusts gossip board over imported replica signer fallback', () => {
-    const env = createEmptyEnv('remote-signer-resolution-gossip-board');
-    env.scenarioMode = false;
-    env.quietRuntimeLogs = true;
-    const entityId = `0x${'9d'.repeat(32)}`;
-    const importedUserSignerId = `0x${'9e'.repeat(20)}`;
-    const hubSignerId = `0x${'9f'.repeat(20)}`;
-    const state = makeEntityState(entityId);
-    state.config = makeSingleSignerConfigFor(importedUserSignerId);
-    env.state.eReplicas.set(`${entityId}:${importedUserSignerId}`, {
-      entityId,
-      signerId: importedUserSignerId,
-      entityEncPubKey: '',
-      mempool: [],
-      isProposer: false,
-      state,
-    } as unknown as EntityReplica);
-    env.gossip = {
-      getProfiles: () => [
-        {
-          entityId,
-          metadata: {
-            board: {
-              validators: [{ signerId: hubSignerId }],
-            },
-          },
-        },
-      ],
-    } as RuntimeReplica['gossip'];
-
-    expect(resolveEntityProposerId(env, entityId, 'remote-output')).toBe(hubSignerId);
   });
 
   test('sparse WAL replay resolves an Account output from its atomically stored signer witness', () => {
@@ -2064,7 +1993,7 @@ describe('audit fail-fast regressions', () => {
     );
     env.overlay = [];
     if (env.infrastructure) env.infrastructure.currentStorageOverlayMarks = [];
-    await expect(applyEntityFrame(env, state, frameTxs, frameTimestamp)).rejects.toThrow(
+    await expect(applyEntityFrameWithMaterializedTestInfraContext(env, state, frameTxs, frameTimestamp)).rejects.toThrow(
       'ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx',
     );
 
@@ -2085,7 +2014,7 @@ describe('audit fail-fast regressions', () => {
     env.overlay = [];
     if (env.infrastructure) env.infrastructure.currentStorageOverlayMarks = [];
 
-    const applied = await applyEntityFrame(env, state, frameTxs, env.state.timestamp);
+    const applied = await applyEntityFrameWithMaterializedTestInfraContext(env, state, frameTxs, env.state.timestamp);
 
     expect(readEntityFrameEventMessages(applied.newState)).toHaveLength(1);
     expect(applied.storageChanges).toContainEqual({ family: 'entity', entityId: state.entityId });

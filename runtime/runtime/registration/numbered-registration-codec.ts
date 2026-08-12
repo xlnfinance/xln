@@ -11,6 +11,7 @@ import type {
   RuntimeReplica,
 } from '../types';
 import { createLazyEntity, encodeBoard, hashBoard } from '../../entity/factory';
+import { canonicalEntitySeed } from './entity-creation';
 
 export type { NumberedRegistrationDefinition } from '../types';
 
@@ -107,6 +108,11 @@ export const assertNumberedRegistrationRequest = (env: RuntimeReplica, request: 
       if (!entity.config.validators.some(validator => validator.toLowerCase() === localSignerId)) {
         throw new Error(`NUMBERED_REGISTRATION_LOCAL_SIGNER_NOT_ON_BOARD:${index}`);
       }
+      if (canonicalEntitySeed(entity.entitySeed) !== entity.entitySeed) {
+        throw new Error(`NUMBERED_REGISTRATION_ENTITY_SEED_NON_CANONICAL:${index}`);
+      }
+    } else if (entity.entitySeed !== null) {
+      throw new Error(`NUMBERED_REGISTRATION_PAYER_ONLY_SEED_FORBIDDEN:${index}`);
     }
     if (entity.position && ![entity.position.x, entity.position.y, entity.position.z].every(Number.isFinite)) {
       throw new Error(`NUMBERED_REGISTRATION_POSITION_INVALID:${index}`);
@@ -155,13 +161,17 @@ export const buildNumberedRegistrationRequest = (
     entityProviderAddress: address(input.jurisdiction.entityProviderAddress, 'ENTITY_PROVIDER'),
     entities: input.entities.map(entity => {
       const config = createLazyEntity(entity.name, entity.validators, entity.threshold, input.jurisdiction, env).config;
+      const ownership = entity.localSignerId === null
+        ? { localSignerId: null, entitySeed: null }
+        : {
+            localSignerId: address(entity.localSignerId, 'LOCAL_SIGNER'),
+            entitySeed: canonicalEntitySeed(entity.entitySeed),
+          };
       return {
         name: entity.name,
         boardHash: hashBoard(encodeBoard(config, env)).toLowerCase(),
         config,
-        localSignerId: entity.localSignerId === null
-          ? null
-          : address(entity.localSignerId, 'LOCAL_SIGNER'),
+        ...ownership,
         ...(entity.profileName ? { profileName: entity.profileName } : {}),
         ...(entity.position ? { position: structuredClone(entity.position) } : {}),
       };

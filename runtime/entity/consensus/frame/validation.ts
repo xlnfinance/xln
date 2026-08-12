@@ -10,6 +10,10 @@ import type { EntityLeaderTimeoutVote, EntityFrame } from '../../types';
 import { validateEntityTxs } from '../../tx-validation';
 import { assertEntityFrameEventByteBudget } from './events';
 import { validateJPrefixCertificate } from '../jurisdiction/prefix-validation';
+import { validateEntityInfraContext } from './infra-context-validation';
+import { assertEntityFrameTotalByteBudget } from '../frame';
+import { LIMITS } from '../../../config/constants';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 
 const rejectUnexpectedKeys = (
   value: Record<string, unknown>,
@@ -158,15 +162,15 @@ const validateFrameEvents = (
   return decoded;
 };
 
-function assertProposedEntityFrame(
+const validateFrameIdentityAndContext = (
   frame: Record<string, unknown>,
   context: string,
-): asserts frame is Record<string, unknown> & EntityFrame {
+): ReturnType<typeof validateEntityInfraContext> => {
   rejectUnexpectedKeys(
     frame,
     [
       'height', 'parentFrameHash', 'stateRoot', 'authorityRoot', 'timestamp',
-      'txs', 'events', 'hash', 'leader', 'jPrefixCertificate',
+      'entityContext', 'txs', 'events', 'hash', 'leader', 'jPrefixCertificate',
       'hashesToSign', 'collectedSigs', 'hankos',
     ],
     context,
@@ -187,16 +191,40 @@ function assertProposedEntityFrame(
       `${context}.timestamp must be a non-negative safe integer`,
     );
   }
-  validateEntityTxs(frame['txs'], `${context}.txs`);
-  validateFrameEvents(frame['events'], `${context}.events`);
-  validateString(frame['hash'], `${context}.hash`);
-  const leader = validateObject(frame['leader'], `${context}.leader`);
+  let entityContext;
+  try {
+    entityContext = validateEntityInfraContext(frame['entityContext']);
+  } catch (error) {
+    throw new FinancialDataCorruptionError(
+      `${context}.entityContext invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (
+    entityContext.height !== Number(frame['height']) ||
+    entityContext.parentFrameHash !== String(frame['parentFrameHash'])
+  ) {
+    throw new FinancialDataCorruptionError(`${context}.entityContext binding mismatch`);
+  }
+  return entityContext;
+};
+
+const validateFrameLeader = (
+  value: unknown,
+  entityContext: ReturnType<typeof validateEntityInfraContext>,
+  context: string,
+): void => {
+  const leader = validateObject(value, `${context}.leader`);
   rejectUnexpectedKeys(
     leader,
     ['proposerSignerId', 'view', 'certificate', 'relayCertificate'],
     `${context}.leader`,
   );
   validateString(leader['proposerSignerId'], `${context}.leader.proposerSignerId`);
+  if (
+    entityContext.proposerSignerId !== String(leader['proposerSignerId'])
+  ) {
+    throw new FinancialDataCorruptionError(`${context}.entityContext proposer mismatch`);
+  }
   const view = validateNumber(leader['view'], `${context}.leader.view`);
   if (!Number.isSafeInteger(view) || view < 0) {
     throw new FinancialDataCorruptionError(
@@ -215,6 +243,12 @@ function assertProposedEntityFrame(
       `${context}.leader.relayCertificate`,
     );
   }
+};
+
+const validateFrameOptionalEvidence = (
+  frame: Record<string, unknown>,
+  context: string,
+): void => {
   if (frame['jPrefixCertificate'] !== undefined) {
     validateJPrefixCertificate(
       frame['jPrefixCertificate'],
@@ -244,6 +278,18 @@ function assertProposedEntityFrame(
   if (frame['hankos'] !== undefined) {
     validateArray(frame['hankos'], `${context}.hankos`);
   }
+};
+
+function assertProposedEntityFrame(
+  frame: Record<string, unknown>,
+  context: string,
+): asserts frame is Record<string, unknown> & EntityFrame {
+  const entityContext = validateFrameIdentityAndContext(frame, context);
+  validateEntityTxs(frame['txs'], `${context}.txs`);
+  validateFrameEvents(frame['events'], `${context}.events`);
+  validateString(frame['hash'], `${context}.hash`);
+  validateFrameLeader(frame['leader'], entityContext, context);
+  validateFrameOptionalEvidence(frame, context);
 }
 
 const validateHashManifest = (value: unknown, context: string): void => {
@@ -268,5 +314,29 @@ export const validateProposedEntityFrame = (
 ): EntityFrame => {
   const frame = validateObject(value, context);
   assertProposedEntityFrame(frame, context);
+  try {
+    assertEntityFrameTotalByteBudget({
+      prevFrameHash: frame.parentFrameHash,
+      height: frame.height,
+      timestamp: frame.timestamp,
+      txs: frame.txs,
+      events: frame.events,
+      entityId: frame.entityContext.entityId,
+      stateRoot: frame.stateRoot,
+      authorityRoot: frame.authorityRoot,
+      entityContext: frame.entityContext,
+      ...(frame.jPrefixCertificate ? { jPrefixCertificate: frame.jPrefixCertificate } : {}),
+    });
+  } catch (error) {
+    throw new FinancialDataCorruptionError(
+      `${context} total byte limit invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const wireBytes = new TextEncoder().encode(encodeCanonicalConsensusValue(frame)).byteLength;
+  if (wireBytes > LIMITS.MAX_FRAME_SIZE_BYTES) {
+    throw new FinancialDataCorruptionError(
+      `${context} wire byte limit exceeded: ${wireBytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}`,
+    );
+  }
   return frame;
 };

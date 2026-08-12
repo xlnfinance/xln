@@ -9,6 +9,7 @@ import {
   signDigest,
 } from '../../account/crypto';
 import { buildSignedEntityCommand } from '../../entity/command';
+import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 import { signedEntityCommandTx } from '../../entity/command/command-codec';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
@@ -159,8 +160,7 @@ export const installPersistedProposalValidator = async (): Promise<{
   }));
   const signerId = durableProposalFixture.validators[1]!;
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId: durableProposalFixture.entityId,
       signerId,
       data: {
@@ -171,7 +171,7 @@ export const installPersistedProposalValidator = async (): Promise<{
         isProposer: false,
         profileName: 'proposal isolation validator',
       },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env, []);

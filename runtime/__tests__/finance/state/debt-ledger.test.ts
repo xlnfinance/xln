@@ -7,7 +7,7 @@ import { cloneEntityState } from '../../../entity/state-clone';
 import {
   applyJEventRange,
   buildJEventRangeData,
-  type LegacyJEventInput,
+  type TestJEventRangeInput,
 } from '../../helpers/j-history';
 import {
   applyDebtCreated,
@@ -49,6 +49,7 @@ const makeConfig = (signerId: string): ConsensusConfig => ({
 
 const makeState = (entityId: string, signerId: string): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
@@ -100,7 +101,7 @@ const makeJEventInput = (
   event: JurisdictionEvent,
   blockNumber: number,
   transactionHash: string,
-): LegacyJEventInput => {
+): TestJEventRangeInput => {
   const blockHash = `0x${String(blockNumber).padStart(64, '0')}`;
   const jurisdictionRef = getJEventJurisdictionRef(JURISDICTION);
   return {

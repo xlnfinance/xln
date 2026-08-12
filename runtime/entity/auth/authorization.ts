@@ -70,12 +70,10 @@ const protocolTxTypes = new Set<EntityTx['type']>([
   'scheduledWake',
   'j_event',
   'accountInput',
-  'certifyProfile',
 ]);
 
 const individualTxTypes = new Set<EntityTx['type']>([
   'chat',
-  'htlcOnionAdvance',
   'materializeCrossJurisdictionClear',
   'materializeCrossJurisdictionSwap',
   'propose',

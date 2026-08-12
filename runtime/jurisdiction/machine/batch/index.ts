@@ -351,7 +351,7 @@ export function createEmptyBatch(): JBatch {
 /**
  * J batches contain only plain objects, arrays, strings, booleans and BigInts.
  * A clone failure is corruption and must stop the frame. A hand-maintained
- * fallback would silently omit the next Solidity field and sign different
+ * omission would silently skip the next Solidity field and sign different
  * bytes from those submitted on-chain.
  */
 export const cloneJBatch = (batch: JBatch): JBatch => structuredClone(batch);
@@ -450,7 +450,7 @@ const estimatedArgumentBytes = (value: unknown): number =>
  * by the owner's Hanko. A malformed/over-budget outer wrapper therefore
  * becomes empty evidence; the signed ProofBody transformer alone decides
  * whether empty evidence is valid. Do not replace this with an outer revert or
- * zero-delta fallback: transformer code/revert/OOG/output remain strict and a
+ * zero-delta substitution: transformer code/revert/OOG/output remain strict and a
  * failure keeps the dispute active. Regression: dispute-arguments.test.ts.
  */
 export function sanitizeOptionalDisputeArgument(

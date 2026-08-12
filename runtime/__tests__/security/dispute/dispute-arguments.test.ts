@@ -51,7 +51,6 @@ function accountWithSwaps(swaps: Array<[string, SwapOffer]>): AccountReplica {
       locks: new Map(),
       pulls: new Map(),
       swapOffers: new Map(swaps),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),

@@ -119,7 +119,7 @@
         return hist[idx];
       }
     }
-    // Fallback to live state
+    // Without a selected historical frame, display the canonical live state.
     if ($runtimeFrameEnv && $runtimeFrameEnv.history && $runtimeFrameEnv.history.length > 0) {
       return $runtimeFrameEnv.history[$runtimeFrameEnv.history.length - 1];
     }

@@ -5,10 +5,11 @@ import {
   buildPreparedCrossJurisdictionRoute,
 } from '../../../extensions/cross-j/index';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../orderbook';
-import type { AccountReplica, AccountTx, Delta } from '../../../types/account';
+import type { AccountReplica, AccountTx, Delta, SwapOffer } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import { getPerfMs } from '../../../infra/time';
 import { createDefaultDelta } from '../../../account/state/delta';
+import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 
 type Cli = {
   swaps: number;
@@ -33,19 +34,19 @@ type RuntimeSwapBenchmarkResult = {
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 
-const argValue = (args: string[], name: string, fallback: string): string => {
+const argValue = (args: string[], name: string, defaultValue: string): string => {
   const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] ?? fallback : fallback;
+  return index >= 0 ? args[index + 1] ?? defaultValue : defaultValue;
 };
 
-const positiveInt = (args: string[], name: string, fallback: number): number => {
-  const value = Number.parseInt(argValue(args, name, String(fallback)), 10);
+const positiveInt = (args: string[], name: string, defaultValue: number): number => {
+  const value = Number.parseInt(argValue(args, name, String(defaultValue)), 10);
   if (!Number.isFinite(value) || value <= 0) throw new Error(`INVALID_ARG:${name}`);
   return value;
 };
 
-const nonNegativeInt = (args: string[], name: string, fallback: number): number => {
-  const value = Number.parseInt(argValue(args, name, String(fallback)), 10);
+const nonNegativeInt = (args: string[], name: string, defaultValue: number): number => {
+  const value = Number.parseInt(argValue(args, name, String(defaultValue)), 10);
   if (!Number.isFinite(value) || value < 0) throw new Error(`INVALID_ARG:${name}`);
   return value;
 };
@@ -66,7 +67,6 @@ const makeAccount = (leftEntity: string, rightEntity: string): AccountReplica =>
     locks: new Map(),
     pulls: new Map(),
     swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
@@ -77,6 +77,8 @@ const makeAccount = (leftEntity: string, rightEntity: string): AccountReplica =>
   },
   status: 'active',
   mempool: [],
+  swapOrderHistory: new Map(),
+  swapClosedOrders: new Map(),
   currentFrame: {
     height: 1,
     timestamp: 1_000,
@@ -117,7 +119,7 @@ const seedSameSwapAccount = (swaps: number): AccountReplica => {
   const wantAmount = 3_000n * SWAP_LOT_SCALE;
   giveDelta.leftHold = giveAmount * BigInt(swaps);
   for (let index = 0; index < swaps; index += 1) {
-    account.state.swapOffers.set(`same-${index}`, {
+    const offer: SwapOffer = {
       offerId: `same-${index}`,
       giveTokenId: 2,
       giveAmount,
@@ -131,7 +133,9 @@ const seedSameSwapAccount = (swaps: number): AccountReplica => {
       createdHeight: index,
       quantizedGive: giveAmount,
       quantizedWant: wantAmount,
-    });
+    };
+    account.state.swapOffers.set(offer.offerId, offer);
+    recordSwapOfferLifecycle(account, offer);
   }
   return account;
 };
@@ -203,7 +207,7 @@ const seedCrossSwapAccount = (swaps: number): AccountReplica => {
       targetPull: { ...templateRoute.targetPull! },
       status: 'resting' as const,
     };
-    account.state.swapOffers.set(orderId, {
+    const offer: SwapOffer = {
       offerId: orderId,
       giveTokenId: route.source.tokenId,
       giveAmount: route.source.amount,
@@ -218,7 +222,9 @@ const seedCrossSwapAccount = (swaps: number): AccountReplica => {
       quantizedGive: route.source.amount,
       quantizedWant: route.target.amount,
       crossJurisdiction: route,
-    });
+    };
+    account.state.swapOffers.set(orderId, offer);
+    recordSwapOfferLifecycle(account, offer);
   }
   return account;
 };
@@ -269,7 +275,11 @@ const runPass = async (
   cross.state.deltas.get(1)!.leftHold = crossTemplate.giveAmount * BigInt(swaps);
   let sameElapsedMs = 0;
   for (let index = 0; index < swaps; index += 1) {
-    if (index > 0) same.state.swapOffers.set(`same-${index}`, { ...sameTemplate, offerId: `same-${index}` });
+    if (index > 0) {
+      const offer = { ...sameTemplate, offerId: `same-${index}` };
+      same.state.swapOffers.set(offer.offerId, offer);
+      recordSwapOfferLifecycle(same, offer);
+    }
     const startedAt = getPerfMs();
     const result = await applyAccountTx(same, sameResolveTx(index), false, 2_000 + index, 2 + index);
     sameElapsedMs += getPerfMs() - startedAt;
@@ -277,10 +287,14 @@ const runPass = async (
   }
   let crossElapsedMs = 0;
   for (let index = 0; index < swaps; index += 1) {
-    if (index > 0) cross.state.swapOffers.set(`cross-${index}`, {
-      ...structuredClone(crossTemplate),
-      offerId: `cross-${index}`,
-    });
+    if (index > 0) {
+      const offer = {
+        ...structuredClone(crossTemplate),
+        offerId: `cross-${index}`,
+      };
+      cross.state.swapOffers.set(offer.offerId, offer);
+      recordSwapOfferLifecycle(cross, offer);
+    }
     const startedAt = getPerfMs();
     const result = await applyAccountTx(cross, crossAckTx(index), false, 2_000 + index, 2 + index);
     crossElapsedMs += getPerfMs() - startedAt;

@@ -4,7 +4,7 @@ import {
   registerSignerKey,
   signAccountFrame,
 } from '../../../account/crypto';
-import { applyEntityFrame } from '../../../entity/consensus';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import { createEntityFrameHash } from '../../../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-witness';
 import { getEntityLeaderState } from '../../../entity/consensus/leader';
@@ -14,15 +14,11 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../../../entity/consensus/state-root';
-import { deriveLocalEntityCryptoKeys } from '../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { initCrontab } from '../../../entity/scheduler';
 import { buildQuorumHanko } from '../../../hanko/signing';
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
-import {
-  collectLocalProfileEncryptionAnnouncements,
-  getCompleteProfileEncryptionManifest,
-} from '../../../entity/profile/profile-encryption';
 import { computeProfileHash } from '../../../entity/profile/profile-signing';
 import {
   applyCertifiedEntityLineagePlan,
@@ -97,8 +93,8 @@ const installReplica = (env: RuntimeReplica, state: EntityState, signerId: strin
 };
 
 const installFixtureEncryptionKeys = (env: RuntimeReplica, replica: EntityReplica): void => {
-  const keys = deriveLocalEntityCryptoKeys(env, replica.entityId, replica.signerId);
-  replica.entityEncPubKey = keys.publicKey;
+  const keys = provisionTestEntityEncryptionKey(env, replica.entityId);
+  replica.state.entityEncryptionPublicKey = keys.publicKey;
 };
 
 export const prepareCatchupFixtureReplica = async (
@@ -111,12 +107,7 @@ export const prepareCatchupFixtureReplica = async (
   const leader = installReplica(env, state, leaderSignerId);
   installFixtureEncryptionKeys(env, target);
   installFixtureEncryptionKeys(env, leader);
-  collectLocalProfileEncryptionAnnouncements(env);
   env.state.eReplicas.delete(`${state.entityId}:${leaderSignerId}`);
-  const manifest = getCompleteProfileEncryptionManifest(env, target.state);
-  if (!manifest) throw new Error('CATCHUP_FIXTURE_PROFILE_MANIFEST_MISSING');
-  state.profileEncryptionManifest = structuredClone(manifest);
-  target.state.profileEncryptionManifest = structuredClone(manifest);
   const profileHash = computeProfileHash(buildLocalEntityProfile(env, target.state, 1));
   const signatures = state.config.validators.map(signerId => ({
     signerId,
@@ -138,7 +129,7 @@ export const buildCatchupFixtureCertificate = async (
   timestamp: number,
 ): Promise<{ frame: EntityFrame; nextState: EntityState }> => {
   const height = state.height + 1;
-  const execution = await applyEntityFrame(env, state, [], timestamp);
+  const execution = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [], timestamp);
   const nextStateBeforeLink: EntityState = {
     ...execution.newState,
     entityId: state.entityId,

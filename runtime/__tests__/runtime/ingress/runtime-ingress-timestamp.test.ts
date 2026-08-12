@@ -4,7 +4,7 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from 
 import { TIMING } from '../../../config/constants';
 import { initCrontab, scheduleHook } from '../../../entity/scheduler';
 import { generateLazyEntityId } from '../../../entity/factory';
-import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
 import { processEventBatch } from '../../../jurisdiction/adapter/watcher';
 import { createRuntimeIngressReceiptStore } from '../../../runtime/input-pipeline/ingress-receipts';
 import { buildJEventRangeData } from '../../helpers/j-history';
@@ -27,6 +27,7 @@ import { getWallClockMs } from '../../../infra/time';
 import { attachLiveJAdapter } from '../../../runtime/jurisdiction/live-jadapters';
 import type { JAdapter } from '../../../jurisdiction/adapter/types';
 import { applyEntityInputFrameCap, applyEntityTxFrameCap } from '../../../runtime/loop/loop-work.ts';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,
@@ -57,7 +58,6 @@ const addTestJurisdiction = (env: RuntimeReplica, name = TEST_JURISDICTION.name,
     blockDelayMs: 0,
     lastBlockTimestamp: env.state.timestamp,
     position: { x: 0, y: 0, z: 0 },
-    contracts: { depository: TEST_JURISDICTION.depositoryAddress, entityProvider: TEST_JURISDICTION.entityProviderAddress },
     contracts: {
       account: `0x${'33'.repeat(20)}`,
       depository: TEST_JURISDICTION.depositoryAddress,
@@ -76,8 +76,8 @@ const makeReplica = (
   signerId = '1',
   env?: RuntimeReplica,
 ): EntityReplica => {
-  const keys = env && hasLocalSignerKey(env, signerId)
-    ? deriveLocalEntityCryptoKeys(env, entityId, signerId)
+  const keys = env
+    ? provisionTestEntityEncryptionKey(env, entityId)
     : { publicKey: '', privateKey: '' };
   return {
     entityId,
@@ -110,6 +110,7 @@ const makeReplica = (
         bio: '',
         website: '',
       },
+      ...(keys.publicKey ? { entityEncryptionPublicKey: keys.publicKey } : {}),
       htlcRoutes: new Map(),
       htlcFeesEarned: 0n,
       lockBook: new Map(),
@@ -127,9 +128,7 @@ const addSignableReplica = (
   const signerId = deriveSignerAddressSync(env.runtimeSeed!, signerLabel).toLowerCase();
   registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, signerLabel));
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-  const replica = makeReplica(entityId, timestamp, signerId);
-  const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
-  replica.entityEncPubKey = keys.publicKey;
+  const replica = makeReplica(entityId, timestamp, signerId, env);
   env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
   return { entityId, signerId, replica };
 };
@@ -483,16 +482,17 @@ describe('runtime ingress timestamp', () => {
     });
 
     await processRuntime(env);
-    const deferredUserInputs = (env.runtimeMempool?.entityInputs ?? []).filter(input =>
-      input.entityTxs?.some(tx => tx.type !== 'certifyProfile'));
+    const deferredUserInputs = env.runtimeMempool?.entityInputs ?? [];
     expect(deferredUserInputs.map(input => input.entityId)).toEqual([normalEntityId]);
     expect(env.runtimeMempool?.queuedAt).toBe(1_000);
   });
 
   test('new ingress timestamp is clamped in live mode and still fires due hooks', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
+    env.scenarioMode = false;
     env.quietRuntimeLogs = true;
     env.state.timestamp = getWallClockMs();
+    const initialTimestamp = env.state.timestamp;
     addTestJurisdiction(env);
     const committedScheduledWakePresence: boolean[] = [];
     registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
@@ -519,8 +519,7 @@ describe('runtime ingress timestamp', () => {
     enqueueRuntimeInput(env, {
       timestamp: futureIngressTimestamp,
       runtimeTxs: [
-        {
-          type: 'importReplica',
+        createTestEntityImportRuntimeTx(env, {
           entityId: importedEntityId,
           signerId: importedSignerId,
           data: {
@@ -534,7 +533,7 @@ describe('runtime ingress timestamp', () => {
             isProposer: true,
             profileName: 'Imported',
           },
-        },
+        }),
       ],
       entityInputs: [],
     });
@@ -542,7 +541,7 @@ describe('runtime ingress timestamp', () => {
     await processRuntime(env);
 
     expect(env.state.timestamp).toBeLessThan(futureIngressTimestamp);
-    expect(env.state.timestamp).toBeGreaterThan(replica.state.timestamp);
+    expect(env.state.timestamp).toBeGreaterThan(initialTimestamp);
     expect(env.state.timestamp).toBeLessThanOrEqual(getWallClockMs() + TIMING.TIMESTAMP_DRIFT_MS);
     const updatedReplica = env.state.eReplicas.get(`${existingEntityId}:${signerId}`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:due-after-ingress')).toBe(false);
@@ -551,13 +550,21 @@ describe('runtime ingress timestamp', () => {
 
   test('direct live process inputs stamp R-frame from block creation time', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
+    env.scenarioMode = false;
     env.quietRuntimeLogs = true;
     env.state.timestamp = 1_000;
 
     const { entityId, signerId } = addSignableReplica(env, 1_000);
 
     const before = getWallClockMs();
-    await processRuntime(env, [{ entityId, signerId, entityTxs: [] }]);
+    await processRuntime(env, [{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'profile-update',
+        data: { profile: { entityId, name: 'Live timestamp input' } },
+      }],
+    }]);
 
     expect(env.state.timestamp).toBeGreaterThanOrEqual(before);
     expect(env.state.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
@@ -565,6 +572,7 @@ describe('runtime ingress timestamp', () => {
 
   test('explicit live ingress timestamp controls delayed R-frame timestamp', async () => {
     const env = createIsolatedEnv('runtime-explicit-ingress-timestamp');
+    env.scenarioMode = false;
     env.quietRuntimeLogs = true;
     env.state.timestamp = 1_000;
 
@@ -611,6 +619,7 @@ describe('runtime ingress timestamp', () => {
     const seed = uniqueSeed('runtime-explicit-ingress-deterministic-hash');
     const buildEnv = (dbSuffix: string): { env: RuntimeReplica; entityId: string; signerId: string } => {
       const env = createEmptyEnv(seed);
+      env.scenarioMode = false;
       env.dbNamespace = `${String(env.runtimeId || 'runtime')}-${dbSuffix}`;
       env.quietRuntimeLogs = true;
       env.state.timestamp = 1_000;
@@ -763,8 +772,7 @@ describe('runtime ingress timestamp', () => {
       const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
       const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
       enqueueRuntimeInput(env, {
-        runtimeTxs: [{
-          type: 'importReplica',
+        runtimeTxs: [createTestEntityImportRuntimeTx(env, {
           entityId,
           signerId,
           data: {
@@ -775,10 +783,10 @@ describe('runtime ingress timestamp', () => {
               shares: { [signerId]: 1n },
               jurisdiction: testJurisdiction(),
             },
-            isProposer: false,
+            isProposer: true,
             profileName: label,
           },
-        }],
+        })],
         entityInputs: [],
       });
       await processRuntime(env);
@@ -802,8 +810,7 @@ describe('runtime ingress timestamp', () => {
     const delayedEntityId = generateLazyEntityId([delayedSignerId], 1n).toLowerCase();
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: firstEntityId,
         signerId: firstSignerId,
         data: {
@@ -814,10 +821,10 @@ describe('runtime ingress timestamp', () => {
             shares: { [firstSignerId]: 1n },
             jurisdiction: testJurisdiction(),
           },
-          isProposer: false,
+          isProposer: true,
           profileName: 'First Replica',
         },
-      }],
+      })],
       entityInputs: [],
     });
 
@@ -825,8 +832,7 @@ describe('runtime ingress timestamp', () => {
     env.runtimeConfig = { minFrameDelayMs: 60, loopIntervalMs: 1 };
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: delayedEntityId,
         signerId: delayedSignerId,
         data: {
@@ -837,10 +843,10 @@ describe('runtime ingress timestamp', () => {
             shares: { [delayedSignerId]: 1n },
             jurisdiction: testJurisdiction(),
           },
-          isProposer: false,
+          isProposer: true,
           profileName: 'Delayed Replica',
         },
-      }],
+      })],
       entityInputs: [],
     });
 

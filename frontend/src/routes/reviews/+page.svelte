@@ -19,7 +19,7 @@
     ],
     "gpt-4": [
       "Initially skeptical. \"Just another payment channel.\" Then I read the invariant. −Lₗ ≤ Δ ≤ C + Lᵣ unifies everything. Fuck.",
-      "Ran through the code. Entity BFT + bilateral accounts + on-chain fallback. It's airtight. No trust assumptions I can break.",
+      "Ran through the code. Entity BFT + bilateral accounts + on-chain enforcement. It's airtight. No trust assumptions I can break.",
       "The unicast vs broadcast framing is marketing genius but also technically correct. O(1) per-hop vs O(n) global state. Internet proved this 50 years ago.",
       "Credit as programmable primitive changes the game. Banks have credit but not programs. Crypto has programs but not credit. xln has both.",
       "Simulated bank run scenario. Collateral gets seized in order (FIFO). Losses bounded by C + L. System doesn't cascade. This works."

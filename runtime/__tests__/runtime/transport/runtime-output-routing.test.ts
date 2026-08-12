@@ -16,7 +16,10 @@ import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../../../pr
 import type { DeliverableEntityInput, RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../../../runtime/types';
 import type { EntityLeaderTimeoutVote } from '../../../entity/types';
 import { getWallClockMs } from '../../../infra/time';
-import { deriveSignerAddressSync } from '../../../account/crypto';
+import { deriveSignerAddressSync, signDigest } from '../../../account/crypto';
+import type { Profile } from '../../../entity/profile';
+import { computeProfileRouteHash } from '../../../entity/profile/profile-signing';
+import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 
 const withRuntimeOwner = (env: RuntimeReplica): RuntimeReplica => {
   const seed = `runtime-output-routing:${String(env.runtimeId || 'anonymous')}`;
@@ -33,6 +36,47 @@ const sendEntityInputWithRouting: typeof sendEntityInputWithRoutingRaw = (env, i
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
+
+const frameParentHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
+
+const emptyEntityContext = (
+  targetEntityId: string,
+  proposerSignerId: string,
+  height: number,
+  parentFrameHash: string,
+) => ({
+  version: 1 as const,
+  proposerReplicaId: `${targetEntityId}:${proposerSignerId}`,
+  entityId: targetEntityId,
+  proposerSignerId,
+  parentFrameHash,
+  height,
+  gossipProfiles: [],
+  peerAssertions: [],
+  htlc: { version: 1 as const, entries: [], originated: [] },
+});
+
+const signedRouteProfile = (
+  targetEntityId: string,
+  targetRuntimeId: string,
+  signingSeed: string,
+): Profile => {
+  const signerId = deriveSignerAddressSync(signingSeed, '1').toLowerCase();
+  const unsigned: Profile = {
+    entityId: targetEntityId,
+    entityEncryptionPublicKey: `0x${'12'.repeat(32)}`,
+    name: 'route authority', avatar: '', bio: '', website: '', lastUpdated: 1,
+    runtimeId: targetRuntimeId,
+    runtimeEncPubKey: `0x${'13'.repeat(32)}`,
+    publicAccounts: [], wsUrl: null, relays: [],
+    metadata: { isHub: false, routingFeePPM: 0, baseFee: 0n },
+    accounts: [],
+  };
+  return {
+    ...unsigned,
+    runtimeSignature: signDigest(signingSeed, '1', computeProfileRouteHash(unsigned)),
+  };
+};
 
 const timeoutVote = (voterId: string, signature: string): EntityLeaderTimeoutVote => ({
   entityId: entityId('75'),
@@ -62,11 +106,17 @@ const committedOutput = (
     height,
     timestamp: height,
     hash,
-    parentFrameHash: `parent:${height - 1}`,
+    parentFrameHash: frameParentHash(height - 1),
     stateRoot: `0x${'11'.repeat(32)}`,
     authorityRoot: `0x${'22'.repeat(32)}`,
     txs: [],
     events: [],
+    entityContext: emptyEntityContext(
+      targetEntityId,
+      targetSignerId,
+      height,
+      frameParentHash(height - 1),
+    ),
     leader: { proposerSignerId: targetSignerId, view: 0 },
     hashesToSign: [{ hash, type: 'entityFrame', context: `entity-frame:${height}` }],
     collectedSigs: new Map([[targetSignerId, [signature]]]),
@@ -580,7 +630,7 @@ describe('runtime output routing', () => {
     expect(warnings).toEqual(['ROUTE_TARGET_RUNTIME_CHANGE_UNVERIFIED']);
   });
 
-  test('falls back to encrypted P2P delivery after direct dispatch misses', () => {
+  test('fails over to encrypted P2P delivery after direct dispatch misses', () => {
     const targetRuntimeId = runtimeId('22');
     const warnings: string[] = [];
     const p2pCalls: Array<{ targetRuntimeId: string; envelope: RuntimeEntityInputsEnvelope; ingressTimestamp?: number }> = [];
@@ -590,7 +640,7 @@ describe('runtime output routing', () => {
   timestamp: 1234,
       },
       infrastructure: {
-        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FAILOVER' }),
       },
       warn: (_scope: string, code: string) => {
         warnings.push(code);
@@ -646,7 +696,7 @@ describe('runtime output routing', () => {
   timestamp: 4321,
       },
       infrastructure: {
-        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FAILOVER' }),
       },
       warn: () => {},
       error: () => {},
@@ -696,7 +746,7 @@ describe('runtime output routing', () => {
   timestamp: 4331,
       },
       infrastructure: {
-        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FAILOVER' }),
       },
       warn: () => {},
       error: () => {},
@@ -877,7 +927,7 @@ describe('runtime output routing', () => {
     }
   });
 
-  test('rejects legacy boolean direct dispatch results', () => {
+  test('rejects untyped boolean direct dispatch results', () => {
     const targetRuntimeId = runtimeId('2a');
     const p2pCalls: unknown[] = [];
     const env = {
@@ -918,7 +968,7 @@ describe('runtime output routing', () => {
     expect(p2pCalls).toHaveLength(0);
   });
 
-  test('falls back to P2P after typed direct dispatch defer', () => {
+  test('fails over to P2P after typed direct dispatch defer', () => {
     const targetRuntimeId = runtimeId('25');
     const p2pCalls: Array<{ targetRuntimeId: string; envelope: RuntimeEntityInputsEnvelope; ingressTimestamp?: number }> = [];
     const env = {
@@ -929,7 +979,7 @@ describe('runtime output routing', () => {
       infrastructure: {
         directEntityInputsDispatch: () => ({
           outcome: 'deferred',
-          code: 'ROUTE_DIRECT_MISS_FALLBACK',
+          code: 'ROUTE_DIRECT_MISS_FAILOVER',
           retryable: true,
           fatal: false,
           terminal: false,
@@ -979,7 +1029,7 @@ describe('runtime output routing', () => {
   timestamp: 2345,
       },
       infrastructure: {
-        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FAILOVER' }),
       },
       warn: () => {},
       error: () => {},
@@ -1094,7 +1144,7 @@ describe('runtime output routing', () => {
   timestamp: 9012,
       },
       infrastructure: {
-        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FAILOVER' }),
       },
       warn: (_scope: string, code: string) => warnings.push(code),
       info: (_scope: string, code: string) => infos.push(code),
@@ -1169,7 +1219,7 @@ describe('runtime output routing', () => {
   timestamp: 5678,
       },
       infrastructure: {
-        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FAILOVER' }),
       },
       warn: (_scope: string, code: string) => warnings.push(code),
       info: (_scope: string, code: string) => infos.push(code),
@@ -1210,7 +1260,7 @@ describe('runtime output routing', () => {
   timestamp: 5678,
       },
       infrastructure: {
-        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FAILOVER' }),
       },
       warn: (_scope: string, code: string) => warnings.push(code),
       info: (_scope: string, code: string) => infos.push(code),
@@ -1306,11 +1356,12 @@ describe('runtime output routing', () => {
     expect(warnings).toContain('ROUTE_RETARGET_LOCAL_TRIGGER_SIGNER');
   });
 
-  test('retargets trigger-only remote outputs to the target gossip board signer before delivery', () => {
+  test('retargets trigger-only remote outputs to the signed Profile authority before delivery', () => {
     const targetRuntimeId = runtimeId('69');
     const targetEntityId = entityId('6a');
     const staleSenderSignerId = runtimeId('6b');
-    const targetSignerId = runtimeId('6c');
+    const profileSeed = 'runtime-routing-trigger-profile';
+    const targetSignerId = deriveSignerAddressSync(profileSeed, '1').toLowerCase();
     const warnings: string[] = [];
     const env = {
       runtimeId: runtimeId('11'),
@@ -1318,14 +1369,7 @@ describe('runtime output routing', () => {
       error: () => {},
       infrastructure: {},
       gossip: {
-        getProfiles: () => [{
-          entityId: targetEntityId,
-          metadata: {
-            board: {
-              validators: [{ signerId: targetSignerId }],
-            },
-          },
-        }],
+        getProfiles: () => [signedRouteProfile(targetEntityId, targetRuntimeId, profileSeed)],
       },
     } as unknown as RuntimeReplica;
 
@@ -1354,7 +1398,8 @@ describe('runtime output routing', () => {
     const targetRuntimeId = runtimeId('69');
     const targetEntityId = entityId('6a');
     const staleSenderSignerId = runtimeId('6b');
-    const targetSignerId = runtimeId('6c');
+    const profileSeed = 'runtime-routing-stale-profile';
+    const targetSignerId = deriveSignerAddressSync(profileSeed, '1').toLowerCase();
     const errors: string[] = [];
     const env = {
       runtimeId: runtimeId('11'),
@@ -1362,14 +1407,7 @@ describe('runtime output routing', () => {
       error: (_scope: string, code: string) => errors.push(code),
       infrastructure: {},
       gossip: {
-        getProfiles: () => [{
-          entityId: targetEntityId,
-          metadata: {
-            board: {
-              validators: [{ signerId: targetSignerId }],
-            },
-          },
-        }],
+        getProfiles: () => [signedRouteProfile(targetEntityId, targetRuntimeId, profileSeed)],
       },
     } as unknown as RuntimeReplica;
 
@@ -1392,11 +1430,11 @@ describe('runtime output routing', () => {
     expect(errors).toContain('ROUTE_REMOTE_SIGNER_MISMATCH');
   });
 
-  test('routes tx-bearing remote outputs when signer is a non-primary gossip board validator', () => {
+  test('routes tx-bearing remote outputs when signer matches signed Profile authority', () => {
     const targetRuntimeId = runtimeId('69');
     const targetEntityId = entityId('6a');
-    const primarySignerId = runtimeId('6b');
-    const secondarySignerId = runtimeId('6c');
+    const profileSeed = 'runtime-routing-tx-profile';
+    const profileSignerId = deriveSignerAddressSync(profileSeed, '1').toLowerCase();
     const errors: string[] = [];
     const env = {
       runtimeId: runtimeId('11'),
@@ -1404,20 +1442,13 @@ describe('runtime output routing', () => {
       error: (_scope: string, code: string) => errors.push(code),
       infrastructure: {},
       gossip: {
-        getProfiles: () => [{
-          entityId: targetEntityId,
-          metadata: {
-            board: {
-              validators: [{ signerId: primarySignerId }, { signerId: secondarySignerId }],
-            },
-          },
-        }],
+        getProfiles: () => [signedRouteProfile(targetEntityId, targetRuntimeId, profileSeed)],
       },
     } as unknown as RuntimeReplica;
 
     const result = planEntityOutputs(env, [{
       entityId: targetEntityId,
-      signerId: secondarySignerId,
+      signerId: profileSignerId,
       entityTxs: [{ type: 'accountInput', data: { fromEntityId: entityId('6d'), toEntityId: targetEntityId } } as any],
     }], {
       ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
@@ -1432,14 +1463,15 @@ describe('runtime output routing', () => {
     });
 
     expect(result.remoteOutputs).toHaveLength(1);
-    expect(result.remoteOutputs[0]?.output.signerId).toBe(secondarySignerId);
+    expect(result.remoteOutputs[0]?.output.signerId).toBe(profileSignerId);
     expect(errors).not.toContain('ROUTE_REMOTE_SIGNER_MISMATCH');
   });
 
   test('routes consensus-only remote outputs without retargeting to primary gossip validator', () => {
     const targetRuntimeId = runtimeId('69');
     const targetEntityId = entityId('6a');
-    const primarySignerId = runtimeId('6b');
+    const profileSeed = 'runtime-routing-consensus-profile';
+    const primarySignerId = deriveSignerAddressSync(profileSeed, '1').toLowerCase();
     const secondarySignerId = runtimeId('6c');
     const warnings: string[] = [];
     const errors: string[] = [];
@@ -1449,14 +1481,7 @@ describe('runtime output routing', () => {
       error: (_scope: string, code: string) => errors.push(code),
       infrastructure: {},
       gossip: {
-        getProfiles: () => [{
-          entityId: targetEntityId,
-          metadata: {
-            board: {
-              validators: [{ signerId: primarySignerId }, { signerId: secondarySignerId }],
-            },
-          },
-        }],
+        getProfiles: () => [signedRouteProfile(targetEntityId, targetRuntimeId, profileSeed)],
       },
     } as unknown as RuntimeReplica;
 
@@ -1467,11 +1492,17 @@ describe('runtime output routing', () => {
         height: 7,
         timestamp: 7,
         hash: '0xproposal',
-        parentFrameHash: 'parent:6',
+        parentFrameHash: frameParentHash(6),
         stateRoot: `0x${'11'.repeat(32)}`,
         authorityRoot: `0x${'22'.repeat(32)}`,
         txs: [],
         events: [],
+        entityContext: emptyEntityContext(
+          targetEntityId,
+          primarySignerId,
+          7,
+          frameParentHash(6),
+        ),
         leader: { proposerSignerId: primarySignerId, view: 0 },
         hashesToSign: [{ hash: '0xproposal', type: 'entityFrame', context: 'entity-frame:7' }],
         collectedSigs: new Map(),
@@ -1730,6 +1761,86 @@ describe('runtime output routing', () => {
     })).toThrow(/INBOUND_ENTITY_SIGNER_MISMATCH/);
     expect(errors).toContain('INBOUND_ENTITY_SIGNER_MISMATCH');
     expect(enqueued).toHaveLength(0);
+  });
+
+  test('rejects a certified cross-j intent whose user siblings resolve to different Runtimes', () => {
+    const localRuntimeId = runtimeId('11');
+    const authenticatedUserRuntimeId = runtimeId('12');
+    const otherUserRuntimeId = runtimeId('13');
+    const sourceUserId = entityId('70');
+    const targetUserId = entityId('71');
+    const sourceHubId = entityId('72');
+    const targetHubId = entityId('73');
+    const sourceUserSignerId = runtimeId('74');
+    const targetUserSignerId = runtimeId('75');
+    const sourceHubSignerId = runtimeId('76');
+    const targetHubSignerId = runtimeId('77');
+    const route = {
+      orderId: 'cross-j-invalid-runtime-topology',
+      makerEntityId: sourceUserId,
+      hubEntityId: sourceHubId,
+      sourceSignerId: sourceUserSignerId,
+      targetSignerId: targetUserSignerId,
+      sourceHubSignerId,
+      targetHubSignerId,
+      source: {
+        jurisdiction: 'stack:1:source', entityId: sourceUserId,
+        counterpartyEntityId: sourceHubId, tokenId: 1, amount: 1n,
+      },
+      target: {
+        jurisdiction: 'stack:2:target', entityId: targetHubId,
+        counterpartyEntityId: targetUserId, tokenId: 2, amount: 1n,
+      },
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      status: 'intent', createdAt: 1, updatedAt: 1, expiresAt: 10,
+    } satisfies CrossJurisdictionSwapRoute;
+    const enqueued: RoutedEntityInput[] = [];
+    const env = {
+      runtimeId: localRuntimeId,
+      state: {
+        eReplicas: new Map([
+          [`${sourceHubId}:${sourceHubSignerId}`, { entityId: sourceHubId, signerId: sourceHubSignerId }],
+          [`${targetHubId}:${targetHubSignerId}`, { entityId: targetHubId, signerId: targetHubSignerId }],
+        ]),
+      },
+      infrastructure: {
+        verifiedProfileRoutes: new Map([
+          [sourceUserId, { runtimeId: authenticatedUserRuntimeId, runtimeSignerId: sourceUserSignerId }],
+          [targetUserId, { runtimeId: otherUserRuntimeId, runtimeSignerId: targetUserSignerId }],
+        ]),
+      },
+      warn: () => {}, info: () => {}, error: () => {},
+    } as unknown as RuntimeReplica;
+
+    expect(() => routeInboundP2PEntityInput(env, authenticatedUserRuntimeId, {
+      entityId: sourceHubId,
+      signerId: sourceHubSignerId,
+      entityTxs: [{
+        type: 'consensusOutput',
+        data: {
+          origin: {
+            sourceEntityId: sourceUserId, lane: 'generic', sequence: 1n,
+            semanticHash: `0x${'78'.repeat(32)}`, height: 1,
+            frameHash: `0x${'79'.repeat(32)}`, outputIndex: 0,
+          },
+          outputHanko: '0x01',
+          targetEntityId: sourceHubId,
+          entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
+        },
+      }],
+    }, {
+      ensureRuntimeInfrastructure: target => target.infrastructure!,
+      enqueueRuntimeInputs: (_target, inputs) => enqueued.push(...(inputs ?? [])),
+      extractEntityId: key => String(key).split(':')[0] || '',
+      hasLocalSignerForEntity: () => true,
+      hasLocalSignerForEntitySigner: (_target, entity, signer) =>
+        (entity === sourceHubId && signer === sourceHubSignerId) ||
+        (entity === targetHubId && signer === targetHubSignerId),
+      resolveSoleLocalSignerForEntity: () => sourceHubSignerId,
+      getP2P: () => null,
+    })).toThrow('CROSS_J_RUNTIME_TOPOLOGY_INVALID:cross-j-invalid-runtime-topology:OWNER_RUNTIME_MISMATCH');
+    expect(enqueued).toEqual([]);
   });
 
   test('fails fast on inbound tx-bearing P2P input for an unknown local entity', () => {

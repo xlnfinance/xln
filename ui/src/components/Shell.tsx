@@ -7,6 +7,7 @@ const NAV: Array<{ to: string; label: string; icon: IconName }> = [
 	{ to: '/', label: 'Home', icon: 'home' },
 	{ to: '/accounts', label: 'Accounts', icon: 'accounts' },
 	{ to: '/pay', label: 'Pay', icon: 'pay' },
+	{ to: '/swap', label: 'Swap', icon: 'swap' },
 	{ to: '/activity', label: 'Activity', icon: 'activity' },
 	{ to: '/settings', label: 'Settings', icon: 'settings' },
 ];

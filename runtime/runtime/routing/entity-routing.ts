@@ -15,6 +15,7 @@ import { safeStringify } from '../../protocol/serialization';
 import { cloneCrossJurisdictionRoute } from '../../extensions/cross-j';
 import { validatePreparedCrossJurisdictionRoute } from '../../extensions/cross-j/prepared-route';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../entity-input/entity-input-envelope-auth.ts';
+import { assertInboundCrossJRuntimeTopology } from './cross-j-topology.ts';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
@@ -1511,6 +1512,24 @@ const validateInboundEntityCommands = (
   }
 };
 
+const assertInboundCrossJCommandsUseCanonicalTopology = (
+  env: RuntimeReplica,
+  authenticatedRuntimeId: string,
+  input: RoutedEntityInput,
+  deps: RuntimeEntityRoutingDeps,
+): void => {
+  for (const tx of getEffectiveEntityInputTxs(input)) {
+    if (tx.type !== 'prepareCrossJurisdictionSwap') continue;
+    const route = extractCrossJurisdictionRouteFromTx(tx);
+    if (!route) throw new Error('CROSS_J_RUNTIME_TOPOLOGY_INVALID:route-missing');
+    assertInboundCrossJRuntimeTopology(env, route, authenticatedRuntimeId, {
+      hasLocalSignerForEntitySigner: deps.hasLocalSignerForEntitySigner,
+      resolveRuntimeId: (entityId, signerId) =>
+        resolveRuntimeIdForCrossJurisdictionEntity(env, entityId, signerId, deps),
+    });
+  }
+};
+
 const validateInboundP2PEntityInput = (
   env: RuntimeReplica,
   from: string,
@@ -1563,6 +1582,7 @@ const validateInboundP2PEntityInput = (
   }
 
   validateInboundEntityCommands(env, from, input);
+  assertInboundCrossJCommandsUseCanonicalTopology(env, from, input, deps);
   // Never learn sender routes from raw payload fields. The authenticated
   // account/entity transition registers them only after successful apply.
   return { kind: 'accepted' };

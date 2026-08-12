@@ -29,14 +29,14 @@ import {
 const ENTITY_REQUIRED = [
   'entityId', 'height', 'timestamp', 'nonces', 'proposals', 'config',
   'reserves', 'lastFinalizedJHeight', 'jBlockChain', 'profile', 'htlcRoutes',
-  'htlcFeesEarned', 'lockBook',
+  'htlcFeesEarned', 'lockBook', 'entityEncryptionPublicKey',
 ] as const;
 
 const ENTITY_OPTIONAL = [
   'entityCommandNonces', 'prevFrameHash', 'leaderState', 'externalWallet',
   'deferredAccountProposals', 'settlementContinuations', 'jHistoryFinality', 'certifiedBoardState',
   'crontabState', 'jBatchState', 'entityProviderActionState',
-  'profileEncryptionManifest', 'consumptionAccumulator', 'certifiedOutputSequences',
+  'consumptionAccumulator', 'certifiedOutputSequences',
   'outDebtsByToken', 'inDebtsByToken', 'swapTradingPairs',
   'crossJurisdictionSwaps', 'pendingCrossJurisdictionFillAcks',
   'crossJurisdictionAuthorizations',
@@ -137,7 +137,7 @@ const ACCOUNT_REPLICA_OPTIONAL = [
 ] as const;
 const ACCOUNT_STATE_REQUIRED = [
   'leftEntity', 'rightEntity', 'domain', 'watchSeed', 'deltas', 'locks',
-  'swapOffers', 'globalCreditLimits', 'leftPendingJClaims', 'rightPendingJClaims',
+  'swapOffers', 'leftPendingJClaims', 'rightPendingJClaims',
   'lastFinalizedJHeight', 'disputeConfig', 'jNonce', 'requestedRebalance',
   'requestedRebalanceFeeState',
 ] as const;
@@ -168,10 +168,6 @@ const validateStorageAccountStateCore = (state: Record<string, unknown>, code: s
     const tokenId = requireBoundaryInteger(key, `${code}_DELTA_KEY`);
     if (tokenId !== validateStorageDelta(value, `${code}_DELTA`)) throw new Error(`${code}_DELTA_KEY_MISMATCH`);
   }
-  const credit = requireBoundaryRecord(state['globalCreditLimits'], `${code}_CREDIT`);
-  requireExactBoundaryKeys(credit, ['ownLimit', 'peerLimit'], [], `${code}_CREDIT_FIELDS`);
-  requireStorageBigInt(credit['ownLimit'], `${code}_OWN_CREDIT`, 0n, UINT256_MAX);
-  requireStorageBigInt(credit['peerLimit'], `${code}_PEER_CREDIT`, 0n, UINT256_MAX);
   requireBoundaryInteger(state['jNonce'], `${code}_J_NONCE`);
   const dispute = requireBoundaryRecord(state['disputeConfig'], `${code}_DISPUTE`);
   requireExactBoundaryKeys(
@@ -279,6 +275,10 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
   const doc = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(doc, ENTITY_REQUIRED, ENTITY_OPTIONAL, `${code}_FIELDS`);
   requireStorageString(doc['entityId'], `${code}_ENTITY_ID`);
+  if (!/^0x[0-9a-f]{64}$/.test(requireStorageString(
+    doc['entityEncryptionPublicKey'],
+    `${code}_ENTITY_ENCRYPTION_PUBLIC_KEY`,
+  ))) throw new Error(`${code}_ENTITY_ENCRYPTION_PUBLIC_KEY`);
   requireBoundaryInteger(doc['height'], `${code}_HEIGHT`);
   requireBoundaryInteger(doc['timestamp'], `${code}_TIMESTAMP`);
   requireStorageMap(doc['nonces'], `${code}_NONCES`);

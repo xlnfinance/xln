@@ -2,39 +2,13 @@ import { deriveDelta } from '../../../account/utils';
 import type { AccountReplica, AccountState } from '../../../types/account';
 import type { RuntimeReplica } from '../../../runtime/types';
 import { getEntityReplicaById } from '../../../entity/replica/replica-lookup';
+import { findAccountByCounterparty } from '../../../account/state/account-lookup';
 export { getEntityReplicaById } from '../../../entity/replica/replica-lookup';
-
-const accountMatchesCounterparty = (
-  account: AccountReplica | null | undefined,
-  ownerEntityId: string,
-  counterpartyId: string,
-): boolean => {
-  const needle = String(counterpartyId || '').toLowerCase();
-  if (!needle) return false;
-
-  const me = String(ownerEntityId || '').toLowerCase();
-  const left = typeof account?.state.leftEntity === 'string' ? account.state.leftEntity.toLowerCase() : '';
-  const right = typeof account?.state.rightEntity === 'string' ? account.state.rightEntity.toLowerCase() : '';
-
-  if (left && right) {
-    if (left === me && right === needle) return true;
-    if (right === me && left === needle) return true;
-  }
-
-  return false;
-};
 
 export const hasAccount = (env: RuntimeReplica, entityId: string, counterpartyId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return false;
-  const needle = counterpartyId.toLowerCase();
-  for (const [key, account] of replica.state.accounts.entries()) {
-    if (typeof key === 'string' && key.toLowerCase() === needle) {
-      return true;
-    }
-    if (accountMatchesCounterparty(account, entityId, counterpartyId)) return true;
-  }
-  return false;
+  return findAccountByCounterparty(replica.state.accounts, entityId, counterpartyId) !== null;
 };
 
 export const getAccountReplica = (
@@ -44,16 +18,7 @@ export const getAccountReplica = (
 ): AccountReplica | null => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return null;
-  const needle = counterpartyId.toLowerCase();
-  for (const [key, account] of replica.state.accounts.entries()) {
-    if (typeof key === 'string' && key.toLowerCase() === needle) {
-      return account ?? null;
-    }
-    if (accountMatchesCounterparty(account, entityId, counterpartyId)) {
-      return account ?? null;
-    }
-  }
-  return null;
+  return findAccountByCounterparty(replica.state.accounts, entityId, counterpartyId);
 };
 
 export const getEntityOutCapacity = (

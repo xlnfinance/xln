@@ -28,7 +28,9 @@ import {
 import { resolveRuntimeJurisdictionConfig } from '../../jurisdiction/machine/jurisdiction-runtime/index.js';
 import { safeStringify } from '../../protocol/serialization/index.js';
 import { commitRuntimeInput, processJEvents, waitScenario } from '../harness/helpers';
-import { quoteHtlcPaymentRoute } from '../../entity/htlc/payment-admission';
+import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
+import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
+import { canonicalEntitySeed } from '../../runtime/registration/entity-creation';
 
 let payRandomCounter = 0;
 const scenarioBoardSigner = (env: RuntimeReplica, alias: string): string => {
@@ -55,7 +57,8 @@ export const resolveScenarioNumberedRegistrationContext = async (
   return { jadapter, payerSignerId } as const;
 };
 
-type ScenarioRegistrationDefinition = Parameters<typeof buildNumberedRegistrationRequest>[1]['entities'][number];
+type NumberedRegistrationDefinition = Parameters<typeof buildNumberedRegistrationRequest>[1]['entities'][number];
+type ScenarioRegistrationDefinition = Omit<NumberedRegistrationDefinition, 'entitySeed'>;
 
 const scenarioRegistrationIntentId = (
   context: ScenarioExecutionContext,
@@ -76,10 +79,16 @@ const registerScenarioEntities = async (
     intentId: scenarioRegistrationIntentId(context, actionIndex, kind),
     jurisdiction,
     payerSignerId,
-    entities: definitions.map(definition => ({
-      ...definition,
-      localSignerId: definition.localSignerId,
-    })),
+    entities: definitions.map((definition, index): NumberedRegistrationDefinition =>
+      definition.localSignerId === null
+        ? { ...definition, localSignerId: null, entitySeed: null }
+        : {
+            ...definition,
+            localSignerId: definition.localSignerId,
+            entitySeed: canonicalEntitySeed(
+              `${context.scenario.seed}:${actionIndex}:${kind}:${index}`,
+            ),
+          }),
   });
   const results = await runNumberedRegistrationIntent(
     env,
@@ -88,10 +97,15 @@ const registerScenarioEntities = async (
     runtimeTxs => commitRuntimeInput(env, { runtimeTxs, entityInputs: [] }).then(() => 'accepted' as const),
     () => processJEvents(env),
   );
-  for (const result of results) {
-    const signerId = result.config.validators[0]!;
-    jadapter.registerEntityWallet?.(result.entityId, ethers.hexlify(getSignerPrivateKey(env, signerId)));
-  }
+  results.forEach((result, index) => {
+    const planned = request.entities[index]!;
+    if (planned.localSignerId !== null) {
+      jadapter.registerEntityWallet?.(
+        result.entityId,
+        ethers.hexlify(getSignerPrivateKey(env, planned.localSignerId)),
+      );
+    }
+  });
   return results;
 };
 
@@ -600,8 +614,7 @@ async function handleLazyGrid(
         const pos = { x: x * spacing, y: y * spacing, z: z * spacing };
 
         // Create in-memory replica (no blockchain registration)
-        runtimeTxs.push({
-          type: 'importReplica' as const,
+        runtimeTxs.push(createTestEntityImportRuntimeTx(env, {
           entityId,
           signerId,
           data: {
@@ -615,7 +628,7 @@ async function handleLazyGrid(
             profileName: gridCoord.slice(0, 4),
             position: pos,
           },
-        });
+        }));
       }
     }
   }

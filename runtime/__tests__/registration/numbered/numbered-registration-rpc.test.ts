@@ -40,6 +40,7 @@ import { commitRuntimeInput, setScenarioStorageEnabled } from '../../../scenario
 import type { JurisdictionConfig } from '../../../entity/types';
 import type { JAdapter } from '../../../jurisdiction/adapter/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { canonicalEntitySeed } from '../../../runtime/registration/entity-creation';
 
 const CHAIN_ID = 31_337;
 
@@ -173,6 +174,7 @@ test('production RPC registration resumes exact WAL bytes after restart and impo
         validators: [{ name: env.runtimeId, weight: 1 }],
         threshold: 1n,
         localSignerId: env.runtimeId,
+        entitySeed: canonicalEntitySeed(seed),
       }],
     });
     const registrationData = adapter.entityProvider.interface.encodeFunctionData(
@@ -303,6 +305,7 @@ test('production RPC registration resumes exact WAL bytes after restart and impo
           validators: [{ name: runtimeId, weight: 1 }],
           threshold: 1n,
           localSignerId: runtimeId,
+          entitySeed: canonicalEntitySeed(seed),
         }],
       });
       expect(remote.authLevel).toBe('admin');

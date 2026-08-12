@@ -501,7 +501,7 @@ export function createGraphEntityNode(options: {
   replica: any;
   userPosition: { x: number; y: number; z: number } | undefined;
   persistedPosition: { x: number; y: number; z: number; jurisdiction: string } | undefined;
-  fallbackJurisdiction: string;
+  defaultJurisdiction: string;
   resolveJMachinePosition(jurisdiction: string): { x: number; y: number; z: number } | null;
   selectedTokenId: number;
   getEntitySize(entityId: string, tokenId: number): number;
@@ -524,7 +524,7 @@ export function createGraphEntityNode(options: {
     if (options.replica?.position) {
       const jurisdictionName =
         options.replica.position.jurisdiction ||
-        options.fallbackJurisdiction ||
+        options.defaultJurisdiction ||
         'default';
       const jurisdiction = options.resolveJMachinePosition(jurisdictionName);
       return jurisdiction

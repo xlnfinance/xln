@@ -42,6 +42,7 @@ import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { getPerfMs } from '../../../infra/time';
 import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
 import { sealAccountDraftAsEntity } from '../../helpers/account-draft';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('account J crash seed and boundary are required');
@@ -105,8 +106,7 @@ enqueueRuntimeInput(env, {
   runtimeTxs: [
     { entityId, signerId: signerA },
     { entityId: counterpartyId, signerId: signerB },
-  ].map(({ entityId: targetEntityId, signerId }) => ({
-    type: 'importReplica' as const,
+  ].map(({ entityId: targetEntityId, signerId }) => createTestEntityImportRuntimeTx(env, {
     entityId: targetEntityId,
     signerId,
     data: {
@@ -227,6 +227,7 @@ applyRuntimeStorageChanges(env, [
   { family: 'entity', entityId: counterpartyId },
 ]);
 await saveRuntimeFrameToStorage({
+  entityContexts: new Map(),
   env,
   tryOpenDb: tryOpenStorageDb,
   getRuntimeDb: getRuntimeStorageDb,
@@ -277,6 +278,7 @@ if (requestedBoundary === 'before-authoritative-history-commit') {
 }
 
 await saveRuntimeFrameToStorage({
+  entityContexts: new Map(),
   env,
   currentFrameInput: appliedRuntime.appliedRuntimeInput,
   tryOpenDb: tryOpenStorageDb,

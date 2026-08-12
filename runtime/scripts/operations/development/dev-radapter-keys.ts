@@ -19,10 +19,10 @@ const RUNTIMES: DevRuntime[] = [
 
 const args = process.argv.slice(2);
 
-const readArg = (name: string, fallback?: string): string | undefined => {
+const readArg = (name: string, defaultValue?: string): string | undefined => {
   const index = args.indexOf(name);
-  if (index < 0) return fallback;
-  return args[index + 1] || fallback;
+  if (index < 0) return defaultValue;
+  return args[index + 1] || defaultValue;
 };
 
 const hasFlag = (name: string): boolean => args.includes(name);

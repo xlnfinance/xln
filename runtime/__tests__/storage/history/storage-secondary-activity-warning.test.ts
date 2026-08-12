@@ -56,6 +56,7 @@ describe('secondary storage error severity', () => {
       materializedState: true,
       entityHashes: [],
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
+      entityContexts: new Map(),
       historyRecords: [],
       activityLogs: [],
       touchedEntities: [],

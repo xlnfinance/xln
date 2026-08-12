@@ -198,7 +198,6 @@ const makeEnv = (): RuntimeReplica =>
                     deltas: new Map(),
                     locks: new Map(),
                     swapOffers: new Map(),
-                    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
                     currentHeight: 1,
                     pendingSignatures: [],
                     rollbackCount: 0,
@@ -321,9 +320,9 @@ const makeTestDelta = (tokenId: number, value: bigint): Delta => ({
 
 const compareAscii = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
-const readTestPageLimit = (raw: unknown, fallback = 10): number => {
-  const numeric = Number(raw ?? fallback);
-  return Math.max(1, Math.min(500, Number.isFinite(numeric) ? Math.floor(numeric) : fallback));
+const readTestPageLimit = (raw: unknown, defaultValue = 10): number => {
+  const numeric = Number(raw ?? defaultValue);
+  return Math.max(1, Math.min(500, Number.isFinite(numeric) ? Math.floor(numeric) : defaultValue));
 };
 
 const makeTestViewPageLoader =

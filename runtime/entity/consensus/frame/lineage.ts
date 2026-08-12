@@ -82,6 +82,7 @@ export const buildCertifiedEntityFrameLink = (
     entityId,
     postStateRoot,
     authorityRoot,
+    frame.entityContext,
     frame.jPrefixCertificate,
   );
   if (recomputed !== frame.hash) {

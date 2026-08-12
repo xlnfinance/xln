@@ -1,5 +1,4 @@
 import type { DerivedDelta } from '@xln/runtime/api/public/runtime-module';
-import { formatAmount } from '../runtime/format';
 
 const max = (a: bigint, b: bigint): bigint => (a > b ? a : b);
 
@@ -40,55 +39,19 @@ export function DeltaBar({ derived, height = 6 }: { derived: DerivedDelta; heigh
 	);
 }
 
-function LegendItem({
-	cls,
-	label,
-	value,
-	decimals,
-}: {
-	cls: string;
-	label: string;
-	value: bigint;
-	decimals: number;
-}) {
+/** Static color key for the bar's three segment kinds — own credit, collateral, peer credit. */
+export function DeltaLegend() {
 	return (
-		<span style={{ opacity: value > 0n ? 1 : 0.35 }}>
-			<i className={cls} /> {label} <b className="num">{formatAmount(value, decimals, 2)}</b>
-		</span>
-	);
-}
-
-/**
- * Numbers under the bar, one line per direction — every segment named and
- * quantified so credit vs collateral vs unused credit reads at a glance.
- */
-export function DeltaBreakdown({
-	derived,
-	decimals,
-	symbol,
-}: {
-	derived: DerivedDelta;
-	decimals: number;
-	symbol: string;
-}) {
-	return (
-		<div className="delta-breakdown">
-			<div className="delta-legend">
-				<span className="delta-side">
-					← send {formatAmount(derived.outCapacity, decimals, 2)} {symbol}
-				</span>
-				<LegendItem cls="dbar-own" label="your unused credit" value={derived.outOwnCredit} decimals={decimals} />
-				<LegendItem cls="dbar-coll" label="collateral" value={derived.outCollateral} decimals={decimals} />
-				<LegendItem cls="dbar-peer" label="their debt to you" value={derived.outPeerCredit} decimals={decimals} />
-			</div>
-			<div className="delta-legend">
-				<span className="delta-side">
-					receive {formatAmount(derived.inCapacity, decimals, 2)} {symbol} →
-				</span>
-				<LegendItem cls="dbar-own" label="your debt" value={derived.inOwnCredit} decimals={decimals} />
-				<LegendItem cls="dbar-coll" label="collateral" value={derived.inCollateral} decimals={decimals} />
-				<LegendItem cls="dbar-peer" label="their unused credit" value={derived.inPeerCredit} decimals={decimals} />
-			</div>
+		<div className="delta-legend">
+			<span>
+				<i className="dbar-own" /> unused credit
+			</span>
+			<span>
+				<i className="dbar-coll" /> collateral
+			</span>
+			<span>
+				<i className="dbar-peer" /> counterparty credit
+			</span>
 		</div>
 	);
 }

@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { requiresFoundationAttestation } from '../../frontend/src/lib/releases/release-signature.ts';
 
 const decode = (value: Uint8Array): string => new TextDecoder().decode(value).trim();
 
@@ -167,7 +166,7 @@ export function assertReleaseVersionMatchesSource(root: string, requestedVersion
 }
 
 export function assertReleaseSigningConfigured(version: string, signingKeys?: string): void {
-  if (requiresFoundationAttestation(version) && !signingKeys) {
+  if (!signingKeys) {
     throw new Error(`RELEASE_SIGNING_KEYS_REQUIRED:${version}`);
   }
 }

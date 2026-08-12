@@ -116,6 +116,23 @@ describe('proof-builder dispute hash', () => {
     expect(() => buildAccountProofBody(accountMachine, '')).toThrow('MISSING_DELTA_TRANSFORMER_ADDRESS');
   });
 
+  test('maps exclusive runtime HTLC expiry to the inclusive Solidity deadline', () => {
+    const proofForTimelock = (timelock: bigint) => buildAccountProofBody(proofAccount({
+      deltas: new Map([[1, { offdelta: 0n }]]),
+      locks: new Map([['lock-deadline', {
+        tokenId: 1,
+        senderIsLeft: true,
+        amount: 1n,
+        timelock,
+        revealBeforeHeight: 123,
+        hashlock: `0x${'11'.repeat(32)}`,
+      }]]),
+    }), DEPOSITORY).runtimeProofBody.transformers[0]?.batch?.payments[0]?.revealedUntilTimestamp;
+
+    expect(proofForTimelock(10_000n)).toBe(9);
+    expect(proofForTimelock(10_001n)).toBe(10);
+  });
+
   test('fails fast when an HTLC lock references a token without a delta slot', () => {
     const accountMachine = proofAccount({
       deltas: new Map([[1, { offdelta: 0n }]]),

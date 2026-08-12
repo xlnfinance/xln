@@ -6,7 +6,7 @@ import { signedEntityCommandTx } from '../../../../entity/command/command-codec'
 import { applyEntityInput, mergeEntityInputs } from '../../../../entity/consensus';
 import { hasVerifiedEntityCommitPrecertificate } from '../../../../entity/consensus/commit/precheck';
 import { prioritizeEntityConsensusInputs } from '../../../../entity/consensus/input/merge';
-import { deriveLocalEntityCryptoKeys } from '../../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../../helpers/cross-j';
 import {
   buildEntityLeaderVoteBody,
   hashEntityLeaderVoteBody,
@@ -234,8 +234,10 @@ describe('leader timeout / old-view proposal ordering regression', () => {
 
     for (const signerId of fixture.state.config.validators) {
       const localReplica = replica(fixture.state, signerId);
-      const keys = deriveLocalEntityCryptoKeys(fixture.env, fixture.state.entityId, signerId);
-      localReplica.entityEncPubKey = keys.publicKey;
+      fixture.state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(
+        fixture.env,
+        fixture.state.entityId,
+      );
       fixture.env.state.eReplicas.set(`${fixture.state.entityId}:${signerId}`, localReplica);
     }
     fixture.env.infrastructure = { ...fixture.env.infrastructure, maxEntityInputsPerFrame: 1 };

@@ -160,7 +160,7 @@ export function getDirectionalEdgeCapacity(
   return fromOut > toIn ? fromOut : toIn;
 }
 
-export function hasCertifiedEntityEncryptionManifest(
+export function hasCertifiedEntityEncryptionKey(
   _replicaMap: ReadonlyMap<string, LocalReplicaLike>,
   profiles: readonly GossipProfile[],
   entityId: string,
@@ -170,11 +170,7 @@ export function hasCertifiedEntityEncryptionManifest(
 
   const profile = findProfileByEntityId(profiles, entityId);
   if (!profile?.metadata.profileHanko || !profile.runtimeSignature) return false;
-  const validators = profile.metadata.board.validators;
-  const attestations = profile.metadata.board.encryptionAttestations;
-  if (validators.length === 0 || attestations.length !== validators.length) return false;
-  const keys = attestations.map((attestation) => normalizeEnvelopeKey(attestation.encryptionPublicKey));
-  return keys.every((key): key is string => key !== null) && new Set(keys).size === validators.length;
+  return normalizeEnvelopeKey(profile.entityEncryptionPublicKey) !== null;
 }
 
 export function quoteHop(

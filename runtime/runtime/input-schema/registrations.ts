@@ -112,7 +112,7 @@ export const validateNumberedRecord = (value: unknown, code: string): void => {
       const entity = requireBoundaryRecord(raw, `${code}_REQUEST_ENTITY_${index}`);
       requireExactBoundaryKeys(
         entity,
-        ['name', 'boardHash', 'config', 'localSignerId'],
+        ['name', 'boardHash', 'config', 'localSignerId', 'entitySeed'],
         ['profileName', 'position'],
         `${code}_REQUEST_ENTITY_${index}_FIELDS`,
       );
@@ -121,6 +121,12 @@ export const validateNumberedRecord = (value: unknown, code: string): void => {
       validateConsensusConfig(entity['config'], `${code}_REQUEST_ENTITY_${index}_CONFIG`);
       if (entity['localSignerId'] !== null) {
         requireString(entity['localSignerId'], `${code}_REQUEST_ENTITY_${index}_LOCAL_SIGNER`);
+        requireString(entity['entitySeed'], `${code}_REQUEST_ENTITY_${index}_SEED`);
+        if (!/^0x[0-9a-f]{128}$/.test(entity['entitySeed'] as string)) {
+          throw new Error(`${code}_REQUEST_ENTITY_${index}_SEED_CANONICAL`);
+        }
+      } else if (entity['entitySeed'] !== null) {
+        throw new Error(`${code}_REQUEST_ENTITY_${index}_PAYER_ONLY_SEED_FORBIDDEN`);
       }
       if (entity['profileName'] !== undefined) requireString(entity['profileName'], `${code}_REQUEST_ENTITY_${index}_PROFILE`);
       if (entity['position'] !== undefined) validateEntityPosition(entity['position'], `${code}_REQUEST_ENTITY_${index}_POSITION`);

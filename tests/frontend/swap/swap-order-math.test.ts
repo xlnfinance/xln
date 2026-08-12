@@ -26,7 +26,7 @@ describe('swap order math', () => {
     expect(result?.effectiveWant).toBeGreaterThan(0n);
   });
 
-  test('parses display price ticks with fallback for invalid values', () => {
+  test('parses display price ticks with an explicit default for invalid values', () => {
     expect(parseSwapDisplayPriceTicks('1.2345', 999n)).toBe(12_345n);
     expect(parseSwapDisplayPriceTicks('0', 999n)).toBe(999n);
     expect(parseSwapDisplayPriceTicks('bad', 999n)).toBe(999n);

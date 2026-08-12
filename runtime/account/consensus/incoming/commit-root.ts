@@ -50,14 +50,12 @@ export const assertLiveCommitMatchesFrame = (
     },
     liveFinancial: {
       deltas: Array.from(account.state.deltas.entries()),
-      globalCreditLimits: account.state.globalCreditLimits,
       jNonce: account.state.jNonce,
       disputeConfig: account.state.disputeConfig,
     },
     ...(validatedMachine ? {
       validatedFinancial: {
         deltas: Array.from(validatedMachine.state.deltas.entries()),
-        globalCreditLimits: validatedMachine.state.globalCreditLimits,
         jNonce: validatedMachine.state.jNonce,
         disputeConfig: validatedMachine.state.disputeConfig,
       },

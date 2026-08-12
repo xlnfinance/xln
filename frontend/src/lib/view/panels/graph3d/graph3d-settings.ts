@@ -45,26 +45,24 @@ function cloneDefaultBirdViewSettings(): BirdViewSettings {
 }
 
 export function normalizeBirdViewSettings(value: unknown): BirdViewSettings {
-  if (!value || typeof value !== 'object') return cloneDefaultBirdViewSettings();
-
-  const parsed = { ...(value as Partial<BirdViewSettings> & { selectedTokenId?: unknown }) } as BirdViewSettings & {
-    selectedTokenId?: unknown;
-  };
-  if (typeof parsed.selectedTokenId === 'string') parsed.selectedTokenId = Number(parsed.selectedTokenId);
-  if (parsed.rotationX === undefined) parsed.rotationX = 0;
-  if (parsed.rotationY === undefined) parsed.rotationY = 0;
-  if (parsed.rotationZ === undefined) parsed.rotationZ = 0;
-  if (parsed.barsMode === undefined) parsed.barsMode = 'close';
-  return parsed as BirdViewSettings;
+  if (!value || typeof value !== 'object') throw new Error('BIRD_VIEW_SETTINGS_INVALID');
+  const parsed = value as Record<string, unknown>;
+  if ((parsed['barsMode'] !== 'close' && parsed['barsMode'] !== 'spread') ||
+    !Number.isSafeInteger(parsed['selectedTokenId']) || Number(parsed['selectedTokenId']) <= 0 ||
+    (parsed['viewMode'] !== '2d' && parsed['viewMode'] !== '3d') ||
+    (parsed['entityMode'] !== 'sphere' && parsed['entityMode'] !== 'identicon') ||
+    typeof parsed['wasLastOpened'] !== 'boolean' ||
+    !Number.isFinite(parsed['rotationX']) ||
+    !Number.isFinite(parsed['rotationY']) ||
+    !Number.isFinite(parsed['rotationZ'])) {
+    throw new Error('BIRD_VIEW_SETTINGS_INVALID');
+  }
+  return parsed as unknown as BirdViewSettings;
 }
 
 export function readBirdViewSettings(storage: BirdViewSettingsStorage | null | undefined): BirdViewSettings {
-  try {
-    const saved = storage?.getItem(BIRD_VIEW_SETTINGS_STORAGE_KEY);
-    return saved ? normalizeBirdViewSettings(JSON.parse(saved)) : cloneDefaultBirdViewSettings();
-  } catch {
-    return cloneDefaultBirdViewSettings();
-  }
+  const saved = storage?.getItem(BIRD_VIEW_SETTINGS_STORAGE_KEY);
+  return saved ? normalizeBirdViewSettings(JSON.parse(saved)) : cloneDefaultBirdViewSettings();
 }
 
 export function buildBirdViewSettings(input: BirdViewSettingsInput): BirdViewSettings {

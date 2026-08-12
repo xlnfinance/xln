@@ -112,7 +112,7 @@
       const signerId = signer?.address || '';
       const runtimeEntry = $runtimeEntries.get(runtime.id);
       const status = runtimeEntry?.status || 'inactive';
-      const fallbackSummaries = signer?.entityId ? [{
+      const knownSignerSummaries = signer?.entityId ? [{
         entityId: signer.entityId,
         signerId,
         label: signer.entityId,
@@ -120,7 +120,7 @@
         ...(signer.jurisdiction ? { jurisdiction: { name: signer.jurisdiction } } : {}),
       }] : [];
       const entityMap = collectEntitySummaries(
-        projectionSummariesForRuntime(runtime.id, fallbackSummaries),
+        projectionSummariesForRuntime(runtime.id, knownSignerSummaries),
         signerId,
         signer?.entityId || null,
       );
@@ -153,7 +153,7 @@
 
   function buildRemoteRuntimeGroup(runtime: StoreRuntime): RuntimeSummary {
     const entities = collectEntitySummaries(
-      projectionSummariesForRuntime(runtime.id, remoteRuntimeFallbackSummaries(runtime)),
+      projectionSummariesForRuntime(runtime.id, remoteRuntimeKnownSummaries(runtime)),
       '',
       runtime.hubEntityId || null,
     );
@@ -225,7 +225,7 @@
 
   type ContextRuntimeEntitySummary = RuntimeAdapterEntitySummary & { isPlaceholder?: boolean };
 
-  function remoteRuntimeFallbackSummaries(runtime: StoreRuntime): ContextRuntimeEntitySummary[] {
+  function remoteRuntimeKnownSummaries(runtime: StoreRuntime): ContextRuntimeEntitySummary[] {
     const summaries: ContextRuntimeEntitySummary[] = [];
     const seen = new Set<string>();
     const add = (
@@ -271,7 +271,7 @@
 
   function projectionSummariesForRuntime(
     runtimeId: string,
-    fallbackSummaries: ContextRuntimeEntitySummary[],
+    knownSummaries: ContextRuntimeEntitySummary[],
   ): ContextRuntimeEntitySummary[] {
     const summaries = new Map<string, ContextRuntimeEntitySummary>();
     const add = (summary: ContextRuntimeEntitySummary | null | undefined): void => {
@@ -291,7 +291,7 @@
       if (summary?.isPlaceholder === true || previous?.isPlaceholder === true) merged.isPlaceholder = true;
       summaries.set(entityId, merged);
     };
-    for (const summary of fallbackSummaries) add(summary);
+    for (const summary of knownSummaries) add(summary);
     if (normalizeId(runtimeId) === controllerRuntimeId || normalizeId(runtimeId) === normalizeId($runtimeView.runtimeId)) {
       for (const summary of $runtimeView.entities ?? []) {
         const projectionRuntimeId = normalizeId(summary?.runtimeId);

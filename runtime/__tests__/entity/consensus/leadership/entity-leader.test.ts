@@ -7,7 +7,7 @@ import {
   getEntityLeaderState,
   getEntityLeaderTimeoutMs,
   getEntityQuorumSafetyWarning,
-  getNextEntityFallbackLeader,
+  getNextEntityFailoverLeader,
 } from '../../../../entity/consensus/leader';
 import {
   deriveSignerAddressSync,
@@ -17,7 +17,7 @@ import {
   verifyAccountSignature,
 } from '../../../../account/crypto';
 import { applyEntityInput } from '../../../../entity/consensus';
-import { applyEntityFrame } from '../../../../entity/consensus';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../../helpers/entity-frame';
 import { buildSignedEntityCommand } from '../../../../entity/command';
 import { signedEntityCommandTx } from '../../../../entity/command/command-codec';
 import { createEntityFrameHash, createEntityFrameHashFromStateRoot } from '../../../../entity/consensus/frame';
@@ -68,6 +68,7 @@ const config = (threshold = 10n): ConsensusConfig => ({
 
 const state = (leaderState?: EntityState['leaderState']): EntityState => ({
   entityId: 'entity',
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 7,
   timestamp: 1_000,
   nonces: new Map(),
@@ -86,15 +87,15 @@ const state = (leaderState?: EntityState['leaderState']): EntityState => ({
 });
 
 describe('entity leader policy', () => {
-  test('keeps validators[0] as CEO and sorts only fallback validators by stake', () => {
+  test('keeps validators[0] as CEO and sorts only successor validators by stake', () => {
     expect(getEntityLeaderOrder(config())).toEqual(['ceo', 'bob', 'carol', 'alice']);
     expect(getEntityLeaderState(state()).activeValidatorId).toBe('ceo');
-    expect(getNextEntityFallbackLeader(state())).toBe('bob');
+    expect(getNextEntityFailoverLeader(state())).toBe('bob');
   });
 
   test('never returns automatically to CEO after failover', () => {
-    expect(getNextEntityFallbackLeader(state({ activeValidatorId: 'bob', view: 1, changedAtHeight: 8 }))).toBe('carol');
-    expect(getNextEntityFallbackLeader(state({ activeValidatorId: 'alice', view: 3, changedAtHeight: 10 }))).toBe('bob');
+    expect(getNextEntityFailoverLeader(state({ activeValidatorId: 'bob', view: 1, changedAtHeight: 8 }))).toBe('carol');
+    expect(getNextEntityFailoverLeader(state({ activeValidatorId: 'alice', view: 3, changedAtHeight: 10 }))).toBe('bob');
   });
 
   test('builds the exact next-height view-change vote body', () => {
@@ -163,7 +164,7 @@ describe('entity leader policy', () => {
     expect(() => validateEntityReplica(replica)).toThrow('votes cannot be empty');
   });
 
-  test('certifies fallback leader from signed timeout votes and lets it propose', async () => {
+  test('certifies failover leader from signed timeout votes and lets it propose', async () => {
     const env = createEmptyEnv('entity-leader-failover');
     env.scenarioMode = true;
     env.state.timestamp = 10_000;
@@ -183,7 +184,7 @@ describe('entity leader policy', () => {
     base.config = board;
     const command = signedEntityCommandTx(buildSignedEntityCommand(env, base, '2', [{
       type: 'chat' as const,
-      data: { from: '2', message: 'fallback leader command' },
+      data: { from: '2', message: 'failover leader command' },
     }]));
     const replicas = new Map<string, EntityReplica>();
     for (const signerId of board.validators) {
@@ -253,8 +254,19 @@ describe('entity leader policy', () => {
     env.scenarioMode = true;
     env.state.timestamp = 2_000;
     const committedState = state();
-    committedState.entityId = '9';
+    committedState.entityId = `0x${'09'.repeat(32)}`;
     committedState.height = 1;
+    const committedContext = {
+      version: 1 as const,
+      proposerReplicaId: `${committedState.entityId}:ceo`,
+      entityId: committedState.entityId,
+      proposerSignerId: 'ceo',
+      parentFrameHash: 'genesis',
+      height: 1,
+      gossipProfiles: [],
+      peerAssertions: [],
+      htlc: { version: 1 as const, entries: [], originated: [] },
+    };
     const committedStateRoot = computeCanonicalEntityConsensusStateHash(committedState);
     const committedAuthorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(committedState));
     const committedHash = createEntityFrameHashFromStateRoot(
@@ -266,11 +278,13 @@ describe('entity leader policy', () => {
       committedState.entityId,
       committedStateRoot,
       committedAuthorityRoot,
+      committedContext,
     );
     committedState.prevFrameHash = committedHash;
     const nextState = { ...committedState, height: 2 };
     const nextStateRoot = computeCanonicalEntityConsensusStateHash(nextState);
     const nextAuthorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(nextState));
+    const nextContext = { ...committedContext, parentFrameHash: committedHash, height: 2 };
     const nextHash = createEntityFrameHashFromStateRoot(
       committedHash,
       2,
@@ -280,6 +294,7 @@ describe('entity leader policy', () => {
       committedState.entityId,
       nextStateRoot,
       nextAuthorityRoot,
+      nextContext,
     );
     const staleFrame: EntityFrame = {
       height: 1,
@@ -289,6 +304,7 @@ describe('entity leader policy', () => {
       timestamp: committedState.timestamp,
       txs: [],
       events: [],
+      entityContext: committedContext,
       hash: committedHash,
       leader: { proposerSignerId: 'ceo', view: 0 },
       hashesToSign: buildEntityHashesToSign(
@@ -306,6 +322,7 @@ describe('entity leader policy', () => {
       timestamp: committedState.timestamp,
       txs: [],
       events: [],
+      entityContext: nextContext,
       hash: nextHash,
       leader: { proposerSignerId: 'ceo', view: 0 },
       hashesToSign: buildEntityHashesToSign(
@@ -440,7 +457,7 @@ describe('entity leader policy', () => {
       buildCertifiedJPrefixTx(proposerEnv, proposerReplica, certificate, proposerId),
     ];
     const preparedTimestamp = 10_000;
-    const replay = await applyEntityFrame(proposerEnv, base, preparedTxs, preparedTimestamp);
+    const replay = await applyEntityFrameWithMaterializedTestInfraContext(proposerEnv, base, preparedTxs, preparedTimestamp);
     const preparedState: EntityState = {
       ...replay.newState,
       entityId: base.entityId,
@@ -454,6 +471,7 @@ describe('entity leader policy', () => {
       preparedTimestamp,
       preparedTxs,
       preparedState,
+      replay.entityContext,
       certificate,
       replay.events,
     );
@@ -466,6 +484,7 @@ describe('entity leader policy', () => {
       timestamp: preparedTimestamp,
       txs: structuredClone(preparedTxs),
       events: structuredClone(replay.events),
+      entityContext: replay.entityContext,
       hash: preparedHash,
       leader: { proposerSignerId: proposerId, view: 0 },
       jPrefixCertificate: structuredClone(certificate),
@@ -594,7 +613,7 @@ describe('entity leader policy', () => {
     const preparedTxs: EntityTx[] = [signedEntityCommandTx(
       buildSignedEntityCommand(env, base, proposerId, preparedUserTxs),
     )];
-    const preparedResult = await applyEntityFrame(env, base, preparedTxs, preparedTimestamp);
+    const preparedResult = await applyEntityFrameWithMaterializedTestInfraContext(env, base, preparedTxs, preparedTimestamp);
     const preparedState: EntityState = {
       ...preparedResult.newState,
       entityId: base.entityId,
@@ -610,6 +629,7 @@ describe('entity leader policy', () => {
       preparedTimestamp,
       preparedTxs,
       preparedState,
+      preparedResult.entityContext,
       undefined,
       preparedResult.events,
     );
@@ -627,6 +647,7 @@ describe('entity leader policy', () => {
       timestamp: preparedTimestamp,
       txs: structuredClone(preparedTxs),
       events: structuredClone(preparedResult.events),
+      entityContext: preparedResult.entityContext,
       hash: preparedHash,
       leader: { proposerSignerId: proposerId, view: 0 },
       hashesToSign: preparedManifest,
@@ -712,7 +733,7 @@ describe('entity leader policy', () => {
     vote4.signature = signAccountFrame(env, '4', hashEntityLeaderVoteBody(vote4));
 
     const conflictingTimestamp = preparedTimestamp + 1;
-    const conflictingResult = await applyEntityFrame(env, base, [], conflictingTimestamp);
+    const conflictingResult = await applyEntityFrameWithMaterializedTestInfraContext(env, base, [], conflictingTimestamp);
     const conflictingState: EntityState = {
       ...conflictingResult.newState,
       entityId: base.entityId,
@@ -728,6 +749,7 @@ describe('entity leader policy', () => {
       conflictingTimestamp,
       [],
       conflictingState,
+      conflictingResult.entityContext,
     );
     const conflictingManifest = buildEntityHashesToSign(
       base.entityId,
@@ -743,6 +765,7 @@ describe('entity leader policy', () => {
       timestamp: conflictingTimestamp,
       txs: [],
       events: [],
+      entityContext: conflictingResult.entityContext,
       hash: conflictingHash,
       leader: { proposerSignerId: proposerId, view: 0 },
       hashesToSign: conflictingManifest,
@@ -847,6 +870,7 @@ describe('entity leader policy', () => {
       preparedTimestamp,
       preparedTxs,
       certified.workingReplica.state,
+      preparedResult.entityContext,
     )).toBe(preparedHash);
 
     let reordered = { workingReplica: structuredClone(replica) };

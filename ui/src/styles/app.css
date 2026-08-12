@@ -560,23 +560,36 @@
 	display: flex;
 	width: 100%;
 	border-radius: 4px;
-	overflow: visible;
+	overflow: hidden;
+	background: var(--hairline);
 }
 
-.dbar-zone {
+.dbar-half {
+	flex: 1 1 0;
+	display: flex;
 	height: 100%;
+	min-width: 0;
 }
 
-.dbar-zone:first-child {
-	border-radius: 4px 0 0 4px;
+/* out (send) half reads outward-in: peer debt, collateral, your unused credit */
+.dbar-out {
+	flex-direction: row-reverse;
 }
 
-.dbar-zone:nth-last-child(2) {
-	border-radius: 0 4px 4px 0;
+.dbar-seg {
+	display: block;
+	height: 100%;
+	transition: width var(--dur-slow) var(--ease);
+}
+
+.dbar-notch {
+	flex: 0 0 1.5px;
+	width: 1.5px;
+	background: var(--ink-3);
 }
 
 .dbar-own {
-	background: color-mix(in srgb, var(--champagne) 42%, transparent);
+	background: color-mix(in srgb, var(--champagne) 55%, transparent);
 }
 
 .dbar-coll {
@@ -584,25 +597,7 @@
 }
 
 .dbar-peer {
-	background: var(--hairline-2);
-}
-
-.dbar-marker {
-	position: absolute;
-	top: -4px;
-	bottom: -4px;
-	width: 2px;
-	margin-left: -1px;
-	background: var(--ink);
-	border-radius: 1px;
-	box-shadow: 0 0 6px color-mix(in srgb, var(--ink) 50%, transparent);
-}
-
-.dbar-marker-chip {
-	width: 2px !important;
-	height: 12px !important;
-	border-radius: 1px !important;
-	background: var(--ink);
+	background: color-mix(in srgb, var(--danger) 50%, transparent);
 }
 
 .delta-legend {

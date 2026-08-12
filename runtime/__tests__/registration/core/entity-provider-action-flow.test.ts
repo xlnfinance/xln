@@ -13,7 +13,8 @@ import {
 import { buildCollectiveEntityProposalTx } from '../../../entity/auth/authorization';
 import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
-import { applyEntityFrame, applyEntityInput } from '../../../entity/consensus';
+import { applyEntityInput } from '../../../entity/consensus';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import { commitEntityFrameCandidateState } from '../../../entity/state-clone';
 import { applyEntityTx } from '../../../entity/tx/apply';
 import { handleEntityProviderTransfer } from '../../../entity/tx/handlers/entity-provider-action';
@@ -22,7 +23,7 @@ import {
   applyEntityProviderActionExecuted,
 } from '../../../entity/tx/j-events-entity-provider-action';
 import { encodeBoard, hashBoard } from '../../../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 import { buildQuorumHanko, verifyHankoForHash } from '../../../hanko/signing';
 import { buildSingleSignerHanko } from '../../../hanko/batch';
 import {
@@ -72,6 +73,7 @@ const blockHash = (byte: string): string => `0x${byte.repeat(32)}`;
 
 const baseState = (entityId: string, config: ConsensusConfig, timestamp: number): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 0,
   timestamp,
   nonces: new Map(),
@@ -160,11 +162,10 @@ const setup = (label = 'single') => {
   };
   const state = baseState(numberedEntityId(2n), config, env.state.timestamp);
   installCertifiedBoardAuthority(env, state);
-  const localKeys = deriveLocalEntityCryptoKeys(env, state.entityId, signerId);
+  state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, state.entityId);
   const replica: EntityReplica = {
     entityId: state.entityId,
     signerId,
-    entityEncPubKey: localKeys.publicKey,
     state,
     mempool: [],
     isProposer: true,
@@ -313,7 +314,7 @@ describe('EntityProvider action flow', () => {
       fixture.signerId,
       [cancelProposal],
     );
-    const quorumAuthorized = await applyEntityFrame(
+    const quorumAuthorized = await applyEntityFrameWithMaterializedTestInfraContext(
       fixture.env,
       original.result.newState,
       [signedEntityCommandTx(cancelCommand)],
@@ -427,7 +428,7 @@ describe('EntityProvider action flow', () => {
       fixture.signerId,
       [proposal],
     );
-    const applied = await applyEntityFrame(
+    const applied = await applyEntityFrameWithMaterializedTestInfraContext(
       fixture.env,
       fixture.state,
       [signedEntityCommandTx(command)],
@@ -834,6 +835,7 @@ describe('EntityProvider action flow', () => {
       registerSignerKey(preparationEnv, signerId, deriveSignerKeySync(boardSeed, labels[index]!)));
     const entityId = hashBoard(encodeBoard(config, preparationEnv)).toLowerCase();
     const genesis = baseState(entityId, config, preparationEnv.state.timestamp);
+    genesis.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(preparationEnv, entityId);
     installCertifiedBoardAuthority(preparationEnv, genesis);
     const proposalCommand = buildSignedEntityCommand(
       preparationEnv,
@@ -841,7 +843,7 @@ describe('EntityProvider action flow', () => {
       signers[0]!,
       [buildCollectiveEntityProposalTx(signers[0]!, [transferTx()])],
     );
-    const proposalFrame = await applyEntityFrame(
+    const proposalFrame = await applyEntityFrameWithMaterializedTestInfraContext(
       preparationEnv,
       genesis,
       [signedEntityCommandTx(proposalCommand)],
@@ -858,7 +860,7 @@ describe('EntityProvider action flow', () => {
       signers[1]!,
       [{ type: 'vote', data: { proposalId, voter: signers[1]!, choice: 'yes' } }],
     );
-    const twoVotes = await applyEntityFrame(
+    const twoVotes = await applyEntityFrameWithMaterializedTestInfraContext(
       preparationEnv,
       proposalFrame.newState,
       [signedEntityCommandTx(secondVote)],
@@ -874,6 +876,9 @@ describe('EntityProvider action flow', () => {
       env.state.timestamp = 5_003;
       env.runtimeId = signerId;
       registerSignerKey(env, signerId, deriveSignerKeySync(boardSeed, labels[index]!));
+      expect(provisionTestEntityEncryptionKey(env, entityId)).toBe(
+        twoVotes.newState.entityEncryptionPublicKey,
+      );
       cacheCertifiedBoardNodes(env, getCertifiedBoardNodeStore(preparationEnv));
       env.state.jReplicas.set('EntityProviderActions', {
         name: 'EntityProviderActions',

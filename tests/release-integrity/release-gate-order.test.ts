@@ -15,6 +15,20 @@ const collectCrossJReleaseTests = (directory: string): string[] => (
 );
 
 describe('release gate ordering', () => {
+  test('every GitHub workflow action is pinned to an immutable commit', () => {
+    const workflows = readdirSync('.github/workflows')
+      .filter(name => name.endsWith('.yml'))
+      .map(name => `.github/workflows/${name}`);
+    expect(workflows.length).toBeGreaterThan(0);
+    for (const path of workflows) {
+      const workflow = readFileSync(path, 'utf8');
+      const actions = [...workflow.matchAll(/^\s*uses:\s+\S+@([^\s#]+)/gm)]
+        .map(match => match[1]);
+      expect(actions.length).toBeGreaterThan(0);
+      expect(actions.every(revision => /^[0-9a-f]{40}$/.test(revision))).toBe(true);
+    }
+  });
+
   test('runs one full E2E only after every cheaper release check', () => {
     const result = Bun.spawnSync({
       cmd: ['bun', 'runtime/scripts/release/run-release-gate.ts', '--profile=release', '--plan'],
@@ -76,6 +90,20 @@ describe('release gate ordering', () => {
     expect(workflow).toContain('git ls-remote --exit-code origin "refs/tags/$RELEASE_TAG^{}"');
     expect(workflow).toContain('test "$remote_sha" = "$RELEASE_SHA"');
     expect(workflow).toContain('gh release create "$RELEASE_TAG"');
+    expect(workflow).toContain('Build signed and notarized macOS release');
+    expect(workflow).toContain('XLN_MACOS_CODESIGN_IDENTITY');
+    expect(workflow).toContain('Build signed Android release');
+    expect(workflow).toContain('XLN_ANDROID_KEYSTORE_PATH');
+    expect(workflow).toContain('XLN_ANDROID_SIGNER_CERT_SHA256');
     expect(workflow).not.toContain('inputs.tag');
+  });
+
+  test('launcher has no mutable registry-tag updater', () => {
+    const launcher = readFileSync('packages/npm/xlnfinance/bin/xln.js', 'utf8');
+    const channels = readFileSync('release/channels.json', 'utf8');
+    expect(launcher).not.toContain('xlnfinance@latest');
+    expect(launcher).not.toContain("command === 'update'");
+    expect(channels).toContain('versioned-github-release-archive');
+    expect(channels).toContain('explicit-immutable-versioned-release-install');
   });
 });

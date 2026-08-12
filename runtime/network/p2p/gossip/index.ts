@@ -11,7 +11,6 @@ import { buildNetworkGraph } from '../../../routing/graph';
 import { PathFinder, type PaymentRoute } from '../../../routing/pathfinding';
 import {
   canonicalizeProfile,
-  getBoardPrimaryPublicKey,
   isHubProfile,
   type Profile,
 } from '../../../entity/profile';
@@ -46,8 +45,7 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
       || newTimestamp > existingTimestamp
       || (newTimestamp === existingTimestamp && (
         existing.runtimeId !== normalized.runtimeId
-        || getBoardPrimaryPublicKey(existing.metadata.board, existing.entityId)
-          !== getBoardPrimaryPublicKey(normalized.metadata.board, normalized.entityId)
+        || existing.entityEncryptionPublicKey !== normalized.entityEncryptionPublicKey
         || existing.accounts.length !== normalized.accounts.length
       ));
 

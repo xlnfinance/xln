@@ -86,7 +86,7 @@ const withKeyStore = async <T>(
   }
 };
 
-const legacyKeyId = (runtimeId: string): string => runtimeId.trim().toLowerCase();
+const normalizedRuntimeKeyId = (runtimeId: string): string => runtimeId.trim().toLowerCase();
 
 const randomKeyId = (): string => {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -94,7 +94,7 @@ const randomKeyId = (): string => {
 };
 
 const deviceKeyId = (runtimeId: string, protectedSecrets: ProtectedVaultSecrets): string =>
-  `${legacyKeyId(runtimeId)}:${protectedSecrets.keyId}`;
+  `${normalizedRuntimeKeyId(runtimeId)}:${protectedSecrets.keyId}`;
 
 const putDeviceKey = (runtimeId: string, protectedSecrets: ProtectedVaultSecrets, key: CryptoKey): Promise<IDBValidKey> =>
   withKeyStore('readwrite', store => store.put(key, deviceKeyId(runtimeId, protectedSecrets)));

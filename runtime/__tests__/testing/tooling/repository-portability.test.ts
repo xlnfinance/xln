@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 const repoRoot = process.cwd();
 
 describe('repository portability', () => {
-  test('the legacy Whisper entrypoint resolves inside any checkout', () => {
+  test('the Whisper launch entrypoint resolves inside any checkout', () => {
     const aliasPath = join(repoRoot, 'ai/whisper-server.py');
     const target = lstatSync(aliasPath).isSymbolicLink()
       ? readlinkSync(aliasPath)

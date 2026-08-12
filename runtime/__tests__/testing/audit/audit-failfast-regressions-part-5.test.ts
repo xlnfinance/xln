@@ -63,9 +63,9 @@ import { isLeftEntity } from '../../../entity/id';
 import {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
   MAX_PENDING_CROSS_J_FILL_ACKS,
-  applyEntityFrame,
   applyEntityInput,
 } from '../../../entity/consensus/index';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 
 import { createEntityFrameHash } from '../../../entity/consensus/frame';
 
@@ -235,11 +235,6 @@ import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/codec/onion-layer
 
 import { encodeHtlcSecretOffer, encodeOnionLayer } from '../../../protocol/htlc/codec/onion';
 
-import {
-  computeEntityProfileCertificationHash,
-  computeValidatorEncryptionAttestationDigest,
-  requireCompleteValidatorEncryptionManifest,
-} from '../../../protocol/htlc/validator-encryption';
 
 import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bootstrap-fail-fast';
 
@@ -365,7 +360,6 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       deltas: new Map(),
       locks: new Map(),
       swapOffers: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -611,6 +605,7 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
 
 const makeEntityState = (entityId: string): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
@@ -831,7 +826,7 @@ describe('audit fail-fast regressions', () => {
     const leftState = makeEntityState(left.entityId);
     leftState.config = makeSingleSignerConfigFor(left.signerId);
     leftState.accounts.set(right.entityId, leftAccount);
-    const applied = await applyEntityFrame(
+    const applied = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       leftState,
       [
@@ -2236,7 +2231,7 @@ describe('audit fail-fast regressions', () => {
     );
     expect(makerMeta).not.toBeNull();
     let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 10_000, stpPolicy: 1 });
-    // USD admission intentionally has no oracle/static fallback. Seed the
+    // USD admission intentionally has no oracle/static substitution. Seed the
     // canonical local price through a real crossed trade, then place the test
     // liquidity; assigning lastTradePriceTicks directly would bypass the path
     // this regression is supposed to exercise.
@@ -2358,7 +2353,7 @@ describe('audit fail-fast regressions', () => {
       },
     ];
 
-    const matched = await applyEntityFrame(
+    const matched = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       bookOwnerState,
       await buildQuorumAuthorizedFrameTxs(env, bookOwnerState, takerAdmissionTxs),
@@ -2385,7 +2380,7 @@ describe('audit fail-fast regressions', () => {
     );
     expect(collisionNotice).toBeUndefined();
 
-    const sourceApplied = await applyEntityFrame(env, sourceState, [
+    const sourceApplied = await applyEntityFrameWithMaterializedTestInfraContext(env, sourceState, [
       {
         type: 'runtimeOutput',
         data: {
@@ -2537,7 +2532,7 @@ describe('audit fail-fast regressions', () => {
         },
       },
     ];
-    const applied = await applyEntityFrame(
+    const applied = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       sourceState,
       await buildQuorumAuthorizedFrameTxs(env, sourceState, fillNoticeTxs),

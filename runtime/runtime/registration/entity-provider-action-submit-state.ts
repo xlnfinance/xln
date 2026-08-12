@@ -2,7 +2,7 @@ import { normalizeSubmitId } from '../command/submit-identity';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 import { getLocalSignerPrivateKey } from '../../account/crypto';
-import { isEntityActiveLeader, ENTITY_J_SUBMIT_FALLBACK_MS } from '../../entity/consensus/leader';
+import { isEntityActiveLeader, ENTITY_J_SUBMIT_RETRY_MS } from '../../entity/consensus/leader';
 import {
   assertEntityProviderActionIntent,
   recomputeEntityProviderActionHash,
@@ -232,7 +232,7 @@ export const applyRetryEntityProviderActionRuntimeTx = (
   if (
     previous &&
     previous.submitAttempts > 0 &&
-    env.state.timestamp < previous.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS
+    env.state.timestamp < previous.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS
   ) return [];
   const witness = replica.hankoWitness?.get(pending.actionHash);
   if (!witness || witness.type !== 'entityProviderAction') {

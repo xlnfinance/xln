@@ -6,7 +6,6 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
     optional: { metadata: 'record' },
   },
   'profile-update': { required: { profile: 'record' } },
-  certifyProfile: { required: { encryptionAttestations: 'array' } },
   j_event: {
     required: {
       from: 'string', jurisdictionRef: 'string', baseHeight: 'integer',

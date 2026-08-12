@@ -14,6 +14,7 @@ import {
   putCertifiedBoardRecord,
 } from '../../../jurisdiction/machine/board-registry';
 import { generateLazyEntityId } from '../../../entity/factory';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
@@ -92,8 +93,7 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
     },
   } as JReplica);
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId,
       data: {
@@ -103,7 +103,7 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
           shares: { [signerId]: 1n }, jurisdiction,
         },
       },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env, []);
@@ -132,6 +132,7 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
   };
   try {
     const save = () => saveRuntimeFrameToStorage({
+      entityContexts: new Map(),
       env,
       tryOpenDb: async () => true,
       getRuntimeDb: () => currentDb,

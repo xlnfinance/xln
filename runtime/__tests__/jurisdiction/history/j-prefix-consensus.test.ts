@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../../../account/crypto';
-import { applyEntityFrame, applyEntityInput } from '../../../entity/consensus';
+import { applyEntityInput } from '../../../entity/consensus';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
 import { createEntityFrameHash } from '../../../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-witness';
 import { generateLazyEntityId } from '../../../entity/factory';
+import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
 import { hasEntityLeaderWork } from '../../../entity/consensus/leader';
 import {
   buildEntityFrameAuthority,
@@ -48,6 +50,7 @@ const disputeProofbody = {
 
 const makeState = (validators: string[]): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 0,
   prevFrameHash: 'genesis',
   timestamp: 1_000,
@@ -170,7 +173,7 @@ const buildOrdinaryProposal = async (
     },
   ];
   const txs: EntityTx[] = [signedEntityCommandTx(buildSignedEntityCommand(env, state, proposerSignerId, userTxs))];
-  const replay = await applyEntityFrame(env, state, txs, timestamp);
+  const replay = await applyEntityFrameWithMaterializedTestInfraContext(env, state, txs, timestamp);
   const postState: EntityState = {
     ...replay.newState,
     entityId: state.entityId,
@@ -188,6 +191,7 @@ const buildOrdinaryProposal = async (
     timestamp,
     txs,
     postState,
+    replay.entityContext,
     undefined,
     replay.events,
   );
@@ -200,6 +204,7 @@ const buildOrdinaryProposal = async (
     timestamp,
     txs,
     events: structuredClone(replay.events),
+    entityContext: replay.entityContext,
     hash,
     leader: { proposerSignerId, view: 0 },
     hashesToSign,
@@ -217,6 +222,7 @@ describe('validator J-prefix consensus', () => {
     const validatorId = installOwnKey(env, 'on-demand-lazy-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
     const state = makeState([validatorId]);
+    state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     state.config.threshold = 1n;
     state.config.shares = { [validatorId]: 1n };
     delete state.config.jurisdiction!.registrationBlock;
@@ -278,6 +284,7 @@ describe('validator J-prefix consensus', () => {
     const validatorId = installOwnKey(env, 'on-demand-registered-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
     const state = makeState([validatorId]);
+    state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     state.config.threshold = 1n;
     state.config.shares = { [validatorId]: 1n };
     const history = recordValidatorJHistory(
@@ -324,6 +331,7 @@ describe('validator J-prefix consensus', () => {
     const validatorId = installOwnKey(env, 'incomplete-history-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
     const state = makeState([validatorId]);
+    state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     state.config.threshold = 1n;
     state.config.shares = { [validatorId]: 1n };
     delete state.config.jurisdiction!.registrationBlock;
@@ -372,6 +380,7 @@ describe('validator J-prefix consensus', () => {
     const validatorId = installOwnKey(env, 'sparse-event-contiguous-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
     const state = makeState([validatorId]);
+    state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     state.config.threshold = 1n;
     state.config.shares = { [validatorId]: 1n };
     delete state.config.jurisdiction!.registrationBlock;
@@ -931,6 +940,7 @@ describe('validator J-prefix consensus', () => {
     const validatorId = installOwnKey(env, 'frozen-base-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
     const baseState = makeState([validatorId]);
+    baseState.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     baseState.config.threshold = 1n;
     baseState.config.shares = { [validatorId]: 1n };
     const replica: EntityReplica = {
@@ -1130,6 +1140,7 @@ describe('validator J-prefix consensus', () => {
     const validatorId = installOwnKey(env, 'next-round-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
     const state = makeState([validatorId]);
+    state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     state.config.threshold = 1n;
     state.config.shares = { [validatorId]: 1n };
     const replica: EntityReplica = {
@@ -1225,6 +1236,7 @@ describe('validator J-prefix consensus', () => {
     const validatorId = installOwnKey(env, 'header-only-no-post-commit-roll-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
     const state = makeState([validatorId]);
+    state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     state.config.threshold = 1n;
     state.config.shares = { [validatorId]: 1n };
     const replica: EntityReplica = {
@@ -1276,6 +1288,7 @@ describe('validator J-prefix consensus', () => {
     const validatorId = installOwnKey(env, 'budgeted-empty-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
     const state = makeState([validatorId]);
+    state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     state.config.threshold = 1n;
     state.config.shares = { [validatorId]: 1n };
     let replica: EntityReplica = {
@@ -1330,6 +1343,9 @@ describe('validator J-prefix consensus', () => {
     const validators = [proposerId, validatorId, laggingId];
     entityId = generateLazyEntityId(validators, 3n);
     const baseState = makeState(validators);
+    baseState.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(proposerEnv, entityId).publicKey;
+    provisionTestEntityEncryptionKey(validatorEnv, entityId);
+    provisionTestEntityEncryptionKey(laggingEnv, entityId);
 
     const proposerReplica: EntityReplica = {
       entityId,

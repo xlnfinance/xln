@@ -709,11 +709,11 @@ export class CustodyStore {
       .slice(0, limit);
   }
 
-  getStateNumber(key: string, fallback = 0): number {
+  getStateNumber(key: string, defaultValue = 0): number {
     const row = this.db.query<{ value: string }, [string]>('SELECT value FROM service_state WHERE key = ?1').get(key);
-    if (!row) return fallback;
+    if (!row) return defaultValue;
     const parsed = Number(row.value);
-    return Number.isFinite(parsed) ? parsed : fallback;
+    return Number.isFinite(parsed) ? parsed : defaultValue;
   }
 
   setStateNumber(key: string, value: number): void {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { deriveSignerAddressSync, signAccountFrame } from '../../../../account/crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, signAccountFrame } from '../../../../account/crypto';
+import { deriveEntityEncryptionPublicKey, provisionEntityEncryptionKey } from '../../../../entity/auth/crypto';
 import { buildSignedEntityCommand } from '../../../../entity/command';
 import { signedEntityCommandTx } from '../../../../entity/command/command-codec';
 import { applyEntityInput } from '../../../../entity/consensus';
@@ -9,6 +10,7 @@ import { encodeBoard, hashBoard } from '../../../../entity/factory';
 import { createEmptyEnv } from '../../../../runtime';
 import type { ConsensusConfig, EntityLeaderTimeoutVote, EntityReplica, EntityState, EntityFrame } from '../../../../entity/types';
 import type { EntityTx } from '../../../../types/entity-tx';
+import { hexlify } from 'ethers';
 
 const jurisdiction = {
   name: 'partial-prepared-failover',
@@ -18,8 +20,13 @@ const jurisdiction = {
   entityProviderAddress: `0x${'a3'.repeat(20)}`,
 };
 
-const makeBaseState = (config: ConsensusConfig, entityId: string): EntityState => ({
+const makeBaseState = (
+  config: ConsensusConfig,
+  entityId: string,
+  entityEncryptionPublicKey: string,
+): EntityState => ({
   entityId,
+  entityEncryptionPublicKey,
   height: 0,
   timestamp: 0,
   nonces: new Map(),
@@ -72,14 +79,16 @@ describe('partial prepared failover', () => {
       jurisdiction,
     };
     const entityId = hashBoard(encodeBoard(board, env)).toLowerCase();
-    const base = makeBaseState(board, entityId);
+    const entityEncryptionPrivateKey = hexlify(deriveSignerKeySync(env.runtimeSeed!, 'entity-encryption'));
+    const entityEncryptionPublicKey = deriveEntityEncryptionPublicKey(entityEncryptionPrivateKey, entityId);
+    provisionEntityEncryptionKey(env, entityId, entityEncryptionPrivateKey);
+    const base = makeBaseState(board, entityId, entityEncryptionPublicKey);
     const oldCommand = chatCommand(env, base, proposerId, 'old proposer disappears');
     const nextCommand = chatCommand(env, base, '2', 'new leader continues');
 
     const proposer: EntityReplica = {
       entityId,
       signerId: proposerId,
-      entityEncPubKey: '',
       state: structuredClone(base),
       mempool: [],
       isProposer: true,
@@ -90,21 +99,20 @@ describe('partial prepared failover', () => {
       signerId: proposerId,
       entityTxs: [oldCommand],
     });
-    const proposalForV2 = proposed.outputs.find(output => output.signerId === '2' && output.proposedFrame);
-    if (!proposalForV2?.proposedFrame) throw new Error('TEST_OLD_PROPOSAL_MISSING');
-    expect(proposalForV2.proposedFrame.collectedSigs?.size).toBe(1);
+    const proposalForSecondValidator = proposed.outputs.find(output => output.signerId === '2' && output.proposedFrame);
+    if (!proposalForSecondValidator?.proposedFrame) throw new Error('TEST_OLD_PROPOSAL_MISSING');
+    expect(proposalForSecondValidator.proposedFrame.collectedSigs?.size).toBe(1);
 
     const validator2: EntityReplica = {
       entityId,
       signerId: '2',
-      entityEncPubKey: '',
       state: structuredClone(base),
       mempool: [nextCommand],
       isProposer: false,
       lastConsensusProgressAt: 0,
     };
-    const preparedByV2 = await applyEntityInput(env, validator2, proposalForV2);
-    const partialFrame = preparedByV2.workingReplica.lockedFrame;
+    const preparedBySecondValidator = await applyEntityInput(env, validator2, proposalForSecondValidator);
+    const partialFrame = preparedBySecondValidator.workingReplica.lockedFrame;
     if (!partialFrame) throw new Error('TEST_PARTIAL_FRAME_MISSING');
     expect(partialFrame.collectedSigs?.size).toBe(2);
 
@@ -114,7 +122,6 @@ describe('partial prepared failover', () => {
     const validator3: EntityReplica = {
       entityId,
       signerId: '3',
-      entityEncPubKey: '',
       state: structuredClone(base),
       mempool: [],
       isProposer: false,
@@ -125,7 +132,7 @@ describe('partial prepared failover', () => {
       signerId: '3',
       leaderTimeoutVote: vote3,
     });
-    const delayedOldProposal = await applyEntityInput(env, afterHigherViewVote.workingReplica, proposalForV2);
+    const delayedOldProposal = await applyEntityInput(env, afterHigherViewVote.workingReplica, proposalForSecondValidator);
     expect(delayedOldProposal.outcome).toEqual({
       kind: 'rejected',
       code: 'PROPOSAL_SUPERSEDED_BY_LOCAL_VIEW_CHANGE',
@@ -133,7 +140,7 @@ describe('partial prepared failover', () => {
     expect(delayedOldProposal.workingReplica.lockedFrame).toBeUndefined();
 
     const votes = [vote2, vote3, vote4];
-    let failover = preparedByV2;
+    let failover = preparedBySecondValidator;
     for (const vote of votes) {
       failover = await applyEntityInput(env, failover.workingReplica, {
         entityId,

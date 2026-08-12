@@ -45,9 +45,9 @@ import {
 import { buildSingleSignerHanko } from '../../../hanko/batch';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
 import { computeProfileHash, signProfileRuntimeRoute } from '../../../entity/profile/profile-signing';
-import { computeValidatorEncryptionAttestationDigest } from '../../../protocol/htlc/validator-encryption';
 import { createTestJReplica } from '../.././helpers/j-replica';
 import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-witness';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const x25519 = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -113,8 +113,7 @@ const buildRuntimeEnv = async () => {
   const entityId = generateLazyEntityId([runtimeId], 1n, env).toLowerCase();
 
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId: runtimeId,
       data: {
@@ -128,7 +127,7 @@ const buildRuntimeEnv = async () => {
         isProposer: true,
         profileName: 'Recovery Test',
       },
-    }],
+    })],
     entityInputs: [],
   });
 
@@ -143,25 +142,12 @@ const buildRecoveryHubProfile = async (
   const wallet = new Wallet(`0x${'66'.repeat(32)}`);
   const runtimeId = wallet.address.toLowerCase();
   const entityId = generateLazyEntityId([runtimeId], 1n).toLowerCase();
-  const signingPublicKey = wallet.signingKey.publicKey.toLowerCase();
   const encryptionPublicKey = pubKeyToHex(
     deriveEncryptionKeyPair(`${wallet.privateKey}:${entityId}:htlc-v1`).publicKey,
   );
-  const attestationBody = {
-    version: 'xln:validator-encryption-key:v1' as const,
-    entityId,
-    signerId: runtimeId,
-    signer: runtimeId,
-    publicKey: signingPublicKey,
-    weight: 1,
-    encryptionPublicKey,
-  };
-  const attestation = {
-    ...attestationBody,
-    signature: wallet.signingKey.sign(computeValidatorEncryptionAttestationDigest(attestationBody)).serialized,
-  };
   const profile: Profile = {
     entityId,
+    entityEncryptionPublicKey: encryptionPublicKey,
     name: 'Recovery Hub',
     avatar: '',
     bio: '',
@@ -181,11 +167,6 @@ const buildRecoveryHubProfile = async (
         chainId: jurisdiction.chainId,
         entityProviderAddress: jurisdiction.entityProviderAddress,
         depositoryAddress: jurisdiction.depositoryAddress,
-      },
-      board: {
-        threshold: 1,
-        validators: [{ signer: runtimeId, weight: 1, signerId: runtimeId, publicKey: signingPublicKey }],
-        encryptionAttestations: [attestation],
       },
     },
     accounts: [],
@@ -315,6 +296,17 @@ describe('runtime recovery tower', () => {
     const pendingHeight = Number(replica!.state.height || 0) + 1;
     const pendingHash = `0x${'a1'.repeat(32)}`;
     bloatedState.height = pendingHeight;
+    const entityContext = {
+      version: 1 as const,
+      proposerReplicaId: replicaKey,
+      entityId,
+      proposerSignerId: replica!.signerId,
+      parentFrameHash: replica!.state.height === 0 ? 'genesis' : replica!.state.prevFrameHash!,
+      height: pendingHeight,
+      gossipProfiles: [],
+      peerAssertions: [],
+      htlc: { version: 1 as const, entries: [], originated: [] },
+    };
     const pendingFrame = {
       height: pendingHeight,
       parentFrameHash: replica!.state.height === 0 ? 'genesis' : replica!.state.prevFrameHash!,
@@ -323,6 +315,7 @@ describe('runtime recovery tower', () => {
       timestamp: replica!.state.timestamp,
       txs: [],
       events: [],
+      entityContext,
       hash: pendingHash,
       leader: {
         proposerSignerId: replica!.signerId,
@@ -427,8 +420,7 @@ describe('runtime recovery tower', () => {
     const secondEntityId = generateLazyEntityId([secondSignerId], 1n, env).toLowerCase();
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: secondEntityId,
         signerId: secondSignerId,
         data: {
@@ -442,7 +434,7 @@ describe('runtime recovery tower', () => {
           isProposer: true,
           profileName: 'Recovery Tail',
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env);

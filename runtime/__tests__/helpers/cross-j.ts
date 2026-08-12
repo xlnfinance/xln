@@ -1,7 +1,10 @@
 import { deriveAccountWatchSeed } from '../../protocol/identity/account-watch-seed';
 import { createEmptyAccountJClaimAccumulator } from '../../account/j-claims/j-claim-accumulator';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../account/crypto';
-import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../../entity/auth/crypto';
+import {
+  deriveEntityEncryptionPublicKey,
+  provisionEntityEncryptionKey,
+} from '../../entity/auth/crypto';
 import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-runtime';
 import {
   canonicalDisputeFinalizationEvidenceHash,
@@ -14,6 +17,7 @@ import type { RuntimeReplica } from '../../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../../types/jurisdiction-events';
 import { createDefaultDelta } from '../../account/state/delta';
+import { hexlify } from 'ethers';
 
 export const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 export const entity = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -105,7 +109,6 @@ export const makeAccount = (
       deltas: new Map([[1, delta]]),
       locks: new Map(),
       swapOffers: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -115,6 +118,8 @@ export const makeAccount = (
       requestedRebalanceFeeState: new Map(),
     },
     status: 'active',
+    swapOrderHistory: new Map(),
+    swapClosedOrders: new Map(),
     mempool: [],
     currentFrame: {
       height: 0,
@@ -143,6 +148,7 @@ export const makeState = (
   jurisdiction: JurisdictionConfig,
   counterpartyId?: string,
 ): EntityState => {
+  const entityEncryptionPrivateKey = hexlify(deriveSignerKeySync(entityId, 'entity-encryption'));
   const accounts = new Map<string, AccountReplica>();
   if (counterpartyId) {
     const account = makeAccount(entityId, counterpartyId, jurisdiction);
@@ -150,7 +156,9 @@ export const makeState = (
   }
   return {
     entityId,
+    entityEncryptionPublicKey: deriveEntityEncryptionPublicKey(entityEncryptionPrivateKey, entityId),
     height: 1,
+    prevFrameHash: `0x${'01'.repeat(32)}`,
     timestamp: 1_000,
     nonces: new Map(),
     proposals: new Map(),
@@ -169,18 +177,24 @@ export const makeState = (
 };
 
 export const addReplica = (env: RuntimeReplica, state: EntityState, signerId: string, isProposer = true): void => {
-  const keys = hasLocalSignerKey(env, signerId)
-    ? deriveLocalEntityCryptoKeys(env, state.entityId, signerId)
-    : { publicKey: '', privateKey: '' };
+  provisionTestEntityEncryptionKey(env, state.entityId);
   env.state.eReplicas.set(`${state.entityId}:${signerId}`, {
     entityId: state.entityId,
     signerId,
-    entityEncPubKey: keys.publicKey,
     state,
     mempool: [],
     isProposer,
   } as EntityReplica);
 };
+
+export const provisionTestEntityEncryptionKey = (
+  env: RuntimeReplica,
+  entityId: string,
+): string => provisionEntityEncryptionKey(
+    env,
+    entityId,
+    hexlify(deriveSignerKeySync(entityId, 'entity-encryption')),
+  );
 
 export const installJurisdictions = (env: RuntimeReplica, ...jurisdictions: JurisdictionConfig[]): void => {
   for (const jurisdiction of jurisdictions) {

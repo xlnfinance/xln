@@ -13,7 +13,7 @@ describe('entity shared formatters', () => {
     expect(formatTokenAmount(1, -123n, 0)).toBe('-123');
   });
 
-  test('formatters fail loudly without raw console fallback', () => {
+  test('formatters fail loudly without raw console substitution', () => {
     const source = readFileSync('frontend/src/lib/view/components/entity/shared/formatters.ts', 'utf8');
 
     expect(source).not.toContain('console.error');

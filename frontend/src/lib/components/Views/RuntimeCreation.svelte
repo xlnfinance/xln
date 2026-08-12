@@ -1013,7 +1013,7 @@
         }
         mnemonic24 = cleanMnemonic;
         mnemonicInput = '';
-        // Imported mnemonic is canonical as entered; no extra compatibility phrase.
+        // Imported mnemonic is canonical as entered; no extra derived phrase.
         mnemonic12 = '';
 
         ethereumAddress = await deriveEthereumAddress(mnemonic24);

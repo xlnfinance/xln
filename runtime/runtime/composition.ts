@@ -42,7 +42,7 @@ import {
 } from './frame/notifications';
 
 export { admitAtomicCrossJAccountInputs };
-export { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
+export { quoteHtlcPaymentRoute } from '../routing/htlc-quote';
 
 let processRuntimeImpl: ReturnType<typeof createRuntimeProcessor> | undefined;
 
@@ -241,6 +241,7 @@ const runtimeStateApi = createRuntimeStateApi({
 export const prewarmRuntimeSignerCache = runtimeStateApi.prewarmRuntimeSignerCache;
 export const createEmptyEnv = runtimeStateApi.createEmptyEnv;
 export { cloneRuntimeFrameMempool };
+export { canonicalEntitySeed, importEntity } from './registration/entity-creation';
 
 const runtimeRecoveryApi = createRuntimeRecoveryApi({
   ensureRuntimeConfig,

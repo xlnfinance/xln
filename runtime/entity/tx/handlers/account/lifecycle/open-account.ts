@@ -76,7 +76,6 @@ const insertLocalAccount = (
       locks: new Map(),
       swapOffers: new Map(),
       pulls: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,

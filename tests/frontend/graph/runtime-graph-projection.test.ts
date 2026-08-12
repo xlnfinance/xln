@@ -1,7 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
 import {
   mergeRuntimeGraphProjections,
   projectRuntimeGraphFrame,
@@ -315,36 +313,28 @@ describe('RuntimeGraphProjection', () => {
     expect(merged.nodes[0]?.desynchronized).toBe(true);
   });
 
-  test('Graph3D projection effect explicitly tracks every asynchronous graph source', async () => {
-    const frontendRequire = createRequire(new URL('../../../frontend/package.json', import.meta.url));
-    const compilerPath = frontendRequire.resolve('svelte/compiler');
-    const { compile } = await import(pathToFileURL(compilerPath).href) as typeof import('svelte/compiler');
+  test('Graph3D projection declaration explicitly reads every graph source', () => {
     const source = readFileSync(
       new URL('../../../frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte', import.meta.url),
       'utf8',
     );
-    const compiled = compile(source, {
-      generate: 'client',
-      dev: true,
-      filename: 'Graph3DPanel.svelte',
-    }).js.code;
-    const projectionWrite = compiled.indexOf('$.set(graphProjections');
-    const effectStart = compiled.lastIndexOf('$.legacy_pre_effect', projectionWrite);
-    expect(projectionWrite).toBeGreaterThan(effectStart);
-    const dependencyBlock = compiled.slice(effectStart, projectionWrite);
+    const declarationStart = source.indexOf('$: graphProjections = buildRuntimeGraphProjections({');
+    const declarationEnd = source.indexOf('\n});', declarationStart);
+    expect(declarationStart).toBeGreaterThan(0);
+    expect(declarationEnd).toBeGreaterThan(declarationStart);
+    const dependencyBlock = source.slice(declarationStart, declarationEnd);
 
     for (const dependency of [
-      '$runtimes()',
-      '$activeRuntimeId()',
-      '$runtimeControllerHandle()',
-      '$runtimeGraphScope()',
-      '$networkMachineRuntime()',
-      '$runtimeGraphLiveFrameCache()',
-      '$.get(env)',
+      '$runtimes',
+      '$activeRuntimeId',
+      '$runtimeControllerHandle.runtimeId',
+      '$runtimeGraphScope',
+      '$networkMachineRuntime',
+      '$runtimeGraphLiveFrameCache',
+      'currentEnv: env',
     ]) {
       expect(dependencyBlock).toContain(dependency);
     }
-    expect(dependencyBlock).not.toContain('$.legacy_pre_effect(() => {}');
   });
 });
 

@@ -289,12 +289,14 @@ describe('remote runtime import manager utilities', () => {
 
   test('rejects a read token even when a manifest falsely labels it admin', () => {
     expect(() => parseRemoteRuntimeImportSourcePayload({
-      entries: [{
-        label: 'H1',
-        access: 'admin',
-        wsUrl: 'ws://127.0.0.1:8092/rpc',
-        token: `xlnra1.read.${Date.now() + 60_000}.aud.kid.jti.sig`,
-      }],
+      manifest: {
+        entries: [{
+          label: 'H1',
+          access: 'admin',
+          wsUrl: 'ws://127.0.0.1:8092/rpc',
+          token: `xlnra1.read.${Date.now() + 60_000}.aud.kid.jti.sig`,
+        }],
+      },
     })).toThrow('REMOTE_RUNTIME_IMPORT_ADMIN_TOKEN_REQUIRED:1');
   });
 
@@ -314,22 +316,16 @@ describe('remote runtime import manager utilities', () => {
     expect(readStoredRemoteRuntimeImports().map(entry => entry.label)).toEqual(['H1']);
   });
 
-  test('fresh import merge reads a session-scoped source wrapper', () => {
-    const legacy = makeStored('legacy H1', 8092, 1);
-    sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify({
-      ok: true,
-      ready: true,
-      manifest: {
-        entries: [legacy],
-      },
-    }));
+  test('fresh import merge reads the canonical session-scoped entry array', () => {
+    const stored = makeStored('Stored H1', 8092, 1);
+    sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify([stored]));
 
-    expect(readStoredRemoteRuntimeImports()[0]?.label).toBe('legacy H1');
+    expect(readStoredRemoteRuntimeImports()[0]?.label).toBe('Stored H1');
     const fresh = makeStored('MM', 8095, 2);
     const merged = persistRemoteRuntimeImports([fresh], { merge: true });
 
-    expect(merged.map(entry => entry.label)).toEqual(['legacy H1', 'MM']);
-    expect(readStoredRemoteRuntimeImports().map(entry => entry.label)).toEqual(['legacy H1', 'MM']);
+    expect(merged.map(entry => entry.label)).toEqual(['Stored H1', 'MM']);
+    expect(readStoredRemoteRuntimeImports().map(entry => entry.label)).toEqual(['Stored H1', 'MM']);
   });
 
   test('fresh import merge drops invalid remote-runtime cache without weakening strict reads', () => {
@@ -412,7 +408,7 @@ describe('remote runtime import manager utilities', () => {
     expect(selectPrimaryRemoteHubSummary([h1, h2], 'missing', h2.runtimeId)?.entityId).toBe(h2.entityId);
   });
 
-  test('remote validation uses non-hub runtime entity before visible gossip hub fallback', () => {
+  test('remote validation uses the runtime entity before a visible gossip hub', () => {
     const mmRuntimeId = `0x${'95'.repeat(20)}`;
     const visibleHub = {
       entityId: `0x${'33'.repeat(32)}`,

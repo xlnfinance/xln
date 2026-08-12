@@ -1,50 +1,31 @@
 {
   "root": true,
   "parser": "@typescript-eslint/parser",
-  "plugins": ["@typescript-eslint", "import", "simple-import-sort"],
+  "plugins": ["@typescript-eslint", "import"],
   "parserOptions": {
     "sourceType": "module",
-    "ecmaVersion": "latest",
-    "project": ["./tsconfig.json", "./e2e/tsconfig.json"],
+    "ecmaVersion": "latest"
   },
-  "extends": [
-    "eslint:recommended",
-    "plugin:@typescript-eslint/recommended",
-    "plugin:prettier/recommended",
-    "plugin:import/typescript",
-  ],
   "rules": {
-    "import/extensions": [
-      "error",
-      "never",
-      {
-        "js": "never",
-        "ts": "never",
-      },
-    ],
-    "simple-import-sort/imports": "error",
-    "simple-import-sort/exports": "error",
-    "@typescript-eslint/no-explicit-any": "warn",
-    "@typescript-eslint/no-unused-vars": "warn",
+    "@typescript-eslint/no-non-null-asserted-optional-chain": "error",
+    "import/no-absolute-path": "error",
+    "import/no-duplicates": "error",
+    "import/no-self-import": "error",
+    "no-case-declarations": "error",
+    "no-empty": "error",
+    "no-eval": "error",
+    "no-extra-boolean-cast": "error",
+    "no-fallthrough": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
     "no-restricted-properties": [
       "error",
       {
         "object": "JSON",
         "property": "stringify",
-        "message": "🚨 FINTECH-SAFETY: Use safeStringify() from serialization-utils (for logs) or encode() from snapshot-coder (for storage). BigInt values will crash JSON.stringify()!"
-      },
-      {
-        "object": "JSON",
-        "property": "parse",
-        "message": "⚠️ FINTECH-SAFETY: Consider using safeParse() or decode() for BigInt-safe deserialization."
+        "message": "FINTECH_SAFETY: use safeStringify() for logs or a canonical codec for persisted/hashed data"
       }
     ],
-  },
-  "settings": {
-    "import/resolver": {
-      "node": {
-        "extensions": [".ts", ".js"],
-      },
-    },
-  },
+    "no-unsafe-finally": "error"
+  }
 }

@@ -4,11 +4,8 @@ import type { CrossJurisdictionCloseProof, CrossJurisdictionSwapRoute } from './
 import type { LendingTermId } from './finance/lending';
 import type { ProposalAction } from '../entity/types';
 import type { PaymentDeliveryMode } from './finance/payment';
-import type { ValidatorEncryptionAttestation } from '../protocol/htlc/validator-encryption';
-import type { EntityProfileDescriptor } from '../entity/profile/profile-descriptor';
 import type { CertifiedBoardAuthorityBinding } from './entity-board-registry';
 import type { ConsumptionProof } from '../entity/consumption/consumption-accumulator-types';
-import type { MultiRecipientCiphertext } from '../protocol/htlc/multi-recipient';
 
 type ProfileUpdateTx = {
   name?: string;
@@ -194,15 +191,7 @@ type EntityTxPayload =
       data: {
         profile: ProfileUpdateTx & {
           entityId: string;
-          hankoSignature?: string;
         };
-      };
-    }
-  | {
-      /** Public validator key manifest proposed only after gossip convergence. */
-      type: 'certifyProfile';
-      data: {
-        encryptionAttestations: ValidatorEncryptionAttestation[];
       };
     }
   | {
@@ -255,69 +244,8 @@ type EntityTxPayload =
         description?: string;
         deliveryMode: Extract<PaymentDeliveryMode, 'instant' | 'async'>;
         startedAtMs?: number;
-        /** Raw local-ingress hint only. Stripped before command/frame/WAL. */
-        secret?: string;
+        /** Optional caller commitment; preimage is derived privately by the proposer. */
         hashlock?: string;
-        // Opaque onion and independently verifiable public commitments frozen
-        // at local ingress before any multisig voting delay.
-        preparedEnvelope?: unknown;
-        preparedSenderLockAmount?: bigint | string;
-        preparedTotalFee?: bigint | string;
-        preparedLockId?: string;
-        preparedTimelock?: bigint | string;
-        preparedRevealBeforeHeight?: number;
-        preparedAtEntityHeight?: number;
-        preparedAtJHeight?: number;
-        preparedRouteProfiles?: Array<{ descriptor: EntityProfileDescriptor; profileHanko: string }>;
-        preparedHopForwardAmounts?: Array<{ entityId: string; amount: bigint | string }>;
-      };
-    }
-  | {
-      /**
-       * Default-proposer-authored reveal of exactly one committed onion layer.
-       * The encrypted layer remains the binding authority; this action exposes
-       * only the deterministic effect that every validator can replay.
-       */
-      type: 'htlcOnionAdvance';
-      data: {
-        version: 1;
-        proposerSignerId: string;
-        inboundEntityId: string;
-        inboundLockId: string;
-        encryptedLayerHash: string;
-        hashlock: string;
-        tokenId: number;
-        amount: bigint;
-        timelock: bigint;
-        revealBeforeHeight: number;
-        advance:
-          | {
-              kind: 'final';
-              secretOffer: MultiRecipientCiphertext;
-              description?: string;
-              startedAtMs?: number;
-            }
-          | {
-              kind: 'acceptOffer';
-              offerHash: string;
-            }
-          | {
-              /**
-               * Plaintext becomes consensus-visible only after the exact
-               * Account ACK below has durably committed the final unlock.
-               */
-              kind: 'revealAccepted';
-              offerHash: string;
-              accountFrameHash: string;
-              accountFrameHeight: number;
-              secret: string;
-            }
-          | {
-              kind: 'forward';
-              nextHop: string;
-              forwardAmount: bigint;
-              innerEnvelope: MultiRecipientCiphertext;
-            };
       };
     }
   | {

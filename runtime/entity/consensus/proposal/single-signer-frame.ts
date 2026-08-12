@@ -53,6 +53,10 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
+import { materializeEntityInfraContext } from './infra-context';
+import { validateProposedEntityFrame } from '../frame/validation';
+import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
+import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 
 export type SingleSignerFrameOptions = Pick<
   EntityProposalSelection,
@@ -72,6 +76,7 @@ const buildSingleSignerCommitments = (
   context: ApplyEntityInputContext,
   options: SingleSignerFrameOptions,
   applied: Awaited<ReturnType<typeof applyEntityFrame>>,
+  entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
 ) => {
   const { env, workingReplica } = context;
   const leader = getEntityLeaderState(workingReplica.state);
@@ -97,6 +102,7 @@ const buildSingleSignerCommitments = (
     state.entityId,
     stateRoot,
     authorityRoot,
+    entityContext,
     options.proposalJPrefixCertificate ?? undefined,
   );
   const outputHashes = buildCertifiedEntityOutputHashes(
@@ -149,14 +155,22 @@ const buildSingleSignerFrame = async (
   const applyFrame = context.promoteCandidateState
     ? applyRuntimeOwnedEntityFrame
     : applyEntityFrame;
+  const entityContext = await materializeEntityInfraContext(env, workingReplica, proposalTxs);
+  await assertHtlcPreparedInfraContext({
+    state: workingReplica.state,
+    proposalTxs,
+    context: entityContext,
+    entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, workingReplica.entityId),
+  });
   const applied = await applyFrame(
     env,
     workingReplica.state,
+    entityContext,
     proposalTxs,
     env.state.timestamp,
   );
   options.checkpoint('frameApply');
-  const commitments = buildSingleSignerCommitments(context, options, applied);
+  const commitments = buildSingleSignerCommitments(context, options, applied, entityContext);
   options.checkpoint('commitments');
   const hankos = await signEntityHashes(
     env,
@@ -176,6 +190,7 @@ const buildSingleSignerFrame = async (
     stateRoot: commitments.stateRoot,
     authorityRoot: commitments.authorityRoot,
     timestamp: commitments.timestamp,
+    entityContext,
     txs: [...proposalTxs],
     events: structuredClone(applied.events),
     hash: commitments.frameHash,
@@ -192,6 +207,7 @@ const buildSingleSignerFrame = async (
     ]),
     hankos,
   };
+  validateProposedEntityFrame(frame, 'SingleSignerEntityFrame');
   return {
     ...applied,
     authority: commitments.authority,
@@ -340,6 +356,7 @@ export const commitSingleSignerFrameIfReady = async (
     txs: options.proposalTxs.map(tx => tx.type),
   });
   const execution = await buildSingleSignerFrame(context, options);
+  context.entityContext = execution.frame.entityContext;
   attachSingleSignerHankos(context, execution);
   await installSingleSignerFrame(context, options, execution);
   options.checkpoint('commit');

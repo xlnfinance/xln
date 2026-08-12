@@ -19,7 +19,7 @@ import type { RuntimeReplica } from '../../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
 import type { EntityInput } from '../../entity/types';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
-import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, findCommittedScenarioHtlcLockId, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry, advanceScenarioTime, advanceScenarioPastDisputeTimeout, pinScenarioJurisdictionUnix, processUntilWithoutLocalHtlcAdvance, withholdScenarioLocalHtlcAdvances } from '../harness/helpers';
+import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, findCommittedScenarioHtlcLockId, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry, advanceScenarioTime, advanceScenarioPastDisputeTimeout, pinScenarioJurisdictionUnix, processUntilWithoutHtlcSecretProposal, withholdScenarioHtlcSecretProposals } from '../harness/helpers';
 import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, isScenarioJAdapterMissingError, resolveScenarioBoardSigner } from '../harness/boot';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { isLeftEntity } from '../../account/utils';
@@ -31,7 +31,8 @@ import { drainJWatcherBacklog } from '../../jurisdiction/adapter/operations/back
 import { withDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
 import { htlcRouteConvergenceCycleBudget } from './test-economy';
 import { readEntityFrameEventMessages } from '../../entity/frame-events';
-import { quoteHtlcPaymentRoute } from '../../entity/htlc/payment-admission';
+import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
+import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(10_000_000);
@@ -1205,8 +1206,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     const charlieSigner = resolveScenarioBoardSigner(env, '6');
     const charlieEntityId = generateLazyEntityId([charlieSigner], 1n, env).toLowerCase();
     await commitRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica' as const,
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: charlieEntityId,
         signerId: charlieSigner,
         data: {
@@ -1219,7 +1219,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
             shares: { [charlieSigner]: 1n },
           },
         },
-      }],
+      })],
       entityInputs: []
     });
 
@@ -1327,7 +1327,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
         },
       }, testSecret)],
     }]);
-    await processUntilWithoutLocalHtlcAdvance(
+    await processUntilWithoutHtlcSecretProposal(
       env,
       timeoutTargets,
       () => findCommittedScenarioHtlcLockId(env, hub.id, charlie.id, testHashlock) !== undefined,
@@ -1345,7 +1345,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       Number(committedLock.timelock) - env.state.timestamp + 1,
       true,
     );
-    await processUntilWithoutLocalHtlcAdvance(
+    await processUntilWithoutHtlcSecretProposal(
       env,
       timeoutTargets,
       () => {
@@ -1383,8 +1383,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     const hub2Signer = resolveScenarioBoardSigner(env, '5');
     const hub2EntityId = generateLazyEntityId([hub2Signer], 1n, env).toLowerCase();
     await commitRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica' as const,
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: hub2EntityId,
         signerId: hub2Signer,
         data: {
@@ -1397,7 +1396,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
             shares: { [hub2Signer]: 1n },
           },
         },
-      }],
+      })],
       entityInputs: []
     });
 
@@ -1585,14 +1584,14 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
         },
       }, hostageSecret.secret)],
     }]);
-    await processUntilWithoutLocalHtlcAdvance(
+    await processUntilWithoutHtlcSecretProposal(
       env,
       hostageTargets,
       () => findCommittedScenarioHtlcLockId(env, hub.id, bob.id, hostageSecret.hashlock) !== undefined,
     );
     const hostageLockId = findCommittedScenarioHtlcLockId(env, hub.id, bob.id, hostageSecret.hashlock);
     if (!hostageLockId) throw new Error('HOSTAGE_LOCK_NOT_COMMITTED');
-    withholdScenarioLocalHtlcAdvances(env, hostageTargets);
+    withholdScenarioHtlcSecretProposals(env, hostageTargets);
 
     console.log(`Canonical hostage HTLC committed: ${hostageLockId.slice(0, 16)}...`);
     console.log(`Hashlock: ${hostageSecret.hashlock.slice(0, 16)}...`);

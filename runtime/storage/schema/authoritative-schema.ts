@@ -34,6 +34,8 @@ import {
 import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
 import { validateDurableOutputRetryState } from '../../runtime/delivery/durable-output-retry';
 import { validateRuntimeHistoryRecords } from '../history/history-view-schema';
+import { validateEntityInfraContext } from '../../entity/consensus/frame/infra-context-validation';
+import type { EntityInfraContext } from '../../types/entity/infra-context';
 
 export * from './schema-state-docs';
 export * from './schema-merkle-cas';
@@ -84,7 +86,7 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   requireExactBoundaryKeys(frame, [
     'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest', 'replicaMetaCheckpoint',
     'replicaMetaStateMode', 'postStateHash', 'stateHash',
-    'hashMode', 'materializedState', 'runtimeInput', 'historyRecords', 'activityLogs',
+    'hashMode', 'materializedState', 'runtimeInput', 'entityContexts', 'historyRecords', 'activityLogs',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
   ], ['entityHashes', 'canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachine', 'pendingRuntimeInput', 'runtimeOutputs', 'runtimeOutputRetryState', 'overlayRecords'], `${code}_FIELDS`);
@@ -128,6 +130,10 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     frame['runtimeInput'],
     `${code}_RUNTIME_INPUT`,
   );
+  frame['entityContexts'] = validateEntityContexts(
+    frame['entityContexts'],
+    Number(frame['height']),
+  );
   frame['historyRecords'] = validateRuntimeHistoryRecords(
     frame['historyRecords'],
     Number(frame['height']),
@@ -152,6 +158,27 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     );
   }
   return frame as RuntimeFrame;
+};
+
+const validateEntityContexts = (
+  value: unknown,
+  runtimeHeight: number,
+): RuntimeFrame['entityContexts'] => {
+  if (!(value instanceof Map)) throw new Error('STORAGE_FRAME_ENTITY_CONTEXTS_MAP_REQUIRED');
+  const contexts = new Map<string, EntityInfraContext>();
+  for (const [replicaId, raw] of value) {
+    const code = `STORAGE_FRAME_ENTITY_CONTEXT_INVALID:${String(replicaId)}`;
+    if (
+      typeof replicaId !== 'string' ||
+      replicaId !== replicaId.toLowerCase() ||
+      !/^0x[0-9a-f]{64}:[^:\s]+$/.test(replicaId)
+    ) throw new Error(`${code}:REPLICA_ID`);
+    const context = validateEntityInfraContext(raw);
+    if (!replicaId.startsWith(`${context.entityId}:`)) throw new Error(`${code}:ENTITY_BINDING`);
+    contexts.set(replicaId, context);
+  }
+  if (contexts.size > 0 && runtimeHeight < 1) throw new Error('STORAGE_FRAME_ENTITY_CONTEXTS_GENESIS_FORBIDDEN');
+  return contexts;
 };
 
 const validateTouchedAccounts = (value: unknown, code: string): void => {

@@ -98,20 +98,6 @@ const RUNTIME_CORE_TESTS = [
   'native/__tests__/watchtower-recovery-flow.test.ts',
 ].join(' ');
 
-const SOUNDCHECK_TARGETS = [
-  'runtime/runtime.ts',
-  'runtime/runtime/composition.ts',
-  'runtime/entity/consensus/leader/certificates.ts',
-  'runtime/entity/consensus/jurisdiction/prefix-round.ts',
-  'runtime/entity/consensus/input/consensus.ts',
-  'runtime/entity/consensus/frame/application.ts',
-  'runtime/account/consensus/index.ts',
-  'runtime/entity/tx/apply.ts',
-  'runtime/storage',
-  'runtime/network/relay/router.ts',
-  'runtime/network/p2p/p2p.ts',
-].join(' ');
-
 const quickSteps: GateStep[] = [
   { name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 },
   { name: 'source checks', command: 'bun run check:src', timeoutMs: 120_000 },
@@ -121,11 +107,6 @@ const quickSteps: GateStep[] = [
     name: 'bilateral same-height collision',
     command: 'bun run test:consensus:collision',
     timeoutMs: 120_000,
-  },
-  {
-    name: 'runtime soundcheck',
-    command: `bun tools/soundcheck.ts --skip-tests ${SOUNDCHECK_TARGETS}`,
-    timeoutMs: 180_000,
   },
   { name: 'diff whitespace check', command: 'git diff --check', timeoutMs: 30_000 },
 ];

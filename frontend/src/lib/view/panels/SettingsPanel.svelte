@@ -140,7 +140,7 @@
       settingsStorageError = '';
       entityOpenMode = localStorage.getItem('xln-dock-entity-open-mode') === 'new-tab' ? 'new-tab' : 'replace';
 
-      // WebGL is the deterministic compatibility default. `navigator.gpu`
+      // WebGL is the deterministic default renderer. `navigator.gpu`
       // only proves that the API exists; the browser may still have no usable
       // adapter, and Three.js then emits warnings before falling back. WebGPU
       // remains an explicit operator choice in Performance settings.

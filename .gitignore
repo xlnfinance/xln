@@ -111,7 +111,7 @@ yarn.lock
 # Private internal files (never in public repo)
 # Naming convention: Keep strategy/sensitive docs in these directories
 # Public repo = showcase. Private repo = real work.
-# reports/      # REMOVED - no longer generating session reports
+reports/
 # private/      # REMOVED - empty folder deleted
 # research/     # REMOVED - moved to docs/research/
 

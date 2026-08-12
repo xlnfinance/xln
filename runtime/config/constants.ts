@@ -26,6 +26,9 @@ export const LIMITS = {
   /** Maximum size of a single frame in bytes. 1000 tx frames get a 10KB/tx budget. */
   MAX_FRAME_SIZE_BYTES: 10_000_000,
 
+  /** Maximum canonical bytes in one signed gossip Profile (aggregate frame budget remains separate). */
+  MAX_PROFILE_BYTES: 1024 * 1024,
+
   /** Strict exclusive limit for every physical mutable-storage value. */
   MAX_STORAGE_VALUE_BYTES: 10_000,
 
@@ -212,7 +215,7 @@ export const BLOCKCHAIN = {
   // Idle RPC runtimes share the same chain, so a 1s poll per runtime amplifies
   // into dozens of identical eth_blockNumber calls. Local submissions invoke
   // pollNow() at the durability boundary; the interval is only the external
-  // chain fallback and therefore may stay deliberately cold.
+  // chain failover and therefore may stay deliberately cold.
   J_WATCHER_POLL_INTERVAL_MS: 5_000,
 
   /** Maximum finalized block range fetched by one J-watcher poll. */

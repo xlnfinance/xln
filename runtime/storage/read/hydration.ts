@@ -1,11 +1,6 @@
 import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../../orderbook';
 import type { AccountReplica } from '../../types/account';
 import type { EntityState } from '../../entity/types';
-import {
-  cloneCrossJurisdictionBookAdmission,
-  cloneCrossJurisdictionAccountTxRoute,
-  cloneCrossJurisdictionRoute,
-} from '../../extensions/cross-j/index';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../types';
 import { assertAccountMempoolWithinLimit } from '../../account/input/mempool';
 import { assertAccountJClaimAccumulatorState } from '../../account/j-claims/j-claim-accumulator';
@@ -14,31 +9,12 @@ import { assertConsumptionAccumulatorState } from '../../entity/consumption/cons
 import { LIMITS } from '../../config/constants';
 import { assertJBatchWithinContractLimits } from '../../jurisdiction/machine/batch';
 import { cloneAccountReplica } from '../../account/state/state-clone';
-
-const withProp = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
-  value === undefined ? {} : ({ [key]: value } as Record<K, V>);
-
-const publicCrossJurisdictionSwaps = (swaps: EntityState['crossJurisdictionSwaps']): EntityState['crossJurisdictionSwaps'] | undefined =>
-  swaps ? new Map(Array.from(swaps.entries()).map(([id, route]) => [id, cloneCrossJurisdictionRoute(route)])) : undefined;
-
-const publicCrossJurisdictionBookAdmissions = (
-  admissions: EntityState['crossJurisdictionBookAdmissions'],
-): EntityState['crossJurisdictionBookAdmissions'] | undefined =>
-  admissions ? new Map(Array.from(admissions.entries()).map(([id, admission]) => [
-    id,
-    cloneCrossJurisdictionBookAdmission(admission),
-  ])) : undefined;
-
-const publicPendingCrossJurisdictionFillAcks = (
-  pendingAcks: EntityState['pendingCrossJurisdictionFillAcks'],
-): EntityState['pendingCrossJurisdictionFillAcks'] | undefined =>
-  pendingAcks ? new Map(Array.from(pendingAcks.entries()).map(([id, pending]) => [
-    id,
-    {
-      ...pending,
-      tx: cloneCrossJurisdictionAccountTxRoute(pending.tx) as typeof pending.tx,
-    },
-  ])) : undefined;
+import {
+  cloneStoredCrossJurisdictionBookAdmissions,
+  cloneStoredCrossJurisdictionRoutes,
+  cloneStoredPendingCrossJurisdictionFillAcks,
+  withDefinedProperty,
+} from './entity-core-boundary';
 
 export const hydrateAccountDocFromStorage = (doc: StorageAccountDoc): AccountReplica => {
   assertAccountMempoolWithinLimit(doc, 'storage.account.mempool');
@@ -102,40 +78,40 @@ export const hydrateEntityStateFromStorage = (options: {
     height: core.height,
     timestamp: core.timestamp,
     nonces: core.nonces,
-    ...withProp('entityCommandNonces', core.entityCommandNonces),
+    ...withDefinedProperty('entityCommandNonces', core.entityCommandNonces),
     proposals: core.proposals,
     config: core.config,
+    entityEncryptionPublicKey: core.entityEncryptionPublicKey,
     reserves: core.reserves,
-    ...withProp('externalWallet', core.externalWallet),
+    ...withDefinedProperty('externalWallet', core.externalWallet),
     accounts: new Map(Array.from(accounts.entries()).map(([key, value]) => [key, hydrateAccountDocFromStorage(value)])),
     lastFinalizedJHeight: core.lastFinalizedJHeight,
     jBlockChain: core.jBlockChain,
-    ...withProp('jHistoryFinality', core.jHistoryFinality),
-    ...withProp('certifiedBoardState', core.certifiedBoardState),
-    ...withProp('profileEncryptionManifest', core.profileEncryptionManifest),
+    ...withDefinedProperty('jHistoryFinality', core.jHistoryFinality),
+    ...withDefinedProperty('certifiedBoardState', core.certifiedBoardState),
     profile: core.profile,
     htlcRoutes: core.htlcRoutes,
     htlcFeesEarned: core.htlcFeesEarned,
     lockBook: core.lockBook,
-    ...withProp('prevFrameHash', core.prevFrameHash),
-    ...withProp('leaderState', core.leaderState),
-    ...withProp('deferredAccountProposals', core.deferredAccountProposals),
-    ...withProp('settlementContinuations', core.settlementContinuations),
-    ...withProp('crontabState', core.crontabState),
-    ...withProp('jBatchState', core.jBatchState),
-    ...withProp('entityProviderActionState', core.entityProviderActionState),
-    ...withProp('consumptionAccumulator', core.consumptionAccumulator),
-    ...withProp('certifiedOutputSequences', core.certifiedOutputSequences),
-    ...withProp('outDebtsByToken', core.outDebtsByToken),
-    ...withProp('inDebtsByToken', core.inDebtsByToken),
-    ...withProp('orderbookExt', orderbookExt),
-    ...withProp('swapTradingPairs', core.swapTradingPairs),
-    ...withProp('crossJurisdictionSwaps', publicCrossJurisdictionSwaps(core.crossJurisdictionSwaps)),
-    ...withProp('crossJurisdictionAuthorizations', publicCrossJurisdictionSwaps(core.crossJurisdictionAuthorizations)),
-    ...withProp('pendingCrossJurisdictionFillAcks', publicPendingCrossJurisdictionFillAcks(core.pendingCrossJurisdictionFillAcks)),
-    ...withProp('crossJurisdictionBookAdmissions', publicCrossJurisdictionBookAdmissions(core.crossJurisdictionBookAdmissions)),
-    ...withProp('hubRebalanceConfig', core.hubRebalanceConfig),
-    ...withProp('lending', core.lending),
+    ...withDefinedProperty('prevFrameHash', core.prevFrameHash),
+    ...withDefinedProperty('leaderState', core.leaderState),
+    ...withDefinedProperty('deferredAccountProposals', core.deferredAccountProposals),
+    ...withDefinedProperty('settlementContinuations', core.settlementContinuations),
+    ...withDefinedProperty('crontabState', core.crontabState),
+    ...withDefinedProperty('jBatchState', core.jBatchState),
+    ...withDefinedProperty('entityProviderActionState', core.entityProviderActionState),
+    ...withDefinedProperty('consumptionAccumulator', core.consumptionAccumulator),
+    ...withDefinedProperty('certifiedOutputSequences', core.certifiedOutputSequences),
+    ...withDefinedProperty('outDebtsByToken', core.outDebtsByToken),
+    ...withDefinedProperty('inDebtsByToken', core.inDebtsByToken),
+    ...withDefinedProperty('orderbookExt', orderbookExt),
+    ...withDefinedProperty('swapTradingPairs', core.swapTradingPairs),
+    ...withDefinedProperty('crossJurisdictionSwaps', cloneStoredCrossJurisdictionRoutes(core.crossJurisdictionSwaps)),
+    ...withDefinedProperty('crossJurisdictionAuthorizations', cloneStoredCrossJurisdictionRoutes(core.crossJurisdictionAuthorizations)),
+    ...withDefinedProperty('pendingCrossJurisdictionFillAcks', cloneStoredPendingCrossJurisdictionFillAcks(core.pendingCrossJurisdictionFillAcks)),
+    ...withDefinedProperty('crossJurisdictionBookAdmissions', cloneStoredCrossJurisdictionBookAdmissions(core.crossJurisdictionBookAdmissions)),
+    ...withDefinedProperty('hubRebalanceConfig', core.hubRebalanceConfig),
+    ...withDefinedProperty('lending', core.lending),
   };
 };
 

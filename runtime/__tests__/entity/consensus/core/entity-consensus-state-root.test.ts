@@ -15,9 +15,23 @@ import type { EntityState } from '../../../../entity/types';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
+const signerId = `0x${'33'.repeat(20)}`;
+
+const frameContext = (height: number, parentFrameHash: string) => ({
+  version: 1 as const,
+  proposerReplicaId: `${entityId}:${signerId}`,
+  entityId,
+  proposerSignerId: signerId,
+  parentFrameHash,
+  height,
+  gossipProfiles: [],
+  peerAssertions: [],
+  htlc: { version: 1 as const, entries: [], originated: [] },
+});
 
 const baseState = (): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 1,
   timestamp: 100,
   nonces: new Map(),
@@ -43,6 +57,9 @@ const baseState = (): EntityState => ({
 type StateMutator = (state: EntityState) => void;
 
 const mutators = {
+  entityEncryptionPublicKey: state => {
+    state.entityEncryptionPublicKey = `0x${'55'.repeat(32)}`;
+  },
   entityId: state => {
     state.entityId = `0x${'33'.repeat(32)}`;
   },
@@ -128,25 +145,6 @@ const mutators = {
       version: 1,
       confirmedNonce: 1n,
       generation: 1,
-    };
-  },
-  profileEncryptionManifest: state => {
-    state.profileEncryptionManifest = {
-      entityId,
-      threshold: 1,
-      attestations: [
-        {
-          version: 'xln:validator-encryption-key:v1',
-          entityId,
-          signer: '0x0000000000000000000000000000000000000001',
-          signerId: '1',
-          weight: 1,
-          publicKey: `0x${'77'.repeat(32)}`,
-          encryptionPublicKey: `0x${'99'.repeat(32)}`,
-          signature: `0x${'11'.repeat(65)}`,
-        },
-      ],
-      hash: `0x${'88'.repeat(32)}`,
     };
   },
   profile: state => {
@@ -581,13 +579,13 @@ test('Entity frame hash binds the complete shared post-replay state root', async
   const left = baseState();
   const right = baseState();
   right.nonces.set('validator-observed-nonce', 1);
-  const leftHash = await createEntityFrameHash('genesis', 1, 100, [], left);
-  const rightHash = await createEntityFrameHash('genesis', 1, 100, [], right);
+  const leftHash = await createEntityFrameHash('genesis', 1, 100, [], left, frameContext(1, 'genesis'));
+  const rightHash = await createEntityFrameHash('genesis', 1, 100, [], right, frameContext(1, 'genesis'));
   expect(rightHash).not.toBe(leftHash);
 
   right.nonces.clear();
-  expect(await createEntityFrameHash('genesis', 1, 100, [], right)).toBe(leftHash);
-  expect(await createEntityFrameHash('different-prev-frame', 1, 100, [], right)).not.toBe(leftHash);
+  expect(await createEntityFrameHash('genesis', 1, 100, [], right, frameContext(1, 'genesis'))).toBe(leftHash);
+  expect(await createEntityFrameHash('different-prev-frame', 1, 100, [], right, frameContext(1, 'different-prev-frame'))).not.toBe(leftHash);
 });
 
 test('Entity frame strict codec binds arbitrary transaction metadata keys', async () => {
@@ -600,8 +598,8 @@ test('Entity frame strict codec binds arbitrary transaction metadata keys', asyn
       metadata: { type: 'audit', provider },
     },
   });
-  const left = await createEntityFrameHash('genesis', 1, 100, [tx('provider-a')], state);
-  const right = await createEntityFrameHash('genesis', 1, 100, [tx('provider-b')], state);
+  const left = await createEntityFrameHash('genesis', 1, 100, [tx('provider-a')], state, frameContext(1, 'genesis'));
+  const right = await createEntityFrameHash('genesis', 1, 100, [tx('provider-b')], state, frameContext(1, 'genesis'));
   expect(right).not.toBe(left);
 });
 

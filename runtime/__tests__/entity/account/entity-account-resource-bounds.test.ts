@@ -12,7 +12,7 @@ import { LIMITS } from '../../../config/constants';
 import { applyEntityInput } from '../../../entity/consensus';
 import { assertEntityAccountInsertionCapacity } from '../../../entity/account/account-capacity';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../../../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 import { isLeftEntity } from '../../../entity/id';
 import { applyAccountInputToEntity } from '../../../entity/tx/handlers/account/index';
 import { handleOpenAccountEntityTx } from '../../../entity/tx/handlers/account/lifecycle/open-account';
@@ -49,7 +49,6 @@ const makeAccount = (mempool: AccountTx[] = []): AccountReplica => ({
     },
     watchSeed,
     deltas: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     disputeConfig: { leftResponseSeconds: 576, rightResponseSeconds: 576 },
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
@@ -87,6 +86,7 @@ const makeAccount = (mempool: AccountTx[] = []): AccountReplica => ({
 
 const makeState = (): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'66'.repeat(32)}`,
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
@@ -504,11 +504,10 @@ test('every committed Entity transition emits a size measurement without consump
     shares: { [signerId]: 1n },
   };
   state.entityId = hashBoard(encodeBoard(state.config)).toLowerCase();
-  const localKeys = deriveLocalEntityCryptoKeys(env, state.entityId, signerId);
+  state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, state.entityId);
   const replica: EntityReplica = {
     entityId: state.entityId,
     signerId,
-    entityEncPubKey: localKeys.publicKey,
     state,
     mempool: [],
     isProposer: true,

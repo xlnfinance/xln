@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
+import { requireEntityEncryptionPrivateKey } from '../../../entity/auth/crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { Level } from 'level';
@@ -60,7 +62,12 @@ import {
   STORAGE_WRITER_LOCK_TTL_MS,
   withStorageWriterLock,
 } from '../../../storage/runtime-dbs';
-import { buildCryptographicProfileFixture } from '../.././helpers/cryptographic-profile';
+import { verifyProfileSignature } from '../../../entity/profile/profile-signing';
+import {
+  buildCryptographicProfileFixture,
+  certifySingleSignerProfileFixture,
+  deriveSingleSignerFixtureEntityId,
+} from '../../helpers/cryptographic-profile';
 
 describe('storage frame journal retention', () => {
   const cleanupRuntimeStorage = (dbRoot: string, runtimeId: string): void => {
@@ -87,7 +94,7 @@ describe('storage frame journal retention', () => {
     env.state.height = 1;
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
     return env;
   };
 
@@ -112,14 +119,13 @@ describe('storage frame journal retention', () => {
         entityProviderAddress: '0x0000000000000000000000000000000000000012',
       };
       installTestJurisdiction(env, jurisdiction);
-      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
       for (const signerIndex of [2, 3]) {
         const signer = deriveSignerAddressSync(seed, String(signerIndex)).toLowerCase();
         registerSignerKey(env, signer, deriveSignerKeySync(seed, String(signerIndex)));
         const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
         enqueueRuntimeInput(env, {
-          runtimeTxs: [{
-            type: 'importReplica',
+          runtimeTxs: [createTestEntityImportRuntimeTx(env, {
             entityId,
             signerId: signer,
             data: {
@@ -132,7 +138,7 @@ describe('storage frame journal retention', () => {
                 jurisdiction,
               },
             },
-          }],
+          })],
           entityInputs: [],
         });
         await processRuntime(env, []);
@@ -220,7 +226,7 @@ describe('storage frame journal retention', () => {
     for (let height = 1; height <= 3; height += 1) {
       env.state.height = height;
       env.state.timestamp = 1_000 + height;
-      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
     }
 
     const first = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
@@ -267,14 +273,13 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'checkpoint-view-pruned-test',
       address: 'browservm://checkpoint-view-pruned-test',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: signer,
         data: {
@@ -287,7 +292,7 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -295,14 +300,23 @@ describe('storage frame journal retention', () => {
 
     env.state.height = prunedHeight + 1;
     env.state.timestamp += 1;
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
     const retainedHeight = env.state.height;
+
+    expect(await readPersistedFrameJournal(env, prunedHeight)).toBeNull();
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
 
     expect(await readPersistedCheckpointSnapshot(env, prunedHeight)).toBeNull();
     expect(await readPersistedCheckpointSnapshot(env, retainedHeight)).toBeTruthy();
+
+    const restored = await loadEnvFromDB(runtimeId, seed);
+    if (!restored) throw new Error('PRUNED_ENTITY_SEED_RESTORE_MISSING');
+    expect(restored.state.eReplicas.has(`${entityId}:${signer}`)).toBe(true);
+    expect(requireEntityEncryptionPrivateKey(restored, entityId)).toMatch(/^0x[0-9a-f]{64}$/);
+    await closeRuntimeDb(restored);
+    await closeInfraDb(restored);
   });
 
   test('retained snapshots keep every replay diff after the oldest retained base', async () => {
@@ -330,14 +344,13 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'retained-snapshot-replay-window-test',
       address: 'browservm://retained-snapshot-replay-window-test',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: signer,
         data: {
@@ -350,7 +363,7 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -399,18 +412,17 @@ describe('storage frame journal retention', () => {
     const signer = deriveSignerAddressSync(seed, '1');
     registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
     const localEntityId = generateLazyEntityId([signer], 1n).toLowerCase();
-    const remoteEntityId = `0x${'ab'.repeat(32)}`;
+    const remoteEntityId = deriveSingleSignerFixtureEntityId(seed, '2');
     const jurisdiction: JurisdictionConfig = {
       name: 'historical-local-entities-only',
       address: 'browservm://historical-local-entities-only',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: localEntityId,
         signerId: signer,
         data: {
@@ -423,19 +435,31 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
     const remoteSignerId = deriveSignerAddressSync(seed, '2').toLowerCase();
-    env.gossip.profiles.set(remoteEntityId, buildCryptographicProfileFixture({
+    const remoteProfile = certifySingleSignerProfileFixture(buildCryptographicProfileFixture({
       entityId: remoteEntityId,
       signingSeed: seed,
       signerId: '2',
       runtimeId: remoteSignerId,
       name: 'Remote counterparty',
       lastUpdated: env.state.timestamp,
-    }));
+    }), seed, '2');
+    env.gossip.profiles.set(remoteEntityId, remoteProfile);
+    const routeVerification = await verifyProfileSignature(remoteProfile);
+    if (!routeVerification.valid || !routeVerification.signerId) {
+      throw new Error(`TEST_REMOTE_PROFILE_ROUTE_INVALID:${routeVerification.reason ?? 'unknown'}`);
+    }
+    env.infrastructure!.verifiedProfileRoutes ??= new Map();
+    env.infrastructure!.verifiedProfileRoutes.set(remoteEntityId, {
+      runtimeId: remoteProfile.runtimeId,
+      runtimeSignerId: routeVerification.signerId,
+      runtimeEncPubKey: remoteProfile.runtimeEncPubKey,
+      lastUpdated: remoteProfile.lastUpdated,
+    });
     enqueueRuntimeInput(env, {
       timestamp: env.state.timestamp,
       runtimeTxs: [],
@@ -482,8 +506,8 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'checkpoint-replica-lineage-test',
       address: 'browservm://checkpoint-replica-lineage-test',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
@@ -492,8 +516,7 @@ describe('storage frame journal retention', () => {
     registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: signer,
         data: {
@@ -506,10 +529,21 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId: signer.toLowerCase(),
+        entityTxs: [{
+          type: 'profile-update',
+          data: { profile: { entityId, name: 'checkpoint-replica-lineage' } },
+        }],
+      }],
+    });
     await processRuntime(env, []);
     const checkpointHeight = env.state.height;
     expect(env.state.eReplicas.get(`${entityId}:${signer.toLowerCase()}`)?.state.height).toBeGreaterThan(0);
@@ -518,8 +552,7 @@ describe('storage frame journal retention', () => {
     registerSignerKey(env, secondSigner, deriveSignerKeySync(seed, '2'));
     const secondEntityId = generateLazyEntityId([secondSigner], 1n).toLowerCase();
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: secondEntityId,
         signerId: secondSigner,
         data: {
@@ -532,7 +565,7 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -588,7 +621,7 @@ describe('storage frame journal retention', () => {
     try {
       await withStorageWriterLock(env, async () => {
         try {
-          await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+          await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
         } catch (error) {
           failure = error;
         }
@@ -652,7 +685,7 @@ describe('storage frame journal retention', () => {
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
-    const firstSave = await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    const firstSave = await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
     const persistence = firstSave.persistencePerfMs;
     expect(persistence).toBeTruthy();
     expect(Object.keys(persistence?.planningStages ?? {})).toEqual(['overlay', 'lineage', 'remainder']);
@@ -675,7 +708,7 @@ describe('storage frame journal retention', () => {
     const planningStageTotal = Object.values(persistence?.planningStages ?? {})
       .reduce((sum, durationMs) => sum + durationMs, 0);
     expect(planningStageTotal).toBeLessThanOrEqual((persistence?.planning ?? 0) + 0.01);
-    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [])).rejects.toThrow(
+    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map())).rejects.toThrow(
       'STORAGE_APPEND_INVARIANT_FAILED',
     );
 
@@ -696,11 +729,12 @@ describe('storage frame journal retention', () => {
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
     const beforeFrame = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
     expect(beforeFrame).toBeTruthy();
 
     const result = await saveRuntimeFrameToStorage({
+      entityContexts: new Map(),
       env,
       tryOpenDb: async (targetEnv) => {
         await getRuntimeStorageDb(targetEnv).open();
@@ -746,14 +780,15 @@ describe('storage frame journal retention', () => {
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
     env.state.height = 2;
     env.state.timestamp = 2_000;
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
 
     env.state.height = 1;
     env.state.timestamp = 3_000;
     const result = await saveRuntimeFrameToStorage({
+      entityContexts: new Map(),
       env,
       tryOpenDb: async (targetEnv) => {
         await getRuntimeStorageDb(targetEnv).open();
@@ -798,7 +833,7 @@ describe('storage frame journal retention', () => {
 
     env.state.height = 2;
     env.state.timestamp = 2_000;
-    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [])).rejects.toThrow(
+    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map())).rejects.toThrow(
       'STORAGE_WRITER_LOCK_HELD',
     );
 
@@ -825,7 +860,7 @@ describe('storage frame journal retention', () => {
 
     env.state.height = 2;
     env.state.timestamp = 2_000;
-    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [])).rejects.toThrow(
+    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map())).rejects.toThrow(
       'STORAGE_WRITER_LOCK_HELD',
     );
 
@@ -856,15 +891,14 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'storage-restore-missing-multisig-meta',
       address: 'browservm://storage-restore-missing-multisig-meta',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [signerA, signerB].map((signerId, index) => ({
-          type: 'importReplica' as const,
+      runtimeTxs: [signerA, signerB].map((signerId, index) => (createTestEntityImportRuntimeTx(env, {
           entityId,
           signerId,
           data: {
@@ -877,7 +911,7 @@ describe('storage frame journal retention', () => {
               jurisdiction,
             },
           },
-        })),
+        }))),
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -944,14 +978,13 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'storage-transport-outbox',
       address: 'browservm://storage-transport-outbox',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: localEntityId,
         signerId: signer,
         data: {
@@ -964,7 +997,7 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -983,6 +1016,17 @@ describe('storage frame journal retention', () => {
         hash: `0x${'77'.repeat(32)}`,
         txs: [],
         events: [],
+        entityContext: {
+          version: 1,
+          proposerReplicaId: `0x${'72'.repeat(32)}:0x${'73'.repeat(20)}`,
+          entityId: `0x${'72'.repeat(32)}`,
+          proposerSignerId: `0x${'73'.repeat(20)}`,
+          parentFrameHash: `0x${'74'.repeat(32)}`,
+          height: 22,
+          gossipProfiles: [],
+          peerAssertions: [],
+          htlc: { version: 1, entries: [], originated: [] },
+        },
         leader: { proposerSignerId: `0x${'73'.repeat(20)}`, view: 0 },
         hashesToSign: buildEntityHashesToSign(
           `0x${'72'.repeat(32)}`,
@@ -1004,8 +1048,7 @@ describe('storage frame journal retention', () => {
     registerSignerKey(env, secondSigner, deriveSignerKeySync(seed, '2'));
     const secondEntityId = generateLazyEntityId([secondSigner], 1n).toLowerCase();
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: secondEntityId,
         signerId: secondSigner,
         data: {
@@ -1018,7 +1061,7 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -1098,7 +1141,7 @@ describe('storage frame journal retention', () => {
       env.state.height = 1;
       env.state.timestamp = 1_000;
 
-      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
       const frame = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
       expect(frame?.stateHash).toMatch(/^0x[0-9a-f]{64}$/);
       expect(frame?.frameHash).toMatch(/^0x[0-9a-f]{64}$/);
@@ -1150,15 +1193,14 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'canonical-snapshot-restore-test',
       address: 'browservm://canonical-snapshot-restore-test',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: signer,
         data: {
@@ -1171,7 +1213,7 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -1225,15 +1267,14 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'storage-missing-replay-diff-test',
       address: 'browservm://storage-missing-replay-diff-test',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: signer,
         data: {
@@ -1246,7 +1287,7 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -1327,15 +1368,14 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'epoch-rotation-tail-test',
       address: 'browservm://epoch-rotation-tail-test',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: signer,
         data: {
@@ -1348,7 +1388,7 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -1486,8 +1526,8 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'frame-retention-test',
       address: 'browservm://frame-retention-test',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
@@ -1495,8 +1535,7 @@ describe('storage frame journal retention', () => {
     enqueueRuntimeInput(env, {
       timestamp: env.state.timestamp,
       runtimeTxs: [
-        {
-          type: 'importReplica',
+        createTestEntityImportRuntimeTx(env, {
           entityId: entityA,
           signerId: signerA,
           data: {
@@ -1509,9 +1548,8 @@ describe('storage frame journal retention', () => {
               jurisdiction,
             },
           },
-        },
-        {
-          type: 'importReplica',
+        }),
+        createTestEntityImportRuntimeTx(env, {
           entityId: entityB,
           signerId: signerB,
           data: {
@@ -1524,7 +1562,7 @@ describe('storage frame journal retention', () => {
               jurisdiction,
             },
           },
-        },
+        }),
       ],
       entityInputs: [],
     });
@@ -1650,15 +1688,14 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'storage-crash-history-view-loss-test',
       address: 'browservm://storage-crash-history-view-loss-test',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: signer,
         data: {
@@ -1671,7 +1708,7 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -1689,8 +1726,7 @@ describe('storage frame journal retention', () => {
       registerSignerKey(env, nextSigner, deriveSignerKeySync(seed, String(signerIndex)));
       const nextEntityId = generateLazyEntityId([nextSigner], 1n).toLowerCase();
       enqueueRuntimeInput(env, {
-        runtimeTxs: [{
-          type: 'importReplica',
+        runtimeTxs: [createTestEntityImportRuntimeTx(env, {
           entityId: nextEntityId,
           signerId: nextSigner,
           data: {
@@ -1703,7 +1739,7 @@ describe('storage frame journal retention', () => {
               jurisdiction,
             },
           },
-        }],
+        })],
         entityInputs: [],
       });
       await processRuntime(env, []);
@@ -1754,7 +1790,7 @@ describe('storage frame journal retention', () => {
     env.state.height = 1;
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
 
     const db = getRuntimeWalDb(env);
     const head = await readStorageHead(db);
@@ -1891,15 +1927,14 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'storage-crash-torn-snapshot-docs-test',
       address: 'browservm://storage-crash-torn-snapshot-docs-test',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: signer,
         data: {
@@ -1912,7 +1947,7 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -1999,15 +2034,14 @@ describe('storage frame journal retention', () => {
     const jurisdiction = {
       name: 'storage-overlay-restart-test',
       address: 'browservm://storage-overlay-restart-test',
-      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+      entityProviderAddress: '0x000000000000000000000000000000000000beef',
       chainId: 31337,
     };
     installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: signer,
         data: {
@@ -2020,7 +2054,7 @@ describe('storage frame journal retention', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -2133,7 +2167,7 @@ describe('storage frame journal retention', () => {
 	      category: 'system',
 	      message: `history-view-prune-${height}`,
 	    }];
-	    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+	    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
 	  }
 
 	  expect(await readHistoryViewRuntimeActivity(getHistoryViewDb(env), 1)).toBeNull();
@@ -2164,7 +2198,7 @@ describe('storage frame journal retention', () => {
       category: 'system',
       message: 'durable-wal-activity',
     }];
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map());
     expect((await readStorageFrameRecord(getRuntimeWalDb(env), 1))?.activityLogs[0]?.message)
       .toBe('durable-wal-activity');
     await closeRuntimeDb(env);

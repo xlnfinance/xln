@@ -73,7 +73,6 @@ import {
 import { decodeRuntimeAdapterRequest, runtimeAdapterMessageByteLength } from '../runtime-adapter/codec';
 import {
   getRelayClientIp,
-  hasConnectedEncryptedRelayClient,
   resolveRequestClientIp,
   sendEntityInputDirectViaRelaySocketDelivery,
   type RelaySocketData,
@@ -118,8 +117,6 @@ import { getJurisdictionIdentityRef } from '../../jurisdiction/machine/jurisdict
 import { readInheritedChildSecrets } from '../../infra/process/child-secrets';
 import { createLocalPairingController } from './ownership/local-pairing';
 import { createGossipProfileAdmission } from './network/gossip-admission';
-import { deriveSignerAddressSync } from '../../account/crypto';
-import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './ownership/local-runtime';
 import { createBrainVaultOwnerController } from './ownership/brainvault';
 import { dbRootPath } from '../../runtime/platform';
 import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
@@ -289,11 +286,11 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
 };
 const getDefaultLocalRelayUrl = (port?: number): string => `ws://localhost:${port ?? DEFAULT_OPTIONS.port}/relay`;
 const resolveConfiguredRelayUrl = (port?: number): string => {
-  const fallback = getDefaultLocalRelayUrl(port);
+  const defaultValue = getDefaultLocalRelayUrl(port);
   const candidates = [process.env['INTERNAL_RELAY_URL'], process.env['RELAY_URL']]
     .map(value => String(value || '').trim())
     .filter(Boolean);
-  return candidates[0] || fallback;
+  return candidates[0] || defaultValue;
 };
 
 let relayStore = createRelayStore(DEFAULT_OPTIONS.serverId ?? 'xln-server');
@@ -323,9 +320,6 @@ const sendDirectEntityInput = (
   ingressTimestamp?: number,
 ) =>
   sendEntityInputDirectViaRelaySocketDelivery(relayStore, env, targetRuntimeId, envelope, logOneShot, ingressTimestamp);
-
-const hasDirectRelayClient = (targetRuntimeId: string): boolean =>
-  hasConnectedEncryptedRelayClient(relayStore, targetRuntimeId);
 
 const installProcessSafetyGuards = (): void => {
   if (processGuardsInstalled) return;
@@ -1440,10 +1434,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   try {
     serverBootPhase = 'runtime';
     serverLog.info('runtime.init.start');
-    if (String(process.env['XLN_BRAINVAULT_OWNER_PATH'] || '').trim()) {
-      const prewarmed = await brainVaultOwnerController.prewarm(SERVER_RUNTIME_SEED);
-      if (prewarmed) serverLog.info('brainvault_owner.prewarmed');
-    }
+    const brainVaultOwnerPrewarmed = String(process.env['XLN_BRAINVAULT_OWNER_PATH'] || '').trim()
+      ? await brainVaultOwnerController.prewarm(SERVER_RUNTIME_SEED)
+      : null;
+    if (brainVaultOwnerPrewarmed) serverLog.info('brainvault_owner.prewarmed');
     env = await main(SERVER_RUNTIME_SEED, {
       trustedJurisdictionRpcBindings: resolveTrustedServerRestoreRpcBindings(),
       localSigners: [
@@ -1464,7 +1458,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     env.infrastructure = env.infrastructure ?? {};
     env.infrastructure.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
       sendDirectEntityInput(runtimeEnv, targetRuntimeId, envelope, ingressTimestamp);
-    env.infrastructure.canUseConnectedRelayFallback = hasDirectRelayClient;
     startRuntimeLoop(env, {
       onFatal: async payload => {
         serverLog.error('runtime.loop_fatal', {
@@ -1479,27 +1472,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     await initializeJurisdictionAdapter(env);
 
     if (LOCAL_RUNTIME_OWNER) {
-      const jurisdictionName = String(env.activeJurisdiction || 'local');
-      const jurisdiction = env.state.jReplicas.get(jurisdictionName);
-      if (!jurisdiction) throw new Error(`LOCAL_RUNTIME_OWNER_JURISDICTION_MISSING:${jurisdictionName}`);
-      const owner = buildLocalRuntimeOwner({
-        signerId: deriveSignerAddressSync(SERVER_RUNTIME_SEED, LOCAL_RUNTIME_OWNER.label),
-        profileName: LOCAL_RUNTIME_OWNER.profileName,
-        jurisdictionName,
-        jurisdiction,
-      });
-      const result = await ensureLocalRuntimeOwner(env, owner, {
-        enqueue: enqueueRuntimeInput,
-        onFrameCommit: (targetEnv, callback) =>
-          registerRuntimeFrameCommitCallback(targetEnv, ({ height }) => callback(height)),
-        timeoutMs: STARTUP_STEP_TIMEOUT_MS,
-      });
-      relayStore.activeHubEntityIds = [];
-      serverLog.info('local_owner.ready', {
-        entityId: shortId(result.entityId, 10),
-        created: result.created,
-        height: result.height,
-      });
+      throw new Error(
+        'LOCAL_RUNTIME_OWNER_ENTITY_KEY_CUSTODY_REQUIRED: configure XLN_BRAINVAULT_OWNER_PATH',
+      );
     }
 
     if (String(process.env['XLN_BRAINVAULT_OWNER_PATH'] || '').trim()) {
@@ -1552,7 +1527,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     serverBootError = (error as Error)?.message || String(error);
     serverLog.error('startup.failed_after_bind', { error: getErrorMessage(error) });
     return closeFailedServerStartup(error, env, bound);
-  } finally {
   }
 
   serverLog.info('ready', {

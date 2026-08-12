@@ -5,7 +5,7 @@ import {
   buildPaymentPanelView,
   buildPaymentPanelViewFromRuntimeView,
 } from '../../../frontend/src/lib/components/Entity/payments/payment-panel-view';
-import { hasCertifiedEntityEncryptionManifest } from '../../../frontend/src/lib/components/Entity/payment-routing';
+import { hasCertifiedEntityEncryptionKey } from '../../../frontend/src/lib/components/Entity/payment-routing';
 
 const SOURCE = `0x${'11'.repeat(32)}`;
 const HUB = `0x${'22'.repeat(32)}`;
@@ -22,7 +22,7 @@ test('payment panel view projects only payment routing state from replicas', () 
       entityId: SOURCE,
       state: {
         entityId: SOURCE,
-        entityEncPubKey: `0x${'55'.repeat(32)}`,
+        entityEncryptionPublicKey: `0x${'55'.repeat(32)}`,
         config: { hiddenFromPaymentView: true },
         reserves: new Map([[1, 100n]]),
         lockBook: new Map([['lock-1', { accountId: HUB, tokenId: 1, direction: 'outgoing' }]]),
@@ -55,7 +55,7 @@ test('payment panel view projects only payment routing state from replicas', () 
   expect(view.networkGraph).toBe(networkGraph);
   expect(view.replicaMap.size).toBe(1);
   const projected = view.replicaMap.get(`${SOURCE}:${SIGNER}`);
-  expect((projected?.state as Record<string, unknown>).entityEncPubKey).toBeUndefined();
+  expect((projected?.state as Record<string, unknown>).entityEncryptionPublicKey).toBeUndefined();
   expect(projected?.state.lockBook.get('lock-1')).toEqual({ accountId: HUB, tokenId: 1, direction: 'outgoing' });
   expect(projected?.state.accounts.get(HUB)?.deltas.get(1)).toBe(delta);
   expect((projected?.state as Record<string, unknown>).config).toBeUndefined();
@@ -78,7 +78,7 @@ test('payment panel view projects payment routing state from runtime adapter fra
       core: {
         entityId: SOURCE,
         signerId: SIGNER,
-        entityEncPubKey: `0x${'66'.repeat(32)}`,
+        entityEncryptionPublicKey: `0x${'66'.repeat(32)}`,
         lockBook: new Map([['lock-2', { accountId: HUB, tokenId: 1, direction: 'outgoing' }]]),
       },
       accounts: {
@@ -108,29 +108,23 @@ test('payment panel view projects payment routing state from runtime adapter fra
   expect(view.blockedCounterpartyIds.has(HUB.toLowerCase())).toBe(true);
   expect(view.networkGraph).toBeNull();
   const projected = view.replicaMap.get(`${SOURCE}:${SIGNER.toLowerCase()}`);
-  expect((projected?.state as Record<string, unknown>).entityEncPubKey).toBeUndefined();
+  expect((projected?.state as Record<string, unknown>).entityEncryptionPublicKey).toBeUndefined();
   expect(projected?.state.lockBook.get('lock-2')).toEqual({ accountId: HUB, tokenId: 1, direction: 'outgoing' });
   expect(projected?.state.accounts.get(HUB.toLowerCase())?.deltas.get(1)).toBe(delta);
 });
 
-test('payment key coverage requires every validator key in a certified profile', () => {
+test('payment key coverage requires one certified Entity encryption key', () => {
   const profile = {
     entityId: HUB,
+    entityEncryptionPublicKey: 'invalid',
     runtimeSignature: `0x${'11'.repeat(65)}`,
     metadata: {
       profileHanko: '0x01',
-      board: {
-        threshold: 2,
-        validators: [{ signerId: 'a' }, { signerId: 'b' }],
-        encryptionAttestations: [{ encryptionPublicKey: `0x${'21'.repeat(32)}` }],
-      },
     },
   };
-  expect(hasCertifiedEntityEncryptionManifest(new Map(), [profile] as never, HUB)).toBe(false);
-  profile.metadata.board.encryptionAttestations.push({ encryptionPublicKey: `0x${'22'.repeat(32)}` });
-  expect(hasCertifiedEntityEncryptionManifest(new Map(), [profile] as never, HUB)).toBe(true);
-  profile.metadata.board.encryptionAttestations[1]!.encryptionPublicKey = `0x${'21'.repeat(32)}`;
-  expect(hasCertifiedEntityEncryptionManifest(new Map(), [profile] as never, HUB)).toBe(false);
+  expect(hasCertifiedEntityEncryptionKey(new Map(), [profile] as never, HUB)).toBe(false);
+  profile.entityEncryptionPublicKey = `0x${'21'.repeat(32)}`;
+  expect(hasCertifiedEntityEncryptionKey(new Map(), [profile] as never, HUB)).toBe(true);
 });
 
 test('PaymentPanel consumes PaymentPanelView instead of owning full env reads', () => {

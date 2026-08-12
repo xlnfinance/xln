@@ -8,10 +8,14 @@ import {
 import { applyEntityInput } from '../../entity/consensus';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
-import { deriveLocalEntityCryptoKeys } from '../../entity/auth/crypto';
+import {
+  deriveEntityEncryptionPublicKey,
+  provisionEntityEncryptionKey,
+} from '../../entity/auth/crypto';
 import { generateLazyEntityId } from '../../entity/factory';
 import type { EntityFrame, EntityReplica, EntityState } from '../../entity/types';
 import { createEmptyEnv } from '../../runtime';
+import { hexlify } from 'ethers';
 
 const signerLabels = ['1', '2', '3'] as const;
 type SignerLabel = typeof signerLabels[number];
@@ -23,9 +27,15 @@ export const createEntityProposalFixture = (
   const validators = signerLabels.map(label =>
     deriveSignerAddressSync(seed, label).toLowerCase());
   const entityId = generateLazyEntityId(validators, threshold).toLowerCase();
+  const entityEncryptionPrivateKey = hexlify(deriveSignerKeySync(seed, 'entity-encryption'));
+  const entityEncryptionPublicKey = deriveEntityEncryptionPublicKey(
+    entityEncryptionPrivateKey,
+    entityId,
+  );
 
   const createState = (): EntityState => ({
     entityId,
+    entityEncryptionPublicKey,
     height: 0,
     timestamp: 0,
     nonces: new Map(),
@@ -53,11 +63,10 @@ export const createEntityProposalFixture = (
     registerSignerKey(env, signerId, deriveSignerKeySync(seed, label));
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
-    const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
+    provisionEntityEncryptionKey(env, entityId, entityEncryptionPrivateKey);
     const replica: EntityReplica = {
       entityId,
       signerId,
-      entityEncPubKey: keys.publicKey,
       state: createState(),
       mempool: [],
       isProposer: label === '1',

@@ -35,7 +35,7 @@ const transferReceipt: CanonicalRpcReceipt = {
 const transferReceiptsRoot = '0xf78dfb743fbd92ade140711c8bbc542b5e307f0ab7984eff35d751969fe57efa';
 
 // Independently captured Base mainnet block 10,000,024 (Canyon): one OP
-// deposit receipt followed by one legacy receipt.
+// deposit receipt followed by one retired receipt.
 const baseCanyonReceipts = [
   {
     type: '0x7e',

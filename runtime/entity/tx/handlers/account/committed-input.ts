@@ -143,6 +143,7 @@ const applyCommittedFrameTransactions = async (
   context: SuccessfulAccountInputContext,
 ): Promise<void> => {
   const { env, state, input, account, counterpartyId, result, effects, options } = context;
+  const consumedPreparedHtlcBindings = new Set<string>();
   for (const { frame, committedViaNewFrame } of result.committedFrames ?? []) {
     applyCommittedAccountFrameFollowups(
       state,
@@ -186,8 +187,11 @@ const applyCommittedFrameTransactions = async (
             outputs: effects.outputs,
             accountTxs: effects.accountTxs,
             candidateEffects: effects.candidateEffects,
+            ...(options?.infraContext ? { infraContext: options.infraContext } : {}),
+            consumedPreparedHtlcBindings,
           },
           accountTx,
+          frame,
           committedViaNewFrame,
         );
       }

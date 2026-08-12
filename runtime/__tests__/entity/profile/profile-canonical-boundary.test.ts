@@ -1,0 +1,129 @@
+import { expect, test } from 'bun:test';
+import { LIMITS } from '../../../config/constants';
+import { createDefaultDelta } from '../../../account/state/delta';
+import {
+  buildEntityProfileDescriptor,
+  buildChangedEntityProfileHashToSign,
+  computeEntityProfileDescriptorHash,
+  MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES,
+} from '../../../entity/profile/profile-descriptor';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { HANKO_MAX_BYTES } from '../../../hanko/codec';
+import type { EntityState } from '../../../entity/types';
+import {
+  buildCryptographicProfileFixture,
+  certifySingleSignerProfileFixture,
+  deriveSingleSignerFixtureEntityId,
+} from '../../helpers/cryptographic-profile';
+import { parseProfile } from '../../../entity/profile';
+import { verifyProfileSignature } from '../../../entity/profile/profile-signing';
+
+const id = (value: number): string => `0x${value.toString(16).padStart(64, '0')}`;
+const address = `0x${'11'.repeat(20)}`;
+const key = `0x${'22'.repeat(32)}`;
+
+const stateWithAccounts = (entityId: string, accountCount: number, tokenCount: number): EntityState => ({
+  entityId,
+  entityEncryptionPublicKey: key,
+  height: 1,
+  timestamp: 1,
+  nonces: new Map(),
+  proposals: new Map(),
+  config: { mode: 'proposer-based', threshold: 1n, validators: [address], shares: { [address]: 1n } },
+  reserves: new Map(),
+  accounts: new Map(Array.from({ length: accountCount }, (_, accountIndex) => {
+    const counterpartyId = id(accountIndex + 2);
+    return [counterpartyId, { state: {
+      leftEntity: entityId < counterpartyId ? entityId : counterpartyId,
+      rightEntity: entityId < counterpartyId ? counterpartyId : entityId,
+      domain: { chainId: 31_337, depositoryAddress: address },
+      deltas: new Map(Array.from({ length: tokenCount }, (_, tokenIndex) => {
+        const tokenId = tokenIndex + 1;
+        const capacity = 340282366920938463463374607431768211455000n - BigInt(tokenId);
+        return [tokenId, createDefaultDelta(tokenId, { left: capacity, right: capacity - 1n })];
+      })),
+    } }];
+  })) as EntityState['accounts'],
+  lastFinalizedJHeight: 0,
+  jBlockChain: [],
+  profile: { name: 'profile-budget', isHub: false, avatar: '', bio: '', website: '' },
+  htlcRoutes: new Map(),
+  htlcFeesEarned: 0n,
+  lockBook: new Map(),
+});
+
+test('profile keeps one best liquid token per account, then fills globally within the exact byte budget', () => {
+  const descriptor = buildEntityProfileDescriptor(stateWithAccounts(id(1), 1_000, 32));
+  const bytes = new TextEncoder().encode(encodeCanonicalConsensusValue(descriptor)).byteLength;
+  expect(bytes).toBeLessThanOrEqual(MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES);
+  expect(bytes).toBeLessThan(LIMITS.MAX_PROFILE_BYTES);
+  expect(descriptor.accounts).toHaveLength(1_000);
+  expect(descriptor.accounts.every(account => Object.keys(account.tokenCapacities).length >= 1)).toBe(true);
+  expect(descriptor.accounts.every(account => Object.keys(account.tokenCapacities).length <= 16)).toBe(true);
+  const fullProfile = {
+    ...descriptor,
+    lastUpdated: Number.MAX_SAFE_INTEGER,
+    runtimeId: 'x'.repeat(128),
+    runtimeEncPubKey: `0x${'f'.repeat(64)}`,
+    runtimeSignature: `0x${'f'.repeat(130)}`,
+    wsUrl: `wss://${'x'.repeat(2042)}`,
+    relays: Array.from({ length: 8 }, (_, index) => `wss://${index}${'x'.repeat(2041)}`).sort(),
+    metadata: {
+      ...descriptor.metadata,
+      mirrors: Array.from({ length: 16 }, (_, index) => ({
+        entityId: id(index + 2_000),
+        jurisdiction: {
+          name: `${index.toString().padStart(2, '0')}${'x'.repeat(126)}`,
+          chainId: Number.MAX_SAFE_INTEGER,
+          entityProviderAddress: address,
+          depositoryAddress: address,
+        },
+      })),
+      profileHanko: `0x${'ff'.repeat(HANKO_MAX_BYTES)}`,
+    },
+  };
+  expect(new TextEncoder().encode(encodeCanonicalConsensusValue(fullProfile)).byteLength)
+    .toBeLessThanOrEqual(LIMITS.MAX_PROFILE_BYTES);
+});
+
+test('profile capacity uses the owning Entity right-side perspective', () => {
+  const right = id(9);
+  const left = id(1);
+  const state = stateWithAccounts(right, 0, 0);
+  state.accounts.set(left, { state: {
+    leftEntity: left,
+    rightEntity: right,
+    domain: { chainId: 31_337, depositoryAddress: address },
+    deltas: new Map([[1, createDefaultDelta(1, { left: 5n, right: 20n })]]),
+  } } as EntityState['accounts'] extends Map<unknown, infer Value> ? Value : never);
+  const capacities = buildEntityProfileDescriptor(state).accounts[0]!.tokenCapacities as Record<string, { inCapacity: bigint; outCapacity: bigint }>;
+  expect(capacities['1']).toEqual({ inCapacity: 5n, outCapacity: 20n });
+});
+
+test('profile hash witness changes only with the final descriptor, even after in-place state mutation', () => {
+  const state = stateWithAccounts(id(1), 1, 1);
+  const previous = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(state));
+  expect(buildChangedEntityProfileHashToSign(state, previous)).toBeNull();
+  state.profile.name = 'mutated-final-profile';
+  const changed = buildChangedEntityProfileHashToSign(state, previous);
+  expect(changed?.type).toBe('profile');
+  expect(changed?.hash).not.toBe(previous);
+  expect(buildChangedEntityProfileHashToSign(state, changed!.hash)).toBeNull();
+});
+
+test('certified route authority comes from the verified Hanko claim, never an embedded board copy', async () => {
+  const seed = 'profile-authority-option-b';
+  const entityId = deriveSingleSignerFixtureEntityId(seed);
+  const certified = certifySingleSignerProfileFixture(buildCryptographicProfileFixture({
+    entityId,
+    signingSeed: seed,
+    name: 'authority',
+  }), seed);
+  expect((await verifyProfileSignature(certified)).valid).toBe(true);
+  const forged = structuredClone(certified) as unknown as { metadata: Record<string, unknown> };
+  forged.metadata['board'] = {
+    threshold: 1,
+    validators: [{ signer: address, signerId: address, weight: 1, publicKey: `0x04${'44'.repeat(64)}` }],
+  };
+  expect(() => parseProfile(forged)).toThrow('GOSSIP_PROFILE_METADATA_UNKNOWN_FIELD');
+});

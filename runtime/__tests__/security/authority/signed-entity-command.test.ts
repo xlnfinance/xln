@@ -25,7 +25,8 @@ import {
   buildEntityTransactionProposalAction,
   hashEntityProposalAction,
 } from '../../../entity/auth/authorization';
-import { applyEntityFrame, applyEntityInput } from '../../../entity/consensus';
+import { applyEntityInput } from '../../../entity/consensus';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 import {
   buildCertifiedEntityOutputHashes,
@@ -39,15 +40,10 @@ import {
   MAX_ENTITY_FRAME_TX_BYTES,
   selectEntityFrameTxByteBudget,
 } from '../../../entity/consensus/frame';
-import { deriveLocalEntityCryptoKeys } from '../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 import { encodeBoard, hashBoard } from '../../../entity/factory';
 import { withCanonicalCrossJurisdictionRouteHash } from '../../../extensions/cross-j';
 import { routeInboundP2PEntityInput } from '../../../runtime/routing/entity-routing';
-import {
-  buildValidatorEncryptionBoard,
-  createLocalValidatorEncryptionAttestation,
-} from '../../../entity/profile/profile-encryption';
-import { requireCompleteValidatorEncryptionManifest } from '../../../protocol/htlc/validator-encryption';
 import {
   applyCertifiedBoardRegistryEvent,
   cacheCertifiedBoardNodes,
@@ -106,11 +102,10 @@ const setup = (label: string) => {
     htlcFeesEarned: 0n,
     lockBook: new Map(),
   };
-  const keys = deriveLocalEntityCryptoKeys(env, id, signerId);
+  state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, id);
   const replica: EntityReplica = {
     entityId: id,
     signerId,
-    entityEncPubKey: keys.publicKey,
     state,
     mempool: [],
     isProposer: true,
@@ -147,19 +142,15 @@ const setupNumericAliasBoard = () => {
   const state: EntityState = { ...base, entityId: id, config };
   env.state.eReplicas.clear();
   for (const signerId of validators) {
-    const keys = deriveLocalEntityCryptoKeys(env, id, signerId);
+    state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, id);
     env.state.eReplicas.set(`${id}:${signerId}`, {
       entityId: id,
       signerId,
-      entityEncPubKey: keys.publicKey,
       state: structuredClone(state),
       mempool: [],
       isProposer: signerId === proposer,
     });
   }
-  const board = buildValidatorEncryptionBoard(env, state);
-  const attestations = validators.map(signerId => createLocalValidatorEncryptionAttestation(env, state, signerId));
-  state.profileEncryptionManifest = requireCompleteValidatorEncryptionManifest(board, attestations);
   return { env, state, authorSignerId: validators[1]! };
 };
 
@@ -184,6 +175,7 @@ const setupNoJurisdictionMultisig = () => {
     entityId: hashBoard(encodeBoard(config)).toLowerCase(),
     config,
   };
+  state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, state.entityId);
   delete state.entityCommandNonces;
   return { env, state, signers };
 };
@@ -420,8 +412,23 @@ describe('signed Entity command admission', () => {
   test('uses a certified alias-to-EOA binding on an independent validator runtime', () => {
     const { env: authorEnv, state, authorSignerId } = setupNumericAliasBoard();
     const command = buildSignedEntityCommand(authorEnv, state, authorSignerId, [chatCommand(authorSignerId)]);
+    installCertifiedBoardEvents(authorEnv, state, [
+      certifiedBoardEvent('FoundationBootstrapped', entityId('fa'), { height: 1 }),
+      certifiedBoardEvent('EntityRegistered', command.boardHash, {
+        height: 2,
+        entityId: state.entityId,
+      }),
+    ]);
     const verifierEnv = createEmptyEnv('signed-command:independent-validator');
+    // Numeric signer labels are BrainVault-local aliases. Independent replay
+    // therefore needs the same canonical vault seed plus the independently
+    // certified board root; neither the source Runtime object nor its replicas
+    // are consulted.
+    verifierEnv.runtimeSeed = authorEnv.runtimeSeed;
     verifierEnv.scenarioMode = true;
+    expect(provisionTestEntityEncryptionKey(verifierEnv, state.entityId))
+      .toBe(state.entityEncryptionPublicKey);
+    cacheCertifiedBoardNodes(verifierEnv, new Map(getCertifiedBoardNodeStore(authorEnv)));
     expect(command.authorSignerId).toBe('2');
     expect(command.authorSigner).not.toBe('2');
     expect(assertSignedEntityCommand(verifierEnv, structuredClone(state), command)).toEqual(command);
@@ -446,7 +453,7 @@ describe('signed Entity command admission', () => {
     const [proposer, voter] = signers as [string, string];
     const proposalTx = buildCollectiveEntityProposalTx(proposer, [hubCommand()]);
     const proposalCommand = buildSignedEntityCommand(env, state, proposer, [proposalTx]);
-    const proposed = await applyEntityFrame(env, state, [signedEntityCommandTx(proposalCommand)], 2_001);
+    const proposed = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [signedEntityCommandTx(proposalCommand)], 2_001);
     expect(proposed.newState.hubRebalanceConfig).toBeUndefined();
     const proposal = Array.from(proposed.newState.proposals.values())[0];
     expect(proposal?.status).toBe('pending');
@@ -459,7 +466,7 @@ describe('signed Entity command admission', () => {
       data: { proposalId: proposal!.id, voter, choice: 'yes' },
     };
     const voteCommand = buildSignedEntityCommand(env, proposed.newState, voter, [voteTx]);
-    const committed = await applyEntityFrame(
+    const committed = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       proposed.newState,
       [signedEntityCommandTx(voteCommand)],
@@ -468,7 +475,7 @@ describe('signed Entity command admission', () => {
     expect(committed.newState.hubRebalanceConfig?.routingFeePPM).toBe(777);
     expect(committed.newState.proposals.get(proposal!.id)?.status).toBe('executed');
 
-    const retry = await applyEntityFrame(
+    const retry = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       committed.newState,
       [signedEntityCommandTx(voteCommand)],
@@ -484,7 +491,7 @@ describe('signed Entity command admission', () => {
     const afterFirstNonce = advanceEntityCommandNonce(state, first);
     const second = buildSignedEntityCommand(env, afterFirstNonce, proposer, [proposalTx]);
 
-    const applied = await applyEntityFrame(
+    const applied = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       state,
       [signedEntityCommandTx(first), signedEntityCommandTx(second)],
@@ -527,7 +534,7 @@ describe('signed Entity command admission', () => {
       type: 'reissueCertifiedOutput',
       data: { targetEntityId, targetSignerId: proposer, sequence: 1n, semanticHash, entityTxs: payload },
     };
-    const proposed = await applyEntityFrame(env, state, [signedEntityCommandTx(
+    const proposed = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [signedEntityCommandTx(
       buildSignedEntityCommand(env, state, proposer, [buildCollectiveEntityProposalTx(proposer, [reissue])]),
     )], 2_001);
     expect(proposed.outputs).toHaveLength(0);
@@ -538,7 +545,7 @@ describe('signed Entity command admission', () => {
       type: 'vote',
       data: { proposalId: proposal!.id, voter, choice: 'yes' },
     };
-    const committed = await applyEntityFrame(env, proposed.newState, [signedEntityCommandTx(
+    const committed = await applyEntityFrameWithMaterializedTestInfraContext(env, proposed.newState, [signedEntityCommandTx(
       buildSignedEntityCommand(env, proposed.newState, voter, [vote]),
     )], 2_002);
     expect(committed.newState.proposals.get(proposal!.id)?.status).toBe('executed');
@@ -650,14 +657,14 @@ describe('signed Entity command admission', () => {
 
     const proposalTx = buildCollectiveEntityProposalTx(proposer, [hubCommand()]);
     const proposalCommand = buildSignedEntityCommand(env, state, proposer, [proposalTx]);
-    const proposed = await applyEntityFrame(env, state, [signedEntityCommandTx(proposalCommand)], 2_001);
+    const proposed = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [signedEntityCommandTx(proposalCommand)], 2_001);
     const proposal = Array.from(proposed.newState.proposals.values())[0]!;
     const duplicateVote: EntityTx = {
       type: 'vote',
       data: { proposalId: proposal.id, voter: proposer, choice: 'yes' },
     };
     const duplicateCommand = buildSignedEntityCommand(env, proposed.newState, proposer, [duplicateVote]);
-    await expect(applyEntityFrame(
+    await expect(applyEntityFrameWithMaterializedTestInfraContext(
       env,
       proposed.newState,
       [signedEntityCommandTx(duplicateCommand)],
@@ -679,12 +686,15 @@ describe('signed Entity command admission', () => {
   });
 
   test('independent validator replays the exact signed frame without the author private key', async () => {
-    const { env: authorEnv, state, authorSignerId } = setupNumericAliasBoard();
+    const { env: authorEnv, state, signers } = setupNoJurisdictionMultisig();
+    const authorSignerId = signers[1]!;
     const command = buildSignedEntityCommand(authorEnv, state, authorSignerId, [chatCommand(authorSignerId)]);
     const verifierEnv = createEmptyEnv('signed-command:independent-frame-validator');
     verifierEnv.scenarioMode = true;
+    expect(provisionTestEntityEncryptionKey(verifierEnv, state.entityId))
+      .toBe(state.entityEncryptionPublicKey);
 
-    const { events, newState: nextState } = await applyEntityFrame(
+    const { events, newState: nextState } = await applyEntityFrameWithMaterializedTestInfraContext(
       verifierEnv,
       structuredClone(state),
       [signedEntityCommandTx(command)],
@@ -703,8 +713,8 @@ describe('signed Entity command admission', () => {
     const { env, signerId, state } = setup('retry-no-op');
     const tx = chatCommand(signerId, 'apply exactly once');
     const command = buildSignedEntityCommand(env, state, signerId, [tx]);
-    const first = await applyEntityFrame(env, state, [signedEntityCommandTx(command)], 1_001);
-    const retry = await applyEntityFrame(env, first.newState, [signedEntityCommandTx(command)], 1_002);
+    const first = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [signedEntityCommandTx(command)], 1_001);
+    const retry = await applyEntityFrameWithMaterializedTestInfraContext(env, first.newState, [signedEntityCommandTx(command)], 1_002);
     expect(first.events).toEqual([{
       type: 'text',
       validatorId: signerId,
@@ -763,7 +773,7 @@ describe('signed Entity command admission', () => {
     ]);
     const next = buildSignedEntityCommand(env, rotated, nextSigner, [chatCommand(nextSigner)]);
     expect(next.nonce).toBe(1n);
-    const replay = await applyEntityFrame(env, rotated, [signedEntityCommandTx(next)], 1_001);
+    const replay = await applyEntityFrameWithMaterializedTestInfraContext(env, rotated, [signedEntityCommandTx(next)], 1_001);
     expect(replay.newState.entityCommandNonces?.bySigner.size).toBe(1);
     expect(replay.newState.entityCommandNonces?.bySigner.get(nextSigner)?.nonce).toBe(1n);
     expect(replay.newState.entityCommandNonces?.bySigner.has(signerId)).toBe(false);
@@ -790,7 +800,7 @@ describe('signed Entity command admission', () => {
       type: 'propose',
       data: { proposer, action },
     }]);
-    const epochZeroApplied = await applyEntityFrame(
+    const epochZeroApplied = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       registered,
       [signedEntityCommandTx(epochZeroCommand)],
@@ -836,7 +846,7 @@ describe('signed Entity command admission', () => {
       signedEntityCommandTx(epochZeroCommand),
       signedEntityCommandTx(epochTwoCommand),
     ])).toHaveLength(2);
-    const epochTwoApplied = await applyEntityFrame(
+    const epochTwoApplied = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       epochTwo,
       [signedEntityCommandTx(epochTwoCommand)],
@@ -854,7 +864,7 @@ describe('signed Entity command admission', () => {
       type: 'vote',
       data: { proposalId: newProposal.id, voter, choice: 'yes' },
     }]);
-    const executed = await applyEntityFrame(
+    const executed = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       epochTwoApplied.newState,
       [signedEntityCommandTx(epochTwoVote)],
@@ -900,7 +910,7 @@ describe('signed Entity command admission', () => {
 
   test('rejects a raw user transaction even when injected directly into frame replay', async () => {
     const { env, state } = setup('raw-frame-rejection');
-    await expect(applyEntityFrame(env, state, [hubCommand()], 1_001))
+    await expect(applyEntityFrameWithMaterializedTestInfraContext(env, state, [hubCommand()], 1_001))
       .rejects.toThrow('ENTITY_COMMAND_REQUIRED:setHubConfig');
   });
 
@@ -928,7 +938,7 @@ describe('signed Entity command admission', () => {
     const { env, signerId, state } = setup('bounded-chat-proposals');
     const chats = Array.from({ length: 101 }, (_, index) => chatCommand(signerId, `chat-${index}`));
     const chatBatch = buildSignedEntityCommand(env, state, signerId, chats);
-    const chatted = await applyEntityFrame(env, state, [signedEntityCommandTx(chatBatch)], 1_001);
+    const chatted = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [signedEntityCommandTx(chatBatch)], 1_001);
     const chatEvents = readEntityFrameEventMessages(chatted.newState);
     expect(chatEvents).toHaveLength(101);
     expect(chatEvents[0]).toContain('chat-0');
@@ -943,7 +953,7 @@ describe('signed Entity command admission', () => {
       },
     }));
     const proposalBatch = buildSignedEntityCommand(env, chatted.newState, signerId, proposalTxs);
-    const proposed = await applyEntityFrame(
+    const proposed = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       chatted.newState,
       [signedEntityCommandTx(proposalBatch)],
@@ -968,7 +978,7 @@ describe('signed Entity command admission', () => {
       },
     };
     const first = buildSignedEntityCommand(env, state, proposer, [firstTx]);
-    const pending = await applyEntityFrame(env, state, [signedEntityCommandTx(first)], 2_001);
+    const pending = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [signedEntityCommandTx(first)], 2_001);
     expect(Array.from(pending.newState.proposals.values())).toHaveLength(1);
     expect(Array.from(pending.newState.proposals.values())[0]?.status).toBe('pending');
 
@@ -979,7 +989,7 @@ describe('signed Entity command admission', () => {
         action: { type: 'collective_message', data: { message: 'pending-2' } },
       },
     }]);
-    await expect(applyEntityFrame(
+    await expect(applyEntityFrameWithMaterializedTestInfraContext(
       env,
       pending.newState,
       [signedEntityCommandTx(spam)],
@@ -1010,20 +1020,20 @@ describe('signed Entity command admission', () => {
       type: 'propose',
       data: { proposer, action: { type: 'collective_message', data: { message: 'reject me' } } },
     }]);
-    const proposed = await applyEntityFrame(env, state, [signedEntityCommandTx(proposalCommand)], 3_001);
+    const proposed = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [signedEntityCommandTx(proposalCommand)], 3_001);
     const proposal = Array.from(proposed.newState.proposals.values())[0]!;
 
     const blockingNo = buildSignedEntityCommand(env, proposed.newState, noVoter, [{
       type: 'vote', data: { proposalId: proposal.id, voter: noVoter, choice: 'no' },
     }]);
-    const rejected = await applyEntityFrame(env, proposed.newState, [signedEntityCommandTx(blockingNo)], 3_002);
+    const rejected = await applyEntityFrameWithMaterializedTestInfraContext(env, proposed.newState, [signedEntityCommandTx(blockingNo)], 3_002);
     expect(rejected.newState.proposals.get(proposal.id)?.status).toBe('rejected');
 
     const replacement = buildSignedEntityCommand(env, rejected.newState, proposer, [{
       type: 'propose',
       data: { proposer, action: { type: 'collective_message', data: { message: 'capacity is free' } } },
     }]);
-    const replaced = await applyEntityFrame(env, rejected.newState, [signedEntityCommandTx(replacement)], 3_003);
+    const replaced = await applyEntityFrameWithMaterializedTestInfraContext(env, rejected.newState, [signedEntityCommandTx(replacement)], 3_003);
     expect(Array.from(replaced.newState.proposals.values()).filter(item => item.status === 'pending')).toHaveLength(1);
   });
 
@@ -1044,7 +1054,7 @@ describe('signed Entity command admission', () => {
       type: 'propose',
       data: { proposer: oldProposer, action: { type: 'collective_message', data: { message: 'old board' } } },
     }]);
-    const pending = await applyEntityFrame(env, registered, [signedEntityCommandTx(pendingCommand)], 2_001);
+    const pending = await applyEntityFrameWithMaterializedTestInfraContext(env, registered, [signedEntityCommandTx(pendingCommand)], 2_001);
     const oldProposal = Array.from(pending.newState.proposals.values())[0]!;
 
     const nextSeed = 'signed-command:proposal-rotation';
@@ -1072,7 +1082,7 @@ describe('signed Entity command admission', () => {
       type: 'propose',
       data: { proposer: nextSigner, action: { type: 'collective_message', data: { message: 'new board' } } },
     }]);
-    const applied = await applyEntityFrame(env, rotated, [signedEntityCommandTx(nextCommand)], 2_002);
+    const applied = await applyEntityFrameWithMaterializedTestInfraContext(env, rotated, [signedEntityCommandTx(nextCommand)], 2_002);
     expect(applied.newState.proposals.get(oldProposal.id)?.status).toBe('rejected');
     expect(Array.from(applied.newState.proposals.values()).some(proposal =>
       proposal.proposer === nextSigner && proposal.status === 'executed')).toBe(true);
@@ -1095,13 +1105,13 @@ describe('signed Entity command admission', () => {
     const proposalCommand = buildSignedEntityCommand(env, mixedState, proposer, [
       buildCollectiveEntityProposalTx(proposer, [hubCommand()]),
     ]);
-    const proposed = await applyEntityFrame(env, mixedState, [signedEntityCommandTx(proposalCommand)], 2_001);
+    const proposed = await applyEntityFrameWithMaterializedTestInfraContext(env, mixedState, [signedEntityCommandTx(proposalCommand)], 2_001);
     const proposal = Array.from(proposed.newState.proposals.values())[0]!;
     expect(proposal.status).toBe('pending');
     const voteCommand = buildSignedEntityCommand(env, proposed.newState, voter, [{
       type: 'vote', data: { proposalId: proposal.id, voter, choice: 'yes' },
     }]);
-    const executed = await applyEntityFrame(env, proposed.newState, [signedEntityCommandTx(voteCommand)], 2_002);
+    const executed = await applyEntityFrameWithMaterializedTestInfraContext(env, proposed.newState, [signedEntityCommandTx(voteCommand)], 2_002);
     expect(executed.newState.hubRebalanceConfig?.routingFeePPM).toBe(777);
   });
 

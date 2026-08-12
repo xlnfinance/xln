@@ -1,0 +1,115 @@
+import type { EntityInfraContext } from '../../../types/entity/infra-context';
+import type { EntityRuntimeContext } from '../../runtime-context';
+import type { EntityReplica } from '../../types';
+import type { EntityTx } from '../../../types/entity-tx';
+import { canonicalizeProfile } from '../../profile';
+import { compareStableText } from '../../../protocol/serialization';
+import { getPrevFrameHash } from '../frame/lineage';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { LIMITS } from '../../../config/constants';
+import { materializeHtlcPreparedInfraContext } from '../../htlc/materialize-context';
+import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
+import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
+
+type ProposerInfraContext = EntityRuntimeContext & {
+  gossip?: {
+    getProfiles?: () => import('../../profile').Profile[];
+    getNetworkGraph?: () => {
+      findPaths: (source: string, target: string, amount?: bigint, tokenId?: number) =>
+        Promise<Array<{ path: string[] }>>;
+    };
+  };
+};
+
+const entityTxNeedsHtlcInfra = (tx: EntityTx): boolean =>
+  tx.type === 'htlcPayment' ||
+  (tx.type === 'accountInput' && 'proposal' in tx.data &&
+    tx.data.proposal.frame.accountTxs.some(accountTx =>
+      accountTx.type === 'htlc_lock' || accountTx.type === 'htlc_resolve'));
+
+/** Materialize public infrastructure only after the proposer fixes exact frame txs. */
+export const materializeEntityInfraContext = async (
+  env: EntityRuntimeContext,
+  replica: EntityReplica,
+  proposalTxs: readonly EntityTx[],
+): Promise<EntityInfraContext> => {
+  const entityId = replica.entityId.trim().toLowerCase();
+  const proposerSignerId = replica.signerId.trim().toLowerCase();
+  const htlcTxs = proposalTxs.filter(entityTxNeedsHtlcInfra);
+  const needsHtlcInfra = htlcTxs.length > 0;
+  const getProfiles = (env as ProposerInfraContext).gossip?.getProfiles;
+  if (needsHtlcInfra && !getProfiles) throw new Error('ENTITY_INFRA_GOSSIP_UNAVAILABLE');
+  const profiles = needsHtlcInfra ? getProfiles!() : [];
+  const canonicalProfiles = profiles.map(profile => canonicalizeProfile(profile));
+  const routeEntityIds = new Set(htlcTxs.flatMap(tx =>
+    tx.type === 'htlcPayment' ? tx.data.route.map(value => String(value).toLowerCase()) : []));
+  const observeOnlineEntityIds = env.infrastructure?.observeOnlineEntityIds;
+  if (needsHtlcInfra && !observeOnlineEntityIds) throw new Error('ENTITY_INFRA_LIVENESS_OBSERVER_UNAVAILABLE');
+  const observedOnline = new Map<string, boolean>();
+  const isEntityOnline = (peerEntityId: string): boolean => {
+    const canonical = peerEntityId.toLowerCase();
+    const existing = observedOnline.get(canonical);
+    if (existing !== undefined) return existing;
+    const online = observeOnlineEntityIds!([canonical]).has(canonical);
+    observedOnline.set(canonical, online);
+    return online;
+  };
+  const needsRouteResolution = htlcTxs.some(tx => tx.type === 'htlcPayment' && tx.data.route.length === 0);
+  const graph = (env as ProposerInfraContext).gossip?.getNetworkGraph?.();
+  if (needsRouteResolution && !graph) throw new Error('ENTITY_INFRA_ROUTE_RESOLVER_UNAVAILABLE');
+  const resolveRoute = async (tx: Extract<EntityTx, { type: 'htlcPayment' }>): Promise<readonly string[]> => {
+    const routes = await graph!.findPaths(entityId, tx.data.targetEntityId, tx.data.amount, tx.data.tokenId);
+    const route = routes[0]?.path;
+    if (!route) throw new Error(`HTLC_PAYMENT_ROUTE_NOT_FOUND:${entityId}:${tx.data.targetEntityId}`);
+    return route;
+  };
+  const htlc = needsHtlcInfra
+    ? await materializeHtlcPreparedInfraContext({
+        state: replica.state,
+        proposalTxs,
+        entityEncryptionPublicKey: replica.state.entityEncryptionPublicKey,
+        entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, entityId),
+        isEntityOnline,
+        profiles: canonicalProfiles,
+        parentFrameHash: getPrevFrameHash(replica.state),
+        height: replica.state.height + 1,
+        resolveRoute,
+      })
+    : { version: 1 as const, entries: [], originated: [] };
+  for (const entry of htlc.entries) {
+    if (entry.outcome.kind === 'forward') routeEntityIds.add(entry.outcome.nextHopEntityId);
+  }
+  for (const originated of htlc.originated) {
+    for (const routeEntityId of originated.route) routeEntityIds.add(routeEntityId);
+    isEntityOnline(originated.nextHopEntityId);
+  }
+  const gossipProfiles = canonicalProfiles
+    .filter(profile => routeEntityIds.has(profile.entityId.toLowerCase()))
+    .sort((left, right) => compareStableText(left.entityId, right.entityId));
+  if (gossipProfiles.length !== routeEntityIds.size || new Set(gossipProfiles.map(profile => profile.entityId)).size !== gossipProfiles.length) {
+    throw new Error('ENTITY_INFRA_PROFILE_SET_INCOMPLETE');
+  }
+  const peerAssertions = [...observedOnline.keys()]
+    .sort(compareStableText)
+    .map(peerEntityId => ({
+      entityId: peerEntityId,
+      online: observedOnline.get(peerEntityId) ?? isEntityOnline(peerEntityId),
+    }));
+  const context: EntityInfraContext = {
+    version: 1,
+    proposerReplicaId: `${entityId}:${proposerSignerId}`,
+    entityId,
+    proposerSignerId,
+    parentFrameHash: getPrevFrameHash(replica.state),
+    height: replica.state.height + 1,
+    gossipProfiles,
+    peerAssertions,
+    htlc,
+  };
+  await assertEntityInfraContextAuthority(env, context, replica.state);
+  const byteLength = new TextEncoder().encode(encodeCanonicalConsensusValue(context)).byteLength;
+  if (byteLength > LIMITS.MAX_FRAME_SIZE_BYTES) {
+    throw new Error(`ENTITY_INFRA_CONTEXT_BYTE_LIMIT_EXCEEDED:${byteLength}:${LIMITS.MAX_FRAME_SIZE_BYTES}`);
+  }
+  return context;
+};

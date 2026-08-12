@@ -12,7 +12,7 @@ import {
   registerEntities,
 } from '../harness/boot';
 import { withDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
-import { quoteHtlcPaymentRoute } from '../../entity/htlc/payment-admission';
+import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
 
 export interface EconomyEntity {
   id: string;

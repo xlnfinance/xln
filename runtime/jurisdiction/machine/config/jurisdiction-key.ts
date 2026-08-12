@@ -28,12 +28,12 @@ const sameRpc = (left: unknown, right: unknown): boolean => {
   return normalizeLoopbackUrl(leftRaw) === normalizeLoopbackUrl(rightRaw);
 };
 
-export const normalizeJurisdictionKey = (value: unknown, fallback = 'primary'): string =>
-  normalizeKeySegment(value) || normalizeKeySegment(fallback) || 'primary';
+export const normalizeJurisdictionKey = (value: unknown, defaultValue = 'primary'): string =>
+  normalizeKeySegment(value) || normalizeKeySegment(defaultValue) || 'primary';
 
 export const selectWritableJurisdictionKey = (
   jurisdictions: Record<string, WritableJurisdictionEntry>,
-  fallback?: unknown,
+  defaultValue?: unknown,
   rpcCandidates: unknown[] = [],
 ): string => {
   const entries = Object.entries(jurisdictions).filter(([key]) => normalizeKeySegment(key));
@@ -42,6 +42,6 @@ export const selectWritableJurisdictionKey = (
     entries.find(([, entry]) => entry.primary === true)?.[0] ??
     entries.find(([, entry]) => isActiveJurisdiction(entry) && hasRequiredContracts(entry))?.[0] ??
     entries[0]?.[0] ??
-    normalizeJurisdictionKey(fallback)
+    normalizeJurisdictionKey(defaultValue)
   );
 };

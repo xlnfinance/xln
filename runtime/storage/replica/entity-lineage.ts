@@ -188,6 +188,7 @@ const assertFrameBody = (entityId: string, link: CertifiedEntityFrameLink): Enti
     entityId,
     frame.stateRoot,
     frame.authorityRoot,
+    frame.entityContext,
     frame.jPrefixCertificate,
   );
   if (bodyHash !== frame.hash) {

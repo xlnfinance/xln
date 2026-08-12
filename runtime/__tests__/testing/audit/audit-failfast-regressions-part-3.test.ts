@@ -61,9 +61,10 @@ import { isLeftEntity } from '../../../entity/id';
 import {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
   MAX_PENDING_CROSS_J_FILL_ACKS,
-  applyEntityFrame,
   applyEntityInput,
 } from '../../../entity/consensus/index';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
+import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
 
 import { createEntityFrameHash } from '../../../entity/consensus/frame';
 
@@ -232,11 +233,6 @@ import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/codec/onion-layer
 
 import { encodeHtlcSecretOffer, encodeOnionLayer } from '../../../protocol/htlc/codec/onion';
 
-import {
-  computeEntityProfileCertificationHash,
-  computeValidatorEncryptionAttestationDigest,
-  requireCompleteValidatorEncryptionManifest,
-} from '../../../protocol/htlc/validator-encryption';
 
 import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bootstrap-fail-fast';
 
@@ -363,7 +359,6 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       deltas: new Map(),
       locks: new Map(),
       swapOffers: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -600,6 +595,7 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
 
 const makeEntityState = (entityId: string): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
@@ -778,6 +774,7 @@ describe('audit fail-fast regressions', () => {
     const { signerId, entityId } = registerLazySigner(seed, '1');
     const counterpartyId = `0x${'34'.repeat(32)}`;
     const state = makeEntityState(entityId);
+    state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     state.config = makeSingleSignerConfigFor(signerId);
     env.state.jReplicas.set('AuditTestnet', {
       name: 'AuditTestnet',
@@ -2419,9 +2416,10 @@ describe('audit fail-fast regressions', () => {
     ];
 
     const honestBaseState = makeEntityState(entityId);
+    honestBaseState.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     honestBaseState.config = makeSingleSignerConfigFor(signerId);
     const frameTxs = await buildQuorumAuthorizedFrameTxs(env, honestBaseState, collectiveTxs);
-    const { newState: honestFrameState, collectedHashes = [] } = await applyEntityFrame(
+    const { newState: honestFrameState, collectedHashes = [], entityContext } = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       honestBaseState,
       frameTxs,
@@ -2434,7 +2432,7 @@ describe('audit fail-fast regressions', () => {
       timestamp: env.state.timestamp,
       leaderState: { activeValidatorId: signerId, view: 0, changedAtHeight: 0 },
     };
-    const frameHash = await createEntityFrameHash('genesis', 1, env.state.timestamp, frameTxs, honestNewState);
+    const frameHash = await createEntityFrameHash('genesis', 1, env.state.timestamp, frameTxs, honestNewState, entityContext);
     const hashesToSign = buildEntityHashesToSign(entityId, 1, frameHash, collectedHashes);
     const stateRoot = computeCanonicalEntityConsensusStateHash(honestNewState);
     const authorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(honestNewState));
@@ -2445,9 +2443,8 @@ describe('audit fail-fast regressions', () => {
       entityEncPubKey: '',
       mempool: [],
       isProposer: false,
-      state: makeEntityState(entityId),
+      state: honestBaseState,
     } as EntityReplica;
-    replica.state.config = makeSingleSignerConfigFor(signerId);
 
     const result = await applyEntityInput(env, replica, {
       entityId,
@@ -2459,6 +2456,7 @@ describe('audit fail-fast regressions', () => {
         authorityRoot,
         timestamp: env.state.timestamp,
         txs: frameTxs,
+        entityContext,
         events: [],
         hash: frameHash,
         leader: { proposerSignerId: signerId, view: 0 },

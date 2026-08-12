@@ -5,6 +5,7 @@ import type { JInput } from '../../jurisdiction/machine/input';
 import type { EntityTx } from '../../types/entity-tx';
 import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claims';
 import type { AccountConsensusContext } from '../../account/consensus/context';
+import type { EntityInfraContext } from '../../types/entity/infra-context';
 import { createAccountConsensusContext } from '../account/account-consensus-context';
 import {
   applyAccountInputToEntity,
@@ -86,14 +87,12 @@ import {
   handleRemoveCrossJurisdictionBookOrderEntityTx,
 } from './handlers/cross-j/book-order';
 import { handleScheduledWakeEntityTx } from './handlers/system/scheduled-wake';
-import { handleCertifyProfileEntityTx } from './handlers/account/lifecycle/profile-certification';
 import {
   handleEntityProviderCancelAction,
   handleEntityProviderReleaseControlShares,
   handleEntityProviderTransfer,
 } from './handlers/entity-provider-action';
 import type { AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
-import { handleHtlcOnionAdvance } from './handlers/htlc/onion-advance';
 
 const entityTxLog = createStructuredLogger('entity.tx');
 
@@ -120,6 +119,8 @@ export interface ApplyEntityTxResult {
 }
 
 export interface ApplyEntityTxOptions {
+  /** Exact proposer-observed facts committed by the enclosing EntityFrame. */
+  infraContext?: EntityInfraContext;
   accountConsensusContext?: AccountConsensusContext;
   mutableFrameState?: boolean;
   manualBroadcastInInput?: boolean;
@@ -319,12 +320,6 @@ const entityTxDispatchers = {
     tx as Extract<EntityTx, { type: 'profile-update' }>,
     options?.mutableFrameState,
   ),
-  certifyProfile: (env, state, tx, options) => handleCertifyProfileEntityTx(
-    env,
-    state,
-    tx as Extract<EntityTx, { type: 'certifyProfile' }>,
-    options?.mutableFrameState,
-  ),
   initOrderbookExt: (_env, state, tx, options) => handleInitOrderbookExtEntityTx(
     state,
     tx as Extract<EntityTx, { type: 'initOrderbookExt' }>,
@@ -345,13 +340,7 @@ const entityTxDispatchers = {
     env,
     options?.candidateEffects ?? [],
     options?.mutableFrameState,
-  ),
-  htlcOnionAdvance: (env, state, tx, options) => handleHtlcOnionAdvance(
-    env,
-    state,
-    tx as Extract<EntityTx, { type: 'htlcOnionAdvance' }>,
-    options?.candidateEffects ?? [],
-    options?.mutableFrameState,
+    options?.infraContext,
   ),
   resolveHtlcLock: (_env, state, tx, options) => handleResolveHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'resolveHtlcLock' }>, options?.mutableFrameState),
   processHtlcTimeouts: (_env, state, tx, options) => handleProcessHtlcTimeoutsEntityTx(state, tx as Extract<EntityTx, { type: 'processHtlcTimeouts' }>, options?.mutableFrameState),
@@ -545,7 +534,7 @@ export const applyEntityTx = async (
     const reducerCandidateEffects: EntityCandidateEffect[] = [];
     const { accountChanges = [], ...result } = await dispatcher(env, entityState, entityTx, {
       ...options,
-      accountConsensusContext: options?.accountConsensusContext ?? createAccountConsensusContext(env),
+      accountConsensusContext: options?.accountConsensusContext ?? createAccountConsensusContext(env, undefined, entityState),
       storageChanges: reducerStorageChanges,
       candidateEffects: reducerCandidateEffects,
     });

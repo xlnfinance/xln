@@ -267,11 +267,11 @@ export const normalizeQaBrowserIssues = (value: unknown): QaBrowserIssue[] => {
   return value.map(normalizeQaBrowserIssue).filter((item): item is QaBrowserIssue => Boolean(item));
 };
 
-const qaSeveritySince = (fallback: number, values: readonly unknown[]): number => {
+const qaSeveritySince = (defaultValue: number, values: readonly unknown[]): number => {
   const timestamps = values
     .map(asFiniteNumber)
     .filter((value): value is number => value !== null && value >= 0);
-  return timestamps.length > 0 ? Math.min(...timestamps) : Math.max(0, fallback);
+  return timestamps.length > 0 ? Math.min(...timestamps) : Math.max(0, defaultValue);
 };
 
 const qaBrowserHealthSeverity = (
@@ -1328,11 +1328,11 @@ export const compareQaBenchmarkRuns = (
   const top = blockingSlower[0] ?? fasterTiming[0] ?? null;
   const hostLoadOnly = slower.length > 0 && blockingSlower.length === 0;
   const hostLoadDelta = slower.find(metric => metric.metric === 'peakLoad1') ?? null;
-  const sameGitHead = Boolean(current.code?.gitHead && baseline.code?.gitHead)
-    ? current.code!.gitHead === baseline.code!.gitHead
+  const sameGitHead = current.code?.gitHead !== undefined && baseline.code?.gitHead !== undefined
+    ? current.code.gitHead === baseline.code.gitHead
     : null;
-  const sameCodeHash = Boolean(current.code?.codeHash && baseline.code?.codeHash)
-    ? current.code!.codeHash === baseline.code!.codeHash
+  const sameCodeHash = current.code?.codeHash !== undefined && baseline.code?.codeHash !== undefined
+    ? current.code.codeHash === baseline.code.codeHash
     : null;
   const likelyCauses = [
     ...(sameCodeHash === false ? ['code hash changed'] : []),
@@ -1366,10 +1366,10 @@ export const compareQaBenchmarkRuns = (
 };
 
 const normalizeQaShardSeverity = (shard: QaShardManifestDraft, since: number): QaShardManifest => {
-  const fallback = buildQaShardSeveritySignal(shard, since);
+  const defaultSignal = buildQaShardSeveritySignal(shard, since);
   return {
     ...shard,
-    ...normalizeQaSeveritySignal(shard, fallback),
+    ...normalizeQaSeveritySignal(shard, defaultSignal),
   };
 };
 
@@ -1378,10 +1378,10 @@ const normalizeQaBenchmarkSeverity = (
   since: number,
 ): QaBenchmarkComparison | undefined => {
   if (!benchmark) return undefined;
-  const fallback = buildQaBenchmarkSeveritySignal(benchmark, since);
+  const defaultSignal = buildQaBenchmarkSeveritySignal(benchmark, since);
   return {
     ...benchmark,
-    ...normalizeQaSeveritySignal(benchmark, fallback),
+    ...normalizeQaSeveritySignal(benchmark, defaultSignal),
   };
 };
 
@@ -1880,23 +1880,6 @@ const findComparableQaBenchmarkRun = (run: QaRunManifest): QaRunManifest | null 
     }) as Record<string, unknown> | null;
     const direct = parseManifestJson(row?.['manifest_json']);
     if (direct) return direct;
-    const fallbackRows = db.query(`
-      SELECT manifest_json
-      FROM qa_runs
-      WHERE run_id != $runId
-        AND total_ms IS NOT NULL
-        AND created_at < $createdAt
-      ORDER BY created_at DESC
-      LIMIT 200
-    `).all({
-      $runId: run.runId,
-      $createdAt: run.createdAt,
-    }) as Array<Record<string, unknown>>;
-    const suiteKey = qaRunSuiteKey(run);
-    for (const candidate of fallbackRows) {
-      const parsed = parseManifestJson(candidate['manifest_json']);
-      if (parsed && qaRunSuiteKey(parsed) === suiteKey) return parsed;
-    }
     return null;
   } finally {
     db.close();

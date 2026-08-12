@@ -64,7 +64,6 @@ export function applyCommittedAccountFrameFollowups(
     // Account frames are canonical once committed; keep entity-local indexes in
     // sync here instead of mutating them while the account proposal is still tentative.
     if (accountTx.type === 'htlc_resolve') {
-      if (accountTx.data.outcome === 'offer') continue;
       const account = newState.accounts.get(counterpartyId);
       if (account?.mempool?.length) {
         account.mempool = account.mempool.filter((mempoolTx) =>
@@ -83,38 +82,29 @@ export function applyCommittedAccountFrameFollowups(
           const resolvesForwardedOutbound =
             route.outboundLockId === accountTx.data.lockId && Boolean(route.inboundEntity) && !route.originated;
           if (!resolvesInbound && !resolvesOriginatedOutbound && !resolvesForwardedOutbound) continue;
-          if ('offerHash' in accountTx.data) {
-            if (resolvesForwardedOutbound || resolvesOriginatedOutbound) {
-              route.acceptedOfferHash = accountTx.data.offerHash.toLowerCase();
-              route.acceptedAccountFrameHash = committedFrame.stateHash.toLowerCase();
-              route.acceptedAccountFrameHeight = committedFrame.height;
-              continue;
-            }
-            if (resolvesInbound) {
-              candidateEffects.push({
-                kind: 'runtimeEvent',
-                eventName: 'HtlcReceived',
-                data: buildHtlcReceivedEventPayload({
-                  entityId: newState.entityId,
-                  fromEntity: counterpartyId,
-                  toEntity: newState.entityId,
-                  hashlock,
-                  lockId: accountTx.data.lockId,
-                  ...(route.amount !== undefined ? { amount: route.amount } : {}),
-                  ...(route.tokenId !== undefined ? { tokenId: route.tokenId } : {}),
-                  ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
-                  ...(jurisdictionIdFor(newState, env) ? { jurisdictionId: jurisdictionIdFor(newState, env) } : {}),
-                  receivedAtMs: newState.timestamp,
-                }),
-              });
-            }
+          if (resolvesInbound) {
+            candidateEffects.push({
+              kind: 'runtimeEvent',
+              eventName: 'HtlcReceived',
+              data: buildHtlcReceivedEventPayload({
+                entityId: newState.entityId,
+                fromEntity: counterpartyId,
+                toEntity: newState.entityId,
+                hashlock,
+                lockId: accountTx.data.lockId,
+                ...(route.amount !== undefined ? { amount: route.amount } : {}),
+                ...(route.tokenId !== undefined ? { tokenId: route.tokenId } : {}),
+                ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
+                ...(jurisdictionIdFor(newState, env) ? { jurisdictionId: jurisdictionIdFor(newState, env) } : {}),
+                receivedAtMs: newState.timestamp,
+              }),
+            });
           }
           if (resolvesForwardedOutbound) {
             // This commit reveals the downstream preimage, but the forwarded
             // route is not terminal until applyHtlcSecretFollowups queues the
             // exact upstream resolve in this same Entity-frame replay. Deleting
-            // it here loses the inbound lock reference and lets the post-commit
-            // onion hook recreate the downstream lock forever.
+            // it here loses the inbound lock reference needed for propagation.
             continue;
           }
           emitOriginatedHtlcFinalized(env, newState, route, accountTx, candidateEffects);

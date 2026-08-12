@@ -42,6 +42,7 @@ import type { RuntimeReplica } from '../../runtime/types';
 import { readCliOption } from '../../config/cli';
 import { buildCrossJurisdictionSwapSubmission } from '../../runtime/jurisdiction-api';
 import type { EntityReplica } from '../../entity/types';
+import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 import {
   bindScenarioJReplica,
   createJReplica,
@@ -127,12 +128,11 @@ const createEntity = async (
   const { config } = createLazyEntity(name, [signer], 1n, jurisdiction, env);
   const id = generateLazyEntityId([signer], 1n, env).toLowerCase();
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId: id,
       signerId: signer,
       data: { config, isProposer: true, profileName: name, position },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env);

@@ -117,6 +117,7 @@ export const parseCappedGateArgs = (argv = process.argv.slice(2)): CappedGateArg
 };
 
 const asFiniteNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 };
@@ -127,12 +128,11 @@ export const validateCappedTestnetPolicy = (policy: CappedTestnetPolicy): string
     errors.push('POLICY_SCHEMA_INVALID');
   }
   const riskCapUsd = asFiniteNumber(policy.riskCapUsd);
-  if (riskCapUsd === null || riskCapUsd <= 0 || riskCapUsd > MAINNET_GATE.cappedRiskUsd) {
-    errors.push(`POLICY_RISK_CAP_INVALID:${String(policy.riskCapUsd)}`);
+  if (riskCapUsd !== null) errors.push(`POLICY_UNENFORCED_RISK_CAP_CLAIM:${String(policy.riskCapUsd)}`);
+  if (policy.riskCapEnforcement !== 'not_implemented') {
+    errors.push(`POLICY_RISK_CAP_ENFORCEMENT_MUST_ADMIT_MISSING:${String(policy.riskCapEnforcement)}`);
   }
-  if (!['operator_config', 'code', 'contract'].includes(String(policy.riskCapEnforcement || ''))) {
-    errors.push(`POLICY_RISK_CAP_ENFORCEMENT_INVALID:${String(policy.riskCapEnforcement)}`);
-  }
+  errors.push('CAPPED_TESTNET_EXECUTABLE_RISK_CAP_ENFORCEMENT_MISSING');
   if (asFiniteNumber(policy.expectedTowers) !== MAINNET_GATE.expectedTowers) {
     errors.push(`POLICY_EXPECTED_TOWERS_INVALID:${String(policy.expectedTowers)}`);
   }

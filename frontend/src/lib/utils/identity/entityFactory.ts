@@ -76,17 +76,18 @@ export async function createEphemeralEntity(
   );
 
   // Create RuntimeInput to import entity replica
+  if (!runtimeEnv.runtimeSeed) throw new Error('ENTITY_IMPORT_RUNTIME_SEED_REQUIRED');
   const runtimeInput = {
-    runtimeTxs: [{
-      type: 'importReplica' as const,
+    runtimeTxs: [xln.importEntity({
       entityId,
       signerId,
+      entitySeed: runtimeEnv.runtimeSeed,
       data: {
         isProposer: true,
         config,
         profileName: `self-${signerId.slice(2, 8)}`,
-      }
-    }],
+      },
+    })],
     entityInputs: []
   };
 

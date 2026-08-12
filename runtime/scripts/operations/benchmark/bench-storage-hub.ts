@@ -32,6 +32,7 @@ import type { RuntimeReplica, RoutedEntityInput } from '../../../runtime/types';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { getPerfMs } from '../../../infra/time';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
 import {
   buildStorageLiveReplicaMetaCommitment,
@@ -62,27 +63,27 @@ type PaymentKind = 'direct' | 'htlc';
 const args = globalThis.process.argv.slice(2);
 
 function getArg(name: string): string | undefined;
-function getArg(name: string, fallback: string): string;
-function getArg(name: string, fallback?: string): string | undefined {
-  return fallback === undefined
+function getArg(name: string, defaultValue: string): string;
+function getArg(name: string, defaultValue?: string): string | undefined {
+  return defaultValue === undefined
     ? readCliOption(args, name)
-    : readCliOption(args, name, fallback);
+    : readCliOption(args, name, defaultValue);
 }
 
 const hasFlag = (name: string): boolean => hasCliFlag(args, name);
 
-const parsePositiveInt = (value: string | undefined, fallback: number): number => {
+const parsePositiveInt = (value: string | undefined, defaultValue: number): number => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
 };
 
-const parseNonNegativeInt = (value: string | undefined, fallback: number): number => {
+const parseNonNegativeInt = (value: string | undefined, defaultValue: number): number => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : defaultValue;
 };
 
-const parseBigIntArg = (value: string | undefined, fallback: bigint): bigint => {
-  if (!value) return fallback;
+const parseBigIntArg = (value: string | undefined, defaultValue: bigint): bigint => {
+  if (!value) return defaultValue;
   try {
     return BigInt(value);
   } catch {
@@ -236,7 +237,6 @@ const projectAccountDoc = (account: AccountReplica): Record<string, unknown> => 
   deltas: account.state.deltas,
   locks: account.state.locks,
   swapOffers: account.state.swapOffers,
-  globalCreditLimits: account.state.globalCreditLimits,
   currentHeight: account.currentHeight,
   pendingFrame: account.pendingFrame,
   pendingSignatures: account.pendingSignatures,
@@ -354,7 +354,6 @@ const paymentTxFor = (
       route: [user.entityId, hub.entityId],
       deliveryMode: 'async',
       description,
-      secret,
       hashlock: hashHtlcSecret(secret),
     },
   };
@@ -457,13 +456,12 @@ const importParticipants = async (
   env: RuntimeReplica,
   participants: Participant[],
   importBatch: number,
-  jurisdiction: { name: string; depositoryAddress: string; entityProviderAddress: string; chainId: number },
+  jurisdiction: { address: string; name: string; depositoryAddress: string; entityProviderAddress: string; chainId: number },
 ): Promise<void> => {
   for (let offset = 0; offset < participants.length; offset += importBatch) {
     const slice = participants.slice(offset, offset + importBatch);
     const runtimeInput = {
-      runtimeTxs: slice.map((participant) => ({
-        type: 'importReplica' as const,
+      runtimeTxs: slice.map((participant) => createTestEntityImportRuntimeTx(env, {
         entityId: participant.entityId,
         signerId: participant.signerId,
         data: {
@@ -482,7 +480,7 @@ const importParticipants = async (
     } as unknown as RuntimeReplica['runtimeMempool'];
     await applyRuntimeInput(env, runtimeInput);
     if (env.runtimeConfig?.storage?.enabled === true || env.infrastructure?.persistencePaused !== true) {
-      await saveEnvToDB(env, runtimeInput);
+      await saveEnvToDB(env, runtimeInput, undefined, undefined, new Map());
     }
   }
 };
@@ -868,6 +866,7 @@ async function main() {
             replica.entityId,
             frame.stateRoot,
             frame.authorityRoot,
+            frame.entityContext,
             frame.jPrefixCertificate,
           );
           console.error('[ENTITY_FRAME_LINEAGE_VERIFY]', JSON.stringify({

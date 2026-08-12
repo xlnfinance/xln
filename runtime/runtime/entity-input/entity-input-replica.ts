@@ -32,6 +32,7 @@ export type AppliedEntityReplicaInput = {
   accountJClaimNodeChanges: Awaited<
     ReturnType<typeof applyEntityInput>
   >['accountJClaimNodeChanges'];
+  entityContext: Awaited<ReturnType<typeof applyEntityInput>>['entityContext'];
 };
 
 const didCommitEntityFrame = (
@@ -209,5 +210,6 @@ export const applyEntityInputToReplica = async (
     storageChanges: applied.storageChanges,
     consumptionNodeChanges: applied.consumptionNodeChanges,
     accountJClaimNodeChanges: applied.accountJClaimNodeChanges,
+    entityContext: applied.entityContext,
   };
 };

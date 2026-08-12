@@ -25,6 +25,7 @@ import {
   assertRecoveryRuntimeMachineMatches,
   listRecoveryRuntimeMachineMismatchFields,
 } from '../machine';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 
 export const verifyRecoveryJournalFrame = (
   env: RuntimeReplica,
@@ -32,6 +33,14 @@ export const verifyRecoveryJournalFrame = (
   height: number,
   result: RuntimeInputApplyResult,
 ): void => {
+  const expectedEntityContexts = encodeCanonicalConsensusValue(frame.entityContexts);
+  const actualEntityContexts = encodeCanonicalConsensusValue(result.entityContexts);
+  if (actualEntityContexts !== expectedEntityContexts) {
+    throw new Error(
+      `RECOVERY_JOURNAL_ENTITY_CONTEXTS_MISMATCH:height=${height}:` +
+      `expected=${expectedEntityContexts}:actual=${actualEntityContexts}`,
+    );
+  }
   if (frame.runtimeMachine) {
     assertRecoveryRuntimeMachineMatches(env, frame.runtimeMachine, height);
   }

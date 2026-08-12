@@ -466,11 +466,11 @@ async function waitForDaemonReceiptEvent(
     await delay(500);
   }
 
-  const fallbackResponse = await daemonClient.getFrameReceipts({
+  const diagnosticResponse = await daemonClient.getFrameReceipts({
     fromHeight: Math.max(1, fromHeight - 8),
     limit: 32,
   }).catch(() => null);
-  const fallbackRecent = (fallbackResponse?.receipts || [])
+  const diagnosticRecent = (diagnosticResponse?.receipts || [])
     .flatMap((receipt) =>
       receipt.logs.map((log) => {
         const data = log.data || {};
@@ -487,7 +487,7 @@ async function waitForDaemonReceiptEvent(
 
   throw new Error(
     `Timed out waiting for daemon receipt ${options.eventName} on ${targetEntityId.slice(0, 12)} ` +
-    `(recent=${recent.join(',') || 'none'}, fallback=${fallbackRecent.join(',') || 'none'})`,
+    `(recent=${recent.join(',') || 'none'}, diagnostic=${diagnosticRecent.join(',') || 'none'})`,
   );
 }
 

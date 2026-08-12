@@ -2,6 +2,9 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import type { ConsensusConfig } from '../../../entity/types';
 import type { RuntimeReplica, RuntimeInput } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
+import {
+  importEntity,
+} from '../../../runtime/registration/entity-creation';
 
 const normalize = (value: unknown): string => String(value || '').trim().toLowerCase();
 
@@ -84,6 +87,7 @@ export const ensureLocalRuntimeOwner = async (
     enqueue: (env: RuntimeReplica, input: RuntimeInput) => void;
     onFrameCommit: (env: RuntimeReplica, callback: (height: number) => void) => () => void;
     timeoutMs?: number;
+    entitySeed: Uint8Array;
   },
 ): Promise<{ entityId: string; created: boolean; height: number }> => {
   if (hasLocalOwnerReplica(env, owner.entityId, owner.signerId)) {
@@ -114,16 +118,16 @@ export const ensureLocalRuntimeOwner = async (
       timeoutMs,
     );
     deps.enqueue(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [importEntity({
         entityId: owner.entityId,
         signerId: owner.signerId,
+        entitySeed: deps.entitySeed,
         data: {
           isProposer: true,
           config: owner.config,
           profileName: owner.profileName,
         },
-      }],
+      })],
       entityInputs: [],
     });
   });

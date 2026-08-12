@@ -61,19 +61,19 @@ export const makeQaSeveritySignal = (input: QaSeveritySignal): QaSeveritySignal 
 
 export const normalizeQaSeveritySignal = (
   value: unknown,
-  fallback: QaSeveritySignal,
+  defaultSignal: QaSeveritySignal,
 ): QaSeveritySignal => {
-  if (!value || typeof value !== 'object') return makeQaSeveritySignal(fallback);
+  if (!value || typeof value !== 'object') return makeQaSeveritySignal(defaultSignal);
   const record = value as Record<string, unknown>;
-  const severity = isQaSeverity(record['severity']) ? record['severity'] : fallback.severity;
+  const severity = isQaSeverity(record['severity']) ? record['severity'] : defaultSignal.severity;
   const reason = typeof record['reason'] === 'string' && record['reason'].trim()
     ? record['reason'].trim()
-    : fallback.reason;
-  const since = asFiniteSince(record['since']) ?? fallback.since;
+    : defaultSignal.reason;
+  const since = asFiniteSince(record['since']) ?? defaultSignal.since;
   const owner = typeof record['owner'] === 'string' && record['owner'].trim()
     ? record['owner'].trim()
-    : fallback.owner;
-  const evidence = Array.isArray(record['evidence']) ? normalizeEvidence(record['evidence']) : fallback.evidence;
+    : defaultSignal.owner;
+  const evidence = Array.isArray(record['evidence']) ? normalizeEvidence(record['evidence']) : defaultSignal.evidence;
   return makeQaSeveritySignal({ severity, reason, since, owner, evidence });
 };
 

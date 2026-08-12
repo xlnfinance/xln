@@ -117,13 +117,14 @@ Commands:
 `);
       break;
 
-    case 'status':
+    case 'status': {
       const block = await jAdapter.provider.getBlockNumber();
       console.log(`Block: ${block}`);
       console.log(`ChainId: ${jAdapter.chainId}`);
       console.log(`Jurisdiction: ${activeJurisdiction.name} (${activeJurisdiction.key})`);
       console.log(`Depository: ${jAdapter.addresses.depository}`);
       break;
+    }
 
     case 'reserves': {
       if (!args[0]) { console.log('Usage: reserves <entityId>'); break; }
@@ -156,12 +157,13 @@ Commands:
     }
 
 
+    default:
+      if (command) console.log(`Unknown command: ${command}. Type 'help' for commands.`);
+      break;
+
     case 'exit':
     case 'quit':
       process.exit(0);
-
-    default:
-      if (command) console.log(`Unknown command: ${command}. Type 'help' for commands.`);
   }
 }
 

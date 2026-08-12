@@ -152,6 +152,7 @@ const makeEnv = (): RuntimeReplica =>
             isProposer: true,
             state: {
               entityId,
+              entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
               height: 7,
               timestamp: 700,
               nonces: new Map(),
@@ -185,7 +186,6 @@ const makeEnv = (): RuntimeReplica =>
                       deltas: new Map(),
                       locks: new Map(),
                       swapOffers: new Map(),
-                      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
                       requestedRebalance: new Map(),
                       requestedRebalanceFeeState: new Map(),
                       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
@@ -213,6 +213,8 @@ const makeEnv = (): RuntimeReplica =>
                     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
                     proofBody: { tokenIds: [], deltas: [] },
                     pendingWithdrawals: new Map(),
+                    swapOrderHistory: new Map(),
+                    swapClosedOrders: new Map(),
                     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
                   },
                 ],
@@ -322,9 +324,9 @@ const makeTestDelta = (tokenId: number, value: bigint): Delta => ({
 
 const compareAscii = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
-const readTestPageLimit = (raw: unknown, fallback = 10): number => {
-  const numeric = Number(raw ?? fallback);
-  return Math.max(1, Math.min(500, Number.isFinite(numeric) ? Math.floor(numeric) : fallback));
+const readTestPageLimit = (raw: unknown, defaultValue = 10): number => {
+  const numeric = Number(raw ?? defaultValue);
+  return Math.max(1, Math.min(500, Number.isFinite(numeric) ? Math.floor(numeric) : defaultValue));
 };
 
 const makeTestViewPageLoader =
@@ -498,7 +500,7 @@ test('runtime adapter solvency-summary returns per-stack asset conservation', as
   expect(summary).not.toHaveProperty('accounts');
 });
 
-test('runtime adapter solvency-summary rejects historical fallback until a projection exists', async () => {
+test('runtime adapter solvency-summary rejects historical substitution until a projection exists', async () => {
   await expect(resolveRuntimeAdapterRead({ env: makeEnv() }, 'solvency-summary', { atHeight: 6 })).rejects.toThrow(
     'historical solvency-summary reads are not available yet',
   );
@@ -535,7 +537,7 @@ test('runtime adapter rejects old static auth keys', () => {
   expect(verifyRuntimeAdapterAuthCredential('seed', token)?.level).toBe('admin');
 });
 
-test('runtime adapter rejects legacy four-part capability tokens', () => {
+test('runtime adapter rejects retired four-part capability tokens', () => {
   const exp = Date.now() + 60_000;
   const signature = createHmac('sha256', 'seed').update(`xln-radapter-v1:cap:admin:${exp}`).digest('hex');
   expect(verifyRuntimeAdapterAuthCredential('seed', `xlnra1.full.${exp}.${signature}`)).toBe(null);
@@ -572,47 +574,19 @@ test('runtime adapter capability token ttl is configurable', () => {
   }
 });
 
-test('runtime adapter can require explicit auth seed', () => {
-  const previousRequireSeed = process.env['XLN_RADAPTER_REQUIRE_AUTH_SEED'];
+test('runtime adapter accepts only the explicit auth seed source', () => {
   const previousAuthSeed = process.env['XLN_RADAPTER_AUTH_SEED'];
-  process.env['XLN_RADAPTER_REQUIRE_AUTH_SEED'] = '1';
   try {
     delete process.env['XLN_RADAPTER_AUTH_SEED'];
-    expect(resolveRuntimeAdapterAuthSeed(makeEnv())).toBe(null);
+    expect(resolveRuntimeAdapterAuthSeed()).toBe(null);
     process.env['XLN_RADAPTER_AUTH_SEED'] = 'explicit-auth-seed';
-    expect(resolveRuntimeAdapterAuthSeed(makeEnv())).toBe('explicit-auth-seed');
+    expect(resolveRuntimeAdapterAuthSeed()).toBe('explicit-auth-seed');
   } finally {
-    if (previousRequireSeed === undefined) {
-      delete process.env['XLN_RADAPTER_REQUIRE_AUTH_SEED'];
-    } else {
-      process.env['XLN_RADAPTER_REQUIRE_AUTH_SEED'] = previousRequireSeed;
-    }
     if (previousAuthSeed === undefined) {
       delete process.env['XLN_RADAPTER_AUTH_SEED'];
     } else {
       process.env['XLN_RADAPTER_AUTH_SEED'] = previousAuthSeed;
     }
-  }
-});
-
-test('runtime adapter runtime seed auth fallback is explicit opt-in', () => {
-  const previousNodeEnv = process.env['NODE_ENV'];
-  const previousAllowFallback = process.env['XLN_RADAPTER_ALLOW_RUNTIME_SEED_AUTH'];
-  const previousAuthSeed = process.env['XLN_RADAPTER_AUTH_SEED'];
-  try {
-    delete process.env['NODE_ENV'];
-    delete process.env['XLN_RADAPTER_AUTH_SEED'];
-    delete process.env['XLN_RADAPTER_ALLOW_RUNTIME_SEED_AUTH'];
-    expect(resolveRuntimeAdapterAuthSeed(makeEnv())).toBe(null);
-    process.env['XLN_RADAPTER_ALLOW_RUNTIME_SEED_AUTH'] = '1';
-    expect(resolveRuntimeAdapterAuthSeed(makeEnv())).toBe('seed');
-  } finally {
-    if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];
-    else process.env['NODE_ENV'] = previousNodeEnv;
-    if (previousAllowFallback === undefined) delete process.env['XLN_RADAPTER_ALLOW_RUNTIME_SEED_AUTH'];
-    else process.env['XLN_RADAPTER_ALLOW_RUNTIME_SEED_AUTH'] = previousAllowFallback;
-    if (previousAuthSeed === undefined) delete process.env['XLN_RADAPTER_AUTH_SEED'];
-    else process.env['XLN_RADAPTER_AUTH_SEED'] = previousAuthSeed;
   }
 });
 
@@ -622,9 +596,9 @@ test('runtime adapter production auth seed requires entropy', () => {
   try {
     process.env['NODE_ENV'] = 'production';
     process.env['XLN_RADAPTER_AUTH_SEED'] = 'short';
-    expect(() => resolveRuntimeAdapterAuthSeed(makeEnv())).toThrow('RADAPTER_AUTH_SEED_TOO_WEAK');
+    expect(() => resolveRuntimeAdapterAuthSeed()).toThrow('RADAPTER_AUTH_SEED_TOO_WEAK');
     process.env['XLN_RADAPTER_AUTH_SEED'] = 'x'.repeat(32);
-    expect(resolveRuntimeAdapterAuthSeed(makeEnv())).toBe('x'.repeat(32));
+    expect(resolveRuntimeAdapterAuthSeed()).toBe('x'.repeat(32));
   } finally {
     if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];
     else process.env['NODE_ENV'] = previousNodeEnv;
@@ -865,7 +839,7 @@ test('current stored view frame overlays local identity without mixing a later l
       core: {
         signerId?: string;
         isProposer?: boolean;
-        entityEncPubKey?: string;
+        entityEncryptionPublicKey?: string;
         height: number;
         timestamp: number;
         prevFrameHash?: string;
@@ -919,7 +893,7 @@ test('current stored view frame overlays local identity without mixing a later l
   expect(frame.activeEntity?.core.reserves.get(1)).toBe(100n);
   expect(frame.activeEntity?.core.signerId).toBe(replica.signerId);
   expect(frame.activeEntity?.core.isProposer).toBe(true);
-  expect(frame.activeEntity?.core.entityEncPubKey).toBe('pub');
+  expect(frame.activeEntity?.core.entityEncryptionPublicKey).toBe(`0x${'44'.repeat(32)}`);
   expect('entityEncPrivKey' in (frame.activeEntity?.core ?? {})).toBe(false);
   expect(frame.activeEntity?.core.htlcNotes).toEqual(new Map([['hashlock:local-h7', 'local note h7']]));
 });
@@ -1026,7 +1000,6 @@ test('runtime adapter graph-frame keeps gossip peers and complete local account 
     'proofBody',
     'pendingWithdrawals',
     'rebalancePolicy',
-    'globalCreditLimits',
   ]) {
     expect(local?.accounts.items[0]).not.toHaveProperty(heavyAccountField);
   }
@@ -1271,7 +1244,7 @@ test('runtime adapter graph-frame synthesizes missing account endpoint nodes', a
   });
 });
 
-test('runtime adapter historical graph-frame derives fallback timestamp from the selected frame', async () => {
+test('runtime adapter historical graph-frame derives its timestamp from the selected frame', async () => {
   const env = makeEnv();
   env.runtimeId = 'runtime:h1';
   const liveLoader = makeTestViewPageLoader(env);
@@ -1566,6 +1539,7 @@ test('runtime adapter frame read returns compact summary without raw runtime inp
     postStateHash: 'post-state',
     stateHash: 'state',
     runtimeInput,
+    entityContexts: new Map(),
     historyRecords: [],
     activityLogs: [],
     overlayRecords: [{ scope: { family: 'entity', entityId }, key: 'raw', value: new Uint8Array([1, 2, 3]) }],

@@ -42,6 +42,7 @@ import {
   syncChain,
   commitRuntimeInput,
 } from '../harness/helpers';
+import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 
 const USDC = 1;
 const ONE = 10n ** 18n;
@@ -52,9 +53,8 @@ const hasFinalizedHankoBatch = (replica: EntityReplica): boolean =>
     (block.events || []).some(event => event.type === 'HankoBatchProcessed'),
   );
 
-const importBoardReplicas = (entityId: string, config: ConsensusConfig, x: number) =>
-  config.validators.map((signerId, index) => ({
-    type: 'importReplica' as const,
+const importBoardReplicas = (env: RuntimeReplica, entityId: string, config: ConsensusConfig, x: number) =>
+  config.validators.map((signerId, index) => createTestEntityImportRuntimeTx(env, {
     entityId,
     signerId,
     data: {
@@ -319,9 +319,9 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
     // CRITICAL: Multi-signer requires separate replica for EACH validator
     await commitRuntimeInput(env, {
       runtimeTxs: [
-        ...importBoardReplicas(alice.id, aliceConfig, 0),
-        ...importBoardReplicas(registered.id, registeredConfig, 100),
-        ...importBoardReplicas(hub.id, hubConfig, 220),
+        ...importBoardReplicas(env, alice.id, aliceConfig, 0),
+        ...importBoardReplicas(env, registered.id, registeredConfig, 100),
+        ...importBoardReplicas(env, hub.id, hubConfig, 220),
       ],
       entityInputs: [],
     });
@@ -469,7 +469,7 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
     // All validators commit the proposal frame. Their frame precommits are not
     // governance votes and therefore cannot execute the proposed mint.
     await commitRuntimeInput(env, {
-      runtimeTxs: [...importBoardReplicas(testEntity.id, testConfig, 340)],
+      runtimeTxs: [...importBoardReplicas(env, testEntity.id, testConfig, 340)],
       entityInputs: [],
     });
     const negativeHeightBefore = requireReplica(env, testEntity.id, testEntity.validators[0]!).state.height;

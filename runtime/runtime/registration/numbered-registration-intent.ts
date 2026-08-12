@@ -1,4 +1,4 @@
-import type { TransactionReceipt } from 'ethers';
+import { ethers, type TransactionReceipt } from 'ethers';
 
 import type {
   JAdapter,
@@ -17,7 +17,6 @@ import type {
   ResolveNumberedRegistrationData,
   RuntimeTx,
 } from '../types';
-import { encodeBoard, hashBoard } from '../../entity/factory';
 import { getSignerPrivateKey } from '../../account/crypto';
 import {
   getTrustedRegistrationAdapter,
@@ -32,6 +31,8 @@ import {
   parseNumberedRegistrationIntentTransaction,
 } from './numbered-registration-codec';
 import { markLocalNumberedRegistrationTx } from './numbered-registration-auth';
+import { importEntity } from './entity-creation';
+import { encodeBoard, hashBoard } from '../../entity/factory';
 
 export { buildNumberedRegistrationRequest } from './numbered-registration-codec';
 
@@ -305,10 +306,10 @@ export const buildNumberedRegistrationCompletionRuntimeTxs = (
       if (localBoardIndex < 0) {
         throw new Error(`NUMBERED_REGISTRATION_LOCAL_SIGNER_NOT_ON_BOARD:${index}`);
       }
-      return [{
-        type: 'importReplica',
+      return [importEntity({
         entityId: result.entityId,
         signerId: planned.localSignerId,
+        entitySeed: ethers.getBytes(planned.entitySeed),
         data: {
           isProposer: localBoardIndex === 0,
           config: {
@@ -322,7 +323,7 @@ export const buildNumberedRegistrationCompletionRuntimeTxs = (
           profileName: planned.profileName ?? planned.name,
           ...(planned.position ? { position: structuredClone(planned.position) } : {}),
         },
-      }];
+      })];
     }),
     markLocalNumberedRegistrationTx({ type: 'resolveNumberedRegistrationIntent', data: completion }),
   ];
@@ -356,7 +357,11 @@ export const applyNumberedRegistrationResolution = (
           candidate.entityId.toLowerCase() === result.entityId &&
           candidate.signerId.toLowerCase() === planned.localSignerId)
       : undefined;
-    if (!evidence || computeRegistrationEvidenceHash(evidence) !== result.evidenceHash || (planned.localSignerId !== null && !replica)) {
+    if (
+      !evidence ||
+      computeRegistrationEvidenceHash(evidence) !== result.evidenceHash ||
+      (planned.localSignerId !== null && !replica)
+    ) {
       throw new Error(`NUMBERED_REGISTRATION_COMPLETION_INCOMPLETE:${result.entityId}`);
     }
     if (replica && hashBoard(encodeBoard(replica.state.config, env)).toLowerCase() !== planned.boardHash) {

@@ -35,7 +35,7 @@ const buildBootstrapTimeline = (
   const infoBacklog = (marketMakerChild.lastInfo as { runtimeBacklog?: unknown } | null)?.runtimeBacklog;
   const backlog = summarizeBootstrapBacklog(deps.isRecord, lastEvent?.backlog ?? infoBacklog);
   const resetTotal = timingFor(timings, 'reset_total');
-  const fallbackLastEvent = resetTotal.completedAt
+  const defaultLastEvent = resetTotal.completedAt
     ? {
         event: resetState.lastError ? 'reset-failed' : 'reset-complete',
         stage: 'orchestrator',
@@ -61,7 +61,7 @@ const buildBootstrapTimeline = (
           at: lastEvent.at,
           height: lastEvent.height,
         }
-      : fallbackLastEvent,
+      : defaultLastEvent,
     stages: buildBootstrapStages({
       params,
       resetState,

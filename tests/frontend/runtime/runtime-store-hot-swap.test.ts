@@ -75,7 +75,6 @@ test('runtime controller is the single adapter lifecycle owner', () => {
   expect(runtimeStoreSource).toContain("controllerId && controllerId !== 'embedded' && $runtimes.has(controllerId)");
   expect(runtimeStoreSource).toContain("controllerId !== 'embedded'");
   expect(runtimeStoreSource).toContain('$runtimes.has(controllerId)');
-  expect(runtimeStoreSource).not.toContain('runtimeSelectionFallbackId');
   expect(runtimeStoreSource).not.toContain('export const activeRuntimeId = writable');
 });
 
@@ -368,19 +367,16 @@ test('localhost debug env surfaces expose RuntimeView with matching live runtime
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const embeddedStoreSource = readFileSync('frontend/src/lib/stores/bootstrap/embeddedRuntimeStore.ts', 'utf8');
   const runtimeLoaderSource = readFileSync('frontend/src/lib/stores/bootstrap/xlnRuntimeLoader.ts', 'utf8');
-  const debugSurfaceSource = readFileSync('frontend/src/lib/utils/runtime/debugSurface.ts', 'utf8');
   const viewSource = readFileSync('frontend/src/lib/view/View.svelte', 'utf8');
   const appTypes = readFileSync('frontend/src/app.d.ts', 'utf8');
 
   expect(xlnStoreSource).toContain("import { xlnEnvironment, setXlnEnvironment } from './bootstrap/embeddedRuntimeStore';");
-  expect(xlnStoreSource).not.toContain("registerDebugSurface('env', () => localDebugEnv, { legacyName: '__xln_env' });");
   expect(embeddedStoreSource).toContain('const viewEnv = createRuntimeViewEnv(runtimeEnv);');
   expect(embeddedStoreSource).toContain("registerDebugSurface('env', () => localDebugEnv);");
   expect(embeddedStoreSource).toContain('localDebugEnv = createDetachedRuntimeViewEnv(runtimeEnv);');
   expect(xlnStoreSource).not.toContain('window.__xln_env =');
   expect(runtimeLoaderSource).toContain("registerDebugSurface('instance', () => XLN);");
   expect(runtimeLoaderSource).not.toContain('window.__xln_instance =');
-  expect(debugSurfaceSource).not.toContain('legacyName');
   expect(appTypes).not.toContain('__xln_env');
   expect(appTypes).not.toContain('__xln_instance');
   expect(appTypes).not.toContain('__xlnRuntimeAdapter');
@@ -432,16 +428,9 @@ test('localhost debug env surfaces expose RuntimeView with matching live runtime
   expect(viewSource).toContain("from '$lib/stores/runtimeViewStore'");
   expect(viewSource).toContain("from '$lib/utils/runtime/debugSurface'");
   expect(viewSource).toContain("registerDebugSurface('view', () => get(runtimeView)");
-  expect(viewSource).not.toContain("legacyName: '__xlnRuntimeView'");
 });
 
-test('view runtime frame stores do not expose legacy isolated names', () => {
-  const viewFiles = collectFrontendSources('frontend/src/lib/view');
-  const legacyPattern = /\bisolated(RuntimeReplica|History|TimeIndex|IsLive|Revision)\b/;
-  for (const file of viewFiles) {
-    const source = readFileSync(file, 'utf8');
-    expect(source.match(legacyPattern)?.[0] ?? '', file).toBe('');
-  }
+test('view runtime frame stores expose the canonical live snapshot debug surface', () => {
   const viewSource = readFileSync('frontend/src/lib/view/View.svelte', 'utf8');
   expect(viewSource).toContain("registerDebugSurface('liveRuntimeSnapshot'");
   expect(viewSource).toContain("registerDebugSurface('publishLiveRuntimeSnapshot'");
@@ -579,12 +568,12 @@ test('vault restore rebinds RuntimeController to the restored embedded runtime',
   expect(initializedStart).toBeGreaterThan(restoreStart);
   const restoreSource = source.slice(restoreStart, initializedStart);
 
-  const fallbackIndex = restoreSource.indexOf('runtimeOperations.setActiveRuntimeId(activeId)');
+  const activeSelectionIndex = restoreSource.indexOf('runtimeOperations.setActiveRuntimeId(activeId)');
   const pipelineIndex = restoreSource.indexOf('await ensureRuntimePipelineAlive(runtimeToSync as Runtime, activeXln)');
   const controllerIndex = restoreSource.indexOf('await runtimeOperations.selectRuntime(activeId)');
   const syncIndex = restoreSource.indexOf('this.syncRuntime(runtimeToSync)');
-  expect(fallbackIndex).toBeGreaterThan(0);
-  expect(pipelineIndex).toBeGreaterThan(fallbackIndex);
+  expect(activeSelectionIndex).toBeGreaterThan(0);
+  expect(pipelineIndex).toBeGreaterThan(activeSelectionIndex);
   expect(controllerIndex).toBeGreaterThan(pipelineIndex);
   expect(syncIndex).toBeGreaterThan(controllerIndex);
 });

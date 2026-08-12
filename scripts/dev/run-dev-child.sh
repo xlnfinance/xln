@@ -3,8 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
-DEV_CHILD_COMMAND="\"$REPO_ROOT/scripts/dev/run-dev-child.sh\""
-CONCURRENTLY_JS="$REPO_ROOT/node_modules/concurrently/dist/bin/concurrently.js"
 source "$SCRIPT_DIR/process-owner.sh"
 
 role="${1:-}"
@@ -14,7 +12,7 @@ if [[ -z "$role" ]]; then
 fi
 
 case "$role" in
-  anvil|anvil2|stack|mesh|watchtower|runtime|vite|vite-http|ready)
+  anvil|anvil2|rpc-ready|mesh|watchtower|runtime|vite|vite-http|ready)
     ;;
   *)
     echo "DEV_CHILD_ROLE_UNKNOWN:${role}" >&2
@@ -51,8 +49,6 @@ if [[ ! "$DEV_CHILD_TERM_TIMEOUT_MS" =~ ^[1-9][0-9]*$ ]]; then
   echo "DEV_CHILD_TERM_TIMEOUT_INVALID:${DEV_CHILD_TERM_TIMEOUT_MS}" >&2
   exit 2
 fi
-DEV_INNER_KILL_TIMEOUT_MS=$((DEV_CHILD_TERM_TIMEOUT_MS + 5000))
-
 register_owned_dev_process "$role" "$REPO_ROOT"
 owned_child_pid=''
 
@@ -137,6 +133,25 @@ run_vite() {
     "$REPO_ROOT/frontend/node_modules/.bin/vite" dev "$@"
 }
 
+wait_for_dev_chains() {
+  run_owned bun runtime/scripts/operations/development/wait-rpc-chain.ts \
+    --url "http://127.0.0.1:${RPC_PORT}" \
+    --chain-id 31337 \
+    --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
+  run_owned bun runtime/scripts/operations/development/wait-rpc-chain.ts \
+    --url "http://127.0.0.1:${RPC2_PORT}" \
+    --chain-id 31338 \
+    --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
+}
+
+# Only the supervisor may release application roles after the one exact
+# dual-chain barrier. Direct child invocation cannot bypass that phase.
+if [[ "$role" != "anvil" && "$role" != "anvil2" && "$role" != "rpc-ready" \
+  && "${XLN_DEV_CHAINS_READY:-}" != "1" ]]; then
+  echo "DEV_CHAINS_NOT_READY:role=${role}" >&2
+  exit 2
+fi
+
 case "$role" in
   anvil)
     run_anvil "$RPC_PORT" 31337
@@ -144,20 +159,8 @@ case "$role" in
   anvil2)
     run_anvil "$RPC2_PORT" 31338
     ;;
-  stack)
-    run_owned bun runtime/scripts/operations/development/wait-rpc-chain.ts --url "http://127.0.0.1:${RPC_PORT}" --chain-id 31337 --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
-    run_owned bun runtime/scripts/operations/development/wait-rpc-chain.ts --url "http://127.0.0.1:${RPC2_PORT}" --chain-id 31338 --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
-    run_owned bun --no-orphans "$CONCURRENTLY_JS" \
-      --kill-others \
-      --kill-timeout "$DEV_INNER_KILL_TIMEOUT_MS" \
-      --names 'MESH,WATCH,RUNTIME,VITE,VITE_HTTP,READY' \
-      -c 'blue,red,yellow,green,white,cyan' \
-      "${DEV_CHILD_COMMAND} mesh" \
-      "${DEV_CHILD_COMMAND} watchtower" \
-      "${DEV_CHILD_COMMAND} runtime" \
-      "${DEV_CHILD_COMMAND} vite" \
-      "${DEV_CHILD_COMMAND} vite-http" \
-      "${DEV_CHILD_COMMAND} ready"
+  rpc-ready)
+    wait_for_dev_chains
     ;;
   mesh)
     run_owned env \

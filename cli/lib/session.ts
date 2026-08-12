@@ -4,6 +4,7 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   generateLazyEntityId,
+  importEntity,
   getP2PState,
   loadEnvFromDB,
   processRuntime,
@@ -287,16 +288,16 @@ const bootstrapFresh = async (
     env,
     {
       runtimeTxs: [
-        {
-          type: 'importReplica',
+        importEntity({
           entityId,
           signerId: identity.signerAddress,
+          entitySeed: identity.mnemonic,
           data: {
             isProposer: true,
             config: entityConfig,
             profileName: identity.label || settings.profileName,
           },
-        },
+        }),
       ],
       entityInputs: [],
     },

@@ -36,7 +36,6 @@ const createAccount = (localEntity = leftEntity, peerEntity = rightEntity): Acco
       locks: new Map(),
       swapOffers: new Map(),
       pulls: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -69,6 +68,8 @@ const createAccount = (localEntity = leftEntity, peerEntity = rightEntity): Acco
     proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+    swapOrderHistory: new Map(),
+    swapClosedOrders: new Map(),
   };
   account.currentFrame.accountStateRoot = computeAccountStateRoot(account.state);
   return account;
@@ -170,12 +171,17 @@ describe('typed Account peer rejection', () => {
     expect(rejected.rejected?.code).toBe('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID');
     expect(safeStringify(account)).toBe(before);
 
-    const honestContext = withVerifier(createAccountConsensusContext(env), async (_hanko, _hash, expectedEntityId) => ({
-      valid: true,
-      entityId: expectedEntityId,
-    }));
+    const observedAuthorities: unknown[] = [];
+    const honestContext = withVerifier(
+      createAccountConsensusContext(env),
+      async (_hanko, _hash, expectedEntityId, authority) => {
+        observedAuthorities.push(authority);
+        return { valid: true, entityId: expectedEntityId };
+      },
+    );
     const accepted = await applyAccountInput(honestContext, account, input);
     expect(accepted.success).toBe(true);
+    expect(observedAuthorities).toEqual([{ allowPreviousBoard: false }]);
     expect(account.currentHeight).toBe(1);
     expect(account.pendingFrame).toBeUndefined();
   });
@@ -212,6 +218,46 @@ describe('typed Account peer rejection', () => {
 
     expect(rejected.rejected?.code).toBe('ACCOUNT_PEER_FRAME_HANKO_INVALID');
     expect(safeStringify(account)).toBe(before);
+  });
+
+  test('fresh peer frames always reject previous-board authority', async () => {
+    const env = createEmptyEnv('account-peer-current-board-only');
+    env.quietRuntimeLogs = true;
+    const account = createAccount();
+    const frame = {
+      height: 1,
+      timestamp: env.state.timestamp,
+      jHeight: 0,
+      accountTxs: [],
+      prevFrameHash: 'genesis',
+      accountStateRoot: computeAccountStateRoot(account.state),
+      deltas: [],
+      stateHash: '',
+      byLeft: false,
+    };
+    frame.stateHash = await createFrameHash(frame);
+    const input: Extract<AccountInput, { kind: 'frame' }> = {
+      kind: 'frame',
+      fromEntityId: account.proofHeader.toEntity,
+      toEntityId: account.proofHeader.fromEntity,
+      domain: { ...account.state.domain },
+      disputeConfig: { ...account.state.disputeConfig },
+      watchSeed: account.state.watchSeed,
+      proposal: { frame, frameHanko: `0x${'66'.repeat(65)}` },
+    };
+    const observedAuthorities: unknown[] = [];
+    const context = withVerifier(
+      createAccountConsensusContext(env),
+      async (_hanko, _hash, _expectedEntityId, authority) => {
+        observedAuthorities.push(authority);
+        return { valid: false, entityId: null };
+      },
+    );
+
+    const result = await applyAccountInput(context, account, input);
+
+    expect(result.rejected?.code).toBe('ACCOUNT_PEER_FRAME_HANKO_INVALID');
+    expect(observedAuthorities).toEqual([{ allowPreviousBoard: false }]);
   });
 
   test('signed zero-row add_delta poison is rejected without throw or mutation', async () => {

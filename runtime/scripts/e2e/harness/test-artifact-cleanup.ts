@@ -156,9 +156,9 @@ const parseMaxBytes = (env: Record<string, string | undefined>): number => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_TEST_WORKSPACE_MAX_BYTES;
 };
 
-const parsePositiveByteLimit = (raw: string | undefined, fallback: number): number => {
+const parsePositiveByteLimit = (raw: string | undefined, defaultValue: number): number => {
   const parsed = Number(String(raw || '').trim());
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : defaultValue;
 };
 
 const pidIsAlive = (pid: number): boolean => {

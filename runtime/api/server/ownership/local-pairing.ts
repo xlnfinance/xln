@@ -91,7 +91,7 @@ const runtimeWsUrl = (requestUrl: string): string => {
 };
 
 const runtimeManifest = (env: RuntimeReplica, requestUrl: string, capabilityTtlMs: number, now: number) => {
-  const seed = resolveRuntimeAdapterAuthSeed(env);
+  const seed = resolveRuntimeAdapterAuthSeed();
   if (!seed) throw new Error('LOCAL_PAIRING_RUNTIME_AUTH_SEED_MISSING');
   const expiresAt = now + capabilityTtlMs;
   const audience = resolveRuntimeAdapterAuthAudience(env);

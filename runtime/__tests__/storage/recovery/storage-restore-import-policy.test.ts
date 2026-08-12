@@ -22,6 +22,7 @@ import { resolveDbPath } from '../../../storage/runtime-dbs';
 import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 type RecoveryEnv = { env: RuntimeReplica; entityId: string; signerId: string; replica: EntityReplica };
 const cleanupPaths: string[] = [];
@@ -82,8 +83,7 @@ const createRecoveryEnv = async (
     },
   } as JReplica);
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId,
       data: {
@@ -96,7 +96,7 @@ const createRecoveryEnv = async (
           jurisdiction,
         },
       },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env, []);

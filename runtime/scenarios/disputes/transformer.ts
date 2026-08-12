@@ -14,7 +14,7 @@ import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { deriveDisputeTokenFinalization } from '../../protocol/dispute/finalization';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { withDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
-import { quoteHtlcPaymentRoute } from '../../entity/htlc/payment-admission';
+import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
 import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
 import { ASYNC_PAYMENT_EXPIRY_MS } from '../../types/finance/payment';
 import { safeStringify } from '../../protocol/serialization';
@@ -29,8 +29,8 @@ import {
   findReplica,
   getProcess,
   processJEvents,
-  processUntilWithoutLocalHtlcAdvance,
-  withholdScenarioLocalHtlcAdvances,
+  processUntilWithoutHtlcSecretProposal,
+  withholdScenarioHtlcSecretProposals,
   syncChain,
   pinScenarioJurisdictionUnix,
   advanceScenarioPastDisputeTimeout,
@@ -148,14 +148,14 @@ const takePendingSwapProposal = (
 
 const capturePendingSwapProposal = async (
   env: RuntimeReplica,
-  withheldAdvances: Parameters<typeof withholdScenarioLocalHtlcAdvances>[1],
+  withheldAdvances: Parameters<typeof withholdScenarioHtlcSecretProposals>[1],
   fromEntityId: string,
   toEntityId: string,
   offerId: string,
 ): Promise<AccountProposalInput> => {
   const process = await getProcess();
   for (let cycle = 0; cycle < 24; cycle += 1) {
-    withholdScenarioLocalHtlcAdvances(env, withheldAdvances);
+    withholdScenarioHtlcSecretProposals(env, withheldAdvances);
     const proposal = takePendingSwapProposal(env, fromEntityId, toEntityId, offerId);
     if (proposal) return proposal;
     await process(env);
@@ -507,7 +507,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
         { type: 'placeSwapOffer', data: { counterpartyEntityId: hub.id, offerId: 'alice-maker-left', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount: aliceWantAmount, ...deriveSwapNetAuthorization(aliceWantAmount, 1) } },
       ],
     }]);
-    await processUntilWithoutLocalHtlcAdvance(
+    await processUntilWithoutHtlcSecretProposal(
       env,
       withheldAdvances,
       () => findCommittedScenarioHtlcLockId(env, alice.id, hub.id, aliceHashlock) !== undefined
@@ -543,7 +543,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
         },
       }],
     }]);
-    await processUntilWithoutLocalHtlcAdvance(
+    await processUntilWithoutHtlcSecretProposal(
       env,
       withheldAdvances,
       () => findReplica(env, alice.id)[1].state.orderbookExt !== undefined,
@@ -581,7 +581,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
         },
       ],
     }]);
-    await processUntilWithoutLocalHtlcAdvance(
+    await processUntilWithoutHtlcSecretProposal(
       env,
       withheldAdvances,
       () => findCommittedScenarioHtlcLockId(env, alice.id, hub.id, hubHashlock) !== undefined
@@ -590,7 +590,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     const hubLockId = findCommittedScenarioHtlcLockId(env, alice.id, hub.id, hubHashlock);
     if (!hubLockId) throw new Error('DISPUTE_TRANSFORMER_HUB_LOCK_NOT_COMMITTED');
 
-    withholdScenarioLocalHtlcAdvances(env, withheldAdvances);
+    withholdScenarioHtlcSecretProposals(env, withheldAdvances);
 
     // Produce the exact signed peer proposals that the two independent
     // matchers consume. We intercept them before delivery so the opposing

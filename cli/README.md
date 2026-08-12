@@ -65,7 +65,7 @@ Use a local mesh for development:
 
 ```bash
 # terminal A
-bun run serve
+bun run dev
 
 # terminal B
 export XLN_API_BASE=http://127.0.0.1:8080

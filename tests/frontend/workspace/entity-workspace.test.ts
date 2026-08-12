@@ -98,7 +98,7 @@ test('entity workspace has no separate audit ops or liquidity projection lenses 
   expect(workspace).toContain('<EntityPanelTabs');
 });
 
-test('entity settings workspace is a projection command surface, not the legacy RuntimeReplica panel', () => {
+test('entity settings workspace is a projection command surface, not the retired RuntimeReplica panel', () => {
   const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
   const settings = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntitySettingsProjectionPanel.svelte', 'utf8');
   const consensusSettings = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityConsensusSettingsPanel.svelte', 'utf8');

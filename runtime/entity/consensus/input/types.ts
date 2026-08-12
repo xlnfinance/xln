@@ -9,6 +9,7 @@ import type {
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import type { RuntimeOverlayRecord } from '../../../types/account';
+import type { EntityInfraContext } from '../../../types/entity/infra-context';
 
 /**
  * Entity-facing view of one Runtime-routed input.
@@ -45,6 +46,8 @@ export type ApplyEntityInputResult = {
   consumptionNodeChanges?: EntityCandidate['consumptionNodeChanges'];
   accountJClaimNodeChanges?: EntityCandidate['accountJClaimNodeChanges'];
   canonicalAppliedInput?: EntityInput;
+  /** Exact Entity frame context produced or accepted by this input. */
+  entityContext?: EntityInfraContext;
 };
 
 export type ApplyEntityInputContext = {
@@ -61,6 +64,7 @@ export type ApplyEntityInputContext = {
   /** False while Runtime stages one touched-only Entity candidate. */
   promoteCandidateState: boolean;
   canonicalAppliedInput?: EntityInput;
+  entityContext?: EntityInfraContext;
 };
 
 export const commitEntityConsensusInput = (
@@ -82,6 +86,7 @@ export const commitEntityConsensusInput = (
   ...(context.canonicalAppliedInput
     ? { canonicalAppliedInput: context.canonicalAppliedInput }
     : {}),
+  ...(context.entityContext ? { entityContext: context.entityContext } : {}),
 });
 
 export const noopEntityConsensusInput = (

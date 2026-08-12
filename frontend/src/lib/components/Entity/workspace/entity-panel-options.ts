@@ -139,9 +139,9 @@ export function buildConfigureTokenOptions(input: {
 export function resolveConfigureTokenId(
   currentTokenId: number,
   options: readonly { id: number }[],
-  fallbackTokenId = 1,
+  defaultTokenId = 1,
 ): number {
   return options.some((opt) => opt.id === currentTokenId)
     ? currentTokenId
-    : options[0]?.id ?? fallbackTokenId;
+    : options[0]?.id ?? defaultTokenId;
 }

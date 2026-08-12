@@ -26,9 +26,9 @@ export function normalizeXlnAppPath(value) {
 	}
 }
 
-function sanitizeNotificationText(value, fallback, maxLength) {
-	const text = String(value || fallback).replace(/\s+/g, ' ').trim();
-	if (!text) return fallback;
+function sanitizeNotificationText(value, defaultText, maxLength) {
+	const text = String(value || defaultText).replace(/\s+/g, ' ').trim();
+	if (!text) return defaultText;
 	return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 

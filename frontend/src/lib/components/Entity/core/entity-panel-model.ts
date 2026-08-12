@@ -108,6 +108,7 @@ function summaryProfile(summary: RuntimeAdapterEntitySummary | null | undefined)
     : undefined;
   return {
     entityId,
+    entityEncryptionPublicKey: '',
     name: String(summary?.label || entityId).trim(),
     avatar: '',
     bio: '',
@@ -122,7 +123,6 @@ function summaryProfile(summary: RuntimeAdapterEntitySummary | null | undefined)
       isHub: summary?.isHub === true,
       routingFeePPM: 0,
       baseFee: 0n,
-      board: { threshold: 0, validators: [], encryptionAttestations: [] },
       ...(jurisdiction ? { jurisdiction } : {}),
     },
     accounts: [],
@@ -418,11 +418,11 @@ export function getEntityJurisdictionKeyFromReplicas(
 export function isSameJurisdictionEntity(
   env: RuntimeReplica | EnvSnapshot | null | undefined,
   replica: EntityReplica | null | undefined,
-  fallbackEntityId: string,
+  expectedEntityId: string,
   leftEntityId: string,
   rightEntityId: string,
 ): boolean {
-  const currentEntityId = String(replica?.state?.entityId || fallbackEntityId || '').trim().toLowerCase();
+  const currentEntityId = String(replica?.state?.entityId || expectedEntityId || '').trim().toLowerCase();
   const normalizedLeftEntityId = String(leftEntityId || '').trim().toLowerCase();
   const normalizedRightEntityId = String(rightEntityId || '').trim().toLowerCase();
   const leftJurisdiction = normalizedLeftEntityId === currentEntityId
@@ -438,11 +438,11 @@ export function isSameJurisdictionEntity(
 export function isSameJurisdictionEntityInReplicas(
   replicas: Map<string, EntityReplica> | null | undefined,
   replica: EntityReplica | null | undefined,
-  fallbackEntityId: string,
+  expectedEntityId: string,
   leftEntityId: string,
   rightEntityId: string,
 ): boolean {
-  const currentEntityId = String(replica?.state?.entityId || fallbackEntityId || '').trim().toLowerCase();
+  const currentEntityId = String(replica?.state?.entityId || expectedEntityId || '').trim().toLowerCase();
   const normalizedLeftEntityId = String(leftEntityId || '').trim().toLowerCase();
   const normalizedRightEntityId = String(rightEntityId || '').trim().toLowerCase();
   const leftJurisdiction = normalizedLeftEntityId === currentEntityId

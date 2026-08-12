@@ -34,7 +34,8 @@ import { deriveDelta, isLeftEntity } from '../../account/utils';
 import { createGossipLayer } from '../../network/p2p/gossip';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { readEntityFrameEventMessages } from '../../entity/frame-events';
-import { quoteHtlcPaymentRoute } from '../../entity/htlc/payment-admission';
+import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
+import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 import { ethers } from 'ethers';
 import {
   AHB_DEBUG,
@@ -219,8 +220,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
       entities.push({ id: entityId, signer, name, boardHash });
 
-      createEntityTxs.push({
-        type: 'importReplica' as const,
+      createEntityTxs.push(createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: signer,
         data: {
@@ -234,7 +234,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
             jurisdiction: arrakis
           }
         }
-      });
+      }));
       console.log(`${name}: Entity ${entityId.slice(0, 10)}... @ (${position.x}, ${position.y}, ${position.z})`);
     }
 
@@ -2471,8 +2471,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const carolBoardHash = hashBoard(carolEncodedBoard);
     carol = { id: carolBoardHash, signer: carolSigner, name: 'Carol', boardHash: carolBoardHash };
     await commitRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: carol.id,
         signerId: carol.signer,
         data: {
@@ -2480,7 +2479,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
           position: carolPosition,
           config: carolConfig
         }
-      }],
+      })],
       entityInputs: []
     });
 

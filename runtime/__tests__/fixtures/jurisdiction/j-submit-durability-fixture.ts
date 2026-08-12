@@ -17,6 +17,7 @@ const makeState = (): EntityState => {
   batch.reserveToReserve.push({ receivingEntity: `0x${'61'.repeat(32)}`, tokenId: 1, amount: 10n });
   return {
     entityId,
+    entityEncryptionPublicKey: `0x${'71'.repeat(32)}`,
     height: 1,
     timestamp: 1_000,
     nonces: new Map(),
@@ -69,7 +70,7 @@ export const makeJSubmitDurabilityFixture = () => {
   const replica: EntityReplica = {
     entityId,
     signerId,
-    entityEncPubKey: '',
+    entityEncPubKey: `0x${'71'.repeat(32)}`,
     state: makeState(),
     mempool: [],
     isProposer: true,

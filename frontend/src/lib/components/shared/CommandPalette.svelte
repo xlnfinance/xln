@@ -129,7 +129,7 @@
       });
     }
 
-    // Fallback: search entities by name
+    // If no command matches, search the entity index by name.
     if (results.length === 0 && q.length >= 2) {
       const matches = findCommandPaletteEntities(q, view);
       for (const m of matches.slice(0, 5)) {

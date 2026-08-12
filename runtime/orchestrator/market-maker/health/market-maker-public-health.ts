@@ -48,7 +48,7 @@ const buildCrossExpectedDepth = (marketMaker: MarketMakerHealth): CrossExpectedD
         expectedOffers > 0 && expectedBidOffers + expectedAskOffers === expectedOffers;
       // Missing directional counts are not inferred. A health payload
       // is protocol evidence for startup; accepting ambiguous totals would
-      // reintroduce the symmetric-book fallback this gate exists to remove.
+      // reintroduce the symmetric-book substitution this gate exists to remove.
       if (!countsAreCanonical) continue;
       addCrossExpectedDepth(expectedByHub, pair.bookOwnerEntityId ?? '', pair.pairId, {
         bidOffers: expectedBidOffers,

@@ -11,6 +11,8 @@ export type {
   QaPhaseWaterfallSegment,
   QaPhaseWaterfall,
   QaCodeFingerprint,
+  QaPerfChildSample,
+  QaPerfSample,
   QaPerfSummary,
   QaPerfSummaryView,
   QaBrowserIssue,

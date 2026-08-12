@@ -27,7 +27,7 @@ const requireResponseSeconds = (value: unknown, side: 'left' | 'right'): number 
  * Validate the exact bilateral clock committed by every Account state root.
  * Zero is intentional: two parties may choose same-block finality. The only
  * protocol ceiling prevents an accidental account from remaining disputed for
- * more than one year; there is deliberately no jurisdiction-wide fallback.
+ * more than one year; there is deliberately no jurisdiction-wide substitute.
  */
 export const canonicalAccountDisputeConfig = (value: AccountDisputeConfig): AccountDisputeConfig => {
   if (!value || typeof value !== 'object') {

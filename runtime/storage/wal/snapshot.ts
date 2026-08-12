@@ -237,6 +237,7 @@ const DURABLE_RUNTIME_STATE_KEYS = [
   'pendingJurisdictionImports',
   'numberedRegistrationIntents',
   'certifiedRegistrationEvidence',
+  'entityEncryptionSeeds',
 ] as const;
 
 const buildDurableRuntimeStateSnapshot = (
@@ -286,6 +287,9 @@ const buildDurableRuntimeStateSnapshot = (
       : {}),
     ...(hasDurableEntries(state.certifiedRegistrationEvidence)
       ? { certifiedRegistrationEvidence: structuredClone(state.certifiedRegistrationEvidence) }
+      : {}),
+    ...(hasDurableEntries(state.entityEncryptionSeeds)
+      ? { entityEncryptionSeeds: structuredClone(state.entityEncryptionSeeds) }
       : {}),
     ...(options?.includeCertifiedBoardNodes
       ? {

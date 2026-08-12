@@ -6,6 +6,7 @@ import { EMPTY_J_HISTORY_ROOT } from '../../../jurisdiction/machine/history-cons
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../../../storage/read/projections';
 import type { JurisdictionConfig } from '../../../entity/types';
 import { createTestJReplica } from '../.././helpers/j-replica';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 
@@ -47,8 +48,7 @@ describe('runtime remote replica import', () => {
     // authenticate the genesis board without inventing registration evidence.
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId,
         data: {
@@ -59,10 +59,10 @@ describe('runtime remote replica import', () => {
             shares: { [signerId]: 1n },
             jurisdiction,
           },
-          isProposer: false,
+          isProposer: true,
           profileName: 'Remote Hub',
         },
-      }],
+      })],
       entityInputs: [],
     });
 
@@ -70,8 +70,8 @@ describe('runtime remote replica import', () => {
 
     const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     expect(replica).toBeDefined();
-    expect(replica?.entityEncPubKey).toBe('');
-    expect(replica && Object.hasOwn(replica, 'entityEncPrivKey')).toBeFalse();
+    expect(replica?.state.entityEncryptionPublicKey).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(replica && Object.hasOwn(replica, 'entityEncryptionPrivateKey')).toBeFalse();
     expect(replica?.state.lastFinalizedJHeight).toBe(0);
     expect(env.gossip.getProfiles().some(profile => profile.entityId === entityId)).toBe(false);
 
@@ -105,8 +105,7 @@ describe('runtime remote replica import', () => {
     const importedEntityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const unknownEntityId = generateLazyEntityId([`0x${'cd'.repeat(20)}`], 1n).toLowerCase();
     const runtimeInput = {
-      runtimeTxs: [{
-        type: 'importReplica' as const,
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: importedEntityId,
         signerId,
         data: {
@@ -117,10 +116,10 @@ describe('runtime remote replica import', () => {
             shares: { [signerId]: 1n },
             jurisdiction,
           },
-          isProposer: false,
+          isProposer: true,
           profileName: 'Uncommitted import',
         },
-      }],
+      })],
       entityInputs: [{ entityId: unknownEntityId, signerId, entityTxs: [] }],
     };
     enqueueRuntimeInput(env, runtimeInput);

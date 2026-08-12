@@ -48,10 +48,10 @@ export type StorageHealth = {
 
 export const parseStorageLimit = (
   value: string | undefined,
-  fallback: number,
+  defaultValue: number,
   name: string,
 ): number => {
-  const parsed = value === undefined || value === '' ? fallback : Number(value);
+  const parsed = value === undefined || value === '' ? defaultValue : Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
     throw new Error(`STORAGE_CONFIG_${name}_INVALID:${String(value)}`);
   }

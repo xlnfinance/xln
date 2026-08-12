@@ -25,7 +25,6 @@ const account = (): AccountReplica => ({
     locks: new Map(),
     pulls: new Map(),
     swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     jNonce: 0,
     disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     lastFinalizedJHeight: 0,

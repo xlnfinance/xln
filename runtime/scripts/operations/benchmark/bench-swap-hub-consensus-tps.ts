@@ -12,13 +12,14 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { MAX_ACCOUNT_FRAME_TXS } from '../../../account/consensus/frame/hash';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../orderbook';
 import { createEmptyEnv } from '../../../runtime';
-import type { AccountInput, AccountReplica, AccountTx, Delta } from '../../../types/account';
+import type { AccountInput, AccountReplica, AccountTx, Delta, SwapOffer } from '../../../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import { getPerfMs } from '../../../infra/time';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
+import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 
 type Cli = {
   swaps: number;
@@ -94,19 +95,19 @@ const averageStageMs = (stages: StageTotals): HubConsensusBenchmarkResult['stage
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 
-const argValue = (args: string[], name: string, fallback: string): string => {
+const argValue = (args: string[], name: string, defaultValue: string): string => {
   const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] ?? fallback : fallback;
+  return index >= 0 ? args[index + 1] ?? defaultValue : defaultValue;
 };
 
-const positiveInt = (args: string[], name: string, fallback: number): number => {
-  const value = Number.parseInt(argValue(args, name, String(fallback)), 10);
+const positiveInt = (args: string[], name: string, defaultValue: number): number => {
+  const value = Number.parseInt(argValue(args, name, String(defaultValue)), 10);
   if (!Number.isFinite(value) || value <= 0) throw new Error(`INVALID_ARG:${name}`);
   return value;
 };
 
-const nonNegativeInt = (args: string[], name: string, fallback: number): number => {
-  const value = Number.parseInt(argValue(args, name, String(fallback)), 10);
+const nonNegativeInt = (args: string[], name: string, defaultValue: number): number => {
+  const value = Number.parseInt(argValue(args, name, String(defaultValue)), 10);
   if (!Number.isFinite(value) || value < 0) throw new Error(`INVALID_ARG:${name}`);
   return value;
 };
@@ -159,6 +160,7 @@ const makeEntityState = (
   jurisdiction: JurisdictionConfig,
 ): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'11'.repeat(32)}`,
   height: 1,
   timestamp: 1_000,
   nonces: new Map(),
@@ -185,7 +187,6 @@ const addReplica = (
   env.state.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
-    entityEncPubKey: `0x${'aa'.repeat(32)}`,
     mempool: [],
     isProposer: true,
     state: makeEntityState(entityId, signerId, jurisdiction),
@@ -255,7 +256,6 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountReplica => 
       locks: new Map(),
       pulls: new Map(),
       swapOffers: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -266,6 +266,8 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountReplica => 
     },
     status: 'active',
     mempool: [],
+    swapOrderHistory: new Map(),
+    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -319,7 +321,7 @@ const makeSameCase = (
   for (let offset = 0; offset < count; offset += 1) {
     const index = startIndex + offset;
     const offerId = `same-${index}`;
-    base.state.swapOffers.set(offerId, {
+    const offer: SwapOffer = {
       offerId,
       giveTokenId: 2,
       giveAmount,
@@ -333,7 +335,9 @@ const makeSameCase = (
       createdHeight: 0,
       quantizedGive: giveAmount,
       quantizedWant: wantAmount,
-    });
+    };
+    base.state.swapOffers.set(offerId, offer);
+    recordSwapOfferLifecycle(base, offer);
     txs.push({
       type: 'swap_resolve',
       data: {
@@ -427,7 +431,7 @@ const makeCrossCase = (
       createdHeight: 0,
       createdTimestamp: 1_000,
     });
-    base.state.swapOffers.set(offerId, {
+    const offer: SwapOffer = {
       offerId,
       giveTokenId: admittedRoute.source.tokenId,
       giveAmount: admittedRoute.source.amount,
@@ -442,7 +446,9 @@ const makeCrossCase = (
       quantizedGive: admittedRoute.source.amount,
       quantizedWant: admittedRoute.target.amount,
       crossJurisdiction: admittedRoute,
-    });
+    };
+    base.state.swapOffers.set(offerId, offer);
+    recordSwapOfferLifecycle(base, offer);
     txs.push({
       type: 'cross_swap_fill_ack',
       data: {

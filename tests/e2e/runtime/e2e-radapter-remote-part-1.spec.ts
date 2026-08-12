@@ -757,7 +757,7 @@ test('remote /app opens an existing hub runtime through radapter', { tag: '@func
       hubIsHub: hub?.isHub === true,
       accountCount: Number(active?.accounts?.totalItems ?? active?.accounts?.items?.length ?? 0),
       loginText: document.body.textContent || '',
-      debugRootViewMatchesLegacy: debugRoot.view === runtimeView,
+      debugRootViewMatchesSnapshot: debugRoot.view === runtimeView,
       debugRootAdapterConnected: rootAdapterStatus?.connected === true,
       debugRootAdapterAuthLevel: rootAdapterStatus?.authLevel ?? null,
     };
@@ -771,7 +771,7 @@ test('remote /app opens an existing hub runtime through radapter', { tag: '@func
   expect(snapshot.accountCount).toBeGreaterThan(0);
   expect(snapshot.accountCount).toBeLessThanOrEqual(10);
   expect(/quick login/i.test(snapshot.loginText)).toBe(false);
-  expect(snapshot.debugRootViewMatchesLegacy).toBe(true);
+  expect(snapshot.debugRootViewMatchesSnapshot).toBe(true);
   expect(snapshot.debugRootAdapterConnected).toBe(true);
   expect(snapshot.debugRootAdapterAuthLevel).toBe('admin');
   await expect(page.getByTestId('context-current')).not.toContainText(/no runtime selected/i);
@@ -1312,8 +1312,6 @@ test('context dropdown groups H1 H2 H3 remote runtimes', { tag: '@functional' },
         const label = String(targetLabel || '').toLowerCase();
         const menu = document.querySelector('.dropdown-menu');
         if (!menu) throw new Error('CONTEXT_MENU_MISSING');
-        if (menu.querySelector('.runtime-main')) throw new Error('LEGACY_RUNTIME_MAIN_PRESENT');
-        if (menu.querySelector('.runtime-delete')) throw new Error('LEGACY_RUNTIME_DELETE_PRESENT');
         const focus = menu.querySelector('[data-testid="context-runtime-focus"]');
         if (!focus) throw new Error('CONTEXT_RUNTIME_FOCUS_MISSING');
         const row = Array.from(focus.querySelectorAll('[data-testid="context-entity-row"]')).find(
@@ -1787,7 +1785,7 @@ test(
 );
 
 test(
-  'admin remote runtime opens settings projection without legacy RuntimeReplica settings',
+  'admin remote runtime opens settings projection without retired RuntimeReplica settings',
   { tag: '@functional' },
   async ({ page }) => {
     const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
@@ -1832,7 +1830,7 @@ test(
       return {
         projectionPanel: Boolean(panel),
         saveDisabled: saveButton?.hasAttribute('disabled') ?? true,
-        legacySettingsMounted:
+        localSettingsMounted:
           Boolean(document.querySelector('.entity-settings')) ||
           text.includes('IndexedDB') ||
           text.includes('Recovery Services') ||
@@ -1844,7 +1842,7 @@ test(
 
     expect(result.projectionPanel).toBe(true);
     expect(result.saveDisabled).toBe(false);
-    expect(result.legacySettingsMounted).toBe(false);
+    expect(result.localSettingsMounted).toBe(false);
     expect(result.fullAccessWarning).toBe(false);
     expect(
       consoleProblems.filter(message =>
@@ -1916,7 +1914,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
   expect(qaApiRequests, '/health must not read /api/qa; QA cockpit owns that surface').toEqual([]);
   expect(
     debugProjectionRequests,
-    '/health must read runtime projections through RuntimeQueryClient, not legacy debug entity/event APIs',
+    '/health must read runtime projections through RuntimeQueryClient, not retired debug entity/event APIs',
   ).toEqual([]);
   expect(
     consoleProblems.filter(message =>

@@ -17,6 +17,8 @@ import { buildRouteOutputKey } from '../../runtime/routing/output-routing';
 import { releaseUncommittedReliableIngress } from '../../runtime/reliable/reliable-delivery.ts';
 import { accountHasProposableMempool } from '../../entity/consensus/account/mempool-eligibility';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
+import { accountInputProposal } from '../../account/consensus/flush';
+import { hashHtlcSecret } from '../../protocol/htlc/utils';
 
 // Lazy-loaded process to avoid circular deps
 let _process: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;
@@ -38,62 +40,67 @@ export const commitRuntimeInput = async (env: RuntimeReplica, runtimeInput: Runt
   return runtime.processRuntime(env);
 };
 
-export type ScenarioHtlcAdvanceTarget = Readonly<{
+export type ScenarioHtlcSecretTarget = Readonly<{
   entityId: string;
   signerId: string;
   hashlock: string;
 }>;
 
-const matchingLocalHtlcAdvance = (
+const entityTxRevealsTargetSecret = (tx: EntityTx, hashlock: string): boolean => {
+  if (tx.type === 'accountInput') {
+    return accountInputProposal(tx.data)?.frame.accountTxs.some(accountTx =>
+      accountTx.type === 'htlc_resolve'
+      && accountTx.data.outcome === 'secret'
+      && hashHtlcSecret(accountTx.data.secret).toLowerCase() === hashlock.toLowerCase()
+    ) ?? false;
+  }
+  if (tx.type === 'entityCommand') return tx.data.txs.some(nested => entityTxRevealsTargetSecret(nested, hashlock));
+  if (tx.type === 'consensusOutput' || tx.type === 'reissueCertifiedOutput') {
+    return tx.data.entityTxs.some(nested => entityTxRevealsTargetSecret(nested, hashlock));
+  }
+  if (tx.type === 'propose' && tx.data.action?.type === 'entity_transaction') {
+    return tx.data.action.data.txs.some(nested => entityTxRevealsTargetSecret(nested, hashlock));
+  }
+  return false;
+};
+
+const matchingLocalHtlcSecretProposal = (
   input: { entityId: string; signerId: string; entityTxs?: EntityTx[] },
-  targets: readonly ScenarioHtlcAdvanceTarget[],
-): boolean => (input.entityTxs ?? []).some(tx => {
-  if (tx.type !== 'htlcOnionAdvance') return false;
-  const targeted = targets.some(target =>
+  targets: readonly ScenarioHtlcSecretTarget[],
+): boolean => targets.some(target =>
     input.entityId.toLowerCase() === target.entityId.toLowerCase()
       && input.signerId.toLowerCase() === target.signerId.toLowerCase()
-      && tx.data.hashlock.toLowerCase() === target.hashlock.toLowerCase()
+      && (input.entityTxs ?? []).some(tx => entityTxRevealsTargetSecret(tx, target.hashlock))
   );
-  if (targeted && tx.data.advance.kind !== 'final') {
-    throw new Error(`SCENARIO_HTLC_ADVANCE_PHASE_UNEXPECTED:${tx.data.advance.kind}`);
-  }
-  return targeted;
-});
 
 /** Withhold one exact local custody continuation; Account consensus remains untouched. */
-export function withholdScenarioLocalHtlcAdvances(
+export function withholdScenarioHtlcSecretProposals(
   env: RuntimeReplica,
-  targets: readonly ScenarioHtlcAdvanceTarget[],
+  targets: readonly ScenarioHtlcSecretTarget[],
 ): void {
   const escaped = [env.pendingOutputs, env.networkInbox, env.pendingNetworkOutputs]
     .flatMap(queue => queue ?? [])
-    .filter(input => matchingLocalHtlcAdvance(input, targets));
-  if (escaped.length > 0) throw new Error('SCENARIO_HTLC_ADVANCE_ESCAPED_LOCAL_INGRESS');
+    .filter(input => matchingLocalHtlcSecretProposal(input, targets));
+  if (escaped.length > 0) throw new Error('SCENARIO_HTLC_SECRET_PROPOSAL_ESCAPED_LOCAL_INGRESS');
   const queued = env.runtimeMempool.entityInputs;
-  const dropped = queued.filter(input => matchingLocalHtlcAdvance(input, targets));
-  for (const input of dropped) {
-    const txs = input.entityTxs ?? [];
-    if (txs.length !== 1 || txs[0]?.type !== 'htlcOnionAdvance') {
-      throw new Error('SCENARIO_HTLC_ADVANCE_MIXED_WITH_DURABLE_INPUT');
-    }
-  }
-  env.runtimeMempool.entityInputs = queued.filter(input => !matchingLocalHtlcAdvance(input, targets));
+  const dropped = queued.filter(input => matchingLocalHtlcSecretProposal(input, targets));
+  env.runtimeMempool.entityInputs = queued.filter(input => !matchingLocalHtlcSecretProposal(input, targets));
   releaseUncommittedReliableIngress(env, dropped, []);
 }
 
-export async function processUntilWithoutLocalHtlcAdvance(
+export async function processUntilWithoutHtlcSecretProposal(
   env: RuntimeReplica,
-  targets: readonly ScenarioHtlcAdvanceTarget[],
+  targets: readonly ScenarioHtlcSecretTarget[],
   ready: () => boolean,
   maxCycles = 32,
 ): Promise<void> {
   const process = await getProcess();
   for (let cycle = 0; cycle < maxCycles; cycle += 1) {
-    withholdScenarioLocalHtlcAdvances(env, targets);
+    withholdScenarioHtlcSecretProposals(env, targets);
     if (ready()) return;
     await process(env);
   }
-  withholdScenarioLocalHtlcAdvances(env, targets);
+  withholdScenarioHtlcSecretProposals(env, targets);
   if (!ready()) throw new Error(`SCENARIO_HTLC_STATE_NOT_REACHED:${maxCycles}`);
 }
 

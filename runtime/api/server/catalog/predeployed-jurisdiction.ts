@@ -73,5 +73,5 @@ export const selectPredeployedJurisdiction = (
   if (rpcMatch) return rpcMatch;
   const primaryMatch = requireUniqueMatch(entries.filter(entry => entry.primary === true), 'primary');
   if (primaryMatch) return primaryMatch;
-  return requireUniqueMatch(entries, 'fallback');
+  return requireUniqueMatch(entries, 'default');
 };

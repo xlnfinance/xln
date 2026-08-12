@@ -93,7 +93,7 @@ const compareOptionalIndex = (
 
 /**
  * EVM execution order is consensus data. Payload sorting is only a deterministic
- * fallback for synthetic events that have no chain log position.
+ * deterministic position for synthetic events that have no chain log index.
  */
 export function compareCanonicalJurisdictionEvents(
   left: JurisdictionEvent,

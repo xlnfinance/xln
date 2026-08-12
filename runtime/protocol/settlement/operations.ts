@@ -102,6 +102,7 @@ export function compileOps(
   // Group by tokenId — multiple ops on same token merge into one diff
   const diffMap = new Map<number, SettlementDiff>();
   const forgiveTokenIds: number[] = [];
+  const forgivenTokenIds = new Set<number>();
 
   const ensureDiff = (tokenId: number): SettlementDiff => {
     let diff = diffMap.get(tokenId);
@@ -121,6 +122,10 @@ export function compileOps(
   for (const [index, op] of ops.entries()) {
     assertSettlementTokenId(op.tokenId, `op=${index}`);
     if (op.type === 'forgive') {
+      if (forgivenTokenIds.has(op.tokenId)) {
+        throw new Error(`SETTLEMENT_DUPLICATE_FORGIVENESS_TOKEN:${op.tokenId}`);
+      }
+      forgivenTokenIds.add(op.tokenId);
       forgiveTokenIds.push(op.tokenId);
       continue;
     }

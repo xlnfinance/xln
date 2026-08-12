@@ -11,7 +11,7 @@ import {
 import { prepareAccountJClaimTx } from '../../../account/j-claims/j-claim-transition';
 import { handleJEventClaim } from '../../../account/tx/handlers/j-events/claim';
 import { createSettlementWorkspaceHash } from '../../../account/tx/handlers/settlement/transition';
-import { applyEntityFrame } from '../../../entity/consensus';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import { selectSettlementContinuation } from '../../../entity/consensus/account/settlement-continuation';
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 import {
@@ -49,6 +49,7 @@ import {
   applyCertifiedBoardRegistryEvent,
   cacheCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
+  resolveObserverCertifiedBoardHash,
 } from '../../../jurisdiction/machine/board-registry';
 import { createEmptyEnv } from '../../../runtime';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
@@ -130,9 +131,10 @@ const accountSettledEvent = (nonce: number) => ({
 
 const installRegisteredBoard = (
   env: RuntimeReplica,
-  state: EntityState,
+  observerState: EntityState,
   jurisdiction: JurisdictionConfig,
   boardHash: string,
+  registeredEntityId = observerState.entityId,
 ): void => {
   const events: JurisdictionEvent[] = [{
     type: 'FoundationBootstrapped',
@@ -149,8 +151,8 @@ const installRegisteredBoard = (
   }, {
     type: 'EntityRegistered',
     data: {
-      entityId: state.entityId,
-      entityNumber: BigInt(state.entityId).toString(),
+      entityId: registeredEntityId,
+      entityNumber: BigInt(registeredEntityId).toString(),
       boardHash,
     },
     blockNumber: 2,
@@ -160,13 +162,13 @@ const installRegisteredBoard = (
   }];
   for (const event of events) {
     const applied = applyCertifiedBoardRegistryEvent(
-      state.certifiedBoardState,
+      observerState.certifiedBoardState,
       getCertifiedBoardNodeStore(env),
       jurisdiction,
       event,
     );
     cacheCertifiedBoardNodes(env, applied.newNodes);
-    state.certifiedBoardState = applied.state;
+    observerState.certifiedBoardState = applied.state;
   }
 };
 
@@ -423,7 +425,7 @@ describe('atomic settlement Account transition', () => {
       data: { counterpartyEntityId: leftEntity, workspaceHash: account.state.settlementWorkspace!.workspaceHash },
     } as const;
     const proposal = buildCollectiveEntityProposalTx(rightSigner, [approve]);
-    const execution = await applyEntityFrame(env, rightState, [
+    const execution = await applyEntityFrameWithMaterializedTestInfraContext(env, rightState, [
       signedEntityCommandTx(buildSignedEntityCommand(env, rightState, rightSigner, [proposal])),
     ], 2_000);
     expect(assertEntityStateRootCache(execution.newState)).toBe(
@@ -471,7 +473,7 @@ describe('atomic settlement Account transition', () => {
     expect(seal.data.postProof.hanko).toBeDefined();
     expect(computeCanonicalEntityConsensusStateHash(execution.newState)).toBe(unsignedEntityStateRoot);
 
-    const nextExecution = await applyEntityFrame(env, execution.newState, [], 2_001);
+    const nextExecution = await applyEntityFrameWithMaterializedTestInfraContext(env, execution.newState, [], 2_001);
     expect(assertEntityStateRootCache(nextExecution.newState)).toBe(
       computeCanonicalEntityConsensusStateHash(nextExecution.newState),
     );
@@ -521,7 +523,7 @@ describe('atomic settlement Account transition', () => {
     const drainedAccount = approved.newState.accounts.get(counterparty)!;
     drainedAccount.mempool = [];
     drainedAccount.proofHeader.nextProofNonce = 6;
-    const materialized = await applyEntityFrame(env, approved.newState, [], 2_000);
+    const materialized = await applyEntityFrameWithMaterializedTestInfraContext(env, approved.newState, [], 2_000);
     const seal = materialized.newState.accounts.get(counterparty)?.mempool[0];
     expect(materialized.newState.deferredAccountProposals?.has(counterparty)).toBe(false);
     expect(materialized.collectedHashes?.map(({ type }) => type)).toEqual(['settlement', 'dispute']);
@@ -539,7 +541,7 @@ describe('atomic settlement Account transition', () => {
       success: false,
       error: 'Transactions deferred until signed settlement finalizes: 1',
     });
-    const refreshed = await applyEntityFrame(env, materialized.newState, [], 2_001);
+    const refreshed = await applyEntityFrameWithMaterializedTestInfraContext(env, materialized.newState, [], 2_001);
     const refreshedAccount = refreshed.newState.accounts.get(counterparty)!;
     expect(refreshed.newState.deferredAccountProposals?.has(counterparty)).toBe(false);
     expect(refreshed.collectedHashes?.map(({ type }) => type)).toEqual(['settlement', 'dispute']);
@@ -625,7 +627,7 @@ describe('atomic settlement Account transition', () => {
       },
     });
 
-    const materialized = await applyEntityFrame(env, leftState, [], 3_000);
+    const materialized = await applyEntityFrameWithMaterializedTestInfraContext(env, leftState, [], 3_000);
     const materializedAccount = materialized.newState.accounts.get(rightEntity)!;
 
     expect(materialized.newState.deferredAccountProposals?.has(rightEntity)).toBe(false);
@@ -1261,6 +1263,18 @@ describe('atomic settlement Account transition', () => {
       jurisdiction,
       registeredBoardHash,
     );
+    installRegisteredBoard(
+      env,
+      rightState,
+      jurisdiction,
+      registeredBoardHash,
+      leftEntity,
+    );
+    expect(resolveObserverCertifiedBoardHash(
+      rightState,
+      getCertifiedBoardNodeStore(env),
+      leftEntity,
+    )).toBe(registeredBoardHash);
 
     const upsertTx = transition({
       kind: 'upsert',
@@ -1308,7 +1322,7 @@ describe('atomic settlement Account transition', () => {
       2_000,
       0,
       false,
-      createAccountConsensusContext(env),
+      createAccountConsensusContext(env, getAccountJClaimNodeStore(env), sealingState),
     );
     expect(result).toMatchObject({ success: true });
     expect(sealingState.accounts.get(rightEntity)!.state.settlementWorkspace?.leftHanko).toBeDefined();
@@ -1319,7 +1333,7 @@ describe('atomic settlement Account transition', () => {
       2_000,
       0,
       true,
-      createAccountConsensusContext(env),
+      createAccountConsensusContext(env, getAccountJClaimNodeStore(env), rightState),
       undefined,
       registeredBoardHash,
     );

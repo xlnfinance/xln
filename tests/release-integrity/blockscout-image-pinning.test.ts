@@ -25,7 +25,7 @@ describe('Blockscout deployment image trust', () => {
     for (const image of images) expect(image).toMatch(/@sha256:[0-9a-f]{64}$/);
   });
 
-  test('has no mutable Blockscout tag controls or latest-tag fallback', () => {
+  test('has no mutable Blockscout tag controls or latest-tag substitution', () => {
     const deploymentSources = [
       readFileSync(COMPOSE_PATH, 'utf8'),
       readFileSync(DEPLOY_PATH, 'utf8'),

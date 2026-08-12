@@ -178,12 +178,12 @@ const findStoryVideo = (
     usedShardIndexes.add(best.shardIndex);
     return { shard: best.shard, shardIndex: best.shardIndex, video: best.video };
   }
-  const fallback = run.shards
+  const firstAvailable = run.shards
     .map((shard, shardIndex) => ({ shard, shardIndex, video: shard.artifacts.find(isVideoArtifact) ?? null }))
     .find(candidate => !usedShardIndexes.has(candidate.shardIndex) && candidate.video);
-  if (!fallback?.video) return { shard: null, shardIndex: null, video: null };
-  usedShardIndexes.add(fallback.shardIndex);
-  return { shard: fallback.shard, shardIndex: fallback.shardIndex, video: fallback.video };
+  if (!firstAvailable?.video) return { shard: null, shardIndex: null, video: null };
+  usedShardIndexes.add(firstAvailable.shardIndex);
+  return { shard: firstAvailable.shard, shardIndex: firstAvailable.shardIndex, video: firstAvailable.video };
 };
 
 export const buildAdminStoryCards = (
@@ -205,12 +205,12 @@ export const buildAdminStoryCards = (
   });
 };
 
-const normalizeOwner = (input: Record<string, unknown>, fallbackRole: string): QaAdminHealthOwner => {
+const normalizeOwner = (input: Record<string, unknown>, defaultRole: string): QaAdminHealthOwner => {
   const online = asBoolean(input['online']);
   const exitCode = asNumber(input['exitCode']);
   return {
-    role: asString(input['role']) ?? fallbackRole,
-    name: asString(input['name']) ?? asString(input['role']) ?? fallbackRole,
+    role: asString(input['role']) ?? defaultRole,
+    name: asString(input['name']) ?? asString(input['role']) ?? defaultRole,
     status: online === true || exitCode === null ? 'online' : online === false ? 'offline' : 'unknown',
     runtimeId: asString(input['runtimeId']) ?? asString(input['leaseOwnerId']),
     dbPath: asString(input['dbPath']),

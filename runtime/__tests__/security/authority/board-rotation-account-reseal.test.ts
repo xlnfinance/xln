@@ -90,9 +90,18 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
     logIndex: 2,
     frameHash,
   }));
-  const applied = await applyAccountInput(createAccountConsensusContext(env), account, input);
+  const baseContext = createAccountConsensusContext(env);
+  const observedAuthorities: Array<Parameters<typeof baseContext.verifyHanko>[3]> = [];
+  const applied = await applyAccountInput({
+    ...baseContext,
+    verifyHanko: async (hanko, hash, expectedEntityId, authority) => {
+      observedAuthorities.push(authority);
+      return baseContext.verifyHanko(hanko, hash, expectedEntityId, authority);
+    },
+  }, account, input);
 
   expect(applied.success, applied.error).toBe(true);
+  expect(observedAuthorities[0]).toEqual({ allowPreviousBoard: false });
   expect(account.counterpartyFrameHanko).toBe(frameHanko);
   expect(account.currentFrame).toEqual(beforeFrame);
   expect(account.currentHeight).toBe(7);

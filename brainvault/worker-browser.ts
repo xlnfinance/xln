@@ -4,7 +4,7 @@
  * frontend/copy-static-files.js builds this source for browser use.
  * The generated bundle is intentionally not tracked.
  *
- * Uses hash-wasm (WebAssembly) for browser compatibility.
+ * Uses hash-wasm because browsers execute the portable WebAssembly backend.
  *
  * AUDITOR NOTE: the specId handshake prevents a cached generated worker from
  * silently deriving a different wallet after the UI updates. A loud mismatch

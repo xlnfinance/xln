@@ -20,6 +20,7 @@ const counterpartyId = `0x${'bb'.repeat(32)}`;
 
 const makeEntityState = (): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 0,
   timestamp: 123,
   nonces: new Map(),
@@ -106,7 +107,7 @@ test('r2r admission treats open debt as senior to reserve', async () => {
   );
 });
 
-test('removed legacy settlement commands cannot mutate the jurisdiction batch', async () => {
+test('removed retired settlement commands cannot mutate the jurisdiction batch', async () => {
   const entityTxSource = readFileSync(join(process.cwd(), 'runtime/types/entity-tx.ts'), 'utf8');
   const dispatcherSource = readFileSync(join(process.cwd(), 'runtime/entity/tx/apply.ts'), 'utf8');
   expect(entityTxSource).not.toContain("type: 'createSettlement'");
@@ -118,7 +119,7 @@ test('removed legacy settlement commands cannot mutate the jurisdiction batch', 
     const state = makeEntityState();
     state.jBatchState = initJBatch();
     const before = cloneJBatch(state.jBatchState.batch);
-    const rawLegacyTx = {
+    const retiredTx = {
       type,
       data: {
         counterpartyEntityId: counterpartyId,
@@ -127,7 +128,7 @@ test('removed legacy settlement commands cannot mutate the jurisdiction batch', 
       },
     } as unknown as EntityTx;
 
-    const result = await applyEntityTx(createEmptyEnv(`legacy-${type}`), state, rawLegacyTx);
+    const result = await applyEntityTx(createEmptyEnv(`retired-${type}`), state, retiredTx);
 
     expect(result.skippedError).toBe(`ENTITY_TX_UNHANDLED: type=${type}`);
     expect(result.newState.jBatchState?.batch).toEqual(before);
@@ -187,7 +188,6 @@ test('htlc payment handler traces stay behind structured logging', () => {
   expect(source).toContain("const htlcLog = createStructuredLogger('entity.htlc');");
   expect(source).not.toContain('console.');
   expect(source).toContain('htlcLog.debug');
-  expect(source).toContain('htlcLog.error');
 });
 
 test('dispute handler traces stay behind structured logging', () => {

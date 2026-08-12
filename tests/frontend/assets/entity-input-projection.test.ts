@@ -116,7 +116,7 @@ test('vault user token helpers use active RuntimeStore env and RuntimeInput comm
 	  expect(vaultStore).not.toContain('async enqueueRuntimeInput');
 	});
 
-test('unmounted legacy RuntimeReplica owner panels are removed instead of kept as dead code', () => {
+test('unmounted retired RuntimeReplica owner panels are removed instead of kept as dead code', () => {
   expect(existsSync('frontend/src/lib/components/Admin/AdminPanel.svelte')).toBe(false);
   expect(existsSync('frontend/src/lib/components/Network/ProfileForm.svelte')).toBe(false);
   expect(existsSync('frontend/src/lib/components/Network/ProfileCard.svelte')).toBe(false);

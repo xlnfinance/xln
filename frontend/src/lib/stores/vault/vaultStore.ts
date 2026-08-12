@@ -748,10 +748,10 @@ function scheduleRuntimeRecoveryUpload(runtimeId: string, env: RuntimeReplica, x
   );
 }
 
-const getLiveRuntimeEnvForId = (runtimeId: string, fallback?: RuntimeReplica | null): RuntimeReplica | null => {
+const getLiveRuntimeEnvForId = (runtimeId: string, suppliedEnv?: RuntimeReplica | null): RuntimeReplica | null => {
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
   const latest = normalizedRuntimeId ? get(runtimes).get(normalizedRuntimeId)?.env : null;
-  return unwrapLiveRuntimeEnv(latest) ?? unwrapLiveRuntimeEnv(fallback) ?? fallback ?? null;
+  return unwrapLiveRuntimeEnv(latest) ?? unwrapLiveRuntimeEnv(suppliedEnv) ?? suppliedEnv ?? null;
 };
 
 async function enqueueAndAwait(
@@ -1342,16 +1342,16 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       env,
       {
         runtimeTxs: [
-          {
-            type: 'importReplica',
+          xln.importEntity({
             entityId,
             signerId: signerAddress,
+            entitySeed: runtime.seed,
             data: {
               isProposer: true,
               config: entityConfig,
               profileName: runtime.label,
             },
-          },
+          }),
         ],
         entityInputs: [],
       },
@@ -2144,16 +2144,16 @@ export const vaultOperations = {
           newEnv,
           {
             runtimeTxs: [
-              {
-                type: 'importReplica',
+              xln.importEntity({
                 entityId: entityId,
                 signerId: signerAddress,
+                entitySeed: seed,
                 data: {
                   isProposer: true,
                   config: entityConfig,
                   profileName: name,
                 },
-              },
+              }),
             ],
             entityInputs: [],
           },
@@ -2202,16 +2202,16 @@ export const vaultOperations = {
             newEnv,
             {
               runtimeTxs: [
-                {
-                  type: 'importReplica',
+                xln.importEntity({
                   entityId: secondaryEntityId,
                   signerId: secondaryAddress,
+                  entitySeed: seed,
                   data: {
                     isProposer: true,
                     config: secondaryEntityConfig,
                     profileName: `${name} ${secondary.name}`,
                   },
-                },
+                }),
               ],
               entityInputs: [],
             },
@@ -2522,7 +2522,7 @@ export const vaultOperations = {
 
   // Add signer to active runtime. Awaits key registration and entity
   // creation before returning: the runtime's own processing loop can pick up
-  // a newly imported replica's mempool (e.g. its self-certifyProfile) as soon
+  // a newly imported replica's mempool as soon
   // as importReplica lands, so the signer key must already be registered by
   // then — never fire-and-forget this tail.
   async addSigner(name?: string, jurisdiction?: string): Promise<Signer | null> {

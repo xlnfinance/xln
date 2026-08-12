@@ -36,6 +36,7 @@ import type { DeliverableEntityInput, RuntimeReplica, RoutedEntityInput, Runtime
 import type { JPrefixAttestation } from '../../../types/jurisdiction-events';
 import type { AccountTx } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
+import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import { cloneCrossJurisdictionRoute } from '../../../extensions/cross-j';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -63,6 +64,24 @@ const requireOnlyEnvelopeInput = (envelope: RuntimeEntityInputsEnvelope): Delive
   return envelope.entityInputs[0];
 };
 
+const entityFrameParentHash = (height: number): string =>
+  height === 1 ? 'genesis' : `0x${(height - 1).toString(16).padStart(64, '0')}`;
+
+const emptyEntityContext = (
+  target: string,
+  height: number,
+): EntityInfraContext => ({
+  version: 1,
+  proposerReplicaId: `${target}:${targetSignerId}`,
+  entityId: target,
+  proposerSignerId: targetSignerId,
+  parentFrameHash: entityFrameParentHash(height),
+  height,
+  gossipProfiles: [],
+  peerAssertions: [],
+  htlc: { version: 1, entries: [], originated: [] },
+});
+
 const entityFrameOutput = (
   height: number,
   target = targetEntityId,
@@ -76,11 +95,12 @@ const entityFrameOutput = (
     height,
     timestamp: height,
     hash: `0xentity-frame-${height}`,
-    parentFrameHash: `entity-frame-${height - 1}`,
+    parentFrameHash: entityFrameParentHash(height),
     stateRoot: `0x${'11'.repeat(32)}`,
     authorityRoot: `0x${'22'.repeat(32)}`,
     txs: [],
     events: [],
+    entityContext: emptyEntityContext(target, height),
     leader: { proposerSignerId: targetSignerId, view: 0 },
     hashesToSign: buildEntityHashesToSign(
       target,
@@ -410,7 +430,7 @@ describe('ordered reliable output lanes', () => {
       expect(env.pendingNetworkOutputs).toHaveLength(2);
       expect([...env.infrastructure!.deferredNetworkMeta!.values()].every(meta => meta.nextRetryAt === 2_000)).toBe(true);
 
-      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, env.pendingNetworkOutputs);
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, env.pendingNetworkOutputs, undefined, new Map());
       await closeRuntimeDb(env);
       await closeInfraDb(env);
 
@@ -453,6 +473,109 @@ describe('ordered reliable output lanes', () => {
       await closeInfraDb(env);
       removeStorage();
     }
+  });
+
+  test('restart gives an unmarked cross-j proposal one bounded sibling window, then fails loud', async () => {
+    const seed = `cross-j-orphan-restart ${process.pid} ${Date.now()} alpha beta gamma`;
+    const sourceRuntimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    const removeStorage = (): void => {
+      const namespacePath = join(dbRoot, sourceRuntimeId);
+      for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
+        rmSync(`${namespacePath}${suffix}`, { recursive: true, force: true });
+      }
+    };
+    removeStorage();
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = sourceRuntimeId;
+    env.dbNamespace = sourceRuntimeId;
+    env.scenarioMode = true;
+    env.state.height = 1;
+    env.state.timestamp = 1_000;
+    env.pendingNetworkOutputs = [
+      crossJProposalOutput('source', { height: 1, timestamp: 1_000 }),
+    ];
+
+    try {
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, env.pendingNetworkOutputs, undefined, new Map());
+      await closeRuntimeDb(env);
+      await closeInfraDb(env);
+
+      const restored = await loadEnvFromDB(sourceRuntimeId, seed);
+      if (!restored) throw new Error('TEST_CROSS_J_ORPHAN_RESTART_DID_NOT_RESTORE');
+      restored.scenarioMode = true;
+      let transportAttempts = 0;
+      const deps = routingDeps(() => ({
+        enqueueEntityInputsDelivery: () => {
+          transportAttempts += 1;
+          return deliveryAccepted('TEST_ORPHAN_MUST_NOT_SEND');
+        },
+      }));
+      try {
+        expect(restored.pendingNetworkOutputs).toHaveLength(1);
+        expect(getNextNetworkRetryTimestamp(restored, deps)).toBe(31_000);
+
+        // First loop: the legitimate adjacent-frame window remains open.
+        restored.state.timestamp = 30_999;
+        expect(hasReadyPendingNetworkOutputs(restored, deps, restored.state.timestamp)).toBe(false);
+        expect(splitPendingOutputsByRetryWindow(
+          restored,
+          restored.pendingNetworkOutputs ?? [],
+          deps,
+        )).toMatchObject({ ready: [], waiting: [expect.any(Object)] });
+
+        // Second loop: no sibling arrived. Preserve the orphan bytes and stop
+        // the Runtime through the existing fatal-loop boundary.
+        restored.state.timestamp = 31_000;
+        expect(hasReadyPendingNetworkOutputs(restored, deps, restored.state.timestamp)).toBe(true);
+        expect(() => splitPendingOutputsByRetryWindow(
+          restored,
+          restored.pendingNetworkOutputs ?? [],
+          deps,
+        )).toThrow('CROSS_J_ATOMIC_COHORT_RECOVERY_EXPIRED');
+        expect(restored.pendingNetworkOutputs).toHaveLength(1);
+        expect(transportAttempts).toBe(0);
+      } finally {
+        await closeRuntimeDb(restored);
+        await closeInfraDb(restored);
+      }
+    } finally {
+      await closeRuntimeDb(env);
+      await closeInfraDb(env);
+      removeStorage();
+    }
+  });
+
+  test('restart rejects a marked atomic ACK orphan before any transport attempt', () => {
+    const pair = { phase: 'ack' as const, pairKey: 'atomic-ack-orphan-after-restart' };
+    const orphan = {
+      ...accountAckOutput(3),
+      sourceRuntimeFrame: { height: 1, timestamp: 1_000 },
+      atomicCrossJurisdictionPair: pair,
+    };
+    const env = signingEnv('output-routing-marked-ack-orphan-restart', {
+      scenarioMode: true,
+      state: { height: 2, timestamp: 2_000 },
+      pendingNetworkOutputs: [orphan],
+    });
+    let transportAttempts = 0;
+    const deps = routingDeps(() => ({
+      enqueueEntityInputsDelivery: () => {
+        transportAttempts += 1;
+        return deliveryAccepted('TEST_ORPHAN_MUST_NOT_SEND');
+      },
+    }));
+
+    markRestoredReliableOutputsDue(env);
+    expect(getNextNetworkRetryTimestamp(env, deps)).toBe(0);
+    expect(() => splitPendingOutputsByRetryWindow(
+      env,
+      env.pendingNetworkOutputs ?? [],
+      deps,
+    )).toThrow('CROSS_J_ATOMIC_COHORT_ORPHANED:ack');
+    expect(env.pendingNetworkOutputs).toEqual([orphan]);
+    expect(transportAttempts).toBe(0);
   });
 
   test('atomic cross-j envelope retries automatically as one bounded cohort', () => {
@@ -539,6 +662,35 @@ describe('ordered reliable output lanes', () => {
     ]);
   });
 
+  test('rejects a complete cross-j cohort before dispatch when sibling routes split across Runtimes', () => {
+    const env = signingEnv('output-routing-cross-j-runtime-split', {
+      scenarioMode: true,
+      state: { height: 3, timestamp: 3_000 },
+    });
+    const sourceRuntimeId = runtimeId('91');
+    const targetSiblingRuntimeId = runtimeId('92');
+    const source = {
+      ...crossJProposalOutput('source', { height: 2, timestamp: 2_000 }),
+      runtimeId: sourceRuntimeId,
+    };
+    const target = {
+      ...crossJProposalOutput('target', { height: 2, timestamp: 2_000 }),
+      runtimeId: targetSiblingRuntimeId,
+    };
+    const delivered: RuntimeEntityInputsEnvelope[] = [];
+
+    expect(() => dispatchEntityOutputs(env, [
+      { output: source, targetRuntimeId: sourceRuntimeId },
+      { output: target, targetRuntimeId: targetSiblingRuntimeId },
+    ], routingDeps(() => ({
+      enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
+        delivered.push(envelope);
+        return deliveryAccepted('TEST_CROSS_J_RUNTIME_SPLIT_SHOULD_NOT_SEND');
+      },
+    })))).toThrow(/CROSS_J_RUNTIME_TOPOLOGY_INVALID:.*:SIBLING_RUNTIME_SPLIT/);
+    expect(delivered).toEqual([]);
+  });
+
   test('pairs sibling cross-j proposals certified in adjacent Runtime frames into one envelope', () => {
     const sourceProposal = crossJProposalOutput('source', { height: 48, timestamp: 1_000 });
     const targetProposal = crossJProposalOutput('target', { height: 49, timestamp: 1_001 });
@@ -566,6 +718,50 @@ describe('ordered reliable output lanes', () => {
     expect(envelopes[0]?.sourceRuntimeHeight).toBe(50);
     expect(envelopes[0]?.sourceRuntimeTimestamp).toBe(1_002);
     expect(envelopes[0]?.atomicCrossJurisdictionPair?.phase).toBe('proposal');
+  });
+
+  test('a parked cross-j proposal joins its later sibling and dispatches only the complete pair', () => {
+    const sourceProposal = crossJProposalOutput('source', { height: 48, timestamp: 1_000 });
+    const targetProposal = crossJProposalOutput('target', { height: 49, timestamp: 1_001 });
+    const envelopes: RuntimeEntityInputsEnvelope[] = [];
+    const env = signingEnv('output-routing-later-cross-j-sibling', {
+      scenarioMode: true,
+      state: { height: 50, timestamp: 2_000 },
+      pendingNetworkOutputs: [sourceProposal],
+    });
+    const deps = routingDeps(() => ({
+      enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
+        envelopes.push(envelope);
+        return deliveryAccepted('TEST_LATER_CROSS_J_SIBLING_DELIVERED');
+      },
+    }));
+
+    const firstPass = splitPendingOutputsByRetryWindow(
+      env,
+      env.pendingNetworkOutputs ?? [],
+      deps,
+    );
+    expect(firstPass).toMatchObject({ ready: [], waiting: [expect.any(Object)] });
+    expect(envelopes).toHaveLength(0);
+
+    env.pendingNetworkOutputs = buildPendingNetworkOutputs([
+      sourceProposal,
+      targetProposal,
+    ]);
+    const pairedPass = splitPendingOutputsByRetryWindow(
+      env,
+      env.pendingNetworkOutputs,
+      deps,
+    );
+    expect(pairedPass.ready).toHaveLength(2);
+    expect(pairedPass.waiting).toHaveLength(0);
+    dispatchEntityOutputs(
+      env,
+      pairedPass.ready.map(output => ({ output, targetRuntimeId })),
+      deps,
+    );
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]?.entityInputs).toHaveLength(2);
   });
 
   test('ordinary cross-j proposal legs also retry automatically as one cohort', () => {

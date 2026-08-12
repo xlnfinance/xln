@@ -37,6 +37,7 @@ import type { StoragePersistenceBoundary } from '../../../storage';
 import type { AccountReplica } from '../../../types/account';
 import type { CertifiedEntityFrameLink, JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { createDefaultDelta } from '../../../account/state/delta';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
@@ -79,8 +80,7 @@ env.state.jReplicas.set(jurisdiction.name, {
   },
 } as JReplica);
 enqueueRuntimeInput(env, {
-  runtimeTxs: [{
-    type: 'importReplica',
+  runtimeTxs: [createTestEntityImportRuntimeTx(env, {
     entityId,
     signerId,
     data: {
@@ -93,7 +93,7 @@ enqueueRuntimeInput(env, {
         jurisdiction,
       },
     },
-  }],
+  })],
   entityInputs: [],
 });
 await processRuntime(env, []);
@@ -122,7 +122,6 @@ const oversizedAccount: AccountReplica = {
     locks: new Map(),
     swapOffers: new Map(),
     pulls: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     disputeConfig: { leftResponseSeconds: 576, rightResponseSeconds: 576 },
     jNonce: 0,
     requestedRebalance: new Map(),

@@ -7,6 +7,7 @@ import { Wallet, hexlify } from 'ethers';
 
 import { deriveSignerKeySync } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import {
   closeInfraDb,
   closeRuntimeDb,
@@ -63,8 +64,7 @@ const createBackupAppointment = async () => {
   const jurisdiction = installJurisdiction(env);
   const entityId = generateLazyEntityId([runtimeId], 1n, env).toLowerCase();
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId: runtimeId,
       data: {
@@ -78,7 +78,7 @@ const createBackupAppointment = async () => {
         isProposer: true,
         profileName: 'Watchtower Smoke',
       },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env);

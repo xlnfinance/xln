@@ -173,7 +173,7 @@
       for (const [key] of entries) {
         const entityId = key.split(':')[0];
         if (entityId && !names.has(entityId)) {
-          // Fallback: use full ID
+          // The full ID is the canonical label when no profile name exists.
           names.set(entityId, entityId);
         }
       }

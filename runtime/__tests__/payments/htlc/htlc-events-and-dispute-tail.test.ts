@@ -27,7 +27,6 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
       deltas: new Map(),
       locks: new Map(),
       swapOffers: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
@@ -56,6 +55,8 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: new Map(),
+    swapOrderHistory: new Map(),
+    swapClosedOrders: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };
 
@@ -67,6 +68,7 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
     isProposer: true,
     state: {
       entityId,
+      entityEncryptionPublicKey: `0x${'55'.repeat(32)}`,
       height: 0,
       timestamp: 50_000,
       nonces: new Map(),
@@ -140,12 +142,16 @@ describe('htlc event contract and dispute tail', () => {
     });
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
 
-    const invalid = handleResolveHtlcLockEntityTx(replica.state, {
+    expect(() => handleResolveHtlcLockEntityTx(replica.state, {
       type: 'resolveHtlcLock',
       data: { counterpartyEntityId: counterpartyId, lockId, secret: `0x${'55'.repeat(32)}` },
-    });
-    expect(invalid.accountTxs).toEqual([]);
-    expect(invalid.newState.htlcRoutes.has(hashlock)).toBe(false);
+    })).toThrow(`HTLC_RESOLVE_HASHLOCK_MISMATCH:${lockId}`);
+    expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
+
+    expect(() => handleResolveHtlcLockEntityTx(replica.state, {
+      type: 'resolveHtlcLock',
+      data: { counterpartyEntityId: counterpartyId, lockId: `0x${'77'.repeat(32)}`, secret },
+    })).toThrow('HTLC_RESOLVE_LOCK_MISSING');
 
     const conflicted = structuredClone(replica.state);
     conflicted.htlcRoutes.set(hashlock, {
@@ -251,7 +257,6 @@ describe('htlc event contract and dispute tail', () => {
           lockId,
           outcome: 'secret',
           secret,
-          offerHash: `0x${'55'.repeat(32)}`,
         },
       }],
       prevFrameHash: '',
@@ -301,72 +306,6 @@ describe('htlc event contract and dispute tail', () => {
       entityId: recipientEntityId,
       hashlock,
       description: 'uid:recipient-7',
-    });
-  });
-
-  test('indexes every certified Entity frame before publishing Runtime events', () => {
-    const entityId = `0x${'11'.repeat(32)}`;
-    const counterpartyId = `0x${'22'.repeat(32)}`;
-    const hashlock = `0x${'33'.repeat(32)}`;
-    const lockId = `0x${'44'.repeat(32)}`;
-    const replica = makeReplica(entityId, counterpartyId);
-    const env = createEmptyEnv('certified-note-before-runtime-event');
-    env.state.eReplicas.set(`${entityId}:${replica.signerId}`, replica);
-
-    const effects: EntityCandidateEffect[] = [{
-      kind: 'runtimeEvent',
-      eventName: 'HtlcReceived',
-      data: { entityId, hashlock, lockId },
-    }, {
-      kind: 'entityFrameHistory',
-      entityId,
-      signerId: replica.signerId,
-      link: {
-        frame: {
-          height: 1,
-          parentFrameHash: '',
-          stateRoot: `0x${'01'.repeat(32)}`,
-          authorityRoot: `0x${'02'.repeat(32)}`,
-          timestamp: 1,
-          txs: [{
-            type: 'htlcOnionAdvance',
-            data: {
-              version: 1,
-              proposerSignerId: replica.signerId,
-              inboundEntityId: counterpartyId,
-              inboundLockId: lockId,
-              encryptedLayerHash: `0x${'03'.repeat(32)}`,
-              hashlock,
-              tokenId: 1,
-              amount: 3n,
-              timelock: 2n,
-              revealBeforeHeight: 3,
-              advance: { kind: 'final', description: 'uid:customer-9' },
-            },
-          }],
-          events: [],
-          hash: `0x${'04'.repeat(32)}`,
-          leader: { proposerSignerId: replica.signerId, view: 0 },
-          hashesToSign: [],
-        },
-        postAuthority: {
-          config: replica.state.config,
-          leaderState: {
-            activeValidatorId: replica.signerId,
-            view: 0,
-            changedAtHeight: 0,
-          },
-        },
-      },
-    }];
-
-    publishEntityCandidateEffects(env, replica, effects);
-
-    expect(env.frameLogs.find((entry) => entry.message === 'HtlcReceived')?.data).toMatchObject({
-      entityId,
-      hashlock,
-      lockId,
-      description: 'uid:customer-9',
     });
   });
 
@@ -691,14 +630,14 @@ describe('htlc event contract and dispute tail', () => {
         createdTimestamp: replica.state.timestamp - 1_000,
       });
       const candidateEffects: EntityCandidateEffect[] = [];
-      const commit = (counterpartyId: string, lockId: string, data: { secret: string } | { offerHash: string }) =>
+      const commit = (counterpartyId: string, lockId: string, secret: string) =>
         applyCommittedAccountFrameFollowups(replica.state, counterpartyId, {
           height: 1,
           timestamp: replica.state.timestamp,
           jHeight: 0,
           accountTxs: [{
             type: 'htlc_resolve',
-            data: { lockId, outcome: 'secret', ...data },
+              data: { lockId, outcome: 'secret', secret },
           }],
           prevFrameHash: '',
           deltas: [],
@@ -707,12 +646,12 @@ describe('htlc event contract and dispute tail', () => {
         }, [], env, candidateEffects);
       const commits = order === 'inbound-first'
         ? [
-            () => commit(inboundEntity, inboundLockId, { offerHash: `0x${'66'.repeat(32)}` }),
-            () => commit(outboundEntity, outboundLockId, { secret }),
+            () => commit(inboundEntity, inboundLockId, secret),
+            () => commit(outboundEntity, outboundLockId, secret),
           ]
         : [
-            () => commit(outboundEntity, outboundLockId, { secret }),
-            () => commit(inboundEntity, inboundLockId, { offerHash: `0x${'66'.repeat(32)}` }),
+            () => commit(outboundEntity, outboundLockId, secret),
+            () => commit(inboundEntity, inboundLockId, secret),
           ];
 
       commits[0]!();
@@ -722,75 +661,6 @@ describe('htlc event contract and dispute tail', () => {
       expect(candidateEffects.filter(effect => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcReceived')).toHaveLength(1);
       expect(candidateEffects.filter(effect => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcFinalized')).toHaveLength(1);
     }
-  });
-
-  test('keeps an accepted originated route until its ACK-bound reveal finalizes it', () => {
-    const entityId = `0x${'11'.repeat(32)}`;
-    const counterpartyId = `0x${'22'.repeat(32)}`;
-    const outboundLockId = 'lock-accepted-offer';
-    const hashlock = `0x${'78'.repeat(32)}`;
-    const offerHash = `0x${'79'.repeat(32)}`;
-    const accountFrameHash = `0x${'7a'.repeat(32)}`;
-    const secret = `0x${'55'.repeat(32)}`;
-    const env = createEmptyEnv('htlc-accepted-offer-seed');
-    env.quietRuntimeLogs = true;
-    const replica = makeReplica(entityId, counterpartyId);
-    const account = replica.state.accounts.get(counterpartyId)!;
-    account.mempool.push({
-      type: 'htlc_lock',
-      data: {
-        lockId: outboundLockId,
-        hashlock,
-        tokenId: 1,
-        amount: 10n,
-        timelock: 100000n,
-        revealBeforeHeight: 10,
-      },
-    });
-    replica.state.htlcRoutes.set(hashlock, {
-      hashlock,
-      tokenId: 1,
-      amount: 10n,
-      outboundEntity: counterpartyId,
-      outboundLockId,
-      createdTimestamp: replica.state.timestamp - 1000,
-    });
-
-    applyCommittedAccountFrameFollowups(replica.state, counterpartyId, {
-      height: 7,
-      timestamp: replica.state.timestamp,
-      jHeight: 0,
-      accountTxs: [{
-        type: 'htlc_resolve',
-        data: { lockId: outboundLockId, outcome: 'secret', offerHash },
-      }],
-      prevFrameHash: '',
-      deltas: [],
-      stateHash: accountFrameHash,
-      byLeft: true,
-    }, [], env, []);
-
-    expect(replica.state.htlcRoutes.get(hashlock)).toMatchObject({
-      acceptedOfferHash: offerHash,
-      acceptedAccountFrameHash: accountFrameHash,
-      acceptedAccountFrameHeight: 7,
-    });
-    expect(env.frameLogs.some((entry) => entry.message === 'HtlcFinalized')).toBe(false);
-
-    const candidateEffects: EntityCandidateEffect[] = [];
-    applyHtlcSecretFollowups({
-      env,
-      state: replica.state,
-      newState: replica.state,
-      outputs: [],
-      accountTxs: [],
-      candidateEffects,
-    }, [{ hashlock, secret }]);
-
-    expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
-    expect(env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized')).toHaveLength(0);
-    publishEntityCandidateEffects(env, replica, candidateEffects);
-    expect(env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized')).toHaveLength(1);
   });
 
   test('keeps originated outbound route while lock is still queued for account consensus', () => {

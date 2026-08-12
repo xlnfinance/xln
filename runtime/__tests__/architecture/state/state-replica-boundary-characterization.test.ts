@@ -24,6 +24,7 @@ import { applyRuntimeInput, createEmptyEnv } from '../../../runtime';
 import type { BrowserVMState, RuntimeReplica } from '../../../runtime/types';
 import type { ConsensusConfig, EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const hex = (byte: string, bytes: number): string => `0x${byte.repeat(bytes)}`;
 const counterpartyId = hex('f1', 32);
@@ -79,12 +80,11 @@ const createCommittedAccountFixture = async (): Promise<{
   };
   const entityId = generateLazyEntityId([signerId], 1n, env).toLowerCase();
   await applyRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId,
       data: { config, isProposer: true, profileName: 'State boundary' },
-    }],
+    })],
     entityInputs: [],
   });
 

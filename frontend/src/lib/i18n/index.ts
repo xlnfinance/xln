@@ -96,7 +96,7 @@ export function t(key: string, params?: Record<string, string | number>): string
   const currentLocale = get(locale);
   let text = getNestedValue(translations[currentLocale], key);
 
-  // Fallback to English
+  // English is the canonical default locale.
   if (!text && currentLocale !== 'en') {
     text = getNestedValue(translations.en, key);
   }

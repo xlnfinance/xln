@@ -134,7 +134,6 @@ const makeAccount = (selfId: string, counterpartyId: string, watchSeed: string):
       deltas: new Map([[1, delta]]),
       locks: new Map(),
       swapOffers: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -303,10 +302,10 @@ describe('watchtower recovery full flow', () => {
     env.browserVMState = browserVMState;
 
     xln.enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [xln.importEntity({
         entityId,
         signerId: runtimeId,
+        entitySeed: runtimeSeed,
         data: {
           config: {
             mode: 'proposer-based',
@@ -318,7 +317,7 @@ describe('watchtower recovery full flow', () => {
           isProposer: true,
           profileName: 'Restore Flow',
         },
-      }],
+      })],
       entityInputs: [],
     });
     await xln.processRuntime(env);
@@ -421,10 +420,10 @@ describe('watchtower recovery full flow', () => {
     const jurisdiction = installJurisdiction(env, 'ActiveBuilder');
 
     xln.enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [xln.importEntity({
         entityId,
         signerId: signerAddress,
+        entitySeed: runtimeSeed,
         data: {
           config: {
             mode: 'proposer-based',
@@ -436,7 +435,7 @@ describe('watchtower recovery full flow', () => {
           isProposer: true,
           profileName: 'Active Builder',
         },
-      }],
+      })],
       entityInputs: [],
     });
     await xln.processRuntime(env);
@@ -533,10 +532,10 @@ describe('watchtower recovery full flow', () => {
     const jurisdiction = installJurisdiction(env, 'LastResortFlow');
 
     xln.enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [xln.importEntity({
         entityId,
         signerId: signerAddress,
+        entitySeed: runtimeSeed,
         data: {
           config: {
             mode: 'proposer-based',
@@ -548,7 +547,7 @@ describe('watchtower recovery full flow', () => {
           isProposer: true,
           profileName: 'Last Resort Flow',
         },
-      }],
+      })],
       entityInputs: [],
     });
     await xln.processRuntime(env);

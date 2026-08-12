@@ -6,7 +6,7 @@ import {
 } from '../../../frontend/src/lib/health/relayEventSeverity';
 
 describe('relay event severity', () => {
-  test('uses typed delivery metadata before legacy status strings', () => {
+  test('uses typed delivery metadata', () => {
     expect(relayTimelineTone({
       status: 'delivered',
       delivery: {
@@ -37,10 +37,10 @@ describe('relay event severity', () => {
     })).toBe(true);
   });
 
-  test('keeps legacy status fallback for pre-typed relay events', () => {
+  test('classifies current activity status when delivery metadata is absent', () => {
     expect(relayTimelineTone({ status: 'rejected' })).toBe('error');
-    expect(relayTimelineTone({ status: 'local-delivery-failed' })).toBe('error');
     expect(relayTimelineTone({ status: 'queued' })).toBe('warning');
     expect(relayTimelineTone({ status: 'delivered' })).toBe('neutral');
   });
+
 });

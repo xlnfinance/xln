@@ -21,6 +21,7 @@ import {
 import { deriveEthereumAddress, deriveEthereumPrivateKeyAtPath } from '../../../../brainvault/core.ts';
 import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID } from '../../../../brainvault/primitives/spec.ts';
 import { registerSignerKey } from '../../../account/crypto';
+import { deriveMnemonicCustodySeed } from '../../../runtime/registration/entity-creation/mnemonic-seed';
 import type { RuntimeInput, RuntimeReplica } from '../../../runtime/types';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime';
 import type {
@@ -185,10 +186,12 @@ export const createBrainVaultOwnerController = (
       jurisdictionName,
       jurisdiction,
     });
+    const custodySeed = deriveMnemonicCustodySeed(stored.mnemonic24);
     return ensureLocalRuntimeOwner(env, owner, {
       enqueue: deps.enqueue,
       onFrameCommit: deps.onFrameCommit,
       timeoutMs: deps.timeoutMs,
+      entitySeed: custodySeed,
     });
   };
 

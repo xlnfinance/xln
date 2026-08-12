@@ -568,9 +568,9 @@ function selectPreferredMoveAssetSymbol(): string {
     },
   });
 }
-function toErrorMessage(error: unknown, fallback: string): string {
+function toErrorMessage(error: unknown, defaultMessage: string): string {
   if (error instanceof Error && error.message) return error.message;
-  return fallback;
+  return defaultMessage;
 }
 function logEntityPanelDiagnostic(message: string, details?: unknown): void {
   errorLog.log(message, "Entity Panel", details);
@@ -618,8 +618,8 @@ $: activeEnv = env;
 $: activeLiveEnv = liveEnv;
 $: activeIsLive = isLive;
 $: activeCommandsReady = activeIsLive && $runtimeControllerHandle.commandReady;
-$: fallbackRuntimeEnv = getRuntimeEnv(activeEnv);
-$: actionRuntimeEnv = activeLiveEnv ?? (typeof liveEnvResolver === "function" ? liveEnvResolver() : null) ?? fallbackRuntimeEnv;
+$: suppliedRuntimeEnv = getRuntimeEnv(activeEnv);
+$: actionRuntimeEnv = activeLiveEnv ?? (typeof liveEnvResolver === "function" ? liveEnvResolver() : null) ?? suppliedRuntimeEnv;
 $: displayEnv = activeIsLive ? (actionRuntimeEnv ?? activeEnv) : activeEnv;
 // Display only the owned post-WAL projection; the live Runtime is an action handle.
 $: displayProjectionFrame = runtimeProjectionFrame;
@@ -688,9 +688,9 @@ $: gossipName = (() => {
   return profile?.name || "";
 })();
 $: heroDisplayName = (() => {
-  const fallbackId = replica?.state?.entityId || tab.entityId || "";
+  const canonicalId = replica?.state?.entityId || tab.entityId || "";
   const gossip = (gossipName ?? "").trim();
-  return gossip && !isPlaceholderEntityName(gossip) ? gossip : fallbackId;
+  return gossip && !isPlaceholderEntityName(gossip) ? gossip : canonicalId;
 })();
 $: entityJurisdictionBadge = getJurisdictionBadgeInfo(replica?.state?.config?.jurisdiction?.name || selectedJurisdictionName || tab.jurisdiction || null, replica?.state?.config?.jurisdiction?.chainId ?? null);
 $: activeXlnFunctions = $xlnFunctions;

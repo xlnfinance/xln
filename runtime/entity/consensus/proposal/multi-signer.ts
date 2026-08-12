@@ -35,6 +35,11 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
+import { materializeEntityInfraContext } from './infra-context';
+import { validateProposedEntityFrame } from '../frame/validation';
+import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
+import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
+import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
 
 const replayPreparedFrameForRelay = async (
   env: EntityRuntimeContext,
@@ -45,7 +50,14 @@ const replayPreparedFrameForRelay = async (
   const jRangeError = getReplicaJRangeValidationError(env, replica, frame.txs);
   if (jRangeError) throw new Error(`ENTITY_PREPARED_J_RANGE_MISMATCH:${jRangeError}`);
   assertFrameJPrefix(env, replica, frame);
-  const applied = await applyEntityFrame(env, replica.state, frame.txs, frame.timestamp);
+  await assertEntityInfraContextAuthority(env, frame.entityContext, replica.state);
+  await assertHtlcPreparedInfraContext({
+    state: replica.state,
+    proposalTxs: frame.txs,
+    context: frame.entityContext,
+    entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, replica.entityId),
+  });
+  const applied = await applyEntityFrame(env, replica.state, frame.entityContext, frame.txs, frame.timestamp);
   if (!entityFrameEventsEqual(applied.events, frame.events)) {
     throw new Error('ENTITY_PREPARED_EVENTS_MISMATCH');
   }
@@ -77,6 +89,7 @@ const replayPreparedFrameForRelay = async (
     state.entityId,
     stateRoot,
     authorityRoot,
+    frame.entityContext,
     frame.jPrefixCertificate,
   );
   if (replayedHash !== frame.hash) {
@@ -221,6 +234,77 @@ const signProposalManifest = async (
   );
 };
 
+const assertMultiSignerProposalPrefix = (
+  env: EntityRuntimeContext,
+  replica: EntityReplica,
+  selection: EntityProposalSelection,
+  view: number,
+): void => {
+  const { proposalJPrefixCertificate, proposalTxs } = selection;
+  assertProposerJRangesMatchLocalHistory(env, replica, proposalTxs);
+  assertFrameJPrefix(env, replica, {
+    height: replica.state.height + 1,
+    parentFrameHash: getPrevFrameHash(replica.state),
+    leader: { proposerSignerId: replica.signerId.toLowerCase(), view },
+    txs: proposalTxs,
+    ...(proposalJPrefixCertificate ? { jPrefixCertificate: proposalJPrefixCertificate } : {}),
+  });
+};
+
+const storeMultiSignerCandidate = (
+  replica: EntityReplica,
+  applied: Awaited<ReturnType<typeof applyEntityFrame>>,
+  state: EntityState,
+  frameHash: string,
+  hashesToSign: ReturnType<typeof buildEntityHashesToSign>,
+): void => {
+  replica.candidate = {
+    frameHash,
+    height: state.height,
+    state,
+    outputs: applied.outputs,
+    jOutputs: applied.jOutputs,
+    hashesToSign,
+    candidateEffects: applied.candidateEffects,
+    storageChanges: applied.storageChanges,
+    ...(applied.consumptionNodeChanges ? { consumptionNodeChanges: applied.consumptionNodeChanges } : {}),
+    ...(applied.accountJClaimNodeChanges ? { accountJClaimNodeChanges: applied.accountJClaimNodeChanges } : {}),
+  };
+};
+
+const assembleMultiSignerFrame = (
+  replica: EntityReplica,
+  selection: EntityProposalSelection,
+  applied: Awaited<ReturnType<typeof applyEntityFrame>>,
+  state: EntityState,
+  entityContext: EntityFrame['entityContext'],
+  frameHash: string,
+  stateRoot: string,
+  authorityRoot: string,
+  hashesToSign: ReturnType<typeof buildEntityHashesToSign>,
+  selfSigs: string[],
+  timestamp: number,
+  view: number,
+): EntityFrame => ({
+  height: state.height,
+  parentFrameHash: getPrevFrameHash(replica.state),
+  stateRoot,
+  authorityRoot,
+  entityContext,
+  txs: [...selection.proposalTxs],
+  events: structuredClone(applied.events),
+  hash: frameHash,
+  timestamp,
+  leader: {
+    proposerSignerId: replica.signerId.toLowerCase(),
+    view,
+    ...(replica.pendingLeaderCertificate ? { certificate: replica.pendingLeaderCertificate } : {}),
+  },
+  ...(selection.proposalJPrefixCertificate ? { jPrefixCertificate: structuredClone(selection.proposalJPrefixCertificate) } : {}),
+  hashesToSign,
+  collectedSigs: new Map([[replica.signerId, selfSigs]]),
+});
+
 const buildMultiSignerProposal = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
@@ -228,20 +312,9 @@ const buildMultiSignerProposal = async (
   const { env, workingReplica } = context;
   const { proposalJPrefixCertificate, proposalTxs } = selection;
   const leader = getReplicaProposalLeader(workingReplica);
-  assertProposerJRangesMatchLocalHistory(env, workingReplica, proposalTxs);
-  assertFrameJPrefix(env, workingReplica, {
-    height: workingReplica.state.height + 1,
-    parentFrameHash: getPrevFrameHash(workingReplica.state),
-    leader: {
-      proposerSignerId: workingReplica.signerId.toLowerCase(),
-      view: leader.view,
-    },
-    txs: proposalTxs,
-    ...(proposalJPrefixCertificate
-      ? { jPrefixCertificate: proposalJPrefixCertificate }
-      : {}),
-  });
-  const applied = await applyEntityFrame(env, workingReplica.state, proposalTxs, env.state.timestamp);
+  assertMultiSignerProposalPrefix(env, workingReplica, selection, leader.view);
+  const entityContext = await materializeEntityInfraContext(env, workingReplica, proposalTxs);
+  const applied = await applyEntityFrame(env, workingReplica.state, entityContext, proposalTxs, env.state.timestamp);
   const height = workingReplica.state.height + 1;
   const state = buildProposalState(
     workingReplica,
@@ -262,6 +335,7 @@ const buildMultiSignerProposal = async (
     state.entityId,
     stateRoot,
     authorityRoot,
+    entityContext,
     proposalJPrefixCertificate ?? undefined,
   );
   const outputHashes = buildCertifiedEntityOutputHashes(
@@ -278,44 +352,13 @@ const buildMultiSignerProposal = async (
     [...(applied.collectedHashes ?? []), ...outputHashes],
   );
   const selfSigs = await signProposalManifest(env, workingReplica, state, hashesToSign);
-  workingReplica.candidate = {
-    frameHash,
-    height,
-    state,
-    outputs: applied.outputs,
-    jOutputs: applied.jOutputs,
-    hashesToSign,
-    candidateEffects: applied.candidateEffects,
-    storageChanges: applied.storageChanges,
-    ...(applied.consumptionNodeChanges
-      ? { consumptionNodeChanges: applied.consumptionNodeChanges }
-      : {}),
-    ...(applied.accountJClaimNodeChanges
-      ? { accountJClaimNodeChanges: applied.accountJClaimNodeChanges }
-      : {}),
-  };
-  return {
-    height,
-    parentFrameHash,
-    stateRoot,
-    authorityRoot,
-    txs: [...proposalTxs],
-    events: structuredClone(applied.events),
-    hash: frameHash,
-    timestamp: env.state.timestamp,
-    leader: {
-      proposerSignerId: workingReplica.signerId.toLowerCase(),
-      view: leader.view,
-      ...(workingReplica.pendingLeaderCertificate
-        ? { certificate: workingReplica.pendingLeaderCertificate }
-        : {}),
-    },
-    ...(proposalJPrefixCertificate
-      ? { jPrefixCertificate: structuredClone(proposalJPrefixCertificate) }
-      : {}),
-    hashesToSign,
-    collectedSigs: new Map([[workingReplica.signerId, selfSigs]]),
-  };
+  storeMultiSignerCandidate(workingReplica, applied, state, frameHash, hashesToSign);
+  const frame = assembleMultiSignerFrame(
+    workingReplica, selection, applied, state, entityContext, frameHash,
+    stateRoot, authorityRoot, hashesToSign, selfSigs, env.state.timestamp, leader.view,
+  );
+  validateProposedEntityFrame(frame, 'MultiSignerEntityFrame');
+  return frame;
 };
 
 export const startMultiSignerProposalIfReady = async (

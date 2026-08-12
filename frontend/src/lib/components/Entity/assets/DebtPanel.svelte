@@ -127,7 +127,7 @@
     return getEntityDisplayName(entityId, {
       selfEntityId: entityState?.entityId || '',
       selfLabel: 'You',
-      fallback: 'Unknown',
+      defaultLabel: 'Unknown',
       source: [],
     });
   }

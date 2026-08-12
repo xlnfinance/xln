@@ -24,12 +24,32 @@ import {
   resolvePersistedRestoreSource,
   type PersistedRestoreSource,
 } from './source';
+import { getBytes } from 'ethers';
+import { deriveEntityEncryptionPrivateKey } from '../../runtime/registration/entity-creation/crypto';
+import {
+  assertLocalEntityCryptoKeys,
+  provisionEntityEncryptionKey,
+} from '../../entity/auth/crypto';
 
 export type LoadedRuntimeStorage = {
   env: RuntimeReplica;
   latestHeight: number;
   checkpointHeight: number;
   selectedSnapshotHeight: number;
+};
+
+export const restoreEntityKeysFromAuthoritativeSnapshot = (
+  env: RuntimeReplica,
+): void => {
+  const retainedSeeds = env.infrastructure?.entityEncryptionSeeds;
+  if (!retainedSeeds) return;
+  for (const [entityId, seed] of retainedSeeds) {
+    provisionEntityEncryptionKey(
+      env,
+      entityId,
+      deriveEntityEncryptionPrivateKey(getBytes(seed), entityId),
+    );
+  }
 };
 
 const assertRestoredCanonicalState = (
@@ -132,7 +152,7 @@ export const loadPersistedRuntime = async (
   runtimeId?: string | null,
   runtimeSeed?: string | null,
   targetHeightOverride?: number,
-  options: { prunedTargetReturnsNull?: boolean } = {},
+  options: import('./journal/replay').ReplayOptions = {},
 ): Promise<LoadedRuntimeStorage | null> => {
   const env = reads.createPersistedStorageEnv(runtimeId, runtimeSeed);
   assertStorageSafetyOverridesAllowed();
@@ -153,6 +173,7 @@ export const loadPersistedRuntime = async (
       // by graph restoration if the two phases ever gain overlapping fields.
       restoreDurableRuntimeSnapshot(env, source.frame.runtimeMachine);
     }
+    restoreEntityKeysFromAuthoritativeSnapshot(env);
     await restorePersistedEntityGraph(
       deps,
       reads,
@@ -162,6 +183,7 @@ export const loadPersistedRuntime = async (
       source.latestHeight,
       source.selectedSnapshotHeight,
     );
+    assertLocalEntityCryptoKeys(env);
     await installRestoredRuntimeFrame(
       reads,
       env,

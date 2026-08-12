@@ -137,7 +137,7 @@ describe('vault runtime creation lock', () => {
     expect(mountSource).toContain("window.removeEventListener('pagehide', handlePageHide);");
   });
 
-  test('runtime restore does not rewrite legacy signer jurisdiction labels', () => {
+  test('runtime restore does not rewrite existing signer jurisdiction labels', () => {
     const source = read('frontend/src/lib/stores/vault/vaultStore.ts');
     const restoreStart = source.indexOf('async function buildOrRestoreRuntimeEnv(runtime: Runtime');
     const restoreEnd = source.indexOf('\nfunction registerRuntimeResumeListener', restoreStart);

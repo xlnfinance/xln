@@ -44,7 +44,6 @@ const makeAccount = (): AccountReplica => ({
     locks: new Map(),
     swapOffers: new Map(),
     pulls: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
@@ -349,52 +348,6 @@ test('certified proposal and executed vote frames index nested HTLC descriptions
   }] });
   expect(votedReplica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('nested invoice');
   expect(votedReplica.htlcNotes?.get(`lock:${lockId}`)).toBe('nested invoice');
-});
-
-test('only a final certified onion advance indexes its private presentation note', () => {
-  const hashlock = `0x${'9a'.repeat(32)}`;
-  const inboundLockId = `0x${'ab'.repeat(32)}`;
-  const baseData = {
-    version: 1 as const,
-    proposerSignerId: proposer,
-    inboundEntityId: rightEntity,
-    inboundLockId,
-    encryptedLayerHash: `0x${'bc'.repeat(32)}`,
-    hashlock,
-    tokenId: 1,
-    amount: 1n,
-    timelock: 2n,
-    revealBeforeHeight: 3,
-  };
-
-  const forwardedReplica = makeReplica();
-  indexCertifiedEntityFrameNotes(forwardedReplica, { txs: [{
-    type: 'htlcOnionAdvance',
-    data: {
-      ...baseData,
-      advance: {
-        kind: 'forward',
-        nextEntityId: rightEntity,
-        nextAmount: 1n,
-        nextTimelock: 1n,
-        nextRevealBeforeHeight: 2,
-        nextEncryptedLayerHash: `0x${'cd'.repeat(32)}`,
-        nextLayer: 'opaque',
-      },
-    },
-  }] });
-  expect(forwardedReplica.htlcNotes).toBeUndefined();
-
-  const finalReplica = makeReplica();
-  indexCertifiedEntityFrameNotes(finalReplica, { txs: [{
-    type: 'htlcOnionAdvance',
-    data: {
-      ...baseData,
-      advance: { kind: 'final', description: 'final recipient' },
-    },
-  }] });
-  expect(finalReplica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('final recipient');
-  expect(finalReplica.htlcNotes?.get(`lock:${inboundLockId}`)).toBe('final recipient');
 });
 
 test('decode validation rejects oversized swap history, resolve history, and HTLC notes', () => {

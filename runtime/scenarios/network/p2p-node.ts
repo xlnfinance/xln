@@ -24,14 +24,15 @@ import type { JAdapter, JTokenInfo } from '../../jurisdiction/adapter/types';
 import type { Profile } from '../../entity/profile';
 import { withDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
 import { hasCliFlag, readCliOption } from '../../config/cli';
-import { quoteHtlcPaymentRoute } from '../../entity/htlc/payment-admission';
+import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
+import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 
 const args = globalThis.process.argv.slice(2);
 
 const getArg = (name: string): string | undefined =>
   readCliOption(args, name);
-const getArgOr = (name: string, fallback: string): string =>
-  readCliOption(args, name, fallback);
+const getArgOr = (name: string, defaultValue: string): string =>
+  readCliOption(args, name, defaultValue);
 
 const hasFlag = (name: string): boolean => hasCliFlag(args, name);
 
@@ -345,17 +346,12 @@ const logProfile = (label: string, profile: Profile | null | undefined) => {
     console.log(`[P2P_DEBUG] ${label}`, { profile: 'missing' });
     return;
   }
-  const board = profile.metadata?.board;
-  const boardSize = Array.isArray(board)
-    ? board.length
-    : (board?.validators ? board.validators.length : 0);
   console.log(`[P2P_DEBUG] ${label}`, {
     entityId: profile.entityId,
     runtimeId: profile.runtimeId,
     wsUrl: profile.wsUrl || null,
     accounts: (profile.accounts || []).map((acct) => acct.counterpartyId?.slice(-4)).filter(Boolean),
-    boardSize,
-    hasPublicKey: typeof profile.metadata?.board?.validators?.[0]?.publicKey === 'string',
+    hasEntityEncryptionPublicKey: typeof profile.entityEncryptionPublicKey === 'string',
   });
 };
 
@@ -374,12 +370,8 @@ const waitForProfile = async (
     if (profile) {
       lastProfile = profile;
       const hasRuntime = !requireRuntimeId || !!profile.runtimeId;
-      const board = profile.metadata?.board;
-      const boardSize = Array.isArray(board)
-        ? board.length
-        : (board?.validators ? board.validators.length : 0);
-      const hasBoard = !requireBoard || boardSize > 0;
-      const hasPublicKey = !requirePublicKey || typeof profile.metadata?.board?.validators?.[0]?.publicKey === 'string';
+      const hasBoard = !requireBoard || typeof profile.metadata.profileHanko === 'string';
+      const hasPublicKey = !requirePublicKey || typeof profile.entityEncryptionPublicKey === 'string';
       if (hasRuntime && hasBoard && hasPublicKey) return profile;
     }
     refresh?.();
@@ -389,15 +381,11 @@ const waitForProfile = async (
     throw new Error(`PROFILE_MISSING_RUNTIME_ID: ${name}`);
   }
   if (lastProfile && requireBoard) {
-    const board = lastProfile.metadata?.board;
-    const boardSize = Array.isArray(board)
-      ? board.length
-      : (board?.validators ? board.validators.length : 0);
-    if (boardSize === 0) {
+    if (!lastProfile.metadata.profileHanko) {
       throw new Error(`PROFILE_MISSING_BOARD: ${name}`);
     }
   }
-  if (lastProfile && requirePublicKey && typeof lastProfile.metadata?.board?.validators?.[0]?.publicKey !== 'string') {
+  if (lastProfile && requirePublicKey && typeof lastProfile.entityEncryptionPublicKey !== 'string') {
     throw new Error(`PROFILE_MISSING_PUBLIC_KEY: ${name}`);
   }
   throw new Error(`PROFILE_TIMEOUT: ${name}`);
@@ -756,8 +744,7 @@ const run = async () => {
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [
-      {
-        type: 'importReplica',
+      createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId,
         data: {
@@ -766,7 +753,7 @@ const run = async () => {
           profileName: role,
           position: { x: 0, y: 0, z: 0 },
         },
-      },
+      }),
     ],
     entityInputs: [],
   });

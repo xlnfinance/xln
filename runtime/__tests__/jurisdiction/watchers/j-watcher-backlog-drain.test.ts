@@ -27,6 +27,7 @@ import {
   restoreDurableRuntimeSnapshot,
 } from '../../../storage/wal/snapshot';
 import { attachLiveJAdapter } from '../../../runtime/jurisdiction/live-jadapters';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const CHAIN_ID = 31_337;
 const RUNTIME_SEED = 'j-watcher-backlog-drain';
@@ -255,8 +256,7 @@ describe('RPC J-watcher backlog drain', () => {
     const signerAddress = new ethers.Wallet(ethers.hexlify(signerPrivateKey)).address;
     const entityId = generateLazyEntityId([signerAddress], 1n).toLowerCase();
     await commitRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: SIGNER_ID,
         data: {
@@ -269,7 +269,7 @@ describe('RPC J-watcher backlog drain', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
 
@@ -335,8 +335,7 @@ describe('RPC J-watcher backlog drain', () => {
     const lateSignerAddress = new ethers.Wallet(ethers.hexlify(lateSignerPrivateKey)).address;
     const lateEntityId = generateLazyEntityId([lateSignerAddress], 1n).toLowerCase();
     await commitRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId: lateEntityId,
         signerId: LATE_SIGNER_ID,
         data: {
@@ -349,7 +348,7 @@ describe('RPC J-watcher backlog drain', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
 

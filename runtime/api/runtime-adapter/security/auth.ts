@@ -155,7 +155,7 @@ const constantTimeEquals = (left: string, right: string): boolean => {
   return timingSafeEqual(leftBuffer, rightBuffer);
 };
 
-export const resolveRuntimeAdapterAuthSeed = (env: RuntimeReplica | null): string | null => {
+export const resolveRuntimeAdapterAuthSeed = (): string | null => {
   const fromEnv = typeof process !== 'undefined' ? String(process.env['XLN_RADAPTER_AUTH_SEED'] || '').trim() : '';
   if (registeredRuntimeAdapterAuthSeed) {
     if (fromEnv && normalizedSeed(fromEnv) !== registeredRuntimeAdapterAuthSeed) {
@@ -164,10 +164,7 @@ export const resolveRuntimeAdapterAuthSeed = (env: RuntimeReplica | null): strin
     return registeredRuntimeAdapterAuthSeed;
   }
   if (fromEnv) return normalizedSeed(fromEnv);
-  if (truthyEnv('XLN_RADAPTER_REQUIRE_AUTH_SEED')) return null;
-  if (!truthyEnv('XLN_RADAPTER_ALLOW_RUNTIME_SEED_AUTH')) return null;
-  const runtimeSeed = String(env?.runtimeSeed || '').trim();
-  return runtimeSeed ? normalizedSeed(runtimeSeed) : null;
+  return null;
 };
 
 export const registerRuntimeAdapterAuthSeed = (seed: string): void => {

@@ -1,11 +1,11 @@
 /**
  * Canonical Wasm Argon2 shard implementation.
  *
- * Browser and compatibility workers import this function instead of copying
+ * Browser and native workers import this function instead of copying
  * options. Password bytes are exact input after NFKD: trimming, case folding,
  * replacement characters, library defaults, or an Argon version upgrade would
- * all create a different wallet. resolveKdfParams exists for the legacy CLI's
- * explicitly domain-separated custom mode; V1 callers use the frozen defaults.
+ * all create a different wallet. resolveKdfParams owns the CLI's explicitly
+ * domain-separated custom mode; canonical callers use the frozen defaults.
  *
  * AUDITOR NOTE: t=1 and p=1 describe one shard, not the whole recovery. The
  * outer protocol repeats that 256 MiB unit for every shard. Keeping each shard

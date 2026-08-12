@@ -1804,7 +1804,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
   // XLN is full in-memory snapshots - NO LOADING STATE NEEDED
 
   // Strict mode: if runtime is not ready, expose only fail-fast guards.
-  // No mock math, no fake token/entity formatting, no fallback data.
+  // No mock math, no fake token/entity formatting, no substitute data.
   if (!$xlnInstance) {
     const fail = (fnName: string): never => {
       throw new Error(`XLN_NOT_READY:${fnName}`);

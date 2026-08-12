@@ -51,13 +51,13 @@ const VALID_BAR_LAYOUT: readonly BarLayoutMode[] = ['center', 'sides'] as const;
 const VALID_ACCOUNT_DELTA_VIEW: readonly AccountDeltaViewMode[] = ['per-token', 'aggregated'] as const;
 const VALID_THEME: readonly ThemeName[] = ['dark', 'editor', 'light', 'merchant', 'gold-luxe', 'matrix', 'arctic'] as const;
 
-function pickOption<T extends string>(value: unknown, valid: readonly T[], fallback: T): T {
-  return typeof value === 'string' && valid.includes(value as T) ? (value as T) : fallback;
+function pickOption<T extends string>(value: unknown, valid: readonly T[], defaultValue: T): T {
+  return typeof value === 'string' && valid.includes(value as T) ? (value as T) : defaultValue;
 }
 
-function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+function clampNumber(value: unknown, defaultValue: number, min: number, max: number): number {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return fallback;
+  if (!Number.isFinite(numeric)) return defaultValue;
   return Math.max(min, Math.min(max, numeric));
 }
 

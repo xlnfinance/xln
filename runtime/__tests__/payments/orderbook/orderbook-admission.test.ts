@@ -116,7 +116,7 @@ describe('orderbook admission', () => {
     (field, override) => {
       const offer = committedOffer(override as Partial<SwapOffer>);
       // The candidate still carries a well-formed price, which is exactly the
-      // value a fallback reader would have silently accepted as "committed".
+      // value a permissive reader would have silently accepted as "committed".
       expect(() => admitOrderbookOfferForMatching(
         env,
         makeAdmissionState(offer),

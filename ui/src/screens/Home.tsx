@@ -10,7 +10,7 @@ import { formatAmount, getTokenMeta, parseAmount, timeAgo } from '../runtime/for
 import { displayEntityName, useAccounts, useEntityCore, usePortfolio } from '../runtime/views';
 import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
 
-import { formatEventAmount, USER_ACTIVITY_TYPES, type ActivityEventView } from './Activity';
+import { formatEventAmount, isDisplayableActivityEvent, USER_ACTIVITY_TYPES, type ActivityEventView } from './Activity';
 
 type HeadView = { latestHeight?: number; frameHash?: string; stateHash?: string } & Record<string, unknown>;
 type ActivityView = { events?: ActivityEventView[] };
@@ -51,6 +51,10 @@ export function Home() {
 		types: USER_ACTIVITY_TYPES,
 		...(entityId ? { entityId } : {}),
 	});
+	const recentActivity = useMemo(
+		() => (activity.data?.events ?? []).filter(isDisplayableActivityEvent),
+		[activity.data],
+	);
 
 	const names = useMemo(() => {
 		const map = new Map<string, string>();
@@ -169,7 +173,7 @@ export function Home() {
 									<span style={{ flex: '1 1 100%', marginTop: 12 }}>
 										{token ? (
 											<>
-												<DeltaBar derived={token.derived} signed={token.signed} height={6} />
+												<DeltaBar derived={token.derived} height={6} />
 												<span className="faint" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 7 }}>
 													<span>← send {formatAmount(token.derived.outCapacity, tokenMeta.decimals, 2)}</span>
 													<span>receive {formatAmount(token.derived.inCapacity, tokenMeta.decimals, 2)} →</span>
@@ -228,7 +232,7 @@ export function Home() {
 						<span className="caps" style={{ marginBottom: 8 }}>
 							Activity
 						</span>
-						{(activity.data?.events ?? []).slice(0, 4).map((event, index) => (
+						{recentActivity.slice(0, 4).map((event, index) => (
 							<div key={event.id ?? index} className="proof-row">
 								<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
 									{String(event.title || event.type || 'Frame')}
@@ -238,7 +242,7 @@ export function Home() {
 								</span>
 							</div>
 						))}
-						{(activity.data?.events?.length ?? 0) === 0 && (
+						{recentActivity.length === 0 && (
 							<p className="faint" style={{ fontSize: 12, padding: '10px 0' }}>
 								Quiet so far.
 							</p>

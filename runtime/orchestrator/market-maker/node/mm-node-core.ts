@@ -4,6 +4,8 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { importEntity } from '../../../runtime/registration/entity-creation';
+import { deriveMnemonicCustodySeed } from '../../../runtime/registration/entity-creation/mnemonic-seed';
 import {
   buildDefaultEntitySwapPairs,
   getSwapPairOrientation,
@@ -479,21 +481,21 @@ const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
 ] as const;
 const argsRaw = process.argv.slice(2);
 
-const getArg = (name: string, fallback = ''): string =>
-  readCliOption(argsRaw, name, fallback);
+const getArg = (name: string, defaultValue = ''): string =>
+  readCliOption(argsRaw, name, defaultValue);
 
 const readRpcUrls = (): Record<number, string> => {
   const urls: Record<number, string> = {};
   for (let index = 1; index <= 8; index += 1) {
     const flag = index === 1 ? '--rpc-url' : `--rpc${index}-url`;
     const envName = index === 1 ? 'ANVIL_RPC' : `ANVIL_RPC${index}`;
-    const fallback =
+    const defaultRpcUrl =
       index === 1
         ? process.env['ANVIL_RPC'] || ''
         : process.env[envName] || process.env[`RPC${index}`] || process.env[`XLN_RPC${index}_URL`] || '';
     urls[index] = getArg(
       flag,
-      index === 2 ? process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || fallback : fallback,
+      index === 2 ? process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || defaultRpcUrl : defaultRpcUrl,
     );
   }
   return urls;
@@ -678,8 +680,7 @@ export const createMarketMakerEntityContext = async (
   if (!getEntityReplicaById(env, entityId)) {
     enqueueRuntimeInput(env, {
       runtimeTxs: [
-        {
-          type: 'importReplica',
+        importEntity({
           entityId,
           signerId,
           data: {
@@ -688,7 +689,8 @@ export const createMarketMakerEntityContext = async (
             profileName,
             position,
           },
-        },
+          entitySeed: deriveMnemonicCustodySeed(resolvedArgs.seed),
+        }),
       ],
       entityInputs: [],
     });
@@ -821,17 +823,6 @@ const readHubRoleName = (profile: { name?: string; metadata?: { hubName?: unknow
   return hubBaseName(metadataName || String(profile.name || ''));
 };
 
-const readHubSignerId = (profile: {
-  metadata?: { board?: { validators?: Array<{ signerId?: string; signer?: string }> } };
-}): string => {
-  const validators = profile.metadata?.board?.validators;
-  if (!Array.isArray(validators) || validators.length === 0) return '';
-  const first = validators[0] || {};
-  return String(first.signerId || first.signer || '')
-    .trim()
-    .toLowerCase();
-};
-
 export const readVisibleHubProfiles = (env: RuntimeReplica, includeSiblings = false): HubProfile[] => {
   const required = new Set(resolvedArgs.meshHubNames.map(name => name.toLowerCase()));
   return (env.gossip?.getProfiles?.() || [])
@@ -856,7 +847,7 @@ export const readVisibleHubProfiles = (env: RuntimeReplica, includeSiblings = fa
       name: String(profile.name || '').trim(),
       hubName: readHubRoleName(profile),
       entityId,
-      signerId: readHubSignerId(profile),
+      signerId: String(env.infrastructure?.verifiedProfileRoutes?.get(entityId)?.runtimeSignerId || '').toLowerCase(),
       runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
       jurisdictionName: String(profile.metadata?.jurisdiction?.name || '').trim(),
       chainId: Number(profile.metadata?.jurisdiction?.chainId || 0),
@@ -1081,7 +1072,7 @@ export const buildMarketMakerTokenIdsByContext = (
   contexts: MarketMakerEntityContext[],
 ): Map<string, number[]> => {
   const catalogTokenIds = normalizeTokenIdsForMm(tokenCatalog);
-  const fallback =
+  const defaultTokenIds =
     catalogTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT ? catalogTokenIds : [...DEFAULT_ACCOUNT_TOKEN_IDS];
   const byContext = new Map<string, number[]>();
   for (const context of contexts) {
@@ -1095,7 +1086,7 @@ export const buildMarketMakerTokenIdsByContext = (
       marketMakerContextKey(context),
       jurisdictionTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT
         ? selectMarketMakerBootstrapTokenIds(jurisdictionTokenIds)
-        : fallback,
+        : defaultTokenIds,
     );
   }
   return byContext;
@@ -1104,10 +1095,10 @@ export const buildMarketMakerTokenIdsByContext = (
 export const getMarketMakerTokenIds = (
   tokenIdsByContext: MarketMakerTokenIdsByContext,
   context: MarketMakerEntityContext,
-  fallback: number[] = [...DEFAULT_ACCOUNT_TOKEN_IDS],
+  defaultTokenIds: number[] = [...DEFAULT_ACCOUNT_TOKEN_IDS],
 ): number[] => {
   const ids = tokenIdsByContext.get(marketMakerContextKey(context));
-  return ids && ids.length >= HUB_REQUIRED_TOKEN_COUNT ? ids : fallback;
+  return ids && ids.length >= HUB_REQUIRED_TOKEN_COUNT ? ids : defaultTokenIds;
 };
 
 export const collectOfferIdsForAccount = (

@@ -37,8 +37,6 @@ export interface HtlcLock {
    */
   envelopeHash?: string;
 
-  /** Opaque beneficiary offer, decryptable only by the payer's default proposer. */
-  secretOffer?: import('../protocol/htlc/multi-recipient').MultiRecipientCiphertext;
 }
 
 export interface PullCommitment {
@@ -136,10 +134,6 @@ export interface HtlcRoute {
 
   // Resolution
   secret?: string;
-  /** Exact opaque offer accepted by a durable outbound Account frame. */
-  acceptedOfferHash?: string;
-  acceptedAccountFrameHash?: string;
-  acceptedAccountFrameHeight?: number;
   // Waiting for inbound counterparty to ACK secret-return (htlc_resolve(secret)).
   secretAckPending?: boolean;
   secretAckStartedAt?: number;
@@ -221,10 +215,6 @@ export interface AccountState {
   pulls?: Map<string, PullCommitment>;
   subcontracts?: Map<string, AccountSubcontract>;
   lendingIntents?: Map<string, AccountLendingIntentKind>;
-  globalCreditLimits: {
-    ownLimit: bigint;
-    peerLimit: bigint;
-  };
   leftPendingJClaims: AccountJClaimAccumulatorState;
   rightPendingJClaims: AccountJClaimAccumulatorState;
   lastFinalizedJHeight: number;
@@ -267,11 +257,11 @@ export interface AccountReplica {
   // Durable local lifecycle log for swap UI/history.
   // Keep this in account state so closed/partial orders do not disappear
   // when the short bilateral frameHistory ring buffer prunes old frames.
-  swapOrderHistory?: Map<string, SwapOrderHistoryEntry>;
+  swapOrderHistory: Map<string, SwapOrderHistoryEntry>;
   // Terminal swap orders (filled/canceled/closed) used by the UI closed-orders view.
   // Keep open working state and terminal history separate so the UI does not infer
   // closed rows by subtracting live offers from a broad lifecycle store.
-  swapClosedOrders?: Map<string, SwapOrderHistoryEntry>;
+  swapClosedOrders: Map<string, SwapOrderHistoryEntry>;
 
   // Frame-based consensus (like old_src Channel, consistent with entity frames)
   currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
@@ -878,10 +868,7 @@ export type AccountTx =
         amount: bigint;
         tokenId: number;
         deliveryMode?: Extract<PaymentDeliveryMode, 'instant' | 'async'>;
-        envelope?: import('../protocol/htlc/codec/envelope').HtlcEnvelope
-          | import('../protocol/htlc/multi-recipient').MultiRecipientCiphertext
-          | string
-          | undefined;
+        envelope?: import('../protocol/htlc/multi-recipient').OpaqueHtlcCiphertext;
       };
     }
   | {
@@ -889,18 +876,8 @@ export type AccountTx =
       data:
         | {
             lockId: string;
-            outcome: 'offer';
-            offer: import('../protocol/htlc/multi-recipient').MultiRecipientCiphertext;
-          }
-        | {
-            lockId: string;
             outcome: 'secret';
             secret: string;
-          }
-        | {
-            lockId: string;
-            outcome: 'secret';
-            offerHash: string;
           }
         | {
             lockId: string;

@@ -69,8 +69,8 @@ const normalizeChainId = (value: unknown): number => {
   return chainId;
 };
 
-const normalizePlatform = (value: unknown, fallback: PushPlatformV1): PushPlatformV1 => {
-  const platform = String(value || fallback).trim().toLowerCase() as PushPlatformV1;
+const normalizePlatform = (value: unknown, defaultPlatform: PushPlatformV1): PushPlatformV1 => {
+  const platform = String(value || defaultPlatform).trim().toLowerCase() as PushPlatformV1;
   if (!VALID_PLATFORMS.has(platform)) throw new Error('PUSH_PLATFORM_INVALID');
   return platform;
 };
@@ -137,11 +137,11 @@ const findJReplica = (env: unknown, chainId: number, depositoryAddress: string):
   throw new Error('PUSH_JURISDICTION_REPLICA_NOT_FOUND');
 };
 
-const firstHttpRpc = (replica: unknown, fallbackAddress: unknown): string => {
+const firstHttpRpc = (replica: unknown, preferredAddress: unknown): string => {
   const rawRpcs = getPath(replica, ['rpcs']);
   const adapterRpcs = getPath(replica, ['jadapter', 'rpcs']);
   const candidates = [
-    fallbackAddress,
+    preferredAddress,
     getPath(replica, ['rpc']),
     getPath(replica, ['jadapter', 'rpc']),
     ...(Array.isArray(adapterRpcs) ? adapterRpcs : []),
@@ -163,8 +163,8 @@ const resolvePushWakeRpcOverride = (chainId: number, depositoryAddress: string):
   if (isRecord(source)) {
     const exact = source[targetKey];
     const byChain = source[String(chainId)];
-    const fallback = source['default'];
-    const value = exact || byChain || fallback;
+    const defaultEntry = source['default'];
+    const value = exact || byChain || defaultEntry;
     if (typeof value === 'string') return normalizeHttpUrl(value, 'PUSH_RPC_URL');
   }
   if (Array.isArray(source)) {

@@ -1,9 +1,5 @@
 import { buildDefaultEntitySwapPairs, getTokenIdsForJurisdiction } from '../../account/utils';
 import { applyRuntimeStorageChanges } from '../observability/env-events';
-import {
-  canonicalizeLocalEntityCryptoKeys,
-  resolveReplicaEntityCryptoKeys,
-} from '../../entity/auth/crypto';
 import { normalizeEntitySwapTradingPairs } from '../finance/swap-pairs';
 import { initCrontab } from '../../entity/scheduler';
 import {
@@ -58,6 +54,12 @@ import {
   applyNumberedRegistrationResolution,
 } from '../registration/numbered-registration-intent';
 import { assertRuntimeTxCapabilitiesAuthorized } from './internal-tx-auth';
+import { getBytes } from 'ethers';
+import {
+  deriveEntityEncryptionPublicKey,
+  provisionEntityEncryptionKey,
+} from '../../entity/auth/crypto';
+import { deriveEntityEncryptionPrivateKey } from '../registration/entity-creation/crypto';
 
 const runtimeTxLog = createStructuredLogger('runtime.tx');
 
@@ -296,8 +298,17 @@ const entityHasCertifiedCheckpoint = (
     Boolean(replica.certifiedFrameAnchor) ||
     Boolean(replica.certifiedFrameLineage?.length));
 
+const deriveImportedEntityEncryptionKeys = (
+  runtimeTx: ImportReplicaRuntimeTx,
+  entityId: string,
+): Readonly<{ privateKey: string; publicKey: string }> => {
+  const seed = runtimeTx.data.entitySeed;
+  if (!/^0x[0-9a-f]{128}$/.test(seed)) throw new Error('IMPORT_REPLICA_ENTITY_SEED_INVALID');
+  const privateKey = deriveEntityEncryptionPrivateKey(getBytes(seed), entityId);
+  return { privateKey, publicKey: deriveEntityEncryptionPublicKey(privateKey, entityId) };
+};
+
 const applyReplicaLocalMetadata = (
-  env: RuntimeReplica,
   replica: EntityReplica,
   identity: ReplicaImportIdentity,
   isProposer: boolean,
@@ -305,12 +316,6 @@ const applyReplicaLocalMetadata = (
   replica.isProposer = isProposer;
   replica.entityId = identity.entityId;
   replica.signerId = identity.signerId;
-  canonicalizeLocalEntityCryptoKeys(
-    env,
-    identity.entityId,
-    identity.signerId,
-    replica,
-  );
 };
 
 const reuseExistingReplica = (
@@ -322,14 +327,18 @@ const reuseExistingReplica = (
   config: EntityState['config'],
   hasCertifiedCheckpoint: boolean,
 ): string => {
+  const entityEncryptionPublicKey = deriveImportedEntityEncryptionKeys(runtimeTx, identity.entityId).publicKey;
+  if (replica.state.entityEncryptionPublicKey !== entityEncryptionPublicKey) {
+    throw new Error(`IMPORT_REPLICA_ENTITY_ENCRYPTION_PUBLIC_KEY_MISMATCH:${identity.entityId}`);
+  }
   if (hasCertifiedCheckpoint) {
     resolveImportCheckpointState(env, identity.entityId, identity.signerId, config);
     // Re-import changes validator-local routing metadata only. Mutating the
     // certified Entity state here would change its root without a quorum frame.
-    applyReplicaLocalMetadata(env, replica, identity, runtimeTx.data.isProposer);
+    applyReplicaLocalMetadata(replica, identity, runtimeTx.data.isProposer);
   } else {
     backfillEntityJurisdictionBinding(env, identity.entityId, config.jurisdiction!);
-    applyReplicaLocalMetadata(env, replica, identity, runtimeTx.data.isProposer);
+    applyReplicaLocalMetadata(replica, identity, runtimeTx.data.isProposer);
     replica.state.entityId = identity.entityId;
     replica.state.config = config;
     if (
@@ -358,16 +367,17 @@ const buildCheckpointReplica = (
   runtimeTx: ImportReplicaRuntimeTx,
   identity: ReplicaImportIdentity,
   config: EntityState['config'],
-  replicaKeys: ReturnType<typeof resolveReplicaEntityCryptoKeys>,
 ): EntityReplica => {
   const state = cloneEntityState(
     resolveImportCheckpointState(env, identity.entityId, identity.signerId, config),
     true,
   );
+  if (state.entityEncryptionPublicKey !== deriveImportedEntityEncryptionKeys(runtimeTx, identity.entityId).publicKey) {
+    throw new Error(`IMPORT_REPLICA_ENTITY_ENCRYPTION_PUBLIC_KEY_MISMATCH:${identity.entityId}`);
+  }
   return {
     entityId: identity.entityId,
     signerId: identity.signerId,
-    entityEncPubKey: replicaKeys.publicKey,
     mempool: [],
     isProposer: runtimeTx.data.isProposer,
     state,
@@ -389,12 +399,10 @@ const buildGenesisReplica = (
   runtimeTx: ImportReplicaRuntimeTx,
   identity: ReplicaImportIdentity,
   config: EntityState['config'],
-  replicaKeys: ReturnType<typeof resolveReplicaEntityCryptoKeys>,
 ): EntityReplica => {
   const replica: EntityReplica = {
     entityId: identity.entityId,
     signerId: identity.signerId,
-    entityEncPubKey: replicaKeys.publicKey,
     mempool: [],
     isProposer: runtimeTx.data.isProposer,
     state: {
@@ -404,6 +412,7 @@ const buildGenesisReplica = (
       nonces: new Map(),
       proposals: new Map(),
       config,
+      entityEncryptionPublicKey: deriveImportedEntityEncryptionKeys(runtimeTx, identity.entityId).publicKey,
       reserves: new Map(),
       accounts: new Map(),
       deferredAccountProposals: new Map(),
@@ -464,7 +473,20 @@ const assertNumberedReplicaImportAuthority = (
   config: EntityState['config'],
   isProposer: boolean,
 ): void => {
-  if (!isNumberedEntity(toEntityId(entityId))) return;
+  const boardIndex = config.validators.findIndex(
+    validator => validator.toLowerCase() === signerId,
+  );
+  if (boardIndex < 0) throw new Error(`IMPORT_REPLICA_SIGNER_NOT_ON_BOARD:${signerId}`);
+  if (isProposer !== (boardIndex === 0)) {
+    throw new Error(`IMPORT_REPLICA_PROPOSER_FLAG_INVALID:${entityId}:${signerId}`);
+  }
+  if (!isNumberedEntity(toEntityId(entityId))) {
+    const boardEntityId = hashBoard(encodeBoard(config, env)).toLowerCase();
+    if (entityId !== boardEntityId) {
+      throw new Error(`IMPORT_REPLICA_LAZY_BOARD_ID_MISMATCH:${entityId}:${boardEntityId}`);
+    }
+    return;
+  }
   const jurisdiction = config.jurisdiction;
   if (!jurisdiction) throw new Error(`NUMBERED_REPLICA_JURISDICTION_MISSING:${entityId}`);
   const evidence = env.infrastructure?.certifiedRegistrationEvidence?.get(
@@ -474,13 +496,6 @@ const assertNumberedReplicaImportAuthority = (
   const boardHash = hashBoard(encodeBoard(config, env)).toLowerCase();
   if (evidence.boardHash.toLowerCase() !== boardHash) {
     throw new Error(`NUMBERED_REPLICA_REGISTRATION_BOARD_MISMATCH:${entityId}`);
-  }
-  const boardIndex = config.validators.findIndex(
-    validator => validator.toLowerCase() === signerId,
-  );
-  if (boardIndex < 0) throw new Error(`NUMBERED_REPLICA_SIGNER_NOT_ON_BOARD:${signerId}`);
-  if (isProposer !== (boardIndex === 0)) {
-    throw new Error(`NUMBERED_REPLICA_PROPOSER_FLAG_INVALID:${entityId}:${signerId}`);
   }
 };
 
@@ -508,9 +523,31 @@ const importReplicaRuntimeTx = (env: RuntimeReplica, runtimeTx: ImportReplicaRun
   );
   const siblings = Array.from(env.state.eReplicas.values()).filter(replica =>
     String(replica.entityId || replica.state.entityId).toLowerCase() === identity.entityId);
+  const encryptionKeys = deriveImportedEntityEncryptionKeys(runtimeTx, identity.entityId);
+  const importedSeed = runtimeTx.data.entitySeed;
+  for (const sibling of siblings) {
+    if (sibling.state.entityEncryptionPublicKey !== encryptionKeys.publicKey) {
+      throw new Error(`IMPORT_REPLICA_ENTITY_ENCRYPTION_PUBLIC_KEY_MISMATCH:${identity.entityId}`);
+    }
+  }
   const hasCheckpoint = entityHasCertifiedCheckpoint(siblings);
+  const cachedPrivateKey = env.infrastructure?.entityEncryptionPrivateKeys?.get(identity.entityId);
+  if (cachedPrivateKey && cachedPrivateKey !== encryptionKeys.privateKey) {
+    throw new Error(`ENTITY_ENCRYPTION_KEY_CONFLICT:entity=${identity.entityId}`);
+  }
+  const retainedSeed = env.infrastructure?.entityEncryptionSeeds?.get(identity.entityId);
+  if (retainedSeed && retainedSeed !== importedSeed) {
+    throw new Error(`ENTITY_ENCRYPTION_SEED_CONFLICT:entity=${identity.entityId}`);
+  }
+  const finishImport = (entityId: string): string => {
+    provisionEntityEncryptionKey(env, identity.entityId, encryptionKeys.privateKey);
+    env.infrastructure ??= {};
+    env.infrastructure.entityEncryptionSeeds ??= new Map();
+    env.infrastructure.entityEncryptionSeeds.set(identity.entityId, importedSeed);
+    return entityId;
+  };
   if (existing) {
-    return reuseExistingReplica(
+    return finishImport(reuseExistingReplica(
       env,
       runtimeTx,
       identity,
@@ -518,16 +555,11 @@ const importReplicaRuntimeTx = (env: RuntimeReplica, runtimeTx: ImportReplicaRun
       existing.replica,
       config,
       hasCheckpoint,
-    );
+    ));
   }
 
-  const replicaKeys = resolveReplicaEntityCryptoKeys(
-    env,
-    identity.entityId,
-    identity.signerId,
-  );
   if (siblings.length > 0) {
-    const replica = buildCheckpointReplica(env, runtimeTx, identity, config, replicaKeys);
+    const replica = buildCheckpointReplica(env, runtimeTx, identity, config);
     env.state.eReplicas.set(identity.replicaKey, replica);
     runtimeTxLog.info('replica.imported_from_certified_checkpoint', {
       entity: identity.entityId,
@@ -535,16 +567,16 @@ const importReplicaRuntimeTx = (env: RuntimeReplica, runtimeTx: ImportReplicaRun
       height: replica.state.height,
       head: replica.state.prevFrameHash ?? 'genesis',
     });
-    return identity.entityId;
+    return finishImport(identity.entityId);
   }
 
   backfillEntityJurisdictionBinding(env, identity.entityId, config.jurisdiction!);
   env.state.eReplicas.set(
     identity.replicaKey,
-    buildGenesisReplica(env, runtimeTx, identity, config, replicaKeys),
+    buildGenesisReplica(env, runtimeTx, identity, config),
   );
   assertCreatedReplicaJHeight(env, identity.replicaKey);
-  return identity.entityId;
+  return finishImport(identity.entityId);
 };
 
 const findExistingReplicaCaseInsensitive = (

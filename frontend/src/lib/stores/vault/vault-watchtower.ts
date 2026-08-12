@@ -117,7 +117,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
       const totalResponseSeconds = leftResponseSeconds + rightResponseSeconds;
       if (!Number.isSafeInteger(totalResponseSeconds) || totalResponseSeconds <= 0) {
         // A zero-window account has no delayed phase for a tower to enter. Do
-        // not invent a global fallback: the bilateral ProofBody is the complete
+        // not invent a global substitute: the bilateral ProofBody is the complete
         // timing authority and the owner may intentionally choose zero.
         continue;
       }

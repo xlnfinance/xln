@@ -21,6 +21,7 @@ import {
   processRuntime,
 } from '../../../runtime';
 import { getLiveJAdapter } from '../../../runtime/jurisdiction/live-jadapters';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const TEST_RUN_ID = `${globalThis.process.pid}-${Date.now()}`;
 const cleanupNamespaces: string[] = [];
@@ -281,8 +282,7 @@ describe('runtime import external-side-effect atomicity', () => {
       );
 
       enqueueRuntimeInput(env, {
-        runtimeTxs: [{
-          type: 'importReplica',
+        runtimeTxs: [createTestEntityImportRuntimeTx(env, {
           entityId: importedEntityId,
           signerId: importedSignerId,
           data: {
@@ -296,7 +296,7 @@ describe('runtime import external-side-effect atomicity', () => {
             isProposer: false,
             profileName: 'Uncommitted Wallet Import',
           },
-        }],
+        })],
         entityInputs: [{
           entityId: unknownEntityId,
           signerId: unknownSignerId,
@@ -331,8 +331,7 @@ describe('runtime import external-side-effect atomicity', () => {
       const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
       expect(() => browserVM.getEntityWallet(entityId)).toThrow('BrowserVM missing wallet for entity');
       enqueueRuntimeInput(env, {
-        runtimeTxs: [{
-          type: 'importReplica',
+        runtimeTxs: [createTestEntityImportRuntimeTx(env, {
           entityId,
           signerId,
           data: {
@@ -345,7 +344,7 @@ describe('runtime import external-side-effect atomicity', () => {
             },
             isProposer: true,
           },
-        }],
+        })],
         entityInputs: [],
       });
       await processRuntime(env);

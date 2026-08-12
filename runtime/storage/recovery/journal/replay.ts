@@ -23,7 +23,9 @@ type ReplayTarget = {
   selectedSnapshotHeight: number;
 };
 
-type ReplayOptions = { prunedTargetReturnsNull?: boolean };
+export type ReplayOptions = {
+  prunedTargetReturnsNull?: boolean;
+};
 
 type LoadPersistedRuntime = (
   runtimeId?: string | null,

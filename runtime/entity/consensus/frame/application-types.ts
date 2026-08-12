@@ -15,9 +15,11 @@ import type {
   SwapOfferEvent,
 } from '../../tx/handlers/account';
 import type { VerifiedCertifiedEntityOutput } from '../output/certification';
+import type { EntityInfraContext } from '../../../types/entity/infra-context';
 
 export type ApplyEntityTxsInOrderContext = {
   env: EntityRuntimeContext;
+  entityContext: EntityInfraContext;
   accountConsensusContext: AccountConsensusContext;
   entityTxs: EntityTx[];
   currentEntityState: EntityState;

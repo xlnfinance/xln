@@ -51,7 +51,10 @@ export const verifyStartHanko = async (
     disputeHash,
     counterpartyId,
     env,
-    boardHash ? { registeredBoardHash: boardHash } : undefined,
+    {
+      ...(boardHash ? { registeredBoardHash: boardHash } : {}),
+      observerState: sourceState,
+    },
   );
   if (verification.valid) return true;
   const currentProof = buildAccountProofBodyFromJurisdictions(env.state, account);

@@ -13,15 +13,21 @@ import {
 } from '../../../storage/history/history-view';
 import { decodeBuffer, decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/codec';
 import { liveKeyForDoc } from '../../../storage/schema/doc-refs';
-import { prepareStorageStateHashes } from '../../../storage/hashes';
+import {
+  computeStorageFrameHash,
+  computeStorageStateRoot,
+  prepareStorageStateHashes,
+} from '../../../storage/hashes';
 import {
   KEY_HEAD,
   KEY_MERKLE_BRANCH,
   KEY_MERKLE_LEAF,
   STORAGE_SCHEMA_VERSION,
+  ZERO_FRAME_HASH,
   keyCertifiedBoardNode,
   keyConsumptionNode,
   keyDiff,
+  keyFrame,
 } from '../../../storage/keys';
 import type {
   RuntimeDbLike,
@@ -33,6 +39,7 @@ import type {
   StorageMerkleBranchDoc,
   StorageMerkleLeafDoc,
   StorageRuntimeConfig,
+  RuntimeFrame,
 } from '../../../storage/types';
 import {
   EMPTY_CERTIFIED_BOARD_ROOT,
@@ -51,6 +58,8 @@ import { createEmptyEnv } from '../../../runtime';
 import { createBook } from '../../../orderbook/core';
 import { validateStorageBookDocValue } from '../../../storage/schema/authoritative-schema';
 import { computeIntegrityDigest } from '../../../infra/integrity-checksum';
+import { computeStorageReplicaMetaDigest } from '../../../storage/replica/replica-meta-digest';
+import { buildDurableRuntimeMachineSnapshot } from '../../../storage/wal/snapshot';
 
 const entityId = `0x${'11'.repeat(32)}`;
 type PreparedStorageHashes = Awaited<ReturnType<typeof prepareStorageStateHashes>>;
@@ -105,6 +114,7 @@ const makeMemoryDb = (entries: Array<[Buffer, Buffer]> = []): RuntimeDbLike => {
 
 const entityDoc = (height: number): StorageEntityCoreDoc => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'12'.repeat(32)}`,
   height,
   timestamp: height,
   nonces: new Map(),
@@ -184,7 +194,103 @@ const head = (latestHeight: number, latestMaterializedHeight: number): StorageHe
   retainedHistoryBytes: 0,
 });
 
+const materializedFrame = (
+  height: number,
+  prepared: PreparedStorageHashes,
+): RuntimeFrame => {
+  const base: RuntimeFrame = {
+    height,
+    timestamp: height,
+    prevFrameHash: ZERO_FRAME_HASH,
+    replicaMetaDigest: computeStorageReplicaMetaDigest([]),
+    replicaMetaCheckpoint: true,
+    replicaMetaStateMode: 'full',
+    postStateHash: ZERO_FRAME_HASH,
+    stateHash: computeStorageStateRoot(prepared.entityHashes),
+    hashMode: 'storage-merkle-v1',
+    materializedState: true,
+    entityHashes: prepared.entityHashes,
+    runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    entityContexts: new Map(),
+    historyRecords: [],
+    activityLogs: [],
+    runtimeMachine: buildDurableRuntimeMachineSnapshot(createEmptyEnv(`storage-frame-${height}`)),
+    touchedEntities: [entityId],
+    touchedAccounts: [],
+    touchedBookEntities: [],
+  };
+  return { ...base, frameHash: computeStorageFrameHash(base) };
+};
+
 describe('storage crash recovery', () => {
+  test('heals an equal-HEAD current projection whose live document no longer matches its Merkle commitment', async () => {
+    const diff = entityDiff(1);
+    const prepared = await prepareStorageStateHashes({
+      db: makeMemoryDb(),
+      puts: diff.puts,
+      dels: [],
+    });
+    const storageHead = head(1, 1);
+    const frame = materializedFrame(1, prepared);
+    const historyDb = makeMemoryDb([
+      [KEY_HEAD, encodeBuffer(storageHead)],
+      [keyDiff(1), encodeBuffer(diff)],
+      [keyFrame(1), encodeBuffer(frame)],
+    ]);
+    const currentDb = makeMemoryDb([
+      [KEY_HEAD, encodeBuffer(storageHead)],
+      ...prepared.docPuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
+      ...prepared.merklePuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
+    ]);
+    const corrupted = entityDoc(99);
+    const corruptBatch = currentDb.batch();
+    corruptBatch.put(liveKeyForDoc(diff.puts[0]!), encodeBuffer(corrupted));
+    await corruptBatch.write();
+
+    const result = await recoverStorageDbFromHistory({
+      db: currentDb,
+      walDb: historyDb,
+      config,
+    });
+
+    expect(result.recovered).toBe(true);
+    expect(decodeBuffer<StorageEntityCoreDoc>(
+      await currentDb.get(liveKeyForDoc(diff.puts[0]!)),
+    ).height).toBe(1);
+  });
+
+  test('removes current-only content-addressed nodes even when HEAD and live Merkle state match', async () => {
+    const diff = entityDiff(1);
+    const prepared = await prepareStorageStateHashes({
+      db: makeMemoryDb(),
+      puts: diff.puts,
+      dels: [],
+    });
+    const storageHead = head(1, 1);
+    const frame = materializedFrame(1, prepared);
+    const orphanKey = keyCertifiedBoardNode(`0x${'99'.repeat(32)}`);
+    const currentDb = makeMemoryDb([
+      [KEY_HEAD, encodeBuffer(storageHead)],
+      ...prepared.docPuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
+      ...prepared.merklePuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
+      [orphanKey, Buffer.from([0xc0])],
+    ]);
+    const historyDb = makeMemoryDb([
+      [KEY_HEAD, encodeBuffer(storageHead)],
+      [keyDiff(1), encodeBuffer(diff)],
+      [keyFrame(1), encodeBuffer(frame)],
+    ]);
+
+    const result = await recoverStorageDbFromHistory({
+      db: currentDb,
+      walDb: historyDb,
+      config,
+    });
+
+    expect(result.recovered).toBe(true);
+    await expect(currentDb.get(orphanKey)).rejects.toMatchObject({ code: 'LEVEL_NOT_FOUND' });
+  });
+
   test('copies immutable certified-board nodes before publishing recovered current head', async () => {
     const stackKey = getCertifiedBoardStackKey({
       chainId: 31_337,

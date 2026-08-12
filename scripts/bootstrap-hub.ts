@@ -17,12 +17,14 @@ import { createStructuredLogger } from '../runtime/infra/logger';
 import { requireJurisdictionBlockTimeMs } from '../runtime/orchestrator/mesh/mesh-jurisdictions';
 import type { ConsensusConfig } from '../runtime/entity/types';
 import type { RuntimeReplica } from '../runtime/runtime/types';
+import { importEntity } from '../runtime/runtime/registration/entity-creation';
+import { deriveMnemonicCustodySeed } from '../runtime/runtime/registration/entity-creation/mnemonic-seed';
 
 const args = process.argv.slice(2);
 
-const getArg = (name: string, fallback: string): string => {
+const getArg = (name: string, defaultValue: string): string => {
   const idx = args.indexOf(name);
-  return idx === -1 ? fallback : args[idx + 1] || fallback;
+  return idx === -1 ? defaultValue : args[idx + 1] || defaultValue;
 };
 
 export type HubConfig = {
@@ -135,8 +137,7 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
 
   if (!replicaExists) {
     ensureRuntimeInput(env);
-    env.runtimeMempool.runtimeTxs.push({
-      type: 'importReplica',
+    env.runtimeMempool.runtimeTxs.push(importEntity({
       entityId,
       signerId: signerAddress,
       data: {
@@ -145,7 +146,8 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
         profileName: hubConfig.name,
         position: hubConfig.position || { x: 0, y: 0, z: 0 },
       },
-    });
+      entitySeed: deriveMnemonicCustodySeed(hubConfig.seed),
+    }));
 
     await processRuntime(env, []);
     bootstrapLog.info('hub.entity_created', {

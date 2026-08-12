@@ -54,7 +54,7 @@
 
   const LIVE_TIME_INDEX = -1;
 
-  // Direct store usage - no fallback logic
+  // Direct store usage: this is the only canonical read path.
   $: isRemoteRuntime = $runtimeControllerHandle.mode === 'remote';
   $: maxTimeIndex = Math.max(0, (isRemoteRuntime ? $runtimeHistoryFrames.length : $history.length) - 1);
   $: selectedFrameIndex = $isLive || $timeIndex < 0
@@ -487,8 +487,8 @@
   }
 
   async function scanRemoteHeight() {
-    const fallbackHeight = Number($history[selectedFrameIndex]?.state.height || $runtimeControllerHandle.height || 0);
-    const raw = remoteScanHeightDraft.trim() || String(Math.max(1, Math.floor(fallbackHeight || 1)));
+    const selectedHeight = Number($history[selectedFrameIndex]?.state.height || $runtimeControllerHandle.height || 0);
+    const raw = remoteScanHeightDraft.trim() || String(Math.max(1, Math.floor(selectedHeight || 1)));
     const requestedHeight = Math.max(1, Math.floor(Number(raw)));
     if (!Number.isFinite(requestedHeight) || requestedHeight < 1) {
       remoteScanError = 'height must be positive';

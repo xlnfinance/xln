@@ -20,8 +20,8 @@ import {
 } from './release-snapshot/source-policy.ts';
 
 const command = process.argv[2];
-const value = (name: string, fallback: string): string =>
-  resolve(process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3) || fallback);
+const value = (name: string, defaultValue: string): string =>
+  resolve(process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3) || defaultValue);
 const boardPath = value('board', 'foundation-release-board.json');
 const keysPath = value('keys', `${homedir()}/.config/xln/foundation-release-keys.json`);
 
@@ -49,14 +49,7 @@ if (command === 'verify' || command === 'publish-check') {
   const snapshot = JSON.parse(readFileSync(snapshotPath, 'utf8')) as ReleaseSnapshot;
   const valid = verifyReleaseSnapshot(snapshot, board);
   if (!snapshot.attestation) {
-    if (!valid) throw new Error(`RELEASE_ATTESTATION_MISSING:${snapshotPath}`);
-    if (command === 'publish-check') {
-      assertReleaseSourceContainedInPublishedRef(process.cwd(), snapshot.release.sourceCommit);
-      assertReleaseTagBindsSource(process.cwd(), snapshot.release.version, snapshot.release.sourceCommit);
-      console.log(`Release tag binds source: v${snapshot.release.version} ${snapshot.release.sourceCommit}`);
-    }
-    console.log(`Historical unsigned release: ${snapshot.release.version}`);
-    process.exit(0);
+    throw new Error(`RELEASE_ATTESTATION_MISSING:${snapshotPath}`);
   }
   if (!valid) throw new Error(`RELEASE_ATTESTATION_INVALID:${snapshotPath}`);
   if (command === 'publish-check') {

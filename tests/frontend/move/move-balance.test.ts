@@ -73,7 +73,7 @@ describe('move balance helpers', () => {
     })).toBe('hub-a');
   });
 
-  test('computes current source available balance with row fallback', () => {
+  test('computes current source available balance with row metadata', () => {
     expect(computeMoveSourceAvailableBalanceForEndpoint({
       from: 'reserve',
       row: { externalBalance: 1n, reserveBalance: 80n, accountBalance: 2n },

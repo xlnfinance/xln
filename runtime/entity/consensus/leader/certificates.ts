@@ -215,6 +215,7 @@ const validatePreparedFrameEvidence = (
     state.entityId,
     evidence.stateRoot,
     evidence.authorityRoot,
+    evidence.entityContext,
     evidence.jPrefixCertificate,
   );
   if (recomputedHash !== evidence.hash) {

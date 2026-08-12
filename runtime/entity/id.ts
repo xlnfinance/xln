@@ -173,7 +173,7 @@ export function parseUniversalEntityId(
     parseNumberedEntityId(trimmed, defaultProvider) ??
     parseNamedEntityId(trimmed, defaultProvider, lookupFn);
   if (parsed) return parsed;
-  // There is no raw-hex fallback. Accepting malformed identifiers as if they
+  // Raw hex is not accepted. Treating malformed identifiers as if they
   // were canonical makes typos address a different Entity instead of failing.
   throw new Error(`ENTITY_ID_FORMAT_INVALID:${trimmed}`);
 }

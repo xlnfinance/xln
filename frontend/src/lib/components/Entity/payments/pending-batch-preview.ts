@@ -114,7 +114,7 @@ export function pendingBatchEntityLabel(entityId: string, options: PendingBatchL
   return getEntityDisplayName(raw, {
     source: options.activeEnv,
     selfEntityId: options.selfEntityId,
-    fallback: 'Unknown',
+    defaultLabel: 'Unknown',
   });
 }
 

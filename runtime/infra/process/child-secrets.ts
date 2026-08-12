@@ -74,10 +74,10 @@ export const readInheritedChildSecrets = (): ChildSecrets => {
 export const resolveChildSecret = (
   secrets: ChildSecrets,
   key: string,
-  fallback: string,
+  configuredValue: string,
 ): string => {
   const inherited = secrets[key]?.trim() || '';
-  const configured = fallback.trim();
+  const configured = configuredValue.trim();
   if (inherited && configured && inherited !== configured) {
     throw new Error(`CHILD_SECRET_SOURCE_CONFLICT:${key}`);
   }

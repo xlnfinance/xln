@@ -63,7 +63,7 @@ const getNativeSecp256k1 = (): NativeSecp256k1 | null => {
 };
 
 // Configure @noble/secp256k1 HMAC (required for signing)
-// Always install a sync HMAC implementation (Node/Bun fast path, browser fallback).
+// Always install a sync HMAC implementation (Node/Bun native path, browser portable path).
 const installHmacSync = () => {
   if (secp256k1.utils.hmacSha256Sync) return;
   const isBrowser = isBrowserRuntime();
@@ -156,7 +156,7 @@ const getSignerKeyStore = (scope: SignerKeyScope, create = false): SignerKeyStor
 const parseSignerIndex = (signerId: string): number | null => {
   const trimmed = signerId.trim();
   if (/^s\d+$/.test(trimmed)) {
-    throw new Error(`DEPRECATED_SIGNER_PREFIX: signerId "${signerId}" must be numeric (e.g. "1")`);
+    throw new Error(`NONCANONICAL_SIGNER_PREFIX: signerId "${signerId}" must be numeric (e.g. "1")`);
   }
   const match = trimmed.match(/^(\d+)$/);
   if (!match) return null;
@@ -610,7 +610,7 @@ export function signDigestBytesWithPrivateKey(
   if (native) {
     // Same raw secp256k1 ECDSA operation as noble, only through the native
     // backend available in Bun/Node. Browser builds keep the audited noble
-    // fallback below; Hanko bytes and on-chain ecrecover compatibility do not
+    // portable implementation below; Hanko bytes and on-chain ecrecover compatibility do not
     // change.
     const { signature, recid } = native.ecdsaSign(messageBytes, privateKey);
     return { signature: new Uint8Array(signature), recovery: recid };
@@ -689,7 +689,7 @@ export function verifyAccountSignature(
   if (!parsed) return false;
   const publicKey = getSignerPublicKey(env, key);
   if (!publicKey) {
-    // Deterministic fallback for replay/recovery: recover address from signature.
+    // Canonical address-authority path for replay/recovery: recover from the signature.
     // This removes runtime dependence on gossip key registration for account frame verification.
     if (/^0x[a-f0-9]{40}$/i.test(key)) {
       const recovered = recoverAddressFromDigestSignature(

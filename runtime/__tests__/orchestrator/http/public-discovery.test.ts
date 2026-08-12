@@ -78,7 +78,7 @@ describe('public discovery', () => {
     const publicPayload = buildPublicHubDiscoveryPayload({
       hubChildren,
       relayStore,
-      primaryJurisdictionFallback: null,
+      defaultJurisdiction: null,
       serverTime: 1234,
     });
     const debugEntries = getDebugEntityEntries({

@@ -207,8 +207,8 @@ export function classifyFailureText(value: string): QaFailureClass {
   return 'unknown';
 }
 
-export function finiteSortValue(value: number | null | undefined, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+export function finiteSortValue(value: number | null | undefined, defaultValue: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : defaultValue;
 }
 
 export function phaseObservedMs(run: QaSummary, key: QaPhaseKey): number | null {

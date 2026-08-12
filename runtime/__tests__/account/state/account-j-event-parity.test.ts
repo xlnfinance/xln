@@ -45,7 +45,6 @@ const machine = (): AccountReplica => ({
     deltas: new Map([[1, createDefaultDelta(1)]]),
     locks: new Map(),
     swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,

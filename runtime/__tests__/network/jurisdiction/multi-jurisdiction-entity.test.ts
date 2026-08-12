@@ -29,10 +29,10 @@ import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/config/defaults';
 import { accountStateDomainFromJurisdiction } from '../../../account/commitment/state-root';
 import type { JAdapter } from '../../../jurisdiction/adapter/types';
 import { canonicalizeProfile, parseProfile } from '../../../entity/profile';
-import { computeValidatorEncryptionAttestationDigest } from '../../../protocol/htlc/validator-encryption';
 import type { ConsensusConfig, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import { installCanonicalRegistrationEvidence } from '../../helpers/registration-evidence';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { createTestJReplica } from '../../helpers/j-replica';
 import { resolveDbPath } from '../../../storage/runtime-dbs';
 import { SigningKey, computeAddress } from 'ethers';
@@ -124,29 +124,6 @@ const canonicalLocalSigner = (env: RuntimeReplica, signerId: string): string => 
 const evidenceActivationHeight = (entityId: string): number =>
   5 + Number(BigInt(entityId) & 0xff_ffffn);
 
-const profileBoard = (entityId: string, label: string) => {
-  const key = new SigningKey(deriveSignerKeySync(`multi-j-profile:${label}`, '1'));
-  const publicKey = key.publicKey.toLowerCase();
-  const signer = computeAddress(publicKey).toLowerCase();
-  const body = {
-    version: 'xln:validator-encryption-key:v1' as const,
-    entityId,
-    signerId: signer,
-    signer,
-    publicKey,
-    weight: 1,
-    encryptionPublicKey: `0x${'61'.repeat(32)}`,
-  };
-  return {
-    threshold: 1,
-    validators: [{ signer, signerId: signer, weight: 1, publicKey }],
-    encryptionAttestations: [{
-      ...body,
-      signature: key.sign(computeValidatorEncryptionAttestationDigest(body)).serialized,
-    }],
-  };
-};
-
 describe('multi-jurisdiction entity binding', () => {
   test('jurisdiction identity uses stack refs before display names', () => {
     const canonical = makeJurisdiction('Testnet', 31337, '11', '12');
@@ -206,15 +183,14 @@ describe('multi-jurisdiction entity binding', () => {
       });
     }
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: canonicalSignerId,
         data: {
           isProposer: true,
           config,
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env);
@@ -236,15 +212,14 @@ describe('multi-jurisdiction entity binding', () => {
     const signerId = await importEntity(env, entityId, '31', j1);
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId,
         data: {
           isProposer: true,
           config: makeConfig(signerId, j2),
         },
-      }],
+      })],
       entityInputs: [],
     });
     await expect(processRuntime(env)).rejects.toThrow('ENTITY_JURISDICTION_CONFLICT');
@@ -607,6 +582,7 @@ describe('multi-jurisdiction entity binding', () => {
   test('gossip profile metadata carries jurisdiction mirrors under the profile signature envelope', () => {
     const parsed = parseProfile({
       entityId: entity('03'),
+      entityEncryptionPublicKey: `0x${'61'.repeat(32)}`,
       name: 'Alice Base',
       avatar: '',
       bio: '',
@@ -636,7 +612,6 @@ describe('multi-jurisdiction entity binding', () => {
             depositoryAddress: addr('47'),
           },
         }],
-        board: profileBoard(entity('03'), 'jurisdiction-mirrors'),
       },
       accounts: [],
     });

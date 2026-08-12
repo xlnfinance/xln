@@ -309,7 +309,6 @@ const accountStateRootEntries = (
     }],
     ['financial', {
     deltasRoot: mapRoot('deltas'),
-    globalCreditLimits: account.globalCreditLimits,
     jNonce: account.jNonce,
     disputeConfig: account.disputeConfig,
     }],

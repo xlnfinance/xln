@@ -245,5 +245,6 @@ export const applyEntityInput = async (
     candidateEffects: phaseContext.candidateEffects,
     storageChanges: phaseContext.storageChanges,
     ...(phaseContext.canonicalAppliedInput ? { canonicalAppliedInput: phaseContext.canonicalAppliedInput } : {}),
+    ...(phaseContext.entityContext ? { entityContext: phaseContext.entityContext } : {}),
   };
 };

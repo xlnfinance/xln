@@ -107,6 +107,7 @@ const validateReplayedCommitments = (
     state.entityId,
     stateRoot,
     authorityRoot,
+    frame.entityContext,
     frame.jPrefixCertificate,
   );
   if (replayedHash !== frame.hash) {
@@ -132,6 +133,7 @@ const replayCommitFrame = async (
     applied = await applyEntityFrame(
       env,
       workingReplica.state,
+      frame.entityContext,
       frame.txs,
       frame.timestamp,
     );

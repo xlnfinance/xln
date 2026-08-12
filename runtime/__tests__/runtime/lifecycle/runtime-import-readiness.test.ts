@@ -105,7 +105,7 @@ describe('runtime import readiness gate', () => {
     });
   });
 
-  test('blocks import on typed fatal health failure even if legacy degraded list is empty', () => {
+  test('blocks import on typed fatal health failure even if retired degraded list is empty', () => {
     const health = baseReadyHealth();
     health.failures = [{
       category: 'Contradiction',

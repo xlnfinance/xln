@@ -22,10 +22,10 @@ export function entityAvatar(
 export function preferredAvatar(
   functions: FrontendXlnFunctions | null,
   entityId: string,
-  fallbackSeed: string,
+  defaultSeed: string,
   size: number = 40,
 ): string {
   const entity = entityAvatar(functions, entityId);
   if (entity) return entity;
-  return seedAvatar(functions, fallbackSeed, size);
+  return seedAvatar(functions, defaultSeed, size);
 }

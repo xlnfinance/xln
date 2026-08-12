@@ -13,8 +13,6 @@ export type EntityPanelRouteState = {
 
 export type EntityPanelDeepLinkRequest = {
   hashRoute?: string | null;
-  view?: string | null;
-  subview?: string | null;
   jurisdiction?: string | null;
   availableJurisdictionNames?: readonly (string | null | undefined)[];
 };
@@ -23,9 +21,6 @@ export type EntityPanelDeepLinkUpdate = Partial<EntityPanelRouteState & {
   configureWorkspaceTab: ConfigureWorkspaceTab;
   selectedJurisdictionName: string | null;
 }>;
-
-const settingsSubviews: readonly SettingsSubview[] = ['wallet', 'consensus', 'recovery', 'display', 'network', 'data', 'log', 'entity'];
-const configureWorkspaceTabs: readonly ConfigureWorkspaceTab[] = ['extend-credit', 'request-credit', 'collateral', 'token', 'dispute'];
 
 export function getLocationHashRoute(location: Location): string | null {
   const hashRaw = location.hash.startsWith('#') ? location.hash.slice(1) : location.hash;
@@ -64,78 +59,49 @@ export function getLocationParamValue(location: Location, keys: string[]): strin
 export function canonicalizeEntityPanelRoute(routeRaw: string | null): string | null {
   const route = String(routeRaw || '').trim().toLowerCase().replace(/^\/+|\/+$/g, '');
   if (!route) return null;
-  if (route.startsWith('pay/')) return 'accounts/send';
   switch (route) {
     case 'assets':
     case 'assets/move':
-    case 'external':
-    case 'reserves':
       return 'assets';
     case 'assets/history':
       return 'assets/history';
     case 'accounts':
     case 'accounts/open':
-    case 'open':
       return 'accounts/open';
     case 'accounts/send':
-    case 'pay':
-    case 'send':
       return 'accounts/send';
     case 'accounts/receive':
-    case 'receive':
       return 'accounts/receive';
     case 'accounts/swap':
-    case 'swap':
       return 'accounts/swap';
     case 'accounts/move':
-    case 'move':
       return 'accounts/move';
     case 'accounts/lending':
-    case 'lending':
-    case 'borrow':
-    case 'lend':
       return 'accounts/lending';
     case 'accounts/history':
-    case 'history':
       return 'accounts/history';
     case 'accounts/configure':
-    case 'configure':
       return 'accounts/configure';
     case 'accounts/activity':
-    case 'activity':
       return 'accounts/activity';
     case 'accounts/appearance':
-    case 'appearance':
       return 'accounts/appearance';
     case 'settings':
     case 'settings/wallet':
-    case 'wallet':
       return 'settings';
     case 'settings/recovery':
-    case 'recovery':
-    case 'watchtowers':
       return 'settings/recovery';
     case 'settings/consensus':
-    case 'consensus':
       return 'settings/consensus';
     case 'settings/display':
-    case 'display':
       return 'settings/display';
     case 'settings/network':
-    case 'network':
-    case 'gossip':
       return 'settings/network';
     case 'settings/data':
-    case 'data':
       return 'settings/data';
     case 'settings/log':
-    case 'log':
-    case 'chat':
       return 'settings/log';
     case 'settings/entity':
-    case 'entity':
-    case 'governance':
-    case 'create':
       return 'settings/entity';
     default:
       return null;
@@ -145,8 +111,7 @@ export function canonicalizeEntityPanelRoute(routeRaw: string | null): string | 
 export function resolveEntityPanelDeepLink(input: EntityPanelDeepLinkRequest): EntityPanelDeepLinkUpdate {
   const update: EntityPanelDeepLinkUpdate = {};
   const hashRoute = canonicalizeEntityPanelRoute(input.hashRoute ?? null);
-  const view = String(input.view || hashRoute || '').trim().toLowerCase();
-  const subview = String(input.subview || '').trim().toLowerCase();
+  const view = String(hashRoute || '').trim().toLowerCase();
   const jurisdiction = String(input.jurisdiction || '').trim();
 
   switch (view) {
@@ -235,16 +200,6 @@ export function resolveEntityPanelDeepLink(input: EntityPanelDeepLinkRequest): E
       break;
   }
 
-  if (view === 'settings' && settingsSubviews.includes(subview as SettingsSubview)) {
-    update.settingsSubview = subview as SettingsSubview;
-  }
-  if (view === 'configure' && subview) {
-    if (subview === 'credit') {
-      update.configureWorkspaceTab = 'extend-credit';
-    } else if (configureWorkspaceTabs.includes(subview as ConfigureWorkspaceTab)) {
-      update.configureWorkspaceTab = subview as ConfigureWorkspaceTab;
-    }
-  }
   if (jurisdiction) {
     const matched = input.availableJurisdictionNames?.find((candidate) =>
       String(candidate || '').trim().toLowerCase() === jurisdiction.toLowerCase(),
@@ -261,9 +216,7 @@ export function resolveEntityPanelDeepLinkFromLocation(
   const hashRoute = canonicalizeEntityPanelRoute(getLocationHashRoute(location));
   return resolveEntityPanelDeepLink({
     hashRoute,
-    view: getLocationParamValue(location, ['view']),
-    subview: getLocationParamValue(location, ['subview', 'sub']),
-    jurisdiction: getLocationParamValue(location, ['jId', 'jurisdiction', 'j']),
+    jurisdiction: getLocationParamValue(location, ['jurisdiction']),
     availableJurisdictionNames,
   });
 }

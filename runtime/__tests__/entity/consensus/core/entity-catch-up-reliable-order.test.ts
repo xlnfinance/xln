@@ -6,7 +6,8 @@ import {
   registerSignerKey,
   signAccountFrame,
 } from '../../../../account/crypto';
-import { applyEntityFrame, applyEntityInput } from '../../../../entity/consensus';
+import { applyEntityInput } from '../../../../entity/consensus';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../../helpers/entity-frame';
 import { createEntityFrameHash } from '../../../../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../../../../entity/consensus/input/hanko-witness';
 import { getEntityLeaderState } from '../../../../entity/consensus/leader';
@@ -17,15 +18,11 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../../../../entity/consensus/state-root';
 import { generateLazyEntityId } from '../../../../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../../helpers/cross-j';
 import { initCrontab } from '../../../../entity/scheduler';
 import { buildQuorumHanko } from '../../../../hanko/signing';
 import { startRuntimeHistoryTraceForTesting } from '../../../../runtime/observability/history-retention';
 import { buildLocalEntityProfile } from '../../../../network/p2p/gossip/helper';
-import {
-  collectLocalProfileEncryptionAnnouncements,
-  getCompleteProfileEncryptionManifest,
-} from '../../../../entity/profile/profile-encryption';
 import { computeProfileHash } from '../../../../entity/profile/profile-signing';
 import { safeStringify } from '../../../../protocol/serialization';
 import { canonicalJurisdictionEventsHash } from '../../../../jurisdiction/machine/event-observation';
@@ -139,7 +136,7 @@ const buildCommitCertificate = async (
 ): Promise<{ frame: EntityFrame; nextState: EntityState }> => {
   const certificateSigners = Array.isArray(signerIds) ? signerIds : [signerIds];
   const height = state.height + 1;
-  const execution = await applyEntityFrame(env, state, [], timestamp);
+  const execution = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [], timestamp);
   const nextStateBeforeLink: EntityState = {
     ...execution.newState,
     entityId: state.entityId,
@@ -155,6 +152,7 @@ const buildCommitCertificate = async (
     timestamp,
     [],
     nextStateBeforeLink,
+    execution.entityContext,
   );
   const outputHashes = buildCertifiedEntityOutputHashes(
     nextStateBeforeLink,
@@ -191,6 +189,7 @@ const buildCommitCertificate = async (
     timestamp,
     txs: [],
     events: [],
+    entityContext: execution.entityContext,
     hash: frameHash,
     leader: { proposerSignerId: state.config.validators[0]!, view: 0 },
     hashesToSign,
@@ -216,11 +215,10 @@ const deliverable = (
 });
 
 const installReplica = (env: RuntimeReplica, state: EntityState, signerId: string): void => {
-  const keys = deriveLocalEntityCryptoKeys(env, state.entityId, signerId);
+  state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, state.entityId);
   const replica: EntityReplica = {
     entityId: state.entityId,
     signerId,
-    entityEncPubKey: keys.publicKey,
     state: structuredClone(state),
     mempool: [],
     isProposer: true,
@@ -544,23 +542,15 @@ describe('ordered reliable Entity catch-up', () => {
       registerSignerKey(signingEnv, leaderSignerId, leaderPrivateKey);
       registerSignerKey(signingEnv, signerId, signerPrivateKey);
     }
-    const certificateSigners = [leaderSignerId, signerId];
+    const certificateSigners = [signerId, leaderSignerId];
     const initialState = createEntityState(signerId, certificateSigners, 2n);
     installReplica(receiver, initialState, signerId);
     const receiverReplica = receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`)!;
     receiverReplica.isProposer = false;
-    const receiverEntityKeys = deriveLocalEntityCryptoKeys(receiver, initialState.entityId, signerId);
-    receiverReplica.entityEncPubKey = receiverEntityKeys.publicKey;
+    provisionTestEntityEncryptionKey(receiver, initialState.entityId);
     installReplica(receiver, initialState, leaderSignerId);
     const leaderReplica = receiver.state.eReplicas.get(`${initialState.entityId}:${leaderSignerId}`)!;
-    const leaderEntityKeys = deriveLocalEntityCryptoKeys(receiver, initialState.entityId, leaderSignerId);
-    leaderReplica.entityEncPubKey = leaderEntityKeys.publicKey;
-    collectLocalProfileEncryptionAnnouncements(receiver);
     receiver.state.eReplicas.delete(`${initialState.entityId}:${leaderSignerId}`);
-    const manifest = getCompleteProfileEncryptionManifest(receiver, receiverReplica.state);
-    if (!manifest) throw new Error('TEST_LOCAL_PROFILE_MANIFEST_MISSING');
-    initialState.profileEncryptionManifest = structuredClone(manifest);
-    receiverReplica.state.profileEncryptionManifest = structuredClone(manifest);
     const profileHash = computeProfileHash(buildLocalEntityProfile(receiver, receiverReplica.state, 1));
     const profileSignatures = certificateSigners.map(certificateSignerId => ({
       signerId: certificateSignerId,
@@ -690,6 +680,10 @@ describe('ordered reliable Entity catch-up', () => {
       replicaMetaCheckpoint: true,
       replicaMetaStateMode: 'full',
       runtimeInput: structuredClone(committedHistoryFrame.runtimeInput),
+      entityContexts: new Map([[
+        `${initialState.entityId}:${signerId}`,
+        structuredClone(heightOne.frame.entityContext),
+      ]]),
       pendingRuntimeInput: structuredClone(restarted.runtimeMempool!),
       runtimeOutputs: structuredClone(restarted.pendingNetworkOutputs ?? []),
       runtimeMachine: durableMachineAfterHeightOne,

@@ -12,11 +12,14 @@ import {
   reconcileHistoryViews,
 } from './history/history-view';
 import {
+  assertEntityHashesEqual,
   canonicalizeStorageDoc,
   computeStorageFrameHash,
   computeStoragePostStateHash,
   prepareStorageCanonicalStateHashes,
   prepareStorageStateHashes,
+  readAllEntityHashDocs,
+  toFrameEntityHashes,
 } from './hashes';
 import {
   createSnapshot,
@@ -124,7 +127,11 @@ import {
   buildReplayVerifiableRuntimeMachineSnapshot,
 } from './wal/snapshot';
 import { buildDurableOutputRetryState } from '../runtime/delivery/durable-output-retry';
-import { verifyStorageSnapshotIntegrity } from './read/verify';
+import {
+  verifyStorageSnapshotIntegrity,
+  verifyStorageTailIntegrity,
+} from './read/verify';
+import { verifyLiveStorageIntegrity } from './read/live-integrity';
 import {
   validateAccountJClaimNodeValue,
   validateCertifiedBoardNodeValue,
@@ -291,6 +298,9 @@ const CURRENT_RECOVERY_PREFIXES = [
   KEY_MERKLE_ROOT,
   KEY_MERKLE_BRANCH,
   KEY_MERKLE_LEAF,
+  KEY_CERTIFIED_BOARD_NODE,
+  KEY_CONSUMPTION_NODE,
+  KEY_ACCOUNT_J_CLAIM_NODE,
 ] as const;
 
 const clearCurrentRecoveryState = async (db: RuntimeDbLike): Promise<void> => {
@@ -317,14 +327,29 @@ const storageHeadsEqual = (left: StorageHead, right: StorageHead): boolean =>
 const synchronizeCertifiedBoardNodes = async (
   walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
-  batch: ReturnType<RuntimeDbLike['batch']>,
+  batch?: ReturnType<RuntimeDbLike['batch']>,
 ): Promise<boolean> => {
+  const authoritativeKeys = new Set<string>();
   let changed = false;
   for await (const key of iterateKeys(walDb, { prefix: keyCertifiedBoardNodePrefix() })) {
+    authoritativeKeys.add(key.toString('hex'));
     const authoritative = await walDb.get(key);
+    const hash = decodeTaggedStorageHash(
+      key,
+      KEY_CERTIFIED_BOARD_NODE,
+      'STORAGE_CERTIFIED_BOARD_NODE_KEY_INVALID',
+    );
+    const node = decodeValidatedBuffer(authoritative, validateCertifiedBoardNodeValue);
+    const actual = hashCertifiedBoardNode(node);
+    if (actual !== hash) throw new Error(`CERTIFIED_BOARD_NODE_CORRUPT:${hash}:${actual}`);
     const current = await readRawOrNull(currentDb, key);
     if (current?.equals(authoritative)) continue;
-    batch.put(key, authoritative);
+    batch?.put(key, authoritative);
+    changed = true;
+  }
+  for await (const key of iterateKeys(currentDb, { prefix: keyCertifiedBoardNodePrefix() })) {
+    if (authoritativeKeys.has(key.toString('hex'))) continue;
+    batch?.del(key);
     changed = true;
   }
   return changed;
@@ -333,7 +358,7 @@ const synchronizeCertifiedBoardNodes = async (
 const synchronizeConsumptionNodes = async (
   walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
-  batch: ReturnType<RuntimeDbLike['batch']>,
+  batch?: ReturnType<RuntimeDbLike['batch']>,
 ): Promise<boolean> => {
   const states: ConsumptionAccumulatorState[] = [];
   for await (const key of iterateKeys(currentDb, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
@@ -361,12 +386,12 @@ const synchronizeConsumptionNodes = async (
     if (!value) throw new Error(`CONSUMPTION_NODE_MISSING:${hash}`);
     const current = await readRawOrNull(currentDb, key);
     if (current?.equals(value)) continue;
-    batch.put(key, value);
+    batch?.put(key, value);
     changed = true;
   }
   for await (const key of iterateKeys(currentDb, { prefix: keyConsumptionNodePrefix() })) {
     if (reachableKeys.has(key.toString('hex'))) continue;
-    batch.del(key);
+    batch?.del(key);
     changed = true;
   }
   return changed;
@@ -521,7 +546,7 @@ const pruneUnreachableConsumptionHistoryNodes = async (
 const synchronizeAccountJClaimNodes = async (
   walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
-  batch: ReturnType<RuntimeDbLike['batch']>,
+  batch?: ReturnType<RuntimeDbLike['batch']>,
 ): Promise<boolean> => {
   const states: AccountJClaimAccumulatorState[] = [];
   for await (const key of iterateKeys(currentDb, { prefix: Buffer.from([KEY_LIVE_ACCOUNT]) })) {
@@ -551,15 +576,54 @@ const synchronizeAccountJClaimNodes = async (
     const value = values.get(hash);
     if (!value) throw new Error(`ACCOUNT_J_CLAIM_NODE_MISSING:${hash}`);
     if ((await readRawOrNull(currentDb, key))?.equals(value)) continue;
-    batch.put(key, value);
+    batch?.put(key, value);
     changed = true;
   }
   for await (const key of iterateKeys(currentDb, { prefix: keyAccountJClaimNodePrefix() })) {
     if (reachableKeys.has(key.toString('hex'))) continue;
-    batch.del(key);
+    batch?.del(key);
     changed = true;
   }
   return changed;
+};
+
+const assertCurrentProjectionIntegrity = async (
+  currentDb: RuntimeDbLike,
+  walDb: RuntimeDbLike,
+  walHead: StorageHead,
+  requireFrameHashes = true,
+): Promise<Map<string, StorageEntityHashDoc>> => {
+  await verifyLiveStorageIntegrity(currentDb);
+  const entityHashDocs = await readAllEntityHashDocs(currentDb);
+  const materializedHeight = materializedHeightOf(walHead);
+  if (materializedHeight > 0) {
+    const frame = await readStorageFrameRecord(walDb, materializedHeight);
+    if (!frame?.entityHashes && requireFrameHashes) {
+      throw new Error(
+        `STORAGE_CURRENT_PROJECTION_FRAME_HASHES_MISSING:height=${materializedHeight}`,
+      );
+    }
+    if (frame?.entityHashes) {
+      assertEntityHashesEqual(
+        toFrameEntityHashes(entityHashDocs.values()),
+        frame.entityHashes,
+        `currentMaterializedHeight=${materializedHeight}`,
+      );
+    }
+  } else if (entityHashDocs.size > 0) {
+    throw new Error('STORAGE_CURRENT_PROJECTION_UNEXPECTED_ENTITY_HASHES');
+  }
+
+  const boardChanged = await synchronizeCertifiedBoardNodes(walDb, currentDb);
+  const consumptionChanged = await synchronizeConsumptionNodes(walDb, currentDb);
+  const accountJClaimChanged = await synchronizeAccountJClaimNodes(walDb, currentDb);
+  if (boardChanged || consumptionChanged || accountJClaimChanged) {
+    throw new Error(
+      `STORAGE_CURRENT_NODE_PROJECTION_MISMATCH:` +
+        `board=${boardChanged}:consumption=${consumptionChanged}:accountJ=${accountJClaimChanged}`,
+    );
+  }
+  return entityHashDocs;
 };
 
 const pruneUnreachableAccountJClaimHistoryNodes = async (
@@ -626,6 +690,7 @@ export const recoverStorageDbFromHistory = async (options: {
   walDb: RuntimeDbLike;
   config: Required<StorageRuntimeConfig>;
   onPersistenceProgress?: StoragePersistenceProgressHook;
+  verifyCurrentProjection?: boolean;
 }): Promise<{ recovered: boolean; entityHashDocs?: Map<string, StorageEntityHashDoc> }> => {
   const walHead = await readHead(options.walDb, options.config);
   const rawCurrentHead = await readRawOrNull(options.db, KEY_HEAD);
@@ -651,7 +716,33 @@ export const recoverStorageDbFromHistory = async (options: {
   if (historyLatestHeight === 0) return { recovered: false };
 
   let entityHashDocs: Map<string, StorageEntityHashDoc> | undefined;
-  const resetFromHistory = !rawCurrentHead || currentMaterializedHeight < historySnapshotHeight;
+  const headsMatch = Boolean(rawCurrentHead) && storageHeadsEqual(walHead, currentHead);
+  const shouldVerifyCurrent = headsMatch && options.verifyCurrentProjection !== false;
+  let currentProjectionInvalid = false;
+  if (shouldVerifyCurrent) {
+    // Verify the only authority first. A damaged WAL must halt recovery rather
+    // than being copied into the disposable current projection.
+    await verifyStorageTailIntegrity(options.walDb);
+    try {
+      entityHashDocs = await assertCurrentProjectionIntegrity(
+        options.db,
+        options.walDb,
+        walHead,
+      );
+      options.onPersistenceProgress?.('recovery-current-verified');
+    } catch (error) {
+      currentProjectionInvalid = true;
+      storageLog.warn('current_projection.invalid_rebuilding', {
+        error: error instanceof Error ? error.message : String(error),
+        height: currentMaterializedHeight,
+      });
+      options.onPersistenceProgress?.('recovery-current-invalid');
+    }
+  }
+  const resetFromHistory =
+    !rawCurrentHead ||
+    currentMaterializedHeight < historySnapshotHeight ||
+    currentProjectionInvalid;
   let replayFromHeight = currentMaterializedHeight;
   let recovered = false;
   if (resetFromHistory) {
@@ -693,7 +784,7 @@ export const recoverStorageDbFromHistory = async (options: {
   }
 
   const batch = options.db.batch();
-  const headChanged = !rawCurrentHead || !storageHeadsEqual(walHead, currentHead);
+  const headChanged = !rawCurrentHead || !headsMatch || currentProjectionInvalid;
   // History commits before the rebuildable current projection cache.
   // The normal append path writes both DBs and never scans the content-addressed
   // DAG. Only a lagging/current-cache recovery needs to copy immutable nodes.
@@ -709,11 +800,27 @@ export const recoverStorageDbFromHistory = async (options: {
     ? await synchronizeAccountJClaimNodes(options.walDb, options.db, batch)
     : false;
   options.onPersistenceProgress?.('recovery-account-j-nodes-synchronized');
-  if (headChanged) batch.put(KEY_HEAD, encodeBuffer(walHead));
-  if (boardNodesChanged || consumptionNodesChanged || accountJClaimNodesChanged || headChanged) {
+  if (boardNodesChanged || consumptionNodesChanged || accountJClaimNodesChanged) {
     await writeBatch(batch);
-    options.onPersistenceProgress?.('recovery-current-write-done');
+    options.onPersistenceProgress?.('recovery-current-nodes-written');
     recovered = true;
+  }
+  if (headChanged) {
+    // HEAD is the publication fence for the rebuilt cache and must be last.
+    const headBatch = options.db.batch();
+    headBatch.put(KEY_HEAD, encodeBuffer(walHead));
+    await writeBatch(headBatch);
+    options.onPersistenceProgress?.('recovery-current-head-published');
+    recovered = true;
+  }
+  if (shouldVerifyCurrent || resetFromHistory || headChanged) {
+    entityHashDocs = await assertCurrentProjectionIntegrity(
+      options.db,
+      options.walDb,
+      walHead,
+      shouldVerifyCurrent,
+    );
+    options.onPersistenceProgress?.('recovery-current-reverified');
   }
   return { recovered, ...(entityHashDocs ? { entityHashDocs } : {}) };
 };
@@ -756,6 +863,7 @@ export type StorageFrameSaveOptions = {
   currentFrameOutputs?: RoutedEntityInput[];
   pendingRuntimeInput?: RuntimeInput;
   historyRecords?: RuntimeHistoryRecord[];
+  entityContexts: Map<string, import('../types/entity/infra-context').EntityInfraContext>;
   tryOpenDb: (env: RuntimeReplica) => Promise<boolean>;
   getRuntimeDb: (env: RuntimeReplica) => RuntimeDbLike;
   tryOpenRuntimeWalDb: (env: RuntimeReplica) => Promise<boolean>;
@@ -806,6 +914,19 @@ const runStorageSnapshotLifecycle = async (
   if (snapshotDue || snapshotRequiredByBytes) {
     options.onPersistenceProgress?.('snapshot-start');
     const startedAt = options.getPerfMs();
+    const projection = await recoverStorageDbFromHistory({
+      db,
+      walDb,
+      config,
+      verifyCurrentProjection: true,
+      ...(options.onPersistenceProgress
+        ? { onPersistenceProgress: options.onPersistenceProgress }
+        : {}),
+    });
+    if (projection.entityHashDocs) {
+      options.env.infrastructure ??= {};
+      options.env.infrastructure.storageEntityHashDocs = projection.entityHashDocs;
+    }
     const snapshot = await createSnapshot(
       db,
       walDb,
@@ -936,15 +1057,17 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
     throw new Error('STORAGE_RUNTIME_WAL_UNAVAILABLE');
   }
   const walDb = options.getRuntimeWalDb(options.env);
+  const state = options.env.infrastructure ??= {};
   const recovered = await recoverStorageDbFromHistory({
     db,
     walDb,
     config,
+    verifyCurrentProjection: state.storageCurrentProjectionVerified !== true,
     ...(options.onPersistenceProgress
       ? { onPersistenceProgress: options.onPersistenceProgress }
       : {}),
   });
-  const state = options.env.infrastructure ?? {};
+  state.storageCurrentProjectionVerified = true;
   if (recovered.entityHashDocs) {
     state.storageEntityHashDocs = recovered.entityHashDocs;
   }
@@ -1374,6 +1497,7 @@ const buildStorageRuntimeFrame = (
         }
       : {}),
     runtimeInput: appliedRuntimeInput,
+    entityContexts: structuredClone(options.entityContexts),
     historyRecords: (options.historyRecords ?? []).map(record =>
       structuredClone(record),
     ),

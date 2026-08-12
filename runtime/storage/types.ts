@@ -8,6 +8,7 @@ import type { DebtEntry } from '../types/finance/debt';
 import type { FrameLogEntry } from '../types/logging';
 import type { HubRebalanceConfig } from '../types/finance/rebalance';
 import type { DurableOutputRetryState } from '../runtime/delivery/durable-output-retry';
+import type { EntityInfraContext } from '../types/entity/infra-context';
 import type { RadixMerkleRadix, RadixMerkleRootKind } from '../protocol/state/radix-merkle';
 import type { StorageMerkleNamespace } from './keys';
 
@@ -104,7 +105,7 @@ export type StorageEntityCoreDoc = {
   crontabState?: CrontabState;
   jBatchState?: JBatchState;
   entityProviderActionState?: EntityState['entityProviderActionState'];
-  profileEncryptionManifest?: EntityState['profileEncryptionManifest'];
+  entityEncryptionPublicKey: EntityState['entityEncryptionPublicKey'];
   profile: EntityState['profile'];
   htlcRoutes: Map<string, HtlcRoute>;
   htlcFeesEarned: bigint;
@@ -162,6 +163,8 @@ export type RuntimeFrame = {
   /** Sparse canonical Entity + durable R-machine replay oracle. */
   runtimeStateHash?: string;
   runtimeInput: RuntimeInput;
+  /** Exact public infrastructure slices committed by Entity frames in this Runtime frame. */
+  entityContexts: Map<string, EntityInfraContext>;
   /**
    * Exact certified child frames produced by this Runtime frame. These live in
    * the authoritative WAL so every disposable history view can be rebuilt
@@ -195,6 +198,7 @@ export type PersistedFrameJournal = Pick<RuntimeFrame,
   | 'replicaMetaCheckpoint'
   | 'replicaMetaStateMode'
   | 'runtimeInput'
+  | 'entityContexts'
   | 'pendingRuntimeInput'
   | 'runtimeOutputs'
   | 'runtimeOutputRetryState'
@@ -252,7 +256,6 @@ export type StorageReplicaMeta = {
   entityId: string;
   signerId: string;
   isProposer: boolean;
-  entityEncPubKey: string;
   /**
    * Exact validator-local state for multi-validator or checkpoint records.
    * Intermediate single-signer metadata references the authoritative shared

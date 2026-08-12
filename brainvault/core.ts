@@ -51,7 +51,7 @@ export function getShardCount(factor: number): number {
 }
 
 /**
- * Derive the legacy V1 factor for an explicit shard count without floating point.
+ * Derive the canonical factor for an explicit shard count without floating point.
  * This is exactly equivalent to ceil(log10(shardCount)) + 1 for positive integers.
  */
 export function factorForShardCount(shardCount: number): number {

@@ -294,7 +294,7 @@ describe('serialization-utils', () => {
     expect(afterRestored.events.some((event) => event.type === 'CANCELED')).toBe(true);
   });
 
-  test('rejects old legacy bigint string encoding', () => {
+  test('rejects old retired bigint string encoding', () => {
     const parsed = safeParse<{ amount: string }>('{"amount":"BigInt(5)"}');
     expect(parsed.amount).toBe('BigInt(5)');
   });

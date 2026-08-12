@@ -2,9 +2,8 @@
 
 Run a persistent local xln runtime and open its wallet UI in your system browser:
 
-```sh
-bunx xlnfinance
-```
+Install and run the exact versioned GitHub Release archive linked from
+`https://xln.finance/install`; do not resolve a mutable registry tag.
 
 The runtime listens only on `127.0.0.1:8080`. The launcher opens
 `http://localhost:8080/app`, exchanges a single-use pairing token for full admin
@@ -20,4 +19,7 @@ backend and the resulting signer is stored in the node state directory with owne
 permissions. Normal recovery returns only the public address/entity and timing. The
 mnemonic crosses into the browser only after the separate **Show mnemonic** action.
 
-Commands: `daemon`, `open`, `status`, `stop`, `logs`, `update`, and `version`.
+Commands: `daemon`, `open`, `status`, `stop`, `logs`, and `version`.
+
+The launcher does not install mutable tags. Upgrade by installing the exact versioned
+GitHub Release archive shown on the xln install page after verifying its release manifest.

@@ -17,7 +17,6 @@ const makeAccount = (): AccountReplica => ({
     deltas: new Map(),
     locks: new Map(),
     swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
@@ -28,6 +27,8 @@ const makeAccount = (): AccountReplica => ({
   },
   status: 'active',
   mempool: [],
+  swapOrderHistory: new Map(),
+  swapClosedOrders: new Map(),
   currentFrame: {
     height: 0,
     timestamp: 0,
@@ -51,6 +52,22 @@ const makeAccount = (): AccountReplica => ({
 });
 
 describe('swap order history', () => {
+  test('rejects a replica without its canonical lifecycle maps', () => {
+    const malformed = makeAccount() as AccountReplica & {
+      swapOrderHistory?: AccountReplica['swapOrderHistory'];
+    };
+    delete malformed.swapOrderHistory;
+    expect(() => recordSwapOfferLifecycle(malformed as AccountReplica, {
+      offerId: 'missing-map',
+      giveTokenId: 1,
+      giveAmount: 1n,
+      wantTokenId: 2,
+      wantAmount: 1n,
+      makerIsLeft: true,
+      createdHeight: 1,
+    })).toThrow('ACCOUNT_SWAP_HISTORY_MAP_REQUIRED');
+  });
+
   test('resolve lifecycle is idempotent for retried identical account application', () => {
     const account = makeAccount();
     const offer: SwapOffer = {
@@ -80,7 +97,7 @@ describe('swap order history', () => {
     recordSwapResolveLifecycle(account, offer.offerId, 2, resolve);
     recordSwapResolveLifecycle(account, offer.offerId, 2, { ...resolve });
 
-    const history = account.swapOrderHistory?.get(offer.offerId);
+    const history = account.swapOrderHistory.get(offer.offerId);
     expect(history?.originalGiveAmount).toBe(40n);
     expect(history?.originalWantAmount).toBe(100n);
     expect(history?.resolves).toHaveLength(1);
@@ -134,8 +151,8 @@ describe('swap order history', () => {
     recordSwapOfferLifecycle(account, offer);
     recordSwapClosedLifecycle(account, offer.offerId);
 
-    const activeRoute = account.swapOrderHistory?.get(offer.offerId)?.crossJurisdiction;
-    const closedRoute = account.swapClosedOrders?.get(offer.offerId)?.crossJurisdiction;
+    const activeRoute = account.swapOrderHistory.get(offer.offerId)?.crossJurisdiction;
+    const closedRoute = account.swapClosedOrders.get(offer.offerId)?.crossJurisdiction;
     expect(closedRoute).toEqual(activeRoute);
     expect(closedRoute).not.toBe(activeRoute);
     expect(closedRoute?.source).not.toBe(activeRoute?.source);

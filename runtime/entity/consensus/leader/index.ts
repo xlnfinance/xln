@@ -10,7 +10,7 @@ import { hasActionableSettlementContinuation } from '../account/settlement-conti
 
 const ENTITY_LEADER_TIMEOUT_BASE_MS = 10_000;
 const ENTITY_LEADER_TIMEOUT_MAX_MS = 60_000;
-export const ENTITY_J_SUBMIT_FALLBACK_MS = 60_000;
+export const ENTITY_J_SUBMIT_RETRY_MS = 60_000;
 
 const normalizeSignerId = (value: string): string => value.trim().toLowerCase();
 
@@ -32,13 +32,13 @@ export const getEntityLeaderOrder = (config: ConsensusConfig): string[] => {
   const validators = config.validators.map(normalizeSignerId);
   const ceo = validators[0];
   if (!ceo) return [];
-  const fallback = validators.slice(1).sort((left, right) => {
+  const successors = validators.slice(1).sort((left, right) => {
     const leftShares = validatorShares(config, left);
     const rightShares = validatorShares(config, right);
     if (leftShares !== rightShares) return leftShares > rightShares ? -1 : 1;
     return validators.indexOf(left) - validators.indexOf(right) || compareStableText(left, right);
   });
-  return [ceo, ...fallback];
+  return [ceo, ...successors];
 };
 
 export const getEntityLeaderState = (state: EntityLeaderStateView): EntityLeaderState => {
@@ -56,7 +56,7 @@ export const getEntityLeaderState = (state: EntityLeaderStateView): EntityLeader
   };
 };
 
-export const getNextEntityFallbackLeader = (state: EntityLeaderStateView): string => {
+export const getNextEntityFailoverLeader = (state: EntityLeaderStateView): string => {
   const order = getEntityLeaderOrder(state.config);
   if (order.length < 2) return order[0] ?? '';
   const activeIndex = order.indexOf(getEntityLeaderState(state).activeValidatorId);
@@ -94,7 +94,7 @@ export const buildEntityLeaderVoteBody = (state: EntityLeaderStateView): EntityL
     fromView: leader.view,
     toView: leader.view + 1,
     previousLeaderId: leader.activeValidatorId,
-    nextLeaderId: getNextEntityFallbackLeader(state),
+    nextLeaderId: getNextEntityFailoverLeader(state),
   };
 };
 

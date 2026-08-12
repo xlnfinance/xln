@@ -17,6 +17,7 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { createJAdapter } from '../../../jurisdiction/adapter';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import type { JurisdictionConfig } from '../../../entity/types';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);
@@ -78,8 +79,7 @@ async function main() {
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [
-      {
-        type: 'importReplica',
+      createTestEntityImportRuntimeTx(env, {
         entityId: entityA,
         signerId: signer1,
         data: {
@@ -92,9 +92,8 @@ async function main() {
             jurisdiction,
           },
         },
-      },
-      {
-        type: 'importReplica',
+      }),
+      createTestEntityImportRuntimeTx(env, {
         entityId: entityB,
         signerId: signer2,
         data: {
@@ -107,7 +106,7 @@ async function main() {
             jurisdiction,
           },
         },
-      },
+      }),
     ],
     entityInputs: [],
   });

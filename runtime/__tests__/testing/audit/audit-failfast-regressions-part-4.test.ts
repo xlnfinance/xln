@@ -36,7 +36,6 @@ import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 
 import { buildHashLadderProof, revealHashLadder } from '../../../protocol/htlc/hash-ladder';
 
-import type { MultiRecipientCiphertext } from '../../../protocol/htlc/multi-recipient';
 
 import { checkAutoRebalance, handleRequestCollateral } from '../../../account/tx/handlers/rebalance/request-collateral';
 
@@ -64,9 +63,10 @@ import { isLeftEntity } from '../../../entity/id';
 import {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
   MAX_PENDING_CROSS_J_FILL_ACKS,
-  applyEntityFrame,
   applyEntityInput,
 } from '../../../entity/consensus/index';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
+import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
 
 import { createEntityFrameHash } from '../../../entity/consensus/frame';
 
@@ -114,7 +114,6 @@ import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../../../entit
 
 import { buildCrossJurisdictionEntityOutput } from '../../../entity/tx/j-events-htlc/cross-j-outputs';
 
-import { handleHtlcOnionAdvance } from '../../../entity/tx/handlers/htlc/onion-advance';
 
 import {
   handleAdmitCrossJurisdictionBookOrderEntityTx,
@@ -225,22 +224,6 @@ import { resolveHankoBoardDelays } from '../../../hanko/claims';
 
 import { signEntityHashes, verifyHankoForHash } from '../../../hanko/signing';
 
-import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
-
-import { computeHtlcEnvelopeContextHash, computeHtlcSecretOfferContextHash } from '../../../protocol/htlc/codec/envelope';
-
-import { encryptBytesForValidatorManifest } from '../../../protocol/htlc/multi-recipient';
-
-import { buildHtlcOnionAdvanceTx } from '../../../entity/htlc/onion-advance';
-import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/codec/onion-layer';
-
-import { encodeHtlcSecretOffer, encodeOnionLayer } from '../../../protocol/htlc/codec/onion';
-
-import {
-  computeEntityProfileCertificationHash,
-  computeValidatorEncryptionAttestationDigest,
-  requireCompleteValidatorEncryptionManifest,
-} from '../../../protocol/htlc/validator-encryption';
 
 import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bootstrap-fail-fast';
 
@@ -365,7 +348,6 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       deltas: new Map(),
       locks: new Map(),
       swapOffers: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -602,6 +584,7 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
 
 const makeEntityState = (entityId: string): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
@@ -781,46 +764,43 @@ describe('audit fail-fast regressions', () => {
       } as any,
     ];
     const baseState = makeEntityState(entityId);
+    baseState.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId).publicKey;
     baseState.config = config;
     const frameTxs = await buildQuorumAuthorizedFrameTxs(env, baseState, collectiveTxs);
-    const { newState: replayedState, collectedHashes = [], outputs, events } = await applyEntityFrame(
+    const { newState: replayedState, collectedHashes = [], outputs, events, entityContext } = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       baseState,
       frameTxs,
       env.state.timestamp,
     );
     const leaderState = { activeValidatorId: first.signerId, view: 0, changedAtHeight: 0 };
-    const frameHash = await createEntityFrameHash('genesis', 1, env.state.timestamp, frameTxs, {
+    const committedState: EntityState = {
       ...replayedState,
       entityId,
       height: 1,
       timestamp: env.state.timestamp,
       leaderState,
-    });
+    };
+    const frameHash = await createEntityFrameHash(
+      'genesis',
+      1,
+      env.state.timestamp,
+      frameTxs,
+      committedState,
+      entityContext,
+    );
     const localManifest = buildEntityHashesToSign(
       entityId,
       1,
       frameHash,
       [
         ...collectedHashes,
-        ...buildCertifiedEntityOutputHashes(replayedState, env, 1, frameHash, outputs),
+        ...buildCertifiedEntityOutputHashes(committedState, env, 1, frameHash, outputs),
       ],
     );
-    const stateRoot = computeCanonicalEntityConsensusStateHash({
-      ...replayedState,
-      entityId,
-      height: 1,
-      timestamp: env.state.timestamp,
-      leaderState,
-    });
+    const stateRoot = computeCanonicalEntityConsensusStateHash(committedState);
     const authorityRoot = computeEntityFrameAuthorityRoot(
-      buildEntityFrameAuthority({
-        ...replayedState,
-        entityId,
-        height: 1,
-        timestamp: env.state.timestamp,
-        leaderState,
-      }),
+      buildEntityFrameAuthority(committedState),
     );
     const attackerHash = ethers.keccak256(ethers.toUtf8Bytes('attacker-selected-dispute-hash'));
     const validatorReplica: EntityReplica = {
@@ -842,6 +822,7 @@ describe('audit fail-fast regressions', () => {
         authorityRoot,
         timestamp: env.state.timestamp,
         txs: frameTxs,
+        entityContext,
         events: [],
         hash: ethers.keccak256(ethers.toUtf8Bytes('proposer-selected-invalid-frame-hash')),
         leader: { proposerSignerId: first.signerId, view: 0 },
@@ -862,6 +843,7 @@ describe('audit fail-fast regressions', () => {
         height: 1,
         timestamp: env.state.timestamp,
         txs: frameTxs,
+        entityContext,
         events: [],
         hash: frameHash,
         leader: { proposerSignerId: first.signerId, view: 0 },
@@ -873,7 +855,9 @@ describe('audit fail-fast regressions', () => {
     expect(forgedProposalResult.outputs).toEqual([]);
     expect(forgedProposalResult.workingReplica.lockedFrame).toBeUndefined();
 
-    const proposerFrameSignature = signAccountFrame(env, first.signerId, frameHash);
+    const proposerFrameSignatures = localManifest.map(({ hash }) =>
+      signAccountFrame(env, first.signerId, hash),
+    );
     const honestProposal = {
       height: 1,
       parentFrameHash: 'genesis',
@@ -881,11 +865,12 @@ describe('audit fail-fast regressions', () => {
       authorityRoot,
       timestamp: env.state.timestamp,
       txs: frameTxs,
+      entityContext,
       events,
       hash: frameHash,
       leader: { proposerSignerId: first.signerId, view: 0 },
       hashesToSign: localManifest,
-      collectedSigs: new Map([[first.signerId, [proposerFrameSignature]]]),
+      collectedSigs: new Map([[first.signerId, proposerFrameSignatures]]),
     };
     const precommitResult = await applyEntityInput(env, validatorReplica, {
       entityId,
@@ -996,14 +981,14 @@ describe('audit fail-fast regressions', () => {
     const honestBaseState = makeEntityState(entityId);
     honestBaseState.config = makeSingleSignerConfigFor(signerId);
     const frameTxs = await buildQuorumAuthorizedFrameTxs(env, honestBaseState, collectiveTxs);
-    const { newState: honestFrameState } = await applyEntityFrame(env, honestBaseState, frameTxs, env.state.timestamp);
+    const { newState: honestFrameState, entityContext } = await applyEntityFrameWithMaterializedTestInfraContext(env, honestBaseState, frameTxs, env.state.timestamp);
     const honestNewState: EntityState = {
       ...honestFrameState,
       entityId,
       height: 1,
       timestamp: env.state.timestamp,
     };
-    const frameHash = await createEntityFrameHash('genesis', 1, env.state.timestamp, frameTxs, honestNewState);
+    const frameHash = await createEntityFrameHash('genesis', 1, env.state.timestamp, frameTxs, honestNewState, entityContext);
     const secondaryHash = ethers.keccak256(ethers.toUtf8Bytes('account-frame-secondary-hash'));
     const frameSig = signAccountFrame(env, signerId, frameHash);
     const secondarySig = signAccountFrame(env, signerId, secondaryHash);
@@ -1024,6 +1009,7 @@ describe('audit fail-fast regressions', () => {
         height: 1,
         timestamp: env.state.timestamp,
         txs: frameTxs,
+        entityContext,
         hash: frameHash,
         leader: { proposerSignerId: signerId, view: 0 },
         hashesToSign: [
@@ -1488,10 +1474,15 @@ describe('audit fail-fast regressions', () => {
     );
     const env = createEmptyEnv('account-certified-counterparty-route-local');
 
-    expect(() => resolveEntityProposerId(env, counterpartyId, 'legacy-gossip-route')).toThrow(
+    expect(() => resolveEntityProposerId(env, counterpartyId, 'noncanonical-gossip-route')).toThrow(
       'SIGNER_RESOLUTION_FAILED',
     );
-    expect(await resolveCertifiedAccountCounterpartyProposer(env, account, counterpartyId)).toBe(counterpartySignerId);
+    expect(await resolveCertifiedAccountCounterpartyProposer(
+      env,
+      makeEntityState(localEntityId),
+      account,
+      counterpartyId,
+    )).toBe(counterpartySignerId);
   });
 
   test('crontab resends a restored pending frame without persisting transport routing', async () => {
@@ -2252,33 +2243,11 @@ describe('audit fail-fast regressions', () => {
     const beforeRoot = computeAccountStateRoot(receiver.state);
     expect(computeAccountStateRootCold(receiver.state)).toBe(beforeRoot);
 
-    const opaqueOffer = {
-      version: 'xln:htlc-multi-recipient:v1',
-      manifest: {
-        entityId: right.entityId,
-        threshold: 0,
-        attestations: [],
-        hash: `0x${'41'.repeat(32)}`,
-      },
-      profileCertification: {
-        profileHash: `0x${'42'.repeat(32)}`,
-        routingStateHash: `0x${'43'.repeat(32)}`,
-        hanko: `0x${'44'.repeat(65)}`,
-      },
-      contextHash: `0x${'45'.repeat(32)}`,
-      nonce: 'AAAAAAAAAAAAAAAA',
-      ciphertext: 'AAAA',
-      recipients: [],
-    } as MultiRecipientCiphertext;
     const frame: AccountFrame = {
       height: 1,
       timestamp: env.state.timestamp,
       jHeight: 0,
       accountTxs: [
-        {
-          type: 'htlc_resolve',
-          data: { lockId: 'existing-lock', outcome: 'offer', offer: opaqueOffer },
-        },
         {
           type: 'htlc_lock',
           data: {
@@ -2323,7 +2292,7 @@ describe('audit fail-fast regressions', () => {
     expect(receiver.pendingFrame).toEqual(localPending.accountInput.proposal.frame);
     expect(receiver.pendingAccountInput).toEqual(localPending.accountInput);
     expect(receiver.mempool).toEqual([]);
-    expect(receiver.state.locks.get('existing-lock')?.secretOffer).toBeUndefined();
+    expect(receiver.state.locks.has('existing-lock')).toBe(true);
     expect(receiver.state.swapOffers.get('existing-offer')?.giveAmount).toBe(7n);
     const afterTiming: Parameters<typeof computeAccountStateRoot>[1] = {};
     expect(computeAccountStateRoot(receiver.state, afterTiming)).toBe(beforeRoot);

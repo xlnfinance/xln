@@ -60,7 +60,7 @@ function TokenSection({ token }: { token: AccountTokenView }) {
 				</span>
 			</div>
 
-			<DeltaBar derived={d} signed={token.signed} height={8} />
+			<DeltaBar derived={d} height={8} />
 			<div style={{ marginTop: 8 }}>
 				<DeltaLegend />
 			</div>

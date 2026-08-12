@@ -21,9 +21,9 @@ const argValue = (name: string): string | null => {
 
 const hasFlag = (name: string): boolean => process.argv.slice(2).includes(`--${name}`);
 
-const positiveInt = (raw: string | null, fallback: number): number => {
+const positiveInt = (raw: string | null, defaultValue: number): number => {
   const parsed = Number(raw ?? '');
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : defaultValue;
 };
 
 const readRunnerLock = () => readE2ERunnerLock(runnerLockPath);

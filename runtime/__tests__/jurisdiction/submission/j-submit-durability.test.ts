@@ -9,7 +9,7 @@ import {
 import { J_SUBMIT_RESULT_FINGERPRINT_LIMIT } from '../../../runtime/jurisdiction/j-submit-result';
 import { collectDueJSubmitRuntimeTxs } from '../../../runtime/jurisdiction/j-submit-scheduler';
 import { submitRuntimeJOutbox } from '../../../runtime/jurisdiction/j-submit';
-import { ENTITY_J_SUBMIT_FALLBACK_MS } from '../../../entity/consensus/leader';
+import { ENTITY_J_SUBMIT_RETRY_MS } from '../../../entity/consensus/leader';
 import { createEmptyBatch } from '../../../jurisdiction/machine/batch';
 import { computeCanonicalEntityHash } from '../../../storage/canonical-hash';
 import { buildCanonicalEntityReplicaSnapshot } from '../../../storage/wal/snapshot';
@@ -72,7 +72,7 @@ describe('durable validator-local J submit state', () => {
       failedAt: env.state.timestamp,
     };
 
-    expect(collectDueJSubmitRuntimeTxs(env, env.state.timestamp + ENTITY_J_SUBMIT_FALLBACK_MS)).toEqual([]);
+    expect(collectDueJSubmitRuntimeTxs(env, env.state.timestamp + ENTITY_J_SUBMIT_RETRY_MS)).toEqual([]);
     expect(await applyRuntimeTx(env, retry, { isReplay: true })).toEqual([]);
 
     const queued: Parameters<typeof applyRuntimeTx>[1][] = [];
@@ -119,7 +119,7 @@ describe('durable validator-local J submit state', () => {
     expect(replica.state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
     expect(computeCanonicalEntityHash(replica).hash).toBe(beforeHash);
     expect(env.infrastructure?.pendingCommittedJOutbox).toEqual([]);
-    expect(collectDueJSubmitRuntimeTxs(env, env.state.timestamp + ENTITY_J_SUBMIT_FALLBACK_MS * 2)).toEqual([]);
+    expect(collectDueJSubmitRuntimeTxs(env, env.state.timestamp + ENTITY_J_SUBMIT_RETRY_MS * 2)).toEqual([]);
   });
 
   test('transient result starts backoff from the persisted attempt timestamp', async () => {
@@ -133,8 +133,8 @@ describe('durable validator-local J submit state', () => {
       { message: 'ECONNRESET' },
     ), { isReplay: true });
 
-    expect(collectDueJSubmitRuntimeTxs(env, 2_000 + ENTITY_J_SUBMIT_FALLBACK_MS - 1)).toEqual([]);
-    expect(collectDueJSubmitRuntimeTxs(env, 2_000 + ENTITY_J_SUBMIT_FALLBACK_MS)).toHaveLength(1);
+    expect(collectDueJSubmitRuntimeTxs(env, 2_000 + ENTITY_J_SUBMIT_RETRY_MS - 1)).toEqual([]);
+    expect(collectDueJSubmitRuntimeTxs(env, 2_000 + ENTITY_J_SUBMIT_RETRY_MS)).toHaveLength(1);
   });
 
   test('authenticated J input defers external I/O and makes the batch immediately retryable', async () => {
@@ -284,7 +284,7 @@ describe('durable validator-local J submit state', () => {
 
   test('queued retry cannot overlap a durable pending attempt', async () => {
     const { env, replica, retry } = await commitAttempt();
-    env.state.timestamp += ENTITY_J_SUBMIT_FALLBACK_MS;
+    env.state.timestamp += ENTITY_J_SUBMIT_RETRY_MS;
 
     expect(await applyRuntimeTx(env, retry, { isReplay: true })).toEqual([]);
     expect(replica.jSubmitState?.submitAttempts).toBe(1);
@@ -297,7 +297,7 @@ describe('durable validator-local J submit state', () => {
     if (!firstBatchTx || firstBatchTx.type !== 'batch') throw new Error('first attempt fixture missing');
 
     env.infrastructure!.pendingCommittedJOutbox = [];
-    env.state.timestamp += ENTITY_J_SUBMIT_FALLBACK_MS;
+    env.state.timestamp += ENTITY_J_SUBMIT_RETRY_MS;
     const [secondRetry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
     if (!secondRetry) throw new Error('second retry fixture missing');
     const secondOutbox = await applyRuntimeTx(env, secondRetry, { isReplay: true });
@@ -346,7 +346,7 @@ describe('durable validator-local J submit state', () => {
     expect(env.infrastructure?.pendingCommittedJOutbox).toEqual(afterFirstResult.pending);
   });
 
-  test('conflicting duplicate of an older recorded attempt still fails after a newer result', async () => {
+  test('conflicting duplicate of a prior recorded attempt still fails after a newer result', async () => {
     const { env, replica, jOutbox: firstOutbox } = await commitAttempt();
     const firstBatchTx = firstOutbox[0]?.jTxs[0];
     if (!firstBatchTx || firstBatchTx.type !== 'batch') throw new Error('first attempt fixture missing');
@@ -358,7 +358,7 @@ describe('durable validator-local J submit state', () => {
     );
     await applyRuntimeTx(env, firstResult, { isReplay: true });
 
-    env.state.timestamp += ENTITY_J_SUBMIT_FALLBACK_MS;
+    env.state.timestamp += ENTITY_J_SUBMIT_RETRY_MS;
     const [secondRetry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
     if (!secondRetry) throw new Error('second retry fixture missing');
     const secondOutbox = await applyRuntimeTx(env, secondRetry, { isReplay: true });
@@ -401,7 +401,7 @@ describe('durable validator-local J submit state', () => {
       );
       results.push(result);
       await applyRuntimeTx(env, result, { isReplay: true });
-      env.state.timestamp += ENTITY_J_SUBMIT_FALLBACK_MS;
+      env.state.timestamp += ENTITY_J_SUBMIT_RETRY_MS;
     }
 
     const firstAttemptId = results[0]!.data.attemptId;

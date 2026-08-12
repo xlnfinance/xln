@@ -125,9 +125,9 @@
                   <div class="wide"><dt>Final recipient</dt><dd class="exact-id"><code>{payment.recipientEntityId}</code></dd></div>
                   <div><dt>Asset</dt><dd>{tokenLabel(payment.tokenId, payment.tokenSymbol, payment.tokenName)}</dd></div>
                   <div><dt>Recipient amount</dt><dd>{payment.recipientAmount.toString()}</dd></div>
-                  <div><dt>Exact total debit</dt><dd>{payment.totalDebit.toString()}</dd></div>
-                  <div><dt>Exact fee</dt><dd>{payment.totalFee.toString()}</dd></div>
-                  <div class="wide"><dt>Hashlock</dt><dd class="exact-id"><code>{payment.hashlock}</code></dd></div>
+                  <div><dt>Maximum sender debit</dt><dd>{payment.maxSenderDebit.toString()}</dd></div>
+                  <div><dt>Maximum fee</dt><dd>{payment.maxFee.toString()}</dd></div>
+                  <div class="wide"><dt>Hashlock</dt><dd class="exact-id"><code>{payment.hashlock ?? 'Pending proposer derivation'}</code></dd></div>
                 </dl>
               </section>
             {/each}

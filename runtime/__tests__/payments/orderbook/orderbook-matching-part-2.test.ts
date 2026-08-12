@@ -31,6 +31,7 @@ import type { AccountReplica, AccountTx, SwapOffer } from '../../../types/accoun
 import type { EntityCandidateEffect } from '../../../entity/types';
 
 import { createDefaultDelta } from '../../../account/state/delta';
+import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 
 const TESTNET_STACK = `stack:31337:0x${'11'.repeat(20)}`;
 
@@ -47,7 +48,18 @@ const processCommittedOrderbookSwaps = (
 ) => processOrderbookSwaps(state, offers.map(markWorkingOrderbookOffer), options);
 
 function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountReplica {
-  const offers = Array.isArray(input) ? input : [input];
+  const offers = (Array.isArray(input) ? input : [input]).map(offer =>
+    offer.crossJurisdiction
+      ? {
+          ...offer,
+          crossJurisdiction: {
+            ...offer.crossJurisdiction,
+            sourceDisputeConfig: offer.crossJurisdiction.sourceDisputeConfig ?? { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+            targetDisputeConfig: offer.crossJurisdiction.targetDisputeConfig ?? { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+          },
+        }
+      : offer,
+  );
   const firstOffer = offers[0];
   const deltas = new Map<number, ReturnType<typeof createDefaultDelta>>();
   for (const offer of offers) {
@@ -64,7 +76,7 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
     else giveDelta.rightHold += heldGiveAmount;
   }
 
-  return {
+  const account: AccountReplica = {
     state: {
       leftEntity: firstOffer?.fromEntity ?? 'hub-entity',
       rightEntity: firstOffer?.toEntity ?? 'fixture-peer',
@@ -76,7 +88,6 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
       deltas,
       locks: new Map(),
       swapOffers: new Map(offers.map((offer) => [offer.offerId, offer])),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
@@ -87,6 +98,8 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
     },
     status: 'active',
     mempool: [],
+    swapOrderHistory: new Map(),
+    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -110,6 +123,8 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
     pendingWithdrawals: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };
+  for (const offer of offers) recordSwapOfferLifecycle(account, offer);
+  return account;
 }
 
 /** See part 1: projection-only fixtures still use the canonical AccountReplica shape. */
@@ -132,7 +147,7 @@ function makeAccountIndex(offerIds: readonly string[]): AccountReplica {
   );
 }
 
-describe('orderbook matching fallback execution mapping', () => {
+describe('orderbook matching execution mapping', () => {
   test('validates a remote cross-j book order from admitted route without refreshing it', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;

@@ -25,7 +25,7 @@ type PendingBatchActionRunnerOptions = {
   confirmClear: () => boolean;
   notifySuccess: (message: string) => void;
   notifyError: (message: string) => void;
-  formatError: (error: unknown, fallback: string) => string;
+  formatError: (error: unknown, defaultMessage: string) => string;
 };
 
 export function buildPendingBatchEntityInput(

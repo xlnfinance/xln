@@ -121,7 +121,9 @@ test('port preflight refuses to signal a foreign listener', async () => {
     while (Date.now() < deadline) {
       try {
         if ((await fetch(`http://127.0.0.1:${port}`)).ok) break;
-      } catch {}
+      } catch {
+        // The foreign listener may not have bound yet; poll until the deadline.
+      }
       await Bun.sleep(20);
     }
     expect((await fetch(`http://127.0.0.1:${port}`)).status).toBe(200);

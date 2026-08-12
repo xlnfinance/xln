@@ -23,6 +23,9 @@ import {
 import { entityLog } from '../entity-log';
 import { getPrevFrameHash } from '../frame/lineage';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
+import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
+import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
+import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
 
 export type ProposalReplayResult =
   | { accepted: true; execution: EntityCandidate }
@@ -73,6 +76,7 @@ const verifyProposalFrameHash = (
     state.entityId,
     frame.stateRoot,
     frame.authorityRoot,
+    frame.entityContext,
     frame.jPrefixCertificate,
   );
   if (frameHash === frame.hash) return null;
@@ -123,9 +127,24 @@ export const replayProposedEntityFrame = async (
 ): Promise<ProposalReplayResult> => {
   let applied: Awaited<ReturnType<typeof applyEntityFrame>>;
   try {
+    await assertEntityInfraContextAuthority(
+      context.env,
+      frame.entityContext,
+      context.workingReplica.state,
+    );
+    await assertHtlcPreparedInfraContext({
+      state: context.workingReplica.state,
+      proposalTxs: frame.txs,
+      context: frame.entityContext,
+      entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(
+        context.env,
+        context.workingReplica.state.entityId,
+      ),
+    });
     applied = await applyEntityFrame(
       context.env,
       context.workingReplica.state,
+      frame.entityContext,
       frame.txs,
       frame.timestamp,
     );

@@ -93,7 +93,7 @@ describe('rendered token metadata is exact', () => {
     })).toBe('▸ C8: 1.2345');
   });
 
-  test('production render code contains no silent eighteen-decimal fallback', async () => {
+  test('production render code contains no silent eighteen-decimal substitution', async () => {
     const glob = new Bun.Glob('frontend/src/lib/**/*.{ts,svelte}');
     for await (const path of glob.scan({ cwd: process.cwd(), absolute: true })) {
       const source = await Bun.file(path).text();

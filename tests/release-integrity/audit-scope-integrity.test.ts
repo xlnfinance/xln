@@ -168,7 +168,11 @@ test('every claim-binding artifact field rejects relabeling', () => {
 });
 
 test('migration never upgrades broad module labels into unrecorded invariant claims', () => {
-  const broadRun = REGISTRY.agentRuns.find(candidate => candidate.id === 'legacy-top-security-reaudit-20260801')!;
+  const broadRun = REGISTRY.agentRuns.find(candidate => (
+    candidate.moduleIds.includes('public-wallet-api')
+    && candidate.invariantIds.length === 0
+    && Object.keys(candidate.moduleFingerprints).length === 0
+  ))!;
   expect(broadRun.moduleIds).toContain('public-wallet-api');
   expect(broadRun.invariantIds).toEqual([]);
   expect(broadRun.moduleFingerprints).toEqual({});
@@ -181,7 +185,7 @@ test('migration never upgrades broad module labels into unrecorded invariant cla
   }
 });
 
-test('schema v2 rejects missing exact-scope fields before validation can crash', () => {
+test('the exact-scope schema rejects missing fields before validation can crash', () => {
   const malformed = JSON.parse(JSON.stringify(REGISTRY)) as {
     invariants: Array<Record<string, unknown>>;
     agentRuns: Array<Record<string, unknown>>;

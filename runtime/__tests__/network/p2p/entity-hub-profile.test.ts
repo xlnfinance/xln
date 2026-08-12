@@ -7,6 +7,7 @@ import { cloneEntityState } from '../../../entity/state-clone';
 import { handleSetHubConfigEntityTx } from '../../../entity/tx/handlers/account/lifecycle/admin';
 import type { ConsensusConfig, EntityState } from '../../../entity/types';
 import type { HubRebalanceConfig } from '../../../types/finance/rebalance';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const ENTITY_SEED = 'entity-hub-profile-test-seed';
 const SIGNER_LABEL = 'signer-1';
@@ -82,8 +83,7 @@ describe('entity hub profile classification', () => {
     const entityId = hashBoard(encodeBoard(config));
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId,
         data: {
@@ -91,7 +91,7 @@ describe('entity hub profile classification', () => {
           isProposer: true,
           profileName: 'Test Entity',
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env);
@@ -167,12 +167,11 @@ describe('entity hub profile classification', () => {
     const config = buildConsensusConfig(signerId);
     const entityId = hashBoard(encodeBoard(config));
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId,
         data: { config, isProposer: true, profileName: 'H1' },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env);

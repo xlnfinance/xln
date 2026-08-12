@@ -6,6 +6,7 @@ import { ethers } from 'ethers';
 import { applyEntityTx } from '../../../entity/tx/apply';
 
 import { applyAccountTx } from '../../../account/tx/apply';
+import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 
@@ -191,7 +192,6 @@ import { canonicalDisputeFinalizationEvidenceHash } from '../../../jurisdiction/
 
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
 
-import { collectLocalProfileEncryptionAnnouncements } from '../../../entity/profile/profile-encryption';
 
 import { LIMITS } from '../../../config/constants';
 
@@ -824,6 +824,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 0,
       crossJurisdiction: { ...route, status: 'resting' },
     });
+    recordSwapOfferLifecycle(account, account.state.swapOffers.get(route.orderId)!);
     addReplica(env, state, signer);
     const replica = env.state.eReplicas.get(`${state.entityId}:${signer}`)!;
 
@@ -1324,6 +1325,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdHeight: 0,
         crossJurisdiction: { ...route, status: 'resting' },
       });
+      recordSwapOfferLifecycle(account, account.state.swapOffers.get(route.orderId)!);
     }
 
     addReplica(env, sourceUserState, sourceUserSigner);
@@ -1464,6 +1466,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdHeight: 0,
         crossJurisdiction: { ...route, status: 'resting' },
       });
+      recordSwapOfferLifecycle(account, account.state.swapOffers.get(route.orderId)!);
     }
 
     addReplica(env, sourceUserState, sourceUserSigner);
@@ -1588,6 +1591,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 0,
       crossJurisdiction: { ...route },
     });
+    recordSwapOfferLifecycle(account, account.state.swapOffers.get(route.orderId)!);
     account.state.pulls = new Map([
       [
         route.sourcePull!.pullId,

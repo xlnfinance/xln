@@ -24,8 +24,8 @@ const CANONICAL_BALANCE_REFRESH_MS = 1_000;
 
 function clampAccountBarUsdPerPx(raw: unknown): number {
   const numeric = Number(raw);
-  const fallback = ACCOUNT_BAR_USD_PER_100PX_DEFAULT / 100;
-  if (!Number.isFinite(numeric)) return fallback;
+  const defaultScale = ACCOUNT_BAR_USD_PER_100PX_DEFAULT / 100;
+  if (!Number.isFinite(numeric)) return defaultScale;
   const min = ACCOUNT_BAR_USD_PER_100PX_MIN / 100;
   const max = ACCOUNT_BAR_USD_PER_100PX_MAX / 100;
   return Math.max(min, Math.min(max, Math.round(numeric * 100) / 100));

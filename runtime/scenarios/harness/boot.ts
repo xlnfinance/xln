@@ -21,6 +21,7 @@ import {
 } from '../../runtime/jurisdiction/live-jadapters';
 
 export type { JAdapterMode };
+import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 
 const SCENARIO_JADAPTER_MISSING = 'SCENARIO_JADAPTER_MISSING';
 
@@ -510,8 +511,7 @@ export async function registerEntities(
     runtimeTxs: result.map((r, i) => {
       const sourceEntity = entities[i];
       if (!sourceEntity) throw new Error(`REGISTER_ENTITY_SOURCE_MISSING: index=${i}`);
-      return {
-        type: 'importReplica' as const,
+      return createTestEntityImportRuntimeTx(env, {
         entityId: r.id,
         signerId: r.signer,
         data: {
@@ -525,7 +525,7 @@ export async function registerEntities(
             jurisdiction,
           }
         }
-      };
+      });
     }),
     entityInputs: []
   });
@@ -683,8 +683,7 @@ export async function createNumberedEntity(
   );
 
   await commitRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica' as const,
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId: boardIdentity.signer,
       data: {
@@ -698,7 +697,7 @@ export async function createNumberedEntity(
           jurisdiction
         }
       }
-    }],
+    })],
     entityInputs: []
   });
 

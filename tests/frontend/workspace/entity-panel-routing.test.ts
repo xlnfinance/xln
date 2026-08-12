@@ -7,9 +7,9 @@ import {
 } from '../../../frontend/src/lib/components/Entity/workspace/entity-panel-routing';
 
 describe('entity panel routing helpers', () => {
-  test('canonicalizes account workspace aliases', () => {
-    expect(canonicalizeEntityPanelRoute('pay/0xabc')).toBe('accounts/send');
-    expect(canonicalizeEntityPanelRoute('borrow')).toBe('accounts/lending');
+  test('accepts only canonical account workspace routes', () => {
+    expect(canonicalizeEntityPanelRoute('pay/0xabc')).toBeNull();
+    expect(canonicalizeEntityPanelRoute('borrow')).toBeNull();
     expect(canonicalizeEntityPanelRoute('/settings/recovery/')).toBe('settings/recovery');
     expect(canonicalizeEntityPanelRoute('/settings/consensus/')).toBe('settings/consensus');
   });
@@ -23,23 +23,9 @@ describe('entity panel routing helpers', () => {
       activeTab: 'accounts',
       accountWorkspaceTab: 'move',
     });
-    expect(resolveEntityPanelDeepLink({ hashRoute: 'borrow' })).toEqual({
+    expect(resolveEntityPanelDeepLink({ hashRoute: 'accounts/lending' })).toEqual({
       activeTab: 'accounts',
       accountWorkspaceTab: 'lending',
-    });
-  });
-
-  test('preserves legacy view/subview query behavior', () => {
-    expect(resolveEntityPanelDeepLink({ view: 'settings', subview: 'recovery' })).toEqual({
-      activeTab: 'settings',
-      settingsSubview: 'recovery',
-    });
-    expect(resolveEntityPanelDeepLink({ view: 'configure', subview: 'credit' })).toEqual({
-      configureWorkspaceTab: 'extend-credit',
-    });
-    expect(resolveEntityPanelDeepLink({ view: 'settings', subview: 'consensus' })).toEqual({
-      activeTab: 'settings',
-      settingsSubview: 'consensus',
     });
   });
 

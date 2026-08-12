@@ -36,7 +36,6 @@ import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 
 import { buildHashLadderProof, revealHashLadder } from '../../../protocol/htlc/hash-ladder';
 
-import type { MultiRecipientCiphertext } from '../../../protocol/htlc/multi-recipient';
 
 import { checkAutoRebalance, handleRequestCollateral } from '../../../account/tx/handlers/rebalance/request-collateral';
 
@@ -63,9 +62,9 @@ import { isLeftEntity } from '../../../entity/id';
 import {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
   MAX_PENDING_CROSS_J_FILL_ACKS,
-  applyEntityFrame,
   applyEntityInput,
 } from '../../../entity/consensus/index';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 
 import { createEntityFrameHash } from '../../../entity/consensus/frame';
 
@@ -113,7 +112,6 @@ import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../../../entit
 
 import { buildCrossJurisdictionEntityOutput } from '../../../entity/tx/j-events-htlc/cross-j-outputs';
 
-import { handleHtlcOnionAdvance } from '../../../entity/tx/handlers/htlc/onion-advance';
 
 import {
   handleAdmitCrossJurisdictionBookOrderEntityTx,
@@ -224,22 +222,6 @@ import { resolveHankoBoardDelays } from '../../../hanko/claims';
 
 import { signEntityHashes, verifyHankoForHash } from '../../../hanko/signing';
 
-import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
-
-import { computeHtlcEnvelopeContextHash, computeHtlcSecretOfferContextHash } from '../../../protocol/htlc/codec/envelope';
-
-import { encryptBytesForValidatorManifest } from '../../../protocol/htlc/multi-recipient';
-
-import { buildHtlcOnionAdvanceTx } from '../../../entity/htlc/onion-advance';
-import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/codec/onion-layer';
-
-import { encodeHtlcSecretOffer, encodeOnionLayer } from '../../../protocol/htlc/codec/onion';
-
-import {
-  computeEntityProfileCertificationHash,
-  computeValidatorEncryptionAttestationDigest,
-  requireCompleteValidatorEncryptionManifest,
-} from '../../../protocol/htlc/validator-encryption';
 
 import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bootstrap-fail-fast';
 
@@ -364,7 +346,6 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       deltas: new Map(),
       locks: new Map(),
       swapOffers: new Map(),
-      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -610,6 +591,7 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
 
 const makeEntityState = (entityId: string): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
@@ -863,7 +845,7 @@ describe('audit fail-fast regressions', () => {
       },
     ];
     await expect(
-      applyEntityFrame(env, cappedState, await buildQuorumAuthorizedFrameTxs(env, cappedState, fillNoticeTxs)),
+      applyEntityFrameWithMaterializedTestInfraContext(env, cappedState, await buildQuorumAuthorizedFrameTxs(env, cappedState, fillNoticeTxs)),
     ).rejects.toThrow('CROSS_J_FILL_ACK_PENDING_CAPACITY');
     expect(cappedState.pendingCrossJurisdictionFillAcks.size).toBe(MAX_PENDING_CROSS_J_FILL_ACKS);
     expect(
@@ -872,7 +854,7 @@ describe('audit fail-fast regressions', () => {
       ),
     ).toBe(false);
 
-    const first = await applyEntityFrame(
+    const first = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
       sourceState,
       await buildQuorumAuthorizedFrameTxs(env, sourceState, fillNoticeTxs),
@@ -891,7 +873,7 @@ describe('audit fail-fast regressions', () => {
     env.state.timestamp = originalTimestamp + CROSS_J_PENDING_FILL_ACK_TTL_MS + 1;
     const expiredEnv = env;
     expiredState.timestamp = expiredEnv.state.timestamp;
-    const preserved = await applyEntityFrame(expiredEnv, expiredState, []);
+    const preserved = await applyEntityFrameWithMaterializedTestInfraContext(expiredEnv, expiredState, []);
     const preservedAck = preserved.newState.pendingCrossJurisdictionFillAcks?.values().next().value;
     expect(preservedAck?.ttlExpiredAt).toBe(expiredEnv.state.timestamp);
     expect(expiredEnv.infrastructure?.securityIncidents).toBeUndefined();
@@ -923,7 +905,7 @@ describe('audit fail-fast regressions', () => {
       crossJurisdiction: route,
     });
 
-    const second = await applyEntityFrame(env, stateWithOffer, []);
+    const second = await applyEntityFrameWithMaterializedTestInfraContext(env, stateWithOffer, []);
     expect(second.newState.pendingCrossJurisdictionFillAcks?.size ?? 0).toBe(0);
     const drainedAccount = second.newState.accounts.get(sourceUser);
     const queuedAck = [...(drainedAccount?.mempool ?? []), ...(drainedAccount?.pendingFrame?.accountTxs ?? [])].find(
@@ -933,13 +915,13 @@ describe('audit fail-fast regressions', () => {
   });
 
   test('cross-j fill ack admission secondary index requires matching route hash', () => {
-    const env = createEmptyEnv('cross-fill-ack-admission-fallback');
+    const env = createEmptyEnv('cross-fill-ack-admission-regression');
     env.state.timestamp = 10_000;
     const sourceHub = `0x${'20'.repeat(32)}`;
     const sourceUser = `0x${'31'.repeat(32)}`;
     const targetHub = `0x${'32'.repeat(32)}`;
     const targetUser = `0x${'33'.repeat(32)}`;
-    const orderId = 'source-admission-fallback';
+    const orderId = 'source-admission-regression';
     const route = buildPreparedCrossJurisdictionRoute(
       {
         orderId,
@@ -973,7 +955,7 @@ describe('audit fail-fast regressions', () => {
         updatedAt: env.state.timestamp,
         expiresAt: env.state.timestamp + 60_000,
       },
-      { runtimeSeed: 'cross-fill-ack-admission-fallback', now: env.state.timestamp },
+      { runtimeSeed: 'cross-fill-ack-admission-regression', now: env.state.timestamp },
     );
     const state = makeEntityState(targetHub);
     const routeHash = route.routeHash || 'route-hash';
@@ -1347,225 +1329,6 @@ describe('audit fail-fast regressions', () => {
 
     expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('htlcAwaitingSecret'))).toBe(false);
     expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
-  });
-
-  test('committed HTLC forward enforces announced PPM fee, not only base fee', async () => {
-    const seed = 'htlc-forward-ppm-fee';
-    const env = createEmptyEnv(seed);
-    const signerId = deriveSignerAddressSync(seed, 'hub');
-    const signerKey = deriveSignerKeySync(seed, 'hub');
-    const nextHopSignerId = deriveSignerAddressSync(seed, 'next-hop');
-    const nextHopSignerKey = deriveSignerKeySync(seed, 'next-hop');
-    registerSignerKey(env, signerId, signerKey);
-    registerSignerKey(env, nextHopSignerId, nextHopSignerKey);
-    const hubId = generateLazyEntityId([signerId], 1n).toLowerCase();
-    const payerId = `0x${'a1'.repeat(32)}`;
-    const nextHopId = generateLazyEntityId([nextHopSignerId], 1n).toLowerCase();
-    const hubState = makeEntityState(hubId);
-    hubState.config = makeSingleSignerConfigFor(signerId);
-    hubState.hubRebalanceConfig = {
-      matchingStrategy: 'amount',
-      policyVersion: 1,
-      routingFeePPM: 100_000,
-      baseFee: 10n,
-    };
-    hubState.accounts.set(
-      nextHopId,
-      isLeftEntity(hubId, nextHopId)
-        ? makeProposalAccount([], hubId, nextHopId)
-        : makeProposalAccount([], nextHopId, hubId),
-    );
-    const crypto = new NobleCryptoProvider();
-    const keyPair = x25519.keygen();
-    const hubEncryptionPublicKey = hexBytes(keyPair.publicKey);
-    const signerPublicKey = new ethers.SigningKey(hexBytes(signerKey)).publicKey.toLowerCase();
-    const attestationBody = {
-      version: 'xln:validator-encryption-key:v1' as const,
-      entityId: hubId,
-      signerId,
-      signer: signerId,
-      publicKey: signerPublicKey,
-      weight: 1,
-      encryptionPublicKey: hubEncryptionPublicKey,
-    };
-    const manifest = requireCompleteValidatorEncryptionManifest(
-      {
-        entityId: hubId,
-        threshold: 1,
-        validators: [
-          {
-            signerId,
-            signer: signerId,
-            publicKey: signerPublicKey,
-            weight: 1,
-          },
-        ],
-      },
-      [
-        {
-          ...attestationBody,
-          signature: signAccountFrame(env, signerId, computeValidatorEncryptionAttestationDigest(attestationBody)),
-        },
-      ],
-    );
-    hubState.profileEncryptionManifest = structuredClone(manifest);
-    const lockId = 'ppm-fee-lock';
-    const finalSecret = `0x${'a4'.repeat(32)}`;
-    const hashlock = hashHtlcSecret(finalSecret);
-    const timelock = BigInt(hubState.timestamp + 120_000);
-    const contextHash = computeHtlcEnvelopeContextHash({
-      entityId: hubId,
-      lockId,
-      hashlock,
-      tokenId: 1,
-      amount: 1_000_000n,
-      timelock,
-      revealBeforeHeight: 100,
-    });
-    const routingStateHash = ethers.keccak256(ethers.toUtf8Bytes('ppm-fee-routing-state'));
-    const profileHash = computeEntityProfileCertificationHash(manifest.hash, routingStateHash);
-    const [profileHanko] = await signEntityHashes(env, hubId, signerId, [profileHash], hubState);
-    if (!profileHanko) throw new Error('TEST_PROFILE_HANKO_MISSING');
-    const profileCertification = { profileHash, routingStateHash, hanko: profileHanko };
-
-    const nextHopState = makeEntityState(nextHopId);
-    nextHopState.config = makeSingleSignerConfigFor(nextHopSignerId);
-    const nextHopKeyPair = x25519.keygen();
-    const nextHopEncryptionPublicKey = hexBytes(nextHopKeyPair.publicKey);
-    const nextHopSignerPublicKey = new ethers.SigningKey(hexBytes(nextHopSignerKey)).publicKey.toLowerCase();
-    const nextHopAttestationBody = {
-      version: 'xln:validator-encryption-key:v1' as const,
-      entityId: nextHopId,
-      signerId: nextHopSignerId,
-      signer: nextHopSignerId,
-      publicKey: nextHopSignerPublicKey,
-      weight: 1,
-      encryptionPublicKey: nextHopEncryptionPublicKey,
-    };
-    const nextHopManifest = requireCompleteValidatorEncryptionManifest(
-      {
-        entityId: nextHopId,
-        threshold: 1,
-        validators: [
-          {
-            signerId: nextHopSignerId,
-            signer: nextHopSignerId,
-            publicKey: nextHopSignerPublicKey,
-            weight: 1,
-          },
-        ],
-      },
-      [
-        {
-          ...nextHopAttestationBody,
-          signature: signAccountFrame(
-            env,
-            nextHopSignerId,
-            computeValidatorEncryptionAttestationDigest(nextHopAttestationBody),
-          ),
-        },
-      ],
-    );
-    const nextHopRoutingStateHash = ethers.keccak256(ethers.toUtf8Bytes('next-hop-routing-state'));
-    const nextHopProfileHash = computeEntityProfileCertificationHash(nextHopManifest.hash, nextHopRoutingStateHash);
-    const [nextHopProfileHanko] = await signEntityHashes(
-      env,
-      nextHopId,
-      nextHopSignerId,
-      [nextHopProfileHash],
-      nextHopState,
-    );
-    if (!nextHopProfileHanko) throw new Error('TEST_NEXT_HOP_PROFILE_HANKO_MISSING');
-    const forwardAmount = 999_990n;
-    const forwardTimelock = timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS);
-    const forwardRevealBeforeHeight = 100 - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS;
-    const innerContextHash = computeHtlcEnvelopeContextHash({
-      entityId: nextHopId,
-      lockId: `${lockId}-fwd`,
-      hashlock,
-      tokenId: 1,
-      amount: forwardAmount,
-      timelock: forwardTimelock,
-      revealBeforeHeight: forwardRevealBeforeHeight,
-    });
-    const secretOffer = await encryptBytesForValidatorManifest(
-      encodeHtlcSecretOffer({ secret: finalSecret }),
-      manifest,
-      profileCertification,
-      computeHtlcSecretOfferContextHash({
-        entityId: nextHopId,
-        payerEntityId: hubId,
-        beneficiaryEntityId: nextHopId,
-        lockId: `${lockId}-fwd`,
-        hashlock,
-        tokenId: 1,
-        amount: forwardAmount,
-        timelock: forwardTimelock,
-        revealBeforeHeight: forwardRevealBeforeHeight,
-      }),
-      crypto,
-      signerId,
-    );
-    const innerEnvelope = await encryptBytesForValidatorManifest(
-      encodeOnionLayer({ finalRecipient: true, secretOffer }),
-      nextHopManifest,
-      {
-        profileHash: nextHopProfileHash,
-        routingStateHash: nextHopRoutingStateHash,
-        hanko: nextHopProfileHanko,
-      },
-      innerContextHash,
-      crypto,
-      nextHopSignerId,
-    );
-    const encryptedLayer = await encryptBytesForValidatorManifest(
-      encodeOnionLayer({
-        nextHop: nextHopId,
-        innerEnvelope,
-        forwardAmount: forwardAmount.toString(),
-      }),
-      manifest,
-      profileCertification,
-      contextHash,
-      crypto,
-      signerId,
-    );
-    const accountMachine = isLeftEntity(payerId, hubId)
-      ? makeProposalAccount([], payerId, hubId)
-      : makeProposalAccount([], hubId, payerId);
-    accountMachine.state.locks.set(lockId, {
-      lockId,
-      hashlock,
-      timelock,
-      revealBeforeHeight: 100,
-      amount: 1_000_000n,
-      tokenId: 1,
-      senderIsLeft: true,
-      createdHeight: 1,
-      createdTimestamp: hubState.timestamp,
-      envelopeHash: hashEncryptedHtlcLayer(encryptedLayer),
-    });
-    hubState.accounts.set(payerId, accountMachine);
-    const lock = accountMachine.state.locks.get(lockId);
-    if (!lock) throw new Error('TEST_HTLC_LOCK_MISSING');
-    const advanceTx = buildHtlcOnionAdvanceTx(hubState, payerId, lock, encryptedLayer, {
-      nextHop: nextHopId,
-      innerEnvelope,
-      forwardAmount: forwardAmount.toString(),
-    });
-    const result = await handleHtlcOnionAdvance(env, hubState, advanceTx);
-
-    expect(result.accountTxs).toHaveLength(1);
-    expect(result.accountTxs[0]?.accountId).toBe(payerId);
-    expect(result.accountTxs[0]?.tx).toEqual({
-      type: 'htlc_resolve',
-      data: { lockId, outcome: 'error', reason: 'fee_below_ppm' },
-    });
-    expect(result.newState.htlcRoutes.has(hashlock)).toBe(false);
-
-    const replay = await handleHtlcOnionAdvance(env, structuredClone(hubState), advanceTx);
-    expect(replay.accountTxs).toEqual(result.accountTxs);
-    expect(replay.newState.htlcRoutes).toEqual(result.newState.htlcRoutes);
   });
 
   test('disputeStart folds evidence tx mempool into dispute arguments instead of blocking', async () => {

@@ -50,7 +50,6 @@ import type {
 type RuntimeAdapterEntityCoreDoc = StorageEntityCoreDoc & {
   signerId?: string;
   isProposer?: boolean;
-  entityEncPubKey?: string;
   htlcNotes?: EntityReplica['htlcNotes'];
 };
 import type { Profile } from '../../entity/profile';
@@ -268,8 +267,8 @@ const normalizePath = (path: string): string[] => {
   return parts;
 };
 
-const readBoundedLimit = (rawValue: unknown, fallback: number): number => {
-  const raw = Number(rawValue ?? fallback);
+const readBoundedLimit = (rawValue: unknown, defaultValue: number): number => {
+  const raw = Number(rawValue ?? defaultValue);
   if (!Number.isFinite(raw)) throw new RuntimeAdapterError('E_BAD_QUERY', 'limit must be finite');
   return Math.max(1, Math.min(500, Math.floor(raw)));
 };
@@ -487,7 +486,7 @@ const jurisdictionSummary = (jurisdiction: unknown): RuntimeAdapterEntitySummary
 
 const summaryFromProfile = (
   profile: Profile,
-  fallbackHeight: number,
+  defaultHeight: number,
 ): RuntimeAdapterEntitySummary | null => {
   const entityId = normalizeEntityId(profile.entityId);
   if (!entityId) return null;
@@ -498,7 +497,7 @@ const summaryFromProfile = (
     entityId,
     ...(runtimeId ? { runtimeId } : {}),
     label: profileName || entityId,
-    height: Math.max(0, Math.floor(Number(profile.lastUpdated || fallbackHeight || 0))),
+    height: Math.max(0, Math.floor(Number(profile.lastUpdated || defaultHeight || 0))),
     isHub: profile.metadata?.isHub === true,
     ...(jurisdiction ? { jurisdiction } : {}),
   };
@@ -573,21 +572,21 @@ const headFromEnv = (env: RuntimeReplica): StorageHead => {
 };
 
 const readBestHead = async (ctx: RuntimeAdapterResolveContext): Promise<StorageHead> => {
-  const fallback = headFromEnv(ctx.env);
-  if (!ctx.readHead) return fallback;
+  const inMemoryHead = headFromEnv(ctx.env);
+  if (!ctx.readHead) return inMemoryHead;
   const stored = await ctx.readHead();
-  if (!stored) return fallback;
+  if (!stored) return inMemoryHead;
   const liveHeight = envHeight(ctx.env);
   if (latestHeadHeight(stored) >= liveHeight) return stored;
   const latestHeight = Math.max(liveHeight, latestHeadHeight(stored));
   return {
     ...stored,
     latestHeight,
-    latestMaterializedHeight: Math.min(latestHeight, Math.max(headMaterializedHeight(stored), headMaterializedHeight(fallback))),
-    latestSnapshotHeight: Math.min(latestHeight, Math.max(headSnapshotHeight(stored), headSnapshotHeight(fallback))),
+    latestMaterializedHeight: Math.min(latestHeight, Math.max(headMaterializedHeight(stored), headMaterializedHeight(inMemoryHead))),
+    latestSnapshotHeight: Math.min(latestHeight, Math.max(headSnapshotHeight(stored), headSnapshotHeight(inMemoryHead))),
     retainedHistoryBytes: Math.max(
       0,
-      Math.floor(Number(stored.retainedHistoryBytes ?? fallback.retainedHistoryBytes ?? 0)),
+      Math.floor(Number(stored.retainedHistoryBytes ?? inMemoryHead.retainedHistoryBytes ?? 0)),
     ),
   };
 };
@@ -904,6 +903,12 @@ const compactAccountDocForView = (
     status: doc.status,
     mempool: [],
     currentFrame: compactAccountFrameForView(doc.currentFrame),
+    swapOrderHistory: includeSwapHistory
+      ? compactMapTail(doc.swapOrderHistory, 20) ?? new Map()
+      : new Map(),
+    swapClosedOrders: includeSwapHistory
+      ? compactMapTail(doc.swapClosedOrders, 20) ?? new Map()
+      : new Map(),
     currentHeight: doc.currentHeight,
     pendingSignatures: [],
     rollbackCount: doc.rollbackCount,
@@ -922,13 +927,9 @@ const compactAccountDocForView = (
 
   const pulls = compactMapTail(doc.state.pulls, 20);
   if (pulls) compact.state.pulls = pulls;
-  if (includeSwapHistory) {
-    // Account history is a point-read concern. Putting it in every Account of
-    // an aggregate Entity view multiplies payload size by the page width and
-    // can make an otherwise healthy Runtime uninspectable.
-    compact.swapOrderHistory = compactMapTail(doc.swapOrderHistory, 20) ?? new Map();
-    compact.swapClosedOrders = compactMapTail(doc.swapClosedOrders, 20) ?? new Map();
-  }
+  // Account history is a point-read concern. Aggregate Entity views retain
+  // the required canonical fields as empty maps instead of multiplying their
+  // payload by the page width.
   if (doc.pendingFrame) compact.pendingFrame = compactAccountFrameForView(doc.pendingFrame);
   if (doc.lastOutboundFrameAck) compact.lastOutboundFrameAck = doc.lastOutboundFrameAck;
   if (doc.pendingForwards) compact.pendingForwards = doc.pendingForwards;
@@ -1097,11 +1098,11 @@ const compactJBatchStateForView = (state: JBatchState | undefined): JBatchState 
 const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeAdapterEntityCoreDoc => {
   const compact: RuntimeAdapterEntityCoreDoc = {
     entityId: core.entityId,
+    entityEncryptionPublicKey: core.entityEncryptionPublicKey,
     ...withDefinedProp('signerId', core.signerId),
     ...withDefinedProp('isProposer', core.isProposer),
     height: core.height,
     timestamp: core.timestamp,
-    ...(core.entityEncPubKey ? { entityEncPubKey: core.entityEncPubKey } : {}),
     profile: core.profile,
     config: core.config,
     nonces: compactMapTail(core.nonces, 100) ?? new Map(),
@@ -1412,13 +1413,13 @@ const projectViewFrame = async (
   if (query?.booksPage !== undefined) storedQuery.booksPage = query.booksPage;
   const stored = await loadViewPageForHeight(ctx, activeEntityId, height, isCurrentHeight, storedQuery);
   const compactStored = compactViewPageForRemote(activeEntityId, stored);
-  const fallbackJurisdiction = jurisdictionSummary(compactStored.core.config?.jurisdiction);
+  const storedJurisdiction = jurisdictionSummary(compactStored.core.config?.jurisdiction);
   const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
     entityId: activeEntityId,
     label: String(compactStored.core.profile?.name || '').trim() || activeEntityId,
     height: Math.max(0, Math.floor(Number(compactStored.core.height ?? height))),
     ...(compactStored.core.profile?.isHub === true ? { isHub: true } : {}),
-    ...(fallbackJurisdiction ? { jurisdiction: fallbackJurisdiction } : {}),
+    ...(storedJurisdiction ? { jurisdiction: storedJurisdiction } : {}),
   };
 
   return {
@@ -1721,13 +1722,13 @@ const projectGraphFrame = async (
   );
 
   const record = ctx.readFrame ? await ctx.readFrame(height) : null;
-  const fallbackTimestamp = entities.reduce(
+  const projectedTimestamp = entities.reduce(
     (latest, entity) => Math.max(latest, Number(entity.core?.timestamp || 0)),
     isLiveQuery ? capturedTimestamp : 0,
   );
   const timestamp = Math.max(
     0,
-    Math.floor(Number(record?.timestamp ?? fallbackTimestamp)),
+    Math.floor(Number(record?.timestamp ?? projectedTimestamp)),
   );
   const frame: RuntimeAdapterGraphFrame = {
     head,

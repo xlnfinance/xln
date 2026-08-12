@@ -15,7 +15,7 @@ import {
 } from '../../../../entity/consensus/leader';
 import { buildEntityHashesToSign } from '../../../../entity/consensus/input/hanko-witness';
 import { generateLazyEntityId } from '../../../../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../../../../entity/auth/crypto';
+import { provisionTestEntityEncryptionKey } from '../../../helpers/cross-j';
 import { initCrontab } from '../../../../entity/scheduler';
 import {
   createDueScheduledWakeInputs,
@@ -52,7 +52,7 @@ const runtime = (seed: string): RuntimeReplica => {
 const installVoteTarget = (
   env: RuntimeReplica,
   seed: string,
-  options: { localSignerIsFallback?: boolean } = {},
+  options: { localSignerIsFailover?: boolean } = {},
 ): {
   replica: EntityReplica;
   vote: EntityLeaderTimeoutVote;
@@ -61,7 +61,7 @@ const installVoteTarget = (
   const voterId = deriveSignerAddressSync(seed, 'voter').toLowerCase();
   registerSignerKey(env, signerId, deriveSignerKeySync(seed, 'receiver-signer'));
   registerSignerKey(env, voterId, deriveSignerKeySync(seed, 'voter'));
-  const validators = options.localSignerIsFallback
+  const validators = options.localSignerIsFailover
     ? [voterId, signerId]
     : [signerId, voterId];
   const entityId = generateLazyEntityId(validators, 2n, env).toLowerCase();
@@ -89,11 +89,10 @@ const installVoteTarget = (
     lockBook: new Map(),
     swapTradingPairs: [],
   };
-  const localKeys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
+  state.entityEncryptionPublicKey = provisionTestEntityEncryptionKey(env, entityId);
   const replica: EntityReplica = {
     entityId,
     signerId,
-    entityEncPubKey: localKeys.publicKey,
     state,
     mempool: [],
     isProposer: false,
@@ -163,7 +162,7 @@ describe('reliable leader timeout vote delivery', () => {
     const { replica, vote: unrelatedRemoteVote } = installVoteTarget(
       receiver,
       'leader-vote-local-intent-board',
-      { localSignerIsFallback: true },
+      { localSignerIsFailover: true },
     );
     replica.lastConsensusProgressAt = 0;
     replica.mempool.push({
@@ -199,7 +198,7 @@ describe('reliable leader timeout vote delivery', () => {
     const { replica, vote: unrelatedRemoteVote } = installVoteTarget(
       receiver,
       'leader-vote-unmarked-intent-board',
-      { localSignerIsFallback: true },
+      { localSignerIsFailover: true },
     );
     const unrelatedIngress = voteOutput(receiver, replica, unrelatedRemoteVote);
     expect(registerReliableIngress(receiver, sender.runtimeId!, unrelatedIngress).kind).toBe('enqueue');

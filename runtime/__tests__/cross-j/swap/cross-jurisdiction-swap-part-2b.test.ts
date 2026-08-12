@@ -20,7 +20,8 @@ import {
   routeRemoteCrossJurisdictionBookCancels,
 } from '../../../entity/tx/handlers/account/index';
 
-import { applyEntityFrame, applyEntityInput, mergeEntityInputs } from '../../../entity/consensus/index';
+import { applyEntityInput, mergeEntityInputs } from '../../../entity/consensus/index';
+import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 
 import {
   appendDefaultProposerCrossJMaterializations,
@@ -184,7 +185,6 @@ import { applyJEventRange, buildJEventRangeData } from '../../helpers/j-history'
 
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
 
-import { collectLocalProfileEncryptionAnnouncements } from '../../../entity/profile/profile-encryption';
 
 import { LIMITS } from '../../../config/constants';
 
@@ -244,7 +244,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       .toThrow('CROSS_J_CLOSE_PROOF_FILL_RATIO_INVALID');
     expect(() => cloneCrossJurisdictionCloseProof({
       ...valid,
-      closeMode: 'legacy_cancel' as never,
+      closeMode: 'invalid_cancel' as never,
     })).toThrow('CROSS_J_CLOSE_PROOF_MODE_INVALID');
   });
 
@@ -868,6 +868,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     ]);
 
     const capacityState = requested.newState;
+    capacityState.prevFrameHash ??= `0x${'91'.repeat(32)}`;
     const capacityAccount = capacityState.accounts.get(sourceUser)!;
     capacityAccount.mempool = Array.from(
       { length: LIMITS.ACCOUNT_MEMPOOL_SIZE - 1 },
@@ -893,7 +894,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
 
     await expect(
-      applyEntityFrame(env, capacityState, frameTxs, env.state.timestamp),
+      applyEntityFrameWithMaterializedTestInfraContext(env, capacityState, frameTxs, env.state.timestamp),
     ).rejects.toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
     expect(capacityState).toEqual(before);
     expect(capacityState.accounts.get(sourceUser)!.mempool).toHaveLength(

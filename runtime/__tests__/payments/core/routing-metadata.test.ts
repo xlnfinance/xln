@@ -5,8 +5,6 @@ import type { Profile } from '../../../entity/profile';
 import { parseProfile } from '../../../entity/profile';
 import { buildNetworkGraph } from '../../../routing/graph';
 import { PathFinder } from '../../../routing/pathfinding';
-import { SigningKey, computeAddress } from 'ethers';
-import { computeValidatorEncryptionAttestationDigest } from '../../../protocol/htlc/validator-encryption';
 
 const TOKEN_ID = 1;
 const AMOUNT = 555_000_000_000_000_000_000n;
@@ -24,29 +22,6 @@ const caps = (out: bigint, inn: bigint) => ({
   },
 });
 
-const boardFor = (entityId: string, privateKey: string): Profile['metadata']['board'] => {
-  const key = new SigningKey(privateKey);
-  const publicKey = key.publicKey.toLowerCase();
-  const signer = computeAddress(publicKey).toLowerCase();
-  const body = {
-    version: 'xln:validator-encryption-key:v1' as const,
-    entityId,
-    signerId: signer,
-    signer,
-    publicKey,
-    weight: 1,
-    encryptionPublicKey: `0x${'12'.repeat(32)}`,
-  };
-  return {
-    threshold: 1,
-    validators: [{ signer, signerId: signer, weight: 1, publicKey }],
-    encryptionAttestations: [{
-      ...body,
-      signature: key.sign(computeValidatorEncryptionAttestationDigest(body)).serialized,
-    }],
-  };
-};
-
 function profile(
   entityId: string,
   runtimeId: string,
@@ -55,6 +30,7 @@ function profile(
 ): Profile {
   return {
     entityId,
+    entityEncryptionPublicKey: `0x${entityId.slice(2, 66)}`,
     runtimeId,
     name: entityId,
     avatar: '',
@@ -66,7 +42,10 @@ function profile(
     wsUrl: null,
     relays: [],
     metadata,
-    accounts,
+    accounts: accounts.map(account => ({
+      ...account,
+      domain: { chainId: 31_337, depositoryAddress: '0x1111111111111111111111111111111111111111' },
+    })),
   };
 }
 
@@ -77,7 +56,6 @@ describe('Routing metadata hard requirements', () => {
         routingFeePPM: 10_000,
         baseFee: 0n,
         isHub: false,
-        board: boardFor(ALICE, `0x${'41'.repeat(32)}`),
       }, [{
         counterpartyId: BOB,
         tokenCapacities: caps(12n, 34n),
@@ -86,10 +64,10 @@ describe('Routing metadata hard requirements', () => {
         routingFeePPM: 10_000,
         baseFee: { __xlnType: 'BigInt', value: '7' },
         isHub: false,
-        board: boardFor(ALICE, `0x${'41'.repeat(32)}`),
       },
       accounts: [{
         counterpartyId: BOB,
+        domain: { chainId: 31_337, depositoryAddress: '0x1111111111111111111111111111111111111111' },
         tokenCapacities: {
           [TOKEN_ID]: {
             inCapacity: { __xlnType: 'BigInt', value: '12' },
@@ -111,7 +89,6 @@ describe('Routing metadata hard requirements', () => {
       routingFeePPM: 10_000,
       baseFee: 0n,
       isHub: false,
-      board: boardFor(ALICE, `0x${'41'.repeat(32)}`),
     }, []);
     malformed.accounts = [{
       counterpartyId: BOB,
@@ -126,7 +103,6 @@ describe('Routing metadata hard requirements', () => {
       routingFeePPM: 1_000_000,
       baseFee: 0n,
       isHub: false,
-      board: boardFor(ALICE, `0x${'41'.repeat(32)}`),
     }, []);
 
     expect(() => parseProfile(malformed)).toThrow('GOSSIP_PROFILE_ROUTING_FEE_PPM_INVALID');
@@ -150,37 +126,6 @@ describe('Routing metadata hard requirements', () => {
     expect(new PathFinder(graph).findRoutes(ALICE, BOB, AMOUNT, TOKEN_ID)).toEqual([]);
   });
 
-  test('rejects non-numeric and overflowing uint16 board values', () => {
-    const validProfile = profile(ALICE, ALICE.slice(0, 42), {
-      routingFeePPM: 10_000,
-      baseFee: 0n,
-      isHub: false,
-      board: boardFor(ALICE, `0x${'41'.repeat(32)}`),
-    }, []);
-    const validBoard = validProfile.metadata.board;
-
-    expect(() => parseProfile({
-      ...validProfile,
-      metadata: {
-        ...validProfile.metadata,
-        board: { ...validBoard, threshold: '1' },
-      },
-    })).toThrow('GOSSIP_PROFILE_BOARD_THRESHOLD_INVALID');
-
-    expect(() => parseProfile({
-      ...validProfile,
-      metadata: {
-        ...validProfile.metadata,
-        board: {
-          ...validBoard,
-          encryptionAttestations: validBoard.encryptionAttestations.map((attestation) => ({
-            ...attestation,
-            weight: 65_536,
-          })),
-        },
-      },
-    })).toThrow('GOSSIP_PROFILE_ENCRYPTION_ATTESTATION_WEIGHT_INVALID');
-  });
 
   test('routing graph diagnostics use structured logging only', () => {
     const source = readFileSync(join(process.cwd(), 'runtime/routing/graph.ts'), 'utf8');
@@ -190,9 +135,10 @@ describe('Routing metadata hard requirements', () => {
     expect(source).not.toContain('console.');
   });
 
-  test('rejects legacy profile endpoints field', () => {
+  test('rejects retired profile endpoints field', () => {
     expect(() => parseProfile({
       entityId: ALICE,
+      entityEncryptionPublicKey: `0x${'ab'.repeat(32)}`,
       runtimeId: ALICE.slice(0, 42),
       name: 'Alice',
       avatar: '',
@@ -209,10 +155,6 @@ describe('Routing metadata hard requirements', () => {
         routingFeePPM: 10_000,
         baseFee: '0',
         isHub: false,
-        board: {
-          threshold: 1,
-          validators: [{ signer: ALICE.slice(0, 42), signerId: ALICE.slice(0, 42), weight: 1, publicKey: 'board:alice' }],
-        },
       },
       accounts: [],
     })).toThrow(/GOSSIP_PROFILE_UNKNOWN_FIELD/);
@@ -221,6 +163,7 @@ describe('Routing metadata hard requirements', () => {
   test('accepts canonical wsUrl field', () => {
     const parsed = parseProfile({
       entityId: H1,
+      entityEncryptionPublicKey: `0x${'12'.repeat(32)}`,
       runtimeId: H1.slice(0, 42),
       name: 'H1',
       avatar: '',
@@ -235,7 +178,6 @@ describe('Routing metadata hard requirements', () => {
         routingFeePPM: 10_000,
         baseFee: '0',
         isHub: true,
-        board: boardFor(H1, `0x${'31'.repeat(32)}`),
       },
       accounts: [],
     });
@@ -244,9 +186,10 @@ describe('Routing metadata hard requirements', () => {
     expect(parsed.relays).toEqual(['wss://xln.finance/relay']);
   });
 
-  test('rejects dead legacy metadata.position field', () => {
+  test('rejects dead retired metadata.position field', () => {
     expect(() => parseProfile({
       entityId: ALICE,
+      entityEncryptionPublicKey: `0x${'ab'.repeat(32)}`,
       runtimeId: ALICE.slice(0, 42),
       name: 'Alice',
       avatar: '',
@@ -263,10 +206,6 @@ describe('Routing metadata hard requirements', () => {
         baseFee: '0',
         isHub: false,
         position: { x: 1, y: 2, z: 3 },
-        board: {
-          threshold: 1,
-          validators: [{ signer: ALICE.slice(0, 42), signerId: ALICE.slice(0, 42), weight: 1, publicKey: 'board:alice' }],
-        },
       },
       accounts: [],
     })).toThrow(/GOSSIP_PROFILE_METADATA_UNKNOWN_FIELD/);

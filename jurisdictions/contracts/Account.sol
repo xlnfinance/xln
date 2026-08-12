@@ -1138,7 +1138,7 @@ library Account {
     uint256 appliedOrdered = requestedOrdered;
     if (appliedOrdered < lowerOrdered) appliedOrdered = lowerOrdered;
     if (appliedOrdered > upperOrdered) appliedOrdered = upperOrdered;
-    // If legacy/corrupt signed state itself supplied int256.min, upperOrdered
+    // If corrupt signed state itself supplied int256.min, upperOrdered
     // can also be zero. Preserve the liveness floor after both bounds so this
     // helper has no path that returns the un-negatable sentinel.
     if (appliedOrdered == 0) appliedOrdered = 1;

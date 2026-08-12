@@ -12,7 +12,6 @@ import {
   getCertifiedBoardStackKey,
   resolveObserverCertifiedBoardRecord,
 } from '../../jurisdiction/machine/board-registry';
-import { validatePersistedValidatorEncryptionManifest } from '../../protocol/htlc/validator-encryption';
 import { requireCommittedDirectPaymentRoute } from '../../protocol/payments/route';
 import type { EntityCommandNonceState, EntityTx, SignedEntityCommandV1 } from '../../types/entity-tx';
 import type { EntityState } from '../types';
@@ -69,20 +68,11 @@ export const resolveEntityCommandBoard = (
 ): ResolvedEntityCommandBoard => {
   const canonicalShares = resolveCanonicalEntityBoardShares(state.config);
   const aliases = new Set<string>();
-  const manifest = state.profileEncryptionManifest
-    ? validatePersistedValidatorEncryptionManifest(state.entityId, state.config, state.profileEncryptionManifest)
-    : null;
-  const attestations = new Map(
-    (manifest?.attestations ?? []).map(attestation => [
-      canonicalEntityCommandSignerId(attestation.signerId),
-      attestation,
-    ]),
-  );
   const members = state.config.validators.map((rawSignerId): ResolvedBoardMember => {
     const signerId = canonicalEntityCommandSignerId(rawSignerId);
     if (aliases.has(signerId)) throw new Error(`ENTITY_COMMAND_BOARD_DUPLICATE_ALIAS:${signerId}`);
     aliases.add(signerId);
-    const resolvedSigner = attestations.get(signerId)?.signer ?? getSignerAddress(env, signerId);
+    const resolvedSigner = getSignerAddress(env, signerId);
     if (!resolvedSigner) throw new Error(`ENTITY_COMMAND_BOARD_SIGNER_UNAVAILABLE:${signerId}`);
     const signer = canonicalEntityCommandAddress(resolvedSigner, 'ENTITY_COMMAND_BOARD_SIGNER_INVALID');
     if (/^0x[0-9a-f]{40}$/.test(signerId) && signer !== signerId) {
@@ -90,9 +80,6 @@ export const resolveEntityCommandBoard = (
     }
     return { signerId, signer, share: canonicalShares.bySigner.get(signerId)! };
   });
-  if (attestations.size > 0 && attestations.size !== members.length) {
-    throw new Error(`ENTITY_COMMAND_BOARD_MANIFEST_SIZE_INVALID:${attestations.size}:${members.length}`);
-  }
   const resolvedConfig = {
     mode: state.config.mode,
     threshold: state.config.threshold,

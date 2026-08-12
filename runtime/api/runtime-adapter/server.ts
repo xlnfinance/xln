@@ -219,10 +219,10 @@ const countUncommittedPendingLanes = (env: RuntimeReplica): number => {
   return count;
 };
 
-const readPositiveNumberEnv = (name: string, fallback: number): number => {
+const readPositiveNumberEnv = (name: string, defaultValue: number): number => {
   const raw = typeof process !== 'undefined' ? process.env[name] : undefined;
   const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
+  return Number.isFinite(value) && value > 0 ? value : defaultValue;
 };
 
 const createConfiguredBucket = (
@@ -514,7 +514,7 @@ const handleRuntimeAdapterAuth = (
   state.commandLaneKind = null;
   state.commandFrontierExpiresAtMs = null;
   const auth = verifyRuntimeAdapterAuthCredential(
-    resolveRuntimeAdapterAuthSeed(env),
+    resolveRuntimeAdapterAuthSeed(),
     msg.key,
     {
       audience: resolveRuntimeAdapterAuthAudience(env),

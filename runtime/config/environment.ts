@@ -7,14 +7,14 @@
  */
 export const readPositiveIntegerEnv = (
   name: string,
-  fallback: number,
+  defaultValue: number,
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): number => {
-  if (!Number.isSafeInteger(fallback) || fallback <= 0) {
-    throw new Error(`ENV_POSITIVE_INTEGER_FALLBACK_INVALID:${name}:${fallback}`);
+  if (!Number.isSafeInteger(defaultValue) || defaultValue <= 0) {
+    throw new Error(`ENV_POSITIVE_INTEGER_DEFAULT_INVALID:${name}:${defaultValue}`);
   }
   const raw = environment[name];
-  if (raw === undefined) return fallback;
+  if (raw === undefined) return defaultValue;
   if (!/^[1-9]\d*$/.test(raw)) {
     throw new Error(`ENV_POSITIVE_INTEGER_INVALID:${name}:${raw}`);
   }
@@ -33,11 +33,11 @@ export const readPositiveIntegerEnv = (
  */
 export const readBooleanEnv = (
   name: string,
-  fallback: boolean,
+  defaultValue: boolean,
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): boolean => {
   const raw = environment[name];
-  if (raw === undefined) return fallback;
+  if (raw === undefined) return defaultValue;
   const normalized = raw.trim().toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;

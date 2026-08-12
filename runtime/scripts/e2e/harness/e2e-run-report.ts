@@ -32,7 +32,7 @@ import { compareStableText } from '../../../protocol/serialization';
 import { tailLog } from './e2e-fatal-log-monitor';
 import { parseJsonLinesStrict, parseJsonStrict } from './e2e-failure-capsule';
 import { deriveE2EShardPaths, summarizePerfSamples } from './e2e-isolated-runtime';
-import type { QaCodeFingerprint } from './e2e-isolated-runtime';
+import type { E2ECodeFingerprint } from './e2e-isolated-runtime';
 import type {
   CliArgs,
   E2EBrowserHealthCounters,
@@ -296,7 +296,7 @@ export const writeRunManifest = (
   tasks: readonly RunTask[],
   totalMs: number,
   createdAt: number,
-  codeFingerprint: QaCodeFingerprint,
+  codeFingerprint: E2ECodeFingerprint,
   primaryFailure: E2EPrimaryFailureIdentity | null,
 ): QaRunManifest => {
   const gateConfig = buildE2EGateConfig(args, tasks);

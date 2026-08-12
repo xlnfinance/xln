@@ -164,10 +164,14 @@ const buildProofPayments = (
   deltaIndex: ReadonlyMap<number, number>,
 ): RuntimePayment[] =>
   sortTransformerEntries(account.state.locks.entries()).map(([lockId, lock]) => {
-    const revealedUntilTimestamp = Math.floor(Number(lock.timelock) / 1000);
-    if (!Number.isFinite(revealedUntilTimestamp) || revealedUntilTimestamp <= 0) {
+    const revealedUntilTimestampBigInt = (lock.timelock - 1n) / 1000n;
+    if (
+      revealedUntilTimestampBigInt <= 0n
+      || revealedUntilTimestampBigInt > BigInt(Number.MAX_SAFE_INTEGER)
+    ) {
       throw new Error(`HTLC_LOCK_INVALID_TIMELOCK:${lockId}`);
     }
+    const revealedUntilTimestamp = Number(revealedUntilTimestampBigInt);
     return {
       deltaIndex: requireProofDeltaIndex(
         deltaIndex,

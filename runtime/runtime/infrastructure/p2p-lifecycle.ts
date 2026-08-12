@@ -2,13 +2,12 @@ import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, Runtim
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { RuntimeP2P, type P2PConfig } from '../../network/p2p/p2p';
 import { isRuntimeId } from '../../network/p2p/auth/runtime-id';
-import { assertLocalEntityCryptoKeys } from '../../entity/auth/crypto';
+import {
+  provisionEntityEncryptionKey,
+  requireEntityEncryptionPrivateKey,
+} from '../../entity/auth/crypto';
 import type { RuntimeInboundEntityInputsResult } from '../routing/entity-routing';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
-import {
-  buildLocalProfileCertificationInput,
-  collectDueLocalProfileCertificationInputs,
-} from '../../network/p2p/gossip/local-profile-lifecycle';
 
 export type { P2PConfig } from '../../network/p2p/p2p';
 
@@ -131,15 +130,6 @@ const buildRuntimeP2POptions = (
         });
       }
     },
-    onEncryptionManifestComplete: (entityId, encryptionAttestations) => {
-      const input = buildLocalProfileCertificationInput(env, entityId, encryptionAttestations);
-      if (!input) {
-        p2pLifecycleLog.debug('profile.certification_not_due', { entity: shortId(entityId, 8) });
-        return;
-      }
-      deps.enqueueRuntimeInputs(env, [input]);
-      deps.notifyEnvChange(env);
-    },
   };
   if (config.signerId !== undefined) options.signerId = config.signerId;
   if (config.relayUrls !== undefined) options.relayUrls = config.relayUrls;
@@ -151,15 +141,6 @@ const buildRuntimeP2POptions = (
   return options;
 };
 
-const enqueueDueProfileCertifications = (
-  env: RuntimeReplica,
-  deps: RuntimeP2PLifecycleDeps,
-): void => {
-  const due = collectDueLocalProfileCertificationInputs(env);
-  if (due.length === 0) return;
-  deps.enqueueRuntimeInputs(env, due);
-  deps.notifyEnvChange(env);
-};
 
 /**
  * Runtime P2P is process-local infrastructure, not consensus state.
@@ -177,7 +158,16 @@ export const startRuntimeP2P = (
   });
   const state = deps.ensureRuntimeInfrastructure(env);
   state.lastP2PConfig = config;
-  assertLocalEntityCryptoKeys(env);
+  for (const replica of env.state.eReplicas.values()) {
+    const publicKey = provisionEntityEncryptionKey(
+      env,
+      replica.entityId,
+      requireEntityEncryptionPrivateKey(env, replica.entityId),
+    );
+    if (publicKey !== replica.state.entityEncryptionPublicKey) {
+      throw new Error(`ENTITY_ENCRYPTION_KEY_MISMATCH:entity=${replica.entityId}`);
+    }
+  }
   const resolvedRuntimeId = config.runtimeId || env.runtimeId;
   if (!resolvedRuntimeId || !isRuntimeId(resolvedRuntimeId)) {
     p2pLifecycleLog.debug('start.pending_runtime_id');
@@ -190,8 +180,8 @@ export const startRuntimeP2P = (
   if (reusable) return reusable;
 
   state.p2p = new RuntimeP2P(buildRuntimeP2POptions(env, state, config, resolvedRuntimeId, deps));
+  state.observeOnlineEntityIds = entityIds => state.p2p?.observeOnlineEntityIds(entityIds) ?? new Set();
   p2pState(env)[ENV_P2P_SINGLETON_KEY] = state.p2p;
-  enqueueDueProfileCertifications(env, deps);
   state.p2p.connect();
   return state.p2p;
 };

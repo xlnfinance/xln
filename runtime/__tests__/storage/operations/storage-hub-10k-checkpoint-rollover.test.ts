@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { generateLazyEntityId } from '../../../entity/factory';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { runtimeAdapterOwnerCommandLaneId } from '../../../runtime/command/frontier';
 import { markLocalRuntimeAdapterCommandTx } from '../../../runtime/command/frontier-auth';
 import {
@@ -104,8 +105,7 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
   let progressStartedAt = performance.now();
   try {
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId,
         data: {
@@ -119,7 +119,7 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     await processRuntime(env, []);

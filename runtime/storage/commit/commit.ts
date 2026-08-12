@@ -139,9 +139,10 @@ const resolveAuthoritativeFrameCommitStatus = async (
 const saveRuntimeEnvironment = async (
   deps: RuntimeStorageApiDeps,
   env: RuntimeReplica,
-  currentFrameInput?: RuntimeInput,
-  currentFrameOutputs?: RoutedEntityInput[],
-  pendingRuntimeInput?: RuntimeInput,
+  currentFrameInput: RuntimeInput | undefined,
+  currentFrameOutputs: RoutedEntityInput[] | undefined,
+  pendingRuntimeInput: RuntimeInput | undefined,
+  entityContexts: Map<string, import('../../types/entity/infra-context').EntityInfraContext>,
 ): Promise<{
   staleWriterStopped: boolean;
   persistencePerfMs?: Awaited<
@@ -174,6 +175,7 @@ const saveRuntimeEnvironment = async (
           getPerfMs,
           formatPerfMs,
           historyRecords: pendingHistoryRecords,
+          entityContexts,
           stopStaleWriterOnHeadAhead: runtimeIsBrowser && !env.scenarioMode,
           ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
           ...(currentFrameOutputs === undefined
@@ -264,9 +266,10 @@ export const createRuntimeStorageCommitApi = (
   RuntimeFrameStorageError,
   saveEnvToDB: (
     env: RuntimeReplica,
-    currentFrameInput?: RuntimeInput,
-    currentFrameOutputs?: RoutedEntityInput[],
-    pendingRuntimeInput?: RuntimeInput,
+    currentFrameInput: RuntimeInput | undefined,
+    currentFrameOutputs: RoutedEntityInput[] | undefined,
+    pendingRuntimeInput: RuntimeInput | undefined,
+    entityContexts: Map<string, import('../../types/entity/infra-context').EntityInfraContext>,
   ) =>
     saveRuntimeEnvironment(
       deps,
@@ -274,5 +277,6 @@ export const createRuntimeStorageCommitApi = (
       currentFrameInput,
       currentFrameOutputs,
       pendingRuntimeInput,
+      entityContexts,
     ),
 });

@@ -36,20 +36,20 @@ const getJReplicaByJurisdictionNameOrRef = (env: RuntimeReplica, jurisdictionNam
     : getJReplicaByName(env, raw);
 };
 
-export function getRuntimeJurisdictionHeight(env: RuntimeReplica, fallbackHeight = 0, jurisdictionName?: string): number {
-  const fallback = Number.isFinite(fallbackHeight) ? Math.max(0, Math.floor(fallbackHeight)) : 0;
+export function getRuntimeJurisdictionHeight(env: RuntimeReplica, defaultHeight = 0, jurisdictionName?: string): number {
+  const baseline = Number.isFinite(defaultHeight) ? Math.max(0, Math.floor(defaultHeight)) : 0;
   if (jurisdictionName) {
     const requested = getJReplicaByJurisdictionNameOrRef(env, jurisdictionName);
-    if (!requested) return fallback;
+    if (!requested) return baseline;
     const blockNumber = Number(requested?.blockNumber ?? 0n);
-    return Number.isFinite(blockNumber) ? Math.max(0, Math.floor(blockNumber)) : fallback;
+    return Number.isFinite(blockNumber) ? Math.max(0, Math.floor(blockNumber)) : baseline;
   }
 
   const active = env.activeJurisdiction ? env.state.jReplicas?.get(env.activeJurisdiction) : undefined;
   const candidates = active
     ? [active, ...Array.from(env.state.jReplicas?.values?.() || [])]
     : Array.from(env.state.jReplicas?.values?.() || []);
-  let best = fallback;
+  let best = baseline;
   for (const replica of candidates) {
     const blockNumber = Number(replica?.blockNumber ?? 0n);
     if (Number.isFinite(blockNumber) && blockNumber > best) best = Math.floor(blockNumber);

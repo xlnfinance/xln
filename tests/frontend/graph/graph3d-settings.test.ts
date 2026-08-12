@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   BIRD_VIEW_SETTINGS_STORAGE_KEY,
+  DEFAULT_BIRD_VIEW_SETTINGS,
   buildBirdViewSettings,
   readBirdViewSettings,
   writeBirdViewSettings,
@@ -17,7 +18,7 @@ function memoryStorage(seed?: Record<string, string>) {
 }
 
 describe('graph3d settings', () => {
-  test('reads defaults when storage is empty or invalid', () => {
+  test('reads defaults only when storage is empty and rejects invalid JSON', () => {
     expect(readBirdViewSettings(null)).toMatchObject({
       barsMode: 'close',
       selectedTokenId: 1,
@@ -30,10 +31,10 @@ describe('graph3d settings', () => {
     });
 
     const storage = memoryStorage({ [BIRD_VIEW_SETTINGS_STORAGE_KEY]: '{bad-json' });
-    expect(readBirdViewSettings(storage)).toMatchObject({ barsMode: 'close', selectedTokenId: 1 });
+    expect(() => readBirdViewSettings(storage)).toThrow();
   });
 
-  test('normalizes legacy selected token and rotation fields', () => {
+  test('rejects malformed stored settings instead of inferring missing fields', () => {
     const storage = memoryStorage({
       [BIRD_VIEW_SETTINGS_STORAGE_KEY]: JSON.stringify({
         barsMode: 'spread',
@@ -44,16 +45,7 @@ describe('graph3d settings', () => {
       }),
     });
 
-    expect(readBirdViewSettings(storage)).toEqual({
-      barsMode: 'spread',
-      selectedTokenId: 2,
-      viewMode: '2d',
-      entityMode: 'identicon',
-      wasLastOpened: true,
-      rotationX: 0,
-      rotationY: 0,
-      rotationZ: 0,
-    });
+    expect(() => readBirdViewSettings(storage)).toThrow('BIRD_VIEW_SETTINGS_INVALID');
   });
 
   test('builds and writes camera-aware settings snapshots', () => {

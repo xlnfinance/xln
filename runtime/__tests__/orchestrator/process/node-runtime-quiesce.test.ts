@@ -23,6 +23,7 @@ import { resolveDbPath } from '../../../storage/runtime-dbs';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { attachLiveJAdapter } from '../../../runtime/jurisdiction/live-jadapters';
 import type { JurisdictionConfig } from '../../../entity/types';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const removeRuntimeStorage = (basePath: string): void => {
   for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
@@ -131,8 +132,7 @@ describe('node runtime quiesce', () => {
       },
     } as JReplica);
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId,
         data: {
@@ -145,7 +145,7 @@ describe('node runtime quiesce', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     expect(env.infrastructure?.loopActive ?? false).toBe(false);
@@ -220,8 +220,7 @@ describe('node runtime quiesce', () => {
     if (!originalP2P) throw new Error('TEST_P2P_START_FAILED');
     startRuntimeLoop(env, { tickDelayMs: 0 });
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId: runtimeId,
         data: {
@@ -234,7 +233,7 @@ describe('node runtime quiesce', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
     expect(env.runtimeMempool?.runtimeTxs).toHaveLength(1);
@@ -349,8 +348,7 @@ describe('node runtime quiesce', () => {
     env.infrastructure ??= {};
     env.infrastructure.persistencePaused = true;
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
+      runtimeTxs: [createTestEntityImportRuntimeTx(env, {
         entityId,
         signerId,
         data: {
@@ -363,7 +361,7 @@ describe('node runtime quiesce', () => {
             jurisdiction,
           },
         },
-      }],
+      })],
       entityInputs: [],
     });
 

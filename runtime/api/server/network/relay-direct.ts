@@ -126,7 +126,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     pushDirectRelayDeliveryEvent(relayStore, {
       targetRuntimeId,
       envelope,
-      status: 'direct-miss-fallback',
+      status: 'direct-miss-failover',
       reason: delivery.code,
       delivery,
     });
@@ -145,7 +145,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
       fromRuntimeId,
       targetRuntimeId,
       envelope,
-      status: 'direct-miss-fallback',
+      status: 'direct-miss-failover',
       reason: delivery.code,
       delivery,
     });
@@ -163,7 +163,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
       fromRuntimeId,
       targetRuntimeId,
       envelope,
-      status: 'direct-miss-fallback',
+      status: 'direct-miss-failover',
       reason: delivery.code,
       delivery,
     });
@@ -242,7 +242,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     fromRuntimeId,
     targetRuntimeId,
     envelope,
-    status: 'direct-miss-fallback',
+    status: 'direct-miss-failover',
   });
-  return deferredDirectRelayDelivery('ROUTE_DIRECT_MISS_FALLBACK');
+  return deferredDirectRelayDelivery('ROUTE_DIRECT_MISS_FAILOVER');
 };

@@ -18,6 +18,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../../../entity/consensus/state-root';
 import { generateLazyEntityId } from '../../../entity/factory';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { applyRuntimeStorageChanges } from '../../../runtime/observability/env-events';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../../../runtime';
 import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../../../storage';
@@ -127,8 +128,7 @@ test('snapshot retention keeps old witnesses until their roots are pruned, then 
     },
   } as JReplica);
   enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
+    runtimeTxs: [createTestEntityImportRuntimeTx(env, {
       entityId,
       signerId,
       data: {
@@ -138,7 +138,7 @@ test('snapshot retention keeps old witnesses until their roots are pruned, then 
           shares: { [signerId]: 1n }, jurisdiction,
         },
       },
-    }],
+    })],
     entityInputs: [],
   });
   await processRuntime(env, []);
@@ -188,6 +188,7 @@ test('snapshot retention keeps old witnesses until their roots are pruned, then 
   const historyDb = makeAtomicMemoryDb();
   const historyViewDb = makeAtomicMemoryDb();
   const save = () => saveRuntimeFrameToStorage({
+    entityContexts: new Map(),
     env,
     tryOpenDb: async () => true,
     getRuntimeDb: () => currentDb,

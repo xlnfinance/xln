@@ -40,9 +40,9 @@ const argValue = (name: string): string | null => {
   return process.argv.find(arg => arg.startsWith(prefix))?.slice(prefix.length) ?? null;
 };
 
-const positiveInteger = (value: string | undefined | null, fallback: number): number => {
+const positiveInteger = (value: string | undefined | null, defaultValue: number): number => {
   const parsed = Number(value ?? '');
-  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
+  if (!Number.isInteger(parsed) || parsed <= 0) return defaultValue;
   return parsed;
 };
 

@@ -122,7 +122,7 @@ import {
   provisionPrimaryRpcJurisdictionStack,
   readShardJurisdictions,
   resetLocalAnvilChains,
-  resolvePrimaryHubJurisdictionFallback,
+  resolvePrimaryHubJurisdiction,
   seedShardJurisdictions,
   syncCanonicalJurisdictionsFromShard,
   toPublicJurisdictionsPayload,
@@ -2192,6 +2192,10 @@ const waitForHubBaseline = async (): Promise<void> => {
             );
           }
         }
+        console.log(
+          `[MESH] baseline ready: direct=${directOpen}/${directRequired} ` +
+          `required=${String(requireDirectLinks)} elapsedMs=${Date.now() - baselineStartedAt}`,
+        );
         return;
       }
     }
@@ -2330,7 +2334,7 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
   let lastStatus: Record<string, unknown> = {};
   while (true) {
     const hasRpc2 = hasShardRpc2Jurisdiction(jurisdictionsConfig);
-    const primary = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);
+    const primary = resolvePrimaryHubJurisdiction(jurisdictionsConfig);
     let contracts: RpcContractAddresses | null = null;
     if (primary) {
       const payload = JSON.parse(readShardJurisdictions(jurisdictionsConfig)) as {
@@ -2490,7 +2494,7 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
     if (args.custodyEnabled && options.enableCustody) {
       const custodyStartedAt = startTiming('reset_custody');
       try {
-        const primaryJurisdiction = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);
+        const primaryJurisdiction = resolvePrimaryHubJurisdiction(jurisdictionsConfig);
         if (!primaryJurisdiction?.key) {
           throw new Error('CUSTODY_PRIMARY_JURISDICTION_MISSING');
         }
@@ -2777,7 +2781,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       return new Response(safeStringify(buildPublicHubDiscoveryPayload({
         hubChildren,
         relayStore,
-        primaryJurisdictionFallback: resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig),
+        defaultJurisdiction: resolvePrimaryHubJurisdiction(jurisdictionsConfig),
       })), { headers });
     }
 

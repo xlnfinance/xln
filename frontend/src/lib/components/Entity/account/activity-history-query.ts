@@ -78,9 +78,9 @@ type RawActivityHistoryPage = Partial<Omit<RuntimeAdapterActivityPage, 'events' 
   partial?: boolean;
 };
 
-const finiteFloor = (value: unknown, fallback: number): number => {
+const finiteFloor = (value: unknown, defaultValue: number): number => {
   const next = Math.floor(Number(value));
-  return Number.isFinite(next) ? next : fallback;
+  return Number.isFinite(next) ? next : defaultValue;
 };
 
 const normalizeTypes = (value: RuntimeAdapterReadQuery['types']): string[] | undefined => {

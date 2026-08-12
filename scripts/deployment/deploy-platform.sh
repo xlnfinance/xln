@@ -14,7 +14,6 @@
 #   bun run deploy:prod               Full remote public-testnet reset/rollout.
 #   bun run deploy:prod:frontend      Upload frontend without restarting Runtime.
 #   bun run deploy:prod:runtime       Runtime-only public-testnet reset/rollout.
-#   bun run deploy:prod:runtime:reset Explicit alias for the same Runtime reset.
 #
 # Option model
 #   --remote <user@host>   Operate on a remote checkout over SSH. When frontend
@@ -1113,7 +1112,7 @@ run_local_deploy() {
       echo "[deploy] removing local runtime state"
       rm -rf db db-tmp
     else
-      echo "[deploy] preserving checkout state until production migration completes"
+      echo "[deploy] production state remains in the canonical external state root"
     fi
     find logs -type f -name '*.log' -delete 2>/dev/null || true
   fi
@@ -1183,36 +1182,7 @@ run_local_deploy() {
       export XLN_RDB_ROOT="${XLN_RDB_ROOT:-$XLN_STATE_ROOT/rdb}"
       install -d -m 700 "$XLN_STATE_ROOT" "$XLN_JDB_ROOT" "$XLN_RDB_ROOT"
 
-      migrate_production_path() {
-        local source="$1"
-        local destination="$2"
-        [ -e "$source" ] || return 0
-        if [ -e "$destination" ]; then
-          echo "PRODUCTION_STATE_MIGRATION_COLLISION: source=$source destination=$destination" >&2
-          return 1
-        fi
-        install -d -m 700 "$(dirname "$destination")"
-        mv "$source" "$destination"
-      }
-
-      if [ -e data/anvil-state.json ] || [ -e data/anvil2-state.json ]; then
-        pm2 delete anvil >/dev/null 2>&1 || true
-        pm2 delete anvil2 >/dev/null 2>&1 || true
-        lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -TERM 2>/dev/null || true
-        lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -TERM 2>/dev/null || true
-        sleep 2
-      fi
-      run_or_fail_deploy "failed to migrate production JDB" migrate_production_path data/anvil-state.json "$XLN_JDB_ROOT/anvil-state.json"
-      run_or_fail_deploy "failed to migrate production JDB2" migrate_production_path data/anvil2-state.json "$XLN_JDB_ROOT/anvil2-state.json"
-      run_or_fail_deploy "failed to migrate production runtime DB" migrate_production_path db/runtime "$XLN_RDB_ROOT/runtime"
-      run_or_fail_deploy "failed to migrate production custody DB" migrate_production_path db/custody "$XLN_RDB_ROOT/custody"
-      run_or_fail_deploy "failed to migrate production watchtower DB" migrate_production_path db/watchtower "$XLN_RDB_ROOT/watchtower"
-      run_or_fail_deploy "failed to migrate production custody temp DB" migrate_production_path db-tmp/prod-custody "$XLN_RDB_ROOT/custody-tmp"
-      run_or_fail_deploy "failed to migrate production storage history" migrate_production_path data/storage-health-history.json "$XLN_RDB_ROOT/storage-health-history.json"
-      rm -rf data/anvil-tmp
-      rmdir data db db-tmp 2>/dev/null || true
       chmod -R go-rwx "$XLN_STATE_ROOT"
-      touch "$XLN_STATE_ROOT/.checkout-state-migrated"
 
       if [ "$RESET_PRODUCTION_MESH" = "1" ]; then
         export XLN_MESH_PRESERVE_STATE_ON_RESET=1
@@ -1325,11 +1295,9 @@ if [ -n "$REMOTE_HOST" ]; then
 
   # Remote deploy keeps the checkout self-healing. Frontend compilation happens on the
   # caller so Vite cannot OOM-kill live Anvil processes on the production host.
-  # some servers may retain /root/xln but lose .git metadata after disk cleanup or
-  # manual recovery. In that case we must re-bootstrap the checkout before rebuilding
-  # frontend/runtime. The first rollout preserves legacy checkout state for migration;
-  # later rollouts clean it because production persistence lives in /var/lib/xln.
-  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else XLN_DIR=/root/xln; mkdir -p \"\$XLN_DIR\"; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; if [ ! -d .git ]; then echo '[deploy] remote checkout missing .git; reinitializing repository'; git init; fi; if ! git remote get-url origin >/dev/null 2>&1; then git remote add origin '$ORIGIN_URL'; else git remote set-url origin '$ORIGIN_URL'; fi; git fetch origin main; git cat-file -e '$EXPECTED_DEPLOY_SHA^{commit}'; git merge-base --is-ancestor '$EXPECTED_DEPLOY_SHA' origin/main; git reset --hard; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi; git checkout -B main '$EXPECTED_DEPLOY_SHA'; git reset --hard '$EXPECTED_DEPLOY_SHA'; test \"\$(git rev-parse HEAD)\" = '$EXPECTED_DEPLOY_SHA'; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi;"
+  # A remote checkout is disposable. Durable production state exists only under
+  # /var/lib/xln, so every deploy cleans the checkout before binding exact bytes.
+  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else XLN_DIR=/root/xln; mkdir -p \"\$XLN_DIR\"; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; if [ ! -d .git ]; then echo '[deploy] remote checkout missing .git; reinitializing repository'; git init; fi; if ! git remote get-url origin >/dev/null 2>&1; then git remote add origin '$ORIGIN_URL'; else git remote set-url origin '$ORIGIN_URL'; fi; git fetch origin main; git cat-file -e '$EXPECTED_DEPLOY_SHA^{commit}'; git merge-base --is-ancestor '$EXPECTED_DEPLOY_SHA' origin/main; git reset --hard; git clean -fd; git checkout -B main '$EXPECTED_DEPLOY_SHA'; git reset --hard '$EXPECTED_DEPLOY_SHA'; test \"\$(git rev-parse HEAD)\" = '$EXPECTED_DEPLOY_SHA'; git clean -fd;"
   if [ -n "$remote_frontend_archive" ]; then
     remote_cmd="$remote_cmd rm -rf frontend/build; tar -xzf '$remote_frontend_archive' -C frontend; rm -f '$remote_frontend_archive';"
   fi

@@ -37,7 +37,7 @@ export const content = {
       items: [
         "<strong>2025:</strong> 72 CBDCs in pilot phase",
         "<strong>2026:</strong> Cross-border CBDC interop becomes political imperative",
-        "<strong>Legacy rails incompatible:</strong> SWIFT and correspondent banking can't handle programmable money",
+        "<strong>Incumbent rails are insufficient:</strong> SWIFT and correspondent banking can't handle programmable money",
         "<strong>Window closing:</strong> Each CBDC building incompatible scaling solution creates permanent fragmentation",
         "<strong>Universal substrate needed NOW:</strong> Before standards ossify"
       ]
@@ -144,7 +144,7 @@ export const content = {
       items: [
         "<strong>2025:</strong> 72 CBDC в пилотной фазе",
         "<strong>2026:</strong> Трансграничная совместимость CBDC становится политическим императивом",
-        "<strong>Legacy-рельсы несовместимы:</strong> SWIFT и корреспондентский банкинг не справятся с программируемыми деньгами",
+        "<strong>Текущих рельсов недостаточно:</strong> SWIFT и корреспондентский банкинг не справятся с программируемыми деньгами",
         "<strong>Окно закрывается:</strong> Каждый CBDC с несовместимым решением создаёт необратимую фрагментацию",
         "<strong>Универсальный субстрат нужен СЕЙЧАС:</strong> Пока стандарты не окостенели"
       ]
@@ -786,7 +786,7 @@ export const content = {
       items: [
         "<strong>2025:</strong> 72 CBDCs in der Pilotphase",
         "<strong>2026:</strong> Grenzüberschreitende CBDC-Interoperabilität wird politisch zwingend",
-        "<strong>Legacy-Schienen inkompatibel:</strong> SWIFT und Korrespondenzbanken können programmierbares Geld nicht handhaben",
+        "<strong>Bestehende Zahlungswege reichen nicht:</strong> SWIFT und Korrespondenzbanken können programmierbares Geld nicht handhaben",
         "<strong>Fenster schließt sich:</strong> Jede CBDC, die inkompatible Skalierungslösungen baut, schafft permanente Fragmentierung",
         "<strong>Universelles Substrat JETZT benötigt:</strong> Bevor Standards verknöchern"
       ]

@@ -82,7 +82,7 @@ export const handleUnsafeAccountFrame = async (
       type: 'prepareDispute',
       data: {
         counterpartyEntityId: counterpartyId,
-        description: 'late-htlc-secret-enforcement',
+        description: dispute.reason,
       },
     },
     env,
