@@ -142,8 +142,8 @@ describe('production startup wiring', () => {
       'runtime/__tests__/reliable-delivery-receipts.test.ts',
       'runtime/__tests__/reliable-local-catchup-real-crash.test.ts',
       'runtime/__tests__/reliable-frontier-real-crash.test.ts',
-      'runtime/__tests__/j-submit-crash-recovery.test.ts',
-      'runtime/__tests__/j-submit-real-rpc-crash-recovery.test.ts',
+      'runtime/__tests__/jurisdiction/submission/j-submit-crash-recovery.test.ts',
+      'runtime/__tests__/jurisdiction/submission/j-submit-real-rpc-crash-recovery.test.ts',
     ]) {
       expect(releaseGate).toContain(crashTest);
     }
