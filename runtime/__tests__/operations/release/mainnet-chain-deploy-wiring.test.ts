@@ -16,7 +16,19 @@ const chainMatrix = require('../../../../jurisdictions/scripts/deploy-chain-matr
     stablecoin: { address: string; deployTestStablecoin: boolean },
     rpcCall: (url: string, method: string, params: unknown[]) => Promise<unknown>,
   ): Promise<void>;
-  profiles: { mainnet: { ethereum: Record<string, unknown> } };
+  preflightTronStablecoin(
+    chain: Record<string, unknown>,
+    tronWeb: { address: { toHex(value: string): string; fromHex(value: string): string } },
+    stablecoin: { base58: string; hex41: string; evm: string },
+    reader: {
+      getContract(address: string): Promise<Record<string, unknown>>;
+      readDecimals(address: string): Promise<Record<string, unknown>>;
+    },
+  ): Promise<void>;
+  profiles: { mainnet: { ethereum: Record<string, unknown>; tron: Record<string, unknown> & {
+    id: string;
+    usdtAddress: { base58: string; hex41: string; evm: string };
+  } } };
 };
 const readRpcAdapterSource = (): string => [
   'chain-ids.ts',
@@ -161,6 +173,78 @@ describe('mainnet chain deployment wiring', () => {
     expect(script).toContain('without explicit --replace');
     expect(script).toContain('patchLinkReferences');
     expect(script).toContain('TRON bytecode still contains unresolved library link placeholders');
+  });
+
+  test('TRON stablecoin is read-only validated before dry-run, key access, compile, or broadcast', async () => {
+    const script = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-chain-matrix.cjs'), 'utf8');
+    const chain = chainMatrix.profiles.mainnet.tron;
+    const stablecoin = chain.usdtAddress;
+    const tronWeb = {
+      address: {
+        toHex: (value: string) => value === stablecoin.base58
+          ? stablecoin.hex41.slice(2)
+          : value.replace(/^0x/, ''),
+        fromHex: (value: string) => value.toLowerCase() === stablecoin.hex41.slice(2).toLowerCase()
+          ? stablecoin.base58
+          : `T-${value}`,
+      },
+    };
+    const calls: string[] = [];
+    const reader = {
+      getContract: async (address: string) => {
+        calls.push(`contract:${address}`);
+        return { contract_address: stablecoin.hex41.slice(2), bytecode: '6000' };
+      },
+      readDecimals: async (address: string) => {
+        calls.push(`decimals:${address}`);
+        return {
+          result: { result: true },
+          constant_result: ['6'.padStart(64, '0')],
+        };
+      },
+    };
+
+    await chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, reader);
+    expect(calls).toEqual([
+      `contract:${stablecoin.base58}`,
+      `decimals:${stablecoin.base58}`,
+    ]);
+    await expect(chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, {
+      ...reader,
+      getContract: async () => ({ contract_address: stablecoin.hex41.slice(2), bytecode: '' }),
+    })).rejects.toThrow(`TRON_STABLECOIN_CODE_MISSING:${chain.id}:${stablecoin.base58}`);
+    await expect(chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, {
+      ...reader,
+      getContract: async () => ({ contract_address: `41${'00'.repeat(20)}`, bytecode: '6000' }),
+    })).rejects.toThrow(`TRON_STABLECOIN_CONTRACT_IDENTITY_MISMATCH:${chain.id}`);
+    await expect(chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, {
+      ...reader,
+      readDecimals: async () => ({
+        result: { result: true },
+        constant_result: ['12'.padStart(64, '0')],
+      }),
+    })).rejects.toThrow(`TRON_STABLECOIN_DECIMALS_MISMATCH:${chain.id}:expected=6:actual=18`);
+    await expect(chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, {
+      ...reader,
+      readDecimals: async () => ({
+        result: { result: false },
+        constant_result: [],
+      }),
+    })).rejects.toThrow(`TRON_STABLECOIN_DECIMALS_CALL_FAILED:${chain.id}:${stablecoin.base58}`);
+    await expect(chainMatrix.preflightTronStablecoin(chain, tronWeb, stablecoin, {
+      ...reader,
+      readDecimals: async () => ({
+        result: { result: true },
+        constant_result: ['06'],
+      }),
+    })).rejects.toThrow(`TRON_STABLECOIN_DECIMALS_RESPONSE_INVALID:${chain.id}:${stablecoin.base58}`);
+
+    const preflightIndex = script.indexOf('await preflightTronStablecoin(chain, readOnlyTronWeb, usdt);');
+    expect(preflightIndex).toBeGreaterThan(-1);
+    expect(preflightIndex).toBeLessThan(script.indexOf('if (options.dryRun)', preflightIndex));
+    expect(preflightIndex).toBeLessThan(script.indexOf('const privateKey = requireHexPrivateKey()', preflightIndex));
+    expect(preflightIndex).toBeLessThan(script.indexOf("run('bun', ['scripts/compile-tron.cjs'", preflightIndex));
+    expect(preflightIndex).toBeLessThan(script.indexOf("deployTronContract(tronWeb, 'Account')", preflightIndex));
   });
 
   test('TRON compiler uses pinned standard-json solc artifacts outside git', () => {

@@ -253,6 +253,49 @@ const tronAddressInfo = (tronWeb, address) => {
   };
 };
 
+const preflightTronStablecoin = async (chain, tronWeb, stablecoin, reader = {}) => {
+  const getContract = reader.getContract || ((address) => tronWeb.trx.getContract(address));
+  const readDecimals = reader.readDecimals || ((address) =>
+    tronWeb.transactionBuilder.triggerConstantContract(
+      address,
+      'decimals()',
+      {},
+      [],
+      address,
+    ));
+  const contract = await getContract(stablecoin.base58);
+  let contractAddress;
+  try {
+    contractAddress = tronAddressInfo(tronWeb, contract?.contract_address);
+  } catch {
+    throw new Error(`TRON_STABLECOIN_CONTRACT_IDENTITY_INVALID:${chain.id}:${stablecoin.base58}`);
+  }
+  if (contractAddress.hex41.toLowerCase() !== stablecoin.hex41.toLowerCase()) {
+    throw new Error(
+      `TRON_STABLECOIN_CONTRACT_IDENTITY_MISMATCH:${chain.id}:` +
+      `expected=${stablecoin.hex41}:actual=${contractAddress.hex41}`,
+    );
+  }
+  const bytecode = typeof contract?.bytecode === 'string'
+    ? stripHexPrefix(contract.bytecode)
+    : '';
+  if (!/^[0-9a-fA-F]+$/.test(bytecode)) {
+    throw new Error(`TRON_STABLECOIN_CODE_MISSING:${chain.id}:${stablecoin.base58}`);
+  }
+  const response = await readDecimals(stablecoin.base58);
+  if (response?.result?.result !== true) {
+    throw new Error(`TRON_STABLECOIN_DECIMALS_CALL_FAILED:${chain.id}:${stablecoin.base58}`);
+  }
+  const encodedDecimals = stripHexPrefix(response.constant_result?.[0] || '');
+  if (response.constant_result?.length !== 1 || !/^[0-9a-fA-F]{64}$/.test(encodedDecimals)) {
+    throw new Error(`TRON_STABLECOIN_DECIMALS_RESPONSE_INVALID:${chain.id}:${stablecoin.base58}`);
+  }
+  const decimals = Number(BigInt(`0x${encodedDecimals}`));
+  if (decimals !== 6) {
+    throw new Error(`TRON_STABLECOIN_DECIMALS_MISMATCH:${chain.id}:expected=6:actual=${decimals}`);
+  }
+};
+
 const patchLinkReferences = (bytecode, linkReferences, libraries) => {
   const refs = linkReferences || {};
   const patches = [];
@@ -328,23 +371,16 @@ const deployTronContract = async (tronWeb, contractName, parameters = [], librar
 
 const deployTron = async (chain, options) => {
   const preflight = await preflightChain(chain);
-  if (options.dryRun) {
-    return { chain, preflight, dryRun: true };
-  }
-
-  const privateKey = requireHexPrivateKey();
-  if (!options.skipCompile) run('bun', ['scripts/compile-tron.cjs', '--all', '--quiet']);
   const { TronWeb } = require('tronweb');
-  const tronWeb = new TronWeb({
+  const readOnlyTronWeb = new TronWeb({
     fullHost: tronFullHostFor(chain),
     headers: tronGridHeaders(),
-    privateKey,
   });
 
   const rawUsdtAddress = chain.usdtAddress || (chain.usdtEnv ? process.env[chain.usdtEnv] : undefined);
   if (!rawUsdtAddress) throw new Error(`${chain.usdtEnv || `${chain.id} USDT address`} is required`);
   const usdt = tronAddressInfo(
-    tronWeb,
+    readOnlyTronWeb,
     typeof rawUsdtAddress === 'string' ? rawUsdtAddress : rawUsdtAddress.base58,
   );
   if (typeof rawUsdtAddress === 'object') {
@@ -354,6 +390,18 @@ const deployTron = async (chain, options) => {
       }
     }
   }
+  await preflightTronStablecoin(chain, readOnlyTronWeb, usdt);
+  if (options.dryRun) {
+    return { chain, preflight, dryRun: true };
+  }
+
+  const privateKey = requireHexPrivateKey();
+  if (!options.skipCompile) run('bun', ['scripts/compile-tron.cjs', '--all', '--quiet']);
+  const tronWeb = new TronWeb({
+    fullHost: tronFullHostFor(chain),
+    headers: tronGridHeaders(),
+    privateKey,
+  });
 
   const account = await deployTronContract(tronWeb, 'Account');
   const depositoryBounds = await deployTronContract(tronWeb, 'DepositoryBounds');
@@ -577,5 +625,6 @@ if (require.main === module) {
 module.exports = {
   evmStablecoinFor,
   preflightEvmStablecoin,
+  preflightTronStablecoin,
   profiles,
 };
