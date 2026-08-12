@@ -376,7 +376,7 @@ describe('frontend time-machine current env contract', () => {
     expect(source).not.toContain('localIsLive.set(true);\n        localTimeIndex.set(-1);\n        registerEnvChanges(nextEnv);');
   });
 
-  test('demo and graph actions block historical frames instead of auto-switching live', () => {
+  test('demo actions block historical frames and retired graph actions stay absent', () => {
     const architect = read('frontend/src/lib/view/panels/ArchitectPanel.svelte');
     const graph = read('frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte');
     const dock = read('frontend/src/lib/view/DockRoot.svelte');
@@ -391,19 +391,11 @@ describe('frontend time-machine current env contract', () => {
     expect(architect).not.toContain('runtimeFrameTimeIndex.set(Math.max(0, frames.length - 1))');
     expect(architect).not.toContain('runtimeFrameIsLive.set(false)');
 
-    expect(graph).toContain('export let runtimeFrameIsLive: Writable<boolean>;');
-    expect(graph).toContain('getLiveEnvForAction');
-    expect(graph).toContain('get(runtimeFrameTimeIndex) !== -1 || !get(runtimeFrameIsLive)');
-    expect(graph).toContain('Switch to the current runtime state before acting.');
-    expect(graph).toContain('submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput] })');
-    expect(graph).not.toContain('submitRuntimeInput(actionEnv');
-    expect(graph).not.toContain('function goToLiveForAction');
-    expect(graph).not.toContain('runtimeFrameTimeIndex.set(-1)');
-    expect(graph).not.toContain('runtimeFrameIsLive.set(true)');
-    expect(graph).not.toContain('enqueueRuntimeInput(env,');
-    expect(graph).not.toContain('$runtimeFrameEnv?.runtimeInput');
-    expect(graph).not.toContain('$runtimeFrameEnv.runtimeInput');
-    expect(graph).not.toContain('get(runtimeFrameEnv)?.state.eReplicas');
+    expect(graph).not.toContain('export let runtimeFrameIsLive: Writable<boolean>;');
+    expect(graph).not.toContain('function getLiveEnvForAction');
+    expect(graph).not.toContain('async function sendPayment()');
+    expect(graph).not.toContain('async function executeSinglePayment');
+    expect(graph).not.toContain('async function executeScenario()');
     expect(graph).toContain('if (timeIndex >= 0) {');
     expect(graph).toContain('debug.warn(`⚠️ No entity data found at frame ${timeIndex} - clearing network`)');
     expect(dock).toContain('runtimeFrameIsLive,');
@@ -415,7 +407,8 @@ describe('frontend time-machine current env contract', () => {
     expect(architect).toContain('function clearDemoRuntimeState');
     expect(architect).toContain('$runtimeFrameEnv.state.eReplicas.clear()');
     expect(architect).toContain("publishCurrentEnv([])");
-    expect(architect).toContain("Existing economy cleared before topology rebuild");
+    expect(architect).toContain("Demo reset complete - ready for new topology");
+    expect(architect).not.toContain("Existing economy cleared before topology rebuild");
     expect(architect).not.toContain('Reset not implemented');
     expect(architect).not.toContain('reload page to reset');
     expect(architect).not.toContain('reload page for now');

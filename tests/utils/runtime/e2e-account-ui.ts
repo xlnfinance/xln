@@ -224,9 +224,6 @@ export async function getRenderedPrimaryOutbound(page: Page): Promise<number> {
   return getRenderedPrimaryCapacity(page, '.delta-row .compact-out-value, .compact-out-value, .cap.out .cap-value');
 }
 
-export async function getRenderedPrimaryInbound(page: Page): Promise<number> {
-  return getRenderedPrimaryCapacity(page, '.delta-row .compact-in-value, .compact-in-value, .cap.in .cap-value');
-}
 
 export async function waitForRenderedPrimaryOutboundDelta(
   page: Page,
@@ -246,31 +243,11 @@ export async function waitForRenderedPrimaryOutboundDelta(
   );
 }
 
-export async function waitForRenderedPrimaryInboundDelta(
-  page: Page,
-  baseline: number,
-  expectedDelta: number,
-  options?: {
-    timeoutMs?: number;
-    tolerance?: number;
-  },
-): Promise<number> {
-  return waitForRenderedPrimaryCapacityDelta(
-    page,
-    baseline,
-    expectedDelta,
-    '.delta-row .compact-in-value, .compact-in-value, .cap.in .cap-value',
-    options,
-  );
-}
 
 export async function getRenderedOutboundForAccount(page: Page, counterpartyId: string): Promise<number> {
   return getRenderedCapacityForAccount(page, counterpartyId, 'outbound');
 }
 
-export async function getRenderedInboundForAccount(page: Page, counterpartyId: string): Promise<number> {
-  return getRenderedCapacityForAccount(page, counterpartyId, 'inbound');
-}
 
 export async function getRenderedExternalBalance(page: Page, symbol: string): Promise<number> {
   return getNumericTextByTestId(page, `external-balance-${symbol}`);
@@ -282,29 +259,6 @@ export async function getRenderedReserveBalance(page: Page, symbol: string): Pro
 
 export async function getRenderedAccountSpendableBalance(page: Page, symbol: string): Promise<number> {
   return getNumericTextByTestId(page, `account-spendable-${symbol}`);
-}
-
-export async function waitForRenderedOutboundForAccount(
-  page: Page,
-  counterpartyId: string,
-  options?: {
-    timeoutMs?: number;
-  },
-): Promise<number> {
-  const timeoutMs = options?.timeoutMs ?? 20_000;
-  const startedAt = Date.now();
-  let lastError: Error | null = null;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      return await getRenderedOutboundForAccount(page, counterpartyId);
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      await page.waitForTimeout(250);
-    }
-  }
-
-  throw lastError ?? new Error(`Timed out waiting for rendered outbound account ${counterpartyId}`);
 }
 
 export async function waitForRenderedOutboundForAccountDelta(
@@ -323,26 +277,6 @@ export async function waitForRenderedOutboundForAccountDelta(
     baseline,
     expectedDelta,
     'outbound',
-    options,
-  );
-}
-
-export async function waitForRenderedInboundForAccountDelta(
-  page: Page,
-  counterpartyId: string,
-  baseline: number,
-  expectedDelta: number,
-  options?: {
-    timeoutMs?: number;
-    tolerance?: number;
-  },
-): Promise<number> {
-  return waitForRenderedAccountCapacityDelta(
-    page,
-    counterpartyId,
-    baseline,
-    expectedDelta,
-    'inbound',
     options,
   );
 }

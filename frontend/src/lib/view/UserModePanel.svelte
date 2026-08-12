@@ -339,20 +339,6 @@
     return null;
   }
 
-  function firstReplicaWithRelationshipsInFrame(frame: RuntimeFrame | null | undefined): EntityReplica | null {
-    const replicas = frame?.state.eReplicas;
-    if (!replicas) return null;
-    let best: { replica: EntityReplica; score: number } | null = null;
-    for (const replica of replicas.values()) {
-      if (!replica?.entityId || !replica?.signerId) continue;
-      const accountCount = Number(replica.state?.accounts?.size || 0);
-      const bookCount = Number(replica.state?.orderbookExt?.books?.size || 0);
-      const score = accountCount * 1_000_000 + bookCount * 1_000 + Number(replica.state?.height || 0);
-      if (!best || score > best.score) best = { replica, score };
-    }
-    return best?.replica ?? null;
-  }
-
   $effect(() => {
     if (!isRemoteRuntime) return;
     if (!runtimeProjectionMatchesRuntime($runtimeView.runtimeId, $activeRuntimeId)) return;
@@ -636,12 +622,6 @@
     };
   });
 
-  function listJMachineNames(env: RuntimeFrame | null | undefined): string[] {
-    const jReplicas = env?.state.jReplicas;
-    if (!jReplicas) return [];
-    return Array.from(jReplicas.keys());
-  }
-
   function resolveJMachineName(names: string[], candidate: string | null | undefined): string | null {
     const normalized = String(candidate || '').trim().toLowerCase();
     if (!normalized) return null;
@@ -809,11 +789,6 @@
     if (isRemoteRuntime) {
       void refreshCurrentRuntimeProjection();
     }
-  }
-
-  // Handle account selection from dropdown
-  function handleAccountSelect(event: CustomEvent<{ accountId: string | null }>) {
-    selectedAccountId = event.detail.accountId;
   }
 
   function handleOnboardingComplete() {

@@ -357,81 +357,6 @@ async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void>
   }, { targetRuntimeId: runtimeId }, { timeout: RUNTIME_READY_TIMEOUT });
 }
 
-async function waitForRuntimeBootstrap(
-  page: Page,
-  expectedRuntimeId: string,
-  previousRuntimeId: string | null,
-): Promise<string> {
-  const expected = String(expectedRuntimeId || '').toLowerCase();
-  const previous = String(previousRuntimeId || '').toLowerCase();
-
-  await expect
-    .poll(async () => {
-      return await page.evaluate(({ expectedRuntimeId, previousRuntimeId }) => {
-        const env = (window as typeof window & {
-          isolatedEnv?: {
-            runtimeId?: string;
-            eReplicas?: Map<string, unknown>;
-          };
-        }).isolatedEnv;
-        const runtimeId = String(env?.runtimeId || '').toLowerCase();
-        const replicaCount = Number(env?.state?.eReplicas?.size || 0);
-
-        const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
-        const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
-        const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
-        const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
-        const selectedReady =
-          selectedRuntimeId
-          && selectedRuntimeId === runtimeId
-          && selectedRuntimeId !== String(previousRuntimeId || '').toLowerCase()
-          && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
-          && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId);
-        if (runtimeId && replicaCount > 0 && selectedReady) {
-          return runtimeId;
-        }
-        if (
-          !runtimeId
-          && selectedRuntimeId
-          && selectedRuntimeId !== String(previousRuntimeId || '').toLowerCase()
-          && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
-          && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
-        ) {
-          return selectedRuntimeId;
-        }
-
-        const onboardingVisible =
-          Boolean(document.querySelector('#display-name'))
-          || Array.from(document.querySelectorAll('button')).some((button) => {
-            const label = String(button.textContent || '').trim().toLowerCase();
-            return label === 'start' || label === 'start using xln' || label === 'continue';
-          });
-
-        if (onboardingVisible) {
-          return runtimeId || String(expectedRuntimeId || '').toLowerCase() || 'onboarding-visible';
-        }
-        return '';
-      }, { expectedRuntimeId: expected, previousRuntimeId: previous }).catch(() => '');
-    }, {
-      timeout: RUNTIME_READY_TIMEOUT,
-      intervals: [250, 500, 1000],
-    })
-    .not.toBe('');
-
-  const activeRuntimeId = await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-      };
-    }).isolatedEnv;
-    const envRuntimeId = String(env?.runtimeId || '').toLowerCase();
-    if (envRuntimeId) return envRuntimeId;
-    const selectedRuntimeId = document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId;
-    return String(selectedRuntimeId || '').toLowerCase();
-  }).catch(() => '');
-
-  return activeRuntimeId || expected;
-}
 
 async function waitForActiveRuntimeId(page: Page, runtimeId: string): Promise<void> {
   await page.waitForFunction(({ targetRuntimeId }) => {
@@ -452,36 +377,6 @@ async function waitForActiveRuntimeId(page: Page, runtimeId: string): Promise<vo
   }, { targetRuntimeId: runtimeId }, { timeout: 15_000 });
 }
 
-async function waitForAnyRuntimeReady(page: Page): Promise<string> {
-  return await page.waitForFunction(() => {
-    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
-    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
-    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
-    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
-    if (
-      selectedRuntimeId
-      && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
-      && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
-    ) {
-      return selectedRuntimeId;
-    }
-
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        eReplicas?: Map<string, unknown>;
-      };
-    }).isolatedEnv;
-    if (!env?.runtimeId || Number(env?.state?.eReplicas?.size || 0) <= 0) return null;
-    return String(env.runtimeId).toLowerCase();
-  }, { timeout: RUNTIME_READY_TIMEOUT }).then(async (handle) => {
-    const value = await handle.jsonValue();
-    if (typeof value !== 'string' || value.length === 0) {
-      throw new Error('runtimeId missing after runtime creation');
-    }
-    return value;
-  });
-}
 
 async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | null): Promise<string> {
   try {

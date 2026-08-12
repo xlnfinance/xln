@@ -663,58 +663,6 @@ async function dumpRelayErrorSlice(page: Page, tag: string, since: number): Prom
   console.log(`[E2E][${tag}] relay debug errors/warns since=${since}: ${JSON.stringify(rows)}`);
 }
 
-async function waitForRelayHtlcPipeline(
-  page: Page,
-  opts: {
-    since: number;
-    senderRuntimeId: string;
-    hubRuntimeId: string;
-    recipientRuntimeId: string;
-    hubEntityId: string;
-    recipientEntityId: string;
-    timeoutMs?: number;
-  }
-): Promise<void> {
-  const timeoutMs = opts.timeoutMs ?? 12_000;
-  const start = Date.now();
-  let sawSenderToHub = false;
-  while (Date.now() - start < timeoutMs) {
-    const events = await fetchRelayEvents(page, {
-      last: 1000,
-      event: 'delivery',
-      msgType: 'entity_input',
-      since: opts.since,
-    });
-
-    sawSenderToHub = events.some((ev: any) =>
-      String(ev?.from || '').toLowerCase() === String(opts.senderRuntimeId).toLowerCase() &&
-      String(ev?.to || '').toLowerCase() === String(opts.hubRuntimeId).toLowerCase() &&
-      String(ev?.details?.entityId || '').toLowerCase() === String(opts.hubEntityId).toLowerCase() &&
-      String(ev?.status || '').startsWith('delivered')
-    );
-
-    const sawHubToRecipient = events.some((ev: any) =>
-      String(ev?.from || '').toLowerCase() === String(opts.hubRuntimeId).toLowerCase() &&
-      String(ev?.to || '').toLowerCase() === String(opts.recipientRuntimeId).toLowerCase() &&
-      String(ev?.details?.entityId || '').toLowerCase() === String(opts.recipientEntityId).toLowerCase() &&
-      (String(ev?.status || '').startsWith('delivered') || String(ev?.status || '').startsWith('queued'))
-    );
-
-    if (sawSenderToHub && sawHubToRecipient) return;
-    await page.waitForTimeout(250);
-  }
-
-  await dumpRelaySlice(page, 'htlc-pipeline-timeout', 250);
-  await dumpRelayErrorSlice(page, 'htlc-pipeline-timeout', opts.since);
-  if (!sawSenderToHub) {
-    throw new Error(
-      `Relay pipeline break: sender(${opts.senderRuntimeId.slice(0, 12)}) -> hub(${opts.hubRuntimeId.slice(0, 12)}) not delivered`
-    );
-  }
-  throw new Error(
-    `Relay pipeline break: hub(${opts.hubRuntimeId.slice(0, 12)}) did not emit entity_input to recipient runtime=${opts.recipientRuntimeId.slice(0, 12)} entity=${opts.recipientEntityId.slice(0, 12)}`
-  );
-}
 
 /** Faucet 100 USDC into one exact bilateral hub account (with 30s timeout). */
 async function faucet(page: Page, entityId: string, hubEntityId: string) {
@@ -799,39 +747,6 @@ async function screenshot(page: Page, name: string) {
   console.log(`[E2E] 📸 Screenshot: ${name}.png`);
 }
 
-async function getEntityPersistenceSnapshot(page: Page, entityId: string, counterpartyId: string) {
-  return page.evaluate(({ entityId, counterpartyId }) => {
-    const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) {
-      return {
-        envReady: false,
-        runtimeHeight: 0,
-        historyFrames: 0,
-        hasAccount: false,
-        accountCount: 0,
-      };
-    }
-    for (const [key, rep] of env.state.eReplicas.entries()) {
-      if (!String(key).startsWith(entityId + ':')) continue;
-      const accountCount = rep?.state?.accounts?.size || 0;
-      const hasAccount = !!rep?.state?.accounts?.has?.(counterpartyId);
-      return {
-        envReady: true,
-        runtimeHeight: Number(env.state.height || 0),
-        historyFrames: Array.isArray(env.history) ? env.history.length : 0,
-        hasAccount,
-        accountCount,
-      };
-    }
-    return {
-      envReady: true,
-      runtimeHeight: Number(env.state.height || 0),
-      historyFrames: Array.isArray(env.history) ? env.history.length : 0,
-      hasAccount: false,
-      accountCount: 0,
-    };
-  }, { entityId, counterpartyId });
-}
 
 // ─── Test ─────────────────────────────────────────────────────────
 

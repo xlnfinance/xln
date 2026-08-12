@@ -5,11 +5,10 @@ import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { panelBridge } from "../../utils/panelBridge";
 import { PerformanceMonitor, type PerfMetrics } from "../../utils/perfMonitor";
-import { getXLN, submitRuntimeInput, entityPositions } from "$lib/stores/xlnStore";
+import { getXLN, entityPositions } from "$lib/stores/xlnStore";
 import { requireTokenDecimals } from "$lib/components/Entity/token-metadata";
 import Graph3DViewport from "../../components/Graph3DViewport.svelte";
 import { compareStableText } from "$lib/utils/stableSort";
-import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from "$lib/utils/runtime/liveRuntimeEnv";
   import { activeRuntimeId, runtimeOperations, runtimes, type Runtime } from "$lib/stores/runtimeStore";
 import { runtimeControllerHandle } from "$lib/stores/runtimeControllerStore";
 import { runtimeView } from "$lib/stores/runtimeViewStore";
@@ -65,7 +64,7 @@ import {
 } from "./graph3d-visuals";
 import type { GraphConnectionData, GraphEntityData, GraphFrameActivity, GraphJBlockHistoryEntry, GraphPaymentJob, GraphRendererMode, GraphRipple, GraphXLNRuntime } from "./graph3d-types";
 import { buildRuntimeGraphProjections } from "./graph3d-runtime-projections";
-import { buildGraphPaymentInput, collectGraphTokenIds, executeGraphScenario, getGraphEntitySizeForToken, loadGraphScenarioSteps, parseGraphPaymentAmount } from "./graph3d-actions";
+import { collectGraphTokenIds, getGraphEntitySizeForToken, loadGraphScenarioSteps } from "./graph3d-actions";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
@@ -73,7 +72,6 @@ let miniPanelPosition = { x: 0, y: 0 };
 export let runtimeFrameEnv: Writable<any>;
 export let runtimeFrameHistory: Writable<any[]>;
 export let runtimeFrameTimeIndex: Writable<number>;
-export let runtimeFrameIsLive: Writable<boolean>;
 export let graphInitSignal: Writable<boolean> | undefined = undefined;
 $: initEnabled = graphInitSignal ? $graphInitSignal : true;
 $: env = (() => {
@@ -146,17 +144,6 @@ function detachConnectionVisuals(connection: GraphConnectionData): void {
 }
 function detachEntityVisuals(entity: GraphEntityData): void {
   detachFromGraphWorld(entity.mesh); // label + rings are children of the mesh
-}
-function getLiveEnvForAction(action: string): any {
-  if (get(runtimeFrameTimeIndex) !== -1 || !get(runtimeFrameIsLive)) {
-    throw new Error(`${action} requires LIVE mode. Switch to the current runtime state before acting.`);
-  }
-  const currentEnv = get(runtimeFrameEnv);
-  const liveEnv = unwrapLiveRuntimeEnv(currentEnv) ?? currentEnv;
-  if (!liveEnv?.state.eReplicas || !(liveEnv.state.eReplicas instanceof Map)) {
-    throw new Error(`${action} requires live runtime environment`);
-  }
-  return liveEnv;
 }
 let XLN: GraphXLNRuntime | null = null;
 const debug = {
@@ -2562,132 +2549,6 @@ function calculateAvailableRoutes(from: string, to: string) {
   });
   selectedRouteIndex = 0;
 }
-async function sendPayment() {
-  try {
-    if (!paymentFrom || !paymentTo) {
-      debug.error("❌ Missing from/to entities");
-      alert("Please select from and to entities");
-      return;
-    }
-    if (paymentFrom === paymentTo) {
-      debug.error("❌ Same entity selected");
-      alert("Cannot send payment to same entity");
-      return;
-    }
-    const selectedRoute = availableRoutes[selectedRouteIndex];
-    if (!selectedRoute) {
-      alert("No route available for this payment");
-      return;
-    }
-    getLiveEnvForAction("Graph payment");
-    const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const job: GraphPaymentJob = {
-      id: jobId,
-      from: paymentFrom,
-      to: paymentTo,
-      tokenId: selectedTokenId,
-      amount: paymentAmount,
-      tps: paymentTPS,
-      sentCount: 0,
-      startedAt: Date.now(),
-    };
-    if (paymentTPS === 0) {
-      await executeSinglePayment(job);
-    } else {
-      const intervalMs = 1000 / paymentTPS; // Convert TPS to milliseconds
-      const intervalId = window.setInterval(async () => {
-        await executeSinglePayment(job);
-        job.sentCount++;
-      }, intervalMs);
-      job.intervalId = intervalId;
-      activeJobs = [...activeJobs, job];
-    }
-  } catch (error) {
-    debug.error("🔥 CRITICAL ERROR in sendPayment:", error);
-    debug.error("Stack:", error instanceof Error ? error.stack : "No stack");
-    alert(`Payment failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-async function executeSinglePayment(job: GraphPaymentJob) {
-  try {
-    if (!XLN) {
-      throw new Error("XLN runtime not loaded");
-    }
-    const actionEnv = getLiveEnvForAction("Graph payment");
-    let ourReplica: any = null;
-    for (const key of actionEnv.state.eReplicas.keys()) {
-      if (key.startsWith(job.from + ":")) {
-        ourReplica = actionEnv.state.eReplicas.get(key);
-        break;
-      }
-    }
-    if (!ourReplica) {
-      throw new Error(`No replica found for entity ${getEntityShortName(job.from)} (${job.from})`);
-    }
-    const hasDirectAccount = ourReplica?.state?.accounts?.has(job.to);
-    if (!hasDirectAccount) {
-    }
-    const selectedRoute = availableRoutes[selectedRouteIndex];
-    if (!selectedRoute) {
-      throw new Error("No route selected");
-    }
-    let signerId = "1"; // default
-    for (const key of actionEnv.state.eReplicas.keys()) {
-      if (key.startsWith(job.from + ":")) {
-        signerId = key.split(":")[1] || "1";
-        break;
-      }
-    }
-    const recipientAmount = parseGraphPaymentAmount(job.amount, getTokenDecimals(job.tokenId));
-    const profiles = actionEnv.gossip?.getProfiles?.();
-    if (!Array.isArray(profiles)) throw new Error("Graph payment routing profiles unavailable");
-    const maxSenderDebit = XLN.quoteHtlcPaymentRoute(
-      profiles,
-      selectedRoute.path,
-      job.tokenId,
-      recipientAmount,
-    ).senderLockAmount;
-    const paymentInput = buildGraphPaymentInput(
-      job,
-      signerId,
-      selectedRoute.path,
-      getTokenDecimals(job.tokenId),
-      maxSenderDebit,
-    );
-    triggerEntityActivity(job.from);
-    triggerEntityActivity(job.to);
-    const nextEnv = await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput] });
-    if (nextEnv) {
-      runtimeFrameEnv.set(nextEnv);
-      runtimeFrameHistory.set(nextEnv.history || []);
-    }
-    recentActivity = [
-      {
-        id: `tx-${Date.now()}`,
-        message: `${getEntityShortName(job.from)} → ${getEntityShortName(job.to)}: ${job.amount}`,
-        timestamp: Date.now(),
-        type: "payment" as "payment",
-      },
-      ...recentActivity,
-    ].slice(0, 10);
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    debug.error("❌ Payment failed:", error); // Log full error object
-    debug.error("❌ Error message:", errorMsg);
-    debug.error("❌ Stack trace:", error instanceof Error ? error.stack : "No stack");
-    alert(`Payment failed: ${errorMsg}`);
-    if (job.intervalId) {
-      cancelJob(job.id);
-    }
-  }
-}
-function cancelJob(jobId: string) {
-  const job = activeJobs.find((j) => j.id === jobId);
-  if (job?.intervalId) {
-    clearInterval(job.intervalId);
-  }
-  activeJobs = activeJobs.filter((j) => j.id !== jobId);
-}
 function createRipple(entityId: string) {
   const entity = entities.find((e) => e.id === entityId);
   if (!entity || !scene) return;
@@ -2731,39 +2592,6 @@ function detectJurisdictionalEvents() {
       createRipple(entityId);
     }
   });
-}
-async function executeScenario() {
-  if (!selectedScenarioFile) {
-    debug.warn("No scenario selected");
-    return;
-  }
-  isLoadingScenario = true;
-  try {
-    const XLN = (await getXLN()) as unknown as GraphXLNRuntime;
-    const actionEnv = getLiveEnvForAction("Graph scenario");
-    const { parsed, result } = await executeGraphScenario({
-      filename: selectedScenarioFile,
-      runtime: XLN,
-      env: actionEnv,
-    });
-    if (parsed.errors.length > 0) {
-      console.error("Scenario parse errors:", parsed.errors);
-      debug.error("Scenario has errors - check console");
-      return;
-    }
-    if (!result) return;
-    runtimeFrameHistory.set(actionEnv.history || []);
-    runtimeFrameEnv.set(createRuntimeViewEnv(actionEnv));
-    if (!result.success) {
-      console.error("Scenario execution errors:", result.errors);
-      debug.error("Scenario execution failed - check console");
-    }
-  } catch (error) {
-    console.error("Failed to execute scenario:", error);
-    debug.error("Scenario failed: " + (error as Error).message);
-  } finally {
-    isLoadingScenario = false;
-  }
 }
 function getEntityBalanceInfo(entityId: string): string {
   return formatGraphEntityBalanceInfo({

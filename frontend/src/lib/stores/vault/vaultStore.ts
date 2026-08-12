@@ -40,7 +40,6 @@ import { writeHubJoinPreference, writeSavedCollateralPolicy } from '../../utils/
 
 import { writeOnboardingCompleteForEntities } from '../../utils/onboarding/onboardingState';
 
-import { tabOperations } from '../ui/tabStore';
 
 import { isInactiveTabStandby } from '../../utils/control/activeTabLock';
 
@@ -1028,37 +1027,6 @@ function applyRuntimeLogPreference(env: RuntimeReplica): void {
   if (!env) return;
   const verbose = !!get(settings).verboseLogging;
   env.quietRuntimeLogs = !verbose;
-}
-
-async function resetRuntimePersistence(runtime: Runtime, xln: XLNModule): Promise<void> {
-  const runtimeIdLower = normalizeRuntimeId(runtime.id);
-  if (!runtimeIdLower) throw new Error('Invalid runtime id for reset');
-  const liveRuntimeEntry = get(runtimes).get(runtimeIdLower);
-  if (liveRuntimeEntry?.env) {
-    await stopRuntimeEnv(unwrapLiveRuntimeEnv(liveRuntimeEntry.env) ?? liveRuntimeEntry.env);
-  }
-  runtimes.update(currentRuntimes => {
-    const runtimeEntry = currentRuntimes.get(runtimeIdLower);
-    if (!runtimeEntry) return currentRuntimes;
-    const updated = new Map(currentRuntimes);
-    updated.set(runtimeIdLower, {
-      ...runtimeEntry,
-      env: null,
-      status: 'disconnected',
-      lastSynced: Date.now(),
-    });
-    return updated;
-  });
-  if (normalizeRuntimeId(get(activeRuntimeId) || '') === runtimeIdLower) {
-    setXlnEnvironment(null);
-    tabOperations.clearAllTabs();
-  }
-  const resetEnv = xln.createEmptyEnv(runtime.seed);
-  applyRuntimeLogPreference(resetEnv);
-  resetEnv.runtimeId = runtimeIdLower;
-  resetEnv.dbNamespace = runtimeIdLower;
-  await xln.clearDB(resetEnv);
-  toasts.warning('This runtime storage was reset', 8000);
 }
 
 function ensureRuntimeLoopRunning(env: RuntimeReplica, xln: XLNModule, reason: string): void {

@@ -549,15 +549,6 @@ async function getRpcAllowanceRaw(page: Page, symbol: string, owner: string, spe
   return BigInt(raw || '0x0');
 }
 
-async function assertInfiniteDepositoryAllowance(page: Page, owner: string): Promise<void> {
-  const depository = await getDepositoryAddress(page);
-  const requiredSymbols = ['USDC', 'USDT', 'WETH'] as const;
-  for (const symbol of requiredSymbols) {
-    await expect
-      .poll(async () => await getRpcAllowanceRaw(page, symbol, owner, depository), { timeout: ROUTE_TIMEOUT_MS })
-      .toBe(MaxUint256);
-  }
-}
 
 async function seedExternalWallet(page: Page, recipient: string, symbol: string, amount: string): Promise<void> {
   const tokens = await getApiTokens(page);
@@ -691,22 +682,6 @@ async function refreshAccountSpendableBalance(page: Page, symbol: string): Promi
   return getRenderedAccountSpendableBalance(page, symbol);
 }
 
-async function getVisibleEoaAddress(page: Page): Promise<string> {
-  await openAssetsTab(page);
-  return await page.evaluate(() => {
-    const labels = Array.from(document.querySelectorAll('.wallet-label'));
-    const eoaLabel = labels.find((node) => {
-      const text = String(node.textContent || '').trim();
-      return text === 'EOA' || text === 'External';
-    });
-    const card = eoaLabel?.parentElement;
-    const paragraphs = card ? Array.from(card.querySelectorAll('p')) : [];
-    const value = paragraphs
-      .map((node) => String(node.textContent || '').trim())
-      .find((text) => /^0x[a-fA-F0-9]{40}$/.test(text));
-    return String(value || '');
-  });
-}
 
 async function getRpcExternalBalance(page: Page, symbol: string, holder: string): Promise<number> {
   const token = await getApiToken(page, symbol);
@@ -725,11 +700,6 @@ async function readOnchainReserveBalanceRaw(page: Page, entityId: string, symbol
   ]);
   const [reserve] = DEPOSITORY_RESERVES.decodeFunctionResult('_reserves', raw);
   return BigInt(reserve);
-}
-
-async function readOnchainReserveBalance(page: Page, entityId: string, symbol: string): Promise<number> {
-  const token = await getApiToken(page, symbol);
-  return Number(formatUnits(await readOnchainReserveBalanceRaw(page, entityId, symbol), token.decimals));
 }
 
 type DeltaSnapshot = {

@@ -1,6 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
 import type { TimeState } from '$lib/types/ui';
-import type { EnvSnapshot } from '@xln/runtime/api/public/runtime-module';
 import { history } from './xlnStore';
 import { errorLog } from './errorLogStore';
 
@@ -18,18 +17,6 @@ export const timeState = writable<TimeState>({ ...defaultTimeState });
 export const currentTimeIndex = derived(timeState, $state => $state.currentTimeIndex);
 export const isLive = derived(timeState, $state => $state.isLive);
 export const maxTimeIndex = derived(timeState, $state => $state.maxTimeIndex);
-
-function requireHistoricalFrame(
-  frames: EnvSnapshot[],
-  currentTimeIndex: number,
-): EnvSnapshot {
-  const clampedIndex = Math.max(0, Math.min(currentTimeIndex, frames.length - 1));
-  const frame = frames[clampedIndex];
-  if (!frame) {
-    throw new Error(`Time machine selected invalid historical frame ${currentTimeIndex}`);
-  }
-  return frame;
-}
 
 // Time operations
 const timeOperations = {

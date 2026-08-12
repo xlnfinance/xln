@@ -245,12 +245,6 @@
     isPlaying = !isPlaying;
   }
 
-  function formatTPS(tps: number): string {
-    if (tps >= 1000000) return `${(tps / 1000000).toFixed(1)}M`;
-    if (tps >= 1000) return `${(tps / 1000).toFixed(0)}K`;
-    return tps.toString();
-  }
-
   function deviceColor(status: string): string {
     switch(status) {
       case 'ok': return '#4fd18b';

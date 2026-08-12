@@ -236,7 +236,6 @@
               runtimeFrameEnv,
               runtimeFrameHistory,
               runtimeFrameTimeIndex,
-              runtimeFrameIsLive,
               graphInitSignal,
             },
           });

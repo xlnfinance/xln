@@ -1183,10 +1183,6 @@
     return selectedRouteIndex >= 0 && !!routes[selectedRouteIndex];
   }
 
-  async function payNowCheapest() {
-    await payNowCheapestTracked();
-  }
-
   function flashPaymentSubmitted(elapsedMs: number): void {
     paymentSubmitted = true;
     paymentSubmissionMs = elapsedMs;
@@ -1364,18 +1360,6 @@
   function handleAmountInput() {
     preflightError = null;
     resetQuotedRoutes();
-  }
-
-  function handleRepeatChange(event: Event) {
-    const target = event.target as HTMLSelectElement | null;
-    repeatIntervalMs = target ? Number(target.value) : 0;
-    clearRepeatTimer();
-    if (repeatIntervalMs <= 0) {
-      repeatArmed = false;
-      repeatStoppedReason = '';
-      return;
-    }
-    repeatStoppedReason = '';
   }
 
   $: if (

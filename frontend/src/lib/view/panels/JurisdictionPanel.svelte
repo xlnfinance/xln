@@ -101,19 +101,6 @@
   //          TIME-TRAVEL AWARE DATA DERIVATION
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // Get current frame based on timeIndex
-  function getCurrentFrame(): RuntimeReplica | EnvSnapshot | null {
-    const timeIndex = runtimeFrameTimeIndex ? get(runtimeFrameTimeIndex) : -1;
-    const history = runtimeFrameHistory ? get(runtimeFrameHistory) : [];
-    const env = get(runtimeFrameEnv);
-
-    if (timeIndex >= 0 && history && history.length > 0) {
-      const idx = Math.min(timeIndex, history.length - 1);
-      return history[idx] ?? null;
-    }
-    return env; // Live mode - return env directly
-  }
-
   let isLive = $derived.by(() => {
     const timeIndex = runtimeFrameTimeIndex ? ($runtimeFrameTimeIndex ?? -1) : -1;
     return timeIndex < 0;
@@ -760,14 +747,6 @@
       if (sliced.length > 0) body = `${body}.${sliced}`;
     }
     return `${negative ? '-' : ''}${body} ETH`;
-  }
-
-  function formatChannelKey(key: string): string {
-    if (!key) return 'N/A';
-    if (key.length > 20) {
-      return key.slice(0, 10) + '...' + key.slice(-6);
-    }
-    return key;
   }
 
   function handleEntityClick(entityId: string) {

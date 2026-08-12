@@ -14,8 +14,6 @@ const TOKEN_ID_USDC = 1;
 const TOKEN_DECIMALS = getTokenInfo(TOKEN_ID_USDC).decimals;
 const TOKEN_SCALE = 10n ** BigInt(TOKEN_DECIMALS);
 const USD_150 = (150n * TOKEN_SCALE).toString();
-const USD_100 = (100n * TOKEN_SCALE).toString();
-const USD_50 = (50n * TOKEN_SCALE).toString();
 const ERC20_BALANCE_OF = new Interface(['function balanceOf(address) view returns (uint256)']);
 const DEPOSITORY_RESERVES = new Interface([
   'function _reserves(bytes32 entity, uint256 tokenId) view returns (uint256)',
@@ -1069,92 +1067,7 @@ async function enforceDebtDirect(page: Page, entityId: string, tokenId: number):
   await enqueueRuntimeInput(page, input as Parameters<typeof enqueueRuntimeInput>[1]);
 }
 
-async function enforceDebtUntilSettled(
-  page: Page,
-  entityId: string,
-  debtorEntityId: string,
-  debtorSignerId: string,
-  creditorEntityId: string,
-  tokenId: number,
-  expectedSnapshot: string,
-): Promise<void> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await enforceDebtDirect(page, entityId, tokenId);
-    const settled = await expect
-      .poll(async () => {
-        const value = await readDebtSnapshot(page, debtorEntityId, debtorSignerId, creditorEntityId, 'out');
-        return value
-          ? `${value.status}:${value.remainingAmount.toString()}:${value.paidAmount.toString()}`
-          : 'missing';
-      }, {
-        timeout: 15_000,
-        intervals: [500, 1000, 1500],
-      })
-      .toBe(expectedSnapshot)
-      .then(() => true)
-      .catch(() => false);
-    if (settled) return;
-  }
-  const value = await readDebtSnapshot(page, debtorEntityId, debtorSignerId, creditorEntityId, 'out');
-  throw new Error(
-    `debt enforce did not settle as expected: got=${
-      value ? `${value.status}:${value.remainingAmount.toString()}:${value.paidAmount.toString()}` : 'missing'
-    } expected=${expectedSnapshot}`,
-  );
-}
 
-async function openReserveToExternalMove(
-  page: Page,
-  entityId: string,
-  amount: string,
-  recipient: string,
-  expectedState: 'ready' | 'blocked' = 'ready',
-): Promise<void> {
-  await ensureSelfEntitySelected(page, entityId);
-  await openAssetsTab(page);
-  const moveTab = page.getByTestId('asset-tab-move').first();
-  await expect(moveTab).toBeVisible({ timeout: 20_000 });
-  await moveTab.click();
-  const workspace = page.getByTestId('move-workspace-assets').first();
-  await expect(workspace).toBeVisible({ timeout: 20_000 });
-  await expect(workspace.getByTestId('move-route-summary').first()).toBeVisible({ timeout: 20_000 });
-  await workspace.getByTestId('move-asset-symbol').first().selectOption('USDC');
-  await workspace.getByTestId('move-source-reserve').first().click();
-  await workspace.getByTestId('move-target-external').first().click();
-  await workspace.getByTestId('move-external-recipient').first().fill(recipient);
-  const amountInput = workspace.getByTestId('move-amount').first();
-  await amountInput.fill(amount);
-  await expect
-    .poll(async () => (await amountInput.inputValue()).trim(), {
-      timeout: 10_000,
-      intervals: [100, 250, 500],
-      message: 'move amount input must retain the typed value',
-    })
-    .toBe(amount);
-  const confirm = workspace.getByTestId('move-confirm').first();
-  await expect(workspace.getByTestId('move-route-summary').first()).toContainText('Reserve → External');
-  await expect(workspace.getByTestId('move-route-summary').first()).toContainText(`${amount} USDC`);
-  if (expectedState === 'blocked') {
-    await expect
-      .poll(async () => {
-        if (!(await confirm.isDisabled())) return 'enabled';
-        const statuses = await page.getByTestId('move-status').allTextContents().catch(() => []);
-        const text = statuses.map((entry) => String(entry || '').trim()).filter(Boolean).join(' | ');
-        return text || 'disabled';
-      }, { timeout: 10_000, intervals: [200, 400, 800] })
-      .toBe('Amount exceeds available balance');
-    return;
-  }
-  await expect
-    .poll(async () => {
-      if (!(await confirm.isDisabled())) return 'enabled';
-      const statuses = await page.getByTestId('move-status').allTextContents().catch(() => []);
-      const text = statuses.map((entry) => String(entry || '').trim()).filter(Boolean).join(' | ');
-      return text || 'disabled';
-    }, { timeout: 10_000, intervals: [200, 400, 800] })
-    .toBe('enabled');
-  await expect(confirm).toHaveText(/Add to Batch/i);
-}
 
 async function openOutstandingDebtToken(page: Page, symbol = 'USDC'): Promise<void> {
   await openAssetsTab(page);

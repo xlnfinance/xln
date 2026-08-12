@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
 
 export type PersistedReceiptCursor = {
   nextHeight: number;
@@ -300,16 +300,4 @@ export async function waitForPersistedFrameMessageMatch(
       `(height=${runtimeHeight} frames=${recentEvents.map((event) => event.frameHeight).join(',') || 'none'} ` +
       `recent=${recentEvents.map((event) => event.message).join(',') || 'none'})`,
   );
-}
-
-export async function expectPersistedFrameEvent(
-  page: Page,
-  options: {
-    cursor: PersistedReceiptCursor;
-    eventName: string;
-    entityId?: string;
-    timeoutMs?: number;
-  },
-): Promise<void> {
-  await expect(waitForPersistedFrameEvent(page, options)).resolves.toBeUndefined();
 }

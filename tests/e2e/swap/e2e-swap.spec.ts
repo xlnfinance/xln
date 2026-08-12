@@ -13,7 +13,6 @@ import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
 } from '../../utils/e2e-demo-users';
-import { getRenderedOutboundForAccount } from '../../utils/runtime/e2e-account-ui';
 import { buildDefaultEntitySwapPairs, getTokenInfo } from '../../../runtime/account/utils';
 import { capturePageScreenshot } from '../../utils/e2e-screenshots';
 import { hasSilentRelayMarketSubscribe, installSilentRelayWebSocket } from '../../utils/e2e-silent-relay';
@@ -232,37 +231,6 @@ async function ensureSwapScope(page: Page, desired: 'aggregated' | 'selected'): 
     .toBe(desired);
 }
 
-async function expectVisibleOrderbookDepth(
-  page: Page,
-  expected: { asks: number; bids: number },
-  options?: { timeoutMs?: number; minSources?: number; maxSources?: number },
-): Promise<void> {
-  const timeoutMs = options?.timeoutMs ?? 15_000;
-  await expect
-    .poll(
-      async () => {
-        const counts = await readOrderbookRowCounts(page);
-        const sources = await countUniqueOrderbookSources(page);
-        return { ...counts, sources };
-      },
-      { timeout: timeoutMs, intervals: [200, 400, 800] },
-    )
-    .toEqual({
-      asks: expected.asks,
-      bids: expected.bids,
-      sources: expect.any(Number),
-    });
-  if (typeof options?.minSources === 'number') {
-    await expect
-      .poll(async () => await countUniqueOrderbookSources(page), { timeout: timeoutMs, intervals: [200, 400, 800] })
-      .toBeGreaterThanOrEqual(options.minSources);
-  }
-  if (typeof options?.maxSources === 'number') {
-    await expect
-      .poll(async () => await countUniqueOrderbookSources(page), { timeout: timeoutMs, intervals: [200, 400, 800] })
-      .toBeLessThanOrEqual(options.maxSources);
-  }
-}
 
 async function createDemoRuntime(page: Page, label: string, mnemonic: string): Promise<void> {
   await createSharedRuntime(page, label, mnemonic);
@@ -623,57 +591,6 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
     wantTokenId: Number(result.wantTokenId),
     orderAmount: String(result.orderAmount || '1'),
     orderPrice: String(result.orderPrice || '1'),
-  };
-}
-
-async function ensureDeterministicSwapAccount(page: Page): Promise<{
-  entityId: string;
-  signerId: string;
-  counterpartyId: string;
-}> {
-  const identity = await readSelectedUiRuntimeIdentity(page);
-
-  const hubIds = await listSharedHubIds(page);
-  const hubId = hubIds[0];
-  expect(typeof hubId === 'string' && hubId.length > 0, 'hub not discovered').toBe(true);
-
-  await connectRuntimeToSharedHubWithCredit(page, {
-    entityId: identity.entityId,
-    signerId: identity.signerId,
-  }, hubId!, '10000', SWAP_CONNECT_TOKEN_IDS);
-
-  for (const funding of [
-    { tokenId: 1, amount: '100' },
-    { tokenId: 2, amount: '1' },
-  ]) {
-    const faucetResponse = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
-      data: {
-        userEntityId: identity.entityId,
-        userRuntimeId: identity.runtimeId,
-        hubEntityId: hubId!,
-        tokenId: funding.tokenId,
-        amount: funding.amount,
-      },
-    });
-    const faucetBody = await faucetResponse.json().catch(() => ({}));
-    expect(
-      faucetResponse.ok(),
-      `swap faucet failed for token ${funding.tokenId}: ${JSON.stringify(faucetBody)}`,
-    ).toBe(true);
-  }
-
-  await expect.poll(async () => {
-    return await getRenderedOutboundForAccount(page, hubId!);
-  }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0);
-
-  await expect.poll(async () => {
-    return await readAccountTokenOutCapacity(page, identity.entityId, identity.signerId, hubId!, 2);
-  }, { timeout: 60_000, intervals: [250, 500, 1000] }).toBeGreaterThan(0);
-
-  return {
-    entityId: identity.entityId,
-    signerId: identity.signerId,
-    counterpartyId: hubId!,
   };
 }
 
@@ -1325,87 +1242,6 @@ async function waitForSwapOrderbookLiquidity(
   );
 }
 
-async function prepareExecutableOrder(page: Page): Promise<number> {
-  await ensureSwapOrderbookVisible(page);
-  const preferredPairs = ['WETH/USDC', 'USDC/USDT', 'WETH/USDT'].filter((pair) => CANONICAL_SWAP_PAIR_LABELS.includes(pair));
-  if (preferredPairs.length === 0) {
-    throw new Error('No executable WETH/* pair is available in canonical swap pairs');
-  }
-
-  const placeButton = page.getByTestId('swap-ticket-submit').first();
-  const amountInput = page.getByTestId('swap-ticket-amount').first();
-  const priceInput = page.getByTestId('swap-ticket-rate').first();
-  await expect(amountInput).toBeVisible({ timeout: 20_000 });
-  await expect(priceInput).toBeVisible({ timeout: 20_000 });
-  const deadline = Date.now() + 30_000;
-  let lastFormError = '';
-  while (Date.now() < deadline) {
-    for (const pairLabel of preferredPairs) {
-      await selectSwapPairSide(page, pairLabel, 'buy');
-      await page.waitForTimeout(250);
-      const sidesToTry: Array<{
-        mode: 'buy' | 'sell';
-        rows: Locator;
-        pick: 'first' | 'last';
-      }> = [];
-
-      const asks = page.getByTestId('orderbook-ask-row');
-      const bids = page.getByTestId('orderbook-bid-row');
-      const askCount = await asks.count();
-      const bidCount = await bids.count();
-
-      if (askCount > 0) sidesToTry.push({ mode: 'buy', rows: asks, pick: 'last' });
-      if (bidCount > 0) sidesToTry.push({ mode: 'sell', rows: bids, pick: 'first' });
-
-      for (const side of sidesToTry) {
-        await selectSwapPairSide(page, pairLabel, side.mode);
-        await page.waitForTimeout(120);
-
-        try {
-          if (side.pick === 'last') {
-            await side.rows.last().click();
-          } else {
-            await side.rows.first().click();
-          }
-          await expect(page.getByTestId('swap-ticket-rate').first()).not.toHaveValue('', { timeout: 5_000 });
-        } catch {
-          continue;
-        }
-
-        const available = await readAvailableFromSizing(page);
-        if (!Number.isFinite(available) || available <= 0) continue;
-        const rawPriceText = await priceInput.inputValue().catch(() => '');
-        const levelPrice = parseFirstNumber(rawPriceText);
-        let targetAmount = 0;
-        if (side.mode === 'buy') {
-          // Buy-base mode spends quote directly; enforce min-notional headroom.
-          if (available < 100) continue;
-          targetAmount = Math.min(available, 120);
-        } else {
-          // Sell-base mode spends base; ensure quote notional >=100 at selected level price.
-          if (!Number.isFinite(levelPrice) || levelPrice <= 0) continue;
-          const minBaseFor100 = 100 / levelPrice;
-          const desiredBase = Math.max(minBaseFor100 * 1.05, 0.02);
-          if (available < desiredBase) continue;
-          targetAmount = Math.min(available, Math.max(desiredBase, 0.1));
-        }
-        if (!Number.isFinite(targetAmount) || targetAmount <= 0) continue;
-        await amountInput.fill(formatDecimalForInput(targetAmount));
-        await page.waitForTimeout(80);
-
-        if (await placeButton.isEnabled()) {
-          return targetAmount;
-        }
-      }
-    }
-
-    const formError = await page.getByTestId('swap-ticket-error').first().textContent().catch(() => null);
-    if (formError?.trim()) lastFormError = formError.trim();
-    await page.waitForTimeout(450);
-  }
-
-  throw new Error(`No preferred WETH pair is executable${lastFormError ? ` (${lastFormError})` : ''}`);
-}
 
 async function executeOrderbookClickFill(
   page: Page,

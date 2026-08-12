@@ -1395,30 +1395,6 @@ export async function waitForRebalanceSecured(
   );
 }
 
-export async function selectContextEntity(page: Page, identity: RuntimeIdentity): Promise<void> {
-  const trigger = page.getByTestId('context-current').first();
-  await expect(trigger).toBeVisible({ timeout: 20_000 });
-  if (normalizeId((await trigger.getAttribute('data-entity-id')) || '') === normalizeId(identity.entityId)) return;
-  await trigger.click();
-  const row = page
-    .locator(`[data-testid="context-entity-row"][data-entity-id="${normalizeId(identity.entityId)}"]`)
-    .first();
-  await expect(row).toBeVisible({ timeout: 20_000 });
-  await row.click();
-  await expect
-    .poll(
-      async () => ({
-        entityId: normalizeId((await trigger.getAttribute('data-entity-id')) || ''),
-        signerId: normalizeId((await trigger.getAttribute('data-signer-id')) || ''),
-      }),
-      {
-        timeout: 20_000,
-        intervals: [100, 250, 500],
-        message: `context must switch to ${identity.entityId.slice(0, 10)}`,
-      },
-    )
-    .toEqual({ entityId: normalizeId(identity.entityId), signerId: normalizeId(identity.signerId) });
-}
 
 export async function dismissSwapCompletionModal(page: Page): Promise<void> {
   if (page.isClosed()) return;

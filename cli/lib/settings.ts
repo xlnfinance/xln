@@ -63,10 +63,3 @@ export const saveSettings = async (settings: CliSettings): Promise<void> => {
   };
   await writeFile(settingsPath(settings.homeDir), `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 };
-
-export const setBarStyle = async (barStyle: BarStyle): Promise<CliSettings> => {
-  const settings = await loadSettings();
-  settings.barStyle = barStyle;
-  await saveSettings(settings);
-  return settings;
-};

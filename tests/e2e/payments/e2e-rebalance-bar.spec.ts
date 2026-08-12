@@ -20,7 +20,6 @@ import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
   selectDemoMnemonic,
-  switchToRuntime as switchToSharedRuntime,
 } from '../../utils/e2e-demo-users';
 import {
   connectRuntimeToHub as connectRuntimeToSharedHub,
@@ -266,25 +265,6 @@ async function readDebugErrors(page: Page, sinceTs: number): Promise<DebugErrorS
   return out.slice(-80);
 }
 
-async function hasDebugHtlcEvent(
-  page: Page,
-  hashlock: string,
-  eventName: 'HtlcReceived' | 'HtlcFinalized',
-  sinceTs: number,
-): Promise<boolean> {
-  const targetHashlock = hashlock.toLowerCase();
-  const events = await readDebugTimeline(page, { last: 1000, sinceTs });
-  return events.some((event) => {
-    const details = isRecord(event.details) ? event.details : {};
-    const payload = isRecord(details.payload) ? details.payload : {};
-    const data = isRecord(payload.data) ? payload.data : {};
-    return (
-      payload.eventName === eventName &&
-      typeof data.hashlock === 'string' &&
-      data.hashlock.toLowerCase() === targetHashlock
-    );
-  });
-}
 
 async function readRecentFrameEvents(page: Page, counterpartyId: string): Promise<FrameEventSummary> {
   return page.evaluate(({ counterpartyId }) => {
@@ -522,10 +502,6 @@ async function connectHubWithCredit(
   await page.waitForTimeout(800);
 }
 
-async function switchRuntime(page: Page, label: string) {
-  await switchToSharedRuntime(page, label);
-  await ensureRuntimeOnline(page, `switch-${label}`);
-}
 
 async function discoverNamedHubs(page: Page): Promise<{ h1: string; h3: string }> {
   const hubs = await waitForNamedHubs(page, ['h1', 'h3'], { apiBaseUrl: API_BASE_URL });
@@ -816,25 +792,6 @@ async function waitForPairIdle(
   );
 }
 
-async function waitForOutCapacityIncrease(
-  page: Page,
-  counterpartyId: string,
-  baselineOutCapacity: bigint,
-  timeoutMs = 30_000,
-  ownerEntityId?: string,
-) {
-  const start = Date.now();
-  let last: Awaited<ReturnType<typeof readPairState>> = null;
-  while (Date.now() - start < timeoutMs) {
-    last = await readPairState(page, counterpartyId, ownerEntityId);
-    const outCapacity = BigInt(last?.outCapacity || '0');
-    if (outCapacity > baselineOutCapacity) return last;
-    await page.waitForTimeout(500);
-  }
-  throw new Error(
-    `outCapacity did not increase for ${counterpartyId.slice(0, 12)}: baseline=${baselineOutCapacity} last=${JSON.stringify(last, null, 2)}`,
-  );
-}
 
 async function waitForFundingLiquidityReady(
   page: Page,

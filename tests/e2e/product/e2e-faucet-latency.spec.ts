@@ -144,22 +144,6 @@ async function readFaucetAccountSnapshot(
   };
 }
 
-async function findEntitySigner(page: Page, entityId: string): Promise<string | null> {
-  return page.evaluate((targetEntityId) => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        eReplicas?: Map<string, unknown>;
-      };
-    }).isolatedEnv;
-    if (!env?.state?.eReplicas) return null;
-    for (const replicaKey of env.state.eReplicas.keys()) {
-      const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
-      if (String(replicaEntityId || '').toLowerCase() !== String(targetEntityId || '').toLowerCase()) continue;
-      if (replicaSignerId) return replicaSignerId;
-    }
-    return null;
-  }, entityId);
-}
 
 async function readRenderedAccountTokenOut(page: Page, hubId: string, symbol: string): Promise<number> {
   return page.evaluate(({ hubId, symbol }) => {

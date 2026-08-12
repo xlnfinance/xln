@@ -13,7 +13,6 @@ export {
 } from '../../jurisdiction/adapter';
 export { getAvailableJurisdictions } from '../../jurisdiction/adapter/core/config';
 export {
-  createDemoDelta,
   deriveDelta,
   getDefaultCreditLimit,
   getDefaultSwapTradingPairs,

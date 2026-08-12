@@ -746,25 +746,6 @@ async function readCustodyDashboard(
   }, custodyBaseUrl) as CustodyDashboardPayload;
 }
 
-async function waitForCustodyBalance(
-  page: Page,
-  custodyBaseUrl: string,
-  expectedMinor: bigint,
-): Promise<CustodyDashboardPayload> {
-  await expect.poll(
-    async () => {
-      const dashboard = await readCustodyDashboard(page, custodyBaseUrl);
-      return String(dashboard.headlineBalance?.amountMinor || '0');
-    },
-    {
-      timeout: 30_000,
-      intervals: [500, 750, 1000],
-      message: `custody balance must converge to ${expectedMinor.toString()}`,
-    },
-  ).toBe(expectedMinor.toString());
-
-  return await readCustodyDashboard(page, custodyBaseUrl);
-}
 
 const readCustodyTokenMinor = (dashboard: CustodyDashboardPayload, tokenId: number): bigint => {
   const row = (dashboard.tokens ?? []).find((token) => Number(token.tokenId || 0) === tokenId);

@@ -160,31 +160,6 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
 }
 
 /**
- * Create a simple delta for demo purposes
- * @param tokenId - Token ID
- * @param collateral - Collateral amount
- * @param delta - Delta amount
- * @returns Delta object with reasonable defaults
- */
-export function createDemoDelta(tokenId: number, collateral: bigint = 1000n, delta: bigint = 0n): Delta {
-  const creditLimit = getDefaultCreditLimit(tokenId);
-
-  const deltaData = {
-    tokenId,
-    collateral,
-    ondelta: delta,
-    offdelta: 0n,
-    leftCreditLimit: creditLimit,
-    rightCreditLimit: creditLimit,
-    leftAllowance: 0n,
-    rightAllowance: 0n,
-  };
-
-  // VALIDATE AT SOURCE: Guarantee type safety from this point forward
-  return validateDelta(deltaData, 'createDemoDelta');
-}
-
-/**
  * Get token information for display
  * USDC is primary token (1), ETH is secondary (2)
  */

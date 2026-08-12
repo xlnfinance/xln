@@ -584,27 +584,6 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
   expect(result.ok, `faucet failed for ${entityId.slice(0, 10)}: ${JSON.stringify(result.data)}`).toBe(true);
 }
 
-async function faucetViaBrowserFetch(page: Page, entityId: string, hubEntityId: string) {
-  const apiBaseUrl = await getActiveApiBase(page);
-  const result = await page.evaluate(async ({ eid, hubEntityId, apiBaseUrl }) => {
-    try {
-      const runtimeId = (window as any).isolatedEnv?.runtimeId;
-      if (!runtimeId) {
-        return { ok: false, status: 0, data: { error: 'missing runtimeId in isolatedEnv' } };
-      }
-      const resp = await fetch(`${apiBaseUrl}/api/faucet/offchain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userEntityId: eid, userRuntimeId: runtimeId, hubEntityId, tokenId: 1, amount: '100' }),
-      });
-      const data = await resp.json().catch(() => ({}));
-      return { ok: resp.status === 200, status: resp.status, data };
-    } catch (e: any) {
-      return { ok: false, status: 0, data: { error: e?.message || String(e) } };
-    }
-  }, { eid: entityId, hubEntityId, apiBaseUrl });
-  expect(result.ok, `faucet failed for ${entityId.slice(0, 10)}: ${JSON.stringify(result.data)}`).toBe(true);
-}
 
 async function waitForOutCapAtLeast(
   page: Page,
