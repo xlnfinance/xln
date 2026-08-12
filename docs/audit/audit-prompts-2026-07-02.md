@@ -384,7 +384,7 @@ Evidence:
 - Save path append invariant and frame hash: `runtime/storage/index.ts:342-440`.
 - Restore canonical mismatch check: `runtime/runtime.ts:3375-3395`.
 - Storage fail-closed tests:
-  `runtime/__tests__/storage-frame-journal-retention.test.ts:289`, `760`.
+  `runtime/__tests__/storage/history/storage-frame-journal-retention.test.ts:289`, `760`.
 
 Risks:
 

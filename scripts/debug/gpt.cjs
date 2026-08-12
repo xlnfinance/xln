@@ -529,7 +529,7 @@ const RUNTIME_FILES = {
     'runtime/__tests__/j-batch-reserve-availability.test.ts',
     'runtime/__tests__/multi-jurisdiction-entity.test.ts',
     'runtime/__tests__/serialization-utils.test.ts',
-    'runtime/__tests__/storage-canonical-hash.test.ts',
+    'runtime/__tests__/storage/runtime/storage-canonical-hash.test.ts',
   ],
   frontend: [],
 };

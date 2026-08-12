@@ -196,7 +196,7 @@ Use the ladder, not a broad suite first.
 L1 narrow:
 
 ```bash
-bun test runtime/__tests__/recovery-tower.test.ts
+bun test runtime/__tests__/storage/recovery/recovery-tower.test.ts
 bun test runtime/__tests__/watchtower-last-resort.test.ts
 bun test tests/frontend/recovery-tower-config.test.ts
 ```

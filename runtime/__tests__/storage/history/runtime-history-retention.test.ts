@@ -1,0 +1,130 @@
+import { expect, test } from 'bun:test';
+
+import {
+  createEmptyEnv,
+  enqueueRuntimeInput,
+  processRuntime,
+} from '../../../runtime';
+import {
+  deriveSignerAddressSync,
+  deriveSignerKeySync,
+  registerSignerKey,
+} from '../../../account/crypto';
+import { generateLazyEntityId } from '../../../entity/factory';
+import { buildCanonicalEnvSnapshot } from '../../../storage/wal/snapshot';
+import {
+  appendRecentRuntimeSnapshot,
+  RECENT_RUNTIME_HISTORY_LIMIT,
+  startRuntimeHistoryTraceForTesting,
+} from '../../../runtime/observability/history-retention';
+
+test('recent snapshot helper enforces its exact bound and rejects invalid limits', () => {
+  const first = { height: 1 } as never;
+  const second = { height: 2 } as never;
+  expect(appendRecentRuntimeSnapshot([first], second, 1)).toEqual([second]);
+  expect(appendRecentRuntimeSnapshot([first], second, 0)).toEqual([]);
+  expect(() => appendRecentRuntimeSnapshot([], second, -1))
+    .toThrow('RUNTIME_HISTORY_LIMIT_INVALID:-1');
+});
+
+test('production RuntimeReplica retains only the bounded canonical debug tail', async () => {
+  expect(RECENT_RUNTIME_HISTORY_LIMIT).toBe(0);
+  const seed = 'bounded runtime history alpha beta gamma';
+  const env = createEmptyEnv(seed);
+  env.runtimeConfig = {
+    ...(env.runtimeConfig || {}),
+    storage: { ...(env.runtimeConfig?.storage || {}), enabled: false },
+  };
+  if (env.infrastructure) env.infrastructure.persistencePaused = true;
+  env.scenarioMode = true;
+  env.quietRuntimeLogs = true;
+
+  const seedSnapshot = buildCanonicalEnvSnapshot(env, {
+    runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    runtimeOutputs: [],
+    description: 'seed-0',
+    logs: [],
+    gossipProfiles: [],
+  });
+  env.history = Array.from({ length: RECENT_RUNTIME_HISTORY_LIMIT }, (_, index) => ({
+    ...seedSnapshot,
+    description: `seed-${index}`,
+  }));
+
+  const signer = deriveSignerAddressSync(seed, '1');
+  registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
+  const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
+  const jurisdiction = {
+    name: 'bounded-history-test',
+    chainId: 31_337,
+    depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+    entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+  };
+  env.activeJurisdiction = jurisdiction.name;
+  env.state.jReplicas.set(jurisdiction.name, {
+    ...jurisdiction,
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
+    position: { x: 0, y: 0, z: 0 },
+    contracts: {
+      depository: jurisdiction.depositoryAddress,
+      entityProvider: jurisdiction.entityProviderAddress,
+    },
+  });
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [{
+      type: 'importReplica',
+      entityId,
+      signerId: signer,
+      data: {
+        isProposer: true,
+        config: {
+          mode: 'proposer-based',
+          threshold: 1n,
+          validators: [signer],
+          shares: { [signer]: 1n },
+          jurisdiction,
+        },
+      },
+    }],
+    entityInputs: [],
+  });
+
+  const trace = startRuntimeHistoryTraceForTesting(env);
+  await processRuntime(env, []);
+  trace.stop();
+
+  expect(env.state.height).toBe(1);
+  expect(env.history).toEqual([]);
+  expect(trace.snapshots).toHaveLength(1);
+  expect(trace.snapshots[0]?.state.height).toBe(1);
+
+  const secondSigner = deriveSignerAddressSync(seed, '2');
+  const secondEntityId = generateLazyEntityId([secondSigner], 1n).toLowerCase();
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [{
+      type: 'importReplica',
+      entityId: secondEntityId,
+      signerId: secondSigner,
+      data: {
+        isProposer: false,
+        config: {
+          mode: 'proposer-based',
+          threshold: 1n,
+          validators: [secondSigner],
+          shares: { [secondSigner]: 1n },
+          jurisdiction,
+        },
+      },
+    }],
+    entityInputs: [],
+  });
+  await processRuntime(env, []);
+
+  expect(env.state.height).toBe(2);
+  expect(env.runtimeConfig?.snapshotIntervalFrames).toBe(100);
+  expect(env.history).toEqual([]);
+});

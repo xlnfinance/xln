@@ -114,7 +114,7 @@ generic base class.
   collision, rollback ordering, and LEFT wins.
 - `runtime/__tests__/account-frame-integrity.test.ts` — exact frame validation.
 - `runtime/__tests__/derive-delta-property.test.ts` — the single balance model.
-- `runtime/__tests__/storage-canonical-hash.test.ts` — durable canonical bytes.
+- `runtime/__tests__/storage/runtime/storage-canonical-hash.test.ts` — durable canonical bytes.
 - `runtime/__tests__/multisig-secondary-hanko.test.ts` — candidate
   certification.
 

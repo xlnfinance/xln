@@ -955,7 +955,7 @@ for (const [path, markers] of [
     ['solvency diagnostics use structured logging only', 'runtime.solvency'],
   ],
   [
-    'runtime/__tests__/runtime-storage-logging.test.ts',
+    'runtime/__tests__/storage/runtime/runtime-storage-logging.test.ts',
     ['runtime storage DB boundary uses structured logging without direct console output', 'runtime.storage'],
   ],
   [

@@ -1,0 +1,182 @@
+import { describe, expect, test } from 'bun:test';
+import { mkdirSync, rmSync } from 'fs';
+import { join } from 'path';
+import {
+  closeInfraDb,
+  closeRuntimeDb,
+  createEmptyEnv,
+  enqueueRuntimeInput,
+  listPersistedCheckpointHeights,
+  loadEnvFromDB,
+  main,
+  processRuntime,
+  verifyRuntimeChain,
+} from '../../../runtime.ts';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { generateLazyEntityId } from '../../../entity/factory';
+import type { RuntimeReplica } from '../../../runtime/types';
+import { createTestJReplica } from '../.././helpers/j-replica';
+
+function hasPendingBilateralState(env: RuntimeReplica): boolean {
+  for (const replica of env.state.eReplicas.values()) {
+    for (const account of replica.state?.accounts?.values() || []) {
+      if (account.pendingFrame || account.pendingAccountInput) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+describe('checkpoint persistence with pending bilateral state', () => {
+  test('persists and restores checkpoint while an account pendingFrame exists', async () => {
+    const seed = `checkpoint-pending ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    const namespacePath = join(dbRoot, runtimeId);
+
+    rmSync(namespacePath, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
+    mkdirSync(dbRoot, { recursive: true });
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...env.runtimeConfig?.storage,
+        snapshotPeriodFrames: 1,
+        materializePeriodFrames: 1,
+      },
+    };
+    env.quietRuntimeLogs = true;
+
+    const signerA = deriveSignerAddressSync(seed, '1');
+    const signerB = deriveSignerAddressSync(seed, '2');
+    registerSignerKey(env, signerA, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signerB, deriveSignerKeySync(seed, '2'));
+
+    const entityA = generateLazyEntityId([signerA], 1n).toLowerCase();
+    const entityB = generateLazyEntityId([signerB], 1n).toLowerCase();
+    const jurisdiction = {
+      name: 'checkpoint-pending-test',
+      address: 'browservm://checkpoint-pending-test',
+      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      chainId: 31337,
+    };
+    env.activeJurisdiction = jurisdiction.name;
+    env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
+      name: jurisdiction.name,
+      chainId: jurisdiction.chainId,
+      contracts: {
+        depository: jurisdiction.depositoryAddress,
+        entityProvider: jurisdiction.entityProviderAddress,
+        account: '0x000000000000000000000000000000000000ac01',
+        deltaTransformer: '0x000000000000000000000000000000000000de17',
+      },
+    }));
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [
+        {
+          type: 'importReplica',
+          entityId: entityA,
+          signerId: signerA,
+          data: {
+            isProposer: true,
+            config: {
+              mode: 'proposer-based',
+              threshold: 1n,
+              validators: [signerA],
+              shares: { [signerA]: 1n },
+              jurisdiction,
+            },
+          },
+        },
+        {
+          type: 'importReplica',
+          entityId: entityB,
+          signerId: signerB,
+          data: {
+            isProposer: true,
+            config: {
+              mode: 'proposer-based',
+              threshold: 1n,
+              validators: [signerB],
+              shares: { [signerB]: 1n },
+              jurisdiction,
+            },
+          },
+        },
+      ],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [
+        {
+          entityId: entityA,
+          signerId: signerA,
+          entityTxs: [
+            {
+              type: 'openAccount',
+              data: {
+                targetEntityId: entityB,
+                creditAmount: 1000n,
+                tokenId: 1,
+                // Account clocks are bilateral state and therefore explicit
+                // even in persistence-only fixtures.
+                disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    let pendingObserved = false;
+    for (let i = 0; i < 6; i += 1) {
+      await processRuntime(env, []);
+      if (hasPendingBilateralState(env)) {
+        pendingObserved = true;
+        break;
+      }
+    }
+
+    expect(pendingObserved).toBe(true);
+    expect(hasPendingBilateralState(env)).toBe(true);
+
+    const checkpointHeights = await listPersistedCheckpointHeights(env);
+    const checkpointHeight = Number(checkpointHeights.at(-1) || 0);
+    expect(checkpointHeight).toBe(env.state.height);
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+
+    const restored = await loadEnvFromDB(runtimeId, seed, { fromSnapshotHeight: checkpointHeight });
+    expect(restored).toBeTruthy();
+    expect(restored?.state.height).toBe(checkpointHeight);
+    expect(hasPendingBilateralState(restored!)).toBe(true);
+
+    await closeRuntimeDb(restored!);
+    await closeInfraDb(restored!);
+
+    const restarted = await main(seed);
+    expect(restarted.state.height).toBe(checkpointHeight);
+    expect(hasPendingBilateralState(restarted)).toBe(true);
+    await closeRuntimeDb(restarted);
+    await closeInfraDb(restarted);
+
+    const verify = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: checkpointHeight });
+    expect(verify.ok).toBe(true);
+    expect(verify.expectedStateHash).toBe(verify.actualStateHash);
+  });
+});
