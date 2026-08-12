@@ -9,7 +9,7 @@
     "compile:tron": "bun scripts/compile-tron.cjs --all",
     "deploy:chains:testnet": "bun scripts/deploy-chain-matrix.cjs --profile=testnet --write-jurisdictions",
     "deploy:chains:mainnet": "bun scripts/deploy-chain-matrix.cjs --profile=mainnet --yes --write-jurisdictions",
-    "test": "bun ../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=contracts -- bunx hardhat test test/*.ts test/*.cjs",
+    "test": "bun ../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=contracts -- bunx hardhat test",
     "test:default": "bun ../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=contracts-default -- bunx hardhat test",
     "forge:setup": "test -d lib/forge-std || (mkdir -p lib && git clone --depth 1 --branch v1.11.0 https://github.com/foundry-rs/forge-std.git lib/forge-std && rm -rf lib/forge-std/.git)",
     "test:forge": "bun run forge:setup && forge test --root .",

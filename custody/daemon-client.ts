@@ -15,9 +15,8 @@ import type { RuntimeInput } from '../runtime/runtime/types';
 import type { EntityTx } from '../runtime/types/entity-tx';
 import type { PaymentDeliveryMode } from '../runtime/types/finance/payment';
 
-export type DaemonAuthKeyProvider = string | (() => string);
+type DaemonAuthKeyProvider = string | (() => string);
 export type DaemonFrameLog = RuntimeAdapterFrameLog;
-export type DaemonFrameReceipt = RuntimeAdapterFrameReceiptResponse['receipts'][number];
 export type DaemonFrameReceiptResponse = RuntimeAdapterFrameReceiptResponse;
 export type DaemonRoute = RuntimeAdapterPaymentRoute;
 
@@ -37,7 +36,7 @@ export type DaemonQueuePaymentResult = {
   commandSequence: number;
 };
 
-export type DaemonQueuePaymentParams = {
+type DaemonQueuePaymentParams = {
   sourceEntityId: string;
   signerId: string;
   targetEntityId: string;

@@ -209,9 +209,9 @@ export const computeAuditStatus = (
   };
 };
 
-export type AuditGateProfile = 'merge' | 'release' | 'ideal';
+type AuditGateProfile = 'merge' | 'release' | 'ideal';
 
-export type AuditGateResult = Readonly<{
+type AuditGateResult = Readonly<{
   ok: boolean;
   profile: AuditGateProfile;
   failures: readonly string[];

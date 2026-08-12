@@ -1,6 +1,6 @@
 import { isLoopbackCustodyPeer } from './session-admission';
 
-export type CustodyMutationRejection = {
+type CustodyMutationRejection = {
   status: 403 | 415;
   code: 'CUSTODY_ORIGIN_FORBIDDEN' | 'CUSTODY_FETCH_SITE_FORBIDDEN' | 'CUSTODY_JSON_REQUIRED';
 };

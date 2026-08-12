@@ -246,7 +246,7 @@ const fingerprintCommand = (registry: AuditRegistry, args: CliArgs): void => {
   else console.log(`${requested} ${fingerprints.get(requested)}`);
 };
 
-export const runAuditCli = (argv = process.argv.slice(2)): void => {
+const runAuditCli = (argv = process.argv.slice(2)): void => {
   const args = parseArgs(argv);
   const registry = loadAuditRegistry(args.registryPath);
   if (args.command === 'validate') return validateCommand(registry, args.json);

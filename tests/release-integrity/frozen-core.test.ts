@@ -18,9 +18,20 @@ function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'xln-frozen-core-'));
   roots.push(root);
   writeFileSync(join(root, 'VERSION'), '0.1.7\n');
-  mkdirSync(join(root, 'runtime'), { recursive: true });
+  mkdirSync(join(root, 'runtime/feature'), { recursive: true });
+  writeFileSync(join(root, 'shared.ts'), 'export const shared = 11;\n');
   writeFileSync(join(root, 'runtime/helper.ts'), 'export const value = 7;\n');
-  writeFileSync(join(root, 'runtime/runtime.ts'), "import { value } from './helper';\nexport const result = value;\n");
+  writeFileSync(join(root, 'runtime/explicit.ts'), 'export const explicit = 13;\n');
+  writeFileSync(join(root, 'runtime/feature/index.ts'), 'export const feature = 17;\n');
+  writeFileSync(join(root, 'runtime/runtime.ts'), [
+    "import { value } from './helper';",
+    "import { shared } from '../shared.ts';",
+    "import { explicit } from './explicit.ts';",
+    "import { feature } from './feature';",
+    "import { unused } from 'package-import';",
+    'export const result = value + shared + explicit + feature + Number(Boolean(unused));',
+    '',
+  ].join('\n'));
   return root;
 }
 
@@ -37,7 +48,20 @@ describe('frozen core integrity', () => {
 
     expect(first.rootHash).toBe(second.rootHash);
     expect(first.status).toBe('UNCHANGED');
-    expect(first.mutableDependencies).toEqual([{ source: 'runtime/runtime.ts', dependency: 'runtime/helper.ts' }]);
+    expect(first.mutableDependencies).toEqual([
+      { source: 'runtime/runtime.ts', dependency: 'runtime/explicit.ts' },
+      { source: 'runtime/runtime.ts', dependency: 'runtime/feature/index.ts' },
+      { source: 'runtime/runtime.ts', dependency: 'runtime/helper.ts' },
+      { source: 'runtime/runtime.ts', dependency: 'shared.ts' },
+    ]);
+  });
+
+  test('rejects a relative import that escapes the repository root', () => {
+    const root = fixture();
+    writeFileSync(join(root, 'runtime/runtime.ts'), "import '../../outside.ts';\n");
+    const manifest = createFrozenManifest(root, ['runtime/runtime.ts'], '0.1.7', 'test baseline');
+
+    expect(() => collectFrozenCore(root, manifest, '0.1.7')).toThrow('FROZEN_CORE_PATH_ESCAPE:../outside.ts');
   });
 
   test('fails closed when one frozen byte changes', () => {

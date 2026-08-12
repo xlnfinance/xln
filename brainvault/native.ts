@@ -39,7 +39,7 @@ import {
 } from './primitives/spec.ts';
 import { hexToBytes } from './primitives/encoding.ts';
 
-export type BrainVaultNativeInput = Readonly<{
+type BrainVaultNativeInput = Readonly<{
   name: string;
   passphrase: string;
   /** Presets 1..5 map to 10^(factor-1); values >=6 are literal shard counts. */
@@ -55,7 +55,7 @@ export type BrainVaultNativeProgress = Readonly<{
   workers: number;
 }>;
 
-export type BrainVaultNativeResult = Readonly<{
+type BrainVaultNativeResult = Readonly<{
   specId: typeof BRAINVAULT_V1_SPEC_ID;
   backend: 'native-node';
   shardCount: number;
@@ -66,7 +66,7 @@ export type BrainVaultNativeResult = Readonly<{
   ethereumAddress: string;
 }>;
 
-export type BrainVaultNativeOptions = Readonly<{
+type BrainVaultNativeOptions = Readonly<{
   signal?: AbortSignal;
   onProgress?: (progress: BrainVaultNativeProgress) => void;
   /** Bundled distributions pass their built worker; source runs use the TS file. */

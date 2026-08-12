@@ -121,9 +121,12 @@ function dependencySpecifiers(text: string): string[] {
   return [...text.matchAll(pattern)].map((match) => match[1] || match[2] || match[3]).filter(Boolean) as string[];
 }
 
-function resolveDependency(from: string, specifier: string, paths: Set<string>): string | null {
-  if (!specifier.startsWith('../release-snapshot')) return null;
+export function resolveReleaseSnapshotDependency(from: string, specifier: string, paths: Set<string>): string | null {
+  if (!specifier.startsWith('.')) return null;
   const base = posix.normalize(posix.join(posix.dirname(from), specifier));
+  if (base === '..' || base.startsWith('../') || posix.isAbsolute(base)) {
+    throw new Error(`RELEASE_SNAPSHOT_DEPENDENCY_PATH_ESCAPE:${from}:${specifier}`);
+  }
   const candidates = [base, ...['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.svelte', '.sol'].map((ext) => `${base}${ext}`)];
   candidates.push(...['.ts', '.tsx', '.js', '.jsx', '.svelte'].map((ext) => `${base}/index${ext}`));
   return candidates.find((candidate) => paths.has(candidate)) ?? null;
@@ -145,7 +148,7 @@ function collectFile(root: string, path: string, scc: SccFile | undefined, allPa
   const buffer = entryType === 'symlink' ? Buffer.from(readlinkSync(absolute)) : readFileSync(absolute);
   const text = buffer.byteLength <= 2_000_000 ? readText(buffer) : '';
   const specifiers = dependencySpecifiers(text);
-  const dependencies = [...new Set(specifiers.map((value) => resolveDependency(path, value, allPaths)).filter(Boolean) as string[])].sort();
+  const dependencies = [...new Set(specifiers.map((value) => resolveReleaseSnapshotDependency(path, value, allPaths)).filter(Boolean) as string[])].sort();
   const physicalLines = text ? text.split(/\r?\n/).length : 0;
   const metrics: RawMetrics = {
     bytes: buffer.byteLength,

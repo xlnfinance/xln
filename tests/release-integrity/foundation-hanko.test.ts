@@ -21,7 +21,7 @@ import {
   type ReleaseEnvelope,
 } from '../../frontend/src/lib/releases/release-signature.ts';
 import type { ReleaseManifest, ReleaseSnapshot } from '../../tools/release-snapshot/types.ts';
-import { releaseSnapshotExclusion } from '../../tools/release-snapshot/collect.ts';
+import { releaseSnapshotExclusion, resolveReleaseSnapshotDependency } from '../../tools/release-snapshot/collect.ts';
 import { RELEASE_EDITORIAL_NOTICE, writeReleaseMarkdown } from '../../tools/release-snapshot/render.ts';
 
 const ROOT = resolve(import.meta.dir, '../..');
@@ -88,6 +88,27 @@ describe('Foundation release Hanko', () => {
     const changedLock = [...base, { path: 'bun.lock', sha256: '33'.repeat(32) }];
     expect(computeCodeSnapshotRoot(withLock)).not.toBe(computeCodeSnapshotRoot(base));
     expect(computeCodeSnapshotRoot(changedLock)).not.toBe(computeCodeSnapshotRoot(withLock));
+  });
+
+  test('resolves only repository-contained relative release dependencies', () => {
+    const paths = new Set([
+      'tools/shared.ts',
+      'tools/release-snapshot/collect.ts',
+      'tools/release-snapshot/explicit.ts',
+      'tools/release-snapshot/feature/index.ts',
+    ]);
+    const resolveDependency = (specifier: string): string | null =>
+      resolveReleaseSnapshotDependency('tools/release-snapshot/collect.ts', specifier, paths);
+
+    expect(resolveDependency('./explicit')).toBe('tools/release-snapshot/explicit.ts');
+    expect(resolveDependency('./explicit.ts')).toBe('tools/release-snapshot/explicit.ts');
+    expect(resolveDependency('./feature')).toBe('tools/release-snapshot/feature/index.ts');
+    expect(resolveDependency('../shared')).toBe('tools/shared.ts');
+    expect(resolveDependency('node:fs')).toBeNull();
+    expect(resolveDependency('ethers')).toBeNull();
+    expect(() => resolveDependency('../../../outside')).toThrow(
+      'RELEASE_SNAPSHOT_DEPENDENCY_PATH_ESCAPE:tools/release-snapshot/collect.ts:../../../outside',
+    );
   });
 
   test('pins the checked-in Foundation board and rejects an attacker-owned 2-of-3 board', () => {

@@ -3,7 +3,7 @@
 import type { AuditModuleReview, AuditRegistry } from './types';
 import { runCoversWholeModule } from './review-validation';
 
-export type ModuleReviewStatus = Readonly<{
+type ModuleReviewStatus = Readonly<{
   floor: number;
   count: number;
   familyCount: number;

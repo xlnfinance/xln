@@ -1,4 +1,4 @@
-export type SessionCreationLimiterOptions = {
+type SessionCreationLimiterOptions = {
   windowMs: number;
   perClientLimit: number;
   globalLimit: number;
