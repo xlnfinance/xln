@@ -271,7 +271,6 @@
   function setSpeed(newSpeed: number) {
     speed = newSpeed;
     showSpeedMenu = false;
-    panelBridge.emit('playback:speed', newSpeed);
     // Restart interval with new speed if playing
     if (playing && playbackInterval) {
       clearInterval(playbackInterval);

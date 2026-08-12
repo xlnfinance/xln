@@ -84,9 +84,6 @@
   let pendingPaymentCommandId: string | null = null;
   let paymentPendingMessage = '';
   let paymentPendingToastId: string | null = null;
-  let repeatIntervalMs = 0;
-  let repeatArmed = false;
-  let repeatTimer: ReturnType<typeof setInterval> | null = null;
   let payMaxAmount = 0n;
   let canPayNow = false;
   let showNoteField = false;
@@ -115,12 +112,6 @@
   const MIN_SELF_CYCLE_INTERMEDIATES = 2;
   const AUTO_ROUTE_RETRY_WINDOW_MS = 8_000;
   const AUTO_ROUTE_RETRY_DELAY_MS = 200;
-  type LockBookEntry = {
-    accountId: string;
-    tokenId: number;
-    direction: 'incoming' | 'outgoing';
-  };
-
   type SendPaymentResult = { queued: boolean };
   type BarcodeDetectorLike = {
     detect(source: CanvasImageSource): Promise<Array<{ rawValue?: string }>>;
@@ -170,26 +161,6 @@
       byEntityId.set(entity, profile);
     }
     runtimeProfiles = Array.from(byEntityId.values());
-  }
-
-  function hasPendingOutgoingLock(from: string, to: string, token: number): boolean {
-    if (!currentReplicas) return false;
-    const fromNorm = normalizeEntityId(from);
-    const toNorm = normalizeEntityId(to);
-    for (const [key, replica] of currentReplicas.entries()) {
-      const [replicaEntityId] = key.split(':');
-      if (normalizeEntityId(replicaEntityId) !== fromNorm) continue;
-      const lockBook = replica?.state?.lockBook;
-      if (!(lockBook instanceof Map)) continue;
-      for (const lock of lockBook.values()) {
-        const entry = lock as LockBookEntry;
-        if (entry.direction !== 'outgoing') continue;
-        if (normalizeEntityId(entry.accountId) !== toNorm) continue;
-        if (Number(entry.tokenId) !== token) continue;
-        return true;
-      }
-    }
-    return false;
   }
 
   function getURLHashRoute(): string | null {
@@ -320,38 +291,7 @@
     }
   }
 
-  const clearRepeatTimer = () => {
-    if (repeatTimer) {
-      clearInterval(repeatTimer);
-      repeatTimer = null;
-    }
-  };
-
-  function stopRepeatTimer(_reason: string): void {
-    clearRepeatTimer();
-    repeatArmed = false;
-  }
-
-  const restartRepeatTimer = () => {
-    clearRepeatTimer();
-    if (!repeatArmed || repeatIntervalMs <= 0 || selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
-    repeatTimer = setInterval(() => {
-      if (sendingPayment || findingRoutes) return;
-      if (hasPendingOutgoingLock(entityId, targetEntityId, tokenId)) {
-        stopRepeatTimer('Previous HTLC is still settling on this account.');
-        return;
-      }
-      void sendPayment(false);
-    }, repeatIntervalMs);
-  };
-
-  $: if (repeatIntervalMs === 0) {
-    clearRepeatTimer();
-    repeatArmed = false;
-  }
-
   onDestroy(() => {
-    clearRepeatTimer();
     if (paymentPendingToastId) toasts.remove(paymentPendingToastId);
     if (autoRouteRetryTimer) {
       clearTimeout(autoRouteRetryTimer);
@@ -362,8 +302,6 @@
   function resetQuotedRoutes(): void {
     routes = [];
     selectedRouteIndex = -1;
-    clearRepeatTimer();
-    repeatArmed = false;
   }
 
   function getEntityName(id: string): string {
@@ -909,7 +847,7 @@
     return true;
   }
 
-  async function findRoutes(preserveRepeatTimer = false, silent = false): Promise<boolean> {
+  async function findRoutes(silent = false): Promise<boolean> {
     if (!targetEntityId || !amount) return false;
 
     const viewportY = typeof window === 'undefined' ? 0 : window.scrollY;
@@ -919,10 +857,6 @@
     routes = [];
     selectedRouteIndex = -1;
     preflightError = null;
-    if (!preserveRepeatTimer) {
-      clearRepeatTimer();
-    }
-
     try {
       await refreshGossipOnDemand('route-preflight', [entityId, targetEntityId]);
       if (requireEncryption) await ensureRecipientProfileReady();
@@ -1119,7 +1053,7 @@
   ) {
     const routeKey = pendingAutoRouteKey;
     completedAutoRouteKey = routeKey;
-    void findRoutes(false, true).then((success) => {
+    void findRoutes(true).then((success) => {
       if (success) return;
       if (pendingAutoRouteKey !== routeKey || completedAutoRouteKey !== routeKey) return;
       if (!isTransientRoutePreflightError(preflightError) || Date.now() >= autoRouteRetryDeadlineMs) {
@@ -1155,7 +1089,7 @@
     const t0 = performance.now();
     let result: SendPaymentResult;
     if (hasSelectedRoute()) {
-      result = await sendPayment(true);
+      result = await sendPayment();
     } else {
       result = await payNowCheapestTracked();
     }
@@ -1167,13 +1101,13 @@
   async function payNowCheapestTracked(): Promise<SendPaymentResult> {
     if (sendingPayment || findingRoutes) return { queued: false };
     if (isSelfRecipient) return { queued: false };
-    await findRoutes(false);
+    await findRoutes();
     if (routes.length === 0) return { queued: false };
     selectedRouteIndex = 0;
-    return await sendPayment(true);
+    return await sendPayment();
   }
 
-  async function sendPayment(manual = true): Promise<SendPaymentResult> {
+  async function sendPayment(): Promise<SendPaymentResult> {
     if (selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return { queued: false };
     if (sendingPayment) return { queued: false };
 
@@ -1185,11 +1119,6 @@
       preflightError = null;
       const requireEncryption = usesConditionalDelivery(deliveryMode);
       if (requireEncryption) await ensureRecipientProfileReady();
-
-      // Timer-driven sends must refresh route quotes to avoid reusing stale capacities.
-      if (!manual) {
-        await findRoutes(true);
-      }
 
       const route = routes[selectedRouteIndex];
       if (!route) throw new Error('Selected route is no longer available');
@@ -1248,7 +1177,6 @@
       return { queued: true };
     } catch (error) {
       logPaymentDiagnostic('Payment submission failed', error, {
-        manual,
         selectedRouteIndex,
         selectedRoutePath: routes[selectedRouteIndex]?.path || [],
       });
@@ -1263,21 +1191,15 @@
         pendingPaymentCommandId = latestReceipt.commandId;
         paymentPendingMessage = 'Payment submission pending. Reconnect or unlock to resume the original payment; do not send a second payment.';
         preflightError = null;
-        stopRepeatTimer(paymentPendingMessage);
         if (paymentPendingToastId) toasts.remove(paymentPendingToastId);
         paymentPendingToastId = toasts.warning(paymentPendingMessage, 0);
       } else {
         preflightError = failure.message || 'Unknown send error';
-        if (!manual) stopRepeatTimer(preflightError);
         toasts.error(`Payment failed: ${preflightError}`);
       }
       return { queued: false };
     } finally {
       sendingPayment = false;
-      if (manual && queued && repeatIntervalMs > 0) {
-        repeatArmed = true;
-        restartRepeatTimer();
-      }
     }
   }
 
@@ -1611,7 +1533,7 @@
       <button
         type="button"
         class="find-routes-link"
-        on:click={() => void findRoutes(false)}
+        on:click={() => void findRoutes()}
         disabled={!targetEntityId || !amount}
       >
         {routes.length > 0 ? 'Refresh routes' : 'Find routes'}

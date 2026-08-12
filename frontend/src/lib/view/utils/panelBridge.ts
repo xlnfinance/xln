@@ -31,7 +31,6 @@ type EventMap = {
   'scenario:loaded': { name: string; frames: number }; // Scenario loaded successfully
   'camera:update': { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number }; distance?: number }; // Camera position changed
   'camera:restore': { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number }; distance?: number }; // Apply a saved camera preset
-  'playback:speed': number; // Playback speed multiplier from TimeMachine
 };
 
 class PanelBridge {
