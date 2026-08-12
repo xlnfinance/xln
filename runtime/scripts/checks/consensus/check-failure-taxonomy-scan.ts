@@ -909,7 +909,7 @@ for (const [path, markers] of [
   ],
   ['runtime/__tests__/operations/health/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
   [
-    'runtime/__tests__/entity-factory-logging.test.ts',
+    'runtime/__tests__/registration/core/entity-factory-logging.test.ts',
     ['lazy entity creation uses structured logging without direct console output', 'entity.factory'],
   ],
   [

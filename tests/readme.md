@@ -57,7 +57,7 @@ cd jurisdictions && bunx hardhat test --grep DeltaTransformer
 - After a slow e2e exposes a bug, add the shortest deterministic regression below it: runtime scenario if the bug crosses machines, unit/component if the bug is local.
 - For bootstrap bugs, use `bun run prod:bootstrap:fresh`, `bun run prod:bootstrap:clone`, or `bun run prod:bootstrap:hydrate` before any full e2e rerun. Inspect `bootstrap-events.jsonl` and `mm-bootstrap-events.jsonl` with `jq`.
 - Keep Playwright assertions user-visible where possible. Use runtime debug reads only to prove consensus, persistence, or chain state that the UI cannot faithfully expose.
-- Do not add silent skips. `runtime/__tests__/test-skip-discipline.test.ts` enforces this.
+- Do not add silent skips. `runtime/__tests__/testing/infrastructure/test-skip-discipline.test.ts` enforces this.
 - Always run `bun run check` before reporting completion.
 
 ## Current Fast Gates

@@ -522,7 +522,7 @@ const RUNTIME_FILES = {
   ],
   swapUi: [],
   tests: [
-    'runtime/__tests__/ids.test.ts',
+    'runtime/__tests__/registration/core/ids.test.ts',
     'runtime/__tests__/account/consensus/account-frame-integrity.test.ts',
     'runtime/__tests__/runtime/transport/runtime-output-routing.test.ts',
     'runtime/__tests__/runtime/ingress/runtime-ingress-timestamp.test.ts',

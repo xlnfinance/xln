@@ -28,7 +28,7 @@ test('health redaction keeps local operator requests on loopback only', () => {
 });
 
 test('proxied Runtime API never treats loopback socket origin as operator authority', () => {
-  const source = readFileSync(new URL('../api/server/index.ts', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../../../api/server/index.ts', import.meta.url), 'utf8');
   expect(source).toContain('const operatorAuthorized = hasDaemonControlAuth(req, session.env);');
   expect(source).not.toContain('isLocalOperatorRequest(req, peerAddress) || hasDaemonControlAuth');
 });

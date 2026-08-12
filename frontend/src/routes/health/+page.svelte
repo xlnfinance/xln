@@ -1001,7 +1001,7 @@
         {/each}
       </div>
       <div class="command-strip">
-        <code>bun test runtime/__tests__/qa-story-report.test.ts</code>
+        <code>bun test runtime/__tests__/testing/qa/qa-story-report.test.ts</code>
         <code>bun run prod:health:capped-testnet</code>
         <code>bun run gate:capped-testnet</code>
       </div>
