@@ -5,11 +5,17 @@ const singleSignerPath =
 const multiSignerPath =
   'runtime/entity/consensus/proposal/multi-signer.ts';
 const runtimeProcessPath = 'runtime/runtime/frame/process.ts';
+const entityInputStagingPath =
+  'runtime/runtime/entity-input/entity-input-staging.ts';
+const entityInputOutputPath =
+  'runtime/runtime/entity-input/entity-input-output.ts';
 
 const frameApplication = await Bun.file(frameApplicationPath).text();
 const singleSigner = await Bun.file(singleSignerPath).text();
 const multiSigner = await Bun.file(multiSignerPath).text();
 const runtimeProcess = await Bun.file(runtimeProcessPath).text();
+const entityInputStaging = await Bun.file(entityInputStagingPath).text();
+const entityInputOutput = await Bun.file(entityInputOutputPath).text();
 
 if (
   !frameApplication.includes(
@@ -22,7 +28,7 @@ if (frameApplication.includes('cloneEntityState(normalized)')) {
   throw new Error('ENTITY_FRAME_FULL_STATE_CLONE_FORBIDDEN');
 }
 if (!singleSigner.includes('? applyRuntimeOwnedEntityFrame')) {
-  throw new Error('SINGLE_SIGNER_RUNTIME_OWNED_FRAME_MISSING');
+  throw new Error('SINGLE_SIGNER_CROSS_J_RUNTIME_OWNED_FRAME_MISSING');
 }
 if (multiSigner.includes('applyRuntimeOwnedEntityFrame')) {
   throw new Error('MULTI_SIGNER_RUNTIME_OWNED_FRAME_FORBIDDEN');
@@ -30,9 +36,26 @@ if (multiSigner.includes('applyRuntimeOwnedEntityFrame')) {
 if (runtimeProcess.includes('cloneRuntimeState(')) {
   throw new Error('RUNTIME_FRAME_FULL_STATE_CLONE_FORBIDDEN');
 }
+if (
+  !/stageExternalEntityInput\([\s\S]*?options,\s*false,?\s*\)/.test(
+    entityInputStaging,
+  ) ||
+  !entityInputStaging.includes(
+    'commitEntityFrameCandidateState(staged.result.nextReplica.state)',
+  )
+) {
+  throw new Error('ORDINARY_ENTITY_INPUT_CANDIDATE_BOUNDARY_MISSING');
+}
+if (
+  !/applyEntityInputToReplica\([\s\S]*?options\.isReplay,\s*true,\s*true,?\s*\)/.test(
+    entityInputOutput,
+  )
+) {
+  throw new Error('CROSS_J_RUNTIME_OWNED_FRAME_BOUNDARY_MISSING');
+}
 
 console.log(
-  '✅ Runtime/single-signer mutate owned State; multi-signer uses touched candidates',
+  '✅ Ordinary Entity inputs use touched candidates; Runtime-private Cross-J retains owned-State apply',
 );
 
 export {};

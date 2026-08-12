@@ -261,13 +261,14 @@ export const rejectMalformedEntityInput = (
     env.scenarioMode ||
     options.isReplay ||
     !(error instanceof RuntimeEntityInputApplyError) ||
-    error.failureKind !== 'malformed-ingress'
+    (error.failureKind !== 'malformed-ingress' &&
+      error.failureKind !== 'unroutable-ingress')
   ) {
     return false;
   }
   context.inputOutcomes.push({
     inputIndex,
-    outcome: { kind: 'rejected', code: error.failureKind },
+    outcome: { kind: 'rejected', code: error.rejectionCode },
     entityFrameCommitted: false,
     committedAccountFrames: [],
   });

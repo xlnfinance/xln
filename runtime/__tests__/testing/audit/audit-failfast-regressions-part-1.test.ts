@@ -182,6 +182,8 @@ import { createJReplica } from '../../../scenarios/harness/boot';
 
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../../../runtime/input-pipeline/entity-inputs';
 import { assertExternalEntityInputAllowed } from '../../../runtime/entity-input/entity-input-admission.ts';
+import { createRuntimeEntityInputBatchContext } from '../../../runtime/entity-input/entity-input-contract.ts';
+import { rejectMalformedEntityInput } from '../../../runtime/entity-input/entity-input-staging.ts';
 import { discardRejectedEntityInput } from '../../../runtime/frame/input/discard';
 
 import { MalformedEntityFrameInputError } from '../../../entity/tx/processing/invariant-errors';
@@ -1179,6 +1181,7 @@ describe('audit fail-fast regressions', () => {
       new MalformedEntityFrameInputError('definitely_unknown_entity_tx', 'ENTITY_TX_UNHANDLED'),
     );
     expect(malformed.failureKind).toBe('malformed-ingress');
+    expect(malformed.rejectionCode).toBe('ENTITY_TX_UNHANDLED');
     expect(malformed.isDiscardableIngress).toBe(true);
 
     const unroutableLocal = new RuntimeEntityInputApplyError(
@@ -1191,7 +1194,20 @@ describe('audit fail-fast regressions', () => {
       new Error('RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET'),
       'unroutable-ingress',
     );
+    expect(unroutableLocal.rejectionCode).toBe('unroutable-ingress');
     expect(unroutableLocal.isDiscardableIngress).toBe(true);
+    const unroutableContext = createRuntimeEntityInputBatchContext([]);
+    expect(rejectMalformedEntityInput(
+      local.env,
+      unroutableLocal,
+      0,
+      unroutableContext,
+      { isReplay: false, routingDeps: {} as never },
+    )).toBe(true);
+    expect(unroutableContext.inputOutcomes[0]?.outcome).toEqual({
+      kind: 'rejected',
+      code: 'unroutable-ingress',
+    });
 
     const storage = new RuntimeEntityInputApplyError(
       {

@@ -5,6 +5,7 @@ import type { RoutedEntityInput } from '../types.ts';
 import type { RuntimeEntityRoutingDeps } from '../routing/entity-routing.ts';
 import {
   classifyEntityInputApplyFailure,
+  MalformedEntityFrameInputError,
   type EntityInputApplyFailureKind,
 } from '../../entity/tx/processing/invariant-errors.ts';
 import { nodeProcess } from '../../infra/process/runtime-process.ts';
@@ -77,6 +78,7 @@ export class RuntimeEntityInputApplyError extends Error {
   readonly sourceRuntimeTimestamp: number | undefined;
   readonly trustedLocalCrossJurisdiction: boolean;
   readonly failureKind: EntityInputApplyFailureKind;
+  readonly rejectionCode: string;
 
   constructor(
     input: RoutedEntityInput,
@@ -102,6 +104,9 @@ export class RuntimeEntityInputApplyError extends Error {
     this.sourceRuntimeTimestamp = input.sourceRuntimeFrame?.timestamp;
     this.trustedLocalCrossJurisdiction = trustedLocalCrossJurisdiction;
     this.failureKind = failureKind;
+    this.rejectionCode = cause instanceof MalformedEntityFrameInputError
+      ? cause.rejection
+      : failureKind;
   }
 
   get isRemoteIngress(): boolean {
