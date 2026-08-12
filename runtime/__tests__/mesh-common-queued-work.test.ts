@@ -5,7 +5,7 @@ import {
   hasQueuedExtendCredit,
   hasQueuedOpenAccount,
   hasQueuedSwapOffer,
-} from '../orchestrator/mesh-common';
+} from '../orchestrator/mesh/mesh-common';
 import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
 import { hashEntityCommandTxs } from '../entity/command/command-codec';
 import type { EntityTx } from '../types/entity-tx';

@@ -7,7 +7,7 @@ import {
   resetMeshJurisdictionsCache,
   resolveMeshJurisdictionConfig,
   resolveSecondaryJurisdictions,
-} from '../orchestrator/mesh-jurisdictions';
+} from '../orchestrator/mesh/mesh-jurisdictions';
 
 const writeJurisdictions = (payload: Record<string, unknown>): string => {
   const root = mkdtempSync(join(tmpdir(), 'xln-mesh-jurisdictions-'));

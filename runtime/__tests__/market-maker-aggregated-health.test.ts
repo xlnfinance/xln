@@ -4,8 +4,8 @@ import {
   countMarketSnapshotOrderDepth,
   isExactMarketSnapshotOrderDepth,
   mergeMarketSnapshotOrderDepth,
-} from '../orchestrator/market-maker-aggregated-health';
-import { buildPublicMarketMakerHealth } from '../orchestrator/market-maker-public-health';
+} from '../orchestrator/market-maker/health/market-maker-aggregated-health';
+import { buildPublicMarketMakerHealth } from '../orchestrator/market-maker/health/market-maker-public-health';
 import type { MarketMakerHealthPayload } from '../orchestrator/orchestrator-types';
 
 describe('aggregated market maker health', () => {

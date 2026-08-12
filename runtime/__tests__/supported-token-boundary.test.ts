@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { getTokenInfo } from '../account/utils';
 import { defaultTokensForJurisdiction } from '../jurisdiction/machine/config/default-tokens';
-import { getBootstrapCreditAmount } from '../orchestrator/mesh-common';
+import { getBootstrapCreditAmount } from '../orchestrator/mesh/mesh-common';
 
 describe('supported-token metadata boundary', () => {
   test('Base USDC financial amounts use its canonical six decimals', () => {

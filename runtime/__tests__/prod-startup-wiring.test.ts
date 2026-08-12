@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { discoverHubIds } from '../orchestrator/custody-bootstrap';
+import { discoverHubIds } from '../orchestrator/bootstrap/custody-bootstrap';
 import { createOrchestratorProxyHandlers } from '../orchestrator/proxy';
 import { MAX_WALLET_SNAPSHOT_BODY_BYTES } from '../api/public/external-wallet/http';
 import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '../scripts/e2e-fatal-log-monitor';
@@ -16,7 +16,12 @@ const readMarketMakerNodeModule = (file: string): string =>
   readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8');
 
 const readMarketMakerNodeSource = (): string =>
-  ['mm-node.ts', 'mm-node-core.ts', 'mm-node-health.ts', 'mm-node-run.ts'].map(readMarketMakerNodeModule).join('\n');
+  [
+    'mm-node.ts',
+    'market-maker/node/mm-node-core.ts',
+    'market-maker/node/mm-node-health.ts',
+    'market-maker/node/mm-node-run.ts',
+  ].map(readMarketMakerNodeModule).join('\n');
 
 const readRpcAdapterSource = (): string =>
   [
@@ -43,7 +48,7 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 describe('production startup wiring', () => {
   test('managed hub BrainVault prewarms before WAL replay and opens custody only after restore', () => {
     const hub = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    const transport = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-runtime-transport.ts'), 'utf8');
+    const transport = readFileSync(join(repoRoot, 'runtime/orchestrator/hub/hub-runtime-transport.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const prewarm = hub.indexOf('await brainVaultOwner.prewarm(resolvedArgs.seed);');
     const runtimeMain = hub.indexOf('const env = await main(resolvedArgs.seed', prewarm);
@@ -91,7 +96,7 @@ describe('production startup wiring', () => {
   });
 
   test('runtime import rejects public callers before minting admin capabilities', () => {
-    const runtimeImportHttp = readFileSync(join(repoRoot, 'runtime/orchestrator/runtime-import-http.ts'), 'utf8');
+    const runtimeImportHttp = readFileSync(join(repoRoot, 'runtime/orchestrator/runtime/runtime-import-http.ts'), 'utf8');
     const handler = runtimeImportHttp.indexOf('export const handleRuntimeImportHttpRequest');
     const operatorGate = runtimeImportHttp.indexOf(
       'if (requiresLocalNodeOperator(url) && !operatorAuthorized)',
@@ -519,16 +524,16 @@ describe('production startup wiring', () => {
     );
 
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
-    const marketMakerPoller = readFileSync(join(repoRoot, 'runtime/orchestrator/market-maker-child-poll.ts'), 'utf8');
+    const marketMakerPoller = readFileSync(join(repoRoot, 'runtime/orchestrator/market-maker/health/market-maker-child-poll.ts'), 'utf8');
     const marketMakerAggregation = readFileSync(
-      join(repoRoot, 'runtime/orchestrator/market-maker-aggregated-health.ts'),
+      join(repoRoot, 'runtime/orchestrator/market-maker/health/market-maker-aggregated-health.ts'),
       'utf8',
     );
     const orchestratorConfig = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-config.ts'), 'utf8');
     const runtimeEntityRouting = readFileSync(join(repoRoot, 'runtime/runtime/routing/entity-routing.ts'), 'utf8');
     const runtimeLoopSource = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop.ts'), 'utf8');
     const standaloneServer = readFileSync(join(repoRoot, 'runtime/api/server/index.ts'), 'utf8');
-    const custodyBootstrap = readFileSync(join(repoRoot, 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');
+    const custodyBootstrap = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap/custody-bootstrap.ts'), 'utf8');
     const startCustodyDev = readFileSync(join(repoRoot, 'runtime/scripts/start-custody-dev.ts'), 'utf8');
     const cli = readFileSync(join(repoRoot, 'runtime/api/server/cli.ts'), 'utf8');
     expect(orchestratorConfig).toContain(
@@ -652,7 +657,7 @@ describe('production startup wiring', () => {
     expect(marketMakerAggregation).toContain('depthReady: route.depthReady === true');
     expect(marketMakerAggregation).toContain('expectedOffers: Number(pair.expectedOffers || 0)');
     const snapshotEnrichment = readFileSync(
-      join(repoRoot, 'runtime/orchestrator/market-maker-public-health.ts'),
+      join(repoRoot, 'runtime/orchestrator/market-maker/health/market-maker-public-health.ts'),
       'utf8',
     );
     expect(snapshotEnrichment).toContain('const snapshotDepthExact = isExactMarketSnapshotOrderDepth');
@@ -671,7 +676,7 @@ describe('production startup wiring', () => {
     expect(startCustodyDev).not.toContain("CUSTODY_JURISDICTION_ID: 'arrakis'");
     expect(cli).toContain("const REMOTE_RPC = process.env['XLN_CLI_REMOTE_RPC'] || 'https://xln.finance/rpc';");
     expect(cli).not.toContain('/rpc/arrakis');
-    expect(readFileSync(join(repoRoot, 'runtime/orchestrator/jurisdictions.ts'), 'utf8')).toContain(
+    expect(readFileSync(join(repoRoot, 'runtime/orchestrator/jurisdiction/jurisdictions.ts'), 'utf8')).toContain(
       'const seedPath = existsSync(canonicalPath) ? canonicalPath : resolveRepoJurisdictionsJsonPath();',
     );
     expect(orchestrator).toContain('const buildSecondaryRpcArgs = (): string[] => {');
@@ -722,7 +727,7 @@ describe('production startup wiring', () => {
 
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const hubVisibleProfiles = readFileSync(
-      join(repoRoot, 'runtime/orchestrator/hub-visible-profiles.ts'),
+      join(repoRoot, 'runtime/orchestrator/hub/hub-visible-profiles.ts'),
       'utf8',
     );
     const bootstrapHub = readFileSync(join(repoRoot, 'scripts/bootstrap-hub.ts'), 'utf8');
@@ -759,7 +764,7 @@ describe('production startup wiring', () => {
     expect(hubNode).not.toContain("normalized === 'arrakis'");
     expect(hubNode).not.toContain("normalized === 'wakanda'");
     expect(hubNode).not.toContain('PRIMARY_TESTNET_JURISDICTION_NAME');
-    const meshJurisdictions = readFileSync(join(repoRoot, 'runtime/orchestrator/mesh-jurisdictions.ts'), 'utf8');
+    const meshJurisdictions = readFileSync(join(repoRoot, 'runtime/orchestrator/mesh/mesh-jurisdictions.ts'), 'utf8');
     expect(meshJurisdictions).toContain(
       'const exactMatch = entries.find((entry) => sameMeshRpc(entry.rpc, requestedRpc));',
     );
@@ -889,7 +894,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('JURISDICTION_ADAPTER_NOT_READY name=${jurisdiction.name}');
     expect(orchestratorConfig).toContain("readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS', 1_500_000)");
     expect(orchestratorConfig).toContain('Math.max(MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS, STARTUP_TIMEOUT_MS)');
-    expect(mmNode).toContain("import { MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS } from './orchestrator-config';");
+    expect(mmNode).toContain("import { MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS } from '../../orchestrator-config';");
     expect(orchestratorConfig).toContain("readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS', 60_000)");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'");
@@ -1266,7 +1271,7 @@ describe('production startup wiring', () => {
     const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime/composition.ts'), 'utf8');
     const runtimeLoop = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop.ts'), 'utf8');
     const runtimeWatchers = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop-watchers.ts'), 'utf8');
-    const nodeQuiesce = readFileSync(join(repoRoot, 'runtime/orchestrator/node-runtime-quiesce.ts'), 'utf8');
+    const nodeQuiesce = readFileSync(join(repoRoot, 'runtime/orchestrator/process/node-runtime-quiesce.ts'), 'utf8');
     const sources = [
       readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),
       readMarketMakerNodeSource(),
@@ -1293,7 +1298,7 @@ describe('production startup wiring', () => {
       nodeQuiesce.indexOf("transitionRuntimeLifecycle(state, 'stopped');"),
     );
     for (const source of sources) {
-      expect(source).toContain("from './node-runtime-quiesce';");
+      expect(source).toContain('node-runtime-quiesce');
       expect(source).toContain('quiesceNodeRuntime');
       const quiesceBlock = source.includes('const createHubControlRequestHandler = (')
         ? extractSourceBlock(
@@ -1496,8 +1501,8 @@ describe('production startup wiring', () => {
     const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');
     const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/remoteRuntimeImportFlow.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
-    const runtimeImportHttp = readFileSync(join(repoRoot, 'runtime/orchestrator/runtime-import-http.ts'), 'utf8');
-    const bootstrapTimeline = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap-timeline-stages.ts'), 'utf8');
+    const runtimeImportHttp = readFileSync(join(repoRoot, 'runtime/orchestrator/runtime/runtime-import-http.ts'), 'utf8');
+    const bootstrapTimeline = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap/bootstrap-timeline-stages.ts'), 'utf8');
     const isolatedRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
 
     expect(baseline).toContain('allowAutoReset?: boolean;');
@@ -1552,8 +1557,8 @@ describe('production startup wiring', () => {
   });
 
   test('market maker activates executable arguments before deriving runtime keys', () => {
-    const core = readMarketMakerNodeModule('mm-node-core.ts');
-    const run = readMarketMakerNodeModule('mm-node-run.ts');
+    const core = readMarketMakerNodeModule('market-maker/node/mm-node-core.ts');
+    const run = readMarketMakerNodeModule('market-maker/node/mm-node-run.ts');
     const activation = run.indexOf('activateMarketMakerProcessArgs();');
     const runtimeCreation = run.indexOf('const env = await main(resolvedArgs.seed, {');
 
@@ -1566,7 +1571,7 @@ describe('production startup wiring', () => {
   test('node orchestrators validate J adapters without mutating committed replicas', () => {
     const sources = [
       readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),
-      readMarketMakerNodeModule('mm-node-core.ts'),
+      readMarketMakerNodeModule('market-maker/node/mm-node-core.ts'),
     ];
     for (const source of sources) {
       expect(source).toContain('assertJStackAddressMatch(');
@@ -1593,7 +1598,7 @@ describe('production startup wiring', () => {
 
   test('market maker health route serves cached bootstrap readiness without scanning state', () => {
     const mmNode = readMarketMakerNodeSource();
-    const mmProgress = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-bootstrap-progress.ts'), 'utf8');
+    const mmProgress = readFileSync(join(repoRoot, 'runtime/orchestrator/market-maker/node/mm-bootstrap-progress.ts'), 'utf8');
     const healthRouteStart = mmNode.indexOf("if (pathname === '/api/health')");
     const controlRouteStart = mmNode.indexOf("if (pathname === '/api/control/p2p/stop'");
     expect(healthRouteStart).toBeGreaterThan(0);
@@ -1649,8 +1654,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('completionHealth = deps.health.buildSnapshot({ includeCross: true });');
     expect(mmNode).toContain('deps.health.setCurrentHealth(completionHealth);');
     expect(mmNode).toContain('deps.health.rebuildHealthResponse();');
-    expect(readMarketMakerNodeModule('mm-node-health.ts')).toContain('computeCanonicalEntityHashesFromEnv');
-    expect(readMarketMakerNodeModule('mm-node-run.ts')).toContain('computeCanonicalStateHashFromEnv');
+    expect(readMarketMakerNodeModule('market-maker/node/mm-node-health.ts')).toContain('computeCanonicalEntityHashesFromEnv');
+    expect(readMarketMakerNodeModule('market-maker/node/mm-node-run.ts')).toContain('computeCanonicalStateHashFromEnv');
     expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: RuntimeReplica): string =>');
     expect(mmProgress).toContain("schema: 'market-maker-bootstrap-entity-state-v1'");
     expect(mmNode).toContain('const fingerprint = buildMarketMakerBootstrapFingerprint(');
@@ -2240,7 +2245,10 @@ describe('production startup wiring', () => {
   });
 
   test('bootstrap timeline stages expose typed failure metadata', () => {
-    const bootstrapTimeline = ['bootstrap-timeline.ts', 'bootstrap-timeline-stages.ts']
+    const bootstrapTimeline = [
+      'bootstrap/bootstrap-timeline.ts',
+      'bootstrap/bootstrap-timeline-stages.ts',
+    ]
       .map(file => readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8'))
       .join('\n');
     const types = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-types.ts'), 'utf8');
@@ -2259,7 +2267,7 @@ describe('production startup wiring', () => {
 
   test('market maker quote hot path is producer-only after runtime loop starts', () => {
     const mmNode = readMarketMakerNodeSource();
-    const meshCommon = readFileSync(join(repoRoot, 'runtime/orchestrator/mesh-common.ts'), 'utf8');
+    const meshCommon = readFileSync(join(repoRoot, 'runtime/orchestrator/mesh/mesh-common.ts'), 'utf8');
     const ensureStart = mmNode.indexOf('const ensureMarketMakerHubConnectivity = async (');
     const readyStart = mmNode.indexOf('const isMarketMakerConnectivityReady = (');
     const quotePipelineStart = mmNode.indexOf('type BootstrapSameQuoteDriverDeps = {');
@@ -2334,7 +2342,7 @@ describe('production startup wiring', () => {
     expect(readyStart).toBeGreaterThan(ensureStart);
 
     const ensureConnectivity = mmNode.slice(ensureStart, readyStart);
-    expect(mmNode).toContain("import { deriveAccountWatchSeed } from '../protocol/identity/account-watch-seed';");
+    expect(mmNode).toContain("import { deriveAccountWatchSeed } from '../../../protocol/identity/account-watch-seed';");
     expect(ensureConnectivity).toContain(
       'const deriveMarketMakerAccountWatchSeed = (counterpartyId: string): string =>',
     );
@@ -2358,7 +2366,7 @@ describe('production startup wiring', () => {
 
   test('hub and market maker prefer authenticated direct entity delivery with relay fallback', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    const hubTransport = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-runtime-transport.ts'), 'utf8');
+    const hubTransport = readFileSync(join(repoRoot, 'runtime/orchestrator/hub/hub-runtime-transport.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
     const p2p = readFileSync(join(repoRoot, 'runtime/network/p2p/p2p.ts'), 'utf8');
 
@@ -2460,7 +2468,7 @@ describe('production startup wiring', () => {
 
   test('custody bootstrap waits until market maker readiness completes', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
-    const custodyBootstrapSource = readFileSync(join(repoRoot, 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');
+    const custodyBootstrapSource = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap/custody-bootstrap.ts'), 'utf8');
     const marketMakerAwait = orchestrator.indexOf('await waitForMarketMakerReady();');
     const custodyBootstrap = orchestrator.indexOf('custodySupport = await startCustodySupport({');
     expect(marketMakerAwait).toBeGreaterThan(0);
@@ -2492,7 +2500,7 @@ describe('production startup wiring', () => {
     const sources = [
       'runtime/orchestrator/daemon-control.ts',
       'runtime/orchestrator/hub-node.ts',
-      'runtime/orchestrator/mm-node-core.ts',
+      'runtime/orchestrator/market-maker/node/mm-node-core.ts',
       'runtime/runtime/finance/swap-command-plan.ts',
       'frontend/src/lib/components/Entity/onboarding-runtime-input.ts',
       'frontend/src/lib/components/Entity/hub-discovery-profile.ts',
@@ -2911,7 +2919,7 @@ describe('production startup wiring', () => {
   });
 
   test('hub account-status proxy skips health polling when cached child mapping is known', () => {
-    const routes = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-api-routes.ts'), 'utf8');
+    const routes = readFileSync(join(repoRoot, 'runtime/orchestrator/hub/hub-api-routes.ts'), 'utf8');
     const findHubStart = routes.indexOf('const findHub = async (');
     const accountRouteStart = routes.indexOf('const handleHubAccountRequest = async (');
     expect(findHubStart).toBeGreaterThan(0);

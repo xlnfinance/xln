@@ -249,7 +249,7 @@ import {
   requireCompleteValidatorEncryptionManifest,
 } from '../protocol/htlc/validator-encryption';
 
-import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fail-fast';
+import { handleMeshBootstrapLoopError } from '../orchestrator/mesh/mesh-bootstrap-fail-fast';
 
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 

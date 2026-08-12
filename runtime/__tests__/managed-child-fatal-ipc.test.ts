@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   attachManagedChildFatalIpc,
   parseManagedChildFatalReport,
-} from '../orchestrator/managed-child-fatal-ipc';
+} from '../orchestrator/process/managed-child-fatal-ipc';
 import { openRelayIncidentJournal } from '../network/relay/incident-journal';
 import { createRelayStore, pushDebugEvent } from '../network/relay/store';
 

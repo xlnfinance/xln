@@ -6,7 +6,7 @@ import {
   getBootstrapCreditAmount,
   getBootstrapTokenAmount,
   isCanonicalAccountOpener,
-} from '../orchestrator/mesh-common';
+} from '../orchestrator/mesh/mesh-common';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 

@@ -13,7 +13,7 @@ import {
   type RuntimeFailureSignal,
 } from '../protocol/errors/failure-taxonomy';
 import { publicAggregatedHealth } from '../api/server/health/redaction';
-import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
+import { resolveRuntimeImportReadiness } from '../orchestrator/runtime/runtime-import-readiness';
 
 const readText = (path: string): string => {
   const splitSources: Record<string, string[]> = {
@@ -84,9 +84,9 @@ const readText = (path: string): string => {
     'runtime/account/tx/apply.ts': ['runtime/account/tx/apply.ts', 'runtime/account/tx/mutation.ts'],
     'runtime/orchestrator/mm-node.ts': [
       'runtime/orchestrator/mm-node.ts',
-      'runtime/orchestrator/mm-node-core.ts',
-      'runtime/orchestrator/mm-node-health.ts',
-      'runtime/orchestrator/mm-node-run.ts',
+      'runtime/orchestrator/market-maker/node/mm-node-core.ts',
+      'runtime/orchestrator/market-maker/node/mm-node-health.ts',
+      'runtime/orchestrator/market-maker/node/mm-node-run.ts',
     ],
     'runtime/api/public/external-wallet-api.ts': [
       'runtime/api/public/external-wallet-api.ts',
@@ -96,9 +96,9 @@ const readText = (path: string): string => {
       'runtime/api/public/external-wallet/snapshot-handler.ts',
       'runtime/api/public/external-wallet/tokens-handler.ts',
     ],
-    'runtime/orchestrator/bootstrap-timeline.ts': [
-      'runtime/orchestrator/bootstrap-timeline.ts',
-      'runtime/orchestrator/bootstrap-timeline-stages.ts',
+    'runtime/orchestrator/bootstrap/bootstrap-timeline.ts': [
+      'runtime/orchestrator/bootstrap/bootstrap-timeline.ts',
+      'runtime/orchestrator/bootstrap/bootstrap-timeline-stages.ts',
     ],
     'runtime/__tests__/audit-failfast-regressions.test.ts': [
       'runtime/__tests__/audit-failfast-regressions-part-1.test.ts',
@@ -171,7 +171,7 @@ const fatalIncidentRoutes = [
       ['runtime/orchestrator/hub-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
       ['runtime/orchestrator/mm-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
       [
-        'runtime/orchestrator/managed-child-fatal-ipc.ts',
+        'runtime/orchestrator/process/managed-child-fatal-ipc.ts',
         ["type: 'xln:managed-child-fatal'", "type: 'xln:managed-child-fatal-ack'", 'persisted: true'],
       ],
       [
@@ -395,7 +395,7 @@ for (const marker of [
   assertIncludes(taxonomy, marker, taxonomyPath);
 }
 
-const runtimeImportReadinessPath = 'runtime/orchestrator/runtime-import-readiness.ts';
+const runtimeImportReadinessPath = 'runtime/orchestrator/runtime/runtime-import-readiness.ts';
 const runtimeImportReadiness = readText(runtimeImportReadinessPath);
 for (const marker of [
   "error: 'RUNTIME_IMPORT_NETWORK_NOT_READY'",
@@ -407,7 +407,7 @@ for (const marker of [
   assertIncludes(runtimeImportReadiness, marker, runtimeImportReadinessPath);
 }
 
-const runtimeImportHttpPath = 'runtime/orchestrator/runtime-import-http.ts';
+const runtimeImportHttpPath = 'runtime/orchestrator/runtime/runtime-import-http.ts';
 const runtimeImportHttp = readText(runtimeImportHttpPath);
 for (const marker of [
   'const readiness = resolveRuntimeImportReadiness(',
@@ -444,7 +444,7 @@ assertNotIncludes(orchestrator, '[MESH] custody bootstrap failed:', orchestrator
 assertNotIncludes(orchestrator, '[MESH] received SIGTERM from parent during reset', orchestratorPath);
 assertNotIncludes(orchestrator, '[MESH] initial reset failed:', orchestratorPath);
 
-const bootstrapTimelinePath = 'runtime/orchestrator/bootstrap-timeline.ts';
+const bootstrapTimelinePath = 'runtime/orchestrator/bootstrap/bootstrap-timeline.ts';
 const bootstrapTimeline = readText(bootstrapTimelinePath);
 assertIncludes(
   bootstrapTimeline,
@@ -615,7 +615,7 @@ for (const [path, markers] of [
     ["createStructuredLogger('orchestrator.lifecycle')", 'http.shutdown_timeout'],
   ],
   [
-    'runtime/orchestrator/managed-runtime-leases.ts',
+    'runtime/orchestrator/process/managed-runtime-leases.ts',
     ["createStructuredLogger('orchestrator.managed_leases')", 'stale_processes.kill', 'lease.unreadable_ignored'],
   ],
   [
@@ -641,7 +641,7 @@ for (const [path, markers] of [
     ["createStructuredLogger('runtime.jsubmit')", 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed'],
   ],
   ['runtime/runtime/jurisdiction/j-submit-result.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
-  ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
+  ['runtime/orchestrator/market-maker/health/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
   [
     'runtime/protocol/payments/delivery-result.ts',
     ['export type DeliveryResult', 'failure?: RuntimeFailureSignal', 'deliveryFailure'],
@@ -712,7 +712,7 @@ assertNotIncludes(disputeWatch, '[PUSH-WATCH] target', disputeWatchPath);
 
 for (const orchestratorLifecyclePath of [
   'runtime/orchestrator/graceful-server.ts',
-  'runtime/orchestrator/managed-runtime-leases.ts',
+  'runtime/orchestrator/process/managed-runtime-leases.ts',
   'runtime/infra/process/parent-watch.ts',
 ]) {
   assertNotIncludes(readText(orchestratorLifecyclePath), 'console.', orchestratorLifecyclePath);

@@ -9,7 +9,7 @@ import {
   parseManagedProcessTable,
   readManagedProcessTable,
   type ManagedProcessOps,
-} from '../orchestrator/managed-runtime-leases';
+} from '../orchestrator/process/managed-runtime-leases';
 import { closeRelayClientsForReset } from '../network/relay/reset';
 import { createRelayStore } from '../network/relay/store';
 

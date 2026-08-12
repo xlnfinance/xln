@@ -4,7 +4,7 @@ import {
   assertBootstrapNotStalled,
   beginBootstrapProgress,
   buildBootstrapProgressHealth,
-} from '../orchestrator/bootstrap-progress-watchdog';
+} from '../orchestrator/bootstrap/bootstrap-progress-watchdog';
 
 describe('bootstrap progress watchdog', () => {
   test('allows long bootstrap work while bounded steps keep completing', () => {

@@ -10,7 +10,7 @@ import {
   getCreditGrantedByEntity,
   hasCommittedAccountState,
   isAccountWriteLaneIdle,
-} from '../../orchestrator/mesh-common';
+} from '../../orchestrator/mesh/mesh-common';
 import { hasCrossJurisdictionBookOrder } from '../../orderbook/cross-j';
 import { getEntityReplicaById } from '../../api/server/entities/lookup';
 import { assert } from '../harness/helpers';

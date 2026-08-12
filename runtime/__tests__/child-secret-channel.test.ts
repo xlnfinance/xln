@@ -9,7 +9,7 @@ import {
   parseChildSecretPayload,
   writeInheritedChildSecrets,
 } from '../infra/process/child-secrets';
-import { spawnBunChild } from '../orchestrator/custody-bootstrap';
+import { spawnBunChild } from '../orchestrator/bootstrap/custody-bootstrap';
 
 const readStream = async (stream: NodeJS.ReadableStream): Promise<string> => {
   let value = '';
@@ -148,7 +148,7 @@ describe('orchestrator child secret channel', () => {
   test('managed hub, market maker, and custody argv contain no secrets', () => {
     const root = process.cwd();
     const orchestrator = readFileSync(join(root, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
-    const custody = readFileSync(join(root, 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');
+    const custody = readFileSync(join(root, 'runtime/orchestrator/bootstrap/custody-bootstrap.ts'), 'utf8');
 
     expect(orchestrator).not.toContain("'--seed', child.seed");
     expect(orchestrator).not.toContain("'--seed', marketMakerChild.seed");

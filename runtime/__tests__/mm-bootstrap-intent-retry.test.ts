@@ -4,7 +4,7 @@ import {
   consumeExpiredBootstrapIntentAttempt,
   isBootstrapIntentAttemptExpired,
   MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS,
-} from '../orchestrator/mm-node-core';
+} from '../orchestrator/market-maker/node/mm-node-core';
 
 /**
  * Regression for the bootstrap-cross stall: a cross-j offerId is stable for a

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { areMarketMakerHubTransportsReady } from '../orchestrator/mm-transport';
+import { areMarketMakerHubTransportsReady } from '../orchestrator/market-maker/node/mm-transport';
 
 describe('market maker transport readiness', () => {
   test('accepts official relay delivery when hub profiles are visible', () => {

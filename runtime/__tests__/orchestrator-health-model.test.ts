@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { deriveHubRuntimeHealth, deriveResetHealthOk } from '../orchestrator/health-model';
+import { deriveHubRuntimeHealth, deriveResetHealthOk } from '../orchestrator/health/health-model';
 
 test('orchestrator health treats hub process health separately from relay self-presence', () => {
   const health = deriveHubRuntimeHealth({

@@ -14,7 +14,7 @@ import {
 } from '../runtime/account/crypto';
 import { encodeBoard, hashBoard } from '../runtime/entity/factory';
 import { createStructuredLogger } from '../runtime/infra/logger';
-import { requireJurisdictionBlockTimeMs } from '../runtime/orchestrator/mesh-jurisdictions';
+import { requireJurisdictionBlockTimeMs } from '../runtime/orchestrator/mesh/mesh-jurisdictions';
 import type { ConsensusConfig } from '../runtime/entity/types';
 import type { RuntimeReplica } from '../runtime/runtime/types';
 

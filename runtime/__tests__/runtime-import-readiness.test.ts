@@ -4,7 +4,7 @@ import {
   classifyRuntimeImportReadinessReason,
   classifyRuntimeMarketMakerFailure,
 } from '../protocol/errors/failure-taxonomy';
-import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
+import { resolveRuntimeImportReadiness } from '../orchestrator/runtime/runtime-import-readiness';
 import type { AggregatedHealth } from '../orchestrator/orchestrator-types';
 
 const baseReadyHealth = (): Pick<AggregatedHealth,

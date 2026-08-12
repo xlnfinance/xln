@@ -10,7 +10,7 @@ import { closeRuntimeContext } from './utils/e2e-runtime-shutdown.mts';
 
 import { deriveSignerAddressSync } from '../runtime/account/crypto';
 
-import { HUB_MESH_CREDIT_AMOUNT } from '../runtime/orchestrator/mesh-common';
+import { HUB_MESH_CREDIT_AMOUNT } from '../runtime/orchestrator/mesh/mesh-common';
 
 import { decodeRuntimeAdapterRequest } from '../runtime/api/runtime-adapter/codec';
 

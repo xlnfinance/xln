@@ -4,7 +4,7 @@ import {
   assertOrchestratorResetAllowed,
   ORCHESTRATOR_RESET_CONFIRMATION,
   OrchestratorResetRejectedError,
-} from '../orchestrator/reset-guard';
+} from '../orchestrator/server/reset-guard';
 
 const makeRequest = (headers: Record<string, string> = {}): Request =>
   new Request('http://127.0.0.1:8080/api/reset', {

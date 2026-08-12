@@ -173,7 +173,7 @@ const CORE_FILES = {
     'network/relay/market/subscription-limiter.ts', // Stream rate limiting
     'orchestrator/mm-node.ts',               // Market maker bootstrap, quote loop, cross books
     'api/server/health/market-maker.ts',     // Health/self-test contract for MM books
-    'orchestrator/mesh-common.ts',           // Bootstrap defaults for hubs/MM/accounts
+    'orchestrator/mesh/mesh-common.ts',           // Bootstrap defaults for hubs/MM/accounts
     'protocol/dispute/arguments.ts',                  // Dispute argument builder/evidence inclusion
     'watchtower/action.ts',                  // Watchtower action decisions
     'api/server/rpc/watchtower-proxy.ts',    // Runtime watchtower proxy API
@@ -375,9 +375,9 @@ const CROSS_FILES = {
     'network/relay/market/subscription-limiter.ts',
     'network/relay/market/subscriptions.ts',
     'orchestrator/mm-node.ts',
-    'orchestrator/mesh-common.ts',
-    'orchestrator/mesh-jurisdictions.ts',
-    'orchestrator/jurisdictions.ts',
+    'orchestrator/mesh/mesh-common.ts',
+    'orchestrator/mesh/mesh-jurisdictions.ts',
+    'orchestrator/jurisdiction/jurisdictions.ts',
     'api/server/health/market-maker.ts',
     'api/server/catalog/jurisdictions.ts',
     'protocol/dispute/arguments.ts',
@@ -583,7 +583,7 @@ const ORDERBOOK_FILES = {
     'network/relay/market/subscription-limiter.ts',
     'network/relay/market/subscriptions.ts',
     'orchestrator/mm-node.ts',
-    'orchestrator/mm-transport.ts',
+    'orchestrator/market-maker/node/mm-transport.ts',
     'api/server/health/market-maker.ts',
   ],
   docs: [

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { normalizeMarketMakerHealthPayload } from '../orchestrator/market-maker-health-payload';
+import { normalizeMarketMakerHealthPayload } from '../orchestrator/market-maker/health/market-maker-health-payload';
 import type { MarketMakerHealthPayload } from '../orchestrator/orchestrator-types';
 
 describe('market maker health payload normalization', () => {

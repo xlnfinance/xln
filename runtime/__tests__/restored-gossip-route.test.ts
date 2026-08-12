@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { restoredRuntimeRouteRelocated } from '../orchestrator/restored-gossip-route';
+import { restoredRuntimeRouteRelocated } from '../orchestrator/mesh/restored-gossip-route';
 
 const runtimeId = '0x1111111111111111111111111111111111111111';
 

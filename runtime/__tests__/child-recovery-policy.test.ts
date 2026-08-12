@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { persistChildFailureReceipt, type ChildFailureReceipt } from '../orchestrator/child-failure-diagnostics';
+import { persistChildFailureReceipt, type ChildFailureReceipt } from '../orchestrator/process/child-failure-diagnostics';
 import {
   decideChildFailure,
   selectChildFailureReason,
   shouldCaptureUnexpectedChildExit,
-} from '../orchestrator/child-recovery-policy';
+} from '../orchestrator/process/child-recovery-policy';
 
 const crash = (reason: string) => ({
   role: 'hub' as const,

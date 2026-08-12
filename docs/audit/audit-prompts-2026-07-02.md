@@ -488,7 +488,7 @@ Evidence:
 - Dev stack: `scripts/dev/run-dev.sh`.
 - Destructive local clean slate: `scripts/dev/clean-slate.sh`.
 - Port layout: `scripts/lib/port-layout.sh`.
-- Reset guard: `runtime/orchestrator/reset-guard.ts`.
+- Reset guard: `runtime/orchestrator/server/reset-guard.ts`.
 - Orchestrator reset flow: `runtime/orchestrator/orchestrator.ts:2148-2284`.
 - Health/runtime import endpoints:
   `runtime/orchestrator/orchestrator.ts:2405-2475`.

@@ -18,7 +18,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import {
   checkpointNodeRuntime,
   quiesceNodeRuntime,
-} from '../orchestrator/node-runtime-quiesce';
+} from '../orchestrator/process/node-runtime-quiesce';
 import { resolveDbPath } from '../storage/runtime-dbs';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';

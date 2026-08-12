@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { toPublicJurisdictionsPayload } from '../orchestrator/jurisdictions';
-import { selectPrimaryHubJurisdiction } from '../orchestrator/jurisdiction-select';
+import { toPublicJurisdictionsPayload } from '../orchestrator/jurisdiction/jurisdictions';
+import { selectPrimaryHubJurisdiction } from '../orchestrator/jurisdiction/jurisdiction-select';
 import { resolveRpcProxyIndex } from '../orchestrator/proxy';
 
 describe('orchestrator public RPC routes', () => {

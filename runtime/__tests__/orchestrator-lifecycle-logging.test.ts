@@ -21,7 +21,7 @@ const withSuppressedStructuredLogs = async <T>(fn: () => T | Promise<T>): Promis
 test('orchestrator lifecycle helpers use structured logging without direct console output', () => {
   const files = [
     'runtime/orchestrator/graceful-server.ts',
-    'runtime/orchestrator/managed-runtime-leases.ts',
+    'runtime/orchestrator/process/managed-runtime-leases.ts',
     'runtime/infra/process/parent-watch.ts',
   ];
   const sources = files.map((file) => readFileSync(join(process.cwd(), file), 'utf8'));
@@ -68,7 +68,7 @@ test('parent watch still fails closed on missing parent pid', async () => {
 });
 
 test('managed custody children terminate when their spawning process is replaced', () => {
-  const bootstrap = readFileSync(join(process.cwd(), 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');
+  const bootstrap = readFileSync(join(process.cwd(), 'runtime/orchestrator/bootstrap/custody-bootstrap.ts'), 'utf8');
   const daemon = readFileSync(join(process.cwd(), 'runtime/api/server/index.ts'), 'utf8');
   const custody = readFileSync(join(process.cwd(), 'custody/server.ts'), 'utf8');
 

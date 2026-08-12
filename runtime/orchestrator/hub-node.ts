@@ -21,7 +21,7 @@ import {
   normalizeJurisdictionDisplayName,
   readVisibleHubProfiles,
   type VisibleHubProfile,
-} from './hub-visible-profiles';
+} from './hub/hub-visible-profiles';
 import { deployMissingDefaultTokens } from '../jurisdiction/adapter/operations/dev-token-deployment';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
 import { assertJStackAddressMatch } from '../jurisdiction/adapter/operations/stack-binding';
@@ -43,7 +43,7 @@ import {
 import { toPublicRpcUrl } from '../network/p2p/loopback-url';
 import { startParentLivenessWatch } from '../infra/process/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
-import { quiesceNodeRuntime } from './node-runtime-quiesce';
+import { quiesceNodeRuntime } from './process/node-runtime-quiesce';
 import { applyJEventsToEnv } from '../jurisdiction/adapter/watcher';
 import { drainJWatcherBacklog } from '../jurisdiction/adapter/operations/backlog-drain';
 import { createRelayStore } from '../network/relay/store';
@@ -51,19 +51,19 @@ import { safeStringify } from '../protocol/serialization';
 import { writeDurableFile } from '../storage/fs-durability';
 import { createStructuredLogger } from '../infra/logger';
 import { getPerfMs } from '../infra/time';
-import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
-import { reportManagedChildFatal } from './managed-child-fatal-ipc';
+import { handleMeshBootstrapLoopError } from './mesh/mesh-bootstrap-fail-fast';
+import { reportManagedChildFatal } from './process/managed-child-fatal-ipc';
 import {
   advanceBootstrapProgress,
   beginBootstrapProgress,
   buildBootstrapProgressHealth,
   type BootstrapProgress,
   type BootstrapProgressHealth,
-} from './bootstrap-progress-watchdog';
-import { restoredRuntimeRouteRelocated } from './restored-gossip-route';
+} from './bootstrap/bootstrap-progress-watchdog';
+import { restoredRuntimeRouteRelocated } from './mesh/restored-gossip-route';
 import { readInheritedChildSecrets, resolveChildSecret } from '../infra/process/child-secrets';
-import { findMissingRpcContractCode } from './contract-readiness';
-import { readJurisdictionsFile } from './jurisdictions-file';
+import { findMissingRpcContractCode } from './bootstrap/contract-readiness';
+import { readJurisdictionsFile } from './jurisdiction/jurisdictions-file';
 import { getTokenIdsForJurisdiction } from '../account/utils';
 import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../api/server/health/redaction';
 import { requiresLocalNodeOperator } from '../api/server/control/node-http-access';
@@ -82,7 +82,7 @@ import {
   attachRuntimeAdapterTicker,
   forgetRuntimeAdapterClient,
 } from '../api/runtime-adapter/server';
-import { redactTokenBearingUrlForLog } from './runtime-import-log';
+import { redactTokenBearingUrlForLog } from './runtime/runtime-import-log';
 import { handleLendingStateRequest } from '../api/server/entities/lending';
 import { handleRuntimeActivityRequest } from '../api/server/health/activity';
 import { handleReserveFaucet } from '../api/server/faucet/reserve';
@@ -135,7 +135,7 @@ import {
   sleep,
   summarizeRuntimeQuiescence,
   waitUntil,
-} from './mesh-common';
+} from './mesh/mesh-common';
 import {
   requireJurisdictionBlockTimeMs,
   resetMeshJurisdictionsCache,
@@ -143,7 +143,7 @@ import {
   resolveMeshJurisdictionRpcBindings,
   resolveSecondaryJurisdictions,
   type ResolvedMeshJurisdictionConfig,
-} from './mesh-jurisdictions';
+} from './mesh/mesh-jurisdictions';
 import {
   createHubDirectRuntimeRoute,
   createHubRadapterMessageHandler,
@@ -151,7 +151,7 @@ import {
   type DirectEntityInputDebug,
   type DirectInputDebugState,
   type HubServerSocket,
-} from './hub-runtime-transport';
+} from './hub/hub-runtime-transport';
 
 type Args = {
   name: string;

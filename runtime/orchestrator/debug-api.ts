@@ -2,7 +2,7 @@ import { compareStableText, safeStringify } from '../protocol/serialization';
 import { maybeHandleRelayDebugRequest } from '../network/relay/debug-http';
 import type { RelayStore } from '../network/relay/store';
 import { buildKnownProfileBundle } from '../api/server/network/gossip-profiles';
-import { getDebugEntityEntries } from './public-discovery';
+import { getDebugEntityEntries } from './hub/public-discovery';
 import type { HubChild, MarketMakerChild } from './orchestrator-types';
 
 type OrchestratorDebugApiDeps = {

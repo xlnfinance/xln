@@ -10,8 +10,8 @@ import {
 import {
   parseRuntimeSecurityIncidentTelemetry,
   syncRuntimeSecurityTelemetry,
-} from '../orchestrator/runtime-security-telemetry';
-import { validateHubHealthPayload } from '../orchestrator/bootstrap-health-validation';
+} from '../orchestrator/health/runtime-security-telemetry';
+import { validateHubHealthPayload } from '../orchestrator/bootstrap/bootstrap-health-validation';
 
 const runtimeId = '0x1111111111111111111111111111111111111111';
 

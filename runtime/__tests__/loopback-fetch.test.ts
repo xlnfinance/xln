@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 
-import { fetchLoopback } from '../orchestrator/loopback-fetch';
+import { fetchLoopback } from '../orchestrator/server/loopback-fetch';
 
 const originalFetch = globalThis.fetch;
 

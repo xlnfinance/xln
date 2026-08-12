@@ -9,7 +9,7 @@ import {
   waitForCustodyRouteableState,
   waitForHttpReady,
   type ManagedChild,
-} from '../orchestrator/custody-bootstrap';
+} from '../orchestrator/bootstrap/custody-bootstrap';
 
 test('public daemon health waits for completed runtime boot without private health fields', () => {
   expect(isPublicDaemonHealthReady({

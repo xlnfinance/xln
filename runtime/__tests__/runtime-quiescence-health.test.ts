@@ -5,7 +5,7 @@ import {
   hasPairMutualCredit,
   isAccountWriteLaneIdle,
   summarizeRuntimeQuiescence,
-} from '../orchestrator/mesh-common';
+} from '../orchestrator/mesh/mesh-common';
 import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
 import type { AccountReplica } from '../types/account';
 import type { DeliverableEntityInput } from '../runtime/types';

@@ -15,7 +15,7 @@ import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from '.
 import {
   startCustodySupport,
   stopManagedChild,
-} from './custody-bootstrap';
+} from './bootstrap/custody-bootstrap';
 import {
   clearDebugTimeline,
   createRelayStore,
@@ -54,7 +54,7 @@ import {
   loadOrCreateOperatorToken,
   operatorPreflightResponse,
   ORCHESTRATOR_JSON_HEADERS,
-} from './operator-access';
+} from './hub/operator-access';
 import {
   resolveOrchestratorSocketType,
   type AggregatedHealth,
@@ -83,20 +83,20 @@ import {
   STARTUP_TIMEOUT_MS,
   parseArgs,
 } from './orchestrator-config';
-import { evaluateBootstrapProgressDeadline } from './bootstrap-progress-deadline';
-import { fetchLoopback } from './loopback-fetch';
-import { validateHubHealthPayload, validateHubInfoPayload } from './bootstrap-health-validation';
+import { evaluateBootstrapProgressDeadline } from './bootstrap/bootstrap-progress-deadline';
+import { fetchLoopback } from './server/loopback-fetch';
+import { validateHubHealthPayload, validateHubInfoPayload } from './bootstrap/bootstrap-health-validation';
 import {
   createManagedRuntimeLeaseManager,
   readManagedProcessTable,
   type ManagedProcessTableEntry,
-} from './managed-runtime-leases';
+} from './process/managed-runtime-leases';
 import {
   scheduleMarketMakerRecoverySpawn,
   shouldAbortMarketMakerSpawn,
-} from './mm-recovery-spawn';
+} from './market-maker/node/mm-recovery-spawn';
 import { buildPrometheusMetrics } from './prometheus';
-import { deriveResetHealthOk } from './health-model';
+import { deriveResetHealthOk } from './health/health-model';
 import {
   buildAggregatedBootstrapReserveHealth,
   buildAggregatedCustodyHealth,
@@ -107,15 +107,15 @@ import {
   collectBootstrapReserveEntities,
   collectManagedRelayClients,
   deriveAggregatedSystemStatus,
-} from './aggregated-health-projections';
+} from './health/aggregated-health-projections';
 import {
   buildAggregatedMarketMakerHealth,
   countMarketSnapshotOrderDepth,
   type MarketSnapshotOrderDepth,
-} from './market-maker-aggregated-health';
-import { buildPublicMarketMakerHealth } from './market-maker-public-health';
-import { buildPublicHubDiscoveryPayload } from './public-discovery';
-import { handleResetHttpRequest } from './reset-http';
+} from './market-maker/health/market-maker-aggregated-health';
+import { buildPublicMarketMakerHealth } from './market-maker/health/market-maker-public-health';
+import { buildPublicHubDiscoveryPayload } from './hub/public-discovery';
+import { handleResetHttpRequest } from './server/reset-http';
 import {
   deployRpc2JurisdictionStack,
   hasShardRpc2Jurisdiction,
@@ -127,62 +127,62 @@ import {
   syncCanonicalJurisdictionsFromShard,
   toPublicJurisdictionsPayload,
   type OrchestratorJurisdictionsConfig,
-} from './jurisdictions';
+} from './jurisdiction/jurisdictions';
 import { createOrchestratorProxyHandlers, resolveRpcProxyIndex } from './proxy';
-import { createHubApiRoutes } from './hub-api-routes';
+import { createHubApiRoutes } from './hub/hub-api-routes';
 import {
   findMissingRpcContractCode,
   type RpcContractAddresses,
-} from './contract-readiness';
+} from './bootstrap/contract-readiness';
 import { maybeHandleOrchestratorDebugApi } from './debug-api';
-import { resolveConfiguredRelayAudience } from './relay-audience';
-import { areHubChildrenReady } from './hub-mesh-readiness';
+import { resolveConfiguredRelayAudience } from './mesh/relay-audience';
+import { areHubChildrenReady } from './hub/hub-mesh-readiness';
 import {
   HUB_MESH_CREDIT_AMOUNT,
   deriveMarketMakerEntityId,
   type MarketMakerEntityJurisdictionConfig,
-} from './mesh-common';
+} from './mesh/mesh-common';
 import {
   requireJurisdictionBlockTimeMs,
   resolveMeshJurisdictionConfig,
   resolveSecondaryJurisdictions,
   type ResolvedMeshJurisdictionConfig,
-} from './mesh-jurisdictions';
-import { buildRuntimeImportLogLine } from './runtime-import-log';
+} from './mesh/mesh-jurisdictions';
+import { buildRuntimeImportLogLine } from './runtime/runtime-import-log';
 import {
   normalizeMarketMakerHealthPayload,
-} from './market-maker-health-payload';
-import { createMarketMakerChildPoller } from './market-maker-child-poll';
-import { createManagedRuntimeSecurityTelemetrySync } from './runtime-security-telemetry';
+} from './market-maker/health/market-maker-health-payload';
+import { createMarketMakerChildPoller } from './market-maker/health/market-maker-child-poll';
+import { createManagedRuntimeSecurityTelemetrySync } from './health/runtime-security-telemetry';
 import {
   createBootstrapTimelineTools,
   projectCurrentBootstrapTimelineParams,
-} from './bootstrap-timeline';
-import { createProcessHealthBuilder } from './process-health';
+} from './bootstrap/bootstrap-timeline';
+import { createProcessHealthBuilder } from './health/process-health';
 import {
   flushPrefixedLogChunk,
   pushChildLogLines,
   type PrefixLogState,
   writePrefixedLogChunk,
-} from './child-log-buffer';
+} from './process/child-log-buffer';
 import {
   evaluateHubBaselineDeadlines,
   type HubBaselineProgressState,
-} from './hub-baseline-progress';
-import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
-import { handleRuntimeImportHttpRequest } from './runtime-import-http';
-import { persistChildFailureReceipt, type ChildFailureReceipt } from './child-failure-diagnostics';
+} from './hub/hub-baseline-progress';
+import { resolveRuntimeImportReadiness } from './runtime/runtime-import-readiness';
+import { handleRuntimeImportHttpRequest } from './runtime/runtime-import-http';
+import { persistChildFailureReceipt, type ChildFailureReceipt } from './process/child-failure-diagnostics';
 import {
   attachManagedChildFatalIpc,
   type ManagedChildFatalReport,
-} from './managed-child-fatal-ipc';
+} from './process/managed-child-fatal-ipc';
 import {
   decideChildFailure,
   selectChildFailureReason,
   shouldCaptureUnexpectedChildExit,
   type ChildFailureDecision,
   type ChildFailureObservation,
-} from './child-recovery-policy';
+} from './process/child-recovery-policy';
 import {
   buildRuntimeHealthFailures,
   normalizeRuntimeFailureCode,
@@ -192,15 +192,15 @@ import {
   deriveMeshChildSeed,
   readMeshSeedOverrides,
   requireMeshRootSeed,
-} from './mesh-seeds';
+} from './mesh/mesh-seeds';
 import {
   createResetCoordinator,
   resolveActiveResetOptions,
   resolveHealthResetOptions,
   resolveResetCapabilityHealth,
   type OrchestratorResetOptions,
-} from './reset-coordinator';
-import { buildDiskSummary } from './disk-health';
+} from './process/reset-coordinator';
+import { buildDiskSummary } from './health/disk-health';
 
 const args = parseArgs();
 const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;

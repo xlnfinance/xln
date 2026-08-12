@@ -12,7 +12,12 @@ import type { JReplica } from '../types/jurisdiction-runtime';
 
 const readText = (path: string): string => {
   if (path !== 'runtime/orchestrator/mm-node.ts') return readFileSync(path, 'utf8');
-  return ['mm-node.ts', 'mm-node-core.ts', 'mm-node-health.ts', 'mm-node-run.ts']
+  return [
+    'mm-node.ts',
+    'market-maker/node/mm-node-core.ts',
+    'market-maker/node/mm-node-health.ts',
+    'market-maker/node/mm-node-run.ts',
+  ]
     .map(file => readFileSync(`runtime/orchestrator/${file}`, 'utf8'))
     .join('\n');
 };
@@ -97,7 +102,7 @@ for (const [path, markers] of [
     'return Boolean(left.jurisdictionRef && right.jurisdictionRef && left.jurisdictionRef === right.jurisdictionRef);',
     'compareStableText(left.context.jurisdictionRef, right.context.jurisdictionRef)',
   ]],
-  ['runtime/orchestrator/mesh-jurisdictions.ts', [
+  ['runtime/orchestrator/mesh/mesh-jurisdictions.ts', [
     'const exactMatch = entries.find((entry) => sameMeshRpc(entry.rpc, requestedRpc));',
     'entries.find(isPrimaryJurisdiction)',
   ]],
@@ -126,7 +131,7 @@ for (const [path, forbidden] of [
     'sameJurisdictionIdentityOrNameOnlyFallback',
     'sameJurisdictionRefOrNameFallback',
   ]],
-  ['runtime/orchestrator/mesh-jurisdictions.ts', [
+  ['runtime/orchestrator/mesh/mesh-jurisdictions.ts', [
     "map['arrakis']",
   ]],
   ['runtime/api/server/catalog/jurisdictions.ts', [

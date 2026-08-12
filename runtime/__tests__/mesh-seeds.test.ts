@@ -5,7 +5,7 @@ import {
   deriveMeshChildSeed,
   readMeshSeedOverrides,
   requireMeshRootSeed,
-} from '../orchestrator/mesh-seeds';
+} from '../orchestrator/mesh/mesh-seeds';
 
 describe('mesh operator seed derivation', () => {
   test('derives stable domain-separated child secrets without exposing the root', () => {

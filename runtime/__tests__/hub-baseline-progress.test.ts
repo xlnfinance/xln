@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildHubBaselineProgressSignature,
   evaluateHubBaselineDeadlines,
-} from '../orchestrator/hub-baseline-progress';
+} from '../orchestrator/hub/hub-baseline-progress';
 import type { HubHealthPayload } from '../orchestrator/orchestrator-types';
-import { validateHubHealthPayload } from '../orchestrator/bootstrap-health-validation';
+import { validateHubHealthPayload } from '../orchestrator/bootstrap/bootstrap-health-validation';
 
 const health = (overrides: Partial<HubHealthPayload> = {}): HubHealthPayload => ({
   height: 1,

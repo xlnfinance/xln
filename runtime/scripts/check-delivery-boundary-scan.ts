@@ -34,7 +34,12 @@ const readRuntimeOutputRoutingBoundary = (): string => {
 const readText = (path: string): string => {
   if (path === 'runtime/runtime/routing/output-routing.ts') return readRuntimeOutputRoutingBoundary();
   if (path === 'runtime/orchestrator/mm-node.ts') {
-    return ['mm-node.ts', 'mm-node-core.ts', 'mm-node-health.ts', 'mm-node-run.ts']
+    return [
+      'mm-node.ts',
+      'market-maker/node/mm-node-core.ts',
+      'market-maker/node/mm-node-health.ts',
+      'market-maker/node/mm-node-run.ts',
+    ]
       .map(file => readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8'))
       .join('\n');
   }
@@ -255,7 +260,7 @@ for (const [path, markers] of [
     'delivery: relayDelivery',
     'local-delivery-failed',
   ]],
-  ['runtime/orchestrator/hub-runtime-transport.ts', [
+  ['runtime/orchestrator/hub/hub-runtime-transport.ts', [
     'route.sendEntityInputsDelivery(',
     'targetRuntimeId,\n    envelope,\n    ingressTimestamp,',
   ]],

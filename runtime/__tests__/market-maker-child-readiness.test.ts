@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveMarketMakerChildReadiness } from '../orchestrator/market-maker-child-readiness';
+import { deriveMarketMakerChildReadiness } from '../orchestrator/market-maker/health/market-maker-child-readiness';
 
 const readyInput = {
   runtimeHalted: false,

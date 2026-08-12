@@ -3,7 +3,7 @@ import { normalizeLoopbackUrl } from '../network/p2p/loopback-url';
 import { readPositiveIntegerEnv } from '../config/environment';
 import { hasCliFlag, readCliOption } from '../config/cli';
 import type { Args } from './orchestrator-types';
-import { relayAudienceFromWebUrl } from './relay-audience';
+import { relayAudienceFromWebUrl } from './mesh/relay-audience';
 
 const argsRaw = process.argv.slice(2);
 

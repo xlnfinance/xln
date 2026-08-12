@@ -6,7 +6,7 @@ import {
   isOperatorRequest,
   loadOrCreateOperatorToken,
   operatorPreflightResponse,
-} from '../orchestrator/operator-access';
+} from '../orchestrator/hub/operator-access';
 
 const temporaryDirectories: string[] = [];
 

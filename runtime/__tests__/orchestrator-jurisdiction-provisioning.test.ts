@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { getLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';
 import { normalizeJurisdictionImportRequest } from '../runtime/jurisdiction/jurisdiction-import';
-import { findMissingRpcContractCode } from '../orchestrator/contract-readiness';
+import { findMissingRpcContractCode } from '../orchestrator/bootstrap/contract-readiness';
 import {
   assertDeterministicRpcStackAddresses,
   deployRpc2JurisdictionStack,
@@ -17,7 +17,7 @@ import {
   readShardJurisdictions,
   resetLocalAnvilChains,
   type OrchestratorJurisdictionsConfig,
-} from '../orchestrator/jurisdictions';
+} from '../orchestrator/jurisdiction/jurisdictions';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
 import { setScenarioStorageEnabled } from '../scenarios/harness/helpers';
 import { stopProcess, type ManagedChildProcess } from '../scripts/e2e-managed-process';

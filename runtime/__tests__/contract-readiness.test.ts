@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import {
   findMissingRpcContractCode,
   type RpcContractAddresses,
-} from '../orchestrator/contract-readiness';
+} from '../orchestrator/bootstrap/contract-readiness';
 
 const addresses: RpcContractAddresses = {
   account: `0x${'11'.repeat(20)}`,

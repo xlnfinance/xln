@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChildProcess } from 'node:child_process';
-import { createMarketMakerChildPoller } from '../orchestrator/market-maker-child-poll';
+import { createMarketMakerChildPoller } from '../orchestrator/market-maker/health/market-maker-child-poll';
 import type { MarketMakerChild, MarketMakerHealthPayload } from '../orchestrator/orchestrator-types';
 
 const createDeferred = <T>() => {

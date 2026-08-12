@@ -4,7 +4,7 @@ import {
   resolveActiveResetOptions,
   resolveHealthResetOptions,
   resolveResetCapabilityHealth,
-} from '../orchestrator/reset-coordinator';
+} from '../orchestrator/process/reset-coordinator';
 
 const deferred = (): { promise: Promise<void>; resolve: () => void } => {
   let resolve!: () => void;

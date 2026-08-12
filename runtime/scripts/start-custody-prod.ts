@@ -14,7 +14,7 @@ import {
   waitForHttpReady,
   waitForCustodyRouteableState,
   type ManagedChild,
-} from '../orchestrator/custody-bootstrap';
+} from '../orchestrator/bootstrap/custody-bootstrap';
 
 type MainHealthPayload = {
   hubs?: Array<{ entityId?: string }>;

@@ -3,7 +3,7 @@ import {
   buildRuntimeImportLogLine,
   redactTokenBearingUrlForLog,
   type RuntimeImportLogManifest,
-} from '../orchestrator/runtime-import-log';
+} from '../orchestrator/runtime/runtime-import-log';
 
 test('runtime import stdout log omits token-bearing import URL and capability tokens', () => {
   const manifest = {

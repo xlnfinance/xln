@@ -5,12 +5,12 @@ import {
   marketMakerBootstrapProgressSignature,
   resolveMarketMakerReadySnapshotAction,
   runtimeBacklogBlocksMarketMakerQuotes,
-} from '../orchestrator/mm-bootstrap-progress';
+} from '../orchestrator/market-maker/node/mm-bootstrap-progress';
 import {
   evaluateBootstrapProgressDeadline,
   isBootstrapWorkWithinDeadline,
   updateBootstrapWorkStartedAt,
-} from '../orchestrator/bootstrap-progress-deadline';
+} from '../orchestrator/bootstrap/bootstrap-progress-deadline';
 import { computeCanonicalRuntimeStateHash } from '../storage/canonical-hash';
 import { computeStorageFrameHash } from '../storage/hashes';
 import type { RuntimeFrame } from '../storage/types';

@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readJurisdictionsFile } from '../orchestrator/jurisdictions-file';
+import { readJurisdictionsFile } from '../orchestrator/jurisdiction/jurisdictions-file';
 import { isActiveJurisdictionStatus } from '../jurisdiction/adapter/core/config';
 
 const tempRoots: string[] = [];

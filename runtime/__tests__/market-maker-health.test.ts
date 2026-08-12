@@ -25,7 +25,7 @@ import {
   type MarketMakerHealth,
   type MarketMakerTokenIdsByContext,
 } from '../orchestrator/mm-node';
-import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../orchestrator/mesh-common';
+import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../orchestrator/mesh/mesh-common';
 import { createEmptyEnv } from '../runtime';
 import type { AccountReplica, SwapOffer } from '../types/account';
 import type { EntityReplica } from '../entity/types';

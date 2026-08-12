@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildPublicHubDiscoveryPayload, getDebugEntityEntries } from '../orchestrator/public-discovery';
+import { buildPublicHubDiscoveryPayload, getDebugEntityEntries } from '../orchestrator/hub/public-discovery';
 import type { HubChild } from '../orchestrator/orchestrator-types';
 import { createRelayStore } from '../network/relay/store';
 
