@@ -4,15 +4,15 @@ import { createEventDispatcher } from "svelte";
 import { onDestroy, onMount } from "svelte";
 import type { ComponentType } from "svelte";
 import { MaxUint256, Wallet, hexlify, isAddress, parseEther, ZeroAddress } from "ethers";
-import type { AccountReplica, EntityTx, RuntimeReplica, EnvSnapshot, JAdapter, JBatch, Profile, RoutedEntityInput, RuntimeAdapterViewFrame, RuntimeInput, XLNModule } from "@xln/runtime/api/public/runtime-module";
+import type { AccountReplica, EntityTx, RuntimeReplica, EnvSnapshot, JAdapter, Profile, RoutedEntityInput, RuntimeAdapterViewFrame, RuntimeInput, XLNModule } from "@xln/runtime/api/public/runtime-module";
 import { buildDebtEnforcementRuntimeInputFromProjection } from "@xln/runtime/runtime/transactions/debt-enforcement-input";
 import { getDraftBatchReserveDelta } from "@xln/runtime/jurisdiction/machine/batch";
 import type { Tab, EntityReplica } from "$lib/types/ui";
 import { getXLN, resolveConfiguredApiBase } from "../../../../stores/xlnStore";
 import { settings } from "../../../../stores/settingsStore";
 import { runtimes } from "../../../../stores/runtimeStore";
-import { activeRuntime, vaultOperations } from "$lib/stores/vault/vaultStore";
-import { entityPositions, submitEntityInputs, submitRuntimeInput, xlnFunctions } from "../../../../stores/xlnStore";
+import { activeRuntime } from "$lib/stores/vault/vaultStore";
+import { submitEntityInputs, submitRuntimeInput, xlnFunctions } from "../../../../stores/xlnStore";
 import { recordRuntimeIngressReceipt } from "../../../../stores/commands/runtimeCommandBus";
 import { runtimeControllerHandle } from "../../../../stores/runtimeControllerStore";
 import { toasts } from "../../../../stores/ui/toastStore";
@@ -21,10 +21,9 @@ import { getOpenAccountRebalancePolicyData } from "$lib/utils/onboarding/onboard
 import { prewarmCounterpartyProfiles } from "$lib/utils/runtime/p2pPrefetch";
 import { requireSignerIdForEntity } from "$lib/utils/identity/entityReplica";
 import { registerDebugSurface } from "$lib/utils/runtime/debugSurface";
-import { getEntityDisplayName, getGossipProfiles, resolveEntityName } from "$lib/utils/identity/entityNaming";
+import { getGossipProfiles } from "$lib/utils/identity/entityNaming";
 import { entityAvatar } from "$lib/utils/identity/avatar";
 import { getJurisdictionBadgeInfo } from "$lib/utils/identity/jurisdictionBadge";
-import { formatEntityId } from "$lib/utils/format";
 import { resetEverything } from "$lib/utils/control/resetEverything";
 import { Landmark, Settings, Users } from "lucide-svelte";
 import AccountWorkspaceView from "../AccountWorkspaceView.svelte";
@@ -38,19 +37,18 @@ import EntitySelectionEmptyState from "./EntitySelectionEmptyState.svelte";
 import EntitySettingsProjectionPanel from "./EntitySettingsProjectionPanel.svelte";
 import { buildEntityConsensusSettingsView } from "../entity-consensus-settings";
 import { importJMachineViaRuntime, type JMachineCreateDetail } from "$lib/components/Jurisdiction/import-jmachine-runtime";
-import ContextSwitcher from "./ContextSwitcher.svelte";
 import { OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS, faucetPendingKey, type FaucetApiResult, type PendingReserveFaucet, readJsonResponse, reconcilePendingReserveFaucets } from "../../account/account-faucet";
 import { buildMoveArrowPath, buildMoveRouteSteps, canAddMoveRouteToDraft, getMovePrimaryActionLabel, getMoveRouteKey, isImmediateMoveExecutionRoute, isMoveRouteSupported, moveNeedsExternalRecipient, moveNeedsReserveRecipient, routeRequiresExplicitExternalAllowance, MOVE_ENDPOINT_LABEL, MOVE_ENDPOINTS, type MoveEndpoint } from "../../move-routes";
 import { buildMoveAllowanceContextSignature, buildMoveAllowanceStatusLabel, getMoveRequiredAllowanceAmount, isMoveAllowanceSatisfied } from "../../move/move-allowance";
 import { choosePreferredMoveAssetSymbol, computeMoveSourceAvailableBalanceForEndpoint, getMoveMaxAmountForEndpoint, getPreferredMoveSourceAccountId } from "../../move/move-balance";
 import { getMoveValidationErrorForContext, type MoveValidationMode } from "../../move/move-validation";
 import { createMoveVisualController } from "../../move/move-visual-controller";
-import type { AssetLedgerRow, AssetLedgerTotals } from "../../asset-ledger";
-import { buildEntityPanelView, findLocalAccountByCounterparty, findReplicaForEntityTab, getActiveJurisdictionName, getCurrentEntityJurisdictionName, getRuntimeEnv, getRuntimeId, isSameJurisdictionEntity, isSameJurisdictionEntityInReplicas, isAccountLeftPerspective, isHubProfile, materializeAccountView, requireRuntimeEnv } from "../../core/entity-panel-model";
+import type { AssetLedgerRow } from "../../asset-ledger";
+import { buildEntityPanelView, findLocalAccountByCounterparty, findReplicaForEntityTab, getCurrentEntityJurisdictionName, getRuntimeEnv, getRuntimeId, isSameJurisdictionEntityInReplicas, isAccountLeftPerspective, materializeAccountView, requireRuntimeEnv } from "../../core/entity-panel-model";
 import { formatAddress, isPlaceholderEntityName, shortHash } from "../entity-panel-display";
 import { buildConfigureTokenOptions, buildMoveEntityOptions, buildMoveHubEntityOptions, buildMoveSourceAccountOptions, buildOpenAccountEntityOptions, isFullEntityId, normalizeWorkspaceAccountId, resolveConfigureTokenId, resolveMoveTargetHubEntityId } from "../entity-panel-options";
-import { type ExternalAllowanceRead, type ExternalWalletReadResult, type ExternalWalletSnapshotSource } from "../../assets/external-wallet-snapshot";
-import { buildExternalWalletStateSyncSignature, buildOnchainReserves, createExternalTokenCatalogLoader, fetchExternalTokenCatalog, isExternalWalletSnapshotTransportFailure, readExternalWalletState, readObservedExternalAllowance, requestExternalWalletSnapshot, resolveExternalWalletSpender } from "../../external-wallet-reader";
+import { type ExternalWalletReadResult, type ExternalWalletSnapshotSource } from "../../assets/external-wallet-snapshot";
+import { buildExternalWalletStateSyncSignature, buildOnchainReserves, createExternalTokenCatalogLoader, fetchExternalTokenCatalog, isExternalWalletSnapshotTransportFailure, readExternalWalletState, requestExternalWalletSnapshot, resolveExternalWalletSpender } from "../../external-wallet-reader";
 import { buildEntityPanelHashRouteFromState, canonicalizeEntityPanelRoute, getLocationHashParams, getLocationHashRoute, resolveEntityPanelDeepLinkFromLocation, type AccountWorkspaceTab, type AssetWorkspaceTab, type ConfigureWorkspaceTab, type SettingsSubview, type ViewTab } from "../entity-panel-routing";
 import { openDisputedAccountNavigation, returnToAccountsWorkspace, selectAccountNavigation, selectTopLevelTabNavigation, type AccountWorkspaceNavigationPatch } from "../../account/account-workspace-navigation";
 import { buildEntityActivityAccounts, buildEntityActivityRows, filterEntityActivityRows } from "../../activity/entity-activity";
@@ -59,13 +57,12 @@ import { emptyEntityWorkspaceEmbeddedRuntimeContext, type EntityWorkspaceEmbedde
 import { buildHubDiscoveryProjection, buildHubDiscoveryRemoteHubsFromRuntimes, buildDirectOpenAccountRuntimeInput, canSubmitHubOpenAccount, emptyHubDiscoveryProjection, getHubOpenAccountPermissionError, type HubDiscoveryProjection } from "../../onboarding/hub-discovery-profile";
 import { buildPaymentPanelView, buildPaymentPanelViewFromRuntimeView, emptyPaymentPanelView, type PaymentPanelView } from "../../payments/payment-panel-view";
 import { buildSwapPanelRuntimeView, type SwapPanelRuntimeView } from "../../swap/swap-panel-helpers";
-import { buildAccountSpendableByToken, buildAccountPortfolioData, buildAssetLedger, createEntityAssetValueFormatters, formatTokenInputAmount, parsePositiveAssetAmount, parseTokenAmountInput } from "../../assets/entity-asset-values";
+import { buildAccountSpendableByToken, buildAccountPortfolioData, buildAssetLedger, createEntityAssetValueFormatters, parsePositiveAssetAmount, parseTokenAmountInput } from "../../assets/entity-asset-values";
 import {
   choosePreferredAssetSymbol,
   compareTokenSymbols,
   findAssetLedgerRowBySymbol,
   findExternalTokenBySymbol,
-  getExternalTokenIdentityKey,
   getFaucetReserveTokenMeta,
   isReserveTransferToken,
   requireExternalTokenBySymbol,

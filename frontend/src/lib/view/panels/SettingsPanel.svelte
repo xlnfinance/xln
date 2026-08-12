@@ -7,7 +7,7 @@
    * Copyright (C) 2025 XLN Finance
    */
 
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
   import { setFrontendVerboseLogging } from '../utils/frontendLogger';

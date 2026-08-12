@@ -9,7 +9,7 @@
   import { isTronChainId, type ConsensusConfig } from '@xln/runtime/api/public/runtime-module';
   import { getXLN, registerActiveNumberedEntities, submitRuntimeInput } from '../../../stores/xlnStore';
   import { errorLog } from '../../../stores/errorLogStore';
-  import { activeRuntime, vaultOperations } from '../../../stores/vault/vaultStore';
+  import { activeRuntime } from '../../../stores/vault/vaultStore';
   import { tabOperations } from '../../../stores/ui/tabStore';
   import { generateLazyEntityIdPreview } from '../../../utils/identity/lazyEntityId';
   import { Plus, X, Download, Upload, Shield, Hash, Tag, Zap } from 'lucide-svelte';

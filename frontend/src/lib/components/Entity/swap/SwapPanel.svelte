@@ -1,8 +1,8 @@
 <script lang="ts">
 import { tick } from 'svelte';
-import type { AccountReplica, EntityReplica, Tab } from '$lib/types/ui';
+import type { EntityReplica, Tab } from '$lib/types/ui';
 import { writable } from 'svelte/store';
-import type { BookState, Profile, RuntimeReplica, SwapAccountCapacityView, SwapBookEntry, SwapInboundCapacityPlan } from '@xln/runtime/api/public/runtime-module';
+import type { BookState, Profile, RuntimeReplica, SwapBookEntry } from '@xln/runtime/api/public/runtime-module';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
@@ -18,7 +18,6 @@ import { errorLog } from '../../../stores/errorLogStore';
 import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
 import { unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
 import { prewarmCounterpartyProfiles } from '$lib/utils/runtime/p2pPrefetch';
-import { amountToUsd } from '$lib/utils/assetPricing';
 import { requireTokenDecimals } from '../token-metadata';
 import { buildEntityPanelView } from '../core/entity-panel-model';
 import { formatEntityId } from '$lib/utils/format';

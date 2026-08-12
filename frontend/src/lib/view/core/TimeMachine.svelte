@@ -176,9 +176,7 @@
     Pause,
     ChevronRight,
     SkipForward,
-    Repeat,
     Scissors,
-    ChevronDown
   } from 'lucide-svelte';
 
   // Playback state

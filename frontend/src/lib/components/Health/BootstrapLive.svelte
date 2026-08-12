@@ -5,7 +5,6 @@
     CheckCircle2,
     CircleGauge,
     Coins,
-    Database,
     GitBranch,
     HardDrive,
     Landmark,
@@ -17,7 +16,6 @@
     ShieldCheck,
     Store,
     WalletCards,
-    Wifi,
   } from 'lucide-svelte';
   import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/runtime/qa/severity';
   import { QA } from '@xln/runtime/config/constants';

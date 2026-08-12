@@ -4,7 +4,6 @@
   import { ScanLine, X, Check } from 'lucide-svelte';
   import jsQR from 'jsqr';
   import type {
-    AccountState,
     RoutedEntityInput as EntityInputPayload,
     RuntimeReplica,
     PaymentRoute,
@@ -17,7 +16,6 @@
     sendRuntimeDebugEvent,
     xlnFunctions,
   } from '../../../stores/xlnStore';
-  import { routePreview } from '../../../stores/network/routePreviewStore';
   import { errorLog } from '../../../stores/errorLogStore';
   import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
   import { toasts } from '$lib/stores/ui/toastStore';

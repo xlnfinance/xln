@@ -79,8 +79,6 @@ import type {
   XLNModule,
   RuntimeReplica,
   EnvSnapshot,
-  EntityId,
-  ReplicaKey,
   RoutedEntityInput,
   RuntimeInput,
   RuntimeAdapter,
@@ -94,7 +92,6 @@ import type {
   NumberedRegistrationCommandResult,
   EntityDisplayInfo,
   FinancialConstants,
-  SwapBookEntry,
   CrossJurisdictionSwapRoute,
   Profile as GossipProfile,
 } from '@xln/runtime/api/public/runtime-module';

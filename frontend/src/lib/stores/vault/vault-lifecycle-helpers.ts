@@ -40,7 +40,7 @@ export const runtimeQuiesceWorkSummary = (env: RuntimeReplica) => ({
   pendingOutputs: env.pendingOutputs?.length ?? 0,
   networkInbox: env.networkInbox?.length ?? 0,
   pendingNetworkOutputs: env.pendingNetworkOutputs?.length ?? 0,
-  jurisdictions: Array.from(env.state.jReplicas.entries(), ([name, replica]) => ({
+  jurisdictions: Array.from(env.state.jReplicas.keys(), (name) => ({
     name,
     mode: env.infrastructure?.liveJAdapters?.get(name)?.mode ?? null,
     watching: env.infrastructure?.liveJAdapters?.get(name)?.isWatching?.() ?? false,

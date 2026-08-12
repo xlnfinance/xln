@@ -2,7 +2,6 @@ import type {
   RuntimeAdapter,
   RuntimeAdapterGraphFrame,
   RuntimeAdapterTimelineIndexPage,
-  RuntimeActivityEvent,
 } from '@xln/runtime/api/public/runtime-module';
 import { RemoteRuntimeAdapter } from '../../../../../runtime/api/runtime-adapter/remote';
 import type { Runtime } from '$lib/stores/runtimeStore';

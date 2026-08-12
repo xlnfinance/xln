@@ -1,6 +1,5 @@
 import type {
   AccountReplica,
-  AccountState,
   EntityReplica,
   PaymentRoute,
   Profile as GossipProfile,

@@ -5,7 +5,6 @@
   import ComparativeChart from './ComparativeChart.svelte';
   import InvariantTicker from '../Home/InvariantTicker.svelte';
   import Collapsible from './Collapsible.svelte';
-  import LanguageSwitcher from '../LanguageSwitcher.svelte';
   import { content, type Content, type ContentLang } from './content';
   import { locale } from '$lib/i18n';
 

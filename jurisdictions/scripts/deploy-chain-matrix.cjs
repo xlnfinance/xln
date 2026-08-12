@@ -140,6 +140,39 @@ const rpc = async (url, method, params = [], extraHeaders = {}) => {
   return payload.result;
 };
 
+const evmStablecoinFor = (chain, env = process.env) => {
+  const fromProfile = typeof chain.usdtAddress === 'string' ? chain.usdtAddress.trim() : '';
+  const fromEnvironment = chain.usdtEnv ? String(env[chain.usdtEnv] || '').trim() : '';
+  const address = fromProfile || fromEnvironment;
+  if (!address) {
+    if (chain.id === 'ethereum-sepolia') return { address: '', deployTestStablecoin: true };
+    throw new Error(`EVM_STABLECOIN_ADDRESS_REQUIRED:${chain.id}`);
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address) || /^0x0{40}$/i.test(address)) {
+    throw new Error(`EVM_STABLECOIN_ADDRESS_INVALID:${chain.id}:${address}`);
+  }
+  return { address, deployTestStablecoin: false };
+};
+
+const preflightEvmStablecoin = async (chain, url, stablecoin, rpcCall = rpc) => {
+  if (stablecoin.deployTestStablecoin) return;
+  const code = await rpcCall(url, 'eth_getCode', [stablecoin.address, 'latest']);
+  if (typeof code !== 'string' || !/^0x[0-9a-fA-F]+$/.test(code) || code === '0x') {
+    throw new Error(`EVM_STABLECOIN_CODE_MISSING:${chain.id}:${stablecoin.address}`);
+  }
+  const encodedDecimals = await rpcCall(url, 'eth_call', [{
+    to: stablecoin.address,
+    data: '0x313ce567',
+  }, 'latest']);
+  if (typeof encodedDecimals !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(encodedDecimals)) {
+    throw new Error(`EVM_STABLECOIN_DECIMALS_RESPONSE_INVALID:${chain.id}:${stablecoin.address}`);
+  }
+  const decimals = Number(BigInt(encodedDecimals));
+  if (decimals !== 6) {
+    throw new Error(`EVM_STABLECOIN_DECIMALS_MISMATCH:${chain.id}:expected=6:actual=${decimals}`);
+  }
+};
+
 const preflightChain = async (chain) => {
   const url = chain.kind === 'tron' ? jsonRpcUrlFor(chain) : rpcUrlFor(chain);
   const chainIdHex = await rpc(url, 'eth_chainId', [], chain.kind === 'tron' ? tronGridHeaders() : {});
@@ -165,7 +198,9 @@ const run = (command, args, options = {}) => {
 };
 
 const deployEvm = async (chain, options) => {
+  const stablecoin = evmStablecoinFor(chain);
   const preflight = await preflightChain(chain);
+  await preflightEvmStablecoin(chain, preflight.url, stablecoin);
   if (options.dryRun) {
     return { chain, preflight, dryRun: true };
   }
@@ -178,8 +213,8 @@ const deployEvm = async (chain, options) => {
   run('bunx', ['--bun', 'hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', chain.hardhatNetwork], {
     env: {
       XLN_DEPLOY_OUTPUT: outputPath,
-      XLN_STABLECOIN_ADDRESS: String(chain.usdtEnv ? process.env[chain.usdtEnv] || '' : ''),
-      XLN_DEPLOY_TEST_STABLECOIN: chain.id === 'ethereum-sepolia' && !process.env[chain.usdtEnv] ? '1' : '0',
+      XLN_STABLECOIN_ADDRESS: stablecoin.address,
+      XLN_DEPLOY_TEST_STABLECOIN: stablecoin.deployTestStablecoin ? '1' : '0',
     },
   });
   const deployed = JSON.parse(readFileSync(outputPath, 'utf8'));
@@ -532,7 +567,15 @@ const main = async () => {
   writeDeploymentOutputs(options.profile, results, options.writeJurisdictions);
 };
 
-main().catch((error) => {
-  console.error(error?.stack || error?.message || error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error?.stack || error?.message || error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  evmStablecoinFor,
+  preflightEvmStablecoin,
+  profiles,
+};

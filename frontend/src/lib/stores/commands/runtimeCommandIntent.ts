@@ -11,7 +11,6 @@ import {
   normalizeRuntimeId,
   normalizeRuntimeServerFingerprint,
   type RemoteRuntimeCommandIntent,
-  type RemoteRuntimeCommandIntentStatus,
 } from './runtimeCommandIntentCodec';
 import {
   addProtectedRemoteRuntimeCommandIntent,

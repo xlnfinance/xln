@@ -11,7 +11,6 @@ import type {
   XLNModule,
 } from '@xln/runtime/api/public/runtime-module';
 import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath } from 'ethers';
-import { get } from 'svelte/store';
 import {
   redactVaultRuntimeForPersistence,
   type ProtectedVaultSecrets,
@@ -19,7 +18,6 @@ import {
 } from '../../security/vaultProtection';
 import { unwrapLiveRuntimeEnv } from '../../utils/runtime/liveRuntimeEnv';
 import { installRuntimeCommandJournalKeys } from '../commands/runtimeCommandJournalKeyring';
-import { runtimes } from '../runtimeStore';
 import { getXLN } from '../xlnStore';
 
 const recoveryTowerInfoCache = new Map<string, { fetchedAt: number; info: TowerServerInfo }>();

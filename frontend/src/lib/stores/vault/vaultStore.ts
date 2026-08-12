@@ -3,15 +3,11 @@ import { derived, get, writable } from 'svelte/store';
 import { Wallet } from 'ethers';
 
 import type {
-  EncryptedRuntimeRecoveryBundleV1,
   RuntimeReplica,
-  JurisdictionConfig,
   PersistedFrameJournal,
   RuntimeInput,
   RuntimeRecoveryBundleV1,
   TowerAppointmentV1,
-  TowerCounterDisputeRemedy,
-  TowerLastResortPayloadV1,
   TowerReceiptV1,
   XLNModule,
 } from '@xln/runtime/api/public/runtime-module';
@@ -101,7 +97,6 @@ import {
   findJReplicaByName,
   getConfiguredRecoveryTowers,
   getEntityReplicaJurisdictionName,
-  getJReplicaContractAddress,
   getJReplicaJurisdictionName,
   getReplayMeta,
   getRuntimeP2PHandle,
@@ -122,12 +117,7 @@ import {
   summarizeRuntimeRecoveryTowerFailure,
   summarizeRuntimeRecoveryTowerReceipt,
   type CreateRuntimeOptions,
-  type FaucetResult,
-  type HealthMachine,
-  type HealthPayload,
   type ImportedJMachineConfig,
-  type JurisdictionsPayload,
-  type RecoveryTowerConfig,
   type Runtime,
   type RuntimeRecoveryCandidate,
   type RuntimeRecoveryConfig,
@@ -139,15 +129,12 @@ import {
 } from './vault-recovery';
 import { buildDelayedLastResortAppointmentsForTower } from './vault-watchtower';
 import {
-  summarizeHealth,
   resolveJurisdictionChainId,
   fetchJurisdictions,
   fundSignerWalletViaFaucet,
-  fundRuntimeSignersInBrowserVM,
 } from './vault-bootstrap';
 import {
   getRuntimeFatalDiagnostics,
-  runtimeInputWorkSummary,
   runtimeQuiesceWorkSummary,
 } from './vault-lifecycle-helpers';
 export { buildDelayedLastResortAppointmentsForTower } from './vault-watchtower';

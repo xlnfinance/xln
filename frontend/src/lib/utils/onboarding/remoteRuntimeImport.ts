@@ -44,13 +44,6 @@ export type StoredRemoteRuntimeImportEntry = RemoteRuntimeImportEntry & {
   hubEntities?: RemoteRuntimeHubSummary[];
 };
 
-export type RemoteRuntimeImportManifest = {
-  v: 1;
-  entries: RemoteRuntimeImportEntry[];
-  issuedAt?: number;
-  expiresAt?: number;
-};
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 

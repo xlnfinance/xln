@@ -8,7 +8,7 @@
 
 import type { EnvSnapshot, RuntimeTx } from '@xln/runtime/runtime/types';
 import type { EntityInput } from '@xln/runtime/entity/types';
-import type { FrameLogEntry, LogCategory, LogLevel } from '@xln/runtime/types/logging';
+import type { FrameLogEntry } from '@xln/runtime/types/logging';
 
 // Re-export commonly used backend types for convenience
 export type {
@@ -165,52 +165,13 @@ export interface TimeState {
 }
 
 // Entity formation forms
-export interface EntityFormData {
-  entityType: 'lazy' | 'numbered' | 'named';
-  entityName: string;
-  jurisdiction: string;
-  validators: ValidatorData[];
-  threshold: number;
-}
-
-export interface ValidatorData {
-  name: string;
-  weight: number;
-}
-
 // Jurisdiction UI display
-export interface JurisdictionStatus {
-  port: number;
-  name: string;
-  connected: boolean;
-  chainId?: number;
-  blockNumber?: number;
-  contractAddress?: string;
-  nextEntityNumber?: number;
-  entities: EntityInfo[];
-  lastUpdate: Date;
-}
-
-export interface EntityInfo {
-  id: string;
-  name: string;
-  type: 'lazy' | 'numbered' | 'named';
-  boardHash: string;
-}
-
 // =============================================================================
 // STRUCTURED LOGGING SYSTEM
 // =============================================================================
 // Core log types are imported from their backend owner above.
 
 /** Log filter configuration (frontend-only) */
-export interface LogFilter {
-  levels: Set<LogLevel>;
-  categories: Set<LogCategory>;
-  entityId?: string; // Filter to specific entity
-  searchText?: string; // Free-text search
-}
-
 // Server frame wrapper for transaction history UI
 export interface RuntimeFrame {
   frameIndex: number;
@@ -225,10 +186,3 @@ export interface RuntimeFrame {
 }
 
 // Banking transaction display
-export interface BankingTransaction {
-  type: 'input' | 'output' | 'import';
-  icon: string;
-  primaryInfo: string;
-  secondaryInfo: string;
-  amount: string;
-}

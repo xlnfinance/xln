@@ -258,7 +258,6 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.71.2",
     "@ethereumjs/block": "^10.1.2",
     "@ethereumjs/common": "^10.1.2",
     "@ethereumjs/mpt": "^10.1.2",

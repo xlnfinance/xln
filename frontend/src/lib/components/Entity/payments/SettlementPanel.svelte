@@ -29,7 +29,6 @@
   type RuntimeEnv = RuntimeReplica;
   type JBatchState = NonNullable<EntityState['jBatchState']>;
   type BatchShape = JBatchState['batch'];
-  type FeeOverrides = { gasBumpBps?: number; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string };
   type PendingSettleEntityTx = Extract<EntityTx, { type: 'r2r' }>;
   type SettlementLike = {
     leftEntity?: unknown;

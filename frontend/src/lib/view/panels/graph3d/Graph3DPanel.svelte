@@ -5,7 +5,7 @@ import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { panelBridge } from "../../utils/panelBridge";
 import { PerformanceMonitor, type PerfMetrics } from "../../utils/perfMonitor";
-import { getXLN, submitRuntimeInput, entityPositions, type RelativeEntityPosition } from "$lib/stores/xlnStore";
+import { getXLN, submitRuntimeInput, entityPositions } from "$lib/stores/xlnStore";
 import { requireTokenDecimals } from "$lib/components/Entity/token-metadata";
 import Graph3DViewport from "../../components/Graph3DViewport.svelte";
 import { compareStableText } from "$lib/utils/stableSort";

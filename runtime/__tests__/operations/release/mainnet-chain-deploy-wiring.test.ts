@@ -1,8 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 
 const repoRoot = process.cwd();
+const require = createRequire(import.meta.url);
+const chainMatrix = require('../../../../jurisdictions/scripts/deploy-chain-matrix.cjs') as {
+  evmStablecoinFor(chain: Record<string, unknown>, env?: Record<string, string | undefined>): {
+    address: string;
+    deployTestStablecoin: boolean;
+  };
+  preflightEvmStablecoin(
+    chain: Record<string, unknown>,
+    url: string,
+    stablecoin: { address: string; deployTestStablecoin: boolean },
+    rpcCall: (url: string, method: string, params: unknown[]) => Promise<unknown>,
+  ): Promise<void>;
+  profiles: { mainnet: { ethereum: Record<string, unknown> } };
+};
 const readRpcAdapterSource = (): string => [
   'chain-ids.ts',
   'rpc-public.ts',
@@ -34,6 +49,47 @@ describe('mainnet chain deployment wiring', () => {
     expect(script).toContain('STABLECOIN_DECIMALS_MISMATCH');
   });
 
+  test('mainnet stablecoin is validated before the first deployment command', async () => {
+    const script = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-chain-matrix.cjs'), 'utf8');
+    const chain = chainMatrix.profiles.mainnet.ethereum;
+    const stablecoin = chainMatrix.evmStablecoinFor(chain, {});
+    expect(stablecoin).toEqual({
+      address: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+      deployTestStablecoin: false,
+    });
+
+    const calls: Array<{ method: string; params: unknown[] }> = [];
+    await chainMatrix.preflightEvmStablecoin(chain, 'https://rpc.invalid', stablecoin, async (_url, method, params) => {
+      calls.push({ method, params });
+      if (method === 'eth_getCode') return '0x6000';
+      if (method === 'eth_call') return `0x${'6'.padStart(64, '0')}`;
+      throw new Error(`unexpected method ${method}`);
+    });
+    expect(calls).toEqual([
+      { method: 'eth_getCode', params: [stablecoin.address, 'latest'] },
+      { method: 'eth_call', params: [{ to: stablecoin.address, data: '0x313ce567' }, 'latest'] },
+    ]);
+    expect(script.indexOf('await preflightEvmStablecoin(chain, preflight.url, stablecoin);'))
+      .toBeLessThan(script.indexOf("run('bunx', ['--bun', 'hardhat', 'compile'])"));
+    expect(script).toContain('XLN_STABLECOIN_ADDRESS: stablecoin.address');
+
+    const missingCodeCalls: string[] = [];
+    await expect(chainMatrix.preflightEvmStablecoin(
+      chain,
+      'https://rpc.invalid',
+      stablecoin,
+      async (_url, method) => {
+        missingCodeCalls.push(method);
+        return '0x';
+      },
+    )).rejects.toThrow(`EVM_STABLECOIN_CODE_MISSING:ethereum-mainnet:${stablecoin.address}`);
+    expect(missingCodeCalls).toEqual(['eth_getCode']);
+
+    const invalid = { ...chain, usdtAddress: 'not-an-address' };
+    expect(() => chainMatrix.evmStablecoinFor(invalid, {}))
+      .toThrow('EVM_STABLECOIN_ADDRESS_INVALID:ethereum-mainnet:not-an-address');
+  });
+
   test('EVM deployment evidence retains every linked contract receipt and watcher start block', () => {
     const stack = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-stack.cjs'), 'utf8');
     const matrix = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-chain-matrix.cjs'), 'utf8');
@@ -45,7 +101,7 @@ describe('mainnet chain deployment wiring', () => {
     expect(stack).toContain('STABLECOIN_TOKEN_ID_MISMATCH');
     expect(stack).toContain('registeredTokens:');
     expect(matrix).toContain('result.evmContracts ? { evmContracts: result.evmContracts }');
-    expect(matrix).toContain("XLN_DEPLOY_TEST_STABLECOIN: chain.id === 'ethereum-sepolia'");
+    expect(matrix).toContain("XLN_DEPLOY_TEST_STABLECOIN: stablecoin.deployTestStablecoin ? '1' : '0'");
     expect(matrix).toContain('...existingDeployments');
     expect(matrix).toContain("run('bunx', ['--bun', 'hardhat', 'compile'])");
     expect(matrix).toContain("run('bunx', ['--bun', 'hardhat', 'run'");

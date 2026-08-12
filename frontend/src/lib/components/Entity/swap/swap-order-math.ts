@@ -13,9 +13,6 @@ export const MAX_PRICE_DEVIATION_BPS = 3000n;
 export const MIN_ORDER_NOTIONAL_USD = 10;
 export const FILLED_DISPLAY_PPM_THRESHOLD = 999_950n;
 
-export type SwapOrderMode = 'buy-base' | 'sell-base' | 'none';
-export type SwapTradeSide = 'buy-base' | 'sell-base';
-
 export type PreparedSwapOrderLike = {
   priceTicks: bigint;
   effectiveGive: bigint;

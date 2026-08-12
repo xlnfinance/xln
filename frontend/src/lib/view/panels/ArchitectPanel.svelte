@@ -9,7 +9,7 @@
 
   import type { Writable } from 'svelte/store';
   import { get } from 'svelte/store';
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
   // @ts-ignore - Vite raw import
   import ahbScenarioCode from '../../../../../runtime/scenarios/consensus/ahb.ts?raw';
