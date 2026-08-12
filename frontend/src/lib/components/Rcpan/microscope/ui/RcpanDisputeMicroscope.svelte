@@ -1,11 +1,11 @@
 <script lang="ts">
   import RcpanAccountMicroscope from './RcpanAccountMicroscope.svelte';
-  import RcpanCourtLedger from './RcpanCourtLedger.svelte';
+  import RcpanCourtLedger from '../../RcpanCourtLedger.svelte';
   import type {
     MicroscopeAccountDisplay,
     MicroscopeCourtDisplay,
     MicroscopeCourtPlacement,
-  } from './microscope-visual-types';
+  } from '../model/microscope-visual-types';
   import './rcpan-dispute-microscope.css';
 
   export let account: MicroscopeAccountDisplay;

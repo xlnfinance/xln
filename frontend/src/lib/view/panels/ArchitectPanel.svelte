@@ -23,7 +23,7 @@
   import { defaultAccountDisputeConfigForRoleEvidence } from '@xln/runtime/account/config/dispute-config';
   import { activeRuntime as activeRuntimeStore } from '$lib/stores/runtimeStore';
   import { activeRuntime as activeVaultRuntime } from '$lib/stores/vault/vaultStore';
-  import SolvencyPanel from './SolvencyPanel.svelte';
+  import SolvencyPanel from './solvency/SolvencyPanel.svelte';
 
   // Receive isolated env as props (passed from View.svelte) - REQUIRED
   export let runtimeFrameEnv: Writable<any>;

@@ -5,7 +5,7 @@ import * as THREE from '../../frontend/node_modules/three';
 
 import { createAccountBars } from '../../frontend/src/lib/network3d/AccountBarRenderer';
 import { toDerivedAccountData } from '../../frontend/src/lib/network3d/derivedAccount';
-import { createGraphGrid } from '../../frontend/src/lib/view/panels/graph3d-visuals';
+import { createGraphGrid } from '../../frontend/src/lib/view/panels/graph3d/graph3d-visuals';
 
 const endpoint = (id: string, x: number) => ({ id, position: new THREE.Vector3(x, 0, 0) });
 
@@ -82,8 +82,8 @@ describe('account bar parenting', () => {
   });
 
   test('graph content is built into graphWorld, so cleanup and VR transforms apply to it', () => {
-    const panel = readFileSync('frontend/src/lib/view/panels/Graph3DPanel.svelte', 'utf8');
-    const visuals = readFileSync('frontend/src/lib/view/panels/graph3d-visuals.ts', 'utf8');
+    const panel = readFileSync('frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte', 'utf8');
+    const visuals = readFileSync('frontend/src/lib/view/panels/graph3d/graph3d-visuals.ts', 'utf8');
     const bars = readFileSync('frontend/src/lib/network3d/AccountBarRenderer.ts', 'utf8');
 
     // The visual builders take no scene at all — everything lands in graphWorld.
@@ -126,7 +126,7 @@ describe('account bar parenting', () => {
 
     for (const file of [
       'frontend/src/lib/network3d/AccountBarRenderer.ts',
-      'frontend/src/lib/view/panels/graph3d-visuals.ts',
+      'frontend/src/lib/view/panels/graph3d/graph3d-visuals.ts',
     ]) {
       expect(readFileSync(file, 'utf8')).not.toContain('inPeerCredit: Number(');
     }

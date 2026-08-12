@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { parseArgs, flagNumber, flagString } from '../lib/args';
-import { parseHumanAmount } from '../lib/format';
+import { parseHumanAmount } from '../lib/presentation/format';
 import { assertNoSecretArgv } from '../commands/index';
 
 describe('cli args', () => {

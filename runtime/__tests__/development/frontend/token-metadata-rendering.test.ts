@@ -11,12 +11,12 @@ import { remainingOfferUsd } from '../../../../frontend/src/lib/components/Entit
 import {
   RCPAN_MICROSCOPE_TOKENS,
   tokenAmountToUsdMicros,
-} from '../../../../frontend/src/lib/components/Rcpan/microscope-tokens';
+} from '../../../../frontend/src/lib/components/Rcpan/microscope/model/microscope-tokens';
 import type { SwapBookEntry } from '../../../entity/types';
 import {
   formatGraphEntityReserveBalances,
   formatGraphReserveBadge,
-} from '../../../../frontend/src/lib/view/panels/graph3d-helpers';
+} from '../../../../frontend/src/lib/view/panels/graph3d/graph3d-helpers';
 
 describe('rendered token metadata is exact', () => {
   test('jurisdiction catalog decimals win for a custom token', () => {

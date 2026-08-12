@@ -4,7 +4,7 @@
     MicroscopeAccountDisplay,
     MicroscopeExternalFlow,
     MicroscopeNodeDisplay,
-  } from './microscope-visual-types';
+  } from '../model/microscope-visual-types';
   import './rcpan-account-microscope.css';
 
   export let display: MicroscopeAccountDisplay;

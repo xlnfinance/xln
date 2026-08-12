@@ -3,7 +3,7 @@
     MicroscopeCourtDisplay,
     MicroscopeCourtPlacement,
     MicroscopeCourtRow,
-  } from './microscope-visual-types';
+  } from './microscope/model/microscope-visual-types';
   import './rcpan-court-ledger.css';
 
   export let display: MicroscopeCourtDisplay;

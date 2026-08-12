@@ -7,7 +7,7 @@ import {
   type MergedTimelineSelection,
   type RuntimeTimelineFrame,
   type RuntimeTimelineIndex,
-} from './runtimeGraphTimeline';
+} from './timeline/runtimeGraphTimeline';
 
 export type NetworkMachineTimelineMode = 'all-frames' | 'graph-changes';
 

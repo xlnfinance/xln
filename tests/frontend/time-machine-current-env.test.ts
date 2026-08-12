@@ -378,7 +378,7 @@ describe('frontend time-machine current env contract', () => {
 
   test('demo and graph actions block historical frames instead of auto-switching live', () => {
     const architect = read('frontend/src/lib/view/panels/ArchitectPanel.svelte');
-    const graph = read('frontend/src/lib/view/panels/Graph3DPanel.svelte');
+    const graph = read('frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte');
     const dock = read('frontend/src/lib/view/DockRoot.svelte');
 
     expect(architect).toContain('function publishCurrentEnv');

@@ -1,15 +1,15 @@
 import * as readline from 'node:readline';
 import type { CliSession } from '../lib/session';
 import { formatAccountsPanel } from '../lib/accounts';
-import { headerLine, shortId } from '../lib/format';
-import { paint } from '../lib/theme';
+import { headerLine, shortId } from '../lib/presentation/format';
+import { paint } from '../lib/presentation/theme';
 import { saveSettings, type BarStyle } from '../lib/settings';
 import { listDiscoverableHubs, formatHubList, openHubAccount } from '../lib/actions/open-account';
 import { buildReceiveInvoice, sendPayment, type DeliveryMode } from '../lib/actions/pay';
 import { placeSwap } from '../lib/actions/swap';
 import { executeMove } from '../lib/actions/move';
 import { executeLending, readLendingState } from '../lib/actions/lending';
-import { parseHumanAmount } from '../lib/format';
+import { parseHumanAmount } from '../lib/presentation/format';
 
 type Tab =
   | 'accounts'

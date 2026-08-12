@@ -1,6 +1,6 @@
 import type { GraphPaymentJob, GraphXLNRuntime } from './graph3d-types';
 import { graphReserveValue } from './graph3d-helpers';
-import { parseTokenAmountInput } from '../../components/Entity/assets/token-amount-input';
+import { parseTokenAmountInput } from '../../../components/Entity/assets/token-amount-input';
 
 export function parseGraphPaymentAmount(amount: string, decimals: number): bigint {
   return parseTokenAmountInput(amount, decimals);

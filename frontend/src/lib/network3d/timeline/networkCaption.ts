@@ -7,7 +7,7 @@
  */
 
 import type { RuntimeActivityEvent } from '@xln/runtime/api/public/runtime-module';
-import type { NetworkMachineCue } from './networkMachine';
+import type { NetworkMachineCue } from '../networkMachine';
 
 export type NetworkCaption = {
   title: string;

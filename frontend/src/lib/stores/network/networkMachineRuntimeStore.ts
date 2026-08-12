@@ -4,18 +4,18 @@ import { compileNetworkMachine, type NetworkMachine, type NetworkMachineStep } f
 import {
   disconnectNetworkTimelineReaders,
   networkTimelineSourceFor,
-} from '$lib/network3d/networkTimelineLoader';
+} from '$lib/network3d/timeline/networkTimelineLoader';
 import {
   recordNetworkTrail,
   scenarioNetworkTimelineSource,
   trailNetworkTimelineSource,
   type NetworkTimelineSource,
   type NetworkTrail,
-} from '$lib/network3d/networkTimelineSource';
+} from '$lib/network3d/timeline/networkTimelineSource';
 import { getXLN } from '../bootstrap/xlnRuntimeLoader';
 import { networkMachineConfig } from './networkMachineStore';
 import { runtimes } from '../runtimeStore';
-import type { RuntimeTimelineIndex } from '$lib/network3d/runtimeGraphTimeline';
+import type { RuntimeTimelineIndex } from '$lib/network3d/timeline/runtimeGraphTimeline';
 
 export type NetworkMachineRuntimeState = {
   loading: boolean;

@@ -1,4 +1,4 @@
-import { formatTokenAmount, parseTokenAmount } from '../../runtime/runtime.ts';
+import { formatTokenAmount, parseTokenAmount } from '../../../runtime/runtime.ts';
 import { paint } from './theme';
 
 export const shortId = (id: string, head = 6, tail = 4): string => {

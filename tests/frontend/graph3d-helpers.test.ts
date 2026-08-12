@@ -20,7 +20,7 @@ import {
   graphReserveValue,
   graphReserveValues,
   parseGraphScenarioSteps,
-} from '../../frontend/src/lib/view/panels/graph3d-helpers';
+} from '../../frontend/src/lib/view/panels/graph3d/graph3d-helpers';
 
 const USDC_DECIMALS = 6;
 const getUsdcDecimals = (): number => USDC_DECIMALS;

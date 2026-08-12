@@ -21,7 +21,7 @@
   import { settingsOperations } from '$lib/stores/settingsStore';
   import { networkMachineRuntimeOperations } from '$lib/stores/network/networkMachineRuntimeStore';
   import { networkMachineDemo } from '$lib/stores/network/networkMachineDemoStore';
-  import { decodeNetworkTrailFromHash } from '$lib/network3d/networkTimelineSource';
+  import { decodeNetworkTrailFromHash } from '$lib/network3d/timeline/networkTimelineSource';
 
   let embedMode = true;
   let scenarioError = '';

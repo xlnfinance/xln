@@ -9,12 +9,12 @@ import {
   recordNetworkTrail,
   scenarioNetworkTimelineSource,
   trailNetworkTimelineSource,
-} from '../../frontend/src/lib/network3d/networkTimelineSource';
+} from '../../frontend/src/lib/network3d/timeline/networkTimelineSource';
 import {
   activityForStep,
   captionForStep,
   describeEvent,
-} from '../../frontend/src/lib/network3d/networkCaption';
+} from '../../frontend/src/lib/network3d/timeline/networkCaption';
 
 type ReadCall = { path: string; query?: Record<string, unknown> };
 

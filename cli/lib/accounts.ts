@@ -4,10 +4,10 @@ import {
   isLeftEntity,
 } from '../../runtime/runtime.ts';
 import type { AccountReplica, Delta, EntityReplica, RuntimeReplica } from './runtime-types';
-import { renderCapacityBar, formatBarLegend } from './bars';
-import { formatAmount, shortId } from './format';
+import { renderCapacityBar, formatBarLegend } from './presentation/bars';
+import { formatAmount, shortId } from './presentation/format';
 import type { BarStyle } from './settings';
-import { paint } from './theme';
+import { paint } from './presentation/theme';
 
 export type AccountTokenRow = {
   counterpartyId: string;

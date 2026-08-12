@@ -252,7 +252,7 @@ test('persisted receipt probes reuse the live Runtime module singleton', () => {
 test('wallet UI and wallet-backed E2E helpers never import a second Runtime module', () => {
   const guardedFiles = [
     'frontend/src/lib/view/panels/ArchitectPanel.svelte',
-    'frontend/src/lib/view/panels/Graph3DPanel.svelte',
+    'frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte',
     'tests/e2e-debt-ledger.spec.ts',
     'tests/e2e-runtime-persistence.spec.ts',
   ];

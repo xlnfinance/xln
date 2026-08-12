@@ -10,7 +10,7 @@
     networkMachineRuntimeOperations,
   } from '$lib/stores/network/networkMachineRuntimeStore';
   import type { NetworkMachineTimelineMode } from '$lib/network3d/networkMachine';
-  import { captionForStep } from '$lib/network3d/networkCaption';
+  import { captionForStep } from '$lib/network3d/timeline/networkCaption';
   import { xlnFunctions } from '$lib/stores/xlnStore';
 
   let playing = false;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildClosedAscii, renderTwinBars, renderCapacityBar } from '../lib/bars';
+import { buildClosedAscii, renderTwinBars, renderCapacityBar } from '../lib/presentation/bars';
 import type { DerivedDelta } from '../lib/runtime-types';
 
 const sampleDerived = (overrides: Partial<DerivedDelta> = {}): DerivedDelta => ({

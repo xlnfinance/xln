@@ -3,8 +3,8 @@
   import { settings, settingsOperations } from '$lib/stores/settingsStore';
   import { getAvailableThemes } from '$lib/utils/themes';
   import type { ThemeName } from '$lib/types/ui';
-  import type { RcpanTimelineState } from './microscope-timeline';
-  import type { RcpanMicroscopeControls, RcpanMicroscopePalette } from './microscope-playground';
+  import type { RcpanTimelineState } from './microscope/model/microscope-timeline';
+  import type { RcpanMicroscopeControls, RcpanMicroscopePalette } from './microscope/model/microscope-playground';
   import './rcpan-controls.css';
 
   export let value: RcpanMicroscopeControls;

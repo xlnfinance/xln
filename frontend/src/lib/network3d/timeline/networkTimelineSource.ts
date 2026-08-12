@@ -21,7 +21,7 @@ import type {
   RuntimeAdapterTimelineIndexPage,
   RuntimeActivityEvent,
 } from '@xln/runtime/api/public/runtime-module';
-import { buildRuntimeActivityEvents } from '../../../../runtime/api/public/activity-history';
+import { buildRuntimeActivityEvents } from '../../../../../runtime/api/public/activity-history';
 import { deserializeTaggedJson, serializeTaggedJson } from '@xln/runtime/protocol/serialization';
 import { normalizeRuntimeTimelineIndex, type RuntimeTimelineIndex } from './runtimeGraphTimeline';
 

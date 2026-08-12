@@ -112,15 +112,10 @@ describe('repository source folder-width invariant', () => {
     expect(evaluateFolderWidths(widths, FOLDER_WIDTH_DEBT)).toEqual([]);
     expect(widths.filter(entry => entry.files > 10)).toEqual([
       { path: 'brainvault', files: 11 },
-      { path: 'cli/lib', files: 13 },
       { path: 'frontend', files: 11 },
       { path: 'frontend/src/lib/components/Entity', files: 70 },
-      { path: 'frontend/src/lib/components/Rcpan', files: 22 },
-      { path: 'frontend/src/lib/network3d', files: 14 },
       { path: 'frontend/src/lib/stores', files: 13 },
-      { path: 'frontend/src/lib/view/panels', files: 20 },
       { path: 'jurisdictions/contracts', files: 16 },
-      { path: 'jurisdictions/scripts', files: 14 },
       { path: 'jurisdictions/test', files: 19 },
       { path: 'scripts', files: 25 },
       { path: 'scripts/dev', files: 12 },

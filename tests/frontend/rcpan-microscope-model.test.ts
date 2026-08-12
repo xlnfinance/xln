@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveRcpanFinanceFrame, deriveFcuanFinanceFrame } from '../../frontend/src/lib/components/Rcpan/microscope-finance';
-import { deriveRcpanMicroscopeFrame } from '../../frontend/src/lib/components/Rcpan/microscope-model';
-import { cloneMicroscopeControls, type RcpanScenarioId } from '../../frontend/src/lib/components/Rcpan/microscope-playground';
-import { deriveMicroscopeTimeline, phaseStartMs, type RcpanMicroscopePhase } from '../../frontend/src/lib/components/Rcpan/microscope-timeline';
-import { RCPAN_MICROSCOPE_TOKENS } from '../../frontend/src/lib/components/Rcpan/microscope-tokens';
+import { deriveRcpanFinanceFrame, deriveFcuanFinanceFrame } from '../../frontend/src/lib/components/Rcpan/microscope/model/microscope-finance';
+import { deriveRcpanMicroscopeFrame } from '../../frontend/src/lib/components/Rcpan/microscope/model/microscope-model';
+import { cloneMicroscopeControls, type RcpanScenarioId } from '../../frontend/src/lib/components/Rcpan/microscope/model/microscope-playground';
+import { deriveMicroscopeTimeline, phaseStartMs, type RcpanMicroscopePhase } from '../../frontend/src/lib/components/Rcpan/microscope/model/microscope-timeline';
+import { RCPAN_MICROSCOPE_TOKENS } from '../../frontend/src/lib/components/Rcpan/microscope/model/microscope-tokens';
 
 const BASE_MS = 1_000;
 const USDC = RCPAN_MICROSCOPE_TOKENS[0]!;

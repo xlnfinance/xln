@@ -1,6 +1,6 @@
 /**
  * Test Base Sepolia connection
- * Run: cd jurisdictions && npx hardhat run scripts/test-base-connection.cjs --network base-sepolia
+ * Run: cd jurisdictions && npx hardhat run scripts/verify/test-base-connection.cjs --network base-sepolia
  */
 
 const hre = require("hardhat");

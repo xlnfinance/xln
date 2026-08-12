@@ -18,7 +18,7 @@ import {
   selectMergedTimelineAt,
   selectMergedTimelineEvent,
   runtimeTimelineColor,
-} from '../../frontend/src/lib/network3d/runtimeGraphTimeline';
+} from '../../frontend/src/lib/network3d/timeline/runtimeGraphTimeline';
 import {
   connectedRuntimeGraphEntityIds,
   layoutRuntimeGraph,
@@ -36,7 +36,7 @@ import {
   parseNetworkMachineConfig,
   type NetworkMachineConfig,
 } from '../../frontend/src/lib/network3d/networkMachine';
-import { readTimelineIndexPages } from '../../frontend/src/lib/network3d/networkTimelineLoader';
+import { readTimelineIndexPages } from '../../frontend/src/lib/network3d/timeline/networkTimelineLoader';
 import { assertNetworkMachineIsLive } from '../../frontend/src/lib/stores/network/networkMachineRuntimeStore';
 import {
   beginGraphGesture,
@@ -320,7 +320,7 @@ describe('RuntimeGraphProjection', () => {
     const compilerPath = frontendRequire.resolve('svelte/compiler');
     const { compile } = await import(pathToFileURL(compilerPath).href) as typeof import('svelte/compiler');
     const source = readFileSync(
-      new URL('../../frontend/src/lib/view/panels/Graph3DPanel.svelte', import.meta.url),
+      new URL('../../frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte', import.meta.url),
       'utf8',
     );
     const compiled = compile(source, {
@@ -468,7 +468,7 @@ describe('NetworkMachine', () => {
 
 describe('NetworkMachine runtime indexes', () => {
   test('browser runtimes read their index through the adapter, not from in-memory history', () => {
-    const loader = readFileSync('frontend/src/lib/network3d/networkTimelineLoader.ts', 'utf8');
+    const loader = readFileSync('frontend/src/lib/network3d/timeline/networkTimelineLoader.ts', 'utf8');
 
     // `env.history` is permanently empty (RECENT_RUNTIME_HISTORY_LIMIT = 0), so deriving a
     // browser timeline from it produced zero frames and a dead time machine.

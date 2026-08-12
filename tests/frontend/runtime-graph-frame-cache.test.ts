@@ -41,7 +41,7 @@ const readCache = (): Map<string, RuntimeAdapterGraphFrame> => {
 describe('RuntimeGraphFrameCache', () => {
   test('timeline disposal cannot disconnect the graph live-reader pool', () => {
     const source = readFileSync(
-      new URL('../../frontend/src/lib/network3d/networkTimelineLoader.ts', import.meta.url),
+      new URL('../../frontend/src/lib/network3d/timeline/networkTimelineLoader.ts', import.meta.url),
       'utf8',
     );
     expect(source).toContain('const timelineRemoteReaders = new RemoteRuntimeReaderPool();');

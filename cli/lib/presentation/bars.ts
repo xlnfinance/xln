@@ -1,5 +1,5 @@
 import type { DerivedDelta } from '../runtime-types';
-import type { BarStyle } from './settings';
+import type { BarStyle } from '../settings';
 import { colorizeBar, colorizeTwinSegment } from './theme';
 
 export type BarRenderOptions = {

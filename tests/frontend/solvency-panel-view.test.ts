@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { buildSolvencyProjection } from '../../frontend/src/lib/view/panels/solvency-panel-view';
+import { buildSolvencyProjection } from '../../frontend/src/lib/view/panels/solvency/solvency-panel-view';
 
 test('solvency projection derives reserves and collateral from an injected runtime frame', () => {
   const left = `0x${'11'.repeat(32)}`;
@@ -94,7 +94,7 @@ test('solvency projection fails loud on malformed amounts', () => {
 });
 
 test('SolvencyPanel reads adapter solvency-summary with injected env fallback', () => {
-  const source = readFileSync('frontend/src/lib/view/panels/SolvencyPanel.svelte', 'utf8');
+  const source = readFileSync('frontend/src/lib/view/panels/solvency/SolvencyPanel.svelte', 'utf8');
   const dockRoot = readFileSync('frontend/src/lib/view/DockRoot.svelte', 'utf8');
   const architect = readFileSync('frontend/src/lib/view/panels/ArchitectPanel.svelte', 'utf8');
 

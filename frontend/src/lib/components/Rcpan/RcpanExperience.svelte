@@ -3,21 +3,21 @@
   import { BadgeCheck, Landmark, Pause, Play, ReceiptText, RotateCcw, Scale, ShieldCheck } from 'lucide-svelte';
   import { settingsOperations } from '$lib/stores/settingsStore';
   import RcpanControls from './RcpanControls.svelte';
-  import RcpanDisputeMicroscope from './RcpanDisputeMicroscope.svelte';
+  import RcpanDisputeMicroscope from './microscope/ui/RcpanDisputeMicroscope.svelte';
   import RcpanSalesHero from './RcpanSalesHero.svelte';
   import RcpanSystemComparison from './RcpanSystemComparison.svelte';
   import {
     cloneMicroscopeControls,
     type RcpanMicroscopeControls,
     type RcpanScenarioId,
-  } from './microscope-playground';
+  } from './microscope/model/microscope-playground';
   import {
     deriveMicroscopeTimeline,
     phaseStartMs,
     RCPAN_SCENARIOS,
-  } from './microscope-timeline';
-  import { deriveRcpanMicroscopeFrame } from './microscope-model';
-  import { formatUsdMicros } from './microscope-tokens';
+  } from './microscope/model/microscope-timeline';
+  import { deriveRcpanMicroscopeFrame } from './microscope/model/microscope-model';
+  import { formatUsdMicros } from './microscope/model/microscope-tokens';
   import './rcpan-experience.css';
 
   let controls = cloneMicroscopeControls();

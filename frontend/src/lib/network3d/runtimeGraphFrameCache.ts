@@ -7,7 +7,7 @@ import {
   readRemoteRuntimeGraphFrame,
   subscribeNetworkRuntimeChanges,
   type NetworkRuntimeChangeSubscription,
-} from './networkTimelineLoader';
+} from './timeline/networkTimelineLoader';
 
 export const runtimeGraphLiveFrameCache = writable<Map<string, RuntimeAdapterGraphFrame>>(new Map());
 

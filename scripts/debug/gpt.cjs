@@ -245,7 +245,7 @@ const CORE_FILES = {
     'src/lib/view/README.md',               // View system overview + layout model
     'src/lib/view/View.svelte',             // Main View orchestrator (Dockview panels)
     'src/lib/view/core/TimeMachine.svelte', // Time navigation control
-    'src/lib/view/panels/Graph3DPanel.svelte', // 3D graph visualization
+    'src/lib/view/panels/graph3d/Graph3DPanel.svelte', // 3D graph visualization
     'src/lib/view/panels/ArchitectPanel.svelte', // Architect modes + workflows
     'src/lib/view/panels/JurisdictionPanel.svelte', // On-chain state viewer
     'src/lib/view/utils/panelBridge.ts',    // Panel-to-panel messaging
@@ -1302,7 +1302,7 @@ ${includeFrontend ? `
     src/lib/view/README.md              ${fileSizes['frontend/src/lib/view/README.md'] || '?'} lines - View system overview
     src/lib/view/View.svelte            ${fileSizes['frontend/src/lib/view/View.svelte'] || '?'} lines - Main View orchestrator
     src/lib/view/core/TimeMachine.svelte ${fileSizes['frontend/src/lib/view/core/TimeMachine.svelte'] || '?'} lines - Time control
-    src/lib/view/panels/Graph3DPanel.svelte ${fileSizes['frontend/src/lib/view/panels/Graph3DPanel.svelte'] || '?'} lines - 3D graph panel
+    src/lib/view/panels/graph3d/Graph3DPanel.svelte ${fileSizes['frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte'] || '?'} lines - 3D graph panel
     src/lib/view/panels/ArchitectPanel.svelte ${fileSizes['frontend/src/lib/view/panels/ArchitectPanel.svelte'] || '?'} lines - Architect workflows
     src/lib/view/panels/JurisdictionPanel.svelte ${fileSizes['frontend/src/lib/view/panels/JurisdictionPanel.svelte'] || '?'} lines - Jurisdiction viewer
     src/lib/view/utils/panelBridge.ts   ${fileSizes['frontend/src/lib/view/utils/panelBridge.ts'] || '?'} lines - Panel messaging
