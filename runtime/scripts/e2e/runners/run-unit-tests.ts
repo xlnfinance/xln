@@ -18,7 +18,7 @@ const DEFAULT_UNIT_TEST_TARGETS = [
   'native/__tests__',
 ];
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const REQUIRED_CONTRACT_ARTIFACTS = [
   'jurisdictions/artifacts/contracts/Account.sol/Account.json',
   'jurisdictions/artifacts/contracts/EntityProvider.sol/EntityProvider.json',
