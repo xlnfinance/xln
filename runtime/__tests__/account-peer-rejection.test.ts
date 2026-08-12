@@ -8,11 +8,11 @@ import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim
 import type { AccountInput, AccountReplica } from '../types/account';
 import { safeStringify } from '../protocol/serialization';
 import { createEmptyEnv } from '../runtime';
-import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import { createEntityProposalFixture } from './helpers/entity-proposal-fixture';
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 import { buildSignedEntityCommand } from '../entity/command';
-import { signedEntityCommandTx } from '../entity/command-codec';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
 import { createDisputeProofHashWithNonce } from '../protocol/dispute/proof-builder';
 import { LIMITS } from '../config/constants';
 

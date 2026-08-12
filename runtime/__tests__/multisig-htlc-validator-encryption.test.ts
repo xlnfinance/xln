@@ -15,7 +15,7 @@ import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
   requireProfileEncryptionManifest,
-} from '../entity/profile-encryption';
+} from '../entity/profile/profile-encryption';
 import { buildEntityProfile } from '../network/p2p/gossip/helper';
 import { announceCertifiedLocalProfiles } from '../network/p2p/gossip/local-profile-lifecycle';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
@@ -51,15 +51,15 @@ import {
   computeEntityProfileCertificationComponents,
   computeEntityProfileDescriptorHash,
   profileToEntityProfileDescriptor,
-} from '../entity/profile-descriptor';
+} from '../entity/profile/profile-descriptor';
 import { createDefaultDelta } from '../account/state/delta';
-import { validateEntityState } from '../entity/state-validation';
+import { validateEntityState } from '../entity/state/state-validation';
 import { getValidatorEncryptionManifestFromBoard, parseProfile, type Profile } from '../entity/profile';
 import {
   computeProfileHash,
   signProfileRuntimeRoute,
   verifyProfileSignature,
-} from '../entity/profile-signing';
+} from '../entity/profile/profile-signing';
 import {
   prepareHtlcPaymentEntityInputs,
   prepareHtlcPaymentEntityTx,
@@ -73,10 +73,10 @@ import {
   stopP2PAndWait,
 } from '../runtime';
 import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
-import { buildCollectiveEntityProposalTx } from '../entity/authorization';
+import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
 import { buildSignedEntityCommand } from '../entity/command';
-import { signedEntityCommandTx } from '../entity/command-codec';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { initCrontab } from '../entity/scheduler';
 import { applyEntityFrame, applyEntityInput } from '../entity/consensus';
 import { handleHtlcPayment } from '../entity/tx/handlers/htlc-payment';
@@ -92,7 +92,7 @@ import {
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc-onion-advance';
 import { encodeHtlcSecretOffer } from '../protocol/htlc/codec/onion';
-import { appendDefaultProposerAcceptedHtlcReveals } from '../entity/htlc-onion-post-commit';
+import { appendDefaultProposerAcceptedHtlcReveals } from '../entity/transition/htlc-onion-post-commit';
 import { createJReplica } from '../scenarios/boot';
 import { installCanonicalRegistrationEvidence } from './helpers/registration-evidence';
 import {

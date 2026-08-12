@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
 import { applyEntityFrame, applyEntityInput } from '../entity/consensus';
 import { buildSignedEntityCommand } from '../entity/command';
-import { signedEntityCommandTx } from '../entity/command-codec';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import { generateLazyEntityId } from '../entity/factory';

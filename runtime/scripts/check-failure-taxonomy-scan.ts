@@ -862,8 +862,8 @@ assertNotIncludes(debtEvents, 'console.', debtEventsPath);
 
 for (const validationPath of [
   'runtime/account/validation/state-validation.ts',
-  'runtime/entity/state-validation.ts',
-  'runtime/entity/replica-validation.ts',
+  'runtime/entity/state/state-validation.ts',
+  'runtime/entity/replica/replica-validation.ts',
   'runtime/runtime/routing-validation.ts',
 ]) {
   assertNotIncludes(readText(validationPath), 'console.', validationPath);

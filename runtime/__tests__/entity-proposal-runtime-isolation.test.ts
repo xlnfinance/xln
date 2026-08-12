@@ -8,8 +8,8 @@ import {
   buildEntityLeaderVoteBody,
   hashEntityLeaderVoteBody,
 } from '../entity/consensus/leader';
-import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
-import { getConsumptionNodeStore } from '../entity/consumption-store';
+import { getAccountJClaimNodeStore } from '../entity/account/account-j-claim-node-store';
+import { getConsumptionNodeStore } from '../entity/consumption/consumption-store';
 import {
   handleInboundP2PEntityInputs,
   processRuntime,

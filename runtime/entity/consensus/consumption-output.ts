@@ -8,8 +8,8 @@ import {
   getConsumptionKey,
   type ConsumptionNode,
   type ConsumptionOutputIdentity,
-} from '../consumption-accumulator';
-import { getConsumptionNodeStore } from '../consumption-store';
+} from '../consumption/consumption-accumulator';
+import { getConsumptionNodeStore } from '../consumption/consumption-store';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityOutput, EntityState, HashToSign, EntityFrame } from '../types';
 import {

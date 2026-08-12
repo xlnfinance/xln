@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, signAccountFrame } from '../account/crypto';
 import { buildSignedEntityCommand } from '../entity/command';
-import { signedEntityCommandTx } from '../entity/command-codec';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
 import { applyEntityInput, mergeEntityInputs } from '../entity/consensus';
 import { hasVerifiedEntityCommitPrecertificate } from '../entity/consensus/commit-precheck';
 import { prioritizeEntityConsensusInputs } from '../entity/consensus/input-merge';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import {
   buildEntityLeaderVoteBody,
   hashEntityLeaderVoteBody,

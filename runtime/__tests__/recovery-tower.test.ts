@@ -44,7 +44,7 @@ import {
 } from '../entity/consensus/state-root';
 import { buildSingleSignerHanko } from '../hanko/batch';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
-import { computeProfileHash, signProfileRuntimeRoute } from '../entity/profile-signing';
+import { computeProfileHash, signProfileRuntimeRoute } from '../entity/profile/profile-signing';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 import { createTestJReplica } from './helpers/j-replica';
 import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';

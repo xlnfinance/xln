@@ -12,7 +12,7 @@ The E-machine is replicated state owned by one entity board. The proposer builds
 - [`runtime/entity/consensus/`](../../runtime/entity/consensus) - frame hash, input merge, Hanko witness manifest.
 - [`runtime/entity/tx/apply.ts`](../../runtime/entity/tx/apply.ts) - entity transaction dispatcher.
 - [`runtime/entity/tx/handlers/`](../../runtime/entity/tx/handlers) - account, dispute, J-event, scheduler, and extension handlers.
-- [`runtime/entity/scheduler.ts`](../../runtime/entity/scheduler.ts) - canonical jobs and crontab execution.
+- [`runtime/entity/scheduler/index.ts`](../../runtime/entity/scheduler/index.ts) - canonical jobs and crontab execution.
 
 ## Main Methods
 

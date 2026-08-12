@@ -27,7 +27,7 @@ import {
 } from './store';
 import { classifyWebSocketSendResult } from '../websocket-send-result';
 import type { Profile } from '../../entity/profile';
-import { verifyProfileSignature, type ProfileVerifyResult } from '../../entity/profile-signing';
+import { verifyProfileSignature, type ProfileVerifyResult } from '../../entity/profile/profile-signing';
 import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from '../p2p/auth/hello-auth';
 import type { HelloChallengeBinding } from '../p2p/auth/hello-challenge';
 import { isDeliveryDelivered, type DeliveryResult } from '../../protocol/payments/delivery-result';

@@ -16,7 +16,7 @@ import {
   assertEntityProposalAction,
   hashEntityProposalAction,
   resolveCanonicalEntityBoardShares,
-} from '../../authorization';
+} from '../../auth/authorization';
 import { resolveEntityCommandBoard } from '../../command';
 import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
 import { buildCertifiedEntityOutput } from '../cross-j-outputs';

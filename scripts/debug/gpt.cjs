@@ -191,7 +191,7 @@ const CORE_FILES = {
     // Utilities (support functions)
     'account/state/state-clone.ts', // Account candidate/snapshot isolation
     'entity/state-clone.ts',  // Entity candidate/snapshot isolation
-    'entity/replica-clone.ts', // Validator-local replica isolation
+    'entity/replica/replica-clone.ts', // Validator-local replica isolation
     'storage/snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
     'runtime/jurisdiction-api.ts', // J-adapter / on-chain integration surface
   ],
@@ -303,7 +303,7 @@ const CROSS_FILES = {
     'account/crypto.ts',
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
-    'entity/replica-clone.ts',
+    'entity/replica/replica-clone.ts',
     'runtime.ts',
     'runtime/composition.ts',
     'runtime/frame/process.ts',
@@ -502,7 +502,7 @@ const RUNTIME_FILES = {
     'storage/snapshot-coder.ts',
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
-    'entity/replica-clone.ts',
+    'entity/replica/replica-clone.ts',
     'runtime/env-events.ts',
     'infra/logger.ts',
     'jurisdiction/machine/jurisdiction-runtime.ts',
@@ -557,7 +557,7 @@ const ORDERBOOK_FILES = {
     'protocol/serialization.ts',
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
-    'entity/replica-clone.ts',
+    'entity/replica/replica-clone.ts',
     'runtime/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
@@ -625,7 +625,7 @@ const SWAP_FILES = {
     'protocol/serialization.ts',
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
-    'entity/replica-clone.ts',
+    'entity/replica/replica-clone.ts',
     'runtime/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
@@ -1264,7 +1264,7 @@ xln/
 
     account/state/state-clone.ts ${fileSizes['runtime/account/state/state-clone.ts'] || '?'} lines - Account candidate isolation
     entity/state-clone.ts        ${fileSizes['runtime/entity/state-clone.ts'] || '?'} lines - Entity candidate isolation
-    entity/replica-clone.ts      ${fileSizes['runtime/entity/replica-clone.ts'] || '?'} lines - Replica-local isolation
+    entity/replica/replica-clone.ts      ${fileSizes['runtime/entity/replica/replica-clone.ts'] || '?'} lines - Replica-local isolation
     storage/snapshot-coder.ts            ${fileSizes['runtime/storage/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
   docs/
     readme.md                           ${fileSizes['docs/readme.md'] || '?'} lines - Live docs index and reading path

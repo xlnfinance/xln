@@ -1,11 +1,11 @@
 import { Level } from 'level';
 import { collectReachableAccountJClaimNodes } from '../../account/j-claims/j-claim-accumulator';
-import { getAccountJClaimNodeStore, getLiveAccountJClaimAccumulatorStates } from '../../entity/account-j-claim-node-store';
+import { getAccountJClaimNodeStore, getLiveAccountJClaimAccumulatorStates } from '../../entity/account/account-j-claim-node-store';
 import {
   collectReachableConsumptionNodes,
   getConsumptionNodeStore,
   getLiveConsumptionAccumulatorStates,
-} from '../../entity/consumption-store';
+} from '../../entity/consumption/consumption-store';
 import { collectReachableCertifiedBoardNodes, getCertifiedBoardNodeStore } from '../../jurisdiction/machine/board-registry';
 import {
   assertCertifiedJHistoryIntegrity,

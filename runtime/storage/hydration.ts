@@ -9,8 +9,8 @@ import {
 import type { StorageAccountDoc, StorageEntityCoreDoc } from './types';
 import { assertAccountMempoolWithinLimit } from '../account/input/mempool';
 import { assertAccountJClaimAccumulatorState } from '../account/j-claims/j-claim-accumulator';
-import { assertEntityAccountCountWithinLimit } from '../entity/account-capacity';
-import { assertConsumptionAccumulatorState } from '../entity/consumption-accumulator';
+import { assertEntityAccountCountWithinLimit } from '../entity/account/account-capacity';
+import { assertConsumptionAccumulatorState } from '../entity/consumption/consumption-accumulator';
 import { LIMITS } from '../config/constants';
 import { assertJBatchWithinContractLimits } from '../jurisdiction/machine/batch';
 import { cloneAccountReplica } from '../account/state/state-clone';

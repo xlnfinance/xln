@@ -7,7 +7,7 @@ import { createAccountJClaimSession } from '../account/j-claims/j-claim-session'
 import {
   cacheCommittedAccountJClaimNodeChanges,
   getAccountJClaimNodeStore,
-} from '../entity/account-j-claim-node-store';
+} from '../entity/account/account-j-claim-node-store';
 import { prepareAccountJClaimTx } from '../account/j-claims/j-claim-transition';
 import { mergeJEventClaimOps } from '../entity/tx/j-events-account';
 import type { JEventAccountTx } from '../entity/tx/j-events-types';

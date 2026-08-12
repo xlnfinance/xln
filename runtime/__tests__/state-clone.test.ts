@@ -5,7 +5,7 @@ import { cloneAccountReplica } from '../account/state/state-clone';
 import {
   cloneEntityReplica,
   forkEntityReplicaForInput,
-} from '../entity/replica-clone';
+} from '../entity/replica/replica-clone';
 import {
   cloneEntityState,
   cloneTrustedEntityState,
@@ -15,7 +15,7 @@ import {
 import {
   commitEntityAccountCandidate,
   EntityAccountCandidateMap,
-} from '../entity/candidate-map';
+} from '../entity/state/candidate-map';
 import {
   computeCanonicalEntityConsensusStateHash,
   computeCanonicalEntityConsensusStateHashCold,
@@ -24,7 +24,7 @@ import {
   applyEntityFrame,
   applyRuntimeOwnedEntityFrame,
 } from '../entity/consensus/frame-application';
-import { EntityCandidateMap } from '../entity/candidate-map';
+import { EntityCandidateMap } from '../entity/state/candidate-map';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import {
   applyCommand,
@@ -33,7 +33,7 @@ import {
 } from '../orderbook';
 import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
-import { validateEntityReplica } from '../entity/replica-validation';
+import { validateEntityReplica } from '../entity/replica/replica-validation';
 import { createEmptyEnv } from '../runtime';
 import type { AccountReplica } from '../types/account';
 import type { EntityState } from '../entity/types';

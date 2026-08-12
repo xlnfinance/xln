@@ -19,7 +19,7 @@ import {
 import { applyEntityInput } from '../entity/consensus';
 import { applyEntityFrame } from '../entity/consensus';
 import { buildSignedEntityCommand } from '../entity/command';
-import { signedEntityCommandTx } from '../entity/command-codec';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
 import { createEntityFrameHash, createEntityFrameHashFromStateRoot } from '../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import {
@@ -49,7 +49,7 @@ import {
   decodeEntityOutput,
   decodeRoutedEntityInput,
 } from '../runtime/routing-validation';
-import { validateEntityReplica } from '../entity/replica-validation';
+import { validateEntityReplica } from '../entity/replica/replica-validation';
 
 const leaderTestJurisdiction = {
   name: 'entity-leader-test',

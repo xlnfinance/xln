@@ -152,7 +152,7 @@ FILES TO SCAN:
 - runtime/runtime/types.ts (Runtime interface design)
 - runtime/account/state/state-clone.ts (Account candidate isolation)
 - runtime/entity/state-clone.ts (Entity candidate isolation)
-- runtime/entity/replica-clone.ts (validator-local replica isolation)
+- runtime/entity/replica/replica-clone.ts (validator-local replica isolation)
 - runtime/entity/tx/apply.ts (dispatcher pattern)
 - runtime/account/utils.ts (utility functions)
 

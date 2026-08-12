@@ -4,7 +4,7 @@ import {
   drainPendingCrossJurisdictionFillAcks,
   stashPendingCrossJurisdictionFillAck,
 } from '../entity/consensus/cross-j-fill-ack';
-import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import type { EntityCandidateEffect } from '../entity/types';
 import { createEmptyEnv } from '../runtime';
 import { buildPreparedCrossJurisdictionRoute } from '../extensions/cross-j';

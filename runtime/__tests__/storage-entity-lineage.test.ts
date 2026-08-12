@@ -7,9 +7,9 @@ import {
   registerSignerKey,
   signAccountFrame,
 } from '../account/crypto';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { buildSignedEntityCommand } from '../entity/command';
-import { signedEntityCommandTx } from '../entity/command-codec';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
 import { applyEntityFrame, selectPreparedFrameFromCertificate } from '../entity/consensus';
 import { createEntityFrameHashFromStateRoot } from '../entity/consensus/frame';
 import {

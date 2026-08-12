@@ -8,7 +8,7 @@ import {
 import { cloneIsolatedAccountInput } from '../protocol/account-input-clone';
 import { createDefaultDelta } from '../account/state/delta';
 import { createEmptyEnv } from '../runtime';
-import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import { addr, makeAccount } from './helpers/cross-j';
 
 test('authenticated J finality enters the canonical AccountInput boundary', async () => {

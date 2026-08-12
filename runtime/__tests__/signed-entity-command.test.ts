@@ -17,14 +17,14 @@ import {
   MAX_ENTITY_COMMAND_BYTES,
   mergeEntityCommandTransactions,
   signedEntityCommandTx,
-} from '../entity/command-codec';
+} from '../entity/command/command-codec';
 import {
   assertCertifiedEntityOutputAuthorization,
   assertRuntimeOutputAuthorization,
   buildCollectiveEntityProposalTx,
   buildEntityTransactionProposalAction,
   hashEntityProposalAction,
-} from '../entity/authorization';
+} from '../entity/auth/authorization';
 import { applyEntityFrame, applyEntityInput } from '../entity/consensus';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
 import {
@@ -39,14 +39,14 @@ import {
   MAX_ENTITY_FRAME_TX_BYTES,
   selectEntityFrameTxByteBudget,
 } from '../entity/consensus/frame';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j';
 import { routeInboundP2PEntityInput } from '../runtime/entity-routing';
 import {
   buildValidatorEncryptionBoard,
   createLocalValidatorEncryptionAttestation,
-} from '../entity/profile-encryption';
+} from '../entity/profile/profile-encryption';
 import { requireCompleteValidatorEncryptionManifest } from '../protocol/htlc/validator-encryption';
 import {
   applyCertifiedBoardRegistryEvent,

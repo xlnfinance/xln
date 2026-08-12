@@ -11,7 +11,7 @@ import { handleSwapResolve } from '../account/tx/handlers/swap/resolve/index';
 import { handleSwapOffer } from '../account/tx/handlers/swap/offer/index';
 import { decodeAccountTx } from '../account/tx-validation';
 import { validateAccountReplica } from '../account/validation/state-validation';
-import { buildEntityTransactionProposalAction } from '../entity/authorization';
+import { buildEntityTransactionProposalAction } from '../entity/auth/authorization';
 import { validateEntityTx } from '../entity/tx-validation';
 import { computeSwapPriceTicks, SWAP_LOT_SCALE } from '../orderbook/types';
 import { exactFillRatioToUint16 } from '../orderbook/swap-execution';

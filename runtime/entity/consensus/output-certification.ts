@@ -25,7 +25,7 @@ import {
 } from '../../jurisdiction/machine/board-registry';
 import { LIMITS } from '../../config/constants';
 import { assertReliableCertifiedPayloadIsAtomic } from './output-envelope';
-import { assertCertifiedEntityOutputAuthorization } from '../authorization';
+import { assertCertifiedEntityOutputAuthorization } from '../auth/authorization';
 
 const assertCertifiableOutput = (output: EntityOutput, outputIndex: number): EntityTx[] => {
   if (

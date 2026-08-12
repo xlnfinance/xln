@@ -69,9 +69,9 @@ import { createEntityFrameHash } from '../entity/consensus/frame';
 
 import { buildSignedEntityCommand, prepareLocallyAuthoredEntityTxs } from '../entity/command';
 
-import { signedEntityCommandTx } from '../entity/command-codec';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
 
-import { buildCollectiveEntityProposalTx } from '../entity/authorization';
+import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
 
 import { generateProposalId } from '../entity/tx/proposals';
 

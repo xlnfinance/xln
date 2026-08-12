@@ -5,7 +5,7 @@ import type { JInput } from '../../jurisdiction/machine/input';
 import type { EntityTx } from '../../types/entity-tx';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import type { AccountConsensusContext } from '../../account/consensus/context';
-import { createAccountConsensusContext } from '../account-consensus-context';
+import { createAccountConsensusContext } from '../account/account-consensus-context';
 import {
   applyAccountInputToEntity,
   type AccountTxTarget,

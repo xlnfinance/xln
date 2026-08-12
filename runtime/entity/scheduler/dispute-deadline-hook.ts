@@ -2,7 +2,7 @@ import type {
   CrontabExecutionContext,
   EntityTransitionContext,
   ScheduledHook,
-} from '../scheduler-types';
+} from './types';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { scheduleHook } from './hook-state';
 import type { DueHookPlan } from './due-hook-types';

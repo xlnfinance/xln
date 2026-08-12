@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
 import { createEmptyEnv } from '../runtime';
-import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 
 const entityId = `0x${'aa'.repeat(32)}`;

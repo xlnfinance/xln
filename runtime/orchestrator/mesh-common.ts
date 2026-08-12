@@ -4,11 +4,11 @@ import type { RuntimeReplica } from '../runtime/types';
 import { deriveDelta, getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { getBootstrapTokenAmount } from '../jurisdiction/machine/bootstrap-economy';
-import { getEntityReplicaById } from '../entity/replica-lookup';
-import { assertEntityProposalAction } from '../entity/authorization';
-import { normalizeSignedEntityCommand } from '../entity/command-codec';
+import { getEntityReplicaById } from '../entity/replica/replica-lookup';
+import { assertEntityProposalAction } from '../entity/auth/authorization';
+import { normalizeSignedEntityCommand } from '../entity/command/command-codec';
 import { getReliableOutputIdentity } from '../runtime/output-routing';
-export { getEntityReplicaById } from '../entity/replica-lookup';
+export { getEntityReplicaById } from '../entity/replica/replica-lookup';
 export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
 export {
   getBootstrapTokenAmount,

@@ -1,7 +1,7 @@
 import { deriveAccountWatchSeed } from '../../protocol/account-watch-seed';
 import { createEmptyAccountJClaimAccumulator } from '../../account/j-claims/j-claim-accumulator';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../account/crypto';
-import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../../entity/crypto';
+import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../../entity/auth/crypto';
 import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-runtime';
 import {
   canonicalDisputeFinalizationEvidenceHash,

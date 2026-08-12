@@ -15,11 +15,11 @@ import {
   applyConsumptionOutput,
   createEmptyConsumptionAccumulator,
   MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY,
-} from '../entity/consumption-accumulator';
+} from '../entity/consumption/consumption-accumulator';
 import {
   cacheCommittedConsumptionNodeChanges,
   getConsumptionNodeStore,
-} from '../entity/consumption-store';
+} from '../entity/consumption/consumption-store';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,

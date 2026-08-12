@@ -1,8 +1,8 @@
 import { deriveDelta } from '../../account/utils';
 import type { AccountReplica, AccountState } from '../../types/account';
 import type { RuntimeReplica } from '../../runtime/types';
-import { getEntityReplicaById } from '../../entity/replica-lookup';
-export { getEntityReplicaById } from '../../entity/replica-lookup';
+import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
+export { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 
 const accountMatchesCounterparty = (
   account: AccountReplica | null | undefined,

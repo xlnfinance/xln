@@ -1,5 +1,5 @@
 import type { BookState, EntityReferral, HubProfile } from '../orderbook';
-import type { CrontabState } from '../entity/scheduler-types';
+import type { CrontabState } from '../entity/scheduler/types';
 import type { JBatchState } from '../jurisdiction/machine/batch';
 import type { AccountReplica, HtlcRoute, RuntimeOverlayRecord } from '../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, EntitySwapPair, LockBookEntry, Proposal } from '../entity/types';

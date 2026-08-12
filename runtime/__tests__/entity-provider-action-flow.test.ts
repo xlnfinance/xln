@@ -10,9 +10,9 @@ import {
   assertEntityProviderActionJTxBinding,
   recomputeEntityProviderActionHash,
 } from '../entity/entity-provider-action';
-import { buildCollectiveEntityProposalTx } from '../entity/authorization';
+import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
 import { buildSignedEntityCommand } from '../entity/command';
-import { signedEntityCommandTx } from '../entity/command-codec';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
 import { applyEntityFrame, applyEntityInput } from '../entity/consensus';
 import { commitEntityFrameCandidateState } from '../entity/state-clone';
 import { applyEntityTx } from '../entity/tx/apply';
@@ -22,7 +22,7 @@ import {
   applyEntityProviderActionExecuted,
 } from '../entity/tx/j-events-entity-provider-action';
 import { encodeBoard, hashBoard } from '../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { buildSingleSignerHanko } from '../hanko/batch';
 import {

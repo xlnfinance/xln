@@ -4,7 +4,7 @@ import type {
   CrontabExecutionContext,
   EntityTransitionContext,
   ScheduledHook,
-} from '../scheduler-types';
+} from './types';
 import { getEntityCertifiedJurisdictionHeight } from '../../jurisdiction/machine/height';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { terminateHtlcRoute } from '../tx/htlc-route-lifecycle';

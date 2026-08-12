@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 
 import { proposeAccountFrame } from '../account/consensus/proposal/propose';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settlement/transition';

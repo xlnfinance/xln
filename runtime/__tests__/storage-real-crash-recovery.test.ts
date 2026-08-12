@@ -17,7 +17,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import {
   deriveLocalEntityCryptoKeys,
   requireEntityEncryptionPrivateKey,
-} from '../entity/crypto';
+} from '../entity/auth/crypto';
 import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-events';
 import { getEntityLeaderState } from '../entity/consensus/leader';
 import { buildJPrefixCertificate } from '../jurisdiction/machine/j-prefix-consensus';

@@ -1,9 +1,9 @@
-import { getLiveAccountJClaimAccumulatorStates } from '../../entity/account-j-claim-node-store';
-import { getLiveConsumptionAccumulatorStates } from '../../entity/consumption-store';
+import { getLiveAccountJClaimAccumulatorStates } from '../../entity/account/account-j-claim-node-store';
+import { getLiveConsumptionAccumulatorStates } from '../../entity/consumption/consumption-store';
 import {
   assertPersistedLocalEntityCryptoKeys,
   resolveReplicaEntityCryptoKeys,
-} from '../../entity/crypto';
+} from '../../entity/auth/crypto';
 import { createReplicaKey, formatReplicaKey } from '../../protocol/identity';
 import {
   assertCertifiedJHistoryIntegrity,

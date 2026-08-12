@@ -12,7 +12,7 @@ import type {
   JTx,
 } from '../types/jurisdiction-runtime';
 import type { CertifiedBoardNodeStore } from '../types/entity-board-registry';
-import type { ConsumptionNodeStore } from '../entity/consumption-accumulator-types';
+import type { ConsumptionNodeStore } from '../entity/consumption/consumption-accumulator-types';
 import type { AccountJClaimNodeStore } from '../types/account-j-claims';
 import type {
   RecordEntityProviderActionSubmitResultData,

@@ -99,14 +99,14 @@ import {
   hashConsumptionNode,
   type ConsumptionAccumulatorState,
   type ConsumptionNode,
-} from '../entity/consumption-accumulator';
+} from '../entity/consumption/consumption-accumulator';
 import {
   collectReachableConsumptionNodes,
   finalizePersistedConsumptionNodes,
   getConsumptionNodeStore,
   getLiveConsumptionAccumulatorStates,
   getSafePendingConsumptionDeletes,
-} from '../entity/consumption-store';
+} from '../entity/consumption/consumption-store';
 import {
   collectReachableAccountJClaimNodes,
   hashAccountJClaimNode,
@@ -117,7 +117,7 @@ import {
   finalizePersistedAccountJClaimNodes,
   getLiveAccountJClaimAccumulatorStates,
   getSafePendingAccountJClaimDeletes,
-} from '../entity/account-j-claim-node-store';
+} from '../entity/account/account-j-claim-node-store';
 import {
   buildDurableRuntimeMempool,
   buildDurableRuntimeMachineSnapshot,

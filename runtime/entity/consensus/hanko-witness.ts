@@ -3,7 +3,7 @@ import type { EntityOutput, EntityState, HashToSign, HashType, EntityFrame } fro
 import type { JInput } from '../../jurisdiction/machine/input';
 import type { HankoString } from '../../types/hanko';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
-import { normalizeSignatureMap } from '../signatures';
+import { normalizeSignatureMap } from '../auth/signatures';
 import {
   accountInputAck,
   accountInputBoardReseal,

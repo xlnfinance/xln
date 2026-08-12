@@ -1,8 +1,8 @@
 import { decodeAccountPeerInput } from '../../account/validation/input-validation';
 import { assertExactMultiRecipientCiphertextSchema } from '../../protocol/htlc/multi-recipient-schema';
 import type { EntityTx } from '../../types/entity-tx';
-import { assertEntityProposalAction } from '../authorization';
-import { normalizeSignedEntityCommand } from '../command-codec';
+import { assertEntityProposalAction } from '../auth/authorization';
+import { normalizeSignedEntityCommand } from '../command/command-codec';
 import { normalizeConsensusOutputBoardAuthority } from '../consensus/output-certification';
 import type { ProposalAction } from '../types';
 import { requireKnownEntityTxType } from '../tx/catalog';

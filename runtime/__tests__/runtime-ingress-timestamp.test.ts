@@ -4,7 +4,7 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from 
 import { TIMING } from '../config/constants';
 import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
-import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../entity/crypto';
+import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../entity/auth/crypto';
 import { processEventBatch } from '../jurisdiction/adapter/watcher';
 import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
 import { buildJEventRangeData } from './helpers/j-history';

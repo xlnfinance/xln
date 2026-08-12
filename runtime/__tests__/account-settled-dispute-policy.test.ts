@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import { shouldSuppressReturnedAccountTx } from '../entity/consensus/frame-tx-effects';
 import { applyAccountSettledJEvent } from '../entity/tx/j-events-account-settled';
 import type { FinalizedJEventContext } from '../entity/tx/j-events';

@@ -9,8 +9,8 @@ import {
 } from '../entity/scheduler';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { buildSignedEntityCommand } from '../entity/command';
-import { signedEntityCommandTx } from '../entity/command-codec';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { applyEntityFrame, applyEntityInput } from '../entity/consensus/index';
 import {
@@ -31,7 +31,7 @@ import {
 import {
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   type ScheduledWakeTx,
-} from '../entity/scheduled-wake-validation';
+} from '../entity/scheduler/scheduled-wake-validation';
 import { safeStringify } from '../protocol/serialization';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';
@@ -45,9 +45,9 @@ import {
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
-} from '../entity/profile-encryption';
+} from '../entity/profile/profile-encryption';
 import { buildLocalEntityProfile } from '../network/p2p/gossip/helper';
-import { computeProfileHash } from '../entity/profile-signing';
+import { computeProfileHash } from '../entity/profile/profile-signing';
 import { makeAccount } from './helpers/cross-j';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;

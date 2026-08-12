@@ -12,7 +12,7 @@ import {
 } from '../../runtime';
 import { applyAccountInput } from '../../account/consensus';
 import { proposeAccountFrame } from '../../account/consensus/proposal/propose';
-import { createAccountConsensusContext } from '../../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../../entity/account/account-consensus-context';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
@@ -24,7 +24,7 @@ import {
 } from '../../account/commitment/state-root';
 import {
   getAccountJClaimNodeStore,
-} from '../../entity/account-j-claim-node-store';
+} from '../../entity/account/account-j-claim-node-store';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,

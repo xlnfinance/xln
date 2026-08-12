@@ -7,7 +7,7 @@ import { createAccountJClaimSession } from '../account/j-claims/j-claim-session'
 import {
   cacheCommittedAccountJClaimNodeChanges,
   getAccountJClaimNodeStore,
-} from '../entity/account-j-claim-node-store';
+} from '../entity/account/account-j-claim-node-store';
 import { prepareAccountJClaimTx } from '../account/j-claims/j-claim-transition';
 import { handleJEventClaim } from '../account/tx/handlers/j-events/claim';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settlement/transition';
@@ -19,8 +19,8 @@ import {
   computeCanonicalEntityConsensusStateHash,
 } from '../entity/consensus/state-root';
 import { buildSignedEntityCommand } from '../entity/command';
-import { signedEntityCommandTx } from '../entity/command-codec';
-import { buildCollectiveEntityProposalTx } from '../entity/authorization';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
+import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
 import {
   sealHankoWitnessInState,
   type HankoWitnessEntry,
@@ -51,7 +51,7 @@ import {
   getCertifiedBoardNodeStore,
 } from '../jurisdiction/machine/board-registry';
 import { createEmptyEnv } from '../runtime';
-import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import { cloneAccountReplica } from '../account/state/state-clone';
 import type { AccountTx, SettlementOp } from '../types/account';
 import type { EntityState, HashToSign, JurisdictionConfig } from '../entity/types';

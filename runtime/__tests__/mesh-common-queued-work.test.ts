@@ -6,8 +6,8 @@ import {
   hasQueuedOpenAccount,
   hasQueuedSwapOffer,
 } from '../orchestrator/mesh-common';
-import { buildCollectiveEntityProposalTx } from '../entity/authorization';
-import { hashEntityCommandTxs } from '../entity/command-codec';
+import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
+import { hashEntityCommandTxs } from '../entity/command/command-codec';
 import type { EntityTx } from '../types/entity-tx';
 import type { RuntimeReplica } from '../runtime/types';
 

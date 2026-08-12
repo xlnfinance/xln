@@ -10,7 +10,7 @@ import {
   createEmptyEnv,
   generateLazyEntityId,
 } from '../runtime';
-import { applySignerEntityExternalWalletSnapshot } from '../entity/signer-wallet';
+import { applySignerEntityExternalWalletSnapshot } from '../entity/auth/signer-wallet';
 import { cloneEntityState } from '../entity/state-clone';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';

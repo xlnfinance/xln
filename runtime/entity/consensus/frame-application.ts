@@ -5,7 +5,7 @@
 
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
 import { proposeAccountFrame } from '../../account/consensus/proposal/propose';
-import { getAccountJClaimNodeStore } from '../account-j-claim-node-store';
+import { getAccountJClaimNodeStore } from '../account/account-j-claim-node-store';
 import {
   assertCanonicalSettlementWorkspace,
   hasPendingSettlementTransition,
@@ -25,7 +25,7 @@ import { swapKey, type WorkingOrderbookOffer } from '../../orderbook/swap-execut
 import { mergeStorageOverlayRecords } from '../../protocol/overlay';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
-import { assertScheduledWakeFrameOrder } from '../scheduled-wake-validation';
+import { assertScheduledWakeFrameOrder } from '../scheduler/scheduled-wake-validation';
 import { createEntityFrameCandidateState } from '../state-clone';
 import { getAccountPerspective } from '../../account/state/perspective';
 import { emitScopedEvents } from '../../infra/scoped-events';
@@ -42,24 +42,24 @@ import {
   assertRuntimeOutputAuthorization,
   isCollectiveEntityActionTx,
   isIndividualEntityCommandTx,
-} from '../authorization';
+} from '../auth/authorization';
 import {
   advanceEntityCommandNonce,
   assertSignedEntityCommand,
   getEntityCommandDisposition,
   normalizeEntityCommandNonceBoard,
 } from '../command';
-import { isEntityCommandForbiddenTx } from '../command-codec';
+import { isEntityCommandForbiddenTx } from '../command/command-codec';
 import {
   applyConsumptionOutput,
   createEmptyConsumptionAccumulator,
-} from '../consumption-accumulator';
-import { type ConsumptionNodeChanges } from '../consumption-store';
+} from '../consumption/consumption-accumulator';
+import { type ConsumptionNodeChanges } from '../consumption/consumption-store';
 import {
   entityTxContainsAccountTransition,
   entityTxContainsCrossJSetup,
   selectCrossJOpeningAccountProposalTxs,
-} from '../cross-j-proposer-materialization';
+} from '../transition/cross-j-proposer-materialization';
 import { initCrontab } from '../scheduler';
 import { applyEntityTx, type ApplyEntityTxResult } from '../tx/apply';
 import {
@@ -82,7 +82,7 @@ import {
   refreshAccountWorkIndex,
 } from './account-work-index';
 import { applyAccountInput } from '../../account/consensus';
-import { createAccountConsensusContext } from '../account-consensus-context';
+import { createAccountConsensusContext } from '../account/account-consensus-context';
 import { createLocalAccountInput } from '../../account/input';
 import { assertEntityFrameTxByteBudget } from './frame';
 import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from './output-certification';

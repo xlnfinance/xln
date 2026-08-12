@@ -19,7 +19,7 @@ import {
   putEntityAccountCommitment,
   type EntityAccountCommitment,
 } from './account-commitment-tree';
-import { EntityAccountCandidateMap, entityAccountCommitmentEntries } from '../candidate-map';
+import { EntityAccountCandidateMap, entityAccountCommitmentEntries } from '../state/candidate-map';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 

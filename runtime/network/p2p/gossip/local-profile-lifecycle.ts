@@ -6,9 +6,9 @@ import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
   buildValidatorEncryptionBoard,
-} from '../../../entity/profile-encryption';
+} from '../../../entity/profile/profile-encryption';
 import { buildLocalEntityProfile } from './helper';
-import { computeProfileHash, signProfileRuntimeRoute } from '../../../entity/profile-signing';
+import { computeProfileHash, signProfileRuntimeRoute } from '../../../entity/profile/profile-signing';
 import { compareStableText } from '../../../protocol/serialization';
 import {
   requireCompleteValidatorEncryptionManifest,

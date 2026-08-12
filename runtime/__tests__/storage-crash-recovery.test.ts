@@ -45,8 +45,8 @@ import {
   createEmptyConsumptionAccumulator,
   getConsumptionKey,
   verifyConsumptionProof,
-} from '../entity/consumption-accumulator';
-import { getConsumptionNodeStore } from '../entity/consumption-store';
+} from '../entity/consumption/consumption-accumulator';
+import { getConsumptionNodeStore } from '../entity/consumption/consumption-store';
 import { createEmptyEnv } from '../runtime';
 import { createBook } from '../orderbook/core';
 import { validateStorageBookDocValue } from '../storage/authoritative-schema';

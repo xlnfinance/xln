@@ -63,20 +63,20 @@ import {
 import {
   EMPTY_CONSUMPTION_ROOT,
   hashConsumptionNode,
-} from '../entity/consumption-accumulator';
+} from '../entity/consumption/consumption-accumulator';
 import {
   collectReachableConsumptionNodes,
   getConsumptionNodeStore,
-} from '../entity/consumption-store';
-import { assertEntityAccountInsertionCapacity } from '../entity/account-capacity';
+} from '../entity/consumption/consumption-store';
+import { assertEntityAccountInsertionCapacity } from '../entity/account/account-capacity';
 import {
   EMPTY_ACCOUNT_J_CLAIM_ROOT,
   collectReachableAccountJClaimNodes,
   hashAccountJClaimNode,
   type AccountJClaimAccumulatorState,
 } from '../account/j-claims/j-claim-accumulator';
-import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
-import { validateEntityReplicaMetadata } from '../entity/replica-validation';
+import { getAccountJClaimNodeStore } from '../entity/account/account-j-claim-node-store';
+import { validateEntityReplicaMetadata } from '../entity/replica/replica-validation';
 import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,

@@ -9,7 +9,7 @@ import {
   cloneIsolatedRuntimeInput,
   cloneIsolatedRuntimeSnapshot,
 } from '../../runtime/input-clone';
-import { cloneIsolatedEntityInput } from '../../entity/input-clone';
+import { cloneIsolatedEntityInput } from '../../entity/state/input-clone';
 import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,

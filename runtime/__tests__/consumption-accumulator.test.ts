@@ -17,7 +17,7 @@ import {
   type ConsumptionNodeStore,
   type ConsumptionOutputIdentity,
   type ConsumptionProof,
-} from '../entity/consumption-accumulator';
+} from '../entity/consumption/consumption-accumulator';
 
 const bytes32 = (hexByte: string): string => `0x${hexByte.repeat(32)}`;
 const entity = (value: number): string => ethers.toBeHex(BigInt(value), 32).toLowerCase();

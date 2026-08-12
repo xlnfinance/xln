@@ -17,7 +17,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
 import { generateLazyEntityId } from '../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { initCrontab } from '../entity/scheduler';
 import { buildQuorumHanko } from '../hanko/signing';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
@@ -25,8 +25,8 @@ import { buildLocalEntityProfile } from '../network/p2p/gossip/helper';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
-} from '../entity/profile-encryption';
-import { computeProfileHash } from '../entity/profile-signing';
+} from '../entity/profile/profile-encryption';
+import { computeProfileHash } from '../entity/profile/profile-signing';
 import { safeStringify } from '../protocol/serialization';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';

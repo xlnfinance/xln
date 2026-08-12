@@ -24,7 +24,7 @@ import {
 } from '../../../../account/input/peer-rejection';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import { addMessage } from '../../../frame-events';
-import { getEntityAccountInsertionCapacityError } from '../../../account-capacity';
+import { getEntityAccountInsertionCapacityError } from '../../../account/account-capacity';
 import { isLeftEntity } from '../../../id';
 import { canonicalAccountDisputeConfig } from '../../../../account/config/dispute-config';
 

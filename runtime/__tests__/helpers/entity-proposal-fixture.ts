@@ -8,7 +8,7 @@ import {
 import { applyEntityInput } from '../../entity/consensus';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../../entity/consensus/hanko-witness';
-import { deriveLocalEntityCryptoKeys } from '../../entity/crypto';
+import { deriveLocalEntityCryptoKeys } from '../../entity/auth/crypto';
 import { generateLazyEntityId } from '../../entity/factory';
 import type { EntityFrame, EntityReplica, EntityState } from '../../entity/types';
 import { createEmptyEnv } from '../../runtime';

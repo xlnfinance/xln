@@ -2,7 +2,7 @@ import type { EntityState } from '../types';
 import {
   getConsumptionTreeByteLength,
   type ConsumptionAccumulatorState,
-} from '../consumption-accumulator';
+} from '../consumption/consumption-accumulator';
 import { encodeCanonicalEntityConsensusState } from './state-root';
 import { shortId } from '../../infra/logger';
 import type { EntityRuntimeContext } from '../runtime-context';

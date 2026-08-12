@@ -16,7 +16,7 @@ import { deriveEncryptionKeyPair, pubKeyToHex } from '../../protocol/p2p-crypto'
 import {
   computeProfileHash,
   computeProfileRouteHash,
-} from '../../entity/profile-signing';
+} from '../../entity/profile/profile-signing';
 import { computeValidatorEncryptionAttestationDigest } from '../../protocol/htlc/validator-encryption';
 
 type CryptographicProfileOptions = Readonly<{

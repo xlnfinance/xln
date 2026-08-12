@@ -57,7 +57,7 @@ import {
 import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../entity/tx/htlc-route-lifecycle';
 
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 
 import { isLeftEntity } from '../entity/id';
 
@@ -72,9 +72,9 @@ import { createEntityFrameHash } from '../entity/consensus/frame';
 
 import { buildSignedEntityCommand, prepareLocallyAuthoredEntityTxs } from '../entity/command';
 
-import { signedEntityCommandTx } from '../entity/command-codec';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
 
-import { buildCollectiveEntityProposalTx } from '../entity/authorization';
+import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
 
 import { generateProposalId } from '../entity/tx/proposals';
 

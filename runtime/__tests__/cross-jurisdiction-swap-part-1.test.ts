@@ -26,7 +26,7 @@ import {
   entityTxContainsCrossJMaterialization,
   selectCrossJCommitPhaseTxs,
   selectCrossJOpeningAccountProposalTxs,
-} from '../entity/cross-j-proposer-materialization';
+} from '../entity/transition/cross-j-proposer-materialization';
 
 import { prepareLocallyAuthoredEntityTxs } from '../entity/command';
 
@@ -56,7 +56,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import { createDefaultDelta } from '../account/state/delta';
 
 import { cloneAccountReplica } from '../account/state/state-clone';
-import { cloneEntityReplica } from '../entity/replica-clone';
+import { cloneEntityReplica } from '../entity/replica/replica-clone';
 import { cloneEntityState } from '../entity/state-clone';
 
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
@@ -183,15 +183,15 @@ import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 
 import { buildLocalEntityProfile } from '../network/p2p/gossip/helper';
 
-import { collectLocalProfileEncryptionAnnouncements } from '../entity/profile-encryption';
+import { collectLocalProfileEncryptionAnnouncements } from '../entity/profile/profile-encryption';
 
 import { LIMITS } from '../config/constants';
 
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 
-import { assertRuntimeOutputAuthorization } from '../entity/authorization';
-import { getConsumptionNodeStore } from '../entity/consumption-store';
-import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
+import { assertRuntimeOutputAuthorization } from '../entity/auth/authorization';
+import { getConsumptionNodeStore } from '../entity/consumption/consumption-store';
+import { getAccountJClaimNodeStore } from '../entity/account/account-j-claim-node-store';
 
 import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
 

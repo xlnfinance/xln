@@ -14,7 +14,7 @@ import {
 import { LIMITS } from '../config/constants';
 import type { AccountReplica, AccountTx } from '../types/account';
 import { createEmptyEnv } from '../runtime';
-import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import { makeAccount as makeCanonicalAccount } from './helpers/cross-j';
 
 const accountContext = () =>

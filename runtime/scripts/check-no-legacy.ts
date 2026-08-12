@@ -61,7 +61,7 @@ const ALLOWLIST: readonly Allowance[] = [
     reason: 'Third-party @ethereumjs/tx export name for pre-EIP-2718 transactions.',
   },
   {
-    file: 'runtime/entity/profile.ts',
+    file: 'runtime/entity/profile/index.ts',
     match: 'assertNoLegacyProfileFields',
     reason: 'Enforcement: rejects pre-canonical profile fields rather than reading them.',
   },

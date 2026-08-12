@@ -3,7 +3,7 @@ import { applyRuntimeStorageChanges } from './env-events';
 import {
   canonicalizeLocalEntityCryptoKeys,
   resolveReplicaEntityCryptoKeys,
-} from '../entity/crypto';
+} from '../entity/auth/crypto';
 import { normalizeEntitySwapTradingPairs } from './swap-pairs';
 import { initCrontab } from '../entity/scheduler';
 import {

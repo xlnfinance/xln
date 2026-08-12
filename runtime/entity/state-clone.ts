@@ -11,7 +11,7 @@ import { structuredCloneOrThrow } from '../protocol/structured-clone';
 import { cloneCrossJurisdictionAccountTxRoute } from '../extensions/cross-j';
 import { applyAccountClonePolicy } from '../account/state/state-clone';
 import { copyEntityFrameEvents } from './frame-events';
-import { validateEntityState } from './state-validation';
+import { validateEntityState } from './state/state-validation';
 import { forkEntityAccountCommitmentCache } from './consensus/state-root';
 import { forkAccountWorkIndexes } from './consensus/account-work-index';
 import { forkCrossJurisdictionBookAdmissionIndex } from '../extensions/cross-j/orderbook';
@@ -19,12 +19,12 @@ import {
   createEntityAccountCandidateMap,
   commitEntityAccountCandidate,
   snapshotEntityAccountMap,
-} from './candidate-map';
+} from './state/candidate-map';
 import {
   commitEntityOrderbookCandidate,
   createEntityOrderbookCandidate,
   snapshotEntityOrderbookCandidate,
-} from './candidate-map';
+} from './state/candidate-map';
 
 const cloneLog = createStructuredLogger('entity.state_clone');
 

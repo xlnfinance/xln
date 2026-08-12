@@ -12,7 +12,7 @@ import { canonicalizeRuntimeWsAudience, directRuntimeWsAudience } from './ws-pro
 import { buildLocalEntityProfile } from './gossip/helper';
 import { extractEntityId } from '../../protocol/identity';
 import { getSignerPrivateKeyIfAvailable, registerSignerPublicKey } from '../../account/crypto';
-import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../../entity/profile-signing';
+import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../../entity/profile/profile-signing';
 import { inspectHankoForHash } from '../../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../../protocol/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
@@ -39,7 +39,7 @@ import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
   type ValidatorEncryptionAnnouncement,
-} from '../../entity/profile-encryption';
+} from '../../entity/profile/profile-encryption';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/entity-input/entity-input-envelope-auth.ts';
 

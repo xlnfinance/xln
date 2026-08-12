@@ -20,7 +20,7 @@ import {
 } from '../../../account/commitment/state-root';
 import { applyAccountInput } from '../../../account/consensus';
 import { createLocalAccountInput } from '../../../account/input';
-import { assertEntityAccountInsertionCapacity } from '../../account-capacity';
+import { assertEntityAccountInsertionCapacity } from '../../account/account-capacity';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { resolveJurisdictionRebalanceDefaults } from '../../../account/config/defaults';
 import { buildHubRebalancePolicyTx } from './account-admin';

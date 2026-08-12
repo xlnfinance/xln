@@ -1,10 +1,10 @@
 import { parseProfile, type Profile } from '../../entity/profile';
-import { validateEntityReplica } from '../../entity/replica-validation';
+import { validateEntityReplica } from '../../entity/replica/replica-validation';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { cloneIsolatedRuntimeSnapshot } from '../../runtime/input-clone';
-import { assertAccountJClaimRootsAvailable } from '../../entity/account-j-claim-node-store';
-import { assertConsumptionRootsAvailable } from '../../entity/consumption-store';
+import { assertAccountJClaimRootsAvailable } from '../../entity/account/account-j-claim-node-store';
+import { assertConsumptionRootsAvailable } from '../../entity/consumption/consumption-store';
 import { assertCertifiedBoardRootsAvailable } from '../../jurisdiction/machine/board-registry';
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
 import {

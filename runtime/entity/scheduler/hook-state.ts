@@ -1,7 +1,7 @@
 import type {
   CrontabState,
   ScheduledHook,
-} from '../scheduler-types';
+} from './types';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
 
 const crontabLog = createStructuredLogger('entity.crontab');

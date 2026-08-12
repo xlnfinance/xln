@@ -31,7 +31,7 @@ import {
   type HankoWitnessEntry,
 } from '../entity/consensus/hanko-witness';
 import { generateLazyEntityId } from '../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { handleExtendCreditEntityTx } from '../entity/tx/handlers/account-admin';
 import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { createEmptyEnv } from '../runtime';
@@ -45,12 +45,12 @@ import {
 import {
   cacheCommittedConsumptionNodeChanges,
   getConsumptionNodeStore,
-} from '../entity/consumption-store';
+} from '../entity/consumption/consumption-store';
 import {
   createConsumptionProof,
   getConsumptionKey,
   verifyConsumptionProof,
-} from '../entity/consumption-accumulator';
+} from '../entity/consumption/consumption-accumulator';
 import type { AccountReplica, AccountInput, AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { ConsensusOutputOrigin, EntityTx } from '../types/entity-tx';

@@ -177,7 +177,7 @@ import {
 } from '../../jurisdiction/machine/local-history';
 import { getEntityFrameJRangeBudgetError } from '../../jurisdiction/machine/range-budget';
 import type { EntityTx } from '../../types/entity-tx';
-import { emitDefaultProposerHtlcOnionAdvances } from '../htlc-onion-post-commit';
+import { emitDefaultProposerHtlcOnionAdvances } from '../transition/htlc-onion-post-commit';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityOutput, EntityReplica, EntityFrame } from '../types';
 import { getEntityLeaderState, isEntityActiveLeader } from './leader';

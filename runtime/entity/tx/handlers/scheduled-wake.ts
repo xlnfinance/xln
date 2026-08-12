@@ -2,8 +2,8 @@ import type { EntityCandidateEffect, EntityState, HashToSign } from '../../types
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { executeCrontab } from '../../scheduler';
-import { assertScheduledWakeMatchesState } from '../../scheduled-wake-validation';
-import { isCollectiveEntityActionTx } from '../../authorization';
+import { assertScheduledWakeMatchesState } from '../../scheduler/scheduled-wake-validation';
+import { isCollectiveEntityActionTx } from '../../auth/authorization';
 
 type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;
 

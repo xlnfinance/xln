@@ -5,7 +5,7 @@ import type {
   CrontabExecutionContext,
   EntityTransitionContext,
   ScheduledHook,
-} from '../scheduler-types';
+} from './types';
 import { getCertifiedBoardNodeStore } from '../../jurisdiction/machine/board-registry';
 import {
   applyBoardRotationResealMigrations,

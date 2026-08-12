@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, signAccountFrame } from '../account/crypto';
 import { buildSignedEntityCommand } from '../entity/command';
-import { signedEntityCommandTx } from '../entity/command-codec';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
 import { applyEntityInput } from '../entity/consensus';
 import { buildEntityLeaderVoteBody, hashEntityLeaderVoteBody } from '../entity/consensus/leader';
 import { encodeBoard, hashBoard } from '../entity/factory';

@@ -2,7 +2,7 @@ import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, Runtim
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { RuntimeP2P, type P2PConfig } from '../network/p2p/p2p';
 import { isRuntimeId } from '../network/p2p/auth/runtime-id';
-import { assertLocalEntityCryptoKeys } from '../entity/crypto';
+import { assertLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import type { RuntimeInboundEntityInputsResult } from './entity-routing';
 import { isDeliveryDelivered } from '../protocol/payments/delivery-result';
 import {

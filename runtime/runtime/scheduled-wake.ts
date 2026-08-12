@@ -6,7 +6,7 @@ import {
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   type ScheduledWakeJob,
   type ScheduledWakeTx,
-} from '../entity/scheduled-wake-validation';
+} from '../entity/scheduler/scheduled-wake-validation';
 import { compareStableText } from '../protocol/serialization';
 import {
   buildEntityLeaderVoteBody,

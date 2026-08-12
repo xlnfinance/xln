@@ -293,7 +293,7 @@ runtime/account/tx/handlers/custody-deposit.ts
 runtime/account/tx/handlers/custody-withdraw.ts
 runtime/account/tx/handlers/custody-debit.ts
 runtime/types/account.ts            (add custody to Account state)
-runtime/entity/scheduler.ts         (check custody before R→C)
+runtime/entity/scheduler/index.ts   (check custody before R→C)
 frontend/src/lib/components/Entity/CustodyPanel.svelte
 docs/custody.md                     (this file)
 ```

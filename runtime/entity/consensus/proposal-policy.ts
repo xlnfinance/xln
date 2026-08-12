@@ -4,7 +4,7 @@ import { selectEntityTxsWithinJRangeBudget } from '../../jurisdiction/machine/ra
 import type { EntityTx } from '../../types/entity-tx';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityState, EntityFrame } from '../types';
-import { selectCrossJCommitPhaseTxs } from '../cross-j-proposer-materialization';
+import { selectCrossJCommitPhaseTxs } from '../transition/cross-j-proposer-materialization';
 import { selectEntityFrameTxByteBudget } from './frame';
 import {
   normalizeConsensusOutputOrigin,

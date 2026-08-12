@@ -242,7 +242,7 @@ for (const path of [
   'runtime/qa/runtime-ascii.ts',
   'runtime/protocol/dispute/proof-builder.ts',
   'runtime/network/p2p/gossip/helper.ts',
-  'runtime/entity/profile.ts',
+  'runtime/entity/profile/index.ts',
 ] as const) {
   assertNotMatches(readText(path), /\b65_535\b|\b65535\b/, path);
 }

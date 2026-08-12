@@ -15,7 +15,7 @@ import {
   createAccountJClaimProof,
   verifyAccountJClaimProof,
 } from '../account/j-claims/j-claim-accumulator';
-import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
+import { getAccountJClaimNodeStore } from '../entity/account/account-j-claim-node-store';
 import { generateLazyEntityId } from '../entity/factory';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 import { dbRootPath } from '../runtime/platform';

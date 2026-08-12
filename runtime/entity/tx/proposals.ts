@@ -3,7 +3,7 @@ import type { EntityRuntimeContext } from '../runtime-context';
 import { createHash } from '../../infra/platform-crypto';
 import { safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
-import { canonicalEntityBoardSignerId, hashEntityProposalAction } from '../authorization';
+import { canonicalEntityBoardSignerId, hashEntityProposalAction } from '../auth/authorization';
 import { addMessage } from '../frame-events';
 import { nextEntityCommandNonce, resolveEntityCommandBoard } from '../command';
 import { LIMITS } from '../../config/constants';

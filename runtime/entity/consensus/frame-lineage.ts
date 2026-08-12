@@ -1,5 +1,5 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
-import { cloneIsolatedProposedEntityFrame } from '../input-clone';
+import { cloneIsolatedProposedEntityFrame } from '../state/input-clone';
 import type {
   CertifiedEntityFrameLink,
   EntityCandidateEffect,

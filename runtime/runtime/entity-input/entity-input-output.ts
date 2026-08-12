@@ -19,8 +19,8 @@ import {
   applyEntityInputToReplica,
   type AppliedEntityReplicaInput,
 } from './entity-input-replica.ts';
-import { cacheCommittedConsumptionNodeChanges } from '../../entity/consumption-store.ts';
-import { cacheCommittedAccountJClaimNodeChanges } from '../../entity/account-j-claim-node-store.ts';
+import { cacheCommittedConsumptionNodeChanges } from '../../entity/consumption/consumption-store';
+import { cacheCommittedAccountJClaimNodeChanges } from '../../entity/account/account-j-claim-node-store';
 import {
   applyStorageChanges,
   publishEntityCandidateEffects,

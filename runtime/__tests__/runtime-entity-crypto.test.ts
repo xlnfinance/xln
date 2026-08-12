@@ -6,7 +6,7 @@ import {
   assertPersistedLocalEntityCryptoKeys,
   deriveLocalEntityCryptoKeys,
   requireEntityEncryptionPrivateKey,
-} from '../entity/crypto';
+} from '../entity/auth/crypto';
 import { createEmptyEnv, generateLazyEntityId } from '../runtime';
 import { applyRuntimeTx } from '../runtime/tx-handlers';
 

@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from 'bun:test';
-import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { applyAccountInput, proposeAccountFrame } from '../account/consensus';
@@ -10,9 +10,9 @@ import { computeAccountStateRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../account/co
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { LIMITS } from '../config/constants';
 import { applyEntityInput } from '../entity/consensus';
-import { assertEntityAccountInsertionCapacity } from '../entity/account-capacity';
+import { assertEntityAccountInsertionCapacity } from '../entity/account/account-capacity';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { isLeftEntity } from '../entity/id';
 import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
 import { handleOpenAccountEntityTx } from '../entity/tx/handlers/open-account';
@@ -25,7 +25,7 @@ import type { AccountReplica, AccountTx } from '../types/account';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { validateAccountReplica } from '../account/validation/state-validation';
-import { validateEntityState } from '../entity/state-validation';
+import { validateEntityState } from '../entity/state/state-validation';
 import { sealAccountDraftAsEntity } from './helpers/account-draft';
 
 const entityId = `0x${'11'.repeat(32)}`;

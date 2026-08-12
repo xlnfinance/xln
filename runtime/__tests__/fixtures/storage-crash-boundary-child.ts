@@ -21,9 +21,9 @@ import {
 import {
   applyEntityFrame,
 } from '../../entity/consensus';
-import { buildCollectiveEntityProposalTx } from '../../entity/authorization';
+import { buildCollectiveEntityProposalTx } from '../../entity/auth/authorization';
 import { buildSignedEntityCommand } from '../../entity/command';
-import { signedEntityCommandTx } from '../../entity/command-codec';
+import { signedEntityCommandTx } from '../../entity/command/command-codec';
 import {
   createEntityFrameHashFromStateRoot,
 } from '../../entity/consensus/frame';

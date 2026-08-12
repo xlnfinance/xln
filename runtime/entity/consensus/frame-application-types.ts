@@ -8,7 +8,7 @@ import type {
   AccountJClaimNode,
   AccountJClaimNodeStore,
 } from '../../types/account-j-claims';
-import type { ConsumptionNode } from '../consumption-accumulator';
+import type { ConsumptionNode } from '../consumption/consumption-accumulator';
 import type {
   SwapCancelEvent,
   SwapCancelRequestEvent,

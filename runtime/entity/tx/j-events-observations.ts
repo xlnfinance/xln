@@ -4,7 +4,7 @@ import { formatTokenAmount } from '../../account/financial-utils';
 import {
   applySignerEntityExternalWalletDelta,
   applySignerEntityExternalWalletSnapshot,
-} from '../signer-wallet';
+} from '../auth/signer-wallet';
 import { applyKnownHtlcSecret } from './j-events-htlc';
 import { applyDebtCreated, applyDebtEnforced, applyDebtForgiven } from './j-events-debt';
 import type { FinalizedJEventContext } from './j-events';

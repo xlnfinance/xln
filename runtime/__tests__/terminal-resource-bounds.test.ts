@@ -24,7 +24,7 @@ import type {
 } from '../entity/types';
 import type { EntityTx } from '../types/entity-tx';
 import { validateAccountReplica } from '../account/validation/state-validation';
-import { validateEntityReplica } from '../entity/replica-validation';
+import { validateEntityReplica } from '../entity/replica/replica-validation';
 import { publishEntityCandidateEffects } from '../runtime/env-events';
 
 const leftEntity = `0x${'11'.repeat(32)}`;

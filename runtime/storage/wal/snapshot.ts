@@ -2,7 +2,7 @@ import type { EntityReplica } from '../../entity/types';
 import type { RuntimeReplica, EnvSnapshot, RoutedEntityInput, RuntimeInput } from '../../runtime/types';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { Profile } from '../../entity/profile';
-import { cloneEntityReplica } from '../../entity/replica-clone';
+import { cloneEntityReplica } from '../../entity/replica/replica-clone';
 import { markRestoredJSubmitRuntimeTxs } from '../../runtime/j-submit-state';
 import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/machine/registration-evidence';
 import { markRestoredJImportResultRuntimeTxs } from '../../runtime/jurisdiction-import';
@@ -17,14 +17,14 @@ import {
   collectReachableConsumptionNodes,
   getConsumptionNodeStore,
   getLiveConsumptionAccumulatorStates,
-} from '../../entity/consumption-store';
+} from '../../entity/consumption/consumption-store';
 import {
   collectReachableAccountJClaimNodes,
 } from '../../account/j-claims/j-claim-accumulator';
 import {
   getAccountJClaimNodeStore,
   getLiveAccountJClaimAccumulatorStates,
-} from '../../entity/account-j-claim-node-store';
+} from '../../entity/account/account-j-claim-node-store';
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,

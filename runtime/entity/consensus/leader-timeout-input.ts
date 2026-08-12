@@ -4,7 +4,7 @@ import { shortId } from '../../infra/logger';
 import {
   cloneIsolatedEntityLeaderCertificate,
   cloneIsolatedEntityLeaderTimeoutVote,
-} from '../input-clone';
+} from '../state/input-clone';
 import type { EntityLeaderTimeoutVote, EntityFrame } from '../types';
 import {
   assertEntityLeaderVoteMatchesState,

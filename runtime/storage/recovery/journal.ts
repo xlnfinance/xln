@@ -4,7 +4,7 @@ import {
   cloneIsolatedRuntimeInput,
 } from '../../runtime/input-clone';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
-import { getConsumptionNodeStore } from '../../entity/consumption-store';
+import { getConsumptionNodeStore } from '../../entity/consumption/consumption-store';
 import {
   deleteRuntimeMetadata,
   readRuntimeMetadata,

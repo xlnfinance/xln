@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import { sealAccountDraftAsEntity } from './helpers/account-draft';
 
 import { x25519 } from '@noble/curves/ed25519.js';
@@ -72,9 +72,9 @@ import { createEntityFrameHash } from '../entity/consensus/frame';
 
 import { buildSignedEntityCommand, prepareLocallyAuthoredEntityTxs } from '../entity/command';
 
-import { signedEntityCommandTx } from '../entity/command-codec';
+import { signedEntityCommandTx } from '../entity/command/command-codec';
 
-import { buildCollectiveEntityProposalTx } from '../entity/authorization';
+import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
 
 import { generateProposalId } from '../entity/tx/proposals';
 

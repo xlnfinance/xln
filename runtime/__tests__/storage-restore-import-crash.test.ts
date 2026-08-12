@@ -19,8 +19,8 @@ import {
   createConsumptionProof,
   getConsumptionKey,
   verifyConsumptionProof,
-} from '../entity/consumption-accumulator';
-import { getConsumptionNodeStore } from '../entity/consumption-store';
+} from '../entity/consumption/consumption-accumulator';
+import { getConsumptionNodeStore } from '../entity/consumption/consumption-store';
 
 const fixture = join(import.meta.dir, 'fixtures/storage-restore-import-crash-child.ts');
 const namespaces: string[] = [];

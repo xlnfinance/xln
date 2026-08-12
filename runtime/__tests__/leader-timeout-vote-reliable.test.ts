@@ -15,7 +15,7 @@ import {
 } from '../entity/consensus/leader';
 import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import { generateLazyEntityId } from '../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { initCrontab } from '../entity/scheduler';
 import {
   createDueScheduledWakeInputs,

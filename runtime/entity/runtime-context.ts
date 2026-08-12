@@ -4,7 +4,7 @@ import type { JReplica } from '../types/jurisdiction-runtime';
 import type { LogCategory } from '../types/logging';
 import type {
   ConsumptionNodeStore,
-} from './consumption-accumulator-types';
+} from './consumption/consumption-accumulator-types';
 import type { EntityReplica } from './types';
 
 /**

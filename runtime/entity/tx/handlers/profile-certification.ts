@@ -2,11 +2,11 @@ import type { EntityState, HashToSign } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
-import { buildValidatorEncryptionBoard } from '../../profile-encryption';
+import { buildValidatorEncryptionBoard } from '../../profile/profile-encryption';
 import {
   buildEntityProfileDescriptor,
   computeEntityProfileDescriptorHash,
-} from '../../profile-descriptor';
+} from '../../profile/profile-descriptor';
 import {
   requireCompleteValidatorEncryptionManifest,
   validatePersistedValidatorEncryptionManifest,

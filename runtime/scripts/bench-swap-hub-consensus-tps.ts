@@ -18,7 +18,7 @@ import type { RuntimeReplica } from '../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { getPerfMs } from '../infra/time';
 import { createDefaultDelta } from '../account/state/delta';
-import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 
 type Cli = {
   swaps: number;

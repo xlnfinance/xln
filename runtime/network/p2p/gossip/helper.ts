@@ -17,8 +17,8 @@ import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKeyIfAvailab
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../../../protocol/p2p-crypto';
 import { UINT16_MAX } from '../../../config/constants';
 import { requireCompleteValidatorEncryptionManifest } from '../../../protocol/htlc/validator-encryption';
-import { getProfileEncryptionAttestations } from '../../../entity/profile-encryption';
-import { buildEntityProfileDescriptor } from '../../../entity/profile-descriptor';
+import { getProfileEncryptionAttestations } from '../../../entity/profile/profile-encryption';
+import { buildEntityProfileDescriptor } from '../../../entity/profile/profile-descriptor';
 
 type BuiltProfile = Omit<Profile, 'runtimeId' | 'runtimeEncPubKey'>;
 

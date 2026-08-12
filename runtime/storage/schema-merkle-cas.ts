@@ -1,5 +1,5 @@
 import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
-import type { ConsumptionNode } from '../entity/consumption-accumulator';
+import type { ConsumptionNode } from '../entity/consumption/consumption-accumulator';
 import type { AccountJClaimNode } from '../account/j-claims/j-claim-accumulator';
 import type {
   StorageMerkleBranchDoc,

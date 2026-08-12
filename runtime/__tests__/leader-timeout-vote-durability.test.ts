@@ -13,7 +13,7 @@ import {
   hashEntityLeaderVoteBody,
 } from '../entity/consensus/leader';
 import { generateLazyEntityId } from '../entity/factory';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { initCrontab } from '../entity/scheduler';
 import { dbRootPath } from '../runtime/platform';
 import {

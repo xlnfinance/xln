@@ -9,7 +9,7 @@ import {
   signDigest,
 } from '../../account/crypto';
 import { buildSignedEntityCommand } from '../../entity/command';
-import { signedEntityCommandTx } from '../../entity/command-codec';
+import { signedEntityCommandTx } from '../../entity/command/command-codec';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../../entity/consensus/hanko-witness';
 import { getEntityLeaderState } from '../../entity/consensus/leader';

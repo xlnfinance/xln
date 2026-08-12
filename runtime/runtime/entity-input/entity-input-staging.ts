@@ -33,8 +33,8 @@ import {
   collectCommittedEntityResult,
   recordEntityInputProfile,
 } from './entity-input-output.ts';
-import { cacheCommittedConsumptionNodeChanges } from '../../entity/consumption-store.ts';
-import { cacheCommittedAccountJClaimNodeChanges } from '../../entity/account-j-claim-node-store.ts';
+import { cacheCommittedConsumptionNodeChanges } from '../../entity/consumption/consumption-store';
+import { cacheCommittedAccountJClaimNodeChanges } from '../../entity/account/account-j-claim-node-store';
 
 export const collectCommittedAccountFrames = (
   input: RoutedEntityInput,

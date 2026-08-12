@@ -2,7 +2,7 @@ import type { AccountBoardResealMigration, AccountDisputeSeal, AccountReplica } 
 import type { EntityInput, EntityState, HashToSign } from '../types';
 import type { CertifiedBoardNodeStore } from '../../types/entity-board-registry';
 import type { JurisdictionEvent } from '../../types/jurisdiction-events';
-import { resolveObserverCertifiedAccountCounterpartyProposer } from '../account-counterparty-route';
+import { resolveObserverCertifiedAccountCounterpartyProposer } from '../account/account-counterparty-route';
 import { buildCertifiedEntityOutput } from './cross-j-outputs';
 
 type BoardActivatedEvent = Extract<JurisdictionEvent, { type: 'BoardActivated' }>;

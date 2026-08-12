@@ -1,6 +1,6 @@
 import type { AccountFrame, AccountReplica } from '../../types/account';
 import type { RuntimeReplica } from '../types';
-import { validateEntityState } from '../../entity/state-validation';
+import { validateEntityState } from '../../entity/state/state-validation';
 import { computeFrameHash } from '../../account/consensus/index';
 import { assertAccountFrameDeltaIntegrity } from '../../account/state/frame';
 

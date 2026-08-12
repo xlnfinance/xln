@@ -22,7 +22,7 @@ import type {
   CrontabExecutionContext,
   EntityTransitionContext,
   CrontabTaskState,
-} from '../scheduler-types';
+} from './types';
 import { getRebalanceAccountIds } from '../consensus/account-work-index';
 
 const crontabLog = createStructuredLogger('entity.crontab');

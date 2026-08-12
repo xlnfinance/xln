@@ -5,9 +5,9 @@ import type { LendingTermId } from './lending';
 import type { ProposalAction } from '../entity/types';
 import type { PaymentDeliveryMode } from './payment';
 import type { ValidatorEncryptionAttestation } from '../protocol/htlc/validator-encryption';
-import type { EntityProfileDescriptor } from '../entity/profile-descriptor';
+import type { EntityProfileDescriptor } from '../entity/profile/profile-descriptor';
 import type { CertifiedBoardAuthorityBinding } from './entity-board-registry';
-import type { ConsumptionProof } from '../entity/consumption-accumulator-types';
+import type { ConsumptionProof } from '../entity/consumption/consumption-accumulator-types';
 import type { MultiRecipientCiphertext } from '../protocol/htlc/multi-recipient';
 
 type ProfileUpdateTx = {

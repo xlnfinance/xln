@@ -25,8 +25,8 @@ import type { RuntimeFrame } from '../storage/types';
 import { createEmptyBatch } from '../jurisdiction/machine/batch';
 import { validateDurableRuntimeMachineSnapshot } from '../storage/wal/runtime-machine-schema';
 import { validateEntityTx } from '../entity/tx-validation';
-import { buildEntityTransactionProposalAction } from '../entity/authorization';
-import { hashEntityCommandTxs } from '../entity/command-codec';
+import { buildEntityTransactionProposalAction } from '../entity/auth/authorization';
+import { hashEntityCommandTxs } from '../entity/command/command-codec';
 import {
   KEY_HEAD,
   keyAccountJClaimNode,

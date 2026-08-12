@@ -18,7 +18,7 @@
 import type { ConsensusConfig, EntityReplica } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
-import { buildEntityTransactionProposalAction, hashEntityProposalAction } from '../entity/authorization';
+import { buildEntityTransactionProposalAction, hashEntityProposalAction } from '../entity/auth/authorization';
 import { prepareLocallyAuthoredEntityTxs } from '../entity/command';
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../entity/factory';
 import { getEntityLeaderState } from '../entity/consensus/leader';
