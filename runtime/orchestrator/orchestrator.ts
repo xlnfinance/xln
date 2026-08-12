@@ -186,7 +186,7 @@ import {
 import {
   buildRuntimeHealthFailures,
   normalizeRuntimeFailureCode,
-} from '../protocol/failure-taxonomy';
+} from '../protocol/errors/failure-taxonomy';
 import { STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
 import {
   deriveMeshChildSeed,

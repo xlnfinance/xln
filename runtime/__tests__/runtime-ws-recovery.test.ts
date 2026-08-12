@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveSignerAddressSync } from '../account/crypto';
-import { deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
+import { deriveEncryptionKeyPair } from '../protocol/crypto/p2p-crypto';
 import { RuntimeWsClient } from '../network/p2p/ws-client';
 import { canonicalizeRuntimeWsAudience, deserializeWsMessage, serializeWsMessage } from '../network/p2p/ws-protocol';
 import { startStandaloneRelayServer, type StandaloneRelayServer } from '../network/relay/standalone-server';

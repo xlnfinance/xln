@@ -3,7 +3,7 @@ import { readEntityFrameEventMessages } from '../entity/frame-events';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
+import { deriveAccountWatchSeed } from '../protocol/identity/account-watch-seed';
 import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
 import { createEmptyEnv } from '../runtime';
 import { createAccountConsensusContext } from '../entity/account/account-consensus-context';

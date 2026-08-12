@@ -1,4 +1,4 @@
-import type { RuntimeOverlayRecord } from '../types/account';
+import type { RuntimeOverlayRecord } from '../../types/account';
 
 const normalizeOverlayEntityId = (value: string): string =>
   String(value || '').toLowerCase();

@@ -1,10 +1,10 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import type { EntityTx } from '../../types/entity-tx';
 import type { RuntimeReplica, ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, RoutedEntityInput } from '../types';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { hasEntityCommitCertificate } from '../../entity/auth/signatures';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
-import { txFingerprint } from '../../protocol/tx-multiset';
+import { txFingerprint } from '../../protocol/state/tx-multiset';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { buildPreparedFrameEvidence, hashEntityLeaderVoteBody } from '../../entity/consensus/leader';
 import { hashJPrefixAttestation } from '../../jurisdiction/machine/j-prefix-consensus';

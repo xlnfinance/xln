@@ -5,7 +5,7 @@ import {
   validateNumber,
   validateObject,
   validateString,
-} from '../../../protocol/validation-primitives';
+} from '../../../protocol/boundary/validation-primitives';
 import type { EntityLeaderTimeoutVote, EntityFrame } from '../../types';
 import { validateEntityTxs } from '../../tx-validation';
 import { assertEntityFrameEventByteBudget } from './events';

@@ -33,17 +33,17 @@ import {
   XLN_URI_SCHEME,
   DEFAULT_RUNTIME_HOST,
   MAX_NUMBERED_ENTITY,
-} from '../protocol/identity.js';
+} from '../protocol/identity/index.js';
 import {
   formatEntityDisplay,
   formatSignerDisplay,
   formatReplicaDisplay,
   getEntityDisplayNumber,
-} from '../protocol/identity-display.js';
+} from '../protocol/identity/identity-display.js';
 import {
   parseReplicaUri,
   formatReplicaUri,
-} from '../protocol/identity-uri.js';
+} from '../protocol/identity/identity-uri.js';
 
 describe('Identity System - Type Constructors', () => {
   test('toEntityId creates branded EntityId', () => {

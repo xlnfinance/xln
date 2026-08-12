@@ -2,7 +2,7 @@ import { compareCanonicalText, swapKey, type SwapKey } from './swap-keys.ts';
 import { deriveSide } from './types.ts';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { UINT16_MAX } from '../config/constants.ts';
-import { deriveTransferOffdeltaChange } from '../protocol/delta-movement.ts';
+import { deriveTransferOffdeltaChange } from '../protocol/transform/delta-movement';
 import { computeSwapPriceTicks } from './types.ts';
 
 export const MAX_SWAP_FILL_RATIO = UINT16_MAX;

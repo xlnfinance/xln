@@ -113,8 +113,8 @@ export {
   formatSignerDisplay,
   formatReplicaDisplay,
   getEntityDisplayNumber,
-} from '../../protocol/identity-display';
-export { formatReplicaUri, parseReplicaUri } from '../../protocol/identity-uri';
+} from '../../protocol/identity/identity-display';
+export { formatReplicaUri, parseReplicaUri } from '../../protocol/identity/identity-uri';
 
 import type {
   RuntimeAdapterGraphEntityCore,

@@ -26,7 +26,7 @@ import {
   deriveEncryptionKeyPair,
   encryptJSON,
   pubKeyToHex,
-} from '../../protocol/p2p-crypto';
+} from '../../protocol/crypto/p2p-crypto';
 import {
   closeInfraDb,
   closeRuntimeDb,

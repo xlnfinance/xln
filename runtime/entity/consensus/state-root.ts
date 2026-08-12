@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import type { AccountReplica, AccountState } from '../../types/account';
 import type { ConsensusConfig, EntityFrameAuthority, EntityLeaderState, EntityState } from '../types';
 import { compareStableText } from '../../protocol/serialization';
-import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import { cloneAccountInputWithoutPostCommitHankos, cloneAccountTxWithoutPostCommitHankos } from './input/hanko-witness';
 import { computeBookCommitmentHash } from '../../orderbook/commitment';
 import { createStructuredLogger } from '../../infra/logger';

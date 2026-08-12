@@ -21,7 +21,7 @@ import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
 
-import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
+import { deriveAccountWatchSeed } from '../protocol/identity/account-watch-seed';
 
 import { applyAccountTx } from '../account/tx/apply';
 

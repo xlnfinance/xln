@@ -4,9 +4,9 @@
  */
 
 import { ethers } from 'ethers';
-import { normalizeEntityId } from '../protocol/entity-id';
+import { normalizeEntityId } from '../protocol/identity/entity-id';
 
-export { compareEntityIds, isLeftEntity, normalizeEntityId } from '../protocol/entity-id';
+export { compareEntityIds, isLeftEntity, normalizeEntityId } from '../protocol/identity/entity-id';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // UNIVERSAL ENTITY ID PARSER

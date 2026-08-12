@@ -2,7 +2,7 @@ import { normalizeSubmitId } from '../command/submit-identity';
 import type { EntityReplica } from '../../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../types';
 import type { JTx } from '../../types/jurisdiction-runtime';
-import { classifyRuntimeJBatchFailure } from '../../protocol/failure-taxonomy';
+import { classifyRuntimeJBatchFailure } from '../../protocol/errors/failure-taxonomy';
 import { safeStringify } from '../../protocol/serialization';
 import {
   buildJSubmitAttemptId,

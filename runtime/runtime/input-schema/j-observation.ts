@@ -8,7 +8,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
   requireString,
-} from '../../protocol/boundary-primitives';
+} from '../../protocol/boundary/boundary-primitives';
 
 type ObservationData = Extract<RuntimeTx, { type: 'observeJRange' }>['data'];
 

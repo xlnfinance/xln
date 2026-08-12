@@ -4,7 +4,7 @@ import hre from "hardhat";
 import type { DeltaTransformer } from "../typechain-types/index.js";
 import { buildAccountProofBody } from "../../runtime/protocol/dispute/proof-builder.ts";
 import { createEmptyAccountJClaimAccumulator } from "../../runtime/account/j-claims/j-claim-accumulator";
-import { buildPositionalSwapFillRatioBuckets } from "../../runtime/protocol/transformer-ordering.ts";
+import { buildPositionalSwapFillRatioBuckets } from "../../runtime/protocol/transform/transformer-ordering";
 import { asOfferId } from "../../runtime/orderbook/swap-keys.ts";
 import { deriveSwapOffdeltaChanges } from "../../runtime/orderbook/swap-execution.ts";
 import type { AccountReplica, SwapOffer } from "../../runtime/types.ts";

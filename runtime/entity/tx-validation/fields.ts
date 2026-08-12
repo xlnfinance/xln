@@ -7,7 +7,7 @@ import {
   requireExactBoundaryKeys,
   requireString,
   requireStringArray,
-} from '../../protocol/boundary-primitives';
+} from '../../protocol/boundary/boundary-primitives';
 
 type EntityTxFieldKind =
   | 'array'

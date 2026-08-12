@@ -1,6 +1,6 @@
 import { buildQuorumHanko } from '../../../hanko/signing';
 import { logError, shortHash, shortId } from '../../../infra/logger';
-import { removeCommittedTxsFromMempool } from '../../../protocol/tx-multiset';
+import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
 import type { EntityState, EntityFrame, EntityCandidate } from '../../types';
 import type { HankoString } from '../../../types/hanko';
 import { commitEntityFrameCandidateState } from '../../state-clone';

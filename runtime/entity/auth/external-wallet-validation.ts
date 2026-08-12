@@ -3,7 +3,7 @@ import {
   validateMapInstance,
   validateNumber,
   validateObject,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 
 const validateBalances = (value: unknown, context: string): void => {
   const balancesByOwner = validateMapInstance(value, context);

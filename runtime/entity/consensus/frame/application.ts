@@ -22,7 +22,7 @@ import {
   normalizeEntityRef,
 } from '../../../orderbook/cross-j/orderbook';
 import { swapKey, type WorkingOrderbookOffer } from '../../../orderbook/swap-execution';
-import { mergeStorageOverlayRecords } from '../../../protocol/overlay';
+import { mergeStorageOverlayRecords } from '../../../protocol/state/overlay';
 import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
 import { assertScheduledWakeFrameOrder } from '../../scheduler/scheduled-wake-validation';

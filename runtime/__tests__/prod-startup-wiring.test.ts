@@ -2334,7 +2334,7 @@ describe('production startup wiring', () => {
     expect(readyStart).toBeGreaterThan(ensureStart);
 
     const ensureConnectivity = mmNode.slice(ensureStart, readyStart);
-    expect(mmNode).toContain("import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';");
+    expect(mmNode).toContain("import { deriveAccountWatchSeed } from '../protocol/identity/account-watch-seed';");
     expect(ensureConnectivity).toContain(
       'const deriveMarketMakerAccountWatchSeed = (counterpartyId: string): string =>',
     );

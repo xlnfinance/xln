@@ -1,6 +1,6 @@
 import { RemoteRuntimeAdapter } from '../../../../runtime/api/runtime-adapter/remote';
 import { RuntimeWsClient, type RuntimeWsClientOptions } from '../../../../runtime/network/p2p/ws-client';
-import { deriveEncryptionKeyPair } from '../../../../runtime/protocol/p2p-crypto';
+import { deriveEncryptionKeyPair } from '../../../../runtime/protocol/crypto/p2p-crypto';
 import { directRuntimeWsAudience } from '../../../../runtime/network/p2p/ws-protocol';
 import { RuntimeQueryClient } from '$lib/stores/runtimeQueryClient';
 import {

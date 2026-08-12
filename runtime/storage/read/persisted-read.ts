@@ -15,7 +15,7 @@ import {
   readStorageOverlayRecordsFromDiffs,
   type StorageHead,
 } from '..';
-import { storageOverlayRecordKey } from '../../protocol/overlay';
+import { storageOverlayRecordKey } from '../../protocol/state/overlay';
 import { normalizeDbNamespace } from '../runtime-dbs';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 import { requireStorageDbOpen } from '../commit/availability';

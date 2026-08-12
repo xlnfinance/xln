@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { verifyAccountSignature } from '../../../account/crypto';
 import type { ConsensusConfig, EntityReplica, HashToSign, EntityFrame } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';

@@ -8,7 +8,7 @@ import type { DebtEntry } from '../types/finance/debt';
 import type { FrameLogEntry } from '../types/logging';
 import type { HubRebalanceConfig } from '../types/finance/rebalance';
 import type { DurableOutputRetryState } from '../runtime/delivery/durable-output-retry';
-import type { RadixMerkleRadix, RadixMerkleRootKind } from '../protocol/radix-merkle';
+import type { RadixMerkleRadix, RadixMerkleRootKind } from '../protocol/state/radix-merkle';
 import type { StorageMerkleNamespace } from './keys';
 
 export type RuntimeDbLike = {

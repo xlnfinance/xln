@@ -1,4 +1,4 @@
-import { safeStringify } from './serialization';
+import { safeStringify } from '../serialization';
 
 export type FingerprintableTx = {
   type: string;

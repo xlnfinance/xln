@@ -6,7 +6,7 @@ import {
   validateNumber,
   validateObject,
   validateString,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 import { validatePersistedValidatorEncryptionManifest } from '../../protocol/htlc/validator-encryption';
 import type { ConsensusConfig, EntityState } from '../types';
 import { assertEntityAccountCountWithinLimit } from '../account/account-capacity';

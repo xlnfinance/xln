@@ -4,7 +4,7 @@ import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAc
 import { canonicalAccountTxForFrameHash } from '../account/consensus/frame/hash';
 import type { AccountFrame, Delta } from '../types/account';
 import { decodeAccountFrame } from '../account/validation/frame-validation';
-import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../protocol/integer-ranges';
+import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../protocol/boundary/integer-ranges';
 import { TOKENS } from '../config/constants';
 
 const delta = (tokenId: number, offdelta: bigint): Delta => ({

@@ -189,7 +189,7 @@ describe('canonical binary codec', () => {
 
   test('encodes plain browser payloads without a global Buffer polyfill', () => {
     const moduleUrl = new URL('../storage/codec/binary-codec.ts', import.meta.url).href;
-    const serializationUrl = new URL('../protocol/serialization.ts', import.meta.url).href;
+    const serializationUrl = new URL('../protocol/serialization/index.ts', import.meta.url).href;
     const child = Bun.spawnSync({
       cmd: ['bun', '-e', [
         'globalThis.Buffer = undefined;',

@@ -1,4 +1,4 @@
-import { deriveTransferOffdeltaChange } from '../runtime/protocol/delta-movement';
+import { deriveTransferOffdeltaChange } from '../runtime/protocol/transform/delta-movement';
 import {
   API_BASE_URL,
   CROSS_J_SOURCE_COMMITTED_OR_ADVANCED_STATUSES,

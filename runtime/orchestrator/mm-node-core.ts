@@ -12,7 +12,7 @@ import {
   getTokenInfo,
   isLiquidSwapToken,
 } from '../account/utils';
-import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
+import { deriveAccountWatchSeed } from '../protocol/identity/account-watch-seed';
 import { deriveSwapNetAuthorization } from '../account/swap/swap-net-authorization';
 import {
   canonicalAccountRoleEvidence,

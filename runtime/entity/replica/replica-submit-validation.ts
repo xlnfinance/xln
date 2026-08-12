@@ -3,8 +3,8 @@ import {
   validateArray,
   validateObject,
   validateString,
-} from '../../protocol/validation-primitives';
-import { isRuntimeFailureSignal } from '../../protocol/failure-taxonomy';
+} from '../../protocol/boundary/validation-primitives';
+import { isRuntimeFailureSignal } from '../../protocol/errors/failure-taxonomy';
 
 const MAX_UINT256 = (1n << 256n) - 1n;
 const FINGERPRINT_LIMIT = 256;

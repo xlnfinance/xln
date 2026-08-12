@@ -5,7 +5,7 @@ import {
   validateArray,
   validateMapInstance,
   validateObject,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 
 const HISTORY_FIELDS = new Set([
   'offerId', 'giveTokenId', 'giveAmount', 'originalGiveAmount', 'wantTokenId',

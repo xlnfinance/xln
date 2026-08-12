@@ -1,7 +1,7 @@
 import { keccak256 } from 'ethers';
 
 import type { AccountReplica, AccountTx, HtlcLock } from '../../../types/account';
-import { encodeCanonicalConsensusValue } from '../../canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../serialization/canonical-consensus-value';
 import { computeHtlcSecretOfferContextHash, type HtlcEnvelope } from './envelope';
 import { isMultiRecipientCiphertext, type MultiRecipientCiphertext } from '../multi-recipient';
 

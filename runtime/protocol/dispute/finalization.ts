@@ -7,7 +7,7 @@
  * collateral allocation, reserve payment, and new-debt creation exactly.
  */
 
-import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../integer-ranges';
+import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../boundary/integer-ranges';
 
 type DisputeDirectionAmounts = Readonly<{
   leftToRight: bigint;

@@ -1,7 +1,7 @@
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import type { CryptoProvider } from '../crypto/provider';
-import { decodeBase64Bytes, encodeBase64Bytes } from '../base64';
+import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
 import { serializeTaggedJson } from '../serialization';
 import { MAX_HTLC_BINARY_LAYER_BYTES } from './codec/binary';
 import { assertExactMultiRecipientCiphertextSchema } from './multi-recipient-schema';

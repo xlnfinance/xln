@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { RuntimeSecurityIncidentTelemetry } from '../protocol/security-incident';
+import type { RuntimeSecurityIncidentTelemetry } from '../protocol/errors/security-incident';
 import {
   pushDebugEvent,
   setDebugIncidentState,

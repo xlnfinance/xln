@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import { NobleCryptoProvider } from '../../protocol/crypto/noble';
 import type { EntityInput, EntityState } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';

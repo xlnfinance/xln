@@ -2,7 +2,7 @@ import type { AccountState } from '../../types/account';
 import {
   FinancialDataCorruptionError,
   validateObject,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 import { safeStringify } from '../../protocol/serialization';
 import { decodeAccountFrame } from './frame-validation';
 import {

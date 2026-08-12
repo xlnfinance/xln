@@ -13,7 +13,7 @@ import type {
   TowerEncryptedPayloadV1,
   TowerModeV1,
 } from './types';
-import { normalizeAccountWatchSeed } from '../../../protocol/account-watch-seed';
+import { normalizeAccountWatchSeed } from '../../../protocol/identity/account-watch-seed';
 import { hashWatchtowerCounterDisputeHankoPayload } from '../../../hanko/onchain-domain';
 
 const RECOVERY_LOOKUP_DOMAIN = 'xln:recovery:lookup:v1';

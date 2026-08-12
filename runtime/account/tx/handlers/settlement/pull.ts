@@ -18,7 +18,7 @@ import {
 } from '../../../../protocol/htlc/hash-ladder';
 import { addHold, releaseHold } from '../../hold-utils';
 import { ensureDelta } from '../../delta-utils';
-import { deriveTransferOffdeltaChange } from '../../../../protocol/delta-movement';
+import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
 import { createDefaultDelta } from '../../../state/delta';
 
 type PullLockTx = Extract<AccountTx, { type: 'cross_pull_lock' }>;

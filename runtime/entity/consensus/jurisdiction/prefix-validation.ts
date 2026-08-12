@@ -5,7 +5,7 @@ import {
   validateNumber,
   validateObject,
   validateString,
-} from '../../../protocol/validation-primitives';
+} from '../../../protocol/boundary/validation-primitives';
 
 const CLAIM_KEYS = [
   'jurisdictionRef',

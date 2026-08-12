@@ -25,13 +25,13 @@ import type {
 import type { ProofBodyStruct, TransformerClauseStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
 import type { DeltaTransformer } from '../../../jurisdictions/typechain-types/contracts/DeltaTransformer.sol/DeltaTransformer.ts';
 import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body.ts';
-import { sortTransformerEntries } from '../transformer-ordering.ts';
-import { normalizeAccountWatchSeed } from '../account-watch-seed.ts';
+import { sortTransformerEntries } from '../transform/transformer-ordering';
+import { normalizeAccountWatchSeed } from '../identity/account-watch-seed';
 import { HASHLADDER_MAX_FILL_RATIO } from '../htlc/hash-ladder.ts';
 import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/machine/batch.ts';
-import { compareStableText } from '../serialization.ts';
+import { compareStableText } from '../serialization';
 import { deriveSwapOffdeltaChanges } from '../../orderbook/swap-execution.ts';
-import { deriveTransferOffdeltaChange } from '../delta-movement.ts';
+import { deriveTransferOffdeltaChange } from '../transform/delta-movement';
 import {
   hashCooperativeDisputeProofHankoPayload,
   hashCooperativeUpdateHankoPayload,

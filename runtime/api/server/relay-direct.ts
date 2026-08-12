@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from 'bun';
 import type { RuntimeReplica, RuntimeEntityInputsEnvelope } from '../../runtime/types';
-import { encryptJSON, hexToPubKey } from '../../protocol/p2p-crypto';
+import { encryptJSON, hexToPubKey } from '../../protocol/crypto/p2p-crypto';
 import {
   isRelaySocketOpen,
   normalizeRuntimeKey,

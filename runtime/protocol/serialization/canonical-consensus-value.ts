@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import { compareStableText } from './serialization';
+import { compareStableText } from './';
 
 type CanonicalStack = Map<object, string>;
 

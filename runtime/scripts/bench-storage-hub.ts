@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'path';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { hasCliFlag, readCliOption } from '../config/cli';
-import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
+import { deriveAccountWatchSeed } from '../protocol/identity/account-watch-seed';
 import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
 import { generateLazyEntityId } from '../entity/factory';
 import {

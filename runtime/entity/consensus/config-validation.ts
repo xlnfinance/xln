@@ -2,7 +2,7 @@ import {
   FinancialDataCorruptionError,
   validateArray,
   validateObject,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 import type { ConsensusConfig } from '../types';
 
 const validateShares = (

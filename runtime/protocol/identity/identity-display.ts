@@ -4,7 +4,7 @@ import {
   type EntityId,
   type ReplicaKey,
   type SignerId,
-} from './identity';
+} from './';
 
 /** Human-readable Entity label. Consensus code must keep using the full ID. */
 export const formatEntityDisplay = (entityId: EntityId): string => {

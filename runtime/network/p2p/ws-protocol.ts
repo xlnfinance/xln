@@ -17,7 +17,7 @@
 import { serializeTaggedJson } from '../../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../storage/codec/binary-codec';
-import type { Codec } from '../../protocol/codec';
+import type { Codec } from '../../protocol/serialization/codec';
 import { XLN_PROTOCOL_VERSION, type XlnProtocolVersion } from '../../protocol/version';
 import {
   requireBoundaryInteger,

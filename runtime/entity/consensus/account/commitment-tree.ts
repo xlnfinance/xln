@@ -6,7 +6,7 @@ import {
   computeRadixMerkleLeafHash,
   computeRadixMerkleRootHash,
   EMPTY_RADIX_MERKLE_ROOT,
-} from '../../../protocol/radix-merkle';
+} from '../../../protocol/state/radix-merkle';
 
 const ACCOUNT_COMMITMENT_RADIX = 16;
 

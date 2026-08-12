@@ -13,17 +13,17 @@ import type {
   PendingSettlementContinuation,
 } from '../types/entity-tx';
 import type { JAdapterFailure } from '../types/jurisdiction-runtime';
-import type { RuntimeFailureSignal } from '../protocol/failure-taxonomy';
+import type { RuntimeFailureSignal } from '../protocol/errors/failure-taxonomy';
 import type { CertifiedBoardRegistryState } from '../types/entity-board-registry';
 import type { ConsumptionAccumulatorState, ConsumptionNodeEntry } from './consumption/consumption-accumulator-types';
 import type { AccountJClaimNodeChanges } from '../types/finance/account-j-claims';
 import type { EntityProviderActionState, EntityProviderActionSubmitState } from '../types/entity-provider-actions';
 import type { JBatchState } from '../jurisdiction/machine/batch';
 import type { JInput } from '../jurisdiction/machine/input';
-import type { RuntimeSecurityIncidentIdentity } from '../protocol/security-incident';
-import type { JurisdictionConfig } from '../protocol/jurisdiction-config';
+import type { RuntimeSecurityIncidentIdentity } from '../protocol/errors/security-incident';
+import type { JurisdictionConfig } from '../protocol/config/jurisdiction-config';
 import type { CrontabState } from './scheduler/types';
-export type { JurisdictionConfig } from '../protocol/jurisdiction-config';
+export type { JurisdictionConfig } from '../protocol/config/jurisdiction-config';
 
 export interface ConsensusConfig {
   mode: 'proposer-based' | 'gossip-based';

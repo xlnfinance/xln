@@ -9,7 +9,7 @@ import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/config/defaults';
-import { normalizeAccountWatchSeed } from '../../../protocol/account-watch-seed';
+import { normalizeAccountWatchSeed } from '../../../protocol/identity/account-watch-seed';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   accountStateDomainFromJurisdiction,

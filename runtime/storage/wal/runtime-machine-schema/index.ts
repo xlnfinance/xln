@@ -17,7 +17,7 @@ import {
   requireString,
   requireStringArray,
   validateStorageSafeValue,
-} from '../../../protocol/boundary-primitives';
+} from '../../../protocol/boundary/boundary-primitives';
 
 const validateStorageConfig = (value: unknown, code: string): void => {
   const storage = requireBoundaryRecord(value, code);

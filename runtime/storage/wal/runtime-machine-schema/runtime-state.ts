@@ -15,7 +15,7 @@ import {
   requireString,
   validateStorageSafeValue,
   validateStringMap,
-} from '../../../protocol/boundary-primitives';
+} from '../../../protocol/boundary/boundary-primitives';
 
 const DELIVERY_KINDS = new Set([
   'entity-frame', 'hash-precommit', 'leader-timeout-vote', 'account-ack',

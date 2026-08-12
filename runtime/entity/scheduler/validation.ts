@@ -4,7 +4,7 @@ import {
   validateNumber,
   validateObject,
   validateString,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 import type {
   CrontabState,
   CrontabTaskMethod,

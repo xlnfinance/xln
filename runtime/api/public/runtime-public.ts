@@ -46,7 +46,7 @@ export type {
   FullReplicaAddress,
   ReplicaUri,
 } from '../../protocol/identity';
-export type { JurisdictionInfo } from '../../protocol/jurisdiction-identity';
+export type { JurisdictionInfo } from '../../protocol/identity/jurisdiction-identity';
 export {
   deriveSignerKeySync,
   getCachedSignerPrivateKey,

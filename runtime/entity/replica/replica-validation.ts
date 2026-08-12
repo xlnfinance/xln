@@ -5,7 +5,7 @@ import {
   validateNumber,
   validateObject,
   validateString,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 import type { EntityReplica } from '../types';
 import { validateHtlcNotes } from '../htlc/note-validation';
 import {

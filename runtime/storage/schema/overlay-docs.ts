@@ -4,7 +4,7 @@ import { docRefKey } from './doc-refs';
 import { keyDiff, normalizeEntityId } from '../keys';
 import { readValidatedOrNull } from '../database/level';
 import { validateStorageDiffRecordValue } from './authoritative-schema';
-import { mergeStorageOverlayRecords, storageOverlayRecordKey } from '../../protocol/overlay';
+import { mergeStorageOverlayRecords, storageOverlayRecordKey } from '../../protocol/state/overlay';
 import { projectAccountDoc, projectEntityCoreDoc } from '../read/projections';
 import { buildReplicaLookup, findReplicaForEntity } from '../replica/replicas';
 import type {

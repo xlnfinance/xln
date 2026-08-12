@@ -1,4 +1,4 @@
-import { classifyRuntimeMarketMakerFailure } from '../protocol/failure-taxonomy';
+import { classifyRuntimeMarketMakerFailure } from '../protocol/errors/failure-taxonomy';
 import {
   isExactMarketSnapshotOrderDepth,
   type MarketSnapshotOrderDepth,

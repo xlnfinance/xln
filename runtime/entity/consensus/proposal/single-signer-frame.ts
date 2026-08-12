@@ -2,7 +2,7 @@ import { signAccountFrame } from '../../../account/crypto';
 import { signEntityHashes } from '../../../hanko/signing';
 import { cumulativeMarksToPhases } from '../../../infra/performance/profile';
 import { assertFrameJPrefix } from '../../../jurisdiction/machine/j-prefix-consensus';
-import { removeCommittedTxsFromMempool } from '../../../protocol/tx-multiset';
+import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
 import type { EntityFrame } from '../../types';
 import { getPerfMs } from '../../../infra/time';
 import { commitEntityFrameCandidateState } from '../../state-clone';

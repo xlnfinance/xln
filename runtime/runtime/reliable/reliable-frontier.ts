@@ -1,8 +1,8 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value.ts';
+import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
-import { compareStableText, safeStringify } from '../../protocol/serialization.ts';
+import { compareStableText, safeStringify } from '../../protocol/serialization';
 import type { ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, ReliableDeliveryReceipt } from '../types.ts';
 
 const CANONICAL_DIGEST_PATTERN = /^0x[0-9a-f]{64}$/;

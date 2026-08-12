@@ -9,8 +9,8 @@ import { assertCanonicalSettlementWorkspace } from '../../account/tx/handlers/se
 import { MAX_CREDIT_LIMIT } from '../../account/tx/handlers/balance/set-credit-limit';
 import { validateEntityState } from '../../entity/state/state-validation';
 import { FINANCIAL, LIMITS, TOKENS } from '../../config/constants';
-import { normalizeAccountWatchSeed } from '../../protocol/account-watch-seed';
-import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../../protocol/integer-ranges';
+import { normalizeAccountWatchSeed } from '../../protocol/identity/account-watch-seed';
+import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../../protocol/boundary/integer-ranges';
 import type { AccountFrame, AccountState, Delta } from '../../types/account';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../types';
 import { normalizeEntityId } from '../keys';

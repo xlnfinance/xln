@@ -1,5 +1,5 @@
 import { deriveSignerAddressSync, getSignerPrivateKeyIfAvailable } from '../../account/crypto.ts';
-import { extractEntityId, extractSignerId } from '../../protocol/identity.ts';
+import { extractEntityId, extractSignerId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../infra/logger.ts';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
 import type { RuntimeReplica } from '../types.ts';

@@ -27,7 +27,7 @@ import {
   DepositoryBounds__factory,
   HashLadderRegistry__factory,
 } from '../../../../jurisdictions/typechain-types/index';
-import { safeStringify } from '../../../protocol/serialization.js';
+import { safeStringify } from '../../../protocol/serialization/index.js';
 import { createStructuredLogger } from '../../../infra/logger';
 import { isLeftEntity, normalizeEntityId } from '../../../entity/id';
 import { requireBoundaryUint } from '../../../protocol/boundary-validation';

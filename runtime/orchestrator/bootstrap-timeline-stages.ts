@@ -1,4 +1,4 @@
-import { classifyRuntimeBootstrapStageFailure } from '../protocol/failure-taxonomy';
+import { classifyRuntimeBootstrapStageFailure } from '../protocol/errors/failure-taxonomy';
 import {
   HEALTH_RESPONSE_REFRESH_TIMEOUT_MS,
   HUB_BASELINE_TIMEOUT_MS,

@@ -1,4 +1,4 @@
-import type { JId } from './identity';
+import type { JId } from './';
 
 export interface JurisdictionInfo {
   jId: JId;

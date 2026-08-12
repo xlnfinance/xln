@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { signAccountFrame, verifyAccountSignature } from '../../../account/crypto';
 import { shortId } from '../../../infra/logger';
 import {

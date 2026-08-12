@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'node:child_process';
 import type { ServerWebSocket } from 'bun';
-import type { RuntimeFailureSignal } from '../protocol/failure-taxonomy';
-import type { RuntimeSecurityIncidentTelemetry } from '../protocol/security-incident';
+import type { RuntimeFailureSignal } from '../protocol/errors/failure-taxonomy';
+import type { RuntimeSecurityIncidentTelemetry } from '../protocol/errors/security-incident';
 import type { ManagedChild, ManagedIdentity } from './custody-bootstrap';
 import type { StorageHealth } from '../infra/storage-monitor';
 

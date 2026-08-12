@@ -1,5 +1,5 @@
 import { LIMITS } from '../../config/constants';
-import { isLeftEntity } from '../../protocol/entity-id';
+import { isLeftEntity } from '../../protocol/identity/entity-id';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import {
   FinancialDataCorruptionError,
@@ -7,7 +7,7 @@ import {
   validateMapInstance,
   validateObject,
   validateString,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 import type { AccountReplica } from '../../types/account';
 import { assertAccountJClaimAccumulatorState } from '../j-claims/j-claim-accumulator';
 import { assertAccountMempoolWithinLimit } from '../input/mempool';

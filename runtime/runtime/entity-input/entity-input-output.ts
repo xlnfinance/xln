@@ -1,6 +1,6 @@
 import type { EntityTx } from '../../types/entity-tx.ts';
 import type { RoutedEntityInput, RuntimeReplica } from '../types.ts';
-import { safeStringify } from '../../protocol/serialization.ts';
+import { safeStringify } from '../../protocol/serialization';
 import { getPerfMs } from '../../infra/time.ts';
 import { shortId } from '../../infra/logger.ts';
 import {

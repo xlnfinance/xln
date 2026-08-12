@@ -3,7 +3,7 @@ import {
   FinancialDataCorruptionError,
   validateMapInstance,
   validateObject,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 import type { ConsensusConfig } from '../types';
 import { assertEntityProviderActionIntent } from '../entity-provider-action';
 

@@ -4,7 +4,7 @@ import {
   validateMapInstance,
   validateNumber,
   validateObject,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 
 const POLICY_SIDES = new Set(['left', 'right']);
 const POLICY_FIELDS = new Set([

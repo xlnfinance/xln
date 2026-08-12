@@ -5,7 +5,7 @@ import {
   validateNumber,
   validateObject,
   validateString,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 import { validateProposedEntityFrame } from '../consensus/frame/validation';
 
 export const validateReplicaJHistory = (

@@ -38,7 +38,7 @@ import {
   resolveUniqueCertifiedRegisteredBoardRecord,
   verifyCertifiedBoardProof,
 } from '../jurisdiction/machine/board-registry';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/crypto/p2p-crypto';
 import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../entity/profile/profile-signing';
 import type { Profile } from '../entity/profile';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';

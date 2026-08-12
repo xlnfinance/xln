@@ -5,7 +5,7 @@ import {
   toJId,
   toSignerId,
   type ReplicaUri,
-} from './identity';
+} from './';
 
 export const formatReplicaUri = (uri: ReplicaUri): string =>
   `${XLN_URI_SCHEME}${uri.runtimeHost}/${uri.jId}/${uri.epAddress}/${uri.entityId}/${uri.signerId}`;

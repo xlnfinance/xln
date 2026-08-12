@@ -3,7 +3,7 @@ import type { EntityOutput } from '../../entity/types';
 import {
   validateMapInstance,
   validateObject,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 import {
   validateJPrefixAttestation,
 } from '../../entity/consensus/jurisdiction/prefix-validation';

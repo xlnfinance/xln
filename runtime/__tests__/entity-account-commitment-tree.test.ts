@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
-import { buildRadixMerkle } from '../protocol/radix-merkle';
+import { buildRadixMerkle } from '../protocol/state/radix-merkle';
 import { ethers } from 'ethers';
 import {
   buildEntityAccountCommitment,

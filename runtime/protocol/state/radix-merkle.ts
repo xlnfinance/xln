@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { computeIntegrityDigest } from '../infra/integrity-checksum';
+import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 
 export type RadixMerkleRadix = 16 | 256;
 export type RadixMerkleHashAlgorithm = 'integrity' | 'keccak256';

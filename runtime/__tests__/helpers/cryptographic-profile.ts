@@ -12,7 +12,7 @@ import type {
   ProfileJurisdiction,
 } from '../../entity/profile';
 import { canonicalizeProfile } from '../../entity/profile';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../../protocol/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../../protocol/crypto/p2p-crypto';
 import {
   computeProfileHash,
   computeProfileRouteHash,

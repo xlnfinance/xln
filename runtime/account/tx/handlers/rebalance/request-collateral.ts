@@ -18,9 +18,9 @@
  */
 
 import type { AccountReplica, AccountTx } from '../../../../types/account';
-import { isLeftEntity } from '../../../../protocol/entity-id';
+import { isLeftEntity } from '../../../../protocol/identity/entity-id';
 import { deriveDelta } from '../../../utils';
-import { deriveTransferOffdeltaChange } from '../../../../protocol/delta-movement';
+import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
 import { getDefaultRebalanceBaseFeeForToken } from '../../../config/defaults';
 
 type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;

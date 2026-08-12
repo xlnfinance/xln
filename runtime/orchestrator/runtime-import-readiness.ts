@@ -5,7 +5,7 @@ import {
   isRuntimeFailureSignal,
   type RuntimeFailureCategory,
   type RuntimeFailureSignal,
-} from '../protocol/failure-taxonomy';
+} from '../protocol/errors/failure-taxonomy';
 
 export type RuntimeImportReadinessDecision =
   | { ok: true }

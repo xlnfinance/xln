@@ -236,4 +236,4 @@ export const commitEntityOrderbookCandidate = (
 import { cloneAccountReplica } from '../../account/state/state-clone';
 import type { AccountReplica } from '../../types/account';
 import type { BookState, OrderbookExtState } from '../../orderbook';
-import { structuredCloneOrThrow } from '../../protocol/structured-clone';
+import { structuredCloneOrThrow } from '../../protocol/serialization/structured-clone';

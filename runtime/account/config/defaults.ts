@@ -1,4 +1,4 @@
-import type { JurisdictionConfig } from '../../protocol/jurisdiction-config';
+import type { JurisdictionConfig } from '../../protocol/config/jurisdiction-config';
 import {
   buildDefaultRebalanceBaseFee,
   buildDefaultRebalancePolicy,

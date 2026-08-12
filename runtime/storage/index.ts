@@ -137,7 +137,7 @@ import {
   validateStoredAccountFrameValue,
   validateStoredEntityFrameValue,
 } from './history/history-view-schema';
-import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../protocol/serialization/canonical-consensus-value';
 import { buffersEqual } from '../protocol/serialization';
 import type {
   PerfDeps,

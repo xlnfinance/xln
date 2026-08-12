@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import { ethers } from 'ethers';
 import type { AccountTx } from '../../types/account';
 import type { EntityFrameEvent, EntityState } from '../types';

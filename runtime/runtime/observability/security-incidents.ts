@@ -4,7 +4,7 @@ import type {
   RuntimeSecurityIncident,
   RuntimeSecurityIncidentIdentity,
   RuntimeSecurityIncidentTelemetry,
-} from '../../protocol/security-incident';
+} from '../../protocol/errors/security-incident';
 
 export const MAX_RUNTIME_SECURITY_INCIDENTS = 256;
 const OVERFLOW_INCIDENT_ID = 'cross-j:incident-capacity';

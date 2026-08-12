@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 import type { AccountPeerInput } from '../../../types/account';

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 
 import { deriveSignerAddressSync, signDigest } from '../account/crypto';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/crypto/p2p-crypto';
 import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { createHelloChallengeRegistry } from '../network/p2p/auth/hello-challenge';
 import { verifyHelloAuth } from '../network/p2p/auth/hello-auth';

@@ -2,7 +2,7 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 
 import { getSignerAddress, signAccountFrame, verifyAccountSignature } from '../../account/crypto.ts';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
-import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value.ts';
+import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import type {
   RuntimeEntityInputsEnvelope,
   RuntimeReplica,

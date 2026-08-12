@@ -5,7 +5,7 @@
 
 import type { AccountReplica, AccountTx } from '../../../types/account';
 import type { AccountConsensusContext } from '../context';
-import { removeCommittedTxsFromMempool } from '../../../protocol/tx-multiset';
+import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
 import { getPerfMs } from '../../../infra/time';
 import { HEAVY_LOGS } from '../../../infra/debug-flags';
 import { createStructuredLogger, shortId } from '../../../infra/logger';

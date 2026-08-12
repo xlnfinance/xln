@@ -104,7 +104,7 @@ const CORE_FILES = {
   runtime: [
     // Core data structures and implementation
     'runtime/types.ts',      // Runtime input/frame/replica interfaces
-    'protocol/identity.ts',  // Identity system: EntityId, SignerId, JId, ReplicaKey
+    'protocol/identity/index.ts',  // Identity system: EntityId, SignerId, JId, ReplicaKey
 
     // Main coordinators (how the system works)
     'runtime.ts',            // Narrow public facade
@@ -122,7 +122,7 @@ const CORE_FILES = {
 
     // Financial accounting (CRITICAL for bug analysis)
     'account/utils.ts',      // deriveDelta() RCPAN calculation, TOKEN_REGISTRY
-    'protocol/serialization.ts', // BigInt serialization (common bug source)
+    'protocol/serialization/index.ts', // BigInt serialization (common bug source)
 
     // Transaction processing (how txs are applied)
     'entity/tx/apply.ts',    // Entity transaction dispatcher
@@ -297,9 +297,9 @@ const CROSS_FILES = {
     'types/cross-jurisdiction.ts',
     'types/jurisdiction-events.ts',
     'types/jurisdiction-runtime.ts',
-    'protocol/identity.ts',
+    'protocol/identity/index.ts',
     'account/utils.ts',
-    'protocol/serialization.ts',
+    'protocol/serialization/index.ts',
     'account/crypto.ts',
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
@@ -444,7 +444,7 @@ const RUNTIME_FILES = {
     'types/entity-tx.ts',
     'types/jurisdiction-events.ts',
     'types/jurisdiction-runtime.ts',
-    'protocol/identity.ts',
+    'protocol/identity/index.ts',
     'config/constants.ts',
     'runtime.ts',
     'runtime/composition.ts',
@@ -498,7 +498,7 @@ const RUNTIME_FILES = {
     'account/utils.ts',
     'account/crypto.ts',
     'account/state/frame.ts',
-    'protocol/serialization.ts',
+    'protocol/serialization/index.ts',
     'storage/codec/snapshot-coder.ts',
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
@@ -552,9 +552,9 @@ const ORDERBOOK_FILES = {
     'runtime/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
-    'protocol/identity.ts',
+    'protocol/identity/index.ts',
     'account/utils.ts',
-    'protocol/serialization.ts',
+    'protocol/serialization/index.ts',
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
@@ -620,9 +620,9 @@ const SWAP_FILES = {
     'runtime/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
-    'protocol/identity.ts',
+    'protocol/identity/index.ts',
     'account/utils.ts',
-    'protocol/serialization.ts',
+    'protocol/serialization/index.ts',
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
@@ -1214,14 +1214,14 @@ xln/
 
   runtime/
     runtime/types.ts             ${fileSizes['runtime/runtime/types.ts'] || '?'} lines - Runtime input/frame/replica interfaces
-    protocol/identity.ts         ${fileSizes['runtime/protocol/identity.ts'] || '?'} lines - Identity system: EntityId, SignerId, JId, ReplicaKey
+    protocol/identity/index.ts   ${fileSizes['runtime/protocol/identity/index.ts'] || '?'} lines - Identity system: EntityId, SignerId, JId, ReplicaKey
     runtime.ts                   ${fileSizes['runtime/runtime.ts'] || '?'} lines - Narrow public facade
     entity/consensus/index.ts          ${fileSizes['runtime/entity/consensus/index.ts'] || '?'} lines - Entity candidate and Hanko certification
     account/consensus/index.ts         ${fileSizes['runtime/account/consensus/index.ts'] || '?'} lines - Bilateral consensus, left/right perspective
     account/view-state.ts   ${fileSizes['runtime/account/view-state.ts'] || '?'} lines - Bilateral state machine
     jurisdiction/batch.ts                   ${fileSizes['runtime/jurisdiction/machine/batch.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
     account/utils.ts             ${fileSizes['runtime/account/utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
-    protocol/serialization.ts       ${fileSizes['runtime/protocol/serialization.ts'] || '?'} lines - BigInt serialization
+    protocol/serialization/index.ts ${fileSizes['runtime/protocol/serialization/index.ts'] || '?'} lines - BigInt serialization
     account/crypto.ts            ${fileSizes['runtime/account/crypto.ts'] || '?'} lines - Signature verification
     runtime/jurisdiction-api.ts  ${fileSizes['runtime/runtime/jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
 

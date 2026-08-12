@@ -8,7 +8,7 @@ import {
   normalizeAccountStateDomain,
   sameAccountStateDomain,
 } from '../../../../account/commitment/state-root';
-import { isAccountWatchSeed } from '../../../../protocol/account-watch-seed';
+import { isAccountWatchSeed } from '../../../../protocol/identity/account-watch-seed';
 import {
   DEFAULT_ACCOUNT_TOKEN_IDS,
   resolveJurisdictionRebalanceDefaults,

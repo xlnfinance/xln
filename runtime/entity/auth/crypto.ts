@@ -1,6 +1,6 @@
 import { getSignerPrivateKey, getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import { extractSignerId } from '../../protocol/identity';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../../protocol/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../../protocol/crypto/p2p-crypto';
 import type { EntityRuntimeContext } from '../runtime-context';
 
 const bytesToHex = (bytes: Uint8Array): string =>

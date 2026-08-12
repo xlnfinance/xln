@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   buildHexKeyedMerkle,
   buildHexKeyedMerkleMaterialized,
-} from '../protocol/radix-merkle';
+} from '../protocol/state/radix-merkle';
 import { storageMerkleCellHexKey } from '../storage/hashes';
 import { buildBookDeletionsFromOverlay, storageRefsFromOverlay } from '../storage/schema/overlay-docs';
 import {
@@ -20,7 +20,7 @@ const hexKey = (byte: number): string => `0x${byte.toString(16).padStart(2, '0')
 const value = (text: string): Uint8Array => new TextEncoder().encode(text);
 
 test('storage radix merkle initializes in browsers without Node Buffer', () => {
-  const moduleUrl = new URL('../protocol/radix-merkle.ts', import.meta.url).href;
+  const moduleUrl = new URL('../protocol/state/radix-merkle.ts', import.meta.url).href;
   const child = Bun.spawnSync({
     cmd: [process.execPath, '-e', `
       globalThis.Buffer = undefined;

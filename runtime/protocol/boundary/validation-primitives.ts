@@ -1,4 +1,4 @@
-import { safeStringify } from './serialization';
+import { safeStringify } from '../serialization';
 
 export class FinancialDataCorruptionError extends Error {
   constructor(message: string, context?: Record<string, unknown>) {

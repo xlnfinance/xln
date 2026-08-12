@@ -12,8 +12,8 @@ import {
   cloneProofBodyStruct,
   type ProofBodyStruct,
 } from '../../protocol/dispute/proof-body';
-import { cloneIsolatedAccountFrame } from '../../protocol/account-input-clone';
-import { structuredCloneOrThrow } from '../../protocol/structured-clone';
+import { cloneIsolatedAccountFrame } from '../../protocol/state/account-input-clone';
+import { structuredCloneOrThrow } from '../../protocol/serialization/structured-clone';
 import { forkAccountCommitmentCache } from '../commitment/map-commitment';
 
 const cloneAccountTx = <T extends AccountTx>(tx: T): T => {

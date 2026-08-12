@@ -1,6 +1,6 @@
 import type { AccountState } from '../../types/account';
 import type { EntityTx } from '../../types/entity-tx';
-import { isLeftEntity } from '../../protocol/entity-id';
+import { isLeftEntity } from '../../protocol/identity/entity-id';
 import { deriveDelta } from '../utils';
 import { canonicalAccountDisputeConfig, type AccountDisputeConfig } from '../config/dispute-config';
 

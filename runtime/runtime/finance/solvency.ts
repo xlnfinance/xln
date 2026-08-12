@@ -1,5 +1,5 @@
 import { computeCanonicalEntityConsensusStateHash } from '../../entity/consensus/state-root';
-import { isLeftEntity } from '../../protocol/entity-id';
+import { isLeftEntity } from '../../protocol/identity/entity-id';
 import { createStructuredLogger } from '../../infra/logger';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../types';

@@ -6,7 +6,7 @@ import type { EntityTx } from '../../types/entity-tx';
 
 import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardHash } from '../../jurisdiction/machine/board-registry';
 import { verifyHankoForHash } from '../../hanko/signing';
-import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import {
   computeHtlcEnvelopeContextHash,
   type HtlcEnvelope,

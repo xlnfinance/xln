@@ -72,8 +72,8 @@ export {
   formatSignerDisplay,
   formatReplicaDisplay,
   getEntityDisplayNumber,
-} from '../../protocol/identity-display';
-export { formatReplicaUri, parseReplicaUri } from '../../protocol/identity-uri';
+} from '../../protocol/identity/identity-display';
+export { formatReplicaUri, parseReplicaUri } from '../../protocol/identity/identity-uri';
 export { clearDatabase } from '../../storage/database/clear-database';
 export { generateEntityAvatar, generateSignerAvatar, getEntityDisplayInfo, getSignerDisplayInfo, hashToAvatar } from '../../presentation/identity-display';
 export { getEntityShortId } from '../../presentation/identity-display';

@@ -9,7 +9,7 @@ import {
   signDigestBytesWithPrivateKey,
 } from '../account/crypto';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/crypto/p2p-crypto';
 import { RuntimeP2P } from '../network/p2p/p2p';
 import {
   collectLocalProfileEncryptionAnnouncements,
@@ -72,7 +72,7 @@ import {
   startP2P,
   stopP2PAndWait,
 } from '../runtime';
-import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
+import { deriveAccountWatchSeed } from '../protocol/identity/account-watch-seed';
 import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
 import { buildSignedEntityCommand } from '../entity/command';
 import { signedEntityCommandTx } from '../entity/command/command-codec';

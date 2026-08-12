@@ -6,7 +6,7 @@ import {
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 import { compareCanonicalText } from '../../orderbook/swap-keys';
-import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from '../../protocol/p2p-crypto';
+import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from '../../protocol/crypto/p2p-crypto';
 import { deriveSignerAddressSync, signDigest } from '../../account/crypto';
 import {
   deserializeWsMessage,

@@ -4,7 +4,7 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 import { decodeRuntimeInput } from '../../runtime/input-schema';
-import { validateStorageSafeValue } from '../../protocol/boundary-primitives';
+import { validateStorageSafeValue } from '../../protocol/boundary/boundary-primitives';
 import { MAX_NUMBERED_REGISTRATION_ENTITIES } from '../../runtime/registration/numbered-registration-codec';
 import { LIMITS } from '../../config/constants';
 import type {

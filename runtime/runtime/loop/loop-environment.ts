@@ -5,7 +5,7 @@ import {
   isProductionRuntime,
   readRuntimeEnv,
 } from '../../infra/process/runtime-process.ts';
-import { safeStringify } from '../../protocol/serialization.ts';
+import { safeStringify } from '../../protocol/serialization';
 import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure.ts';
 import type { RuntimeReplica, RuntimeInput } from '../types.ts';
 import {

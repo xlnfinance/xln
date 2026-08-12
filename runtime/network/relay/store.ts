@@ -11,7 +11,7 @@ import { safeStringify } from '../../protocol/serialization';
 import {
   normalizeRuntimeFailureCode,
   type RuntimeFailureCategory,
-} from '../../protocol/failure-taxonomy';
+} from '../../protocol/errors/failure-taxonomy';
 import {
   deliveryAccepted,
   deliveryDeferred,

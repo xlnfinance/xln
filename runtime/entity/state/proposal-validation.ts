@@ -3,7 +3,7 @@ import {
   FinancialDataCorruptionError,
   validateMapInstance,
   validateObject,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 
 export const validateEntityProposals = (
   value: unknown,

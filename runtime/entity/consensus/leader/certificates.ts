@@ -8,7 +8,7 @@
  */
 import { verifyAccountSignature } from '../../../account/crypto';
 import { log } from '../../../infra/diagnostics';
-import { encodeCanonicalConsensusValue } from '../../../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { compareStableText } from '../../../protocol/serialization';
 import type { ConsensusConfig, EntityCandidate, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica, EntityState, HashToSign, EntityFrame } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';

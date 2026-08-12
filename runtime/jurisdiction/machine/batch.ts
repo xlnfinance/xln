@@ -15,7 +15,7 @@ import { ethers } from 'ethers';
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.js';
 import { validateJBatch } from './batch-validation';
 import type { JurisdictionConfig } from '../../entity/types';
-import type { RuntimeFailureSignal } from '../../protocol/failure-taxonomy';
+import type { RuntimeFailureSignal } from '../../protocol/errors/failure-taxonomy';
 import { normalizeEntityId, compareEntityIds } from '../../entity/id';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { PROOF_BODY_ABI } from '../../protocol/dispute/proof-body';

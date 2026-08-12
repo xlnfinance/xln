@@ -1,9 +1,9 @@
 import { ethers } from 'ethers';
 
 import type { AccountReplica, AccountState, AccountStateDomain, SettlementWorkspace } from '../../types/account';
-import type { JurisdictionConfig } from '../../protocol/jurisdiction-config';
+import type { JurisdictionConfig } from '../../protocol/config/jurisdiction-config';
 import { compareStableText } from '../../protocol/serialization';
-import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../../protocol/radix-merkle';
+import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../../protocol/state/radix-merkle';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 import { assertAccountJClaimAccumulatorState } from '../j-claims/j-claim-accumulator';
 import {

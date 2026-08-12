@@ -2,7 +2,7 @@ import {
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
-} from './boundary-validation';
+} from '../boundary-validation';
 
 export { requireBoundaryInteger, requireBoundaryRecord, requireExactBoundaryKeys };
 

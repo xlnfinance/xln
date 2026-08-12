@@ -13,7 +13,7 @@ import {
 import {
   cloneIsolatedAccountInput,
   cloneIsolatedAccountTx,
-} from '../../../protocol/account-input-clone';
+} from '../../../protocol/state/account-input-clone';
 
 export type HankoWitnessEntry = {
   hanko: HankoString;

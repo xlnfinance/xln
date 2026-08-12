@@ -13,7 +13,7 @@ import {
   requireString,
   requireStringArray,
   validateStorageSafeValue,
-} from '../../protocol/boundary-primitives';
+} from '../../protocol/boundary/boundary-primitives';
 import {
   validateConsensusConfig,
   validateEntityPosition,

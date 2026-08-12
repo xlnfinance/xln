@@ -1,7 +1,7 @@
-import { extractEntityId } from '../../protocol/identity.ts';
+import { extractEntityId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../infra/logger.ts';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
-import { safeStringify } from '../../protocol/serialization.ts';
+import { safeStringify } from '../../protocol/serialization';
 import { runtimeInputRequiresOutboxCapacity } from '../admission.ts';
 import {
   createRuntimeOutputRoutingDeps,

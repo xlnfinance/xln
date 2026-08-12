@@ -13,7 +13,7 @@ import { buildJEventRangeDigest, canonicalJEventRangeHash } from './history-cons
 import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
-} from '../../protocol/boundary-primitives';
+} from '../../protocol/boundary/boundary-primitives';
 
 export type JEventRangeSignatureVerifier = (
   signerId: string,

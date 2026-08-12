@@ -1,5 +1,5 @@
 import { createStructuredLogger } from '../../infra/logger.ts';
-import { normalizeRuntimeFailureCode } from '../../protocol/failure-taxonomy.ts';
+import { normalizeRuntimeFailureCode } from '../../protocol/errors/failure-taxonomy';
 import type { RuntimeReplica } from '../types.ts';
 import { transitionRuntimeLifecycle } from '../lifecycle.ts';
 

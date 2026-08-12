@@ -2,7 +2,7 @@ import type { AccountReplica, AccountTx, Delta } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import { createStructuredLogger } from '../../infra/logger';
-import { txFingerprint } from '../../protocol/tx-multiset';
+import { txFingerprint } from '../../protocol/state/tx-multiset';
 import {
   checkAutoRebalance,
   resolveAutoRebalanceFeePolicy,

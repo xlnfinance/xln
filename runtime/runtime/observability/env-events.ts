@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 /**
  * XLN Event Emission System (EVM-style)
  *
@@ -20,7 +20,7 @@ import type {
 import type { RuntimeReplica, RuntimeHistoryRecord } from '../types';
 import type { LogCategory, FrameLogEntry } from '../../types/logging';
 
-import { storageOverlayRecordKey } from '../../protocol/overlay';
+import { storageOverlayRecordKey } from '../../protocol/state/overlay';
 import { invalidateEntityAccountCommitment } from '../../entity/consensus/state-root';
 import { refreshAccountWorkIndex } from '../../entity/consensus/account/work-index';
 import {

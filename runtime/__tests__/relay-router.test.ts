@@ -6,7 +6,7 @@ import { relayRoute as productionRelayRoute } from '../network/relay/router';
 import { cacheEncryptionKey, createRelayStore, resolveEncryptionPublicKeyHex } from '../network/relay/store';
 import { deserializeWsMessage, hashHelloMessage, hashRuntimeWsFrame, makeHelloNonce, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { deriveSignerAddressSync, signDigest } from '../account/crypto';
-import { encryptJSON, deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
+import { encryptJSON, deriveEncryptionKeyPair } from '../protocol/crypto/p2p-crypto';
 import { DEFAULT_GOSSIP_BATCH_LIMIT } from '../network/p2p/gossip/profile-batch';
 import { createLocalDeliveryHandler } from '../network/relay/local-delivery';
 import { createEmptyEnv } from '../runtime';

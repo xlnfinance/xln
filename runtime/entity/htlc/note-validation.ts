@@ -2,7 +2,7 @@ import { LIMITS } from '../../config/constants';
 import {
   FinancialDataCorruptionError,
   validateMapInstance,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 
 /**
  * Replica notes are uncommitted presentation metadata, but they still cross a

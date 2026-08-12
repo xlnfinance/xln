@@ -13,7 +13,7 @@ import {
   requireFiniteNumber,
   requireString,
   requireStringArray,
-} from '../../../protocol/boundary-primitives';
+} from '../../../protocol/boundary/boundary-primitives';
 
 const validateAttempt = (value: unknown, code: string): void => {
   const attempt = requireBoundaryRecord(value, code);

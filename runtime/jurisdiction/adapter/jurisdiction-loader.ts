@@ -18,7 +18,7 @@ import {
   requireFiniteNumber,
   requireString,
   validateStorageSafeValue,
-} from '../../protocol/boundary-primitives';
+} from '../../protocol/boundary/boundary-primitives';
 
 const jurisdictionLoaderLog = createStructuredLogger('runtime.jurisdiction_loader');
 

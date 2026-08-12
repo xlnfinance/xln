@@ -52,7 +52,7 @@ import {
   computeRadixMerkleLeafHash,
   packRadixMerklePath,
   radixMerklePathSlots,
-} from '../../protocol/radix-merkle';
+} from '../../protocol/state/radix-merkle';
 import { hydrateEntityStateFromStorage } from './projections';
 import { requireStorageDbOpen } from '../commit/availability';
 import {

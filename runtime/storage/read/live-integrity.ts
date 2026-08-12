@@ -23,7 +23,7 @@ import {
   parseLiveBookKey,
 } from '../keys';
 import { iterateKeys } from '../database/level';
-import { buildHexKeyedMerkleMaterialized, packRadixMerklePath } from '../../protocol/radix-merkle';
+import { buildHexKeyedMerkleMaterialized, packRadixMerklePath } from '../../protocol/state/radix-merkle';
 import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,

@@ -1,4 +1,4 @@
-import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../protocol/serialization/canonical-consensus-value';
 import { expect, test } from 'bun:test';
 
 import {

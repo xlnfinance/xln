@@ -11,7 +11,7 @@ import {
   classifyRuntimeTransportFailure,
   isRuntimeFailureSignal,
   type RuntimeFailureSignal,
-} from '../protocol/failure-taxonomy';
+} from '../protocol/errors/failure-taxonomy';
 import { publicAggregatedHealth } from '../api/server/health-redaction';
 import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
 
@@ -379,7 +379,7 @@ assertNotIncludes(publicHealthText, 'secret timeline reason', 'publicAggregatedH
 assertIncludes(publicHealthText, '"code":"OPERATOR_CONFIG_INVALID"', 'publicAggregatedHealth');
 assertIncludes(publicHealthText, '"fatal":true', 'publicAggregatedHealth');
 
-const taxonomyPath = 'runtime/protocol/failure-taxonomy.ts';
+const taxonomyPath = 'runtime/protocol/errors/failure-taxonomy.ts';
 const taxonomy = readText(taxonomyPath);
 for (const marker of [
   "export type RuntimeFailureCategory = 'ExpectedEmpty' | 'TransientRace' | 'Contradiction';",

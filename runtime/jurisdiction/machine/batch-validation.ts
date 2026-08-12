@@ -6,7 +6,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
   requireString,
-} from '../../protocol/boundary-primitives';
+} from '../../protocol/boundary/boundary-primitives';
 import type { JBatch } from './batch';
 
 type FieldValidator = (value: unknown, code: string) => unknown;

@@ -2,7 +2,7 @@ import { LIMITS } from '../../config/constants';
 import {
   FinancialDataCorruptionError,
   validateMapInstance,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 
 const ENTITY_ID_PATTERN = /^0x[0-9a-f]{64}$/;
 

@@ -1,4 +1,4 @@
-import { classifyRuntimeTransportFailure, type RuntimeFailureSignal } from '../protocol/failure-taxonomy';
+import { classifyRuntimeTransportFailure, type RuntimeFailureSignal } from '../protocol/errors/failure-taxonomy';
 import { safeStringify } from '../protocol/serialization';
 import { readPositiveIntegerEnv } from '../config/environment';
 import {

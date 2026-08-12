@@ -14,7 +14,7 @@ import { extractEntityId } from '../../protocol/identity';
 import { getSignerPrivateKeyIfAvailable, registerSignerPublicKey } from '../../account/crypto';
 import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../../entity/profile/profile-signing';
 import { inspectHankoForHash } from '../../hanko/signing';
-import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../../protocol/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../../protocol/crypto/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './auth/runtime-id';
 import { compareStableText } from '../../protocol/serialization';

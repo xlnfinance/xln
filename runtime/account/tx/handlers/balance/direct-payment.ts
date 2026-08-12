@@ -7,9 +7,9 @@
 
 import type { AccountReplica, AccountTx } from '../../../../types/account';
 import { deriveDelta } from '../../../utils';
-import { deriveTransferOffdeltaChange } from '../../../../protocol/delta-movement';
+import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
 import { FINANCIAL } from '../../../../config/constants';
-import { isLeftEntity } from '../../../../protocol/entity-id';
+import { isLeftEntity } from '../../../../protocol/identity/entity-id';
 import { createStructuredLogger } from '../../../../infra/logger';
 import { getAccountPerspective } from '../../../state/perspective';
 import { ensureDelta } from '../../delta-utils';

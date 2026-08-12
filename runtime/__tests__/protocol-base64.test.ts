@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { decodeBase64Bytes, encodeBase64Bytes } from '../protocol/base64';
+import { decodeBase64Bytes, encodeBase64Bytes } from '../protocol/serialization/base64';
 
 describe('canonical protocol Base64', () => {
   test('round-trips protocol bytes with one padded spelling', () => {

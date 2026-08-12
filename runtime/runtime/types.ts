@@ -38,7 +38,7 @@ import type { RuntimeP2PConfig } from './infrastructure/p2p-types';
 
 import type {
   RuntimeSecurityIncident,
-} from '../protocol/security-incident';
+} from '../protocol/errors/security-incident';
 
 export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];

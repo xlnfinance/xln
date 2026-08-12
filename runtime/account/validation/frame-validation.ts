@@ -4,7 +4,7 @@ import {
   validateArray,
   validateObject,
   validateString,
-} from '../../protocol/validation-primitives';
+} from '../../protocol/boundary/validation-primitives';
 import { assertAccountFrameDeltaIntegrity } from '../state/frame';
 import { validateDelta } from './delta-validation';
 import { decodeAccountTxs } from '../tx-validation';

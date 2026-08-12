@@ -12,7 +12,7 @@
 import type { CryptoProvider, CryptoKeyPair } from './provider';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
-import { decodeBase64Bytes, encodeBase64Bytes } from '../base64';
+import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
 
 export type NobleCryptoProviderOptions = {
   deterministicSeed?: string;
