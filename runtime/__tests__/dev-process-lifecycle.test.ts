@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const repoRoot = resolve(import.meta.dir, '../..');
+const concurrentlyJs = join(repoRoot, 'node_modules/concurrently/dist/bin/concurrently.js');
 const tempRoots: string[] = [];
 const cleanupPids = new Set<number>();
 
@@ -58,55 +59,61 @@ afterEach(async () => {
 });
 
 describe('dev process lifecycle', () => {
+  test('Bun supervisor kills every concurrently descendant on SIGINT', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'xln-dev-supervisor-'));
+    tempRoots.push(root);
+    const firstPidPath = join(root, 'first.pid');
+    const secondPidPath = join(root, 'second.pid');
+    const command = (pidPath: string): string =>
+      `bash -c 'echo $$$$ > "${pidPath}"; trap "exit 0" INT TERM; while :; do sleep 1; done'`;
+    const supervisor = spawn('bun', [
+      '--no-orphans', concurrentlyJs,
+      '--kill-others', '--kill-timeout', '1000',
+      command(firstPidPath), command(secondPidPath),
+    ], { cwd: repoRoot, stdio: 'ignore' });
+    if (!supervisor.pid) throw new Error('SUPERVISOR_PID_MISSING');
+    cleanupPids.add(supervisor.pid);
+    await Promise.all([waitForFile(firstPidPath), waitForFile(secondPidPath)]);
+    const descendants = [firstPidPath, secondPidPath].map(path => Number(readFileSync(path, 'utf8').trim()));
+    descendants.forEach(pid => cleanupPids.add(pid));
+
+    process.kill(supervisor.pid, 'SIGINT');
+    await waitForExit(supervisor);
+    await waitUntil(() => descendants.every(pid => !isAlive(pid)), `descendants=${descendants.join(',')}`);
+  });
+
   test('watchtower cannot survive a SIGKILLed role wrapper', async () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-dev-watchtower-'));
     tempRoots.push(root);
     const reservation = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('reserved') });
     const port = reservation.port;
     reservation.stop(true);
-    const chainServer = (chainId: number) => Bun.serve({
-      hostname: '127.0.0.1',
-      port: 0,
-      fetch: async request => {
-        const body = await request.json() as { id?: unknown };
-        return Response.json({ jsonrpc: '2.0', id: body.id ?? 1, result: `0x${chainId.toString(16)}` });
-      },
-    });
-    const rpc = chainServer(31_337);
-    const rpc2 = chainServer(31_338);
     const pidDir = join(root, 'pids');
-    try {
-      const wrapper = spawn(join(repoRoot, 'scripts/dev/run-dev-child.sh'), ['watchtower'], {
-        cwd: repoRoot,
-        env: {
-          ...process.env,
-          XLN_DEV_CHAINS_READY: '1',
-          RPC_PORT: String(rpc.port), RPC2_PORT: String(rpc2.port),
-          API_PORT: '19082', WEB_PORT: '19080', WEB_HTTP_PORT: '19081',
-          CUSTODY_PORT: '19087', CUSTODY_DAEMON_PORT: '19088', WATCHTOWER_PORT: String(port),
-          DEV_LOG_DIR: join(root, 'logs'), MESH_LOG_LEVEL: 'warn', XLN_RDB_ROOT: join(root, 'rdb'),
-          XLN_JDB_ROOT: join(root, 'jdb'), XLN_DEV_PID_DIR: pidDir, XLN_DEV_OWNER_ID: 'a'.repeat(32),
-        },
-        stdio: 'ignore',
-      });
-      if (!wrapper.pid) throw new Error('WATCHTOWER_WRAPPER_PID_MISSING');
-      cleanupPids.add(wrapper.pid);
-      await waitUntil(() => {
-        try { return Bun.spawnSync(['lsof', '-ti', `TCP:${port}`, '-sTCP:LISTEN']).stdout.toString().trim().length > 0; }
-        catch { return false; }
-      }, `watchtower-port=${port}`);
-      const listenerPid = Number(Bun.spawnSync(['lsof', '-ti', `TCP:${port}`, '-sTCP:LISTEN']).stdout.toString().trim());
-      expect(listenerPid).toBeGreaterThan(0);
-      expect(listenerPid).not.toBe(wrapper.pid);
-      cleanupPids.add(listenerPid);
+    const wrapper = spawn(join(repoRoot, 'scripts/dev/run-dev-child.sh'), ['watchtower'], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        RPC_PORT: '19545', RPC2_PORT: '19546', API_PORT: '19082', WEB_PORT: '19080', WEB_HTTP_PORT: '19081',
+        CUSTODY_PORT: '19087', CUSTODY_DAEMON_PORT: '19088', WATCHTOWER_PORT: String(port),
+        DEV_LOG_DIR: join(root, 'logs'), MESH_LOG_LEVEL: 'warn', XLN_RDB_ROOT: join(root, 'rdb'),
+        XLN_JDB_ROOT: join(root, 'jdb'), XLN_DEV_PID_DIR: pidDir, XLN_DEV_OWNER_ID: 'a'.repeat(32),
+      },
+      stdio: 'ignore',
+    });
+    if (!wrapper.pid) throw new Error('WATCHTOWER_WRAPPER_PID_MISSING');
+    cleanupPids.add(wrapper.pid);
+    await waitUntil(() => {
+      try { return Bun.spawnSync(['lsof', '-ti', `TCP:${port}`, '-sTCP:LISTEN']).stdout.toString().trim().length > 0; }
+      catch { return false; }
+    }, `watchtower-port=${port}`, 10_000);
+    const listenerPid = Number(Bun.spawnSync(['lsof', '-ti', `TCP:${port}`, '-sTCP:LISTEN']).stdout.toString().trim());
+    expect(listenerPid).toBeGreaterThan(0);
+    expect(listenerPid).not.toBe(wrapper.pid);
+    cleanupPids.add(listenerPid);
 
-      process.kill(wrapper.pid, 'SIGKILL');
-      await waitForExit(wrapper);
-      await waitUntil(() => !isAlive(listenerPid), `watchtower-listener=${listenerPid}`);
-    } finally {
-      rpc.stop(true);
-      rpc2.stop(true);
-    }
+    process.kill(wrapper.pid, 'SIGKILL');
+    await waitForExit(wrapper);
+    await waitUntil(() => !isAlive(listenerPid), `watchtower-listener=${listenerPid}`);
   });
 
   test('cleanup accepts a recorded process that exits during identity inspection', async () => {

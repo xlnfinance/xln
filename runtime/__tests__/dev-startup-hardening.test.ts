@@ -4,12 +4,6 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { acquireDevSingleton, runDevCommands, type DevSingletonLease } from '../../scripts/dev/run-dev';
-import {
-  DEV_ROLES,
-  isExpectedDevTerminationNotice,
-  shouldEchoDevLine,
-  superviseDev,
-} from '../../scripts/dev/supervise-dev';
 
 const repoRoot = resolve(import.meta.dir, '../..');
 const tempRoots: string[] = [];
@@ -122,20 +116,14 @@ describe('dev RPC readiness', () => {
 test('dev starts application services only after both exact Anvil chains are ready', () => {
   const runner = readFileSync(join(repoRoot, 'scripts/dev/run-dev.sh'), 'utf8');
   const child = readFileSync(join(repoRoot, 'scripts/dev/run-dev-child.sh'), 'utf8');
-  const supervisor = readFileSync(join(repoRoot, 'scripts/dev/supervise-dev.ts'), 'utf8');
-  expect(DEV_ROLES).toEqual(['anvil', 'anvil2', 'mesh', 'watchtower', 'runtime', 'vite', 'vite-http', 'ready']);
-  expect(runner).toContain('bun scripts/dev/supervise-dev.ts');
-  expect(runner).not.toContain('concurrently');
+  expect(runner).toContain("--names 'ANVIL,ANVIL2,STACK'");
+  expect(runner).toContain('${DEV_CHILD_COMMAND} stack');
   const firstReady = child.indexOf("--chain-id 31337");
   const secondReady = child.indexOf("--chain-id 31338");
-  const barrier = supervisor.indexOf('const barrier = spawnRole(DEV_CHAIN_BARRIER_ROLE)');
-  const applicationStart = supervisor.indexOf('for (const role of DEV_APPLICATION_ROLES) spawnRole(role)');
+  const meshStart = child.indexOf('${DEV_CHILD_COMMAND} mesh');
   expect(firstReady).toBeGreaterThan(0);
   expect(secondReady).toBeGreaterThan(firstReady);
-  expect(child).toContain('rpc-ready)\n    wait_for_dev_chains');
-  expect(child).toContain('DEV_CHAINS_NOT_READY:role=${role}');
-  expect(barrier).toBeGreaterThan(0);
-  expect(applicationStart).toBeGreaterThan(barrier);
+  expect(meshStart).toBeGreaterThan(secondReady);
 });
 
 test('dev cleanup reaps only owner-recorded processes and only deletes the dev shard', () => {
@@ -164,9 +152,6 @@ test('ordinary dev startup atomically resets ephemeral Anvil and Runtime state',
   expect(scripts['dev:setup']).toBeUndefined();
   expect(scripts['dev:no-relay']).toBeUndefined();
   expect(scripts['dev:anvil2']).toBeUndefined();
-  expect(scripts['start']).toBeUndefined();
-  expect(scripts['serve']).toBeUndefined();
-  expect(scripts['serve:dev']).toBeUndefined();
   expect(launcher.indexOf('const lease = acquireDevSingleton()')).toBeLessThan(launcher.indexOf('runDevCommands(commands'));
   expect(launcher).toContain('DEV_LAUNCHER_SHUTDOWN_TIMEOUT_MS = 90_000');
   expect(launcher).toContain('stopProcessGroup({');
@@ -546,57 +531,8 @@ test('dev exports the storage roots consumed by mesh, watcher and health monitor
   expect(runner).toContain('XLN_JURISDICTIONS_PATH="$XLN_RDB_ROOT/jurisdictions.json"');
   expect(child).toContain('--db-root "$XLN_RDB_ROOT/mesh"');
   expect(child).toContain('--db "$XLN_RDB_ROOT/watchtower"');
-  expect(runner).toContain('export DEV_RUNTIME_BUNDLE_PATH DEV_STARTED_AT_MS DEV_READY_TIMEOUT_MS DEV_SHUTDOWN_TIMEOUT_MS');
-  expect(child).not.toContain('DEV_INNER_KILL_TIMEOUT_MS');
-  expect(child).not.toContain('CONCURRENTLY_JS');
-  expect(child).not.toContain('dist/bin/concurrently.js');
-});
-
-test('dev supervisor owns all roles, preserves their logs and stops siblings after one role fails', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'xln-dev-supervisor-'));
-  tempRoots.push(root);
-  const childScript = join(root, 'child.sh');
-  const descendantPidPath = join(root, 'descendant.pid');
-  const logDir = join(root, 'logs');
-  writeFileSync(childScript, `#!/bin/bash
-set -euo pipefail
-role="$1"
-echo "started role=$role"
-if [[ "$role" == "ready" || "$role" == "rpc-ready" ]]; then exit 0; fi
-if [[ "$role" == "mesh" ]]; then sleep 0.1; exit 7; fi
-if [[ "$role" == "anvil" ]]; then
-  sleep 30 &
-  echo $! > "${descendantPidPath}"
-fi
-trap 'exit 0' TERM INT
-while true; do sleep 0.05; done
-`);
-  chmodSync(childScript, 0o700);
-  const exitCode = await superviseDev({
-    childScript,
-    cwd: root,
-    logDir,
-    shutdownTimeoutMs: 2_000,
-  });
-  expect(exitCode).toBe(7);
-  const log = readFileSync(join(logDir, 'dev.log'), 'utf8');
-  for (const role of DEV_ROLES) expect(log).toContain(`started role=${role}`);
-  expect(log).toContain('[MESH] DEV_ROLE_EXIT code=7 signal=none');
-  expect(log).toContain('DEV_STOPPED exitCode=7');
-  const descendantPid = Number(readFileSync(descendantPidPath, 'utf8').trim());
-  expect(() => process.kill(descendantPid, 0)).toThrow();
-});
-
-test('dev console keeps lifecycle/status/error lines while full detail stays in dev.log', () => {
-  expect(shouldEchoDevLine('ready', 'DEV_HEARTBEAT phase=mesh', false)).toBe(true);
-  expect(shouldEchoDevLine('mesh', 'RUNTIME_IMPORT_READY count=5', false)).toBe(true);
-  expect(shouldEchoDevLine('mesh', '[WARN][network] retrying', false)).toBe(true);
-  expect(shouldEchoDevLine('vite', 'verbose transform detail', false)).toBe(false);
-  expect(shouldEchoDevLine('vite', 'real socket failure', true)).toBe(true);
-  expect(isExpectedDevTerminationNotice(
-    '/repo/scripts/dev/run-dev-child.sh: line 63: 98394 Terminated: 15          "$@"',
-  )).toBe(true);
-  expect(isExpectedDevTerminationNotice('worker failed: Terminated: 15 while flushing state')).toBe(false);
+  expect(runner).toContain('DEV_OUTER_KILL_TIMEOUT_MS=$((DEV_SHUTDOWN_TIMEOUT_MS + 10000))');
+  expect(child).toContain('DEV_INNER_KILL_TIMEOUT_MS=$((DEV_CHILD_TERM_TIMEOUT_MS + 5000))');
 });
 
 test('dev rejects independent storage roots before stopping or resetting anything', async () => {
