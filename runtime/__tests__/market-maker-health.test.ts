@@ -6,7 +6,7 @@ import {
 } from '../api/server/market-maker-health';
 import { buildDefaultEntitySwapPairs } from '../account/utils';
 import { deriveSwapNetAuthorization } from '../account/swap/swap-net-authorization';
-import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
+import { handleSwapOffer } from '../account/tx/handlers/swap/offer/index';
 import { deriveSameOrderbookMaterialization } from '../entity/tx/handlers/account/orderbook-matching-helpers';
 import { buildMarketSnapshotForReplica } from '../network/relay/market-snapshot';
 import { applyCommand, createBook } from '../orderbook';

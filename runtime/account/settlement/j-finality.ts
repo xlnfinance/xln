@@ -4,7 +4,7 @@ import {
   isDisputeStartedByLeft,
 } from '../consensus/dispute/policy';
 import { invalidateAccountMapCommitment } from '../commitment/map-commitment';
-import { clearFinalizedSettlementWorkspace } from '../tx/handlers/settle-transition';
+import { clearFinalizedSettlementWorkspace } from '../tx/handlers/settlement/transition';
 export type AccountDisputeFinalityResult = {
   hadActiveDispute: boolean;
   hadSettlementWorkspace: boolean;

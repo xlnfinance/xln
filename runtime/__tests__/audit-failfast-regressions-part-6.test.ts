@@ -26,11 +26,11 @@ import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 import { applyAccountTx } from '../account/tx/apply';
 
 
-import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
+import { handleHtlcLock } from '../account/tx/handlers/htlc/lock';
 
-import { handleHtlcResolve } from '../account/tx/handlers/htlc-resolve';
+import { handleHtlcResolve } from '../account/tx/handlers/htlc/resolve';
 
-import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
+import { createSettlementWorkspaceHash } from '../account/tx/handlers/settlement/transition';
 
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 
@@ -38,9 +38,9 @@ import { buildHashLadderProof, revealHashLadder } from '../protocol/htlc/hash-la
 
 import type { MultiRecipientCiphertext } from '../protocol/htlc/multi-recipient';
 
-import { checkAutoRebalance, handleRequestCollateral } from '../account/tx/handlers/request-collateral';
+import { checkAutoRebalance, handleRequestCollateral } from '../account/tx/handlers/rebalance/request-collateral';
 
-import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
+import { handleSwapOffer } from '../account/tx/handlers/swap/offer/index';
 
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame/hash';
 
@@ -136,7 +136,7 @@ import { applyJEvent } from '../entity/tx/j-events';
 
 import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 
-import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-event-finality';
+import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-events/finality';
 
 import { queueCrossJurisdictionSalvageFromFinalizedArguments } from '../entity/tx/j-events-htlc';
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createAccountConsensusContext } from '../entity/account-consensus-context';
 
 import { proposeAccountFrame } from '../account/consensus/proposal/propose';
-import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
+import { createSettlementWorkspaceHash } from '../account/tx/handlers/settlement/transition';
 import { applyEntityInput } from '../entity/consensus';
 import { generateLazyEntityId } from '../entity/factory';
 import { createEmptyEnv, hasRuntimeWork } from '../runtime';

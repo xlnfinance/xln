@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { handleDirectPayment } from '../account/tx/handlers/direct-payment';
+import { handleDirectPayment } from '../account/tx/handlers/balance/direct-payment';
 import { computeFrameHash } from '../account/consensus/frame/hash';
 import { applyPendingForwardFollowup } from '../entity/tx/handlers/account/committed-htlc-followups';
 import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../types/account';

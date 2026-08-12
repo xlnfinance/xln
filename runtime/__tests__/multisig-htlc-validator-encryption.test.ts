@@ -80,7 +80,7 @@ import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { initCrontab } from '../entity/scheduler';
 import { applyEntityFrame, applyEntityInput } from '../entity/consensus';
 import { handleHtlcPayment } from '../entity/tx/handlers/htlc-payment';
-import { handleHtlcResolve } from '../account/tx/handlers/htlc-resolve';
+import { handleHtlcResolve } from '../account/tx/handlers/htlc/resolve';
 import {
   buildHtlcOnionRevealAcceptedTx,
   validateHtlcOnionAdvanceTx,

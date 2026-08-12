@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { handlePullLock } from '../account/tx/handlers/pull';
+import { handlePullLock } from '../account/tx/handlers/settlement/pull';
 import {
   buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionRoute,

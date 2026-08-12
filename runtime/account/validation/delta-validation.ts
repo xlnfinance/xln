@@ -6,7 +6,7 @@ import {
 } from '../../protocol/validation-primitives';
 import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../../protocol/integer-ranges';
 import { TOKENS } from '../../config/constants';
-import { MAX_CREDIT_LIMIT } from '../tx/handlers/set-credit-limit';
+import { MAX_CREDIT_LIMIT } from '../tx/handlers/balance/set-credit-limit';
 
 const BIGINT_FIELDS = [
   'collateral',

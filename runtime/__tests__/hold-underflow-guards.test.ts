@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { handleHtlcResolve } from '../account/tx/handlers/htlc-resolve';
+import { handleHtlcResolve } from '../account/tx/handlers/htlc/resolve';
 import {
   createSettlementWorkspaceHash,
   handleSettleTransition,
-} from '../account/tx/handlers/settle-transition';
+} from '../account/tx/handlers/settlement/transition';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { createDefaultDelta } from '../account/state/delta';
 import { entity, makeAccount } from './helpers/cross-j';

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { createFrameHash } from '../account/consensus/frame/hash';
 import { computeAccountStateRoot } from '../account/commitment/state-root';
-import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
+import { createSettlementWorkspaceHash } from '../account/tx/handlers/settlement/transition';
 import { deriveDelta } from '../account/utils';
 import { validateDelta } from '../account/validation/delta-validation';
 import { FINANCIAL, LIMITS, TOKENS } from '../config/constants';

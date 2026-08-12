@@ -36,7 +36,7 @@ import {
   getCrossJurisdictionLocalUsdCapError,
   isCrossJurisdictionBookRiskRejection,
 } from '../../../extensions/cross-j/orderbook';
-import { getPullLockAdmissionError } from '../../../account/tx/handlers/pull';
+import { getPullLockAdmissionError } from '../../../account/tx/handlers/settlement/pull';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 

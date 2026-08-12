@@ -6,7 +6,7 @@ import { createStructuredLogger, shortId } from '../../../infra/logger';
 import { normalizeRebalanceMatchingStrategy } from '../../../extensions/rebalance/policy';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import { checkAutoRebalance } from '../../../account/tx/handlers/request-collateral';
+import { checkAutoRebalance } from '../../../account/tx/handlers/rebalance/request-collateral';
 import {
   assertNoTokenlessHubRawOverrides,
   getDefaultRebalanceBaseFeeForToken,

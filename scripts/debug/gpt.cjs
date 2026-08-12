@@ -163,10 +163,10 @@ const CORE_FILES = {
     'types/lending.ts',                        // Lending pool/loan state model
     'entity/tx/handlers/lending.ts',           // Lending offer/borrow/repay entity tx handlers
     'api/server/lending.ts',                   // Hub lending API handlers
-    'account/tx/handlers/swap-offer.ts',     // Account-level swap offer placement
-    'account/tx/handlers/swap-resolve.ts',   // Swap settlement / hashladder resolution
-    'account/tx/handlers/swap-cancel.ts',    // Swap cancellation
-    'account/tx/handlers/cross-swap-fill-ack.ts', // Cross-j fill acknowledgement processing
+    'account/tx/handlers/swap/offer/index.ts',     // Account-level swap offer placement
+    'account/tx/handlers/swap/resolve/index.ts',   // Swap settlement / hashladder resolution
+    'account/tx/handlers/swap/lifecycle/cancel.ts',    // Swap cancellation
+    'account/tx/handlers/swap/cross-fill-ack/index.ts', // Cross-j fill acknowledgement processing
     'orderbook/cross-j.ts',                  // Cross-j book types and conversion helpers
     'network/relay/market-snapshot.ts',            // Market snapshot projection
     'network/relay/market-subscriptions.ts',       // Orderbook streaming subscriptions
@@ -179,7 +179,7 @@ const CORE_FILES = {
     'api/server/watchtower-proxy.ts',        // Runtime watchtower proxy API
 
     'account/tx/apply.ts',   // Account transaction dispatcher
-    'account/tx/handlers/add-delta.ts', // Delta addition (payment processing)
+    'account/tx/handlers/balance/add-delta.ts', // Delta addition (payment processing)
 
     // Routing (multi-hop payments)
     'routing/graph.ts',      // Network graph representation
@@ -358,14 +358,14 @@ const CROSS_FILES = {
     'entity/tx/handlers/htlc-payment.ts',
     'entity/tx/handlers/settle.ts',
     'account/tx/apply.ts',
-    'account/tx/handlers/swap-offer.ts',
-    'account/tx/handlers/swap-resolve.ts',
-    'account/tx/handlers/swap-cancel.ts',
-    'account/tx/handlers/swap-history.ts',
-    'account/tx/handlers/cross-swap-fill-ack.ts',
-    'account/tx/handlers/add-delta.ts',
-    'account/tx/handlers/j-event-claim.ts',
-    'account/tx/handlers/settle-transition.ts',
+    'account/tx/handlers/swap/offer/index.ts',
+    'account/tx/handlers/swap/resolve/index.ts',
+    'account/tx/handlers/swap/lifecycle/cancel.ts',
+    'account/tx/handlers/swap/lifecycle/history.ts',
+    'account/tx/handlers/swap/cross-fill-ack/index.ts',
+    'account/tx/handlers/balance/add-delta.ts',
+    'account/tx/handlers/j-events/claim.ts',
+    'account/tx/handlers/settlement/transition.ts',
     'orderbook/index.ts',
     'orderbook/types.ts',
     'orderbook/core.ts',
@@ -492,9 +492,9 @@ const RUNTIME_FILES = {
     'entity/tx/handlers/settle.ts',
     'entity/tx/handlers/mint-reserves.ts',
     'account/tx/apply.ts',
-    'account/tx/handlers/add-delta.ts',
-    'account/tx/handlers/direct-payment.ts',
-    'account/tx/handlers/set-credit-limit.ts',
+    'account/tx/handlers/balance/add-delta.ts',
+    'account/tx/handlers/balance/direct-payment.ts',
+    'account/tx/handlers/balance/set-credit-limit.ts',
     'account/utils.ts',
     'account/crypto.ts',
     'account/state/frame.ts',
@@ -570,10 +570,10 @@ const ORDERBOOK_FILES = {
     'entity/tx/handlers/account/orderbook-matching.ts',
     'entity/tx/handlers/account/orderbook-matching-helpers.ts',
     'entity/tx/handlers/account/orderbook-cancels.ts',
-    'account/tx/handlers/swap-offer.ts',
-    'account/tx/handlers/swap-resolve.ts',
-    'account/tx/handlers/swap-cancel.ts',
-    'account/tx/handlers/swap-history.ts',
+    'account/tx/handlers/swap/offer/index.ts',
+    'account/tx/handlers/swap/resolve/index.ts',
+    'account/tx/handlers/swap/lifecycle/cancel.ts',
+    'account/tx/handlers/swap/lifecycle/history.ts',
     'orderbook/index.ts',
     'orderbook/types.ts',
     'orderbook/core.ts',
@@ -639,11 +639,11 @@ const SWAP_FILES = {
     'entity/tx/handlers/account/orderbook-matching-helpers.ts',
     'entity/tx/handlers/account/orderbook-cancels.ts',
     'account/tx/apply.ts',
-    'account/tx/handlers/swap-offer.ts',
-    'account/tx/handlers/swap-resolve.ts',
-    'account/tx/handlers/swap-cancel.ts',
-    'account/tx/handlers/swap-history.ts',
-    'account/tx/handlers/add-delta.ts',
+    'account/tx/handlers/swap/offer/index.ts',
+    'account/tx/handlers/swap/resolve/index.ts',
+    'account/tx/handlers/swap/lifecycle/cancel.ts',
+    'account/tx/handlers/swap/lifecycle/history.ts',
+    'account/tx/handlers/balance/add-delta.ts',
     'orderbook/index.ts',
     'orderbook/types.ts',
     'orderbook/core.ts',
@@ -757,8 +757,8 @@ swaps executable and disputable.
 2. Runtime model: \`types/cross-jurisdiction.ts\`, \`extensions/cross-j/index.ts\`,
    \`extensions/cross-j/orderbook.ts\`, \`entity/consensus/index.ts\`.
 3. Execution path: \`entity/tx/handlers/cross-j-*.ts\`,
-   \`account/tx/handlers/cross-swap-fill-ack.ts\`,
-   \`account/tx/handlers/swap-resolve.ts\`, then orderbook matching.
+   \`account/tx/handlers/swap/cross-fill-ack/index.ts\`,
+   \`account/tx/handlers/swap/resolve/index.ts\`, then orderbook matching.
 4. Backstop: \`cross-j-salvage.ts\`, \`protocol/dispute/arguments.ts\`,
    \`entity/tx/handlers/dispute.ts\`, watchtower action, and dispute docs.
 5. Product proof: \`SwapPanel.svelte\`, \`OrderbookPanel.svelte\`, and
@@ -1072,17 +1072,17 @@ market-maker bootstrapping, manual route recommendations, and hub lending.
 \`\`\`
 User UI -> placeSwapOffer
   -> entity/tx/handlers/swap-requests.ts
-  -> account/tx/handlers/swap-offer.ts
+  -> account/tx/handlers/swap/offer/index.ts
   -> account orderbook matching
-  -> account/tx/handlers/swap-resolve.ts
+  -> account/tx/handlers/swap/resolve/index.ts
   -> swap closed/open projections
 \`\`\`
 
 Same-chain orderbook matching lives in:
 - \`runtime/entity/tx/handlers/account/orderbook-matching.ts\`
 - \`runtime/entity/tx/handlers/account/orderbook-matching-helpers.ts\`
-- \`runtime/account/tx/handlers/swap-offer.ts\`
-- \`runtime/account/tx/handlers/swap-resolve.ts\`
+- \`runtime/account/tx/handlers/swap/offer/index.ts\`
+- \`runtime/account/tx/handlers/swap/resolve/index.ts\`
 
 The UI contract is: clicking a red/green real orderbook level must select the
 concrete hub/row and update the visible form amounts/assets. All-hubs mode must
@@ -1114,7 +1114,7 @@ Read these together:
 - \`runtime/extensions/cross-j/boundary.ts\`
 - \`runtime/orderbook/cross-j-orderbook.ts\`
 - \`runtime/entity/tx/handlers/cross-j-*.ts\`
-- \`runtime/account/tx/handlers/cross-swap-fill-ack.ts\`
+- \`runtime/account/tx/handlers/swap/cross-fill-ack/index.ts\`
 
 Design rule: expected market failures (no liquidity, no market, quote expired)
 are terminal user-visible swap failures/cancellations, not protocol fatals.
@@ -1235,7 +1235,7 @@ xln/
       entity/tx/handlers/cross-j-*.ts - Cross-j setup/book/fill/salvage/clear/sweep
       entity/tx/handlers/account/orderbook-matching-*.ts - Same/cross matching
       account/tx/handlers/swap-*.ts - Account-level offer/resolve/cancel
-      account/tx/handlers/cross-swap-fill-ack.ts ${fileSizes['runtime/account/tx/handlers/cross-swap-fill-ack.ts'] || '?'} lines - Fill ACK processing
+      account/tx/handlers/swap/cross-fill-ack/index.ts ${fileSizes['runtime/account/tx/handlers/swap/cross-fill-ack/index.ts'] || '?'} lines - Fill ACK processing
       relay/market-subscriptions.ts ${fileSizes['runtime/network/relay/market-subscriptions.ts'] || '?'} lines - Book streaming
       orchestrator/mm-node.ts     ${fileSizes['runtime/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
       server/market-maker-health.ts ${fileSizes['runtime/api/server/market-maker-health.ts'] || '?'} lines - MM readiness health
@@ -1256,7 +1256,7 @@ xln/
 
     account/tx/
       apply.ts                   ${fileSizes['runtime/account/tx/apply.ts'] || '?'} lines - Account tx dispatcher
-      handlers/add-delta.ts      ${fileSizes['runtime/account/tx/handlers/add-delta.ts'] || '?'} lines - Delta addition
+      handlers/add-delta.ts      ${fileSizes['runtime/account/tx/handlers/balance/add-delta.ts'] || '?'} lines - Delta addition
 
     routing/
       graph.ts                   ${fileSizes['runtime/routing/graph.ts'] || '?'} lines - Network graph

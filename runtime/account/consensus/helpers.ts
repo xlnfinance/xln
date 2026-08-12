@@ -6,7 +6,7 @@ import { txFingerprint } from '../../protocol/tx-multiset';
 import {
   checkAutoRebalance,
   resolveAutoRebalanceFeePolicy,
-} from '../tx/handlers/request-collateral';
+} from '../tx/handlers/rebalance/request-collateral';
 import { normalizeAccountStateDomain, type AccountStateDomain } from '../commitment/state-root';
 import { assertAccountMempoolWithinLimit } from '../input/mempool';
 import {

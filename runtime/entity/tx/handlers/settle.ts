@@ -38,7 +38,7 @@ import {
   assertCanonicalSettlementWorkspace,
   createSettlementWorkspaceHash,
   hasPendingSettlementTransition,
-} from '../../../account/tx/handlers/settle-transition';
+} from '../../../account/tx/handlers/settlement/transition';
 import { projectAccountAfterSettlement } from '../../../account/settlement/settlement-projection';
 import { buildAccountProofBodyFromJurisdictions } from '../../../account/consensus/helpers';
 

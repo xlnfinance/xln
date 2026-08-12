@@ -5,30 +5,30 @@ import { getAccountPerspective } from '../state/perspective';
 import type { AccountJClaimSession } from '../j-claims/j-claim-session';
 import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute/policy';
 import type { ApplyAccountTxResult } from './apply-types';
-import { handleAddDelta } from './handlers/add-delta';
-import { handleSetCreditLimit } from './handlers/set-credit-limit';
-import { handleDirectPayment } from './handlers/direct-payment';
-import { handleReserveToCollateral } from './handlers/reserve-to-collateral';
-import { handleRequestCollateral } from './handlers/request-collateral';
-import { handleRebalancePolicy } from './handlers/rebalance-policy';
-import { handleRebalanceRefund } from './handlers/rebalance-refund';
-import { handleHtlcLock } from './handlers/htlc-lock';
-import { handleHtlcResolve } from './handlers/htlc-resolve';
+import { handleAddDelta } from './handlers/balance/add-delta';
+import { handleSetCreditLimit } from './handlers/balance/set-credit-limit';
+import { handleDirectPayment } from './handlers/balance/direct-payment';
+import { handleReserveToCollateral } from './handlers/rebalance/reserve-to-collateral';
+import { handleRequestCollateral } from './handlers/rebalance/request-collateral';
+import { handleRebalancePolicy } from './handlers/rebalance/policy';
+import { handleRebalanceRefund } from './handlers/rebalance/refund';
+import { handleHtlcLock } from './handlers/htlc/lock';
+import { handleHtlcResolve } from './handlers/htlc/resolve';
 import {
   handleCrossPullClose,
   handleCrossPullProgress,
   handlePullLock,
-} from './handlers/pull';
-import { handleSwapOffer } from './handlers/swap-offer';
-import { handleSwapResolve } from './handlers/swap-resolve';
-import { handleCrossSwapFillAck } from './handlers/cross-swap-fill-ack';
-import { handleSwapCancelRequest } from './handlers/swap-cancel';
+} from './handlers/settlement/pull';
+import { handleSwapOffer } from './handlers/swap/offer/index';
+import { handleSwapResolve } from './handlers/swap/resolve/index';
+import { handleCrossSwapFillAck } from './handlers/swap/cross-fill-ack/index';
+import { handleSwapCancelRequest } from './handlers/swap/lifecycle/cancel';
 import {
   getSignedSettlementWorkspaceTxError,
   handleSettleTransition,
-} from './handlers/settle-transition';
-import { handleJEventClaim } from './handlers/j-event-claim';
-import { handleLendingAccountTx } from './handlers/lending';
+} from './handlers/settlement/transition';
+import { handleJEventClaim } from './handlers/j-events/claim';
+import { handleLendingAccountTx } from './handlers/balance/lending';
 
 type MutationContext = {
   account: AccountReplica;

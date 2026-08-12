@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { computeAccountStateRoot } from '../account/commitment/state-root';
-import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
+import { handleJEventClaim } from '../account/tx/handlers/j-events/claim';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { createAccountJClaimSession } from '../account/j-claims/j-claim-session';
 import {

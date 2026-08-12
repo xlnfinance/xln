@@ -9,8 +9,8 @@ import {
   getAccountJClaimNodeStore,
 } from '../entity/account-j-claim-node-store';
 import { prepareAccountJClaimTx } from '../account/j-claims/j-claim-transition';
-import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
-import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
+import { handleJEventClaim } from '../account/tx/handlers/j-events/claim';
+import { createSettlementWorkspaceHash } from '../account/tx/handlers/settlement/transition';
 import { applyEntityFrame } from '../entity/consensus';
 import { selectSettlementContinuation } from '../entity/consensus/settlement-continuation';
 import { proposeAccountFrame } from '../account/consensus/proposal/propose';
@@ -42,7 +42,7 @@ import {
   initCrontab,
 } from '../entity/scheduler';
 import { hubRebalanceHandler } from '../entity/scheduler/rebalance';
-import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-event-finality';
+import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-events/finality';
 import { createEmptyBatch, initJBatch } from '../jurisdiction/machine/batch';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import {
@@ -1989,7 +1989,7 @@ describe('atomic settlement Account transition', () => {
   test('settlement seal is current-board-only while its dispute proof keeps board grace', () => {
     const repoRoot = join(import.meta.dir, '..', '..');
     const accountSeal = readFileSync(
-      join(repoRoot, 'runtime/account/tx/handlers/settle-transition.ts'),
+      join(repoRoot, 'runtime/account/tx/handlers/settlement/transition.ts'),
       'utf8',
     );
     const entitySeal = readFileSync(

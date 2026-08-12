@@ -17,7 +17,7 @@ import {
   cloneJBatch,
   initJBatch,
 } from '../../jurisdiction/machine/batch';
-import { hasPendingSettlementTransition } from '../../account/tx/handlers/settle-transition';
+import { hasPendingSettlementTransition } from '../../account/tx/handlers/settlement/transition';
 import type {
   CrontabExecutionContext,
   EntityTransitionContext,

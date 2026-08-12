@@ -4,7 +4,7 @@ import { readEntityFrameEventMessages } from '../entity/frame-events';
 import { accountInputProposal } from '../account/consensus/flush';
 import { replaceLocalDisputeDraft } from '../account/consensus/dispute/seal';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
-import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
+import { createSettlementWorkspaceHash } from '../account/tx/handlers/settlement/transition';
 import {
   clearSignerKeys,
   deriveSignerAddressSync,

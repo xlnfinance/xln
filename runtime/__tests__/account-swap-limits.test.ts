@@ -7,8 +7,8 @@ import {
   getAccountSwapMarketOfferCount,
 } from '../account/swap/swap-limits';
 import type { SwapOffer } from '../types/account';
-import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
-import { validateSwapOfferAdmission } from '../account/tx/handlers/swap-offer/admission';
+import { handleSwapOffer } from '../account/tx/handlers/swap/offer/index';
+import { validateSwapOfferAdmission } from '../account/tx/handlers/swap/offer/admission';
 import { makeAccount } from './helpers/cross-j';
 
 const offer = (

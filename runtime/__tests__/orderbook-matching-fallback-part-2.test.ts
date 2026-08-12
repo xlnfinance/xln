@@ -14,7 +14,7 @@ import { buildCrossMarketOfferFromBookOrder } from '../entity/tx/handlers/accoun
 
 import { applyCrossJurisdictionBookProgressToState } from '../entity/tx/handlers/cross-j-book-order';
 
-import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
+import { handleSwapResolve } from '../account/tx/handlers/swap/resolve/index';
 
 import { createEmptyEnv } from '../runtime';
 import { publishEntityCandidateEffects } from '../runtime/env-events';

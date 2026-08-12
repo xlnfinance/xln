@@ -4,7 +4,7 @@ import {
   recordSwapClosedLifecycle,
   recordSwapOfferLifecycle,
   recordSwapResolveLifecycle,
-} from '../account/tx/handlers/swap-history';
+} from '../account/tx/handlers/swap/lifecycle/history';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import type { AccountReplica, SwapOffer } from '../types/account';
 

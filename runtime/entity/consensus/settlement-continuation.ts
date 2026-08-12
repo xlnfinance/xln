@@ -1,9 +1,9 @@
-import { hasPendingSettlementTransition } from '../../account/tx/handlers/settle-transition';
+import { hasPendingSettlementTransition } from '../../account/tx/handlers/settlement/transition';
 import { isBatchEmpty } from '../../jurisdiction/machine/batch';
 import type { EntityTx, PendingSettlementContinuation } from '../../types/entity-tx';
 import type { EntityState } from '../types';
 import { getAccountPerspective } from '../../account/state/perspective';
-import { assertCanonicalSettlementWorkspace } from '../../account/tx/handlers/settle-transition';
+import { assertCanonicalSettlementWorkspace } from '../../account/tx/handlers/settlement/transition';
 import { compareStableText } from '../../protocol/serialization';
 
 export type SettlementContinuationDisposition =

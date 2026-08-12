@@ -21,7 +21,7 @@ Read first:
 4. runtime/cross-jurisdiction*.ts, runtime/orderbook/cross-j-orderbook.ts.
 5. runtime/entity/tx/handlers/cross-j-*.ts, swap-requests.ts, dispute.ts.
 6. runtime/entity/tx/handlers/account/orderbook-matching-*.ts.
-7. runtime/account/tx/handlers/swap-*.ts and cross-swap-fill-ack.ts.
+7. runtime/account/tx/handlers/swap/{offer,resolve,cross-fill-ack,lifecycle}/.
 8. runtime/orchestrator/mm-node.ts, runtime/api/server/market-maker-health.ts, runtime/network/relay/market-subscriptions.ts.
 9. frontend SwapPanel.svelte, OrderbookPanel.svelte, routed-swap-planner.ts, routed-swap-execution.ts.
 10. tests/e2e-swap.spec.ts, tests/e2e-cross-j-swap.spec.ts, runtime cross-j/orderbook tests.

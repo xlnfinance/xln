@@ -6,7 +6,7 @@ import {
   recordSwapClosedLifecycle,
   recordSwapOfferLifecycle,
   recordSwapResolveLifecycle,
-} from '../account/tx/handlers/swap-history';
+} from '../account/tx/handlers/swap/lifecycle/history';
 import { LIMITS } from '../config/constants';
 import {
   consumeHtlcRuntimeEvent,

@@ -9,7 +9,7 @@ import { getAccountJClaimNodeStore } from '../account-j-claim-node-store';
 import {
   assertCanonicalSettlementWorkspace,
   hasPendingSettlementTransition,
-} from '../../account/tx/handlers/settle-transition';
+} from '../../account/tx/handlers/settlement/transition';
 import { markCrossJurisdictionBookAdmissionResolving } from '../../extensions/cross-j/orderbook';
 import { logError, shortHash, shortId, shortOrder } from '../../infra/logger';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';

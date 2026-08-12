@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import { deriveDelta } from '../account/utils';
-import { handleDirectPayment } from '../account/tx/handlers/direct-payment';
-import { handleSetCreditLimit } from '../account/tx/handlers/set-credit-limit';
+import { handleDirectPayment } from '../account/tx/handlers/balance/direct-payment';
+import { handleSetCreditLimit } from '../account/tx/handlers/balance/set-credit-limit';
 import type { Delta, DerivedDelta } from '../types/account';
 import { makeAccount } from './helpers/cross-j';
 
