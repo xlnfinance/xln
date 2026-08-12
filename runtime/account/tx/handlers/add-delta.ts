@@ -4,7 +4,7 @@
  */
 
 import type { AccountState, AccountTx } from '../../../types/account';
-import { createDefaultDelta } from '../../delta';
+import { createDefaultDelta } from '../../state/delta';
 
 export function handleAddDelta(
   account: AccountState,

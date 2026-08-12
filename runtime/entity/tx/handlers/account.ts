@@ -11,7 +11,7 @@ import type { ApplyEntityTxOptions } from '../apply';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
 import { cumulativeMarksToPhases } from '../../../infra/perf-profile';
 import { getPerfMs } from '../../../infra/time';
-import { AccountPeerEvidenceError } from '../../../account/peer-rejection';
+import { AccountPeerEvidenceError } from '../../../account/input/peer-rejection';
 import { resolveInboundAccount } from './account/inbound-account';
 import { rejectFrozenAccountInput } from './account/frozen-input';
 import type { CommittedAccountEffects } from './account/committed-input';

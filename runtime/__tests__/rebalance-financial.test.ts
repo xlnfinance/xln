@@ -4,7 +4,7 @@ import { handleRebalanceRefund } from '../account/tx/handlers/rebalance-refund';
 import { handleRequestCollateral } from '../account/tx/handlers/request-collateral';
 import type { AccountReplica } from '../types/account';
 import type { RebalanceRequestFeeState } from '../types/rebalance';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 import { entity, makeAccount } from './helpers/cross-j';
 
 const requestState = (

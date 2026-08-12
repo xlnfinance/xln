@@ -6,7 +6,7 @@ import { applyPendingForwardFollowup } from '../entity/tx/handlers/account/commi
 import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../types/account';
 import type { EntityState } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 import { makeAccount as makeCanonicalAccount } from './helpers/cross-j';
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 

@@ -3,12 +3,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { applyAccountTx } from '../account/tx/apply';
-import { createAccountJClaimSession } from '../account/j-claim-session';
+import { createAccountJClaimSession } from '../account/j-claims/j-claim-session';
 import {
   cacheCommittedAccountJClaimNodeChanges,
   getAccountJClaimNodeStore,
 } from '../entity/account-j-claim-node-store';
-import { prepareAccountJClaimTx } from '../account/j-claim-transition';
+import { prepareAccountJClaimTx } from '../account/j-claims/j-claim-transition';
 import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { applyEntityFrame } from '../entity/consensus';
@@ -52,12 +52,12 @@ import {
 } from '../jurisdiction/machine/board-registry';
 import { createEmptyEnv } from '../runtime';
 import { createAccountConsensusContext } from '../entity/account-consensus-context';
-import { cloneAccountReplica } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state/state-clone';
 import type { AccountTx, SettlementOp } from '../types/account';
 import type { EntityState, HashToSign, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 import {
   addReplica,
   addr,

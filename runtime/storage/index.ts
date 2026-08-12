@@ -112,7 +112,7 @@ import {
   hashAccountJClaimNode,
   type AccountJClaimAccumulatorState,
   type AccountJClaimNode,
-} from '../account/j-claim-accumulator';
+} from '../account/j-claims/j-claim-accumulator';
 import {
   finalizePersistedAccountJClaimNodes,
   getLiveAccountJClaimAccumulatorStates,

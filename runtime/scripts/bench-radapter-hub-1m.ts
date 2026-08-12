@@ -6,7 +6,7 @@ import { join } from 'path';
 import { Level } from 'level';
 import type { ServerWebSocket } from 'bun';
 import { ethers } from 'ethers';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { createFrameHash } from '../account/consensus/frame';
 import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 

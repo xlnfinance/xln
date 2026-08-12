@@ -17,7 +17,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/machine/batch';
 import {

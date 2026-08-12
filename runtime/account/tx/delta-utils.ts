@@ -1,6 +1,6 @@
 import type { AccountState, Delta } from '../../types/account';
 import { TOKENS } from '../../config/constants';
-import { assertAccountDeltaCapacity, createDefaultDelta } from '../delta';
+import { assertAccountDeltaCapacity, createDefaultDelta } from '../state/delta';
 
 export function ensureDelta(account: AccountState, tokenId: number): Delta {
   if (!Number.isSafeInteger(tokenId) || tokenId < 0 || tokenId > TOKENS.MAX_TOKEN_ID) {

@@ -5,7 +5,7 @@ import type { HandleAccountInputResult } from './types';
 import {
   rejectAccountPeerEvidenceError,
   rejectAccountPeerInput,
-} from '../peer-rejection';
+} from '../input/peer-rejection';
 import {
   type ValidatedCounterpartyDisputeSeal,
   validateCounterpartyDisputeSeal,

@@ -114,7 +114,7 @@ const projectOrderbookConsensusState = (
  * the complete resting-liquidity map twice. The Entity commitment retains the
  * current/pending Account frames (and therefore their roots) plus every local
  * lifecycle field below. A field may be added here only when it is covered by
- * accountStateRootEntries in account/state-root.ts.
+ * accountStateRootEntries in account/commitment/state-root.ts.
  */
 const ACCOUNT_ROOT_COMMITTED_FIELDS = [
   'domain',

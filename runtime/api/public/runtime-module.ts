@@ -52,7 +52,7 @@ export type { BookState } from '../../orderbook';
 export type {
   SwapAccountCapacityView,
   SwapInboundCapacityPlan,
-} from '../../account/swap-inbound-plan';
+} from '../../account/swap/swap-inbound-plan';
 export type { RuntimeActivityEvent, RuntimeActivityFilters } from '../../storage/views/activity-types';
 export type { DeliveryResult } from '../../protocol/payments/delivery-result';
 export type {

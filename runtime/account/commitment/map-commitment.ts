@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
-import { computeIntegrityDigest } from '../infra/integrity-checksum';
-import type { AccountState } from '../types/account';
+import { computeIntegrityDigest } from '../../infra/integrity-checksum';
+import type { AccountState } from '../../types/account';
 
 export type AccountCommittedMap =
   | 'deltas'

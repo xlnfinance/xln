@@ -49,7 +49,7 @@ import {
 } from '../runtime';
 import { readStorageFrameRecord } from '../storage';
 import { buildRouteOutputKey, getReliableOutputIdentity } from '../runtime/output-routing';
-import { computeAccountStateRoot } from '../account/state-root';
+import { computeAccountStateRoot } from '../account/commitment/state-root';
 import type { DeliverableEntityInput, RuntimeReplica, ReliableDeliveryReceipt } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 import type { EntityTx } from '../types/entity-tx';

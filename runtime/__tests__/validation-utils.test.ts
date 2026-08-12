@@ -2,12 +2,12 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { createDefaultDelta } from '../account/delta';
-import { validateAccountDeltas } from '../account/delta-validation';
+import { createDefaultDelta } from '../account/state/delta';
+import { validateAccountDeltas } from '../account/validation/delta-validation';
 
 test('validation utilities do not hide account-delta failures behind console output', () => {
   const source = readFileSync(
-    join(process.cwd(), 'runtime/account/delta-validation.ts'),
+    join(process.cwd(), 'runtime/account/validation/delta-validation.ts'),
     'utf8',
   );
 

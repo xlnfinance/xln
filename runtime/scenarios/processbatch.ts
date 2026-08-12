@@ -10,7 +10,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
 import type { EntityReplica } from '../entity/types';
 import {
   getProcess,

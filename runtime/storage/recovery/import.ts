@@ -1,5 +1,5 @@
 import { Level } from 'level';
-import { collectReachableAccountJClaimNodes } from '../../account/j-claim-accumulator';
+import { collectReachableAccountJClaimNodes } from '../../account/j-claims/j-claim-accumulator';
 import { getAccountJClaimNodeStore, getLiveAccountJClaimAccumulatorStates } from '../../entity/account-j-claim-node-store';
 import {
   collectReachableConsumptionNodes,

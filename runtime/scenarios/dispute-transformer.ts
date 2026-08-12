@@ -5,7 +5,7 @@
  */
 
 import { ethers } from 'ethers';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
 
 import type { AccountFrame, AccountInput, AccountReplica } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
@@ -15,7 +15,7 @@ import { deriveDisputeTokenFinalization } from '../protocol/dispute/finalization
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
-import { deriveSwapNetAuthorization } from '../account/swap-net-authorization';
+import { deriveSwapNetAuthorization } from '../account/swap/swap-net-authorization';
 import { ASYNC_PAYMENT_EXPIRY_MS } from '../types/payment';
 import { safeStringify } from '../protocol/serialization';
 import { releaseUncommittedReliableIngress } from '../runtime/reliable/reliable-delivery.ts';

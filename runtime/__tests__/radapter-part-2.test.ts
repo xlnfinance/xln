@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test';
 import { createHmac } from 'crypto';
 import { computeAddress, hexlify, keccak256, recoverAddress, SigningKey, toUtf8Bytes } from 'ethers';
 
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 
 import {
   deriveRuntimeAdapterCapabilityToken,

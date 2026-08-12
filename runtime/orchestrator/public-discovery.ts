@@ -1,7 +1,7 @@
 import { normalizeRuntimeKey, type RelayStore } from '../network/relay/store';
 import { compareStableText } from '../protocol/serialization';
 import type { HubChild } from './orchestrator-types';
-import type { AccountRoleEvidenceSource } from '../account/dispute-config';
+import type { AccountRoleEvidenceSource } from '../account/config/dispute-config';
 
 export type PublicHubJurisdiction = {
   name: string;

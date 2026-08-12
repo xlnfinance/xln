@@ -9,16 +9,16 @@ import {
   planSwapInboundCapacity,
   readSwapAccountCapacity,
   type SwapInboundCapacityPlan,
-} from '../account/swap-inbound-plan';
+} from '../account/swap/swap-inbound-plan';
 import {
   buildCrossJurisdictionSwapIntent,
   buildDeterministicSwapOfferId,
-} from '../account/swap-command-route';
+} from '../account/swap/swap-command-route';
 import {
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
-} from '../account/dispute-config';
-export { buildDeterministicSwapOfferId } from '../account/swap-command-route';
+} from '../account/config/dispute-config';
+export { buildDeterministicSwapOfferId } from '../account/swap/swap-command-route';
 
 type SwapCommandParty = Readonly<{
   entityId: string;

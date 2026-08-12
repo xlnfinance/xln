@@ -1,17 +1,17 @@
-import type { AccountFrame } from '../types/account';
+import type { AccountFrame } from '../../types/account';
 import {
   FinancialDataCorruptionError,
   validateArray,
   validateObject,
   validateString,
-} from '../protocol/validation-primitives';
-import { assertAccountFrameDeltaIntegrity } from './frame';
+} from '../../protocol/validation-primitives';
+import { assertAccountFrameDeltaIntegrity } from '../state/frame';
 import { validateDelta } from './delta-validation';
-import { decodeAccountTxs } from './tx-validation';
+import { decodeAccountTxs } from '../tx-validation';
 import {
   requireBoundaryInteger,
   requireExactBoundaryKeys,
-} from '../protocol/boundary-validation';
+} from '../../protocol/boundary-validation';
 
 const isBytes32 = (value: string): boolean => /^0x[0-9a-fA-F]{64}$/.test(value);
 

@@ -15,7 +15,7 @@
  */
 
 import fs from 'node:fs';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
 import net from 'node:net';
 import path from 'node:path';
 

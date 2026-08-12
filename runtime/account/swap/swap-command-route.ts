@@ -1,9 +1,9 @@
-import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j';
+import { withCanonicalCrossJurisdictionRouteHash } from '../../extensions/cross-j';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionVenueIdForLegs,
-} from '../extensions/cross-j/market';
-import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+} from '../../extensions/cross-j/market';
+import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 
 const normalizeId = (value: string): string => String(value || '').trim().toLowerCase();
 

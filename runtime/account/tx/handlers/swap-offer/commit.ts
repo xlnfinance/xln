@@ -10,7 +10,7 @@ import type { PreparedSwapOfferAmounts } from './quantization';
 import {
   requantizeSwapNetAuthorization,
   type SwapNetAuthorization,
-} from '../../../swap-net-authorization';
+} from '../../../swap/swap-net-authorization';
 
 type SwapOfferResult = {
   success: boolean;

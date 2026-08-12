@@ -10,7 +10,7 @@ import {
   getBestAsk,
   getBestBid,
 } from '@xln/runtime/api/public/runtime-module';
-import type { AccountRoleEvidence } from '@xln/runtime/account/dispute-config';
+import type { AccountRoleEvidence } from '@xln/runtime/account/config/dispute-config';
 import { submitActiveCrossJurisdictionIntent, submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../stores/xlnStore';
 import { readRuntimeAccountProjection, readRuntimeEntityProjectionFrame } from '../../stores/runtimeViewStore';
 import { toasts } from '../../stores/toastStore';

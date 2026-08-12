@@ -1,5 +1,5 @@
-import { createEmptyAccountJClaimAccumulator } from '../../account/j-claim-accumulator';
-import { EMPTY_ACCOUNT_STATE_ROOT } from '../../account/state-root';
+import { createEmptyAccountJClaimAccumulator } from '../../account/j-claims/j-claim-accumulator';
+import { EMPTY_ACCOUNT_STATE_ROOT } from '../../account/commitment/state-root';
 import { applyCommand, createBook, type BookState } from '../../orderbook';
 import { encodeBuffer } from '../../storage/codec';
 import { STORAGE_MAX_PHYSICAL_VALUE_BYTES } from '../../storage/rebranched-db';

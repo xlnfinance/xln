@@ -12,7 +12,7 @@ import { proposeAccountFrame } from '../account/consensus/propose';
 
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 
-import { computeAccountStateRoot } from '../account/state-root';
+import { computeAccountStateRoot } from '../account/commitment/state-root';
 
 import {
   collectCommittedCrossJurisdictionCancelAcks,
@@ -52,9 +52,9 @@ import type { JurisdictionEvent } from '../types/jurisdiction-events';
 
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
 
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 
-import { cloneAccountReplica } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state/state-clone';
 import { cloneEntityReplica } from '../entity/replica-clone';
 import { cloneEntityState } from '../entity/state-clone';
 

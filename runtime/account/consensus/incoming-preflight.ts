@@ -12,7 +12,7 @@ import { getIncomingAccountDeadlineViolation, type AccountInputSecurityContext }
 import { resolveSameHeightIncomingFrame } from './collision';
 import { buildDuplicateCommittedFrameAck, describeAccountState } from './replay';
 import type { HandleAccountInputResult } from './types';
-import { rejectAccountPeerInput } from '../peer-rejection';
+import { rejectAccountPeerInput } from '../input/peer-rejection';
 
 const preflightLog = createStructuredLogger('account.preflight');
 const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;

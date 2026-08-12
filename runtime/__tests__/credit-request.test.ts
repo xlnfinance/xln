@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 import { handleCreditRequest } from '../api/server/credit-request';
 import type { AccountState } from '../types/account';
 import type { RuntimeReplica, RuntimeInput } from '../runtime/types';

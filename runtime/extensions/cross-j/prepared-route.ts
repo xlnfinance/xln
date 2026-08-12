@@ -1,6 +1,6 @@
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityState } from '../../entity/types';
-import { canonicalAccountDisputeConfig } from '../../account/dispute-config';
+import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
 import {
   cloneCrossJurisdictionRoute,
   deriveCrossJurisdictionPullId,

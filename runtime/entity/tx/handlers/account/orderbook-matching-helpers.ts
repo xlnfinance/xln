@@ -32,7 +32,7 @@ import {
   deriveSwapFillPolicyFee,
   requantizeSwapNetAuthorization,
   type SwapNetAuthorization,
-} from '../../../../account/swap-net-authorization';
+} from '../../../../account/swap/swap-net-authorization';
 import {
   buildCrossJurisdictionMarketOffer,
   crossJurisdictionBookAdmissionKeyFor,

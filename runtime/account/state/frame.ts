@@ -1,4 +1,4 @@
-import type { AccountFrame, Delta } from '../types/account';
+import type { AccountFrame, Delta } from '../../types/account';
 
 export const deriveAccountFrameOffdeltas = (frameOrDeltas: AccountFrame | readonly Delta[]): bigint[] => {
   const deltas: readonly Delta[] = Array.isArray(frameOrDeltas)

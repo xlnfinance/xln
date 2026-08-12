@@ -5,7 +5,7 @@
 
 import type { Delta, DerivedDelta } from '../types/account';
 import { PERFORMANCE } from '../config/constants';
-import { validateDelta } from './delta-validation';
+import { validateDelta } from './validation/delta-validation';
 // Re-exported under its own name so callers that already reach for account
 // utilities do not need a second import path for the LEFT tie-break.
 export { isLeftEntity } from '../protocol/entity-id';

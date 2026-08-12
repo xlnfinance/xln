@@ -20,7 +20,7 @@
   import type { RuntimeInput, XLNModule } from '@xln/runtime/api/public/runtime-module';
   import type { EntityReplica } from '@xln/runtime/entity/types';
   import type { JAdapter } from '@xln/runtime/jurisdiction/adapter';
-  import { defaultAccountDisputeConfigForRoleEvidence } from '@xln/runtime/account/dispute-config';
+  import { defaultAccountDisputeConfigForRoleEvidence } from '@xln/runtime/account/config/dispute-config';
   import { activeRuntime as activeRuntimeStore } from '$lib/stores/runtimeStore';
   import { activeRuntime as activeVaultRuntime } from '$lib/stores/vaultStore';
   import SolvencyPanel from './SolvencyPanel.svelte';

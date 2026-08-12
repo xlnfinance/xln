@@ -16,13 +16,13 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { createBook, applyCommand, type BookState, type BookEvent } from '../orderbook/core';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, computeSwapPriceTicks, deriveSide } from '../orderbook/types';
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
 import { deriveCanonicalSwapFillRatio } from '../orderbook/swap-execution';
 import type { AccountReplica, AccountTx, SwapOffer } from '../types/account';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 
 // Helpers
 const LOT_SCALE = SWAP_LOT_SCALE; // 10^12

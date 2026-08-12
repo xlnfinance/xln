@@ -8,7 +8,7 @@ import {
   computeAccountStateRootCold,
   computeAccountStateSectionHashes,
   computeAccountStateSectionHashesCold,
-} from '../state-root';
+} from '../commitment/state-root';
 
 const commitLog = createStructuredLogger('account.commit');
 

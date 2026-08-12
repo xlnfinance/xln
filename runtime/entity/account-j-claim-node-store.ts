@@ -8,7 +8,7 @@ import type { EntityRuntimeContext } from './runtime-context';
 import {
   collectReachableAccountJClaimNodes,
   hashAccountJClaimNode,
-} from '../account/j-claim-accumulator';
+} from '../account/j-claims/j-claim-accumulator';
 
 export const getAccountJClaimNodeStore = (env: EntityRuntimeContext): Map<string, AccountJClaimNode> => {
   env.infrastructure ??= {};

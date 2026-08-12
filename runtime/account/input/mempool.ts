@@ -1,5 +1,5 @@
-import { LIMITS } from '../config/constants';
-import type { AccountReplica, AccountTx } from '../types/account';
+import { LIMITS } from '../../config/constants';
+import type { AccountReplica, AccountTx } from '../../types/account';
 
 type AccountMempoolSubject = Pick<AccountReplica, 'mempool'> & {
   pendingFrame?: AccountReplica['pendingFrame'] | undefined;

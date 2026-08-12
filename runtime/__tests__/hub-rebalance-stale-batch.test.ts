@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { computeAccountStateRoot } from '../account/state-root';
+import { computeAccountStateRoot } from '../account/commitment/state-root';
 import { executeCrontab, initCrontab, HUB_PENDING_BROADCAST_STALE_MS } from '../entity/scheduler';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';

@@ -1,14 +1,14 @@
-import type { AccountState } from '../types/account';
+import type { AccountState } from '../../types/account';
 import {
   FinancialDataCorruptionError,
   validateObject,
-} from '../protocol/validation-primitives';
-import { safeStringify } from '../protocol/serialization';
+} from '../../protocol/validation-primitives';
+import { safeStringify } from '../../protocol/serialization';
 import { decodeAccountFrame } from './frame-validation';
 import {
   normalizeAccountStateDomain,
   sameAccountStateDomain,
-} from './state-root';
+} from '../commitment/state-root';
 
 /**
  * A resend is a durable copy of one exact proposal, not a second proposal lane.

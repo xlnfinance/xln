@@ -14,7 +14,7 @@ that drives them. Read the cascade before the services around it.
 1. `runtime/runtime/types.ts` — Runtime Input, Tx, Frame, and live replica.
 2. `runtime/entity/types.ts` — Entity State, candidate, Frame, and replica.
 3. `runtime/types/account.ts` — Account State, replica, Input, Tx, and Frame.
-4. `runtime/account/state-root.ts` — the exact bilateral commitment.
+4. `runtime/account/commitment/state-root.ts` — the exact bilateral commitment.
 5. `runtime/entity/consensus/state-root.ts` — Entity commitment, including the
    deterministic Account-replica projection.
 
@@ -47,7 +47,7 @@ that drives them. Read the cascade before the services around it.
 21. `runtime/jurisdiction/machine/history-consensus.ts` — certified J-prefix facts.
 22. `runtime/jurisdiction/adapter/ingress-transform.ts` — external evidence boundary.
 23. `runtime/entity/tx/j-events.ts` — certified J effects enter Entity.
-24. `runtime/account/j-finality.ts` — Account-owned settlement finality.
+24. `runtime/account/settlement/j-finality.ts` — Account-owned settlement finality.
 25. `runtime/runtime/j-submit.ts` — durable post-frame submission lifecycle.
 
 ## Folder ownership

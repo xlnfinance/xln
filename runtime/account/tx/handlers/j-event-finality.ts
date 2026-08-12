@@ -3,8 +3,8 @@ import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { getDefaultCreditLimit } from '../../utils';
 import { clearFinalizedSettlementWorkspace } from './settle-transition';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
-import { invalidateAccountMapCommitment } from '../../map-commitment';
-import { createDefaultDelta } from '../../delta';
+import { invalidateAccountMapCommitment } from '../../commitment/map-commitment';
+import { createDefaultDelta } from '../../state/delta';
 
 const normalizedEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 

@@ -15,7 +15,7 @@ import type { AccountFrame, AccountTx, SettlementDiff, SettlementWorkspace } fro
 import type { EntityInput, EntityState } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
-import { getAccountPerspective } from '../../../account/perspective';
+import { getAccountPerspective } from '../../../account/state/perspective';
 import { addMessage } from '../../frame-events';
 import { initJBatch, batchAddSettlement } from '../../../jurisdiction/machine/batch';
 import { isLeftEntity } from '../../id';
@@ -39,7 +39,7 @@ import {
   createSettlementWorkspaceHash,
   hasPendingSettlementTransition,
 } from '../../../account/tx/handlers/settle-transition';
-import { projectAccountAfterSettlement } from '../../../account/settlement-projection';
+import { projectAccountAfterSettlement } from '../../../account/settlement/settlement-projection';
 import { buildAccountProofBodyFromJurisdictions } from '../../../account/consensus/helpers';
 
 import type { AccountReplica } from '../../../types/account';

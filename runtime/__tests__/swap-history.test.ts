@@ -5,7 +5,7 @@ import {
   recordSwapOfferLifecycle,
   recordSwapResolveLifecycle,
 } from '../account/tx/handlers/swap-history';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import type { AccountReplica, SwapOffer } from '../types/account';
 
 const makeAccount = (): AccountReplica => ({

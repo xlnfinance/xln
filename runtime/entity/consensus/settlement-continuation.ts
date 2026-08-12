@@ -2,7 +2,7 @@ import { hasPendingSettlementTransition } from '../../account/tx/handlers/settle
 import { isBatchEmpty } from '../../jurisdiction/machine/batch';
 import type { EntityTx, PendingSettlementContinuation } from '../../types/entity-tx';
 import type { EntityState } from '../types';
-import { getAccountPerspective } from '../../account/perspective';
+import { getAccountPerspective } from '../../account/state/perspective';
 import { assertCanonicalSettlementWorkspace } from '../../account/tx/handlers/settle-transition';
 import { compareStableText } from '../../protocol/serialization';
 

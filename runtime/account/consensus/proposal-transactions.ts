@@ -1,6 +1,6 @@
 import type { AccountReplica, AccountTx } from '../../types/account';
 import type { AccountConsensusContext } from './context';
-import { cloneAccountReplica } from '../state-clone';
+import { cloneAccountReplica } from '../state/state-clone';
 import { isLeftEntity } from '../utils';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { applyAccountTx } from '../tx/apply';
@@ -10,8 +10,8 @@ import {
   captureSettlementVector,
   getAccountStateDomain,
 } from './helpers';
-import { createAccountJClaimSession } from '../j-claim-session';
-import { prepareAccountJClaimTx } from '../j-claim-transition';
+import { createAccountJClaimSession } from '../j-claims/j-claim-session';
+import { prepareAccountJClaimTx } from '../j-claims/j-claim-transition';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 import type { AccountSwapOfferCreated } from './types';

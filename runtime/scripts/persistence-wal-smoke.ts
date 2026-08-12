@@ -12,7 +12,7 @@ import {
   closeRuntimeDb,
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
 import { generateLazyEntityId } from '../entity/factory';
 import { createJAdapter } from '../jurisdiction/adapter';
 import type { JReplica } from '../types/jurisdiction-runtime';

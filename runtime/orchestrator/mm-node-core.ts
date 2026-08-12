@@ -13,12 +13,12 @@ import {
   isLiquidSwapToken,
 } from '../account/utils';
 import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
-import { deriveSwapNetAuthorization } from '../account/swap-net-authorization';
+import { deriveSwapNetAuthorization } from '../account/swap/swap-net-authorization';
 import {
   canonicalAccountRoleEvidence,
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
-} from '../account/dispute-config';
+} from '../account/config/dispute-config';
 import { LIMITS, SWAP_CONSTANTS } from '../config/constants';
 import { readCliOption } from '../config/cli';
 import { readBooleanEnv } from '../config/environment';

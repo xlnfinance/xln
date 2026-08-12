@@ -1,4 +1,4 @@
-import { validateAccountReplica } from '../account/state-validation';
+import { validateAccountReplica } from '../account/validation/state-validation';
 import { LIMITS } from '../config/constants';
 import {
   FinancialDataCorruptionError,

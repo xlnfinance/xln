@@ -60,7 +60,7 @@
   import type {
     AccountRoleEvidence,
     AccountRoleEvidenceSource,
-  } from '@xln/runtime/account/dispute-config';
+  } from '@xln/runtime/account/config/dispute-config';
 
   export let entityId: string = '';
   export let runtimeProjection: OnboardingRuntimeProjection = emptyOnboardingRuntimeProjection();

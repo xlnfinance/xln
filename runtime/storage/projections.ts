@@ -1,6 +1,6 @@
 import type { AccountReplica } from '../types/account';
 import type { EntityReplica, EntityState } from '../entity/types';
-import { cloneAccountReplica } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state/state-clone';
 import { cloneEntityState } from '../entity/state-clone';
 import {
   cloneCrossJurisdictionBookAdmission,

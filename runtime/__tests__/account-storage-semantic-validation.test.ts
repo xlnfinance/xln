@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createFrameHash } from '../account/consensus/frame';
-import { computeAccountStateRoot } from '../account/state-root';
+import { computeAccountStateRoot } from '../account/commitment/state-root';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { deriveDelta } from '../account/utils';
-import { validateDelta } from '../account/delta-validation';
+import { validateDelta } from '../account/validation/delta-validation';
 import { FINANCIAL, LIMITS, TOKENS } from '../config/constants';
 import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';

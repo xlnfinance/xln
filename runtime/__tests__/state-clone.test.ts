@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { cloneAccountReplica } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state/state-clone';
 import {
   cloneEntityReplica,
   forkEntityReplicaForInput,
@@ -25,7 +25,7 @@ import {
   applyRuntimeOwnedEntityFrame,
 } from '../entity/consensus/frame-application';
 import { EntityCandidateMap } from '../entity/candidate-map';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import {
   applyCommand,
   createBook,
@@ -429,7 +429,7 @@ describe('state cloning', () => {
 
   test('clone diagnostics use structured logging only', () => {
     const source = [
-      readFileSync('runtime/account/state-clone.ts', 'utf8'),
+      readFileSync('runtime/account/state/state-clone.ts', 'utf8'),
       readFileSync('runtime/entity/state-clone.ts', 'utf8'),
     ].join('\n');
 

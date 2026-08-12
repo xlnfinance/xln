@@ -5,7 +5,7 @@ import { submitAndWait } from '../session';
 import { findAccount } from '../accounts';
 import { paint } from '../theme';
 import { shortId } from '../format';
-import { defaultAccountDisputeConfigForRoleEvidence, type AccountRoleEvidence } from '../../../runtime/account/dispute-config';
+import { defaultAccountDisputeConfigForRoleEvidence, type AccountRoleEvidence } from '../../../runtime/account/config/dispute-config';
 import { resolveCliHubPartyRoles } from '../account-role-evidence';
 import { ensureCliProfiles } from '../profile-barrier';
 

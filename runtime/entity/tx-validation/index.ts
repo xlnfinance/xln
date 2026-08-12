@@ -1,4 +1,4 @@
-import { decodeAccountPeerInput } from '../../account/input-validation';
+import { decodeAccountPeerInput } from '../../account/validation/input-validation';
 import { assertExactMultiRecipientCiphertextSchema } from '../../protocol/htlc/multi-recipient-schema';
 import type { EntityTx } from '../../types/entity-tx';
 import { assertEntityProposalAction } from '../authorization';

@@ -21,7 +21,7 @@ import {
 import {
   accountStateDomainFromJurisdiction,
   computeAccountStateRoot,
-} from '../../account/state-root';
+} from '../../account/commitment/state-root';
 import {
   getAccountJClaimNodeStore,
 } from '../../entity/account-j-claim-node-store';

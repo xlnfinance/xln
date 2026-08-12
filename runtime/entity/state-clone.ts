@@ -9,7 +9,7 @@ import { createStructuredLogger } from '../infra/logger';
 import { cloneJBatch, type JBatchState } from '../jurisdiction/machine/batch';
 import { structuredCloneOrThrow } from '../protocol/structured-clone';
 import { cloneCrossJurisdictionAccountTxRoute } from '../extensions/cross-j';
-import { applyAccountClonePolicy } from '../account/state-clone';
+import { applyAccountClonePolicy } from '../account/state/state-clone';
 import { copyEntityFrameEvents } from './frame-events';
 import { validateEntityState } from './state-validation';
 import { forkEntityAccountCommitmentCache } from './consensus/state-root';

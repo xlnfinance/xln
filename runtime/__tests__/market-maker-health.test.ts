@@ -5,7 +5,7 @@ import {
   getMarketMakerHealth as getServerMarketMakerHealth,
 } from '../api/server/market-maker-health';
 import { buildDefaultEntitySwapPairs } from '../account/utils';
-import { deriveSwapNetAuthorization } from '../account/swap-net-authorization';
+import { deriveSwapNetAuthorization } from '../account/swap/swap-net-authorization';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { deriveSameOrderbookMaterialization } from '../entity/tx/handlers/account/orderbook-matching-helpers';
 import { buildMarketSnapshotForReplica } from '../network/relay/market-snapshot';
@@ -30,7 +30,7 @@ import { createEmptyEnv } from '../runtime';
 import type { AccountReplica, SwapOffer } from '../types/account';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 import { LIMITS } from '../config/constants';
 import { encodeBuffer } from '../storage/codec';
 import { makeAccount as makeCanonicalAccount } from './helpers/cross-j';

@@ -6,8 +6,8 @@
 import type { AccountReplica, AccountTx } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
 import type { AccountConsensusContext } from '../consensus/context';
-import type { AccountJClaimSession } from '../j-claim-session';
-import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../map-commitment';
+import type { AccountJClaimSession } from '../j-claims/j-claim-session';
+import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../commitment/map-commitment';
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
 

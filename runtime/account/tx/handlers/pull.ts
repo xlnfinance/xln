@@ -19,7 +19,7 @@ import {
 import { addHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';
 import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
-import { createDefaultDelta } from '../../delta';
+import { createDefaultDelta } from '../../state/delta';
 
 type PullLockTx = Extract<AccountTx, { type: 'cross_pull_lock' }>;
 type CrossPullCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;

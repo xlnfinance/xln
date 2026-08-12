@@ -1,11 +1,11 @@
-import type { JurisdictionConfig } from '../protocol/jurisdiction-config';
+import type { JurisdictionConfig } from '../../protocol/jurisdiction-config';
 import {
   buildDefaultRebalanceBaseFee,
   buildDefaultRebalancePolicy,
   scaleWholeTokenAmount,
   type RebalancePolicy,
-} from '../types/rebalance';
-import { getTokenInfo } from './utils';
+} from '../../types/rebalance';
+import { getTokenInfo } from '../utils';
 
 export const DEFAULT_ACCOUNT_TOKEN_IDS = [1, 3, 2] as const; // USDC, USDT, WETH
 

@@ -6,8 +6,8 @@
 import type { AccountReplica, AccountDisputeSeal, AccountFrame, AccountInput, AccountPeerInput, Delta } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
 import type { AccountConsensusContext } from './context';
-import { cloneAccountFrame, cloneAccountReplica } from '../state-clone';
-import { getAccountPerspective } from '../perspective';
+import { cloneAccountFrame, cloneAccountReplica } from '../state/state-clone';
+import { getAccountPerspective } from '../state/perspective';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { applyAccountTx } from '../tx/apply';
 import type { AccountTxRejection } from '../tx/apply-types';
@@ -22,12 +22,12 @@ import {
   shouldIncludeToken,
   summarizeDeltasForLog,
 } from './helpers';
-import { appendAccountMempoolTxs } from '../mempool';
+import { appendAccountMempoolTxs } from '../input/mempool';
 import {
   applyAccountDisputeFinality,
   applyAccountDisputeStarted,
-} from '../j-finality';
-import { applyLocalAccountInput } from '../local-tx-admission';
+} from '../settlement/j-finality';
+import { applyLocalAccountInput } from '../input/local-tx-admission';
 import { getAccountInputEnvelopeError } from '../input';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../protocol/dispute/arguments';
 import type {
@@ -38,9 +38,9 @@ import type {
 } from './types';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { getMinimumSafeSettlementNonce } from '../../protocol/settlement/operations';
-import { computeAccountStateRoot, computeAccountStateSectionHashes } from '../state-root';
-import { forkAccountCommitmentCache } from '../map-commitment';
-import { createAccountJClaimSession, type AccountJClaimSession } from '../j-claim-session';
+import { computeAccountStateRoot, computeAccountStateSectionHashes } from '../commitment/state-root';
+import { forkAccountCommitmentCache } from '../commitment/map-commitment';
+import { createAccountJClaimSession, type AccountJClaimSession } from '../j-claims/j-claim-session';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import {
   getIncomingAccountDeadlineViolation,
@@ -70,7 +70,7 @@ import { preflightIncomingAccountFrame } from './incoming-preflight';
 import {
   rejectAccountPeerEvidenceError,
   rejectAccountPeerInput,
-} from '../peer-rejection';
+} from '../input/peer-rejection';
 export { proposeAccountFrame } from './propose';
 export type {
   HandleAccountInputResult,

@@ -9,7 +9,7 @@ import {
   accountInputProposal,
 } from './flush';
 import { getAccountStateDomain } from './helpers';
-import { AccountPeerEvidenceError } from '../peer-rejection';
+import { AccountPeerEvidenceError } from '../input/peer-rejection';
 
 export type ValidatedCounterpartyDisputeSeal = {
   hanko: string;

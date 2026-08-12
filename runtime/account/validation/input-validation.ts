@@ -2,7 +2,7 @@ import {
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
-} from '../protocol/boundary-validation';
+} from '../../protocol/boundary-validation';
 import type {
   AccountBoardReseal,
   AccountDisputeSeal,
@@ -10,9 +10,9 @@ import type {
   AccountFrameProposal,
   AccountPeerInput,
   AccountStateDomain,
-} from '../types/account';
+} from '../../types/account';
 import { decodeAccountFrame } from './frame-validation';
-import { canonicalAccountDisputeConfig } from './dispute-config';
+import { canonicalAccountDisputeConfig } from '../config/dispute-config';
 
 const requireString = (value: unknown, code: string): string => {
   if (typeof value !== 'string' || value.length === 0) throw new Error(code);

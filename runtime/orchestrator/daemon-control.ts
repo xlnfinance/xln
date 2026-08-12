@@ -8,7 +8,7 @@ import type { RuntimeIngressReceipt } from '../runtime/ingress-receipts';
 import type { ConsensusConfig } from '../entity/types';
 import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';
 import { scaleWholeTokenAmount } from '../types/rebalance';
-import { defaultAccountDisputeConfigForRoleEvidence } from '../account/dispute-config';
+import { defaultAccountDisputeConfigForRoleEvidence } from '../account/config/dispute-config';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,

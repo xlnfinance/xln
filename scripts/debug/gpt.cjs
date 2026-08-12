@@ -116,7 +116,7 @@ const CORE_FILES = {
     'entity/consensus/index.ts',   // Entity input -> candidate -> Hanko certificate -> commit
     'account/consensus/index.ts',  // Bilateral account consensus between entities
     'account/input.ts',      // Canonical AccountInput boundary
-    'account/j-finality.ts', // Account-owned unilateral Depository finality
+    'account/settlement/j-finality.ts', // Account-owned unilateral Depository finality
     'account/view-state.ts', // Bilateral state machine (classifyBilateralState)
     'jurisdiction/machine/batch.ts',    // J-batch system: E-machine accumulates -> jBroadcast -> J-machine
 
@@ -189,7 +189,7 @@ const CORE_FILES = {
     'account/crypto.ts',     // Account frame signing/verification (CRITICAL)
 
     // Utilities (support functions)
-    'account/state-clone.ts', // Account candidate/snapshot isolation
+    'account/state/state-clone.ts', // Account candidate/snapshot isolation
     'entity/state-clone.ts',  // Entity candidate/snapshot isolation
     'entity/replica-clone.ts', // Validator-local replica isolation
     'storage/snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
@@ -301,7 +301,7 @@ const CROSS_FILES = {
     'account/utils.ts',
     'protocol/serialization.ts',
     'account/crypto.ts',
-    'account/state-clone.ts',
+    'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica-clone.ts',
     'runtime.ts',
@@ -314,7 +314,7 @@ const CROSS_FILES = {
     'runtime/output-routing.ts',
     'runtime/j-submit.ts',
     'account/input.ts',
-    'account/j-finality.ts',
+    'account/settlement/j-finality.ts',
     'entity/consensus/index.ts',
     'orderbook/cross-j-orderbook.ts',
     'account/consensus/index.ts',
@@ -467,7 +467,7 @@ const RUNTIME_FILES = {
     'account/consensus/dispute-seal.ts',
     'account/consensus/commit-root.ts',
     'account/input.ts',
-    'account/j-finality.ts',
+    'account/settlement/j-finality.ts',
     'account/consensus/frame.ts',
     'account/consensus/helpers.ts',
     'account/view-state.ts',
@@ -497,10 +497,10 @@ const RUNTIME_FILES = {
     'account/tx/handlers/set-credit-limit.ts',
     'account/utils.ts',
     'account/crypto.ts',
-    'account/frame.ts',
+    'account/state/frame.ts',
     'protocol/serialization.ts',
     'storage/snapshot-coder.ts',
-    'account/state-clone.ts',
+    'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica-clone.ts',
     'runtime/env-events.ts',
@@ -555,7 +555,7 @@ const ORDERBOOK_FILES = {
     'protocol/identity.ts',
     'account/utils.ts',
     'protocol/serialization.ts',
-    'account/state-clone.ts',
+    'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica-clone.ts',
     'runtime/swap-pairs.ts',
@@ -623,7 +623,7 @@ const SWAP_FILES = {
     'protocol/identity.ts',
     'account/utils.ts',
     'protocol/serialization.ts',
-    'account/state-clone.ts',
+    'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica-clone.ts',
     'runtime/swap-pairs.ts',
@@ -1262,7 +1262,7 @@ xln/
       graph.ts                   ${fileSizes['runtime/routing/graph.ts'] || '?'} lines - Network graph
       pathfinding.ts             ${fileSizes['runtime/routing/pathfinding.ts'] || '?'} lines - Dijkstra routing
 
-    account/state-clone.ts       ${fileSizes['runtime/account/state-clone.ts'] || '?'} lines - Account candidate isolation
+    account/state/state-clone.ts ${fileSizes['runtime/account/state/state-clone.ts'] || '?'} lines - Account candidate isolation
     entity/state-clone.ts        ${fileSizes['runtime/entity/state-clone.ts'] || '?'} lines - Entity candidate isolation
     entity/replica-clone.ts      ${fileSizes['runtime/entity/replica-clone.ts'] || '?'} lines - Replica-local isolation
     storage/snapshot-coder.ts            ${fileSizes['runtime/storage/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization

@@ -18,7 +18,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
 import type { EntityInput } from '../entity/types';
 import { getPerfMs } from '../infra/time';
 import {

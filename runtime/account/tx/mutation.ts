@@ -1,8 +1,8 @@
 import type { AccountReplica, AccountTx } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
 import type { AccountConsensusContext } from '../consensus/context';
-import { getAccountPerspective } from '../perspective';
-import type { AccountJClaimSession } from '../j-claim-session';
+import { getAccountPerspective } from '../state/perspective';
+import type { AccountJClaimSession } from '../j-claims/j-claim-session';
 import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute-policy';
 import type { ApplyAccountTxResult } from './apply-types';
 import { handleAddDelta } from './handlers/add-delta';

@@ -7,13 +7,13 @@ import {
   cloneCrossJurisdictionRoute,
 } from '../extensions/cross-j/index';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from './types';
-import { assertAccountMempoolWithinLimit } from '../account/mempool';
-import { assertAccountJClaimAccumulatorState } from '../account/j-claim-accumulator';
+import { assertAccountMempoolWithinLimit } from '../account/input/mempool';
+import { assertAccountJClaimAccumulatorState } from '../account/j-claims/j-claim-accumulator';
 import { assertEntityAccountCountWithinLimit } from '../entity/account-capacity';
 import { assertConsumptionAccumulatorState } from '../entity/consumption-accumulator';
 import { LIMITS } from '../config/constants';
 import { assertJBatchWithinContractLimits } from '../jurisdiction/machine/batch';
-import { cloneAccountReplica } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state/state-clone';
 
 const withProp = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
   value === undefined ? {} : ({ [key]: value } as Record<K, V>);

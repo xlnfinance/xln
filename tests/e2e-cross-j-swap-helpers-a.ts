@@ -1,6 +1,6 @@
 import { HDNodeWallet, Mnemonic, getIndexedAccountPath } from 'ethers';
 import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
-import { defaultAccountDisputeConfigForParties } from '../runtime/account/dispute-config';
+import { defaultAccountDisputeConfigForParties } from '../runtime/account/config/dispute-config';
 import { deriveJurisdictionSignerIndex } from '../runtime/jurisdiction/machine/signer-derivation';
 import type { MarketSnapshotPayload } from '../runtime/network/relay/market-snapshot';
 import { expect, type Page } from './global-setup.mts';

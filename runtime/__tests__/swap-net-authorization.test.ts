@@ -5,12 +5,12 @@ import {
   deriveSwapFillPolicyFee,
   deriveSwapNetAuthorization,
   requantizeSwapNetAuthorization,
-} from '../account/swap-net-authorization';
-import { createDefaultDelta } from '../account/delta';
+} from '../account/swap/swap-net-authorization';
+import { createDefaultDelta } from '../account/state/delta';
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { decodeAccountTx } from '../account/tx-validation';
-import { validateAccountReplica } from '../account/state-validation';
+import { validateAccountReplica } from '../account/validation/state-validation';
 import { buildEntityTransactionProposalAction } from '../entity/authorization';
 import { validateEntityTx } from '../entity/tx-validation';
 import { computeSwapPriceTicks, SWAP_LOT_SCALE } from '../orderbook/types';

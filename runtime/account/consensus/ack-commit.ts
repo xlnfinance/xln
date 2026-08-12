@@ -3,16 +3,16 @@ import type { AccountOutput } from '../../types/account';
 import type { AccountConsensusContext } from './context';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
-import { cloneAccountFrame } from '../state-clone';
-import { getAccountPerspective } from '../perspective';
+import { cloneAccountFrame } from '../state/state-clone';
+import { getAccountPerspective } from '../state/perspective';
 import { applyAccountTx } from '../tx/apply';
-import { deriveAccountFrameTokenIds } from '../frame';
-import { appendAccountMempoolTxs } from '../mempool';
+import { deriveAccountFrameTokenIds } from '../state/frame';
+import { appendAccountMempoolTxs } from '../input/mempool';
 import {
   commitStagedAccountCommitmentCache,
   discardStagedAccountCommitmentCache,
-} from '../map-commitment';
-import type { AccountJClaimSession } from '../j-claim-session';
+} from '../commitment/map-commitment';
+import type { AccountJClaimSession } from '../j-claims/j-claim-session';
 import type { AccountInputSecurityContext } from './deadline-policy';
 import { accountInputAck, accountInputProposal } from './flush';
 import {
@@ -27,7 +27,7 @@ import {
   type ValidatedCounterpartyDisputeSeal,
 } from './dispute-seal';
 import type { HandleAccountInputResult } from './types';
-import { rejectAccountPeerInput } from '../peer-rejection';
+import { rejectAccountPeerInput } from '../input/peer-rejection';
 
 const ackLog = createStructuredLogger('account.ack');
 

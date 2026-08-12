@@ -1,5 +1,5 @@
-import type { Delta } from '../types/account';
-import { LIMITS } from '../config/constants';
+import type { Delta } from '../../types/account';
+import { LIMITS } from '../../config/constants';
 
 type InitialCreditLimits = Readonly<{
   left?: bigint;

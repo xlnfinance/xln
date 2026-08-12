@@ -22,8 +22,8 @@ import {
   tryRestoreRuntimeEnvFromTower,
   type Runtime,
 } from '../../frontend/src/lib/stores/vaultStore';
-import { createDefaultDelta } from '../../runtime/account/delta';
-import { createEmptyAccountJClaimAccumulator } from '../../runtime/account/j-claim-accumulator';
+import { createDefaultDelta } from '../../runtime/account/state/delta';
+import { createEmptyAccountJClaimAccumulator } from '../../runtime/account/j-claims/j-claim-accumulator';
 import type { AccountReplica } from '../../runtime/types';
 import { runWatchtowerSweep } from '../../runtime/watchtower/action';
 import {

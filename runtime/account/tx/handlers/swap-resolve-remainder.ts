@@ -9,7 +9,7 @@ import type {
 import {
   requantizeSwapNetAuthorization,
   type SwapNetAuthorization,
-} from '../../swap-net-authorization';
+} from '../../swap/swap-net-authorization';
 
 export type SwapResolveRemainderResult =
   | {

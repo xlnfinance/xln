@@ -6,7 +6,7 @@ import {
   DEFAULT_ACCOUNT_TOKEN_IDS,
   getDefaultRebalancePolicyForToken,
   resolveJurisdictionRebalanceDefaults,
-} from '../account/defaults';
+} from '../account/config/defaults';
 import type { EntityState, JurisdictionConfig } from '../entity/types';
 
 const baseJurisdiction: JurisdictionConfig = {

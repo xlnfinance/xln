@@ -4,16 +4,16 @@ import {
   commitStagedAccountCommitmentCache,
   invalidateAccountMapCommitment,
   stageAccountCommitmentCache,
-} from '../account/map-commitment';
+} from '../account/commitment/map-commitment';
 import {
   computeAccountStateRoot,
   computeAccountStateRootCold,
-} from '../account/state-root';
-import { cloneAccountReplica } from '../account/state-clone';
+} from '../account/commitment/state-root';
+import { cloneAccountReplica } from '../account/state/state-clone';
 import { cloneEntityState } from '../entity/state-clone';
 import type { SwapOffer } from '../types/account';
 import type { EntityState } from '../entity/types';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 import { makeAccount } from './helpers/cross-j';
 
 const LEFT = `0x${'11'.repeat(32)}`;

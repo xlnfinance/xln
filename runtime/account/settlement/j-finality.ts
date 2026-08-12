@@ -1,10 +1,10 @@
-import type { AccountExternalFinalityInput, AccountReplica } from '../types/account';
+import type { AccountExternalFinalityInput, AccountReplica } from '../../types/account';
 import {
   freezeAccountForDispute,
   isDisputeStartedByLeft,
-} from './consensus/dispute-policy';
-import { invalidateAccountMapCommitment } from './map-commitment';
-import { clearFinalizedSettlementWorkspace } from './tx/handlers/settle-transition';
+} from '../consensus/dispute-policy';
+import { invalidateAccountMapCommitment } from '../commitment/map-commitment';
+import { clearFinalizedSettlementWorkspace } from '../tx/handlers/settle-transition';
 export type AccountDisputeFinalityResult = {
   hadActiveDispute: boolean;
   hadSettlementWorkspace: boolean;

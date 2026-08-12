@@ -18,7 +18,7 @@ import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountReplica, Delta } from '../types/account';
 import type { EntityInput, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
 import { getLiveJAdapter } from '../runtime/live-jadapters';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
 import type { Profile } from '../entity/profile';

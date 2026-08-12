@@ -1,7 +1,7 @@
 import type { EntityState } from '../types';
 import type { AccountReplica } from '../../types/account';
 import { deriveDelta } from '../../account/utils';
-import { getDefaultRebalancePolicyForToken } from '../../account/defaults';
+import { getDefaultRebalancePolicyForToken } from '../../account/config/defaults';
 import { hasPendingSettlementTransition } from '../../account/tx/handlers/settle-transition';
 import { isLeftEntity } from '../id';
 import { accountHasProposableMempool } from './account-mempool-eligibility';

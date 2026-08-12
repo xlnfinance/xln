@@ -3,9 +3,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   planSwapInboundCapacity,
   readSwapAccountCapacity,
-} from '../account/swap-inbound-plan';
+} from '../account/swap/swap-inbound-plan';
 import type { AccountState, Delta } from '../types/account';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 
 const left = `0x${'11'.repeat(32)}`;
 const right = `0x${'22'.repeat(32)}`;

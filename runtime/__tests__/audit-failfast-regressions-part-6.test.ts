@@ -13,11 +13,11 @@ import {
   isWithinAccountFrameBounds,
 } from '../account/consensus/index';
 
-import { computeAccountStateRoot, computeAccountStateRootCold } from '../account/state-root';
+import { computeAccountStateRoot, computeAccountStateRootCold } from '../account/commitment/state-root';
 
 import { resolveCertifiedAccountCounterpartyProposer } from '../runtime/account-counterparty-route';
 
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
 
@@ -202,7 +202,7 @@ import { validateStorageAccountDocValue } from '../storage/authoritative-schema'
 
 import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 
 import { cloneEntityState } from '../entity/state-clone';
 
@@ -245,7 +245,7 @@ import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fai
 
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 
-import { cloneAccountReplica } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state/state-clone';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,

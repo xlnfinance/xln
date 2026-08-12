@@ -1,21 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 
-import { computeAccountStateRoot } from '../account/state-root';
+import { computeAccountStateRoot } from '../account/commitment/state-root';
 import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import { createAccountJClaimSession } from '../account/j-claim-session';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
+import { createAccountJClaimSession } from '../account/j-claims/j-claim-session';
 import {
   cacheCommittedAccountJClaimNodeChanges,
   getAccountJClaimNodeStore,
 } from '../entity/account-j-claim-node-store';
-import { prepareAccountJClaimTx } from '../account/j-claim-transition';
+import { prepareAccountJClaimTx } from '../account/j-claims/j-claim-transition';
 import { mergeJEventClaimOps } from '../entity/tx/j-events-account';
 import type { JEventAccountTx } from '../entity/tx/j-events-types';
 import { createEmptyEnv } from '../runtime';
 import type { AccountReplica, AccountTx } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;

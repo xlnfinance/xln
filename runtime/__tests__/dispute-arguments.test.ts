@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 
 import { buildDisputeArgumentsForSnapshot } from '../entity/dispute-arguments';
 import {

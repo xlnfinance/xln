@@ -7,7 +7,7 @@ import {
   signAccountFrame,
 } from '../account/crypto';
 import { applyAccountInput } from '../account/consensus';
-import { computeAccountStateRoot } from '../account/state-root';
+import { computeAccountStateRoot } from '../account/commitment/state-root';
 import { generateLazyEntityId } from '../entity/factory';
 import { initCrontab } from '../entity/scheduler';
 import {

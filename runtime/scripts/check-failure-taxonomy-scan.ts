@@ -590,7 +590,7 @@ for (const [path, markers] of [
   ['runtime/entity/tx/handlers/settle.ts', ["createStructuredLogger('entity.settle')"]],
   ['runtime/entity/tx/j-events-debt.ts', ["createStructuredLogger('entity.debt')", 'ledger.divergence']],
   ['runtime/account/utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
-  ['runtime/account/delta-validation.ts', ['ACCOUNT_DELTAS_MISSING', 'ACCOUNT_DELTAS_INVALID_TOKEN_ID']],
+  ['runtime/account/validation/delta-validation.ts', ['ACCOUNT_DELTAS_MISSING', 'ACCOUNT_DELTAS_INVALID_TOKEN_ID']],
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
   [
     'runtime/runtime/infra.ts',
@@ -861,7 +861,7 @@ const debtEvents = readText(debtEventsPath);
 assertNotIncludes(debtEvents, 'console.', debtEventsPath);
 
 for (const validationPath of [
-  'runtime/account/state-validation.ts',
+  'runtime/account/validation/state-validation.ts',
   'runtime/entity/state-validation.ts',
   'runtime/entity/replica-validation.ts',
   'runtime/runtime/routing-validation.ts',

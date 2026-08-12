@@ -6,13 +6,13 @@
  */
 export { entityNeedsPeriodicWake } from '../../runtime/wake';
 export * from './public-utilities';
-export { planSwapInboundCapacity, readSwapAccountCapacity } from '../../account/swap-inbound-plan';
+export { planSwapInboundCapacity, readSwapAccountCapacity } from '../../account/swap/swap-inbound-plan';
 export type {
   SwapAccountCapacityView,
   SwapAccountCapacityViewInput,
   SwapInboundCapacityPlan,
   SwapInboundCapacityPlanInput,
-} from '../../account/swap-inbound-plan';
+} from '../../account/swap/swap-inbound-plan';
 export {
   assertCrossJurisdictionSwapTargetReady,
   buildDeterministicSwapOfferId,

@@ -1,29 +1,29 @@
-import { LIMITS } from '../config/constants';
-import { isLeftEntity } from '../protocol/entity-id';
-import { requireBoundaryInteger } from '../protocol/boundary-validation';
+import { LIMITS } from '../../config/constants';
+import { isLeftEntity } from '../../protocol/entity-id';
+import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import {
   FinancialDataCorruptionError,
   validateArray,
   validateMapInstance,
   validateObject,
   validateString,
-} from '../protocol/validation-primitives';
-import type { AccountReplica } from '../types/account';
-import { assertAccountJClaimAccumulatorState } from './j-claim-accumulator';
-import { assertAccountMempoolWithinLimit } from './mempool';
+} from '../../protocol/validation-primitives';
+import type { AccountReplica } from '../../types/account';
+import { assertAccountJClaimAccumulatorState } from '../j-claims/j-claim-accumulator';
+import { assertAccountMempoolWithinLimit } from '../input/mempool';
 import { validateDelta } from './delta-validation';
-import { assertAccountDeltaCapacity } from './delta';
+import { assertAccountDeltaCapacity } from '../state/delta';
 import { decodeAccountFrame } from './frame-validation';
-import { decodeAccountTxs } from './tx-validation';
+import { decodeAccountTxs } from '../tx-validation';
 import { validatePendingAccountResend } from './pending-resend-validation';
 import {
   validateRebalanceFeePolicies,
   validateRequestedRebalanceAmounts,
   validateRequestedRebalanceFeeState,
 } from './rebalance-validation';
-import { normalizeAccountStateDomain } from './state-root';
+import { normalizeAccountStateDomain } from '../commitment/state-root';
 import { validateSwapHistoryMap } from './swap-history-validation';
-import { assertSwapNetAuthorization } from './swap-net-authorization';
+import { assertSwapNetAuthorization } from '../swap/swap-net-authorization';
 
 const LENDING_INTENTS = new Set([
   'fund',

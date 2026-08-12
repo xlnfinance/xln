@@ -11,7 +11,7 @@ import type {
   SwapResolveTx,
   ValidatedSwapResolve,
 } from './swap-resolve-types';
-import { assertSwapNetAuthorization } from '../../swap-net-authorization';
+import { assertSwapNetAuthorization } from '../../swap/swap-net-authorization';
 
 const swapResolveLog = createStructuredLogger('account.swap');
 

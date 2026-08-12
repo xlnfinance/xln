@@ -74,7 +74,7 @@ import {
   collectReachableAccountJClaimNodes,
   hashAccountJClaimNode,
   type AccountJClaimAccumulatorState,
-} from '../account/j-claim-accumulator';
+} from '../account/j-claims/j-claim-accumulator';
 import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
 import { validateEntityReplicaMetadata } from '../entity/replica-validation';
 import {

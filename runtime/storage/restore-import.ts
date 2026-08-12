@@ -6,7 +6,7 @@ import {
   collectReachableAccountJClaimNodes,
   hashAccountJClaimNode,
   type AccountJClaimNode,
-} from '../account/j-claim-accumulator';
+} from '../account/j-claims/j-claim-accumulator';
 import { docValueKey, liveKeyForDoc } from './doc-refs';
 import {
   computeStorageFrameHash,

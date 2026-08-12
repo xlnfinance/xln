@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { cloneAccountReplica } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state/state-clone';
 import {
   computeAccountStateRoot,
   computeAccountStateRootCold,
-} from '../account/state-root';
-import { createDefaultDelta } from '../account/delta';
+} from '../account/commitment/state-root';
+import { createDefaultDelta } from '../account/state/delta';
 import {
   computeCanonicalEntityConsensusStateHash,
   computeCanonicalEntityConsensusStateHashCold,

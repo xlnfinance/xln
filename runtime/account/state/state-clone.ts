@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountReplica, AccountTx } from '../types/account';
+import type { AccountFrame, AccountReplica, AccountTx } from '../../types/account';
 import {
   cloneCrossJurisdictionAccountFrameRoute,
   cloneCrossJurisdictionAccountInputRoute,
@@ -6,15 +6,15 @@ import {
   cloneCrossJurisdictionPullBinding,
   cloneCrossJurisdictionSwapHistoryRoute,
   cloneCrossJurisdictionSwapOfferRoute,
-} from '../extensions/cross-j';
-import { cloneDisputeArgumentSnapshot } from '../protocol/dispute/argument-snapshot';
+} from '../../extensions/cross-j';
+import { cloneDisputeArgumentSnapshot } from '../../protocol/dispute/argument-snapshot';
 import {
   cloneProofBodyStruct,
   type ProofBodyStruct,
-} from '../protocol/dispute/proof-body';
-import { cloneIsolatedAccountFrame } from '../protocol/account-input-clone';
-import { structuredCloneOrThrow } from '../protocol/structured-clone';
-import { forkAccountCommitmentCache } from './map-commitment';
+} from '../../protocol/dispute/proof-body';
+import { cloneIsolatedAccountFrame } from '../../protocol/account-input-clone';
+import { structuredCloneOrThrow } from '../../protocol/structured-clone';
+import { forkAccountCommitmentCache } from '../commitment/map-commitment';
 
 const cloneAccountTx = <T extends AccountTx>(tx: T): T => {
   const cloned = structuredClone(tx) as T;

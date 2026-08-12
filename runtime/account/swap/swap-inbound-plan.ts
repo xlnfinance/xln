@@ -1,8 +1,8 @@
-import type { AccountState } from '../types/account';
-import type { EntityTx } from '../types/entity-tx';
-import { isLeftEntity } from '../protocol/entity-id';
-import { deriveDelta } from './utils';
-import { canonicalAccountDisputeConfig, type AccountDisputeConfig } from './dispute-config';
+import type { AccountState } from '../../types/account';
+import type { EntityTx } from '../../types/entity-tx';
+import { isLeftEntity } from '../../protocol/entity-id';
+import { deriveDelta } from '../utils';
+import { canonicalAccountDisputeConfig, type AccountDisputeConfig } from '../config/dispute-config';
 
 export type SwapInboundCapacityPlan = Readonly<{
   accountExists: boolean;

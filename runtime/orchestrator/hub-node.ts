@@ -12,11 +12,11 @@ import { defaultTokensForJurisdiction } from '../jurisdiction/machine/default-to
 import {
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
-} from '../account/dispute-config';
+} from '../account/config/dispute-config';
 import {
   committedAccountRoleEvidence,
   verifiedGossipAccountRoleEvidence,
-} from '../account/role-evidence';
+} from '../account/config/role-evidence';
 import {
   normalizeJurisdictionDisplayName,
   readVisibleHubProfiles,

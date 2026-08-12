@@ -14,7 +14,7 @@ import {
 } from './market';
 import { exactFillRatioToUint16 } from '../../orderbook/swap-execution';
 import { getSwapLotScale } from '../../orderbook';
-import { canonicalAccountDisputeConfig } from '../../account/dispute-config';
+import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
 
 export {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,

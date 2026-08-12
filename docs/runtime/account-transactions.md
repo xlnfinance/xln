@@ -31,7 +31,7 @@ This folder owns bilateral account transaction application.
 ## Calls into
 
 - `cross-jurisdiction.ts`
-- `account/state-clone.ts`
+- `account/state/state-clone.ts`
 - `account-consensus-helpers.ts`
 
 ## Audit note

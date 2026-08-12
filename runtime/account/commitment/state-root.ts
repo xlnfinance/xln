@@ -1,22 +1,22 @@
 import { ethers } from 'ethers';
 
-import type { AccountReplica, AccountState, AccountStateDomain, SettlementWorkspace } from '../types/account';
-import type { JurisdictionConfig } from '../protocol/jurisdiction-config';
-import { compareStableText } from '../protocol/serialization';
-import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../protocol/radix-merkle';
-import { computeIntegrityDigest } from '../infra/integrity-checksum';
-import { assertAccountJClaimAccumulatorState } from './j-claim-accumulator';
+import type { AccountReplica, AccountState, AccountStateDomain, SettlementWorkspace } from '../../types/account';
+import type { JurisdictionConfig } from '../../protocol/jurisdiction-config';
+import { compareStableText } from '../../protocol/serialization';
+import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../../protocol/radix-merkle';
+import { computeIntegrityDigest } from '../../infra/integrity-checksum';
+import { assertAccountJClaimAccumulatorState } from '../j-claims/j-claim-accumulator';
 import {
   computeAccountMapCommitment,
   type AccountMapCommitmentTiming,
 } from './map-commitment';
-import { createStructuredLogger } from '../infra/logger';
-import { isRuntimePerfProfileEnabled } from '../infra/perf-runtime-flags';
-import { getPerfMs } from '../infra/time';
+import { createStructuredLogger } from '../../infra/logger';
+import { isRuntimePerfProfileEnabled } from '../../infra/perf-runtime-flags';
+import { getPerfMs } from '../../infra/time';
 
 const accountRootLog = createStructuredLogger('account.state-root');
 
-export type { AccountStateDomain } from '../types/account';
+export type { AccountStateDomain } from '../../types/account';
 
 export const EMPTY_ACCOUNT_STATE_ROOT = `0x${'00'.repeat(32)}`;
 

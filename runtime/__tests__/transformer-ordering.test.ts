@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import { buildPositionalSwapFillRatioBuckets, sortTransformerEntries } from '../protocol/transformer-ordering';
 import { asOfferId } from '../orderbook/swap-keys';

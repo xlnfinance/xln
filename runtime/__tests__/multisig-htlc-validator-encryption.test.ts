@@ -8,7 +8,7 @@ import {
   registerSignerKey,
   signDigestBytesWithPrivateKey,
 } from '../account/crypto';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 import { RuntimeP2P } from '../network/p2p/p2p';
 import {
@@ -52,7 +52,7 @@ import {
   computeEntityProfileDescriptorHash,
   profileToEntityProfileDescriptor,
 } from '../entity/profile-descriptor';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 import { validateEntityState } from '../entity/state-validation';
 import { getValidatorEncryptionManifestFromBoard, parseProfile, type Profile } from '../entity/profile';
 import {

@@ -1,5 +1,5 @@
 import { deriveAccountWatchSeed } from '../../protocol/account-watch-seed';
-import { createEmptyAccountJClaimAccumulator } from '../../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../../account/j-claims/j-claim-accumulator';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../account/crypto';
 import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../../entity/crypto';
 import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-runtime';
@@ -13,7 +13,7 @@ import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } 
 import type { RuntimeReplica } from '../../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../../types/jurisdiction-events';
-import { createDefaultDelta } from '../../account/delta';
+import { createDefaultDelta } from '../../account/state/delta';
 
 export const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 export const entity = (byte: string): string => `0x${byte.repeat(32)}`;

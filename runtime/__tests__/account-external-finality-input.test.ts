@@ -6,7 +6,7 @@ import {
   createAccountDisputeStartedInput,
 } from '../account/input';
 import { cloneIsolatedAccountInput } from '../protocol/account-input-clone';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 import { createEmptyEnv } from '../runtime';
 import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import { addr, makeAccount } from './helpers/cross-j';

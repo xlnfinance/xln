@@ -2,7 +2,7 @@ import type { AccountFrame, AccountReplica } from '../../types/account';
 import type { RuntimeReplica } from '../types';
 import { validateEntityState } from '../../entity/state-validation';
 import { computeFrameHash } from '../../account/consensus/index';
-import { assertAccountFrameDeltaIntegrity } from '../../account/frame';
+import { assertAccountFrameDeltaIntegrity } from '../../account/state/frame';
 
 const formatAccountLabel = (replicaKey: string, counterpartyId: string): string =>
   `${replicaKey.slice(-4)}↔${counterpartyId.slice(-4)}`;

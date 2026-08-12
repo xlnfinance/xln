@@ -9,7 +9,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { bootScenario, registerEntities, fundEntities } from './boot';
 import {

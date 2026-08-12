@@ -4,7 +4,7 @@ import {
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
   type AccountRoleEvidenceSource,
-} from '@xln/runtime/account/dispute-config';
+} from '@xln/runtime/account/config/dispute-config';
 import {
   buildOpenAccountTx,
   type OpenAccountRebalancePolicy,

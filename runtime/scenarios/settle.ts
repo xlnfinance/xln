@@ -11,7 +11,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
 import type { SettlementDiff, SettlementOp } from '../types/account';
 import { compileOps } from '../protocol/settlement/operations';
 import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain, findReplica, setScenarioStorageEnabled, converge, processUntil, processJEvents } from './helpers';

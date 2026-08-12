@@ -3,7 +3,7 @@ import type {
   AccountJClaimNode,
   AccountJClaimNodeChanges,
   AccountJClaimNodeStore,
-} from '../types/account-j-claims';
+} from '../../types/account-j-claims';
 
 export type AccountJClaimSession = {
   readonly store: AccountJClaimNodeStore;

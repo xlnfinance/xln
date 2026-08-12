@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { applyCommand, createBook, type BookState } from '../orderbook/core';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { createOrderbookExtState, ORDERBOOK_PRICE_SCALE, replaceOrderbookPair, SWAP_LOT_SCALE } from '../orderbook/types';
 import { validateBookAgainstOffers, validateBookStructure, validateEntityOrderbooks } from '../orderbook/validity';
 import type { AccountReplica, SwapOffer } from '../types/account';

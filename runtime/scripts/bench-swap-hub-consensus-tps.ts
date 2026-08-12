@@ -1,5 +1,5 @@
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { applyAccountInput, proposeAccountFrame } from '../account/consensus/index';
 import { isLeftEntity } from '../account/utils';
 import { spawn } from 'node:child_process';
@@ -17,7 +17,7 @@ import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } 
 import type { RuntimeReplica } from '../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { getPerfMs } from '../infra/time';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 import { createAccountConsensusContext } from '../entity/account-consensus-context';
 
 type Cli = {

@@ -16,7 +16,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
 import type { EntityInput } from '../entity/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, findCommittedScenarioHtlcLockId, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry, advanceScenarioTime, advanceScenarioPastDisputeTimeout, pinScenarioJurisdictionUnix, processUntilWithoutLocalHtlcAdvance, withholdScenarioLocalHtlcAdvances } from './helpers';

@@ -1,4 +1,4 @@
-import type { AccountRoleEvidence } from '../../runtime/account/dispute-config';
+import type { AccountRoleEvidence } from '../../runtime/account/config/dispute-config';
 import type { HubApiRow } from './api';
 import type { CliSession } from './session';
 

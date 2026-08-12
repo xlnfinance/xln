@@ -76,7 +76,7 @@ assertIncludes(
   'assertCrossJurisdictionSwapTargetReadyInEnv',
   targetReadinessPath,
 );
-const commandRoutePath = 'runtime/account/swap-command-route.ts';
+const commandRoutePath = 'runtime/account/swap/swap-command-route.ts';
 assertIncludes(readText(commandRoutePath), 'withCanonicalCrossJurisdictionRouteHash({', commandRoutePath);
 
 const activityPath = 'runtime/api/public/activity-history.ts';

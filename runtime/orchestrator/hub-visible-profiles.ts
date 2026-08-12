@@ -1,4 +1,4 @@
-import { verifiedGossipAccountRoleEvidence } from '../account/role-evidence';
+import { verifiedGossipAccountRoleEvidence } from '../account/config/role-evidence';
 import { getJurisdictionIdentityRef } from '../jurisdiction/machine/jurisdiction-runtime';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import type { RuntimeReplica } from '../runtime/types';

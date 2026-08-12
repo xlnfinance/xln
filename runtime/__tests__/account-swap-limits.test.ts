@@ -5,7 +5,7 @@ import {
   accountSwapMarketKey,
   getAccountSwapMarketLimitError,
   getAccountSwapMarketOfferCount,
-} from '../account/swap-limits';
+} from '../account/swap/swap-limits';
 import type { SwapOffer } from '../types/account';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { validateSwapOfferAdmission } from '../account/tx/handlers/swap-offer/admission';

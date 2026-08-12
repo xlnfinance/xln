@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 
 import { createBook, applyCommand, getBestAsk, getBestBid, getBookOrder, getBookSideLevels } from '../orderbook/core';
 
@@ -30,7 +30,7 @@ import {
 import type { AccountReplica, AccountTx, SwapOffer } from '../types/account';
 import type { EntityCandidateEffect } from '../entity/types';
 
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 
 const TESTNET_STACK = `stack:31337:0x${'11'.repeat(20)}`;
 

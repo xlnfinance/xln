@@ -5,7 +5,7 @@ import type { SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runt
 import {
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
-} from '@xln/runtime/account/dispute-config';
+} from '@xln/runtime/account/config/dispute-config';
 import { compareStableText } from './swap-formatting';
 import { type PreparedSwapOrderLike } from './swap-order-math';
 import './SwapPanel.css';

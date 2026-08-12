@@ -1,9 +1,9 @@
-import { cloneAccountReplica } from './state-clone';
-import type { AccountReplica, Delta, SettlementDiff } from '../types/account';
-import { createDefaultDelta } from './delta';
-import { invalidateAccountMapCommitment } from './map-commitment';
-import { getDefaultCreditLimit } from './utils';
-import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../protocol/integer-ranges';
+import { cloneAccountReplica } from '../state/state-clone';
+import type { AccountReplica, Delta, SettlementDiff } from '../../types/account';
+import { createDefaultDelta } from '../state/delta';
+import { invalidateAccountMapCommitment } from '../commitment/map-commitment';
+import { getDefaultCreditLimit } from '../utils';
+import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../../protocol/integer-ranges';
 
 const createSettlementDelta = (tokenId: number): Delta => {
   const creditLimit = getDefaultCreditLimit(tokenId);

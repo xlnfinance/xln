@@ -7,13 +7,13 @@ import {
   EMPTY_ACCOUNT_STATE_ROOT,
   normalizeAccountStateDomain,
   sameAccountStateDomain,
-} from '../../../../account/state-root';
+} from '../../../../account/commitment/state-root';
 import { isAccountWatchSeed } from '../../../../protocol/account-watch-seed';
 import {
   DEFAULT_ACCOUNT_TOKEN_IDS,
   resolveJurisdictionRebalanceDefaults,
-} from '../../../../account/defaults';
-import { createEmptyAccountJClaimAccumulator } from '../../../../account/j-claim-accumulator';
+} from '../../../../account/config/defaults';
+import { createEmptyAccountJClaimAccumulator } from '../../../../account/j-claims/j-claim-accumulator';
 import {
   accountInputReferenceHeight,
 } from '../../../../account/consensus/flush';
@@ -21,12 +21,12 @@ import { getAccountInputEnvelopeError } from '../../../../account/input';
 import {
   AccountPeerEvidenceError,
   type AccountPeerRejectionCode,
-} from '../../../../account/peer-rejection';
+} from '../../../../account/input/peer-rejection';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import { addMessage } from '../../../frame-events';
 import { getEntityAccountInsertionCapacityError } from '../../../account-capacity';
 import { isLeftEntity } from '../../../id';
-import { canonicalAccountDisputeConfig } from '../../../../account/dispute-config';
+import { canonicalAccountDisputeConfig } from '../../../../account/config/dispute-config';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
 const rejectPeerInput = (code: AccountPeerRejectionCode, reason: string): never => {

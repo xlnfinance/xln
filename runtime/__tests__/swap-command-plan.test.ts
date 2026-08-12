@@ -4,7 +4,7 @@ import {
   assertCrossJurisdictionSwapTargetReady,
   planSwapCommand,
 } from '../runtime/swap-command-plan';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 import { entity, makeAccount } from './helpers/cross-j';
 
 const sourceUser = entity('11');

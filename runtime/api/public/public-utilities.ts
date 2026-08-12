@@ -40,12 +40,12 @@ export {
 } from '../../account/financial-utils';
 export { calculateSolvency, verifySolvency } from '../../runtime/solvency';
 export { classifyBilateralState, getAccountBarVisual } from '../../account/view-state';
-export { createDefaultDelta } from '../../account/delta';
-export { deriveSwapNetAuthorization } from '../../account/swap-net-authorization';
+export { createDefaultDelta } from '../../account/state/delta';
+export { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
 export {
   validateAccountDeltas,
   validateDelta,
-} from '../../account/delta-validation';
+} from '../../account/validation/delta-validation';
 export { decode, encode } from '../../storage/snapshot-coder';
 export {
   createReplicaKey,

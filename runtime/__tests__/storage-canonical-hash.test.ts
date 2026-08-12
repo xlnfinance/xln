@@ -8,7 +8,7 @@ import {
 import { computeStorageFrameHash, computeStoragePostStateHash } from '../storage/hashes';
 import { encodeBuffer } from '../storage/codec';
 import { buildStorageLiveReplicaMetaCommitment } from '../storage/replicas';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { applyCommand, createBook, replaceOrderbookPair } from '../orderbook';
 import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../storage/projections';

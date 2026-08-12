@@ -1,11 +1,11 @@
 import { getSignerAddress, signAccountFrame, verifyAccountSignature } from '../account/crypto';
 import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../protocol/account-watch-seed';
-import { canonicalAccountDisputeConfig } from '../account/dispute-config';
+import { canonicalAccountDisputeConfig } from '../account/config/dispute-config';
 import {
   accountStateDomainFromJurisdiction,
   normalizeAccountStateDomain,
   sameAccountStateDomain,
-} from '../account/state-root';
+} from '../account/commitment/state-root';
 import { LIMITS } from '../config/constants';
 import {
   getCertifiedBoardNodeStore,

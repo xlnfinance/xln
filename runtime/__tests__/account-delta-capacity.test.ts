@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { validateAccountDeltas } from '../account/delta-validation';
-import { createDefaultDelta } from '../account/delta';
+import { validateAccountDeltas } from '../account/validation/delta-validation';
+import { createDefaultDelta } from '../account/state/delta';
 import { ensureDelta } from '../account/tx/delta-utils';
 import { LIMITS } from '../config/constants';
 import type { AccountState } from '../types/account';

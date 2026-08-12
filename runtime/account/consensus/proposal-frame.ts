@@ -1,7 +1,7 @@
 import type { AccountFrame, AccountReplica, AccountTx } from '../../types/account';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { safeStringify } from '../../protocol/serialization';
-import { decodeAccountFrame } from '../frame-validation';
+import { decodeAccountFrame } from '../validation/frame-validation';
 import { createStructuredLogger } from '../../infra/logger';
 import {
   createFrameHash,
@@ -13,7 +13,7 @@ import {
   computeAccountStateRoot,
   computeAccountStateSectionHashes,
   type AccountStateRootTiming,
-} from '../state-root';
+} from '../commitment/state-root';
 import type { ProposeAccountFrameResult } from './types';
 
 const accountLog = createStructuredLogger('account');

@@ -5,7 +5,7 @@
  */
 
 import type { RuntimeReplica, RuntimeTx } from '../runtime/types.js';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config.js';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config.js';
 import type { EntityInput, ConsensusConfig } from '../entity/types.js';
 import { ethers } from 'ethers';
 import type {

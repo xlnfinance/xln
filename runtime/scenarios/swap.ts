@@ -18,8 +18,8 @@
 
 import type { AccountReplica } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
-import { deriveSwapNetAuthorization } from '../account/swap-net-authorization';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
+import { deriveSwapNetAuthorization } from '../account/swap/swap-net-authorization';
 import { getLiveJAdapterEntries } from '../runtime/live-jadapters';
 import type { EntityInput } from '../entity/types';
 import { ethers } from 'ethers';

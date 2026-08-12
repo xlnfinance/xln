@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import { applyAccountTx } from '../account/tx/apply';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyCommittedAccountFrameFollowups, type AccountTxTarget } from '../entity/tx/handlers/account';
 import type { AccountFrame, AccountReplica, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityState } from '../entity/types';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const HUB = entity('10');

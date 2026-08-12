@@ -1,7 +1,7 @@
 import type { AccountExternalFinalityInput, AccountInput, AccountState, AccountTx } from '../types/account';
-import type { AccountPeerRejectionCode } from './peer-rejection';
+import type { AccountPeerRejectionCode } from './input/peer-rejection';
 import { isAccountWatchSeed } from '../protocol/account-watch-seed';
-import { canonicalAccountDisputeConfig } from './dispute-config';
+import { canonicalAccountDisputeConfig } from './config/dispute-config';
 
 export type AccountInputEnvelopeError = Readonly<{
   code: AccountPeerRejectionCode;

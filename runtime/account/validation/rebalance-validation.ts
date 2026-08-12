@@ -1,10 +1,10 @@
-import { TOKENS } from '../config/constants';
+import { TOKENS } from '../../config/constants';
 import {
   FinancialDataCorruptionError,
   validateMapInstance,
   validateNumber,
   validateObject,
-} from '../protocol/validation-primitives';
+} from '../../protocol/validation-primitives';
 
 const POLICY_SIDES = new Set(['left', 'right']);
 const POLICY_FIELDS = new Set([

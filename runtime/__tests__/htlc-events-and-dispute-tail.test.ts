@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { executeCrontab, initCrontab, scheduleHook } from '../entity/scheduler';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,

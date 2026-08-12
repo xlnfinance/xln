@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { decodeAccountFrame } from '../account/frame-validation';
+import { decodeAccountFrame } from '../account/validation/frame-validation';
 import { decodeAccountTx } from '../account/tx-validation';
 
 const hash = `0x${'11'.repeat(32)}`;

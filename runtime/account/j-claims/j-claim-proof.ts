@@ -5,7 +5,7 @@ import type {
   AccountJClaimProof,
   AccountJClaimProofResult,
   AccountJClaimRecord,
-} from '../types/account-j-claims';
+} from '../../types/account-j-claims';
 import {
   EMPTY_ACCOUNT_J_CLAIM_ROOT,
   accountJClaimKeyBit,

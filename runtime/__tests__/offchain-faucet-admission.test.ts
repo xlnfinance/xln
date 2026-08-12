@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 import { handleOffchainFaucet } from '../api/server/offchain-faucet';
 import {
   describeOffchainFaucetAccountState,

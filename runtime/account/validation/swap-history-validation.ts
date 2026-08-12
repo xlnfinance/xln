@@ -1,11 +1,11 @@
-import { LIMITS } from '../config/constants';
-import type { SwapOrderHistoryEntry, SwapOrderResolveHistoryEntry } from '../types/account';
+import { LIMITS } from '../../config/constants';
+import type { SwapOrderHistoryEntry, SwapOrderResolveHistoryEntry } from '../../types/account';
 import {
   FinancialDataCorruptionError,
   validateArray,
   validateMapInstance,
   validateObject,
-} from '../protocol/validation-primitives';
+} from '../../protocol/validation-primitives';
 
 const HISTORY_FIELDS = new Set([
   'offerId', 'giveTokenId', 'giveAmount', 'originalGiveAmount', 'wantTokenId',

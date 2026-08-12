@@ -20,7 +20,7 @@ import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention
 import {
   setAccountStateRootDebugRecorder,
   type AccountStateRootDebugRecord,
-} from '../account/state-root';
+} from '../account/commitment/state-root';
 import {
   setJBlockHeadersIngressTransform,
   setJEventIngressTransform,

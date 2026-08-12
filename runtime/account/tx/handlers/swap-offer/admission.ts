@@ -1,7 +1,7 @@
 import type { AccountState, AccountTx } from '../../../../types/account';
 import { FINANCIAL, LIMITS } from '../../../../config/constants';
-import { getAccountSwapMarketLimitError } from '../../../swap-limits';
-import { assertSwapNetAuthorization } from '../../../swap-net-authorization';
+import { getAccountSwapMarketLimitError } from '../../../swap/swap-limits';
+import { assertSwapNetAuthorization } from '../../../swap/swap-net-authorization';
 
 export type SwapOfferTx = Extract<AccountTx, { type: 'swap_offer' }>;
 

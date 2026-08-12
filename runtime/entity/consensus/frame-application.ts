@@ -27,7 +27,7 @@ import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 import { assertScheduledWakeFrameOrder } from '../scheduled-wake-validation';
 import { createEntityFrameCandidateState } from '../state-clone';
-import { getAccountPerspective } from '../../account/perspective';
+import { getAccountPerspective } from '../../account/state/perspective';
 import { emitScopedEvents } from '../../infra/scoped-events';
 import { addMessages, clearEntityFrameEvents, readEntityFrameEvents } from '../frame-events';
 import type { AccountPeerInput, AccountReplica, AccountTx, RuntimeOverlayRecord } from '../../types/account';

@@ -1,12 +1,12 @@
-import type { Delta } from '../types/account';
-import { assertAccountDeltaCapacity } from './delta';
+import type { Delta } from '../../types/account';
+import { assertAccountDeltaCapacity } from '../state/delta';
 import {
   TypeSafetyViolationError,
   validateObject,
-} from '../protocol/validation-primitives';
-import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../protocol/integer-ranges';
-import { TOKENS } from '../config/constants';
-import { MAX_CREDIT_LIMIT } from './tx/handlers/set-credit-limit';
+} from '../../protocol/validation-primitives';
+import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../../protocol/integer-ranges';
+import { TOKENS } from '../../config/constants';
+import { MAX_CREDIT_LIMIT } from '../tx/handlers/set-credit-limit';
 
 const BIGINT_FIELDS = [
   'collateral',

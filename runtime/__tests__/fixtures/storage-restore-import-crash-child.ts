@@ -11,9 +11,9 @@ import {
   deriveSignerKeySync,
   signAccountFrame,
 } from '../../account/crypto';
-import { createEmptyAccountJClaimAccumulator } from '../../account/j-claim-accumulator';
+import { createEmptyAccountJClaimAccumulator } from '../../account/j-claims/j-claim-accumulator';
 import { LIMITS } from '../../config/constants';
-import { EMPTY_ACCOUNT_STATE_ROOT } from '../../account/state-root';
+import { EMPTY_ACCOUNT_STATE_ROOT } from '../../account/commitment/state-root';
 import { deriveAccountWatchSeed } from '../../protocol/account-watch-seed';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
 import { getEntityLeaderState } from '../../entity/consensus/leader';
@@ -37,7 +37,7 @@ import type { StoragePersistenceBoundary } from '../../storage';
 import type { AccountReplica } from '../../types/account';
 import type { CertifiedEntityFrameLink, JurisdictionConfig } from '../../entity/types';
 import type { JReplica } from '../../types/jurisdiction-runtime';
-import { createDefaultDelta } from '../../account/delta';
+import { createDefaultDelta } from '../../account/state/delta';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('seed and restore boundary are required');

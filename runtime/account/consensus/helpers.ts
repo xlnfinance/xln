@@ -7,8 +7,8 @@ import {
   checkAutoRebalance,
   resolveAutoRebalanceFeePolicy,
 } from '../tx/handlers/request-collateral';
-import { normalizeAccountStateDomain, type AccountStateDomain } from '../state-root';
-import { assertAccountMempoolWithinLimit } from '../mempool';
+import { normalizeAccountStateDomain, type AccountStateDomain } from '../commitment/state-root';
+import { assertAccountMempoolWithinLimit } from '../input/mempool';
 import {
   firstUsableContractAddress,
   requireDurableJurisdictionStack,

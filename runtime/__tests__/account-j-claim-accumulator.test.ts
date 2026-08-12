@@ -12,8 +12,8 @@ import {
   type AccountJClaimAccumulatorState,
   type AccountJClaimNode,
   type AccountJClaimRecord,
-} from '../account/j-claim-accumulator';
-import { accountJClaimKeyBit, getAccountJClaimKey } from '../account/j-claim-codec';
+} from '../account/j-claims/j-claim-accumulator';
+import { accountJClaimKeyBit, getAccountJClaimKey } from '../account/j-claims/j-claim-codec';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;

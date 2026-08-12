@@ -16,8 +16,8 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
-import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
-import { deriveSwapNetAuthorization } from '../account/swap-net-authorization';
+import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
+import { deriveSwapNetAuthorization } from '../account/swap/swap-net-authorization';
 import type { EntityInput } from '../entity/types';
 import {
   bindScenarioJReplica,

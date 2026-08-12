@@ -1,18 +1,18 @@
-import type { AccountState, AccountTx } from '../types/account';
-import type { JurisdictionEvent } from '../types/jurisdiction-events';
+import type { AccountState, AccountTx } from '../../types/account';
+import type { JurisdictionEvent } from '../../types/jurisdiction-events';
 import type {
   AccountJClaimAccumulatorState,
   AccountJClaimDomain,
   AccountJClaimProofResult,
   AccountJClaimRecord,
   AccountJClaimSide,
-} from '../types/account-j-claims';
-import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
+} from '../../types/account-j-claims';
+import { canonicalJurisdictionEventsHash } from '../../jurisdiction/machine/event-observation';
 import {
   canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,
   requireCanonicalJurisdictionEvents,
-} from '../jurisdiction/machine/event-normalization';
+} from '../../jurisdiction/machine/event-normalization';
 import {
   applyAccountJClaimDelete,
   applyAccountJClaimInsert,

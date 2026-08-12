@@ -18,7 +18,7 @@
  * 4. Both sides exchange j_event_claim → 2-of-2 agreement
  * 5. The proof-verified bilateral transition applies state ONLY after match
  *
- * See account/j-claim-transition.ts for the proof-verified implementation.
+ * See account/j-claims/j-claim-transition.ts for the proof-verified implementation.
  *
  * Reference: Depository.sol reserveToCollateral (line 1035)
  * Reference: 2019src.txt lines 233-239 (reserveToCollateral pattern)

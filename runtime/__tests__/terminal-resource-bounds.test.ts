@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import { EMPTY_ACCOUNT_STATE_ROOT } from '../account/state-root';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
+import { EMPTY_ACCOUNT_STATE_ROOT } from '../account/commitment/state-root';
 import {
   recordSwapClosedLifecycle,
   recordSwapOfferLifecycle,
@@ -23,7 +23,7 @@ import type {
   Proposal,
 } from '../entity/types';
 import type { EntityTx } from '../types/entity-tx';
-import { validateAccountReplica } from '../account/state-validation';
+import { validateAccountReplica } from '../account/validation/state-validation';
 import { validateEntityReplica } from '../entity/replica-validation';
 import { publishEntityCandidateEffects } from '../runtime/env-events';
 

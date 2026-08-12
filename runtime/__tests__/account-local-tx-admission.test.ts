@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { admitLocalAccountTx } from '../account/local-tx-admission';
+import { admitLocalAccountTx } from '../account/input/local-tx-admission';
 import { applyAccountInput } from '../account/consensus/index';
 import { proposeAccountFrame } from '../account/consensus/propose';
 import { createLocalAccountInput } from '../account/input';

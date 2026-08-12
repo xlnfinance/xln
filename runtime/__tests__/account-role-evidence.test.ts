@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   canonicalAccountRoleEvidence,
   defaultAccountDisputeConfigForRoleEvidence,
-} from '../account/dispute-config';
+} from '../account/config/dispute-config';
 
 const USER = `0x${'11'.repeat(32)}`;
 const HUB = `0x${'22'.repeat(32)}`;

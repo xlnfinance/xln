@@ -1,8 +1,8 @@
 import { ethers } from 'ethers';
 
 import type { AccountReplica, AccountState, AccountTx, SettlementDiff, SettlementOp, SettlementWorkspace } from '../../../types/account';
-import { cloneAccountReplica } from '../../state-clone';
-import { computeCanonicalMerkleRoot } from '../../state-root';
+import { cloneAccountReplica } from '../../state/state-clone';
+import { computeCanonicalMerkleRoot } from '../../commitment/state-root';
 import { deriveDelta } from '../../utils';
 import { compileOps, getMinimumSafeSettlementNonce } from '../../../protocol/settlement/operations';
 import { createStructuredLogger } from '../../../infra/logger';
@@ -17,7 +17,7 @@ import {
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
 } from '../../../protocol/dispute/arguments';
-import { projectAccountAfterSettlement } from '../../settlement-projection';
+import { projectAccountAfterSettlement } from '../../settlement/settlement-projection';
 import type {
   AccountTxRejection,
   ApplyAccountTxResult,

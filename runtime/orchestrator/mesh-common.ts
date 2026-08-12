@@ -9,7 +9,7 @@ import { assertEntityProposalAction } from '../entity/authorization';
 import { normalizeSignedEntityCommand } from '../entity/command-codec';
 import { getReliableOutputIdentity } from '../runtime/output-routing';
 export { getEntityReplicaById } from '../entity/replica-lookup';
-export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/defaults';
+export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
 export {
   getBootstrapTokenAmount,
 } from '../jurisdiction/machine/bootstrap-economy';

@@ -5,11 +5,11 @@ import {
   computeAccountStateRoot,
   encodeAccountStateValue,
   encodeAccountStateValueOracle,
-} from '../account/state-root';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+} from '../account/commitment/state-root';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import type { AccountReplica, AccountState } from '../types/account';
-import { createDefaultDelta } from '../account/delta';
+import { createDefaultDelta } from '../account/state/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;

@@ -14,7 +14,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import {
   createAccountJClaimProof,
   verifyAccountJClaimProof,
-} from '../account/j-claim-accumulator';
+} from '../account/j-claims/j-claim-accumulator';
 import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
 import { generateLazyEntityId } from '../entity/factory';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';

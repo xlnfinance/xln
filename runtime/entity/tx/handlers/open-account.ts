@@ -8,7 +8,7 @@ import { upsertSortedStringMapEntry } from '../../../infra/sorted-map-index';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
-import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/defaults';
+import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/config/defaults';
 import { normalizeAccountWatchSeed } from '../../../protocol/account-watch-seed';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
@@ -17,14 +17,14 @@ import {
   EMPTY_ACCOUNT_STATE_ROOT,
   normalizeAccountStateDomain,
   sameAccountStateDomain,
-} from '../../../account/state-root';
+} from '../../../account/commitment/state-root';
 import { applyAccountInput } from '../../../account/consensus';
 import { createLocalAccountInput } from '../../../account/input';
 import { assertEntityAccountInsertionCapacity } from '../../account-capacity';
-import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claim-accumulator';
-import { resolveJurisdictionRebalanceDefaults } from '../../../account/defaults';
+import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
+import { resolveJurisdictionRebalanceDefaults } from '../../../account/config/defaults';
 import { buildHubRebalancePolicyTx } from './account-admin';
-import { canonicalAccountDisputeConfig } from '../../../account/dispute-config';
+import { canonicalAccountDisputeConfig } from '../../../account/config/dispute-config';
 
 type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
 

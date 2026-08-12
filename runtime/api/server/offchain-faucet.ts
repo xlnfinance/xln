@@ -17,7 +17,7 @@ import {
 } from './offchain-faucet-admission';
 import { faucetFailureBody } from './faucet-failure';
 import { getTokenInfo } from '../../account/utils';
-import { getDefaultRebalanceBaseFeeForToken } from '../../account/defaults';
+import { getDefaultRebalanceBaseFeeForToken } from '../../account/config/defaults';
 
 const faucetLog = createStructuredLogger('server.faucet');
 
