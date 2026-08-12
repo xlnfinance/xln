@@ -12,7 +12,7 @@
   import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
   import { writable, get } from 'svelte/store';
-  import { activeRuntime as activeRuntimeStore, vaultOperations } from '$lib/stores/vaultStore';
+  import { activeRuntime as activeRuntimeStore, vaultOperations } from '$lib/stores/vault/vaultStore';
   import { errorLog } from '$lib/stores/errorLogStore';
   import { settings } from '$lib/stores/settingsStore';
   import {
@@ -28,7 +28,7 @@
     setRuntimeViewActiveEntityId,
   } from '$lib/stores/runtimeViewStore';
   import { runtimes, activeRuntimeId, runtimeOperations } from '$lib/stores/runtimeStore';
-  import { showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
+  import { showVaultPanel, vaultUiOperations } from '$lib/stores/vault/vaultUiStore';
   import type { Tab } from '$lib/types/ui';
   import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
   import type { EntityReplica } from '@xln/runtime/entity/types';
@@ -37,8 +37,8 @@
     readAnyOnboardingComplete,
     readOnboardingComplete,
     writeOnboardingCompleteForEntities,
-  } from '$lib/utils/onboardingState';
-  import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+  } from '$lib/utils/onboarding/onboardingState';
+  import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
   import { panelBridge } from './utils/panelBridge';
   import { resolveActiveLocalReplica } from './local-runtime-selection';
 

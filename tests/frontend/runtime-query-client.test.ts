@@ -613,7 +613,7 @@ test('remote Time Machine scan reads historical frames through history-frame-bat
 test('address explorer routes read runtime projections instead of debug entity APIs', () => {
   const directory = readFileSync('frontend/src/routes/address/+page.svelte', 'utf8');
   const detail = readFileSync('frontend/src/routes/address/[entityId]/+page.svelte', 'utf8');
-  const runtimeConnection = readFileSync('frontend/src/lib/utils/runtimeConnection.ts', 'utf8');
+  const runtimeConnection = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
   const appLayout = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
 
   expect(directory).toContain('ensureProjectionRuntimeConnected');
@@ -646,14 +646,14 @@ test('address explorer routes read runtime projections instead of debug entity A
   expect(runtimeConnection).toContain('readRemoteRuntimeRequestFromUrl');
   expect(runtimeConnection).toContain('persistRemoteRuntimeRequest');
   expect(runtimeConnection).toContain('stripRemoteRuntimeParamsFromHistory');
-  expect(runtimeConnection).toContain("from '$lib/stores/vaultStore'");
+  expect(runtimeConnection).toContain("from '$lib/stores/vault/vaultStore'");
   expect(runtimeConnection).toContain('await vaultOperations.initialize()');
   expect(runtimeConnection).toContain('const runtime = get(activeRuntime)');
   expect(runtimeConnection).toContain('runtimeId: runtime.id');
   expect(runtimeConnection).toContain('seed: runtime.seed');
   expect(runtimeConnection).toContain('await initializeXLN()');
   expect(runtimeConnection).toContain('getRuntimeControllerAdapter');
-  expect(appLayout).toContain("from '$lib/utils/runtimeConnection'");
+  expect(appLayout).toContain("from '$lib/utils/runtime/runtimeConnection'");
   expect(appLayout).not.toContain('function readRemoteRuntimeRequestFromUrl');
   expect(appLayout).not.toContain('function persistRemoteRuntimeRequest');
   expect(appLayout).not.toContain('function remoteAccessFromAuthKey');
@@ -685,7 +685,7 @@ test('health admin reads active runtime projections instead of debug event/entit
 });
 
 test('remote runtime validation uses typed query client reads with runtime-scoped cache', () => {
-  const source = readFileSync('frontend/src/lib/utils/remoteRuntimeValidation.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/utils/onboarding/remoteRuntimeValidation.ts', 'utf8');
 
   expect(source).toContain('new RuntimeQueryClient(() => adapter, runtimeId)');
   expect(source).toContain('queryClient.readHead()');

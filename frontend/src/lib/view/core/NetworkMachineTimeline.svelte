@@ -1,14 +1,14 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import { networkMachineDemo } from '$lib/stores/networkMachineDemoStore';
+  import { networkMachineDemo } from '$lib/stores/network/networkMachineDemoStore';
   import { Pause, Play, RefreshCw, SkipBack, SkipForward } from 'lucide-svelte';
   import { appState, appStateOperations } from '$lib/stores/appStateStore';
-  import { networkMachineConfig, networkMachineOperations } from '$lib/stores/networkMachineStore';
+  import { networkMachineConfig, networkMachineOperations } from '$lib/stores/network/networkMachineStore';
   import {
     networkMachineRuntime,
     networkMachineRuntimeOperations,
-  } from '$lib/stores/networkMachineRuntimeStore';
+  } from '$lib/stores/network/networkMachineRuntimeStore';
   import type { NetworkMachineTimelineMode } from '$lib/network3d/networkMachine';
   import { captionForStep } from '$lib/network3d/networkCaption';
   import { xlnFunctions } from '$lib/stores/xlnStore';

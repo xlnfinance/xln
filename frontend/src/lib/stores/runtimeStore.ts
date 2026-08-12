@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import type { RuntimeReplica, RuntimeAdapterConfig } from '@xln/runtime/api/public/runtime-module';
-import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
-import { registerDebugSurface } from '$lib/utils/debugSurface';
+import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
+import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
 import {
   normalizeRemoteRuntimeWsUrl,
   describeRemoteRuntimeImportError,
@@ -15,9 +15,9 @@ import {
   type RemoteRuntimeImportAccess,
   type RemoteRuntimeImportEntry,
   type StoredRemoteRuntimeImportEntry,
-} from '$lib/utils/remoteRuntimeImport';
-import { validateRemoteRuntimeEntry } from '$lib/utils/remoteRuntimeValidation';
-import { getXLN } from './xlnRuntimeLoader';
+} from '$lib/utils/onboarding/remoteRuntimeImport';
+import { validateRemoteRuntimeEntry } from '$lib/utils/onboarding/remoteRuntimeValidation';
+import { getXLN } from './bootstrap/xlnRuntimeLoader';
 import {
   getRuntimeControllerConfig,
   runtimeControllerHandle,

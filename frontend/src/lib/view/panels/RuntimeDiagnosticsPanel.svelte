@@ -5,7 +5,7 @@
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { getRuntimeControllerAdapter } from '$lib/stores/runtimeControllerStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
-  import { activeRuntime } from '$lib/stores/vaultStore';
+  import { activeRuntime } from '$lib/stores/vault/vaultStore';
 
   let head: StorageHead | null = null;
   let checkpoints: Array<{ height?: number }> = [];

@@ -18,7 +18,7 @@
   import TabStylePicker from '$lib/components/Settings/TabStylePicker.svelte';
   import { TAB_STYLE_OPTIONS } from '$lib/utils/ui-style-options';
   import { settings as appSettings, settingsOperations } from '$lib/stores/settingsStore';
-  import { networkMachineConfig, networkMachineOperations } from '$lib/stores/networkMachineStore';
+  import { networkMachineConfig, networkMachineOperations } from '$lib/stores/network/networkMachineStore';
   import type { NetworkMachineTimelineMode } from '$lib/network3d/networkMachine';
 
   // Props (isolated stores - reserved for future time-travel settings UI)

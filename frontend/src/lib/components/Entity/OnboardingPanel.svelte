@@ -15,8 +15,8 @@
     vaultOperations,
     type RecoveryTowerConfig,
     type RecoveryTowerSetupMode,
-  } from '../../stores/vaultStore';
-  import { entityAvatar } from '../../utils/avatar';
+  } from '../../stores/vault/vaultStore';
+  import { entityAvatar } from '../../utils/identity/avatar';
   import {
     type HubJoinPreference,
     hydrateJurisdictionPolicyDefaults,
@@ -25,12 +25,12 @@
     writeHubJoinPreference,
     writeSavedCollateralPolicy,
     getOpenAccountRebalancePolicyData,
-  } from '../../utils/onboardingPreferences';
+  } from '../../utils/onboarding/onboardingPreferences';
   import {
     readOnboardingComplete,
     writeOnboardingCompleteForEntities,
-  } from '../../utils/onboardingState';
-  import { normalizeEntityId } from '../../utils/entityReplica';
+  } from '../../utils/onboarding/onboardingState';
+  import { normalizeEntityId } from '../../utils/identity/entityReplica';
   import {
     getManualRecoveryTowers,
     isOfficialRecoveryTower,
@@ -39,13 +39,13 @@
     normalizeTowerMode,
     resolveOfficialRecoveryTowerUrl,
     type RecoveryServiceMode,
-  } from '../../utils/recoverySettings';
+  } from '../../utils/recovery/recoverySettings';
   import {
     clearRuntimeRecoveryDiscoveryStatus,
     formatRuntimeRecoveryDiscoveryFailure,
     readRuntimeRecoveryDiscoveryStatus,
     type RuntimeRecoveryDiscoveryStatus,
-  } from '../../utils/recoveryDiscoveryStatus';
+  } from '../../utils/recovery/recoveryDiscoveryStatus';
   import {
     assertCommittedAutoJoinCount,
     buildOnboardingHubOpenRuntimeInput,

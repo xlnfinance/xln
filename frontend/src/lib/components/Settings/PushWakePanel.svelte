@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
-  import type { RecoveryTowerConfig, Runtime } from '$lib/stores/vaultStore';
-  import { vaultOperations } from '$lib/stores/vaultStore';
+  import type { RecoveryTowerConfig, Runtime } from '$lib/stores/vault/vaultStore';
+  import { vaultOperations } from '$lib/stores/vault/vaultStore';
   import {
     buildPushWakeRegistrationPayload,
     buildPushWakeRegistrationRequest,
@@ -14,8 +14,8 @@
     resolvePushWakeTarget,
     upsertPushWakeRegistrationRecord,
     type PushWakeRegistrationRecord,
-  } from '$lib/utils/pushWakeRegistration';
-  import { normalizeTowerMode } from '$lib/utils/recoverySettings';
+  } from '$lib/utils/recovery/pushWakeRegistration';
+  import { normalizeTowerMode } from '$lib/utils/recovery/recoverySettings';
   import { Bell, BellOff, Check, LoaderCircle } from 'lucide-svelte';
   import { onMount } from 'svelte';
 

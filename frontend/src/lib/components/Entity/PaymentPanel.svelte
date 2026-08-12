@@ -17,12 +17,12 @@
     sendRuntimeDebugEvent,
     xlnFunctions,
   } from '../../stores/xlnStore';
-  import { routePreview } from '../../stores/routePreviewStore';
+  import { routePreview } from '../../stores/network/routePreviewStore';
   import { errorLog } from '../../stores/errorLogStore';
-  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+  import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
   import { toasts } from '$lib/stores/toastStore';
-  import { runtimeCommandLatestReceipt } from '$lib/stores/runtimeCommandBus';
-  import { classifyRuntimeFailure } from '$lib/utils/runtimeFailure';
+  import { runtimeCommandLatestReceipt } from '$lib/stores/commands/runtimeCommandBus';
+  import { classifyRuntimeFailure } from '$lib/utils/runtime/runtimeFailure';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
   import EntityIdentity from '../shared/EntityIdentity.svelte';

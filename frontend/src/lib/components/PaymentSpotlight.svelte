@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fade, fly } from 'svelte/transition';
-  import { paymentSpotlight, type PaymentSpotlight } from '$lib/stores/paymentSpotlightStore';
+  import { paymentSpotlight, type PaymentSpotlight } from '$lib/stores/network/paymentSpotlightStore';
 
   let spotlight: PaymentSpotlight | null = null;
   paymentSpotlight.subscribe((value) => spotlight = value);

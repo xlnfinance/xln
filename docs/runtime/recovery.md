@@ -38,7 +38,7 @@ path.
 
 ## Called by
 
-- `frontend/src/lib/stores/vaultStore.ts`
+- `frontend/src/lib/stores/vault/vaultStore.ts`
   Schedules upload of encrypted runtime backups and restores from tower on a
   fresh device or missing local DB.
 - `runtime/watchtower/http.ts`

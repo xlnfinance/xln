@@ -1,5 +1,5 @@
 import type { JurisdictionConfig } from '@xln/runtime/api/public/runtime-module';
-import { errorLog } from './errorLogStore';
+import { errorLog } from '../errorLogStore';
 import {
   type FaucetResult,
   type HealthMachine,

@@ -6,7 +6,7 @@ import {
   prewarmCounterpartyProfiles,
   waitForOpenAccountCounterpartyProfiles,
   waitForCounterpartyRuntimeRoutes,
-} from '../../frontend/src/lib/utils/p2pPrefetch';
+} from '../../frontend/src/lib/utils/runtime/p2pPrefetch';
 
 const SOURCE = `0x${'11'.repeat(32)}`;
 const SIGNER = `0x${'22'.repeat(20)}`;

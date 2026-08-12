@@ -5,7 +5,7 @@ import {
   type AccountRoleEvidenceSource,
 } from '@xln/runtime/account/config/dispute-config';
 
-import { normalizeEntityId } from '../../../utils/entityReplica';
+import { normalizeEntityId } from '../../../utils/identity/entityReplica';
 import type { HubOpenAccountRebalancePolicy } from './../hub-discovery-profile';
 
 export type OnboardingRuntimeTarget = {

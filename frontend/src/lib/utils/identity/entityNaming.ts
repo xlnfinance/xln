@@ -1,5 +1,5 @@
 import type { Profile as GossipProfile } from '@xln/runtime/api/public/runtime-module';
-import { formatEntityId } from './format';
+import { formatEntityId } from '../format';
 
 type GossipSource = {
   gossip?: {

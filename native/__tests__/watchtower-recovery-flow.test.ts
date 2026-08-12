@@ -21,7 +21,7 @@ import {
   resolveDefaultRecoveryTowerUrls,
   tryRestoreRuntimeEnvFromTower,
   type Runtime,
-} from '../../frontend/src/lib/stores/vaultStore';
+} from '../../frontend/src/lib/stores/vault/vaultStore';
 import { createDefaultDelta } from '../../runtime/account/state/delta';
 import { createEmptyAccountJClaimAccumulator } from '../../runtime/account/j-claims/j-claim-accumulator';
 import type { AccountReplica } from '../../runtime/types';

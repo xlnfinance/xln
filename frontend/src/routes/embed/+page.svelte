@@ -19,8 +19,8 @@
   import { page } from '$app/stores';
   import View from '$lib/view/View.svelte';
   import { settingsOperations } from '$lib/stores/settingsStore';
-  import { networkMachineRuntimeOperations } from '$lib/stores/networkMachineRuntimeStore';
-  import { networkMachineDemo } from '$lib/stores/networkMachineDemoStore';
+  import { networkMachineRuntimeOperations } from '$lib/stores/network/networkMachineRuntimeStore';
+  import { networkMachineDemo } from '$lib/stores/network/networkMachineDemoStore';
   import { decodeNetworkTrailFromHash } from '$lib/network3d/networkTimelineSource';
 
   let embedMode = true;

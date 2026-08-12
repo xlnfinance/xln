@@ -4,7 +4,7 @@ import { BRAINVAULT_V1_SPEC_ID } from '../../../../brainvault/spec';
 import {
   createPaymentTerminalMonitor,
   PAYMENT_TERMINAL_EVENT_NAMES,
-} from '../../../../frontend/src/lib/stores/paymentTerminalMonitor';
+} from '../../../../frontend/src/lib/stores/network/paymentTerminalMonitor';
 import {
   decodeRuntimeAdapterBrowserMessage,
   decodeRuntimeAdapterMessage,

@@ -32,7 +32,7 @@ This folder owns the standalone recovery/watchtower API service.
 
 ## Called by
 
-- `frontend/src/lib/stores/vaultStore.ts`
+- `frontend/src/lib/stores/vault/vaultStore.ts`
 - external operators running `bun run watchtower`
 
 ## Boundary

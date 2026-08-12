@@ -1,7 +1,7 @@
 import {
   resolveDefaultRecoveryTowerUrls,
   type RecoveryTowerConfig,
-} from '$lib/stores/vaultStore';
+} from '$lib/stores/vault/vaultStore';
 
 export type RecoveryServiceMode = 'blind_backup' | 'delayed_last_resort';
 

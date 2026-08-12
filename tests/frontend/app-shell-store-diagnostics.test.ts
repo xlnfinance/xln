@@ -28,8 +28,8 @@ const diagnosticFiles = [
     logLine: "errorLog.log('TIME_MACHINE_HISTORY_NOT_READY: skipping max-index update', 'Time Machine'",
   },
   {
-    path: 'frontend/src/lib/stores/jmachineStore.ts',
-    importLine: "import { errorLog } from './errorLogStore';",
+    path: 'frontend/src/lib/stores/network/jmachineStore.ts',
+    importLine: "import { errorLog } from '../errorLogStore';",
     logLine: "errorLog.log('Failed to load J-Machine configs; clearing corrupted storage', 'J-Machine Store'",
   },
 ] as const;

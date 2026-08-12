@@ -12,9 +12,9 @@ import {
   type NetworkTimelineSource,
   type NetworkTrail,
 } from '$lib/network3d/networkTimelineSource';
-import { getXLN } from './xlnRuntimeLoader';
+import { getXLN } from '../bootstrap/xlnRuntimeLoader';
 import { networkMachineConfig } from './networkMachineStore';
-import { runtimes } from './runtimeStore';
+import { runtimes } from '../runtimeStore';
 import type { RuntimeTimelineIndex } from '$lib/network3d/runtimeGraphTimeline';
 
 export type NetworkMachineRuntimeState = {

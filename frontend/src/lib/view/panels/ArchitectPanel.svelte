@@ -22,7 +22,7 @@
   import type { JAdapter } from '@xln/runtime/jurisdiction/adapter';
   import { defaultAccountDisputeConfigForRoleEvidence } from '@xln/runtime/account/config/dispute-config';
   import { activeRuntime as activeRuntimeStore } from '$lib/stores/runtimeStore';
-  import { activeRuntime as activeVaultRuntime } from '$lib/stores/vaultStore';
+  import { activeRuntime as activeVaultRuntime } from '$lib/stores/vault/vaultStore';
   import SolvencyPanel from './SolvencyPanel.svelte';
 
   // Receive isolated env as props (passed from View.svelte) - REQUIRED

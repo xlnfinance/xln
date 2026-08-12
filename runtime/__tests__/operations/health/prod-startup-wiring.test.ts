@@ -361,7 +361,7 @@ describe('production startup wiring', () => {
     const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
     const deploy = readPlatformDeploy();
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vaultStore.ts'), 'utf8');
+    const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vault/vaultStore.ts'), 'utf8');
 
     expect(runtimeCreation).toContain("url.searchParams.set('access', 'admin')");
     expect(runtimeCreation).not.toContain("url.searchParams.set('allowPartial', '1')");
@@ -406,7 +406,7 @@ describe('production startup wiring', () => {
   });
 
   test('fresh browser runtimes replay EntityProvider authority from deployment', () => {
-    const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vaultStore.ts'), 'utf8');
+    const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vault/vaultStore.ts'), 'utf8');
     const freshRuntimeBootstrap = extractSourceBlock(
       vaultStore,
       '// Import the same primary jurisdiction name that hub profiles advertise.',
@@ -423,8 +423,8 @@ describe('production startup wiring', () => {
   });
 
   test('wallet entity configs commit the imported jurisdiction block time', () => {
-    const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vaultStore.ts'), 'utf8');
-    const vaultRecovery = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vault-recovery.ts'), 'utf8');
+    const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vault/vaultStore.ts'), 'utf8');
+    const vaultRecovery = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vault/vault-recovery.ts'), 'utf8');
     const signerConfig = extractSourceBlock(
       vaultRecovery,
       'export const buildSignerEntityConfig = (',
@@ -1499,7 +1499,7 @@ describe('production startup wiring', () => {
       .map(file => readFileSync(join(repoRoot, file), 'utf8'))
       .join('\n');
     const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');
-    const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/remoteRuntimeImportFlow.ts'), 'utf8');
+    const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const runtimeImportHttp = readFileSync(join(repoRoot, 'runtime/orchestrator/runtime/runtime-import-http.ts'), 'utf8');
     const bootstrapTimeline = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap/bootstrap-timeline-stages.ts'), 'utf8');

@@ -7,7 +7,7 @@ import {
   buildOnboardingProfileRuntimeInput,
   selectAdvertisedAutoJoinCandidates,
 } from '../../../frontend/src/lib/components/Entity/onboarding/onboarding-runtime-input';
-import { getOpenAccountRebalancePolicyData } from '../../../frontend/src/lib/utils/onboardingPreferences';
+import { getOpenAccountRebalancePolicyData } from '../../../frontend/src/lib/utils/onboarding/onboardingPreferences';
 
 const ENTITY = `0x${'11'.repeat(32)}`;
 const SIGNER = `0x${'22'.repeat(20)}`;

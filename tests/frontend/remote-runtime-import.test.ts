@@ -17,8 +17,8 @@ import {
   remoteRuntimeIdForWsUrl,
   parseRemoteRuntimeImportSourcePayload,
   type StoredRemoteRuntimeImportEntry,
-} from '../../frontend/src/lib/utils/remoteRuntimeImport';
-import { writeRemoteRuntimeImportSummary } from '../../frontend/src/lib/utils/remoteRuntimeImportFlow';
+} from '../../frontend/src/lib/utils/onboarding/remoteRuntimeImport';
+import { writeRemoteRuntimeImportSummary } from '../../frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow';
 import {
   LIVE_RUNTIME_DISCOVERY_MAX_RETRIES,
   shouldRetryLiveRuntimeDiscovery,
@@ -29,7 +29,7 @@ import {
   buildRuntimeWsRecoveryPeerSources,
   selectPrimaryRemoteEntitySummary,
   selectPrimaryRemoteHubSummary,
-} from '../../frontend/src/lib/utils/remoteRuntimeValidation';
+} from '../../frontend/src/lib/utils/onboarding/remoteRuntimeValidation';
 
 const token = `xlnra1.full.${Date.now() + 60 * 60 * 1000}.aud.kid.jti.sig`;
 
@@ -645,9 +645,9 @@ describe('remote runtime import manager utilities', () => {
     const xlnStore = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
     const runtimeCreation = readFileSync('frontend/src/lib/components/Views/RuntimeCreation.svelte', 'utf8');
     const runtimeStore = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
-    const vaultStore = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+    const vaultStore = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
     const appLayout = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
-    const importFlow = readFileSync('frontend/src/lib/utils/remoteRuntimeImportFlow.ts', 'utf8');
+    const importFlow = readFileSync('frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow.ts', 'utf8');
 
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports()');
     expect(xlnStore).toContain("new URL('/api/runtime-import', resolveConfiguredApiBase(window.location.origin))");

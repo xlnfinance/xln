@@ -5,8 +5,8 @@
     parseRemoteRuntimeImportText,
     type RemoteRuntimeImportAccess,
     type RemoteRuntimeImportEntry,
-  } from '$lib/utils/remoteRuntimeImport';
-  import { importRemoteRuntimeEntries } from '$lib/utils/remoteRuntimeImportFlow';
+  } from '$lib/utils/onboarding/remoteRuntimeImport';
+  import { importRemoteRuntimeEntries } from '$lib/utils/onboarding/remoteRuntimeImportFlow';
 
   type Row = RemoteRuntimeImportEntry & { index: number; status: string; detail: string };
   let mode: 'single' | 'bulk' = 'single';

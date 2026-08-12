@@ -5,7 +5,7 @@ import {
   buildPersistedJMachineConfig,
   normalizeJMachineCreateDetail,
 } from '../../frontend/src/lib/components/Jurisdiction/import-jmachine-runtime';
-import { deriveJMachineCreatedAt, normalizeJMachineConfig } from '../../frontend/src/lib/stores/jmachineStore';
+import { deriveJMachineCreatedAt, normalizeJMachineConfig } from '../../frontend/src/lib/stores/network/jmachineStore';
 
 const draft = {
   name: 'local-sim-visual',
@@ -68,7 +68,7 @@ test('Settings/UserMode JMachine import uses the shared runtime helper', () => {
   const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
   const userMode = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
   const addJMachine = readFileSync('frontend/src/lib/components/Jurisdiction/AddJMachine.svelte', 'utf8');
-  const store = readFileSync('frontend/src/lib/stores/jmachineStore.ts', 'utf8');
+  const store = readFileSync('frontend/src/lib/stores/network/jmachineStore.ts', 'utf8');
   const helper = readFileSync('frontend/src/lib/components/Jurisdiction/import-jmachine-runtime.ts', 'utf8');
 
   expect(settings).toContain('onImportJMachine(event.detail)');

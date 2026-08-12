@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { getXLN } from '$lib/stores/xlnRuntimeLoader';
+  import { getXLN } from '$lib/stores/bootstrap/xlnRuntimeLoader';
   import {
     currentHeight,
     history,

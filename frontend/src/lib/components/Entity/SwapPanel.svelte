@@ -15,9 +15,9 @@ import { submitActiveCrossJurisdictionIntent, submitEntityInputs, submitRuntimeI
 import { readRuntimeAccountProjection, readRuntimeEntityProjectionFrame } from '../../stores/runtimeViewStore';
 import { toasts } from '../../stores/toastStore';
 import { errorLog } from '../../stores/errorLogStore';
-import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
-import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
-import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
+import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
+import { unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
+import { prewarmCounterpartyProfiles } from '$lib/utils/runtime/p2pPrefetch';
 import { amountToUsd } from '$lib/utils/assetPricing';
 import { requireTokenDecimals } from './token-metadata';
 import { buildEntityPanelView } from './entity-panel-model';

@@ -14,7 +14,7 @@ import {
   summarizeRuntimeRecoveryTowerFailure,
   summarizeRuntimeRecoveryTowerReceipt,
   tryRestoreRuntimeEnvFromTower,
-} from '../../frontend/src/lib/stores/vaultStore';
+} from '../../frontend/src/lib/stores/vault/vaultStore';
 import * as xln from '../../runtime/runtime';
 import { decryptTowerPayloadWithWatchSeed } from '../../runtime/storage/recovery/bundle/crypto';
 import { deserializeTaggedJson } from '../../runtime/protocol/serialization';
@@ -77,7 +77,7 @@ test('runtime recovery modes keep tower setup out of seed creation defaults', ()
 });
 
 test('tower receipts block runtime output only when explicitly enabled', () => {
-  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
   const registration = source.slice(
     source.indexOf('function registerRuntimeEnvChange('),
     source.indexOf('function runtimeToEntry(', source.indexOf('function registerRuntimeEnvChange(')),
@@ -158,15 +158,15 @@ test('runtime recovery tower status summaries are bounded, compact, and fail-fas
   expect(merged).toHaveLength(16);
   expect(merged[0]).toEqual(receipt);
 
-  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
   expect(source).toContain('TOWER_RECEIPT_MISSING');
   expect(source).toContain('lastTowerFailures');
   expect(source).toContain('updateRuntimeRecoveryMetadata(normalizedRuntimeId');
 });
 
 test('vault runtime recovery and restore diagnostics use persistent error log', () => {
-  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
-  const bootstrapSource = readFileSync('frontend/src/lib/stores/vault-bootstrap.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
+  const bootstrapSource = readFileSync('frontend/src/lib/stores/vault/vault-bootstrap.ts', 'utf8');
   const recoveryStart = source.indexOf('const persistRuntimeMetadataSnapshot');
   const recoveryEnd = source.indexOf('async function cleanupRuntimeEnv', recoveryStart);
   const cleanupStart = recoveryEnd;
@@ -174,7 +174,7 @@ test('vault runtime recovery and restore diagnostics use persistent error log', 
   const restoreStart = source.indexOf('async function buildOrRestoreRuntimeEnv');
   const restoreEnd = source.indexOf('function registerRuntimeResumeListener', restoreStart);
 
-  expect(source).toContain("import { errorLog } from './errorLogStore';");
+  expect(source).toContain("import { errorLog } from '../errorLogStore';");
   expect(recoveryStart).toBeGreaterThan(0);
   expect(recoveryEnd).toBeGreaterThan(recoveryStart);
   expect(cleanupStart).toBeGreaterThan(0);
@@ -205,7 +205,7 @@ test('vault runtime recovery and restore diagnostics use persistent error log', 
 });
 
 test('vaultStore diagnostics do not use raw console output', () => {
-  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
 
   expect(source).toContain("errorLog.log('Resume refresh failed', 'Runtime Resume', error)");
   expect(source).toContain('Broadcast refresh failed');

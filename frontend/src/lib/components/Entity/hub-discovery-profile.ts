@@ -13,12 +13,12 @@ import {
 import {
   hasUsableOpenAccountCounterpartyProfile,
   waitForCounterpartyRuntimeRoutes,
-} from '../../utils/p2pPrefetch';
+} from '../../utils/runtime/p2pPrefetch';
 import {
   isCommittedAccount,
   isOpeningAccount,
   normalizeEntityId,
-} from '../../utils/entityReplica';
+} from '../../utils/identity/entityReplica';
 import type { Runtime } from '../../stores/runtimeStore';
 
 export type HubProfileSeedResult = {

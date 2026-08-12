@@ -7,7 +7,7 @@
   import { xlnFunctions, xlnInstance } from '../../stores/xlnStore';
   import type { EntityReplica, AccountReplica } from '$lib/types/ui';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import { entityAvatar } from '$lib/utils/avatar';
+  import { entityAvatar } from '$lib/utils/identity/avatar';
   import { getAccountUiStatus, getAccountUiStatusLabel, type AccountUiStatus } from '$lib/utils/accountStatus';
 
   export let replica: EntityReplica | null = null;

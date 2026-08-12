@@ -37,7 +37,7 @@ import {
   type NetworkMachineConfig,
 } from '../../frontend/src/lib/network3d/networkMachine';
 import { readTimelineIndexPages } from '../../frontend/src/lib/network3d/networkTimelineLoader';
-import { assertNetworkMachineIsLive } from '../../frontend/src/lib/stores/networkMachineRuntimeStore';
+import { assertNetworkMachineIsLive } from '../../frontend/src/lib/stores/network/networkMachineRuntimeStore';
 import {
   beginGraphGesture,
   emptyGraphGestureState,

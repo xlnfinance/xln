@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { wireDebug } from '../../frontend/src/lib/utils/wireDebug';
+import { wireDebug } from '../../frontend/src/lib/utils/runtime/wireDebug';
 
 describe('browser wire debug surface', () => {
   test('decodes exact peer and rAdapter wire values without changing production codecs', () => {

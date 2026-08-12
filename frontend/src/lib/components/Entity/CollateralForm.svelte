@@ -8,7 +8,7 @@
     getCounterpartyAccount,
     normalizeEntityId,
     requireSignerIdForEntity,
-  } from '$lib/utils/entityReplica';
+  } from '$lib/utils/identity/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
   import { amountToUsd } from '$lib/utils/assetPricing';

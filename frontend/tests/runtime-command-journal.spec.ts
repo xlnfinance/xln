@@ -27,8 +27,8 @@ test('remote command survives reload encrypted and retries with the same ID afte
         resolve();
       };
     });
-    const keyringPath = '/src/lib/stores/runtimeCommandJournalKeyring.ts';
-    const intentPath = '/src/lib/stores/runtimeCommandIntent.ts';
+    const keyringPath = '/src/lib/stores/commands/runtimeCommandJournalKeyring.ts';
+    const intentPath = '/src/lib/stores/commands/runtimeCommandIntent.ts';
     const keyring = await import(keyringPath);
     const intents = await import(intentPath);
     await keyring.installRuntimeCommandJournalKeys(runtimeId, walletSeed);
@@ -69,7 +69,7 @@ test('remote command survives reload encrypted and retries with the same ID afte
 
   await page.reload();
   const lockedError = await page.evaluate(async ({ runtimeId, serverFingerprint }) => {
-    const intentPath = '/src/lib/stores/runtimeCommandIntent.ts';
+    const intentPath = '/src/lib/stores/commands/runtimeCommandIntent.ts';
     const intents = await import(intentPath);
     try {
       await intents.listUnresolvedRemoteRuntimeCommandIntents(runtimeId, serverFingerprint);
@@ -81,8 +81,8 @@ test('remote command survives reload encrypted and retries with the same ID afte
   expect(lockedError).toBe(`RUNTIME_COMMAND_JOURNAL_LOCKED:${runtimeId}`);
 
   const restored = await page.evaluate(async ({ runtimeId, serverFingerprint, walletSeed, wrongWalletSeed, commandId }) => {
-    const keyringPath = '/src/lib/stores/runtimeCommandJournalKeyring.ts';
-    const intentPath = '/src/lib/stores/runtimeCommandIntent.ts';
+    const keyringPath = '/src/lib/stores/commands/runtimeCommandJournalKeyring.ts';
+    const intentPath = '/src/lib/stores/commands/runtimeCommandIntent.ts';
     const keyring = await import(keyringPath);
     const intents = await import(intentPath);
     let wrongWalletError: string | null = null;

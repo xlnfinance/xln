@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { generateLazyEntityIdPreview } from '../../frontend/src/lib/utils/lazyEntityId';
+import { generateLazyEntityIdPreview } from '../../frontend/src/lib/utils/identity/lazyEntityId';
 import { generateLazyEntityId } from '../../runtime/entity/factory';
 
 describe('frontend lazy entity id preview', () => {

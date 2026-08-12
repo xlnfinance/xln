@@ -7,7 +7,7 @@ import type {
   RuntimeAdapterViewFrame,
 } from '@xln/runtime/api/public/runtime-module';
 import type { EntityReplica } from '$lib/types/ui';
-import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+import { unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
 
 export function materializeReplicaView(candidate: EntityReplica | null | undefined): EntityReplica | null {
   if (!candidate) return null;

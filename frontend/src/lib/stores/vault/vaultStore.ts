@@ -22,7 +22,7 @@ import {
   runtimeOperations,
   runtimes,
   type RuntimeSelectionLease,
-} from './runtimeStore';
+} from '../runtimeStore';
 
 import {
   dispatchRuntimeInputToRuntimeEnv,
@@ -32,29 +32,29 @@ import {
   setXlnEnvironment,
   submitEntityInputs as submitXlnEntityInputs,
   xlnInstance,
-} from './xlnStore';
+} from '../xlnStore';
 
-import { settings } from './settingsStore';
+import { settings } from '../settingsStore';
 
-import { toasts } from './toastStore';
+import { toasts } from '../toastStore';
 
-import { errorLog } from './errorLogStore';
+import { errorLog } from '../errorLogStore';
 
-import { writeHubJoinPreference, writeSavedCollateralPolicy } from '../utils/onboardingPreferences';
+import { writeHubJoinPreference, writeSavedCollateralPolicy } from '../../utils/onboarding/onboardingPreferences';
 
-import { writeOnboardingCompleteForEntities } from '../utils/onboardingState';
+import { writeOnboardingCompleteForEntities } from '../../utils/onboarding/onboardingState';
 
-import { tabOperations } from './tabStore';
+import { tabOperations } from '../tabStore';
 
-import { isInactiveTabStandby } from '../utils/activeTabLock';
+import { isInactiveTabStandby } from '../../utils/control/activeTabLock';
 
-import { unwrapLiveRuntimeEnv } from '../utils/liveRuntimeEnv';
+import { unwrapLiveRuntimeEnv } from '../../utils/runtime/liveRuntimeEnv';
 
-import { registerDebugSurface } from '../utils/debugSurface';
+import { registerDebugSurface } from '../../utils/runtime/debugSurface';
 
-import { generateLazyEntityIdPreview } from '../utils/lazyEntityId';
+import { generateLazyEntityIdPreview } from '../../utils/identity/lazyEntityId';
 
-import { parseStorageSchemaMismatch } from '../utils/storageSchemaRecovery';
+import { parseStorageSchemaMismatch } from '../../utils/recovery/storageSchemaRecovery';
 
 import {
   deleteVaultDeviceKey,
@@ -63,12 +63,12 @@ import {
   unprotectVaultSecrets,
   type ProtectedVaultSecrets,
   type VaultUnlockDurationMs,
-} from '../security/vaultProtection';
-import { isVaultAuthorityLeaseExpired } from '../security/vault-authority-lease';
+} from '../../security/vaultProtection';
+import { isVaultAuthorityLeaseExpired } from '../../security/vault-authority-lease';
 
-import { lockRuntimeCommandJournal } from './runtimeCommandJournalKeyring';
+import { lockRuntimeCommandJournal } from '../commands/runtimeCommandJournalKeyring';
 
-import { deriveJurisdictionSignerIndex } from '../../../../runtime/jurisdiction/machine/config/signer-derivation';
+import { deriveJurisdictionSignerIndex } from '../../../../../runtime/jurisdiction/machine/config/signer-derivation';
 
 import {
   findRuntimeByIdCaseInsensitive,
@@ -2623,7 +2623,7 @@ export const vaultOperations = {
       xln.registerSignerKey(runtime.seed, address, privateKeyBytes);
 
       // Now create entity (key is registered, signing will work)
-      const { autoCreateEntityForSigner } = await import('../utils/entityFactory');
+      const { autoCreateEntityForSigner } = await import('../../utils/identity/entityFactory');
       const runtimeEntry = get(runtimes).get(runtime.id);
       const runtimeEnv = runtimeEntry?.env ? (unwrapLiveRuntimeEnv(runtimeEntry.env) ?? runtimeEntry.env) : null;
       if (!runtimeEnv) {

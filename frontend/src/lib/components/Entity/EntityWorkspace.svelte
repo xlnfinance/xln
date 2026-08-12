@@ -1,6 +1,6 @@
 <script lang="ts">
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { runtimeCommandLatestReceipt } from '$lib/stores/runtimeCommandBus';
+  import { runtimeCommandLatestReceipt } from '$lib/stores/commands/runtimeCommandBus';
   import {
     runtimeView,
     runtimeViewAccountsPage,

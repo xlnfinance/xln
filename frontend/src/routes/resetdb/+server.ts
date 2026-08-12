@@ -2,7 +2,7 @@ import type { RequestHandler } from './$types';
 import {
   isResetDbConfirmationValid,
   RESET_CONFIRM_COOKIE,
-} from '$lib/utils/resetDbGuard';
+} from '$lib/utils/control/resetDbGuard';
 
 const DEFAULT_RETURN_TO = '/app';
 

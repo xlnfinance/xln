@@ -407,8 +407,8 @@ const CROSS_FILES = {
     'src/lib/components/Entity/move-routes.ts',
     'src/lib/components/Trading/OrderbookPanel.svelte',
     'src/lib/components/Trading/orderbook-relay-url.ts',
-    'src/lib/stores/routePreviewStore.ts',
-    'src/lib/utils/jurisdictionBadge.ts',
+    'src/lib/stores/network/routePreviewStore.ts',
+    'src/lib/utils/identity/jurisdictionBadge.ts',
   ],
   tests: [
     'runtime/__tests__/helpers/cross-j.ts',

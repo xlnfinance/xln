@@ -7,14 +7,14 @@ import {
   onRuntimeControllerStatus,
   runtimeControllerHandle,
 } from '$lib/stores/runtimeControllerStore';
-import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
+import { activeRuntime, vaultOperations } from '$lib/stores/vault/vaultStore';
 import { initializeXLN, suspendClientActivity, switchAppRuntimeAdapter } from '$lib/stores/xlnStore';
 import {
   adoptActiveTabLock,
   ownsActiveTabLock,
   tryInitializeActiveTabLock,
   waitForActiveTabLockLoss,
-} from './activeTabLock';
+} from '../control/activeTabLock';
 import {
   REMOTE_RUNTIME_IMPORT_HASH_PARAM,
   REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
@@ -22,7 +22,7 @@ import {
   remoteRuntimeIdForWsUrl,
   readRemoteRuntimeTokenAudience,
   resolveStoredRemoteRuntimeAuthKey,
-} from './remoteRuntimeImport';
+} from '../onboarding/remoteRuntimeImport';
 import { normalizeWsConnectUrl } from './wsUrl';
 
 export const REMOTE_ACCEPT_PREFIX = 'xln-remote-runtime-accepted:';

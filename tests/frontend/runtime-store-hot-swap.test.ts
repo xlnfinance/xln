@@ -109,7 +109,7 @@ test('embedded adapter binds to selected runtime env before bootstrap commands',
 
 test('selected embedded runtime never falls back to a mismatched bootstrap env', () => {
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const embeddedSource = readFileSync('frontend/src/lib/stores/embeddedRuntimeStore.ts', 'utf8');
+  const embeddedSource = readFileSync('frontend/src/lib/stores/bootstrap/embeddedRuntimeStore.ts', 'utf8');
   const derivedStart = embeddedSource.indexOf('export const xlnEnvironment = derived');
   const setEnvStart = embeddedSource.indexOf('export function setXlnEnvironment');
   const switchStart = storeSource.indexOf('export const switchAppRuntimeAdapter');
@@ -124,15 +124,15 @@ test('selected embedded runtime never falls back to a mismatched bootstrap env',
   const setEnvSource = embeddedSource.slice(setEnvStart);
   const switchSource = storeSource.slice(switchStart, refreshStart);
 
-  expect(storeSource).toContain("import { xlnEnvironment, setXlnEnvironment } from './embeddedRuntimeStore';");
-  expect(storeSource).toContain("export { xlnEnvironment, setXlnEnvironment } from './embeddedRuntimeStore';");
+  expect(storeSource).toContain("import { xlnEnvironment, setXlnEnvironment } from './bootstrap/embeddedRuntimeStore';");
+  expect(storeSource).toContain("export { xlnEnvironment, setXlnEnvironment } from './bootstrap/embeddedRuntimeStore';");
   expect(storeSource).not.toContain('const bootstrapEnvironment = writable');
   expect(storeSource).not.toContain('export const xlnEnvironment = derived');
   expect(storeSource).not.toContain('export function setXlnEnvironment');
   expect(embeddedSource).toContain('const bootstrapEnvironment = writable<RuntimeReplica | null>(null);');
   expect(derivedSource).toContain('return runtimeEntry?.env ?? null;');
   expect(derivedSource).not.toContain('if (runtimeEntry) return runtimeEntry.env ?? null;');
-  expect(embeddedSource).toContain("import { errorLog } from './errorLogStore';");
+  expect(embeddedSource).toContain("import { errorLog } from '../errorLogStore';");
   expect(setEnvSource).toContain('const canPublishActiveEnv = !selectedRuntimeId || (envRuntimeId !== \'\' && envRuntimeId === selectedRuntimeId);');
   expect(setEnvSource).toContain('RUNTIME_STORE_ENV_OVERWRITE_REFUSED');
   expect(setEnvSource).toContain("errorLog.log(message, 'Runtime RuntimeReplica'");
@@ -194,7 +194,7 @@ test('remote adapter resolver restores active auth from the remote runtime regis
 });
 
 test('direct remote runtime URL reuses saved capability before showing paste prompt', () => {
-  const source = readFileSync('frontend/src/lib/utils/runtimeConnection.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
   const readStart = source.indexOf('export function readRemoteRuntimeRequestFromUrl');
   const payloadStart = source.indexOf('export function runtimeImportPayloadFromParams', readStart);
   expect(readStart).toBeGreaterThan(0);
@@ -222,7 +222,7 @@ test('remote projection never materializes fake RuntimeReplica snapshots', () =>
 });
 
 test('remote runtime bulk import validates with bounded parallelism', () => {
-  const source = readFileSync('frontend/src/lib/utils/remoteRuntimeImportFlow.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow.ts', 'utf8');
   const appLayoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
   expect(existsSync('frontend/src/lib/components/Runtime/RemoteRuntimeManager.svelte')).toBe(true);
   expect(existsSync('frontend/src/routes/radapter/manage/+page.svelte')).toBe(false);
@@ -328,8 +328,8 @@ test('remote runtime refresh ignores unchanged ticks and debounces projection re
 
 test('frontend remote runtime operations use short fail-fast budgets', () => {
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const runtimeConnectionSource = readFileSync('frontend/src/lib/utils/runtimeConnection.ts', 'utf8');
-  const importValidationSource = readFileSync('frontend/src/lib/utils/remoteRuntimeValidation.ts', 'utf8');
+  const runtimeConnectionSource = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
+  const importValidationSource = readFileSync('frontend/src/lib/utils/onboarding/remoteRuntimeValidation.ts', 'utf8');
 
   expect(xlnStoreSource).toContain('const FRONTEND_REMOTE_REQUEST_TIMEOUT_MS = 5_000');
   expect(xlnStoreSource).toContain('const FRONTEND_REMOTE_RECONNECT_MAX_MS = 2_000');
@@ -366,13 +366,13 @@ test('remote RuntimeView refresh stays projection-native without fake RuntimeRep
 
 test('localhost debug env surfaces expose RuntimeView with matching live runtime infrastructure', () => {
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const embeddedStoreSource = readFileSync('frontend/src/lib/stores/embeddedRuntimeStore.ts', 'utf8');
-  const runtimeLoaderSource = readFileSync('frontend/src/lib/stores/xlnRuntimeLoader.ts', 'utf8');
-  const debugSurfaceSource = readFileSync('frontend/src/lib/utils/debugSurface.ts', 'utf8');
+  const embeddedStoreSource = readFileSync('frontend/src/lib/stores/bootstrap/embeddedRuntimeStore.ts', 'utf8');
+  const runtimeLoaderSource = readFileSync('frontend/src/lib/stores/bootstrap/xlnRuntimeLoader.ts', 'utf8');
+  const debugSurfaceSource = readFileSync('frontend/src/lib/utils/runtime/debugSurface.ts', 'utf8');
   const viewSource = readFileSync('frontend/src/lib/view/View.svelte', 'utf8');
   const appTypes = readFileSync('frontend/src/app.d.ts', 'utf8');
 
-  expect(xlnStoreSource).toContain("import { xlnEnvironment, setXlnEnvironment } from './embeddedRuntimeStore';");
+  expect(xlnStoreSource).toContain("import { xlnEnvironment, setXlnEnvironment } from './bootstrap/embeddedRuntimeStore';");
   expect(xlnStoreSource).not.toContain("registerDebugSurface('env', () => localDebugEnv, { legacyName: '__xln_env' });");
   expect(embeddedStoreSource).toContain('const viewEnv = createRuntimeViewEnv(runtimeEnv);');
   expect(embeddedStoreSource).toContain("registerDebugSurface('env', () => localDebugEnv);");
@@ -430,7 +430,7 @@ test('localhost debug env surfaces expose RuntimeView with matching live runtime
   expect(viewSource).toContain('refreshSelectedRuntimeView,');
   expect(viewSource).toContain('runtimeViewActiveEntityId,');
   expect(viewSource).toContain("from '$lib/stores/runtimeViewStore'");
-  expect(viewSource).toContain("from '$lib/utils/debugSurface'");
+  expect(viewSource).toContain("from '$lib/utils/runtime/debugSurface'");
   expect(viewSource).toContain("registerDebugSurface('view', () => get(runtimeView)");
   expect(viewSource).not.toContain("legacyName: '__xlnRuntimeView'");
 });
@@ -572,7 +572,7 @@ test('authenticated remote admin authority survives transport reconnect while co
 });
 
 test('vault restore rebinds RuntimeController to the restored embedded runtime', () => {
-  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
   const restoreStart = source.indexOf('const resolvedActive = findRuntimeByIdCaseInsensitive');
   const initializedStart = source.indexOf('initialized = true;', restoreStart);
   expect(restoreStart).toBeGreaterThan(0);
@@ -590,7 +590,7 @@ test('vault restore rebinds RuntimeController to the restored embedded runtime',
 });
 
 test('vault explicitly removes the persistence fence before resuming a drained runtime', () => {
-  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
   const helperStart = source.indexOf('function ensureRuntimeLoopRunning');
   const helperEnd = source.indexOf('async function buildOrRestoreRuntimeEnv', helperStart);
   expect(helperStart).toBeGreaterThan(0);
@@ -641,7 +641,7 @@ test('app embedded boot restores vault runtimes before default browser runtime i
 });
 
 test('vault bootstrap commands submit explicit runtime env through command bus helper', () => {
-  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
   const enqueueStart = source.indexOf('async function enqueueAndAwait(');
   const helperEnd = source.indexOf('async function ensureRuntimePipelineAlive', enqueueStart);
   expect(enqueueStart).toBeGreaterThan(0);
@@ -679,7 +679,7 @@ test('app remote runtime prompt activates through hot boot instead of reload', (
 
 test('embedded remote capability never bypasses explicit runtime consent', () => {
   const appLayout = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
-  const runtimeConnection = readFileSync('frontend/src/lib/utils/runtimeConnection.ts', 'utf8');
+  const runtimeConnection = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
   expect(appLayout).toContain('remoteRequest && remoteRuntimeRequiresConsent(remoteRequest)');
   expect(runtimeConnection).toContain('export function remoteRuntimeRequiresConsent');
 
@@ -696,7 +696,7 @@ test('embedded remote capability never bypasses explicit runtime consent', () =>
 });
 
 test('accepted remote runtime links persist into the shared runtime registry', () => {
-  const source = readFileSync('frontend/src/lib/utils/runtimeConnection.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
   const persistStart = source.indexOf('export function persistRemoteRuntimeRequest');
   const acceptStart = source.indexOf('export function hasAcceptedRemoteRuntime');
   expect(persistStart).toBeGreaterThan(0);
@@ -835,7 +835,7 @@ test('xlnStore diagnostics avoid raw warn/error console output', () => {
 });
 
 test('local runtime creation marks the target before bootstrap and switches controller after persistence', () => {
-  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
   const createStart = source.indexOf('async createRuntime(');
   const deleteStart = source.indexOf('async deleteRuntime(', createStart);
   expect(createStart).toBeGreaterThan(0);
@@ -853,7 +853,7 @@ test('local runtime creation marks the target before bootstrap and switches cont
 });
 
 test('vault runtime selection delegates adapter lifecycle to RuntimeController path', () => {
-  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
   const selectStart = source.indexOf('async selectRuntime(runtimeId: string, lease?: RuntimeSelectionLease)');
   const addSignerStart = source.indexOf('// Add signer to active runtime', selectStart);
   expect(selectStart).toBeGreaterThan(0);
@@ -871,7 +871,7 @@ test('vault runtime selection delegates adapter lifecycle to RuntimeController p
 });
 
 test('vault initialization preserves active shared runtime selection', () => {
-  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
   const initStart = source.indexOf('async initialize()');
   const clearStart = source.indexOf('// Clear all runtimes', initStart);
   expect(initStart).toBeGreaterThan(0);
@@ -903,7 +903,7 @@ test('frontend surfaces do not bypass RuntimeController when switching active ru
 });
 
 test('active Runtime ownership uses Web Locks and releases only after quiesce', () => {
-  const lockSource = readFileSync('frontend/src/lib/utils/activeTabLock.ts', 'utf8');
+  const lockSource = readFileSync('frontend/src/lib/utils/control/activeTabLock.ts', 'utf8');
   const layoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
   const loseStart = lockSource.indexOf('const loseWebLockTo');
   const loseEnd = lockSource.indexOf('async function handleHardResetRequest', loseStart);
@@ -918,8 +918,8 @@ test('active Runtime ownership uses Web Locks and releases only after quiesce', 
 });
 
 test('projection routes never evict or duplicate an active embedded Runtime', () => {
-  const lockSource = readFileSync('frontend/src/lib/utils/activeTabLock.ts', 'utf8');
-  const connectionSource = readFileSync('frontend/src/lib/utils/runtimeConnection.ts', 'utf8');
+  const lockSource = readFileSync('frontend/src/lib/utils/control/activeTabLock.ts', 'utf8');
+  const connectionSource = readFileSync('frontend/src/lib/utils/runtime/runtimeConnection.ts', 'utf8');
   const ownershipStart = connectionSource.indexOf('const ensureProjectionEmbeddedRuntimeOwnership');
   const bootstrapStart = connectionSource.indexOf("if (!hasStoredRemoteRuntimePreference())");
   const bootstrapSource = connectionSource.slice(bootstrapStart);

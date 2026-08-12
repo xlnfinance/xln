@@ -6,7 +6,7 @@ import {
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import type { EntityReplica } from '$lib/types/ui';
 import { amountToUsd } from '$lib/utils/assetPricing';
-import { getEntityDisplayName } from '$lib/utils/entityNaming';
+import { getEntityDisplayName } from '$lib/utils/identity/entityNaming';
 import { requireTokenDecimals } from './../token-metadata';
 
 type GossipSource = Parameters<typeof getEntityDisplayName>[1]['source'];

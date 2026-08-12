@@ -14,12 +14,12 @@
     DEFAULT_VAULT_UNLOCK_DURATION_MS,
     type RuntimeRecoveryCandidate,
     type RuntimeRecoveryDiscoveryFailure,
-  } from '$lib/stores/vaultStore';
+  } from '$lib/stores/vault/vaultStore';
   import type { VaultUnlockDurationMs } from '$lib/security/vaultProtection';
-  import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vaultUiStore';
-  import { resetEverything } from '$lib/utils/resetEverything';
-  import { writeRuntimeRecoveryDiscoveryStatus } from '$lib/utils/recoveryDiscoveryStatus';
-  import { buildRemoteRuntimeRecoveryPeerSources } from '$lib/utils/remoteRuntimeValidation';
+  import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vault/vaultUiStore';
+  import { resetEverything } from '$lib/utils/control/resetEverything';
+  import { writeRuntimeRecoveryDiscoveryStatus } from '$lib/utils/recovery/recoveryDiscoveryStatus';
+  import { buildRemoteRuntimeRecoveryPeerSources } from '$lib/utils/onboarding/remoteRuntimeValidation';
   import {
     BRAINVAULT_V1,
     BRAINVAULT_V1_SPEC_ID,
@@ -40,7 +40,7 @@
     runtimeControllerHandle,
   } from '$lib/stores/runtimeControllerStore';
   import type { RuntimeAdapterBrainVaultResult } from '@xln/runtime/api/runtime-adapter/types';
-  import { generateLazyEntityIdPreview } from '$lib/utils/lazyEntityId';
+  import { generateLazyEntityIdPreview } from '$lib/utils/identity/lazyEntityId';
   import {
     BRAINVAULT_WORKER_CAP_STORAGE_KEY,
     computeBrainVaultWorkerCap,

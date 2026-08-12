@@ -8,7 +8,7 @@
 import { writable, get } from 'svelte/store';
 import { ethers } from 'ethers';
 import { compareStableText } from '$lib/utils/stableSort';
-import { errorLog } from './errorLogStore';
+import { errorLog } from '../errorLogStore';
 
 export interface JMachineConfig {
   name: string;

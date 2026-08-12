@@ -1,5 +1,5 @@
 import type { NavigationSelection } from '$lib/stores/appStateStore';
-import type { Runtime as VaultRuntime } from '$lib/stores/vaultStore';
+import type { Runtime as VaultRuntime } from '$lib/stores/vault/vaultStore';
 
 export type NavigationItem = {
   id: string;

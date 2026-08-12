@@ -9,7 +9,7 @@
   import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { ensureProjectionRuntimeConnected } from '$lib/utils/runtimeConnection';
+  import { ensureProjectionRuntimeConnected } from '$lib/utils/runtime/runtimeConnection';
   import {
     isRelayTimelineError,
     isRelayTimelineWarning,

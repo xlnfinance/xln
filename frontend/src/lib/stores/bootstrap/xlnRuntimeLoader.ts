@@ -1,8 +1,8 @@
 import { writable } from 'svelte/store';
 import type { XLNModule } from '@xln/runtime/api/public/runtime-module';
 import { isXLNModuleLoaded } from '@xln/runtime/api/public/runtime-module-guard';
-import { registerDebugSurface } from '$lib/utils/debugSurface';
-import '$lib/utils/wireDebug';
+import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
+import '$lib/utils/runtime/wireDebug';
 
 let XLN: XLNModule | null = null;
 let xlnLoadPromise: Promise<XLNModule> | null = null;

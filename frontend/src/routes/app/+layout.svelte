@@ -23,31 +23,31 @@
   import { settingsOperations } from '$lib/stores/settingsStore';
   import { tabOperations } from '$lib/stores/tabStore';
   import { timeOperations } from '$lib/stores/timeStore';
-  import { vaultOperations } from '$lib/stores/vaultStore';
+  import { vaultOperations } from '$lib/stores/vault/vaultStore';
   import { resolveDeployVersionAction } from '$lib/utils/deployVersionPolicy';
-  import { resetEverything } from '$lib/utils/resetEverything';
-  import { parseStorageSchemaMismatch } from '$lib/utils/storageSchemaRecovery';
+  import { resetEverything } from '$lib/utils/control/resetEverything';
+  import { parseStorageSchemaMismatch } from '$lib/utils/recovery/storageSchemaRecovery';
   import {
     adoptActiveTabLock,
     clearInactiveTabStandby,
     initializeActiveTabLock,
     isInactiveTabStandby,
     waitForActiveTabLockLoss
-  } from '$lib/utils/activeTabLock';
+  } from '$lib/utils/control/activeTabLock';
   import {
     describeRemoteRuntimeImportError,
     parseRemoteRuntimeImportPayload,
-  } from '$lib/utils/remoteRuntimeImport';
+  } from '$lib/utils/onboarding/remoteRuntimeImport';
   import {
     fetchRemoteRuntimeImportSource,
     importRemoteRuntimeEntries,
     persistActiveRemoteRuntimeImport,
-  } from '$lib/utils/remoteRuntimeImportFlow';
+  } from '$lib/utils/onboarding/remoteRuntimeImportFlow';
   import {
     consumeLocalRuntimePairing,
     readLocalRuntimePairingToken,
     stripLocalRuntimePairingToken,
-  } from '$lib/utils/localRuntimePairing';
+  } from '$lib/utils/runtime/localRuntimePairing';
   import {
     persistRemoteRuntimeRequest,
     readRemoteRuntimeImportPayloadFromHash,
@@ -57,7 +57,7 @@
     remoteRuntimeRequiresConsent,
     stripRemoteRuntimeParamsFromHistory,
     type RemoteRuntimeRequest,
-  } from '$lib/utils/runtimeConnection';
+  } from '$lib/utils/runtime/runtimeConnection';
 
   let { children } = $props();
 

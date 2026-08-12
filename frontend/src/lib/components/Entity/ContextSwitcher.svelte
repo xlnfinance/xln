@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import { allRuntimes, activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
+  import { allRuntimes, activeRuntime, vaultOperations } from '$lib/stores/vault/vaultStore';
   import {
     activeRuntimeId as activeStoreRuntimeId,
     coordinateRuntimeSelection,
@@ -12,12 +12,12 @@
   } from '$lib/stores/runtimeStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore';
-  import { resetEverything } from '$lib/utils/resetEverything';
+  import { resetEverything } from '$lib/utils/control/resetEverything';
   import { refreshCurrentRuntimeProjection, xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
   import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/public/runtime-module';
   import type { Tab } from '$lib/types/ui';
-  import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
-  import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';
+  import { entityAvatar, preferredAvatar } from '$lib/utils/identity/avatar';
+  import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '$lib/utils/identity/jurisdictionBadge';
   import { compareStableText } from '$lib/utils/stableSort';
 
   export let tab: Tab;

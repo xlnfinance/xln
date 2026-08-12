@@ -1,7 +1,7 @@
 import {
   parseRemoteRuntimeImportSourcePayload,
   type RemoteRuntimeImportAccess,
-} from '../../utils/remoteRuntimeImport';
+} from '../../utils/onboarding/remoteRuntimeImport';
 
 export type FactorInfo = {
   factor: number;

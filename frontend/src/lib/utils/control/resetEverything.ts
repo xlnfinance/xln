@@ -1,5 +1,5 @@
 import { broadcastHardResetRequest } from './activeTabLock';
-import { shutdownRuntimeResumeListener, vaultOperations } from '../stores/vaultStore';
+import { shutdownRuntimeResumeListener, vaultOperations } from '../../stores/vault/vaultStore';
 import { RESET_CONFIRM_COOKIE } from './resetDbGuard';
 
 let activeResetPromise: Promise<void> | null = null;

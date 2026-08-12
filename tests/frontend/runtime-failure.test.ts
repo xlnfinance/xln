@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   classifyRuntimeFailure,
   runtimeFailureMessage,
-} from '../../frontend/src/lib/utils/runtimeFailure';
+} from '../../frontend/src/lib/utils/runtime/runtimeFailure';
 import { RuntimeAdapterError } from '../../runtime/api/runtime-adapter/errors';
 
 test('runtime failure classifier fail-closes unknown errors as fatal', () => {

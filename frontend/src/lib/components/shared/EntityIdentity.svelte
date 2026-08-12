@@ -1,6 +1,6 @@
 <script lang="ts">
   import { xlnFunctions } from '$lib/stores/xlnStore';
-  import { entityAvatar } from '$lib/utils/avatar';
+  import { entityAvatar } from '$lib/utils/identity/avatar';
 
   export let entityId: string;
   export let name: string = '';

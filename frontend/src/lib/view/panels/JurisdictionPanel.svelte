@@ -9,7 +9,7 @@
   import { get } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
   import type { BrowserVMTokenInfo, RuntimeReplica, EnvSnapshot, JReplica } from '@xln/runtime/api/public/runtime-module';
-  import { activeRuntime, allRuntimes } from '$lib/stores/vaultStore';
+  import { activeRuntime, allRuntimes } from '$lib/stores/vault/vaultStore';
   import { settings } from '$lib/stores/settingsStore';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
   import { loadJurisdictionTokenRegistry } from './jurisdiction-token-registry';

@@ -8,7 +8,7 @@ import {
   normalizeImportedUiSettings,
   normalizeUiStyle,
 } from '../utils/ui-style';
-import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
+import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/runtime/wsUrl';
 import { errorLog } from './errorLogStore';
 import {
   DEFAULT_XLN_MASCOT_DOCK,

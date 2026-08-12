@@ -1,4 +1,4 @@
-import { normalizeWsConnectUrl } from './wsUrl';
+import { normalizeWsConnectUrl } from '../runtime/wsUrl';
 import { REMOTE_RUNTIME } from '@xln/runtime/config/constants';
 
 export const REMOTE_RUNTIME_IMPORT_HASH_PARAM = REMOTE_RUNTIME.IMPORT_HASH_PARAM;

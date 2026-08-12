@@ -4,7 +4,7 @@ import {
   isResetDbConfirmationValid,
   readResetDbCookie,
   RESET_CONFIRM_COOKIE,
-} from '../../frontend/src/lib/utils/resetDbGuard';
+} from '../../frontend/src/lib/utils/control/resetDbGuard';
 
 const nonce = '0123456789abcdef0123456789abcdef';
 

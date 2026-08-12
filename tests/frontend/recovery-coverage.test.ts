@@ -5,14 +5,14 @@ import {
   buildRecoveryTowerStatuses,
   buildRuntimeRecoveryCoverage,
   formatRecoveryBytes,
-} from '../../frontend/src/lib/utils/recoveryCoverage';
+} from '../../frontend/src/lib/utils/recovery/recoveryCoverage';
 import {
   clearRuntimeRecoveryDiscoveryStatus,
   formatRuntimeRecoveryDiscoveryFailure,
   readRuntimeRecoveryDiscoveryStatus,
   writeRuntimeRecoveryDiscoveryStatus,
-} from '../../frontend/src/lib/utils/recoveryDiscoveryStatus';
-import type { Runtime } from '../../frontend/src/lib/stores/vaultStore';
+} from '../../frontend/src/lib/utils/recovery/recoveryDiscoveryStatus';
+import type { Runtime } from '../../frontend/src/lib/stores/vault/vaultStore';
 
 const runtimeFixture = (recovery: Runtime['recovery'] = {}): Runtime => ({
   id: '0x1111111111111111111111111111111111111111',

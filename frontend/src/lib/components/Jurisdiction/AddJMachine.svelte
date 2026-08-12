@@ -14,7 +14,7 @@
     deriveJMachineCreatedAt,
     parseJMachineConfigJson,
     type JMachineConfig,
-  } from '$lib/stores/jmachineStore';
+  } from '$lib/stores/network/jmachineStore';
   import { POPULAR_NETWORKS, isBrowserVMChainId, BROWSERVM_CHAIN_START, type NetworkConfig } from '$lib/config/networks';
 
   type FieldDraft = {

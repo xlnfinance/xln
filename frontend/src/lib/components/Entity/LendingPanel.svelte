@@ -8,7 +8,7 @@
     getRuntimeControllerConfig,
     isRuntimeControllerConfigCurrent,
   } from '../../stores/runtimeControllerStore';
-  import { runtimeHttpOriginFromWsUrl } from '$lib/utils/wsUrl';
+  import { runtimeHttpOriginFromWsUrl } from '$lib/utils/runtime/wsUrl';
   import { toasts } from '../../stores/toastStore';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';

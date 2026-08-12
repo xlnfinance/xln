@@ -16,11 +16,11 @@ import {
   redactVaultRuntimeForPersistence,
   type ProtectedVaultSecrets,
   type VaultUnlockDurationMs,
-} from '../security/vaultProtection';
-import { unwrapLiveRuntimeEnv } from '../utils/liveRuntimeEnv';
-import { installRuntimeCommandJournalKeys } from './runtimeCommandJournalKeyring';
-import { runtimes } from './runtimeStore';
-import { getXLN } from './xlnStore';
+} from '../../security/vaultProtection';
+import { unwrapLiveRuntimeEnv } from '../../utils/runtime/liveRuntimeEnv';
+import { installRuntimeCommandJournalKeys } from '../commands/runtimeCommandJournalKeyring';
+import { runtimes } from '../runtimeStore';
+import { getXLN } from '../xlnStore';
 
 const recoveryTowerInfoCache = new Map<string, { fetchedAt: number; info: TowerServerInfo }>();
 

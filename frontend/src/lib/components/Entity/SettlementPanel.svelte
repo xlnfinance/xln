@@ -1,11 +1,11 @@
 <script lang="ts">
   import { getXLN, submitEntityInputs, xlnFunctions } from '../../stores/xlnStore';
-  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+  import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
   import type { EntityReplica, EntityTx, AccountReplica, EntityState } from '$lib/types/ui';
   import type { RuntimeReplica, EnvSnapshot, Profile as GossipProfile } from '@xln/runtime/api/public/runtime-module';
   import { errorLog } from '../../stores/errorLogStore';
   import { toasts } from '../../stores/toastStore';
-  import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
+  import { entityAvatar as resolveEntityAvatar } from '$lib/utils/identity/avatar';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
   import ActivityHistoryPanel from './ActivityHistoryPanel.svelte';

@@ -7,11 +7,11 @@
   import { errorLog } from '../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import { xlnFunctions } from '../../stores/xlnStore';
-  import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
+  import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboarding/onboardingPreferences';
   import {
     normalizeEntityId,
     requireSignerIdForEntity,
-  } from '$lib/utils/entityReplica';
+  } from '$lib/utils/identity/entityReplica';
   import {
     emptyHubDiscoveryProjection,
     buildHubOpenAccountRuntimeInput,

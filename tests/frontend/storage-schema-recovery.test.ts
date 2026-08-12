@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { parseStorageSchemaMismatch } from '../../frontend/src/lib/utils/storageSchemaRecovery';
+import { parseStorageSchemaMismatch } from '../../frontend/src/lib/utils/recovery/storageSchemaRecovery';
 
 describe('storage schema recovery UX', () => {
   test('recognizes a wrapped durable storage schema mismatch', () => {
@@ -18,7 +18,7 @@ describe('storage schema recovery UX', () => {
   });
 
   test('offers authenticated recovery before an explicit destructive reset', () => {
-    const vault = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+    const vault = readFileSync('frontend/src/lib/stores/vault/vaultStore.ts', 'utf8');
     const layout = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
     const recoveryStart = vault.indexOf('async recoverSchemaMismatchedRuntimesFromConfiguredBackups()');
     const recoveryEnd = vault.indexOf('\n  syncRuntime(', recoveryStart);

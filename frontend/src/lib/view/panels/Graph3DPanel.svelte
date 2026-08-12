@@ -9,7 +9,7 @@ import { getXLN, submitRuntimeInput, entityPositions, type RelativeEntityPositio
 import { requireTokenDecimals } from "$lib/components/Entity/token-metadata";
 import Graph3DViewport from "../components/Graph3DViewport.svelte";
 import { compareStableText } from "$lib/utils/stableSort";
-import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from "$lib/utils/liveRuntimeEnv";
+import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from "$lib/utils/runtime/liveRuntimeEnv";
   import { activeRuntimeId, runtimeOperations, runtimes, type Runtime } from "$lib/stores/runtimeStore";
 import { runtimeControllerHandle } from "$lib/stores/runtimeControllerStore";
 import { runtimeView } from "$lib/stores/runtimeViewStore";
@@ -17,8 +17,8 @@ import { runtimeGraphLiveFrameCache, watchRuntimeGraphFrameCache } from "$lib/ne
 import { runtimeGraphCanonicity, runtimeGraphControlOperations, runtimeGraphScope } from "$lib/stores/runtimeGraphControlStore";
 import { beginGraphGesture, emptyGraphGestureState, endGraphGesture, type GraphGestureOutcome } from "$lib/network3d/graphSelectionGesture";
 import { ImmersiveWalletSurface } from "$lib/network3d/ImmersiveWalletSurface";
-import { registerDebugSurface } from "$lib/utils/debugSurface";
-import { networkMachineRuntime } from "$lib/stores/networkMachineRuntimeStore";
+import { registerDebugSurface } from "$lib/utils/runtime/debugSurface";
+import { networkMachineRuntime } from "$lib/stores/network/networkMachineRuntimeStore";
 import { mergeRuntimeGraphProjections, requireActionableGraphNodeRuntimeId, type MergedRuntimeGraph, type RuntimeGraphCanonicity, type RuntimeGraphProjection } from "$lib/network3d/runtimeGraphProjection";
 import { materializeRuntimeGraphReplicas } from "$lib/network3d/runtimeGraphRender";
 import { connectedRuntimeGraphEntityIds, resolveRuntimeGraphLayout, type RuntimeGraphLayoutCache } from "$lib/network3d/runtimeGraphLayout";

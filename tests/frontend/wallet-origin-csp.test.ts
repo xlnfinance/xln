@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { runtimeHttpOriginFromWsUrl } from '../../frontend/src/lib/utils/wsUrl';
+import { runtimeHttpOriginFromWsUrl } from '../../frontend/src/lib/utils/runtime/wsUrl';
 import { readFileSync } from 'node:fs';
 
 const source = (path: string): string => readFileSync(path, 'utf8');

@@ -20,7 +20,7 @@
     vaultOperations,
     type RecoveryTowerConfig,
     type RecoveryTowerSetupMode,
-  } from '$lib/stores/vaultStore';
+  } from '$lib/stores/vault/vaultStore';
   import {
     getManualRecoveryTowers,
     isOfficialRecoveryTower,
@@ -29,16 +29,16 @@
     normalizeTowerMode,
     resolveOfficialRecoveryTowerUrl,
     type RecoveryServiceMode,
-  } from '$lib/utils/recoverySettings';
+  } from '$lib/utils/recovery/recoverySettings';
   import {
     buildRecoveryTowerStatuses,
     buildRuntimeRecoveryCoverage,
-  } from '$lib/utils/recoveryCoverage';
+  } from '$lib/utils/recovery/recoveryCoverage';
   import {
     readRuntimeRecoveryDiscoveryStatus,
     type RuntimeRecoveryDiscoveryStatus,
-  } from '$lib/utils/recoveryDiscoveryStatus';
-  import { buildRemoteRuntimeRecoveryPeerSources } from '$lib/utils/remoteRuntimeValidation';
+  } from '$lib/utils/recovery/recoveryDiscoveryStatus';
+  import { buildRemoteRuntimeRecoveryPeerSources } from '$lib/utils/onboarding/remoteRuntimeValidation';
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
   import type { JMachineCreateDetail } from '$lib/components/Jurisdiction/import-jmachine-runtime';
   import PushWakePanel from '$lib/components/Settings/PushWakePanel.svelte';

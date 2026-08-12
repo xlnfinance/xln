@@ -11,7 +11,7 @@
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import { runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
   import { refreshRuntimeView } from '$lib/stores/runtimeViewStore';
-  import { ensureProjectionRuntimeConnected } from '$lib/utils/runtimeConnection';
+  import { ensureProjectionRuntimeConnected } from '$lib/utils/runtime/runtimeConnection';
 
   type ExplorerEntity = {
     entityId: string;

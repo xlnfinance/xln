@@ -1,10 +1,10 @@
 import { derived, get, writable } from 'svelte/store';
 import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
-import { activeRuntimeId, runtimes } from './runtimeStore';
-import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
-import { registerDebugSurface } from '$lib/utils/debugSurface';
-import { errorLog } from './errorLogStore';
-import { hasConnectedJurisdictionAdapter } from './vault-helpers';
+import { activeRuntimeId, runtimes } from '../runtimeStore';
+import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
+import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
+import { errorLog } from '../errorLogStore';
+import { hasConnectedJurisdictionAdapter } from '../vault/vault-helpers';
 import { getXLN } from './xlnRuntimeLoader';
 
 const bootstrapEnvironment = writable<RuntimeReplica | null>(null);

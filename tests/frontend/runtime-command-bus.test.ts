@@ -11,14 +11,14 @@ import {
   runtimeCommandRetryOptions,
   submitRuntimeCommand,
   type CommandReceipt,
-} from '../../frontend/src/lib/stores/runtimeCommandBus';
+} from '../../frontend/src/lib/stores/commands/runtimeCommandBus';
 import { RuntimeAdapterError } from '../../runtime/api/runtime-adapter/errors';
-import { listUnresolvedRemoteRuntimeCommandIntents } from '../../frontend/src/lib/stores/runtimeCommandIntent';
+import { listUnresolvedRemoteRuntimeCommandIntents } from '../../frontend/src/lib/stores/commands/runtimeCommandIntent';
 import {
   findCommittedEmbeddedRuntimeInputHeight,
   findPersistedEmbeddedRuntimeInputHeight,
   runtimeFrameContainsSubmittedInput,
-} from '../../frontend/src/lib/stores/embeddedRuntimeCommandCompletion';
+} from '../../frontend/src/lib/stores/commands/embeddedRuntimeCommandCompletion';
 
 const SIGNED_SERVER_FINGERPRINT = '0x01fe56d4322ab531393851ee54e1f751c8358fc2fc3730a432963661e33f50d3';
 
@@ -40,7 +40,7 @@ const readStore = <T>(store: { subscribe: (run: (value: T) => void) => () => voi
 };
 
 test('runtime command bus records pending accepted observed committed error receipts deterministically', () => {
-  const source = readFileSync('frontend/src/lib/stores/runtimeCommandBus.ts', 'utf8');
+  const source = readFileSync('frontend/src/lib/stores/commands/runtimeCommandBus.ts', 'utf8');
 
   expect(source).toContain("export type RuntimeCommandStatus = 'pending' | 'accepted' | 'observed' | 'committed' | 'error'");
   expect(source).toContain('receiptId: `runtime-command-${++receiptSequence}`');
@@ -62,7 +62,7 @@ test('runtime command bus records pending accepted observed committed error rece
 
 test('browser E2E mutations use the live runtime command bus instead of a detached view RuntimeReplica', () => {
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const embeddedSource = readFileSync('frontend/src/lib/stores/embeddedRuntimeStore.ts', 'utf8');
+  const embeddedSource = readFileSync('frontend/src/lib/stores/bootstrap/embeddedRuntimeStore.ts', 'utf8');
   const helperSource = readFileSync('tests/utils/e2e-runtime-input.ts', 'utf8');
   const enqueueStart = helperSource.indexOf('export async function enqueueRuntimeInput');
   const enqueueEnd = helperSource.indexOf('export async function enqueueEntityTxs', enqueueStart);
@@ -377,11 +377,11 @@ test('capability-only one-shot response loss is not offered as a retryable payme
 });
 
 test('remote command journal persists protected replayable intents outside localStorage', () => {
-  const intentSource = readFileSync('frontend/src/lib/stores/runtimeCommandIntent.ts', 'utf8');
-  const codecSource = readFileSync('frontend/src/lib/stores/runtimeCommandIntentCodec.ts', 'utf8');
-  const indexedDbSource = readFileSync('frontend/src/lib/stores/runtimeCommandJournalIndexedDb.ts', 'utf8');
-  const keyringSource = readFileSync('frontend/src/lib/stores/runtimeCommandJournalKeyring.ts', 'utf8');
-  const storageSource = readFileSync('frontend/src/lib/stores/runtimeCommandJournalStorage.ts', 'utf8');
+  const intentSource = readFileSync('frontend/src/lib/stores/commands/runtimeCommandIntent.ts', 'utf8');
+  const codecSource = readFileSync('frontend/src/lib/stores/commands/runtimeCommandIntentCodec.ts', 'utf8');
+  const indexedDbSource = readFileSync('frontend/src/lib/stores/commands/runtimeCommandJournalIndexedDb.ts', 'utf8');
+  const keyringSource = readFileSync('frontend/src/lib/stores/commands/runtimeCommandJournalKeyring.ts', 'utf8');
+  const storageSource = readFileSync('frontend/src/lib/stores/commands/runtimeCommandJournalStorage.ts', 'utf8');
   const routeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const journalSource = `${intentSource}\n${codecSource}\n${indexedDbSource}\n${keyringSource}\n${storageSource}`;
 

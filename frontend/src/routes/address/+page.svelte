@@ -5,7 +5,7 @@
   import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeAdapterHeight, runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
-  import { ensureProjectionRuntimeConnected } from '$lib/utils/runtimeConnection';
+  import { ensureProjectionRuntimeConnected } from '$lib/utils/runtime/runtimeConnection';
 
   type AddressEntity = {
     entityId: string;

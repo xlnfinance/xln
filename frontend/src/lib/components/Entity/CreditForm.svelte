@@ -3,9 +3,9 @@
   import type { RuntimeReplica, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
   import { xlnFunctions, error } from '../../stores/xlnStore';
   import { errorLog } from '../../stores/errorLogStore';
-  import { recordRuntimeIngressReceipt } from '../../stores/runtimeCommandBus';
+  import { recordRuntimeIngressReceipt } from '../../stores/commands/runtimeCommandBus';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
-  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+  import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
   import { requireTokenDecimals } from './token-metadata';

@@ -8,7 +8,7 @@ const read = (path: string) => readFileSync(join(repoRoot, path), 'utf8');
 
 describe('vault runtime creation lock', () => {
   test('default jurisdiction import names preserve configured labels', () => {
-    const source = read('frontend/src/lib/stores/vault-helpers.ts');
+    const source = read('frontend/src/lib/stores/vault/vault-helpers.ts');
     const functionStart = source.indexOf('const resolveDefaultJurisdictionImportName = (');
     expect(functionStart).toBeGreaterThan(0);
     const functionSource = source.slice(functionStart, source.indexOf('\n};', functionStart) + 3);
@@ -21,7 +21,7 @@ describe('vault runtime creation lock', () => {
   });
 
   test('primary jurisdiction selection does not depend on arrakis key', () => {
-    const source = read('frontend/src/lib/stores/vault-helpers.ts');
+    const source = read('frontend/src/lib/stores/vault/vault-helpers.ts');
     const functionStart = source.indexOf('const resolveJurisdictionConfig = (');
     const functionEnd = source.indexOf('const resolveDefaultJurisdictionImportName = (', functionStart);
     expect(functionStart).toBeGreaterThan(0);
@@ -37,8 +37,8 @@ describe('vault runtime creation lock', () => {
   });
 
   test('createRuntime serializes concurrent creation for the same runtime id', () => {
-    const source = read('frontend/src/lib/stores/vaultStore.ts');
-    const recoverySource = read('frontend/src/lib/stores/vault-recovery.ts');
+    const source = read('frontend/src/lib/stores/vault/vaultStore.ts');
+    const recoverySource = read('frontend/src/lib/stores/vault/vault-recovery.ts');
     const functionStart = source.indexOf('async createRuntime(name: string, seed: string');
     expect(functionStart).toBeGreaterThan(0);
     const functionSource = source.slice(functionStart, source.indexOf('\n  // Select runtime', functionStart));
@@ -54,7 +54,7 @@ describe('vault runtime creation lock', () => {
   });
 
   test('fresh runtime starts its processor before asynchronous jurisdiction provisioning', () => {
-    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const source = read('frontend/src/lib/stores/vault/vaultStore.ts');
     const functionStart = source.indexOf('async createRuntime(name: string, seed: string');
     const functionSource = source.slice(functionStart, source.indexOf('\n  // Select runtime', functionStart));
     const createEnv = functionSource.indexOf('newEnv = xln.createEmptyEnv(seed);');
@@ -73,7 +73,7 @@ describe('vault runtime creation lock', () => {
   });
 
   test('runtime suspension closes ingress and drains accepted work before persistence quiesce', () => {
-    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const source = read('frontend/src/lib/stores/vault/vaultStore.ts');
     const functionStart = source.indexOf('async function suspendRuntimeEnvActivity(');
     const functionEnd = source.indexOf('\nasync function suspendInactiveRuntimeActivity(', functionStart);
     expect(functionStart).toBeGreaterThan(0);
@@ -95,12 +95,12 @@ describe('vault runtime creation lock', () => {
     expect(pausePersistence).toBeGreaterThan(drainWork);
     expect(stopLoop).toBeGreaterThan(quiescePersistence);
     expect(stopP2P).toBeGreaterThan(stopLoop);
-    expect(read('frontend/src/lib/stores/vault-recovery.ts'))
+    expect(read('frontend/src/lib/stores/vault/vault-recovery.ts'))
       .toContain('export const RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS = 10_000;');
   });
 
   test('page shutdown retains the recovery barrier until accepted work is fully stopped', () => {
-    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const source = read('frontend/src/lib/stores/vault/vaultStore.ts');
     const operationStart = source.indexOf('async suspendAllRuntimeActivity(): Promise<void>');
     const operationEnd = source.indexOf('\n  async refreshActiveRuntimeFromDbIfBehind()', operationStart);
     expect(operationStart).toBeGreaterThan(0);
@@ -114,7 +114,7 @@ describe('vault runtime creation lock', () => {
   });
 
   test('page unload synchronously fences external ingress before navigation aborts requests', () => {
-    const store = read('frontend/src/lib/stores/vaultStore.ts');
+    const store = read('frontend/src/lib/stores/vault/vaultStore.ts');
     const layout = read('frontend/src/routes/app/+layout.svelte');
     const operationStart = store.indexOf('beginRuntimePageUnload(): void');
     const operationEnd = store.indexOf('\n  async suspendAllRuntimeActivity()', operationStart);
@@ -138,7 +138,7 @@ describe('vault runtime creation lock', () => {
   });
 
   test('runtime restore does not rewrite legacy signer jurisdiction labels', () => {
-    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const source = read('frontend/src/lib/stores/vault/vaultStore.ts');
     const restoreStart = source.indexOf('async function buildOrRestoreRuntimeEnv(runtime: Runtime');
     const restoreEnd = source.indexOf('\nfunction registerRuntimeResumeListener', restoreStart);
     expect(restoreStart).toBeGreaterThan(0);
@@ -152,7 +152,7 @@ describe('vault runtime creation lock', () => {
   });
 
   test('timed lock is scoped to the protection lease that scheduled it', () => {
-    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const source = read('frontend/src/lib/stores/vault/vaultStore.ts');
     const scheduleStart = source.indexOf('const scheduleVaultLock = (runtime: Runtime)');
     const lockStart = source.indexOf('async lockRuntime(runtimeId: string');
     const selectStart = source.indexOf('\n  // Select runtime', lockStart);
@@ -167,7 +167,7 @@ describe('vault runtime creation lock', () => {
   });
 
   test('locked runtimes cannot derive signer keys and render the vault gate', () => {
-    const store = read('frontend/src/lib/stores/vaultStore.ts');
+    const store = read('frontend/src/lib/stores/vault/vaultStore.ts');
     const panel = read('frontend/src/lib/view/UserModePanel.svelte');
 
     expect(store).toContain('if (!runtime?.seed) return null;');

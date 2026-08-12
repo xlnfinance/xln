@@ -11,7 +11,7 @@
   import { createEventDispatcher } from 'svelte';
   import type { Profile as GossipProfile } from '@xln/runtime/api/public/runtime-module';
   import { xlnFunctions } from '../../stores/xlnStore';
-  import { entityAvatar } from '../../utils/avatar';
+  import { entityAvatar } from '../../utils/identity/avatar';
   import { compareStableText } from '$lib/utils/stableSort';
 
   export let value: string = '';

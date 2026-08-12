@@ -65,7 +65,7 @@ describe('e2e demo user helper', () => {
 
   test('runtime persistence E2E configures the live Runtime through a narrow control', () => {
     const source = readFileSync(join(repoRoot, 'tests/e2e-runtime-persistence.spec.ts'), 'utf8');
-    const persistenceStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/embeddedRuntimeStore.ts'), 'utf8');
+    const persistenceStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/bootstrap/embeddedRuntimeStore.ts'), 'utf8');
     const commandStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
     expect(source).not.toContain('env.runtimeConfig');
     expect(source).toContain('__xln?.runtimePersistence');

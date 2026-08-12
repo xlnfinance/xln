@@ -7,7 +7,7 @@
   import type { RuntimeAdapterFrameReceiptResponse } from '@xln/runtime/api/runtime-adapter/types';
   import type { EnvSnapshot } from '@xln/runtime/runtime/types';
   import { toasts } from '$lib/stores/toastStore';
-  import { paymentSpotlight } from '$lib/stores/paymentSpotlightStore';
+  import { paymentSpotlight } from '$lib/stores/network/paymentSpotlightStore';
   import UserModePanel from './UserModePanel.svelte';
   import CommandPalette from '../components/shared/CommandPalette.svelte';
   import {
@@ -31,8 +31,8 @@
     runtimeView,
     runtimeViewActiveEntityId,
   } from '$lib/stores/runtimeViewStore';
-  import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
-  import { isLocalDebugSurfaceAllowed, registerDebugSurface } from '$lib/utils/debugSurface';
+  import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
+  import { isLocalDebugSurfaceAllowed, registerDebugSurface } from '$lib/utils/runtime/debugSurface';
   import {
     createPaymentTerminalMonitor,
     PAYMENT_TERMINAL_EVENT_NAMES,
@@ -41,7 +41,7 @@
     type PaymentTerminalEvent,
     type PaymentTerminalReadRequest,
     type PaymentTerminalReceiptPage,
-  } from '$lib/stores/paymentTerminalMonitor';
+  } from '$lib/stores/network/paymentTerminalMonitor';
 
   let commandPaletteOpen = false;
   let commandPaletteView: CommandPaletteView = emptyCommandPaletteView();

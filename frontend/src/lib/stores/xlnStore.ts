@@ -2,8 +2,8 @@ import { writable, derived, get } from 'svelte/store';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
 import { activeEnv, activeRuntimeId, registerRuntimeAdapterSwitcher, runtimes, runtimeOperations } from './runtimeStore';
-import { vaultOperations } from './vaultStore';
-import { xlnEnvironment, setXlnEnvironment } from './embeddedRuntimeStore';
+import { vaultOperations } from './vault/vaultStore';
+import { xlnEnvironment, setXlnEnvironment } from './bootstrap/embeddedRuntimeStore';
 import { toasts } from './toastStore';
 import {
   connectRuntimeAdapter,
@@ -21,19 +21,19 @@ import {
   submitRuntimeCommand,
   type RuntimeCommandExecutionOptions,
   type RuntimeCommandProgress,
-} from './runtimeCommandBus';
+} from './commands/runtimeCommandBus';
 import {
   listUnresolvedRemoteRuntimeCommandIntents,
   withRemoteRuntimeCommandReplayLease,
-} from './runtimeCommandIntent';
+} from './commands/runtimeCommandIntent';
 import {
   isRuntimeCommandJournalUnlocked,
   signRuntimeAdapterOwnerBinding,
-} from './runtimeCommandJournalKeyring';
+} from './commands/runtimeCommandJournalKeyring';
 import {
   findCommittedEmbeddedRuntimeInputHeight,
   findPersistedEmbeddedRuntimeInputHeight,
-} from './embeddedRuntimeCommandCompletion';
+} from './commands/embeddedRuntimeCommandCompletion';
 import {
   REMOTE_HISTORY_SCAN_CACHE_LIMIT,
   ensureRuntimeHistoryContext,
@@ -53,10 +53,10 @@ import {
   setRuntimeViewActiveEntityId,
   type RuntimeViewSelection,
 } from './runtimeViewStore';
-import { assertNetworkMachineIsLive, networkMachineRuntime } from './networkMachineRuntimeStore';
-import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
-import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
-import { registerDebugSurface } from '$lib/utils/debugSurface';
+import { assertNetworkMachineIsLive, networkMachineRuntime } from './network/networkMachineRuntimeStore';
+import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/utils/runtime/wsUrl';
+import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
+import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
 import {
   deleteVaultDeviceKey,
   protectVaultSecrets,
@@ -68,12 +68,12 @@ import {
   readRemoteRuntimeTokenAudience,
   resolveStoredRemoteRuntimeAuthKey,
   type RemoteRuntimeHubSummary,
-} from '$lib/utils/remoteRuntimeImport';
+} from '$lib/utils/onboarding/remoteRuntimeImport';
 import {
   waitForOpenAccountCounterpartyProfiles,
-} from '$lib/utils/p2pPrefetch';
+} from '$lib/utils/runtime/p2pPrefetch';
 import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
-import { getXLN, xlnInstance } from './xlnRuntimeLoader';
+import { getXLN, xlnInstance } from './bootstrap/xlnRuntimeLoader';
 import { parseProfile } from '@xln/runtime/entity/profile';
 import type {
   XLNModule,
@@ -209,7 +209,7 @@ function showPendingResetNotice(): void {
   toasts.warning(notice, 8000);
 }
 
-export { xlnEnvironment, setXlnEnvironment } from './embeddedRuntimeStore';
+export { xlnEnvironment, setXlnEnvironment } from './bootstrap/embeddedRuntimeStore';
 
 export const isLoading = writable<boolean>(true);
 export const error = writable<string | null>(null);
