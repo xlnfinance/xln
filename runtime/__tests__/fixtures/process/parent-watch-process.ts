@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { startParentLivenessWatch } from '../../infra/process/parent-watch';
+import { startParentLivenessWatch } from '../../../infra/process/parent-watch';
 
 const mode = process.argv[2];
 

@@ -8,11 +8,11 @@ import {
   DeterministicFaults,
   faultMatrixSeeds,
   withFaultSeed,
-} from './fixtures/deterministic-faults';
+} from './fixtures/faults/deterministic-faults';
 import {
   MemoryRuntimeDb,
   TornBatchRuntimeDb,
-} from './fixtures/memory-runtime-db';
+} from './fixtures/storage/memory-runtime-db';
 
 const logicalKey = Buffer.from([0x24, 0x01]);
 const originalValue = Buffer.alloc(48_000, 0x31);

@@ -1,11 +1,11 @@
-import { deriveSignerAddressSync } from '../../account/crypto';
+import { deriveSignerAddressSync } from '../../../account/crypto';
 import {
   createEmptyEnv,
   enqueueRuntimeInput,
   getRuntimeWalDb,
   processRuntime,
-} from '../../runtime';
-import { readStorageFrameRecord } from '../../storage';
+} from '../../../runtime';
+import { readStorageFrameRecord } from '../../../storage';
 import {
   buildCatchupFixtureCertificate,
   catchupFixtureDeliverable,
@@ -13,7 +13,7 @@ import {
   prepareCatchupFixtureReplica,
   registerCatchupFixtureSigners,
 } from './reliable-local-catchup-fixture';
-import { markLocalJAuthorityRuntimeTx } from '../../jurisdiction/machine/registration-evidence';
+import { markLocalJAuthorityRuntimeTx } from '../../../jurisdiction/machine/registration-evidence';
 
 const [seed] = Bun.argv.slice(2);
 if (!seed) throw new Error('reliable local catch-up crash seed is required');

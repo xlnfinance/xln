@@ -1,8 +1,8 @@
 import {
   withStorageWriterLock,
   type StorageWriterLockBoundary,
-} from '../../storage/runtime-dbs';
-import type { RuntimeReplica } from '../../runtime/types';
+} from '../../../storage/runtime-dbs';
+import type { RuntimeReplica } from '../../../runtime/types';
 
 const [namespace, requestedBoundary] = Bun.argv.slice(2);
 if (!namespace || !requestedBoundary) throw new Error('namespace and writer-lock boundary are required');

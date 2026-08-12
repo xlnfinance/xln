@@ -1,15 +1,15 @@
 import {
   processRuntime,
   registerRecoveryBackupBarrier,
-} from '../../runtime';
-import { deriveSignerAddressSync } from '../../account/crypto';
+} from '../../../runtime';
+import { deriveSignerAddressSync } from '../../../account/crypto';
 import {
   bootScenario,
   fundEntities,
   registerEntities,
-} from '../../scenarios/harness/boot';
-import { formatRuntime } from '../../qa/runtime-ascii';
-import { safeStringify } from '../../protocol/serialization';
+} from '../../../scenarios/harness/boot';
+import { formatRuntime } from '../../../qa/runtime-ascii';
+import { safeStringify } from '../../../protocol/serialization';
 
 type CrashBoundary =
   | 'before-intent'

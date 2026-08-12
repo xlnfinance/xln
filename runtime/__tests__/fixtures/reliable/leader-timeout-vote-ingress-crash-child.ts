@@ -1,6 +1,6 @@
-import { registerReliableIngress } from '../../runtime/reliable/reliable-delivery.ts';
-import { createEmptyEnv } from '../../runtime';
-import type { DeliverableEntityInput } from '../../runtime/types';
+import { registerReliableIngress } from '../../../runtime/reliable/reliable-delivery.ts';
+import { createEmptyEnv } from '../../../runtime';
+import type { DeliverableEntityInput } from '../../../runtime/types';
 
 const [receiverSeed, senderRuntimeId, encodedOutput] = Bun.argv.slice(2);
 if (!receiverSeed || !senderRuntimeId || !encodedOutput) {

@@ -78,7 +78,7 @@ test('managed custody children terminate when their spawning process is replaced
 });
 
 test('managed child survives with its parent and exits after the exact parent is killed', async () => {
-  const fixture = join(process.cwd(), 'runtime/__tests__/fixtures/parent-watch-process.ts');
+  const fixture = join(process.cwd(), 'runtime/__tests__/fixtures/process/parent-watch-process.ts');
   const parent = spawn('bun', [fixture, 'parent'], { stdio: ['ignore', 'pipe', 'pipe'] });
   let childPid = 0;
   try {

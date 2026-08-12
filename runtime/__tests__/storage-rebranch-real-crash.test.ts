@@ -10,7 +10,7 @@ import {
   withRebranchedValues,
 } from '../storage/database/rebranched-db';
 
-const fixture = join(import.meta.dir, 'fixtures/storage-rebranch-crash-child.ts');
+const fixture = join(import.meta.dir, 'fixtures/storage/storage-rebranch-crash-child.ts');
 const roots: string[] = [];
 const logicalKey = Buffer.from([0x22, 0x01]);
 

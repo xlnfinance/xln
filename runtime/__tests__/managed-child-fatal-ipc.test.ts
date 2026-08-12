@@ -10,7 +10,7 @@ import {
 import { openRelayIncidentJournal } from '../network/relay/incident-journal';
 import { createRelayStore, pushDebugEvent } from '../network/relay/store';
 
-const fixture = join(import.meta.dir, 'fixtures/managed-child-fatal-ipc-child.ts');
+const fixture = join(import.meta.dir, 'fixtures/process/managed-child-fatal-ipc-child.ts');
 const tempPaths: string[] = [];
 
 afterEach(() => {

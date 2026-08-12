@@ -37,7 +37,7 @@ import type {
   StorageDocRef,
   StorageHead,
 } from '../storage/types';
-import { MemoryRuntimeDb } from './fixtures/memory-runtime-db';
+import { MemoryRuntimeDb } from './fixtures/storage/memory-runtime-db';
 import {
   entityDocWithEncodedSize,
   oversizedAccount,
@@ -45,7 +45,7 @@ import {
   storageCounterpartyId as counterpartyId,
   storageEntityId as entityId,
   storagePairId as pairId,
-} from './fixtures/oversized-storage-docs';
+} from './fixtures/storage/oversized-storage-docs';
 
 const physicalPrefix = (logicalKey: Buffer): string => Buffer.concat([
   Buffer.from([KEY_REBRANCH_NODE]),

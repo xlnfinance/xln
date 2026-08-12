@@ -1,4 +1,4 @@
-import type { RuntimeDbLike } from '../../storage/types';
+import type { RuntimeDbLike } from '../../../storage/types';
 
 type MemoryOperation =
   | { kind: 'put'; key: Buffer; value: Buffer }

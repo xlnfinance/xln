@@ -72,7 +72,7 @@ import {
   DeterministicFaults,
   faultMatrixSeeds,
   withFaultSeed,
-} from './fixtures/deterministic-faults';
+} from './fixtures/faults/deterministic-faults';
 
 const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 

@@ -16,7 +16,7 @@ import type { EntityReplica } from '../entity/types';
 import {
   makeJSubmitDurabilityFixture,
   signerId as firstLeaderId,
-} from './fixtures/j-submit-durability-fixture';
+} from './fixtures/jurisdiction/j-submit-durability-fixture';
 
 const secondLeaderId = `0x${'42'.repeat(20)}`;
 

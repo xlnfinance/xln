@@ -3,31 +3,31 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 import {
   createEmptyEnv,
   saveEnvToDB,
-} from '../../runtime';
+} from '../../../runtime';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
   registerSignerKey,
   signAccountFrame,
-} from '../../account/crypto';
+} from '../../../account/crypto';
 import {
   receiverFrontierKey,
   senderFrontierKey,
-} from '../../runtime/reliable/reliable-frontier.ts';
-import { applyRuntimeStorageChanges } from '../../runtime/observability/env-events';
-import { serializeTaggedJson } from '../../protocol/serialization';
+} from '../../../runtime/reliable/reliable-frontier.ts';
+import { applyRuntimeStorageChanges } from '../../../runtime/observability/env-events';
+import { serializeTaggedJson } from '../../../protocol/serialization';
 import {
   createCatchupFixtureState,
   prepareCatchupFixtureReplica,
   registerCatchupFixtureSigners,
 } from './reliable-local-catchup-fixture';
-import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
+import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-witness';
 import type {
   DeliverableEntityInput,
   RuntimeReplica,
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
-} from '../../runtime/types';
+} from '../../../runtime/types';
 
 const [seed] = Bun.argv.slice(2);
 if (!seed) throw new Error('reliable frontier crash seed is required');

@@ -1,12 +1,12 @@
-import { deriveSignerAddressSync } from '../../account/crypto';
-import { markLocalJAuthorityRuntimeTx } from '../../jurisdiction/machine/registration-evidence';
-import { registerReliableIngress } from '../../runtime/reliable/reliable-delivery.ts';
+import { deriveSignerAddressSync } from '../../../account/crypto';
+import { markLocalJAuthorityRuntimeTx } from '../../../jurisdiction/machine/registration-evidence';
+import { registerReliableIngress } from '../../../runtime/reliable/reliable-delivery.ts';
 import {
   createEmptyEnv,
   enqueueRuntimeInput,
   processRuntime,
-} from '../../runtime';
-import type { DeliverableEntityInput } from '../../runtime/types';
+} from '../../../runtime';
+import type { DeliverableEntityInput } from '../../../runtime/types';
 import {
   buildCatchupFixtureCertificate,
   catchupFixtureDeliverable,

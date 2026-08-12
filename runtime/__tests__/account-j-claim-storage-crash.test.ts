@@ -25,7 +25,7 @@ import { hydrateAccountJClaimRootNodesFromStorage } from '../storage/read/read';
 import type { StorageDiffRecord } from '../storage/types';
 import type { AccountJClaimNode, AccountJClaimRecord } from '../types/finance/account-j-claims';
 
-const fixture = join(import.meta.dir, 'fixtures/account-j-claim-storage-crash-child.ts');
+const fixture = join(import.meta.dir, 'fixtures/storage/account-j-claim-storage-crash-child.ts');
 const namespaces: Array<{ dbRoot: string; runtimeId: string }> = [];
 
 const cleanupRuntimeStorage = (dbRoot: string, runtimeId: string): void => {

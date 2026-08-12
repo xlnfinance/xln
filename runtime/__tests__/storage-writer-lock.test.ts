@@ -20,7 +20,7 @@ const waitForReadyWorkers = async (directory: string, count: number): Promise<vo
   }
 };
 
-const crashFixture = `${import.meta.dir}/fixtures/storage-writer-lock-crash-child.ts`;
+const crashFixture = `${import.meta.dir}/fixtures/storage/storage-writer-lock-crash-child.ts`;
 
 for (const boundary of [
   'after-candidate-sync',

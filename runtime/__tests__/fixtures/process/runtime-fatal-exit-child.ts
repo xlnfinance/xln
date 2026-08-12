@@ -2,8 +2,8 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   startRuntimeLoop,
-} from '../../runtime';
-import type { RuntimeTx } from '../../runtime/types';
+} from '../../../runtime';
+import type { RuntimeTx } from '../../../runtime/types';
 
 const env = createEmptyEnv(`runtime-fatal-exit-${process.pid}`);
 enqueueRuntimeInput(env, {

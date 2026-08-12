@@ -14,9 +14,9 @@ import { readStorageFrameRecord } from '../storage';
 import {
   createCatchupFixtureState,
   deriveCatchupFixtureSigners,
-} from './fixtures/reliable-local-catchup-fixture';
+} from './fixtures/reliable/reliable-local-catchup-fixture';
 
-const fixture = join(import.meta.dir, 'fixtures/reliable-receipt-only-crash-child.ts');
+const fixture = join(import.meta.dir, 'fixtures/reliable/reliable-receipt-only-crash-child.ts');
 let cleanupRuntimeId: string | null = null;
 
 const cleanupRuntimeStorage = (runtimeId: string): void => {

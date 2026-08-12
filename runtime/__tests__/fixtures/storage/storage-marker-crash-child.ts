@@ -1,7 +1,7 @@
 import {
   writeDurableFile,
   type StorageDurabilityBoundary,
-} from '../../storage/fs-durability';
+} from '../../../storage/fs-durability';
 
 const markerPath = String(process.argv[2] || '');
 const requestedBoundary = String(process.argv[3] || '') as StorageDurabilityBoundary;

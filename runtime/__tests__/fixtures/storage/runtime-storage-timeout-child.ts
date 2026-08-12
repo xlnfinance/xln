@@ -2,13 +2,13 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   processRuntime,
-} from '../../runtime';
-import { deriveSignerAddressSync } from '../../account/crypto';
-import { generateLazyEntityId } from '../../entity/factory';
-import { ensureRuntimeInfrastructure } from '../../runtime/infrastructure/runtime-infrastructure';
-import type { ConsensusConfig, JurisdictionConfig } from '../../entity/types';
-import type { RuntimeTx } from '../../runtime/types';
-import { createTestJReplica } from '../helpers/j-replica';
+} from '../../../runtime';
+import { deriveSignerAddressSync } from '../../../account/crypto';
+import { generateLazyEntityId } from '../../../entity/factory';
+import { ensureRuntimeInfrastructure } from '../../../runtime/infrastructure/runtime-infrastructure';
+import type { ConsensusConfig, JurisdictionConfig } from '../../../entity/types';
+import type { RuntimeTx } from '../../../runtime/types';
+import { createTestJReplica } from '../../helpers/j-replica';
 
 const [seed] = Bun.argv.slice(2);
 if (!seed) throw new Error('runtime storage timeout fixture requires a seed');

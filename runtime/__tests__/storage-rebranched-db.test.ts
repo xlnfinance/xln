@@ -4,7 +4,7 @@ import {
   STORAGE_MAX_PHYSICAL_VALUE_BYTES,
   withRebranchedValues,
 } from '../storage/database/rebranched-db';
-import { MemoryRuntimeDb } from './fixtures/memory-runtime-db';
+import { MemoryRuntimeDb } from './fixtures/storage/memory-runtime-db';
 
 describe('path-addressed rebranched LevelDB values', () => {
   test('round-trips a real fat-account-sized value while every physical value stays under 10 KiB', async () => {

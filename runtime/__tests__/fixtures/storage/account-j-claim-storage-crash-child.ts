@@ -9,39 +9,39 @@ import {
   tryOpenStorageDb,
   tryOpenRuntimeWalDb,
   tryOpenHistoryViewDb,
-} from '../../runtime';
-import { applyAccountInput } from '../../account/consensus';
-import { proposeAccountFrame } from '../../account/consensus/proposal/propose';
-import { createAccountConsensusContext } from '../../entity/account/account-consensus-context';
+} from '../../../runtime';
+import { applyAccountInput } from '../../../account/consensus';
+import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
+import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
   registerSignerKey,
-} from '../../account/crypto';
+} from '../../../account/crypto';
 import {
   accountStateDomainFromJurisdiction,
   computeAccountStateRoot,
-} from '../../account/commitment/state-root';
+} from '../../../account/commitment/state-root';
 import {
   getAccountJClaimNodeStore,
-} from '../../entity/account/account-j-claim-node-store';
+} from '../../../entity/account/account-j-claim-node-store';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
-} from '../../entity/consensus/state-root';
-import { generateLazyEntityId } from '../../entity/factory';
-import { handleOpenAccountEntityTx } from '../../entity/tx/handlers/account/lifecycle/open-account';
-import { applyRuntimeStorageChanges } from '../../runtime/observability/env-events';
+} from '../../../entity/consensus/state-root';
+import { generateLazyEntityId } from '../../../entity/factory';
+import { handleOpenAccountEntityTx } from '../../../entity/tx/handlers/account/lifecycle/open-account';
+import { applyRuntimeStorageChanges } from '../../../runtime/observability/env-events';
 import {
   saveRuntimeFrameToStorage,
   type StoragePersistenceBoundary,
-} from '../../storage';
-import type { EntityReplica, JurisdictionConfig } from '../../entity/types';
-import type { JReplica } from '../../types/jurisdiction-runtime';
-import { getPerfMs } from '../../infra/time';
-import { buildRuntimeCheckpointSnapshot } from '../../storage/wal/snapshot';
-import { sealAccountDraftAsEntity } from '../helpers/account-draft';
+} from '../../../storage';
+import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
+import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { getPerfMs } from '../../../infra/time';
+import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
+import { sealAccountDraftAsEntity } from '../../helpers/account-draft';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('account J crash seed and boundary are required');

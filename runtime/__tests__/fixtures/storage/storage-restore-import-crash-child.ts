@@ -5,39 +5,39 @@ import {
   persistRestoredEnvToDB,
   processRuntime,
   registerSignerKey,
-} from '../../runtime';
+} from '../../../runtime';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
   signAccountFrame,
-} from '../../account/crypto';
-import { createEmptyAccountJClaimAccumulator } from '../../account/j-claims/j-claim-accumulator';
-import { LIMITS } from '../../config/constants';
-import { EMPTY_ACCOUNT_STATE_ROOT } from '../../account/commitment/state-root';
-import { deriveAccountWatchSeed } from '../../protocol/identity/account-watch-seed';
-import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
-import { getEntityLeaderState } from '../../entity/consensus/leader';
-import { generateLazyEntityId } from '../../entity/factory';
+} from '../../../account/crypto';
+import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
+import { LIMITS } from '../../../config/constants';
+import { EMPTY_ACCOUNT_STATE_ROOT } from '../../../account/commitment/state-root';
+import { deriveAccountWatchSeed } from '../../../protocol/identity/account-watch-seed';
+import { createEntityFrameHashFromStateRoot } from '../../../entity/consensus/frame';
+import { getEntityLeaderState } from '../../../entity/consensus/leader';
+import { generateLazyEntityId } from '../../../entity/factory';
 import {
   applyConsumptionOutput,
   createConsumptionProof,
   createEmptyConsumptionAccumulator,
   getConsumptionKey,
-} from '../../entity/consumption/consumption-accumulator';
+} from '../../../entity/consumption/consumption-accumulator';
 import {
   cacheCommittedConsumptionNodeChanges,
   getConsumptionNodeStore,
-} from '../../entity/consumption/consumption-store';
+} from '../../../entity/consumption/consumption-store';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
-} from '../../entity/consensus/state-root';
-import type { StoragePersistenceBoundary } from '../../storage';
-import type { AccountReplica } from '../../types/account';
-import type { CertifiedEntityFrameLink, JurisdictionConfig } from '../../entity/types';
-import type { JReplica } from '../../types/jurisdiction-runtime';
-import { createDefaultDelta } from '../../account/state/delta';
+} from '../../../entity/consensus/state-root';
+import type { StoragePersistenceBoundary } from '../../../storage';
+import type { AccountReplica } from '../../../types/account';
+import type { CertifiedEntityFrameLink, JurisdictionConfig } from '../../../entity/types';
+import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { createDefaultDelta } from '../../../account/state/delta';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('seed and restore boundary are required');

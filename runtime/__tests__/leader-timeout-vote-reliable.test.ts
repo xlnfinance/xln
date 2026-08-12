@@ -227,7 +227,7 @@ describe('reliable leader timeout vote delivery', () => {
     const output = voteOutput(receiver, replica, vote);
     sender.pendingNetworkOutputs = [structuredClone(output)];
     const senderSnapshot = buildDurableRuntimeMachineSnapshot(sender);
-    const fixture = join(import.meta.dir, 'fixtures/leader-timeout-vote-ingress-crash-child.ts');
+    const fixture = join(import.meta.dir, 'fixtures/reliable/leader-timeout-vote-ingress-crash-child.ts');
 
     const child = Bun.spawn({
       cmd: [

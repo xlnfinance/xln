@@ -1,11 +1,11 @@
-import { createEmptyEnv } from '../../runtime';
-import { applyRuntimeTx } from '../../runtime/transactions/tx-handlers';
+import { createEmptyEnv } from '../../../runtime';
+import { applyRuntimeTx } from '../../../runtime/transactions/tx-handlers';
 import {
   registerPendingCommittedJOutbox,
-} from '../../runtime/jurisdiction/j-submit-state';
-import { collectDueJSubmitRuntimeTxs } from '../../runtime/jurisdiction/j-submit-scheduler';
-import { createEmptyBatch } from '../../jurisdiction/machine/batch';
-import type { EntityReplica, EntityState } from '../../entity/types';
+} from '../../../runtime/jurisdiction/j-submit-state';
+import { collectDueJSubmitRuntimeTxs } from '../../../runtime/jurisdiction/j-submit-scheduler';
+import { createEmptyBatch } from '../../../jurisdiction/machine/batch';
+import type { EntityReplica, EntityState } from '../../../entity/types';
 
 export const entityId = `0x${'31'.repeat(32)}`;
 export const signerId = `0x${'41'.repeat(20)}`;

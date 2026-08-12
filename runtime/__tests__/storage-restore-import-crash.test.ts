@@ -22,7 +22,7 @@ import {
 } from '../entity/consumption/consumption-accumulator';
 import { getConsumptionNodeStore } from '../entity/consumption/consumption-store';
 
-const fixture = join(import.meta.dir, 'fixtures/storage-restore-import-crash-child.ts');
+const fixture = join(import.meta.dir, 'fixtures/storage/storage-restore-import-crash-child.ts');
 const namespaces: string[] = [];
 const boundaries = [
   ['after-restore-current-fence', 1],

@@ -3,33 +3,33 @@ import {
   deriveSignerKeySync,
   registerSignerKey,
   signAccountFrame,
-} from '../../account/crypto';
-import { applyEntityFrame } from '../../entity/consensus';
-import { createEntityFrameHash } from '../../entity/consensus/frame';
-import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
-import { getEntityLeaderState } from '../../entity/consensus/leader';
-import { buildCertifiedEntityOutputHashes } from '../../entity/consensus/output/certification';
+} from '../../../account/crypto';
+import { applyEntityFrame } from '../../../entity/consensus';
+import { createEntityFrameHash } from '../../../entity/consensus/frame';
+import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-witness';
+import { getEntityLeaderState } from '../../../entity/consensus/leader';
+import { buildCertifiedEntityOutputHashes } from '../../../entity/consensus/output/certification';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
-} from '../../entity/consensus/state-root';
-import { deriveLocalEntityCryptoKeys } from '../../entity/auth/crypto';
-import { generateLazyEntityId } from '../../entity/factory';
-import { initCrontab } from '../../entity/scheduler';
-import { buildQuorumHanko } from '../../hanko/signing';
-import { buildLocalEntityProfile } from '../../network/p2p/gossip/helper';
+} from '../../../entity/consensus/state-root';
+import { deriveLocalEntityCryptoKeys } from '../../../entity/auth/crypto';
+import { generateLazyEntityId } from '../../../entity/factory';
+import { initCrontab } from '../../../entity/scheduler';
+import { buildQuorumHanko } from '../../../hanko/signing';
+import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
-} from '../../entity/profile/profile-encryption';
-import { computeProfileHash } from '../../entity/profile/profile-signing';
+} from '../../../entity/profile/profile-encryption';
+import { computeProfileHash } from '../../../entity/profile/profile-signing';
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
-} from '../../storage/replica/entity-lineage';
-import type { DeliverableEntityInput, RuntimeReplica } from '../../runtime/types';
-import type { EntityReplica, EntityState, EntityFrame } from '../../entity/types';
+} from '../../../storage/replica/entity-lineage';
+import type { DeliverableEntityInput, RuntimeReplica } from '../../../runtime/types';
+import type { EntityReplica, EntityState, EntityFrame } from '../../../entity/types';
 
 export const deriveCatchupFixtureSigners = (seed: string): {
   leaderSignerId: string;

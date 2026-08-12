@@ -11,72 +11,72 @@ import {
   tryOpenStorageDb,
   tryOpenRuntimeWalDb,
   tryOpenHistoryViewDb,
-} from '../../runtime';
+} from '../../../runtime';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
   registerSignerKey,
   signAccountFrame,
-} from '../../account/crypto';
+} from '../../../account/crypto';
 import {
   applyEntityFrame,
-} from '../../entity/consensus';
-import { buildCollectiveEntityProposalTx } from '../../entity/auth/authorization';
-import { buildSignedEntityCommand } from '../../entity/command';
-import { signedEntityCommandTx } from '../../entity/command/command-codec';
+} from '../../../entity/consensus';
+import { buildCollectiveEntityProposalTx } from '../../../entity/auth/authorization';
+import { buildSignedEntityCommand } from '../../../entity/command';
+import { signedEntityCommandTx } from '../../../entity/command/command-codec';
 import {
   createEntityFrameHashFromStateRoot,
-} from '../../entity/consensus/frame';
+} from '../../../entity/consensus/frame';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
-} from '../../entity/consensus/state-root';
-import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
+} from '../../../entity/consensus/state-root';
+import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-witness';
 import {
   buildEntityLeaderCertificate,
   buildEntityLeaderVoteBody,
   getEntityLeaderState,
   hashEntityLeaderVoteBody,
-} from '../../entity/consensus/leader';
-import { generateProposalId } from '../../entity/tx/processing/proposals';
-import { generateNumberedEntityId } from '../../entity/factory';
-import { buildQuorumHanko, getEntityConfigBoardHash } from '../../hanko/signing';
+} from '../../../entity/consensus/leader';
+import { generateProposalId } from '../../../entity/tx/processing/proposals';
+import { generateNumberedEntityId } from '../../../entity/factory';
+import { buildQuorumHanko, getEntityConfigBoardHash } from '../../../hanko/signing';
 import {
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
-} from '../../jurisdiction/machine/event-observation';
+} from '../../../jurisdiction/machine/event-observation';
 import {
   buildJEventRangeDigest,
   canonicalJEventRangeHash,
   EMPTY_J_HISTORY_ROOT,
   foldJHistoryRoot,
-} from '../../jurisdiction/machine/history-consensus';
+} from '../../../jurisdiction/machine/history-consensus';
 import {
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
-} from '../../jurisdiction/machine/history/j-prefix-consensus';
-import { applyRuntimeStorageChanges } from '../../runtime/observability/env-events';
-import { cloneIsolatedRuntimeInput } from '../../runtime/input-pipeline/input-clone';
-import { collectDueJSubmitRuntimeTxs } from '../../runtime/jurisdiction/j-submit-scheduler';
-import { registerPendingCommittedJOutbox } from '../../runtime/jurisdiction/j-submit-state';
-import { applyRuntimeTx } from '../../runtime/transactions/tx-handlers';
+} from '../../../jurisdiction/machine/history/j-prefix-consensus';
+import { applyRuntimeStorageChanges } from '../../../runtime/observability/env-events';
+import { cloneIsolatedRuntimeInput } from '../../../runtime/input-pipeline/input-clone';
+import { collectDueJSubmitRuntimeTxs } from '../../../runtime/jurisdiction/j-submit-scheduler';
+import { registerPendingCommittedJOutbox } from '../../../runtime/jurisdiction/j-submit-state';
+import { applyRuntimeTx } from '../../../runtime/transactions/tx-handlers';
 import {
   readStorageHead,
   saveRuntimeFrameToStorage,
   type StoragePersistenceBoundary,
-} from '../../storage';
-import { encodeBuffer } from '../../storage/codec/codec';
-import { KEY_HEAD } from '../../storage/keys';
-import { getPerfMs } from '../../infra/time';
-import type { CertifiedRegistrationEvidence, JReplica } from '../../types/jurisdiction-runtime';
-import type { CertifiedEntityFrameLink, EntityState, JurisdictionConfig } from '../../entity/types';
-import type { EntityTx } from '../../types/entity-tx';
-import type { JurisdictionEvent } from '../../types/jurisdiction-events';
+} from '../../../storage';
+import { encodeBuffer } from '../../../storage/codec/codec';
+import { KEY_HEAD } from '../../../storage/keys';
+import { getPerfMs } from '../../../infra/time';
+import type { CertifiedRegistrationEvidence, JReplica } from '../../../types/jurisdiction-runtime';
+import type { CertifiedEntityFrameLink, EntityState, JurisdictionConfig } from '../../../entity/types';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import {
   installCanonicalRegisteredBoardAuthority,
   installCanonicalRegistrationEvidence,
-} from '../helpers/registration-evidence';
+} from '../../helpers/registration-evidence';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('seed and persistence boundary are required');

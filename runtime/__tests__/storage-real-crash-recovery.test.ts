@@ -61,7 +61,7 @@ import type {
   StorageRuntimeConfig,
 } from '../storage/types';
 
-const fixture = join(import.meta.dir, 'fixtures/storage-crash-boundary-child.ts');
+const fixture = join(import.meta.dir, 'fixtures/storage/storage-crash-boundary-child.ts');
 const namespaces: Array<{ dbRoot: string; runtimeId: string }> = [];
 const config: Required<StorageRuntimeConfig> = {
   enabled: true,

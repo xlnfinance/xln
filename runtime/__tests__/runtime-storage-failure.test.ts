@@ -21,7 +21,7 @@ import {
 } from '../storage/commit/commit';
 import { buildDurableRuntimeMachineSnapshot } from '../storage/wal/snapshot';
 
-const fixture = join(import.meta.dir, 'fixtures/runtime-storage-timeout-child.ts');
+const fixture = join(import.meta.dir, 'fixtures/storage/runtime-storage-timeout-child.ts');
 
 const removeRuntimeStorage = (runtimeId: string): void => {
   const base = join(dbRootPath, runtimeId);

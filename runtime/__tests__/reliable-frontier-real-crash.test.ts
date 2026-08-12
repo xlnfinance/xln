@@ -16,7 +16,7 @@ import {
 import { dbRootPath } from '../runtime/platform';
 import type { RuntimeReplica, ReliableDeliveryReceipt } from '../runtime/types';
 
-const fixture = join(import.meta.dir, 'fixtures/reliable-frontier-crash-child.ts');
+const fixture = join(import.meta.dir, 'fixtures/reliable/reliable-frontier-crash-child.ts');
 let cleanupRuntimeId: string | null = null;
 
 const cleanupRuntimeStorage = (runtimeId: string): void => {

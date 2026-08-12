@@ -20,7 +20,7 @@ import {
 } from '../storage/runtime-dbs';
 import type { RuntimeReplica } from '../runtime/types';
 
-const fixture = join(import.meta.dir, 'fixtures/storage-marker-crash-child.ts');
+const fixture = join(import.meta.dir, 'fixtures/storage/storage-marker-crash-child.ts');
 const tempRoots: string[] = [];
 const markerBody = `${JSON.stringify({ snapshotHeight: 7, generation: 'durable-marker-v1' })}\n`;
 

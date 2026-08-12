@@ -10,7 +10,7 @@ import { encodeBuffer } from '../storage/codec/codec';
 import { KEY_REBRANCH_NODE, keyLiveAccount, keyLiveAccountField } from '../storage/keys';
 import { withRebranchedValues } from '../storage/database/rebranched-db';
 import type { RuntimeDbLike, StorageAccountDoc } from '../storage/types';
-import { MemoryRuntimeDb } from './fixtures/memory-runtime-db';
+import { MemoryRuntimeDb } from './fixtures/storage/memory-runtime-db';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;

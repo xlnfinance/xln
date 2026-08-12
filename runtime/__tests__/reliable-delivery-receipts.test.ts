@@ -40,7 +40,7 @@ import {
   createCatchupFixtureState,
   prepareCatchupFixtureReplica,
   registerCatchupFixtureSigners,
-} from './fixtures/reliable-local-catchup-fixture';
+} from './fixtures/reliable/reliable-local-catchup-fixture';
 import {
   createEmptyEnv,
   getRuntimeWalDb,

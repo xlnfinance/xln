@@ -24,7 +24,7 @@ import {
   createCatchupFixtureState,
   prepareCatchupFixtureReplica,
   registerCatchupFixtureSigners,
-} from './fixtures/reliable-local-catchup-fixture';
+} from './fixtures/reliable/reliable-local-catchup-fixture';
 
 const runtime = (seed: string): RuntimeReplica => {
   const env = createEmptyEnv(seed);
