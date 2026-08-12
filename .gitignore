@@ -64,6 +64,7 @@ playwright-report/**/*.webm
 test-results/**/*.webm
 .playwright-mcp/
 .codex/
+.agents/
 .logs/
 .tmp/
 .tmp-*
