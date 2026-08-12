@@ -51,8 +51,8 @@ const assertOrder = (text: string, path: string, markers: string[]): void => {
 
 const accountConsensusPaths = [
   'runtime/account/consensus/index.ts',
-  'runtime/account/consensus/ack-commit.ts',
-  'runtime/account/consensus/incoming-preflight.ts',
+  'runtime/account/consensus/incoming/ack-commit.ts',
+  'runtime/account/consensus/incoming/preflight.ts',
 ];
 const accountConsensusPath = accountConsensusPaths.join(', ');
 const accountHandlerPaths = [
@@ -61,11 +61,11 @@ const accountHandlerPaths = [
 ];
 const accountHandlerPath = accountHandlerPaths.join(', ');
 const accountProposePaths = [
-  'runtime/account/consensus/propose.ts',
-  'runtime/account/consensus/proposal-admission.ts',
+  'runtime/account/consensus/proposal/propose.ts',
+  'runtime/account/consensus/proposal/admission.ts',
 ];
 const accountProposePath = accountProposePaths.join(', ');
-const accountFramePath = 'runtime/account/consensus/frame.ts';
+const accountFramePath = 'runtime/account/consensus/frame/hash.ts';
 const entityConsensusPaths = [
   'runtime/entity/consensus/replica-validation.ts',
   'runtime/entity/consensus/leader-certificates.ts',
@@ -122,17 +122,17 @@ const auditDoc = readText(auditDocPath);
 assertNotMatches(accountConsensus, /\bjHeight\s*\|\|/g, accountConsensusPath, 'jHeight || fallback');
 assertNotMatches(accountPropose, /\bjHeight\s*\|\||entityJHeight\s*\|\|/g, accountProposePath, 'jHeight/entityJHeight || fallback');
 assertInitializer(
-  'runtime/account/consensus/proposal-admission.ts',
+  'runtime/account/consensus/proposal/admission.ts',
   'frameJHeight',
   'entityJHeight ?? account.state.lastFinalizedJHeight ?? 0',
 );
 assertInitializer(
-  'runtime/account/consensus/ack-commit.ts',
+  'runtime/account/consensus/incoming/ack-commit.ts',
   'jHeight',
   'pendingFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0',
 );
 assertInitializer(
-  'runtime/account/consensus/incoming-preflight.ts',
+  'runtime/account/consensus/incoming/preflight.ts',
   'frameJHeight',
   'receivedFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0',
 );

@@ -3,20 +3,20 @@
  * frame construction, and the hash manifest that Entity consensus certifies.
  */
 
-import type { AccountReplica, AccountTx } from '../../types/account';
-import type { AccountConsensusContext } from './context';
-import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
-import { getPerfMs } from '../../infra/time';
-import { HEAVY_LOGS } from '../../infra/debug-flags';
-import { createStructuredLogger, shortId } from '../../infra/logger';
-import type { ProposeAccountFrameResult } from './types';
-import { cumulativeMarksToPhases } from '../../infra/perf-profile';
-import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
-import { validateProposalTransactions } from './proposal-transactions';
-import { buildProposalFrame } from './proposal-frame';
-import { prepareProposalProof } from './proposal-proof';
-import { finalizeAccountProposal } from './proposal-finalize';
-import { prepareProposalAdmission } from './proposal-admission';
+import type { AccountReplica, AccountTx } from '../../../types/account';
+import type { AccountConsensusContext } from '../context';
+import { removeCommittedTxsFromMempool } from '../../../protocol/tx-multiset';
+import { getPerfMs } from '../../../infra/time';
+import { HEAVY_LOGS } from '../../../infra/debug-flags';
+import { createStructuredLogger, shortId } from '../../../infra/logger';
+import type { ProposeAccountFrameResult } from '../types';
+import { cumulativeMarksToPhases } from '../../../infra/perf-profile';
+import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../../infra/perf-runtime-flags';
+import { validateProposalTransactions } from './transactions';
+import { buildProposalFrame } from './frame';
+import { prepareProposalProof } from './proof';
+import { finalizeAccountProposal } from './finalize';
+import { prepareProposalAdmission } from './admission';
 
 const accountLog = createStructuredLogger('account');
 const ACCOUNT_PROPOSAL_PROFILE =

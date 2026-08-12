@@ -1,18 +1,18 @@
-import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../../types/account';
-import { cloneAccountFrame } from '../state/state-clone';
-import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
-import { cloneIsolatedAccountInput } from '../../protocol/account-input-clone';
-import { stageAccountCommitmentCache } from '../commitment/map-commitment';
+import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../../../types/account';
+import { cloneAccountFrame } from '../../state/state-clone';
+import { removeCommittedTxsFromMempool } from '../../../protocol/tx-multiset';
+import { cloneIsolatedAccountInput } from '../../../protocol/account-input-clone';
+import { stageAccountCommitmentCache } from '../../commitment/map-commitment';
 import type {
   AccountConsensusHashToSign,
   ProposeAccountFrameResult,
-} from './types';
+} from '../types';
 import type {
   PreparedProposalProof,
-} from './proposal-proof';
+} from './proof';
 import type {
   ProposalTransactionEffects,
-} from './proposal-transactions';
+} from './transactions';
 
 type DisputeSeal = NonNullable<
   Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>['proposal']['disputeSeal']

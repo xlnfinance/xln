@@ -3,7 +3,7 @@ import type { EntityState } from '../../../types';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { addMessage } from '../../../frame-events';
 import { initJBatch } from '../../../../jurisdiction/machine/batch';
-import { freezeAccountForDispute } from '../../../../account/consensus/dispute-policy';
+import { freezeAccountForDispute } from '../../../../account/consensus/dispute/policy';
 import {
   collectDisputeEvidenceReadinessIssues,
   hasQueuedDisputeFinalize,

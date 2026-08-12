@@ -11,7 +11,7 @@ import {
   tryOpenHistoryViewDb,
 } from '../../runtime';
 import { applyAccountInput } from '../../account/consensus';
-import { proposeAccountFrame } from '../../account/consensus/propose';
+import { proposeAccountFrame } from '../../account/consensus/proposal/propose';
 import { createAccountConsensusContext } from '../../entity/account-consensus-context';
 import {
   deriveSignerAddressSync,

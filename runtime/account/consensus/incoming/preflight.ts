@@ -3,16 +3,16 @@
  * replaying any transaction. This phase never mutates live Account state.
  */
 
-import type { AccountFrame, AccountInput, AccountReplica } from '../../types/account';
-import { createStructuredLogger, shortId } from '../../infra/logger';
-import { HEAVY_LOGS } from '../../infra/debug-flags';
-import { getAccountFrameBoundsError } from './frame';
-import { accountInputProposal } from './flush';
-import { getIncomingAccountDeadlineViolation, type AccountInputSecurityContext } from './deadline-policy';
+import type { AccountFrame, AccountInput, AccountReplica } from '../../../types/account';
+import { createStructuredLogger, shortId } from '../../../infra/logger';
+import { HEAVY_LOGS } from '../../../infra/debug-flags';
+import { getAccountFrameBoundsError } from '../frame/hash';
+import { accountInputProposal } from '../flush';
+import { getIncomingAccountDeadlineViolation, type AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { resolveSameHeightIncomingFrame } from './collision';
 import { buildDuplicateCommittedFrameAck, describeAccountState } from './replay';
-import type { HandleAccountInputResult } from './types';
-import { rejectAccountPeerInput } from '../input/peer-rejection';
+import type { HandleAccountInputResult } from '../types';
+import { rejectAccountPeerInput } from '../../input/peer-rejection';
 
 const preflightLog = createStructuredLogger('account.preflight');
 const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;

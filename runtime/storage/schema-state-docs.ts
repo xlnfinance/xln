@@ -2,7 +2,7 @@ import type { BookState } from '../orderbook';
 import { validateSpreadDistribution } from '../orderbook';
 import { validateBookStructure } from '../orderbook/validity';
 import { verifyAndWarmBookCommitment } from '../orderbook/commitment';
-import { assertAccountFrameHash } from '../account/consensus/frame';
+import { assertAccountFrameHash } from '../account/consensus/frame/hash';
 import { canonicalAccountDisputeConfig } from '../account/config/dispute-config';
 import { validateAccountReplica } from '../account/validation/state-validation';
 import { assertCanonicalSettlementWorkspace } from '../account/tx/handlers/settle-transition';

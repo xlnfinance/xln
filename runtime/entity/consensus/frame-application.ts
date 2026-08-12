@@ -4,7 +4,7 @@
  */
 
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
-import { proposeAccountFrame } from '../../account/consensus/propose';
+import { proposeAccountFrame } from '../../account/consensus/proposal/propose';
 import { getAccountJClaimNodeStore } from '../account-j-claim-node-store';
 import {
   assertCanonicalSettlementWorkspace,

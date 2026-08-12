@@ -1,12 +1,12 @@
 import { ethers } from 'ethers';
 
-import type { AccountFrame, AccountTx } from '../../types/account';
-import { assertAccountFrameDeltaIntegrity } from '../state/frame';
-import { computeCanonicalMerkleRoot } from '../commitment/state-root';
-import { canonicalJurisdictionEventsHash } from '../../jurisdiction/machine/event-observation';
-import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/event-normalization';
-import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
-import { LIMITS } from '../../config/constants';
+import type { AccountFrame, AccountTx } from '../../../types/account';
+import { assertAccountFrameDeltaIntegrity } from '../../state/frame';
+import { computeCanonicalMerkleRoot } from '../../commitment/state-root';
+import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/event-observation';
+import { requireCanonicalJurisdictionEvents } from '../../../jurisdiction/machine/event-normalization';
+import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../constants';
+import { LIMITS } from '../../../config/constants';
 
 export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
 // A peer controls its proposed timestamp. Reject future time because it could

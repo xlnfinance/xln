@@ -2,7 +2,7 @@ import type { AccountExternalFinalityInput, AccountReplica } from '../../types/a
 import {
   freezeAccountForDispute,
   isDisputeStartedByLeft,
-} from '../consensus/dispute-policy';
+} from '../consensus/dispute/policy';
 import { invalidateAccountMapCommitment } from '../commitment/map-commitment';
 import { clearFinalizedSettlementWorkspace } from '../tx/handlers/settle-transition';
 export type AccountDisputeFinalityResult = {

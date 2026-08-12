@@ -9,7 +9,7 @@ import {
   buildPreparedCrossJurisdictionRoute,
 } from '../extensions/cross-j/index';
 import { generateLazyEntityId } from '../entity/factory';
-import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
+import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame/hash';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import { createEmptyEnv } from '../runtime';
 import type { AccountInput, AccountReplica, AccountTx, Delta } from '../types/account';

@@ -13,7 +13,7 @@ import { shortHash, shortId } from '../../../../infra/logger';
 import {
   freezeAccountForDispute,
   isDisputeStartedByLeft,
-} from '../../../../account/consensus/dispute-policy';
+} from '../../../../account/consensus/dispute/policy';
 import { disputeLog } from './shared';
 import {
   admitDisputeStart,

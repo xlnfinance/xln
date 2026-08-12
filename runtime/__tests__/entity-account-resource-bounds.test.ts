@@ -3,7 +3,7 @@ import { createAccountConsensusContext } from '../entity/account-consensus-conte
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { applyAccountInput, proposeAccountFrame } from '../account/consensus';
-import { createFrameHash } from '../account/consensus/frame';
+import { createFrameHash } from '../account/consensus/frame/hash';
 import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
 import { createLocalAccountInput } from '../account/input';
 import { computeAccountStateRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../account/commitment/state-root';

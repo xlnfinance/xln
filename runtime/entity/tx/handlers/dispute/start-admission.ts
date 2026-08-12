@@ -7,7 +7,7 @@ import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-typ
 import { addMessage } from '../../../frame-events';
 import { initJBatch } from '../../../../jurisdiction/machine/batch';
 import { isCrossJurisdictionTerminalStatus } from '../../../../extensions/cross-j';
-import { freezeAccountForDispute } from '../../../../account/consensus/dispute-policy';
+import { freezeAccountForDispute } from '../../../../account/consensus/dispute/policy';
 import { BATCH_ABI } from '../../../../protocol/dispute/proof-body';
 import {
   collectDisputeEvidenceReadinessIssues,

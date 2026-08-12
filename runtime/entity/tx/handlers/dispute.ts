@@ -20,7 +20,7 @@ import { addMessage } from '../../frame-events';
 import {
   freezeAccountForDispute,
   returnPreparedAccountToActive,
-} from '../../../account/consensus/dispute-policy';
+} from '../../../account/consensus/dispute/policy';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { swapKey } from '../../../orderbook/swap-keys';
 import { crossJurisdictionBookOwnerRef } from '../../../extensions/cross-j/orderbook';

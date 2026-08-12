@@ -5,7 +5,7 @@ import { join } from 'node:path';
 test('account consensus core uses structured logging only', () => {
   const source = [
     'runtime/account/consensus/index.ts',
-    'runtime/account/consensus/incoming-preflight.ts',
+    'runtime/account/consensus/incoming/preflight.ts',
   ]
     .map(path => readFileSync(join(process.cwd(), path), 'utf8'))
     .join('\n');

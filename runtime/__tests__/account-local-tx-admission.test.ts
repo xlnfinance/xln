@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { admitLocalAccountTx } from '../account/input/local-tx-admission';
 import { applyAccountInput } from '../account/consensus/index';
-import { proposeAccountFrame } from '../account/consensus/propose';
+import { proposeAccountFrame } from '../account/consensus/proposal/propose';
 import { createLocalAccountInput } from '../account/input';
 import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
 import {
@@ -10,7 +10,7 @@ import {
   freezeAccountForDispute,
   isDisputeStartedByLeft,
   returnPreparedAccountToActive,
-} from '../account/consensus/dispute-policy';
+} from '../account/consensus/dispute/policy';
 import { LIMITS } from '../config/constants';
 import type { AccountReplica, AccountTx } from '../types/account';
 import { createEmptyEnv } from '../runtime';

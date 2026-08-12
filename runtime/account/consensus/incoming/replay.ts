@@ -1,12 +1,12 @@
-import type { AccountFrame, AccountInput, AccountReplica } from '../../types/account';
-import { createStructuredLogger, shortId } from '../../infra/logger';
+import type { AccountFrame, AccountInput, AccountReplica } from '../../../types/account';
+import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   accountInputAck,
   accountInputDisputeSeal,
   accountInputProposal,
   accountInputReferenceHeight,
-} from './flush';
-import type { HandleAccountInputResult } from './types';
+} from '../flush';
+import type { HandleAccountInputResult } from '../types';
 
 const replayLog = createStructuredLogger('account.replay');
 

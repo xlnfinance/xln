@@ -1,6 +1,6 @@
-import type { AccountReplica } from '../../types/account';
-import { createStructuredLogger } from '../../infra/logger';
-import { safeStringify } from '../../protocol/serialization';
+import type { AccountReplica } from '../../../types/account';
+import { createStructuredLogger } from '../../../infra/logger';
+import { safeStringify } from '../../../protocol/serialization';
 import {
   computeAccountCommitmentSectionDetail,
   computeAccountCommitmentSectionDetailCold,
@@ -8,7 +8,7 @@ import {
   computeAccountStateRootCold,
   computeAccountStateSectionHashes,
   computeAccountStateSectionHashesCold,
-} from '../commitment/state-root';
+} from '../../commitment/state-root';
 
 const commitLog = createStructuredLogger('account.commit');
 

@@ -40,7 +40,7 @@ import { checkAutoRebalance, handleRequestCollateral } from '../account/tx/handl
 
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 
-import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
+import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame/hash';
 
 import { resolveAutoRebalanceFeePolicy, runPostFrameAutoRebalanceCheck } from '../account/consensus/helpers';
 

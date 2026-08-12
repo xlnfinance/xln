@@ -35,9 +35,9 @@ that drives them. Read the cascade before the services around it.
     certification through the same candidate model.
 15. `runtime/entity/consensus/multi-signer-proposal.ts` — validator candidate
     and Hanko flow.
-16. `runtime/account/consensus/collision.ts` — deterministic same-height
+16. `runtime/account/consensus/incoming/collision.ts` — deterministic same-height
     LEFT-wins rollback.
-17. `runtime/account/consensus/ack-commit.ts` — bilateral commit.
+17. `runtime/account/consensus/incoming/ack-commit.ts` — bilateral commit.
 18. `runtime/runtime/frame/storage-failure.ts` — pre/post-WAL failure rules.
 19. `runtime/storage/commit.ts` — the only durable Runtime commit point.
 20. `runtime/storage/recovery/replay.ts` — rebuild from durable truth.

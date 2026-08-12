@@ -5,7 +5,7 @@ import {
   getCrossJurisdictionCommittedFillAmounts,
   getCrossJurisdictionPrivateSeed,
 } from '../extensions/cross-j/index';
-import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
+import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame/hash';
 import { safeStringify } from '../protocol/serialization';
 import type { AccountReplica, AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';

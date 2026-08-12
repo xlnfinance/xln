@@ -1,9 +1,9 @@
-import { hashHtlcSecret } from '../../protocol/htlc/utils';
-import { hashEncryptedHtlcLayer } from '../../protocol/htlc/onion-layer';
-import type { AccountFrame, AccountState, HtlcLock } from '../../types/account';
-import type { HankoString } from '../../types/hanko';
-import { isHtlcTimelockExpired } from '../htlc-deadline';
-import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
+import { hashHtlcSecret } from '../../../protocol/htlc/utils';
+import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/onion-layer';
+import type { AccountFrame, AccountState, HtlcLock } from '../../../types/account';
+import type { HankoString } from '../../../types/hanko';
+import { isHtlcTimelockExpired } from '../../htlc-deadline';
+import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../constants';
 
 export const HTLC_ENFORCEMENT_RESERVE_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
 

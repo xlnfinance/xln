@@ -1,33 +1,33 @@
-import type { AccountFrame, AccountInput, AccountReplica } from '../../types/account';
-import type { AccountOutput } from '../../types/account';
-import type { AccountConsensusContext } from './context';
-import { HEAVY_LOGS } from '../../infra/debug-flags';
-import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
-import { cloneAccountFrame } from '../state/state-clone';
-import { getAccountPerspective } from '../state/perspective';
-import { applyAccountTx } from '../tx/apply';
-import { deriveAccountFrameTokenIds } from '../state/frame';
-import { appendAccountMempoolTxs } from '../input/mempool';
+import type { AccountFrame, AccountInput, AccountReplica } from '../../../types/account';
+import type { AccountOutput } from '../../../types/account';
+import type { AccountConsensusContext } from '../context';
+import { HEAVY_LOGS } from '../../../infra/debug-flags';
+import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
+import { cloneAccountFrame } from '../../state/state-clone';
+import { getAccountPerspective } from '../../state/perspective';
+import { applyAccountTx } from '../../tx/apply';
+import { deriveAccountFrameTokenIds } from '../../state/frame';
+import { appendAccountMempoolTxs } from '../../input/mempool';
 import {
   commitStagedAccountCommitmentCache,
   discardStagedAccountCommitmentCache,
-} from '../commitment/map-commitment';
-import type { AccountJClaimSession } from '../j-claims/j-claim-session';
-import type { AccountInputSecurityContext } from './deadline-policy';
-import { accountInputAck, accountInputProposal } from './flush';
+} from '../../commitment/map-commitment';
+import type { AccountJClaimSession } from '../../j-claims/j-claim-session';
+import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
+import { accountInputAck, accountInputProposal } from '../flush';
 import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
   runPostFrameAutoRebalanceCheck,
-} from './helpers';
+} from '../helpers';
 import { assertLiveCommitMatchesFrame } from './commit-root';
 import {
   getDisputeSealRequirementError,
   storeCounterpartyDisputeSeal,
   type ValidatedCounterpartyDisputeSeal,
-} from './dispute-seal';
-import type { HandleAccountInputResult } from './types';
-import { rejectAccountPeerInput } from '../input/peer-rejection';
+} from '../dispute/seal';
+import type { HandleAccountInputResult } from '../types';
+import { rejectAccountPeerInput } from '../../input/peer-rejection';
 
 const ackLog = createStructuredLogger('account.ack');
 

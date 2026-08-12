@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { applyAccountInput } from '../account/consensus';
 import type { AccountConsensusContext } from '../account/consensus/context';
-import { createFrameHash } from '../account/consensus/frame';
+import { createFrameHash } from '../account/consensus/frame/hash';
 import { computeAccountStateRoot } from '../account/commitment/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import type { AccountInput, AccountReplica } from '../types/account';

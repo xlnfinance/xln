@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createFrameHash } from '../account/consensus/frame';
+import { createFrameHash } from '../account/consensus/frame/hash';
 import { computeAccountStateRoot } from '../account/commitment/state-root';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { deriveDelta } from '../account/utils';

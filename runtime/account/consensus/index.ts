@@ -12,7 +12,7 @@ import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { applyAccountTx } from '../tx/apply';
 import type { AccountTxRejection } from '../tx/apply-types';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
-import { createFrameHash } from './frame';
+import { createFrameHash } from './frame/hash';
 import {
   assertNoUnilateralSettlementMutation,
   buildAccountProofBodyFromJurisdictions,
@@ -47,31 +47,31 @@ import {
   HTLC_ENFORCEMENT_RESERVE_MS,
   isHtlcSecretEnforcementWindowClosed,
   type AccountInputSecurityContext,
-} from './deadline-policy';
+} from './dispute/deadline-policy';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from './flush';
-import { handleBoardReseal } from './board-reseal';
-import { handlePendingFrameAck } from './ack-commit';
-import { assertLiveCommitMatchesFrame } from './commit-root';
+import { handleBoardReseal } from './incoming/board-reseal';
+import { handlePendingFrameAck } from './incoming/ack-commit';
+import { assertLiveCommitMatchesFrame } from './incoming/commit-root';
 import {
   getDisputeSealRequirementError,
   replaceLocalDisputeDraft,
   storeCounterpartyDisputeSeal,
   type ValidatedCounterpartyDisputeSeal,
   validateCounterpartyDisputeSeal,
-} from './dispute-seal';
+} from './dispute/seal';
 import {
   classifyAccountInputReplay,
   getDisputeHankoShapeError,
   handleReplayOrObsoleteAccountInput,
   normalizeAccountInputHeight,
-} from './replay';
-import { applySameHeightIncomingFrameRollback, handleUnmatchedAck, resolveAccountAckTarget } from './collision';
-import { preflightIncomingAccountFrame } from './incoming-preflight';
+} from './incoming/replay';
+import { applySameHeightIncomingFrameRollback, handleUnmatchedAck, resolveAccountAckTarget } from './incoming/collision';
+import { preflightIncomingAccountFrame } from './incoming/preflight';
 import {
   rejectAccountPeerEvidenceError,
   rejectAccountPeerInput,
 } from '../input/peer-rejection';
-export { proposeAccountFrame } from './propose';
+export { proposeAccountFrame } from './proposal/propose';
 export type {
   HandleAccountInputResult,
 } from './types';
@@ -81,7 +81,7 @@ const accountLog = createStructuredLogger('account');
 export { getIncomingAccountDeadlineViolation, HTLC_ENFORCEMENT_RESERVE_MS, isHtlcSecretEnforcementWindowClosed };
 export type { AccountInputSecurityContext };
 
-export { computeFrameHash, isWithinAccountFrameBounds } from './frame';
+export { computeFrameHash, isWithinAccountFrameBounds } from './frame/hash';
 
 // Counter-based replay protection was intentionally replaced by the frame chain
 // (height + prevFrameHash). Nonces remain only for on-chain proof material.

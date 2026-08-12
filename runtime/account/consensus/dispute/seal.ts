@@ -1,15 +1,15 @@
-import type { AccountPeerInput, AccountReplica } from '../../types/account';
-import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
-import { safeStringify } from '../../protocol/serialization';
-import { shortId } from '../../infra/logger';
+import type { AccountPeerInput, AccountReplica } from '../../../types/account';
+import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
+import { safeStringify } from '../../../protocol/serialization';
+import { shortId } from '../../../infra/logger';
 import type { AccountInputSecurityContext } from './deadline-policy';
 import {
   accountInputAck,
   accountInputDisputeSeal,
   accountInputProposal,
-} from './flush';
-import { getAccountStateDomain } from './helpers';
-import { AccountPeerEvidenceError } from '../input/peer-rejection';
+} from '../flush';
+import { getAccountStateDomain } from '../helpers';
+import { AccountPeerEvidenceError } from '../../input/peer-rejection';
 
 export type ValidatedCounterpartyDisputeSeal = {
   hanko: string;

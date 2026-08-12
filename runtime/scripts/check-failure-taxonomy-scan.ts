@@ -69,17 +69,17 @@ const readText = (path: string): string => {
       'runtime/entity/tx/handlers/dispute/finalize-admission.ts',
       'runtime/entity/tx/handlers/dispute/finalize-proof.ts',
     ],
-    'runtime/account/consensus/propose.ts': [
-      'runtime/account/consensus/propose.ts',
-      'runtime/account/consensus/proposal-admission.ts',
-      'runtime/account/consensus/proposal-frame.ts',
-      'runtime/account/consensus/proposal-proof.ts',
-      'runtime/account/consensus/proposal-finalize.ts',
-      'runtime/account/consensus/proposal-transactions.ts',
+    'runtime/account/consensus/proposal/propose.ts': [
+      'runtime/account/consensus/proposal/propose.ts',
+      'runtime/account/consensus/proposal/admission.ts',
+      'runtime/account/consensus/proposal/frame.ts',
+      'runtime/account/consensus/proposal/proof.ts',
+      'runtime/account/consensus/proposal/finalize.ts',
+      'runtime/account/consensus/proposal/transactions.ts',
     ],
     'runtime/account/consensus/index.ts': [
       'runtime/account/consensus/index.ts',
-      'runtime/account/consensus/incoming-preflight.ts',
+      'runtime/account/consensus/incoming/preflight.ts',
     ],
     'runtime/account/tx/apply.ts': ['runtime/account/tx/apply.ts', 'runtime/account/tx/mutation.ts'],
     'runtime/orchestrator/mm-node.ts': [
@@ -566,7 +566,7 @@ for (const [path, markers] of [
     ["createStructuredLogger('account')", 'frame.prev_hash_mismatch', 'frame.state_root_mismatch'],
   ],
   [
-    'runtime/account/consensus/propose.ts',
+    'runtime/account/consensus/proposal/propose.ts',
     ["createStructuredLogger('account')", 'frame.validation_failed', 'proposal.profile'],
   ],
   ['runtime/entity/tx/handlers/account/orderbook-matching.ts', ["createStructuredLogger('orderbook.same')"]],
@@ -810,7 +810,7 @@ const accountConsensusPath = 'runtime/account/consensus/index.ts';
 const accountConsensus = readText(accountConsensusPath);
 assertNotIncludes(accountConsensus, 'console.', accountConsensusPath);
 
-const accountProposePath = 'runtime/account/consensus/propose.ts';
+const accountProposePath = 'runtime/account/consensus/proposal/propose.ts';
 const accountPropose = readText(accountProposePath);
 assertNotIncludes(accountPropose, 'console.', accountProposePath);
 

@@ -1,15 +1,15 @@
-import type { AccountInput, AccountPeerInput, AccountReplica } from '../../types/account';
-import type { AccountInputSecurityContext } from './deadline-policy';
-import { accountInputBoardReseal } from './flush';
-import type { HandleAccountInputResult } from './types';
+import type { AccountInput, AccountPeerInput, AccountReplica } from '../../../types/account';
+import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
+import { accountInputBoardReseal } from '../flush';
+import type { HandleAccountInputResult } from '../types';
 import {
   rejectAccountPeerEvidenceError,
   rejectAccountPeerInput,
-} from '../input/peer-rejection';
+} from '../../input/peer-rejection';
 import {
   type ValidatedCounterpartyDisputeSeal,
   validateCounterpartyDisputeSeal,
-} from './dispute-seal';
+} from '../dispute/seal';
 
 type BoardResealPayload = NonNullable<ReturnType<typeof accountInputBoardReseal>>;
 

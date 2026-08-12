@@ -1,17 +1,17 @@
-import type { AccountReplica } from '../../types/account';
-import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
+import type { AccountReplica } from '../../../types/account';
+import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import {
   buildAccountProofBodyFromJurisdictions,
   getAccountStateDomain,
   isEntityId32,
   type AccountJurisdictionView,
-} from './helpers';
+} from '../helpers';
 import {
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
-} from '../../protocol/dispute/arguments';
-import type { ProposeAccountFrameResult } from './types';
-import { replaceLocalDisputeDraft } from './dispute-seal';
+} from '../../../protocol/dispute/arguments';
+import type { ProposeAccountFrameResult } from '../types';
+import { replaceLocalDisputeDraft } from '../dispute/seal';
 
 type DisputeProjection = {
   proof: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;

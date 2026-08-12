@@ -13,7 +13,7 @@ import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { applyEntityFrame } from '../entity/consensus';
 import { selectSettlementContinuation } from '../entity/consensus/settlement-continuation';
-import { proposeAccountFrame } from '../account/consensus/propose';
+import { proposeAccountFrame } from '../account/consensus/proposal/propose';
 import {
   assertEntityStateRootCache,
   computeCanonicalEntityConsensusStateHash,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createFrameHash } from '../account/consensus/frame';
+import { createFrameHash } from '../account/consensus/frame/hash';
 import {
   createEntityFrameHash,
   createEntityFrameHashFromStateRoot,

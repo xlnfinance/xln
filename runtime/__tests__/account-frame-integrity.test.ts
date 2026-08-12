@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from '../account/state/frame';
-import { canonicalAccountTxForFrameHash } from '../account/consensus/frame';
+import { canonicalAccountTxForFrameHash } from '../account/consensus/frame/hash';
 import type { AccountFrame, Delta } from '../types/account';
 import { decodeAccountFrame } from '../account/validation/frame-validation';
 import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../protocol/integer-ranges';

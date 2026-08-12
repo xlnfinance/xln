@@ -8,7 +8,7 @@ import { applyEntityTx } from '../entity/tx/apply';
 
 import { applyAccountTx } from '../account/tx/apply';
 
-import { proposeAccountFrame } from '../account/consensus/propose';
+import { proposeAccountFrame } from '../account/consensus/proposal/propose';
 
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 

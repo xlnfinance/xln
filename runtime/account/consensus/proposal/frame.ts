@@ -1,20 +1,20 @@
-import type { AccountFrame, AccountReplica, AccountTx } from '../../types/account';
-import { HEAVY_LOGS } from '../../infra/debug-flags';
-import { safeStringify } from '../../protocol/serialization';
-import { decodeAccountFrame } from '../validation/frame-validation';
-import { createStructuredLogger } from '../../infra/logger';
+import type { AccountFrame, AccountReplica, AccountTx } from '../../../types/account';
+import { HEAVY_LOGS } from '../../../infra/debug-flags';
+import { safeStringify } from '../../../protocol/serialization';
+import { decodeAccountFrame } from '../../validation/frame-validation';
+import { createStructuredLogger } from '../../../infra/logger';
 import {
   createFrameHash,
   MAX_FRAME_SIZE_BYTES,
-} from './frame';
-import { isLeftEntity } from '../utils';
-import { shouldIncludeToken } from './helpers';
+} from '../frame/hash';
+import { isLeftEntity } from '../../utils';
+import { shouldIncludeToken } from '../helpers';
 import {
   computeAccountStateRoot,
   computeAccountStateSectionHashes,
   type AccountStateRootTiming,
-} from '../commitment/state-root';
-import type { ProposeAccountFrameResult } from './types';
+} from '../../commitment/state-root';
+import type { ProposeAccountFrameResult } from '../types';
 
 const accountLog = createStructuredLogger('account');
 

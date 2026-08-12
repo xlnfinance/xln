@@ -1,5 +1,5 @@
 import type { AccountReplica, AccountTx } from '../../types/account';
-import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dispute-policy';
+import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dispute/policy';
 import type { EntityState } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
 import { getPerfMs } from '../../infra/time';
