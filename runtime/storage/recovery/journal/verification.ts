@@ -7,7 +7,7 @@ import { computeCanonicalStateHashFromEnv } from '../../canonical-hash';
 import {
   applyCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
-} from '../../entity-lineage';
+} from '../../replica/entity-lineage';
 import {
   buildStorageLiveReplicaMetaCommitment,
   buildStorageReplicaMetaCommitmentFromCheckpointPlan,
@@ -15,7 +15,7 @@ import {
   summarizeStorageReplicaMetaEntries,
   summarizeStorageReplicaMetaFields,
   summarizeStorageReplicaMetaHeads,
-} from '../../replicas';
+} from '../../replica/replicas';
 import type { PersistedFrameJournal } from '../../types';
 import {
   buildDurableRuntimeMachineSnapshot,

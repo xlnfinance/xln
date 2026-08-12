@@ -39,7 +39,7 @@ that drives them. Read the cascade before the services around it.
     LEFT-wins rollback.
 17. `runtime/account/consensus/incoming/ack-commit.ts` — bilateral commit.
 18. `runtime/runtime/frame/lifecycle/storage-failure.ts` — pre/post-WAL failure rules.
-19. `runtime/storage/commit.ts` — the only durable Runtime commit point.
+19. `runtime/storage/commit/commit.ts` — the only durable Runtime commit point.
 20. `runtime/storage/recovery/journal/replay.ts` — rebuild from durable truth.
 
 ### 4. External settlement

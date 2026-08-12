@@ -7,19 +7,19 @@ import {
   computeCanonicalEntityHash,
   computeCanonicalRuntimeStateHash,
 } from './canonical-hash';
-import { encodeBuffer } from './codec';
-import { encodeBinaryPayload } from './binary-codec';
+import { encodeBuffer } from './codec/codec';
+import { encodeBinaryPayload } from './codec/binary-codec';
 import {
   docRefCellKey,
   docRefForDoc,
   docValueKey,
   liveKeyForDoc,
   liveKeyForRef,
-} from './doc-refs';
+} from './schema/doc-refs';
 import {
   prepareAccountStorageDelete,
   prepareAccountStorageLayout,
-} from './account-layout';
+} from './schema/account-layout';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   KEY_LIVE_ENTITY,
@@ -37,13 +37,13 @@ import {
   keyMerkleRootPrefix,
   normalizeEntityId,
 } from './keys';
-import { iterateKeys, readRawOrNull, readValidatedOrNull } from './level';
+import { iterateKeys, readRawOrNull, readValidatedOrNull } from './database/level';
 import {
   validateStorageBookDocValue,
   validateStorageMerkleBranchDocValue,
   validateStorageMerkleLeafDocValue,
   validateStorageMerkleRootDocValue,
-} from './authoritative-schema';
+} from './schema/authoritative-schema';
 import {
   buildHexKeyedMerkle,
   computeRadixMerkleBranchHash,
@@ -55,7 +55,7 @@ import {
   type RadixMerkleRootKind,
   EMPTY_RADIX_MERKLE_ROOT,
 } from '../protocol/radix-merkle';
-import { buildReplicaLookup } from './replicas';
+import { buildReplicaLookup } from './replica/replicas';
 import type {
   RuntimeDbLike,
   StorageDoc,

@@ -193,11 +193,11 @@ import { buffersEqual, safeStringify } from '../protocol/serialization';
 
 import type { ProofBodyStruct } from '../protocol/dispute/proof-body';
 
-import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
+import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/read/projections';
 
-import { validateStorageAccountDocValue } from '../storage/authoritative-schema';
+import { validateStorageAccountDocValue } from '../storage/schema/authoritative-schema';
 
-import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
+import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec/codec';
 
 import { createDefaultDelta } from '../account/state/delta';
 

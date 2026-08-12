@@ -12,7 +12,7 @@ this document in the same release.
   values are sorted by encoded bytes. Numbers, bigints, strings, booleans and
   null have distinct type tags.
 - Runtime storage and WebSocket transport use the tagged MessagePack codec in
-  `runtime/storage/binary-codec.ts`. The leading `0x01` codec byte is part of
+  `runtime/storage/codec/binary-codec.ts`. The leading `0x01` codec byte is part of
   the production format. Storage and wire readers reject every other codec;
   obsolete data requires an explicit offline migration.
 - JSON is a developer representation only. `serializeWsMessageForDebug` and the

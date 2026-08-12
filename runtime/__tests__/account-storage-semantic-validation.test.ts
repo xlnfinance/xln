@@ -6,13 +6,13 @@ import { createSettlementWorkspaceHash } from '../account/tx/handlers/settlement
 import { deriveDelta } from '../account/utils';
 import { validateDelta } from '../account/validation/delta-validation';
 import { FINANCIAL, LIMITS, TOKENS } from '../config/constants';
-import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
-import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
+import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec/codec';
+import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/read/projections';
 import {
   assertStorageAccountDocBinding,
   validateStorageAccountDocValue,
   validateStorageDiffRecordValue,
-} from '../storage/authoritative-schema';
+} from '../storage/schema/authoritative-schema';
 import type { StorageAccountDoc } from '../storage/types';
 import { entity, makeAccount } from './helpers/cross-j';
 

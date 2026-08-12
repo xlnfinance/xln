@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { buildPersistenceInspection, type PersistenceInspectionSummary } from '../storage/persistence-inspect';
+import { buildPersistenceInspection, type PersistenceInspectionSummary } from '../storage/read/persistence-inspect';
 import { safeStringify } from '../protocol/serialization';
 
 type Args = {

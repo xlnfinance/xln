@@ -4,7 +4,7 @@ import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
 import { buildDurableRuntimeMachineSnapshot } from './wal/snapshot';
-import { buildCertifiedEntityLineagePlan } from './entity-lineage';
+import { buildCertifiedEntityLineagePlan } from './replica/entity-lineage';
 
 export type CanonicalFrameEntityHash = {
   entityId: string;

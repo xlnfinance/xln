@@ -14,11 +14,11 @@ import {
   computeCanonicalEntityHashesFromEnv,
   computeCanonicalStateHashFromEnv,
 } from '../canonical-hash';
-import type { PersistedStorageReadApi } from '../persisted-read';
+import type { PersistedStorageReadApi } from '../read/persisted-read';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
-import { assertStorageSafetyOverridesAllowed } from '../safety';
+import { assertStorageSafetyOverridesAllowed } from '../commit/safety';
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
-import { shouldRequireCanonicalStorageAudit } from '../commit';
+import { shouldRequireCanonicalStorageAudit } from '../commit/commit';
 import { restorePersistedEntityGraph } from './entities';
 import {
   resolvePersistedRestoreSource,

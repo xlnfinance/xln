@@ -192,7 +192,7 @@ const CORE_FILES = {
     'account/state/state-clone.ts', // Account candidate/snapshot isolation
     'entity/state-clone.ts',  // Entity candidate/snapshot isolation
     'entity/replica/replica-clone.ts', // Validator-local replica isolation
-    'storage/snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
+    'storage/codec/snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
     'runtime/jurisdiction-api.ts', // J-adapter / on-chain integration surface
   ],
   docs: [
@@ -499,7 +499,7 @@ const RUNTIME_FILES = {
     'account/crypto.ts',
     'account/state/frame.ts',
     'protocol/serialization.ts',
-    'storage/snapshot-coder.ts',
+    'storage/codec/snapshot-coder.ts',
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
@@ -1265,7 +1265,7 @@ xln/
     account/state/state-clone.ts ${fileSizes['runtime/account/state/state-clone.ts'] || '?'} lines - Account candidate isolation
     entity/state-clone.ts        ${fileSizes['runtime/entity/state-clone.ts'] || '?'} lines - Entity candidate isolation
     entity/replica/replica-clone.ts      ${fileSizes['runtime/entity/replica/replica-clone.ts'] || '?'} lines - Replica-local isolation
-    storage/snapshot-coder.ts            ${fileSizes['runtime/storage/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
+    storage/codec/snapshot-coder.ts            ${fileSizes['runtime/storage/codec/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
   docs/
     readme.md                           ${fileSizes['docs/readme.md'] || '?'} lines - Live docs index and reading path
     constraints.md                      ${fileSizes['docs/constraints.md'] || '?'} lines - Why bilateral provable-credit settlement is necessary

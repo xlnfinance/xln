@@ -17,7 +17,7 @@ import {
 } from '../jurisdiction/machine/local-history';
 import { advanceCertifiedBoardFinality } from '../jurisdiction/machine/board-registry';
 import { createEmptyEnv } from '../runtime';
-import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
+import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/read/projections';
 import type { EntityState } from '../entity/types';
 import type { JurisdictionEvent, JurisdictionEventData, ValidatorJEventBlock } from '../types/jurisdiction-events';
 

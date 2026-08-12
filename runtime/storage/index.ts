@@ -1,16 +1,16 @@
-import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec';
+import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec/codec';
 import {
   deleteKeyRange,
   iterateKeys,
   readRawOrNull,
-} from './level';
+} from './database/level';
 import {
   buildCertifiedFramePuts,
   buildHistoryViewPuts,
   pruneHistoryViewRetention,
   readHistoryViewHead,
   reconcileHistoryViews,
-} from './history-view';
+} from './history/history-view';
 import {
   canonicalizeStorageDoc,
   computeStorageFrameHash,
@@ -24,22 +24,22 @@ import {
   maybeRotateSnapshots,
   pruneHistoryBeforeHeight,
   readSnapshotDocs,
-} from './lifecycle';
+} from './database/lifecycle';
 import {
   buildBookDeletionsFromOverlay,
   buildDocPuts,
   mergeOverlayRecordsIntoEnv,
   storageRefsFromOverlay,
-} from './overlay-docs';
+} from './schema/overlay-docs';
 import {
   applyCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
-} from './entity-lineage';
+} from './replica/entity-lineage';
 import {
   listStorageSnapshotReplicaMetas,
   readStorageFrameRecord,
   readStorageHead,
-} from './read';
+} from './read/read';
 import {
   KEY_HEAD,
   HISTORY_VIEW_ACCOUNT_FRAME,
@@ -75,14 +75,14 @@ import {
   parseHistoryViewEntityFrameKey,
   keySnapshotReplicaMetaPrefix,
 } from './keys';
-import { readAccountStorageLayout } from './account-layout';
+import { readAccountStorageLayout } from './schema/account-layout';
 import {
   buildLiveReplicaLookup,
   buildLiveReplicaMetaPlan,
   buildStorageLiveReplicaMetaCommitment,
   buildStorageReplicaMetaCommitmentFromCheckpointPlan,
   summarizeStorageReplicaMetaHeads,
-} from './replicas';
+} from './replica/replicas';
 import { createStructuredLogger } from '../infra/logger';
 import { cumulativeMarksToDurations } from '../infra/performance/profile';
 import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
@@ -124,7 +124,7 @@ import {
   buildReplayVerifiableRuntimeMachineSnapshot,
 } from './wal/snapshot';
 import { buildDurableOutputRetryState } from '../runtime/delivery/durable-output-retry';
-import { verifyStorageSnapshotIntegrity } from './verify';
+import { verifyStorageSnapshotIntegrity } from './read/verify';
 import {
   validateAccountJClaimNodeValue,
   validateCertifiedBoardNodeValue,
@@ -132,11 +132,11 @@ import {
   validateStorageAccountDocValue,
   validateStorageDiffRecordValue,
   validateStorageEntityCoreDocValue,
-} from './authoritative-schema';
+} from './schema/authoritative-schema';
 import {
   validateStoredAccountFrameValue,
   validateStoredEntityFrameValue,
-} from './history-view-schema';
+} from './history/history-view-schema';
 import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 import { buffersEqual } from '../protocol/serialization';
 import type {
@@ -153,34 +153,34 @@ import type {
   StoragePersistenceProgressHook,
   StorageRuntimeConfig,
 } from './types';
-import { resolveStorageRuntimeConfig } from './config';
-export { resolveStorageRuntimeConfig } from './config';
+import { resolveStorageRuntimeConfig } from './database/config';
+export { resolveStorageRuntimeConfig } from './database/config';
 export {
   buildAccountMerkleFromState,
-} from './projections';
+} from './read/projections';
 export {
   readHistoryViewAccountFrames,
   readHistoryViewEntityFrames,
   readHistoryViewRuntimeActivity,
   readHistoryViewHead,
   reconcileHistoryViews,
-} from './history-view';
+} from './history/history-view';
 export {
   inspectStorage,
-} from './inspect';
+} from './read/inspect';
 export {
   seedFreshStorageEpoch,
-} from './lifecycle';
+} from './database/lifecycle';
 export {
   computeStorageFrameHash,
   computeStoragePostStateHash,
 } from './hashes';
 export {
   readStorageOverlayRecordsFromDiffs,
-} from './overlay-docs';
+} from './schema/overlay-docs';
 export {
   verifyStorageSnapshotAtHeight,
-} from './verify';
+} from './read/verify';
 export {
   findStorageLatestSnapshotAtOrBelow,
   hydrateAccountJClaimRootNodesFromStorage,
@@ -196,17 +196,17 @@ export {
   loadEntityViewPageFromStorage,
   readStorageFrameRecord,
   readStorageHead,
-} from './read';
+} from './read/read';
 export {
   verifyStorageTailIntegrity,
-} from './verify';
+} from './read/verify';
 export {
   replaceRestoredStorageBase,
-} from './restore-import';
+} from './database/restore-import';
 
 export type {
   StorageEntityViewPage,
-} from './read';
+} from './read/read';
 
 export type {
   RuntimeDbLike,

@@ -7,7 +7,7 @@ import {
   pruneUnreachableDisputeEvidence,
 } from '../account/dispute/evidence-retention';
 import { hashProofBodyStruct } from '../protocol/dispute/proof-builder';
-import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
+import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/read/projections';
 import type { AccountState } from '../types/account';
 import type { ProofBodyStruct } from '../protocol/dispute/proof-body';
 import { entity, makeAccount } from './helpers/cross-j';

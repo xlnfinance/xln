@@ -82,7 +82,7 @@ export function buildFrozenTree(files: Array<Pick<FrozenFileBaseline, 'path' | '
 }
 
 function resolveImport(source: string, specifier: string, root: string): string | null {
-  if (!specifier.startsWith('.')) return null;
+  if (!specifier.startsWith('../frozen-core')) return null;
   const base = posix.normalize(posix.join(posix.dirname(source), specifier));
   const candidates = [base, ...SOURCE_EXTENSIONS.map((extension) => `${base}${extension}`), ...SOURCE_EXTENSIONS.map((extension) => `${base}/index${extension}`)];
   return candidates.find((candidate) => existsSync(assertSafePath(root, candidate)) && lstatSync(assertSafePath(root, candidate)).isFile()) ?? null;

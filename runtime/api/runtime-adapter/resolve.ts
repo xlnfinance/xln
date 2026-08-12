@@ -15,7 +15,7 @@ import {
   projectAccountDoc,
   projectEntityCoreDoc,
   projectEntityReplicaCoreView,
-} from '../../storage/projections';
+} from '../../storage/read/projections';
 import type {
   StorageAccountDoc,
   StorageEntityCoreDoc,

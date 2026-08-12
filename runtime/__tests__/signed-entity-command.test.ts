@@ -55,8 +55,8 @@ import {
 } from '../jurisdiction/machine/board-registry';
 import { applyRuntimeInput, createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
 import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
-import { hydrateEntityStateFromStorage } from '../storage/hydration';
-import { projectEntityCoreDoc } from '../storage/projections';
+import { hydrateEntityStateFromStorage } from '../storage/read/hydration';
+import { projectEntityCoreDoc } from '../storage/read/projections';
 import type { ConsensusConfig, EntityReplica, EntityState, Proposal } from '../entity/types';
 import type { RuntimeReplica, RoutedEntityInput } from '../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';

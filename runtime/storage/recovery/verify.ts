@@ -2,16 +2,16 @@ import { buildRecoveryJournalFromStorageFrame } from '../queries';
 import {
   buildStorageLiveReplicaMetaCommitment,
   buildStorageReplicaMetaCommitmentFromCheckpointPlan,
-} from '../replicas';
+} from '../replica/replicas';
 import { computeCanonicalStateHashFromEnv } from '../canonical-hash';
-import { buildRuntimeCheckpointLineagePlan } from '../entity-lineage';
+import { buildRuntimeCheckpointLineagePlan } from '../replica/entity-lineage';
 import { buildReplayVerifiableRuntimeMachineSnapshot } from '../wal/snapshot';
 import {
   computeStoragePostStateHash,
   type RuntimeFrame,
 } from '..';
 import type { RuntimeReplica } from '../../runtime/types';
-import type { PersistedStorageReadApi } from '../persisted-read';
+import type { PersistedStorageReadApi } from '../read/persisted-read';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 import type { LoadedRuntimeStorage } from './load';
 

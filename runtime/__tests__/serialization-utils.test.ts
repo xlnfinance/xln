@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { compareStableText, deserializeTaggedJson, safeParse, safeStringify, serializeTaggedJson } from '../protocol/serialization';
-import { decode, encode } from '../storage/snapshot-coder';
+import { decode, encode } from '../storage/codec/snapshot-coder';
 import { applyCommand, createBook, type BookState } from '../orderbook';
 import { createOrderbookExtState, replaceOrderbookPair, type OrderbookExtState } from '../orderbook/types';
 

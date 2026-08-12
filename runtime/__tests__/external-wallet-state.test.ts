@@ -12,7 +12,7 @@ import {
 } from '../runtime';
 import { applySignerEntityExternalWalletSnapshot } from '../entity/auth/signer-wallet';
 import { cloneEntityState } from '../entity/state-clone';
-import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
+import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/read/projections';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';

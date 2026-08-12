@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { ENTITY_TX_TYPES } from '../entity/tx/catalog';
 import { validateEntityTx } from '../entity/tx-validation';
 import { decodeAccountTx } from '../account/tx-validation';
-import { validateStorageEntityCoreDocValue } from '../storage/schema-state-docs';
-import { projectEntityCoreDoc } from '../storage/projections';
+import { validateStorageEntityCoreDocValue } from '../storage/schema/schema-state-docs';
+import { projectEntityCoreDoc } from '../storage/read/projections';
 import { createEntityProposalFixture } from './helpers/entity-proposal-fixture';
 
 const repoRoot = process.cwd();

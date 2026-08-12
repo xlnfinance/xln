@@ -5,7 +5,7 @@ import {
   buildHexKeyedMerkleMaterialized,
 } from '../protocol/radix-merkle';
 import { storageMerkleCellHexKey } from '../storage/hashes';
-import { buildBookDeletionsFromOverlay, storageRefsFromOverlay } from '../storage/overlay-docs';
+import { buildBookDeletionsFromOverlay, storageRefsFromOverlay } from '../storage/schema/overlay-docs';
 import {
   KEY_MERKLE_BRANCH,
   KEY_MERKLE_LEAF,

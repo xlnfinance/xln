@@ -33,8 +33,8 @@ import {
   KEY_SNAPSHOT_REPLICA_META,
   keyCertifiedBoardNode,
 } from '../storage/keys';
-import { measurePrefixBytes } from '../storage/level';
-import { hydrateCertifiedBoardRootNodesFromStorage, readStorageHead } from '../storage/read';
+import { measurePrefixBytes } from '../storage/database/level';
+import { hydrateCertifiedBoardRootNodesFromStorage, readStorageHead } from '../storage/read/read';
 import type { RuntimeDbLike } from '../storage/types';
 import type { CertifiedBoardRecord } from '../types/entity-board-registry';
 import type { EntityReplica, JurisdictionConfig } from '../entity/types';

@@ -6,8 +6,8 @@ import {
   buildHistoryViewPuts,
   readHistoryViewAccountFrames,
   readHistoryViewRuntimeActivity,
-} from '../storage/history-view';
-import { decodeBuffer, encodeBuffer } from '../storage/codec';
+} from '../storage/history/history-view';
+import { decodeBuffer, encodeBuffer } from '../storage/codec/codec';
 import { HISTORY_VIEW_ACCOUNT_FRAME, HISTORY_VIEW_RUNTIME_ACTIVITY } from '../storage/keys';
 import type { RuntimeDbLike } from '../storage/types';
 

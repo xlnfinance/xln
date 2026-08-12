@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   STORAGE_MAX_PHYSICAL_VALUE_BYTES,
   withRebranchedValues,
-} from '../storage/rebranched-db';
+} from '../storage/database/rebranched-db';
 import {
   DeterministicFaults,
   faultMatrixSeeds,

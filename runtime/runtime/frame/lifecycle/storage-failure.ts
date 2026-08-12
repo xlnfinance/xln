@@ -7,9 +7,9 @@ import {
   publishRuntimeFrameTransaction,
 } from '../transaction';
 
-import type { RuntimeFrameCommitStatus } from '../../../storage/commit-status';
+import type { RuntimeFrameCommitStatus } from '../../../storage/commit/commit-status';
 
-export type { RuntimeFrameCommitStatus } from '../../../storage/commit-status';
+export type { RuntimeFrameCommitStatus } from '../../../storage/commit/commit-status';
 
 const haltRuntimeForRecovery = (
   runtime: RuntimeReplica,

@@ -27,7 +27,7 @@ import { computeProfileHash } from '../../entity/profile/profile-signing';
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
-} from '../../storage/entity-lineage';
+} from '../../storage/replica/entity-lineage';
 import type { DeliverableEntityInput, RuntimeReplica } from '../../runtime/types';
 import type { EntityReplica, EntityState, EntityFrame } from '../../entity/types';
 

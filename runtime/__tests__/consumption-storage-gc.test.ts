@@ -22,7 +22,7 @@ import { applyRuntimeStorageChanges } from '../runtime/observability/env-events'
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
 import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../storage';
 import { keyConsumptionNode } from '../storage/keys';
-import { hydrateConsumptionRootNodesFromStorage } from '../storage/read';
+import { hydrateConsumptionRootNodesFromStorage } from '../storage/read/read';
 import type { RuntimeDbLike } from '../storage/types';
 import type { EntityReplica, JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';

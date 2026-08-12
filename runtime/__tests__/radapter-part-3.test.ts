@@ -47,13 +47,13 @@ import {
   MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES,
 } from '../runtime/command/frontier';
 
-import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { decodeBuffer, encodeBuffer } from '../storage/codec/codec';
 
-import { prepareAccountStorageLayout } from '../storage/account-layout';
+import { prepareAccountStorageLayout } from '../storage/schema/account-layout';
 
 import { MAX_PERSISTED_MERKLE_NODE_BYTES, prepareStorageStateHashes } from '../storage/hashes';
 
-import { verifyLiveStorageIntegrity } from '../storage/live-integrity';
+import { verifyLiveStorageIntegrity } from '../storage/read/live-integrity';
 
 import {
   KEY_HEAD,
@@ -72,15 +72,15 @@ import {
   textBytes,
 } from '../storage/keys';
 
-import { projectAccountDoc, projectEntityCoreDoc, projectEntityReplicaCoreView } from '../storage/projections';
+import { projectAccountDoc, projectEntityCoreDoc, projectEntityReplicaCoreView } from '../storage/read/projections';
 
-import { withRebranchedValues } from '../storage/rebranched-db';
+import { withRebranchedValues } from '../storage/database/rebranched-db';
 
 import {
   loadEntityAccountDocFromStorage,
   loadEntityStateFromStorage,
   loadEntityViewPageFromStorage,
-} from '../storage/read';
+} from '../storage/read/read';
 
 import type {
   RuntimeDbLike,

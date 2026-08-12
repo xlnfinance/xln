@@ -15,7 +15,7 @@ import {
 } from '../jurisdiction/machine/registration-evidence';
 import { applyRuntimeTx } from '../runtime/transactions/tx-handlers';
 import { createEmptyEnv } from '../runtime';
-import { buildCertifiedEntityLineagePlan } from '../storage/entity-lineage';
+import { buildCertifiedEntityLineagePlan } from '../storage/replica/entity-lineage';
 import type { EntityReplica, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';

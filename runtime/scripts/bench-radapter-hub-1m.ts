@@ -22,8 +22,8 @@ import {
   forgetRuntimeAdapterClient,
   handleRuntimeAdapterMessage,
 } from '../api/runtime-adapter/server';
-import { encodeBuffer, writeBatch } from '../storage/codec';
-import { docRefCellKey, docRefForDoc, docValueKey, liveKeyForDoc } from '../storage/doc-refs';
+import { encodeBuffer, writeBatch } from '../storage/codec/codec';
+import { docRefCellKey, docRefForDoc, docValueKey, liveKeyForDoc } from '../storage/schema/doc-refs';
 import { prepareStorageStateHashes, storageMerkleCellHexKey } from '../storage/hashes';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
@@ -34,17 +34,17 @@ import {
   keyMerkleLeaf,
   keyMerkleRoot,
 } from '../storage/keys';
-import { inspectStorage } from '../storage/inspect';
-import { createSnapshot, seedFreshStorageEpoch } from '../storage/lifecycle';
+import { inspectStorage } from '../storage/read/inspect';
+import { createSnapshot, seedFreshStorageEpoch } from '../storage/database/lifecycle';
 import { buildHexKeyedMerkleMaterialized, packRadixMerklePath } from '../protocol/radix-merkle';
-import { projectEntityCoreDoc } from '../storage/projections';
+import { projectEntityCoreDoc } from '../storage/read/projections';
 import { deriveRuntimeIdFromSeed } from '../storage/runtime-dbs';
 import {
   listStorageLiveEntityIds,
   loadEntityAccountDocFromStorage,
   loadEntityViewPageFromStorage,
   readStorageHead,
-} from '../storage/read';
+} from '../storage/read/read';
 import type {
   RuntimeDbLike,
   StorageDoc,

@@ -366,7 +366,7 @@ value is:
 5. `runtime/account/consensus/index.ts` — Account entry point and collision
 6. `runtime/account/tx/apply.ts` — financial validation
 7. `runtime/account/tx/mutation.ts` — financial mutation
-8. `runtime/storage/commit.ts` — the only durable Runtime commit point
+8. `runtime/storage/commit/commit.ts` — the only durable Runtime commit point
 
 Then read [the documentation index](docs/readme.md), [active release
 blockers](todo.md), and [the mainnet acceptance bar](docs/mainnet.md). Files

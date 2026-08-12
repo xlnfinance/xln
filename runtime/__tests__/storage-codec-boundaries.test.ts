@@ -4,14 +4,14 @@ import { ethers } from 'ethers';
 import { Level } from 'level';
 
 import type { AccountFrame } from '../types/account';
-import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
-import { decodeBuffer, encodeBuffer, writeBatch } from '../storage/codec';
+import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/codec/binary-codec';
+import { decodeBuffer, encodeBuffer, writeBatch } from '../storage/codec/codec';
 import {
   readHistoryViewAccountFrames,
   readHistoryViewHead,
   readHistoryViewRuntimeActivity,
   type StoredAccountFrameValue,
-} from '../storage/history-view';
+} from '../storage/history/history-view';
 import {
   KEY_HISTORY_VIEW_HEAD,
   STORAGE_SCHEMA_VERSION,
@@ -188,7 +188,7 @@ describe('canonical binary codec', () => {
   });
 
   test('encodes plain browser payloads without a global Buffer polyfill', () => {
-    const moduleUrl = new URL('../storage/binary-codec.ts', import.meta.url).href;
+    const moduleUrl = new URL('../storage/codec/binary-codec.ts', import.meta.url).href;
     const serializationUrl = new URL('../protocol/serialization.ts', import.meta.url).href;
     const child = Bun.spawnSync({
       cmd: ['bun', '-e', [

@@ -17,14 +17,14 @@ import type { RuntimeReplica } from '../../runtime/types';
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
-} from '../entity-lineage';
+} from '../replica/entity-lineage';
 import {
   hydrateAccountJClaimRootNodesFromStorage,
   hydrateCertifiedBoardRootNodesFromStorage,
   hydrateConsumptionRootNodesFromStorage,
 } from '..';
 import { computeCanonicalEntityHash } from '../canonical-hash';
-import type { PersistedStorageReadApi } from '../persisted-read';
+import type { PersistedStorageReadApi } from '../read/persisted-read';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 import { assertPersistedJurisdictionsAvailable, resolvePersistedReplicaIdentity } from './identity';
 import { assertCrossJLocalCohorts } from '../../runtime/routing/cross-j-topology';

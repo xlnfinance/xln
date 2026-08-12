@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { evaluateStorageProgressDeadline } from '../storage/progress-deadline';
+import { evaluateStorageProgressDeadline } from '../storage/commit/progress-deadline';
 
 test('storage deadline measures idle time after the latest completed phase', () => {
   expect(evaluateStorageProgressDeadline(54_000, 61_000, 60_000)).toEqual({

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
-import { encodeBuffer } from '../storage/codec';
-import { readHistoryViewHead } from '../storage/history-view';
-import { inspectStorage } from '../storage/inspect';
+import { encodeBuffer } from '../storage/codec/codec';
+import { readHistoryViewHead } from '../storage/history/history-view';
+import { inspectStorage } from '../storage/read/inspect';
 import { recoverStorageDbFromHistory } from '../storage/index';
 import {
   KEY_HISTORY_VIEW_HEAD,
@@ -10,10 +10,10 @@ import {
   STORAGE_FRAME_FORMAT,
   STORAGE_SCHEMA_VERSION,
 } from '../storage/keys';
-import { seedFreshStorageEpoch } from '../storage/lifecycle';
-import { readStorageHead } from '../storage/read';
+import { seedFreshStorageEpoch } from '../storage/database/lifecycle';
+import { readStorageHead } from '../storage/read/read';
 import type { RuntimeDbLike, StorageHistoryViewHead, StorageHead, StorageRuntimeConfig } from '../storage/types';
-import { verifyStorageTailIntegrity } from '../storage/verify';
+import { verifyStorageTailIntegrity } from '../storage/read/verify';
 import type { RuntimeReplica } from '../runtime/types';
 
 const currentHead = (schemaVersion: number): StorageHead => ({

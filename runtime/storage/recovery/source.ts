@@ -9,7 +9,7 @@ import {
 import type {
   PersistedStorageHandle,
   PersistedStorageReadApi,
-} from '../persisted-read';
+} from '../read/persisted-read';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 
 export type PersistedRestoreSource = {

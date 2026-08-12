@@ -18,7 +18,7 @@ import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import {
   buildRuntimeFrameCommitProofExpectation,
   classifyRuntimeFrameCommitProof,
-} from '../storage/commit';
+} from '../storage/commit/commit';
 import { buildDurableRuntimeMachineSnapshot } from '../storage/wal/snapshot';
 
 const fixture = join(import.meta.dir, 'fixtures/runtime-storage-timeout-child.ts');

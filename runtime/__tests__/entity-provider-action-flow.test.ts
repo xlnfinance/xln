@@ -57,8 +57,8 @@ import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
-import { hydrateEntityStateFromStorage } from '../storage/hydration';
-import { projectEntityCoreDoc } from '../storage/projections';
+import { hydrateEntityStateFromStorage } from '../storage/read/hydration';
+import { projectEntityCoreDoc } from '../storage/read/projections';
 import type { ConsensusConfig, EntityReplica, EntityState } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { attachLiveJAdapter } from '../runtime/jurisdiction/live-jadapters';

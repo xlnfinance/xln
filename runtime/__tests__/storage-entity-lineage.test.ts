@@ -28,15 +28,15 @@ import { initCrontab } from '../entity/scheduler';
 import { applyRuntimeTx } from '../runtime/transactions/tx-handlers';
 import { createEmptyEnv } from '../runtime';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import { decodeBuffer } from '../storage/codec';
+import { decodeBuffer } from '../storage/codec/codec';
 import {
   applyCertifiedEntityLineagePlan,
   beginRuntimeCheckpointLineageRefresh,
   buildCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
   refreshRuntimeCheckpointLineageForEntity,
-} from '../storage/entity-lineage';
-import { buildStorageReplicaMetaCommitment } from '../storage/replicas';
+} from '../storage/replica/entity-lineage';
+import { buildStorageReplicaMetaCommitment } from '../storage/replica/replicas';
 import type { StorageReplicaMeta } from '../storage/types';
 import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';

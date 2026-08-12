@@ -25,7 +25,7 @@ import type { RuntimeReplica } from '../../runtime/types';
 import type { FrameLogEntry } from '../../types/logging';
 import type { PersistedFrameJournal } from '../types';
 import type { PersistenceQueryDeps } from './deps';
-import { requireStorageDbOpen } from '../availability';
+import { requireStorageDbOpen } from '../commit/availability';
 
 export const buildRecoveryJournalFromStorageFrame = (
   frame: RuntimeFrame,

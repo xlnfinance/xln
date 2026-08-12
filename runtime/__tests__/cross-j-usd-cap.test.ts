@@ -11,8 +11,8 @@ import {
 import { applyCommand, createBook, recordAcceptedUsdAskPrice } from '../orderbook';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { isAuthorizedUsdReferenceAsk } from '../entity/tx/handlers/account/orderbook-matching-same-results';
-import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
-import { validateStorageBookDocValue } from '../storage/authoritative-schema';
+import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec/codec';
+import { validateStorageBookDocValue } from '../storage/schema/authoritative-schema';
 import { jref, makeJurisdiction } from './helpers/cross-j';
 import { addr, entity, installJurisdictions, makeState } from './helpers/cross-j';
 import { createEmptyEnv } from '../runtime';

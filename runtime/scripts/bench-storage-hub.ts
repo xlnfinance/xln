@@ -39,7 +39,7 @@ import {
   summarizeStorageReplicaMetaEntries,
   summarizeStorageReplicaMetaFields,
   summarizeStorageReplicaMetaHeads,
-} from '../storage/replicas';
+} from '../storage/replica/replicas';
 
 type Participant = {
   entityId: string;

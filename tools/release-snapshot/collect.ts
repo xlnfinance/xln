@@ -122,7 +122,7 @@ function dependencySpecifiers(text: string): string[] {
 }
 
 function resolveDependency(from: string, specifier: string, paths: Set<string>): string | null {
-  if (!specifier.startsWith('.')) return null;
+  if (!specifier.startsWith('../release-snapshot')) return null;
   const base = posix.normalize(posix.join(posix.dirname(from), specifier));
   const candidates = [base, ...['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.svelte', '.sol'].map((ext) => `${base}${ext}`)];
   candidates.push(...['.ts', '.tsx', '.js', '.jsx', '.svelte'].map((ext) => `${base}/index${ext}`));

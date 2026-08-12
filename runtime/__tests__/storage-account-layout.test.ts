@@ -5,10 +5,10 @@ import {
   prepareAccountStorageLayout,
   readAccountStorageLayout,
   STORAGE_ACCOUNT_FIELD_TAG,
-} from '../storage/account-layout';
-import { encodeBuffer } from '../storage/codec';
+} from '../storage/schema/account-layout';
+import { encodeBuffer } from '../storage/codec/codec';
 import { KEY_REBRANCH_NODE, keyLiveAccount, keyLiveAccountField } from '../storage/keys';
-import { withRebranchedValues } from '../storage/rebranched-db';
+import { withRebranchedValues } from '../storage/database/rebranched-db';
 import type { RuntimeDbLike, StorageAccountDoc } from '../storage/types';
 import { MemoryRuntimeDb } from './fixtures/memory-runtime-db';
 

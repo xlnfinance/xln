@@ -106,8 +106,8 @@ operational evidence for restart/load stability, not unit-test substitutes.
 - `runtime/account/tx/handlers/swap/resolve/index.ts`
 - `runtime/extensions/cross-j/index.ts`
 - `runtime/extensions/cross-j/orderbook.ts`
-- `runtime/storage/read.ts`
-- `runtime/storage/projections.ts`
+- `runtime/storage/read/read.ts`
+- `runtime/storage/read/projections.ts`
 - `runtime/storage/canonical-hash.ts`
 - `runtime/jurisdiction/adapter/rpc.ts`
 - `runtime/jurisdiction/adapter/watcher.ts`

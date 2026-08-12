@@ -19,9 +19,9 @@ import { getAccountJClaimNodeStore } from '../entity/account/account-j-claim-nod
 import { generateLazyEntityId } from '../entity/factory';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 import { dbRootPath } from '../runtime/platform';
-import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { decodeBuffer, encodeBuffer } from '../storage/codec/codec';
 import { keyAccountJClaimNode, keyDiff } from '../storage/keys';
-import { hydrateAccountJClaimRootNodesFromStorage } from '../storage/read';
+import { hydrateAccountJClaimRootNodesFromStorage } from '../storage/read/read';
 import type { StorageDiffRecord } from '../storage/types';
 import type { AccountJClaimNode, AccountJClaimRecord } from '../types/finance/account-j-claims';
 

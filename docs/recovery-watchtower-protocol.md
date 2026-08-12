@@ -35,7 +35,7 @@ XLN already has most of the raw material:
 - Dispute proof state: `abiProofBody`, `currentDisputeProofHanko`, `counterpartyDisputeProofHanko`, `disputeProofNoncesByHash`, and `disputeProofBodiesByHash`.
 - `buildAccountProofBody()` and `createDisputeProofHash()` in `runtime/protocol/dispute/proof-builder.ts`.
 - durable account frame history via `RuntimeHistoryRecord` materialized by
-  `runtime/storage/history-view.ts` from the authoritative Runtime WAL.
+  `runtime/storage/history/history-view.ts` from the authoritative Runtime WAL.
 - storage Merkle roots used by `stateHash`, documented in `docs/merkle.md`.
 - `entity-crontab.ts` already handles pending-frame resend, stale pending-frame detection, HTLC timeouts, rollback suggestions, and rebalance automation.
 - the native wallet plan already says relays/watchtowers may notify and prove, but must not hold spend-capable user keys.

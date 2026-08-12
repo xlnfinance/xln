@@ -5,7 +5,7 @@ import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '
 import { hashHelloMessage, hashRuntimeWsFrame, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from '../network/p2p/auth/hello-auth';
 import { XLN_PROTOCOL_VERSION } from '../protocol/version';
-import { encodeBinaryPayload } from '../storage/binary-codec';
+import { encodeBinaryPayload } from '../storage/codec/binary-codec';
 import type { ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 
 const makeAuthedHello = (

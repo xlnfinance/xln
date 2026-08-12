@@ -22,7 +22,7 @@ import {
 import { generateLazyEntityId } from '../entity/factory';
 import { recordAccountFrameHistory } from '../runtime/observability/env-events';
 import { closeHistoryViewDb } from '../storage/runtime-dbs';
-import { pruneHistoryBeforeHeight } from '../storage/lifecycle';
+import { pruneHistoryBeforeHeight } from '../storage/database/lifecycle';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 

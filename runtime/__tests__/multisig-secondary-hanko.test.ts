@@ -41,7 +41,7 @@ import {
   hydrateEntityStateFromStorage,
   projectAccountDoc,
   projectEntityCoreDoc,
-} from '../storage/projections';
+} from '../storage/read/projections';
 import {
   cacheCommittedConsumptionNodeChanges,
   getConsumptionNodeStore,

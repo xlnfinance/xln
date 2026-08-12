@@ -23,8 +23,8 @@ import {
 import { buildPendingNetworkOutputs, getReliableOutputIdentity } from '../runtime/routing/output-routing';
 import { createEmptyEnv } from '../runtime';
 import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
-import { hydrateAccountDocFromStorage } from '../storage/hydration';
-import { projectAccountDoc } from '../storage/projections';
+import { hydrateAccountDocFromStorage } from '../storage/read/hydration';
+import { projectAccountDoc } from '../storage/read/projections';
 import type { AccountInput } from '../types/account';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RoutedEntityInput } from '../runtime/types';

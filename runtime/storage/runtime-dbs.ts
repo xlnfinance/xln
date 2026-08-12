@@ -9,8 +9,8 @@ import {
   seedFreshStorageEpoch,
   verifyStorageTailIntegrity,
 } from './';
-import { assertStorageSafetyOverridesAllowed } from './safety';
-import { withRebranchedValues } from './rebranched-db';
+import { assertStorageSafetyOverridesAllowed } from './commit/safety';
+import { withRebranchedValues } from './database/rebranched-db';
 import {
   fsyncStorageParentDirectory,
   writeDurableFile,

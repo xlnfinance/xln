@@ -3,8 +3,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   validateStorageBookDocValue,
   validateStorageEntityCoreDocValue,
-} from '../storage/authoritative-schema';
-import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
+} from '../storage/schema/authoritative-schema';
+import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec/codec';
 import { prepareStorageStateHashes } from '../storage/hashes';
 import {
   KEY_HEAD,
@@ -20,17 +20,17 @@ import {
 import {
   readAccountStorageLayout,
   STORAGE_ACCOUNT_FIELD_TAG,
-} from '../storage/account-layout';
+} from '../storage/schema/account-layout';
 import {
   createSnapshot,
   maybeRotateSnapshots,
   readSnapshotDocs,
   seedFreshStorageEpoch,
-} from '../storage/lifecycle';
+} from '../storage/database/lifecycle';
 import {
   STORAGE_MAX_PHYSICAL_VALUE_BYTES,
   withRebranchedValues,
-} from '../storage/rebranched-db';
+} from '../storage/database/rebranched-db';
 import type {
   RuntimeDbLike,
   StorageDoc,

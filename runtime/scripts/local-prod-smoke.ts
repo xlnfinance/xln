@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Level } from 'level';
 import { readStorageHead } from '../storage';
-import { withRebranchedValues } from '../storage/rebranched-db';
+import { withRebranchedValues } from '../storage/database/rebranched-db';
 import type { StorageHead } from '../storage/types';
 import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';
 import {

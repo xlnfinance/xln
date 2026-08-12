@@ -98,11 +98,11 @@ import { installCanonicalRegistrationEvidence } from './helpers/registration-evi
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
-} from '../storage/entity-lineage';
+} from '../storage/replica/entity-lineage';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/machine/event-observation';
 import { buildLocalJPrefixAttestation } from '../jurisdiction/machine/j-prefix-consensus';
-import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
+import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/read/projections';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/observability/history-retention';
 import { validateEntityTx } from '../entity/tx-validation';
 import {

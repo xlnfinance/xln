@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { decodeBinaryPayload } from '@xln/runtime/storage/binary-codec';
-  import { STORAGE_ACCOUNT_FIELD_BY_TAG } from '@xln/runtime/storage/account-field-tags';
-  import { STORAGE_MERKLE_NAMESPACE_BY_TAG } from '@xln/runtime/storage/merkle-namespace-tags';
+  import { decodeBinaryPayload } from '@xln/runtime/storage/codec/binary-codec';
+  import { STORAGE_ACCOUNT_FIELD_BY_TAG } from '@xln/runtime/storage/schema/account-field-tags';
+  import { STORAGE_MERKLE_NAMESPACE_BY_TAG } from '@xln/runtime/storage/schema/merkle-namespace-tags';
   import { compareStableText } from '$lib/utils/stableSort';
 
   type DbKindFilter = 'all' | 'core' | 'infra';

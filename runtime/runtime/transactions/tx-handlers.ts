@@ -41,7 +41,7 @@ import { encodeBoard, hashBoard } from '../../entity/factory';
 import { isNumberedEntity, toEntityId } from '../../protocol/identity';
 import { getCertifiedBoardStackKey } from '../../jurisdiction/machine/board-registry';
 import { cloneEntityState } from '../../entity/state-clone';
-import { buildRuntimeCheckpointLineagePlan } from '../../storage/entity-lineage';
+import { buildRuntimeCheckpointLineagePlan } from '../../storage/replica/entity-lineage';
 import {
   assertCertifiedRegistrationEvidence,
   computeRegistrationEvidenceClaimHash,

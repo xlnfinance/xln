@@ -11,7 +11,7 @@ import {
 import type { RuntimeAdapterWireMessage } from '@xln/runtime/api/runtime-adapter/wire-schema';
 import { XLN_PROTOCOL_VERSION } from '@xln/runtime/protocol/version';
 import { deserializeTaggedJson, serializeTaggedJson } from '@xln/runtime/protocol/serialization';
-import { decodeBinaryPayload } from '@xln/runtime/storage/binary-codec';
+import { decodeBinaryPayload } from '@xln/runtime/storage/codec/binary-codec';
 import { registerDebugSurface } from './debugSurface';
 
 type WireBytes = Uint8Array | ArrayBuffer | ArrayBufferView;

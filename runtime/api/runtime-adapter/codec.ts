@@ -1,5 +1,5 @@
 import { deserializeTaggedJson, serializeTaggedJson } from '../../protocol/serialization';
-import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../storage/binary-codec';
+import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../storage/codec/binary-codec';
 import type { Codec } from '../../protocol/codec';
 import {
   validateRuntimeAdapterWireMessage,

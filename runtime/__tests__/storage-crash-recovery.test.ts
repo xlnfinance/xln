@@ -10,9 +10,9 @@ import {
   putHistoryViewCommit,
   readHistoryViewHead,
   readHistoryViewRuntimeActivity,
-} from '../storage/history-view';
-import { decodeBuffer, decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
-import { liveKeyForDoc } from '../storage/doc-refs';
+} from '../storage/history/history-view';
+import { decodeBuffer, decodeValidatedBuffer, encodeBuffer } from '../storage/codec/codec';
+import { liveKeyForDoc } from '../storage/schema/doc-refs';
 import { prepareStorageStateHashes } from '../storage/hashes';
 import {
   KEY_HEAD,
@@ -49,7 +49,7 @@ import {
 import { getConsumptionNodeStore } from '../entity/consumption/consumption-store';
 import { createEmptyEnv } from '../runtime';
 import { createBook } from '../orderbook/core';
-import { validateStorageBookDocValue } from '../storage/authoritative-schema';
+import { validateStorageBookDocValue } from '../storage/schema/authoritative-schema';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
 
 const entityId = `0x${'11'.repeat(32)}`;

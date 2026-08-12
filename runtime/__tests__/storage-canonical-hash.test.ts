@@ -6,12 +6,12 @@ import {
   computeCanonicalStateHashFromEnv,
 } from '../storage/canonical-hash';
 import { computeStorageFrameHash, computeStoragePostStateHash } from '../storage/hashes';
-import { encodeBuffer } from '../storage/codec';
-import { buildStorageLiveReplicaMetaCommitment } from '../storage/replicas';
+import { encodeBuffer } from '../storage/codec/codec';
+import { buildStorageLiveReplicaMetaCommitment } from '../storage/replica/replicas';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { applyCommand, createBook, replaceOrderbookPair } from '../orderbook';
-import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../storage/projections';
+import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../storage/read/projections';
 import { cloneEntityState } from '../entity/state-clone';
 import type { RuntimeFrame } from '../storage/types';
 import type { AccountReplica } from '../types/account';

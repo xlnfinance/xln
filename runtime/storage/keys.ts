@@ -1,8 +1,8 @@
 import type { RadixMerkleRadix } from '../protocol/radix-merkle';
 import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../infra/integrity-checksum';
-import { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './merkle-namespace-tags';
+import { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './schema/merkle-namespace-tags';
 
-export type { StorageMerkleNamespace } from './merkle-namespace-tags';
+export type { StorageMerkleNamespace } from './schema/merkle-namespace-tags';
 
 /**
  * xln testnet has one canonical storage format. We deliberately do not carry

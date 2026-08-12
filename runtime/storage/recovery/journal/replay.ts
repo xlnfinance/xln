@@ -10,10 +10,10 @@ import {
   type RuntimeFrame,
 } from '../..';
 import { computeCanonicalEntityHashesFromEnv } from '../../canonical-hash';
-import type { PersistedStorageReadApi } from '../../persisted-read';
+import type { PersistedStorageReadApi } from '../../read/persisted-read';
 import { buildRecoveryJournalFromStorageFrame } from '../../queries';
 import type { RuntimeStorageApiDeps } from '../../runtime-storage-deps';
-import { assertStorageSafetyOverridesAllowed } from '../../safety';
+import { assertStorageSafetyOverridesAllowed } from '../../commit/safety';
 import type { LoadedRuntimeStorage } from '../load';
 import { verifyPersistedFrameState } from '../verify';
 

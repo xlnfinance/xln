@@ -14,7 +14,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import { cloneEntityState } from '../entity/state-clone';
 import { applyEntityTx } from '../entity/tx/apply';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { decodeBuffer, encodeBuffer } from '../storage/codec/codec';
 import {
   buildCanonicalEnvSnapshot,
   buildDurableRuntimeMachineSnapshot,

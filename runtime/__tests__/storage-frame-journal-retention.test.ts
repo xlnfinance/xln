@@ -34,8 +34,8 @@ import {
   verifyStorageTailIntegrity,
 } from '../storage';
 import { getPerfMs } from '../infra/time';
-import { decodeBuffer, encodeBuffer, writeBatch } from '../storage/codec';
-import { readRawOrNull } from '../storage/level';
+import { decodeBuffer, encodeBuffer, writeBatch } from '../storage/codec/codec';
+import { readRawOrNull } from '../storage/database/level';
 import {
   KEY_HEAD,
   keyDiff,

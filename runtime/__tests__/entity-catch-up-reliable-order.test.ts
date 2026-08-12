@@ -53,12 +53,12 @@ import {
   computeCanonicalRuntimeStateHash,
   computeCanonicalStateHashFromEnv,
 } from '../storage/canonical-hash';
-import { buildStorageReplicaMetaCommitment } from '../storage/replicas';
+import { buildStorageReplicaMetaCommitment } from '../storage/replica/replicas';
 import { computeStoragePostStateHash } from '../storage/hashes';
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
-} from '../storage/entity-lineage';
+} from '../storage/replica/entity-lineage';
 import type { DeliverableEntityInput, RuntimeReplica } from '../runtime/types';
 import type { EntityReplica, EntityState, EntityFrame } from '../entity/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';

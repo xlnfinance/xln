@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../runtime';
-import { encodeBuffer } from '../storage/codec';
+import { encodeBuffer } from '../storage/codec/codec';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';
 import { KEY_HEAD, STORAGE_SCHEMA_VERSION, keyDiff } from '../storage/keys';
-import { projectEntityCoreDoc } from '../storage/projections';
-import { loadEntityStatesAtHeightFromStorage } from '../storage/read';
+import { projectEntityCoreDoc } from '../storage/read/projections';
+import { loadEntityStatesAtHeightFromStorage } from '../storage/read/read';
 import type { RuntimeDbLike, StorageDiffRecord, StorageHead } from '../storage/types';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 

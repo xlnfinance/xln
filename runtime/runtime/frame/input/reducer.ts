@@ -5,7 +5,7 @@ import { createStructuredLogger } from '../../../infra/logger';
 import {
   beginRuntimeCheckpointLineageRefresh,
   refreshRuntimeCheckpointLineageForEntity,
-} from '../../../storage/entity-lineage';
+} from '../../../storage/replica/entity-lineage';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import { DEBUG } from '../../../infra/debug-flags';

@@ -16,12 +16,12 @@ import { buildQuorumHanko } from '../hanko/signing';
 import { handleScheduledWakeEntityTx } from '../entity/tx/handlers/scheduled-wake';
 import { safeStringify } from '../protocol/serialization';
 import { createEmptyEnv } from '../runtime';
-import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { decodeBuffer, encodeBuffer } from '../storage/codec/codec';
 import {
   hydrateEntityStateFromStorage,
   projectAccountDoc,
   projectEntityCoreDoc,
-} from '../storage/projections';
+} from '../storage/read/projections';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';

@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Level } from 'level';
 
-import { pruneHistoryViewRetention } from '../storage/history-view';
+import { pruneHistoryViewRetention } from '../storage/history/history-view';
 import {
   keyHistoryViewAccountFrame,
   keyHistoryViewEntityFrame,
   keyHistoryViewRuntimeActivity,
   STORAGE_SCHEMA_VERSION,
 } from '../storage/keys';
-import { readRawOrNull } from '../storage/level';
+import { readRawOrNull } from '../storage/database/level';
 import type { StorageRuntimeConfig } from '../storage/types';
 
 const roots: string[] = [];

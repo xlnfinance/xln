@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { getJEventJurisdictionRef } from '../jurisdiction/machine/event-observation';
-import { decode, encode } from '../storage/snapshot-coder';
+import { decode, encode } from '../storage/codec/snapshot-coder';
 import { cloneEntityState } from '../entity/state-clone';
 import {
   applyJEventRange,
@@ -19,7 +19,7 @@ import { createEmptyEnv, generateLazyEntityId } from '../runtime';
 import { applyJEvent } from '../entity/tx/j-events';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
 import { applyEntityTx } from '../entity/tx/apply';
-import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
+import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/read/projections';
 import type { StorageEntityCoreDoc } from '../storage/types';
 import type { ConsensusConfig, EntityState, JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';

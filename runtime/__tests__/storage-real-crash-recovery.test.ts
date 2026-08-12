@@ -31,7 +31,7 @@ import {
 import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
 import { dbRootPath } from '../runtime/platform';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import { buildCertifiedEntityLineagePlan } from '../storage/entity-lineage';
+import { buildCertifiedEntityLineagePlan } from '../storage/replica/entity-lineage';
 import {
   readStorageHead,
   readHistoryViewHead,
@@ -41,9 +41,9 @@ import {
   recoverStorageDbFromHistory,
   type StoragePersistenceBoundary,
 } from '../storage';
-import { decodeBuffer, encodeBuffer } from '../storage/codec';
-import { createSnapshot } from '../storage/lifecycle';
-import { iterateKeys, readRawOrNull } from '../storage/level';
+import { decodeBuffer, encodeBuffer } from '../storage/codec/codec';
+import { createSnapshot } from '../storage/database/lifecycle';
+import { iterateKeys, readRawOrNull } from '../storage/database/level';
 import {
   KEY_HEAD,
   keyCertifiedBoardNode,

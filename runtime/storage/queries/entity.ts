@@ -10,12 +10,12 @@ import {
   resolveRuntimeWalDbPath,
   resolveStorageDbPath,
 } from '../runtime-dbs';
-import { verifyStorageTailIntegrity } from '../verify';
+import { verifyStorageTailIntegrity } from '../read/verify';
 import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/machine/local-history';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { PersistenceQueryDeps } from './deps';
-import { requireStorageDbOpen } from '../availability';
+import { requireStorageDbOpen } from '../commit/availability';
 
 /**
  * Pagination understood by the persisted Entity view.

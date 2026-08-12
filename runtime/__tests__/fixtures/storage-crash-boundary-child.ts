@@ -66,7 +66,7 @@ import {
   saveRuntimeFrameToStorage,
   type StoragePersistenceBoundary,
 } from '../../storage';
-import { encodeBuffer } from '../../storage/codec';
+import { encodeBuffer } from '../../storage/codec/codec';
 import { KEY_HEAD } from '../../storage/keys';
 import { getPerfMs } from '../../infra/time';
 import type { CertifiedRegistrationEvidence, JReplica } from '../../types/jurisdiction-runtime';

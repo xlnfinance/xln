@@ -16,8 +16,8 @@ import {
   validateStorageMerkleLeafDocValue,
   validateStorageMerkleRootDocValue,
   validateStorageSnapshotManifestValue,
-} from '../storage/authoritative-schema';
-import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
+} from '../storage/schema/authoritative-schema';
+import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec/codec';
 import { createEmptyEnv } from '../runtime';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { computeStorageFrameHash } from '../storage/hashes';

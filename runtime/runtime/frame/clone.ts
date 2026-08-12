@@ -6,7 +6,7 @@ import { copyDeterministicHtlcTestSecretCapability } from '../../protocol/htlc/t
 import { copyLocalRuntimeAdapterCommandAuthorization } from '../command/frontier-auth';
 import { copyLocalNumberedRegistrationAuthorization } from '../registration/numbered-registration-auth';
 import { buildCanonicalRuntimeStateSnapshot } from '../../storage/wal/snapshot';
-import { encodeBuffer } from '../../storage/codec';
+import { encodeBuffer } from '../../storage/codec/codec';
 import { copyLocalEntityProviderActionRuntimeTxAuthorization } from '../registration/entity-provider-action-submit-auth';
 import { copyLocalJImportResultRuntimeTxAuthorization } from '../jurisdiction/jurisdiction-import';
 import { copyLocalJSubmitRuntimeTxAuthorization } from '../jurisdiction/j-submit-state';

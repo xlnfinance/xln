@@ -19,7 +19,7 @@ import {
   registerSignerKey,
 } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { readHistoryViewRuntimeActivity } from '../storage/history-view';
+import { readHistoryViewRuntimeActivity } from '../storage/history/history-view';
 import { keyHistoryViewRuntimeActivity } from '../storage/keys';
 import { readFrameReceipts } from '../api/server/rpc-ws';
 import { createTestJReplica } from './helpers/j-replica';

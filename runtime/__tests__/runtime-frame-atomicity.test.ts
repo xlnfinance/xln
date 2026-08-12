@@ -26,7 +26,7 @@ import {
   createReliableDeliveryReceipt,
   getInputReliableIdentity,
 } from '../runtime/reliable/reliable-delivery.ts';
-import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { decodeBuffer, encodeBuffer } from '../storage/codec/codec';
 import { KEY_HEAD } from '../storage/keys';
 import { readStorageHead } from '../storage';
 import {
@@ -46,7 +46,7 @@ import {
   cloneAccountInputWithoutPostCommitHankos,
 } from '../entity/consensus/input/hanko-witness';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/machine/registration-evidence';
-import { readStorageFrameRecord } from '../storage/read';
+import { readStorageFrameRecord } from '../storage/read/read';
 import { createTestJReplica } from './helpers/j-replica';
 
 const TEST_RUN_ID = `${process.pid}-${Date.now()}`;

@@ -32,7 +32,7 @@ import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { createDefaultDelta } from '../account/state/delta';
 import { LIMITS } from '../config/constants';
-import { encodeBuffer } from '../storage/codec';
+import { encodeBuffer } from '../storage/codec/codec';
 import { makeAccount as makeCanonicalAccount } from './helpers/cross-j';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;

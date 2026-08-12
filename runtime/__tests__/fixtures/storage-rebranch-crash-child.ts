@@ -1,6 +1,6 @@
 import { Level } from 'level';
 
-import { withRebranchedValues } from '../../storage/rebranched-db';
+import { withRebranchedValues } from '../../storage/database/rebranched-db';
 
 const [dbPath, stage] = Bun.argv.slice(2);
 if (!dbPath || !stage) throw new Error('rebranch crash fixture requires db path and stage');

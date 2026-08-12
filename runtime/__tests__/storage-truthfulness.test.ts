@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../runtime';
-import { requireStorageDbOpen } from '../storage/availability';
+import { requireStorageDbOpen } from '../storage/commit/availability';
 import { readAccountFrameHistory } from '../storage/queries/history';
-import { loadEntityStateFromStorage } from '../storage/read';
+import { loadEntityStateFromStorage } from '../storage/read/read';
 
 test('storage availability distinguishes an unavailable handle from an empty database', async () => {
   await expect(requireStorageDbOpen(

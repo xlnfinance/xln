@@ -8,7 +8,7 @@ import { KEY_REBRANCH_NODE } from '../storage/keys';
 import {
   STORAGE_MAX_PHYSICAL_VALUE_BYTES,
   withRebranchedValues,
-} from '../storage/rebranched-db';
+} from '../storage/database/rebranched-db';
 
 const fixture = join(import.meta.dir, 'fixtures/storage-rebranch-crash-child.ts');
 const roots: string[] = [];

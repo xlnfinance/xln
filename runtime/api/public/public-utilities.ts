@@ -46,7 +46,7 @@ export {
   validateAccountDeltas,
   validateDelta,
 } from '../../account/validation/delta-validation';
-export { decode, encode } from '../../storage/snapshot-coder';
+export { decode, encode } from '../../storage/codec/snapshot-coder';
 export {
   createReplicaKey,
   DEFAULT_RUNTIME_HOST,
@@ -74,7 +74,7 @@ export {
   getEntityDisplayNumber,
 } from '../../protocol/identity-display';
 export { formatReplicaUri, parseReplicaUri } from '../../protocol/identity-uri';
-export { clearDatabase } from '../../storage/clear-database';
+export { clearDatabase } from '../../storage/database/clear-database';
 export { generateEntityAvatar, generateSignerAvatar, getEntityDisplayInfo, getSignerDisplayInfo, hashToAvatar } from '../../presentation/identity-display';
 export { getEntityShortId } from '../../presentation/identity-display';
 export { safeStringify } from '../../protocol/serialization';

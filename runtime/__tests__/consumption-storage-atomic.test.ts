@@ -27,14 +27,14 @@ import {
 } from '../entity/consensus/state-root';
 import { applyRuntimeStorageChanges } from '../runtime/observability/env-events';
 import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../storage';
-import { decodeBuffer } from '../storage/codec';
+import { decodeBuffer } from '../storage/codec/codec';
 import { KEY_HEAD, keyConsumptionNode, keyDiff, keyLiveEntity } from '../storage/keys';
 import type { RuntimeDbLike, StorageEntityCoreDoc, StorageHead } from '../storage/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import type { JurisdictionConfig } from '../entity/types';
 import { getPerfMs } from '../infra/time';
 import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
-import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
+import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/read/projections';
 import { LIMITS } from '../config/constants';
 
 type RecordedDb = RuntimeDbLike & { writes: string[][] };

@@ -13,9 +13,9 @@ import {
 } from '../../jurisdiction/machine/local-history';
 import { ensureRuntimeInfrastructure } from '../../runtime/infrastructure/runtime-infrastructure';
 import type { RuntimeReplica } from '../../runtime/types';
-import { clearDatabase } from '../clear-database';
+import { clearDatabase } from '../database/clear-database';
 import { computeCanonicalEntityHash, computeCanonicalRuntimeStateHash } from '../canonical-hash';
-import { buildCertifiedEntityLineagePlan } from '../entity-lineage';
+import { buildCertifiedEntityLineagePlan } from '../replica/entity-lineage';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,
@@ -23,8 +23,8 @@ import {
   DEFAULT_SNAPSHOT_PERIOD_FRAMES,
   STORAGE_SCHEMA_VERSION,
 } from '../keys';
-import { hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc } from '../projections';
-import { buildStorageReplicaMetaCommitment } from '../replicas';
+import { hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc } from '../read/projections';
+import { buildStorageReplicaMetaCommitment } from '../replica/replicas';
 import { replaceRestoredStorageBase } from '../index';
 import { type StorageDbRole, withStorageWriterLock } from '../runtime-dbs';
 import type { StorageDoc, StoragePersistenceBoundaryHook } from '../types';
