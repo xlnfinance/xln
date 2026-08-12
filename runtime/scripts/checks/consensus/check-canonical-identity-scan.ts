@@ -150,7 +150,7 @@ for (const [path, markers] of [
     'jurisdiction identity uses stack refs before display names',
     "expect(getJReplicaByJurisdictionRef(env, 'Canonical')).toBeUndefined();",
   ]],
-  ['runtime/__tests__/prod-startup-wiring.test.ts', [
+  ['runtime/__tests__/operations/health/prod-startup-wiring.test.ts', [
     "expect(hubNode).not.toContain(\"normalized === 'arrakis'\");",
     "expect(mmNode).not.toContain('sameJurisdictionIdentityOrNameOnlyFallback');",
     "expect(reserveBootstrap).not.toContain('sameJurisdictionRefOrNameFallback');",

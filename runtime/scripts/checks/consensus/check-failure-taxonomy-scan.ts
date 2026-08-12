@@ -109,9 +109,9 @@ const readText = (path: string): string => {
       'runtime/__tests__/audit-failfast-regressions-part-6.test.ts',
     ],
     'runtime/__tests__/radapter.test.ts': [
-      'runtime/__tests__/radapter-part-1.test.ts',
-      'runtime/__tests__/radapter-part-2.test.ts',
-      'runtime/__tests__/radapter-part-3.test.ts',
+      'runtime/__tests__/api/runtime-adapter/radapter-part-1.test.ts',
+      'runtime/__tests__/api/runtime-adapter/radapter-part-2.test.ts',
+      'runtime/__tests__/api/runtime-adapter/radapter-part-3.test.ts',
     ],
   };
   return (splitSources[path] ?? [path]).map(file => readFileSync(file, 'utf8')).join('\n');
@@ -904,10 +904,10 @@ for (const [path, markers] of [
   ],
   ['runtime/__tests__/runtime/lifecycle/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
   [
-    'runtime/__tests__/health-redaction.test.ts',
+    'runtime/__tests__/operations/health/health-redaction.test.ts',
     ['public aggregated health strips child process ids', 'Latest /api/health child refresh window'],
   ],
-  ['runtime/__tests__/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
+  ['runtime/__tests__/operations/health/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
   [
     'runtime/__tests__/entity-factory-logging.test.ts',
     ['lazy entity creation uses structured logging without direct console output', 'entity.factory'],
@@ -959,7 +959,7 @@ for (const [path, markers] of [
     ['runtime storage DB boundary uses structured logging without direct console output', 'runtime.storage'],
   ],
   [
-    'runtime/__tests__/watchtower-standalone.test.ts',
+    'runtime/__tests__/security/watchtower/watchtower-standalone.test.ts',
     ['uses structured logging without direct console output', 'watchtower.standalone'],
   ],
   [
@@ -979,7 +979,7 @@ for (const [path, markers] of [
     ['jurisdiction loader diagnostics', 'runtime.jurisdiction_loader'],
   ],
   [
-    'runtime/__tests__/external-wallet-api.test.ts',
+    'runtime/__tests__/api/server/external-wallet-api.test.ts',
     ['external wallet API uses structured logging instead of raw console output', 'server.external_wallet'],
   ],
   [

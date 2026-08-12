@@ -103,7 +103,7 @@ export const buildMainnetPreflightSteps = (
         'runtime/__tests__/derive-delta-property.test.ts',
         'runtime/__tests__/env-events-audit-commit.test.ts',
         'runtime/__tests__/capped-testnet-gate.test.ts',
-        'runtime/__tests__/prod-health-smoke.test.ts',
+        'runtime/__tests__/operations/health/prod-health-smoke.test.ts',
       ].join(' '),
       timeoutMs: 240_000,
     },

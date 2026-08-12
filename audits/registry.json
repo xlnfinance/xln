@@ -337,7 +337,7 @@
         "tests/frontend/payment-panel-view.test.ts",
         "tests/frontend/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime-command-bus.test.ts",
-        "runtime/__tests__/frontend-xln-invoice.test.ts"
+        "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ],
       "dependencies": [
         "runtime-pipeline",
@@ -389,7 +389,7 @@
         "tests/frontend/payment-panel-view.test.ts",
         "tests/frontend/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime-command-bus.test.ts",
-        "runtime/__tests__/frontend-xln-invoice.test.ts"
+        "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ],
       "dependencies": [
         "api-auth-custody",
@@ -793,7 +793,7 @@
         "runtime/api/public/runtime-module.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/external-wallet-api.test.ts",
+        "runtime/__tests__/api/server/external-wallet-api.test.ts",
         "runtime/__tests__/orchestrator-rpc-public-routes.test.ts",
         "runtime/__tests__/security/hanko/signer-public-key-binding.test.ts"
       ],
@@ -819,7 +819,7 @@
       ],
       "testGlobs": [
         "runtime/__tests__/**/*activity-history*",
-        "runtime/__tests__/external-wallet-state.test.ts",
+        "runtime/__tests__/api/server/external-wallet-state.test.ts",
         "runtime/__tests__/public-discovery.test.ts"
       ],
       "requiredEvidence": [
@@ -845,8 +845,8 @@
         "runtime/api/public/runtime-public.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/external-wallet-api.test.ts",
-        "runtime/__tests__/external-wallet-state.test.ts",
+        "runtime/__tests__/api/server/external-wallet-api.test.ts",
+        "runtime/__tests__/api/server/external-wallet-state.test.ts",
         "runtime/__tests__/payments/htlc/htlc-dispute-secret-publication.test.ts"
       ],
       "requiredEvidence": [
@@ -872,7 +872,7 @@
       ],
       "testGlobs": [
         "runtime/__tests__/**/*activity-history*",
-        "runtime/__tests__/external-wallet-state.test.ts",
+        "runtime/__tests__/api/server/external-wallet-state.test.ts",
         "runtime/__tests__/public-discovery.test.ts"
       ],
       "requiredEvidence": [
@@ -983,7 +983,7 @@
         "tests/frontend/payment-panel-view.test.ts",
         "tests/frontend/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime-command-bus.test.ts",
-        "runtime/__tests__/frontend-xln-invoice.test.ts"
+        "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ]
     },
     {
@@ -1060,7 +1060,7 @@
         "tests/frontend/payment-panel-view.test.ts",
         "tests/frontend/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime-command-bus.test.ts",
-        "runtime/__tests__/frontend-xln-invoice.test.ts"
+        "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ]
     },
     {
