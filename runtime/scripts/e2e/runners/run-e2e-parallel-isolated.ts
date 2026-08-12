@@ -604,7 +604,7 @@ const assertRunnerPreflight = async (): Promise<void> => {
   if (!existsSync(typechainIndex)) {
     throw new Error(`RUNNER_PREFLIGHT_FAILED missing ${typechainIndex}`);
   }
-  await import(resolve(process.cwd(), 'runtime', 'jurisdiction', 'adapter', 'browservm.ts'));
+  await import(resolve(process.cwd(), 'runtime', 'jurisdiction', 'adapter', 'browservm', 'browservm.ts'));
 };
 
 type PlaywrightTarget = {
@@ -889,10 +889,10 @@ export const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] =
 export const listPlaywrightSpecFiles = (includeAllSpecs: boolean): string[] => {
   const excludedDefaultSpecs = new Set<string>([
     // Shared-page AHB flow. Its useful assertions were ported into
-    // tests/e2e-ahb-isolated.spec.ts; keep this out of the canonical isolated bar.
-    'tests/e2e-ahb-payment.spec.ts',
+    // tests/e2e/runtime/e2e-ahb-isolated.spec.ts; keep this out of the canonical isolated bar.
+    'tests/e2e/payments/e2e-ahb-payment.spec.ts',
     // Keep the default bar focused on fast isolated product checks.
-    'tests/e2e-multiroute-load.spec.ts',
+    'tests/e2e/payments/e2e-multiroute-load.spec.ts',
   ]);
   const res = spawnSync('rg', ['--files', 'tests'], {
     cwd: process.cwd(),

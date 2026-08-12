@@ -32,7 +32,7 @@ const includesAll = (text: string, patterns: string[], file: string): string[] =
 const requirements: CoverageRequirement[] = [
   {
     area: 'pay',
-    file: 'tests/e2e-payment-smoke.spec.ts',
+    file: 'tests/e2e/payments/e2e-payment-smoke.spec.ts',
     patterns: [
       'fresh runtimes can open accounts, faucet, pay, and reload persisted state',
       'submitUiPayment',
@@ -41,7 +41,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'pay',
-    file: 'tests/e2e-ahb-isolated.spec.ts',
+    file: 'tests/e2e/runtime/e2e-ahb-isolated.spec.ts',
     patterns: [
       'bidirectional payments survive across two isolated browser contexts',
       'overspend rejection',
@@ -52,7 +52,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'pay',
-    file: 'tests/e2e-pay-deeplink.spec.ts',
+    file: 'tests/e2e/payments/e2e-pay-deeplink.spec.ts',
     patterns: [
       'restores runtime and opens the pay screen from hash params',
       '#payment-amount-input',
@@ -60,7 +60,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'recovery',
-    file: 'tests/e2e-watchtower-recovery.spec.ts',
+    file: 'tests/e2e/recovery/e2e-watchtower-recovery.spec.ts',
     patterns: [
       'restores a wiped runtime from standalone tower backup',
       'deriveRuntimeRecoveryLookupKey',
@@ -70,7 +70,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'swap',
-    file: 'tests/e2e-swap-isolated.spec.ts',
+    file: 'tests/e2e/swap/e2e-swap-isolated.spec.ts',
     patterns: [
       'two isolated users trade against each other through one hub orderbook without market maker liquidity',
       'resting maker order can fill partially, stay open, then cancel remainder',
@@ -80,7 +80,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'swap',
-    file: 'tests/e2e-swap.spec.ts',
+    file: 'tests/e2e/swap/e2e-swap.spec.ts',
     patterns: [
       'swap rejects price beyond 30% from current orderbook',
       'swap rejects sell price beyond 30% from current orderbook',

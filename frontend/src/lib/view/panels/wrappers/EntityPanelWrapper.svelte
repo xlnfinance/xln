@@ -12,7 +12,7 @@
    */
 
   import type { Writable } from 'svelte/store';
-  import EntityWorkspace from '$lib/components/Entity/EntityWorkspace.svelte';
+  import EntityWorkspace from '$lib/components/Entity/workspace/EntityWorkspace.svelte';
   import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/runtime-frame-context';
   import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/embedded-runtime-context';
   import type { Tab } from '$lib/types/ui';

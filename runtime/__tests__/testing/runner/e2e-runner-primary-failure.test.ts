@@ -14,13 +14,13 @@ test('keeps one typed primary failure while cancelled neighbors do not consume t
   const primaryCapsule = {
     version: 1 as const,
     reportPath: 'shard-2/artifacts/playwright/playwright-report.json',
-    file: 'tests/e2e-lending.spec.ts',
+    file: 'tests/e2e/product/e2e-lending.spec.ts',
     title: 'lending flow',
     line: 42,
     column: 7,
     project: 'chromium',
     error: 'Expected balance to equal 100',
-    stack: 'tests/e2e-lending.spec.ts:42:7',
+    stack: 'tests/e2e/product/e2e-lending.spec.ts:42:7',
     attachments: [],
     rerunCommand: 'bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --trace=retain-on-failure',
   };

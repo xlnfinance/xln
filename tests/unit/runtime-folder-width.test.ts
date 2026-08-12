@@ -119,7 +119,6 @@ describe('repository source folder-width invariant', () => {
       { path: 'jurisdictions/test', files: 19 },
       { path: 'scripts', files: 25 },
       { path: 'scripts/dev', files: 12 },
-      { path: 'tests', files: 53 },
       { path: 'tests/frontend', files: 45 },
       { path: 'tests/utils', files: 20 },
     ]);

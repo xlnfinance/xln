@@ -435,7 +435,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   // PHASE 6.5: HTLC RESOLVE -> AUTO-REBALANCE REQUEST
   // Keep this in sync with:
   // - runtime/account/consensus/index.ts::runPostFrameAutoRebalanceCheck
-  // - tests/e2e-rebalance-bar.spec.ts cycle assertions
+  // - tests/e2e/payments/e2e-rebalance-bar.spec.ts cycle assertions
   // ══════════════════════════════════════════════════════════════════════════
   console.log = originalLog;
   console.log('\n--- TEST 6.5: HTLC resolve triggers auto request_collateral ---');

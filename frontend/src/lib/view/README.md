@@ -54,5 +54,5 @@ force layout, frame cache, account bar geometry, gesture state. It has no Svelte
 
 ```bash
 bun test tests/frontend/                       # projection, layout, helpers, bar parenting
-bunx playwright test tests/dockview.spec.ts    # dock smoke
+bunx playwright test tests/sites/dockview.spec.ts    # dock smoke
 ```

@@ -9,7 +9,7 @@ bun run test
 bun run test:e2e:fast
 ```
 
-For browser smoke coverage, use `tests/e2e-payment-smoke.spec.ts`.
+For browser smoke coverage, use `tests/e2e/payments/e2e-payment-smoke.spec.ts`.
 
 For runtime scenario coverage, use:
 

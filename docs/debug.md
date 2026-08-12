@@ -305,7 +305,7 @@ curl -s -X POST "https://xln.finance/api/reset" | jq .
 bun run scenario:lock-ahb
 
 # 2) e2e ahb
-bunx playwright test tests/e2e-ahb-payment.spec.ts
+bunx playwright test tests/e2e/payments/e2e-ahb-payment.spec.ts
 
 # 3) ah1-3b (multi-hop via H1/H2/H3)
 bun run scenario:ah1-3b

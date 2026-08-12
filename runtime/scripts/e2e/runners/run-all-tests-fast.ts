@@ -120,7 +120,7 @@ async function main(): Promise<void> {
   if (args.quick || args.smoke) {
     // One critical rebalance assertion path for sub-minute feedback.
     e2eArgs.push('--pw-project=chromium');
-    e2eArgs.push('--pw-files=tests/e2e-rebalance-bar.spec.ts');
+    e2eArgs.push('--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts');
     e2eArgs.push('--pw-grep=faucet -> request_collateral -> secured bar');
   }
 

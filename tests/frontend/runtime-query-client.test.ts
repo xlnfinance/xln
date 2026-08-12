@@ -253,8 +253,8 @@ test('wallet UI and wallet-backed E2E helpers never import a second Runtime modu
   const guardedFiles = [
     'frontend/src/lib/view/panels/ArchitectPanel.svelte',
     'frontend/src/lib/view/panels/graph3d/Graph3DPanel.svelte',
-    'tests/e2e-debt-ledger.spec.ts',
-    'tests/e2e-runtime-persistence.spec.ts',
+    'tests/e2e/product/e2e-debt-ledger.spec.ts',
+    'tests/e2e/runtime/e2e-runtime-persistence.spec.ts',
   ];
 
   for (const file of guardedFiles) {
@@ -269,7 +269,7 @@ test('activity history panel reads activity through RuntimeQueryClient only', ()
   const panelSource = readFileSync('frontend/src/lib/components/Entity/payments/ActivityHistoryPanel.svelte', 'utf8');
   const querySource = readFileSync('frontend/src/lib/components/Entity/account/activity-history-query.ts', 'utf8');
   const addressRouteSource = readFileSync('frontend/src/routes/address/[entityId]/+page.svelte', 'utf8');
-  const paymentSmokeSource = readFileSync('tests/e2e-payment-smoke.spec.ts', 'utf8');
+  const paymentSmokeSource = readFileSync('tests/e2e/payments/e2e-payment-smoke.spec.ts', 'utf8');
   const source = `${panelSource}\n${querySource}`;
   const activityE2EHelper = paymentSmokeSource.slice(
     paymentSmokeSource.indexOf('async function countRuntimeActivityEvents'),
@@ -460,8 +460,8 @@ test('runtime controller exposes only typed debug projection queries', () => {
   const appTypes = readFileSync('frontend/src/app.d.ts', 'utf8');
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const remoteE2ESource = [
-    'tests/e2e-radapter-remote-part-1.spec.ts',
-    'tests/e2e-radapter-remote-part-2.spec.ts',
+    'tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts',
+    'tests/e2e/runtime/e2e-radapter-remote-part-2.spec.ts',
   ].map(file => readFileSync(file, 'utf8')).join('\n');
 
   expect(queryClientSource).toContain('query: {');

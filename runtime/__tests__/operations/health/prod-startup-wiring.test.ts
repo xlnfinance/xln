@@ -394,7 +394,7 @@ describe('production startup wiring', () => {
   });
 
   test('production payment smoke only reads persisted receipts from a real debug runtime env', () => {
-    const paymentSmoke = readFileSync(join(repoRoot, 'tests/e2e-payment-smoke.spec.ts'), 'utf8');
+    const paymentSmoke = readFileSync(join(repoRoot, 'tests/e2e/payments/e2e-payment-smoke.spec.ts'), 'utf8');
     const receiptHelper = readFileSync(join(repoRoot, 'tests/utils/e2e-runtime-receipts.ts'), 'utf8');
 
     expect(paymentSmoke).toContain("Boolean(env && typeof env === 'object' && String(env.runtimeId || '').trim())");
@@ -1495,7 +1495,7 @@ describe('production startup wiring', () => {
 
   test('prod remote runtime import e2e cannot reset the shared prod mesh implicitly', () => {
     const baseline = readFileSync(join(repoRoot, 'tests/utils/e2e-baseline.ts'), 'utf8');
-    const radapterRemote = ['tests/e2e-radapter-remote-part-1.spec.ts', 'tests/e2e-radapter-remote-part-2.spec.ts']
+    const radapterRemote = ['tests/e2e/runtime/e2e-radapter-remote-part-1.spec.ts', 'tests/e2e/runtime/e2e-radapter-remote-part-2.spec.ts']
       .map(file => readFileSync(join(repoRoot, file), 'utf8'))
       .join('\n');
     const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');

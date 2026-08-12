@@ -4,13 +4,13 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 
 const CORE_E2E_FILES = [
-  'tests/e2e-payment-smoke.spec.ts',
+  'tests/e2e/payments/e2e-payment-smoke.spec.ts',
   'tests/e2e-dispute.spec.ts',
-  'tests/e2e-watchtower-recovery.spec.ts',
-  'tests/e2e-swap-isolated.spec.ts',
-  'tests/e2e-ahb-isolated.spec.ts',
+  'tests/e2e/recovery/e2e-watchtower-recovery.spec.ts',
+  'tests/e2e/swap/e2e-swap-isolated.spec.ts',
+  'tests/e2e/runtime/e2e-ahb-isolated.spec.ts',
   'tests/e2e-cross-j-swap.spec.ts',
-  'tests/e2e-pay-deeplink.spec.ts',
+  'tests/e2e/payments/e2e-pay-deeplink.spec.ts',
 ];
 
 const CORE_E2E_TITLES = [

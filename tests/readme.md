@@ -25,7 +25,7 @@ For one browser flow:
 ```bash
 bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts \
   --pw-project=chromium \
-  --pw-files='tests/e2e-swap-isolated.spec.ts::two isolated users trade against each other through one hub orderbook without market maker liquidity' \
+  --pw-files='tests/e2e/swap/e2e-swap-isolated.spec.ts::two isolated users trade against each other through one hub orderbook without market maker liquidity' \
   --video=off --trace=off --screenshot=only-on-failure --max-failures=1
 ```
 

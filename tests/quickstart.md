@@ -23,7 +23,7 @@ This runs the canonical user flows listed in `runtime/scripts/e2e/runners/run-e2
 ```bash
 bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts \
   --pw-project=chromium \
-  --pw-files='tests/e2e-payment-smoke.spec.ts::fresh runtimes can open accounts, faucet, pay, and reload persisted state' \
+  --pw-files='tests/e2e/payments/e2e-payment-smoke.spec.ts::fresh runtimes can open accounts, faucet, pay, and reload persisted state' \
   --video=off --trace=off --screenshot=only-on-failure --max-failures=1
 ```
 
@@ -44,7 +44,7 @@ Manual server mode is for interactive debugging, not the default gate.
 ```bash
 bun run dev
 PW_SKIP_WEBSERVER=1 PW_BASE_URL=https://localhost:8080 E2E_BASE_URL=https://localhost:8080 E2E_API_BASE_URL=https://localhost:8080 \
-  bunx playwright test tests/e2e-payment-smoke.spec.ts --project=chromium
+  bunx playwright test tests/e2e/payments/e2e-payment-smoke.spec.ts --project=chromium
 ```
 
 Use this when you need to inspect the browser manually or debug a persistent local process.

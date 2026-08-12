@@ -84,7 +84,6 @@ export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
   'jurisdictions/test': 19,
   scripts: 25,
   'scripts/dev': 12,
-  tests: 53,
   'tests/frontend': 45,
   'tests/utils': 20,
 };

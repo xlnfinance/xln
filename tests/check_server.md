@@ -36,5 +36,5 @@ ls -lh frontend/static/runtime.js
 
 ```bash
 bun run test:e2e:fast
-bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --pw-project=chromium --pw-files=tests/e2e-payment-smoke.spec.ts
+bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --pw-project=chromium --pw-files=tests/e2e/payments/e2e-payment-smoke.spec.ts
 ```

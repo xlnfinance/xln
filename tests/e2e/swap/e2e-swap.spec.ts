@@ -1,0 +1,2810 @@
+/**
+ * E2E swap coverage for the live UI and the built-in browser scenarios.
+ *
+ * These tests verify that swap offers can auto-prepare missing token capacity, place and cancel
+ * cleanly through the UI, and that the scenario runners still produce partial fills after reload-safe setup.
+ */
+import { test, expect, type Locator, type Page, type TestInfo } from '../../global-setup.mts';
+import { Wallet } from 'ethers';
+import { timedStep } from '../../utils/e2e-timing.mts';
+import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth } from '../../utils/e2e-baseline';
+import { connectRuntimeToHubWithCredit as connectRuntimeToSharedHubWithCredit } from '../../utils/e2e-connect';
+import {
+  gotoApp as gotoSharedApp,
+  createRuntime as createSharedRuntime,
+} from '../../utils/e2e-demo-users';
+import { getRenderedOutboundForAccount } from '../../utils/e2e-account-ui';
+import { buildDefaultEntitySwapPairs, getTokenInfo } from '../../../runtime/account/utils';
+import { capturePageScreenshot } from '../../utils/e2e-screenshots';
+import { hasSilentRelayMarketSubscribe, installSilentRelayWebSocket } from '../../utils/e2e-silent-relay';
+
+const INIT_TIMEOUT = 30_000;
+const SWAP_CONNECT_TOKEN_IDS = [1, 2] as const;
+const CANONICAL_SWAP_PAIRS = buildDefaultEntitySwapPairs().map((pair) => ({
+  ...pair,
+  label: `${getTokenInfo(pair.baseTokenId).symbol}/${getTokenInfo(pair.quoteTokenId).symbol}`,
+}));
+const CANONICAL_SWAP_PAIR_IDS = CANONICAL_SWAP_PAIRS.map((pair) => pair.pairId);
+const CANONICAL_SWAP_PAIR_LABELS = CANONICAL_SWAP_PAIRS.map((pair) => pair.label);
+const SWAP_TOKEN_BY_SYMBOL: Record<string, string> = {
+  USDC: '1',
+  WETH: '2',
+  USDT: '3',
+};
+
+type SwapDeltaSnapshot = Readonly<{
+  collateral: string;
+  ondelta: string;
+  offdelta: string;
+  leftCreditLimit: string;
+  rightCreditLimit: string;
+  leftHold: string;
+  rightHold: string;
+}>;
+
+function randomMnemonic(): string {
+  return Wallet.createRandom().mnemonic!.phrase;
+}
+
+async function gotoApp(page: Page): Promise<void> {
+  await gotoSharedApp(page, {
+    appBaseUrl: APP_BASE_URL,
+    initTimeoutMs: INIT_TIMEOUT,
+    settleMs: 500,
+  });
+}
+
+async function dismissOnboardingIfVisible(page: Page): Promise<void> {
+  const checkbox = page.locator('text=I understand and accept the risks of using this software').first();
+  if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await checkbox.click();
+    const continueBtn = page.locator('button:has-text("Continue")').first();
+    if (await continueBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await continueBtn.click();
+      await page.waitForTimeout(300);
+    }
+  }
+}
+
+async function readSelectedUiRuntimeIdentity(page: Page): Promise<{
+  entityId: string;
+  signerId: string;
+  runtimeId: string;
+}> {
+  const trigger = page.getByTestId('context-current').first();
+  await expect(trigger).toBeVisible({ timeout: 20_000 });
+
+  const [entityId, signerId, runtimeId] = await Promise.all([
+    trigger.getAttribute('data-entity-id'),
+    trigger.getAttribute('data-signer-id'),
+    trigger.getAttribute('data-runtime-id'),
+  ]);
+
+  const selected = {
+    entityId: String(entityId || '').trim(),
+    signerId: String(signerId || '').trim(),
+    runtimeId: String(runtimeId || '').trim(),
+  };
+
+  expect(selected.entityId, 'UI-selected entityId must be present').toMatch(/^0x[a-fA-F0-9]{64}$/);
+  expect(selected.signerId, 'UI-selected signerId must be present').toMatch(/^0x[a-fA-F0-9]{40}$/);
+  expect(selected.runtimeId, 'UI-selected runtimeId must be present').not.toBe('');
+  return selected;
+}
+
+async function expectSelectedUiRuntimeIdentity(
+  page: Page,
+  expected: { entityId: string; signerId: string },
+): Promise<void> {
+  const selected = await readSelectedUiRuntimeIdentity(page);
+  expect(
+    {
+      entityId: selected.entityId.toLowerCase(),
+      signerId: selected.signerId.toLowerCase(),
+    },
+    'selected entity drift detected',
+  ).toEqual({
+    entityId: expected.entityId.toLowerCase(),
+    signerId: expected.signerId.toLowerCase(),
+  });
+}
+
+function orderbookRowTestId(side: 'ask' | 'bid'): string {
+  return side === 'ask' ? 'orderbook-ask-row' : 'orderbook-bid-row';
+}
+
+async function readOrderbookRowCounts(page: Page): Promise<{ asks: number; bids: number }> {
+  return {
+    asks: await page.getByTestId(orderbookRowTestId('ask')).count(),
+    bids: await page.getByTestId(orderbookRowTestId('bid')).count(),
+  };
+}
+
+async function countUniqueOrderbookSources(page: Page): Promise<number> {
+  return await page.locator('[data-testid="orderbook-source-icon"]').evaluateAll((nodes) => {
+    const ids = new Set<string>();
+    for (const node of nodes) {
+      const sourceId = String((node as HTMLElement).dataset.sourceId || '').trim();
+      if (sourceId) ids.add(sourceId);
+    }
+    return ids.size;
+  });
+}
+
+async function readRowSourceIds(row: Locator): Promise<string[]> {
+  return await row.locator('[data-testid="orderbook-source-icon"]').evaluateAll((nodes) =>
+    nodes
+      .map((node) => String((node as HTMLElement).dataset.sourceId || '').trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+async function expectVisibleOrderbookRowsUseSingleHub(page: Page): Promise<void> {
+  await expect
+    .poll(async () => await page.locator('[data-testid="orderbook-ask-row"],[data-testid="orderbook-bid-row"]').evaluateAll((rows) => {
+      if (rows.length === 0) return false;
+      return rows.every((row) => row.querySelectorAll('[data-testid="orderbook-source-icon"]').length === 1);
+    }), { timeout: 10_000, intervals: [50, 100, 200] })
+    .toBe(true);
+}
+
+async function readSwapScopeMode(page: Page): Promise<'aggregated' | 'selected' | ''> {
+  const raw = String(await page.getByTestId('swap-scope-toggle').first().getAttribute('data-scope-mode') || '').trim();
+  return raw === 'aggregated' || raw === 'selected' ? raw : '';
+}
+
+async function ensureSwapOrderbookVisible(page: Page): Promise<void> {
+  if (await page.getByTestId('swap-orderbook').first().isVisible({ timeout: 500 }).catch(() => false)) return;
+  const toggle = page.getByTestId('swap-ticket-orderbook-toggle').first();
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  await toggle.click();
+  await expect(page.getByTestId('swap-orderbook').first()).toBeVisible({ timeout: 20_000 });
+}
+
+async function selectSwapPairSide(page: Page, pairLabel: string, side: 'buy' | 'sell'): Promise<void> {
+  const [baseSymbol, quoteSymbol] = pairLabel.split('/');
+  const baseToken = SWAP_TOKEN_BY_SYMBOL[String(baseSymbol || '').trim().toUpperCase()];
+  const quoteToken = SWAP_TOKEN_BY_SYMBOL[String(quoteSymbol || '').trim().toUpperCase()];
+  if (!baseToken || !quoteToken) throw new Error(`Unsupported swap pair label: ${pairLabel}`);
+  const fromToken = side === 'buy' ? quoteToken : baseToken;
+  const toToken = side === 'buy' ? baseToken : quoteToken;
+  const fromTokenSelect = page.getByTestId('swap-ticket-from-token').first();
+  const toTokenSelect = page.getByTestId('swap-ticket-to-token').first();
+  await expect(fromTokenSelect).toBeVisible({ timeout: 20_000 });
+  await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
+  await fromTokenSelect.selectOption(fromToken);
+  await toTokenSelect.selectOption(toToken);
+  const pairSelect = page.getByTestId('swap-orderbook-pair-select').first();
+  await expect(pairSelect, 'same-chain orderbook pair selector must be present').toHaveCount(1, { timeout: 10_000 });
+  await expect
+    .poll(async () => pairSelect.evaluate((node) => {
+      const select = node as HTMLSelectElement;
+      return select.selectedOptions[0]?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    }), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: 'same-chain orderbook selector must show Asset-Asset (Jurisdiction)',
+    })
+    .toMatch(new RegExp(`${baseSymbol}\\s*-\\s*${quoteSymbol}\\s*\\([^)]+\\)`, 'i'));
+}
+
+async function selectOrderbookPairByLabel(page: Page, labelPattern: RegExp): Promise<string> {
+  const pairSelect = page.getByTestId('swap-orderbook-pair-select').first();
+  await expect(pairSelect, 'orderbook pair selector must be mounted').toHaveCount(1, { timeout: 10_000 });
+  const options = await pairSelect.evaluate((node) =>
+    Array.from((node as HTMLSelectElement).options).map((option) => ({
+      value: option.value,
+      label: option.textContent?.replace(/\s+/g, ' ').trim() || '',
+    })),
+  );
+  const match = options.find((option) => labelPattern.test(option.label));
+  expect(match, `orderbook pair selector missing ${labelPattern}: ${JSON.stringify(options)}`).toBeTruthy();
+  await pairSelect.selectOption(match!.value);
+  return match!.label;
+}
+
+async function expectSwapTokens(page: Page, expected: { fromSymbol: string; toSymbol: string }): Promise<void> {
+  const fromTokenId = SWAP_TOKEN_BY_SYMBOL[expected.fromSymbol.toUpperCase()];
+  const toTokenId = SWAP_TOKEN_BY_SYMBOL[expected.toSymbol.toUpperCase()];
+  expect(fromTokenId, `unsupported expected from token ${expected.fromSymbol}`).toBeTruthy();
+  expect(toTokenId, `unsupported expected to token ${expected.toSymbol}`).toBeTruthy();
+  const fromToken = page.getByTestId('swap-ticket-from-token').first();
+  const toToken = page.getByTestId('swap-ticket-to-token').first();
+  await expect(fromToken).toHaveValue(String(fromTokenId), { timeout: 10_000 });
+  await expect(toToken).toHaveValue(String(toTokenId), { timeout: 10_000 });
+  await expect(fromToken.locator('option:checked')).toHaveText(expected.fromSymbol);
+  await expect(toToken.locator('option:checked')).toHaveText(expected.toSymbol);
+}
+
+async function ensureSwapScope(page: Page, desired: 'aggregated' | 'selected'): Promise<void> {
+  await ensureSwapOrderbookVisible(page);
+  const scopeToggle = page.getByTestId('swap-scope-toggle').first();
+  await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(async () => {
+      const current = await readSwapScopeMode(page);
+      if (current !== desired) {
+        await scopeToggle.click();
+        await page.waitForTimeout(150);
+      }
+      return await readSwapScopeMode(page);
+    }, { timeout: 10_000, intervals: [50, 100, 200] })
+    .toBe(desired);
+}
+
+async function expectVisibleOrderbookDepth(
+  page: Page,
+  expected: { asks: number; bids: number },
+  options?: { timeoutMs?: number; minSources?: number; maxSources?: number },
+): Promise<void> {
+  const timeoutMs = options?.timeoutMs ?? 15_000;
+  await expect
+    .poll(
+      async () => {
+        const counts = await readOrderbookRowCounts(page);
+        const sources = await countUniqueOrderbookSources(page);
+        return { ...counts, sources };
+      },
+      { timeout: timeoutMs, intervals: [200, 400, 800] },
+    )
+    .toEqual({
+      asks: expected.asks,
+      bids: expected.bids,
+      sources: expect.any(Number),
+    });
+  if (typeof options?.minSources === 'number') {
+    await expect
+      .poll(async () => await countUniqueOrderbookSources(page), { timeout: timeoutMs, intervals: [200, 400, 800] })
+      .toBeGreaterThanOrEqual(options.minSources);
+  }
+  if (typeof options?.maxSources === 'number') {
+    await expect
+      .poll(async () => await countUniqueOrderbookSources(page), { timeout: timeoutMs, intervals: [200, 400, 800] })
+      .toBeLessThanOrEqual(options.maxSources);
+  }
+}
+
+async function createDemoRuntime(page: Page, label: string, mnemonic: string): Promise<void> {
+  await createSharedRuntime(page, label, mnemonic);
+}
+
+async function ensureAnyHubAccountOpen(page: Page): Promise<{
+  entityId: string;
+  signerId: string;
+  counterpartyId: string;
+  giveTokenId: number;
+  wantTokenId: number;
+  orderAmount: string;
+  orderPrice: string;
+}> {
+  const result = await page.evaluate(async () => {
+    const CANDIDATE_TOKEN_IDS = [1, 2, 3];
+    const TOKEN_SCALE = 10n ** 18n;
+    const MIN_TEST_FILL = TOKEN_SCALE / 100n; // 0.01
+
+    const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
+      if (!(accounts instanceof Map)) return null;
+      const owner = String(ownerId || '').toLowerCase();
+      const cp = String(counterpartyId || '').toLowerCase();
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey || '').toLowerCase() === cp) return account;
+        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+          ? String(account.counterpartyEntityId).toLowerCase()
+          : '';
+        if (canonicalCp === cp) return account;
+        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
+        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+      }
+      return null;
+    };
+
+    const getDelta = (account: any, tokenId: number): any => {
+      if (!(account?.state?.deltas instanceof Map)) return null;
+      return account.state.deltas.get(tokenId) ?? null;
+    };
+
+    const getTokenDecimals = (tokenId: number): number => {
+      const XLN = (window as any).XLN;
+      const decimals = Number(XLN?.getTokenInfo?.(tokenId)?.decimals ?? 18);
+      return Number.isFinite(decimals) && decimals >= 0 ? Math.floor(decimals) : 18;
+    };
+
+    const formatAmount = (amount: bigint, decimals: number): string => {
+      if (amount <= 0n) return '0';
+      const scale = 10n ** BigInt(decimals);
+      const whole = amount / scale;
+      const frac = amount % scale;
+      if (frac === 0n) return whole.toString();
+      const fracText = frac.toString().padStart(decimals, '0').replace(/0+$/, '');
+      return fracText.length > 0 ? `${whole.toString()}.${fracText}` : whole.toString();
+    };
+
+    const getCapacity = (entityId: string, counterpartyId: string, account: any, tokenId: number) => {
+      const XLN = (window as any).XLN;
+      const delta = getDelta(account, tokenId);
+      if (!delta || !XLN?.deriveDelta) {
+        return { hasDelta: Boolean(delta), inCapacity: 0n, outCapacity: 0n };
+      }
+      const isLeft = XLN?.isLeft
+        ? Boolean(XLN.isLeftEntity(entityId, counterpartyId))
+        : String(entityId).toLowerCase() < String(counterpartyId).toLowerCase();
+      const derived = XLN.deriveDelta(delta, isLeft);
+      const inCapacity = typeof derived?.inCapacity === 'bigint' ? derived.inCapacity : BigInt(derived?.inCapacity || 0);
+      const outCapacity = typeof derived?.outCapacity === 'bigint' ? derived.outCapacity : BigInt(derived?.outCapacity || 0);
+      return { hasDelta: true, inCapacity, outCapacity };
+    };
+
+    const listTokenIds = (account: any): number[] => {
+      const tokenIds = new Set<number>(CANDIDATE_TOKEN_IDS);
+      if (account?.state?.deltas instanceof Map) {
+        for (const [id] of account.state.deltas.entries()) {
+          const parsed = Number.parseInt(String(id), 10);
+          if (Number.isFinite(parsed) && parsed > 0) tokenIds.add(parsed);
+        }
+      }
+      return [...tokenIds].sort((a, b) => a - b);
+    };
+
+    const findTradablePair = (entityId: string, counterpartyId: string, account: any) => {
+      if (!account) return null;
+      const tokenIds = listTokenIds(account);
+      const caps = tokenIds.map((tokenId) => ({ tokenId, ...getCapacity(entityId, counterpartyId, account, tokenId) }));
+      let best: {
+        giveTokenId: number;
+        wantTokenId: number;
+        giveOut: bigint;
+        wantIn: bigint;
+        budget: bigint;
+      } | null = null;
+      for (const give of caps) {
+        if (give.outCapacity <= 0n) continue;
+        for (const want of caps) {
+          if (want.tokenId === give.tokenId) continue;
+          if (!want.hasDelta || want.inCapacity <= 0n) continue;
+          const budget = give.outCapacity < want.inCapacity ? give.outCapacity : want.inCapacity;
+          if (budget <= 0n) continue;
+          if (budget < MIN_TEST_FILL && (!best || best.budget >= MIN_TEST_FILL)) continue;
+          if (!best || budget > best.budget) {
+            best = {
+              giveTokenId: give.tokenId,
+              wantTokenId: want.tokenId,
+              giveOut: give.outCapacity,
+              wantIn: want.inCapacity,
+              budget,
+            };
+          }
+        }
+      }
+      return best;
+    };
+
+    const requestOffchainFaucet = async (
+      runtimeId: string,
+      userEntityId: string,
+      hubEntityId: string,
+      tokenId: number,
+      amount: string,
+    ): Promise<{ ok: boolean; detail: string }> => {
+      const deadline = Date.now() + 20_000;
+      let lastDetail = 'unknown';
+      while (Date.now() < deadline) {
+        try {
+          const response = await fetch('/api/faucet/offchain', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              userEntityId,
+              userRuntimeId: runtimeId,
+              hubEntityId,
+              tokenId,
+              amount,
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (response.ok && payload?.success) {
+            return { ok: true, detail: String(payload?.status || 'queued') };
+          }
+          lastDetail = String(payload?.code || payload?.error || `status:${response.status}`);
+          // transient conflict while account pending / syncing
+          if (response.status === 409 || response.status === 503) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            continue;
+          }
+          return { ok: false, detail: lastDetail };
+        } catch (error: any) {
+          lastDetail = String(error?.message || error);
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+      return { ok: false, detail: lastDetail };
+    };
+
+    const buildOrderAmount = (giveTokenId: number, budget: bigint): string => {
+      if (budget <= 0n) return '0';
+      const decimals = getTokenDecimals(giveTokenId);
+      const one = 10n ** BigInt(decimals);
+      const tenth = one / 10n;
+      let amountWei = budget;
+      if (budget > one) amountWei = one;
+      else if (budget > tenth && tenth > 0n) amountWei = tenth;
+      return formatAmount(amountWei, decimals);
+    };
+
+    const findLocalReplica = (env: any, entityId: string, signerId: string) => {
+      const repKey = Array.from(env.state.eReplicas.keys()).find((key: string) => {
+        const [eid, sid] = String(key).split(':');
+        return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+          && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+      });
+      return repKey ? env.state.eReplicas.get(repKey) : null;
+    };
+
+    const accountReadyForSwap = (entityId: string, counterpartyId: string, account: any) => {
+      if (!account || account?.pendingFrame || Number(account?.currentHeight || 0) <= 0) return null;
+      const pair = findTradablePair(entityId, counterpartyId, account);
+      if (!pair) return null;
+      return {
+        ...pair,
+        orderAmount: buildOrderAmount(pair.giveTokenId, pair.budget),
+        orderPrice: '1',
+      };
+    };
+
+    const env = (window as any).isolatedEnv;
+    const XLN = (window as any).XLN;
+    if (!env?.state.eReplicas || !XLN?.enqueueRuntimeInput) return { ok: false, error: 'isolatedEnv/XLN missing' };
+
+    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
+    let entityId = '';
+    let signerId = '';
+    let openedHubId = '';
+
+    for (const [key, rep] of env.state.eReplicas.entries()) {
+      const [eid, sid] = String(key).split(':');
+      if (!eid || !sid) continue;
+      if (runtimeSigner && String(sid).toLowerCase() !== runtimeSigner) continue;
+      entityId = eid;
+      signerId = sid;
+      if (rep?.state?.accounts instanceof Map && rep.state.accounts.size > 0) {
+        for (const [cpId, account] of rep.state.accounts.entries()) {
+          const ready = accountReadyForSwap(entityId, String(cpId || ''), account);
+          if (ready && ready.orderAmount !== '0') {
+            return { ok: true, entityId, signerId, counterpartyId: String(cpId), ...ready };
+          }
+          if (!openedHubId) openedHubId = String(cpId || '');
+        }
+      }
+      // Keep scanning local replicas until we either find a usable account
+      // or exhaust the runtime-owned replicas. Stopping after the first replica
+      // silently picks the wrong local entity when the first entry has no account.
+      if (entityId && signerId && openedHubId) break;
+    }
+
+    if (!entityId || !signerId) return { ok: false, error: 'local entity not found' };
+
+    let hubId = String(openedHubId || '');
+    if (!hubId) {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 15_000) {
+        const profiles = env?.gossip?.getProfiles?.() || [];
+        const hub = profiles.find((p: any) => p?.metadata?.isHub === true);
+        hubId = String(hub?.entityId || '');
+        if (hubId) break;
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
+    if (!hubId) return { ok: false, error: 'hub not discovered in gossip' };
+
+    const existingAccount = (() => {
+      const repKey = Array.from(env.state.eReplicas.keys()).find((key: string) => {
+        const [eid, sid] = String(key).split(':');
+        return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+          && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+      });
+      if (!repKey) return null;
+      const rep = env.state.eReplicas.get(repKey);
+      return findAccount(rep?.state?.accounts, entityId, hubId);
+    })();
+
+    if (!existingAccount) {
+      XLN.enqueueRuntimeInput(env, {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId,
+          signerId,
+          entityTxs: [{
+            type: 'openAccount',
+            data: {
+              targetEntityId: hubId,
+              disputeConfig: entityId.toLowerCase() < hubId.toLowerCase()
+                ? { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 }
+                : { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 },
+              creditAmount: 10_000n * TOKEN_SCALE,
+              tokenId: 1,
+            },
+          }],
+        }],
+      });
+    }
+
+    const waitForSwapReady = async (
+      timeoutMs: number,
+    ): Promise<{
+      giveTokenId: number;
+      wantTokenId: number;
+      giveOut: bigint;
+      wantIn: bigint;
+      budget: bigint;
+      orderAmount: string;
+      orderPrice: string;
+    } | null> => {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < timeoutMs) {
+        for (const [key, rep] of env.state.eReplicas.entries()) {
+          const [eid] = String(key).split(':');
+          if (String(eid || '').toLowerCase() !== String(entityId).toLowerCase()) continue;
+          const account = findAccount(rep?.state?.accounts, entityId, hubId);
+          const ready = accountReadyForSwap(entityId, hubId, account);
+          if (ready && ready.orderAmount !== '0') {
+            return ready;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      return null;
+    };
+
+    const earlyReady = await waitForSwapReady(20_000);
+    if (earlyReady) {
+      return { ok: true, entityId, signerId, counterpartyId: hubId, ...earlyReady };
+    }
+
+    XLN.enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId,
+        entityTxs: CANDIDATE_TOKEN_IDS.map((tokenId) => ({
+          type: 'extendCredit',
+          data: {
+            counterpartyEntityId: hubId,
+            tokenId,
+            amount: 10_000n * TOKEN_SCALE,
+          },
+        })),
+      }],
+    });
+
+    const readyAfterExtend = await waitForSwapReady(45_000);
+    if (readyAfterExtend) {
+      return { ok: true, entityId, signerId, counterpartyId: hubId, ...readyAfterExtend };
+    }
+
+    const faucet = await requestOffchainFaucet(
+      String(env.runtimeId || ''),
+      entityId,
+      hubId,
+      1,
+      '100',
+    );
+    const readyAfterFaucet = await waitForSwapReady(45_000);
+    if (readyAfterFaucet) {
+      return { ok: true, entityId, signerId, counterpartyId: hubId, ...readyAfterFaucet };
+    }
+
+    const rep = findLocalReplica(env, entityId, signerId);
+    const account = findAccount(rep?.state?.accounts, entityId, hubId);
+    if (account) {
+      const tokens = listTokenIds(account)
+        .map((tokenId) => {
+          const cap = getCapacity(entityId, hubId, account, tokenId);
+          return `${tokenId}:out=${cap.outCapacity.toString()}:in=${cap.inCapacity.toString()}:delta=${String(cap.hasDelta)}`;
+        })
+        .join(', ');
+      return {
+        ok: false,
+        error:
+          `swap-capacity timeout: faucet=${faucet.ok ? 'ok' : `fail(${faucet.detail})`} ` +
+          `currentHeight=${String(account?.currentHeight || 0)} tokens=[${tokens}]`,
+      };
+    }
+
+    return { ok: false, error: 'swap-capacity timeout: account not found after open/extend' };
+  });
+
+  expect(result.ok, `ensureAnyHubAccountOpen failed: ${result.error || 'unknown'}`).toBe(true);
+  if (!result.ok) throw new Error(result.error || 'failed');
+  return {
+    entityId: result.entityId,
+    signerId: result.signerId,
+    counterpartyId: result.counterpartyId,
+    giveTokenId: Number(result.giveTokenId),
+    wantTokenId: Number(result.wantTokenId),
+    orderAmount: String(result.orderAmount || '1'),
+    orderPrice: String(result.orderPrice || '1'),
+  };
+}
+
+async function ensureDeterministicSwapAccount(page: Page): Promise<{
+  entityId: string;
+  signerId: string;
+  counterpartyId: string;
+}> {
+  const identity = await readSelectedUiRuntimeIdentity(page);
+
+  const hubIds = await listSharedHubIds(page);
+  const hubId = hubIds[0];
+  expect(typeof hubId === 'string' && hubId.length > 0, 'hub not discovered').toBe(true);
+
+  await connectRuntimeToSharedHubWithCredit(page, {
+    entityId: identity.entityId,
+    signerId: identity.signerId,
+  }, hubId!, '10000', SWAP_CONNECT_TOKEN_IDS);
+
+  for (const funding of [
+    { tokenId: 1, amount: '100' },
+    { tokenId: 2, amount: '1' },
+  ]) {
+    const faucetResponse = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
+      data: {
+        userEntityId: identity.entityId,
+        userRuntimeId: identity.runtimeId,
+        hubEntityId: hubId!,
+        tokenId: funding.tokenId,
+        amount: funding.amount,
+      },
+    });
+    const faucetBody = await faucetResponse.json().catch(() => ({}));
+    expect(
+      faucetResponse.ok(),
+      `swap faucet failed for token ${funding.tokenId}: ${JSON.stringify(faucetBody)}`,
+    ).toBe(true);
+  }
+
+  await expect.poll(async () => {
+    return await getRenderedOutboundForAccount(page, hubId!);
+  }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0);
+
+  await expect.poll(async () => {
+    return await readAccountTokenOutCapacity(page, identity.entityId, identity.signerId, hubId!, 2);
+  }, { timeout: 60_000, intervals: [250, 500, 1000] }).toBeGreaterThan(0);
+
+  return {
+    entityId: identity.entityId,
+    signerId: identity.signerId,
+    counterpartyId: hubId!,
+  };
+}
+
+async function readAccountTokenOutCapacity(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+  tokenId: number,
+): Promise<number> {
+  return await page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
+    const nonNegative = (x: bigint): bigint => (x < 0n ? 0n : x);
+    const normalize = (value: string) => String(value || '').trim().toLowerCase();
+    const env = (window as any).isolatedEnv;
+    if (!env?.state.eReplicas) return 0;
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return normalize(eid) === normalize(entityId) && normalize(sid) === normalize(signerId);
+    });
+    const replica = key ? env.state.eReplicas.get(key) : null;
+    if (!replica?.state?.accounts || !(replica.state.accounts instanceof Map)) return 0;
+
+    let account: any = null;
+    for (const [accountKey, candidate] of replica.state.accounts.entries()) {
+      if (normalize(String(accountKey || '')) === normalize(counterpartyId)) {
+        account = candidate;
+        break;
+      }
+      const left = normalize(String(candidate?.leftEntity || ''));
+      const right = normalize(String(candidate?.rightEntity || ''));
+      const owner = normalize(entityId);
+      const cp = normalize(counterpartyId);
+      if ((left === owner && right === cp) || (left === cp && right === owner)) {
+        account = candidate;
+        break;
+      }
+    }
+    if (!account?.state?.deltas || !(account.state.deltas instanceof Map)) return 0;
+    const delta = account.state.deltas.get(tokenId);
+    if (!delta) return 0;
+
+    const totalDelta = BigInt(delta.ondelta || 0n) + BigInt(delta.offdelta || 0n);
+    const collateral = nonNegative(BigInt(delta.collateral || 0n));
+    const ownCreditLimit = BigInt(delta.leftCreditLimit || 0n);
+    const peerCreditLimit = BigInt(delta.rightCreditLimit || 0n);
+    let outCollateral = totalDelta > 0n ? (totalDelta > collateral ? collateral : totalDelta) : 0n;
+    let inOwnCredit = nonNegative(-totalDelta);
+    if (inOwnCredit > ownCreditLimit) inOwnCredit = ownCreditLimit;
+    let outPeerCredit = nonNegative(totalDelta - collateral);
+    if (outPeerCredit > peerCreditLimit) outPeerCredit = peerCreditLimit;
+    const outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
+    const outAllowance = BigInt(delta.leftAllowance || 0n);
+    const leftHold = BigInt(delta.leftHold || 0n);
+    const leftEntity = normalize(String(account.state.leftEntity || ''));
+    const isLeft = leftEntity === normalize(entityId);
+    let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowance);
+    outCapacity = nonNegative(outCapacity - leftHold);
+
+    if (!isLeft) {
+      let inCollateral = totalDelta > 0n ? nonNegative(collateral - totalDelta) : collateral;
+      let inAllowance = BigInt(delta.rightAllowance || 0n);
+      let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
+      let rightHold = BigInt(delta.rightHold || 0n);
+      let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowance);
+      inCapacity = nonNegative(inCapacity - rightHold);
+      outCapacity = inCapacity;
+    }
+
+    return Number(outCapacity) / 1e18;
+  }, { entityId, signerId, counterpartyId, tokenId });
+}
+
+async function listSharedHubIds(page: Page): Promise<string[]> {
+  const response = await page.request.get(`${API_BASE_URL}/api/health`);
+  expect(response.ok(), 'health endpoint must be available').toBe(true);
+  const body = await response.json() as {
+    hubMesh?: { hubIds?: string[] };
+    hubs?: Array<{ entityId?: string; online?: boolean }>;
+  };
+
+  const hubMeshIds = Array.isArray(body.hubMesh?.hubIds) ? body.hubMesh!.hubIds.filter(Boolean) : [];
+  if (hubMeshIds.length > 0) return Array.from(new Set(hubMeshIds.map((id) => String(id))));
+
+  const liveHubIds = Array.isArray(body.hubs)
+    ? body.hubs
+        .filter((hub) => hub.online !== false && typeof hub.entityId === 'string' && hub.entityId.length > 0)
+        .map((hub) => String(hub.entityId))
+    : [];
+  return Array.from(new Set(liveHubIds));
+}
+
+async function ensureDeterministicSwapAccounts(
+  page: Page,
+  minHubCount = 3,
+): Promise<{
+  entityId: string;
+  signerId: string;
+  runtimeId: string;
+  hubIds: string[];
+}> {
+  const identity = await readSelectedUiRuntimeIdentity(page);
+
+  const hubIds = (await listSharedHubIds(page)).slice(0, minHubCount);
+  expect(hubIds.length, `expected at least ${minHubCount} hubs for aggregated swap coverage`).toBeGreaterThanOrEqual(minHubCount);
+
+  for (const hubId of hubIds) {
+    await connectRuntimeToSharedHubWithCredit(page, {
+      entityId: identity.entityId,
+      signerId: identity.signerId,
+    }, hubId, '10000', SWAP_CONNECT_TOKEN_IDS);
+  }
+
+  await expect
+    .poll(async () => {
+      const health = await getHealth(page);
+      const mmHubs = Array.isArray(health?.marketMaker?.hubs) ? health.marketMaker!.hubs : [];
+      let readyHubs = 0;
+      let pairBookCount = 0;
+      for (const hubId of hubIds) {
+        const hub = mmHubs.find((entry) => String(entry.hubEntityId || '').toLowerCase() === String(hubId).toLowerCase());
+        const readyPairs = (hub?.pairs ?? []).filter((pair) =>
+          CANONICAL_SWAP_PAIR_IDS.includes(String(pair.pairId || '')) && pair.ready === true,
+        );
+        pairBookCount += readyPairs.length;
+        if (readyPairs.length === CANONICAL_SWAP_PAIR_IDS.length) readyHubs += 1;
+      }
+      return { readyHubs, pairBookCount };
+    }, {
+      timeout: 30_000,
+      intervals: [250, 500, 1000],
+      message: 'server market-maker must expose 3x3 hub orderbooks before swap UI assertions',
+    })
+    .toEqual({ readyHubs: hubIds.length, pairBookCount: hubIds.length * CANONICAL_SWAP_PAIR_IDS.length });
+
+  return {
+    entityId: identity.entityId,
+    signerId: identity.signerId,
+    runtimeId: identity.runtimeId,
+    hubIds,
+  };
+}
+
+async function faucetSwapTokenUntilOutCapacity(
+  page: Page,
+  runtimeRef: {
+    entityId: string;
+    signerId: string;
+    runtimeId: string;
+  },
+  hubId: string,
+  funding: { tokenId: number; amount: string },
+): Promise<void> {
+  const deadline = Date.now() + 75_000;
+  let attempts = 0;
+  let lastCapacity = 0;
+  let lastBody: unknown = null;
+  let lastStatus = 0;
+
+  while (Date.now() < deadline) {
+    lastCapacity = await readAccountTokenOutCapacity(
+      page,
+      runtimeRef.entityId,
+      runtimeRef.signerId,
+      hubId,
+      funding.tokenId,
+    ).catch(() => 0);
+    if (lastCapacity > 0) return;
+
+    attempts += 1;
+    const faucetResponse = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
+      data: {
+        userEntityId: runtimeRef.entityId,
+        userRuntimeId: runtimeRef.runtimeId,
+        hubEntityId: hubId,
+        tokenId: funding.tokenId,
+        amount: funding.amount,
+      },
+    });
+    lastStatus = faucetResponse.status();
+    lastBody = await faucetResponse.json().catch(() => ({}));
+    if (!faucetResponse.ok()) {
+      const code = String((lastBody as any)?.code || '');
+      if (
+        code !== 'FAUCET_ACCOUNT_NOT_READY'
+        && code !== 'FAUCET_ACCOUNT_PENDING_FRAME'
+        && code !== 'FAUCET_CLIENT_PENDING_FRAME'
+      ) {
+        break;
+      }
+    }
+
+    const settleStartedAt = Date.now();
+    while (Date.now() - settleStartedAt < 12_000) {
+      lastCapacity = await readAccountTokenOutCapacity(
+        page,
+        runtimeRef.entityId,
+        runtimeRef.signerId,
+        hubId,
+        funding.tokenId,
+      ).catch(() => 0);
+      if (lastCapacity > 0) return;
+      await page.waitForTimeout(350);
+    }
+  }
+
+  throw new Error(
+    `swap click faucet did not produce outCapacity for hub ${hubId} token ${funding.tokenId}: ` +
+      `attempts=${attempts} lastCapacity=${lastCapacity} status=${lastStatus} body=${JSON.stringify(lastBody)}`,
+  );
+}
+
+async function readSwapState(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+): Promise<{
+  openOfferCount: number;
+  accountSwapOffersSize: number;
+  accountSwapOrderHistorySize: number;
+  accountSwapClosedOrdersSize: number;
+  totalSwapOrderHistorySize: number;
+  accountHistoryCancelRequested: boolean;
+  accountHistoryResolveCount: number;
+  accountHasSwapOfferInMempool: boolean;
+  accountHasSwapOfferInPendingFrame: boolean;
+  accountHasSwapCancelRequestInMempool: boolean;
+  accountHasSwapCancelRequestInPendingFrame: boolean;
+  accountConsensusReady: boolean;
+  accountCurrentHeight: number;
+  accountMempoolSize: number;
+  accountProposalSize: number;
+  accountLockedFrameSize: number;
+  accountPendingFrameSize: number;
+  deltas: Record<string, SwapDeltaSnapshot>;
+}> {
+  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+    const findAccount = (accounts: any, ownerId: string, cpId: string) => {
+      if (!(accounts instanceof Map)) return null;
+      const owner = String(ownerId || '').toLowerCase();
+      const cp = String(cpId || '').toLowerCase();
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey || '').toLowerCase() === cp) return account;
+        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+          ? String(account.counterpartyEntityId).toLowerCase()
+          : '';
+        if (canonicalCp === cp) return account;
+        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
+        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+      }
+      return null;
+    };
+
+    const env = (window as any).isolatedEnv;
+    if (!env?.state.eReplicas) {
+      return {
+        openOfferCount: 0,
+        accountSwapOffersSize: 0,
+        accountSwapOrderHistorySize: 0,
+        accountSwapClosedOrdersSize: 0,
+        totalSwapOrderHistorySize: 0,
+        accountHistoryCancelRequested: false,
+        accountHistoryResolveCount: 0,
+        accountHasSwapOfferInMempool: false,
+        accountHasSwapOfferInPendingFrame: false,
+        accountHasSwapCancelRequestInMempool: false,
+        accountHasSwapCancelRequestInPendingFrame: false,
+        accountConsensusReady: false,
+        accountCurrentHeight: 0,
+        accountMempoolSize: 0,
+        accountProposalSize: 0,
+        accountLockedFrameSize: 0,
+        accountPendingFrameSize: 0,
+        deltas: {},
+      };
+    }
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const rep = key ? env.state.eReplicas.get(key) : null;
+    const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
+    const accountHistory = account?.swapOrderHistory instanceof Map
+      ? Array.from(account.swapOrderHistory.values())
+      : [];
+    const totalSwapOrderHistorySize = Number(
+      Array.from(rep?.state?.accounts?.values?.() || []).reduce(
+        (count: number, item: any) => count + Number(item?.swapOrderHistory?.size || 0),
+        0,
+      ),
+    );
+    return {
+      openOfferCount: Number(
+        Array.from(rep?.state?.accounts?.values?.() || []).reduce(
+          (count: number, account: any) => count + Number(account?.state?.swapOffers?.size || 0),
+          0,
+        ),
+      ),
+      accountSwapOffersSize: Number(account?.state?.swapOffers?.size || 0),
+      accountSwapOrderHistorySize: Number(account?.swapOrderHistory?.size || 0),
+      accountSwapClosedOrdersSize: Number(account?.swapClosedOrders?.size || 0),
+      totalSwapOrderHistorySize,
+      accountHistoryCancelRequested: accountHistory.some((entry: any) => Boolean(entry?.cancelRequested)),
+      accountHistoryResolveCount: Number(
+        accountHistory.reduce(
+          (count: number, entry: any) => count + Number(Array.isArray(entry?.resolves) ? entry.resolves.length : 0),
+          0,
+        ),
+      ),
+      accountHasSwapOfferInMempool: !!(account?.mempool || []).find((tx: any) => tx?.type === 'swap_offer'),
+      accountHasSwapOfferInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find((tx: any) => tx?.type === 'swap_offer'),
+      accountHasSwapCancelRequestInMempool: !!(account?.mempool || []).find(
+        (tx: any) => tx?.type === 'swap_cancel_request'
+      ),
+      accountHasSwapCancelRequestInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find(
+        (tx: any) => tx?.type === 'swap_cancel_request'
+      ),
+      accountConsensusReady: Boolean(
+        account?.currentFrame &&
+        Number(account?.currentHeight ?? 0) > 0 &&
+        !account?.pendingFrame &&
+        Number(account?.mempool?.length ?? 0) === 0 &&
+        Number(account?.proposal?.accountTxs?.length ?? account?.proposal?.txs?.length ?? 0) === 0 &&
+        Number(account?.lockedFrame?.accountTxs?.length ?? account?.lockedFrame?.txs?.length ?? 0) === 0
+      ),
+      accountCurrentHeight: Number(account?.currentHeight ?? 0),
+      accountMempoolSize: Number(account?.mempool?.length ?? 0),
+      accountProposalSize: Number(account?.proposal?.accountTxs?.length ?? account?.proposal?.txs?.length ?? 0),
+      accountLockedFrameSize: Number(account?.lockedFrame?.accountTxs?.length ?? account?.lockedFrame?.txs?.length ?? 0),
+      accountPendingFrameSize: Number(account?.pendingFrame?.accountTxs?.length ?? account?.pendingFrame?.txs?.length ?? 0),
+      deltas: Object.fromEntries(
+        Array.from(account?.state?.deltas?.entries?.() || []).map(([tokenId, delta]: [unknown, any]) => [
+          String(tokenId),
+          {
+            collateral: String(delta?.collateral ?? 0n),
+            ondelta: String(delta?.ondelta ?? 0n),
+            offdelta: String(delta?.offdelta ?? 0n),
+            leftCreditLimit: String(delta?.leftCreditLimit ?? 0n),
+            rightCreditLimit: String(delta?.rightCreditLimit ?? 0n),
+            leftHold: String(delta?.leftHold ?? 0n),
+            rightHold: String(delta?.rightHold ?? 0n),
+          },
+        ]),
+      ),
+    };
+  }, { entityId, signerId, counterpartyId });
+}
+
+async function readHubSwapDeltas(
+  page: Page,
+  hubEntityId: string,
+  counterpartyEntityId: string,
+  tokenIds: readonly number[],
+): Promise<Record<string, SwapDeltaSnapshot>> {
+  const response = await page.request.get(`${API_BASE_URL}/api/hub/account-status`, {
+    params: {
+      hubEntityId,
+      counterpartyEntityId,
+      tokenIds: tokenIds.join(','),
+    },
+  });
+  const body = await response.json().catch(() => null) as any;
+  expect(response.ok(), `hub Account financial status failed: ${JSON.stringify(body)}`).toBe(true);
+  expect(body?.success).toBe(true);
+  return Object.fromEntries(
+    (Array.isArray(body?.tokens) ? body.tokens : []).map((token: any) => [
+      String(token?.tokenId),
+      token?.delta,
+    ]),
+  );
+}
+
+async function waitForSwapBilateralSettlementIdle(
+  page: Page,
+  accountRef: { entityId: string; signerId: string },
+  counterpartyId: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const local = await readSwapState(page, accountRef.entityId, accountRef.signerId, counterpartyId);
+        const response = await page.request.get(`${API_BASE_URL}/api/hub/account-status`, {
+          params: {
+            hubEntityId: counterpartyId,
+            counterpartyEntityId: accountRef.entityId,
+            tokenIds: '1,2,3',
+          },
+        });
+        const remote = await response.json().catch(() => null) as any;
+        return {
+          localReady: local.accountConsensusReady,
+          localMempool: local.accountMempoolSize,
+          localProposal: local.accountProposalSize,
+          localLocked: local.accountLockedFrameSize,
+          localPending: local.accountPendingFrameSize,
+          remoteOk: Boolean(response.ok() && remote?.success),
+          remoteReady: Boolean(remote?.ready),
+          remoteMempool: Number(remote?.mempool ?? -1),
+          remoteRuntimeMempool: Number(remote?.runtime?.runtimeMempool?.length ?? -1),
+          remoteReplicaMempool: Number(remote?.replica?.mempool?.length ?? -1),
+          remoteReplicaProposal: Number(remote?.replica?.proposalTxs?.length ?? -1),
+          remoteReplicaLocked: Number(remote?.replica?.lockedFrameTxs?.length ?? -1),
+        };
+      },
+      { timeout: 45_000, intervals: [250, 500, 1000] },
+    )
+    .toEqual({
+      localReady: true,
+      localMempool: 0,
+      localProposal: 0,
+      localLocked: 0,
+      localPending: 0,
+      remoteOk: true,
+      remoteReady: true,
+      remoteMempool: 0,
+      remoteRuntimeMempool: 0,
+      remoteReplicaMempool: 0,
+      remoteReplicaProposal: 0,
+      remoteReplicaLocked: 0,
+    });
+}
+
+async function readSwapResolveCount(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+): Promise<number> {
+  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+    const findAccount = (accounts: any, ownerId: string, cpId: string) => {
+      if (!(accounts instanceof Map)) return null;
+      const owner = String(ownerId || '').toLowerCase();
+      const cp = String(cpId || '').toLowerCase();
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey || '').toLowerCase() === cp) return account;
+        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+          ? String(account.counterpartyEntityId).toLowerCase()
+          : '';
+        if (canonicalCp === cp) return account;
+        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
+        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+      }
+      return null;
+    };
+
+    const env = (window as any).isolatedEnv;
+    if (!env?.state.eReplicas) return 0;
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const rep = key ? env.state.eReplicas.get(key) : null;
+    const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
+    if (!account) return 0;
+
+    let count = 0;
+    for (const frame of account.frameHistory || []) {
+      for (const tx of frame?.accountTxs || []) {
+        if (tx?.type === 'swap_resolve') count += 1;
+      }
+    }
+    return count;
+  }, { entityId, signerId, counterpartyId });
+}
+
+async function readPositiveSwapResolveCount(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+): Promise<number> {
+  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+    const findAccount = (accounts: any, ownerId: string, cpId: string) => {
+      if (!(accounts instanceof Map)) return null;
+      const owner = String(ownerId || '').toLowerCase();
+      const cp = String(cpId || '').toLowerCase();
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey || '').toLowerCase() === cp) return account;
+        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+          ? String(account.counterpartyEntityId).toLowerCase()
+          : '';
+        if (canonicalCp === cp) return account;
+        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
+        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+      }
+      return null;
+    };
+
+    const env = (window as any).isolatedEnv;
+    if (!env?.state.eReplicas) return 0;
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const rep = key ? env.state.eReplicas.get(key) : null;
+    const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
+    if (!account) return 0;
+
+    let count = 0;
+    for (const frame of account.frameHistory || []) {
+      for (const tx of frame?.accountTxs || []) {
+        if (tx?.type !== 'swap_resolve') continue;
+        const fillRatio = Number(tx?.data?.fillRatio || 0);
+        if (fillRatio > 0) count += 1;
+      }
+    }
+    return count;
+  }, { entityId, signerId, counterpartyId });
+}
+
+async function openSwapWorkspace(page: Page): Promise<void> {
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await accountsTab.click();
+  const swapTab = page.getByTestId('account-workspace-tab-swap').first();
+  await expect(swapTab).toBeVisible({ timeout: 20_000 });
+  await swapTab.click();
+  await expect(page.locator('.swap-panel').first()).toBeVisible({ timeout: 15_000 });
+}
+
+async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string): Promise<void> {
+  const select = page.getByTestId('swap-ticket-hub-select').first();
+  const hasSelector = await select.isVisible({ timeout: 1500 }).catch(() => false);
+  if (!hasSelector) return;
+  await expect
+    .poll(async () => await select.locator('option').count(), {
+      timeout: 30_000,
+      intervals: [250, 500, 1000],
+      message: 'swap account selector must expose at least one account option',
+    })
+    .toBeGreaterThan(0);
+  const values = await select.locator('option').evaluateAll((options) =>
+    options.map((option) => ({ value: String((option as HTMLOptionElement).value || ''), label: option.textContent || '' })),
+  );
+  const normalizedPreferred = String(preferredAccountId || '').trim().toLowerCase();
+  const preferredAccount = normalizedPreferred
+    ? values.find((option) => String(option.value || '').trim().toLowerCase() === normalizedPreferred)
+    : null;
+  const targetAccount = preferredAccount || values.find((option) => option.value);
+  if (!targetAccount) return;
+  await select.evaluate((node, value) => {
+    const element = node as HTMLSelectElement;
+    element.value = String(value || '');
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  }, targetAccount.value);
+  await expect
+    .poll(async () => String(await select.inputValue().catch(() => '')).trim().toLowerCase(), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+    })
+    .toBe(String(targetAccount.value).trim().toLowerCase());
+}
+
+function parseFirstNumber(text: string): number {
+  const match = String(text || '').match(/-?\d[\d,]*(?:\.\d+)?/);
+  if (!match) return Number.NaN;
+  return Number.parseFloat(match[0]!.replace(/,/g, ''));
+}
+
+function formatDecimalForInput(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  return value.toFixed(6).replace(/\.?0+$/, '');
+}
+
+function normalizeDisplayedPriceText(value: string): string {
+  return String(value || '').replace(/,/g, '').trim();
+}
+
+async function waitForSwapOrderbookLiquidity(
+  page: Page,
+  pairLabel: string,
+  options?: {
+    preferredAccountId?: string;
+    scope?: 'Aggregated' | 'Selected';
+    minSources?: number;
+  },
+): Promise<void> {
+  const desiredScope = options?.scope || 'Aggregated';
+  const minSources = Number.isFinite(options?.minSources) ? Number(options?.minSources) : 1;
+
+  const readVisibleLiquidity = async () => {
+    const { asks, bids } = await readOrderbookRowCounts(page);
+    const uniqueSourceIds = await countUniqueOrderbookSources(page);
+    const sourceStatus = String(await page.getByTestId('orderbook-source-status').first().textContent().catch(() => '') || '').trim();
+    return { asks, bids, rows: asks + bids, sources: uniqueSourceIds, sourceStatus };
+  };
+
+  const isReadyState = (state: { rows: number; sources: number; sourceStatus: string }): boolean => (
+    state.rows > 0
+    && state.sources >= minSources
+  );
+
+  const tryWaitOnce = async (
+    timeoutMs: number,
+  ): Promise<{ asks: number; bids: number; rows: number; sources: number; sourceStatus: string }> => {
+    const scopeToggle = page.getByTestId('swap-scope-toggle').first();
+    const refreshLabel = page.locator('.swap-panel .orderbook-panel .update-label').first();
+    await ensureSwapOrderbookVisible(page);
+    await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
+    await selectCounterpartyInSwap(page, options?.preferredAccountId);
+    const start = Date.now();
+    let lastState = await readVisibleLiquidity().catch(() => ({ asks: 0, bids: 0, rows: 0, sources: 0, sourceStatus: '' }));
+    while (Date.now() - start < timeoutMs) {
+      await ensureSwapScope(page, desiredScope === 'Aggregated' ? 'aggregated' : 'selected');
+      await selectSwapPairSide(page, pairLabel, 'buy');
+      await page.waitForTimeout(250);
+      lastState = await readVisibleLiquidity();
+      if (isReadyState(lastState)) return lastState;
+      if (await refreshLabel.isVisible().catch(() => false)) {
+        await refreshLabel.click().catch(() => {});
+        await page.waitForTimeout(200);
+        lastState = await readVisibleLiquidity().catch(() => lastState);
+        if (isReadyState(lastState)) return lastState;
+      }
+      await selectCounterpartyInSwap(page, options?.preferredAccountId);
+      await page.waitForTimeout(750);
+    }
+    return lastState;
+  };
+
+  let lastState = await tryWaitOnce(45_000);
+  if (isReadyState(lastState)) {
+    if (desiredScope === 'Aggregated') await expectVisibleOrderbookRowsUseSingleHub(page);
+    return;
+  }
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => {
+    const env = (window as any).isolatedEnv;
+    return !!env?.runtimeId && Number(env?.state.eReplicas?.size || 0) > 0;
+  }, { timeout: 60_000 });
+  await openSwapWorkspace(page);
+  lastState = await tryWaitOnce(45_000);
+  if (isReadyState(lastState)) {
+    if (desiredScope === 'Aggregated') await expectVisibleOrderbookRowsUseSingleHub(page);
+    return;
+  }
+
+  const selectedAccountId = await page.getByTestId('swap-ticket-hub-select').first().inputValue().catch(() => '');
+  throw new Error(
+    `Swap orderbook stayed empty for ${pairLabel}: ${JSON.stringify({ ...lastState, selectedAccountId, desiredScope, minSources })}`,
+  );
+}
+
+async function prepareExecutableOrder(page: Page): Promise<number> {
+  await ensureSwapOrderbookVisible(page);
+  const preferredPairs = ['WETH/USDC', 'USDC/USDT', 'WETH/USDT'].filter((pair) => CANONICAL_SWAP_PAIR_LABELS.includes(pair));
+  if (preferredPairs.length === 0) {
+    throw new Error('No executable WETH/* pair is available in canonical swap pairs');
+  }
+
+  const placeButton = page.getByTestId('swap-ticket-submit').first();
+  const amountInput = page.getByTestId('swap-ticket-amount').first();
+  const priceInput = page.getByTestId('swap-ticket-rate').first();
+  await expect(amountInput).toBeVisible({ timeout: 20_000 });
+  await expect(priceInput).toBeVisible({ timeout: 20_000 });
+  const deadline = Date.now() + 30_000;
+  let lastFormError = '';
+  while (Date.now() < deadline) {
+    for (const pairLabel of preferredPairs) {
+      await selectSwapPairSide(page, pairLabel, 'buy');
+      await page.waitForTimeout(250);
+      const sidesToTry: Array<{
+        mode: 'buy' | 'sell';
+        rows: Locator;
+        pick: 'first' | 'last';
+      }> = [];
+
+      const asks = page.getByTestId('orderbook-ask-row');
+      const bids = page.getByTestId('orderbook-bid-row');
+      const askCount = await asks.count();
+      const bidCount = await bids.count();
+
+      if (askCount > 0) sidesToTry.push({ mode: 'buy', rows: asks, pick: 'last' });
+      if (bidCount > 0) sidesToTry.push({ mode: 'sell', rows: bids, pick: 'first' });
+
+      for (const side of sidesToTry) {
+        await selectSwapPairSide(page, pairLabel, side.mode);
+        await page.waitForTimeout(120);
+
+        try {
+          if (side.pick === 'last') {
+            await side.rows.last().click();
+          } else {
+            await side.rows.first().click();
+          }
+          await expect(page.getByTestId('swap-ticket-rate').first()).not.toHaveValue('', { timeout: 5_000 });
+        } catch {
+          continue;
+        }
+
+        const available = await readAvailableFromSizing(page);
+        if (!Number.isFinite(available) || available <= 0) continue;
+        const rawPriceText = await priceInput.inputValue().catch(() => '');
+        const levelPrice = parseFirstNumber(rawPriceText);
+        let targetAmount = 0;
+        if (side.mode === 'buy') {
+          // Buy-base mode spends quote directly; enforce min-notional headroom.
+          if (available < 100) continue;
+          targetAmount = Math.min(available, 120);
+        } else {
+          // Sell-base mode spends base; ensure quote notional >=100 at selected level price.
+          if (!Number.isFinite(levelPrice) || levelPrice <= 0) continue;
+          const minBaseFor100 = 100 / levelPrice;
+          const desiredBase = Math.max(minBaseFor100 * 1.05, 0.02);
+          if (available < desiredBase) continue;
+          targetAmount = Math.min(available, Math.max(desiredBase, 0.1));
+        }
+        if (!Number.isFinite(targetAmount) || targetAmount <= 0) continue;
+        await amountInput.fill(formatDecimalForInput(targetAmount));
+        await page.waitForTimeout(80);
+
+        if (await placeButton.isEnabled()) {
+          return targetAmount;
+        }
+      }
+    }
+
+    const formError = await page.getByTestId('swap-ticket-error').first().textContent().catch(() => null);
+    if (formError?.trim()) lastFormError = formError.trim();
+    await page.waitForTimeout(450);
+  }
+
+  throw new Error(`No preferred WETH pair is executable${lastFormError ? ` (${lastFormError})` : ''}`);
+}
+
+async function executeOrderbookClickFill(
+  page: Page,
+  accountRef: { entityId: string; signerId: string; counterpartyId: string; hubIds: string[] },
+  clickTarget: 'lowest-ask' | 'highest-bid' | 'mid-price',
+  options?: {
+    scope?: 'aggregated' | 'selected';
+    preferredAccountId?: string;
+    measureIdleRpcWindow?: boolean;
+  },
+): Promise<{
+  routedCounterpartyId: string;
+  feedbackFullyFilledMs: number;
+  closedStateMs: number;
+  rpcHttpRequests: number;
+  rpcCalls: number;
+  rpcMethods: Record<string, number>;
+  idleRpcWindowMs: number;
+  idleRpcHttpRequests: number;
+  idleRpcCalls: number;
+  idleRpcMethods: Record<string, number>;
+}> {
+  const orderbookLogs: string[] = [];
+  const runtimeProfiles: Array<{ observedAtMs: number; text: string }> = [];
+  const rpc2Methods = new Map<string, number>();
+  let rpc2HttpRequests = 0;
+  let rpc2JsonRpcCalls = 0;
+  let swapClickStartedAt = 0;
+  const onRpcRequest = (request: { url(): string; postData(): string | null }) => {
+    if (!/\/rpc2(?:\?|$)/.test(request.url())) return;
+    rpc2HttpRequests += 1;
+    const body = request.postData();
+    if (!body) return;
+    try {
+      const parsed = JSON.parse(body) as unknown;
+      const calls = Array.isArray(parsed) ? parsed : [parsed];
+      for (const call of calls) {
+        if (!call || typeof call !== 'object') continue;
+        const method = String((call as { method?: unknown }).method || 'missing');
+        rpc2JsonRpcCalls += 1;
+        rpc2Methods.set(method, (rpc2Methods.get(method) ?? 0) + 1);
+      }
+    } catch {
+      rpc2Methods.set('invalid-json', (rpc2Methods.get('invalid-json') ?? 0) + 1);
+    }
+  };
+  const onConsole = (msg: { text(): string }) => {
+    const text = msg.text();
+    if (
+      text.includes('process.profile') ||
+      text.includes('frame.profile') ||
+      text.includes('single_signer.profile') ||
+      text.includes('proposal.profile') ||
+      text.includes('state-root] profile')
+    ) {
+      runtimeProfiles.push({ observedAtMs: Date.now(), text });
+    }
+    if (text.includes('ORDERBOOK') || text.includes('Swap offer placed') || text.includes('Failed to place swap')) {
+      orderbookLogs.push(text);
+      if (orderbookLogs.length > 40) orderbookLogs.shift();
+    }
+  };
+  page.on('console', onConsole as any);
+  page.on('request', onRpcRequest as any);
+  const readOrderbookDebug = async () => await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+    const env = (window as any).isolatedEnv;
+    const accountSelect = document.querySelector('[data-testid="swap-ticket-hub-select"]') as HTMLSelectElement | null;
+    const scopeToggle = document.querySelector('[data-testid="swap-scope-toggle"]') as HTMLButtonElement | null;
+    const amountInput = document.querySelector('[data-testid="swap-ticket-amount"]') as HTMLInputElement | null;
+    const priceInput = document.querySelector('[data-testid="swap-ticket-rate"]') as HTMLInputElement | null;
+    const formError = (document.querySelector('.swap-panel .form-error') as HTMLElement | null)?.innerText || '';
+    if (!env?.state.eReplicas) return null;
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const rep = key ? env.state.eReplicas.get(key) : null;
+    const account = rep?.state?.accounts?.get?.(counterpartyId);
+    const offer = account?.state?.swapOffers instanceof Map ? Array.from(account.state.swapOffers.values())[0] : null;
+    let swapResolveCount = 0;
+    let positiveSwapResolveCount = 0;
+    for (const frame of account?.frameHistory || []) {
+      for (const tx of frame?.accountTxs || []) {
+        if (tx?.type !== 'swap_resolve') continue;
+        swapResolveCount += 1;
+        if (Number(tx?.data?.fillRatio || 0) > 0) positiveSwapResolveCount += 1;
+      }
+    }
+    const hubRepKey = Array.from(env.state.eReplicas.keys()).find((k: string) => String(k).split(':')[0]?.toLowerCase() === String(counterpartyId).toLowerCase());
+    const hubRep = hubRepKey ? env.state.eReplicas.get(hubRepKey) : null;
+    const book = hubRep?.state?.orderbookExt?.books?.get?.('1/2');
+    const readSideLevels = (currentBook: any, side: 'ask' | 'bid') => {
+      if (!currentBook) return [];
+      const bucketIds = side === 'ask'
+        ? Array.from(currentBook.askBucketIdsAsc || [])
+        : Array.from(currentBook.bidBucketIdsDesc || []);
+      const buckets = side === 'ask' ? currentBook.askBuckets : currentBook.bidBuckets;
+      const levels = [];
+      for (const bucketId of bucketIds) {
+        const bucket = buckets?.get?.(String(bucketId)) ?? buckets?.get?.(bucketId);
+        if (!bucket) continue;
+        const pricesAsc = Array.from(bucket.pricesAsc || []);
+        const orderedPrices = side === 'ask' ? pricesAsc : [...pricesAsc].reverse();
+        for (const priceTicks of orderedPrices) {
+          const level = bucket.levels?.get?.(String(priceTicks)) ?? bucket.levels?.get?.(priceTicks);
+          if (!level) continue;
+          const orders = [];
+          for (const orderId of Array.from(level.orderIds || [])) {
+            const order = currentBook.orders?.get?.(orderId);
+            if (!order) continue;
+            orders.push({
+              orderId,
+              owner: order.ownerId,
+              qtyLots: order.qtyLots,
+              priceTicks: String(order.priceTicks),
+            });
+          }
+          if (orders.length === 0) continue;
+          levels.push({
+            priceTicks: String(level.priceTicks ?? priceTicks),
+            orders,
+          });
+          if (levels.length >= 5) return levels;
+        }
+      }
+      return levels;
+    };
+    const askTop = readSideLevels(book, 'ask');
+    const bidTop = readSideLevels(book, 'bid');
+    return {
+      selectedAccountId: accountSelect?.value || '',
+      scopeMode: scopeToggle?.dataset?.scopeMode || scopeToggle?.innerText?.trim() || '',
+      amountInput: amountInput?.value || '',
+      priceInput: priceInput?.value || '',
+      formError,
+      swapResolveCount,
+      positiveSwapResolveCount,
+      localOffer: offer ? {
+        offerId: offer.offerId,
+        giveTokenId: String(offer.giveTokenId),
+        wantTokenId: String(offer.wantTokenId),
+        giveAmount: String(offer.giveAmount),
+        wantAmount: String(offer.wantAmount),
+        priceTicks: String(offer.priceTicks ?? ''),
+        timeInForce: offer.timeInForce ?? null,
+        makerIsLeft: offer.makerIsLeft,
+        fromEntity: offer.fromEntity,
+        toEntity: offer.toEntity,
+      } : null,
+      hubBook: book ? {
+        bestAskPriceTicks: askTop[0]?.priceTicks ?? null,
+        bestBidPriceTicks: bidTop[0]?.priceTicks ?? null,
+        askTop,
+        bidTop,
+      } : null,
+    };
+  }, accountRef);
+  try {
+    const desiredScope = options?.scope ?? 'aggregated';
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
+    await ensureSwapScope(page, desiredScope);
+    if (options?.preferredAccountId) {
+      await selectCounterpartyInSwap(page, options.preferredAccountId);
+    }
+    if (clickTarget === 'lowest-ask') {
+      await selectSwapPairSide(page, 'WETH/USDC', 'sell');
+      await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
+    } else if (clickTarget === 'highest-bid') {
+      await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+      await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
+    } else {
+      await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+      await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
+    }
+    await page.waitForTimeout(120);
+
+    let clickedDisplayedPrice = '';
+    let clickedSourceIds: string[] = [];
+    if (clickTarget === 'lowest-ask') {
+      const asks = page.getByTestId('orderbook-ask-row');
+      await expect(asks.last()).toBeVisible({ timeout: 20_000 });
+      const row = asks.last();
+      clickedDisplayedPrice = String(await row.locator('.price').textContent() || '').trim();
+      clickedSourceIds = await readRowSourceIds(row);
+      await row.click();
+    } else if (clickTarget === 'highest-bid') {
+      const bids = page.getByTestId('orderbook-bid-row');
+      await expect(bids.first()).toBeVisible({ timeout: 20_000 });
+      const row = bids.first();
+      clickedDisplayedPrice = String(await row.locator('.price').textContent() || '').trim();
+      clickedSourceIds = await readRowSourceIds(row);
+      await row.click();
+    } else {
+      const mid = page.getByTestId('orderbook-mid-row').first();
+      await expect(mid).toBeVisible({ timeout: 20_000 });
+      clickedDisplayedPrice = String(await mid.locator('.mid-price').textContent() || '').trim();
+      await mid.click();
+    }
+
+    if (clickTarget === 'lowest-ask') {
+      await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
+    } else if (clickTarget === 'highest-bid') {
+      await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
+    }
+    const priceInput = page.getByTestId('swap-ticket-rate').first();
+    await expect(priceInput).toBeVisible({ timeout: 10_000 });
+    if (clickedDisplayedPrice) {
+      await expect.poll(async () => String(await priceInput.inputValue()).trim(), {
+        timeout: 10_000,
+        intervals: [50, 100, 200],
+      }).toBe(normalizeDisplayedPriceText(clickedDisplayedPrice));
+    }
+    const scopeToggle = page.getByTestId('swap-scope-toggle').first();
+    const selectedHub = page.getByTestId('swap-ticket-hub-select').first();
+    await expect
+      .poll(async () => await readSwapScopeMode(page), { timeout: 10_000, intervals: [50, 100, 200] })
+      .toBe(desiredScope);
+    await expect.poll(async () => String(await selectedHub.inputValue()).trim(), {
+      timeout: 10_000,
+      intervals: [50, 100, 200],
+    }).not.toBe('');
+    const routedCounterpartyId = String(await selectedHub.inputValue()).trim();
+    if (desiredScope === 'aggregated' && clickTarget !== 'mid-price') {
+      expect(clickedSourceIds, 'All Hubs click row must map to one concrete hub').toHaveLength(1);
+      expect(routedCounterpartyId.toLowerCase()).toBe(clickedSourceIds[0]);
+    }
+    const fillTokenIds = [
+      Number(await page.getByTestId('swap-ticket-from-token').first().inputValue()),
+      Number(await page.getByTestId('swap-ticket-to-token').first().inputValue()),
+    ];
+    expect(fillTokenIds.every(tokenId => Number.isInteger(tokenId) && tokenId > 0)).toBe(true);
+    expect(new Set(fillTokenIds).size).toBe(2);
+    const swapStateBefore = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
+    await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+      const runtimeProcess = (globalThis as any).process;
+      if (runtimeProcess?.env) {
+        runtimeProcess.env.XLN_RUNTIME_PROCESS_PROFILE = '1';
+        runtimeProcess.env.XLN_RUNTIME_PROCESS_SLOW_MS = '0';
+        runtimeProcess.env.XLN_ENTITY_FRAME_SLOW_MS = '0';
+        runtimeProcess.env.XLN_ENTITY_INPUT_SLOW_MS = '0';
+        runtimeProcess.env.XLN_ACCOUNT_INPUT_SLOW_MS = '0';
+      }
+      const messages: string[] = [];
+      const feedbackEvents: Array<{ message: string; atMs: number }> = [];
+      // This helper is invoked more than once in the round-trip journey. Old
+      // terminal toasts are page history, not feedback for the next click.
+      const observed = new Set<Element>(document.querySelectorAll('.toast'));
+      const collect = () => {
+        for (const toast of document.querySelectorAll('.toast')) {
+          if (observed.has(toast)) continue;
+          observed.add(toast);
+          const message = toast.querySelector('.message')?.textContent?.trim();
+          if (message) {
+            messages.push(message);
+            const clickStartedAt = Number((window as any).__xlnSwapClickStartedAt || performance.now());
+            feedbackEvents.push({ message, atMs: Math.max(0, Math.round(performance.now() - clickStartedAt)) });
+          }
+        }
+      };
+      const observer = new MutationObserver(collect);
+      observer.observe(document.body, { childList: true, subtree: true });
+      (window as any).__xlnSwapFeedbackMessages = messages;
+      (window as any).__xlnSwapFeedbackEvents = feedbackEvents;
+      (window as any).__xlnSwapFeedbackObserver = observer;
+      const startedAt = performance.now();
+      const samples: Array<Record<string, unknown>> = [];
+      let lastSignature = '';
+      const sample = () => {
+        const env = (window as any).isolatedEnv;
+        const replicaKey = env?.state.eReplicas instanceof Map
+          ? Array.from(env.state.eReplicas.keys()).find((key: unknown) => {
+              const [candidateEntityId, candidateSignerId] = String(key).split(':');
+              return candidateEntityId?.toLowerCase() === entityId.toLowerCase()
+                && candidateSignerId?.toLowerCase() === signerId.toLowerCase();
+            })
+          : null;
+        const replica = replicaKey ? env.state.eReplicas.get(replicaKey) : null;
+        const account = replica?.state?.accounts instanceof Map
+          ? Array.from(replica.state.accounts.entries()).find(([key, value]: [unknown, any]) =>
+              String(key).toLowerCase() === counterpartyId.toLowerCase()
+              || String(value?.counterpartyEntityId || '').toLowerCase() === counterpartyId.toLowerCase(),
+            )?.[1]
+          : null;
+        const history = account?.swapOrderHistory instanceof Map
+          ? Array.from(account.swapOrderHistory.values()) as any[]
+          : [];
+        const state = {
+          runtimeHeight: Number(env?.state.height ?? 0),
+          entityHeight: Number(replica?.state?.height ?? 0),
+          accountHeight: Number(account?.currentHeight ?? 0),
+          mempool: Number(account?.mempool?.length ?? 0),
+          pending: Number(account?.pendingFrame?.accountTxs?.length ?? 0),
+          openOffers: Number(account?.state?.swapOffers?.size ?? 0),
+          closedOrders: Number(account?.swapClosedOrders?.size ?? 0),
+          resolves: history.reduce((count, entry) => count + Number(Array.isArray(entry?.resolves) ? entry.resolves.length : 0), 0),
+        };
+        const signature = JSON.stringify(state);
+        if (signature !== lastSignature) {
+          samples.push({ atMs: Math.round(performance.now() - startedAt), ...state });
+          lastSignature = signature;
+        }
+        (window as any).__xlnSwapCausalAnimationFrame = requestAnimationFrame(sample);
+      };
+      (window as any).__xlnSwapCausalSamples = samples;
+      (window as any).__xlnSwapCausalAnimationFrame = requestAnimationFrame(sample);
+    }, accountRef);
+    await expect(placeButton).toBeEnabled({ timeout: 10_000 });
+    rpc2HttpRequests = 0;
+    rpc2JsonRpcCalls = 0;
+    rpc2Methods.clear();
+    await page.evaluate(() => { (window as any).__xlnSwapClickStartedAt = performance.now(); });
+    swapClickStartedAt = Date.now();
+    console.log('[E2E-SWAP-CLICK] start');
+    await placeButton.click();
+
+    await expect
+      .poll(
+        async () => {
+          const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
+          return (
+            state.accountHistoryResolveCount > swapStateBefore.accountHistoryResolveCount
+            || state.accountSwapClosedOrdersSize > swapStateBefore.accountSwapClosedOrdersSize
+          );
+        },
+        { timeout: 30_000, intervals: [100, 250, 500, 1000] },
+      )
+      .toBe(true);
+    const clickToClosedStateMs = Date.now() - swapClickStartedAt;
+    // Account consensus can expose the closed order before the async click
+    // handler publishes its terminal UI receipt. Keep the observer alive
+    // until that receipt exists; stopping it at the state transition races
+    // the user-visible completion signal on fast local runtimes.
+    await expect
+      .poll(
+        async () => await page.evaluate(() => {
+          const messages = (window as any).__xlnSwapFeedbackMessages as string[] | undefined;
+          return (messages ?? []).filter(message =>
+            message === 'Swap offer submitted'
+            || message === 'Order placed'
+            || message.startsWith('Order placed and fully filled'),
+          ).length;
+        }),
+        { timeout: 10_000, intervals: [16, 32, 64, 128] },
+      )
+      .toBeGreaterThanOrEqual(1);
+    const swapObservation = await page.evaluate(() => {
+      ((window as any).__xlnSwapFeedbackObserver as MutationObserver | undefined)?.disconnect();
+      const messages = [...((window as any).__xlnSwapFeedbackMessages as string[] || [])];
+      const feedbackEvents = [...((window as any).__xlnSwapFeedbackEvents as Array<{ message: string; atMs: number }> || [])];
+      cancelAnimationFrame(Number((window as any).__xlnSwapCausalAnimationFrame || 0));
+      const samples = [...((window as any).__xlnSwapCausalSamples as Array<Record<string, unknown>> || [])];
+      const runtimeProcess = (globalThis as any).process;
+      if (runtimeProcess?.env) {
+        runtimeProcess.env.XLN_RUNTIME_PROCESS_PROFILE = '0';
+      }
+      delete (window as any).__xlnSwapFeedbackObserver;
+      delete (window as any).__xlnSwapFeedbackMessages;
+      delete (window as any).__xlnSwapFeedbackEvents;
+      delete (window as any).__xlnSwapClickStartedAt;
+      delete (window as any).__xlnSwapCausalAnimationFrame;
+      delete (window as any).__xlnSwapCausalSamples;
+      return { messages, feedbackEvents, samples };
+    });
+    const swapFeedbackMessages = swapObservation.messages;
+    const placementFeedback = swapFeedbackMessages.filter((message) =>
+      message === 'Swap offer submitted'
+      || message === 'Order placed'
+      || message.startsWith('Order placed and fully filled'),
+    );
+    expect(placementFeedback).toHaveLength(1);
+    expect(placementFeedback[0]).toMatch(/^Order placed and fully filled/);
+    const fullyFilledFeedback = swapObservation.feedbackEvents.find((event) =>
+      event.message.startsWith('Order placed and fully filled'),
+    );
+    expect(fullyFilledFeedback, 'fully-filled feedback must carry an exact click-relative timestamp').toBeDefined();
+    const feedbackFullyFilledMs = Number(fullyFilledFeedback?.atMs ?? Number.POSITIVE_INFINITY);
+    console.log(`[E2E-TIMING] swap_click.feedback_fully_filled ${feedbackFullyFilledMs}ms`);
+    const rpc2MethodSummary = [...rpc2Methods.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .map(([method, count]) => `${method}:${count}`)
+      .join(',');
+    console.log(
+      `[E2E-SWAP-LATENCY] click_to_closed_state=${clickToClosedStateMs}ms ` +
+      `rpc2_http=${rpc2HttpRequests} rpc2_calls=${rpc2JsonRpcCalls} methods=${rpc2MethodSummary || 'none'}`,
+    );
+    if (rpc2JsonRpcCalls > 1) {
+      console.warn(
+        `[E2E-PERF-WARN] pure off-chain swap observed background rpc2 polling: ` +
+        `calls=${rpc2JsonRpcCalls} methods=${rpc2MethodSummary || 'none'}`,
+      );
+    }
+    console.log(`[E2E-SWAP-FEEDBACK] ${JSON.stringify(swapObservation.feedbackEvents)}`);
+    console.log('[E2E-SWAP-CLICK] closed');
+    console.log(`[E2E-SWAP-CAUSAL] ${JSON.stringify(swapObservation.samples)}`);
+    for (const profile of runtimeProfiles.filter((sample) => sample.observedAtMs >= swapClickStartedAt)) {
+      console.log(`[E2E-SWAP-PROFILE] at=${profile.observedAtMs - swapClickStartedAt}ms ${profile.text}`);
+    }
+
+    await expect
+      .poll(
+        async () => {
+          const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
+          return {
+            accountSwapOffersSize: state.accountSwapOffersSize,
+            accountHasSwapOfferInMempool: state.accountHasSwapOfferInMempool,
+            accountHasSwapOfferInPendingFrame: state.accountHasSwapOfferInPendingFrame,
+          };
+        },
+        { timeout: 30_000, intervals: [100, 250, 500, 1000] },
+      )
+      .toEqual({
+        accountSwapOffersSize: 0,
+        accountHasSwapOfferInMempool: false,
+        accountHasSwapOfferInPendingFrame: false,
+      });
+
+    await expect
+      .poll(async () => await page.getByTestId('swap-open-order-row').count(), {
+        timeout: 15_000,
+        intervals: [100, 250, 500],
+      })
+      .toBe(0);
+    const closedTab = page.getByTestId('swap-orders-tab-closed').first();
+    await expect(closedTab).toBeVisible({ timeout: 10_000 });
+    const fillModal = page.locator('.swap-modal').first();
+    const fillModalVisible = await fillModal
+      .waitFor({ state: 'visible', timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (fillModalVisible) {
+      await expect(fillModal).toContainText(/Swap Filled/i, { timeout: 10_000 });
+      await fillModal.getByRole('button', { name: /Close/i }).click();
+    }
+    await closedTab.click();
+    const closedOrdersTable = page.getByTestId('swap-closed-orders').first();
+    await expect(closedOrdersTable).toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(async () => {
+        const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
+        return state.accountSwapClosedOrdersSize;
+      }, {
+        timeout: 15_000,
+        intervals: [100, 250, 500],
+      })
+      .toBeGreaterThan(0);
+    await expect
+      .poll(async () => await page.getByTestId('swap-closed-order-row').count(), {
+        timeout: 15_000,
+        intervals: [100, 250, 500],
+      })
+      .toBeGreaterThan(0);
+    const firstClosedRow = page.getByTestId('swap-closed-order-row').first();
+    await expect(firstClosedRow).toBeVisible({ timeout: 10_000 });
+    await expect(firstClosedRow.locator('td').first()).toContainText(/Filled/i, { timeout: 10_000 });
+    await expect(firstClosedRow.locator('td').first()).not.toContainText(/Partial/i, { timeout: 10_000 });
+    await waitForSwapBilateralSettlementIdle(page, accountRef, routedCounterpartyId);
+    const swapStateAfter = await readSwapState(
+      page,
+      accountRef.entityId,
+      accountRef.signerId,
+      routedCounterpartyId,
+    );
+    const hubDeltas = await readHubSwapDeltas(
+      page,
+      routedCounterpartyId,
+      accountRef.entityId,
+      fillTokenIds,
+    );
+    for (const tokenId of fillTokenIds) {
+      const key = String(tokenId);
+      const before = swapStateBefore.deltas[key];
+      const after = swapStateAfter.deltas[key];
+      const hub = hubDeltas[key];
+      expect(before, `pre-fill delta missing for token ${tokenId}`).toBeDefined();
+      expect(after, `post-fill delta missing for token ${tokenId}`).toBeDefined();
+      expect(hub, `hub post-fill delta missing for token ${tokenId}`).toBeDefined();
+      expect(hub, `bilateral delta divergence for token ${tokenId}`).toEqual(after);
+      expect(after.offdelta, `swap must move token ${tokenId} offdelta`).not.toBe(before.offdelta);
+      expect(
+        { leftHold: after.leftHold, rightHold: after.rightHold },
+        `full fill must clear both holds for token ${tokenId}`,
+      ).toEqual({ leftHold: '0', rightHold: '0' });
+    }
+    const clickRpcHttpRequests = rpc2HttpRequests;
+    const clickRpcCalls = rpc2JsonRpcCalls;
+    const clickRpcMethods = Object.fromEntries(
+      [...rpc2Methods.entries()].sort(([left], [right]) => left.localeCompare(right)),
+    );
+    let idleRpcWindowMs = 0;
+    let idleRpcHttpRequests = 0;
+    let idleRpcCalls = 0;
+    let idleRpcMethods: Record<string, number> = {};
+    if (options?.measureIdleRpcWindow) {
+      rpc2HttpRequests = 0;
+      rpc2JsonRpcCalls = 0;
+      rpc2Methods.clear();
+      const idleStartedAt = Date.now();
+      await page.waitForTimeout(6_000);
+      idleRpcWindowMs = Date.now() - idleStartedAt;
+      idleRpcHttpRequests = rpc2HttpRequests;
+      idleRpcCalls = rpc2JsonRpcCalls;
+      idleRpcMethods = Object.fromEntries(
+        [...rpc2Methods.entries()].sort(([left], [right]) => left.localeCompare(right)),
+      );
+      const allowedHttpRequests = Math.floor(idleRpcWindowMs / 1_000);
+      console.log(
+        `[E2E-RPC-RATE] endpoint=rpc2 window=${idleRpcWindowMs}ms ` +
+        `http=${idleRpcHttpRequests} calls=${idleRpcCalls} ` +
+        `rate=${(idleRpcHttpRequests * 1_000 / idleRpcWindowMs).toFixed(3)}req/s ` +
+        `methods=${JSON.stringify(idleRpcMethods)}`,
+      );
+      if (idleRpcHttpRequests > allowedHttpRequests) {
+        console.warn(
+          `[E2E-PERF-WARN] idle rpc2 rate exceeded informational target: ` +
+          `http=${idleRpcHttpRequests} allowed=${allowedHttpRequests} window=${idleRpcWindowMs}ms`,
+        );
+      }
+    }
+    return {
+      routedCounterpartyId,
+      feedbackFullyFilledMs,
+      closedStateMs: clickToClosedStateMs,
+      rpcHttpRequests: clickRpcHttpRequests,
+      rpcCalls: clickRpcCalls,
+      rpcMethods: clickRpcMethods,
+      idleRpcWindowMs,
+      idleRpcHttpRequests,
+      idleRpcCalls,
+      idleRpcMethods,
+    };
+  } catch (error) {
+    const debugState = await readOrderbookDebug().catch(() => null);
+    console.error(`[E2E-ORDERBOOK-DEBUG] ${clickTarget} recent logs:\n${orderbookLogs.join('\n')}`);
+    console.error(`[E2E-ORDERBOOK-STATE] ${clickTarget} ${JSON.stringify(debugState, null, 2)}`);
+    throw error;
+  } finally {
+    page.off('console', onConsole as any);
+    page.off('request', onRpcRequest as any);
+  }
+}
+
+async function expectAllCanonicalSwapPairsHaveLiquidity(page: Page): Promise<void> {
+  await ensureSwapScope(page, 'aggregated');
+  const expectedPairs = CANONICAL_SWAP_PAIR_LABELS;
+
+  for (const pairLabel of expectedPairs) {
+    await waitForSwapOrderbookLiquidity(page, pairLabel, { scope: 'Aggregated', minSources: 3 });
+    await expect
+      .poll(async () => {
+        const { asks, bids } = await readOrderbookRowCounts(page);
+        const uniqueSourceIds = await countUniqueOrderbookSources(page);
+        return { asks, bids, rows: asks + bids, sources: uniqueSourceIds };
+      }, {
+        timeout: 15_000,
+        intervals: [250, 500, 1000],
+        message: `orderbook for ${pairLabel} should have visible liquidity from 3 hubs`,
+      })
+      .toEqual(expect.objectContaining({
+        asks: 10,
+        bids: 10,
+        rows: 20,
+        sources: 3,
+      }));
+    await expect(page.getByTestId('orderbook-source-status').first()).toHaveText(/^Sources:\s*3$/i, { timeout: 15_000 });
+    await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 5_000, minSources: 3, maxSources: 3 });
+  }
+}
+
+async function readAvailableFromSizing(page: Page): Promise<number> {
+  const stat = page.getByTestId('swap-ticket-available').first();
+  await expect(stat).toBeVisible({ timeout: 20_000 });
+  const text = String((await stat.textContent()) || '');
+  const available = parseFirstNumber(text);
+  if (!Number.isFinite(available)) throw new Error(`Cannot parse available amount: ${text}`);
+  return available;
+}
+
+async function selectSwapAccount(page: Page, accountId: string): Promise<void> {
+  const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
+  await expect(accountSelect).toBeVisible({ timeout: 20_000 });
+  await accountSelect.selectOption(accountId);
+  await page.waitForTimeout(200);
+}
+
+async function readFirstOpenOrderRemaining(page: Page): Promise<number> {
+  const remainingCell = page.getByTestId('swap-open-order-row').first().locator('td').nth(3);
+  await expect(remainingCell).toBeVisible({ timeout: 30_000 });
+  const text = String((await remainingCell.textContent()) || '');
+  const value = parseFirstNumber(text);
+  if (!Number.isFinite(value)) throw new Error(`Cannot parse remaining amount: ${text}`);
+  return value;
+}
+
+function shiftDisplayedPrice(value: string, delta: number): string {
+  const parsed = Number.parseFloat(normalizeDisplayedPriceText(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Cannot shift displayed price: ${value}`);
+  }
+  return Math.max(0.0001, parsed + delta).toFixed(4);
+}
+
+async function configureRestingBuyFromBestAsk(
+  page: Page,
+  options?: { maxQuote?: number },
+): Promise<{ restingPrice: string }> {
+  const amountInput = page.getByTestId('swap-ticket-amount').first();
+  const priceInput = page.getByTestId('swap-ticket-rate').first();
+  const placeButton = page.getByTestId('swap-ticket-submit').first();
+  await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+  await expect(amountInput).toBeVisible({ timeout: 20_000 });
+  await expect(priceInput).toBeVisible({ timeout: 20_000 });
+
+  const asks = page.getByTestId('orderbook-ask-row');
+  await expect(asks.last()).toBeVisible({ timeout: 20_000 });
+  const bestAskText = String(await asks.last().locator('.price').textContent() || '').trim();
+  const availableQuote = await readAvailableFromSizing(page);
+  expect(availableQuote, 'buy-side available quote must be positive').toBeGreaterThan(0);
+  await amountInput.fill(formatDecimalForInput(Math.min(availableQuote, options?.maxQuote ?? 25)));
+
+  const restingPrice = shiftDisplayedPrice(bestAskText, -0.0001);
+  await priceInput.fill(restingPrice);
+  await expect(priceInput).toHaveValue(restingPrice);
+  await expect(placeButton).toBeEnabled({ timeout: 10_000 });
+  return { restingPrice };
+}
+
+async function expectOrderbookHasAnyVisibleLiquidity(
+  page: Page,
+  options?: { timeoutMs?: number; minSources?: number; maxSources?: number },
+): Promise<void> {
+  const timeoutMs = options?.timeoutMs ?? 15_000;
+  await expect
+    .poll(
+      async () => {
+        const counts = await readOrderbookRowCounts(page);
+        const sources = await countUniqueOrderbookSources(page);
+        return { ...counts, sources };
+      },
+      { timeout: timeoutMs, intervals: [200, 400, 800] },
+    )
+    .toEqual(expect.objectContaining({
+      asks: expect.any(Number),
+      bids: expect.any(Number),
+      sources: expect.any(Number),
+    }));
+  await expect
+    .poll(async () => {
+      const counts = await readOrderbookRowCounts(page);
+      return counts.asks > 0 && counts.bids > 0;
+    }, { timeout: timeoutMs, intervals: [200, 400, 800] })
+    .toBe(true);
+  if (typeof options?.minSources === 'number') {
+    await expect
+      .poll(async () => await countUniqueOrderbookSources(page), { timeout: timeoutMs, intervals: [200, 400, 800] })
+      .toBeGreaterThanOrEqual(options.minSources);
+  }
+  if (typeof options?.maxSources === 'number') {
+    await expect
+      .poll(async () => await countUniqueOrderbookSources(page), { timeout: timeoutMs, intervals: [200, 400, 800] })
+      .toBeLessThanOrEqual(options.maxSources);
+  }
+}
+
+async function expectMarketMakerBooksHealthy(page: Page): Promise<void> {
+  const health = await getHealth(page, API_BASE_URL);
+  expect(health?.marketMaker?.ok, 'market maker health must be ready').toBe(true);
+  const hubs = health?.marketMaker?.hubs ?? [];
+  expect(hubs.length, 'market maker health must expose 3 hubs').toBeGreaterThanOrEqual(3);
+  for (const hub of hubs) {
+    expect(hub.ready, `market maker hub ${hub.hubEntityId} must be ready`).toBe(true);
+    expect(hub.depthReady, `market maker hub ${hub.hubEntityId} must expose exact configured depth`).toBe(true);
+    let expectedHubOffers = 0;
+    for (const pair of hub.pairs ?? []) {
+      expect(pair.ready, `market maker pair ${pair.pairId} on hub ${hub.hubEntityId} must be ready`).toBe(true);
+      expect(pair.depthReady, `market maker pair ${pair.pairId} on hub ${hub.hubEntityId} must expose exact configured depth`).toBe(true);
+      expect(pair.expectedOffers, `market maker pair ${pair.pairId} must declare expected depth`).toBeGreaterThan(0);
+      expect(pair.offers, `market maker pair ${pair.pairId} must contain only configured offers`).toBe(pair.expectedOffers);
+      expectedHubOffers += Number(pair.expectedOffers);
+    }
+    expect(hub.offers, `market maker hub ${hub.hubEntityId} must contain only configured offers`).toBe(expectedHubOffers);
+  }
+}
+
+async function expectSelectedBooksHaveVisibleLiquidity(
+  page: Page,
+  pairLabels: string[],
+  selectedAccountIds: string[],
+): Promise<void> {
+  const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
+  await expect(accountSelect).toBeVisible({ timeout: 20_000 });
+  await ensureSwapScope(page, 'selected');
+  for (const accountId of selectedAccountIds) {
+    await accountSelect.selectOption(accountId);
+    await page.waitForTimeout(200);
+    for (const pairLabel of pairLabels) {
+      await selectSwapPairSide(page, pairLabel, 'buy');
+      await waitForSwapOrderbookLiquidity(page, pairLabel, {
+        preferredAccountId: accountId,
+        scope: 'Selected',
+        minSources: 1,
+      });
+      await expectOrderbookHasAnyVisibleLiquidity(page, {
+        timeoutMs: 10_000,
+        minSources: 1,
+        maxSources: 1,
+      });
+      const depth = await readOrderbookRowCounts(page);
+      expect(depth.asks, `${pairLabel} ${accountId} must expose exactly 10 committed asks`).toBe(10);
+      expect(depth.bids, `${pairLabel} ${accountId} must expose exactly 10 committed bids`).toBe(10);
+    }
+  }
+}
+
+test.describe('E2E Swap Flow', () => {
+  test.setTimeout(240_000);
+
+  test.beforeEach(async ({ page }) => {
+    await timedStep('swap.ensure_baseline', () => ensureE2EBaseline(page, {
+      requireMarketMaker: true,
+      requireHubMesh: true,
+      minHubCount: 3,
+    }));
+  });
+
+  test('swap shows visible depth on all canonical pairs and selected books', { tag: '@functional' }, async ({ page }, testInfo) => {
+    await timedStep('swap_pairs.goto_app', () => gotoApp(page));
+    await timedStep('swap_pairs.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('swap_pairs.create_runtime', () => createDemoRuntime(page, `swap-pairs-${Date.now()}`, randomMnemonic()));
+    const runtimeRef = await timedStep('swap_pairs.ensure_hub_accounts', () => ensureDeterministicSwapAccounts(page, 3));
+    await timedStep('swap_pairs.open_workspace', () => openSwapWorkspace(page));
+    const hubPrecedesLegs = await page.getByTestId('swap-ticket').first().evaluate((builder) => {
+      const hub = builder.querySelector('[data-testid="swap-ticket-hub-select"]');
+      const firstLeg = builder.querySelector('[data-testid="swap-ticket-from-network"]');
+      return Boolean(hub && firstLeg && (hub.compareDocumentPosition(firstLeg) & Node.DOCUMENT_POSITION_FOLLOWING));
+    });
+    expect(hubPrecedesLegs, 'Hub selector must be the first field before From/To').toBe(true);
+    await timedStep('swap_pairs.check_mm_health', () => expectMarketMakerBooksHealthy(page));
+    await timedStep('swap_pairs.check_aggregated_depth', () => expectAllCanonicalSwapPairsHaveLiquidity(page));
+    await capturePageScreenshot(page, testInfo, 'same-j-aggregated-exact-10x10.png');
+    await timedStep('swap_pairs.check_selected_depth', () =>
+      expectSelectedBooksHaveVisibleLiquidity(page, CANONICAL_SWAP_PAIR_LABELS, runtimeRef.hubIds.slice(0, 3)));
+    await capturePageScreenshot(page, testInfo, 'same-j-selected-exact-10x10.png');
+    await ensureSwapScope(page, 'aggregated');
+  });
+
+	  test('swap orderbook shows terminal no-market state when relay stream never returns a snapshot', { tag: '@resilience' }, async ({ page }) => {
+    await timedStep('swap_no_market.goto_app', () => gotoApp(page));
+    await timedStep('swap_no_market.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('swap_no_market.create_runtime', () => createDemoRuntime(page, `swap-no-market-${Date.now()}`, randomMnemonic()));
+    const runtimeRef = await timedStep('swap_no_market.ensure_hub_account', () => ensureDeterministicSwapAccounts(page, 1));
+    const hubId = runtimeRef.hubIds[0]!;
+
+    await timedStep('swap_no_market.install_silent_relay', () => installSilentRelayWebSocket(page, { currentPage: true }));
+    await timedStep('swap_no_market.open_workspace', () => openSwapWorkspace(page));
+    await timedStep('swap_no_market.select_counterparty', () => selectCounterpartyInSwap(page, hubId));
+    await timedStep('swap_no_market.open_orderbook', async () => {
+      await ensureSwapOrderbookVisible(page);
+      await ensureSwapScope(page, 'selected');
+      await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+    });
+
+    const orderbook = page.getByTestId('swap-orderbook').first();
+    const panel = orderbook.locator('.orderbook-panel').first();
+    await expect(orderbook, 'right-side swap orderbook must stay visible in terminal no-market state').toBeVisible({ timeout: 20_000 });
+    await expect(panel, 'orderbook panel must remain mounted while stream resolves terminally').toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-pair-id') || ''), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'silent relay test must still subscribe to the selected same-chain market',
+      })
+      .toBe('1/2');
+    await expect
+      .poll(async () => hasSilentRelayMarketSubscribe(page, ['"1/2"']), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'orderbook must actually send a market subscription before terminal no-market is accepted',
+      })
+      .toBe(true);
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
+        timeout: 12_000,
+        intervals: [250, 500, 1000],
+        message: 'silent relay must resolve to no-market instead of hanging in syncing',
+      })
+      .toBe('no-market');
+    await expect(page.getByTestId('orderbook-source-status').first()).toContainText(/No market/i, { timeout: 5_000 });
+    await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
+    await expect
+      .poll(async () => readOrderbookRowCounts(page), {
+        timeout: 5_000,
+        intervals: [100, 250, 500],
+      })
+      .toEqual({ asks: 0, bids: 0 });
+	  });
+
+  test('swap orderbook shows terminal error state when relay rejects the market subscription', { tag: '@resilience' }, async ({ page }) => {
+    await timedStep('swap_error.goto_app', () => gotoApp(page));
+    await timedStep('swap_error.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('swap_error.create_runtime', () => createDemoRuntime(page, `swap-error-${Date.now()}`, randomMnemonic()));
+    const runtimeRef = await timedStep('swap_error.ensure_hub_account', () => ensureDeterministicSwapAccounts(page, 1));
+    const hubId = runtimeRef.hubIds[0]!;
+
+    await timedStep('swap_error.install_error_relay', () =>
+      installSilentRelayWebSocket(page, { currentPage: true, errorOnSubscribe: true }));
+    await timedStep('swap_error.open_workspace', () => openSwapWorkspace(page));
+    await timedStep('swap_error.select_counterparty', () => selectCounterpartyInSwap(page, hubId));
+    await timedStep('swap_error.open_orderbook', async () => {
+      await ensureSwapOrderbookVisible(page);
+      await ensureSwapScope(page, 'selected');
+      await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+    });
+
+    const orderbook = page.getByTestId('swap-orderbook').first();
+    const panel = orderbook.locator('.orderbook-panel').first();
+    await expect(orderbook, 'right-side swap orderbook must stay visible in terminal relay error state').toBeVisible({ timeout: 20_000 });
+    await expect(panel, 'orderbook panel must remain mounted after relay error').toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => hasSilentRelayMarketSubscribe(page, ['"1/2"']), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'error relay test must subscribe before accepting terminal error state',
+      })
+      .toBe(true);
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
+        timeout: 5_000,
+        intervals: [100, 250, 500],
+        message: 'relay error must resolve to terminal error instead of hanging in syncing',
+      })
+      .toBe('error');
+    await expect(page.getByTestId('orderbook-source-status').first()).toContainText(/E_UNKNOWN_HUB Unknown market hub/i, { timeout: 5_000 });
+    await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
+    await expect
+      .poll(async () => readOrderbookRowCounts(page), {
+        timeout: 5_000,
+        intervals: [100, 250, 500],
+      })
+      .toEqual({ asks: 0, bids: 0 });
+  });
+
+  test('swap orderbook pair dropdown updates same-chain form tokens', { tag: '@functional' }, async ({ page }) => {
+    await timedStep('swap_pair_dropdown.goto_app', () => gotoApp(page));
+    await timedStep('swap_pair_dropdown.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('swap_pair_dropdown.create_runtime', () => createDemoRuntime(page, `swap-pair-dropdown-${Date.now()}`, randomMnemonic()));
+    const runtimeRef = await timedStep('swap_pair_dropdown.ensure_hub_account', () => ensureDeterministicSwapAccounts(page, 1));
+    const hubId = runtimeRef.hubIds[0]!;
+
+    await timedStep('swap_pair_dropdown.open_workspace', () => openSwapWorkspace(page));
+    await timedStep('swap_pair_dropdown.select_counterparty', () => selectCounterpartyInSwap(page, hubId));
+    await timedStep('swap_pair_dropdown.open_orderbook', async () => {
+      await ensureSwapOrderbookVisible(page);
+      await ensureSwapScope(page, 'selected');
+      await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+    });
+
+    const selectedLabel = await selectOrderbookPairByLabel(page, /USDC\s*-\s*USDT\s*\(Testnet\)/i);
+    expect(selectedLabel).toMatch(/USDC\s*-\s*USDT\s*\(Testnet\)/i);
+    await expectSwapTokens(page, { fromSymbol: 'USDT', toSymbol: 'USDC' });
+    const panel = page.getByTestId('swap-orderbook').first().locator('.orderbook-panel').first();
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-pair-id') || ''), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'same-chain orderbook dropdown must switch the subscribed pair id',
+      })
+      .toBe('1/3');
+  });
+
+	  // Scenario: place a valid non-marketable WETH/USDC offer through the visible swap UI
+  // and verify the open order survives a reload.
+  test('swap place WETH/USDC offer survives reload', { tag: '@resilience' }, async ({ page }) => {
+    const accountRef = await timedStep('swap_auto.prepare_book', () => prepareOrderbookClickTest(page));
+
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
+    const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
+    const scopeToggle = page.getByTestId('swap-scope-toggle').first();
+    await expect(accountSelect).toBeVisible({ timeout: 20_000 });
+    await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
+    if (String(await scopeToggle.textContent() || '').trim() !== 'Selected') {
+      await scopeToggle.click();
+    }
+    await accountSelect.selectOption(accountRef.counterpartyId);
+    await page.waitForTimeout(200);
+    const { restingPrice } = await timedStep('swap_auto.configure_resting_buy', () =>
+      configureRestingBuyFromBestAsk(page, { maxQuote: 25 }),
+    );
+    await expect(placeButton).toBeEnabled({ timeout: 5_000 });
+
+    await timedStep('swap_auto.place_offer', async () => {
+      await placeButton.click();
+      await expect(page.getByTestId('swap-open-order-row').first()).toBeVisible({ timeout: 60_000 });
+      await page.waitForFunction(
+        ({ entityId, accountId }) => {
+          const env = (window as any).isolatedEnv;
+          if (!env?.state.eReplicas || !(env.state.eReplicas instanceof Map)) return false;
+          const targetEntityId = String(entityId || '').toLowerCase();
+          const targetAccountId = String(accountId || '').toLowerCase();
+          const replica = Array.from(env.state.eReplicas.values()).find((candidate: any) =>
+            String(candidate?.entityId || '').toLowerCase() === targetEntityId,
+          );
+          const account = replica?.state?.accounts?.get?.(targetAccountId);
+          if (!account) return false;
+          const offerCount = account.state.swapOffers instanceof Map ? account.state.swapOffers.size : 0;
+          const pendingCount = Array.isArray(account.mempool) ? account.mempool.length : 0;
+          return offerCount > 0 && !account.pendingFrame && pendingCount === 0;
+        },
+        { entityId: accountRef.entityId, accountId: accountRef.counterpartyId },
+        { timeout: 60_000 },
+      );
+      await page.waitForTimeout(1200);
+    });
+
+    await timedStep('swap_auto.reload_page', async () => {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => {
+        const env = (window as any).isolatedEnv;
+        return !!env?.runtimeId && Number(env?.state.eReplicas?.size || 0) > 0;
+      }, { timeout: 60_000 });
+      await openSwapWorkspace(page);
+      await selectCounterpartyInSwap(page, accountRef.counterpartyId);
+      const accountSelectAfterReload = page.getByTestId('swap-ticket-hub-select').first();
+      const scopeToggleAfterReload = page.getByTestId('swap-scope-toggle').first();
+      if (String(await scopeToggleAfterReload.textContent() || '').trim() !== 'Selected') {
+        await scopeToggleAfterReload.click();
+      }
+      await accountSelectAfterReload.selectOption(accountRef.counterpartyId);
+    });
+    await timedStep('swap_auto.reload_assert_offer_persisted', async () => {
+      const firstRow = page.getByTestId('swap-open-order-row').first();
+      await expect(firstRow).toBeVisible({ timeout: 60_000 });
+      await expect(firstRow.locator('td').nth(2)).toHaveText(restingPrice, { timeout: 10_000 });
+    });
+  });
+
+  // Scenario: place a non-marketable order, cancel it from the UI, and verify both state machine
+  // and rendered order table clear before and after reload.
+  test('swap place and cancel from UI updates state machine', { tag: '@functional' }, async ({ page }) => {
+    const accountRef = await timedStep('swap.prepare_book', () => prepareOrderbookClickTest(page));
+
+    await expect(page.getByTestId('swap-orderbook')).toBeVisible({ timeout: 20_000 });
+    await timedStep('swap.assert_selected_entity_stable', () => expectSelectedUiRuntimeIdentity(page, accountRef));
+    const swapResolveCountBefore = await timedStep('swap.read_resolve_count_before', () =>
+      readSwapResolveCount(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+    );
+
+    const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
+    const scopeToggle = page.getByTestId('swap-scope-toggle').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
+    await expect(accountSelect).toBeVisible({ timeout: 20_000 });
+    await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
+    if (String(await scopeToggle.textContent() || '').trim() !== 'Selected') {
+      await scopeToggle.click();
+    }
+    await accountSelect.selectOption(accountRef.counterpartyId);
+    await page.waitForTimeout(200);
+    await timedStep('swap.configure_resting_buy', () => configureRestingBuyFromBestAsk(page, { maxQuote: 25 }));
+
+    await timedStep('swap.place_offer', async () => {
+      await placeButton.click();
+      await expect(page.getByTestId('swap-open-order-row').first()).toBeVisible({ timeout: 60_000 });
+    });
+    const openOrderRow = page.getByTestId('swap-open-order-row').first();
+    await timedStep('swap.capture_offer_row', async () => {
+      await expect(openOrderRow).toBeVisible({ timeout: 30_000 });
+    });
+
+    await timedStep('swap.assert_non_marketable_order_stays_open', async () => {
+      const remaining = await readFirstOpenOrderRemaining(page);
+      expect(remaining, 'non-marketable order must remain open before cancel').toBeGreaterThan(0);
+      await expect
+        .poll(
+          async () => await readSwapResolveCount(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+          { timeout: 5_000, intervals: [250, 500, 1000] },
+        )
+        .toBe(swapResolveCountBefore);
+    });
+
+    const cancelButton = openOrderRow.getByTestId('swap-open-order-cancel');
+    await expect(cancelButton).toBeVisible({ timeout: 20_000 });
+    await timedStep('swap.cancel_offer', async () => {
+      await cancelButton.click();
+      await expect
+        .poll(async () => {
+          const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+          return (
+            state.accountSwapOffersSize === 0 ||
+            state.accountHasSwapCancelRequestInMempool ||
+            state.accountHasSwapCancelRequestInPendingFrame
+          );
+        }, { timeout: 60_000 })
+        .toBe(true);
+    });
+
+    await timedStep('swap.wait_closed_orderbook_ui', async () => {
+      await expect
+        .poll(async () => await page.getByTestId('swap-open-order-row').count(), { timeout: 60_000 })
+        .toBe(0);
+    });
+
+    await timedStep('swap.assert_post_close_state', async () => {
+      await expectSelectedUiRuntimeIdentity(page, accountRef);
+      const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+      expect(state.accountSwapOffersSize).toBe(0);
+      expect(state.accountSwapClosedOrdersSize, 'terminal closed-order store must contain canceled order').toBeGreaterThan(0);
+    });
+
+    await timedStep('swap.assert_closed_tab_canceled_row', async () => {
+      const closedTab = page.getByTestId('swap-orders-tab-closed').first();
+      await expect(closedTab).toBeVisible({ timeout: 10_000 });
+      await closedTab.click();
+      const firstClosedRow = page.getByTestId('swap-closed-order-row').first();
+      await expect(firstClosedRow).toBeVisible({ timeout: 20_000 });
+      await expect(firstClosedRow.locator('td').first()).toContainText(/Canceled/i, { timeout: 10_000 });
+    });
+
+    await timedStep('swap.reload_page', async () => {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => {
+        const env = (window as any).isolatedEnv;
+        return !!env?.runtimeId && Number(env?.state.eReplicas?.size || 0) > 0;
+      }, { timeout: 60_000 });
+    });
+    await timedStep('swap.reload_assert_no_open_offer', async () => {
+      await expectSelectedUiRuntimeIdentity(page, accountRef);
+      await expect.poll(async () => {
+        const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+        return state.accountSwapOffersSize;
+      }, { timeout: 60_000 }).toBe(0);
+    });
+    await timedStep('swap.reload_assert_ui_no_rows', async () => {
+      await expect.poll(async () => await page.getByTestId('swap-open-order-row').count(), {
+        timeout: 60_000,
+      }).toBe(0);
+    });
+    await timedStep('swap.reload_assert_closed_row_persisted', async () => {
+      await openSwapWorkspace(page);
+      await selectCounterpartyInSwap(page, accountRef.counterpartyId);
+      await page.getByTestId('swap-orders-tab-closed').first().click();
+      const firstClosedRow = page.getByTestId('swap-closed-order-row').first();
+      await expect(firstClosedRow).toBeVisible({ timeout: 20_000 });
+      await expect(firstClosedRow.locator('td').first()).toContainText(/Canceled/i, { timeout: 10_000 });
+    });
+  });
+
+async function prepareOrderbookClickTest(page: Page): Promise<{
+  entityId: string;
+  signerId: string;
+  counterpartyId: string;
+  hubIds: string[];
+}> {
+    await timedStep('swap_click.goto_app', () => gotoApp(page));
+    await timedStep('swap_click.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('swap_click.create_runtime', () => createDemoRuntime(page, `swap-click-${Date.now()}`, randomMnemonic()));
+    const runtimeRef = await timedStep('swap_click.ensure_hub_account', () => ensureDeterministicSwapAccounts(page, 3));
+
+    for (const hubId of runtimeRef.hubIds) {
+      for (const funding of [
+        { tokenId: 1, amount: '100' },
+        { tokenId: 2, amount: '1' },
+      ]) {
+        await faucetSwapTokenUntilOutCapacity(page, runtimeRef, hubId, funding);
+      }
+    }
+
+    await timedStep('swap_click.open_workspace', () => openSwapWorkspace(page));
+    await timedStep('swap_click.select_counterparty', () => selectCounterpartyInSwap(page, runtimeRef.hubIds[0]!));
+    await expect(page.getByTestId('swap-orderbook')).toBeVisible({ timeout: 20_000 });
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: runtimeRef.hubIds[0]!,
+      scope: 'Aggregated',
+      minSources: 3,
+    });
+    return {
+      entityId: runtimeRef.entityId,
+      signerId: runtimeRef.signerId,
+      counterpartyId: runtimeRef.hubIds[0]!,
+      hubIds: runtimeRef.hubIds,
+    };
+  }
+
+  test('swap orderbook lowest ask click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }, testInfo) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+
+    const metrics = await timedStep('swap_click.lowest_ask_fills', () =>
+      executeOrderbookClickFill(page, accountRef, 'lowest-ask', { measureIdleRpcWindow: true }),
+    );
+    await testInfo.attach('swap-click-latency.json', {
+      body: Buffer.from(JSON.stringify({
+        schema: 'xln.qa.swap-click-latency.v1',
+        slaMs: 500,
+        ...metrics,
+      }, null, 2)),
+      contentType: 'application/json',
+    });
+  });
+
+  test('swap orderbook highest bid click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+
+    await timedStep('swap_click.highest_bid_fills', () =>
+      executeOrderbookClickFill(page, accountRef, 'highest-bid'),
+    );
+  });
+
+  test('swap orderbook mid price click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+    await timedStep('swap_click.mid_price_fills', () =>
+      executeOrderbookClickFill(page, accountRef, 'mid-price'),
+    );
+  });
+
+  test('swap flip keeps the displayed receive amount as the next source amount', { tag: '@functional' }, async ({ page }) => {
+    await prepareOrderbookClickTest(page);
+    await ensureSwapScope(page, 'aggregated');
+    await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+    await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
+
+    const asks = page.getByTestId('orderbook-ask-row');
+    await expect(asks.last()).toBeVisible({ timeout: 20_000 });
+    await asks.last().click();
+    await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
+
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const receiveInput = page.getByTestId('swap-ticket-receive-amount').first();
+    await expect(amountInput).toBeVisible({ timeout: 10_000 });
+    await expect(receiveInput).toBeVisible({ timeout: 10_000 });
+    const spendBefore = parseFirstNumber(await amountInput.inputValue());
+    const receiveBefore = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
+    expect(spendBefore, 'book click must populate source amount').toBeGreaterThan(0);
+    expect(receiveBefore, 'book click must populate receive amount').toBeGreaterThan(0);
+
+    await page.getByTestId('swap-ticket-flip').first().click();
+    await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
+    const flippedSourceAmount = parseFirstNumber(await amountInput.inputValue());
+    const flippedReceiveAmount = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
+    expect(Math.abs(flippedSourceAmount - receiveBefore), 'flip must not reinterpret USDC amount as WETH').toBeLessThan(0.000001);
+    expect(flippedSourceAmount, 'WETH source amount after flip must be much smaller than old USDC source amount').toBeLessThan(spendBefore / 100);
+    expect(flippedReceiveAmount, 'flipped receive should stay near the original spend notional').toBeGreaterThan(spendBefore * 0.99);
+  });
+
+  test('swap flip keeps the sell-side displayed receive amount as the next source amount', { tag: '@functional' }, async ({ page }) => {
+    await prepareOrderbookClickTest(page);
+    await ensureSwapScope(page, 'aggregated');
+    await selectSwapPairSide(page, 'WETH/USDC', 'sell');
+    await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
+
+    const bids = page.getByTestId('orderbook-bid-row');
+    await expect(bids.first()).toBeVisible({ timeout: 20_000 });
+    await bids.first().click();
+    await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
+
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const receiveInput = page.getByTestId('swap-ticket-receive-amount').first();
+    await expect(amountInput).toBeVisible({ timeout: 10_000 });
+    await expect(receiveInput).toBeVisible({ timeout: 10_000 });
+    const spendBefore = parseFirstNumber(await amountInput.inputValue());
+    const receiveBefore = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
+    expect(spendBefore, 'sell-side book click must populate source amount').toBeGreaterThan(0);
+    expect(receiveBefore, 'sell-side book click must populate receive amount').toBeGreaterThan(0);
+
+    await page.getByTestId('swap-ticket-flip').first().click();
+    await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
+    const flippedSourceAmount = parseFirstNumber(await amountInput.inputValue());
+    const flippedReceiveAmount = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
+    expect(Math.abs(flippedSourceAmount - receiveBefore), 'sell-side flip must carry old USDC receive into new USDC source').toBeLessThan(0.000001);
+    expect(flippedSourceAmount, 'USDC source after sell-side flip must be much larger than old WETH source').toBeGreaterThan(spendBefore * 100);
+    expect(flippedReceiveAmount, 'sell-side flipped receive should stay near the original WETH spend').toBeGreaterThan(spendBefore * 0.99);
+  });
+
+  test('swap can buy from asks and then sell back into bids on the same book', { tag: '@functional' }, async ({ page }) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+    const buyResult = await timedStep('swap_roundtrip.buy_fill', () =>
+      executeOrderbookClickFill(page, accountRef, 'lowest-ask'));
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: buyResult.routedCounterpartyId,
+      scope: 'Selected',
+      minSources: 1,
+    });
+    await timedStep('swap_roundtrip.sell_fill', () =>
+      executeOrderbookClickFill(page, accountRef, 'highest-bid', {
+        scope: 'selected',
+        preferredAccountId: buyResult.routedCounterpartyId,
+      }));
+  });
+
+  test('swap manual price override after book click uses the edited limit price', { tag: '@functional' }, async ({ page }) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: accountRef.counterpartyId,
+      scope: 'Aggregated',
+      minSources: 3,
+    });
+
+    const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
+    await expect(accountSelect).toBeVisible({ timeout: 20_000 });
+    await ensureSwapScope(page, 'selected');
+    await selectSwapAccount(page, accountRef.counterpartyId);
+
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const priceInput = page.getByTestId('swap-ticket-rate').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
+    await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+    await expect(amountInput).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(120);
+
+    const asks = page.getByTestId('orderbook-ask-row');
+    await expect(asks.last()).toBeVisible({ timeout: 20_000 });
+    const clickedAskText = String(await asks.last().locator('.price').textContent() || '').trim();
+    await asks.last().click();
+
+    const availableQuote = await readAvailableFromSizing(page);
+    expect(availableQuote, 'buy-side available quote must be positive').toBeGreaterThan(0);
+    await amountInput.fill(formatDecimalForInput(Math.min(availableQuote, 25)));
+    await expect(priceInput).toHaveValue(normalizeDisplayedPriceText(clickedAskText), { timeout: 10_000 });
+    const editedPrice = shiftDisplayedPrice(clickedAskText, -0.0001);
+    await priceInput.fill(editedPrice);
+    await expect(priceInput).toHaveValue(editedPrice);
+    await expect(placeButton).toBeEnabled({ timeout: 10_000 });
+    await placeButton.click();
+
+    const firstRow = page.getByTestId('swap-open-order-row').first();
+    await expect(firstRow).toBeVisible({ timeout: 30_000 });
+    await expect(firstRow.locator('td').nth(2)).toHaveText(editedPrice, { timeout: 10_000 });
+
+    const cancelButton = firstRow.getByTestId('swap-open-order-cancel');
+    await expect(cancelButton).toBeVisible({ timeout: 10_000 });
+    await cancelButton.click();
+    await expect
+      .poll(async () => await page.getByTestId('swap-open-order-row').count(), {
+        timeout: 60_000,
+        intervals: [100, 250, 500, 1000],
+      })
+      .toBe(0);
+  });
+
+  test('swap rejects price beyond 30% from current orderbook', { tag: '@resilience' }, async ({ page }) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: accountRef.counterpartyId,
+      scope: 'Aggregated',
+      minSources: 3,
+    });
+
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const priceInput = page.getByTestId('swap-ticket-rate').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
+    await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+
+    const asks = page.getByTestId('orderbook-ask-row');
+    await expect(asks.last()).toBeVisible({ timeout: 20_000 });
+    const bestAskText = String(await asks.last().locator('.price').textContent() || '').trim();
+    const bestAsk = Number.parseFloat(normalizeDisplayedPriceText(bestAskText));
+    expect(Number.isFinite(bestAsk) && bestAsk > 0, `best ask missing: ${bestAskText}`).toBe(true);
+
+    await amountInput.fill('10');
+    await priceInput.fill(String((bestAsk * 1.4).toFixed(4)));
+    await expect(placeButton).toBeDisabled({ timeout: 10_000 });
+    await expect(page.getByTestId('swap-ticket-error').first()).toContainText(/within 30% of the current orderbook/i, {
+      timeout: 10_000,
+    });
+  });
+
+  test('swap rejects sell price beyond 30% from current orderbook', { tag: '@resilience' }, async ({ page }) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: accountRef.counterpartyId,
+      scope: 'Aggregated',
+      minSources: 3,
+    });
+
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const priceInput = page.getByTestId('swap-ticket-rate').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
+    await selectSwapPairSide(page, 'WETH/USDC', 'sell');
+
+    const bids = page.getByTestId('orderbook-bid-row');
+    await expect(bids.first()).toBeVisible({ timeout: 20_000 });
+    const bestBidText = String(await bids.first().locator('.price').textContent() || '').trim();
+    const bestBid = Number.parseFloat(normalizeDisplayedPriceText(bestBidText));
+    expect(Number.isFinite(bestBid) && bestBid > 0, `best bid missing: ${bestBidText}`).toBe(true);
+
+    const available = await readAvailableFromSizing(page);
+    expect(available, 'sell-side available amount must be positive').toBeGreaterThan(0);
+    const sellAmount = Math.max(0.01, Math.min(available, 0.05));
+    await amountInput.fill(formatDecimalForInput(sellAmount));
+    await priceInput.fill(String((bestBid * 0.59).toFixed(4)));
+    await expect(placeButton).toBeDisabled({ timeout: 10_000 });
+    await expect(page.getByTestId('swap-ticket-error').first()).toContainText(/within 30% of the current orderbook/i, {
+      timeout: 10_000,
+    });
+  });
+
+test('swap keeps a within-band wide limit as a resting order instead of filling immediately', { tag: '@functional' }, async ({ page }, testInfo) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const priceInput = page.getByTestId('swap-ticket-rate').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
+
+    await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: accountRef.counterpartyId,
+      scope: 'Aggregated',
+      minSources: 3,
+    });
+    const resolveCountBefore = await readPositiveSwapResolveCount(
+      page,
+      accountRef.entityId,
+      accountRef.signerId,
+      accountRef.counterpartyId,
+    );
+    await timedStep('swap.configure_resting_buy', () => configureRestingBuyFromBestAsk(page, { maxQuote: 25 }));
+    await capturePageScreenshot(page, testInfo, 'swap-form-filled-resting-limit-desktop.png', {
+      fullPage: false,
+      ux: {
+        title: 'desktop resting limit form',
+        group: 'Swap',
+        description: 'Limit order configured inside the current orderbook band.',
+        platform: 'desktop',
+        tags: ['swap', 'limit-order'],
+      },
+    });
+    await placeButton.click();
+
+    await expect(page.getByTestId('swap-open-order-row').first()).toBeVisible({ timeout: 30_000 });
+    await capturePageScreenshot(page, testInfo, 'swap-resting-order-open-desktop.png', {
+      fullPage: false,
+      ux: {
+        title: 'desktop open resting order',
+        group: 'Swap',
+        description: 'Open order row after a resting limit order is placed.',
+        platform: 'desktop',
+        tags: ['swap', 'open-order'],
+      },
+    });
+    await expect
+      .poll(async () => await readPositiveSwapResolveCount(
+        page,
+        accountRef.entityId,
+        accountRef.signerId,
+        accountRef.counterpartyId,
+      ), { timeout: 5_000, intervals: [250, 500, 1000] })
+      .toBe(resolveCountBefore);
+    const remaining = await readFirstOpenOrderRemaining(page);
+    expect(remaining, 'within-band wide limit should remain fully open').toBeGreaterThan(0);
+
+    const cancelButton = page.getByTestId('swap-open-order-cancel').first();
+    await expect(cancelButton).toBeVisible({ timeout: 10_000 });
+    await cancelButton.click();
+    await expect
+      .poll(async () => await page.getByTestId('swap-open-order-row').count(), {
+        timeout: 60_000,
+        intervals: [100, 250, 500, 1000],
+      })
+      .toBe(0);
+  });
+
+  test('swap scope and account switching clears stale rows and stale book hint state', { tag: '@resilience' }, async ({ page }) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+
+    await ensureSwapScope(page, 'selected');
+    await selectSwapAccount(page, accountRef.hubIds[0]!);
+    await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: accountRef.hubIds[0]!,
+      scope: 'Selected',
+      minSources: 1,
+    });
+    await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 10_000, minSources: 1, maxSources: 1 });
+
+    const asks = page.getByTestId('orderbook-ask-row');
+    await expect(asks.last()).toBeVisible({ timeout: 20_000 });
+    await asks.last().click();
+    await expect(page.getByTestId('swap-ticket-rate').first()).not.toHaveValue('', { timeout: 10_000 });
+
+    await selectSwapAccount(page, accountRef.hubIds[1]!);
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: accountRef.hubIds[1]!,
+      scope: 'Selected',
+      minSources: 1,
+    });
+    await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 10_000, minSources: 1, maxSources: 1 });
+
+    await ensureSwapScope(page, 'aggregated');
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: accountRef.hubIds[1]!,
+      scope: 'Aggregated',
+      minSources: 3,
+    });
+    await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 10_000, minSources: 3, maxSources: 3 });
+
+    await selectSwapPairSide(page, 'USDC/USDT', 'buy');
+    await waitForSwapOrderbookLiquidity(page, 'USDC/USDT', {
+      preferredAccountId: accountRef.hubIds[1]!,
+      scope: 'Aggregated',
+      minSources: 3,
+    });
+    await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 10_000, minSources: 3, maxSources: 3 });
+  });
+
+});

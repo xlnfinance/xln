@@ -28,7 +28,7 @@ describe('e2e demo user helper', () => {
 
   test('AHB browser flow reads transport status through the narrow connectivity boundary', () => {
     const paths = [
-      'tests/e2e-ahb-payment.spec.ts',
+      'tests/e2e/payments/e2e-ahb-payment.spec.ts',
       'tests/e2e-custody.spec.ts',
     ];
     const source = paths.map(path => readFileSync(join(repoRoot, path), 'utf8')).join('\n');
@@ -45,8 +45,8 @@ describe('e2e demo user helper', () => {
 
   test('browser E2E reads no live infrastructure through detached Runtime views', () => {
     const exceptionPaths = new Set([
-      'tests/e2e-runtime-ingress-debug.spec.ts',
-      'tests/e2e-storage-writer-lock.spec.ts',
+      'tests/e2e/runtime/e2e-runtime-ingress-debug.spec.ts',
+      'tests/e2e/recovery/e2e-storage-writer-lock.spec.ts',
     ]);
     const paths = [
       ...readdirSync(join(repoRoot, 'tests'))
@@ -64,7 +64,7 @@ describe('e2e demo user helper', () => {
   });
 
   test('runtime persistence E2E configures the live Runtime through a narrow control', () => {
-    const source = readFileSync(join(repoRoot, 'tests/e2e-runtime-persistence.spec.ts'), 'utf8');
+    const source = readFileSync(join(repoRoot, 'tests/e2e/runtime/e2e-runtime-persistence.spec.ts'), 'utf8');
     const persistenceStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/bootstrap/embeddedRuntimeStore.ts'), 'utf8');
     const commandStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
     expect(source).not.toContain('env.runtimeConfig');

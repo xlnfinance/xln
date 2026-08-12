@@ -1,5 +1,5 @@
 import { parseArgs, flagString, flagBool, flagNumber } from '../lib/args';
-import { helpText, parseHumanAmount } from '../lib/format';
+import { helpText, parseHumanAmount } from '../lib/presentation/format';
 import { loadSettings, saveSettings, type BarStyle } from '../lib/settings';
 import {
   createDemoMnemonic,
@@ -19,7 +19,7 @@ import { executeLending, readLendingState, type LendingOp } from '../lib/actions
 import { callDaemon, daemonSocketExists } from '../lib/daemon/client';
 import { startDaemonServer } from '../lib/daemon/server';
 import { runTui } from '../tui/app';
-import { paint } from '../lib/theme';
+import { paint } from '../lib/presentation/theme';
 
 const requirePassphrase = async (): Promise<string> => {
   const resolved = resolvePassphrase();

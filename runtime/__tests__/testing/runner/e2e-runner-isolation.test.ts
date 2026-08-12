@@ -273,7 +273,7 @@ describe('isolated E2E runner resources', () => {
     expect(command).toContain('--shards=1');
     expect(command).toContain('--workers-per-shard=1');
     expect(command).toContain('--pw-project=chromium');
-    expect(command).toContain('--pw-files=tests/e2e-payment-smoke.spec.ts');
+    expect(command).toContain('--pw-files=tests/e2e/payments/e2e-payment-smoke.spec.ts');
     expect(command).not.toContain('localhost:8080');
     expect(command).not.toContain('127.0.0.1:8082');
     expect(command).not.toContain('run-with-test-cleanup.ts');
@@ -282,7 +282,7 @@ describe('isolated E2E runner resources', () => {
 
   test('preserves commas inside an exact Playwright title selector', () => {
     const target =
-      'tests/e2e-payment-smoke.spec.ts::fresh runtimes can open accounts, faucet, pay, and reload persisted state';
+      'tests/e2e/payments/e2e-payment-smoke.spec.ts::fresh runtimes can open accounts, faucet, pay, and reload persisted state';
 
     expect(parsePlaywrightFilesFlag(target)).toEqual([target]);
     expect(parsePlaywrightFilesFlag('tests/one.spec.ts,tests/two.spec.ts')).toEqual([
@@ -294,7 +294,7 @@ describe('isolated E2E runner resources', () => {
   test('batches one spec by infrastructure requirements and QA category', () => {
     const batches = batchPlaywrightTargetsByFile([
       {
-        target: 'tests/e2e-swap.spec.ts',
+        target: 'tests/e2e/swap/e2e-swap.spec.ts',
         requireMarketMaker: true,
         requireCustody: false,
         scenario: null,
@@ -303,7 +303,7 @@ describe('isolated E2E runner resources', () => {
         testCategory: 'functional',
       },
       {
-        target: 'tests/e2e-swap.spec.ts',
+        target: 'tests/e2e/swap/e2e-swap.spec.ts',
         requireMarketMaker: true,
         requireCustody: false,
         scenario: null,
@@ -312,7 +312,7 @@ describe('isolated E2E runner resources', () => {
         testCategory: 'functional',
       },
       {
-        target: 'tests/e2e-swap.spec.ts',
+        target: 'tests/e2e/swap/e2e-swap.spec.ts',
         requireMarketMaker: true,
         requireCustody: false,
         scenario: null,
@@ -330,13 +330,13 @@ describe('isolated E2E runner resources', () => {
       requireMarketMaker: batch.requireMarketMaker,
     }))).toEqual([
       {
-        title: 'tests/e2e-swap.spec.ts [functional batch]',
+        title: 'tests/e2e/swap/e2e-swap.spec.ts [functional batch]',
         grep: undefined,
         category: 'functional',
         requireMarketMaker: true,
       },
       {
-        title: 'tests/e2e-swap.spec.ts [resilience batch]',
+        title: 'tests/e2e/swap/e2e-swap.spec.ts [resilience batch]',
         grep: undefined,
         category: 'resilience',
         requireMarketMaker: true,

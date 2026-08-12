@@ -214,7 +214,7 @@ E2E_BASE_URL=https://localhost:8080 \
 E2E_API_BASE_URL=https://localhost:8080 \
 E2E_RESET_BASE_URL=http://127.0.0.1:8082 \
 PW_ONLY_CHROMIUM=1 PW_FAST=1 PW_VIDEO=off PW_TRACE=off PW_SCREENSHOT=only-on-failure \
-bunx playwright test tests/e2e-watchtower-recovery.spec.ts --project=chromium
+bunx playwright test tests/e2e/recovery/e2e-watchtower-recovery.spec.ts --project=chromium
 ```
 
 L3 gate:

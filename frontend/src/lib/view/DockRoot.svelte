@@ -4,12 +4,12 @@
   import { DockviewComponent } from 'dockview';
   import type { RuntimeReplica, RuntimeAdapterViewFrame } from '@xln/runtime/api/public/runtime-module';
   import type { EnvSnapshot } from '@xln/runtime/runtime/types';
-  import Graph3DPanel from './panels/Graph3DPanel.svelte';
+  import Graph3DPanel from './panels/graph3d/Graph3DPanel.svelte';
   import ConsolePanel from './panels/ConsolePanel.svelte';
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
   import SettingsPanel from './panels/SettingsPanel.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
-  import SolvencyPanel from './panels/SolvencyPanel.svelte';
+  import SolvencyPanel from './panels/solvency/SolvencyPanel.svelte';
   import GossipPanel from './panels/GossipPanel.svelte';
   import DockEntityAuditPanel from './panels/DockEntityAuditPanel.svelte';
   import JMachineInspectorPanel from './panels/JMachineInspectorPanel.svelte';

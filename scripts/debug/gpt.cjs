@@ -236,9 +236,9 @@ const CORE_FILES = {
     'runtime/__tests__/payments/orderbook/orderbook-matching-fallback-part-2.test.ts',
     'runtime/__tests__/payments/swap/swap-order-preparation.test.ts',
     'runtime/__tests__/finance/state/lending.test.ts',
-    'tests/e2e-swap.spec.ts',
+    'tests/e2e/swap/e2e-swap.spec.ts',
     'tests/e2e-cross-j-swap.spec.ts',
-    'tests/e2e-lending.spec.ts',
+    'tests/e2e/product/e2e-lending.spec.ts',
   ],
   frontend: [
     // Optional UI/UX architecture (use --frontend flag)
@@ -672,7 +672,7 @@ const SWAP_FILES = {
     'runtime/__tests__/payments/orderbook/orderbook-validity.test.ts',
     'runtime/__tests__/payments/swap/swap-order-preparation.test.ts',
     'runtime/__tests__/payments/core/price-improvement.test.ts',
-    'tests/e2e-swap.spec.ts',
+    'tests/e2e/swap/e2e-swap.spec.ts',
   ]),
   frontend: [],
 };
@@ -1149,7 +1149,7 @@ Read these together:
 - \`runtime/api/server/entities/lending.ts\`
 - \`frontend/src/lib/components/Entity/payments/LendingPanel.svelte\`
 - \`runtime/__tests__/finance/state/lending.test.ts\`
-- \`tests/e2e-lending.spec.ts\`
+- \`tests/e2e/product/e2e-lending.spec.ts\`
 
 ### Market maker and orderbook readiness
 
@@ -1292,9 +1292,9 @@ xln/
     src/lib/components/Entity/payments/LendingPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/payments/LendingPanel.svelte'] || '?'} lines - Lending offer/borrow/repay UI
 
   behavior tests/
-    tests/e2e-swap.spec.ts              ${fileSizes['tests/e2e-swap.spec.ts'] || '?'} lines - Same-chain swap UX contract
+    tests/e2e/swap/e2e-swap.spec.ts              ${fileSizes['tests/e2e/swap/e2e-swap.spec.ts'] || '?'} lines - Same-chain swap UX contract
     tests/e2e-cross-j-swap.spec.ts      ${fileSizes['tests/e2e-cross-j-swap.spec.ts'] || '?'} lines - Cross-j swap/manual recommendation UX contract
-    tests/e2e-lending.spec.ts           ${fileSizes['tests/e2e-lending.spec.ts'] || '?'} lines - Lending UI contract
+    tests/e2e/product/e2e-lending.spec.ts           ${fileSizes['tests/e2e/product/e2e-lending.spec.ts'] || '?'} lines - Lending UI contract
     runtime/__tests__/finance/state/lending.test.ts   ${fileSizes['runtime/__tests__/finance/state/lending.test.ts'] || '?'} lines - Lending state-machine contract
 
 ${includeFrontend ? `

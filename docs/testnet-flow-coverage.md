@@ -17,9 +17,9 @@ Required E2E coverage:
 
 Primary specs:
 
-- `tests/e2e-payment-smoke.spec.ts`
-- `tests/e2e-ahb-isolated.spec.ts`
-- `tests/e2e-pay-deeplink.spec.ts`
+- `tests/e2e/payments/e2e-payment-smoke.spec.ts`
+- `tests/e2e/runtime/e2e-ahb-isolated.spec.ts`
+- `tests/e2e/payments/e2e-pay-deeplink.spec.ts`
 
 ## Same-Account Swap
 
@@ -35,8 +35,8 @@ Required E2E coverage:
 
 Primary specs:
 
-- `tests/e2e-swap-isolated.spec.ts`
-- `tests/e2e-swap.spec.ts`
+- `tests/e2e/swap/e2e-swap-isolated.spec.ts`
+- `tests/e2e/swap/e2e-swap.spec.ts`
 
 ## Cross-J Swap
 
