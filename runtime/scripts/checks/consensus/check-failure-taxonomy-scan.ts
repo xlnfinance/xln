@@ -943,7 +943,7 @@ for (const [path, markers] of [
   ],
   ['runtime/__tests__/validation-utils.test.ts', ['validateAccountDeltas fails loud', 'ACCOUNT_DELTAS_MISSING']],
   [
-    'runtime/__tests__/relay-router.test.ts',
+    'runtime/__tests__/network/relay/relay-router.test.ts',
     ['relay router and local delivery verbose diagnostics use structured logging', 'relay.local_delivery'],
   ],
   [
@@ -971,11 +971,11 @@ for (const [path, markers] of [
     ['orchestrator lifecycle helpers use structured logging without direct console output', 'orchestrator.lifecycle'],
   ],
   [
-    'runtime/__tests__/jurisdiction-config-logging.test.ts',
+    'runtime/__tests__/network/jurisdiction/jurisdiction-config-logging.test.ts',
     ['jurisdiction config loader uses structured logging without direct console output', 'runtime.jurisdiction_config'],
   ],
   [
-    'runtime/__tests__/jurisdiction-loader-logging.test.ts',
+    'runtime/__tests__/network/jurisdiction/jurisdiction-loader-logging.test.ts',
     ['jurisdiction loader diagnostics', 'runtime.jurisdiction_loader'],
   ],
   [

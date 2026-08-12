@@ -146,7 +146,7 @@ for (const [path, forbidden] of [
 }
 
 for (const [path, markers] of [
-  ['runtime/__tests__/multi-jurisdiction-entity.test.ts', [
+  ['runtime/__tests__/network/jurisdiction/multi-jurisdiction-entity.test.ts', [
     'jurisdiction identity uses stack refs before display names',
     "expect(getJReplicaByJurisdictionRef(env, 'Canonical')).toBeUndefined();",
   ]],
@@ -155,7 +155,7 @@ for (const [path, markers] of [
     "expect(mmNode).not.toContain('sameJurisdictionIdentityOrNameOnlyFallback');",
     "expect(reserveBootstrap).not.toContain('sameJurisdictionRefOrNameFallback');",
   ]],
-  ['runtime/__tests__/server-jurisdictions.test.ts', [
+  ['runtime/__tests__/network/server/server-jurisdictions.test.ts', [
     'preserves its configured display name',
   ]],
 ] as const) {

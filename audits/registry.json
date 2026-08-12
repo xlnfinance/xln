@@ -202,7 +202,7 @@
       "testGlobs": [
         "runtime/__tests__/**/*p2p*",
         "runtime/__tests__/**/*relay*",
-        "runtime/__tests__/direct-runtime-bun.test.ts",
+        "runtime/__tests__/network/routing/direct-runtime-bun.test.ts",
         "runtime/scenarios/network/p2p-*.ts"
       ],
       "dependencies": [
@@ -650,7 +650,7 @@
       "testGlobs": [
         "runtime/__tests__/**/*p2p*",
         "runtime/__tests__/**/*relay*",
-        "runtime/__tests__/direct-runtime-bun.test.ts",
+        "runtime/__tests__/network/routing/direct-runtime-bun.test.ts",
         "runtime/scenarios/network/p2p-*.ts"
       ]
     },
@@ -675,7 +675,7 @@
       "testGlobs": [
         "runtime/__tests__/**/*p2p*",
         "runtime/__tests__/**/*relay*",
-        "runtime/__tests__/direct-runtime-bun.test.ts",
+        "runtime/__tests__/network/routing/direct-runtime-bun.test.ts",
         "runtime/scenarios/network/p2p-*.ts"
       ]
     },
@@ -700,7 +700,7 @@
       "testGlobs": [
         "runtime/__tests__/**/*p2p*",
         "runtime/__tests__/**/*relay*",
-        "runtime/__tests__/direct-runtime-bun.test.ts",
+        "runtime/__tests__/network/routing/direct-runtime-bun.test.ts",
         "runtime/scenarios/network/p2p-*.ts"
       ]
     },

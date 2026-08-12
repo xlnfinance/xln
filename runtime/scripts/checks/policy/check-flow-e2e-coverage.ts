@@ -11,12 +11,12 @@ type CoverageRequirement = {
 const readText = (path: string): string => {
   if (path !== 'runtime/__tests__/cross-jurisdiction-swap.test.ts') return readFileSync(path, 'utf8');
   return [
-    'runtime/__tests__/cross-jurisdiction-swap-part-1.test.ts',
-    'runtime/__tests__/cross-jurisdiction-swap-part-2a.test.ts',
-    'runtime/__tests__/cross-jurisdiction-swap-part-2b.test.ts',
-    'runtime/__tests__/cross-jurisdiction-swap-part-3.test.ts',
-    'runtime/__tests__/cross-jurisdiction-swap-part-4.test.ts',
-    'runtime/__tests__/cross-jurisdiction-swap-part-5.test.ts',
+    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-1.test.ts',
+    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2a.test.ts',
+    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2b.test.ts',
+    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-3.test.ts',
+    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-4.test.ts',
+    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-5.test.ts',
     'runtime/__tests__/audit-failfast-regressions-part-6.test.ts',
   ].map(file => readFileSync(file, 'utf8')).join('\n');
 };

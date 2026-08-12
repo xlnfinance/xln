@@ -306,26 +306,26 @@ for (const [path, markers] of [
     'ROUTE_P2P_INVALID_DELIVERY_RESULT',
     'ROUTE_SEND_NOT_DELIVERED',
   ]],
-  ['runtime/__tests__/p2p-prefetch.test.ts', [
+  ['runtime/__tests__/network/p2p/p2p-prefetch.test.ts', [
     'enqueueEntityInputsDelivery reports typed delivery result',
     'enqueueEntityInputsDelivery returns typed success with transport',
   ]],
-  ['runtime/__tests__/relay-store.test.ts', [
+  ['runtime/__tests__/network/relay/relay-store.test.ts', [
     'websocket send result classifier covers the complete server/client matrix',
     'relay delivery events expose typed retry and fatal semantics',
   ]],
-  ['runtime/__tests__/relay-direct.test.ts', [
+  ['runtime/__tests__/network/relay/relay-direct.test.ts', [
     'direct relay diagnostics stay machine-readable',
     'relay.direct.target_key_missing',
     'relay.direct.source_key_missing',
     'relay.direct.send_failed',
   ]],
-  ['runtime/__tests__/relay-router.test.ts', [
+  ['runtime/__tests__/network/relay/relay-router.test.ts', [
     'delivery:',
     'send-failed',
     'deliver-invalid',
   ]],
-  ['runtime/__tests__/direct-runtime-bun.test.ts', [
+  ['runtime/__tests__/network/routing/direct-runtime-bun.test.ts', [
     'sendEntityInputsDelivery',
     'WEBSOCKET_SEND_RESULT_INVALID',
     'ROUTE_DIRECT_DELIVERED',
