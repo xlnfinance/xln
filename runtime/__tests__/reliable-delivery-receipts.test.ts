@@ -24,7 +24,7 @@ import {
   buildLocalJPrefixAttestation,
   hashJPrefixAttestation,
   mergeJPrefixAttestations,
-} from '../jurisdiction/machine/j-prefix-consensus';
+} from '../jurisdiction/machine/history/j-prefix-consensus';
 import {
   hashCertifiedEntityOutput,
   hashCertifiedEntityOutputSemantic,

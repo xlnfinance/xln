@@ -1,7 +1,7 @@
 import { isHexString } from 'ethers';
 import type { RuntimeInput, RuntimeReplica, RuntimeTx } from '../../runtime/types';
 import { enqueueRuntimeInput } from '../../runtime/input-pipeline/input-queue';
-import { indexReserveUpdatedEvents } from '../machine/event-evidence';
+import { indexReserveUpdatedEvents } from '../machine/events/event-evidence';
 import {
   bindLocalJEventIngressSource,
   type LocalJEventIngressSource,

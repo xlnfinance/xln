@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { normalizeJurisdictionKey, selectWritableJurisdictionKey } from '../jurisdiction/machine/jurisdiction-key';
+import { normalizeJurisdictionKey, selectWritableJurisdictionKey } from '../jurisdiction/machine/config/jurisdiction-key';
 
 describe('jurisdiction key selection', () => {
   test('prefers an explicit primary jurisdiction key', () => {

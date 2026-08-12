@@ -1,6 +1,6 @@
 import type { RuntimeInput, RuntimeReplica, RuntimeTx } from '../../../../runtime/types';
 import { enqueueRuntimeInput } from '../../../../runtime/input-pipeline/input-queue';
-import { indexReserveUpdatedEvents } from '../../../machine/event-evidence';
+import { indexReserveUpdatedEvents } from '../../../machine/events/event-evidence';
 import { isCanonicalEvent } from '../../event-relevance';
 import { applyJEventIngressTransform } from '../../ingress-transform';
 import {

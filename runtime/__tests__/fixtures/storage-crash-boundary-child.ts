@@ -55,7 +55,7 @@ import {
 import {
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
-} from '../../jurisdiction/machine/j-prefix-consensus';
+} from '../../jurisdiction/machine/history/j-prefix-consensus';
 import { applyRuntimeStorageChanges } from '../../runtime/observability/env-events';
 import { cloneIsolatedRuntimeInput } from '../../runtime/input-pipeline/input-clone';
 import { collectDueJSubmitRuntimeTxs } from '../../runtime/jurisdiction/j-submit-scheduler';

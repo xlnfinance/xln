@@ -8,7 +8,7 @@ import {
   TOKEN_REGISTRATION_AMOUNT,
   defaultTokensForJurisdiction,
   getDefaultTokenSupply,
-} from '../machine/default-tokens';
+} from '../machine/config/default-tokens';
 
 const log = createStructuredLogger('jurisdiction.dev-tokens');
 

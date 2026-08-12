@@ -2,12 +2,12 @@ import type { EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica } 
 import type { RuntimeReplica, ReliableDeliveryIdentity, RoutedEntityInput } from '../types.ts';
 import type { EntityTx } from '../../types/entity-tx.ts';
 import { getEntityLeaderState } from '../../entity/consensus/leader';
-import { reconcileJEventRangeWithFinalizedState } from '../../jurisdiction/machine/local-history.ts';
-import { decodeUnsignedJEventRange } from '../../jurisdiction/machine/j-event-range-validation.ts';
+import { reconcileJEventRangeWithFinalizedState } from '../../jurisdiction/machine/local-history/index.ts';
+import { decodeUnsignedJEventRange } from '../../jurisdiction/machine/j-event-range-validation/index.ts';
 import {
   getJPrefixAttestationTemporalDisposition,
   verifyOutOfRoundJPrefixAttestation,
-} from '../../jurisdiction/machine/j-prefix-consensus.ts';
+} from '../../jurisdiction/machine/history/j-prefix-consensus.ts';
 import {
   assertReliableLaneCompatible,
   reliableIdentityExactKey,

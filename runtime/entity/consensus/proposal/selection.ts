@@ -4,7 +4,7 @@ import {
   entityRequiresJPrefixCertificate,
   hasPendingLocalJEvent,
   isFrozenBaseJPrefixRollAuthorized,
-} from '../../../jurisdiction/machine/j-prefix-consensus';
+} from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import { nodeProcess } from '../../../infra/process/runtime-process';
 import type { EntityReplica } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';

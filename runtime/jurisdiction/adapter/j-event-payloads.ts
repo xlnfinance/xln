@@ -1,5 +1,5 @@
 import type { JurisdictionEvent } from '../../types/jurisdiction-events';
-import { normalizeJurisdictionEvent } from '../machine/event-normalization';
+import { normalizeJurisdictionEvent } from '../machine/events/event-normalization';
 import { CANONICAL_J_EVENTS } from '../machine/event-catalog';
 import type { JEventIngress } from './types';
 

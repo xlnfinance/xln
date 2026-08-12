@@ -1,16 +1,16 @@
-import type { ConsensusConfig, EntityReplica, JurisdictionConfig } from '../../entity/types';
-import type { EntityRuntimeContext } from '../../entity/runtime-context';
-import type { JReplica } from '../../types/jurisdiction-runtime';
-import { firstUsableContractAddress } from './contract-address';
+import type { ConsensusConfig, EntityReplica, JurisdictionConfig } from '../../../entity/types';
+import type { EntityRuntimeContext } from '../../../entity/runtime-context';
+import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { firstUsableContractAddress } from '../contract-address';
 import {
   getJurisdictionStackId,
   isJurisdictionStackRef,
   normalizeStackChainId,
-} from './jurisdiction-stack';
+} from '../jurisdiction-stack';
 export {
   getJurisdictionStackId,
   isJurisdictionStackRef,
-} from './jurisdiction-stack';
+} from '../jurisdiction-stack';
 
 const firstDefined = <T>(...values: Array<T | undefined>): T | undefined => {
   for (const value of values) {

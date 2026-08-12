@@ -33,13 +33,13 @@ import {
   setJHistoryRangeIngressTransform,
   updateWatcherJurisdictionCursor,
 } from '../jurisdiction/adapter/watcher';
-import { findReserveUpdatedEvidence } from '../jurisdiction/machine/event-evidence';
+import { findReserveUpdatedEvidence } from '../jurisdiction/machine/events/event-evidence';
 import { decodeAuthenticatedWatcherEvents } from '../jurisdiction/adapter/rpc-watcher-events';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 import {
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
-} from '../jurisdiction/machine/j-prefix-consensus';
+} from '../jurisdiction/machine/history/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { createEmptyEnv } from '../runtime';
 import { applyRuntimeTx } from '../runtime/transactions/tx-handlers';
@@ -204,7 +204,7 @@ describe('JAdapter watcher ingress', () => {
       .map(file => readFileSync(join(process.cwd(), 'runtime/jurisdiction/adapter', file), 'utf8'))
       .join('\n');
 
-    expect(source).toContain("from '../../runtime/input-queue'");
+    expect(source).toContain("from '../../runtime/input-pipeline/input-queue'");
     expect(source).not.toMatch(/from ['"]\.\.\/runtime(?:\.ts)?['"]/);
   });
 

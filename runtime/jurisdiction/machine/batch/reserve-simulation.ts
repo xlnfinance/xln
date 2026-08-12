@@ -1,5 +1,5 @@
-import type { JBatch } from './batch';
-import { normalizeEntityId } from '../../entity/id';
+import type { JBatch } from './';
+import { normalizeEntityId } from '../../../entity/id';
 
 type DraftBatchReserveOpType =
   | 'reserveToReserve'

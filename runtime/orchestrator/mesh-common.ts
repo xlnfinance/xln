@@ -3,7 +3,7 @@ import type { EntityTx } from '../types/entity-tx';
 import type { RuntimeReplica } from '../runtime/types';
 import { deriveDelta, getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
-import { getBootstrapTokenAmount } from '../jurisdiction/machine/bootstrap-economy';
+import { getBootstrapTokenAmount } from '../jurisdiction/machine/config/bootstrap-economy';
 import { getEntityReplicaById } from '../entity/replica/replica-lookup';
 import { assertEntityProposalAction } from '../entity/auth/authorization';
 import { normalizeSignedEntityCommand } from '../entity/command/command-codec';
@@ -12,7 +12,7 @@ export { getEntityReplicaById } from '../entity/replica/replica-lookup';
 export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
 export {
   getBootstrapTokenAmount,
-} from '../jurisdiction/machine/bootstrap-economy';
+} from '../jurisdiction/machine/config/bootstrap-economy';
 
 export const HUB_MESH_TOKEN_ID = 1;
 export const getBootstrapCreditAmount = (

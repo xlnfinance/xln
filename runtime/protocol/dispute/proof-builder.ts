@@ -28,7 +28,7 @@ import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body.ts';
 import { sortTransformerEntries } from '../transform/transformer-ordering';
 import { normalizeAccountWatchSeed } from '../identity/account-watch-seed';
 import { HASHLADDER_MAX_FILL_RATIO } from '../htlc/hash-ladder.ts';
-import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/machine/batch.ts';
+import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/machine/batch/index.ts';
 import { compareStableText } from '../serialization';
 import { deriveSwapOffdeltaChanges } from '../../orderbook/swap-execution.ts';
 import { deriveTransferOffdeltaChange } from '../transform/delta-movement';

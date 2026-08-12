@@ -1,10 +1,10 @@
-import type { JTx } from '../../types/jurisdiction-runtime';
+import type { JTx } from '../../../types/jurisdiction-runtime';
 import {
   assertJBatchWithinContractLimits,
   batchOpCount,
   computeBatchHankoHash,
   encodeJBatch,
-} from './batch';
+} from './';
 import { keccak256 } from 'ethers';
 
 type BatchJTx = Extract<JTx, { type: 'batch' }>;

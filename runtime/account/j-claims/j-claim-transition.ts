@@ -12,7 +12,7 @@ import {
   canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,
   requireCanonicalJurisdictionEvents,
-} from '../../jurisdiction/machine/event-normalization';
+} from '../../jurisdiction/machine/events/event-normalization';
 import {
   applyAccountJClaimDelete,
   applyAccountJClaimInsert,

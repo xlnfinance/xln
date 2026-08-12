@@ -1,7 +1,7 @@
 import { signAccountFrame } from '../../../account/crypto';
 import { assertEntityConfigBoardAuthority } from '../../../hanko/signing';
 import { shortHash, shortId } from '../../../infra/logger';
-import { assertFrameJPrefix } from '../../../jurisdiction/machine/j-prefix-consensus';
+import { assertFrameJPrefix } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import {
   cloneIsolatedEntityLeaderCertificate,
   cloneIsolatedProposedEntityFrame,

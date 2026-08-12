@@ -11,7 +11,7 @@ import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
 } from '../jurisdiction/machine/event-observation';
-import { compareCanonicalJurisdictionEvents } from '../jurisdiction/machine/event-normalization';
+import { compareCanonicalJurisdictionEvents } from '../jurisdiction/machine/events/event-normalization';
 import {
   createEntityFrameHash,
   createEntityFrameHashFromStateRoot,

@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { JurisdictionEventBlock, ValidatorJEventBlock } from '../../types/jurisdiction-events';
+import type { JurisdictionEventBlock, ValidatorJEventBlock } from '../../../types/jurisdiction-events';
 
 const HISTORY_EMPTY_DOMAIN = 'xln:j-history-empty:v1';
 const HISTORY_LEAF_DOMAIN = 'xln:j-history-event-block:v1';

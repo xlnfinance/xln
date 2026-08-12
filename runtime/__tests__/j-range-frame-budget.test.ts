@@ -19,7 +19,7 @@ import {
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
   restoreJPrefixRound,
-} from '../jurisdiction/machine/j-prefix-consensus';
+} from '../jurisdiction/machine/history/j-prefix-consensus';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/machine/history-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';

@@ -147,11 +147,11 @@ import {
   getJEventJurisdictionRef,
 } from '../jurisdiction/machine/event-observation';
 
-import { getRuntimeJurisdictionHeight } from '../jurisdiction/machine/height';
+import { getRuntimeJurisdictionHeight } from '../jurisdiction/machine/history/height';
 
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 
-import { buildLocalJPrefixAttestation } from '../jurisdiction/machine/j-prefix-consensus';
+import { buildLocalJPrefixAttestation } from '../jurisdiction/machine/history/j-prefix-consensus';
 
 import { createEmptyBatch, encodeJBatch } from '../jurisdiction/machine/batch';
 

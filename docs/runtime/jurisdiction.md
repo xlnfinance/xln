@@ -9,7 +9,7 @@ The J-machine converts finalized chain observations into deterministic entity in
 - [`runtime/jurisdiction/machine/`](../../runtime/jurisdiction/machine) - identity, height, event normalization, and J-batch logic.
 - [`runtime/jurisdiction/adapter/`](../../runtime/jurisdiction/adapter) - RPC and BrowserVM adapters/watchers.
 - [`runtime/entity/tx/j-events.ts`](../../runtime/entity/tx/j-events.ts) - applies threshold-observed J-events to entity state.
-- [`runtime/jurisdiction/machine/batch.ts`](../../runtime/jurisdiction/machine/batch.ts) - canonical batch encoding and contract-limit checks.
+- [`runtime/jurisdiction/machine/batch/index.ts`](../../runtime/jurisdiction/machine/batch/index.ts) - canonical batch encoding and contract-limit checks.
 
 ## Main Methods
 

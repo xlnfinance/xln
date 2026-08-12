@@ -1,19 +1,19 @@
-import type { JurisdictionEventBlock, JurisdictionEventData } from '../../types/jurisdiction-events';
+import type { JurisdictionEventBlock, JurisdictionEventData } from '../../../types/jurisdiction-events';
 import {
   canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,
   requireCanonicalJurisdictionEvents,
-} from './event-normalization';
+} from '../events/event-normalization';
 import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
   normalizeDisputeFinalizationEvidence,
-} from './event-observation';
-import { buildJEventRangeDigest, canonicalJEventRangeHash } from './history-consensus';
+} from '../event-observation';
+import { buildJEventRangeDigest, canonicalJEventRangeHash } from '../history-consensus';
 import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
-} from '../../protocol/boundary/boundary-primitives';
+} from '../../../protocol/boundary/boundary-primitives';
 
 export type JEventRangeSignatureVerifier = (
   signerId: string,

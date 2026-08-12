@@ -47,9 +47,9 @@ Top 100 simplification targets:
 33. `runtime/storage/wal/snapshot.ts` — separate env snapshot building from BrowserVM state inclusion.
 34. `runtime/storage/index.ts` — separate pure restore from infra rehydration glue.
 35. `runtime/storage/wal/hash.ts` — centralize hash-input normalization with zero ad hoc field deletions outside this file.
-38. `runtime/jurisdiction/machine/batch.ts` — split encoding/hash/signing helpers from batch-mutation helpers.
-39. `runtime/jurisdiction/machine/batch.ts` — move submit-to-contract glue out, keep only batch structure logic.
-40. `runtime/jurisdiction/machine/batch.ts` — centralize batch op dedupe rules per op type instead of scattered checks.
+38. `runtime/jurisdiction/machine/batch/index.ts` — split encoding/hash/signing helpers from batch-mutation helpers.
+39. `runtime/jurisdiction/machine/batch/index.ts` — move submit-to-contract glue out, keep only batch structure logic.
+40. `runtime/jurisdiction/machine/batch/index.ts` — centralize batch op dedupe rules per op type instead of scattered checks.
 41. `runtime/jurisdiction/adapter/rpc.ts` — extract shared batch submit flow into helper shared with BrowserVM adapter.
 42. `runtime/jurisdiction/adapter/rpc.ts` — extract watcher poll loop into `rpc-watcher.ts`.
 43. `runtime/jurisdiction/adapter/rpc.ts` — extract token allowance/deposit helpers into `rpc-erc20.ts`.

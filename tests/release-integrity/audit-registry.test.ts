@@ -64,7 +64,7 @@ describe('canonical audit registry', () => {
     for (const coupledPath of [
       'runtime/config/constants.ts',
       'runtime/extensions/cross-j/index.ts',
-      'runtime/jurisdiction/machine/event-normalization.ts',
+      'runtime/jurisdiction/machine/events/event-normalization.ts',
       'runtime/orderbook/swap-execution.ts',
       'runtime/__tests__/direct-payment-frame-integrity.test.ts',
       'jurisdictions/test/DeltaTransformer.test.ts',

@@ -1,8 +1,8 @@
 import { ethers } from 'ethers';
 
-import type { EntityState, JurisdictionConfig } from '../../entity/types';
-import type { EntityRuntimeContext } from '../../entity/runtime-context';
-import type { JurisdictionEvent } from '../../types/jurisdiction-events';
+import type { EntityState, JurisdictionConfig } from '../../../entity/types';
+import type { EntityRuntimeContext } from '../../../entity/runtime-context';
+import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import type {
   CertifiedBoardAuthorityBinding,
   CertifiedBoardNodeStore,
@@ -11,7 +11,7 @@ import type {
   CertifiedBoardRecord,
   CertifiedBoardRegistryState,
   CertifiedBoardSource,
-} from '../../types/entity-board-registry';
+} from '../../../types/entity-board-registry';
 
 const ABI = ethers.AbiCoder.defaultAbiCoder();
 const domain = (label: string): string => ethers.keccak256(ethers.toUtf8Bytes(label));

@@ -8,7 +8,7 @@ import { hasCliFlag, readCliOption } from '../config/cli';
 import { readBooleanEnv } from '../config/environment';
 import { normalizeRuntimeId } from '../network/p2p/auth/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
-import { defaultTokensForJurisdiction } from '../jurisdiction/machine/default-tokens';
+import { defaultTokensForJurisdiction } from '../jurisdiction/machine/config/default-tokens';
 import {
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
@@ -30,7 +30,7 @@ import {
   normalizeJurisdictionKey,
   selectWritableJurisdictionKey,
   type WritableJurisdictionEntry,
-} from '../jurisdiction/machine/jurisdiction-key';
+} from '../jurisdiction/machine/config/jurisdiction-key';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import {

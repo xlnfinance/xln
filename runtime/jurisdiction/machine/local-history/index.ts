@@ -1,4 +1,4 @@
-import type { EntityState } from '../../entity/types';
+import type { EntityState } from '../../../entity/types';
 import type {
   JurisdictionEvent,
   JurisdictionEventBlock,
@@ -6,27 +6,27 @@ import type {
   ValidatorJBlockHeader,
   ValidatorJEventBlock,
   ValidatorJHistory,
-} from '../../types/jurisdiction-events';
+} from '../../../types/jurisdiction-events';
 import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
   normalizeDisputeFinalizationEvidence,
-} from './event-observation';
+} from '../event-observation';
 import {
   compareCanonicalJurisdictionEvents,
   requireCanonicalJurisdictionEvents,
-} from './event-normalization';
+} from '../events/event-normalization';
 import {
   canonicalJEventRangeHash,
   EMPTY_J_HISTORY_ROOT,
   foldJHistoryRoot,
   getJHistoryRegistrationBaseHeight,
-} from './history-consensus';
+} from '../history-consensus';
 import {
   type JEventRangeSignatureVerifier,
   validateJEventRangeEnvelope,
-} from './j-event-range-validation';
+} from '../j-event-range-validation';
 
 /** Bounded UI/audit cache. It is never consulted as consensus authority. */
 export const MAX_CERTIFIED_J_EVENT_BLOCKS = 256;

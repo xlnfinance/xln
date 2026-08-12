@@ -1,24 +1,24 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { ethers } from 'ethers';
 
-import { signAccountFrame, verifyAccountSignature } from '../../account/crypto';
+import { signAccountFrame, verifyAccountSignature } from '../../../account/crypto';
 
-import { compareStableText } from '../../protocol/serialization';
-import type { ConsensusConfig, EntityReplica, EntityState } from '../../entity/types';
-import type { EntityRuntimeContext } from '../../entity/runtime-context';
-import type { EntityTx } from '../../types/entity-tx';
-import type { JPrefixAttestation, JPrefixCertificate, JPrefixClaim, JPrefixRound, JurisdictionEventBlock, ValidatorJHistory } from '../../types/jurisdiction-events';
-import { getJEventJurisdictionRef } from './event-observation';
-import { buildJEventRangeDigest, canonicalJEventRangeHash, foldJHistoryRoot } from './history-consensus';
-import { normalizeStrictJEventBlock } from './j-event-range-validation';
+import { compareStableText } from '../../../protocol/serialization';
+import type { ConsensusConfig, EntityReplica, EntityState } from '../../../entity/types';
+import type { EntityRuntimeContext } from '../../../entity/runtime-context';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { JPrefixAttestation, JPrefixCertificate, JPrefixClaim, JPrefixRound, JurisdictionEventBlock, ValidatorJHistory } from '../../../types/jurisdiction-events';
+import { getJEventJurisdictionRef } from '../event-observation';
+import { buildJEventRangeDigest, canonicalJEventRangeHash, foldJHistoryRoot } from '../history-consensus';
+import { normalizeStrictJEventBlock } from '../j-event-range-validation';
 import {
   buildUnsignedJEventRangeAtHeight,
   buildValidatorJPrefixHeaders,
   finalizedJHistoryRoot,
   getValidatorJContiguousThroughHeight,
   reconcileJEventRangeWithFinalizedState,
-} from './local-history';
-import { getJRangeClaimsProposableBudgetError, type JRangeBody } from './range-budget';
+} from '../local-history';
+import { getJRangeClaimsProposableBudgetError, type JRangeBody } from '../range-budget';
 
 const J_PREFIX_ATTESTATION_DOMAIN = 'xln:j-prefix-attestation:v1';
 
@@ -823,7 +823,7 @@ export const assertFrameJPrefix = (
   env: EntityRuntimeContext,
   replica: Pick<EntityReplica, 'signerId' | 'state' | 'jHistory' | 'jPrefixRound'>,
   frame: Pick<
-    import('../../entity/types').EntityFrame,
+    import('../../../entity/types').EntityFrame,
     'height' | 'parentFrameHash' | 'leader' | 'txs' | 'jPrefixCertificate'
   >,
 ): void => {

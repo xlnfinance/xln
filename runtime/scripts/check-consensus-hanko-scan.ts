@@ -86,7 +86,7 @@ const hankoCodecPath = 'runtime/hanko/codec.ts';
 const hankoClaimsPath = 'runtime/hanko/claims.ts';
 const hankoBatchPath = 'runtime/hanko/batch.ts';
 const onchainHankoDomainPath = 'runtime/hanko/onchain-domain.ts';
-const jBatchPath = 'runtime/jurisdiction/machine/batch.ts';
+const jBatchPath = 'runtime/jurisdiction/machine/batch/index.ts';
 const rpcAdapterPaths = [
   'runtime/jurisdiction/adapter/rpc-public.ts',
   'runtime/jurisdiction/adapter/rpc-adapter.ts',

@@ -9,7 +9,7 @@ import { validateDelta } from './validation/delta-validation';
 // Re-exported under its own name so callers that already reach for account
 // utilities do not need a second import path for the LEFT tie-break.
 export { isLeftEntity } from '../protocol/identity/entity-id';
-import { DEFAULT_TOKENS, TRON_ONLY_DEFAULT_TOKENS, defaultTokensForJurisdiction } from '../jurisdiction/machine/default-tokens';
+import { DEFAULT_TOKENS, TRON_ONLY_DEFAULT_TOKENS, defaultTokensForJurisdiction } from '../jurisdiction/machine/config/default-tokens';
 import { logDebug } from '../infra/logger';
 
 // CRITICAL: Default credit is 0 - credit must be explicitly extended via set_credit_limit

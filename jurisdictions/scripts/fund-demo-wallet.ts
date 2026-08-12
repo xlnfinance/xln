@@ -17,7 +17,7 @@ import {
 import { generateLazyEntityId } from '../../runtime/entity/factory';
 import { prepareSignedBatch } from '../../runtime/hanko/batch';
 import { createEmptyBatch } from '../../runtime/jurisdiction/machine/batch';
-import { deriveJurisdictionSignerIndex } from '../../runtime/jurisdiction/machine/signer-derivation';
+import { deriveJurisdictionSignerIndex } from '../../runtime/jurisdiction/machine/config/signer-derivation';
 import { Depository__factory } from '../typechain-types/factories/contracts/Depository.sol/Depository__factory';
 
 type PublicJurisdiction = Readonly<{

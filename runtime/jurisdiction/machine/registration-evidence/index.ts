@@ -1,13 +1,13 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { ethers } from 'ethers';
 
-import { signAccountFrame, verifyAccountSignature } from '../../account/crypto';
-import { EntityProvider__factory } from '../../../jurisdictions/typechain-types';
-import { verifyCanonicalReceiptProof, type AuthenticatedRpcLog } from './receipt-codec';
+import { signAccountFrame, verifyAccountSignature } from '../../../account/crypto';
+import { EntityProvider__factory } from '../../../../jurisdictions/typechain-types';
+import { verifyCanonicalReceiptProof, type AuthenticatedRpcLog } from '../receipt-codec';
 
-import type { CertifiedRegistrationEvidence, JReplica } from '../../types/jurisdiction-runtime';
-import type { RuntimeReplica, RuntimeTx } from '../../runtime/types';
-import { getCertifiedBoardStackKey } from './board-registry';
+import type { CertifiedRegistrationEvidence, JReplica } from '../../../types/jurisdiction-runtime';
+import type { RuntimeReplica, RuntimeTx } from '../../../runtime/types';
+import { getCertifiedBoardStackKey } from '../board-registry';
 
 const FOUNDATION_ENTITY_ID = ethers.toBeHex(1n, 32).toLowerCase();
 const ZERO_BYTES32 = `0x${'00'.repeat(32)}`;

@@ -4,7 +4,7 @@ import type { AccountFrame, AccountTx } from '../../../types/account';
 import { assertAccountFrameDeltaIntegrity } from '../../state/frame';
 import { computeCanonicalMerkleRoot } from '../../commitment/state-root';
 import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/event-observation';
-import { requireCanonicalJurisdictionEvents } from '../../../jurisdiction/machine/event-normalization';
+import { requireCanonicalJurisdictionEvents } from '../../../jurisdiction/machine/events/event-normalization';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../constants';
 import { LIMITS } from '../../../config/constants';
 

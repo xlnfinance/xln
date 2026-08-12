@@ -10,7 +10,7 @@ import {
   assertValidatorJHistoryIntegrity,
 } from '../../jurisdiction/machine/local-history';
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
-import { restoreJPrefixRound } from '../../jurisdiction/machine/j-prefix-consensus';
+import { restoreJPrefixRound } from '../../jurisdiction/machine/history/j-prefix-consensus';
 import { cloneEntityState } from '../../entity/state-clone';
 import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';

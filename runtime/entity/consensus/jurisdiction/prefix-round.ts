@@ -168,7 +168,7 @@ import {
   hasDueLocalJPrefixAdvance,
   hasPendingLocalJEvent,
   mergeJPrefixAttestations,
-} from '../../../jurisdiction/machine/j-prefix-consensus';
+} from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import {
   getJEventRangeValidationError,
   getValidatorJContiguousThroughHeight,

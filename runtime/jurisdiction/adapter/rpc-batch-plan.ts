@@ -1,6 +1,6 @@
 import { normalizeEntityId } from '../../entity/id';
 import { isBatchEmpty, preflightBatchForE2, type JBatch } from '../machine/batch';
-import { assertSealedJBatchBinding, type SealedBatchJTx } from '../machine/sealed-batch';
+import { assertSealedJBatchBinding, type SealedBatchJTx } from '../machine/batch/sealed-batch';
 import { resolveEntityProposerId } from '../../runtime/delivery/entity-output-signer';
 import type { JTx } from '../../types/jurisdiction-runtime';
 import type { RuntimeReplica } from '../../runtime/types';

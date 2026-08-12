@@ -24,7 +24,7 @@ import {
   restoreJPrefixRound,
   selectHighestWeightedCommonJPrefix,
   verifyJPrefixCertificate,
-} from '../jurisdiction/machine/j-prefix-consensus';
+} from '../jurisdiction/machine/history/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { createEmptyEnv, hasRuntimeWork } from '../runtime';
 import type { EntityReplica, EntityState, EntityFrame } from '../entity/types';

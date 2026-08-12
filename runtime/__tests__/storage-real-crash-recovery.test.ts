@@ -20,7 +20,7 @@ import {
 } from '../entity/auth/crypto';
 import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-events';
 import { getEntityLeaderState } from '../entity/consensus/leader';
-import { buildJPrefixCertificate } from '../jurisdiction/machine/j-prefix-consensus';
+import { buildJPrefixCertificate } from '../jurisdiction/machine/history/j-prefix-consensus';
 import { generateNumberedEntityId } from '../entity/factory';
 import { verifyHankoForHash } from '../hanko/signing';
 import {

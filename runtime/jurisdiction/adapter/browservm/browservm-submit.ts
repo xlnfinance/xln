@@ -1,6 +1,6 @@
 import { normalizeEntityId } from '../../../entity/id';
 import { batchOpCount, isBatchEmpty } from '../../machine/batch';
-import { assertSealedJBatchBinding } from '../../machine/sealed-batch';
+import { assertSealedJBatchBinding } from '../../machine/batch/sealed-batch';
 import { assertEntityProviderActionJTxBinding } from '../../../entity/entity-provider-action';
 import type { JTx } from '../../../types/jurisdiction-runtime';
 import type { BrowserVMProvider } from './browservm-provider';

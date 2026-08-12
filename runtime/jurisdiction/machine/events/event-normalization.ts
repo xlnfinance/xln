@@ -1,10 +1,10 @@
-import type { JurisdictionEvent } from '../../types/jurisdiction-events';
-import { compareStableText, safeStringify } from '../../protocol/serialization';
+import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
+import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import {
   normalizeMetadata,
   toRecord,
-} from './event-normalization-primitives';
-import { EVENT_NORMALIZERS } from './event-normalizers';
+} from '../event-normalization-primitives';
+import { EVENT_NORMALIZERS } from '../event-normalizers';
 
 /**
  * This table is the only jurisdiction-event decoding registry. Each handler

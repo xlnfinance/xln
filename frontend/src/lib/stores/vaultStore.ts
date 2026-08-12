@@ -68,7 +68,7 @@ import { isVaultAuthorityLeaseExpired } from '../security/vault-authority-lease'
 
 import { lockRuntimeCommandJournal } from './runtimeCommandJournalKeyring';
 
-import { deriveJurisdictionSignerIndex } from '../../../../runtime/jurisdiction/machine/signer-derivation';
+import { deriveJurisdictionSignerIndex } from '../../../../runtime/jurisdiction/machine/config/signer-derivation';
 
 import {
   findRuntimeByIdCaseInsensitive,

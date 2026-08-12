@@ -6,7 +6,7 @@ import {
   getDefaultRebalancePolicyForToken,
 } from '../account/config/defaults';
 import { dai, eth, usd } from '../scenarios/helpers';
-import { getBootstrapTokenAmount } from '../jurisdiction/machine/bootstrap-economy';
+import { getBootstrapTokenAmount } from '../jurisdiction/machine/config/bootstrap-economy';
 
 describe('rebalance defaults use token raw units', () => {
   test('USDC token 1 uses six-decimal raw amounts', () => {

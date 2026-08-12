@@ -11,7 +11,7 @@ import { handleDisputeFinalize, handleDisputeStart } from '../entity/tx/handlers
 import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
-import { getEntityCertifiedJurisdictionHeight } from '../jurisdiction/machine/height';
+import { getEntityCertifiedJurisdictionHeight } from '../jurisdiction/machine/history/height';
 import {
   buildAccountProofBody,
   createDisputeProofHashWithNonce,

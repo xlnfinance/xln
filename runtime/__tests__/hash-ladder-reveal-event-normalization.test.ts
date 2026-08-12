@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { normalizeJurisdictionEvent } from '../jurisdiction/machine/event-normalization';
+import { normalizeJurisdictionEvent } from '../jurisdiction/machine/events/event-normalization';
 
 const bytes32 = (byte: string): string => `0x${byte.repeat(64)}`;
 

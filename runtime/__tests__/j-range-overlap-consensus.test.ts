@@ -6,7 +6,7 @@ import { applyJEvent } from '../entity/tx/j-events';
 import { buildJHistoryRangeRuntimeInput } from '../jurisdiction/adapter/history-ingress';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 import { buildJEventRangeDigest, canonicalJEventRangeHash } from '../jurisdiction/machine/history-consensus';
-import { assertFrameJPrefix, buildLocalJPrefixAttestation } from '../jurisdiction/machine/j-prefix-consensus';
+import { assertFrameJPrefix, buildLocalJPrefixAttestation } from '../jurisdiction/machine/history/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/machine/registration-evidence';
 import { applyRuntimeTx } from '../runtime/transactions/tx-handlers';

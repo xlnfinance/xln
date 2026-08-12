@@ -118,7 +118,7 @@ const CORE_FILES = {
     'account/input.ts',      // Canonical AccountInput boundary
     'account/settlement/j-finality.ts', // Account-owned unilateral Depository finality
     'account/view-state.ts', // Bilateral state machine (classifyBilateralState)
-    'jurisdiction/machine/batch.ts',    // J-batch system: E-machine accumulates -> jBroadcast -> J-machine
+    'jurisdiction/machine/batch/index.ts',    // J-batch system: E-machine accumulates -> jBroadcast -> J-machine
 
     // Financial accounting (CRITICAL for bug analysis)
     'account/utils.ts',      // deriveDelta() RCPAN calculation, TOKEN_REGISTRY
@@ -320,11 +320,11 @@ const CROSS_FILES = {
     'account/consensus/index.ts',
     'account/view-state.ts',
     'account/consensus/dispute/policy.ts',
-    'jurisdiction/machine/batch.ts',
-    'jurisdiction/machine/height.ts',
-    'jurisdiction/machine/event-normalization.ts',
+    'jurisdiction/machine/batch/index.ts',
+    'jurisdiction/machine/history/height.ts',
+    'jurisdiction/machine/events/event-normalization.ts',
     'jurisdiction/machine/event-observation.ts',
-    'jurisdiction/machine/jurisdiction-runtime.ts',
+    'jurisdiction/machine/jurisdiction-runtime/index.ts',
     'protocol/htlc/hash-ladder.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
@@ -473,9 +473,9 @@ const RUNTIME_FILES = {
     'account/view-state.ts',
     'account/consensus/proposal/propose.ts',
     'account/consensus/types.ts',
-    'jurisdiction/machine/batch.ts',
-    'jurisdiction/machine/height.ts',
-    'jurisdiction/machine/event-normalization.ts',
+    'jurisdiction/machine/batch/index.ts',
+    'jurisdiction/machine/history/height.ts',
+    'jurisdiction/machine/events/event-normalization.ts',
     'jurisdiction/machine/event-observation.ts',
     'entity/tx/apply.ts',
     'entity/tx/handlers/basic.ts',
@@ -505,7 +505,7 @@ const RUNTIME_FILES = {
     'entity/replica/replica-clone.ts',
     'runtime/env-events.ts',
     'infra/logger.ts',
-    'jurisdiction/machine/jurisdiction-runtime.ts',
+    'jurisdiction/machine/jurisdiction-runtime/index.ts',
     'jurisdiction/adapter/config.ts',
     'jurisdiction/machine/jurisdiction-stack.ts',
     'runtime/jurisdiction-api.ts',
@@ -1219,7 +1219,7 @@ xln/
     entity/consensus/index.ts          ${fileSizes['runtime/entity/consensus/index.ts'] || '?'} lines - Entity candidate and Hanko certification
     account/consensus/index.ts         ${fileSizes['runtime/account/consensus/index.ts'] || '?'} lines - Bilateral consensus, left/right perspective
     account/view-state.ts   ${fileSizes['runtime/account/view-state.ts'] || '?'} lines - Bilateral state machine
-    jurisdiction/batch.ts                   ${fileSizes['runtime/jurisdiction/machine/batch.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
+    jurisdiction/machine/batch/index.ts     ${fileSizes['runtime/jurisdiction/machine/batch/index.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
     account/utils.ts             ${fileSizes['runtime/account/utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
     protocol/serialization/index.ts ${fileSizes['runtime/protocol/serialization/index.ts'] || '?'} lines - BigInt serialization
     account/crypto.ts            ${fileSizes['runtime/account/crypto.ts'] || '?'} lines - Signature verification

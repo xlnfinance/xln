@@ -2,7 +2,7 @@ import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/c
 import { ethers } from 'ethers';
 
 import type { ConsensusConfig, EntityLeaderState, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityLeaderTimeoutVoteBody, EntityReplica, EntityState, EntityFrame } from '../../types';
-import { isFrozenBaseJPrefixRollAuthorized } from '../../../jurisdiction/machine/j-prefix-consensus';
+import { isFrozenBaseJPrefixRollAuthorized } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import { compareStableText, serializeTaggedJson } from '../../../protocol/serialization';
 import { cloneIsolatedProposedEntityFrame } from '../../state/input-clone';
 import { hasQueuedOrPendingAccountWork } from '../account/work-index';

@@ -8,7 +8,7 @@ import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/mach
 import { formatRuntime } from '../qa/runtime-ascii';
 import { advanceScenarioTime } from './helpers';
 import { submitSignedScenarioBatch } from './j-batch-submit';
-import { DEFAULT_TOKENS } from '../jurisdiction/machine/default-tokens';
+import { DEFAULT_TOKENS } from '../jurisdiction/machine/config/default-tokens';
 
 type ProcessFn = (env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>;
 

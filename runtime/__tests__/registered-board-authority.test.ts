@@ -45,7 +45,7 @@ import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/va
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 import { getJEventJurisdictionRef } from '../jurisdiction/machine/event-observation';
 import { foldJHistoryRoot, EMPTY_J_HISTORY_ROOT } from '../jurisdiction/machine/history-consensus';
-import { buildLocalJPrefixAttestation } from '../jurisdiction/machine/j-prefix-consensus';
+import { buildLocalJPrefixAttestation } from '../jurisdiction/machine/history/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { createEmptyEnv, restoreEnvFromCheckpointSnapshot } from '../runtime';
 import { getReliableOutputIdentity } from '../runtime/routing/output-routing';

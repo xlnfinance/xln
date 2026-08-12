@@ -11,7 +11,7 @@ import {
   getLocalJPrefixAttestableHeight,
   hasDueLocalJPrefixAdvance,
   hasCurrentRoundJPrefixAttestation,
-} from '../machine/j-prefix-consensus';
+} from '../machine/history/j-prefix-consensus';
 import { markLocalJAuthorityRuntimeTx } from '../machine/registration-evidence';
 import {
   applyJHistoryRangeIngressTransform,

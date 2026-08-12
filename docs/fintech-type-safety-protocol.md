@@ -30,7 +30,7 @@ Fix these first when reducing type risk:
 
 1. `runtime/jurisdiction/adapter/*`
 2. `runtime/storage/wal/*`
-3. `runtime/jurisdiction/machine/batch.ts`
+3. `runtime/jurisdiction/machine/batch/index.ts`
 4. `runtime/protocol/dispute/proof-builder.ts`
 5. `runtime/account/tx/*`
 6. `runtime/entity/tx/*`

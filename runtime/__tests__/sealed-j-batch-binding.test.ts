@@ -6,7 +6,7 @@ import {
   encodeJBatch,
   batchOpCount,
 } from '../jurisdiction/machine/batch';
-import { assertSealedJBatchBinding } from '../jurisdiction/machine/sealed-batch';
+import { assertSealedJBatchBinding } from '../jurisdiction/machine/batch/sealed-batch';
 import type { JTx } from '../types/jurisdiction-runtime';
 
 const entityId = `0x${'11'.repeat(32)}`;

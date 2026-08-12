@@ -30,7 +30,7 @@ import {
 } from './boot';
 import { commitRuntimeInput, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { generateLazyEntityId } from '../entity/factory';
-import { DEFAULT_TOKENS } from '../jurisdiction/machine/default-tokens';
+import { DEFAULT_TOKENS } from '../jurisdiction/machine/config/default-tokens';
 import { isLeftEntity } from '../account/utils';
 import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
 

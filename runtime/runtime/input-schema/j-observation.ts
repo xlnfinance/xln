@@ -1,4 +1,4 @@
-import { normalizeJurisdictionEvent } from '../../jurisdiction/machine/event-normalization';
+import { normalizeJurisdictionEvent } from '../../jurisdiction/machine/events/event-normalization';
 import { recordValidatorJHistory } from '../../jurisdiction/machine/local-history';
 import type { RuntimeTx } from '../types';
 import {

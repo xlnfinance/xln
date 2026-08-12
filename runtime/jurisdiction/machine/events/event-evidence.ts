@@ -1,4 +1,4 @@
-import type { RuntimeReplica } from '../../runtime/types';
+import type { RuntimeReplica } from '../../../runtime/types';
 
 export type ReserveUpdatedEvidence = {
   name: 'ReserveUpdated';

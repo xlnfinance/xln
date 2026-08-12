@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JAdapter } from '../../../jurisdiction/adapter';
-import { normalizeJurisdictionKey, selectWritableJurisdictionKey, type WritableJurisdictionEntry } from '../../../jurisdiction/machine/jurisdiction-key';
+import { normalizeJurisdictionKey, selectWritableJurisdictionKey, type WritableJurisdictionEntry } from '../../../jurisdiction/machine/config/jurisdiction-key';
 import { resolveJurisdictionsJsonPath } from '../../../jurisdiction/adapter/jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../../../jurisdiction/adapter/jurisdictions-version';
 import { toPublicRpcUrl } from '../../../network/p2p/loopback-url';

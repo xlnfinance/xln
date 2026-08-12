@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { deriveJurisdictionSignerIndex } from '../jurisdiction/machine/signer-derivation';
+import { deriveJurisdictionSignerIndex } from '../jurisdiction/machine/config/signer-derivation';
 
 describe('jurisdiction signer derivation', () => {
   test('is canonical across case and whitespace', () => {

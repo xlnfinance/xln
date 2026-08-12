@@ -25,7 +25,7 @@ import {
   buildNumberedRegistrationRequest,
   runNumberedRegistrationIntent,
 } from '../runtime/registration/numbered-registration-intent.js';
-import { resolveRuntimeJurisdictionConfig } from '../jurisdiction/machine/jurisdiction-runtime.js';
+import { resolveRuntimeJurisdictionConfig } from '../jurisdiction/machine/jurisdiction-runtime/index.js';
 import { safeStringify } from '../protocol/serialization/index.js';
 import { commitRuntimeInput, processJEvents, waitScenario } from './helpers';
 import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';

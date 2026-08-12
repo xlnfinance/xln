@@ -1,10 +1,10 @@
-import type { EntityState } from '../../entity/types';
-import type { RuntimeReplica } from '../../runtime/types';
+import type { EntityState } from '../../../entity/types';
+import type { RuntimeReplica } from '../../../runtime/types';
 import {
   getJReplicaByJurisdictionRef,
   getJReplicaByName,
   isJurisdictionStackRef,
-} from './jurisdiction-runtime';
+} from '../jurisdiction-runtime';
 
 /**
  * Jurisdiction height visible to an Entity reducer.

@@ -44,8 +44,8 @@ import {
   hashCooperativeUpdateHankoPayload,
   hashDisputeProofHankoPayload,
 } from '../../../hanko/onchain-domain';
-import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../../machine/default-tokens';
-import { getBootstrapTokenAmountBySymbol } from '../../machine/bootstrap-economy';
+import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../../machine/config/default-tokens';
+import { getBootstrapTokenAmountBySymbol } from '../../machine/config/bootstrap-economy';
 import {
   decodeBrowserVmEvents,
   toBrowserVmReceiptLogs,

@@ -2,7 +2,7 @@ import type { EntityCandidateEffect, EntityState } from '../types';
 import type { AccountReplica } from '../../types/account';
 import { addMessage } from '../frame-events';
 import { formatTokenAmount } from '../../account/financial-utils';
-import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/event-normalization';
+import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/events/event-normalization';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import type { FinalizedJEventContext } from './j-events';
 

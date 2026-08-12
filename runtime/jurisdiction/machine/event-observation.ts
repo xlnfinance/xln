@@ -6,7 +6,7 @@ import {
   canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,
   requireCanonicalJurisdictionEvents,
-} from './event-normalization';
+} from './events/event-normalization';
 
 const UNCONFIGURED_J_EVENT_JURISDICTION = 'unconfigured';
 

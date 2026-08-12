@@ -20,7 +20,7 @@ import {
   TOKEN_REGISTRATION_AMOUNT,
   defaultTokensForJurisdiction,
   getDefaultTokenSupply,
-} from '../machine/default-tokens';
+} from '../machine/config/default-tokens';
 import { requireUsableContractAddress } from '../machine/contract-address';
 import { packTokenReference } from './contract-codec';
 import { DEV_CHAIN_IDS } from './chain-ids';

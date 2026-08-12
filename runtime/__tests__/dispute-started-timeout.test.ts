@@ -4,7 +4,7 @@ import { SigningKey, computeAddress } from 'ethers';
 import { deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
 import { rawEventToJEvents } from '../jurisdiction/adapter/j-event-payloads';
-import { normalizeJurisdictionEvent } from '../jurisdiction/machine/event-normalization';
+import { normalizeJurisdictionEvent } from '../jurisdiction/machine/events/event-normalization';
 import { createEmptyEnv } from '../runtime';
 import type { RuntimeReplica } from '../runtime/types';
 import {

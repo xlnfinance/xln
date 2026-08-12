@@ -1,4 +1,4 @@
-import { normalizeLoopbackUrl } from '../../network/p2p/loopback-url';
+import { normalizeLoopbackUrl } from '../../../network/p2p/loopback-url';
 
 export type WritableJurisdictionEntry = Record<string, unknown> & {
   primary?: unknown;
