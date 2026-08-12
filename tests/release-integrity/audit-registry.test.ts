@@ -92,7 +92,7 @@ describe('canonical audit registry', () => {
     ];
     const tests = [
       'tests/e2e-payment.spec.ts',
-      'tests/frontend/payment-panel-view.test.ts',
+      'tests/frontend/payments/payment-panel-view.test.ts',
       'tests/frontend/payment-terminal-monitor.test.ts',
       'tests/frontend/runtime-command-bus.test.ts',
       'runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts',

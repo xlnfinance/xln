@@ -789,7 +789,7 @@ test('lending mutations use the signer runtime command path instead of unauthent
 
 test('server-side faucet requests publish upstream runtime ingress receipts when provided', () => {
   const panelSource = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-  const faucetSource = readFileSync('frontend/src/lib/components/Entity/account-faucet.ts', 'utf8');
+  const faucetSource = readFileSync('frontend/src/lib/components/Entity/account/account-faucet.ts', 'utf8');
   const assetFaucetSource = readFileSync('frontend/src/lib/components/Entity/AssetFaucetCard.svelte', 'utf8');
   const assetsSource = readFileSync('frontend/src/lib/components/Entity/EntityAssetsTab.svelte', 'utf8');
 

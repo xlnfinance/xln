@@ -334,7 +334,7 @@
         "runtime/__tests__/**/*htlc*",
         "runtime/scenarios/payments/htlc-*.ts",
         "tests/e2e-payment.spec.ts",
-        "tests/frontend/payment-panel-view.test.ts",
+        "tests/frontend/payments/payment-panel-view.test.ts",
         "tests/frontend/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime-command-bus.test.ts",
         "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
@@ -386,7 +386,7 @@
       "testGlobs": [
         "frontend/tests/brainvault-*.spec.ts",
         "tests/e2e-payment.spec.ts",
-        "tests/frontend/payment-panel-view.test.ts",
+        "tests/frontend/payments/payment-panel-view.test.ts",
         "tests/frontend/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime-command-bus.test.ts",
         "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
@@ -980,7 +980,7 @@
         "runtime/__tests__/**/*htlc*",
         "runtime/scenarios/payments/htlc-*.ts",
         "tests/e2e-payment.spec.ts",
-        "tests/frontend/payment-panel-view.test.ts",
+        "tests/frontend/payments/payment-panel-view.test.ts",
         "tests/frontend/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime-command-bus.test.ts",
         "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
@@ -1057,7 +1057,7 @@
       "testGlobs": [
         "frontend/tests/brainvault-*.spec.ts",
         "tests/e2e-payment.spec.ts",
-        "tests/frontend/payment-panel-view.test.ts",
+        "tests/frontend/payments/payment-panel-view.test.ts",
         "tests/frontend/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime-command-bus.test.ts",
         "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"

@@ -36,7 +36,7 @@ import {
   tokenNetworkLabel,
   type CrossSwapSetupStep,
   type SwapPanelRuntimeView,
-} from './swap-panel-helpers';
+} from './swap/swap-panel-helpers';
 import { compareStableText, normalizeDecimalInput, normalizeDisplayPriceForInput, parseDecimalAmountToBigInt, toBigIntSafe } from './swap-formatting';
 import {
   AGGREGATED_ORDERBOOK_DEPTH,
@@ -54,7 +54,7 @@ import {
   type PreparedSwapOrderLike,
   type SwapFormValidationInput,
   validateSwapForm,
-} from './swap-order-math';
+} from './swap/swap-order-math';
 import {
   buildRoutedRouteCandidates,
   estimateRoutedHopOutput,
@@ -86,7 +86,7 @@ import {
   type OfferLifecycle,
   type OfferLike,
   type SwapCompletionModal,
-} from './swap-order-history';
+} from './swap/swap-order-history';
 import SwapOrderList from './SwapOrderList.svelte';
 import SwapCompletionDialog from './SwapCompletionDialog.svelte';
 import SwapOrderbookSection from './SwapOrderbookSection.svelte';

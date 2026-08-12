@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   resolveReserveTokenMetaFromCatalog,
-} from '../../../../frontend/src/lib/components/Entity/entity-asset-catalog';
+} from '../../../../frontend/src/lib/components/Entity/assets/entity-asset-catalog';
 import {
   getAssetValueUsd,
   getExternalTokenValueUsd,
-} from '../../../../frontend/src/lib/components/Entity/entity-asset-values';
-import { remainingOfferUsd } from '../../../../frontend/src/lib/components/Entity/swap-order-history';
+} from '../../../../frontend/src/lib/components/Entity/assets/entity-asset-values';
+import { remainingOfferUsd } from '../../../../frontend/src/lib/components/Entity/swap/swap-order-history';
 import {
   RCPAN_MICROSCOPE_TOKENS,
   tokenAmountToUsdMicros,

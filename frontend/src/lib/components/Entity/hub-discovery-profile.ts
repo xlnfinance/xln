@@ -8,7 +8,7 @@ import {
 import {
   buildOpenAccountTx,
   type OpenAccountRebalancePolicy,
-} from './entity-action-txs';
+} from './account/entity-action-txs';
 
 import {
   hasUsableOpenAccountCounterpartyProfile,

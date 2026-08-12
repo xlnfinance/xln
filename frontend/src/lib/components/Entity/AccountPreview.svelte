@@ -13,8 +13,8 @@
   import { amountToUsdMicros } from '$lib/utils/assetPricing';
   import { formatEntityId } from '$lib/utils/format';
   import { getAccountUiStatus, getAccountUiStatusDescription, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
-  import { faucetPendingKey } from './account-faucet';
-  import { formatEntityNetworkLabel, normalizeJurisdictionDisplayName } from './swap-panel-helpers';
+  import { faucetPendingKey } from './account/account-faucet';
+  import { formatEntityNetworkLabel, normalizeJurisdictionDisplayName } from './swap/swap-panel-helpers';
 
   export let account: AccountReplica;
   export let counterpartyId: string;

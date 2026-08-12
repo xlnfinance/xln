@@ -146,7 +146,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/swap-panel-helpers.ts',
+    file: 'frontend/src/lib/components/Entity/swap/swap-panel-helpers.ts',
     patterns: [
       'buildCrossSwapSetupSteps',
       "CrossSwapSetupStepId = 'target-account' | 'target-credit'",

@@ -27,7 +27,7 @@
   import TokenSelect from '../shared/TokenSelect.svelte';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import { parseXlnInvoice, type ParsedXlnInvoice } from '$lib/utils/xlnInvoice';
-  import { parseTokenAmountInput, tokenAmountInputErrorMessage } from './token-amount-input';
+  import { parseTokenAmountInput, tokenAmountInputErrorMessage } from './assets/token-amount-input';
   import { requireTokenDecimals } from './token-metadata';
   import {
     hasCertifiedEntityEncryptionManifest,
@@ -40,7 +40,7 @@
     emptyPaymentPanelView,
     type PaymentPanelView,
     type PaymentReplicaView,
-  } from './payment-panel-view';
+  } from './payments/payment-panel-view';
 
   export let entityId: string;
   export let paymentView: PaymentPanelView = emptyPaymentPanelView();

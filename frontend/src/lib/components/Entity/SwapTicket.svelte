@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { RoutedSwapRouteCandidate } from './routed-swap-planner';
-  import type { CrossSwapSetupStep } from './swap-panel-helpers';
-  import { formatEntityNetworkLabel } from './swap-panel-helpers';
+  import type { CrossSwapSetupStep } from './swap/swap-panel-helpers';
+  import { formatEntityNetworkLabel } from './swap/swap-panel-helpers';
   import SwapRouteBuilder from './SwapRouteBuilder.svelte';
 
   type SourceEntityOption = {

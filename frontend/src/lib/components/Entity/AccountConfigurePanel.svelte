@@ -7,7 +7,7 @@
   import ConfigureWorkspaceTabs from './ConfigureWorkspaceTabs.svelte';
   import CreditForm from './CreditForm.svelte';
   import LiveRequiredState from './LiveRequiredState.svelte';
-  import type { ConfigureWorkspaceTab } from './entity-panel-routing';
+  import type { ConfigureWorkspaceTab } from './workspace/entity-panel-routing';
 
   type ConfigureTokenOption = {
     id: number;

@@ -4,7 +4,7 @@
   import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
   import type { Tab } from '$lib/types/ui';
   import ContextSwitcher from './ContextSwitcher.svelte';
-  import type { ViewTab } from './entity-panel-routing';
+  import type { ViewTab } from './workspace/entity-panel-routing';
 
   type JurisdictionBadge = {
     className: string;

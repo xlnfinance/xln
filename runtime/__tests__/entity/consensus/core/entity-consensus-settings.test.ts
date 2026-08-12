@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   buildEntityConsensusSettingsView,
-} from '../../../../../frontend/src/lib/components/Entity/entity-consensus-settings';
+} from '../../../../../frontend/src/lib/components/Entity/workspace/entity-consensus-settings';
 import type { EntityReplica, Proposal } from '../../../../entity/types';
 import type { EntityTx } from '../../../../types/entity-tx';
 

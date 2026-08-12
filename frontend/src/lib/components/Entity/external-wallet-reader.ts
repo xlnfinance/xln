@@ -1,8 +1,8 @@
 import { isAddress, ZeroAddress } from 'ethers';
 import type { JAdapter } from '@xln/runtime/api/public/runtime-module';
 import type { EntityReplica } from '$lib/types/ui';
-import { readJsonResponse } from './account-faucet';
-import type { ExternalToken } from './entity-asset-catalog';
+import { readJsonResponse } from './account/account-faucet';
+import type { ExternalToken } from './assets/entity-asset-catalog';
 import {
   assertExternalSnapshotCount,
   normalizeOptionalTokenId,
@@ -11,7 +11,7 @@ import {
   type ExternalAllowanceRead,
   type ExternalWalletReadResult,
   type ExternalWalletSnapshotResponse,
-} from './external-wallet-snapshot';
+} from './assets/external-wallet-snapshot';
 
 const REQUEST_TIMEOUT_MS = 5_000;
 type JTokenRegistryItem = Awaited<ReturnType<JAdapter['getTokenRegistry']>>[number];

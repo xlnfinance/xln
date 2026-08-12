@@ -18,10 +18,10 @@
   import ReceivePanel from './ReceivePanel.svelte';
   import SettlementPanel from './SettlementPanel.svelte';
   import SwapPanel from './SwapPanel.svelte';
-  import type { SwapPanelRuntimeView } from './swap-panel-helpers';
-  import type { DisputedAccountView } from './account-dispute-view';
+  import type { SwapPanelRuntimeView } from './swap/swap-panel-helpers';
+  import type { DisputedAccountView } from './account/account-dispute-view';
   import type { EntityActivityAccountOption, EntityActivityRow } from './entity-activity';
-  import type { AccountWorkspaceTab, ConfigureWorkspaceTab } from './entity-panel-routing';
+  import type { AccountWorkspaceTab, ConfigureWorkspaceTab } from './workspace/entity-panel-routing';
   import {
     emptyHubDiscoveryProjection,
     type HubDiscoveryProjection,
@@ -29,7 +29,7 @@
   import {
     emptyPaymentPanelView,
     type PaymentPanelView,
-  } from './payment-panel-view';
+  } from './payments/payment-panel-view';
   import type { MoveEndpoint } from './move-routes';
 
   type IconTabConfig<T extends string> = {

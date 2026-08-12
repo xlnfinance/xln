@@ -267,7 +267,7 @@ test('wallet UI and wallet-backed E2E helpers never import a second Runtime modu
 
 test('activity history panel reads activity through RuntimeQueryClient only', () => {
   const panelSource = readFileSync('frontend/src/lib/components/Entity/ActivityHistoryPanel.svelte', 'utf8');
-  const querySource = readFileSync('frontend/src/lib/components/Entity/activity-history-query.ts', 'utf8');
+  const querySource = readFileSync('frontend/src/lib/components/Entity/account/activity-history-query.ts', 'utf8');
   const addressRouteSource = readFileSync('frontend/src/routes/address/[entityId]/+page.svelte', 'utf8');
   const paymentSmokeSource = readFileSync('tests/e2e-payment-smoke.spec.ts', 'utf8');
   const source = `${panelSource}\n${querySource}`;

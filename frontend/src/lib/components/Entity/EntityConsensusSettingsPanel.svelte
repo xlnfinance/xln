@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Clock3, GitBranch, ShieldCheck } from 'lucide-svelte';
-  import type { EntityConsensusSettingsView } from './entity-consensus-settings';
+  import type { EntityConsensusSettingsView } from './workspace/entity-consensus-settings';
 
   export let view: EntityConsensusSettingsView;
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { SwapCompletionModal } from './swap-order-history';
+  import type { SwapCompletionModal } from './swap/swap-order-history';
 
   export let modal: SwapCompletionModal;
   export let formatAmount: (amount: bigint, tokenId: number) => string;

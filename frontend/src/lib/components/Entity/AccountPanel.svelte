@@ -8,7 +8,7 @@
   import AccountTokenDetails from './shared/AccountTokenDetails.svelte';
   import { buildAccountTokenDetails, isAccountLeftPerspective } from './shared/account-token-details';
   import { compareStableText } from '$lib/utils/stableSort';
-  import { faucetPendingKey } from './account-faucet';
+  import { faucetPendingKey } from './account/account-faucet';
 
   export let account: AccountReplica;
   export let counterpartyId: string;

@@ -7,7 +7,7 @@ import {
   type AccountRoleEvidence,
 } from '@xln/runtime/account/config/dispute-config';
 import { compareStableText } from './swap-formatting';
-import { type PreparedSwapOrderLike } from './swap-order-math';
+import { type PreparedSwapOrderLike } from './swap/swap-order-math';
 import './SwapPanel.css';
 
 export type BookSide = 'bid' | 'ask';

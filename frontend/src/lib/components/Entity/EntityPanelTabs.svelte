@@ -36,30 +36,30 @@ import EntityPanelShell from "./EntityPanelShell.svelte";
 import RuntimeCommandGateBanner from "./RuntimeCommandGateBanner.svelte";
 import EntitySelectionEmptyState from "./EntitySelectionEmptyState.svelte";
 import EntitySettingsProjectionPanel from "./EntitySettingsProjectionPanel.svelte";
-import { buildEntityConsensusSettingsView } from "./entity-consensus-settings";
+import { buildEntityConsensusSettingsView } from "./workspace/entity-consensus-settings";
 import { importJMachineViaRuntime, type JMachineCreateDetail } from "$lib/components/Jurisdiction/import-jmachine-runtime";
 import ContextSwitcher from "./ContextSwitcher.svelte";
-import { OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS, faucetPendingKey, type FaucetApiResult, type PendingReserveFaucet, readJsonResponse, reconcilePendingReserveFaucets } from "./account-faucet";
+import { OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS, faucetPendingKey, type FaucetApiResult, type PendingReserveFaucet, readJsonResponse, reconcilePendingReserveFaucets } from "./account/account-faucet";
 import { buildMoveArrowPath, buildMoveRouteSteps, canAddMoveRouteToDraft, getMovePrimaryActionLabel, getMoveRouteKey, isImmediateMoveExecutionRoute, isMoveRouteSupported, moveNeedsExternalRecipient, moveNeedsReserveRecipient, routeRequiresExplicitExternalAllowance, MOVE_ENDPOINT_LABEL, MOVE_ENDPOINTS, type MoveEndpoint } from "./move-routes";
-import { buildMoveAllowanceContextSignature, buildMoveAllowanceStatusLabel, getMoveRequiredAllowanceAmount, isMoveAllowanceSatisfied } from "./move-allowance";
-import { choosePreferredMoveAssetSymbol, computeMoveSourceAvailableBalanceForEndpoint, getMoveMaxAmountForEndpoint, getPreferredMoveSourceAccountId } from "./move-balance";
-import { getMoveValidationErrorForContext, type MoveValidationMode } from "./move-validation";
-import { createMoveVisualController } from "./move-visual-controller";
+import { buildMoveAllowanceContextSignature, buildMoveAllowanceStatusLabel, getMoveRequiredAllowanceAmount, isMoveAllowanceSatisfied } from "./move/move-allowance";
+import { choosePreferredMoveAssetSymbol, computeMoveSourceAvailableBalanceForEndpoint, getMoveMaxAmountForEndpoint, getPreferredMoveSourceAccountId } from "./move/move-balance";
+import { getMoveValidationErrorForContext, type MoveValidationMode } from "./move/move-validation";
+import { createMoveVisualController } from "./move/move-visual-controller";
 import type { AssetLedgerRow, AssetLedgerTotals } from "./asset-ledger";
 import { buildEntityPanelView, findLocalAccountByCounterparty, findReplicaForEntityTab, getActiveJurisdictionName, getCurrentEntityJurisdictionName, getRuntimeEnv, getRuntimeId, isSameJurisdictionEntity, isSameJurisdictionEntityInReplicas, isAccountLeftPerspective, isHubProfile, materializeAccountView, requireRuntimeEnv } from "./entity-panel-model";
-import { formatAddress, isPlaceholderEntityName, shortHash } from "./entity-panel-display";
-import { buildConfigureTokenOptions, buildMoveEntityOptions, buildMoveHubEntityOptions, buildMoveSourceAccountOptions, buildOpenAccountEntityOptions, isFullEntityId, normalizeWorkspaceAccountId, resolveConfigureTokenId, resolveMoveTargetHubEntityId } from "./entity-panel-options";
-import { type ExternalAllowanceRead, type ExternalWalletReadResult, type ExternalWalletSnapshotSource } from "./external-wallet-snapshot";
+import { formatAddress, isPlaceholderEntityName, shortHash } from "./workspace/entity-panel-display";
+import { buildConfigureTokenOptions, buildMoveEntityOptions, buildMoveHubEntityOptions, buildMoveSourceAccountOptions, buildOpenAccountEntityOptions, isFullEntityId, normalizeWorkspaceAccountId, resolveConfigureTokenId, resolveMoveTargetHubEntityId } from "./workspace/entity-panel-options";
+import { type ExternalAllowanceRead, type ExternalWalletReadResult, type ExternalWalletSnapshotSource } from "./assets/external-wallet-snapshot";
 import { buildExternalWalletStateSyncSignature, buildOnchainReserves, createExternalTokenCatalogLoader, fetchExternalTokenCatalog, isExternalWalletSnapshotTransportFailure, readExternalWalletState, readObservedExternalAllowance, requestExternalWalletSnapshot, resolveExternalWalletSpender } from "./external-wallet-reader";
-import { buildEntityPanelHashRouteFromState, canonicalizeEntityPanelRoute, getLocationHashParams, getLocationHashRoute, resolveEntityPanelDeepLinkFromLocation, type AccountWorkspaceTab, type AssetWorkspaceTab, type ConfigureWorkspaceTab, type SettingsSubview, type ViewTab } from "./entity-panel-routing";
-import { openDisputedAccountNavigation, returnToAccountsWorkspace, selectAccountNavigation, selectTopLevelTabNavigation, type AccountWorkspaceNavigationPatch } from "./account-workspace-navigation";
+import { buildEntityPanelHashRouteFromState, canonicalizeEntityPanelRoute, getLocationHashParams, getLocationHashRoute, resolveEntityPanelDeepLinkFromLocation, type AccountWorkspaceTab, type AssetWorkspaceTab, type ConfigureWorkspaceTab, type SettingsSubview, type ViewTab } from "./workspace/entity-panel-routing";
+import { openDisputedAccountNavigation, returnToAccountsWorkspace, selectAccountNavigation, selectTopLevelTabNavigation, type AccountWorkspaceNavigationPatch } from "./account/account-workspace-navigation";
 import { buildEntityActivityAccounts, buildEntityActivityRows, filterEntityActivityRows } from "./entity-activity";
 import { emptyEntityWorkspaceRuntimeFrameContext, type EntityWorkspaceRuntimeFrameContext } from "./runtime-frame-context";
 import { emptyEntityWorkspaceEmbeddedRuntimeContext, type EntityWorkspaceEmbeddedRuntimeContext } from "./embedded-runtime-context";
 import { buildHubDiscoveryProjection, buildHubDiscoveryRemoteHubsFromRuntimes, buildDirectOpenAccountRuntimeInput, canSubmitHubOpenAccount, emptyHubDiscoveryProjection, getHubOpenAccountPermissionError, type HubDiscoveryProjection } from "./hub-discovery-profile";
-import { buildPaymentPanelView, buildPaymentPanelViewFromRuntimeView, emptyPaymentPanelView, type PaymentPanelView } from "./payment-panel-view";
-import { buildSwapPanelRuntimeView, type SwapPanelRuntimeView } from "./swap-panel-helpers";
-import { buildAccountSpendableByToken, buildAccountPortfolioData, buildAssetLedger, createEntityAssetValueFormatters, formatTokenInputAmount, parsePositiveAssetAmount, parseTokenAmountInput } from "./entity-asset-values";
+import { buildPaymentPanelView, buildPaymentPanelViewFromRuntimeView, emptyPaymentPanelView, type PaymentPanelView } from "./payments/payment-panel-view";
+import { buildSwapPanelRuntimeView, type SwapPanelRuntimeView } from "./swap/swap-panel-helpers";
+import { buildAccountSpendableByToken, buildAccountPortfolioData, buildAssetLedger, createEntityAssetValueFormatters, formatTokenInputAmount, parsePositiveAssetAmount, parseTokenAmountInput } from "./assets/entity-asset-values";
 import {
   choosePreferredAssetSymbol,
   compareTokenSymbols,
@@ -74,10 +74,10 @@ import {
   sortExternalTokens,
   type ExternalToken,
   type ReserveTransferAsset,
-} from "./entity-asset-catalog";
+} from "./assets/entity-asset-catalog";
 import { requireTokenDecimals } from "./token-metadata";
-import { buildOpenOutgoingDebtTotals, buildPendingBatchPreview, buildPendingBatchState, canBroadcastPendingBatch, formatBatchReserveIssue, getPendingBatchReserveIssue, pendingBatchEntityLabel } from "./pending-batch-preview";
-import { createPendingBatchActionRunner, enqueuePendingBatchAction } from "./pending-batch-actions";
+import { buildOpenOutgoingDebtTotals, buildPendingBatchPreview, buildPendingBatchState, canBroadcastPendingBatch, formatBatchReserveIssue, getPendingBatchReserveIssue, pendingBatchEntityLabel } from "./payments/pending-batch-preview";
+import { createPendingBatchActionRunner, enqueuePendingBatchAction } from "./payments/pending-batch-actions";
 import {
   buildAddTokenToAccountTx,
   buildBroadcastTx,
@@ -91,8 +91,8 @@ import {
   buildSettlementApproveTx,
   encodeExternalEoaAsEntity,
   type MovePostSettleOp,
-} from "./entity-action-txs";
-import { buildDisputedAccountViews } from "./account-dispute-view";
+} from "./account/entity-action-txs";
+import { buildDisputedAccountViews } from "./account/account-dispute-view";
 export let tab: Tab;
 export let hideHeader: boolean = false;
 export let showJurisdiction: boolean = true;

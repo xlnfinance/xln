@@ -55,7 +55,7 @@
     type OnboardingHubCandidate,
     type OnboardingRuntimeTarget,
     type OnboardingRuntimeProjection,
-  } from './onboarding-runtime-input';
+  } from './onboarding/onboarding-runtime-input';
   import { hubDiscoveryJurisdictionKey } from './hub-discovery-profile';
   import type {
     AccountRoleEvidence,

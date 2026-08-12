@@ -43,8 +43,8 @@
   import type { JMachineCreateDetail } from '$lib/components/Jurisdiction/import-jmachine-runtime';
   import PushWakePanel from '$lib/components/Settings/PushWakePanel.svelte';
   import EntityConsensusSettingsPanel from './EntityConsensusSettingsPanel.svelte';
-  import type { EntityConsensusSettingsView } from './entity-consensus-settings';
-  import type { SettingsSubview } from './entity-panel-routing';
+  import type { EntityConsensusSettingsView } from './workspace/entity-consensus-settings';
+  import type { SettingsSubview } from './workspace/entity-panel-routing';
   import type { ThemeName } from '$lib/types/ui';
 
   type ProfileView = {

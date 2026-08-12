@@ -2502,7 +2502,7 @@ describe('production startup wiring', () => {
       'runtime/orchestrator/hub-node.ts',
       'runtime/orchestrator/market-maker/node/mm-node-core.ts',
       'runtime/runtime/finance/swap-command-plan.ts',
-      'frontend/src/lib/components/Entity/onboarding-runtime-input.ts',
+      'frontend/src/lib/components/Entity/onboarding/onboarding-runtime-input.ts',
       'frontend/src/lib/components/Entity/hub-discovery-profile.ts',
       'frontend/src/lib/components/Entity/swap-panel-core.ts',
       'frontend/src/lib/view/panels/ArchitectPanel.svelte',

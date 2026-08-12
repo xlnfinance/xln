@@ -60,7 +60,7 @@
     type OnboardingHubCandidate,
     type OnboardingRuntimeProjection,
     type OnboardingRuntimeTarget,
-  } from '$lib/components/Entity/onboarding-runtime-input';
+  } from '$lib/components/Entity/onboarding/onboarding-runtime-input';
   import {
     type FormationRuntimeProjection,
   } from '$lib/components/Entity/formation-runtime-projection';

@@ -28,12 +28,26 @@ afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe('runtime folder-width invariant', () => {
-  test('allows ten direct TypeScript files and rejects the eleventh', () => {
+describe('repository source folder-width invariant', () => {
+  test('allows ten direct source files and rejects the eleventh', () => {
     expect(evaluateFolderWidths([{ path: 'runtime/ten', files: 10 }], {})).toEqual([]);
     expect(evaluateFolderWidths([{ path: 'runtime/eleven', files: 11 }], {})).toEqual([
       'FOLDER_TOO_WIDE runtime/eleven:11 > 10',
     ]);
+  });
+
+  test('counts every supported source language together and ignores data files', () => {
+    const root = makeRoot();
+    const extensions = [
+      'ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs', 'svelte', 'sol', 'sh',
+    ];
+    for (const [index, extension] of extensions.entries()) {
+      writeFileSync(join(root, `source-${index}.${extension}`), 'source\n');
+    }
+    writeFileSync(join(root, 'notes.md'), 'not source\n');
+    writeFileSync(join(root, 'data.json'), '{}\n');
+
+    expect(collectFolderWidths(root)).toEqual([{ path: '.', files: 11 }]);
   });
 
   test('counts nested directories independently and does not exempt fixtures', () => {
@@ -75,10 +89,51 @@ describe('runtime folder-width invariant', () => {
     expect(collectFolderWidths(root)).toEqual([{ path: '.', files: 1 }]);
   });
 
-  test('the repository has no folder-width debt', () => {
+  test('prunes generated and exact excluded trees without hiding similarly named source', () => {
+    const root = makeRoot();
+    addTypeScriptFiles(join(root, 'node_modules'), 11);
+    addTypeScriptFiles(join(root, 'build'), 11);
+    addTypeScriptFiles(join(root, '.archive'), 11);
+    addTypeScriptFiles(join(root, 'reports'), 11);
+    addTypeScriptFiles(join(root, 'reports-live'), 11);
+    addTypeScriptFiles(join(root, 'src', 'build-tools'), 11);
+
+    expect(collectFolderWidths(root)).toEqual([
+      { path: '.', files: 0 },
+      { path: 'reports-live', files: 11 },
+      { path: 'src', files: 0 },
+      { path: 'src/build-tools', files: 11 },
+    ]);
+  });
+
+  test('the repository has only the exact declared source-folder debt', () => {
     const repoRoot = resolve(import.meta.dir, '../..');
-    const widths = collectFolderWidths(repoRoot, resolve(repoRoot, 'runtime'));
+    const widths = collectFolderWidths(repoRoot);
     expect(evaluateFolderWidths(widths, FOLDER_WIDTH_DEBT)).toEqual([]);
-    expect(widths.filter(entry => entry.files > 10)).toEqual([]);
+    expect(widths.filter(entry => entry.files > 10)).toEqual([
+      { path: 'brainvault', files: 11 },
+      { path: 'cli/lib', files: 13 },
+      { path: 'frontend', files: 11 },
+      { path: 'frontend/src/lib/components/Entity', files: 70 },
+      { path: 'frontend/src/lib/components/Rcpan', files: 22 },
+      { path: 'frontend/src/lib/network3d', files: 14 },
+      { path: 'frontend/src/lib/stores', files: 36 },
+      { path: 'frontend/src/lib/utils', files: 37 },
+      { path: 'frontend/src/lib/view/panels', files: 20 },
+      { path: 'jurisdictions/contracts', files: 16 },
+      { path: 'jurisdictions/scripts', files: 14 },
+      { path: 'jurisdictions/test', files: 19 },
+      { path: 'scripts', files: 25 },
+      { path: 'scripts/dev', files: 12 },
+      { path: 'tests', files: 53 },
+      { path: 'tests/frontend', files: 70 },
+      { path: 'tests/utils', files: 20 },
+    ]);
+  });
+
+  test('runtime retains no source-folder debt', () => {
+    const repoRoot = resolve(import.meta.dir, '../..');
+    const runtimeWidths = collectFolderWidths(repoRoot, resolve(repoRoot, 'runtime'));
+    expect(runtimeWidths.filter(entry => entry.files > 10)).toEqual([]);
   });
 });

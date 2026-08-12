@@ -25,7 +25,7 @@
     isTransientActivityReadError,
     normalizeActivityEntityId,
     normalizeActivityHistoryPage,
-  } from './activity-history-query';
+  } from './account/activity-history-query';
 
   export let entityId: string;
   export let runtimeId: string | undefined = undefined;
