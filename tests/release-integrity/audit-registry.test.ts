@@ -35,6 +35,10 @@ describe('canonical audit registry', () => {
     expect(REGISTRY.agentRuns.every(run => run.provisional || (
       run.state === 'COMPLETED' && reviewers.get(run.reviewerId)?.state === 'RANKED'
     ))).toBe(true);
+    const browserVmPath = 'runtime/jurisdiction/adapter/browservm/browservm-provider.ts';
+    expect(REGISTRY.scope.exclusions.some(({ glob }) => matchesAuditGlob(browserVmPath, glob))).toBe(true);
+    const jurisdictionIngress = REGISTRY.modules.find(module => module.id === 'jurisdiction-ingress')!;
+    expect(jurisdictionIngress.exclusions.some(({ glob }) => matchesAuditGlob(browserVmPath, glob))).toBe(true);
   });
 
   test('fingerprints are deterministic and dependency-aware', () => {

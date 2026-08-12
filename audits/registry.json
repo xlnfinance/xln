@@ -26,7 +26,7 @@
     ],
     "exclusions": [
       {
-        "glob": "runtime/jurisdiction/adapter/browservm-*.ts",
+        "glob": "runtime/jurisdiction/adapter/browservm/*.ts",
         "reason": "BrowserVM is peripheral to the production remote-jurisdiction release path."
       },
       {
@@ -285,7 +285,7 @@
       ],
       "exclusions": [
         {
-          "glob": "runtime/jurisdiction/adapter/browservm-*.ts",
+          "glob": "runtime/jurisdiction/adapter/browservm/*.ts",
           "reason": "BrowserVM is peripheral to the production remote-jurisdiction release path and receives a lower evidence profile."
         }
       ]
