@@ -2,20 +2,20 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, rmSync, statSync } from 'fs';
 import { basename, dirname, join } from 'path';
 
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { hasCliFlag, readCliOption } from '../config/cli';
-import { deriveAccountWatchSeed } from '../protocol/identity/account-watch-seed';
-import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
-import { generateLazyEntityId } from '../entity/factory';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { hasCliFlag, readCliOption } from '../../../config/cli';
+import { deriveAccountWatchSeed } from '../../../protocol/identity/account-watch-seed';
+import { defaultAccountDisputeConfigForParties } from '../../../account/config/dispute-config';
+import { generateLazyEntityId } from '../../../entity/factory';
 import {
   createEntityFrameHashFromStateRoot,
   setEntityFrameHashDebugRecorder,
-} from '../entity/consensus/frame';
-import { hashHtlcSecret } from '../protocol/htlc/utils';
-import { converge } from '../scenarios/harness/helpers';
-import { serializeTaggedJson } from '../protocol/serialization';
-import { buildAccountMerkleFromState } from '../storage';
-import { inspectStorageDb, loadEntityStateFromStorageDb } from '../runtime';
+} from '../../../entity/consensus/frame';
+import { hashHtlcSecret } from '../../../protocol/htlc/utils';
+import { converge } from '../../../scenarios/harness/helpers';
+import { serializeTaggedJson } from '../../../protocol/serialization';
+import { buildAccountMerkleFromState } from '../../../storage';
+import { inspectStorageDb, loadEntityStateFromStorageDb } from '../../../runtime';
 import {
   applyRuntimeInput,
   closeInfraDb,
@@ -24,22 +24,22 @@ import {
   loadEnvFromDB,
   processRuntime,
   saveEnvToDB,
-} from '../runtime';
-import { dbRootPath } from '../runtime/platform';
-import type { AccountReplica } from '../types/account';
-import type { EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeReplica, RoutedEntityInput } from '../runtime/types';
-import type { EntityTx } from '../types/entity-tx';
-import type { JReplica } from '../types/jurisdiction-runtime';
-import { getPerfMs } from '../infra/time';
-import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
+} from '../../../runtime';
+import { dbRootPath } from '../../../runtime/platform';
+import type { AccountReplica } from '../../../types/account';
+import type { EntityReplica, EntityState } from '../../../entity/types';
+import type { RuntimeReplica, RoutedEntityInput } from '../../../runtime/types';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { getPerfMs } from '../../../infra/time';
+import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
 import {
   buildStorageLiveReplicaMetaCommitment,
   inspectStorageReplicaMetaEntries,
   summarizeStorageReplicaMetaEntries,
   summarizeStorageReplicaMetaFields,
   summarizeStorageReplicaMetaHeads,
-} from '../storage/replica/replicas';
+} from '../../../storage/replica/replicas';
 
 type Participant = {
   entityId: string;

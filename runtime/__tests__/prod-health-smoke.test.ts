@@ -9,7 +9,7 @@ import {
   getFatalHealthFailures,
   validateHubTopology,
   validateDeployedSource,
-} from '../scripts/prod-health-smoke';
+} from '../scripts/operations/production/prod-health-smoke';
 
 test('prod health smoke ignores advisory bootstrap reserve target drift', () => {
   expect(getFatalDegradedReasons(['bootstrapReserveTargets'])).toEqual([]);
@@ -60,7 +60,7 @@ test('prod health smoke blocks every unresolved incident without leaking message
 });
 
 test('prod health smoke queries unresolved incidents before ordinary health', () => {
-  const source = readFileSync('runtime/scripts/prod-health-smoke.ts', 'utf8');
+  const source = readFileSync('runtime/scripts/operations/production/prod-health-smoke.ts', 'utf8');
   const incidentQuery = source.indexOf("`${args.baseUrl}/api/debug/incidents?state=open&limit=1000`");
   const healthQuery = source.indexOf("`${args.baseUrl}/api/health`");
   expect(incidentQuery).toBeGreaterThan(0);

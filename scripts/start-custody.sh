@@ -37,4 +37,4 @@ xln_kill_by_port "$CUSTODY_PORT" start-custody
 xln_kill_by_port "$CUSTODY_DAEMON_PORT" start-custody
 xln_kill_by_pattern "runtime/api/server/index.ts --port ${CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${CUSTODY_DAEMON_PORT}" start-custody
 
-exec "${HOME}/.bun/bin/bun" runtime/scripts/start-custody-prod.ts
+exec "${HOME}/.bun/bin/bun" runtime/scripts/operations/custody/start-custody-prod.ts

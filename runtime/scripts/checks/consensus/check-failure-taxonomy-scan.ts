@@ -510,7 +510,7 @@ const publicFailureSignalSource = healthRedaction.slice(
 );
 assertNotIncludes(publicFailureSignalSource, 'message', healthRedactionPath);
 
-const prodHealthPath = 'runtime/scripts/prod-health-smoke.ts';
+const prodHealthPath = 'runtime/scripts/operations/production/prod-health-smoke.ts';
 const prodHealth = readText(prodHealthPath);
 for (const marker of [
   'export const getFatalHealthFailures',

@@ -15,7 +15,7 @@ test('sparse WAL preserves every tx in a merged reliable Entity input', async ()
   const child = Bun.spawn({
     cmd: [
       process.execPath,
-      'runtime/scripts/bench-storage-hub.ts',
+      'runtime/scripts/operations/benchmark/bench-storage-hub.ts',
       '--accounts', '2',
       '--import-batch', '3',
       '--open-batch', '2',

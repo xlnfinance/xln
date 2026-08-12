@@ -18,7 +18,7 @@ test('dev radapter keys prints one app source URL without pre-runtime tokens', (
   const envOutPath = join(dir, 'radapter-keys.env');
   try {
     const result = spawnSync('bun', [
-      'runtime/scripts/dev-radapter-keys.ts',
+      'runtime/scripts/operations/development/dev-radapter-keys.ts',
       '--web-port',
       '8084',
       '--api-port',
@@ -66,7 +66,7 @@ test('dev radapter keys can suppress early URL logging for bun run dev', () => {
   const envOutPath = join(dir, 'radapter-keys.env');
   try {
     const result = spawnSync('bun', [
-      'runtime/scripts/dev-radapter-keys.ts',
+      'runtime/scripts/operations/development/dev-radapter-keys.ts',
       '--web-port',
       '8084',
       '--api-port',
@@ -98,7 +98,7 @@ test('dev radapter keys can run quietly when bun run dev waits for the real mani
   const envOutPath = join(dir, 'radapter-keys.env');
   try {
     const result = spawnSync('bun', [
-      'runtime/scripts/dev-radapter-keys.ts',
+      'runtime/scripts/operations/development/dev-radapter-keys.ts',
       '--web-port',
       '8084',
       '--api-port',
@@ -131,7 +131,7 @@ test('dev radapter keys can point app import links at the browser QA origin', ()
   const envOutPath = join(dir, 'radapter-keys.env');
   try {
     const result = spawnSync('bun', [
-      'runtime/scripts/dev-radapter-keys.ts',
+      'runtime/scripts/operations/development/dev-radapter-keys.ts',
       '--web-port',
       '8084',
       '--manager-origin',

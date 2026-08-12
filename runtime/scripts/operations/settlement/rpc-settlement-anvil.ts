@@ -11,7 +11,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
+import { createXlnJsonRpcProvider } from '../../../jurisdiction/adapter';
 
 export type ManagedAnvil = {
   child: ChildProcess;

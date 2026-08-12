@@ -6,33 +6,33 @@ import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Level } from 'level';
-import { readStorageHead } from '../storage';
-import { withRebranchedValues } from '../storage/database/rebranched-db';
-import type { StorageHead } from '../storage/types';
-import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';
+import { readStorageHead } from '../../../storage';
+import { withRebranchedValues } from '../../../storage/database/rebranched-db';
+import type { StorageHead } from '../../../storage/types';
+import { RemoteRuntimeAdapter } from '../../../api/runtime-adapter/remote';
 import {
   E2E_FATAL_LOG_TAIL_LINES,
   findFirstRuntimeFatalLogHit,
   tailLog,
-} from './e2e/harness/e2e-fatal-log-monitor';
-import { stopProcessGroup } from './e2e/runners/process-group';
-import { getHubMeshBudgetElapsedMs } from './bootstrap-stage-budget';
+} from '../../e2e/harness/e2e-fatal-log-monitor';
+import { stopProcessGroup } from '../../e2e/runners/process-group';
+import { getHubMeshBudgetElapsedMs } from '../bootstrap/bootstrap-stage-budget';
 import {
   evaluateMmHealthProbeFailure,
   trackCausalProgress,
   type CausalProgressState,
-} from './bootstrap-progress';
+} from '../bootstrap/bootstrap-progress';
 import {
   acquireLocalTestPortLease,
   assertLocalTestPortsFree,
   buildInheritedLocalTestLeaseEnv,
   stripLocalTestLeaseEnv,
-} from './e2e/harness/local-test-port-lease';
+} from '../../e2e/harness/local-test-port-lease';
 import {
   parseAdversaryProfile,
   runAdversaryProfile,
   type MeshHealthPayload,
-} from '../scenarios/cross-j/mm-mesh-adversary';
+} from '../../../scenarios/cross-j/mm-mesh-adversary';
 
 type ManagedProcess = {
   name: string;

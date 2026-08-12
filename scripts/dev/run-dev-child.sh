@@ -145,8 +145,8 @@ case "$role" in
     run_anvil "$RPC2_PORT" 31338
     ;;
   stack)
-    run_owned bun runtime/scripts/wait-rpc-chain.ts --url "http://127.0.0.1:${RPC_PORT}" --chain-id 31337 --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
-    run_owned bun runtime/scripts/wait-rpc-chain.ts --url "http://127.0.0.1:${RPC2_PORT}" --chain-id 31338 --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
+    run_owned bun runtime/scripts/operations/development/wait-rpc-chain.ts --url "http://127.0.0.1:${RPC_PORT}" --chain-id 31337 --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
+    run_owned bun runtime/scripts/operations/development/wait-rpc-chain.ts --url "http://127.0.0.1:${RPC2_PORT}" --chain-id 31338 --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
     run_owned bun --no-orphans "$CONCURRENTLY_JS" \
       --kill-others \
       --kill-timeout "$DEV_INNER_KILL_TIMEOUT_MS" \

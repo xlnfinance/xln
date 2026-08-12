@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 
-import { serializeTaggedJson } from '../protocol/serialization';
-import { readInheritedChildSecrets, resolveChildSecret } from '../infra/process/child-secrets';
+import { serializeTaggedJson } from '../../../protocol/serialization';
+import { readInheritedChildSecrets, resolveChildSecret } from '../../../infra/process/child-secrets';
 import {
   DaemonControlClient,
   enableRouting,
   setupCustody,
   type EnableRoutingConfig,
   type SetupCustodyConfig,
-} from '../orchestrator/daemon-control';
-import { hasCliFlag, readCliOption } from '../config/cli';
+} from '../../../orchestrator/daemon-control';
+import { hasCliFlag, readCliOption } from '../../../config/cli';
 
 const args = process.argv.slice(2);
 const inheritedSecrets = readInheritedChildSecrets();
@@ -47,9 +47,9 @@ const parseNumbers = (value: string): number[] =>
 const printUsage = (): void => {
   console.log(`
 Usage:
-  bun runtime/scripts/daemon-control.ts enable-routing --base-url http://127.0.0.1:8080 --name H1 --seed my-seed --signer-label hub-1
-  bun runtime/scripts/daemon-control.ts become-hub --base-url http://127.0.0.1:8080 --name H1 --seed my-seed --signer-label hub-1
-  bun runtime/scripts/daemon-control.ts setup-custody --base-url http://127.0.0.1:8080 --name Custody --seed my-seed --signer-label custody-1 --hub-ids 0x...,0x...
+  bun runtime/scripts/operations/production/daemon-control.ts enable-routing --base-url http://127.0.0.1:8080 --name H1 --seed my-seed --signer-label hub-1
+  bun runtime/scripts/operations/production/daemon-control.ts become-hub --base-url http://127.0.0.1:8080 --name H1 --seed my-seed --signer-label hub-1
+  bun runtime/scripts/operations/production/daemon-control.ts setup-custody --base-url http://127.0.0.1:8080 --name Custody --seed my-seed --signer-label custody-1 --hub-ids 0x...,0x...
 
 Optional:
   --auth-key <xlnra1 capability>

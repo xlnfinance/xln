@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { getStorageHealthSnapshotReadOnlySync, type StorageHealth } from '../infra/storage-monitor';
-import { safeStringify } from '../protocol/serialization';
+import { getStorageHealthSnapshotReadOnlySync, type StorageHealth } from '../../../infra/storage-monitor';
+import { safeStringify } from '../../../protocol/serialization';
 
 type DiskDebugPayload = {
   ok: boolean;
@@ -30,7 +30,7 @@ type DiskDebugPayload = {
 const usage = (code = 1): never => {
   console.log([
     'Usage:',
-    '  bun runtime/scripts/debug-disk.ts [--json]',
+    '  bun runtime/scripts/operations/diagnostics/debug-disk.ts [--json]',
     '',
     'Options:',
     '  --json   Print machine-readable JSON',

@@ -534,7 +534,7 @@ describe('production startup wiring', () => {
     const runtimeLoopSource = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop.ts'), 'utf8');
     const standaloneServer = readFileSync(join(repoRoot, 'runtime/api/server/index.ts'), 'utf8');
     const custodyBootstrap = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap/custody-bootstrap.ts'), 'utf8');
-    const startCustodyDev = readFileSync(join(repoRoot, 'runtime/scripts/start-custody-dev.ts'), 'utf8');
+    const startCustodyDev = readFileSync(join(repoRoot, 'runtime/scripts/operations/custody/start-custody-dev.ts'), 'utf8');
     const cli = readFileSync(join(repoRoot, 'runtime/api/server/cli.ts'), 'utf8');
     expect(orchestratorConfig).toContain(
       "relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')",
@@ -1214,8 +1214,8 @@ describe('production startup wiring', () => {
   test('non-production Anvil harnesses keep bounded history in memory', () => {
     const harnesses = [
       'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
-      'runtime/scripts/rpc-settlement-anvil.ts',
-      'runtime/scripts/dev-anvil-stack.ts',
+      'runtime/scripts/operations/settlement/rpc-settlement-anvil.ts',
+      'runtime/scripts/operations/development/dev-anvil-stack.ts',
       'runtime/scripts/e2e/runners/run-system-tests-parallel.ts',
       'runtime/scenarios/harness/boot.ts',
       'runtime/__tests__/watchtower-rpc-last-resort.test.ts',
@@ -1227,7 +1227,7 @@ describe('production startup wiring', () => {
   });
 
   test('production bootstrap starts stateful Anvil chains sequentially', () => {
-    const smoke = readFileSync(join(repoRoot, 'runtime/scripts/local-prod-smoke.ts'), 'utf8');
+    const smoke = readFileSync(join(repoRoot, 'runtime/scripts/operations/production/local-prod-smoke.ts'), 'utf8');
     const primaryStart = smoke.indexOf("startManaged('anvil',");
     const primaryReady = smoke.indexOf("await waitForRpc(rpcPort, '0x7a69', 'Testnet')");
     const secondaryStart = smoke.indexOf("startManaged('anvil2',");
@@ -1735,26 +1735,26 @@ describe('production startup wiring', () => {
 
   test('local prod smoke records bootstrap benchmark stages and hash assertions', () => {
     const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
-    const smoke = readFileSync(join(repoRoot, 'runtime/scripts/local-prod-smoke.ts'), 'utf8');
+    const smoke = readFileSync(join(repoRoot, 'runtime/scripts/operations/production/local-prod-smoke.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
-    const benchmark = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-benchmark.ts'), 'utf8');
-    const soundcheck = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-soundcheck.ts'), 'utf8');
+    const benchmark = readFileSync(join(repoRoot, 'runtime/scripts/operations/bootstrap/bootstrap-benchmark.ts'), 'utf8');
+    const soundcheck = readFileSync(join(repoRoot, 'runtime/scripts/operations/bootstrap/bootstrap-soundcheck.ts'), 'utf8');
 
     expect(packageJson).toContain(
-      '"prod:bootstrap:bench": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-bench -- bun runtime/scripts/bootstrap-benchmark.ts"',
+      '"prod:bootstrap:bench": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-bench -- bun runtime/scripts/operations/bootstrap/bootstrap-benchmark.ts"',
     );
     expect(packageJson).toContain(
-      '"prod:bootstrap:fresh": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-fresh -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=fresh"',
+      '"prod:bootstrap:fresh": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-fresh -- bun runtime/scripts/operations/bootstrap/bootstrap-soundcheck.ts --mode=fresh"',
     );
     expect(packageJson).toContain(
-      '"prod:bootstrap:template": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-template -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=template"',
+      '"prod:bootstrap:template": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-template -- bun runtime/scripts/operations/bootstrap/bootstrap-soundcheck.ts --mode=template"',
     );
     expect(packageJson).toContain(
-      '"prod:bootstrap:clone": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-clone --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=clone"',
+      '"prod:bootstrap:clone": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-clone --keep-test-artifacts -- bun runtime/scripts/operations/bootstrap/bootstrap-soundcheck.ts --mode=clone"',
     );
     expect(packageJson).toContain(
-      '"prod:bootstrap:hydrate": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-hydrate --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"',
+      '"prod:bootstrap:hydrate": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-hydrate --keep-test-artifacts -- bun runtime/scripts/operations/bootstrap/bootstrap-soundcheck.ts --mode=hydrate"',
     );
     expect(packageJson).toContain(
       '"prod:bootstrap:rotation": "XLN_STORAGE_EPOCH_MAX_BYTES=4194304 XLN_LOCAL_PROD_SMOKE_REQUIRE_EPOCH_ROTATION=1',
@@ -2010,7 +2010,7 @@ describe('production startup wiring', () => {
     const systemRunner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-system-tests-parallel.ts'), 'utf8');
     const soakRunner = readFileSync(join(repoRoot, 'runtime/scripts/release/run-soak-gate.ts'), 'utf8');
     const cleanupHelper = readFileSync(join(repoRoot, 'runtime/scripts/e2e/harness/test-artifact-cleanup.ts'), 'utf8');
-    const bootstrapSoundcheck = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-soundcheck.ts'), 'utf8');
+    const bootstrapSoundcheck = readFileSync(join(repoRoot, 'runtime/scripts/operations/bootstrap/bootstrap-soundcheck.ts'), 'utf8');
     const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
     expect(fatalHelper).toContain('/MISSING_SIGNER_KEY/');
     expect(fatalHelper).toContain('/JADAPTER_MISSING/');
@@ -2046,13 +2046,13 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"test:cleanup": "bun runtime/scripts/e2e/harness/test-artifact-cleanup.ts"');
     expect(packageJson).toContain('"test:unit": "bun runtime/scripts/e2e/runners/run-unit-tests.ts"');
     expect(packageJson).toContain(
-      '"test:persistence:cli": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=persistence-cli -- bun runtime/scripts/persistence-wal-smoke.ts"',
+      '"test:persistence:cli": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=persistence-cli -- bun runtime/scripts/operations/persistence/persistence-wal-smoke.ts"',
     );
     expect(packageJson).toContain(
-      '"test:watchtower:smoke": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=watchtower-smoke -- bun runtime/scripts/watchtower-smoke.ts"',
+      '"test:watchtower:smoke": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=watchtower-smoke -- bun runtime/scripts/operations/production/watchtower-smoke.ts"',
     );
     expect(packageJson).toContain(
-      '"test:rpc-settlement": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=rpc-settlement -- bun runtime/scripts/rpc-settlement-parity.ts"',
+      '"test:rpc-settlement": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=rpc-settlement -- bun runtime/scripts/operations/settlement/rpc-settlement-parity.ts"',
     );
     expect(packageJson).toContain(
       '"test:contracts:full": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- sh -c \\"bunx hardhat test test/*.ts test/*.cjs\\""',

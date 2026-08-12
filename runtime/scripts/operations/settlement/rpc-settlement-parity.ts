@@ -17,8 +17,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { DEFAULT_PRIVATE_KEY, DEV_CHAIN_IDS, createJAdapter } from '../jurisdiction/adapter';
-import type { JAdapter } from '../jurisdiction/adapter/types';
+import { DEFAULT_PRIVATE_KEY, DEV_CHAIN_IDS, createJAdapter } from '../../../jurisdiction/adapter';
+import type { JAdapter } from '../../../jurisdiction/adapter/types';
 import { startAnvil, stopAnvil, waitForRpcReady, type ManagedAnvil } from './rpc-settlement-anvil';
 import { runParity } from './rpc-settlement-run';
 import {
@@ -82,7 +82,7 @@ const parseMode = (raw: string | true | undefined): Mode => {
 };
 
 const loadJurisdiction = (id: string): Jurisdiction => {
-  const path = fileURLToPath(new URL('../../jurisdictions/jurisdictions.json', import.meta.url));
+  const path = fileURLToPath(new URL('../../../../jurisdictions/jurisdictions.json', import.meta.url));
   const catalog = JSON.parse(readFileSync(path, 'utf8')) as {
     jurisdictions: Record<string, Jurisdiction>;
   };

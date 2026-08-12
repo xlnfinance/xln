@@ -110,7 +110,7 @@ generic base class.
 
 - `runtime/__tests__/runtime-frame-atomicity.test.ts` — mutation/WAL/read
   barriers and input recovery.
-- `runtime/scripts/persistence-simultaneous-proposal-smoke.ts` — Account
+- `runtime/scripts/operations/persistence/persistence-simultaneous-proposal-smoke.ts` — Account
   collision, rollback ordering, and LEFT wins.
 - `runtime/__tests__/account-frame-integrity.test.ts` — exact frame validation.
 - `runtime/__tests__/derive-delta-property.test.ts` — the single balance model.

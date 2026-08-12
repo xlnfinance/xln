@@ -13,7 +13,7 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
 
   try {
     const keys = spawnSync('bun', [
-      'runtime/scripts/dev-radapter-keys.ts',
+      'runtime/scripts/operations/development/dev-radapter-keys.ts',
       '--web-port',
       '8084',
       '--manager-origin',
@@ -34,7 +34,7 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(keys.status, keys.stderr).toBe(0);
 
     const bannerArgs = [
-      'runtime/scripts/print-dev-links.ts',
+      'runtime/scripts/operations/development/print-dev-links.ts',
       '--web-port',
       '8084',
       '--web-http-port',

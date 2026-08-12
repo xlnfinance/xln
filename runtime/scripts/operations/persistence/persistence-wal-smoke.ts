@@ -10,13 +10,13 @@ import {
   loadEnvFromDB,
   verifyRuntimeChain,
   closeRuntimeDb,
-} from '../runtime.ts';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { defaultAccountDisputeConfigForParties } from '../account/config/dispute-config';
-import { generateLazyEntityId } from '../entity/factory';
-import { createJAdapter } from '../jurisdiction/adapter';
-import type { JReplica } from '../types/jurisdiction-runtime';
-import type { JurisdictionConfig } from '../entity/types';
+} from '../../../runtime.ts';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { defaultAccountDisputeConfigForParties } from '../../../account/config/dispute-config';
+import { generateLazyEntityId } from '../../../entity/factory';
+import { createJAdapter } from '../../../jurisdiction/adapter';
+import type { JReplica } from '../../../types/jurisdiction-runtime';
+import type { JurisdictionConfig } from '../../../entity/types';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);

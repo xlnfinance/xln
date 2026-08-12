@@ -1,24 +1,24 @@
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
-import { applyAccountInput, proposeAccountFrame } from '../account/consensus/index';
-import { isLeftEntity } from '../account/utils';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
+import { applyAccountInput, proposeAccountFrame } from '../../../account/consensus/index';
+import { isLeftEntity } from '../../../account/utils';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
-} from '../extensions/cross-j/index';
-import { generateLazyEntityId } from '../entity/factory';
-import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame/hash';
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
-import { createEmptyEnv } from '../runtime';
-import type { AccountInput, AccountReplica, AccountTx, Delta } from '../types/account';
-import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeReplica } from '../runtime/types';
-import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import { getPerfMs } from '../infra/time';
-import { createDefaultDelta } from '../account/state/delta';
-import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
+} from '../../../extensions/cross-j/index';
+import { generateLazyEntityId } from '../../../entity/factory';
+import { MAX_ACCOUNT_FRAME_TXS } from '../../../account/consensus/frame/hash';
+import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../orderbook';
+import { createEmptyEnv } from '../../../runtime';
+import type { AccountInput, AccountReplica, AccountTx, Delta } from '../../../types/account';
+import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
+import type { RuntimeReplica } from '../../../runtime/types';
+import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
+import { getPerfMs } from '../../../infra/time';
+import { createDefaultDelta } from '../../../account/state/delta';
+import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 
 type Cli = {
   swaps: number;

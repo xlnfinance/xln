@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 
-import { createJAdapter, createXlnJsonRpcProvider } from '../jurisdiction/adapter';
+import { createJAdapter, createXlnJsonRpcProvider } from '../../../jurisdiction/adapter';
 
 type Args = {
   name: string;

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { createEmptyEnv, getPersistedLatestHeight, readPersistedFrameJournals } from '../runtime';
-import { safeStringify } from '../protocol/serialization';
+import { createEmptyEnv, getPersistedLatestHeight, readPersistedFrameJournals } from '../../../runtime';
+import { safeStringify } from '../../../protocol/serialization';
 
 type Args = {
   runtimeId?: string;
@@ -20,7 +20,7 @@ const usage = (code = 1): never => {
   console.log(
     [
       'Usage:',
-      '  bun runtime/scripts/read-frame-receipts.ts --runtime-id <id> [--from 1] [--to N] [--tail N] [--limit 200]',
+      '  bun runtime/scripts/operations/diagnostics/read-frame-receipts.ts --runtime-id <id> [--from 1] [--to N] [--tail N] [--limit 200]',
       '    [--entity <entityId>] [--event <eventName>] [--inputs] [--json]',
       '',
       'Notes:',

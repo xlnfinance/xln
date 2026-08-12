@@ -129,7 +129,7 @@ fi
 
 if [[ "$XLN_START_ASSERT_ONLY_ACTIVE" -ne 1 ]]; then
   xln_kill_by_pattern "scripts/start-custody.sh" start-server
-  xln_kill_by_pattern "runtime/scripts/start-custody-prod.ts" start-server
+  xln_kill_by_pattern "runtime/scripts/operations/custody/start-custody-prod.ts" start-server
   xln_kill_by_pattern "runtime/api/server/index.ts --port ${XLN_MESH_CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${XLN_MESH_CUSTODY_DAEMON_PORT}" start-server
   xln_kill_by_port "$XLN_MESH_CUSTODY_PORT" start-server
   xln_kill_by_port "$XLN_MESH_CUSTODY_DAEMON_PORT" start-server

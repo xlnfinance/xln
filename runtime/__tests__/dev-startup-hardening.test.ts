@@ -68,7 +68,7 @@ describe('dev RPC readiness', () => {
     const server = startChainRpc(31_337);
     try {
       const result = await run('bun', [
-        'runtime/scripts/wait-rpc-chain.ts',
+        'runtime/scripts/operations/development/wait-rpc-chain.ts',
         '--url', `http://127.0.0.1:${server.port}`,
         '--chain-id', '31337',
         '--timeout-ms', '1000',
@@ -84,7 +84,7 @@ describe('dev RPC readiness', () => {
     const server = startChainRpc(31_338);
     try {
       const result = await run('bun', [
-        'runtime/scripts/wait-rpc-chain.ts',
+        'runtime/scripts/operations/development/wait-rpc-chain.ts',
         '--url', `http://127.0.0.1:${server.port}`,
         '--chain-id', '31337',
         '--timeout-ms', '1000',
@@ -102,7 +102,7 @@ describe('dev RPC readiness', () => {
     const port = reservation.port;
     reservation.stop(true);
     const result = await run('bun', [
-      'runtime/scripts/wait-rpc-chain.ts',
+      'runtime/scripts/operations/development/wait-rpc-chain.ts',
       '--url', `http://127.0.0.1:${port}`,
       '--chain-id', '31337',
       '--timeout-ms', '200',

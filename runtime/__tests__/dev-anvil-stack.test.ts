@@ -18,7 +18,7 @@ const reservePort = (): number => {
 test('dev-anvil-stack one-shot mode deploys and exits after stopping spawned anvil', async () => {
   const port = reservePort();
   const child = spawn('bun', [
-    'runtime/scripts/dev-anvil-stack.ts',
+    'runtime/scripts/operations/development/dev-anvil-stack.ts',
     '--spawn-anvil',
     '--port', String(port),
     '--chain-id', '31338',

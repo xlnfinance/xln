@@ -6,7 +6,7 @@ import {
   BoundedPerfMetric,
   cumulativeMarksToDurations,
   type PerfMarks,
-} from '../infra/performance/profile';
+} from '../../../infra/performance/profile';
 
 type ProfilePayload = Record<string, unknown>;
 export type ParsedProfile = { runtime: string; scope: string; event: string; payload: ProfilePayload };
@@ -166,7 +166,7 @@ const main = async (): Promise<void> => {
   const args = process.argv.slice(2);
   const logPath = args.find(arg => !arg.startsWith('--'));
   const jsonOutput = args.includes('--json');
-  if (!logPath) throw new Error('USAGE: bun runtime/scripts/analyze-runtime-perf.ts <log-file> [--json]');
+  if (!logPath) throw new Error('USAGE: bun runtime/scripts/operations/benchmark/analyze-runtime-perf.ts <log-file> [--json]');
   metrics.clear();
   const lines = createInterface({ input: createReadStream(logPath), crlfDelay: Number.POSITIVE_INFINITY });
   let parsedProfiles = 0;

@@ -30,7 +30,7 @@ export async function mmMesh(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
   console.log('\n🏛️  MM mesh scenario (orchestrator same-j + cross-j books)\n');
   console.log(`[mm-mesh] adversary=${adversary}`);
 
-  const smokePath = join(process.cwd(), 'runtime/scripts/local-prod-smoke.ts');
+  const smokePath = join(process.cwd(), 'runtime/scripts/operations/production/local-prod-smoke.ts');
   const exitCode = await new Promise<number>((resolve, reject) => {
     const child = spawn('bun', [smokePath], {
       cwd: process.cwd(),

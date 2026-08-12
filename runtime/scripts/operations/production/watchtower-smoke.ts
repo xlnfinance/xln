@@ -5,22 +5,22 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Wallet, hexlify } from 'ethers';
 
-import { deriveSignerKeySync } from '../account/crypto';
-import { generateLazyEntityId } from '../entity/factory';
+import { deriveSignerKeySync } from '../../../account/crypto';
+import { generateLazyEntityId } from '../../../entity/factory';
 import {
   closeInfraDb,
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
   processRuntime,
-} from '../runtime';
-import { buildRuntimeRecoveryBundle } from '../storage/recovery/bundle';
+} from '../../../runtime';
+import { buildRuntimeRecoveryBundle } from '../../../storage/recovery/bundle';
 import {
   buildTowerAppointmentOwnerMessage,
   encryptRuntimeRecoveryBundle,
-} from '../storage/recovery/bundle/crypto';
-import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../api/public/runtime-module';
-import { startStandaloneWatchtowerServer } from '../watchtower/standalone-server';
+} from '../../../storage/recovery/bundle/crypto';
+import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../../../api/public/runtime-module';
+import { startStandaloneWatchtowerServer } from '../../../watchtower/standalone-server';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 

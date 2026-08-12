@@ -2,7 +2,7 @@
 /**
  * CLI smoke against the canonical local orchestration stack.
  *
- * Reuses the same boot path as `runtime/scripts/local-prod-smoke.ts`:
+ * Reuses the same boot path as `runtime/scripts/operations/production/local-prod-smoke.ts`:
  *   acquireLocalTestPortLease → start-anvil.sh → start-anvil2.sh → start-server.sh
  *
  * Then drives two CLI wallets: onboard → hubs → open → pay → status → daemon.

@@ -7,8 +7,8 @@ import {
   type BookEvent,
   type BookState,
   type Side,
-} from '../orderbook';
-import { getPerfMs } from '../infra/time';
+} from '../../../orderbook';
+import { getPerfMs } from '../../../infra/time';
 import { runSwapRuntimeBenchmark } from './bench-swap-runtime-tps';
 
 type Cli = {

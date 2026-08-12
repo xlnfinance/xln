@@ -91,7 +91,7 @@ const runSmoke = async (
   if (label === 'template' && existsSync(runDir)) rmSync(runDir, { recursive: true, force: true });
   mkdirSync(runDir, { recursive: true });
   await new Promise<void>((resolveRun, rejectRun) => {
-    const proc = spawn('bun', ['runtime/scripts/local-prod-smoke.ts'], {
+    const proc = spawn('bun', ['runtime/scripts/operations/production/local-prod-smoke.ts'], {
       cwd: repoRoot,
       env: {
         ...process.env,

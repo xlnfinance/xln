@@ -346,7 +346,7 @@ const runDaemonControl = async (
   env: NodeJS.ProcessEnv,
   secrets: ChildSecrets,
 ): Promise<DaemonControlCliResult> => {
-  const proc = spawn('bun', ['runtime/scripts/daemon-control.ts', ...args], {
+  const proc = spawn('bun', ['runtime/scripts/operations/production/daemon-control.ts', ...args], {
     cwd: process.cwd(),
     env: {
       ...buildManagedRuntimeChildSecretEnv(process.env, false),

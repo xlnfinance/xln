@@ -6,8 +6,8 @@ import {
   getBestBid,
   type BookEvent,
   type BookState,
-} from '../orderbook';
-import { getPerfMs } from '../infra/time';
+} from '../../../orderbook';
+import { getPerfMs } from '../../../infra/time';
 
 type Cli = {
   swaps: number;

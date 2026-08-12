@@ -76,7 +76,7 @@ const runSmoke = async (index: number): Promise<BootstrapMetrics> => {
   const metricsPath = join(runDir, 'bootstrap-metrics.json');
   console.log(`[bootstrap-benchmark] run=${run}/${runs} dir=${runDir}`);
   await new Promise<void>((resolve, reject) => {
-    const proc = spawn('bun', ['runtime/scripts/local-prod-smoke.ts'], {
+    const proc = spawn('bun', ['runtime/scripts/operations/production/local-prod-smoke.ts'], {
       cwd: repoRoot,
       env: {
         ...process.env,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { buildPersistenceInspection, type PersistenceInspectionSummary } from '../storage/read/persistence-inspect';
-import { safeStringify } from '../protocol/serialization';
+import { buildPersistenceInspection, type PersistenceInspectionSummary } from '../../../storage/read/persistence-inspect';
+import { safeStringify } from '../../../protocol/serialization';
 
 type Args = {
   runtimeId?: string;
@@ -18,7 +18,7 @@ type Args = {
 const usage = (code = 1): never => {
   console.log([
     'Usage:',
-    '  bun runtime/scripts/inspect-persistence.ts (--runtime-id <id> | --runtime-seed <seed>) [options]',
+    '  bun runtime/scripts/operations/diagnostics/inspect-persistence.ts (--runtime-id <id> | --runtime-seed <seed>) [options]',
     '',
     'Options:',
     '  --tail <n>             Number of latest WAL frames to inspect (default: 32)',

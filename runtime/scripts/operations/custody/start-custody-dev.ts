@@ -3,9 +3,9 @@
 import { watch } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { spawnBunChild, startCustodySupport, stopManagedChild, waitForHttpReady } from '../orchestrator/bootstrap/custody-bootstrap';
-import { selectPrimaryHubJurisdiction } from '../orchestrator/jurisdiction/jurisdiction-select';
-import { fetchLoopback } from '../orchestrator/server/loopback-fetch';
+import { spawnBunChild, startCustodySupport, stopManagedChild, waitForHttpReady } from '../../../orchestrator/bootstrap/custody-bootstrap';
+import { selectPrimaryHubJurisdiction } from '../../../orchestrator/jurisdiction/jurisdiction-select';
+import { fetchLoopback } from '../../../orchestrator/server/loopback-fetch';
 
 const API_BASE_URL = process.env['DEV_API_BASE_URL'] || 'http://127.0.0.1:8082';
 const ANVIL_RPC = process.env['DEV_ANVIL_RPC'] || 'http://127.0.0.1:8545';

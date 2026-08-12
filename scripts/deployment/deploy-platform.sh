@@ -1160,10 +1160,10 @@ run_local_deploy() {
       run_or_fail_deploy "failed to pause production explorer backend" pause_production_explorer_backend
       mkdir -p logs
       pkill -TERM -f 'scripts/start-custody.sh' >/dev/null 2>&1 || true
-      pkill -TERM -f 'runtime/scripts/start-custody-prod.ts' >/dev/null 2>&1 || true
+      pkill -TERM -f 'runtime/scripts/operations/custody/start-custody-prod.ts' >/dev/null 2>&1 || true
       sleep 1
       pkill -KILL -f 'scripts/start-custody.sh' >/dev/null 2>&1 || true
-      pkill -KILL -f 'runtime/scripts/start-custody-prod.ts' >/dev/null 2>&1 || true
+      pkill -KILL -f 'runtime/scripts/operations/custody/start-custody-prod.ts' >/dev/null 2>&1 || true
 
       lsof -ti TCP:8087 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
       lsof -ti TCP:8088 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true

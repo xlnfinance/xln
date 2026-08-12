@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const repoRoot = resolve(import.meta.dir, '../..');
-const scriptPath = join(repoRoot, 'runtime/scripts/debug-disk.ts');
+const scriptPath = join(repoRoot, 'runtime/scripts/operations/diagnostics/debug-disk.ts');
 const packageJsonPath = join(repoRoot, 'package.json');
 
 describe('debug:disk', () => {
@@ -45,6 +45,6 @@ describe('debug:disk', () => {
     const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
       scripts?: Record<string, string>;
     };
-    expect(packageJson.scripts?.['debug:disk']).toBe('bun runtime/scripts/debug-disk.ts');
+    expect(packageJson.scripts?.['debug:disk']).toBe('bun runtime/scripts/operations/diagnostics/debug-disk.ts');
   });
 });

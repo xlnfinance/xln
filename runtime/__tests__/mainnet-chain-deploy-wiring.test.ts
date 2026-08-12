@@ -6,12 +6,12 @@ const repoRoot = process.cwd();
 const readRpcAdapterSource = (): string => [
   'chain-ids.ts',
   'rpc-public.ts',
-  'rpc-adapter.ts',
-  'rpc-lifecycle.ts',
-  'rpc-chain-io.ts',
-  'rpc-finality.ts',
-  'rpc-reads.ts',
-  'rpc-wallet-writes.ts',
+  'rpc/rpc-adapter.ts',
+  'rpc/rpc-lifecycle.ts',
+  'rpc/rpc-chain-io.ts',
+  'rpc/rpc-finality.ts',
+  'rpc/rpc-reads.ts',
+  'rpc/wallet/rpc-wallet-writes.ts',
 ].map(file => readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter', file), 'utf8')).join('\n');
 
 describe('mainnet chain deployment wiring', () => {
@@ -128,7 +128,7 @@ describe('mainnet chain deployment wiring', () => {
   });
 
   test('TRON Nile read smoke is watch-only and requires a key only for writes', () => {
-    const smoke = readFileSync(join(repoRoot, 'runtime/scripts/tron-nile-smoke.ts'), 'utf8');
+    const smoke = readFileSync(join(repoRoot, 'runtime/scripts/operations/production/tron-nile-smoke.ts'), 'utf8');
     expect(smoke).toContain("!privateKey ? { watchOnly: true }");
     expect(smoke).toContain('TRON_NILE_PRIVATE_KEY_REQUIRED_FOR_WRITE');
     expect(smoke).not.toContain('DEFAULT_PRIVATE_KEY');

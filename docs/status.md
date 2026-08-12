@@ -102,7 +102,7 @@ When docs disagree, use this order:
   `jurisdictions/scripts/public-proof-smoke.ts` at `53e8e1259`; reserve parity
   held at `900 + 1000 - 100 - 50 = 1750`.
 - Runtime ↔ Sepolia reserve and J-event parity was proven with
-  `runtime/scripts/rpc-settlement-parity.ts --mode=attach
+  `runtime/scripts/operations/settlement/rpc-settlement-parity.ts --mode=attach
   --jurisdiction=ethereum-sepolia`: reserves moved `1750 → 1627` / `0 → 123`,
   and receipt events matched an independent chain refetch. Evidence receipt:
   `0xe3b7370d960c8901f506a5239c4395c72b50e1a1c95574bdef413d20d73d9f6d`
