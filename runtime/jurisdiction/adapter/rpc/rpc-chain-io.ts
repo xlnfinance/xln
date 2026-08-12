@@ -10,7 +10,7 @@ import {
   type FeeOverrides,
   type RpcReceipt,
 } from './rpc-boundary';
-import { isTronChainId } from '../rpc-public';
+import { isTronChainId } from '../chain-ids';
 import {
   sendRpcBatch,
   type RpcBatchRequest,

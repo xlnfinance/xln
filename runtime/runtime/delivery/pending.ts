@@ -474,8 +474,6 @@ type RuntimeP2PDispatch = {
   getVerifiedRuntimeRoute?(entityId: string): { runtimeId: string; lastUpdated: number } | null;
 };
 
-export type RuntimeDirectEntityInputDispatchResult = DeliveryResult;
-
 export type RuntimeEntityInputRoutingResult = {
   delivery: DeliveryResult;
 };

@@ -523,7 +523,7 @@ export const getCrossJurisdictionRouteRemainingAmounts = (
   };
 };
 
-export const computeCrossJurisdictionPriceTicks = (
+const computeCrossJurisdictionPriceTicks = (
   side: 0 | 1,
   baseTokenId: number,
   quoteTokenId: number,

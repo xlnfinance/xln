@@ -534,7 +534,6 @@ describe('production startup wiring', () => {
     const runtimeLoopSource = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop.ts'), 'utf8');
     const standaloneServer = readFileSync(join(repoRoot, 'runtime/api/server/index.ts'), 'utf8');
     const custodyBootstrap = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap/custody-bootstrap.ts'), 'utf8');
-    const startCustodyDev = readFileSync(join(repoRoot, 'runtime/scripts/operations/custody/start-custody-dev.ts'), 'utf8');
     const cli = readFileSync(join(repoRoot, 'runtime/api/server/cli.ts'), 'utf8');
     expect(orchestratorConfig).toContain(
       "relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')",
@@ -669,11 +668,6 @@ describe('production startup wiring', () => {
     );
     expect(orchestrator).toContain('jurisdictionId: primaryJurisdiction.key');
     expect(orchestrator).not.toContain("jurisdictionId: 'arrakis'");
-    expect(startCustodyDev).toContain('const custodyJurisdictionId = await resolveCustodyJurisdictionId();');
-    expect(startCustodyDev).toContain('jurisdictionId: custodyJurisdictionId');
-    expect(startCustodyDev).toContain('CUSTODY_JURISDICTION_ID: custodyJurisdictionId');
-    expect(startCustodyDev).not.toContain("jurisdictionId: 'arrakis'");
-    expect(startCustodyDev).not.toContain("CUSTODY_JURISDICTION_ID: 'arrakis'");
     expect(cli).toContain("const REMOTE_RPC = process.env['XLN_CLI_REMOTE_RPC'] || 'https://xln.finance/rpc';");
     expect(cli).not.toContain('/rpc/arrakis');
     expect(readFileSync(join(repoRoot, 'runtime/orchestrator/jurisdiction/jurisdictions.ts'), 'utf8')).toContain(

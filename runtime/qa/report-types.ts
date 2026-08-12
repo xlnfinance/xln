@@ -93,6 +93,7 @@ export type QaCodeFingerprint = {
   gitStatus: string;
   dirty: boolean;
   codeHash: string;
+  buildInputHash?: string;
   computedAt: number;
   trackedFileCount: number;
   trackedBytes: number;
@@ -243,7 +244,7 @@ export type QaRunCategory = 'unit' | 'contract' | 'e2e' | 'scenario' | 'benchmar
 export type QaTestCategory = 'functional' | 'resilience';
 export type QaRunTestCategory = QaTestCategory | 'mixed' | 'unknown';
 
-type QaFailureCapsule = {
+export type QaFailureCapsule = {
   version: 1;
   reportPath: string;
   file: string;

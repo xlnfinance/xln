@@ -7,7 +7,8 @@ import {
   processEventBatch,
   rememberPendingWatcherJBlock,
 } from '../../watcher';
-import { isTronChainId, prepareAuthenticatedWatcherIngress } from '../../rpc-public';
+import { prepareAuthenticatedWatcherIngress } from '../../rpc-public';
+import { isTronChainId } from '../../chain-ids';
 import { readAuthenticatedReceiptRange } from '../../receipt-root';
 import { buildTrackedExternalOwners } from '../../rpc-watcher-inputs';
 import { decodeAuthenticatedWatcherEvents } from '../../rpc-watcher-events';

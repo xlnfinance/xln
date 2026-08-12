@@ -21,7 +21,6 @@ import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-event
 import { type AuthenticatedReceiptRange, type ReceiptReadProfile } from './receipt-root';
 import { type RpcBatchResponse } from './rpc-utils';
 import { applyJBlockHeadersIngressTransform } from './watcher';
-import { TRON_CHAIN_IDS } from './chain-ids';
 import type { JAdapterMode } from './types';
 
 /**
@@ -66,19 +65,19 @@ export type TxDisputeProofBodyEvidence = Readonly<{
   proofbody: JBatch['disputeStarts'][number]['initialProofbody'];
 }>;
 
-export const toFinalizationDecimal = (value: unknown): string => {
+const toFinalizationDecimal = (value: unknown): string => {
   if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value.toString();
   if (typeof value === 'string' && /^(?:0|[1-9][0-9]*)$/.test(value.trim())) return value.trim();
   throw new Error('J_DISPUTE_FINALIZATION_DECIMAL_INVALID');
 };
 
-export const toFinalizationHex = (value: unknown): string => {
+const toFinalizationHex = (value: unknown): string => {
   if (typeof value === 'string' && /^0x(?:[0-9a-fA-F]{2})*$/.test(value)) return value.toLowerCase();
   throw new Error('J_DISPUTE_FINALIZATION_HEX_INVALID');
 };
 
-export const depositoryTransactionInterface = Depository__factory.createInterface();
+const depositoryTransactionInterface = Depository__factory.createInterface();
 const DISPUTE_PROOF_BODY_PARAM = ethers.ParamType.from(PROOF_BODY_ABI);
 const FINALIZATION_EVIDENCE_TYPES = [
   'bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32',
@@ -270,8 +269,6 @@ export const resolveDisputeFinalizationEvidence = (
   };
 };
 
-export const isTronChainId = (chainId: number): boolean => TRON_CHAIN_IDS.has(chainId);
-
 export const resolveWatcherPollToBlock = (
   fromBlock: number,
   safeToBlock: number,
@@ -295,7 +292,7 @@ export const resolveWatcherPollToBlock = (
  * transform first would mix a fresh receipt with a different run's header and,
  * worse, could let a transform disguise an actually inconsistent RPC result.
  */
-export const assertAuthenticatedWatcherLogHeaders = (
+const assertAuthenticatedWatcherLogHeaders = (
   authenticatedRange: Pick<AuthenticatedReceiptRange, 'headers' | 'logs'>,
 ): Array<{ jHeight: number; jBlockHash: string }> => {
   const authenticatedHeaders = authenticatedRange.headers.map(({ jHeight, jBlockHash }) => ({
@@ -408,7 +405,7 @@ export type ExternalWalletTrackedOwnerCursor = {
   allowanceAfterBlockByKey: Map<string, number>;
 };
 
-export const normalizeTrackedKey = (value: unknown): string =>
+const normalizeTrackedKey = (value: unknown): string =>
   String(value || '')
     .trim()
     .toLowerCase();
@@ -505,10 +502,10 @@ export type ApprovalReceiptLog = {
   logIndex?: number;
 };
 
-export const approvalEventInterface = new ethers.Interface([
+const approvalEventInterface = new ethers.Interface([
   'event Approval(address indexed owner,address indexed spender,uint256 value)',
 ]);
-export const approvalEventFragment = approvalEventInterface.getEvent('Approval');
+const approvalEventFragment = approvalEventInterface.getEvent('Approval');
 if (!approvalEventFragment) throw new Error('APPROVAL_EVENT_FRAGMENT_MISSING');
 
 export const resolveApprovalReceiptLogIndex = (params: {

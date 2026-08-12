@@ -2,7 +2,7 @@ import { safeStringify } from '../../protocol/serialization';
 import type { EnvSnapshot, RuntimeInput, RuntimeReplica } from '../types';
 import type { RuntimeFrame } from '../../storage/types';
 
-export type RuntimeInputCommitRecord =
+type RuntimeInputCommitRecord =
   | Pick<EnvSnapshot, 'state' | 'runtimeInput'>
   | { height: number; runtimeInput: RuntimeInput };
 

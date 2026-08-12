@@ -15,7 +15,6 @@ export {
   rescheduleDeferredOutputs,
   splitPendingOutputsByRetryWindow,
   type PlannedRemoteOutput,
-  type RuntimeDirectEntityInputDispatchResult,
   type RuntimeOutputRoutingDeps,
 } from '../delivery/pending';
 export { planEntityOutputs } from '../delivery/plan';

@@ -15,10 +15,10 @@ import {
   updateWatcherJurisdictionCursor,
 } from '../../watcher';
 import {
-  isTronChainId,
   resolveWatcherPollToBlock,
   rpcLog,
 } from '../../rpc-public';
+import { isTronChainId } from '../../chain-ids';
 import { shouldAuditCanonicalWatcherState } from '../../watcher/observe/watcher-poll-policy';
 import {
   assertAuthorityEvidenceCanonical,

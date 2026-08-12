@@ -647,7 +647,7 @@ interface RuntimeInfrastructure {
     targetRuntimeId: string,
     envelope: RuntimeEntityInputsEnvelope,
     ingressTimestamp?: number,
-  ) => import('./routing/output-routing').RuntimeDirectEntityInputDispatchResult) | null;
+  ) => import('../protocol/payments/delivery-result').DeliveryResult) | null;
   directReliableReceiptDispatch?: ((
     targetRuntimeId: string,
     receipt: ReliableDeliveryReceipt,
