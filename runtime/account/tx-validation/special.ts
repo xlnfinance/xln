@@ -40,6 +40,9 @@ const validateHtlcLock = (value: unknown, code: string): void => {
     optional: { deliveryMode: 'string', envelope: 'recordOrString' },
     literals: { deliveryMode: ['instant', 'async'] },
   }, code);
+  if (typeof data['hashlock'] !== 'string' || !/^0x[0-9a-f]{64}$/.test(data['hashlock'])) {
+    throw new Error(`${code}_HASHLOCK`);
+  }
   if (data['envelope'] !== undefined) validateHtlcEnvelope(data['envelope']);
 };
 

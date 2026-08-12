@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { LIMITS } from '../../../config/constants';
 import { createOnionEnvelopes, validateEnvelope } from '../../../protocol/htlc/codec/envelope';
+import { decodeAccountTx } from '../../../account/tx-validation';
 
 describe('htlc envelope validation', () => {
   test('rejects oversized final recipient envelope payload', () => {
@@ -30,6 +31,20 @@ describe('htlc envelope validation', () => {
     const route = Array.from({ length: 102 }, (_, index) => `entity-${index}`);
 
     await expect(createOnionEnvelopes(route, 'secret')).rejects.toThrow('101 hops > MAX_HOPS (100)');
+  });
+
+  test('rejects non-canonical uppercase Account hashlocks', () => {
+    expect(() => decodeAccountTx({
+      type: 'htlc_lock',
+      data: {
+        lockId: `0x${'11'.repeat(32)}`,
+        hashlock: `0x${'AB'.repeat(32)}`,
+        timelock: 60_000n,
+        revealBeforeHeight: 100,
+        amount: 1n,
+        tokenId: 1,
+      },
+    }, 'ACCOUNT_TX')).toThrow('ACCOUNT_TX_DATA_HASHLOCK');
   });
 
   test('fails closed when encryption inputs or certified recipient keys are missing', async () => {
