@@ -938,10 +938,10 @@ for (const [path, markers] of [
     ['account frame proposal path uses structured logging only', 'proposal.profile'],
   ],
   [
-    'runtime/__tests__/debt-ledger.test.ts',
+    'runtime/__tests__/finance/state/debt-ledger.test.ts',
     ['debt ledger divergence without direct console warning', 'DEBT_LEDGER_DIVERGENCE'],
   ],
-  ['runtime/__tests__/validation-utils.test.ts', ['validateAccountDeltas fails loud', 'ACCOUNT_DELTAS_MISSING']],
+  ['runtime/__tests__/architecture/state/validation-utils.test.ts', ['validateAccountDeltas fails loud', 'ACCOUNT_DELTAS_MISSING']],
   [
     'runtime/__tests__/network/relay/relay-router.test.ts',
     ['relay router and local delivery verbose diagnostics use structured logging', 'relay.local_delivery'],

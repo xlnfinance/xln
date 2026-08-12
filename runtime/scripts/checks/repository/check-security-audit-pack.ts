@@ -140,7 +140,7 @@ const gptContextPath = 'scripts/debug/gpt.cjs';
 const gptContext = readText(gptContextPath);
 for (const marker of [
   'src/lib/components/Entity/LendingPanel.svelte',
-  'runtime/__tests__/lending.test.ts',
+  'runtime/__tests__/finance/state/lending.test.ts',
   'tests/e2e-lending.spec.ts',
   'Multihop execution is intentionally deferred',
 ]) {

@@ -235,7 +235,7 @@ const CORE_FILES = {
     'runtime/__tests__/payments/orderbook/orderbook-matching-fallback-part-1.test.ts',
     'runtime/__tests__/payments/orderbook/orderbook-matching-fallback-part-2.test.ts',
     'runtime/__tests__/payments/swap/swap-order-preparation.test.ts',
-    'runtime/__tests__/lending.test.ts',
+    'runtime/__tests__/finance/state/lending.test.ts',
     'tests/e2e-swap.spec.ts',
     'tests/e2e-cross-j-swap.spec.ts',
     'tests/e2e-lending.spec.ts',
@@ -528,7 +528,7 @@ const RUNTIME_FILES = {
     'runtime/__tests__/runtime/ingress/runtime-ingress-timestamp.test.ts',
     'runtime/__tests__/jurisdiction/batches/j-batch-reserve-availability.test.ts',
     'runtime/__tests__/network/jurisdiction/multi-jurisdiction-entity.test.ts',
-    'runtime/__tests__/serialization-utils.test.ts',
+    'runtime/__tests__/protocol/codec/serialization-utils.test.ts',
     'runtime/__tests__/storage/runtime/storage-canonical-hash.test.ts',
   ],
   frontend: [],
@@ -1148,7 +1148,7 @@ Read these together:
 - \`runtime/entity/tx/handlers/payments/lending.ts\`
 - \`runtime/api/server/entities/lending.ts\`
 - \`frontend/src/lib/components/Entity/LendingPanel.svelte\`
-- \`runtime/__tests__/lending.test.ts\`
+- \`runtime/__tests__/finance/state/lending.test.ts\`
 - \`tests/e2e-lending.spec.ts\`
 
 ### Market maker and orderbook readiness
@@ -1295,7 +1295,7 @@ xln/
     tests/e2e-swap.spec.ts              ${fileSizes['tests/e2e-swap.spec.ts'] || '?'} lines - Same-chain swap UX contract
     tests/e2e-cross-j-swap.spec.ts      ${fileSizes['tests/e2e-cross-j-swap.spec.ts'] || '?'} lines - Cross-j swap/manual recommendation UX contract
     tests/e2e-lending.spec.ts           ${fileSizes['tests/e2e-lending.spec.ts'] || '?'} lines - Lending UI contract
-    runtime/__tests__/lending.test.ts   ${fileSizes['runtime/__tests__/lending.test.ts'] || '?'} lines - Lending state-machine contract
+    runtime/__tests__/finance/state/lending.test.ts   ${fileSizes['runtime/__tests__/finance/state/lending.test.ts'] || '?'} lines - Lending state-machine contract
 
 ${includeFrontend ? `
   frontend/

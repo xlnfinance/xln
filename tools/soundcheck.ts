@@ -331,7 +331,7 @@ function mappedTestsForProfile(profile: string): Array<{ label: string; command:
           'runtime/__tests__/payments/core/price-improvement.test.ts',
           'runtime/__tests__/orderbook-matching-fallback.test.ts',
           'runtime/__tests__/payments/orderbook/orderbook-validity.test.ts',
-          'runtime/__tests__/serialization-utils.test.ts',
+          'runtime/__tests__/protocol/codec/serialization-utils.test.ts',
         ],
       },
     ];

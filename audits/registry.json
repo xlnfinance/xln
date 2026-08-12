@@ -251,7 +251,7 @@
         "runtime/__tests__/**/*external-wallet*",
         "runtime/__tests__/public-*.test.ts",
         "runtime/__tests__/**/*faucet*",
-        "runtime/__tests__/reserve-faucet.test.ts",
+        "runtime/__tests__/api/product/reserve-faucet.test.ts",
         "runtime/__tests__/orchestrator-rpc-public-routes.test.ts",
         "runtime/__tests__/security/hanko/signer-public-key-binding.test.ts",
         "runtime/__tests__/payments/htlc/htlc-dispute-secret-publication.test.ts"
@@ -768,7 +768,7 @@
       ],
       "testGlobs": [
         "runtime/__tests__/**/*faucet*",
-        "runtime/__tests__/reserve-faucet.test.ts"
+        "runtime/__tests__/api/product/reserve-faucet.test.ts"
       ],
       "requiredEvidence": [
         "codeTrace",

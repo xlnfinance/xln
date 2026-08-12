@@ -30,7 +30,7 @@ const REQUIRED_CONTRACT_ARTIFACTS = [
 // themselves remain unchanged; a second Bun test process runs them from the
 // runtime directory, where child stdio is captured correctly.
 const SUBPROCESS_STDIO_TEST_FILES = [
-  'custody-bootstrap.test.ts',
+  'custody/custody-bootstrap.test.ts',
   'debug-disk.test.ts',
   'dev-anvil-stack.test.ts',
   'dev-radapter-keys.test.ts',

@@ -139,9 +139,9 @@ describe('production startup wiring', () => {
     const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/release/run-release-gate.ts'), 'utf8');
     const coreE2e = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-core.ts'), 'utf8');
     for (const crashTest of [
-      'runtime/__tests__/reliable-delivery-receipts.test.ts',
-      'runtime/__tests__/reliable-local-catchup-real-crash.test.ts',
-      'runtime/__tests__/reliable-frontier-real-crash.test.ts',
+      'runtime/__tests__/runtime/reliability/reliable-delivery-receipts.test.ts',
+      'runtime/__tests__/runtime/reliability/reliable-local-catchup-real-crash.test.ts',
+      'runtime/__tests__/runtime/reliability/reliable-frontier-real-crash.test.ts',
       'runtime/__tests__/jurisdiction/submission/j-submit-crash-recovery.test.ts',
       'runtime/__tests__/jurisdiction/submission/j-submit-real-rpc-crash-recovery.test.ts',
     ]) {
