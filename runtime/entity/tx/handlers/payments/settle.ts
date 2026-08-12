@@ -840,7 +840,11 @@ export async function processCommittedSettlementTransitionFollowup(
  * Check if workspace ops are safe to auto-approve (compiles then checks)
  */
 export function canAutoApproveWorkspace(workspace: SettlementWorkspace, iAmLeft: boolean): boolean {
-  if (workspace.ops.some((op) => op.type === 'forgive')) return false;
+  // Forgiveness and rawDiff are explicit bilateral escape hatches. In
+  // particular, rawDiff can move collateral ownership through ondelta while
+  // leaving total collateral and reserves unchanged; no generic safety
+  // predicate may turn that proposal into the counterparty's signature.
+  if (workspace.ops.some((op) => op.type === 'forgive' || op.type === 'rawDiff')) return false;
   const { diffs } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
   return diffs.every(diff => userAutoApprove(diff, iAmLeft));
 }

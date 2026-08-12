@@ -101,8 +101,20 @@ const registerToken = async (
   const existingRaw = await getStoredValue(context, key);
   if (existingRaw) {
     const existing = decodeStoredPushRegistration(existingRaw, key);
-    if (Number(existing.signedAt || 0) > Number(registration.signedAt || 0)) {
+    if (existing.signedAt > registration.signedAt) {
       throw new Error('PUSH_REGISTRATION_STALE');
+    }
+    if (existing.signedAt === registration.signedAt) {
+      const sameSignedRegistration =
+        existing.runtimeId === registration.runtimeId
+        && existing.entityId === registration.entityId
+        && existing.tokenHash === registration.tokenHash
+        && existing.token === registration.token
+        && existing.platform === registration.platform
+        && existing.chainId === registration.chainId
+        && existing.depositoryAddress === registration.depositoryAddress
+        && existing.rpcUrl === registration.rpcUrl;
+      if (!sameSignedRegistration) throw new Error('PUSH_REGISTRATION_REPLAY_MISMATCH');
     }
   }
   const stored: StoredPushRegistration = { ...registration, updatedAt: context.now() };

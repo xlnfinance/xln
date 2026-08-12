@@ -37,6 +37,7 @@ test('HTLC capacity admission rejects atomically instead of committing a fail-so
   const state = {
     entityId: source,
     timestamp: 100,
+    htlcRoutes: new Map(),
     accounts: new Map([[nextHop, {
       state: {
         leftEntity: source,
@@ -73,4 +74,8 @@ test('HTLC capacity admission rejects atomically instead of committing a fail-so
 
   delta.leftCreditLimit = 1n;
   expect(validatePreparedHtlcPayment(state, tx, context)).toBe(prepared);
+
+  state.htlcRoutes.set(prepared.hashlock, { lockId: prepared.lockId });
+  expect(() => validatePreparedHtlcPayment(state, tx, context))
+    .toThrow(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${prepared.hashlock}`);
 });

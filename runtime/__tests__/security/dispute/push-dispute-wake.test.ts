@@ -58,6 +58,14 @@ test('webhook push transport aborts a hung delivery', async () => {
   expect(result).toEqual({ ok: false, error: 'PUSH_WEBHOOK_TIMEOUT:5' });
 });
 
+test('webhook push transport rejects public plaintext and bearer-over-http endpoints', () => {
+  expect(() => new WebhookPushSender('http://push.example.test/send'))
+    .toThrow('PUSH_WEBHOOK_ENDPOINT_INVALID');
+  expect(() => new WebhookPushSender('http://127.0.0.1:8080/send', 'secret'))
+    .toThrow('PUSH_WEBHOOK_AUTH_REQUIRES_HTTPS');
+  expect(() => new WebhookPushSender('http://127.0.0.1:8080/send')).not.toThrow();
+});
+
 const makeRegistration = (over: Partial<StoredPushRegistration> = {}): StoredPushRegistration => ({
   runtimeId: ZeroAddress.toLowerCase(),
   entityId: entityId(1),
@@ -117,7 +125,16 @@ describe('push registration signature', () => {
     const token = 'device-token-abc';
     const tokenHash = hashPushToken(token);
     const signedAt = Date.now();
-    const message = buildPushRegistrationMessage(runtimeId, entityId(7), tokenHash, 'android', CHAIN_ID, DEPOSITORY, signedAt);
+    const message = buildPushRegistrationMessage(
+      runtimeId,
+      entityId(7),
+      tokenHash,
+      'android',
+      CHAIN_ID,
+      DEPOSITORY,
+      'http://127.0.0.1:8545/',
+      signedAt,
+    );
     const ownerSignature = await wallet.signMessage(message);
 
     const request = {
@@ -139,7 +156,22 @@ describe('push registration signature', () => {
     expect(verified.tokenHash).toBe(tokenHash);
 
     expect(() => verifyPushRegistration({ ...request, entityId: entityId(8) })).toThrow(/SIGNATURE_INVALID/);
+    expect(() => verifyPushRegistration({ ...request, rpcUrl: 'https://attacker.invalid/' })).toThrow(/SIGNATURE_INVALID/);
     expect(() => verifyPushRegistration(request, { now: signedAt + 48 * 60 * 60 * 1000 })).toThrow(/STALE/);
+  });
+
+  test('accepts exact equal-time retry but rejects altered equal-time registration', async () => {
+    const dbPath = join(await mkdtemp(join(tmpdir(), 'xln-push-retry-')), 'push.level');
+    const store = createPushStore({ dbPath, now: () => 2_000 });
+    const registration = makeRegistration();
+    try {
+      await store.registerToken(registration);
+      await expect(store.registerToken({ ...registration })).resolves.toMatchObject({ rpcUrl: registration.rpcUrl });
+      await expect(store.registerToken({ ...registration, rpcUrl: 'https://attacker.invalid/' }))
+        .rejects.toThrow('PUSH_REGISTRATION_REPLAY_MISMATCH');
+    } finally {
+      await store.close();
+    }
   });
 
   test('unregister removes only the signed runtime token registration', async () => {
@@ -188,7 +220,16 @@ describe('push registration signature', () => {
     const token = 'device-token-http';
     const tokenHash = hashPushToken(token);
     const signedAt = Date.now();
-    const registerMessage = buildPushRegistrationMessage(runtimeId, entityId(9), tokenHash, 'web', CHAIN_ID, DEPOSITORY, signedAt);
+    const registerMessage = buildPushRegistrationMessage(
+      runtimeId,
+      entityId(9),
+      tokenHash,
+      'web',
+      CHAIN_ID,
+      DEPOSITORY,
+      'http://127.0.0.1:8545/',
+      signedAt,
+    );
     const ownerSignature = await wallet.signMessage(registerMessage);
     try {
       const registerResponse = await handlePushRegister(new Request('http://tower.local/api/push/register', {

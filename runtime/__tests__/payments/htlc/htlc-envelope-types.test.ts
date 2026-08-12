@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { LIMITS } from '../../../config/constants';
-import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
 import { createOnionEnvelopes, validateEnvelope } from '../../../protocol/htlc/codec/envelope';
 
 describe('htlc envelope validation', () => {
@@ -19,22 +18,8 @@ describe('htlc envelope validation', () => {
       validateEnvelope({
         nextHop: '0x' + '1'.repeat(64),
         innerEnvelope: {
-          version: 'xln:htlc-multi-recipient:v1',
-          manifest: {
-            entityId: `0x${'22'.repeat(32)}`,
-            threshold: 1,
-            attestations: [],
-            hash: `0x${'33'.repeat(32)}`,
-          },
-          profileCertification: {
-            profileHash: `0x${'55'.repeat(32)}`,
-            routingStateHash: `0x${'66'.repeat(32)}`,
-            hanko: '0x01',
-          },
-          contextHash: `0x${'44'.repeat(32)}`,
-          nonce: 'AAAAAAAAAAAAAAAA',
+          version: 'xln:htlc-opaque:v1',
           ciphertext: 'x'.repeat(LIMITS.MAX_FRAME_SIZE_BYTES + 1),
-          recipients: [],
         },
         forwardAmount: '1',
       }),
@@ -59,16 +44,17 @@ describe('htlc envelope validation', () => {
     };
 
     await expect(createOnionEnvelopes(route, `0x${'55'.repeat(32)}`))
-      .rejects.toThrow('Onion envelope encryption requires crypto, certified manifests, amounts, and lock binding');
+      .rejects.toThrow('Onion envelope encryption requires Entity keys, aligned Account domains, amounts, lock binding, and proposer entropy');
     await expect(createOnionEnvelopes(
       route,
       `0x${'55'.repeat(32)}`,
       new Map(),
-      new NobleCryptoProvider({ deterministicSeed: 'missing-htlc-manifest' }),
+      [{ chainId: 31337, depositoryAddress: `0x${'66'.repeat(20)}` }],
       new Map(),
       undefined,
       1,
       binding,
-    )).rejects.toThrow(`Missing validator encryption manifest for payer ${route[0]}`);
+      () => `0x${'77'.repeat(32)}`,
+    )).rejects.toThrow(`Missing Entity encryption key for final recipient ${route[1]}`);
   });
 });

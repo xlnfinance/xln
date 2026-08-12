@@ -7,6 +7,7 @@ import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/e
 import { requireCanonicalJurisdictionEvents } from '../../../jurisdiction/machine/events/event-normalization';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../constants';
 import { LIMITS } from '../../../config/constants';
+import { serializeCanonicalTaggedJson } from '../../../protocol/serialization';
 
 export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
 // A peer controls its proposed timestamp. Reject future time because it could
@@ -16,6 +17,10 @@ export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
 // Entity time/J-height before an incoming frame is applied.
 const MAX_FRAME_FUTURE_SKEW_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
 export const MAX_FRAME_SIZE_BYTES = 10_000_000;
+
+/** Exact UTF-8 wire size of the canonical Account frame encoding. */
+export const getCanonicalAccountFrameSizeBytes = (frame: AccountFrame): number =>
+  new TextEncoder().encode(serializeCanonicalTaggedJson(frame)).byteLength;
 
 export function isWithinAccountFrameBounds(
   frame: AccountFrame,
@@ -37,6 +42,10 @@ export function getAccountFrameBoundsError(
   }
   if (frame.accountTxs.length > MAX_ACCOUNT_FRAME_TXS) {
     return `tx count ${frame.accountTxs.length} > ${MAX_ACCOUNT_FRAME_TXS}`;
+  }
+  const frameSizeBytes = getCanonicalAccountFrameSizeBytes(frame);
+  if (frameSizeBytes > MAX_FRAME_SIZE_BYTES) {
+    return `frame size ${frameSizeBytes} bytes > ${MAX_FRAME_SIZE_BYTES}`;
   }
   if (!ethers.isHexString(frame.accountStateRoot, 32)) {
     return `accountStateRoot ${String(frame.accountStateRoot)} is invalid`;

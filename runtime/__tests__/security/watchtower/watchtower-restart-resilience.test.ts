@@ -100,15 +100,14 @@ const createBackupAppointment = async () => {
     }],
   });
   const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
-  const signedAt = 123_456;
+  const signedAt = Date.now();
   const signature = await wallet.signMessage(
     buildTowerAppointmentOwnerMessage(
       runtimeId,
       'blind_backup',
       encrypted.lookupKey,
       0,
-      encrypted.bundleHash,
-      encrypted.height,
+      encrypted,
       signedAt,
       undefined,
     ),
@@ -231,8 +230,7 @@ describe('watchtower restart resilience', () => {
         'delayed_last_resort',
         lastResortLookupKey,
         0,
-        lastResortAppointment.bundle.bundleHash,
-        lastResortAppointment.bundle.height,
+        lastResortAppointment.bundle,
         lastResortSignedAt,
         lastResortPayload,
       ),

@@ -1,10 +1,10 @@
 /**
- * Deterministic Entity replay for an ingress-sealed HTLC payment.
+ * Deterministic Entity replay for a proposer-sealed HTLC payment.
  *
- * Route discovery and onion construction happen once at trusted local ingress.
- * The proposer keeps the preimage private. Validators independently verify
- * the public route, certified manifests, exact debit/fees, frozen deadlines,
- * and outer ciphertext bindings; frame hashes commit the opaque bytes exactly.
+ * Route discovery, preimage generation, and onion construction happen once
+ * during proposer frame assembly. Validators never receive the preimage; they
+ * verify the public route/profile/domain evidence, exact debit/fees, deadlines,
+ * and opaque ciphertext shape before signing the exact frame bytes.
  */
 
 import type { AccountTx } from '../../../../types/account';

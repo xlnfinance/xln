@@ -23,6 +23,7 @@ import type { PushRegistrationRequestV1, PushUnregisterRequestV1 } from './push/
 const DEFAULT_MAX_JSON_BODY_BYTES = 128 * 1024;
 const SMALL_MAX_JSON_BODY_BYTES = 8 * 1024;
 const APPOINTMENT_ENVELOPE_MAX_BYTES = 64 * 1024;
+const TOWER_APPOINTMENT_MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
 
 export const resolveAppointmentBodyLimit = (store: Pick<WatchtowerStore, 'maxStoredBytesPerLookupKey'>): number =>
   Math.max(
@@ -215,6 +216,12 @@ const verifyTowerAppointment = (appointment: TowerAppointmentV1): TowerAppointme
     throw new Error('TOWER_APPOINTMENT_RUNTIME_ID_MISMATCH');
   }
   const signedAt = Math.max(0, Math.floor(Number(appointment.ownerProof?.signedAt || 0)));
+  if (!Number.isSafeInteger(signedAt) || signedAt <= 0) {
+    throw new Error('TOWER_APPOINTMENT_SIGNED_AT_INVALID');
+  }
+  if (Math.abs(Date.now() - signedAt) > TOWER_APPOINTMENT_MAX_CLOCK_SKEW_MS) {
+    throw new Error('TOWER_APPOINTMENT_STALE');
+  }
   const slot = Math.max(0, Math.floor(Number(appointment.slot ?? 0)));
   const towerMode = normalizeTowerModeV1(appointment.towerMode);
   if (towerMode === 'blind_backup' && appointment.lastResortPayload) {
@@ -228,8 +235,7 @@ const verifyTowerAppointment = (appointment: TowerAppointmentV1): TowerAppointme
     towerMode,
     lookupKey,
     slot,
-    appointment.bundle.bundleHash,
-    appointment.bundle.height,
+    appointment.bundle,
     signedAt,
     appointment.lastResortPayload,
   );

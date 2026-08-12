@@ -26,10 +26,10 @@ test('MAX_HOPS opaque onion stays bounded and every Entity decrypts one layer', 
   const rootLockId = bytes32(0x7_001);
   const hashlock = bytes32(0x7_002);
   const envelope = await createOnionEnvelopes(
-    route, bytes32(0x7_003), publicKeys, domains, privateKeys.get(route[0]!)!, forwards,
+    route, bytes32(0x7_003), publicKeys, domains, forwards,
     undefined, 1,
     { rootLockId, hashlock, tokenId: 1, senderLockAmount: 1n, timelock, revealBeforeHeight },
-    { sourceEntityId: route[0]!, parentFrameHash: bytes32(0x7_004), entityHeight: 1, paymentTxHash: bytes32(0x7_005) },
+    hopIndex => privateKeyAt(route.length + hopIndex),
   );
   expect(new TextEncoder().encode(JSON.stringify(envelope)).byteLength).toBeLessThan(LIMITS.MAX_FRAME_SIZE_BYTES);
 

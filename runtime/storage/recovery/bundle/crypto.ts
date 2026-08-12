@@ -145,17 +145,25 @@ export const computeTowerLastResortPayloadDigest = (payload: TowerLastResortPayl
   return ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(payload)));
 };
 
+/**
+ * Bind the exact opaque bytes the tower retains, not only the plaintext bundle
+ * hash. Otherwise an intermediary can replace IV/ciphertext/compression while
+ * preserving bundleHash and leave the owner with an undecryptable backup.
+ */
+export const computeEncryptedRuntimeRecoveryEnvelopeHash = (
+  bundle: EncryptedRuntimeRecoveryBundleV1,
+): string => ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(bundle)));
+
 export const buildTowerAppointmentOwnerMessage = (
   runtimeId: string,
   towerMode: TowerModeV1,
   lookupKey: string,
   slot: number,
-  bundleHash: string,
-  height: number,
+  bundle: EncryptedRuntimeRecoveryBundleV1,
   signedAt: number,
   lastResortPayload?: TowerLastResortPayloadV1 | null,
 ): string =>
-  `${TOWER_APPOINTMENT_DOMAIN}|${String(runtimeId).toLowerCase()}|${towerMode}|${lookupKey}|${Math.max(0, Math.floor(Number(slot || 0)))}|${bundleHash}|${Math.max(0, Math.floor(Number(height || 0)))}|${Math.max(0, Math.floor(Number(signedAt || 0)))}|${computeTowerLastResortPayloadDigest(lastResortPayload)}`;
+  `${TOWER_APPOINTMENT_DOMAIN}|${String(runtimeId).toLowerCase()}|${towerMode}|${lookupKey}|${Math.max(0, Math.floor(Number(slot || 0)))}|${computeEncryptedRuntimeRecoveryEnvelopeHash(bundle)}|${Math.max(0, Math.floor(Number(signedAt || 0)))}|${computeTowerLastResortPayloadDigest(lastResortPayload)}`;
 
 export const computeWatchtowerCounterDisputeAuthorizationHash = (
   chainId: number,

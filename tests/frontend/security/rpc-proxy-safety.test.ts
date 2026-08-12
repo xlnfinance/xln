@@ -41,9 +41,12 @@ describe('rpc proxy safety', () => {
     expect(isLocalProxyRequest('http://localhost/rpc2', '127.0.0.1')).toBe(false);
   });
 
-  test('blocks unsafe anvil and wallet methods', () => {
+  test('allows only the explicit read-only RPC surface', () => {
     expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'anvil_setBalance', params: [] }))).toBe('anvil_setBalance');
     expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'wallet_addEthereumChain', params: [] }))).toBe('wallet_addEthereumChain');
+    expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_signTypedData_v4', params: [] }))).toBe('eth_signTypedData_v4');
+    expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_sendRawTransaction', params: [] }))).toBe('eth_sendRawTransaction');
+    expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_futureReadMethod', params: [] }))).toBe('eth_futureReadMethod');
     expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }))).toBeNull();
   });
 });

@@ -73,12 +73,24 @@ const normalizeChainId = (value: unknown): number => {
   return chainId;
 };
 
-const normalizeRpcUrl = (value: unknown): string => {
-  const rpcUrl = String(value || '').trim();
-  if (!rpcUrl || rpcUrl.length > MAX_RPC_URL_LENGTH || !/^https?:\/\//i.test(rpcUrl)) {
+const normalizePushRpcUrl = (value: unknown): string => {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > MAX_RPC_URL_LENGTH) {
     throw new Error('PUSH_RPC_URL_INVALID');
   }
-  return rpcUrl;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error('PUSH_RPC_URL_INVALID');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('PUSH_RPC_URL_INVALID');
+  }
+  parsed.hash = '';
+  const normalized = parsed.toString();
+  if (normalized.length > MAX_RPC_URL_LENGTH) throw new Error('PUSH_RPC_URL_INVALID');
+  return normalized;
 };
 
 const normalizeSignedAt = (value: unknown): number => {
@@ -115,7 +127,7 @@ const decodeStoredRegistrationValue = (raw: string): StoredPushRegistration => {
     platform: normalizePlatform(value['platform']),
     chainId: requireBoundaryInteger(value['chainId'], 'PUSH_STORED_REGISTRATION_CHAIN_ID_INVALID', 1),
     depositoryAddress: normalizeAddress(value['depositoryAddress']),
-    rpcUrl: normalizeRpcUrl(value['rpcUrl']),
+    rpcUrl: normalizePushRpcUrl(value['rpcUrl']),
     signedAt: requireBoundaryInteger(value['signedAt'], 'PUSH_STORED_REGISTRATION_SIGNED_AT_INVALID', 1),
     updatedAt: requireBoundaryInteger(value['updatedAt'], 'PUSH_STORED_REGISTRATION_UPDATED_AT_INVALID'),
   };
@@ -149,9 +161,10 @@ export const buildPushRegistrationMessage = (
   platform: PushPlatformV1,
   chainId: number,
   depositoryAddress: string,
+  rpcUrl: string,
   signedAt: number,
 ): string =>
-  `${PUSH_REGISTRATION_DOMAIN}|${runtimeId.toLowerCase()}|${entityId.toLowerCase()}|${tokenHash.toLowerCase()}|${platform}|${Math.floor(chainId)}|${depositoryAddress.toLowerCase()}|${Math.floor(signedAt)}`;
+  `${PUSH_REGISTRATION_DOMAIN}|${runtimeId.toLowerCase()}|${entityId.toLowerCase()}|${tokenHash.toLowerCase()}|${platform}|${Math.floor(chainId)}|${depositoryAddress.toLowerCase()}|${normalizePushRpcUrl(rpcUrl)}|${Math.floor(signedAt)}`;
 
 export const buildPushUnregisterMessage = (runtimeId: string, tokenHash: string, signedAt: number): string =>
   `${PUSH_UNREGISTER_DOMAIN}|${runtimeId.toLowerCase()}|${tokenHash.toLowerCase()}|${Math.floor(signedAt)}`;
@@ -169,7 +182,7 @@ export const verifyPushRegistration = (
   const platform = normalizePlatform(request.platform);
   const chainId = normalizeChainId(request.chainId);
   const depositoryAddress = normalizeAddress(request.depositoryAddress);
-  const rpcUrl = normalizeRpcUrl(request.rpcUrl);
+  const rpcUrl = normalizePushRpcUrl(request.rpcUrl);
   const signedAt = normalizeSignedAt(request.signedAt);
   assertFresh(signedAt, options);
   const tokenHash = hashPushToken(token);
@@ -180,6 +193,7 @@ export const verifyPushRegistration = (
     platform,
     chainId,
     depositoryAddress,
+    rpcUrl,
     signedAt,
   );
   const recovered = ethers.verifyMessage(message, String(request.ownerSignature || '')).toLowerCase();

@@ -916,6 +916,53 @@ describe('atomic settlement Account transition', () => {
     expect(canAutoApproveWorkspace(pureForgiveness.state.settlementWorkspace!, false)).toBe(false);
   });
 
+  test('a committed rawDiff never auto-seals for its counterparty', async () => {
+    const env = createEmptyEnv('settlement-transition-raw-diff-manual-only');
+    const jurisdiction = makeJurisdiction('settlement-transition', 31337, 'a1', 'b2');
+    const leftSigner = registerTestSigner(env, 'settlement-transition-raw-diff-manual-only', '1');
+    const rightSigner = registerTestSigner(env, 'settlement-transition-raw-diff-manual-only', '2');
+    const leftState = makeState(LEFT, leftSigner, jurisdiction, RIGHT);
+    const rightState = makeState(RIGHT, rightSigner, jurisdiction, LEFT);
+    addReplica(env, leftState, leftSigner);
+    addReplica(env, rightState, rightSigner);
+    const rightAccount = rightState.accounts.get(LEFT)!;
+    const tx = transition({
+      kind: 'upsert',
+      revision: 1,
+      ops: [{
+        type: 'rawDiff',
+        tokenId: 1,
+        leftDiff: 0n,
+        rightDiff: 0n,
+        collateralDiff: 0n,
+        ondeltaDiff: 1n,
+      }],
+      executorIsLeft: true,
+    });
+
+    expect((await applyAccountTx(rightAccount, tx, true, 1_000)).success).toBe(true);
+    expect(canAutoApproveWorkspace(rightAccount.state.settlementWorkspace!, false)).toBe(false);
+
+    const followup = await processCommittedSettlementTransitionFollowup(
+      rightAccount,
+      tx,
+      {
+        ...rightAccount.currentFrame,
+        height: 1,
+        timestamp: 1_000,
+        accountTxs: [tx],
+        byLeft: true,
+      },
+      LEFT,
+      rightState,
+      env,
+    );
+
+    expect(followup).toEqual({ outputs: [], accountTxs: [], hashesToSign: [] });
+    expect(rightState.deferredAccountProposals?.has(LEFT) ?? false).toBe(false);
+    expect(rightAccount.state.settlementWorkspace?.rightHanko).toBeUndefined();
+  });
+
   test('settlement ops reject token ids outside the canonical Account domain', async () => {
     const account = makeAccount(LEFT, RIGHT);
     const result = await upsert(account, {

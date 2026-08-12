@@ -19,13 +19,9 @@ describe('opaque Entity HTLC encryption', () => {
       rootLockId: `0x${'41'.repeat(32)}`, hashlock: `0x${'51'.repeat(32)}`, tokenId: 1,
       senderLockAmount: 10n, timelock: 100_000n, revealBeforeHeight: 100,
     };
-    const derivation = {
-      sourceEntityId: route[0]!, parentFrameHash: `0x${'61'.repeat(32)}`,
-      entityHeight: 7, paymentTxHash: `0x${'71'.repeat(32)}`,
-    };
     const build = (lockId = binding.rootLockId) => createOnionEnvelopes(
       route, `0x${'81'.repeat(32)}`, new Map([[route[0]!, hex(x25519.getPublicKey(getBytes(sourceSecret)))], [route[1]!, recipientPublic]]),
-      [domain], sourceSecret, new Map(), undefined, 1, { ...binding, rootLockId: lockId }, derivation,
+      [domain], new Map(), undefined, 1, { ...binding, rootLockId: lockId }, () => sourceSecret,
     );
     const first = await build();
     expect(await build()).toEqual(first);
@@ -60,9 +56,8 @@ describe('opaque Entity HTLC encryption', () => {
     };
     const preimage = `0x${'71'.repeat(32)}`;
     const encrypted = await createOnionEnvelopes(
-      [source, hub, target], preimage, publicKeys, [domain, domain], sourceSecret,
-      new Map([[hub, 9n]]), undefined, 1, binding,
-      { sourceEntityId: source, parentFrameHash: `0x${'81'.repeat(32)}`, entityHeight: 7, paymentTxHash: `0x${'91'.repeat(32)}` },
+      [source, hub, target], preimage, publicKeys, [domain, domain],
+      new Map([[hub, 9n]]), undefined, 1, binding, () => sourceSecret,
     );
     const hubLayer = unwrapEnvelope(decryptOpaqueHtlcBytes(
       encrypted, publicKeys.get(hub)!, hubSecret,

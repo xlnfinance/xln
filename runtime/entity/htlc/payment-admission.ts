@@ -1,6 +1,4 @@
 import { keccak256 } from 'ethers';
-import { hkdf } from '@noble/hashes/hkdf.js';
-import { sha256 } from '@noble/hashes/sha2.js';
 import { getAccountPerspective } from '../../account/state/perspective';
 import { sameAccountStateDomain } from '../../account/commitment/state-root';
 import { deriveDelta } from '../../account/utils';
@@ -15,6 +13,7 @@ import {
   hashHtlcSecret,
 } from '../../protocol/htlc/utils';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
+import { getDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 import type { PreparedOriginatedHtlcPayment } from '../../types/entity/htlc-infra-context';
 import type { EntityTx } from '../../types/entity-tx';
@@ -34,7 +33,7 @@ const positive = (value: unknown, code: string): bigint => {
   return value;
 };
 
-const exactRawPayment = (tx: HtlcPaymentTx): void => {
+const assertRawHtlcPayment = (tx: HtlcPaymentTx): void => {
   const allowed = new Set(['amount', 'deliveryMode', 'maxSenderDebit', 'route', 'targetEntityId', 'tokenId', 'description', 'hashlock', 'startedAtMs']);
   if (Object.keys(tx.data).some(key => !allowed.has(key))) throw new Error('HTLC_PAYMENT_FIELDS_INVALID');
   if (!Number.isSafeInteger(tx.data.tokenId) || tx.data.tokenId < 0 || tx.data.tokenId > TOKENS.MAX_TOKEN_ID) {
@@ -49,6 +48,9 @@ const exactRawPayment = (tx: HtlcPaymentTx): void => {
     || tx.data.description !== tx.data.description.trim()
     || new TextEncoder().encode(tx.data.description).byteLength > LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH
   )) throw new Error('HTLC_PAYMENT_DESCRIPTION_INVALID');
+  if (tx.data.hashlock !== undefined && !/^0x[0-9a-f]{64}$/.test(tx.data.hashlock)) {
+    throw new Error('HTLC_PAYMENT_HASHLOCK_INVALID');
+  }
 };
 
 const normalizeRoute = (raw: readonly string[], source: string, target: string): string[] => {
@@ -72,26 +74,25 @@ const uniqueProfile = (profiles: readonly RoutingProfile[], id: string): Routing
 export const hashRawHtlcPaymentTx = (tx: HtlcPaymentTx): string =>
   keccak256(new TextEncoder().encode(encodeCanonicalConsensusValue(tx)));
 
-const keyBytes = (secret: string): Uint8Array => {
-  const normalized = secret.startsWith('0x') ? secret.slice(2) : secret;
-  if (!/^[0-9a-fA-F]{64}$/.test(normalized)) throw new Error('HTLC_SOURCE_ENTITY_PRIVATE_KEY_INVALID');
-  return Uint8Array.from(normalized.match(/../g)!, value => Number.parseInt(value, 16));
+const randomBytes32Hex = (): string => {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return `0x${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
 };
 
-export const deriveHtlcPaymentSecret = (privateKey: string, publicContext: Readonly<{
-  sourceEntityId: string;
-  parentFrameHash: string;
-  height: number;
-  txIndex: number;
-  txHash: string;
-}>): string => {
-  const bytes = hkdf(
-    sha256,
-    keyBytes(privateKey),
-    sha256(new TextEncoder().encode('xln:htlc-payment-secret:v1:salt')),
-    new TextEncoder().encode(encodeCanonicalConsensusValue(publicContext)),
-    32,
-  );
+/**
+ * Proposer-only entropy, created before Entity consensus starts. The preimage
+ * is never put in the Entity transaction or prepared context; only the target
+ * ciphertext contains it. Validator replay therefore cannot reconstruct the
+ * bearer secret from the shared Entity decryption key.
+ */
+export const generateHtlcPaymentPreimage = (): string => randomBytes32Hex();
+
+const generateHtlcEphemeralPrivateKey = (): string => {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  // Make the serialized private scalar canonical before noble applies the same
+  // RFC 7748 clamping internally.
+  bytes[0] = bytes[0]! & 248;
+  bytes[31] = (bytes[31]! & 127) | 64;
   return `0x${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
 };
 
@@ -99,32 +100,34 @@ export type MaterializeOriginatedHtlcPaymentsInput = Readonly<{
   state: EntityState;
   proposalTxs: readonly EntityTx[];
   profiles: readonly Profile[];
-  sourceEntityEncryptionPrivateKey: string;
-  parentFrameHash: string;
   height: number;
   resolveRoute(tx: HtlcPaymentTx): Promise<readonly string[]>;
+  createPreimage?: () => string;
+  createEphemeralPrivateKey?: (txHash: string, hopIndex: number) => string;
 }>;
 
 export const materializeOriginatedHtlcPayments = async (
   input: MaterializeOriginatedHtlcPaymentsInput,
 ): Promise<PreparedOriginatedHtlcPayment[]> => {
   const originated: PreparedOriginatedHtlcPayment[] = [];
+  const activeHashlocks = new Set([...input.state.htlcRoutes.keys()].map(hashlock => hashlock.toLowerCase()));
   for (const [txIndex, candidate] of input.proposalTxs.entries()) {
     if (candidate.type !== 'htlcPayment') continue;
-    exactRawPayment(candidate);
+    assertRawHtlcPayment(candidate);
     const source = entityId(input.state.entityId, 'HTLC_PAYMENT_SOURCE_INVALID');
     const target = entityId(candidate.data.targetEntityId, 'HTLC_PAYMENT_TARGET_INVALID');
     const selectedRoute = candidate.data.route.length > 0 ? candidate.data.route : await input.resolveRoute(candidate);
     const route = normalizeRoute(selectedRoute, source, target);
     const txHash = hashRawHtlcPaymentTx(candidate);
-    const secret = deriveHtlcPaymentSecret(input.sourceEntityEncryptionPrivateKey, {
-      sourceEntityId: source, parentFrameHash: input.parentFrameHash,
-      height: input.height, txIndex, txHash,
-    });
+    const localSecret = getDeterministicHtlcTestSecret(candidate);
+    const secret = localSecret ?? (input.createPreimage ?? generateHtlcPaymentPreimage)();
+    if (!/^0x[0-9a-f]{64}$/.test(secret)) throw new Error('HTLC_PAYMENT_PREIMAGE_INVALID');
     const hashlock = hashHtlcSecret(secret).toLowerCase();
-    if (candidate.data.hashlock !== undefined && candidate.data.hashlock.toLowerCase() !== hashlock) {
+    if (candidate.data.hashlock !== undefined && candidate.data.hashlock !== hashlock) {
       throw new Error('HTLC_PAYMENT_HASHLOCK_MISMATCH');
     }
+    if (activeHashlocks.has(hashlock)) throw new Error(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${hashlock}`);
+    activeHashlocks.add(hashlock);
     const startedAtMs = candidate.data.startedAtMs ?? input.state.timestamp;
     if (!Number.isSafeInteger(startedAtMs) || startedAtMs !== input.state.timestamp) throw new Error('HTLC_PAYMENT_STARTED_AT_INVALID');
     const quote = quoteHtlcPaymentRoute(input.profiles, route, candidate.data.tokenId, candidate.data.amount);
@@ -160,10 +163,10 @@ export const materializeOriginatedHtlcPayments = async (
       return fromAccount.domain;
     });
     const envelope = await createOnionEnvelopes(
-      route, secret, publicKeys, domains, input.sourceEntityEncryptionPrivateKey,
+      route, secret, publicKeys, domains,
       quote.hopForwardAmounts, candidate.data.description, startedAtMs,
       { rootLockId: lockId, hashlock, tokenId: candidate.data.tokenId, senderLockAmount: quote.senderLockAmount, timelock, revealBeforeHeight },
-      { sourceEntityId: source, parentFrameHash: input.parentFrameHash, entityHeight: input.height, paymentTxHash: txHash },
+      hopIndex => (input.createEphemeralPrivateKey ?? (() => generateHtlcEphemeralPrivateKey()))(txHash, hopIndex),
     );
     originated.push({
       txHash, targetEntityId: target, tokenId: candidate.data.tokenId, recipientAmount: candidate.data.amount,
@@ -180,12 +183,106 @@ export const materializeOriginatedHtlcPayments = async (
   return originated;
 };
 
+type AssertOriginatedInput = Readonly<{
+  state: EntityState;
+  proposalTxs: readonly EntityTx[];
+  profiles: readonly Profile[];
+  height: number;
+  originated: readonly PreparedOriginatedHtlcPayment[];
+}>;
+
+const assertOriginRouteEvidence = (
+  input: AssertOriginatedInput,
+  tx: HtlcPaymentTx,
+  origin: PreparedOriginatedHtlcPayment,
+): void => {
+  const source = entityId(input.state.entityId, 'HTLC_PAYMENT_SOURCE_INVALID');
+  const target = entityId(tx.data.targetEntityId, 'HTLC_PAYMENT_TARGET_INVALID');
+  const route = normalizeRoute(origin.route, source, target);
+  if (tx.data.route.length > 0 && encodeCanonicalConsensusValue(route) !== encodeCanonicalConsensusValue(tx.data.route)) {
+    throw new Error(`HTLC_PAYMENT_PREPARED_ROUTE_MISMATCH:${origin.txHash}`);
+  }
+  const sourceProfile = uniqueProfile(input.profiles, source);
+  if (sourceProfile.entityEncryptionPublicKey !== input.state.entityEncryptionPublicKey) {
+    throw new Error('HTLC_PAYMENT_SOURCE_PROFILE_KEY_MISMATCH');
+  }
+  for (const [index, from] of route.slice(0, -1).entries()) {
+    const to = route[index + 1]!;
+    const left = uniqueProfile(input.profiles, from).accounts.find(row => row.counterpartyId.toLowerCase() === to);
+    const right = uniqueProfile(input.profiles, to).accounts.find(row => row.counterpartyId.toLowerCase() === from);
+    if (!left || !right) throw new Error(`HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING:${from}:${to}`);
+    if (!sameAccountStateDomain(left.domain, right.domain)) {
+      throw new Error(`HTLC_PAYMENT_PROFILE_ACCOUNT_DOMAIN_MISMATCH:${from}:${to}`);
+    }
+    if (index === 0) {
+      const local = input.state.accounts.get(to);
+      if (!local || !sameAccountStateDomain(local.state.domain, left.domain)) {
+        throw new Error(`HTLC_PAYMENT_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${source}:${to}`);
+      }
+    }
+  }
+};
+
+const assertOriginEconomics = (
+  input: AssertOriginatedInput,
+  tx: HtlcPaymentTx,
+  txIndex: number,
+  origin: PreparedOriginatedHtlcPayment,
+): void => {
+  const startedAtMs = tx.data.startedAtMs ?? input.state.timestamp;
+  if (!Number.isSafeInteger(startedAtMs) || startedAtMs !== input.state.timestamp) throw new Error('HTLC_PAYMENT_STARTED_AT_INVALID');
+  const quote = quoteHtlcPaymentRoute(input.profiles, [...origin.route], tx.data.tokenId, tx.data.amount);
+  if (quote.senderLockAmount > tx.data.maxSenderDebit) throw new Error('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
+  const window = resolvePaymentDeadlineWindow({
+    mode: tx.data.deliveryMode,
+    runtimeJHeight: input.state.lastFinalizedJHeight,
+    timestamp: startedAtMs,
+    totalHops: origin.route.length - 1,
+  });
+  const expected = {
+    targetEntityId: tx.data.targetEntityId.toLowerCase(), tokenId: tx.data.tokenId,
+    recipientAmount: tx.data.amount, description: tx.data.description ?? '', deliveryMode: tx.data.deliveryMode,
+    startedAtMs, senderLockAmount: quote.senderLockAmount, maxSenderDebit: tx.data.maxSenderDebit,
+    totalFee: quote.senderLockAmount - tx.data.amount,
+    lockId: generateLockId(origin.hashlock, input.height, txIndex, startedAtMs).toLowerCase(),
+    timelock: calculateHopTimelock(window.baseTimelock, 0),
+    revealBeforeHeight: calculateHopRevealHeight(window.baseHeight, 0, origin.route.length - 1),
+    nextHopEntityId: origin.route[1]!,
+  };
+  if (tx.data.hashlock !== undefined && tx.data.hashlock !== origin.hashlock) {
+    throw new Error(`HTLC_PAYMENT_PREPARED_HASHLOCK_MISMATCH:${origin.txHash}`);
+  }
+  for (const [key, value] of Object.entries(expected)) {
+    if (origin[key as keyof typeof origin] !== value) throw new Error(`HTLC_PAYMENT_PREPARED_${key.toUpperCase()}_MISMATCH:${origin.txHash}`);
+  }
+};
+
+/** Validators authenticate public payment facts but never recreate proposer entropy. */
+export const assertOriginatedHtlcPayments = (input: AssertOriginatedInput): void => {
+  const expectedTxs = input.proposalTxs
+    .map((tx, txIndex) => ({ tx, txIndex }))
+    .filter((row): row is { tx: HtlcPaymentTx; txIndex: number } => row.tx.type === 'htlcPayment');
+  if (expectedTxs.length !== input.originated.length) throw new Error('HTLC_PAYMENT_PREPARED_ORIGIN_COUNT_MISMATCH');
+  const origins = new Map(input.originated.map(origin => [origin.txHash, origin]));
+  const activeHashlocks = new Set([...input.state.htlcRoutes.keys()].map(hashlock => hashlock.toLowerCase()));
+  for (const { tx, txIndex } of expectedTxs) {
+    assertRawHtlcPayment(tx);
+    const txHash = hashRawHtlcPaymentTx(tx);
+    const origin = origins.get(txHash);
+    if (!origin) throw new Error(`HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:${txHash}`);
+    if (activeHashlocks.has(origin.hashlock)) throw new Error(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${origin.hashlock}`);
+    activeHashlocks.add(origin.hashlock);
+    assertOriginRouteEvidence(input, tx, origin);
+    assertOriginEconomics(input, tx, txIndex, origin);
+  }
+};
+
 export const validatePreparedHtlcPayment = (
   state: EntityState,
   tx: HtlcPaymentTx,
   infraContext: EntityInfraContext | undefined,
 ): PreparedOriginatedHtlcPayment => {
-  exactRawPayment(tx);
+  assertRawHtlcPayment(tx);
   if (!infraContext) throw new Error('HTLC_PAYMENT_INFRA_CONTEXT_REQUIRED');
   const txHash = hashRawHtlcPaymentTx(tx);
   const prepared = infraContext.htlc.originated.find(entry => entry.txHash === txHash);
@@ -195,6 +292,9 @@ export const validatePreparedHtlcPayment = (
     || prepared.maxSenderDebit !== tx.data.maxSenderDebit || prepared.deliveryMode !== tx.data.deliveryMode
     || prepared.startedAtMs !== (tx.data.startedAtMs ?? state.timestamp)) {
     throw new Error(`HTLC_PAYMENT_PREPARED_CONTEXT_MISMATCH:${txHash}`);
+  }
+  if (state.htlcRoutes.has(prepared.hashlock)) {
+    throw new Error(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${prepared.hashlock}`);
   }
   const account = state.accounts.get(prepared.nextHopEntityId);
   const delta = account?.state.deltas.get(prepared.tokenId);

@@ -340,8 +340,7 @@ describe('watchtower recovery full flow', () => {
         'blind_backup',
         encrypted.lookupKey,
         0,
-        encrypted.bundleHash,
-        encrypted.height,
+        encrypted,
         signedAt,
         undefined,
       ),
@@ -404,7 +403,7 @@ describe('watchtower recovery full flow', () => {
 
   test('frontend last-resort builder emits a tower-bound appointment for dispute-capable accounts', async () => {
     const runtimeSeed = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-    const rootWallet = new Wallet(hexlify(xln.deriveSignerKeySync(runtimeSeed, '1')));
+    const rootWallet = deriveFrontendWallet(runtimeSeed, 0);
     const signerAddress = rootWallet.address.toLowerCase();
     const entityId = xln.generateLazyEntityId([signerAddress], 1n).toLowerCase();
     const counterpartyId = xln.generateLazyEntityId([addr('55')], 1n).toLowerCase();
@@ -516,7 +515,7 @@ describe('watchtower recovery full flow', () => {
     await mkdir(towerRoot, { recursive: true });
 
     const runtimeSeed = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
-    const rootWallet = new Wallet(hexlify(xln.deriveSignerKeySync(runtimeSeed, '1')));
+    const rootWallet = deriveFrontendWallet(runtimeSeed, 0);
     const signerAddress = rootWallet.address.toLowerCase();
     const entityId = xln.generateLazyEntityId([signerAddress], 1n).toLowerCase();
     const counterpartyId = xln.generateLazyEntityId([addr('99')], 1n).toLowerCase();
@@ -621,6 +620,7 @@ describe('watchtower recovery full flow', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(upload.appointment),
     });
+    if (!put.ok) throw new Error(`TOWER_APPOINTMENT_UPLOAD_FAILED:${put.status}:${await put.text()}`);
     expect(put.ok).toBe(true);
 
     const initialProofbodyHash = `0x${'cc'.repeat(32)}`;

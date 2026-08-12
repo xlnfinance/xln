@@ -1,10 +1,10 @@
 import type { AccountFrame, AccountReplica, AccountTx } from '../../../types/account';
 import { HEAVY_LOGS } from '../../../infra/debug-flags';
-import { safeStringify } from '../../../protocol/serialization';
 import { decodeAccountFrame } from '../../validation/frame-validation';
 import { createStructuredLogger } from '../../../infra/logger';
 import {
   createFrameHash,
+  getCanonicalAccountFrameSizeBytes,
   MAX_FRAME_SIZE_BYTES,
 } from '../frame/hash';
 import { isLeftEntity } from '../../utils';
@@ -129,7 +129,7 @@ export const buildProposalFrame = async (
       },
     };
   }
-  const frameSize = safeStringify(frame).length;
+  const frameSize = getCanonicalAccountFrameSizeBytes(frame);
   if (frameSize > MAX_FRAME_SIZE_BYTES) {
     accountLog.warn('frame.too_large', { frameSize, limit: MAX_FRAME_SIZE_BYTES });
     return {

@@ -12,10 +12,13 @@ const ROOT = process.cwd();
 // vendored and historical trees out of the scan instead of weakening the
 // rule with per-file allowlists.
 const SCAN_ROOTS = [
+  'agents',
+  'ai',
   'brainvault',
   'cli',
   'custody',
   'debates',
+  'design',
   'e2e',
   'frontend/src',
   'jurisdictions',
@@ -27,6 +30,7 @@ const SCAN_ROOTS = [
   'scripts',
   'tests',
   'tools',
+  'types',
   'ui/src',
 ];
 const EXCLUDE_PARTS = [

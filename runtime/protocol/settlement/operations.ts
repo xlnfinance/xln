@@ -244,26 +244,19 @@ export function userAutoApprove(diff: SettlementDiff, iAmLeft: boolean): boolean
   // 2. Collateral changes are within counterparty's share
 
   const myReserveDiff = iAmLeft ? diff.leftDiff : diff.rightDiff;
+  const myCollateralShareDiff = iAmLeft
+    ? diff.ondeltaDiff
+    : diff.collateralDiff - diff.ondeltaDiff;
 
   // If my reserve decreases, I need to manually approve
   if (myReserveDiff < 0n) return false;
 
-  // If collateral decreases, check ondelta to see whose share is affected
-  if (diff.collateralDiff < 0n) {
-    // Collateral is being withdrawn
-    if (iAmLeft) {
-      // I'm left. ondeltaDiff < 0 means my share decreases → need approval
-      if (diff.ondeltaDiff < 0n) return false;
-    } else {
-      // I'm right. Right's share = collateral - ondelta.
-      // ondeltaDiff > 0 means left's share increases → right's share decreases → need approval
-      // ondeltaDiff = 0 and collateralDiff < 0 means right's share decreases → need approval
-      // Only safe if ondeltaDiff <= collateralDiff (left absorbs all the decrease)
-      // Actually: right's share change = collateralDiff - ondeltaDiff
-      // Safe if right's share doesn't decrease: collateralDiff - ondeltaDiff >= 0
-      if (diff.collateralDiff - diff.ondeltaDiff < 0n) return false;
-    }
-  }
+  // `ondelta` is left's collateral share; right owns the remainder. Checking
+  // only when total collateral decreases misses a pure ownership transfer with
+  // collateralDiff=0. Such a raw diff can take one side's collateral share
+  // without changing either reserve, so every negative own-share delta needs
+  // an explicit signature regardless of the aggregate collateral movement.
+  if (myCollateralShareDiff < 0n) return false;
 
   return true;
 }

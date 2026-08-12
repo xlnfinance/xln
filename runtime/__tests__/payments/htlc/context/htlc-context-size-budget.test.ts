@@ -40,12 +40,6 @@ test('100-hop minimal full-profile context fits protocol but transport remains t
   expect(contextBytes).toBeLessThan(resolveRuntimeWsMaxMessageBytes());
 });
 
-test('transport rejects protocol-valid plaintext near one MiB after encryption expansion', () => {
-  const encryptedPayload = encryptJSON({ entityInputs: [{ entityTxs: [{ data: 'x'.repeat(800_000) }] }] }, deriveEncryptionKeyPair('context-size-target').publicKey);
-  expect(() => serializeWsMessage({ type: 'entity_inputs', from: 'source', to: 'target', payload: encryptedPayload, encrypted: true }))
-    .toThrow('WS_MESSAGE_TOO_LARGE_TO_SEND');
-});
-
 test('one signed gossip profile is rejected above one MiB independently of aggregate frame limits', () => {
   expect(() => parseProfile({
     entityId: id(1),

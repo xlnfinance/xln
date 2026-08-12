@@ -861,10 +861,15 @@ describe('audit fail-fast regressions', () => {
     );
     const futureFrame = { ...oldFrame, timestamp: 130_001 };
     const regressedFrame = { ...oldFrame, timestamp: 999 };
+    const oversizedUtf8Frame = {
+      ...oldFrame,
+      accountTxs: [{ type: 'fixture', data: { note: 'é'.repeat(5_100_000) } }],
+    } as typeof oldFrame;
 
     expect(isWithinAccountFrameBounds(oldFrame, 100_000)).toBe(true);
     expect(isWithinAccountFrameBounds(futureFrame, 100_000)).toBe(false);
     expect(isWithinAccountFrameBounds(regressedFrame, 100_000)).toBe(true);
+    expect(isWithinAccountFrameBounds(oversizedUtf8Frame, 100_000)).toBe(false);
   });
 
   test('HTLC secret enforcement reserve closes on either entity time or finalized J-height', () => {

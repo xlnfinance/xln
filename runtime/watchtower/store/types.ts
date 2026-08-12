@@ -16,6 +16,8 @@ export type StoredLookupDoc = {
     slot: number;
     towerMode: TowerModeV1;
     bundle: EncryptedRuntimeRecoveryBundleV1;
+    ownerSignedAt: number;
+    encryptedEnvelopeHash: string;
     lastResortPayloadDigest: string;
     lastResortPayload?: TowerLastResortPayloadV1;
   }>;

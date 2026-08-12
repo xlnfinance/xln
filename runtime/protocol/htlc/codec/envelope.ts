@@ -17,8 +17,6 @@
  */
 
 import { keccak256 } from 'ethers';
-import { sha256 } from '@noble/hashes/sha2.js';
-import { hkdf } from '@noble/hashes/hkdf.js';
 import { HTLC, LIMITS } from '../../../config/constants';
 import { safeStringify } from '../../serialization';
 import { encryptOpaqueHtlcBytes, type OpaqueHtlcCiphertext } from '../multi-recipient';
@@ -33,13 +31,6 @@ export type HtlcEnvelopeBinding = Readonly<{
   senderLockAmount: bigint;
   timelock: bigint;
   revealBeforeHeight: number;
-}>;
-
-export type HtlcEphemeralDerivationContext = Readonly<{
-  sourceEntityId: string;
-  parentFrameHash: string;
-  entityHeight: number;
-  paymentTxHash: string;
 }>;
 
 export type HtlcEnvelopeContext = Readonly<{
@@ -135,12 +126,11 @@ export async function createOnionEnvelopes(
   secret: string,
   entityEncryptionPublicKeys?: ReadonlyMap<string, string>,
   hopAccountDomains?: readonly Readonly<{ chainId: number; depositoryAddress: string }>[],
-  sourceEntityEncryptionPrivateKey?: string,
   hopForwardAmounts?: Map<string, bigint>,
   description?: string,
   startedAtMs?: number,
   binding?: HtlcEnvelopeBinding,
-  derivationContext?: HtlcEphemeralDerivationContext,
+  ephemeralPrivateKeyAt?: (hopIndex: number) => string,
 ): Promise<OpaqueHtlcCiphertext> {
   if (route.length < 2) {
     throw new Error('Route must have at least sender and recipient');
@@ -172,37 +162,10 @@ export async function createOnionEnvelopes(
   } else if (uniqueEntities.size !== route.length) {
     throw new Error(`Route contains loops: ${route.length} entities but only ${uniqueEntities.size} unique`);
   }
-  if (!entityEncryptionPublicKeys || !hopAccountDomains || !sourceEntityEncryptionPrivateKey || !hopForwardAmounts || !binding || !derivationContext) {
-    throw new Error('Onion envelope encryption requires Entity keys, aligned Account domains, amounts, and lock binding');
+  if (!entityEncryptionPublicKeys || !hopAccountDomains || !hopForwardAmounts || !binding || !ephemeralPrivateKeyAt) {
+    throw new Error('Onion envelope encryption requires Entity keys, aligned Account domains, amounts, lock binding, and proposer entropy');
   }
   if (hopAccountDomains.length !== route.length - 1) throw new Error('HTLC_ACCOUNT_DOMAIN_COUNT_MISMATCH');
-  const ephemeralKey = (purpose: string, hopIndex: number): string => {
-    const normalizedSecret = sourceEntityEncryptionPrivateKey.startsWith('0x')
-      ? sourceEntityEncryptionPrivateKey.slice(2)
-      : sourceEntityEncryptionPrivateKey;
-    if (!/^[0-9a-fA-F]{64}$/.test(normalizedSecret)) throw new Error('HTLC_SOURCE_ENTITY_PRIVATE_KEY_INVALID');
-    const secretBytes = Uint8Array.from(normalizedSecret.match(/../g)!, value => Number.parseInt(value, 16));
-    const publicInfo = new TextEncoder().encode(safeStringify({
-      version: 'xln:htlc-ephemeral-key:v1',
-      purpose,
-      hopIndex,
-      route,
-      binding,
-      derivationContext,
-    }));
-    const digest = hkdf(
-      sha256,
-      secretBytes,
-      sha256(new TextEncoder().encode('xln:htlc-ephemeral-key:v1:salt')),
-      publicInfo,
-      32,
-    );
-    // RFC 7748 X25519 scalar clamping is explicit here so the deterministic
-    // KDF output is itself the canonical private scalar on every platform.
-    digest[0] = digest[0]! & 248;
-    digest[31] = (digest[31]! & 127) | 64;
-    return `0x${Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')}`;
-  };
 
   // Build onion layers (2024 User.ts pattern: encrypt innermost first, wrap outward)
   // Encrypt the preimage only inside the final recipient's onion layer. No
@@ -227,7 +190,7 @@ export async function createOnionEnvelopes(
     finalPayload,
     finalPublicKey,
     computeHtlcEnvelopeContextHash(contextAt(route, route.length - 1, binding, hopForwardAmounts, hopAccountDomains)),
-    ephemeralKey('onion-layer', route.length - 1),
+    ephemeralPrivateKeyAt(route.length - 1),
   );
 
   // Step 2: Wrap each hop's layer (from final backwards to first)
@@ -261,7 +224,7 @@ export async function createOnionEnvelopes(
       layerPayload,
       currentHopPublicKey,
       computeHtlcEnvelopeContextHash(contextAt(route, i, binding, hopForwardAmounts, hopAccountDomains)),
-      ephemeralKey('onion-layer', i),
+      ephemeralPrivateKeyAt(i),
     );
   }
 

@@ -265,6 +265,7 @@ async function registerDirectPushWakeToken(baseUrl: string, params: {
     params.platform,
     params.chainId,
     params.depositoryAddress,
+    params.rpcUrl,
     signedAt,
   ));
   const response = await fetch(`${baseUrl}/api/push/register`, {

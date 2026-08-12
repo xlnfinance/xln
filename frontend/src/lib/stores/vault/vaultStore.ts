@@ -552,8 +552,7 @@ async function uploadRuntimeRecoverySnapshot(runtimeId: string, env: RuntimeRepl
     'blind_backup',
     encrypted.lookupKey,
     backupSlot,
-    encrypted.bundleHash,
-    encrypted.height,
+    encrypted,
     signedAt,
     undefined,
   );

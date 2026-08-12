@@ -244,7 +244,7 @@ type EntityTxPayload =
         description?: string;
         deliveryMode: Extract<PaymentDeliveryMode, 'instant' | 'async'>;
         startedAtMs?: number;
-        /** Optional caller commitment; preimage is derived privately by the proposer. */
+        /** Optional local caller commitment; the preimage never enters consensus. */
         hashlock?: string;
       };
     }

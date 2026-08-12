@@ -17,7 +17,7 @@ import { findAccountKey } from '../tx/account-key';
 import { HTLC } from '../../config/constants';
 import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../../routing/fees';
 import type { Profile } from '../profile';
-import { hashRawHtlcPaymentTx, materializeOriginatedHtlcPayments } from './payment-admission';
+import { assertOriginatedHtlcPayments, materializeOriginatedHtlcPayments } from './payment-admission';
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import { validateHtlcPreparedInfraContext } from './prepared-context-validation';
@@ -202,8 +202,6 @@ export const materializeHtlcPreparedInfraContext = async (
     state: input.state,
     proposalTxs: input.proposalTxs,
     profiles: input.profiles,
-    sourceEntityEncryptionPrivateKey: input.entityEncryptionPrivateKey,
-    parentFrameHash: input.parentFrameHash,
     height: input.height,
     resolveRoute: input.resolveRoute,
   });
@@ -216,8 +214,7 @@ export const assertHtlcPreparedInfraContext = async (
 ): Promise<void> => {
   const actual = validateHtlcPreparedInfraContext(input.context.htlc);
   const online = new Map(input.context.peerAssertions.map(assertion => [assertion.entityId, assertion.online]));
-  const routes = new Map(actual.originated.map(origin => [origin.txHash, origin.route]));
-  const expected = await materializeHtlcPreparedInfraContext({
+  const replayInput: MaterializeHtlcPreparedContextInput = {
     state: input.state,
     proposalTxs: input.proposalTxs,
     entityEncryptionPublicKey: input.state.entityEncryptionPublicKey,
@@ -226,14 +223,18 @@ export const assertHtlcPreparedInfraContext = async (
     profiles: input.context.gossipProfiles,
     parentFrameHash: input.context.parentFrameHash,
     height: input.context.height,
-    resolveRoute: async tx => {
-      const txHash = hashRawHtlcPaymentTx(tx);
-      const route = routes.get(txHash);
-      if (!route) throw new Error(`HTLC_PAYMENT_DISCOVERED_ROUTE_REQUIRED:${txHash}`);
-      return route;
-    },
-  });
-  if (encodeCanonicalConsensusValue(expected) !== encodeCanonicalConsensusValue(actual)) {
-    throw new Error('HTLC_PREPARED_CONTEXT_REPLAY_MISMATCH');
+    resolveRoute: async () => { throw new Error('HTLC_PAYMENT_VALIDATOR_ROUTE_RESOLUTION_FORBIDDEN'); },
+  };
+  assertEntityEncryptionKeypair(replayInput.entityEncryptionPublicKey, replayInput.entityEncryptionPrivateKey);
+  const expectedEntries = canonicalizeInboundEntries(collectInboundEntries(replayInput));
+  if (encodeCanonicalConsensusValue(expectedEntries) !== encodeCanonicalConsensusValue(actual.entries)) {
+    throw new Error('HTLC_PREPARED_INBOUND_REPLAY_MISMATCH');
   }
+  assertOriginatedHtlcPayments({
+    state: input.state,
+    proposalTxs: input.proposalTxs,
+    profiles: input.context.gossipProfiles,
+    height: input.context.height,
+    originated: actual.originated,
+  });
 };

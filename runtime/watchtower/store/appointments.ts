@@ -6,7 +6,10 @@ import type {
   TowerReceiptV1,
 } from '../../storage/recovery/bundle/types';
 import { normalizeTowerModeV1 } from '../../storage/recovery/bundle/types';
-import { computeTowerLastResortPayloadDigest } from '../../storage/recovery/bundle/crypto';
+import {
+  computeEncryptedRuntimeRecoveryEnvelopeHash,
+  computeTowerLastResortPayloadDigest,
+} from '../../storage/recovery/bundle/crypto';
 import { deserializeTaggedJson } from '../../protocol/serialization';
 import {
   computeStoredLookupBytes,
@@ -97,24 +100,47 @@ export const upsertAppointment = async (
     throw new Error(`TOWER_LOOKUP_RUNTIME_ID_MISMATCH:${existing.runtimeId}:${runtimeId}`);
   }
   const sequence = Math.max(0, ...existing.receipts.map(receipt => receipt.sequence || 0)) + 1;
+  const ownerSignedAt = Math.max(0, Math.floor(Number(appointment.ownerProof.signedAt || 0)));
   const lastResortPayloadDigest = computeTowerLastResortPayloadDigest(appointment.lastResortPayload);
+  const encryptedEnvelopeHash = computeEncryptedRuntimeRecoveryEnvelopeHash(appointment.bundle);
+  const sameSlotEntries = existing.bundles.filter(
+    entry =>
+      entry.slot === slot
+      && entry.towerMode === towerMode
+      && (entry.bundle.kind ?? 'snapshot') === (appointment.bundle.kind ?? 'snapshot'),
+  );
+  const latestSameSlot = sameSlotEntries.reduce<(typeof sameSlotEntries)[number] | undefined>(
+    (latest, entry) => !latest || entry.ownerSignedAt > latest.ownerSignedAt ? entry : latest,
+    undefined,
+  );
+  if (latestSameSlot && latestSameSlot.ownerSignedAt > ownerSignedAt) {
+    throw new Error('TOWER_APPOINTMENT_STALE');
+  }
+  if (
+    latestSameSlot
+    && latestSameSlot.ownerSignedAt === ownerSignedAt
+    && (
+      latestSameSlot.encryptedEnvelopeHash !== encryptedEnvelopeHash
+      || latestSameSlot.lastResortPayloadDigest !== lastResortPayloadDigest
+    )
+  ) {
+    throw new Error('TOWER_APPOINTMENT_REPLAY_MISMATCH');
+  }
   const candidate = {
     slot,
     towerMode,
     bundle: appointment.bundle,
+    ownerSignedAt,
+    encryptedEnvelopeHash,
     lastResortPayloadDigest,
     ...(appointment.lastResortPayload ? { lastResortPayload: structuredClone(appointment.lastResortPayload) } : {}),
   };
   const sortedBundles = sortStoredBundles([
     candidate,
-    ...existing.bundles.filter(
-      entry =>
-        !(
-          entry.slot === slot &&
-          entry.towerMode === towerMode &&
-          entry.bundle.bundleHash === appointment.bundle.bundleHash
-        ),
-    ),
+    ...existing.bundles.filter(entry =>
+      entry.slot !== slot
+      || entry.towerMode !== towerMode
+      || (entry.bundle.kind ?? 'snapshot') !== (appointment.bundle.kind ?? 'snapshot')),
   ]);
   const nextBundles = retainAppointmentBundles(sortedBundles, towerMode, context.maxBundlesPerLookupKey);
   const nextDoc: StoredLookupDoc = {

@@ -86,6 +86,22 @@ export async function applyCommittedHtlcLockFollowup(
     || binding.timelock !== lock.timelock
     || binding.revealBeforeHeight !== lock.revealBeforeHeight
   ) throw new Error(`HTLC_PREPARED_BINDING_MISMATCH:${lock.lockId}`);
+  // A hashlock is the Entity-wide identity of one live routed payment. Without
+  // this guard, a peer can commit a second lock through another Account and
+  // replace the honest route below. The eventual preimage would then settle
+  // the attacker's inbound lock while the honest upstream lock times out,
+  // transferring the hub's outbound principal. The Account lock is already
+  // committed, so reject only that colliding lock and preserve the first route.
+  if (ctx.newState.htlcRoutes.has(lock.hashlock)) {
+    ctx.accountTxs.push({
+      accountId: ctx.input.fromEntityId.toLowerCase(),
+      tx: {
+        type: 'htlc_resolve',
+        data: { lockId: lock.lockId, outcome: 'error', reason: 'hashlock_already_active' },
+      },
+    });
+    return;
+  }
   if (prepared.outcome.kind === 'reject') {
     ctx.accountTxs.push({
       accountId: ctx.input.fromEntityId.toLowerCase(),

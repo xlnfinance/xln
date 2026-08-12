@@ -10,13 +10,23 @@ const id = (byte: string): string => `0x${byte.repeat(64)}`;
 const domain = { chainId: 31337, depositoryAddress: `0x${'11'.repeat(20)}` };
 const opaque = { version: 'xln:htlc-opaque:v1' as const, ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' };
 
-const setup = (kind: 'forward' | 'reject' | 'final') => {
-  const from = id('1');
-  const to = id('2');
-  const next = id('3');
-  const lockId = id('4');
-  const hashlock = id('5');
-  const frameHash = id('6');
+type SetupOverrides = {
+  from?: string;
+  to?: string;
+  next?: string;
+  lockId?: string;
+  hashlock?: string;
+  frameHash?: string;
+  state?: { entityId: string; timestamp: number; htlcRoutes: Map<string, unknown>; lockBook: Map<string, unknown> };
+};
+
+const setup = (kind: 'forward' | 'reject' | 'final', overrides: SetupOverrides = {}) => {
+  const from = overrides.from ?? id('1');
+  const to = overrides.to ?? id('2');
+  const next = overrides.next ?? id('3');
+  const lockId = overrides.lockId ?? id('4');
+  const hashlock = overrides.hashlock ?? id('5');
+  const frameHash = overrides.frameHash ?? id('6');
   const envelopeHash = hashOpaqueHtlcCiphertext(opaque);
   const lock = { lockId, hashlock, tokenId: 1, amount: 10n, timelock: 100_000n, revealBeforeHeight: 100, envelopeHash };
   const tx = { type: 'htlc_lock' as const, data: { ...lock, envelope: opaque } };
@@ -26,7 +36,7 @@ const setup = (kind: 'forward' | 'reject' | 'final') => {
     lockId, envelopeHash, hashlock, tokenId: 1, amount: 10n, timelock: 100_000n, revealBeforeHeight: 100,
   };
   const accountTxs: Array<{ accountId: string; tx: unknown }> = [];
-  const state = { entityId: to, timestamp: 1, htlcRoutes: new Map(), lockBook: new Map() };
+  const state = overrides.state ?? { entityId: to, timestamp: 1, htlcRoutes: new Map(), lockBook: new Map() };
   const outcome = kind === 'forward'
     ? { kind: 'forward' as const, nextHopEntityId: next, forwardAmount: 9n, innerEnvelope: opaque }
     : kind === 'final'
@@ -40,7 +50,7 @@ const setup = (kind: 'forward' | 'reject' | 'final') => {
     candidateEffects: [], consumedPreparedHtlcBindings,
     infraContext: { htlc: { entries: [{ binding, outcome }] } },
   };
-  return { context, tx, frame, accountTxs, state, next };
+  return { context, tx, frame, accountTxs, state, from, next, lockId, hashlock };
 };
 
 describe('same-frame incoming HTLC followup', () => {
@@ -91,6 +101,56 @@ describe('same-frame incoming HTLC followup', () => {
       tx: { type: 'htlc_lock', data: expect.objectContaining({ amount: 9n, envelope: opaque }) },
     }]);
     expect(fixture.state.htlcRoutes.size).toBe(1);
+  });
+
+  test('same Entity frame rejects a second peer lock with an active hashlock without replacing its route', async () => {
+    const first = setup('forward');
+    await applyCommittedHtlcLockFollowup(first.context as never, first.tx, first.frame as never, true);
+    const originalRoute = first.state.htlcRoutes.get(first.hashlock);
+
+    const collision = setup('forward', {
+      from: id('a'),
+      next: id('b'),
+      lockId: id('c'),
+      frameHash: id('d'),
+      hashlock: first.hashlock,
+      state: first.state,
+    });
+    await applyCommittedHtlcLockFollowup(
+      collision.context as never,
+      collision.tx,
+      collision.frame as never,
+      true,
+    );
+
+    expect(collision.accountTxs).toEqual([{
+      accountId: collision.from,
+      tx: {
+        type: 'htlc_resolve',
+        data: { lockId: collision.lockId, outcome: 'error', reason: 'hashlock_already_active' },
+      },
+    }]);
+    expect(first.state.htlcRoutes.size).toBe(1);
+    expect(first.state.htlcRoutes.get(first.hashlock)).toBe(originalRoute);
+    expect(originalRoute).toMatchObject({
+      inboundEntity: first.from,
+      inboundLockId: first.lockId,
+      outboundEntity: first.next,
+    });
+
+    // The downstream preimage still resolves the original upstream lock. A
+    // replaced route would instead pay the colliding peer and strand the first
+    // payer until timeout.
+    first.accountTxs.length = 0;
+    Object.assign(first.state, { htlcFeesEarned: 0n, crontabState: initCrontab() });
+    applyHtlcSecretFollowups({
+      env: {}, state: first.state, newState: first.state, outputs: [],
+      accountTxs: first.accountTxs, candidateEffects: [],
+    } as never, [{ secret: id('e'), hashlock: first.hashlock }]);
+    expect(first.accountTxs).toEqual([{
+      accountId: first.from,
+      tx: { type: 'htlc_resolve', data: { lockId: first.lockId, outcome: 'secret', secret: id('e') } },
+    }]);
   });
 
   test('queues reject and refuses consuming one prepared binding twice', async () => {

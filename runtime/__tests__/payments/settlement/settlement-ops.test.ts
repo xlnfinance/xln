@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { compileOps } from '../../../protocol/settlement/operations';
+import { compileOps, userAutoApprove } from '../../../protocol/settlement/operations';
 import type { SettlementOp } from '../../../types/account';
 
 test('compileOps rejects unknown settlement operation types without console substitution', () => {
@@ -32,6 +32,25 @@ test('compileOps preserves valid proposer-left r2c settlement diff semantics', (
     collateralDiff: 10n,
     ondeltaDiff: 10n,
   }]);
+});
+
+test('auto-approval rejects ondelta-only theft of either side collateral share', () => {
+  const stealFromRight = {
+    tokenId: 1,
+    leftDiff: 0n,
+    rightDiff: 0n,
+    collateralDiff: 0n,
+    ondeltaDiff: 100n,
+  };
+  const stealFromLeft = {
+    ...stealFromRight,
+    ondeltaDiff: -100n,
+  };
+
+  // Total collateral and both reserves stay unchanged. Only ownership moves:
+  // left owns `ondelta`, while right owns `collateral - ondelta`.
+  expect(userAutoApprove(stealFromRight, false)).toBe(false);
+  expect(userAutoApprove(stealFromLeft, true)).toBe(false);
 });
 
 test('compileOps rejects settlements the Solidity ABI or Account contract cannot execute', () => {

@@ -29,14 +29,27 @@ export class WebhookPushSender implements PushSender {
   readonly kind = 'webhook';
 
   constructor(
-    private readonly endpoint: string,
+    endpoint: string,
     private readonly authToken?: string,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly timeoutMs: number = DEFAULT_WEBHOOK_TIMEOUT_MS,
   ) {
-    if (!/^https?:\/\//i.test(endpoint)) throw new Error('PUSH_WEBHOOK_ENDPOINT_INVALID');
+    let parsed: URL;
+    try {
+      parsed = new URL(endpoint);
+    } catch {
+      throw new Error('PUSH_WEBHOOK_ENDPOINT_INVALID');
+    }
+    const loopback = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '::1';
+    if (parsed.username || parsed.password || (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && loopback))) {
+      throw new Error('PUSH_WEBHOOK_ENDPOINT_INVALID');
+    }
+    if (authToken && parsed.protocol !== 'https:') throw new Error('PUSH_WEBHOOK_AUTH_REQUIRES_HTTPS');
+    this.endpoint = parsed.toString();
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('PUSH_WEBHOOK_TIMEOUT_INVALID');
   }
+
+  private readonly endpoint: string;
 
   async send(notification: PushNotificationV1): Promise<PushSendResult> {
     const controller = new AbortController();

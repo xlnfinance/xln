@@ -167,13 +167,21 @@ export const decodeStoredLookupDoc = (raw: string, expectedLookupKey?: string): 
     const entry = record(value, 'TOWER_STORED_BUNDLE_ENTRY_INVALID');
     requireExactBoundaryKeys(
       entry,
-      ['slot', 'towerMode', 'bundle', 'lastResortPayloadDigest'],
+      ['slot', 'towerMode', 'bundle', 'ownerSignedAt', 'encryptedEnvelopeHash', 'lastResortPayloadDigest'],
       ['lastResortPayload'],
       'TOWER_STORED_BUNDLE_ENTRY_FIELDS_INVALID',
     );
     const slot = safeInt(entry['slot'], 'TOWER_STORED_BUNDLE_SLOT_INVALID');
     const towerMode = normalizeTowerModeV1(entry['towerMode']);
     const bundle = decodeBundle(entry['bundle'], lookupKey, runtimeId);
+    const ownerSignedAt = safeInt(entry['ownerSignedAt'], 'TOWER_STORED_OWNER_SIGNED_AT_INVALID');
+    const encryptedEnvelopeHash = text(
+      entry['encryptedEnvelopeHash'],
+      'TOWER_STORED_ENCRYPTED_ENVELOPE_HASH_INVALID',
+    ).toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(encryptedEnvelopeHash)) {
+      throw new Error('TOWER_STORED_ENCRYPTED_ENVELOPE_HASH_INVALID');
+    }
     const lastResortPayloadDigest = text(
       entry['lastResortPayloadDigest'],
       'TOWER_STORED_LAST_RESORT_DIGEST_INVALID',
@@ -185,6 +193,8 @@ export const decodeStoredLookupDoc = (raw: string, expectedLookupKey?: string): 
       slot,
       towerMode,
       bundle,
+      ownerSignedAt,
+      encryptedEnvelopeHash,
       lastResortPayloadDigest,
       ...(entry['lastResortPayload'] === undefined
         ? {}

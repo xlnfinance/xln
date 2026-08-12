@@ -1,24 +1,32 @@
-const FORBIDDEN_RPC_METHODS = new Set([
-  'eth_accounts',
-  'eth_coinbase',
-  'eth_sendTransaction',
-  'eth_sign',
-  'eth_signTransaction',
-  'eth_submitHashrate',
-  'eth_submitWork',
+// The browser bridge is read-only. An allowlist fails closed for new client
+// methods, including signing variants such as eth_signTypedData_v4 and raw
+// transaction broadcast, instead of relying on an incomplete denylist.
+const ALLOWED_RPC_METHODS = new Set([
+  'eth_blockNumber',
+  'eth_call',
+  'eth_chainId',
+  'eth_estimateGas',
+  'eth_feeHistory',
+  'eth_gasPrice',
+  'eth_getBalance',
+  'eth_getBlockByHash',
+  'eth_getBlockByNumber',
+  'eth_getBlockReceipts',
+  'eth_getBlockTransactionCountByHash',
+  'eth_getBlockTransactionCountByNumber',
+  'eth_getCode',
+  'eth_getLogs',
+  'eth_getProof',
+  'eth_getStorageAt',
+  'eth_getTransactionByBlockHashAndIndex',
+  'eth_getTransactionByBlockNumberAndIndex',
+  'eth_getTransactionByHash',
+  'eth_getTransactionCount',
+  'eth_getTransactionReceipt',
+  'eth_maxPriorityFeePerGas',
+  'net_version',
+  'web3_clientVersion',
 ]);
-
-const FORBIDDEN_RPC_PREFIXES = [
-  'admin_',
-  'anvil_',
-  'debug_',
-  'evm_',
-  'hardhat_',
-  'miner_',
-  'personal_',
-  'txpool_',
-  'wallet_',
-];
 
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1']);
 const LOOPBACK_CLIENTS = new Set(['localhost', '127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -68,7 +76,7 @@ export function findForbiddenRpcProxyMethod(bodyText: string): string | null {
     if (typeof method !== 'string' || !method) {
       return 'invalid-json-rpc';
     }
-    if (FORBIDDEN_RPC_METHODS.has(method) || FORBIDDEN_RPC_PREFIXES.some(prefix => method.startsWith(prefix))) {
+    if (!ALLOWED_RPC_METHODS.has(method)) {
       return method;
     }
   }

@@ -245,6 +245,7 @@ export const buildPushWakeRegistrationPayload = (
       platform,
       target.chainId,
       target.depositoryAddress,
+      target.rpcUrl,
       signedAt,
     ),
   };

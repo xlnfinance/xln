@@ -367,15 +367,14 @@ describe('runtime recovery tower', () => {
 
     const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
     expect(encrypted.compression).toBe('gzip');
-    const signedAt = 42_001;
+    const signedAt = Date.now();
     const signature = await wallet.signMessage(
       buildTowerAppointmentOwnerMessage(
         runtimeId,
         'blind_backup',
         encrypted.lookupKey,
         0,
-        encrypted.bundleHash,
-        encrypted.height,
+        encrypted,
         signedAt,
         undefined,
       ),
@@ -511,15 +510,14 @@ describe('runtime recovery tower', () => {
       },
     });
     const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
-    const signedAt = 42_000;
+    const signedAt = Date.now();
     const signature = await wallet.signMessage(
       buildTowerAppointmentOwnerMessage(
         runtimeId,
         'blind_backup',
         encrypted.lookupKey,
         0,
-        encrypted.bundleHash,
-        encrypted.height,
+        encrypted,
         signedAt,
         undefined,
       ),

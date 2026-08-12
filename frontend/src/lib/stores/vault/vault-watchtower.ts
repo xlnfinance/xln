@@ -224,6 +224,10 @@ export async function buildDelayedLastResortAppointmentsForTower(
         responseMode: 'last_resort',
         lastResortWindowSeconds,
       };
+      const appointmentBundle: EncryptedRuntimeRecoveryBundleV1 = {
+        ...encryptedBundle,
+        lookupKey,
+      };
       const signedAt = Date.now();
       const ownerProofSignature = await rootWallet.signMessage(
         xln.buildTowerAppointmentOwnerMessage(
@@ -231,8 +235,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
           'delayed_last_resort',
           lookupKey,
           0,
-          encryptedBundle.bundleHash,
-          encryptedBundle.height,
+          appointmentBundle,
           signedAt,
           lastResortPayload,
         ),
@@ -250,10 +253,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
           // Last-resort appointments use a separate blind lookup namespace so towers
           // cannot infer backup availability from the action channel and vice
           // versa. The ciphertext stays opaque to the tower either way.
-          bundle: {
-            ...encryptedBundle,
-            lookupKey,
-          },
+          bundle: appointmentBundle,
           lastResortPayload,
           ownerProof: {
             runtimeId: normalizedRuntimeId,

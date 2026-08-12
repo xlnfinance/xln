@@ -100,15 +100,14 @@ const createRuntimeAppointment = async () => {
     }],
   });
   const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
-  const signedAt = 123_456;
+  const signedAt = Date.now();
   const signature = await wallet.signMessage(
     buildTowerAppointmentOwnerMessage(
       runtimeId,
       'blind_backup',
       encrypted.lookupKey,
       0,
-      encrypted.bundleHash,
-      encrypted.height,
+      encrypted,
       signedAt,
       undefined,
     ),
@@ -126,7 +125,7 @@ const createRuntimeAppointment = async () => {
       signature,
     },
   };
-  return { appointment, encrypted };
+  return { appointment, encrypted, wallet };
 };
 
 describe('standalone watchtower service', () => {
@@ -188,7 +187,7 @@ describe('standalone watchtower service', () => {
     });
     servers.push(server);
     const base = `http://127.0.0.1:${server.server.port}`;
-    const { appointment, encrypted } = await createRuntimeAppointment();
+    const { appointment, encrypted, wallet } = await createRuntimeAppointment();
     for (const healthPath of ['/', '/api/tower/healthz']) {
       const health = await fetch(`${base}${healthPath}`);
       expect(health.ok).toBe(true);
@@ -210,17 +209,48 @@ describe('standalone watchtower service', () => {
     });
     expect(put.ok).toBe(true);
 
+    const alteredBundle = {
+      ...appointment.bundle,
+      ciphertext: `${appointment.bundle.ciphertext}00`,
+    };
+    const unsignedMutation = await fetch(`${base}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: serializeTaggedJson({ ...appointment, bundle: alteredBundle }),
+    });
+    await expect(unsignedMutation.text()).resolves.toContain('TOWER_APPOINTMENT_SIGNATURE_INVALID');
+
+    const alteredSignature = await wallet.signMessage(buildTowerAppointmentOwnerMessage(
+      appointment.ownerProof.runtimeId,
+      appointment.towerMode,
+      appointment.lookupKey,
+      appointment.slot,
+      alteredBundle,
+      appointment.ownerProof.signedAt,
+      appointment.lastResortPayload,
+    ));
+    const ambiguousRetry = await fetch(`${base}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: serializeTaggedJson({
+        ...appointment,
+        bundle: alteredBundle,
+        ownerProof: { ...appointment.ownerProof, signature: alteredSignature },
+      }),
+    });
+    await expect(ambiguousRetry.text()).resolves.toContain('TOWER_APPOINTMENT_REPLAY_MISMATCH');
+
     const unrelatedWallet = Wallet.createRandom();
     const unrelatedRuntimeId = unrelatedWallet.address.toLowerCase();
-    const signedAt = 123_457;
+    const signedAt = Date.now();
+    const conflictingBundle = { ...appointment.bundle, runtimeId: unrelatedRuntimeId };
     const signature = await unrelatedWallet.signMessage(
       buildTowerAppointmentOwnerMessage(
         unrelatedRuntimeId,
         'blind_backup',
         encrypted.lookupKey,
         0,
-        appointment.bundle.bundleHash,
-        appointment.bundle.height,
+        conflictingBundle,
         signedAt,
         undefined,
       ),
@@ -230,7 +260,7 @@ describe('standalone watchtower service', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         ...appointment,
-        bundle: { ...appointment.bundle, runtimeId: unrelatedRuntimeId },
+        bundle: conflictingBundle,
         ownerProof: { runtimeId: unrelatedRuntimeId, signedAt, signature },
       }),
     });
@@ -270,8 +300,17 @@ describe('standalone watchtower service', () => {
       maxStoredBytesPerLookupKey: 3 * 1024 * 1024,
     });
     servers.push(server);
-    const { appointment } = await createRuntimeAppointment();
+    const { appointment, wallet } = await createRuntimeAppointment();
     appointment.bundle.ciphertext = `0x${'ab'.repeat(640 * 1024)}`;
+    appointment.ownerProof.signature = await wallet.signMessage(buildTowerAppointmentOwnerMessage(
+      appointment.ownerProof.runtimeId,
+      appointment.towerMode,
+      appointment.lookupKey,
+      appointment.slot,
+      appointment.bundle,
+      appointment.ownerProof.signedAt,
+      appointment.lastResortPayload,
+    ));
     const body = JSON.stringify(appointment);
     expect(Buffer.byteLength(body, 'utf8')).toBeGreaterThan(1024 * 1024);
 
@@ -280,6 +319,7 @@ describe('standalone watchtower service', () => {
       headers: { 'content-type': 'application/json' },
       body,
     });
+    if (!response.ok) throw new Error(`TOWER_APPOINTMENT_UPLOAD_FAILED:${response.status}:${await response.text()}`);
     expect(response.status).toBe(200);
   });
 
@@ -354,15 +394,14 @@ describe('standalone watchtower service', () => {
       iv: '0x1234',
       ciphertext: '0xabcd',
     };
-    const signedAt = 123_456;
+    const signedAt = Date.now();
     const signature = await runtimeWallet.signMessage(
       buildTowerAppointmentOwnerMessage(
         runtimeId,
         'delayed_last_resort',
         lookupKey,
         0,
-        bundle.bundleHash,
-        bundle.height,
+        bundle,
         signedAt,
         lastResortPayload,
       ),
