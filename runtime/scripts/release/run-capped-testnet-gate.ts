@@ -11,6 +11,7 @@ import {
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
 } from '../e2e/harness/test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../../api/server/child-process-env';
+import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';
 
 const DEFAULT_POLICY_PATH = 'ops/capped-testnet-policy.json';
 
@@ -212,16 +213,15 @@ const runStep = async (step: GateStep): Promise<StepResult> => {
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', step.command], {
     cwd: process.cwd(),
     env: sanitizeChildProcessEnv(process.env),
+    detached: GATE_CHILD_PROCESS_DETACHED,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const prefix = `[capped:${step.name}]`;
   proc.stdout.on('data', chunk => process.stdout.write(`${prefix} ${chunk.toString()}`));
   proc.stderr.on('data', chunk => process.stderr.write(`${prefix} ${chunk.toString()}`));
+  let termination: Promise<void> | null = null;
   const timer = setTimeout(() => {
-    proc.kill('SIGTERM');
-    setTimeout(() => {
-      if (proc.exitCode === null) proc.kill('SIGKILL');
-    }, 5_000).unref();
+    termination = terminateGateProcessGroup(proc);
   }, step.timeoutMs);
   timer.unref();
   const code = await new Promise<number | null>((resolve, reject) => {
@@ -229,6 +229,7 @@ const runStep = async (step: GateStep): Promise<StepResult> => {
     proc.once('exit', resolve);
   });
   clearTimeout(timer);
+  if (termination) await termination;
   return { ...step, code, durationMs: Date.now() - startedAt };
 };
 

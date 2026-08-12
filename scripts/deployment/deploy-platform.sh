@@ -186,13 +186,13 @@ ensure_main_branch_for_push() {
   fi
 }
 
-ensure_clean_worktree_for_push() {
+ensure_clean_worktree_for_remote_deploy() {
   if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "Refusing --push with uncommitted tracked changes. Commit or stash them first." >&2
+    echo "REMOTE_DEPLOY_DIRTY_WORKTREE: commit or stash tracked changes first" >&2
     exit 1
   fi
   if [ -n "$(git ls-files --others --exclude-standard)" ]; then
-    echo "Refusing --push with untracked files. Commit, ignore, or remove them first." >&2
+    echo "REMOTE_DEPLOY_UNTRACKED_FILES: commit, ignore, or remove them first" >&2
     exit 1
   fi
 }
@@ -1285,9 +1285,15 @@ run_local_deploy() {
 }
 
 if [ -n "$REMOTE_HOST" ]; then
+  ensure_clean_worktree_for_remote_deploy
   if [ "$PUSH" = "1" ]; then
     ensure_main_branch_for_push
-    ensure_clean_worktree_for_push
+  fi
+
+  EXPECTED_DEPLOY_SHA="$(git rev-parse --verify 'HEAD^{commit}')"
+  if ! [[ "$EXPECTED_DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "REMOTE_DEPLOY_HEAD_INVALID:$EXPECTED_DEPLOY_SHA" >&2
+    exit 1
   fi
 
   ORIGIN_URL="$(git remote get-url origin 2>/dev/null || printf '%s' 'https://github.com/xlnfinance/xln.git')"
@@ -1302,12 +1308,17 @@ if [ -n "$REMOTE_HOST" ]; then
   remote_frontend_archive=""
   if [ "$BUILD_FRONTEND" = "1" ]; then
     build_remote_frontend_archive
+    ensure_clean_worktree_for_remote_deploy
     remote_frontend_archive="/tmp/$(basename "$PREBUILT_FRONTEND_ARCHIVE")"
     echo "[deploy] uploading prebuilt frontend to $REMOTE_HOST"
     scp "$PREBUILT_FRONTEND_ARCHIVE" "$REMOTE_HOST:$remote_frontend_archive"
   fi
   if [ "$PUSH" = "1" ]; then
-    ensure_clean_worktree_for_push
+    ensure_clean_worktree_for_remote_deploy
+    if [ "$(git rev-parse --verify 'HEAD^{commit}')" != "$EXPECTED_DEPLOY_SHA" ]; then
+      echo "REMOTE_DEPLOY_HEAD_CHANGED_DURING_BUILD" >&2
+      exit 1
+    fi
     echo "[deploy] pushing main to origin"
     git push origin main
   fi
@@ -1318,7 +1329,7 @@ if [ -n "$REMOTE_HOST" ]; then
   # manual recovery. In that case we must re-bootstrap the checkout before rebuilding
   # frontend/runtime. The first rollout preserves legacy checkout state for migration;
   # later rollouts clean it because production persistence lives in /var/lib/xln.
-  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else XLN_DIR=/root/xln; mkdir -p \"\$XLN_DIR\"; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; if [ ! -d .git ]; then echo '[deploy] remote checkout missing .git; reinitializing repository'; git init; fi; if ! git remote get-url origin >/dev/null 2>&1; then git remote add origin '$ORIGIN_URL'; else git remote set-url origin '$ORIGIN_URL'; fi; git fetch origin main; git reset --hard; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi; git checkout -B main origin/main; git reset --hard origin/main; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi;"
+  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else XLN_DIR=/root/xln; mkdir -p \"\$XLN_DIR\"; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; if [ ! -d .git ]; then echo '[deploy] remote checkout missing .git; reinitializing repository'; git init; fi; if ! git remote get-url origin >/dev/null 2>&1; then git remote add origin '$ORIGIN_URL'; else git remote set-url origin '$ORIGIN_URL'; fi; git fetch origin main; git cat-file -e '$EXPECTED_DEPLOY_SHA^{commit}'; git merge-base --is-ancestor '$EXPECTED_DEPLOY_SHA' origin/main; git reset --hard; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi; git checkout -B main '$EXPECTED_DEPLOY_SHA'; git reset --hard '$EXPECTED_DEPLOY_SHA'; test \"\$(git rev-parse HEAD)\" = '$EXPECTED_DEPLOY_SHA'; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi;"
   if [ -n "$remote_frontend_archive" ]; then
     remote_cmd="$remote_cmd rm -rf frontend/build; tar -xzf '$remote_frontend_archive' -C frontend; rm -f '$remote_frontend_archive';"
   fi

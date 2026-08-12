@@ -100,3 +100,12 @@ test('capped testnet gate starts from cleanup before writing run artifacts', () 
     source.indexOf('writeReport(args.outPath, baseReport)'),
   );
 });
+
+test('capped testnet timeout terminates the entire spawned process group', () => {
+  const source = readFileSync('runtime/scripts/release/run-capped-testnet-gate.ts', 'utf8');
+  expect(source).toContain("import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';");
+  expect(source).toContain('detached: GATE_CHILD_PROCESS_DETACHED');
+  expect(source).toContain('termination = terminateGateProcessGroup(proc)');
+  expect(source).not.toContain("proc.kill('SIGTERM')");
+  expect(source).not.toContain("proc.kill('SIGKILL')");
+});
