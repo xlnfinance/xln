@@ -12,7 +12,7 @@
   import { buildAccountTokenDetails, isAccountLeftPerspective } from '../../shared/account-token-details';
   import { amountToUsdMicros } from '$lib/utils/assetPricing';
   import { formatEntityId } from '$lib/utils/format';
-  import { getAccountUiStatus, getAccountUiStatusDescription, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
+  import { getAccountUiStatus, getAccountUiStatusDescription } from '$lib/utils/accountStatus';
   import { faucetPendingKey } from '../account-faucet';
   import { formatEntityNetworkLabel, normalizeJurisdictionDisplayName } from '../../swap/swap-panel-helpers';
 
@@ -161,7 +161,6 @@
   $: accountDeltaViewMode = $settings.accountDeltaViewMode ?? 'per-token';
   $: tokenSummaries = (() => {
     if (tokenDetails.length === 0 || !activeXlnFunctions) return [];
-    const isLeft = isAccountLeftPerspective(entityId, account.state);
     const rows: Array<{
       tokenId: number;
       symbol: string;
@@ -223,10 +222,7 @@
   $: faucetLabel = isDevnet ? 'Faucet' : '';
   $: liteMode = !!$settings.liteMode;
   $: uiStatus = getAccountUiStatus(account);
-  $: isPending = uiStatus === 'sent';
   $: hasActiveDispute = uiStatus === 'disputed';
-  $: isFinalizedDisputed = uiStatus === 'finalized_disputed';
-  $: statusLabel = getAccountUiStatusLabel(uiStatus);
   $: statusDescription = getAccountUiStatusDescription(uiStatus);
   $: accountHeight = Number(account.currentFrame?.height ?? account.currentHeight ?? 0);
   $: jFinalizedHeight = Number(account.state.lastFinalizedJHeight ?? 0);
@@ -259,7 +255,6 @@
     mounted = false;
     if (disputeClockTimer) clearInterval(disputeClockTimer);
   });
-  $: compactConsensusLabel = `${statusLabel} · A#${accountHeight} · J#${jFinalizedHeight}${jPendingSideSuffix}`;
   $: consensusUpdatedAt = Number(account.currentFrame?.timestamp ?? account.pendingFrame?.timestamp ?? 0);
   function formatDetailTimestamp(ms: number): string {
     if (!Number.isFinite(ms) || ms <= 0) return 'n/a';
@@ -334,11 +329,6 @@
   function toggleInlineDetails(tokenId: number | 'all', event?: Event): void {
     event?.stopPropagation();
     expandedDetailTokenId = expandedDetailTokenId === tokenId ? null : tokenId;
-  }
-
-  function handleFaucet(e: MouseEvent) {
-    e.stopPropagation();
-    dispatch('faucet', { counterpartyId, tokenId: agg.primaryTokenId });
   }
 
   function handleTokenFaucet(tokenId: number): void {

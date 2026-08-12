@@ -167,7 +167,6 @@
     $runtimeFrameEnv.state.eReplicas.clear();
     $runtimeFrameEnv.runtimeInput = { runtimeTxs: [], entityInputs: [], jInputs: [] } as RuntimeInput;
     $runtimeFrameEnv.history = [];
-    tutorialActive = false;
     publishCurrentEnv([]);
     lastAction = message;
     return true;
@@ -363,7 +362,6 @@
   // TUTORIAL SYSTEM - Autopilot Mode
   // ============================================================================
 
-  let tutorialActive = false;
   // Scenario Code - shows actual scenarios/ahb.ts from /runtime (via Vite raw import)
   let scenarioCodeTextarea: HTMLTextAreaElement;
   const scenarioCode = ahbScenarioCode;
@@ -410,14 +408,11 @@
     }
     ahbRunning = true;
     loading = true;
-    tutorialActive = true;
     try {
       const XLN = await getXLN();
 
       // Ensure env exists with seed + eReplicas
       ensureScenarioEnv(XLN, 'AHB');
-      const jadapter = await getJAdapterFromEnv();
-
       // CRITICAL: Clear old state BEFORE running demo
       $runtimeFrameEnv.state.eReplicas.clear();
       $runtimeFrameEnv.history = [];
@@ -433,7 +428,6 @@
 
       // NO autopilot - user controls historical frames via TimeMachine.
       // Keep the workspace LIVE on the scenario's final runtime env by default.
-      tutorialActive = false; // Don't show tutorial UI - just use TimeMachine
     } catch (err: any) {
       // CRITICAL: Still update history with frames created before error
       const frames = $runtimeFrameEnv?.history || [];
@@ -444,7 +438,6 @@
         lastAction = `❌ ${err.message}`;
       }
       console.error('[Tutorial] AHB error:', err);
-      tutorialActive = false;
     } finally {
       loading = false;
       ahbRunning = false; // Reset guard
@@ -550,7 +543,6 @@
       runtimeFrameHistory.set([]);
       runtimeFrameTimeIndex.set(-1);
       runtimeFrameIsLive.set(true);
-      tutorialActive = false;
       lastAction = 'Reset complete - ready for new scenario';
     } catch (err: any) {
       console.error('[Reset] Error:', err);
@@ -569,7 +561,6 @@
     }
     gridRunning = true;
     loading = true;
-    tutorialActive = true;
     try {
       const XLN = await getXLN();
 
@@ -593,7 +584,6 @@
         lastAction = `❌ ${err}`;
       }
       console.error('[Grid] Error:', err);
-      tutorialActive = false;
     } finally {
       loading = false;
       gridRunning = false;
@@ -609,7 +599,6 @@
     }
     settleRunning = true;
     loading = true;
-    tutorialActive = true;
     try {
       const XLN = await getXLN();
 
@@ -633,7 +622,6 @@
         lastAction = `❌ ${err}`;
       }
       console.error('[Settle] Error:', err);
-      tutorialActive = false;
     } finally {
       loading = false;
       settleRunning = false;

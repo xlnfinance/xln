@@ -190,13 +190,8 @@
   // Get current frame subtitle (Fed Chair educational content)
   $: currentSubtitle = $history[selectedFrameIndex]?.meta?.subtitle;
 
-  // FPS tracking
-  let fps = 0;
-  let frameTimestamps: number[] = [];
-
   // Dropdowns
   let showSpeedMenu = false;
-  let showLoopMenu = false;
   let remoteScanHeightDraft = '';
   let remoteScanError = '';
   let remoteEntityChanging = false;
@@ -214,17 +209,6 @@
     { value: 5.0, label: '5x' },
     { value: 10.0, label: '10x' }
   ];
-
-  // Calculate FPS from history updates
-  // FIXED: Only update when history length actually changes, not on every reactive cycle
-  let lastHistoryLength = 0;
-  $: if ($history.length > 0 && $history.length !== lastHistoryLength) {
-    const now = Date.now();
-    frameTimestamps.push(now);
-    frameTimestamps = frameTimestamps.filter(t => now - t < 60000); // Keep last minute
-    fps = frameTimestamps.length / 60;
-    lastHistoryLength = $history.length;
-  }
 
   // Format time from frame
   function formatTime(frameIndex: number): string {
@@ -310,7 +294,6 @@
 
   function setLoopMode(mode: typeof loopMode) {
     loopMode = mode;
-    showLoopMenu = false;
   }
 
   function markSlicePoint() {
@@ -721,7 +704,7 @@
           class="frame-badge"
           class:live={$isLive}
           data-testid="time-machine-frame-badge"
-          on:click={() => { showSpeedMenu = !showSpeedMenu; showLoopMenu = false; }}
+          on:click={() => { showSpeedMenu = !showSpeedMenu; }}
           title="Click for playback settings"
         >
           {$isLive ? `LIVE/${$history.length}` : `${selectedFrameIndex + 1}/${$history.length}`}

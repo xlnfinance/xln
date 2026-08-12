@@ -114,8 +114,6 @@ const asRecordArray = (value: unknown): Record<string, unknown>[] =>
 const isVideoArtifact = (artifact: QaArtifact): boolean =>
   artifact.kind === 'video' || String(artifact.contentType || '').startsWith('video/');
 
-const lowerText = (value: string | null | undefined): string => String(value || '').toLowerCase();
-
 const shardSearchText = (shard: QaShard): string => {
   const scenarioSteps = shard.scenario?.steps
     ?.map(step => `${step.title} ${step.text}`)

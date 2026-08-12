@@ -76,7 +76,7 @@
     };
   };
 
-  async function submitExtendCredit(successMessage: string) {
+  async function submitExtendCredit(_successMessage: string) {
     if (!effectiveCounterparty) return;
     try {
       const env = activeEnv;

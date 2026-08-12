@@ -24,12 +24,13 @@ function fixture(): string {
   writeFileSync(join(root, 'runtime/explicit.ts'), 'export const explicit = 13;\n');
   writeFileSync(join(root, 'runtime/feature/index.ts'), 'export const feature = 17;\n');
   writeFileSync(join(root, 'runtime/runtime.ts'), [
-    "import { value } from './helper';",
+    "import { value } from './helper.js';",
     "import { shared } from '../shared.ts';",
     "import { explicit } from './explicit.ts';",
     "import { feature } from './feature';",
     "import { unused } from 'package-import';",
-    'export const result = value + shared + explicit + feature + Number(Boolean(unused));',
+    "const fixture = \"import '../../outside.ts'\";",
+    'export const result = value + shared + explicit + feature + Number(Boolean(unused)) + fixture.length;',
     '',
   ].join('\n'));
   return root;

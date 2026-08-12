@@ -281,12 +281,11 @@ const preferReplicaNode = (left: RuntimeGraphNodeState, right: RuntimeGraphNodeS
 const accountState = (
   source: RuntimeGraphSource,
   node: RuntimeGraphNodeState,
-  counterpartyId: string,
+  _counterpartyId: string,
   account: unknown,
 ): RuntimeGraphAccountState => {
   const value = projectGraphAccountView(account);
   const observer = node.entityId;
-  const counterparty = id(counterpartyId);
   const leftEntityId = value.state.leftEntity;
   const rightEntityId = value.state.rightEntity;
   return {

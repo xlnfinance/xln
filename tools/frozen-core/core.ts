@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, posix, resolve, sep } from 'node:path';
+import * as ts from 'typescript';
 
 import type {
   FrozenCoreManifest,
@@ -12,8 +13,38 @@ import type {
 
 const LEAF_DOMAIN = Buffer.from('xln:frozen-core:leaf:v1\0');
 const DIRECTORY_DOMAIN = Buffer.from('xln:frozen-core:directory:v1\0');
-const IMPORT_PATTERN = /(?:import|export)\s+(?:[^'";]*?\sfrom\s*)?['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\)|import\(\s*['"]([^'"]+)['"]\s*\)/g;
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.svelte'];
+const SCRIPT_SOURCE_PATTERN = /\.(?:[cm]?[jt]sx?|sol)$/i;
+const SVELTE_SCRIPT_PATTERN = /<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi;
+
+const astDependencySpecifiers = (path: string, source: string): string[] => {
+  const scriptKind = /\.(?:jsx|tsx)$/i.test(path) ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind);
+  const specifiers: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
+      specifiers.push(node.moduleSpecifier.text);
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      const expression = node.moduleReference.expression;
+      if (expression && ts.isStringLiteralLike(expression)) specifiers.push(expression.text);
+    } else if (ts.isCallExpression(node) && node.arguments.length === 1) {
+      const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require';
+      const argument = node.arguments[0];
+      if ((isDynamicImport || isRequire) && argument && ts.isStringLiteralLike(argument)) specifiers.push(argument.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return specifiers;
+};
+
+export function sourceDependencySpecifiers(path: string, source: string): string[] {
+  if (SCRIPT_SOURCE_PATTERN.test(path)) return astDependencySpecifiers(path, source);
+  if (!path.toLowerCase().endsWith('.svelte')) return [];
+  return [...source.matchAll(SVELTE_SCRIPT_PATTERN)]
+    .flatMap((match, index) => astDependencySpecifiers(`${path}#script-${index}.ts`, match[1] ?? ''));
+}
 
 function sha256(...parts: Array<string | Buffer>): string {
   const hash = createHash('sha256');
@@ -83,17 +114,17 @@ export function buildFrozenTree(files: Array<Pick<FrozenFileBaseline, 'path' | '
 
 function resolveImport(source: string, specifier: string, root: string): string | null {
   if (!specifier.startsWith('.')) return null;
-  const base = posix.normalize(posix.join(posix.dirname(source), specifier));
-  const candidates = [base, ...SOURCE_EXTENSIONS.map((extension) => `${base}${extension}`), ...SOURCE_EXTENSIONS.map((extension) => `${base}/index${extension}`)];
+  const dependencyPath = specifier.split(/[?#]/, 1)[0] ?? '';
+  const base = posix.normalize(posix.join(posix.dirname(source), dependencyPath)).replace(/\/$/, '');
+  const sourceBase = base.replace(/\.(?:c|m)?jsx?$/i, '');
+  const candidates = [base, ...SOURCE_EXTENSIONS.map((extension) => `${sourceBase}${extension}`), ...SOURCE_EXTENSIONS.map((extension) => `${sourceBase}/index${extension}`)];
   return candidates.find((candidate) => existsSync(assertSafePath(root, candidate)) && lstatSync(assertSafePath(root, candidate)).isFile()) ?? null;
 }
 
 function mutableDependencies(root: string, source: string, frozenPaths: Set<string>): string[] {
   const text = readFileSync(assertSafePath(root, source), 'utf8');
-  const resolved = [...text.matchAll(IMPORT_PATTERN)]
-    .map((match) => match[1] || match[2] || match[3])
-    .filter(Boolean)
-    .map((specifier) => resolveImport(source, specifier!, root))
+  const resolved = sourceDependencySpecifiers(source, text)
+    .map((specifier) => resolveImport(source, specifier, root))
     .filter((path): path is string => Boolean(path) && !frozenPaths.has(path!));
   return [...new Set(resolved)].sort();
 }

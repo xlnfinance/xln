@@ -224,14 +224,6 @@
     consensusBlock = { number: consensusBlock.number + 1, txs: [], status: 'building' };
   }
 
-  // Auto-finalize every 3 seconds if block has any txs
-  let blockTimer = 0;
-  $: {
-    if (consensusBlock.txs.length > 0) {
-      // Block will finalize in animate() when full, or after 3 seconds
-    }
-  }
-
   onMount(() => {
     initializeDevices();
     animationFrame = requestAnimationFrame(animate);
@@ -328,7 +320,7 @@
         <svg class="device-scene" viewBox="0 0 {viewWidth} {viewHeight}" xmlns="http://www.w3.org/2000/svg">
           <!-- Raycast lines (when block finalizes, ALL nodes download) -->
           {#if raycastingBlock !== null}
-            {#each broadcastDevices as device, i}
+            {#each broadcastDevices as device}
               {#if device.status === 'ok' || device.status === 'struggling'}
                 <line
                   x1={device.x} y1={device.y}
@@ -343,7 +335,7 @@
           {/if}
 
           <!-- RPC zombie lines (dead nodes trust datacenters) -->
-          {#each broadcastDevices as device, i}
+          {#each broadcastDevices as device}
             {#if device.status === 'pruned' || device.status === 'offline'}
               <line
                 x1={device.x} y1={device.y}
@@ -382,7 +374,7 @@
           {/each}
 
           <!-- Devices -->
-          {#each broadcastDevices as device, i}
+          {#each broadcastDevices as device}
             <g transform="translate({device.x}, {device.y})">
               <!-- Device icon -->
               <image
@@ -449,7 +441,7 @@
           <span style="color: {deviceColor('ok')}">✓ {unicastAlive} alive</span>
         </div>
         <svg class="device-scene" viewBox="0 0 {viewWidth} {viewHeight}" xmlns="http://www.w3.org/2000/svg">
-          {#each unicastDevices as device, i}
+          {#each unicastDevices as device}
             <g transform="translate({device.x}, {device.y})">
               <image
                 href={device.icon}

@@ -22,6 +22,7 @@ import {
 } from '../../frontend/src/lib/releases/release-signature.ts';
 import type { ReleaseManifest, ReleaseSnapshot } from '../../tools/release-snapshot/types.ts';
 import { releaseSnapshotExclusion, resolveReleaseSnapshotDependency } from '../../tools/release-snapshot/collect.ts';
+import { sourceDependencySpecifiers } from '../../tools/frozen-core/core.ts';
 import { RELEASE_EDITORIAL_NOTICE, writeReleaseMarkdown } from '../../tools/release-snapshot/render.ts';
 
 const ROOT = resolve(import.meta.dir, '../..');
@@ -102,13 +103,25 @@ describe('Foundation release Hanko', () => {
 
     expect(resolveDependency('./explicit')).toBe('tools/release-snapshot/explicit.ts');
     expect(resolveDependency('./explicit.ts')).toBe('tools/release-snapshot/explicit.ts');
+    expect(resolveDependency('./explicit.js')).toBe('tools/release-snapshot/explicit.ts');
+    expect(resolveDependency('./explicit.js?raw')).toBe('tools/release-snapshot/explicit.ts');
     expect(resolveDependency('./feature')).toBe('tools/release-snapshot/feature/index.ts');
+    expect(resolveDependency('./feature/')).toBe('tools/release-snapshot/feature/index.ts');
     expect(resolveDependency('../shared')).toBe('tools/shared.ts');
     expect(resolveDependency('node:fs')).toBeNull();
     expect(resolveDependency('ethers')).toBeNull();
     expect(() => resolveDependency('../../../outside')).toThrow(
       'RELEASE_SNAPSHOT_DEPENDENCY_PATH_ESCAPE:tools/release-snapshot/collect.ts:../../../outside',
     );
+    expect(sourceDependencySpecifiers('tests/fixture.ts', [
+      `const importLine = "import { errorLog } from '../../../../stores/errorLogStore'";`,
+      `import { actual } from './actual.js';`,
+    ].join('\n'))).toEqual(['./actual.js']);
+    expect(sourceDependencySpecifiers('jurisdictions/contracts/fixture.sol', [
+      `pragma solidity ^0.8.0;`,
+      `import { EntityProvider } from './EntityProvider.sol';`,
+      `import './Depository.sol';`,
+    ].join('\n'))).toEqual(['./EntityProvider.sol', './Depository.sol']);
   });
 
   test('pins the checked-in Foundation board and rejects an attacker-owned 2-of-3 board', () => {

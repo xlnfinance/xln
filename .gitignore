@@ -35,6 +35,10 @@ frontend/ios/App/build/
 # Backend generated files
 dist/
 
+# Python generated files
+**/__pycache__/
+*.py[cod]
+
 # Contract artifacts (jurisdictions/)
 jurisdictions/artifacts/
 jurisdictions/cache/

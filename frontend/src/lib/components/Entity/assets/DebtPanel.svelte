@@ -209,10 +209,6 @@
     });
   }
 
-  function debtTone(_status: DebtEntry['status']): 'open' {
-    return 'open';
-  }
-
   function debtIndexLabel(entry: DebtEntry | null): string {
     if (!entry) return '—';
     const index = entry.currentDebtIndex ?? entry.createdDebtIndex;

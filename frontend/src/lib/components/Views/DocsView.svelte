@@ -64,7 +64,6 @@
   let isLoadingDoc = $state(false);
   let currentDoc = $state<DocEntry | null>(null);
   let currentDocId = $state('');
-  let currentDocContent = $state('');
   let renderedHtml = $state('');
   let headings = $state<TocHeading[]>([]);
   let loadError = $state('');
@@ -266,13 +265,11 @@
       const markdown = await response.text();
       currentDoc = doc;
       currentDocId = doc.id;
-      currentDocContent = markdown;
       headings = extractHeadings(markdown);
       renderedHtml = await renderMarkdown(doc, markdown);
     } catch (error) {
       loadError = `Failed to load document: ${errorMessage(error)}`;
       renderedHtml = '';
-      currentDocContent = '';
       headings = [];
     } finally {
       isLoadingDoc = false;

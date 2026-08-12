@@ -8,7 +8,6 @@
   import { activeRuntime } from '$lib/stores/vault/vaultStore';
 
   let head: StorageHead | null = null;
-  let checkpoints: Array<{ height?: number }> = [];
   let timeline: RuntimeAdapterTimelineIndexPage | null = null;
   let verification: unknown = null;
   let loading = false;
@@ -26,7 +25,7 @@
     loading = true;
     error = '';
     try {
-      [head, checkpoints, timeline] = await Promise.all([
+      [head, , timeline] = await Promise.all([
         runtimeQueryClient.readHead(),
         runtimeQueryClient.readCheckpoints(),
         runtimeQueryClient.readTimelineIndex({ limit: 40, scanLimit: 160 }),

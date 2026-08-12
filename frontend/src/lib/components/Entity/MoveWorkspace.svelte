@@ -91,12 +91,6 @@
     return getDisplayBalance(endpoint);
   }
 
-  function stripStepPrefix(step: string): string {
-    return step.replace(/^\d+\.\s*/, '').trim();
-  }
-
-  $: moveRouteKey = `${moveFromEndpoint}->${moveToEndpoint}`;
-  $: moveRouteDirect = moveRouteKey === 'external->external';
   $: moveRouteRequiresDetails = moveFromEndpoint === 'account'
     || moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint)
     || moveToEndpoint === 'account'
@@ -105,7 +99,7 @@
   $: moveUsesDraftAction = canAddMoveToExistingBatch();
   $: moveVisibleActionError = moveUsesDraftAction ? moveDraftError : moveBroadcastError;
   $: moveSourceBalanceLabel = formatAmount(moveSourceAvailableBalance, moveDisplayDecimals);
-  $: moveStepList = moveRouteSteps(moveFromEndpoint, moveToEndpoint);
+  $: void moveRouteSteps;
   $: onMoveVisualRoot(moveVisualRoot);
 
   onDestroy(() => {

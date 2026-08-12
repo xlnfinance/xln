@@ -73,13 +73,6 @@ def merge_speakers_with_transcript(diarization, transcript_json):
 
     return "\n\n".join(output_lines)
 
-def format_time(seconds):
-    """Format seconds to HH:MM:SS.mmm"""
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = seconds % 60
-    return f"{h:02d}:{m:02d}:{s:06.3f}"
-
 def main():
     if len(sys.argv) < 3:
         print("Usage: ./diarize.py <audio.m4a> <transcript.json> [output.txt]")

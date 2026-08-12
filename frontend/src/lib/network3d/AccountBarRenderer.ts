@@ -274,11 +274,8 @@ function createTokenBars(
       normalizedDirection,
       fromSegments,
       toSegments,
-      barHeight,
       fromEntitySize,
       toEntitySize,
-      fromCreditUsed,
-      toCreditUsed,
       settings,
       barRadius  // Pass adjusted radius for this token count
     );
@@ -291,8 +288,6 @@ function createTokenBars(
       fromSegments,
       toSegments,
       barHeight,
-      fromCreditUsed,
-      toCreditUsed,
       settings,
       barRadius  // Pass adjusted radius for this token count
     );
@@ -324,11 +319,8 @@ function renderSpreadMode(
   direction: THREE.Vector3,
   fromSegments: AccountSegments,
   toSegments: AccountSegments,
-  barHeight: number,
   fromEntitySize: number,
   toEntitySize: number,
-  fromCreditUsed: number,
-  toCreditUsed: number,
   settings: AccountBarSettings,
   barRadius: number  // Adjusted radius passed from parent
 ): void {
@@ -410,8 +402,6 @@ function renderCloseMode(
   fromSegments: AccountSegments,
   toSegments: AccountSegments,
   barHeight: number,
-  fromCreditUsed: number,
-  toCreditUsed: number,
   settings: AccountBarSettings,
   barRadius: number  // Adjusted radius passed from parent
 ): void {
@@ -486,8 +476,8 @@ function createBarCylinder(
   length: number,
   color: number,
   colorType: keyof typeof BAR_COLORS,
-  barSide: 'left' | 'right',
-  bilateralState: AccountBarVisual | null | undefined
+  _barSide: 'left' | 'right',
+  _bilateralState: AccountBarVisual | null | undefined
 ): THREE.Mesh {
   const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
   const isUnusedCredit = colorType === 'availableCredit';

@@ -17,8 +17,6 @@
   import { settings } from '$lib/stores/settingsStore';
   import {
     entityPositions,
-    xlnFunctions,
-    xlnInstance,
     refreshCurrentRuntimeProjection,
   } from '$lib/stores/xlnStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
@@ -68,7 +66,6 @@
 
   type RuntimeFrame = RuntimeReplica | EnvSnapshot;
   type JurisdictionLike = { name: string };
-  type JurisdictionEntry = { name?: string; rpcs?: string[] };
   interface Props {
     runtimeFrameEnv: Writable<RuntimeReplica | null>;
     runtimeFrameRevision?: Writable<number>;
@@ -165,7 +162,6 @@
   let viewMode = $state<ViewMode>('entity'); // Default to entity view (wallet = entity)
   let selectedEntityId = $state<string | null>(null);
   let selectedSignerId = $state<string | null>(null);
-  let selectedAccountId = $state<string | null>(null);
   let selectedJurisdictionName = $state<string | null>(null);
   let isCreatingJMachine = $state(false);
   let jMachineCreateError = $state('');
@@ -185,7 +181,6 @@
     activeInlinePanel = 'none';
     selectedEntityId = nextEntityId;
     selectedSignerId = nextSignerId || null;
-    selectedAccountId = null;
     selectedJurisdictionName = null;
     selectedInitialAction = action;
     workspaceActionRevision += 1;
@@ -200,14 +195,6 @@
     return vault?.signers?.[activeSignerIndex] || vault?.signers?.[0] || null;
   });
   const positionsMap = $derived($entityPositions);
-  const activeXlnFunctions = $derived($xlnFunctions);
-  const xlnReady = $derived(Boolean(activeXlnFunctions?.isReady));
-
-  const signerWalletAddress = $derived(signer?.address || '');
-  const signerWalletPrivateKey = $derived(
-    signer ? vaultOperations.getSignerPrivateKey(0) : null
-  );
-
   // Active runtime (optional for multi-runtime setups)
   const activeRuntime = $derived.by(() => $runtimes.get($activeRuntimeId));
   const isRemoteRuntime = $derived(activeRuntime?.type === 'remote' || $runtimeControllerHandle.mode === 'remote');
@@ -229,7 +216,6 @@
       runtimeFrameIsLive.set(true);
       selectedEntityId = null;
       selectedSignerId = null;
-      selectedAccountId = null;
       selectedJurisdictionName = null;
       isCreatingJMachine = false;
       jMachineCreateError = '';
@@ -243,7 +229,6 @@
     if (lastVaultId && lastVaultId !== currentVaultId) {
       selectedEntityId = null;
       selectedSignerId = null;
-      selectedAccountId = null;
       selectedJurisdictionName = null;
       isCreatingJMachine = false;
       jMachineCreateError = '';
@@ -351,7 +336,6 @@
     viewMode = 'entity';
     selectedEntityId = entityId;
     selectedSignerId = signerId || null;
-    selectedAccountId = null;
     selectedJurisdictionName = null;
   });
 
@@ -422,15 +406,8 @@
     if (replicaJurisdiction && replicaJurisdiction !== selectedJurisdictionName) {
       selectedEntityId = null;
       selectedSignerId = null;
-      selectedAccountId = null;
     }
   });
-
-  // Get selected account
-	  const selectedAccount = $derived.by(() => {
-	    if (!selectedReplica || !selectedAccountId) return null;
-	    return selectedReplica.state?.accounts?.get(selectedAccountId) || null;
-	  });
 
 	  const selectedReplicaJurisdiction = $derived.by(() => String(
 	    selectedReplica?.state?.config?.jurisdiction?.name
@@ -652,17 +629,6 @@
     return null;
   }
 
-  const signerNetworkEnabled = $derived.by(() => {
-    const jurisdictionName =
-      selectedReplica?.state?.config?.jurisdiction?.name
-      || selectedJurisdictionName
-      || null;
-    if (!jurisdictionName || !currentFrame?.state.jReplicas) return false;
-    const replicas: JurisdictionEntry[] = Array.from(currentFrame.state.jReplicas.values());
-    const match = replicas.find((replica) => replica?.name === jurisdictionName);
-    return Array.isArray(match?.rpcs) && match.rpcs.some((rpc: string) => !rpc.startsWith('browservm://'));
-  });
-
   const hasSigner = $derived(isRemoteRuntime || !!signer?.address);
   const activeVaultLocked = $derived(
     !isRemoteRuntime
@@ -774,7 +740,6 @@
     viewMode = 'entity';
     selectedEntityId = null;
     selectedSignerId = event.detail.signerId;
-    selectedAccountId = null;
   }
 
   // Handle entity selection from dropdown
@@ -783,7 +748,6 @@
     viewMode = 'entity';
     selectedEntityId = entityId;
     selectedSignerId = signerId;
-    selectedAccountId = null;
     selectedJurisdictionName = null; // Clear filter to allow any entity
     setRuntimeViewActiveEntityId(entityId);
     if (isRemoteRuntime) {
@@ -796,14 +760,12 @@
     writeOnboardingCompleteForEntities(runtimeEntityIds.length > 0 ? runtimeEntityIds : [selectedEntityId || ''], true);
     onboardingComplete = true;
     viewMode = 'entity';
-    selectedAccountId = null;
     activeInlinePanel = 'none';
   }
 
   function handleJurisdictionSelect(event: CustomEvent<{ name: string }>) {
     viewMode = 'entity';
     selectedJurisdictionName = event.detail.name;
-    selectedAccountId = null;
   }
 
   async function handleAddRuntime() {

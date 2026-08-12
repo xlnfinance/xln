@@ -194,7 +194,7 @@
     "check:determinism": "bun runtime/scripts/checks/architecture/check-determinism.ts",
     "check:determinism:static": "bun runtime/scripts/checks/architecture/check-determinism.ts --static-only",
     "check:j-event-catalog": "bun runtime/scripts/checks/consensus/check-j-event-catalog.ts",
-    "check:runtime-contract-types": "bun node_modules/@typescript/native/bin/tsc -p tsconfig.runtime-contract-tests.json --noEmit --checkers 4",
+    "check:runtime-contract-types": "bun node_modules/@typescript/native/bin/tsc -p tsconfig.runtime-contract-tests.json --noEmit --checkers 4 && bun runtime/scripts/checks/repository/check-test-import-resolution.ts",
     "soundcheck": "bun tools/soundcheck.ts",
     "release:snapshot": "bun tools/release-snapshot.ts",
     "release:launcher:build": "bun scripts/release/build-xlnfinance-package.ts",

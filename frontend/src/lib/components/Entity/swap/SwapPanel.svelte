@@ -109,14 +109,10 @@ export let runtimeView: SwapPanelRuntimeView | null = null;
 export let runtimeHeight = 0;
 export let counterpartyId: string = '';
 let orderbookScopeMode: 'aggregated' | 'selected' = 'selected';
-let swapPanelRoot: HTMLDivElement | null = null;
 let createOrderAccountId = '';
 let selectedBookAccountId = '';
 let activeOrderAccountId = '';
 let showOrderbook = true;
-let selectedRouteEntityId = '';
-let selectedRouteEntityName = '';
-let selectedRouteJurisdictionLabel = '';
 const {
   readAccountCapacityForReplica,
   hasTokenInReplicaAccount,
@@ -125,7 +121,6 @@ const {
   resolvePairOrientation,
   isLiquidToken,
   tokenIdsForJurisdiction,
-  buildPairOrientationsForTokenIds,
   buildPairOptions,
   planInboundCapacityForReplica,
   computeOrderNotionalUsd,
@@ -156,7 +151,6 @@ const orderbookSnapshotCacheBumpedAt = new Map<string, number>();
 let orderbookQuoteNonce = 0;
 let orderbookPairId = '1/2';
 let orderbookRefreshNonce = 0;
-let orderPercent = 100;
 let amountEditedByUser = false;
 let lastAutoAmountContextSignature = '';
 let lastAutoAmountCapacity = -1n;
@@ -195,15 +189,12 @@ let offerLifecycles: OfferLifecycle[] = [];
 let closedOfferLifecycles: OfferLifecycle[] = [];
 let closedOrderViews: ClosedOrderView[] = [];
 let filteredClosedOrderViews: ClosedOrderView[] = [];
-let wantTokenPresentInAccount = false;
 let availableGiveCapacity = 0n;
 let availableWantInCapacity = 0n;
 let autoInboundCreditTarget: bigint | null = null;
 let currentPeerCreditLimit = 0n;
 let formattedAvailableGiveAmount = '0';
 let formattedAvailableGive = '0';
-let formattedAvailableWantInAmount = '0';
-let formattedAvailableWantIn = '0';
 let targetCapacityAmount = 0n;
 let formattedTargetCapacityAmount = '0';
 let targetCapacityLabel = '0';
@@ -232,18 +223,13 @@ let preservePriceOnNextContextChange = false;
 let preserveAmountOnNextContextChange = false;
 let selectedSourceEntityValue = '';
 let routeDetailsOpen = false;
-let openTokenMenu: 'give' | 'want' | '' = '';
-let sourceMenuOpen = false;
 let routeMenuOpen = false;
 const routeMenuOpenStore = writable(false);
-let routeMenuToggleCount = 0;
-let routeMenuNativeClickCount = 0;
 let routeMenuSetCount = 0;
 let routeMenuLastSetReason = 'init';
 let ignoreOutsideMenuClickUntil = 0;
 let ignoreNextWindowMenuClick = false;
 let ignoreWindowMenuClickCount = 0;
-let hubMenuOpen = false;
 let crossTargetInCapacity = 0n;
 let selectedCrossTargetReplica: EntityReplica | null = null;
 let crossTargetHasAccount = false;
@@ -391,7 +377,6 @@ function isHubAccount(accountIdValue: string): boolean {
   return swapRuntimeView.isHubEntity(normalized);
 }
 $: hubAccountIds = accountIds.filter((id) => isHubAccount(id)).slice(0, 10);
-$: hiddenAccountCount = Math.max(0, accountIds.length - hubAccountIds.length);
 $: fallbackHubAccountId = firstAvailableHubId(hubAccountIds, [counterpartyId], isHubAccount);
 $: if (!resolveHubIdCandidate(selectedBookAccountId, hubAccountIds, isHubAccount) && fallbackHubAccountId) {
   selectedBookAccountId = fallbackHubAccountId;
@@ -402,12 +387,6 @@ $: if (!resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount)
 $: if (orderbookScopeMode === 'selected' && selectedBookAccountId) {
   createOrderAccountId = selectedBookAccountId;
 }
-$: currentHubSelection =
-  orderbookScopeMode === 'aggregated'
-    ? resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) || fallbackHubAccountId
-    : resolveHubIdCandidate(selectedBookAccountId, hubAccountIds, isHubAccount) ||
-      resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) ||
-      fallbackHubAccountId;
 $: activeOrderAccountId =
   orderbookScopeMode === 'aggregated'
     ? resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) || fallbackHubAccountId
@@ -502,17 +481,11 @@ function jurisdictionLabelForAssetKey(assetKey: string): string {
   if (targetRef && ref === targetRef) return targetJurisdictionLabel;
   return normalizeJurisdictionDisplayName(parsed.jurisdictionRef);
 }
-function entityAvatarSrc(entityIdValue: string): string {
-  const normalized = String(entityIdValue || '').trim();
-  if (!normalized || !activeXlnFunctions?.isReady) return '';
-  return activeXlnFunctions.generateEntityAvatar?.(normalized) || '';
-}
 function hubJurisdictionLabel(entityIdValue: string): string {
   const profileJurisdiction = getProfileJurisdictionName(getHubProfile(entityIdValue));
   return profileJurisdiction || sourceJurisdictionLabel;
 }
 $: selectedHubOptions = hubAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
-$: selectedHubOption = selectedHubOptions.find((hub) => hub.value === (createOrderAccountId || activeOrderAccountId)) || null;
 $: crossTargetOptions = buildCrossTargetOptions(swapRuntimeView, sourceEntityIdValue, currentReplica);
 $: routeOptions = buildRouteOptions(sourceEntityIdValue, currentReplica, activeOrderAccountId, crossTargetOptions);
 $: visibleRouteOptions =
@@ -590,19 +563,9 @@ $: targetRouteEntityLabel =
   swapRouteMode === 'cross' && selectedCrossTarget
     ? `${accountLabel(selectedCrossTarget.targetHubEntityId)} -> ${accountLabel(selectedCrossTarget.targetEntityId)}`
     : `${accountLabel(String(activeOrderAccountId || ''))} -> ${accountLabel(sourceEntityIdValue)}`;
-$: sourceChainLabel = selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel;
 $: selectedRouteUnavailableReason = selectedRouteOption?.disabledReason || '';
 $: routeVenueLabel = activeOrderAccountId ? accountLabel(activeOrderAccountId) : 'Select venue';
-$: bookVenueLabel = activeBookHubId ? accountLabel(activeBookHubId) : routeVenueLabel;
-$: selectedSourceEntityLabel = selectedSourceEntity?.label || sourceChainLabel || '';
 $: selectedRouteLabel = selectedRouteOption?.label || '';
-$: selectedRouteEntityId = swapRouteMode === 'cross' ? selectedRouteOption?.targetEntityId || selectedCrossTarget?.targetEntityId || '' : sourceEntityIdValue;
-$: selectedRouteEntityName = swapRouteMode === 'cross' ? accountLabel(selectedRouteEntityId) : accountLabel(sourceEntityIdValue);
-$: selectedRouteJurisdictionLabel = swapRouteMode === 'cross' ? selectedRouteOption?.targetJurisdiction || targetJurisdictionLabel : sourceJurisdictionLabel;
-$: selectedHubLabel = selectedHubOption?.label || routeVenueLabel || '';
-$: selectedHubJurisdictionLabel = hubJurisdictionLabel(createOrderAccountId || activeOrderAccountId) || sourceJurisdictionLabel;
-$: selectedHubDisplayLabel =
-  createOrderAccountId || activeOrderAccountId ? formatEntityNetworkLabel(selectedHubLabel, selectedHubJurisdictionLabel) : 'Select hub';
 $: routePathSourceLabel = sourceJurisdictionLabel || selectedRouteOption?.sourceJurisdiction || 'Current';
 $: routePathTargetLabel =
   swapRouteMode === 'cross'
@@ -617,7 +580,6 @@ $: routeSummaryAssetsLabel =
   swapRouteMode === 'cross'
     ? `${tokenNetworkLabel(giveToken, sourceJurisdictionLabel, tokenSymbol)} -> ${tokenNetworkLabel(wantToken, targetJurisdictionLabel, tokenSymbol)}`
     : `${giveTokenSymbol} -> ${wantTokenSymbol}`;
-$: swapTokenPairLabel = `${giveTokenSymbol} -> ${wantTokenSymbol}`;
 $: selectedCrossTargetReplica =
   selectedCrossTarget
     ? detailedTargetReplica?.entityId === selectedCrossTarget.targetEntityId
@@ -1488,10 +1450,7 @@ function selectSourceEntityOption(value: string): void {
   routeSelectionCommitNonce += 1;
   selectedOrderLevel = null;
   submitError = '';
-  sourceMenuOpen = false;
-  openTokenMenu = '';
   setRouteMenuOpen(false, 'source-change');
-  hubMenuOpen = false;
 }
 function handleGiveTokenChange(event: Event): void {
   const nextGive = Number.parseInt(String((event.currentTarget as HTMLSelectElement | null)?.value || ''), 10);
@@ -1520,84 +1479,14 @@ function tokenClass(symbol: string): string {
       .replace(/[^a-z0-9_-]/g, '') || 'token'
   );
 }
-function toggleTokenMenu(menu: 'give' | 'want'): void {
-  sourceMenuOpen = false;
-  setRouteMenuOpen(false, 'token-menu');
-  hubMenuOpen = false;
-  openTokenMenu = openTokenMenu === menu ? '' : menu;
-}
-function toggleSourceMenu(): void {
-  openTokenMenu = '';
-  setRouteMenuOpen(false, 'source-menu');
-  hubMenuOpen = false;
-  sourceMenuOpen = !sourceMenuOpen;
-}
 function setRouteMenuOpen(nextOpen: boolean, reason = 'unknown'): void {
   routeMenuSetCount += 1;
   routeMenuLastSetReason = `${reason}:${nextOpen ? 'open' : 'closed'}`;
   routeMenuOpen = nextOpen;
   routeMenuOpenStore.set(nextOpen);
 }
-function toggleRouteMenu(): void {
-  sourceMenuOpen = false;
-  openTokenMenu = '';
-  hubMenuOpen = false;
-  routeMenuToggleCount += 1;
-  setRouteMenuOpen(!routeMenuOpen, 'toggle');
-}
-function routeMenuButtonAction(node: HTMLButtonElement): { destroy: () => void } {
-  const handleClick = (event: MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-    routeMenuNativeClickCount += 1;
-    node.dataset['routeNativeClickCount'] = String(routeMenuNativeClickCount);
-    const nextOpen = node.dataset['routeMenuOpen'] !== 'true';
-    routeMenuToggleCount += 1;
-    node.dataset['routeMenuToggleCount'] = String(routeMenuToggleCount);
-    node.dataset['routeNextOpen'] = String(nextOpen);
-    ignoreOutsideMenuClickUntil = Date.now() + 1500;
-    ignoreNextWindowMenuClick = true;
-    ignoreWindowMenuClickCount = 4;
-    if (typeof window !== 'undefined') {
-      (window as Window & { __xlnRouteMenuSuppressWindowClickUntil?: number }).__xlnRouteMenuSuppressWindowClickUntil = Date.now() + 3000;
-    }
-    setRouteMenuOpen(nextOpen, 'route-button');
-  };
-  node.addEventListener('click', handleClick);
-  return {
-    destroy() {
-      node.removeEventListener('click', handleClick);
-    },
-  };
-}
-function toggleHubMenu(): void {
-  sourceMenuOpen = false;
-  openTokenMenu = '';
-  setRouteMenuOpen(false, 'hub-menu');
-  hubMenuOpen = !hubMenuOpen;
-}
-function selectGiveTokenOption(tokenIdValue: number): void {
-  setSwapTokens(tokenIdValue, wantToken);
-  sourceMenuOpen = false;
-  openTokenMenu = '';
-  setRouteMenuOpen(false, 'give-token');
-  hubMenuOpen = false;
-}
-function selectWantTokenOption(tokenIdValue: number): void {
-  setSwapTokens(giveToken, tokenIdValue);
-  sourceMenuOpen = false;
-  openTokenMenu = '';
-  setRouteMenuOpen(false, 'want-token');
-  hubMenuOpen = false;
-}
 function handleRouteSelectChange(event: Event): void {
   const nextValue = String((event.currentTarget as HTMLSelectElement | null)?.value || '');
-  selectRouteOption(nextValue);
-}
-function handleRouteCommitEvent(event: CustomEvent<{ value?: string }>): void {
-  const nextValue = String(event.detail?.value || '');
-  if (!nextValue) return;
   selectRouteOption(nextValue);
 }
 function commitRouteSelection(selection: { route: SwapRouteOption; target: CrossTargetOption | null }): void {
@@ -1611,30 +1500,13 @@ function selectRouteOption(value: string): void {
   const selection = buildCommittedRouteSelectionFromDom(routeSelectElement, value);
   if (!selection || selection.route.disabled) return;
   commitRouteSelection(selection);
-  sourceMenuOpen = false;
-  openTokenMenu = '';
   setRouteMenuOpen(false, 'route-select');
-  hubMenuOpen = false;
   submitError = '';
 }
-function dispatchRouteCommit(node: HTMLSelectElement, value: string): void {
-  const nextValue = String(value || '').trim();
-  if (!nextValue) return;
-  node.dataset['routeCommittedValue'] = nextValue;
-  node.dispatchEvent(
-    new CustomEvent('xlnroutecommit', {
-      bubbles: true,
-      detail: { value: nextValue },
-    }),
-  );
-}
 function closeSwapMenus(reason = 'window-close'): void {
-  sourceMenuOpen = false;
-  openTokenMenu = '';
   if (reason === 'escape') {
     setRouteMenuOpen(false, reason);
   }
-  hubMenuOpen = false;
 }
 function handleSwapWindowClick(event: MouseEvent): void {
   const globalSuppressUntil =
@@ -1664,11 +1536,6 @@ function formatPriceTicks(ticks: bigint): string {
   if (ORDERBOOK_PRICE_DECIMALS <= 0) return whole.toString();
   const frac = (ticks % ORDERBOOK_PRICE_SCALE).toString().padStart(ORDERBOOK_PRICE_DECIMALS, '0');
   return `${whole.toString()}.${frac}`;
-}
-function lotsToBaseWei(sizeLots: bigint, baseTokenId: number): bigint {
-  if (sizeLots <= 0n) return 0n;
-  if (!activeXlnFunctions?.isReady) return 0n;
-  return sizeLots * activeXlnFunctions.getSwapLotScale(baseTokenId);
 }
 function tokenSymbol(tokenIdValue: number): string {
   if (!Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 'Token';
@@ -1752,7 +1619,6 @@ $: giveTokenSymbol = selectedTokenSymbol(giveToken, giveTokenId, giveTokenOption
 $: wantTokenSymbol = selectedTokenSymbol(wantToken, wantTokenId, wantTokenOptions);
 $: {
   currentReplica;
-  wantTokenPresentInAccount = hasTokenInAccount(activeOrderAccountId, wantToken);
   availableGiveCapacity = readOutCapacity(activeOrderAccountId, giveToken);
   availableWantInCapacity = readInCapacity(activeOrderAccountId, wantToken);
 }
@@ -1820,15 +1686,10 @@ $: {
   if (!amountEditedByUser && activeOrderAccountId && Number.isFinite(giveToken) && giveToken > 0 && availableGiveCapacity !== lastAutoAmountCapacity) {
     lastAutoAmountCapacity = availableGiveCapacity;
     const autoSelection = computeOrderAmountSelection(100);
-    orderPercent = 100;
     orderAmountInput = autoSelection.amountInput;
     if (autoSelection.priceInput !== null) priceRatioInput = autoSelection.priceInput;
   }
 }
-$: formattedAvailableWantInAmount =
-  Number.isFinite(wantToken) && wantToken > 0 ? formatAmount(availableWantInCapacity, wantToken) : availableWantInCapacity.toString();
-$: formattedAvailableWantIn =
-  Number.isFinite(wantToken) && wantToken > 0 ? `${formattedAvailableWantInAmount} ${wantTokenSymbol}` : formattedAvailableWantInAmount;
 $: targetCapacityAmount = swapRouteMode === 'cross' ? crossTargetInCapacity : availableWantInCapacity;
 $: formattedTargetCapacityAmount =
   Number.isFinite(wantToken) && wantToken > 0 ? formatAmount(targetCapacityAmount, wantToken) : targetCapacityAmount.toString();
@@ -1852,14 +1713,6 @@ $: crossSwapSetupSteps = buildCrossSwapSetupSteps({
   creditIncreaseLabel: crossSetupCreditIncreaseLabel,
   tokenSymbol: wantTokenSymbol,
 });
-$: estimatedPrice = limitPriceTicks && limitPriceTicks > 0n ? formatPriceTicks(limitPriceTicks) : 'n/a';
-$: estimatedReceiveLabel =
-  Number.isFinite(wantToken) && wantToken > 0 ? `${formatAmount(canonicalWantAmount, wantToken)} ${wantTokenSymbol}` : canonicalWantAmount.toString();
-$: estimatedSpendLabel =
-  Number.isFinite(giveToken) && giveToken > 0 ? `${formatAmount(canonicalGiveAmount, giveToken)} ${giveTokenSymbol}` : canonicalGiveAmount.toString();
-$: sourceAssetLabel = tokenNetworkLabel(giveToken, sourceJurisdictionLabel, tokenSymbol);
-$: targetAssetLabel = tokenNetworkLabel(wantToken, targetJurisdictionLabel, tokenSymbol);
-$: swapRouteTitle = swapRouteMode === 'cross' ? `${sourceJurisdictionLabel} -> ${targetJurisdictionLabel}` : sourceJurisdictionLabel;
 // Enumerate function-boundary dependencies so a fresh book snapshot updates the visible price.
 $: {
   orderMode;
@@ -1871,9 +1724,6 @@ $: {
   marketPriceTicks = resolveReferencePriceTicks();
 }
 $: marketPriceLabel = marketPriceTicks && marketPriceTicks > 0n ? `${formatPriceTicks(marketPriceTicks)} ${quoteTokenSymbol}` : 'No market';
-$: marketPriceSideLabel = orderMode === 'sell-base' ? 'Best bid' : 'Best ask';
-$: leftoverGiveLabel =
-  Number.isFinite(giveToken) && giveToken > 0 ? `${formatAmount(giveAmountLeftover, giveToken)} ${giveTokenSymbol}` : giveAmountLeftover.toString();
 $: autoInboundCreditIncrease =
   autoInboundCreditTarget && autoInboundCreditTarget > currentPeerCreditLimit ? autoInboundCreditTarget - currentPeerCreditLimit : 0n;
 $: canAutoPrepareInboundCapacity = autoInboundCreditTarget !== null && autoInboundCreditIncrease > 0n;
@@ -2013,9 +1863,6 @@ $: autoCapacityNote = (() => {
   const increaseLabel = formatAmount(autoInboundCreditIncrease, wantToken);
   return `Placing this swap will auto-activate ${wantTokenSymbol} and set inbound capacity to ${targetLabel} ${wantTokenSymbol} (+${increaseLabel}).`;
 })();
-$: sourceCapacityShortfall = canonicalGiveAmount > availableGiveCapacity ? canonicalGiveAmount - availableGiveCapacity : 0n;
-$: hasSourceCapacityShortfall = canonicalGiveAmount > 0n && sourceCapacityShortfall > 0n;
-$: leftoverGiveNote = giveAmountLeftover > 0n ? `Canonical order leaves ${leftoverGiveLabel} unspent after lot quantization.` : '';
 $: capacityWarning = (() => {
   if (!activeOrderAccountId || !Number.isFinite(giveToken) || giveToken <= 0) return '';
   if (availableGiveCapacity <= 0n) return `No ${giveTokenSymbol} outbound capacity on ${sourceRouteEntityLabel}.`;
@@ -2055,8 +1902,6 @@ function computeOrderAmountSelection(percent: number): {
   const levelGiveTokenId = selectedOrderLevel.side === 'ask' ? selectedOrderLevel.quoteTokenId : selectedOrderLevel.baseTokenId;
   const selectedLevelAccountId =
     swapRouteMode === 'cross' ? activeOrderAccountId : createOrderAccountId || selectedBookAccountId || selectedOrderLevel.accountIds[0] || '';
-  const levelBaseDecimals = getTokenDecimals(selectedOrderLevel.baseTokenId);
-  const levelQuoteDecimals = getTokenDecimals(selectedOrderLevel.quoteTokenId);
   const levelGiveCapacity = readOutCapacity(selectedLevelAccountId, levelGiveTokenId);
   // A clicked level is the limit price; matching sweeps to it and GTC keeps any remainder.
   const rawGive = (levelGiveCapacity * BigInt(clamped)) / 100n;
@@ -2074,7 +1919,6 @@ function computeOrderAmountSelection(percent: number): {
 function applyOrderPercent(percent: number, markUserEdit = true) {
   const clamped = Math.max(0, Math.min(100, Math.round(percent)));
   const selection = computeOrderAmountSelection(clamped);
-  orderPercent = clamped;
   amountEditedByUser = markUserEdit;
   setOrderAmountInputValue(selection.amountInput);
   if (selection.priceInput !== null) priceRatioInput = selection.priceInput;
@@ -2196,15 +2040,7 @@ function handleSelectedHubChange(nextValue: string): void {
     createOrderAccountId = nextValue;
   }
   selectedOrderLevel = null;
-  hubMenuOpen = false;
-  sourceMenuOpen = false;
-  openTokenMenu = '';
   setRouteMenuOpen(false, 'hub-change');
-}
-function selectHubOption(nextValue: string): void {
-  const option = selectedHubOptions.find((candidate) => candidate.value === nextValue);
-  if (!option) return;
-  handleSelectedHubChange(option.value);
 }
 function handleOrderbookLevelClick(event: CustomEvent<SwapOrderbookLevelClickDetail>) {
   submitError = '';
@@ -2365,7 +2201,6 @@ $: {
 }
 $: baseTokenId = parsedOrderbookPair?.baseTokenId ?? giveToken;
 $: quoteTokenId = parsedOrderbookPair?.quoteTokenId ?? wantToken;
-$: baseTokenSymbol = tokenSymbol(baseTokenId);
 $: quoteTokenSymbol = tokenSymbol(quoteTokenId);
 $: orderbookPairDisplayLabel =
   swapRouteMode === 'cross' && activeCrossMarket
@@ -2431,7 +2266,6 @@ $: preparedOrder = (activeXlnFunctions, giveToken, wantToken, selectedOrderLevel
 $: canonicalPriceTicks = preparedOrder?.priceTicks ?? limitPriceTicks;
 $: canonicalGiveAmount = preparedOrder?.effectiveGive ?? 0n;
 $: canonicalWantAmount = preparedOrder?.effectiveWant ?? 0n;
-$: giveAmountLeftover = preparedOrder?.unspentGiveAmount ?? 0n;
 $: displayedSwapNetAuthorization = (() => {
   if (canonicalWantAmount <= 0n) return null;
   if (swapRouteMode === 'cross') return { maxFee: 0n, minNetReceive: canonicalWantAmount };
@@ -2748,7 +2582,6 @@ async function placeSwapOffer() {
     if (crossJurisdiction) {
       toasts.success('Cross-j swap preparation submitted');
     }
-    orderPercent = 100;
     selectedOrderLevel = null;
     setOrderAmountInputValue('');
     priceRatioInput = '';
@@ -2851,7 +2684,6 @@ function useMarketPrice(): void {
 <svelte:window on:click={handleSwapWindowClick} on:keydown={handleSwapWindowKeydown} />
 <div
   class="swap-panel"
-  bind:this={swapPanelRoot}
 >
   <div class="trade-grid" class:book-open={showOrderbook}>
       <SwapTicket

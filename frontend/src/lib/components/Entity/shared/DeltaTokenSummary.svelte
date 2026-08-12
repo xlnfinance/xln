@@ -55,7 +55,6 @@
   $: compactName = name || symbol;
   $: resolvedVisualScale = visualScale ?? buildTokenVisualScale(symbol, decimals, derived);
   $: outUsdHint = formatUsdHint(resolvedVisualScale?.outCapacityUsd ?? 0);
-  $: inUsdHint = formatUsdHint(resolvedVisualScale?.inCapacityUsd ?? 0);
   $: outHoldHint = formatHoldHint(derived.outTotalHold ?? 0n);
   $: inHoldHint = formatHoldHint(derived.inTotalHold ?? 0n);
 

@@ -161,12 +161,6 @@
     return `Entity ${shortEntity(entityNum)}`;
   }
 
-  function selectSigner(signerId: string) {
-    dispatch('signerSelect', { signerId });
-    isOpen = false;
-    searchTerm = '';
-  }
-
   function selectEntity(signerId: string, entityId: string, jurisdiction: string) {
     dispatch('entitySelect', {
       jurisdiction: jurisdiction || 'browservm',

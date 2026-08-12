@@ -84,8 +84,6 @@
   let mediaRecorder: MediaRecorder | null = null;
   let audioContext: AudioContext | null = null;
   let micStream: MediaStream | null = null;
-  let isRecordingCommand = false; // Recording after wake word
-  let audioChunks: Blob[] = [];
   let lastTranscript = '';
 
   // Camera state
@@ -1286,7 +1284,7 @@ Help the user understand this entity's state, suggest actions, or answer questio
         <!-- Audio Visualizer -->
         {#if isListening || isSpeaking}
           <div class="audio-visualizer" class:speaking={isSpeaking}>
-            {#each audioLevels as level, i}
+            {#each audioLevels as level}
               <div class="bar" style="height: {Math.max(4, level * 24)}px; opacity: {0.4 + level * 0.6}"></div>
             {/each}
           </div>

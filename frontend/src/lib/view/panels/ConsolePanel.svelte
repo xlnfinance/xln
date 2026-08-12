@@ -69,7 +69,6 @@
   let commandHistory: string[] = [];
   let historyIndex = -1;
   let commandInputEl: HTMLInputElement;
-  let suggestions: string[] = [];
 
   function clearLogs() {
     logs = [];

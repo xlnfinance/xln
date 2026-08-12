@@ -425,7 +425,6 @@
   const workerShardWatchdogs = new Map<Worker, ReturnType<typeof setTimeout>>();
   let retryShardQueue: number[] = [];
   const shardRetryCounts = new Map<number, number>();
-  let workerCount = 1;
   let activeWorkerCount = 1;
   let derivationError = '';
   let workerLimitNotice = '';
@@ -735,7 +734,6 @@
   // ============================================================================
 
   function syncWorkerCounts(): void {
-    workerCount = workers.length;
     activeWorkerCount = workers.length - drainingWorkers.size;
   }
 
@@ -1051,7 +1049,6 @@
     shardCount = run.shardCount;
     const initialUsableCap = Math.max(1, Math.min(maxWorkers, shardCount));
     let initialWorkers = Math.min(effectiveTargetWorkerCount, initialUsableCap);
-    workerCount = initialWorkers;
     activeWorkerCount = initialWorkers;
     finalizeInProgress = false;
     phase = 'deriving';
@@ -1068,8 +1065,6 @@
     }
 
     // Start with the exact worker count the UI is allowed to request.
-    const cpuCores = navigator.hardwareConcurrency || 4;
-
     try {
       let attempts = 0;
       while (true) {
@@ -1118,7 +1113,6 @@
             initialWorkers = reduced;
             maxWorkers = Math.max(1, Math.min(maxWorkers, reduced));
             persistWorkerCap(maxWorkers);
-            workerCount = initialWorkers;
             activeWorkerCount = initialWorkers;
             targetWorkerCount = Math.min(targetWorkerCount, initialWorkers);
             attempts += 1;
@@ -1189,7 +1183,6 @@
           shardCount = sample.total;
           shardsCompleted = sample.completed;
           activeWorkerCount = sample.workers;
-          workerCount = sample.workers;
           nodeShardTimeMs = nodeShardTimeMs > 0
             ? nodeShardTimeMs * 0.7 + sample.lastShardMs * 0.3
             : sample.lastShardMs;

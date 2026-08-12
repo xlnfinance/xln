@@ -18,7 +18,6 @@ import { join } from "path";
 const PORT = 3031;
 const OLLAMA_URL = "http://localhost:11434";
 const MLX_BASE_PORT = 8081; // Starting port for MLX servers (parallel loading)
-const XLN_FRONTEND_URL = "https://localhost:8080"; // xln frontend for state queries
 
 // ============================================================================
 // PARALLEL MLX MODEL LOADER STATE (512GB RAM = unlimited parallel models)
@@ -925,34 +924,6 @@ function executeXlnTool(name: string, args: Record<string, any>): { result: any;
     default:
       return { result: null, error: `Unknown tool: ${name}` };
   }
-}
-
-// Process tool calls from model response
-async function processToolCalls(
-  toolCalls: Array<{ id: string; function: { name: string; arguments: string } }>
-): Promise<Array<{ tool_call_id: string; role: "tool"; content: string }>> {
-  const results: Array<{ tool_call_id: string; role: "tool"; content: string }> = [];
-
-  for (const call of toolCalls) {
-    try {
-      const args = JSON.parse(call.function.arguments);
-      const { result, error } = executeXlnTool(call.function.name, args);
-
-      results.push({
-        tool_call_id: call.id,
-        role: "tool",
-        content: error ? JSON.stringify({ error }) : JSON.stringify(result)
-      });
-    } catch (e) {
-      results.push({
-        tool_call_id: call.id,
-        role: "tool",
-        content: JSON.stringify({ error: `Failed to execute ${call.function.name}: ${e}` })
-      });
-    }
-  }
-
-  return results;
 }
 
 // ============================================================================

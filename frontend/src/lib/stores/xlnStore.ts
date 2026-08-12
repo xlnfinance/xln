@@ -831,7 +831,7 @@ const refreshRemoteRuntimeProjection = async (
 
 const createEmbeddedRuntimeAdapter = async (
   xln: XLNModule,
-  runtimeSeed?: string | null,
+  _runtimeSeed?: string | null,
   targetEnv?: RuntimeReplica | null,
 ): Promise<RuntimeAdapter> => {
   let boundEnv = targetEnv ? (unwrapLiveRuntimeEnv(targetEnv) ?? targetEnv) : null;
@@ -1612,7 +1612,7 @@ const logInterestingEntityInputs = (inputs: RoutedEntityInput[]): void => {
   }
 };
 
-const resolveActiveRuntimeCommandEnv = async (xln: XLNModule): Promise<RuntimeReplica> => {
+const resolveActiveRuntimeCommandEnv = async (_xln: XLNModule): Promise<RuntimeReplica> => {
   const selectedEnv = get(activeEnv) ?? get(xlnEnvironment);
   const runtimeEnv = selectedEnv ? (unwrapLiveRuntimeEnv(selectedEnv) ?? selectedEnv) : null;
   if (runtimeEnv) return runtimeEnv;

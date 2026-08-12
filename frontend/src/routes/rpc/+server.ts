@@ -21,7 +21,6 @@ function resolveLocalRpcUrlFromRequest(requestUrl: string): string {
 }
 
 const getRpcUrl = (requestUrl: string, clientAddress?: string): string => {
-  const url = new URL(requestUrl);
   if (isLocalProxyRequest(requestUrl, clientAddress)) {
     return resolveLocalRpcUrlFromRequest(requestUrl);
   }

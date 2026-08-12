@@ -35,13 +35,7 @@ export function logDebug(category: keyof FrontendLogConfig, ...args: unknown[]):
 }
 
 // Global verbose logging toggle (controlled by Settings panel)
-let VERBOSE_ENABLED = true; // DEFAULT ON for development
-
-// Monkey-patch console for performance-aware logging
-const originalLog = console.log;
-
 export function setFrontendVerboseLogging(enabled: boolean): void {
-  VERBOSE_ENABLED = enabled;
   for (const key of Object.keys(LOG_CONFIG) as Array<keyof FrontendLogConfig>) {
     LOG_CONFIG[key] = enabled;
   }

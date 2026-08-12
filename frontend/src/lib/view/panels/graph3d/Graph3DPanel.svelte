@@ -36,7 +36,6 @@ import {
   getGraphSignerIdForEntity,
   graphEntityHasReserves,
   graphReserveValue,
-  parseGraphScenarioSteps,
   type GraphPaymentRoute,
 } from "./graph3d-helpers";
 import { buildBirdViewSettings, readBirdViewSettings, writeBirdViewSettings, type BirdViewSettings } from "./graph3d-settings";
@@ -62,9 +61,9 @@ import {
   startProportionalBroadcast,
   buildSimpleRadialLayout,
 } from "./graph3d-visuals";
-import type { GraphConnectionData, GraphEntityData, GraphFrameActivity, GraphJBlockHistoryEntry, GraphPaymentJob, GraphRendererMode, GraphRipple, GraphXLNRuntime } from "./graph3d-types";
+import type { GraphConnectionData, GraphEntityData, GraphFrameActivity, GraphJBlockHistoryEntry, GraphRendererMode, GraphRipple, GraphXLNRuntime } from "./graph3d-types";
 import { buildRuntimeGraphProjections } from "./graph3d-runtime-projections";
-import { collectGraphTokenIds, getGraphEntitySizeForToken, loadGraphScenarioSteps } from "./graph3d-actions";
+import { collectGraphTokenIds, getGraphEntitySizeForToken } from "./graph3d-actions";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
@@ -172,7 +171,6 @@ let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) prob
 let broadcastEnabled = true;
 let jAutoProposerInterval: ReturnType<typeof setInterval> | null = null;
 let jProposalIntervalMs = 1000; // 1 second default - configurable
-let jLastProposalTime = 0; // Track last proposal timestamp
 let jAutoProposerEnabled = true; // Enable/disable auto-proposer
 let lastAnimatedFrameIndex = -1; // Track which frame we last animated (to avoid re-animating)
 let entities: GraphEntityData[] = [];
@@ -277,7 +275,6 @@ let availableTokens: number[] = []; // Will be populated from actual token data
 let rendererMode: GraphRendererMode = "webgl";
 let labelScale: number = 2.0;
 let entitySizeMultiplier: number = 1.0;
-let lightningSpeed: number = 100;
 let forceLayoutEnabled: boolean = true;
 let gridSize: number = 2000;
 let gridDivisions: number = 3;
@@ -286,7 +283,6 @@ let gridColor: string = "#ffffff"; // White for better contrast with 3x3 grid
 let autoRotate: boolean = false;
 let autoRotateSpeed: number = 0.5; // RPM
 let showFpsOverlay: boolean = false; // Controlled by settings
-let cameraDistance: number = 500;
 let cameraTarget: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
 let gridHelper: THREE.GridHelper | null = null;
 let resizeDebounceTimer: number | null = null;
@@ -300,8 +296,6 @@ function getTokenDecimals(tokenId: number): number {
 }
 let paymentFrom: string = "";
 let paymentTo: string = "";
-let paymentAmount: string = "200000";
-let paymentTPS: number = 0; // 0-100 TPS (0 = once, 0.1 = every 10s, 100 = max)
 $: if (entities.length >= 2 && !paymentFrom && !paymentTo) {
   const firstEntity = entities[0];
   const secondEntity = entities[1];
@@ -324,13 +318,6 @@ $: if (availableRoutes.length > 0 && selectedRouteIndex >= 0) {
 $: if (scene && settings.theme) {
   const themeColors = getGraphThemeColors(settings.theme);
   scene.background = new THREE.Color(themeColors.background);
-}
-let selectedScenarioFile: string = "";
-let isLoadingScenario: boolean = false;
-let scenarioSteps: Array<{ timestamp: number; title: string; description: string; actions: any[] }> = [];
-let activeJobs: GraphPaymentJob[] = [];
-$: if (selectedScenarioFile) {
-  loadScenarioSteps(selectedScenarioFile);
 }
 $: if (scene && jurisdictionsData) {
   const jurisdictionsArray = jurisdictionsData;
@@ -449,7 +436,6 @@ $: if (scene && jurisdictionsData) {
       for (let targetHeight = currentHeightNum - 1; targetHeight >= Math.max(0, currentHeightNum - 3); targetHeight--) {
         const maxFrameIdx = $runtimeFrameTimeIndex >= 0 ? Math.min($runtimeFrameTimeIndex, runtimeHistory.length - 1) : runtimeHistory.length - 1;
         let foundFrame = null;
-        let foundIdx = -1;
         let foundHeight = -1;
         for (let frameIdx = maxFrameIdx; frameIdx >= 0; frameIdx--) {
           const frame = runtimeHistory[frameIdx];
@@ -457,7 +443,6 @@ $: if (scene && jurisdictionsData) {
           const frameJHeight = graphJReplicaHeight(frameJReplica);
           if (frameJHeight <= targetHeight && frameJHeight > 0) {
             foundFrame = frameJReplica;
-            foundIdx = frameIdx;
             foundHeight = frameJHeight;
             break;
           }
@@ -500,7 +485,6 @@ $: if (scene && jurisdictionsData) {
     }
   }
 }
-let animationSpeed = 1.0;
 function createProportionalBroadcast(jMachinePos: THREE.Vector3, txCount: number) {
   if (!scene || txCount === 0) return;
   const broadcast = startProportionalBroadcast({
@@ -538,26 +522,12 @@ $: if (entities.length > 0) {
     entityMeshMap.set(entity.id, entity.mesh);
   });
 }
-async function loadScenarioSteps(filename: string) {
-  try {
-    scenarioSteps = (await loadGraphScenarioSteps(filename, parseGraphScenarioSteps)) ?? [];
-  } catch (error) {
-    console.error("Failed to load scenario steps:", error);
-    scenarioSteps = [];
-  }
-}
 let isVRSupported: boolean = false;
 let isVRActive: boolean = false;
 let activeRipples: GraphRipple[] = [];
 let availableRoutes: GraphPaymentRoute[] = [];
 let selectedRouteIndex: number = 0;
 let graphInitialized = false;
-let recentActivity: Array<{
-  id: string;
-  message: string;
-  timestamp: number;
-  type: "payment" | "credit" | "settlement" | "j-event" | "commit";
-}> = [];
 async function initAndSetup() {
   if (graphInitialized) return;
   graphInitialized = true;
@@ -605,7 +575,6 @@ onMount(() => {
     else if (key === "gridDivisions") gridDivisions = value;
     else if (key === "gridOpacity") gridOpacity = value;
     else if (key === "gridColor") gridColor = value;
-    else if (key === "cameraDistance") cameraDistance = value;
     else if (key === "cameraTarget") {
       cameraTarget = value;
       if (controls) {
@@ -618,8 +587,7 @@ onMount(() => {
     } else if (key === "entitySizeMultiplier") {
       entitySizeMultiplier = value;
       lastLabelUpdateTimeIndex = Number.NaN;
-    } else if (key === "lightningSpeed") lightningSpeed = value;
-    else if (key === "rendererMode") rendererMode = value;
+    } else if (key === "rendererMode") rendererMode = value;
     else if (key === "forceLayoutEnabled") forceLayoutEnabled = value;
     else if (key === "autoRotate") autoRotate = value;
     else if (key === "autoRotateSpeed") autoRotateSpeed = value;
@@ -633,12 +601,10 @@ onMount(() => {
     gridDivisions = 3;
     gridOpacity = 0.4;
     gridColor = "#ffffff";
-    cameraDistance = 500;
     cameraTarget = { x: 0, y: 0, z: 0 };
     labelScale = 2.0;
     entitySizeMultiplier = 1.0;
     lastLabelUpdateTimeIndex = Number.NaN;
-    lightningSpeed = 100;
     rendererMode = "webgl";
     forceLayoutEnabled = true;
     if (controls) {
@@ -664,14 +630,10 @@ onMount(() => {
     controls.update();
     saveBirdViewSettings();
   };
-  const handlePlaybackSpeed = (newSpeed: number) => {
-    animationSpeed = newSpeed;
-  };
   panelBridge.on("settings:update", handleSettingsUpdate);
   panelBridge.on("settings:reset", handleSettingsReset);
   panelBridge.on("camera:focus", handleCameraFocus);
   panelBridge.on("camera:restore", handleCameraRestore);
-  panelBridge.on("playback:speed", handlePlaybackSpeed);
   let updateTimeout: ReturnType<typeof setTimeout> | null = null;
   const debouncedUpdate = () => {
     if (updateTimeout) clearTimeout(updateTimeout);
@@ -727,7 +689,6 @@ onMount(() => {
     panelBridge.off("settings:reset", handleSettingsReset);
     panelBridge.off("camera:focus", handleCameraFocus);
     panelBridge.off("camera:restore", handleCameraRestore);
-    panelBridge.off("playback:speed", handlePlaybackSpeed);
   };
 });
 let resizeObserver: ResizeObserver | null = null;
@@ -793,7 +754,7 @@ function recreateGrid() {
 function createJMachine(size: number = 25, position: { x: number; y: number; z: number } = { x: 0, y: 200, z: 0 }, name: string = "J-MACHINE", jHeight: number = 0): THREE.Group {
   return createGraphJMachine(size, position, name, jHeight);
 }
-function addTxToJMachine(fromEntityId: string): THREE.Mesh | null {
+function addTxToJMachine(_fromEntityId: string): THREE.Mesh | null {
   if (!jMachine || !scene) return null;
   const txGeometry = new THREE.BoxGeometry(2, 2, 2);
   const txMaterial = new THREE.MeshPhongMaterial({
@@ -825,11 +786,9 @@ function startJAutoProposer() {
   if (jAutoProposerInterval) {
     clearInterval(jAutoProposerInterval);
   }
-  jLastProposalTime = Date.now();
   jAutoProposerInterval = setInterval(() => {
     if (!jAutoProposerEnabled || !jMachine || !scene) return;
     if (jMachineTxBoxes.length === 0) return;
-    jLastProposalTime = Date.now();
     triggerBroadcast();
     gridPulseIntensity = 1.0;
   }, jProposalIntervalMs);
@@ -1416,7 +1375,6 @@ function createTransactionParticles() {
             } else if (tx.type === "payFromReserve" || tx.kind === "payFromReserve") {
               const fromEntityId = processingEntityId;
               const toEntityId = tx.targetEntityId || tx.data?.targetEntityId;
-              const amount = tx.amount || tx.data?.amount || 0n;
               if (toEntityId) {
                 addTxToJMachine(fromEntityId);
                 triggerEntityActivity(fromEntityId);

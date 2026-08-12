@@ -124,7 +124,6 @@ import {
   type RuntimeRecoveryTowerReceiptSummary,
   type RuntimesState,
   type Signer,
-  type TowerServerInfo,
 } from './vault-recovery';
 import { buildDelayedLastResortAppointmentsForTower } from './vault-watchtower';
 import {
@@ -270,8 +269,6 @@ const runtimeRecoveryUploadMeta = new Map<
     lastSnapshotHash: string | null;
   }
 >();
-
-const recoveryTowerInfoCache = new Map<string, { fetchedAt: number; info: TowerServerInfo }>();
 
 const persistRuntimeMetadataSnapshot = (): void => {
   try {
@@ -1029,7 +1026,7 @@ function applyRuntimeLogPreference(env: RuntimeReplica): void {
   env.quietRuntimeLogs = !verbose;
 }
 
-function ensureRuntimeLoopRunning(env: RuntimeReplica, xln: XLNModule, reason: string): void {
+function ensureRuntimeLoopRunning(env: RuntimeReplica, xln: XLNModule, _reason: string): void {
   const state = env.infrastructure;
   if (state?.loopActive && !state.persistencePaused && !state.persistenceQuiescing) return;
   xln.resumeRuntimeAfterPersistenceQuiesce(env);

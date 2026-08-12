@@ -12,7 +12,7 @@ import type {
   ReleaseSnapshot,
   TreeNode,
 } from './types.ts';
-import { collectFrozenCore, readFrozenManifest } from '../frozen-core/core.ts';
+import { collectFrozenCore, readFrozenManifest, sourceDependencySpecifiers } from '../frozen-core/core.ts';
 
 type SccFile = {
   Language?: string;
@@ -116,19 +116,16 @@ function countMatches(text: string, pattern: RegExp): number {
   return text.match(pattern)?.length ?? 0;
 }
 
-function dependencySpecifiers(text: string): string[] {
-  const pattern = /(?:import|export)\s+(?:[^'";]*?\sfrom\s*)?['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\)|import\(\s*['"]([^'"]+)['"]\s*\)/g;
-  return [...text.matchAll(pattern)].map((match) => match[1] || match[2] || match[3]).filter(Boolean) as string[];
-}
-
 export function resolveReleaseSnapshotDependency(from: string, specifier: string, paths: Set<string>): string | null {
   if (!specifier.startsWith('.')) return null;
-  const base = posix.normalize(posix.join(posix.dirname(from), specifier));
+  const dependencyPath = specifier.split(/[?#]/, 1)[0] ?? '';
+  const base = posix.normalize(posix.join(posix.dirname(from), dependencyPath)).replace(/\/$/, '');
   if (base === '..' || base.startsWith('../') || posix.isAbsolute(base)) {
     throw new Error(`RELEASE_SNAPSHOT_DEPENDENCY_PATH_ESCAPE:${from}:${specifier}`);
   }
-  const candidates = [base, ...['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.svelte', '.sol'].map((ext) => `${base}${ext}`)];
-  candidates.push(...['.ts', '.tsx', '.js', '.jsx', '.svelte'].map((ext) => `${base}/index${ext}`));
+  const sourceBase = base.replace(/\.(?:c|m)?jsx?$/i, '');
+  const candidates = [base, ...['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.svelte', '.sol'].map((ext) => `${sourceBase}${ext}`)];
+  candidates.push(...['.ts', '.tsx', '.js', '.jsx', '.svelte'].map((ext) => `${sourceBase}/index${ext}`));
   return candidates.find((candidate) => paths.has(candidate)) ?? null;
 }
 
@@ -147,7 +144,7 @@ function collectFile(root: string, path: string, scc: SccFile | undefined, allPa
   const entryType = lstatSync(absolute).isSymbolicLink() ? 'symlink' : 'file';
   const buffer = entryType === 'symlink' ? Buffer.from(readlinkSync(absolute)) : readFileSync(absolute);
   const text = buffer.byteLength <= 2_000_000 ? readText(buffer) : '';
-  const specifiers = dependencySpecifiers(text);
+  const specifiers = sourceDependencySpecifiers(path, text);
   const dependencies = [...new Set(specifiers.map((value) => resolveReleaseSnapshotDependency(path, value, allPaths)).filter(Boolean) as string[])].sort();
   const physicalLines = text ? text.split(/\r?\n/).length : 0;
   const metrics: RawMetrics = {

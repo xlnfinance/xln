@@ -287,8 +287,6 @@
       const id = Number(entry?.id);
       if (!Number.isFinite(id) || id <= lastSeen) continue;
       if (id > newLastSeen) newLastSeen = id;
-      const message = String(entry?.message || '').trim();
-
       if (!shouldSurfaceLogAsToast(entry)) continue;
 
       const level = String(entry?.level || 'warn').toLowerCase();

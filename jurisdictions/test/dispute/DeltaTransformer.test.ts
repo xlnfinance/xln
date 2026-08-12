@@ -7,7 +7,7 @@ import { createEmptyAccountJClaimAccumulator } from "../../../runtime/account/j-
 import { buildPositionalSwapFillRatioBuckets } from "../../../runtime/protocol/transform/transformer-ordering";
 import { asOfferId } from "../../../runtime/orderbook/swap-keys.ts";
 import { deriveSwapOffdeltaChanges } from "../../../runtime/orderbook/swap-execution.ts";
-import type { AccountReplica, SwapOffer } from "../../../runtime/types.ts";
+import type { AccountReplica, SwapOffer } from "../../../runtime/types/account.ts";
 
 const { ethers } = hre;
 const MAX_FILL_RATIO = 65535n;

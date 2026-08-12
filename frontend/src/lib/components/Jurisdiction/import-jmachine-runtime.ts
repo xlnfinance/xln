@@ -164,7 +164,7 @@ export const buildPersistedJMachineConfig = (
 };
 
 export const importJMachineViaRuntime = async (
-  env: RuntimeReplica,
+  _env: RuntimeReplica,
   detail: JMachineCreateDetail,
 ): Promise<RuntimeJMachineImportResult> => {
   const normalized = normalizeJMachineCreateDetail(detail);

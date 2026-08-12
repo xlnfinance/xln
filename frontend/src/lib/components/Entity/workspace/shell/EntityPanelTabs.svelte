@@ -107,15 +107,11 @@ let env: RuntimeReplica | EnvSnapshot | null = null;
 let liveEnv: RuntimeReplica | null = null;
 let liveEnvResolver: (() => RuntimeReplica | null) | null = null;
 let envRevision = "";
-let history: EnvSnapshot[] = [];
-let timeIndex = -1;
 let isLive = true;
 $: env = embeddedRuntimeContext.env;
 $: liveEnv = embeddedRuntimeContext.liveEnv;
 $: liveEnvResolver = embeddedRuntimeContext.liveEnvResolver;
 $: envRevision = runtimeFrameContext.envRevision;
-$: history = embeddedRuntimeContext.history;
-$: timeIndex = runtimeFrameContext.timeIndex;
 $: isLive = runtimeFrameContext.isLive;
 type DebtDrainRequest = {
   tokenId: number;
@@ -151,7 +147,6 @@ let configureWorkspaceTab: ConfigureWorkspaceTab = "extend-credit";
 let workspaceAccountId = "";
 let configureTokenId = 1;
 let pendingBatchSubmitting = false;
-let debtEnforcingTokenId: number | null = null;
 let pendingBatchMode: "draft" | "sent" | null = null;
 let pendingBatchState = buildPendingBatchState(null);
 let hubDiscoveryProjection: HubDiscoveryProjection = emptyHubDiscoveryProjection();
@@ -211,15 +206,6 @@ function syncHashToCurrentView(): void {
   if (currentHash === nextHash) return;
   replaceState(`${window.location.pathname}${window.location.search}#${nextHash}`, window.history.state ?? {});
 }
-type TokenCatalogItem = {
-  symbol: string;
-  address: string;
-  decimals?: number;
-  tokenId?: number;
-};
-type TokenCatalogResponse = {
-  tokens?: TokenCatalogItem[];
-};
 type IconTabConfig<T extends string> = {
   id: T;
   icon: ComponentType;
@@ -228,9 +214,6 @@ type IconTabConfig<T extends string> = {
 type IconBadgeTabConfig<T extends string> = IconTabConfig<T> & {
   showBadge?: boolean;
   badgeType?: "pending";
-};
-type IndexedDbWithDatabases = IDBFactory & {
-  databases?: () => Promise<IDBDatabaseInfo[]>;
 };
 function getCurrentEntityJAdapter(xln: XLNModule, env: RuntimeReplica, context: string): JAdapter {
   const entityId = String(replica?.state?.entityId || tab.entityId || "").trim();
@@ -249,9 +232,6 @@ let moveHubEntityOptions: string[] = [];
 let moveValidationSignature = "";
 function resetMoveLineMeasurement(): void {
   moveVisualController.resetMeasurement();
-}
-function scheduleMoveCommittedLineReady(): void {
-  moveVisualController.scheduleCommittedLineReady();
 }
 function bumpMoveNodeLayout(): void {
   moveVisualController.bumpNodeLayout();
@@ -714,8 +694,6 @@ $: heroDisplayName = (() => {
 })();
 $: entityJurisdictionBadge = getJurisdictionBadgeInfo(replica?.state?.config?.jurisdiction?.name || selectedJurisdictionName || tab.jurisdiction || null, replica?.state?.config?.jurisdiction?.chainId ?? null);
 $: activeXlnFunctions = $xlnFunctions;
-$: activeHistory = history;
-$: activeTimeIndex = timeIndex;
 $: liveRuntimeEnv = getRuntimeEnv(actionRuntimeEnv);
 $: canOpenAccounts = canSubmitHubOpenAccount({
   adapterMode: $runtimeControllerHandle.mode,
@@ -904,7 +882,6 @@ let externalTokensLoading = true;
 let externalWalletSnapshotSource: ExternalWalletSnapshotSource | null = null;
 let depositingToken: string | null = null; // symbol of token being deposited
 let withdrawingExternalToken: string | null = null; // symbol of token being withdrawn back to EOA
-let collateralFundingToken: string | null = null; // symbol of token being moved to collateral
 let faucetAssetSymbol = "USDC";
 let externalToReserveSymbol = "USDC";
 let reserveToCollateralSymbol = "USDC";
@@ -948,9 +925,7 @@ const moveVisualController = createMoveVisualController({
   setCommittedLineReady: (ready) => (moveCommittedLineReady = ready),
   bumpLayoutVersion: () => (moveNodeLayoutVersion += 1),
 });
-let collateralToReserveAmount = "";
 let reserveToExternalAmount = "";
-let sendingExternalToken: string | null = null;
 let transferableAssetOptions: ReserveTransferAsset[] = [];
 let assetLedgerRows: AssetLedgerRow[] = [];
 let moveUiState: MoveUiState = {
@@ -970,11 +945,6 @@ let pendingAssetBridgeSync: {
 let resolvingAssetBridgeSync = false;
 let externalFetchInFlight: Promise<void> | null = null;
 let externalWalletStateSyncKey = "";
-let selectedExternalToReserveToken: ReserveTransferAsset | null = null;
-let selectedReserveToCollateralToken: ReserveTransferAsset | null = null;
-let selectedCollateralToReserveToken: ReserveTransferAsset | null = null;
-let selectedReserveToExternalToken: ReserveTransferAsset | null = null;
-let selectedSendAssetToken: ExternalToken | null = null;
 let moveAssetOptions: Array<{ symbol: string }> = [];
 let selectedMoveExternalToken: ExternalToken | null = null;
 let selectedMoveTransferToken: ReserveTransferAsset | null = null;
@@ -1208,18 +1178,6 @@ function getAccountSpendableCapacity(counterpartyEntityId: string, tokenId: numb
   if (!derived) return 0n;
   return derived.outCapacity;
 }
-function isLocalExecutorForWorkspace(counterpartyEntityId: string, account: AccountReplica | null): boolean {
-  const workspace = account?.state.settlementWorkspace;
-  const entityId = String(replica?.state?.entityId || tab.entityId || "")
-    .trim()
-    .toLowerCase();
-  const counterparty = String(counterpartyEntityId || "")
-    .trim()
-    .toLowerCase();
-  if (!workspace || workspace.status !== "ready_to_submit" || !entityId || !counterparty) return false;
-  return workspace.executorIsLeft === isAccountLeftPerspective(entityId, account);
-}
-// Faucet: fund entity reserves with test tokens
 function resolveReserveTokenMeta(tokenId: number, symbolHint?: string): { tokenId: number; symbol: string; decimals: number } {
   return resolveReserveTokenMetaFromCatalog({
     tokenId,
@@ -1493,11 +1451,6 @@ $: {
   }
 }
 $: transferableAssetOptions = externalTokens.filter(isReserveTransferToken);
-$: selectedExternalToReserveToken = findReserveTransferTokenBySymbol(externalToReserveSymbol);
-$: selectedReserveToCollateralToken = findReserveTransferTokenBySymbol(reserveToCollateralSymbol);
-$: selectedCollateralToReserveToken = findReserveTransferTokenBySymbol(collateralToReserveSymbol);
-$: selectedReserveToExternalToken = findReserveTransferTokenBySymbol(reserveToExternalSymbol);
-$: selectedSendAssetToken = findPanelExternalToken(sendAssetSymbol);
 $: moveAssetOptions = assetLedgerRows
   .filter((row) => {
     const symbol = String(row.symbol || "").trim();
@@ -1514,11 +1467,6 @@ $: moveAssetOptions = assetLedgerRows
   .map((row) => ({ symbol: row.symbol }));
 $: selectedMoveExternalToken = findPanelExternalToken(moveAssetSymbol);
 $: selectedMoveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
-$: workspaceAccount = (() => {
-  const entityId = String(replica?.state?.entityId || tab.entityId || "").trim();
-  if (!entityId || !workspaceAccountId || !replica?.state?.accounts) return null;
-  return findLocalAccountByCounterparty(entityId, replica.state.accounts, workspaceAccountId);
-})();
 $: accountSpendableByToken = (() => {
   activeEnv;
   envRevision;
@@ -1770,11 +1718,6 @@ async function fetchExternalTokens(forceSnapshot = false) {
   });
   return await externalFetchInFlight;
 }
-async function getActiveSignerPrivateKey(): Promise<Uint8Array> {
-  return await getSignerPrivateKeyForAuthority(
-    captureSignerAuthorityContext("active-signer-private-key"),
-  );
-}
 async function getSignerPrivateKeyForAuthority(
   authority: SignerAuthorityContext,
 ): Promise<Uint8Array> {
@@ -1799,20 +1742,15 @@ async function sendExternalAsset(): Promise<void> {
   const jadapter = getCurrentEntityJAdapter(xln, authority.env, "send-external-asset");
   const privKey = await getSignerPrivateKeyForAuthority(authority);
   assertSignerAuthorityContextCurrent(authority, "send-external-asset-before-send");
-  sendingExternalToken = token.symbol;
-  try {
-    if (token.address === ZeroAddress) {
-      await jadapter.transferNative(privKey, recipient, amount);
-    } else {
-      await jadapter.transferErc20(privKey, token.address, recipient, amount);
-    }
-    sendAssetAmount = "";
-    toasts.success(`Sent ${token.symbol}`);
-    if (token.address === ZeroAddress) {
-      void fetchExternalTokens(true);
-    }
-  } finally {
-    sendingExternalToken = null;
+  if (token.address === ZeroAddress) {
+    await jadapter.transferNative(privKey, recipient, amount);
+  } else {
+    await jadapter.transferErc20(privKey, token.address, recipient, amount);
+  }
+  sendAssetAmount = "";
+  toasts.success(`Sent ${token.symbol}`);
+  if (token.address === ZeroAddress) {
+    void fetchExternalTokens(true);
   }
 }
 async function collateralToReserve(tokenId: number, amount: bigint, counterpartyEntityIdOverride?: string, postSettleOp: MovePostSettleOp = { type: "none" }, broadcast = true): Promise<void> {
@@ -2156,7 +2094,7 @@ async function executeMovePlan(): Promise<void> {
   try {
     const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
     if (routeKey === "external->external") {
-      const token = requirePanelExternalToken(moveAssetSymbol);
+      requirePanelExternalToken(moveAssetSymbol);
       const recipient = moveExternalRecipient.trim();
       if (!isAddress(recipient)) throw new Error("Recipient must be a valid EOA address");
       setMoveProgress("Signing external transfer");
@@ -2252,7 +2190,6 @@ async function reserveToCollateral(tokenId: number, amountOverride?: bigint, cou
     return;
   }
   const info = getTokenInfo(tokenId);
-  collateralFundingToken = info.symbol;
   try {
     await submitEntityInputs([
       buildEntityInput(entityId, signerId, [
@@ -2274,8 +2211,6 @@ async function reserveToCollateral(tokenId: number, amountOverride?: bigint, cou
       error: toErrorMessage(err, "Reserve to collateral failed"),
     });
     toasts.error(`Reserve → Collateral failed: ${(err as Error).message}`);
-  } finally {
-    collateralFundingToken = null;
   }
 }
 async function openAccountWithFullId(targetEntityId: string) {
@@ -2436,7 +2371,6 @@ async function enforceOutstandingDebt(request: DebtDrainRequest): Promise<void> 
     toasts.error("Debt enforcement requires LIVE mode");
     return;
   }
-  debtEnforcingTokenId = tokenId;
   try {
     const signerId = resolveEntitySigner(entityId, "debt-enforcement");
     const jurisdictionName = String(replica?.state?.config?.jurisdiction?.name || selectedJurisdictionName || "").trim();
@@ -2462,8 +2396,6 @@ async function enforceOutstandingDebt(request: DebtDrainRequest): Promise<void> 
       error: toErrorMessage(err, "Debt enforcement failed"),
     });
     toasts.error(`Debt enforcement failed: ${(err as Error).message}`);
-  } finally {
-    debtEnforcingTokenId = null;
   }
 }
 async function addTokenToAccount() {
@@ -2678,12 +2610,12 @@ function resolveConsensusTokenMetadata(tokenId: number): { symbol: string } | nu
   const token = externalTokens.find((candidate) => candidate.tokenId === tokenId);
   return token ? { symbol: token.symbol } : null;
 }
-let { formatAmount, formatCompact, formatApproxUsd, formatUsdExact, getAssetPrice, getAssetValue, getExternalValue, calculatePortfolioValue } = createEntityAssetValueFormatters({
+let { formatAmount, formatApproxUsd, formatUsdExact, getAssetValue, getExternalValue, calculatePortfolioValue } = createEntityAssetValueFormatters({
   getTokenInfo,
   tokenPrecision: undefined,
   compactNumbers: false,
 });
-$: ({ formatAmount, formatCompact, formatApproxUsd, formatUsdExact, getAssetPrice, getAssetValue, getExternalValue, calculatePortfolioValue } = createEntityAssetValueFormatters({
+$: ({ formatAmount, formatApproxUsd, formatUsdExact, getAssetValue, getExternalValue, calculatePortfolioValue } = createEntityAssetValueFormatters({
   getTokenInfo,
   tokenPrecision: $settings?.tokenPrecision,
   compactNumbers: Boolean($settings?.compactNumbers),
@@ -2772,7 +2704,6 @@ function getPendingBatchLabelOptions() {
 }
 $: openOutgoingDebtSummary = buildOpenOutgoingDebtTotals({ replica, activeXlnFunctions });
 $: pendingBatchState = buildPendingBatchState(replica?.state?.jBatchState);
-$: hasDraftBatch = pendingBatchState.hasDraftBatch;
 $: hasSentBatch = pendingBatchState.hasSentBatch;
 $: pendingBatchReserveIssue = getPendingBatchReserveIssue({
   entityId: String(replica?.state?.entityId || tab.entityId || ""),

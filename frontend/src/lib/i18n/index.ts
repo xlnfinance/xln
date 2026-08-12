@@ -116,6 +116,7 @@ export function t(key: string, params?: Record<string, string | number>): string
 
 // Reactive translation store for Svelte
 export const translations$ = derived(locale, ($locale) => {
+  void $locale;
   return (key: string, params?: Record<string, string | number>) => t(key, params);
 });
 

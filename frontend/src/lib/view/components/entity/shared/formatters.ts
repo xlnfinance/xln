@@ -16,7 +16,7 @@
  * formatTokenAmount(1, 1234567890123456789n, 18) // "1.234567890123456789"
  */
 export function formatTokenAmount(
-  tokenId: number,
+  _tokenId: number,
   amount: bigint,
   decimals: number
 ): string {

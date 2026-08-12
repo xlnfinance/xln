@@ -30,7 +30,6 @@
   import {
     hasCertifiedEntityEncryptionManifest,
     findProfileByEntityId,
-    getDirectionalEdgeCapacity,
     normalizeEntityId,
     quoteHop,
   } from '../payment-routing';
@@ -88,19 +87,12 @@
   let repeatIntervalMs = 0;
   let repeatArmed = false;
   let repeatTimer: ReturnType<typeof setInterval> | null = null;
-  let repeatStoppedReason = '';
   let payMaxAmount = 0n;
   let canPayNow = false;
   let showNoteField = false;
   let paymentSubmitted = false;
   let paymentSubmissionMs = 0;
   let paymentSubmissionTimer: ReturnType<typeof setTimeout> | null = null;
-  const REPEAT_OPTIONS = [
-    { value: 0, label: 'No repeat' },
-    { value: 1_000, label: 'Repeat 1s' },
-    { value: 10_000, label: 'Repeat 10s' },
-    { value: 60_000, label: 'Repeat 1m' },
-  ];
   const DELIVERY_MODES: Array<{
     value: PaymentDeliveryMode;
     label: string;
@@ -335,16 +327,14 @@
     }
   };
 
-  function stopRepeatTimer(reason: string): void {
+  function stopRepeatTimer(_reason: string): void {
     clearRepeatTimer();
     repeatArmed = false;
-    repeatStoppedReason = reason;
   }
 
   const restartRepeatTimer = () => {
     clearRepeatTimer();
     if (!repeatArmed || repeatIntervalMs <= 0 || selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
-    repeatStoppedReason = '';
     repeatTimer = setInterval(() => {
       if (sendingPayment || findingRoutes) return;
       if (hasPendingOutgoingLock(entityId, targetEntityId, tokenId)) {
@@ -374,7 +364,6 @@
     selectedRouteIndex = -1;
     clearRepeatTimer();
     repeatArmed = false;
-    repeatStoppedReason = '';
   }
 
   function getEntityName(id: string): string {
@@ -455,27 +444,6 @@
     const profile = getGossipProfileByEntityId(entity);
     if (!profile) return true; // allow local+gossip mixed discovery; key coverage is enforced above
     return profile.metadata.isHub === true;
-  }
-
-  function formatToken(value: bigint): string {
-    try {
-      if (activeXlnFunctions?.formatTokenAmount) return activeXlnFunctions.formatTokenAmount(tokenId, value);
-    } catch {
-      // best effort formatting
-    }
-    return value.toString();
-  }
-
-  function formatTokenNumberOnly(value: bigint): string {
-    const raw = formatToken(value);
-    const symbol = String(activeXlnFunctions?.getTokenInfo?.(tokenId)?.symbol || '').trim();
-    if (!symbol) return raw;
-    const rawLower = raw.toLowerCase();
-    const symbolLower = symbol.toLowerCase();
-    if (rawLower.endsWith(symbolLower)) {
-      return raw.slice(0, raw.length - symbol.length).trimEnd();
-    }
-    return raw.trim();
   }
 
   function formatTokenInputValue(tokenIdValue: number, value: bigint): string {
@@ -569,18 +537,6 @@
       activeXlnFunctions.getTokenInfo(tokenIdValue).decimals,
       `token:${tokenIdValue}`,
     );
-  }
-
-  function hasOutboundCapacity(from: string, to: string, token: number): boolean {
-    if (!activeXlnFunctions?.deriveDelta) return false;
-    return getDirectionalEdgeCapacity(
-      currentReplicas,
-      getGossipProfiles(),
-      activeXlnFunctions.deriveDelta,
-      from,
-      to,
-      token,
-    ) > 0n;
   }
 
   function quoteRequiredInboundForForward(desiredForward: bigint, feePPM: number, baseFee: bigint): bigint {
@@ -1402,7 +1358,6 @@
     ? routes[selectedRouteIndex]
     : routes[0] ?? null;
 
-  $: isDirectRoute = activeRoute && activeRoute.path.length === 2;
   $: showRouteList = routes.length > 0;
 
   $: payButtonLabel = (() => {

@@ -580,7 +580,6 @@
   $: jBatch = jBatchState?.batch || null;
   $: sentBatch = jBatchState?.sentBatch || null;
   $: pendingOps = countBatchOps(jBatch);
-  $: sentOps = countBatchOps(sentBatch?.batch);
   $: hasSentBatch = !!sentBatch;
   $: hasDraftBatch = pendingOps > 0;
   $: hasAnyBatch = hasSentBatch || hasDraftBatch;
