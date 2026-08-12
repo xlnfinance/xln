@@ -22,7 +22,7 @@ import {
 } from '../leader/certificates';
 import { entityLog } from '../entity-log';
 import { getPrevFrameHash } from '../frame/lineage';
-import { MalformedEntityFrameInputError } from '../../tx/invariant-errors';
+import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 
 export type ProposalReplayResult =
   | { accepted: true; execution: EntityCandidate }

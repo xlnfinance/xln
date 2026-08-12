@@ -1,17 +1,17 @@
-import { normalizeEntityRef } from './account-key';
+import { normalizeEntityRef } from '../account-key';
 import {
   cloneCrossJurisdictionRoute,
   isCrossJurisdictionRouteTransitionAllowed,
   isCrossJurisdictionTerminalStatus,
-} from '../../extensions/cross-j/index';
+} from '../../../extensions/cross-j';
 import {
   getJurisdictionStackId,
   isJurisdictionStackRef,
-} from '../../jurisdiction/machine/jurisdiction-runtime';
-import type { AccountTx } from '../../types/account';
-import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
-import type { EntityState } from '../types';
-import type { EntityRuntimeContext } from '../runtime-context';
+} from '../../../jurisdiction/machine/jurisdiction-runtime';
+import type { AccountTx } from '../../../types/account';
+import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
+import type { EntityState } from '../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 
 const normalizeAddress = (value: unknown): string => String(value || '').trim().toLowerCase();
 

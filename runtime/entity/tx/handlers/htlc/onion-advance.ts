@@ -11,7 +11,7 @@ import { addMessage } from '../../../frame-events';
 import type { AccountTx, HtlcRoute } from '../../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
-import { terminateHtlcRoute } from '../../htlc-route-lifecycle';
+import { terminateHtlcRoute } from '../../j-events-htlc/route-lifecycle';
 import { applyHtlcSecretFollowups } from '../account/committed-htlc-followups';
 
 const log = createStructuredLogger('entity.htlc_onion_advance');

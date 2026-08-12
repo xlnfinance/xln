@@ -13,7 +13,7 @@ import type { EntityReplica, EntityState } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityTx } from '../../types/entity-tx';
 import { findAccountKey, normalizeEntityRef } from '../tx/account-key';
-import { accountHasCrossPullCloseQueued } from '../tx/cross-jurisdiction-helpers';
+import { accountHasCrossPullCloseQueued } from '../tx/j-events-htlc/cross-jurisdiction-helpers';
 
 const normalized = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 

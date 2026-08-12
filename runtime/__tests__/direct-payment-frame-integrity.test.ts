@@ -8,7 +8,7 @@ import type { EntityState } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { createDefaultDelta } from '../account/state/delta';
 import { makeAccount as makeCanonicalAccount } from './helpers/cross-j';
-import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
+import { MalformedEntityFrameInputError } from '../entity/tx/processing/invariant-errors';
 
 const LEFT = `0x${'aa'.repeat(32)}`;
 const RIGHT = `0x${'bb'.repeat(32)}`;

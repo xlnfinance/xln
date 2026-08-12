@@ -6,7 +6,7 @@ import type { RuntimeEntityRoutingDeps } from '../routing/entity-routing.ts';
 import {
   classifyEntityInputApplyFailure,
   type EntityInputApplyFailureKind,
-} from '../../entity/tx/invariant-errors.ts';
+} from '../../entity/tx/processing/invariant-errors.ts';
 import { nodeProcess } from '../../infra/process/runtime-process.ts';
 import {
   isRuntimePerfProfileEnabled,

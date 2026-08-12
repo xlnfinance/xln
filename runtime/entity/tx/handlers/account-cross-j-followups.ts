@@ -32,7 +32,7 @@ import { cancelHook, scheduleHook } from '../../scheduler';
 import {
   buildCrossJurisdictionEntityOutput,
   crossJurisdictionRouteSignerHint,
-} from '../cross-j-outputs';
+} from '../j-events-htlc/cross-j-outputs';
 import { applyCrossJurisdictionBookProgressToState } from './cross-j/book-order';
 import { handleAdmitCrossJurisdictionBookOrderEntityTx } from './cross-j/book-order';
 import type { SwapOfferEvent } from './account';

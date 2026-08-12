@@ -12,7 +12,7 @@ import {
   consumeHtlcRuntimeEvent,
   indexCertifiedEntityFrameNotes,
 } from '../entity/htlc/note-index';
-import { terminateHtlcRoute } from '../entity/tx/htlc-route-lifecycle';
+import { terminateHtlcRoute } from '../entity/tx/j-events-htlc/route-lifecycle';
 import { applyHtlcTimeoutFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
 import { createEmptyEnv } from '../runtime';
 import type { AccountReplica, SwapOffer } from '../types/account';

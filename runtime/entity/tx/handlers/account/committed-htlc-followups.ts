@@ -9,13 +9,13 @@ import { encryptedHtlcLayer } from '../../../../protocol/htlc/codec/onion-layer'
 import {
   armHtlcSecretAckTimeout,
   terminateHtlcRoute,
-} from '../../htlc-route-lifecycle';
-import { pushCrossJurisdictionEntityOutput } from '../../cross-j-outputs';
+} from '../../j-events-htlc/route-lifecycle';
+import { pushCrossJurisdictionEntityOutput } from '../../j-events-htlc/cross-j-outputs';
 import { CROSS_J_MAX_FILL_RATIO } from '../../../../extensions/cross-j/index';
 import { buildHtlcFinalizedEventPayload } from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../infra/logger';
 import type { AccountTxTarget } from './orderbook/queue';
-import { MalformedEntityFrameInputError } from '../../invariant-errors';
+import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 

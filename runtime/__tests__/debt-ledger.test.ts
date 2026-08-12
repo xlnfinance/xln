@@ -13,7 +13,7 @@ import {
   applyDebtCreated,
   applyDebtEnforced,
   applyDebtForgiven,
-} from '../entity/tx/j-events-debt';
+} from '../entity/tx/j-events-observations/debt';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { createEmptyEnv, generateLazyEntityId } from '../runtime';
 import { applyJEvent } from '../entity/tx/j-events';

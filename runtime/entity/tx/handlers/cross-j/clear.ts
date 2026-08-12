@@ -24,8 +24,8 @@ import {
   accountHasCrossPullCloseQueued,
   findCrossJurisdictionOfferRoute,
   mergeCrossJurisdictionRoute,
-} from '../../cross-jurisdiction-helpers';
-import { pushCrossJurisdictionEntityOutput } from '../../cross-j-outputs';
+} from '../../j-events-htlc/cross-jurisdiction-helpers';
+import { pushCrossJurisdictionEntityOutput } from '../../j-events-htlc/cross-j-outputs';
 import type { AccountTxTarget } from '../account';
 
 type CrossJurisdictionClearTx = Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>;

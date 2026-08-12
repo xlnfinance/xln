@@ -8,7 +8,7 @@ import {
   validateJPrefixAttestation,
 } from '../../entity/consensus/jurisdiction/prefix-validation';
 import { validateProposedEntityFrame } from '../../entity/consensus/frame/validation';
-import { requireKnownEntityTxType } from '../../entity/tx/catalog';
+import { requireKnownEntityTxType } from '../../entity/tx/processing/catalog';
 
 const assertEntityMessagePayload = (
   input: Record<string, unknown>,

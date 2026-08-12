@@ -11,7 +11,7 @@ import {
   executeProposal,
   generateProposalId,
   pruneTerminalEntityProposals,
-} from '../../proposals';
+} from '../../processing/proposals';
 import {
   assertEntityProposalAction,
   hashEntityProposalAction,
@@ -19,7 +19,7 @@ import {
 } from '../../../auth/authorization';
 import { resolveEntityCommandBoard } from '../../../command';
 import { createStructuredLogger, shortHash, shortId } from '../../../../infra/logger';
-import { buildCertifiedEntityOutput } from '../../cross-j-outputs';
+import { buildCertifiedEntityOutput } from '../../j-events-htlc/cross-j-outputs';
 import { hashCertifiedEntityOutputSemantic } from '../../../consensus/output/certification';
 import { normalizeEntityRef } from '../../account-key';
 

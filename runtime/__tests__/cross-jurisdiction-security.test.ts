@@ -7,7 +7,7 @@ import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
 } from '../extensions/cross-j/index';
-import { validateCrossJurisdictionLocalBinding } from '../entity/tx/cross-jurisdiction-helpers';
+import { validateCrossJurisdictionLocalBinding } from '../entity/tx/j-events-htlc/cross-jurisdiction-helpers';
 import { createEmptyEnv } from '../runtime';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import {

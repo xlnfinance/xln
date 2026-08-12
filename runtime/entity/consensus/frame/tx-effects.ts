@@ -17,7 +17,7 @@ import {
   ownsSourceHubRouteForFillAck,
   stashPendingCrossJurisdictionFillAck,
 } from '../account/cross-j-fill-ack';
-import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/cross-j-outputs';
+import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/j-events-htlc/cross-j-outputs';
 import type { ApplyEntityTxsInOrderContext } from './application-types';
 import type {
   SwapCancelEvent,

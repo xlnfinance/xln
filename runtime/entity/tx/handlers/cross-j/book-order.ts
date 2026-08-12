@@ -41,14 +41,14 @@ import { findAccountKey } from '../../account-key';
 import {
   mergeCrossJurisdictionRoute,
   validateCrossJurisdictionRouteTransition,
-} from '../../cross-jurisdiction-helpers';
+} from '../../j-events-htlc/cross-jurisdiction-helpers';
 import type { SwapOfferEvent } from '../account/orderbook/offers';
 import { normalizeSwapOfferForOrderbook } from '../../../../orderbook/swap-execution';
 import type { ApplyEntityTxOptions } from '../../apply';
 import {
   buildCrossJurisdictionEntityOutput,
   crossJurisdictionRouteSignerHint,
-} from '../../cross-j-outputs';
+} from '../../j-events-htlc/cross-j-outputs';
 import { draftPreparedDisputeStartIfReady } from '../dispute';
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>

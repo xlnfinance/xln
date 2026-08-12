@@ -2,14 +2,14 @@ import { ethers } from 'ethers';
 import type {
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapRoute,
-} from '../../types/cross-jurisdiction';
+} from '../../../types/cross-jurisdiction';
 import type {
   AccountReplica,
   CrossJurisdictionDisputeRecovery,
-} from '../../types/account';
-import type { EntityInput, EntityState } from '../types';
-import { addMessage } from '../frame-events';
-import { decodeHashLadderBinary, verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
+} from '../../../types/account';
+import type { EntityInput, EntityState } from '../../types';
+import { addMessage } from '../../frame-events';
+import { decodeHashLadderBinary, verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import {
   buildCrossJurisdictionPullReveal,
   CROSS_J_MAX_FILL_RATIO,
@@ -17,19 +17,19 @@ import {
   getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
-} from '../../extensions/cross-j/index';
-import { createStructuredLogger, shortHash } from '../../infra/logger';
+} from '../../../extensions/cross-j';
+import { createStructuredLogger, shortHash } from '../../../infra/logger';
 import { buildCrossJurisdictionEntityOutput, pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
 import {
   batchAddHashLadderRegistration,
   hasHashLadderRegistrationRoom,
   initJBatch,
   isBatchEmpty,
-} from '../../jurisdiction/machine/batch';
-import type { JEventAccountTx } from './j-events-types';
-import { compareStableText } from '../../protocol/serialization';
-import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
-import { findExactSignedProofBodyPull } from '../../account/pull-registry-settlement';
+} from '../../../jurisdiction/machine/batch';
+import type { JEventAccountTx } from '../j-events-types';
+import { compareStableText } from '../../../protocol/serialization';
+import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import { findExactSignedProofBodyPull } from '../../../account/pull-registry-settlement';
 
 const jEventHtlcLog = createStructuredLogger('j.event.htlc');
 

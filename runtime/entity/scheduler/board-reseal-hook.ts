@@ -12,7 +12,7 @@ import {
   BOARD_RESEAL_HOOK_ID,
   BOARD_RESEAL_RETRY_MS,
   buildPendingBoardRotationResealDrafts,
-} from '../tx/board-rotation-reseal';
+} from '../tx/state-effects/board-rotation-reseal';
 import { scheduleHook } from './hook-state';
 import type { DueHookPlan } from './due-hook-types';
 

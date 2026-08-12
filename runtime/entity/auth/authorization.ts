@@ -6,7 +6,7 @@ import type { ConsensusConfig, EntityState, ProposalAction } from '../types';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityTx } from '../../types/entity-tx';
 import { isCrossJurisdictionTerminalStatus } from '../../extensions/cross-j';
-import { EntityCommandRejectionError } from '../tx/invariant-errors';
+import { EntityCommandRejectionError } from '../tx/processing/invariant-errors';
 
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
 import { isCrossJurisdictionSiblingPair } from '../../extensions/cross-j/boundary';

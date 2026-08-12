@@ -264,7 +264,7 @@ import type { AccountReplica, AccountTx, RuntimeOverlayRecord } from '../../../t
 import { collectCommittedCrossJurisdictionCancelAcks } from '../../tx/handlers/account';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityCandidateEffect, EntityInput, EntityOutput, EntityState } from '../../types';
-import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/cross-j-outputs';
+import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/j-events-htlc/cross-j-outputs';
 import { entityLog } from '../entity-log';
 
 export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../../extensions/cross-j/fill-ack';

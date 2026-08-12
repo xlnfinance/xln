@@ -14,7 +14,7 @@ import {
   type SwapCancelRequestEvent,
 } from './handlers/account';
 import { applyJEvent } from './j-events';
-import { shouldRethrowEntityTxError } from './invariant-errors';
+import { shouldRethrowEntityTxError } from './processing/invariant-errors';
 import { createStructuredLogger } from '../../infra/logger';
 import { handleR2E } from './handlers/jurisdiction/r2e';
 import { handleHtlcPayment } from './handlers/htlc/payment';

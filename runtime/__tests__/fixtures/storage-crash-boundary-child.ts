@@ -39,7 +39,7 @@ import {
   getEntityLeaderState,
   hashEntityLeaderVoteBody,
 } from '../../entity/consensus/leader';
-import { generateProposalId } from '../../entity/tx/proposals';
+import { generateProposalId } from '../../entity/tx/processing/proposals';
 import { generateNumberedEntityId } from '../../entity/factory';
 import { buildQuorumHanko, getEntityConfigBoardHash } from '../../hanko/signing';
 import {

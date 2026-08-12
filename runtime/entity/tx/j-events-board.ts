@@ -9,7 +9,7 @@ import { cancelHook, scheduleHook } from '../scheduler';
 import {
   BOARD_RESEAL_HOOK_ID,
   markBoardRotationResealsPending,
-} from './board-rotation-reseal';
+} from './state-effects/board-rotation-reseal';
 import type { FinalizedJEventContext } from './j-events';
 
 /**

@@ -1,4 +1,4 @@
-import type { EntityTx } from '../../types/entity-tx';
+import type { EntityTx } from '../../../types/entity-tx';
 
 /**
  * The one catalog of Entity transaction discriminants.

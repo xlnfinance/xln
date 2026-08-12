@@ -529,7 +529,7 @@ for (const [path, markers] of [
     'runtime/api/public/external-wallet-api.ts',
     ["createStructuredLogger('server.external_wallet')", 'faucet.erc20.failed', 'snapshot.failed', 'faucet.gas.failed'],
   ],
-  ['runtime/entity/tx/invariant-errors.ts', ["'SWAP_REQUEST_',"]],
+  ['runtime/entity/tx/processing/invariant-errors.ts', ["'SWAP_REQUEST_',"]],
   [
     'runtime/entity/tx/handlers/payments/direct-payment.ts',
     ["createStructuredLogger('entity.payment')", 'DIRECT_PAYMENT_${code}:${detail}', "'NEXT_HOP_ACCOUNT_MISSING'"],
@@ -539,7 +539,7 @@ for (const [path, markers] of [
     ['requireCommittedDirectPaymentRoute', "'ROUTE_START_INVALID'", "'ROUTE_END_INVALID'"],
   ],
   ['runtime/entity/tx/handlers/system/basic.ts', ["createStructuredLogger('entity.basic')"]],
-  ['runtime/entity/tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
+  ['runtime/entity/tx/processing/proposals.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity/factory.ts', ["createStructuredLogger('entity.factory')", 'lazy.create']],
   ['runtime/entity/consensus/entity-log.ts', ["createStructuredLogger('entity')"]],
   ['runtime/entity/consensus/frame/application.ts', ['frame.profile', 'frame.apply']],
@@ -588,7 +588,7 @@ for (const [path, markers] of [
   ['runtime/entity/tx/handlers/htlc/payment.ts', ["createStructuredLogger('entity.htlc')"]],
   ['runtime/entity/tx/handlers/dispute/index.ts', ["createStructuredLogger('entity.dispute')"]],
   ['runtime/entity/tx/handlers/payments/settle.ts', ["createStructuredLogger('entity.settle')"]],
-  ['runtime/entity/tx/j-events-debt.ts', ["createStructuredLogger('entity.debt')", 'ledger.divergence']],
+  ['runtime/entity/tx/j-events-observations/debt.ts', ["createStructuredLogger('entity.debt')", 'ledger.divergence']],
   ['runtime/account/utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
   ['runtime/account/validation/delta-validation.ts', ['ACCOUNT_DELTAS_MISSING', 'ACCOUNT_DELTAS_INVALID_TOKEN_ID']],
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
@@ -761,7 +761,7 @@ const basicHandlerPath = 'runtime/entity/tx/handlers/system/basic.ts';
 const basicHandler = readText(basicHandlerPath);
 assertNotIncludes(basicHandler, 'console.', basicHandlerPath);
 
-const proposalHandlerPath = 'runtime/entity/tx/proposals.ts';
+const proposalHandlerPath = 'runtime/entity/tx/processing/proposals.ts';
 const proposalHandler = readText(proposalHandlerPath);
 assertNotIncludes(proposalHandler, 'console.', proposalHandlerPath);
 
@@ -856,7 +856,7 @@ const settleHandlerPath = 'runtime/entity/tx/handlers/payments/settle.ts';
 const settleHandler = readText(settleHandlerPath);
 assertNotIncludes(settleHandler, 'console.', settleHandlerPath);
 
-const debtEventsPath = 'runtime/entity/tx/j-events-debt.ts';
+const debtEventsPath = 'runtime/entity/tx/j-events-observations/debt.ts';
 const debtEvents = readText(debtEventsPath);
 assertNotIncludes(debtEvents, 'console.', debtEventsPath);
 

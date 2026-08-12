@@ -13,7 +13,7 @@ import { initCrontab } from '../entity/scheduler';
 import {
   applyBoardRotationResealMigrations,
   buildBoardRotationResealDrafts,
-} from '../entity/tx/board-rotation-reseal';
+} from '../entity/tx/state-effects/board-rotation-reseal';
 import { buildQuorumHanko } from '../hanko/signing';
 import {
   commitReliableIngress,

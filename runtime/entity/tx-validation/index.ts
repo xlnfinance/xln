@@ -5,7 +5,7 @@ import { assertEntityProposalAction } from '../auth/authorization';
 import { normalizeSignedEntityCommand } from '../command/command-codec';
 import { normalizeConsensusOutputBoardAuthority } from '../consensus/output/certification';
 import type { ProposalAction } from '../types';
-import { requireKnownEntityTxType } from '../tx/catalog';
+import { requireKnownEntityTxType } from '../tx/processing/catalog';
 import {
   requireArray,
   requireBigInt,

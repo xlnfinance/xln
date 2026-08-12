@@ -14,7 +14,7 @@ import type { RuntimeOverlayRecord } from '../../../../types/account';
 import {
   findCrossJurisdictionOfferRoute,
   mergeCrossJurisdictionRoute,
-} from '../../cross-jurisdiction-helpers';
+} from '../../j-events-htlc/cross-jurisdiction-helpers';
 import type { AccountTxTarget } from '../account';
 import { handleRequestCrossJurisdictionClearEntityTx } from './clear';
 

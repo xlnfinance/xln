@@ -49,7 +49,7 @@ assertNotIncludes(handler, "'cancelSwapOffer' | 'cancelSwap' | 'proposeCancelSwa
 assertNotIncludes(handler, 'console.error', handlerPath);
 assertNotIncludes(handler, 'return { newState: entityState, outputs: [] };', handlerPath);
 
-const invariantPath = 'runtime/entity/tx/invariant-errors.ts';
+const invariantPath = 'runtime/entity/tx/processing/invariant-errors.ts';
 const invariant = readText(invariantPath);
 assertIncludes(invariant, "'SWAP_REQUEST_',", invariantPath);
 

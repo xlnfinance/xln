@@ -1,9 +1,9 @@
-import type { AccountBoardResealMigration, AccountDisputeSeal, AccountReplica } from '../../types/account';
-import type { EntityInput, EntityState, HashToSign } from '../types';
-import type { CertifiedBoardNodeStore } from '../../types/entity-board-registry';
-import type { JurisdictionEvent } from '../../types/jurisdiction-events';
-import { resolveObserverCertifiedAccountCounterpartyProposer } from '../account/account-counterparty-route';
-import { buildCertifiedEntityOutput } from './cross-j-outputs';
+import type { AccountBoardResealMigration, AccountDisputeSeal, AccountReplica } from '../../../types/account';
+import type { EntityInput, EntityState, HashToSign } from '../../types';
+import type { CertifiedBoardNodeStore } from '../../../types/entity-board-registry';
+import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
+import { resolveObserverCertifiedAccountCounterpartyProposer } from '../../account/account-counterparty-route';
+import { buildCertifiedEntityOutput } from '../j-events-htlc/cross-j-outputs';
 
 type BoardActivatedEvent = Extract<JurisdictionEvent, { type: 'BoardActivated' }>;
 

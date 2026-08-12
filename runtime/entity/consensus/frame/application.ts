@@ -72,9 +72,9 @@ import {
 import { normalizeSwapOfferForOrderbook } from '../../../orderbook/swap-execution';
 import { buildCurrentEntityProfileHashToSign } from '../../tx/handlers/account/lifecycle/profile-certification';
 import { buildSettlementSealDraft } from '../../tx/handlers/payments/settle';
-import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../tx/htlc-route-lifecycle';
-import { MalformedEntityFrameInputError } from '../../tx/invariant-errors';
-import { normalizeEntityProposalBoard } from '../../tx/proposals';
+import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../tx/j-events-htlc/route-lifecycle';
+import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
+import { normalizeEntityProposalBoard } from '../../tx/processing/proposals';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
 import {
   getProposableAccountIds,
@@ -106,7 +106,7 @@ import {
   ownsSourceHubRouteForFillAck,
   stashPendingCrossJurisdictionFillAck,
 } from '../account/cross-j-fill-ack';
-import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/cross-j-outputs';
+import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/j-events-htlc/cross-j-outputs';
 import { isSelfBoardAuthorityTransitionFrame } from '../proposal/policy';
 
 const recordFrameAccountChange = (

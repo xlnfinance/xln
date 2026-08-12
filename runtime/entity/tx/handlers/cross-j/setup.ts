@@ -13,14 +13,14 @@ import {
 import {
   buildCertifiedEntityOutput,
   pushCrossJurisdictionEntityOutput,
-} from '../../cross-j-outputs';
+} from '../../j-events-htlc/cross-j-outputs';
 import {
   canonicalizeCrossJurisdictionRouteForKnownEntities,
   isCrossJurisdictionRouteParticipant,
   mergeCrossJurisdictionRoute,
   validateCrossJurisdictionLocalBinding,
   validateCrossJurisdictionRouteTransition,
-} from '../../cross-jurisdiction-helpers';
+} from '../../j-events-htlc/cross-jurisdiction-helpers';
 import { normalizeEntityRef } from '../../account-key';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';

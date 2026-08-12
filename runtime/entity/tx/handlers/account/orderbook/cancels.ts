@@ -18,7 +18,7 @@ import { crossJurisdictionBookOwnerRef } from '../../../../../orderbook/cross-j/
 import {
   buildCrossJurisdictionEntityOutput,
   crossJurisdictionRouteSignerHint,
-} from '../../../cross-j-outputs';
+} from '../../../j-events-htlc/cross-j-outputs';
 import {
   hasQueuedCrossSwapAckForEntityState,
   queueUniqueSwapResolveForEntityState,

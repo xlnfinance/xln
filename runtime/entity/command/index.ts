@@ -17,7 +17,7 @@ import { requireCommittedDirectPaymentRoute } from '../../protocol/payments/rout
 import type { EntityCommandNonceState, EntityTx, SignedEntityCommandV1 } from '../../types/entity-tx';
 import type { EntityState } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
-import { EntityCommandRejectionError } from '../tx/invariant-errors';
+import { EntityCommandRejectionError } from '../tx/processing/invariant-errors';
 import {
   assertEntityCommandTxs,
   assertEntityCommandAuthorBindings,

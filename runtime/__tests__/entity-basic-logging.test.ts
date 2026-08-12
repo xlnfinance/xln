@@ -12,7 +12,7 @@ import type { EntityTx } from '../types/entity-tx';
 
 test('basic entity proposal and vote traces stay behind structured logging', () => {
   const handler = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/system/basic.ts'), 'utf8');
-  const proposals = readFileSync(join(process.cwd(), 'runtime/entity/tx/proposals.ts'), 'utf8');
+  const proposals = readFileSync(join(process.cwd(), 'runtime/entity/tx/processing/proposals.ts'), 'utf8');
 
   expect(handler).toContain("const basicLog = createStructuredLogger('entity.basic');");
   expect(proposals).toContain("const proposalLog = createStructuredLogger('entity.basic');");

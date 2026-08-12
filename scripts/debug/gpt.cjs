@@ -127,7 +127,7 @@ const CORE_FILES = {
     // Transaction processing (how txs are applied)
     'entity/tx/apply.ts',    // Entity transaction dispatcher
     'entity/tx/handlers/system/basic.ts', // Basic Entity transaction validation and handlers
-    'entity/tx/proposals.ts', // Proposal logic
+    'entity/tx/processing/proposals.ts', // Proposal logic
     'entity/tx/j-events.ts',  // Jurisdiction event handling
     'entity/tx/handlers/account/index.ts',         // Account operations (openAccount, extendCredit)
     'entity/tx/handlers/jurisdiction/r2c.ts', // Deposit collateral / reserve-to-collateral flow (R2C)
@@ -146,8 +146,8 @@ const CORE_FILES = {
     'extensions/cross-j/orderbook.ts',       // Cross-j book-owner and route ownership rules
     'extensions/cross-j/boundary.ts',        // Runtime topology for source/target/book-owner roles
     'orderbook/cross-j/orderbook.ts', // Cross-j admission lookup/stash/drain helpers
-    'entity/tx/cross-j-outputs.ts',          // Cross-j runtime outputs and notices
-    'entity/tx/cross-jurisdiction-helpers.ts', // Cross-j account/route helper logic
+    'entity/tx/j-events-htlc/cross-j-outputs.ts',          // Cross-j runtime outputs and notices
+    'entity/tx/j-events-htlc/cross-jurisdiction-helpers.ts', // Cross-j account/route helper logic
     'entity/tx/handlers/payments/swap-requests.ts',   // Same-chain and cross-j swap request creation
     'entity/tx/handlers/cross-j/setup.ts',   // Cross-j setup/admission path
     'entity/tx/handlers/cross-j/book-order.ts', // Remote book-order admission
@@ -336,8 +336,8 @@ const CROSS_FILES = {
     'extensions/cross-j/boundary.ts',
     'entity/tx/apply.ts',
     'entity/tx/j-events.ts',
-    'entity/tx/cross-j-outputs.ts',
-    'entity/tx/cross-jurisdiction-helpers.ts',
+    'entity/tx/j-events-htlc/cross-j-outputs.ts',
+    'entity/tx/j-events-htlc/cross-jurisdiction-helpers.ts',
     'entity/tx/handlers/account/index.ts',
     'entity/tx/handlers/account-cross-j-followups.ts',
     'entity/tx/handlers/account/committed-frame-followups.ts',
@@ -479,12 +479,12 @@ const RUNTIME_FILES = {
     'jurisdiction/machine/event-observation.ts',
     'entity/tx/apply.ts',
     'entity/tx/handlers/system/basic.ts',
-    'entity/tx/proposals.ts',
+    'entity/tx/processing/proposals.ts',
     'entity/tx/j-events.ts',
     'entity/tx/j-events-account.ts',
     'entity/tx/j-events-batch.ts',
-    'entity/tx/j-events-debt.ts',
-    'entity/tx/j-events-htlc.ts',
+    'entity/tx/j-events-observations/debt.ts',
+    'entity/tx/j-events-htlc/index.ts',
     'entity/tx/j-events-types.ts',
     'entity/tx/handlers/account/index.ts',
     'entity/tx/handlers/jurisdiction/r2c.ts',
@@ -1247,7 +1247,7 @@ xln/
     entity/tx/
       apply.ts                   ${fileSizes['runtime/entity/tx/apply.ts'] || '?'} lines - Entity tx dispatcher
       handlers/basic.ts          ${fileSizes['runtime/entity/tx/handlers/system/basic.ts'] || '?'} lines - Basic tx validation and handlers
-      proposals.ts               ${fileSizes['runtime/entity/tx/proposals.ts'] || '?'} lines - Proposal logic
+      processing/proposals.ts    ${fileSizes['runtime/entity/tx/processing/proposals.ts'] || '?'} lines - Proposal logic
       j-events.ts                ${fileSizes['runtime/entity/tx/j-events.ts'] || '?'} lines - Jurisdiction events
       handlers/account.ts              ${fileSizes['runtime/entity/tx/handlers/account/index.ts'] || '?'} lines - Account operations
       handlers/r2c.ts                  ${fileSizes['runtime/entity/tx/handlers/jurisdiction/r2c.ts'] || '?'} lines - R2C deposits

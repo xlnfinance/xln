@@ -5,7 +5,7 @@ import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import { findAccountKey } from '../../account-key';
 import type { AccountTxTarget } from '../account';
-import { persistVerifiedHtlcSecret } from '../../htlc-route-lifecycle';
+import { persistVerifiedHtlcSecret } from '../../j-events-htlc/route-lifecycle';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 

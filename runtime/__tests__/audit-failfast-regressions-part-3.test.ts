@@ -52,7 +52,7 @@ import {
   executeCrontab,
   initCrontab,
 } from '../entity/scheduler';
-import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../entity/tx/htlc-route-lifecycle';
+import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../entity/tx/j-events-htlc/route-lifecycle';
 
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../entity/factory';
 
@@ -73,7 +73,7 @@ import { signedEntityCommandTx } from '../entity/command/command-codec';
 
 import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
 
-import { generateProposalId } from '../entity/tx/proposals';
+import { generateProposalId } from '../entity/tx/processing/proposals';
 
 import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
 
@@ -108,7 +108,7 @@ import { applyEntityTx } from '../entity/tx/apply';
 
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity/tx/handlers/account-cross-j-followups';
 
-import { buildCrossJurisdictionEntityOutput } from '../entity/tx/cross-j-outputs';
+import { buildCrossJurisdictionEntityOutput } from '../entity/tx/j-events-htlc/cross-j-outputs';
 
 import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc/onion-advance';
 
@@ -179,7 +179,7 @@ import { createJReplica } from '../scenarios/harness/boot';
 
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/input-pipeline/entity-inputs';
 
-import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
+import { MalformedEntityFrameInputError } from '../entity/tx/processing/invariant-errors';
 
 import { applyStorageChanges } from '../runtime/observability/env-events';
 

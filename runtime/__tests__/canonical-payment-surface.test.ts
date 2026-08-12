@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { ENTITY_TX_TYPES } from '../entity/tx/catalog';
+import { ENTITY_TX_TYPES } from '../entity/tx/processing/catalog';
 import { validateEntityTx } from '../entity/tx-validation';
 import { decodeAccountTx } from '../account/tx-validation';
 import { validateStorageEntityCoreDocValue } from '../storage/schema/schema-state-docs';

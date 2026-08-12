@@ -1,6 +1,6 @@
-import type { AccountTx, HtlcLock, HtlcRoute } from '../../types/account';
-import type { EntityState } from '../types';
-import { cancelHook, scheduleHook } from '../scheduler/hook-state';
+import type { AccountTx, HtlcLock, HtlcRoute } from '../../../types/account';
+import type { EntityState } from '../../types';
+import { cancelHook, scheduleHook } from '../../scheduler/hook-state';
 
 /** Auto-dispute when the upstream peer never acknowledges a returned secret. */
 export const HTLC_SECRET_ACK_TIMEOUT_MS = 30_000;

@@ -26,7 +26,7 @@ import {
   isJPrefixLocalFreshnessRace,
 } from '../jurisdiction/prefix-round';
 import { getPrevFrameHash } from '../frame/lineage';
-import { MalformedEntityFrameInputError } from '../../tx/invariant-errors';
+import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 
 export type CommitExecutionResolution =
   | { kind: 'execution'; execution: EntityCandidate }

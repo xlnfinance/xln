@@ -11,7 +11,7 @@ import { initCrontab, scheduleHook } from '../entity/scheduler';
 import {
   BOARD_RESEAL_HOOK_ID,
   markBoardRotationResealsPending,
-} from '../entity/tx/board-rotation-reseal';
+} from '../entity/tx/state-effects/board-rotation-reseal';
 import { buildQuorumHanko } from '../hanko/signing';
 import { handleScheduledWakeEntityTx } from '../entity/tx/handlers/system/scheduled-wake';
 import { safeStringify } from '../protocol/serialization';

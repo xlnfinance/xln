@@ -1,13 +1,13 @@
-import { addMessage } from '../frame-events';
-import { getTokenInfo } from '../../account/utils';
-import { formatTokenAmount } from '../../account/financial-utils';
+import { addMessage } from '../../frame-events';
+import { getTokenInfo } from '../../../account/utils';
+import { formatTokenAmount } from '../../../account/financial-utils';
 import {
   applySignerEntityExternalWalletDelta,
   applySignerEntityExternalWalletSnapshot,
-} from '../auth/signer-wallet';
-import { applyKnownHtlcSecret } from './j-events-htlc';
-import { applyDebtCreated, applyDebtEnforced, applyDebtForgiven } from './j-events-debt';
-import type { FinalizedJEventContext } from './j-events';
+} from '../../auth/signer-wallet';
+import { applyKnownHtlcSecret } from '../j-events-htlc';
+import { applyDebtCreated, applyDebtEnforced, applyDebtForgiven } from './debt';
+import type { FinalizedJEventContext } from '../j-events';
 
 const displayTokenAmount = (tokenId: number, amount: unknown): string => {
   return formatTokenAmount(tokenId, BigInt(amount as string | number | bigint));

@@ -5,7 +5,7 @@ import { LIMITS } from '../../config/constants';
 
 import type { EntityTx, SignedEntityCommandV1 } from '../../types/entity-tx';
 import { canonicalEntityBoardSignerId, isEntityProtocolTx } from '../auth/authorization';
-import { EntityCommandRejectionError } from '../tx/invariant-errors';
+import { EntityCommandRejectionError } from '../tx/processing/invariant-errors';
 
 const ENTITY_COMMAND_DOMAIN = 'xln:entity-command:v1' as const;
 export const UNREGISTERED_ENTITY_COMMAND_STACK_KEY = ethers
