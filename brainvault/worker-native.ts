@@ -6,7 +6,7 @@
  */
 import { parentPort } from 'worker_threads';
 import { hashRaw as argon2Native } from '@node-rs/argon2';
-import { bytesToHex } from './encoding.ts';
+import { bytesToHex } from './primitives/encoding.ts';
 import { deriveBrainVaultNativeShard } from './native.ts';
 import {
   assertBrainVaultName,
@@ -14,7 +14,7 @@ import {
   BRAINVAULT_V1,
   BRAINVAULT_V1_SPEC_ID,
   createShardSalt,
-} from './spec.ts';
+} from './primitives/spec.ts';
 
 parentPort?.on('message', async ({ specId, name, passphrase, shardIndex, shardCount, shardMemoryKb, algId }) => {
   if (specId !== BRAINVAULT_V1_SPEC_ID) {

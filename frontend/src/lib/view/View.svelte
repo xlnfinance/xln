@@ -6,7 +6,7 @@
   import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
   import type { RuntimeAdapterFrameReceiptResponse } from '@xln/runtime/api/runtime-adapter/types';
   import type { EnvSnapshot } from '@xln/runtime/runtime/types';
-  import { toasts } from '$lib/stores/toastStore';
+  import { toasts } from '$lib/stores/ui/toastStore';
   import { paymentSpotlight } from '$lib/stores/network/paymentSpotlightStore';
   import UserModePanel from './UserModePanel.svelte';
   import CommandPalette from '../components/shared/CommandPalette.svelte';

@@ -18,7 +18,7 @@ import {
   createRuntime as createSharedRuntime,
 } from '../../utils/e2e-demo-users';
 import { connectHub as connectActiveRuntimeToHub } from '../../utils/e2e-connect';
-import { getRenderedPrimaryOutbound, waitForRenderedPrimaryOutboundDelta } from '../../utils/e2e-account-ui';
+import { getRenderedPrimaryOutbound, waitForRenderedPrimaryOutboundDelta } from '../../utils/runtime/e2e-account-ui';
 import { getPersistedReceiptCursor } from '../../utils/e2e-runtime-receipts';
 import { openAccountWorkspaceTab } from '../../utils/e2e-account-workspace';
 

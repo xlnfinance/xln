@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { deriveBrainVaultNative } from '../../brainvault/native';
-import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/spec';
+import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/primitives/spec';
 import { validateRuntimeAdapterWireMessage } from '../../runtime/api/runtime-adapter/wire-schema';
 import { createBrainVaultOwnerController } from '../../runtime/api/server/ownership/brainvault';
 import type { EntityReplica, RuntimeInput, RuntimeReplica } from '../../runtime/runtime/types';

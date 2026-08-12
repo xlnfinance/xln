@@ -2,7 +2,7 @@ import { devices, expect, test, type BrowserContext, type Locator, type Page } f
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL, waitForNamedHubs } from '../../utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from '../../utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
-import { resolveRuntimeImportAppUrl } from '../../utils/e2e-runtime-import';
+import { resolveRuntimeImportAppUrl } from '../../utils/runtime/e2e-runtime-import';
 import { captureLocatorScreenshot, capturePageScreenshot } from '../../utils/e2e-screenshots';
 
 const SWAP_CONNECT_TOKEN_IDS = [1, 2, 3] as const;

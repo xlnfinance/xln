@@ -26,11 +26,11 @@ import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-basel
 import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
-} from './utils/e2e-account-ui';
+} from './utils/runtime/e2e-account-ui';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { timedStep } from './utils/e2e-timing.mts';
-import { closeRuntimeContext } from './utils/e2e-runtime-shutdown.mts';
+import { closeRuntimeContext } from './utils/runtime/e2e-runtime-shutdown.mts';
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 

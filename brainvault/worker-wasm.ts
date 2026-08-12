@@ -4,9 +4,9 @@
  * indexed shard across a worker-thread boundary and returns strict hex.
  */
 import { parentPort } from 'worker_threads';
-import { bytesToHex } from './encoding.ts';
-import { deriveShardWithParams } from './kdf.ts';
-import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './spec.ts';
+import { bytesToHex } from './primitives/encoding.ts';
+import { deriveShardWithParams } from './primitives/kdf.ts';
+import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './primitives/spec.ts';
 
 parentPort?.on('message', async ({ specId, name, passphrase, shardIndex, shardCount, shardMemoryKb, algId }) => {
   if (specId !== BRAINVAULT_V1_SPEC_ID) {

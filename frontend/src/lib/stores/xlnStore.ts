@@ -4,7 +4,7 @@ import { settings } from './settingsStore';
 import { activeEnv, activeRuntimeId, registerRuntimeAdapterSwitcher, runtimes, runtimeOperations } from './runtimeStore';
 import { vaultOperations } from './vault/vaultStore';
 import { xlnEnvironment, setXlnEnvironment } from './bootstrap/embeddedRuntimeStore';
-import { toasts } from './toastStore';
+import { toasts } from './ui/toastStore';
 import {
   connectRuntimeAdapter,
   disconnectRuntimeAdapter,

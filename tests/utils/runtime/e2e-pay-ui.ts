@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { ethers } from 'ethers';
-import { getTokenInfo } from '../../runtime/account/utils';
-import { openAccountWorkspaceTab } from './e2e-account-workspace';
+import { getTokenInfo } from '../../../runtime/account/utils';
+import { openAccountWorkspaceTab } from '../e2e-account-workspace';
 
 export type UiPaymentIntent = {
   recipientEntityId: string;

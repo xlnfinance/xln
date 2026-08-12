@@ -18,8 +18,8 @@ import {
   quiesceRuntimePage,
   wrapRuntimeContextClose,
   wrapRuntimePageClose,
-} from './utils/e2e-runtime-shutdown.mts';
-import { isBenignConsoleMessage } from './utils/browser-health-classification.mts';
+} from './utils/runtime/e2e-runtime-shutdown.mts';
+import { isBenignConsoleMessage } from './utils/browser/browser-health-classification.mts';
 import {
   formatE2EGuardFailure,
   matchesBrowserIssue,
@@ -31,7 +31,7 @@ import {
   type E2EBrowserIssueType as BrowserIssueType,
   type E2EDebugIncident,
   type E2EDebugIncidentExpectation,
-} from './utils/e2e-browser-guard.mts';
+} from './utils/browser/e2e-browser-guard.mts';
 
 type BrowserWithPatch = Browser & {
   __xlnQaNewContext?: Browser['newContext'];

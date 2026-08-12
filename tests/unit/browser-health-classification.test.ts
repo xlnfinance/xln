@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { isBenignConsoleMessage } from '../utils/browser-health-classification.mts';
+import { isBenignConsoleMessage } from '../utils/browser/browser-health-classification.mts';
 
 describe('browser health severity classification', () => {
   test('ignores only Chromium ReadPixels driver diagnostics', () => {

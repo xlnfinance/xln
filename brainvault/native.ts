@@ -36,8 +36,8 @@ import {
   BRAINVAULT_V1,
   BRAINVAULT_V1_SPEC_ID,
   createShardSalt,
-} from './spec.ts';
-import { hexToBytes } from './encoding.ts';
+} from './primitives/spec.ts';
+import { hexToBytes } from './primitives/encoding.ts';
 
 export type BrainVaultNativeInput = Readonly<{
   name: string;

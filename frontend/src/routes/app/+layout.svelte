@@ -21,7 +21,7 @@
   } from '$lib/stores/runtimeViewStore';
   import { errorLog } from '$lib/stores/errorLogStore';
   import { settingsOperations } from '$lib/stores/settingsStore';
-  import { tabOperations } from '$lib/stores/tabStore';
+  import { tabOperations } from '$lib/stores/ui/tabStore';
   import { timeOperations } from '$lib/stores/timeStore';
   import { vaultOperations } from '$lib/stores/vault/vaultStore';
   import { resolveDeployVersionAction } from '$lib/utils/deployVersionPolicy';

@@ -32,8 +32,8 @@ import {
   waitForPersistedFrameEventMatch,
   type PersistedFrameEvent,
 } from '../../utils/e2e-runtime-receipts';
-import { submitUiPayment } from '../../utils/e2e-pay-ui';
-import { enqueueEntityTxs } from '../../utils/e2e-runtime-input';
+import { submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
+import { enqueueEntityTxs } from '../../utils/runtime/e2e-runtime-input';
 
 /**
  * REBALANCE INVARIANT (do not "simplify" this in future edits):

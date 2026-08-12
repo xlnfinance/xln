@@ -22,16 +22,16 @@ import { API_BASE_URL, APP_BASE_URL, ensureE2EBaseline } from '../../utils/e2e-b
 import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
-} from '../../utils/e2e-account-ui';
-import { runBrainvaultCli } from '../../utils/e2e-brainvault';
+} from '../../utils/runtime/e2e-account-ui';
+import { runBrainvaultCli } from '../../utils/runtime/e2e-brainvault';
 import { connectRuntimeToHub } from '../../utils/e2e-connect';
 import { deriveSignerAddressFromMnemonic, gotoApp } from '../../utils/e2e-demo-users';
-import { submitUiPayment } from '../../utils/e2e-pay-ui';
+import { submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
 import {
   getPersistedReceiptCursor,
   waitForPersistedFrameEventMatch,
 } from '../../utils/e2e-runtime-receipts';
-import { closeRuntimeContext, closeRuntimePage } from '../../utils/e2e-runtime-shutdown.mts';
+import { closeRuntimeContext, closeRuntimePage } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 

@@ -16,7 +16,7 @@ import {
   deriveSitePassword, factorForShardCount, getShardCount, hexToBytes, validateInputs,
 } from './core.ts';
 import { BIP39_ENGLISH } from './bip39-english.ts';
-import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID } from './spec.ts';
+import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID } from './primitives/spec.ts';
 
 // Test vectors for v1.0 (simplified: no hashName, direct salt from name)
 // FROZEN - these define wallet compatibility forever

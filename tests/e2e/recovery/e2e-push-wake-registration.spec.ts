@@ -14,8 +14,8 @@ import {
 } from '../../utils/e2e-demo-users';
 import { connectHub } from '../../utils/e2e-connect';
 import { startDisputeFromManageUi } from '../../utils/e2e-account-workspace';
-import { requireIsolatedBaseUrl } from '../../utils/e2e-isolated-env';
-import { quiesceRuntimePage } from '../../utils/e2e-runtime-shutdown.mts';
+import { requireIsolatedBaseUrl } from '../../utils/runtime/e2e-isolated-env';
+import { quiesceRuntimePage } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../runtime/account/crypto';
 import { createXlnJsonRpcProvider } from '../../../runtime/jurisdiction/adapter';
 import { mineRpcToBlockExact } from '../../../runtime/scenarios/harness/rpc-block-mining';

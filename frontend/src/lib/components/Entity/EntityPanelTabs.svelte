@@ -15,7 +15,7 @@ import { activeRuntime, vaultOperations } from "$lib/stores/vault/vaultStore";
 import { entityPositions, submitEntityInputs, submitRuntimeInput, xlnFunctions } from "../../stores/xlnStore";
 import { recordRuntimeIngressReceipt } from "../../stores/commands/runtimeCommandBus";
 import { runtimeControllerHandle } from "../../stores/runtimeControllerStore";
-import { toasts } from "../../stores/toastStore";
+import { toasts } from "../../stores/ui/toastStore";
 import { errorLog } from "../../stores/errorLogStore";
 import { getOpenAccountRebalancePolicyData } from "$lib/utils/onboarding/onboardingPreferences";
 import { prewarmCounterpartyProfiles } from "$lib/utils/runtime/p2pPrefetch";

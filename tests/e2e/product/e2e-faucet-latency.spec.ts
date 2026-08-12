@@ -3,7 +3,7 @@ import { deriveDelta } from '../../../runtime/account/utils';
 import { getHealth } from '../../utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from '../../utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
-import { requireIsolatedBaseUrl } from '../../utils/e2e-isolated-env';
+import { requireIsolatedBaseUrl } from '../../utils/runtime/e2e-isolated-env';
 
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');

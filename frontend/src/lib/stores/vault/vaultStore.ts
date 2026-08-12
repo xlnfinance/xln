@@ -36,7 +36,7 @@ import {
 
 import { settings } from '../settingsStore';
 
-import { toasts } from '../toastStore';
+import { toasts } from '../ui/toastStore';
 
 import { errorLog } from '../errorLogStore';
 
@@ -44,7 +44,7 @@ import { writeHubJoinPreference, writeSavedCollateralPolicy } from '../../utils/
 
 import { writeOnboardingCompleteForEntities } from '../../utils/onboarding/onboardingState';
 
-import { tabOperations } from '../tabStore';
+import { tabOperations } from '../ui/tabStore';
 
 import { isInactiveTabStandby } from '../../utils/control/activeTabLock';
 

@@ -169,7 +169,7 @@ describe('isolated E2E runner resources', () => {
 
   test('runner build and browser helpers have no fallback to shared dev resources', () => {
     const runner = readFileSync('runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts', 'utf8');
-    const runtimeImport = readFileSync('tests/utils/e2e-runtime-import.ts', 'utf8');
+    const runtimeImport = readFileSync('tests/utils/runtime/e2e-runtime-import.ts', 'utf8');
     const viteConfig = readFileSync('frontend/vite.config.ts', 'utf8');
 
     expect(runner).toContain('XLN_RUNTIME_BUNDLE_OUT: artifacts.runtimeBundlePath');

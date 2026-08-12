@@ -25,7 +25,7 @@ import {
   factorForShardCount, formatDuration, hexToBytes, bytesToHex,
   BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, deriveSitePassword,
 } from './core.ts';
-import { assertBrainVaultName, assertBrainVaultPassphrase } from './spec.ts';
+import { assertBrainVaultName, assertBrainVaultPassphrase } from './primitives/spec.ts';
 
 const args = process.argv.slice(2);
 const showHelp = args.includes('--help') || args.includes('-h');

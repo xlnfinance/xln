@@ -69,7 +69,7 @@ import { allowDebugIncident, expect, test, type BrowserContext } from './global-
 import { ensureE2EBaseline } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { gotoApp } from './utils/e2e-demo-users';
-import { enqueueEntityTxs } from './utils/e2e-runtime-input';
+import { enqueueEntityTxs } from './utils/runtime/e2e-runtime-input';
 import { hasSilentRelayMarketSubscribe, installSilentRelayWebSocket } from './utils/e2e-silent-relay';
 import { timedStep } from './utils/e2e-timing.mts';
 

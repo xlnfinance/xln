@@ -20,7 +20,7 @@ import {
   selectSourceChainInSwap,
 } from './e2e-cross-j-swap-helpers-a';
 import { expect, type Page } from './global-setup.mts';
-import { enqueueEntityTxs } from './utils/e2e-runtime-input';
+import { enqueueEntityTxs } from './utils/runtime/e2e-runtime-input';
 
 export async function expectCrossOrderbookReady(
   page: Page,

@@ -21,11 +21,11 @@ bun test brainvault/core.test.ts
 
 ## Files
 
-- `spec.ts` - frozen V1 constants and shard salt
-- `kdf.ts` - Argon2id shard derivation
+- `primitives/spec.ts` - frozen V1 constants and shard salt
+- `primitives/kdf.ts` - Argon2id shard derivation
 - `core.ts` - shard combination and wallet derivation API
 - `bip39-english.ts` - embedded canonical wordlist
-- `encoding.ts` - strict hex boundaries
+- `primitives/encoding.ts` - strict hex boundaries
 - `cli.ts` - CLI tool
 - `native.ts` - bounded native orchestration used by Bun nodes
 - `worker-browser.ts` - browser worker source

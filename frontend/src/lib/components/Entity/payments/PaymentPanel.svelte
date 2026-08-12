@@ -20,7 +20,7 @@
   import { routePreview } from '../../../stores/network/routePreviewStore';
   import { errorLog } from '../../../stores/errorLogStore';
   import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
-  import { toasts } from '$lib/stores/toastStore';
+  import { toasts } from '$lib/stores/ui/toastStore';
   import { runtimeCommandLatestReceipt } from '$lib/stores/commands/runtimeCommandBus';
   import { classifyRuntimeFailure } from '$lib/utils/runtime/runtimeFailure';
   import EntityInput from '../../shared/EntityInput.svelte';

@@ -13,7 +13,7 @@ import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
 } from '../../utils/e2e-demo-users';
-import { getRenderedOutboundForAccount } from '../../utils/e2e-account-ui';
+import { getRenderedOutboundForAccount } from '../../utils/runtime/e2e-account-ui';
 import { buildDefaultEntitySwapPairs, getTokenInfo } from '../../../runtime/account/utils';
 import { capturePageScreenshot } from '../../utils/e2e-screenshots';
 import { hasSilentRelayMarketSubscribe, installSilentRelayWebSocket } from '../../utils/e2e-silent-relay';

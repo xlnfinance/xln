@@ -21,7 +21,7 @@
   - Demo and database management
   - Replica lookup with multiple fallback strategies
 
-- **Tab Store** (`src/lib/stores/tabStore.ts`)
+- **Tab Store** (`src/lib/stores/ui/tabStore.ts`)
   - Multi-panel tab system with persistence
   - Add/remove/update tab operations
   - localStorage integration for state persistence

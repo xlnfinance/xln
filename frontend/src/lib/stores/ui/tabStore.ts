@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import type { Tab } from '$lib/types/ui';
-import { errorLog } from './errorLogStore';
+import { errorLog } from '../errorLogStore';
 
 export const tabs = writable<Tab[]>([]);
 export const activeTabId = writable<string | null>(null);

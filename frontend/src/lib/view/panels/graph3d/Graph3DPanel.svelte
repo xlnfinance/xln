@@ -14,7 +14,7 @@ import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from "$lib/utils/runtime/l
 import { runtimeControllerHandle } from "$lib/stores/runtimeControllerStore";
 import { runtimeView } from "$lib/stores/runtimeViewStore";
 import { runtimeGraphLiveFrameCache, watchRuntimeGraphFrameCache } from "$lib/network3d/runtimeGraphFrameCache";
-import { runtimeGraphCanonicity, runtimeGraphControlOperations, runtimeGraphScope } from "$lib/stores/runtimeGraphControlStore";
+import { runtimeGraphCanonicity, runtimeGraphControlOperations, runtimeGraphScope } from "$lib/stores/network/runtimeGraphControlStore";
 import { beginGraphGesture, emptyGraphGestureState, endGraphGesture, type GraphGestureOutcome } from "$lib/network3d/graphSelectionGesture";
 import { ImmersiveWalletSurface } from "$lib/network3d/ImmersiveWalletSurface";
 import { registerDebugSurface } from "$lib/utils/runtime/debugSurface";

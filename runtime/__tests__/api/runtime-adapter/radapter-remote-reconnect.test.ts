@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { BRAINVAULT_V1_SPEC_ID } from '../../../../brainvault/spec';
+import { BRAINVAULT_V1_SPEC_ID } from '../../../../brainvault/primitives/spec';
 import {
   createPaymentTerminalMonitor,
   PAYMENT_TERMINAL_EVENT_NAMES,

@@ -18,8 +18,8 @@ const diagnosticFiles = [
     logLine: "errorLog.log('Failed to load settings; clearing corrupted storage', 'Settings'",
   },
   {
-    path: 'frontend/src/lib/stores/tabStore.ts',
-    importLine: "import { errorLog } from './errorLogStore';",
+    path: 'frontend/src/lib/stores/ui/tabStore.ts',
+    importLine: "import { errorLog } from '../errorLogStore';",
     logLine: "errorLog.log('Failed to load tabs; clearing corrupted storage', 'Tabs'",
   },
   {

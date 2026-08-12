@@ -44,17 +44,17 @@ import { timedStep } from '../../utils/e2e-timing.mts';
 import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
-} from '../../utils/e2e-account-ui';
-import { outCap, waitForOutCapDelta } from '../../utils/e2e-derived-capacity';
+} from '../../utils/runtime/e2e-account-ui';
+import { outCap, waitForOutCapDelta } from '../../utils/runtime/e2e-derived-capacity';
 import {
   createRuntimeIdentity,
   gotoApp,
   selectDemoMnemonic,
 } from '../../utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from '../../utils/e2e-connect';
-import { enqueueEntityTxs } from '../../utils/e2e-runtime-input';
+import { enqueueEntityTxs } from '../../utils/runtime/e2e-runtime-input';
 import { getTokenInfo } from '../../../runtime/account/utils';
-import { closeRuntimeContext } from '../../utils/e2e-runtime-shutdown.mts';
+import { closeRuntimeContext } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 
 const INIT_TIMEOUT = 30_000;
 

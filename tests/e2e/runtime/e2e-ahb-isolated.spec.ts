@@ -14,7 +14,7 @@ import { ensureE2EBaseline } from '../../utils/e2e-baseline';
 import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
-} from '../../utils/e2e-account-ui';
+} from '../../utils/runtime/e2e-account-ui';
 import { connectRuntimeToHub } from '../../utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
 import {
@@ -23,7 +23,7 @@ import {
   waitForPersistedFrameEventMatch,
 } from '../../utils/e2e-runtime-receipts';
 
-import { requireIsolatedBaseUrl } from '../../utils/e2e-isolated-env';
+import { requireIsolatedBaseUrl } from '../../utils/runtime/e2e-isolated-env';
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
 const LONG_E2E = process.env.E2E_LONG === '1';

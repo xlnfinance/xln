@@ -6,7 +6,7 @@
   import { DISPLAY, TIME_MACHINE } from '@xln/runtime/config/constants';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import NetworkMachineTimeline from './NetworkMachineTimeline.svelte';
-  import { runtimeGraphScope } from '$lib/stores/runtimeGraphControlStore';
+  import { runtimeGraphScope } from '$lib/stores/network/runtimeGraphControlStore';
   import { panelBridge } from '../utils/panelBridge';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { activeRuntimeId, runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
@@ -18,7 +18,7 @@
     setRuntimeViewActiveEntityId,
     type RuntimeViewHistoryScanState,
   } from '$lib/stores/runtimeViewStore';
-  import { toasts } from '$lib/stores/toastStore';
+  import { toasts } from '$lib/stores/ui/toastStore';
   import { appState, appStateOperations } from '$lib/stores/appStateStore';
   import {
     getXLN,

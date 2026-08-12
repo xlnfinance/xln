@@ -12,9 +12,9 @@
  */
 
 import { argon2id } from 'hash-wasm';
-import { bytesToHex } from './encoding.ts';
-import { deriveShardWithParams } from './kdf.ts';
-import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './spec.ts';
+import { bytesToHex } from './primitives/encoding.ts';
+import { deriveShardWithParams } from './primitives/kdf.ts';
+import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './primitives/spec.ts';
 
 // Message handler
 self.onmessage = async function(e: MessageEvent) {

@@ -19,15 +19,15 @@ import { blake3 } from '@noble/hashes/blake3.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { HDNodeWallet } from 'ethers';
 import { BIP39_ENGLISH } from './bip39-english.ts';
-import { hexToBytes } from './encoding.ts';
-import { resolveKdfParams } from './kdf.ts';
-import type { BrainvaultKdfParams } from './kdf.ts';
-import { BRAINVAULT_V1 } from './spec.ts';
+import { hexToBytes } from './primitives/encoding.ts';
+import { resolveKdfParams } from './primitives/kdf.ts';
+import type { BrainvaultKdfParams } from './primitives/kdf.ts';
+import { BRAINVAULT_V1 } from './primitives/spec.ts';
 
-export { bytesToHex, hexToBytes } from './encoding.ts';
-export { deriveShard, deriveShardWithParams } from './kdf.ts';
-export type { BrainvaultKdfParams } from './kdf.ts';
-export { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './spec.ts';
+export { bytesToHex, hexToBytes } from './primitives/encoding.ts';
+export { deriveShard, deriveShardWithParams } from './primitives/kdf.ts';
+export type { BrainvaultKdfParams } from './primitives/kdf.ts';
+export { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './primitives/spec.ts';
 
 /**
  * Calculate number of shards for a given factor

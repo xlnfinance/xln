@@ -4,10 +4,10 @@ import { Interface } from 'ethers';
 import { ensureE2EBaseline, APP_BASE_URL } from '../../utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
 import { connectHub } from '../../utils/e2e-connect';
-import { getRenderedExternalBalance, getRenderedReserveBalance } from '../../utils/e2e-account-ui';
+import { getRenderedExternalBalance, getRenderedReserveBalance } from '../../utils/runtime/e2e-account-ui';
 import { startDisputeFromManageUi } from '../../utils/e2e-account-workspace';
 import { capturePageScreenshot } from '../../utils/e2e-screenshots';
-import { enqueueEntityTxs, enqueueRuntimeInput } from '../../utils/e2e-runtime-input';
+import { enqueueEntityTxs, enqueueRuntimeInput } from '../../utils/runtime/e2e-runtime-input';
 import { deriveDelta, getTokenInfo } from '../../../runtime/account/utils';
 
 const TOKEN_ID_USDC = 1;

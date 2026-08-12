@@ -16,7 +16,7 @@ import { basename, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { RemoteRuntimeAdapter } from '../../runtime/api/runtime-adapter/remote';
-import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/spec';
+import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/primitives/spec';
 
 const ROOT = resolve(import.meta.dir, '../..');
 const PACKAGE_DIR = join(ROOT, 'packages/npm/xlnfinance');

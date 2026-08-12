@@ -3,12 +3,12 @@ import { Wallet } from 'ethers';
 import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
-} from '../../utils/e2e-account-ui';
+} from '../../utils/runtime/e2e-account-ui';
 import { requireApiBaseUrl } from '../../utils/e2e-base-url';
 import { ensureE2EBaseline } from '../../utils/e2e-baseline';
 import { connectRuntimeToHub } from '../../utils/e2e-connect';
 import { APP_BASE_URL, createRuntimeIdentity, gotoApp } from '../../utils/e2e-demo-users';
-import { submitUiPayment } from '../../utils/e2e-pay-ui';
+import { submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
 import {
   getPersistedReceiptCursor,
   waitForPersistedFrameEventMatch,

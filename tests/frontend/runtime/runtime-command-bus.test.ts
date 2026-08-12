@@ -63,7 +63,7 @@ test('runtime command bus records pending accepted observed committed error rece
 test('browser E2E mutations use the live runtime command bus instead of a detached view RuntimeReplica', () => {
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const embeddedSource = readFileSync('frontend/src/lib/stores/bootstrap/embeddedRuntimeStore.ts', 'utf8');
-  const helperSource = readFileSync('tests/utils/e2e-runtime-input.ts', 'utf8');
+  const helperSource = readFileSync('tests/utils/runtime/e2e-runtime-input.ts', 'utf8');
   const enqueueStart = helperSource.indexOf('export async function enqueueRuntimeInput');
   const enqueueEnd = helperSource.indexOf('export async function enqueueEntityTxs', enqueueStart);
   const enqueueSource = helperSource.slice(enqueueStart, enqueueEnd);

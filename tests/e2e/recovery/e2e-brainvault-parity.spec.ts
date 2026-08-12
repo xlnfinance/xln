@@ -6,7 +6,7 @@ import {
   normalizeBrainvaultMnemonic as normalizeMnemonic,
   runBrainvaultCli,
   type BrainvaultCliOutput,
-} from '../../utils/e2e-brainvault';
+} from '../../utils/runtime/e2e-brainvault';
 
 import {
   APP_BASE_URL,

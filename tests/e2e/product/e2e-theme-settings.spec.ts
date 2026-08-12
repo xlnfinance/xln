@@ -4,7 +4,7 @@ import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
 } from '../../utils/e2e-demo-users';
-import { requireIsolatedBaseUrl } from '../../utils/e2e-isolated-env';
+import { requireIsolatedBaseUrl } from '../../utils/runtime/e2e-isolated-env';
 
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const INIT_TIMEOUT = 30_000;

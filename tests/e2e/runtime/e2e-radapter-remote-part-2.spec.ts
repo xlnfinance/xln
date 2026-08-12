@@ -4,9 +4,9 @@ import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth, waitForNamedH
 
 import { openAccountWorkspaceTab } from '../../utils/e2e-account-workspace';
 
-import { acceptRemoteRuntimeConsent, resolveRuntimeImportAppUrl } from '../../utils/e2e-runtime-import';
+import { acceptRemoteRuntimeConsent, resolveRuntimeImportAppUrl } from '../../utils/runtime/e2e-runtime-import';
 
-import { closeRuntimeContext } from '../../utils/e2e-runtime-shutdown.mts';
+import { closeRuntimeContext } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 
 import { deriveSignerAddressSync } from '../../../runtime/account/crypto';
 

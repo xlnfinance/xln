@@ -19,7 +19,7 @@ import {
   type BrainVaultNativeProgress,
 } from '../../../../brainvault/native.ts';
 import { deriveEthereumAddress, deriveEthereumPrivateKeyAtPath } from '../../../../brainvault/core.ts';
-import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID } from '../../../../brainvault/spec.ts';
+import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID } from '../../../../brainvault/primitives/spec.ts';
 import { registerSignerKey } from '../../../account/crypto';
 import type { RuntimeInput, RuntimeReplica } from '../../../runtime/types';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime';

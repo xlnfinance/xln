@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { getTokenInfo } from '../../runtime/account/utils';
-import { enqueueEntityTxs } from './e2e-runtime-input';
+import { enqueueEntityTxs } from './runtime/e2e-runtime-input';
 
 const DEFAULT_TOKEN_IDS = [1] as const;
 const diagnosticOpenTimeoutMs = Number(process.env.E2E_DIAGNOSTIC_OPEN_TIMEOUT_MS || 75_000);

@@ -13,7 +13,7 @@ import {
 import type { AccountRoleEvidence } from '@xln/runtime/account/config/dispute-config';
 import { submitActiveCrossJurisdictionIntent, submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../../stores/xlnStore';
 import { readRuntimeAccountProjection, readRuntimeEntityProjectionFrame } from '../../../stores/runtimeViewStore';
-import { toasts } from '../../../stores/toastStore';
+import { toasts } from '../../../stores/ui/toastStore';
 import { errorLog } from '../../../stores/errorLogStore';
 import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
 import { unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';

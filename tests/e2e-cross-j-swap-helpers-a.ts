@@ -6,8 +6,8 @@ import type { MarketSnapshotPayload } from '../runtime/network/relay/market/snap
 import { expect, type Page } from './global-setup.mts';
 export { aggregateExpectedCrossBookDepth } from './utils/e2e-cross-book-depth';
 import { type E2EHealthResponse } from './utils/e2e-baseline';
-import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
-import { enqueueEntityTxs } from './utils/e2e-runtime-input';
+import { requireIsolatedBaseUrl } from './utils/runtime/e2e-isolated-env';
+import { enqueueEntityTxs } from './utils/runtime/e2e-runtime-input';
 
 export const INIT_TIMEOUT = 30_000;
 

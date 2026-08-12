@@ -16,14 +16,14 @@ import {
   listRenderedCounterpartyIds,
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
-} from '../../utils/e2e-account-ui';
+} from '../../utils/runtime/e2e-account-ui';
 import { connectHub as connectActiveRuntimeToHub } from '../../utils/e2e-connect';
 import {
   createDemoUsers,
   gotoApp as gotoSharedApp,
   switchToRuntime,
 } from '../../utils/e2e-demo-users';
-import { expectUiPaymentNoRoute, prepareUiPayment, submitUiPayment } from '../../utils/e2e-pay-ui';
+import { expectUiPaymentNoRoute, prepareUiPayment, submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
 import {
   getPersistedReceiptCursor,
   waitForPersistedFrameEvent,

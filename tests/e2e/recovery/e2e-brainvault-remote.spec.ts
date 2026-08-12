@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '../../global-setup.mts';
 
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from '../../utils/e2e-baseline';
-import { acceptRemoteRuntimeConsent } from '../../utils/e2e-runtime-import';
+import { acceptRemoteRuntimeConsent } from '../../utils/runtime/e2e-runtime-import';
 
 type RuntimeImportCapability = {
   label: string;

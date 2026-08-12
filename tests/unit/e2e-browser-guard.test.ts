@@ -6,7 +6,7 @@ import {
   unexpectedOpenIncidents,
   type E2EBrowserIssue,
   type E2EDebugIncident,
-} from '../utils/e2e-browser-guard.mts';
+} from '../utils/browser/e2e-browser-guard.mts';
 
 const browserIssue = (
   type: E2EBrowserIssue['type'],

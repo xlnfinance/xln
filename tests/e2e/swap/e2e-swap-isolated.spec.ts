@@ -17,7 +17,7 @@ import { deriveDelta } from '../../../runtime/account/utils';
 import { ensureE2EBaseline, type E2EHealthResponse } from '../../utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from '../../utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
-import { requireIsolatedBaseUrl } from '../../utils/e2e-isolated-env';
+import { requireIsolatedBaseUrl } from '../../utils/runtime/e2e-isolated-env';
 import { timedStep } from '../../utils/e2e-timing.mts';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
