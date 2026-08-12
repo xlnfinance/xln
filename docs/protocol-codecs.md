@@ -88,6 +88,6 @@ direction.
 ## Golden vectors
 
 `runtime/__tests__/frame-hash-golden.test.ts` pins account and entity frame
-hashes. `runtime/__tests__/account-state-root.test.ts` pins field inclusion and
+hashes. `runtime/__tests__/account/state/account-state-root.test.ts` pins field inclusion and
 ephemeral-state exclusion. Any intentional encoding change must update both the
 vectors and this specification after independently inspecting the new payload.

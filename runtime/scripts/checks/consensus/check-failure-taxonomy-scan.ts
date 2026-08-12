@@ -913,7 +913,7 @@ for (const [path, markers] of [
     ['lazy entity creation uses structured logging without direct console output', 'entity.factory'],
   ],
   [
-    'runtime/__tests__/entity-consensus-logging.test.ts',
+    'runtime/__tests__/entity/consensus/core/entity-consensus-logging.test.ts',
     ['entity consensus core uses structured logging only', 'frame.profile'],
   ],
   [
@@ -921,20 +921,20 @@ for (const [path, markers] of [
     ['runtime entity input j-output collection logs stay behind structured debug logging', 'inputs.profile'],
   ],
   [
-    'runtime/__tests__/entity-input-merge.test.ts',
+    'runtime/__tests__/entity/boundaries/entity-input-merge.test.ts',
     ['uses structured logging without direct console output', 'entity.input.merge'],
   ],
   ['runtime/__tests__/settlement-ops.test.ts', ['SETTLEMENT_UNKNOWN_OP_TYPE', 'without console fallback']],
   [
-    'runtime/__tests__/account-followup-logging.test.ts',
+    'runtime/__tests__/account/transactions/account-followup-logging.test.ts',
     ['account committed followups use structured logging only', 'account.followup'],
   ],
   [
-    'runtime/__tests__/account-consensus-logging.test.ts',
+    'runtime/__tests__/account/consensus/account-consensus-logging.test.ts',
     ['account consensus core uses structured logging only', 'frame.state_root_mismatch'],
   ],
   [
-    'runtime/__tests__/account-propose-logging.test.ts',
+    'runtime/__tests__/account/consensus/account-propose-logging.test.ts',
     ['account frame proposal path uses structured logging only', 'proposal.profile'],
   ],
   [

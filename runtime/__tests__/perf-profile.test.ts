@@ -4,7 +4,7 @@ import {
   cumulativeMarksToDurations,
   cumulativeMarksToPhases,
 } from '../infra/performance/profile';
-import { asDurationMs, parseProfileLine } from '../scripts/analyze-runtime-perf';
+import { asDurationMs, parseProfileLine } from '../scripts/operations/benchmark/analyze-runtime-perf';
 
 describe('runtime performance profiling', () => {
   test('converts cumulative frame marks into non-overlapping stages', () => {

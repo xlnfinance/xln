@@ -1,0 +1,786 @@
+import { describe, expect, test } from 'bun:test';
+
+import {
+  deriveSignerAddressSync,
+  deriveSignerKeySync,
+  registerSignerKey,
+  signAccountFrame,
+} from '../../../../account/crypto';
+import { applyEntityFrame, applyEntityInput } from '../../../../entity/consensus';
+import { createEntityFrameHash } from '../../../../entity/consensus/frame';
+import { buildEntityHashesToSign } from '../../../../entity/consensus/input/hanko-witness';
+import { getEntityLeaderState } from '../../../../entity/consensus/leader';
+import { buildCertifiedEntityOutputHashes } from '../../../../entity/consensus/output/certification';
+import {
+  buildEntityFrameAuthority,
+  computeCanonicalEntityConsensusStateHash,
+  computeEntityFrameAuthorityRoot,
+} from '../../../../entity/consensus/state-root';
+import { generateLazyEntityId } from '../../../../entity/factory';
+import { deriveLocalEntityCryptoKeys } from '../../../../entity/auth/crypto';
+import { initCrontab } from '../../../../entity/scheduler';
+import { buildQuorumHanko } from '../../../../hanko/signing';
+import { startRuntimeHistoryTraceForTesting } from '../../../../runtime/observability/history-retention';
+import { buildLocalEntityProfile } from '../../../../network/p2p/gossip/helper';
+import {
+  collectLocalProfileEncryptionAnnouncements,
+  getCompleteProfileEncryptionManifest,
+} from '../../../../entity/profile/profile-encryption';
+import { computeProfileHash } from '../../../../entity/profile/profile-signing';
+import { safeStringify } from '../../../../protocol/serialization';
+import { canonicalJurisdictionEventsHash } from '../../../../jurisdiction/machine/event-observation';
+import { recordValidatorJHistory } from '../../../../jurisdiction/machine/local-history';
+import { markLocalJAuthorityRuntimeTx } from '../../../../jurisdiction/machine/registration-evidence';
+import { buildRuntimeRecoveryBundle } from '../../../../storage/recovery/bundle';
+import { applyMergedEntityInputs } from '../../../../runtime/input-pipeline/entity-inputs';
+import type { RuntimeEntityRoutingDeps } from '../../../../runtime/routing/entity-routing';
+import {
+  applyReliableDeliveryReceipts,
+  commitReliableIngress,
+  finalizeReliableIngressCommit,
+  registerReliableIngress,
+  releaseUncommittedReliableIngress,
+} from '../../../../runtime/reliable/reliable-delivery.ts';
+import {
+  closeInfraDb,
+  createEmptyEnv,
+  enqueueRuntimeInput,
+  processRuntime,
+  restoreEnvFromRecoveryBundles,
+} from '../../../../runtime';
+import {
+  computeCanonicalEntityHashesFromEnv,
+  computeCanonicalRuntimeStateHash,
+  computeCanonicalStateHashFromEnv,
+} from '../../../../storage/canonical-hash';
+import { buildStorageReplicaMetaCommitment } from '../../../../storage/replica/replicas';
+import { computeStoragePostStateHash } from '../../../../storage/hashes';
+import {
+  applyCertifiedEntityLineagePlan,
+  buildCertifiedEntityLineagePlan,
+} from '../../../../storage/replica/entity-lineage';
+import type { DeliverableEntityInput, RuntimeReplica } from '../../../../runtime/types';
+import type { EntityReplica, EntityState, EntityFrame } from '../../../../entity/types';
+import type { JurisdictionEvent } from '../../../../types/jurisdiction-events';
+import {
+  buildDurableRuntimeMachineSnapshot,
+  buildReplayVerifiableRuntimeMachineSnapshot,
+  restoreDurableRuntimeSnapshot,
+} from '../../../../storage/wal/snapshot';
+import type { PersistedFrameJournal } from '../../../../storage/types';
+import {
+  DeterministicFaults,
+  faultMatrixSeeds,
+  withFaultSeed,
+} from '../../../fixtures/faults/deterministic-faults';
+
+const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createRuntime = (seed: string): RuntimeReplica => {
+  const env = createEmptyEnv(seed);
+  const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+  registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, '1'));
+  env.runtimeId = runtimeId;
+  env.runtimeSeed = seed;
+  env.scenarioMode = true;
+  env.quietRuntimeLogs = true;
+  env.runtimeConfig = { storage: { enabled: false } };
+  env.infrastructure ??= {};
+  return env;
+};
+
+const routingDeps: RuntimeEntityRoutingDeps = {
+  ensureRuntimeInfrastructure: env => (env.infrastructure ??= {}),
+  enqueueRuntimeInputs: () => {},
+  extractEntityId: replicaKey => String(replicaKey).split(':')[0] || '',
+  hasLocalSignerForEntity: () => false,
+  hasLocalSignerForEntitySigner: () => false,
+  resolveSoleLocalSignerForEntity: () => null,
+  getP2P: () => null,
+};
+
+const createEntityState = (
+  signerId: string,
+  validators: string[] = [signerId],
+  threshold = 1n,
+): EntityState => {
+  const entityId = generateLazyEntityId(validators, threshold).toLowerCase();
+  return {
+    entityId,
+    height: 0,
+    timestamp: 0,
+    nonces: new Map(),
+    proposals: new Map(),
+    config: {
+      mode: 'proposer-based',
+      threshold,
+      validators,
+      shares: Object.fromEntries(validators.map(validatorId => [validatorId, 1n])),
+    },
+    reserves: new Map(),
+    accounts: new Map(),
+    deferredAccountProposals: new Map(),
+    crontabState: initCrontab(),
+    lastFinalizedJHeight: 0,
+    jBlockChain: [],
+    profile: { name: 'catch-up validator', isHub: false, avatar: '', bio: '', website: '' },
+    htlcRoutes: new Map(),
+    htlcFeesEarned: 0n,
+    lockBook: new Map(),
+    swapTradingPairs: [],
+  };
+};
+
+const buildCommitCertificate = async (
+  env: RuntimeReplica,
+  state: EntityState,
+  signerIds: string | string[],
+  timestamp: number,
+): Promise<{ frame: EntityFrame; nextState: EntityState }> => {
+  const certificateSigners = Array.isArray(signerIds) ? signerIds : [signerIds];
+  const height = state.height + 1;
+  const execution = await applyEntityFrame(env, state, [], timestamp);
+  const nextStateBeforeLink: EntityState = {
+    ...execution.newState,
+    entityId: state.entityId,
+    height,
+    timestamp,
+    leaderState: getEntityLeaderState(state),
+  };
+  const previousFrameHash = state.height === 0 ? 'genesis' : state.prevFrameHash;
+  if (!previousFrameHash) throw new Error(`TEST_PREVIOUS_FRAME_HASH_MISSING:${state.height}`);
+  const frameHash = await createEntityFrameHash(
+    previousFrameHash,
+    height,
+    timestamp,
+    [],
+    nextStateBeforeLink,
+  );
+  const outputHashes = buildCertifiedEntityOutputHashes(
+    nextStateBeforeLink,
+    env,
+    height,
+    frameHash,
+    execution.outputs,
+  );
+  const hashesToSign = buildEntityHashesToSign(
+    state.entityId,
+    height,
+    frameHash,
+    [...(execution.collectedHashes ?? []), ...outputHashes],
+  );
+  const signaturesBySigner = new Map(certificateSigners.map(certificateSignerId => [
+    certificateSignerId,
+    hashesToSign.map(hashInfo => signAccountFrame(env, certificateSignerId, hashInfo.hash)),
+  ]));
+  const hankos = await Promise.all(hashesToSign.map((hashInfo, index) => buildQuorumHanko(
+    env,
+    state.entityId,
+    hashInfo.hash,
+    certificateSigners.map(certificateSignerId => ({
+      signerId: certificateSignerId,
+      signature: signaturesBySigner.get(certificateSignerId)![index]!,
+    })),
+    state.config,
+  )));
+  const frame: EntityFrame = {
+    height,
+    parentFrameHash: previousFrameHash,
+    stateRoot: computeCanonicalEntityConsensusStateHash(nextStateBeforeLink),
+    authorityRoot: computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(nextStateBeforeLink)),
+    timestamp,
+    txs: [],
+    events: [],
+    hash: frameHash,
+    leader: { proposerSignerId: state.config.validators[0]!, view: 0 },
+    hashesToSign,
+    collectedSigs: signaturesBySigner,
+    hankos,
+  };
+  return {
+    frame,
+    nextState: { ...nextStateBeforeLink, prevFrameHash: frameHash },
+  };
+};
+
+const deliverable = (
+  receiverRuntimeId: string,
+  entityId: string,
+  signerId: string,
+  frame: EntityFrame,
+): DeliverableEntityInput => ({
+  runtimeId: receiverRuntimeId,
+  entityId,
+  signerId,
+  proposedFrame: structuredClone(frame),
+});
+
+const installReplica = (env: RuntimeReplica, state: EntityState, signerId: string): void => {
+  const keys = deriveLocalEntityCryptoKeys(env, state.entityId, signerId);
+  const replica: EntityReplica = {
+    entityId: state.entityId,
+    signerId,
+    entityEncPubKey: keys.publicKey,
+    state: structuredClone(state),
+    mempool: [],
+    isProposer: true,
+  };
+  env.state.eReplicas.set(`${state.entityId}:${signerId}`, replica);
+};
+
+const reliableRecoveryProjection = (env: RuntimeReplica): Record<string, unknown> => ({
+  pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
+  reliableIngressReceiptLedger: env.infrastructure?.reliableIngressReceiptLedger ?? new Map(),
+  reliableIngressTerminalWatermarks: env.infrastructure?.reliableIngressTerminalWatermarks ?? new Map(),
+  receivedReliableReceiptLedger: env.infrastructure?.receivedReliableReceiptLedger ?? new Map(),
+  receivedReliableTerminalWatermarks: env.infrastructure?.receivedReliableTerminalWatermarks ?? new Map(),
+});
+
+describe('ordered reliable Entity catch-up', () => {
+  test('future proposal is explicitly deferred instead of falsely committed', async () => {
+    const entitySeed = `entity-catch-up-l1-${TEST_RUN_ID}`;
+    const signerId = deriveSignerAddressSync(entitySeed, '1').toLowerCase();
+    const env = createRuntime(`entity-catch-up-l1-runtime-${TEST_RUN_ID}`);
+    registerSignerKey(env, signerId, deriveSignerKeySync(entitySeed, '1'));
+    const state = createEntityState(signerId);
+    const replica: EntityReplica = {
+      entityId: state.entityId,
+      signerId,
+      entityEncPubKey: '',
+      state,
+      mempool: [],
+      isProposer: true,
+    };
+    const future = await buildCommitCertificate(env, {
+      ...(await buildCommitCertificate(env, state, signerId, 100)).nextState,
+    }, signerId, 200);
+    const proposalOnly = structuredClone(future.frame);
+    proposalOnly.collectedSigs = new Map();
+    delete proposalOnly.hankos;
+
+    const result = await applyEntityInput(env, replica, {
+      entityId: state.entityId,
+      signerId,
+      proposedFrame: proposalOnly,
+    });
+
+    expect(result.outcome).toEqual({ kind: 'deferred', reason: 'PROPOSAL_CATCH_UP_STATE_WAIT' });
+    expect(result.workingReplica.state.height).toBe(0);
+    expect(result.workingReplica.proposal).toBeUndefined();
+  });
+
+  test('replays an older quorum certificate without treating a later local J event as signer freshness', async () => {
+    const entitySeed = `entity-catch-up-j-future-${TEST_RUN_ID}`;
+    const leaderSignerId = deriveSignerAddressSync(`${entitySeed}-leader`, '1').toLowerCase();
+    const quorumSignerId = deriveSignerAddressSync(`${entitySeed}-quorum`, '1').toLowerCase();
+    const catchUpSignerId = deriveSignerAddressSync(`${entitySeed}-catch-up`, '1').toLowerCase();
+    const env = createRuntime(`entity-catch-up-j-future-runtime-${TEST_RUN_ID}`);
+    for (const [signerId, seed] of [
+      [leaderSignerId, `${entitySeed}-leader`],
+      [quorumSignerId, `${entitySeed}-quorum`],
+      [catchUpSignerId, `${entitySeed}-catch-up`],
+    ] as const) {
+      registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
+    }
+    const initialState = createEntityState(
+      catchUpSignerId,
+      [leaderSignerId, quorumSignerId, catchUpSignerId],
+      2n,
+    );
+    const certifiedBeforeObservation = await buildCommitCertificate(
+      env,
+      initialState,
+      [leaderSignerId, quorumSignerId],
+      100,
+    );
+    const laterBlockHash = `0x${'ab'.repeat(32)}`;
+    const laterEvent: JurisdictionEvent = {
+      blockNumber: 1,
+      blockHash: laterBlockHash,
+      transactionHash: `0x${'cd'.repeat(32)}`,
+      logIndex: 0,
+      type: 'ReserveUpdated',
+      data: {
+        entity: initialState.entityId,
+        tokenId: 1,
+        newBalance: '1',
+      },
+    };
+    const replica: EntityReplica = {
+      entityId: initialState.entityId,
+      signerId: catchUpSignerId,
+      entityEncPubKey: '',
+      state: structuredClone(initialState),
+      mempool: [],
+      isProposer: false,
+      jHistory: recordValidatorJHistory(undefined, {
+        jurisdictionRef: 'unconfigured',
+        scannedThroughHeight: 1,
+        tipBlockHash: laterBlockHash,
+        headers: [{ jHeight: 1, jBlockHash: laterBlockHash }],
+        blocks: [{
+          jurisdictionRef: 'unconfigured',
+          jHeight: 1,
+          jBlockHash: laterBlockHash,
+          eventsHash: canonicalJurisdictionEventsHash([laterEvent]),
+          events: [laterEvent],
+        }],
+      }),
+    };
+
+    const result = await applyEntityInput(env, replica, {
+      entityId: initialState.entityId,
+      signerId: catchUpSignerId,
+      proposedFrame: structuredClone(certifiedBeforeObservation.frame),
+    });
+
+    expect(result.outcome).toEqual({ kind: 'committed' });
+    expect(result.workingReplica.state.height).toBe(1);
+    expect(result.workingReplica.state.lastFinalizedJHeight).toBe(0);
+    expect(result.workingReplica.jHistory?.eventBlocks.has(1)).toBe(true);
+    expect(certifiedBeforeObservation.frame.collectedSigs?.has(catchUpSignerId)).toBe(false);
+  });
+
+  test('H+2 first survives duplicate/restart and commits only after H+1 certificate catch-up', async () => {
+    const entitySeed = `entity-catch-up-l2-${TEST_RUN_ID}`;
+    const signerId = deriveSignerAddressSync(entitySeed, '1').toLowerCase();
+    const sender = createRuntime(`entity-catch-up-sender-${TEST_RUN_ID}`);
+    const receiver = createRuntime(`entity-catch-up-receiver-${TEST_RUN_ID}`);
+    registerSignerKey(receiver, signerId, deriveSignerKeySync(entitySeed, '1'));
+    const initialState = createEntityState(signerId);
+    installReplica(receiver, initialState, signerId);
+
+    const heightOne = await buildCommitCertificate(receiver, initialState, signerId, 100);
+    const heightTwo = await buildCommitCertificate(receiver, heightOne.nextState, signerId, 200);
+    const h1 = deliverable(receiver.runtimeId!, initialState.entityId, signerId, heightOne.frame);
+    const h2 = deliverable(receiver.runtimeId!, initialState.entityId, signerId, heightTwo.frame);
+    sender.pendingNetworkOutputs = [structuredClone(h1), structuredClone(h2)];
+
+    expect(registerReliableIngress(receiver, sender.runtimeId!, h2).kind).toBe('enqueue');
+    expect(registerReliableIngress(receiver, sender.runtimeId!, h2).kind).toBe('pending');
+    const futureAttempt = await applyMergedEntityInputs(receiver, [h2], [], {
+      isReplay: false,
+      routingDeps,
+    });
+    expect(futureAttempt.appliedEntityInputs).toEqual([]);
+    expect(receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
+    expect(commitReliableIngress(receiver, futureAttempt.appliedEntityInputs)).toEqual([]);
+    releaseUncommittedReliableIngress(receiver, [h2], futureAttempt.appliedEntityInputs);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
+    expect(sender.pendingNetworkOutputs).toHaveLength(2);
+
+    const machineSnapshot = buildDurableRuntimeMachineSnapshot(receiver);
+    const restarted = createRuntime(`entity-catch-up-receiver-${TEST_RUN_ID}`);
+    installReplica(restarted, initialState, signerId);
+    restoreDurableRuntimeSnapshot(restarted, machineSnapshot);
+    expect(restarted.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(registerReliableIngress(restarted, sender.runtimeId!, h2).kind).toBe('enqueue');
+    releaseUncommittedReliableIngress(restarted, [h2], []);
+
+    // A quorum certificate for the exact next height is sufficient catch-up
+    // evidence even when this validator never received the proposal.
+    expect(registerReliableIngress(restarted, sender.runtimeId!, h1).kind).toBe('enqueue');
+    const firstCommit = await applyMergedEntityInputs(restarted, [h1], [], {
+      isReplay: false,
+      routingDeps,
+    });
+    expect(firstCommit.appliedEntityInputs).toHaveLength(1);
+    expect(restarted.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(1);
+    const h1Commits = commitReliableIngress(restarted, firstCommit.appliedEntityInputs);
+    expect(h1Commits).toHaveLength(1);
+    finalizeReliableIngressCommit(restarted, h1Commits);
+
+    // Drop the first receipt. Exact retry regenerates it from the durable
+    // ledger and must not acknowledge or collect H+2.
+    const regeneratedH1 = registerReliableIngress(restarted, sender.runtimeId!, h1);
+    expect(regeneratedH1.kind).toBe('receipt');
+    applyReliableDeliveryReceipts(sender, [regeneratedH1.receipt!]);
+    expect(sender.pendingNetworkOutputs).toEqual([h2]);
+
+    expect(registerReliableIngress(restarted, sender.runtimeId!, h2).kind).toBe('enqueue');
+    const secondCommit = await applyMergedEntityInputs(restarted, [h2], [], {
+      isReplay: false,
+      routingDeps,
+    });
+    expect(secondCommit.appliedEntityInputs).toHaveLength(1);
+    expect(restarted.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(2);
+    const h2Commits = commitReliableIngress(restarted, secondCommit.appliedEntityInputs);
+    expect(h2Commits).toHaveLength(1);
+    finalizeReliableIngressCommit(restarted, h2Commits);
+    applyReliableDeliveryReceipts(sender, [h2Commits[0]!.receipt]);
+
+    expect(sender.pendingNetworkOutputs).toEqual([]);
+    expect(restarted.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(restarted.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(1);
+    expect(h1Commits[0]!.receipt!.body.identity.height).toBe(1);
+    expect(h2Commits[0]!.receipt!.body.identity.height).toBe(2);
+    expect(h1Commits[0]!.receipt!.body.identity.frameHash).toBe(heightOne.frame.hash);
+    expect(h2Commits[0]!.receipt!.body.identity.frameHash).toBe(heightTwo.frame.hash);
+  });
+
+  for (const faultSeed of faultMatrixSeeds()) {
+    test(`converges after deterministic delay/reorder/drop/duplicate/restart seed=${faultSeed}`, async () =>
+      withFaultSeed(faultSeed, async () => {
+        const faults = new DeterministicFaults(faultSeed);
+        const entitySeed = `entity-fault-matrix-${faultSeed}`;
+        const receiverSeed = `entity-fault-receiver-${faultSeed}`;
+        const sender = createRuntime(`entity-fault-sender-${faultSeed}`);
+        let receiver = createRuntime(receiverSeed);
+        const signerId = deriveSignerAddressSync(entitySeed, '1').toLowerCase();
+        const signerKey = deriveSignerKeySync(entitySeed, '1');
+        registerSignerKey(receiver, signerId, signerKey);
+        const initialState = createEntityState(signerId);
+        installReplica(receiver, initialState, signerId);
+
+        const outputs: DeliverableEntityInput[] = [];
+        let certifiedState = initialState;
+        for (let height = 1; height <= 4; height += 1) {
+          const certified = await buildCommitCertificate(
+            receiver,
+            certifiedState,
+            signerId,
+            height * 100,
+          );
+          outputs.push(deliverable(
+            receiver.runtimeId!,
+            initialState.entityId,
+            signerId,
+            certified.frame,
+          ));
+          certifiedState = certified.nextState;
+        }
+        sender.pendingNetworkOutputs = structuredClone(outputs);
+
+        const restart = (): void => {
+          const replica = receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`);
+          if (!replica) throw new Error('FAULT_MATRIX_REPLICA_MISSING');
+          const machine = buildDurableRuntimeMachineSnapshot(receiver);
+          const restarted = createRuntime(receiverSeed);
+          registerSignerKey(restarted, signerId, signerKey);
+          restarted.state.eReplicas.set(
+            `${initialState.entityId}:${signerId}`,
+            structuredClone(replica),
+          );
+          restoreDurableRuntimeSnapshot(restarted, machine);
+          receiver = restarted;
+        };
+
+        const deliver = async (input: DeliverableEntityInput): Promise<void> => {
+          const registration = registerReliableIngress(
+            receiver,
+            sender.runtimeId!,
+            input,
+          );
+          if (registration.kind === 'receipt') {
+            applyReliableDeliveryReceipts(sender, [registration.receipt]);
+            return;
+          }
+          if (registration.kind !== 'enqueue') return;
+          const result = await applyMergedEntityInputs(receiver, [input], [], {
+            isReplay: false,
+            routingDeps,
+          });
+          const commits = commitReliableIngress(receiver, result.appliedEntityInputs);
+          if (result.appliedEntityInputs.length === 0) {
+            releaseUncommittedReliableIngress(receiver, [input], []);
+            return;
+          }
+          finalizeReliableIngressCommit(receiver, commits);
+          applyReliableDeliveryReceipts(
+            sender,
+            commits.flatMap(commit => commit.receipt ? [commit.receipt] : []),
+          );
+        };
+
+        // Force every fault class once before the seeded schedule takes over:
+        // H4 arrives before H1, H2 is dropped, H3 is delayed, the receiver
+        // restarts, and H1 is duplicated across the durable receipt boundary.
+        await deliver(outputs[3]!);
+        const delayedUntil = new Map([[3, 3 + faults.pick(3)]]);
+        restart();
+        await deliver(outputs[0]!);
+        await deliver(outputs[0]!);
+
+        const attempts = new Map<number, number>();
+        for (let tick = 1; tick <= 128 && sender.pendingNetworkOutputs!.length > 0; tick += 1) {
+          const eligible = sender.pendingNetworkOutputs!.filter(input => {
+            const height = input.proposedFrame?.height;
+            return height !== undefined && (delayedUntil.get(height) ?? 0) <= tick;
+          });
+          if (eligible.length === 0) continue;
+          const input = structuredClone(eligible[faults.pick(eligible.length)]!);
+          const height = input.proposedFrame!.height;
+          const attempt = (attempts.get(height) ?? 0) + 1;
+          attempts.set(height, attempt);
+          if (attempt < 4 && faults.oneIn(5)) continue;
+          if (attempt < 4 && faults.oneIn(5)) {
+            delayedUntil.set(height, tick + 1 + faults.pick(4));
+            continue;
+          }
+          await deliver(input);
+          if (faults.oneIn(4)) await deliver(input);
+          if (tick === 2 + faults.pick(4)) restart();
+        }
+
+        expect(sender.pendingNetworkOutputs).toEqual([]);
+        expect(receiver.state.eReplicas.get(
+          `${initialState.entityId}:${signerId}`,
+        )?.state.height).toBe(4);
+        expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
+        expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(1);
+      }));
+  }
+
+  test('local valid H+2 remains durable across defer/restart and commits after H+1', async () => {
+    const entitySeed = `entity-catch-up-local-${TEST_RUN_ID}`;
+    const leaderSignerId = deriveSignerAddressSync(`${entitySeed}-leader`, '1').toLowerCase();
+    const signerId = deriveSignerAddressSync(entitySeed, '1').toLowerCase();
+    const receiverSeed = `entity-catch-up-local-runtime-${TEST_RUN_ID}`;
+    const receiver = createRuntime(receiverSeed);
+    const builder = createRuntime(`entity-catch-up-local-builder-${TEST_RUN_ID}`);
+    const leaderPrivateKey = deriveSignerKeySync(`${entitySeed}-leader`, '1');
+    const signerPrivateKey = deriveSignerKeySync(entitySeed, '1');
+    for (const signingEnv of [receiver, builder]) {
+      registerSignerKey(signingEnv, leaderSignerId, leaderPrivateKey);
+      registerSignerKey(signingEnv, signerId, signerPrivateKey);
+    }
+    const certificateSigners = [leaderSignerId, signerId];
+    const initialState = createEntityState(signerId, certificateSigners, 2n);
+    installReplica(receiver, initialState, signerId);
+    const receiverReplica = receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`)!;
+    receiverReplica.isProposer = false;
+    const receiverEntityKeys = deriveLocalEntityCryptoKeys(receiver, initialState.entityId, signerId);
+    receiverReplica.entityEncPubKey = receiverEntityKeys.publicKey;
+    installReplica(receiver, initialState, leaderSignerId);
+    const leaderReplica = receiver.state.eReplicas.get(`${initialState.entityId}:${leaderSignerId}`)!;
+    const leaderEntityKeys = deriveLocalEntityCryptoKeys(receiver, initialState.entityId, leaderSignerId);
+    leaderReplica.entityEncPubKey = leaderEntityKeys.publicKey;
+    collectLocalProfileEncryptionAnnouncements(receiver);
+    receiver.state.eReplicas.delete(`${initialState.entityId}:${leaderSignerId}`);
+    const manifest = getCompleteProfileEncryptionManifest(receiver, receiverReplica.state);
+    if (!manifest) throw new Error('TEST_LOCAL_PROFILE_MANIFEST_MISSING');
+    initialState.profileEncryptionManifest = structuredClone(manifest);
+    receiverReplica.state.profileEncryptionManifest = structuredClone(manifest);
+    const profileHash = computeProfileHash(buildLocalEntityProfile(receiver, receiverReplica.state, 1));
+    const profileSignatures = certificateSigners.map(certificateSignerId => ({
+      signerId: certificateSignerId,
+      signature: signAccountFrame(receiver, certificateSignerId, profileHash),
+    }));
+    const profileHanko = await buildQuorumHanko(
+      receiver,
+      initialState.entityId,
+      profileHash,
+      profileSignatures,
+      initialState.config,
+    );
+    receiverReplica.hankoWitness = new Map([[profileHash, {
+      hanko: profileHanko,
+      type: 'profile',
+      entityHeight: 0,
+      createdAt: 1,
+    }]]);
+    applyCertifiedEntityLineagePlan(receiver, buildCertifiedEntityLineagePlan(receiver));
+    const heightOne = await buildCommitCertificate(builder, initialState, certificateSigners, 100);
+    const heightTwo = await buildCommitCertificate(builder, heightOne.nextState, certificateSigners, 200);
+    const h1 = deliverable(receiver.runtimeId!, initialState.entityId, signerId, heightOne.frame);
+    const h2 = deliverable(receiver.runtimeId!, initialState.entityId, signerId, heightTwo.frame);
+
+    // Recovery journal tails require a non-zero snapshot anchor. Record a real
+    // validator-local watcher observation through RuntimeTx instead of faking
+    // R-height or importing an unrelated Entity.
+    const observedBlockHash = `0x${'31'.repeat(32)}`;
+    enqueueRuntimeInput(receiver, {
+      runtimeTxs: [markLocalJAuthorityRuntimeTx({
+        type: 'observeJRange',
+        data: {
+          entityId: initialState.entityId,
+          signerId,
+          jurisdictionRef: 'unconfigured',
+          scannedThroughHeight: 1,
+          tipBlockHash: observedBlockHash,
+          headers: [{ jHeight: 1, jBlockHash: observedBlockHash }],
+          blocks: [],
+        },
+      })],
+      entityInputs: [],
+    });
+    await processRuntime(receiver, []);
+    expect(receiver.state.height).toBe(1);
+
+    expect(receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
+    expect(receiver.pendingOutputs ?? []).toEqual([]);
+    expect(receiver.networkInbox ?? []).toEqual([]);
+    receiver.pendingNetworkOutputs = [structuredClone(h2)];
+    await processRuntime(receiver, []);
+    const firstTickReplica = receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`);
+    expect(firstTickReplica?.state.height, safeStringify({
+      runtimeHeight: receiver.state.height,
+      runtimeMempool: receiver.runtimeMempool,
+      historyInput: receiver.history?.at(-1)?.runtimeInput,
+      replica: firstTickReplica,
+    }, 2)).toBe(0);
+    expect(receiver.pendingNetworkOutputs).toEqual([h2]);
+    expect(receiver.runtimeMempool?.entityInputs).toEqual([{
+      ...h2,
+      from: receiver.runtimeId,
+    }]);
+
+    await processRuntime(receiver, []);
+    expect(receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
+    expect(receiver.pendingNetworkOutputs).toEqual([h2]);
+    // H+2 remains in the durable outbox after its one queued attempt. Keeping
+    // another copy in the Runtime mempool would multiply it on every retry.
+    expect(receiver.runtimeMempool?.entityInputs).toEqual([]);
+
+    const recoverySigners = [{
+      index: 0,
+      address: receiver.runtimeId!,
+      name: 'Reliable recovery runtime',
+      entityId: initialState.entityId,
+    }];
+    const baseRecoveryBundle = buildRuntimeRecoveryBundle(receiver, {
+      signers: recoverySigners,
+      createdAt: 1_000,
+    });
+    const restarted = await restoreEnvFromRecoveryBundles([baseRecoveryBundle], {
+      runtimeSeed: receiverSeed,
+      runtimeId: receiver.runtimeId,
+    });
+    restarted.pendingNetworkOutputs = [structuredClone(h1), ...(restarted.pendingNetworkOutputs ?? [])];
+
+    // Route H+1 first while the restored H+2 is still deferred. Then inject a
+    // duplicate reordered H+2 into the same R-frame: before the durability
+    // barrier this applied H+1 and H+2 before a single WAL save.
+    await processRuntime(restarted, []);
+    expect(restarted.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
+    const committedFrameTrace = startRuntimeHistoryTraceForTesting(restarted);
+    try {
+      await processRuntime(restarted, [structuredClone(h2)]);
+    } finally {
+      committedFrameTrace.stop();
+    }
+    const afterHeightOneReplica = restarted.state.eReplicas.get(`${initialState.entityId}:${signerId}`);
+    expect(afterHeightOneReplica?.state.height).toBe(1);
+    expect(afterHeightOneReplica?.state.prevFrameHash).toBe(heightOne.frame.hash);
+    expect(committedFrameTrace.snapshots.at(-1)?.runtimeInput.entityInputs
+      .map(input => input.proposedFrame?.height ?? null)).toEqual([1]);
+    expect(restarted.pendingNetworkOutputs?.map(output => output.proposedFrame?.height ?? null)).toEqual([2]);
+    expect(restarted.runtimeMempool?.entityInputs
+      .map(input => input.proposedFrame?.height ?? null)).toEqual([2]);
+
+    const committedHistoryFrame = committedFrameTrace.snapshots.at(-1);
+    if (!committedHistoryFrame) throw new Error('TEST_RELIABLE_RECOVERY_HISTORY_FRAME_MISSING');
+    const durableMachineAfterHeightOne = buildDurableRuntimeMachineSnapshot(restarted, {
+      pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
+    });
+    const replayMachineAfterHeightOne = buildReplayVerifiableRuntimeMachineSnapshot(restarted, {
+      pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
+    });
+    const replicaMetaDigest = buildStorageReplicaMetaCommitment(restarted).digest;
+    const journal: PersistedFrameJournal = {
+      height: committedHistoryFrame.state.height,
+      timestamp: committedHistoryFrame.state.timestamp,
+      replicaMetaDigest,
+      postStateHash: computeStoragePostStateHash({
+        height: committedHistoryFrame.state.height,
+        timestamp: committedHistoryFrame.state.timestamp,
+        replicaMetaDigest,
+        runtimeMachine: replayMachineAfterHeightOne,
+      }),
+      replicaMetaCheckpoint: true,
+      replicaMetaStateMode: 'full',
+      runtimeInput: structuredClone(committedHistoryFrame.runtimeInput),
+      pendingRuntimeInput: structuredClone(restarted.runtimeMempool!),
+      runtimeOutputs: structuredClone(restarted.pendingNetworkOutputs ?? []),
+      runtimeMachine: durableMachineAfterHeightOne,
+      runtimeStateHash: computeCanonicalRuntimeStateHash(
+        restarted.state.height,
+        restarted.state.timestamp,
+        computeCanonicalEntityHashesFromEnv(restarted),
+        durableMachineAfterHeightOne,
+      ),
+      logs: structuredClone(committedHistoryFrame.logs ?? []),
+    };
+    const tailRecoveryBundle = buildRuntimeRecoveryBundle(restarted, {
+      signers: recoverySigners,
+      kind: 'journal_tail',
+      baseCheckpoint: {
+        height: baseRecoveryBundle.runtimeHeight,
+        hash: baseRecoveryBundle.checkpointHash!,
+      },
+      frames: [journal],
+      createdAt: 1_001,
+    });
+    // A recovery process owns this runtime namespace exclusively. Close the
+    // first restore's infra handle before simulating the next process; opening
+    // two Level instances for one path correctly fails instead of sharing an
+    // unsafe writer.
+    await closeInfraDb(restarted);
+    const tailRestored = await restoreEnvFromRecoveryBundles(
+      [baseRecoveryBundle, tailRecoveryBundle],
+      { runtimeSeed: receiverSeed, runtimeId: receiver.runtimeId },
+    );
+    expect(safeStringify(reliableRecoveryProjection(tailRestored))).toBe(
+      safeStringify(reliableRecoveryProjection(restarted)),
+    );
+    expect(computeCanonicalStateHashFromEnv(tailRestored)).toBe(journal.runtimeStateHash);
+    await closeInfraDb(tailRestored);
+
+    const missingPendingInputTail = structuredClone(tailRecoveryBundle);
+    delete missingPendingInputTail.frames![0]!.pendingRuntimeInput;
+    await expect(restoreEnvFromRecoveryBundles(
+      [baseRecoveryBundle, missingPendingInputTail],
+      { runtimeSeed: receiverSeed, runtimeId: receiver.runtimeId },
+    )).rejects.toThrow('RECOVERY_BUNDLE_SIGNATURE_INVALID');
+
+    const missingLocalOutboxTail = structuredClone(tailRecoveryBundle);
+    missingLocalOutboxTail.frames![0]!.runtimeOutputs = [];
+    await expect(restoreEnvFromRecoveryBundles(
+      [baseRecoveryBundle, missingLocalOutboxTail],
+      { runtimeSeed: receiverSeed, runtimeId: receiver.runtimeId },
+    )).rejects.toThrow('RECOVERY_BUNDLE_SIGNATURE_INVALID');
+
+    const corruptTail = structuredClone(tailRecoveryBundle);
+    corruptTail.frames![0]!.runtimeStateHash = `0x${'00'.repeat(32)}`;
+    await expect(restoreEnvFromRecoveryBundles(
+      [baseRecoveryBundle, corruptTail],
+      { runtimeSeed: receiverSeed, runtimeId: receiver.runtimeId },
+    )).rejects.toThrow('RECOVERY_BUNDLE_SIGNATURE_INVALID');
+
+    const afterHeightOneSnapshot = buildDurableRuntimeMachineSnapshot(restarted);
+    const afterHeightOneRestart = createRuntime(receiverSeed);
+    afterHeightOneRestart.state.eReplicas.set(
+      `${initialState.entityId}:${signerId}`,
+      structuredClone(afterHeightOneReplica!),
+    );
+    afterHeightOneRestart.state.eReplicas.get(`${initialState.entityId}:${signerId}`)!.isProposer = false;
+    restoreDurableRuntimeSnapshot(afterHeightOneRestart, afterHeightOneSnapshot);
+
+    for (let tick = 0; tick < 8; tick += 1) {
+      await processRuntime(afterHeightOneRestart, []);
+      const replica = afterHeightOneRestart.state.eReplicas.get(`${initialState.entityId}:${signerId}`);
+      if (
+        replica?.state.height === 2 &&
+        replica.state.prevFrameHash === heightTwo.frame.hash &&
+        (afterHeightOneRestart.pendingNetworkOutputs?.length ?? 0) === 0 &&
+        (afterHeightOneRestart.runtimeMempool?.reliableReceipts?.length ?? 0) === 0
+      ) break;
+    }
+
+    const finalReplica = afterHeightOneRestart.state.eReplicas.get(`${initialState.entityId}:${signerId}`);
+    expect(finalReplica?.state.height).toBe(2);
+    expect(finalReplica?.state.prevFrameHash).toBe(heightTwo.frame.hash);
+    expect(afterHeightOneRestart.pendingNetworkOutputs, safeStringify({
+      pendingNetworkOutputs: afterHeightOneRestart.pendingNetworkOutputs,
+      runtimeMempool: afterHeightOneRestart.runtimeMempool,
+      pendingReliableIngress: afterHeightOneRestart.infrastructure?.pendingReliableIngress,
+      reliableIngressReceiptLedger: afterHeightOneRestart.infrastructure?.reliableIngressReceiptLedger,
+      reliableIngressTerminalWatermarks: afterHeightOneRestart.infrastructure?.reliableIngressTerminalWatermarks,
+      receivedReliableReceiptLedger: afterHeightOneRestart.infrastructure?.receivedReliableReceiptLedger,
+      receivedReliableTerminalWatermarks: afterHeightOneRestart.infrastructure?.receivedReliableTerminalWatermarks,
+    }, 2)).toEqual([]);
+    expect(afterHeightOneRestart.runtimeMempool?.entityInputs ?? []).toEqual([]);
+    expect(afterHeightOneRestart.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(1);
+    expect(afterHeightOneRestart.infrastructure?.receivedReliableTerminalWatermarks?.size).toBe(1);
+  });
+});

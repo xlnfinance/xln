@@ -4,11 +4,11 @@ import { join } from 'node:path';
 
 test('runtime entity input j-output collection logs stay behind structured debug logging', () => {
   const source = [
-    'entity-input-contract.ts',
-    'entity-input-output.ts',
-    'entity-input-replica.ts',
-    'entity-input-staging.ts',
-    'entity-inputs.ts',
+    'entity-input/entity-input-contract.ts',
+    'entity-input/entity-input-output.ts',
+    'entity-input/entity-input-replica.ts',
+    'entity-input/entity-input-staging.ts',
+    'input-pipeline/entity-inputs.ts',
   ].map(file => readFileSync(join(process.cwd(), 'runtime/runtime', file), 'utf8')).join('\n');
 
   expect(source).toContain("entityInputLog = createStructuredLogger('runtime.entity_inputs');");

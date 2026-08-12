@@ -218,7 +218,7 @@ Missing fee state rejects the batch before any reserve or Account mutation.
 For executable evidence, start with:
 
 - `runtime/__tests__/derive-delta-property.test.ts`;
-- `runtime/__tests__/account-frame-integrity.test.ts`;
+- `runtime/__tests__/account/consensus/account-frame-integrity.test.ts`;
 - `runtime/scripts/operations/persistence/persistence-simultaneous-proposal-smoke.ts`;
 - `runtime/__tests__/runtime-frame-atomicity.test.ts`;
 - the focused HTLC and self-payment E2E scenarios.

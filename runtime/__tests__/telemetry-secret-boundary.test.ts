@@ -12,10 +12,10 @@ import { safeStringify } from '../protocol/serialization';
 
 const readRpcAdapterSource = (repoRoot: string): string => [
   'rpc-public.ts',
-  'rpc-adapter.ts',
-  'rpc-lifecycle.ts',
-  'rpc-reads.ts',
-  'rpc-wallet-writes.ts',
+  'rpc/rpc-adapter.ts',
+  'rpc/rpc-lifecycle.ts',
+  'rpc/rpc-reads.ts',
+  'rpc/wallet/rpc-wallet-writes.ts',
 ].map(file => readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter', file), 'utf8')).join('\n');
 
 const sentinels = {

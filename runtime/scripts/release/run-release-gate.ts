@@ -66,7 +66,7 @@ const RUNTIME_CORE_TESTS = [
   'runtime/__tests__/j-submit-crash-recovery.test.ts',
   'runtime/__tests__/j-submit-real-rpc-crash-recovery.test.ts',
   ...CROSS_J_RUNTIME_CORE_TESTS,
-  'runtime/__tests__/entity-frame-j-broadcast-continuation.test.ts',
+  'runtime/__tests__/entity/boundaries/entity-frame-j-broadcast-continuation.test.ts',
   'runtime/__tests__/storage/recovery/runtime-recovery-timestamp.test.ts',
   'runtime/__tests__/relay-router.test.ts',
   'runtime/__tests__/direct-runtime-bun.test.ts',

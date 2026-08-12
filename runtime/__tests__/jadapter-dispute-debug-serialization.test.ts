@@ -9,11 +9,11 @@ describe('JAdapter dispute diagnostics', () => {
 
     const source = await Promise.all([
       'rpc-public.ts',
-      'rpc-adapter.ts',
-      'rpc-batch-preflight.ts',
-      'rpc-lifecycle.ts',
-      'rpc-reads.ts',
-      'rpc-wallet-writes.ts',
+      'rpc/rpc-adapter.ts',
+      'rpc/write/rpc-batch-preflight.ts',
+      'rpc/rpc-lifecycle.ts',
+      'rpc/rpc-reads.ts',
+      'rpc/wallet/rpc-wallet-writes.ts',
     ].map(file => Bun.file(new URL(`../jurisdiction/adapter/${file}`, import.meta.url)).text())).then(parts => parts.join('\n'));
     expect(source).toContain('disputeStart=${safeStringify(input.disputeStartDebug)}');
     expect(source).not.toContain('JSON.stringify(input.disputeStartDebug)');
