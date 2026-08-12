@@ -2,7 +2,7 @@
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import type { EntityPanelJurisdictionView } from '../entity-panel-model';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
-  import EntityDropdown from '../EntityDropdown.svelte';
+  import EntityDropdown from './shell/EntityDropdown.svelte';
 
   export let tab: Tab;
   export let hideHeader = false;

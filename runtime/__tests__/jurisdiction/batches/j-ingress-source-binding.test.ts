@@ -331,7 +331,7 @@ describe('manual J-event ingress source binding', () => {
   test('frontend HTTP responses cannot be promoted into local consensus events', () => {
     const panelSource = readFileSync(join(
       process.cwd(),
-      'frontend/src/lib/components/Entity/EntityPanelTabs.svelte',
+      'frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte',
     ), 'utf8');
     const walletSource = readFileSync(join(
       process.cwd(),

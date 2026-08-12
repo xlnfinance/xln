@@ -252,7 +252,7 @@ describe('entity panel model helpers', () => {
   });
 
   test('entity panel tabs consumes EntityPanelView instead of rebuilding env projections inline', () => {
-    const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    const source = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
     expect(source).toContain('displayEnv = activeIsLive ? (actionRuntimeEnv ?? activeEnv) : activeEnv');
     expect(source).toContain('displayProjectionFrame = runtimeProjectionFrame');
     expect(source).toContain('panelView = buildEntityPanelView(displayEnv, tab.entityId, tab.signerId, envRevision, displayProjectionFrame)');
@@ -271,7 +271,7 @@ describe('entity panel model helpers', () => {
   });
 
   test('move validation and execution consume the same reactive balance snapshot shown to the user', () => {
-    const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    const source = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
 
     expect(source).toContain('reserveToken: selectedMoveTransferToken');
     expect(source).toContain('externalToken: selectedMoveExternalToken');
@@ -280,9 +280,9 @@ describe('entity panel model helpers', () => {
   });
 
   test('focused account display consumes projected entity names instead of full env', () => {
-    const accountPanel = readFileSync('frontend/src/lib/components/Entity/AccountPanel.svelte', 'utf8');
-    const focusedView = readFileSync('frontend/src/lib/components/Entity/EntityFocusedAccountView.svelte', 'utf8');
-    const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    const accountPanel = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountPanel.svelte', 'utf8');
+    const focusedView = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityFocusedAccountView.svelte', 'utf8');
+    const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
 
     expect(accountPanel).toContain('export let entityNames: Map<string, string>');
     expect(accountPanel).not.toContain('EnvSnapshot');
@@ -294,9 +294,9 @@ describe('entity panel model helpers', () => {
   });
 
   test('account list display consumes projected height and entity names', () => {
-    const accountList = readFileSync('frontend/src/lib/components/Entity/AccountList.svelte', 'utf8');
+    const accountList = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountList.svelte', 'utf8');
     const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
-    const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
 
     expect(resolveAccountListEntityName('ALICE', 'alice', new Map(), 'You')).toBe('You');
     expect(resolveAccountListEntityName('BOB', 'alice', new Map([['bob', 'Hub B']]))).toBe('Hub B');
@@ -311,7 +311,7 @@ describe('entity panel model helpers', () => {
     expect(accountList).not.toContain('xlnEnvironment');
     expect(accountList).not.toContain('$xlnEnvironment');
     expect(accountList).not.toContain('getEntityDisplayName(');
-    const accountPreview = readFileSync('frontend/src/lib/components/Entity/AccountPreview.svelte', 'utf8');
+    const accountPreview = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountPreview.svelte', 'utf8');
     expect(accountPreview).toContain('export let counterpartyProfile: GossipProfile | null');
     expect(accountPreview).toContain('export let counterpartyName: string');
     expect(accountPreview).toContain('export let isDevnet');
@@ -332,12 +332,12 @@ describe('entity panel model helpers', () => {
   });
 
   test('account selectors consume projected entity names without owning env', () => {
-    const entitySelect = readFileSync('frontend/src/lib/components/Entity/EntitySelect.svelte', 'utf8');
-    const accountDropdown = readFileSync('frontend/src/lib/components/Entity/AccountDropdown.svelte', 'utf8');
-    const creditForm = readFileSync('frontend/src/lib/components/Entity/CreditForm.svelte', 'utf8');
-    const collateralForm = readFileSync('frontend/src/lib/components/Entity/CollateralForm.svelte', 'utf8');
+    const entitySelect = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntitySelect.svelte', 'utf8');
+    const accountDropdown = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountDropdown.svelte', 'utf8');
+    const creditForm = readFileSync('frontend/src/lib/components/Entity/account/ui/CreditForm.svelte', 'utf8');
+    const collateralForm = readFileSync('frontend/src/lib/components/Entity/account/ui/CollateralForm.svelte', 'utf8');
     const lendingPanel = readFileSync('frontend/src/lib/components/Entity/payments/LendingPanel.svelte', 'utf8');
-    const configurePanel = readFileSync('frontend/src/lib/components/Entity/AccountConfigurePanel.svelte', 'utf8');
+    const configurePanel = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountConfigurePanel.svelte', 'utf8');
     const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
 
     for (const source of [entitySelect, accountDropdown]) {
@@ -374,10 +374,10 @@ describe('entity panel model helpers', () => {
   });
 
   test('entity header dropdown consumes panel projection without store fallbacks', () => {
-    const dropdown = readFileSync('frontend/src/lib/components/Entity/EntityDropdown.svelte', 'utf8');
+    const dropdown = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityDropdown.svelte', 'utf8');
     const chrome = readFileSync('frontend/src/lib/components/Entity/workspace/EntityPanelChrome.svelte', 'utf8');
-    const contextSwitcher = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
-    const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    const contextSwitcher = readFileSync('frontend/src/lib/components/Entity/workspace/shell/ContextSwitcher.svelte', 'utf8');
+    const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
 
     expect(dropdown).toContain('export let entityNames: Map<string, string>');
     expect(dropdown).toContain('export let jurisdictions: Array<{ name?: string }>');

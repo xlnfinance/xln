@@ -64,8 +64,8 @@ test('JMachine config normalization does not depend on wall-clock fallback', () 
 });
 
 test('Settings/UserMode JMachine import uses the shared runtime helper', () => {
-  const settings = readFileSync('frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte', 'utf8');
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+  const settings = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntitySettingsProjectionPanel.svelte', 'utf8');
+  const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
   const userMode = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
   const addJMachine = readFileSync('frontend/src/lib/components/Jurisdiction/AddJMachine.svelte', 'utf8');
   const store = readFileSync('frontend/src/lib/stores/network/jmachineStore.ts', 'utf8');

@@ -188,7 +188,7 @@ test('onboarding creates every jurisdiction entity but only requires advertised 
 });
 
 test('OnboardingPanel uses injected runtime projection and RuntimeInput helpers', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/OnboardingPanel.svelte', 'utf8');
+  const source = readFileSync('frontend/src/lib/components/Entity/onboarding/OnboardingPanel.svelte', 'utf8');
   const parent = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
 
   expect(source).toContain('export let runtimeProjection: OnboardingRuntimeProjection');
@@ -215,7 +215,7 @@ test('OnboardingPanel uses injected runtime projection and RuntimeInput helpers'
 });
 
 test('OnboardingPanel never hides hub discovery or policy fallback failures', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/OnboardingPanel.svelte', 'utf8');
+  const source = readFileSync('frontend/src/lib/components/Entity/onboarding/OnboardingPanel.svelte', 'utf8');
   const inputSource = readFileSync('frontend/src/lib/components/Entity/onboarding/onboarding-runtime-input.ts', 'utf8');
 
   expect(source).toContain('ONBOARDING_HUB_DISCOVERY_FAILED');
@@ -226,7 +226,7 @@ test('OnboardingPanel never hides hub discovery or policy fallback failures', ()
 });
 
 test('FormationPanel uses injected runtime projection instead of xlnEnvironment', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/FormationPanel.svelte', 'utf8');
+  const source = readFileSync('frontend/src/lib/components/Entity/onboarding/FormationPanel.svelte', 'utf8');
   const parent = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
 
   expect(source).toContain('export let runtimeProjection: FormationRuntimeProjection');

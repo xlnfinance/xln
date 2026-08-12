@@ -46,10 +46,10 @@
   import { runtimeProjectionMatchesRuntime } from '$lib/components/Entity/entity-workspace';
   import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/runtime-frame-context';
   import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/embedded-runtime-context';
-  import OnboardingPanel from '$lib/components/Entity/OnboardingPanel.svelte';
+  import OnboardingPanel from '$lib/components/Entity/onboarding/OnboardingPanel.svelte';
   import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
-  import FormationPanel from '$lib/components/Entity/FormationPanel.svelte';
+  import FormationPanel from '$lib/components/Entity/onboarding/FormationPanel.svelte';
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
   import {
     importJMachineViaRuntime,
@@ -63,8 +63,8 @@
   } from '$lib/components/Entity/onboarding/onboarding-runtime-input';
   import {
     type FormationRuntimeProjection,
-  } from '$lib/components/Entity/formation-runtime-projection';
-  import { hubDiscoveryJurisdictionKey } from '$lib/components/Entity/hub-discovery-profile';
+  } from '$lib/components/Entity/onboarding/formation-runtime-projection';
+  import { hubDiscoveryJurisdictionKey } from '$lib/components/Entity/onboarding/hub-discovery-profile';
 
   type RuntimeFrame = RuntimeReplica | EnvSnapshot;
   type JurisdictionLike = { name: string };

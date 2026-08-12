@@ -99,9 +99,9 @@ test('entity workspace has no separate audit ops or liquidity projection lenses 
 });
 
 test('entity settings workspace is a projection command surface, not the legacy RuntimeReplica panel', () => {
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-  const settings = readFileSync('frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte', 'utf8');
-  const consensusSettings = readFileSync('frontend/src/lib/components/Entity/EntityConsensusSettingsPanel.svelte', 'utf8');
+  const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
+  const settings = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntitySettingsProjectionPanel.svelte', 'utf8');
+  const consensusSettings = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityConsensusSettingsPanel.svelte', 'utf8');
 
   expect(tabs).toContain('EntitySettingsProjectionPanel.svelte');
   expect(tabs).toContain('<EntitySettingsProjectionPanel');
@@ -147,7 +147,7 @@ test('normal wallet hides terminal runtime receipt heights and keeps actionable 
 });
 
 test('entity panel routing is owned by the existing wallet app tabs', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+  const source = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
   expect(source).not.toContain('workspaceLens');
   expect(source).not.toContain('workspaceLensNavigationVersion');
   expect(source).not.toContain('entityWorkspaceTabForLens');
@@ -304,7 +304,7 @@ test('runtime frame context separates projection metadata from embedded RuntimeR
   const runtimeContext = readFileSync('frontend/src/lib/components/Entity/runtime-frame-context.ts', 'utf8');
   const embeddedContext = readFileSync('frontend/src/lib/components/Entity/embedded-runtime-context.ts', 'utf8');
   const workspace = readFileSync('frontend/src/lib/components/Entity/workspace/EntityWorkspace.svelte', 'utf8');
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+  const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
 
   expect(runtimeContext).not.toContain('RuntimeReplica');
   expect(runtimeContext).not.toContain('EnvSnapshot');
@@ -320,7 +320,7 @@ test('runtime frame context separates projection metadata from embedded RuntimeR
 });
 
 test('remote projection entity panel does not hide account surface behind RuntimeReplica availability', () => {
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+  const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
   const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
   const assets = readFileSync('frontend/src/lib/components/Entity/assets/EntityAssetsTab.svelte', 'utf8');
   const debt = readFileSync('frontend/src/lib/components/Entity/assets/DebtPanel.svelte', 'utf8');

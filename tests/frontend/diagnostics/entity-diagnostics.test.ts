@@ -8,28 +8,28 @@ const diagnosticFiles = [
     logLine: "errorLog.log('Activity history projection read failed', 'Activity History'",
   },
   {
-    path: 'frontend/src/lib/components/Entity/CollateralForm.svelte',
-    importLine: "import { errorLog } from '../../stores/errorLogStore';",
+    path: 'frontend/src/lib/components/Entity/account/ui/CollateralForm.svelte',
+    importLine: "import { errorLog } from '../../../../stores/errorLogStore';",
     logLine: "errorLog.log('Collateral request failed', 'Collateral Form'",
   },
   {
-    path: 'frontend/src/lib/components/Entity/CreditForm.svelte',
-    importLine: "import { errorLog } from '../../stores/errorLogStore';",
+    path: 'frontend/src/lib/components/Entity/account/ui/CreditForm.svelte',
+    importLine: "import { errorLog } from '../../../../stores/errorLogStore';",
     logLine: "errorLog.log('Credit action failed', 'Credit Form'",
   },
   {
-    path: 'frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte',
+    path: 'frontend/src/lib/components/Entity/workspace/shell/EntitySettingsProjectionPanel.svelte',
     importLine: "import { errorLog } from '$lib/stores/errorLogStore';",
     logLine: "errorLog.log('Entity profile update failed', 'Entity Settings'",
   },
   {
-    path: 'frontend/src/lib/components/Entity/FormationPanel.svelte',
-    importLine: "import { errorLog } from '../../stores/errorLogStore';",
+    path: 'frontend/src/lib/components/Entity/onboarding/FormationPanel.svelte',
+    importLine: "import { errorLog } from '../../../stores/errorLogStore';",
     logLine: "errorLog.log('Entity creation failed', 'Formation Panel'",
   },
   {
-    path: 'frontend/src/lib/components/Entity/HubDiscoveryPanel.svelte',
-    importLine: "import { errorLog } from '../../stores/errorLogStore';",
+    path: 'frontend/src/lib/components/Entity/onboarding/HubDiscoveryPanel.svelte',
+    importLine: "import { errorLog } from '../../../stores/errorLogStore';",
     logLine: "errorLog.log('Hub connection failed', 'Hub Discovery'",
   },
   {

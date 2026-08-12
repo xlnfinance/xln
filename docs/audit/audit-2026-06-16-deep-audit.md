@@ -238,7 +238,7 @@ The bulk of frontend size is concentrated in a few monoliths. Splitting these is
 highest-leverage move toward the "less code" goal and reduces re-render/merge risk:
 | File | Lines |
 |---|---|
-| `lib/components/Entity/EntityPanelTabs.svelte` | 7899 |
+| `lib/components/Entity/workspace/shell/EntityPanelTabs.svelte` | 7899 |
 | `lib/view/panels/Graph3DPanel.svelte` | 6057 |
 | `lib/components/Entity/SwapPanel.svelte` | 4083 |
 | `lib/components/Landing/LandingPage.svelte` | 3171 |

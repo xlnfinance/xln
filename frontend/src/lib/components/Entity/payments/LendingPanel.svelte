@@ -11,7 +11,7 @@
   import { runtimeHttpOriginFromWsUrl } from '$lib/utils/runtime/wsUrl';
   import { toasts } from '../../../stores/ui/toastStore';
   import BigIntInput from '../../Common/BigIntInput.svelte';
-  import EntitySelect from '../EntitySelect.svelte';
+  import EntitySelect from '../workspace/shell/EntitySelect.svelte';
   import { requireTokenDecimals } from '../token-metadata';
 
   export let entityId: string;

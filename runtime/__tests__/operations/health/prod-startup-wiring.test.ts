@@ -294,7 +294,7 @@ describe('production startup wiring', () => {
     const server = readFileSync(join(repoRoot, 'runtime/api/server/index.ts'), 'utf8');
     const packagedDaemon = readFileSync(join(repoRoot, 'packages/npm/xlnfinance/lib/process.js'), 'utf8');
     const formationPanel = readFileSync(
-      join(repoRoot, 'frontend/src/lib/components/Entity/FormationPanel.svelte'),
+      join(repoRoot, 'frontend/src/lib/components/Entity/onboarding/FormationPanel.svelte'),
       'utf8',
     );
     expect(server).toContain("process.env['XLN_LOCAL_SIMULATION'] === 'true'");
@@ -2055,7 +2055,7 @@ describe('production startup wiring', () => {
       '"test:rpc-settlement": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=rpc-settlement -- bun runtime/scripts/operations/settlement/rpc-settlement-parity.ts"',
     );
     expect(packageJson).toContain(
-      '"test:contracts:full": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- sh -c \\"bunx hardhat test test/*.ts test/*.cjs\\""',
+      '"test:contracts:full": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- bunx hardhat test"',
     );
     expect(packageJson).toContain(
       '"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --exclude-market-maker',
@@ -2503,7 +2503,7 @@ describe('production startup wiring', () => {
       'runtime/orchestrator/market-maker/node/mm-node-core.ts',
       'runtime/runtime/finance/swap-command-plan.ts',
       'frontend/src/lib/components/Entity/onboarding/onboarding-runtime-input.ts',
-      'frontend/src/lib/components/Entity/hub-discovery-profile.ts',
+      'frontend/src/lib/components/Entity/onboarding/hub-discovery-profile.ts',
       'frontend/src/lib/components/Entity/swap-panel-core.ts',
       'frontend/src/lib/view/panels/ArchitectPanel.svelte',
     ].map(file => readFileSync(join(repoRoot, file), 'utf8'));

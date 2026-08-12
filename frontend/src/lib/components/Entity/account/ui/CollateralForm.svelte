@@ -1,0 +1,444 @@
+<script lang="ts">
+  import { get } from 'svelte/store';
+  import type { AccountReplica, RuntimeReplica, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
+  import { xlnFunctions, error } from '../../../../stores/xlnStore';
+  import { errorLog } from '../../../../stores/errorLogStore';
+  import { runtimeControllerHandle } from '../../../../stores/runtimeControllerStore';
+  import {
+    getCounterpartyAccount,
+    normalizeEntityId,
+    requireSignerIdForEntity,
+  } from '$lib/utils/identity/entityReplica';
+  import BigIntInput from '../../../Common/BigIntInput.svelte';
+  import EntitySelect from '../../workspace/shell/EntitySelect.svelte';
+  import { amountToUsd } from '$lib/utils/assetPricing';
+  import { requireTokenDecimals } from '../../token-metadata';
+
+  export let entityId: string;
+  export let actionRuntimeEnv: RuntimeReplica | null = null;
+  export let isLive: boolean;
+  export let signerId: string | null = null;
+  export let counterpartyId: string | null;
+  export let accountIds: string[] = [];
+  export let entityNames: Map<string, string> = new Map();
+  export let accountOverride: AccountReplica | null = null;
+  export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
+
+  $: activeXlnFunctions = $xlnFunctions;
+  $: activeEnv = actionRuntimeEnv;
+  $: activeIsLive = isLive;
+
+  let selectedCounterparty = counterpartyId || '';
+  let selectedTokenId = 1;
+  let collateralAmount = 0n;
+  let lastPrefillKey = '';
+  let lastAutoMax = 0n;
+  let overCollateralMinutes = 30;
+  let submitting = false;
+
+  const OVERCOLLATERAL_RENT_RATE_USD_PER_100_PER_HOUR = 1;
+  const usdFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  $: effectiveCounterparty = counterpartyId || selectedCounterparty;
+  $: tokenList = activeXlnFunctions
+    ? [1, 2, 3].map((id) => ({ id, symbol: activeXlnFunctions.getTokenInfo(id).symbol }))
+    : [];
+  $: userDerivedDelta = (() => {
+    if (!effectiveCounterparty || !activeXlnFunctions) return null;
+    const account = accountOverride ?? (
+      activeEnv ? getCounterpartyAccount(activeEnv, entityId, effectiveCounterparty)?.account ?? null : null
+    );
+    const delta = account?.state.deltas?.get?.(selectedTokenId);
+    if (!delta) return null;
+
+    const isUserLeft =
+      normalizeEntityId(entityId) < normalizeEntityId(effectiveCounterparty);
+    try {
+      return activeXlnFunctions.deriveDelta(delta, isUserLeft);
+    } catch {
+      return null;
+    }
+  })();
+  $: selectedTokenDecimals = (() => {
+    if (!activeXlnFunctions) return 0;
+    return requireTokenDecimals(
+      activeXlnFunctions.getTokenInfo(selectedTokenId).decimals,
+      `token:${selectedTokenId}`,
+    );
+  })();
+  $: maxCollateralNeeded = (() => {
+    if (!userDerivedDelta) return 0n;
+    return userDerivedDelta.outPeerCredit > 0n ? userDerivedDelta.outPeerCredit : 0n;
+  })();
+  $: maxCollateralRequest = (() => {
+    if (!userDerivedDelta) return 0n;
+    return userDerivedDelta.outPeerCredit;
+  })();
+  $: overCollateralAmount = collateralAmount > maxCollateralRequest ? collateralAmount - maxCollateralRequest : 0n;
+
+  function tokenSymbol(tokenId: number): string {
+    const info = activeXlnFunctions?.getTokenInfo?.(tokenId);
+    return String(info?.symbol || `Token #${tokenId}`).trim();
+  }
+
+  function formatUsd(value: number): string {
+    if (!Number.isFinite(value)) return '$0.00';
+    return usdFormatter.format(value);
+  }
+
+  function formatTokenAmount(amount: bigint): string {
+    if (amount === 0n) return '0';
+    return activeXlnFunctions?.formatTokenAmount?.(selectedTokenId, amount) || amount.toString();
+  }
+
+  $: overCollateralUsd = amountToUsd(
+    overCollateralAmount,
+    selectedTokenDecimals,
+    tokenSymbol(selectedTokenId),
+  );
+  $: overCollateralRentRateUsdPerHour = overCollateralUsd * (OVERCOLLATERAL_RENT_RATE_USD_PER_100_PER_HOUR / 100);
+  $: overCollateralRentCostUsd = overCollateralRentRateUsdPerHour * (overCollateralMinutes / 60);
+  $: {
+    const key = `${normalizeEntityId(effectiveCounterparty)}:${selectedTokenId}`;
+    if (key !== lastPrefillKey) {
+      collateralAmount = maxCollateralNeeded;
+      lastAutoMax = maxCollateralNeeded;
+      lastPrefillKey = key;
+    } else if (collateralAmount === lastAutoMax && maxCollateralNeeded !== lastAutoMax) {
+      collateralAmount = maxCollateralNeeded;
+      lastAutoMax = maxCollateralNeeded;
+    }
+  }
+
+  type CounterpartyFeePolicy = {
+    policyVersion: number;
+    baseFee: bigint;
+    liquidityFeeBps: bigint;
+    gasFee: bigint;
+  };
+
+  function resolveCounterpartyPolicy(
+    env: RuntimeReplica,
+    ownerEntityId: string,
+    cpEntityId: string,
+    tokenId: number,
+  ): CounterpartyFeePolicy | null {
+    const account = getCounterpartyAccount(env, ownerEntityId, cpEntityId)?.account;
+    return resolveProjectedCounterpartyPolicy(account, ownerEntityId, tokenId);
+  }
+
+  function resolveProjectedCounterpartyPolicy(
+    account: AccountReplica | null | undefined,
+    ownerEntityId: string,
+    tokenId: number,
+  ): CounterpartyFeePolicy | null {
+    if (!account) return null;
+    const owner = normalizeEntityId(ownerEntityId);
+    const side = owner === normalizeEntityId(account.state.leftEntity)
+      ? 'right'
+      : owner === normalizeEntityId(account.state.rightEntity)
+        ? 'left'
+        : null;
+    if (!side) return null;
+    const policy = account.state.rebalanceFeePolicies?.get(tokenId)?.[side];
+    if (!policy) return null;
+    return {
+      policyVersion: policy.policyVersion,
+      baseFee: policy.baseFee,
+      liquidityFeeBps: policy.liquidityFeeBps,
+      gasFee: policy.gasFee,
+    };
+  }
+
+  $: projectedFeePolicy = activeEnv
+    ? resolveCounterpartyPolicy(activeEnv, entityId, effectiveCounterparty, selectedTokenId)
+    : resolveProjectedCounterpartyPolicy(accountOverride, entityId, selectedTokenId);
+  $: projectedFeeAmount = projectedFeePolicy
+    ? projectedFeePolicy.baseFee + projectedFeePolicy.gasFee +
+      ((collateralAmount * projectedFeePolicy.liquidityFeeBps) / 10000n)
+    : 0n;
+  $: projectedNetCollateral = collateralAmount > projectedFeeAmount
+    ? collateralAmount - projectedFeeAmount
+    : 0n;
+
+  type CollateralEntityInput = {
+    entityId: string;
+    signerId: string;
+    entityTxs: Array<{
+      type: 'requestCollateral';
+      data: {
+        counterpartyEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        feeTokenId: number;
+        feeAmount: bigint;
+        policyVersion: number;
+      };
+    }>;
+  };
+
+  async function requestCollateral() {
+    if (!effectiveCounterparty) return;
+    if (submitting) throw new Error('COLLATERAL_SUBMISSION_IN_FLIGHT');
+    submitting = true;
+    try {
+      const env = activeEnv;
+      const handle = get(runtimeControllerHandle);
+      const remoteWritable = handle.mode === 'remote' && handle.authLevel === 'admin';
+      if (!env && !remoteWritable) throw new Error('Collateral command requires live embedded RuntimeReplica or admin remote runtime');
+      if (!activeIsLive) throw new Error('Collateral request is only available in LIVE mode');
+      const resolvedSigner = (env && activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'collateral-form'))
+        || signerId
+        || (env ? requireSignerIdForEntity(env, entityId, 'collateral-form') : '');
+      if (!resolvedSigner) throw new Error('Signer is required for collateral command');
+      const feePolicy = env
+        ? resolveCounterpartyPolicy(env, entityId, effectiveCounterparty, selectedTokenId)
+        : resolveProjectedCounterpartyPolicy(accountOverride, entityId, selectedTokenId);
+      if (!feePolicy) {
+        throw new Error('Missing committed counterparty rebalance fee policy. Wait for the Account policy frame.');
+      }
+      if (feePolicy.baseFee < 0n || feePolicy.gasFee < 0n || feePolicy.liquidityFeeBps < 0n) {
+        throw new Error('Counterparty rebalance fee policy contains negative values.');
+      }
+      const feeAmount =
+        feePolicy.baseFee +
+        feePolicy.gasFee +
+        ((collateralAmount * feePolicy.liquidityFeeBps) / 10000n);
+      if (feeAmount < 0n) {
+        throw new Error('Computed rebalance fee is negative. Counterparty policy is invalid.');
+      }
+      if (feeAmount >= collateralAmount) {
+        throw new Error('Collateral fee must be lower than the gross request amount.');
+      }
+
+      const collateralInput: CollateralEntityInput = {
+        entityId,
+        signerId: resolvedSigner,
+        entityTxs: [{
+          type: 'requestCollateral',
+          data: {
+            counterpartyEntityId: effectiveCounterparty,
+            tokenId: selectedTokenId,
+            amount: collateralAmount,
+            feeTokenId: selectedTokenId,
+            feeAmount,
+            policyVersion: feePolicy.policyVersion,
+          },
+        }],
+      };
+
+      if (!submitRuntimeInput) throw new Error('Collateral command path is not connected');
+      await submitRuntimeInput({ runtimeTxs: [], entityInputs: [collateralInput], jInputs: [] });
+
+      collateralAmount = 0n;
+    } catch (err) {
+      errorLog.log('Collateral request failed', 'Collateral Form', { entityId, counterpartyId: effectiveCounterparty, err });
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      error.set(`Collateral request failed: ${message}`);
+    } finally {
+      submitting = false;
+    }
+  }
+
+  function useMaxCollateral() {
+    collateralAmount = maxCollateralNeeded;
+    lastAutoMax = maxCollateralNeeded;
+  }
+
+  function onMinutesChange(event: Event) {
+    const target = event.currentTarget as HTMLInputElement | null;
+    const next = Number(target?.value || 0);
+    if (Number.isFinite(next)) {
+      overCollateralMinutes = Math.max(1, Math.min(100, Math.round(next)));
+    }
+  }
+</script>
+
+<div class="action-card">
+  <h4>Request Collateral</h4>
+  <div class="action-form">
+    {#if counterpartyId === null}
+      <EntitySelect bind:value={selectedCounterparty} options={accountIds} {entityNames} placeholder="Select account" />
+    {/if}
+    <select bind:value={selectedTokenId} class="form-select">
+      {#each tokenList as token}
+        <option value={token.id}>{token.symbol}</option>
+      {/each}
+    </select>
+    <BigIntInput
+      bind:value={collateralAmount}
+      decimals={selectedTokenDecimals}
+      placeholder="Collateral amount"
+      disabled={submitting}
+    />
+    <button
+      class="action-button max"
+      type="button"
+      on:click={useMaxCollateral}
+      disabled={submitting || !effectiveCounterparty || maxCollateralNeeded <= 0n}
+      title="Use max suggested amount"
+    >
+      Max
+    </button>
+    <button class="action-button collateral" on:click={requestCollateral} disabled={submitting || !effectiveCounterparty || collateralAmount <= 0n || !projectedFeePolicy || projectedNetCollateral <= 0n}>
+      {submitting ? 'Submitting…' : 'Request Collateral'}
+    </button>
+  </div>
+  <div class="max-hint">
+    Suggested gross max: {activeXlnFunctions?.formatTokenAmount(selectedTokenId, maxCollateralNeeded) || '0'}
+  </div>
+  {#if projectedFeePolicy && collateralAmount > 0n}
+    <div class="max-hint" data-testid="collateral-authorization-breakdown">
+      Gross {formatTokenAmount(collateralAmount)} − exact fee {formatTokenAmount(projectedFeeAmount)}
+      = net collateral {formatTokenAmount(projectedNetCollateral)} {tokenSymbol(selectedTokenId)}
+    </div>
+  {/if}
+
+  {#if overCollateralAmount > 0n}
+    <div class="over-collateral-note">
+      <div>
+        You are requesting over-collateralization of {formatTokenAmount(overCollateralAmount)} {tokenSymbol(selectedTokenId)}.
+        Hub acceptance cap: {formatTokenAmount(maxCollateralRequest)} {tokenSymbol(selectedTokenId)}.
+      </div>
+      <div>
+        Fee estimate: $1 per $100 per hour (approx.). For {overCollateralMinutes} minutes: {formatUsd(overCollateralRentCostUsd)}.
+      </div>
+      <div class="over-collateral-slider-row">
+        <label for="over-collateral-minutes">Over-collateralization rental, minutes:</label>
+        <input
+          id="over-collateral-minutes"
+          class="over-collateral-slider"
+          type="range"
+          min="1"
+          max="100"
+          value={overCollateralMinutes}
+          on:input={onMinutesChange}
+        />
+        <span>{overCollateralMinutes}</span>
+      </div>
+    </div>
+  {/if}
+</div>
+
+<style>
+  .action-card {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 8px;
+  }
+
+  .action-card h4 {
+    margin: 0 0 8px 0;
+    color: #e4e4e7;
+    font-size: 0.8em;
+    font-weight: 600;
+  }
+
+  .action-form {
+    display: flex;
+    gap: 7px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .form-select {
+    padding: 9px 10px;
+    background: #09090b;
+    border: 1px solid #27272a;
+    border-radius: 8px;
+    color: #e4e4e7;
+    font-size: 0.88em;
+    min-width: 100px;
+  }
+
+  .form-select:focus {
+    border-color: #fbbf24;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.1);
+  }
+
+  .action-button {
+    padding: 8px 14px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.78em;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .action-button.max {
+    background: #111216;
+    border: 1px solid #2f3138;
+    color: #d1d5db;
+  }
+
+  .action-button.max:hover {
+    border-color: #4b5563;
+    color: #f3f4f6;
+  }
+
+  .action-button.collateral {
+    background: linear-gradient(135deg, #0d9488, #0f766e);
+    color: white;
+    box-shadow: 0 1px 3px rgba(13, 148, 136, 0.3);
+  }
+
+  .action-button.collateral:hover {
+    background: linear-gradient(135deg, #14b8a6, #0d9488);
+  }
+
+  .action-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .max-hint {
+    margin-top: 7px;
+    color: #9ca3af;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .over-collateral-note {
+    margin-top: 10px;
+    padding: 8px;
+    border: 1px solid #3b3f4c;
+    border-radius: 8px;
+    background: #111216;
+    color: #d1d5db;
+    font-size: 11px;
+    line-height: 1.35;
+    display: grid;
+    row-gap: 8px;
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .over-collateral-slider-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: #9ca3af;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .over-collateral-slider {
+    flex: 1 1 220px;
+    min-width: 0;
+    max-width: 100%;
+    margin: 0;
+  }
+</style>

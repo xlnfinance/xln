@@ -85,8 +85,8 @@ test('gossip directory view projects radapter entity summaries without full Runt
 test('dock GossipPanel consumes the Runtime query projection', () => {
   const dockPanel = readFileSync('frontend/src/lib/view/panels/GossipPanel.svelte', 'utf8');
   const dockRoot = readFileSync('frontend/src/lib/view/DockRoot.svelte', 'utf8');
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-  const settingsProjection = readFileSync('frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte', 'utf8');
+  const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
+  const settingsProjection = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntitySettingsProjectionPanel.svelte', 'utf8');
 
   expect(dockPanel).toContain('createRuntimeQueryStore');
   expect(dockPanel).toContain('readViewFrame');

@@ -3,15 +3,15 @@
   import type { ComponentType } from 'svelte';
   import { ArrowDownLeft, ArrowUpRight, Activity, Banknote, Landmark, PlusCircle, Repeat, Settings as SettingsIcon, SlidersHorizontal } from 'lucide-svelte';
   import type { EntityReplica, Tab } from '$lib/types/ui';
-  import AccountAppearancePanel from '../AccountAppearancePanel.svelte';
-  import AccountConfigurePanel from '../AccountConfigurePanel.svelte';
-  import AccountDropdown from '../AccountDropdown.svelte';
-  import AccountList from '../AccountList.svelte';
-  import AccountOpenPanel from '../AccountOpenPanel.svelte';
+  import AccountAppearancePanel from '../account/ui/AccountAppearancePanel.svelte';
+  import AccountConfigurePanel from '../account/ui/AccountConfigurePanel.svelte';
+  import AccountDropdown from '../account/ui/AccountDropdown.svelte';
+  import AccountList from '../account/ui/AccountList.svelte';
+  import AccountOpenPanel from '../account/ui/AccountOpenPanel.svelte';
   import AccountWorkspaceRail from './AccountWorkspaceRail.svelte';
   import EntityActivityPanel from '../EntityActivityPanel.svelte';
   import LendingPanel from '../payments/LendingPanel.svelte';
-  import LiveRequiredState from '../LiveRequiredState.svelte';
+  import LiveRequiredState from './shell/LiveRequiredState.svelte';
   import MoveWorkspace from '../MoveWorkspace.svelte';
   import PaymentPanel from '../payments/PaymentPanel.svelte';
   import PendingBatchNotice from '../payments/PendingBatchNotice.svelte';
@@ -25,7 +25,7 @@
   import {
     emptyHubDiscoveryProjection,
     type HubDiscoveryProjection,
-  } from '../hub-discovery-profile';
+  } from '../onboarding/hub-discovery-profile';
   import {
     emptyPaymentPanelView,
     type PaymentPanelView,

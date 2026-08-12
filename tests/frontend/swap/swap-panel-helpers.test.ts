@@ -340,7 +340,7 @@ describe('swap panel helpers', () => {
     const [panel, workspace, tabs] = await Promise.all([
       Bun.file('frontend/src/lib/components/Entity/swap/SwapPanel.svelte').text(),
       Bun.file('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte').text(),
-      Bun.file('frontend/src/lib/components/Entity/EntityPanelTabs.svelte').text(),
+      Bun.file('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte').text(),
     ]);
 
     expect(panel).toContain('export let runtimeView: SwapPanelRuntimeView | null = null');

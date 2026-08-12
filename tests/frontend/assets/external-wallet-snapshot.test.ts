@@ -89,7 +89,7 @@ describe('external wallet snapshot helpers', () => {
   });
 
   test('remote projection sessions read external wallet snapshots through API without live RuntimeReplica', () => {
-    const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    const source = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
     const fetchStart = source.indexOf('async function fetchExternalTokens');
     const fetchEnd = source.indexOf('const allowanceReads = moveAllowanceRouteEnabled', fetchStart);
     expect(fetchStart).toBeGreaterThan(0);
@@ -119,7 +119,7 @@ describe('external wallet snapshot helpers', () => {
   });
 
   test('live wallet balances refresh through read-only snapshots without producing consensus input', () => {
-    const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    const source = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
     const reader = readFileSync('frontend/src/lib/components/Entity/external-wallet-reader.ts', 'utf8');
     expect(reader).toContain('signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)');
     expect(source).toContain('const externalWalletRefresh = window.setInterval(() => {');
@@ -130,7 +130,7 @@ describe('external wallet snapshot helpers', () => {
   });
 
   test('external wallet snapshot transport failures are non-fatal persistent diagnostics', () => {
-    const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    const source = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
     const reader = readFileSync('frontend/src/lib/components/Entity/external-wallet-reader.ts', 'utf8');
     expect(reader).toContain('function isExternalWalletSnapshotTransportFailure(message: string): boolean');
     expect(source).toMatch(

@@ -111,11 +111,11 @@ describe('repository source folder-width invariant', () => {
     const widths = collectFolderWidths(repoRoot);
     expect(evaluateFolderWidths(widths, FOLDER_WIDTH_DEBT)).toEqual([]);
     expect(widths.filter(entry => entry.files > 10)).toEqual([
-      { path: 'frontend/src/lib/components/Entity', files: 45 },
+      { path: 'frontend/src/lib/components/Entity', files: 20 },
       { path: 'jurisdictions/contracts', files: 16 },
       { path: 'scripts', files: 25 },
       { path: 'scripts/dev', files: 12 },
-      { path: 'tests/frontend', files: 45 },
+      { path: 'tests/frontend', files: 20 },
     ]);
   });
 

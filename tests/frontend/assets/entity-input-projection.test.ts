@@ -6,10 +6,10 @@ test('EntityInput consumes projected profiles instead of global runtime env', ()
   const payment = readFileSync('frontend/src/lib/components/Entity/payments/PaymentPanel.svelte', 'utf8');
   const move = readFileSync('frontend/src/lib/components/Entity/MoveWorkspace.svelte', 'utf8');
   const settlement = readFileSync('frontend/src/lib/components/Entity/payments/SettlementPanel.svelte', 'utf8');
-  const accountOpen = readFileSync('frontend/src/lib/components/Entity/AccountOpenPanel.svelte', 'utf8');
+  const accountOpen = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountOpenPanel.svelte', 'utf8');
   const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
   const assets = readFileSync('frontend/src/lib/components/Entity/assets/EntityAssetsTab.svelte', 'utf8');
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+  const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
 
   expect(entityInput).toContain('export let profiles: GossipProfile[] = []');
   expect(entityInput).toContain('activeProfiles = Array.isArray(profiles) ? profiles : []');
@@ -36,9 +36,9 @@ test('EntityInput consumes projected profiles instead of global runtime env', ()
 
 test('entity naming helpers are projection-only and do not perform hidden runtime fetches', () => {
   const entityNaming = readFileSync('frontend/src/lib/utils/identity/entityNaming.ts', 'utf8');
-  const entitySelect = readFileSync('frontend/src/lib/components/Entity/EntitySelect.svelte', 'utf8');
-  const entityDropdown = readFileSync('frontend/src/lib/components/Entity/EntityDropdown.svelte', 'utf8');
-  const accountDropdown = readFileSync('frontend/src/lib/components/Entity/AccountDropdown.svelte', 'utf8');
+  const entitySelect = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntitySelect.svelte', 'utf8');
+  const entityDropdown = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityDropdown.svelte', 'utf8');
+  const accountDropdown = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountDropdown.svelte', 'utf8');
 
   for (const source of [entityNaming, entitySelect, entityDropdown, accountDropdown]) {
     expect(source).not.toContain('scheduleGossipProfileFetch');

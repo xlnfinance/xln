@@ -30,7 +30,7 @@ test('runtime selector hot-swaps adapters instead of reloading the app', () => {
 test('runtime controller is the single adapter lifecycle owner', () => {
   const controllerSource = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const contextSwitcherSource = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
+  const contextSwitcherSource = readFileSync('frontend/src/lib/components/Entity/workspace/shell/ContextSwitcher.svelte', 'utf8');
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
   const queryClientSource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
 

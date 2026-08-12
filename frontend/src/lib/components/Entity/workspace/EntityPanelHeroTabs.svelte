@@ -3,7 +3,7 @@
   import { Check, Copy } from 'lucide-svelte';
   import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
   import type { Tab } from '$lib/types/ui';
-  import ContextSwitcher from '../ContextSwitcher.svelte';
+  import ContextSwitcher from './shell/ContextSwitcher.svelte';
   import type { ViewTab } from './entity-panel-routing';
 
   type JurisdictionBadge = {

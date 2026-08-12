@@ -720,7 +720,7 @@ test('public mutation exports no longer accept caller-owned RuntimeReplica', () 
 });
 
 test('server-side credit requests publish upstream runtime ingress receipts', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/CreditForm.svelte', 'utf8');
+  const source = readFileSync('frontend/src/lib/components/Entity/account/ui/CreditForm.svelte', 'utf8');
 
   expect(source).toContain('recordRuntimeIngressReceipt');
   expect(source).toContain('runtimeControllerHandle');
@@ -730,9 +730,9 @@ test('server-side credit requests publish upstream runtime ingress receipts', ()
 });
 
 test('credit and collateral configure forms submit RuntimeInput through shared command path', () => {
-  const creditSource = readFileSync('frontend/src/lib/components/Entity/CreditForm.svelte', 'utf8');
-  const collateralSource = readFileSync('frontend/src/lib/components/Entity/CollateralForm.svelte', 'utf8');
-  const configureSource = readFileSync('frontend/src/lib/components/Entity/AccountConfigurePanel.svelte', 'utf8');
+  const creditSource = readFileSync('frontend/src/lib/components/Entity/account/ui/CreditForm.svelte', 'utf8');
+  const collateralSource = readFileSync('frontend/src/lib/components/Entity/account/ui/CollateralForm.svelte', 'utf8');
+  const configureSource = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountConfigurePanel.svelte', 'utf8');
   const accountWorkspaceSource = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
   const resolverSource = readFileSync('runtime/api/runtime-adapter/resolve.ts', 'utf8');
 
@@ -788,7 +788,7 @@ test('lending mutations use the signer runtime command path instead of unauthent
 });
 
 test('server-side faucet requests publish upstream runtime ingress receipts when provided', () => {
-  const panelSource = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+  const panelSource = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
   const faucetSource = readFileSync('frontend/src/lib/components/Entity/account/account-faucet.ts', 'utf8');
   const assetFaucetSource = readFileSync('frontend/src/lib/components/Entity/assets/AssetFaucetCard.svelte', 'utf8');
   const assetsSource = readFileSync('frontend/src/lib/components/Entity/assets/EntityAssetsTab.svelte', 'utf8');
@@ -834,14 +834,14 @@ test('entity workspace renders latest runtime command receipt status', () => {
 });
 
 test('entity panel never promotes UI reads or transaction responses into J-prefix inputs', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+  const source = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
   expect(source).not.toContain('async function applyCanonicalJEventsToActiveEnv');
   expect(source).not.toContain('buildJEventsRuntimeInput(env, events');
   expect(source).not.toContain('applyJEventsToEnv');
 });
 
 test('entity panel pure RuntimeInput mutations do not require embedded RuntimeReplica on remote', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+  const source = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
 
   expect(source).not.toContain('requireRuntimeEnv(activeEnv');
   expect(source).not.toContain("requireRuntimeEnv(actionRuntimeEnv, 'settings-profile-update')");
@@ -875,7 +875,7 @@ test('entity panel pure RuntimeInput mutations do not require embedded RuntimeRe
 });
 
 test('entity panel debt enforcement submits RuntimeInput instead of calling JAdapter directly', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+  const source = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
   const enforceIndex = source.indexOf('async function enforceOutstandingDebt');
   expect(enforceIndex).toBeGreaterThan(0);
   const enforceSource = source.slice(enforceIndex, source.indexOf('async function addTokenToAccount', enforceIndex));

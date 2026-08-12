@@ -12,7 +12,7 @@ import {
   hubDiscoveryJurisdictionKey,
   hubHasPublishedRuntimeRoute,
   isSameEntityId,
-} from '../../frontend/src/lib/components/Entity/hub-discovery-profile';
+} from '../../frontend/src/lib/components/Entity/onboarding/hub-discovery-profile';
 import { readFileSync } from 'node:fs';
 
 const SOURCE = `0x${'11'.repeat(32)}`;
@@ -565,7 +565,7 @@ test('hub discovery remote hubs are projected from runtime registry outside Enti
     height: 0,
   });
 
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+  const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
   expect(tabs).toContain('buildHubDiscoveryRemoteHubsFromRuntimes($runtimes.values())');
   expect(tabs).not.toContain('remoteHubCandidates = Array.from($runtimes.values()).flatMap');
 });
@@ -641,17 +641,17 @@ test('hub discovery projection marks uncommitted account as opening', () => {
 });
 
 test('HubDiscoveryPanel renders a supplied projection instead of scanning eReplicas', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/HubDiscoveryPanel.svelte', 'utf8');
-  const profile = readFileSync('frontend/src/lib/components/Entity/hub-discovery-profile.ts', 'utf8');
-  const accountOpen = readFileSync('frontend/src/lib/components/Entity/AccountOpenPanel.svelte', 'utf8');
+  const source = readFileSync('frontend/src/lib/components/Entity/onboarding/HubDiscoveryPanel.svelte', 'utf8');
+  const profile = readFileSync('frontend/src/lib/components/Entity/onboarding/hub-discovery-profile.ts', 'utf8');
+  const accountOpen = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountOpenPanel.svelte', 'utf8');
   const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+  const tabs = readFileSync('frontend/src/lib/components/Entity/workspace/shell/EntityPanelTabs.svelte', 'utf8');
   expect(source).toContain('export let hubDiscoveryProjection');
   expect(source).toContain('export let canOpenAccounts = true');
   expect(source).toContain('export let submitRuntimeInput');
   expect(source).toContain('hubDiscoveryProjection.sourceSignerId');
   expect(source).toContain('ensureHubOpenAccountProfileReady({');
-  expect(source).toContain("import { runtimeControllerHandle } from '../../stores/runtimeControllerStore'");
+  expect(source).toContain("import { runtimeControllerHandle } from '../../../stores/runtimeControllerStore'");
   expect(source).toContain('adapterMode: $runtimeControllerHandle.mode');
   expect(source).toContain('authLevel: $runtimeControllerHandle.authLevel');
   expect(source).toContain('hubDiscoveryProjection.localHubs');
@@ -690,7 +690,7 @@ test('HubDiscoveryPanel renders a supplied projection instead of scanning eRepli
   expect(accountWorkspace).toContain('{submitRuntimeInput}');
   expect(tabs).toContain('canOpenAccounts = canSubmitHubOpenAccount');
   expect(tabs).toContain('profiles: directoryPanelView.profiles?.length ? directoryPanelView.profiles : panelProfiles');
-  expect(tabs).toMatch(/import \{ runtimes \} from ["']\.\.\/\.\.\/stores\/runtimeStore["']/);
+  expect(tabs).toMatch(/import \{ runtimes \} from ["']\.\.\/\.\.\/\.\.\/\.\.\/stores\/runtimeStore["']/);
   expect(tabs).toContain('remoteHubs: remoteHubCandidates');
   expect(tabs).toContain('if (!canOpenAccounts)');
   expect(tabs).toContain('buildDirectOpenAccountRuntimeInput');
@@ -711,7 +711,7 @@ test('HubDiscoveryPanel renders a supplied projection instead of scanning eRepli
   expect(source).not.toContain('getEntityJurisdictionKey(');
   expect(source).not.toContain('appRuntimeAdapterMode');
   expect(source).not.toContain('runtimeAdapterAuthLevel');
-  expect(tabs).toMatch(/import \{ runtimeControllerHandle \} from ["']\.\.\/\.\.\/stores\/runtimeControllerStore["']/);
+  expect(tabs).toMatch(/import \{ runtimeControllerHandle \} from ["']\.\.\/\.\.\/\.\.\/\.\.\/stores\/runtimeControllerStore["']/);
   expect(tabs).toContain('adapterMode: $runtimeControllerHandle.mode');
   expect(tabs).toContain('authLevel: $runtimeControllerHandle.authLevel');
   expect(tabs).not.toContain('appRuntimeAdapterMode');
