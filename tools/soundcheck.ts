@@ -69,7 +69,7 @@ const ORDERBOOK_MARKERS = [
   'runtime/storage/index.ts',
   'runtime/entity/consensus/index.ts',
   'runtime/entity/tx/handlers/dispute.ts',
-  'runtime/scenarios/swap.ts',
+  'runtime/scenarios/market/swap.ts',
   'runtime/runtime/types.ts',
 ];
 

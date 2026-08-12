@@ -10,44 +10,44 @@ import { startRuntimeHistoryTraceForTesting } from '../runtime/observability/his
  */
 export const scenarios = {
   ahb: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
-    const { ahb } = await import('./ahb');
+    const { ahb } = await import('./consensus/ahb');
     await ahb(env);
     return env;
   },
   lockAhb: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
-    const { lockAhb } = await import('./lock-ahb');
+    const { lockAhb } = await import('./payments/lock-ahb');
     await lockAhb(env);
     return env;
   },
   swap: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
-    const { swap, swapWithOrderbook, multiPartyTrading } = await import('./swap');
+    const { swap, swapWithOrderbook, multiPartyTrading } = await import('./market/swap');
     await swap(env);
     await swapWithOrderbook(env);
     await multiPartyTrading(env);
     return env;
   },
   swapMarket: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
-    const { swapMarket } = await import('./swap-market');
+    const { swapMarket } = await import('./market/swap-market');
     await swapMarket(env);
     return env;
   },
   rapidFire: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
-    const { rapidFire } = await import('./rapid-fire');
+    const { rapidFire } = await import('./consensus/rapid-fire');
     await rapidFire(env);
     return env;
   },
   grid: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
-    const { grid } = await import('./grid');
+    const { grid } = await import('./consensus/grid');
     await grid(env);
     return env;
   },
   settle: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
-    const { runSettleScenario } = await import('./settle');
+    const { runSettleScenario } = await import('./settlement/settle');
     await runSettleScenario(env);
     return env;
   },
   disputeLifecycle: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
-    const { runDisputeLifecycle } = await import('./dispute-lifecycle');
+    const { runDisputeLifecycle } = await import('./disputes/lifecycle');
     return await runDisputeLifecycle(env);
   },
   fullMechanics: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
@@ -99,11 +99,11 @@ export const recordScenario = async (
   }
 };
 
-export { parseScenario, mergeAndSortEvents } from './parser';
-export { executeScenario } from './executor';
+export { parseScenario, mergeAndSortEvents } from './runner/parser';
+export { executeScenario } from './runner/executor';
 export {
   SCENARIOS,
   getScenario,
   getScenariosByTag,
   type ScenarioMetadata,
-} from './catalog';
+} from './runner/catalog';

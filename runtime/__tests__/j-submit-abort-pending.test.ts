@@ -10,7 +10,7 @@ import {
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { dbRootPath } from '../runtime/platform';
-import { bootScenario, fundEntities, registerEntities } from '../scenarios/boot';
+import { bootScenario, fundEntities, registerEntities } from '../scenarios/harness/boot';
 import {
   cleanupRuntimeStorage,
   driveRuntimeUntil,

@@ -21,11 +21,11 @@ const readMarketMakerNodeSource = (): string =>
 const readRpcAdapterSource = (): string =>
   [
     'rpc-public.ts',
-    'rpc-adapter.ts',
-    'rpc-chain-io.ts',
-    'rpc-lifecycle.ts',
-    'rpc-reads.ts',
-    'rpc-wallet-writes.ts',
+    'rpc/rpc-adapter.ts',
+    'rpc/rpc-chain-io.ts',
+    'rpc/rpc-lifecycle.ts',
+    'rpc/rpc-reads.ts',
+    'rpc/wallet/rpc-wallet-writes.ts',
     'rpc/watcher/rpc-watcher-ingress.ts',
     'rpc/watcher/rpc-watcher-poll.ts',
   ]
@@ -1212,7 +1212,7 @@ describe('production startup wiring', () => {
       'runtime/scripts/rpc-settlement-anvil.ts',
       'runtime/scripts/dev-anvil-stack.ts',
       'runtime/scripts/run-system-tests-parallel.ts',
-      'runtime/scenarios/boot.ts',
+      'runtime/scenarios/harness/boot.ts',
       'runtime/__tests__/watchtower-rpc-last-resort.test.ts',
     ];
     for (const relativePath of harnesses) {
@@ -2071,7 +2071,7 @@ describe('production startup wiring', () => {
       '"test:e2e:all": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
     );
     expect(packageJson).toContain(
-      '"test:p2p:relay": "bun runtime/scripts/run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/p2p-relay.ts"',
+      '"test:p2p:relay": "bun runtime/scripts/run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/network/p2p-relay.ts"',
     );
     expect(bootstrapSoundcheck).toContain(
       "XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] || '1'",
@@ -2169,7 +2169,7 @@ describe('production startup wiring', () => {
 
   test('scenario workers only start transports their scenario actually uses', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scenarios/run.ts'), 'utf8');
-    const p2pNode = readFileSync(join(repoRoot, 'runtime/scenarios/p2p-node.ts'), 'utf8');
+    const p2pNode = readFileSync(join(repoRoot, 'runtime/scenarios/network/p2p-node.ts'), 'utf8');
 
     expect(runner).not.toContain('runtime/network/relay/standalone-server.ts');
     expect(runner).not.toContain('RELAY_URL:');

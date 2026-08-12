@@ -5,8 +5,8 @@ import { createEmptyEnv } from '../runtime';
 import {
   executeScenario,
   resolveScenarioNumberedRegistrationContext,
-} from '../scenarios/executor';
-import { setScenarioStorageEnabled } from '../scenarios/helpers';
+} from '../scenarios/runner/executor';
+import { setScenarioStorageEnabled } from '../scenarios/harness/helpers';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';

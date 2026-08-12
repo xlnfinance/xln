@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { requireRuntimeSeed, setScenarioStorageEnabled } from '../scenarios/helpers';
+import { requireRuntimeSeed, setScenarioStorageEnabled } from '../scenarios/harness/helpers';
 import type { RuntimeReplica } from '../runtime/types';
 
 const originalXlnRuntimeSeed = process.env['XLN_RUNTIME_SEED'];

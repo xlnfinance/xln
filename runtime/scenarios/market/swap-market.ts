@@ -1,0 +1,1065 @@
+/**
+ * Multi-Party Orderbook Market Scenario
+ *
+ * Tests realistic orderbook behavior with:
+ * - 1 reference asset (USDC - token 1)
+ * - 3 pairwise books: USDC/ETH, USDC/WBTC, USDC/DAI
+ * - 10 participants: 3 hubs + 7 traders (Alice, Bob, Carol, Dave, Eve, Frank, Grace)
+ * - Realistic market dynamics: makers, takers, partial fills, spread
+ *
+ * Market scenario:
+ * - Phase 1: Makers place limit orders (bid/ask spread)
+ * - Phase 2: Takers sweep orderbook
+ * - Phase 3: Market volatility (cancel + replace orders)
+ *
+ * Run with: bun runtime/scenarios/market/swap-market.ts
+ */
+
+import type { RuntimeReplica } from '../../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
+import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
+import type { EntityInput } from '../../entity/types';
+import {
+  bindScenarioJReplica,
+  createJurisdictionConfig,
+  createJReplica,
+  ensureJAdapter,
+  getJAdapterMode,
+  registerEntities,
+} from '../harness/boot';
+import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from '../harness/helpers';
+import { createGossipLayer } from '../../network/p2p/gossip';
+import { getBookOrders } from '../../orderbook/core';
+
+type MarketHub = { name: string; id: string; signer: string; role: string; pairs: string[] };
+type MarketTrader = { name: string; id: string; signer: string; role: string };
+
+// Lazy-loaded runtime functions
+let _process: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;
+
+const getProcess = async () => {
+  if (!_process) {
+    const runtime = await import('../../runtime');
+    _process = runtime.processRuntime;
+  }
+  return _process;
+};
+
+const requireDefined = <T>(value: T | undefined, label: string): T => {
+  if (!value) {
+    throw new Error(`SWAP_MARKET_MISSING_ENTITY:${label}`);
+  }
+  return value;
+};
+
+// Keep scenario tokens away from production liquid-quote token ids except USDC itself.
+// That way scenario pair orientation follows the same liquid-quote rules as production
+// instead of accidentally inverting base/quote because ETH/DAI reused ids {1,3}.
+const USDC = 1;  // Quote / reference asset
+const ETH = 2;   // Base for ETH/USDC - price ~3000 USDC per ETH
+const WBTC = 4;  // Base for WBTC/USDC - price ~60000 USDC per WBTC
+const DAI = 5;   // Base for DAI/USDC - price ~1 USDC per DAI
+
+const ETH_USDC_PAIR = `${Math.min(ETH, USDC)}/${Math.max(ETH, USDC)}`;
+const WBTC_USDC_PAIR = `${Math.min(WBTC, USDC)}/${Math.max(WBTC, USDC)}`;
+const DAI_USDC_PAIR = `${Math.min(DAI, USDC)}/${Math.max(DAI, USDC)}`;
+
+const DECIMALS = 18n;
+const ONE = 10n ** DECIMALS;
+
+const usdc = (amount: number | bigint) => BigInt(amount) * ONE;
+const eth = (amount: number | bigint) => BigInt(amount) * ONE;
+const wbtc = (amount: number | bigint) => BigInt(amount) * ONE;
+const dai = (amount: number | bigint) => BigInt(amount) * ONE;
+
+// Fill ratios
+
+// Using helpers from helpers.ts (no duplication)
+
+export async function swapMarket(env: RuntimeReplica): Promise<void> {
+  const restoreStrict = enableStrictScenario(env, 'Swap Market');
+  const prevScenarioMode = env.scenarioMode;
+  try {
+  env.scenarioMode = true; // Deterministic time control
+  requireRuntimeSeed(env, 'Swap Market');
+  ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'], 'Swap Market');
+  const process = await getProcess();
+
+  if (env.scenarioMode && env.state.height === 0) {
+    env.state.timestamp = 1;
+  }
+
+  if (env.state.jReplicas && env.state.jReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.state.jReplicas.size} old jurisdictions from previous scenario`);
+    env.state.jReplicas.clear();
+  }
+  if (env.state.eReplicas && env.state.eReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.state.eReplicas.size} old entities from previous scenario`);
+    env.state.eReplicas.clear();
+  }
+  if (env.history && env.history.length > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.history.length} old snapshots from previous scenario`);
+    env.history = [];
+  }
+  env.state.height = 0;
+  env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
+  env.pendingOutputs = [];
+  env.pendingNetworkOutputs = [];
+  env.networkInbox = [];
+  env.frameLogs = [];
+  env.gossip = createGossipLayer();
+
+  if (env.state.jReplicas && env.state.jReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.state.jReplicas.size} old jurisdictions from previous scenario`);
+    env.state.jReplicas.clear();
+  }
+  if (env.state.eReplicas && env.state.eReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.state.eReplicas.size} old entities from previous scenario`);
+    env.state.eReplicas.clear();
+  }
+  if (env.history && env.history.length > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.history.length} old snapshots from previous scenario`);
+    env.history = [];
+  }
+  env.state.height = 0;
+  env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
+  env.pendingOutputs = [];
+  env.pendingNetworkOutputs = [];
+  env.networkInbox = [];
+  env.frameLogs = [];
+  env.gossip = createGossipLayer();
+
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('      SWAP MARKET: Multi-Party Orderbook Simulation            ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  // ============================================================================
+  // SETUP: JAdapter + J-Machine
+  // ============================================================================
+  console.log('🏛️  Setting up JAdapter J-Machine...');
+
+  const jMode = getJAdapterMode();
+  const jadapter = await ensureJAdapter(env, jMode);
+  const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
+  bindScenarioJReplica(
+    env,
+    createJReplica(env, 'Market', jadapter.addresses.depository, J_MACHINE_POSITION),
+    jadapter,
+  );
+  jadapter.startWatching(env);
+  console.log('✅ JAdapter J-Machine created\n');
+
+  // ============================================================================
+  // SETUP: Create 10 entities (3 hubs + 7 traders)
+  // ============================================================================
+  console.log('📦 Creating 10 market participants (3 hubs + 7 traders)...');
+
+  const hubs: MarketHub[] = [
+    { name: 'HubETH', id: '', signer: '1', role: 'hub', pairs: [ETH_USDC_PAIR] }, // ETH/USDC
+    { name: 'HubWBTC', id: '', signer: '2', role: 'hub', pairs: [WBTC_USDC_PAIR] }, // WBTC/USDC
+    { name: 'HubDAI', id: '', signer: '3', role: 'hub', pairs: [DAI_USDC_PAIR] }, // DAI/USDC
+  ];
+
+  const traders: MarketTrader[] = [
+    { name: 'Alice', id: '', signer: '4', role: 'maker' },
+    { name: 'Bob', id: '', signer: '5', role: 'maker' },
+    { name: 'Carol', id: '', signer: '6', role: 'taker' },
+    { name: 'Dave', id: '', signer: '7', role: 'taker' },
+    { name: 'Eve', id: '', signer: '8', role: 'maker' },
+    { name: 'Frank', id: '', signer: '9', role: 'taker' },
+    { name: 'Grace', id: '', signer: '10', role: 'maker' },
+  ];
+
+  const entities = [...hubs, ...traders];
+
+  const HUB_SPACING = 160;
+  const HUB_Y = -80;
+  const TRADER_Y = -140;
+  const TRADER_Z = 70;
+  const TRADER_X = 40;
+
+  const MARKET_OFFSETS: Record<string, { x: number; y: number; z: number }> = {
+    HubETH: { x: -HUB_SPACING, y: HUB_Y, z: 0 },
+    HubWBTC: { x: 0, y: HUB_Y, z: 0 },
+    HubDAI: { x: HUB_SPACING, y: HUB_Y, z: 0 },
+    Alice: { x: -HUB_SPACING - TRADER_X, y: TRADER_Y, z: -TRADER_Z },
+    Bob: { x: -HUB_SPACING + TRADER_X, y: TRADER_Y, z: TRADER_Z },
+    Carol: { x: -HUB_SPACING, y: TRADER_Y, z: 0 },
+    Dave: { x: -TRADER_X, y: TRADER_Y, z: -TRADER_Z },
+    Grace: { x: TRADER_X, y: TRADER_Y, z: TRADER_Z },
+    Eve: { x: HUB_SPACING - TRADER_X, y: TRADER_Y, z: -TRADER_Z },
+    Frank: { x: HUB_SPACING + TRADER_X, y: TRADER_Y, z: TRADER_Z },
+  };
+
+  const MARKET_POSITIONS: Record<string, { x: number; y: number; z: number }> = Object.fromEntries(
+    Object.entries(MARKET_OFFSETS).map(([name, offset]) => [
+      name,
+      {
+        x: J_MACHINE_POSITION.x + offset.x,
+        y: J_MACHINE_POSITION.y + offset.y,
+        z: J_MACHINE_POSITION.z + offset.z,
+      },
+    ]),
+  );
+
+  const jurisdiction = createJurisdictionConfig(
+    'Market',
+    jadapter.addresses.depository,
+    jadapter.addresses.entityProvider,
+  );
+  const registered = await registerEntities(
+    env,
+    jadapter,
+    entities.map(entity => ({
+      name: entity.name,
+      signer: entity.signer,
+      position: MARKET_POSITIONS[entity.name] || { x: 0, y: -80, z: 0 },
+    })),
+    jurisdiction,
+  );
+  for (let index = 0; index < entities.length; index += 1) {
+    const entity = entities[index];
+    const registration = registered[index];
+    if (!entity || !registration) throw new Error(`SWAP_MARKET_REGISTRATION_MISSING:${index}`);
+    entity.id = registration.id;
+    entity.signer = registration.signer;
+  }
+  console.log(`  ✅ Created: ${entities.map(e => e.name).join(', ')}\n`);
+
+  const hubEth = requireDefined(hubs[0], 'HubETH');
+  const hubWbtc = requireDefined(hubs[1], 'HubWBTC');
+  const hubDai = requireDefined(hubs[2], 'HubDAI');
+  const alice = requireDefined(traders[0], 'Alice');
+  const bob = requireDefined(traders[1], 'Bob');
+  const carol = requireDefined(traders[2], 'Carol');
+  const dave = requireDefined(traders[3], 'Dave');
+  const eve = requireDefined(traders[4], 'Eve');
+  const frank = requireDefined(traders[5], 'Frank');
+  const grace = requireDefined(traders[6], 'Grace');
+
+  // Initialize orderbookExt for each hub
+  const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../../orderbook');
+  await process(env, hubs.map(hub => ({
+    entityId: hub.id,
+    signerId: hub.signer,
+    entityTxs: [{
+      type: 'initOrderbookExt',
+      data: {
+        name: hub.name,
+        spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+        referenceTokenId: USDC,
+        usdQuoteAuthorityEntityId: eve.id,
+        minTradeSize: 0n,
+        supportedPairs: hub.pairs,
+      },
+    }],
+  })));
+  await converge(env);
+  console.log('  ✅ Orderbook extensions initialized\n');
+
+  // ============================================================================
+  // SETUP: Open bilateral accounts per hub
+  // ============================================================================
+  console.log('🔗 Opening bilateral accounts (traders ↔ hubs)...');
+
+  const hubEthTraders = [alice, bob, eve, carol];
+  const hubWbtcTraders = [alice, grace, dave];
+  const hubDaiTraders = [bob, eve, frank];
+
+  const openPairs: Array<{ trader: typeof traders[number]; hub: typeof hubs[number] }> = [
+    ...hubEthTraders.map(trader => ({ trader, hub: hubEth })),
+    ...hubWbtcTraders.map(trader => ({ trader, hub: hubWbtc })),
+    ...hubDaiTraders.map(trader => ({ trader, hub: hubDai })),
+  ];
+
+  for (const { trader, hub } of openPairs) {
+    await process(env, [{
+      entityId: trader.id,
+      signerId: trader.signer,
+      entityTxs: [{ type: 'openAccount', data: {
+        targetEntityId: hub.id,
+        disputeConfig: defaultAccountDisputeConfigForParties(trader.id, false, hub.id, true),
+      } }],
+    }]);
+    await converge(env, 30);
+  }
+  console.log('  ✅ Bilateral accounts created\n');
+
+  // ============================================================================
+  // SETUP: Credit limits (4 tokens: USDC, ETH, WBTC, DAI)
+  // ============================================================================
+  console.log('💳 Setting up credit limits for all traders...');
+
+  const creditLimitUnits = 10_000_000n / 3n;
+
+  const creditPairs: Array<{
+    trader: typeof traders[number];
+    hub: typeof hubs[number];
+    tokenA: number;
+    tokenB: number;
+    amountA: bigint;
+    amountB: bigint;
+  }> = [
+    ...hubEthTraders.map(trader => ({
+      trader,
+      hub: hubEth,
+      tokenA: USDC,
+      tokenB: ETH,
+      amountA: usdc(creditLimitUnits),
+      amountB: eth(creditLimitUnits),
+    })),
+    ...hubWbtcTraders.map(trader => ({
+      trader,
+      hub: hubWbtc,
+      tokenA: USDC,
+      tokenB: WBTC,
+      amountA: usdc(creditLimitUnits),
+      amountB: wbtc(creditLimitUnits),
+    })),
+    ...hubDaiTraders.map(trader => ({
+      trader,
+      hub: hubDai,
+      tokenA: USDC,
+      tokenB: DAI,
+      amountA: usdc(creditLimitUnits),
+      amountB: dai(creditLimitUnits),
+    })),
+  ];
+
+  for (const { trader, hub, tokenA, tokenB, amountA, amountB } of creditPairs) {
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: tokenA, amount: amountA } },
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: tokenB, amount: amountB } },
+      ],
+    }]);
+    await process(env, [{
+      entityId: trader.id,
+      signerId: trader.signer,
+      entityTxs: [
+        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: tokenA, amount: amountA } },
+        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: tokenB, amount: amountB } },
+      ],
+    }]);
+    await converge(env, 30);
+  }
+  console.log('  ✅ Bidirectional credit established for all tokens\n');
+
+  // ============================================================================
+  // PHASE 1: Makers place limit orders (create orderbook depth)
+  // ============================================================================
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('         PHASE 1: Makers Place Limit Orders                    ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  console.log('📊 Building orderbook depth across 3 pairs...\n');
+
+  // USDC/ETH book (ETH @ $3000)
+  console.log('💱 USDC/ETH Orderbook (HubETH):');
+  await process(env, [
+    // Alice: Sell 10 ETH @ $3100 (ask above market)
+    {
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'placeSwapOffer',
+        data: {
+          offerId: 'alice-eth-ask',
+          counterpartyEntityId: hubEth.id,
+          giveTokenId: ETH,
+          giveAmount: eth(10),
+          wantTokenId: USDC,
+          wantAmount: usdc(31000), // $3100/ETH
+          ...deriveSwapNetAuthorization(usdc(31000), 1),
+        },
+      }],
+    },
+    // Bob: Sell 5 ETH @ $3050 (tighter ask)
+    {
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'placeSwapOffer',
+        data: {
+          offerId: 'bob-eth-ask',
+          counterpartyEntityId: hubEth.id,
+          giveTokenId: ETH,
+          giveAmount: eth(5),
+          wantTokenId: USDC,
+          wantAmount: usdc(15250), // $3050/ETH
+          ...deriveSwapNetAuthorization(usdc(15250), 1),
+        },
+      }],
+    },
+    // Eve: Buy 8 ETH @ $2950 (bid below market)
+    {
+      entityId: eve.id,
+      signerId: eve.signer,
+      entityTxs: [{
+        type: 'placeSwapOffer',
+        data: {
+          offerId: 'eve-eth-bid',
+          counterpartyEntityId: hubEth.id,
+          giveTokenId: USDC,
+          giveAmount: usdc(23600), // $2950/ETH * 8
+          wantTokenId: ETH,
+          wantAmount: eth(8),
+          ...deriveSwapNetAuthorization(eth(8), 1),
+        },
+      }],
+    },
+  ]);
+
+  console.log('  ✅ Alice: SELL 10 ETH @ $3100 (ask)');
+  console.log('  ✅ Bob: SELL 5 ETH @ $3050 (ask)');
+  console.log('  ✅ Eve: BUY 8 ETH @ $2950 (bid)\n');
+
+  // USDC/WBTC book (WBTC @ $60000)
+  console.log('💱 USDC/WBTC Orderbook (HubWBTC):');
+  await process(env, [
+    // Grace: Sell 2 WBTC @ $61000 (ask)
+    {
+      entityId: grace.id,
+      signerId: grace.signer,
+      entityTxs: [{
+        type: 'placeSwapOffer',
+        data: {
+          offerId: 'grace-wbtc-ask',
+          counterpartyEntityId: hubWbtc.id,
+          giveTokenId: WBTC,
+          giveAmount: wbtc(2),
+          wantTokenId: USDC,
+          wantAmount: usdc(122000), // $61000/WBTC
+          ...deriveSwapNetAuthorization(usdc(122000), 1),
+        },
+      }],
+    },
+    // Alice: Buy 1 WBTC @ $59000 (bid)
+    {
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'placeSwapOffer',
+        data: {
+          offerId: 'alice-wbtc-bid',
+          counterpartyEntityId: hubWbtc.id,
+          giveTokenId: USDC,
+          giveAmount: usdc(59000), // $59000/WBTC
+          wantTokenId: WBTC,
+          wantAmount: wbtc(1),
+          ...deriveSwapNetAuthorization(wbtc(1), 1),
+        },
+      }],
+    },
+  ]);
+
+  console.log('  ✅ Grace: SELL 2 WBTC @ $61000 (ask)');
+  console.log('  ✅ Alice: BUY 1 WBTC @ $59000 (bid)\n');
+
+  // USDC/DAI book (DAI @ $1). The book now stores qtyLots as bigint, so
+  // scenario sizes are limited by collateral, not a uint32 lot ceiling.
+  console.log('💱 USDC/DAI Orderbook (HubDAI):');
+  await process(env, [
+    // Bob: Sell 500 DAI @ $1.001 (tight spread, stablecoin pair)
+    {
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'placeSwapOffer',
+        data: {
+          offerId: 'bob-dai-ask',
+          counterpartyEntityId: hubDai.id,
+          giveTokenId: DAI,
+          giveAmount: dai(500),
+          wantTokenId: USDC,
+          wantAmount: usdc(501), // ~$1.002/DAI
+          ...deriveSwapNetAuthorization(usdc(501), 1),
+        },
+      }],
+    },
+    // Eve: Buy 300 DAI @ $0.999 (bid)
+    {
+      entityId: eve.id,
+      signerId: eve.signer,
+      entityTxs: [{
+        type: 'placeSwapOffer',
+        data: {
+          offerId: 'eve-dai-bid',
+          counterpartyEntityId: hubDai.id,
+          giveTokenId: USDC,
+          giveAmount: usdc(299), // ~$0.997/DAI * 300
+          wantTokenId: DAI,
+          wantAmount: dai(300),
+          ...deriveSwapNetAuthorization(dai(300), 1),
+        },
+      }],
+    },
+  ]);
+
+  console.log('  ✅ Bob: SELL 500 DAI @ $1.002 (ask)');
+  console.log('  ✅ Eve: BUY 300 DAI @ $0.997 (bid)\n');
+
+  await converge(env);
+  console.log('✅ PHASE 1 COMPLETE: Orderbook depth established\n');
+
+  const [, bobEthRepBefore] = findReplica(env, bob.id);
+  const bobEthAccountBefore = bobEthRepBefore.state.accounts.get(hubEth.id);
+  const bobEthOfferBefore = bobEthAccountBefore?.state.swapOffers?.get('bob-eth-ask');
+  if (!bobEthOfferBefore) {
+    console.warn('⚠️ Bob ETH ask missing after Phase 1; continuing with baseline order values');
+  }
+  const [, aliceWbtcRepBefore] = findReplica(env, alice.id);
+  const aliceWbtcAccountBefore = aliceWbtcRepBefore.state.accounts.get(hubWbtc.id);
+  const aliceWbtcOfferBefore = aliceWbtcAccountBefore?.state.swapOffers?.get('alice-wbtc-bid');
+  if (!aliceWbtcOfferBefore) {
+    console.warn('⚠️ Alice WBTC bid missing after Phase 1; continuing with baseline order values');
+  }
+
+  const [, bobDaiRepBefore] = findReplica(env, bob.id);
+  const bobDaiAccountBefore = bobDaiRepBefore.state.accounts.get(hubDai.id);
+  const bobDaiOfferBefore = bobDaiAccountBefore?.state.swapOffers?.get('bob-dai-ask');
+  if (!bobDaiOfferBefore) {
+    console.warn('⚠️ Bob DAI ask missing after Phase 1; continuing with baseline order values');
+  }
+  // ============================================================================
+  // PHASE 2: Takers sweep orderbook
+  // ============================================================================
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('         PHASE 2: Takers Sweep Orderbook                       ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  console.log('🎯 Takers placing crossing orders (auto-matched by Hub orderbook)...\n');
+
+  // Carol buys ETH - place crossing bid that hits Bob's ask @ $3050
+  // Carol offers more USDC/ETH than Bob's ask price, so it crosses
+  console.log('💱 Carol: BUY 3 ETH @ $3100 (crosses Bob\'s ask @ $3050)');
+  await process(env, [{
+    entityId: carol.id,
+    signerId: carol.signer,
+    entityTxs: [{
+      type: 'placeSwapOffer',
+      data: {
+        offerId: 'carol-eth-bid',
+        counterpartyEntityId: hubEth.id,
+        giveTokenId: USDC,
+        giveAmount: usdc(9300), // $3100/ETH * 3 ETH
+        wantTokenId: ETH,
+        wantAmount: eth(3),
+        ...deriveSwapNetAuthorization(eth(3), 1),
+      },
+    }],
+  }]);
+  await converge(env, 30);
+  console.log('  ✅ Carol\'s bid placed - orderbook should match with Bob\'s ask\n');
+
+  // Dave sells WBTC - place crossing ask that hits Alice's bid @ $59000
+  console.log('💱 Dave: SELL 1 WBTC @ $58000 (crosses Alice\'s bid @ $59000)');
+  await process(env, [{
+    entityId: dave.id,
+    signerId: dave.signer,
+    entityTxs: [{
+      type: 'placeSwapOffer',
+      data: {
+        offerId: 'dave-wbtc-ask',
+        counterpartyEntityId: hubWbtc.id,
+        giveTokenId: WBTC,
+        giveAmount: wbtc(1),
+        wantTokenId: USDC,
+        wantAmount: usdc(58000), // Lower than Alice's bid
+        ...deriveSwapNetAuthorization(usdc(58000), 1),
+      },
+    }],
+  }]);
+  await converge(env, 30);
+  console.log('  ✅ Dave\'s ask placed - orderbook should match with Alice\'s bid\n');
+
+  // Frank buys DAI - place crossing bid
+  console.log('💱 Frank: BUY 100 DAI @ $1.01 (crosses Bob\'s ask @ $1.002)');
+  await process(env, [{
+    entityId: frank.id,
+    signerId: frank.signer,
+    entityTxs: [{
+      type: 'placeSwapOffer',
+      data: {
+        offerId: 'frank-dai-bid',
+        counterpartyEntityId: hubDai.id,
+        giveTokenId: USDC,
+        giveAmount: usdc(101), // ~$1.01/DAI * 100
+        wantTokenId: DAI,
+        wantAmount: dai(100),
+        ...deriveSwapNetAuthorization(dai(100), 1),
+      },
+    }],
+  }]);
+  await converge(env, 30);
+  console.log('  ✅ Frank\'s bid placed - orderbook should match with Bob\'s ask\n');
+
+  console.log('✅ PHASE 2 COMPLETE: Crossing orders placed, matches processed\n');
+
+  // After orderbook matching, verify state:
+  // Carol's 3 ETH bid should have matched with Bob's 5 ETH ask (partial fill)
+  // Bob's remaining: 5 - 3 = 2 ETH
+  const [, bobEthRepAfter] = findReplica(env, bob.id);
+  const bobEthAccountAfter = bobEthRepAfter.state.accounts.get(hubEth.id);
+  const bobEthOfferAfter = bobEthAccountAfter?.state.swapOffers?.get('bob-eth-ask');
+
+  // Note: Exact fill amounts depend on orderbook matching semantics
+  // We check that SOME fill occurred (remaining < original)
+  if (bobEthOfferAfter) {
+    const remainingEth = bobEthOfferAfter.giveAmount;
+    assert(remainingEth < eth(5), `Bob ETH ask partially filled (remaining: ${remainingEth}, original: ${eth(5)})`);
+    console.log(`  Bob ETH remaining: ${Number(remainingEth) / 1e18} ETH`);
+  } else {
+    console.log('  Bob ETH ask fully filled (offer removed)');
+  }
+
+  // Alice's WBTC bid should match Dave's ask
+  const [, aliceWbtcRepAfter] = findReplica(env, alice.id);
+  const aliceWbtcAccountAfter = aliceWbtcRepAfter.state.accounts.get(hubWbtc.id);
+  const aliceWbtcBidAfter = aliceWbtcAccountAfter?.state.swapOffers?.get('alice-wbtc-bid');
+  if (aliceWbtcBidAfter) {
+    console.log(`  Alice WBTC bid remaining: ${Number(aliceWbtcBidAfter.giveAmount) / 1e18} USDC`);
+  } else {
+    console.log('  Alice WBTC bid fully filled (offer removed)');
+  }
+
+  // Bob's DAI ask should partially fill
+  const [, bobDaiRepAfter] = findReplica(env, bob.id);
+  const bobDaiAccountAfter = bobDaiRepAfter.state.accounts.get(hubDai.id);
+  const bobDaiOfferAfter = bobDaiAccountAfter?.state.swapOffers?.get('bob-dai-ask');
+  if (bobDaiOfferAfter) {
+    const remainingDai = bobDaiOfferAfter.giveAmount;
+    console.log(`  Bob DAI remaining: ${Number(remainingDai) / 1e18} DAI`);
+  } else {
+    console.log('  Bob DAI ask fully filled (offer removed)');
+  };
+
+  // ============================================================================
+  // PHASE 3: Market volatility (cancel + replace)
+  // ============================================================================
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('         PHASE 3: Market Volatility (Cancel & Replace)         ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  // Alice requests cancel for her ETH ask (price too high, no fills)
+  console.log('🚫 Alice: Request cancel ETH ask @ $3100 (no fills, exact order remains open)');
+  await process(env, [{
+    entityId: alice.id,
+    signerId: alice.signer,
+    entityTxs: [{
+      type: 'proposeCancelSwap',
+      data: {
+        offerId: 'alice-eth-ask',
+        counterpartyEntityId: hubEth.id,
+      },
+    }],
+  }]);
+  await converge(env);
+  await converge(env);
+  console.log('  ✅ Cancel request resolved by hub\n');
+
+  // Alice replaces with better price
+  console.log('📊 Alice: New ETH ask @ $3020 (tighter spread)');
+  await process(env, [{
+    entityId: alice.id,
+    signerId: alice.signer,
+    entityTxs: [{
+      type: 'placeSwapOffer',
+      data: {
+        offerId: 'alice-eth-ask-repriced',
+        counterpartyEntityId: hubEth.id,
+        giveTokenId: ETH,
+        giveAmount: eth(10),
+        wantTokenId: USDC,
+        wantAmount: usdc(30200), // $3020/ETH (better price)
+        ...deriveSwapNetAuthorization(usdc(30200), 1),
+      },
+    }],
+  }]);
+  console.log('  ✅ New order placed\n');
+
+  await converge(env);
+  console.log('✅ PHASE 3 COMPLETE: Market volatility simulated\n');
+
+  const [, aliceEthRepAfter] = findReplica(env, alice.id);
+  const aliceEthAccountAfter = aliceEthRepAfter.state.accounts.get(hubEth.id);
+  assert(!aliceEthAccountAfter?.state.swapOffers?.has('alice-eth-ask'), 'Alice ETH ask cancelled');
+  const aliceEthRepricedOffer = aliceEthAccountAfter?.state.swapOffers?.get('alice-eth-ask-repriced');
+  if (!aliceEthRepricedOffer) {
+    console.warn('[SWAP-MARKET] Alice ETH repriced ask is no longer open (likely rejected or immediately resolved)');
+  }
+  if (aliceEthRepricedOffer) {
+    assert(aliceEthRepricedOffer.giveAmount === eth(10), `Alice ETH repriced ask giveAmount = ${eth(10)} (got ${aliceEthRepricedOffer.giveAmount})`);
+    assert(aliceEthRepricedOffer.wantAmount === usdc(30200), `Alice ETH repriced ask wantAmount = ${usdc(30200)} (got ${aliceEthRepricedOffer.wantAmount})`);
+  }
+
+  // ============================================================================
+  // VERIFICATION & SUMMARY
+  // ============================================================================
+  console.log('🔄 Final convergence (flush pending frames)...');
+  await converge(env, 200);
+  const dumpAccountState = (label: string, entityId: string, counterpartyId: string) => {
+    const [, rep] = findReplica(env, entityId);
+    if (!rep) {
+      console.warn(`[SWAP-MARKET] ${label}: missing replica ${entityId.slice(-4)}`);
+      return;
+    }
+    const account = rep.state.accounts.get(counterpartyId);
+    if (!account) {
+      console.warn(`[SWAP-MARKET] ${label}: no account ${entityId.slice(-4)}↔${counterpartyId.slice(-4)}`);
+      return;
+    }
+    const mempoolTypes = account.mempool.map(tx => tx.type);
+    const pendingTypes = account.pendingFrame?.accountTxs.map(tx => tx.type) ?? [];
+    console.warn(
+      `[SWAP-MARKET] ${label}: ${entityId.slice(-4)}↔${counterpartyId.slice(-4)} ` +
+        `height=${account.currentHeight} pending=${account.pendingFrame ? 'yes' : 'no'} ` +
+        `mempool=[${mempoolTypes.join(',')}] pendingTxs=[${pendingTypes.join(',')}]`,
+    );
+  };
+  await processUntil(
+    env,
+    () => {
+      try {
+        assertRuntimeIdle(env, 'Swap Market');
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    400,
+    'Swap Market idle',
+    undefined,
+    () => {
+      try {
+        assertRuntimeIdle(env, 'Swap Market');
+      } catch (error) {
+        console.warn(error instanceof Error ? error.message : error);
+        const hubDaiId = hubDai.id;
+        dumpAccountState('idle-debug hubDai→bob', hubDaiId, bob.id);
+        dumpAccountState('idle-debug bob→hubDai', bob.id, hubDaiId);
+        dumpAccountState('idle-debug hubDai→eve', hubDaiId, eve.id);
+        dumpAccountState('idle-debug eve→hubDai', eve.id, hubDaiId);
+      }
+    }
+  );
+  console.log('✅ Final convergence complete\n');
+
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('                   MARKET SUMMARY                              ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  for (const hub of hubs) {
+    const [, hubRep] = findReplica(env, hub.id);
+    const hubExt = hubRep.state.orderbookExt;
+    if (!hubExt?.books) continue;
+    console.log(`📈 ${hub.name} Orderbook State:`);
+    console.log(`  - Total pairs: ${hubExt.books.size}`);
+    for (const [pairId, book] of hubExt.books) {
+      let bidCount = 0, askCount = 0;
+      for (const order of getBookOrders(book)) {
+        if (order.side === 0) bidCount++;
+        else askCount++;
+      }
+      console.log(`  - Pair ${pairId}: ${bidCount} bids, ${askCount} asks`);
+    }
+    console.log();
+  }
+
+  // Check individual trader positions
+  console.log('👥 Trader Positions:');
+  for (const trader of [carol, dave, frank]) {
+    const [, rep] = findReplica(env, trader.id);
+    const account = rep.state.accounts.get(hubEth.id) || rep.state.accounts.get(hubWbtc.id) || rep.state.accounts.get(hubDai.id);
+    if (account) {
+      const deltas = Array.from(account.state.deltas.values());
+      console.log(`  ${trader.name}:`);
+      for (const delta of deltas) {
+        const tokenId = delta.tokenId;
+        const netPosition = delta.ondelta - delta.offdelta;
+        if (netPosition !== 0n) {
+          const tokenName = tokenId === USDC ? 'USDC' : tokenId === ETH ? 'ETH' : tokenId === WBTC ? 'WBTC' : 'DAI';
+          console.log(`    - ${tokenName}: ${netPosition > 0n ? '+' : ''}${netPosition.toString()}`);
+        }
+      }
+    }
+  }
+
+  console.log('\n═══════════════════════════════════════════════════════════════');
+  console.log('✅ MULTI-PARTY MARKET SIMULATION COMPLETE!');
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log(`📊 Total frames: ${env.history?.length || 0}`);
+  console.log(`👥 Participants: 10 (${entities.map(e => e.name).join(', ')})`);
+  console.log(`💱 Orderbooks: 3 (USDC/ETH, USDC/WBTC, USDC/DAI)`);
+  console.log(`📈 Orders placed: 9`);
+  console.log(`🎯 Market fills: 3`);
+  console.log(`🚫 Cancellations: 1`);
+  console.log('═══════════════════════════════════════════════════════════════\n');
+  } finally {
+    env.scenarioMode = prevScenarioMode ?? false;
+    restoreStrict();
+  }
+}
+
+// ============================================================================
+// HIGH-LOAD STRESS TEST: Rapid Order Placement & Matching
+// ============================================================================
+
+export async function swapMarketStress(env: RuntimeReplica): Promise<void> {
+  const restoreStrict = enableStrictScenario(env, 'Swap Market Stress');
+  const prevScenarioMode = env.scenarioMode;
+  try {
+  env.scenarioMode = true; // Deterministic time control
+  requireRuntimeSeed(env, 'Swap Market Stress');
+  ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'], 'Swap Market Stress');
+  const process = await getProcess();
+
+  if (env.scenarioMode && env.state.height === 0) {
+    env.state.timestamp = 1;
+  }
+
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('      SWAP MARKET STRESS TEST: High-Load Order Processing      ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  // ============================================================================
+  // SETUP: JAdapter + J-Machine + Hub
+  // ============================================================================
+  console.log('🏛️  Setting up stress test environment...');
+
+  const jMode = getJAdapterMode();
+  const jadapter = await ensureJAdapter(env, jMode);
+  const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
+  bindScenarioJReplica(
+    env,
+    createJReplica(env, 'StressTest', jadapter.addresses.depository, J_MACHINE_POSITION),
+    jadapter,
+  );
+  jadapter.startWatching(env);
+  console.log('✅ JAdapter J-Machine created\n');
+
+  // Create 1 hub + 10 traders
+  const hub = { name: 'Hub', id: '', signer: '1' };
+  const traders: Array<{ name: string; id: string; signer: string }> = [];
+  for (let i = 0; i < 10; i++) {
+    traders.push({
+      name: `Trader${i}`,
+      id: '',
+      signer: String(i + 2),
+    });
+  }
+
+  // Create entities
+  const allEntities = [hub, ...traders];
+  const jurisdiction = createJurisdictionConfig(
+    'StressTest',
+    jadapter.addresses.depository,
+    jadapter.addresses.entityProvider,
+  );
+  const registered = await registerEntities(
+    env,
+    jadapter,
+    allEntities.map((entity, index) => ({
+      name: entity.name,
+      signer: entity.signer,
+      position: { x: (index - 5) * 30, y: -80, z: 0 },
+    })),
+    jurisdiction,
+  );
+  for (let index = 0; index < allEntities.length; index += 1) {
+    const entity = allEntities[index];
+    const registration = registered[index];
+    if (!entity || !registration) throw new Error(`SWAP_MARKET_STRESS_REGISTRATION_MISSING:${index}`);
+    entity.id = registration.id;
+    entity.signer = registration.signer;
+  }
+  console.log(`✅ Created ${allEntities.length} entities\n`);
+
+  // Initialize hub orderbook
+  const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../../orderbook');
+  await process(env, [{
+    entityId: hub.id,
+    signerId: hub.signer,
+    entityTxs: [{
+      type: 'initOrderbookExt',
+      data: {
+        name: 'StressHub',
+        spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+        referenceTokenId: USDC,
+        usdQuoteAuthorityEntityId: requireDefined(traders[0], 'stress quote authority').id,
+        minTradeSize: 0n,
+        supportedPairs: [ETH_USDC_PAIR], // ETH/USDC only for simplicity
+      },
+    }],
+  }]);
+  await converge(env);
+  console.log('✅ Hub orderbook initialized\n');
+
+  // Open accounts and extend credit for all traders
+  console.log('🔗 Opening accounts and extending credit...');
+  for (const trader of traders) {
+    await process(env, [{
+      entityId: trader.id,
+      signerId: trader.signer,
+      entityTxs: [{ type: 'openAccount', data: {
+        targetEntityId: hub.id,
+        disputeConfig: defaultAccountDisputeConfigForParties(trader.id, false, hub.id, true),
+      } }],
+    }]);
+    await converge(env, 20);
+
+    await process(env, [
+      { entityId: hub.id, signerId: hub.signer, entityTxs: [
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: ETH, amount: eth(1000) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: USDC, amount: usdc(3_000_000) } },
+      ]},
+      { entityId: trader.id, signerId: trader.signer, entityTxs: [
+        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: ETH, amount: eth(1000) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC, amount: usdc(3_000_000) } },
+      ]},
+    ]);
+    await converge(env, 20);
+  }
+  console.log('✅ All accounts and credit established\n');
+
+  // ============================================================================
+  // STRESS TEST: Place many orders rapidly
+  // ============================================================================
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('         STRESS PHASE 1: Rapid Order Placement                 ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  const ORDERS_PER_TRADER = 5;
+  const BASE_PRICE = 3000n;
+  let ordersPlaced = 0;
+  const startTime = Date.now();
+
+  // Each trader places ORDERS_PER_TRADER orders alternating buy/sell
+  for (let round = 0; round < ORDERS_PER_TRADER; round++) {
+    const orderBatch: EntityInput[] = [];
+
+    for (let t = 0; t < traders.length; t++) {
+      const trader = traders[t]!;
+      const isBuy = (t + round) % 2 === 0;
+      const priceOffset = BigInt((t - 5) * 10 + round * 2); // Spread prices around base
+      const price = BASE_PRICE + priceOffset;
+      const qty = 1n + BigInt(round % 3); // 1-3 ETH per order
+
+      if (isBuy) {
+        // BUY order: give USDC, want ETH
+        orderBatch.push({
+          entityId: trader.id,
+          signerId: trader.signer,
+          entityTxs: [{
+            type: 'placeSwapOffer',
+            data: {
+              offerId: `${trader.name}-buy-${round}`,
+              counterpartyEntityId: hub.id,
+              giveTokenId: USDC,
+              giveAmount: usdc(qty * price),
+              wantTokenId: ETH,
+              wantAmount: eth(qty),
+              ...deriveSwapNetAuthorization(eth(qty), 1),
+            },
+          }],
+        });
+      } else {
+        // SELL order: give ETH, want USDC
+        orderBatch.push({
+          entityId: trader.id,
+          signerId: trader.signer,
+          entityTxs: [{
+            type: 'placeSwapOffer',
+            data: {
+              offerId: `${trader.name}-sell-${round}`,
+              counterpartyEntityId: hub.id,
+              giveTokenId: ETH,
+              giveAmount: eth(qty),
+              wantTokenId: USDC,
+              wantAmount: usdc(qty * price),
+              ...deriveSwapNetAuthorization(usdc(qty * price), 1),
+            },
+          }],
+        });
+      }
+      ordersPlaced++;
+    }
+
+    // Process entire batch in parallel
+    await process(env, orderBatch);
+    await converge(env, 50);
+    console.log(`  Round ${round + 1}/${ORDERS_PER_TRADER}: ${orderBatch.length} orders placed`);
+  }
+
+  const orderTime = Date.now() - startTime;
+  console.log(`\n✅ Placed ${ordersPlaced} orders in ${orderTime}ms (${(ordersPlaced / (orderTime / 1000)).toFixed(1)} orders/sec)\n`);
+
+  // ============================================================================
+  // STRESS TEST: Check orderbook state
+  // ============================================================================
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('         STRESS PHASE 2: Orderbook State Verification          ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  const [, hubRep] = findReplica(env, hub.id);
+  const ext = hubRep.state.orderbookExt;
+  const book = ext?.books?.get('1/4');
+
+  if (book) {
+    let bidCount = 0, askCount = 0, totalQty = 0n;
+    for (const order of getBookOrders(book)) {
+      totalQty += BigInt(order.qtyLots);
+      if (order.side === 0) bidCount++;
+      else askCount++;
+    }
+    console.log(`📊 Orderbook ETH/USDC:`);
+    console.log(`   - Active bids: ${bidCount}`);
+    console.log(`   - Active asks: ${askCount}`);
+    console.log(`   - Total lots: ${totalQty}`);
+
+    // Some orders should have matched (crossing prices)
+    const expectedOrders = ordersPlaced;
+    const actualOrders = bidCount + askCount;
+    const matchedOrders = expectedOrders - actualOrders;
+    console.log(`   - Matched (crossed): ~${matchedOrders} orders\n`);
+  }
+
+  // ============================================================================
+  // STRESS TEST: Final statistics
+  // ============================================================================
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('                 STRESS TEST RESULTS                           ');
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log(`📊 Total frames: ${env.history?.length || 0}`);
+  console.log(`📈 Orders placed: ${ordersPlaced}`);
+  console.log(`⏱️  Order time: ${orderTime}ms`);
+  console.log(`🚀 Throughput: ${(ordersPlaced / (orderTime / 1000)).toFixed(1)} orders/sec`);
+  console.log(`👥 Traders: ${traders.length}`);
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+    // Drain any trailing mempool/pending frames before returning.
+    await converge(env, 200);
+    assertRuntimeIdle(env, 'Swap Market');
+
+  } finally {
+    env.scenarioMode = prevScenarioMode ?? false;
+    restoreStrict();
+  }
+}
+
+// Self-executing scenario
+if (import.meta.main) {
+  const { createEmptyEnv } = await import('../../runtime');
+  const env = createEmptyEnv();
+  env.scenarioMode = true;
+  env.runtimeSeed = 'swap-market-cli-seed-42'; // Set before require check
+
+  const args = process.argv.slice(2);
+  if (args.includes('--stress')) {
+    await swapMarketStress(env);
+  } else {
+    await swapMarket(env);
+  }
+}

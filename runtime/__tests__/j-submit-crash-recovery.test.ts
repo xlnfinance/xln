@@ -13,7 +13,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { getNextJSubmitRetryTimestamp } from '../runtime/jurisdiction/j-submit-scheduler';
 import { dbRootPath } from '../runtime/platform';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';
-import { bootScenario, fundEntities, registerEntities } from '../scenarios/boot';
+import { bootScenario, fundEntities, registerEntities } from '../scenarios/harness/boot';
 import {
   cleanupRuntimeStorage,
   crashBoundaryFixture,

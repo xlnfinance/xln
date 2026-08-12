@@ -95,13 +95,13 @@ Top 100 simplification targets:
 83. `tests/e2e-ahb-payment.spec.ts` — extract shared mesh/bootstrap/assert helpers into test utils.
 84. `tests/utils/e2e-connect.ts` — centralize connection nudges and runtime-online polling with one contract.
 85. `tests/utils/*` — dedupe repeated wait-for-balance, open-runtime, and selector helpers.
-86. `runtime/scenarios/helpers.ts` — split sync/drain/converge helpers from formatting and strict-mode helpers.
-87. `runtime/scenarios/ahb.ts` — split by phase; it is too large to maintain as one file.
-88. `runtime/scenarios/lock-ahb.ts` — split hostage/dispute/timeouts into separate scenario modules.
-89. `runtime/scenarios/rebalance.ts` — split funding/bootstrap from assertion logic.
-90. `runtime/scenarios/dispute-lifecycle.ts` — merge repeated process/sync/converge loops into one helper.
-91. `runtime/scenarios/boot.ts` — centralize signer/runtime/bootstrap setup used by all scenarios and e2e harnesses.
-92. `runtime/scenarios/executor.ts` — split scenario graph loading from runtime execution.
+86. `runtime/scenarios/harness/helpers.ts` — split sync/drain/converge helpers from formatting and strict-mode helpers.
+87. `runtime/scenarios/consensus/ahb.ts` — split by phase; it is too large to maintain as one file.
+88. `runtime/scenarios/payments/lock-ahb.ts` — split hostage/dispute/timeouts into separate scenario modules.
+89. `runtime/scenarios/settlement/rebalance.ts` — split funding/bootstrap from assertion logic.
+90. `runtime/scenarios/disputes/lifecycle.ts` — merge repeated process/sync/converge loops into one helper.
+91. `runtime/scenarios/harness/boot.ts` — centralize signer/runtime/bootstrap setup used by all scenarios and e2e harnesses.
+92. `runtime/scenarios/runner/executor.ts` — split scenario graph loading from runtime execution.
 93. `jurisdictions/contracts/Depository.sol` — split admin/dev-only helpers from production batch path.
 94. `jurisdictions/contracts/Depository.sol` — move reserve op internals into dedicated library.
 95. `jurisdictions/contracts/EntityProvider.sol` — split name transfer, board validation, and hanko verification concerns.

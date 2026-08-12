@@ -205,4 +205,4 @@ OUTPUT: Step-by-step walkthrough with code snippets and line numbers.
 **Verification:**
 - Don't trust LLM assertions blindly
 - Cross-reference: If LLM says "line 450", verify in actual file
-- Run scenarios to test claims: `bun runtime/scenarios/ahb.ts`
+- Run scenarios to test claims: `bun runtime/scenarios/consensus/ahb.ts`

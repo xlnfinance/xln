@@ -12,7 +12,7 @@ import {
   setEntityFrameHashDebugRecorder,
 } from '../entity/consensus/frame';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
-import { converge } from '../scenarios/helpers';
+import { converge } from '../scenarios/harness/helpers';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { buildAccountMerkleFromState } from '../storage';
 import { inspectStorageDb, loadEntityStateFromStorageDb } from '../runtime';

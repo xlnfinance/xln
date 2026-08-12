@@ -6,10 +6,10 @@ const readSource = (path: string): string =>
   path === 'runtime/jurisdiction/adapter/rpc/rpc-adapter.ts'
     ? [
         'rpc-public.ts',
-        'rpc-adapter.ts',
-        'rpc-lifecycle.ts',
-        'rpc-reads.ts',
-        'rpc-wallet-writes.ts',
+        'rpc/rpc-adapter.ts',
+        'rpc/rpc-lifecycle.ts',
+        'rpc/rpc-reads.ts',
+        'rpc/wallet/rpc-wallet-writes.ts',
         'rpc/watcher/rpc-watcher-canonical.ts',
         'rpc/watcher/rpc-watcher-controller.ts',
         'rpc/watcher/rpc-watcher-ingress.ts',
@@ -22,16 +22,16 @@ const readSource = (path: string): string =>
 
 describe('determinism cleanup lifecycle', () => {
   test('determinism harness stops runtime loop and managed anvil after each run', () => {
-    const source = readSource('runtime/scenarios/determinism-test.ts');
+    const source = readSource('runtime/scenarios/runner/determinism.ts');
 
-    expect(source).toContain("import { stopManagedScenarioAnvil } from './boot'");
+    expect(source).toContain("import { stopManagedScenarioAnvil } from '../harness/boot'");
     expect(source).toContain('const { closeRuntimeDb, closeInfraDb, stopRuntimeLoopAndWait } = await import');
     expect(source).toContain('await stopRuntimeLoopAndWait(env, 5_000);');
     expect(source).toContain('await stopManagedScenarioAnvil();');
   });
 
   test('scenario boot exposes an explicit managed anvil shutdown', () => {
-    const source = readSource('runtime/scenarios/boot.ts');
+    const source = readSource('runtime/scenarios/harness/boot.ts');
 
     expect(source).toContain('export const stopManagedScenarioAnvil');
     expect(source).toContain('const managedAnvils = new Map<string, ManagedAnvilProcess>()');
@@ -77,7 +77,7 @@ describe('determinism cleanup lifecycle', () => {
   });
 
   test('determinism oracle replays external J inputs without masking consensus evidence', () => {
-    const source = readSource('runtime/scenarios/determinism-test.ts');
+    const source = readSource('runtime/scenarios/runner/determinism.ts');
     expect(source).toContain('createJEventTraceTransform(jEventTraceMode, jEventTrace)');
     expect(source).toContain('createJBlockHeadersTraceTransform(jEventTraceMode, jEventTrace)');
     expect(source).toContain('createJHistoryRangeTraceTransform(jEventTraceMode, jEventTrace)');
@@ -88,14 +88,14 @@ describe('determinism cleanup lifecycle', () => {
   });
 
   test('determinism oracle uses canonical J replica snapshots', () => {
-    const source = readSource('runtime/scenarios/determinism-test.ts');
+    const source = readSource('runtime/scenarios/runner/determinism.ts');
     const projectStart = source.indexOf('const projectJReplicas =');
     const projectEnd = source.indexOf('const snapshotEnvProjection =', projectStart);
     expect(projectStart).toBeGreaterThan(0);
     expect(projectEnd).toBeGreaterThan(projectStart);
     const projectSource = source.slice(projectStart, projectEnd);
 
-    expect(source).toContain("import { buildCanonicalJReplicaSnapshot } from '../storage/wal/snapshot';");
+    expect(source).toContain("import { buildCanonicalJReplicaSnapshot } from '../../storage/wal/snapshot';");
     expect(projectSource).toContain('buildCanonicalJReplicaSnapshot(replica)');
     expect(projectSource).not.toContain('blockNumber: replica.blockNumber');
     expect(projectSource).not.toContain('lastBlockTimestamp: replica.lastBlockTimestamp');
@@ -103,7 +103,7 @@ describe('determinism cleanup lifecycle', () => {
 
   test('RPC scenarios use explicit polling and a wall-clock-independent chain', () => {
     const rpcSource = readSource('runtime/jurisdiction/adapter/rpc/rpc-adapter.ts');
-    const bootSource = readSource('runtime/scenarios/boot.ts');
+    const bootSource = readSource('runtime/scenarios/harness/boot.ts');
 
     expect(rpcSource).toContain('manualPolling: env.scenarioMode === true,');
     expect(rpcSource).toContain('if (!session.manualPolling) {');
@@ -111,7 +111,7 @@ describe('determinism cleanup lifecycle', () => {
   });
 
   test('dispute transformer pins the economically relevant RPC block before broadcasting', () => {
-    const source = readSource('runtime/scenarios/dispute-transformer.ts');
+    const source = readSource('runtime/scenarios/disputes/transformer.ts');
     const debugMarker = source.indexOf('DISPUTE_DEBUG:before-start-broadcast');
     const timestampPin = source.indexOf('pinScenarioJurisdictionUnix(', debugMarker);
     const startBroadcast = source.indexOf("entityTxs: [{ type: 'j_broadcast'", debugMarker);

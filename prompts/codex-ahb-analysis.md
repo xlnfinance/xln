@@ -15,7 +15,7 @@ Perform **forensic-level analysis** of the Alice-Hub-Bob scenario and underlying
 
 ### Phase 1: Understand the Flow (20 min)
 1. `runtime/runtime/types.ts` - Runtime machine types and R→E routing envelopes
-2. `runtime/scenarios/ahb.ts` (full file, ~1561 lines) - The scenario implementation
+2. `runtime/scenarios/consensus/ahb.ts` (full file, ~1561 lines) - The scenario implementation
 3. `runtime/runtime.ts` (lines 372-784, 1517-1650) - applyRuntimeInput + process() tick
 
 ### Phase 2: Trace Execution Paths (30 min)

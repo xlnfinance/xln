@@ -32,7 +32,7 @@ import {
   parseAdversaryProfile,
   runAdversaryProfile,
   type MeshHealthPayload,
-} from '../scenarios/mm-mesh-adversary';
+} from '../scenarios/cross-j/mm-mesh-adversary';
 
 type ManagedProcess = {
   name: string;

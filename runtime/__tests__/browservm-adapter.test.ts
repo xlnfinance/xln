@@ -4,12 +4,12 @@ import { ethers } from 'ethers';
 import { createJAdapter } from '../jurisdiction/adapter';
 import { verifyCanonicalReceiptProof } from '../jurisdiction/machine/receipt-codec';
 import { createEmptyEnv } from '../runtime';
-import { bindScenarioJReplica, createJReplica, createJurisdictionConfig } from '../scenarios/boot';
+import { bindScenarioJReplica, createJReplica, createJurisdictionConfig } from '../scenarios/harness/boot';
 import {
   advanceScenarioPastDisputeTimeout,
   pinScenarioJurisdictionUnix,
   readScenarioJurisdictionUnix,
-} from '../scenarios/helpers';
+} from '../scenarios/harness/helpers';
 import { buildCanonicalJReplicaSnapshot } from '../storage/wal/snapshot';
 import type { EntityReplica } from '../entity/types';
 

@@ -5,8 +5,8 @@ import { computeAddress, hexlify } from 'ethers';
 
 import { getSignerPrivateKey } from '../account/crypto';
 import { dbRootPath } from '../runtime/platform';
-import { bootScenario } from '../scenarios/boot';
-import { setScenarioStorageEnabled } from '../scenarios/helpers';
+import { bootScenario } from '../scenarios/harness/boot';
+import { setScenarioStorageEnabled } from '../scenarios/harness/helpers';
 import {
   buildJurisdictionImportRequestHash,
   normalizeJurisdictionImportRequest,

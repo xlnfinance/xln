@@ -19,7 +19,7 @@ import {
   type OrchestratorJurisdictionsConfig,
 } from '../orchestrator/jurisdictions';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
-import { setScenarioStorageEnabled } from '../scenarios/helpers';
+import { setScenarioStorageEnabled } from '../scenarios/harness/helpers';
 import { stopProcess, type ManagedChildProcess } from '../scripts/e2e-managed-process';
 
 const CHAIN_ID = 31_337;

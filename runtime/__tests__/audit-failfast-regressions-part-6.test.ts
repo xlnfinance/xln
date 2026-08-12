@@ -178,7 +178,7 @@ import {
   validateRuntimeInputAdmission,
 } from '../runtime';
 
-import { createJReplica } from '../scenarios/boot';
+import { createJReplica } from '../scenarios/harness/boot';
 
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/input-pipeline/entity-inputs';
 

@@ -93,7 +93,7 @@ import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc-onion-advance';
 import { encodeHtlcSecretOffer } from '../protocol/htlc/codec/onion';
 import { appendDefaultProposerAcceptedHtlcReveals } from '../entity/transition/htlc-onion-post-commit';
-import { createJReplica } from '../scenarios/boot';
+import { createJReplica } from '../scenarios/harness/boot';
 import { installCanonicalRegistrationEvidence } from './helpers/registration-evidence';
 import {
   applyCertifiedEntityLineagePlan,

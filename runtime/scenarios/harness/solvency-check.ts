@@ -1,0 +1,45 @@
+/**
+ * Solvency Check Utility
+ * Verifies total reserves + collateral equals expected value
+ */
+
+import type { RuntimeReplica } from '../../runtime/types';
+import { isLeftEntity } from '../../entity/id';
+
+export function checkSolvency(env: RuntimeReplica, expected: bigint, label: string, optional: boolean = false): void {
+  let reserves = 0n;
+  let collateral = 0n;
+
+  console.log(`[SOLVENCY ${label}] Checking ${env.state.eReplicas.size} replicas...`);
+
+  for (const [replicaKey, replica] of env.state.eReplicas) {
+    let replicaReserves = 0n;
+    for (const [, amount] of replica.state.reserves) {
+      replicaReserves += amount;
+      reserves += amount;
+    }
+    console.log(`  [${replicaKey.slice(0,20)}] reserves=${replicaReserves / 10n**18n}M`);
+
+    for (const [counterpartyId, account] of replica.state.accounts) {
+      if (isLeftEntity(replica.state.entityId, counterpartyId)) {
+        for (const [, delta] of account.state.deltas) {
+          collateral += delta.collateral;
+        }
+      }
+    }
+  }
+
+  const total = reserves + collateral;
+  console.log(`[SOLVENCY ${label}] Total: reserves=${reserves / 10n**18n}M, collateral=${collateral / 10n**18n}M, sum=${total / 10n**18n}M`);
+
+  if (total !== expected) {
+    if (!optional || env.strictScenario) {
+      console.error(`❌ [${label}] SOLVENCY FAIL: ${total} !== ${expected}`);
+      throw new Error(`SOLVENCY VIOLATION at "${label}": got ${total}, expected ${expected}`);
+    }
+    console.warn(`⚠️  [${label}] SOLVENCY MISMATCH (optional): ${total} !== ${expected} - continuing`);
+    return;
+  }
+
+  console.log(`✅ [${label}] Solvency OK`);
+}

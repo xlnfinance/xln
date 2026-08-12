@@ -32,7 +32,7 @@ Events emitted DURING broadcastBatch (inside applyRuntimeInput tick) get queued 
 - runtime/j-event-watcher.ts:246-304 - Queues to env.runtimeInput.entityInputs
 - runtime/runtime.ts:727 - Clears env.runtimeInput.entityInputs
 - runtime/runtime.ts:1616 - broadcastBatch called (emits events synchronously)
-- runtime/scenarios/ahb.ts:706 - processJEvents called (finds empty queue)
+- runtime/scenarios/consensus/ahb.ts:706 - processJEvents called (finds empty queue)
 
 ## Question
 

@@ -5,7 +5,7 @@ import {
   getDefaultRebalanceBaseFeeForToken,
   getDefaultRebalancePolicyForToken,
 } from '../account/config/defaults';
-import { dai, eth, usd } from '../scenarios/helpers';
+import { dai, eth, usd } from '../scenarios/harness/helpers';
 import { getBootstrapTokenAmount } from '../jurisdiction/machine/config/bootstrap-economy';
 
 describe('rebalance defaults use token raw units', () => {

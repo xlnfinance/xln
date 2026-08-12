@@ -10,7 +10,7 @@ import { createEmptyEnv } from '../runtime';
 import { deriveSignerAddressSync, getSignerPrivateKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jurisdiction/adapter';
-import { createJReplica, createJurisdictionConfig } from '../scenarios/boot';
+import { createJReplica, createJurisdictionConfig } from '../scenarios/harness/boot';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
@@ -20,7 +20,7 @@ import {
   ensureSignerKeysFromSeed,
   processJEvents,
   setScenarioStorageEnabled,
-} from '../scenarios/helpers';
+} from '../scenarios/harness/helpers';
 import {
   buildCanonicalEntityReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,

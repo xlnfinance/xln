@@ -12,7 +12,7 @@ import {
   bootScenario,
   fundEntities,
   registerEntities,
-} from '../../scenarios/boot';
+} from '../../scenarios/harness/boot';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { safeStringify } from '../../protocol/serialization';
 import type { RuntimeReplica, JAdapter } from '../../runtime/types';

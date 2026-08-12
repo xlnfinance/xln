@@ -13,7 +13,7 @@ import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory'
 import { buildQuorumHanko, inspectHankoForHash, verifyHankoForHash } from '../hanko/signing';
 import { decodeHankoEnvelope, encodeHankoEnvelope } from '../hanko/codec';
 import { createEmptyEnv } from '../runtime';
-import { createJReplica } from '../scenarios/boot';
+import { createJReplica } from '../scenarios/harness/boot';
 import type { ConsensusConfig, EntityReplica, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { installCanonicalRegisteredBoardAuthority } from './helpers/registration-evidence';

@@ -6,12 +6,12 @@ import {
   converge,
   convergeWithOffline,
   processWithOffline,
-} from '../scenarios/helpers';
+} from '../scenarios/harness/helpers';
 import { buildRouteOutputKey } from '../runtime/routing/output-routing';
 import { registerReliableIngress } from '../runtime/reliable/reliable-delivery.ts';
 import type { DeliverableEntityInput } from '../runtime/types';
 import type { JPrefixAttestation } from '../types/jurisdiction-events';
-import { htlcRouteConvergenceCycleBudget } from '../scenarios/test-economy';
+import { htlcRouteConvergenceCycleBudget } from '../scenarios/payments/test-economy';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const runtimeId = `0x${'22'.repeat(20)}`;

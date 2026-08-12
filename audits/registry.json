@@ -203,7 +203,7 @@
         "runtime/__tests__/**/*p2p*",
         "runtime/__tests__/**/*relay*",
         "runtime/__tests__/direct-runtime-bun.test.ts",
-        "runtime/scenarios/p2p-*.ts"
+        "runtime/scenarios/network/p2p-*.ts"
       ],
       "dependencies": [
         "protocol-primitives",
@@ -332,7 +332,7 @@
       "testGlobs": [
         "runtime/__tests__/**/*payment*",
         "runtime/__tests__/**/*htlc*",
-        "runtime/scenarios/htlc-*.ts",
+        "runtime/scenarios/payments/htlc-*.ts",
         "tests/e2e-payment.spec.ts",
         "tests/frontend/payment-panel-view.test.ts",
         "tests/frontend/payment-terminal-monitor.test.ts",
@@ -359,7 +359,7 @@
       "testGlobs": [
         "runtime/__tests__/**/*orderbook*",
         "runtime/__tests__/**/*swap*",
-        "runtime/scenarios/swap*.ts"
+        "runtime/scenarios/market/swap*.ts"
       ],
       "dependencies": [
         "account-consensus",
@@ -651,7 +651,7 @@
         "runtime/__tests__/**/*p2p*",
         "runtime/__tests__/**/*relay*",
         "runtime/__tests__/direct-runtime-bun.test.ts",
-        "runtime/scenarios/p2p-*.ts"
+        "runtime/scenarios/network/p2p-*.ts"
       ]
     },
     {
@@ -676,7 +676,7 @@
         "runtime/__tests__/**/*p2p*",
         "runtime/__tests__/**/*relay*",
         "runtime/__tests__/direct-runtime-bun.test.ts",
-        "runtime/scenarios/p2p-*.ts"
+        "runtime/scenarios/network/p2p-*.ts"
       ]
     },
     {
@@ -701,7 +701,7 @@
         "runtime/__tests__/**/*p2p*",
         "runtime/__tests__/**/*relay*",
         "runtime/__tests__/direct-runtime-bun.test.ts",
-        "runtime/scenarios/p2p-*.ts"
+        "runtime/scenarios/network/p2p-*.ts"
       ]
     },
     {
@@ -978,7 +978,7 @@
       "testGlobs": [
         "runtime/__tests__/**/*payment*",
         "runtime/__tests__/**/*htlc*",
-        "runtime/scenarios/htlc-*.ts",
+        "runtime/scenarios/payments/htlc-*.ts",
         "tests/e2e-payment.spec.ts",
         "tests/frontend/payment-panel-view.test.ts",
         "tests/frontend/payment-terminal-monitor.test.ts",
@@ -1006,7 +1006,7 @@
       "testGlobs": [
         "runtime/__tests__/**/*orderbook*",
         "runtime/__tests__/**/*swap*",
-        "runtime/scenarios/swap*.ts"
+        "runtime/scenarios/market/swap*.ts"
       ]
     },
     {

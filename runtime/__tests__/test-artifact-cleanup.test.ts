@@ -660,7 +660,7 @@ describe('test artifact cleanup', () => {
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=persistence-cli -- bun runtime/scripts/persistence-wal-smoke.ts');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=watchtower-smoke -- bun runtime/scripts/watchtower-smoke.ts');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=rpc-settlement -- bun runtime/scripts/rpc-settlement-parity.ts');
-    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/p2p-relay.ts');
+    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/network/p2p-relay.ts');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=bootstrap-soundcheck -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=all');
     expect(rootPackage).toContain(
       '"check": "bun run check:brainvault && bun run check:contract-artifact-drift && ' +

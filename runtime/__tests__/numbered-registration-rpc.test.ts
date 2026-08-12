@@ -36,7 +36,7 @@ import {
 } from '../runtime';
 import { dbRootPath } from '../runtime/platform';
 import type { RuntimeReplica } from '../runtime/types';
-import { commitRuntimeInput, setScenarioStorageEnabled } from '../scenarios/helpers';
+import { commitRuntimeInput, setScenarioStorageEnabled } from '../scenarios/harness/helpers';
 import type { JurisdictionConfig } from '../entity/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import type { JReplica } from '../types/jurisdiction-runtime';

@@ -7,8 +7,8 @@ import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
 } from '../jurisdiction/machine/board-registry';
-import { bootScenario, fundEntities, registerEntities } from '../scenarios/boot';
-import { ensureSignerKeysFromSeed } from '../scenarios/helpers';
+import { bootScenario, fundEntities, registerEntities } from '../scenarios/harness/boot';
+import { ensureSignerKeysFromSeed } from '../scenarios/harness/helpers';
 import { createEmptyEnv } from '../runtime';
 
 const canonicalSigner = (env: ReturnType<typeof createEmptyEnv>, signerIndex: string): string =>

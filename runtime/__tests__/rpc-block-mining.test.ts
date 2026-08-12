@@ -3,7 +3,7 @@ import {
   advanceRpcToUnixSeconds,
   mineRpcToBlockExact,
   readRpcUnixSeconds,
-} from '../scenarios/rpc-block-mining';
+} from '../scenarios/harness/rpc-block-mining';
 
 type FakeProvider = {
   block: bigint;

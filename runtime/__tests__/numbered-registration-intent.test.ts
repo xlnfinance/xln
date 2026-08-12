@@ -19,7 +19,7 @@ import {
 import { markLocalNumberedRegistrationTx } from '../runtime/registration/numbered-registration-auth';
 import { createJAdapter } from '../jurisdiction/adapter';
 import { closeInfraDb, closeRuntimeDb, createEmptyEnv, loadEnvFromDB } from '../runtime';
-import { commitRuntimeInput, processJEvents, setScenarioStorageEnabled } from '../scenarios/helpers';
+import { commitRuntimeInput, processJEvents, setScenarioStorageEnabled } from '../scenarios/harness/helpers';
 import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,

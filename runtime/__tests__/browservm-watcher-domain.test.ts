@@ -8,7 +8,7 @@ import {
   normalizeJurisdictionImportRequest,
 } from '../runtime/jurisdiction/jurisdiction-import';
 import { createEmptyEnv } from '../runtime';
-import { createJReplica } from '../scenarios/boot';
+import { createJReplica } from '../scenarios/harness/boot';
 import { validateBrowserVmState } from '../runtime/input-schema/browser';
 
 test('BrowserVM stack does not reuse the fresh-Anvil watcher domain', async () => {

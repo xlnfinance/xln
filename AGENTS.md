@@ -199,7 +199,7 @@ Auto-rebuild: `bun run dev`. Time-travel: read from `env` not live stores. Bilat
 ### ASCII Mode (Quick Scan)
 ```bash
 # Run scenario with full output
-bun runtime/scenarios/lock-ahb.ts > /tmp/debug.log
+bun runtime/scenarios/payments/lock-ahb.ts > /tmp/debug.log
 
 # Grep for specific info
 grep "Entity.*Alice" /tmp/debug.log        # Find Alice's state

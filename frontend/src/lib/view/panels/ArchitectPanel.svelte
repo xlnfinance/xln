@@ -12,9 +12,9 @@
   import { onDestroy, onMount } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
   // @ts-ignore - Vite raw import
-  import ahbScenarioCode from '../../../../../runtime/scenarios/ahb.ts?raw';
+  import ahbScenarioCode from '../../../../../runtime/scenarios/consensus/ahb.ts?raw';
   // @ts-ignore - Vite raw import
-  import settleScenarioCode from '../../../../../runtime/scenarios/settle.ts?raw';
+  import settleScenarioCode from '../../../../../runtime/scenarios/settlement/settle.ts?raw';
   import { shortAddress } from '$lib/utils/format';
   import { getXLN, submitRuntimeInput } from '$lib/stores/xlnStore';
   import type { RuntimeInput, XLNModule } from '@xln/runtime/api/public/runtime-module';

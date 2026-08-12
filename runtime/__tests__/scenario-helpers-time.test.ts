@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createEmptyEnv } from '../runtime';
-import { processUntil } from '../scenarios/helpers';
+import { processUntil } from '../scenarios/harness/helpers';
 
 describe('scenario helper time ownership', () => {
   test('processUntil does not fabricate time for a live runtime', async () => {

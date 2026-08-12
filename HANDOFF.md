@@ -93,7 +93,7 @@ legs move symmetrically. Fix it; do not design it away.
 1. **Finish the cross-jurisdiction scenario.** The repo had zero of them (15
    scenarios, none cover cross-j) — that gap is why this area rotted.
 
-   `runtime/scenarios/cross-j.ts` exists and gets as far as applying the intent,
+   `runtime/scenarios/cross-j/index.ts` exists and gets as far as applying the intent,
    then stops at `CROSS_J_OWNER_RUNTIME_COLLISION`, because it runs everything
    in one process. That is the protocol refusing the shape, not a bug to work
    around: `resolveCrossJurisdictionRuntimeTopology`

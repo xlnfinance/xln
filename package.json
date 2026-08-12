@@ -55,7 +55,7 @@
     "test:watchtower:smoke": "bun runtime/scripts/run-with-test-cleanup.ts --reason=watchtower-smoke -- bun runtime/scripts/watchtower-smoke.ts",
     "test:rpc-settlement": "bun runtime/scripts/run-with-test-cleanup.ts --reason=rpc-settlement -- bun runtime/scripts/rpc-settlement-parity.ts",
     "test:tron:nile": "bun runtime/scripts/tron-nile-smoke.ts",
-    "test:p2p:relay": "bun runtime/scripts/run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/p2p-relay.ts",
+    "test:p2p:relay": "bun runtime/scripts/run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/network/p2p-relay.ts",
     "soak:quick": "bun runtime/scripts/run-soak-gate.ts --profile=quick --iterations=2",
     "perf:runtime": "bun runtime/scripts/analyze-runtime-perf.ts",
     "soak:swap10m": "bun runtime/scripts/run-soak-gate.ts --profile=swap --minutes=10",

@@ -40,7 +40,7 @@ import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 import type { AccountInput } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../runtime/types';
-import { enableStrictScenario } from '../scenarios/helpers';
+import { enableStrictScenario } from '../scenarios/harness/helpers';
 import {
   buildEntityHashesToSign,
   cloneAccountInputWithoutPostCommitHankos,
