@@ -54,12 +54,12 @@ const readText = (path: string): string => {
       'runtime/runtime/entity-input/entity-input-replica.ts',
       'runtime/runtime/entity-input/entity-input-staging.ts',
     ],
-    'runtime/entity/tx/handlers/account.ts': [
-      'runtime/entity/tx/handlers/account.ts',
+    'runtime/entity/tx/handlers/account/index.ts': [
+      'runtime/entity/tx/handlers/account/index.ts',
       'runtime/entity/tx/handlers/account/input-phases.ts',
     ],
-    'runtime/entity/tx/handlers/dispute.ts': [
-      'runtime/entity/tx/handlers/dispute.ts',
+    'runtime/entity/tx/handlers/dispute/index.ts': [
+      'runtime/entity/tx/handlers/dispute/index.ts',
       'runtime/entity/tx/handlers/dispute/shared.ts',
       'runtime/entity/tx/handlers/dispute/start.ts',
       'runtime/entity/tx/handlers/dispute/start-admission.ts',
@@ -531,14 +531,14 @@ for (const [path, markers] of [
   ],
   ['runtime/entity/tx/invariant-errors.ts', ["'SWAP_REQUEST_',"]],
   [
-    'runtime/entity/tx/handlers/direct-payment.ts',
+    'runtime/entity/tx/handlers/payments/direct-payment.ts',
     ["createStructuredLogger('entity.payment')", 'DIRECT_PAYMENT_${code}:${detail}', "'NEXT_HOP_ACCOUNT_MISSING'"],
   ],
   [
     'runtime/protocol/payments/route.ts',
     ['requireCommittedDirectPaymentRoute', "'ROUTE_START_INVALID'", "'ROUTE_END_INVALID'"],
   ],
-  ['runtime/entity/tx/handlers/basic.ts', ["createStructuredLogger('entity.basic')"]],
+  ['runtime/entity/tx/handlers/system/basic.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity/tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity/factory.ts', ["createStructuredLogger('entity.factory')", 'lazy.create']],
   ['runtime/entity/consensus/entity-log.ts', ["createStructuredLogger('entity')"]],
@@ -551,8 +551,8 @@ for (const [path, markers] of [
   ['runtime/runtime/infrastructure/p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
   ['runtime/network/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
   ['runtime/entity/consensus/input/merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict']],
-  ['runtime/entity/tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
-  ['runtime/entity/tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
+  ['runtime/entity/tx/handlers/account/index.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
+  ['runtime/entity/tx/handlers/account/lifecycle/open-account.ts', ["createStructuredLogger('account.open')"]],
   [
     'runtime/entity/tx/handlers/account/committed-frame-followups.ts',
     ["createStructuredLogger('account.followup')", 'frame.commit', 'frame.tx'],
@@ -569,7 +569,7 @@ for (const [path, markers] of [
     'runtime/account/consensus/proposal/propose.ts',
     ["createStructuredLogger('account')", 'frame.validation_failed', 'proposal.profile'],
   ],
-  ['runtime/entity/tx/handlers/account/orderbook-matching.ts', ["createStructuredLogger('orderbook.same')"]],
+  ['runtime/entity/tx/handlers/account/orderbook/index.ts', ["createStructuredLogger('orderbook.same')"]],
   ['runtime/runtime/transactions/tx-handlers.ts', ["createStructuredLogger('runtime.tx')", 'replica.import_start']],
   [
     'runtime/runtime/jurisdiction/jurisdiction-import.ts',
@@ -579,15 +579,15 @@ for (const [path, markers] of [
       'jurisdiction.import_retry',
     ],
   ],
-  ['runtime/entity/tx/handlers/r2r.ts', ["createStructuredLogger('entity.jbatch')"]],
-  ['runtime/entity/tx/handlers/mint-reserves.ts', ["createStructuredLogger('entity.jbatch')"]],
-  ['runtime/entity/tx/handlers/j-broadcast.ts', ["createStructuredLogger('entity.jbatch')"]],
-  ['runtime/entity/tx/handlers/j-clear-batch.ts', ["createStructuredLogger('entity.jbatch')"]],
-  ['runtime/entity/tx/handlers/j-abort-sent-batch.ts', ["createStructuredLogger('entity.jbatch')"]],
-  ['runtime/entity/tx/handlers/r2c.ts', ["createStructuredLogger('entity.r2c')"]],
-  ['runtime/entity/tx/handlers/htlc-payment.ts', ["createStructuredLogger('entity.htlc')"]],
-  ['runtime/entity/tx/handlers/dispute.ts', ["createStructuredLogger('entity.dispute')"]],
-  ['runtime/entity/tx/handlers/settle.ts', ["createStructuredLogger('entity.settle')"]],
+  ['runtime/entity/tx/handlers/jurisdiction/r2r.ts', ["createStructuredLogger('entity.jbatch')"]],
+  ['runtime/entity/tx/handlers/jurisdiction/mint-reserves.ts', ["createStructuredLogger('entity.jbatch')"]],
+  ['runtime/entity/tx/handlers/jurisdiction/j-broadcast.ts', ["createStructuredLogger('entity.jbatch')"]],
+  ['runtime/entity/tx/handlers/jurisdiction/j-clear-batch.ts', ["createStructuredLogger('entity.jbatch')"]],
+  ['runtime/entity/tx/handlers/jurisdiction/j-abort-sent-batch.ts', ["createStructuredLogger('entity.jbatch')"]],
+  ['runtime/entity/tx/handlers/jurisdiction/r2c.ts', ["createStructuredLogger('entity.r2c')"]],
+  ['runtime/entity/tx/handlers/htlc/payment.ts', ["createStructuredLogger('entity.htlc')"]],
+  ['runtime/entity/tx/handlers/dispute/index.ts', ["createStructuredLogger('entity.dispute')"]],
+  ['runtime/entity/tx/handlers/payments/settle.ts', ["createStructuredLogger('entity.settle')"]],
   ['runtime/entity/tx/j-events-debt.ts', ["createStructuredLogger('entity.debt')", 'ledger.divergence']],
   ['runtime/account/utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
   ['runtime/account/validation/delta-validation.ts', ['ACCOUNT_DELTAS_MISSING', 'ACCOUNT_DELTAS_INVALID_TOKEN_ID']],
@@ -651,7 +651,7 @@ for (const [path, markers] of [
   for (const marker of markers) assertIncludes(text, marker, path);
 }
 
-const directPaymentHandlerPath = 'runtime/entity/tx/handlers/direct-payment.ts';
+const directPaymentHandlerPath = 'runtime/entity/tx/handlers/payments/direct-payment.ts';
 const directPaymentHandler = readText(directPaymentHandlerPath);
 assertNotIncludes(directPaymentHandler, 'console.log', directPaymentHandlerPath);
 
@@ -753,11 +753,11 @@ const solvencyPath = 'runtime/runtime/finance/solvency.ts';
 const solvency = readText(solvencyPath);
 assertNotIncludes(solvency, 'console.', solvencyPath);
 
-const r2cHandlerPath = 'runtime/entity/tx/handlers/r2c.ts';
+const r2cHandlerPath = 'runtime/entity/tx/handlers/jurisdiction/r2c.ts';
 const r2cHandler = readText(r2cHandlerPath);
 assertNotIncludes(r2cHandler, 'console.log', r2cHandlerPath);
 
-const basicHandlerPath = 'runtime/entity/tx/handlers/basic.ts';
+const basicHandlerPath = 'runtime/entity/tx/handlers/system/basic.ts';
 const basicHandler = readText(basicHandlerPath);
 assertNotIncludes(basicHandler, 'console.', basicHandlerPath);
 
@@ -787,11 +787,11 @@ const runtimeEntityInputsPath = 'runtime/runtime/input-pipeline/entity-inputs.ts
 const runtimeEntityInputs = readText(runtimeEntityInputsPath);
 assertNotIncludes(runtimeEntityInputs, 'console.', runtimeEntityInputsPath);
 
-const accountHandlerPath = 'runtime/entity/tx/handlers/account.ts';
+const accountHandlerPath = 'runtime/entity/tx/handlers/account/index.ts';
 const accountHandler = readText(accountHandlerPath);
 assertNotIncludes(accountHandler, 'console.', accountHandlerPath);
 
-const openAccountHandlerPath = 'runtime/entity/tx/handlers/open-account.ts';
+const openAccountHandlerPath = 'runtime/entity/tx/handlers/account/lifecycle/open-account.ts';
 const openAccountHandler = readText(openAccountHandlerPath);
 assertNotIncludes(openAccountHandler, 'console.', openAccountHandlerPath);
 
@@ -814,7 +814,7 @@ const accountProposePath = 'runtime/account/consensus/proposal/propose.ts';
 const accountPropose = readText(accountProposePath);
 assertNotIncludes(accountPropose, 'console.', accountProposePath);
 
-const sameOrderbookMatchingPath = 'runtime/entity/tx/handlers/account/orderbook-matching.ts';
+const sameOrderbookMatchingPath = 'runtime/entity/tx/handlers/account/orderbook/index.ts';
 const sameOrderbookMatching = readText(sameOrderbookMatchingPath);
 assertNotIncludes(sameOrderbookMatching, 'console.', sameOrderbookMatchingPath);
 
@@ -835,24 +835,24 @@ assertNotIncludes(runtimeAdapterServer, 'console.', runtimeAdapterServerPath);
 assertNotIncludes(runtimeAdapterServer, '[RADAPTER] RESPONSE_TOO_LARGE', runtimeAdapterServerPath);
 
 for (const jBatchHandlerPath of [
-  'runtime/entity/tx/handlers/r2r.ts',
-  'runtime/entity/tx/handlers/mint-reserves.ts',
-  'runtime/entity/tx/handlers/j-broadcast.ts',
-  'runtime/entity/tx/handlers/j-clear-batch.ts',
-  'runtime/entity/tx/handlers/j-abort-sent-batch.ts',
+  'runtime/entity/tx/handlers/jurisdiction/r2r.ts',
+  'runtime/entity/tx/handlers/jurisdiction/mint-reserves.ts',
+  'runtime/entity/tx/handlers/jurisdiction/j-broadcast.ts',
+  'runtime/entity/tx/handlers/jurisdiction/j-clear-batch.ts',
+  'runtime/entity/tx/handlers/jurisdiction/j-abort-sent-batch.ts',
 ]) {
   assertNotIncludes(readText(jBatchHandlerPath), 'console.', jBatchHandlerPath);
 }
 
-const htlcPaymentHandlerPath = 'runtime/entity/tx/handlers/htlc-payment.ts';
+const htlcPaymentHandlerPath = 'runtime/entity/tx/handlers/htlc/payment.ts';
 const htlcPaymentHandler = readText(htlcPaymentHandlerPath);
 assertNotIncludes(htlcPaymentHandler, 'console.', htlcPaymentHandlerPath);
 
-const disputeHandlerPath = 'runtime/entity/tx/handlers/dispute.ts';
+const disputeHandlerPath = 'runtime/entity/tx/handlers/dispute/index.ts';
 const disputeHandler = readText(disputeHandlerPath);
 assertNotIncludes(disputeHandler, 'console.', disputeHandlerPath);
 
-const settleHandlerPath = 'runtime/entity/tx/handlers/settle.ts';
+const settleHandlerPath = 'runtime/entity/tx/handlers/payments/settle.ts';
 const settleHandler = readText(settleHandlerPath);
 assertNotIncludes(settleHandler, 'console.', settleHandlerPath);
 

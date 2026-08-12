@@ -1,0 +1,48 @@
+/**
+ * Reserve-to-external handler
+ *
+ * Entity withdraws reserve balance to an external EOA address encoded as bytes32.
+ * The entity layer stays declarative: it only validates balance and appends the
+ * operation into the next J-batch. J-broadcast remains the only on-chain commit path.
+ */
+
+import type { EntityInput, EntityState } from '../../../types';
+import type { EntityTx } from '../../../../types/entity-tx';
+import { prepareEntityTxState } from '../../../state-clone';
+import { addMessage } from '../../../frame-events';
+import { batchAddReserveToExternal, initJBatch } from '../../../../jurisdiction/machine/batch';
+import { getReserveCandidateIssue } from './j-batch-reserve-admission';
+
+export async function handleR2E(
+  entityState: EntityState,
+  entityTx: Extract<EntityTx, { type: 'r2e' }>,
+  mutableFrameState = false,
+): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
+  const { receivingEntity, tokenId, amount } = entityTx.data;
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
+  const outputs: EntityInput[] = [];
+
+  const reserveIssue = getReserveCandidateIssue(entityState, {
+    type: 'reserveToExternalToken',
+    receivingEntity,
+    tokenId,
+    amount,
+  });
+  if (reserveIssue) {
+    const message = `❌ Insufficient spendable reserve: have ${reserveIssue.availableAfterDebt}, need ${amount} token ${tokenId}`;
+    addMessage(newState, message);
+    throw new Error(message);
+  }
+
+  if (!newState.jBatchState) {
+    newState.jBatchState = initJBatch();
+  }
+
+  batchAddReserveToExternal(newState.jBatchState, receivingEntity, tokenId, amount);
+  addMessage(
+    newState,
+    `📦 Queued R→E: ${amount} token ${tokenId} to ${receivingEntity.slice(-8)} (use jBroadcast to commit)`,
+  );
+
+  return { newState, outputs };
+}

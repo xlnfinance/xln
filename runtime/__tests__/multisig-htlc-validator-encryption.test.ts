@@ -45,7 +45,7 @@ import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-ca
 import {
   buildCurrentEntityProfileHashToSign,
   handleCertifyProfileEntityTx,
-} from '../entity/tx/handlers/profile-certification';
+} from '../entity/tx/handlers/account/lifecycle/profile-certification';
 import {
   buildEntityProfileDescriptor,
   computeEntityProfileCertificationComponents,
@@ -79,7 +79,7 @@ import { signedEntityCommandTx } from '../entity/command/command-codec';
 import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { initCrontab } from '../entity/scheduler';
 import { applyEntityFrame, applyEntityInput } from '../entity/consensus';
-import { handleHtlcPayment } from '../entity/tx/handlers/htlc-payment';
+import { handleHtlcPayment } from '../entity/tx/handlers/htlc/payment';
 import { handleHtlcResolve } from '../account/tx/handlers/htlc/resolve';
 import {
   buildHtlcOnionRevealAcceptedTx,
@@ -90,7 +90,7 @@ import {
   htlcSecretOfferContextHash,
 } from '../protocol/htlc/codec/onion-layer';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
-import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc-onion-advance';
+import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc/onion-advance';
 import { encodeHtlcSecretOffer } from '../protocol/htlc/codec/onion';
 import { appendDefaultProposerAcceptedHtlcReveals } from '../entity/transition/htlc-onion-post-commit';
 import { createJReplica } from '../scenarios/harness/boot';

@@ -31,7 +31,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../../entity/consensus/state-root';
 import { generateLazyEntityId } from '../../entity/factory';
-import { handleOpenAccountEntityTx } from '../../entity/tx/handlers/open-account';
+import { handleOpenAccountEntityTx } from '../../entity/tx/handlers/account/lifecycle/open-account';
 import { applyRuntimeStorageChanges } from '../../runtime/observability/env-events';
 import {
   saveRuntimeFrameToStorage,

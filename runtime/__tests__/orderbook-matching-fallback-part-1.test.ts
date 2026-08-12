@@ -8,9 +8,9 @@ import { getSwapLotScale, ORDERBOOK_PRICE_SCALE, quoteAmountAtPrice, SWAP_LOT_SC
 
 import { removeCrossJurisdictionBookOrderByRouteId } from '../orderbook/cross-j';
 
-import { processOrderbookCancels, processOrderbookSwaps } from '../entity/tx/handlers/account';
+import { processOrderbookCancels, processOrderbookSwaps } from '../entity/tx/handlers/account/index';
 
-import { applyCrossJurisdictionBookProgressToState } from '../entity/tx/handlers/cross-j-book-order';
+import { applyCrossJurisdictionBookProgressToState } from '../entity/tx/handlers/cross-j/book-order';
 
 import { handleSwapResolve } from '../account/tx/handlers/swap/resolve/index';
 

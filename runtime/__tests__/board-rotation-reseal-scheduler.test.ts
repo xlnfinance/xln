@@ -13,7 +13,7 @@ import {
   markBoardRotationResealsPending,
 } from '../entity/tx/board-rotation-reseal';
 import { buildQuorumHanko } from '../hanko/signing';
-import { handleScheduledWakeEntityTx } from '../entity/tx/handlers/scheduled-wake';
+import { handleScheduledWakeEntityTx } from '../entity/tx/handlers/system/scheduled-wake';
 import { safeStringify } from '../protocol/serialization';
 import { createEmptyEnv } from '../runtime';
 import { decodeBuffer, encodeBuffer } from '../storage/codec/codec';

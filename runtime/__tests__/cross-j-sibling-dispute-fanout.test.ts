@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { committedCrossJSourceResponseWindowMs } from '../extensions/cross-j/prepared-route';
 import { queueCrossJurisdictionSiblingDisputeFanout } from '../entity/tx/j-events-htlc';
-import { handleCrossJurisdictionForceSiblingDisputeEntityTx } from '../entity/tx/handlers/cross-j-force-sibling-dispute';
+import { handleCrossJurisdictionForceSiblingDisputeEntityTx } from '../entity/tx/handlers/cross-j/force-sibling-dispute';
 import { createEmptyEnv } from '../runtime';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityInput } from '../entity/types';

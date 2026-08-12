@@ -32,7 +32,7 @@ import {
 } from '../entity/consensus/input/hanko-witness';
 import { generateLazyEntityId } from '../entity/factory';
 import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
-import { handleExtendCreditEntityTx } from '../entity/tx/handlers/account-admin';
+import { handleExtendCreditEntityTx } from '../entity/tx/handlers/account/lifecycle/admin';
 import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { createEmptyEnv } from '../runtime';
 import { safeStringify } from '../protocol/serialization';

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { applyAccountTx } from '../account/tx/apply';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import { createEntityFrameHash } from '../entity/consensus/frame';
-import { applyCommittedAccountFrameFollowups, type AccountTxTarget } from '../entity/tx/handlers/account';
+import { applyCommittedAccountFrameFollowups, type AccountTxTarget } from '../entity/tx/handlers/account/index';
 import type { AccountFrame, AccountReplica, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityState } from '../entity/types';
 import { createDefaultDelta } from '../account/state/delta';

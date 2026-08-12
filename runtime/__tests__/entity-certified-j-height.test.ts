@@ -6,8 +6,8 @@ import {
   deriveSignerKeySync,
   registerSignerKey,
 } from '../account/crypto';
-import { handleScheduledWakeEntityTx } from '../entity/tx/handlers/scheduled-wake';
-import { handleDisputeFinalize, handleDisputeStart } from '../entity/tx/handlers/dispute';
+import { handleScheduledWakeEntityTx } from '../entity/tx/handlers/system/scheduled-wake';
+import { handleDisputeFinalize, handleDisputeStart } from '../entity/tx/handlers/dispute/index';
 import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';

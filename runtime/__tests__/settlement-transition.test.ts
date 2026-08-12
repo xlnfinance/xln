@@ -34,8 +34,8 @@ import {
   handleSettleExecute,
   handleSettlePropose,
   processCommittedSettlementTransitionFollowup,
-} from '../entity/tx/handlers/settle';
-import { handleJAbortSentBatch } from '../entity/tx/handlers/j-abort-sent-batch';
+} from '../entity/tx/handlers/payments/settle';
+import { handleJAbortSentBatch } from '../entity/tx/handlers/jurisdiction/j-abort-sent-batch';
 import {
   executeCrontab,
   HUB_REBALANCE_INTERVAL_MS,
@@ -1993,7 +1993,7 @@ describe('atomic settlement Account transition', () => {
       'utf8',
     );
     const entitySeal = readFileSync(
-      join(repoRoot, 'runtime/entity/tx/handlers/settle.ts'),
+      join(repoRoot, 'runtime/entity/tx/handlers/payments/settle.ts'),
       'utf8',
     );
 

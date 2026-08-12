@@ -6,9 +6,9 @@ import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
 } from '../protocol/htlc/events';
-import { applyCommittedAccountFrameFollowups } from '../entity/tx/handlers/account';
+import { applyCommittedAccountFrameFollowups } from '../entity/tx/handlers/account/index';
 import { applyHtlcSecretFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
-import { handleResolveHtlcLockEntityTx } from '../entity/tx/handlers/htlc-direct';
+import { handleResolveHtlcLockEntityTx } from '../entity/tx/handlers/htlc/direct';
 import { pruneSettledOriginatedHtlcRoutes } from '../entity/tx/htlc-route-lifecycle';
 import { publishEntityCandidateEffects } from '../runtime/observability/env-events';
 import { createEmptyEnv } from '../runtime';

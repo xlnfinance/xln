@@ -68,7 +68,7 @@ Scores are `importance / complexity` out of 100.
 - `runtime/account/utils.ts`
 - `runtime/account/tx/apply.ts`
 - `runtime/entity/tx/apply.ts`
-- `runtime/entity/tx/handlers/dispute.ts`
+- `runtime/entity/tx/handlers/dispute/index.ts`
 - `runtime/hanko/signing.ts`
 - `runtime/protocol/dispute/proof-builder.ts`
 - `jurisdictions/contracts/EntityProvider.sol`

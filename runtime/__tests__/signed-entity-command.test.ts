@@ -31,7 +31,7 @@ import {
   buildCertifiedEntityOutputHashes,
   hashCertifiedEntityOutputSemantic,
 } from '../entity/consensus/output/certification';
-import { handleReissueCertifiedOutputEntityTx } from '../entity/tx/handlers/basic';
+import { handleReissueCertifiedOutputEntityTx } from '../entity/tx/handlers/system/basic';
 import {
   assertEntityFrameEventByteBudget,
   assertEntityFrameTxByteBudget,

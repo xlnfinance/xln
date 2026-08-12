@@ -14,9 +14,9 @@ import { scheduleHook } from '../../../scheduler';
 import { upsertSortedStringMapEntry } from '../../../../infra/sorted-map-index';
 import { pruneUnreachableDisputeEvidence } from '../../../../account/dispute/evidence-retention';
 import type { ApplyEntityTxOptions } from '../../apply';
-import { buildHubRebalancePolicyTx } from '../account-admin';
+import { buildHubRebalancePolicyTx } from './lifecycle/admin';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../account-cross-j-followups';
-import { processCommittedSettlementTransitionFollowup } from '../settle';
+import { processCommittedSettlementTransitionFollowup } from '../payments/settle';
 import { applyCommittedAccountFrameFollowups } from './committed-frame-followups';
 import {
   applyCommittedHtlcLockFollowup,
@@ -24,12 +24,12 @@ import {
   applyHtlcTimeoutFollowups,
   applyPendingForwardFollowup,
 } from './committed-htlc-followups';
-import type { AccountTxTarget } from './orderbook-queue';
+import type { AccountTxTarget } from './orderbook/queue';
 import type {
   SwapCancelEvent,
   SwapCancelRequestEvent,
   SwapOfferEvent,
-} from './orderbook-offers';
+} from './orderbook/offers';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
 

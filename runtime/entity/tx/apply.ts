@@ -16,28 +16,28 @@ import {
 import { applyJEvent } from './j-events';
 import { shouldRethrowEntityTxError } from './invariant-errors';
 import { createStructuredLogger } from '../../infra/logger';
-import { handleR2E } from './handlers/r2e';
-import { handleHtlcPayment } from './handlers/htlc-payment';
-import { handleR2C } from './handlers/r2c';
-import { handleE2R } from './handlers/e2r';
-import { handleR2R } from './handlers/r2r';
-import { handleCrossPullCloseEntityTx } from './handlers/pull';
+import { handleR2E } from './handlers/jurisdiction/r2e';
+import { handleHtlcPayment } from './handlers/htlc/payment';
+import { handleR2C } from './handlers/jurisdiction/r2c';
+import { handleE2R } from './handlers/jurisdiction/e2r';
+import { handleR2R } from './handlers/jurisdiction/r2r';
+import { handleCrossPullCloseEntityTx } from './handlers/payments/pull';
 import {
   handleCancelSwapRequest,
   handlePlaceSwapOfferRequest,
-} from './handlers/swap-requests';
-import { handleJBroadcast } from './handlers/j-broadcast';
-import { handleJRebroadcast } from './handlers/j-rebroadcast';
-import { handleJAbortSentBatch } from './handlers/j-abort-sent-batch';
-import { handleJClearBatch } from './handlers/j-clear-batch';
-import { handleMintReserves } from './handlers/mint-reserves';
+} from './handlers/payments/swap-requests';
+import { handleJBroadcast } from './handlers/jurisdiction/j-broadcast';
+import { handleJRebroadcast } from './handlers/jurisdiction/j-rebroadcast';
+import { handleJAbortSentBatch } from './handlers/jurisdiction/j-abort-sent-batch';
+import { handleJClearBatch } from './handlers/jurisdiction/j-clear-batch';
+import { handleMintReserves } from './handlers/jurisdiction/mint-reserves';
 import {
   handleSettleApprove,
   handleSettleExecute,
   handleSettlePropose,
   handleSettleReject,
   handleSettleUpdate,
-} from './handlers/settle';
+} from './handlers/payments/settle';
 import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from './handlers/dispute';
 import {
   handleChatEntityTx,
@@ -47,53 +47,53 @@ import {
   handleProposeEntityTx,
   handleVoteEntityTx,
   handleReissueCertifiedOutputEntityTx,
-} from './handlers/basic';
-import { handleOpenAccountEntityTx } from './handlers/open-account';
+} from './handlers/system/basic';
+import { handleOpenAccountEntityTx } from './handlers/account/lifecycle/open-account';
 import {
   handleProcessHtlcTimeoutsEntityTx,
   handleResolveHtlcLockEntityTx,
-} from './handlers/htlc-direct';
-import { handleDirectPaymentEntityTx } from './handlers/direct-payment';
+} from './handlers/htlc/direct';
+import { handleDirectPaymentEntityTx } from './handlers/payments/direct-payment';
 import {
   handleExtendCreditEntityTx,
   handleRequestCollateralEntityTx,
   handleSetHubConfigEntityTx,
   handleSetRebalancePolicyEntityTx,
-} from './handlers/account-admin';
+} from './handlers/account/lifecycle/admin';
 import {
   handleLendingBorrowEntityTx,
   handleLendingClosePositionEntityTx,
   handleLendingOfferEntityTx,
   handleLendingRepayEntityTx,
-} from './handlers/lending';
+} from './handlers/payments/lending';
 import {
   handleMaterializeCrossJurisdictionSwapEntityTx,
   handlePrepareCrossJurisdictionSwapEntityTx,
   handleRegisterCrossJurisdictionSwapEntityTx,
-} from './handlers/cross-j-setup';
-import { handleCrossJurisdictionFillNoticeEntityTx } from './handlers/cross-j-fill';
+} from './handlers/cross-j/setup';
+import { handleCrossJurisdictionFillNoticeEntityTx } from './handlers/cross-j/fill';
 import {
   handleMaterializeCrossJurisdictionClearEntityTx,
   handleRequestCrossJurisdictionClearEntityTx,
-} from './handlers/cross-j-clear';
-import { handleCrossJurisdictionSalvageEntityTx } from './handlers/cross-j-salvage';
-import { handleCrossJurisdictionForceSiblingDisputeEntityTx } from './handlers/cross-j-force-sibling-dispute';
-import { handleOrderbookSweepCrossJurisdictionEntityTx } from './handlers/cross-j-sweep';
+} from './handlers/cross-j/clear';
+import { handleCrossJurisdictionSalvageEntityTx } from './handlers/cross-j/salvage';
+import { handleCrossJurisdictionForceSiblingDisputeEntityTx } from './handlers/cross-j/force-sibling-dispute';
+import { handleOrderbookSweepCrossJurisdictionEntityTx } from './handlers/cross-j/sweep';
 import {
   handleApplyCrossJurisdictionBookProgressEntityTx,
   handleAdmitCrossJurisdictionBookOrderEntityTx,
   handleCrossJurisdictionBookOrderRemovedEntityTx,
   handleRemoveCrossJurisdictionBookOrderEntityTx,
-} from './handlers/cross-j-book-order';
-import { handleScheduledWakeEntityTx } from './handlers/scheduled-wake';
-import { handleCertifyProfileEntityTx } from './handlers/profile-certification';
+} from './handlers/cross-j/book-order';
+import { handleScheduledWakeEntityTx } from './handlers/system/scheduled-wake';
+import { handleCertifyProfileEntityTx } from './handlers/account/lifecycle/profile-certification';
 import {
   handleEntityProviderCancelAction,
   handleEntityProviderReleaseControlShares,
   handleEntityProviderTransfer,
 } from './handlers/entity-provider-action';
 import type { AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
-import { handleHtlcOnionAdvance } from './handlers/htlc-onion-advance';
+import { handleHtlcOnionAdvance } from './handlers/htlc/onion-advance';
 
 const entityTxLog = createStructuredLogger('entity.tx');
 

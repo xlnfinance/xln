@@ -4,7 +4,7 @@ import type { EntityTx } from '../../../types/entity-tx';
 import { prepareLocallyAuthoredEntityTxs } from '../../command';
 import { appendDefaultProposerCrossJMaterializations } from '../../transition/cross-j-proposer-materialization';
 import { appendDefaultProposerAcceptedHtlcReveals } from '../../transition/htlc-onion-post-commit';
-import { assertLocalJRebroadcastAllowed } from '../../tx/handlers/j-rebroadcast';
+import { assertLocalJRebroadcastAllowed } from '../../tx/handlers/jurisdiction/j-rebroadcast';
 import { prioritizeScheduledWakeTransactions } from './merge';
 import type { ApplyEntityInputContext } from './types';
 import {

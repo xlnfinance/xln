@@ -33,8 +33,8 @@ import {
   buildCrossJurisdictionEntityOutput,
   crossJurisdictionRouteSignerHint,
 } from '../cross-j-outputs';
-import { applyCrossJurisdictionBookProgressToState } from './cross-j-book-order';
-import { handleAdmitCrossJurisdictionBookOrderEntityTx } from './cross-j-book-order';
+import { applyCrossJurisdictionBookProgressToState } from './cross-j/book-order';
+import { handleAdmitCrossJurisdictionBookOrderEntityTx } from './cross-j/book-order';
 import type { SwapOfferEvent } from './account';
 
 const crossJFollowupLog = createStructuredLogger('crossj.followup');

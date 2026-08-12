@@ -6,7 +6,7 @@ import { assertEntityJBroadcastOrder } from '../entity/consensus/frame/applicati
 import {
   shouldAutoBroadcastDraft,
   takeBroadcastBatch,
-} from '../entity/tx/handlers/j-broadcast';
+} from '../entity/tx/handlers/jurisdiction/j-broadcast';
 import { initJBatch } from '../jurisdiction/machine/batch';
 import {
   entity,

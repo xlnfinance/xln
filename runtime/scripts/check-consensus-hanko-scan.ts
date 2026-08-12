@@ -56,7 +56,7 @@ const accountConsensusPaths = [
 ];
 const accountConsensusPath = accountConsensusPaths.join(', ');
 const accountHandlerPaths = [
-  'runtime/entity/tx/handlers/account.ts',
+  'runtime/entity/tx/handlers/account/index.ts',
   'runtime/entity/tx/handlers/account/committed-input.ts',
 ];
 const accountHandlerPath = accountHandlerPaths.join(', ');

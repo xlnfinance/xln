@@ -248,7 +248,7 @@ highest-leverage move toward the "less code" goal and reduces re-render/merge ri
 - Frontend is otherwise clean: only 6 `@ts-ignore`/`TODO`-class markers total.
 
 ### F2 — Misc runtime dedup (low)
-- `entity/tx/handlers/settle.ts:827 userAutoApprove` is a no-op wrapper around
+- `entity/tx/handlers/payments/settle.ts:827 userAutoApprove` is a no-op wrapper around
   `settlement-ops.ts:146 userAutoApprove` (imported as `userAutoApproveByDiff`).
   Have `canAutoApproveWorkspace` + the two `scenarios/settle*.ts` import the real one
   directly and drop the wrapper.

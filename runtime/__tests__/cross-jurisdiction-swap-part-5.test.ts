@@ -10,7 +10,7 @@ import {
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../protocol/dispute/arguments';
 import { planCrossJurisdictionTargetRecovery } from '../entity/tx/j-events-htlc';
-import { handlePrepareDispute } from '../entity/tx/handlers/dispute';
+import { handlePrepareDispute } from '../entity/tx/handlers/dispute/index';
 import { addReplica, addr, entity, jref, makeJurisdiction, makeState } from './helpers/cross-j';
 
 const TEST_DISPUTE_CONFIG = { leftResponseSeconds: 10, rightResponseSeconds: 10 } as const;

@@ -100,7 +100,7 @@ operational evidence for restart/load stability, not unit-test substitutes.
 - `runtime/account/consensus/index.ts`
 - `runtime/entity/tx/apply.ts`
 - `runtime/entity/tx/j-events.ts`
-- `runtime/entity/tx/handlers/account.ts`
+- `runtime/entity/tx/handlers/account/index.ts`
 - `runtime/entity/tx/handlers/account-cross-j-followups.ts`
 - `runtime/account/tx/handlers/settlement/pull.ts`
 - `runtime/account/tx/handlers/swap/resolve/index.ts`
@@ -115,7 +115,7 @@ operational evidence for restart/load stability, not unit-test substitutes.
 - `runtime/jurisdiction/adapter/events/history-ingress.ts`
 - `runtime/extensions/lending.ts`
 - `runtime/types/finance/lending.ts`
-- `runtime/entity/tx/handlers/lending.ts`
+- `runtime/entity/tx/handlers/payments/lending.ts`
 - `runtime/api/server/entities/lending.ts`
 - `runtime/network/relay/router.ts`
 - `runtime/network/p2p/p2p.ts`

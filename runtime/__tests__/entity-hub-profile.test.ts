@@ -4,7 +4,7 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from 
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { buildLocalEntityProfile } from '../network/p2p/gossip/helper';
 import { cloneEntityState } from '../entity/state-clone';
-import { handleSetHubConfigEntityTx } from '../entity/tx/handlers/account-admin';
+import { handleSetHubConfigEntityTx } from '../entity/tx/handlers/account/lifecycle/admin';
 import type { ConsensusConfig, EntityState } from '../entity/types';
 import type { HubRebalanceConfig } from '../types/finance/rebalance';
 

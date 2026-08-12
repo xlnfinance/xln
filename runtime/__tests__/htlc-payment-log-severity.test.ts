@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 test('expected HTLC capacity rejection is informational, not a browser error', () => {
   const source = readFileSync(
-    join(process.cwd(), 'runtime/entity/tx/handlers/htlc-payment.ts'),
+    join(process.cwd(), 'runtime/entity/tx/handlers/htlc/payment.ts'),
     'utf8',
   );
   const start = source.indexOf('if (prepared.senderLockAmount > capacity)');

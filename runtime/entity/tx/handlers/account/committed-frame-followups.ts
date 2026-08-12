@@ -6,7 +6,7 @@ import { cancelHook } from '../../../scheduler';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../infra/logger';
-import type { AccountTxTarget } from './orderbook-queue';
+import type { AccountTxTarget } from './orderbook/queue';
 import { applyCommittedLendingFollowup } from './committed-lending-followup';
 
 const accountFollowupLog = createStructuredLogger('account.followup');

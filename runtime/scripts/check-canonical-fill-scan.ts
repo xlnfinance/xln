@@ -218,11 +218,11 @@ for (const [path, markers] of [
     'applyCrossJurisdictionFillProgress',
     'CROSS_J_MAX_FILL_RATIO',
   ]],
-  ['runtime/entity/tx/handlers/cross-j-book-order.ts', [
+  ['runtime/entity/tx/handlers/cross-j/book-order.ts', [
     'applyCrossJurisdictionFillProgress',
     'getCrossJurisdictionCommittedProofRatio',
   ]],
-  ['runtime/entity/tx/handlers/cross-j-salvage.ts', [
+  ['runtime/entity/tx/handlers/cross-j/salvage.ts', [
     'verifyHashLadderBinary',
     'verifiedFillRatio !== claimedFillRatio',
     'Off-chain fill progress is informational only',

@@ -108,27 +108,27 @@ test('each payment operation retains one explicit canonical transaction path', (
   expect(paymentPanel).toContain("entityTxs: usesDirectPayment\n          ? [{\n              type: 'directPayment' as const");
   expect(paymentPanel).toContain("          : [{\n              type: 'htlcPayment' as const");
 
-  expect(source('runtime/entity/tx/handlers/direct-payment.ts'))
+  expect(source('runtime/entity/tx/handlers/payments/direct-payment.ts'))
     .toContain("type: 'direct_payment'");
-  expect(source('runtime/entity/tx/handlers/htlc-payment.ts'))
+  expect(source('runtime/entity/tx/handlers/htlc/payment.ts'))
     .toContain("type: 'htlc_lock'");
-  expect(source('runtime/entity/tx/handlers/swap-requests.ts'))
+  expect(source('runtime/entity/tx/handlers/payments/swap-requests.ts'))
     .toContain("type: 'swap_offer'");
   expect(source('runtime/entity/consensus/frame/application.ts')).not.toContain('Fallback:');
 
-  const crossJurisdiction = source('runtime/entity/tx/handlers/cross-j-setup.ts');
+  const crossJurisdiction = source('runtime/entity/tx/handlers/cross-j/setup.ts');
   expect(crossJurisdiction).toContain("{ type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } }");
   expect(crossJurisdiction).toContain("buildCrossJurisdictionPullBinding(route, 'source')");
   expect(crossJurisdiction).toContain("buildCrossJurisdictionPullBinding(route, 'target')");
 
-  expect(source('runtime/entity/tx/handlers/account-admin.ts'))
+  expect(source('runtime/entity/tx/handlers/account/lifecycle/admin.ts'))
     .toContain("type: 'set_credit_limit'");
 
   const lendingPanel = source('frontend/src/lib/components/Entity/LendingPanel.svelte');
   for (const type of ['lendingOffer', 'lendingBorrow', 'lendingRepay']) {
     expect(lendingPanel).toContain(`type: '${type}'`);
   }
-  const lendingHandler = source('runtime/entity/tx/handlers/lending.ts');
+  const lendingHandler = source('runtime/entity/tx/handlers/payments/lending.ts');
   for (const type of ['lending_fund', 'lending_borrow_request', 'lending_repay', 'lending_close_request']) {
     expect(lendingHandler).toContain(`type: '${type}'`);
   }

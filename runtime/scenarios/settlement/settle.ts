@@ -19,7 +19,7 @@ import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJA
 import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { createGossipLayer } from '../../network/p2p/gossip';
-import { userAutoApprove } from '../../entity/tx/handlers/settle';
+import { userAutoApprove } from '../../entity/tx/handlers/payments/settle';
 
 const USDC_TOKEN_ID = 1;
 const DECIMALS = 18n;

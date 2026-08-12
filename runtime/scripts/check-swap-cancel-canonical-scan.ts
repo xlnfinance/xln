@@ -39,7 +39,7 @@ assertNotIncludes(apply, `${retiredResolve}:`, applyPath);
 assertNotIncludes(apply, 'cancelSwapOffer:', applyPath);
 assertNotIncludes(apply, 'cancelSwap:', applyPath);
 
-const handlerPath = 'runtime/entity/tx/handlers/swap-requests.ts';
+const handlerPath = 'runtime/entity/tx/handlers/payments/swap-requests.ts';
 const handler = readText(handlerPath);
 assertIncludes(handler, "Extract<EntityTx, { type: 'proposeCancelSwap' }>", handlerPath);
 assertIncludes(handler, 'const requireSwapAccount =', handlerPath);

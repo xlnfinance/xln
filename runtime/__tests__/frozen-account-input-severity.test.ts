@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { canProcessFrozenAccountInput, frozenAccountInputLogLevel } from '../entity/tx/handlers/account';
+import { canProcessFrozenAccountInput, frozenAccountInputLogLevel } from '../entity/tx/handlers/account/index';
 import { canProcessAccountTxForDisputeStatus } from '../account/consensus/dispute/policy';
 import type { AccountInput, AccountState } from '../types/account';
 

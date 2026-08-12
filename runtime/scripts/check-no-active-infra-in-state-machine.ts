@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 const TARGETS = [
   'runtime/entity/tx/apply.ts',
   'runtime/entity/tx/j-events.ts',
-  'runtime/entity/tx/handlers/dispute.ts',
+  'runtime/entity/tx/handlers/dispute/index.ts',
   'runtime/entity/tx/handlers/dispute/shared.ts',
   'runtime/entity/tx/handlers/dispute/start.ts',
   'runtime/entity/tx/handlers/dispute/start-admission.ts',
@@ -12,7 +12,7 @@ const TARGETS = [
   'runtime/entity/tx/handlers/dispute/finalize.ts',
   'runtime/entity/tx/handlers/dispute/finalize-admission.ts',
   'runtime/entity/tx/handlers/dispute/finalize-proof.ts',
-  'runtime/entity/tx/handlers/j-broadcast.ts',
+  'runtime/entity/tx/handlers/jurisdiction/j-broadcast.ts',
   'runtime/account/consensus/index.ts',
   'runtime/entity/consensus/leader/certificates.ts',
   'runtime/entity/consensus/jurisdiction/prefix-round.ts',

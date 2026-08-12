@@ -9,7 +9,7 @@ import {
   LENDING_TERM_MS,
   selectBestLendingPool,
 } from '../../../../extensions/lending';
-import type { AccountTxTarget } from './orderbook-queue';
+import type { AccountTxTarget } from './orderbook/queue';
 import {
   applyLendingClosePayout,
   applyLendingCloseRequest,

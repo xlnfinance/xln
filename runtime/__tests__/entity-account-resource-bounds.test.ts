@@ -14,8 +14,8 @@ import { assertEntityAccountInsertionCapacity } from '../entity/account/account-
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
 import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { isLeftEntity } from '../entity/id';
-import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
-import { handleOpenAccountEntityTx } from '../entity/tx/handlers/open-account';
+import { applyAccountInputToEntity } from '../entity/tx/handlers/account/index';
+import { handleOpenAccountEntityTx } from '../entity/tx/handlers/account/lifecycle/open-account';
 import { applyAccountSettledJEvent } from '../entity/tx/j-events-account-settled';
 import { createEmptyEnv } from '../runtime';
 import { hydrateAccountDocFromStorage, hydrateEntityStateFromStorage } from '../storage/read/hydration';

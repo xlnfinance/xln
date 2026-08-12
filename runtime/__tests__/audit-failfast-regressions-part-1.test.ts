@@ -113,24 +113,24 @@ import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity/tx/h
 
 import { buildCrossJurisdictionEntityOutput } from '../entity/tx/cross-j-outputs';
 
-import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc-onion-advance';
+import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc/onion-advance';
 
 import {
   handleAdmitCrossJurisdictionBookOrderEntityTx,
   handleCrossJurisdictionBookOrderRemovedEntityTx,
-} from '../entity/tx/handlers/cross-j-book-order';
+} from '../entity/tx/handlers/cross-j/book-order';
 
-import type { SwapOfferEvent } from '../entity/tx/handlers/account';
+import type { SwapOfferEvent } from '../entity/tx/handlers/account/index';
 
-import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../entity/tx/handlers/dispute';
+import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../entity/tx/handlers/dispute/index';
 
-import { handleJAbortSentBatch } from '../entity/tx/handlers/j-abort-sent-batch';
+import { handleJAbortSentBatch } from '../entity/tx/handlers/jurisdiction/j-abort-sent-batch';
 
-import { handleJRebroadcast } from '../entity/tx/handlers/j-rebroadcast';
+import { handleJRebroadcast } from '../entity/tx/handlers/jurisdiction/j-rebroadcast';
 
-import { handleSetHubConfigEntityTx, handleSetRebalancePolicyEntityTx } from '../entity/tx/handlers/account-admin';
+import { handleSetHubConfigEntityTx, handleSetRebalancePolicyEntityTx } from '../entity/tx/handlers/account/lifecycle/admin';
 
-import { buildSettlementSealDraft, processCommittedSettlementTransitionFollowup } from '../entity/tx/handlers/settle';
+import { buildSettlementSealDraft, processCommittedSettlementTransitionFollowup } from '../entity/tx/handlers/payments/settle';
 
 import { applyJEvent } from '../entity/tx/j-events';
 

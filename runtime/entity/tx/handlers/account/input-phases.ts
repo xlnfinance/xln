@@ -25,7 +25,7 @@ import { handleUnsafeAccountFrame } from './dispute-input';
 import {
   buildAccountHandlerResult,
   type AccountHandlerResult,
-} from './result';
+} from './lifecycle/result';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
 

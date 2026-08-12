@@ -70,8 +70,8 @@ import {
   type SwapOfferEvent,
 } from '../../tx/handlers/account';
 import { normalizeSwapOfferForOrderbook } from '../../../orderbook/swap-execution';
-import { buildCurrentEntityProfileHashToSign } from '../../tx/handlers/profile-certification';
-import { buildSettlementSealDraft } from '../../tx/handlers/settle';
+import { buildCurrentEntityProfileHashToSign } from '../../tx/handlers/account/lifecycle/profile-certification';
+import { buildSettlementSealDraft } from '../../tx/handlers/payments/settle';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../tx/htlc-route-lifecycle';
 import { MalformedEntityFrameInputError } from '../../tx/invariant-errors';
 import { normalizeEntityProposalBoard } from '../../tx/proposals';

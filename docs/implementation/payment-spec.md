@@ -207,8 +207,8 @@ Missing fee state rejects the batch before any reserve or Account mutation.
 
 1. `runtime/types/entity-tx.ts` — user and peer Entity intents.
 2. `runtime/types/account.ts` — Account Input, Tx, Frame, State, and Replica.
-3. `runtime/entity/tx/handlers/direct-payment.ts` — direct intent routing.
-4. `runtime/entity/tx/handlers/htlc-payment.ts` — prepared onion admission.
+3. `runtime/entity/tx/handlers/payments/direct-payment.ts` — direct intent routing.
+4. `runtime/entity/tx/handlers/htlc/payment.ts` — prepared onion admission.
 5. `runtime/account/consensus/index.ts` — the single Account input boundary.
 6. `runtime/account/tx/apply.ts` — validation dispatch.
 7. `runtime/account/tx/mutation.ts` — Account-owned mutation dispatch.

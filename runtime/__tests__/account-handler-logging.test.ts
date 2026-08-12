@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { deriveAccountWatchSeed } from '../protocol/identity/account-watch-seed';
-import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
+import { applyAccountInputToEntity } from '../entity/tx/handlers/account/index';
 import { createEmptyEnv } from '../runtime';
 import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
@@ -51,12 +51,12 @@ const makeEntityState = (): EntityState => ({
 });
 
 test('account handlers keep failures behind structured logging', () => {
-  const account = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/account.ts'), 'utf8');
+  const account = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/account/index.ts'), 'utf8');
   const inputPhases = readFileSync(
     join(process.cwd(), 'runtime/entity/tx/handlers/account/input-phases.ts'),
     'utf8',
   );
-  const openAccount = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/open-account.ts'), 'utf8');
+  const openAccount = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/account/lifecycle/open-account.ts'), 'utf8');
 
   expect(account).toContain("const accountHandlerLog = createStructuredLogger('account.handler');");
   expect(inputPhases).toContain("const accountHandlerLog = createStructuredLogger('account.handler');");

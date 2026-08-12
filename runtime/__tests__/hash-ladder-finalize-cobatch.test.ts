@@ -5,7 +5,7 @@ import {
   createEmptyBatch,
   initJBatch,
 } from '../jurisdiction/machine/batch';
-import { takeBroadcastBatch } from '../entity/tx/handlers/j-broadcast';
+import { takeBroadcastBatch } from '../entity/tx/handlers/jurisdiction/j-broadcast';
 import {
   scrubDisputeFinalizationsForCounterparty,
   scrubDisputeStartsForCounterparty,

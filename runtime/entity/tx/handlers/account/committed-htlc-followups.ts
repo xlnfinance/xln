@@ -14,7 +14,7 @@ import { pushCrossJurisdictionEntityOutput } from '../../cross-j-outputs';
 import { CROSS_J_MAX_FILL_RATIO } from '../../../../extensions/cross-j/index';
 import { buildHtlcFinalizedEventPayload } from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../infra/logger';
-import type { AccountTxTarget } from './orderbook-queue';
+import type { AccountTxTarget } from './orderbook/queue';
 import { MalformedEntityFrameInputError } from '../../invariant-errors';
 
 const accountFollowupLog = createStructuredLogger('account.followup');

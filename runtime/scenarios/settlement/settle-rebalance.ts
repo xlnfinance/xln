@@ -25,7 +25,7 @@ import {
   assert, findReplica, usd, snap,
 } from '../harness/helpers';
 import { bootScenario, registerEntities, type RegisteredEntity } from '../harness/boot';
-import { userAutoApprove } from '../../entity/tx/handlers/settle';
+import { userAutoApprove } from '../../entity/tx/handlers/payments/settle';
 import { deriveDelta } from '../../account/utils';
 import { isLeftEntity } from '../../entity/id';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';

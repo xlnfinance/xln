@@ -17,7 +17,7 @@ import {
   collectCommittedCrossJurisdictionCancelAcks,
   processOrderbookCancels,
   routeRemoteCrossJurisdictionBookCancels,
-} from '../entity/tx/handlers/account';
+} from '../entity/tx/handlers/account/index';
 
 import { applyEntityInput, mergeEntityInputs } from '../entity/consensus/index';
 
@@ -139,7 +139,7 @@ import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../entity/
 
 import { applyMergedEntityInputs } from '../runtime/input-pipeline/entity-inputs';
 
-import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matching';
+import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook';
 
 import {
   createRuntimeOutputRoutingDeps,

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { handleProposeEntityTx, handleVoteEntityTx } from '../entity/tx/handlers/basic';
+import { handleProposeEntityTx, handleVoteEntityTx } from '../entity/tx/handlers/system/basic';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { createEmptyEnv } from '../runtime';
@@ -11,7 +11,7 @@ import type { EntityState } from '../entity/types';
 import type { EntityTx } from '../types/entity-tx';
 
 test('basic entity proposal and vote traces stay behind structured logging', () => {
-  const handler = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/basic.ts'), 'utf8');
+  const handler = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/system/basic.ts'), 'utf8');
   const proposals = readFileSync(join(process.cwd(), 'runtime/entity/tx/proposals.ts'), 'utf8');
 
   expect(handler).toContain("const basicLog = createStructuredLogger('entity.basic');");

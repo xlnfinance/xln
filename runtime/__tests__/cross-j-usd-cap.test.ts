@@ -10,7 +10,7 @@ import {
 } from '../extensions/cross-j/orderbook';
 import { applyCommand, createBook, recordAcceptedUsdAskPrice } from '../orderbook';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import { isAuthorizedUsdReferenceAsk } from '../entity/tx/handlers/account/orderbook-matching-same-results';
+import { isAuthorizedUsdReferenceAsk } from '../entity/tx/handlers/account/orderbook/same/results';
 import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec/codec';
 import { validateStorageBookDocValue } from '../storage/schema/authoritative-schema';
 import { jref, makeJurisdiction } from './helpers/cross-j';
@@ -20,7 +20,7 @@ import {
   buildPreparedCrossJurisdictionRoute,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../extensions/cross-j';
-import { handleMaterializeCrossJurisdictionSwapEntityTx } from '../entity/tx/handlers/cross-j-setup';
+import { handleMaterializeCrossJurisdictionSwapEntityTx } from '../entity/tx/handlers/cross-j/setup';
 
 const internalWethUsdBook = () => {
   let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 16, stpPolicy: 0 });

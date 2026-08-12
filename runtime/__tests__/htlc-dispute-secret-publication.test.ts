@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { executeCrontab, initCrontab, scheduleHook } from '../entity/scheduler';
-import { handleDisputeFinalize } from '../entity/tx/handlers/dispute';
+import { handleDisputeFinalize } from '../entity/tx/handlers/dispute/index';
 import {
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
