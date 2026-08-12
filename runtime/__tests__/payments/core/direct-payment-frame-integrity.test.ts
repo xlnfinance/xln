@@ -69,7 +69,7 @@ describe('direct payment frame integrity', () => {
 
     const result = handleDirectPayment(account, tx, false);
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(account.state.deltas.get(1)?.offdelta).toBe(100n);
     expect(account.currentFrame.stateHash).toBe(frameHashBefore);
     expect(await computeFrameHash(account.currentFrame)).toBe(frameHashBefore);
@@ -93,8 +93,9 @@ describe('direct payment frame integrity', () => {
     };
 
     const result = handleDirectPayment(account, forged, false);
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('must match the frame proposer');
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected forged payment rejection');
+    expect(result.rejection.message).toContain('must match the frame proposer');
     expect(account.state.deltas.get(1)?.offdelta).toBe(0n);
   });
 
@@ -118,7 +119,7 @@ describe('direct payment frame integrity', () => {
       };
 
       for (let index = 0; index < paymentCount; index += 1) {
-        expect(handleDirectPayment(account, tx, false).success).toBe(true);
+        expect(handleDirectPayment(account, tx, false).ok).toBe(true);
       }
       expect(account.pendingForwards).toHaveLength(paymentCount);
 
@@ -159,7 +160,7 @@ describe('direct payment frame integrity', () => {
       },
     }, false);
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(account.state.deltas.get(1)?.offdelta).toBe(1n);
     expect(account.pendingForwards).toHaveLength(1);
     expect(account.pendingForwards?.[0]?.route).toEqual([LEFT.toUpperCase(), NEXT]);
@@ -180,8 +181,8 @@ describe('direct payment frame integrity', () => {
       },
     }, false);
 
-    expect(payment('direct', [LEFT, NEXT]).success).toBe(false);
-    expect(payment('trusted', [LEFT, NEXT, `0x${'44'.repeat(32)}`]).success).toBe(false);
+    expect(payment('direct', [LEFT, NEXT]).ok).toBe(false);
+    expect(payment('trusted', [LEFT, NEXT, `0x${'44'.repeat(32)}`]).ok).toBe(false);
     expect(account.state.deltas.get(1)?.offdelta).toBe(0n);
     expect(account.pendingForwards).toBeUndefined();
   });

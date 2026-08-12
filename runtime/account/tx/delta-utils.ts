@@ -1,10 +1,18 @@
 import type { AccountState, Delta } from '../../types/account';
 import { TOKENS } from '../../config/constants';
-import { assertAccountDeltaCapacity, createDefaultDelta } from '../state/delta';
+import {
+  ACCOUNT_DELTA_ERROR_CODES,
+  AccountDeltaError,
+  assertAccountDeltaCapacity,
+  createDefaultDelta,
+} from '../state/delta';
 
 export function ensureDelta(account: AccountState, tokenId: number): Delta {
   if (!Number.isSafeInteger(tokenId) || tokenId < 0 || tokenId > TOKENS.MAX_TOKEN_ID) {
-    throw new Error(`ACCOUNT_DELTA_TOKEN_INVALID:${String(tokenId)}`);
+    throw new AccountDeltaError(
+      ACCOUNT_DELTA_ERROR_CODES.tokenInvalid,
+      String(tokenId),
+    );
   }
   let delta = account.deltas.get(tokenId);
   if (!delta) {

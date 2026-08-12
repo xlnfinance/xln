@@ -1250,7 +1250,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       env.state.timestamp,
       1,
     );
-    expect(progress.success).toBe(true);
+    expect(progress.ok).toBe(true);
     expect(targetAccount.state.pulls?.get(route.targetPull!.pullId)?.crossJurisdiction).toMatchObject({
       fillSeq: 1,
       cumulativeFillRatio: 65_535,
@@ -1635,7 +1635,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           updatedAccount.state.leftEntity === sourceHub,
           env.state.timestamp,
         )
-      ).success,
+      ).ok,
     ).toBe(true);
     const continuation = await applyEntityTx(env, result.newState, {
       type: 'requestCrossJurisdictionClear',

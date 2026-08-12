@@ -283,7 +283,7 @@ const runPass = async (
     const startedAt = getPerfMs();
     const result = await applyAccountTx(same, sameResolveTx(index), false, 2_000 + index, 2 + index);
     sameElapsedMs += getPerfMs() - startedAt;
-    if (!result.success) throw new Error(`SAME_SWAP_FAILED:${index}:${result.error}`);
+    if (!result.ok) throw new Error(`SAME_SWAP_FAILED:${index}:${result.rejection.message}`);
   }
   let crossElapsedMs = 0;
   for (let index = 0; index < swaps; index += 1) {
@@ -298,7 +298,7 @@ const runPass = async (
     const startedAt = getPerfMs();
     const result = await applyAccountTx(cross, crossAckTx(index), false, 2_000 + index, 2 + index);
     crossElapsedMs += getPerfMs() - startedAt;
-    if (!result.success) throw new Error(`CROSS_SWAP_FAILED:${index}:${result.error}`);
+    if (!result.ok) throw new Error(`CROSS_SWAP_FAILED:${index}:${result.rejection.message}`);
   }
   return { same, cross, elapsedMs: sameElapsedMs + crossElapsedMs, sameElapsedMs, crossElapsedMs };
 };

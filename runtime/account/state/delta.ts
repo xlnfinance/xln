@@ -1,6 +1,25 @@
 import type { Delta } from '../../types/account';
 import { LIMITS } from '../../config/constants';
 
+export const ACCOUNT_DELTA_ERROR_CODES = {
+  tokenInvalid: 'ACCOUNT_DELTA_TOKEN_INVALID',
+  rowCountInvalid: 'ACCOUNT_DELTA_ROW_COUNT_INVALID',
+  rowLimitExceeded: 'ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED',
+} as const satisfies Record<string, string>;
+
+export type AccountDeltaErrorCode =
+  (typeof ACCOUNT_DELTA_ERROR_CODES)[keyof typeof ACCOUNT_DELTA_ERROR_CODES];
+
+export class AccountDeltaError extends Error {
+  readonly code: AccountDeltaErrorCode;
+
+  constructor(code: AccountDeltaErrorCode, detail: string) {
+    super(`${code}:${detail}`);
+    this.name = 'AccountDeltaError';
+    this.code = code;
+  }
+}
+
 type InitialCreditLimits = Readonly<{
   left?: bigint;
   right?: bigint;
@@ -35,12 +54,15 @@ export const assertAccountDeltaCapacity = (
   context: string,
 ): void => {
   if (!Number.isSafeInteger(rowCount) || rowCount < 0) {
-    throw new Error(`ACCOUNT_DELTA_ROW_COUNT_INVALID:${context}:${rowCount}`);
+    throw new AccountDeltaError(
+      ACCOUNT_DELTA_ERROR_CODES.rowCountInvalid,
+      `${context}:${rowCount}`,
+    );
   }
   if (rowCount > LIMITS.MAX_ACCOUNT_TOKEN_ROWS) {
-    throw new Error(
-      `ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:${context}:` +
-      `${rowCount}:${LIMITS.MAX_ACCOUNT_TOKEN_ROWS}`,
+    throw new AccountDeltaError(
+      ACCOUNT_DELTA_ERROR_CODES.rowLimitExceeded,
+      `${context}:${rowCount}:${LIMITS.MAX_ACCOUNT_TOKEN_ROWS}`,
     );
   }
 };

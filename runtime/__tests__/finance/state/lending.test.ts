@@ -111,7 +111,7 @@ const commit = async (
   timestamp: number,
 ): Promise<AccountTxTarget[]> => {
   const result = await applyAccountTx(state.accounts.get(counterparty)!, tx, byLeft, timestamp, 0, false);
-  expect(result.success, result.error).toBe(true);
+  expect(result.ok, result.ok ? undefined : result.rejection.message).toBe(true);
   const followups: AccountTxTarget[] = [];
   applyCommittedAccountFrameFollowups(state, counterparty, frame(tx, byLeft, timestamp), followups, undefined, []);
   return followups;
@@ -149,13 +149,13 @@ describe('payer-authenticated hub lending', () => {
       },
     }));
     const borrowerAccount = state.accounts.get(BORROWER)!;
-    for (const tx of borrows) expect((await applyAccountTx(borrowerAccount, tx, false)).success).toBe(true);
+    for (const tx of borrows) expect((await applyAccountTx(borrowerAccount, tx, false)).ok).toBe(true);
     const grants: AccountTxTarget[] = [];
     applyCommittedAccountFrameFollowups(state, BORROWER, frame(borrows, false, 2_000), grants, undefined, []);
     expect(grants.map(output => output.tx.type === 'lending_credit' ? output.tx.data.creditLimit : 0n))
       .toEqual([20_100n, 20_300n]);
 
-    for (const output of grants) expect((await applyAccountTx(borrowerAccount, output.tx, true)).success).toBe(true);
+    for (const output of grants) expect((await applyAccountTx(borrowerAccount, output.tx, true)).ok).toBe(true);
     applyCommittedAccountFrameFollowups(
       state,
       BORROWER,
@@ -175,7 +175,7 @@ describe('payer-authenticated hub lending', () => {
         amount: loan.repaymentAmount,
       },
     }));
-    for (const tx of repayments) expect((await applyAccountTx(borrowerAccount, tx, false)).success).toBe(true);
+    for (const tx of repayments) expect((await applyAccountTx(borrowerAccount, tx, false)).ok).toBe(true);
     const revokes: AccountTxTarget[] = [];
     applyCommittedAccountFrameFollowups(state, BORROWER, frame(repayments, false, 3_000), revokes, undefined, []);
     expect(revokes.map(output => output.tx.type === 'lending_credit' ? output.tx.data.creditLimit : 0n))
@@ -277,7 +277,7 @@ describe('payer-authenticated hub lending', () => {
 
     await expect(applyAccountTx(account, tx, true)).rejects.toThrow('LENDING_LENDER_NOT_PROPOSER');
     const first = await applyAccountTx(account, tx, false);
-    expect(first.success).toBe(true);
+    expect(first.ok).toBe(true);
     const offdeltaAfterFirst = account.state.deltas.get(1)!.offdelta;
     await expect(applyAccountTx(account, tx, false)).rejects.toThrow('LENDING_INTENT_REPLAY');
     expect(account.state.deltas.get(1)!.offdelta).toBe(offdeltaAfterFirst);

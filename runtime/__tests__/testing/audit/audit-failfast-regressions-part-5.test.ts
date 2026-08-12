@@ -1307,7 +1307,7 @@ describe('audit fail-fast regressions', () => {
         executorIsLeft: true,
       },
     };
-    expect((await applyAccountTx(fixture.account, upsertTx, true, 1_000)).success).toBe(true);
+    expect((await applyAccountTx(fixture.account, upsertTx, true, 1_000)).ok).toBe(true);
     fixture.account.state.settlementWorkspace!.leftHanko = '0x1234';
     fixture.account.state.settlementWorkspace!.nonceAtSign = 8;
     fixture.account.state.settlementWorkspace!.settlementHash = `0x${'81'.repeat(32)}`;
@@ -1516,7 +1516,7 @@ describe('audit fail-fast regressions', () => {
       },
     };
     const applied = await applyAccountTx(account, transition, false, 1_000);
-    expect(applied.success).toBe(true);
+    expect(applied.ok).toBe(true);
     const result = await processCommittedSettlementTransitionFollowup(
       account,
       transition,
@@ -1824,8 +1824,8 @@ describe('audit fail-fast regressions', () => {
       1,
     );
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain(`max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`);
+    expect(result.ok).toBe(false);
+    expect(result.ok ? undefined : result.rejection.message).toContain(`max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`);
     expect(accountMachine.state.locks.size).toBe(LIMITS.MAX_ACCOUNT_HTLC_LOCKS);
   });
 

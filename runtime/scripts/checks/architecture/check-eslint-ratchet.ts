@@ -15,8 +15,8 @@ type EslintFile = {
 };
 
 const DEBT_RULES = new Set(['import/no-duplicates', 'no-restricted-properties']);
-const DEBT_COUNT = 431;
-const DEBT_SHA256 = '424e316f99074e05a93ce4e4bb66f0ea51c9e5686f522b758f960f254f9d704c';
+const DEBT_COUNT = 429;
+const DEBT_SHA256 = '4832247b2989535fd60e6feed421d4792b48fe034191b03121f14bdecc9f520f';
 const outputPath = `${tmpdir()}/xln-eslint-${String(process.pid)}.json`;
 
 const result = spawnSync(

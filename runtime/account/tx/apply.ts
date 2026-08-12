@@ -11,6 +11,7 @@ import type { HtlcEnforcementClock } from '../htlc-deadline';
 import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../commitment/map-commitment';
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
+import { withAccountTxCandidateEffects } from './apply-result';
 
 const missingCommitmentInvalidation = (_tx: never): never => {
   throw new Error('ACCOUNT_TX_COMMITMENT_INVALIDATION_MISSING');
@@ -124,8 +125,8 @@ export async function applyAccountTx(
     candidateEffects,
     htlcEnforcementClock,
   );
-  if (result.success) {
+  if (result.ok) {
     invalidateCommittedMapsForTx(account, accountTx, deltaKeysBeforeMutation);
   }
-  return candidateEffects.length > 0 ? { ...result, candidateEffects } : result;
+  return withAccountTxCandidateEffects(result, candidateEffects);
 }

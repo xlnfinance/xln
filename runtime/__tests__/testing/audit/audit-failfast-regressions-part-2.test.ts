@@ -1137,7 +1137,7 @@ describe('audit fail-fast regressions', () => {
       true,
       env.state.timestamp,
     );
-    expect(workspaceResult.success).toBe(true);
+    expect(workspaceResult.ok).toBe(true);
     receiver.proofHeader.nextProofNonce = 9;
     const workspaceHash = receiver.state.settlementWorkspace!.workspaceHash;
     const staleSeal: AccountTx = {
@@ -1381,7 +1381,7 @@ describe('audit fail-fast regressions', () => {
       undefined,
       { timestamp: 120_000, jHeight: 5 },
     );
-    expect(timeout.success).toBe(true);
+    expect(timeout.ok).toBe(true);
     expect(timeoutAccount.state.locks.has('clock-bound-lock')).toBe(false);
 
     const secret = `0x${'44'.repeat(32)}`;
@@ -1398,7 +1398,7 @@ describe('audit fail-fast regressions', () => {
       undefined,
       { timestamp: 119_999, jHeight: 5 },
     );
-    expect(reveal.success).toBe(true);
+    expect(reveal.ok).toBe(true);
     expect(secretAccount.state.locks.has('clock-bound-lock')).toBe(false);
   });
 
@@ -1572,7 +1572,7 @@ describe('audit fail-fast regressions', () => {
     expect(frame.timestamp).toBe(env.state.timestamp);
 
     const replayed = await applyAccountTx(receiver, pullLock, frame.byLeft!, frame.timestamp, frame.jHeight, true, env);
-    expect(replayed.success).toBe(true);
+    expect(replayed.ok).toBe(true);
     expect(computeAccountStateRoot(receiver.state)).toBe(frame.accountStateRoot);
   });
 

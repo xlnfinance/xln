@@ -91,8 +91,9 @@ describe('account economic swap limits', () => {
       },
     }, true, 2);
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain(`max ${limit}`);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected swap offer cap rejection');
+    expect(result.rejection.message).toContain(`max ${limit}`);
     expect(swapOffers.has('twenty-first')).toBe(false);
     expect(swapOffers.size).toBe(limit);
   });
@@ -124,8 +125,9 @@ describe('account economic swap limits', () => {
       },
     } as Parameters<typeof handleSwapOffer>[1], true, 2);
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain(`max ${limit}`);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected swap offer cap rejection');
+    expect(result.rejection.message).toContain(`max ${limit}`);
     expect(swapOffers.has('cross-overflow')).toBe(false);
   });
 });

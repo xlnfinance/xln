@@ -358,7 +358,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(result.swapOfferCreated?.crossJurisdiction).toEqual(route);
     expect(result.swapOfferCreated?.maxFee).toBe(0n);
     expect(result.swapOfferCreated?.minNetReceive).toBe(route.target.amount);
@@ -456,8 +456,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('chain-proportional');
+    expect(result.ok).toBe(false);
+    expect(result.ok ? undefined : result.rejection.message).toContain('chain-proportional');
     expect(account.state.deltas.get(route.source.tokenId)!.offdelta).toBe(before);
 
     const forgedOpeningRoute = {
@@ -483,8 +483,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         crossJurisdictionRoute: forgedOpeningRoute,
       },
     }, route.sourcePull!.signedAmount > 0n, 2_000, 1);
-    expect(opening.success).toBe(false);
-    expect(opening.error).toBe('Cross-j pull opening must be a zero-progress resting route');
+    expect(opening.ok).toBe(false);
+    expect(opening.ok ? undefined : opening.rejection.message).toBe('Cross-j pull opening must be a zero-progress resting route');
     expect(openingAccount.state.pulls?.has(route.sourcePull!.pullId) ?? false).toBe(false);
   });
 
@@ -907,7 +907,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(account.state.swapOffers.has(route.orderId)).toBe(true);
     expect(account.state.pulls?.has(route.sourcePull!.pullId)).toBe(true);
     const updatedRoute = account.state.swapOffers.get(route.orderId)?.crossJurisdiction;
@@ -1000,7 +1000,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     const updatedRoute = account.state.swapOffers.get(route.orderId)?.crossJurisdiction;
     expect(updatedRoute?.filledSourceAmount).toBe(500n);
     expect(updatedRoute?.priceImprovementSourceAmount).toBe(25n);
@@ -1087,7 +1087,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(account.state.swapOffers.has(route.orderId)).toBe(false);
     const closed = account.swapClosedOrders?.get(route.orderId);
     expect(closed?.resolves).toHaveLength(1);
@@ -1283,7 +1283,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     const updatedRoute = account.state.swapOffers.get(route.orderId)?.crossJurisdiction;
     expect(updatedRoute?.status).toBe('partially_filled');
     expect(updatedRoute?.cumulativeFillRatio).toBe(16_384);
@@ -1558,7 +1558,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
 
     const updatedRoute = account.state.swapOffers.get(route.orderId)?.crossJurisdiction;
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(updatedRoute?.fillSeq).toBe(2);
     expect(updatedRoute?.cumulativeFillRatio).toBe(32_768);
     expect(updatedRoute?.filledSourceAmount).toBe(20_000_000_000_000_000n);
@@ -1644,7 +1644,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(account.state.swapOffers.has(route.orderId)).toBe(false);
     const closed = account.swapClosedOrders?.get(route.orderId);
     expect(closed).toBeDefined();

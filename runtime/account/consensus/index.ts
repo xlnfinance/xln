@@ -246,14 +246,14 @@ const replayIncomingFrameOnClone = async (
         jHeight: securityContext.finalizedJHeight,
       },
     );
-    if (!result.success) {
+    if (!result.ok) {
       return {
         kind: 'return',
         result: {
           success: false,
-          error: `Frame application failed: ${result.error}`,
+          error: `Frame application failed: ${result.rejection.message}`,
           events,
-          ...(result.rejection ? { txRejection: result.rejection } : {}),
+          txRejection: result.rejection,
         },
       };
     }
@@ -262,18 +262,18 @@ const replayIncomingFrameOnClone = async (
       accountLog.debug('receiver.tx.processed', { type: accountTx.type, success: true });
     }
     replay.processEvents.push(...result.events);
-    if (result.secret && result.hashlock) {
+    if (result.outcome === 'htlc_secret') {
       replay.revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
     }
-    if (result.timedOutHashlock) timedOutHashlocks.push(result.timedOutHashlock);
-    if (result.swapOfferCreated) replay.swapOffersCreated.push(result.swapOfferCreated);
-    if (result.swapOfferCancelRequested) {
+    if (result.outcome === 'htlc_error') timedOutHashlocks.push(result.hashlock);
+    if (result.outcome === 'swap_offer_created') replay.swapOffersCreated.push(result.swapOfferCreated);
+    if (result.outcome === 'swap_cancel_requested') {
       replay.swapCancelRequests.push({
         ...result.swapOfferCancelRequested,
         accountId: input.fromEntityId,
       });
     }
-    if (result.swapOfferCancelled) replay.swapOffersCancelled.push(result.swapOfferCancelled);
+    if (result.outcome === 'swap_cancelled') replay.swapOffersCancelled.push(result.swapOfferCancelled);
   }
   return { kind: 'continue', replay };
 };
@@ -389,13 +389,13 @@ const reexecuteIncomingFrame = async (
       },
     );
     candidateEffects.push(...(commitResult.candidateEffects ?? []));
-    if (!commitResult.success) {
+    if (!commitResult.ok) {
       accountLog.error('frame.commit.failed', {
         side: 'receiver',
         type: tx.type,
-        error: commitResult.error,
+        error: commitResult.rejection.message,
       });
-      throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
+      throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.rejection.message}`);
     }
     assertNoUnilateralSettlementMutation(account, beforeSettlement, tx, 'receiver/commit');
   }

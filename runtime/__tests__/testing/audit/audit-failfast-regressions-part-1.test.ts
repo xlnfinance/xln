@@ -2368,7 +2368,7 @@ describe('audit fail-fast regressions', () => {
       1,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     const offer = account.state.swapOffers.get(route.orderId);
     expect(offer?.giveAmount).toBe(route.source.amount);
     expect(offer?.wantAmount).toBe(route.target.amount);
@@ -2486,8 +2486,8 @@ describe('audit fail-fast regressions', () => {
         1,
       );
 
-      expect(result.error).toBeUndefined();
-      expect(result.success).toBe(true);
+      expect(result.ok ? undefined : result.rejection.message).toBeUndefined();
+      expect(result.ok).toBe(true);
       const offer = account.state.swapOffers.get(restingRoute.orderId);
       expect(offer?.giveAmount).toBe(amounts.sourceAmount);
       expect(offer?.wantAmount).toBe(amounts.targetAmount);
@@ -2584,7 +2584,7 @@ describe('audit fail-fast regressions', () => {
       1,
       1_000,
     );
-    expect(payerResult.success).toBe(false);
+    expect(payerResult.ok).toBe(false);
     expect(account.state.locks.has('lock-1')).toBe(true);
     expect(account.state.deltas.get(1)?.leftHold).toBe(amount);
 
@@ -2595,7 +2595,7 @@ describe('audit fail-fast regressions', () => {
       1,
       1_000,
     );
-    expect(beneficiaryResult.success).toBe(true);
+    expect(beneficiaryResult.ok).toBe(true);
     expect(account.state.locks.has('lock-1')).toBe(false);
     expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
   });

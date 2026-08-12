@@ -161,14 +161,14 @@ const applyPendingFrameTransactions = async (
       committedJClaims,
     );
     candidateEffects.push(...(result.candidateEffects ?? []));
-    if (!result.success) {
+    if (!result.ok) {
       ackLog.error('frame.commit.failed', {
         side: 'proposer',
         type: tx.type,
-        error: result.error,
+        error: result.rejection.message,
       });
       throw new Error(
-        `Frame ${pendingFrame.height} commit failed: ${tx.type} - ${result.error}`,
+        `Frame ${pendingFrame.height} commit failed: ${tx.type} - ${result.rejection.message}`,
       );
     }
     assertNoUnilateralSettlementMutation(
@@ -177,7 +177,7 @@ const applyPendingFrameTransactions = async (
       tx,
       'proposer/commit',
     );
-    if (result.timedOutHashlock) timedOutHashlocks.push(result.timedOutHashlock);
+    if (result.outcome === 'htlc_error') timedOutHashlocks.push(result.hashlock);
   }
   commitStagedAccountCommitmentCache(account.state);
   assertLiveCommitMatchesFrame(

@@ -9,6 +9,7 @@ import {
 import { createDefaultDelta } from '../../../account/state/delta';
 import { handleSwapResolve } from '../../../account/tx/handlers/swap/resolve';
 import { handleSwapOffer } from '../../../account/tx/handlers/swap/offer';
+import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 import { decodeAccountTx } from '../../../account/tx-validation';
 import { validateAccountReplica } from '../../../account/validation/state-validation';
 import { buildEntityTransactionProposalAction } from '../../../entity/auth/authorization';
@@ -56,6 +57,7 @@ const resolvableAccount = (): AccountReplica => {
     [offer.wantTokenId, wantDelta],
   ]);
   account.state.swapOffers = new Map([[offer.offerId, offer]]);
+  recordSwapOfferLifecycle(account, offer);
   return account;
 };
 
@@ -196,7 +198,7 @@ describe('swap net authorization', () => {
         minNetReceive: amount - 200n,
       },
     }, true, 1);
-    expect(accepted.success).toBe(true);
+    expect(accepted.ok).toBe(true);
     expect(account.state.swapOffers.get('committed-authorization')).toMatchObject({
       maxFee: 200n,
       minNetReceive: amount - 200n,
@@ -214,8 +216,9 @@ describe('swap net authorization', () => {
         minNetReceive: 1n,
       },
     }, true, 1);
-    expect(invalid.success).toBe(false);
-    expect(invalid.error).toBe('SWAP_NET_AUTH_INITIAL_TERMS_INVALID');
+    expect(invalid.ok).toBe(false);
+    if (invalid.ok) throw new Error('expected invalid swap auth');
+    expect(invalid.rejection.message).toBe('SWAP_NET_AUTH_INITIAL_TERMS_INVALID');
     expect(account.state.swapOffers.has('invalid-authorization')).toBe(false);
   });
 
@@ -246,8 +249,9 @@ describe('swap net authorization', () => {
         feeAmount: 101n,
       },
     }, false, 2);
-    expect(rejected.success).toBe(false);
-    expect(rejected.error).toBe('SWAP_NET_AUTH_MAX_FEE_EXCEEDED');
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) throw new Error('expected over-cap swap fill');
+    expect(rejected.rejection.message).toBe('SWAP_NET_AUTH_MAX_FEE_EXCEEDED');
     expect(overCap.state.swapOffers.get('net-authorized-offer')?.giveAmount)
       .toBe(2n * amount);
 
@@ -266,7 +270,7 @@ describe('swap net authorization', () => {
         feeAmount: 100n,
       },
     }, false, 2);
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(accepted.state.swapOffers.get('net-authorized-offer')).toMatchObject({
       giveAmount: amount,
       wantAmount: amount,

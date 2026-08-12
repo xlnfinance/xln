@@ -5,17 +5,15 @@ import { deriveSwapOffdeltaChanges } from '../../../../../orderbook/swap-executi
 import { getHold, releaseHold } from '../../../hold-utils';
 import { ensureDelta } from '../../../delta-utils';
 import { deriveTransferOffdeltaChange } from '../../../../../protocol/transform/delta-movement';
+import { accountTxValidationRejected } from '../../../apply-result';
 import type {
   AppliedSwapResolve,
   SwapResolveFailure,
   ValidatedSwapResolve,
 } from './types';
 
-const failure = (events: string[], error: string): SwapResolveFailure => ({
-  success: false,
-  error,
-  events,
-});
+const failure = (events: string[], error: string): SwapResolveFailure =>
+  accountTxValidationRejected(error, events);
 
 const validateCounterpartyCapacity = (
   account: AccountState,

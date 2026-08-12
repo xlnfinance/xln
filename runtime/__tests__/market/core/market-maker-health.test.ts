@@ -253,8 +253,8 @@ test('five-token market maker depth remains canonical through Account and hub ad
         priceTicks: spec.priceTicks,
       },
     }, true, 1);
-    expect(result.error).toBeUndefined();
-    expect(result.success).toBe(true);
+    expect(result.ok ? undefined : result.rejection.message).toBeUndefined();
+    expect(result.ok).toBe(true);
 
     const offer = account.state.swapOffers.get(spec.offerId)!;
     expect(offer.priceTicks).toBe(spec.priceTicks);

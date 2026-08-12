@@ -10,13 +10,14 @@ import type {
   PreparedCrossSwapFillAck,
 } from './types';
 import type { AccountReplica } from '../../../../../types/account';
+import { accountTxValidationRejected } from '../../../apply-result';
 
 const reject = (
   events: string[],
   error: string,
 ): CrossSwapFillAckAdmission => ({
   ok: false,
-  result: { success: false, error, events },
+  result: accountTxValidationRejected(error, events),
 });
 
 export const prepareCrossSwapFillAck = (
@@ -98,8 +99,4 @@ export const prepareCrossSwapFillAck = (
 export const rejectCrossSwapFillAck = (
   prepared: PreparedCrossSwapFillAck,
   error: string,
-): CrossSwapFillAckResult => ({
-  success: false,
-  error,
-  events: prepared.events,
-});
+): CrossSwapFillAckResult => accountTxValidationRejected(error, prepared.events);

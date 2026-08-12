@@ -13,42 +13,41 @@ import { isLeftEntity } from '../../../../protocol/identity/entity-id';
 import { createStructuredLogger } from '../../../../infra/logger';
 import { getAccountPerspective } from '../../../state/perspective';
 import { ensureDelta } from '../../delta-utils';
+import type { ApplyAccountTxResult } from '../../apply-types';
+import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
 const directPaymentLog = createStructuredLogger('account.payment');
 
 type DirectPaymentTx = Extract<AccountTx, { type: 'direct_payment' }>;
-type DirectPaymentResult = { success: boolean; events: string[]; error?: string };
 type PendingPaymentForward = NonNullable<AccountReplica['pendingForwards']>[number];
 
 const validatePaymentEnvelope = (
   payment: DirectPaymentTx['data'],
   events: string[],
-): DirectPaymentResult | undefined => {
+): ApplyAccountTxResult | undefined => {
   const { tokenId, amount, route, deliveryMode, trustedGatewayEntityId } = payment;
   if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
     directPaymentLog.debug('invalid_amount', { tokenId, amount: amount.toString() });
-    return {
-      success: false,
-      error: `Invalid payment amount: ${amount.toString()} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT.toString()}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT.toString()})`,
+    return accountTxValidationRejected(
+      `Invalid payment amount: ${amount.toString()} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT.toString()}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT.toString()})`,
       events,
-    };
+    );
   }
   if (route.length === 0 || route.length > FINANCIAL.MAX_ROUTE_HOPS) {
     directPaymentLog.debug('route_too_long', { hops: route.length, max: FINANCIAL.MAX_ROUTE_HOPS });
-    return {
-      success: false,
-      error: `Route too long: ${route.length} hops (max ${FINANCIAL.MAX_ROUTE_HOPS})`,
+    return accountTxValidationRejected(
+      `Route too long: ${route.length} hops (max ${FINANCIAL.MAX_ROUTE_HOPS})`,
       events,
-    };
+    );
   }
   if (deliveryMode !== 'direct' && deliveryMode !== 'trusted') {
-    return { success: false, error: 'Payment delivery mode must be direct or trusted', events };
+    return accountTxValidationRejected('Payment delivery mode must be direct or trusted', events);
   }
   if (deliveryMode === 'direct' && trustedGatewayEntityId !== undefined) {
-    return { success: false, error: 'Direct payment forbids a trusted gateway', events };
+    return accountTxValidationRejected('Direct payment forbids a trusted gateway', events);
   }
   if (deliveryMode === 'trusted' && !trustedGatewayEntityId) {
-    return { success: false, error: 'Trusted payment requires one declared gateway', events };
+    return accountTxValidationRejected('Trusted payment requires one declared gateway', events);
   }
   return undefined;
 };
@@ -59,7 +58,7 @@ const resolvePaymentParties = (
   byLeft: boolean,
   events: string[],
 ):
-  | DirectPaymentResult
+  | ApplyAccountTxResult
   | {
       leftEntity: string;
       paymentFromEntity: string;
@@ -79,11 +78,10 @@ const resolvePaymentParties = (
     (assertedFrom && assertedFrom !== paymentFromEntity.toLowerCase()) ||
     (assertedTo && assertedTo !== paymentToEntity.toLowerCase())
   ) {
-    return {
-      success: false,
-      error: 'FATAL: Payment direction must match the frame proposer',
+    return accountTxValidationRejected(
+      'FATAL: Payment direction must match the frame proposer',
       events,
-    };
+    );
   }
   return { leftEntity, paymentFromEntity, paymentToEntity };
 };
@@ -95,12 +93,15 @@ const validatePaymentRoute = (
   payment: DirectPaymentTx['data'],
   parties: { paymentFromEntity: string; paymentToEntity: string },
   events: string[],
-): DirectPaymentResult | undefined => {
+): ApplyAccountTxResult | undefined => {
   const { deliveryMode, route, trustedGatewayEntityId } = payment;
   if (deliveryMode === 'direct') {
     return route.length === 1 && sameEntity(route[0], parties.paymentToEntity)
       ? undefined
-      : { success: false, error: 'Direct payment route must contain only the bilateral recipient', events };
+      : accountTxValidationRejected(
+          'Direct payment route must contain only the bilateral recipient',
+          events,
+        );
   }
 
   const gateway = String(trustedGatewayEntityId).toLowerCase();
@@ -109,7 +110,10 @@ const validatePaymentRoute = (
   if (from === gateway) {
     return route.length === 1 && sameEntity(route[0], parties.paymentToEntity)
       ? undefined
-      : { success: false, error: 'Trusted gateway final leg must contain only the recipient', events };
+      : accountTxValidationRejected(
+          'Trusted gateway final leg must contain only the recipient',
+          events,
+        );
   }
   const finalTarget = String(route[1] || '').toLowerCase();
   if (
@@ -122,7 +126,10 @@ const validatePaymentRoute = (
   ) {
     return undefined;
   }
-  return { success: false, error: 'Trusted payment must be source → declared gateway → recipient', events };
+  return accountTxValidationRejected(
+    'Trusted payment must be source → declared gateway → recipient',
+    events,
+  );
 };
 
 const appendPaymentEvent = (
@@ -177,13 +184,13 @@ export function handleDirectPayment(
   account: AccountReplica,
   accountTx: DirectPaymentTx,
   byLeft: boolean,
-): DirectPaymentResult {
+): ApplyAccountTxResult {
   const { tokenId, amount } = accountTx.data;
   const events: string[] = [];
   const envelopeError = validatePaymentEnvelope(accountTx.data, events);
   if (envelopeError) return envelopeError;
   const parties = resolvePaymentParties(account, accountTx.data, byLeft, events);
-  if ('success' in parties) return parties;
+  if ('ok' in parties) return parties;
   const routeError = validatePaymentRoute(accountTx.data, parties, events);
   if (routeError) return routeError;
   const { counterparty } = getAccountPerspective(account.state, account.proofHeader.fromEntity);
@@ -192,11 +199,10 @@ export function handleDirectPayment(
   const senderIsLeft = parties.paymentFromEntity === parties.leftEntity;
   const senderDerived = deriveDelta(delta, senderIsLeft);
   if (amount > senderDerived.outCapacity) {
-    return {
-      success: false,
-      error: `Insufficient capacity for sender ${parties.paymentFromEntity.slice(-4)}: need ${amount.toString()}, available ${senderDerived.outCapacity.toString()}`,
+    return accountTxValidationRejected(
+      `Insufficient capacity for sender ${parties.paymentFromEntity.slice(-4)}: need ${amount.toString()}, available ${senderDerived.outCapacity.toString()}`,
       events,
-    };
+    );
   }
   delta.offdelta += deriveTransferOffdeltaChange(senderIsLeft, amount);
   appendPaymentEvent(account, accountTx.data, parties, byLeft, counterparty, events);
@@ -204,5 +210,5 @@ export function handleDirectPayment(
     events.push(`↪️ Forwarding payment to ${forward.route.at(-1)!.slice(-4)} via ${forward.route.length - 1} more hops`);
     account.pendingForwards = [...(account.pendingForwards ?? []), forward];
   }
-  return { success: true, events };
+  return accountTxApplied(events);
 }

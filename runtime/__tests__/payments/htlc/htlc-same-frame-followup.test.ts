@@ -72,14 +72,14 @@ describe('same-frame incoming HTLC followup', () => {
       { type: 'htlc_resolve', data: { lockId: id('4'), outcome: 'secret', secret: id('8') } },
       false, 1, 1,
     );
-    expect(wrong.success).toBe(false);
+    expect(wrong.ok).toBe(false);
     const applied = structuredClone(account);
     const valid = await handleHtlcResolve(
       applied as never,
       { type: 'htlc_resolve', data: { lockId: id('4'), outcome: 'secret', secret } },
       false, 1, 1,
     );
-    expect(valid.success).toBe(true);
+    expect(valid.ok).toBe(true);
     expect(applied.locks.has(id('4'))).toBe(false);
   });
 

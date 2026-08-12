@@ -15,7 +15,12 @@ import { prepareAccountJClaimTx } from '../../j-claims/j-claim-transition';
 import type { AccountJClaimNodeStore } from '../../../types/finance/account-j-claims';
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
 import type { AccountSwapOfferCreated } from '../types';
-import type { AccountTxRejection } from '../../tx/apply-types';
+import {
+  ACCOUNT_TX_FAILURE_DISPOSITIONS,
+  type AccountTxFailureDisposition,
+  type AccountTxRejection,
+} from '../../tx/apply-types';
+import { accountTxRejectionMessage } from '../../tx/apply-result';
 
 const accountLog = createStructuredLogger('account');
 
@@ -72,11 +77,11 @@ const shouldUseOptimisticProposalBatch = (txs: readonly AccountTx[]): boolean =>
 const isRefreshableStaleSettlementSeal = (
   account: AccountReplica,
   tx: AccountTx,
-  rejection: AccountTxRejection | undefined,
+  rejection: AccountTxRejection,
 ): boolean => {
   if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return false;
   if (
-    rejection?.kind !== 'settlement_seal_nonce_mismatch' ||
+    rejection.kind !== 'settlement_seal_nonce_mismatch' ||
     rejection.basis !== 'account'
   ) {
     return false;
@@ -114,7 +119,7 @@ const applyProposalTransaction = async (
     context.consensusContext,
     jClaimSession,
   );
-  if (result.success) {
+  if (result.ok) {
     assertNoUnilateralSettlementMutation(machine, beforeSettlement, preparedTx, 'propose/validate');
   }
   return { tx, preparedTx, result };
@@ -128,34 +133,34 @@ const collectSuccessfulTransaction = (
   applied: AppliedProposalTx,
 ): void => {
   const { tx, preparedTx, result } = applied;
+  if (!result.ok) throw new Error('ACCOUNT_TX_COLLECT_REJECTED');
   validTxs.push(preparedTx);
   validMempoolTxs.push(tx);
   effects.events.push(...result.events);
   if (HEAVY_LOGS) {
     accountLog.debug('tx.result', {
       type: tx.type,
-      hasSecret: Boolean(result.secret),
-      hasHashlock: Boolean(result.hashlock),
+      outcome: result.outcome,
     });
   }
-  if (result.secret && result.hashlock) {
+  if (result.outcome === 'htlc_secret') {
     effects.revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
   }
-  if (result.swapOfferCreated) effects.swapOffersCreated.push(result.swapOfferCreated);
-  if (result.swapOfferCancelRequested) {
+  if (result.outcome === 'swap_offer_created') effects.swapOffersCreated.push(result.swapOfferCreated);
+  if (result.outcome === 'swap_cancel_requested') {
     effects.swapCancelRequests.push({
       ...result.swapOfferCancelRequested,
       accountId: account.proofHeader.toEntity,
     });
   }
-  if (result.swapOfferCancelled) effects.swapOffersCancelled.push(result.swapOfferCancelled);
+  if (result.outcome === 'swap_cancelled') effects.swapOffersCancelled.push(result.swapOfferCancelled);
 };
 
 const throwCriticalProposalFailure = (
   tx: AccountTx,
-  error: string | undefined,
+  rejection: AccountTxRejection,
 ): void => {
-  const reason = error || 'validation_failed';
+  const reason = accountTxRejectionMessage(rejection);
   if (tx.type === 'settle_transition') {
     throw new Error(`SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${tx.data.kind}:${reason}`);
   }
@@ -184,26 +189,39 @@ const throwCriticalProposalFailure = (
   }
 };
 
+const proposalFailureDisposition = (
+  account: AccountReplica,
+  tx: AccountTx,
+  rejection: AccountTxRejection,
+): Extract<AccountTxFailureDisposition, 'retry' | 'reject'> => {
+  if (
+    rejection.kind === 'settlement_signed_account_frozen' ||
+    isRefreshableStaleSettlementSeal(account, tx, rejection)
+  ) {
+    return ACCOUNT_TX_FAILURE_DISPOSITIONS.retry;
+  }
+  return ACCOUNT_TX_FAILURE_DISPOSITIONS.reject;
+};
+
 const classifyFailedTransaction = (
   machine: AccountReplica,
   applied: AppliedProposalTx,
   effects: ProposalTransactionEffects,
 ): 'deferred' | 'remove' => {
   const { tx, result } = applied;
-  if (
-    result.rejection?.kind === 'settlement_signed_account_frozen' ||
-    isRefreshableStaleSettlementSeal(machine, tx, result.rejection)
-  ) {
+  if (result.ok) throw new Error('ACCOUNT_TX_PROPOSAL_CLASSIFY_OK');
+  const disposition = proposalFailureDisposition(machine, tx, result.rejection);
+  if (disposition === ACCOUNT_TX_FAILURE_DISPOSITIONS.retry) {
     effects.events.push(...result.events);
-    accountLog.info('tx.deferred', { type: tx.type, reason: result.error });
+    accountLog.info('tx.deferred', { type: tx.type, reason: result.rejection.message });
     return 'deferred';
   }
-  throwCriticalProposalFailure(tx, result.error);
-  accountLog.debug('tx.skipped', { type: tx.type, error: result.error || 'unknown' });
+  throwCriticalProposalFailure(tx, result.rejection);
+  accountLog.debug('tx.skipped', { type: tx.type, error: result.rejection.message });
   if (tx.type === 'htlc_lock') {
     effects.failedHtlcLocks.push({
       hashlock: tx.data.hashlock,
-      reason: result.error || 'validation_failed',
+      reason: result.rejection.message,
     });
     accountLog.debug('htlc_lock.cancel_queued', { hashlock: shortHash(tx.data.hashlock) });
   }
@@ -220,7 +238,7 @@ const validateOptimisticBatch = async (
   for (const tx of context.proposalWindow) {
     if (HEAVY_LOGS) accountLog.debug('batch.optimistic_tx', { type: tx.type });
     const result = await applyProposalTransaction(context, machine, tx, jClaimSession);
-    if (!result.result.success) return null;
+    if (!result.result.ok) return null;
     applied.push(result);
   }
   return { machine, applied };
@@ -265,7 +283,7 @@ export const validateProposalTransactions = async (
     if (HEAVY_LOGS) accountLog.debug('tx.process', { type: tx.type });
     const txMachine = cloneAccountReplica(clonedMachine);
     const applied = await applyProposalTransaction(context, txMachine, tx, jClaimSession);
-    if (!applied.result.success) {
+    if (!applied.result.ok) {
       const disposition = classifyFailedTransaction(clonedMachine, applied, effects);
       if (disposition === 'deferred') deferredTxCount += 1;
       else txsToRemove.push(tx);

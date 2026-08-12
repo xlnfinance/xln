@@ -1,17 +1,11 @@
 import type { AccountReplica, AccountTx } from '../../../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../../../types/cross-jurisdiction';
-import type { SwapOfferEvent } from '../../../apply-types';
+import type { ApplyAccountTxResult } from '../../../apply-types';
 
 export type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
 type CrossSwapOffer = NonNullable<AccountReplica['state']['swapOffers']> extends Map<string, infer Offer> ? Offer : never;
 
-export type CrossSwapFillAckResult = {
-  success: boolean;
-  events: string[];
-  error?: string;
-  swapOfferCreated?: SwapOfferEvent;
-  swapOfferCancelled?: { offerId: string; accountId: string };
-};
+export type CrossSwapFillAckResult = ApplyAccountTxResult;
 
 export type PreparedCrossSwapFillAck = {
   account: AccountReplica;

@@ -15,22 +15,16 @@ import { createStructuredLogger, shortHash } from '../../../../infra/logger';
 import { releaseHold } from '../../hold-utils';
 import { isHtlcDeadlineExpired } from '../../../htlc-deadline';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
+import type { ApplyAccountTxResult } from '../../apply-types';
+import {
+  accountTxHtlcError,
+  accountTxHtlcSecret,
+  accountTxValidationRejected,
+} from '../../apply-result';
 
 const htlcResolveLog = createStructuredLogger('account.htlc');
 
 type HtlcResolveTx = Extract<AccountTx, { type: 'htlc_resolve' }>;
-type HtlcResolveResult = {
-  success: boolean;
-  events: string[];
-  error?: string;
-  outcome?: 'secret' | 'error';
-  secret?: string;
-  hashlock?: string;
-  reason?: string;
-  amount?: bigint;
-  tokenId?: number;
-  description?: string;
-};
 
 function getHtlcSecretResolveError(
   lock: HtlcLock,
@@ -82,7 +76,7 @@ function applyHtlcResolution(
   delta: Delta,
   data: HtlcResolveTx['data'],
   events: string[],
-): HtlcResolveResult {
+): ApplyAccountTxResult {
   const releaseSide = lock.senderIsLeft ? 'left' : 'right';
   const releaseError = releaseHold(
     delta,
@@ -92,7 +86,7 @@ function applyHtlcResolution(
       `HTLC_RESOLVE_HOLD_UNDERFLOW:${releaseSide} ` +
       `hold=${hold.toString()} amount=${amount.toString()}`,
   );
-  if (releaseError) return { success: false, error: releaseError, events };
+  if (releaseError) return accountTxValidationRejected(releaseError, events);
 
   if (data.outcome === 'secret') {
     delta.offdelta += deriveTransferOffdeltaChange(lock.senderIsLeft, lock.amount);
@@ -109,15 +103,10 @@ function applyHtlcResolution(
     );
   }
   account.locks.delete(lock.lockId);
-  return {
-    success: true,
-    events,
-    outcome: data.outcome,
-    hashlock: lock.hashlock,
-    ...(data.outcome === 'secret' && 'secret' in data ? { secret: data.secret } : {}),
-    ...(data.outcome === 'secret' ? { amount: lock.amount, tokenId: lock.tokenId } : {}),
-    ...(data.outcome === 'error' ? { reason: data.reason || 'unknown' } : {}),
-  };
+  if (data.outcome === 'secret' && 'secret' in data) {
+    return accountTxHtlcSecret(events, data.secret, lock.hashlock, lock.amount, lock.tokenId);
+  }
+  return accountTxHtlcError(events, lock.hashlock);
 }
 
 export async function handleHtlcResolve(
@@ -126,13 +115,13 @@ export async function handleHtlcResolve(
   byLeft: boolean,
   currentJHeight: number,
   currentTimestamp: number,
-): Promise<HtlcResolveResult> {
+): Promise<ApplyAccountTxResult> {
   const { lockId, outcome } = accountTx.data;
   const events: string[] = [];
   const lock = account.locks.get(lockId);
-  if (!lock) return { success: false, error: `Lock ${lockId} not found`, events };
+  if (!lock) return accountTxValidationRejected(`Lock ${lockId} not found`, events);
   const delta = account.deltas.get(lock.tokenId);
-  if (!delta) return { success: false, error: `Delta ${lock.tokenId} not found`, events };
+  if (!delta) return accountTxValidationRejected(`Delta ${lock.tokenId} not found`, events);
   const validationError = outcome === 'secret'
     ? getHtlcSecretResolveError(
         lock,
@@ -147,6 +136,6 @@ export async function handleHtlcResolve(
         currentJHeight,
         currentTimestamp,
       );
-  if (validationError) return { success: false, error: validationError, events };
+  if (validationError) return accountTxValidationRejected(validationError, events);
   return applyHtlcResolution(account, lock, delta, accountTx.data, events);
 }

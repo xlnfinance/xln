@@ -17,6 +17,7 @@ import type {
   CrossSwapFillAckResult,
   PreparedCrossSwapFillAck,
 } from './types';
+import { accountTxSwapCancelled } from '../../../apply-result';
 
 export type CrossFillProgress = ReturnType<
   typeof requireCrossJurisdictionFillProgress
@@ -37,16 +38,13 @@ export const syncSourcePullBinding = (
 
 export const cancelledOfferResult = (
   prepared: PreparedCrossSwapFillAck,
-): CrossSwapFillAckResult => ({
-  success: true,
-  events: prepared.events,
-  swapOfferCancelled: {
+): CrossSwapFillAckResult =>
+  accountTxSwapCancelled(prepared.events, {
     offerId: prepared.tx.data.offerId,
     accountId: prepared.offer.makerIsLeft
       ? prepared.account.state.leftEntity
       : prepared.account.state.rightEntity,
-  },
-});
+  });
 
 export const applyUnfilledCrossSwapCancellation = (
   prepared: PreparedCrossSwapFillAck,

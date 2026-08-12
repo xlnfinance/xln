@@ -6,6 +6,7 @@ import type {
   AppliedSwapResolve,
   SwapResolveFailure,
 } from './types';
+import { accountTxValidationRejected } from '../../../apply-result';
 import {
   requantizeSwapNetAuthorization,
   type SwapNetAuthorization,
@@ -13,17 +14,14 @@ import {
 
 export type SwapResolveRemainderResult =
   | {
-      success: true;
+      ok: true;
       closeOrderInHistory: boolean;
       swapOfferCancelled?: { offerId: string; accountId: string };
     }
   | SwapResolveFailure;
 
-const failure = (events: string[], error: string): SwapResolveFailure => ({
-  success: false,
-  error,
-  events,
-});
+const failure = (events: string[], error: string): SwapResolveFailure =>
+  accountTxValidationRejected(error, events);
 
 const releaseGiveHold = (
   resolve: AppliedSwapResolve,
@@ -53,7 +51,7 @@ const closeSwapOffer = (
     : account.rightEntity;
   events.push(`📊 Swap offer ${resolve.offerId.slice(0, 8)}... ${message}`);
   return {
-    success: true,
+    ok: true,
     closeOrderInHistory: true,
     swapOfferCancelled: { offerId: resolve.offerId, accountId: makerId },
   };
@@ -129,5 +127,5 @@ export const applySwapResolveRemainder = (
     `📊 Swap offer ${resolve.offerId.slice(0, 8)}... partially filled, ` +
     `${resolve.offer.giveAmount} remaining`,
   );
-  return { success: true, closeOrderInHistory: false };
+  return { ok: true, closeOrderInHistory: false };
 };

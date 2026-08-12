@@ -17,6 +17,7 @@ import type {
   CrossSwapFillAckResult,
   PreparedCrossSwapFillAck,
 } from './types';
+import { accountTxSwapOfferCreated } from '../../../apply-result';
 
 type FillOutcome = {
   sourceTotal: bigint;
@@ -142,28 +143,24 @@ const retainCrossOfferRemainder = (
     `${fill.nextRatio}/${CROSS_J_MAX_FILL_RATIO}, ` +
     `${outcome.remainingSource} source remaining`,
   );
-  return {
-    success: true,
-    events,
-    swapOfferCreated: {
-      offerId: tx.data.offerId,
-      makerIsLeft: offer.makerIsLeft,
-      fromEntity: account.state.leftEntity,
-      toEntity: account.state.rightEntity,
-      createdHeight: offer.createdHeight,
-      giveTokenId: offer.giveTokenId,
-      giveAmount: offer.giveAmount,
-      wantTokenId: offer.wantTokenId,
-      wantAmount: offer.wantAmount,
-      maxFee: offer.maxFee,
-      minNetReceive: offer.minNetReceive,
-      priceTicks: offer.priceTicks,
-      ...(offer.timeInForce !== undefined
-        ? { timeInForce: offer.timeInForce }
-        : {}),
-      crossJurisdiction: route,
-    },
-  };
+  return accountTxSwapOfferCreated(events, {
+    offerId: tx.data.offerId,
+    makerIsLeft: offer.makerIsLeft,
+    fromEntity: account.state.leftEntity,
+    toEntity: account.state.rightEntity,
+    createdHeight: offer.createdHeight,
+    giveTokenId: offer.giveTokenId,
+    giveAmount: offer.giveAmount,
+    wantTokenId: offer.wantTokenId,
+    wantAmount: offer.wantAmount,
+    maxFee: offer.maxFee,
+    minNetReceive: offer.minNetReceive,
+    priceTicks: offer.priceTicks,
+    ...(offer.timeInForce !== undefined
+      ? { timeInForce: offer.timeInForce }
+      : {}),
+    crossJurisdiction: route,
+  });
 };
 
 export const commitCrossSwapFillProgress = (

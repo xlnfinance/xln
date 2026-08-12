@@ -47,7 +47,7 @@ describe('rebalance financial transitions', () => {
       data: { requestId: 'request-7', requestTokenId: 7, amount: 1n, reason: 'timeout' },
     }, false);
 
-    expect(partial.success).toBe(true);
+    expect(partial.ok).toBe(true);
     expect(state.state.requestedRebalance.get(7)).toBe(500n);
     expect(state.state.requestedRebalanceFeeState.get(7)?.refund?.refundedAmount).toBe(1n);
     expect(state.state.requestedRebalanceFeeState.get(8)?.refund).toBeUndefined();
@@ -56,7 +56,7 @@ describe('rebalance financial transitions', () => {
       type: 'rebalance_refund',
       data: { requestId: 'request-7', requestTokenId: 7, amount: 99n, reason: 'timeout' },
     }, false);
-    expect(final.success).toBe(true);
+    expect(final.ok).toBe(true);
     expect(state.state.requestedRebalance.has(7)).toBe(false);
     expect(state.state.requestedRebalanceFeeState.has(7)).toBe(false);
     expect(state.shadow.rebalance.submittedAtByToken.has(7)).toBe(false);
@@ -76,8 +76,8 @@ describe('rebalance financial transitions', () => {
       data: { requestId: 'request-7', requestTokenId: 7, amount: 101n, reason: 'manual' },
     }, false);
 
-    expect(wrong.success).toBe(false);
-    expect(over.success).toBe(false);
+    expect(wrong.ok).toBe(false);
+    expect(over.ok).toBe(false);
     expect(state.state.deltas.get(1)?.offdelta).toBe(before);
     expect(state.state.requestedRebalanceFeeState.get(7)?.refund).toBeUndefined();
   });
@@ -94,7 +94,7 @@ describe('rebalance financial transitions', () => {
       data: { tokenId: 1, amount: 90n, feeTokenId: 1, feeAmount: 20n, policyVersion: 1 },
     }, true, 5);
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(delta.offdelta).toBe(before);
     expect(state.state.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(10n);
   });

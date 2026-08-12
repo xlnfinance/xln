@@ -1,19 +1,11 @@
 import type { AccountTx, Delta, SwapOffer } from '../../../../../types/account';
+import type { ApplyAccountTxRejected, ApplyAccountTxResult } from '../../../apply-types';
 
 export type SwapResolveTx = Extract<AccountTx, { type: 'swap_resolve' }>;
 
-export type SwapResolveResult = {
-  success: boolean;
-  events: string[];
-  error?: string;
-  swapOfferCancelled?: { offerId: string; accountId: string };
-};
+export type SwapResolveResult = ApplyAccountTxResult;
 
-export type SwapResolveFailure = {
-  success: false;
-  events: string[];
-  error: string;
-};
+export type SwapResolveFailure = ApplyAccountTxRejected;
 
 export type ValidatedSwapResolve = {
   offerId: string;

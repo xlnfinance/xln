@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.runtime.json",
+  "include": [
+    "runtime/__tests__/types/fints/apply-account-tx-result.negative.ts",
+    "runtime/__tests__/types/fints/apply-account-tx-units.negative.ts"
+  ],
+  "exclude": []
+}

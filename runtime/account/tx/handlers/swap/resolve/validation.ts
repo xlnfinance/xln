@@ -6,6 +6,7 @@ import {
   MAX_SWAP_FILL_RATIO,
 } from '../../../../../orderbook/swap-execution';
 import { createStructuredLogger, shortOrder } from '../../../../../infra/logger';
+import { accountTxValidationRejected } from '../../../apply-result';
 import type {
   SwapResolveFailure,
   SwapResolveTx,
@@ -32,11 +33,8 @@ type ExecutionFill = {
   executionProvided: boolean;
 };
 
-const failure = (events: string[], error: string): SwapResolveFailure => ({
-  success: false,
-  error,
-  events,
-});
+const failure = (events: string[], error: string): SwapResolveFailure =>
+  accountTxValidationRejected(error, events);
 
 const resolveCanonicalOffer = (
   account: AccountState,
@@ -311,9 +309,9 @@ export const validateSwapResolve = (
   events: string[],
 ): ValidatedSwapResolve | SwapResolveFailure => {
   const canonical = resolveCanonicalOffer(account, tx, byLeft, events);
-  if ('success' in canonical) return canonical;
+  if ('ok' in canonical) return canonical;
   const fill = deriveExecutionFill(tx, canonical, events);
-  if ('success' in fill) return fill;
+  if ('ok' in fill) return fill;
   const economicsFailure = validateExecutionEconomics(tx, canonical, fill, byLeft, events);
   if (economicsFailure) return economicsFailure;
   return {

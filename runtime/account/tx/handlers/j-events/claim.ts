@@ -10,6 +10,8 @@ import {
   type AccountJurisdictionView,
 } from '../../../consensus/helpers';
 import { createStructuredLogger, shortHash } from '../../../../infra/logger';
+import type { ApplyAccountTxResult } from '../../apply-types';
+import { accountTxApplied } from '../../apply-result';
 
 const jEventClaimLog = createStructuredLogger('account.j_event');
 
@@ -23,7 +25,7 @@ export function handleJEventClaim(
   candidateEffects: AccountOutput[],
   jurisdictions: AccountJurisdictionView,
   session: AccountJClaimSession,
-): { success: boolean; events: string[]; error?: string } {
+): ApplyAccountTxResult {
   const { jHeight, jBlockHash } = accountTx.data;
   jEventClaimLog.debug('claim.received', { jHeight, hash: shortHash(jBlockHash), byLeft });
   const { counterparty } = getAccountPerspective(account.state, myEntityId);
@@ -37,12 +39,9 @@ export function handleJEventClaim(
   if (transition.status === 'pending' || transition.status === 'idempotent' || transition.status === 'stale') {
     account.state.leftPendingJClaims = transition.left;
     account.state.rightPendingJClaims = transition.right;
-    return {
-      success: true,
-      events: [transition.status === 'pending'
+    return accountTxApplied([transition.status === 'pending'
         ? '📥 J-event claim authenticated and retained'
-        : `ℹ️ j_event_claim ${transition.status}`],
-    };
+        : `ℹ️ j_event_claim ${transition.status}`]);
   }
 
   const staged = structuredClone(account);
@@ -88,5 +87,5 @@ export function handleJEventClaim(
       },
     });
   }
-  return { success: true, events: ['✅ J-event claim finalized bilaterally'] };
+  return accountTxApplied(['✅ J-event claim finalized bilaterally']);
 }

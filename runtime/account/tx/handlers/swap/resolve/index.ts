@@ -21,12 +21,16 @@ import type {
   SwapResolveResult,
   SwapResolveTx,
 } from './types';
+import {
+  accountTxApplied,
+  accountTxSwapCancelled,
+} from '../../../apply-result';
 
 const recordSwapResolveHistory = (
   account: AccountReplica,
   tx: SwapResolveTx,
   currentHeight: number,
-  resolve: ReturnType<typeof validateSwapResolve> & { success?: never },
+  resolve: ReturnType<typeof validateSwapResolve> & { ok?: never },
   closeOrder: boolean,
 ): void => {
   const data = tx.data;
@@ -65,11 +69,11 @@ export async function handleSwapResolve(
 ): Promise<SwapResolveResult> {
   const events: string[] = [];
   const validated = validateSwapResolve(account.state, tx, byLeft, events);
-  if ('success' in validated) return validated;
+  if ('ok' in validated) return validated;
   const applied = applySwapResolveFinancials(account.state, validated, events);
-  if ('success' in applied) return applied;
+  if ('ok' in applied) return applied;
   const remainder = applySwapResolveRemainder(account.state, applied, events);
-  if (!remainder.success) return remainder;
+  if (!remainder.ok) return remainder;
 
   recordSwapResolveHistory(
     account,
@@ -78,11 +82,7 @@ export async function handleSwapResolve(
     validated,
     remainder.closeOrderInHistory,
   );
-  return {
-    success: true,
-    events,
-    ...(remainder.swapOfferCancelled
-      ? { swapOfferCancelled: remainder.swapOfferCancelled }
-      : {}),
-  };
+  return remainder.swapOfferCancelled
+    ? accountTxSwapCancelled(events, remainder.swapOfferCancelled)
+    : accountTxApplied(events);
 }

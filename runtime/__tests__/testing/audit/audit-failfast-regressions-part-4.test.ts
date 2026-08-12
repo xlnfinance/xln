@@ -1050,8 +1050,9 @@ describe('audit fail-fast regressions', () => {
       1,
     );
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain(`max ${LIMITS.MAX_ACCOUNT_SWAP_OFFERS}`);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected swap offer cap rejection');
+    expect(result.rejection.message).toContain(`max ${LIMITS.MAX_ACCOUNT_SWAP_OFFERS}`);
     expect(accountMachine.state.swapOffers.size).toBe(LIMITS.MAX_ACCOUNT_SWAP_OFFERS);
   });
 

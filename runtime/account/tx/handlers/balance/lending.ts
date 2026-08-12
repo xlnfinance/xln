@@ -2,6 +2,8 @@ import type { AccountReplica, AccountTx } from '../../../../types/account';
 import { normalizeInterestBps, normalizeLendingTerm } from '../../../../extensions/lending';
 import { handleDirectPayment } from './direct-payment';
 import { handleSetCreditLimit } from './set-credit-limit';
+import type { ApplyAccountTxResult } from '../../apply-types';
+import { accountTxApplied } from '../../apply-result';
 
 type LendingAccountTx = Extract<AccountTx, {
   type:
@@ -13,7 +15,7 @@ type LendingAccountTx = Extract<AccountTx, {
     | 'lending_close_payout';
 }>;
 
-type LendingResult = { success: boolean; events: string[]; error?: string };
+type LendingResult = ApplyAccountTxResult;
 
 const ENTITY_ID_RE = /^0x[0-9a-f]{64}$/;
 const INTENT_ID_RE = /^(?:lend|borrow|loan)-[0-9a-f]{16}$/;
@@ -119,7 +121,7 @@ export const handleLendingAccountTx = (
     const intentKey = `fund:${normalized(tx.data.positionId)}`;
     requireUnusedIntent(account, intentKey);
     const result = applyPayment(account, tx, byLeft);
-    if (result.success) consumeIntent(account, intentKey, 'fund');
+    if (result.ok) consumeIntent(account, intentKey, 'fund');
     return result;
   }
 
@@ -131,7 +133,7 @@ export const handleLendingAccountTx = (
     normalizeLendingTerm(tx.data.termId);
     normalizeInterestBps(tx.data.maxInterestBps);
     consumeIntent(account, `borrow:${normalized(tx.data.requestId)}`, 'borrow');
-    return { success: true, events: [`Lending borrow request ${tx.data.requestId} committed`] };
+    return accountTxApplied([`Lending borrow request ${tx.data.requestId} committed`]);
   }
 
   if (tx.type === 'lending_repay') {
@@ -142,7 +144,7 @@ export const handleLendingAccountTx = (
     const intentKey = `repay:${normalized(tx.data.loanId)}`;
     requireUnusedIntent(account, intentKey);
     const result = applyPayment(account, tx, byLeft);
-    if (result.success) consumeIntent(account, intentKey, 'repay');
+    if (result.ok) consumeIntent(account, intentKey, 'repay');
     return result;
   }
 
@@ -155,7 +157,7 @@ export const handleLendingAccountTx = (
       type: 'set_credit_limit',
       data: { tokenId: tx.data.tokenId, amount: tx.data.creditLimit },
     }, byLeft);
-    if (result.success) {
+    if (result.ok) {
       consumeIntent(
         account,
         `${tx.data.action === 'grant' ? 'grant' : 'revoke'}:${normalized(tx.data.loanId)}`,
@@ -170,7 +172,7 @@ export const handleLendingAccountTx = (
     requireRole(account, byLeft, 'lender', tx.data.lenderEntityId);
     requireCounterparty(account, normalized(tx.data.lenderEntityId), tx.data.hubEntityId);
     consumeIntent(account, `close:${normalized(tx.data.positionId)}`, 'close-request');
-    return { success: true, events: [`Lending close request ${tx.data.positionId} committed`] };
+    return accountTxApplied([`Lending close request ${tx.data.positionId} committed`]);
   }
 
   requireIntentId(tx.data.positionId, 'lend');
@@ -180,6 +182,6 @@ export const handleLendingAccountTx = (
   const intentKey = `payout:${normalized(tx.data.positionId)}`;
   requireUnusedIntent(account, intentKey);
   const result = applyPayment(account, tx, byLeft);
-  if (result.success) consumeIntent(account, intentKey, 'close-payout');
+  if (result.ok) consumeIntent(account, intentKey, 'close-payout');
   return result;
 };

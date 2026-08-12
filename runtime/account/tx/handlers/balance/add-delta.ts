@@ -4,12 +4,19 @@
  */
 
 import type { AccountState, AccountTx } from '../../../../types/account';
+import { AccountDeltaError } from '../../../state/delta';
+import type { ApplyAccountTxResult } from '../../apply-types';
+import {
+  accountTxApplied,
+  accountTxRejected,
+  rejectionFromDeltaError,
+} from '../../apply-result';
 import { ensureDelta } from '../../delta-utils';
 
 export function handleAddDelta(
   account: AccountState,
-  accountTx: Extract<AccountTx, { type: 'add_delta' }>
-): { success: boolean; events: string[]; error?: string } {
+  accountTx: Extract<AccountTx, { type: 'add_delta' }>,
+): ApplyAccountTxResult {
   const { tokenId } = accountTx.data;
   const events: string[] = [];
 
@@ -20,11 +27,11 @@ export function handleAddDelta(
     // Keep the bounded insertion at the mutation sink and reject it as data.
     ensureDelta(account, tokenId);
   } catch (error) {
-    if (!(error instanceof Error) || !error.message.startsWith('ACCOUNT_DELTA_')) throw error;
-    return { success: false, events: [error.message], error: error.message };
+    if (!(error instanceof AccountDeltaError)) throw error;
+    return accountTxRejected(rejectionFromDeltaError(error, tokenId), [error.message]);
   }
-  if (existed) return { success: true, events };
+  if (existed) return accountTxApplied(events);
 
   events.push(`➕ Added token ${tokenId} to account`);
-  return { success: true, events };
+  return accountTxApplied(events);
 }

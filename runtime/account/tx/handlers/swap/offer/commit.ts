@@ -1,5 +1,6 @@
 import type { AccountReplica, SwapOffer } from '../../../../../types/account';
-import type { SwapOfferEvent } from '../../../apply-types';
+import type { ApplyAccountTxResult } from '../../../apply-types';
+import { accountTxSwapOfferCreated, accountTxValidationRejected } from '../../../apply-result';
 import { deriveDelta } from '../../../../utils';
 import { cloneCrossJurisdictionRoute } from '../../../../../extensions/cross-j';
 import { ensureDelta } from '../../../delta-utils';
@@ -12,20 +13,13 @@ import {
   type SwapNetAuthorization,
 } from '../../../../swap/swap-net-authorization';
 
-type SwapOfferResult = {
-  success: boolean;
-  events: string[];
-  error?: string;
-  swapOfferCreated?: SwapOfferEvent;
-};
-
 export const commitSwapOffer = (
   account: AccountReplica,
   tx: SwapOfferTx,
   admission: SwapOfferAdmission,
   prepared: PreparedSwapOfferAmounts,
   currentHeight: number,
-): SwapOfferResult => {
+): ApplyAccountTxResult => {
   const { offerId, giveTokenId, wantTokenId, timeInForce, crossJurisdiction } = tx.data;
   const { priceTicks, effectiveGiveAmount, effectiveWantAmount } = prepared;
   let authorization: SwapNetAuthorization;
@@ -36,11 +30,10 @@ export const commitSwapOffer = (
       effectiveWantAmount,
     );
   } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      events: [],
-    };
+    return accountTxValidationRejected(
+      error instanceof Error ? error.message : String(error),
+      [],
+    );
   }
   const delta = ensureDelta(account.state, giveTokenId);
   // A cross-j source pull already owns the economic lock. Adding a second hold
@@ -48,11 +41,10 @@ export const commitSwapOffer = (
   if (!crossJurisdiction) {
     const available = deriveDelta(delta, admission.makerIsLeft).outCapacity;
     if (effectiveGiveAmount > available) {
-      return {
-        success: false,
-        error: `Insufficient capacity: need ${effectiveGiveAmount}, available ${available}`,
-        events: [],
-      };
+      return accountTxValidationRejected(
+        `Insufficient capacity: need ${effectiveGiveAmount}, available ${available}`,
+        [],
+      );
     }
   }
   const publicRoute = crossJurisdiction ? cloneCrossJurisdictionRoute(crossJurisdiction) : undefined;
@@ -76,7 +68,7 @@ export const commitSwapOffer = (
   // produce a different AccountFrame root.
   if (!crossJurisdiction) {
     const holdError = addHold(delta, admission.makerIsLeft ? 'left' : 'right', effectiveGiveAmount);
-    if (holdError) return { success: false, error: holdError, events: [] };
+    if (holdError) return accountTxValidationRejected(holdError, []);
   }
   account.state.swapOffers!.set(offerId, offer);
   recordSwapOfferLifecycle(account, offer);
@@ -85,23 +77,19 @@ export const commitSwapOffer = (
       `${effectiveGiveAmount} token${giveTokenId} for ` +
       `${effectiveWantAmount} token${wantTokenId}`,
   ];
-  return {
-    success: true,
-    events,
-    swapOfferCreated: {
-      offerId,
-      makerIsLeft: admission.makerIsLeft,
-      fromEntity: admission.leftEntity,
-      toEntity: admission.rightEntity,
-      createdHeight: currentHeight,
-      giveTokenId,
-      giveAmount: effectiveGiveAmount,
-      wantTokenId,
-      wantAmount: effectiveWantAmount,
-      ...authorization,
-      priceTicks,
-      ...(timeInForce !== undefined ? { timeInForce } : {}),
-      ...(publicRoute ? { crossJurisdiction: publicRoute } : {}),
-    },
-  };
+  return accountTxSwapOfferCreated(events, {
+    offerId,
+    makerIsLeft: admission.makerIsLeft,
+    fromEntity: admission.leftEntity,
+    toEntity: admission.rightEntity,
+    createdHeight: currentHeight,
+    giveTokenId,
+    giveAmount: effectiveGiveAmount,
+    wantTokenId,
+    wantAmount: effectiveWantAmount,
+    ...authorization,
+    priceTicks,
+    ...(timeInForce !== undefined ? { timeInForce } : {}),
+    ...(publicRoute ? { crossJurisdiction: publicRoute } : {}),
+  });
 };

@@ -9,6 +9,8 @@
 import type { AccountState, AccountTx } from '../../../../types/account';
 import { FINANCIAL } from '../../../../config/constants';
 import { ensureDelta } from '../../delta-utils';
+import type { ApplyAccountTxResult } from '../../apply-types';
+import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
 // Maximum credit limit (prevents overflow attacks)
 export const MAX_CREDIT_LIMIT = FINANCIAL.MAX_PAYMENT_AMOUNT * 1000n; // 1000x max payment
@@ -17,15 +19,18 @@ export function handleSetCreditLimit(
   account: AccountState,
   accountTx: Extract<AccountTx, { type: 'set_credit_limit' }>,
   byLeft: boolean
-): { success: boolean; events: string[]; error?: string } {
+): ApplyAccountTxResult {
   const { tokenId, amount } = accountTx.data;
   const events: string[] = [];
 
   if (amount < 0n) {
-    return { success: false, error: `Credit limit cannot be negative: ${amount}`, events };
+    return accountTxValidationRejected(`Credit limit cannot be negative: ${amount}`, events);
   }
   if (amount > MAX_CREDIT_LIMIT) {
-    return { success: false, error: `Credit limit exceeds maximum: ${amount} > ${MAX_CREDIT_LIMIT}`, events };
+    return accountTxValidationRejected(
+      `Credit limit exceeds maximum: ${amount} > ${MAX_CREDIT_LIMIT}`,
+      events,
+    );
   }
 
   // Channel.ts pattern (Transition.ts:358-362):
@@ -48,5 +53,5 @@ export function handleSetCreditLimit(
     events.push(`💳 Right credit limit = ${amount.toString()} for token ${tokenId}`);
   }
 
-  return { success: true, events };
+  return accountTxApplied(events);
 }

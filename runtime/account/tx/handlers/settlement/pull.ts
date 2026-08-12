@@ -20,6 +20,8 @@ import { addHold, releaseHold } from '../../hold-utils';
 import { ensureDelta } from '../../delta-utils';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
 import { createDefaultDelta } from '../../../state/delta';
+import type { ApplyAccountTxResult } from '../../apply-types';
+import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
 type PullLockTx = Extract<AccountTx, { type: 'cross_pull_lock' }>;
 type CrossPullCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
@@ -290,12 +292,12 @@ export async function handlePullLock(
   _byLeft: boolean,
   currentHeight: number,
   currentTimestamp: number,
-): Promise<{ success: boolean; events: string[]; error?: string }> {
+): Promise<ApplyAccountTxResult> {
   const { pullId, tokenId, amount, fullHash, partialRoot, crossJurisdiction } = accountTx.data;
   const events: string[] = [];
 
   const admissionError = getPullLockAdmissionError(account, accountTx);
-  if (admissionError) return { success: false, error: admissionError, events };
+  if (admissionError) return accountTxValidationRejected(admissionError, events);
   const absAmount = absBigInt(amount);
 
   const beneficiaryIsLeft = amount > 0n;
@@ -309,7 +311,7 @@ export async function handlePullLock(
   const delta = ensureDelta(account, tokenId);
 
   const holdError = addHold(delta, loserIsLeft ? 'left' : 'right', absAmount);
-  if (holdError) return { success: false, error: holdError, events };
+  if (holdError) return accountTxValidationRejected(holdError, events);
 
   // No sealed pull reveal deadline. Settlement clock is dispute-relative
   // seconds on L1; cooperative close is event-driven (hashladder reveal).
@@ -328,7 +330,7 @@ export async function handlePullLock(
   });
 
   events.push(`🪝 Pull locked: ${pullId.slice(0, 8)}... amount ${amount} token${tokenId}`);
-  return { success: true, events };
+  return accountTxApplied(events);
 }
 
 export async function handleCrossPullClose(
@@ -336,24 +338,17 @@ export async function handleCrossPullClose(
   accountTx: CrossPullCloseTx,
   byLeft: boolean,
   _currentTimestamp: number,
-): Promise<{
-  success: boolean;
-  events: string[];
-  error?: string;
-}> {
+): Promise<ApplyAccountTxResult> {
   const { pullId, proof } = accountTx.data;
   const events: string[] = [];
   const pull = account.pulls?.get(pullId);
   if (!pull) {
-    return {
-      success: true,
-      events: [`🪝 Cross-j pull close ignored: ${pullId.slice(0, 8)}... already closed`],
-    };
+    return accountTxApplied([`🪝 Cross-j pull close ignored: ${pullId.slice(0, 8)}... already closed`]);
   }
   const binding = pull.crossJurisdiction;
-  if (!binding) return { success: false, error: `Cross-j close requires pull binding`, events };
+  if (!binding) return accountTxValidationRejected(`Cross-j close requires pull binding`, events);
   const evidence = validateCrossPullCloseEvidence(pull, binding, accountTx);
-  if (!evidence.ok) return { success: false, error: evidence.error, events };
+  if (!evidence.ok) return accountTxValidationRejected(evidence.error, events);
   const ratio = evidence.ratio;
 
   const beneficiaryIsLeft = pull.amount > 0n;
@@ -366,11 +361,10 @@ export async function handleCrossPullClose(
     ? beneficiaryIsLeft
     : !beneficiaryIsLeft;
   if (byLeft !== authorizedHubIsLeft) {
-    return {
-      success: false,
-      error: `Only the ${binding.leg} Hub can close cross-j pull`,
+    return accountTxValidationRejected(
+      `Only the ${binding.leg} Hub can close cross-j pull`,
       events,
-    };
+    );
   }
 
   const delta = ensureDelta(account, pull.tokenId);
@@ -378,17 +372,17 @@ export async function handleCrossPullClose(
   const absAmount = absBigInt(pull.amount);
   const previousRatio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(pull.claimedRatio ?? 0) || 0)));
   if (ratio < previousRatio) {
-    return { success: false, error: `Cross-j close ratio regression: ${ratio} < ${previousRatio}`, events };
+    return accountTxValidationRejected(`Cross-j close ratio regression: ${ratio} < ${previousRatio}`, events);
   }
   const previousClaimed = pull.claimedAmount ?? ((absAmount * BigInt(previousRatio)) / BigInt(HASHLADDER_MAX_FILL_RATIO));
   const cumulativeClaimed = binding.leg === 'source'
     ? proof.cumulativeSourceAmount
     : proof.cumulativeTargetAmount;
   if (cumulativeClaimed < previousClaimed) {
-    return { success: false, error: `Cross-j close amount regression: ${cumulativeClaimed} < ${previousClaimed}`, events };
+    return accountTxValidationRejected(`Cross-j close amount regression: ${cumulativeClaimed} < ${previousClaimed}`, events);
   }
   if (cumulativeClaimed > absAmount) {
-    return { success: false, error: `Cross-j close amount overflow: ${cumulativeClaimed} > ${absAmount}`, events };
+    return accountTxValidationRejected(`Cross-j close amount overflow: ${cumulativeClaimed} > ${absAmount}`, events);
   }
   const applied = cumulativeClaimed - previousClaimed;
   const remainingHold = absAmount > cumulativeClaimed ? absAmount - cumulativeClaimed : 0n;
@@ -400,60 +394,57 @@ export async function handleCrossPullClose(
     debitHold,
     () => `Pull ${payerIsLeft ? 'left' : 'right'} hold underflow`,
   );
-  if (holdError) return { success: false, error: holdError, events };
+  if (holdError) return accountTxValidationRejected(holdError, events);
   if (applied > 0n) {
     delta.offdelta += deriveTransferOffdeltaChange(payerIsLeft, applied);
   }
 
   account.pulls?.delete(pullId);
   events.push(`🪝 Cross-j pull closed: ${pullId.slice(0, 8)}... ratio ${ratio}/${HASHLADDER_MAX_FILL_RATIO} claimed ${applied} released ${remainingHold}`);
-  return {
-    success: true,
-    events,
-  };
+  return accountTxApplied(events);
 }
 
 export async function handleCrossPullProgress(
   account: AccountState,
   accountTx: CrossPullProgressTx,
   byLeft: boolean,
-): Promise<{ success: boolean; events: string[]; error?: string }> {
+): Promise<ApplyAccountTxResult> {
   const events: string[] = [];
   const { pullId, fill } = accountTx.data;
   const pull = account.pulls?.get(pullId);
-  if (!pull) return { success: false, error: `Cross-j target pull ${pullId} not found`, events };
+  if (!pull) return accountTxValidationRejected(`Cross-j target pull ${pullId} not found`, events);
   const binding = pull.crossJurisdiction;
   if (binding.leg !== 'target') {
-    return { success: false, error: `Cross-j progress requires target pull`, events };
+    return accountTxValidationRejected(`Cross-j progress requires target pull`, events);
   }
   if (
     fill.offerId !== binding.orderId ||
     !fill.routeHash ||
     fill.routeHash.toLowerCase() !== binding.routeHash.toLowerCase()
   ) {
-    return { success: false, error: `Cross-j progress route mismatch`, events };
+    return accountTxValidationRejected(`Cross-j progress route mismatch`, events);
   }
 
   const beneficiaryIsLeft = pull.amount > 0n;
   if (byLeft === beneficiaryIsLeft) {
-    return { success: false, error: `Only the target Hub can advance cross-j pull`, events };
+    return accountTxValidationRejected(`Only the target Hub can advance cross-j pull`, events);
   }
   const currentSeq = Math.max(0, Math.floor(Number(binding.fillSeq ?? 0) || 0));
   const nextSeq = Math.floor(Number(fill.fillSeq));
   const previousSeq = Math.floor(Number(fill.previousFillSeq));
   if (fill.ackKind !== 'fill' && fill.ackKind !== 'cancel') {
-    return { success: false, error: `Cross-j progress kind invalid`, events };
+    return accountTxValidationRejected(`Cross-j progress kind invalid`, events);
   }
   const cancelling = fill.ackKind === 'cancel';
   if (cancelling && fill.cancelRemainder !== true) {
-    return { success: false, error: `Cross-j cancel progress must clear remainder`, events };
+    return accountTxValidationRejected(`Cross-j cancel progress must clear remainder`, events);
   }
   if (
     previousSeq !== currentSeq ||
     (!cancelling && nextSeq !== currentSeq + 1) ||
     (cancelling && nextSeq !== currentSeq)
   ) {
-    return { success: false, error: `Cross-j progress sequence mismatch`, events };
+    return accountTxValidationRejected(`Cross-j progress sequence mismatch`, events);
   }
 
   let nextRatio: number;
@@ -465,7 +456,7 @@ export async function handleCrossPullProgress(
       fillDenominator: fill.fillDenominator,
     });
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error), events };
+    return accountTxValidationRejected(error instanceof Error ? error.message : String(error), events);
   }
   const currentRatio = committedCrossJurisdictionRatio(binding);
   const priorSource = binding.filledSourceAmount ?? 0n;
@@ -484,7 +475,7 @@ export async function handleCrossPullProgress(
     (!cancelling && (nextRatio <= currentRatio || sourceIncrement <= 0n || targetIncrement <= 0n)) ||
     (cancelling && (nextRatio !== currentRatio || sourceIncrement !== 0n || targetIncrement !== 0n))
   ) {
-    return { success: false, error: `Cross-j progress amounts mismatch`, events };
+    return accountTxValidationRejected(`Cross-j progress amounts mismatch`, events);
   }
 
   binding.fillSeq = nextSeq;
@@ -498,5 +489,5 @@ export async function handleCrossPullProgress(
     : 'partially_filled';
   if (cancelling) binding.clearingPolicy = 'cancel_and_clear';
   events.push(`🌉 Cross-j target progress ${fill.offerId.slice(0, 8)} ${nextRatio}/${HASHLADDER_MAX_FILL_RATIO}`);
-  return { success: true, events };
+  return accountTxApplied(events);
 }

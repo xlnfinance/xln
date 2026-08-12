@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.runtime.json",
+  "include": [
+    "runtime/__tests__/types/fints/apply-account-tx-result.widened.ts"
+  ],
+  "exclude": []
+}

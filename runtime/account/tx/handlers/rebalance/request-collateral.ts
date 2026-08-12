@@ -22,9 +22,10 @@ import { isLeftEntity } from '../../../../protocol/identity/entity-id';
 import { deriveDelta } from '../../../utils';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
 import { getDefaultRebalanceBaseFeeForToken } from '../../../config/defaults';
+import type { ApplyAccountTxResult } from '../../apply-types';
+import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
 type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;
-type RequestCollateralResult = { success: boolean; events: string[]; error?: string };
 
 const validateCollateralRequest = (account: AccountReplica, data: RequestCollateralTx['data']): string | undefined => {
   if (data.amount <= 0n) return 'request_collateral: amount must be > 0';
@@ -65,20 +66,17 @@ export function handleRequestCollateral(
   accountTx: RequestCollateralTx,
   byLeft?: boolean,
   currentTimestamp = 0,
-): RequestCollateralResult {
+): ApplyAccountTxResult {
   const { tokenId, amount, feeTokenId, feeAmount } = accountTx.data;
 
   const validationError = validateCollateralRequest(account, accountTx.data);
-  if (validationError) return { success: false, events: [], error: validationError };
+  if (validationError) return accountTxValidationRejected(validationError, []);
 
   const existingRequest = account.state.requestedRebalance.get(tokenId) ?? 0n;
   if (existingRequest > 0n) {
-    return {
-      success: true,
-      events: [
-        `ℹ️ request_collateral skipped: pending request is immutable token=${tokenId} amount=${existingRequest}`,
-      ],
-    };
+    return accountTxApplied([
+      `ℹ️ request_collateral skipped: pending request is immutable token=${tokenId} amount=${existingRequest}`,
+    ]);
   }
 
   // Deterministic request amount comes from frame payload.
@@ -89,13 +87,19 @@ export function handleRequestCollateral(
   // signed payload. Therefore the exact prepaid fee is already feeAmount.
   const effectiveFeeTarget = feeAmount;
   if (effectiveFeeTarget <= 0n) {
-    return { success: false, events: [], error: 'request_collateral: feeAmount must produce effectiveFee > 0' };
+    return accountTxValidationRejected(
+      'request_collateral: feeAmount must produce effectiveFee > 0',
+      [],
+    );
   }
 
   const feeToken = feeTokenId ?? tokenId;
   const feeDelta = account.state.deltas.get(feeToken);
   if (!feeDelta) {
-    return { success: false, events: [], error: `request_collateral: no delta for fee token ${feeToken}` };
+    return accountTxValidationRejected(
+      `request_collateral: no delta for fee token ${feeToken}`,
+      [],
+    );
   }
 
   // Request size is deterministic from payload; when fee is paid in the SAME token,
@@ -105,21 +109,17 @@ export function handleRequestCollateral(
     effectiveRequest = amount > effectiveFeeTarget ? amount - effectiveFeeTarget : 0n;
   }
   if (effectiveRequest <= 0n) {
-    return {
-      success: true,
-      events: [
-        `ℹ️ Collateral request skipped: prepaid fee consumes the full request (fee=${effectiveFeeTarget}, token=${feeToken})`,
-      ],
-    };
+    return accountTxApplied([
+      `ℹ️ Collateral request skipped: prepaid fee consumes the full request (fee=${effectiveFeeTarget}, token=${feeToken})`,
+    ]);
   }
 
   const requesterFeeCapacity = deriveDelta(feeDelta, requesterIsLeft).outCapacity;
   if (effectiveFeeTarget > requesterFeeCapacity) {
-    return {
-      success: false,
-      events: [],
-      error: `request_collateral: insufficient fee capacity in token ${feeToken} (${requesterFeeCapacity} < ${effectiveFeeTarget})`,
-    };
+    return accountTxValidationRejected(
+      `request_collateral: insufficient fee capacity in token ${feeToken} (${requesterFeeCapacity} < ${effectiveFeeTarget})`,
+      [],
+    );
   }
 
   // Convention: positive offdelta means LEFT has more.
@@ -143,7 +143,7 @@ export function handleRequestCollateral(
   const feeDisplay = effectiveFeeTarget > 0n ? `, prepaidFee=${effectiveFeeTarget}` : '';
   const events = [`🔄 Collateral requested: ${effectiveRequest} token ${tokenId}${feeDisplay} (hub will deposit R→C)`];
 
-  return { success: true, events };
+  return accountTxApplied(events);
 }
 
 /**

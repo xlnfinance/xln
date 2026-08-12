@@ -22,10 +22,16 @@ import {
   storeDisputeArgumentSnapshot,
 } from '../../../../protocol/dispute/arguments';
 import { projectAccountAfterSettlement } from '../../../settlement/settlement-projection';
+import { ACCOUNT_TX_REJECTION_CODES } from '../../apply-types';
 import type {
   AccountTxRejection,
   ApplyAccountTxResult,
 } from '../../apply-types';
+import {
+  accountTxApplied,
+  accountTxRejected,
+  settlementSealNonceRejection,
+} from '../../apply-result';
 
 type SettleTransitionTx = Extract<AccountTx, { type: 'settle_transition' }>;
 type UpsertTransition = Extract<SettleTransitionTx['data'], { kind: 'upsert' }>;
@@ -59,12 +65,12 @@ class SettlementSealNonceMismatchError extends Error {
     basis: SettlementSealNonceRejection['basis'],
   ) {
     super(message);
-    this.rejection = {
-      kind: 'settlement_seal_nonce_mismatch',
+    this.rejection = settlementSealNonceRejection(
+      message,
       suppliedNonce,
       requiredNonce,
       basis,
-    };
+    );
   }
 }
 
@@ -643,7 +649,7 @@ export async function handleSettleTransition(
       for (const tokenId of addWorkspaceHolds(draft, next)) changed.add(tokenId);
       commitDraft(account, draft, changed);
       transitionLog.debug('workspace.upserted', { revision: next.revision, hash: next.workspaceHash });
-      return { success: true, events: [`Settlement workspace v${next.revision} committed`] };
+      return accountTxApplied([`Settlement workspace v${next.revision} committed`]);
     }
 
     if (transition.kind === 'seal') {
@@ -652,7 +658,7 @@ export async function handleSettleTransition(
       account.disputeProofBodiesByHash = structuredClone(draft.disputeProofBodiesByHash ?? {});
       account.disputeProofNoncesByHash = { ...(draft.disputeProofNoncesByHash ?? {}) };
       account.disputeArgumentSnapshotsByHash = structuredClone(draft.disputeArgumentSnapshotsByHash ?? {});
-      return { success: true, events: [`Settlement workspace v${transition.revision} sealed`] };
+      return accountTxApplied([`Settlement workspace v${transition.revision} sealed`]);
     }
 
     const workspace = assertCurrentWorkspace(draft, transition.revision, transition.workspaceHash);
@@ -672,7 +678,7 @@ export async function handleSettleTransition(
       workspace.status = 'submitted';
       workspace.lastUpdatedAt = timestamp;
       commitDraft(account, draft, changed);
-      return { success: true, events: [`Settlement workspace v${workspace.revision} submitted`] };
+      return accountTxApplied([`Settlement workspace v${workspace.revision} submitted`]);
     }
 
     if (workspace.status === 'submitted') throw new Error('SETTLEMENT_CLEAR_SUBMITTED_FORBIDDEN');
@@ -685,17 +691,19 @@ export async function handleSettleTransition(
     for (const tokenId of releaseWorkspaceHolds(draft, workspace)) changed.add(tokenId);
     delete draft.state.settlementWorkspace;
     commitDraft(account, draft, changed);
-    return { success: true, events: [`Settlement workspace v${workspace.revision} cleared`] };
+    return accountTxApplied([`Settlement workspace v${workspace.revision} cleared`]);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     transitionLog.warn('workspace.transition_rejected', { kind: tx.data.kind, error: message });
-    return {
-      success: false,
-      events: [],
-      error: message,
-      ...(error instanceof SettlementSealNonceMismatchError
-        ? { rejection: error.rejection }
-        : {}),
-    };
+    return accountTxRejected(
+      error instanceof SettlementSealNonceMismatchError
+        ? error.rejection
+        : {
+            kind: 'validation',
+            code: ACCOUNT_TX_REJECTION_CODES.validation,
+            message,
+          },
+      [],
+    );
   }
 }

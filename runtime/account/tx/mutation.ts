@@ -5,6 +5,12 @@ import type { AccountJClaimSession } from '../j-claims/j-claim-session';
 import type { HtlcEnforcementClock } from '../htlc-deadline';
 import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute/policy';
 import type { ApplyAccountTxResult } from './apply-types';
+import {
+  accountTxRejected,
+  closedForDisputeRejection,
+  settlementFrozenRejection,
+} from './apply-result';
+import { toJHeight, toUnixMs, type JHeight, type UnixMs } from './units';
 import { handleAddDelta } from './handlers/balance/add-delta';
 import { handleSetCreditLimit } from './handlers/balance/set-credit-limit';
 import { handleDirectPayment } from './handlers/balance/direct-payment';
@@ -34,8 +40,8 @@ type MutationContext = {
   account: AccountReplica;
   tx: AccountTx;
   byLeft: boolean;
-  timestamp: number;
-  jHeight: number;
+  timestamp: UnixMs;
+  jHeight: JHeight;
   isValidation: boolean;
   consensusContext?: AccountConsensusContext;
   jClaimSession?: AccountJClaimSession;
@@ -74,12 +80,12 @@ const applyCollateralRequest = (context: MutationContext): ApplyAccountTxResult 
       },
     });
   };
-  if (!result.success) {
+  if (!result.ok) {
     debug({
       step: 1,
       status: 'error',
       event: 'request_collateral_rejected',
-      reason: result.error || 'unknown',
+      reason: result.rejection.message,
       tokenId,
     });
     return result;
@@ -120,25 +126,13 @@ const applyHtlcResolve = async (context: MutationContext): Promise<ApplyAccountT
     timestamp: context.timestamp,
     jHeight: context.jHeight,
   };
-  const result = await handleHtlcResolve(
+  return handleHtlcResolve(
     context.account.state,
     context.tx,
     context.byLeft,
     clock.jHeight,
     clock.timestamp,
   );
-  return {
-    success: result.success,
-    events: result.events,
-    ...(result.error ? { error: result.error } : {}),
-    ...(result.secret ? { secret: result.secret } : {}),
-    ...(result.hashlock ? { hashlock: result.hashlock } : {}),
-    ...(result.amount !== undefined ? { amount: result.amount } : {}),
-    ...(result.tokenId !== undefined ? { tokenId: result.tokenId } : {}),
-    ...(result.outcome === 'error' && result.hashlock
-      ? { timedOutHashlock: result.hashlock }
-      : {}),
-  };
 };
 
 const applyJEventClaim = (context: MutationContext): ApplyAccountTxResult => {
@@ -173,8 +167,8 @@ export const applyAccountTxMutation = async (
   account: AccountReplica,
   tx: AccountTx,
   byLeft: boolean,
-  timestamp: number,
-  jHeight: number,
+  rawTimestamp: number,
+  rawJHeight: number,
   isValidation: boolean,
   consensusContext: AccountConsensusContext | undefined,
   jClaimSession: AccountJClaimSession | undefined,
@@ -182,6 +176,8 @@ export const applyAccountTxMutation = async (
   candidateEffects: AccountOutput[],
   htlcEnforcementClock?: HtlcEnforcementClock,
 ): Promise<ApplyAccountTxResult> => {
+  const timestamp = toUnixMs(rawTimestamp);
+  const jHeight = toJHeight(rawJHeight);
   const myEntityId = account.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(account.state, myEntityId);
   const context: MutationContext = {
@@ -200,18 +196,15 @@ export const applyAccountTxMutation = async (
     counterparty,
   };
   if (!canProcessAccountTxForDisputeStatus(account.status)) {
-    const error =
-      `ACCOUNT_CLOSED_FOR_DISPUTE:status=${account.status};tx=${tx.type}`;
-    return { success: false, events: [error], error };
+    const rejection = closedForDisputeRejection(account.status, tx.type);
+    return accountTxRejected(rejection, [rejection.message]);
   }
   const freezeError = getSignedSettlementWorkspaceTxError(account, tx);
   if (freezeError) {
-    return {
-      success: false,
-      events: [freezeError],
-      error: freezeError,
-      rejection: { kind: 'settlement_signed_account_frozen', txType: tx.type },
-    };
+    return accountTxRejected(
+      settlementFrozenRejection(tx.type, freezeError),
+      [freezeError],
+    );
   }
 
   switch (tx.type) {

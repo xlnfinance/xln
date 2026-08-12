@@ -51,14 +51,18 @@ test('add_delta rejects a 129th row at the mutation sink without throwing or mut
     { type: 'add_delta', data: { tokenId: LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1 } },
   );
   expect(result).toEqual({
-    success: false,
+    ok: false,
     events: [
       `ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert:` +
       `${LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1}:${LIMITS.MAX_ACCOUNT_TOKEN_ROWS}`,
     ],
-    error:
-      `ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert:` +
-      `${LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1}:${LIMITS.MAX_ACCOUNT_TOKEN_ROWS}`,
+    rejection: {
+      kind: 'delta_row_limit_exceeded',
+      code: 'ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED',
+      message:
+        `ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert:` +
+        `${LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1}:${LIMITS.MAX_ACCOUNT_TOKEN_ROWS}`,
+    },
   });
   expect(account.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
 });
@@ -73,8 +77,9 @@ test('add_delta boundary and mutation sink reject token ids outside the canonica
     account,
     { type: 'add_delta', data: { tokenId: TOKENS.MAX_TOKEN_ID + 1 } },
   );
-  expect(result.success).toBe(false);
-  expect(result.error).toBe(`ACCOUNT_DELTA_TOKEN_INVALID:${TOKENS.MAX_TOKEN_ID + 1}`);
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error('expected add_delta rejection');
+  expect(result.rejection.message).toBe(`ACCOUNT_DELTA_TOKEN_INVALID:${TOKENS.MAX_TOKEN_ID + 1}`);
   expect(account.deltas.size).toBe(0);
 });
 

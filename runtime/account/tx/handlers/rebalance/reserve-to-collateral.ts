@@ -26,6 +26,8 @@
 
 import type { AccountState, AccountTx } from '../../../../types/account';
 import { createStructuredLogger } from '../../../../infra/logger';
+import type { ApplyAccountTxResult } from '../../apply-types';
+import { accountTxValidationRejected } from '../../apply-result';
 
 const reserveToCollateralLog = createStructuredLogger('account.reserve');
 
@@ -39,7 +41,7 @@ const reserveToCollateralLog = createStructuredLogger('account.reserve');
 export function handleReserveToCollateral(
   _account: AccountState,
   accountTx: Extract<AccountTx, { type: 'reserve_to_collateral' }>
-): { success: boolean; events: string[]; error?: string } {
+): ApplyAccountTxResult {
   // ═══════════════════════════════════════════════════════════════════════════
   // SECURITY BLOCK: Reject all direct reserve_to_collateral transactions
   // ═══════════════════════════════════════════════════════════════════════════
@@ -57,9 +59,8 @@ export function handleReserveToCollateral(
 
   reserveToCollateralLog.debug('direct_tx_blocked', { tokenId, collateral: collateral.toString() });
 
-  return {
-    success: false,
-    events: [],
-    error: 'SECURITY: reserve_to_collateral blocked - must use j_event_claim bilateral consensus'
-  };
+  return accountTxValidationRejected(
+    'SECURITY: reserve_to_collateral blocked - must use j_event_claim bilateral consensus',
+    [],
+  );
 }

@@ -6,18 +6,12 @@
  */
 
 import type { AccountReplica, AccountTx } from '../../../../../types/account';
-import type { SwapOfferEvent } from '../../../apply-types';
+import type { ApplyAccountTxResult } from '../../../apply-types';
+import { accountTxValidationRejected } from '../../../apply-result';
 import { validateSwapOfferAdmission } from './admission';
 import { prepareSwapOfferAmounts } from './quantization';
 import { validateCrossJurisdictionSourceBinding } from './cross-j-binding';
 import { commitSwapOffer } from './commit';
-
-type SwapOfferResult = {
-  success: boolean;
-  events: string[];
-  error?: string;
-  swapOfferCreated?: SwapOfferEvent;
-};
 
 export const handleSwapOffer = async (
   account: AccountReplica,
@@ -25,21 +19,21 @@ export const handleSwapOffer = async (
   byLeft: boolean,
   currentHeight: number,
   _isValidation = false,
-): Promise<SwapOfferResult> => {
+): Promise<ApplyAccountTxResult> => {
   // Preserve the canonical empty map even when admission rejects. Both Account
   // frame validation and commit execute this same transition.
   account.state.swapOffers ??= new Map();
   const admissionResult = validateSwapOfferAdmission(account.state, tx, byLeft);
   if (!admissionResult.admission) {
-    return { success: false, error: admissionResult.error!, events: [] };
+    return accountTxValidationRejected(admissionResult.error!, []);
   }
   const amountResult = prepareSwapOfferAmounts(tx);
   if (!amountResult.prepared) {
-    return { success: false, error: amountResult.error!, events: [] };
+    return accountTxValidationRejected(amountResult.error!, []);
   }
   const bindingError = validateCrossJurisdictionSourceBinding(account.state, tx);
   if (bindingError) {
-    return { success: false, error: bindingError, events: [] };
+    return accountTxValidationRejected(bindingError, []);
   }
   return commitSwapOffer(account, tx, admissionResult.admission, amountResult.prepared, currentHeight);
 };

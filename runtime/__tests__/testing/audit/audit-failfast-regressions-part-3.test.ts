@@ -1695,8 +1695,8 @@ describe('audit fail-fast regressions', () => {
       0,
     );
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('insufficient fee capacity');
+    expect(result.ok).toBe(false);
+    expect(result.ok ? undefined : result.rejection.message).toContain('insufficient fee capacity');
     expect(accountMachine.state.requestedRebalance.size).toBe(0);
     expect(feeDelta.offdelta).toBe(100n);
   });
@@ -1745,7 +1745,7 @@ describe('audit fail-fast regressions', () => {
       2,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(accountMachine.state.requestedRebalance.get(1)).toBe(590n);
     expect(accountMachine.state.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(10n);
     expect(accountMachine.shadow.rebalance.submittedAtByToken.get(1)).toBe(123);
@@ -1906,7 +1906,7 @@ describe('audit fail-fast regressions', () => {
 
     const result = await applyAccountTx(account, tx, true, 123, 0);
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(account.state.rebalanceFeePolicies?.get(1)?.left).toEqual({
       policyVersion: 4,
       baseFee: 7n,
@@ -1917,7 +1917,7 @@ describe('audit fail-fast regressions', () => {
     expect(account.state.rebalanceFeePolicies?.get(1)?.right).toBeUndefined();
 
     const retry = await applyAccountTx(account, tx, true, 999, 0);
-    expect(retry.success).toBe(true);
+    expect(retry.ok).toBe(true);
     expect(account.state.rebalanceFeePolicies?.get(1)?.left?.updatedAt).toBe(123);
 
     const beforeConflict = computeAccountStateRoot(account.state);
@@ -1931,7 +1931,7 @@ describe('audit fail-fast regressions', () => {
       999,
       0,
     );
-    expect(conflict).toMatchObject({ success: false, error: expect.stringContaining('REBALANCE_POLICY_EQUIVOCATION') });
+    expect(conflict).toMatchObject({ ok: false, rejection: { message: expect.stringContaining('REBALANCE_POLICY_EQUIVOCATION') } });
     expect(computeAccountStateRoot(account.state)).toBe(beforeConflict);
 
     const stale = await applyAccountTx(
@@ -1944,7 +1944,7 @@ describe('audit fail-fast regressions', () => {
       999,
       0,
     );
-    expect(stale.success).toBe(true);
+    expect(stale.ok).toBe(true);
     expect(computeAccountStateRoot(account.state)).toBe(beforeConflict);
 
     const right = await applyAccountTx(
@@ -1957,7 +1957,7 @@ describe('audit fail-fast regressions', () => {
       456,
       0,
     );
-    expect(right.success).toBe(true);
+    expect(right.ok).toBe(true);
     expect(account.state.rebalanceFeePolicies?.get(1)?.right?.baseFee).toBe(13n);
     expect(account.state.rebalanceFeePolicies?.get(1)?.left?.baseFee).toBe(7n);
   });
@@ -1975,7 +1975,7 @@ describe('audit fail-fast regressions', () => {
 
     const result = await applyAccountTx(account, malformed, true, 123, 0);
 
-    expect(result).toMatchObject({ success: false, error: expect.stringContaining('invalid fee types') });
+    expect(result).toMatchObject({ ok: false, rejection: { message: expect.stringContaining('invalid fee types') } });
     expect(computeAccountStateRoot(account.state)).toBe(before);
     expect(account.state.rebalanceFeePolicies).toBeUndefined();
   });
@@ -2288,7 +2288,7 @@ describe('audit fail-fast regressions', () => {
       2,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(accountMachine.state.requestedRebalance.get(1)).toBe(previousRequest);
     expect(accountMachine.state.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(previousFee);
     expect(accountMachine.state.requestedRebalanceFeeState.get(1)?.requestedAmount).toBe(previousRequest);

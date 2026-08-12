@@ -18,6 +18,8 @@ import { ensureDelta } from '../../delta-utils';
 import { addHold } from '../../hold-utils';
 import { isHtlcTimelockExpired } from '../../../htlc-deadline';
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../../protocol/htlc/codec/onion-layer';
+import type { ApplyAccountTxResult } from '../../apply-types';
+import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
 type HtlcLockTx = Extract<AccountTx, { type: 'htlc_lock' }>;
 
@@ -51,7 +53,7 @@ export async function handleHtlcLock(
   currentTimestamp: number,
   currentJHeight: number,
   _isValidation: boolean = false
-): Promise<{ success: boolean; events: string[]; error?: string }> {
+): Promise<ApplyAccountTxResult> {
   const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId } = accountTx.data;
   const events: string[] = [];
 
@@ -61,7 +63,7 @@ export async function handleHtlcLock(
   }
 
   const validationError = validateHtlcLock(account, accountTx, currentTimestamp, currentJHeight);
-  if (validationError) return { success: false, error: validationError, events };
+  if (validationError) return accountTxValidationRejected(validationError, events);
 
   const delta = ensureDelta(account.state, tokenId);
 
@@ -74,18 +76,17 @@ export async function handleHtlcLock(
     ? null
     : encryptedHtlcLayer(accountTx.data.envelope);
   if (accountTx.data.envelope !== undefined && !encryptedLayer) {
-    return { success: false, error: 'HTLC lock envelope must be encrypted', events };
+    return accountTxValidationRejected('HTLC lock envelope must be encrypted', events);
   }
 
   // 6. Check available capacity (deriveDelta auto-deducts HTLC holds now)
   const derived = deriveDelta(delta, senderIsLeft);
 
   if (amount > derived.outCapacity) {
-    return {
-      success: false,
-      error: `Insufficient capacity: need ${amount}, available ${derived.outCapacity}`,
+    return accountTxValidationRejected(
+      `Insufficient capacity: need ${amount}, available ${derived.outCapacity}`,
       events,
-    };
+    );
   }
 
   // 7. Create lock
@@ -106,7 +107,7 @@ export async function handleHtlcLock(
   // CRITICAL CONSENSUS FIX: Apply holds during BOTH validation and commit
   // Holds must be in frame hash to prevent same-frame over-commit attacks
   const holdError = addHold(delta, senderIsLeft ? 'left' : 'right', amount);
-  if (holdError) return { success: false, error: holdError, events };
+  if (holdError) return accountTxValidationRejected(holdError, events);
 
   // 9. Add lock to locks Map
   // CRITICAL CONSENSUS FIX: Add during validation too (prevents duplicate lockId in same frame)
@@ -115,5 +116,5 @@ export async function handleHtlcLock(
 
   events.push(`🔒 HTLC locked: ${amount} token ${tokenId}, expires block ${revealBeforeHeight}, hash ${hashlock.slice(0,16)}...`);
 
-  return { success: true, events };
+  return accountTxApplied(events);
 }

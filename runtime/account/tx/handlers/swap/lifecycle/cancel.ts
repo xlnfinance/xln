@@ -14,6 +14,8 @@
 import type { AccountReplica, AccountTx } from '../../../../../types/account';
 import { createStructuredLogger, shortOrder } from '../../../../../infra/logger';
 import { recordSwapCancelRequested } from './history';
+import type { ApplyAccountTxResult } from '../../../apply-types';
+import { accountTxSwapCancelRequested, accountTxValidationRejected } from '../../../apply-result';
 
 const swapCancelLog = createStructuredLogger('account.swap');
 
@@ -23,29 +25,29 @@ export async function handleSwapCancelRequest(
   byLeft: boolean,
   _currentHeight: number,
   isValidation: boolean = false
-): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelRequested?: { offerId: string } }> {
+): Promise<ApplyAccountTxResult> {
   const { offerId } = accountTx.data;
   const events: string[] = [];
 
   // 1. Find offer
   if (!account.state.swapOffers) {
-    return { success: false, error: `No swap offers exist`, events };
+    return accountTxValidationRejected(`No swap offers exist`, events);
   }
   const offer = account.state.swapOffers.get(offerId);
   if (!offer) {
-    return { success: false, error: `Offer ${offerId} not found`, events };
+    return accountTxValidationRejected(`Offer ${offerId} not found`, events);
   }
 
   // 2. Validate caller IS the maker (Channel.ts: byLeft = frame proposer = caller)
   const callerIsLeft = byLeft;
 
   if (callerIsLeft !== offer.makerIsLeft) {
-    return { success: false, error: `Only maker can cancel swap offer`, events };
+    return accountTxValidationRejected(`Only maker can cancel swap offer`, events);
   }
 
   // 3. Emit request event (used by hub orderbook cancel flow)
   events.push(`📨 Swap cancel requested: ${offerId.slice(0, 8)}...`);
   swapCancelLog.debug('cancel_request.accepted', { offer: shortOrder(offerId, 8), phase: isValidation ? 'validation' : 'commit' });
   recordSwapCancelRequested(account, offerId, _currentHeight);
-  return { success: true, events, swapOfferCancelRequested: { offerId } };
+  return accountTxSwapCancelRequested(events, offerId);
 }

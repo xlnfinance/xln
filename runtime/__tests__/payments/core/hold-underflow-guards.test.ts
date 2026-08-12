@@ -39,7 +39,7 @@ describe('hold underflow guards', () => {
       1_000,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(accountMachine.state.locks.has(lockId)).toBe(false);
     expect(delta.leftHold).toBe(0n);
   });
@@ -78,8 +78,9 @@ describe('hold underflow guards', () => {
       },
     }, true, 2);
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('SETTLEMENT_HOLD_UNDERFLOW:right');
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected settlement hold underflow');
+    expect(result.rejection.message).toContain('SETTLEMENT_HOLD_UNDERFLOW:right');
     expect(deltaA.leftHold).toBe(5n);
     expect(deltaB.rightHold).toBe(1n);
     expect(accountMachine.state.settlementWorkspace).toBeDefined();
@@ -118,8 +119,9 @@ describe('hold underflow guards', () => {
       1_000,
     );
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('HTLC_RESOLVE_HOLD_UNDERFLOW:left');
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected htlc hold underflow');
+    expect(result.rejection.message).toContain('HTLC_RESOLVE_HOLD_UNDERFLOW:left');
     expect(delta.leftHold).toBe(5n);
     expect(delta.offdelta).toBe(0n);
     expect(accountMachine.locks.has(lockId)).toBe(true);
@@ -156,8 +158,9 @@ describe('hold underflow guards', () => {
       1_000,
     );
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('HTLC_RESOLVE_HOLD_UNDERFLOW:left');
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected htlc hold underflow');
+    expect(result.rejection.message).toContain('HTLC_RESOLVE_HOLD_UNDERFLOW:left');
     expect(delta.leftHold).toBe(5n);
     expect(accountMachine.locks.has(lockId)).toBe(true);
   });

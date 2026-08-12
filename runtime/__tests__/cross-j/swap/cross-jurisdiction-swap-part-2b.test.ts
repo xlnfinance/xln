@@ -411,8 +411,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       2_000,
       1,
     );
-    expect(invalidTargetResult.success).toBe(false);
-    expect(invalidTargetResult.error).toContain('cumulative target mismatch');
+    expect(invalidTargetResult.ok).toBe(false);
+    expect(invalidTargetResult.ok ? undefined : invalidTargetResult.rejection.message).toContain('cumulative target mismatch');
 
     const result = await applyAccountTx(
       account,
@@ -440,7 +440,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     const updatedRoute = account.state.swapOffers.get(route.orderId)?.crossJurisdiction;
     expect(updatedRoute?.filledSourceAmount).toBe(cumulativeSource);
     expect(updatedRoute?.filledTargetAmount).toBe(cumulativeTarget);
@@ -556,7 +556,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(account.state.swapOffers.has(route.orderId)).toBe(false);
     expect(account.state.pulls.get(route.sourcePull!.pullId)?.crossJurisdiction?.status).toBe('clear_requested');
     expect(account.state.pulls.get(route.sourcePull!.pullId)?.crossJurisdiction?.clearingPolicy).toBe('cancel_and_clear');
@@ -729,7 +729,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       env.state.timestamp,
       1,
     );
-    expect(targetCloseResult.success, targetCloseResult.error).toBe(true);
+    expect(targetCloseResult.ok, targetCloseResult.ok ? undefined : targetCloseResult.rejection.message).toBe(true);
     expect(stagedTargetClose.newState.accounts.get(targetUser)!.state.pulls?.has(route.targetPull!.pullId)).toBe(false);
 
     const accountAfterClear = materialized.newState.accounts.get(sourceUser)!;
@@ -762,7 +762,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       env.state.timestamp,
       1,
     );
-    expect(resolveResult.success, resolveResult.error).toBe(true);
+    expect(resolveResult.ok, resolveResult.ok ? undefined : resolveResult.rejection.message).toBe(true);
     expect(accountAfterClear.state.pulls?.has(route.sourcePull!.pullId)).toBe(false);
     const releasedDelta = accountAfterClear.state.deltas.get(route.sourcePull!.tokenId)!;
     expect(sourcePullPayerIsLeft ? releasedDelta.leftHold : releasedDelta.rightHold).toBe(0n);
@@ -1017,8 +1017,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       env.state.timestamp,
       1,
     );
-    expect(lowerProofResult.success).toBe(false);
-    expect(lowerProofResult.error).toContain('ratio');
+    expect(lowerProofResult.ok).toBe(false);
+    expect(lowerProofResult.ok ? undefined : lowerProofResult.rejection.message).toContain('ratio');
     expect(account.state.pulls?.has(highRoute.targetPull!.pullId)).toBe(true);
 
     const lowerBinaryResult = await applyAccountTx(
@@ -1031,8 +1031,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       env.state.timestamp,
       2,
     );
-    expect(lowerBinaryResult.success).toBe(false);
-    expect(lowerBinaryResult.error).toContain('binary');
+    expect(lowerBinaryResult.ok).toBe(false);
+    expect(lowerBinaryResult.ok ? undefined : lowerBinaryResult.rejection.message).toContain('binary');
     expect(account.state.pulls?.has(highRoute.targetPull!.pullId)).toBe(true);
   });
 
@@ -1135,8 +1135,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Only the target Hub');
+    expect(result.ok).toBe(false);
+    expect(result.ok ? undefined : result.rejection.message).toContain('Only the target Hub');
     expect(computeAccountStateRoot(account.state)).toBe(before);
     expect(account.state.pulls?.has(targetPull.pullId)).toBe(true);
   });
@@ -1229,8 +1229,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(uncommittedResult.success).toBe(false);
-    expect(uncommittedResult.error).toContain('chain-proportional');
+    expect(uncommittedResult.ok).toBe(false);
+    expect(uncommittedResult.ok ? undefined : uncommittedResult.rejection.message).toContain('chain-proportional');
     expect(computeAccountStateRoot(account.state)).toBe(initialRoot);
     expect(account.state.pulls?.has(sourcePull.pullId)).toBe(true);
 
@@ -1258,8 +1258,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       2,
     );
 
-    expect(forgedAmountResult.success).toBe(false);
-    expect(forgedAmountResult.error).toContain('source amount 999 != committed 500');
+    expect(forgedAmountResult.ok).toBe(false);
+    expect(forgedAmountResult.ok ? undefined : forgedAmountResult.rejection.message).toContain('source amount 999 != committed 500');
     expect(computeAccountStateRoot(committedAccount.state)).toBe(committedRoot);
 
     const canonicalAmountResult = await applyAccountTx(
@@ -1272,7 +1272,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       env.state.timestamp,
       3,
     );
-    expect(canonicalAmountResult.success, canonicalAmountResult.error).toBe(true);
+    expect(canonicalAmountResult.ok, canonicalAmountResult.ok ? undefined : canonicalAmountResult.rejection.message).toBe(true);
     expect(committedAccount.state.pulls?.has(sourcePull.pullId)).toBe(false);
   });
 
