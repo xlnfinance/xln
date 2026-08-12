@@ -7,7 +7,7 @@ import type {
   AccountJClaimPruneResult,
   AccountJClaimRecord,
   AccountJClaimSide,
-} from '../../types/account-j-claims';
+} from '../../types/finance/account-j-claims';
 import {
   EMPTY_ACCOUNT_J_CLAIM_ROOT,
   accountJClaimKeyBit,
@@ -25,7 +25,7 @@ import {
   verifyAccountJClaimProof,
 } from './j-claim-proof';
 
-export type * from '../../types/account-j-claims';
+export type * from '../../types/finance/account-j-claims';
 export {
   EMPTY_ACCOUNT_J_CLAIM_ROOT,
   createAccountJClaimProof,

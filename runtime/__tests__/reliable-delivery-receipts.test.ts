@@ -31,7 +31,7 @@ import {
 } from '../entity/consensus/output/certification';
 import { generateLazyEntityId } from '../entity/factory';
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
-import { orderReliableEntityInputsWithinSourceLanes } from '../runtime/frame/input-admission';
+import { orderReliableEntityInputsWithinSourceLanes } from '../runtime/frame/input/admission';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import {

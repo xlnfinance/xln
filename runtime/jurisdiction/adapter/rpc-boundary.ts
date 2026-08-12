@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { nodeProcess, runtimeIsBrowser } from '../../infra/runtime-process';
+import { nodeProcess, runtimeIsBrowser } from '../../infra/process/runtime-process';
 import { safeStringify } from '../../protocol/serialization';
 import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
 

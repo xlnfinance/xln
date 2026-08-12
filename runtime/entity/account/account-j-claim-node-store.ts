@@ -3,7 +3,7 @@ import type {
   AccountJClaimNode,
   AccountJClaimNodeChanges,
   AccountJClaimNodeStore,
-} from '../../types/account-j-claims';
+} from '../../types/finance/account-j-claims';
 import type { EntityRuntimeContext } from '../runtime-context';
 import {
   collectReachableAccountJClaimNodes,

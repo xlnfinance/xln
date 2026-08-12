@@ -4,7 +4,7 @@ import {
 import {
   isProductionRuntime,
   readRuntimeEnv,
-} from '../../infra/runtime-process.ts';
+} from '../../infra/process/runtime-process.ts';
 import { safeStringify } from '../../protocol/serialization.ts';
 import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
 import type { RuntimeReplica, RuntimeInput } from '../types.ts';

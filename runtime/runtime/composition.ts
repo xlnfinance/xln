@@ -1,4 +1,4 @@
-import { runtimeIsBrowser } from '../infra/runtime-process';
+import { runtimeIsBrowser } from '../infra/process/runtime-process';
 export { getLiveJAdapter, getLiveJAdapterEntries } from './live-jadapters';
 
 // The testnet exposes one canonical runtime contract. Breaking changes replace
@@ -26,8 +26,8 @@ import {
 } from './frame/transaction';
 import {
   admitAtomicCrossJAccountInputs,
-} from './frame/cross-j-atomic-admission';
-import { createRuntimeInputReducer } from './frame/input-reducer';
+} from './frame/cross-j/atomic-admission';
+import { createRuntimeInputReducer } from './frame/input/reducer';
 import { createRuntimeProcessor } from './frame/process';
 import { clearRuntimeDatabases } from './storage-admin';
 import { loadLiveRuntimeFromDB } from './live-restore';

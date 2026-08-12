@@ -1,45 +1,45 @@
-import { nodeProcess } from '../../infra/runtime-process';
+import { nodeProcess } from '../../../infra/process/runtime-process';
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
-} from '../../runtime/input-clone';
-import { requireBoundaryInteger } from '../../protocol/boundary-validation';
-import { getConsumptionNodeStore } from '../../entity/consumption/consumption-store';
+} from '../../../runtime/input-clone';
+import { requireBoundaryInteger } from '../../../protocol/boundary-validation';
+import { getConsumptionNodeStore } from '../../../entity/consumption/consumption-store';
 import {
   deleteRuntimeMetadata,
   readRuntimeMetadata,
   writeRuntimeMetadata,
-} from '../../runtime/loop/loop-environment.ts';
+} from '../../../runtime/loop/loop-environment.ts';
 import {
   clearPendingAuditEvents,
   dropPendingHistoryRecords,
   peekPendingHistoryRecords,
-} from '../../runtime/env-events';
-import { restoreDurableOutputRetryState } from '../../runtime/durable-output-retry';
+} from '../../../runtime/env-events';
+import { restoreDurableOutputRetryState } from '../../../runtime/durable-output-retry';
 import {
   registerPendingCommittedJOutbox,
   splitJOutboxForDurableSubmit,
-} from '../../runtime/j-submit-state';
-import { finalizeReliableIngressCommit } from '../../runtime/reliable/reliable-delivery.ts';
-import { refreshScheduledWakeIndex } from '../../runtime/scheduled-wake';
+} from '../../../runtime/j-submit-state';
+import { finalizeReliableIngressCommit } from '../../../runtime/reliable/reliable-delivery.ts';
+import { refreshScheduledWakeIndex } from '../../../runtime/scheduled-wake';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
-} from '../../runtime/entity-output-signer';
+} from '../../../runtime/entity-output-signer';
 import type {
   RuntimeInput,
   RuntimeReplica,
   RoutedEntityInput,
-} from '../../runtime/types';
-import type { RuntimeInputApplyResult } from '../../runtime/frame/apply';
-import type { RuntimeOutputRoutingDeps } from '../../runtime/output-routing';
-import type { PersistedFrameJournal } from '../types';
+} from '../../../runtime/types';
+import type { RuntimeInputApplyResult } from '../../../runtime/frame/apply';
+import type { RuntimeOutputRoutingDeps } from '../../../runtime/output-routing';
+import type { PersistedFrameJournal } from '../../types';
 import {
   authorizeRestoredRuntimeInput,
-} from '../wal/snapshot';
-import { createStructuredLogger } from '../../infra/logger';
-import { verifyRecoveryJournalFrame } from './journal-verification';
-import { assertCrossJLocalCohorts } from '../../runtime/cross-j-topology';
+} from '../../wal/snapshot';
+import { createStructuredLogger } from '../../../infra/logger';
+import { verifyRecoveryJournalFrame } from './verification';
+import { assertCrossJLocalCohorts } from '../../../runtime/cross-j-topology';
 
 const APPLY_ALLOWED = Symbol.for('xln.runtime.env.apply.allowed');
 const REPLAY_MODE = Symbol.for('xln.runtime.env.replay.mode');

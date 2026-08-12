@@ -26,10 +26,10 @@ export type { JReplica } from '../../types/jurisdiction-runtime';
 export type { EntityTx } from '../../types/entity-tx';
 export type { AccountReplica, AccountState, AccountFrame, Delta, DerivedDelta, AccountTx, SettlementDiff } from '../../types/account';
 export type { Xlnomy } from '../../types/xlnomy';
-export type { HubRebalanceConfig } from '../../types/rebalance';
-export type { DebtEntry } from '../../types/debt';
+export type { HubRebalanceConfig } from '../../types/finance/rebalance';
+export type { DebtEntry } from '../../types/finance/debt';
 export type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
-export type { PaymentDeliveryMode } from '../../types/payment';
+export type { PaymentDeliveryMode } from '../../types/finance/payment';
 export type { PersistedFrameJournal } from '../../storage/types';
 export type { RuntimeFrame, StorageHead } from '../../storage/types';
 export type {
@@ -42,7 +42,7 @@ export type {
   TowerCounterDisputeRemedy,
   TowerModeV1,
   TowerReceiptV1,
-} from '../../storage/recovery/types';
+} from '../../storage/recovery/bundle/types';
 
 export type { Profile } from '../../entity/profile';
 export type { PaymentRoute } from '../../routing/pathfinding';

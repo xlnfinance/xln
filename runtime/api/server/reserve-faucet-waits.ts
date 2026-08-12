@@ -3,7 +3,7 @@ import type { JAdapter } from '../../jurisdiction/adapter';
 import { DEV_CHAIN_IDS } from '../../jurisdiction/adapter';
 import { createStructuredLogger } from '../../infra/logger';
 import { getEntityReplicaById } from './entity-lookup';
-import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 
 const faucetLog = createStructuredLogger('server.faucet');
 

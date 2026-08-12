@@ -1,11 +1,11 @@
-import type { RuntimeReplica, RuntimeInput } from '../types';
-import { requireRuntimeMempool } from '../input-queue';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
+import type { RuntimeReplica, RuntimeInput } from '../../types';
+import { requireRuntimeMempool } from '../../input-queue';
+import { ensureRuntimeInfrastructure } from '../../runtime-infrastructure';
 import type { FrameExecutionState } from './execution-state';
 import {
   cloneRuntimeFrameMempool,
   prependOlderRuntimeInput,
-} from './transaction';
+} from '../transaction';
 
 export type UndurableRuntimeInputContext = {
   frame: FrameExecutionState;

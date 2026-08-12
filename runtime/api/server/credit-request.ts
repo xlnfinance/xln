@@ -7,7 +7,7 @@ import { getFaucetHubProfiles } from './faucet-hubs';
 import { getRequestCreditCap } from './hub-health';
 import { isEntityId32 } from './utils';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../../runtime/ingress-receipts';
-import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 
 type CreditRequestInput = {
   req: Request;

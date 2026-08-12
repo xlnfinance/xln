@@ -13,7 +13,7 @@ import type {
 } from '../runtime/api/runtime-adapter/types';
 import type { RuntimeInput } from '../runtime/runtime/types';
 import type { EntityTx } from '../runtime/types/entity-tx';
-import type { PaymentDeliveryMode } from '../runtime/types/payment';
+import type { PaymentDeliveryMode } from '../runtime/types/finance/payment';
 
 export type DaemonAuthKeyProvider = string | (() => string);
 export type DaemonFrameLog = RuntimeAdapterFrameLog;

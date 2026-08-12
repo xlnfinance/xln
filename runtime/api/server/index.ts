@@ -58,7 +58,7 @@ import { createHelloChallengeRegistry } from '../../network/p2p/auth/hello-chall
 import { createLocalDeliveryHandler } from '../../network/relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdictions-path';
 import { createStructuredLogger, registerStructuredLogSink, shortId } from '../../infra/logger';
-import { startParentLivenessWatch } from '../../infra/parent-watch';
+import { startParentLivenessWatch } from '../../infra/process/parent-watch';
 import { buildMarketSnapshotForReplica, type MarketSnapshotPayload } from '../../network/relay/market/snapshot';
 import { createMarketSubscriptionStack } from '../../network/relay/market/subscriptions';
 import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../../network/relay/market/wire';
@@ -115,14 +115,14 @@ import {
 } from './assistant-proxy';
 import { selectPredeployedJurisdiction } from './predeployed-jurisdiction';
 import { getJurisdictionIdentityRef } from '../../jurisdiction/machine/jurisdiction-runtime';
-import { readInheritedChildSecrets } from '../../infra/child-secrets';
+import { readInheritedChildSecrets } from '../../infra/process/child-secrets';
 import { createLocalPairingController } from './local-pairing';
 import { createGossipProfileAdmission } from './gossip-profile-admission';
 import { deriveSignerAddressSync } from '../../account/crypto';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';
 import { createBrainVaultOwnerController } from './brainvault-owner';
 import { dbRootPath } from '../../runtime/platform';
-import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 import type { Server } from 'bun';
 
 // Global J-adapter instance (set during startup)

@@ -52,7 +52,7 @@ import {
 import {
   discardRejectedEntityInput,
   RuntimeInputDiscardedError,
-} from '../frame/input-discard.ts';
+} from '../frame/input/discard.ts';
 import { createRuntimeRoutingApi } from './loop-routing.ts';
 import {
   createRuntimeLifecycleApi,

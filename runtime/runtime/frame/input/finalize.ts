@@ -1,18 +1,18 @@
-import { isLocalEntityLeaderTimeoutVote } from '../../entity/consensus/leader';
-import { createStructuredLogger } from '../../infra/logger';
-import { createGossipLayer } from '../../network/p2p/gossip';
-import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
-import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
-import type { JInput } from '../../jurisdiction/machine/input';
+import { isLocalEntityLeaderTimeoutVote } from '../../../entity/consensus/leader';
+import { createStructuredLogger } from '../../../infra/logger';
+import { createGossipLayer } from '../../../network/p2p/gossip';
+import { normalizeRuntimeId } from '../../../network/p2p/auth/runtime-id';
+import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
+import type { JInput } from '../../../jurisdiction/machine/input';
 import {
   commitReliableIngress,
   getInputReliableIdentity,
   releaseUncommittedReliableIngress,
   type ReliableIngressCommit,
-} from '../reliable/reliable-delivery.ts';
-import { mergeDurableReceiptOnlyInputs } from '../reliable/reliable-durable-inputs.ts';
-import { reliableIdentityExactKey } from '../reliable/reliable-frontier.ts';
-import { splitRoutedOutputByDeliveryLane } from '../output-routing';
+} from '../../reliable/reliable-delivery.ts';
+import { mergeDurableReceiptOnlyInputs } from '../../reliable/reliable-durable-inputs.ts';
+import { reliableIdentityExactKey } from '../../reliable/reliable-frontier.ts';
+import { splitRoutedOutputByDeliveryLane } from '../../output-routing';
 
 const runtimeLog = createStructuredLogger('runtime');
 

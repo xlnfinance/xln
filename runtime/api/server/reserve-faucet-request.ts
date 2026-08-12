@@ -18,7 +18,7 @@ import {
   waitForReserveUpdate,
   waitForRuntimeIdle,
 } from './reserve-faucet-waits';
-import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 
 const faucetLog = createStructuredLogger('server.faucet');
 

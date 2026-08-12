@@ -61,7 +61,7 @@ import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { hasLocalSignerForEntitySigner } from '../runtime/loop/loop-identity.ts';
-import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-secrets';
+import { readInheritedChildSecrets, resolveChildSecret } from '../infra/process/child-secrets';
 import {
   BOOTSTRAP_POLL_MS,
   buildMarketMakerConsensusConfig,

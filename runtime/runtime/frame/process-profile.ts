@@ -1,10 +1,10 @@
 import type { EntityInputCausalTrace } from '../../qa/account-causal-trace';
-import { cumulativeMarksToPhases } from '../../infra/perf-profile';
-import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
+import { cumulativeMarksToPhases } from '../../infra/performance/profile';
+import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/performance/runtime-flags';
 import { createStructuredLogger } from '../../infra/logger';
 import type { RuntimeReplica } from '../types';
 import { getPerfMs } from '../../infra/time';
-import { nodeProcess } from '../../infra/runtime-process';
+import { nodeProcess } from '../../infra/process/runtime-process';
 
 const runtimeLog = createStructuredLogger('runtime');
 const APPLY_PROFILE = nodeProcess?.env?.['XLN_RUNTIME_APPLY_PROFILE'] === '1';

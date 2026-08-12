@@ -9,8 +9,8 @@ import { deriveRuntimeAdapterCapabilityToken } from '../runtime/api/runtime-adap
 import { RuntimeAdapterError } from '../runtime/api/runtime-adapter/errors';
 import { createStructuredLogger } from '../runtime/infra/logger';
 import { deserializeTaggedJson, serializeTaggedJson } from '../runtime/protocol/serialization';
-import { readInheritedChildSecrets, resolveChildSecret } from '../runtime/infra/child-secrets';
-import { startParentLivenessWatch } from '../runtime/infra/parent-watch';
+import { readInheritedChildSecrets, resolveChildSecret } from '../runtime/infra/process/child-secrets';
+import { startParentLivenessWatch } from '../runtime/infra/process/parent-watch';
 import { DaemonRpcClient, type DaemonFrameLog } from './daemon-client';
 import { CustodyStore, type ActivityRecord, type SessionRecord, type WithdrawalRecord } from './store';
 import {

@@ -1,7 +1,7 @@
 import {
   nodeProcess,
   readRuntimeEnv,
-} from '../infra/runtime-process';
+} from '../infra/process/runtime-process';
 
 /**
  * Yield one host task without adding an artificial Runtime delay.

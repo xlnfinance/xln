@@ -2,12 +2,12 @@ import type {
   EnvSnapshot,
   ReliableDeliveryReceipt,
   RuntimeInput,
-} from '../types';
+} from '../../types';
 import type {
   ReliableIngressCommit,
   ReliableReceiptSenderCheckpoint,
-} from '../reliable/reliable-delivery.ts';
-import type { RuntimeFrameTransaction } from './transaction';
+} from '../../reliable/reliable-delivery.ts';
+import type { RuntimeFrameTransaction } from '../transaction';
 
 type RuntimeReceiptDelivery = {
   runtimeId: string;

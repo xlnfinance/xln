@@ -14,7 +14,7 @@ const readMarketMakerNodeSource = (): string => [
 test('bootstrap uses the canonical WAL-before-dispatch commit path', () => {
   const process = readFileSync(join(repoRoot, 'runtime/runtime/frame/process.ts'), 'utf8');
   const postCommit = readFileSync(
-    join(repoRoot, 'runtime/runtime/frame/post-commit.ts'),
+    join(repoRoot, 'runtime/runtime/frame/lifecycle/post-commit.ts'),
     'utf8',
   );
   const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');

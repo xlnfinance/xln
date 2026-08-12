@@ -40,7 +40,7 @@ const BANNED_PATTERNS: Array<{ pattern: RegExp; rule: string }> = [
 const ALLOWED_INFRA_CALLS = new Set([
   'runtime/entity/htlc/payment-admission.ts:getRandomValues',
   'runtime/runtime/frame/process-profile.ts:Date.now',
-  'runtime/runtime/frame/start.ts:Date.now',
+  'runtime/runtime/frame/lifecycle/start.ts:Date.now',
 ]);
 
 const toRel = (abs: string): string => path.relative(ROOT, abs).replace(/\\/g, '/');

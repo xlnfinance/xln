@@ -7,7 +7,7 @@ import { deriveSignerKeySync } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime.ts';
 import { buildRuntimeRecoveryBundle } from '../storage/recovery/bundle';
-import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from '../storage/recovery/crypto';
+import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from '../storage/recovery/bundle/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
 import type { JurisdictionConfig, TowerAppointmentV1 } from '../api/public/runtime-module';
 import { decodeStoredLookupDoc } from '../watchtower/store/decode';

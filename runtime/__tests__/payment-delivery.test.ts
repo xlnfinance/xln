@@ -5,7 +5,7 @@ import {
 } from '../protocol/payments/delivery';
 import { HTLC } from '../config/constants';
 import { calculateHopRevealHeight, calculateHopTimelock } from '../protocol/htlc/utils';
-import { ASYNC_PAYMENT_EXPIRY_BLOCKS, ASYNC_PAYMENT_EXPIRY_MS } from '../types/payment';
+import { ASYNC_PAYMENT_EXPIRY_BLOCKS, ASYNC_PAYMENT_EXPIRY_MS } from '../types/finance/payment';
 
 describe('payment delivery modes', () => {
   test('async is a deterministic 24-hour window', () => {

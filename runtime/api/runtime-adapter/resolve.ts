@@ -31,11 +31,11 @@ import { buildRuntimeRecoveryBundle } from '../../storage/recovery/bundle';
 import {
   deriveRuntimeRecoveryLookupKey,
   encryptRuntimeRecoveryBundle,
-} from '../../storage/recovery/crypto';
+} from '../../storage/recovery/bundle/crypto';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecoverySignerV1,
-} from '../../storage/recovery/types';
+} from '../../storage/recovery/bundle/types';
 import type { RuntimeActivityFilters } from '../../storage/views/activity-types';
 import type {
   RuntimeAdapterActivityPage,
@@ -59,7 +59,7 @@ import {
   type RuntimeIngressReceipt,
 } from '../../runtime/ingress-receipts';
 import { calculateSolvency } from '../../runtime/solvency';
-import { acquireRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import { acquireRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 
 export type RuntimeAdapterResolveContext = {
   env: RuntimeReplica;

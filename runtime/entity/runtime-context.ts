@@ -1,4 +1,4 @@
-import type { AccountJClaimNodeStore } from '../types/account-j-claims';
+import type { AccountJClaimNodeStore } from '../types/finance/account-j-claims';
 import type { CertifiedBoardNodeStore } from '../types/entity-board-registry';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import type { LogCategory } from '../types/logging';

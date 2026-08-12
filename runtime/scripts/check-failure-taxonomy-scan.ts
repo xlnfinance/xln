@@ -24,24 +24,24 @@ const readText = (path: string): string => {
       'runtime/runtime/frame/apply.ts',
       'runtime/runtime/frame/clone.ts',
       'runtime/runtime/frame/dispatch.ts',
-      'runtime/runtime/frame/execution-state.ts',
-      'runtime/runtime/frame/finish.ts',
-      'runtime/runtime/frame/input-admission.ts',
-      'runtime/runtime/frame/input-finalize.ts',
-      'runtime/runtime/frame/input-reducer.ts',
+      'runtime/runtime/frame/input/execution-state.ts',
+      'runtime/runtime/frame/lifecycle/finish.ts',
+      'runtime/runtime/frame/input/admission.ts',
+      'runtime/runtime/frame/input/finalize.ts',
+      'runtime/runtime/frame/input/reducer.ts',
       'runtime/runtime/frame/plan.ts',
-      'runtime/runtime/frame/post-commit.ts',
-      'runtime/runtime/frame/prepare.ts',
+      'runtime/runtime/frame/lifecycle/post-commit.ts',
+      'runtime/runtime/frame/lifecycle/prepare.ts',
       'runtime/runtime/frame/process-profile.ts',
-      'runtime/runtime/frame/input-recovery.ts',
+      'runtime/runtime/frame/input/recovery.ts',
       'runtime/runtime/frame/snapshot.ts',
-      'runtime/runtime/frame/start.ts',
+      'runtime/runtime/frame/lifecycle/start.ts',
       'runtime/runtime/frame/transaction.ts',
-      'runtime/runtime/frame/writer-lock.ts',
+      'runtime/runtime/frame/lifecycle/writer-lock.ts',
     ],
     'runtime/runtime/loop/loop.ts': [
       'runtime/runtime/loop/loop.ts',
-      'runtime/runtime/frame/input-discard.ts',
+      'runtime/runtime/frame/input/discard.ts',
       'runtime/runtime/loop/loop-lifecycle.ts',
       'runtime/runtime/loop/loop-failure.ts',
     ],
@@ -619,7 +619,7 @@ for (const [path, markers] of [
     ["createStructuredLogger('orchestrator.managed_leases')", 'stale_processes.kill', 'lease.unreadable_ignored'],
   ],
   [
-    'runtime/infra/parent-watch.ts',
+    'runtime/infra/process/parent-watch.ts',
     ["createStructuredLogger('orchestrator.parent_watch')", 'missing_parent_pid', 'parent_pid_missing'],
   ],
   [
@@ -713,7 +713,7 @@ assertNotIncludes(disputeWatch, '[PUSH-WATCH] target', disputeWatchPath);
 for (const orchestratorLifecyclePath of [
   'runtime/orchestrator/graceful-server.ts',
   'runtime/orchestrator/managed-runtime-leases.ts',
-  'runtime/infra/parent-watch.ts',
+  'runtime/infra/process/parent-watch.ts',
 ]) {
   assertNotIncludes(readText(orchestratorLifecyclePath), 'console.', orchestratorLifecyclePath);
 }
@@ -877,7 +877,7 @@ for (const marker of [
   assertIncludes(runtimeEntityInputs, marker, runtimeEntityInputsPath);
 }
 
-const runtimeSourcePath = 'runtime/runtime/frame/input-discard.ts';
+const runtimeSourcePath = 'runtime/runtime/frame/input/discard.ts';
 const runtimeSource = readText(runtimeSourcePath);
 assertIncludes(runtimeSource, 'error.isDiscardableIngress', runtimeSourcePath);
 assertNotIncludes(

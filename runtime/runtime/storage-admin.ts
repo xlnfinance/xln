@@ -1,6 +1,6 @@
 import { createStructuredLogger } from '../infra/logger';
 import type { createRuntimeLoopApi } from './loop/loop.ts';
-import { nodeProcess, runtimeIsBrowser } from '../infra/runtime-process';
+import { nodeProcess, runtimeIsBrowser } from '../infra/process/runtime-process';
 import { dbRootPath } from './platform';
 import type { RuntimeReplica } from './types';
 

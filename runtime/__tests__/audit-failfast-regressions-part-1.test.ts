@@ -182,7 +182,7 @@ import { createJReplica } from '../scenarios/boot';
 
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/entity-inputs';
 import { assertExternalEntityInputAllowed } from '../runtime/entity-input/entity-input-admission.ts';
-import { discardRejectedEntityInput } from '../runtime/frame/input-discard';
+import { discardRejectedEntityInput } from '../runtime/frame/input/discard';
 
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 
@@ -260,7 +260,7 @@ import {
   resolveEntityProposerId,
 } from '../runtime/entity-output-signer';
 
-import { QUOTE_EXPIRY_MS } from '../types/rebalance';
+import { QUOTE_EXPIRY_MS } from '../types/finance/rebalance';
 
 import type { AccountFrame, AccountInput, AccountReplica, AccountState, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';

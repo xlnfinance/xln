@@ -76,7 +76,7 @@ import { marketMakerBootstrapProgressSignature } from './mm-bootstrap-progress';
 import { areMarketMakerHubTransportsReady } from './mm-transport';
 import { quiesceNodeRuntime } from './node-runtime-quiesce';
 import { MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS } from './orchestrator-config';
-import { startParentLivenessWatch } from '../infra/parent-watch';
+import { startParentLivenessWatch } from '../infra/process/parent-watch';
 
 import {
   activateMarketMakerProcessArgs,

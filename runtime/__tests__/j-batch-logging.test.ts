@@ -10,7 +10,7 @@ import { cloneJBatch, initJBatch } from '../jurisdiction/machine/batch';
 import { createEmptyEnv } from '../runtime';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
-import type { DebtEntry } from '../types/debt';
+import type { DebtEntry } from '../types/finance/debt';
 import type { EntityState } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';

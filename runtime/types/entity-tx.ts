@@ -1,9 +1,9 @@
 import type { JurisdictionEventData } from './jurisdiction-events';
 import type { AccountPeerInput, AccountState, AccountStateDomain, SettlementOp } from './account';
 import type { CrossJurisdictionCloseProof, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
-import type { LendingTermId } from './lending';
+import type { LendingTermId } from './finance/lending';
 import type { ProposalAction } from '../entity/types';
-import type { PaymentDeliveryMode } from './payment';
+import type { PaymentDeliveryMode } from './finance/payment';
 import type { ValidatorEncryptionAttestation } from '../protocol/htlc/validator-encryption';
 import type { EntityProfileDescriptor } from '../entity/profile/profile-descriptor';
 import type { CertifiedBoardAuthorityBinding } from './entity-board-registry';

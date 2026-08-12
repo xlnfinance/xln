@@ -3,16 +3,16 @@ import {
   deriveSignerAddressSync,
   signAccountFrame,
   verifyAccountSignature,
-} from '../../account/crypto';
-import { serializeTaggedJson } from '../../protocol/serialization';
-import { buildRuntimeRecoveryCheckpointSnapshot } from '../wal';
-import type { RuntimeReplica } from '../../runtime/types';
+} from '../../../account/crypto';
+import { serializeTaggedJson } from '../../../protocol/serialization';
+import { buildRuntimeRecoveryCheckpointSnapshot } from '../../wal';
+import type { RuntimeReplica } from '../../../runtime/types';
 import type {
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
 } from './types';
-import type { PersistedFrameJournal } from '../types';
+import type { PersistedFrameJournal } from '../../types';
 
 const RECOVERY_BUNDLE_VERSION = 1;
 const MAX_RECOVERY_JOURNAL_FRAMES = 10_000;

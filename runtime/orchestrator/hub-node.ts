@@ -41,7 +41,7 @@ import {
   RPC_MARKET_MAX_DEPTH,
 } from '../network/relay/market/snapshot';
 import { toPublicRpcUrl } from '../network/p2p/loopback-url';
-import { startParentLivenessWatch } from '../infra/parent-watch';
+import { startParentLivenessWatch } from '../infra/process/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { quiesceNodeRuntime } from './node-runtime-quiesce';
 import { applyJEventsToEnv } from '../jurisdiction/adapter/watcher';
@@ -61,7 +61,7 @@ import {
   type BootstrapProgressHealth,
 } from './bootstrap-progress-watchdog';
 import { restoredRuntimeRouteRelocated } from './restored-gossip-route';
-import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-secrets';
+import { readInheritedChildSecrets, resolveChildSecret } from '../infra/process/child-secrets';
 import { findMissingRpcContractCode } from './contract-readiness';
 import { readJurisdictionsFile } from './jurisdictions-file';
 import { getTokenIdsForJurisdiction } from '../account/utils';

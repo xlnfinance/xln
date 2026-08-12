@@ -12,7 +12,7 @@ import {
 } from '../helpers';
 import { createAccountJClaimSession } from '../../j-claims/j-claim-session';
 import { prepareAccountJClaimTx } from '../../j-claims/j-claim-transition';
-import type { AccountJClaimNodeStore } from '../../../types/account-j-claims';
+import type { AccountJClaimNodeStore } from '../../../types/finance/account-j-claims';
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
 import type { AccountSwapOfferCreated } from '../types';
 import type { AccountTxRejection } from '../../tx/apply-types';

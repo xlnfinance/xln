@@ -1,21 +1,21 @@
-import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
-import { safeStringify } from '../../protocol/serialization';
-import { writeRuntimeMetadata } from '../../runtime/loop/loop-environment.ts';
-import type { RuntimeReplica } from '../../runtime/types';
+import { assertCertifiedRegistrationEvidenceStore } from '../../../jurisdiction/machine/registration-evidence';
+import { safeStringify } from '../../../protocol/serialization';
+import { writeRuntimeMetadata } from '../../../runtime/loop/loop-environment.ts';
+import type { RuntimeReplica } from '../../../runtime/types';
 import {
   listStorageSnapshotHeights,
   readStorageFrameRecord,
   reconcileHistoryViews,
   resolveStorageRuntimeConfig,
   type RuntimeFrame,
-} from '..';
-import { computeCanonicalEntityHashesFromEnv } from '../canonical-hash';
-import type { PersistedStorageReadApi } from '../persisted-read';
-import { buildRecoveryJournalFromStorageFrame } from '../queries';
-import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
-import { assertStorageSafetyOverridesAllowed } from '../safety';
-import type { LoadedRuntimeStorage } from './load';
-import { verifyPersistedFrameState } from './verify';
+} from '../..';
+import { computeCanonicalEntityHashesFromEnv } from '../../canonical-hash';
+import type { PersistedStorageReadApi } from '../../persisted-read';
+import { buildRecoveryJournalFromStorageFrame } from '../../queries';
+import type { RuntimeStorageApiDeps } from '../../runtime-storage-deps';
+import { assertStorageSafetyOverridesAllowed } from '../../safety';
+import type { LoadedRuntimeStorage } from '../load';
+import { verifyPersistedFrameState } from '../verify';
 
 type ReplayTarget = {
   latestHeight: number;

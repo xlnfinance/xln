@@ -8,7 +8,7 @@ import {
   acquireRuntimeCommittedRead,
   acquireRuntimeFrameWriter,
   withRuntimeCommittedRead,
-} from '../runtime/frame/writer-lock';
+} from '../runtime/frame/lifecycle/writer-lock';
 
 const radapterAuthSeed = process.env['XLN_RADAPTER_AUTH_SEED'] || 'seed';
 process.env['XLN_RADAPTER_AUTH_SEED'] = radapterAuthSeed;

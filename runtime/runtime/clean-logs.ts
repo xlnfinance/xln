@@ -1,5 +1,5 @@
 import type { RuntimeReplica } from './types';
-import { runtimeIsBrowser } from '../infra/runtime-process';
+import { runtimeIsBrowser } from '../infra/process/runtime-process';
 
 export type RuntimeCleanLogDeps = {
   ensureRuntimeInfrastructure: (env: RuntimeReplica) => NonNullable<RuntimeReplica['infrastructure']>;

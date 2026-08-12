@@ -16,7 +16,7 @@ import {
   splitJOutboxForDurableSubmit,
 } from '../j-submit-state';
 import { refreshScheduledWakeIndex } from '../scheduled-wake';
-import type { FrameExecutionState } from './execution-state';
+import type { FrameExecutionState } from './input/execution-state';
 import {
   ACCOUNT_CAUSAL_TRACE,
   type RuntimeProcessProfile,

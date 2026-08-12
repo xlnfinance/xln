@@ -7,7 +7,7 @@ import type { EntityTx } from '../../../types/entity-tx';
 import type {
   AccountJClaimNode,
   AccountJClaimNodeStore,
-} from '../../../types/account-j-claims';
+} from '../../../types/finance/account-j-claims';
 import type { ConsumptionNode } from '../../consumption/consumption-accumulator';
 import type {
   SwapCancelEvent,

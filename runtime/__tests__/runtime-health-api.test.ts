@@ -4,7 +4,7 @@ import { createRelayStore, storeVerifiedGossipProfile } from '../network/relay/s
 import { createEmptyEnv } from '../runtime';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry, type RuntimeHealthDeps } from '../api/server/health-api';
 import { createMarketMakerServerState } from '../api/server/market-maker-health';
-import { acquireRuntimeFrameWriter } from '../runtime/frame/writer-lock';
+import { acquireRuntimeFrameWriter } from '../runtime/frame/lifecycle/writer-lock';
 import {
   buildCryptographicProfileFixture,
   certifySingleSignerProfileFixture,

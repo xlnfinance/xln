@@ -1,4 +1,4 @@
-import type { TowerProofBody } from './types';
+import type { TowerProofBody } from './bundle/types';
 
 const requireRecord = (
   value: unknown,

@@ -3,7 +3,7 @@ import {
   ASYNC_PAYMENT_EXPIRY_BLOCKS,
   ASYNC_PAYMENT_EXPIRY_MS,
   type PaymentDeliveryMode,
-} from '../../types/payment';
+} from '../../types/finance/payment';
 
 export type ConditionalPaymentMode = Extract<PaymentDeliveryMode, 'instant' | 'async'>;
 

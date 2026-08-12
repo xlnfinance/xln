@@ -11,7 +11,7 @@ import {
   childSecretFdEnv,
   type ChildSecrets,
   writeInheritedChildSecrets,
-} from '../infra/child-secrets';
+} from '../infra/process/child-secrets';
 
 const DEFAULT_CHILD_READY_TIMEOUT_MS = 120_000;
 const LOG_TAIL_LINES = 80;

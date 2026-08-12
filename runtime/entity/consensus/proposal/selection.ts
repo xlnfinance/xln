@@ -5,7 +5,7 @@ import {
   hasPendingLocalJEvent,
   isFrozenBaseJPrefixRollAuthorized,
 } from '../../../jurisdiction/machine/j-prefix-consensus';
-import { nodeProcess } from '../../../infra/runtime-process';
+import { nodeProcess } from '../../../infra/process/runtime-process';
 import type { EntityReplica } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';

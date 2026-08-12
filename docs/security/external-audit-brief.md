@@ -114,7 +114,7 @@ operational evidence for restart/load stability, not unit-test substitutes.
 - `runtime/jurisdiction/adapter/event-observation.ts`
 - `runtime/jurisdiction/adapter/history-ingress.ts`
 - `runtime/extensions/lending.ts`
-- `runtime/types/lending.ts`
+- `runtime/types/finance/lending.ts`
 - `runtime/entity/tx/handlers/lending.ts`
 - `runtime/api/server/lending.ts`
 - `runtime/network/relay/router.ts`

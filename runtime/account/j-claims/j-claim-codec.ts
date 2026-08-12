@@ -6,7 +6,7 @@ import type {
   AccountJClaimNode,
   AccountJClaimRecord,
   AccountJClaimSide,
-} from '../../types/account-j-claims';
+} from '../../types/finance/account-j-claims';
 
 const ABI = ethers.AbiCoder.defaultAbiCoder();
 const domain = (label: string): string => ethers.keccak256(ethers.toUtf8Bytes(label)).toLowerCase();

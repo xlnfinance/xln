@@ -9,8 +9,8 @@ import {
   createEmptyEnv,
   loadEnvFromDB,
 } from '../runtime';
-import { createFrameExecutionState } from '../runtime/frame/execution-state';
-import { handleRuntimeFrameStorageFailure } from '../runtime/frame/storage-failure';
+import { createFrameExecutionState } from '../runtime/frame/input/execution-state';
+import { handleRuntimeFrameStorageFailure } from '../runtime/frame/lifecycle/storage-failure';
 import { createRuntimeFrameTransaction } from '../runtime/frame/transaction';
 import { dbRootPath } from '../runtime/platform';
 import { ensureRuntimeInfrastructure } from '../runtime/runtime-infrastructure';

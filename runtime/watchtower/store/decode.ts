@@ -1,10 +1,10 @@
 import { deserializeTaggedJson } from '../../protocol/serialization';
-import { normalizeTowerModeV1 } from '../../storage/recovery/types';
+import { normalizeTowerModeV1 } from '../../storage/recovery/bundle/types';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   TowerLastResortPayloadV1,
   TowerReceiptV1,
-} from '../../storage/recovery/types';
+} from '../../storage/recovery/bundle/types';
 import type {
   StoredLookupDoc,
   StoredTowerActionReceipt,

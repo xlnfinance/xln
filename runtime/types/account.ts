@@ -1,15 +1,15 @@
 import type { CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { HankoString } from './hanko';
 import type { JurisdictionEvent } from './jurisdiction-events';
-import type { PaymentDeliveryMode } from './payment';
-import type { LendingTermId } from './lending';
+import type { PaymentDeliveryMode } from './finance/payment';
+import type { LendingTermId } from './finance/lending';
 import type { DisputeArgumentSnapshot } from '../protocol/dispute/argument-snapshot';
 import type {
   AccountRebalanceShadowState,
   BilateralRebalanceFeePolicy,
   RebalanceRequestFeeState,
-} from './rebalance';
-import type { AccountJClaimAccumulatorState, AccountJClaimProof } from './account-j-claims';
+} from './finance/rebalance';
+import type { AccountJClaimAccumulatorState, AccountJClaimProof } from './finance/account-j-claims';
 
 // ═══════════════════════════════════════════════════════════════
 // HTLC (Hash Time-Locked Contracts)

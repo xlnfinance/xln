@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { handleRebalanceRefund } from '../account/tx/handlers/rebalance/refund';
 import { handleRequestCollateral } from '../account/tx/handlers/rebalance/request-collateral';
 import type { AccountReplica } from '../types/account';
-import type { RebalanceRequestFeeState } from '../types/rebalance';
+import type { RebalanceRequestFeeState } from '../types/finance/rebalance';
 import { createDefaultDelta } from '../account/state/delta';
 import { entity, makeAccount } from './helpers/cross-j';
 

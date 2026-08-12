@@ -1,5 +1,5 @@
 import { shortId } from '../../../infra/logger';
-import { nodeProcess } from '../../../infra/runtime-process';
+import { nodeProcess } from '../../../infra/process/runtime-process';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareLocallyAuthoredEntityTxs } from '../../command';
 import { appendDefaultProposerCrossJMaterializations } from '../../transition/cross-j-proposer-materialization';

@@ -23,7 +23,7 @@ import {
 import { EmbeddedRuntimeAdapter } from '../api/runtime-adapter/embedded';
 import { registerRuntimePublishedCallback } from '../runtime/loop/loop-environment.ts';
 import { notifyRuntimeStateChanged } from '../runtime/frame/notifications';
-import { acquireRuntimeFrameWriter } from '../runtime/frame/writer-lock';
+import { acquireRuntimeFrameWriter } from '../runtime/frame/lifecycle/writer-lock';
 
 import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';
 
@@ -39,7 +39,7 @@ import {
   type RuntimeAdapterGraphFrame,
 } from '../api/runtime-adapter/resolve';
 
-import { decryptRuntimeRecoveryBundle, deriveRuntimeRecoveryLookupKey } from '../storage/recovery/crypto';
+import { decryptRuntimeRecoveryBundle, deriveRuntimeRecoveryLookupKey } from '../storage/recovery/bundle/crypto';
 
 import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../api/runtime-adapter/server';
 

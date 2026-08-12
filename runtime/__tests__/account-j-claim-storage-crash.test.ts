@@ -23,7 +23,7 @@ import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { keyAccountJClaimNode, keyDiff } from '../storage/keys';
 import { hydrateAccountJClaimRootNodesFromStorage } from '../storage/read';
 import type { StorageDiffRecord } from '../storage/types';
-import type { AccountJClaimNode, AccountJClaimRecord } from '../types/account-j-claims';
+import type { AccountJClaimNode, AccountJClaimRecord } from '../types/finance/account-j-claims';
 
 const fixture = join(import.meta.dir, 'fixtures/account-j-claim-storage-crash-child.ts');
 const namespaces: Array<{ dbRoot: string; runtimeId: string }> = [];

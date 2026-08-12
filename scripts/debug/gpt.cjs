@@ -160,7 +160,7 @@ const CORE_FILES = {
     'entity/tx/handlers/account/orderbook-matching-helpers.ts', // Shared matching helpers
     'entity/tx/handlers/account/orderbook-cancels.ts', // Orderbook cancellation path
     'extensions/lending.ts',                              // Hub lending pool math, terms, ids, memos
-    'types/lending.ts',                        // Lending pool/loan state model
+    'types/finance/lending.ts',                // Lending pool/loan state model
     'entity/tx/handlers/lending.ts',           // Lending offer/borrow/repay entity tx handlers
     'api/server/lending.ts',                   // Hub lending API handlers
     'account/tx/handlers/swap/offer/index.ts',     // Account-level swap offer placement
@@ -1144,7 +1144,7 @@ No-liquidity is an expected terminal product state, not a protocol fatal.
 
 Read these together:
 - \`runtime/extensions/lending.ts\`
-- \`runtime/types/lending.ts\`
+- \`runtime/types/finance/lending.ts\`
 - \`runtime/entity/tx/handlers/lending.ts\`
 - \`runtime/api/server/lending.ts\`
 - \`frontend/src/lib/components/Entity/LendingPanel.svelte\`
@@ -1240,7 +1240,7 @@ xln/
       orchestrator/mm-node.ts     ${fileSizes['runtime/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
       server/market-maker-health.ts ${fileSizes['runtime/api/server/market-maker-health.ts'] || '?'} lines - MM readiness health
       lending.ts                  ${fileSizes['runtime/extensions/lending.ts'] || '?'} lines - Lending math and ids
-      types/lending.ts            ${fileSizes['runtime/types/lending.ts'] || '?'} lines - Lending state types
+      types/finance/lending.ts    ${fileSizes['runtime/types/finance/lending.ts'] || '?'} lines - Lending state types
       entity/tx/handlers/lending.ts ${fileSizes['runtime/entity/tx/handlers/lending.ts'] || '?'} lines - Lending tx handlers
       server/lending.ts           ${fileSizes['runtime/api/server/lending.ts'] || '?'} lines - Lending API handlers
 

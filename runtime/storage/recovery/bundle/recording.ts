@@ -1,10 +1,10 @@
 import { ethers } from 'ethers';
 
-import { serializeTaggedJson } from '../../protocol/serialization';
+import { serializeTaggedJson } from '../../../protocol/serialization';
 import {
   computeRuntimeRecoveryBundleHash,
   validateRuntimeRecoveryBundle,
-} from './bundle';
+} from './index';
 import type { RuntimeRecording, RuntimeRecoveryBundleV1 } from './types';
 
 type UnsignedRecordingManifest = Omit<RuntimeRecording, 'manifestHash'>;

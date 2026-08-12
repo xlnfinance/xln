@@ -21,7 +21,7 @@ that drives them. Read the cascade before the services around it.
 ### 2. One input through all three machines
 
 6. `runtime/runtime/frame/process.ts` — the visible Runtime coordinator.
-7. `runtime/runtime/frame/prepare.ts` — detach one immutable Runtime input.
+7. `runtime/runtime/frame/lifecycle/prepare.ts` — detach one immutable Runtime input.
 8. `runtime/runtime/frame/apply.ts` — apply Runtime and routed Entity work.
 9. `runtime/entity/consensus/input/consensus.ts` — the Entity entry point.
 10. `runtime/entity/consensus/frame/application.ts` — replay a candidate.
@@ -38,9 +38,9 @@ that drives them. Read the cascade before the services around it.
 16. `runtime/account/consensus/incoming/collision.ts` — deterministic same-height
     LEFT-wins rollback.
 17. `runtime/account/consensus/incoming/ack-commit.ts` — bilateral commit.
-18. `runtime/runtime/frame/storage-failure.ts` — pre/post-WAL failure rules.
+18. `runtime/runtime/frame/lifecycle/storage-failure.ts` — pre/post-WAL failure rules.
 19. `runtime/storage/commit.ts` — the only durable Runtime commit point.
-20. `runtime/storage/recovery/replay.ts` — rebuild from durable truth.
+20. `runtime/storage/recovery/journal/replay.ts` — rebuild from durable truth.
 
 ### 4. External settlement
 

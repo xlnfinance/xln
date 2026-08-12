@@ -1,5 +1,5 @@
 import { getTokenInfo } from '../../account/utils';
-import { scaleWholeTokenAmount } from '../../types/rebalance';
+import { scaleWholeTokenAmount } from '../../types/finance/rebalance';
 import { type RuntimeReplica } from '../../runtime/types';
 import type { JTokenInfo } from '../../jurisdiction/adapter/types';
 import { getBootstrapTokenAmount } from '../../jurisdiction/machine/bootstrap-economy';

@@ -12,7 +12,7 @@ import {
   assertInboundCrossJRuntimeTopology,
 } from '../runtime/cross-j-topology';
 import { applyPreparedRuntimeFrame } from '../runtime/frame/apply';
-import { createFrameExecutionState } from '../runtime/frame/execution-state';
+import { createFrameExecutionState } from '../runtime/frame/input/execution-state';
 import { createRuntimeProcessProfile } from '../runtime/frame/process-profile';
 import { createEmptyEnv } from '../runtime';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';

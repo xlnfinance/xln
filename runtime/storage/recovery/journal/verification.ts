@@ -1,13 +1,13 @@
-import { getCachedSignerPrivateKey } from '../../account/crypto';
-import { safeStringify } from '../../protocol/serialization';
-import type { RuntimeInputApplyResult } from '../../runtime/frame/apply';
-import type { RuntimeReplica } from '../../runtime/types';
-import { computeStoragePostStateHash } from '..';
-import { computeCanonicalStateHashFromEnv } from '../canonical-hash';
+import { getCachedSignerPrivateKey } from '../../../account/crypto';
+import { safeStringify } from '../../../protocol/serialization';
+import type { RuntimeInputApplyResult } from '../../../runtime/frame/apply';
+import type { RuntimeReplica } from '../../../runtime/types';
+import { computeStoragePostStateHash } from '../..';
+import { computeCanonicalStateHashFromEnv } from '../../canonical-hash';
 import {
   applyCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
-} from '../entity-lineage';
+} from '../../entity-lineage';
 import {
   buildStorageLiveReplicaMetaCommitment,
   buildStorageReplicaMetaCommitmentFromCheckpointPlan,
@@ -15,16 +15,16 @@ import {
   summarizeStorageReplicaMetaEntries,
   summarizeStorageReplicaMetaFields,
   summarizeStorageReplicaMetaHeads,
-} from '../replicas';
-import type { PersistedFrameJournal } from '../types';
+} from '../../replicas';
+import type { PersistedFrameJournal } from '../../types';
 import {
   buildDurableRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimeMachineSnapshot,
-} from '../wal/snapshot';
+} from '../../wal/snapshot';
 import {
   assertRecoveryRuntimeMachineMatches,
   listRecoveryRuntimeMachineMismatchFields,
-} from './machine';
+} from '../machine';
 
 export const verifyRecoveryJournalFrame = (
   env: RuntimeReplica,

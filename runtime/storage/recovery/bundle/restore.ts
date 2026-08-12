@@ -1,10 +1,10 @@
-import { markRestoredReliableOutputsDue } from '../../runtime/output-routing';
-import type { RuntimeReplica } from '../../runtime/types';
-import type { CheckpointRestoreOptions } from './checkpoint';
-import type { PersistedFrameJournal } from '../types';
-import { assertRuntimeRecoveryBundleAuthenticity } from './bundle';
+import { markRestoredReliableOutputsDue } from '../../../runtime/output-routing';
+import type { RuntimeReplica } from '../../../runtime/types';
+import type { CheckpointRestoreOptions } from '../checkpoint';
+import type { PersistedFrameJournal } from '../../types';
+import { assertRuntimeRecoveryBundleAuthenticity } from './index';
 import type { RuntimeRecoveryBundleV1 } from './types';
-import { authorizeRestoredRuntimeInput } from '../wal/snapshot';
+import { authorizeRestoredRuntimeInput } from '../../wal/snapshot';
 
 export interface RuntimeBundleRestoreOptions extends CheckpointRestoreOptions {
   targetHeight?: number;

@@ -41,7 +41,7 @@ import { getMinimumSafeSettlementNonce } from '../../protocol/settlement/operati
 import { computeAccountStateRoot, computeAccountStateSectionHashes } from '../commitment/state-root';
 import { forkAccountCommitmentCache } from '../commitment/map-commitment';
 import { createAccountJClaimSession, type AccountJClaimSession } from '../j-claims/j-claim-session';
-import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
+import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claims';
 import {
   getIncomingAccountDeadlineViolation,
   HTLC_ENFORCEMENT_RESERVE_MS,

@@ -1,22 +1,22 @@
-import { createStructuredLogger, logError, shortId } from '../../infra/logger';
-import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
-import { decodeRoutedEntityInput } from '../routing-validation';
-import { validateJInputs } from '../../storage/wal/runtime-machine-schema/j';
-import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
-import type { JInput } from '../../jurisdiction/machine/input';
+import { createStructuredLogger, logError, shortId } from '../../../infra/logger';
+import { normalizeRuntimeId } from '../../../network/p2p/auth/runtime-id';
+import { decodeRoutedEntityInput } from '../../routing-validation';
+import { validateJInputs } from '../../../storage/wal/runtime-machine-schema/j';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
+import type { JInput } from '../../../jurisdiction/machine/input';
 import {
   getInputReliableIdentity,
   registerReliableIngress,
-} from '../reliable/reliable-delivery.ts';
-import { compareReliableIdentityPosition } from '../reliable/reliable-frontier.ts';
+} from '../../reliable/reliable-delivery.ts';
+import { compareReliableIdentityPosition } from '../../reliable/reliable-frontier.ts';
 import {
   validateExternalEntityInputTargets,
   RuntimeEntityInputApplyError,
-} from '../entity-inputs';
-import { splitRoutedOutputByDeliveryLane } from '../output-routing';
-import { assertScheduledWakeTxAuthorized } from '../scheduled-wake';
-import { validateRuntimeInputShapeAndLimits } from '../input-validation';
-import { selectPotentialAtomicCrossJInputIndexes } from './cross-j-atomic-admission';
+} from '../../entity-inputs';
+import { splitRoutedOutputByDeliveryLane } from '../../output-routing';
+import { assertScheduledWakeTxAuthorized } from '../../scheduled-wake';
+import { validateRuntimeInputShapeAndLimits } from '../../input-validation';
+import { selectPotentialAtomicCrossJInputIndexes } from '../cross-j/atomic-admission';
 
 const runtimeLog = createStructuredLogger('runtime');
 

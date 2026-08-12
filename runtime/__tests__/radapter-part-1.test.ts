@@ -38,7 +38,7 @@ import {
   type RuntimeAdapterGraphFrame,
 } from '../api/runtime-adapter/resolve';
 
-import { decryptRuntimeRecoveryBundle, deriveRuntimeRecoveryLookupKey } from '../storage/recovery/crypto';
+import { decryptRuntimeRecoveryBundle, deriveRuntimeRecoveryLookupKey } from '../storage/recovery/bundle/crypto';
 
 import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../api/runtime-adapter/server';
 

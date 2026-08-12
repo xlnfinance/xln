@@ -4,7 +4,7 @@ import {
   buildDefaultRebalancePolicy,
   scaleWholeTokenAmount,
   type RebalancePolicy,
-} from '../../types/rebalance';
+} from '../../types/finance/rebalance';
 import { getTokenInfo } from '../utils';
 
 export const DEFAULT_ACCOUNT_TOKEN_IDS = [1, 3, 2] as const; // USDC, USDT, WETH

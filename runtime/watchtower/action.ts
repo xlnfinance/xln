@@ -10,8 +10,8 @@ import type {
   TowerCounterDisputeRemedy,
   TowerFinalDisputeProof,
   TowerLastResortWatchV1,
-} from '../storage/recovery/types';
-import { decryptTowerPayloadWithWatchSeed } from '../storage/recovery/crypto';
+} from '../storage/recovery/bundle/types';
+import { decryptTowerPayloadWithWatchSeed } from '../storage/recovery/bundle/crypto';
 import type { LastResortTowerAppointment, WatchtowerStore, StoredTowerActionReceipt } from './store';
 
 const DEPOSITORY_MINIMAL_ABI = [

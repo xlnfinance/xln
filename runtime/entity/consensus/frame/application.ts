@@ -12,7 +12,7 @@ import {
 } from '../../../account/tx/handlers/settlement/transition';
 import { markCrossJurisdictionBookAdmissionResolving } from '../../../extensions/cross-j/orderbook';
 import { logError, shortHash, shortId, shortOrder } from '../../../infra/logger';
-import { cumulativeMarksToPhases } from '../../../infra/perf-profile';
+import { cumulativeMarksToPhases } from '../../../infra/performance/profile';
 import { assertEntityFrameJRangeBudget } from '../../../jurisdiction/machine/range-budget';
 import { replaceOrderbookPair, type OrderbookExtState } from '../../../orderbook';
 import {
@@ -36,7 +36,7 @@ import type { EntityRuntimeContext } from '../../runtime-context';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import type { EntityTx } from '../../../types/entity-tx';
-import type { AccountJClaimNode, AccountJClaimNodeChanges, AccountJClaimNodeStore } from '../../../types/account-j-claims';
+import type { AccountJClaimNode, AccountJClaimNodeChanges, AccountJClaimNodeStore } from '../../../types/finance/account-j-claims';
 import { getPerfMs } from '../../../infra/time';
 import {
   assertRuntimeOutputAuthorization,

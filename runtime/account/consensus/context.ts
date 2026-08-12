@@ -1,6 +1,6 @@
 import type { HankoString } from '../../types/hanko';
 import type { JReplica } from '../../types/jurisdiction-runtime';
-import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
+import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claims';
 
 /**
  * Read-only capabilities supplied by Entity before entering Account consensus.

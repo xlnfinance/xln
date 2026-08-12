@@ -1,6 +1,6 @@
-import type { RuntimeReplica } from '../types';
-import { inferRuntimeLifecyclePhase } from '../lifecycle';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
+import type { RuntimeReplica } from '../../types';
+import { inferRuntimeLifecyclePhase } from '../../lifecycle';
+import { ensureRuntimeInfrastructure } from '../../runtime-infrastructure';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 

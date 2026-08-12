@@ -17,7 +17,7 @@ import {
 } from './hub-health';
 import type { MarketMakerServerState } from './market-maker-health';
 import { getMarketMakerHealth } from './market-maker-health';
-import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 
 export type RuntimeHealthCacheEntry = {
   fullBody: string;

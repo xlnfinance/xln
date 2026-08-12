@@ -1,5 +1,5 @@
-import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../../infra/perf-runtime-flags';
-import { nodeProcess } from '../../../infra/runtime-process';
+import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../../infra/performance/runtime-flags';
+import { nodeProcess } from '../../../infra/process/runtime-process';
 
 const ENTITY_FRAME_PROFILE =
   nodeProcess?.env?.['XLN_ENTITY_FRAME_PROFILE'] === '1' ||

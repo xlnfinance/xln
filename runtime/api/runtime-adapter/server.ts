@@ -60,7 +60,7 @@ import { markLocalRuntimeAdapterCommandTx } from '../../runtime/command-frontier
 import { verifyRuntimeAdapterOwnerBinding } from './security/owner-binding';
 import { encodeBinaryPayload } from '../../storage/binary-codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
-import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 import {
   ensurePendingNumberedRegistrationsResumed,
   registerNumberedEntities,

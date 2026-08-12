@@ -1,6 +1,6 @@
 import type { AccountReplica } from '../types/account';
 import type { EntityState } from './types';
-import type { LendingLoan, LendingPoolPosition, LendingState } from '../types/lending';
+import type { LendingLoan, LendingPoolPosition, LendingState } from '../types/finance/lending';
 import {
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionRoute,

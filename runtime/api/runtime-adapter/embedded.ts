@@ -21,7 +21,7 @@ import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './
 import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../../runtime/lifecycle';
 import { ensureRuntimeInfrastructure } from '../../runtime/runtime-infrastructure';
 import type { RuntimePublishedNotice } from '../../runtime/loop/loop-environment.ts';
-import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 import {
   ensurePendingNumberedRegistrationsResumed,
   registerNumberedEntities,

@@ -217,7 +217,7 @@ describe('production startup wiring', () => {
   test('canonical runtime commit persists the durable outbox before backup and dispatch', () => {
     const process = readFileSync(join(repoRoot, 'runtime/runtime/frame/process.ts'), 'utf8');
     const recoveryOutput = readFileSync(join(repoRoot, 'runtime/runtime/recovery-output.ts'), 'utf8');
-    const postCommit = readFileSync(join(repoRoot, 'runtime/runtime/frame/post-commit.ts'), 'utf8');
+    const postCommit = readFileSync(join(repoRoot, 'runtime/runtime/frame/lifecycle/post-commit.ts'), 'utf8');
     const durableOutbox = recoveryOutput.indexOf('env.pendingNetworkOutputs = buildPendingNetworkOutputs([');
     const save = process.indexOf('const outcome = await deps.storage.saveEnvToDB(');
     const plan = process.indexOf('const outputPlan = planRuntimeFrameOutputs(');
@@ -852,7 +852,7 @@ describe('production startup wiring', () => {
     );
     const runtimeSource = readFileSync(join(repoRoot, 'runtime/runtime/composition.ts'), 'utf8');
     const frameDispatchSource = readFileSync(join(repoRoot, 'runtime/runtime/frame/dispatch.ts'), 'utf8');
-    const framePreparationSource = readFileSync(join(repoRoot, 'runtime/runtime/frame/prepare.ts'), 'utf8');
+    const framePreparationSource = readFileSync(join(repoRoot, 'runtime/runtime/frame/lifecycle/prepare.ts'), 'utf8');
     const runtimeLoopWorkSource = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop-work.ts'), 'utf8');
     const runtimeLoopLifecycleSource = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop-lifecycle.ts'), 'utf8');
     expect(runtimeLoopLifecycleSource).toContain(

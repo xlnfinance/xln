@@ -1,4 +1,4 @@
-import type { DebtEntry, DebtEventType } from '../../types/debt';
+import type { DebtEntry, DebtEventType } from '../../types/finance/debt';
 import type { EntityState } from '../types';
 import type { JurisdictionEvent } from '../../types/jurisdiction-events';
 import { createStructuredLogger, shortId } from '../../infra/logger';

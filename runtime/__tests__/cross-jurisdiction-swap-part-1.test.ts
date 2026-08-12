@@ -37,7 +37,7 @@ import {
   submitCrossJurisdictionIntent,
   submitCrossJurisdictionSwap,
 } from '../runtime';
-import { markPotentialAtomicCrossJInputPairs } from '../runtime/frame/cross-j-atomic-admission';
+import { markPotentialAtomicCrossJInputPairs } from '../runtime/frame/cross-j/atomic-admission';
 
 import { buildCrossJurisdictionSwapSubmission } from '../runtime/jurisdiction-api';
 

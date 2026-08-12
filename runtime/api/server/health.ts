@@ -5,7 +5,7 @@ import type { RuntimeReplica } from '../../runtime/types.js';
 import type { EntityReplica } from '../../entity/types.js';
 import { getP2PState } from '../../runtime.js';
 import { compareStableText } from '../../protocol/serialization';
-import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 import { getLiveJAdapter } from '../../runtime/live-jadapters';
 
 export interface HealthStatus {

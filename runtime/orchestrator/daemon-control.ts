@@ -7,7 +7,7 @@ import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serializ
 import type { RuntimeIngressReceipt } from '../runtime/ingress-receipts';
 import type { ConsensusConfig } from '../entity/types';
 import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';
-import { scaleWholeTokenAmount } from '../types/rebalance';
+import { scaleWholeTokenAmount } from '../types/finance/rebalance';
 import { defaultAccountDisputeConfigForRoleEvidence } from '../account/config/dispute-config';
 import {
   requireBoundaryInteger,

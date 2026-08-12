@@ -1,11 +1,11 @@
-import { runtimeIsBrowser } from '../infra/runtime-process';
+import { runtimeIsBrowser } from '../infra/process/runtime-process';
 import { ensureRuntimeInfrastructure } from '../runtime/runtime-infrastructure';
 import type { RuntimeReplica } from '../runtime/types';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 import { createRuntimeStorageCommitApi } from './commit';
 import { createPersistedStorageReadApi } from './persisted-read';
 import { loadPersistedRuntime } from './recovery/load';
-import { createRuntimeReplayLoader } from './recovery/replay';
+import { createRuntimeReplayLoader } from './recovery/journal/replay';
 import { createRuntimeChainVerifier } from './recovery/verify';
 
 export type { RuntimeStorageApiDeps } from './runtime-storage-deps';

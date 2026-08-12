@@ -249,7 +249,7 @@ import {
   resolveEntityProposerId,
 } from '../runtime/entity-output-signer';
 
-import { QUOTE_EXPIRY_MS } from '../types/rebalance';
+import { QUOTE_EXPIRY_MS } from '../types/finance/rebalance';
 
 import type { AccountFrame, AccountInput, AccountReplica, AccountState, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';

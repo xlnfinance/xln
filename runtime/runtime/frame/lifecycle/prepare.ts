@@ -1,21 +1,21 @@
-import { hasVerifiedEntityCommitPrecertificate } from '../../entity/consensus/commit/precheck';
+import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
 import {
   prioritizeEntityConsensusInputs,
   prioritizeProtocolEntityInputs,
-} from '../../entity/consensus';
+} from '../../../entity/consensus';
 import {
   causalTraceContainsWork,
   summarizeRuntimeAccountCausality,
-} from '../../qa/account-causal-trace';
-import { prepareHtlcPaymentEntityInputs } from '../../entity/htlc/payment-admission';
-import type { RuntimeReplica, RuntimeInput } from '../types';
-import { applyEntityHeightDurabilityBarrier } from '../entity-height-barrier';
-import { cloneRuntimeFrameMempool } from './clone';
-import type { FrameExecutionState } from './execution-state';
+} from '../../../qa/account-causal-trace';
+import { prepareHtlcPaymentEntityInputs } from '../../../entity/htlc/payment-admission';
+import type { RuntimeReplica, RuntimeInput } from '../../types';
+import { applyEntityHeightDurabilityBarrier } from '../../entity-height-barrier';
+import { cloneRuntimeFrameMempool } from '../clone';
+import type { FrameExecutionState } from '../input/execution-state';
 import {
   ACCOUNT_CAUSAL_TRACE,
   type RuntimeProcessProfile,
-} from './process-profile';
+} from '../process-profile';
 
 export type RuntimeFramePreparationDeps = {
   prioritizeJEventFrame(input: RuntimeInput, mempool: RuntimeInput, timestamp: number): boolean;

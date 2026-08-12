@@ -16,7 +16,7 @@ import {
   tryRestoreRuntimeEnvFromTower,
 } from '../../frontend/src/lib/stores/vaultStore';
 import * as xln from '../../runtime/runtime';
-import { decryptTowerPayloadWithWatchSeed } from '../../runtime/storage/recovery/crypto';
+import { decryptTowerPayloadWithWatchSeed } from '../../runtime/storage/recovery/bundle/crypto';
 import { deserializeTaggedJson } from '../../runtime/protocol/serialization';
 import type { EncryptedRuntimeRecoveryBundleV1, RuntimeReplica, XLNModule } from '../../runtime/api/public/runtime-module';
 

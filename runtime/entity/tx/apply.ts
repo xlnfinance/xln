@@ -3,7 +3,7 @@ import type { EntityState, EntityOutput, HashType, EntityCandidateEffect } from 
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { JInput } from '../../jurisdiction/machine/input';
 import type { EntityTx } from '../../types/entity-tx';
-import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
+import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claims';
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import { createAccountConsensusContext } from '../account/account-consensus-context';
 import {
@@ -92,7 +92,7 @@ import {
   handleEntityProviderReleaseControlShares,
   handleEntityProviderTransfer,
 } from './handlers/entity-provider-action';
-import type { AccountJClaimNodeChanges } from '../../types/account-j-claims';
+import type { AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
 import { handleHtlcOnionAdvance } from './handlers/htlc-onion-advance';
 
 const entityTxLog = createStructuredLogger('entity.tx');

@@ -15,7 +15,7 @@ import {
 } from '../output-routing';
 import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import { finalizeReliableIngressCommit } from '../reliable/reliable-delivery.ts';
-import type { FrameExecutionState } from './execution-state';
+import type { FrameExecutionState } from './input/execution-state';
 
 const runtimeLog = createStructuredLogger('runtime');
 

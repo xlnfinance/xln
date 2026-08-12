@@ -6,7 +6,7 @@ import {
   BoundedPerfMetric,
   cumulativeMarksToDurations,
   type PerfMarks,
-} from '../infra/perf-profile';
+} from '../infra/performance/profile';
 
 type ProfilePayload = Record<string, unknown>;
 export type ParsedProfile = { runtime: string; scope: string; event: string; payload: ProfilePayload };

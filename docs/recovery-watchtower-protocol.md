@@ -672,8 +672,8 @@ Compared with adding only payments/swaps/cross-chain swaps, recovery/watchtowers
 
 Files/modules:
 
-- add `runtime/storage/recovery/types.ts`;
-- add `runtime/storage/recovery/bundle.ts`;
+- add `runtime/storage/recovery/bundle/types.ts`;
+- add `runtime/storage/recovery/bundle/index.ts`;
 - add `runtime/storage/recovery/verify.ts`;
 - add `runtime/storage/recovery/peer-sync.ts`;
 - extend hub/direct relay surfaces in `runtime/api/server/index.ts`, `runtime/orchestrator/hub-node.ts`, and relay server modules;
@@ -762,8 +762,8 @@ Features:
 Status key: done = implemented and covered in the current repo; open = still
 active backlog.
 
-1. done: define recovery protocol types in `runtime/storage/recovery/types.ts`.
-2. done: build bundle creation from `AccountReplica` in `runtime/storage/recovery/bundle.ts`.
+1. done: define recovery protocol types in `runtime/storage/recovery/bundle/types.ts`.
+2. done: build bundle creation from `AccountReplica` in `runtime/storage/recovery/bundle/index.ts`.
 3. done: build deterministic verification in `runtime/storage/recovery/verify.ts`.
 4. partial: add PSR wire handling to direct runtime/hub/relay transports.
    - done: authenticated direct runtime websocket accepts

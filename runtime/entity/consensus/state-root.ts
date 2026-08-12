@@ -7,7 +7,7 @@ import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensu
 import { cloneAccountInputWithoutPostCommitHankos, cloneAccountTxWithoutPostCommitHankos } from './input/hanko-witness';
 import { computeBookCommitmentHash } from '../../orderbook/commitment';
 import { createStructuredLogger } from '../../infra/logger';
-import { isRuntimePerfProfileEnabled } from '../../infra/perf-runtime-flags';
+import { isRuntimePerfProfileEnabled } from '../../infra/performance/runtime-flags';
 import { getPerfMs } from '../../infra/time';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 import {

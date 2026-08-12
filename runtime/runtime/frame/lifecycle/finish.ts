@@ -1,16 +1,16 @@
-import type { RuntimeReplica } from '../types';
+import type { RuntimeReplica } from '../../types';
 import {
   rollbackReliableDeliveryReceipts,
   rollbackReliableIngressCommit,
-} from '../reliable/reliable-delivery.ts';
-import { requireRuntimeMempool } from '../input-queue';
-import { transitionRuntimeLifecycle } from '../lifecycle';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
+} from '../../reliable/reliable-delivery.ts';
+import { requireRuntimeMempool } from '../../input-queue';
+import { transitionRuntimeLifecycle } from '../../lifecycle';
+import { ensureRuntimeInfrastructure } from '../../runtime-infrastructure';
 import {
   prependOlderRuntimeInput,
-} from './transaction';
-import type { FrameExecutionState } from './execution-state';
-import type { RuntimeProcessProfile } from './process-profile';
+} from '../transaction';
+import type { FrameExecutionState } from '../input/execution-state';
+import type { RuntimeProcessProfile } from '../process-profile';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 

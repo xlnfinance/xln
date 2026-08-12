@@ -1,6 +1,6 @@
 import type { Level } from 'level';
 
-import type { RuntimeRecoveryBundleV1 } from '../recovery/types';
+import type { RuntimeRecoveryBundleV1 } from '../recovery/bundle/types';
 import type { RuntimeFrame } from '..';
 import type { StorageDbRole } from '../runtime-dbs';
 import type { RuntimeReplica } from '../../runtime/types';

@@ -3,7 +3,7 @@ import {
   BoundedPerfMetric,
   cumulativeMarksToDurations,
   cumulativeMarksToPhases,
-} from '../infra/perf-profile';
+} from '../infra/performance/profile';
 import { asDurationMs, parseProfileLine } from '../scripts/analyze-runtime-perf';
 
 describe('runtime performance profiling', () => {

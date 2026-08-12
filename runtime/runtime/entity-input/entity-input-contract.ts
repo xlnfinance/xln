@@ -7,11 +7,11 @@ import {
   classifyEntityInputApplyFailure,
   type EntityInputApplyFailureKind,
 } from '../../entity/tx/invariant-errors.ts';
-import { nodeProcess } from '../../infra/runtime-process.ts';
+import { nodeProcess } from '../../infra/process/runtime-process.ts';
 import {
   isRuntimePerfProfileEnabled,
   readRuntimePerfSlowMs,
-} from '../../infra/perf-runtime-flags.ts';
+} from '../../infra/performance/runtime-flags.ts';
 import { createStructuredLogger } from '../../infra/logger.ts';
 
 export const entityInputLog = createStructuredLogger('runtime.entity_inputs');

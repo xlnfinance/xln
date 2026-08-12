@@ -11,12 +11,12 @@ import {
   registerCommittedSingleSignerWallets,
 } from '../../runtime/recovery-infra';
 import { rehydrateRestoredRuntimeInfra } from '../../runtime/infra';
-import { runtimeIsBrowser } from '../../infra/runtime-process';
+import { runtimeIsBrowser } from '../../infra/process/runtime-process';
 import { assertBrowserVMJurisdiction } from '../../jurisdiction/adapter/browservm/browservm-registry';
 import { replayPersistedRuntimeJournals } from './journal';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../../runtime/types';
 import type { PersistedFrameJournal } from '../types';
-import type { RuntimeRecoveryBundleV1 } from './types';
+import type { RuntimeRecoveryBundleV1 } from './bundle/types';
 import { loadGossipProfilesFromInfraDb } from '../../runtime/infra-gossip-store';
 import type { StorageDbRole } from '../runtime-dbs';
 import {
@@ -24,7 +24,7 @@ import {
   type CheckpointRestoreOptions,
 } from './checkpoint';
 import { persistRestoredRuntimeState, type PersistRestoredRuntimeOptions } from './import';
-import { restoreRuntimeFromBundles, type RuntimeBundleRestoreOptions } from './bundle-restore';
+import { restoreRuntimeFromBundles, type RuntimeBundleRestoreOptions } from './bundle/restore';
 
 type RuntimeModule = typeof import('../../runtime');
 

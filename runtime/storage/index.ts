@@ -84,7 +84,7 @@ import {
   summarizeStorageReplicaMetaHeads,
 } from './replicas';
 import { createStructuredLogger } from '../infra/logger';
-import { cumulativeMarksToDurations } from '../infra/perf-profile';
+import { cumulativeMarksToDurations } from '../infra/performance/profile';
 import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
 import type { FrameLogEntry } from '../types/logging';
 import type { EntityState } from '../entity/types';

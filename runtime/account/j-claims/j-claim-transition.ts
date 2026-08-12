@@ -6,7 +6,7 @@ import type {
   AccountJClaimProofResult,
   AccountJClaimRecord,
   AccountJClaimSide,
-} from '../../types/account-j-claims';
+} from '../../types/finance/account-j-claims';
 import { canonicalJurisdictionEventsHash } from '../../jurisdiction/machine/event-observation';
 import {
   canonicalJurisdictionEventKey,

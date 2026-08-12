@@ -15,24 +15,24 @@ import type { EntityInput } from '../../entity/types';
 import type { RuntimeInput, RuntimeReplica } from '../types';
 import { getWallClockMs } from '../../infra/time';
 import { clearPendingAuditEvents, flushPendingAuditEvents } from '../env-events';
-import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './writer-lock';
-import { createFrameExecutionState, type FrameExecutionState } from './execution-state';
+import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './lifecycle/writer-lock';
+import { createFrameExecutionState, type FrameExecutionState } from './input/execution-state';
 import {
   createRuntimeFrameTransaction,
   previewPublishedRuntimeInput,
   publishRuntimeFrameTransaction,
 } from './transaction';
 import { createRuntimeProcessProfile, type RuntimeProcessProfile } from './process-profile';
-import { restoreUndurableRuntimeInput } from './input-recovery';
-import { startRuntimeFrame } from './start';
-import { prepareRuntimeFrameInput } from './prepare';
+import { restoreUndurableRuntimeInput } from './input/recovery';
+import { startRuntimeFrame } from './lifecycle/start';
+import { prepareRuntimeFrameInput } from './lifecycle/prepare';
 import { applyPreparedRuntimeFrame } from './apply';
 import { planRuntimeFrameOutputs } from './plan';
 import { prepareRuntimeFrameCommit } from './snapshot';
-import { handleRuntimeFrameStorageFailure } from './storage-failure';
-import { runCommittedRuntimeEffects } from './post-commit';
-import { finishRuntimeFrame, handleRuntimeFrameFailure } from './finish';
-import type { RuntimeInputReducer } from './input-reducer';
+import { handleRuntimeFrameStorageFailure } from './lifecycle/storage-failure';
+import { runCommittedRuntimeEffects } from './lifecycle/post-commit';
+import { finishRuntimeFrame, handleRuntimeFrameFailure } from './lifecycle/finish';
+import type { RuntimeInputReducer } from './input/reducer';
 import { getLiveJAdapterEntries } from '../live-jadapters';
 
 const runtimeLog = createStructuredLogger('runtime');

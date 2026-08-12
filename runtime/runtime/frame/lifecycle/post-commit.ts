@@ -1,19 +1,19 @@
-import { materializePendingJurisdictionImportResults } from '../jurisdiction-import';
-import { submitRuntimeJOutbox, type RuntimeJOutboxQueue } from '../j-submit';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
-import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../types';
-import type { JInput } from '../../jurisdiction/machine/input';
-import { getWallClockMs } from '../../infra/time';
+import { materializePendingJurisdictionImportResults } from '../../jurisdiction-import';
+import { submitRuntimeJOutbox, type RuntimeJOutboxQueue } from '../../j-submit';
+import { ensureRuntimeInfrastructure } from '../../runtime-infrastructure';
+import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../../types';
+import type { JInput } from '../../../jurisdiction/machine/input';
+import { getWallClockMs } from '../../../infra/time';
 import {
   dispatchCommittedEntityOutputs,
   dispatchCommittedReceipts,
   finalizeCommittedReceiptDeliveries,
   runCommittedRecoveryBarrier,
-} from './dispatch';
-import type { FrameExecutionState } from './execution-state';
-import type { RuntimeFrameOutputPlan } from './plan';
-import type { RuntimeProcessProfile } from './process-profile';
-import type { RuntimeOutputRoutingDeps } from '../output-routing';
+} from '../dispatch';
+import type { FrameExecutionState } from '../input/execution-state';
+import type { RuntimeFrameOutputPlan } from '../plan';
+import type { RuntimeProcessProfile } from '../process-profile';
+import type { RuntimeOutputRoutingDeps } from '../../output-routing';
 
 export type CommittedRuntimeEffectDeps = {
   enqueueRuntimeInputs: RuntimeJOutboxQueue;
@@ -85,7 +85,7 @@ export const runCommittedRuntimeEffects = async (
 
   state.lastFrameAt = getWallClockMs();
   if (env.strictScenario) {
-    const { assertRuntimeStateStrict } = await import('./assertions');
+    const { assertRuntimeStateStrict } = await import('../assertions');
     await assertRuntimeStateStrict(env);
     profile.mark('strict');
   }

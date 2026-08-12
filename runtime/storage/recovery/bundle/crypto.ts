@@ -1,11 +1,11 @@
 import { ethers } from 'ethers';
 import { TextDecoder, TextEncoder } from 'util';
-import { deriveSignerAddressSync } from '../../account/crypto';
-import { deserializeTaggedJson, serializeTaggedJson } from '../../protocol/serialization';
+import { deriveSignerAddressSync } from '../../../account/crypto';
+import { deserializeTaggedJson, serializeTaggedJson } from '../../../protocol/serialization';
 import {
   assertRuntimeRecoveryBundleAuthenticity,
   computeRuntimeRecoveryBundleHash,
-} from './bundle';
+} from './index';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecoveryBundleV1,
@@ -13,8 +13,8 @@ import type {
   TowerEncryptedPayloadV1,
   TowerModeV1,
 } from './types';
-import { normalizeAccountWatchSeed } from '../../protocol/account-watch-seed';
-import { hashWatchtowerCounterDisputeHankoPayload } from '../../hanko/onchain-domain';
+import { normalizeAccountWatchSeed } from '../../../protocol/account-watch-seed';
+import { hashWatchtowerCounterDisputeHankoPayload } from '../../../hanko/onchain-domain';
 
 const RECOVERY_LOOKUP_DOMAIN = 'xln:recovery:lookup:v1';
 const RECOVERY_ACTION_LOOKUP_DOMAIN = 'xln:recovery:action-lookup:v1';

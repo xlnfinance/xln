@@ -1,11 +1,11 @@
 import type { OrderbookExtState } from '../orderbook';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import type { DebtEntry } from '../types/debt';
+import type { DebtEntry } from '../types/finance/debt';
 import type { JBlockFinalized, JHistoryFinality, JPrefixAttestation, JPrefixCertificate, JPrefixRound, ValidatorJHistory } from '../types/jurisdiction-events';
 import type { HankoString } from '../types/hanko';
 import type { AccountFrame, AccountOutput, AccountReplica, AccountTx, AccountHistoryRecord, HtlcNoteKey, HtlcRoute, RuntimeOverlayRecord } from '../types/account';
-import type { HubRebalanceConfig } from '../types/rebalance';
-import type { LendingState } from '../types/lending';
+import type { HubRebalanceConfig } from '../types/finance/rebalance';
+import type { LendingState } from '../types/finance/lending';
 import type {
   ConsensusOutputOrigin,
   EntityCommandNonceState,
@@ -16,7 +16,7 @@ import type { JAdapterFailure } from '../types/jurisdiction-runtime';
 import type { RuntimeFailureSignal } from '../protocol/failure-taxonomy';
 import type { CertifiedBoardRegistryState } from '../types/entity-board-registry';
 import type { ConsumptionAccumulatorState, ConsumptionNodeEntry } from './consumption/consumption-accumulator-types';
-import type { AccountJClaimNodeChanges } from '../types/account-j-claims';
+import type { AccountJClaimNodeChanges } from '../types/finance/account-j-claims';
 import type { EntityProviderActionState, EntityProviderActionSubmitState } from '../types/entity-provider-actions';
 import type { JBatchState } from '../jurisdiction/machine/batch';
 import type { JInput } from '../jurisdiction/machine/input';

@@ -20,7 +20,7 @@ import { normalizeRuntimeId, isRuntimeId } from './auth/runtime-id';
 import { compareStableText } from '../../protocol/serialization';
 import { DEFAULT_GOSSIP_BATCH_LIMIT, selectProfileBatch, type GossipProfileBatchRequest } from './gossip/profile-batch';
 import { createStructuredLogger, shortId } from '../../infra/logger';
-import { isRuntimePerfProfileEnabled } from '../../infra/perf-runtime-flags';
+import { isRuntimePerfProfileEnabled } from '../../infra/performance/runtime-flags';
 import {
   isBrowserDirectWsEndpointAllowed,
   isSameWsUrlList,

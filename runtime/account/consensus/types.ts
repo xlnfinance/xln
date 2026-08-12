@@ -1,7 +1,7 @@
 import type { AccountFrame, AccountPeerInput, AccountTx } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
 import type { HankoString } from '../../types/hanko';
-import type { AccountJClaimNodeChanges } from '../../types/account-j-claims';
+import type { AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
 import type { AccountDisputeFinalityResult } from '../settlement/j-finality';
 import type { AccountTxRejection } from '../tx/apply-types';
 import type { AccountPeerRejection } from '../input/peer-rejection';

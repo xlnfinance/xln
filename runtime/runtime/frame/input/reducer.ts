@@ -1,43 +1,43 @@
-import { hasVerifiedEntityCommitPrecertificate } from '../../entity/consensus/commit/precheck';
-import { mergeEntityInputs } from '../../entity/consensus/index';
-import { cumulativeMarksToPhases } from '../../infra/perf-profile';
-import { createStructuredLogger } from '../../infra/logger';
+import { hasVerifiedEntityCommitPrecertificate } from '../../../entity/consensus/commit/precheck';
+import { mergeEntityInputs } from '../../../entity/consensus';
+import { cumulativeMarksToPhases } from '../../../infra/performance/profile';
+import { createStructuredLogger } from '../../../infra/logger';
 import {
   beginRuntimeCheckpointLineageRefresh,
   refreshRuntimeCheckpointLineageForEntity,
-} from '../../storage/entity-lineage';
-import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
-import type { JInput } from '../../jurisdiction/machine/input';
-import { DEBUG } from '../../infra/debug-flags';
-import { getPerfMs } from '../../infra/time';
-import { attachEventEmitters } from '../env-events';
-import { applyMergedEntityInputs } from '../entity-inputs';
-import type { RuntimeEntityRoutingDeps } from '../entity-routing';
-import { applyReliableDeliveryReceipts, type ReliableIngressCommit } from '../reliable/reliable-delivery.ts';
-import { applyRuntimeTx } from '../tx-handlers';
+} from '../../../storage/entity-lineage';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
+import type { JInput } from '../../../jurisdiction/machine/input';
+import { DEBUG } from '../../../infra/debug-flags';
+import { getPerfMs } from '../../../infra/time';
+import { attachEventEmitters } from '../../env-events';
+import { applyMergedEntityInputs } from '../../entity-inputs';
+import type { RuntimeEntityRoutingDeps } from '../../entity-routing';
+import { applyReliableDeliveryReceipts, type ReliableIngressCommit } from '../../reliable/reliable-delivery.ts';
+import { applyRuntimeTx } from '../../tx-handlers';
 import {
   atomicCrossJPairIndexesThatDidNotCommit,
   admitAtomicCrossJAccountInputs,
   markPotentialAtomicCrossJInputPairs,
-} from './cross-j-atomic-admission';
+} from '../cross-j/atomic-admission';
 import {
   markCommittedAtomicCrossJAckOutputs,
   recordRejectedAtomicCrossJInputs,
   summarizeAtomicCrossJAccountInput,
-} from './cross-j-evidence';
+} from '../cross-j/evidence';
 import {
   prepareRuntimeInputIngress,
   validateRuntimeInputIngress,
   type RuntimeInputAdmissionDeps,
-} from './input-admission';
+} from './admission';
 import {
   advanceAppliedRuntimeFrame,
   buildAppliedRuntimeInput,
   commitRuntimeReliableIngress,
   type RuntimeReliableCommitDeps,
-} from './input-finalize';
-import { safeStringify } from '../../protocol/serialization';
-import { nodeProcess } from '../../infra/runtime-process';
+} from './finalize';
+import { safeStringify } from '../../../protocol/serialization';
+import { nodeProcess } from '../../../infra/process/runtime-process';
 
 const runtimeLog = createStructuredLogger('runtime');
 const APPLY_PROFILE_ENABLED =

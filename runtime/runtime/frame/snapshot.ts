@@ -2,7 +2,7 @@ import { hasRuntimeHistoryTraceForTesting } from '../history-retention';
 import type { RuntimeReplica, RuntimeInput } from '../types';
 import type { FrameLogEntry } from '../../types/logging';
 import { buildCanonicalEnvSnapshot } from '../../storage/wal/snapshot';
-import type { FrameExecutionState } from './execution-state';
+import type { FrameExecutionState } from './input/execution-state';
 import type { RuntimeProcessProfile } from './process-profile';
 
 export const prepareRuntimeFrameCommit = (

@@ -12,7 +12,7 @@ import {
   deriveRuntimeRecoveryActionLookupKey,
   encryptRuntimeRecoveryBundle,
   encryptTowerPayloadForWatchSeed,
-} from '../storage/recovery/crypto';
+} from '../storage/recovery/bundle/crypto';
 import type { JReplica, JurisdictionConfig, TowerLastResortPayloadV1, TowerAppointmentV1 } from '../api/public/runtime-module';
 import {
   encodeTowerCounterDisputeRemedy,

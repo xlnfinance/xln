@@ -1,6 +1,6 @@
 import type { AccountFrame, AccountReplica, AccountTx } from '../../../../types/account';
 import type { EntityState } from '../../../types';
-import type { LendingState } from '../../../../types/lending';
+import type { LendingState } from '../../../../types/finance/lending';
 import {
   buildLendingLoanId,
   computeLendingInterest,

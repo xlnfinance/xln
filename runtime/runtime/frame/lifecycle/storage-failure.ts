@@ -1,15 +1,15 @@
-import { clearPendingAuditEvents } from '../env-events';
-import { transitionRuntimeLifecycle } from '../lifecycle';
-import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
-import type { RuntimeReplica } from '../types';
-import type { FrameExecutionState } from './execution-state';
+import { clearPendingAuditEvents } from '../../env-events';
+import { transitionRuntimeLifecycle } from '../../lifecycle';
+import { ensureRuntimeInfrastructure } from '../../runtime-infrastructure';
+import type { RuntimeReplica } from '../../types';
+import type { FrameExecutionState } from '../input/execution-state';
 import {
   publishRuntimeFrameTransaction,
-} from './transaction';
+} from '../transaction';
 
-import type { RuntimeFrameCommitStatus } from '../../storage/commit-status';
+import type { RuntimeFrameCommitStatus } from '../../../storage/commit-status';
 
-export type { RuntimeFrameCommitStatus } from '../../storage/commit-status';
+export type { RuntimeFrameCommitStatus } from '../../../storage/commit-status';
 
 const haltRuntimeForRecovery = (
   runtime: RuntimeReplica,

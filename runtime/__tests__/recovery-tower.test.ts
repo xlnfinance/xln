@@ -20,15 +20,15 @@ import {
   buildRuntimeRecoveryBundle,
   computeRuntimeRecoveryCheckpointHash,
 } from '../storage/recovery/bundle';
-import { buildRuntimeRecording, validateRuntimeRecording } from '../storage/recovery/recording';
+import { buildRuntimeRecording, validateRuntimeRecording } from '../storage/recovery/bundle/recording';
 import {
   buildTowerAppointmentOwnerMessage,
   decryptRuntimeRecoveryBundle,
   deriveRuntimeRecoveryActionLookupKey,
   deriveRuntimeRecoveryLookupKey,
   encryptRuntimeRecoveryBundle,
-} from '../storage/recovery/crypto';
-import type { TowerAppointmentV1 } from '../storage/recovery/types';
+} from '../storage/recovery/bundle/crypto';
+import type { TowerAppointmentV1 } from '../storage/recovery/bundle/types';
 import { buildRuntimeCheckpointSnapshot } from '../storage/wal';
 import { computePersistedEnvStateHash } from '../storage/wal/hash';
 import { createWatchtowerStore } from '../watchtower/store';
