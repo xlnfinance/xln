@@ -4,7 +4,7 @@ import type { AccountReplica, AccountState } from '../../types/account';
 import type { ConsensusConfig, EntityFrameAuthority, EntityLeaderState, EntityState } from '../types';
 import { compareStableText } from '../../protocol/serialization';
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
-import { cloneAccountInputWithoutPostCommitHankos, cloneAccountTxWithoutPostCommitHankos } from './hanko-witness';
+import { cloneAccountInputWithoutPostCommitHankos, cloneAccountTxWithoutPostCommitHankos } from './input/hanko-witness';
 import { computeBookCommitmentHash } from '../../orderbook/commitment';
 import { createStructuredLogger } from '../../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../../infra/perf-runtime-flags';
@@ -18,7 +18,7 @@ import {
   ENTITY_ACCOUNT_COMMITMENT_RADIX,
   putEntityAccountCommitment,
   type EntityAccountCommitment,
-} from './account-commitment-tree';
+} from './account/commitment-tree';
 import { EntityAccountCandidateMap, entityAccountCommitmentEntries } from '../state/candidate-map';
 
 const entityRootLog = createStructuredLogger('entity.state-root');

@@ -1,7 +1,7 @@
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityInput } from '../../entity/types';
 import type { EntityTx } from '../../types/entity-tx';
-import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
 
 /**
  * Cross-j Entity messages are runtime-local only. The only admissible edges are

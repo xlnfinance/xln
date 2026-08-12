@@ -95,8 +95,8 @@ operational evidence for restart/load stability, not unit-test substitutes.
 ## High-Risk Files
 
 - `runtime/runtime.ts`
-- `runtime/entity/consensus/input-consensus.ts`
-- `runtime/entity/consensus/frame-application.ts`
+- `runtime/entity/consensus/input/consensus.ts`
+- `runtime/entity/consensus/frame/application.ts`
 - `runtime/account/consensus/index.ts`
 - `runtime/entity/tx/apply.ts`
 - `runtime/entity/tx/j-events.ts`

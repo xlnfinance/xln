@@ -20,7 +20,7 @@ import {
 import { resolveEntityCommandBoard } from '../../command';
 import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
 import { buildCertifiedEntityOutput } from '../cross-j-outputs';
-import { hashCertifiedEntityOutputSemantic } from '../../consensus/output-certification';
+import { hashCertifiedEntityOutputSemantic } from '../../consensus/output/certification';
 import { normalizeEntityRef } from '../account-key';
 
 const basicLog = createStructuredLogger('entity.basic');

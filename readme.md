@@ -362,7 +362,7 @@ value is:
 1. [R → E → A → J architecture](docs/core/rjea-architecture.md)
 2. [Payment and HTLC flow](docs/implementation/payment-spec.md)
 3. `runtime/runtime/frame/process.ts` — Runtime transition and WAL ordering
-4. `runtime/entity/consensus/input-consensus.ts` — Entity entry point
+4. `runtime/entity/consensus/input/consensus.ts` — Entity entry point
 5. `runtime/account/consensus/index.ts` — Account entry point and collision
 6. `runtime/account/tx/apply.ts` — financial validation
 7. `runtime/account/tx/mutation.ts` — financial mutation

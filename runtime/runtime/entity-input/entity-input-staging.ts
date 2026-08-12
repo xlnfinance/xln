@@ -2,7 +2,7 @@ import {
   collectCrossJurisdictionRemoteEntityHints,
   registerEntityRuntimeHintWithDeps,
 } from '../entity-routing.ts';
-import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope.ts';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
 import {
   accountInputAck,
   accountInputProposal,

@@ -109,7 +109,7 @@ import {
   buildConsensusOutputOrigin,
   hashCertifiedEntityOutput,
   hashCertifiedEntityOutputSemantic,
-} from '../entity/consensus/output-certification';
+} from '../entity/consensus/output/certification';
 
 const CONTEXT_HASH = `0x${'a7'.repeat(32)}`;
 const ROUTING_STATE_HASH = `0x${'b6'.repeat(32)}`;

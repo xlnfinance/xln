@@ -4,7 +4,7 @@ import type {
   ReliableDeliveryReceipt,
   RoutedEntityInput,
 } from '../types.ts';
-import { isLocalEntityLeaderTimeoutVote } from '../../entity/consensus/leader.ts';
+import { isLocalEntityLeaderTimeoutVote } from '../../entity/consensus/leader';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
 import {
   assertReliableIdentityDurableInPostState,

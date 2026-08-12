@@ -6,8 +6,8 @@ import {
 } from '../protocol/validation-primitives';
 import {
   validateJPrefixAttestation,
-} from '../entity/consensus/j-prefix-validation';
-import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
+} from '../entity/consensus/jurisdiction/prefix-validation';
+import { validateProposedEntityFrame } from '../entity/consensus/frame/validation';
 import { requireKnownEntityTxType } from '../entity/tx/catalog';
 
 const assertEntityMessagePayload = (

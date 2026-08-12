@@ -13,7 +13,7 @@ import { applyAccountClonePolicy } from '../account/state/state-clone';
 import { copyEntityFrameEvents } from './frame-events';
 import { validateEntityState } from './state/state-validation';
 import { forkEntityAccountCommitmentCache } from './consensus/state-root';
-import { forkAccountWorkIndexes } from './consensus/account-work-index';
+import { forkAccountWorkIndexes } from './consensus/account/work-index';
 import { forkCrossJurisdictionBookAdmissionIndex } from '../extensions/cross-j/orderbook';
 import {
   createEntityAccountCandidateMap,

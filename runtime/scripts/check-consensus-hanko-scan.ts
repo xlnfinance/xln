@@ -68,14 +68,14 @@ const accountProposePath = accountProposePaths.join(', ');
 const accountFramePath = 'runtime/account/consensus/frame/hash.ts';
 const entityConsensusPaths = [
   'runtime/entity/consensus/replica-validation.ts',
-  'runtime/entity/consensus/leader-certificates.ts',
-  'runtime/entity/consensus/j-prefix-round.ts',
-  'runtime/entity/consensus/input-ingress.ts',
-  'runtime/entity/consensus/input-admission.ts',
-  'runtime/entity/consensus/input-consensus.ts',
-  'runtime/entity/consensus/frame-application.ts',
-  'runtime/entity/consensus/commit-finalization.ts',
-  'runtime/entity/consensus/single-signer-frame.ts',
+  'runtime/entity/consensus/leader/certificates.ts',
+  'runtime/entity/consensus/jurisdiction/prefix-round.ts',
+  'runtime/entity/consensus/input/ingress.ts',
+  'runtime/entity/consensus/input/admission.ts',
+  'runtime/entity/consensus/input/consensus.ts',
+  'runtime/entity/consensus/frame/application.ts',
+  'runtime/entity/consensus/commit/finalization.ts',
+  'runtime/entity/consensus/proposal/single-signer-frame.ts',
 ];
 const entityConsensusPath = entityConsensusPaths.join(', ');
 const envEventsPath = 'runtime/runtime/env-events.ts';

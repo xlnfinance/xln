@@ -6,7 +6,7 @@ import {
   validateObject,
   validateString,
 } from '../../protocol/validation-primitives';
-import { validateProposedEntityFrame } from '../consensus/frame-validation';
+import { validateProposedEntityFrame } from '../consensus/frame/validation';
 
 export const validateReplicaJHistory = (
   value: unknown,

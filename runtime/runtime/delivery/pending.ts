@@ -14,7 +14,7 @@ import { getWallClockMs } from '../../infra/time';
 import { validateDeliverableEntityInput } from '../routing-validation';
 import { recordRuntimeSecurityIncident } from '../security-incidents';
 
-import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output-envelope';
+import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output/envelope';
 import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
 import {
   deliveryAccepted,

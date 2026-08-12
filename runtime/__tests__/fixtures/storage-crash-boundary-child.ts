@@ -32,7 +32,7 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../../entity/consensus/state-root';
-import { buildEntityHashesToSign } from '../../entity/consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
 import {
   buildEntityLeaderCertificate,
   buildEntityLeaderVoteBody,

@@ -28,7 +28,7 @@ import {
 import {
   hashCertifiedEntityOutput,
   hashCertifiedEntityOutputSemantic,
-} from '../entity/consensus/output-certification';
+} from '../entity/consensus/output/certification';
 import { generateLazyEntityId } from '../entity/factory';
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 import { orderReliableEntityInputsWithinSourceLanes } from '../runtime/frame/input-admission';

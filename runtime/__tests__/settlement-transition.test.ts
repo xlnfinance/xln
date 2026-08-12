@@ -12,7 +12,7 @@ import { prepareAccountJClaimTx } from '../account/j-claims/j-claim-transition';
 import { handleJEventClaim } from '../account/tx/handlers/j-events/claim';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settlement/transition';
 import { applyEntityFrame } from '../entity/consensus';
-import { selectSettlementContinuation } from '../entity/consensus/settlement-continuation';
+import { selectSettlementContinuation } from '../entity/consensus/account/settlement-continuation';
 import { proposeAccountFrame } from '../account/consensus/proposal/propose';
 import {
   assertEntityStateRootCache,
@@ -24,7 +24,7 @@ import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
 import {
   sealHankoWitnessInState,
   type HankoWitnessEntry,
-} from '../entity/consensus/hanko-witness';
+} from '../entity/consensus/input/hanko-witness';
 import { signEntityHashes } from '../hanko/signing';
 import { generateLazyEntityId, generateNumberedEntityId } from '../entity/factory';
 import {

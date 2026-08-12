@@ -6,7 +6,7 @@ import type { EntityTx } from '../types/entity-tx';
 import type { Profile } from '../entity/profile';
 import type { RuntimeOutputRoutingDeps } from './output-routing';
 import { extractCrossJurisdictionRouteFromTx } from '../extensions/cross-j/boundary';
-import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
+import { getEffectiveEntityInputTxs } from '../entity/consensus/output/envelope';
 import { normalizeRuntimeId } from '../network/p2p/auth/runtime-id';
 import { advanceEntityCommandNonce, assertSignedEntityCommand } from '../entity/command';
 import { validateDeliverableEntityInput } from './routing-validation';

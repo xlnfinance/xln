@@ -23,7 +23,7 @@ import type {
   EntityTransitionContext,
   CrontabTaskState,
 } from './types';
-import { getRebalanceAccountIds } from '../consensus/account-work-index';
+import { getRebalanceAccountIds } from '../consensus/account/work-index';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 

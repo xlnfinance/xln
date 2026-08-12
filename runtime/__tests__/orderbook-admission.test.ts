@@ -11,7 +11,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 
-import { admitOrderbookOfferForMatching } from '../entity/consensus/orderbook-admission';
+import { admitOrderbookOfferForMatching } from '../entity/consensus/account/orderbook-admission';
 import { normalizeSwapOfferForOrderbook } from '../orderbook/swap-execution';
 import { SWAP_LOT_SCALE } from '../orderbook/types';
 import type { EntityRuntimeContext } from '../entity/runtime-context';

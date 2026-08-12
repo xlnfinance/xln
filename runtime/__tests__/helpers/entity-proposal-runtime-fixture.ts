@@ -11,7 +11,7 @@ import {
 import { buildSignedEntityCommand } from '../../entity/command';
 import { signedEntityCommandTx } from '../../entity/command/command-codec';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
-import { buildEntityHashesToSign } from '../../entity/consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
 import { getEntityLeaderState } from '../../entity/consensus/leader';
 import type { EntityFrame } from '../../entity/types';
 import { createDirectRuntimeWsRoute } from '../../network/p2p/direct-runtime-bun';

@@ -1,5 +1,5 @@
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
-import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
+import { validateProposedEntityFrame } from '../entity/consensus/frame/validation';
 import { decodeAccountFrame } from '../account/validation/frame-validation';
 import { validateEntityTxs } from '../entity/tx-validation';
 import { validateJInputs } from './wal/runtime-machine-schema/j';

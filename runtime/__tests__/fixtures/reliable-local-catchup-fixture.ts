@@ -6,9 +6,9 @@ import {
 } from '../../account/crypto';
 import { applyEntityFrame } from '../../entity/consensus';
 import { createEntityFrameHash } from '../../entity/consensus/frame';
-import { buildEntityHashesToSign } from '../../entity/consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
 import { getEntityLeaderState } from '../../entity/consensus/leader';
-import { buildCertifiedEntityOutputHashes } from '../../entity/consensus/output-certification';
+import { buildCertifiedEntityOutputHashes } from '../../entity/consensus/output/certification';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,

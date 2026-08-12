@@ -47,7 +47,7 @@ import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 import { computeProfileHash, signProfileRuntimeRoute } from '../entity/profile/profile-signing';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 import { createTestJReplica } from './helpers/j-replica';
-import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const x25519 = (byte: string): string => `0x${byte.repeat(32)}`;

@@ -4,7 +4,7 @@ import { mergeDurableReceiptOnlyInputs } from '../runtime/reliable/reliable-dura
 import { getInputReliableIdentity } from '../runtime/reliable/reliable-receipt.ts';
 import { reliableIdentityExactKey } from '../runtime/reliable/reliable-frontier.ts';
 import { splitRoutedOutputByDeliveryLane } from '../runtime/output-routing';
-import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
 import { safeStringify } from '../protocol/serialization';
 import type { RoutedEntityInput } from '../runtime/types';
 

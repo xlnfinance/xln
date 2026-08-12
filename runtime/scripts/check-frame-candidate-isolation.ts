@@ -1,9 +1,9 @@
 const frameApplicationPath =
-  'runtime/entity/consensus/frame-application.ts';
+  'runtime/entity/consensus/frame/application.ts';
 const singleSignerPath =
-  'runtime/entity/consensus/single-signer-frame.ts';
+  'runtime/entity/consensus/proposal/single-signer-frame.ts';
 const multiSignerPath =
-  'runtime/entity/consensus/multi-signer-proposal.ts';
+  'runtime/entity/consensus/proposal/multi-signer.ts';
 const runtimeProcessPath = 'runtime/runtime/frame/process.ts';
 
 const frameApplication = await Bun.file(frameApplicationPath).text();

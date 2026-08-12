@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   pruneHankoWitnessToReachableState,
   type HankoWitnessEntry,
-} from '../entity/consensus/hanko-witness';
+} from '../entity/consensus/input/hanko-witness';
 import type { EntityState } from '../entity/types';
 
 const hash = (byte: string): string => `0x${byte.repeat(64)}`;

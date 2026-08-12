@@ -23,7 +23,7 @@ import {
   deriveSignerKeySync,
   registerSignerKey,
 } from '../account/crypto';
-import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
 import {
   closeInfraDb,
   closeRuntimeDb,

@@ -3,7 +3,7 @@ import { assertExactMultiRecipientCiphertextSchema } from '../../protocol/htlc/m
 import type { EntityTx } from '../../types/entity-tx';
 import { assertEntityProposalAction } from '../auth/authorization';
 import { normalizeSignedEntityCommand } from '../command/command-codec';
-import { normalizeConsensusOutputBoardAuthority } from '../consensus/output-certification';
+import { normalizeConsensusOutputBoardAuthority } from '../consensus/output/certification';
 import type { ProposalAction } from '../types';
 import { requireKnownEntityTxType } from '../tx/catalog';
 import {

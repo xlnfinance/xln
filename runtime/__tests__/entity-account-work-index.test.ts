@@ -7,7 +7,7 @@ import {
   getRebalanceAccountIds,
   hasProposableAccount,
   refreshAccountWorkIndex,
-} from '../entity/consensus/account-work-index';
+} from '../entity/consensus/account/work-index';
 import { hasEntityLeaderWork } from '../entity/consensus/leader';
 import type { EntityReplica } from '../entity/types';
 import { cloneEntityState } from '../entity/state-clone';

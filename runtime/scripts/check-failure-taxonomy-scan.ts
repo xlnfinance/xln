@@ -542,7 +542,7 @@ for (const [path, markers] of [
   ['runtime/entity/tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity/factory.ts', ["createStructuredLogger('entity.factory')", 'lazy.create']],
   ['runtime/entity/consensus/entity-log.ts', ["createStructuredLogger('entity')"]],
-  ['runtime/entity/consensus/frame-application.ts', ['frame.profile', 'frame.apply']],
+  ['runtime/entity/consensus/frame/application.ts', ['frame.profile', 'frame.apply']],
   [
     'runtime/runtime/entity-inputs.ts',
     ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input'],
@@ -550,7 +550,7 @@ for (const [path, markers] of [
   ['runtime/runtime/input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
   ['runtime/runtime/p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
   ['runtime/network/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
-  ['runtime/entity/consensus/input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict']],
+  ['runtime/entity/consensus/input/merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict']],
   ['runtime/entity/tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity/tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
   [
@@ -769,16 +769,16 @@ const entityFactoryPath = 'runtime/entity/factory.ts';
 const entityFactory = readText(entityFactoryPath);
 assertNotIncludes(entityFactory, 'console.', entityFactoryPath);
 
-const entityInputMergePath = 'runtime/entity/consensus/input-merge.ts';
+const entityInputMergePath = 'runtime/entity/consensus/input/merge.ts';
 const entityInputMerge = readText(entityInputMergePath);
 assertNotIncludes(entityInputMerge, 'console.', entityInputMergePath);
 
 for (const entityConsensusPath of [
-  'runtime/entity/consensus/leader-certificates.ts',
-  'runtime/entity/consensus/j-prefix-round.ts',
+  'runtime/entity/consensus/leader/certificates.ts',
+  'runtime/entity/consensus/jurisdiction/prefix-round.ts',
   'runtime/entity/consensus/state-quota.ts',
-  'runtime/entity/consensus/input-consensus.ts',
-  'runtime/entity/consensus/frame-application.ts',
+  'runtime/entity/consensus/input/consensus.ts',
+  'runtime/entity/consensus/frame/application.ts',
 ]) {
   assertNotIncludes(readText(entityConsensusPath), 'console.', entityConsensusPath);
 }

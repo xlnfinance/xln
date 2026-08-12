@@ -3,7 +3,7 @@ import { log } from '../../infra/diagnostics';
 import { safeStringify } from '../../protocol/serialization';
 import type { EntityTx } from '../../types/entity-tx';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState } from '../types';
-import { validateProposedEntityFrame } from './frame-validation';
+import { validateProposedEntityFrame } from './frame/validation';
 
 const hasWellFormedEntityTxs = (input: EntityInput): boolean => {
   if (!input.entityTxs) return true;

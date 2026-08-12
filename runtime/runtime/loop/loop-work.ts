@@ -1,5 +1,5 @@
-import { hasProposableAccount } from '../../entity/consensus/account-work-index.ts';
-import { isEntityActiveLeader } from '../../entity/consensus/leader.ts';
+import { hasProposableAccount } from '../../entity/consensus/account/work-index';
+import { isEntityActiveLeader } from '../../entity/consensus/leader';
 import {
   entityRequiresJPrefixCertificate,
   getLocalJPrefixAttestableHeight,

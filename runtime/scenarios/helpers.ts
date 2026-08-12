@@ -15,7 +15,7 @@ import { normalizeRuntimeId } from '../network/p2p/auth/runtime-id';
 import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
 import { buildRouteOutputKey } from '../runtime/output-routing';
 import { releaseUncommittedReliableIngress } from '../runtime/reliable/reliable-delivery.ts';
-import { accountHasProposableMempool } from '../entity/consensus/account-mempool-eligibility';
+import { accountHasProposableMempool } from '../entity/consensus/account/mempool-eligibility';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 
 // Lazy-loaded process to avoid circular deps

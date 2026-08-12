@@ -5,7 +5,7 @@ import { applyEntityFrame, applyEntityInput } from '../entity/consensus';
 import { buildSignedEntityCommand } from '../entity/command';
 import { signedEntityCommandTx } from '../entity/command/command-codec';
 import { createEntityFrameHash } from '../entity/consensus/frame';
-import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
 import { generateLazyEntityId } from '../entity/factory';
 import { hasEntityLeaderWork } from '../entity/consensus/leader';
 import {

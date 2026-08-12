@@ -864,7 +864,7 @@ describe('production startup wiring', () => {
     expect(runtimeLoopWorkSource).toContain('export const applyEntityTxFrameCap =');
     expect(runtimeLoopWorkSource).toContain('mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];');
     expect(runtimeSource).not.toContain('prepareCrossJurisdictionEntityInputs');
-    const entityAdmissionSource = readFileSync(join(repoRoot, 'runtime/entity/consensus/input-admission.ts'), 'utf8');
+    const entityAdmissionSource = readFileSync(join(repoRoot, 'runtime/entity/consensus/input/admission.ts'), 'utf8');
     expect(entityAdmissionSource).toContain('appendDefaultProposerCrossJMaterializations');
     expect(
       framePreparationSource.indexOf('input.entityInputs = await prepareHtlcPaymentEntityInputs('),
@@ -1159,7 +1159,7 @@ describe('production startup wiring', () => {
   });
 
   test('prod runtime child keeps merge debug output structured and gated', () => {
-    const mergeSource = readFileSync(join(repoRoot, 'runtime/entity/consensus/input-merge.ts'), 'utf8');
+    const mergeSource = readFileSync(join(repoRoot, 'runtime/entity/consensus/input/merge.ts'), 'utf8');
     expect(mergeSource).toContain("const entityInputMergeLog = createStructuredLogger('entity.input.merge');");
     expect(mergeSource).toContain("entityInputMergeLog.warn('frame.conflict'");
     expect(mergeSource).not.toContain('console.');

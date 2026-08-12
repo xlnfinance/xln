@@ -134,7 +134,7 @@ import {
 
 import { signEntityHashes } from '../hanko/signing';
 
-import { hashCertifiedEntityOutputSemantic } from '../entity/consensus/output-certification';
+import { hashCertifiedEntityOutputSemantic } from '../entity/consensus/output/certification';
 
 import {
   countDeferredHashLadderReveals,
@@ -195,7 +195,7 @@ import { collectLocalProfileEncryptionAnnouncements } from '../entity/profile/pr
 
 import { LIMITS } from '../config/constants';
 
-import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
+import { getEffectiveEntityInputTxs } from '../entity/consensus/output/envelope';
 
 import { assertRuntimeOutputAuthorization } from '../entity/auth/authorization';
 

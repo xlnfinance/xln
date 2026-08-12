@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   drainPendingCrossJurisdictionFillAcks,
   stashPendingCrossJurisdictionFillAck,
-} from '../entity/consensus/cross-j-fill-ack';
+} from '../entity/consensus/account/cross-j-fill-ack';
 import { createAccountConsensusContext } from '../entity/account/account-consensus-context';
 import type { EntityCandidateEffect } from '../entity/types';
 import { createEmptyEnv } from '../runtime';

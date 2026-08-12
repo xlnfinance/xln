@@ -21,7 +21,7 @@ import { applyEntityFrame } from '../entity/consensus';
 import { buildSignedEntityCommand } from '../entity/command';
 import { signedEntityCommandTx } from '../entity/command/command-codec';
 import { createEntityFrameHash, createEntityFrameHashFromStateRoot } from '../entity/consensus/frame';
-import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,

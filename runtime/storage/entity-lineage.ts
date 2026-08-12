@@ -25,7 +25,7 @@ import { compareStableText } from '../protocol/serialization';
 import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, ConsensusConfig, EntityFrameAuthority, EntityReplica, EntityFrame } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
-import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
+import { validateProposedEntityFrame } from '../entity/consensus/frame/validation';
 import { normalizeEntityId } from './keys';
 import type { StorageReplicaLookup } from './types';
 

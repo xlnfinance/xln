@@ -23,17 +23,17 @@ that drives them. Read the cascade before the services around it.
 6. `runtime/runtime/frame/process.ts` — the visible Runtime coordinator.
 7. `runtime/runtime/frame/prepare.ts` — detach one immutable Runtime input.
 8. `runtime/runtime/frame/apply.ts` — apply Runtime and routed Entity work.
-9. `runtime/entity/consensus/input-consensus.ts` — the Entity entry point.
-10. `runtime/entity/consensus/frame-application.ts` — replay a candidate.
+9. `runtime/entity/consensus/input/consensus.ts` — the Entity entry point.
+10. `runtime/entity/consensus/frame/application.ts` — replay a candidate.
 11. `runtime/account/consensus/index.ts` — the Account entry point.
 12. `runtime/account/tx/apply.ts` — validate one Account transaction.
 13. `runtime/account/tx/mutation.ts` — mutate Account-owned financial state.
 
 ### 3. Certification and failure
 
-14. `runtime/entity/consensus/single-signer-frame.ts` — immediate local
+14. `runtime/entity/consensus/proposal/single-signer-frame.ts` — immediate local
     certification through the same candidate model.
-15. `runtime/entity/consensus/multi-signer-proposal.ts` — validator candidate
+15. `runtime/entity/consensus/proposal/multi-signer.ts` — validator candidate
     and Hanko flow.
 16. `runtime/account/consensus/incoming/collision.ts` — deterministic same-height
     LEFT-wins rollback.

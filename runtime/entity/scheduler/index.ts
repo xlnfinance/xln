@@ -66,7 +66,7 @@ import { processDueHooks } from './due-hooks';
 import {
   getPendingAccountIds,
   getRebalanceAccountIds,
-} from '../consensus/account-work-index';
+} from '../consensus/account/work-index';
 
 export {
   HUB_PENDING_BROADCAST_STALE_MS,

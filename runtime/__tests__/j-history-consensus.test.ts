@@ -16,7 +16,7 @@ import {
   createEntityFrameHash,
   createEntityFrameHashFromStateRoot,
 } from '../entity/consensus/frame';
-import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
 import { applyEntityInput } from '../entity/consensus/index';
 import { applyJEvent } from '../entity/tx/j-events';
 import { createEmptyEnv } from '../runtime';

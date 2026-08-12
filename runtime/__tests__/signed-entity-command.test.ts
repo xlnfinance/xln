@@ -30,7 +30,7 @@ import { readEntityFrameEventMessages } from '../entity/frame-events';
 import {
   buildCertifiedEntityOutputHashes,
   hashCertifiedEntityOutputSemantic,
-} from '../entity/consensus/output-certification';
+} from '../entity/consensus/output/certification';
 import { handleReissueCertifiedOutputEntityTx } from '../entity/tx/handlers/basic';
 import {
   assertEntityFrameEventByteBudget,

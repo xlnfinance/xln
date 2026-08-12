@@ -22,7 +22,7 @@ import type { LogCategory, FrameLogEntry } from '../types/logging';
 
 import { storageOverlayRecordKey } from '../protocol/overlay';
 import { invalidateEntityAccountCommitment } from '../entity/consensus/state-root';
-import { refreshAccountWorkIndex } from '../entity/consensus/account-work-index';
+import { refreshAccountWorkIndex } from '../entity/consensus/account/work-index';
 import {
   consumeHtlcRuntimeEvent,
   indexCertifiedEntityFrameNotes,

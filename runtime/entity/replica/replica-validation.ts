@@ -12,11 +12,11 @@ import {
   validateEntityLeaderCertificate,
   validateEntityLeaderVote,
   validateProposedEntityFrame,
-} from '../consensus/frame-validation';
+} from '../consensus/frame/validation';
 import {
   validateJPrefixAttestation,
   validateJPrefixCertificate,
-} from '../consensus/j-prefix-validation';
+} from '../consensus/jurisdiction/prefix-validation';
 import {
   validateEntityProviderActionSubmitState,
   validateJSubmitState,

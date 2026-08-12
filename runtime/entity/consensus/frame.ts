@@ -17,14 +17,14 @@ import {
 import { LIMITS } from '../../config/constants';
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
 import { readEntityFrameEvents } from '../frame-events';
-import { assertEntityFrameEventByteBudget } from './frame-events';
+import { assertEntityFrameEventByteBudget } from './frame/events';
 
 export const MAX_ENTITY_FRAME_TX_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 export {
   MAX_ENTITY_FRAME_EVENT_BYTES,
   assertEntityFrameEventByteBudget,
   entityFrameEventsEqual,
-} from './frame-events';
+} from './frame/events';
 
 export const isCanonicalEntityFrameDigest = (value: unknown): value is string =>
   typeof value === 'string' && /^0x[0-9a-f]{64}$/.test(value);

@@ -9,19 +9,19 @@ export {
   selectPreparedFrameFromCertificate,
   verifyEntityLeaderCertificate,
   verifyEntityRelayCertificate,
-} from './leader-certificates';
+} from './leader/certificates';
 export {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
   MAX_PENDING_CROSS_J_FILL_ACKS,
-} from './cross-j-fill-ack';
-export { attachTargetConsumptionProofs } from './consumption-output';
+} from './account/cross-j-fill-ack';
+export { attachTargetConsumptionProofs } from './output/consumption';
 export {
   selectProposableEntityTxs,
-} from './proposal-policy';
+} from './proposal/policy';
 export {
   mergeEntityInputs,
   prioritizeEntityConsensusInputs,
   prioritizeProtocolEntityInputs,
-} from './input-merge';
-export { applyEntityInput, type EntityInputOutcome } from './input-consensus';
-export { applyEntityFrame } from './frame-application';
+} from './input/merge';
+export { applyEntityInput, type EntityInputOutcome } from './input/consensus';
+export { applyEntityFrame } from './frame/application';

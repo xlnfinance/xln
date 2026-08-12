@@ -21,7 +21,7 @@ import {
   prepareCatchupFixtureReplica,
   registerCatchupFixtureSigners,
 } from './reliable-local-catchup-fixture';
-import { buildEntityHashesToSign } from '../../entity/consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
 import type {
   DeliverableEntityInput,
   RuntimeReplica,

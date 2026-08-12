@@ -1,7 +1,7 @@
 import type { EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica } from '../../entity/types.ts';
 import type { RuntimeReplica, ReliableDeliveryIdentity, RoutedEntityInput } from '../types.ts';
 import type { EntityTx } from '../../types/entity-tx.ts';
-import { getEntityLeaderState } from '../../entity/consensus/leader.ts';
+import { getEntityLeaderState } from '../../entity/consensus/leader';
 import { reconcileJEventRangeWithFinalizedState } from '../../jurisdiction/machine/local-history.ts';
 import { decodeUnsignedJEventRange } from '../../jurisdiction/machine/j-event-range-validation.ts';
 import {
@@ -13,7 +13,7 @@ import {
   reliableIdentityExactKey,
 } from './reliable-frontier.ts';
 import { getReliableOutputIdentity } from '../output-routing.ts';
-import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope.ts';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
 
 const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 

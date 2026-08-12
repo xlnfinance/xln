@@ -16,7 +16,7 @@ import {
   hashCertifiedEntityOutputSemantic,
   normalizeConsensusOutputBoardAuthority,
   resolveConsensusOutputBoardAuthority,
-} from '../entity/consensus/output-certification';
+} from '../entity/consensus/output/certification';
 import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { encodeSignedHanko } from '../hanko/codec';
 import { hashHankoBoardClaim, resolveHankoBoardDelays } from '../hanko/claims';

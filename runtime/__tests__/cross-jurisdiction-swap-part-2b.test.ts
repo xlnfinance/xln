@@ -135,7 +135,7 @@ import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '..
 
 import { signEntityHashes } from '../hanko/signing';
 
-import { hashCertifiedEntityOutputSemantic } from '../entity/consensus/output-certification';
+import { hashCertifiedEntityOutputSemantic } from '../entity/consensus/output/certification';
 
 import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../entity/tx/j-events-htlc';
 
@@ -188,7 +188,7 @@ import { collectLocalProfileEncryptionAnnouncements } from '../entity/profile/pr
 
 import { LIMITS } from '../config/constants';
 
-import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
+import { getEffectiveEntityInputTxs } from '../entity/consensus/output/envelope';
 
 import { assertRuntimeOutputAuthorization } from '../entity/auth/authorization';
 

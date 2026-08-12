@@ -27,8 +27,8 @@ HankoClaim {
 | `runtime/hanko/core.ts` | core primitives: sign, pack, unpack, recover, flashloan governance |
 | `runtime/hanko/signing.ts` | consensus integration: signEntityHashes, buildQuorumHanko, verifyHankoForHash |
 | `runtime/account/crypto.ts` | key derivation: BIP-39 + HMAC-SHA256, signDigest, verifyAccountSignature |
-| `runtime/entity/consensus/input-consensus.ts` | entity proposal, precommit, timeout, and commit-input consensus |
-| `runtime/entity/consensus/frame-application.ts` | deterministic frame apply and Hanko-bound output construction |
+| `runtime/entity/consensus/input/consensus.ts` | entity proposal, precommit, timeout, and commit-input consensus |
+| `runtime/entity/consensus/frame/application.ts` | deterministic frame apply and Hanko-bound output construction |
 | `jurisdictions/contracts/EntityProvider.sol` | on-chain verification: verifyHankoSignature, ecrecover, board hash |
 | `jurisdictions/contracts/Types.sol` | solidity struct definitions |
 

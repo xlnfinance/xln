@@ -9,8 +9,8 @@ import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { buildPreparedFrameEvidence, hashEntityLeaderVoteBody } from '../../entity/consensus/leader';
 import { hashJPrefixAttestation } from '../../jurisdiction/machine/j-prefix-consensus';
 
-import { assertCertifiedOutputSemanticIdentity } from '../../entity/consensus/output-certification';
-import { getCertifiedOutputNestedTxs, getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope';
+import { assertCertifiedOutputSemanticIdentity } from '../../entity/consensus/output/certification';
+import { getCertifiedOutputNestedTxs, getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
 import { accountInputProposal } from '../../account/consensus/flush';
 
 export const carriesEntityCommitNotification = (output: RoutedEntityInput): boolean =>

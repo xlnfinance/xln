@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { EntityOutput } from '../entity/types';
-import { filterEntityFrameBroadcastContinuations } from '../entity/consensus/j-broadcast-continuation';
-import { assertEntityJBroadcastOrder } from '../entity/consensus/frame-application';
+import { filterEntityFrameBroadcastContinuations } from '../entity/consensus/jurisdiction/broadcast-continuation';
+import { assertEntityJBroadcastOrder } from '../entity/consensus/frame/application';
 import {
   shouldAutoBroadcastDraft,
   takeBroadcastBatch,

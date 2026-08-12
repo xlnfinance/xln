@@ -1,4 +1,4 @@
-import { hasVerifiedEntityCommitPrecertificate } from '../../entity/consensus/commit-precheck';
+import { hasVerifiedEntityCommitPrecertificate } from '../../entity/consensus/commit/precheck';
 import {
   prioritizeEntityConsensusInputs,
   prioritizeProtocolEntityInputs,

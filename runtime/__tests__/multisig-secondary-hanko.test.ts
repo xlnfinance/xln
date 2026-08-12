@@ -24,12 +24,12 @@ import {
   hashCertifiedEntityOutput,
   hashCertifiedEntityOutputSemantic,
   isNonMutatingEntityWakeOutput,
-} from '../entity/consensus/output-certification';
+} from '../entity/consensus/output/certification';
 import {
   attachHankoWitnessToOutputs,
   sealHankoWitnessInState,
   type HankoWitnessEntry,
-} from '../entity/consensus/hanko-witness';
+} from '../entity/consensus/input/hanko-witness';
 import { generateLazyEntityId } from '../entity/factory';
 import { deriveLocalEntityCryptoKeys } from '../entity/auth/crypto';
 import { handleExtendCreditEntityTx } from '../entity/tx/handlers/account-admin';

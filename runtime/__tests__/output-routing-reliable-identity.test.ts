@@ -9,7 +9,7 @@ import { safeStringify } from '../protocol/serialization';
 import {
   assignCertifiedOutputIdentities,
   hashCertifiedEntityOutputSemantic,
-} from '../entity/consensus/output-certification';
+} from '../entity/consensus/output/certification';
 import type { DeliverableEntityInput, RoutedEntityInput } from '../runtime/types';
 import type { EntityState } from '../entity/types';
 import type { EntityTx } from '../types/entity-tx';

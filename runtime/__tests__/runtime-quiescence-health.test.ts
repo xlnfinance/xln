@@ -6,7 +6,7 @@ import {
   isAccountWriteLaneIdle,
   summarizeRuntimeQuiescence,
 } from '../orchestrator/mesh-common';
-import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
 import type { AccountReplica } from '../types/account';
 import type { DeliverableEntityInput } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';

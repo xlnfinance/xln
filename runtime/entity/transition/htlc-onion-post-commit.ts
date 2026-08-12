@@ -22,7 +22,7 @@ import type { AccountTx, HtlcLock } from '../../types/account';
 import type { EntityOutput, EntityReplica } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityTx } from '../../types/entity-tx';
-import { verifyCertifiedEntityOutput } from '../consensus/output-certification';
+import { verifyCertifiedEntityOutput } from '../consensus/output/certification';
 import { requireEntityEncryptionPrivateKey } from '../auth/crypto';
 
 const log = createStructuredLogger('entity.htlc_onion_post_commit');

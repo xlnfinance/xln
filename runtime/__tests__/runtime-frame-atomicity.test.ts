@@ -44,7 +44,7 @@ import { enableStrictScenario } from '../scenarios/helpers';
 import {
   buildEntityHashesToSign,
   cloneAccountInputWithoutPostCommitHankos,
-} from '../entity/consensus/hanko-witness';
+} from '../entity/consensus/input/hanko-witness';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/machine/registration-evidence';
 import { readStorageFrameRecord } from '../storage/read';
 import { createTestJReplica } from './helpers/j-replica';

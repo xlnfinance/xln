@@ -114,7 +114,7 @@ test('each payment operation retains one explicit canonical transaction path', (
     .toContain("type: 'htlc_lock'");
   expect(source('runtime/entity/tx/handlers/swap-requests.ts'))
     .toContain("type: 'swap_offer'");
-  expect(source('runtime/entity/consensus/frame-application.ts')).not.toContain('Fallback:');
+  expect(source('runtime/entity/consensus/frame/application.ts')).not.toContain('Fallback:');
 
   const crossJurisdiction = source('runtime/entity/tx/handlers/cross-j-setup.ts');
   expect(crossJurisdiction).toContain("{ type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } }");
@@ -178,7 +178,7 @@ test('four payment modes stay distinct while retired swap alternatives fail loud
 });
 
 test('same-j offers are projected only by the counterparty matcher', () => {
-  const frameApplication = source('runtime/entity/consensus/frame-application.ts');
+  const frameApplication = source('runtime/entity/consensus/frame/application.ts');
   expect(frameApplication).toContain('if (!currentEntityState.orderbookExt) return stats;');
   expect(frameApplication).toContain("entityLog.debug('orderbook.skip_local_maker'");
   expect(frameApplication).toContain('if (!currentEntityState.orderbookExt) return;');

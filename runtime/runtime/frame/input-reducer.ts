@@ -1,4 +1,4 @@
-import { hasVerifiedEntityCommitPrecertificate } from '../../entity/consensus/commit-precheck';
+import { hasVerifiedEntityCommitPrecertificate } from '../../entity/consensus/commit/precheck';
 import { mergeEntityInputs } from '../../entity/consensus/index';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 import { createStructuredLogger } from '../../infra/logger';

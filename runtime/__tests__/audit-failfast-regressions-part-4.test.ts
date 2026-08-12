@@ -78,8 +78,8 @@ import { buildCollectiveEntityProposalTx } from '../entity/auth/authorization';
 
 import { generateProposalId } from '../entity/tx/proposals';
 
-import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
-import { buildCertifiedEntityOutputHashes } from '../entity/consensus/output-certification';
+import { buildEntityHashesToSign } from '../entity/consensus/input/hanko-witness';
+import { buildCertifiedEntityOutputHashes } from '../entity/consensus/output/certification';
 
 import {
   buildEntityFrameAuthority,

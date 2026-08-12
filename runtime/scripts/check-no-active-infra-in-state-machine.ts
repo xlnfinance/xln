@@ -14,11 +14,11 @@ const TARGETS = [
   'runtime/entity/tx/handlers/dispute/finalize-proof.ts',
   'runtime/entity/tx/handlers/j-broadcast.ts',
   'runtime/account/consensus/index.ts',
-  'runtime/entity/consensus/leader-certificates.ts',
-  'runtime/entity/consensus/j-prefix-round.ts',
+  'runtime/entity/consensus/leader/certificates.ts',
+  'runtime/entity/consensus/jurisdiction/prefix-round.ts',
   'runtime/entity/consensus/state-quota.ts',
-  'runtime/entity/consensus/input-consensus.ts',
-  'runtime/entity/consensus/frame-application.ts',
+  'runtime/entity/consensus/input/consensus.ts',
+  'runtime/entity/consensus/frame/application.ts',
   'runtime/runtime/j-submit.ts',
 ];
 

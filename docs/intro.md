@@ -37,8 +37,8 @@ Interpretation:
 ## Proof anchors (where to verify)
 - jurisdictions/contracts/Depository.sol: RCPAN enforcement + FIFO debt queue.
 - runtime/account/consensus/index.ts: ADD_TX -> PROPOSE -> SIGN -> COMMIT.
-- runtime/entity/consensus/input-consensus.ts: PBFT-style input and commit flow.
-- runtime/entity/consensus/frame-application.ts: deterministic committed-frame reducer.
+- runtime/entity/consensus/input/consensus.ts: PBFT-style input and commit flow.
+- runtime/entity/consensus/frame/application.ts: deterministic committed-frame reducer.
 - runtime/account/utils.ts: deriveDelta() and invariant math.
 
 ## XLN is not

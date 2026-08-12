@@ -8,7 +8,7 @@ import {
   EMPTY_ENTITY_ACCOUNT_COMMITMENT,
   entityAccountCommitmentRoot,
   putEntityAccountCommitment,
-} from '../entity/consensus/account-commitment-tree';
+} from '../entity/consensus/account/commitment-tree';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 const valueHash = (value: string): string =>

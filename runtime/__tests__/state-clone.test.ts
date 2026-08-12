@@ -23,7 +23,7 @@ import {
 import {
   applyEntityFrame,
   applyRuntimeOwnedEntityFrame,
-} from '../entity/consensus/frame-application';
+} from '../entity/consensus/frame/application';
 import { EntityCandidateMap } from '../entity/state/candidate-map';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim-accumulator';
 import {

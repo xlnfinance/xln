@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
+import { validateProposedEntityFrame } from '../entity/consensus/frame/validation';
 
 test('proposed Entity frames reject malformed transactions before replay', () => {
   const malformedFrame = {
