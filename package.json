@@ -127,7 +127,7 @@
     "debug:incidents": "bun runtime/scripts/operations/diagnostics/debug-incidents.ts",
     "test": "bun runtime/scripts/e2e/runners/run-all-tests-fast.ts --quick --scenario-workers=2 --e2e-shards=1",
     "test:contracts": "bun run test:contracts:full",
-    "test:contracts:full": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- sh -c \"bunx hardhat test test/*.ts test/*.cjs\"",
+    "test:contracts:full": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- bunx hardhat test",
     "build:static": "cd frontend && bun run build:static && echo '✅ Static build complete for GitHub Pages'",
     "build:deploy": "bun run build:static && echo '🚀 Ready for GitHub Pages deployment'",
     "native": "bun scripts/native/build-platforms.ts",
