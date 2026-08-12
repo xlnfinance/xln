@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { freemem, loadavg, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
-import { compareStableText } from '../protocol/serialization';
-import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
+import { compareStableText } from '../../../protocol/serialization';
+import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 
 /**
  * Resource isolation and candidate-identity primitives for the E2E runner.

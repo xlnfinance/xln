@@ -717,7 +717,7 @@ const QA_CATALOG = [
     id: 'e2e-isolated',
     group: 'E2E',
     label: 'Isolated Browser E2E',
-    command: 'bun runtime/scripts/run-e2e-parallel-isolated.ts --all --video=on',
+    command: 'bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --video=on',
     description: 'Full browser mesh with isolated chains, API, wallet, videos, traces.',
   },
   {
@@ -1542,7 +1542,7 @@ test.describe('QA cockpit scenario player', () => {
           title: 'QA cockpit fixture records playback transcript',
           command: [
             'bun',
-            'runtime/scripts/run-e2e-parallel-isolated.ts',
+            'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
             '--pw-project=chromium',
             '--pw-files=["tests/e2e-qa-cockpit-fixture.spec.ts::QA cockpit fixture records playback transcript"]',
             '--video=on',
@@ -2126,7 +2126,7 @@ test.describe('QA cockpit scenario player', () => {
           title: 'QA cockpit fixture records playback transcript',
           command: [
             'bun',
-            'runtime/scripts/run-e2e-parallel-isolated.ts',
+            'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
             '--pw-project=chromium',
             '--pw-files=["tests/e2e-qa-cockpit-fixture.spec.ts::QA cockpit fixture records playback transcript"]',
             '--video=on',

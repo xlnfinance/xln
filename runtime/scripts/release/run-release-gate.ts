@@ -5,12 +5,12 @@ import { readdirSync } from 'node:fs';
 import type { Readable } from 'node:stream';
 import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';
 
-import { assertMinDiskFree, getMinDiskFreeBytes } from '../infra/storage-monitor';
+import { assertMinDiskFree, getMinDiskFreeBytes } from '../../infra/storage-monitor';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
   withoutTestArtifactCleanupDoneEnv,
-} from './test-artifact-cleanup';
+} from '../e2e/harness/test-artifact-cleanup';
 
 type GateProfile = 'quick' | 'ci' | 'release';
 

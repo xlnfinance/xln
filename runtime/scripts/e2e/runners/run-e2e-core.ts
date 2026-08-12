@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
+import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 
 const CORE_E2E_FILES = [
   'tests/e2e-payment-smoke.spec.ts',
@@ -32,7 +32,7 @@ const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\
 
 const passthrough = process.argv.slice(2);
 const runnerArgs = [
-  'runtime/scripts/run-e2e-parallel-isolated.ts',
+  'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
   ...passthrough,
   '--shards=4',
   '--workers-per-shard=1',

@@ -8,7 +8,7 @@ Use the isolated runner for normal browser testing. It builds once, starts a ded
 bun run test:e2e:fast
 ```
 
-This runs the canonical user flows listed in `runtime/scripts/run-e2e-fast.ts` with:
+This runs the canonical user flows listed in `runtime/scripts/e2e/runners/run-e2e-fast.ts` with:
 
 - isolated Anvil RPCs
 - isolated runtime API server
@@ -21,7 +21,7 @@ This runs the canonical user flows listed in `runtime/scripts/run-e2e-fast.ts` w
 ## One Flow
 
 ```bash
-bun runtime/scripts/run-e2e-parallel-isolated.ts \
+bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts \
   --pw-project=chromium \
   --pw-files='tests/e2e-payment-smoke.spec.ts::fresh runtimes can open accounts, faucet, pay, and reload persisted state' \
   --video=off --trace=off --screenshot=only-on-failure --max-failures=1

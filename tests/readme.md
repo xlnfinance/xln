@@ -23,7 +23,7 @@ bun run test:e2e:fast
 For one browser flow:
 
 ```bash
-bun runtime/scripts/run-e2e-parallel-isolated.ts \
+bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts \
   --pw-project=chromium \
   --pw-files='tests/e2e-swap-isolated.spec.ts::two isolated users trade against each other through one hub orderbook without market maker liquidity' \
   --video=off --trace=off --screenshot=only-on-failure --max-failures=1
@@ -63,7 +63,7 @@ cd jurisdictions && bunx hardhat test --grep DeltaTransformer
 ## Current Fast Gates
 
 - `bun run test` runs quick all-tests: smoke scenarios plus one focused E2E path.
-- `bun run test:e2e:fast` runs the canonical isolated browser flow set from `runtime/scripts/run-e2e-fast.ts`.
+- `bun run test:e2e:fast` runs the canonical isolated browser flow set from `runtime/scripts/e2e/runners/run-e2e-fast.ts`.
 - `bun run gate:quick` runs source checks, selected runtime/native tests, soundcheck, and whitespace checks.
 - `bun run gate:ci` adds frontend check, contracts, persistence/watchtower smoke, coverage markers, and fast E2E.
 - `bun run gate:release` adds deterministic replay, core E2E, RPC scenarios, and the storage benchmark.

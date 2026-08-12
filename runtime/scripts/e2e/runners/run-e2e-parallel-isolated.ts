@@ -5,11 +5,11 @@
  * - dedicated vite preview server (single frontend build shared by all shards)
  *
  * Usage:
- *   bun runtime/scripts/run-e2e-parallel-isolated.ts
- *   bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=3
- *   bun runtime/scripts/run-e2e-parallel-isolated.ts --all
- *   bun runtime/scripts/run-e2e-parallel-isolated.ts --video=on --trace=on-first-retry --max-failures=1
- *   bun runtime/scripts/run-e2e-parallel-isolated.ts --all --start-at=18 --preserve-artifacts
+ *   bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts
+ *   bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --shards=3
+ *   bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all
+ *   bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --video=on --trace=on-first-retry --max-failures=1
+ *   bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --start-at=18 --preserve-artifacts
  */
 
 import { createHash } from 'node:crypto';
@@ -36,49 +36,49 @@ import {
   deriveQaTestDescription,
   deriveQaTestHandle,
   formatQaRunIdUtc,
-} from '../qa/report';
+} from '../../../qa/report';
 import {
   QA_TEST_CATEGORY_TAGS,
   formatQaTestCategoryViolations,
   inspectQaTestCategory,
   qaTestCategoryFromTags,
-} from '../qa/test-categories';
+} from '../../../qa/test-categories';
 import type {
   QaFailureCapsule,
   QaScenarioMetadata,
   QaTestCategory,
-} from '../qa/types';
-import { assertMinDiskFree } from '../infra/storage-monitor';
-import { compareStableText } from '../protocol/serialization';
-import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
+} from '../../../qa/types';
+import { assertMinDiskFree } from '../../../infra/storage-monitor';
+import { compareStableText } from '../../../protocol/serialization';
+import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 import {
   createIncrementalRuntimeFatalLogScanner,
   findRuntimeFatalLogLines,
   tailLog,
-} from './e2e-fatal-log-monitor';
+} from '../harness/e2e-fatal-log-monitor';
 import {
   stopProcessDependencyChain,
   type ManagedChildProcess,
-} from './e2e-managed-process';
+} from '../harness/e2e-managed-process';
 import {
   isE2ERunnerProcessAlive,
   readE2ERunnerLock,
   type E2ERunnerLock,
-} from './e2e-runner-lock';
+} from '../harness/e2e-runner-lock';
 import {
   acquireLocalTestPortLease,
   assertLocalTestPortsFree,
   LOCAL_TEST_PORT_POOL_VERSION,
   LOCAL_TEST_STACK_BASES,
   type LocalTestPortLease,
-} from './local-test-port-lease';
+} from '../harness/local-test-port-lease';
 import {
   buildIsolatedE2ERerunCommand,
   parseJsonStrict,
   readPlaywrightFailureReport,
-} from './e2e-failure-capsule';
-import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';
-import { listPlaywrightTestMetadata } from './playwright-test-metadata';
+} from '../harness/e2e-failure-capsule';
+import { cleanupTestArtifactsBeforeRun } from '../harness/test-artifact-cleanup';
+import { listPlaywrightTestMetadata } from '../harness/playwright-test-metadata';
 import {
   assertE2EBrowserHealthGate,
   parseStepTimings,
@@ -86,7 +86,7 @@ import {
   publishQaRunIfConfigured,
   shardBrowserEventsPath,
   writeRunManifest,
-} from './e2e-run-report';
+} from '../harness/e2e-run-report';
 
 export {
   assertE2EBrowserHealthGate,
@@ -94,7 +94,7 @@ export {
   readShardBrowserIssues,
   readShardLastRunStatus,
   resolveE2EShardManifestStatus,
-} from './e2e-run-report';
+} from '../harness/e2e-run-report';
 import {
   assertE2ECodeFingerprintStable,
   computeCodeFingerprint,
@@ -108,7 +108,7 @@ import {
   type AsyncLimiter,
   type E2EBuildArtifacts,
   type QaPerfSummary,
-} from './e2e-isolated-runtime';
+} from '../harness/e2e-isolated-runtime';
 
 export {
   assertE2ECodeFingerprintStable,
@@ -123,13 +123,13 @@ export {
   isE2ECodeInputPath,
   parseE2EChildPerfOutput,
   readE2EChildrenPerf,
-} from './e2e-isolated-runtime';
+} from '../harness/e2e-isolated-runtime';
 export type {
   E2EBuildArtifacts,
   E2ECodeDriftGuard,
   E2EShardPaths,
   E2EShardPorts,
-} from './e2e-isolated-runtime';
+} from '../harness/e2e-isolated-runtime';
 export {
   acquireLocalTestPortLease,
   assertLocalTestPortsFree,
@@ -137,7 +137,7 @@ export {
   LOCAL_TEST_STACK_BASES,
   parseLocalTestListeningPortOutput,
   readLocalTestListeningPortPids,
-} from './local-test-port-lease';
+} from '../harness/local-test-port-lease';
 
 export type CliArgs = {
   shards: number;
@@ -492,7 +492,7 @@ const parseArgs = (): CliArgs => {
 };
 
 export const ISOLATED_E2E_RUNNER_USAGE = [
-  'Usage: bun runtime/scripts/run-e2e-parallel-isolated.ts [options]',
+  'Usage: bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts [options]',
   '',
   'Target selection:',
   '  --pw-files=<file[,file...]>   Exact Playwright specs',

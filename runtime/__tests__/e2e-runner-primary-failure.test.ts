@@ -8,7 +8,7 @@ import {
   isE2EGlobalFailFastAbortSignal,
   reconcileE2EShardCleanupFailures,
   resolveE2EShardManifestStatus,
-} from '../scripts/run-e2e-parallel-isolated';
+} from '../scripts/e2e/runners/run-e2e-parallel-isolated';
 
 test('keeps one typed primary failure while cancelled neighbors do not consume the failure budget', () => {
   const primaryCapsule = {
@@ -22,7 +22,7 @@ test('keeps one typed primary failure while cancelled neighbors do not consume t
     error: 'Expected balance to equal 100',
     stack: 'tests/e2e-lending.spec.ts:42:7',
     attachments: [],
-    rerunCommand: 'bun runtime/scripts/run-e2e-parallel-isolated.ts --trace=retain-on-failure',
+    rerunCommand: 'bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --trace=retain-on-failure',
   };
   const first = advanceE2ERunFailureState(initialE2ERunFailureState(), {
     shard: 2,
@@ -60,8 +60,8 @@ test('keeps one typed primary failure while cancelled neighbors do not consume t
 });
 
 test('runner skips HTTP forensics for fail-fast cancellations and forces trace on exact reruns', () => {
-  const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
-  const report = readFileSync('runtime/scripts/e2e-run-report.ts', 'utf8');
+  const runner = readFileSync('runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts', 'utf8');
+  const report = readFileSync('runtime/scripts/e2e/harness/e2e-run-report.ts', 'utf8');
 
   expect(runner).toContain("resultClass: 'cancelled'");
   expect(runner).toContain('isE2EGlobalFailFastAbortSignal(signal)');

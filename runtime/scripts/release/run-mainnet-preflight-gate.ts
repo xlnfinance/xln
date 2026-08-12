@@ -6,13 +6,13 @@ import { dirname, join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';
 
-import { assertMinDiskFree, getMinDiskFreeBytes } from '../infra/storage-monitor';
+import { assertMinDiskFree, getMinDiskFreeBytes } from '../../infra/storage-monitor';
 import { MAINNET_GATE } from './mainnet-gate-constants';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
   withoutTestArtifactCleanupDoneEnv,
-} from './test-artifact-cleanup';
+} from '../e2e/harness/test-artifact-cleanup';
 
 export type MainnetPreflightArgs = {
   dryRun: boolean;
@@ -127,7 +127,7 @@ export const buildMainnetPreflightSteps = (
     steps.push({
       name: 'one-hour release soak',
       category: 'soak',
-      command: `bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=${MAINNET_GATE.soakMinutes}`,
+      command: `bun runtime/scripts/release/run-soak-gate.ts --profile=release --minutes=${MAINNET_GATE.soakMinutes}`,
       timeoutMs: (MAINNET_GATE.soakMinutes + 30) * 60_000,
     });
   }

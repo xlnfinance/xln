@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { discoverHubIds } from '../orchestrator/bootstrap/custody-bootstrap';
 import { createOrchestratorProxyHandlers } from '../orchestrator/proxy';
 import { MAX_WALLET_SNAPSHOT_BODY_BYTES } from '../api/public/external-wallet/http';
-import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '../scripts/e2e-fatal-log-monitor';
-import { expandPlaywrightTargets } from '../scripts/run-e2e-parallel-isolated';
+import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '../scripts/e2e/harness/e2e-fatal-log-monitor';
+import { expandPlaywrightTargets } from '../scripts/e2e/runners/run-e2e-parallel-isolated';
 
 const repoRoot = process.cwd();
 const readPlatformDeploy = (): string =>
@@ -126,7 +126,7 @@ describe('production startup wiring', () => {
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
-    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/release/run-release-gate.ts'), 'utf8');
 
     expect(packageJson.scripts['check:src'].split('&&').map(command => command.trim()))
       .not.toContain('bun run check:determinism');
@@ -136,8 +136,8 @@ describe('production startup wiring', () => {
   });
 
   test('release gate proves replacement idempotency at both external I/O boundaries', () => {
-    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
-    const coreE2e = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-core.ts'), 'utf8');
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/release/run-release-gate.ts'), 'utf8');
+    const coreE2e = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-core.ts'), 'utf8');
     for (const crashTest of [
       'runtime/__tests__/reliable-delivery-receipts.test.ts',
       'runtime/__tests__/reliable-local-catchup-real-crash.test.ts',
@@ -151,22 +151,22 @@ describe('production startup wiring', () => {
   });
 
   test('bounded soak stays separate from the release gate', () => {
-    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/release/run-release-gate.ts'), 'utf8');
 
     expect(releaseGate).not.toContain("command: 'bun run soak:quick'");
   });
 
   test('production topology health runs after deployment, not against an unrelated release candidate', () => {
-    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
-    const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/run-mainnet-preflight-gate.ts'), 'utf8');
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/release/run-release-gate.ts'), 'utf8');
+    const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/release/run-mainnet-preflight-gate.ts'), 'utf8');
 
     expect(releaseGate).not.toContain("command: 'bun run prod:health'");
     expect(mainnetGate).toContain("command: 'bun run prod:health:capped-testnet'");
   });
 
   test('release RPC scenarios include the lock hostage terminal-evidence flow', () => {
-    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
-    const systemRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-system-tests-parallel.ts'), 'utf8');
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/release/run-release-gate.ts'), 'utf8');
+    const systemRunner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-system-tests-parallel.ts'), 'utf8');
 
     expect(releaseGate).toContain(
       "{ name: 'RPC system scenarios', command: 'bun run test:system:parallel', timeoutMs: 1_200_000 }",
@@ -453,7 +453,7 @@ describe('production startup wiring', () => {
 
   test('isolated frontend builds generate llms context in their requested static directory', () => {
     const generator = readFileSync(join(repoRoot, 'scripts/debug/gpt.cjs'), 'utf8');
-    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
 
     expect(generator).toContain("const outputDir = path.resolve(frontendDir, process.env.XLN_STATIC_DIR || 'static');");
     expect(generator).not.toContain("const outputDir = path.join(__dirname, '../../frontend/static/');");
@@ -1183,7 +1183,7 @@ describe('production startup wiring', () => {
   });
 
   test('isolated e2e runner bounds green-path MM teardown and cleans child ports', () => {
-    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
     expect(runner).toContain('const assertShardRuntimePortsReleased = (');
     expect(runner).toMatch(
       /stopProcessDependencyChain\(\[\s*\{ label: 'vite', proc: vite \},\s*\{ label: 'api', proc: api, termTimeoutMs: 35_000 \}/,
@@ -1213,10 +1213,10 @@ describe('production startup wiring', () => {
 
   test('non-production Anvil harnesses keep bounded history in memory', () => {
     const harnesses = [
-      'runtime/scripts/run-e2e-parallel-isolated.ts',
+      'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
       'runtime/scripts/rpc-settlement-anvil.ts',
       'runtime/scripts/dev-anvil-stack.ts',
-      'runtime/scripts/run-system-tests-parallel.ts',
+      'runtime/scripts/e2e/runners/run-system-tests-parallel.ts',
       'runtime/scenarios/harness/boot.ts',
       'runtime/__tests__/watchtower-rpc-last-resort.test.ts',
     ];
@@ -1239,7 +1239,7 @@ describe('production startup wiring', () => {
   });
 
   test('isolated e2e outer timeout exceeds every declared Playwright test timeout', () => {
-    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
     const configured = runner.match(/const DEFAULT_E2E_TEST_TIMEOUT_MS = ([\d_]+);/);
     expect(configured).not.toBeNull();
     const outerTimeoutMs = Number(String(configured?.[1] || '').replaceAll('_', ''));
@@ -1253,7 +1253,7 @@ describe('production startup wiring', () => {
   });
 
   test('fast e2e caps full-stack browser concurrency at the release-tested level', () => {
-    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-fast.ts'), 'utf8');
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-fast.ts'), 'utf8');
     expect(runner).toContain('const stackConcurrency = isCi ? 1 : 8;');
     expect(runner).toContain('`--shards=${stackConcurrency}`');
     expect(runner).toContain('`--max-mm-concurrency=${isCi ? 1 : 2}`');
@@ -1261,7 +1261,7 @@ describe('production startup wiring', () => {
   });
 
   test('isolated e2e overlaps the bounded market-maker queue with plain stacks', () => {
-    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
     expect(runner).toContain('const prioritizedMarketMakerIndex = activeMarketMakerTasks < args.maxMmConcurrency');
     expect(runner).toContain('!claimed[index] && task.requireMarketMaker');
     expect(runner).toContain('!claimed[index] && !task.requireMarketMaker');
@@ -1503,7 +1503,7 @@ describe('production startup wiring', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const runtimeImportHttp = readFileSync(join(repoRoot, 'runtime/orchestrator/runtime/runtime-import-http.ts'), 'utf8');
     const bootstrapTimeline = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap/bootstrap-timeline-stages.ts'), 'utf8');
-    const isolatedRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    const isolatedRunner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
 
     expect(baseline).toContain('allowAutoReset?: boolean;');
     expect(baseline).toContain('if (!resolved.allowAutoReset) {');
@@ -1742,19 +1742,19 @@ describe('production startup wiring', () => {
     const soundcheck = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-soundcheck.ts'), 'utf8');
 
     expect(packageJson).toContain(
-      '"prod:bootstrap:bench": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-bench -- bun runtime/scripts/bootstrap-benchmark.ts"',
+      '"prod:bootstrap:bench": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-bench -- bun runtime/scripts/bootstrap-benchmark.ts"',
     );
     expect(packageJson).toContain(
-      '"prod:bootstrap:fresh": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-fresh -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=fresh"',
+      '"prod:bootstrap:fresh": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-fresh -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=fresh"',
     );
     expect(packageJson).toContain(
-      '"prod:bootstrap:template": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-template -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=template"',
+      '"prod:bootstrap:template": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-template -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=template"',
     );
     expect(packageJson).toContain(
-      '"prod:bootstrap:clone": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-clone --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=clone"',
+      '"prod:bootstrap:clone": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-clone --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=clone"',
     );
     expect(packageJson).toContain(
-      '"prod:bootstrap:hydrate": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-hydrate --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"',
+      '"prod:bootstrap:hydrate": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=bootstrap-hydrate --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"',
     );
     expect(packageJson).toContain(
       '"prod:bootstrap:rotation": "XLN_STORAGE_EPOCH_MAX_BYTES=4194304 XLN_LOCAL_PROD_SMOKE_REQUIRE_EPOCH_ROTATION=1',
@@ -1996,20 +1996,20 @@ describe('production startup wiring', () => {
   });
 
   test('isolated e2e runner fails fast on fatal shard log markers', () => {
-    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
-    const isolatedRuntime = readFileSync(join(repoRoot, 'runtime/scripts/e2e-isolated-runtime.ts'), 'utf8');
-    const fatalHelper = readFileSync(join(repoRoot, 'runtime/scripts/e2e-fatal-log-monitor.ts'), 'utf8');
-    const runnerLockHelper = readFileSync(join(repoRoot, 'runtime/scripts/e2e-runner-lock.ts'), 'utf8');
-    const standaloneMonitor = readFileSync(join(repoRoot, 'runtime/scripts/e2e-fail-fast-monitor.ts'), 'utf8');
-    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
-    const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/run-mainnet-preflight-gate.ts'), 'utf8');
-    const allTestsFast = readFileSync(join(repoRoot, 'runtime/scripts/run-all-tests-fast.ts'), 'utf8');
-    const unitTestsRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-unit-tests.ts'), 'utf8');
-    const e2eFastRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-fast.ts'), 'utf8');
-    const e2eCoreRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-core.ts'), 'utf8');
-    const systemRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-system-tests-parallel.ts'), 'utf8');
-    const soakRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-soak-gate.ts'), 'utf8');
-    const cleanupHelper = readFileSync(join(repoRoot, 'runtime/scripts/test-artifact-cleanup.ts'), 'utf8');
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
+    const isolatedRuntime = readFileSync(join(repoRoot, 'runtime/scripts/e2e/harness/e2e-isolated-runtime.ts'), 'utf8');
+    const fatalHelper = readFileSync(join(repoRoot, 'runtime/scripts/e2e/harness/e2e-fatal-log-monitor.ts'), 'utf8');
+    const runnerLockHelper = readFileSync(join(repoRoot, 'runtime/scripts/e2e/harness/e2e-runner-lock.ts'), 'utf8');
+    const standaloneMonitor = readFileSync(join(repoRoot, 'runtime/scripts/e2e/harness/e2e-fail-fast-monitor.ts'), 'utf8');
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/release/run-release-gate.ts'), 'utf8');
+    const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/release/run-mainnet-preflight-gate.ts'), 'utf8');
+    const allTestsFast = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-all-tests-fast.ts'), 'utf8');
+    const unitTestsRunner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-unit-tests.ts'), 'utf8');
+    const e2eFastRunner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-fast.ts'), 'utf8');
+    const e2eCoreRunner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-core.ts'), 'utf8');
+    const systemRunner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-system-tests-parallel.ts'), 'utf8');
+    const soakRunner = readFileSync(join(repoRoot, 'runtime/scripts/release/run-soak-gate.ts'), 'utf8');
+    const cleanupHelper = readFileSync(join(repoRoot, 'runtime/scripts/e2e/harness/test-artifact-cleanup.ts'), 'utf8');
     const bootstrapSoundcheck = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-soundcheck.ts'), 'utf8');
     const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
     expect(fatalHelper).toContain('/MISSING_SIGNER_KEY/');
@@ -2021,7 +2021,7 @@ describe('production startup wiring', () => {
     expect(fatalHelper).toContain('/child\\.unexpected_exit/');
     expect(fatalHelper).toContain('export const E2E_FATAL_LOG_TAIL_LINES = 80;');
     expect(runner).toContain('const startFailFastLogMonitor = (');
-    expect(runner).toContain("import { assertMinDiskFree } from '../infra/storage-monitor';");
+    expect(runner).toContain("import { assertMinDiskFree } from '../../../infra/storage-monitor';");
     expect(runner).toContain('const assertRunnerPreflight = async (): Promise<void> => {');
     expect(runner).toContain('assertMinDiskFree();');
     expect(runner).toContain('createIncrementalRuntimeFatalLogScanner,');
@@ -2032,7 +2032,7 @@ describe('production startup wiring', () => {
     expect(runner).toContain('--- last 80 lines (${logPath}) ---');
     expect(runner).toContain('shardAbortController.abort();');
     expect(runner).toContain("child.kill('SIGTERM')");
-    expect(runner).toContain("from './e2e-runner-lock';");
+    expect(runner).toContain("from '../harness/e2e-runner-lock';");
     expect(runnerLockHelper).toContain('logsDir?: string;');
     expect(runnerLockHelper).toContain("if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;");
     expect(runnerLockHelper).toContain("if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;");
@@ -2042,41 +2042,41 @@ describe('production startup wiring', () => {
     expect(standaloneMonitor).toContain('await stopRunner();');
     expect(standaloneMonitor).toContain("process.kill(lock.pid, 'SIGTERM')");
     expect(standaloneMonitor).toContain("process.kill(lock.pid, 'SIGKILL')");
-    expect(packageJson).toContain('"test:e2e:monitor": "bun runtime/scripts/e2e-fail-fast-monitor.ts"');
-    expect(packageJson).toContain('"test:cleanup": "bun runtime/scripts/test-artifact-cleanup.ts"');
-    expect(packageJson).toContain('"test:unit": "bun runtime/scripts/run-unit-tests.ts"');
+    expect(packageJson).toContain('"test:e2e:monitor": "bun runtime/scripts/e2e/harness/e2e-fail-fast-monitor.ts"');
+    expect(packageJson).toContain('"test:cleanup": "bun runtime/scripts/e2e/harness/test-artifact-cleanup.ts"');
+    expect(packageJson).toContain('"test:unit": "bun runtime/scripts/e2e/runners/run-unit-tests.ts"');
     expect(packageJson).toContain(
-      '"test:persistence:cli": "bun runtime/scripts/run-with-test-cleanup.ts --reason=persistence-cli -- bun runtime/scripts/persistence-wal-smoke.ts"',
+      '"test:persistence:cli": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=persistence-cli -- bun runtime/scripts/persistence-wal-smoke.ts"',
     );
     expect(packageJson).toContain(
-      '"test:watchtower:smoke": "bun runtime/scripts/run-with-test-cleanup.ts --reason=watchtower-smoke -- bun runtime/scripts/watchtower-smoke.ts"',
+      '"test:watchtower:smoke": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=watchtower-smoke -- bun runtime/scripts/watchtower-smoke.ts"',
     );
     expect(packageJson).toContain(
-      '"test:rpc-settlement": "bun runtime/scripts/run-with-test-cleanup.ts --reason=rpc-settlement -- bun runtime/scripts/rpc-settlement-parity.ts"',
+      '"test:rpc-settlement": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=rpc-settlement -- bun runtime/scripts/rpc-settlement-parity.ts"',
     );
     expect(packageJson).toContain(
-      '"test:contracts:full": "bun runtime/scripts/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- sh -c \\"bunx hardhat test test/*.ts test/*.cjs\\""',
+      '"test:contracts:full": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- sh -c \\"bunx hardhat test test/*.ts test/*.cjs\\""',
     );
     expect(packageJson).toContain(
-      '"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker',
+      '"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --exclude-market-maker',
     );
     expect(packageJson).toContain(
-      '"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only',
+      '"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --market-maker-only',
     );
     expect(packageJson).toContain(
-      '"test:e2e:full": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
+      '"test:e2e:full": "bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
     );
     expect(packageJson).toContain(
-      '"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker --strict-browser-health --shards=7',
+      '"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --exclude-market-maker --strict-browser-health --shards=7',
     );
     expect(packageJson).toContain(
-      '"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
+      '"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --market-maker-only --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
     );
     expect(packageJson).toContain(
-      '"test:e2e:all": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
+      '"test:e2e:all": "bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
     );
     expect(packageJson).toContain(
-      '"test:p2p:relay": "bun runtime/scripts/run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/network/p2p-relay.ts"',
+      '"test:p2p:relay": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/network/p2p-relay.ts"',
     );
     expect(bootstrapSoundcheck).toContain(
       "XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] || '1'",
@@ -2110,7 +2110,7 @@ describe('production startup wiring', () => {
     expect(releaseGate).toContain("process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1'");
     expect(releaseGate).toContain('env: withoutTestArtifactCleanupDoneEnv()');
     expect(mainnetGate).toContain('env: withoutTestArtifactCleanupDoneEnv()');
-    expect(cleanupHelper).toContain("import { sanitizeChildProcessEnv } from '../api/server/child-process-env';");
+    expect(cleanupHelper).toContain("import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';");
     expect(cleanupHelper).toContain('const next = sanitizeChildProcessEnv(env);');
     expect(unitTestsRunner).toContain('cleanupTestArtifactsBeforeRun({');
     expect(unitTestsRunner).toContain("reason: 'unit-tests'");
@@ -2127,9 +2127,9 @@ describe('production startup wiring', () => {
     expect(e2eFastRunner).toContain("scope: 'e2e'");
     expect(e2eFastRunner).toContain('TEST_ARTIFACT_CLEANUP_DONE_ENV');
     expect(e2eFastRunner).toContain('env: sanitizeChildProcessEnv({');
-    expect(e2eCoreRunner).toContain("import { sanitizeChildProcessEnv } from '../api/server/child-process-env';");
+    expect(e2eCoreRunner).toContain("import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';");
     expect(e2eCoreRunner).toContain('env: sanitizeChildProcessEnv(process.env)');
-    expect(runner).toContain("import { sanitizeChildProcessEnv } from '../api/server/child-process-env';");
+    expect(runner).toContain("import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';");
     expect(isolatedRuntime).toContain('env: sanitizeChildProcessEnv(process.env)');
     expect(runner).toContain(
       "XLN_AUTO_PROVISION_EXTERNAL_FAUCET: process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] ?? '1'",
@@ -2139,13 +2139,13 @@ describe('production startup wiring', () => {
     expect(allTestsFast).toContain('e2eEnv,');
     expect(systemRunner).toContain('cleanupTestArtifactsBeforeRun,');
     expect(systemRunner).toContain('TEST_ARTIFACT_CLEANUP_DONE_ENV,');
-    expect(systemRunner).toContain("from './test-artifact-cleanup';");
-    expect(systemRunner).toContain("import { sanitizeChildProcessEnv } from '../api/server/child-process-env';");
+    expect(systemRunner).toContain("from '../harness/test-artifact-cleanup';");
+    expect(systemRunner).toContain("import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';");
     expect(systemRunner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'system-tests' })");
     expect(systemRunner).toContain("process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1'");
     expect(systemRunner).toContain('env: sanitizeChildProcessEnv(process.env)');
     expect(systemRunner).toContain('env: sanitizeChildProcessEnv({');
-    expect(soakRunner).toContain("import { sanitizeChildProcessEnv } from '../api/server/child-process-env';");
+    expect(soakRunner).toContain("import { sanitizeChildProcessEnv } from '../../api/server/child-process-env';");
     expect(soakRunner).toContain('env: sanitizeChildProcessEnv(process.env)');
     expect(cleanupHelper).toContain('export const DEFAULT_TEST_WORKSPACE_MAX_BYTES = 50 * 1024 * 1024 * 1024;');
     expect(cleanupHelper).toContain('const estimatedWorkspaceBytes = estimateWorkspaceBytes(cwd);');
@@ -2320,7 +2320,7 @@ describe('production startup wiring', () => {
   });
 
   test('isolated E2E failure forensics never opens the live database and records every HTTP failure', () => {
-    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
     const forensicsStart = runner.indexOf('const captureShardFailureForensics = async (');
     const runShardStart = runner.indexOf('const runShard = async (');
     const forensics = runner.slice(forensicsStart, runShardStart);

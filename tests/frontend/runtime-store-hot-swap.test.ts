@@ -949,6 +949,6 @@ test('projection routes never evict or duplicate an active embedded Runtime', ()
   const destroySource = layoutSource.slice(destroyStart, destroyStart + 600);
   expect(destroyStart).toBeGreaterThan(0);
   expect(destroySource).not.toContain('releaseActiveTabLock?.()');
-  const fastGateSource = readFileSync('runtime/scripts/run-e2e-fast.ts', 'utf8');
+  const fastGateSource = readFileSync('runtime/scripts/e2e/runners/run-e2e-fast.ts', 'utf8');
   expect(fastGateSource).toContain("title: 'projection route cannot evict an active embedded Runtime owner'");
 });

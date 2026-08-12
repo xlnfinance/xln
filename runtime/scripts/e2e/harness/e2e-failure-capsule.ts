@@ -175,7 +175,7 @@ export const buildIsolatedE2ERerunCommand = (
   options: IsolatedE2ERerunOptions,
 ): string => [
   'bun',
-  'runtime/scripts/run-e2e-parallel-isolated.ts',
+  'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
   '--shards=1',
   '--workers-per-shard=1',
   '--max-failures=1',

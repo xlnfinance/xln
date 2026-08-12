@@ -21,7 +21,7 @@ import {
   isE2ECodeInputPath,
   LOCAL_TEST_STACK_BASES,
   parsePlaywrightFilesFlag,
-} from '../scripts/run-e2e-parallel-isolated';
+} from '../scripts/e2e/runners/run-e2e-parallel-isolated';
 
 const createE2EBuildCacheFixture = (root: string, codeHash: string) => {
   const artifacts = deriveE2EBuildArtifacts(root);
@@ -56,13 +56,13 @@ describe('isolated E2E runner resources', () => {
   test('--help prints usage without acquiring a lease or starting a stack', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-e2e-help-'));
     try {
-      const script = resolve('runtime/scripts/run-e2e-parallel-isolated.ts');
+      const script = resolve('runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts');
       const result = spawnSync('bun', [script, '--help'], {
         cwd: root,
         encoding: 'utf8',
       });
       expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout).toContain('Usage: bun runtime/scripts/run-e2e-parallel-isolated.ts');
+      expect(result.stdout).toContain('Usage: bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts');
       expect(existsSync(join(root, '.logs'))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -157,7 +157,7 @@ describe('isolated E2E runner resources', () => {
   });
 
   test('runner never reaps processes by command-line substring', () => {
-    const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
+    const runner = readFileSync('runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts', 'utf8');
     expect(runner).not.toContain('reapStaleIsolatedE2EProcesses');
     expect(runner).not.toContain('isIsolatedE2EProcessCommand');
     expect(runner).not.toContain('process.kill(pid');
@@ -168,7 +168,7 @@ describe('isolated E2E runner resources', () => {
   });
 
   test('runner build and browser helpers have no fallback to shared dev resources', () => {
-    const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
+    const runner = readFileSync('runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts', 'utf8');
     const runtimeImport = readFileSync('tests/utils/e2e-runtime-import.ts', 'utf8');
     const viteConfig = readFileSync('frontend/vite.config.ts', 'utf8');
 
@@ -188,7 +188,7 @@ describe('isolated E2E runner resources', () => {
   });
 
   test('artifact retention preserves evidence without skipping the parent run lease', () => {
-    const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
+    const runner = readFileSync('runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts', 'utf8');
 
     expect(runner).toContain("argv: args.preserveArtifacts ? ['--keep-test-artifacts'] : []");
     expect(runner).not.toContain('if (!args.preserveArtifacts) {\n    cleanupTestArtifactsBeforeRun');
@@ -196,7 +196,7 @@ describe('isolated E2E runner resources', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-e2e-preserve-lease-'));
     const artifact = join(root, '.logs/e2e-parallel/prior-run/evidence.txt');
     const repoRoot = resolve(import.meta.dir, '../..');
-    const cleanupModule = join(repoRoot, 'runtime/scripts/test-artifact-cleanup.ts');
+    const cleanupModule = join(repoRoot, 'runtime/scripts/e2e/harness/test-artifact-cleanup.ts');
     const globalSetupModule = join(repoRoot, 'tests/playwright-global-setup.ts');
     mkdirSync(join(root, '.logs/e2e-parallel/prior-run'), { recursive: true });
     writeFileSync(artifact, 'preserve-me', 'utf8');
@@ -245,7 +245,7 @@ describe('isolated E2E runner resources', () => {
   });
 
   test('resumed runs resolve manifest metadata by stable shard id', () => {
-    const report = readFileSync('runtime/scripts/e2e-run-report.ts', 'utf8');
+    const report = readFileSync('runtime/scripts/e2e/harness/e2e-run-report.ts', 'utf8');
 
     expect(report).toContain('const taskByShard = new Map(tasks.map(task => [task.shard, task] as const));');
     expect(report).toContain('const task = taskByShard.get(result.shard);');
@@ -253,7 +253,7 @@ describe('isolated E2E runner resources', () => {
   });
 
   test('passes the provisioned shard jurisdiction registry into Playwright-owned child runtimes', () => {
-    const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
+    const runner = readFileSync('runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts', 'utf8');
     const playwrightEnv = runner.slice(
       runner.indexOf("const playwrightResult = await runE2ECommand('bunx'"),
       runner.indexOf("markPhase('playwright'"),
@@ -269,7 +269,7 @@ describe('isolated E2E runner resources', () => {
     };
     const command = packageJson.scripts['test:e2e:payment:smoke'];
 
-    expect(command).toStartWith('bun runtime/scripts/run-e2e-parallel-isolated.ts ');
+    expect(command).toStartWith('bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts ');
     expect(command).toContain('--shards=1');
     expect(command).toContain('--workers-per-shard=1');
     expect(command).toContain('--pw-project=chromium');
@@ -383,7 +383,7 @@ describe('isolated E2E runner resources', () => {
   test('build cache ignores runner-only drift but invalidates runtime and frontend inputs', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-e2e-build-inputs-'));
     const files = [
-      'runtime/scripts/run-e2e-parallel-isolated.ts',
+      'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
       'runtime/__tests__/runner.test.ts',
       'runtime/runtime.ts',
       'frontend/src/app.ts',
@@ -415,7 +415,7 @@ describe('isolated E2E runner resources', () => {
     try {
       mkdirSync(dirname(resolve(root, file)), { recursive: true });
       writeFileSync(resolve(root, file), 'v1');
-      const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
+      const runner = readFileSync('runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts', 'utf8');
       const probeImplementation = runner.slice(
         runner.indexOf('export const computeE2ESourceDriftProbe'),
         runner.indexOf('const computeRepositorySourceDriftProbe'),

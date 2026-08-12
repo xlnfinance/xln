@@ -2,11 +2,11 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { MAINNET_GATE } from '../scripts/mainnet-gate-constants';
+import { MAINNET_GATE } from '../scripts/release/mainnet-gate-constants';
 import {
   buildMainnetPreflightSteps,
   parseMainnetPreflightArgs,
-} from '../scripts/run-mainnet-preflight-gate';
+} from '../scripts/release/run-mainnet-preflight-gate';
 
 const repoRoot = join(import.meta.dir, '..', '..');
 
@@ -36,7 +36,7 @@ test('mainnet preflight opts into one-hour soak and bounded radapter scale evide
 
   expect(steps.map(step => step.command)).toContain('bun run bench:radapter:hub100k:hot10k');
   expect(steps.map(step => step.command)).toContain(
-    `bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=${MAINNET_GATE.soakMinutes}`,
+    `bun runtime/scripts/release/run-soak-gate.ts --profile=release --minutes=${MAINNET_GATE.soakMinutes}`,
   );
   expect(MAINNET_GATE.soakMinutes).toBe(60);
   expect(MAINNET_GATE.regressionThresholdPct).toBe(20);
@@ -70,17 +70,17 @@ test('mainnet preflight arg parser accepts explicit test artifact retention', ()
 });
 
 test('mainnet and release gates check disk before expensive browser/runtime gates', () => {
-  const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/run-mainnet-preflight-gate.ts'), 'utf8');
-  const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
+  const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/release/run-mainnet-preflight-gate.ts'), 'utf8');
+  const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/release/run-release-gate.ts'), 'utf8');
 
-  expect(mainnetGate).toContain("import { assertMinDiskFree, getMinDiskFreeBytes } from '../infra/storage-monitor';");
+  expect(mainnetGate).toContain("import { assertMinDiskFree, getMinDiskFreeBytes } from '../../infra/storage-monitor';");
   expect(mainnetGate).toContain('minDiskFreeBytes: getMinDiskFreeBytes(),');
   expect(mainnetGate).toContain('console.log(`minDiskFreeBytes=${getMinDiskFreeBytes()}`);');
   expect(mainnetGate.indexOf('cleanupTestArtifactsBeforeRun({')).toBeLessThan(
     mainnetGate.indexOf('assertMinDiskFree();'),
   );
   expect(mainnetGate.indexOf('assertMinDiskFree();')).toBeLessThan(mainnetGate.indexOf('printPlan(steps);'));
-  expect(releaseGate).toContain("import { assertMinDiskFree, getMinDiskFreeBytes } from '../infra/storage-monitor';");
+  expect(releaseGate).toContain("import { assertMinDiskFree, getMinDiskFreeBytes } from '../../infra/storage-monitor';");
   expect(releaseGate).toContain('Disk guard: minFreeBytes=${getMinDiskFreeBytes()}');
   expect(releaseGate).toContain("if (profile !== 'quick') assertMinDiskFree();");
   expect(releaseGate.indexOf('cleanupTestArtifactsBeforeRun({ reason: `release-gate:${profile}` })')).toBeLessThan(

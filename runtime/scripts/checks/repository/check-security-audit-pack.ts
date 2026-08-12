@@ -129,7 +129,7 @@ for (const marker of [
   assertIncludes(todo, marker, todoPath);
 }
 for (const stale of [
-  'bun runtime/scripts/run-mainnet-preflight-gate.ts --include-soak',
+  'bun runtime/scripts/release/run-mainnet-preflight-gate.ts --include-soak',
 ]) {
   assertNotIncludes(status, stale, statusPath);
   assertNotIncludes(todo, stale, todoPath);

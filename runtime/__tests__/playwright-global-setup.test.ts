@@ -87,6 +87,6 @@ describe('playwright global setup cleanup', () => {
     expect(globalSetup).toContain('PLAYWRIGHT_ARTIFACT_CLEANUP_CWD');
     expect(globalSetup).toContain("resolve(__dirname, '..')");
     expect(globalSetup).not.toContain('import.meta.dir');
-    expect(globalSetup).not.toContain("from '../runtime/scripts/test-artifact-cleanup'");
+    expect(globalSetup).not.toContain("from '../runtime/scripts/e2e/harness/test-artifact-cleanup'");
   });
 });

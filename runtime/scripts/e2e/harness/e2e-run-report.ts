@@ -17,8 +17,8 @@ import {
   summarizeQaBrowserIssues,
   summarizeQaFailureClasses,
   summarizeQaRunBrowserHealth,
-} from '../qa/report';
-import { qaRunTestCategory } from '../qa/test-categories';
+} from '../../../qa/report';
+import { qaRunTestCategory } from '../../../qa/test-categories';
 import type {
   QaArtifact,
   QaArtifactKind,
@@ -26,9 +26,9 @@ import type {
   QaRunManifest,
   QaSlowStep,
   QaTestCategory,
-} from '../qa/types';
-import { assertQaCandidateIdentity, buildQaCandidateIdentity } from '../qa/candidate';
-import { compareStableText } from '../protocol/serialization';
+} from '../../../qa/types';
+import { assertQaCandidateIdentity, buildQaCandidateIdentity } from '../../../qa/candidate';
+import { compareStableText } from '../../../protocol/serialization';
 import { tailLog } from './e2e-fatal-log-monitor';
 import { parseJsonLinesStrict, parseJsonStrict } from './e2e-failure-capsule';
 import { deriveE2EShardPaths, summarizePerfSamples } from './e2e-isolated-runtime';
@@ -40,7 +40,7 @@ import type {
   E2EShardRunStatus,
   RunResult,
   RunTask,
-} from './run-e2e-parallel-isolated';
+} from '../runners/run-e2e-parallel-isolated';
 import { LOCAL_TEST_PORT_POOL_VERSION } from './local-test-port-lease';
 
 type JsonRecord = Record<string, unknown>;

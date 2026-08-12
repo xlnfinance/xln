@@ -16,8 +16,8 @@ import {
   acquireLocalTestPortLease,
   buildInheritedLocalTestLeaseEnv,
   stripLocalTestLeaseEnv,
-} from '../../runtime/scripts/local-test-port-lease.ts';
-import { stopProcessGroup } from '../../runtime/scripts/process-group.ts';
+} from '../../runtime/scripts/e2e/harness/local-test-port-lease.ts';
+import { stopProcessGroup } from '../../runtime/scripts/e2e/runners/process-group.ts';
 
 const repoRoot = process.cwd();
 const inheritedProcessEnv = stripLocalTestLeaseEnv(process.env);

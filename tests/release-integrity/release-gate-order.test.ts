@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 describe('release gate ordering', () => {
   test('runs one full E2E only after every cheaper release check', () => {
     const result = Bun.spawnSync({
-      cmd: ['bun', 'runtime/scripts/run-release-gate.ts', '--profile=release', '--plan'],
+      cmd: ['bun', 'runtime/scripts/release/run-release-gate.ts', '--profile=release', '--plan'],
       cwd: process.cwd(),
       stdout: 'pipe',
       stderr: 'pipe',

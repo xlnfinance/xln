@@ -14,8 +14,8 @@ import {
   E2E_FATAL_LOG_TAIL_LINES,
   findFirstRuntimeFatalLogHit,
   tailLog,
-} from './e2e-fatal-log-monitor';
-import { stopProcessGroup } from './process-group';
+} from './e2e/harness/e2e-fatal-log-monitor';
+import { stopProcessGroup } from './e2e/runners/process-group';
 import { getHubMeshBudgetElapsedMs } from './bootstrap-stage-budget';
 import {
   evaluateMmHealthProbeFailure,
@@ -27,7 +27,7 @@ import {
   assertLocalTestPortsFree,
   buildInheritedLocalTestLeaseEnv,
   stripLocalTestLeaseEnv,
-} from './local-test-port-lease';
+} from './e2e/harness/local-test-port-lease';
 import {
   parseAdversaryProfile,
   runAdversaryProfile,

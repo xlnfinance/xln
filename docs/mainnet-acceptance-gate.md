@@ -140,7 +140,7 @@ Required evidence:
 5. `bun run test:e2e:full` output.
 6. `bun run test:watchtower:smoke` output.
 7. 1-hour soak output from
-   `bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=60`.
+   `bun runtime/scripts/release/run-soak-gate.ts --profile=release --minutes=60`.
 8. Production-health output proving one tower and three hubs are healthy.
 9. Browser/F12 console evidence for landing, bootstrap, recovery, payment,
    swap, dispute, and reload flows with zero uncaught errors.

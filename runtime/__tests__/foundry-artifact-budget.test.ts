@@ -9,7 +9,7 @@ import {
   DEFAULT_FOUNDRY_MAX_BYTES,
   FOUNDRY_HOME_ENV,
   FOUNDRY_MAX_BYTES_ENV,
-} from '../scripts/test-artifact-cleanup';
+} from '../scripts/e2e/harness/test-artifact-cleanup';
 
 const roots: string[] = [];
 const repoRoot = resolve(import.meta.dir, '../..');

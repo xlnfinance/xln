@@ -5,7 +5,7 @@ import {
   qaRunTestCategory,
   qaTestCategoryFromTags,
 } from '../qa/test-categories';
-import { parsePlaywrightTestMetadata } from '../scripts/playwright-test-metadata';
+import { parsePlaywrightTestMetadata } from '../scripts/e2e/harness/playwright-test-metadata';
 
 test('classifies exactly one native Playwright QA category tag', () => {
   expect(qaTestCategoryFromTags(['@functional'])).toBe('functional');

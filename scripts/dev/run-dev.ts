@@ -10,7 +10,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 
-import { stopProcessGroup } from '../../runtime/scripts/process-group';
+import { stopProcessGroup } from '../../runtime/scripts/e2e/runners/process-group';
 
 export const DEV_SINGLETON_PORT = 17_999;
 export const DEV_LAUNCHER_SHUTDOWN_TIMEOUT_MS = 90_000;

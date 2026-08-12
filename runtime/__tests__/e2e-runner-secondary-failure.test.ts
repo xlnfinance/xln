@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   runE2EShardFailureDiagnostic,
   signalE2EFatalMonitorChild,
-} from '../scripts/run-e2e-parallel-isolated';
+} from '../scripts/e2e/runners/run-e2e-parallel-isolated';
 
 test('preserves the primary shard failure and surfaces a forensic capture failure', async () => {
   const reported: string[] = [];

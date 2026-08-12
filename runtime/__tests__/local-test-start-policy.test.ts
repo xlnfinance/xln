@@ -7,7 +7,7 @@ import {
   acquireLocalTestPortLease,
   buildInheritedLocalTestLeaseEnv,
   stripLocalTestLeaseEnv,
-} from '../scripts/local-test-port-lease';
+} from '../scripts/e2e/harness/local-test-port-lease';
 
 const repoRoot = resolve(import.meta.dir, '../..');
 const tempRoots: string[] = [];

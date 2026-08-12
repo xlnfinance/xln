@@ -8,7 +8,7 @@ import {
   readE2EChildrenPerf,
   runE2ECommand,
   waitForE2EServerHealthy,
-} from '../scripts/run-e2e-parallel-isolated';
+} from '../scripts/e2e/runners/run-e2e-parallel-isolated';
 
 const servers: Bun.Server<unknown>[] = [];
 

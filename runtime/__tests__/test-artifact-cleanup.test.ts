@@ -13,8 +13,8 @@ import {
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
   TEST_WORKSPACE_MAX_BYTES_ENV,
   withoutTestArtifactCleanupDoneEnv,
-} from '../scripts/test-artifact-cleanup';
-import { parseRunWithTestCleanupArgs } from '../scripts/run-with-test-cleanup';
+} from '../scripts/e2e/harness/test-artifact-cleanup';
+import { parseRunWithTestCleanupArgs } from '../scripts/e2e/runners/run-with-test-cleanup';
 import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 
 const makeTempWorkspace = (): string => mkdtempSync(join(tmpdir(), 'xln-test-artifacts-'));
@@ -337,8 +337,8 @@ describe('test artifact cleanup', () => {
   test('nested runner can refresh e2e artifacts only through its inherited run lease', () => {
     const root = makeTempWorkspace();
     const repoRoot = process.cwd();
-    const wrapperPath = join(repoRoot, 'runtime/scripts/run-with-test-cleanup.ts');
-    const cleanupModulePath = join(repoRoot, 'runtime/scripts/test-artifact-cleanup.ts');
+    const wrapperPath = join(repoRoot, 'runtime/scripts/e2e/runners/run-with-test-cleanup.ts');
+    const cleanupModulePath = join(repoRoot, 'runtime/scripts/e2e/harness/test-artifact-cleanup.ts');
     const nestedProbe = [
       "import { existsSync, mkdirSync, writeFileSync } from 'node:fs';",
       `import { cleanupTestArtifactsBeforeRun } from ${JSON.stringify(cleanupModulePath)};`,
@@ -377,8 +377,8 @@ describe('test artifact cleanup', () => {
   test('sequential nested runners preserve the root lease between sibling gate steps', () => {
     const root = makeTempWorkspace();
     const repoRoot = process.cwd();
-    const wrapperPath = join(repoRoot, 'runtime/scripts/run-with-test-cleanup.ts');
-    const cleanupModulePath = join(repoRoot, 'runtime/scripts/test-artifact-cleanup.ts');
+    const wrapperPath = join(repoRoot, 'runtime/scripts/e2e/runners/run-with-test-cleanup.ts');
+    const cleanupModulePath = join(repoRoot, 'runtime/scripts/e2e/harness/test-artifact-cleanup.ts');
     const probe = [
       "import { spawnSync } from 'node:child_process';",
       "import { existsSync } from 'node:fs';",
@@ -414,8 +414,8 @@ describe('test artifact cleanup', () => {
   test('SIGKILL of the wrapper cannot expose artifacts while its leased child is alive', async () => {
     const root = makeTempWorkspace();
     const repoRoot = process.cwd();
-    const wrapperPath = join(repoRoot, 'runtime/scripts/run-with-test-cleanup.ts');
-    const cleanupPath = join(repoRoot, 'runtime/scripts/test-artifact-cleanup.ts');
+    const wrapperPath = join(repoRoot, 'runtime/scripts/e2e/runners/run-with-test-cleanup.ts');
+    const cleanupPath = join(repoRoot, 'runtime/scripts/e2e/harness/test-artifact-cleanup.ts');
     const readyPath = join(root, 'child-ready.json');
     const activeArtifact = join(root, 'db-tmp/runtime/active.ldb');
     const childProbe = [
@@ -483,7 +483,7 @@ describe('test artifact cleanup', () => {
     for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]] as const) {
       const root = makeTempWorkspace();
       const repoRoot = process.cwd();
-      const wrapperPath = join(repoRoot, 'runtime/scripts/run-with-test-cleanup.ts');
+      const wrapperPath = join(repoRoot, 'runtime/scripts/e2e/runners/run-with-test-cleanup.ts');
       const readyPath = join(root, 'process-group-ready.json');
       const childProbe = [
         "import { spawn } from 'node:child_process';",
@@ -680,7 +680,7 @@ describe('test artifact cleanup', () => {
       'prod:bootstrap:hydrate',
       'prod:bootstrap:soundcheck',
     ]) {
-      expect(rootScripts[scriptName]).toStartWith('bun runtime/scripts/run-with-test-cleanup.ts ');
+      expect(rootScripts[scriptName]).toStartWith('bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts ');
       expect(rootScripts[scriptName]).not.toContain('test-artifact-cleanup.ts');
     }
     expect(rootPackage).toContain('"test:scenarios:parallel:isolated": "bun runtime/scenarios/run.ts"');
@@ -689,9 +689,9 @@ describe('test artifact cleanup', () => {
     expect(scenarioRunner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'scenario', argv: process.argv.slice(2) })");
     expect(scenarioRunner).toContain("[TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1'");
     expect(scenarioRunner).not.toContain('runtime/network/relay/standalone-server.ts');
-    expect(frontendPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e');
-    expect(frontendPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-ui --scope=e2e');
-    expect(contractsPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=contracts');
-    expect(contractsPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=contracts-default');
+    expect(frontendPackage).toContain('../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e');
+    expect(frontendPackage).toContain('../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-ui --scope=e2e');
+    expect(contractsPackage).toContain('../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=contracts');
+    expect(contractsPackage).toContain('../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=contracts-default');
   });
 });

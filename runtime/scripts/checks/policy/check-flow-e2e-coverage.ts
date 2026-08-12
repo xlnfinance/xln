@@ -183,7 +183,7 @@ const requirements: CoverageRequirement[] = [
   },
 ];
 
-const coreGatePath = 'runtime/scripts/run-e2e-core.ts';
+const coreGatePath = 'runtime/scripts/e2e/runners/run-e2e-core.ts';
 const coreGate = readText(coreGatePath);
 const coreTitles = [
   'fresh runtimes can open accounts, faucet, pay, and reload persisted state',

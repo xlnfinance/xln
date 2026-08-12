@@ -17,7 +17,7 @@ import { scheduler } from 'node:timers/promises';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
-} from '../scripts/test-artifact-cleanup';
+} from '../scripts/e2e/harness/test-artifact-cleanup';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 

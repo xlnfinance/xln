@@ -5,8 +5,8 @@ import { spawn } from 'node:child_process';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
-} from './test-artifact-cleanup';
-import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
+} from '../harness/test-artifact-cleanup';
+import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 
 const FAST_E2E_TARGETS = [
   {
@@ -105,7 +105,7 @@ cleanupTestArtifactsBeforeRun({
   argv: passthrough,
 });
 const args = [
-  'runtime/scripts/run-e2e-parallel-isolated.ts',
+  'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
   ...passthrough,
   `--shards=${stackConcurrency}`,
   '--workers-per-shard=1',

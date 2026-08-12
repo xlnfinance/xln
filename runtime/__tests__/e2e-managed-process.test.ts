@@ -6,7 +6,7 @@ import {
   stopProcessDependencyChain,
   type ManagedChildProcess,
   waitForProcessClose,
-} from '../scripts/e2e-managed-process';
+} from '../scripts/e2e/harness/e2e-managed-process';
 
 const waitForOutput = async (child: ManagedChildProcess, marker: string): Promise<void> => {
   await new Promise<void>((resolve, reject) => {

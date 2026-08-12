@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, truncateSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createIncrementalRuntimeFatalLogScanner } from '../scripts/e2e-fatal-log-monitor';
+import { createIncrementalRuntimeFatalLogScanner } from '../scripts/e2e/harness/e2e-fatal-log-monitor';
 
 const withLog = (run: (path: string) => void): void => {
   const dir = mkdtempSync(join(tmpdir(), 'xln-incremental-fatal-log-'));
@@ -132,7 +132,7 @@ test('malformed or unclassified child exits fail closed', () => {
 
 test('isolated E2E runner polls through the incremental scanner', () => {
   const runner = readFileSync(
-    join(process.cwd(), 'runtime/scripts/run-e2e-parallel-isolated.ts'),
+    join(process.cwd(), 'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts'),
     'utf8',
   );
   expect(runner).toContain('const fatalScanner = createIncrementalRuntimeFatalLogScanner(logPath);');

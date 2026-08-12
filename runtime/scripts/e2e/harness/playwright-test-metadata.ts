@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { relative, resolve } from 'node:path';
 
-import type { QaTaggedTest } from '../qa/test-categories';
+import type { QaTaggedTest } from '../../../qa/test-categories';
 
 type JsonRecord = Record<string, unknown>;
 

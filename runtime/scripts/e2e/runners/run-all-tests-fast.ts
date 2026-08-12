@@ -6,8 +6,8 @@
  * Both run concurrently in separate isolated stacks.
  *
  * Usage:
- *   bun runtime/scripts/run-all-tests-fast.ts
- *   bun runtime/scripts/run-all-tests-fast.ts --scenario-workers=3 --e2e-shards=2
+ *   bun runtime/scripts/e2e/runners/run-all-tests-fast.ts
+ *   bun runtime/scripts/e2e/runners/run-all-tests-fast.ts --scenario-workers=3 --e2e-shards=2
  */
 
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
@@ -16,8 +16,8 @@ import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
   withoutTestArtifactCleanupDoneEnv,
-} from './test-artifact-cleanup';
-import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
+} from '../harness/test-artifact-cleanup';
+import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 
 type CliArgs = {
   scenarioWorkers: number;
@@ -115,7 +115,7 @@ async function main(): Promise<void> {
     childEnv,
   );
 
-  const e2eArgs = ['runtime/scripts/run-e2e-parallel-isolated.ts', `--shards=${args.e2eShards}`];
+  const e2eArgs = ['runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts', `--shards=${args.e2eShards}`];
   if (args.skipBuild) e2eArgs.push('--skip-build');
   if (args.quick || args.smoke) {
     // One critical rebalance assertion path for sub-minute feedback.

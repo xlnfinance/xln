@@ -494,7 +494,7 @@ test('runtime controller exposes only typed debug projection queries', () => {
 });
 
 test('fast e2e target titles stay in sync with specs', () => {
-  const fastRunnerSource = readFileSync('runtime/scripts/run-e2e-fast.ts', 'utf8');
+  const fastRunnerSource = readFileSync('runtime/scripts/e2e/runners/run-e2e-fast.ts', 'utf8');
   const targetMatches = [...fastRunnerSource.matchAll(/file: '([^']+)'[\s\S]*?title: '([^']+)'/g)];
   expect(targetMatches.length).toBeGreaterThan(0);
 

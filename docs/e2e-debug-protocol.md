@@ -31,7 +31,7 @@ If classification is not explicit, stop and classify first.
 Run the narrowest honest command:
 
 ```bash
-bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=8 --workers-per-shard=1 --base-port=20000 --video=off --trace=off --screenshot=only-on-failure --max-failures=1
+bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --shards=8 --workers-per-shard=1 --base-port=20000 --video=off --trace=off --screenshot=only-on-failure --max-failures=1
 ```
 
 Then read only:

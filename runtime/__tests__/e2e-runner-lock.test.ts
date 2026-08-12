@@ -7,7 +7,7 @@ import {
   isE2ERunnerProcessAlive,
   parseE2ERunnerLock,
   readE2ERunnerLock,
-} from '../scripts/e2e-runner-lock';
+} from '../scripts/e2e/harness/e2e-runner-lock';
 
 test('runner lock parser rejects corrupt and incomplete ownership evidence', () => {
   expect(() => parseE2ERunnerLock('{', '/lock')).toThrow('RUNNER_LOCK_INVALID');

@@ -6,10 +6,10 @@
  * - This runner gives each worker its own port/anvil process (chainId=31337).
  *
  * Usage:
- *   bun runtime/scripts/run-system-tests-parallel.ts
- *   bun runtime/scripts/run-system-tests-parallel.ts --workers=6
- *   bun runtime/scripts/run-system-tests-parallel.ts --scenarios=processbatch,rebalance
- *   bun runtime/scripts/run-system-tests-parallel.ts --base-port=18545 --stream
+ *   bun runtime/scripts/e2e/runners/run-system-tests-parallel.ts
+ *   bun runtime/scripts/e2e/runners/run-system-tests-parallel.ts --workers=6
+ *   bun runtime/scripts/e2e/runners/run-system-tests-parallel.ts --scenarios=processbatch,rebalance
+ *   bun runtime/scripts/e2e/runners/run-system-tests-parallel.ts --base-port=18545 --stream
  */
 
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
@@ -20,8 +20,8 @@ import { scheduler } from 'node:timers/promises';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
-} from './test-artifact-cleanup';
-import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
+} from '../harness/test-artifact-cleanup';
+import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 

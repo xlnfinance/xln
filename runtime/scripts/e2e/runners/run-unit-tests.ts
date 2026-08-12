@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
-} from './test-artifact-cleanup';
-import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
+} from '../harness/test-artifact-cleanup';
+import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
 
 const DEFAULT_UNIT_TEST_TARGETS = [
   'runtime/__tests__',

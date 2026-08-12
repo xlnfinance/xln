@@ -649,7 +649,7 @@ const QA_TEST_CATALOG = [
     id: 'e2e-isolated',
     group: 'E2E',
     label: 'Isolated Browser E2E',
-    command: 'bun runtime/scripts/run-e2e-parallel-isolated.ts --all --video=on',
+    command: 'bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --video=on',
     description: 'Full browser mesh with isolated chains, API, wallet, videos, traces.',
   },
   {
@@ -815,7 +815,7 @@ const sanitizeE2ETarget = (target: string): string => {
 };
 
 const buildRestartCommand = (target: string, title: string): string[] => [
-  'runtime/scripts/run-e2e-parallel-isolated.ts',
+  'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts',
   '--pw-project=chromium',
   `--pw-files=${JSON.stringify([`${target}::${title}`])}`,
   '--shards=1',

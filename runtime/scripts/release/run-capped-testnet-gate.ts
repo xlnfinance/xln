@@ -9,8 +9,8 @@ import { MAINNET_GATE, MAINNET_GATE_LABELS } from './mainnet-gate-constants';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
-} from './test-artifact-cleanup';
-import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
+} from '../e2e/harness/test-artifact-cleanup';
+import { sanitizeChildProcessEnv } from '../../api/server/child-process-env';
 
 const DEFAULT_POLICY_PATH = 'ops/capped-testnet-policy.json';
 
@@ -179,7 +179,7 @@ export const buildCappedTestnetGateSteps = (
   if (!options.skipSoak) {
     steps.push({
       name: 'one-hour release soak',
-      command: `bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=${soakMinutes}`,
+      command: `bun runtime/scripts/release/run-soak-gate.ts --profile=release --minutes=${soakMinutes}`,
       timeoutMs: (soakMinutes + 30) * 60_000,
     });
   }

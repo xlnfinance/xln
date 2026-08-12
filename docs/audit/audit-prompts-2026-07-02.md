@@ -540,9 +540,9 @@ Answer:
 Evidence:
 
 - `bun run check`: `package.json:132-141`.
-- Fast suite: `runtime/scripts/run-all-tests-fast.ts`.
-- Fast e2e target list: `runtime/scripts/run-e2e-fast.ts`.
-- Release gate: `runtime/scripts/run-release-gate.ts`.
+- Fast suite: `runtime/scripts/e2e/runners/run-all-tests-fast.ts`.
+- Fast e2e target list: `runtime/scripts/e2e/runners/run-e2e-fast.ts`.
+- Release gate: `runtime/scripts/release/run-release-gate.ts`.
 - Determinism guard: `runtime/scripts/checks/architecture/check-determinism.ts`.
 - Manual delta guard: `runtime/scripts/checks/policy/check-no-manual-delta-math.ts`.
 

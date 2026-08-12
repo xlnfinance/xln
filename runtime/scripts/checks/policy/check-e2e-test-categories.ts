@@ -7,7 +7,7 @@ import {
   formatQaTestCategoryViolations,
   inspectQaTestCategory,
 } from '../../../qa/test-categories';
-import { listPlaywrightTestMetadata } from '../../playwright-test-metadata';
+import { listPlaywrightTestMetadata } from '../../e2e/harness/playwright-test-metadata';
 
 const listSpecs = (root: string): string[] => {
   const specs: string[] = [];

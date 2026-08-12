@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { materializeSvelteKitShardOutDir } from '../scripts/run-e2e-parallel-isolated';
+import { materializeSvelteKitShardOutDir } from '../scripts/e2e/runners/run-e2e-parallel-isolated';
 
 const makeTempDir = (): string => mkdtempSync(join(tmpdir(), 'xln-e2e-sveltekit-'));
 

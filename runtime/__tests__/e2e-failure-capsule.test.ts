@@ -7,14 +7,14 @@ import {
   buildIsolatedE2ERerunCommand,
   parseJsonLinesStrict,
   readPlaywrightFailureReport,
-} from '../scripts/e2e-failure-capsule';
+} from '../scripts/e2e/harness/e2e-failure-capsule';
 import {
   captureE2EHttpForensics,
   createE2ECodeDriftGuard,
   deriveE2EShardPaths,
   readShardBrowserIssues,
   readShardLastRunStatus,
-} from '../scripts/run-e2e-parallel-isolated';
+} from '../scripts/e2e/runners/run-e2e-parallel-isolated';
 
 const temporaryRoots: string[] = [];
 const temporaryRoot = (prefix: string): string => {
@@ -79,7 +79,7 @@ describe('isolated E2E first-failure diagnostics', () => {
       prewaitHealth: 'reset',
       strictBrowserHealth: true,
     })).toBe(
-      "bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --max-failures=1 '--pw-files=tests/e2e-wallet.spec.ts::user'\"'\"'s wallet pays $5' --pw-project=chromium --video=retain-on-failure --trace=on-first-retry --screenshot=only-on-failure --prewait-health=reset --strict-browser-health --preserve-artifacts",
+      "bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --max-failures=1 '--pw-files=tests/e2e-wallet.spec.ts::user'\"'\"'s wallet pays $5' --pw-project=chromium --video=retain-on-failure --trace=on-first-retry --screenshot=only-on-failure --prewait-health=reset --strict-browser-health --preserve-artifacts",
     );
   });
 

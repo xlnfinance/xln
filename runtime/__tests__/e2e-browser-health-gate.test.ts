@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { summarizeQaBrowserIssues, type QaBrowserIssue } from '../qa/report';
-import { assertE2EBrowserHealthGate } from '../scripts/run-e2e-parallel-isolated';
+import { assertE2EBrowserHealthGate } from '../scripts/e2e/runners/run-e2e-parallel-isolated';
 
 const browserHealth = (overrides: Partial<{
   issueCount: number;

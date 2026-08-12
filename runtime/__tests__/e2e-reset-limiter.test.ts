@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createAsyncLimiter } from '../scripts/run-e2e-parallel-isolated';
+import { createAsyncLimiter } from '../scripts/e2e/runners/run-e2e-parallel-isolated';
 
 describe('isolated e2e reset concurrency', () => {
   test('a healthy shard never waits for unrelated resets to drain', async () => {
