@@ -16,6 +16,11 @@ import type { AccountReplica, AccountTx } from '../../../types/account';
 import { createEmptyEnv } from '../../../runtime';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { makeAccount as makeCanonicalAccount } from '../../helpers/cross-j';
+import {
+  accountInputFailureMessage,
+  isProposedAccountFrame,
+  proposeAccountFrameMessage,
+} from '../../../account/consensus/result';
 
 const accountContext = () =>
   createAccountConsensusContext(createEmptyEnv('account-local-tx-admission'));
@@ -70,7 +75,7 @@ describe('account mempool multiplicity', () => {
       owningEntityIsHub: false,
     });
 
-    expect(result).toMatchObject({ success: true, admittedAccountTxCount: 1 });
+    expect(result).toMatchObject({ ok: true, admittedAccountTxCount: 1 });
     expect(account.mempool).toEqual([PAYMENT]);
   });
 
@@ -188,8 +193,10 @@ describe('account mempool multiplicity', () => {
 
     const result = await proposeAccountFrame(accountContext(), account, 1);
 
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('ACCOUNT_PROPOSAL_STATUS_FROZEN:dispute_preparing');
+    expect(isProposedAccountFrame(result)).toBe(false);
+    expect(result.ok).toBe(false);
+    expect('accountInput' in result).toBe(false);
+    expect(proposeAccountFrameMessage(result)).toBe('ACCOUNT_PROPOSAL_STATUS_FROZEN:dispute_preparing');
     expect(account).toEqual(before);
   });
 
@@ -240,8 +247,8 @@ describe('account mempool multiplicity', () => {
     };
 
     const result = await applyAccountInput(accountContext(), account, input);
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('ACCOUNT_INPUT_PARTY_MISMATCH');
+    expect(result.ok).toBe(false);
+    expect(accountInputFailureMessage(result)).toContain('ACCOUNT_INPUT_PARTY_MISMATCH');
     expect(account.mempool).toEqual([]);
   });
 

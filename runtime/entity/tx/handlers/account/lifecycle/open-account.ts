@@ -148,7 +148,7 @@ const seedOpenAccountPolicies = async (
     account,
     createLocalAccountInput(account.state, state.entityId, initialAccountTxs),
   );
-  if (admission.admittedAccountTxCount !== initialAccountTxs.length) {
+  if (!admission.ok || admission.admittedAccountTxCount !== initialAccountTxs.length) {
     throw new Error(`OPEN_ACCOUNT_INITIAL_TXS_NOT_ADMITTED:${counterpartyId}`);
   }
   if (tx.data.rebalancePolicy) assertRequestedRebalancePolicy(tokenId, tx.data.rebalancePolicy);

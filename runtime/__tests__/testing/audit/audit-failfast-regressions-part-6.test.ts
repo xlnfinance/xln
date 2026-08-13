@@ -247,6 +247,9 @@ import type { EntityTx } from '../../../types/entity-tx';
 import { installCanonicalRegisteredBoardAuthority } from '../../helpers/registration-evidence';
 
 import { ethers } from 'ethers';
+import {
+  isProposedAccountFrame,
+} from '../../../account/consensus/result';
 
 const makeSingleSignerConfig = (): EntityState['config'] => ({
   mode: 'proposer-based',
@@ -1451,7 +1454,7 @@ describe('audit fail-fast regressions', () => {
     delta.rightHold = BigInt(route.sourcePull!.amount);
     account.state.deltas.set(route.sourcePull!.tokenId, delta);
     const proposed = await proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp);
-    expect(proposed.success).toBe(true);
+    expect(isProposedAccountFrame(proposed)).toBe(true);
     const pendingHeight = proposed.accountInput!.proposal.frame.height;
     hubState.accounts.set(userId, account);
 

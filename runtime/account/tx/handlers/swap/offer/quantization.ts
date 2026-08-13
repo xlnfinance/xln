@@ -19,18 +19,19 @@ export type PreparedSwapOfferAmounts = {
 const resolveSameJurisdictionPrice = (
   tx: SwapOfferTx,
   stepTicks: bigint,
-): { priceTicks?: bigint; error?: string } => {
+): { ok: true; priceTicks: bigint } | { ok: false; message: string } => {
   const { giveTokenId, wantTokenId, giveAmount, wantAmount, priceTicks: input } = tx.data;
   const prepared = prepareSwapOrder(giveTokenId, wantTokenId, giveAmount, wantAmount);
   if (!prepared) {
-    return { error: 'Invalid price ratio or order too small after canonical quantization' };
+    return { ok: false, message: 'Invalid price ratio or order too small after canonical quantization' };
   }
-  if (input === undefined) return { priceTicks: prepared.priceTicks };
-  if (input <= 0n) return { error: `Invalid explicit priceTicks: ${input}` };
+  if (input === undefined) return { ok: true, priceTicks: prepared.priceTicks };
+  if (input <= 0n) return { ok: false, message: `Invalid explicit priceTicks: ${input}` };
   const alignedInput = (input / stepTicks) * stepTicks;
   if (alignedInput !== input) {
     return {
-      error: `Explicit priceTicks must align to step ${stepTicks.toString()} (got ${input.toString()})`,
+      ok: false,
+      message: `Explicit priceTicks must align to step ${stepTicks.toString()} (got ${input.toString()})`,
     };
   }
   const tickDrift = input > prepared.priceTicks
@@ -38,14 +39,15 @@ const resolveSameJurisdictionPrice = (
     : prepared.priceTicks - input;
   if (tickDrift > stepTicks) {
     return {
-      error: `Price mismatch after deterministic quantization: expected ` +
+      ok: false,
+      message: `Price mismatch after deterministic quantization: expected ` +
         `${prepared.priceTicks.toString()}, got ${input.toString()} ` +
         `(drift ${tickDrift} > step ${stepTicks})`,
     };
   }
   // A one-step integer round-trip drift is expected; the explicit tick remains
   // the signed user intent and therefore owns the final book level.
-  return { priceTicks: input };
+  return { ok: true, priceTicks: input };
 };
 
 const validatePreparedAmounts = (
@@ -79,9 +81,13 @@ const validatePreparedAmounts = (
   return null;
 };
 
+export type SwapOfferAmountResult =
+  | { ok: true; prepared: PreparedSwapOfferAmounts }
+  | { ok: false; message: string };
+
 export const prepareSwapOfferAmounts = (
   tx: SwapOfferTx,
-): { prepared?: PreparedSwapOfferAmounts; error?: string } => {
+): SwapOfferAmountResult => {
   const { giveTokenId, wantTokenId, giveAmount, wantAmount, crossJurisdiction } = tx.data;
   const crossMarket = crossJurisdiction
     ? deriveCanonicalCrossJurisdictionMarket(crossJurisdiction)
@@ -95,11 +101,12 @@ export const prepareSwapOfferAmounts = (
   const quoteTokenId = side === 1 ? wantTokenId : giveTokenId;
   const lotScale = getSwapLotScale(baseTokenId);
   if (rawBaseAmount < lotScale) {
-    return { error: `Order too small for lot size (${lotScale.toString()} base units)` };
+    return { ok: false, message: `Order too small for lot size (${lotScale.toString()} base units)` };
   }
   if (crossMarket && rawBaseAmount % lotScale !== 0n) {
     return {
-      error: `Cross-j base amount must align to lot size (${lotScale.toString()} base units)`,
+      ok: false,
+      message: `Cross-j base amount must align to lot size (${lotScale.toString()} base units)`,
     };
   }
   const pairPolicy = crossMarket
@@ -109,8 +116,10 @@ export const prepareSwapOfferAmounts = (
   const sameJurisdictionPrice = crossMarket
     ? null
     : resolveSameJurisdictionPrice(tx, stepTicks);
-  if (sameJurisdictionPrice?.error) return { error: sameJurisdictionPrice.error };
-  const priceTicks = crossMarket
+  if (sameJurisdictionPrice && !sameJurisdictionPrice.ok) {
+    return { ok: false, message: sameJurisdictionPrice.message };
+  }
+  const priceTicks = sameJurisdictionPrice === null
     ? computePriceTicksForBaseQuote(
         side,
         baseTokenId,
@@ -118,9 +127,9 @@ export const prepareSwapOfferAmounts = (
         rawBaseAmount,
         rawQuoteAmount,
       )
-    : sameJurisdictionPrice!.priceTicks!;
+    : sameJurisdictionPrice.priceTicks;
   if (crossMarket && priceTicks <= 0n) {
-    return { error: 'Invalid cross-j price ratio or order too small after canonical quantization' };
+    return { ok: false, message: 'Invalid cross-j price ratio or order too small after canonical quantization' };
   }
   // Cross-j pull receipts already commit the exact amounts. Only same-j intent
   // is quantized; the cross-j price is an index, never authority to resize it.
@@ -137,8 +146,9 @@ export const prepareSwapOfferAmounts = (
     effectiveGiveAmount,
     effectiveWantAmount,
   );
-  if (amountError) return { error: amountError };
+  if (amountError) return { ok: false, message: amountError };
   return {
+    ok: true,
     prepared: { priceTicks, effectiveGiveAmount, effectiveWantAmount },
   };
 };

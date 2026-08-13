@@ -4,7 +4,7 @@ import type { HankoString } from '../../types/hanko';
 import type { AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
 import type { AccountDisputeFinalityResult } from '../settlement/j-finality';
 import type { AccountTxRejection } from '../tx/apply-types';
-import type { AccountPeerRejection } from '../input/peer-rejection';
+import type { AccountPeerRejectionCode } from '../input/peer-rejection';
 
 export type AccountConsensusHashToSign = {
   hash: string;
@@ -28,11 +28,32 @@ export type AccountSwapOfferCreated = {
   timeInForce?: 0 | 1 | 2 | undefined;
 };
 
-type AccountConsensusFrameResult = {
-  success: boolean;
+export type AccountCommittedFrame = {
+  frame: AccountFrame;
+  committedViaNewFrame: boolean;
+};
+
+export type AccountFailedHtlcLock = {
+  hashlock: string;
+  reason: string;
+};
+
+export type AccountInputDisputeRequired = Readonly<{
+  reason: string;
+  evidenceSecrets: Array<{ hashlock: string; secret: string }>;
+  signedFrame?: {
+    frame: AccountFrame;
+    frameHanko: HankoString;
+  };
+}>;
+
+export type HandleAccountInputRejection =
+  | Readonly<{ kind: 'peer'; code: AccountPeerRejectionCode; message: string }>
+  | Readonly<{ kind: 'tx'; tx: AccountTxRejection; message: string }>
+  | Readonly<{ kind: 'validation'; message: string }>;
+
+type AccountConsensusOkEffects = {
   events: string[];
-  error?: string;
-  txRejection?: AccountTxRejection;
   revealedSecrets?: Array<{ secret: string; hashlock: string }>;
   swapOffersCreated?: AccountSwapOfferCreated[];
   swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
@@ -41,30 +62,60 @@ type AccountConsensusFrameResult = {
   candidateEffects?: AccountOutput[];
 };
 
-export type ProposeAccountFrameResult = AccountConsensusFrameResult & {
-  accountChanged?: true;
-  accountInput?: AccountPeerInput;
-  failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
-};
-
-export type HandleAccountInputResult = AccountConsensusFrameResult & {
-  /** Number of local AccountTxs admitted to the next-frame mempool. */
+export type HandleAccountInputApplied = Readonly<AccountConsensusOkEffects & {
+  ok: true;
   admittedAccountTxCount?: number;
-  /** Result of an authenticated unilateral J-finality transition. */
   externalFinality?: AccountDisputeFinalityResult;
-  /** Validator-computed CAS delta for Account frames committed by this input. */
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   response?: AccountPeerInput;
   approvalNeeded?: AccountTx;
   timedOutHashlocks?: string[];
-  committedFrames?: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>;
-  disputeRequired?: {
-    reason: string;
-    evidenceSecrets: Array<{ hashlock: string; secret: string }>;
-    signedFrame?: {
-      frame: AccountFrame;
-      frameHanko: HankoString;
-    };
-  };
-  rejected?: AccountPeerRejection;
-};
+  committedFrames?: AccountCommittedFrame[];
+}>;
+
+export type HandleAccountInputRejected = Readonly<{
+  ok: false;
+  disposition: 'rejected';
+  rejection: HandleAccountInputRejection;
+  events: string[];
+}>;
+
+export type HandleAccountInputDispute = Readonly<{
+  ok: false;
+  disposition: 'dispute';
+  disputeRequired: AccountInputDisputeRequired;
+  events: string[];
+}>;
+
+export type HandleAccountInputResult =
+  | HandleAccountInputApplied
+  | HandleAccountInputRejected
+  | HandleAccountInputDispute;
+
+export type ProposeAccountFrameProposed = Readonly<AccountConsensusOkEffects & {
+  ok: true;
+  outcome: 'proposed';
+  accountChanged: true;
+  accountInput: AccountPeerInput;
+  failedHtlcLocks?: AccountFailedHtlcLock[];
+}>;
+
+export type ProposeAccountFrameIdle = Readonly<{
+  ok: true;
+  outcome: 'idle';
+  message: string;
+  events: string[];
+  accountChanged?: true;
+  failedHtlcLocks?: AccountFailedHtlcLock[];
+}>;
+
+export type ProposeAccountFrameRejected = Readonly<{
+  ok: false;
+  rejection: Readonly<{ message: string }>;
+  events: string[];
+}>;
+
+export type ProposeAccountFrameResult =
+  | ProposeAccountFrameProposed
+  | ProposeAccountFrameIdle
+  | ProposeAccountFrameRejected;

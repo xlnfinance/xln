@@ -7,12 +7,13 @@ import {
   accountInputReferenceHeight,
 } from '../flush';
 import type { HandleAccountInputResult } from '../types';
+import { accountInputApplied, accountInputValidationRejected } from '../result';
 
 const replayLog = createStructuredLogger('account.replay');
 
 export type AccountInputHeightNormalization =
-  | { normalizedInputHeight: number | undefined; error?: undefined }
-  | { normalizedInputHeight?: undefined; error: string };
+  | { ok: true; normalizedInputHeight: number | undefined }
+  | { ok: false; message: string };
 
 export const normalizeAccountInputHeight = (
   input: AccountInput,
@@ -25,9 +26,9 @@ export const normalizeAccountInputHeight = (
     normalizedInputHeight !== undefined
     && !Number.isFinite(normalizedInputHeight)
   ) {
-    return { error: `Invalid account input height: ${String(referenceHeight)}` };
+    return { ok: false, message: `Invalid account input height: ${String(referenceHeight)}` };
   }
-  return { normalizedInputHeight };
+  return { ok: true, normalizedInputHeight };
 };
 
 export const getDisputeHankoShapeError = (
@@ -126,7 +127,7 @@ export const buildDuplicateCommittedFrameAck = (
     && pendingResponse.toEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
   ) {
     events.push(`↩️ Re-sent cached response for duplicate committed frame ${receivedHeight}`);
-    return { success: true, response: structuredClone(pendingResponse), events };
+    return accountInputApplied({ response: structuredClone(pendingResponse), events });
   }
   const cachedAck = account.lastOutboundFrameAck;
   if (
@@ -135,13 +136,12 @@ export const buildDuplicateCommittedFrameAck = (
     && cachedAck.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
   ) {
     events.push(`↩️ Re-sent ACK for duplicate committed frame ${receivedHeight}`);
-    return { success: true, response: structuredClone(cachedAck.response), events };
+    return accountInputApplied({ response: structuredClone(cachedAck.response), events });
   }
-  return {
-    success: false,
-    error: `DUPLICATE_ACK_CACHE_MISSING: height=${receivedHeight}`,
+  return accountInputValidationRejected(
+    `DUPLICATE_ACK_CACHE_MISSING: height=${receivedHeight}`,
     events,
-  };
+  );
 };
 
 export const handleReplayOrObsoleteAccountInput = (
@@ -174,7 +174,7 @@ export const handleReplayOrObsoleteAccountInput = (
       newFrameHeight: replay.newFrameHeight ?? null,
       from: shortId(input.fromEntityId),
     });
-    return { success: true, events };
+    return accountInputApplied({ events });
   }
   if (!ack && replay.frameIsStale) {
     replayLog.debug('input.stale_frame_ignored', {
@@ -183,7 +183,7 @@ export const handleReplayOrObsoleteAccountInput = (
       newFrameHeight: replay.newFrameHeight ?? null,
       from: shortId(input.fromEntityId),
     });
-    return { success: true, events };
+    return accountInputApplied({ events });
   }
   if (
     ack
@@ -201,7 +201,7 @@ export const handleReplayOrObsoleteAccountInput = (
       status: account.status,
       from: shortId(input.fromEntityId),
     });
-    return { success: true, events };
+    return accountInputApplied({ events });
   }
   return undefined;
 };

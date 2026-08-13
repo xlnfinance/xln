@@ -2,6 +2,7 @@ import { appendAccountMempoolTxs } from './mempool';
 import { txFingerprint } from '../../protocol/state/tx-multiset';
 import type { AccountLocalInput, AccountReplica, AccountTx } from '../../types/account';
 import type { HandleAccountInputResult } from '../consensus/types';
+import { accountInputApplied } from '../consensus/result';
 
 type AccountMempoolQueue = Pick<AccountReplica, 'mempool' | 'pendingFrame'>;
 
@@ -52,9 +53,8 @@ export const applyLocalAccountInput = (
 ): HandleAccountInputResult => {
   const admitted = planLocalAccountTxAdmission(account, input.txs);
   appendAccountMempoolTxs(account, admitted, 'account:localInput');
-  return {
-    success: true,
+  return accountInputApplied({
     events: [],
     admittedAccountTxCount: admitted.length,
-  };
+  });
 };

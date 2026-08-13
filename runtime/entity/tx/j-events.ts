@@ -76,6 +76,8 @@ import {
 } from '../../jurisdiction/machine/board-registry';
 import { validateJEventRangeEnvelope } from '../../jurisdiction/machine/j-event-range-validation';
 import { applyAccountInput } from '../../account/consensus';
+import { accountInputFailureMessage } from '../../account/consensus/result';
+import type { HandleAccountInputApplied } from '../../account/consensus/types';
 import {
   createAccountDisputeFinalityInput,
   createAccountDisputeStartedInput,
@@ -113,9 +115,7 @@ const incrementAccountNonce = (nonce: number, code: string): number => {
 const invalidateSettlementIntentAfterDisputeFinality = (
   state: EntityState,
   counterpartyId: string,
-  accountResult: NonNullable<
-    Awaited<ReturnType<typeof applyAccountInput>>['externalFinality']
-  >,
+  accountResult: NonNullable<HandleAccountInputApplied['externalFinality']>,
 ): void => {
   const removedDeferred = state.deferredAccountProposals?.delete(counterpartyId) ?? false;
   if (
@@ -802,10 +802,10 @@ const applyStartedDisputeAccountInput = async (
     account,
     accountInput,
   );
-  if (!result.success) {
+  if (!result.ok) {
     throw new Error(
       `ACCOUNT_DISPUTE_STARTED_INPUT_FAILED:${counterpartyId}:` +
-      `${result.error ?? 'RESULT_MISSING'}`,
+      `${accountInputFailureMessage(result)}`,
     );
   }
 };
@@ -1428,10 +1428,10 @@ const applyResolvedDisputeFinality = async (
     account,
     accountInput,
   );
-  if (!accountInputResult.success || !accountInputResult.externalFinality) {
+  if (!accountInputResult.ok || !accountInputResult.externalFinality) {
     throw new Error(
       `ACCOUNT_DISPUTE_FINALITY_INPUT_FAILED:${counterpartyId}:` +
-      `${accountInputResult.error ?? 'RESULT_MISSING'}`,
+      `${accountInputFailureMessage(accountInputResult)}`,
     );
   }
   const accountFinality = accountInputResult.externalFinality;

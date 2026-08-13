@@ -16,6 +16,11 @@ import { signedEntityCommandTx } from '../../../entity/command/command-codec';
 import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import { LIMITS, TOKENS } from '../../../config/constants';
 import { createDefaultDelta } from '../../../account/state/delta';
+import {
+  accountInputFailureMessage,
+  accountInputPeerRejectionCode,
+} from '../../../account/consensus/result';
+import { fintsPositiveAccountConsensusResult } from '../../types/fints/account-consensus-result.positive';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
@@ -109,6 +114,22 @@ const installPendingFrame = (account: AccountReplica): void => {
 };
 
 describe('typed Account peer rejection', () => {
+  test('closed unions structurally separate rejection from success payloads', () => {
+    const covered = fintsPositiveAccountConsensusResult();
+    expect(covered.applied.ok).toBe(true);
+    expect('rejection' in covered.applied).toBe(false);
+    expect(covered.rejected.ok).toBe(false);
+    expect('response' in covered.rejected).toBe(false);
+    expect('committedFrames' in covered.rejected).toBe(false);
+    expect(covered.dispute.ok).toBe(false);
+    expect('rejection' in covered.dispute).toBe(false);
+    expect(covered.idle.ok).toBe(true);
+    expect('accountInput' in covered.idle).toBe(false);
+    expect(covered.proposeRejected.ok).toBe(false);
+    expect('accountInput' in covered.proposeRejected).toBe(false);
+    expect(covered.covered.every(Boolean)).toBe(true);
+  });
+
   test('bad domain, party, watch seed, and height are typed no-mutation rejections', async () => {
     const env = createEmptyEnv('account-peer-boundary-rejection');
     env.quietRuntimeLogs = true;
@@ -148,10 +169,16 @@ describe('typed Account peer rejection', () => {
       const input = ackInput(account);
       candidate.mutate(input);
       const before = safeStringify(account);
+      const rootBefore = computeAccountStateRoot(account.state);
       const result = await applyAccountInput(createAccountConsensusContext(env), account, input);
-      expect(result.rejected?.code).toBe(candidate.code);
-      expect(result.success).toBe(false);
+      expect(accountInputPeerRejectionCode(result)).toBe(candidate.code);
+      expect(result.ok).toBe(false);
+      expect(result.disposition).toBe('rejected');
+      expect('response' in result).toBe(false);
+      expect('committedFrames' in result).toBe(false);
+      expect(Object.keys(result).sort()).toEqual(['disposition', 'events', 'ok', 'rejection']);
       expect(safeStringify(account)).toBe(before);
+      expect(computeAccountStateRoot(account.state)).toBe(rootBefore);
     }
   });
 
@@ -168,7 +195,9 @@ describe('typed Account peer rejection', () => {
     const before = safeStringify(account);
 
     const rejected = await applyAccountInput(invalidContext, account, input);
-    expect(rejected.rejected?.code).toBe('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID');
+    expect(accountInputPeerRejectionCode(rejected)).toBe('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID');
+    expect(rejected.ok).toBe(false);
+    expect('response' in rejected).toBe(false);
     expect(safeStringify(account)).toBe(before);
 
     const observedAuthorities: unknown[] = [];
@@ -180,7 +209,9 @@ describe('typed Account peer rejection', () => {
       },
     );
     const accepted = await applyAccountInput(honestContext, account, input);
-    expect(accepted.success).toBe(true);
+    expect(accepted.ok).toBe(true);
+    expect('rejection' in accepted).toBe(false);
+    expect('disposition' in accepted).toBe(false);
     expect(observedAuthorities).toEqual([{ allowPreviousBoard: false }]);
     expect(account.currentHeight).toBe(1);
     expect(account.pendingFrame).toBeUndefined();
@@ -216,7 +247,9 @@ describe('typed Account peer rejection', () => {
 
     const rejected = await applyAccountInput(context, account, input);
 
-    expect(rejected.rejected?.code).toBe('ACCOUNT_PEER_FRAME_HANKO_INVALID');
+    expect(accountInputPeerRejectionCode(rejected)).toBe('ACCOUNT_PEER_FRAME_HANKO_INVALID');
+    expect(rejected.ok).toBe(false);
+    expect('committedFrames' in rejected).toBe(false);
     expect(safeStringify(account)).toBe(before);
   });
 
@@ -256,7 +289,7 @@ describe('typed Account peer rejection', () => {
 
     const result = await applyAccountInput(context, account, input);
 
-    expect(result.rejected?.code).toBe('ACCOUNT_PEER_FRAME_HANKO_INVALID');
+    expect(accountInputPeerRejectionCode(result)).toBe('ACCOUNT_PEER_FRAME_HANKO_INVALID');
     expect(observedAuthorities).toEqual([{ allowPreviousBoard: false }]);
   });
 
@@ -309,12 +342,16 @@ describe('typed Account peer rejection', () => {
         async (_hanko, _hash, expectedEntityId) => ({ valid: true, entityId: expectedEntityId }),
       );
       const before = safeStringify(candidate.account);
+      const rootBefore = computeAccountStateRoot(candidate.account.state);
 
       const result = await applyAccountInput(context, candidate.account, input);
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('ACCOUNT_DELTA_');
+      expect(result.ok).toBe(false);
+      expect('response' in result).toBe(false);
+      expect('committedFrames' in result).toBe(false);
+      expect(accountInputFailureMessage(result)).toContain('ACCOUNT_DELTA_');
       expect(safeStringify(candidate.account)).toBe(before);
+      expect(computeAccountStateRoot(candidate.account.state)).toBe(rootBefore);
     }
   });
 

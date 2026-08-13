@@ -4,6 +4,12 @@ import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { AccountConsensusContext } from '../../../../account/consensus/context';
 import { applyAccountInput } from '../../../../account/consensus';
 import {
+  accountInputFailureMessage,
+  accountInputPeerRejectionCode,
+  assertNeverAccountResult,
+  isAccountInputDispute,
+} from '../../../../account/consensus/result';
+import {
   accountInputAck,
   accountInputProposal,
   accountInputReferenceHeight,
@@ -58,7 +64,7 @@ const logCrossFillAckResult = (
   const touchesCrossFillAck =
     pendingBeforeTxs.includes('cross_swap_fill_ack') ||
     inputFrameTxs.includes('cross_swap_fill_ack') ||
-    (result.committedFrames ?? []).some(({ frame }) =>
+    (result.ok ? result.committedFrames ?? [] : []).some(({ frame }) =>
       frame.accountTxs.some(tx => tx.type === 'cross_swap_fill_ack'));
   if (!touchesCrossFillAck) return;
   accountHandlerLog.debug('cross_fill_ack.input_result', {
@@ -70,11 +76,11 @@ const logCrossFillAckResult = (
     pendingBeforeTxs,
     pendingAfter: account.pendingFrame?.accountTxs.map(tx => tx.type) ?? [],
     currentHeight: account.currentHeight,
-    committedTxs: (result.committedFrames ?? []).map(({ frame }) =>
+    committedTxs: (result.ok ? result.committedFrames ?? [] : []).map(({ frame }) =>
       frame.accountTxs.map(tx => tx.type)),
     events: result.events,
-    success: result.success,
-    error: result.success ? undefined : result.error,
+    ok: result.ok,
+    error: result.ok ? undefined : accountInputFailureMessage(result),
   });
 };
 
@@ -91,61 +97,79 @@ const rejectEmptyAccountInput = (context: AccountInputPhaseContext): never => {
   throw new Error(error);
 };
 
+const finishAppliedAccountInput = async (
+  context: AccountInputPhaseContext,
+  result: Extract<Awaited<ReturnType<typeof applyAccountInput>>, { ok: true }>,
+): Promise<AccountConsensusOutcome> => {
+  const { env, state, input, account, counterpartyId, createdAccount, effects, options } = context;
+  const response = await applySuccessfulAccountInput({
+    env, state, input, account, counterpartyId, createdAccount, result, effects,
+    ...(options ? { options } : {}),
+    checkpointProfile: context.checkpointProfile,
+  });
+  context.checkpointProfile('postConsensus');
+  return {
+    ...(response ? { requiredAccountResponse: response } : {}),
+    ...(result.accountJClaimNodeChanges
+      ? { accountJClaimNodeChanges: result.accountJClaimNodeChanges }
+      : {}),
+  };
+};
+
+const finishDisputedAccountInput = async (
+  context: AccountInputPhaseContext,
+  result: Extract<Awaited<ReturnType<typeof applyAccountInput>>, { disposition: 'dispute' }>,
+): Promise<AccountConsensusOutcome> => {
+  const { env, state, input, account, counterpartyId, createdAccount, effects } = context;
+  const unsafe = await handleUnsafeAccountFrame({
+    env, state, input, account, counterpartyId, createdAccount,
+    dispute: result.disputeRequired,
+    effects,
+  });
+  return {
+    terminalResult: buildAccountHandlerResult(
+      unsafe.newState,
+      { ...effects, outputs: unsafe.outputs },
+      undefined,
+      undefined,
+    ),
+  };
+};
+
+const finishRejectedAccountInput = (
+  context: AccountInputPhaseContext,
+  result: Extract<Awaited<ReturnType<typeof applyAccountInput>>, { disposition: 'rejected' }>,
+): AccountConsensusOutcome => {
+  const { state, input, effects } = context;
+  if (result.rejection.kind === 'peer') {
+    accountHandlerLog.warn('frame.rejected', {
+      from: shortId(input.fromEntityId),
+      code: accountInputPeerRejectionCode(result),
+      error: result.rejection.message,
+    });
+    addMessage(state, `⚠️ Rejected account frame: ${result.rejection.message}`);
+    return { terminalResult: buildAccountHandlerResult(state, effects, undefined, undefined) };
+  }
+  if (result.rejection.kind === 'tx' || result.rejection.kind === 'validation') {
+    const failureMessage = accountInputFailureMessage(result);
+    accountHandlerLog.error('frame.consensus_failed', {
+      from: shortId(input.fromEntityId),
+      error: failureMessage,
+    });
+    addMessage(state, `❌ ${failureMessage}`);
+    throw new Error(`FRAME_CONSENSUS_FAILED: ${failureMessage || 'unknown'}`);
+  }
+  return assertNeverAccountResult(result.rejection);
+};
+
 const finishAccountConsensusInput = async (
   context: AccountInputPhaseContext,
   result: Awaited<ReturnType<typeof applyAccountInput>>,
 ): Promise<AccountConsensusOutcome> => {
-  const { env, state, input, account, counterpartyId, createdAccount, effects, options } = context;
-  if (result.success) {
-    const response = await applySuccessfulAccountInput({
-      env, state, input, account, counterpartyId, createdAccount, result, effects,
-      ...(options ? { options } : {}),
-      checkpointProfile: context.checkpointProfile,
-    });
-    context.checkpointProfile('postConsensus');
-    return {
-      ...(response ? { requiredAccountResponse: response } : {}),
-      ...(result.accountJClaimNodeChanges
-        ? { accountJClaimNodeChanges: result.accountJClaimNodeChanges }
-        : {}),
-    };
-  }
-  if (result.disputeRequired) {
-    const unsafe = await handleUnsafeAccountFrame({
-      env, state, input, account, counterpartyId, createdAccount,
-      dispute: result.disputeRequired,
-      effects,
-    });
-    return {
-      terminalResult: buildAccountHandlerResult(
-        unsafe.newState,
-        { ...effects, outputs: unsafe.outputs },
-        undefined,
-        result.accountJClaimNodeChanges,
-      ),
-    };
-  }
-  if (result.rejected) {
-    accountHandlerLog.warn('frame.rejected', {
-      from: shortId(input.fromEntityId),
-      error: result.rejected.reason,
-    });
-    addMessage(state, `⚠️ Rejected account frame: ${result.rejected.reason}`);
-    return {
-      terminalResult: buildAccountHandlerResult(
-        state,
-        effects,
-        undefined,
-        result.accountJClaimNodeChanges,
-      ),
-    };
-  }
-  accountHandlerLog.error('frame.consensus_failed', {
-    from: shortId(input.fromEntityId),
-    error: result.error,
-  });
-  addMessage(state, `❌ ${result.error}`);
-  throw new Error(`FRAME_CONSENSUS_FAILED: ${result.error || 'unknown'}`);
+  if (result.ok) return finishAppliedAccountInput(context, result);
+  if (isAccountInputDispute(result)) return finishDisputedAccountInput(context, result);
+  if (result.disposition === 'rejected') return finishRejectedAccountInput(context, result);
+  return assertNeverAccountResult(result);
 };
 
 export const applyAccountConsensusInput = async (context: AccountInputPhaseContext): Promise<AccountConsensusOutcome> => {

@@ -29,7 +29,7 @@ import {
   type ValidatedCounterpartyDisputeSeal,
 } from '../dispute/seal';
 import type { HandleAccountInputResult } from '../types';
-import { rejectAccountPeerInput } from '../../input/peer-rejection';
+import { accountInputApplied, rejectAccountPeerInput } from '../result';
 
 const ackLog = createStructuredLogger('account.ack');
 
@@ -354,12 +354,11 @@ export const handlePendingFrameAck = async (
   if (!proposal) {
     return {
       kind: 'return',
-      result: {
-        success: true,
+      result: accountInputApplied({
         events,
         timedOutHashlocks,
         ...(committedFrames.length > 0 && { committedFrames }),
-      },
+      }),
     };
   }
   return { kind: 'fallthrough' };

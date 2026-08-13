@@ -104,7 +104,7 @@ const applyReturnedAccountTxs = async (
       account,
       createLocalAccountInput(account.state, state.entityId, [tx]),
     );
-    if (admission.admittedAccountTxCount === 0) continue;
+    if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
     if (tx.type === 'cross_swap_fill_ack') {
       appendCrossJurisdictionTargetProgressAfterAdmission(state, tx, context.allOutputs);
     }

@@ -35,6 +35,9 @@ import {
 } from '../../../storage/wal/snapshot';
 import { applyJEventRange } from '../../helpers/j-history';
 import { addr, makeAccount, makeState } from '../../helpers/cross-j';
+import {
+  accountInputFailureMessage,
+} from '../../../account/consensus/result';
 
 const digest = (byte: string): string => `0x${byte.repeat(32)}`;
 
@@ -100,7 +103,7 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
     },
   }, account, input);
 
-  expect(applied.success, applied.error).toBe(true);
+  expect(applied.ok, accountInputFailureMessage(applied)).toBe(true);
   expect(observedAuthorities[0]).toEqual({ allowPreviousBoard: false });
   expect(account.counterpartyFrameHanko).toBe(frameHanko);
   expect(account.currentFrame).toEqual(beforeFrame);
@@ -117,12 +120,12 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   expect(restored.counterpartyFrameHanko).toBe(frameHanko);
 
   const beforeExactRetry = structuredClone(account);
-  expect((await applyAccountInput(createAccountConsensusContext(env), account, structuredClone(input))).success).toBe(true);
+  expect((await applyAccountInput(createAccountConsensusContext(env), account, structuredClone(input))).ok).toBe(true);
   expect(account).toEqual(beforeExactRetry);
 
   const sameBlockSuccessor = structuredClone(input);
   sameBlockSuccessor.reseal.boardActivationLogIndex = 3;
-  expect((await applyAccountInput(createAccountConsensusContext(env), account, sameBlockSuccessor)).success).toBe(true);
+  expect((await applyAccountInput(createAccountConsensusContext(env), account, sameBlockSuccessor)).ok).toBe(true);
   expect(account.counterpartyBoardReseal).toEqual({
     activationJHeight: 19,
     activationLogIndex: 3,
@@ -135,8 +138,8 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   tampered.reseal.boardActivationJHeight = 20;
   tampered.reseal.frameHash = digest('a2');
   const rejected = await applyAccountInput(createAccountConsensusContext(env), account, tampered);
-  expect(rejected.success).toBe(false);
-  expect(rejected.error).toContain('ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISMATCH');
+  expect(rejected.ok).toBe(false);
+  expect(accountInputFailureMessage(rejected)).toContain('ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISMATCH');
   expect(account).toEqual(beforeRejected);
 });
 
@@ -176,7 +179,7 @@ test('ACK commit retains the counterparty Hanko needed for later board reseal', 
     ack: { height: 1, frameHash, frameHanko: peerHanko },
   });
 
-  expect(result.success, result.error).toBe(true);
+  expect(result.ok, accountInputFailureMessage(result)).toBe(true);
   expect(account.currentHeight).toBe(1);
   expect(account.counterpartyFrameHanko).toBe(peerHanko);
 });
@@ -228,7 +231,7 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
 
   expect(registerReliableIngress(receiver, senderRuntimeId, output).kind).toBe('enqueue');
   const appliedReseal = await applyAccountInput(createAccountConsensusContext(receiver), account, reseal);
-  expect(appliedReseal.success, appliedReseal.error).toBe(true);
+  expect(appliedReseal.ok, accountInputFailureMessage(appliedReseal)).toBe(true);
   const replica = {
     entityId: receiverEntityId,
     signerId: receiverSigner,
@@ -267,7 +270,7 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
   expect(buildPendingNetworkOutputs([sameBlockOutput, output]).map(candidate =>
     getReliableOutputIdentity(candidate)?.logIndex)).toEqual([5, 6]);
   expect(registerReliableIngress(receiver, senderRuntimeId, sameBlockOutput).kind).toBe('enqueue');
-  expect((await applyAccountInput(createAccountConsensusContext(receiver), account, sameBlockReseal)).success).toBe(true);
+  expect((await applyAccountInput(createAccountConsensusContext(receiver), account, sameBlockReseal)).ok).toBe(true);
   const sameBlockCommits = commitReliableIngress(receiver, [sameBlockOutput]);
   expect(sameBlockCommits).toHaveLength(1);
   expect(sameBlockCommits[0]?.receipt?.body.identity).toMatchObject({

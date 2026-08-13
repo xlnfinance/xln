@@ -2,10 +2,7 @@ import type { AccountInput, AccountPeerInput, AccountReplica } from '../../../ty
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { accountInputBoardReseal } from '../flush';
 import type { HandleAccountInputResult } from '../types';
-import {
-  rejectAccountPeerEvidenceError,
-  rejectAccountPeerInput,
-} from '../../input/peer-rejection';
+import { accountInputApplied, rejectAccountPeerEvidenceError, rejectAccountPeerInput } from '../result';
 import {
   type ValidatedCounterpartyDisputeSeal,
   validateCounterpartyDisputeSeal,
@@ -190,7 +187,7 @@ export const handleBoardReseal = async (
   if (!reseal) return undefined;
   const events: string[] = [];
   const metadata = validateBoardResealMetadata(account, input, reseal, events);
-  if ('success' in metadata) return metadata;
+  if ('ok' in metadata) return metadata;
   const witnesses = await verifyBoardResealWitnesses(
     account,
     input,
@@ -199,7 +196,7 @@ export const handleBoardReseal = async (
     securityContext,
     events,
   );
-  if ('success' in witnesses) return witnesses;
+  if ('ok' in witnesses) return witnesses;
 
   // Witness rotation never changes bilateral money or the on-chain nonce.
   // Install authority metadata only after every supplied hash is verified.
@@ -214,5 +211,5 @@ export const handleBoardReseal = async (
     frameHash: metadata.currentFrameHash,
   };
   events.push(`🔐 Re-sealed Account frame ${metadata.frameHeight} under the current board`);
-  return { success: true, events };
+  return accountInputApplied({ events });
 };

@@ -5,12 +5,10 @@ import { isLeftEntity } from '../../utils';
 import { discardStagedAccountCommitmentCache } from '../../commitment/map-commitment';
 import { accountInputAck, accountInputProposal } from '../flush';
 import { prependUniqueMempoolTxs } from '../helpers';
-import type { HandleAccountInputResult } from '../types';
-import { rejectAccountPeerInput } from '../../input/peer-rejection';
+import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
+import { accountInputApplied, rejectAccountPeerInput } from '../result';
 
 const collisionLog = createStructuredLogger('account.collision');
-
-type AccountCommittedFrame = NonNullable<HandleAccountInputResult['committedFrames']>[number];
 
 export type AccountAckTarget = {
   pendingHeight: number;
@@ -84,11 +82,10 @@ export const handleUnmatchedAck = (
         `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} ` +
           `(current=${String(account.currentHeight ?? 0)}, pending=${pending})`,
       );
-      return {
-        success: true,
+      return accountInputApplied({
         events,
         ...(committedFrames.length > 0 && { committedFrames }),
-      };
+      });
     }
     return rejectAccountPeerInput(
       'ACCOUNT_PEER_ACK_UNMATCHED',
@@ -111,11 +108,10 @@ export const handleUnmatchedAck = (
       `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} ` +
         `(current=${String(account.currentHeight ?? 0)}, pending=${String(pending)})`,
     );
-    return {
-      success: true,
+    return accountInputApplied({
       events,
       ...(committedFrames.length > 0 && { committedFrames }),
-    };
+    });
   }
   const earlyNextAck =
     normalizedInputHeight !== undefined &&
@@ -128,11 +124,10 @@ export const handleUnmatchedAck = (
       `Ignored early ACK for frame ${String(normalizedInputHeight)} ` +
         `(current=${String(account.currentHeight ?? 0)}, pending=none)`,
     );
-    return {
-      success: true,
+    return accountInputApplied({
       events,
       ...(committedFrames.length > 0 && { committedFrames }),
-    };
+    });
   }
   return rejectAccountPeerInput(
     'ACCOUNT_PEER_ACK_UNMATCHED',
@@ -183,12 +178,11 @@ export const resolveSameHeightIncomingFrame = (
       throw new Error(`ACCOUNT_COLLISION_PENDING_RESPONSE_MISSING:${receivedFrame.height}`);
     }
     // Resend exact signed bytes. Rebuilding could change nonce, body or Hanko.
-    return {
-      success: true,
+    return accountInputApplied({
       response: structuredClone(response),
       events,
       ...(committedFrames.length > 0 && { committedFrames }),
-    };
+    });
   }
   if (account.lastRollbackFrameHash === receivedFrame.stateHash) {
     collisionLog.debug('rollback.duplicate', {

@@ -10,6 +10,7 @@ import { getPerfMs } from '../../../infra/time';
 import { HEAVY_LOGS } from '../../../infra/debug-flags';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import type { ProposeAccountFrameResult } from '../types';
+import { proposeAccountFrameIdle } from '../result';
 import { cumulativeMarksToPhases } from '../../../infra/performance/profile';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../../infra/performance/runtime-flags';
 import { validateProposalTransactions } from './transactions';
@@ -41,23 +42,22 @@ const finishEmptyProposal = (
   if (accountChanged) {
     account.mempool = removeCommittedTxsFromMempool(account.mempool, validation.txsToRemove);
   }
-  const result: ProposeAccountFrameResult = {
-    success: false,
-    error: validation.deferredTxCount > 0
+  const result: ProposeAccountFrameResult = proposeAccountFrameIdle({
+    message: validation.deferredTxCount > 0
       ? `Transactions deferred until signed settlement finalizes: ${validation.deferredTxCount}`
       : 'All transactions failed validation',
     events: validation.events,
     ...(validation.failedHtlcLocks.length > 0
       ? { failedHtlcLocks: validation.failedHtlcLocks }
       : {}),
-    ...(accountChanged ? { accountChanged: true } : {}),
-  };
+    ...(accountChanged ? { accountChanged: true as const } : {}),
+  });
   return result;
 };
 
 const logProposalProfile = (
-  proof: Awaited<ReturnType<typeof prepareProposalProof>> & { success: true },
-  frame: Awaited<ReturnType<typeof buildProposalFrame>> & { success: true },
+  proof: Awaited<ReturnType<typeof prepareProposalProof>> & { ok: true },
+  frame: Awaited<ReturnType<typeof buildProposalFrame>> & { ok: true },
   counterparty: string,
   optimisticBatch: boolean,
   profileCheckpoints: Record<string, number>,
@@ -116,7 +116,7 @@ export async function proposeAccountFrame(
     entityJHeight,
     selectedMempoolTxs,
   );
-  if (!admission.success) return admission.result;
+  if (!admission.ok) return admission.result;
   const {
     counterparty,
     events,
@@ -156,7 +156,7 @@ export async function proposeAccountFrame(
     events,
     checkpointProfile,
   );
-  if (!frameBuild.success) return frameBuild.result;
+  if (!frameBuild.ok) return frameBuild.result;
   const { frame: newFrame } = frameBuild;
 
   const proof = await prepareProposalProof(
@@ -166,7 +166,7 @@ export async function proposeAccountFrame(
     events,
     checkpointProfile,
   );
-  if (!proof.success) return proof.result;
+  if (!proof.ok) return proof.result;
   const finalResult = finalizeAccountProposal(
     account,
     clonedMachine,

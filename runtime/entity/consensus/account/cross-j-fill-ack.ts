@@ -96,7 +96,7 @@ const admitGeneratedAccountTx = async (
     account,
     createLocalAccountInput(account.state, state.entityId, [tx]),
   );
-  return result.admittedAccountTxCount === 1;
+  return result.ok && result.admittedAccountTxCount === 1;
 };
 
 type PendingCrossJurisdictionFillAck =

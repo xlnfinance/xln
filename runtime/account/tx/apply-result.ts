@@ -117,6 +117,9 @@ export const withAccountTxCandidateEffects = (
 export const accountTxRejectionMessage = (rejection: AccountTxRejection): string =>
   rejection.message;
 
+export const accountTxFailureMessage = (result: ApplyAccountTxResult): string =>
+  result.ok ? 'ACCOUNT_TX_UNEXPECTED_OK' : result.rejection.message;
+
 export const closedForDisputeRejection = (
   status: string,
   txType: AccountTx['type'],

@@ -250,6 +250,11 @@ import type { EntityTx } from '../../../types/entity-tx';
 import { installCanonicalRegisteredBoardAuthority } from '../../helpers/registration-evidence';
 
 import { ethers } from 'ethers';
+import {
+  accountInputFailureMessage,
+  isProposedAccountFrame,
+  proposeAccountFrameMessage,
+} from '../../../account/consensus/result';
 
 const makeSingleSignerConfig = (): EntityState['config'] => ({
   mode: 'proposer-based',
@@ -767,14 +772,14 @@ describe('audit fail-fast regressions', () => {
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
     const proposal = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 9);
-    if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
+    if (!isProposedAccountFrame(proposal)) throw new Error(proposeAccountFrameMessage(proposal) || 'proposal failed');
     const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposal);
     const result = await applyAccountInput(createAccountConsensusContext(env), receiver, sealedProposal, {
       entityTimestamp: env.state.timestamp + 10 * 60_000,
       finalizedJHeight: 10,
     });
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(receiver.currentHeight).toBe(1);
   });
 
@@ -817,14 +822,14 @@ describe('audit fail-fast regressions', () => {
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
     const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 7);
-    if (!proposed.success || !proposed.accountInput) throw new Error(proposed.error || 'proposal failed');
+    if (!isProposedAccountFrame(proposed)) throw new Error(proposeAccountFrameMessage(proposed) || 'proposal failed');
     const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposed);
     const result = await applyAccountInput(createAccountConsensusContext(env), receiver, sealedProposal, {
       entityTimestamp: env.state.timestamp,
       finalizedJHeight: 7,
     });
 
-    expect(result.success).toBe(true);
+    expect(result.ok).toBe(true);
     expect(result.response?.kind).toBe('ack');
     const newClaimNodes = new Map(
       result.accountJClaimNodeChanges?.newNodes.map(({ hash, node }) => [hash, node]) ?? [],
@@ -835,7 +840,7 @@ describe('audit fail-fast regressions', () => {
       env.state.timestamp,
       7,
     );
-    expect(flushed.success).toBe(true);
+    expect(isProposedAccountFrame(flushed)).toBe(true);
     expect(flushed.accountInput?.kind).toBe('frame_ack');
     if (flushed.accountInput?.kind !== 'frame_ack') throw new Error('expected Entity-flushed frame_ack');
     expect(receiver.pendingAccountInput?.kind).toBe('frame_ack');
@@ -968,7 +973,7 @@ describe('audit fail-fast regressions', () => {
       });
     }
     const proposal = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 1);
-    if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
+    if (!isProposedAccountFrame(proposal)) throw new Error(proposeAccountFrameMessage(proposal) || 'proposal failed');
     const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposal);
 
     const receiverState = provisionEntityState(env, makeEntityState(right.entityId));
@@ -1081,7 +1086,7 @@ describe('audit fail-fast regressions', () => {
       entityTimestamp: env.state.timestamp,
       finalizedJHeight: 0,
     });
-    expect(accountResult.success).toBe(false);
+    expect(accountResult.ok).toBe(false);
     expect(accountResult.disputeRequired?.reason).toContain('Credit limit cannot be negative');
     expect(accountResult.disputeRequired?.signedFrame).toEqual({ frame: invalidFrame, frameHanko });
 
@@ -1176,8 +1181,8 @@ describe('audit fail-fast regressions', () => {
       entityTimestamp: env.state.timestamp,
       finalizedJHeight: 0,
     });
-    expect(accountResult.success).toBe(false);
-    expect(accountResult.rejected?.reason).toContain('SETTLEMENT_SEAL_NONCE_MISMATCH:8:9');
+    expect(accountResult.ok).toBe(false);
+    expect(accountInputFailureMessage(accountResult)).toContain('SETTLEMENT_SEAL_NONCE_MISMATCH:8:9');
     expect(accountResult.disputeRequired).toBeUndefined();
     expect(safeStringify(receiver)).toBe(before);
 
@@ -1487,7 +1492,7 @@ describe('audit fail-fast regressions', () => {
 
     const result = await proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp);
 
-    expect(result.success).toBe(true);
+    expect(isProposedAccountFrame(result)).toBe(true);
     expect(result.accountInput?.proposal.frame?.accountTxs.map(tx => tx.type)).toEqual(['set_credit_limit']);
     const frameDelta = result.accountInput?.proposal.frame?.deltas.find(delta => delta.tokenId === 1);
     expect(frameDelta?.offdelta).toBe(0n);
@@ -1567,7 +1572,7 @@ describe('audit fail-fast regressions', () => {
     receiver.proofHeader = { fromEntity: right, toEntity: left, nextProofNonce: 0 };
 
     const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp);
-    if (!proposed.success) throw new Error(proposed.error || 'proposal failed');
+    if (!isProposedAccountFrame(proposed)) throw new Error(proposeAccountFrameMessage(proposed) || 'proposal failed');
     const frame = proposed.accountInput!.proposal.frame;
     expect(frame.timestamp).toBe(env.state.timestamp);
 
@@ -1597,8 +1602,8 @@ describe('audit fail-fast regressions', () => {
     const proposer = await proposeAccountFrame(createAccountConsensusContext(proposerEnv), cloneAccountReplica(base), committedEntityTimestamp);
     const validator = await proposeAccountFrame(createAccountConsensusContext(validatorEnv), cloneAccountReplica(base), committedEntityTimestamp);
 
-    expect(proposer.success).toBe(true);
-    expect(validator.success).toBe(true);
+    expect(isProposedAccountFrame(proposer)).toBe(true);
+    expect(isProposedAccountFrame(validator)).toBe(true);
     expect(proposer.accountInput?.proposal.frame.timestamp).toBe(committedEntityTimestamp);
     expect(validator.accountInput?.proposal.frame).toEqual(proposer.accountInput?.proposal.frame);
   });
@@ -1972,7 +1977,7 @@ describe('audit fail-fast regressions', () => {
 
     const result = await proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp);
 
-    expect(result.success).toBe(true);
+    expect(isProposedAccountFrame(result)).toBe(true);
     expect(result.accountInput?.proposal.frame.accountTxs).toEqual([validTx]);
     expect(account.pendingFrame?.accountTxs).toEqual([validTx]);
     expect(account.mempool).toEqual([]);
@@ -2012,8 +2017,8 @@ describe('audit fail-fast regressions', () => {
       const proposerAccount = fundedAccount(identity.entityId, hub.entityId);
       proposerAccount.mempool.push(tx);
       const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposerAccount, env.state.timestamp, 0);
-      if (!proposed.success || !proposed.accountInput) {
-        throw new Error(`SAME_CHAIN_PROPOSAL_FAILED:${proposed.error || 'missing input'}`);
+      if (!isProposedAccountFrame(proposed)) {
+        throw new Error(`SAME_CHAIN_PROPOSAL_FAILED:${proposeAccountFrameMessage(proposed) || 'missing input'}`);
       }
       return {
         input: await sealAccountDraftAsEntity(env, identity.entityId, identity.signerId, proposed),

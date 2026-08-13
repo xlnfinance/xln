@@ -28,11 +28,6 @@ export type AccountPeerRejectionCode =
   | 'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID'
   | 'ACCOUNT_PEER_ACK_UNMATCHED';
 
-export type AccountPeerRejection = Readonly<{
-  code: AccountPeerRejectionCode;
-  reason: string;
-}>;
-
 /** Typed exception used only while a nested peer-evidence validator unwinds. */
 export class AccountPeerEvidenceError extends Error {
   readonly code: AccountPeerRejectionCode;
@@ -43,16 +38,3 @@ export class AccountPeerEvidenceError extends Error {
     this.code = code;
   }
 }
-
-export const rejectAccountPeerInput = (code: AccountPeerRejectionCode, reason: string, events: string[]) => ({
-  success: false as const,
-  error: reason,
-  events,
-  rejected: { code, reason } satisfies AccountPeerRejection,
-});
-
-/** Convert only the typed peer failure; every local exception remains fatal. */
-export const rejectAccountPeerEvidenceError = (error: unknown, events: string[]) => {
-  if (!(error instanceof AccountPeerEvidenceError)) throw error;
-  return rejectAccountPeerInput(error.code, error.message, events);
-};

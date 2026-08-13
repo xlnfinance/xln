@@ -24,12 +24,12 @@ export const handleSwapOffer = async (
   // frame validation and commit execute this same transition.
   account.state.swapOffers ??= new Map();
   const admissionResult = validateSwapOfferAdmission(account.state, tx, byLeft);
-  if (!admissionResult.admission) {
-    return accountTxValidationRejected(admissionResult.error!, []);
+  if (!admissionResult.ok) {
+    return accountTxValidationRejected(admissionResult.message, []);
   }
   const amountResult = prepareSwapOfferAmounts(tx);
-  if (!amountResult.prepared) {
-    return accountTxValidationRejected(amountResult.error!, []);
+  if (!amountResult.ok) {
+    return accountTxValidationRejected(amountResult.message, []);
   }
   const bindingError = validateCrossJurisdictionSourceBinding(account.state, tx);
   if (bindingError) {

@@ -1,7 +1,7 @@
 import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
 import type { EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
-import type { HandleAccountInputResult } from '../../../../account/consensus/types';
+import type { AccountInputDisputeRequired } from '../../../../account/consensus/types';
 import { addMessage } from '../../../frame-events';
 import { armHtlcSecretAckTimeout, persistVerifiedHtlcSecret } from '../../j-events-htlc/route-lifecycle';
 import { handlePrepareDispute } from '../dispute';
@@ -14,7 +14,7 @@ type UnsafeFrameContext = {
   account: AccountReplica;
   counterpartyId: string;
   createdAccount: boolean;
-  dispute: NonNullable<HandleAccountInputResult['disputeRequired']>;
+  dispute: AccountInputDisputeRequired;
   effects: CommittedAccountEffects;
 };
 

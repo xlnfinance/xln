@@ -23,6 +23,9 @@ import { handleSwapResolve } from '../../../account/tx/handlers/swap/resolve/ind
 import { deriveCanonicalSwapFillRatio } from '../../../orderbook/swap-execution';
 import type { AccountReplica, AccountTx, SwapOffer } from '../../../types/account';
 import { createDefaultDelta } from '../../../account/state/delta';
+import {
+  accountTxFailureMessage,
+} from '../../../account/tx/apply-result';
 
 // Helpers
 const LOT_SCALE = SWAP_LOT_SCALE; // 10^12
@@ -403,7 +406,7 @@ describe('price improvement', () => {
       };
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
-      expect(resolveResult.success).toBe(true);
+      expect(resolveResult.ok).toBe(true);
       expect(accountMachine.state.swapOffers.has(offerId)).toBe(false);
       // Settlement uses exact quote spent, not limit quote plus bonus leg.
       expect(accountMachine.state.deltas.get(1)?.offdelta).toBe(-executionQuoteAmount);
@@ -483,7 +486,7 @@ describe('price improvement', () => {
       };
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
-      expect(resolveResult.success).toBe(true);
+      expect(resolveResult.ok).toBe(true);
       expect(accountMachine.state.swapOffers.has(offerId)).toBe(false);
       // Settlement uses exact execution proceeds, not proceeds plus bonus leg.
       expect(accountMachine.state.deltas.get(2)?.offdelta).toBe(-executionBaseAmount);
@@ -520,8 +523,8 @@ describe('price improvement', () => {
       };
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
-      expect(resolveResult.success).toBe(false);
-      expect(resolveResult.error).toContain('Counterparty insufficient capacity');
+      expect(resolveResult.ok).toBe(false);
+      expect(accountTxFailureMessage(resolveResult)).toContain('Counterparty insufficient capacity');
     });
 
     test('handleSwapResolve rejects non-zero fill without exact execution amounts', async () => {
@@ -548,8 +551,8 @@ describe('price improvement', () => {
       };
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
-      expect(resolveResult.success).toBe(false);
-      expect(resolveResult.error).toContain('required for non-zero fills');
+      expect(resolveResult.ok).toBe(false);
+      expect(accountTxFailureMessage(resolveResult)).toContain('required for non-zero fills');
     });
 
     test('handleSwapResolve treats zero fill as cancel even when cancelRemainder is false', async () => {
@@ -577,7 +580,7 @@ describe('price improvement', () => {
       };
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
-      expect(resolveResult.success).toBe(true);
+      expect(resolveResult.ok).toBe(true);
       expect(accountMachine.state.swapOffers.has(offerId)).toBe(false);
       expect(accountMachine.swapClosedOrders?.get(offerId)?.resolves.at(-1)?.cancelRemainder).toBe(true);
       expect(accountMachine.swapClosedOrders?.get(offerId)?.resolves.at(-1)?.comment).toBe('manual-cancel');
@@ -610,8 +613,8 @@ describe('price improvement', () => {
       };
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
-      expect(resolveResult.success).toBe(false);
-      expect(resolveResult.error).toContain('Hold underflow');
+      expect(resolveResult.ok).toBe(false);
+      expect(accountTxFailureMessage(resolveResult)).toContain('Hold underflow');
       expect(accountMachine.state.swapOffers.has(offerId)).toBe(true);
     });
   });

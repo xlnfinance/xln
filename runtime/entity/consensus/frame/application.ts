@@ -5,6 +5,7 @@
 
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../../account/consensus/flush';
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
+import { isProposedAccountFrame } from '../../../account/consensus/result';
 import { getAccountJClaimNodeStore } from '../../account/account-j-claim-node-store';
 import {
   assertCanonicalSettlementWorkspace,
@@ -466,7 +467,7 @@ async function materializeDeferredSettlementApprovals(
       account,
       createLocalAccountInput(account.state, state.entityId, [draft.tx]),
     );
-    if (admission.admittedAccountTxCount !== 1) {
+    if (!admission.ok || admission.admittedAccountTxCount !== 1) {
       throw new Error(`SETTLEMENT_DEFERRED_SEAL_NOT_ADMITTED:${accountId}`);
     }
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
@@ -541,13 +542,17 @@ const proposeAccountFrameCandidate = async (
     state.lastFinalizedJHeight,
     crossJOpeningProposalTxs,
   );
-  if (proposal.accountChanged) recordFrameAccountChange(storageChanges, state.entityId, accountKey);
-  if (proposal.swapOffersCancelled?.length) {
+  if ('accountChanged' in proposal && proposal.accountChanged) {
+    recordFrameAccountChange(storageChanges, state.entityId, accountKey);
+  }
+  if (isProposedAccountFrame(proposal) && proposal.swapOffersCancelled?.length) {
     const cancels = proposal.swapOffersCancelled.map(({ offerId }) => ({ accountId: accountKey, offerId }));
     applyCommittedSwapCancelsToOrderbook(env, state, cancels, storageChanges);
   }
-  if (proposal.hashesToSign) collectedHashes.push(...proposal.hashesToSign);
-  for (const { hashlock, reason } of proposal.failedHtlcLocks ?? []) {
+  if (isProposedAccountFrame(proposal) && proposal.hashesToSign) {
+    collectedHashes.push(...proposal.hashesToSign);
+  }
+  for (const { hashlock, reason } of ('failedHtlcLocks' in proposal ? proposal.failedHtlcLocks : undefined) ?? []) {
     const route = state.htlcRoutes.get(hashlock);
     if (!route) continue;
     if (route.outboundLockId) state.lockBook.delete(route.outboundLockId);
@@ -566,7 +571,7 @@ const proposeAccountFrameCandidate = async (
           },
           }]),
         );
-        if (admission.admittedAccountTxCount === 0) continue;
+        if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
         recordFrameAccountChange(storageChanges, state.entityId, route.inboundEntity);
         proposableAccounts.add(route.inboundEntity);
       }
@@ -670,7 +675,9 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     );
     if (proposal) proposedFrames += 1;
 
-    const finalAccountInput = proposal?.success && proposal.accountInput ? proposal.accountInput : requiredResponse;
+    const finalAccountInput = proposal && isProposedAccountFrame(proposal)
+      ? proposal.accountInput
+      : requiredResponse;
     if (!finalAccountInput) continue;
     assertRequiredAccountResponsePreserved(accountKey, requiredResponse, finalAccountInput);
     routeFinalAccountInput(
@@ -822,7 +829,7 @@ const applyOrderbookAccountTxs = async (
       account,
       createLocalAccountInput(account.state, state.entityId, [tx]),
     );
-    if (admission.admittedAccountTxCount === 0) continue;
+    if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
     if (tx.type === 'cross_swap_fill_ack') {
       appendCrossJurisdictionTargetProgressAfterAdmission(state, tx, allOutputs);
     }
@@ -941,7 +948,7 @@ async function applySwapCancelRequests(
       account,
       createLocalAccountInput(account.state, currentEntityState.entityId, [tx]),
     );
-    if (admission.admittedAccountTxCount === 0) continue;
+    if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
     appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, tx, allOutputs);
     proposableAccounts.add(accountId);
     recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
@@ -963,7 +970,7 @@ async function applySwapCancelRequests(
       account,
       createLocalAccountInput(account.state, currentEntityState.entityId, [tx]),
     );
-    if (admission.admittedAccountTxCount === 0) continue;
+    if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
     if (tx.type === 'cross_swap_fill_ack') {
       appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, tx, allOutputs);
     }

@@ -43,6 +43,11 @@ import { getPerfMs } from '../../../infra/time';
 import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
 import { sealAccountDraftAsEntity } from '../../helpers/account-draft';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
+import {
+  accountInputFailureMessage,
+  isProposedAccountFrame,
+  proposeAccountFrameMessage,
+} from '../../../account/consensus/result';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('account J crash seed and boundary are required');
@@ -194,8 +199,8 @@ const proposed = await proposeAccountFrame(
   env.state.timestamp,
   7,
 );
-if (!proposed.success || !proposed.accountInput) {
-  throw new Error(`ACCOUNT_J_CRASH_PROPOSAL_FAILED:${proposed.error ?? 'unknown'}`);
+if (!isProposedAccountFrame(proposed)) {
+  throw new Error(`ACCOUNT_J_CRASH_PROPOSAL_FAILED:${proposeAccountFrameMessage(proposed) ?? 'unknown'}`);
 }
 const sealedProposal = await sealAccountDraftAsEntity(env, entityId, signerA, proposed);
 account.pendingAccountInput = sealedProposal;
@@ -208,8 +213,8 @@ const peerValidation = await applyAccountInput(
   sealedProposal,
   { entityTimestamp: env.state.timestamp, finalizedJHeight: 7 },
 );
-if (!peerValidation.success || !peerValidation.response) {
-  throw new Error(`ACCOUNT_J_CRASH_ACK_FAILED:${peerValidation.error ?? 'missing-response'}`);
+if (!peerValidation.ok || !peerValidation.response) {
+  throw new Error(`ACCOUNT_J_CRASH_ACK_FAILED:${accountInputFailureMessage(peerValidation) ?? 'missing-response'}`);
 }
 const claimAck = await sealAccountDraftAsEntity(
   env,

@@ -13,6 +13,10 @@ import type { AccountState, AccountTx } from '../../../types/account';
 import type { EntityReplica } from '../../../entity/types';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import {
+  isProposedAccountFrame,
+  proposeAccountFrameMessage,
+} from '../../../account/consensus/result';
+import {
   addReplica,
   installJurisdictions,
   makeAccount,
@@ -76,8 +80,12 @@ describe('deferred Account mempool scheduling', () => {
     const { env, replica, account, entityId, signerId } = frozenRepaymentReplica();
 
     const proposal = await proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp);
-    expect(proposal.success).toBe(false);
-    expect(proposal.error).toContain('deferred');
+    expect(isProposedAccountFrame(proposal)).toBe(false);
+    expect(proposal.ok).toBe(true);
+    expect(proposal.outcome).toBe('idle');
+    expect('accountInput' in proposal).toBe(false);
+    expect('rejection' in proposal).toBe(false);
+    expect(proposeAccountFrameMessage(proposal)).toContain('deferred');
     expect(account.mempool.map((tx) => tx.type)).toEqual(['lending_repay']);
 
     expect(hasRuntimeWork(env)).toBe(false);

@@ -5,11 +5,12 @@ import { createStructuredLogger, shortId } from '../../../infra/logger';
 import { MAX_ACCOUNT_FRAME_TXS } from '../frame/hash';
 import { MEMPOOL_LIMIT } from '../constants';
 import type { ProposeAccountFrameResult } from '../types';
+import { proposeAccountFrameRejected } from '../result';
 
 const accountLog = createStructuredLogger('account');
 
 type ProposalAdmission = {
-  success: true;
+  ok: true;
   myEntityId: string;
   counterparty: string;
   quiet: boolean;
@@ -21,7 +22,7 @@ type ProposalAdmission = {
 
 export type ProposalAdmissionResult =
   | ProposalAdmission
-  | { success: false; result: ProposeAccountFrameResult };
+  | { ok: false; result: ProposeAccountFrameResult };
 
 export type AccountProposalAdmissionContext = Readonly<{
   runtimeTimestamp: number;
@@ -66,32 +67,24 @@ const rejectUnavailableProposal = (
 ): ProposeAccountFrameResult | null => {
   const status = account.status ?? 'active';
   if (status !== 'active') {
-    return {
-      success: false,
-      error: `ACCOUNT_PROPOSAL_STATUS_FROZEN:${status}`,
-      events,
-    };
+    return proposeAccountFrameRejected(`ACCOUNT_PROPOSAL_STATUS_FROZEN:${status}`, events);
   }
   if (account.mempool.length > MEMPOOL_LIMIT) {
     accountLog.warn('proposal.mempool_overflow', {
       mempool: account.mempool.length,
       limit: MEMPOOL_LIMIT,
     });
-    return {
-      success: false,
-      error: `Mempool overflow: ${account.mempool.length} > ${MEMPOOL_LIMIT}`,
-      events,
-    };
+    return proposeAccountFrameRejected(`Mempool overflow: ${account.mempool.length} > ${MEMPOOL_LIMIT}`, events);
   }
   if (account.mempool.length === 0) {
     accountLog.debug('proposal.empty_mempool');
-    return { success: false, error: 'No transactions to propose', events };
+    return proposeAccountFrameRejected('No transactions to propose', events);
   }
   if (account.pendingFrame) {
     if (!quiet) accountLog.debug('proposal.waiting_ack', {
       pendingHeight: account.pendingFrame.height,
     });
-    return { success: false, error: 'Waiting for ACK on pending frame', events };
+    return proposeAccountFrameRejected('Waiting for ACK on pending frame', events);
   }
   return null;
 };
@@ -116,7 +109,7 @@ export const prepareProposalAdmission = (
   }
   const events: string[] = [];
   const unavailable = rejectUnavailableProposal(account, quiet, events);
-  if (unavailable) return { success: false, result: unavailable };
+  if (unavailable) return { ok: false, result: unavailable };
 
   // Both sides may propose their independently observed J claim. Requiring a
   // previously committed peer claim here would deadlock bilateral finality;
@@ -137,7 +130,7 @@ export const prepareProposalAdmission = (
   const frameTimestamp = Math.max(entityFrameTimestamp, previousFrameTimestamp);
   validateProposalTimestamp(frameTimestamp);
   return {
-    success: true,
+    ok: true,
     myEntityId,
     counterparty,
     quiet,

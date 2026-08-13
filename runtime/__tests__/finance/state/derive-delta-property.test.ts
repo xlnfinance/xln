@@ -149,7 +149,7 @@ describe('deriveDelta deterministic property invariants', () => {
           type: 'set_credit_limit',
           data: { tokenId: 1, amount: 0n },
         }, grantorIsLeft);
-        expect(revoked.success).toBe(true);
+        expect(revoked.ok).toBe(true);
 
         const creditorIsLeft = debtDirection === 'right-owes-left';
         const creditorView = deriveDelta(delta, creditorIsLeft);
@@ -174,7 +174,7 @@ describe('deriveDelta deterministic property invariants', () => {
             deliveryMode: 'direct',
           },
         }, creditorIsLeft);
-        expect(cured.success).toBe(true);
+        expect(cured.ok).toBe(true);
         expect(delta.ondelta + delta.offdelta).toBe(0n);
       }
     }

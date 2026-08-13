@@ -48,6 +48,7 @@ requireSuccess('FINTS_POSITIVE', 'tsconfig.fints-positive.json');
 requireFailure('FINTS_NEGATIVE', 'tsconfig.fints-negative.json', [
   'apply-account-tx-result.negative.ts',
   'apply-account-tx-units.negative.ts',
+  'account-consensus-result.negative.ts',
 ]);
 requireSuccess('FINTS_WIDENED', 'tsconfig.fints-widened.json');
 

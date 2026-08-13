@@ -261,6 +261,10 @@ import { installCanonicalRegisteredBoardAuthority } from '../../helpers/registra
 import { exactFillRatioToUint16 } from '../../../orderbook/swap-execution';
 
 import { ethers } from 'ethers';
+import {
+  isProposedAccountFrame,
+  proposeAccountFrameMessage,
+} from '../../../account/consensus/result';
 
 const makeSingleSignerConfig = (): EntityState['config'] => ({
   mode: 'proposer-based',
@@ -807,11 +811,11 @@ describe('audit fail-fast regressions', () => {
 
     const leftProposal = await proposeAccountFrame(createAccountConsensusContext(env), leftAccount, env.state.timestamp);
     const rightProposal = await proposeAccountFrame(createAccountConsensusContext(env), rightAccount, env.state.timestamp);
-    if (!leftProposal.success || !leftProposal.accountInput) {
-      throw new Error(`LEFT_SIMULTANEOUS_PROPOSAL_FAILED:${leftProposal.error ?? 'missing input'}`);
+    if (!isProposedAccountFrame(leftProposal)) {
+      throw new Error(`LEFT_SIMULTANEOUS_PROPOSAL_FAILED:${proposeAccountFrameMessage(leftProposal) ?? 'missing input'}`);
     }
-    if (!rightProposal.success || !rightProposal.accountInput) {
-      throw new Error(`RIGHT_SIMULTANEOUS_PROPOSAL_FAILED:${rightProposal.error ?? 'missing input'}`);
+    if (!isProposedAccountFrame(rightProposal)) {
+      throw new Error(`RIGHT_SIMULTANEOUS_PROPOSAL_FAILED:${proposeAccountFrameMessage(rightProposal) ?? 'missing input'}`);
     }
     const leftInput = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, leftProposal);
     const rightInput = await sealAccountDraftAsEntity(env, right.entityId, right.signerId, rightProposal);

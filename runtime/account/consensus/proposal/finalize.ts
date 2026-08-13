@@ -3,10 +3,8 @@ import { cloneAccountFrame } from '../../state/state-clone';
 import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
 import { cloneIsolatedAccountInput } from '../../../protocol/state/account-input-clone';
 import { stageAccountCommitmentCache } from '../../commitment/map-commitment';
-import type {
-  AccountConsensusHashToSign,
-  ProposeAccountFrameResult,
-} from '../types';
+import type { AccountConsensusHashToSign, ProposeAccountFrameResult } from '../types';
+import { proposeAccountFrameProposed } from '../result';
 import type {
   PreparedProposalProof,
 } from './proof';
@@ -129,8 +127,7 @@ export const finalizeAccountProposal = (
       context: `account:${counterparty.slice(-8)}:dispute`,
     });
   }
-  const result: ProposeAccountFrameResult = {
-    success: true,
+  const result = proposeAccountFrameProposed({
     accountChanged: true,
     accountInput,
     events,
@@ -139,9 +136,9 @@ export const finalizeAccountProposal = (
     swapCancelRequests: effects.swapCancelRequests,
     swapOffersCancelled: effects.swapOffersCancelled,
     hashesToSign,
-  };
-  if (effects.failedHtlcLocks.length > 0) {
-    result.failedHtlcLocks = effects.failedHtlcLocks;
-  }
+    ...(effects.failedHtlcLocks.length > 0
+      ? { failedHtlcLocks: effects.failedHtlcLocks }
+      : {}),
+  });
   return result;
 };

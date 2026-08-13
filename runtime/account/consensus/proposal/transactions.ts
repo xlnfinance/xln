@@ -14,7 +14,7 @@ import { createAccountJClaimSession } from '../../j-claims/j-claim-session';
 import { prepareAccountJClaimTx } from '../../j-claims/j-claim-transition';
 import type { AccountJClaimNodeStore } from '../../../types/finance/account-j-claims';
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
-import type { AccountSwapOfferCreated } from '../types';
+import type { AccountFailedHtlcLock, AccountSwapOfferCreated } from '../types';
 import {
   ACCOUNT_TX_FAILURE_DISPOSITIONS,
   type AccountTxFailureDisposition,
@@ -30,7 +30,7 @@ export type ProposalTransactionEffects = {
   swapOffersCreated: AccountSwapOfferCreated[];
   swapCancelRequests: Array<{ offerId: string; accountId: string }>;
   swapOffersCancelled: Array<{ offerId: string; accountId: string }>;
-  failedHtlcLocks: Array<{ hashlock: string; reason: string }>;
+  failedHtlcLocks: AccountFailedHtlcLock[];
 };
 
 export type ValidatedProposalTransactions = ProposalTransactionEffects & {

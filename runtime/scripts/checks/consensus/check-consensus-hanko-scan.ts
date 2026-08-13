@@ -157,7 +157,7 @@ assertOrder(accountConsensus, accountConsensusPath, [
   'const commitResult = await applyAccountTx(',
   'account,',
   'false,',
-  "throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);",
+  "throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.rejection.message}`);",
   "assertNoUnilateralSettlementMutation(account, beforeSettlement, tx, 'receiver/commit');",
 ]);
 assertOrder(accountConsensus, accountConsensusPath, [

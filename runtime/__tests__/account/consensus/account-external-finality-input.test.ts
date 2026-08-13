@@ -74,7 +74,7 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
     cloned,
   );
 
-  expect(result.success).toBe(true);
+  expect(result.ok).toBe(true);
   expect(result.externalFinality).toEqual({
     hadActiveDispute: false,
     hadSettlementWorkspace: false,
@@ -149,7 +149,7 @@ test('DisputeStarted enters Account through the same external-finality boundary'
   );
 
   expect(result).toMatchObject({
-    success: true,
+    ok: true,
     events: ['ACCOUNT_DISPUTE_STARTED_APPLIED'],
   });
   expect(account.status).toBe('disputed');
@@ -228,7 +228,7 @@ test('zero-window DisputeStarted accepts the exact same-second deadline', async 
     account,
     input,
   );
-  expect(result.success).toBe(true);
+  expect(result.ok).toBe(true);
   expect(account.activeDispute?.disputeTimeout).toBe(100);
 });
 
@@ -269,7 +269,7 @@ test('DisputeStarted atomically moves cross-j recovery into the active phase', a
     input,
   );
 
-  expect(result.success).toBe(true);
+  expect(result.ok).toBe(true);
   expect(account.disputePrepare).toBeUndefined();
   expect(account.activeDispute?.crossJurisdictionRecovery).toEqual(recovery);
 });

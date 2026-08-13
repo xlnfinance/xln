@@ -11,13 +11,11 @@ import { accountInputProposal } from '../flush';
 import { getIncomingAccountDeadlineViolation, type AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { resolveSameHeightIncomingFrame } from './collision';
 import { buildDuplicateCommittedFrameAck, describeAccountState } from './replay';
-import type { HandleAccountInputResult } from '../types';
-import { rejectAccountPeerInput } from '../../input/peer-rejection';
+import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
+import { accountInputApplied, accountInputDisputeRequired, rejectAccountPeerInput } from '../result';
 
 const preflightLog = createStructuredLogger('account.preflight');
 const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;
-
-type AccountCommittedFrame = NonNullable<HandleAccountInputResult['committedFrames']>[number];
 
 export type IncomingFramePreflightResult =
   | {
@@ -95,11 +93,10 @@ const handleStaleIncomingFrame = async (
   events.push(
     `ℹ️ Ignored stale frame ${String(receivedFrame.height)} ` + `(current=${String(account.currentHeight ?? 0)})`,
   );
-  return {
-    success: true,
+  return accountInputApplied({
     events,
     ...(committedFrames.length > 0 && { committedFrames }),
-  };
+  });
 };
 
 const validateIncomingFrameProposer = (
@@ -232,18 +229,17 @@ const validateIncomingFrameDeadline = (
   if (!proposal?.frameHanko) {
     throw new Error('INBOUND_ACCOUNT_FRAME_HANKO_MISSING_AFTER_PREFLIGHT');
   }
-  return {
-    success: false,
-    error: violation.reason,
-    events,
-    disputeRequired: {
-      ...violation,
+  return accountInputDisputeRequired(
+    {
+      reason: violation.reason,
+      evidenceSecrets: violation.evidenceSecrets,
       signedFrame: {
         frame: structuredClone(receivedFrame),
         frameHanko: proposal.frameHanko,
       },
     },
-  };
+    events,
+  );
 };
 
 export const preflightIncomingAccountFrame = async (

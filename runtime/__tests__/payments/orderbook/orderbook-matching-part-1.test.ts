@@ -28,6 +28,9 @@ import type { AccountReplica, AccountTx, SwapOffer } from '../../../types/accoun
 
 import { createDefaultDelta } from '../../../account/state/delta';
 import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
+import {
+  accountTxFailureMessage,
+} from '../../../account/tx/apply-result';
 
 const TESTNET_STACK = `stack:31337:0x${'11'.repeat(20)}`;
 
@@ -1066,8 +1069,8 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
-    expect(resolveResult.success).toBe(false);
-    expect(resolveResult.error).toContain('Resting swap terms mismatch');
+    expect(resolveResult.ok).toBe(false);
+    expect(accountTxFailureMessage(resolveResult)).toContain('Resting swap terms mismatch');
     const remaining = accountMachine.state.swapOffers.get('maker-snapped');
     expect(remaining).toBeDefined();
     expect(remaining!.priceTicks).toBe(1003n);
@@ -1340,7 +1343,7 @@ describe('orderbook matching execution mapping', () => {
       1,
     );
 
-    expect(resolveResult.success).toBe(true);
+    expect(resolveResult.ok).toBe(true);
     const quoteDelta = accountMachine.state.deltas.get(5)!;
     const baseDelta = accountMachine.state.deltas.get(2)!;
     expect(quoteDelta.offdelta).toBe(makerQuoteQty);
@@ -1373,7 +1376,7 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
-    expect(resolveResult.success).toBe(true);
+    expect(resolveResult.ok).toBe(true);
 
     const remaining = accountMachine.state.swapOffers.get('maker-partial');
     expect(remaining).toBeDefined();
@@ -1417,8 +1420,8 @@ describe('orderbook matching execution mapping', () => {
       };
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
-      expect(resolveResult.success).toBe(false);
-      expect(resolveResult.error).toContain('missing canonical price or quantized amounts');
+      expect(resolveResult.ok).toBe(false);
+      expect(accountTxFailureMessage(resolveResult)).toContain('missing canonical price or quantized amounts');
     },
   );
 
@@ -1449,8 +1452,8 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
-    expect(resolveResult.success).toBe(false);
-    expect(resolveResult.error).toContain('Resting swap terms mismatch live offer');
+    expect(resolveResult.ok).toBe(false);
+    expect(accountTxFailureMessage(resolveResult)).toContain('Resting swap terms mismatch live offer');
   });
 
   test('auto-cancels prices outside the 30% anchor band instead of resting them', () => {

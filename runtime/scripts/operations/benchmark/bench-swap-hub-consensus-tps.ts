@@ -1,6 +1,11 @@
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { applyAccountInput, proposeAccountFrame } from '../../../account/consensus/index';
+import {
+  accountInputFailureMessage,
+  isProposedAccountFrame,
+  proposeAccountFrameMessage,
+} from '../../../account/consensus/result';
 import { isLeftEntity } from '../../../account/utils';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -500,14 +505,16 @@ const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: Stage
     benchCase.proposerEnv.state.timestamp,
   );
   const receiveStartedAt = getPerfMs();
-  if (!proposed.success) throw new Error(`${benchCase.kind}:propose_failed:${proposed.error}`);
+  if (!isProposedAccountFrame(proposed)) {
+    throw new Error(`${benchCase.kind}:propose_failed:${proposeAccountFrameMessage(proposed)}`);
+  }
   const received = await applyAccountInput(
     receiverContext,
     benchCase.receiver,
     expectInput(proposed.accountInput, benchCase.kind),
   );
   const commitStartedAt = getPerfMs();
-  if (!received.success) throw new Error(`${benchCase.kind}:receive_failed:${received.error}`);
+  if (!received.ok) throw new Error(`${benchCase.kind}:receive_failed:${accountInputFailureMessage(received)}`);
   const committed = await applyAccountInput(
     proposerContext,
     benchCase.proposer,
@@ -520,7 +527,7 @@ const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: Stage
     stages.commit += committedAt - commitStartedAt;
     stages.count += 1;
   }
-  if (!committed.success) throw new Error(`${benchCase.kind}:commit_failed:${committed.error}`);
+  if (!committed.ok) throw new Error(`${benchCase.kind}:commit_failed:${accountInputFailureMessage(committed)}`);
   if (benchCase.proposer.currentHeight !== 1 || benchCase.receiver.currentHeight !== 1) {
     throw new Error(
       `${benchCase.kind}:height_mismatch:${benchCase.proposer.currentHeight}/${benchCase.receiver.currentHeight}`,

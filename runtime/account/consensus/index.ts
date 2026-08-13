@@ -11,7 +11,7 @@ import { getAccountPerspective } from '../state/perspective';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { applyAccountTx } from '../tx/apply';
 import type { AccountTxRejection, ApplyAccountTxOk } from '../tx/apply-types';
-import { assertNever } from '../tx/apply-result';
+import { accountTxFailureMessage, assertNever } from '../tx/apply-result';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { createFrameHash } from './frame/hash';
 import {
@@ -32,6 +32,7 @@ import { applyLocalAccountInput } from '../input/local-tx-admission';
 import { getAccountInputEnvelopeError } from '../input';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../protocol/dispute/arguments';
 import type {
+  AccountCommittedFrame,
   AccountConsensusHashToSign,
   AccountSwapOfferCreated,
   HandleAccountInputResult,
@@ -69,13 +70,17 @@ import {
 import { applySameHeightIncomingFrameRollback, handleUnmatchedAck, resolveAccountAckTarget } from './incoming/collision';
 import { preflightIncomingAccountFrame } from './incoming/preflight';
 import {
+  accountInputApplied,
+  accountInputDisputeRequired,
+  accountInputFailureMessage,
+  accountInputTxRejected,
+  accountInputValidationRejected,
+  isProposedAccountFrame,
   rejectAccountPeerEvidenceError,
   rejectAccountPeerInput,
-} from '../input/peer-rejection';
+} from './result';
 export { proposeAccountFrame } from './proposal/propose';
-export type {
-  HandleAccountInputResult,
-} from './types';
+export type { HandleAccountInputResult } from './types';
 
 const accountLog = createStructuredLogger('account');
 
@@ -87,7 +92,6 @@ export { computeFrameHash, isWithinAccountFrameBounds } from './frame/hash';
 // Counter-based replay protection was intentionally replaced by the frame chain
 // (height + prevFrameHash). Nonces remain only for on-chain proof material.
 
-type AccountCommittedFrame = NonNullable<HandleAccountInputResult['committedFrames']>[number];
 type AccountRevealedSecret = { secret: string; hashlock: string };
 type AccountSwapCancelRequest = { offerId: string; accountId: string };
 
@@ -203,7 +207,10 @@ async function verifySenderFrameHash(
       recomputed: shortHash(recomputedSenderHash),
       claimed: shortHash(receivedFrame.stateHash),
     });
-    return { success: false, error: `Frame hash verification failed - dispute proof mismatch`, events };
+    return accountInputValidationRejected(
+      'Frame hash verification failed - dispute proof mismatch',
+      events,
+    );
   }
   return undefined;
 }
@@ -282,12 +289,11 @@ const replayIncomingFrameOnClone = async (
     if (!result.ok) {
       return {
         kind: 'return',
-        result: {
-          success: false,
-          error: `Frame application failed: ${result.rejection.message}`,
+        result: accountInputTxRejected(
+          result.rejection,
           events,
-          txRejection: result.rejection,
-        },
+          `Frame application failed: ${accountTxFailureMessage(result)}`,
+        ),
       };
     }
     assertNoUnilateralSettlementMutation(clonedMachine, beforeSettlement, accountTx, 'receiver/validate');
@@ -353,7 +359,7 @@ async function validateIncomingFrameOnClone(
       leftPendingJClaims: clonedMachine.state.leftPendingJClaims,
       rightPendingJClaims: clonedMachine.state.rightPendingJClaims,
     });
-    return { kind: 'return', result: { success: false, error: 'Bilateral account state root mismatch', events } };
+    return { kind: 'return', result: accountInputValidationRejected('Bilateral account state root mismatch', events) };
   }
   const proofResult = buildAccountProofBodyFromJurisdictions(context, clonedMachine);
   const localProofBodyHash = proofResult.proofBodyHash;
@@ -365,7 +371,7 @@ async function validateIncomingFrameOnClone(
     validatedCounterpartyDisputeSeal,
   );
   if (frameSealError) {
-    return { kind: 'return', result: { success: false, error: frameSealError, events } };
+    return { kind: 'return', result: accountInputValidationRejected(frameSealError, events) };
   }
 
   accountLog.debug('frame.accept', {
@@ -611,7 +617,7 @@ async function buildIncomingFrameAckMaterial(
     : undefined;
   if (proofChanged) {
     if (!ackDisputeHash) {
-      return { kind: 'return', result: { success: false, error: 'Failed to build ACK dispute hanko', events } };
+      return { kind: 'return', result: accountInputValidationRejected('Failed to build ACK dispute hanko', events) };
     }
     storeAckProofSnapshot(account, ackProofResult, ackSignedNonce, receivedFrame.byLeft);
   }
@@ -679,10 +685,22 @@ function buildIncomingFrameReturnPayload(
   timedOutHashlocks: string[],
   committedFrames: AccountCommittedFrame[],
 ): HandleAccountInputResult {
-  const allRevealedSecrets = [...validation.revealedSecrets, ...(proposeResult?.revealedSecrets || [])];
-  const allSwapOffersCreated = [...validation.swapOffersCreated, ...(proposeResult?.swapOffersCreated || [])];
-  const allSwapCancelRequests = [...validation.swapCancelRequests, ...(proposeResult?.swapCancelRequests || [])];
-  const allSwapOffersCancelled = [...validation.swapOffersCancelled, ...(proposeResult?.swapOffersCancelled || [])];
+  const allRevealedSecrets = [
+    ...validation.revealedSecrets,
+    ...(proposeResult && isProposedAccountFrame(proposeResult) ? proposeResult.revealedSecrets ?? [] : []),
+  ];
+  const allSwapOffersCreated = [
+    ...validation.swapOffersCreated,
+    ...(proposeResult && isProposedAccountFrame(proposeResult) ? proposeResult.swapOffersCreated ?? [] : []),
+  ];
+  const allSwapCancelRequests = [
+    ...validation.swapCancelRequests,
+    ...(proposeResult && isProposedAccountFrame(proposeResult) ? proposeResult.swapCancelRequests ?? [] : []),
+  ];
+  const allSwapOffersCancelled = [
+    ...validation.swapOffersCancelled,
+    ...(proposeResult && isProposedAccountFrame(proposeResult) ? proposeResult.swapOffersCancelled ?? [] : []),
+  ];
   const hashesToSign: AccountConsensusHashToSign[] = [
     {
       hash: receivedFrame.stateHash,
@@ -698,7 +716,7 @@ function buildIncomingFrameReturnPayload(
           },
         ]
       : []),
-    ...(proposeResult?.hashesToSign || []),
+    ...(proposeResult && isProposedAccountFrame(proposeResult) ? proposeResult.hashesToSign ?? [] : []),
   ];
 
   if (HEAVY_LOGS) {
@@ -708,8 +726,7 @@ function buildIncomingFrameReturnPayload(
       newFrame: Boolean(accountInputProposal(response)),
     });
   }
-  return {
-    success: true,
+  return accountInputApplied({
     response,
     events,
     revealedSecrets: allRevealedSecrets,
@@ -719,7 +736,7 @@ function buildIncomingFrameReturnPayload(
     timedOutHashlocks,
     ...(committedFrames.length > 0 && { committedFrames }),
     ...(hashesToSign.length > 0 && { hashesToSign }),
-  };
+  });
 }
 
 async function buildAckResponseForIncomingFrame(
@@ -769,27 +786,23 @@ const classifyIncomingValidationFailure = (
   receivedFrame: AccountFrame,
   result: HandleAccountInputResult,
 ): IncomingFrameResult => {
-  if (result.success) return { kind: 'return', result };
-  if (
-    isRefreshableStaleIncomingSettlementSeal(
-      account,
-      receivedFrame,
-      result.txRejection,
-    )
-  ) {
+  if (result.ok) return { kind: 'return', result };
+  const txRejection = result.disposition === 'rejected' && result.rejection.kind === 'tx'
+    ? result.rejection.tx
+    : undefined;
+  const failureMessage = accountInputFailureMessage(result);
+  if (isRefreshableStaleIncomingSettlementSeal(account, receivedFrame, txRejection)) {
     accountLog.warn('frame.stale_settlement_seal_rejected', {
       height: receivedFrame.height,
-      error: result.error,
+      error: failureMessage,
     });
     return {
       kind: 'return',
-      result: {
-        ...result,
-        rejected: {
-          code: 'ACCOUNT_PEER_FRAME_STALE_SETTLEMENT_SEAL',
-          reason: result.error ?? 'Stale settlement seal rejected',
-        },
-      },
+      result: rejectAccountPeerInput(
+        'ACCOUNT_PEER_FRAME_STALE_SETTLEMENT_SEAL',
+        failureMessage || 'Stale settlement seal rejected',
+        result.events,
+      ),
     };
   }
   const proposal = accountInputProposal(input)!;
@@ -798,17 +811,17 @@ const classifyIncomingValidationFailure = (
   }
   return {
     kind: 'return',
-    result: {
-      ...result,
-      disputeRequired: {
-        reason: result.error ?? 'Signed account frame failed deterministic replay',
+    result: accountInputDisputeRequired(
+      {
+        reason: failureMessage || 'Signed account frame failed deterministic replay',
         evidenceSecrets: [],
         signedFrame: {
           frame: structuredClone(receivedFrame),
           frameHanko: proposal.frameHanko,
         },
       },
-    },
+      result.events,
+    ),
   };
 };
 
@@ -914,6 +927,7 @@ const finishAccountInput = (
   session: AccountInputSession,
   result: HandleAccountInputResult,
 ): HandleAccountInputResult => {
+  if (!result.ok) return result;
   const accountJClaimNodeChanges = session.committedJClaims.changes();
   return {
     ...result,
@@ -994,7 +1008,7 @@ const handleStandaloneDispute = async (session: AccountInputSession): Promise<Ha
       securityContext,
     );
     storeCounterpartyDisputeSeal(account, seal);
-    return { success: true, events };
+    return accountInputApplied({ events });
   } catch (error) {
     return rejectAccountPeerEvidenceError(error, events);
   }
@@ -1077,21 +1091,17 @@ const applyExternalFinalityInput = (
 ): HandleAccountInputResult => {
   if (input.finality.kind === 'dispute_started') {
     applyAccountDisputeStarted(account, input.finality);
-    return {
-      success: true,
-      events: ['ACCOUNT_DISPUTE_STARTED_APPLIED'],
-    };
+    return accountInputApplied({ events: ['ACCOUNT_DISPUTE_STARTED_APPLIED'] });
   }
   const { finalizedJNonce, finalizedTokenIds } = input.finality;
-  return {
-    success: true,
+  return accountInputApplied({
     events: ['ACCOUNT_DISPUTE_FINALITY_APPLIED'],
     externalFinality: applyAccountDisputeFinality(
       account,
       finalizedJNonce,
       finalizedTokenIds,
     ),
-  };
+  });
 };
 
 export async function applyAccountInput(
@@ -1103,7 +1113,7 @@ export async function applyAccountInput(
   const envelopeError = getAccountInputEnvelopeError(account.state, input);
   if (envelopeError) {
     if (input.kind === 'txs' || input.kind === 'external_finality') {
-      return { success: false, error: envelopeError.reason, events: [] };
+      return accountInputValidationRejected(envelopeError.reason, []);
     }
     return rejectAccountPeerInput(envelopeError.code, envelopeError.reason, []);
   }
@@ -1114,10 +1124,10 @@ export async function applyAccountInput(
   const accountJClaimNodeStore = context.jClaimNodeStore;
   const securityContext = resolveAccountInputSecurityContext(context, account, providedSecurityContext);
   const heightNormalization = normalizeAccountInputHeight(input);
-  if (heightNormalization.error) {
+  if (!heightNormalization.ok) {
     return rejectAccountPeerInput(
       'ACCOUNT_PEER_HEIGHT_INVALID',
-      heightNormalization.error,
+      heightNormalization.message,
       [],
     );
   }
@@ -1172,8 +1182,7 @@ export async function applyAccountInput(
   const proposalResult = await handleAccountProposalPhase(session, ack.ackProcessed);
   if (proposalResult) return finishAccountInput(session, proposalResult);
   if (HEAVY_LOGS) accountLog.debug('return.no_response');
-  return finishAccountInput(session, {
-    success: true,
+  return finishAccountInput(session, accountInputApplied({
     events,
     swapOffersCreated: [],
     swapCancelRequests: [],
@@ -1182,5 +1191,5 @@ export async function applyAccountInput(
     ...(session.committedFrames.length > 0 && {
       committedFrames: session.committedFrames,
     }),
-  });
+  }));
 }

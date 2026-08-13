@@ -538,8 +538,9 @@ describe('atomic settlement Account transition', () => {
       materialized.newState.accounts.get(counterparty)!,
       2_001,
     )).resolves.toMatchObject({
-      success: false,
-      error: 'Transactions deferred until signed settlement finalizes: 1',
+      ok: true,
+      outcome: 'idle',
+      message: 'Transactions deferred until signed settlement finalizes: 1',
     });
     const refreshed = await applyEntityFrameWithMaterializedTestInfraContext(env, materialized.newState, [], 2_001);
     const refreshedAccount = refreshed.newState.accounts.get(counterparty)!;

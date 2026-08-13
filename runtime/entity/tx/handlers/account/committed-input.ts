@@ -1,7 +1,7 @@
-import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
+import type { AccountPeerInput, AccountReplica, AccountTx } from '../../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
-import type { HandleAccountInputResult } from '../../../../account/consensus/types';
+import type { HandleAccountInputApplied } from '../../../../account/consensus/types';
 import {
   accountInputAck,
   accountInputProposal,
@@ -56,7 +56,7 @@ type SuccessfulAccountInputContext = {
   account: AccountReplica;
   counterpartyId: string;
   createdAccount: boolean;
-  result: HandleAccountInputResult;
+  result: HandleAccountInputApplied;
   effects: CommittedAccountEffects;
   options?: ApplyEntityTxOptions;
   checkpointProfile(label: string): void;
@@ -121,7 +121,7 @@ const recordCommittedFrames = (
 
 const applyCommittedSwapFollowup = (
   context: SuccessfulAccountInputContext,
-  accountTx: NonNullable<HandleAccountInputResult['committedFrames']>[number]['frame']['accountTxs'][number],
+  accountTx: AccountTx,
 ): void => {
   const { account, counterpartyId, effects } = context;
   if (accountTx.type === 'swap_offer') {

@@ -15,17 +15,18 @@ import {
   type AccountStateRootTiming,
 } from '../../commitment/state-root';
 import type { ProposeAccountFrameResult } from '../types';
+import { proposeAccountFrameRejected } from '../result';
 
 const accountLog = createStructuredLogger('account');
 
 export type ProposalFrameBuildResult =
   | {
-      success: true;
+      ok: true;
       frame: AccountFrame;
       stateRootTiming: AccountStateRootTiming;
     }
   | {
-      success: false;
+      ok: false;
       result: ProposeAccountFrameResult;
     };
 
@@ -85,12 +86,11 @@ export const buildProposalFrame = async (
     accountStateRoot = computeAccountStateRoot(candidate.state, stateRootTiming);
   } catch (error) {
     return {
-      success: false,
-      result: {
-        success: false,
-        error: `ACCOUNT_STATE_ROOT_BUILD_FAILED: ${(error as Error).message}`,
+      ok: false,
+      result: proposeAccountFrameRejected(
+        `ACCOUNT_STATE_ROOT_BUILD_FAILED: ${(error as Error).message}`,
         events,
-      },
+      ),
     };
   }
   checkpointProfile('stateRoot');
@@ -121,26 +121,24 @@ export const buildProposalFrame = async (
       error: error instanceof Error ? error.message : String(error),
     });
     return {
-      success: false,
-      result: {
-        success: false,
-        error: `Frame validation failed: ${(error as Error).message}`,
+      ok: false,
+      result: proposeAccountFrameRejected(
+        `Frame validation failed: ${(error as Error).message}`,
         events,
-      },
+      ),
     };
   }
   const frameSize = getCanonicalAccountFrameSizeBytes(frame);
   if (frameSize > MAX_FRAME_SIZE_BYTES) {
     accountLog.warn('frame.too_large', { frameSize, limit: MAX_FRAME_SIZE_BYTES });
     return {
-      success: false,
-      result: {
-        success: false,
-        error: `Frame exceeds ${MAX_FRAME_SIZE_BYTES} byte limit: ${frameSize} bytes`,
+      ok: false,
+      result: proposeAccountFrameRejected(
+        `Frame exceeds ${MAX_FRAME_SIZE_BYTES} byte limit: ${frameSize} bytes`,
         events,
-      },
+      ),
     };
   }
   checkpointProfile('frameValidation');
-  return { success: true, frame, stateRootTiming };
+  return { ok: true, frame, stateRootTiming };
 };

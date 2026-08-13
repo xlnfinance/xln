@@ -27,6 +27,10 @@ import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { validateAccountReplica } from '../../../account/validation/state-validation';
 import { validateEntityState } from '../../../entity/state/state-validation';
 import { sealAccountDraftAsEntity } from '../../helpers/account-draft';
+import {
+  isProposedAccountFrame,
+  proposeAccountFrameMessage,
+} from '../../../account/consensus/result';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
@@ -399,8 +403,8 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   proposer.currentFrame.stateHash = proposer.currentFrame.accountStateRoot;
 
   const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 0);
-  if (!proposed.success || !proposed.accountInput?.proposal) {
-    throw new Error(proposed.error || 'TEST_ACCOUNT_GENESIS_PROPOSAL_REQUIRED');
+  if (!isProposedAccountFrame(proposed) || !proposed.accountInput.proposal) {
+    throw new Error(proposeAccountFrameMessage(proposed) || 'TEST_ACCOUNT_GENESIS_PROPOSAL_REQUIRED');
   }
   const sealedProposal = await sealAccountDraftAsEntity(
     env,

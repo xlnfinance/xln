@@ -93,15 +93,19 @@ const validateOfferShape = (tx: SwapOfferTx): string | null => {
   return null;
 };
 
+export type SwapOfferAdmissionResult =
+  | { ok: true; admission: SwapOfferAdmission }
+  | { ok: false; message: string };
+
 export const validateSwapOfferAdmission = (
   account: AccountState,
   tx: SwapOfferTx,
   byLeft: boolean,
-): { admission?: SwapOfferAdmission; error?: string } => {
+): SwapOfferAdmissionResult => {
   const limitError = validateOfferCapacityLimits(account, tx);
-  if (limitError) return { error: limitError };
+  if (limitError) return { ok: false, message: limitError };
   const shapeError = validateOfferShape(tx);
-  if (shapeError) return { error: shapeError };
+  if (shapeError) return { ok: false, message: shapeError };
   const { leftEntity, rightEntity } = account;
   const proposerEntityId = byLeft ? leftEntity : rightEntity;
   const route = tx.data.crossJurisdiction;
@@ -117,7 +121,7 @@ export const validateSwapOfferAdmission = (
         .some(entityId => entityId.toLowerCase() === proposerEntityId.toLowerCase())
     )
   ) {
-    return { error: 'Cross-j swap proposer must be the maker or source hub' };
+    return { ok: false, message: 'Cross-j swap proposer must be the maker or source hub' };
   }
   const marketLimitError = getAccountSwapMarketLimitError(account.swapOffers!.values(), {
     giveTokenId: tx.data.giveTokenId,
@@ -125,6 +129,6 @@ export const validateSwapOfferAdmission = (
     ...(route ? { crossJurisdiction: route } : {}),
     makerIsLeft,
   });
-  if (marketLimitError) return { error: marketLimitError };
-  return { admission: { leftEntity, rightEntity, makerIsLeft } };
+  if (marketLimitError) return { ok: false, message: marketLimitError };
+  return { ok: true, admission: { leftEntity, rightEntity, makerIsLeft } };
 };

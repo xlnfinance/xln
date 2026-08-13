@@ -11,6 +11,7 @@ import {
   storeDisputeArgumentSnapshot,
 } from '../../../protocol/dispute/arguments';
 import type { ProposeAccountFrameResult } from '../types';
+import { proposeAccountFrameRejected } from '../result';
 import { replaceLocalDisputeDraft } from '../dispute/seal';
 
 type DisputeProjection = {
@@ -21,7 +22,7 @@ type DisputeProjection = {
 };
 
 export type PreparedProposalProof = {
-  success: true;
+  ok: true;
   signingEntityId: string;
   disputeHash?: string;
   signedProofNonce: number;
@@ -31,7 +32,7 @@ export type PreparedProposalProof = {
 
 export type ProposalProofResult =
   | PreparedProposalProof
-  | { success: false; result: ProposeAccountFrameResult };
+  | { ok: false; result: ProposeAccountFrameResult };
 
 const buildDisputeProjection = (
   jurisdictions: AccountJurisdictionView,
@@ -110,14 +111,12 @@ export const prepareProposalProof = async (
   const signingEntityId = account.proofHeader.fromEntity;
   if (!isEntityId32(candidate.state.leftEntity) || !isEntityId32(candidate.state.rightEntity)) {
     return {
-      success: false,
-      result: {
-        success: false,
-        error:
-          `INVALID_ACCOUNT_ENTITY_ID: left=${String(candidate.state.leftEntity)} ` +
+      ok: false,
+      result: proposeAccountFrameRejected(
+        `INVALID_ACCOUNT_ENTITY_ID: left=${String(candidate.state.leftEntity)} ` +
           `right=${String(candidate.state.rightEntity)}`,
         events,
-      },
+      ),
     };
   }
 
@@ -130,7 +129,7 @@ export const prepareProposalProof = async (
   // otherwise identical multi-validator entities.
   persistDisputeProjection(account, candidate, projection);
   return {
-    success: true,
+    ok: true,
     signingEntityId,
     ...(projection.hash ? { disputeHash: projection.hash } : {}),
     signedProofNonce: projection.nonce,
