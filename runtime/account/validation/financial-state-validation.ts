@@ -26,6 +26,15 @@ const requireAmount = (value: unknown, context: string, allowZero = false): bigi
   return value as bigint;
 };
 
+const requireSignedNonZeroAmount = (value: unknown, context: string): bigint => {
+  if (typeof value !== 'bigint' || value === 0n) {
+    corrupt(context, 'must be a non-zero bigint');
+  }
+  return value as bigint;
+};
+
+const absAmount = (value: bigint): bigint => (value < 0n ? -value : value);
+
 const requireTokenId = (value: unknown, context: string): number => {
   const tokenId = requireBoundaryInteger(value, context, 1);
   if (tokenId > TOKENS.MAX_TOKEN_ID) corrupt(context, 'exceeds canonical token range');
@@ -78,13 +87,13 @@ const validatePull = (key: unknown, value: unknown, context: string): void => {
   const pullId = validateString(pull['pullId'], `${context}.pullId`);
   if (key !== pullId || pullId.includes(':')) corrupt(context, 'Map key/pullId is invalid');
   requireTokenId(pull['tokenId'], `${context}.tokenId`);
-  const amount = requireAmount(pull['amount'], `${context}.amount`);
+  const amount = requireSignedNonZeroAmount(pull['amount'], `${context}.amount`);
   requireHash(pull['fullHash'], `${context}.fullHash`);
   requireHash(pull['partialRoot'], `${context}.partialRoot`);
   requireBoundaryInteger(pull['createdHeight'], `${context}.createdHeight`);
   requireBoundaryInteger(pull['createdTimestamp'], `${context}.createdTimestamp`);
   if (pull['claimedRatio'] !== undefined) requireBoundaryInteger(pull['claimedRatio'], `${context}.claimedRatio`);
-  if (pull['claimedAmount'] !== undefined && requireAmount(pull['claimedAmount'], `${context}.claimedAmount`, true) > amount) {
+  if (pull['claimedAmount'] !== undefined && requireAmount(pull['claimedAmount'], `${context}.claimedAmount`, true) > absAmount(amount)) {
     corrupt(context, 'claimedAmount exceeds amount');
   }
   validatePullBinding(pull['crossJurisdiction'], `${context}.crossJurisdiction`);

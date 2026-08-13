@@ -349,11 +349,6 @@
   function getHtlcNote(data: Record<string, unknown>): string | null {
     const notes = replica?.htlcNotes;
     if (!(notes instanceof Map)) return null;
-    const lockId = typeof data['lockId'] === 'string' ? data['lockId'] : '';
-    if (lockId) {
-      const lockNote = notes.get(`lock:${lockId}`);
-      if (typeof lockNote === 'string' && lockNote.trim()) return lockNote.trim();
-    }
     const hashlock = typeof data['hashlock'] === 'string' ? data['hashlock'] : '';
     if (hashlock) {
       const hashNote = notes.get(`hashlock:${hashlock}`);

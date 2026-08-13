@@ -23,17 +23,17 @@ export type JHeight = number & { readonly [JHeightBrand]: typeof JHeightBrand };
 
 const HEX32 = /^0x[0-9a-fA-F]{64}$/;
 
-export const isHashlock = (value: string): value is Hashlock => HEX32.test(value);
-export const isHtlcSecret = (value: string): value is HtlcSecret => HEX32.test(value);
-export const isLockId = (value: string): value is LockId =>
+const isHashlock = (value: string): value is Hashlock => HEX32.test(value);
+const isHtlcSecret = (value: string): value is HtlcSecret => HEX32.test(value);
+const isLockId = (value: string): value is LockId =>
   typeof value === 'string' && value.length > 0 && !value.includes(':');
-export const isTokenId = (value: number): value is TokenId =>
+const isTokenId = (value: number): value is TokenId =>
   Number.isSafeInteger(value) && value >= 0 && value <= TOKENS.MAX_TOKEN_ID;
-export const isTokenAmount = (value: bigint): value is TokenAmount =>
+const isTokenAmount = (value: bigint): value is TokenAmount =>
   typeof value === 'bigint' && value >= 0n;
-export const isUnixMs = (value: number): value is UnixMs =>
+const isUnixMs = (value: number): value is UnixMs =>
   Number.isSafeInteger(value) && value >= 0;
-export const isJHeight = (value: number): value is JHeight =>
+const isJHeight = (value: number): value is JHeight =>
   Number.isSafeInteger(value) && value >= 0;
 
 export const toHashlock = (value: string): Hashlock => {

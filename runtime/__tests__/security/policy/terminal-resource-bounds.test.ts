@@ -389,6 +389,37 @@ test('decode validation rejects oversized swap history, resolve history, and HTL
   );
 });
 
+test('decode validation accepts signed pull amounts and rejects zero', () => {
+  const makePull = (amount: bigint) => ({
+    pullId: 'pull-canonical',
+    tokenId: 1,
+    amount,
+    claimedRatio: 0,
+    claimedAmount: 0n,
+    fullHash: `0x${'ab'.repeat(32)}`,
+    partialRoot: `0x${'cd'.repeat(32)}`,
+    crossJurisdiction: {
+      orderId: 'order',
+      routeHash: `0x${'12'.repeat(32)}`,
+      leg: 'source' as const,
+    },
+    createdHeight: 1,
+    createdTimestamp: 1,
+  });
+
+  const negative = makeAccount();
+  negative.state.pulls.set('pull-canonical', makePull(-1_000n));
+  expect(() => validateAccountReplica(negative, 'signedPullNegative')).not.toThrow();
+
+  const positive = makeAccount();
+  positive.state.pulls.set('pull-canonical', makePull(1_000n));
+  expect(() => validateAccountReplica(positive, 'signedPullPositive')).not.toThrow();
+
+  const zero = makeAccount();
+  zero.state.pulls.set('pull-canonical', makePull(0n));
+  expect(() => validateAccountReplica(zero, 'zeroPull')).toThrow('must be a non-zero bigint');
+});
+
 test('decode validation rejects malformed nested financial state', () => {
   const lockAccount = makeAccount();
   const lockId = `0x${'71'.repeat(32)}`;

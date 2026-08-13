@@ -171,8 +171,6 @@
 
       const paymentNote = typeof notes?.get === 'function'
         ? (() => {
-            const lockKey = typeof lock.lockId === 'string' ? notes.get(`lock:${lock.lockId}`) : '';
-            if (typeof lockKey === 'string' && lockKey.trim()) return lockKey.trim();
             const hashKey = typeof lock.hashlock === 'string' ? notes.get(`hashlock:${lock.hashlock}`) : '';
             return typeof hashKey === 'string' ? hashKey.trim() : '';
           })()

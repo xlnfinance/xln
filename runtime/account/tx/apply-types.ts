@@ -40,9 +40,6 @@ export const ACCOUNT_TX_REJECTION_CODES = {
   deltaRowLimitExceeded: 'ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED',
 } as const satisfies Record<string, string>;
 
-export type AccountTxRejectionCode =
-  (typeof ACCOUNT_TX_REJECTION_CODES)[keyof typeof ACCOUNT_TX_REJECTION_CODES];
-
 export type AccountTxRejection =
   | Readonly<{
       kind: 'validation';
