@@ -185,6 +185,11 @@ export type RelayRouterConfig = {
   helloSkewMs?: number;
   consumeHelloChallenge?: (ws: object, claim: unknown) => HelloChallengeBinding | null;
   verifyProfile?: (profile: Profile) => Promise<ProfileVerifyResult> | ProfileVerifyResult;
+  applicationBudget?: Partial<{
+    windowMs: number;
+    maxMessages: number;
+    maxBytes: number;
+  }>;
 };
 
 const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
@@ -254,6 +259,38 @@ const createRelayRouteContext = (
 };
 
 type RelayRouteContext = ReturnType<typeof createRelayRouteContext>;
+
+const DEFAULT_APPLICATION_BUDGET = {
+  windowMs: 60_000,
+  maxMessages: 10_000,
+  maxBytes: 512 * 1024 * 1024,
+} as const;
+
+const consumeApplicationBudget = (
+  context: RelayRouteContext,
+  bytes: number,
+  now = Date.now(),
+): boolean => {
+  const { config, fromKey } = context;
+  if (!fromKey) return false;
+  const limits = { ...DEFAULT_APPLICATION_BUDGET, ...config.applicationBudget };
+  let budget = config.store.applicationBudgets.get(fromKey);
+  if (!budget || now - budget.windowStartedAt >= limits.windowMs) {
+    for (const [runtimeId, candidate] of config.store.applicationBudgets) {
+      if (now - candidate.windowStartedAt >= limits.windowMs) {
+        config.store.applicationBudgets.delete(runtimeId);
+      }
+    }
+    budget = { windowStartedAt: now, messageCount: 0, bytes: 0 };
+  }
+  if (budget.messageCount + 1 > limits.maxMessages || budget.bytes + bytes > limits.maxBytes) {
+    return false;
+  }
+  budget.messageCount += 1;
+  budget.bytes += bytes;
+  config.store.applicationBudgets.set(fromKey, budget);
+  return true;
+};
 
 const handleHello = (context: RelayRouteContext): boolean => {
   const { config, ws, type, from, fromKey, traceId, fromEncryptionPubKey } = context;
@@ -731,6 +768,29 @@ const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolea
       details: { traceId },
     });
     config.send(ws, serializeWsMessage({ type: 'error', error: 'entity_inputs must be encrypted' }));
+    return true;
+  }
+  if (
+    (type === 'entity_inputs' || type === 'entity_input_receipt') &&
+    !consumeApplicationBudget(context, new TextEncoder().encode(safeStringify(msg)).byteLength)
+  ) {
+    const code = 'ENTITY_INPUT_RATE_LIMITED';
+    pushDebugEvent(config.store, {
+      event: 'delivery',
+      from,
+      to,
+      msgType: type,
+      status: 'deferred',
+      reason: code,
+      delivery: relayDeliveryMetadata('queued', code),
+      details: routeDeliveryDetails(context),
+    });
+    config.send(ws, serializeWsMessage({
+      type: 'error',
+      error: code,
+      ...(context.id ? { inReplyTo: context.id } : {}),
+      ...(to ? { to } : {}),
+    }));
     return true;
   }
   relayLog(`[RELAY] ${type} from=${from || 'none'} to=${to || 'none'} encrypted=${msg.encrypted ?? false}`);

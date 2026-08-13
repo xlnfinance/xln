@@ -62,6 +62,8 @@ export type WatchtowerStoreOptions = {
   dbPath?: string;
   maxBundlesPerLookupKey?: number;
   maxStoredBytesPerLookupKey?: number;
+  maxLookupKeys?: number;
+  maxTotalStoredBytes?: number;
   receiptTtlMs?: number;
   towerPrivateKey?: string;
   now?: () => number;
@@ -72,10 +74,14 @@ export type WatchtowerStoreContext = {
   dbPath: string;
   maxBundlesPerLookupKey: number;
   maxStoredBytesPerLookupKey: number;
+  maxLookupKeys: number;
+  maxTotalStoredBytes: number;
   receiptTtlMs: number;
   now(): number;
   signer: Wallet;
   db: Level<string, string>;
   opened: boolean;
   cachedStats: { cachedAt: number; value: WatchtowerStoreStats } | null;
+  lookupUsage: { bytesByKey: Map<string, number>; totalStoredBytes: number } | null;
+  appointmentWriteQueue: Promise<void>;
 };

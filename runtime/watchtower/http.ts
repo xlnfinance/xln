@@ -11,6 +11,7 @@ import {
   buildTowerAppointmentOwnerMessage,
 } from '../storage/recovery/bundle/crypto';
 import type { WatchtowerStore } from './store';
+import { WatchtowerGlobalQuotaError } from './store/db';
 import { runWatchtowerSweep } from './action';
 import type { PushStore } from './push/store';
 import {
@@ -108,8 +109,10 @@ const normalizeNonNegativeInt = (value: unknown, label: string): number => {
   return Math.floor(parsed);
 };
 
-const quotaExceededStatus = (message: string): number =>
-  message.startsWith('TOWER_QUOTA_EXCEEDED') || message.startsWith('TOWER_BODY_TOO_LARGE') ? 413 : 400;
+const quotaExceededStatus = (error: unknown, message: string): number =>
+  error instanceof WatchtowerGlobalQuotaError ||
+  message.startsWith('TOWER_QUOTA_EXCEEDED') ||
+  message.startsWith('TOWER_BODY_TOO_LARGE') ? 413 : 400;
 
 const verifyEncryptedBundleShape = (appointment: TowerAppointmentV1): void => {
   if (!appointment.bundle || appointment.bundle.version !== 1) {
@@ -269,7 +272,7 @@ const errorResponse = (error: unknown): Response => {
   return new Response(
     serializeTaggedJson({ ok: false, error: message }),
     {
-      status: quotaExceededStatus(message),
+      status: quotaExceededStatus(error, message),
       headers: { 'content-type': 'application/json' },
     },
   );

@@ -17,6 +17,8 @@ export const createWatchtowerStore = (options: WatchtowerStoreOptions = {}) => {
     dbPath: context.dbPath,
     maxBundlesPerLookupKey: context.maxBundlesPerLookupKey,
     maxStoredBytesPerLookupKey: context.maxStoredBytesPerLookupKey,
+    maxLookupKeys: context.maxLookupKeys,
+    maxTotalStoredBytes: context.maxTotalStoredBytes,
     signerAddress: context.signer.address.toLowerCase(),
     upsertAppointment: (appointment: TowerAppointmentV1) => upsertAppointment(context, appointment),
     getLatest: (lookupKey: string) => getLatest(context, lookupKey),

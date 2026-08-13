@@ -46,6 +46,25 @@ export type AuthenticatedReceiptRange = {
   logs: AuthenticatedRpcLog[];
 };
 
+export type ReceiptAvailabilityFailureCode =
+  | 'J_RECEIPT_BLOCK_MISSING'
+  | 'J_RECEIPT_TRANSACTION_RECEIPT_MISSING';
+
+/**
+ * The RPC endpoint has not exposed data that may legitimately appear on a
+ * retry. This is transport availability, not authenticated-chain evidence and
+ * must never be promoted to a fatal watcher invariant.
+ */
+export class ReceiptAvailabilityError extends Error {
+  constructor(
+    readonly code: ReceiptAvailabilityFailureCode,
+    detail: string,
+  ) {
+    super(`${code}:${detail}`);
+    this.name = 'ReceiptAvailabilityError';
+  }
+}
+
 const ZERO_HASH = `0x${'00'.repeat(32)}`;
 
 const mapConcurrent = async <T, R>(
@@ -67,7 +86,9 @@ const mapConcurrent = async <T, R>(
 };
 
 const parseCanonicalBlock = (raw: unknown, height: number): CanonicalRpcBlock => {
-  if (!raw || typeof raw !== 'object') throw new Error(`J_RECEIPT_BLOCK_MISSING:${height}`);
+  if (!raw || typeof raw !== 'object') {
+    throw new ReceiptAvailabilityError('J_RECEIPT_BLOCK_MISSING', String(height));
+  }
   const block = raw as Partial<CanonicalRpcBlock>;
   if (parseReceiptQuantity(block.number, 'BLOCK_NUMBER') !== BigInt(height)) {
     throw new Error(`J_RECEIPT_BLOCK_NUMBER_MISMATCH:${height}:${String(block.number)}`);
@@ -250,7 +271,7 @@ const readEthereumReceipts = async (
   const unordered = rawReceipts.map((raw, index) => {
     const normalized = normalizeReceiptHash(block.transactions[index], `TRANSACTION_${index}_HASH`);
     if (!raw || typeof raw !== 'object') {
-      throw new Error(`J_RECEIPT_TRANSACTION_RECEIPT_MISSING:${normalized}`);
+      throw new ReceiptAvailabilityError('J_RECEIPT_TRANSACTION_RECEIPT_MISSING', normalized);
     }
     return raw as CanonicalRpcReceipt;
   });

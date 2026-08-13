@@ -17,6 +17,7 @@ import {
   ensureWatchtowerStoreOpen,
   normalizeLookupKey,
   readLookup,
+  runSerializedAppointmentWrite,
   writeLookup,
 } from './db';
 import type { LastResortTowerAppointment, StoredLookupDoc, WatchtowerStoreContext } from './types';
@@ -84,7 +85,7 @@ const validateAppointmentMode = (appointment: TowerAppointmentV1, towerMode: Tow
   }
 };
 
-export const upsertAppointment = async (
+const upsertAppointmentUnlocked = async (
   context: WatchtowerStoreContext,
   appointment: TowerAppointmentV1,
 ): Promise<TowerReceiptV1> => {
@@ -184,6 +185,14 @@ export const upsertAppointment = async (
   await writeLookup(context, nextDoc);
   return receipt;
 };
+
+export const upsertAppointment = async (
+  context: WatchtowerStoreContext,
+  appointment: TowerAppointmentV1,
+): Promise<TowerReceiptV1> => runSerializedAppointmentWrite(
+  context,
+  () => upsertAppointmentUnlocked(context, appointment),
+);
 
 export const getLatest = async (
   context: WatchtowerStoreContext,

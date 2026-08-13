@@ -14,6 +14,7 @@ import {
   encodeCanonicalRpcReceipt,
   readAuthenticatedReceiptRange,
   readAuthenticatedLogsForRange,
+  ReceiptAvailabilityError,
   verifyCanonicalReceiptProof,
   type CanonicalRpcReceipt,
 } from '../../../jurisdiction/adapter/receipt-root';
@@ -120,6 +121,19 @@ afterAll(async () => {
 });
 
 describe('authenticated J watcher receipts', () => {
+  test('classifies absent block data as retryable availability, not authenticated corruption', async () => {
+    const read = readAuthenticatedReceiptRange(
+      async () => null,
+      1,
+      1,
+      ['0x000000000000000000000000000000000000dEaD'],
+    );
+    await expect(read).rejects.toBeInstanceOf(ReceiptAvailabilityError);
+    await read.catch((error) => {
+      expect(error).toMatchObject({ code: 'J_RECEIPT_BLOCK_MISSING' });
+    });
+  });
+
   test('rejects a mixed-fork range at the exact post-receipt header fence', async () => {
     const block = (number: number, hash: string, parentHash: string) => ({
       number: ethers.toQuantity(number),

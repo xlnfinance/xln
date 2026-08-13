@@ -89,6 +89,7 @@ export type RelayStore = {
   maxGossipProfiles: number;
   gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
   runtimeEncryptionKeys: Map<string, string>;
+  applicationBudgets: Map<string, { windowStartedAt: number; messageCount: number; bytes: number }>;
   debugEvents: RelayDebugEvent[];
   debugEventByteLengths: number[];
   debugEventBytes: number;
@@ -124,6 +125,7 @@ const DELIVERY_TRANSIENT_REASONS = new Set([
   'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED',
   'RECOVERY_TARGET_NOT_CONNECTED',
   'TARGET_SOCKET_NOT_OPEN',
+  'ENTITY_INPUT_RATE_LIMITED',
 ]);
 
 const DELIVERY_FATAL_REASON_PARTS = [
@@ -158,6 +160,7 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
     maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
     gossipProfiles: new Map(),
     runtimeEncryptionKeys: new Map(),
+    applicationBudgets: new Map(),
     debugEvents: [],
     debugEventByteLengths: [],
     debugEventBytes: 0,

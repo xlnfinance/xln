@@ -34,6 +34,8 @@ export type StandaloneWatchtowerOptions = {
   towerId?: string;
   dbPath?: string;
   maxStoredBytesPerLookupKey?: number;
+  maxLookupKeys?: number;
+  maxTotalStoredBytes?: number;
   maxBundlesPerLookupKey?: number;
   receiptTtlMs?: number;
   towerPrivateKey?: string;
@@ -302,6 +304,8 @@ const handleHealth = async (
     towerId: store.towerId,
     signerAddress: store.signerAddress,
     maxStoredBytesPerLookupKey: store.maxStoredBytesPerLookupKey,
+    maxLookupKeys: store.maxLookupKeys,
+    maxTotalStoredBytes: store.maxTotalStoredBytes,
     maxBundlesPerLookupKey: store.maxBundlesPerLookupKey,
     sweep: { enabled: scheduler.enabled, intervalMs: scheduler.intervalMs, ...sweepHealth },
     pushWake: {
@@ -420,6 +424,8 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     ...(options.towerId ? { towerId: options.towerId } : {}),
     ...(options.dbPath ? { dbPath: options.dbPath } : {}),
     ...(options.maxStoredBytesPerLookupKey !== undefined ? { maxStoredBytesPerLookupKey: options.maxStoredBytesPerLookupKey } : {}),
+    ...(options.maxLookupKeys !== undefined ? { maxLookupKeys: options.maxLookupKeys } : {}),
+    ...(options.maxTotalStoredBytes !== undefined ? { maxTotalStoredBytes: options.maxTotalStoredBytes } : {}),
     ...(options.maxBundlesPerLookupKey !== undefined ? { maxBundlesPerLookupKey: options.maxBundlesPerLookupKey } : {}),
     ...(options.receiptTtlMs !== undefined ? { receiptTtlMs: options.receiptTtlMs } : {}),
     ...(options.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
@@ -471,6 +477,8 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     host: bindHost,
     port: server.port,
     maxStoredBytesPerLookupKey: store.maxStoredBytesPerLookupKey,
+    maxLookupKeys: store.maxLookupKeys,
+    maxTotalStoredBytes: store.maxTotalStoredBytes,
   });
 
   return {
@@ -493,6 +501,8 @@ if (import.meta.main) {
   const hostArgIdx = args.indexOf('--host');
   const dbArgIdx = args.indexOf('--db');
   const quotaArgIdx = args.indexOf('--quota-bytes');
+  const totalQuotaArgIdx = args.indexOf('--max-total-bytes');
+  const lookupKeysArgIdx = args.indexOf('--max-lookup-keys');
   const bundlesArgIdx = args.indexOf('--max-bundles');
   const sweepIntervalArgIdx = args.indexOf('--sweep-interval-ms');
 
@@ -508,6 +518,12 @@ if (import.meta.main) {
   const maxStoredBytesPerLookupKey = quotaArgIdx !== -1 && args[quotaArgIdx + 1]
     ? Number(args[quotaArgIdx + 1])
     : Number(process.env['XLN_WATCHTOWER_MAX_BYTES'] || 4 * 1024 * 1024);
+  const maxTotalStoredBytes = totalQuotaArgIdx !== -1 && args[totalQuotaArgIdx + 1]
+    ? Number(args[totalQuotaArgIdx + 1])
+    : Number(process.env['XLN_WATCHTOWER_MAX_TOTAL_BYTES'] || 1024 * 1024 * 1024);
+  const maxLookupKeys = lookupKeysArgIdx !== -1 && args[lookupKeysArgIdx + 1]
+    ? Number(args[lookupKeysArgIdx + 1])
+    : Number(process.env['XLN_WATCHTOWER_MAX_LOOKUP_KEYS'] || 10_000);
   const maxBundlesPerLookupKey = bundlesArgIdx !== -1 && args[bundlesArgIdx + 1]
     ? Number(args[bundlesArgIdx + 1])
     : Number(process.env['XLN_WATCHTOWER_MAX_BUNDLES'] || 3);
@@ -545,6 +561,8 @@ if (import.meta.main) {
     ...(dbPath ? { dbPath } : {}),
     towerId,
     maxStoredBytesPerLookupKey,
+    maxTotalStoredBytes,
+    maxLookupKeys,
     maxBundlesPerLookupKey,
     enableLastResortAgent,
     enableOperatorApi,

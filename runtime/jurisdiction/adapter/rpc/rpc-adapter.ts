@@ -10,6 +10,7 @@ import {
   isTransientRpcUnavailableError,
   resolveDisputeFinalizationEvidence,
 } from '../rpc-public';
+import { ReceiptAvailabilityError } from '../receipt-root';
 import { createRpcReadMethods } from './rpc-reads';
 import { createRpcReceiptReaders } from './rpc-receipts';
 import { createRpcSubmitTx } from './write/rpc-submission';
@@ -23,6 +24,9 @@ import {
 import { createRpcWriteMethods } from './write/rpc-write-methods';
 import { asRpcTxResponse } from './rpc-boundary';
 import { prepareDurableEvmTransaction } from './write/evm-durable-transaction';
+
+export const isRpcWatcherTransientError = (error: unknown): boolean =>
+  error instanceof ReceiptAvailabilityError || isTransientRpcUnavailableError(error);
 
 export async function createRpcAdapter(
   config: JAdapterConfig,
@@ -85,7 +89,7 @@ export async function createRpcAdapter(
     resolveDisputeFinalizationEvidence: async (txHash, args, location) =>
       resolveDisputeFinalizationEvidence(await readTxFinalizationEvidence(txHash, location), txHash, args),
     resolveDisputeProofBody: readTxDisputeProofBody,
-    isTransientRpcUnavailable: isTransientRpcUnavailableError,
+    isTransientRpcUnavailable: isRpcWatcherTransientError,
   });
   const lifecycle = createRpcLifecycleMethods({
     provider,

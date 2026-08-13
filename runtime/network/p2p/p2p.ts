@@ -44,6 +44,7 @@ const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
 const ENTITY_INPUT_TARGET_OFFLINE = 'ENTITY_INPUT_TARGET_NOT_CONNECTED';
 const RELIABLE_RECEIPT_TARGET_OFFLINE = 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED';
+const ENTITY_INPUT_RATE_LIMITED = 'ENTITY_INPUT_RATE_LIMITED';
 export const reportRelayClientError = (env: RuntimeReplica, relay: string, error: Error): void => {
   if (error.message === ENTITY_INPUT_TARGET_OFFLINE) {
     env.info('network', 'ENTITY_INPUT_TARGET_OFFLINE', { relay, error: error.message });
@@ -51,6 +52,10 @@ export const reportRelayClientError = (env: RuntimeReplica, relay: string, error
   }
   if (error.message === RELIABLE_RECEIPT_TARGET_OFFLINE) {
     env.info('network', 'RELIABLE_RECEIPT_TARGET_OFFLINE', { relay, error: error.message });
+    return;
+  }
+  if (error.message === ENTITY_INPUT_RATE_LIMITED) {
+    env.info('network', 'ENTITY_INPUT_RATE_LIMITED', { relay, error: error.message });
     return;
   }
   if (isRetryableIngressBackpressure(error)) {

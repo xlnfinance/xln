@@ -16,6 +16,7 @@ import {
   encodeBatch,
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
+import { createWatchedErc20TokenReader } from '../../../runtime/jurisdiction/adapter/rpc-watcher-inputs.ts';
 const abi = ethers.AbiCoder.defaultAbiCoder();
 const COOPERATIVE_UPDATE = 0;
 const DISPUTE_PROOF = 1;
@@ -542,6 +543,7 @@ describe('Depository', () => {
   });
   it('assigns stable token IDs only through the deployment admin', async function () {
     const { depository, erc20 } = await loadFixture(deployFixture);
+    const readWatchedTokens = createWatchedErc20TokenReader(depository, () => undefined);
     const tokenAddress = await erc20.getAddress();
     const packedToken = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(['uint8', 'address', 'uint96'], [0, tokenAddress, 0]),
@@ -550,9 +552,11 @@ describe('Depository', () => {
       depository,
       'E2',
     );
+    expect(await readWatchedTokens()).to.deep.equal([]);
     await expect(depository.connect(user0).registerExternalToken(0, tokenAddress, 0))
       .to.emit(depository, 'TokenRegistered')
       .withArgs(1n, 0, tokenAddress, 0n);
+    expect(await readWatchedTokens()).to.deep.equal([{ tokenId: 1, address: tokenAddress.toLowerCase() }]);
     expect(await depository.tokenToId(packedToken)).to.equal(1n);
     await depository.connect(user0).registerExternalToken(0, tokenAddress, 0);
     expect(await depository.getTokensLength()).to.equal(2n);

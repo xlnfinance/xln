@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
 
 import { isTransientRpcUnavailableError } from '../../../jurisdiction/adapter/rpc-public';
+import { isRpcWatcherTransientError } from '../../../jurisdiction/adapter/rpc/rpc-adapter';
+import { ReceiptAvailabilityError } from '../../../jurisdiction/adapter/receipt-root';
 
 /**
  * A shared public RPC rate-limits by IP. Classifying that throttle as fatal
@@ -25,6 +27,16 @@ test('existing transient classifications still hold', () => {
   ]) {
     expect(isTransientRpcUnavailableError(new Error(message))).toBe(true);
   }
+});
+
+test('typed receipt availability failures stay retryable at the watcher controller boundary', () => {
+  expect(isRpcWatcherTransientError(
+    new ReceiptAvailabilityError('J_RECEIPT_BLOCK_MISSING', '123'),
+  )).toBe(true);
+  expect(isRpcWatcherTransientError(
+    new ReceiptAvailabilityError('J_RECEIPT_TRANSACTION_RECEIPT_MISSING', '0x1234'),
+  )).toBe(true);
+  expect(isRpcWatcherTransientError(new Error('J_RECEIPT_ROOT_MISMATCH'))).toBe(false);
 });
 
 test('genuine faults stay fatal so a broken stack still fails loudly', () => {

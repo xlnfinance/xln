@@ -61,8 +61,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
   return jurisdiction;
 };
 
-const createRuntimeAppointment = async () => {
-  const runtimeSeed = 'watchtower-http-seed';
+const createRuntimeAppointment = async (runtimeSeed = 'watchtower-http-seed') => {
   const env = createEmptyEnv(runtimeSeed);
   const runtimeId = env.runtimeId!;
   const wallet = new Wallet(hexlify(deriveSignerKeySync(runtimeSeed, '1')));
@@ -205,7 +204,7 @@ describe('standalone watchtower service', () => {
     const put = await fetch(`${base}/api/tower/appointment`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(appointment),
+      body: serializeTaggedJson(appointment),
     });
     expect(put.ok).toBe(true);
 
@@ -348,6 +347,41 @@ describe('standalone watchtower service', () => {
     const payload = await put.json() as { ok: boolean; error?: string };
     expect(payload.ok).toBe(false);
     expect(String(payload.error || '')).toContain('TOWER_QUOTA_EXCEEDED');
+  });
+
+  test('rejects a new lookup key at the global quota without evicting the retained appointment', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-global-quota-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-global-quota-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 64 * 1024,
+      maxLookupKeys: 1,
+    });
+    servers.push(server);
+    const base = `http://127.0.0.1:${server.server.port}`;
+    const first = await createRuntimeAppointment('watchtower-global-quota-first');
+    const second = await createRuntimeAppointment('watchtower-global-quota-second');
+    const put = (appointment: TowerAppointmentV1) => fetch(`${base}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: serializeTaggedJson(appointment),
+    });
+    const [firstResponse, secondResponse] = await Promise.all([
+      put(first.appointment),
+      put(second.appointment),
+    ]);
+    expect([firstResponse.status, secondResponse.status].sort()).toEqual([200, 413]);
+    const rejected = firstResponse.status === 413 ? firstResponse : secondResponse;
+    expect(await rejected.json()).toMatchObject({ ok: false });
+    const retained = await Promise.all([
+      server.store.getLatest(first.appointment.lookupKey),
+      server.store.getLatest(second.appointment.lookupKey),
+    ]);
+    expect(retained.filter(Boolean)).toHaveLength(1);
   });
 
   test('rejects plaintext last-resort remedies over HTTP', async () => {

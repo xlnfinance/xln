@@ -17,9 +17,20 @@ import {
 
 const DEFAULT_MAX_BUNDLES = 3;
 const DEFAULT_MAX_STORED_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_LOOKUP_KEYS = 10_000;
+const DEFAULT_MAX_TOTAL_STORED_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_RECEIPT_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 export const STATS_CACHE_TTL_MS = 5_000;
 export const META_STATS_KEY = 'meta:stats:v1';
+
+export class WatchtowerGlobalQuotaError extends Error {
+  readonly code = 'TOWER_GLOBAL_QUOTA_EXCEEDED';
+
+  constructor(detail: string) {
+    super(`TOWER_GLOBAL_QUOTA_EXCEEDED:${detail}`);
+    this.name = 'WatchtowerGlobalQuotaError';
+  }
+}
 
 export const normalizeLookupKey = (lookupKey: string): string => {
   const normalized = String(lookupKey || '')
@@ -53,6 +64,11 @@ export const createWatchtowerStoreContext = (options: WatchtowerStoreOptions = {
     1024,
     Math.floor(Number(options.maxStoredBytesPerLookupKey ?? DEFAULT_MAX_STORED_BYTES)),
   );
+  const maxLookupKeys = Math.max(1, Math.floor(Number(options.maxLookupKeys ?? DEFAULT_MAX_LOOKUP_KEYS)));
+  const maxTotalStoredBytes = Math.max(
+    maxStoredBytesPerLookupKey,
+    Math.floor(Number(options.maxTotalStoredBytes ?? DEFAULT_MAX_TOTAL_STORED_BYTES)),
+  );
   const receiptTtlMs = Math.max(60_000, Math.floor(Number(options.receiptTtlMs ?? DEFAULT_RECEIPT_TTL_MS)));
   const towerPrivateKey = String(
     options.towerPrivateKey ||
@@ -64,12 +80,16 @@ export const createWatchtowerStoreContext = (options: WatchtowerStoreOptions = {
     dbPath,
     maxBundlesPerLookupKey,
     maxStoredBytesPerLookupKey,
+    maxLookupKeys,
+    maxTotalStoredBytes,
     receiptTtlMs,
     now: options.now || (() => Date.now()),
     signer: new Wallet(towerPrivateKey),
     db: new Level<string, string>(dbPath, { valueEncoding: 'utf8' }),
     opened: false,
     cachedStats: null,
+    lookupUsage: null,
+    appointmentWriteQueue: Promise.resolve(),
   };
 };
 
@@ -91,6 +111,37 @@ export const invalidateWatchtowerStats = (context: WatchtowerStoreContext): void
 };
 
 export const lookupKeyFor = (lookupKey: string): string => `lookup:${normalizeLookupKey(lookupKey)}`;
+
+export const runSerializedAppointmentWrite = async <T>(
+  context: WatchtowerStoreContext,
+  operation: () => Promise<T>,
+): Promise<T> => {
+  const predecessor = context.appointmentWriteQueue;
+  let release = (): void => undefined;
+  context.appointmentWriteQueue = new Promise<void>(resolve => { release = resolve; });
+  await predecessor;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+};
+
+const readLookupUsage = async (
+  context: WatchtowerStoreContext,
+): Promise<NonNullable<WatchtowerStoreContext['lookupUsage']>> => {
+  if (context.lookupUsage) return context.lookupUsage;
+  await ensureWatchtowerStoreOpen(context);
+  const bytesByKey = new Map<string, number>();
+  let totalStoredBytes = 0;
+  for await (const [key, raw] of context.db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
+    const bytes = Buffer.byteLength(String(raw), 'utf8');
+    bytesByKey.set(String(key), bytes);
+    totalStoredBytes += bytes;
+  }
+  context.lookupUsage = { bytesByKey, totalStoredBytes };
+  return context.lookupUsage;
+};
 
 const emptyMetaStats = (): StoredTowerMetaStats => ({ actionReceiptCount: 0 });
 
@@ -130,6 +181,23 @@ export const readLookup = async (
 
 export const writeLookup = async (context: WatchtowerStoreContext, doc: StoredLookupDoc): Promise<void> => {
   await ensureWatchtowerStoreOpen(context);
-  await context.db.put(lookupKeyFor(doc.lookupKey), serializeTaggedJson(doc));
+  const storageKey = lookupKeyFor(doc.lookupKey);
+  const serialized = serializeTaggedJson(doc);
+  const storedBytes = Buffer.byteLength(serialized, 'utf8');
+  const usage = await readLookupUsage(context);
+  const previousBytes = usage.bytesByKey.get(storageKey) ?? 0;
+  const nextLookupCount = usage.bytesByKey.size + (previousBytes === 0 ? 1 : 0);
+  const nextTotalStoredBytes = usage.totalStoredBytes - previousBytes + storedBytes;
+  if (nextLookupCount > context.maxLookupKeys) {
+    throw new WatchtowerGlobalQuotaError(`lookupKeys=${nextLookupCount}:max=${context.maxLookupKeys}`);
+  }
+  if (nextTotalStoredBytes > context.maxTotalStoredBytes && storedBytes > previousBytes) {
+    throw new WatchtowerGlobalQuotaError(
+      `storedBytes=${nextTotalStoredBytes}:max=${context.maxTotalStoredBytes}`,
+    );
+  }
+  await context.db.put(storageKey, serialized);
+  usage.bytesByKey.set(storageKey, storedBytes);
+  usage.totalStoredBytes = nextTotalStoredBytes;
   invalidateWatchtowerStats(context);
 };

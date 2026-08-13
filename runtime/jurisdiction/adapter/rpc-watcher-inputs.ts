@@ -1,6 +1,5 @@
 import type { Provider } from 'ethers';
 import { ethers } from 'ethers';
-import type { Depository } from '../../../jurisdictions/typechain-types';
 import { compareStableText } from '../../protocol/serialization';
 import type { RuntimeReplica } from '../../runtime/types';
 import {
@@ -16,6 +15,11 @@ import { watcherErrorDetails } from './rpc/rpc-boundary';
 export type WatchedErc20Token = {
   tokenId: number;
   address: string;
+};
+
+type WatchedTokenRegistry = {
+  getTokensLength(): Promise<bigint>;
+  _tokens(tokenId: number): Promise<readonly [string, bigint, bigint]>;
 };
 
 export type AuthenticatedTxLocation = Readonly<{
@@ -209,14 +213,10 @@ export const createTxDisputeProofBodyReader = (
 };
 
 export const createWatchedErc20TokenReader = (
-  depository: Depository,
+  depository: WatchedTokenRegistry,
   emitDebug: (payload: Record<string, unknown>) => void,
 ): (() => Promise<WatchedErc20Token[]>) => {
-  let cache: WatchedErc20Token[] = [];
-  let loadedAt = 0;
   return async (): Promise<WatchedErc20Token[]> => {
-    const now = Date.now();
-    if (cache.length > 0 && now - loadedAt < 10_000) return cache;
     const tokens: WatchedErc20Token[] = [];
     try {
       const length = Number(await depository.getTokensLength());
@@ -237,8 +237,6 @@ export const createWatchedErc20TokenReader = (
         `J_WATCH_ERC20_REGISTRY_READ_FAILED:${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    cache = tokens;
-    loadedAt = now;
-    return cache;
+    return tokens;
   };
 };

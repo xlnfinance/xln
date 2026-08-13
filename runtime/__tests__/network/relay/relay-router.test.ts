@@ -482,6 +482,48 @@ describe('relay-router gossip fanout', () => {
     )).toBe(true);
   });
 
+  test('defers over-budget entity inputs without closing either authenticated peer', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, RuntimeWsMessage[]>();
+    const closes: string[] = [];
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      applicationBudget: { maxMessages: 1, maxBytes: 1024 * 1024 },
+      send: (ws: FakeWs, raw: Uint8Array) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(deserializeWsMessage(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'A', readyState: 1, close: () => closes.push('A') };
+    const wsB: FakeWs = { label: 'B', readyState: 1, close: () => closes.push('B') };
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
+    const sendInput = (id: string) => relayRoute(config, wsA, {
+      type: 'entity_inputs',
+      id,
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: 'encrypted-payload',
+      encrypted: true,
+    });
+    await sendInput('within-budget');
+    await sendInput('over-budget');
+    expect(sentBySocket.get(wsB)?.some(message => message.id === 'within-budget')).toBe(true);
+    expect(sentBySocket.get(wsB)?.some(message => message.id === 'over-budget')).toBe(false);
+    expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'ENTITY_INPUT_RATE_LIMITED',
+      inReplyTo: 'over-budget',
+    });
+    expect(closes).toEqual([]);
+    expect(store.clients.has(RUNTIME_A)).toBe(true);
+    expect(store.clients.has(RUNTIME_B)).toBe(true);
+  });
+
   test('accepts Bun backpressure and rejects a zero-byte forward to an active target', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
