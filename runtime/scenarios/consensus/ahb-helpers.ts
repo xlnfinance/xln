@@ -170,7 +170,8 @@ export async function maybeApproveSettlement(
   await processUntil(env, () => {
     const [, approverReplica] = findReplica(env, approver.id);
     const account = approverReplica.state.accounts.get(counterpartyId);
-    return !account?.mempool.some((tx) => tx.type === 'settle_transition') &&
+    return account?.state.settlementWorkspace !== undefined &&
+      !account.mempool.some((tx) => tx.type === 'settle_transition') &&
       !account?.pendingFrame?.accountTxs.some((tx) => tx.type === 'settle_transition');
   }, 20, `${approver.name} settlement proposal delivery`);
 

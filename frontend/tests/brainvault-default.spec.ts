@@ -3,7 +3,9 @@ import { expect, test } from '../../tests/global-setup.mts';
 async function completeOnboarding(page: import('@playwright/test').Page): Promise<void> {
   await expect(page.getByLabel('Display name')).toBeVisible({ timeout: 240_000 });
   await expect(page.getByRole('heading', { name: /Configure account/i })).toBeVisible();
-  await expect(page.getByText('Local only')).toBeVisible();
+  const advancedSetup = page.locator('details.setup-advanced').first();
+  await expect(advancedSetup.locator(':scope > summary')).toContainText('Advanced');
+  await expect(advancedSetup).not.toHaveAttribute('open', '');
   const startButton = page.getByRole('button', { name: /^start$/i });
   await expect(startButton).toBeVisible();
   await startButton.click();

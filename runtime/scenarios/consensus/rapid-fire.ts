@@ -26,14 +26,13 @@ import {
   ensureJAdapter,
   getJAdapterMode,
   createJReplica,
-  resolveScenarioBoardSigner,
+  createJurisdictionConfig,
+  registerEntities,
 } from '../harness/boot';
-import { commitRuntimeInput, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from '../harness/helpers';
-import { generateLazyEntityId } from '../../entity/factory';
+import { getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from '../harness/helpers';
 import { DEFAULT_TOKENS } from '../../jurisdiction/machine/config/default-tokens';
 import { isLeftEntity } from '../../account/utils';
 import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
-import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 
 let _process: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;
 
@@ -76,37 +75,30 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
 
   const jMode = getJAdapterMode();
   const jadapter = await ensureJAdapter(env, jMode);
+  const jurisdiction = createJurisdictionConfig(
+    'RapidFire',
+    jadapter.addresses.depository,
+    jadapter.addresses.entityProvider,
+  );
   bindScenarioJReplica(
     env,
     createJReplica(env, 'RapidFire', jadapter.addresses.depository, { x: 0, y: 600, z: 0 }),
     jadapter,
   );
+  jadapter.startWatching(env);
 
-  const createEntity = (name: string, alias: string) => {
-    const signer = resolveScenarioBoardSigner(env, alias);
-    return {
-      name,
-      signer,
-      id: generateLazyEntityId([signer], 1n, env).toLowerCase(),
-    };
-  };
-  const alice = createEntity('Alice', '1');
-  const hub = createEntity('Hub', '2');
-  const bob = createEntity('Bob', '3');
+  const registered = await registerEntities(env, jadapter, [
+    { name: 'Alice', signer: '1', position: { x: -20, y: -40, z: 0 } },
+    { name: 'Hub', signer: '2', position: { x: 0, y: -20, z: 0 } },
+    { name: 'Bob', signer: '3', position: { x: 20, y: -40, z: 0 } },
+  ], jurisdiction);
+  const alice = registered[0];
+  const hub = registered[1];
+  const bob = registered[2];
+  if (!alice || !hub || !bob) {
+    throw new Error('RAPID_FIRE_ENTITY_REGISTRATION_INCOMPLETE');
+  }
   const entities = [alice, hub, bob];
-
-  await commitRuntimeInput(env, {
-    runtimeTxs: entities.map(e => createTestEntityImportRuntimeTx(env, {
-      entityId: e.id,
-      signerId: e.signer,
-      data: {
-        isProposer: true,
-        position: { x: 0, y: 0, z: 0 },
-        config: { mode: 'proposer-based' as const, threshold: 1n, validators: [e.signer], shares: { [e.signer]: 1n } },
-      },
-    })),
-    entityInputs: [],
-  });
 
   console.log(`  ✅ Created: ${entities.map(e => e.name).join(', ')}\n`);
 

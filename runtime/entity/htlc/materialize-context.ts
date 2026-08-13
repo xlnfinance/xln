@@ -23,6 +23,7 @@ import { encodeCanonicalConsensusValue } from '../../protocol/serialization/cano
 import { validateHtlcPreparedInfraContext } from './prepared-context-validation';
 import { getEffectiveEntityInputTxs } from '../consensus/output/envelope';
 import { resolveCanonicalEntityBoardShares } from '../auth/authorization';
+import { normalizeAccountStateDomain } from '../../account/commitment/state-root';
 
 export type MaterializeHtlcPreparedContextInput = Readonly<{
   state: EntityState;
@@ -93,7 +94,10 @@ const buildInboundBinding = (
   return {
     fromEntityId: tx.data.fromEntityId.toLowerCase(),
     toEntityId: tx.data.toEntityId.toLowerCase(),
-    domain: tx.data.domain,
+    // Each binding owns canonical domain bytes. Reusing one input object across
+    // batched locks makes protocol values depend on JavaScript object identity
+    // and triggers Bun's known repeated-reference structuredClone corruption.
+    domain: normalizeAccountStateDomain(tx.data.domain, 'HTLC_PREPARED_DOMAIN'),
     accountFrameHash: proposal.frame.stateHash.toLowerCase(),
     accountHeight: proposal.frame.height,
     lockId: accountTx.data.lockId.toLowerCase(),

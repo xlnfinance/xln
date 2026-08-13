@@ -173,6 +173,26 @@ blocker list:
 - A future fresh typed mutable-path schema for generic oversized Entity/Book
   records. There will be no compatibility reader before mainnet.
 
+## Next product milestone — universal jurisdiction Stack Manager
+
+- Add a dedicated Settings tab for deploying one canonical jurisdiction stack
+  to an arbitrary EVM RPC. Show the active BrainVault signer, chain id, native
+  gas balance, refresh/funding guidance, estimated deployment cost and exact
+  resulting contract addresses before the jurisdiction is saved locally.
+- Expose basic network/name inputs first and keep admin, token catalog, dispute
+  defaults, fee/risk limits and deployment verification in collapsed Advanced.
+- Build one typed `deployStack()` orchestration library used by both the UI and
+  Bun CLI. Foundation deployment becomes a configuration of that same path.
+  Deployment manifests carry an explicit stack version (`V1` for the current
+  contracts); versions select immutable deployed bytecode, never compatibility
+  behavior inside the live Runtime path.
+- Persist a deployed stack only after chain-id binding, bytecode/link-reference
+  verification and receipt finality. Adding it to local jurisdiction discovery
+  must not mutate any Entity consensus configuration implicitly.
+- Publish community stacks to Gossip under the deployer's signer authority.
+  Publish an `official` jurisdiction only with Foundation Hanko; no other signer
+  can announce or replace Foundation jurisdiction metadata.
+
 ## Company formation, IPO and takeover
 
 - Create an Entity and all seed-derived signers in one action, progressing from

@@ -405,7 +405,13 @@ async function captureOnboardingScreens(
     fullPage: true,
   });
 
-  const demoIdentity = prefix.startsWith('mobile') ? 'bob' : prefix === 'wide' ? 'carol' : 'dave';
+  const demoIdentity = prefix.startsWith('mobile')
+    ? 'bob'
+    : prefix === 'wide'
+      ? 'carol'
+      : prefix === 'laptop'
+        ? 'alice'
+        : 'dave';
   const seed = selectDemoMnemonic(demoIdentity);
   await page.evaluate(async ({ label, mnemonic }) => {
     const operations = (window as any).__xln?.vault as {

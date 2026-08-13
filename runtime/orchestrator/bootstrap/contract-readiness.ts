@@ -356,7 +356,16 @@ export const assertCanonicalRpcContractStack = async (
   if (hashLadderRegistryCode.toLowerCase() !== expectedHashLadderRegistryCode.toLowerCase()) {
     throw new Error(`${context}_CODE_MISMATCH:hashLadderRegistry`);
   }
-  if (nftCustodyCode.toLowerCase() !== artifacts.nftCustody.deployedBytecode.toLowerCase()) {
+  const expectedNftCustodyCode = materializeImmutableReferences(
+    'nftCustody',
+    artifacts.nftCustody,
+    artifacts.nftCustody.deployedBytecode,
+    nftCustodyCode,
+    contracts,
+    context,
+    nftCustodyAddress,
+  );
+  if (nftCustodyCode.toLowerCase() !== expectedNftCustodyCode.toLowerCase()) {
     throw new Error(`${context}_CODE_MISMATCH:nftCustody`);
   }
   for (const key of REQUIRED_RPC_CONTRACT_KEYS) {
