@@ -1,12 +1,6 @@
-import { readFileSync } from 'node:fs';
-
 import { expect, test, type Page } from '../../global-setup.mts';
 
-import {
-  normalizeBrainvaultMnemonic as normalizeMnemonic,
-  runBrainvaultCli,
-  type BrainvaultCliOutput,
-} from '../../utils/runtime/e2e-brainvault';
+import { runBrainvaultCli } from '../../utils/runtime/e2e-brainvault';
 
 import {
   APP_BASE_URL,
@@ -82,18 +76,12 @@ async function waitForBrainvaultCreateForm(page: Page): Promise<void> {
   ).toHaveCount(0);
 }
 
-async function expectPostCreateBrainvaultRecovery(page: Page): Promise<void> {
+async function expectPostCreateBrainvaultDefaults(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: /Configure account/i })).toBeVisible({ timeout: 30_000 });
-  const recoveryDetails = page.getByTestId('brainvault-onboarding-recovery');
-  await expect(recoveryDetails).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('brainvault-onboarding-recovery-toggle')).toContainText(/Seed safety/i);
-  await expect(page.getByRole('heading', { name: /Encrypted backup and last-resort dispute protection/i })).toBeVisible();
-  const downloadButton = page.getByRole('button', { name: /Download sheet/i });
-  if (!await downloadButton.isVisible().catch(() => false)) {
-    await page.getByTestId('brainvault-onboarding-recovery-toggle').click();
-  }
-  await expect(downloadButton).toBeVisible({ timeout: 5_000 });
-  await expect(page.getByRole('link', { name: /Read safety notes/i })).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole('button', { name: /Download sheet/i })).toHaveCount(0);
+  await expect(page.getByText(/Show seed/i)).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Default limits', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Encrypted backup and last-resort dispute protection/i })).toBeHidden();
 }
 
 async function readRuntimeCount(page: Page): Promise<number> {
@@ -146,69 +134,40 @@ async function waitForRuntimeMetadata(page: Page, expectedRuntimeId: string): Pr
   return await handle.jsonValue() as StoredRuntime;
 }
 
-const phraseAfter = (sheet: string, heading: string): string => {
-  const lines = sheet.split(/\r?\n/);
-  const index = lines.findIndex(line => line.trim() === heading);
-  if (index < 0) throw new Error(`BRAINVAULT_SHEET_HEADING_MISSING:${heading}`);
-  return normalizeMnemonic(lines[index + 1] || '');
-};
-
-async function readBrainvaultRecoverySheet(page: Page): Promise<BrainvaultCliOutput & { runtimeId: string }> {
-  const recoveryDetails = page.getByTestId('brainvault-onboarding-recovery');
-  await expect(recoveryDetails).toBeVisible({ timeout: 30_000 });
-  const downloadButton = page.getByRole('button', { name: /Download sheet/i });
-  if (!await downloadButton.isVisible().catch(() => false)) {
-    await page.getByTestId('brainvault-onboarding-recovery-toggle').click();
-  }
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    downloadButton.click(),
-  ]);
-  const downloadPath = await download.path();
-  if (!downloadPath) throw new Error('BRAINVAULT_SHEET_DOWNLOAD_PATH_MISSING');
-  const sheet = readFileSync(downloadPath, 'utf8');
-  const runtimeIdLine = sheet.split(/\r?\n/).find(line => line.startsWith('Runtime ID:')) || '';
-  return {
-    mnemonic24: phraseAfter(sheet, '24-word recovery phrase:'),
-    mnemonic12: phraseAfter(sheet, '12-word interoperability phrase:'),
-    runtimeId: runtimeIdLine.slice('Runtime ID:'.length).trim().toLowerCase(),
-  };
-}
-
 async function createFreshWalletWhenNoBackupExists(page: Page): Promise<void> {
   const configureHeading = page.getByRole('heading', { name: /Configure account/i });
   await expect(configureHeading).toBeVisible({ timeout: 120_000 });
+  await page.getByText('Advanced', { exact: true }).click();
   const recoveryStatus = page.getByTestId('runtime-recovery-check-status');
   await expect(recoveryStatus).toBeVisible({ timeout: 30_000 });
-  await expect(recoveryStatus).toContainText(/Checked \d+ watchtowers?,\s+found 0 backups? for this seed/i);
-  await expect(recoveryStatus.getByRole('button', { name: /I have a runtime backup file/i })).toBeVisible();
+  await expect(recoveryStatus).toContainText(/Checked \d+ watchtowers?; found 0 encrypted backups?/i);
+  await expect(recoveryStatus.getByRole('button', { name: /Import runtime backup/i })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Restore wallet/i })).toHaveCount(0);
+  await page.getByText('Advanced', { exact: true }).click();
 }
 
-async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string, shards: number): Promise<BrainvaultCliOutput> {
+async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string, shards: number): Promise<string> {
   await waitForBrainvaultCreateForm(page);
 
   await page.locator('#name').fill(name);
   await page.locator('#passphrase').fill(passphrase);
 
   // Security work factor presets (incl. Custom) are collapsed under the "Advanced" toggle now.
-  await page.getByRole('button', { name: /Security work factor/i }).click();
+  await page.getByRole('button', { name: /Advanced/i }).click();
   await page.getByRole('button', { name: /Custom/i }).click();
   await page.locator('#shards').fill(String(shards));
 
-  const openVaultButton = page.getByRole('button', { name: 'Derive in browser', exact: true });
+  const openVaultButton = page.getByRole('button', { name: 'Derive wallet', exact: true });
   await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
   await openVaultButton.click();
   await createFreshWalletWhenNoBackupExists(page);
 
-  const recovery = await readBrainvaultRecoverySheet(page);
-  const expectedRuntimeId = deriveSignerAddressFromMnemonic(recovery.mnemonic24);
+  const expectedRuntimeId = deriveSignerAddressFromMnemonic(runBrainvaultCli(name, passphrase, shards).mnemonic24);
   const runtime = await waitForRuntimeMetadata(page, expectedRuntimeId);
   expect(runtime.label).toBe(name);
   expect(runtime.seed).toBeUndefined();
   expect(runtime.mnemonic12).toBeUndefined();
-  expect(recovery.runtimeId).toBe(expectedRuntimeId);
-  return recovery;
+  return expectedRuntimeId;
 }
 
 async function waitForCanonicalProfile(page: Page, expectedProfileName: string): Promise<CanonicalEntityProbe> {
@@ -290,7 +249,12 @@ async function startBrainvaultWallet(page: Page, expectedProfileName: string): P
   const configureHeading = page.getByRole('heading', { name: /Configure account/i });
   await expect(configureHeading).toBeVisible({ timeout: 30_000 });
   await page.locator('#display-name').fill(expectedProfileName);
+  // This three-hub resilience fixture explicitly overrides the simple one-hub
+  // product default through the collapsed operator controls.
+  const advanced = page.getByText('Advanced', { exact: true });
+  await advanced.click();
   await page.locator('#hub-join-select').selectOption('3');
+  await advanced.click();
 
   const terms = page.locator('.confirm-section input[type="checkbox"]').first();
   if (!await terms.isChecked()) await terms.check();
@@ -385,10 +349,8 @@ test.describe('brainvault parity', () => {
       await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 250 });
 
       const cli = runBrainvaultCli(currentCase.name, currentCase.passphrase, currentCase.shards);
-      const ui = await deriveBrainvaultInUi(page, currentCase.name, currentCase.passphrase, currentCase.shards);
-
-      expect(ui.mnemonic12).toBe(cli.mnemonic12);
-      expect(ui.mnemonic24).toBe(cli.mnemonic24);
+      const uiRuntimeId = await deriveBrainvaultInUi(page, currentCase.name, currentCase.passphrase, currentCase.shards);
+      expect(uiRuntimeId).toBe(deriveSignerAddressFromMnemonic(cli.mnemonic24));
     });
   }
 
@@ -402,25 +364,21 @@ test.describe('brainvault parity', () => {
     await page.locator('#name').fill('standalone vault');
     await page.locator('#passphrase').fill('ced-export-42');
     // Security work factor presets are collapsed under the "Advanced" toggle now.
-    await page.getByRole('button', { name: /Security work factor/i }).click();
+    await page.getByRole('button', { name: /Advanced/i }).click();
     await page.getByRole('button', { name: /^1\s+Test$/ }).click();
 
-    const openVaultButton = page.getByRole('button', { name: 'Derive in browser', exact: true });
+    const openVaultButton = page.getByRole('button', { name: 'Derive wallet', exact: true });
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
     await openVaultButton.click();
     await createFreshWalletWhenNoBackupExists(page);
 
     const expectedRuntimeId = deriveSignerAddressFromMnemonic(cli.mnemonic24);
     const runtime = await waitForRuntimeMetadata(page, expectedRuntimeId);
-    const recovery = await readBrainvaultRecoverySheet(page);
     expect(runtime.label).toBe('standalone vault');
     expect(runtime.seed).toBeUndefined();
     expect(runtime.mnemonic12).toBeUndefined();
-    expect(recovery.mnemonic24).toBe(cli.mnemonic24);
-    expect(recovery.mnemonic12).toBe(cli.mnemonic12);
-    expect(recovery.runtimeId).toBe(expectedRuntimeId);
     expect(await readRuntimeCount(page)).toBe(1);
-    await expectPostCreateBrainvaultRecovery(page);
+    await expectPostCreateBrainvaultDefaults(page);
 
     const canonicalEntity = await startBrainvaultWallet(page, 'standalone live profile');
     expect(canonicalEntity.runtimeId).toBe(expectedRuntimeId);
@@ -465,7 +423,7 @@ test.describe('brainvault parity', () => {
     await openAddRuntimePanel(page);
     const derived = await deriveBrainvaultInUi(page, 'embedded add runtime', 'ced-add-runtime-42', 1);
 
-    const runtime = await waitForRuntimeMetadata(page, deriveSignerAddressFromMnemonic(derived.mnemonic24));
+    const runtime = await waitForRuntimeMetadata(page, derived);
     expect(runtime.label).toBe('embedded add runtime');
     expect(runtime.seed).toBeUndefined();
     expect(runtime.mnemonic12).toBeUndefined();

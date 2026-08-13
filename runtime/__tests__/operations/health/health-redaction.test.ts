@@ -37,6 +37,12 @@ test('public runtime health strips operational identifiers and reserves', () => 
   const publicPayload = publicRuntimeHealth({
     timestamp: 1,
     systemOk: true,
+    bootstrap: {
+      runtimeStateHash: '0xruntime-root',
+      entityStateHash: '0xentity-root',
+      restoredEntityStateHash: '0xrestored-root',
+      privateSeed: 'never-public',
+    },
     relay: {
       activeClientCount: 2,
       activeClients: ['runtime-secret'],
@@ -61,6 +67,9 @@ test('public runtime health strips operational identifiers and reserves', () => 
   expect(body).not.toContain('accounts');
   expect(body).not.toContain('activeClients');
   expect(body).toContain('activeClientCount');
+  expect(body).toContain('0xruntime-root');
+  expect(body).toContain('0xentity-root');
+  expect(body).not.toContain('never-public');
 });
 
 test('public hub health exposes halted status without leaking fatal internals', () => {

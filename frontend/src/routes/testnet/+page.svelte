@@ -1,4 +1,12 @@
 <script lang="ts">
+  import { DEMO_ACCOUNTS } from '$lib/config/demo-accounts';
+  import { resetEverything } from '$lib/utils/control/resetEverything';
+
+  async function resetTestnet(): Promise<void> {
+    if (!window.confirm('Delete every local xln wallet, cache, and testnet database on this device?')) return;
+    await resetEverything({ confirmed: true, reason: 'testnet-tools' });
+  }
+
   const cards = [
     {
       title: 'Web Wallet',
@@ -60,6 +68,23 @@
       </a>
     {/each}
   </div>
+
+  <section class="tools" aria-labelledby="testnet-tools-heading">
+    <div>
+      <div class="hero-badge">LOCAL TOOLS</div>
+      <h2 id="testnet-tools-heading">Test identities</h2>
+      <p>Disposable Brain Vault wallets for local scenarios. They use no saved production identity.</p>
+    </div>
+    <div class="demo-grid">
+      {#each DEMO_ACCOUNTS as account}
+        <a class="demo-account" href={`/app?demo=${encodeURIComponent(account.label)}`}>
+          <strong>{account.label}</strong>
+          <span>Open disposable wallet</span>
+        </a>
+      {/each}
+    </div>
+    <button class="reset-button" type="button" on:click={resetTestnet}>Delete local testnet data</button>
+  </section>
 
   <footer class="footer">
     <p>Built with bilateral consensus. Every payment is a cryptographic proof.</p>
@@ -197,6 +222,51 @@
     text-align: center;
     color: #52525b;
     font-size: 13px;
+  }
+
+  .tools {
+    width: min(960px, 100%);
+    margin-top: 28px;
+    padding: 24px;
+    border: 1px solid #27272a;
+    border-radius: 16px;
+    background: #111113;
+  }
+
+  .tools h2,
+  .tools p { margin: 0; }
+
+  .tools p { margin-top: 6px; color: #71717a; font-size: 13px; }
+
+  .demo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .demo-account {
+    display: grid;
+    gap: 4px;
+    padding: 14px;
+    color: #e4e4e7;
+    text-decoration: none;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    background: #18181b;
+  }
+
+  .demo-account:hover { border-color: #4ade80; }
+  .demo-account span { color: #71717a; font-size: 11px; }
+
+  .reset-button {
+    margin-top: 18px;
+    padding: 10px 14px;
+    color: #fca5a5;
+    border: 1px solid rgba(248, 113, 113, .35);
+    border-radius: 9px;
+    background: rgba(127, 29, 29, .16);
+    cursor: pointer;
   }
 
   .footer p {

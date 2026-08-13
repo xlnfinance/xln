@@ -1,13 +1,13 @@
 {
-  "title": "desktop onboarding seed",
+  "title": "wide account configuration",
   "group": "Onboarding",
-  "description": "New operator creates a browser runtime wallet.",
+  "description": "Minimal public identity and default account limits before entering the wallet.",
   "platform": "desktop",
   "tags": [
     "onboarding",
-    "wallet"
+    "account limits"
   ],
   "sourceTest": "ui screenshot smoke captures onboarding and testnet tools across viewports",
   "project": "chromium",
-  "capturedAt": 1786658898502
+  "capturedAt": 1786658903923
 }

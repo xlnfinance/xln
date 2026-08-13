@@ -1,13 +1,13 @@
 {
-  "title": "desktop onboarding seed",
+  "title": "mobile-iphone15pro onboarding seed",
   "group": "Onboarding",
   "description": "New operator creates a browser runtime wallet.",
-  "platform": "desktop",
+  "platform": "mobile",
   "tags": [
     "onboarding",
     "wallet"
   ],
   "sourceTest": "ui screenshot smoke captures onboarding and testnet tools across viewports",
   "project": "chromium",
-  "capturedAt": 1786658898502
+  "capturedAt": 1786658906985
 }

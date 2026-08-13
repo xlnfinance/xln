@@ -1,0 +1,14 @@
+{
+  "title": "wide testnet tools",
+  "group": "Testnet",
+  "description": "Testnet entry points, disposable identities, and explicit local reset control.",
+  "platform": "desktop",
+  "tags": [
+    "testnet",
+    "demo identities",
+    "reset"
+  ],
+  "sourceTest": "ui screenshot smoke captures onboarding and testnet tools across viewports",
+  "project": "chromium",
+  "capturedAt": 1786658900914
+}

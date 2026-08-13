@@ -99,6 +99,8 @@ export const publicRuntimeHealth = (payload: unknown): Record<string, unknown> =
   const marketMaker = recordOf(root, 'marketMaker');
   const custody = recordOf(root, 'custody');
   const bootstrapReserves = recordOf(root, 'bootstrapReserves');
+  const bootstrap = recordOf(root, 'bootstrap');
+  const source = recordOf(root, 'source');
   const disk = recordOf(root, 'disk');
   const storage = recordOf(root, 'storage');
   const boot = optionalRecordOf(root, 'boot');
@@ -111,6 +113,12 @@ export const publicRuntimeHealth = (payload: unknown): Record<string, unknown> =
     degraded: arrayOf(root, 'degraded'),
     failures: publicFailureSignals(root),
     system: valueOf(root, 'system'),
+    source: { height: valueOf(source, 'height') },
+    bootstrap: {
+      runtimeStateHash: valueOf(bootstrap, 'runtimeStateHash'),
+      entityStateHash: valueOf(bootstrap, 'entityStateHash'),
+      restoredEntityStateHash: valueOf(bootstrap, 'restoredEntityStateHash'),
+    },
     boot: boot
       ? {
         phase: valueOf(boot, 'phase'),

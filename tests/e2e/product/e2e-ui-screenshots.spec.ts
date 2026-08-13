@@ -16,10 +16,17 @@ async function captureUxPage(
   page: Page,
   output: Parameters<typeof capturePageScreenshot>[1],
   name: string,
-  metadata: { title: string; group: string; description: string; platform?: 'desktop' | 'mobile'; tags?: string[] },
+  metadata: {
+    title: string;
+    group: string;
+    description: string;
+    platform?: 'desktop' | 'mobile';
+    tags?: string[];
+    fullPage?: boolean;
+  },
 ): Promise<void> {
   await capturePageScreenshot(page, output, name, {
-    fullPage: false,
+    fullPage: metadata.fullPage ?? false,
     ux: {
       title: metadata.title,
       group: metadata.group,
@@ -368,18 +375,44 @@ async function captureMainTabs(
   });
 }
 
-async function captureOnboardingScreens(page: Page, output: Parameters<typeof capturePageScreenshot>[1]): Promise<void> {
+async function captureTestnetTools(
+  page: Page,
+  output: Parameters<typeof capturePageScreenshot>[1],
+  prefix: string,
+): Promise<void> {
+  const platform = platformFromPrefix(prefix);
+  await page.goto(`${APP_BASE_URL}/testnet`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: 'xln Testnet' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Test identities' })).toBeVisible({ timeout: 30_000 });
+  await captureUxPage(page, output, `${prefix}-testnet-tools.png`, {
+    title: `${prefix} testnet tools`,
+    group: 'Testnet',
+    description: uxDescription('Testnet entry points, disposable identities, and explicit local reset control.'),
+    platform,
+    tags: ['testnet', 'demo identities', 'reset'],
+    fullPage: true,
+  });
+}
+
+async function captureOnboardingScreens(
+  page: Page,
+  output: Parameters<typeof capturePageScreenshot>[1],
+  prefix: string,
+): Promise<void> {
+  const platform = platformFromPrefix(prefix);
   await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
   await expect(page.getByRole('heading', { name: /Create XLN wallet/i }).first()).toBeVisible({ timeout: 30_000 });
-  await captureUxPage(page, output, 'desktop-onboarding-seed.png', {
-    title: 'desktop onboarding seed',
+  await captureUxPage(page, output, `${prefix}-onboarding-seed.png`, {
+    title: `${prefix} onboarding seed`,
     group: 'Onboarding',
     description: uxDescription('New operator creates a browser runtime wallet.'),
-    platform: 'desktop',
+    platform,
     tags: ['onboarding', 'wallet'],
+    fullPage: true,
   });
 
-  const seed = selectDemoMnemonic('dave');
+  const demoIdentity = prefix.startsWith('mobile') ? 'bob' : prefix === 'wide' ? 'carol' : 'dave';
+  const seed = selectDemoMnemonic(demoIdentity);
   await page.evaluate(async ({ label, mnemonic }) => {
     const operations = (window as any).__xln?.vault as {
       createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
@@ -394,19 +427,44 @@ async function captureOnboardingScreens(page: Page, output: Parameters<typeof ca
   }, { label: 'visual-onboarding', mnemonic: seed });
 
   await expect(page.getByRole('heading', { name: /Configure account/i }).first()).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByTestId('brainvault-onboarding-recovery').first()).toBeVisible({ timeout: 20_000 });
-  await captureUxPage(page, output, 'desktop-onboarding-account-config.png', {
-    title: 'desktop account configuration',
+  await expect(page.getByRole('heading', { name: /Default limits/i }).first()).toBeVisible({ timeout: 20_000 });
+  await captureUxPage(page, output, `${prefix}-onboarding-account-config.png`, {
+    title: `${prefix} account configuration`,
     group: 'Onboarding',
-    description: uxDescription('Recovery and account setup screen before entering the wallet.'),
-    platform: 'desktop',
-    tags: ['onboarding', 'recovery'],
+    description: uxDescription('Minimal public identity and default account limits before entering the wallet.'),
+    platform,
+    tags: ['onboarding', 'account limits'],
+    fullPage: true,
   });
 }
 
-test('ui screenshot smoke captures onboarding screens', { tag: '@functional' }, async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
-  await captureOnboardingScreens(page, testInfo);
+test('ui screenshot smoke captures onboarding and testnet tools across viewports', { tag: '@functional' }, async ({ browser, page }, testInfo) => {
+  test.setTimeout(240_000);
+  await captureTestnetTools(page, testInfo, 'desktop');
+  await captureOnboardingScreens(page, testInfo, 'desktop');
+
+  let wideContext: BrowserContext | null = null;
+  let mobileContext: BrowserContext | null = null;
+  try {
+    wideContext = await browser.newContext({
+      viewport: { width: 1728, height: 1117 },
+      ignoreHTTPSErrors: true,
+    });
+    const widePage = await wideContext.newPage();
+    await captureTestnetTools(widePage, testInfo, 'wide');
+    await captureOnboardingScreens(widePage, testInfo, 'wide');
+
+    mobileContext = await browser.newContext({
+      ...devices['iPhone 15 Pro'],
+      ignoreHTTPSErrors: true,
+    });
+    const mobilePage = await mobileContext.newPage();
+    await captureTestnetTools(mobilePage, testInfo, 'mobile-iphone15pro');
+    await captureOnboardingScreens(mobilePage, testInfo, 'mobile-iphone15pro');
+  } finally {
+    await mobileContext?.close().catch(() => {});
+    await wideContext?.close().catch(() => {});
+  }
 });
 
 test('ui screenshot smoke captures operator admin surfaces', { tag: '@functional' }, async ({ page }, testInfo) => {

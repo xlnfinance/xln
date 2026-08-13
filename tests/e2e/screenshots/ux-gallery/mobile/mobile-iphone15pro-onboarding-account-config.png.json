@@ -1,13 +1,13 @@
 {
-  "title": "desktop account configuration",
+  "title": "mobile-iphone15pro account configuration",
   "group": "Onboarding",
   "description": "Minimal public identity and default account limits before entering the wallet.",
-  "platform": "desktop",
+  "platform": "mobile",
   "tags": [
     "onboarding",
     "account limits"
   ],
   "sourceTest": "ui screenshot smoke captures onboarding and testnet tools across viewports",
   "project": "chromium",
-  "capturedAt": 1786658899623
+  "capturedAt": 1786658908038
 }

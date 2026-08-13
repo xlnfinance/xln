@@ -1,6 +1,5 @@
 import { broadcastHardResetRequest } from './activeTabLock';
 import { shutdownRuntimeResumeListener, vaultOperations } from '../../stores/vault/vaultStore';
-import { RESET_CONFIRM_COOKIE } from './resetDbGuard';
 
 let activeResetPromise: Promise<void> | null = null;
 
@@ -27,51 +26,62 @@ const assertResetConfirmed = (request: unknown): ResetEverythingRequest => {
 };
 
 async function stopCurrentRuntimeActivity(): Promise<void> {
-  try {
-    await vaultOperations.suspendAllRuntimeActivity?.();
-    shutdownRuntimeResumeListener?.();
-  } catch {
-    // best effort
+  await vaultOperations.suspendAllRuntimeActivity?.();
+  shutdownRuntimeResumeListener?.();
+}
+
+function requestOtherTabsShutdown(): void {
+  broadcastHardResetRequest();
+}
+
+const deleteIndexedDb = (name: string): Promise<void> => new Promise((resolve, reject) => {
+  const request = indexedDB.deleteDatabase(name);
+  request.onsuccess = () => resolve();
+  request.onerror = () => reject(request.error ?? new Error(`RESET_INDEXED_DB_DELETE_FAILED:${name}`));
+  request.onblocked = () => reject(new Error(`RESET_INDEXED_DB_DELETE_BLOCKED:${name}`));
+});
+
+const clearIndexedDatabases = async (): Promise<void> => {
+  if (typeof indexedDB === 'undefined' || typeof indexedDB.databases !== 'function') {
+    throw new Error('RESET_INDEXED_DB_ENUMERATION_UNAVAILABLE');
   }
-}
+  const databases = await indexedDB.databases();
+  const names = databases
+    .map(database => database.name?.trim() || '')
+    .filter((name): name is string => name.length > 0);
+  await Promise.all(names.map(deleteIndexedDb));
+};
 
-async function requestOtherTabsShutdown(): Promise<void> {
-  try {
-    broadcastHardResetRequest();
-  } catch {
-    // best effort
-  }
-}
+const clearBrowserCaches = async (): Promise<void> => {
+  if (typeof caches === 'undefined') return;
+  const names = await caches.keys();
+  const deleted = await Promise.all(names.map(name => caches.delete(name)));
+  if (deleted.some(result => result !== true)) throw new Error('RESET_CACHE_DELETE_FAILED');
+};
 
-function randomResetNonce(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('');
-}
+const unregisterServiceWorkers = async (): Promise<void> => {
+  if (!('serviceWorker' in navigator)) return;
+  const registrations = await navigator.serviceWorker.getRegistrations();
+  const deleted = await Promise.all(registrations.map(registration => registration.unregister()));
+  if (deleted.some(result => result !== true)) throw new Error('RESET_SERVICE_WORKER_UNREGISTER_FAILED');
+};
 
-function setResetConfirmationCookie(nonce: string): void {
-  document.cookie = `${RESET_CONFIRM_COOKIE}=${nonce}; Path=/resetdb; SameSite=Strict; Max-Age=30`;
-}
-
-function buildResetDbUrl(nonce: string): string {
-  const returnTo =
-    window.location.pathname.startsWith('/app') || window.location.pathname === '/loading-screen'
-      ? '/app'
-      : '/app';
-  return `/resetdb?returnTo=${encodeURIComponent(returnTo)}&confirm=${encodeURIComponent(nonce)}`;
-}
+export const clearBrowserRuntimeData = async (): Promise<void> => {
+  localStorage.clear();
+  sessionStorage.clear();
+  await Promise.all([clearIndexedDatabases(), clearBrowserCaches(), unregisterServiceWorkers()]);
+};
 
 export async function resetEverything(request: ResetEverythingRequest): Promise<void> {
   assertResetConfirmed(request);
   if (activeResetPromise) return activeResetPromise;
 
   activeResetPromise = (async () => {
-    const nonce = randomResetNonce();
-    setResetConfirmationCookie(nonce);
     await stopCurrentRuntimeActivity();
-    await requestOtherTabsShutdown();
+    requestOtherTabsShutdown();
     await sleep(RESET_TAB_SETTLE_MS);
-    window.location.replace(buildResetDbUrl(nonce));
+    await clearBrowserRuntimeData();
+    window.location.replace('/app');
   })();
 
   return activeResetPromise;

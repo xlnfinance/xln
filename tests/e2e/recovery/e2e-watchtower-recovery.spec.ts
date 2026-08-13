@@ -532,7 +532,7 @@ async function createRuntimeViaUi(
   let factorOneButton = page.getByRole('button', { name: /^1\s+/i }).first();
   if (!await factorOneButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
     // Factor presets are collapsed under the "Advanced" (Security work factor) toggle now.
-    const advancedToggle = page.getByRole('button', { name: /Security work factor/i }).first();
+    const advancedToggle = page.getByRole('button', { name: /Advanced/i }).first();
     if (await advancedToggle.isVisible({ timeout: 1_000 }).catch(() => false)) {
       await advancedToggle.click();
       factorOneButton = page.getByRole('button', { name: /^1\s+/i }).first();
@@ -546,7 +546,7 @@ async function createRuntimeViaUi(
   // browser or on a node, a raw seed continues with the seed. "Derive wallet"
   // and the older wallet-opening labels no longer exist in the UI.
   const createButton = page.getByRole('button', {
-    name: /Derive in browser|Derive on node|Continue with seed|Verify recovery/i,
+    name: /Derive wallet|Derive on node|Continue with seed|Verify recovery/i,
   }).first();
   await expect(createButton).toBeEnabled({ timeout: 15_000 });
   await createButton.click({ force: true });
@@ -702,14 +702,9 @@ async function wipeBrowserRuntimeState(page: Page, context: BrowserContext, towe
     }
     (window as typeof window & { __XLN_WATCHTOWERS__?: string[] }).__XLN_WATCHTOWERS__ = urls;
   }, towerUrls);
-  const resetNonce = '0123456789abcdef0123456789abcdef';
-  await context.addCookies([{
-    name: 'xln_reset_confirm',
-    value: resetNonce,
-    url: `${APP_BASE_URL}/resetdb`,
-    sameSite: 'Strict',
-  }]);
-  await nextPage.goto(`${APP_BASE_URL}/resetdb?returnTo=/app&confirm=${resetNonce}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  nextPage.once('dialog', dialog => dialog.accept());
+  await nextPage.goto(`${APP_BASE_URL}/app#reset`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await nextPage.waitForURL(`${APP_BASE_URL}/app`, { timeout: 30_000 });
   return nextPage;
 }
 

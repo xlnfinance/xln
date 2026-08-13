@@ -13,6 +13,59 @@ export type VaultSecrets = {
   mnemonic12?: string;
 };
 
+const PROTECTED_VAULT_KEYS = ['version', 'keyId', 'iv', 'ciphertext', 'unlockUntil'] as const;
+const KEY_ID_PATTERN = /^[0-9a-f]{32}$/;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const requireExactProtectedVaultKeys = (value: Record<string, unknown>): void => {
+  const allowed = new Set<string>(PROTECTED_VAULT_KEYS);
+  const missing = PROTECTED_VAULT_KEYS.filter(key => !Object.hasOwn(value, key));
+  const extra = Object.keys(value).filter(key => !allowed.has(key));
+  if (missing.length > 0 || extra.length > 0) {
+    throw new Error(`VAULT_PROTECTION_FIELDS_INVALID:missing=${missing.join(',') || 'none'}:extra=${extra.join(',') || 'none'}`);
+  }
+};
+
+const requireBase64Bytes = (value: unknown, bytes: number | null, code: string): string => {
+  if (typeof value !== 'string' || value.length === 0) throw new Error(code);
+  let decoded: string;
+  try {
+    decoded = atob(value);
+  } catch {
+    throw new Error(code);
+  }
+  if ((bytes !== null && decoded.length !== bytes) || (bytes === null && decoded.length === 0)) {
+    throw new Error(code);
+  }
+  return value;
+};
+
+export const decodeProtectedVaultSecrets = (value: unknown): ProtectedVaultSecrets => {
+  if (!isRecord(value)) throw new Error('VAULT_PROTECTION_INVALID');
+  requireExactProtectedVaultKeys(value);
+  if (value['version'] !== 1) throw new Error('VAULT_PROTECTION_VERSION_UNSUPPORTED');
+  if (typeof value['keyId'] !== 'string' || !KEY_ID_PATTERN.test(value['keyId'])) {
+    throw new Error('VAULT_PROTECTION_KEY_ID_INVALID');
+  }
+  const unlockUntil = value['unlockUntil'];
+  if (unlockUntil !== null && (
+    typeof unlockUntil !== 'number'
+    || !Number.isSafeInteger(unlockUntil)
+    || unlockUntil < 0
+  )) {
+    throw new Error('VAULT_PROTECTION_UNLOCK_UNTIL_INVALID');
+  }
+  return {
+    version: 1,
+    keyId: value['keyId'],
+    iv: requireBase64Bytes(value['iv'], 12, 'VAULT_PROTECTION_IV_INVALID'),
+    ciphertext: requireBase64Bytes(value['ciphertext'], null, 'VAULT_PROTECTION_CIPHERTEXT_INVALID'),
+    unlockUntil,
+  };
+};
+
 export const redactVaultRuntimeForPersistence = <T extends {
   seed?: unknown;
   mnemonic12?: unknown;
@@ -150,11 +203,9 @@ export const protectVaultSecrets = async (
 
 export const unprotectVaultSecrets = async (
   runtimeId: string,
-  protectedSecrets: ProtectedVaultSecrets,
+  encodedProtection: ProtectedVaultSecrets,
 ): Promise<VaultSecrets | null> => {
-  if (protectedSecrets.version !== 1) {
-    throw new Error('VAULT_PROTECTION_VERSION_UNSUPPORTED');
-  }
+  const protectedSecrets = decodeProtectedVaultSecrets(encodedProtection);
   if (protectedSecrets.unlockUntil !== null && protectedSecrets.unlockUntil <= Date.now()) {
     await deleteVaultDeviceKey(runtimeId, protectedSecrets);
     return null;

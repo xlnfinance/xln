@@ -1,5 +1,5 @@
 {
-  "title": "desktop onboarding seed",
+  "title": "wide onboarding seed",
   "group": "Onboarding",
   "description": "New operator creates a browser runtime wallet.",
   "platform": "desktop",
@@ -9,5 +9,5 @@
   ],
   "sourceTest": "ui screenshot smoke captures onboarding and testnet tools across viewports",
   "project": "chromium",
-  "capturedAt": 1786658898502
+  "capturedAt": 1786658902801
 }

@@ -179,6 +179,15 @@ test('PaymentPanel consumes PaymentPanelView instead of owning full env reads', 
   expect(viewSource).toContain('networkGraph?: PaymentRuntimeGraph | null');
 });
 
+test('PaymentPanel clears every delayed payment callback on destroy', () => {
+  const panel = readFileSync('frontend/src/lib/components/Entity/payments/PaymentPanel.svelte', 'utf8');
+  const destroyStart = panel.indexOf('onDestroy(() => {');
+  const destroyEnd = panel.indexOf('\n  });', destroyStart);
+  const destroy = panel.slice(destroyStart, destroyEnd);
+  expect(destroy).toContain('clearTimeout(paymentSubmissionTimer)');
+  expect(destroy).toContain('clearTimeout(autoRouteRetryTimer)');
+});
+
 test('payment gossip refresh is owned by runtime store operation', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
 

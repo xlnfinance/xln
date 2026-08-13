@@ -81,8 +81,6 @@
   let policyDefaultsNotice = '';
   let hasPersistedPolicy = false;
   let avatar = '';
-  let revealBrainVaultSeed = false;
-  let copiedBrainVaultField = '';
   let recoveryMode: RecoveryTowerSetupMode = 'official';
   let recoveryTowerDraft: RecoveryTowerConfig[] = [];
   let recoveryDraftLoadedFor = '';
@@ -195,13 +193,6 @@
   };
 
   $: avatar = entityAvatar($xlnFunctions, entityId);
-  $: brainVaultSeed = String($activeRuntime?.seed || '').trim();
-  $: brainVaultMnemonic12 = String($activeRuntime?.mnemonic12 || '').trim();
-  $: brainVaultSigner = $activeRuntime?.signers?.[0] ?? null;
-  $: brainVaultSignerAddress = String(brainVaultSigner?.address || '').trim();
-  $: brainVaultWordCount = brainVaultSeed ? brainVaultSeed.split(/\s+/).filter(Boolean).length : 0;
-  $: brainVaultRuntimeLabel = String($activeRuntime?.label || 'BrainVault').trim();
-  $: hasBrainVaultRecovery = Boolean(brainVaultSeed || brainVaultMnemonic12);
   $: recoveryOfficialUrl = resolveOfficialRecoveryTowerUrl();
   $: recoveryRuntimeSyncKey = `${$activeRuntime?.id || 'none'}:${JSON.stringify($activeRuntime?.recovery?.towers || [])}:${$activeRuntime?.recovery?.useDefaultTowers === true}`;
   $: {
@@ -246,42 +237,6 @@
     if (text.length <= 18) return text || '-';
     return `${text.slice(0, 10)}...${text.slice(-6)}`;
   };
-
-  async function copyBrainVaultValue(value: string, field: string): Promise<void> {
-    const text = String(value || '').trim();
-    if (!text || typeof navigator === 'undefined' || !navigator.clipboard) return;
-    await navigator.clipboard.writeText(text);
-    copiedBrainVaultField = field;
-    setTimeout(() => {
-      if (copiedBrainVaultField === field) copiedBrainVaultField = '';
-    }, 1200);
-  }
-
-  function downloadBrainVaultSheet(): void {
-    if (typeof window === 'undefined') return;
-    const lines = [
-      'XLN BrainVault recovery sheet',
-      '',
-      `Wallet: ${brainVaultRuntimeLabel || '-'}`,
-      `Runtime ID: ${$activeRuntime?.id || '-'}`,
-      `Entity ID: ${entityId || '-'}`,
-      `Signer: ${brainVaultSignerAddress || '-'}`,
-      `Seed words: ${brainVaultWordCount || '-'}`,
-      '',
-      '24-word recovery phrase:',
-      brainVaultSeed || '-',
-      '',
-      ...(brainVaultMnemonic12 ? ['12-word interoperability phrase:', brainVaultMnemonic12, ''] : []),
-      'Store offline. Anyone with these words can control this wallet.',
-    ];
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'xln-brainvault-recovery.txt';
-    link.click();
-    URL.revokeObjectURL(url);
-  }
 
   function inferRecoveryMode(): RecoveryTowerSetupMode {
     const runtime = $activeRuntime;
@@ -834,47 +789,6 @@
     <p>Set the public profile, default limits, and first hub account.</p>
   </div>
   <div class="setup-card">
-    {#if recoveryDiscoveryStatus}
-      <section class="setup-section recovery-check-compact" data-testid="runtime-recovery-check-status">
-        <div class="recovery-check-copy">
-          <span>
-            Checked {recoveryDiscoveryStatus.checkedTowers} watchtower{recoveryDiscoveryStatus.checkedTowers === 1 ? '' : 's'},
-            found {recoveryDiscoveryStatus.backupCount} backup{recoveryDiscoveryStatus.backupCount === 1 ? '' : 's'} for this seed.
-          </span>
-          {#if recoveryDiscoveryStatus.errors.length > 0}
-            <small>{recoveryDiscoveryStatus.errors.length} warning{recoveryDiscoveryStatus.errors.length === 1 ? '' : 's'} during check</small>
-          {/if}
-          {#if recoveryDiscoveryFailureLabels.length > 0}
-            <div class="recovery-check-failures" data-testid="runtime-recovery-check-failures">
-              {#each recoveryDiscoveryFailureLabels as failureLabel}
-                <small>{failureLabel}</small>
-              {/each}
-            </div>
-          {/if}
-        </div>
-        <button
-          type="button"
-          class="mini-action"
-          disabled={recoveryUploadBusy}
-          on:click={triggerRecoveryBackupFilePicker}
-        >
-          {recoveryUploadBusy ? 'Loading backup...' : 'I have a runtime backup file'}
-        </button>
-        <input
-          bind:this={recoveryBackupFileInput}
-          class="backup-file-input"
-          type="file"
-          accept=".json,application/json,text/plain"
-          on:change={handleRecoveryBackupFileSelected}
-        />
-        {#if recoveryUploadMessage}
-          <div class={recoveryUploadTone === 'error' ? 'error-msg compact' : 'recovery-note compact'}>
-            {recoveryUploadMessage}
-          </div>
-        {/if}
-      </section>
-    {/if}
-
     <section class="setup-section">
       <label class="form-label" for="display-name">Display name</label>
       <input
@@ -897,35 +811,6 @@
           <code>{entityId}</code>
         </div>
       </div>
-    </section>
-
-    <section class="setup-section jurisdiction-section">
-      <div class="section-headline">
-        <h3>Jurisdictions</h3>
-        <p>Choose where profile registration and first hub setup run automatically.</p>
-      </div>
-      {#if jurisdictionOptions.length === 0}
-        <div class="empty-recovery-card">Runtime lanes are still loading.</div>
-      {:else}
-        <div class="jurisdiction-toggle-grid">
-          {#each jurisdictionOptions as option (option.key)}
-            <label class="jurisdiction-toggle" class:selected={selectedJurisdictions[option.key] !== false}>
-              <input
-                type="checkbox"
-                checked={selectedJurisdictions[option.key] !== false}
-                on:change={(event) => setJurisdictionEnabled(option.key, event.currentTarget.checked)}
-              />
-              <span class="jurisdiction-toggle-copy">
-                <strong>{option.name}</strong>
-                <code>{shortValue(option.entityId)}</code>
-              </span>
-            </label>
-          {/each}
-        </div>
-        <p class="form-hint compact">
-          All jurisdictions are enabled by default. Disabled lanes stay in the runtime, but onboarding will not auto-publish a profile or open hub accounts there.
-        </p>
-      {/if}
     </section>
 
     <section class="setup-section">
@@ -980,80 +865,58 @@
           {policyDefaultsNotice}
         </div>
       {/if}
-      <div class="hub-join-inline">
+    </section>
+
+    <details class="setup-advanced">
+      <summary>
+        <span><strong>Advanced</strong><small>Jurisdictions, initial hub and recovery services</small></span>
+        <span aria-hidden="true">⌄</span>
+      </summary>
+
+      <div class="hub-join-inline setup-section">
         <label class="form-label" for="hub-join-select">Initial hub join</label>
         <select id="hub-join-select" class="hub-join-select" bind:value={autoJoinHubs}>
           {#each HUB_JOIN_OPTIONS as option}
             <option value={option.value}>{option.label}</option>
           {/each}
         </select>
-        <p class="form-hint compact">Open your first bilateral account automatically right after setup.</p>
+        <p class="form-hint compact">Open the first bilateral account automatically after setup.</p>
       </div>
-    </section>
 
-    {#if hasBrainVaultRecovery}
-      <section class="setup-section brainvault-section">
-        <details class="brainvault-details" data-testid="brainvault-onboarding-recovery">
-          <summary data-testid="brainvault-onboarding-recovery-toggle">
-            <span class="brainvault-summary-copy">
-              <strong>Seed safety</strong>
-              <small>Save the offline recovery sheet before relying on the account.</small>
-            </span>
-            <span class="brainvault-summary-meta">
-              <span>{brainVaultWordCount ? `${brainVaultWordCount} words` : 'Seed ready'}</span>
-              {#if brainVaultSignerAddress}
-                <code title={brainVaultSignerAddress}>{shortValue(brainVaultSignerAddress)}</code>
-              {/if}
-            </span>
-            <span class="brainvault-chevron" aria-hidden="true">⌄</span>
-          </summary>
-
-          <div class="brainvault-panel">
-            <div class="brainvault-actions">
-              <button type="button" class="mini-action" on:click={downloadBrainVaultSheet}>
-                Download sheet
-              </button>
-              <a class="mini-action" href="/docs-static/faq.md" target="_blank" rel="noreferrer">
-                Read safety notes
-              </a>
-              <button
-                type="button"
-                class="mini-action"
-                disabled={!brainVaultSeed}
-                on:click={() => revealBrainVaultSeed = !revealBrainVaultSeed}
-              >
-                {revealBrainVaultSeed ? 'Hide seed' : 'Show seed'}
-              </button>
-              <button
-                type="button"
-                class="mini-action"
-                disabled={!brainVaultSeed}
-                on:click={() => copyBrainVaultValue(brainVaultSeed, 'seed')}
-              >
-                {copiedBrainVaultField === 'seed' ? 'Copied' : 'Copy seed'}
-              </button>
-            </div>
-            <div class="brainvault-row">
-              <span>Wallet</span>
-              <code>{brainVaultRuntimeLabel || '-'}</code>
-            </div>
-            <div class="brainvault-row">
-              <span>Signer</span>
-              <code>{brainVaultSignerAddress || '-'}</code>
-            </div>
-            {#if revealBrainVaultSeed}
-              <div class="seed-box">
-                {#each brainVaultSeed.split(/\s+/) as word, index}
-                  {#if word}
-                    <span><b>{index + 1}</b>{word}</span>
-                  {/if}
-                {/each}
-              </div>
-            {/if}
+      <section class="setup-section jurisdiction-section">
+        <div class="section-headline">
+          <h3>Jurisdictions</h3>
+          <p>All runtime lanes are enabled by default.</p>
+        </div>
+        {#if jurisdictionOptions.length === 0}
+          <div class="empty-recovery-card">Runtime lanes are still loading.</div>
+        {:else}
+          <div class="jurisdiction-toggle-grid">
+            {#each jurisdictionOptions as option (option.key)}
+              <label class="jurisdiction-toggle" class:selected={selectedJurisdictions[option.key] !== false}>
+                <input type="checkbox" checked={selectedJurisdictions[option.key] !== false} on:change={(event) => setJurisdictionEnabled(option.key, event.currentTarget.checked)} />
+                <span class="jurisdiction-toggle-copy"><strong>{option.name}</strong><code>{shortValue(option.entityId)}</code></span>
+              </label>
+            {/each}
           </div>
-        </details>
+        {/if}
       </section>
-    {/if}
+
+      {#if recoveryDiscoveryStatus}
+        <section class="setup-section recovery-check-compact" data-testid="runtime-recovery-check-status">
+          <div class="recovery-check-copy">
+            <span>Checked {recoveryDiscoveryStatus.checkedTowers} watchtower{recoveryDiscoveryStatus.checkedTowers === 1 ? '' : 's'}; found {recoveryDiscoveryStatus.backupCount} encrypted backup{recoveryDiscoveryStatus.backupCount === 1 ? '' : 's'}.</span>
+            {#each recoveryDiscoveryFailureLabels as failureLabel}<small>{failureLabel}</small>{/each}
+          </div>
+          <button type="button" class="mini-action" disabled={recoveryUploadBusy} on:click={triggerRecoveryBackupFilePicker}>
+            {recoveryUploadBusy ? 'Loading backup…' : 'Import runtime backup'}
+          </button>
+          <input bind:this={recoveryBackupFileInput} class="backup-file-input" type="file" accept=".json,application/json,text/plain" on:change={handleRecoveryBackupFileSelected} />
+          {#if recoveryUploadMessage}
+            <div class={recoveryUploadTone === 'error' ? 'error-msg compact' : 'recovery-note compact'}>{recoveryUploadMessage}</div>
+          {/if}
+        </section>
+      {/if}
 
     <section class="setup-section recovery-section">
       <div class="section-headline">
@@ -1167,6 +1030,7 @@
         </div>
       {/if}
     </section>
+    </details>
 
     <section class="setup-section confirm-section">
       <div class="confirm-row">
@@ -1254,109 +1118,8 @@
     font-size: 11px;
   }
 
-  .recovery-check-failures {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-
   .backup-file-input {
     display: none;
-  }
-
-  .brainvault-section {
-    padding: 0;
-    overflow: hidden;
-    background: linear-gradient(180deg, #18130f 0%, #100d0b 100%);
-  }
-
-  .brainvault-details summary {
-    min-height: 58px;
-    padding: 14px 16px 12px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(120px, auto) auto;
-    align-items: center;
-    gap: 12px;
-    cursor: pointer;
-    list-style: none;
-  }
-
-  .brainvault-details summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .brainvault-summary-copy {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .brainvault-details summary strong {
-    color: #f5f5f4;
-    font-size: 15px;
-    line-height: 1.2;
-  }
-
-  .brainvault-details summary small {
-    color: #a8a29e;
-    font-size: 12px;
-    line-height: 1.35;
-  }
-
-  .brainvault-summary-meta {
-    min-width: 0;
-    color: #78716c;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    text-align: right;
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-
-  .brainvault-summary-meta span,
-  .brainvault-summary-meta code {
-    min-width: 0;
-    max-width: 160px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .brainvault-chevron {
-    color: #a8a29e;
-    transition: transform 0.15s ease;
-  }
-
-  .brainvault-details[open] .brainvault-chevron {
-    transform: rotate(180deg);
-  }
-
-  .brainvault-panel {
-    padding: 14px 16px 16px;
-    border-top: 1px solid #27211c;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    background: rgba(0, 0, 0, 0.16);
-  }
-
-  .brainvault-row {
-    display: grid;
-    grid-template-columns: 92px minmax(0, 1fr);
-    gap: 10px;
-    align-items: center;
-    color: #78716c;
-    font-size: 12px;
-  }
-
-  .brainvault-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
   }
 
   .mini-action {
@@ -1380,31 +1143,6 @@
   .mini-action:disabled {
     opacity: 0.45;
     cursor: not-allowed;
-  }
-
-  .seed-box {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 6px;
-    padding: 10px;
-    border-radius: 10px;
-    background: #0f0b09;
-    border: 1px solid #322821;
-  }
-
-  .seed-box span {
-    min-width: 0;
-    display: flex;
-    gap: 5px;
-    align-items: baseline;
-    color: #f5f5f4;
-    font-size: 12px;
-    overflow-wrap: anywhere;
-  }
-
-  .seed-box b {
-    color: #78716c;
-    font-size: 10px;
   }
 
   .recovery-section {
@@ -1708,17 +1446,6 @@
   }
 
   @media (max-width: 640px) {
-    .brainvault-details summary {
-      grid-template-columns: minmax(0, 1fr) auto;
-    }
-
-    .brainvault-summary-meta {
-      grid-column: 1 / -1;
-      justify-content: flex-start;
-      text-align: left;
-    }
-
-    .brainvault-actions,
     .jurisdiction-toggle-grid,
     .policy-grid,
     .recovery-mode-grid,
@@ -1726,7 +1453,6 @@
       grid-template-columns: minmax(0, 1fr);
     }
 
-    .brainvault-row,
     .recovery-service-row {
       grid-template-columns: minmax(0, 1fr);
       gap: 4px;
@@ -1766,6 +1492,29 @@
     padding-top: 16px;
     border-top: 1px solid #27211c;
   }
+
+  .setup-advanced {
+    border: 1px solid #27211c;
+    border-radius: 14px;
+    background: rgba(24, 19, 15, 0.72);
+    overflow: hidden;
+  }
+
+  .setup-advanced > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .setup-advanced > summary::-webkit-details-marker { display: none; }
+  .setup-advanced > summary span:first-child { display: grid; gap: 3px; }
+  .setup-advanced > summary small { color: #78716c; font-size: 12px; }
+  .setup-advanced[open] > summary { border-bottom: 1px solid #27211c; }
+  .setup-advanced > .setup-section { margin: 14px; }
 
   .checkbox-row {
     display: flex;
@@ -1848,29 +1597,6 @@
     .recovery-service-actions {
       align-items: stretch;
       flex-direction: column;
-    }
-
-    .brainvault-row {
-      grid-template-columns: 1fr;
-      gap: 4px;
-    }
-
-    .brainvault-details summary {
-      grid-template-columns: minmax(0, 1fr) auto;
-    }
-
-    .brainvault-summary-meta {
-      grid-column: 1 / -1;
-      max-width: none;
-      text-align: left;
-    }
-
-    .brainvault-actions {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .seed-box {
-      grid-template-columns: 1fr;
     }
 
     .btn-primary {

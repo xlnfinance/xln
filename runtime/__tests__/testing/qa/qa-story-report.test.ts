@@ -1983,8 +1983,9 @@ test('qa history stores sample-stripped manifest json', () => {
 
     const db = new Database(QA_HISTORY_DB_PATH);
     try {
-      const row = db.query(`SELECT manifest_json FROM qa_runs WHERE run_id = $runId`).get({ $runId: runId }) as {
+      const row = db.query(`SELECT manifest_json, forensic_json FROM qa_runs WHERE run_id = $runId`).get({ $runId: runId }) as {
         manifest_json?: string;
+        forensic_json?: string;
       } | null;
       expect(typeof row?.manifest_json).toBe('string');
       const stored = JSON.parse(row!.manifest_json!) as QaRunManifest;
@@ -1992,6 +1993,12 @@ test('qa history stores sample-stripped manifest json', () => {
       expect(stored.perf?.samples).toEqual([]);
       expect(stored.shards[0]?.perf?.sampleCount).toBe(1);
       expect(stored.shards[0]?.perf?.samples).toEqual([]);
+      const forensic = String(row?.forensic_json || '');
+      expect(forensic).toContain(`"runId":"${runId}"`);
+      expect(forensic).not.toContain('logTail');
+      expect(forensic).not.toContain('artifacts');
+      expect(forensic).not.toContain('samples');
+      expect(forensic).not.toContain('seed');
     } finally {
       db.close();
     }

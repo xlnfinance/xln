@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
-import { compareStableText } from '../protocol/serialization';
+import { compareStableText, safeStringify } from '../protocol/serialization';
 import { DISPLAY, QA } from '../config/constants';
 import {
   assertQaSeveritySignal,
@@ -1531,7 +1531,8 @@ const openQaHistoryDb = (): Database => {
       phase_p95_vite_boot_ms REAL,
       phase_p95_playwright_ms REAL,
       logs_dir TEXT NOT NULL,
-      manifest_json TEXT NOT NULL
+      manifest_json TEXT NOT NULL,
+      forensic_json TEXT NOT NULL DEFAULT '{}'
     );
     CREATE INDEX IF NOT EXISTS qa_runs_created_at_idx ON qa_runs(created_at DESC);
     CREATE INDEX IF NOT EXISTS qa_runs_code_hash_idx ON qa_runs(code_hash);
@@ -1563,6 +1564,7 @@ const openQaHistoryDb = (): Database => {
   addColumn('phase_p95_api_healthy_ms', 'REAL');
   addColumn('phase_p95_vite_boot_ms', 'REAL');
   addColumn('phase_p95_playwright_ms', 'REAL');
+  addColumn('forensic_json', "TEXT NOT NULL DEFAULT '{}'");
   db.exec(`CREATE INDEX IF NOT EXISTS qa_runs_suite_key_idx ON qa_runs(suite_key, created_at DESC);`);
   return db;
 };
@@ -1589,6 +1591,56 @@ const stripQaHistoryPerfSamples = (run: QaRunManifest): QaRunManifest => ({
   shards: run.shards.map(shard => ({
     ...shard,
     ...(shard.perf ? { perf: { ...shard.perf, samples: [] } } : {}),
+  })),
+});
+
+const isQaRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const readQaForensicCommitment = (logsDir: string | undefined, shard: number): Record<string, unknown> | null => {
+  if (!logsDir) return null;
+  const path = join(logsDir, `shard-${shard}`, 'artifacts', 'playwright', 'failure-debug', 'health.json');
+  if (!existsSync(path)) return null;
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+  if (!isQaRecord(parsed)) throw new Error(`QA_FORENSIC_HEALTH_INVALID:${shard}`);
+  const source = isQaRecord(parsed['source']) ? parsed['source'] : {};
+  const bootstrap = isQaRecord(parsed['bootstrap']) ? parsed['bootstrap'] : {};
+  return {
+    runtimeHeight: typeof source['height'] === 'number' && Number.isSafeInteger(source['height']) ? source['height'] : null,
+    runtimeStateHash: typeof bootstrap['runtimeStateHash'] === 'string' ? bootstrap['runtimeStateHash'] : null,
+    entityStateHash: typeof bootstrap['entityStateHash'] === 'string' ? bootstrap['entityStateHash'] : null,
+    restoredEntityStateHash: typeof bootstrap['restoredEntityStateHash'] === 'string' ? bootstrap['restoredEntityStateHash'] : null,
+  };
+};
+
+export const buildQaForensicManifest = (run: QaRunManifest, logsDir?: string): Record<string, unknown> => ({
+  version: 1,
+  runId: run.runId,
+  status: run.status,
+  createdAt: run.createdAt,
+  completedAt: run.completedAt,
+  candidate: run.candidate ?? null,
+  code: run.code ? {
+    gitHead: run.code.gitHead,
+    codeHash: run.code.codeHash,
+    buildInputHash: run.code.buildInputHash ?? null,
+    dirty: run.code.dirty,
+  } : null,
+  shards: run.shards.map(shard => ({
+    shard: shard.shard,
+    status: shard.status,
+    resultClass: shard.resultClass ?? null,
+    target: shard.target,
+    durationMs: shard.durationMs,
+    commitment: readQaForensicCommitment(logsDir, shard.shard),
+    failure: shard.failureCapsule ? {
+      file: shard.failureCapsule.file,
+      line: shard.failureCapsule.line,
+      title: shard.failureCapsule.title,
+      fingerprint: createHash('sha256')
+        .update(`${shard.failureCapsule.file}\0${shard.failureCapsule.line}\0${shard.failureCapsule.title}\0${shard.failureCapsule.error}`, 'utf8')
+        .digest('hex'),
+    } : null,
   })),
 });
 
@@ -1639,7 +1691,8 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         phase_p95_vite_boot_ms,
         phase_p95_playwright_ms,
         logs_dir,
-        manifest_json
+        manifest_json,
+        forensic_json
       ) VALUES (
         $runId,
         $createdAt,
@@ -1679,7 +1732,8 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         $phaseP95ViteBootMs,
         $phaseP95PlaywrightMs,
         $logsDir,
-        $manifestJson
+        $manifestJson,
+        $forensicJson
       )
       ON CONFLICT(run_id) DO UPDATE SET
         created_at = excluded.created_at,
@@ -1719,7 +1773,8 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         phase_p95_vite_boot_ms = excluded.phase_p95_vite_boot_ms,
         phase_p95_playwright_ms = excluded.phase_p95_playwright_ms,
         logs_dir = excluded.logs_dir,
-        manifest_json = excluded.manifest_json
+        manifest_json = excluded.manifest_json,
+        forensic_json = excluded.forensic_json
     `).run({
       $runId: normalizedRun.runId,
       $createdAt: normalizedRun.createdAt,
@@ -1760,6 +1815,7 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
       $phaseP95PlaywrightMs: timing.phaseP95?.playwright ?? null,
       $logsDir: logsDir,
       $manifestJson: JSON.stringify(stripQaHistoryPerfSamples(normalizedRun)),
+      $forensicJson: safeStringify(buildQaForensicManifest(normalizedRun, logsDir)),
     });
   } finally {
     db.close();

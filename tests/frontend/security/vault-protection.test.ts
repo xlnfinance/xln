@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 
 import {
   protectVaultSecrets,
+  decodeProtectedVaultSecrets,
   redactVaultRuntimeForPersistence,
   sameVaultProtectionLease,
   unprotectVaultSecrets,
@@ -150,17 +151,30 @@ test('expired lease deletes only its exact IndexedDB key before returning locked
   try {
     const result = await unprotectVaultSecrets('Runtime-A', {
       version: 1,
-      keyId: 'expired-key',
-      iv: 'unused',
-      ciphertext: 'unused',
+      keyId: 'a'.repeat(32),
+      iv: btoa('\0'.repeat(12)),
+      ciphertext: btoa('ciphertext'),
       unlockUntil: 0,
     });
 
     expect(result).toBeNull();
-    expect(operations).toEqual([{ method: 'delete', key: 'runtime-a:expired-key' }]);
+    expect(operations).toEqual([{ method: 'delete', key: `runtime-a:${'a'.repeat(32)}` }]);
   } finally {
     globalThis.indexedDB = previousIndexedDb;
   }
+});
+
+test('vault protection decoder rejects extra keys and malformed authority bytes', () => {
+  const valid = {
+    version: 1,
+    keyId: 'b'.repeat(32),
+    iv: btoa('\0'.repeat(12)),
+    ciphertext: btoa('ciphertext'),
+    unlockUntil: null,
+  };
+  expect(decodeProtectedVaultSecrets(valid)).toEqual(valid);
+  expect(() => decodeProtectedVaultSecrets({ ...valid, retiredField: true })).toThrow('VAULT_PROTECTION_FIELDS_INVALID');
+  expect(() => decodeProtectedVaultSecrets({ ...valid, keyId: 'short' })).toThrow('VAULT_PROTECTION_KEY_ID_INVALID');
 });
 
 test('vault unlock leases encode ten minutes, one day, and forever exactly', async () => {

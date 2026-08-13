@@ -117,16 +117,24 @@
   {#if health}
     <div class="watch-summary">
       <article>
+        <span>runtime</span>
+        <strong>{health.runtimeOk === null ? 'n/a' : health.runtimeOk ? 'online' : 'check'}</strong>
+      </article>
+      <article>
+        <span>relay</span>
+        <strong>{health.relayOk === null ? 'n/a' : health.relayOk ? 'online' : 'check'}</strong>
+      </article>
+      <article>
         <span>direct links</span>
         <strong>{health.directLinkCount}</strong>
       </article>
       <article>
-        <span>tracked paths</span>
-        <strong>{health.tracked.length}</strong>
+        <span>relay clients / profiles</span>
+        <strong>{health.relayActiveClientCount} / {health.relayProfileCount}</strong>
       </article>
       <article>
-        <span>credit pairs</span>
-        <strong>{health.creditPairs.length}</strong>
+        <span>watchtowers</span>
+        <strong>{health.watchtowerCount || 'n/a'}</strong>
       </article>
       <article>
         <span>disk used</span>

@@ -52,6 +52,7 @@ import { generateLazyEntityIdPreview } from '../../utils/identity/lazyEntityId';
 import { parseStorageSchemaMismatch } from '../../utils/recovery/storageSchemaRecovery';
 
 import {
+  decodeProtectedVaultSecrets,
   deleteVaultDeviceKey,
   protectVaultSecrets,
   sameVaultProtectionLease,
@@ -126,6 +127,7 @@ import {
   type Signer,
 } from './vault-recovery';
 import { buildDelayedLastResortAppointmentsForTower } from './vault-watchtower';
+import { decodePersistedRuntime } from './vault-persistence-decoder';
 import {
   resolveJurisdictionChainId,
   fetchJurisdictions,
@@ -284,14 +286,27 @@ const persistVaultStateOrThrow = (): void => {
   localStorage.setItem(VAULT_STORAGE_KEY, serializeVaultState(get(runtimesState)));
 };
 
+const isVaultRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 const readPersistedVaultProtection = (runtimeId: string): ProtectedVaultSecrets | undefined => {
   if (typeof localStorage === 'undefined') return undefined;
   const serialized = localStorage.getItem(VAULT_STORAGE_KEY);
   if (!serialized) return undefined;
-  const parsed = JSON.parse(serialized) as Partial<RuntimesState>;
-  for (const [storedId, runtime] of Object.entries(parsed.runtimes || {})) {
-    if (normalizeRuntimeId(runtime?.id || storedId) !== runtimeId) continue;
-    return runtime?.protectedSecrets;
+  const parsed: unknown = JSON.parse(serialized);
+  if (!isVaultRecord(parsed)) throw new Error('VAULT_STORAGE_ROOT_INVALID');
+  const runtimes = parsed['runtimes'];
+  if (!isVaultRecord(runtimes)) {
+    throw new Error('VAULT_STORAGE_RUNTIMES_INVALID');
+  }
+  for (const [storedId, value] of Object.entries(runtimes)) {
+    if (!isVaultRecord(value)) {
+      throw new Error(`VAULT_STORAGE_RUNTIME_INVALID:${storedId}`);
+    }
+    const storedRuntimeId = typeof value['id'] === 'string' ? value['id'] : storedId;
+    if (normalizeRuntimeId(storedRuntimeId) !== runtimeId) continue;
+    const protectedSecrets = value['protectedSecrets'];
+    return protectedSecrets === undefined ? undefined : decodeProtectedVaultSecrets(protectedSecrets);
   }
   return undefined;
 };
@@ -1840,19 +1855,23 @@ export const vaultOperations = {
 
       const saved = localStorage.getItem(VAULT_STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved);
+        const parsed: unknown = JSON.parse(saved);
+        if (!isVaultRecord(parsed) || !isVaultRecord(parsed['runtimes'])) {
+          throw new Error('VAULT_STORAGE_SCHEMA_INVALID');
+        }
         const normalizedRuntimes: Record<string, Runtime> = {};
-        for (const [rawKey, rawRuntime] of Object.entries(parsed?.runtimes || {})) {
-          const runtime = rawRuntime as Runtime;
-          const normalizedId = normalizeRuntimeId(runtime?.id || rawKey);
-          if (!normalizedId) continue;
+        for (const [rawKey, rawRuntime] of Object.entries(parsed['runtimes'])) {
+          const runtime = decodePersistedRuntime(rawRuntime, rawKey);
+          const normalizedId = normalizeRuntimeId(runtime.id);
+          if (!normalizedId) throw new Error(`VAULT_STORAGE_RUNTIME_ID_INVALID:${rawKey}`);
           normalizedRuntimes[normalizedId] = {
             ...runtime,
             id: normalizedId,
-            seed: typeof runtime.seed === 'string' ? runtime.seed : '',
           };
         }
-        const normalizedActiveId = normalizeRuntimeId(parsed?.activeRuntimeId || '');
+        const normalizedActiveId = normalizeRuntimeId(
+          typeof parsed['activeRuntimeId'] === 'string' ? parsed['activeRuntimeId'] : '',
+        );
         runtimesState.set({
           runtimes: normalizedRuntimes,
           activeRuntimeId:
@@ -1863,10 +1882,8 @@ export const vaultOperations = {
       }
       vaultStorageLoaded.set(true);
     } catch (error) {
-      errorLog.log('Failed to load runtimes; clearing corrupted storage', 'Runtime Storage', error);
-      localStorage.removeItem(VAULT_STORAGE_KEY);
-      runtimesState.set(defaultState);
-      vaultStorageLoaded.set(true);
+      errorLog.log('Failed to load runtimes; preserved corrupted storage for recovery', 'Runtime Storage', error);
+      throw new Error(`VAULT_STORAGE_CORRUPT:${error instanceof Error ? error.message : String(error)}`);
     }
   },
 

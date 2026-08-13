@@ -58,6 +58,7 @@ import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/util
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
 import { registerDebugSurface } from '$lib/utils/runtime/debugSurface';
 import {
+  decodeProtectedVaultSecrets,
   deleteVaultDeviceKey,
   protectVaultSecrets,
   unprotectVaultSecrets,
@@ -523,18 +524,23 @@ const persistEmbeddedRuntimeSeed = async (
   }
 };
 
-const readOrCreateEmbeddedRuntimeSeed = async (): Promise<string | undefined> => {
+export const readOrCreateEmbeddedRuntimeSeed = async (): Promise<string | undefined> => {
   if (typeof window === 'undefined') return undefined;
   const stored = localStorage.getItem(EMBEDDED_RUNTIME_SEED_STORAGE_KEY)?.trim();
   if (stored) {
     if (stored.startsWith('xln-browser-runtime:')) {
-      const protectedSecrets = await protectVaultSecrets('embedded-runtime', { seed: stored }, null);
-      await persistEmbeddedRuntimeSeed(protectedSecrets);
-      return stored;
+      throw new Error('EMBEDDED_RUNTIME_SEED_PLAINTEXT_REJECTED');
     }
-    const protectedSecrets = JSON.parse(stored) as ProtectedVaultSecrets;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stored);
+    } catch {
+      throw new Error('EMBEDDED_RUNTIME_SEED_STORAGE_INVALID_JSON');
+    }
+    const protectedSecrets = decodeProtectedVaultSecrets(parsed);
     const restored = await unprotectVaultSecrets('embedded-runtime', protectedSecrets);
     if (restored?.seed) return restored.seed;
+    throw new Error('EMBEDDED_RUNTIME_SEED_AUTHORITY_UNAVAILABLE');
   }
   const seed = generateEmbeddedRuntimeSeed();
   const protectedSecrets = await protectVaultSecrets('embedded-runtime', { seed }, null);

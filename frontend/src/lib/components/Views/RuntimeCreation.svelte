@@ -17,7 +17,6 @@
   } from '$lib/stores/vault/vaultStore';
   import type { VaultUnlockDurationMs } from '$lib/security/vaultProtection';
   import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vault/vaultUiStore';
-  import { resetEverything } from '$lib/utils/control/resetEverything';
   import { writeRuntimeRecoveryDiscoveryStatus } from '$lib/utils/recovery/recoveryDiscoveryStatus';
   import { buildRemoteRuntimeRecoveryPeerSources } from '$lib/utils/onboarding/remoteRuntimeValidation';
   import {
@@ -32,9 +31,7 @@
     getShardCount,
     hexToBytes,
   } from '@xln/brainvault/core';
-  import { DEMO_ACCOUNTS, type DemoAccount } from '$lib/config/demo-accounts';
-  import { resolveConfiguredApiBase } from '$lib/stores/xlnStore';
-  import { runtimeOperations } from '$lib/stores/runtimeStore';
+  import { DEMO_ACCOUNTS } from '$lib/config/demo-accounts';
   import {
     getRuntimeControllerAdapter,
     runtimeControllerHandle,
@@ -49,10 +46,8 @@
   } from '$lib/brainvault/workers';
   import {
     FACTOR_INFO,
-    LIVE_RUNTIME_DISCOVERY_RETRY_MS,
     WALLET_MODE_TRADEOFFS,
     estimateBrainVaultWork,
-    formatLiveRuntimeImportStatus,
     formatMemoryLabel,
     formatRuntimeDurationRounded,
     countMnemonicWords,
@@ -60,9 +55,6 @@
     hasSupportedMnemonicWordCount,
     normalizeMnemonicPhrase,
     normalizeBrainVaultShardTimeSample,
-    parseLiveRuntimeChoices,
-    shouldRetryLiveRuntimeDiscovery,
-    type LiveRuntimeChoice,
   } from './runtime-creation-model';
 
   // Props
@@ -115,8 +107,8 @@
   // ============================================================================
 
   type Phase = 'input' | 'deriving' | 'recovery' | 'node-ready';
-  type InputMode = 'brainvault' | 'mnemonic' | 'testnet';
-  type RecoveryRehearsalMode = Exclude<InputMode, 'testnet'>;
+  type InputMode = 'brainvault' | 'mnemonic';
+  type RecoveryRehearsalMode = 'mnemonic';
   type BrainVaultDerivationRun = Readonly<{
     name: string;
     passphrase: string;
@@ -144,12 +136,6 @@
       showPassphrase = false;
     }
     inputMode = next;
-    if (next !== 'testnet' || liveRuntimesLoaded || liveRuntimesLoading) return;
-    if (isScenarioPreview()) {
-      liveRuntimesLoaded = true;
-      return;
-    }
-    void discoverLiveRuntimes(true);
   }
 
   function focusWalletModeTab(next: InputMode): void {
@@ -158,7 +144,7 @@
   }
 
   function handleWalletModeKeydown(event: KeyboardEvent): void {
-    const enabledModes = (['brainvault', 'mnemonic', 'testnet'] as const).filter((mode) => (
+    const enabledModes = (['brainvault', 'mnemonic'] as const).filter((mode) => (
       rehearsalMode === null || mode === rehearsalMode
     ));
     const currentIndex = enabledModes.indexOf(inputMode);
@@ -188,143 +174,6 @@
   // Advanced options (security work factor etc.) are collapsed by default for a minimalist screen
   let showAdvanced = false;
 
-  // Group demo accounts by role (users | hubs | apps) so quick login can show separators
-  const DEMO_GROUPS: DemoAccount[][] = DEMO_ACCOUNTS.reduce((groups: DemoAccount[][], acc) => {
-    const last = groups[groups.length - 1];
-    if (last && last[0]?.role === acc.role) last.push(acc);
-    else groups.push([acc]);
-    return groups;
-  }, []);
-
-  // Live remote runtimes discovered from the server's import manifest (hubs + MM + custody).
-  type LiveRuntime = LiveRuntimeChoice;
-  let liveRuntimes: LiveRuntime[] = [];
-  let liveRuntimesLoading = false;
-  let liveRuntimesRetrying = false;
-  let liveRuntimesError = '';
-  let liveRuntimesLoaded = false;
-  let connectingRuntimeId = '';
-  let selectedRuntimeKey = '';
-  let liveRuntimeRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  let liveRuntimeRetryAttempts = 0;
-
-  function clearLiveRuntimeDiscoveryRetry(): void {
-    if (liveRuntimeRetryTimer !== null) {
-      clearTimeout(liveRuntimeRetryTimer);
-      liveRuntimeRetryTimer = null;
-    }
-    liveRuntimesRetrying = false;
-  }
-
-  function scheduleLiveRuntimeDiscoveryRetry(
-    payload: { ready?: boolean; partial?: boolean; retryable?: boolean; fatal?: boolean },
-    entryCount: number,
-  ): boolean {
-    if (!shouldRetryLiveRuntimeDiscovery(payload, entryCount, liveRuntimeRetryAttempts)) {
-      liveRuntimesRetrying = false;
-      return false;
-    }
-    clearLiveRuntimeDiscoveryRetry();
-    liveRuntimeRetryAttempts += 1;
-    liveRuntimesRetrying = true;
-    liveRuntimeRetryTimer = setTimeout(() => {
-      liveRuntimeRetryTimer = null;
-      liveRuntimesRetrying = false;
-      void discoverLiveRuntimes(true);
-    }, LIVE_RUNTIME_DISCOVERY_RETRY_MS);
-    return true;
-  }
-
-  function connectSelectedRuntime(): void {
-    const rt = liveRuntimes.find((r) => r.wsUrl === selectedRuntimeKey);
-    if (rt) void connectLiveRuntime(rt);
-  }
-
-  function selectedRuntimeAccessLabel(): 'admin' {
-    return liveRuntimes.find((r) => r.wsUrl === selectedRuntimeKey)?.access ?? 'admin';
-  }
-
-  // Auto-discovery suppresses transport failures only; reachable runtime-import readiness
-  // failures must stay visible so "no live runtimes" is never a silent bootstrap failure.
-  async function discoverLiveRuntimes(silent = false): Promise<void> {
-    if (typeof window === 'undefined' || liveRuntimesLoading) return;
-    if (!silent) {
-      clearLiveRuntimeDiscoveryRetry();
-      liveRuntimeRetryAttempts = 0;
-    }
-    liveRuntimesLoading = true;
-    liveRuntimesError = '';
-    try {
-      const apiBase = resolveConfiguredApiBase(window.location.origin);
-      const url = new URL('/api/runtime-import', apiBase);
-      url.searchParams.set('access', 'admin');
-      url.searchParams.set('ts', String(Date.now()));
-      const res = await fetch(url.toString(), { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const payload = await res.json() as {
-        ready?: boolean;
-        partial?: boolean;
-        reason?: string;
-        error?: string;
-        code?: string;
-        retryable?: boolean;
-        fatal?: boolean;
-        degraded?: unknown[];
-        manifest?: { entries?: Array<Record<string, unknown>> };
-      };
-      const next = parseLiveRuntimeChoices(payload);
-      liveRuntimes = next;
-      if (!next.some((runtime) => runtime.wsUrl === selectedRuntimeKey)) {
-        selectedRuntimeKey = next[0]?.wsUrl ?? '';
-      }
-      const retrying = silent && next.length === 0
-        ? scheduleLiveRuntimeDiscoveryRetry(payload, next.length)
-        : false;
-      if (next.length > 0) {
-        clearLiveRuntimeDiscoveryRetry();
-        liveRuntimeRetryAttempts = 0;
-      }
-      liveRuntimesLoaded = !retrying;
-      liveRuntimesError = retrying ? '' : formatLiveRuntimeImportStatus(payload, next.length);
-      await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { optional: silent });
-    } catch (err) {
-      if (silent) {
-        liveRuntimesLoaded = !scheduleLiveRuntimeDiscoveryRetry({ retryable: true }, 0);
-      } else {
-        liveRuntimesError = err instanceof Error ? err.message : String(err);
-      }
-    } finally {
-      liveRuntimesLoading = false;
-    }
-  }
-
-  async function connectLiveRuntime(rt: LiveRuntime): Promise<void> {
-    if (connectingRuntimeId) return;
-    connectingRuntimeId = rt.wsUrl;
-    liveRuntimesError = '';
-    try {
-      const stored = await runtimeOperations.connectRemote(rt.wsUrl, rt.token, {
-        label: rt.label,
-        access: rt.access,
-      });
-      const activated = await runtimeOperations.activateRemoteRuntime(stored.runtimeId, { href: '/app' });
-      if (!activated) {
-        liveRuntimesError = `${rt.label}: connected but could not activate the runtime`;
-        connectingRuntimeId = '';
-      }
-    } catch (err) {
-      liveRuntimesError = `${rt.label}: ${err instanceof Error ? err.message : String(err)}`;
-      connectingRuntimeId = '';
-    }
-  }
-
-  $: hasAnyPersistedState = typeof localStorage !== 'undefined' && (localStorage.length > 0 || typeof indexedDB !== 'undefined');
-
-  async function handleResetEverything() {
-    if (confirm('This will clear all wallets, accounts, and runtime state. Continue?')) {
-      await resetEverything({ confirmed: true, reason: 'runtime-creation-manual-reset' });
-    }
-  }
   let createLoginType: 'manual' | 'demo' = 'manual';
 
   // Input state
@@ -336,7 +185,6 @@
   let rehearsalEnabled = false;
   let rehearsalMode: RecoveryRehearsalMode | null = null;
   let rehearsalExpectedAddress = '';
-  let rehearsalFactorConfirmed = true;
   let derivationRun: BrainVaultDerivationRun | null = null;
   let nodeDerivationAbort: AbortController | null = null;
   let nodeDerivationResult: RuntimeAdapterBrainVaultResult | null = null;
@@ -489,6 +337,19 @@
     // Screen 1 only creates/selects a runtime, then exits immediately to Screen 2.
     // Never show a post-seed "ready" screen here; account configuration owns that step.
     vaultOperations.initialize();
+
+    const demoLabel = new URLSearchParams(window.location.search).get('demo');
+    if (demoLabel !== null) {
+      const demo = DEMO_ACCOUNTS.find((candidate) => candidate.label === demoLabel);
+      if (!demo) throw new Error(`TESTNET_DEMO_ACCOUNT_UNKNOWN:${demoLabel}`);
+      inputMode = 'brainvault';
+      name = demo.name;
+      passphrase = demo.password;
+      shardInput = demo.factor;
+      createLoginType = 'demo';
+      window.history.replaceState(null, '', '/app');
+      queueMicrotask(() => void startDerivation());
+    }
   });
 
   let lastDeriveRequest = 0;
@@ -717,7 +578,6 @@
   $: canDerive = inputMode === 'brainvault'
     ? (
         isValidShardInput
-        && (rehearsalMode !== 'brainvault' || rehearsalFactorConfirmed)
         && name.length >= BRAINVAULT_V1.MIN_NAME_LENGTH
         && passphrase.length >= BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH
       )
@@ -868,14 +728,7 @@
     derivationRun = null;
     clearDerivedWalletMaterial();
     showAdvanced = false;
-    if (mode === 'brainvault') {
-      name = '';
-      passphrase = '';
-      shardInput = 3;
-      rehearsalFactorConfirmed = false;
-    } else {
-      mnemonicInput = '';
-    }
+    mnemonicInput = '';
     inputMode = mode;
     derivationError = '';
     phase = 'input';
@@ -897,7 +750,6 @@
     rehearsalMode = null;
     rehearsalExpectedAddress = '';
     rehearsalEnabled = false;
-    rehearsalFactorConfirmed = true;
     showAdvanced = false;
     return true;
   }
@@ -907,20 +759,17 @@
     rehearsalEnabled = false;
     rehearsalMode = null;
     rehearsalExpectedAddress = '';
-    rehearsalFactorConfirmed = true;
     showAdvanced = false;
     derivationError = '';
   }
 
   function selectPresetFactor(nextFactor: number): void {
     shardInput = nextFactor;
-    rehearsalFactorConfirmed = true;
     showAdvanced = false;
   }
 
   function selectCustomFactor(): void {
     if (isPreset) shardInput = 6;
-    rehearsalFactorConfirmed = true;
   }
 
   function handleWorkerFailure(worker: Worker, err: unknown): void {
@@ -1199,7 +1048,6 @@
       shardsCompleted = result.shardCount;
       passphrase = '';
       derivationRun = null;
-      if (!acceptRecoveryRehearsal('brainvault', ethereumAddress)) return;
       phase = 'node-ready';
     } catch (err) {
       if (!isCurrentNodeRun()) return;
@@ -1401,7 +1249,6 @@
       passphrase = '';
       derivationRun = null;
 
-      if (!acceptRecoveryRehearsal('brainvault', ethereumAddress)) return;
       if (await prepareRecoveryDecisionFromCurrentSeed(run.name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`)) {
         await continueAfterRecoveryDiscovery();
       }
@@ -1487,7 +1334,6 @@
     rehearsalEnabled = false;
     rehearsalMode = null;
     rehearsalExpectedAddress = '';
-    rehearsalFactorConfirmed = true;
     showAdvanced = false;
     clearSensitiveWalletMaterial();
     nodeShardTimeMs = 0;
@@ -1500,7 +1346,6 @@
     nodeDerivationAbort?.abort();
     nodeDerivationAbort = null;
     clearSensitiveWalletMaterial();
-    clearLiveRuntimeDiscoveryRetry();
     terminateWorkers();
   });
 
@@ -1511,12 +1356,6 @@
     // Restore the saved auth scheme (dark default)
     if (typeof localStorage !== 'undefined' && localStorage.getItem(AUTH_SCHEME_STORAGE_KEY) === 'light') {
       scheme = 'light';
-    }
-
-    // Testnet-only discovery starts when its tab opens. Main wallet entry never calls
-    // operator endpoints that do not exist on a production-only frontend.
-    if (isScenarioPreview()) {
-      liveRuntimesLoaded = true;
     }
 
     // Run async init
@@ -1622,7 +1461,7 @@
             aria-controls="wallet-panel-brainvault"
             tabindex={inputMode === 'brainvault' ? 0 : -1}
             class:selected={inputMode === 'brainvault'}
-            disabled={phase !== 'input' || (rehearsalMode !== null && rehearsalMode !== 'brainvault')}
+            disabled={phase !== 'input' || rehearsalMode !== null}
             on:click={() => selectInputMode('brainvault')}
             on:keydown={handleWalletModeKeydown}
           >
@@ -1642,20 +1481,6 @@
           >
             Mnemonic
           </button>
-          <button
-            id="wallet-mode-testnet"
-            type="button"
-            role="tab"
-            aria-selected={inputMode === 'testnet'}
-            aria-controls="wallet-panel-testnet"
-            tabindex={inputMode === 'testnet' ? 0 : -1}
-            class:selected={inputMode === 'testnet'}
-            disabled={phase !== 'input' || rehearsalMode !== null}
-            on:click={() => selectInputMode('testnet')}
-            on:keydown={handleWalletModeKeydown}
-          >
-            Testnet
-          </button>
         </div>
 
         <div class="wallet-create-title">
@@ -1664,16 +1489,12 @@
               ? 'Verify recovery'
               : inputMode === 'brainvault'
               ? 'Create xln wallet'
-              : inputMode === 'mnemonic'
-                ? 'Create or restore from seed'
-                : 'Testnet controls'}</h1>
+              : 'Create or restore from seed'}</h1>
             <p>{rehearsalMode !== null
               ? 'Re-enter the same recovery inputs. Only the public wallet fingerprint was kept from the first run.'
               : inputMode === 'brainvault'
-              ? 'Open the same wallet anywhere from the same public name, private secret, and work factor.'
-              : inputMode === 'mnemonic'
-                ? 'Generate a new 24-word seed, or continue with a 12- or 24-word seed you already have.'
-                : 'Disposable identities, remote runtimes, and local reset tools. Never use production funds here.'}</p>
+              ? 'Your name and private secret recreate the same wallet. No backup phrase is required.'
+              : 'Generate a new 24-word seed, or continue with a 12- or 24-word seed you already have.'}</p>
           </div>
         </div>
 
@@ -1684,34 +1505,6 @@
           role="tabpanel"
           aria-labelledby="wallet-mode-brainvault"
         >
-        <div class="tradeoff-card" data-testid="brainvault-tradeoffs">
-          <div class="tradeoff-heading">
-            <span class="section-eyebrow">{WALLET_MODE_TRADEOFFS.brainvault.eyebrow}</span>
-            <p>{WALLET_MODE_TRADEOFFS.brainvault.summary}</p>
-          </div>
-          <div class="tradeoff-grid">
-            <div class="tradeoff-list benefit-list" role="list" aria-label="Benefits">
-              {#each WALLET_MODE_TRADEOFFS.brainvault.benefits as item}
-                <div role="listitem"><span aria-hidden="true">+</span><p>{item}</p></div>
-              {/each}
-            </div>
-            <div class="tradeoff-list cost-list" role="list" aria-label="Costs">
-              {#each WALLET_MODE_TRADEOFFS.brainvault.costs as item}
-                <div role="listitem"><span aria-hidden="true">−</span><p>{item}</p></div>
-              {/each}
-            </div>
-          </div>
-          {@render recoverySecurityWarning()}
-        </div>
-
-        <aside class="execution-target" data-testid="brainvault-execution-target">
-          <span class="section-eyebrow">Derivation target</span>
-          <strong>{brainVaultExecutionTarget}</strong>
-          <p>{derivesBrainVaultOnNode
-            ? 'Exact inputs go through the authenticated control channel. The node derives natively and keeps the signer; mnemonic export happens only on explicit request.'
-            : 'Inputs and the resulting signer stay inside this browser runtime.'}</p>
-        </aside>
-
         <!-- Name Input -->
         <div class="input-group">
           <label for="name">Vault name <span class="label-aside">public derivation input</span></label>
@@ -1786,11 +1579,9 @@
           on:click={() => showAdvanced = !showAdvanced}
         >
           <span class="advanced-toggle-main">
-            <span class="advanced-toggle-label">Security work factor</span>
+            <span class="advanced-toggle-label">Advanced</span>
             <span class="advanced-toggle-summary">
-              {rehearsalMode === 'brainvault' && !rehearsalFactorConfirmed
-                ? 'Choose the same factor again'
-                : `${factorInfo.tier} · ${factorInfo.shards.toLocaleString()} ${factorInfo.shards === 1 ? 'shard' : 'shards'} · ${formatRuntimeDurationRounded(workEstimate.recoveryMs)}`}
+              {`${factorInfo.tier} · ${factorInfo.shards.toLocaleString()} ${factorInfo.shards === 1 ? 'shard' : 'shards'} · ${formatRuntimeDurationRounded(workEstimate.recoveryMs)}`}
             </span>
           </span>
           <svg class="advanced-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1805,7 +1596,7 @@
                 <button
                   type="button"
                   class="factor-btn"
-                  class:selected={shardInput === info.factor && (rehearsalMode !== 'brainvault' || rehearsalFactorConfirmed)}
+                  class:selected={shardInput === info.factor}
                   on:click={() => selectPresetFactor(info.factor)}
                 >
                   <span class="factor-num">{info.factor}</span>
@@ -1815,7 +1606,7 @@
               <button
                 type="button"
                 class="factor-btn custom-btn"
-                class:selected={!isPreset && (rehearsalMode !== 'brainvault' || rehearsalFactorConfirmed)}
+                class:selected={!isPreset}
                 on:click={selectCustomFactor}
               >
                 <span class="factor-num">⚙</span>
@@ -1831,16 +1622,12 @@
                   min="6"
                   max="100000"
                   bind:value={shardInput}
-                  on:input={() => rehearsalFactorConfirmed = true}
                   placeholder="6"
                 />
                 <span class="custom-label">shards</span>
               </div>
             {/if}
 
-            {#if rehearsalMode === 'brainvault' && !rehearsalFactorConfirmed}
-              <p class="warning-text">Choose the exact same work factor used in the first run.</p>
-            {:else}
               <div class="work-estimate" data-testid="brainvault-work-estimate">
                 <div>
                   <span>{derivesBrainVaultOnNode
@@ -1863,7 +1650,19 @@
                   : 'Timing updates and is saved after the first completed shard.'}
               </p>
               <p class="warning-text">Recovery requires the exact same vault name, passphrase, and work factor.</p>
-            {/if}
+            <aside class="execution-target" data-testid="brainvault-execution-target">
+              <span class="section-eyebrow">Derivation target</span>
+              <strong>{brainVaultExecutionTarget}</strong>
+            </aside>
+            <div class="unlock-duration-row">
+              <label for="unlock-duration">Keep unlocked for</label>
+              <select id="unlock-duration" bind:value={unlockDurationChoice}>
+                <option value="10m">10 minutes</option>
+                <option value="1d">1 day</option>
+                <option value="forever">Forever on this device</option>
+              </select>
+            </div>
+            {@render recoverySecurityWarning()}
           </div>
         {/if}
         </div>
@@ -1952,125 +1751,10 @@
             </div>
           {/if}
         </div>
-        {:else}
-        <div
-          id="wallet-panel-testnet"
-          class="mode-panel testnet-panel"
-          role="tabpanel"
-          aria-labelledby="wallet-mode-testnet"
-          data-testid="testnet-tools-panel"
-        >
-          <div class="testnet-banner">
-            <span>Sandbox only</span>
-            <p>These shortcuts are intentionally separated from the real wallet entry flow.</p>
-          </div>
-
-          <div class="quick-login-section">
-            <div class="quick-login-header">
-              <span class="ql-title">Demo identities</span>
-              <span class="ql-temp">A–E · disposable</span>
-            </div>
-            <div class="quick-login-grid">
-              {#each DEMO_GROUPS as group, gi}
-                {#if gi > 0}
-                  <span class="ql-divider" aria-hidden="true"></span>
-                {/if}
-                <div class="ql-group">
-                  {#each group as account}
-                    <button
-                      class="quick-login-btn role-{account.role}"
-                      class:wide={account.label.length > 2}
-                      type="button"
-                      title={account.role === 'hub' ? 'Hub' : account.role === 'app' ? 'App entity' : 'User'}
-                      on:click={() => {
-                        name = account.name;
-                        passphrase = account.password;
-                        shardInput = account.factor;
-                        inputMode = 'brainvault';
-                        createLoginType = 'demo';
-                        setTimeout(() => startDerivation(), 100);
-                      }}
-                    >
-                      {account.label}
-                    </button>
-                  {/each}
-                </div>
-              {/each}
-            </div>
-          </div>
-
-          <!-- Connect to a live remote runtime through the shared admin action path. -->
-          <div class="live-runtime-section" data-testid="live-runtime-section">
-            <div class="live-runtime-header">
-              <span class="ql-title">Remote runtimes</span>
-              <button
-                type="button"
-                class="live-refresh"
-                title="Refresh"
-                aria-label="Refresh live runtimes"
-                disabled={liveRuntimesLoading}
-                on:click={() => discoverLiveRuntimes()}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class:spinning={liveRuntimesLoading}>
-                  <path d="M21 2v6h-6M3 22v-6h6M3.51 9a9 9 0 0114.13-3.36L21 8M3 16l3.36 2.36A9 9 0 0020.49 15"/>
-                </svg>
-              </button>
-            </div>
-
-            {#if liveRuntimes.length > 0}
-              <div class="live-runtime-row">
-                <select
-                  class="live-runtime-select"
-                  data-testid="live-runtime-select"
-                  bind:value={selectedRuntimeKey}
-                  disabled={!!connectingRuntimeId}
-                >
-                  <option value="" disabled>Select a runtime…</option>
-                  {#each liveRuntimes as rt}
-                    <option value={rt.wsUrl}>{rt.label} · {new URL(rt.wsUrl).host}</option>
-                  {/each}
-                </select>
-                <button
-                  type="button"
-                  class="live-connect-btn"
-                  data-testid="live-runtime-connect"
-                  disabled={!selectedRuntimeKey || !!connectingRuntimeId}
-                  on:click={connectSelectedRuntime}
-                >
-                  {connectingRuntimeId ? 'Connecting…' : `Connect · ${selectedRuntimeAccessLabel()}`}
-                </button>
-              </div>
-            {:else if liveRuntimesLoading || liveRuntimesRetrying}
-              <div class="live-runtime-hint">Discovering live runtimes…</div>
-            {:else if liveRuntimesLoaded && !liveRuntimesError}
-              <div class="live-runtime-hint">No live runtimes online.</div>
-            {/if}
-
-            {#if liveRuntimesError}
-              <div class="live-runtime-error">{liveRuntimesError}</div>
-            {/if}
-          </div>
-          {#if hasAnyPersistedState}
-            <div class="testnet-maintenance">
-              <div>
-                <span class="section-eyebrow">Local test state</span>
-                <p>Clear wallets, runtimes, settings, and browser databases on this device.</p>
-              </div>
-              <button
-                type="button"
-                class="testnet-reset-btn"
-                on:click={handleResetEverything}
-              >
-                Reset local data
-              </button>
-            </div>
-          {/if}
-        </div>
         {/if}
 
-        <!-- Derive Button - only visible in input phase -->
-        {#if inputMode !== 'testnet'}
-          {#if rehearsalMode !== null}
+        <!-- Derive Button - always visible in the input phase. -->
+        {#if rehearsalMode !== null}
             <div class="rehearsal-active" data-testid="recovery-rehearsal-active">
               <div>
                 <span class="section-eyebrow">Optional recovery rehearsal</span>
@@ -2079,43 +1763,40 @@
               </div>
               <button type="button" on:click={cancelRecoveryRehearsal}>Cancel rehearsal</button>
             </div>
-          {:else}
+        {:else if inputMode === 'mnemonic'}
+          <details class="mnemonic-advanced">
+            <summary>Advanced</summary>
             <label class="rehearsal-option" data-testid="recovery-rehearsal-option">
               <input type="checkbox" bind:checked={rehearsalEnabled} />
               <span>
                 <strong>Verify recovery before opening</strong>
-                <small>{inputMode === 'brainvault'
-                  ? 'Optional: clear the inputs after derivation and reproduce the same wallet once.'
-                  : 'Optional: clear the seed after validation and enter it again once.'}</small>
+                <small>Optional: clear the seed after validation and enter it again once.</small>
               </span>
               <em>Optional</em>
             </label>
-          {/if}
-          <div class="unlock-duration-row">
-            <label for="unlock-duration">Keep unlocked for</label>
-            <select id="unlock-duration" bind:value={unlockDurationChoice}>
-              <option value="10m">10 minutes</option>
-              <option value="1d">1 day</option>
-              <option value="forever">Forever on this device</option>
-            </select>
-            {#if unlockDurationChoice === 'forever'}
-              <span class="unlock-warning">Convenient, but weaker against malicious scripts or browser extensions.</span>
-            {/if}
-          </div>
-          <button
-            class="derive-btn"
-            disabled={!canDerive}
-            on:click={startDerivation}
-          >
-            {rehearsalMode !== null
-              ? 'Verify recovery'
-              : inputMode === 'brainvault'
-                ? derivesBrainVaultOnNode ? 'Derive on node' : 'Derive in browser'
-                : 'Continue with seed'}
-          </button>
-          {#if derivationError}
-            <div class="matrix-status error">{derivationError}</div>
-          {/if}
+            <div class="unlock-duration-row">
+              <label for="mnemonic-unlock-duration">Keep unlocked for</label>
+              <select id="mnemonic-unlock-duration" bind:value={unlockDurationChoice}>
+                <option value="10m">10 minutes</option>
+                <option value="1d">1 day</option>
+                <option value="forever">Forever on this device</option>
+              </select>
+            </div>
+          </details>
+        {/if}
+        <button
+          class="derive-btn"
+          disabled={!canDerive}
+          on:click={startDerivation}
+        >
+          {rehearsalMode !== null
+            ? 'Verify recovery'
+            : inputMode === 'brainvault'
+              ? derivesBrainVaultOnNode ? 'Derive on node' : 'Derive wallet'
+              : 'Continue with seed'}
+        </button>
+        {#if derivationError}
+          <div class="matrix-status error">{derivationError}</div>
         {/if}
         {/if}
 

@@ -69,9 +69,9 @@ test(
     await openAddRuntimePanel(page);
     await page.getByLabel('Vault name public derivation input').fill('remote-e2e-vault');
     await page.getByLabel('Secret passphrase').fill('Remote-e2e-passphrase-42!');
-    await page.getByRole('button', { name: /Security work factor/i }).click();
+    await page.getByRole('button', { name: /Advanced/i }).click();
     await page.getByRole('button', { name: /^1\s+Test$/ }).click();
-    await page.getByRole('button', { name: /Security work factor/i }).click();
+    await page.getByRole('button', { name: /Advanced/i }).click();
 
     const estimate = page.getByTestId('brainvault-work-estimate');
     await expect(estimate).toContainText(/Browser benchmark|Initial browser estimate/);

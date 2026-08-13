@@ -293,6 +293,10 @@
 
   onDestroy(() => {
     if (paymentPendingToastId) toasts.remove(paymentPendingToastId);
+    if (paymentSubmissionTimer) {
+      clearTimeout(paymentSubmissionTimer);
+      paymentSubmissionTimer = null;
+    }
     if (autoRouteRetryTimer) {
       clearTimeout(autoRouteRetryTimer);
       autoRouteRetryTimer = null;

@@ -49,6 +49,11 @@ export type QaAdminCreditPair = {
 export type QaAdminHealthSnapshot = {
   systemOk: boolean | null;
   coreOk: boolean | null;
+  runtimeOk: boolean | null;
+  relayOk: boolean | null;
+  relayActiveClientCount: number;
+  relayProfileCount: number;
+  watchtowerCount: number;
   degraded: string[];
   disk: {
     ok: boolean | null;
@@ -249,6 +254,8 @@ const normalizeCreditPair = (input: Record<string, unknown>): QaAdminCreditPair 
 export const normalizeQaAdminHealth = (payload: unknown): QaAdminHealthSnapshot | null => {
   if (!isRecord(payload)) return null;
   const process = isRecord(payload['process']) ? payload['process'] : {};
+  const system = isRecord(payload['system']) ? payload['system'] : {};
+  const relay = isRecord(payload['relay']) ? payload['relay'] : {};
   const storage = isRecord(payload['storage']) ? payload['storage'] : {};
   const disk = isRecord(payload['disk']) ? payload['disk'] : {};
   const hubMesh = isRecord(payload['hubMesh']) ? payload['hubMesh'] : {};
@@ -282,6 +289,11 @@ export const normalizeQaAdminHealth = (payload: unknown): QaAdminHealthSnapshot 
   return {
     systemOk: asBoolean(payload['systemOk']),
     coreOk: asBoolean(payload['coreOk']),
+    runtimeOk: asBoolean(system['runtime']),
+    relayOk: asBoolean(system['relay']),
+    relayActiveClientCount: asNumber(relay['activeClientCount']) ?? asNumber(relay['clientCount']) ?? 0,
+    relayProfileCount: asNumber(relay['profileCount']) ?? 0,
+    watchtowerCount: owners.filter(owner => /watchtower|tower/i.test(owner.role)).length,
     degraded: Array.isArray(payload['degraded'])
       ? payload['degraded'].map(value => String(value)).filter(Boolean)
       : [],
