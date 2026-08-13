@@ -21,6 +21,7 @@ const gates: Gate[] = [
   { name: 'determinism', command: ['bun', 'runtime/scripts/checks/architecture/check-determinism.ts', '--static-only'] },
   { name: 'no-weak-collections', command: ['bun', 'runtime/scripts/checks/policy/check-no-weak-collections.ts'] },
   { name: 'runtime-dependencies', command: ['bun', 'runtime/scripts/checks/architecture/check-runtime-dependencies.ts'] },
+  { name: 'fints-negative-types', command: ['bun', 'run', 'check:fints-negative-types'] },
 ];
 
 const results = gates.map(gate => {

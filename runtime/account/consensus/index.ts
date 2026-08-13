@@ -10,7 +10,8 @@ import { cloneAccountFrame, cloneAccountReplica } from '../state/state-clone';
 import { getAccountPerspective } from '../state/perspective';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { applyAccountTx } from '../tx/apply';
-import type { AccountTxRejection } from '../tx/apply-types';
+import type { AccountTxRejection, ApplyAccountTxOk } from '../tx/apply-types';
+import { assertNever } from '../tx/apply-result';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { createFrameHash } from './frame/hash';
 import {
@@ -211,6 +212,38 @@ type IncomingFrameReplay = Omit<IncomingFrameValidation, 'clonedMachine' | 'proo
 type IncomingFrameReplayResult =
   { kind: 'continue'; replay: IncomingFrameReplay } | { kind: 'return'; result: HandleAccountInputResult };
 
+const collectIncomingOkOutcome = (
+  result: ApplyAccountTxOk,
+  replay: IncomingFrameReplay,
+  timedOutHashlocks: string[],
+  fromEntityId: string,
+): void => {
+  switch (result.outcome) {
+    case 'applied':
+      return;
+    case 'htlc_secret':
+      replay.revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
+      return;
+    case 'htlc_error':
+      timedOutHashlocks.push(result.hashlock);
+      return;
+    case 'swap_offer_created':
+      replay.swapOffersCreated.push(result.swapOfferCreated);
+      return;
+    case 'swap_cancel_requested':
+      replay.swapCancelRequests.push({
+        ...result.swapOfferCancelRequested,
+        accountId: fromEntityId,
+      });
+      return;
+    case 'swap_cancelled':
+      replay.swapOffersCancelled.push(result.swapOfferCancelled);
+      return;
+    default:
+      assertNever(result);
+  }
+};
+
 const replayIncomingFrameOnClone = async (
   context: AccountConsensusContext,
   clonedMachine: AccountReplica,
@@ -262,18 +295,7 @@ const replayIncomingFrameOnClone = async (
       accountLog.debug('receiver.tx.processed', { type: accountTx.type, success: true });
     }
     replay.processEvents.push(...result.events);
-    if (result.outcome === 'htlc_secret') {
-      replay.revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
-    }
-    if (result.outcome === 'htlc_error') timedOutHashlocks.push(result.hashlock);
-    if (result.outcome === 'swap_offer_created') replay.swapOffersCreated.push(result.swapOfferCreated);
-    if (result.outcome === 'swap_cancel_requested') {
-      replay.swapCancelRequests.push({
-        ...result.swapOfferCancelRequested,
-        accountId: input.fromEntityId,
-      });
-    }
-    if (result.outcome === 'swap_cancelled') replay.swapOffersCancelled.push(result.swapOfferCancelled);
+    collectIncomingOkOutcome(result, replay, timedOutHashlocks, input.fromEntityId);
   }
   return { kind: 'continue', replay };
 };

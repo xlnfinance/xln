@@ -20,7 +20,7 @@ import {
   type AccountTxFailureDisposition,
   type AccountTxRejection,
 } from '../../tx/apply-types';
-import { accountTxRejectionMessage } from '../../tx/apply-result';
+import { accountTxRejectionMessage, assertNever } from '../../tx/apply-result';
 
 const accountLog = createStructuredLogger('account');
 
@@ -143,17 +143,29 @@ const collectSuccessfulTransaction = (
       outcome: result.outcome,
     });
   }
-  if (result.outcome === 'htlc_secret') {
-    effects.revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
+  switch (result.outcome) {
+    case 'applied':
+      return;
+    case 'htlc_secret':
+      effects.revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
+      return;
+    case 'htlc_error':
+      return;
+    case 'swap_offer_created':
+      effects.swapOffersCreated.push(result.swapOfferCreated);
+      return;
+    case 'swap_cancel_requested':
+      effects.swapCancelRequests.push({
+        ...result.swapOfferCancelRequested,
+        accountId: account.proofHeader.toEntity,
+      });
+      return;
+    case 'swap_cancelled':
+      effects.swapOffersCancelled.push(result.swapOfferCancelled);
+      return;
+    default:
+      assertNever(result);
   }
-  if (result.outcome === 'swap_offer_created') effects.swapOffersCreated.push(result.swapOfferCreated);
-  if (result.outcome === 'swap_cancel_requested') {
-    effects.swapCancelRequests.push({
-      ...result.swapOfferCancelRequested,
-      accountId: account.proofHeader.toEntity,
-    });
-  }
-  if (result.outcome === 'swap_cancelled') effects.swapOffersCancelled.push(result.swapOfferCancelled);
 };
 
 const throwCriticalProposalFailure = (

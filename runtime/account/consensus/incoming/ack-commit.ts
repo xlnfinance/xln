@@ -6,6 +6,8 @@ import { createStructuredLogger, shortHash, shortId } from '../../../infra/logge
 import { cloneAccountFrame } from '../../state/state-clone';
 import { getAccountPerspective } from '../../state/perspective';
 import { applyAccountTx } from '../../tx/apply';
+import { assertNever } from '../../tx/apply-result';
+import type { ApplyAccountTxOk } from '../../tx/apply-types';
 import { deriveAccountFrameTokenIds } from '../../state/frame';
 import { appendAccountMempoolTxs } from '../../input/mempool';
 import {
@@ -139,6 +141,25 @@ const verifyPendingAckCertificate = async (
   return { kind: 'continue', ack, ackHanko: ack.frameHanko, frameHash };
 };
 
+const collectAckCommitOkOutcome = (
+  result: ApplyAccountTxOk,
+  timedOutHashlocks: string[],
+): void => {
+  switch (result.outcome) {
+    case 'htlc_error':
+      timedOutHashlocks.push(result.hashlock);
+      return;
+    case 'applied':
+    case 'htlc_secret':
+    case 'swap_offer_created':
+    case 'swap_cancel_requested':
+    case 'swap_cancelled':
+      return;
+    default:
+      assertNever(result);
+  }
+};
+
 const applyPendingFrameTransactions = async (
   context: AccountConsensusContext,
   account: AccountReplica,
@@ -177,7 +198,7 @@ const applyPendingFrameTransactions = async (
       tx,
       'proposer/commit',
     );
-    if (result.outcome === 'htlc_error') timedOutHashlocks.push(result.hashlock);
+    collectAckCommitOkOutcome(result, timedOutHashlocks);
   }
   commitStagedAccountCommitmentCache(account.state);
   assertLiveCommitMatchesFrame(

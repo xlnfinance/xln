@@ -672,9 +672,11 @@ describe('atomic settlement Account transition', () => {
     }), true, 2_000, 0, false, createEmptyEnv('settlement-exact-nonce-reject'));
 
     expect(result.ok).toBe(false);
-    expect(result.ok ? undefined : result.rejection.message).toContain('SETTLEMENT_SEAL_NONCE_MISMATCH:6:5');
-    expect(result.ok ? undefined : result.rejection).toMatchObject({
+    if (result.ok) throw new Error('expected settlement seal nonce rejection');
+    expect(result.rejection).toEqual({
       kind: 'settlement_seal_nonce_mismatch',
+      code: 'SETTLEMENT_SEAL_NONCE_MISMATCH',
+      message: 'SETTLEMENT_SEAL_NONCE_MISMATCH:6:5:j=0:next=5:local=0:peer=0',
       suppliedNonce: 6,
       requiredNonce: 5,
       basis: 'account',

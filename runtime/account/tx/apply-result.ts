@@ -180,3 +180,7 @@ export const rejectionFromDeltaError = (
     message: error.message,
   };
 };
+
+export const assertNever = (value: never): never => {
+  throw new Error(`ACCOUNT_TX_OUTCOME_UNHANDLED:${String(value)}`);
+};
