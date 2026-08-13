@@ -519,6 +519,8 @@ interface RuntimeInfrastructure {
    */
   liveJAdapters?: Map<string, import('../jurisdiction/adapter/types').JAdapter>;
   lifecyclePhase?: 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
+  /** Explicit operator-facing terminal status; never part of committed RuntimeState. */
+  operatorStatus?: 'HALTED_REQUIRES_OPERATOR';
   loopActive?: boolean;
   halted?: boolean;
   fatalDebugPayload?: {

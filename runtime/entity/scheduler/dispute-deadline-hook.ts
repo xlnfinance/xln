@@ -6,6 +6,7 @@ import type {
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { scheduleHook } from './hook-state';
 import type { DueHookPlan } from './due-hook-types';
+import { toUnixMs, unixMsToUnixSFloor } from '../../protocol/units';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 
@@ -17,7 +18,7 @@ const retryDisputeDeadline = (
   if (!replica.state.crontabState) return;
   scheduleHook(replica.state.crontabState, {
     id: hook.id,
-    triggerAt: replica.state.timestamp + retryMs,
+    triggerAt: toUnixMs(toUnixMs(Number(replica.state.timestamp)) + retryMs),
     type: 'dispute_deadline',
     data: { accountId: hook.data.accountId },
   });
@@ -38,7 +39,7 @@ export const processDisputeDeadlineHook = (
   const weAreStarter = weAreLeft === account.activeDispute.startedByLeft;
   // L1 disputeTimeout is absolute unix seconds (jurisdiction clock).
   const timeoutSec = Number(account.activeDispute.disputeTimeout || 0);
-  const nowSec = Math.floor(Number(replica.state.timestamp || 0) / 1000);
+  const nowSec = unixMsToUnixSFloor(toUnixMs(Number(replica.state.timestamp || 0)));
   if (account.activeDispute.observedOnChain !== true) {
     retryDisputeDeadline(replica, hook, 5000);
     crontabLog.debug('dispute.wait_onchain_start', {

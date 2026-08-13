@@ -4,6 +4,7 @@ import { ethers } from 'ethers';
 import { signAccountFrame, verifyAccountSignature } from '../../../account/crypto';
 
 import { compareStableText } from '../../../protocol/serialization';
+import { retryFailure } from '../../../protocol/errors/failure-taxonomy';
 import type { ConsensusConfig, EntityReplica, EntityState } from '../../../entity/types';
 import type { EntityRuntimeContext } from '../../../entity/runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
@@ -429,7 +430,7 @@ export const buildLocalJPrefixAttestation = (
 ): JPrefixAttestation | null => {
   if (!history) return null;
   if (history.scannedThroughHeight < replica.state.lastFinalizedJHeight) {
-    throw new Error(
+    throw retryFailure('J_PREFIX_LOCAL_HISTORY_BEHIND',
       `J_PREFIX_LOCAL_HISTORY_BEHIND:${history.scannedThroughHeight}:${replica.state.lastFinalizedJHeight}`,
     );
   }
@@ -710,7 +711,10 @@ const localClaimAtHeight = (
   height: number,
 ): JPrefixClaim => {
   if (!history || history.scannedThroughHeight < height) {
-    throw new Error(`J_PREFIX_LOCAL_HISTORY_BEHIND:${history?.scannedThroughHeight ?? 0}:${height}`);
+    throw retryFailure(
+      'J_PREFIX_LOCAL_HISTORY_BEHIND',
+      `J_PREFIX_LOCAL_HISTORY_BEHIND:${history?.scannedThroughHeight ?? 0}:${height}`,
+    );
   }
   return buildUnsignedJEventRangeAtHeight(state, history, height) ?? buildBaseClaim(state, history);
 };
@@ -836,12 +840,12 @@ export const assertFrameJPrefix = (
     if (entityRequiresJPrefixCertificate(replica.state)) {
       throw new Error('J_PREFIX_CERTIFICATE_REQUIRED_FOR_REGISTERED_ENTITY');
     }
-    if (locallyCertified) throw new Error('J_PREFIX_STRONGER_LOCAL_CERTIFICATE');
+    if (locallyCertified) throw retryFailure('J_PREFIX_STRONGER_LOCAL_CERTIFICATE');
     if (hasPendingLocalJEvent(replica.state, replica.jHistory)) {
       // Counterexample: a Byzantine active proposer can otherwise keep
       // committing ordinary frames forever while an honest validator has a
       // durable DisputeStarted at H+1. Absence is consensus data here.
-      throw new Error('J_PREFIX_REQUIRED_LOCAL_EVENT');
+      throw retryFailure('J_PREFIX_REQUIRED_LOCAL_EVENT');
     }
     return;
   }
@@ -863,14 +867,14 @@ export const assertFrameJPrefix = (
     locallyCertified.selected.scannedThroughHeight > certificate.selected.scannedThroughHeight &&
     !emptyBaseRollFrame
   ) {
-    throw new Error('J_PREFIX_STRONGER_LOCAL_CERTIFICATE');
+    throw retryFailure('J_PREFIX_STRONGER_LOCAL_CERTIFICATE');
   }
   if (certificate.selected.scannedThroughHeight === certificate.baseHeight) {
     if (ranges.length !== 0) throw new Error(`J_PREFIX_RANGE_COUNT_INVALID:${ranges.length}`);
     const finalityDue = hasPendingLocalJEvent(replica.state, replica.jHistory);
     const emptyFrozenRoll = frame.txs.length === 0 && isFrozenBaseJPrefixRollAuthorized(replica, certificate);
     if (finalityDue && !emptyFrozenRoll && !emptyBaseRollFrame) {
-      throw new Error('J_PREFIX_REQUIRED_LOCAL_EVENT');
+      throw retryFailure('J_PREFIX_REQUIRED_LOCAL_EVENT');
     }
     return;
   }

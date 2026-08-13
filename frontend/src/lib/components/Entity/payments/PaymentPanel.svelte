@@ -1113,7 +1113,6 @@
 
     sendingPayment = true;
     const priorRuntimeReceiptId = $runtimeCommandLatestReceipt?.receiptId ?? null;
-    let queued = false;
     try {
       if (!activeIsLive) throw new Error('Payments are only available in LIVE mode');
       preflightError = null;
@@ -1173,7 +1172,6 @@
 
       if (!submitRuntimeInput) throw new Error('Payment command path is not connected');
       await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput], jInputs: [] });
-      queued = true;
       return { queued: true };
     } catch (error) {
       logPaymentDiagnostic('Payment submission failed', error, {

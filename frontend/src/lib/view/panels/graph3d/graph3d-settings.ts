@@ -57,7 +57,38 @@ export function normalizeBirdViewSettings(value: unknown): BirdViewSettings {
     !Number.isFinite(parsed['rotationZ'])) {
     throw new Error('BIRD_VIEW_SETTINGS_INVALID');
   }
-  return parsed as unknown as BirdViewSettings;
+  const vector = (candidate: unknown): { x: number; y: number; z: number } | null => {
+    if (!candidate || typeof candidate !== 'object') return null;
+    const point = candidate as Record<string, unknown>;
+    return typeof point['x'] === 'number' && Number.isFinite(point['x']) &&
+      typeof point['y'] === 'number' && Number.isFinite(point['y']) &&
+      typeof point['z'] === 'number' && Number.isFinite(point['z'])
+      ? { x: point['x'], y: point['y'], z: point['z'] }
+      : null;
+  };
+  const cameraRecord = parsed['camera'];
+  const camera = cameraRecord && typeof cameraRecord === 'object'
+    ? (() => {
+        const record = cameraRecord as Record<string, unknown>;
+        const position = vector(record['position']);
+        const target = vector(record['target']);
+        return position && target && typeof record['zoom'] === 'number' && Number.isFinite(record['zoom'])
+          ? { position, target, zoom: record['zoom'] }
+          : null;
+      })()
+    : undefined;
+  if (cameraRecord !== undefined && !camera) throw new Error('BIRD_VIEW_SETTINGS_INVALID');
+  return {
+    barsMode: parsed['barsMode'],
+    selectedTokenId: Number(parsed['selectedTokenId']),
+    viewMode: parsed['viewMode'],
+    entityMode: parsed['entityMode'],
+    wasLastOpened: parsed['wasLastOpened'],
+    rotationX: Number(parsed['rotationX']),
+    rotationY: Number(parsed['rotationY']),
+    rotationZ: Number(parsed['rotationZ']),
+    ...(camera ? { camera } : {}),
+  };
 }
 
 export function readBirdViewSettings(storage: BirdViewSettingsStorage | null | undefined): BirdViewSettings {

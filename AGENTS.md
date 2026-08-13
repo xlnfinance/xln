@@ -171,6 +171,7 @@ Before claiming anything works:
 
 ## 🎯 TYPESCRIPT
 Validate at source. Fail fast. Trust at use. No defensive `?.` in UI if validated upstream.
+`docs/fints.md` is the single normative TypeScript safety standard; do not duplicate or weaken it in agent-specific instructions.
 
 ## 📝 COMMUNICATION MODE
 

@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 import {
   decodeHashLadderBinary,
   verifyHashLadderBinary,
@@ -30,7 +32,7 @@ const queueSalvageJBatchBroadcast = (
   routeId: string,
 ): void => {
   const firstValidator = state.config.validators?.[0];
-  if (!firstValidator) throw new Error(`CROSS_J_REVEAL_PORT_SIGNER_MISSING:${routeId}`);
+  if (!firstValidator) throw haltRuntimeFailure("CROSS_J_REVEAL_PORT_SIGNER_MISSING", `CROSS_J_REVEAL_PORT_SIGNER_MISSING:${routeId}`);
   outputs.push({
     entityId: state.entityId,
     signerId: firstValidator,
@@ -114,7 +116,7 @@ export const handleCrossJurisdictionSalvageEntityTx = async (
   if (!route.targetPull) {
     // A route this entity owns without its target pull commitment is mirror
     // corruption; porting against it would register garbage. Stay loud.
-    throw new Error(`CROSS_J_REVEAL_PORT_TARGET_PULL_MISSING:${routeId}:${newState.entityId}`);
+    throw haltRuntimeFailure("CROSS_J_REVEAL_PORT_TARGET_PULL_MISSING", `CROSS_J_REVEAL_PORT_TARGET_PULL_MISSING:${routeId}:${newState.entityId}`);
   }
   if (isCrossJurisdictionTerminalStatus(route.status)) {
     // Reliable delivery may outlive the route it was created for. Finality is

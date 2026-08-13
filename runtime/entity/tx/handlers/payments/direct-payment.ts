@@ -9,6 +9,7 @@ import { addMessage } from '../../../frame-events';
 import type { AccountTxTarget } from '../account';
 import { requireTrustedPaymentGateway } from '../../../../protocol/payments/delivery';
 import { requireCommittedDirectPaymentRoute } from '../../../../protocol/payments/route';
+import { rejectFailure } from '../../../../protocol/errors/failure-taxonomy';
 
 type DirectPaymentEntityTx = Extract<EntityTx, { type: 'directPayment' }>;
 type DirectPaymentAccountTx = Extract<AccountTx, { type: 'direct_payment' }>;
@@ -20,7 +21,7 @@ type DirectPaymentResult = {
 };
 
 const directPaymentInvariant = (code: string, detail: string): Error =>
-  new Error(`DIRECT_PAYMENT_${code}:${detail}`);
+  rejectFailure(`DIRECT_PAYMENT_${code}`, `DIRECT_PAYMENT_${code}:${detail}`);
 
 const directPaymentLog = createStructuredLogger('entity.payment');
 

@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 import { ethers } from 'ethers';
 import type {
   CrossJurisdictionPullLeg,
@@ -30,6 +32,8 @@ import type { JEventAccountTx } from '../j-events-types';
 import { compareStableText } from '../../../protocol/serialization';
 import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { findExactSignedProofBodyPull } from '../../../account/pull-registry-settlement';
+import { hasInboundHtlcRoute } from '../../htlc/route-views';
+import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
 
 const jEventHtlcLog = createStructuredLogger('j.event.htlc');
 
@@ -125,7 +129,7 @@ export type HashLadderRevealQueueResult =
 export const isSourceRevealWindowExpired = (
   runtimeTimestampMs: number,
   deadlineSec: number,
-): boolean => Math.floor(runtimeTimestampMs / 1_000) > deadlineSec;
+): boolean => unixMsToUnixSFloor(toUnixMs(runtimeTimestampMs)) > deadlineSec;
 
 /**
  * Mirror Depository's first-Source admission clock before mutating a J draft.
@@ -152,7 +156,7 @@ const sourceRevealWindowStatus = (
   const ownerWindow = selfIsLeft
     ? account.state.disputeConfig.leftResponseSeconds
     : account.state.disputeConfig.rightResponseSeconds;
-  const nowSec = Math.floor(Number(state.timestamp) / 1_000);
+  const nowSec = unixMsToUnixSFloor(toUnixMs(Number(state.timestamp)));
   if (nowSec < startSec) {
     throw new Error(`J_HASH_LADDER_SOURCE_WINDOW_NOT_OPEN:${nowSec}:${startSec}`);
   }
@@ -408,7 +412,7 @@ const queueSourceHubClaimRegistrationForRoute = (
   runtimeSeed: string | undefined,
 ): SourceHubClaimRegistration | undefined => {
   const route = state.crossJurisdictionSwaps?.get(routeId);
-  if (!route) throw new Error(`CROSS_J_SOURCE_CLAIM_ROUTE_MISSING:${routeId}`);
+  if (!route) throw haltRuntimeFailure("CROSS_J_SOURCE_CLAIM_ROUTE_MISSING", `CROSS_J_SOURCE_CLAIM_ROUTE_MISSING:${routeId}`);
   if (isCrossJurisdictionTerminalStatus(route.status) || !route.sourcePull) return undefined;
   const self = String(state.entityId).toLowerCase();
   if (
@@ -421,7 +425,7 @@ const queueSourceHubClaimRegistrationForRoute = (
   if (fillRatio <= 0) return undefined;
   const sourceAccount = state.accounts.get(counterpartyId.toLowerCase());
   if (!sourceAccount) {
-    throw new Error(`CROSS_J_SOURCE_CLAIM_ACCOUNT_MISSING:${routeId}:${counterpartyId}`);
+    throw haltRuntimeFailure("CROSS_J_SOURCE_CLAIM_ACCOUNT_MISSING", `CROSS_J_SOURCE_CLAIM_ACCOUNT_MISSING:${routeId}:${counterpartyId}`);
   }
   const active = sourceAccount.activeDispute;
   if (active?.observedOnChain) {
@@ -553,15 +557,13 @@ export function queueCrossJurisdictionRevealPorts(
       partialRoot: route.targetPull.partialRoot,
     }, binary);
     if (verified.fillRatio !== event.fillRatio) {
-      throw new Error(
-        `CROSS_J_REVEAL_PORT_RATIO_MISMATCH:${route.orderId}:` +
-        `event=${event.fillRatio}:verified=${verified.fillRatio}`,
-      );
+      throw haltRuntimeFailure("CROSS_J_REVEAL_PORT_RATIO_MISMATCH", `CROSS_J_REVEAL_PORT_RATIO_MISMATCH:${route.orderId}:` +
+        `event=${event.fillRatio}:verified=${verified.fillRatio}`);
     }
     const entityId = String(route.target.counterpartyEntityId || '').toLowerCase();
     const signerId = String(route.targetSignerId || '').toLowerCase();
     if (!entityId || !signerId) {
-      throw new Error(`CROSS_J_REVEAL_PORT_LANE_MISSING:${route.orderId}`);
+      throw haltRuntimeFailure("CROSS_J_REVEAL_PORT_LANE_MISSING", `CROSS_J_REVEAL_PORT_LANE_MISSING:${route.orderId}`);
     }
     const key = `${entityId}\0${signerId}`;
     const batch = batches.get(key) ?? { entityId, signerId, txs: [] };
@@ -622,13 +624,13 @@ const targetUserSnapshotPullIds = (
     : self === String(account.state.rightEntity || '').toLowerCase()
       ? 'right'
       : null;
-  if (!side) throw new Error(`CROSS_J_TARGET_ACCOUNT_ROLE_MISMATCH:${state.entityId}`);
+  if (!side) throw haltRuntimeFailure("CROSS_J_TARGET_ACCOUNT_ROLE_MISMATCH", `CROSS_J_TARGET_ACCOUNT_ROLE_MISMATCH:${state.entityId}`);
   const pullIds: string[] = [];
   const seen = new Set<string>();
   for (const proofbodyHash of proofbodyHashes) {
     const snapshot = account.disputeArgumentSnapshotsByHash?.[proofbodyHash];
     if (!snapshot) {
-      throw new Error(`CROSS_J_TARGET_SIGNED_SNAPSHOT_MISSING:${proofbodyHash || 'missing'}`);
+      throw haltRuntimeFailure("CROSS_J_TARGET_SIGNED_SNAPSHOT_MISSING", `CROSS_J_TARGET_SIGNED_SNAPSHOT_MISSING:${proofbodyHash || 'missing'}`);
     }
     const sidePullIds = side === 'left'
       ? snapshot.plan.leftPullIds
@@ -681,7 +683,7 @@ export function planCrossJurisdictionTargetRecovery(
   const resultsByPullId: Record<string, string> = {};
   for (const [pullId, result] of Object.entries(suppliedResults)) {
     if (!requiredSet.has(pullId)) {
-      throw new Error(`CROSS_J_TARGET_RECOVERY_RESULT_UNBOUND:${pullId}`);
+      throw haltRuntimeFailure("CROSS_J_TARGET_RECOVERY_RESULT_UNBOUND", `CROSS_J_TARGET_RECOVERY_RESULT_UNBOUND:${pullId}`);
     }
     resultsByPullId[pullId] = String(result || '0').toLowerCase();
   }
@@ -800,7 +802,7 @@ export function queueCrossJurisdictionSiblingDisputeFanout(
         );
         continue;
       }
-      throw new Error(`CROSS_J_SIBLING_DISPUTE_PULLS_MISSING:${route.orderId}`);
+      throw haltRuntimeFailure("CROSS_J_SIBLING_DISPUTE_PULLS_MISSING", `CROSS_J_SIBLING_DISPUTE_PULLS_MISSING:${route.orderId}`);
     }
     const sibling = siblingDisputeTargetForRoute(route, self);
     if (!sibling) {
@@ -808,9 +810,7 @@ export function queueCrossJurisdictionSiblingDisputeFanout(
       // disputed Account must always resolve a sibling binder. Soft-skip left
       // the other leg's clock unstarted (silence→0 residual). Auth admission
       // already requires four signers — absence here is state corruption.
-      throw new Error(
-        `CROSS_J_SIBLING_DISPUTE_SIGNER_MISSING:${route.orderId}:self=${self}`,
-      );
+      throw haltRuntimeFailure("CROSS_J_SIBLING_DISPUTE_SIGNER_MISSING", `CROSS_J_SIBLING_DISPUTE_SIGNER_MISSING:${route.orderId}:self=${self}`);
     }
     const key = `${sibling.entityId}\0${sibling.signerId}`;
     const batch = batches.get(key) ?? {
@@ -944,7 +944,7 @@ export function applyKnownHtlcSecret(
     newState.lockBook.delete(route.inboundLockId);
   }
 
-  if (route.inboundEntity && route.inboundLockId) {
+  if (hasInboundHtlcRoute(route)) {
     accountTxs.push({
       accountId: route.inboundEntity,
       tx: {

@@ -11,7 +11,7 @@ import { RuntimeWsClient } from './ws-client';
 import { canonicalizeRuntimeWsAudience, directRuntimeWsAudience } from './ws-protocol';
 import { buildLocalEntityProfile } from './gossip/helper';
 import { extractEntityId } from '../../protocol/identity';
-import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
+import { getSignerAddress, getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../../entity/profile/profile-signing';
 import { inspectHankoForHash } from '../../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../../protocol/crypto/p2p-crypto';
@@ -36,6 +36,7 @@ import {
 } from '../../protocol/payments/delivery-result';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/entity-input/entity-input-envelope-auth.ts';
+import { retryFailure } from '../../protocol/errors/failure-taxonomy';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
@@ -731,7 +732,7 @@ export class RuntimeP2P {
           });
           continue;
         }
-        throw new Error(
+        throw retryFailure('P2P_ENTITY_INPUTS_SEND_THROW',
           `P2P_ENTITY_INPUTS_SEND_THROW: runtime=${normalizedTargetRuntimeId} entities=${envelope.entityInputs.length} ` +
             `transport=${transport} error=${message}`,
         );
@@ -751,7 +752,7 @@ export class RuntimeP2P {
       directPeers: this.getDirectPeerState(),
       delivery: finalDelivery,
     });
-    throw new Error(
+    throw retryFailure('P2P_ENTITY_INPUTS_NOT_DELIVERED',
       `P2P_ENTITY_INPUTS_NOT_DELIVERED: runtime=${normalizedTargetRuntimeId} entities=${envelope.entityInputs.length} ` +
         `transport=${transport}`,
     );
@@ -1244,6 +1245,13 @@ export class RuntimeP2P {
       // This excludes imported/foreign replicas in browser runtimes while still
       // allowing server runtimes (runtimeId may differ from signer addresses).
       if (!replicaSignerId) {
+        continue;
+      }
+      const defaultSignerId = replica.state.config.validators[0];
+      const defaultSignerAddress = defaultSignerId
+        ? getSignerAddress(this.env, defaultSignerId)?.toLowerCase()
+        : undefined;
+      if (!defaultSignerAddress || getSignerAddress(this.env, replicaSignerId)?.toLowerCase() !== defaultSignerAddress) {
         continue;
       }
       if (getSignerPrivateKeyIfAvailable(this.env, replicaSignerId) === null) continue;

@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 import { shortId } from '../../../infra/logger';
 import { nodeProcess } from '../../../infra/process/runtime-process';
 import type { EntityTx } from '../../../types/entity-tx';
@@ -39,10 +41,8 @@ const addAdmittedTransactions = (
   }
   if (trustedLocalCrossJurisdiction) {
     if (!localCanPropose) {
-      throw new Error(
-        `CROSS_J_LOCAL_COMMAND_PROPOSER_REQUIRED:` +
-          `${workingReplica.entityId}:${workingReplica.signerId}`,
-      );
+      throw haltRuntimeFailure("CROSS_J_LOCAL_COMMAND_PROPOSER_REQUIRED", `CROSS_J_LOCAL_COMMAND_PROPOSER_REQUIRED:` +
+          `${workingReplica.entityId}:${workingReplica.signerId}`);
     }
     return prepareLocallyAuthoredEntityTxs(
       env,

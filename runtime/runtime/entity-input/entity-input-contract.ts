@@ -5,9 +5,13 @@ import type { RoutedEntityInput } from '../types.ts';
 import type { RuntimeEntityRoutingDeps } from '../routing/entity-routing.ts';
 import {
   classifyEntityInputApplyFailure,
+  entityInputFailureDisposition,
   MalformedEntityFrameInputError,
   type EntityInputApplyFailureKind,
 } from '../../entity/tx/processing/invariant-errors.ts';
+import type { FailureDisposition } from '../../protocol/errors/failure-taxonomy.ts';
+import { toRuntimeId, type RuntimeId } from '../../protocol/identity/index.ts';
+import { toRuntimeHeight, toUnixMs, type RuntimeHeight, type UnixMs } from '../../protocol/units.ts';
 import { nodeProcess } from '../../infra/process/runtime-process.ts';
 import {
   isRuntimePerfProfileEnabled,
@@ -73,11 +77,12 @@ export interface RuntimeEntityInputApplyResult {
 export class RuntimeEntityInputApplyError extends Error {
   readonly entityId: string;
   readonly signerId: string;
-  readonly sourceRuntimeId: string;
-  readonly sourceRuntimeHeight: number | undefined;
-  readonly sourceRuntimeTimestamp: number | undefined;
+  readonly sourceRuntimeId: RuntimeId | undefined;
+  readonly sourceRuntimeHeight: RuntimeHeight | undefined;
+  readonly sourceRuntimeTimestamp: UnixMs | undefined;
   readonly trustedLocalCrossJurisdiction: boolean;
   readonly failureKind: EntityInputApplyFailureKind;
+  readonly disposition: FailureDisposition;
   readonly rejectionCode: string;
 
   constructor(
@@ -99,11 +104,19 @@ export class RuntimeEntityInputApplyError extends Error {
     this.name = 'RuntimeEntityInputApplyError';
     this.entityId = input.entityId;
     this.signerId = input.signerId;
-    this.sourceRuntimeId = String(input.from ?? '').trim();
-    this.sourceRuntimeHeight = input.sourceRuntimeFrame?.height;
-    this.sourceRuntimeTimestamp = input.sourceRuntimeFrame?.timestamp;
+    const sourceRuntimeId = String(input.from ?? '').trim();
+    this.sourceRuntimeId = sourceRuntimeId.length === 0
+      ? undefined
+      : toRuntimeId(sourceRuntimeId);
+    this.sourceRuntimeHeight = input.sourceRuntimeFrame === undefined
+      ? undefined
+      : toRuntimeHeight(input.sourceRuntimeFrame.height);
+    this.sourceRuntimeTimestamp = input.sourceRuntimeFrame === undefined
+      ? undefined
+      : toUnixMs(input.sourceRuntimeFrame.timestamp);
     this.trustedLocalCrossJurisdiction = trustedLocalCrossJurisdiction;
     this.failureKind = failureKind;
+    this.disposition = entityInputFailureDisposition(failureKind);
     this.rejectionCode = cause instanceof MalformedEntityFrameInputError
       ? cause.rejection
       : failureKind;
@@ -111,7 +124,7 @@ export class RuntimeEntityInputApplyError extends Error {
 
   get isRemoteIngress(): boolean {
     return (
-      this.sourceRuntimeId.length > 0 &&
+      this.sourceRuntimeId !== undefined &&
       !this.trustedLocalCrossJurisdiction
     );
   }

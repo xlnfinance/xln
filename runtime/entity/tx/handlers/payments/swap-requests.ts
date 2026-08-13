@@ -4,6 +4,7 @@ import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
 import type { AccountTxTarget } from '../account';
 import type { ApplyEntityTxOptions } from '../../apply';
+import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
 
 type SwapRequestResult = {
   newState: EntityState;
@@ -28,7 +29,8 @@ const requireSwapAccount = (
 ): AccountState => {
   const account = state.accounts.get(counterpartyEntityId);
   if (!account) {
-    throw new Error(
+    throw haltRuntimeFailure(
+      'SWAP_REQUEST_ACCOUNT_MISSING',
       `SWAP_REQUEST_ACCOUNT_MISSING:${action}:entity=${state.entityId}:counterparty=${counterpartyEntityId}`,
     );
   }

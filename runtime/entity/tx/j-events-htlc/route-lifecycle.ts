@@ -1,6 +1,7 @@
 import type { AccountTx, HtlcLock, HtlcRoute } from '../../../types/account';
 import type { EntityState } from '../../types';
 import { cancelHook, scheduleHook } from '../../scheduler/hook-state';
+import { hasInboundHtlcRoute } from '../../htlc/route-views';
 
 /** Auto-dispute when the upstream peer never acknowledges a returned secret. */
 export const HTLC_SECRET_ACK_TIMEOUT_MS = 30_000;
@@ -59,7 +60,7 @@ export function armHtlcSecretAckTimeout(
   state: EntityState,
   route: HtlcRoute,
 ): void {
-  if (!route.inboundEntity || !route.inboundLockId) {
+  if (!hasInboundHtlcRoute(route)) {
     throw new Error(`HTLC_SECRET_ACK_INBOUND_ROUTE_REQUIRED:${route.hashlock}`);
   }
   if (!state.crontabState) {

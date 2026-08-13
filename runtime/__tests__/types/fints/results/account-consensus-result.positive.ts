@@ -7,7 +7,7 @@ import type {
   ProposeAccountFrameProposed,
   ProposeAccountFrameRejected,
   ProposeAccountFrameResult,
-} from '../../../account/consensus/types';
+} from '../../../../account/consensus/types';
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends

@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
@@ -36,10 +38,8 @@ export const verifyStartHanko = async (
     evidence.storedDisputeHash?.startsWith('0x') &&
     evidence.storedDisputeHash.toLowerCase() !== disputeHash.toLowerCase()
   ) {
-    throw new Error(
-      `DISPUTE_STORED_HASH_MISMATCH:${counterpartyId}:` +
-      `${evidence.storedDisputeHash}:${disputeHash}`,
-    );
+    throw haltRuntimeFailure("DISPUTE_STORED_HASH_MISMATCH", `DISPUTE_STORED_HASH_MISMATCH:${counterpartyId}:` +
+      `${evidence.storedDisputeHash}:${disputeHash}`);
   }
   const boardHash = resolveObserverCertifiedBoardHash(
     sourceState,

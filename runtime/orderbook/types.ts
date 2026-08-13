@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../protocol/errors/failure-taxonomy";
+
 /**
  * Orderbook Types for XLN
  *
@@ -165,9 +167,7 @@ export function computePriceTicksForBaseQuote(
 export const SWAP_LOT_SCALE = getSwapLotScale(2);
 
 if (SWAP_LOT_SCALE % ORDERBOOK_PRICE_SCALE !== 0n) {
-  throw new Error(
-    `ORDERBOOK_SCALE_INVARIANT: SWAP_LOT_SCALE=${SWAP_LOT_SCALE} must be divisible by ORDERBOOK_PRICE_SCALE=${ORDERBOOK_PRICE_SCALE}`,
-  );
+  throw haltRuntimeFailure("ORDERBOOK_SCALE_INVARIANT", `ORDERBOOK_SCALE_INVARIANT: SWAP_LOT_SCALE=${SWAP_LOT_SCALE} must be divisible by ORDERBOOK_PRICE_SCALE=${ORDERBOOK_PRICE_SCALE}`);
 }
 
 export interface PreparedSwapOrder {

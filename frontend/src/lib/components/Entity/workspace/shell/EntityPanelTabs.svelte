@@ -113,16 +113,7 @@ $: liveEnv = embeddedRuntimeContext.liveEnv;
 $: liveEnvResolver = embeddedRuntimeContext.liveEnvResolver;
 $: envRevision = runtimeFrameContext.envRevision;
 $: isLive = runtimeFrameContext.isLive;
-type DebtDrainRequest = {
-  tokenId: number;
-  symbol: string;
-  maxIterations: number;
-  openCount: number;
-  outstandingAmount: bigint;
-  reserveAmount: bigint;
-  payableAmount: bigint;
-  nextDebtIndex: number | null;
-};
+import type { DebtEnforceRequest } from '../../assets/debt-enforce-request';
 type EntitySettingsProfileDraft = {
   name: string;
   avatar: string;
@@ -2360,7 +2351,7 @@ async function queueDisputeFinalize(counterpartyEntityId: string, description = 
     toasts.error(`Dispute finalize failed: ${(err as Error).message}`);
   }
 }
-async function enforceOutstandingDebt(request: DebtDrainRequest): Promise<void> {
+async function enforceOutstandingDebt(request: DebtEnforceRequest): Promise<void> {
   const { tokenId, symbol, maxIterations, openCount, outstandingAmount, reserveAmount, payableAmount, nextDebtIndex } = request;
   const entityId = String(replica?.state?.entityId || tab.entityId || "").trim();
   if (!entityId) {

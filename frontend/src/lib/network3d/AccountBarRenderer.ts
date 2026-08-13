@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { toDerivedAccountData, type DerivedAccountData } from './derivedAccount';
 import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
+import type { Delta } from '@xln/runtime/api/public/runtime-module';
 
 /** Minimal endpoint shape the bars need. Structurally satisfied by GraphEntityData. */
 export interface BarEndpoint {
@@ -69,11 +70,14 @@ export function createAccountBars(
   parent: THREE.Object3D,
   fromEntity: BarEndpoint,
   toEntity: BarEndpoint,
-  deltas: Map<number, any>,  // Map<tokenId, Delta>
+  deltas: Map<number, Delta>,
   fromIsLeft: boolean,
   settings: AccountBarSettings,
   getEntitySize: (entityId: string, tokenId: number) => number,
-  xlnFunctions: any  // XLNRuntime interface
+  xlnFunctions: {
+    deriveDelta(delta: Delta, isLeft: boolean): Partial<Record<keyof DerivedAccountData, unknown>>;
+    getTokenInfo(tokenId: number): { decimals: number } | undefined;
+  } | null | undefined,
 ): THREE.Group {
   const group = new THREE.Group();
 

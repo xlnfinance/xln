@@ -465,6 +465,7 @@ const buildMarketMakerAccountStatusDebug = (
       height: Number(env.state.height ?? 0),
       timestamp: Number(env.state.timestamp ?? 0),
       halted: Boolean(env.infrastructure?.halted),
+      operatorStatus: env.infrastructure?.operatorStatus ?? null,
       fatalDebugPayload: env.infrastructure?.fatalDebugPayload ?? null,
       loopActive: Boolean(env.infrastructure?.loopActive),
       backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
@@ -617,6 +618,7 @@ const buildMarketMakerHealthResponseJson = (input: MarketMakerHealthProjection):
     startupPhase: input.startupPhase,
     runtime: {
       halted: runtimeHalted,
+      operatorStatus: input.env.infrastructure?.operatorStatus ?? null,
       lifecyclePhase: input.env.infrastructure?.lifecyclePhase ?? null,
       fatalDebugPayload: input.env.infrastructure?.fatalDebugPayload ?? null,
       securityIncidents: readRuntimeSecurityIncidentTelemetry(input.env),

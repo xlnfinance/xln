@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
+
 import type { AccountReplica, AccountInput } from '../../types/account';
 import {
   assertJBatchWithinContractLimits,
@@ -11,19 +13,20 @@ import {
   accountInputProposal,
 } from '../consensus/flush';
 import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
+import { toEvidenceHash, type EvidenceHash } from '../../protocol/hashes';
 
 const PROOF_HASH_PATTERN = /^0x[0-9a-f]{64}$/;
 
-const requireProofHash = (value: unknown, context: string): string => {
+const requireProofHash = (value: unknown, context: string): EvidenceHash => {
   const hash = String(value ?? '').trim();
   const normalized = hash.toLowerCase();
   if (!PROOF_HASH_PATTERN.test(normalized)) {
-    throw new Error(`DISPUTE_EVIDENCE_HASH_INVALID:${context}:${hash || 'missing'}`);
+    throw haltRuntimeFailure("DISPUTE_EVIDENCE_HASH_INVALID", `DISPUTE_EVIDENCE_HASH_INVALID:${context}:${hash || 'missing'}`);
   }
   if (hash !== normalized) {
-    throw new Error(`DISPUTE_EVIDENCE_HASH_NON_CANONICAL:${context}:${hash}`);
+    throw haltRuntimeFailure("DISPUTE_EVIDENCE_HASH_NON_CANONICAL", `DISPUTE_EVIDENCE_HASH_NON_CANONICAL:${context}:${hash}`);
   }
-  return normalized;
+  return toEvidenceHash(normalized);
 };
 
 const addOptionalHash = (
@@ -63,7 +66,7 @@ const addBatchHashes = (
     const claimed = requireProofHash(start.proofbodyHash, `${context}.start[${index}]`);
     const computed = hashProofBodyStruct(start.initialProofbody).toLowerCase();
     if (claimed !== computed) {
-      throw new Error(`DISPUTE_EVIDENCE_J_START_PROOFBODY_HASH_MISMATCH:${claimed}:${computed}`);
+      throw haltRuntimeFailure("DISPUTE_EVIDENCE_J_START_PROOFBODY_HASH_MISMATCH", `DISPUTE_EVIDENCE_J_START_PROOFBODY_HASH_MISMATCH:${claimed}:${computed}`);
     }
     hashes.add(claimed);
   });
@@ -110,7 +113,7 @@ const assertRecordKeysCanonical = (
   for (const key of Object.keys(record ?? {})) {
     const normalized = String(key).toLowerCase();
     if (seen.has(normalized)) {
-      throw new Error(`DISPUTE_EVIDENCE_HASH_AMBIGUOUS:${normalized}`);
+      throw haltRuntimeFailure("DISPUTE_EVIDENCE_HASH_AMBIGUOUS", `DISPUTE_EVIDENCE_HASH_AMBIGUOUS:${normalized}`);
     }
     seen.add(normalized);
     requireProofHash(key, `${context}.key`);
@@ -134,15 +137,15 @@ const assertRetainedProofBodies = (
 ): void => {
   for (const hash of reachable) {
     const body = record?.[hash];
-    if (!body) throw new Error(`DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_MISSING:${hash}`);
+    if (!body) throw haltRuntimeFailure("DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_MISSING", `DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_MISSING:${hash}`);
     let computed: string;
     try {
       computed = hashProofBodyStruct(body as ProofBodyStruct).toLowerCase();
     } catch (cause) {
-      throw new Error(`DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_INVALID:${hash}`, { cause });
+      throw haltRuntimeFailure("DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_INVALID", `DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_INVALID:${hash}`, cause);
     }
     if (computed !== hash) {
-      throw new Error(`DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_HASH_MISMATCH:${hash}:${computed}`);
+      throw haltRuntimeFailure("DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_HASH_MISMATCH", `DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_HASH_MISMATCH:${hash}:${computed}`);
     }
   }
 };
@@ -154,7 +157,7 @@ const assertRetainedNonces = (
   for (const hash of reachable) {
     const nonce = record?.[hash];
     if (!Number.isSafeInteger(nonce) || Number(nonce) <= 0) {
-      throw new Error(`DISPUTE_EVIDENCE_REACHABLE_NONCE_INVALID:${hash}:${String(nonce)}`);
+      throw haltRuntimeFailure("DISPUTE_EVIDENCE_REACHABLE_NONCE_INVALID", `DISPUTE_EVIDENCE_REACHABLE_NONCE_INVALID:${hash}:${String(nonce)}`);
     }
   }
 };
@@ -165,11 +168,11 @@ const assertRetainedSnapshots = (
 ): void => {
   for (const hash of reachable) {
     const snapshot = record?.[hash];
-    if (!snapshot) throw new Error(`DISPUTE_EVIDENCE_REACHABLE_ARGUMENT_SNAPSHOT_MISSING:${hash}`);
+    if (!snapshot) throw haltRuntimeFailure("DISPUTE_EVIDENCE_REACHABLE_ARGUMENT_SNAPSHOT_MISSING", `DISPUTE_EVIDENCE_REACHABLE_ARGUMENT_SNAPSHOT_MISSING:${hash}`);
     const claimed = requireProofHash(snapshot.proofbodyHash, `snapshot.${hash}`);
     const computed = hashProofBodyStruct(snapshot.proofBodyStruct).toLowerCase();
     if (claimed !== hash || computed !== hash) {
-      throw new Error(`DISPUTE_EVIDENCE_REACHABLE_ARGUMENT_SNAPSHOT_MISMATCH:${hash}:${claimed}:${computed}`);
+      throw haltRuntimeFailure("DISPUTE_EVIDENCE_REACHABLE_ARGUMENT_SNAPSHOT_MISMATCH", `DISPUTE_EVIDENCE_REACHABLE_ARGUMENT_SNAPSHOT_MISMATCH:${hash}:${claimed}:${computed}`);
     }
   }
 };

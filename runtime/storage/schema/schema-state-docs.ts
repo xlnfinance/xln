@@ -6,6 +6,7 @@ import { assertAccountFrameHash } from '../../account/consensus/frame/hash';
 import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
 import { validateAccountReplica } from '../../account/validation/state-validation';
 import { assertCanonicalSettlementWorkspace } from '../../account/tx/handlers/settlement/transition';
+import { assertSettlementWorkspacePhase } from '../../account/tx/handlers/settlement/workspace-views';
 import { MAX_CREDIT_LIMIT } from '../../account/tx/handlers/balance/set-credit-limit';
 import { validateEntityState } from '../../entity/state/state-validation';
 import { FINANCIAL, LIMITS, TOKENS } from '../../config/constants';
@@ -233,6 +234,7 @@ const validateStorageAccountStateMaps = (state: AccountState, code: string): voi
     const workspace = requireBoundaryRecord(state.settlementWorkspace, `${code}_WORKSPACE`);
     requireBoundaryInteger(workspace['revision'], `${code}_WORKSPACE_REVISION`, 1);
     assertCanonicalSettlementWorkspace(state, state.settlementWorkspace);
+    assertSettlementWorkspacePhase(state.settlementWorkspace, `${code}_WORKSPACE`);
   }
 };
 const validateStorageAccountReplicaCore = (doc: Record<string, unknown>, code: string): void => {

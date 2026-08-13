@@ -777,7 +777,7 @@ export const tryOpenStorageDb = async (
       } catch (error) {
         const isBlocked =
           error instanceof Error &&
-          (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
+          (error.name === 'SecurityError' || error.name === 'InvalidStateError');
         if (isBlocked) {
           storageLog.warn('storage_db.blocked', { role, error: formatStorageError(error) });
           return false;
@@ -965,7 +965,7 @@ export async function tryOpenRuntimeWalDb(
       } catch (error) {
         const isBlocked =
           error instanceof Error &&
-          (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
+          (error.name === 'SecurityError' || error.name === 'InvalidStateError');
         if (isBlocked) {
           storageLog.warn('runtime_wal.blocked', { error: formatStorageError(error) });
           return false;
@@ -997,7 +997,7 @@ export async function tryOpenHistoryViewDb(
       } catch (error) {
         const isBlocked =
           error instanceof Error &&
-          (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
+          (error.name === 'SecurityError' || error.name === 'InvalidStateError');
         if (isBlocked) {
           storageLog.warn('history_view_db.blocked', { error: formatStorageError(error) });
           return false;

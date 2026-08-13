@@ -1,7 +1,20 @@
+import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
+
 export type SwapNetAuthorization = Readonly<{
   maxFee: bigint;
   minNetReceive: bigint;
 }>;
+
+export class SwapNetAuthorizationError extends FailureDispositionError {
+  constructor(code: string) {
+    super('reject', code);
+    this.name = 'SwapNetAuthorizationError';
+  }
+}
+
+const rejectSwapNetAuthorization = (code: string): never => {
+  throw new SwapNetAuthorizationError(code);
+};
 
 /**
  * Fee authority belongs to the maker's signed offer, not the hub's mutable fee
@@ -29,17 +42,17 @@ const assertOfferAuthorization = (offer: SwapNetAuthorizedOffer): void => {
     offer.giveAmount <= 0n ||
     offer.wantAmount <= 0n
   ) {
-    throw new Error('SWAP_NET_AUTH_OFFER_AMOUNT_INVALID');
+    rejectSwapNetAuthorization('SWAP_NET_AUTH_OFFER_AMOUNT_INVALID');
   }
   if (typeof offer.maxFee !== 'bigint' || offer.maxFee < 0n || offer.maxFee > offer.wantAmount) {
-    throw new Error('SWAP_NET_AUTH_MAX_FEE_INVALID');
+    rejectSwapNetAuthorization('SWAP_NET_AUTH_MAX_FEE_INVALID');
   }
   if (
     typeof offer.minNetReceive !== 'bigint' ||
     offer.minNetReceive < 0n ||
     offer.minNetReceive > offer.wantAmount
   ) {
-    throw new Error('SWAP_NET_AUTH_MIN_RECEIVE_INVALID');
+    rejectSwapNetAuthorization('SWAP_NET_AUTH_MIN_RECEIVE_INVALID');
   }
 };
 
@@ -47,14 +60,14 @@ export const deriveSwapNetAuthorization = (
   wantAmount: bigint,
   bps: number,
 ): SwapNetAuthorization => {
-  if (wantAmount <= 0n) throw new Error('SWAP_NET_AUTH_WANT_INVALID');
+  if (wantAmount <= 0n) rejectSwapNetAuthorization('SWAP_NET_AUTH_WANT_INVALID');
   if (!Number.isSafeInteger(bps) || bps < 0 || bps > 10_000) {
-    throw new Error('SWAP_NET_AUTH_BPS_INVALID');
+    rejectSwapNetAuthorization('SWAP_NET_AUTH_BPS_INVALID');
   }
   const maxFee = (wantAmount * BigInt(bps)) / 10_000n;
   const authorization = { maxFee, minNetReceive: wantAmount - maxFee };
   if (authorization.maxFee >= wantAmount || authorization.minNetReceive <= 0n) {
-    throw new Error('SWAP_NET_AUTH_MAX_FEE_INVALID');
+    rejectSwapNetAuthorization('SWAP_NET_AUTH_MAX_FEE_INVALID');
   }
   assertOfferAuthorization({ giveAmount: 1n, wantAmount, ...authorization });
   return authorization;
@@ -100,10 +113,10 @@ export const deriveSwapFillPolicyFee = (
   const authorizedPolicy = { ...offer, ...policy };
   assertOfferAuthorization(authorizedPolicy);
   if (typeof filledGive !== 'bigint' || filledGive < 0n || filledGive > offer.giveAmount) {
-    throw new Error('SWAP_NET_AUTH_FILL_GIVE_INVALID');
+    rejectSwapNetAuthorization('SWAP_NET_AUTH_FILL_GIVE_INVALID');
   }
   if (typeof filledWant !== 'bigint' || filledWant < 0n) {
-    throw new Error('SWAP_NET_AUTH_FILL_WANT_INVALID');
+    rejectSwapNetAuthorization('SWAP_NET_AUTH_FILL_WANT_INVALID');
   }
   return fillAuthorization(authorizedPolicy, filledGive, filledWant, closesRemainder).maxFee;
 };
@@ -117,7 +130,7 @@ export const assertSwapNetAuthorization = (
 ): void => {
   assertOfferAuthorization(offer);
   if (typeof filledGive !== 'bigint' || filledGive < 0n || filledGive > offer.giveAmount) {
-    throw new Error('SWAP_NET_AUTH_FILL_GIVE_INVALID');
+    rejectSwapNetAuthorization('SWAP_NET_AUTH_FILL_GIVE_INVALID');
   }
   if (
     typeof filledWant !== 'bigint' ||
@@ -127,12 +140,12 @@ export const assertSwapNetAuthorization = (
     fee > filledWant ||
     (filledWant > 0n && fee >= filledWant)
   ) {
-    throw new Error('SWAP_NET_AUTH_FILL_WANT_INVALID');
+    rejectSwapNetAuthorization('SWAP_NET_AUTH_FILL_WANT_INVALID');
   }
   const allowed = fillAuthorization(offer, filledGive, filledWant, closesRemainder);
-  if (fee > allowed.maxFee) throw new Error('SWAP_NET_AUTH_MAX_FEE_EXCEEDED');
+  if (fee > allowed.maxFee) rejectSwapNetAuthorization('SWAP_NET_AUTH_MAX_FEE_EXCEEDED');
   if (filledWant - fee < allowed.minNetReceive) {
-    throw new Error('SWAP_NET_AUTH_MIN_RECEIVE_NOT_MET');
+    rejectSwapNetAuthorization('SWAP_NET_AUTH_MIN_RECEIVE_NOT_MET');
   }
 };
 
@@ -143,7 +156,7 @@ export const requantizeSwapNetAuthorization = (
 ): SwapNetAuthorization => {
   assertOfferAuthorization(offer);
   if (nextGiveAmount <= 0n || nextGiveAmount > offer.giveAmount || nextWantAmount <= 0n) {
-    throw new Error('SWAP_NET_AUTH_REMAINDER_INVALID');
+    rejectSwapNetAuthorization('SWAP_NET_AUTH_REMAINDER_INVALID');
   }
   const removed = proRataAuthorization(offer, offer.giveAmount - nextGiveAmount);
   const authorization = {

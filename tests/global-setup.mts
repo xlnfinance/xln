@@ -7,7 +7,6 @@ import {
   type Browser,
   type BrowserContext,
   type Page,
-  type Request,
   type TestInfo,
 } from '@playwright/test';
 import { appendFileSync, mkdirSync } from 'node:fs';
@@ -193,7 +192,7 @@ const getConsoleResourceStatus = (message: string): number | null => {
   return Number.isInteger(status) ? status : null;
 };
 
-const isBenignRequestFailure = (request: Request, message: string): boolean => {
+const isBenignRequestFailure = (message: string): boolean => {
   if (message !== 'net::ERR_ABORTED') return false;
   return true;
 };
@@ -233,7 +232,7 @@ const observePage = (page: Page, testInfo: TestInfo | null): void => {
   });
   page.on('requestfailed', (request) => {
     const failureMessage = request.failure()?.errorText || 'request failed';
-    if (isBenignRequestFailure(request, failureMessage)) return;
+    if (isBenignRequestFailure(failureMessage)) return;
     emitIssue(testInfo, 'requestfailed', 'error', failureMessage, {
       url: request.url(),
       method: request.method(),

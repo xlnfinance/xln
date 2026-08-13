@@ -23,7 +23,6 @@ import { entityLog } from '../entity-log';
 import {
   getFrameJPrefixValidationError,
   getReplicaJRangeValidationError,
-  isJPrefixLocalFreshnessRace,
 } from '../jurisdiction/prefix-round';
 import { getPrevFrameHash } from '../frame/lineage';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
@@ -57,17 +56,17 @@ const validateCatchUpJRange = (
   }
   const prefixError = getFrameJPrefixValidationError(env, workingReplica, frame);
   if (!prefixError) return null;
-  if (prefixError.startsWith('J_PREFIX_LOCAL_HISTORY_BEHIND:')) {
+  if (prefixError.code === 'J_PREFIX_LOCAL_HISTORY_BEHIND') {
     return deferEntityConsensusInput(context, 'COMMIT_J_PREFIX_HISTORY_WAIT');
   }
-  if (!isJPrefixLocalFreshnessRace(prefixError)) {
-    entityLog.error('commit.j_prefix_rejected', { error: prefixError });
+  if (prefixError.disposition !== 'retry') {
+    entityLog.error('commit.j_prefix_rejected', { error: prefixError.message });
     return rejectEntityConsensusInput(context, 'COMMIT_J_RANGE_MISMATCH');
   }
   // Catch-up must apply H before reaching H+1, which finalizes the newer local
   // observation. Intrinsic range, root and signature checks remain mandatory.
   entityLog.info('commit.catch_up_local_j_prefix_ahead', {
-    error: prefixError,
+    error: prefixError.message,
     frameHeight: frame.height,
     localFinalizedJHeight: workingReplica.state.lastFinalizedJHeight,
     localScannedThroughHeight:

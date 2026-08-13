@@ -13,11 +13,7 @@
   import { REMOTE_RUNTIME } from '@xln/runtime/config/constants';
   import type { Tab } from '$lib/types/ui';
   import EntityPanelTabs from './shell/EntityPanelTabs.svelte';
-  import {
-    buildEntityWorkspaceView,
-    runtimeProjectionMatchesRuntime,
-    type EntityWorkspaceView,
-  } from '../core/entity-workspace';
+  import { runtimeProjectionMatchesRuntime } from '../core/entity-workspace';
   import {
     emptyEntityWorkspaceRuntimeFrameContext,
     type EntityWorkspaceRuntimeFrameContext,
@@ -36,7 +32,6 @@
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
   import type { EntityOpenAction } from '$lib/view/utils/panelBridge';
   export let initialAction: EntityOpenAction | undefined = undefined;
-  export let workspaceView: EntityWorkspaceView | null = null;
   export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext = emptyEntityWorkspaceRuntimeFrameContext;
   export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext = emptyEntityWorkspaceEmbeddedRuntimeContext;
 
@@ -158,16 +153,6 @@
     }
   }
 
-  $: workspaceProjectionEntityId = String(
-    workspaceProjectionFrame?.activeEntityId ||
-      workspaceProjectionFrame?.activeEntity?.summary?.entityId ||
-      tab.entityId ||
-      '',
-  ).trim().toLowerCase();
-  $: resolvedWorkspaceView = workspaceView ?? buildEntityWorkspaceView(
-    workspaceProjectionFrame ? { ...workspaceProjectionFrame, runtimeId: $runtimeControllerHandle.id } : null,
-    workspaceProjectionEntityId || tab.entityId,
-  );
   $: frameContext = runtimeFrameContext ?? emptyEntityWorkspaceRuntimeFrameContext;
   $: embeddedFrameContext = embeddedRuntimeContext ?? emptyEntityWorkspaceEmbeddedRuntimeContext;
   $: runtimeFrameEnv = embeddedFrameContext.env;

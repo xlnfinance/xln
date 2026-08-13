@@ -106,19 +106,7 @@ const atomicPairProtocolRejection = (
     return null;
   }
   if (error.failureKind === 'malformed-ingress') return error;
-  const detail =
-    error.cause instanceof Error
-      ? error.cause.message
-      : String(error.cause ?? '');
-  const invalidPrefixes = [
-    'CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID',
-    'CONSENSUS_OUTPUT_HANKO_INVALID',
-    'CONSENSUS_OUTPUT_SEMANTIC_HASH_MISMATCH',
-    'CONSENSUS_OUTPUT_SEMANTIC_SOURCE_MISMATCH',
-  ];
-  return invalidPrefixes.some(prefix => detail.startsWith(prefix))
-    ? error
-    : null;
+  return null;
 };
 
 const recordAtomicPairRejection = (

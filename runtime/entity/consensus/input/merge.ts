@@ -62,6 +62,8 @@ const canonicalEntityInputSortKey = (input: EntityConsensusInput): string => saf
   signerId: String(input.signerId || '').toLowerCase(),
   from: String(input.from || '').toLowerCase(),
   runtimeId: String(input.runtimeId || '').toLowerCase(),
+  certifiedOutputIdentity: input.certifiedOutputIdentity ?? null,
+  localRuntimeProtocol: input.localRuntimeProtocol ?? null,
   proposedFrame: input.proposedFrame
     ? {
         height: input.proposedFrame.height,
@@ -185,7 +187,13 @@ export const prioritizeEntityConsensusInputs = <T extends EntityConsensusInput>(
 };
 
 export const entityInputMergeKey = (input: EntityConsensusInput): string => {
-  const base = `${input.entityId.toLowerCase()}:${String(input.signerId || '').toLowerCase()}`;
+  const semanticIdentity = input.certifiedOutputIdentity;
+  const deliveryLane = semanticIdentity
+    ? `:certified:${semanticIdentity.lane}:${semanticIdentity.sequence}:${semanticIdentity.semanticHash.toLowerCase()}`
+    : input.localRuntimeProtocol
+      ? `:local-protocol:${input.localRuntimeProtocol}`
+      : '';
+  const base = `${input.entityId.toLowerCase()}:${String(input.signerId || '').toLowerCase()}${deliveryLane}`;
   const atomicCrossJ = input.atomicCrossJurisdictionPair;
   if (atomicCrossJ) {
     const sourceFrame = input.sourceRuntimeFrame;

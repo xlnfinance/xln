@@ -2,27 +2,27 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { computeAccountStateRoot, encodeAccountStateValue } from '../../../account/commitment/state-root';
-import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
-import { createDefaultDelta } from '../../../account/state/delta';
-import { computeCanonicalEntityConsensusStateHash } from '../../../entity/consensus/state-root';
-import { HASHABLE_LOCK_BOOK_ENTRY_FIELDS } from '../../../entity/state/lock-book-fields';
-import { BATCH_ABI, PROOF_BODY_ABI } from '../../../protocol/dispute/proof-body';
-import type { AccountState, Delta, HtlcLock, HtlcRoute, SettlementWorkspace } from '../../../types/account';
-import type { EntityState } from '../../../entity/types';
+import { computeAccountStateRoot, encodeAccountStateValue } from '../../../../account/commitment/state-root';
+import { createEmptyAccountJClaimAccumulator } from '../../../../account/j-claims/j-claim-accumulator';
+import { createDefaultDelta } from '../../../../account/state/delta';
+import { computeCanonicalEntityConsensusStateHash } from '../../../../entity/consensus/state-root';
+import { HASHABLE_LOCK_BOOK_ENTRY_FIELDS } from '../../../../entity/state/lock-book-fields';
+import { BATCH_ABI, PROOF_BODY_ABI } from '../../../../protocol/dispute/proof-body';
+import type { AccountState, Delta, HtlcLock, HtlcRoute, SettlementWorkspace } from '../../../../types/account';
+import type { EntityState } from '../../../../entity/types';
 import {
   HASHABLE_DELTA_FIELDS,
   HASHABLE_HTLC_LOCK_FIELDS,
   HASHABLE_HTLC_ROUTE_FIELDS,
   HASHABLE_SETTLEMENT_WORKSPACE_FIELDS,
-} from '../../../types/hash-coverage/account-nested';
-import { NESTED_HASH_COVERAGE } from '../../../types/hash-coverage/catalog';
+} from '../../../../types/hash-coverage/account-nested';
+import { NESTED_HASH_COVERAGE } from '../../../../types/hash-coverage/catalog';
 import {
   HASHABLE_RUNTIME_PAYMENT_FIELDS,
   HASHABLE_RUNTIME_PROOF_BODY_FIELDS,
   HASHABLE_RUNTIME_PULL_FIELDS,
   HASHABLE_RUNTIME_SWAP_FIELDS,
-} from '../../../types/hash-coverage/evidence-nested';
+} from '../../../../types/hash-coverage/evidence-nested';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;
@@ -193,7 +193,7 @@ describe('nested hash-reachable field coverage', () => {
 
 describe('nested hash coverage gate registration', () => {
   test('package script and check:src include the AST ratchet exactly once', () => {
-    const repoRoot = resolve(import.meta.dir, '../../../..');
+    const repoRoot = resolve(import.meta.dir, '../../../../..');
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };

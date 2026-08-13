@@ -100,6 +100,22 @@ test('profile capacity uses the owning Entity right-side perspective', () => {
   expect(capacities['1']).toEqual({ inCapacity: 5n, outCapacity: 20n });
 });
 
+test('profile descriptor canonicalizes configured contract addresses before signing', () => {
+  const state = stateWithAccounts(id(1), 0, 0);
+  state.config.jurisdiction = {
+    name: 'checksum-addresses',
+    chainId: 31_337,
+    entityProviderAddress: '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',
+    depositoryAddress: '0x0165878A594ca255338adfa4d48449f69242Eb8F',
+  };
+  expect(buildEntityProfileDescriptor(state).metadata.jurisdiction).toEqual({
+    name: 'checksum-addresses',
+    chainId: 31_337,
+    entityProviderAddress: '0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0',
+    depositoryAddress: '0x0165878a594ca255338adfa4d48449f69242eb8f',
+  });
+});
+
 test('profile hash witness changes only with the final descriptor, even after in-place state mutation', () => {
   const state = stateWithAccounts(id(1), 1, 1);
   const previous = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(state));

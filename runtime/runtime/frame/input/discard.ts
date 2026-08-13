@@ -9,10 +9,11 @@ const discardLog = createStructuredLogger('runtime.input_discard');
 const sameRejectedOrigin = (
   input: RoutedEntityInput,
   error: RuntimeEntityInputApplyError,
+  sourceRuntimeId: string,
 ): boolean =>
   input.entityId.toLowerCase() === error.entityId.toLowerCase() &&
   String(input.signerId || '').trim().toLowerCase() === error.signerId.trim().toLowerCase() &&
-  String(input.from || '').trim().toLowerCase() === error.sourceRuntimeId.toLowerCase();
+  String(input.from || '').trim().toLowerCase() === sourceRuntimeId.toLowerCase();
 
 /**
  * Remove only the origin that produced a malformed EntityInput.
@@ -37,10 +38,14 @@ export const discardRejectedEntityInput = (
   if (!(error instanceof RuntimeEntityInputApplyError) || !error.isDiscardableIngress) {
     return null;
   }
+  const sourceRuntimeId = error.sourceRuntimeId;
+  if (!sourceRuntimeId) throw new Error('DISCARDABLE_ENTITY_INPUT_SOURCE_RUNTIME_MISSING');
   const remaining = cloneRuntimeFrameMempool(input);
-  const rejected = remaining.entityInputs.filter(candidate => sameRejectedOrigin(candidate, error));
+  const rejected = remaining.entityInputs.filter(candidate =>
+    sameRejectedOrigin(candidate, error, sourceRuntimeId));
   if (rejected.length === 0) return null;
-  remaining.entityInputs = remaining.entityInputs.filter(candidate => !sameRejectedOrigin(candidate, error));
+  remaining.entityInputs = remaining.entityInputs.filter(candidate =>
+    !sameRejectedOrigin(candidate, error, sourceRuntimeId));
 
   const payload = {
     action: 'discarded',

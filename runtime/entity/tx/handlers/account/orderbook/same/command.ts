@@ -1,4 +1,4 @@
-import { applyCommand } from '../../../../../../orderbook';
+import { applyCommand, OrderbookCapacityError } from '../../../../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../../infra/logger';
 import { queueUniqueSwapResolveForEntityState } from '../queue';
 import {
@@ -76,7 +76,7 @@ export const applySameOfferCommand = (
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message === 'Out of order slots') {
+    if (error instanceof OrderbookCapacityError) {
       rejectFullBook(pass, offer);
     } else {
       containSamePairFailure(

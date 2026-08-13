@@ -1,11 +1,19 @@
 import { LIMITS } from '../../../config/constants';
-import { parseProfile, type Profile } from '../../profile';
+import { parseProfile, type DecodedProfile } from '../../profile';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { validateHtlcPreparedInfraContext } from '../../htlc/prepared-context-validation';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import { verifyProfileSignature } from '../../profile/profile-signing';
 import type { EntityState } from '../../types';
+import {
+  toEntityId,
+  toSignerId,
+  type EntityId,
+  type SignerId,
+} from '../../../protocol/identity';
+import { toFrameHash, type FrameHash } from '../../../protocol/hashes';
+import { toEntityHeight, type EntityHeight } from '../../../protocol/units';
 
 const bytes32 = (value: unknown, code: string): string => {
   if (typeof value !== 'string' || !/^0x[0-9a-f]{64}$/.test(value)) throw new Error(code);
@@ -19,7 +27,7 @@ const exactKeys = (value: unknown, keys: readonly string[], code: string): Recor
   return record;
 };
 
-const canonicalProfile = (value: unknown): Profile => {
+const canonicalProfile = (value: unknown): DecodedProfile => {
   const parsed = parseProfile(value);
   if (encodeCanonicalConsensusValue(value) !== encodeCanonicalConsensusValue(parsed)) {
     throw new Error(`ENTITY_INFRA_PROFILE_NONCANONICAL:${parsed.entityId}`);
@@ -27,26 +35,42 @@ const canonicalProfile = (value: unknown): Profile => {
   return parsed;
 };
 
+export type DecodedEntityInfraContext = EntityInfraContext & Readonly<{
+  entityId: EntityId;
+  proposerSignerId: SignerId;
+  parentFrameHash: FrameHash | 'genesis';
+  height: EntityHeight;
+  gossipProfiles: DecodedProfile[];
+  peerAssertions: ReadonlyArray<Readonly<{
+    entityId: EntityId;
+    online: boolean;
+  }>>;
+}>;
+
 /** One strict parser shared by network frame, deterministic apply, and WAL boundaries. */
-export const validateEntityInfraContext = (value: unknown): EntityInfraContext => {
+export const validateEntityInfraContext = (value: unknown): DecodedEntityInfraContext => {
   const raw = exactKeys(value, [
     'version', 'proposerReplicaId', 'entityId', 'proposerSignerId', 'parentFrameHash',
     'height', 'gossipProfiles', 'peerAssertions', 'htlc',
   ], 'ENTITY_INFRA_CONTEXT_INVALID');
   if (raw['version'] !== 1) throw new Error('ENTITY_INFRA_CONTEXT_VERSION_INVALID');
-  const entityId = bytes32(raw['entityId'], 'ENTITY_INFRA_ENTITY_ID_INVALID');
-  const proposerSignerId = String(raw['proposerSignerId'] ?? '');
-  if (!proposerSignerId || proposerSignerId !== proposerSignerId.trim().toLowerCase()) {
+  const entityId = toEntityId(bytes32(raw['entityId'], 'ENTITY_INFRA_ENTITY_ID_INVALID'));
+  const rawProposerSignerId = String(raw['proposerSignerId'] ?? '');
+  if (!rawProposerSignerId || rawProposerSignerId !== rawProposerSignerId.trim().toLowerCase()) {
     throw new Error('ENTITY_INFRA_PROPOSER_SIGNER_ID_INVALID');
   }
+  const proposerSignerId = toSignerId(rawProposerSignerId);
   const proposerReplicaId = String(raw['proposerReplicaId'] ?? '');
   if (proposerReplicaId !== `${entityId}:${proposerSignerId}`) {
     throw new Error('ENTITY_INFRA_PROPOSER_REPLICA_ID_INVALID');
   }
-  const parentFrameHash = String(raw['parentFrameHash'] ?? '');
-  if (parentFrameHash !== 'genesis') bytes32(parentFrameHash, 'ENTITY_INFRA_PARENT_HASH_INVALID');
+  const rawParentFrameHash = String(raw['parentFrameHash'] ?? '');
+  const parentFrameHash = rawParentFrameHash === 'genesis'
+    ? 'genesis'
+    : toFrameHash(bytes32(rawParentFrameHash, 'ENTITY_INFRA_PARENT_HASH_INVALID'));
   const height = raw['height'];
   if (!Number.isSafeInteger(height) || Number(height) < 1) throw new Error('ENTITY_INFRA_HEIGHT_INVALID');
+  const entityHeight = toEntityHeight(Number(height));
   if (!Array.isArray(raw['gossipProfiles'])) throw new Error('ENTITY_INFRA_PROFILES_INVALID');
   const gossipProfiles = raw['gossipProfiles'].map(canonicalProfile);
   let previousProfileId = '';
@@ -57,11 +81,11 @@ export const validateEntityInfraContext = (value: unknown): EntityInfraContext =
     previousProfileId = profile.entityId;
   }
   if (!Array.isArray(raw['peerAssertions'])) throw new Error('ENTITY_INFRA_PEER_ASSERTIONS_INVALID');
-  const profileIds = new Set(gossipProfiles.map(profile => profile.entityId));
+  const profileIds = new Set<string>(gossipProfiles.map(profile => profile.entityId));
   let previousPeerId = '';
   const peerAssertions = raw['peerAssertions'].map((value, index) => {
     const peer = exactKeys(value, ['entityId', 'online'], `ENTITY_INFRA_PEER_ASSERTION_INVALID:${index}`);
-    const peerEntityId = bytes32(peer['entityId'], `ENTITY_INFRA_PEER_ENTITY_ID_INVALID:${index}`);
+    const peerEntityId = toEntityId(bytes32(peer['entityId'], `ENTITY_INFRA_PEER_ENTITY_ID_INVALID:${index}`));
     if (peerEntityId <= previousPeerId || !profileIds.has(peerEntityId) || typeof peer['online'] !== 'boolean') {
       throw new Error(`ENTITY_INFRA_PEER_ASSERTION_NONCANONICAL:${index}`);
     }
@@ -69,7 +93,7 @@ export const validateEntityInfraContext = (value: unknown): EntityInfraContext =
     return { entityId: peerEntityId, online: peer['online'] };
   });
   const htlc = validateHtlcPreparedInfraContext(raw['htlc']);
-  const requiredProfileIds = new Set(peerAssertions.map(assertion => assertion.entityId));
+  const requiredProfileIds = new Set<string>(peerAssertions.map(assertion => assertion.entityId));
   for (const originated of htlc.originated) {
     for (const routeEntityId of originated.route) requiredProfileIds.add(routeEntityId);
   }
@@ -82,9 +106,9 @@ export const validateEntityInfraContext = (value: unknown): EntityInfraContext =
   ) {
     throw new Error('ENTITY_INFRA_PROFILE_SET_NOT_EXACT');
   }
-  const context: EntityInfraContext = {
+  const context: DecodedEntityInfraContext = {
     version: 1, proposerReplicaId, entityId, proposerSignerId, parentFrameHash,
-    height: Number(height), gossipProfiles, peerAssertions, htlc,
+    height: entityHeight, gossipProfiles, peerAssertions, htlc,
   };
   const bytes = new TextEncoder().encode(encodeCanonicalConsensusValue(context)).byteLength;
   if (bytes > LIMITS.MAX_FRAME_SIZE_BYTES) {

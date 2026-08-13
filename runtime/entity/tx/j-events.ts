@@ -8,6 +8,10 @@ import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
 import { prepareEntityTxState } from '../state-clone';
 import { addMessage } from '../frame-events';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
+import {
+  FailureDispositionError,
+  haltRuntimeFailure,
+} from '../../protocol/errors/failure-taxonomy';
 import { cancelHook, scheduleHook } from '../scheduler';
 import {
   scrubDisputeFinalizationsForCounterparty,
@@ -91,6 +95,12 @@ import {
   applySecretRevealedJEvent,
 } from './j-events-observations';
 import { requireBoundaryUint } from '../../protocol/boundary-validation';
+import {
+  toUnixMs,
+  toUnixS,
+  unixMsToUnixSFloor,
+  type UnixS,
+} from '../../protocol/units';
 import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-runtime';
 import {
   findExactSignedProofBodyPull,
@@ -386,9 +396,12 @@ export const applyJEvent = async (
   });
   if (!validated.ok) {
     if (validated.code === 'J_RANGE_PROPOSER_SIGNATURE_INVALID') {
-      throw new Error(`j_event rejected: invalid proposer signature for ${normalizeSignerId(data.from)}`);
+      throw haltRuntimeFailure(
+        'J_EVENT_PROPOSER_SIGNATURE_INVALID',
+        `j_event rejected: invalid proposer signature for ${normalizeSignerId(data.from)}`,
+      );
     }
-    throw new Error(`j_event rejected: ${validated.code}`);
+    throw haltRuntimeFailure('J_EVENT_RANGE_REJECTED', `j_event rejected: ${validated.code}`);
   }
   const { signerId, jurisdictionRef, data: canonicalData } = validated.range;
   const { signature } = canonicalData;
@@ -498,7 +511,7 @@ function resolveDisputeAccountContext(
 const normalizeFinalProofbodyHash = (value: unknown, counterpartyId: string): string => {
   const hash = String(value || '').trim().toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(hash)) {
-    throw new Error(`J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_INVALID:${counterpartyId}:${hash || 'missing'}`);
+    throw haltRuntimeFailure("J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_INVALID", `J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_INVALID:${counterpartyId}:${hash || 'missing'}`);
   }
   return hash;
 };
@@ -512,10 +525,10 @@ const requireFinalizedProofBodyEvidence = (
   const matches = Object.entries(account.disputeProofBodiesByHash ?? {})
     .filter(([proofbodyHash]) => proofbodyHash.toLowerCase() === finalProofbodyHash);
   if (matches.length === 0) {
-    throw new Error(`J_EVENT_DISPUTE_FINAL_PROOFBODY_MISSING:${counterpartyId}:${finalProofbodyHash}`);
+    throw haltRuntimeFailure("J_EVENT_DISPUTE_FINAL_PROOFBODY_MISSING", `J_EVENT_DISPUTE_FINAL_PROOFBODY_MISSING:${counterpartyId}:${finalProofbodyHash}`);
   }
   if (matches.length !== 1) {
-    throw new Error(`J_EVENT_DISPUTE_FINAL_PROOFBODY_AMBIGUOUS:${counterpartyId}:${finalProofbodyHash}`);
+    throw haltRuntimeFailure("J_EVENT_DISPUTE_FINAL_PROOFBODY_AMBIGUOUS", `J_EVENT_DISPUTE_FINAL_PROOFBODY_AMBIGUOUS:${counterpartyId}:${finalProofbodyHash}`);
   }
   let proofbody: ProofBodyStruct;
   let computedHash: string;
@@ -529,26 +542,16 @@ const requireFinalizedProofBodyEvidence = (
     assertDisputeProofBodyWithinContractLimits(proofbody, 'jEvent.disputeFinalized');
     computedHash = hashProofBodyStruct(proofbody).toLowerCase();
   } catch (error) {
-    if (error instanceof Error && (
-      error.message.startsWith('J_DISPUTE_PROOFBODY_') ||
-      error.message.startsWith('DISPUTE_FINALIZE_PROOFBODY_')
-    )) {
-      throw error;
-    }
-    throw new Error(
-      `J_EVENT_DISPUTE_FINAL_PROOFBODY_INVALID:${counterpartyId}:${finalProofbodyHash}`,
-      { cause: error },
-    );
+    if (error instanceof FailureDispositionError) throw error;
+    throw haltRuntimeFailure("J_EVENT_DISPUTE_FINAL_PROOFBODY_INVALID", `J_EVENT_DISPUTE_FINAL_PROOFBODY_INVALID:${counterpartyId}:${finalProofbodyHash}`, error);
   }
   if (computedHash !== finalProofbodyHash) {
-    throw new Error(
-      `J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_MISMATCH:${counterpartyId}:${finalProofbodyHash}:${computedHash}`,
-    );
+    throw haltRuntimeFailure("J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_MISMATCH", `J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_MISMATCH:${counterpartyId}:${finalProofbodyHash}:${computedHash}`);
   }
   const tokenIds = proofbody.tokenIds.map((value, index) => {
     const tokenId = Number(BigInt(value));
     if (!Number.isSafeInteger(tokenId) || tokenId < 0) {
-      throw new Error(`J_EVENT_DISPUTE_FINAL_TOKEN_ID_INVALID:${counterpartyId}:${index}:${String(value)}`);
+      throw haltRuntimeFailure("J_EVENT_DISPUTE_FINAL_TOKEN_ID_INVALID", `J_EVENT_DISPUTE_FINAL_TOKEN_ID_INVALID:${counterpartyId}:${index}:${String(value)}`);
     }
     return tokenId;
   });
@@ -572,10 +575,8 @@ const installOnchainDisputeProofBody = (
   assertDisputeProofBodyWithinContractLimits(proofbody, context);
   const computedHash = hashProofBodyStruct(proofbody).toLowerCase();
   if (computedHash !== expectedHash) {
-    throw new Error(
-      `J_EVENT_DISPUTE_PROOFBODY_SIDECAR_HASH_MISMATCH:` +
-      `${counterpartyId}:${expectedHash}:${computedHash}`,
-    );
+    throw haltRuntimeFailure("J_EVENT_DISPUTE_PROOFBODY_SIDECAR_HASH_MISMATCH", `J_EVENT_DISPUTE_PROOFBODY_SIDECAR_HASH_MISMATCH:` +
+      `${counterpartyId}:${expectedHash}:${computedHash}`);
   }
   account.disputeProofBodiesByHash ??= {};
   account.disputeProofBodiesByHash[expectedHash] = proofbody;
@@ -607,7 +608,7 @@ type StartedDispute = {
   entityIdNorm: string;
   weAreStarter: boolean;
   starterInitialArguments: string;
-  disputeTimeout: number;
+  disputeTimeout: UnixS;
   counterProofQueued: boolean;
   initialProofbody: ProofBodyStruct;
   canonicalDeltaTransformerAddress: string;
@@ -642,7 +643,7 @@ const queueSelectedPullCounterProof = (
   );
   if (!proofBodyHasPulls(selection.finalProofbody, deltaTransformer)) return false;
   verifyCounterProofIdentity(context.newState, account, counterpartyId, selection);
-  const nowSec = Math.floor(Number(context.newState.timestamp || 0) / 1_000);
+  const nowSec = unixMsToUnixSFloor(toUnixMs(Number(context.newState.timestamp || 0)));
   if (nowSec >= active.disputeTimeout) {
     // Missing the signed response period is an economic outcome, not a reason
     // to reject the authoritative DisputeStarted J event and halt the replica.
@@ -780,8 +781,8 @@ const applyStartedDisputeAccountInput = async (
     initialProofbodyHash: String(data.proofbodyHash),
     initialNonce,
     initialProposerIsLeft: data.proposerIsLeft,
-    disputeTimeout: Number(data.disputeTimeout),
-    disputeStartTimestamp: Number(data.disputeStartTimestamp),
+    disputeTimeout: toUnixS(Number(data.disputeTimeout)),
+    disputeStartTimestamp: toUnixS(Number(data.disputeStartTimestamp)),
     leftResponseSeconds: requireBoundaryUint(
       data.leftResponseSeconds,
       'J_EVENT_DISPUTE_LEFT_RESPONSE_SECONDS_INVALID',
@@ -841,7 +842,7 @@ const initializeStartedDispute = async (
   );
 
   const weAreStarter = senderStr === entityIdNorm;
-  const disputeTimeout = Number(data.disputeTimeout);
+  const disputeTimeout = toUnixS(Number(data.disputeTimeout));
   await applyStartedDisputeAccountInput(
     context,
     account,
@@ -945,7 +946,7 @@ const applyStartedDisputeFollowups = (
     const account = newState.accounts.get(counterpartyId);
     const active = account?.activeDispute;
     if (!account || !active) {
-      throw new Error(`CROSS_J_TARGET_ACTIVE_DISPUTE_MISSING:${counterpartyId}`);
+      throw haltRuntimeFailure("CROSS_J_TARGET_ACTIVE_DISPUTE_MISSING", `CROSS_J_TARGET_ACTIVE_DISPUTE_MISSING:${counterpartyId}`);
     }
     const plan = planCrossJurisdictionTargetRecovery(
       newState,
@@ -1199,10 +1200,8 @@ const resolveFinalizationEvidence = (
     String(item.finalProofbodyHash).toLowerCase() === finalProofbodyHash.toLowerCase()
   );
   if (evidence.length > 1) {
-    throw new Error(
-      `J_EVENT_DISPUTE_FINALIZATION_EVIDENCE_AMBIGUOUS:` +
-      `${senderStr}:${counterentityStr}:${String(data.initialNonce)}`,
-    );
+    throw haltRuntimeFailure("J_EVENT_DISPUTE_FINALIZATION_EVIDENCE_AMBIGUOUS", `J_EVENT_DISPUTE_FINALIZATION_EVIDENCE_AMBIGUOUS:` +
+      `${senderStr}:${counterentityStr}:${String(data.initialNonce)}`);
   }
   const primary = evidence[0];
   const initialNonce = requireBoundaryUint(
@@ -1507,7 +1506,7 @@ const resolveCrossJurisdictionFinalitySettlements = (
         settlements.push({ route, settledRatio: 0 });
         continue;
       }
-      throw new Error(`CROSS_J_FINALITY_PULL_MISSING:${route.orderId}:${role}`);
+      throw haltRuntimeFailure("CROSS_J_FINALITY_PULL_MISSING", `CROSS_J_FINALITY_PULL_MISSING:${route.orderId}:${role}`);
     }
     const record = role === 'source' ? route.sourceRegistryRecord : route.targetRegistryRecord;
     const signedPull = findExactSignedProofBodyPull(
@@ -1575,15 +1574,15 @@ const updateRegistryRecord = (
 ): HashLadderRegistryRecord => {
   const next = { fillRatio: Math.floor(Number(data.fillRatio)), revealedAt: Number(data.revealedAt) };
   if (!Number.isSafeInteger(next.revealedAt) || next.revealedAt <= 0) {
-    throw new Error(`CROSS_J_REGISTRY_REVEALED_AT_INVALID:${orderId}:${String(data.revealedAt)}`);
+    throw haltRuntimeFailure("CROSS_J_REGISTRY_REVEALED_AT_INVALID", `CROSS_J_REGISTRY_REVEALED_AT_INVALID:${orderId}:${String(data.revealedAt)}`);
   }
   if (!existing) return next;
   if (existing.fillRatio === next.fillRatio) {
     if (!data.targetRole && existing.revealedAt !== next.revealedAt) {
-      throw new Error(`CROSS_J_REGISTRY_RETRY_TIME_CONFLICT:${orderId}`);
+      throw haltRuntimeFailure("CROSS_J_REGISTRY_RETRY_TIME_CONFLICT", `CROSS_J_REGISTRY_RETRY_TIME_CONFLICT:${orderId}`);
     }
     if (next.revealedAt < existing.revealedAt) {
-      throw new Error(`CROSS_J_REGISTRY_RECORD_TIME_REGRESSION:${orderId}`);
+      throw haltRuntimeFailure("CROSS_J_REGISTRY_RECORD_TIME_REGRESSION", `CROSS_J_REGISTRY_RECORD_TIME_REGRESSION:${orderId}`);
     }
     // Target exact-ratio publication intentionally refreshes its timestamp.
     // This lets evidence published before a target dispute be republished
@@ -1591,7 +1590,7 @@ const updateRegistryRecord = (
     return next.revealedAt === existing.revealedAt ? existing : next;
   }
   if (!data.targetRole || next.fillRatio < existing.fillRatio || next.revealedAt < existing.revealedAt) {
-    throw new Error(`CROSS_J_REGISTRY_RECORD_CONFLICT:${orderId}:${existing.fillRatio}:${next.fillRatio}`);
+    throw haltRuntimeFailure("CROSS_J_REGISTRY_RECORD_CONFLICT", `CROSS_J_REGISTRY_RECORD_CONFLICT:${orderId}:${existing.fillRatio}:${next.fillRatio}`);
   }
   return next;
 };
@@ -1663,10 +1662,8 @@ const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext):
         route.sourceRegistryFillRatio = observed;
         dirty = true;
       } else if (route.sourceRegistryFillRatio !== observed) {
-        throw new Error(
-          `CROSS_J_SOURCE_REGISTRY_CONFLICT:${route.orderId}:` +
-          `${route.sourceRegistryFillRatio}:${observed}`,
-        );
+        throw haltRuntimeFailure("CROSS_J_SOURCE_REGISTRY_CONFLICT", `CROSS_J_SOURCE_REGISTRY_CONFLICT:${route.orderId}:` +
+          `${route.sourceRegistryFillRatio}:${observed}`);
       }
     }
     if (data.targetRole) {

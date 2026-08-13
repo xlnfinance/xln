@@ -10,6 +10,8 @@ import { ethers } from 'ethers';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
 import { recoverAddressFromDigestSignature, signDigestBytesWithPrivateKey } from '../account/crypto';
 import { compareStableText } from '../protocol/serialization';
+import { haltRuntimeFailure } from '../protocol/errors/failure-taxonomy';
+import { toUnixMs, unixMsToUnixSFloor } from '../protocol/units';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardRecord,
@@ -19,6 +21,8 @@ import {
 import {
   decodeHankoEnvelope,
   encodeHankoEnvelope,
+  HankoValidationError,
+  invalidHanko,
   packHankoSignatures,
   recoverHankoSignatures,
 } from './codec';
@@ -27,6 +31,13 @@ import {
   resolveHankoBoardDelays,
   verifyCanonicalHanko,
 } from './claims';
+
+class CertifiedBoardAuthorityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CertifiedBoardAuthorityError';
+  }
+}
 
 // Browser-compatible Buffer helpers - ALWAYS use manual hex parsing (Node Buffer.from can be broken in some envs)
 const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncoding): Buffer => {
@@ -535,16 +546,16 @@ export async function verifyHankoForHash(
     if (certifiedRegisteredBoardHash && env) {
       const record = resolveAuthorityRecord(expectedEntityId);
       if (!record || record.boardHash !== certifiedRegisteredBoardHash) {
-        throw new Error(
+        throw new CertifiedBoardAuthorityError(
           `CERTIFIED_BOARD_AUTHORITY_CURRENT_MISMATCH:${expectedEntityId}:` +
           `expected=${certifiedRegisteredBoardHash}:received=${record?.boardHash ?? 'missing'}`,
         );
       }
     }
     const entityTimestampSeconds = authority?.observerState
-      ? Math.floor(authority.observerState.timestamp / 1_000)
+      ? unixMsToUnixSFloor(toUnixMs(authority.observerState.timestamp))
       : env
-        ? Math.floor(env.state.timestamp / 1_000)
+        ? unixMsToUnixSFloor(toUnixMs(env.state.timestamp))
         : 0;
     const verified = verifyCanonicalHanko({
       hanko: hankoBytes,
@@ -555,7 +566,7 @@ export async function verifyHankoForHash(
       const record = resolveAuthorityRecord(entityId);
       if (!record) return false;
       if (entityId === expectedTarget && certifiedRegisteredBoardHash && record.boardHash !== certifiedRegisteredBoardHash) {
-        throw new Error(
+        throw new CertifiedBoardAuthorityError(
           `CERTIFIED_BOARD_AUTHORITY_CURRENT_MISMATCH:${entityId}:` +
           `expected=${certifiedRegisteredBoardHash}:received=${record.boardHash}`,
         );
@@ -582,17 +593,21 @@ export async function verifyHankoForHash(
     });
     return { valid: true, entityId: verified.targetEntityId };
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('CERTIFIED_BOARD_AUTHORITY_')) {
+    if (error instanceof CertifiedBoardAuthorityError) {
       throw error;
     }
-    if (error instanceof Error && error.message.startsWith('HANKO_')) {
+    if (error instanceof HankoValidationError) {
       return { valid: false, entityId: null };
     }
     // Malformed peer Hanko is an expected authentication rejection above.
     // Resolver/storage/programming failures are local invariant faults: hiding
     // them as a bad signature would let validators continue from divergent
     // authority state and make the same consensus input non-deterministic.
-    throw error;
+    throw haltRuntimeFailure(
+      'HANKO_VERIFICATION_INTERNAL',
+      error instanceof Error ? error.message : String(error),
+      error,
+    );
   }
 }
 
@@ -615,19 +630,19 @@ export async function resolveHankoDefaultProposerSignerId(
 ): Promise<string> {
   const verified = await verifyHankoForHash(hankoBytes, hash, expectedEntityId, env, authority);
   if (!verified.valid) {
-    throw new Error(`HANKO_PROPOSER_AUTHORITY_INVALID:${expectedEntityId}`);
+    invalidHanko(`HANKO_PROPOSER_AUTHORITY_INVALID:${expectedEntityId}`);
   }
   const inspection = await inspectHankoForHash(hankoBytes, hash);
   const target = inspection.claims.at(-1);
   const expectedTarget = encodeQuorumEntityId(expectedEntityId);
   if (!target || target.entityId !== expectedTarget) {
-    throw new Error(
+    invalidHanko(
       `HANKO_PROPOSER_TARGET_MISMATCH:expected=${expectedTarget}:actual=${target?.entityId ?? 'missing'}`,
     );
   }
   const firstMember = String(target.boardEntityIds[0] || '').toLowerCase();
   if (!/^0x0{24}[0-9a-f]{40}$/.test(firstMember)) {
-    throw new Error(`HANKO_PROPOSER_FIRST_MEMBER_INVALID:${firstMember || 'missing'}`);
+    invalidHanko(`HANKO_PROPOSER_FIRST_MEMBER_INVALID:${firstMember || 'missing'}`);
   }
   return ethers.getAddress(`0x${firstMember.slice(-40)}`).toLowerCase();
 }

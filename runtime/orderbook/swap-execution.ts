@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../protocol/errors/failure-taxonomy";
+
 import { compareCanonicalText, swapKey, type SwapKey } from './swap-keys.ts';
 import { deriveSide } from './types.ts';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
@@ -72,7 +74,7 @@ export const normalizeSwapOfferForOrderbook = (
   const priceTicks = offer.priceTicks && offer.priceTicks > 0n
     ? offer.priceTicks
     : computeSwapPriceTicks(offer.giveTokenId, offer.wantTokenId, offer.giveAmount, offer.wantAmount);
-  if (priceTicks <= 0n) throw new Error(`ORDERBOOK_NORMALIZE_INVALID_PRICE: offer=${offer.offerId}`);
+  if (priceTicks <= 0n) throw haltRuntimeFailure("ORDERBOOK_NORMALIZE_INVALID_PRICE", `ORDERBOOK_NORMALIZE_INVALID_PRICE: offer=${offer.offerId}`);
   return {
     offerId: offer.offerId,
     accountId,

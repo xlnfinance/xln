@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 import { createOrderbookExtState, validateSpreadDistribution } from '../../../../orderbook';
 import type { EntityInput, EntityState, Proposal } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
@@ -324,7 +326,7 @@ export const handleInitOrderbookExtEntityTx = (
   }
   const usdQuoteAuthorityEntityId = normalizeEntityRef(entityTx.data.usdQuoteAuthorityEntityId);
   if (!/^0x[0-9a-f]{64}$/.test(usdQuoteAuthorityEntityId)) {
-    throw new Error(`ORDERBOOK_USD_QUOTE_AUTHORITY_INVALID:${usdQuoteAuthorityEntityId}`);
+    throw haltRuntimeFailure("ORDERBOOK_USD_QUOTE_AUTHORITY_INVALID", `ORDERBOOK_USD_QUOTE_AUTHORITY_INVALID:${usdQuoteAuthorityEntityId}`);
   }
 
   const hubProfile = {

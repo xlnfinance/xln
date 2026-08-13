@@ -6,7 +6,11 @@
  * Left-wins rule: On simultaneous proposals, RIGHT rolls back
  */
 
-import type { AccountReplica } from '../types/account';
+type AccountConsensusView = {
+  currentFrame?: { height?: number };
+  pendingFrame?: { height?: number };
+  mempool?: readonly unknown[];
+};
 
 type BilateralState =
   | 'committed'    // Both sides synced
@@ -29,7 +33,7 @@ interface BilateralVisualizationState {
  * @param isLeft - Am I the left entity? (for conflict resolution)
  */
 export function classifyBilateralState(
-  myAccount: AccountReplica | undefined,
+  myAccount: AccountConsensusView | undefined,
   peerCurrentHeight: number | undefined,
   isLeft: boolean
 ): BilateralVisualizationState {

@@ -1,5 +1,7 @@
 import type { EntityState } from '../types';
 import type { JurisdictionEvent } from '../../types/jurisdiction-events';
+import { haltRuntimeFailure } from '../../protocol/errors/failure-taxonomy';
+import { toJHeight } from '../../protocol/units';
 
 type ExternalWalletSnapshotEvent = Extract<JurisdictionEvent, { type: 'ExternalWalletSnapshot' }>;
 type ExternalWalletDeltaEvent = Extract<JurisdictionEvent, { type: 'ExternalWalletDelta' }>;
@@ -11,7 +13,10 @@ const normalizeSignerId = (value: unknown): string => String(value || '').trim()
 const normalizeExternalWalletAddress = (value: unknown, label: string): string => {
   const normalized = String(value || '').trim().toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(normalized)) {
-    throw new Error(`j_event rejected: invalid external wallet ${label}`);
+    throw haltRuntimeFailure(
+      'J_EVENT_EXTERNAL_WALLET_INVALID',
+      `j_event rejected: invalid external wallet ${label}`,
+    );
   }
   return normalized;
 };
@@ -63,7 +68,7 @@ export const applySignerEntityExternalWalletSnapshot = (
   const wallet = ensureSignerEntityExternalWalletState(state);
   const balancesByToken = ensureNestedMap(wallet.balances, normalizedOwner);
   const allowancesBySpender = ensureNestedMap(wallet.allowances, normalizedOwner);
-  const jHeight = Number(event.blockNumber ?? blockNumber);
+  const jHeight = toJHeight(Number(event.blockNumber ?? blockNumber));
 
   if (nativeBalance !== undefined) {
     balancesByToken.set(NATIVE_EXTERNAL_TOKEN_ADDRESS, {
@@ -118,7 +123,7 @@ export const applySignerEntityExternalWalletDelta = (
   const wallet = state.externalWallet;
   const balancesByToken = wallet?.balances.get(normalizedOwner);
   const allowancesBySpender = wallet?.allowances.get(normalizedOwner);
-  const jHeight = Number(event.blockNumber ?? blockNumber);
+  const jHeight = toJHeight(Number(event.blockNumber ?? blockNumber));
 
   if (balanceDelta !== undefined) {
     const tokenKey = externalWalletBalanceKey(normalizedToken);

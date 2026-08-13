@@ -599,28 +599,17 @@ const queueSettlementExecution = (
   const entityIsLeft = isLeftEntity(state.entityId, counterpartyEntityId);
   const leftEntity = entityIsLeft ? state.entityId : counterpartyEntityId;
   const rightEntity = entityIsLeft ? counterpartyEntityId : state.entityId;
-  try {
-    batchAddSettlement(
-      state.jBatchState,
-      leftEntity,
-      rightEntity,
-      prepared.diffs,
-      prepared.forgiveTokenIds,
-      counterpartyHanko,
-      prepared.signedNonce,
-      state.entityId,
-      disableC2RShortcut,
-    );
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes('pending broadcast')) {
-      throw error;
-    }
-    addMessage(state, '⏭️ settle_execute skipped: jBatch sentBatch pending');
-    settleLog.warn('execute.skip_pending_broadcast', {
-      counterparty: shortId(counterpartyEntityId),
-    });
-    return false;
-  }
+  batchAddSettlement(
+    state.jBatchState,
+    leftEntity,
+    rightEntity,
+    prepared.diffs,
+    prepared.forgiveTokenIds,
+    counterpartyHanko,
+    prepared.signedNonce,
+    state.entityId,
+    disableC2RShortcut,
+  );
   return true;
 };
 

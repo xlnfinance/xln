@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-events';
+import { projectEntityStateWithoutFrameEvents } from '../entity/frame-events';
 import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
@@ -106,13 +106,12 @@ export const canonicalizeStorageAuditValue = (value: unknown): unknown =>
 
 export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFrameEntityHash => {
   const entityId = normalizeEntityId(replica.entityId || replica.state?.entityId || '');
-  const consensusState = { ...replica.state } as Partial<EntityReplica['state']>;
+  const consensusState = projectEntityStateWithoutFrameEvents(replica.state);
   // Frame events are signed history derived during one reducer pass, not live
   // Entity state. The enumerable carrier survives immutable object spreads,
   // so every persistence/consensus projection must remove it explicitly.
   // Persisting it here would make a restored state hash depend on whether the
   // reducer happened to be observed before or after its frame was finalized.
-  delete (consensusState as Record<string, unknown>)[ENTITY_FRAME_EVENT_COLLECTOR];
   return {
     entityId,
     cellCount: 1,

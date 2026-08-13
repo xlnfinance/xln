@@ -1,6 +1,5 @@
 import type * as THREE from 'three';
-import type { Delta } from '@xln/runtime/api/public/runtime-module';
-import type { DerivedAccountData } from '$lib/network3d/derivedAccount';
+import type { XLNModule } from '@xln/runtime/api/public/runtime-module';
 
 export type GraphJBlockHistoryEntry = {
   blockNumber: bigint;
@@ -9,30 +8,10 @@ export type GraphJBlockHistoryEntry = {
   yOffset: number;
 };
 
-export type GraphXLNRuntime = {
-  deriveDelta: (delta: Delta, isLeft: boolean) => DerivedAccountData;
-  getTokenInfo: (tokenId: number) => { symbol: string; decimals: number } | undefined;
-  getEntityShortId: (entityId: string) => string;
-  isLeft: (myEntityId: string, counterpartyEntityId: string) => boolean;
-  executeScenario: (env: unknown, scenario: unknown) => Promise<{ success: boolean; framesGenerated: number; errors?: string[] }>;
-  process: (env: unknown, inputs: unknown[]) => Promise<void>;
-  parseScenario: (text: string) => { errors: unknown[]; scenario: unknown };
-  quoteHtlcPaymentRoute: (
-    profiles: unknown[],
-    route: string[],
-    tokenId: number,
-    recipientAmount: bigint,
-  ) => { senderLockAmount: bigint };
-  classifyBilateralState: (
-    myAccount: unknown,
-    peerCurrentHeight: number | undefined,
-    isLeft: boolean,
-  ) => { state: string; isLeftEntity: boolean; shouldRollback: boolean; pendingHeight: number | null; mempoolCount: number };
-  getAccountBarVisual: (
-    leftState: unknown,
-    rightState: unknown,
-  ) => { glowColor: string | null; glowSide: string | null; glowIntensity: number; isDashed: boolean; pulseSpeed: number };
-};
+export type GraphXLNRuntime = Pick<
+  XLNModule,
+  'deriveDelta' | 'getTokenInfo' | 'getEntityShortId' | 'classifyBilateralState' | 'getAccountBarVisual'
+>;
 
 export type GraphRendererMode = 'webgl' | 'webgpu';
 
@@ -41,7 +20,7 @@ export type GraphEntityData = {
   position: THREE.Vector3;
   mesh: THREE.Mesh;
   label?: THREE.Sprite;
-  profile?: any;
+  profile?: GraphEntityProfile;
   isHub?: boolean;
   lastActivity?: number;
   isPinned?: boolean;
@@ -49,6 +28,41 @@ export type GraphEntityData = {
   isDragging?: boolean;
   activityRing?: THREE.Mesh | null;
   mempoolIndicator?: THREE.Sprite;
+};
+
+export type GraphEntityProfile = {
+  entityId: string;
+  metadata?: {
+    name?: string;
+    isHub?: boolean;
+    position?: { x: number; y: number; z: number } | undefined;
+    provenance?: string[];
+    desynchronized?: boolean;
+  };
+};
+
+export type GraphTransactionLike = {
+  type?: string;
+  kind?: string;
+  entityId?: string;
+  from?: string;
+  to?: string;
+  tokenId?: number;
+  amount?: string | bigint | number;
+  targetEntityId?: string;
+  data?: {
+    amount?: bigint | number | string;
+    tokenId?: number;
+    targetEntityId?: string;
+    fromEntityId?: string;
+    toEntityId?: string;
+    accountTx?: GraphTransactionLike;
+    batch?: {
+      reserveToReserve?: unknown[];
+      reserveToCollateral?: unknown[];
+      settlements?: Array<{ diffs?: Array<{ collateralDiff: bigint | number }> }>;
+    };
+  };
 };
 
 export type GraphFrameActivity = {

@@ -4,7 +4,6 @@
 
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput } from '../../runtime/types';
 import type { EntityInput, EntityReplica } from '../../entity/types';
-import type { EntityTx } from '../../types/entity-tx';
 import type { Delta } from '../../types/account';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { setFailFastErrors } from '../../infra/logger';
@@ -17,8 +16,6 @@ import { buildRouteOutputKey } from '../../runtime/routing/output-routing';
 import { releaseUncommittedReliableIngress } from '../../runtime/reliable/reliable-delivery.ts';
 import { accountHasProposableMempool } from '../../entity/consensus/account/mempool-eligibility';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
-import { accountInputProposal } from '../../account/consensus/flush';
-import { hashHtlcSecret } from '../../protocol/htlc/utils';
 
 // Lazy-loaded process to avoid circular deps
 let _process: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;
@@ -39,84 +36,6 @@ export const commitRuntimeInput = async (env: RuntimeReplica, runtimeInput: Runt
   runtime.enqueueRuntimeInput(env, runtimeInput);
   return runtime.processRuntime(env);
 };
-
-export type ScenarioHtlcSecretTarget = Readonly<{
-  entityId: string;
-  signerId: string;
-  hashlock: string;
-}>;
-
-const entityTxRevealsTargetSecret = (tx: EntityTx, hashlock: string): boolean => {
-  if (tx.type === 'accountInput') {
-    return accountInputProposal(tx.data)?.frame.accountTxs.some(accountTx =>
-      accountTx.type === 'htlc_resolve'
-      && accountTx.data.outcome === 'secret'
-      && hashHtlcSecret(accountTx.data.secret).toLowerCase() === hashlock.toLowerCase()
-    ) ?? false;
-  }
-  if (tx.type === 'entityCommand') return tx.data.txs.some(nested => entityTxRevealsTargetSecret(nested, hashlock));
-  if (tx.type === 'consensusOutput' || tx.type === 'reissueCertifiedOutput') {
-    return tx.data.entityTxs.some(nested => entityTxRevealsTargetSecret(nested, hashlock));
-  }
-  if (tx.type === 'propose' && tx.data.action?.type === 'entity_transaction') {
-    return tx.data.action.data.txs.some(nested => entityTxRevealsTargetSecret(nested, hashlock));
-  }
-  return false;
-};
-
-const matchingLocalHtlcSecretProposal = (
-  input: { entityId: string; signerId: string; entityTxs?: EntityTx[] },
-  targets: readonly ScenarioHtlcSecretTarget[],
-): boolean => targets.some(target =>
-    input.entityId.toLowerCase() === target.entityId.toLowerCase()
-      && input.signerId.toLowerCase() === target.signerId.toLowerCase()
-      && (input.entityTxs ?? []).some(tx => entityTxRevealsTargetSecret(tx, target.hashlock))
-  );
-
-/** Withhold one exact local custody continuation; Account consensus remains untouched. */
-export function withholdScenarioHtlcSecretProposals(
-  env: RuntimeReplica,
-  targets: readonly ScenarioHtlcSecretTarget[],
-): void {
-  const escaped = [env.pendingOutputs, env.networkInbox, env.pendingNetworkOutputs]
-    .flatMap(queue => queue ?? [])
-    .filter(input => matchingLocalHtlcSecretProposal(input, targets));
-  if (escaped.length > 0) throw new Error('SCENARIO_HTLC_SECRET_PROPOSAL_ESCAPED_LOCAL_INGRESS');
-  const queued = env.runtimeMempool.entityInputs;
-  const dropped = queued.filter(input => matchingLocalHtlcSecretProposal(input, targets));
-  env.runtimeMempool.entityInputs = queued.filter(input => !matchingLocalHtlcSecretProposal(input, targets));
-  releaseUncommittedReliableIngress(env, dropped, []);
-}
-
-export async function processUntilWithoutHtlcSecretProposal(
-  env: RuntimeReplica,
-  targets: readonly ScenarioHtlcSecretTarget[],
-  ready: () => boolean,
-  maxCycles = 32,
-): Promise<void> {
-  const process = await getProcess();
-  for (let cycle = 0; cycle < maxCycles; cycle += 1) {
-    withholdScenarioHtlcSecretProposals(env, targets);
-    if (ready()) return;
-    await process(env);
-  }
-  withholdScenarioHtlcSecretProposals(env, targets);
-  if (!ready()) throw new Error(`SCENARIO_HTLC_STATE_NOT_REACHED:${maxCycles}`);
-}
-
-export function findCommittedScenarioHtlcLockId(
-  env: RuntimeReplica,
-  leftEntityId: string,
-  rightEntityId: string,
-  hashlock: string,
-): string | undefined {
-  const find = (ownerId: string, counterpartyId: string) => [...(
-    findReplica(env, ownerId)[1].state.accounts.get(counterpartyId)?.state.locks.values() ?? []
-  )].find(lock => lock.hashlock.toLowerCase() === hashlock.toLowerCase())?.lockId;
-  const leftId = find(leftEntityId, rightEntityId);
-  const rightId = find(rightEntityId, leftEntityId);
-  return leftId && leftId === rightId ? leftId : undefined;
-}
 
 export { checkSolvency } from './solvency-check';
 
@@ -386,7 +305,22 @@ export function enableStrictScenario(env: RuntimeReplica, label: string): () => 
 
   strictScenarioDepth += 1;
 
+  // A deterministic scenario hosts every simulated peer in this Runtime instead
+  // of opening real sockets. Model that observable fact explicitly at the same
+  // proposer-local boundary used by P2P; production must still supply its socket observer.
+  const infrastructure = env.infrastructure ?? (env.infrastructure = {});
+  const previousOnlineObserver = infrastructure.observeOnlineEntityIds;
+  if (!previousOnlineObserver) {
+    infrastructure.observeOnlineEntityIds = entityIds => {
+      const localEntityIds = new Set(
+        Array.from(env.state.eReplicas.values(), replica => replica.entityId.toLowerCase()),
+      );
+      return new Set(entityIds.map(entityId => entityId.toLowerCase()).filter(entityId => localEntityIds.has(entityId)));
+    };
+  }
+
   return () => {
+    if (!previousOnlineObserver) delete infrastructure.observeOnlineEntityIds;
     strictScenarioDepth = Math.max(0, strictScenarioDepth - 1);
     if (strictScenarioDepth === 0) {
       env.strictScenario = false;

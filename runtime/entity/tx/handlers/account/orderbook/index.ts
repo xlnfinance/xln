@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../../protocol/errors/failure-taxonomy";
+
 import type { EntityState } from '../../../../types';
 import {
   type BookState,
@@ -103,7 +105,7 @@ export function processOrderbookSwaps(
   const debugProjectionRejectKeys = new Set<string>();
   const recordDebugProjectionReject = (accountId: string, offerId: string, reason: string): true => {
     if (!debugRebuildProjectionOnly) {
-      throw new Error(`ORDERBOOK_LIVE_PROJECTION_REJECT: account=${accountId} offer=${offerId} reason=${reason}`);
+      throw haltRuntimeFailure("ORDERBOOK_LIVE_PROJECTION_REJECT", `ORDERBOOK_LIVE_PROJECTION_REJECT: account=${accountId} offer=${offerId} reason=${reason}`);
     }
     const key = swapKey(accountId, offerId);
     if (debugProjectionRejectKeys.has(key)) return true;

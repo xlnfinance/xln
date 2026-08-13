@@ -10,7 +10,7 @@ import {
   closedForDisputeRejection,
   settlementFrozenRejection,
 } from './apply-result';
-import { toJHeight, toUnixMs, type JHeight, type UnixMs } from './units';
+import { toJHeight, toUnixMs, type JHeight, type UnixMs } from '../../protocol/units';
 import { handleAddDelta } from './handlers/balance/add-delta';
 import { handleSetCreditLimit } from './handlers/balance/set-credit-limit';
 import { handleDirectPayment } from './handlers/balance/direct-payment';
@@ -228,8 +228,11 @@ export const applyAccountTxMutation = async (
         account,
         tx,
         byLeft,
-        context.htlcEnforcementClock?.timestamp ?? timestamp,
-        context.htlcEnforcementClock?.jHeight ?? jHeight,
+        {
+          committedTimestamp: timestamp,
+          enforcementTimestamp: context.htlcEnforcementClock?.timestamp ?? timestamp,
+          enforcementJHeight: context.htlcEnforcementClock?.jHeight ?? jHeight,
+        },
         isValidation,
       );
     case 'htlc_resolve': return applyHtlcResolve(context);

@@ -62,7 +62,6 @@ const runtimeLoopApi = createRuntimeLoopApi({
   notifyEnvChange: env => notifyRuntimeStateChanged(env),
   processRuntime: (env, inputs, runtimeDelay) => processRuntime(env, inputs, runtimeDelay),
   waitForRuntimeProcessingIdle: (env, timeoutMs) => waitForRuntimeProcessingIdle(env, timeoutMs),
-  getRuntimeProcessGlobal: () => getRuntimeProcessGlobal(),
   runtimeInputHasQueuedWork: input => runtimeInputHasQueuedWork(input),
 });
 
@@ -298,7 +297,6 @@ processRuntimeImpl = createRuntimeProcessor({
 });
 
 export const waitForRuntimeProcessingIdle = runtimeStorageApi.waitForRuntimeProcessingIdle;
-const getRuntimeProcessGlobal = runtimeStorageApi.getRuntimeProcessGlobal;
 export const RuntimeStorageWriteTimeoutError = runtimeStorageApi.RuntimeStorageWriteTimeoutError;
 export type RuntimeStorageWriteTimeoutError = InstanceType<typeof RuntimeStorageWriteTimeoutError>;
 export const RuntimeFrameStorageError = runtimeStorageApi.RuntimeFrameStorageError;

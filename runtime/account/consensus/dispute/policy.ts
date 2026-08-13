@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 import type { AccountReplica, AccountTx } from '../../../types/account';
 import { prependUniqueMempoolTxs } from '../helpers';
 import { createStructuredLogger } from '../../../infra/logger';
@@ -90,12 +92,12 @@ export const isDisputeStartedByLeft = (
   const starter = String(starterEntityId || '').toLowerCase();
   const left = String(leftEntityId || '').toLowerCase();
   const right = String(rightEntityId || '').toLowerCase();
-  if (!starter || !left || !right) throw new Error('DISPUTE_PARTY_ID_MISSING');
+  if (!starter || !left || !right) throw haltRuntimeFailure("DISPUTE_PARTY_ID_MISSING", 'DISPUTE_PARTY_ID_MISSING');
   if (starter === left) return true;
   if (starter === right) return false;
   // Depository disputes are bilateral. Inferring a side for a third-party id
   // creates a second ordering rule unrelated to the signed Account parties.
-  throw new Error(`DISPUTE_STARTER_NOT_A_PARTY:${starter}`);
+  throw haltRuntimeFailure("DISPUTE_STARTER_NOT_A_PARTY", `DISPUTE_STARTER_NOT_A_PARTY:${starter}`);
 };
 
 export const canProcessAccountTxForDisputeStatus = (

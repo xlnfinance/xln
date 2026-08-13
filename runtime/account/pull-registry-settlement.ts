@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../protocol/errors/failure-taxonomy";
+
 import { ethers } from 'ethers';
 
 import type { AccountReplica } from '../types/account';
@@ -42,9 +44,7 @@ const decodeSignedProofBodyPulls = (
   canonicalDeltaTransformerAddress: string,
 ): SignedProofBodyPull[] => {
   if (!ethers.isAddress(canonicalDeltaTransformerAddress)) {
-    throw new Error(
-      `CROSS_J_FINAL_DELTA_TRANSFORMER_ADDRESS_INVALID:${canonicalDeltaTransformerAddress}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_FINAL_DELTA_TRANSFORMER_ADDRESS_INVALID", `CROSS_J_FINAL_DELTA_TRANSFORMER_ADDRESS_INVALID:${canonicalDeltaTransformerAddress}`);
   }
   const canonical = canonicalDeltaTransformerAddress.toLowerCase();
   const pulls: SignedProofBodyPull[] = [];
@@ -59,7 +59,7 @@ const decodeSignedProofBodyPulls = (
         transformer.encodedBatch,
       )[0];
     } catch (cause) {
-      throw new Error(`CROSS_J_FINAL_DELTA_BATCH_INVALID:${transformerIndex}`, { cause });
+      throw haltRuntimeFailure("CROSS_J_FINAL_DELTA_BATCH_INVALID", `CROSS_J_FINAL_DELTA_BATCH_INVALID:${transformerIndex}`, cause);
     }
     const decodedPulls = Array.from(decoded['pull'] ?? []) as ethers.Result[];
     for (const [pullIndex, raw] of decodedPulls.entries()) {
@@ -76,7 +76,7 @@ const decodeSignedProofBodyPulls = (
       });
     }
   }
-  if (canonicalClauses === 0) throw new Error('CROSS_J_FINAL_DELTA_TRANSFORMER_MISSING');
+  if (canonicalClauses === 0) throw haltRuntimeFailure("CROSS_J_FINAL_DELTA_TRANSFORMER_MISSING", 'CROSS_J_FINAL_DELTA_TRANSFORMER_MISSING');
   return pulls;
 };
 
@@ -96,10 +96,8 @@ export const findExactSignedProofBodyPull = (
     && pull.amount === expected.signedAmount
   );
   if (matches.length > 1) {
-    throw new Error(
-      'CROSS_J_FINAL_PULL_AMBIGUOUS:' +
-      `${expected.pullId}:${targetRole ? 'target' : 'source'}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_FINAL_PULL_AMBIGUOUS", 'CROSS_J_FINAL_PULL_AMBIGUOUS:' +
+      `${expected.pullId}:${targetRole ? 'target' : 'source'}`);
   }
   return matches[0];
 };
@@ -117,9 +115,7 @@ const requireExactSignedPull = (
     canonicalDeltaTransformerAddress,
   );
   if (!pull) {
-    throw new Error(
-      `CROSS_J_FINAL_PULL_MISSING:${expected.pullId}:${targetRole ? 'target' : 'source'}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_FINAL_PULL_MISSING", `CROSS_J_FINAL_PULL_MISSING:${expected.pullId}:${targetRole ? 'target' : 'source'}`);
   }
   return pull;
 };
@@ -135,7 +131,7 @@ const beneficiaryWindowSeconds = (
   const start = safeUint(active?.disputeStartTimestamp, Number.MAX_SAFE_INTEGER, 'CROSS_J_FINAL_START');
   const timeout = safeUint(active?.disputeTimeout, Number.MAX_SAFE_INTEGER, 'CROSS_J_FINAL_TIMEOUT');
   if (timeout !== start + leftWindow + rightWindow) {
-    throw new Error(`CROSS_J_FINAL_CLOCK_MISMATCH:${start}:${timeout}:${leftWindow}:${rightWindow}`);
+    throw haltRuntimeFailure("CROSS_J_FINAL_CLOCK_MISMATCH", `CROSS_J_FINAL_CLOCK_MISMATCH:${start}:${timeout}:${leftWindow}:${rightWindow}`);
   }
   return amount > 0n ? leftWindow : rightWindow;
 };
@@ -168,17 +164,15 @@ export const resolveFinalizedCrossJurisdictionRouteLeg = (input: {
     .filter(role => bilateralPairMatches(self, counterparty, input.route[role]));
   if (candidates.length === 0) return undefined;
   if (!input.localStack) {
-    throw new Error(`CROSS_J_FINALITY_JURISDICTION_MISSING:${input.route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_FINALITY_JURISDICTION_MISSING", `CROSS_J_FINALITY_JURISDICTION_MISSING:${input.route.orderId}`);
   }
   const localStack = input.localStack.toLowerCase();
   const exact = candidates.filter(
     role => input.route[role].jurisdiction.toLowerCase() === localStack,
   );
   if (exact.length !== 1) {
-    throw new Error(
-      `CROSS_J_FINALITY_LEG_${exact.length === 0 ? 'MISSING' : 'AMBIGUOUS'}:` +
-      input.route.orderId,
-    );
+    throw haltRuntimeFailure("CROSS_J_FINALITY_LEG", `CROSS_J_FINALITY_LEG_${exact.length === 0 ? 'MISSING' : 'AMBIGUOUS'}:` +
+      input.route.orderId);
   }
   return exact[0]!;
 };

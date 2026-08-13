@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
+
 import {
   applyCommand,
   crossJurisdictionBookQtyLots,
@@ -100,10 +102,8 @@ const validateCrossBookOrder = (
     pass.crossLiveOfferMeta.get(orderId) ??
     buildCrossMarketOfferFromBookOrder(pass.hubState, orderId);
   if (!meta) {
-    throw new Error(
-      `ORDERBOOK_CROSS_J_SNAPSHOT_MISSING: pair=${pairId} order=${orderId} ` +
-      `account=${accountId} offer=${offerId} pendingAck=${queuedAck ? 'yes' : 'no'}`,
-    );
+    throw haltRuntimeFailure("ORDERBOOK_CROSS_J_SNAPSHOT_MISSING", `ORDERBOOK_CROSS_J_SNAPSHOT_MISSING: pair=${pairId} order=${orderId} ` +
+      `account=${accountId} offer=${offerId} pendingAck=${queuedAck ? 'yes' : 'no'}`);
   }
   pass.crossLiveOfferMeta.set(orderId, meta);
   if (isCrossJurisdictionRouteExpired(meta.route, Number(pass.hubState.timestamp || 0))) {
@@ -126,20 +126,16 @@ const validateCrossBookOrder = (
     order.priceTicks !== meta.priceTicks ||
     order.ownerId !== meta.makerId
   ) {
-    throw new Error(
-      `ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
+    throw haltRuntimeFailure("ORDERBOOK_CROSS_J_CACHE_MISMATCH", `ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
       `storedPair=${pairId} canonicalPair=${meta.pairId} ` +
       `storedOwner=${order.ownerId} canonicalOwner=${meta.makerId} ` +
       `storedQty=${order.qtyLots.toString()} canonicalQty=${canonicalQty.toString()} ` +
-      `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`,
-    );
+      `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`);
   }
   if (order.qtyLots !== canonicalQty) {
-    throw new Error(
-      `ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
+    throw haltRuntimeFailure("ORDERBOOK_CROSS_J_CACHE_MISMATCH", `ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
       `storedQty=${order.qtyLots.toString()} canonicalQty=${canonicalQty.toString()} ` +
-      `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`,
-    );
+      `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`);
   }
   return book;
 };

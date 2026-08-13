@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 import type { AccountReplica, AccountTx } from '../../../types/account';
 import type { AccountConsensusContext } from '../context';
 import { cloneAccountReplica } from '../../state/state-clone';
@@ -177,27 +179,21 @@ const throwCriticalProposalFailure = (
     throw new Error(`SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${tx.data.kind}:${reason}`);
   }
   if (tx.type === 'cross_swap_fill_ack') {
-    throw new Error(
-      `CROSS_J_FILL_ACK_PROPOSAL_FAILED: offer=${tx.data.offerId} ` +
-      `seq=${tx.data.fillSeq} error=${reason}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_FILL_ACK_PROPOSAL_FAILED", `CROSS_J_FILL_ACK_PROPOSAL_FAILED: offer=${tx.data.offerId} ` +
+      `seq=${tx.data.fillSeq} error=${reason}`);
   }
   if (tx.type === 'cross_pull_lock') {
-    throw new Error(
-      `CROSS_J_PULL_LOCK_PROPOSAL_FAILED: pull=${tx.data.pullId} ` +
-      `order=${tx.data.crossJurisdiction.orderId} error=${reason}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_PULL_LOCK_PROPOSAL_FAILED", `CROSS_J_PULL_LOCK_PROPOSAL_FAILED: pull=${tx.data.pullId} ` +
+      `order=${tx.data.crossJurisdiction.orderId} error=${reason}`);
   }
   if (tx.type === 'swap_offer' && tx.data.crossJurisdiction) {
-    throw new Error(
-      `CROSS_J_SWAP_OFFER_PROPOSAL_FAILED: offer=${tx.data.offerId} error=${reason}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_SWAP_OFFER_PROPOSAL_FAILED", `CROSS_J_SWAP_OFFER_PROPOSAL_FAILED: offer=${tx.data.offerId} error=${reason}`);
   }
   if (tx.type === 'cross_pull_close') {
-    throw new Error(`CROSS_J_PULL_CLOSE_PROPOSAL_FAILED: pull=${tx.data.pullId} error=${reason}`);
+    throw haltRuntimeFailure("CROSS_J_PULL_CLOSE_PROPOSAL_FAILED", `CROSS_J_PULL_CLOSE_PROPOSAL_FAILED: pull=${tx.data.pullId} error=${reason}`);
   }
   if (tx.type === 'cross_pull_progress') {
-    throw new Error(`CROSS_J_PULL_PROGRESS_PROPOSAL_FAILED: pull=${tx.data.pullId} error=${reason}`);
+    throw haltRuntimeFailure("CROSS_J_PULL_PROGRESS_PROPOSAL_FAILED", `CROSS_J_PULL_PROGRESS_PROPOSAL_FAILED: pull=${tx.data.pullId} error=${reason}`);
   }
 };
 

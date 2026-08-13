@@ -1,5 +1,55 @@
 export type RuntimeFailureCategory = 'ExpectedEmpty' | 'TransientRace' | 'Contradiction';
 
+export type FailureDisposition = 'reject' | 'retry' | 'dispute' | 'halt_runtime';
+
+/**
+ * Pre-mainnet safety default: every expected boundary failure must eventually
+ * be assigned one exact disposition and code. Until that inventory is closed,
+ * an unknown exception is never guessed to be harmless; the outer supervisor
+ * halts only the affected Runtime and keeps the host observable for an operator.
+ * Mainnet remains blocked until every expected finance/consensus error producer
+ * is explicitly categorized; an unknown error never becomes a release-time escape hatch.
+ */
+
+/** Machine-readable failure. Human text is deliberately never inspected. */
+export class FailureDispositionError extends Error {
+  readonly disposition: FailureDisposition;
+  readonly code: string;
+
+  constructor(disposition: FailureDisposition, code: string, message = code, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'FailureDispositionError';
+    this.disposition = disposition;
+    this.code = code;
+  }
+}
+
+export class StorageFailureError extends FailureDispositionError {
+  constructor(code: string, message = code, cause?: unknown) {
+    super('halt_runtime', code, message, cause === undefined ? undefined : { cause });
+    this.name = 'StorageFailureError';
+  }
+}
+
+export const rejectFailure = (code: string, message = code): FailureDispositionError =>
+  new FailureDispositionError('reject', code, message);
+
+export const retryFailure = (code: string, message = code): FailureDispositionError =>
+  new FailureDispositionError('retry', code, message);
+
+export const disputeFailure = (code: string, message = code): FailureDispositionError =>
+  new FailureDispositionError('dispute', code, message);
+
+export const haltRuntimeFailure = (
+  code: string,
+  message = code,
+  cause?: unknown,
+): FailureDispositionError =>
+  new FailureDispositionError('halt_runtime', code, message, cause === undefined ? undefined : { cause });
+
+export const storageFailure = (code: string, message = code, cause?: unknown): StorageFailureError =>
+  new StorageFailureError(code, message, cause);
+
 export type RuntimeFailureSignal = {
   category: RuntimeFailureCategory;
   code: string;
@@ -170,9 +220,7 @@ export const classifyRuntimeTransportFailure = (code: string, message?: string):
 
 export const classifyRuntimeFaucetFailure = (code: string, message?: string): RuntimeFailureSignal => {
   const normalizedCode = normalizeRuntimeFailureCode(code);
-  const category = FAUCET_FAILURE_CATEGORIES[normalizedCode] ?? (
-    normalizedCode.startsWith('FAUCET_INVALID_') ? 'Contradiction' : 'TransientRace'
-  );
+  const category = FAUCET_FAILURE_CATEGORIES[normalizedCode] ?? 'Contradiction';
   return buildRuntimeFailureSignal({
     category,
     code: normalizedCode,
@@ -212,9 +260,7 @@ export const classifyRuntimeJBatchFailure = (
   message?: string,
 ): RuntimeFailureSignal => {
   const normalizedCode = normalizeRuntimeFailureCode(code);
-  const category = J_BATCH_FAILURE_CATEGORIES[normalizedCode] ?? (
-    normalizedCode.startsWith('J_SUBMIT_TRANSIENT') ? 'TransientRace' : 'Contradiction'
-  );
+  const category = J_BATCH_FAILURE_CATEGORIES[normalizedCode] ?? 'Contradiction';
   return buildRuntimeFailureSignal({
     category,
     code: normalizedCode,

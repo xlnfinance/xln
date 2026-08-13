@@ -1,12 +1,32 @@
 import type { RuntimeEntityInputsEnvelope } from '../../../runtime/types';
-import { validateDeliverableEntityInput } from '../../../runtime/routing/routing-validation';
-import { normalizeRuntimeId } from './runtime-id';
+import {
+  validateDeliverableEntityInput,
+  type ValidatedDeliverableEntityInput,
+} from '../../../runtime/routing/routing-validation';
+import { decodeRuntimeId } from './runtime-id';
+import type { RuntimeId } from '../../../protocol/identity';
+import {
+  toRuntimeHeight,
+  toUnixMs,
+  type RuntimeHeight,
+  type UnixMs,
+} from '../../../protocol/units';
 import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../../protocol/boundary-validation';
 
 export const MAX_P2P_ENTITY_INPUTS = 256;
+
+export type DecodedRuntimeEntityInputsEnvelope = Omit<
+  RuntimeEntityInputsEnvelope,
+  'sourceRuntimeId' | 'sourceRuntimeHeight' | 'sourceRuntimeTimestamp' | 'entityInputs'
+> & Readonly<{
+  sourceRuntimeId: RuntimeId;
+  sourceRuntimeHeight: RuntimeHeight;
+  sourceRuntimeTimestamp: UnixMs;
+  entityInputs: ValidatedDeliverableEntityInput[];
+}>;
 
 const requireFrameCoordinate = (value: unknown, field: string): number => {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
@@ -47,7 +67,7 @@ const decodeAtomicPair = (
  * Decode authenticated plaintext before it crosses from transport into the
  * Runtime machine. Encryption proves confidentiality, not schema validity.
  */
-export const decodeRuntimeEntityInputsEnvelope = (value: unknown): RuntimeEntityInputsEnvelope => {
+export const decodeRuntimeEntityInputsEnvelope = (value: unknown): DecodedRuntimeEntityInputsEnvelope => {
   const envelope = requireBoundaryRecord(value, 'P2P_ENTITY_INPUTS_ENVELOPE_INVALID');
   requireExactBoundaryKeys(
     envelope,
@@ -55,8 +75,12 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): RuntimeEntity
     ['atomicCrossJurisdictionPair'],
     'P2P_ENTITY_INPUTS_ENVELOPE_FIELDS_INVALID',
   );
-  const sourceRuntimeId = normalizeRuntimeId(envelope['sourceRuntimeId']);
-  if (!sourceRuntimeId) throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_SOURCE_RUNTIME_INVALID');
+  let sourceRuntimeId: RuntimeId;
+  try {
+    sourceRuntimeId = decodeRuntimeId(envelope['sourceRuntimeId']);
+  } catch {
+    throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_SOURCE_RUNTIME_INVALID');
+  }
   const sourceSignature = envelope['sourceSignature'];
   if (typeof sourceSignature !== 'string' || !/^0x[0-9a-f]{130}$/.test(sourceSignature)) {
     throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_SOURCE_SIGNATURE_INVALID');
@@ -69,19 +93,19 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): RuntimeEntity
       `P2P_ENTITY_INPUTS_ENVELOPE_INPUTS_TOO_MANY:${envelope['entityInputs'].length}:${MAX_P2P_ENTITY_INPUTS}`,
     );
   }
-  const entityInputs = envelope['entityInputs'].map(validateDeliverableEntityInput);
-  if (entityInputs.length === 0) {
+  if (envelope['entityInputs'].length === 0) {
     throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_EMPTY');
   }
   const atomicCrossJurisdictionPair = decodeAtomicPair(
     envelope['atomicCrossJurisdictionPair'],
-    entityInputs.length,
+    envelope['entityInputs'].length,
   );
+  const entityInputs = envelope['entityInputs'].map(validateDeliverableEntityInput);
   return {
     sourceRuntimeId,
     sourceSignature,
-    sourceRuntimeHeight: requireFrameCoordinate(envelope['sourceRuntimeHeight'], 'HEIGHT'),
-    sourceRuntimeTimestamp: requireFrameCoordinate(envelope['sourceRuntimeTimestamp'], 'TIMESTAMP'),
+    sourceRuntimeHeight: toRuntimeHeight(requireFrameCoordinate(envelope['sourceRuntimeHeight'], 'HEIGHT')),
+    sourceRuntimeTimestamp: toUnixMs(requireFrameCoordinate(envelope['sourceRuntimeTimestamp'], 'TIMESTAMP')),
     entityInputs,
     ...(atomicCrossJurisdictionPair ? { atomicCrossJurisdictionPair } : {}),
   };

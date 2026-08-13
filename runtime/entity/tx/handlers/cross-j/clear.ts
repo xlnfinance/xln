@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 import { deterministicEntityTimestamp } from '../../../../orderbook/cross-j/orderbook';
 import {
   CROSS_J_MAX_FILL_RATIO,
@@ -78,15 +80,13 @@ const requestClearThroughSourceAccount = (
 
   const sourceUserId = normalizeEntityRef(route.source.entityId);
   if (normalizeEntityRef(newState.entityId) !== sourceUserId) {
-    throw new Error(
-      `CROSS_J_CLEAR_SOURCE_PARTICIPANT_REQUIRED:${orderId}:${newState.entityId}:${sourceUserId}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_CLEAR_SOURCE_PARTICIPANT_REQUIRED", `CROSS_J_CLEAR_SOURCE_PARTICIPANT_REQUIRED:${orderId}:${newState.entityId}:${sourceUserId}`);
   }
   const sourceAccountId = findAccountKey(newState, sourceHubId);
   const sourceAccount = sourceAccountId ? newState.accounts.get(sourceAccountId) : undefined;
   const sourceOffer = sourceAccount?.state.swapOffers?.get(orderId);
   if (!sourceAccountId || !sourceAccount || !sourceOffer?.crossJurisdiction) {
-    throw new Error(`CROSS_J_CLEAR_SOURCE_OFFER_MISSING:${orderId}:${newState.entityId}:${sourceHubId}`);
+    throw haltRuntimeFailure("CROSS_J_CLEAR_SOURCE_OFFER_MISSING", `CROSS_J_CLEAR_SOURCE_OFFER_MISSING:${orderId}:${newState.entityId}:${sourceHubId}`);
   }
   if (!cancelRemainder && getCrossJurisdictionCommittedFillAmounts(route).fillRatio <= 0) {
     addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
@@ -242,7 +242,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
   const accountTxs: AccountTxTarget[] = [];
   let route = newState.crossJurisdictionSwaps?.get(orderId);
   if (!route) {
-    throw new Error(`CROSS_J_CLEAR_ROUTE_MISSING:${orderId}`);
+    throw haltRuntimeFailure("CROSS_J_CLEAR_ROUTE_MISSING", `CROSS_J_CLEAR_ROUTE_MISSING:${orderId}`);
   }
 
   const offerRoute = findCrossJurisdictionOfferRoute(newState, orderId);
@@ -261,7 +261,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
 
   const canonicalRoute: CrossJurisdictionSwapRoute = withCanonicalCrossJurisdictionRouteHash(route);
   if (!canonicalRoute.sourcePull || !canonicalRoute.targetPull) {
-    throw new Error(`CROSS_J_CLEAR_CORRUPT_ROUTE: order=${orderId} pull commitments missing`);
+    throw haltRuntimeFailure("CROSS_J_CLEAR_CORRUPT_ROUTE", `CROSS_J_CLEAR_CORRUPT_ROUTE: order=${orderId} pull commitments missing`);
   }
 
   const committedFill = getCrossJurisdictionCommittedFillAmounts(canonicalRoute);
@@ -286,23 +286,21 @@ const validateClearMaterialization = (
   const expectedProposer = normalizeEntityRef(state.config.validators[0] || '');
   const claimedProposer = normalizeEntityRef(entityTx.data.proposerSignerId);
   if (!expectedProposer || claimedProposer !== expectedProposer) {
-    throw new Error(
-      `CROSS_J_CLEAR_MATERIALIZE_PROPOSER_INVALID:${claimedProposer || 'missing'}:${expectedProposer || 'missing'}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_PROPOSER_INVALID", `CROSS_J_CLEAR_MATERIALIZE_PROPOSER_INVALID:${claimedProposer || 'missing'}:${expectedProposer || 'missing'}`);
   }
   const storedRoute = state.crossJurisdictionSwaps?.get(orderId);
   if (!storedRoute || storedRoute.status !== 'clear_requested') {
-    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_INTENT_MISSING:${orderId}`);
+    throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_INTENT_MISSING", `CROSS_J_CLEAR_MATERIALIZE_INTENT_MISSING:${orderId}`);
   }
   const route = withCanonicalCrossJurisdictionRouteHash(storedRoute);
   if (!route.sourcePull || !route.targetPull) {
-    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_PULLS_MISSING:${orderId}`);
+    throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_PULLS_MISSING", `CROSS_J_CLEAR_MATERIALIZE_PULLS_MISSING:${orderId}`);
   }
   if (normalizeEntityRef(route.source.counterpartyEntityId) !== normalizeEntityRef(state.entityId)) {
-    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_SOURCE_HUB_MISMATCH:${orderId}`);
+    throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_SOURCE_HUB_MISMATCH", `CROSS_J_CLEAR_MATERIALIZE_SOURCE_HUB_MISMATCH:${orderId}`);
   }
   const { fillRatio } = getCrossJurisdictionCommittedFillAmounts(route);
-  if (fillRatio <= 0) throw new Error(`CROSS_J_CLEAR_MATERIALIZE_FILL_MISSING:${orderId}`);
+  if (fillRatio <= 0) throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_FILL_MISSING", `CROSS_J_CLEAR_MATERIALIZE_FILL_MISSING:${orderId}`);
   let decodedRatio: number;
   try {
     decodedRatio = verifyHashLadderBinary({
@@ -310,28 +308,26 @@ const validateClearMaterialization = (
       partialRoot: route.sourcePull.partialRoot,
     }, binary).fillRatio;
   } catch (error) {
-    throw new Error(
-      `CROSS_J_CLEAR_MATERIALIZE_BINARY_INVALID:${orderId}:` +
-        `${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_BINARY_INVALID", `CROSS_J_CLEAR_MATERIALIZE_BINARY_INVALID:${orderId}:` +
+        `${error instanceof Error ? error.message : String(error)}`);
   }
   if (decodedRatio !== fillRatio) {
-    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_RATIO_MISMATCH:${orderId}:${decodedRatio}:${fillRatio}`);
+    throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_RATIO_MISMATCH", `CROSS_J_CLEAR_MATERIALIZE_RATIO_MISMATCH:${orderId}:${decodedRatio}:${fillRatio}`);
   }
   const expectedProof = buildCrossJurisdictionCloseProof(route, binary);
   if (!closeProofMatches(proof, expectedProof)) {
-    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_PROOF_MISMATCH:${orderId}`);
+    throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_PROOF_MISMATCH", `CROSS_J_CLEAR_MATERIALIZE_PROOF_MISMATCH:${orderId}`);
   }
   const accountId = findAccountKey(state, route.source.entityId);
   const account = accountId ? state.accounts.get(accountId) : undefined;
   if (!accountId || !account?.state.pulls?.has(route.sourcePull.pullId)) {
-    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING:${orderId}`);
+    throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING", `CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING:${orderId}`);
   }
   if (account.state.swapOffers?.has(orderId)) {
-    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_OFFER_STILL_OPEN:${orderId}`);
+    throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_OFFER_STILL_OPEN", `CROSS_J_CLEAR_MATERIALIZE_OFFER_STILL_OPEN:${orderId}`);
   }
   if (accountHasCrossPullCloseQueued(account, route.sourcePull.pullId)) {
-    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_ALREADY_QUEUED:${orderId}`);
+    throw haltRuntimeFailure("CROSS_J_CLEAR_MATERIALIZE_ALREADY_QUEUED", `CROSS_J_CLEAR_MATERIALIZE_ALREADY_QUEUED:${orderId}`);
   }
   return { route, accountId, fillRatio, proof: expectedProof };
 };
@@ -343,7 +339,7 @@ const buildSourceCloseAccountTxs = (
   proof: CrossJurisdictionClearMaterializationTx['data']['proof'],
 ): AccountTxTarget[] => {
   const sourcePull = route.sourcePull;
-  if (!sourcePull) throw new Error(`CROSS_J_CLEAR_SOURCE_PULL_MISSING:${route.orderId}`);
+  if (!sourcePull) throw haltRuntimeFailure("CROSS_J_CLEAR_SOURCE_PULL_MISSING", `CROSS_J_CLEAR_SOURCE_PULL_MISSING:${route.orderId}`);
   const accountTxs: AccountTxTarget[] = [{
     accountId,
     tx: {
@@ -388,7 +384,7 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
   const { route, accountId, fillRatio, proof } = validateClearMaterialization(newState, entityTx);
   const accountTxs = buildSourceCloseAccountTxs(route, accountId, binary, proof);
   const targetPull = route.targetPull;
-  if (!targetPull) throw new Error(`CROSS_J_CLEAR_TARGET_PULL_MISSING:${orderId}`);
+  if (!targetPull) throw haltRuntimeFailure("CROSS_J_CLEAR_TARGET_PULL_MISSING", `CROSS_J_CLEAR_TARGET_PULL_MISSING:${orderId}`);
   const targetCommandRoute = cloneCrossJurisdictionRoute(route);
   targetCommandRoute.sourceCloseProof = cloneCrossJurisdictionCloseProof(proof);
   transitionCrossJurisdictionRouteStatus(

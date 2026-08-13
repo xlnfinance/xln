@@ -19,6 +19,8 @@ import type { PreparedHtlcEntry } from '../../../../types/entity/htlc-infra-cont
 import { HTLC } from '../../../../config/constants';
 import { sameAccountStateDomain } from '../../../../account/commitment/state-root';
 import { deriveForwardHtlcLockId } from '../../../../protocol/htlc/utils';
+import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
+import { hasInboundHtlcRoute } from '../../../htlc/route-views';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
@@ -104,6 +106,7 @@ const applyPreparedHtlcOutcome = (
     hashlock: lock.hashlock, tokenId: lock.tokenId, amount: lock.amount,
     inboundEntity, inboundLockId: lock.lockId,
     outboundEntity: prepared.outcome.nextHopEntityId, outboundLockId,
+    pendingFee: lock.amount - prepared.outcome.forwardAmount,
     createdTimestamp: ctx.newState.timestamp,
   });
   ctx.accountTxs.push({ accountId: prepared.outcome.nextHopEntityId, tx: { type: 'htlc_lock', data: {
@@ -136,9 +139,17 @@ export async function applyCommittedHtlcLockFollowup(
   const lock = account.state.locks.get(accountTx.data.lockId);
   if (!lock || accountTx.data.envelope === undefined) return;
   const layer = encryptedHtlcLayer(accountTx.data.envelope);
-  if (!layer) throw new Error(`HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`);
+  if (!layer) {
+    throw haltRuntimeFailure(
+      'HTLC_ONION_ENCRYPTED_LAYER_REQUIRED',
+      `HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`,
+    );
+  }
   if (lock.envelopeHash !== hashEncryptedHtlcLayer(layer)) {
-    throw new Error(`HTLC_ONION_COMMITTED_HASH_MISMATCH:${lock.lockId}`);
+    throw haltRuntimeFailure(
+      'HTLC_ONION_COMMITTED_HASH_MISMATCH',
+      `HTLC_ONION_COMMITTED_HASH_MISMATCH:${lock.lockId}`,
+    );
   }
   const prepared = requirePreparedHtlcEntry(ctx, lock, committedFrame);
   // A hashlock is the Entity-wide identity of one live routed payment. Without
@@ -191,7 +202,7 @@ export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHash
   for (const timedOutHashlock of timedOutHashlocks) {
     const route = newState.htlcRoutes.get(timedOutHashlock);
     if (!route) continue;
-    if (route.inboundEntity && route.inboundLockId) {
+    if (hasInboundHtlcRoute(route)) {
       accountTxs.push({
         accountId: route.inboundEntity,
         tx: {
@@ -237,7 +248,7 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
     if (route.outboundLockId) newState.lockBook.delete(route.outboundLockId);
     if (route.inboundLockId) newState.lockBook.delete(route.inboundLockId);
 
-    if (route.inboundEntity && route.inboundLockId) {
+    if (hasInboundHtlcRoute(route)) {
       accountTxs.push({
         accountId: route.inboundEntity,
         tx: { type: 'htlc_resolve', data: { lockId: route.inboundLockId, outcome: 'secret', secret } },

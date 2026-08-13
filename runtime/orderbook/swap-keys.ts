@@ -1,14 +1,27 @@
-type Brand<T, TBrand extends string> = T & { readonly __brand: TBrand };
+import { LIMITS } from '../config/constants';
+import { toEntityId } from '../protocol/identity';
 
-export type OfferId = Brand<string, 'OfferId'>;
-export type SwapKey = Brand<`${string}:${string}`, 'SwapKey'>;
+declare const OfferIdBrand: unique symbol;
+declare const SwapKeyBrand: unique symbol;
+
+export type OfferId = string & { readonly [OfferIdBrand]: typeof OfferIdBrand };
+export type SwapKey = `${string}:${string}` & { readonly [SwapKeyBrand]: typeof SwapKeyBrand };
 
 export function asOfferId(value: string): OfferId {
-  return String(value) as OfferId;
+  const normalized = String(value);
+  if (
+    normalized.length === 0
+    || normalized.length > LIMITS.MAX_ACCOUNT_SWAP_HISTORY_TEXT
+    || normalized.includes(':')
+  ) {
+    throw new Error(`SWAP_OFFER_ID_INVALID:${normalized.length}`);
+  }
+  return normalized as OfferId;
 }
 
 export function swapKey(accountId: string, offerId: string): SwapKey {
-  return `${String(accountId)}:${String(offerId)}` as SwapKey;
+  const account = toEntityId(String(accountId));
+  return `${account}:${asOfferId(offerId)}` as SwapKey;
 }
 
 export function compareCanonicalText(left: string, right: string): number {

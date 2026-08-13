@@ -43,7 +43,6 @@ export type RuntimeLoopConfig = {
 export type RuntimeLoopLifecycleDeps = {
   processRuntime(env: RuntimeReplica): Promise<unknown>;
   waitForRuntimeProcessingIdle(env: RuntimeReplica, timeoutMs: number): Promise<boolean>;
-  getRuntimeProcessGlobal(): { exit?: (code: number) => unknown } | null;
   hasRuntimeWork(env: RuntimeReplica): boolean;
   getNextWallClockWakeTimestamp(env: RuntimeReplica): number | null;
 };
@@ -146,7 +145,7 @@ const runRuntimeLoop = async (
       try {
         await processAvailableRuntimeWork(env, deps);
       } catch (error) {
-        haltedMessage = await reportFatalLoopError(env, state, config, deps, error);
+        haltedMessage = await reportFatalLoopError(env, config, error);
         control.running = false;
       }
       if (control.running) await waitForNextRuntimeWork(env, tickDelayMs, deps);

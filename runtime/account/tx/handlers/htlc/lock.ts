@@ -22,6 +22,11 @@ import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
 type HtlcLockTx = Extract<AccountTx, { type: 'htlc_lock' }>;
+type HtlcLockClock = Readonly<{
+  committedTimestamp: number;
+  enforcementTimestamp: number;
+  enforcementJHeight: number;
+}>;
 
 const validateHtlcLock = (
   account: AccountReplica,
@@ -50,8 +55,7 @@ export async function handleHtlcLock(
   account: AccountReplica,
   accountTx: HtlcLockTx,
   byLeft: boolean,
-  currentTimestamp: number,
-  currentJHeight: number,
+  clock: HtlcLockClock,
   _isValidation: boolean = false
 ): Promise<ApplyAccountTxResult> {
   const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId } = accountTx.data;
@@ -62,7 +66,12 @@ export async function handleHtlcLock(
     account.state.locks = new Map();
   }
 
-  const validationError = validateHtlcLock(account, accountTx, currentTimestamp, currentJHeight);
+  const validationError = validateHtlcLock(
+    account,
+    accountTx,
+    clock.enforcementTimestamp,
+    clock.enforcementJHeight,
+  );
   if (validationError) return accountTxValidationRejected(validationError, events);
 
   const delta = ensureDelta(account.state, tokenId);
@@ -99,7 +108,9 @@ export async function handleHtlcLock(
     tokenId,
     senderIsLeft,
     createdHeight: account.currentHeight,
-    createdTimestamp: currentTimestamp,
+    // Root metadata is signed-frame data. The parent Entity clock is only an
+    // admission oracle; committing it here would make honest skew fork roots.
+    createdTimestamp: clock.committedTimestamp,
     ...(encryptedLayer ? { envelopeHash: hashEncryptedHtlcLayer(encryptedLayer) } : {}),
   };
 

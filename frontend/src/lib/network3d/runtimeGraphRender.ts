@@ -16,9 +16,11 @@ export type RuntimeGraphReplicaView = {
 };
 
 const graphReplicaState = (node: RuntimeGraphNodeState): Record<string, unknown> => {
-  const replicaState = node.replica?.state as unknown as Record<string, unknown> | undefined;
-  const coreState = node.core as unknown as Record<string, unknown> | null;
-  const source = replicaState ?? coreState ?? {};
+  const source: Record<string, unknown> = node.replica
+    ? { ...node.replica.state }
+    : node.core
+      ? { ...node.core }
+      : {};
   const profile = source['profile'] as Record<string, unknown> | undefined;
   return {
     ...source,

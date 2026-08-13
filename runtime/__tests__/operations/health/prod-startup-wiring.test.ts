@@ -307,7 +307,7 @@ describe('production startup wiring', () => {
     expect(existsSync(join(repoRoot, 'scripts/start-prod-hub.sh'))).toBe(false);
   });
 
-  test('managed runtime fatal exits only after parent incident fsync acknowledgement', () => {
+  test('managed runtime fatal remains isolated after parent incident fsync acknowledgement', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
@@ -319,10 +319,9 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('persistManagedChildFatalReport(marketMakerChild, report)');
     expect(hubNode).toContain('await reportManagedChildFatal({');
     expect(mmNode).toContain('await reportManagedChildFatal({');
-    const report = runtimeLoop.indexOf('await config.onFatal({');
-    const exit = runtimeLoop.indexOf('getRuntimeProcessGlobal()?.exit?.(1);', report);
-    expect(report).toBeGreaterThan(0);
-    expect(exit).toBeGreaterThan(report);
+    expect(runtimeLoop).toContain('await config.onFatal({');
+    expect(runtimeLoop).toContain('haltRuntimeRequiresOperator(env, error);');
+    expect(runtimeLoop).not.toContain('.exit?.(1)');
   });
 
   test('production frontend deploy builds off-host and uploads a complete artifact', () => {
@@ -699,7 +698,8 @@ describe('production startup wiring', () => {
     expect(runtimeEntityRouting).not.toContain('processRuntime(env)');
     expect(runtimeEntityRouting).not.toContain('queueMicrotask(() =>');
     const runtimeLifecycleSource = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop-failure.ts'), 'utf8');
-    expect(runtimeLifecycleSource).toContain('getRuntimeProcessGlobal()?.exit?.(1);');
+    expect(runtimeLifecycleSource).toContain('haltRuntimeRequiresOperator(env, error);');
+    expect(runtimeLifecycleSource).not.toContain('.exit?.(1)');
     expect(runtimeLoopSource).not.toContain('shouldExitOnRuntimeFatal');
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1'");
     expect(orchestrator).not.toContain('XLN_MARKET_MAKER_DISABLE_STORAGE');

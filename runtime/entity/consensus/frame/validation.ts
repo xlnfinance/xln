@@ -10,10 +10,30 @@ import type { EntityLeaderTimeoutVote, EntityFrame } from '../../types';
 import { validateEntityTxs } from '../../tx-validation';
 import { assertEntityFrameEventByteBudget } from './events';
 import { validateJPrefixCertificate } from '../jurisdiction/prefix-validation';
-import { validateEntityInfraContext } from './infra-context-validation';
+import {
+  validateEntityInfraContext,
+  type DecodedEntityInfraContext,
+} from './infra-context-validation';
 import { assertEntityFrameTotalByteBudget } from '../frame';
 import { LIMITS } from '../../../config/constants';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
+import { toFrameHash, toStateHash, type FrameHash, type StateHash } from '../../../protocol/hashes';
+import {
+  toEntityHeight,
+  toUnixMs,
+  type EntityHeight,
+  type UnixMs,
+} from '../../../protocol/units';
+
+export type DecodedEntityFrame = EntityFrame & Readonly<{
+  height: EntityHeight;
+  parentFrameHash: FrameHash | 'genesis';
+  stateRoot: StateHash;
+  authorityRoot: StateHash;
+  timestamp: UnixMs;
+  hash: FrameHash;
+  entityContext: DecodedEntityInfraContext;
+}>;
 
 const rejectUnexpectedKeys = (
   value: Record<string, unknown>,
@@ -283,11 +303,18 @@ const validateFrameOptionalEvidence = (
 function assertProposedEntityFrame(
   frame: Record<string, unknown>,
   context: string,
-): asserts frame is Record<string, unknown> & EntityFrame {
+): asserts frame is Record<string, unknown> & DecodedEntityFrame {
   const entityContext = validateFrameIdentityAndContext(frame, context);
   validateEntityTxs(frame['txs'], `${context}.txs`);
   validateFrameEvents(frame['events'], `${context}.events`);
-  validateString(frame['hash'], `${context}.hash`);
+  const hash = validateString(frame['hash'], `${context}.hash`);
+  toEntityHeight(Number(frame['height']));
+  toUnixMs(Number(frame['timestamp']));
+  toStateHash(String(frame['stateRoot']));
+  toStateHash(String(frame['authorityRoot']));
+  const parentFrameHash = String(frame['parentFrameHash']);
+  if (parentFrameHash !== 'genesis') toFrameHash(parentFrameHash);
+  toFrameHash(hash);
   validateFrameLeader(frame['leader'], entityContext, context);
   validateFrameOptionalEvidence(frame, context);
 }
@@ -311,7 +338,7 @@ const validateHashManifest = (value: unknown, context: string): void => {
 export const validateProposedEntityFrame = (
   value: unknown,
   context: string,
-): EntityFrame => {
+): DecodedEntityFrame => {
   const frame = validateObject(value, context);
   assertProposedEntityFrame(frame, context);
   try {

@@ -14,6 +14,7 @@ import { requireAccountDeltaTransformerAddress } from '../../../../account/conse
 import { collectKnownDisputeSecretsForSnapshot } from '../../../dispute-arguments';
 import { isUsableContractAddress } from '../../../../jurisdiction/machine/contract-address';
 import { shortId } from '../../../../infra/logger';
+import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
 import { disputeLog, warnDisputeUnlessQuiet } from './shared';
 import { admitDisputeFinalize } from './finalize-admission';
 import { proofBodyHasPulls } from './start-admission';
@@ -30,6 +31,13 @@ import {
   type FinalProofPayload,
   type FinalProofSelection,
 } from './finalize-proof';
+import {
+  toUnixMs,
+  toUnixS,
+  type UnixS,
+  unixMsToUnixSFloor,
+  unixSToUnixMs,
+} from '../../../../protocol/units';
 
 type FinalizeTx = Extract<EntityTx, { type: 'disputeFinalize' }>;
 
@@ -53,7 +61,7 @@ const collectRegistryPublication = (
     ? requireAccountDeltaTransformerAddress(env.state, account.state)
     : '';
   if (secrets.length > 0 && !isUsableContractAddress(transformerAddress)) {
-    throw new Error('DISPUTE_FINALIZE_MISSING_DELTA_TRANSFORMER_ADDRESS');
+    throw haltRuntimeFailure("DISPUTE_FINALIZE_MISSING_DELTA_TRANSFORMER_ADDRESS", 'DISPUTE_FINALIZE_MISSING_DELTA_TRANSFORMER_ADDRESS');
   }
   return { secrets, transformerAddress };
 };
@@ -73,10 +81,10 @@ const resolveFinalizeSubmitNotBefore = (
   counterpartyId: string,
   env: EntityRuntimeContext,
   selection: FinalProofSelection,
-): number | null | undefined => {
+): UnixS | null | undefined => {
   const activeDispute = account.activeDispute!;
-  const timeoutSec = Number(activeDispute.disputeTimeout || 0);
-  const nowSec = Math.floor(Number(state.timestamp || 0) / 1000);
+  const timeoutSec = toUnixS(Number(activeDispute.disputeTimeout || 0));
+  const nowSec = unixMsToUnixSFloor(toUnixMs(Number(state.timestamp || 0)));
 
   const hasPulls = proofBodyHasPulls(
     selection.finalProofbody,
@@ -126,23 +134,25 @@ const queueDisputeFinalize = (
   account: AccountReplica,
   proof: FinalProofPayload,
   registry: { secrets: string[]; transformerAddress: string },
-  submitNotBeforeTimestamp: number | null,
+  submitNotBeforeTimestamp: UnixS | null,
 ): void => {
   const batch = state.jBatchState!.batch;
   if (
     batch.disputeFinalizations.length >=
     J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations
   ) {
-    throw new Error(
+    throw haltRuntimeFailure(
+      'J_BATCH_LIMIT_EXCEEDED',
       `J_BATCH_LIMIT_EXCEEDED: disputeFinalizations ` +
-      `${batch.disputeFinalizations.length + 1}/` +
-      `${J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations}`,
+        `${batch.disputeFinalizations.length + 1}/` +
+        `${J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations}`,
     );
   }
   if (batchOpCount(batch) + 1 > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
-    throw new Error(
+    throw haltRuntimeFailure(
+      'J_BATCH_LIMIT_EXCEEDED',
       `J_BATCH_LIMIT_EXCEEDED: disputeFinalize would exceed total ops ` +
-      `${batchOpCount(batch) + 1}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`,
+        `${batchOpCount(batch) + 1}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`,
     );
   }
   for (const secret of registry.secrets) {
@@ -181,8 +191,8 @@ const selectedCrossJurisdictionRecoveryIsReady = (
     (pullId) => !Object.hasOwn(plan.recovery.resultsByPullId, pullId),
   );
   if (missing.length === 0) return true;
-  const timeoutSec = Number(active.disputeTimeout || 0);
-  const nowSec = Math.floor(Number(state.timestamp || 0) / 1000);
+  const timeoutSec = toUnixS(Number(active.disputeTimeout || 0));
+  const nowSec = unixMsToUnixSFloor(toUnixMs(Number(state.timestamp || 0)));
   // One canonical clock: the signed Target slot remains writable until the
   // local on-chain disputeTimeout. Before it, missing ports wait; at/after it,
   // DeltaTransformer deterministically reads the latest target slot or zero.
@@ -190,7 +200,7 @@ const selectedCrossJurisdictionRecoveryIsReady = (
   if (state.crontabState) {
     scheduleHook(state.crontabState, {
       id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
-      triggerAt: Number(state.timestamp ?? 0) + 1000,
+      triggerAt: toUnixMs(toUnixMs(Number(state.timestamp ?? 0)) + 1000),
       type: 'dispute_deadline',
       data: { accountId: counterpartyId },
     });
@@ -227,11 +237,14 @@ const deferFinalizeForPendingReveals = (
     });
   }
   if (state.crontabState) {
-    const timeoutSec = Number(account.activeDispute!.disputeTimeout || 0);
-    const timeoutMs = timeoutSec > 0 ? timeoutSec * 1000 : Number(state.timestamp ?? 0) + 1000;
+    const timeoutSec = toUnixS(Number(account.activeDispute!.disputeTimeout || 0));
+    const nowMs = toUnixMs(Number(state.timestamp ?? 0));
+    const timeoutMs = timeoutSec > 0
+      ? unixSToUnixMs(timeoutSec)
+      : toUnixMs(nowMs + 1000);
     scheduleHook(state.crontabState, {
       id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
-      triggerAt: Math.min(Number(state.timestamp ?? 0) + 1000, timeoutMs),
+      triggerAt: toUnixMs(Math.min(toUnixMs(nowMs + 1000), timeoutMs)),
       type: 'dispute_deadline',
       data: { accountId: counterpartyId },
     });

@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
+
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeOverlayRecord } from '../../types/account';
@@ -38,9 +40,7 @@ export const removeBookOrderById = (
     });
 
   if (matches.length > 1) {
-    throw new Error(
-      `ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${namespacedOrderId} matches=${matches.length}`,
-    );
+    throw haltRuntimeFailure("ORDERBOOK_DUPLICATE_BOOK_ORDER", `ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${namespacedOrderId} matches=${matches.length}`);
   }
 
   const match = matches[0];
@@ -98,7 +98,7 @@ const resizeBookOrderById = (
   storageChanges: RuntimeOverlayRecord[],
 ): boolean => {
   if (nextQtyLots <= 0n || nextQtyLots > MAX_ORDERBOOK_QTY_LOTS) {
-    throw new Error(`ORDERBOOK_RESIZE_INVALID: order=${namespacedOrderId} qty=${nextQtyLots.toString()}`);
+    throw haltRuntimeFailure("ORDERBOOK_RESIZE_INVALID", `ORDERBOOK_RESIZE_INVALID: order=${namespacedOrderId} qty=${nextQtyLots.toString()}`);
   }
   const ext = state.orderbookExt as OrderbookExtState | undefined;
   if (!ext) return false;
@@ -111,7 +111,7 @@ const resizeBookOrderById = (
       return order ? [{ pairId, book, order }] : [];
     });
   if (matches.length > 1) {
-    throw new Error(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${namespacedOrderId} matches=${matches.length}`);
+    throw haltRuntimeFailure("ORDERBOOK_DUPLICATE_BOOK_ORDER", `ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${namespacedOrderId} matches=${matches.length}`);
   }
   const match = matches[0];
   if (!match) return false;
@@ -119,9 +119,9 @@ const resizeBookOrderById = (
   const bucketMap = match.order.side === 0 ? match.book.bidBuckets : match.book.askBuckets;
   const bucket = bucketMap.get(match.order.bucketId.toString());
   const level = bucket?.levels.get(match.order.priceTicks.toString());
-  if (!bucket || !level) throw new Error(`ORDERBOOK_RESIZE_CORRUPT: order=${namespacedOrderId}`);
+  if (!bucket || !level) throw haltRuntimeFailure("ORDERBOOK_RESIZE_CORRUPT", `ORDERBOOK_RESIZE_CORRUPT: order=${namespacedOrderId}`);
   const nextTotal = level.totalQtyLots - match.order.qtyLots + nextQtyLots;
-  if (nextTotal <= 0n) throw new Error(`ORDERBOOK_RESIZE_UNDERFLOW: order=${namespacedOrderId}`);
+  if (nextTotal <= 0n) throw haltRuntimeFailure("ORDERBOOK_RESIZE_UNDERFLOW", `ORDERBOOK_RESIZE_UNDERFLOW: order=${namespacedOrderId}`);
 
   // This is not matcher repair. Cross-j book quantity changes only when the
   // book owner applies an explicit committed account-ACK progress event.
@@ -164,7 +164,7 @@ export const materializeCrossJurisdictionBookRemainder = (
   const namespacedOrderId = crossJurisdictionBookOrderIdFor(input.sourceEntityId, input.orderId);
   const existingPairs = getOrderbookPairsForOrder(ext, namespacedOrderId);
   if (existingPairs.length > 0) {
-    throw new Error(`ORDERBOOK_REMAINDER_ALREADY_PRESENT: order=${namespacedOrderId}`);
+    throw haltRuntimeFailure("ORDERBOOK_REMAINDER_ALREADY_PRESENT", `ORDERBOOK_REMAINDER_ALREADY_PRESENT: order=${namespacedOrderId}`);
   }
   const book = ext.books.get(input.pairId);
   if (!book) return false;

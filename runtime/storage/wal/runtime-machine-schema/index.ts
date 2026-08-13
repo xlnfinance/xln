@@ -1,7 +1,14 @@
-import type { RoutedEntityInput, RuntimeInput } from '../../../runtime/types';
-import { decodeRuntimeInput } from '../../../runtime/input-schema';
+import type { RuntimeReplica } from '../../../runtime/types';
+import {
+  decodeRuntimeInput,
+  type DecodedRuntimeInput,
+} from '../../../runtime/input-schema';
 import { cloneIsolatedRuntimeSnapshot } from '../../../runtime/input-pipeline/input-clone';
-import { decodeRoutedEntityInput } from '../../../runtime/routing/routing-validation';
+import {
+  decodeRoutedEntityInput,
+  type ValidatedRoutedEntityInput,
+} from '../../../runtime/routing/routing-validation';
+import { toRuntimeId } from '../../../protocol/identity';
 import { validateBrowserVmState } from '../../../runtime/input-schema/browser';
 import { validateEntityTxs } from '../../../entity/tx-validation';
 import { validateJInputs, validateJReplicas } from './j';
@@ -35,7 +42,10 @@ const validateStorageConfig = (value: unknown, code: string): void => {
   }
 };
 
-const validateRuntimeConfig = (value: unknown, code: string): void => {
+export const decodeRuntimeConfig = (
+  value: unknown,
+  code: string,
+): RuntimeReplica['runtimeConfig'] => {
   const config = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(config, [], [
     'minFrameDelayMs', 'loopIntervalMs', 'snapshotIntervalFrames',
@@ -59,13 +69,14 @@ const validateRuntimeConfig = (value: unknown, code: string): void => {
     }
   }
   if (config['storage'] !== undefined) validateStorageConfig(config['storage'], `${code}_STORAGE`);
+  return structuredClone(config) as RuntimeReplica['runtimeConfig'];
 };
 
 function assertRoutedEntityInput(
   value: unknown,
   code: string,
   options: { allowSourceRuntimeFrame?: boolean } = {},
-): asserts value is RoutedEntityInput {
+): asserts value is ValidatedRoutedEntityInput {
   const input = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(input, ['entityId', 'signerId'], [
     'runtimeId', 'from', 'certifiedOutputIdentity', 'entityTxs', 'proposedFrame',
@@ -73,7 +84,6 @@ function assertRoutedEntityInput(
     'atomicCrossJurisdictionPair',
     ...(options.allowSourceRuntimeFrame ? ['sourceRuntimeFrame'] : []),
   ], `${code}_FIELDS`);
-  decodeRoutedEntityInput(input);
   for (const field of ['entityId', 'signerId', 'runtimeId', 'from']) {
     if (input[field] !== undefined) requireString(input[field], `${code}_${field.toUpperCase()}`);
   }
@@ -125,13 +135,14 @@ function assertRoutedEntityInput(
   }
   if (input['jPrefixAttestations'] !== undefined) validateStorageSafeValue(input['jPrefixAttestations'], `${code}_J_PREFIX`);
   if (input['leaderTimeoutVote'] !== undefined) validateStorageSafeValue(input['leaderTimeoutVote'], `${code}_LEADER_TIMEOUT`);
+  decodeRoutedEntityInput(input);
 }
 
 const validateRoutedEntityInput = (
   value: unknown,
   code: string,
   options: { allowSourceRuntimeFrame?: boolean } = {},
-): RoutedEntityInput => {
+): ValidatedRoutedEntityInput => {
   assertRoutedEntityInput(value, code, options);
   return value;
 };
@@ -140,10 +151,10 @@ const validateRoutedEntityInputs = (
   value: unknown,
   code: string,
   options: { allowSourceRuntimeFrame?: boolean } = {},
-): RoutedEntityInput[] => requireArray(value, code)
+): ValidatedRoutedEntityInput[] => requireArray(value, code)
   .map((entry, index) => validateRoutedEntityInput(entry, `${code}_${index}`, options));
 
-const validateRuntimeInput = (value: unknown, code: string): RuntimeInput => {
+const validateRuntimeInput = (value: unknown, code: string): DecodedRuntimeInput => {
   const input = decodeRuntimeInput(value, code);
   input.entityInputs.forEach((entry, index) => validateRoutedEntityInput(
     entry,
@@ -167,10 +178,12 @@ export const validateDurableRuntimeMachineSnapshot = (
     'runtimeId', 'activeJurisdiction', 'browserVMState', 'runtimeConfig', 'infrastructure',
     'pendingOutputs', 'networkInbox', 'pendingNetworkOutputs',
   ], `${code}_FIELDS`);
-  if (snapshot['runtimeId'] !== undefined) requireString(snapshot['runtimeId'], `${code}_RUNTIME_ID`);
+  if (snapshot['runtimeId'] !== undefined) {
+    toRuntimeId(requireString(snapshot['runtimeId'], `${code}_RUNTIME_ID`));
+  }
   if (snapshot['activeJurisdiction'] !== undefined) requireString(snapshot['activeJurisdiction'], `${code}_ACTIVE_JURISDICTION`);
   if (snapshot['browserVMState'] !== undefined) validateBrowserVmState(snapshot['browserVMState'], `${code}_BROWSER_VM_STATE`);
-  if (snapshot['runtimeConfig'] !== undefined) validateRuntimeConfig(snapshot['runtimeConfig'], `${code}_RUNTIME_CONFIG`);
+  if (snapshot['runtimeConfig'] !== undefined) decodeRuntimeConfig(snapshot['runtimeConfig'], `${code}_RUNTIME_CONFIG`);
   if (snapshot['infrastructure'] !== undefined) validateDurableRuntimeState(snapshot['infrastructure'], `${code}_RUNTIME_STATE`);
   validateRuntimeInput(snapshot['runtimeInput'], `${code}_RUNTIME_INPUT`);
   for (const field of ['pendingOutputs', 'networkInbox']) {

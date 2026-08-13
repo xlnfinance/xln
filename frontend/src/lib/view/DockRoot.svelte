@@ -51,7 +51,6 @@
 
   type EntityPanelSeed = { entityId: string; entityName: string; signerId: string; action?: EntityOpenAction };
   type DockviewInitParams = { api: { id: string; close?: () => void } };
-  type DockviewWindow = Window & { __dockview_instance?: DockviewComponent };
   type ActivePanelRef = { id?: string; api?: { id?: string } } | undefined;
   type MountedComponent = ReturnType<typeof mount> | null;
 
@@ -382,7 +381,7 @@
     });
 
     if (typeof window !== 'undefined') {
-      (window as DockviewWindow).__dockview_instance = dockview;
+      window.__dockview_instance = dockview;
     }
 
     const savedLayout = localStorage.getItem('xln-workspace-layout');

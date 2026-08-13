@@ -1,5 +1,5 @@
-import type { ApplyAccountTxResult } from '../../../account/tx/apply-types';
-import { toHashlock, type LockId } from '../../../account/tx/units';
+import type { ApplyAccountTxResult } from '../../../../account/tx/apply-types';
+import { toHashlock, type LockId } from '../../../../account/tx/units';
 
 type IllegalSuccessWithError = {
   ok: true;

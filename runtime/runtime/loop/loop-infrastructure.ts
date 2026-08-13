@@ -173,7 +173,6 @@ export const tryOpenRuntimeInfraDb = async (env: RuntimeReplica): Promise<boolea
     () => true,
     error => {
       const blocked = error instanceof Error && (
-        error.message.includes('blocked') ||
         error.name === 'SecurityError' ||
         error.name === 'InvalidStateError'
       );

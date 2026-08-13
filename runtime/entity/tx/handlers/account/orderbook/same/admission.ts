@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
+
 import { getBestAsk, getBestBid, getBookOrder } from '../../../../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../../infra/logger';
 import type { SameJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
@@ -169,10 +171,8 @@ export const keepIdenticalRestingOrder = (
       storedQty: existing.qtyLots.toString(),
       canonicalQty: prepared.qtyLots.toString(),
     });
-    throw new Error(
-      `ORDERBOOK_CACHE_MISMATCH: pair=${prepared.bookKey} ` +
-      `order=${prepared.namespacedOrderId}`,
-    );
+    throw haltRuntimeFailure("ORDERBOOK_CACHE_MISMATCH", `ORDERBOOK_CACHE_MISMATCH: pair=${prepared.bookKey} ` +
+      `order=${prepared.namespacedOrderId}`);
   }
   orderbookSameLog.debug('order.resting', {
     offer: shortOrder(prepared.offer.offerId, 8),

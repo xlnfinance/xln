@@ -26,6 +26,8 @@ import {
 import { LIMITS } from '../../../config/constants';
 import { assertReliableCertifiedPayloadIsAtomic } from './envelope';
 import { assertCertifiedEntityOutputAuthorization } from '../../auth/authorization';
+import { FailureDispositionError, haltRuntimeFailure, rejectFailure, retryFailure } from '../../../protocol/errors/failure-taxonomy';
+import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
 
 const assertCertifiableOutput = (output: EntityOutput, outputIndex: number): EntityTx[] => {
   if (
@@ -265,7 +267,7 @@ const isImmediatePreviousBoardAuthorityLive = (
     certifiedBoardRecordPrecedes(bound, latest) &&
     bound.boardEpoch + 1 === latest.boardEpoch &&
     bound.boardHash === latest.previousBoardHash &&
-    Math.floor(observerTimestampMs / 1_000) < latest.previousBoardValidUntil
+    unixMsToUnixSFloor(toUnixMs(observerTimestampMs)) < latest.previousBoardValidUntil
   );
 };
 
@@ -278,7 +280,13 @@ export const resolveConsensusOutputBoardAuthority = (
   const binding = origin.boardAuthority;
   const store = getCertifiedBoardNodeStore(env);
   if (!binding) {
-    if (resolveObserverCertifiedBoardRecord(observerState, store, origin.sourceEntityId)) {
+    let registered: CertifiedBoardRecord | null;
+    try {
+      registered = resolveObserverCertifiedBoardRecord(observerState, store, origin.sourceEntityId);
+    } catch (error) {
+      throw haltRuntimeFailure('CONSENSUS_OUTPUT_BOARD_RESOLUTION_FAILED', undefined, error);
+    }
+    if (registered) {
       throw new Error(`CONSENSUS_OUTPUT_BOARD_AUTHORITY_MISSING:${origin.sourceEntityId}`);
     }
     return { kind: 'lazy' };
@@ -297,7 +305,12 @@ export const resolveConsensusOutputBoardAuthority = (
       observerJHeight,
     };
   }
-  const latestRecord = resolveObserverCertifiedBoardRecord(observerState, store, origin.sourceEntityId);
+  let latestRecord: CertifiedBoardRecord | null;
+  try {
+    latestRecord = resolveObserverCertifiedBoardRecord(observerState, store, origin.sourceEntityId);
+  } catch (error) {
+    throw haltRuntimeFailure('CONSENSUS_OUTPUT_BOARD_RESOLUTION_FAILED', undefined, error);
+  }
   if (!latestRecord) {
     throw new Error(`CONSENSUS_OUTPUT_LATEST_BOARD_MEMBERSHIP_MISSING:${origin.sourceEntityId}`);
   }
@@ -556,9 +569,18 @@ export const assertCertifiedEntityOutputWitnesses = async (
   observerState: EntityState,
   authorityBoardHash?: string,
 ): Promise<void> => {
-  const registeredBoardHash =
-    authorityBoardHash ??
-    resolveObserverCertifiedBoardHash(observerState, getCertifiedBoardNodeStore(env), sourceEntityId);
+  let registeredBoardHash = authorityBoardHash;
+  if (registeredBoardHash === undefined) {
+    try {
+      registeredBoardHash = resolveObserverCertifiedBoardHash(
+        observerState,
+        getCertifiedBoardNodeStore(env),
+        sourceEntityId,
+      ) ?? undefined;
+    } catch (error) {
+      throw haltRuntimeFailure('CONSENSUS_OUTPUT_BOARD_RESOLUTION_FAILED', undefined, error);
+    }
+  }
   const witnesses = entityTxs.flatMap(tx => (tx.type === 'accountInput' ? collectAccountInputWitnesses(tx.data) : []));
   for (const witness of witnesses) {
     const verified = await verifyHankoForHash(
@@ -611,6 +633,21 @@ export const verifyCertifiedEntityOutput = async (
   observerState: EntityState,
   tx: Extract<EntityTx, { type: 'consensusOutput' }>,
 ): Promise<VerifiedCertifiedEntityOutput> => {
+  try {
+    return await verifyCertifiedEntityOutputUnchecked(env, observerState, tx);
+  } catch (error) {
+    if (error instanceof FailureDispositionError) throw error;
+    if (error instanceof TypeError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw rejectFailure('CONSENSUS_OUTPUT_INVALID', message);
+  }
+};
+
+const verifyCertifiedEntityOutputUnchecked = async (
+  env: EntityRuntimeContext,
+  observerState: EntityState,
+  tx: Extract<EntityTx, { type: 'consensusOutput' }>,
+): Promise<VerifiedCertifiedEntityOutput> => {
   const origin = normalizeConsensusOutputOrigin(tx.data.origin);
   if (typeof tx.data.outputHanko !== 'string' || tx.data.outputHanko.length === 0) {
     throw new Error('CONSENSUS_OUTPUT_HANKO_MISSING');
@@ -641,7 +678,7 @@ export const verifyCertifiedEntityOutput = async (
   assertCertifiedOutputSemanticIdentity(origin, targetEntityId, entityTxs);
   const authority = resolveConsensusOutputBoardAuthority(origin, observerState, env);
   if (authority.kind === 'defer') {
-    throw new Error(
+    throw retryFailure('CONSENSUS_OUTPUT_AUTHORITY_PREFIX_BEHIND',
       `CONSENSUS_OUTPUT_AUTHORITY_PREFIX_BEHIND:required=${authority.requiredJHeight}:` +
         `observer=${authority.observerJHeight}`,
     );

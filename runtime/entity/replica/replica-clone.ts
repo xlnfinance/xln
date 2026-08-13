@@ -66,7 +66,7 @@ const cloneEntityReplicaWithPolicy = (
   const cloneState = validateClone
     ? cloneEntityState
     : cloneTrustedEntityState;
-  const cloned = {
+  const cloned: EntityReplica = {
     entityId: replica.entityId,
     signerId: replica.signerId,
     state: shareFrameState
@@ -133,7 +133,7 @@ const cloneEntityReplicaWithPolicy = (
     ...(replica.htlcNotes && {
       htlcNotes: new Map(replica.htlcNotes),
     }),
-  } as EntityReplica;
+  };
 
   if (validateClone) {
     return validateEntityReplica(cloned, 'cloneEntityReplica');

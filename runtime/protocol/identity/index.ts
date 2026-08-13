@@ -18,11 +18,9 @@
 declare const EntityIdBrand: unique symbol;
 declare const SignerIdBrand: unique symbol;
 declare const JIdBrand: unique symbol;
+declare const RuntimeIdBrand: unique symbol;
+declare const AccountPairKeyBrand: unique symbol;
 declare const EntityProviderAddressBrand: unique symbol;
-declare const AccountKeyBrand: unique symbol;
-declare const LockIdBrand: unique symbol;
-declare const ProposalIdBrand: unique symbol;
-declare const JurisdictionNameBrand: unique symbol;
 
 /** Entity identifier - 32-byte hex string (0x + 64 chars) */
 export type EntityId = string & { readonly [EntityIdBrand]: typeof EntityIdBrand };
@@ -32,6 +30,14 @@ export type SignerId = string & { readonly [SignerIdBrand]: typeof SignerIdBrand
 
 /** Jurisdiction ID - EVM chainId or lazy hash for local jurisdictions */
 export type JId = string & { readonly [JIdBrand]: typeof JIdBrand };
+
+/** Runtime transport identity - canonical lowercase 20-byte EVM address. */
+export type RuntimeId = string & { readonly [RuntimeIdBrand]: typeof RuntimeIdBrand };
+
+/** Canonical lower-Entity-first key for a bilateral Account pair. */
+export type AccountPairKey = `${EntityId}:${EntityId}` & {
+  readonly [AccountPairKeyBrand]: typeof AccountPairKeyBrand;
+};
 
 /** EntityProvider contract address - 20-byte hex (0x + 40 chars) */
 export type EntityProviderAddress = string & { readonly [EntityProviderAddressBrand]: typeof EntityProviderAddressBrand };
@@ -89,6 +95,9 @@ export const isValidJId = (s: string): s is JId => {
   return typeof s === 'string' && s.length > 0;
 };
 
+export const isValidRuntimeId = (s: string): s is RuntimeId =>
+  /^0x[0-9a-f]{40}$/.test(s);
+
 /** Check if string is valid EntityProviderAddress (0x + 40 hex chars) */
 export const isValidEpAddress = (s: string): s is EntityProviderAddress => {
   return typeof s === 'string' && /^0x[a-fA-F0-9]{40}$/i.test(s);
@@ -120,6 +129,25 @@ export const toJId = (s: string): JId => {
     throw new Error(`FINTECH-SAFETY: Invalid JId: ${s}`);
   }
   return s;
+};
+
+export const toRuntimeId = (s: string): RuntimeId => {
+  if (!isValidRuntimeId(s)) {
+    throw new Error(`FINTECH-SAFETY: Invalid RuntimeId: ${s}`);
+  }
+  return s;
+};
+
+export const createAccountPairKey = (first: string, second: string): AccountPairKey => {
+  const firstEntity = toEntityId(first).toLowerCase() as EntityId;
+  const secondEntity = toEntityId(second).toLowerCase() as EntityId;
+  if (firstEntity === secondEntity) {
+    throw new Error(`FINTECH-SAFETY: AccountPairKey requires distinct entities: ${firstEntity}`);
+  }
+  const [left, right] = firstEntity < secondEntity
+    ? [firstEntity, secondEntity]
+    : [secondEntity, firstEntity];
+  return `${left}:${right}` as AccountPairKey;
 };
 
 /** Create validated EntityProviderAddress - throws if invalid */

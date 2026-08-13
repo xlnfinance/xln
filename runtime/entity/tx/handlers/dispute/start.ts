@@ -11,6 +11,10 @@ import {
 } from '../../../../jurisdiction/machine/batch';
 import { shortHash, shortId } from '../../../../infra/logger';
 import {
+  FailureDispositionError,
+  haltRuntimeFailure,
+} from '../../../../protocol/errors/failure-taxonomy';
+import {
   freezeAccountForDispute,
   isDisputeStartedByLeft,
 } from '../../../../account/consensus/dispute/policy';
@@ -36,6 +40,16 @@ import {
 
 type StartTx = Extract<EntityTx, { type: 'disputeStart' }>;
 
+const applyStartEvidenceBoundary = <T>(operation: () => T): T => {
+  try {
+    return operation();
+  } catch (error) {
+    if (error instanceof FailureDispositionError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw haltRuntimeFailure('DISPUTE_START_EVIDENCE_INVALID', message, error);
+  }
+};
+
 const queuePullDisputeRegistrations = (
   state: EntityState,
   tx: StartTx,
@@ -54,11 +68,11 @@ const queuePullDisputeRegistrations = (
   );
   for (const sourceClaim of sourceClaims) {
     if (sourceClaim.result === 'source-window-expired') {
-      throw new Error(`DISPUTE_START_SOURCE_CLAIM_WINDOW_IMPOSSIBLE:${sourceClaim.routeId}`);
+      throw haltRuntimeFailure("DISPUTE_START_SOURCE_CLAIM_WINDOW_IMPOSSIBLE", `DISPUTE_START_SOURCE_CLAIM_WINDOW_IMPOSSIBLE:${sourceClaim.routeId}`);
     }
     if (sourceClaim.result === 'already-queued') continue;
     if (sourceClaim.result === 'deferred-batch-pending' && !state.jBatchState!.sentBatch) {
-      throw new Error(`DISPUTE_START_SOURCE_CLAIM_NOT_ATOMIC:${sourceClaim.routeId}`);
+      throw haltRuntimeFailure("DISPUTE_START_SOURCE_CLAIM_NOT_ATOMIC", `DISPUTE_START_SOURCE_CLAIM_NOT_ATOMIC:${sourceClaim.routeId}`);
     }
     addMessage(
       state,
@@ -70,7 +84,7 @@ const queuePullDisputeRegistrations = (
   state.jBatchState!.autoBroadcastDraft = true;
   if (state.jBatchState!.sentBatch) return;
   const signerId = state.config.validators[0];
-  if (!signerId) throw new Error('DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING');
+  if (!signerId) throw haltRuntimeFailure("DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING", 'DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING');
   outputs.push({
     entityId: state.entityId,
     signerId,
@@ -99,20 +113,20 @@ const queueDisputeStart = (
     // the Account is already frozen, leaving a valid zero-window claim
     // impossible. Require a clean draft so start plus every Account-scoped
     // Source/Target registration is one indivisible processBatch operation.
-    throw new Error(
-      `DISPUTE_START_PULL_BATCH_NOT_EMPTY:${batchOpCount(batch)}`,
-    );
+    throw haltRuntimeFailure("DISPUTE_START_PULL_BATCH_NOT_EMPTY", `DISPUTE_START_PULL_BATCH_NOT_EMPTY:${batchOpCount(batch)}`);
   }
   if (batch.disputeStarts.length >= J_BATCH_CONTRACT_LIMITS.maxDisputeStarts) {
-    throw new Error(
+    throw haltRuntimeFailure(
+      'J_BATCH_LIMIT_EXCEEDED',
       `J_BATCH_LIMIT_EXCEEDED: disputeStarts ${batch.disputeStarts.length + 1}/` +
-      `${J_BATCH_CONTRACT_LIMITS.maxDisputeStarts}`,
+        `${J_BATCH_CONTRACT_LIMITS.maxDisputeStarts}`,
     );
   }
   if (batchOpCount(batch) + 1 > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
-    throw new Error(
+    throw haltRuntimeFailure(
+      'J_BATCH_LIMIT_EXCEEDED',
       `J_BATCH_LIMIT_EXCEEDED: disputeStart would exceed total ops ${batchOpCount(batch) + 1}/` +
-      `${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`,
+        `${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`,
     );
   }
   batch.disputeStarts.push({
@@ -176,7 +190,7 @@ export const handleDisputeStart = async (
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
   if (entityTx.data.starterCounterArguments !== undefined) {
-    throw new Error('DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED');
+    throw haltRuntimeFailure("DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED", 'DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED');
   }
   validateCrossJurisdictionDisputeRoute(entityState, entityTx);
   const counterpartyId = entityTx.data.counterpartyEntityId;
@@ -188,7 +202,9 @@ export const handleDisputeStart = async (
   });
   const account = admitDisputeStart(newState, counterpartyId);
   if (!account) return { newState, outputs };
-  const proof = loadStartProof(entityState, newState, account, counterpartyId);
+  const proof = applyStartEvidenceBoundary(
+    () => loadStartProof(entityState, newState, account, counterpartyId),
+  );
   if (!proof) return { newState, outputs };
   if (entityTx.data.crossJurisdictionRouteId) {
     assertCrossJurisdictionDisputeProofHasPulls(
@@ -197,16 +213,19 @@ export const handleDisputeStart = async (
       requireAccountDeltaTransformerAddress(env.state, account.state),
     );
   }
-  const nonce = resolveStartNonce(newState, account, counterpartyId, proof.proofBodyHash);
+  const nonce = applyStartEvidenceBoundary(
+    () => resolveStartNonce(newState, account, counterpartyId, proof.proofBodyHash),
+  );
   if (!nonce) return { newState, outputs };
-  const argumentsPair = buildStarterArguments(
-    newState,
-    account,
-    counterpartyId,
-    proof.proofBodyHash,
-    nonce.signedNonce,
-    entityTx.data.starterInitialArguments,
-    env,
+  const argumentsPair = applyStartEvidenceBoundary(() => buildStarterArguments(
+      newState,
+      account,
+      counterpartyId,
+      proof.proofBodyHash,
+      nonce.signedNonce,
+      entityTx.data.starterInitialArguments,
+      env,
+    ),
   );
   const evidence: StartEvidence = { ...proof, ...nonce, ...argumentsPair };
   if (!(await verifyStartHanko(entityState, newState, account, counterpartyId, evidence, env))) {

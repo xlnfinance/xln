@@ -222,6 +222,15 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       .toThrow('RUNTIME_MACHINE_RUNTIME_INPUT_ENTITY_INPUT_0_ENTITY_TX_0_DATA');
   });
 
+  test('rejects a noncanonical RuntimeId before durable snapshot restore', () => {
+    const snapshot = buildDurableRuntimeMachineSnapshot(
+      createEmptyEnv('runtime-machine-runtime-id'),
+    );
+    snapshot['runtimeId'] = `0x${'AB'.repeat(20)}`;
+    expect(() => validateDurableRuntimeMachineSnapshot(snapshot, 'RUNTIME_MACHINE'))
+      .toThrow('Invalid RuntimeId');
+  });
+
   test('validates durable source Runtime-frame provenance in outbox and committed Runtime input', () => {
     const sourceRuntimeFrame = { height: 7, timestamp: 7000 };
     const routedInput = {

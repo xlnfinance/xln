@@ -56,8 +56,8 @@ export type RuntimeGraphAccountView = {
   };
   status?: unknown;
   mempool: unknown[];
-  currentFrame?: { height?: unknown; accountStateRoot?: unknown; stateHash?: unknown; accountTxs?: unknown[] };
-  pendingFrame?: { height?: unknown; accountStateRoot?: unknown; stateHash?: unknown; accountTxs?: unknown[] };
+  currentFrame?: { height: number; accountStateRoot?: unknown; stateHash?: unknown; accountTxs?: unknown[] };
+  pendingFrame?: { height: number; accountStateRoot?: unknown; stateHash?: unknown; accountTxs?: unknown[] };
   currentHeight: number;
   rollbackCount: number;
   lastRollbackFrameHash?: unknown;
@@ -185,8 +185,8 @@ const projectGraphAccountView = (account: unknown): RuntimeGraphAccountView => {
     state: { leftEntity, rightEntity, deltas: new Map(deltas) },
     ...('status' in envelope ? { status: envelope['status'] } : {}),
     mempool: Array.isArray(envelope['mempool']) ? envelope['mempool'] : [],
-    ...(currentFrame ? { currentFrame } : {}),
-    ...(pendingFrame ? { pendingFrame } : {}),
+    ...(currentFrame ? { currentFrame: { ...currentFrame, height: integer(currentFrame['height']) } } : {}),
+    ...(pendingFrame ? { pendingFrame: { ...pendingFrame, height: integer(pendingFrame['height']) } } : {}),
     currentHeight: integer(envelope['currentHeight'] ?? currentFrame?.['height']),
     rollbackCount: integer(envelope['rollbackCount']),
     ...('lastRollbackFrameHash' in envelope

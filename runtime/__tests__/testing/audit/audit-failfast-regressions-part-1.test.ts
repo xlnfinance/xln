@@ -33,6 +33,7 @@ import { handleHtlcResolve } from '../../../account/tx/handlers/htlc/resolve';
 import { createSettlementWorkspaceHash } from '../../../account/tx/handlers/settlement/transition';
 
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
+import { storageFailure } from '../../../protocol/errors/failure-taxonomy';
 
 import { buildHashLadderProof, revealHashLadder } from '../../../protocol/htlc/hash-ladder';
 
@@ -1216,7 +1217,7 @@ describe('audit fail-fast regressions', () => {
         signerId: remote.signerId,
       },
       false,
-      new Error('STORAGE_NODE_HASH_MISMATCH'),
+      storageFailure('STORAGE_NODE_HASH_MISMATCH'),
     );
     expect(storage.failureKind).toBe('storage');
     expect(storage.isDiscardableIngress).toBe(false);
@@ -1276,7 +1277,7 @@ describe('audit fail-fast regressions', () => {
       throw new Error('TEST_REMOTE_BROKEN_STATE_DID_NOT_FAIL');
     };
     expect(
-      (await applyRemoteAgainstBrokenState('remote-storage-failure-fatal', new Error('STORAGE_NODE_HASH_MISMATCH')))
+      (await applyRemoteAgainstBrokenState('remote-storage-failure-fatal', storageFailure('STORAGE_NODE_HASH_MISMATCH')))
         .failureKind,
     ).toBe('storage');
     expect(

@@ -3,8 +3,8 @@ import type { Delta } from '@xln/runtime/api/public/runtime-module';
 import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
 import { toDerivedAccountData, type DerivedAccountData } from '$lib/network3d/derivedAccount';
 import { getGraphThemeColors } from './graph3d-renderer';
-import type { GraphConnectionData, GraphEntityData, GraphXLNRuntime } from './graph3d-types';
-import { formatGraphMempoolTxLabel } from './graph3d-helpers';
+import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphTransactionLike, GraphXLNRuntime } from './graph3d-types';
+import { formatGraphMempoolTxLabel, type GraphAccountViewLike, type GraphReplicaLike } from './graph3d-helpers';
 
 function createTxLabelSprite(text: string): THREE.Sprite {
   const canvas = document.createElement('canvas');
@@ -192,10 +192,10 @@ function createMempoolBox(
  * observed" — never "not committed". Rendering a red box for it would fake a desync.
  */
 export function createAccountMempoolBoxes(options: {
-  fromEntity: any;
-  toEntity: any;
-  leftAccount: any;
-  rightAccount: any;
+  fromEntity: GraphEntityData;
+  toEntity: GraphEntityData;
+  leftAccount: GraphAccountViewLike | null | undefined;
+  rightAccount: GraphAccountViewLike | null | undefined;
   runtime: GraphXLNRuntime | null | undefined;
   getEntitySize(entityId: string, tokenId: number): number;
 }): THREE.Group[] {
@@ -295,7 +295,7 @@ export function positionMempoolIndicator(indicator: THREE.Sprite, entitySize: nu
   indicator.position.set((entitySize + 1.7) / entitySize, 0, 0);
 }
 
-export function graphAccountMempoolCount(account: any): number {
+export function graphAccountMempoolCount(account: GraphAccountViewLike | null | undefined): number {
   const projectedCount = Number(account?.mempoolCount);
   if (Number.isSafeInteger(projectedCount) && projectedCount >= 0) return projectedCount;
   return Array.isArray(account?.mempool) ? account.mempool.length : 0;
@@ -313,11 +313,11 @@ export function createGraphRippleMesh(position: THREE.Vector3): THREE.Mesh {
 
 type GraphConnectionOptions = {
   graphWorld: THREE.Group;
-  fromEntity: any;
-  toEntity: any;
+  fromEntity: GraphEntityData;
+  toEntity: GraphEntityData;
   fromId: string;
   toId: string;
-  replicas: Map<string, any>;
+  replicas: Map<string, GraphReplicaLike>;
   runtime: GraphXLNRuntime | null | undefined;
   theme: string;
   barsMode: 'close' | 'spread';
@@ -358,13 +358,13 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
     const key = [...options.replicas.keys()].find(candidate => candidate.startsWith(`${entityId}:`));
     return key ? options.replicas.get(key) : null;
   };
-  const fromIsLeft = options.runtime?.isLeft?.(options.fromId, options.toId) ?? options.fromId < options.toId;
+  const fromIsLeft = options.fromId < options.toId;
   const leftId = fromIsLeft ? options.fromId : options.toId;
   const rightId = fromIsLeft ? options.toId : options.fromId;
   const leftAccount = findReplica(leftId)?.state?.accounts?.get(rightId);
   const rightAccount = findReplica(rightId)?.state?.accounts?.get(leftId);
-  const leftHeight = leftAccount?.currentFrame?.height ?? 0;
-  const rightHeight = rightAccount?.currentFrame?.height ?? 0;
+  const leftHeight = Number(leftAccount?.currentFrame?.height ?? 0);
+  const rightHeight = Number(rightAccount?.currentFrame?.height ?? 0);
   let account = leftAccount ?? rightAccount;
   let confirmedAccount = account;
   let pendingAccount = null;
@@ -382,13 +382,13 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
   const leftEntityAccount = fromIsLeft ? confirmedAccount : pendingAccount;
   const rightEntityAccount = fromIsLeft ? pendingAccount : confirmedAccount;
   const leftConsensus = options.runtime?.classifyBilateralState?.(
-    leftEntityAccount,
-    rightEntityAccount?.currentFrame?.height ?? 0,
+    leftEntityAccount ?? undefined,
+    Number(rightEntityAccount?.currentFrame?.height ?? 0),
     true,
   );
   const rightConsensus = options.runtime?.classifyBilateralState?.(
-    rightEntityAccount,
-    leftEntityAccount?.currentFrame?.height ?? 0,
+    rightEntityAccount ?? undefined,
+    Number(leftEntityAccount?.currentFrame?.height ?? 0),
     false,
   );
   const barVisual =
@@ -432,7 +432,7 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
   return { bars, mempoolBoxes };
 }
 
-export function createDirectionalLightningMesh(connection: GraphConnectionData, accountTx: any): THREE.Mesh {
+export function createDirectionalLightningMesh(connection: GraphConnectionData, accountTx: GraphTransactionLike | null | undefined): THREE.Mesh {
   const positions = connection.line.geometry.getAttribute('position');
   const start = new THREE.Vector3().fromBufferAttribute(positions, 0);
   const end = new THREE.Vector3().fromBufferAttribute(positions, 1);
@@ -492,13 +492,13 @@ export function createBroadcastRippleMesh(position: THREE.Vector3, txType: strin
 }
 
 export function createGraphEntityNode(options: {
-  profile: any;
+  profile: GraphEntityProfile;
   index: number;
   total: number;
   forceLayoutPosition: THREE.Vector3 | undefined;
   forceLayoutEnabled: boolean;
   isHub: boolean;
-  replica: any;
+  replica: GraphReplicaLike | null | undefined;
   userPosition: { x: number; y: number; z: number } | undefined;
   persistedPosition: { x: number; y: number; z: number; jurisdiction: string } | undefined;
   defaultJurisdiction: string;
@@ -677,7 +677,7 @@ export function startProportionalBroadcast(options: {
 }
 
 export function buildSimpleRadialLayout(
-  profiles: any[],
+  profiles: GraphEntityProfile[],
   connectionMap: Map<string, Set<string>>,
   compareIds: (left: string, right: string) => number,
 ): Map<string, THREE.Vector3> {

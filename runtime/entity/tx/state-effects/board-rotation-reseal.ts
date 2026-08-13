@@ -3,6 +3,7 @@ import type { EntityInput, EntityState, HashToSign } from '../../types';
 import type { CertifiedBoardNodeStore } from '../../../types/entity-board-registry';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { resolveObserverCertifiedAccountCounterpartyProposer } from '../../account/account-counterparty-route';
+import { HankoValidationError } from '../../../hanko/codec';
 import { buildCertifiedEntityOutput } from '../j-events-htlc/cross-j-outputs';
 
 type BoardActivatedEvent = Extract<JurisdictionEvent, { type: 'BoardActivated' }>;
@@ -191,7 +192,7 @@ const buildResealOutput = (
   } catch (error) {
     // An absent/non-authoritative bilateral witness is retryable. Corrupt
     // Account identity, frame hashes, or certified Patricia nodes remain loud.
-    if (error instanceof Error && error.message.startsWith('HANKO_')) {
+    if (error instanceof HankoValidationError) {
       return undefined;
     }
     throw error;

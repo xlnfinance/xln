@@ -1,4 +1,4 @@
-import type { CrossJurisdictionBookAdmission } from '../../types/cross-jurisdiction';
+import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityState } from '../../entity/types';
 import type { EntityRuntimeContext } from '../../entity/runtime-context';
 import type { RuntimeOverlayRecord } from '../../types/account';
@@ -24,6 +24,23 @@ export const normalizeEntityRef = (value: string): string => String(value || '')
 
 export const deterministicEntityTimestamp = (state: EntityState, env?: EntityRuntimeContext): number =>
   Number(state.timestamp || env?.state.timestamp || 0);
+
+export type CrossJurisdictionBookAdmissionFailure = Readonly<{
+  kind: 'pending' | 'risk_reject' | 'invalid';
+  message: string;
+}>;
+
+export const getTypedCrossJurisdictionBookAdmissionFailure = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  now: number,
+): CrossJurisdictionBookAdmissionFailure | null => {
+  const message = getCrossJurisdictionBookAdmissionError(state, route, now);
+  if (!message) return null;
+  if (isCrossJurisdictionBookAdmissionPending(message)) return { kind: 'pending', message };
+  if (isCrossJurisdictionBookRiskRejection(message)) return { kind: 'risk_reject', message };
+  return { kind: 'invalid', message };
+};
 
 export const applyCommittedSwapCancelsToOrderbook = (
   env: EntityRuntimeContext,
@@ -87,7 +104,4 @@ export const findCrossJurisdictionBookAdmissionForAck = (
 export {
   assertCrossJurisdictionOrderAdmissible,
   crossJurisdictionBookOwnerRef,
-  getCrossJurisdictionBookAdmissionError,
-  isCrossJurisdictionBookAdmissionPending,
-  isCrossJurisdictionBookRiskRejection,
 };

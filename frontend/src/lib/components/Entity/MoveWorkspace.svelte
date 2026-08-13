@@ -47,7 +47,11 @@
   export let setMoveSource: (endpoint: MoveEndpoint) => void;
   export let setMoveTarget: (endpoint: MoveEndpoint) => void;
   export let beginMoveDrag: (endpoint: MoveEndpoint, event: PointerEvent | MouseEvent) => void;
-  export let getMoveNodeAnchor: (side: 'from' | 'to', endpoint: MoveEndpoint) => { x: number; y: number } | null;
+  export let getMoveNodeAnchor: (
+    side: 'from' | 'to',
+    endpoint: MoveEndpoint,
+    layoutVersion?: number,
+  ) => { x: number; y: number } | null;
   export let buildMoveArrowPath: (
     start: { x: number; y: number } | null,
     end: { x: number; y: number } | null,
@@ -259,18 +263,16 @@
     {/if}
 
     {#if !moveDragSource}
-      {@const _moveLayoutTick = moveNodeLayoutVersion}
-      {@const committedStart = getMoveNodeAnchor('from', moveFromEndpoint)}
-      {@const committedEnd = getMoveNodeAnchor('to', moveToEndpoint)}
+      {@const committedStart = getMoveNodeAnchor('from', moveFromEndpoint, moveNodeLayoutVersion)}
+      {@const committedEnd = getMoveNodeAnchor('to', moveToEndpoint, moveNodeLayoutVersion)}
       {#if moveCommittedLineReady && committedStart && committedEnd}
         <svg class="move-drag-layer committed" data-testid="move-committed-line" aria-hidden="true">
           <path d={buildMoveArrowPath(committedStart, committedEnd)}></path>
         </svg>
       {/if}
     {:else}
-      {@const _moveLayoutTick = moveNodeLayoutVersion}
-      {@const dragStart = getMoveNodeAnchor('from', moveDragSource)}
-      {@const dragEnd = getMoveNodeAnchor('to', moveDragHoverTarget || moveToEndpoint)}
+      {@const dragStart = getMoveNodeAnchor('from', moveDragSource, moveNodeLayoutVersion)}
+      {@const dragEnd = getMoveNodeAnchor('to', moveDragHoverTarget || moveToEndpoint, moveNodeLayoutVersion)}
       {#if moveLineReady && dragStart && dragEnd}
         <svg class="move-drag-layer" data-testid="move-drag-line" aria-hidden="true">
           <path d={buildMoveArrowPath(dragStart, dragEnd)}></path>

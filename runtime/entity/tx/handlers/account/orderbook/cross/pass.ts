@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
+
 import type { BookState } from '../../../../../../orderbook';
 import { createStructuredLogger } from '../../../../../../infra/logger';
 import {
@@ -82,7 +84,7 @@ export const assertPendingBookFillAckLive = (
   pendingFill.ttlExpiredAt = now;
   admission.updatedAt = now || admission.updatedAt;
   if (!pass.candidateEffects) {
-    throw new Error('CROSS_J_BOOK_FILL_TTL_EFFECT_COLLECTOR_REQUIRED');
+    throw haltRuntimeFailure("CROSS_J_BOOK_FILL_TTL_EFFECT_COLLECTOR_REQUIRED", 'CROSS_J_BOOK_FILL_TTL_EFFECT_COLLECTOR_REQUIRED');
   }
   pass.candidateEffects.push({
     kind: 'securityIncidentRecord',

@@ -1,3 +1,6 @@
+import { haltRuntimeFailure } from "../errors/failure-taxonomy";
+import { exclusiveUnixMsBigIntToUnixS } from '../units';
+
 /**
  * ProofBody Builder - Constructs ABI-encoded dispute proofs from AccountReplica state
  *
@@ -77,17 +80,17 @@ const assertFinalDeltaCanFinalize = (
     ondelta < INT256_MIN || ondelta > INT256_MAX ||
     offdelta < INT256_MIN || offdelta > INT256_MAX
   ) {
-    throw new Error(`DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW:token=${tokenId}`);
+    throw haltRuntimeFailure("DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW", `DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW:token=${tokenId}`);
   }
   const finalDelta = ondelta + offdelta;
   if (finalDelta < INT256_MIN || finalDelta > INT256_MAX) {
-    throw new Error(`DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW:token=${tokenId}`);
+    throw haltRuntimeFailure("DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW", `DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW:token=${tokenId}`);
   }
   // Depository._applyAccountDelta negates negative final deltas. Solidity
   // cannot negate int256.min, so a validator must never sign a ProofBody that
   // is structurally valid yet impossible to finalize on-chain.
   if (finalDelta === INT256_MIN) {
-    throw new Error(`DISPUTE_PROOFBODY_FINAL_DELTA_INT256_MIN:token=${tokenId}`);
+    throw haltRuntimeFailure("DISPUTE_PROOFBODY_FINAL_DELTA_INT256_MIN", `DISPUTE_PROOFBODY_FINAL_DELTA_INT256_MIN:token=${tokenId}`);
   }
 };
 
@@ -164,14 +167,10 @@ const buildProofPayments = (
   deltaIndex: ReadonlyMap<number, number>,
 ): RuntimePayment[] =>
   sortTransformerEntries(account.state.locks.entries()).map(([lockId, lock]) => {
-    const revealedUntilTimestampBigInt = (lock.timelock - 1n) / 1000n;
-    if (
-      revealedUntilTimestampBigInt <= 0n
-      || revealedUntilTimestampBigInt > BigInt(Number.MAX_SAFE_INTEGER)
-    ) {
-      throw new Error(`HTLC_LOCK_INVALID_TIMELOCK:${lockId}`);
-    }
-    const revealedUntilTimestamp = Number(revealedUntilTimestampBigInt);
+    const revealedUntilTimestamp = exclusiveUnixMsBigIntToUnixS(
+      lock.timelock,
+      `HTLC_LOCK_INVALID_TIMELOCK:${lockId}`,
+    );
     return {
       deltaIndex: requireProofDeltaIndex(
         deltaIndex,

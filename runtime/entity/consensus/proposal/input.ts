@@ -18,7 +18,6 @@ import { entityLog } from '../entity-log';
 import {
   getFrameJPrefixValidationError,
   getReplicaJRangeValidationError,
-  isJPrefixLocalFreshnessRace,
 } from '../jurisdiction/prefix-round';
 import { preauthenticateEntityProposal } from './preauthentication';
 
@@ -110,13 +109,13 @@ const validateProposalViewAndJRange = (
   }
   const prefixError = getFrameJPrefixValidationError(env, workingReplica, frame);
   if (!prefixError) return null;
-  if (prefixError.startsWith('J_PREFIX_LOCAL_HISTORY_BEHIND:')) {
+  if (prefixError.code === 'J_PREFIX_LOCAL_HISTORY_BEHIND') {
     return deferEntityConsensusInput(context, 'PROPOSAL_J_PREFIX_HISTORY_WAIT');
   }
-  if (isJPrefixLocalFreshnessRace(prefixError)) {
-    entityLog.info('proposal.j_prefix_stale', { error: prefixError });
+  if (prefixError.disposition === 'retry') {
+    entityLog.info('proposal.j_prefix_stale', { error: prefixError.message });
   } else {
-    entityLog.error('proposal.j_prefix_rejected', { error: prefixError });
+    entityLog.error('proposal.j_prefix_rejected', { error: prefixError.message });
   }
   return rejectEntityConsensusInput(context, 'PROPOSAL_J_RANGE_MISMATCH');
 };

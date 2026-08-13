@@ -44,12 +44,39 @@ const requireFailure = (
   }
 };
 
+const requireBrandMintingGate = (): void => {
+  const result = spawnSync(
+    process.execPath,
+    ['runtime/scripts/checks/fints/check-brand-minting.ts'],
+    { cwd: ROOT, encoding: 'utf8' },
+  );
+  if (result.status !== 0) {
+    throw new Error(`FINTS_BRAND_MINTING_GATE_FAILED\n${result.stdout ?? ''}${result.stderr ?? ''}`);
+  }
+};
+
 requireSuccess('FINTS_POSITIVE', 'tsconfig.fints-positive.json');
 requireFailure('FINTS_NEGATIVE', 'tsconfig.fints-negative.json', [
   'apply-account-tx-result.negative.ts',
   'apply-account-tx-units.negative.ts',
   'account-consensus-result.negative.ts',
+  'entity-frame-phase.negative.ts',
+  'failure-disposition.negative.ts',
 ]);
 requireSuccess('FINTS_WIDENED', 'tsconfig.fints-widened.json');
+requireSuccess(
+  'FINTS_PROTOCOL_BRANDS_POSITIVE',
+  'runtime/scripts/checks/fints/tsconfig.protocol-brands-positive.json',
+);
+requireFailure(
+  'FINTS_PROTOCOL_BRANDS_NEGATIVE',
+  'runtime/scripts/checks/fints/tsconfig.protocol-brands-negative.json',
+  ['protocol-brands.negative.ts'],
+);
+requireSuccess(
+  'FINTS_PROTOCOL_BRANDS_WIDENED',
+  'runtime/scripts/checks/fints/tsconfig.protocol-brands-widened.json',
+);
+requireBrandMintingGate();
 
 console.log('FINTS_NEGATIVE_TYPES_OK');

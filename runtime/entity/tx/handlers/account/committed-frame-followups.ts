@@ -8,6 +8,10 @@ import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '.
 import { createStructuredLogger } from '../../../../infra/logger';
 import type { AccountTxTarget } from './orderbook/queue';
 import { applyCommittedLendingFollowup } from './committed-lending-followup';
+import {
+  hasInboundHtlcRoute,
+  isForwardingHtlcRoute,
+} from '../../../htlc/route-views';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
@@ -22,7 +26,7 @@ function emitOriginatedHtlcFinalized(
   candidateEffects: EntityCandidateEffect[],
 ): void {
   if (accountTx.data.outcome !== 'secret') return;
-  if ((!route.originated && route.inboundEntity) || route.outboundLockId !== accountTx.data.lockId) return;
+  if ((!route.originated && hasInboundHtlcRoute(route)) || route.outboundLockId !== accountTx.data.lockId) return;
   candidateEffects.push({
     kind: 'runtimeEvent',
     eventName: 'HtlcFinalized',
@@ -78,9 +82,9 @@ export function applyCommittedAccountFrameFollowups(
         for (const [hashlock, route] of newState.htlcRoutes.entries()) {
           const resolvesInbound = route.inboundLockId === accountTx.data.lockId;
           const resolvesOriginatedOutbound =
-            route.outboundLockId === accountTx.data.lockId && (route.originated || !route.inboundEntity);
+            route.outboundLockId === accountTx.data.lockId && (route.originated || !hasInboundHtlcRoute(route));
           const resolvesForwardedOutbound =
-            route.outboundLockId === accountTx.data.lockId && Boolean(route.inboundEntity) && !route.originated;
+            route.outboundLockId === accountTx.data.lockId && isForwardingHtlcRoute(route) && !route.originated;
           if (!resolvesInbound && !resolvesOriginatedOutbound && !resolvesForwardedOutbound) continue;
           if (resolvesInbound) {
             candidateEffects.push({

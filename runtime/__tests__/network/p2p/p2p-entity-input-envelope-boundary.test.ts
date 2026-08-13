@@ -52,3 +52,30 @@ test('P2P envelope rejects oversized entity batches before decoding entries', ()
     `P2P_ENTITY_INPUTS_ENVELOPE_INPUTS_TOO_MANY:${MAX_P2P_ENTITY_INPUTS + 1}:${MAX_P2P_ENTITY_INPUTS}`,
   );
 });
+
+test('P2P decoder mints identity and coordinate brands only after exact validation', () => {
+  const entityId = `0x${'22'.repeat(32)}`;
+  const decoded = decodeRuntimeEntityInputsEnvelope({
+    sourceRuntimeId: runtimeId,
+    sourceSignature,
+    sourceRuntimeHeight: 7,
+    sourceRuntimeTimestamp: 8_000,
+    entityInputs: [
+      { entityId, signerId: 'signer-1', runtimeId, entityTxs: [{ type: 'chat' }] },
+    ],
+  });
+  expect(decoded.sourceRuntimeId).toBe(runtimeId);
+  expect(decoded.sourceRuntimeHeight).toBe(7);
+  expect(decoded.sourceRuntimeTimestamp).toBe(8_000);
+  expect(decoded.entityInputs[0]?.entityId).toBe(entityId);
+
+  expect(() => decodeRuntimeEntityInputsEnvelope({
+    sourceRuntimeId: runtimeId,
+    sourceSignature,
+    sourceRuntimeHeight: 7,
+    sourceRuntimeTimestamp: 8_000,
+    entityInputs: [
+      { entityId: 'not-an-entity-id', signerId: 'signer-1', runtimeId, entityTxs: [{ type: 'chat' }] },
+    ],
+  })).toThrow('Invalid EntityId');
+});

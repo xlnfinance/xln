@@ -2,7 +2,6 @@ import { copyLocalEntityLeaderTimeoutVoteAuthorization } from '../../entity/cons
 import type { RuntimeReplica, RuntimeInput } from '../types';
 import { copyLocalJAuthorityRuntimeTxAuthorization } from '../../jurisdiction/machine/registration-evidence';
 import { cloneIsolatedRuntimeInput } from '../input-pipeline/input-clone';
-import { copyDeterministicHtlcTestSecretCapability } from '../../protocol/htlc/test-secret-capability';
 import { copyLocalRuntimeAdapterCommandAuthorization } from '../command/frontier-auth';
 import { copyLocalNumberedRegistrationAuthorization } from '../registration/numbered-registration-auth';
 import { buildCanonicalRuntimeStateSnapshot } from '../../storage/wal/snapshot';
@@ -34,7 +33,6 @@ export const cloneRuntimeFrameMempool = (input: RuntimeInput): RuntimeInput => {
       const targetTx = target.entityTxs?.[txIndex];
       if (!targetTx) throw new Error(`RUNTIME_FRAME_ENTITY_TX_CLONE_MISSING:${inputIndex}:${txIndex}`);
       copyLocalScheduledWakeAuthorization(sourceTx, targetTx);
-      copyDeterministicHtlcTestSecretCapability(sourceTx, targetTx);
     });
     if (source.leaderTimeoutVote) {
       if (!target.leaderTimeoutVote) {

@@ -22,6 +22,7 @@ import {
   type EntityLeaderStateView,
 } from './index';
 import { calculateQuorumPower } from '../replica-validation';
+import { bindEntityCandidateToFrame } from '../candidate-views';
 
 export const normalizePrecommitBundles = (
   config: ConsensusConfig,
@@ -367,15 +368,5 @@ export const getValidatorExecutionForFrame = (
 ): EntityCandidate | undefined => {
   const execution = replica.candidate;
   if (!execution) return undefined;
-  if (
-    execution.frameHash !== frame.hash ||
-    execution.height !== frame.height ||
-    execution.state.height !== frame.height
-  ) {
-    throw new Error(
-      `ENTITY_VALIDATOR_EXECUTION_FRAME_MISMATCH:execution=${execution.height}:${execution.frameHash}:` +
-        `frame=${frame.height}:${frame.hash}`,
-    );
-  }
-  return execution;
+  return bindEntityCandidateToFrame(execution, frame).candidate;
 };

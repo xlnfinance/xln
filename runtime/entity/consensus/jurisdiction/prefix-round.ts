@@ -34,22 +34,31 @@ export const assertProposerJRangesMatchLocalHistory = (
   if (error) throw new Error(`ENTITY_PROPOSER_J_RANGE_INVALID:${error}`);
 };
 
+export type JPrefixValidationFailure = Readonly<{
+  disposition: 'reject' | 'retry';
+  code: string;
+  message: string;
+}>;
+
 export const getFrameJPrefixValidationError = (
   env: EntityRuntimeContext,
   replica: EntityReplica,
   frame: EntityFrame,
-): string | null => {
+): JPrefixValidationFailure | null => {
   try {
     assertFrameJPrefix(env, replica, frame);
     return null;
   } catch (error) {
     if (isCertifiedJHistoryCorruption(error)) throw error;
-    return error instanceof Error ? error.message : String(error);
+    return {
+      disposition: error instanceof FailureDispositionError && error.disposition === 'retry'
+        ? 'retry'
+        : 'reject',
+      code: error instanceof FailureDispositionError ? error.code : 'J_PREFIX_INVALID',
+      message: error instanceof Error ? error.message : String(error),
+    };
   }
 };
-
-export const isJPrefixLocalFreshnessRace = (error: string): boolean =>
-  error === 'J_PREFIX_STRONGER_LOCAL_CERTIFICATE' || error === 'J_PREFIX_REQUIRED_LOCAL_EVENT';
 
 export const pruneReplicaFinalizedJHistory = (replica: EntityReplica): void => {
   const pruned = pruneFinalizedValidatorJHistory(replica.jHistory, replica.state.lastFinalizedJHeight);
@@ -81,7 +90,7 @@ export const ensureLocalJPrefixAttestation = (
   const history = replica.jHistory;
   if (!history) return false;
   if (history.scannedThroughHeight < replica.state.lastFinalizedJHeight) {
-    throw new Error(
+    throw retryFailure('J_PREFIX_LOCAL_HISTORY_BEHIND',
       `J_PREFIX_LOCAL_HISTORY_BEHIND:${history.scannedThroughHeight}:` + `${replica.state.lastFinalizedJHeight}`,
     );
   }
@@ -180,3 +189,4 @@ import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityOutput, EntityReplica, EntityFrame } from '../../types';
 import { getEntityLeaderState, isEntityActiveLeader } from '../leader';
 import { entityLog } from '../entity-log';
+import { FailureDispositionError, retryFailure } from '../../../protocol/errors/failure-taxonomy';

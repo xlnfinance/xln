@@ -36,6 +36,13 @@ type RpcReadDeps = {
   readEntityProviderActionReceipt(entityId: string, actionNonce: bigint): Promise<JEvent | null>;
 };
 
+class TokenRegistryReadError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.name = 'TokenRegistryReadError';
+  }
+}
+
 /** Canonical chain reads. These methods never mutate adapter lifecycle state. */
 export const createRpcReadMethods = (deps: RpcReadDeps): ReadMethods => {
   const { provider, rpcUrl, hasProcessedBatch, readEntityProviderActionReceipt } = deps;
@@ -87,7 +94,7 @@ export const createRpcReadMethods = (deps: RpcReadDeps): ReadMethods => {
       try {
         const length = Number(await deps.depository.getTokensLength());
         if (!Number.isSafeInteger(length) || length < 1) {
-          throw new Error(`TOKEN_REGISTRY_LENGTH_INVALID:${String(length)}`);
+          throw new TokenRegistryReadError(`TOKEN_REGISTRY_LENGTH_INVALID:${String(length)}`);
         }
         const tokens: JTokenInfo[] = [];
         const erc20Interface = new ethers.Interface([
@@ -100,7 +107,7 @@ export const createRpcReadMethods = (deps: RpcReadDeps): ReadMethods => {
           const [rawContractAddress, _externalTokenId, rawTokenType] = await deps.depository._tokens(tokenId);
           if (Number(rawTokenType) !== 0) continue;
           if (rawContractAddress === ethers.ZeroAddress) {
-            throw new Error(`TOKEN_REGISTRY_ENTRY_ADDRESS_INVALID:${tokenId}`);
+            throw new TokenRegistryReadError(`TOKEN_REGISTRY_ENTRY_ADDRESS_INVALID:${tokenId}`);
           }
           const contractAddress = ethers.getAddress(rawContractAddress);
           const erc20 = new ethers.Contract(contractAddress, erc20Interface, provider);
@@ -112,16 +119,16 @@ export const createRpcReadMethods = (deps: RpcReadDeps): ReadMethods => {
               return await read();
             } catch (error) {
               const reason = error instanceof Error ? error.message : String(error);
-              throw new Error(`TOKEN_METADATA_UNAVAILABLE:${tokenId}:${field}:${reason}`);
+              throw new TokenRegistryReadError(`TOKEN_METADATA_UNAVAILABLE:${tokenId}:${field}:${reason}`, error);
             }
           };
           const symbol = String(await readMetadata('symbol', symbolFn)).trim();
           const name = String(await readMetadata('name', nameFn)).trim();
           const decimals = Number(await readMetadata('decimals', decimalsFn));
-          if (!symbol) throw new Error(`TOKEN_METADATA_INVALID:${tokenId}:symbol`);
-          if (!name) throw new Error(`TOKEN_METADATA_INVALID:${tokenId}:name`);
+          if (!symbol) throw new TokenRegistryReadError(`TOKEN_METADATA_INVALID:${tokenId}:symbol`);
+          if (!name) throw new TokenRegistryReadError(`TOKEN_METADATA_INVALID:${tokenId}:name`);
           if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
-            throw new Error(`TOKEN_METADATA_INVALID:${tokenId}:decimals:${String(decimals)}`);
+            throw new TokenRegistryReadError(`TOKEN_METADATA_INVALID:${tokenId}:decimals:${String(decimals)}`);
           }
           tokens.push({ symbol, name, address: contractAddress, decimals, tokenId });
         }
@@ -129,8 +136,8 @@ export const createRpcReadMethods = (deps: RpcReadDeps): ReadMethods => {
         return tokens;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        if (message.startsWith('TOKEN_')) throw err;
-        throw new Error(`TOKEN_REGISTRY_FETCH_FAILED:${message}`, { cause: err });
+        if (err instanceof TokenRegistryReadError) throw err;
+        throw new TokenRegistryReadError(`TOKEN_REGISTRY_FETCH_FAILED:${message}`, err);
       }
     },
 

@@ -5,7 +5,7 @@ import { createStructuredLogger } from '../../infra/logger';
 import type { createRuntimeLoopApi } from '../loop/loop.ts';
 import { materializePendingJurisdictionImportResults } from '../jurisdiction/jurisdiction-import';
 import { requireRuntimeMempool } from '../input-pipeline/input-queue';
-import { transitionRuntimeLifecycle } from '../lifecycle';
+import { haltRuntimeRequiresOperator } from '../lifecycle';
 import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure';
 import type { createRuntimeRecoveryApi } from '../../storage/recovery/restore';
 import type { createRuntimeStorageApi } from '../../storage/runtime-storage';
@@ -268,22 +268,21 @@ const haltStaleRuntimeWriter = async (
 ): Promise<RuntimeFrameCommitResult> => {
   frame.failureHandled = true;
   if (!frame.restoreUndurableInput) throw new Error('RUNTIME_FRAME_INPUT_RESTORE_MISSING');
-  const rollbackError = await frame.restoreUndurableInput(new Error('STALE_RUNTIME_WRITER_STOPPED'), {
+  const staleWriterError = new Error('STALE_RUNTIME_WRITER_STOPPED');
+  const rollbackError = await frame.restoreUndurableInput(staleWriterError, {
     discardMalformedRemoteInput: false,
     requeue: false,
   });
   const state = ensureRuntimeInfrastructure(liveEnv);
-  transitionRuntimeLifecycle(state, 'halted');
-  state.fatalDebugPayload = {
-    message:
+  haltRuntimeRequiresOperator(
+    liveEnv,
+    new Error(
       `STALE_RUNTIME_WRITER_STOPPED: frame=${frameHeightBeforeTick + 1} ` +
       `runtime=${String(liveEnv.runtimeId || '').slice(0, 12)}`,
-    height: Math.max(0, liveEnv.state.height),
-    timestamp: Math.max(0, liveEnv.state.timestamp),
-  };
-  state.stopLoop?.();
+    ),
+  );
   profile.outcome = 'stale-writer-stopped';
-  if (rollbackError.message !== 'STALE_RUNTIME_WRITER_STOPPED') throw rollbackError;
+  if (rollbackError !== staleWriterError) throw rollbackError;
   return { env: liveEnv, state, staleWriterStopped: true };
 };
 

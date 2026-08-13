@@ -9,6 +9,7 @@
 import { ethers } from 'ethers';
 import { createAddressFromString } from '@ethereumjs/util';
 import type { BrowserVmEthersProviderTarget } from '../types';
+import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
 
 const requireBrowserVmChainId = (browserVM: BrowserVmEthersProviderTarget): number => {
   if (typeof browserVM.getChainId !== 'function') {
@@ -62,7 +63,7 @@ const buildBrowserVmBlock = (browserVM: BrowserVmEthersProviderTarget): Record<s
     hash: browserVM.getBlockHash?.() ?? zeroHash,
     parentHash: zeroHash,
     number: Number(browserVM.getBlockNumber?.() ?? 0),
-    timestamp: Math.floor((browserVM.getBlockTimestamp?.() ?? 0) / 1000),
+    timestamp: unixMsToUnixSFloor(toUnixMs(browserVM.getBlockTimestamp?.() ?? 0)),
     nonce: '0x0000000000000000',
     difficulty: 0n,
     gasLimit: 30000000n,

@@ -20,7 +20,7 @@ type EventMap = {
   'vr:payment': { from: string; to: string }; // VR hand gesture payment
   'broadcast:toggle': { enabled: boolean };
   'broadcast:style': { style: 'raycast' | 'wave' | 'particles' };
-  'settings:update': { key: string; value: any };
+  'settings:update': { key: string; value: unknown };
   'settings:reset': {};
   'camera:focus': { target: { x: number; y: number; z: number } };
   'auto-demo:start': {}; // Auto-start demo in VR mode

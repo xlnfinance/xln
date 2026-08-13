@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
+
 import { applyCommand } from '../../../../../../orderbook';
 import { createStructuredLogger, shortOrder } from '../../../../../../infra/logger';
 import { resolveCrossJurisdictionExecutionPriceTicks } from '../../../../../../extensions/cross-j/orderbook';
@@ -59,10 +61,8 @@ const canonicalCrossTradeEvents = (
     pass.crossLiveOfferMeta.get(event.takerOrderId) ??
     buildCrossMarketOfferFromBookOrder(pass.hubState, event.takerOrderId);
   if (!maker || !taker) {
-    throw new Error(
-      `ORDERBOOK_CROSS_J_TRADE_META_MISSING:` +
-      `maker=${event.makerOrderId}:taker=${event.takerOrderId}`,
-    );
+    throw haltRuntimeFailure("ORDERBOOK_CROSS_J_TRADE_META_MISSING", `ORDERBOOK_CROSS_J_TRADE_META_MISSING:` +
+      `maker=${event.makerOrderId}:taker=${event.takerOrderId}`);
   }
   pass.crossLiveOfferMeta.set(event.makerOrderId, maker);
   pass.crossLiveOfferMeta.set(event.takerOrderId, taker);
@@ -91,9 +91,7 @@ const commitRestingCrossOffer = (
     { suspendedOrderIds: pass.suspendedOrderIds },
   );
   if (collectTradeEvents(result.events).length > 0) {
-    throw new Error(
-      `ORDERBOOK_CROSS_J_COMMITTED_WRITE_TRADED: order=${offer.namespacedOrderId}`,
-    );
+    throw haltRuntimeFailure("ORDERBOOK_CROSS_J_COMMITTED_WRITE_TRADED", `ORDERBOOK_CROSS_J_COMMITTED_WRITE_TRADED: order=${offer.namespacedOrderId}`);
   }
   pass.bookCache.set(offer.marketOffer.pairId, result.state);
   pass.bookUpdates.push({ pairId: offer.marketOffer.pairId, book: result.state });
@@ -119,7 +117,7 @@ const aggregateCrossTrades = (
       pass.crossLiveOfferMeta.get(orderId) ??
       buildCrossMarketOfferFromBookOrder(pass.hubState, orderId);
     if (!meta) {
-      throw new Error(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
+      throw haltRuntimeFailure("ORDERBOOK_CROSS_J_FILL_META_MISSING", `ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
     }
     const { accountId, offerId } = parseNamespacedOrderId(
       orderId,

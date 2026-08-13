@@ -14,6 +14,7 @@ import {
   waitForRuntimeProcessingIdle,
 } from '../../../runtime';
 import type { RuntimeReplica } from '../../../runtime/types';
+import { reportFatalLoopError } from '../../../runtime/loop/loop-failure';
 
 describe('runtime lifecycle', () => {
   test('uses one explicit phase as the lifecycle source of truth', () => {
@@ -38,6 +39,29 @@ describe('runtime lifecycle', () => {
     expect(() => transitionRuntimeLifecycle(state, 'running')).toThrow(
       /RUNTIME_LIFECYCLE_INVALID_TRANSITION: halted->running/,
     );
+  });
+
+  test('halts only the failed Runtime and keeps the host process live', async () => {
+    const failed = createEmptyEnv('runtime-failed');
+    const healthy = createEmptyEnv('runtime-healthy');
+    healthy.infrastructure = { lifecyclePhase: 'running', loopActive: true };
+    await reportFatalLoopError(
+      failed,
+      undefined,
+      new Error('MONEY_INVARIANT_BROKEN'),
+    );
+
+    expect(failed.infrastructure).toMatchObject({
+      lifecyclePhase: 'halted',
+      halted: true,
+      operatorStatus: 'HALTED_REQUIRES_OPERATOR',
+    });
+    expect(() => assertRuntimeCommandReady(failed)).toThrow(
+      'RUNTIME_COMMAND_NOT_READY:HALTED_REQUIRES_OPERATOR',
+    );
+    expect(healthy.infrastructure?.lifecyclePhase).toBe('running');
+    expect(healthy.infrastructure?.halted).not.toBe(true);
+    expect(() => assertRuntimeCommandReady(healthy)).not.toThrow();
   });
 
   test('admits commands only while running without a persistence fence', () => {

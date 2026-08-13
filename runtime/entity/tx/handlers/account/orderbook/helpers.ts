@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../../protocol/errors/failure-taxonomy";
+
 import { LIMITS, SWAP_CONSTANTS } from '../../../../../config/constants';
 import {
   baseAmountFromLots,
@@ -161,7 +163,7 @@ export const splitWorkingOrderbookOffers = (
 
   for (const offer of offers) {
     if (!isWorkingOrderbookOffer(offer)) {
-      throw new Error(`ORDERBOOK_UNADMITTED_OFFER: offer=${offerIdForDiagnostic(offer)}`);
+      throw haltRuntimeFailure("ORDERBOOK_UNADMITTED_OFFER", `ORDERBOOK_UNADMITTED_OFFER: offer=${offerIdForDiagnostic(offer)}`);
     }
     if (offer.orderbookKind === 'same-jurisdiction') {
       sameAccountSwapOffers.push(offer);
@@ -171,7 +173,7 @@ export const splitWorkingOrderbookOffers = (
       crossJurisdictionSwapOffers.push(offer);
       continue;
     }
-    throw new Error(`ORDERBOOK_UNADMITTED_OFFER: offer=${offerIdForDiagnostic(offer)}`);
+    throw haltRuntimeFailure("ORDERBOOK_UNADMITTED_OFFER", `ORDERBOOK_UNADMITTED_OFFER: offer=${offerIdForDiagnostic(offer)}`);
   }
 
   return { sameAccountSwapOffers, crossJurisdictionSwapOffers };
@@ -528,10 +530,8 @@ const resolveSameExecutionOffer = (
   }
   const resting = input.batchOffer ?? input.accountOffer;
   if (!resting) {
-    throw new Error(
-      `ORDERBOOK_FILL_SOURCE_MISSING: order=${input.namespacedOrderId} pair=${input.bookKey} ` +
-        `account=${input.accountId} offer=${input.offerId}`,
-    );
+    throw haltRuntimeFailure("ORDERBOOK_FILL_SOURCE_MISSING", `ORDERBOOK_FILL_SOURCE_MISSING: order=${input.namespacedOrderId} pair=${input.bookKey} ` +
+        `account=${input.accountId} offer=${input.offerId}`);
   }
   const canonical = materializeCanonicalRestingOffer(
     resting.giveTokenId,
@@ -570,14 +570,10 @@ export const buildSameFillResolvePlan = (input: SameFillResolveInput): SameFillR
   const filledBig = BigInt(filledLots);
   const isCurrentTakerOrder = input.namespacedOrderId === input.currentNamespacedOrderId;
   if (filledBig <= 0n || weightedCost <= 0n) {
-    throw new Error(
-      `ORDERBOOK_FILL_LOOKUP_FAILED: invalid fill aggregate weightedCost=${weightedCost.toString()} filledLots=${filledBig.toString()}`,
-    );
+    throw haltRuntimeFailure("ORDERBOOK_FILL_LOOKUP_FAILED", `ORDERBOOK_FILL_LOOKUP_FAILED: invalid fill aggregate weightedCost=${weightedCost.toString()} filledLots=${filledBig.toString()}`);
   }
   if (!isCurrentTakerOrder && weightedCost % filledBig !== 0n) {
-    throw new Error(
-      `ORDERBOOK_FILL_LOOKUP_FAILED: non-integral resting price weightedCost=${weightedCost.toString()} filledLots=${filledBig.toString()}`,
-    );
+    throw haltRuntimeFailure("ORDERBOOK_FILL_LOOKUP_FAILED", `ORDERBOOK_FILL_LOOKUP_FAILED: non-integral resting price weightedCost=${weightedCost.toString()} filledLots=${filledBig.toString()}`);
   }
 
   const restingPriceTicks = weightedCost / filledBig;

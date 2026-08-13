@@ -11,6 +11,7 @@ import { terminateHtlcRoute } from '../tx/j-events-htlc/route-lifecycle';
 import { createDueHookPlan, type DueHookPlan } from './due-hook-types';
 import { processDisputeDeadlineHook } from './dispute-deadline-hook';
 import { processBoardResealHook } from './board-reseal-hook';
+import { isDisputeReadyHtlcRoute } from '../htlc/route-views';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 
@@ -21,7 +22,13 @@ const processSecretAckTimeout = (
 ): void => {
   const { hashlock, counterpartyEntityId, inboundLockId } = hook.data;
   const route = replica.state.htlcRoutes.get(hashlock);
-  if (!route?.secretAckPending) return;
+  if (!route) return;
+  if (!isDisputeReadyHtlcRoute(route, replica.state.timestamp)) {
+    if (route.secretAckPending) {
+      throw new Error(`HTLC_SECRET_ACK_ROUTE_INVALID:${hashlock}`);
+    }
+    return;
+  }
   const account = replica.state.accounts.get(counterpartyEntityId);
   if (!account) return;
   if (inboundLockId && !account.state.locks?.has(inboundLockId)) {

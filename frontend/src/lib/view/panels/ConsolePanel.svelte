@@ -1,9 +1,10 @@
 <script lang="ts">
   import type { Writable } from 'svelte/store';
+  import type { EnvSnapshot, RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
 
   // Props for isolated mode (passed from View.svelte)
-  export let runtimeFrameEnv: Writable<any>;
-  export let runtimeFrameHistory: Writable<any[]> | undefined = undefined;
+  export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
+  export let runtimeFrameHistory: Writable<EnvSnapshot[]> | undefined = undefined;
   export let runtimeFrameTimeIndex: Writable<number> | undefined = undefined;
 
   interface ConsoleEntry {
@@ -24,6 +25,18 @@
   let debouncedSearchText = ''; // Debounced version for filtering
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+  const frameLogsOf = (frame: EnvSnapshot): Array<{ timestamp: number; level: string; message: string }> => {
+    const candidate = 'logs' in frame ? frame.logs : 'frameLogs' in frame ? frame.frameLogs : null;
+    if (!Array.isArray(candidate)) return [];
+    return candidate.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const record = entry as Record<string, unknown>;
+      return typeof record['timestamp'] === 'number' && typeof record['level'] === 'string' && typeof record['message'] === 'string'
+        ? [{ timestamp: record['timestamp'], level: record['level'], message: record['message'] }]
+        : [];
+    });
+  };
+
   // Load frame logs from history when timeIndex changes
   function loadFrameLogs() {
     if (!runtimeFrameHistory || !runtimeFrameTimeIndex) return;
@@ -37,7 +50,8 @@
 
     for (let i = 0; i <= endIdx && i < history.length; i++) {
       const frame = history[i];
-      const frameLogs = frame?.logs || frame?.frameLogs || [];
+      if (!frame) continue;
+      const frameLogs = frameLogsOf(frame);
       for (const flog of frameLogs) {
         allLogs.push({
           id: logId++,
@@ -68,7 +82,6 @@
   let commandInput = '';
   let commandHistory: string[] = [];
   let historyIndex = -1;
-  let commandInputEl: HTMLInputElement;
 
   function clearLogs() {
     logs = [];
@@ -119,21 +132,22 @@
     // Runtime inspection
     state: () => {
       const env = $runtimeFrameEnv;
+      if (!env) return { entities: 0, height: 0, timestamp: 0 };
       return {
-        entities: Object.keys(env.state.eReplicas || {}).length,
-        height: env.height,
-        timestamp: env.timestamp
+        entities: env.state.eReplicas.size,
+        height: env.state.height,
+        timestamp: env.state.timestamp
       };
     },
 
     entities: () => {
       const env = $runtimeFrameEnv;
-      return Object.keys(env.state.eReplicas || {});
+      return env ? Array.from(env.state.eReplicas.keys()) : [];
     },
 
     inspect: (entityId: string) => {
       const env = $runtimeFrameEnv;
-      const replica = env.state.eReplicas?.[entityId];
+      const replica = env?.state.eReplicas.get(entityId);
       if (!replica) return `Entity ${entityId} not found`;
       return replica;
     },
@@ -170,14 +184,14 @@
       if (result !== undefined) {
         console.log(result);
       }
-    } catch (err: any) {
-      console.error(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     commandInput = '';
   }
 
-  function evalCommand(cmd: string): any {
+  function evalCommand(cmd: string): unknown {
     // Whitelist-based eval - no actual eval()
     const trimmed = cmd.trim();
 
@@ -328,7 +342,6 @@
   <div class="command-input-container">
     <span class="prompt">></span>
     <input
-      bind:this={commandInputEl}
       bind:value={commandInput}
       on:keydown={handleKeyDown}
       class="command-input"

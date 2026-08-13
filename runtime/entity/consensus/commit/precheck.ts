@@ -5,6 +5,7 @@ import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityConsensusInput } from '../input/types';
 import { createEntityFrameHashFromStateRoot, isCanonicalEntityFrameDigest } from '../frame';
 import { getEntityHashManifestMismatch } from '../input/hanko-witness';
+import { isLockedEntityFrame } from '../frame/phase-views';
 
 const normalize = (value: unknown): string =>
   String(value ?? '')
@@ -78,7 +79,7 @@ export const hasVerifiedEntityCommitPrecertificate = (
   const frame = input.proposedFrame;
   const replica = frame ? exactReplica(env, input) : null;
   const config = replica?.state.config;
-  if (!frame || !replica || !config || !(frame.collectedSigs instanceof Map)) return false;
+  if (!frame || !replica || !config || !isLockedEntityFrame(frame)) return false;
 
   // Signatures over proposer-supplied hashes are not a scheduling certificate.
   // An attacker can replay a public quorum bundle over another frame, or strip

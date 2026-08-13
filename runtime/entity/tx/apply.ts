@@ -15,7 +15,7 @@ import {
   type SwapCancelRequestEvent,
 } from './handlers/account';
 import { applyJEvent } from './j-events';
-import { shouldRethrowEntityTxError } from './processing/invariant-errors';
+import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
 import { createStructuredLogger } from '../../infra/logger';
 import { handleR2E } from './handlers/jurisdiction/r2e';
 import { handleHtlcPayment } from './handlers/htlc/payment';
@@ -564,7 +564,7 @@ export const applyEntityTx = async (
       });
       throw error;
     }
-    if (shouldRethrowEntityTxError(error)) {
+    if (!(error instanceof FailureDispositionError) || error.disposition !== 'reject') {
       entityTxLog.error('failed_invariant', { type: String(entityTx.type), error: message });
       throw error;
     }

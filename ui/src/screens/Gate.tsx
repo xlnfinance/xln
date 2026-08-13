@@ -121,7 +121,7 @@ export function Gate() {
 		});
 	};
 
-	const unlockVault = (vaultId: string, kind: string): void => {
+	const unlockVault = (kind: string): void => {
 		if (kind === 'sandbox') return enterSandbox();
 		if (kind === 'brainvault') {
 			setMode('create');
@@ -185,7 +185,7 @@ export function Gate() {
 			{mode === 'landing' && (
 				<div className="gate-cards fade-in">
 					{vaults.map(vault => (
-						<button key={vault.id} type="button" className="glass gate-card" onClick={() => unlockVault(vault.id, vault.kind)}>
+						<button key={vault.id} type="button" className="glass gate-card" onClick={() => unlockVault(vault.kind)}>
 							<span className="gate-card-icon">
 								<Icon name={vault.kind === 'remote' ? 'bank' : 'lock'} size={18} />
 							</span>

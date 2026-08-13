@@ -13,15 +13,36 @@ import {
   requireBoundaryInteger,
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
+import { toFrameHash, toStateHash, type FrameHash, type StateHash } from '../../protocol/hashes';
+import {
+  toAccountHeight,
+  toJHeight,
+  toUnixMs,
+  type AccountHeight,
+  type JHeight,
+  type UnixMs,
+} from '../../protocol/units';
 
 const isBytes32 = (value: string): boolean => /^0x[0-9a-fA-F]{64}$/.test(value);
 
-const decodeFrameHash = (
+function decodeFrameHash(
+  value: unknown,
+  field: 'stateHash',
+  height: number,
+  context: string,
+): FrameHash | '';
+function decodeFrameHash(
+  value: unknown,
+  field: 'prevFrameHash',
+  height: number,
+  context: string,
+): FrameHash | 'genesis' | '';
+function decodeFrameHash(
   value: unknown,
   field: 'prevFrameHash' | 'stateHash',
   height: number,
   context: string,
-): string => {
+): FrameHash | 'genesis' | '' {
   if (typeof value !== 'string') {
     throw new FinancialDataCorruptionError(`${context}.${field} must be a string`);
   }
@@ -40,8 +61,17 @@ const decodeFrameHash = (
       `${context}.${field} is invalid for height ${height}:value=${hash}`,
     );
   }
-  return hash;
-};
+  return hash === '' || hash === 'genesis' ? hash : toFrameHash(hash);
+}
+
+export type DecodedAccountFrame = AccountFrame & Readonly<{
+  height: AccountHeight;
+  timestamp: UnixMs;
+  jHeight: JHeight;
+  accountStateRoot: StateHash;
+  stateHash: FrameHash | '';
+  prevFrameHash: FrameHash | 'genesis' | '';
+}>;
 
 /**
  * Decode unknown storage/wire data into the only valid AccountFrame shape.
@@ -50,7 +80,7 @@ const decodeFrameHash = (
 export const decodeAccountFrame = (
   value: unknown,
   context = 'AccountFrame',
-): AccountFrame => {
+): DecodedAccountFrame => {
   const frame = validateObject(value, context);
   requireExactBoundaryKeys(
     frame,
@@ -61,7 +91,7 @@ export const decodeAccountFrame = (
     [],
     `${context}.fields`,
   );
-  const height = requireBoundaryInteger(frame['height'], `${context}.height`);
+  const height = toAccountHeight(requireBoundaryInteger(frame['height'], `${context}.height`));
   const accountStateRoot = validateString(
     frame['accountStateRoot'],
     `${context}.accountStateRoot`,
@@ -78,10 +108,10 @@ export const decodeAccountFrame = (
 
   const deltas = validateArray(frame['deltas'], `${context}.deltas`);
   assertAccountDeltaCapacity(deltas.length, `${context}.deltas`);
-  const decoded: AccountFrame = {
+  const decoded: DecodedAccountFrame = {
     height,
-    timestamp: requireBoundaryInteger(frame['timestamp'], `${context}.timestamp`),
-    jHeight: requireBoundaryInteger(frame['jHeight'], `${context}.jHeight`),
+    timestamp: toUnixMs(requireBoundaryInteger(frame['timestamp'], `${context}.timestamp`)),
+    jHeight: toJHeight(requireBoundaryInteger(frame['jHeight'], `${context}.jHeight`)),
     accountTxs: decodeAccountTxs(frame['accountTxs'], `${context}.accountTxs`),
     prevFrameHash: decodeFrameHash(
       frame['prevFrameHash'],
@@ -89,7 +119,7 @@ export const decodeAccountFrame = (
       height,
       context,
     ),
-    accountStateRoot,
+    accountStateRoot: toStateHash(accountStateRoot),
     stateHash: decodeFrameHash(
       frame['stateHash'],
       'stateHash',

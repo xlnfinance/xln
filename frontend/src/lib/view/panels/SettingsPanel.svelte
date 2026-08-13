@@ -20,10 +20,11 @@
   import { settings as appSettings, settingsOperations } from '$lib/stores/settingsStore';
   import { networkMachineConfig, networkMachineOperations } from '$lib/stores/network/networkMachineStore';
   import type { NetworkMachineTimelineMode } from '$lib/network3d/networkMachine';
+  import type { EnvSnapshot, RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
 
   // Props (isolated stores - reserved for future time-travel settings UI)
-  export let runtimeFrameEnv: Writable<any>; void runtimeFrameEnv;
-  export let runtimeFrameHistory: Writable<any[]>; void runtimeFrameHistory;
+  export let runtimeFrameEnv: Writable<RuntimeReplica | null>; void runtimeFrameEnv;
+  export let runtimeFrameHistory: Writable<EnvSnapshot[]>; void runtimeFrameHistory;
   export let runtimeFrameTimeIndex: Writable<number>; void runtimeFrameTimeIndex;
 
   // Live camera state from Graph3D
@@ -151,7 +152,7 @@
 
   // Listen for live camera updates from Graph3D
   onMount(() => {
-    const unsubscribe = panelBridge.on('camera:update', (data: any) => {
+    const unsubscribe = panelBridge.on('camera:update', (data) => {
       liveCameraState = {
         position: data.position || liveCameraState.position,
         target: data.target || liveCameraState.target,
@@ -183,8 +184,8 @@
   }
 
   // Apply setting change (real-time update via panelBridge)
-  function updateSetting(key: keyof ViewSettings, value: any) {
-    (settings as any)[key] = value;
+  function updateSetting<K extends keyof ViewSettings>(key: K, value: ViewSettings[K]) {
+    settings[key] = value;
     saveSettings();
 
     // Notify Graph3DPanel
@@ -218,7 +219,7 @@
   function exportLayout() {
     try {
       // Get dockview instance from window (exposed by View.svelte)
-      const dockview = (window as any).__dockview_instance;
+      const dockview = window.__dockview_instance;
       if (!dockview) {
         layoutError = 'Dockview not available';
         return;
@@ -248,7 +249,7 @@
 
   function importLayout() {
     try {
-      const dockview = (window as any).__dockview_instance;
+      const dockview = window.__dockview_instance;
       if (!dockview) {
         layoutError = 'Dockview not available';
         return;
@@ -283,7 +284,7 @@
 
   function saveLayoutToLocalStorage() {
     try {
-      const dockview = (window as any).__dockview_instance;
+      const dockview = window.__dockview_instance;
       if (!dockview) {
         layoutError = 'Dockview not available';
         return;

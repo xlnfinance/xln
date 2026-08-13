@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
+
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import { isLiquidSwapToken } from '../../account/utils';
 import { parseJurisdictionStackIdentity } from '../../jurisdiction/machine/jurisdiction-stack';
@@ -120,9 +122,7 @@ export function deriveCanonicalCrossJurisdictionBookOwnerForLegs(
     sourceStack.chainId === targetStack.chainId &&
     sourceStack.depositoryAddress === targetStack.depositoryAddress
   ) {
-    throw new Error(
-      `CROSS_J_REQUIRES_DISTINCT_STACKS:stack:${sourceStack.chainId}:${sourceStack.depositoryAddress}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_REQUIRES_DISTINCT_STACKS", `CROSS_J_REQUIRES_DISTINCT_STACKS:stack:${sourceStack.chainId}:${sourceStack.depositoryAddress}`);
   }
   // Book ownership is a sequencing/storage decision and must stay independent
   // from display price orientation and token selection. Every token market for

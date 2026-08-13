@@ -1824,8 +1824,11 @@ describe('audit fail-fast regressions', () => {
         },
       },
       true,
-      0,
-      1,
+      {
+        committedTimestamp: 0,
+        enforcementTimestamp: 0,
+        enforcementJHeight: 1,
+      },
     );
 
     expect(result.ok).toBe(false);

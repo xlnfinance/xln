@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 import { deterministicEntityTimestamp } from '../../../../orderbook/cross-j/orderbook';
 import {
   isCrossJurisdictionRouteExpired,
@@ -73,7 +75,7 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
 
     expiredRoutes++;
     const sourceHubId = String(route.source.counterpartyEntityId || '').toLowerCase();
-    if (!sourceHubId) throw new Error(`CROSS_J_SWEEP_SOURCE_HUB_MISSING:${orderId}`);
+    if (!sourceHubId) throw haltRuntimeFailure("CROSS_J_SWEEP_SOURCE_HUB_MISSING", `CROSS_J_SWEEP_SOURCE_HUB_MISSING:${orderId}`);
     if (String(newState.entityId || '').toLowerCase() !== sourceHubId) {
       waitingRoutes++;
       continue;

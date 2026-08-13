@@ -1,3 +1,5 @@
+import { FailureDispositionError, haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 /**
  * Entity consensus: validator replicas agree on entity frames, then route
  * committed account/J-layer side effects back into the runtime.
@@ -73,6 +75,7 @@ import {
 import { normalizeSwapOfferForOrderbook } from '../../../orderbook/swap-execution';
 import { buildSettlementSealDraft } from '../../tx/handlers/payments/settle';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../tx/j-events-htlc/route-lifecycle';
+import { hasInboundHtlcRoute } from '../../htlc/route-views';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 import { normalizeEntityProposalBoard } from '../../tx/processing/proposals';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
@@ -247,7 +250,7 @@ const assertEntityTxAuthorization = (
   // equivalent lane: it could update one sibling or start a target dispute
   // without the source J event that authorizes the pull reveal.
   if (tx.type === 'crossJurisdictionSalvage' && !context.authorizedRuntimeOutput) {
-    throw new Error('CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED');
+    throw haltRuntimeFailure("CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED", 'CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED');
   }
   if (context.authorizedCommand && !isIndividualEntityCommandTx(tx)) {
     throw new Error(`ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${tx.type}`);
@@ -556,7 +559,7 @@ const proposeAccountFrameCandidate = async (
     const route = state.htlcRoutes.get(hashlock);
     if (!route) continue;
     if (route.outboundLockId) state.lockBook.delete(route.outboundLockId);
-    if (route.inboundEntity && route.inboundLockId) {
+    if (hasInboundHtlcRoute(route)) {
       const inboundAccount = state.accounts.get(route.inboundEntity);
       if (inboundAccount) {
         const admission = await applyAccountInput(
@@ -794,9 +797,7 @@ const applyOrderbookAccountTxs = async (
         continue;
       }
       if (!account?.state.swapOffers?.has(tx.data.offerId)) {
-        throw new Error(
-          `ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${tx.data.offerId} entity=${state.entityId}`,
-        );
+        throw haltRuntimeFailure("ORDERBOOK_SWAP_OWNER_NOT_LOCAL", `ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${tx.data.offerId} entity=${state.entityId}`);
       }
     } else if (tx.type === 'cross_swap_fill_ack' && !account?.state.swapOffers?.has(tx.data.offerId)) {
       const routed = buildCrossJurisdictionFillNoticeOutput(state, accountId, tx);
@@ -819,9 +820,7 @@ const applyOrderbookAccountTxs = async (
         );
         continue;
       }
-      throw new Error(
-        `CROSS_J_FILL_ACK_OWNER_MISSING: account=${accountId} offer=${tx.data.offerId} current=${state.entityId}`,
-      );
+      throw haltRuntimeFailure("CROSS_J_FILL_ACK_OWNER_MISSING", `CROSS_J_FILL_ACK_OWNER_MISSING: account=${accountId} offer=${tx.data.offerId} current=${state.entityId}`);
     }
     if (!account) continue;
     const admission = await applyAccountInput(
@@ -848,7 +847,7 @@ const commitOrderbookMatchResult = (
     const detail = result.debugProjectionRejects
       .map(({ accountId, offerId, reason }) => `${accountId.slice(-8)}:${offerId.slice(-8)}:${reason}`)
       .join(', ');
-    throw new Error(`ORDERBOOK_LIVE_PROJECTION_REJECT: ${detail}`);
+    throw haltRuntimeFailure("ORDERBOOK_LIVE_PROJECTION_REJECT", `ORDERBOOK_LIVE_PROJECTION_REJECT: ${detail}`);
   }
   if (result.crossJurisdictionFills.length > 0) {
     entityLog.info('crossj.firm_fills_recorded', { count: result.crossJurisdictionFills.length });
@@ -937,11 +936,11 @@ async function applySwapCancelRequests(
   allOutputs.push(...routedCancels.outputs);
   for (const { accountId, tx } of routedCancels.accountTxs) {
     if (tx.type !== 'cross_swap_fill_ack') {
-      throw new Error(`CROSS_J_CANCEL_ACK_TX_INVALID:account=${accountId}:type=${tx.type}`);
+      throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_TX_INVALID", `CROSS_J_CANCEL_ACK_TX_INVALID:account=${accountId}:type=${tx.type}`);
     }
     const account = currentEntityState.accounts.get(accountId);
     if (!account) {
-      throw new Error(`CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
+      throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_ACCOUNT_MISSING", `CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
     }
     const admission = await applyAccountInput(
       accountConsensusContext,
@@ -1020,7 +1019,7 @@ const verifyCertifiedFrameInputs = async (
       verified.set(tx, await verifyCertifiedEntityOutput(env, state, tx));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!message.startsWith('CONSENSUS_OUTPUT_')) throw error;
+      if (!(error instanceof FailureDispositionError) || error.disposition !== 'reject') throw error;
       throw new MalformedEntityFrameInputError(tx.type, message);
     }
   }
@@ -1138,7 +1137,7 @@ const prepareEntityFrameWorkingSet = async (
   assertScheduledWakeFrameOrder(entityTxs);
   const crossJSetupPhase = entityTxs.some(entityTxContainsCrossJSetup);
   if (crossJSetupPhase && entityTxs.some(entityTxContainsAccountTransition)) {
-    throw new Error('CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED');
+    throw haltRuntimeFailure("CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED", 'CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED');
   }
   const normalized = normalizeEntityProposalBoard(
     env,

@@ -7,7 +7,6 @@
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import NetworkMachineTimeline from './NetworkMachineTimeline.svelte';
   import { runtimeGraphScope } from '$lib/stores/network/runtimeGraphControlStore';
-  import { panelBridge } from '../utils/panelBridge';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { activeRuntimeId, runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
   import {
@@ -105,14 +104,14 @@
           try {
             await browserVM.restoreState(browserVMState);
             if (nonce !== timeTravelNonce) return;
-          } catch (e: any) {
+          } catch (e: unknown) {
             console.warn('[TimeMachine] restoreState failed:', e);
             if (stateRoot && stateRoot.length === 32 && browserVM?.timeTravel) {
               browserVM.timeTravel(new Uint8Array(stateRoot))
                 .then(() => {
                   if (nonce !== timeTravelNonce) return;
                 })
-                .catch((err: any) => console.warn('[TimeMachine] timeTravel failed:', err));
+                .catch((err: unknown) => console.warn('[TimeMachine] timeTravel failed:', err));
             }
           }
         } else if (stateRoot && stateRoot.length === 32 && browserVM?.timeTravel) {
@@ -120,7 +119,7 @@
             .then(() => {
               if (nonce !== timeTravelNonce) return;
             })
-            .catch((e: any) => console.warn('[TimeMachine] timeTravel failed:', e));
+            .catch((e: unknown) => console.warn('[TimeMachine] timeTravel failed:', e));
         }
       })();
     }
@@ -128,7 +127,14 @@
   }
 
   // Time operations that work with isolated stores
-  let localTimeOperations: any;
+  type LocalTimeOperations = {
+    goToTimeIndex(index: number): void;
+    stepForward(): void;
+    stepBackward(): void;
+    goToHistoryStart(): void;
+    goToLive(): void;
+  };
+  let localTimeOperations: LocalTimeOperations;
   $: localTimeOperations = {
     goToTimeIndex: (index: number) => {
       const max = maxTimeIndex;

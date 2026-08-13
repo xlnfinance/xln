@@ -22,6 +22,7 @@ import {
   appendCertifiedEntityFrameLink,
   buildCertifiedEntityFrameLink,
 } from '../frame/lineage';
+import { requireCertifiedEntityFrameAfterQuorum } from '../frame/phase-views';
 import {
   attachHankoWitnessToOutputs,
   getEntityHashManifestMismatch,
@@ -174,12 +175,12 @@ const installCommittedState = (
 ): void => {
   const { env, workingReplica, candidateEffects, storageChanges } = context;
   const previousState = workingReplica.state;
-  const committedState = {
+  const committedState: EntityState = {
     ...execution.state,
     entityId: previousState.entityId,
     height: frame.height,
     prevFrameHash: frame.hash,
-  } as EntityState;
+  };
   const entitySizeLog = prepareCommittedEntitySizeLog(
     env,
     previousState,
@@ -198,6 +199,7 @@ const installCommittedState = (
   );
   emitCommittedEntitySizeLog(entitySizeLog);
   frame.hankos = hankos;
+  requireCertifiedEntityFrameAfterQuorum(frame);
   appendCertifiedEntityFrameLink(
     workingReplica,
     buildCertifiedEntityFrameLink(

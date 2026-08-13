@@ -16,6 +16,13 @@ import {
 export type Side = 0 | 1;        // 0 = BUY (bids), 1 = SELL (asks)
 type TIF = 0 | 1 | 2;     // 0 = GTC, 1 = IOC, 2 = FOK
 
+export class OrderbookCapacityError extends Error {
+  constructor() {
+    super('Out of order slots');
+    this.name = 'OrderbookCapacityError';
+  }
+}
+
 export type OrderCmd =
   | { kind: 0; ownerId: string; orderId: string; side: Side; tif: TIF; postOnly: boolean; priceTicks: bigint; qtyLots: bigint }
   | { kind: 1; ownerId: string; orderId: string }
@@ -518,7 +525,7 @@ export function materializeCommittedRemainder(
     throw new Error(`BOOK_REMAINDER_DUPLICATE: order=${input.orderId}`);
   }
   if (mutable.orders.size >= mutable.params.maxOrders) {
-    throw new Error('Out of order slots');
+    throw new OrderbookCapacityError();
   }
   const order: BookOrderState = {
     ...input,
@@ -626,7 +633,7 @@ export function applyCommand(state: BookState, cmd: OrderCmd, options: ApplyComm
         events.push({ type: 'REJECT', orderId, ownerId, reason: 'no fill' });
       }
     } else {
-      if (m.orders.size >= m.params.maxOrders) throw new Error('Out of order slots');
+      if (m.orders.size >= m.params.maxOrders) throw new OrderbookCapacityError();
       const order: BookOrderState = {
         orderId,
         ownerId,

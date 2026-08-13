@@ -65,7 +65,6 @@ export type RuntimeLoopApiDeps = {
   notifyEnvChange(env: RuntimeReplica): void;
   processRuntime: RuntimeModule['processRuntime'];
   waitForRuntimeProcessingIdle: RuntimeModule['waitForRuntimeProcessingIdle'];
-  getRuntimeProcessGlobal(): { exit?: (code: number) => unknown } | null;
   runtimeInputHasQueuedWork(input: RuntimeInput): boolean;
 };
 
@@ -97,7 +96,6 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
   const lifecycle = createRuntimeLifecycleApi({
     processRuntime: deps.processRuntime,
     waitForRuntimeProcessingIdle: deps.waitForRuntimeProcessingIdle,
-    getRuntimeProcessGlobal: deps.getRuntimeProcessGlobal,
     hasRuntimeWork,
     getNextWallClockWakeTimestamp: env =>
       resolveNextWallClockWakeTimestamp(env, workDeps),

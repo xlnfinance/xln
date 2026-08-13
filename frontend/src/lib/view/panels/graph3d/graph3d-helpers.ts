@@ -1,7 +1,15 @@
 import type { DerivedAccountData } from '$lib/network3d/derivedAccount';
 import type { Delta } from '@xln/runtime/api/public/runtime-module';
+import type { GraphTransactionLike } from './graph3d-types';
 
-type GraphAccountViewLike = { state: { deltas: Map<number, Delta> } };
+export type GraphAccountViewLike = {
+  state: { deltas: Map<number, Delta> };
+  mempool?: unknown[];
+  mempoolCount?: number;
+  currentFrame?: { height?: number };
+  pendingFrame?: { height?: number; accountTxs?: unknown[] };
+  activeDispute?: { startedByLeft: boolean; disputeTimeout: number; initialNonce: number };
+};
 
 export type ReserveMapLike = Map<string | number, bigint> | Record<string, unknown> | undefined;
 
@@ -13,7 +21,10 @@ export type GraphDualConnectionAccountInfo = {
 };
 
 export type GraphReplicaLike = {
+  entityId?: string;
   signerId?: string | null;
+  mempool?: unknown[];
+  position?: { x: number; y: number; z: number; jurisdiction?: string } | null;
   state?: {
     reserves?: ReserveMapLike;
     accounts?: Map<string, GraphAccountViewLike> | null;
@@ -22,7 +33,7 @@ export type GraphReplicaLike = {
 
 export type GraphGossipLike = {
   getProfiles?: () => Array<{ entityId?: string; name?: string }>;
-  profiles?: Array<{ entityId?: string; name?: string }>;
+  profiles?: Array<{ entityId?: string; name?: string }> | Map<string, { entityId?: string; name?: string }>;
 } | null | undefined;
 
 export type GraphPaymentRoute = {
@@ -132,7 +143,7 @@ export function graphReserveValue(reserves: ReserveMapLike, key: string): bigint
 }
 
 export function formatGraphMempoolTxLabel(
-  tx: any,
+  tx: GraphTransactionLike | null | undefined,
   getTokenDecimals: (tokenId: number) => number,
   blockHeight?: number,
 ): string {
@@ -265,7 +276,8 @@ export function findGraphReplicaByEntityId(
 
 export function getGraphEntityNameFromGossip(gossip: GraphGossipLike, entityId: string): string {
   if (!gossip) return '';
-  const profiles = typeof gossip.getProfiles === 'function' ? gossip.getProfiles() : (gossip.profiles || []);
+  const source = typeof gossip.getProfiles === 'function' ? gossip.getProfiles() : (gossip.profiles || []);
+  const profiles = source instanceof Map ? [...source.values()] : source;
   const profile = profiles.find((item) => String(item.entityId || '') === entityId);
   return String(profile?.name || '');
 }

@@ -1,4 +1,5 @@
 import { FINANCIAL } from '../../config/constants';
+import { rejectFailure } from '../errors/failure-taxonomy';
 
 type DirectPaymentRouteInput = Readonly<{
   sourceEntityId: string;
@@ -7,7 +8,8 @@ type DirectPaymentRouteInput = Readonly<{
 }>;
 
 const routeError = (code: string, detail: string): never => {
-  throw new Error(`DIRECT_PAYMENT_${code}:${detail}`);
+  const failureCode = `DIRECT_PAYMENT_${code}`;
+  throw rejectFailure(failureCode, `${failureCode}:${detail}`);
 };
 
 /** Consensus accepts only the exact route already committed by governance. */

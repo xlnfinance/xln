@@ -274,6 +274,7 @@ type LocalHealthResponse = {
   apiUrl: string;
   runtime: {
     halted: boolean;
+    operatorStatus: 'HALTED_REQUIRES_OPERATOR' | null;
     lifecyclePhase: string | null;
     fatalDebugPayload: unknown;
     securityIncidents: ReturnType<typeof readRuntimeSecurityIncidentTelemetry>;
@@ -1840,6 +1841,7 @@ const buildLocalHealth = (
     apiUrl,
     runtime: {
       halted: runtimeHalted,
+      operatorStatus: env.infrastructure?.operatorStatus ?? null,
       lifecyclePhase: env.infrastructure?.lifecyclePhase ?? null,
       fatalDebugPayload: env.infrastructure?.fatalDebugPayload ?? null,
       securityIncidents: readRuntimeSecurityIncidentTelemetry(env),
@@ -1951,6 +1953,7 @@ const handleAccountStatusRequest = (
         height: Number(env.state.height ?? 0),
         timestamp: Number(env.state.timestamp ?? 0),
         halted: Boolean(env.infrastructure?.halted),
+        operatorStatus: env.infrastructure?.operatorStatus ?? null,
         fatalDebugPayload: env.infrastructure?.fatalDebugPayload ?? null,
         loopActive: Boolean(env.infrastructure?.loopActive),
         runtimeMempool: summarizeRecentRuntimeInputs(

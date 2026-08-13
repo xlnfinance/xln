@@ -3,6 +3,7 @@ import { onMount, onDestroy } from "svelte";
 import { get, type Writable } from "svelte/store";
 import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import type { EnvSnapshot, RuntimeReplica } from "@xln/runtime/api/public/runtime-module";
 import { panelBridge } from "../../utils/panelBridge";
 import { PerformanceMonitor, type PerfMetrics } from "../../utils/perfMonitor";
 import { getXLN, entityPositions } from "$lib/stores/xlnStore";
@@ -37,9 +38,10 @@ import {
   graphEntityHasReserves,
   graphReserveValue,
   type GraphPaymentRoute,
+  type GraphReplicaLike,
 } from "./graph3d-helpers";
 import { buildBirdViewSettings, readBirdViewSettings, writeBirdViewSettings, type BirdViewSettings } from "./graph3d-settings";
-import { createGraphRenderer, detachGraphObject3D, disposeGraphObject3D, getGraphThemeColors } from "./graph3d-renderer";
+import { createGraphRenderer, detachGraphObject3D, disposeGraphObject3D, getGraphThemeColors, type GraphRenderer } from "./graph3d-renderer";
 import {
   buildGraphAccountVisuals,
   createBlockContainer,
@@ -47,7 +49,6 @@ import {
   createBroadcastRippleMesh,
   createDirectionalLightningMesh,
   createEntityLabel,
-  createGraphRippleMesh,
   createGraphEntityNode,
   createGraphGrid,
   createGraphJMachine,
@@ -61,15 +62,15 @@ import {
   startProportionalBroadcast,
   buildSimpleRadialLayout,
 } from "./graph3d-visuals";
-import type { GraphConnectionData, GraphEntityData, GraphFrameActivity, GraphJBlockHistoryEntry, GraphRendererMode, GraphRipple, GraphXLNRuntime } from "./graph3d-types";
+import type { GraphConnectionData, GraphEntityData, GraphEntityProfile, GraphFrameActivity, GraphJBlockHistoryEntry, GraphRendererMode, GraphRipple, GraphTransactionLike, GraphXLNRuntime } from "./graph3d-types";
 import { buildRuntimeGraphProjections } from "./graph3d-runtime-projections";
 import { collectGraphTokenIds, getGraphEntitySizeForToken } from "./graph3d-actions";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
 let miniPanelPosition = { x: 0, y: 0 };
-export let runtimeFrameEnv: Writable<any>;
-export let runtimeFrameHistory: Writable<any[]>;
+export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
+export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
 export let runtimeFrameTimeIndex: Writable<number>;
 export let graphInitSignal: Writable<boolean> | undefined = undefined;
 $: initEnabled = graphInitSignal ? $graphInitSignal : true;
@@ -86,7 +87,7 @@ let graphPositionOverrides = readGraphPositionOverrides(typeof localStorage === 
 let graphProjections: RuntimeGraphProjection[] = [];
 let graphProjectionError = "";
 let mergedRuntimeGraph: MergedRuntimeGraph = mergeRuntimeGraphProjections([], $runtimeGraphCanonicity);
-let graphReplicaProjection = new Map<string, any>();
+let graphReplicaProjection = new Map<string, GraphReplicaLike>();
 let autoFittedGraphSignature = "";
 let forceLayoutCache: RuntimeGraphLayoutCache | null = null;
 $: graphProjections = buildRuntimeGraphProjections({
@@ -96,7 +97,7 @@ $: graphProjections = buildRuntimeGraphProjections({
   scope: $runtimeGraphScope,
   networkState: $networkMachineRuntime,
   liveRemoteFrames: $runtimeGraphLiveFrameCache,
-  currentEnv: env,
+  currentEnv: env ?? null,
 });
 $: if ($runtimeGraphScope !== "merged" && !graphProjections.some((item) => item.source.runtimeId === $runtimeGraphScope)) {
   runtimeGraphControlOperations.setScope("merged");
@@ -113,7 +114,9 @@ $: graphRuntimeOptions = [
 $: graphDesyncCount = mergedRuntimeGraph.nodes.filter((node) => node.desynchronized).length + mergedRuntimeGraph.accounts.filter((account) => account.desynchronized).length + mergedRuntimeGraph.jMachines.filter((machine) => machine.desynchronized).length;
 $: activeJurisdictionName = mergedRuntimeGraph.jMachines[0]?.selected.name ?? null;
 $: jurisdictionsData = mergedRuntimeGraph.jMachines.map((projection) => {
-  const jr = projection.selected.machine as any;
+  const jr = projection.selected.machine && typeof projection.selected.machine === 'object'
+    ? projection.selected.machine as { mempool?: unknown[] }
+    : null;
   return {
     name: projection.selected.name,
     jMachine: {
@@ -125,11 +128,11 @@ $: jurisdictionsData = mergedRuntimeGraph.jMachines.map((projection) => {
     },
   };
 });
-function getTimeAwareReplicas(): Map<string, any> {
+function getTimeAwareReplicas(): Map<string, GraphReplicaLike> {
   return graphReplicaProjection;
 }
 /** Replica keys are `entityId:signerId`. Single lookup used by every graph consumer. */
-function findReplicaForEntity(entityId: string, replicas: Map<string, any> = getTimeAwareReplicas()): any {
+function findReplicaForEntity(entityId: string, replicas: Map<string, GraphReplicaLike> = getTimeAwareReplicas()): GraphReplicaLike | null {
   return findGraphReplicaByEntityId(replicas, entityId);
 }
 /** Detach + free a graph child. Bars/boxes live in graphWorld, so removal must target it. */
@@ -152,14 +155,53 @@ const debug = {
 const reportGraphInitError = (error: unknown) => {
   debug.error("Graph initialization failed:", error);
 };
+const recordOf = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === 'object' ? value as Record<string, unknown> : null;
+const graphTransactionOf = (value: unknown): GraphTransactionLike => {
+  const tx = recordOf(value);
+  if (!tx) return {};
+  const data = recordOf(tx['data']);
+  const amount = tx['amount'] ?? data?.['amount'];
+  return {
+    ...(typeof tx['type'] === 'string' ? { type: tx['type'] } : {}),
+    ...(typeof tx['kind'] === 'string' ? { kind: tx['kind'] } : {}),
+    ...(typeof tx['targetEntityId'] === 'string' ? { targetEntityId: tx['targetEntityId'] } : {}),
+    ...(typeof amount === 'string' || typeof amount === 'number' || typeof amount === 'bigint' ? { amount } : {}),
+    ...(data ? { data: {
+      ...(typeof data['amount'] === 'string' || typeof data['amount'] === 'number' || typeof data['amount'] === 'bigint' ? { amount: data['amount'] } : {}),
+      ...(typeof data['tokenId'] === 'number' ? { tokenId: data['tokenId'] } : {}),
+      ...(typeof data['targetEntityId'] === 'string' ? { targetEntityId: data['targetEntityId'] } : {}),
+      ...(typeof data['fromEntityId'] === 'string' ? { fromEntityId: data['fromEntityId'] } : {}),
+      ...(typeof data['toEntityId'] === 'string' ? { toEntityId: data['toEntityId'] } : {}),
+      ...(data['accountTx'] !== undefined ? { accountTx: graphTransactionOf(data['accountTx']) } : {}),
+    } } : {}),
+  };
+};
+const settingNumber = (value: unknown, key: string): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`GRAPH_SETTING_NUMBER_INVALID:${key}`);
+  return value;
+};
+const settingBoolean = (value: unknown, key: string): boolean => {
+  if (typeof value !== 'boolean') throw new Error(`GRAPH_SETTING_BOOLEAN_INVALID:${key}`);
+  return value;
+};
+const settingVector = (value: unknown, key: string): { x: number; y: number; z: number } => {
+  if (!value || typeof value !== 'object') throw new Error(`GRAPH_SETTING_VECTOR_INVALID:${key}`);
+  const record = value as Record<string, unknown>;
+  return {
+    x: settingNumber(record['x'], `${key}.x`),
+    y: settingNumber(record['y'], `${key}.y`),
+    z: settingNumber(record['z'], `${key}.z`),
+  };
+};
 const settings = { theme: "dark", portfolioScale: 5000, dollarsPerPx: 30000 };
 let OrbitControlsConstructor: typeof OrbitControls;
 let container: HTMLDivElement;
 let scene: THREE.Scene;
 let graphWorld: THREE.Group;
 let camera: THREE.PerspectiveCamera;
-let renderer: THREE.WebGLRenderer | any; // Selected WebGL or WebGPU renderer
-let controls: any;
+let renderer: GraphRenderer;
+let controls: OrbitControls;
 let raycaster: THREE.Raycaster;
 let mouse: THREE.Vector2;
 let entityMeshMap = new Map<string, THREE.Object3D | undefined>();
@@ -197,7 +239,13 @@ let currentFrameActivity: GraphFrameActivity = {
 let connectionIndexMap: Map<string, number> = new Map();
 let animationId: number | null;
 let activeBroadcastSpheres: Array<{ sphere: THREE.Mesh; animationId: number }> = [];
-let hoveredObject: any = null;
+let hoveredObject: THREE.Object3D | null = null;
+function resetHoveredObjectHighlight(target: THREE.Object3D): void {
+  if (!(target instanceof THREE.Mesh) && !(target instanceof THREE.Line)) return;
+  const material = target.material;
+  if (material instanceof THREE.MeshLambertMaterial) material.emissive.setHex(0x002200);
+  else if (material instanceof THREE.LineDashedMaterial) material.color.setHex(0x00ff44);
+}
 let tooltip = { visible: false, x: 0, y: 0, content: "" };
 let dualTooltip = {
   visible: false,
@@ -338,7 +386,7 @@ $: if (scene && jurisdictionsData) {
   jurisdictionsArray.forEach((jurisdiction) => {
     const jMachineGroup = jMachines.get(jurisdiction.name);
     if (jMachineGroup) {
-      const label = jMachineGroup.children.find((child: any) => child.isSprite) as THREE.Sprite | undefined;
+      const label = jMachineGroup.children.find((child) => child instanceof THREE.Sprite) as THREE.Sprite | undefined;
       if (label && label.material && label.material.map) {
         const canvas = document.createElement("canvas");
         const context = canvas.getContext("2d");
@@ -371,7 +419,7 @@ $: if (scene && jurisdictionsData) {
         const prevJReplicas = prevFrame?.state.jReplicas;
         if (prevJReplicas) {
           const prevJReplicaArr = Array.isArray(prevJReplicas) ? prevJReplicas : Array.from(prevJReplicas.values());
-          const prevJR = prevJReplicaArr.find((jr: any) => jr.name === activeJurisdiction.name);
+          const prevJR = prevJReplicaArr.find((jr) => jr.name === activeJurisdiction.name);
           prevMempoolSize = prevJR?.mempool?.length || 0;
         }
       }
@@ -386,7 +434,7 @@ $: if (scene && jurisdictionsData) {
     const mempool = activeJurisdiction.jMachine.mempool || [];
     const currentJHeight = activeJurisdiction.jMachine.jHeight || 0;
     const nextBlockHeight = Number(currentJHeight) + 1;
-    mempool.forEach((tx: any, txIndex: number) => {
+    mempool.forEach((tx, txIndex: number) => {
       const txCube = createMempoolTxCube(txIndex, getTokenDecimals, tx, nextBlockHeight);
       activeJMachine.add(txCube);
       jMachineTxBoxes.push(txCube);
@@ -432,7 +480,7 @@ $: if (scene && jurisdictionsData) {
     const currentHeightNum = Number(currentJHeight);
     const runtimeHistory = $runtimeFrameHistory || [];
     if (runtimeHistory.length > 0 && currentHeightNum > 0) {
-      const blockBoundaries: Array<{ blockNum: number; txs: any[] }> = [];
+      const blockBoundaries: Array<{ blockNum: number; txs: unknown[] }> = [];
       for (let targetHeight = currentHeightNum - 1; targetHeight >= Math.max(0, currentHeightNum - 3); targetHeight--) {
         const maxFrameIdx = $runtimeFrameTimeIndex >= 0 ? Math.min($runtimeFrameTimeIndex, runtimeHistory.length - 1) : runtimeHistory.length - 1;
         let foundFrame = null;
@@ -504,10 +552,11 @@ $: if (jMachine && $runtimeFrameTimeIndex === -1) {
     for (let i = lastAnimatedFrameIndex + 1; i < currentLen; i++) {
       const frame = historyFrames[i];
       const entityInputs = frame?.runtimeInput?.entityInputs || [];
-      entityInputs.forEach((entityInput: any) => {
-        const txs = entityInput?.entityTxs || entityInput?.input?.txs || [];
-        txs.forEach((tx: any) => {
-          const txKind = tx.kind || tx.type;
+      entityInputs.forEach((entityInput) => {
+        const txs = entityInput.entityTxs ?? [];
+        txs.forEach((tx) => {
+          const graphTx = graphTransactionOf(tx);
+          const txKind = graphTx.kind || graphTx.type;
           if (txKind === "payFromReserve" || txKind === "payToReserve" || txKind === "settleToReserve") {
             addTxToJMachine(entityInput.entityId);
           }
@@ -532,13 +581,13 @@ async function initAndSetup() {
   if (graphInitialized) return;
   graphInitialized = true;
   try {
-    XLN = (await getXLN()) as unknown as GraphXLNRuntime;
+    XLN = await getXLN();
   } catch (err) {
     console.error("[Graph3D] Failed to load XLN runtime:", err);
   }
-  if ("xr" in navigator && (navigator as any).xr) {
+  if (navigator.xr) {
     try {
-      const vrSupported = await (navigator as any).xr.isSessionSupported("immersive-vr");
+      const vrSupported = await navigator.xr.isSessionSupported("immersive-vr");
       isVRSupported = vrSupported === true;
     } catch (err) {
       isVRSupported = false;
@@ -565,33 +614,39 @@ onMount(() => {
     }
   };
   panelBridge.on("vr:toggle", handleVRToggle);
-  const handleBroadcastToggle = (event: any) => {
+  const handleBroadcastToggle = (event: { enabled: boolean }) => {
     broadcastEnabled = event.enabled;
   };
   panelBridge.on("broadcast:toggle", handleBroadcastToggle);
-  const handleSettingsUpdate = (event: any) => {
+  const handleSettingsUpdate = (event: { key: string; value: unknown }) => {
     const { key, value } = event;
-    if (key === "gridSize") gridSize = value;
-    else if (key === "gridDivisions") gridDivisions = value;
-    else if (key === "gridOpacity") gridOpacity = value;
-    else if (key === "gridColor") gridColor = value;
+    if (key === "gridSize") gridSize = settingNumber(value, key);
+    else if (key === "gridDivisions") gridDivisions = settingNumber(value, key);
+    else if (key === "gridOpacity") gridOpacity = settingNumber(value, key);
+    else if (key === "gridColor") {
+      if (typeof value !== 'string') throw new Error('GRAPH_SETTING_STRING_INVALID:gridColor');
+      gridColor = value;
+    }
     else if (key === "cameraTarget") {
-      cameraTarget = value;
+      cameraTarget = settingVector(value, key);
       if (controls) {
-        controls.target.set(value.x, value.y, value.z);
+        controls.target.set(cameraTarget.x, cameraTarget.y, cameraTarget.z);
         controls.update();
       }
     } else if (key === "entityLabelScale") {
-      labelScale = value;
+      labelScale = settingNumber(value, key);
       lastLabelUpdateTimeIndex = Number.NaN;
     } else if (key === "entitySizeMultiplier") {
-      entitySizeMultiplier = value;
+      entitySizeMultiplier = settingNumber(value, key);
       lastLabelUpdateTimeIndex = Number.NaN;
-    } else if (key === "rendererMode") rendererMode = value;
-    else if (key === "forceLayoutEnabled") forceLayoutEnabled = value;
-    else if (key === "autoRotate") autoRotate = value;
-    else if (key === "autoRotateSpeed") autoRotateSpeed = value;
-    else if (key === "showFpsOverlay") showFpsOverlay = value;
+    } else if (key === "rendererMode") {
+      if (value !== 'webgl' && value !== 'webgpu') throw new Error('GRAPH_SETTING_RENDERER_INVALID');
+      rendererMode = value;
+    }
+    else if (key === "forceLayoutEnabled") forceLayoutEnabled = settingBoolean(value, key);
+    else if (key === "autoRotate") autoRotate = settingBoolean(value, key);
+    else if (key === "autoRotateSpeed") autoRotateSpeed = settingNumber(value, key);
+    else if (key === "showFpsOverlay") showFpsOverlay = settingBoolean(value, key);
     if (["gridSize", "gridDivisions", "gridOpacity", "gridColor"].includes(key)) {
       recreateGrid();
     }
@@ -613,7 +668,7 @@ onMount(() => {
     }
     recreateGrid();
   };
-  const handleCameraFocus = (event: any) => {
+  const handleCameraFocus = (event: { target: { x: number; y: number; z: number } }) => {
     const { target } = event;
     if (controls) {
       cameraTarget = target;
@@ -621,7 +676,7 @@ onMount(() => {
       controls.update();
     }
   };
-  const handleCameraRestore = (event: any) => {
+  const handleCameraRestore = (event: { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number } }) => {
     if (!controls || !camera) return;
     const { position, target } = event;
     camera.position.set(position.x, position.y, position.z);
@@ -711,23 +766,19 @@ onDestroy(() => {
   activeBroadcastSpheres = [];
   if (animationId) {
     cancelAnimationFrame(animationId);
-    animationId = null as any;
+    animationId = null;
   }
   if (renderer) {
     renderer.dispose();
-    renderer = null as any;
   }
   if (scene) {
-    scene = null as any;
   }
   if (camera) {
-    camera = null as any;
   }
   if (controls) {
     if (typeof controls.dispose === "function") {
       controls.dispose();
     }
-    controls = null;
   }
   entityMeshMap.clear();
   entityInputStrikes.forEach((strike) => {
@@ -822,19 +873,20 @@ async function initThreeJS() {
     100000, // Far plane: see objects at extreme distances
   );
   camera.position.set(0.41, 572.94, 38.32); // AHB top-down view
-  renderer = await createGraphRenderer(rendererMode, { antialias: false }); // Disabled for performance
-  if (!renderer) {
+  const createdRenderer = await createGraphRenderer(rendererMode, { antialias: false }); // Disabled for performance
+  if (!createdRenderer) {
     console.warn("[Graph3D] Renderer unavailable - skipping 3D init");
     return;
   }
-  renderer.xr.enabled = !(typeof navigator !== "undefined" && (navigator as any).webdriver); // Keep XR off in automation
+  renderer = createdRenderer;
+  renderer.xr.enabled = !(typeof navigator !== "undefined" && navigator.webdriver); // Keep XR off in automation
   renderer.setSize(containerWidth, containerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Cap at 1.5 for performance
   container.appendChild(renderer.domElement);
   if (typeof window !== "undefined") {
-    (window as any).__debugScene = scene;
-    (window as any).__debugCamera = camera;
-    (window as any).__debugRenderer = renderer;
+    window.__debugScene = scene;
+    window.__debugCamera = camera;
+    window.__debugRenderer = renderer;
   }
   if (OrbitControlsConstructor) {
     controls = new OrbitControlsConstructor(camera, renderer.domElement);
@@ -915,8 +967,8 @@ function setupVRControllers() {
   for (let index = 0; index < 2; index += 1) {
     const controller = renderer.xr.getController(index);
     controller.userData["sourceId"] = `xr:${index}`;
-    controller.addEventListener("connected", (event: any) => {
-      const inputSource = event.data as XRInputSource | undefined;
+    controller.addEventListener("connected", (event) => {
+      const inputSource = 'data' in event ? event.data as XRInputSource | undefined : undefined;
       const handedness = inputSource?.handedness || `slot-${index}`;
       const mode = inputSource?.targetRayMode || "unknown";
       controller.userData["sourceId"] = `xr:${mode}:${handedness}`;
@@ -950,7 +1002,7 @@ function entityFromObject(object: THREE.Object3D | null | undefined): GraphEntit
   }
   return null;
 }
-function onVRSelectStart(event: any) {
+function onVRSelectStart(event: { target: THREE.Object3D }) {
   const controller = event.target as THREE.Object3D;
   const sourceId = String(controller.userData["sourceId"] || controller.uuid);
   const tempMatrix = new THREE.Matrix4();
@@ -973,7 +1025,7 @@ function onVRSelectStart(event: any) {
     }
   }
 }
-function onVRSelectEnd(event: any) {
+function onVRSelectEnd(event: { target: THREE.Object3D }) {
   const controller = event.target as THREE.Object3D;
   const sourceId = String(controller.userData["sourceId"] || controller.uuid);
   const grab = vrGrabs.get(sourceId);
@@ -1003,7 +1055,7 @@ async function enterVR() {
     return;
   }
   try {
-    const sessionInit: any = {
+    const sessionInit: XRSessionInit = {
       optionalFeatures: [
         "local-floor",
         "bounded-floor",
@@ -1015,11 +1067,13 @@ async function enterVR() {
       requiredFeatures: [],
       domOverlay: { root: container },
     };
-    const session = await (navigator as any).xr.requestSession("immersive-vr", sessionInit);
+    if (!navigator.xr) throw new Error('GRAPH_XR_API_UNAVAILABLE');
+    const session = await navigator.xr.requestSession("immersive-vr", sessionInit);
     await renderer.xr.setSession(session);
     isVRActive = true;
     immersiveWalletSurface?.dispose();
-    immersiveWalletSurface = new ImmersiveWalletSurface(scene, renderer.xr.getCamera(camera), (identity, action) => {
+    const xrCamera = renderer.xr.getCamera();
+    immersiveWalletSurface = new ImmersiveWalletSurface(scene, xrCamera, (identity, action) => {
       panelBridge.emit("openEntityOperations", { ...identity, action });
     });
     scene.background = null; // Transparent = passthrough mode
@@ -1143,12 +1197,12 @@ function updateNetworkData() {
   const timeIndex = $runtimeFrameTimeIndex;
   updateAvailableTokens();
   const currentReplicas = graphReplicaProjection;
-  const entityData: any[] = mergedRuntimeGraph.nodes.map((node) => ({
+  const entityData: GraphEntityProfile[] = mergedRuntimeGraph.nodes.map((node) => ({
     entityId: node.entityId,
     metadata: {
       name: node.selected.label,
       isHub: node.selected.isHub,
-      position: node.selected.position,
+      ...(node.selected.position ? { position: node.selected.position } : {}),
       provenance: node.provenance,
       desynchronized: node.desynchronized,
     },
@@ -1263,17 +1317,17 @@ function clearNetwork() {
   particles.forEach((particle) => detachFromGraphWorld(particle.mesh));
   particles = [];
 }
-function applyForceDirectedLayout(profiles: any[], connectionMap: Map<string, Set<string>>) {
+function applyForceDirectedLayout(profiles: GraphEntityProfile[], connectionMap: Map<string, Set<string>>) {
   if (!forceLayoutEnabled) {
     return applySimpleRadialLayout(profiles, connectionMap);
   }
   forceLayoutCache = resolveRuntimeGraphLayout(mergedRuntimeGraph, graphPositionOverrides, forceLayoutCache);
   return new Map(Array.from(forceLayoutCache.positions, ([entityId, node]) => [entityId, new THREE.Vector3(node.position.x, node.position.y, node.position.z)]));
 }
-function applySimpleRadialLayout(profiles: any[], connectionMap: Map<string, Set<string>>) {
+function applySimpleRadialLayout(profiles: GraphEntityProfile[], connectionMap: Map<string, Set<string>>) {
   return buildSimpleRadialLayout(profiles, connectionMap, compareStableText);
 }
-function createEntityNode(profile: any, index: number, total: number, forceLayoutPositions: Map<string, THREE.Vector3>, isHub: boolean, passedReplicas?: Map<string, any>) {
+function createEntityNode(profile: GraphEntityProfile, index: number, total: number, forceLayoutPositions: Map<string, THREE.Vector3>, isHub: boolean, passedReplicas?: Map<string, GraphReplicaLike>) {
   const currentReplicas = passedReplicas || getTimeAwareReplicas();
   const replica = findReplicaForEntity(profile.entityId, currentReplicas);
   const node = createGraphEntityNode({
@@ -1286,7 +1340,7 @@ function createEntityNode(profile: any, index: number, total: number, forceLayou
     replica,
     userPosition: graphPositionOverrides.get(profile.entityId),
     persistedPosition: $entityPositions.get(profile.entityId),
-    defaultJurisdiction: env?.activeJurisdiction || "default",
+    defaultJurisdiction: env && 'activeJurisdiction' in env ? env.activeJurisdiction || "default" : "default",
     resolveJMachinePosition: (jurisdictionName) => {
       const stored = env?.state.jReplicas?.get(jurisdictionName)?.position;
       if (stored) return stored;
@@ -1350,31 +1404,32 @@ function createTransactionParticles() {
     const currentFrame = $runtimeFrameHistory[timeIndex];
     const entityInputs = currentFrame?.runtimeInput?.entityInputs || [];
     if (entityInputs.length > 0) {
-      entityInputs.forEach((entityInput: any) => {
+      entityInputs.forEach((entityInput) => {
         const processingEntityId = entityInput.entityId;
         currentFrameActivity.activeEntities.add(processingEntityId);
         if (entityInput.entityTxs) {
-          entityInput.entityTxs.forEach((tx: any) => {
-            if (tx.type === "accountInput" && tx.data) {
-              const fromEntityId = tx.data.fromEntityId;
-              const toEntityId = tx.data.toEntityId;
+          entityInput.entityTxs.forEach((tx) => {
+            const graphTx = graphTransactionOf(tx);
+            if (graphTx.type === "accountInput" && graphTx.data?.fromEntityId && graphTx.data.toEntityId) {
+              const fromEntityId = graphTx.data.fromEntityId;
+              const toEntityId = graphTx.data.toEntityId;
               triggerEntityInputStrike(fromEntityId, toEntityId);
               if (!currentFrameActivity.outgoingFlows.has(fromEntityId)) {
                 currentFrameActivity.outgoingFlows.set(fromEntityId, []);
               }
               currentFrameActivity.outgoingFlows.get(fromEntityId)!.push(toEntityId);
-              createDirectionalLightning(fromEntityId, toEntityId, "outgoing", tx.data.accountTx);
+              createDirectionalLightning(fromEntityId, toEntityId, "outgoing", graphTx.data.accountTx);
               if (!currentFrameActivity.incomingFlows.has(toEntityId)) {
                 currentFrameActivity.incomingFlows.set(toEntityId, []);
               }
               currentFrameActivity.incomingFlows.get(toEntityId)!.push(fromEntityId);
               triggerEntityActivity(fromEntityId);
               triggerEntityActivity(toEntityId);
-            } else if (["r2c", "reserve_to_collateral", "deposit_reserve", "withdraw_reserve"].includes(tx.type)) {
-              createBroadcastRipple(processingEntityId, tx.type);
-            } else if (tx.type === "payFromReserve" || tx.kind === "payFromReserve") {
+            } else if (graphTx.type && ["r2c", "reserve_to_collateral", "deposit_reserve", "withdraw_reserve"].includes(graphTx.type)) {
+              createBroadcastRipple(processingEntityId, graphTx.type);
+            } else if (graphTx.type === "payFromReserve" || graphTx.kind === "payFromReserve") {
               const fromEntityId = processingEntityId;
-              const toEntityId = tx.targetEntityId || tx.data?.targetEntityId;
+              const toEntityId = graphTx.targetEntityId || graphTx.data?.targetEntityId;
               if (toEntityId) {
                 addTxToJMachine(fromEntityId);
                 triggerEntityActivity(fromEntityId);
@@ -1387,7 +1442,7 @@ function createTransactionParticles() {
     }
   }
 }
-function createDirectionalLightning(fromEntityId: string, toEntityId: string, direction: "incoming" | "outgoing", accountTx: any) {
+function createDirectionalLightning(fromEntityId: string, toEntityId: string, direction: "incoming" | "outgoing", accountTx: GraphTransactionLike | undefined) {
   const key = `${fromEntityId}->${toEntityId}`;
   const connectionIndex = connectionIndexMap.get(key) ?? connectionIndexMap.get(`${toEntityId}->${fromEntityId}`) ?? -1;
   if (connectionIndex === -1) return;
@@ -1395,13 +1450,14 @@ function createDirectionalLightning(fromEntityId: string, toEntityId: string, di
   if (!connection) return;
   const bolt = createDirectionalLightningMesh(connection, accountTx);
   graphWorld.add(bolt);
+  const amount = accountTx?.data?.amount;
   particles.push({
     mesh: bolt,
     connectionIndex,
     progress: 0,
     speed: 0.02, // Full 3-phase cycle in ~2.5s
     type: accountTx?.type || "unknown",
-    amount: accountTx?.data?.amount,
+    ...(typeof amount === 'bigint' ? { amount } : {}),
     direction,
   });
 }
@@ -1452,7 +1508,7 @@ function updateConnectionsForEntity(entityId: string) {
     }
   });
 }
-function createConnectionLine(fromEntity: any, toEntity: any, fromId: string, toId: string, _replica: any) {
+function createConnectionLine(fromEntity: GraphEntityData, toEntity: GraphEntityData, fromId: string, toId: string, _replica: GraphReplicaLike) {
   const currentReplicas = getTimeAwareReplicas();
   connections.push(
     buildGraphConnection({
@@ -1470,7 +1526,7 @@ function createConnectionLine(fromEntity: any, toEntity: any, fromId: string, to
     }),
   );
 }
-function createAccountBarsForConnection(fromEntity: any, toEntity: any, fromId: string, toId: string, _replica: any) {
+function createAccountBarsForConnection(fromEntity: GraphEntityData, toEntity: GraphEntityData, fromId: string, toId: string, _replica: GraphReplicaLike) {
   return buildGraphAccountVisuals({
     graphWorld,
     fromEntity,
@@ -1705,9 +1761,6 @@ function animate() {
     baseMaterial.opacity = gridOpacity + gridPulseIntensity * 0.3; // Brighten on pulse
   }
   updateRipples();
-  if (Math.random() < 0.05) {
-    detectJurisdictionalEvents();
-  }
   if (renderer && camera) {
     renderer.render(scene, camera);
     perfMonitor.end(); // Complete FPS measurement
@@ -2150,11 +2203,7 @@ function onMouseMove(event: MouseEvent) {
   } else {
     if (hoveredObject) {
       try {
-        if (hoveredObject.material?.emissive?.setHex) {
-          hoveredObject.material.emissive.setHex(0x002200);
-        } else if (hoveredObject.material?.color?.setHex) {
-          hoveredObject.material.color.setHex(0x00ff44);
-        }
+        resetHoveredObjectHighlight(hoveredObject);
       } catch (e) {
         debug.warn("Failed to reset highlight:", e);
       }
@@ -2167,9 +2216,7 @@ function onMouseMove(event: MouseEvent) {
 function onMouseOut() {
   if (hoveredObject) {
     try {
-      if (hoveredObject.material?.emissive?.setHex) {
-        hoveredObject.material.emissive.setHex(0x002200);
-      }
+      resetHoveredObjectHighlight(hoveredObject);
     } catch (e) {
       debug.warn("Failed to reset highlight on mouse out:", e);
     }
@@ -2193,15 +2240,10 @@ function onMouseClick(event: MouseEvent) {
   const jMachineIntersects = raycaster.intersectObjects(jMachineObjects);
   if (jMachineIntersects.length > 0 && jMachineIntersects[0]) {
     const clickedMesh = jMachineIntersects[0].object;
-    let clickedJMachine: THREE.Group | null = null;
-    jMachines.forEach((group) => {
-      if (group.children.includes(clickedMesh)) {
-        clickedJMachine = group;
-      }
-    });
-    if (clickedJMachine && (clickedJMachine as any).userData && (clickedJMachine as any).userData.type === "jMachine") {
-      const pos = (clickedJMachine as any).userData.position as { x: number; y: number; z: number };
-      const name = (clickedJMachine as any).userData.jurisdictionName as string;
+    const clickedJMachine = [...jMachines.values()].find((group) => group.children.includes(clickedMesh)) ?? null;
+    if (clickedJMachine && clickedJMachine.userData['type'] === "jMachine") {
+      const pos = clickedJMachine.userData['position'] as { x: number; y: number; z: number };
+      const name = String(clickedJMachine.userData['jurisdictionName']);
       if (controls && pos) {
         cameraTarget = pos;
         controls.target.set(pos.x, pos.y, pos.z);
@@ -2500,25 +2542,12 @@ function calculateAvailableRoutes(from: string, to: string) {
     return;
   }
   availableRoutes = buildGraphAvailableRoutes({
-    replicas: env.state.eReplicas,
+    replicas: getTimeAwareReplicas(),
     from,
     to,
     getEntityShortName,
   });
   selectedRouteIndex = 0;
-}
-function createRipple(entityId: string) {
-  const entity = entities.find((e) => e.id === entityId);
-  if (!entity || !scene) return;
-  const rippleMesh = createGraphRippleMesh(entity.position);
-  graphWorld.add(rippleMesh);
-  const ripple: GraphRipple = {
-    mesh: rippleMesh,
-    startTime: Date.now(),
-    duration: 1500, // 1.5 seconds
-    maxRadius: 5.0, // Expand to 5 units
-  };
-  activeRipples.push(ripple);
 }
 function updateRipples() {
   const now = Date.now();
@@ -2536,19 +2565,6 @@ function updateRipples() {
     const material = ripple.mesh.material as THREE.MeshBasicMaterial;
     material.opacity = 0.8 * (1 - progress); // Fade out
     return true;
-  });
-}
-function detectJurisdictionalEvents() {
-  if (!env) return;
-  const currentFrame = env.serverState?.history?.[env.serverState.history.length - 1];
-  if (!currentFrame) return;
-  const entityFrames = currentFrame.entityFrames;
-  if (!entityFrames || !(entityFrames instanceof Map)) return;
-  entityFrames.forEach((entityFrame: any, entityId: string) => {
-    const jEvents = entityFrame.jEvents;
-    if (jEvents && jEvents.length > 0) {
-      createRipple(entityId);
-    }
   });
 }
 function getEntityBalanceInfo(entityId: string): string {

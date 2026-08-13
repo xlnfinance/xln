@@ -966,6 +966,27 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(senderFrontierCount(sender)).toBe(1);
   });
 
+  test('late proposal receipt preserves the pending certificate upgrade for the same frame', () => {
+    const sender = runtime('reliable-receipt-sender-proposal-certificate-race');
+    const receiver = runtime('reliable-receipt-receiver-proposal-certificate-race');
+    const proposal = frameOutput(receiver.runtimeId!);
+    const proposalCommits = commitAtReceiver(receiver, sender.runtimeId!, proposal);
+    finalizeReliableIngressCommit(receiver, proposalCommits);
+    const certificate = frameOutput(
+      receiver.runtimeId!,
+      7,
+      `0x${'ab'.repeat(32)}`,
+      ['0xentity-quorum-hanko'],
+    );
+    sender.pendingNetworkOutputs = [certificate];
+
+    expect(applyReliableDeliveryReceipts(sender, [proposalCommits[0]!.receipt]))
+      .toEqual({ removed: 0 });
+    expect(sender.pendingNetworkOutputs).toEqual([certificate]);
+    expect(sender.infrastructure?.receivedReliableReceiptLedger?.values().next().value
+      ?.body.identity.evidenceKind).toBe('entity-proposal');
+  });
+
   test('plain ACK then frame_ack apply durably in order and GC only their exact sender outputs', () => {
     const sender = runtime('reliable-receipt-sender-account-ack-variants');
     const receiver = runtime('reliable-receipt-receiver-account-ack-variants');

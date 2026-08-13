@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import type WebGPURenderer from 'three/src/renderers/webgpu/WebGPURenderer.js';
+
+export type GraphRenderer = THREE.WebGLRenderer | WebGPURenderer;
 
 export function getGraphThemeColors(_theme: string) {
   return {
@@ -14,13 +17,13 @@ export function getGraphThemeColors(_theme: string) {
 export async function createGraphRenderer(
   mode: string,
   options: THREE.WebGLRendererParameters,
-): Promise<THREE.WebGLRenderer | null> {
+): Promise<GraphRenderer | null> {
   if (mode === 'webgpu' && typeof navigator !== 'undefined' && navigator.gpu) {
     try {
       const { default: WebGPURenderer } = await import('three/src/renderers/webgpu/WebGPURenderer.js');
       const renderer = new WebGPURenderer({ antialias: options.antialias });
       await renderer.init();
-      return renderer as unknown as THREE.WebGLRenderer;
+      return renderer;
     } catch (error) {
       console.warn('[Graph3D] WebGPU renderer unavailable, falling back to WebGL:', error);
     }

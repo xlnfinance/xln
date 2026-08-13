@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 import { ethers } from 'ethers';
 
 import type { AccountReplica } from '../../../../types/account';
@@ -27,7 +29,7 @@ export const validateCrossJurisdictionDisputeRoute = (
   if (!routeId) return;
   const route = state.crossJurisdictionSwaps?.get(routeId);
   if (!route || route.orderId !== routeId) {
-    throw new Error(`DISPUTE_START_CROSS_J_ROUTE_MISSING:${routeId}`);
+    throw haltRuntimeFailure("DISPUTE_START_CROSS_J_ROUTE_MISSING", `DISPUTE_START_CROSS_J_ROUTE_MISSING:${routeId}`);
   }
   const localEntityId = state.entityId.toLowerCase();
   const counterpartyId = tx.data.counterpartyEntityId.toLowerCase();
@@ -48,16 +50,16 @@ export const validateCrossJurisdictionDisputeRoute = (
   // same Account onto both legs is ambiguous and is rejected rather than
   // silently choosing one financial role.
   if (isSourceAccount === isTargetAccount) {
-    throw new Error(`DISPUTE_START_CROSS_J_ROUTE_ROLE_MISMATCH:${routeId}`);
+    throw haltRuntimeFailure("DISPUTE_START_CROSS_J_ROUTE_ROLE_MISMATCH", `DISPUTE_START_CROSS_J_ROUTE_ROLE_MISMATCH:${routeId}`);
   }
   if (isCrossJurisdictionTerminalStatus(route.status)) {
-    throw new Error(`DISPUTE_START_CROSS_J_ROUTE_INACTIVE:${routeId}:${route.status}`);
+    throw haltRuntimeFailure("DISPUTE_START_CROSS_J_ROUTE_INACTIVE", `DISPUTE_START_CROSS_J_ROUTE_INACTIVE:${routeId}:${route.status}`);
   }
   // Owner invariant: a cross-j swap leg is defined by paired registry pulls.
   // Without source+target pull commitments there is nothing for applyPull to
   // settle from the reveal registry — reject before drafting disputeStart.
   if (!route.sourcePull || !route.targetPull) {
-    throw new Error(`DISPUTE_START_CROSS_J_PULLS_MISSING:${routeId}`);
+    throw haltRuntimeFailure("DISPUTE_START_CROSS_J_PULLS_MISSING", `DISPUTE_START_CROSS_J_PULLS_MISSING:${routeId}`);
   }
 };
 
@@ -83,7 +85,7 @@ export const proofBodyHasPulls = (
   canonicalDeltaTransformerAddress: string,
 ): boolean => {
   if (!ethers.isAddress(canonicalDeltaTransformerAddress)) {
-    throw new Error(`DISPUTE_DELTA_TRANSFORMER_ADDRESS_INVALID:${canonicalDeltaTransformerAddress}`);
+    throw haltRuntimeFailure("DISPUTE_DELTA_TRANSFORMER_ADDRESS_INVALID", `DISPUTE_DELTA_TRANSFORMER_ADDRESS_INVALID:${canonicalDeltaTransformerAddress}`);
   }
   const canonicalAddress = canonicalDeltaTransformerAddress.toLowerCase();
   for (const [transformerIndex, transformer] of proofBody.transformers.entries()) {
@@ -94,10 +96,8 @@ export const proofBodyHasPulls = (
       };
       if (decoded.pull.length > 0) return true;
     } catch (error) {
-      throw new Error(
-        `DISPUTE_CANONICAL_DELTA_BATCH_INVALID:${transformerIndex}:` +
-        `${error instanceof Error ? error.message : String(error)}`,
-      );
+      throw haltRuntimeFailure("DISPUTE_CANONICAL_DELTA_BATCH_INVALID", `DISPUTE_CANONICAL_DELTA_BATCH_INVALID:${transformerIndex}:` +
+        `${error instanceof Error ? error.message : String(error)}`);
     }
   }
   return false;
@@ -109,7 +109,7 @@ export const assertCrossJurisdictionDisputeProofHasPulls = (
   canonicalDeltaTransformerAddress: string,
 ): void => {
   if (!proofBodyHasPulls(proofBody, canonicalDeltaTransformerAddress)) {
-    throw new Error(`DISPUTE_START_CROSS_J_PROOF_PULLS_MISSING:${routeId}`);
+    throw haltRuntimeFailure("DISPUTE_START_CROSS_J_PROOF_PULLS_MISSING", `DISPUTE_START_CROSS_J_PROOF_PULLS_MISSING:${routeId}`);
   }
 };
 

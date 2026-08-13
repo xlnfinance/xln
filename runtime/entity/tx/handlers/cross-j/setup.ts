@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 import { deterministicEntityTimestamp } from '../../../../orderbook/cross-j/orderbook';
 import {
   buildCrossJurisdictionPullBinding,
@@ -73,10 +75,10 @@ const authorizeCrossJurisdictionIntent = (
   role: 'source' | 'target',
 ): CrossJSetupResult => {
   if (route.status !== 'intent' || route.sourcePull || route.targetPull) {
-    throw new Error(`CROSS_J_USER_AUTH_INTENT_INVALID:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_USER_AUTH_INTENT_INVALID", `CROSS_J_USER_AUTH_INTENT_INVALID:${route.orderId}`);
   }
   if (isCrossJurisdictionRouteExpired(route, deterministicEntityTimestamp(state, env))) {
-    throw new Error(`CROSS_J_USER_AUTH_EXPIRED:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_USER_AUTH_EXPIRED", `CROSS_J_USER_AUTH_EXPIRED:${route.orderId}`);
   }
   if (role === 'source') committedCrossJSourceResponseWindowMs(state, route);
   // Sibling-dispute fanout needs every participant's signer. Admitting a route
@@ -86,15 +88,15 @@ const authorizeCrossJurisdictionIntent = (
   const sourceHubSignerId = normalizeEntityRef(route.sourceHubSignerId || '');
   const targetHubSignerId = normalizeEntityRef(route.targetHubSignerId || '');
   const targetSignerId = normalizeEntityRef(route.targetSignerId || '');
-  if (!sourceSignerId) throw new Error(`CROSS_J_SOURCE_SIGNER_MISSING:${route.orderId}`);
-  if (!sourceHubSignerId) throw new Error(`CROSS_J_SOURCE_HUB_SIGNER_MISSING:${route.orderId}`);
-  if (!targetHubSignerId) throw new Error(`CROSS_J_TARGET_HUB_SIGNER_MISSING:${route.orderId}`);
-  if (!targetSignerId) throw new Error(`CROSS_J_TARGET_SIGNER_MISSING:${route.orderId}`);
+  if (!sourceSignerId) throw haltRuntimeFailure("CROSS_J_SOURCE_SIGNER_MISSING", `CROSS_J_SOURCE_SIGNER_MISSING:${route.orderId}`);
+  if (!sourceHubSignerId) throw haltRuntimeFailure("CROSS_J_SOURCE_HUB_SIGNER_MISSING", `CROSS_J_SOURCE_HUB_SIGNER_MISSING:${route.orderId}`);
+  if (!targetHubSignerId) throw haltRuntimeFailure("CROSS_J_TARGET_HUB_SIGNER_MISSING", `CROSS_J_TARGET_HUB_SIGNER_MISSING:${route.orderId}`);
+  if (!targetSignerId) throw haltRuntimeFailure("CROSS_J_TARGET_SIGNER_MISSING", `CROSS_J_TARGET_SIGNER_MISSING:${route.orderId}`);
   state.crossJurisdictionAuthorizations ||= new Map();
   const existing = state.crossJurisdictionAuthorizations.get(route.orderId);
   if (existing) {
     if (exactRouteBytes(existing) !== exactRouteBytes(route)) {
-      throw new Error(`CROSS_J_USER_AUTH_CONFLICT:${route.orderId}`);
+      throw haltRuntimeFailure("CROSS_J_USER_AUTH_CONFLICT", `CROSS_J_USER_AUTH_CONFLICT:${route.orderId}`);
     }
     // Identical auth is an honest retry (lost certified command / late hub).
     // Re-emit the source→hub prepare; do not absorb as a silent no-op.
@@ -127,7 +129,7 @@ const prepareRawCrossJurisdictionIntent = (
   outputs: EntityInput[],
 ): CrossJSetupResult => {
   if (route.status !== 'intent') {
-    throw new Error(`CROSS_J_RAW_PREPARE_STATUS_INVALID:${route.orderId}:${route.status}`);
+    throw haltRuntimeFailure("CROSS_J_RAW_PREPARE_STATUS_INVALID", `CROSS_J_RAW_PREPARE_STATUS_INVALID:${route.orderId}:${route.status}`);
   }
   if (isCrossJurisdictionRouteExpired(route, deterministicEntityTimestamp(state, env))) {
     addMessage(state, `❌ Cross-j prepare ${route.orderId} expired`);
@@ -161,7 +163,7 @@ const prepareRawCrossJurisdictionIntent = (
     && !existing.targetPull
   ) {
     if (materializedIntentBytes(route, existing) !== exactRouteBytes(existing)) {
-      throw new Error(`CROSS_J_RAW_PREPARE_CONFLICT:${route.orderId}`);
+      throw haltRuntimeFailure("CROSS_J_RAW_PREPARE_CONFLICT", `CROSS_J_RAW_PREPARE_CONFLICT:${route.orderId}`);
     }
     // A certified retry can outlive the raw intent that Account dispute
     // start/finality cancelled. It carries no exposure and is absorbed only
@@ -200,17 +202,17 @@ const prepareRawCrossJurisdictionIntent = (
       addMessage(state, `🌉 Cross-j prepare ${route.orderId} already materialized; replay ignored`);
       return { newState: state, outputs };
     }
-    throw new Error(`CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION", `CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION:${route.orderId}`);
   }
   if (existing) {
     if (exactRouteBytes(existing) !== exactRouteBytes(route)) {
-      throw new Error(`CROSS_J_RAW_PREPARE_CONFLICT:${route.orderId}`);
+      throw haltRuntimeFailure("CROSS_J_RAW_PREPARE_CONFLICT", `CROSS_J_RAW_PREPARE_CONFLICT:${route.orderId}`);
     }
     return { newState: state, outputs };
   }
   state.crossJurisdictionSwaps.set(route.orderId, cloneCrossJurisdictionRoute(route));
   const firstValidator = state.config.validators[0];
-  if (!firstValidator) throw new Error(`CROSS_J_SOURCE_HUB_PROPOSER_MISSING:${route.orderId}`);
+  if (!firstValidator) throw haltRuntimeFailure("CROSS_J_SOURCE_HUB_PROPOSER_MISSING", `CROSS_J_SOURCE_HUB_PROPOSER_MISSING:${route.orderId}`);
   outputs.push({ entityId: state.entityId, signerId: firstValidator, entityTxs: [] });
   addMessage(state, `🌉 Cross-j swap ${route.orderId} awaiting source-hub proposer commitments`);
   return { newState: state, outputs };
@@ -287,10 +289,10 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
   const hasSourcePull = route.sourcePull !== undefined;
   const hasTargetPull = route.targetPull !== undefined;
   if (hasSourcePull !== hasTargetPull) {
-    throw new Error(`CROSS_J_PREPARED_PAYLOAD_PARTIAL:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_PREPARED_PAYLOAD_PARTIAL", `CROSS_J_PREPARED_PAYLOAD_PARTIAL:${route.orderId}`);
   }
   if (localEntityId === sourceUserId || localEntityId === targetUserId) {
-    if (hasSourcePull) throw new Error(`CROSS_J_USER_AUTH_PREPARED_FORBIDDEN:${route.orderId}`);
+    if (hasSourcePull) throw haltRuntimeFailure("CROSS_J_USER_AUTH_PREPARED_FORBIDDEN", `CROSS_J_USER_AUTH_PREPARED_FORBIDDEN:${route.orderId}`);
     return authorizeCrossJurisdictionIntent(
       env,
       newState,
@@ -327,9 +329,7 @@ export const handleMaterializeCrossJurisdictionSwapEntityTx = (
   const expectedProposer = normalizeEntityRef(entityState.config.validators[0] || '');
   const claimedProposer = normalizeEntityRef(entityTx.data.proposerSignerId);
   if (!expectedProposer || claimedProposer !== expectedProposer) {
-    throw new Error(
-      `CROSS_J_MATERIALIZE_PROPOSER_INVALID:${claimedProposer || 'missing'}:${expectedProposer || 'missing'}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_MATERIALIZE_PROPOSER_INVALID", `CROSS_J_MATERIALIZE_PROPOSER_INVALID:${claimedProposer || 'missing'}:${expectedProposer || 'missing'}`);
   }
   const existing = entityState.crossJurisdictionSwaps?.get(entityTx.data.route.orderId);
   if (
@@ -343,15 +343,15 @@ export const handleMaterializeCrossJurisdictionSwapEntityTx = (
     // it. Absorb only the byte-exact materialization of that retired intent;
     // a mismatched terminal payload remains an integrity failure.
     if (materializedIntentBytes(entityTx.data.route, existing) !== exactRouteBytes(existing)) {
-      throw new Error(`CROSS_J_MATERIALIZE_INTENT_MISMATCH:${entityTx.data.route.orderId}`);
+      throw haltRuntimeFailure("CROSS_J_MATERIALIZE_INTENT_MISMATCH", `CROSS_J_MATERIALIZE_INTENT_MISMATCH:${entityTx.data.route.orderId}`);
     }
     return { newState: stateForEntityTx(entityState, options), outputs: [] };
   }
   if (!existing || existing.sourcePull || existing.targetPull || existing.status !== 'intent') {
-    throw new Error(`CROSS_J_MATERIALIZE_INTENT_MISSING:${entityTx.data.route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_MATERIALIZE_INTENT_MISSING", `CROSS_J_MATERIALIZE_INTENT_MISSING:${entityTx.data.route.orderId}`);
   }
   if (materializedIntentBytes(entityTx.data.route, existing) !== exactRouteBytes(existing)) {
-    throw new Error(`CROSS_J_MATERIALIZE_INTENT_MISMATCH:${entityTx.data.route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_MATERIALIZE_INTENT_MISMATCH", `CROSS_J_MATERIALIZE_INTENT_MISMATCH:${entityTx.data.route.orderId}`);
   }
   const capError = getCrossJurisdictionLocalUsdCapError(entityState, entityTx.data.route);
   if (capError) {
@@ -376,9 +376,9 @@ const buildSourceRegistrationTxs = (
   route: CrossJurisdictionSwapRoute,
 ): AccountTxTarget[] => {
   const sourcePull = route.sourcePull;
-  if (!sourcePull) throw new Error(`CROSS_J_REGISTER_SOURCE_PULL_MISSING:${route.orderId}`);
+  if (!sourcePull) throw haltRuntimeFailure("CROSS_J_REGISTER_SOURCE_PULL_MISSING", `CROSS_J_REGISTER_SOURCE_PULL_MISSING:${route.orderId}`);
   const accountId = findAccountKey(state, route.source.entityId);
-  if (!accountId) throw new Error(`CROSS_J_SOURCE_ACCOUNT_MISSING:${route.orderId}`);
+  if (!accountId) throw haltRuntimeFailure("CROSS_J_SOURCE_ACCOUNT_MISSING", `CROSS_J_SOURCE_ACCOUNT_MISSING:${route.orderId}`);
   return [
     {
       accountId,
@@ -424,9 +424,9 @@ const buildTargetRegistrationTxs = (
   route: CrossJurisdictionSwapRoute,
 ): AccountTxTarget[] => {
   const targetPull = route.targetPull;
-  if (!targetPull) throw new Error(`CROSS_J_REGISTER_TARGET_PULL_MISSING:${route.orderId}`);
+  if (!targetPull) throw haltRuntimeFailure("CROSS_J_REGISTER_TARGET_PULL_MISSING", `CROSS_J_REGISTER_TARGET_PULL_MISSING:${route.orderId}`);
   const accountId = findAccountKey(state, route.target.counterpartyEntityId);
-  if (!accountId) throw new Error(`CROSS_J_TARGET_ACCOUNT_MISSING:${route.orderId}`);
+  if (!accountId) throw haltRuntimeFailure("CROSS_J_TARGET_ACCOUNT_MISSING", `CROSS_J_TARGET_ACCOUNT_MISSING:${route.orderId}`);
   return [{
     accountId,
     tx: {
@@ -492,13 +492,13 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
     if (localPull) {
       const accountId = findAccountKey(newState, localPeer);
       const account = accountId ? newState.accounts.get(accountId) : undefined;
-      if (!account) throw new Error(`CROSS_J_REGISTER_ACCOUNT_MISSING:${route.orderId}:${localPeer}`);
+      if (!account) throw haltRuntimeFailure("CROSS_J_REGISTER_ACCOUNT_MISSING", `CROSS_J_REGISTER_ACCOUNT_MISSING:${route.orderId}:${localPeer}`);
       const pullTx = (localEntityId === sourceHubEntityId
         ? buildSourceRegistrationTxs(newState, route)
         : buildTargetRegistrationTxs(newState, route))
         .find(target => target.tx.type === 'cross_pull_lock')?.tx;
       if (!pullTx || pullTx.type !== 'cross_pull_lock') {
-        throw new Error(`CROSS_J_REGISTER_PULL_TX_MISSING:${route.orderId}`);
+        throw haltRuntimeFailure("CROSS_J_REGISTER_PULL_TX_MISSING", `CROSS_J_REGISTER_PULL_TX_MISSING:${route.orderId}`);
       }
       const admissionError = getPullLockAdmissionError(account.state, pullTx);
       if (admissionError) {
@@ -512,7 +512,7 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
   addMessage(newState, `🌉 Cross-j swap ${route.orderId} registered`);
   if (!openingTransition || route.status !== 'resting') return { newState, outputs: [] };
   if (!route.sourcePull || !route.targetPull) {
-    throw new Error(`CROSS_J_REGISTER_OPENING_PULLS_MISSING:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_REGISTER_OPENING_PULLS_MISSING", `CROSS_J_REGISTER_OPENING_PULLS_MISSING:${route.orderId}`);
   }
 
   if (localEntityId === sourceHubEntityId) {

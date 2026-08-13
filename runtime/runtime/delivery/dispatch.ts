@@ -43,6 +43,7 @@ import {
 } from './pending';
 import { planEntityOutputs } from './plan';
 import { recordRuntimeSecurityIncident } from '../observability/security-incidents';
+import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
 
 const routeLog = createStructuredLogger('network.route');
 
@@ -428,13 +429,8 @@ const dispatchP2POutputEnvelope = (
       ' code=' + result.code + ' inputs=' + sendable.length);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const transient = [
-      'P2P_ENTITY_INPUTS_NOT_DELIVERED',
-      'P2P_ENTITY_INPUTS_SEND_THROW',
-      'P2P_TRANSPORT',
-      'WebSocket',
-    ].some(marker => message.includes(marker));
-    if ((delivery !== null && shouldRetryDelivery(delivery)) || transient) {
+    const retryable = error instanceof FailureDispositionError && error.disposition === 'retry';
+    if ((delivery !== null && shouldRetryDelivery(delivery)) || retryable) {
       deferOutputsAfterDeliveryFailure(
         env,
         deps,

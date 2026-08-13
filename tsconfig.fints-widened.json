@@ -1,8 +1,9 @@
 {
   "extends": "./tsconfig.runtime.json",
   "include": [
-    "runtime/__tests__/types/fints/apply-account-tx-result.widened.ts",
-    "runtime/__tests__/types/fints/account-consensus-result.widened.ts"
+    "runtime/__tests__/types/fints/results/apply-account-tx-result.widened.ts",
+    "runtime/__tests__/types/fints/results/account-consensus-result.widened.ts",
+    "runtime/__tests__/types/fints/entity/failure-disposition.widened.ts"
   ],
   "exclude": []
 }

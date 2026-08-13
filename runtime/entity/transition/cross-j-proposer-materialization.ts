@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
+
 import {
   buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullReveal,
@@ -101,7 +103,7 @@ const crossJOpeningLegs = (txs: readonly AccountTx[]): CrossJOpeningLeg[] => {
   for (const tx of txs) {
     if (tx.type !== 'cross_pull_lock' || !tx.data.crossJurisdiction || !tx.data.crossJurisdictionRoute) continue;
     const orderId = normalized(tx.data.crossJurisdiction.orderId);
-    if (!orderId) throw new Error('CROSS_J_OPENING_ORDER_ID_REQUIRED');
+    if (!orderId) throw haltRuntimeFailure("CROSS_J_OPENING_ORDER_ID_REQUIRED", 'CROSS_J_OPENING_ORDER_ID_REQUIRED');
     byOrderId.set(orderId, { orderId, route: tx.data.crossJurisdictionRoute });
   }
   return [...byOrderId.values()].sort((left, right) => left.orderId.localeCompare(right.orderId));
@@ -143,7 +145,7 @@ const pairedCrossJSiblingAccount = (localEntityId: string, route: CrossJurisdict
       accountId: normalized(route.source.counterpartyEntityId),
     };
   }
-  throw new Error(`CROSS_J_OPENING_LOCAL_ROLE_INVALID:${route.orderId}:${local}`);
+  throw haltRuntimeFailure("CROSS_J_OPENING_LOCAL_ROLE_INVALID", `CROSS_J_OPENING_LOCAL_ROLE_INVALID:${route.orderId}:${local}`);
 };
 
 const siblingKey = (sibling: CrossJSiblingAccount): string =>
@@ -152,12 +154,12 @@ const siblingKey = (sibling: CrossJSiblingAccount): string =>
 const crossJOpeningOrderId = (tx: AccountTx): string | undefined => {
   if (tx.type === 'cross_pull_lock' && tx.data.crossJurisdiction) {
     const orderId = normalized(tx.data.crossJurisdiction.orderId);
-    if (!orderId) throw new Error('CROSS_J_OPENING_ORDER_ID_REQUIRED');
+    if (!orderId) throw haltRuntimeFailure("CROSS_J_OPENING_ORDER_ID_REQUIRED", 'CROSS_J_OPENING_ORDER_ID_REQUIRED');
     return orderId;
   }
   if (tx.type === 'swap_offer' && tx.data.crossJurisdiction) {
     const orderId = normalized(tx.data.crossJurisdiction.orderId);
-    if (!orderId) throw new Error('CROSS_J_OPENING_ORDER_ID_REQUIRED');
+    if (!orderId) throw haltRuntimeFailure("CROSS_J_OPENING_ORDER_ID_REQUIRED", 'CROSS_J_OPENING_ORDER_ID_REQUIRED');
     return orderId;
   }
   return undefined;
@@ -275,7 +277,7 @@ export const selectCrossJOpeningAccountProposalTxs = (
   for (const leg of localLegs) {
     const sibling = pairedCrossJSiblingAccount(state.entityId, leg.route);
     if (!sibling.entityId || !sibling.signerId || !sibling.accountId) {
-      throw new Error(`CROSS_J_OPENING_SIBLING_BINDING_REQUIRED:${leg.orderId}`);
+      throw haltRuntimeFailure("CROSS_J_OPENING_SIBLING_BINDING_REQUIRED", `CROSS_J_OPENING_SIBLING_BINDING_REQUIRED:${leg.orderId}`);
     }
     const key = siblingKey(sibling);
     const group = localGroups.get(key) ?? { sibling, orderIds: new Set<string>() };
@@ -290,10 +292,10 @@ export const selectCrossJOpeningAccountProposalTxs = (
       candidate =>
         normalized(candidate.entityId) === sibling.entityId && normalized(candidate.signerId) === sibling.signerId,
     );
-    if (!replica) throw new Error(`CROSS_J_OPENING_SIBLING_REPLICA_MISSING:${siblingKey(sibling)}`);
+    if (!replica) throw haltRuntimeFailure("CROSS_J_OPENING_SIBLING_REPLICA_MISSING", `CROSS_J_OPENING_SIBLING_REPLICA_MISSING:${siblingKey(sibling)}`);
     const siblingAccountKey = findAccountKey(replica.state, sibling.accountId);
     const siblingAccount = siblingAccountKey ? replica.state.accounts.get(siblingAccountKey) : undefined;
-    if (!siblingAccount) throw new Error(`CROSS_J_OPENING_SIBLING_ACCOUNT_MISSING:${siblingKey(sibling)}`);
+    if (!siblingAccount) throw haltRuntimeFailure("CROSS_J_OPENING_SIBLING_ACCOUNT_MISSING", `CROSS_J_OPENING_SIBLING_ACCOUNT_MISSING:${siblingKey(sibling)}`);
     // Only a pending OPENING freezes the cohort. An unrelated pending frame
     // (credit, rebalance, …) must not hide opening legs already queued in
     // the sibling mempool — otherwise dual-Runtime credit ACKs permanently
@@ -319,7 +321,7 @@ export const selectCrossJOpeningAccountProposalTxs = (
       const selectedOrderIds = new Set(commonOrderIds);
       const selected = selectOpeningTxs(account.mempool, selectedOrderIds);
       if (selected.length > MAX_ACCOUNT_FRAME_TXS) {
-        throw new Error(`CROSS_J_OPENING_RECIPROCAL_COHORT_TOO_LARGE:${selected.length}`);
+        throw haltRuntimeFailure("CROSS_J_OPENING_RECIPROCAL_COHORT_TOO_LARGE", `CROSS_J_OPENING_RECIPROCAL_COHORT_TOO_LARGE:${selected.length}`);
       }
       return selected;
     }

@@ -30,6 +30,7 @@ import {
   cloneIsolatedRuntimeInput,
 } from '../../runtime/input-pipeline/input-clone';
 import { assertRuntimeInputCapabilitiesAuthorized } from '../../runtime/transactions/internal-tx-auth';
+import { decodeRuntimeConfig } from './runtime-machine-schema';
 
 export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => {
   markRestoredJSubmitRuntimeTxs(runtimeInput.runtimeTxs);
@@ -464,7 +465,10 @@ export const restoreDurableRuntimeSnapshot = (
     env.runtimeMempool = cloneDurableRuntimeMempool(runtimeInput as RuntimeInput);
   }
   if (snapshot['runtimeConfig'] && typeof snapshot['runtimeConfig'] === 'object') {
-    env.runtimeConfig = structuredClone(snapshot['runtimeConfig']) as RuntimeReplica['runtimeConfig'];
+    env.runtimeConfig = decodeRuntimeConfig(
+      snapshot['runtimeConfig'],
+      'RUNTIME_SNAPSHOT_RUNTIME_CONFIG',
+    );
   }
   const retainedRuntimeState = { ...(env.infrastructure ?? {}) };
   for (const key of DURABLE_RUNTIME_STATE_KEYS) delete retainedRuntimeState[key];

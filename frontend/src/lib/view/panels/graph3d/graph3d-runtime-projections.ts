@@ -1,5 +1,6 @@
 import type { RuntimeAdapterGraphFrame } from '@xln/runtime/api/public/runtime-module';
 import type { Runtime } from '$lib/stores/runtimeStore';
+import type { EnvSnapshot, RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
 import type { NetworkMachineRuntimeState } from '$lib/stores/network/networkMachineRuntimeStore';
 import {
   projectRuntimeEnv,
@@ -14,7 +15,7 @@ export type RuntimeGraphProjectionInputs = {
   scope: string;
   networkState: NetworkMachineRuntimeState;
   liveRemoteFrames: Map<string, RuntimeAdapterGraphFrame>;
-  currentEnv: any;
+  currentEnv: RuntimeReplica | EnvSnapshot | null;
 };
 
 /** Projects every runtime source before canonicity selection merges duplicate entities. */

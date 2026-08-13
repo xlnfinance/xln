@@ -444,8 +444,7 @@ const vapidKeyBytes = (base64Url: string): ArrayBuffer => {
 };
 
 const configuredWebPushPublicKey = (): string => {
-  const meta = import.meta as unknown as { env?: Record<string, string | undefined> };
-  return String(meta.env?.['VITE_XLN_WEB_PUSH_PUBLIC_KEY'] || '').trim();
+  return String(import.meta.env?.['VITE_XLN_WEB_PUSH_PUBLIC_KEY'] || '').trim();
 };
 
 const requestWebPushToken = async (): Promise<PushWakeDeviceToken | null> => {

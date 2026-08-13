@@ -1,4 +1,5 @@
 import type { EntityState } from '../../../entity/types';
+import { retryFailure } from '../../../protocol/errors/failure-taxonomy';
 import type {
   JurisdictionEvent,
   JurisdictionEventBlock,
@@ -490,7 +491,10 @@ export const buildUnsignedJEventRangeAtHeight = (
   const baseHeight = state.lastFinalizedJHeight;
   if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight <= baseHeight) return null;
   if (scannedThroughHeight > history.scannedThroughHeight) {
-    throw new Error(`J_PREFIX_LOCAL_HISTORY_BEHIND:${history.scannedThroughHeight}:${scannedThroughHeight}`);
+    throw retryFailure(
+      'J_PREFIX_LOCAL_HISTORY_BEHIND',
+      `J_PREFIX_LOCAL_HISTORY_BEHIND:${history.scannedThroughHeight}:${scannedThroughHeight}`,
+    );
   }
   const tipBlockHash = history.blockHashes.get(scannedThroughHeight);
   if (!tipBlockHash) throw new Error(`J_PREFIX_LOCAL_TIP_HASH_MISSING:${scannedThroughHeight}`);
@@ -532,7 +536,10 @@ export const buildValidatorJPrefixHeaders = (
   const baseHeight = state.lastFinalizedJHeight;
   if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight <= baseHeight) return [];
   if (scannedThroughHeight > history.scannedThroughHeight) {
-    throw new Error(`J_PREFIX_LOCAL_HISTORY_BEHIND:${history.scannedThroughHeight}:${scannedThroughHeight}`);
+    throw retryFailure(
+      'J_PREFIX_LOCAL_HISTORY_BEHIND',
+      `J_PREFIX_LOCAL_HISTORY_BEHIND:${history.scannedThroughHeight}:${scannedThroughHeight}`,
+    );
   }
   return Array.from({ length: scannedThroughHeight - baseHeight }, (_, index) => {
     const jHeight = baseHeight + index + 1;

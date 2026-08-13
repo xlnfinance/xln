@@ -191,7 +191,7 @@ export const serializeVaultState = (state: RuntimesState): string =>
     runtimes: Object.fromEntries(
       Object.entries(state.runtimes).map(([runtimeId, runtime]) => [
         runtimeId,
-        redactVaultRuntimeForPersistence(runtime as unknown as Record<string, unknown>),
+        redactVaultRuntimeForPersistence(runtime),
       ]),
     ),
   });

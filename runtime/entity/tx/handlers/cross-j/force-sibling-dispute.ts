@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 import { prepareEntityTxState } from '../../../state-clone';
 import { handlePrepareDispute } from '../dispute';
 import { normalizeEntityRef } from '../../account-key';
@@ -93,21 +95,19 @@ export const handleCrossJurisdictionForceSiblingDisputeEntityTx = async (
     // Soft-skip here would break the paired-clock invariant (I1): one leg's
     // DisputeStarted must force-start the sibling. Missing route mirror after
     // a live observed dispute is a critical state-loss, not a no-op.
-    throw new Error(`CROSS_J_SIBLING_DISPUTE_ROUTE_MISSING:${routeId}`);
+    throw haltRuntimeFailure("CROSS_J_SIBLING_DISPUTE_ROUTE_MISSING", `CROSS_J_SIBLING_DISPUTE_ROUTE_MISSING:${routeId}`);
   }
   if (!route.sourcePull || !route.targetPull) {
-    throw new Error(`CROSS_J_SIBLING_DISPUTE_PULLS_MISSING:${routeId}`);
+    throw haltRuntimeFailure("CROSS_J_SIBLING_DISPUTE_PULLS_MISSING", `CROSS_J_SIBLING_DISPUTE_PULLS_MISSING:${routeId}`);
   }
   const counterpartyEntityId = localDisputeCounterparty(route, self);
   if (!counterpartyEntityId) {
-    throw new Error(`CROSS_J_SIBLING_DISPUTE_NOT_PARTICIPANT:${routeId}:self=${self}`);
+    throw haltRuntimeFailure("CROSS_J_SIBLING_DISPUTE_NOT_PARTICIPANT", `CROSS_J_SIBLING_DISPUTE_NOT_PARTICIPANT:${routeId}:self=${self}`);
   }
   const observed = normalizeEntityRef(observedCounterpartyEntityId || '');
   if (!observedIsOtherLegParticipant(route, self, observed)) {
-    throw new Error(
-      `CROSS_J_SIBLING_DISPUTE_OBSERVED_LEG_INVALID:${routeId}:` +
-      `observed=${observed}:self=${self}:local=${counterpartyEntityId}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_SIBLING_DISPUTE_OBSERVED_LEG_INVALID", `CROSS_J_SIBLING_DISPUTE_OBSERVED_LEG_INVALID:${routeId}:` +
+      `observed=${observed}:self=${self}:local=${counterpartyEntityId}`);
   }
   const prepared = await handlePrepareDispute(
     newState,

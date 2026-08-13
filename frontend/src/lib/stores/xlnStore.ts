@@ -1809,8 +1809,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     const fail = (fnName: string): never => {
       throw new Error(`XLN_NOT_READY:${fnName}`);
     };
-    const failFn = <T extends (...args: unknown[]) => unknown>(fnName: string): T =>
-      (((..._args: unknown[]) => fail(fnName)) as unknown as T);
+    const failFn = (fnName: string): (() => never) => () => fail(fnName);
 
     return {
       deriveDelta: failFn('deriveDelta'),

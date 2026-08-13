@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
+
 import type { EntityState } from '../../../../../types';
 import {
   applyCommand,
@@ -121,10 +123,8 @@ export const containSamePairFailure = (
     pass.recordDebugProjectionReject(accountId, offerId, `pair-error:${message}`);
     return;
   }
-  throw new Error(
-    `ORDERBOOK_PAIR_COMMAND_FAILED: pair=${pairId} account=${accountId} ` +
-    `offer=${offerId} error=${message}`,
-  );
+  throw haltRuntimeFailure("ORDERBOOK_PAIR_COMMAND_FAILED", `ORDERBOOK_PAIR_COMMAND_FAILED: pair=${pairId} account=${accountId} ` +
+    `offer=${offerId} error=${message}`);
 };
 
 export const sweepSamePairOutOfBandOffers = (
@@ -156,9 +156,7 @@ export const sweepSamePairOutOfBandOffers = (
     if (pass.suspendedSameOrderIds.has(order.orderId)) continue;
     const liveOffer = buildLiveSameOfferMeta(pass, order.orderId);
     if (!liveOffer) {
-      throw new Error(
-        `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`,
-      );
+      throw haltRuntimeFailure("ORDERBOOK_SAME_SNAPSHOT_MISSING", `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`);
     }
     if (order.priceTicks >= minAllowed && order.priceTicks <= maxAllowed) continue;
     removed += 1;
@@ -232,9 +230,7 @@ export const assertSameBookMatchesAccounts = (
       pass.orderbookOfferMeta.get(order.orderId) ??
       buildLiveSameOfferMeta(pass, order.orderId);
     if (!meta) {
-      throw new Error(
-        `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`,
-      );
+      throw haltRuntimeFailure("ORDERBOOK_SAME_SNAPSHOT_MISSING", `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`);
     }
     if (
       hasQueuedSwapResolveForEntityState(
@@ -257,11 +253,9 @@ export const assertSameBookMatchesAccounts = (
       order.ownerId !== (meta.makerIsLeft ? meta.fromEntity : meta.toEntity) ||
       order.qtyLots !== baseAmount / getSwapLotScale(baseTokenId)
     ) {
-      throw new Error(
-        `ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} ` +
+      throw haltRuntimeFailure("ORDERBOOK_CACHE_MISMATCH", `ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} ` +
         `storedPrice=${order.priceTicks.toString()} ` +
-        `canonicalPrice=${meta.priceTicks.toString()}`,
-      );
+        `canonicalPrice=${meta.priceTicks.toString()}`);
     }
   }
   return book;

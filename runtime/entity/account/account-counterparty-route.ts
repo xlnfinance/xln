@@ -3,8 +3,10 @@ import { ethers } from 'ethers';
 import type { AccountReplica } from '../../types/account';
 import type { CertifiedBoardNodeStore } from '../../types/entity-board-registry';
 import { verifyCanonicalHanko } from '../../hanko/claims';
+import { invalidHanko } from '../../hanko/codec';
 import { resolveObserverCertifiedBoardRecord } from '../../jurisdiction/machine/board-registry';
 import type { EntityState } from '../types';
+import { toUnixMs, unixMsToUnixSFloor } from '../../protocol/units';
 
 const normalize = (value: string): string => String(value || '').trim().toLowerCase();
 
@@ -31,7 +33,7 @@ export const resolveObserverCertifiedAccountCounterpartyProposer = (
     throw new Error(`ACCOUNT_COUNTERPARTY_ROUTE_FRAME_HASH_INVALID:${frameHash || 'missing'}`);
   }
   const expectedTarget = ethers.toBeHex(BigInt(counterparty), 32).toLowerCase() as `0x${string}`;
-  const timestampSeconds = Math.floor(observerState.timestamp / 1_000);
+  const timestampSeconds = unixMsToUnixSFloor(toUnixMs(observerState.timestamp));
   const verified = verifyCanonicalHanko({
     hanko,
     digest: frameHash,
@@ -48,12 +50,12 @@ export const resolveObserverCertifiedAccountCounterpartyProposer = (
   const target = verified.claims.at(-1);
   const firstMember = String(target?.members[0]?.entityId || '').toLowerCase();
   if (!target || target.entityId !== expectedTarget) {
-    throw new Error(
+    invalidHanko(
       `HANKO_PROPOSER_TARGET_MISMATCH:expected=${expectedTarget}:actual=${target?.entityId ?? 'missing'}`,
     );
   }
   if (!/^0x0{24}[0-9a-f]{40}$/.test(firstMember)) {
-    throw new Error(`HANKO_PROPOSER_FIRST_MEMBER_INVALID:${firstMember || 'missing'}`);
+    invalidHanko(`HANKO_PROPOSER_FIRST_MEMBER_INVALID:${firstMember || 'missing'}`);
   }
   return ethers.getAddress(`0x${firstMember.slice(-40)}`).toLowerCase();
 };

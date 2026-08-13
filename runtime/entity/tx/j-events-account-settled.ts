@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
+
 import type { EntityCandidateEffect, EntityState } from '../types';
 import type { AccountReplica } from '../../types/account';
 import { addMessage } from '../frame-events';
@@ -56,7 +58,7 @@ export const applyAccountSettledJEvent = (
     dirtyAccounts,
   } = context;
   if (event.type !== 'AccountSettled') {
-    throw new Error(`J_EVENT_ACCOUNT_SETTLED_ROUTE_MISMATCH:${event.type}`);
+    throw haltRuntimeFailure("J_EVENT_ACCOUNT_SETTLED_ROUTE_MISMATCH", `J_EVENT_ACCOUNT_SETTLED_ROUTE_MISMATCH:${event.type}`);
   }
   const { leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral } =
     event.data;

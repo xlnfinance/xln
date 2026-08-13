@@ -225,13 +225,10 @@ export const admitAtomicCrossJAccountInputs = (
     for (const reason of reasonByInputIndex.values()) {
       reasonCounts[reason] = (reasonCounts[reason] ?? 0) + 1;
     }
-    const cohortBroken = [...reasonByInputIndex.values()].some(reason =>
-      reason === 'unpaired' ||
-      reason.startsWith('unpaired(') ||
-      reason === 'pair-match-failed' ||
-      reason.startsWith('pair-match-failed(') ||
-      reason === 'atomic-group-invalid' ||
-      reason.startsWith('atomic-group-invalid('),
+    const cohortBroken = initial.rejectedLegs.some(leg =>
+      leg.reason === 'unpaired' ||
+      leg.reason === 'pair-match-failed' ||
+      leg.reason === 'atomic-group-invalid',
     );
     env.warn('network', 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH', {
       received: coalescedInputs.length,

@@ -9,7 +9,9 @@ import {
   toEntityId,
   toSignerId,
   toJId,
+  toRuntimeId,
   toEpAddress,
+  createAccountPairKey,
 
   // Validators
   isValidEntityId,
@@ -59,6 +61,19 @@ describe('Identity System - Type Constructors', () => {
   test('toJId creates branded JId', () => {
     const jId = toJId('1');
     expect(jId).toBe('1');
+  });
+
+  test('RuntimeId requires canonical lowercase address bytes', () => {
+    const runtimeId = `0x${'ab'.repeat(20)}`;
+    expect(toRuntimeId(runtimeId)).toBe(runtimeId);
+    expect(() => toRuntimeId(`0x${'AB'.repeat(20)}`)).toThrow('Invalid RuntimeId');
+  });
+
+  test('AccountPairKey is ordered and rejects a self-account', () => {
+    const left = `0x${'11'.repeat(32)}`;
+    const right = `0x${'22'.repeat(32)}`;
+    expect(createAccountPairKey(right, left)).toBe(`${left}:${right}`);
+    expect(() => createAccountPairKey(left, left)).toThrow('requires distinct entities');
   });
 
   test('toEpAddress creates branded address', () => {

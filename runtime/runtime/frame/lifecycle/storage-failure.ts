@@ -1,6 +1,5 @@
 import { clearPendingAuditEvents } from '../../observability/env-events';
-import { transitionRuntimeLifecycle } from '../../lifecycle';
-import { ensureRuntimeInfrastructure } from '../../infrastructure/runtime-infrastructure';
+import { haltRuntimeRequiresOperator } from '../../lifecycle';
 import type { RuntimeReplica } from '../../types';
 import type { FrameExecutionState } from '../input/execution-state';
 import {
@@ -10,20 +9,6 @@ import {
 import type { RuntimeFrameCommitStatus } from '../../../storage/commit/commit-status';
 
 export type { RuntimeFrameCommitStatus } from '../../../storage/commit/commit-status';
-
-const haltRuntimeForRecovery = (
-  runtime: RuntimeReplica,
-  message: string,
-): void => {
-  const state = ensureRuntimeInfrastructure(runtime);
-  transitionRuntimeLifecycle(state, 'halted');
-  state.fatalDebugPayload = {
-    message,
-    height: Math.max(0, runtime.state.height),
-    timestamp: Math.max(0, runtime.state.timestamp),
-  };
-  state.stopLoop?.();
-};
 
 /**
  * Resolve a storage error without guessing whether an unknown WAL append won.
@@ -46,12 +31,12 @@ export const handleRuntimeFrameStorageFailure = async (
   frame.commitDisposition = status;
   frame.reliableReceiptStateDurable = status === 'committed';
   if (status === 'committed') {
-    haltRuntimeForRecovery(
+    haltRuntimeRequiresOperator(
       publishRuntimeFrameTransaction(frame.transaction),
       error.message,
     );
     return;
   }
 
-  haltRuntimeForRecovery(liveRuntime, error.message);
+  haltRuntimeRequiresOperator(liveRuntime, error);
 };

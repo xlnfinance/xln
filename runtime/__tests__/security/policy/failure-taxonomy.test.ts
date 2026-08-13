@@ -9,10 +9,28 @@ import {
   classifyRuntimeJBatchFailure,
   classifyRuntimeMarketMakerFailure,
   classifyRuntimeTransportFailure,
+  disputeFailure,
+  haltRuntimeFailure,
   isRuntimeFailureSignal,
+  rejectFailure,
+  retryFailure,
 } from '../../../protocol/errors/failure-taxonomy';
 
 describe('runtime failure taxonomy', () => {
+  test('uses exact typed dispositions without parsing human text', () => {
+    expect(rejectFailure('PEER_MALFORMED', 'same text')).toMatchObject({
+      disposition: 'reject', code: 'PEER_MALFORMED', message: 'same text',
+    });
+    expect(retryFailure('HEAD_STALE', 'same text')).toMatchObject({
+      disposition: 'retry', code: 'HEAD_STALE', message: 'same text',
+    });
+    expect(disputeFailure('SIGNED_REPLAY_UNSAFE', 'same text')).toMatchObject({
+      disposition: 'dispute', code: 'SIGNED_REPLAY_UNSAFE', message: 'same text',
+    });
+    expect(haltRuntimeFailure('STATE_ROOT_DIVERGED', 'same text')).toMatchObject({
+      disposition: 'halt_runtime', code: 'STATE_ROOT_DIVERGED', message: 'same text',
+    });
+  });
   test('validates runtime failure signal shape', () => {
     const failure = classifyRuntimeTransportFailure('NO_HEALTHY_HUB_API_AVAILABLE', 'relay not ready');
     expect(isRuntimeFailureSignal(failure)).toBe(true);

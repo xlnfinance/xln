@@ -1,7 +1,7 @@
 import type {
   HandleAccountInputResult,
   ProposeAccountFrameResult,
-} from '../../../account/consensus/types';
+} from '../../../../account/consensus/types';
 
 type IllegalAccountInputSuccessWithError = {
   ok: true;

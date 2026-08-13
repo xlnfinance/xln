@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
+
 import { recordAcceptedUsdAskPrice, type BookState } from '../../../../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../../infra/logger';
 import { HEAVY_LOGS } from '../../../../../../infra/debug-flags';
@@ -72,10 +74,8 @@ const queueSameTradeFills = (
     }
     const account = pass.hubState.accounts.get(accountId);
     if (!account) {
-      throw new Error(
-        `ORDERBOOK_ACCOUNT_LOOKUP_FAILED: offer=${offerId} accountId=${accountId} ` +
-        `known=[${[...pass.hubState.accounts.keys()].join(',')}]`,
-      );
+      throw haltRuntimeFailure("ORDERBOOK_ACCOUNT_LOOKUP_FAILED", `ORDERBOOK_ACCOUNT_LOOKUP_FAILED: offer=${offerId} accountId=${accountId} ` +
+        `known=[${[...pass.hubState.accounts.keys()].join(',')}]`);
     }
     const plan = buildSameFillResolvePlan({
       accountId,

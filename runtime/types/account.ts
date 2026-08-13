@@ -674,6 +674,11 @@ export interface SettlementWorkspace {
 
   // Metadata
   lastModifiedByLeft: boolean;                // Who last proposed/updated
+  /**
+   * `draft` is reserved for a future local editing phase. The current canonical
+   * producer starts at `awaiting_counterparty`; retain the explicit phase so a
+   * future editor does not overload that bilateral state or add a parallel type.
+   */
   status: 'draft' | 'awaiting_counterparty' | 'ready_to_submit' | 'submitted';
   memo?: string;                              // Human-readable description
   revision: number;                           // Increments on each update

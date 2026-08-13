@@ -199,6 +199,10 @@ function isLockedEntityFrame(frame: EntityFrame): frame is LockedEntityFrame {
 - Preserve Account and Entity Hanko witness stripping exactly.
 - A verified/certified type may be constructed only by its verifier.
 
+Account proposals and ACKs follow the same rule. Their draft/certified views
+MUST refine the existing `frameHanko` and optional dispute-seal Hanko fields;
+they MUST NOT add a second status or clone the frame to claim certification.
+
 ### 4.4 Lifecycle state
 
 Use a stored discriminated union only when the discriminant is already part of
@@ -340,6 +344,11 @@ The constructor MUST:
 6. perform no I/O, time reads, or randomness inside a reducer;
 7. never return a partial object.
 
+The return type MUST be the narrowest phase that the constructor proves. A
+constructor that can only create `UnsignedSettlementWorkspace` must not return
+the wider `SettlementWorkspace`, because that discards a fact the caller needs
+to make illegal transitions unrepresentable.
+
 AST gates SHOULD forbid direct discriminant-bearing object literals outside the
 owner module when that pattern is practical.
 
@@ -419,6 +428,11 @@ Control flow MUST NOT depend on `message.startsWith`, `includes`, regexes over
 human text, or emoji. Use a literal `code`, typed payload, and `instanceof` at
 the trust boundary. Log messages may remain stable for operators but are not
 the machine taxonomy.
+
+This is enforced structurally: production catch/classifier code may inspect a
+typed disposition or an exact code catalog, never `error.message`. Before a
+mainnet candidate, every expected failure at a money/authority boundary MUST
+be categorized; an uncategorized failure still halts only the affected Runtime.
 
 ### 9.2 Fail-stop Runtime, live host
 
@@ -567,6 +581,11 @@ type Equal<A, B> =
 type Expect<T extends true> = T;
 type Covered = Expect<Equal<keyof HtlcRoute, HtlcRouteField>>;
 ```
+
+A multiplexed protocol envelope needs coverage by operation, not merely one
+top-level `keyof` assertion. `EntityInput` must account for every field in its
+clone, merge, hash, receipt, and routing policies. Adding a field without an
+explicit decision on all five axes is a compile-time failure.
 
 Keep utilities shallow and compatible with both supported TypeScript compilers.
 

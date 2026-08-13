@@ -11,14 +11,12 @@
   import { get } from 'svelte/store';
   import { onDestroy } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
-  // @ts-ignore - Vite raw import
   import ahbScenarioCode from '../../../../../runtime/scenarios/consensus/ahb.ts?raw';
-  // @ts-ignore - Vite raw import
-  import settleScenarioCode from '../../../../../runtime/scenarios/settlement/settle.ts?raw';
   import { shortAddress } from '$lib/utils/format';
   import { getXLN, submitRuntimeInput } from '$lib/stores/xlnStore';
-  import type { RuntimeInput, XLNModule } from '@xln/runtime/api/public/runtime-module';
+  import type { EnvSnapshot, RuntimeInput, RuntimeReplica, XLNModule } from '@xln/runtime/api/public/runtime-module';
   import type { EntityReplica } from '@xln/runtime/entity/types';
+  import type { JurisdictionConfig } from '@xln/runtime/protocol/config/jurisdiction-config';
   import type { JAdapter } from '@xln/runtime/jurisdiction/adapter';
   import { defaultAccountDisputeConfigForRoleEvidence } from '@xln/runtime/account/config/dispute-config';
   import { computeAddress, hexlify } from 'ethers';
@@ -27,8 +25,8 @@
   import SolvencyPanel from './solvency/SolvencyPanel.svelte';
 
   // Receive isolated env as props (passed from View.svelte) - REQUIRED
-  export let runtimeFrameEnv: Writable<any>;
-  export let runtimeFrameHistory: Writable<any[]>;
+  export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
+  export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
   export let runtimeFrameTimeIndex: Writable<number>;
   export let runtimeFrameIsLive: Writable<boolean>;
 
@@ -42,6 +40,7 @@
   let currentMode: Mode = 'economy';
   let loading = false;
   let lastAction = '';
+  const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
   // Reserve operations state
   let selectedEntityForMint = '';
@@ -127,7 +126,6 @@
   }
 
   async function ingressRuntimeInput(
-    _XLN: any,
     input: ArchitectRuntimeInput,
     action = 'runtime action'
   ): Promise<void> {
@@ -151,7 +149,7 @@
     return true;
   }
 
-  function publishCurrentEnv(frames: any[] = $runtimeFrameEnv?.history || []): void {
+  function publishCurrentEnv(frames: EnvSnapshot[] = $runtimeFrameEnv?.history || []): void {
     runtimeFrameIsLive.set(true);
     runtimeFrameTimeIndex.set(-1);
     runtimeFrameHistory.set(frames);
@@ -166,7 +164,6 @@
     }
     stopFedPaymentLoop();
     $runtimeFrameEnv.state.eReplicas.clear();
-    $runtimeFrameEnv.runtimeInput = { runtimeTxs: [], entityInputs: [], jInputs: [] } as RuntimeInput;
     $runtimeFrameEnv.history = [];
     publishCurrentEnv([]);
     lastAction = message;
@@ -193,42 +190,70 @@
     return null;
   }
 
-  function ensureScenarioEnv(XLN: any, label: string): void {
+  function ensureScenarioEnv(XLN: XLNModule, label: string): RuntimeReplica {
     let seed = resolveRuntimeSeed();
     if (seed === null || seed === undefined) {
       seed = DEMO_RUNTIME_SEED;
       console.warn(`[${label}] No runtime seed found; using demo seed.`);
     }
-    if (!$runtimeFrameEnv) {
-      $runtimeFrameEnv = XLN.createEmptyEnv(seed ?? null);
-      runtimeFrameEnv.set($runtimeFrameEnv);
-    }
+    const env = $runtimeFrameEnv ?? XLN.createEmptyEnv(seed ?? null);
+    if (!$runtimeFrameEnv) runtimeFrameEnv.set(env);
 
     // Dev Lab executes against a detached projection only. It must never use
     // the live Runtime's WAL, adapters, P2P handles, or persistence controls.
-    $runtimeFrameEnv.scenarioMode = true;
-    $runtimeFrameEnv.scenarioJAdapterMode = 'browservm';
-    $runtimeFrameEnv.runtimeConfig = {
-      ...$runtimeFrameEnv.runtimeConfig,
-      storage: { ...$runtimeFrameEnv.runtimeConfig?.storage, enabled: false },
+    env.scenarioMode = true;
+    env.scenarioJAdapterMode = 'browservm';
+    env.runtimeConfig = {
+      ...env.runtimeConfig,
+      storage: { ...env.runtimeConfig?.storage, enabled: false },
     };
-    if ($runtimeFrameEnv.infrastructure) {
+    if (env.infrastructure) {
       throw new Error(`${label}: detached scenario unexpectedly owns live infrastructure`);
     }
 
-    if (seed !== null && seed !== undefined && $runtimeFrameEnv.runtimeSeed !== seed) {
-      $runtimeFrameEnv.runtimeSeed = seed;
+    if (seed !== null && seed !== undefined && env.runtimeSeed !== seed) {
+      env.runtimeSeed = seed;
     }
 
-    if ($runtimeFrameEnv.runtimeSeed === undefined || $runtimeFrameEnv.runtimeSeed === null) {
+    if (env.runtimeSeed === undefined || env.runtimeSeed === null) {
       throw new Error(`${label}: runtimeSeed missing - unlock vault or set XLN_RUNTIME_SEED`);
     }
 
-    if (!$runtimeFrameEnv.state.eReplicas) {
-      $runtimeFrameEnv.state.eReplicas = new Map();
+    if (!env.state.eReplicas) {
+      env.state.eReplicas = new Map();
     }
 
-    runtimeFrameEnv.set($runtimeFrameEnv);
+    runtimeFrameEnv.set(env);
+    return env;
+  }
+
+  function requireRuntimeEnv(action: string): RuntimeReplica {
+    const env = $runtimeFrameEnv;
+    if (!env) throw new Error(`${action}: embedded runtime workspace is unavailable`);
+    return env;
+  }
+
+  function requireActiveJurisdiction(env: RuntimeReplica): JurisdictionConfig {
+    const name = env.activeJurisdiction;
+    if (!name) throw new Error('ACTIVE_JURISDICTION_REQUIRED');
+    const replica = env.state.jReplicas.get(name);
+    if (!replica) throw new Error(`ACTIVE_JURISDICTION_REPLICA_MISSING:${name}`);
+    const entityProviderAddress = replica.contracts?.entityProvider;
+    const depositoryAddress = replica.contracts?.depository;
+    if (!entityProviderAddress || !depositoryAddress) {
+      throw new Error(`ACTIVE_JURISDICTION_CONTRACTS_MISSING:${name}`);
+    }
+    return {
+      address: entityProviderAddress,
+      name,
+      entityProviderAddress,
+      depositoryAddress,
+      ...(replica.chainId === undefined ? {} : { chainId: replica.chainId }),
+      ...(replica.blockTimeMs === undefined ? {} : { blockTimeMs: replica.blockTimeMs }),
+      ...(replica.entityProviderDeploymentBlock === undefined
+        ? {}
+        : { entityProviderDeploymentBlock: replica.entityProviderDeploymentBlock }),
+    };
   }
 
   // Get entity IDs for dropdowns (extract entityId from replica keys)
@@ -285,8 +310,8 @@
       lastAction = `✅ Minted ${mintAmount} to entity (on-chain)`;
 
       publishCurrentEnv();
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
+    } catch (err: unknown) {
+      lastAction = ` ${errorMessage(err)}`;
       console.error('[Architect] Mint error:', err);
     } finally {
       loading = false;
@@ -316,8 +341,6 @@
     lastAction = `Sending R2R: ${shortAddress(r2rFromEntity)} → ${shortAddress(r2rToEntity)}...`;
 
     try {
-      const XLN = await getXLN();
-
       // Debug: check reserves before R2R
       const amount = BigInt(r2rAmount);
       const fromReserve = await jadapter.getReserves(r2rFromEntity, 1);
@@ -332,7 +355,7 @@
       if (!signerId) {
         throw new Error(`Missing signer for ${shortAddress(r2rFromEntity)}`);
       }
-      await ingressRuntimeInput(XLN, {
+      await ingressRuntimeInput({
         runtimeTxs: [],
         entityInputs: [{
           entityId: r2rFromEntity,
@@ -351,8 +374,8 @@
       lastAction = `✅ R2R sent: ${r2rAmount} units (on-chain)`;
 
       publishCurrentEnv();
-    } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      lastAction = `❌ ${errorMessage(err)}`;
       console.error('[Architect] R2R error:', err);
     } finally {
       loading = false;
@@ -413,15 +436,15 @@
       const XLN = await getXLN();
 
       // Ensure env exists with seed + eReplicas
-      ensureScenarioEnv(XLN, 'AHB');
+      const env = ensureScenarioEnv(XLN, 'AHB');
       // CRITICAL: Clear old state BEFORE running demo
-      $runtimeFrameEnv.state.eReplicas.clear();
-      $runtimeFrameEnv.history = [];
+      env.state.eReplicas.clear();
+      env.history = [];
 
       // Run the ACTUAL AHB scenario (same code as CLI)
-      await XLN.scenarios.ahb($runtimeFrameEnv);
+      await XLN.scenarios.ahb(env);
 
-      const frames = $runtimeFrameEnv.history || [];
+      const frames = env.history || [];
 
       publishCurrentEnv(frames);
 
@@ -429,14 +452,14 @@
 
       // NO autopilot - user controls historical frames via TimeMachine.
       // Keep the workspace LIVE on the scenario's final runtime env by default.
-    } catch (err: any) {
+    } catch (err: unknown) {
       // CRITICAL: Still update history with frames created before error
       const frames = $runtimeFrameEnv?.history || [];
       if (frames.length > 0) {
         publishCurrentEnv(frames);
-        lastAction = `AHB: ${frames.length} frames (stopped at error). ${err.message}`;
+        lastAction = `AHB: ${frames.length} frames (stopped at error). ${errorMessage(err)}`;
       } else {
-        lastAction = `❌ ${err.message}`;
+        lastAction = `❌ ${errorMessage(err)}`;
       }
       console.error('[Tutorial] AHB error:', err);
     } finally {
@@ -456,21 +479,21 @@
     loading = true;
     try {
       const XLN = await getXLN();
-      ensureScenarioEnv(XLN, 'Swap');
-      $runtimeFrameEnv.state.eReplicas.clear();
-      $runtimeFrameEnv.history = [];
-      await XLN.scenarios.swap($runtimeFrameEnv);
+      const env = ensureScenarioEnv(XLN, 'Swap');
+      env.state.eReplicas.clear();
+      env.history = [];
+      await XLN.scenarios.swap(env);
 
-      const frames = $runtimeFrameEnv.history || [];
+      const frames = env.history || [];
       publishCurrentEnv(frames);
       lastAction = `Swap: ${frames.length} frames loaded.`;
-    } catch (err: any) {
+    } catch (err: unknown) {
       const frames = $runtimeFrameEnv?.history || [];
       if (frames.length > 0) {
         publishCurrentEnv(frames);
-        lastAction = `Swap: ${frames.length} frames (error). ${err.message}`;
+        lastAction = `Swap: ${frames.length} frames (error). ${errorMessage(err)}`;
       } else {
-        lastAction = `❌ ${err.message}`;
+        lastAction = `❌ ${errorMessage(err)}`;
       }
       console.error('[SWAP] error:', err);
     } finally {
@@ -486,19 +509,19 @@
     try {
       const XLN = await getXLN();
 
-      ensureScenarioEnv(XLN, 'Swap Market');
-      $runtimeFrameEnv.state.eReplicas.clear();
-      $runtimeFrameEnv.history = [];
+      const env = ensureScenarioEnv(XLN, 'Swap Market');
+      env.state.eReplicas.clear();
+      env.history = [];
       const runSwapMarketScenario = XLN.scenarios.swapMarket;
       if (!runSwapMarketScenario) throw new Error('Swap Market scenario is unavailable');
-      await runSwapMarketScenario($runtimeFrameEnv);
+      await runSwapMarketScenario(env);
 
-      const frames = $runtimeFrameEnv.history || [];
+      const frames = env.history || [];
       publishCurrentEnv(frames);
 
       lastAction = `Swap Market: ${frames.length} frames`;
-    } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      lastAction = `❌ ${errorMessage(err)}`;
     } finally {
       loading = false;
     }
@@ -511,19 +534,19 @@
     try {
       const XLN = await getXLN();
 
-      ensureScenarioEnv(XLN, 'Rapid Fire');
-      $runtimeFrameEnv.state.eReplicas.clear();
-      $runtimeFrameEnv.history = [];
+      const env = ensureScenarioEnv(XLN, 'Rapid Fire');
+      env.state.eReplicas.clear();
+      env.history = [];
       const runRapidFireScenario = XLN.scenarios.rapidFire;
       if (!runRapidFireScenario) throw new Error('Rapid Fire scenario is unavailable');
-      await runRapidFireScenario($runtimeFrameEnv);
+      await runRapidFireScenario(env);
 
-      const frames = $runtimeFrameEnv.history || [];
+      const frames = env.history || [];
       publishCurrentEnv(frames);
 
       lastAction = `Rapid Fire: ${frames.length} frames`;
-    } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      lastAction = `❌ ${errorMessage(err)}`;
     } finally {
       loading = false;
     }
@@ -545,9 +568,9 @@
       runtimeFrameTimeIndex.set(-1);
       runtimeFrameIsLive.set(true);
       lastAction = 'Reset complete - ready for new scenario';
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[Reset] Error:', err);
-      lastAction = `❌ Reset failed: ${err.message}`;
+      lastAction = `❌ Reset failed: ${errorMessage(err)}`;
     } finally {
       loading = false;
     }
@@ -565,22 +588,22 @@
     try {
       const XLN = await getXLN();
 
-      ensureScenarioEnv(XLN, 'Grid');
+      const env = ensureScenarioEnv(XLN, 'Grid');
 
       // Clear old state BEFORE running demo
-      $runtimeFrameEnv.state.eReplicas.clear();
-      $runtimeFrameEnv.state.jReplicas?.clear();
-      $runtimeFrameEnv.history = [];
+      env.state.eReplicas.clear();
+      env.state.jReplicas?.clear();
+      env.history = [];
 
       // Run the grid scenario
-      await XLN.scenarios.grid($runtimeFrameEnv);
+      await XLN.scenarios.grid(env);
 
-      const frames = $runtimeFrameEnv.history || [];
+      const frames = env.history || [];
       publishCurrentEnv(frames);
       lastAction = 'Grid Scalability scenario loaded';
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err && typeof err === 'object' && 'message' in err) {
-        lastAction = `❌ ${err.message}`;
+        lastAction = `❌ ${errorMessage(err)}`;
       } else {
         lastAction = `❌ ${err}`;
       }
@@ -603,22 +626,22 @@
     try {
       const XLN = await getXLN();
 
-      ensureScenarioEnv(XLN, 'Settle');
+      const env = ensureScenarioEnv(XLN, 'Settle');
 
       // Clear old state BEFORE running demo
-      $runtimeFrameEnv.state.eReplicas.clear();
-      $runtimeFrameEnv.state.jReplicas?.clear();
-      $runtimeFrameEnv.history = [];
+      env.state.eReplicas.clear();
+      env.state.jReplicas?.clear();
+      env.history = [];
 
       // Run the settle scenario
-      await (XLN.scenarios as any).settle($runtimeFrameEnv);
+      await XLN.scenarios.settle(env);
 
-      const frames = $runtimeFrameEnv.history || [];
+      const frames = env.history || [];
       publishCurrentEnv(frames);
       lastAction = 'Settlement Workspace scenario loaded';
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err && typeof err === 'object' && 'message' in err) {
-        lastAction = `❌ ${err.message}`;
+        lastAction = `❌ ${errorMessage(err)}`;
       } else {
         lastAction = `❌ ${err}`;
       }
@@ -642,7 +665,7 @@
         lastAction = 'Connecting to testnet...';
 
         // Auto-import testnet (prod anvil) - shared J-machine
-        await ingressRuntimeInput(XLN, {
+        await ingressRuntimeInput({
           runtimeTxs: [{
             type: 'importJ',
             data: {
@@ -656,7 +679,7 @@
         });
 
         // Process queued importReplica transactions
-        await ingressRuntimeInput(XLN, {
+        await ingressRuntimeInput({
           runtimeTxs: [],
           entityInputs: []
         });
@@ -670,10 +693,12 @@
 
       lastAction = 'Creating 3×3 hub (9 entities)...';
 
-      const xlnomy = $runtimeFrameEnv.state.jReplicas.get($runtimeFrameEnv.activeJurisdiction);
+      const env = requireRuntimeEnv('create hub');
+      const jurisdiction = requireActiveJurisdiction(env);
+      const xlnomy = env.state.jReplicas.get(jurisdiction.name);
       if (!xlnomy) throw new Error('Active xlnomy not found');
 
-      const jPos = xlnomy.jMachine.position;
+      const jPos = xlnomy.position;
 
       // Create 9 entities in 3×3 grid at y=320
       const entities = [];
@@ -699,7 +724,7 @@
               threshold: 1n,
               validators: [signerId],
               shares: { [signerId]: 1n },
-              jurisdiction: $runtimeFrameEnv.activeJurisdiction
+              jurisdiction
             },
             isProposer: true,
             position: { x, y, z }
@@ -708,7 +733,7 @@
       }
 
       // Import all entities
-      await ingressRuntimeInput(XLN, {
+      await ingressRuntimeInput({
         runtimeTxs: entities,
         entityInputs: []
       });
@@ -716,8 +741,8 @@
       lastAction = ` Created 3×3 hub (9 entities at y=320)`;
 
       publishCurrentEnv();
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
+    } catch (err: unknown) {
+      lastAction = ` ${errorMessage(err)}`;
       console.error('[Architect] Create hub error:', err);
     } finally {
       loading = false;
@@ -746,8 +771,8 @@
       lastAction = ` Funded all ${entityIds.length} entities with $1M`;
 
       publishCurrentEnv();
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
+    } catch (err: unknown) {
+      lastAction = ` ${errorMessage(err)}`;
       console.error('[Architect] Fund all error:', err);
     } finally {
       loading = false;
@@ -765,7 +790,7 @@
     loading = true;
 
     try {
-      const XLN = await getXLN();
+      const env = requireRuntimeEnv('send payment');
 
       // Pick 2 random different entities
       const from = entityIds[Math.floor(Math.random() * entityIds.length)];
@@ -774,8 +799,8 @@
         to = entityIds[Math.floor(Math.random() * entityIds.length)];
       }
 
-      const fromReplicaKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
-      const fromReplica = fromReplicaKey ? $runtimeFrameEnv.state.eReplicas.get(fromReplicaKey) : null;
+      const fromReplicaKey = (Array.from(env.state.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
+      const fromReplica = fromReplicaKey ? env.state.eReplicas.get(fromReplicaKey) : null;
 
       if (!fromReplica || !from || !to) {
         throw new Error('Entity not found');
@@ -788,7 +813,7 @@
 
       // Open account if needed
       if (!hasAccount) {
-        await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
+        await ingressRuntimeInput({ runtimeTxs: [], entityInputs: [{
           entityId: from,
           signerId: fromReplica.signerId,
           entityTxs: [{
@@ -800,7 +825,7 @@
 
       // Send payment
       const amount = Math.floor(Math.random() * 100000) + 10000; // 10K-110K
-      await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
+      await ingressRuntimeInput({ runtimeTxs: [], entityInputs: [{
         entityId: from,
         signerId: fromReplica.signerId,
         entityTxs: [{
@@ -819,8 +844,8 @@
       lastAction = ` Payment: ${shortAddress(from)} → ${shortAddress(to)} ($${(amount/1000).toFixed(0)}K)`;
 
       publishCurrentEnv();
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
+    } catch (err: unknown) {
+      lastAction = ` ${errorMessage(err)}`;
       console.error('[Architect] Random payment error:', err);
     } finally {
       loading = false;
@@ -838,12 +863,12 @@
     loading = true;
 
     try {
-      const XLN = await getXLN();
+      const env = requireRuntimeEnv('send transfer');
 
       // Pick random sender with reserves > 0
       const entitiesWithReserves = entityIds.filter(id => {
-        const key = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-        const replica = key ? $runtimeFrameEnv.state.eReplicas.get(key) : null;
+        const key = (Array.from(env.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+        const replica = key ? env.state.eReplicas.get(key) : null;
         const reserves = replica?.state?.reserves?.get(0) || 0n;
         return BigInt(reserves) > 0n;
       });
@@ -855,8 +880,8 @@
       }
 
       const from = entitiesWithReserves[Math.floor(Math.random() * entitiesWithReserves.length)];
-      const fromReplicaKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
-      const fromReplica = fromReplicaKey ? $runtimeFrameEnv.state.eReplicas.get(fromReplicaKey) : null;
+      const fromReplicaKey = (Array.from(env.state.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
+      const fromReplica = fromReplicaKey ? env.state.eReplicas.get(fromReplicaKey) : null;
 
       if (!fromReplica) throw new Error('Sender replica not found');
 
@@ -910,7 +935,7 @@
         }]
       });
 
-      await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: txBatch }, 'send transfer');
+      await ingressRuntimeInput({ runtimeTxs: [], entityInputs: txBatch }, 'send transfer');
 
       lastAction = ` 20% Transfer: ${shortAddress(from!)} → ${shortAddress(to!)} ($${(Number(amount)/1000).toFixed(0)}K)`;
 
@@ -936,8 +961,9 @@
 
     try {
       const XLN = await getXLN();
-
-      const xlnomy = $runtimeFrameEnv.state.jReplicas.get($runtimeFrameEnv.activeJurisdiction);
+      const env = requireRuntimeEnv('scale stress test');
+      const jurisdiction = requireActiveJurisdiction(env);
+      const xlnomy = env.state.jReplicas.get(jurisdiction.name);
       if (!xlnomy) throw new Error('Active xlnomy not found');
 
       // Create 100 entities in 10x10 grid
@@ -958,7 +984,7 @@
             entityId, signerId, entitySeed,
             data: {
               isProposer: true,
-              config: { mode: 'proposer-based', threshold: 1n, validators: [signerId], shares: { [signerId]: 1n }, jurisdiction: $runtimeFrameEnv.activeJurisdiction },
+              config: { mode: 'proposer-based', threshold: 1n, validators: [signerId], shares: { [signerId]: 1n }, jurisdiction },
               profileName: label,
               position: { x, y, z },
             },
@@ -967,7 +993,7 @@
       }
 
       // Batch create all 100 entities in ONE frame
-      await ingressRuntimeInput(XLN, { runtimeTxs, entityInputs: [] }, 'scale stress test');
+      await ingressRuntimeInput({ runtimeTxs, entityInputs: [] }, 'scale stress test');
 
       lastAction = ` Created 100 entities! Check FPS overlay (should be 60+)`;
 
@@ -986,21 +1012,22 @@
     clearDemoRuntimeState('Demo reset complete - ready for new topology');
   }
 
-  let fedPaymentInterval: any = null;
+  let fedPaymentInterval: ReturnType<typeof setInterval> | null = null;
   /** VR/topology payment loop. */
   async function startFedPaymentLoop() {
     if (!requireLiveMode('Fed payment loop')) return;
     if (fedPaymentInterval) clearInterval(fedPaymentInterval);
+    const env = requireRuntimeEnv('Fed payment loop');
 
     const bankEntityIds = entityIds.filter(id => {
-      const key = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $runtimeFrameEnv.state.eReplicas.get(key) : null;
+      const key = (Array.from(env.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? env.state.eReplicas.get(key) : null;
       return replica?.signerId && !replica.signerId.includes('_fed');
     });
 
     const fedId = entityIds.find(id => {
-      const key = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $runtimeFrameEnv.state.eReplicas.get(key) : null;
+      const key = (Array.from(env.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? env.state.eReplicas.get(key) : null;
       return replica?.signerId?.includes('_fed');
     });
 
@@ -1016,7 +1043,7 @@
           stopFedPaymentLoop();
           return;
         }
-        const XLN = await getXLN();
+        const currentEnv = requireRuntimeEnv('Fed payment loop');
 
         tick++;
         const action = tick % 4; // 4-step cycle
@@ -1026,11 +1053,11 @@
           const bank = bankEntityIds[Math.floor(Math.random() * bankEntityIds.length)]!;
           const amount = Math.floor(Math.random() * 500000) + 100000; // $100K-$600K
 
-          const fedKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(fedId + ':'));
-          const fedReplica = fedKey ? $runtimeFrameEnv.state.eReplicas.get(fedKey) : null;
+          const fedKey = (Array.from(currentEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(fedId + ':'));
+          const fedReplica = fedKey ? currentEnv.state.eReplicas.get(fedKey) : null;
 
           if (fedReplica) {
-            await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
+            await ingressRuntimeInput({ runtimeTxs: [], entityInputs: [{
               entityId: fedId,
               signerId: fedReplica.signerId,
               entityTxs: [{
@@ -1051,11 +1078,11 @@
           const bank = bankEntityIds[Math.floor(Math.random() * bankEntityIds.length)]!;
           const amount = Math.floor(Math.random() * 300000) + 50000; // $50K-$350K
 
-          const bankKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(bank + ':'));
-          const bankReplica = bankKey ? $runtimeFrameEnv.state.eReplicas.get(bankKey) : null;
+          const bankKey = (Array.from(currentEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(bank + ':'));
+          const bankReplica = bankKey ? currentEnv.state.eReplicas.get(bankKey) : null;
 
           if (bankReplica) {
-            await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
+            await ingressRuntimeInput({ runtimeTxs: [], entityInputs: [{
               entityId: bank,
               signerId: bankReplica.signerId,
               entityTxs: [{
@@ -1081,8 +1108,8 @@
 
           const amount = Math.floor(Math.random() * 200000) + 25000; // $25K-$225K
 
-          const fromKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
-          const fromReplica = fromKey ? $runtimeFrameEnv.state.eReplicas.get(fromKey) : null;
+          const fromKey = (Array.from(currentEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
+          const fromReplica = fromKey ? currentEnv.state.eReplicas.get(fromKey) : null;
 
           if (fromReplica) {
             // Check if account exists
@@ -1090,7 +1117,7 @@
 
             if (!hasAccount) {
               // Open account first
-              await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
+              await ingressRuntimeInput({ runtimeTxs: [], entityInputs: [{
                 entityId: from,
                 signerId: fromReplica.signerId,
                 entityTxs: [{
@@ -1101,7 +1128,7 @@
             }
 
             // Send payment
-            await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
+            await ingressRuntimeInput({ runtimeTxs: [], entityInputs: [{
               entityId: from,
               signerId: fromReplica.signerId,
               entityTxs: [{
@@ -1121,7 +1148,7 @@
 
         publishCurrentEnv();
 
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('[Fed Loop] Payment error:', err);
       }
     }, 5000); // Every 5 seconds (reduced for performance)
@@ -1151,11 +1178,9 @@
     lastAction = `Creating jurisdiction "${newXlnomyName.toLowerCase()}"...`;
 
     try {
-      const XLN = await getXLN();
-
       // Step 1: Import J-machine
       const isBrowserVM = newXlnomyEvmType === 'browservm';
-      await ingressRuntimeInput(XLN, {
+      await ingressRuntimeInput({
         runtimeTxs: [{
           type: 'importJ',
           data: {
@@ -1169,7 +1194,7 @@
       });
 
       // Step 2: Process the queued importReplica transactions
-      await ingressRuntimeInput(XLN, {
+      await ingressRuntimeInput({
         runtimeTxs: [],
         entityInputs: []
       });
@@ -1191,8 +1216,8 @@
       }
 
       publishCurrentEnv();
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
+    } catch (err: unknown) {
+      lastAction = ` ${errorMessage(err)}`;
       console.error('[Architect] Xlnomy creation error:', err);
     } finally {
       loading = false;
@@ -1214,8 +1239,8 @@
       lastAction = ` Switched to "${name}"`;
 
       runtimeFrameEnv.set($runtimeFrameEnv);
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
+    } catch (err: unknown) {
+      lastAction = ` ${errorMessage(err)}`;
     } finally {
       loading = false;
     }
@@ -1239,6 +1264,8 @@
 
     try {
       const XLN = await getXLN();
+      const env = requireRuntimeEnv('create entity');
+      const jurisdiction = requireActiveJurisdiction(env);
 
       // Generate signerId from xlnomy name + entity name
       const entitySeed = resolveRuntimeSeed();
@@ -1254,7 +1281,7 @@
       };
 
       // Create entity via importReplica RuntimeTx
-      await ingressRuntimeInput(XLN, {
+      await ingressRuntimeInput({
         runtimeTxs: [XLN.importEntity({
           entityId,
           signerId,
@@ -1265,7 +1292,7 @@
               threshold: 1n,
               validators: [signerId],
               shares: { [signerId]: 1n },
-              jurisdiction: $runtimeFrameEnv.activeJurisdiction
+              jurisdiction
             },
             isProposer: true,
             position
@@ -1284,8 +1311,8 @@
         : 'entity'; // Canonical default name
 
       publishCurrentEnv();
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
+    } catch (err: unknown) {
+      lastAction = ` ${errorMessage(err)}`;
       console.error('[Architect] Create entity error:', err);
     } finally {
       loading = false;

@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
+
 import { ethers } from 'ethers';
 import { isLeftEntity } from '../../entity/id';
 import type { AccountFrame, AccountInput, AccountTx, SwapOffer, SwapOrderHistoryEntry } from '../../types/account';
@@ -79,9 +81,7 @@ export function transitionCrossJurisdictionRouteStatus(
   updatedAt: number,
 ): CrossJurisdictionSwapRoute {
   if (!isCrossJurisdictionRouteTransitionAllowed(route.status, nextStatus)) {
-    throw new Error(
-      `CROSS_J_ROUTE_TRANSITION_INVALID: route=${route.orderId} ${route.status || 'intent'}->${nextStatus}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_ROUTE_TRANSITION_INVALID", `CROSS_J_ROUTE_TRANSITION_INVALID: route=${route.orderId} ${route.status || 'intent'}->${nextStatus}`);
   }
   route.status = nextStatus;
   route.updatedAt = updatedAt;
@@ -143,10 +143,10 @@ const readCrossJurisdictionExactFillRatio = (
   if (!hasExactFillRatio) return undefined;
   const orderId = input.orderId || defaultOrderId;
   if (input.fillNumerator === undefined || input.fillDenominator === undefined) {
-    throw new Error(`CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:${orderId}`);
+    throw haltRuntimeFailure("CROSS_J_EXACT_FILL_RATIO_INCOMPLETE", `CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:${orderId}`);
   }
   if (input.fillDenominator <= 0n || input.fillNumerator < 0n || input.fillNumerator > input.fillDenominator) {
-    throw new Error(`CROSS_J_EXACT_FILL_RATIO_INVALID:${orderId}:${input.fillNumerator}/${input.fillDenominator}`);
+    throw haltRuntimeFailure("CROSS_J_EXACT_FILL_RATIO_INVALID", `CROSS_J_EXACT_FILL_RATIO_INVALID:${orderId}:${input.fillNumerator}/${input.fillDenominator}`);
   }
   return {
     numerator: input.fillNumerator,
@@ -167,7 +167,7 @@ export function getCrossJurisdictionCommittedProofRatio(input: CrossJurisdiction
   if (!exactFillRatio) {
     const coarseFillRatio = Math.max(clampFillRatio(input.cumulativeFillRatio), clampFillRatio(input.claimedRatio));
     if (coarseFillRatio > 0) {
-      throw new Error(`CROSS_J_EXACT_FILL_RATIO_REQUIRED:${input.orderId || 'unknown'}`);
+      throw haltRuntimeFailure("CROSS_J_EXACT_FILL_RATIO_REQUIRED", `CROSS_J_EXACT_FILL_RATIO_REQUIRED:${input.orderId || 'unknown'}`);
     }
     return 0;
   }
@@ -177,9 +177,7 @@ export function getCrossJurisdictionCommittedProofRatio(input: CrossJurisdiction
     ['claimedRatio', input.claimedRatio],
   ] as const) {
     if (value !== undefined && clampFillRatio(value) !== derivedRatio) {
-      throw new Error(
-        `CROSS_J_COARSE_EXACT_RATIO_MISMATCH:${input.orderId || 'unknown'}:${label}:${value}:${derivedRatio}`,
-      );
+      throw haltRuntimeFailure("CROSS_J_COARSE_EXACT_RATIO_MISMATCH", `CROSS_J_COARSE_EXACT_RATIO_MISMATCH:${input.orderId || 'unknown'}:${label}:${value}:${derivedRatio}`);
     }
   }
   return derivedRatio;
@@ -202,7 +200,7 @@ export function getCrossJurisdictionCommittedFillAmounts(route: CrossJurisdictio
     route.targetClaimed,
   ].filter((amount): amount is bigint => amount !== undefined);
   if (!exactFillRatio && explicitAmounts.some(amount => amount !== 0n)) {
-    throw new Error(`CROSS_J_EXACT_FILL_RATIO_REQUIRED:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_EXACT_FILL_RATIO_REQUIRED", `CROSS_J_EXACT_FILL_RATIO_REQUIRED:${route.orderId}`);
   }
   const exactSourceAmount = exactFillRatio
     ? scaleByExactRatio(sourceTotal, exactFillRatio.numerator, exactFillRatio.denominator)
@@ -218,7 +216,7 @@ export function getCrossJurisdictionCommittedFillAmounts(route: CrossJurisdictio
     ['targetClaimed', route.targetClaimed, exactTargetAmount],
   ] as const) {
     if (actual !== undefined && actual !== expected) {
-      throw new Error(`CROSS_J_COMMITTED_AMOUNT_MISMATCH:${route.orderId}:${label}:${actual}:${expected}`);
+      throw haltRuntimeFailure("CROSS_J_COMMITTED_AMOUNT_MISMATCH", `CROSS_J_COMMITTED_AMOUNT_MISMATCH:${route.orderId}:${label}:${actual}:${expected}`);
     }
   }
   return {
@@ -301,7 +299,7 @@ export const isCrossJurisdictionFillTerminal = (
 };
 
 const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
-  if (denominator <= 0n) throw new Error(`CROSS_J_CEIL_DIV_DENOMINATOR_INVALID:${denominator.toString()}`);
+  if (denominator <= 0n) throw haltRuntimeFailure("CROSS_J_CEIL_DIV_DENOMINATOR_INVALID", `CROSS_J_CEIL_DIV_DENOMINATOR_INVALID:${denominator.toString()}`);
   return numerator <= 0n ? 0n : (numerator + denominator - 1n) / denominator;
 };
 
@@ -354,7 +352,7 @@ const normalizeCrossJurisdictionSettlementPolicy = (
   const maxSourceDust = route.settlementPolicy?.maxSourceDust ?? defaultQuantizationDust(sourceAmount);
   const maxTargetDust = route.settlementPolicy?.maxTargetDust ?? defaultQuantizationDust(targetAmount);
   if (maxSourceDust < 0n || maxTargetDust < 0n) {
-    throw new Error(`CROSS_J_SETTLEMENT_POLICY_DUST_INVALID:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_SETTLEMENT_POLICY_DUST_INVALID", `CROSS_J_SETTLEMENT_POLICY_DUST_INVALID:${route.orderId}`);
   }
   return {
     roundingMode: 'uint16_ceil',
@@ -374,7 +372,7 @@ const normalizeCrossJurisdictionTimePolicy = (
 ): CrossJurisdictionTimePolicy => {
   const runtimeExpiresAtMs = Math.floor(Number(route.timePolicy?.runtimeExpiresAtMs ?? route.expiresAt ?? 0));
   if (!Number.isFinite(runtimeExpiresAtMs) || runtimeExpiresAtMs < 0) {
-    throw new Error(`CROSS_J_TIME_POLICY_EXPIRES_INVALID:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_TIME_POLICY_EXPIRES_INVALID", `CROSS_J_TIME_POLICY_EXPIRES_INVALID:${route.orderId}`);
   }
   return {
     runtimeClock: 'unix_ms',
@@ -402,7 +400,7 @@ function withCrossJurisdictionPolicyDefaults(route: CrossJurisdictionSwapRoute):
 function assertCrossJurisdictionRiskPolicy(route: CrossJurisdictionSwapRoute): void {
   const riskMode = route.riskMode || 'fully_collateralized';
   if (riskMode !== 'fully_collateralized') {
-    throw new Error(`CROSS_J_RISK_MODE_UNSUPPORTED:${route.orderId}:${riskMode}`);
+    throw haltRuntimeFailure("CROSS_J_RISK_MODE_UNSUPPORTED", `CROSS_J_RISK_MODE_UNSUPPORTED:${route.orderId}:${riskMode}`);
   }
 }
 
@@ -421,7 +419,7 @@ export function projectCrossJurisdictionQuantizedClaim(
     : (total * BigInt(ratio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
   const exactFillRatio = readCrossJurisdictionExactFillRatio(input, 'quantized-claim');
   if (!exactFillRatio && ratio > 0) {
-    throw new Error(`CROSS_J_EXACT_FILL_RATIO_REQUIRED:${input.orderId || 'quantized-claim'}`);
+    throw haltRuntimeFailure("CROSS_J_EXACT_FILL_RATIO_REQUIRED", `CROSS_J_EXACT_FILL_RATIO_REQUIRED:${input.orderId || 'quantized-claim'}`);
   }
   const exactClaim = exactFillRatio
     ? scaleByExactRatio(total, exactFillRatio.numerator, exactFillRatio.denominator)
@@ -625,26 +623,20 @@ export function withCrossJurisdictionClaimProgress(
   const previousClaimedRatio = clampFillRatio(route.claimedRatio);
   const committedRatio = getCrossJurisdictionCommittedProofRatio(route);
   if (nextRatio <= 0) {
-    throw new Error(`CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} zero ratio`);
+    throw haltRuntimeFailure("CROSS_J_CLAIM_PROGRESS_INVALID", `CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} zero ratio`);
   }
   if (committedRatio <= 0) {
-    throw new Error(`CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} no committed fill`);
+    throw haltRuntimeFailure("CROSS_J_CLAIM_PROGRESS_INVALID", `CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} no committed fill`);
   }
   if (nextRatio < previousClaimedRatio) {
-    throw new Error(
-      `CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} stale ratio ${nextRatio} < ${previousClaimedRatio}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_CLAIM_PROGRESS_INVALID", `CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} stale ratio ${nextRatio} < ${previousClaimedRatio}`);
   }
   if (nextRatio > committedRatio) {
-    throw new Error(
-      `CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} ratio ${nextRatio} > committed ${committedRatio}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_CLAIM_PROGRESS_INVALID", `CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} ratio ${nextRatio} > committed ${committedRatio}`);
   }
   if (nextRatio !== committedRatio) {
-    throw new Error(
-      `CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} exact claim must equal committed ratio ` +
-      `${nextRatio} != ${committedRatio}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_CLAIM_PROGRESS_INVALID", `CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} exact claim must equal committed ratio ` +
+      `${nextRatio} != ${committedRatio}`);
   }
   const claimedRatio = committedRatio;
   const committedFill = getCrossJurisdictionCommittedFillAmounts(route);
@@ -775,14 +767,14 @@ export function cloneCrossJurisdictionCloseProof(
 ): CrossJurisdictionCloseProof {
   const fillRatio = Number(proof.fillRatio);
   if (!Number.isSafeInteger(fillRatio) || fillRatio < 0 || fillRatio > CROSS_J_MAX_FILL_RATIO) {
-    throw new Error(`CROSS_J_CLOSE_PROOF_FILL_RATIO_INVALID:${String(proof.fillRatio)}`);
+    throw haltRuntimeFailure("CROSS_J_CLOSE_PROOF_FILL_RATIO_INVALID", `CROSS_J_CLOSE_PROOF_FILL_RATIO_INVALID:${String(proof.fillRatio)}`);
   }
   if (
     proof.closeMode !== 'full'
     && proof.closeMode !== 'partial_cancel_remainder'
     && proof.closeMode !== 'pure_cancel'
   ) {
-    throw new Error(`CROSS_J_CLOSE_PROOF_MODE_INVALID:${String(proof.closeMode)}`);
+    throw haltRuntimeFailure("CROSS_J_CLOSE_PROOF_MODE_INVALID", `CROSS_J_CLOSE_PROOF_MODE_INVALID:${String(proof.closeMode)}`);
   }
   return {
     orderId: String(proof.orderId || ''),
@@ -822,7 +814,7 @@ export function buildCrossJurisdictionCloseProof(
 ): CrossJurisdictionCloseProof {
   const canonical = withCanonicalCrossJurisdictionRouteHash(route);
   if (!canonical.sourcePull || !canonical.targetPull) {
-    throw new Error(`CROSS_J_CLOSE_PROOF_PULLS_MISSING:${canonical.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_CLOSE_PROOF_PULLS_MISSING", `CROSS_J_CLOSE_PROOF_PULLS_MISSING:${canonical.orderId}`);
   }
   const {
     filledSourceAmount: cumulativeSourceAmount,
@@ -1106,7 +1098,7 @@ export function buildCommittedCrossJurisdictionPullBinding(
   leg: CrossJurisdictionPullBinding['leg'],
 ): CrossJurisdictionPullBinding {
   const routeHash = String(route.routeHash || '').toLowerCase();
-  if (!routeHash) throw new Error(`CROSS_J_ROUTE_HASH_MISSING:${route.orderId}`);
+  if (!routeHash) throw haltRuntimeFailure("CROSS_J_ROUTE_HASH_MISSING", `CROSS_J_ROUTE_HASH_MISSING:${route.orderId}`);
   const committedFill = getCrossJurisdictionCommittedFillAmounts(route);
   const hasCommittedFill = committedFillAmountsHaveProgress(committedFill);
   // Use this only after the route has entered committed account state. Immutable
@@ -1292,9 +1284,7 @@ export function assertCrossJurisdictionPriceImprovementMode(
   orderId: string,
 ): void {
   if (mode !== undefined && mode !== 'source_savings') {
-    throw new Error(
-      `CROSS_J_PRICE_IMPROVEMENT_MODE_UNSUPPORTED:${orderId}:${String(mode)}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_PRICE_IMPROVEMENT_MODE_UNSUPPORTED", `CROSS_J_PRICE_IMPROVEMENT_MODE_UNSUPPORTED:${orderId}:${String(mode)}`);
   }
 }
 
@@ -1304,7 +1294,7 @@ export function withCanonicalCrossJurisdictionRouteHash(route: CrossJurisdiction
   assertCrossJurisdictionRiskPolicy(withDefaults);
   const routeHash = deriveCrossJurisdictionRouteHash(withDefaults);
   if (withDefaults.routeHash && String(withDefaults.routeHash).toLowerCase() !== routeHash.toLowerCase()) {
-    throw new Error(`CROSS_J_ROUTE_HASH_MISMATCH:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_ROUTE_HASH_MISMATCH", `CROSS_J_ROUTE_HASH_MISMATCH:${route.orderId}`);
   }
   return { ...withDefaults, routeHash };
 }
@@ -1323,7 +1313,7 @@ function deriveCrossJurisdictionHashLadderProof(
   privateSeed: string,
 ) {
   const seed = String(privateSeed || '').trim();
-  if (!seed) throw new Error(`CROSS_J_HASHLADDER_PRIVATE_SEED_MISSING:${route.orderId}`);
+  if (!seed) throw haltRuntimeFailure("CROSS_J_HASHLADDER_PRIVATE_SEED_MISSING", `CROSS_J_HASHLADDER_PRIVATE_SEED_MISSING:${route.orderId}`);
   return buildHashLadderProof(seed);
 }
 
@@ -1341,10 +1331,8 @@ const assertCrossJurisdictionAssetRouteIsUseful = (route: CrossJurisdictionSwapR
   const sameJurisdiction = normalizeJurisdiction(route.source.jurisdiction) === normalizeJurisdiction(route.target.jurisdiction);
   const sameToken = Number(route.source.tokenId) === Number(route.target.tokenId);
   if (sameJurisdiction && sameToken) {
-    throw new Error(
-      `CROSS_J_SAME_JURISDICTION_TOKEN_INVALID:${route.orderId}:` +
-        `${route.source.jurisdiction}:${route.source.tokenId}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_SAME_JURISDICTION_TOKEN_INVALID", `CROSS_J_SAME_JURISDICTION_TOKEN_INVALID:${route.orderId}:` +
+        `${route.source.jurisdiction}:${route.source.tokenId}`);
   }
 };
 
@@ -1356,7 +1344,7 @@ export function buildPreparedCrossJurisdictionRoute(
   },
 ): CrossJurisdictionSwapRoute {
   const now = Math.floor(Number(options.now || 0));
-  if (!Number.isFinite(now) || now <= 0) throw new Error(`CROSS_J_NOW_INVALID:${options.now}`);
+  if (!Number.isFinite(now) || now <= 0) throw haltRuntimeFailure("CROSS_J_NOW_INVALID", `CROSS_J_NOW_INVALID:${options.now}`);
   // Book TTL only. Settlement clocks are dispute-relative seconds on L1:
   // Source and Target each use their own beneficiary-side signed window. The
   // full left+right sum is exclusively the Account finalization barrier.
@@ -1364,7 +1352,7 @@ export function buildPreparedCrossJurisdictionRoute(
   // no cross-j margin — event-driven sibling fanout owns clocks.
   const marketExpiresAt = Math.floor(Number(route.expiresAt ?? (now + CROSS_J_DEFAULT_BOOK_TTL_MS)));
   if (!Number.isFinite(marketExpiresAt) || marketExpiresAt <= now) {
-    throw new Error(`CROSS_J_EXPIRES_AT_INVALID:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_EXPIRES_AT_INVALID", `CROSS_J_EXPIRES_AT_INVALID:${route.orderId}`);
   }
   const canonicalRoute = withCanonicalCrossJurisdictionRouteHash({
     ...route,

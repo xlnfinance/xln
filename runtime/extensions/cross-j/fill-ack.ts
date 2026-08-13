@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
+
 import { ethers } from 'ethers';
 import { getCrossJurisdictionCommittedProofRatio } from './index';
 import type { AccountTx } from '../../types/account';
@@ -17,10 +19,8 @@ export const buildCrossJurisdictionFillNoticeTx = (
   const cumulativeFillRatio = Math.floor(Number(tx.data.cumulativeFillRatio ?? 0));
   const isCancel = tx.data.ackKind === 'cancel' && tx.data.cancelRemainder === true;
   if ((!isCancel && (fillSeq <= 0 || cumulativeFillRatio <= 0)) || fillSeq < 0 || cumulativeFillRatio < 0) {
-    throw new Error(
-      `CROSS_J_FILL_ACK_INVALID_NOTICE: account=${accountId} offer=${tx.data.offerId} ` +
-        `fillSeq=${fillSeq} ratio=${cumulativeFillRatio}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_FILL_ACK_INVALID_NOTICE", `CROSS_J_FILL_ACK_INVALID_NOTICE: account=${accountId} offer=${tx.data.offerId} ` +
+        `fillSeq=${fillSeq} ratio=${cumulativeFillRatio}`);
   }
   return {
     type: 'crossJurisdictionFillNotice',

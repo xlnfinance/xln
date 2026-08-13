@@ -1,4 +1,5 @@
 import { HTLC } from '../../config/constants';
+import { rejectFailure } from '../errors/failure-taxonomy';
 import {
   ASYNC_PAYMENT_EXPIRY_BLOCKS,
   ASYNC_PAYMENT_EXPIRY_MS,
@@ -39,7 +40,7 @@ export const requireTrustedPaymentGateway = (
     || routeGateway === routeSource
     || routeGateway === routeTarget
   ) {
-    throw new Error(
+    throw rejectFailure('TRUSTED_PAYMENT_GATEWAY_INVALID',
       `TRUSTED_PAYMENT_GATEWAY_INVALID:declared=${declaredGatewayEntityId ?? ''}:` +
         `routeGateway=${routeGateway ?? ''}:routeTarget=${routeTarget ?? ''}:target=${targetEntityId}`,
     );

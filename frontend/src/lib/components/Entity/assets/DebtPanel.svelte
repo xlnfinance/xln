@@ -7,6 +7,7 @@
   import { compareStableText } from '$lib/utils/stableSort';
   import type { DebtEntry, EntityState } from '@xln/runtime/api/public/runtime-module';
   import { requireTokenDecimals } from '../token-metadata';
+  import type { DebtEnforceRequest } from './debt-enforce-request';
 
   export let entityStateOverride: EntityState | null = null;
   export let entityNames: Map<string, string> = new Map();
@@ -14,17 +15,6 @@
   export let enforcingTokenId: number | null = null;
 
   const DEBT_DRAIN_MAX_SLOTS = 100;
-  type DebtEnforceRequest = {
-    tokenId: number;
-    symbol: string;
-    maxIterations: number;
-    openCount: number;
-    outstandingAmount: bigint;
-    reserveAmount: bigint;
-    payableAmount: bigint;
-    nextDebtIndex: number | null;
-  };
-
   const dispatch = createEventDispatcher<{
     enforce: DebtEnforceRequest;
   }>();

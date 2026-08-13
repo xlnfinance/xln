@@ -219,16 +219,21 @@ export const applyReliableDeliveryReceipts = (
     const existing = ledger.get(senderFrontierKey(receipt));
     if (existing) receiptAdvancesSameCoverage(existing, receipt);
     let pendingMatches = 0;
+    let pendingSupersets = 0;
     for (const candidate of indexedOutputs.get(senderFrontierKey(receipt)) ?? []) {
       if (reliableReceiptCoversIdentity(receipt, candidate.identity)) pendingMatches += 1;
+      if (reliableFrontierCovers(candidate.identity, receipt.body.identity)) pendingSupersets += 1;
     }
     if (
       pendingMatches === 0 &&
+      pendingSupersets === 0 &&
       !existing &&
       crossCoverage !== 'lower-exact'
     ) {
       throw new Error(
-        `RELIABLE_RECEIPT_OUTPUT_NOT_PENDING:${receipt.body.identity.kind}:${receipt.body.identity.height}`,
+        `RELIABLE_RECEIPT_OUTPUT_NOT_PENDING:${receipt.body.identity.kind}:` +
+          `${receipt.body.identity.evidenceKind}:${receipt.body.identity.height}:` +
+          `${receipt.body.identity.signerId}:${receipt.body.coverage}`,
       );
     }
     if (crossCoverage !== 'lower-exact') {

@@ -18,57 +18,62 @@ import { getDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 import type { PreparedOriginatedHtlcPayment } from '../../types/entity/htlc-infra-context';
 import type { EntityTx } from '../../types/entity-tx';
+import { rejectFailure } from '../../protocol/errors/failure-taxonomy';
 import type { Profile } from '../profile';
 import type { EntityState } from '../types';
 
 type HtlcPaymentTx = Extract<EntityTx, { type: 'htlcPayment' }>;
 
+function rejectHtlcPayment(message: string): never {
+  throw rejectFailure('HTLC_PAYMENT_INVALID', message);
+}
+
 const entityId = (value: unknown, code: string): string => {
   const normalized = String(value ?? '').trim().toLowerCase();
-  if (!/^0x[0-9a-f]{64}$/.test(normalized)) throw new Error(code);
+  if (!/^0x[0-9a-f]{64}$/.test(normalized)) return rejectHtlcPayment(code);
   return normalized;
 };
 
 const positive = (value: unknown, code: string): bigint => {
-  if (typeof value !== 'bigint' || value <= 0n) throw new Error(code);
+  if (typeof value !== 'bigint' || value <= 0n) return rejectHtlcPayment(code);
   return value;
 };
 
 const assertRawHtlcPayment = (tx: HtlcPaymentTx): void => {
   const allowed = new Set(['amount', 'deliveryMode', 'maxSenderDebit', 'route', 'targetEntityId', 'tokenId', 'description', 'hashlock', 'startedAtMs']);
-  if (Object.keys(tx.data).some(key => !allowed.has(key))) throw new Error('HTLC_PAYMENT_FIELDS_INVALID');
+  if (Object.keys(tx.data).some(key => !allowed.has(key))) rejectHtlcPayment('HTLC_PAYMENT_FIELDS_INVALID');
   if (!Number.isSafeInteger(tx.data.tokenId) || tx.data.tokenId < 0 || tx.data.tokenId > TOKENS.MAX_TOKEN_ID) {
-    throw new Error('HTLC_PAYMENT_TOKEN_INVALID');
+    rejectHtlcPayment('HTLC_PAYMENT_TOKEN_INVALID');
   }
   positive(tx.data.amount, 'HTLC_PAYMENT_AMOUNT_INVALID');
   positive(tx.data.maxSenderDebit, 'HTLC_PAYMENT_MAX_SENDER_DEBIT_INVALID');
-  if (tx.data.maxSenderDebit < tx.data.amount) throw new Error('HTLC_PAYMENT_MAX_SENDER_DEBIT_BELOW_AMOUNT');
-  if (tx.data.deliveryMode !== 'instant' && tx.data.deliveryMode !== 'async') throw new Error('HTLC_PAYMENT_DELIVERY_MODE_INVALID');
+  if (tx.data.maxSenderDebit < tx.data.amount) rejectHtlcPayment('HTLC_PAYMENT_MAX_SENDER_DEBIT_BELOW_AMOUNT');
+  if (tx.data.deliveryMode !== 'instant' && tx.data.deliveryMode !== 'async') rejectHtlcPayment('HTLC_PAYMENT_DELIVERY_MODE_INVALID');
   if (tx.data.description !== undefined && (
     typeof tx.data.description !== 'string'
     || tx.data.description !== tx.data.description.trim()
     || new TextEncoder().encode(tx.data.description).byteLength > LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH
-  )) throw new Error('HTLC_PAYMENT_DESCRIPTION_INVALID');
+  )) rejectHtlcPayment('HTLC_PAYMENT_DESCRIPTION_INVALID');
   if (tx.data.hashlock !== undefined && !/^0x[0-9a-f]{64}$/.test(tx.data.hashlock)) {
-    throw new Error('HTLC_PAYMENT_HASHLOCK_INVALID');
+    rejectHtlcPayment('HTLC_PAYMENT_HASHLOCK_INVALID');
   }
 };
 
 const normalizeRoute = (raw: readonly string[], source: string, target: string): string[] => {
   const route = raw.map(value => entityId(value, 'HTLC_PAYMENT_ROUTE_ENTITY_INVALID'));
-  if (route.length < 2 || route[0] !== source || route.at(-1) !== target) throw new Error('HTLC_PAYMENT_ROUTE_INVALID');
-  if (route.length - 1 > HTLC.MAX_HOPS) throw new Error('HTLC_PAYMENT_ROUTE_TOO_LONG');
+  if (route.length < 2 || route[0] !== source || route.at(-1) !== target) rejectHtlcPayment('HTLC_PAYMENT_ROUTE_INVALID');
+  if (route.length - 1 > HTLC.MAX_HOPS) rejectHtlcPayment('HTLC_PAYMENT_ROUTE_TOO_LONG');
   const selfRoute = source === target;
   const intermediates = route.slice(1, -1);
   const validSelf = selfRoute && intermediates.length >= 2
     && new Set(intermediates).size === intermediates.length && !intermediates.includes(source);
-  if ((!selfRoute && new Set(route).size !== route.length) || (selfRoute && !validSelf)) throw new Error('HTLC_PAYMENT_ROUTE_LOOP');
+  if ((!selfRoute && new Set(route).size !== route.length) || (selfRoute && !validSelf)) rejectHtlcPayment('HTLC_PAYMENT_ROUTE_LOOP');
   return route;
 };
 
 const uniqueProfile = (profiles: readonly RoutingProfile[], id: string): RoutingProfile => {
   const matches = profiles.filter(profile => profile.entityId.toLowerCase() === id);
-  if (matches.length !== 1) throw new Error(`HTLC_PAYMENT_PROFILE_MATCH_COUNT:${id}:${matches.length}`);
+  if (matches.length !== 1) rejectHtlcPayment(`HTLC_PAYMENT_PROFILE_MATCH_COUNT:${id}:${matches.length}`);
   return matches[0]!;
 };
 
@@ -88,8 +93,13 @@ const secureRandomBytes32Hex = (): string => {
  */
 export const generateHtlcPaymentPreimage = (): string => secureRandomBytes32Hex();
 
-const generateHtlcEphemeralPrivateKey = (): string => {
-  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
+const generateHtlcEphemeralPrivateKey = (deterministicTestSeed?: string): string => {
+  const digest = deterministicTestSeed === undefined
+    ? undefined
+    : keccak256(new TextEncoder().encode(deterministicTestSeed)).slice(2);
+  const bytes = digest === undefined
+    ? globalThis.crypto.getRandomValues(new Uint8Array(32))
+    : Uint8Array.from({ length: 32 }, (_, index) => Number.parseInt(digest.slice(index * 2, index * 2 + 2), 16));
   // Make the serialized private scalar canonical before noble applies the same
   // RFC 7748 clamping internally.
   bytes[0] = bytes[0]! & 248;
@@ -120,17 +130,17 @@ export const materializeOriginatedHtlcPayments = async (
     const txHash = hashRawHtlcPaymentTx(candidate);
     const localSecret = getDeterministicHtlcTestSecret(candidate);
     const secret = localSecret ?? generateHtlcPaymentPreimage();
-    if (!/^0x[0-9a-f]{64}$/.test(secret)) throw new Error('HTLC_PAYMENT_PREIMAGE_INVALID');
+    if (!/^0x[0-9a-f]{64}$/.test(secret)) rejectHtlcPayment('HTLC_PAYMENT_PREIMAGE_INVALID');
     const hashlock = hashHtlcSecret(secret).toLowerCase();
     if (candidate.data.hashlock !== undefined && candidate.data.hashlock !== hashlock) {
-      throw new Error('HTLC_PAYMENT_HASHLOCK_MISMATCH');
+      rejectHtlcPayment('HTLC_PAYMENT_HASHLOCK_MISMATCH');
     }
-    if (activeHashlocks.has(hashlock)) throw new Error(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${hashlock}`);
+    if (activeHashlocks.has(hashlock)) rejectHtlcPayment(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${hashlock}`);
     activeHashlocks.add(hashlock);
     const startedAtMs = candidate.data.startedAtMs ?? input.state.timestamp;
-    if (!Number.isSafeInteger(startedAtMs) || startedAtMs !== input.state.timestamp) throw new Error('HTLC_PAYMENT_STARTED_AT_INVALID');
+    if (!Number.isSafeInteger(startedAtMs) || startedAtMs !== input.state.timestamp) rejectHtlcPayment('HTLC_PAYMENT_STARTED_AT_INVALID');
     const quote = quoteHtlcPaymentRoute(input.profiles, route, candidate.data.tokenId, candidate.data.amount);
-    if (quote.senderLockAmount > candidate.data.maxSenderDebit) throw new Error('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
+    if (quote.senderLockAmount > candidate.data.maxSenderDebit) rejectHtlcPayment('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
     const window = resolvePaymentDeadlineWindow({
       mode: candidate.data.deliveryMode,
       runtimeJHeight: input.state.lastFinalizedJHeight,
@@ -142,21 +152,21 @@ export const materializeOriginatedHtlcPayments = async (
     const lockId = generateLockId(hashlock, input.height, txIndex, startedAtMs).toLowerCase();
     const sourceProfile = uniqueProfile(input.profiles, source);
     if (sourceProfile.entityEncryptionPublicKey !== input.state.entityEncryptionPublicKey) {
-      throw new Error('HTLC_PAYMENT_SOURCE_PROFILE_KEY_MISMATCH');
+      rejectHtlcPayment('HTLC_PAYMENT_SOURCE_PROFILE_KEY_MISMATCH');
     }
     const publicKeys = new Map(route.map(id => [id, uniqueProfile(input.profiles, id).entityEncryptionPublicKey]));
     const domains = route.slice(0, -1).map((from, index) => {
       const to = route[index + 1]!;
       const fromAccount = uniqueProfile(input.profiles, from).accounts.find(row => row.counterpartyId.toLowerCase() === to);
       const toAccount = uniqueProfile(input.profiles, to).accounts.find(row => row.counterpartyId.toLowerCase() === from);
-      if (!fromAccount || !toAccount) throw new Error(`HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING:${from}:${to}`);
+      if (!fromAccount || !toAccount) rejectHtlcPayment(`HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING:${from}:${to}`);
       if (!sameAccountStateDomain(fromAccount.domain, toAccount.domain)) {
-        throw new Error(`HTLC_PAYMENT_PROFILE_ACCOUNT_DOMAIN_MISMATCH:${from}:${to}`);
+        rejectHtlcPayment(`HTLC_PAYMENT_PROFILE_ACCOUNT_DOMAIN_MISMATCH:${from}:${to}`);
       }
       if (index === 0) {
         const localAccount = input.state.accounts.get(to);
         if (!localAccount || !sameAccountStateDomain(localAccount.state.domain, fromAccount.domain)) {
-          throw new Error(`HTLC_PAYMENT_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${source}:${to}`);
+          rejectHtlcPayment(`HTLC_PAYMENT_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${source}:${to}`);
         }
       }
       return fromAccount.domain;
@@ -165,7 +175,12 @@ export const materializeOriginatedHtlcPayments = async (
       route, secret, publicKeys, domains,
       quote.hopForwardAmounts, candidate.data.description, startedAtMs,
       { rootLockId: lockId, hashlock, tokenId: candidate.data.tokenId, senderLockAmount: quote.senderLockAmount, timelock, revealBeforeHeight },
-      () => generateHtlcEphemeralPrivateKey(),
+      (() => {
+        let keyIndex = 0;
+        return () => generateHtlcEphemeralPrivateKey(
+          localSecret === undefined ? undefined : `${txHash}:${keyIndex++}`,
+        );
+      })(),
     );
     originated.push({
       txHash, targetEntityId: target, tokenId: candidate.data.tokenId, recipientAmount: candidate.data.amount,
@@ -177,7 +192,7 @@ export const materializeOriginatedHtlcPayments = async (
   }
   originated.sort((left, right) => left.txHash.localeCompare(right.txHash));
   for (let index = 1; index < originated.length; index += 1) {
-    if (originated[index - 1]!.txHash === originated[index]!.txHash) throw new Error(`HTLC_PAYMENT_TX_DUPLICATE:${originated[index]!.txHash}`);
+    if (originated[index - 1]!.txHash === originated[index]!.txHash) rejectHtlcPayment(`HTLC_PAYMENT_TX_DUPLICATE:${originated[index]!.txHash}`);
   }
   return originated;
 };
@@ -199,24 +214,24 @@ const assertOriginRouteEvidence = (
   const target = entityId(tx.data.targetEntityId, 'HTLC_PAYMENT_TARGET_INVALID');
   const route = normalizeRoute(origin.route, source, target);
   if (tx.data.route.length > 0 && encodeCanonicalConsensusValue(route) !== encodeCanonicalConsensusValue(tx.data.route)) {
-    throw new Error(`HTLC_PAYMENT_PREPARED_ROUTE_MISMATCH:${origin.txHash}`);
+    rejectHtlcPayment(`HTLC_PAYMENT_PREPARED_ROUTE_MISMATCH:${origin.txHash}`);
   }
   const sourceProfile = uniqueProfile(input.profiles, source);
   if (sourceProfile.entityEncryptionPublicKey !== input.state.entityEncryptionPublicKey) {
-    throw new Error('HTLC_PAYMENT_SOURCE_PROFILE_KEY_MISMATCH');
+    rejectHtlcPayment('HTLC_PAYMENT_SOURCE_PROFILE_KEY_MISMATCH');
   }
   for (const [index, from] of route.slice(0, -1).entries()) {
     const to = route[index + 1]!;
     const left = uniqueProfile(input.profiles, from).accounts.find(row => row.counterpartyId.toLowerCase() === to);
     const right = uniqueProfile(input.profiles, to).accounts.find(row => row.counterpartyId.toLowerCase() === from);
-    if (!left || !right) throw new Error(`HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING:${from}:${to}`);
+    if (!left || !right) rejectHtlcPayment(`HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING:${from}:${to}`);
     if (!sameAccountStateDomain(left.domain, right.domain)) {
-      throw new Error(`HTLC_PAYMENT_PROFILE_ACCOUNT_DOMAIN_MISMATCH:${from}:${to}`);
+      rejectHtlcPayment(`HTLC_PAYMENT_PROFILE_ACCOUNT_DOMAIN_MISMATCH:${from}:${to}`);
     }
     if (index === 0) {
       const local = input.state.accounts.get(to);
       if (!local || !sameAccountStateDomain(local.state.domain, left.domain)) {
-        throw new Error(`HTLC_PAYMENT_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${source}:${to}`);
+        rejectHtlcPayment(`HTLC_PAYMENT_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${source}:${to}`);
       }
     }
   }
@@ -229,9 +244,9 @@ const assertOriginEconomics = (
   origin: PreparedOriginatedHtlcPayment,
 ): void => {
   const startedAtMs = tx.data.startedAtMs ?? input.state.timestamp;
-  if (!Number.isSafeInteger(startedAtMs) || startedAtMs !== input.state.timestamp) throw new Error('HTLC_PAYMENT_STARTED_AT_INVALID');
+  if (!Number.isSafeInteger(startedAtMs) || startedAtMs !== input.state.timestamp) rejectHtlcPayment('HTLC_PAYMENT_STARTED_AT_INVALID');
   const quote = quoteHtlcPaymentRoute(input.profiles, [...origin.route], tx.data.tokenId, tx.data.amount);
-  if (quote.senderLockAmount > tx.data.maxSenderDebit) throw new Error('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
+  if (quote.senderLockAmount > tx.data.maxSenderDebit) rejectHtlcPayment('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
   const window = resolvePaymentDeadlineWindow({
     mode: tx.data.deliveryMode,
     runtimeJHeight: input.state.lastFinalizedJHeight,
@@ -249,10 +264,10 @@ const assertOriginEconomics = (
     nextHopEntityId: origin.route[1]!,
   };
   if (tx.data.hashlock !== undefined && tx.data.hashlock !== origin.hashlock) {
-    throw new Error(`HTLC_PAYMENT_PREPARED_HASHLOCK_MISMATCH:${origin.txHash}`);
+    rejectHtlcPayment(`HTLC_PAYMENT_PREPARED_HASHLOCK_MISMATCH:${origin.txHash}`);
   }
   for (const [key, value] of Object.entries(expected)) {
-    if (origin[key as keyof typeof origin] !== value) throw new Error(`HTLC_PAYMENT_PREPARED_${key.toUpperCase()}_MISMATCH:${origin.txHash}`);
+    if (origin[key as keyof typeof origin] !== value) rejectHtlcPayment(`HTLC_PAYMENT_PREPARED_${key.toUpperCase()}_MISMATCH:${origin.txHash}`);
   }
 };
 
@@ -261,15 +276,15 @@ export const assertOriginatedHtlcPayments = (input: AssertOriginatedInput): void
   const expectedTxs = input.proposalTxs
     .map((tx, txIndex) => ({ tx, txIndex }))
     .filter((row): row is { tx: HtlcPaymentTx; txIndex: number } => row.tx.type === 'htlcPayment');
-  if (expectedTxs.length !== input.originated.length) throw new Error('HTLC_PAYMENT_PREPARED_ORIGIN_COUNT_MISMATCH');
+  if (expectedTxs.length !== input.originated.length) rejectHtlcPayment('HTLC_PAYMENT_PREPARED_ORIGIN_COUNT_MISMATCH');
   const origins = new Map(input.originated.map(origin => [origin.txHash, origin]));
   const activeHashlocks = new Set([...input.state.htlcRoutes.keys()].map(hashlock => hashlock.toLowerCase()));
   for (const { tx, txIndex } of expectedTxs) {
     assertRawHtlcPayment(tx);
     const txHash = hashRawHtlcPaymentTx(tx);
     const origin = origins.get(txHash);
-    if (!origin) throw new Error(`HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:${txHash}`);
-    if (activeHashlocks.has(origin.hashlock)) throw new Error(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${origin.hashlock}`);
+    if (!origin) rejectHtlcPayment(`HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:${txHash}`);
+    if (activeHashlocks.has(origin.hashlock)) rejectHtlcPayment(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${origin.hashlock}`);
     activeHashlocks.add(origin.hashlock);
     assertOriginRouteEvidence(input, tx, origin);
     assertOriginEconomics(input, tx, txIndex, origin);
@@ -282,12 +297,12 @@ export const validatePreparedHtlcPayment = (
   infraContext: EntityInfraContext | undefined,
 ): PreparedOriginatedHtlcPayment => {
   assertRawHtlcPayment(tx);
-  if (!infraContext) throw new Error('HTLC_PAYMENT_INFRA_CONTEXT_REQUIRED');
+  if (!infraContext) rejectHtlcPayment('HTLC_PAYMENT_INFRA_CONTEXT_REQUIRED');
   const txHash = hashRawHtlcPaymentTx(tx);
   const prepared = infraContext.htlc.originated.find(entry => entry.txHash === txHash);
   if (!prepared) {
     const available = infraContext.htlc.originated.slice(0, 8).map(entry => entry.txHash).join(',');
-    throw new Error(
+    rejectHtlcPayment(
       `HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:${txHash}:` +
       `available=${infraContext.htlc.originated.length}[${available}]`,
     );
@@ -296,18 +311,18 @@ export const validatePreparedHtlcPayment = (
     || prepared.tokenId !== tx.data.tokenId || prepared.recipientAmount !== tx.data.amount
     || prepared.maxSenderDebit !== tx.data.maxSenderDebit || prepared.deliveryMode !== tx.data.deliveryMode
     || (tx.data.startedAtMs !== undefined && prepared.startedAtMs !== tx.data.startedAtMs)) {
-    throw new Error(`HTLC_PAYMENT_PREPARED_CONTEXT_MISMATCH:${txHash}`);
+    rejectHtlcPayment(`HTLC_PAYMENT_PREPARED_CONTEXT_MISMATCH:${txHash}`);
   }
   if (state.htlcRoutes.has(prepared.hashlock)) {
-    throw new Error(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${prepared.hashlock}`);
+    rejectHtlcPayment(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${prepared.hashlock}`);
   }
   const account = state.accounts.get(prepared.nextHopEntityId);
   if (!account || !canProcessAccountTxForDisputeStatus(account.status)) {
-    throw new Error(`HTLC_PAYMENT_OUTBOUND_ACCOUNT_UNAVAILABLE:${txHash}`);
+    rejectHtlcPayment(`HTLC_PAYMENT_OUTBOUND_ACCOUNT_UNAVAILABLE:${txHash}`);
   }
   const delta = account.state.deltas.get(prepared.tokenId);
   if (!delta || deriveDelta(delta, getAccountPerspective(account.state, state.entityId).iAmLeft).outCapacity < prepared.senderLockAmount) {
-    throw new Error(`HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT:${txHash}`);
+    rejectHtlcPayment(`HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT:${txHash}`);
   }
   return prepared;
 };

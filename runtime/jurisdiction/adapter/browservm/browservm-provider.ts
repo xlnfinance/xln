@@ -28,6 +28,7 @@ import {
   HashLadderRegistry__factory,
 } from '../../../../jurisdictions/typechain-types/index';
 import { safeStringify } from '../../../protocol/serialization/index.js';
+import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
 import { createStructuredLogger } from '../../../infra/logger';
 import { isLeftEntity, normalizeEntityId } from '../../../entity/id';
 import { requireBoundaryUint } from '../../../protocol/boundary-validation';
@@ -2254,7 +2255,7 @@ export class BrowserVMProvider {
     const headerData = {
       parentHash: hexToBytes(this.blockHash as `0x${string}`),
       number: BigInt(nextHeight),
-      timestamp: BigInt(Math.floor(timestampMs / 1000)),
+      timestamp: BigInt(unixMsToUnixSFloor(toUnixMs(timestampMs))),
       gasLimit: BLOCK_GAS_LIMIT,
       baseFeePerGas: 1n, // Low base fee for simnet
     };

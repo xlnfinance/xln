@@ -1,6 +1,6 @@
 /**
- * Worst-case programmable dispute: both peers hold a locally signed resolution
- * frame while the network is partitioned. The starter must commit its HTLC and
+ * Worst-case programmable swap dispute: both peers hold a locally signed
+ * resolution frame while the network is partitioned. The starter commits its
  * swap arguments at dispute start; the finalizer supplies the opposite side.
  */
 
@@ -12,25 +12,17 @@ import type { EntityTx } from '../../types/entity-tx';
 import type { RoutedEntityInput, RuntimeReplica } from '../../runtime/types';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { deriveDisputeTokenFinalization } from '../../protocol/dispute/finalization';
-import { hashHtlcSecret } from '../../protocol/htlc/utils';
-import { withDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
-import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
 import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
-import { ASYNC_PAYMENT_EXPIRY_MS } from '../../types/finance/payment';
 import { safeStringify } from '../../protocol/serialization';
 import { releaseUncommittedReliableIngress } from '../../runtime/reliable/reliable-delivery.ts';
 import { bootScenario, fundEntities, registerEntities } from '../harness/boot';
 import {
   assert,
-  advanceScenarioTime,
   converge,
   enableStrictScenario,
-  findCommittedScenarioHtlcLockId,
   findReplica,
   getProcess,
   processJEvents,
-  processUntilWithoutHtlcSecretProposal,
-  withholdScenarioHtlcSecretProposals,
   syncChain,
   pinScenarioJurisdictionUnix,
   advanceScenarioPastDisputeTimeout,
@@ -41,7 +33,6 @@ const USDC = 1;
 const WETH = 2;
 const MAX_FILL_RATIO = 65_535n;
 const WETH_LOT = 1_000_000_000_000n;
-const SCENARIO_DEADLINE_MS = 4_102_464_800_000n;
 const DETERMINISTIC_DISPUTE_START_UNIX = 4_102_445_800;
 
 type Registered = { id: string; signer: string; name: string };
@@ -148,14 +139,12 @@ const takePendingSwapProposal = (
 
 const capturePendingSwapProposal = async (
   env: RuntimeReplica,
-  withheldAdvances: Parameters<typeof withholdScenarioHtlcSecretProposals>[1],
   fromEntityId: string,
   toEntityId: string,
   offerId: string,
 ): Promise<AccountProposalInput> => {
   const process = await getProcess();
   for (let cycle = 0; cycle < 24; cycle += 1) {
-    withholdScenarioHtlcSecretProposals(env, withheldAdvances);
     const proposal = takePendingSwapProposal(env, fromEntityId, toEntityId, offerId);
     if (proposal) return proposal;
     await process(env);
@@ -182,7 +171,7 @@ const captureQueuedAck = (env: RuntimeReplica, toEntityId: string): AccountAckIn
 const requirePendingResolution = (account: AccountReplica | undefined, side: string): AccountFrame => {
   const frame = account?.pendingFrame;
   const types = frameTxTypes(frame);
-  if (!frame || !types.includes('htlc_resolve') || !types.includes('swap_resolve')) {
+  if (!frame || !types.includes('swap_resolve')) {
     throw new Error(`DISPUTE_TRANSFORMER_PENDING_FRAME_MISSING:${side}:${types.join(',') || 'none'}`);
   }
   return frame;
@@ -469,19 +458,6 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     await converge(env, 16);
     assert(!!lateAck, 'Failed to capture a real signed ACK for late-delivery replay', env);
 
-    const aliceSecret = ethers.keccak256(ethers.toUtf8Bytes('dispute-transformer:alice-secret'));
-    const hubSecret = ethers.keccak256(ethers.toUtf8Bytes('dispute-transformer:hub-secret'));
-    const aliceHashlock = hashHtlcSecret(aliceSecret);
-    const hubHashlock = hashHtlcSecret(hubSecret);
-    advanceScenarioTime(
-      env,
-      Number(SCENARIO_DEADLINE_MS) - ASYNC_PAYMENT_EXPIRY_MS - env.state.timestamp,
-      true,
-    );
-    const withheldAdvances = [
-      { entityId: hub.id, signerId: hub.signer, hashlock: aliceHashlock },
-      { entityId: alice.id, signerId: alice.signer, hashlock: hubHashlock },
-    ] as const;
     const giveAmount = MAX_FILL_RATIO * WETH_LOT;
     const aliceWantAmount = MAX_FILL_RATIO * 3_000n;
     const hubGiveAmount = 32_768n * WETH_LOT;
@@ -491,30 +467,11 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [
-        withDeterministicHtlcTestSecret({
-          type: 'htlcPayment',
-          data: {
-            targetEntityId: hub.id,
-            route: [alice.id, hub.id],
-            tokenId: USDC,
-            amount: usd(7),
-            maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id], USDC, usd(7)).senderLockAmount,
-            deliveryMode: 'async',
-            hashlock: aliceHashlock,
-            description: 'dispute-transformer-alice-lock',
-          },
-        }, aliceSecret),
         { type: 'placeSwapOffer', data: { counterpartyEntityId: hub.id, offerId: 'alice-maker-left', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount: aliceWantAmount, ...deriveSwapNetAuthorization(aliceWantAmount, 1) } },
       ],
     }]);
-    await processUntilWithoutHtlcSecretProposal(
-      env,
-      withheldAdvances,
-      () => findCommittedScenarioHtlcLockId(env, alice.id, hub.id, aliceHashlock) !== undefined
-        && offersCommitted(env, alice.id, hub.id, ['alice-maker-left']),
-    );
-    const aliceLockId = findCommittedScenarioHtlcLockId(env, alice.id, hub.id, aliceHashlock);
-    if (!aliceLockId) throw new Error('DISPUTE_TRANSFORMER_ALICE_LOCK_NOT_COMMITTED');
+    await converge(env, 16);
+    assert(offersCommitted(env, alice.id, hub.id, ['alice-maker-left']), 'Alice maker offer did not commit', env);
     assert(
       findReplica(env, alice.id)[1].state.orderbookExt === undefined,
       'User Entity commits the maker offer without becoming a matcher',
@@ -543,30 +500,13 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
         },
       }],
     }]);
-    await processUntilWithoutHtlcSecretProposal(
-      env,
-      withheldAdvances,
-      () => findReplica(env, alice.id)[1].state.orderbookExt !== undefined,
-      12,
-    );
+    await converge(env, 12);
+    assert(findReplica(env, alice.id)[1].state.orderbookExt !== undefined, 'Alice matcher did not initialize', env);
 
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
       entityTxs: [
-        withDeterministicHtlcTestSecret({
-          type: 'htlcPayment',
-          data: {
-            targetEntityId: alice.id,
-            route: [hub.id, alice.id],
-            tokenId: USDC,
-            amount: usd(3),
-            maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [hub.id, alice.id], USDC, usd(3)).senderLockAmount,
-            deliveryMode: 'async',
-            hashlock: hubHashlock,
-            description: 'dispute-transformer-hub-lock',
-          },
-        }, hubSecret),
         {
           type: 'placeSwapOffer',
           data: {
@@ -581,16 +521,12 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
         },
       ],
     }]);
-    await processUntilWithoutHtlcSecretProposal(
+    await converge(env, 16);
+    assert(
+      offersCommitted(env, alice.id, hub.id, ['alice-maker-left', 'hub-maker-right']),
+      'Both maker offers did not commit',
       env,
-      withheldAdvances,
-      () => findCommittedScenarioHtlcLockId(env, alice.id, hub.id, hubHashlock) !== undefined
-        && offersCommitted(env, alice.id, hub.id, ['alice-maker-left', 'hub-maker-right']),
     );
-    const hubLockId = findCommittedScenarioHtlcLockId(env, alice.id, hub.id, hubHashlock);
-    if (!hubLockId) throw new Error('DISPUTE_TRANSFORMER_HUB_LOCK_NOT_COMMITTED');
-
-    withholdScenarioHtlcSecretProposals(env, withheldAdvances);
 
     // Produce the exact signed peer proposals that the two independent
     // matchers consume. We intercept them before delivery so the opposing
@@ -614,7 +550,6 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     }]);
     const bobProposal = await capturePendingSwapProposal(
       env,
-      withheldAdvances,
       bob.id,
       hub.id,
       'bob-taker-hub',
@@ -638,7 +573,6 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     }]);
     const carolProposal = await capturePendingSwapProposal(
       env,
-      withheldAdvances,
       carol.id,
       alice.id,
       'carol-taker-alice',
@@ -660,7 +594,6 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
         signerId: alice.signer,
         entityTxs: [
           { type: 'accountInput', data: carolProposal },
-          { type: 'resolveHtlcLock', data: { counterpartyEntityId: hub.id, lockId: hubLockId, secret: hubSecret } },
         ],
       },
       {
@@ -668,7 +601,6 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
         signerId: hub.signer,
         entityTxs: [
           { type: 'accountInput', data: bobProposal },
-          { type: 'resolveHtlcLock', data: { counterpartyEntityId: alice.id, lockId: aliceLockId, secret: aliceSecret } },
         ],
       },
     ]);
@@ -739,7 +671,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
       decoded: starter,
     })}`);
     assert(starter.fillRatios.some((ratio) => ratio > 0n), 'Starter swap fill argument missing', env);
-    assert(starter.secrets.map((secret) => secret.toLowerCase()).includes(aliceSecret.toLowerCase()), 'Starter HTLC secret missing', env);
+    assert(starter.secrets.length === 0, 'Swap-only starter unexpectedly carried HTLC secrets', env);
 
     const frozenBeforeLateAck = findReplica(env, hub.id)[1].state.accounts.get(alice.id);
     const frozenHeight = frozenBeforeLateAck?.currentHeight;
@@ -854,7 +786,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
       decoded: finalizer,
     })}`);
     assert(finalizer.fillRatios.some((ratio) => ratio > 0n), 'Finalizer swap fill argument missing', env);
-    assert(finalizer.secrets.map((secret) => secret.toLowerCase()).includes(hubSecret.toLowerCase()), 'Finalizer HTLC secret missing', env);
+    assert(finalizer.secrets.length === 0, 'Swap-only finalizer unexpectedly carried HTLC secrets', env);
 
     // Timeout wake may already auto-draft + broadcast finalize into sentBatch.
     const aliceBatch = findReplica(env, alice.id)[1].state.jBatchState;

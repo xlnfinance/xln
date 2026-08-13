@@ -12,6 +12,13 @@ import { MAX_ROUTING_FEE_PPM } from '../../routing/fees';
 import type { AccountStateDomain } from '../../types/account';
 import { normalizeAccountStateDomain } from '../../account/commitment/state-root';
 import { HANKO_MAX_BYTES } from '../../hanko/codec';
+import {
+  toEntityId,
+  toRuntimeId,
+  type EntityId,
+  type RuntimeId,
+} from '../../protocol/identity';
+import { toUnixMs, type UnixMs } from '../../protocol/units';
 
 const utf8Bytes = (value: string): number => new TextEncoder().encode(value).byteLength;
 
@@ -96,6 +103,18 @@ export type Profile = {
   metadata: ProfileMetadata;
   accounts: ProfileAccount[];
 };
+
+type DecodedProfileAccount = ProfileAccount & Readonly<{
+  counterpartyId: EntityId;
+}>;
+
+export type DecodedProfile = Profile & Readonly<{
+  entityId: EntityId;
+  runtimeId: RuntimeId;
+  lastUpdated: UnixMs;
+  publicAccounts: EntityId[];
+  accounts: DecodedProfileAccount[];
+}>;
 
 export const isHubProfile = (profile: Profile): boolean =>
   profile.metadata.isHub === true;
@@ -427,7 +446,7 @@ const parseProfileTokenCapacities = (
   return capacities;
 };
 
-const parseProfileAccounts = (raw: unknown, entityId: string): ProfileAccount[] => {
+const parseProfileAccounts = (raw: unknown, entityId: string): DecodedProfileAccount[] => {
   if (!Array.isArray(raw)) return [];
   if (raw.length > 1000) throw new Error(`GOSSIP_PROFILE_ACCOUNTS_COUNT_INVALID: entity=${entityId}`);
   let previousCounterparty = '';
@@ -436,12 +455,13 @@ const parseProfileAccounts = (raw: unknown, entityId: string): ProfileAccount[] 
       throw new Error(`GOSSIP_PROFILE_ACCOUNT_INVALID: entity=${entityId}`);
     }
     assertOnlyAllowedKeys(accountRaw, ALLOWED_PROFILE_ACCOUNT_KEYS, 'GOSSIP_PROFILE_ACCOUNT_UNKNOWN_FIELD', entityId);
-    const counterpartyId = typeof accountRaw['counterpartyId'] === 'string'
+    const rawCounterpartyId = typeof accountRaw['counterpartyId'] === 'string'
       ? accountRaw['counterpartyId'].trim()
       : '';
-    if (!/^0x[0-9a-f]{64}$/.test(counterpartyId) || counterpartyId <= previousCounterparty) {
+    if (!/^0x[0-9a-f]{64}$/.test(rawCounterpartyId) || rawCounterpartyId <= previousCounterparty) {
       throw new Error(`GOSSIP_PROFILE_ACCOUNT_COUNTERPARTY_REQUIRED: entity=${entityId}`);
     }
+    const counterpartyId = toEntityId(rawCounterpartyId);
     previousCounterparty = counterpartyId;
     const tokenCapacities = parseProfileTokenCapacities(accountRaw['tokenCapacities'], entityId, counterpartyId);
     if (Object.keys(tokenCapacities).length > 16) {
@@ -513,15 +533,16 @@ const assertProfileRouteFields = (
   if (wsUrl && utf8Bytes(wsUrl) > 2048) throw new Error(`GOSSIP_PROFILE_WS_URL_TOO_LONG: entity=${entityId}`);
 };
 
-export const parseProfile = (raw: unknown): Profile => {
+export const parseProfile = (raw: unknown): DecodedProfile => {
   if (!isRecord(raw)) {
     throw new Error('GOSSIP_PROFILE_OBJECT_REQUIRED');
   }
-  const entityId = typeof raw['entityId'] === 'string' ? raw['entityId'].trim() : '';
-  assertProfileByteLimit(raw, entityId);
-  if (!/^0x[0-9a-f]{64}$/.test(entityId)) {
+  const rawEntityId = typeof raw['entityId'] === 'string' ? raw['entityId'].trim() : '';
+  assertProfileByteLimit(raw, rawEntityId);
+  if (!/^0x[0-9a-f]{64}$/.test(rawEntityId)) {
     throw new Error('GOSSIP_PROFILE_ENTITY_ID_REQUIRED');
   }
+  const entityId = toEntityId(rawEntityId);
   const entityEncryptionPublicKey = normalizeX25519Key(raw['entityEncryptionPublicKey']);
   if (!entityEncryptionPublicKey) {
     throw new Error(`GOSSIP_PROFILE_ENTITY_ENCRYPTION_PUBLIC_KEY_REQUIRED: entity=${entityId}`);
@@ -535,29 +556,31 @@ export const parseProfile = (raw: unknown): Profile => {
     throw new Error(`GOSSIP_PROFILE_NAME_REQUIRED: entity=${entityId}`);
   }
   const name = normalizeEntityName(raw['name'], entityId);
-  const lastUpdated = parsePositiveTimestamp(raw['lastUpdated'], entityId);
+  const lastUpdated = toUnixMs(parsePositiveTimestamp(raw['lastUpdated'], entityId));
   const runtimeEncPubKey = normalizeX25519Key(raw['runtimeEncPubKey']);
   if (!runtimeEncPubKey) {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ENC_PUBKEY_REQUIRED: entity=${entityId}`);
   }
-  const runtimeId = typeof raw['runtimeId'] === 'string' ? raw['runtimeId'].trim() : '';
-  if (!runtimeId) {
+  const rawRuntimeId = typeof raw['runtimeId'] === 'string' ? raw['runtimeId'].trim() : '';
+  if (!rawRuntimeId) {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ID_REQUIRED: entity=${entityId}`);
   }
-  const publicAccounts = normalizeStringArray(raw['publicAccounts']);
+  const runtimeId = toRuntimeId(rawRuntimeId);
+  const rawPublicAccounts = normalizeStringArray(raw['publicAccounts']);
   const wsUrl = normalizeWsUrl(raw['wsUrl']);
   const relays = normalizeStringArray(raw['relays']);
-  assertCanonicalStringList(publicAccounts, 1000, 66, `GOSSIP_PROFILE_PUBLIC_ACCOUNTS_NONCANONICAL: entity=${entityId}`);
+  assertCanonicalStringList(rawPublicAccounts, 1000, 66, `GOSSIP_PROFILE_PUBLIC_ACCOUNTS_NONCANONICAL: entity=${entityId}`);
   assertCanonicalStringList(relays, 8, 2048, `GOSSIP_PROFILE_RELAYS_NONCANONICAL: entity=${entityId}`);
-  if (publicAccounts.some(accountId => !/^0x[0-9a-f]{64}$/.test(accountId))) {
+  if (rawPublicAccounts.some(accountId => !/^0x[0-9a-f]{64}$/.test(accountId))) {
     throw new Error(`GOSSIP_PROFILE_PUBLIC_ACCOUNT_ID_INVALID: entity=${entityId}`);
   }
+  const publicAccounts = rawPublicAccounts.map(toEntityId);
   if (relays.some(relay => normalizeWsUrl(relay) !== relay)) {
     throw new Error(`GOSSIP_PROFILE_RELAY_URL_INVALID: entity=${entityId}`);
   }
   assertProfileRouteFields(raw, entityId, name, runtimeId, wsUrl);
   const metadata = parseProfileMetadata(metadataRaw, entityId);
-  const result: Profile = {
+  const result: DecodedProfile = {
     entityId,
     entityEncryptionPublicKey,
     name,

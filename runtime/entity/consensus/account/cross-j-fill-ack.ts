@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 const buildCrossJurisdictionAdmissionFillNoticeOutput = (
   currentEntityState: EntityState,
   accountId: string,
@@ -13,15 +15,13 @@ const buildCrossJurisdictionAdmissionFillNoticeOutput = (
   if (admission.status === 'closed' || admission.status === 'resolving') return null;
   const sourceHubEntityId = normalizeEntityRef(admission.route.source.counterpartyEntityId);
   if (!sourceHubEntityId) {
-    throw new Error(`CROSS_J_FILL_ACK_SOURCE_HUB_MISSING: account=${accountId} offer=${tx.data.offerId}`);
+    throw haltRuntimeFailure("CROSS_J_FILL_ACK_SOURCE_HUB_MISSING", `CROSS_J_FILL_ACK_SOURCE_HUB_MISSING: account=${accountId} offer=${tx.data.offerId}`);
   }
   if (sourceHubEntityId === normalizeEntityRef(currentEntityState.entityId)) return null;
   const hintedSignerRaw = String(admission.route.sourceHubSignerId || '');
   if (!normalizeEntityRef(hintedSignerRaw)) {
-    throw new Error(
-      `CROSS_J_FILL_ACK_SOURCE_HUB_SIGNER_MISSING: account=${accountId} offer=${tx.data.offerId} ` +
-        `sourceHub=${sourceHubEntityId}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_FILL_ACK_SOURCE_HUB_SIGNER_MISSING", `CROSS_J_FILL_ACK_SOURCE_HUB_SIGNER_MISSING: account=${accountId} offer=${tx.data.offerId} ` +
+        `sourceHub=${sourceHubEntityId}`);
   }
   return {
     entityId: sourceHubEntityId,
@@ -66,10 +66,8 @@ export const stashPendingCrossJurisdictionFillAck = (
   const key = pendingCrossJurisdictionFillAckKey(accountId, tx);
   if (currentEntityState.pendingCrossJurisdictionFillAcks.has(key)) return;
   if (currentEntityState.pendingCrossJurisdictionFillAcks.size >= MAX_PENDING_CROSS_J_FILL_ACKS) {
-    throw new Error(
-      `CROSS_J_FILL_ACK_PENDING_CAPACITY: entity=${currentEntityState.entityId} ` +
-        `account=${accountId} offer=${tx.data.offerId} max=${MAX_PENDING_CROSS_J_FILL_ACKS}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_FILL_ACK_PENDING_CAPACITY", `CROSS_J_FILL_ACK_PENDING_CAPACITY: entity=${currentEntityState.entityId} ` +
+        `account=${accountId} offer=${tx.data.offerId} max=${MAX_PENDING_CROSS_J_FILL_ACKS}`);
   }
   currentEntityState.pendingCrossJurisdictionFillAcks.set(key, {
     accountId,
@@ -227,11 +225,11 @@ export const drainCommittedCrossJurisdictionCancelAcks = async (
   let queued = 0;
   for (const { accountId, tx } of collectCommittedCrossJurisdictionCancelAcks(currentEntityState)) {
     if (tx.type !== 'cross_swap_fill_ack') {
-      throw new Error(`CROSS_J_CANCEL_ACK_TX_INVALID:account=${accountId}:type=${tx.type}`);
+      throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_TX_INVALID", `CROSS_J_CANCEL_ACK_TX_INVALID:account=${accountId}:type=${tx.type}`);
     }
     const account = currentEntityState.accounts.get(accountId);
     if (!account) {
-      throw new Error(`CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
+      throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_ACCOUNT_MISSING", `CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
     }
     if (!(await admitGeneratedAccountTx(accountConsensusContext, currentEntityState, account, tx))) continue;
     appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, tx, outputs);

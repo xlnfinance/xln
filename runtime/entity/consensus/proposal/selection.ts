@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 import {
   buildCertifiedJPrefixTx,
   buildJPrefixCertificate,
@@ -119,10 +121,8 @@ export const selectEntityProposal = async (
     options.trustedLocalCrossJurisdiction &&
     proposalTxs.length !== trustedProposalTxs.length
   ) {
-    throw new Error(
-      `CROSS_J_LOCAL_COMMAND_PARTIAL_FRAME_FORBIDDEN:${replica.entityId}:` +
-        `selected=${proposalTxs.length}:required=${trustedProposalTxs.length}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_LOCAL_COMMAND_PARTIAL_FRAME_FORBIDDEN", `CROSS_J_LOCAL_COMMAND_PARTIAL_FRAME_FORBIDDEN:${replica.entityId}:` +
+        `selected=${proposalTxs.length}:required=${trustedProposalTxs.length}`);
   }
   if (proposalSelection.reason) {
     entityLog.debug('proposal.authority_gate', {

@@ -1,4 +1,5 @@
 import type { SameJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
+import { SwapNetAuthorizationError } from '../../../../../../account/swap/swap-net-authorization';
 import {
   keepIdenticalRestingOrder,
   materializeSameOffer,
@@ -29,7 +30,7 @@ export const processSameOrderbookOffer = (
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message.startsWith('SWAP_NET_AUTH_')) {
+    if (error instanceof SwapNetAuthorizationError) {
       rejectFeeUnauthorizedOffer(pass, prepared);
       return;
     }

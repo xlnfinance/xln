@@ -24,6 +24,7 @@ const args = globalThis.process.argv.slice(2);
  * Unused env is the CLI shell Runtime; work happens in local-prod-smoke.
  */
 export async function mmMesh(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
+  if (!_existingEnv) throw new Error('MM_MESH_RUNTIME_REQUIRED');
   const adversary = parseAdversaryProfile(
     readCliOption(args, '--adversary', process.env['XLN_ADVERSARY_PROFILE'] || 'none'),
   );
@@ -51,5 +52,5 @@ export async function mmMesh(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
     throw new Error(`MM_MESH_SMOKE_FAILED exit=${exitCode} adversary=${adversary}`);
   }
   console.log(`\n✅ mm-mesh complete adversary=${adversary}\n`);
-  return _existingEnv ?? ({} as RuntimeReplica);
+  return _existingEnv;
 }

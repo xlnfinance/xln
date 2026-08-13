@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
@@ -52,9 +54,7 @@ export const requireProofBodyStruct = (
   source: string,
 ): ProofBodyStruct => {
   if (!isProofBodyStruct(value)) {
-    throw new Error(
-      `DISPUTE_FINALIZE_PROOFBODY_INVALID: entity=${entityId} counterparty=${counterpartyEntityId} source=${source}`,
-    );
+    throw haltRuntimeFailure("DISPUTE_FINALIZE_PROOFBODY_INVALID", `DISPUTE_FINALIZE_PROOFBODY_INVALID: entity=${entityId} counterparty=${counterpartyEntityId} source=${source}`);
   }
   return value;
 };
@@ -63,19 +63,19 @@ const toBigIntStrict = (value: unknown, label: string): bigint => {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number' && Number.isInteger(value)) return BigInt(value);
   if (typeof value === 'string' && /^-?\d+$/.test(value)) return BigInt(value);
-  throw new Error(`DISPUTE_FINALIZE_PROOFBODY_VALUE_INVALID:${label}`);
+  throw haltRuntimeFailure("DISPUTE_FINALIZE_PROOFBODY_VALUE_INVALID", `DISPUTE_FINALIZE_PROOFBODY_VALUE_INVALID:${label}`);
 };
 
 const requireBytesLike = (value: unknown, label: string): string => {
   if (typeof value !== 'string' || !value.startsWith('0x')) {
-    throw new Error(`DISPUTE_FINALIZE_PROOFBODY_BYTES_INVALID:${label}`);
+    throw haltRuntimeFailure("DISPUTE_FINALIZE_PROOFBODY_BYTES_INVALID", `DISPUTE_FINALIZE_PROOFBODY_BYTES_INVALID:${label}`);
   }
   return value;
 };
 
 const requireAddressLike = (value: unknown, label: string): string => {
   if (!isUsableContractAddress(value)) {
-    throw new Error(`DISPUTE_FINALIZE_PROOFBODY_ADDRESS_INVALID:${label}`);
+    throw haltRuntimeFailure("DISPUTE_FINALIZE_PROOFBODY_ADDRESS_INVALID", `DISPUTE_FINALIZE_PROOFBODY_ADDRESS_INVALID:${label}`);
   }
   return value;
 };
@@ -83,7 +83,7 @@ const requireAddressLike = (value: unknown, label: string): string => {
 const requireResponseSeconds = (value: unknown, label: string): bigint => {
   const seconds = toBigIntStrict(value, label);
   if (seconds < 0n || seconds > 0xffff_ffffn) {
-    throw new Error(`DISPUTE_FINALIZE_PROOFBODY_RESPONSE_SECONDS_INVALID:${label}`);
+    throw haltRuntimeFailure("DISPUTE_FINALIZE_PROOFBODY_RESPONSE_SECONDS_INVALID", `DISPUTE_FINALIZE_PROOFBODY_RESPONSE_SECONDS_INVALID:${label}`);
   }
   return seconds;
 };
@@ -104,7 +104,7 @@ export const canonicalizeProofBodyStruct = (
     `${source}.rightResponseSeconds`,
   );
   if (leftResponseSeconds + rightResponseSeconds > 365n * 24n * 60n * 60n) {
-    throw new Error(`DISPUTE_FINALIZE_PROOFBODY_RESPONSE_TOTAL_INVALID:${source}`);
+    throw haltRuntimeFailure("DISPUTE_FINALIZE_PROOFBODY_RESPONSE_TOTAL_INVALID", `DISPUTE_FINALIZE_PROOFBODY_RESPONSE_TOTAL_INVALID:${source}`);
   }
   return {
     watchSeed: requireBytesLike(proofBody.watchSeed, `${source}.watchSeed`),
@@ -151,7 +151,7 @@ export const resolveDepositoryHankoDomain = (
   if (!isUsableContractAddress(address)) return null;
   const chainId = Number(jurisdiction?.chainId);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
-    throw new Error(`DISPUTE_HANKO_CHAIN_ID_INVALID:${String(jurisdiction?.chainId)}`);
+    throw haltRuntimeFailure("DISPUTE_HANKO_CHAIN_ID_INVALID", `DISPUTE_HANKO_CHAIN_ID_INVALID:${String(jurisdiction?.chainId)}`);
   }
   return { chainId, depositoryAddress: address };
 };

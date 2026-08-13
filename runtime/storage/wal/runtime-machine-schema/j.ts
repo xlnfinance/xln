@@ -1,6 +1,18 @@
 import type { JInput } from '../../../jurisdiction/machine/input';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import type { JTx } from '../../../types/jurisdiction-runtime';
+import {
+  toEntityId,
+  toJId,
+  type EntityId,
+  type JId,
+} from '../../../protocol/identity';
+import {
+  toJHeight,
+  toUnixMs,
+  type JHeight,
+  type UnixMs,
+} from '../../../protocol/units';
 import { validateJBatch } from '../../../jurisdiction/machine/batch-validation';
 import {
   requireArray,
@@ -103,12 +115,30 @@ const validateEntityProviderData = (value: unknown, code: string): void => {
   }
 };
 
-function assertJTx(value: unknown, code: string): asserts value is JTx {
+export type DecodedJTx = JTx & Readonly<{
+  entityId: EntityId;
+  timestamp: UnixMs;
+  expectedJBlock?: JHeight;
+}>;
+
+export type DecodedJInput = Omit<JInput, 'jurisdictionName' | 'jTxs'> & Readonly<{
+  jurisdictionName: JId;
+  jTxs: DecodedJTx[];
+}>;
+
+export type DecodedJReplica = JReplica & Readonly<{
+  name: JId;
+  lastBlockTimestamp: UnixMs;
+}>;
+
+function assertJTx(value: unknown, code: string): asserts value is DecodedJTx {
   const tx = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(tx, ['type', 'entityId', 'data', 'timestamp'], ['expectedJBlock'], `${code}_FIELDS`);
-  requireString(tx['entityId'], `${code}_ENTITY`);
-  requireBoundaryInteger(tx['timestamp'], `${code}_TIMESTAMP`);
-  if (tx['expectedJBlock'] !== undefined) requireBoundaryInteger(tx['expectedJBlock'], `${code}_EXPECTED_BLOCK`);
+  toEntityId(requireString(tx['entityId'], `${code}_ENTITY`));
+  toUnixMs(requireBoundaryInteger(tx['timestamp'], `${code}_TIMESTAMP`));
+  if (tx['expectedJBlock'] !== undefined) {
+    toJHeight(requireBoundaryInteger(tx['expectedJBlock'], `${code}_EXPECTED_BLOCK`));
+  }
   const data = requireBoundaryRecord(tx['data'], `${code}_DATA`);
   if (tx['type'] === 'batch') {
     requireExactBoundaryKeys(data, ['batch', 'batchSize'], [
@@ -143,12 +173,12 @@ function assertJTx(value: unknown, code: string): asserts value is JTx {
   else throw new Error(`${code}_TYPE`);
 }
 
-const validateJTx = (value: unknown, code: string): JTx => {
+const validateJTx = (value: unknown, code: string): DecodedJTx => {
   assertJTx(value, code);
   return value;
 };
 
-export const validateJInputs = (value: unknown, code: string): JInput[] =>
+export const validateJInputs = (value: unknown, code: string): DecodedJInput[] =>
   requireArray(value, code).map((raw, index) => {
     const itemCode = `${code}_${index}`;
     const input = requireBoundaryRecord(raw, itemCode);
@@ -156,7 +186,7 @@ export const validateJInputs = (value: unknown, code: string): JInput[] =>
     const jTxs = requireArray(input['jTxs'], `${itemCode}_TXS`).map((tx, txIndex) =>
       validateJTx(tx, `${itemCode}_TX_${txIndex}`));
     return {
-      jurisdictionName: requireString(input['jurisdictionName'], `${itemCode}_JURISDICTION`),
+      jurisdictionName: toJId(requireString(input['jurisdictionName'], `${itemCode}_JURISDICTION`)),
       jTxs,
     };
   });
@@ -165,7 +195,7 @@ function assertJReplica(
   value: unknown,
   expectedName: string,
   code: string,
-): asserts value is JReplica {
+): asserts value is DecodedJReplica {
   const replica = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(replica, [
     'name', 'blockNumber', 'stateRoot', 'mempool', 'blockDelayMs',
@@ -176,12 +206,13 @@ function assertJReplica(
   ], `${code}_FIELDS`);
   const name = requireString(replica['name'], `${code}_NAME`);
   if (name !== expectedName) throw new Error(`${code}_NAME_KEY_MISMATCH`);
+  toJId(name);
   requireBigInt(replica['blockNumber'], `${code}_BLOCK_NUMBER`, 0n);
   if (replica['stateRoot'] !== null) requireBytes(replica['stateRoot'], `${code}_STATE_ROOT`, 32);
   requireArray(replica['mempool'], `${code}_MEMPOOL`).forEach((tx, index) =>
     validateJTx(tx, `${code}_MEMPOOL_${index}`));
   requireFiniteNumber(replica['blockDelayMs'], `${code}_BLOCK_DELAY`, 0);
-  requireFiniteNumber(replica['lastBlockTimestamp'], `${code}_LAST_TIMESTAMP`, 0);
+  toUnixMs(requireBoundaryInteger(replica['lastBlockTimestamp'], `${code}_LAST_TIMESTAMP`));
   const position = requireBoundaryRecord(replica['position'], `${code}_POSITION`);
   requireExactBoundaryKeys(position, ['x', 'y', 'z'], [], `${code}_POSITION_FIELDS`);
   for (const axis of ['x', 'y', 'z']) {
@@ -217,11 +248,11 @@ function assertJReplica(
   }
 }
 
-export const validateJReplicas = (value: unknown, code: string): Array<[string, JReplica]> =>
+export const validateJReplicas = (value: unknown, code: string): Array<[JId, DecodedJReplica]> =>
   requireArray(value, code).map((raw, index) => {
     const itemCode = `${code}_${index}`;
     if (!Array.isArray(raw) || raw.length !== 2) throw new Error(`${itemCode}_TUPLE`);
-    const key = requireString(raw[0], `${itemCode}_KEY`);
+    const key = toJId(requireString(raw[0], `${itemCode}_KEY`));
     assertJReplica(raw[1], key, `${itemCode}_VALUE`);
     return [key, raw[1]];
   });

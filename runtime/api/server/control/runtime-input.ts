@@ -86,8 +86,9 @@ export const handleRuntimeInputStatus = (
       receipt,
       currentHeight: deps.getCurrentRuntimeHeight(env),
       runtime: env?.infrastructure
-        ? {
+          ? {
             halted: env.infrastructure.halted === true,
+            operatorStatus: env.infrastructure.operatorStatus ?? null,
             fatalDebugPayload: env.infrastructure.fatalDebugPayload ?? null,
           }
         : null,

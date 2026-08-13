@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../../protocol/errors/failure-taxonomy";
+
 import type { EntityInput, EntityState } from '../../../../types';
 import type { EntityRuntimeContext } from '../../../../runtime-context';
 import {
@@ -69,15 +71,13 @@ export function routeRemoteCrossJurisdictionBookCancels(
 
     const sourceHubEntityId = normalizeEntityRef(route.source.counterpartyEntityId);
     if (currentEntityId !== sourceHubEntityId) {
-      throw new Error(
-        `CROSS_J_CANCEL_SOURCE_HUB_REQUIRED:offer=${cancel.offerId}:` +
-          `entity=${currentEntityId}:sourceHub=${sourceHubEntityId}`,
-      );
+      throw haltRuntimeFailure("CROSS_J_CANCEL_SOURCE_HUB_REQUIRED", `CROSS_J_CANCEL_SOURCE_HUB_REQUIRED:offer=${cancel.offerId}:` +
+          `entity=${currentEntityId}:sourceHub=${sourceHubEntityId}`);
     }
 
     const bookOwnerEntityId = crossJurisdictionBookOwnerRef(route);
     if (!bookOwnerEntityId) {
-      throw new Error(`CROSS_J_CANCEL_BOOK_OWNER_MISSING:offer=${cancel.offerId}`);
+      throw haltRuntimeFailure("CROSS_J_CANCEL_BOOK_OWNER_MISSING", `CROSS_J_CANCEL_BOOK_OWNER_MISSING:offer=${cancel.offerId}`);
     }
     if (bookOwnerEntityId === currentEntityId) {
       localBookCancels.push(cancel);
@@ -86,9 +86,7 @@ export function routeRemoteCrossJurisdictionBookCancels(
 
     const bookOwnerSignerId = crossJurisdictionRouteSignerHint(route, bookOwnerEntityId);
     if (!bookOwnerSignerId) {
-      throw new Error(
-        `CROSS_J_CANCEL_BOOK_OWNER_SIGNER_MISSING:offer=${cancel.offerId}:owner=${bookOwnerEntityId}`,
-      );
+      throw haltRuntimeFailure("CROSS_J_CANCEL_BOOK_OWNER_SIGNER_MISSING", `CROSS_J_CANCEL_BOOK_OWNER_SIGNER_MISSING:offer=${cancel.offerId}:owner=${bookOwnerEntityId}`);
     }
     markCrossJurisdictionBookCancelPending(
       sourceHubState,
@@ -123,14 +121,12 @@ export function collectCommittedCrossJurisdictionCancelAcks(
     if (!pending?.bookRemovalCommittedAt) continue;
     const route = sourceHubState.crossJurisdictionSwaps?.get(admission.orderId);
     if (!route) {
-      throw new Error(`CROSS_J_CANCEL_ACK_ROUTE_MISSING:order=${admission.orderId}`);
+      throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_ROUTE_MISSING", `CROSS_J_CANCEL_ACK_ROUTE_MISSING:order=${admission.orderId}`);
     }
     if (normalizeEntityRef(route.source.counterpartyEntityId) !== currentEntityId) continue;
     const account = sourceHubState.accounts.get(pending.sourceAccountId);
     if (!account?.state.swapOffers?.has(admission.orderId)) {
-      throw new Error(
-        `CROSS_J_CANCEL_ACK_SOURCE_OFFER_MISSING:account=${pending.sourceAccountId}:order=${admission.orderId}`,
-      );
+      throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_SOURCE_OFFER_MISSING", `CROSS_J_CANCEL_ACK_SOURCE_OFFER_MISSING:account=${pending.sourceAccountId}:order=${admission.orderId}`);
     }
     if (hasQueuedCrossSwapAckForEntityState(sourceHubState, pending.sourceAccountId, admission.orderId)) {
       continue;
@@ -158,7 +154,7 @@ export function processOrderbookCancels(
   const debugProjectionRejects: MatchResult['debugProjectionRejects'] = [];
   const queuedSwapResolutions = new Set<string>();
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) throw new Error('ORDERBOOK_EXTENSION_REQUIRED_FOR_CANCEL');
+  if (!ext) throw haltRuntimeFailure("ORDERBOOK_EXTENSION_REQUIRED_FOR_CANCEL", 'ORDERBOOK_EXTENSION_REQUIRED_FOR_CANCEL');
 
   for (const { offerId, accountId } of cancels) {
     const account = hubState.accounts.get(accountId);
@@ -178,9 +174,7 @@ export function processOrderbookCancels(
     }
 
     if (matchingBooks.length > 1) {
-      throw new Error(
-        `ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${namespacedOrderId} matches=${matchingBooks.length}`,
-      );
+      throw haltRuntimeFailure("ORDERBOOK_DUPLICATE_BOOK_ORDER", `ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${namespacedOrderId} matches=${matchingBooks.length}`);
     }
 
     for (const { bookKey, book, ownerId } of matchingBooks) {

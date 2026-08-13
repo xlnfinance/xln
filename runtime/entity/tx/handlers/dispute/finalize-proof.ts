@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
@@ -196,7 +198,7 @@ export const verifyCounterProofIdentity = (
 ): void => {
   if (!selection.shouldUseCounterProof || !account.counterpartyDisputeHash) return;
   const domain = resolveDepositoryHankoDomain(sourceState);
-  if (!domain) throw new Error('DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING');
+  if (!domain) throw haltRuntimeFailure("DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING", 'DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING');
   const expectedHash = createDisputeProofHashWithNonce(
     account.state,
     selection.finalProofbodyHash,
@@ -205,10 +207,8 @@ export const verifyCounterProofIdentity = (
     selection.proposerIsLeft,
   );
   if (account.counterpartyDisputeHash.toLowerCase() !== expectedHash.toLowerCase()) {
-    throw new Error(
-      `DISPUTE_COUNTER_FINALIZE_HASH_MISMATCH:${counterpartyId}:` +
-      `${account.counterpartyDisputeHash}:${expectedHash}`,
-    );
+    throw haltRuntimeFailure("DISPUTE_COUNTER_FINALIZE_HASH_MISMATCH", `DISPUTE_COUNTER_FINALIZE_HASH_MISMATCH:${counterpartyId}:` +
+      `${account.counterpartyDisputeHash}:${expectedHash}`);
   }
 };
 
@@ -259,10 +259,8 @@ export const buildFinalProofPayload = (
   );
   const recomputedHash = hashProofBodyStruct(selection.finalProofbody);
   if (recomputedHash.toLowerCase() !== selection.finalProofbodyHash.toLowerCase()) {
-    throw new Error(
-      `DISPUTE_FINALIZE_PROOFBODY_HASH_MISMATCH:${counterpartyId}:` +
-      `${selection.finalProofbodyHash}:${recomputedHash}`,
-    );
+    throw haltRuntimeFailure("DISPUTE_FINALIZE_PROOFBODY_HASH_MISMATCH", `DISPUTE_FINALIZE_PROOFBODY_HASH_MISMATCH:${counterpartyId}:` +
+      `${selection.finalProofbodyHash}:${recomputedHash}`);
   }
   assertDisputeArgumentsWithinContractLimits(
     [starterArguments],

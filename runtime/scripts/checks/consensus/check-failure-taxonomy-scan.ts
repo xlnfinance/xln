@@ -167,7 +167,7 @@ const fatalIncidentRoutes = [
   {
     name: 'managed-runtime',
     steps: [
-      ['runtime/runtime/loop/loop.ts', ['await config.onFatal({', 'getRuntimeProcessGlobal()?.exit?.(1);']],
+      ['runtime/runtime/loop/loop.ts', ['await config.onFatal({', 'haltRuntimeRequiresOperator(env, error);']],
       ['runtime/orchestrator/hub-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
       ['runtime/orchestrator/mm-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
       [
@@ -529,7 +529,10 @@ for (const [path, markers] of [
     'runtime/api/public/external-wallet-api.ts',
     ["createStructuredLogger('server.external_wallet')", 'faucet.erc20.failed', 'snapshot.failed', 'faucet.gas.failed'],
   ],
-  ['runtime/entity/tx/processing/invariant-errors.ts', ["'SWAP_REQUEST_',"]],
+  [
+    'runtime/entity/tx/processing/invariant-errors.ts',
+    ['FailureDispositionError', 'entityInputFailureDisposition'],
+  ],
   [
     'runtime/entity/tx/handlers/payments/direct-payment.ts',
     ["createStructuredLogger('entity.payment')", 'DIRECT_PAYMENT_${code}:${detail}', "'NEXT_HOP_ACCOUNT_MISSING'"],

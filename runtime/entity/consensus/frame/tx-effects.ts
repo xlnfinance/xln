@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 import type { AccountReplica, AccountTx } from '../../../types/account';
 import { canProcessAccountTxForDisputeStatus } from '../../../account/consensus/dispute/policy';
 import type { EntityState } from '../../types';
@@ -61,10 +63,8 @@ const applyReturnedAccountTxs = async (
           );
           continue;
         }
-        throw new Error(
-          `CROSS_J_FILL_ACK_ACCOUNT_OFFER_MISSING: account=${accountId} ` +
-          `offer=${tx.data.offerId} entity=${state.entityId}`,
-        );
+        throw haltRuntimeFailure("CROSS_J_FILL_ACK_ACCOUNT_OFFER_MISSING", `CROSS_J_FILL_ACK_ACCOUNT_OFFER_MISSING: account=${accountId} ` +
+          `offer=${tx.data.offerId} entity=${state.entityId}`);
       }
       context.allOutputs.push(routed);
       entityLog.info('crossj.sibling_fill_notice_routed', {
@@ -76,10 +76,8 @@ const applyReturnedAccountTxs = async (
     }
     if (!account) {
       if (tx.type === 'cross_swap_fill_ack') {
-        throw new Error(
-          `CROSS_J_FILL_ACK_ACCOUNT_MISSING: account=${accountId} ` +
-          `offer=${tx.data.offerId} entity=${state.entityId}`,
-        );
+        throw haltRuntimeFailure("CROSS_J_FILL_ACK_ACCOUNT_MISSING", `CROSS_J_FILL_ACK_ACCOUNT_MISSING: account=${accountId} ` +
+          `offer=${tx.data.offerId} entity=${state.entityId}`);
       }
       entityLog.warn('mempool_op.account_missing', {
         account: shortId(accountId, 8),

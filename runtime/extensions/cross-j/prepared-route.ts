@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
+
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityState } from '../../entity/types';
 import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
@@ -7,6 +9,7 @@ import {
   signedCrossJurisdictionAmountForBeneficiary,
   withCanonicalCrossJurisdictionRouteHash,
 } from './index';
+import { toUnixS, unixSToUnixMs } from '../../protocol/units';
 
 const normalizeEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
@@ -24,10 +27,10 @@ const accountForLeg = (
     : self === counterparty
       ? entity
       : '';
-  if (!expectedAccount) throw new Error(`CROSS_J_PREPARED_${leg.toUpperCase()}_PARTICIPANT_INVALID:${route.orderId}`);
+  if (!expectedAccount) throw haltRuntimeFailure("CROSS_J_PREPARED", `CROSS_J_PREPARED_${leg.toUpperCase()}_PARTICIPANT_INVALID:${route.orderId}`);
   const account = state.accounts.get(expectedAccount);
   if (account) return account;
-  throw new Error(`CROSS_J_PREPARED_${leg.toUpperCase()}_ACCOUNT_MISSING:${route.orderId}`);
+  throw haltRuntimeFailure("CROSS_J_PREPARED", `CROSS_J_PREPARED_${leg.toUpperCase()}_ACCOUNT_MISSING:${route.orderId}`);
 };
 
 const routeDisputeConfig = (
@@ -49,11 +52,9 @@ const assertAccountClockMatchesRoute = (
     actual.leftResponseSeconds !== expected.leftResponseSeconds ||
     actual.rightResponseSeconds !== expected.rightResponseSeconds
   ) {
-    throw new Error(
-      `CROSS_J_PREPARED_${leg.toUpperCase()}_ACCOUNT_CLOCK_MISMATCH:${route.orderId}:` +
+    throw haltRuntimeFailure("CROSS_J_PREPARED", `CROSS_J_PREPARED_${leg.toUpperCase()}_ACCOUNT_CLOCK_MISMATCH:${route.orderId}:` +
       `actual=${actual.leftResponseSeconds},${actual.rightResponseSeconds}:` +
-      `route=${expected.leftResponseSeconds},${expected.rightResponseSeconds}`,
-    );
+      `route=${expected.leftResponseSeconds},${expected.rightResponseSeconds}`);
   }
   return expected;
 };
@@ -78,7 +79,9 @@ export const committedCrossJSourceResponseWindowMs = (
   route: CrossJurisdictionSwapRoute,
 ): number => {
   assertAccountClockMatchesRoute(state, route, 'source');
-  return responseWindowForEntity(route, 'source', route.source.counterpartyEntityId) * 1_000;
+  return unixSToUnixMs(toUnixS(
+    responseWindowForEntity(route, 'source', route.source.counterpartyEntityId),
+  ));
 };
 
 const committedCrossJTargetResponseWindowMs = (
@@ -86,7 +89,9 @@ const committedCrossJTargetResponseWindowMs = (
   route: CrossJurisdictionSwapRoute,
 ): number => {
   assertAccountClockMatchesRoute(state, route, 'target');
-  return responseWindowForEntity(route, 'target', route.target.counterpartyEntityId) * 1_000;
+  return unixSToUnixMs(toUnixS(
+    responseWindowForEntity(route, 'target', route.target.counterpartyEntityId),
+  ));
 };
 
 /**
@@ -125,18 +130,18 @@ export const validatePreparedCrossJurisdictionRoute = (
   const route = withCanonicalCrossJurisdictionRouteHash(rawRoute);
   const sourcePull = route.sourcePull;
   const targetPull = route.targetPull;
-  if (!sourcePull || !targetPull) throw new Error(`CROSS_J_PREPARED_PULLS_MISSING:${route.orderId}`);
+  if (!sourcePull || !targetPull) throw haltRuntimeFailure("CROSS_J_PREPARED_PULLS_MISSING", `CROSS_J_PREPARED_PULLS_MISSING:${route.orderId}`);
   assertEqual(route.status, 'target_prepared', 'CROSS_J_PREPARED_STATUS_INVALID');
   const preparedAt = Number(route.updatedAt);
   const currentTimestamp = Number(state.timestamp);
   if (!Number.isSafeInteger(preparedAt) || preparedAt <= 0) {
-    throw new Error(`CROSS_J_PREPARED_TIMESTAMP_INVALID:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_PREPARED_TIMESTAMP_INVALID", `CROSS_J_PREPARED_TIMESTAMP_INVALID:${route.orderId}`);
   }
   // A prepared route crosses an Entity boundary, so its authenticated origin
   // timestamp is normally older than the receiving Entity frame. Future data
   // is invalid; requiring equality would make ordinary transport delay fatal.
   if (!Number.isSafeInteger(currentTimestamp) || preparedAt > currentTimestamp) {
-    throw new Error(`CROSS_J_PREPARED_TIMESTAMP_FUTURE:${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_PREPARED_TIMESTAMP_FUTURE", `CROSS_J_PREPARED_TIMESTAMP_FUTURE:${route.orderId}`);
   }
   assertEqual(sourcePull.pullId, deriveCrossJurisdictionPullId(route, 'source'), 'CROSS_J_PREPARED_SOURCE_PULL_ID');
   assertEqual(targetPull.pullId, deriveCrossJurisdictionPullId(route, 'target'), 'CROSS_J_PREPARED_TARGET_PULL_ID');

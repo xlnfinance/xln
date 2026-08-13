@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 import {
   CROSS_J_MAX_FILL_RATIO,
   assertCrossJurisdictionPriceImprovementMode,
@@ -67,7 +69,7 @@ const requireHubRoute = (
   orderId: string,
 ): { route: CrossJurisdictionSwapRoute; role: 'source' | 'target' } => {
   const route = state.crossJurisdictionSwaps?.get(orderId);
-  if (!route) throw new Error(`CROSS_J_FILL_NOTICE_ROUTE_MISSING: order=${orderId}`);
+  if (!route) throw haltRuntimeFailure("CROSS_J_FILL_NOTICE_ROUTE_MISSING", `CROSS_J_FILL_NOTICE_ROUTE_MISSING: order=${orderId}`);
 
   const currentEntityId = normalizeEntityRef(state.entityId);
   const bookOwner = normalizeEntityRef(
@@ -76,10 +78,8 @@ const requireHubRoute = (
   const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
   const targetHub = normalizeEntityRef(route.target.entityId);
   if (sourceHub !== currentEntityId && targetHub !== currentEntityId) {
-    throw new Error(
-      `CROSS_J_FILL_NOTICE_SOURCE_HUB_REQUIRED: order=${orderId} current=${state.entityId} ` +
-      `owner=${bookOwner} sourceHub=${sourceHub} targetHub=${targetHub}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_FILL_NOTICE_SOURCE_HUB_REQUIRED", `CROSS_J_FILL_NOTICE_SOURCE_HUB_REQUIRED: order=${orderId} current=${state.entityId} ` +
+      `owner=${bookOwner} sourceHub=${sourceHub} targetHub=${targetHub}`);
   }
   return { route, role: sourceHub === currentEntityId ? 'source' : 'target' };
 };
@@ -92,7 +92,7 @@ const buildFillAckData = (
   const sameSeqCancel = Boolean(data.cancelRemainder) && data.fillSeq === currentFillSeq;
   if (sameSeqCancel) {
     if (!sameCommittedFillNotice(route, data) || data.incrementalSourceAmount !== 0n || data.incrementalTargetAmount !== 0n) {
-      throw new Error(`CROSS_J_FILL_NOTICE_CANCEL_PROGRESS_MISMATCH:${data.orderId}`);
+      throw haltRuntimeFailure("CROSS_J_FILL_NOTICE_CANCEL_PROGRESS_MISMATCH", `CROSS_J_FILL_NOTICE_CANCEL_PROGRESS_MISMATCH:${data.orderId}`);
     }
     return {
       offerId: data.orderId,
@@ -150,9 +150,7 @@ const assertFillNoticeSequence = (
   const incoming = Math.floor(Number(data.fillSeq));
   if (incoming <= current) {
     if (incoming === current && !sameCommittedFillNotice(route, data)) {
-      throw new Error(
-        `CROSS_J_FILL_NOTICE_STALE_CONFLICT: order=${data.orderId} seq=${incoming} current=${current}`,
-      );
+      throw haltRuntimeFailure("CROSS_J_FILL_NOTICE_STALE_CONFLICT", `CROSS_J_FILL_NOTICE_STALE_CONFLICT: order=${data.orderId} seq=${incoming} current=${current}`);
     }
     return 'duplicate';
   }
@@ -160,10 +158,8 @@ const assertFillNoticeSequence = (
     data.previousFillSeq !== undefined &&
     Math.floor(Number(data.previousFillSeq)) !== current
   ) {
-    throw new Error(
-      `CROSS_J_FILL_NOTICE_PREV_SEQ_MISMATCH: order=${data.orderId} ` +
-      `prev=${data.previousFillSeq} current=${current}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_FILL_NOTICE_PREV_SEQ_MISMATCH", `CROSS_J_FILL_NOTICE_PREV_SEQ_MISMATCH: order=${data.orderId} ` +
+      `prev=${data.previousFillSeq} current=${current}`);
   }
   return 'next';
 };
@@ -191,7 +187,7 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
     route.routeHash &&
     routeHash.toLowerCase() !== route.routeHash.toLowerCase()
   ) {
-    throw new Error(`CROSS_J_FILL_NOTICE_ROUTE_HASH_MISMATCH: order=${orderId} got=${routeHash} expected=${route.routeHash}`);
+    throw haltRuntimeFailure("CROSS_J_FILL_NOTICE_ROUTE_HASH_MISMATCH", `CROSS_J_FILL_NOTICE_ROUTE_HASH_MISMATCH: order=${orderId} got=${routeHash} expected=${route.routeHash}`);
   }
 
   const sequence = assertFillNoticeSequence(route, entityTx.data);
@@ -202,17 +198,17 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
 
   const allowed = route.status === 'resting' || route.status === 'partially_filled';
   if (!allowed) {
-    throw new Error(`CROSS_J_FILL_NOTICE_STATUS_INVALID: order=${orderId} status=${route.status}`);
+    throw haltRuntimeFailure("CROSS_J_FILL_NOTICE_STATUS_INVALID", `CROSS_J_FILL_NOTICE_STATUS_INVALID: order=${orderId} status=${route.status}`);
   }
 
   const fillAck = buildFillAckData(route, entityTx.data);
-  if (!route.targetPull) throw new Error(`CROSS_J_TARGET_PULL_MISSING:${orderId}`);
+  if (!route.targetPull) throw haltRuntimeFailure("CROSS_J_TARGET_PULL_MISSING", `CROSS_J_TARGET_PULL_MISSING:${orderId}`);
   const accountPeer = role === 'source'
     ? route.source.entityId
     : route.target.counterpartyEntityId;
   const accountId = findAccountKey(newState, accountPeer);
   if (!accountId) {
-    throw new Error(`CROSS_J_FILL_NOTICE_${role.toUpperCase()}_ACCOUNT_MISSING: order=${orderId} peer=${accountPeer}`);
+    throw haltRuntimeFailure("CROSS_J_FILL_NOTICE", `CROSS_J_FILL_NOTICE_${role.toUpperCase()}_ACCOUNT_MISSING: order=${orderId} peer=${accountPeer}`);
   }
 
   accountTxs.push({

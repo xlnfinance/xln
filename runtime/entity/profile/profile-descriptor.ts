@@ -44,8 +44,12 @@ const profileJurisdiction = (state: EntityState): ProfileJurisdiction | undefine
   return {
     name,
     ...(jurisdiction.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
-    ...(jurisdiction.entityProviderAddress ? { entityProviderAddress: jurisdiction.entityProviderAddress } : {}),
-    ...(jurisdiction.depositoryAddress ? { depositoryAddress: jurisdiction.depositoryAddress } : {}),
+    ...(jurisdiction.entityProviderAddress
+      ? { entityProviderAddress: jurisdiction.entityProviderAddress.toLowerCase() }
+      : {}),
+    ...(jurisdiction.depositoryAddress
+      ? { depositoryAddress: jurisdiction.depositoryAddress.toLowerCase() }
+      : {}),
   };
 };
 

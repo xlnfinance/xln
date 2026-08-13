@@ -11,12 +11,17 @@ import { ACCOUNT_TX_REJECTION_CODES } from '../../../account/tx/apply-types';
 import {
   toHashlock,
   toHtlcSecret,
-  toJHeight,
   toLockId,
   toTokenAmount,
   toTokenId,
-  toUnixMs,
 } from '../../../account/tx/units';
+import {
+  toJHeight,
+  toUnixMs,
+  toUnixS,
+  unixMsToUnixSFloor,
+  unixSToUnixMs,
+} from '../../../protocol/units';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { LIMITS, TOKENS } from '../../../config/constants';
@@ -61,10 +66,16 @@ describe('ApplyAccountTxResult units', () => {
     expect(() => toLockId('lock:colon')).toThrow('ACCOUNT_TX_LOCK_ID_INVALID');
     expect(() => toTokenId(TOKENS.MAX_TOKEN_ID + 1)).toThrow('ACCOUNT_TX_TOKEN_ID_INVALID');
     expect(() => toTokenAmount(-1n)).toThrow('ACCOUNT_TX_TOKEN_AMOUNT_INVALID');
-    expect(() => toUnixMs(-1)).toThrow('ACCOUNT_TX_UNIX_MS_INVALID');
-    expect(() => toJHeight(1.5)).toThrow('ACCOUNT_TX_J_HEIGHT_INVALID');
+    expect(() => toUnixMs(-1)).toThrow('PROTOCOL_UNIX_MS_INVALID');
+    expect(() => toJHeight(1.5)).toThrow('PROTOCOL_J_HEIGHT_INVALID');
     expect(toLockId('lock-timeout-boundary')).toBe('lock-timeout-boundary');
     expect(toHashlock(HEX32('21'))).toBe(HEX32('21'));
+  });
+
+  test('Unix ms/seconds conversions are named and floor unaligned boundaries', () => {
+    expect(unixMsToUnixSFloor(toUnixMs(2_000))).toBe(2);
+    expect(unixMsToUnixSFloor(toUnixMs(2_999))).toBe(2);
+    expect(unixSToUnixMs(toUnixS(2))).toBe(2_000);
   });
 });
 
@@ -140,7 +151,11 @@ describe('ApplyAccountTxResult payment/HTLC/settlement dispositions', () => {
         amount: 7n,
         tokenId: 1,
       },
-    }, true, 1_000, 0);
+    }, true, {
+      committedTimestamp: 1_000,
+      enforcementTimestamp: 1_000,
+      enforcementJHeight: 0,
+    });
     expect(locked.ok).toBe(true);
     expect(account.state.locks.has(lockId)).toBe(true);
     expect(account.state.deltas.get(1)?.leftHold).toBe(7n);

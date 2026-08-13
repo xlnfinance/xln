@@ -13,7 +13,12 @@ export type VaultSecrets = {
   mnemonic12?: string;
 };
 
-export const redactVaultRuntimeForPersistence = <T extends Record<string, unknown>>(
+export const redactVaultRuntimeForPersistence = <T extends {
+  seed?: unknown;
+  mnemonic12?: unknown;
+  devicePassphrase?: unknown;
+  env?: unknown;
+}>(
   runtime: T,
 ): Omit<T, 'seed' | 'mnemonic12' | 'devicePassphrase' | 'env'> => {
   const { seed: _seed, mnemonic12: _mnemonic12, devicePassphrase: _devicePassphrase, env: _env, ...metadata } = runtime;

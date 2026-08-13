@@ -1,5 +1,13 @@
-import type { DeliverableEntityInput, RoutedEntityInput } from '../types';
+import type { RoutedEntityInput } from '../types';
 import type { EntityOutput } from '../../entity/types';
+import {
+  toEntityId,
+  toRuntimeId,
+  toSignerId,
+  type EntityId,
+  type RuntimeId,
+  type SignerId,
+} from '../../protocol/identity';
 import {
   validateMapInstance,
   validateObject,
@@ -9,6 +17,20 @@ import {
 } from '../../entity/consensus/jurisdiction/prefix-validation';
 import { validateProposedEntityFrame } from '../../entity/consensus/frame/validation';
 import { requireKnownEntityTxType } from '../../entity/tx/processing/catalog';
+import { getEntityInputPhaseCombinationError } from '../../entity/consensus/input/phase-views';
+import {
+  requireBoundaryInteger,
+  requireExactBoundaryKeys,
+} from '../../protocol/boundary-validation';
+import { toFrameHash, type FrameHash } from '../../protocol/hashes';
+import {
+  toEntityHeight,
+  toRuntimeHeight,
+  toUnixMs,
+  type EntityHeight,
+  type RuntimeHeight,
+  type UnixMs,
+} from '../../protocol/units';
 
 const assertEntityMessagePayload = (
   input: Record<string, unknown>,
@@ -32,40 +54,38 @@ const assertEntityMessagePayload = (
       requireKnownEntityTxType(tx, `EntityInput.entityTxs_${index}`);
     });
   }
-  if (
-    input['leaderTimeoutVote'] !== undefined &&
-    (
-      input['entityTxs'] !== undefined ||
-      input['proposedFrame'] !== undefined ||
-      input['hashPrecommitFrame'] !== undefined ||
-      input['hashPrecommits'] !== undefined ||
-      input['jPrefixAttestations'] !== undefined
-    )
-  ) {
-    throw new Error(
-      'FINANCIAL-SAFETY: leaderTimeoutVote must use a dedicated consensus lane',
-    );
-  }
   if (input['proposedFrame'] !== undefined) {
     validateProposedEntityFrame(
       input['proposedFrame'],
       'EntityInput.proposedFrame',
     );
   }
-  if (input['hashPrecommits'] !== undefined) {
+  if (input['hashPrecommitFrame'] !== undefined) {
     const reference = validateObject(
       input['hashPrecommitFrame'],
       'EntityInput.hashPrecommitFrame',
     );
-    if (
-      !Number.isSafeInteger(reference['height']) ||
-      typeof reference['frameHash'] !== 'string' ||
-      reference['frameHash'].trim().length === 0
-    ) {
+    requireExactBoundaryKeys(
+      reference,
+      ['height', 'frameHash'],
+      [],
+      'ENTITY_INPUT_HASH_PRECOMMIT_FRAME_FIELDS_INVALID',
+    );
+    if (typeof reference['frameHash'] !== 'string') {
       throw new Error(
         'FINANCIAL-SAFETY: hashPrecommits require exact hashPrecommitFrame',
       );
     }
+    toEntityHeight(requireBoundaryInteger(
+      reference['height'],
+      'ENTITY_INPUT_HASH_PRECOMMIT_HEIGHT_INVALID',
+    ));
+    toFrameHash(reference['frameHash']);
+  }
+  if (input['hashPrecommits'] !== undefined && input['hashPrecommitFrame'] === undefined) {
+    throw new Error(
+      'FINANCIAL-SAFETY: hashPrecommits require exact hashPrecommitFrame',
+    );
   }
   if (input['jPrefixAttestations'] !== undefined) {
     const attestations = validateMapInstance(
@@ -91,9 +111,28 @@ const assertEntityMessagePayload = (
   }
 };
 
+export type ValidatedRoutedEntityInput = RoutedEntityInput & Readonly<{
+  entityId: EntityId;
+  signerId: SignerId;
+  runtimeId?: RuntimeId;
+  from?: RuntimeId;
+  sourceRuntimeFrame?: Readonly<{
+    height: RuntimeHeight;
+    timestamp: UnixMs;
+  }>;
+  hashPrecommitFrame?: Readonly<{
+    height: EntityHeight;
+    frameHash: FrameHash;
+  }>;
+}>;
+
+export type ValidatedDeliverableEntityInput = ValidatedRoutedEntityInput & Readonly<{
+  runtimeId: RuntimeId;
+}>;
+
 function assertRoutedEntityInput(
   input: Record<string, unknown>,
-): asserts input is Record<string, unknown> & RoutedEntityInput {
+): asserts input is Record<string, unknown> & ValidatedRoutedEntityInput {
   if (typeof input['entityId'] !== 'string' || input['entityId'].length === 0) {
     throw new Error(
       'FINANCIAL-SAFETY: entityId is missing or invalid - financial routing corruption detected',
@@ -107,12 +146,45 @@ function assertRoutedEntityInput(
       'FINANCIAL-SAFETY: signerId is missing - entity input must target an exact signer replica',
     );
   }
+  toEntityId(input['entityId']);
+  toSignerId(input['signerId']);
+  for (const field of ['runtimeId', 'from'] as const) {
+    const runtimeId = input[field];
+    if (runtimeId !== undefined) {
+      if (typeof runtimeId !== 'string') {
+        throw new Error(`FINANCIAL-SAFETY: ${field} must be a RuntimeId`);
+      }
+      toRuntimeId(runtimeId);
+    }
+  }
+  if (input['sourceRuntimeFrame'] !== undefined) {
+    const sourceFrame = validateObject(
+      input['sourceRuntimeFrame'],
+      'EntityInput.sourceRuntimeFrame',
+    );
+    requireExactBoundaryKeys(
+      sourceFrame,
+      ['height', 'timestamp'],
+      [],
+      'ENTITY_INPUT_SOURCE_RUNTIME_FRAME_FIELDS_INVALID',
+    );
+    toRuntimeHeight(requireBoundaryInteger(
+      sourceFrame['height'],
+      'ENTITY_INPUT_SOURCE_RUNTIME_HEIGHT_INVALID',
+    ));
+    toUnixMs(requireBoundaryInteger(
+      sourceFrame['timestamp'],
+      'ENTITY_INPUT_SOURCE_RUNTIME_TIMESTAMP_INVALID',
+    ));
+  }
   assertEntityMessagePayload(input);
 }
 
-export const decodeRoutedEntityInput = (value: unknown): RoutedEntityInput => {
+export const decodeRoutedEntityInput = (value: unknown): ValidatedRoutedEntityInput => {
   const input = validateObject(value, 'EntityInput');
   assertRoutedEntityInput(input);
+  const phaseError = getEntityInputPhaseCombinationError(input);
+  if (phaseError) throw new Error(`FINANCIAL-SAFETY:${phaseError}`);
   return input;
 };
 
@@ -140,16 +212,21 @@ export const decodeEntityOutput = (
 };
 
 /** Network delivery additionally requires an already resolved Runtime. */
-export const validateDeliverableEntityInput = (
-  output: unknown,
-): DeliverableEntityInput => {
-  const value = validateObject(output, 'DeliverableEntityInput');
-  assertRoutedEntityInput(value);
-  const input = output as RoutedEntityInput;
-  if (typeof input.runtimeId !== 'string' || input.runtimeId.trim().length === 0) {
+function assertDeliverableRuntime(
+  input: Record<string, unknown> & ValidatedRoutedEntityInput,
+): asserts input is Record<string, unknown> & ValidatedDeliverableEntityInput {
+  if (input.runtimeId === undefined) {
     throw new Error(
       'FINANCIAL-SAFETY: Deliverable EntityOutput missing runtimeId',
     );
   }
-  return input as DeliverableEntityInput;
+}
+
+export const validateDeliverableEntityInput = (
+  output: unknown,
+): ValidatedDeliverableEntityInput => {
+  const value = validateObject(output, 'DeliverableEntityInput');
+  assertRoutedEntityInput(value);
+  assertDeliverableRuntime(value);
+  return value;
 };

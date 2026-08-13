@@ -131,7 +131,7 @@ const attachStructuredLogger =
 
     if (level === 'warn') console.warn(`[${category}]`, message, data || '');
     if (level === 'error') console.error(`[${category}]`, message, data || '');
-    if (level !== 'info' || message.startsWith('REB_')) {
+    if (level !== 'info') {
       queueStructuredAuditEvent(env, level, category, message, data, entityId);
     }
   };

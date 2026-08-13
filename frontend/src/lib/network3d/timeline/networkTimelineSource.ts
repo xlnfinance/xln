@@ -244,14 +244,7 @@ export const graphFrameFromSnapshot = (
   );
   const entities = Array.from(snapshot.state.eReplicas.values()).map((replica) => {
     const entityId = normalizeId(replica.entityId);
-    const state = replica.state as unknown as {
-      reserves?: Map<number, bigint>;
-      profile?: { name?: string; isHub?: boolean };
-      accounts?: Map<string, SnapshotAccount>;
-      height?: unknown;
-      timestamp?: unknown;
-      prevFrameHash?: unknown;
-    } | undefined;
+    const state = replica.state;
     const profile = profiles.get(entityId);
     const label = String(profile?.name || state?.profile?.name || entityId);
     const accounts = Array.from(state?.accounts?.entries?.() ?? [])
@@ -276,9 +269,9 @@ export const graphFrameFromSnapshot = (
     runtimeId,
     height,
     timestamp,
-    stateHash: String((snapshot as EnvSnapshot & { stateHash?: string }).stateHash || ''),
+    stateHash: '',
     entities,
-  } as unknown as RuntimeAdapterGraphFrame;
+  } as RuntimeAdapterGraphFrame;
 };
 
 /** A frame changed the graph when it actually carried work, not just a heartbeat tick. */
@@ -323,7 +316,7 @@ export const scenarioNetworkTimelineSource = (
         runtimeId: expected,
         height: Math.floor(Number(snapshot.state.height)),
         timestamp: Math.floor(Number(snapshot.state.timestamp)),
-        stateHash: String((snapshot as EnvSnapshot & { stateHash?: string }).stateHash || ''),
+        stateHash: '',
         materialized: true,
         graphChanged: snapshotChangedGraph(snapshot),
       })),

@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 /**
  * Entity consensus: validator replicas agree on entity frames, then route
  * committed account/J-layer side effects back into the runtime.
@@ -230,10 +232,8 @@ export const applyEntityInput = async (
   if (proposalResult) return proposalResult;
 
   if (trustedLocalCrossJurisdiction) {
-    throw new Error(
-      `CROSS_J_LOCAL_COMMAND_NOT_FINALIZED:${workingReplica.entityId}:` +
-        `proposal=${workingReplica.proposal?.hash ?? 'none'}:txs=${trustedLocalEntityTxs.length}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_LOCAL_COMMAND_NOT_FINALIZED", `CROSS_J_LOCAL_COMMAND_NOT_FINALIZED:${workingReplica.entityId}:` +
+        `proposal=${workingReplica.proposal?.hash ?? 'none'}:txs=${trustedLocalEntityTxs.length}`);
   }
 
   return {

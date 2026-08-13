@@ -1,4 +1,4 @@
-import type { ApplyAccountTxResult } from '../../../account/tx/apply-types';
+import type { ApplyAccountTxResult } from '../../../../account/tx/apply-types';
 
 export const illegalSuccessWithError: ApplyAccountTxResult = {
   ok: true,

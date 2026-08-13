@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 import type { AccountReplica } from '../../../types/account';
 import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import {
@@ -68,7 +70,7 @@ const buildDisputeProjection = (
   } catch (error) {
     // Failure here is an invariant fault, not a rejected user transaction:
     // committing without the promised recovery proof would make funds unsafe.
-    throw new Error(`DISPUTE_PROOF_BUILD_FAILED: ${(error as Error).message}`, { cause: error });
+    throw haltRuntimeFailure("DISPUTE_PROOF_BUILD_FAILED", `DISPUTE_PROOF_BUILD_FAILED: ${(error as Error).message}`, error);
   }
 };
 

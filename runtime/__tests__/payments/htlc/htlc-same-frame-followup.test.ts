@@ -101,6 +101,7 @@ describe('same-frame incoming HTLC followup', () => {
       tx: { type: 'htlc_lock', data: expect.objectContaining({ amount: 9n, envelope: opaque }) },
     }]);
     expect(fixture.state.htlcRoutes.size).toBe(1);
+    expect(fixture.state.htlcRoutes.get(fixture.hashlock)?.pendingFee).toBe(1n);
   });
 
   test('ACK replay commits the sender frame without consuming recipient onion context', async () => {
@@ -159,6 +160,7 @@ describe('same-frame incoming HTLC followup', () => {
       accountId: first.from,
       tx: { type: 'htlc_resolve', data: { lockId: first.lockId, outcome: 'secret', secret: id('e') } },
     }]);
+    expect(first.state.htlcFeesEarned).toBe(1n);
   });
 
   test('queues reject and refuses consuming one prepared binding twice', async () => {

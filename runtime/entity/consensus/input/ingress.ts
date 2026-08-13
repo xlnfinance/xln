@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 import { shortId } from '../../../infra/logger';
 import { cloneIsolatedEntityInput } from '../../state/input-clone';
 import { forkEntityReplicaForInput } from '../../replica/replica-clone';
@@ -87,7 +89,7 @@ export const prepareEntityInputIngress = (
   promoteCandidateState: boolean,
 ): EntityInputIngress => {
   if (trustedLocalCrossJurisdiction && !isSingleSignerEntity(replica.state)) {
-    throw new Error(`CROSS_J_LOCAL_COMMAND_SINGLE_SIGNER_REQUIRED:${replica.entityId}`);
+    throw haltRuntimeFailure("CROSS_J_LOCAL_COMMAND_SINGLE_SIGNER_REQUIRED", `CROSS_J_LOCAL_COMMAND_SINGLE_SIGNER_REQUIRED:${replica.entityId}`);
   }
   const admissionError = getEntityMempoolAdmissionError(
     replica,

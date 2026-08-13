@@ -63,7 +63,6 @@
 
   let hasActiveTabLock = $state(false);
   let activeTabLockReady = $state(false);
-  let embedBootReady = $state(false);
   let resettingEverything = $state(false);
   let recoveringStorage = $state(false);
   let storageRecoveryError = $state('');
@@ -303,7 +302,6 @@
       if (lockTestMode) {
         isLoading.set(false);
         error.set(null);
-        embedBootReady = true;
         return;
       }
       await bootApp();
@@ -472,7 +470,6 @@
   async function bootApp(): Promise<void> {
     if (!hasActiveTabLock) return;
     const generation = ++bootGeneration;
-    embedBootReady = false;
     try {
       if (generation !== bootGeneration || !hasActiveTabLock) return;
       settingsOperations.initialize();
@@ -493,12 +490,10 @@
       if (generation !== bootGeneration || !hasActiveTabLock) return;
       timeOperations.initialize();
       if (generation !== bootGeneration || !hasActiveTabLock) return;
-      embedBootReady = true;
     } catch (err) {
       if (generation !== bootGeneration || !hasActiveTabLock) return;
       logAppShellDiagnostic('XLN initialization failed', err);
       error.set((err as Error)?.message || 'Initialization failed');
-      embedBootReady = false;
     }
   }
 
@@ -547,7 +542,6 @@
       if (lockTestMode) {
         isLoading.set(false);
         error.set(null);
-        embedBootReady = true;
         try {
           persistDeployVersion((await fetchCurrentDeployVersion()).version);
         } catch (error) {

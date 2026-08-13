@@ -26,8 +26,8 @@
 		"exactOptionalPropertyTypes": true,
 
 		// CATCH ERRORS EARLY
-		"noUnusedLocals": false, // Disabled for /view (WIP)
-		"noUnusedParameters": false, // Disabled for /view (WIP)
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
 		"noFallthroughCasesInSwitch": true,
 		"noPropertyAccessFromIndexSignature": true,
 

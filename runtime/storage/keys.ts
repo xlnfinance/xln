@@ -1,4 +1,13 @@
 import type { RadixMerkleRadix } from '../protocol/state/radix-merkle';
+import { toEntityId, type EntityId } from '../protocol/identity';
+import {
+  toAccountHeight,
+  toEntityHeight,
+  toRuntimeHeight,
+  type AccountHeight,
+  type EntityHeight,
+  type RuntimeHeight,
+} from '../protocol/units';
 import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../infra/integrity-checksum';
 import { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './schema/merkle-namespace-tags';
 
@@ -108,9 +117,9 @@ export const hexBytes = (value: string): Buffer => {
 const signerKeyBytes = (value: string): Buffer =>
   Buffer.concat([Buffer.alloc(12), exactHexBytes(value, 20, 'STORAGE_SIGNER_HEX_20_INVALID')]);
 
-export const decodeEntityId = (bytes: Uint8Array): string => {
+export const decodeEntityId = (bytes: Uint8Array): EntityId => {
   if (bytes.byteLength !== 32) throw new Error(`STORAGE_ENTITY_ID_BYTES_INVALID:${bytes.byteLength}`);
-  return `0x${Buffer.from(bytes).toString('hex')}`;
+  return toEntityId(`0x${Buffer.from(bytes).toString('hex')}`);
 };
 
 export const decodeTaggedStorageHash = (key: Buffer, tag: number, code: string): string => {
@@ -133,9 +142,9 @@ export const decodeHeight = (buffer: Buffer, offset = 1): number => {
   return Number(raw);
 };
 
-export const decodeTaggedStorageHeight = (key: Buffer, tag: number, code: string): number => {
+export const decodeTaggedStorageHeight = (key: Buffer, tag: number, code: string): RuntimeHeight => {
   if (key.length !== 9 || key[0] !== tag) throw new Error(`${code}:${key.toString('hex')}`);
-  return decodeHeight(key);
+  return toRuntimeHeight(decodeHeight(key));
 };
 
 export const textBytes = (value: string): Buffer => {
@@ -244,13 +253,13 @@ export const keyHistoryViewEntityFramePrefix = (entityId?: string): Buffer =>
     ? Buffer.concat([Buffer.from([HISTORY_VIEW_ENTITY_FRAME]), hexBytes(entityId)])
     : Buffer.from([HISTORY_VIEW_ENTITY_FRAME]);
 
-export const parseHistoryViewEntityFrameKey = (key: Buffer): { entityId: string; entityHeight: number } => {
+export const parseHistoryViewEntityFrameKey = (key: Buffer): { entityId: EntityId; entityHeight: EntityHeight } => {
   if (key.length !== 41 || key[0] !== HISTORY_VIEW_ENTITY_FRAME) {
     throw new Error(`STORAGE_HISTORY_VIEW_ENTITY_KEY_INVALID:${key.toString('hex')}`);
   }
   return {
     entityId: decodeEntityId(key.subarray(1, 33)),
-    entityHeight: decodeHeight(key, 33),
+    entityHeight: toEntityHeight(decodeHeight(key, 33)),
   };
 };
 
@@ -261,9 +270,9 @@ export const keyHistoryViewAccountFramePrefix = (entityId?: string, counterparty
 };
 
 export const parseHistoryViewAccountFrameKey = (key: Buffer): {
-  entityId: string;
-  counterpartyId: string;
-  accountHeight: number;
+  entityId: EntityId;
+  counterpartyId: EntityId;
+  accountHeight: AccountHeight;
 } => {
   if (key.length !== 73 || key[0] !== HISTORY_VIEW_ACCOUNT_FRAME) {
     throw new Error(`STORAGE_HISTORY_VIEW_ACCOUNT_KEY_INVALID:${key.toString('hex')}`);
@@ -271,7 +280,7 @@ export const parseHistoryViewAccountFrameKey = (key: Buffer): {
   return {
     entityId: decodeEntityId(key.subarray(1, 33)),
     counterpartyId: decodeEntityId(key.subarray(33, 65)),
-    accountHeight: decodeHeight(key, 65),
+    accountHeight: toAccountHeight(decodeHeight(key, 65)),
   };
 };
 
@@ -309,23 +318,23 @@ export const keySnapshotReplicaMetaPrefix = (height: number, entityId?: string):
     ? Buffer.concat([Buffer.from([KEY_SNAPSHOT_REPLICA_META]), encodeHeight(height), hexBytes(entityId)])
     : Buffer.concat([Buffer.from([KEY_SNAPSHOT_REPLICA_META]), encodeHeight(height)]);
 
-export const parseSnapshotEntityKey = (key: Buffer): { height: number; entityId: string } => {
+export const parseSnapshotEntityKey = (key: Buffer): { height: RuntimeHeight; entityId: EntityId } => {
   if (key.length !== 41 || key[0] !== KEY_SNAPSHOT_ENTITY) {
     throw new Error(`STORAGE_SNAPSHOT_ENTITY_KEY_INVALID:${key.toString('hex')}`);
   }
-  return { height: decodeHeight(key), entityId: decodeEntityId(key.subarray(9, 41)) };
+  return { height: toRuntimeHeight(decodeHeight(key)), entityId: decodeEntityId(key.subarray(9, 41)) };
 };
 
 export const parseSnapshotAccountKey = (key: Buffer): {
-  height: number;
-  entityId: string;
-  counterpartyId: string;
+  height: RuntimeHeight;
+  entityId: EntityId;
+  counterpartyId: EntityId;
 } => {
   if (key.length !== 73 || key[0] !== KEY_SNAPSHOT_ACCOUNT) {
     throw new Error(`STORAGE_SNAPSHOT_ACCOUNT_KEY_INVALID:${key.toString('hex')}`);
   }
   return {
-    height: decodeHeight(key),
+    height: toRuntimeHeight(decodeHeight(key)),
     entityId: decodeEntityId(key.subarray(9, 41)),
     counterpartyId: decodeEntityId(key.subarray(41, 73)),
   };
@@ -342,7 +351,7 @@ export const prefixUpperBound = (prefix: Buffer): Buffer | undefined => {
   return undefined;
 };
 
-export const parseLiveAccountKey = (key: Buffer): { entityId: string; counterpartyId: string } => {
+export const parseLiveAccountKey = (key: Buffer): { entityId: EntityId; counterpartyId: EntityId } => {
   if (key.length !== 65 || key[0] !== KEY_LIVE_ACCOUNT) {
     throw new Error(`STORAGE_LIVE_ACCOUNT_KEY_INVALID:${key.toString('hex')}`);
   }
@@ -367,10 +376,10 @@ export const parseLiveBookKey = (key: Buffer, offset = 1): { entityId: string; p
   return { entityId, pairId: value };
 };
 
-export const parseSnapshotManifestHeight = (key: Buffer): number => {
+export const parseSnapshotManifestHeight = (key: Buffer): RuntimeHeight => {
   if (key.length !== 9 || key[0] !== KEY_SNAPSHOT_MANIFEST) {
     throw new Error(`STORAGE_SNAPSHOT_MANIFEST_KEY_INVALID:${key.toString('hex')}`);
   }
-  return decodeHeight(key);
+  return toRuntimeHeight(decodeHeight(key));
 };
 import { Buffer } from '../infra/platform-crypto';

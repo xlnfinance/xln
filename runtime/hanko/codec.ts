@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { FailureDispositionError } from '../protocol/errors/failure-taxonomy';
 
 import type {
   HankoEnvelope,
@@ -29,25 +30,36 @@ const SECP256K1_HALF_ORDER = BigInt(
   '0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0',
 );
 
+export class HankoValidationError extends FailureDispositionError {
+  constructor(message: string) {
+    super('reject', 'HANKO_INVALID', message);
+    this.name = 'HankoValidationError';
+  }
+}
+
+export function invalidHanko(message: string): never {
+  throw new HankoValidationError(message);
+}
+
 const asHex = (value: string, label: string): HankoHex => {
-  if (!ethers.isHexString(value)) throw new Error(`HANKO_${label}_HEX_INVALID`);
+  if (!ethers.isHexString(value)) invalidHanko(`HANKO_${label}_HEX_INVALID`);
   return ethers.hexlify(value).toLowerCase() as HankoHex;
 };
 
 export const asHankoBytes32 = (value: string, label: string): HankoHex => {
-  if (!ethers.isHexString(value, 32)) throw new Error(`HANKO_${label}_BYTES32_INVALID`);
+  if (!ethers.isHexString(value, 32)) invalidHanko(`HANKO_${label}_BYTES32_INVALID`);
   return ethers.hexlify(value).toLowerCase() as HankoHex;
 };
 
 const assertUint256 = (value: bigint, label: string): void => {
   if (typeof value !== 'bigint' || value < 0n || value > ethers.MaxUint256) {
-    throw new Error(`HANKO_${label}_UINT256_INVALID`);
+    invalidHanko(`HANKO_${label}_UINT256_INVALID`);
   }
 };
 
 const assertUint32 = (value: bigint, label: string): void => {
   if (typeof value !== 'bigint' || value < 0n || value > 0xffff_ffffn) {
-    throw new Error(`HANKO_${label}_UINT32_INVALID`);
+    invalidHanko(`HANKO_${label}_UINT32_INVALID`);
   }
 };
 
@@ -79,7 +91,7 @@ const assertContractHankoShape = (envelope: HankoEnvelope): void => {
     || totalEntities > HANKO_MAX_ENTITIES
     || envelope.placeholders.length > HANKO_MAX_ENTITIES
     || signatures > HANKO_MAX_ENTITIES
-  ) throw new Error('HANKO_PROOF_TOO_LARGE');
+  ) invalidHanko('HANKO_PROOF_TOO_LARGE');
   let totalMembers = 0;
   for (const [index, claim] of envelope.claims.entries()) {
     const members = claim.entityIndexes.length;
@@ -87,9 +99,9 @@ const assertContractHankoShape = (envelope: HankoEnvelope): void => {
       members === 0
       || members !== claim.weights.length
       || members > HANKO_MAX_MEMBERS_PER_CLAIM
-    ) throw new Error(`HANKO_CLAIM_SHAPE_INVALID:${index}`);
+    ) invalidHanko(`HANKO_CLAIM_SHAPE_INVALID:${index}`);
     totalMembers += members;
-    if (totalMembers > HANKO_MAX_TOTAL_MEMBERS) throw new Error('HANKO_PROOF_TOO_LARGE');
+    if (totalMembers > HANKO_MAX_TOTAL_MEMBERS) invalidHanko('HANKO_PROOF_TOO_LARGE');
   }
 };
 
@@ -100,28 +112,28 @@ export const encodeHankoEnvelope = (envelope: HankoEnvelope): HankoString => {
     asHex(envelope.packedSignatures, 'PACKED_SIGNATURES'),
     envelope.claims.map(encodeClaim),
   ]]);
-  if ((encoded.length - 2) / 2 > HANKO_MAX_BYTES) throw new Error('HANKO_PROOF_TOO_LARGE');
+  if ((encoded.length - 2) / 2 > HANKO_MAX_BYTES) invalidHanko('HANKO_PROOF_TOO_LARGE');
   return encoded;
 };
 
 const requireAbiArray = (value: unknown, label: string): readonly unknown[] => {
-  if (!Array.isArray(value)) throw new Error(`HANKO_${label}_ARRAY_INVALID`);
+  if (!Array.isArray(value)) invalidHanko(`HANKO_${label}_ARRAY_INVALID`);
   return value;
 };
 
 const requireAbiBigInt = (value: unknown, label: string): bigint => {
-  if (typeof value !== 'bigint') throw new Error(`HANKO_${label}_BIGINT_INVALID`);
+  if (typeof value !== 'bigint') invalidHanko(`HANKO_${label}_BIGINT_INVALID`);
   return value;
 };
 
 const requireAbiString = (value: unknown, label: string): string => {
-  if (typeof value !== 'string') throw new Error(`HANKO_${label}_STRING_INVALID`);
+  if (typeof value !== 'string') invalidHanko(`HANKO_${label}_STRING_INVALID`);
   return value;
 };
 
 const decodeClaim = (value: unknown, index: number): HankoWireClaim => {
   const claim = requireAbiArray(value, `CLAIM_${index}`);
-  if (claim.length !== 7) throw new Error(`HANKO_CLAIM_${index}_LENGTH_INVALID`);
+  if (claim.length !== 7) invalidHanko(`HANKO_CLAIM_${index}_LENGTH_INVALID`);
   const indexes = requireAbiArray(claim[1], `CLAIM_${index}_INDEXES`)
     .map((entry, member) => requireAbiBigInt(entry, `CLAIM_${index}_INDEX_${member}`));
   const weights = requireAbiArray(claim[2], `CLAIM_${index}_WEIGHTS`)
@@ -143,16 +155,16 @@ const decodeClaim = (value: unknown, index: number): HankoWireClaim => {
 export const decodeHankoEnvelope = (encoded: HankoString): HankoEnvelope => {
   const canonicalInput = asHex(encoded, 'ENVELOPE');
   if ((canonicalInput.length - 2) / 2 > HANKO_MAX_BYTES) {
-    throw new Error('HANKO_PROOF_TOO_LARGE');
+    invalidHanko('HANKO_PROOF_TOO_LARGE');
   }
   let decoded: ethers.Result;
   try {
     decoded = ABI_CODER.decode(HANKO_ABI, canonicalInput);
   } catch (error) {
-    throw new Error(`HANKO_ABI_DECODE_INVALID:${error instanceof Error ? error.message : String(error)}`);
+    invalidHanko(`HANKO_ABI_DECODE_INVALID:${error instanceof Error ? error.message : String(error)}`);
   }
   const tuple = requireAbiArray(decoded[0], 'ENVELOPE');
-  if (tuple.length !== 3) throw new Error('HANKO_ENVELOPE_LENGTH_INVALID');
+  if (tuple.length !== 3) invalidHanko('HANKO_ENVELOPE_LENGTH_INVALID');
   const placeholders = requireAbiArray(tuple[0], 'PLACEHOLDERS');
   const packedSignatures = tuple[1];
   const claims = requireAbiArray(tuple[2], 'CLAIMS');
@@ -164,7 +176,7 @@ export const decodeHankoEnvelope = (encoded: HankoString): HankoEnvelope => {
   };
   assertContractHankoShape(envelope);
   if (encodeHankoEnvelope(envelope).toLowerCase() !== canonicalInput) {
-    throw new Error('HANKO_ABI_NON_CANONICAL');
+    invalidHanko('HANKO_ABI_NON_CANONICAL');
   }
   return envelope;
 };
@@ -174,19 +186,19 @@ const signatureCount = (byteLength: number): number => {
   const candidate = Math.floor((byteLength * 8) / 513);
   const expected = candidate * 64 + Math.ceil(candidate / 8);
   if (candidate <= 0 || expected !== byteLength) {
-    throw new Error(`HANKO_PACKED_SIGNATURE_LENGTH_INVALID:${byteLength}`);
+    invalidHanko(`HANKO_PACKED_SIGNATURE_LENGTH_INVALID:${byteLength}`);
   }
   return candidate;
 };
 
 const assertCanonicalSignature = (signature: Uint8Array, index: number): void => {
-  if (signature.length !== 65) throw new Error(`HANKO_SIGNATURE_LENGTH_INVALID:${index}`);
+  if (signature.length !== 65) invalidHanko(`HANKO_SIGNATURE_LENGTH_INVALID:${index}`);
   const recovery = signature[64];
-  if (recovery !== 27 && recovery !== 28) throw new Error(`HANKO_SIGNATURE_RECOVERY_INVALID:${index}`);
+  if (recovery !== 27 && recovery !== 28) invalidHanko(`HANKO_SIGNATURE_RECOVERY_INVALID:${index}`);
   const r = BigInt(ethers.hexlify(signature.slice(0, 32)));
   const s = BigInt(ethers.hexlify(signature.slice(32, 64)));
   if (r === 0n || s === 0n || s > SECP256K1_HALF_ORDER) {
-    throw new Error(`HANKO_SIGNATURE_NON_CANONICAL:${index}`);
+    invalidHanko(`HANKO_SIGNATURE_NON_CANONICAL:${index}`);
   }
 };
 
@@ -210,7 +222,7 @@ export const unpackHankoSignatures = (packed: string): readonly HankoHex[] => {
   const recoveryOffset = count * 64;
   const usedBits = count % 8;
   if (usedBits !== 0 && (bytes[bytes.length - 1]! >> usedBits) !== 0) {
-    throw new Error('HANKO_PACKED_SIGNATURE_PADDING_NONZERO');
+    invalidHanko('HANKO_PACKED_SIGNATURE_PADDING_NONZERO');
   }
   return Array.from({ length: count }, (_, index) => {
     const recoveryByte = bytes[recoveryOffset + Math.floor(index / 8)]!;
@@ -242,10 +254,10 @@ export const recoverHankoSignatures = (
         )
       : null;
     if (!address) {
-      throw new Error(`HANKO_SIGNATURE_RECOVERY_FAILED:${index}`);
+      invalidHanko(`HANKO_SIGNATURE_RECOVERY_FAILED:${index}`);
     }
     const signerEntityId = ethers.zeroPadValue(address, 32).toLowerCase() as HankoHex;
-    if (signerIds.has(signerEntityId)) throw new Error(`HANKO_DUPLICATE_SIGNER:${signerEntityId}`);
+    if (signerIds.has(signerEntityId)) invalidHanko(`HANKO_DUPLICATE_SIGNER:${signerEntityId}`);
     signerIds.add(signerEntityId);
     return { signerEntityId, signature };
   });

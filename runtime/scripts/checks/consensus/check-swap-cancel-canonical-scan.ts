@@ -48,10 +48,7 @@ assertNotIncludes(handler, `Extract<EntityTx, { type: '${retiredResolve}' }>`, h
 assertNotIncludes(handler, "'cancelSwapOffer' | 'cancelSwap' | 'proposeCancelSwap'", handlerPath);
 assertNotIncludes(handler, 'console.error', handlerPath);
 assertNotIncludes(handler, 'return { newState: entityState, outputs: [] };', handlerPath);
-
-const invariantPath = 'runtime/entity/tx/processing/invariant-errors.ts';
-const invariant = readText(invariantPath);
-assertIncludes(invariant, "'SWAP_REQUEST_',", invariantPath);
+assertIncludes(handler, 'throw haltRuntimeFailure(', handlerPath);
 
 const frontendPath = 'frontend/src/lib/components/Entity/swap/SwapPanel.svelte';
 const frontend = readText(frontendPath);

@@ -8,7 +8,7 @@
   import type { Writable } from 'svelte/store';
   import { get } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
-  import type { BrowserVMTokenInfo, RuntimeReplica, EnvSnapshot, JReplica } from '@xln/runtime/api/public/runtime-module';
+  import type { BrowserVMTokenInfo, EntityReplica, RuntimeReplica, EnvSnapshot, JReplica } from '@xln/runtime/api/public/runtime-module';
   import { activeRuntime, allRuntimes } from '$lib/stores/vault/vaultStore';
   import { settings } from '$lib/stores/settingsStore';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
@@ -79,19 +79,20 @@
   }
 
   // Helper to safely convert serialized BigInt objects from snapshots
-  function toBigInt(value: any): bigint {
+  function toBigInt(value: unknown): bigint {
     if (typeof value === 'bigint') return value;
     if (typeof value === 'number') return BigInt(value);
     if (typeof value === 'string') return BigInt(value);
     if (value && typeof value === 'object') {
+      const encoded = value as { _dataType?: unknown; value?: unknown; toString(): string };
       // Handle serialized format: { _dataType: 'BigInt', value: '...' }
-      if (value._dataType === 'BigInt' && value.value !== undefined) {
-        return BigInt(value.value);
+      if (encoded._dataType === 'BigInt' && encoded.value !== undefined) {
+        return BigInt(String(encoded.value));
       }
       // Handle BigInt(n) string format
-      if (value.toString().startsWith('BigInt(')) {
-        const match = value.toString().match(/BigInt\((-?\d+)\)/);
-        if (match) return BigInt(match[1]);
+      if (encoded.toString().startsWith('BigInt(')) {
+        const match = encoded.toString().match(/BigInt\((-?\d+)\)/);
+        if (match?.[1]) return BigInt(match[1]);
       }
     }
     return 0n;
@@ -160,7 +161,7 @@
     }
 
     // Also extract entity IDs from eReplicas for entities without gossip profiles
-    let eReplicas: Map<string, any> | null = null;
+    let eReplicas: Map<string, EntityReplica> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex as number, history.length - 1);
       eReplicas = history[idx]?.state.eReplicas ?? null;
@@ -169,7 +170,7 @@
     }
 
     if (eReplicas) {
-      const entries = eReplicas instanceof Map ? Array.from(eReplicas.entries()) : Object.entries(eReplicas);
+      const entries = Array.from(eReplicas.entries());
       for (const [key] of entries) {
         const entityId = key.split(':')[0];
         if (entityId && !names.has(entityId)) {
@@ -262,7 +263,7 @@
     const history = runtimeFrameHistory ? $runtimeFrameHistory : [];
     const env = $runtimeFrameEnv;
 
-    let eReplicas: Map<string, any> | null = null;
+    let eReplicas: Map<string, EntityReplica> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex as number, history.length - 1);
       eReplicas = history[idx]?.state.eReplicas ?? null;
@@ -272,7 +273,7 @@
 
     if (!eReplicas) return disputes;
 
-    const entries = eReplicas instanceof Map ? Array.from(eReplicas.entries()) : Object.entries(eReplicas);
+    const entries = Array.from(eReplicas.entries());
     const seen = new Set<string>(); // Avoid duplicates (A vs B = B vs A)
 
     for (const [key, replica] of entries) {
@@ -282,7 +283,7 @@
       const accounts = replica?.state?.accounts;
       if (!accounts) continue;
 
-      const accountEntries = accounts instanceof Map ? Array.from(accounts.entries()) : Object.entries(accounts || {});
+      const accountEntries = Array.from(accounts.entries());
       for (const [cpId, account] of accountEntries) {
         const counterpartyId = String(cpId);
         if (!account?.activeDispute) continue;
@@ -629,7 +630,7 @@
     const timeIndex = runtimeFrameTimeIndex ? (get(runtimeFrameTimeIndex) ?? -1) : -1;
     const history = runtimeFrameHistory ? get(runtimeFrameHistory) : [];
 
-    let eReplicas: Map<string, any> | null = null;
+    let eReplicas: Map<string, EntityReplica> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex, history.length - 1);
       eReplicas = history[idx]?.state.eReplicas ?? null;
@@ -658,7 +659,7 @@
         const entityIds = new Set<string>();
 
         // Extract unique entity IDs
-        const entries = eReplicas instanceof Map ? Array.from(eReplicas.entries()) : Object.entries(eReplicas);
+        const entries = Array.from(eReplicas.entries());
         for (const [key] of entries) {
           const entityId = key.split(':')[0];
           if (entityId) entityIds.add(entityId);
@@ -672,7 +673,7 @@
               entityId,
               entityName: names.get(entityId) || entityId,
               tokenId,
-              debts: debts.map((d: any) => ({
+              debts: debts.map((d) => ({
                 amount: d.amount,
                 creditor: d.creditor,
                 creditorName: names.get(d.creditor) || d.creditor

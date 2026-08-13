@@ -1,6 +1,7 @@
-import type { GraphPaymentJob, GraphXLNRuntime } from './graph3d-types';
+import type { GraphPaymentJob } from './graph3d-types';
 import { graphReserveValue } from './graph3d-helpers';
 import { parseTokenAmountInput } from '../../../components/Entity/assets/token-amount-input';
+import type { GraphReplicaLike } from './graph3d-helpers';
 
 export function parseGraphPaymentAmount(amount: string, decimals: number): bigint {
   return parseTokenAmountInput(amount, decimals);
@@ -43,20 +44,12 @@ export async function loadGraphScenarioSteps<T>(filename: string, parse: (source
   return parse(await response.text());
 }
 
-export async function executeGraphScenario(options: { filename: string; runtime: GraphXLNRuntime; env: any }) {
-  const response = await fetch(`/worlds/${options.filename}`);
-  if (!response.ok) throw new Error(`Failed to load scenario: ${response.statusText}`);
-  const parsed = options.runtime.parseScenario(await response.text());
-  if (parsed.errors.length > 0) return { parsed, result: null };
-  const result = await options.runtime.executeScenario(options.env, parsed.scenario);
-  return { parsed, result };
-}
-
-export function collectGraphTokenIds(replicas: Map<string, any>): number[] {
+export function collectGraphTokenIds(replicas: Map<string, GraphReplicaLike>): number[] {
   const tokenIds = new Set<number>([1]);
   for (const replica of replicas.values()) {
-    if (!replica?.state?.reserves) continue;
-    for (const tokenIdValue of replica.state.reserves.keys()) {
+    const reserves = replica?.state?.reserves;
+    if (!(reserves instanceof Map)) continue;
+    for (const tokenIdValue of reserves.keys()) {
       const tokenId = Number(tokenIdValue);
       if (Number.isFinite(tokenId)) tokenIds.add(tokenId);
     }
@@ -71,7 +64,7 @@ export function calculateGraphEntityRadius(reserveValueUsd: number): number {
 }
 
 export function getGraphEntitySizeForToken(options: {
-  replicas: Map<string, any>;
+  replicas: Map<string, GraphReplicaLike>;
   entityId: string;
   tokenId: number;
   tokenDecimals: number;

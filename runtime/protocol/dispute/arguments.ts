@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../errors/failure-taxonomy";
+
 import { ethers } from 'ethers';
 import type { AccountReplica } from '../../types/account';
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
@@ -135,7 +137,7 @@ export function requireDisputeArgumentSnapshot(
   context: string,
 ): DisputeArgumentSnapshot {
   const snapshot = account.disputeArgumentSnapshotsByHash?.[proofbodyHash];
-  if (!snapshot) throw new Error(`DISPUTE_ARGUMENT_SNAPSHOT_MISSING:${context}:${proofbodyHash}`);
+  if (!snapshot) throw haltRuntimeFailure("DISPUTE_ARGUMENT_SNAPSHOT_MISSING", `DISPUTE_ARGUMENT_SNAPSHOT_MISSING:${context}:${proofbodyHash}`);
   return snapshot;
 }
 

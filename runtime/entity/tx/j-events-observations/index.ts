@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 import { addMessage } from '../../frame-events';
 import { getTokenInfo } from '../../../account/utils';
 import { formatTokenAmount } from '../../../account/financial-utils';
@@ -16,7 +18,7 @@ const displayTokenAmount = (tokenId: number, amount: unknown): string => {
 export const applyReserveUpdatedJEvent = (context: FinalizedJEventContext): void => {
   const { entityState, newState, event, blockNumber, transactionHash } = context;
   if (event.type !== 'ReserveUpdated') {
-    throw new Error(`J_EVENT_RESERVE_ROUTE_MISMATCH:${event.type}`);
+    throw haltRuntimeFailure("J_EVENT_RESERVE_ROUTE_MISMATCH", `J_EVENT_RESERVE_ROUTE_MISMATCH:${event.type}`);
   }
   const tokenId = Number(event.data.tokenId);
   if (String(event.data.entity).toLowerCase() === entityState.entityId.toLowerCase()) {
@@ -35,7 +37,7 @@ export const applyReserveUpdatedJEvent = (context: FinalizedJEventContext): void
 export const applyExternalWalletJEvent = (context: FinalizedJEventContext): void => {
   const { entityState, newState, event, blockNumber, transactionHash } = context;
   if (event.type !== 'ExternalWalletSnapshot' && event.type !== 'ExternalWalletDelta') {
-    throw new Error(`J_EVENT_EXTERNAL_WALLET_ROUTE_MISMATCH:${event.type}`);
+    throw haltRuntimeFailure("J_EVENT_EXTERNAL_WALLET_ROUTE_MISMATCH", `J_EVENT_EXTERNAL_WALLET_ROUTE_MISMATCH:${event.type}`);
   }
   if (String(event.data.entityId).toLowerCase() !== entityState.entityId.toLowerCase()) {
     return;
@@ -54,7 +56,7 @@ export const applyExternalWalletJEvent = (context: FinalizedJEventContext): void
 export const applySecretRevealedJEvent = (context: FinalizedJEventContext): void => {
   const { newState, event, blockNumber, accountTxs, outputs } = context;
   if (event.type !== 'SecretRevealed') {
-    throw new Error(`J_EVENT_SECRET_ROUTE_MISMATCH:${event.type}`);
+    throw haltRuntimeFailure("J_EVENT_SECRET_ROUTE_MISMATCH", `J_EVENT_SECRET_ROUTE_MISMATCH:${event.type}`);
   }
   applyKnownHtlcSecret(
     newState,
@@ -102,5 +104,5 @@ export const applyDebtJEvent = (context: FinalizedJEventContext): void => {
     );
     return;
   }
-  throw new Error(`J_EVENT_DEBT_ROUTE_MISMATCH:${event.type}`);
+  throw haltRuntimeFailure("J_EVENT_DEBT_ROUTE_MISMATCH", `J_EVENT_DEBT_ROUTE_MISMATCH:${event.type}`);
 };

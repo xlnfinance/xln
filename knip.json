@@ -8,7 +8,7 @@
     "runtime/scripts/**/*.ts",
     "runtime/scenarios/**/*.ts",
     "runtime/__tests__/**/*.test.ts",
-    "runtime/__tests__/types/fints/*.ts",
+    "runtime/__tests__/types/fints/**/*.ts",
     "scripts/**/*.ts",
     "tools/*.ts",
     "tests/**/*.spec.ts",
@@ -65,6 +65,7 @@
     "@typescript/native",
     "@tsconfig/node20",
     "@types/minimatch",
+    "@stryker-mutator/command-runner",
     "three",
     "svelte"
   ]

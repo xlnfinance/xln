@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../protocol/errors/failure-taxonomy";
+
 import type {
   BookOrderState,
   BookState,
@@ -14,7 +16,7 @@ const UTF8 = new TextEncoder();
 
 const u32 = (value: number): Uint8Array => {
   if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff_ffff) {
-    throw new Error(`ORDERBOOK_COMMITMENT_U32_INVALID:${String(value)}`);
+    throw haltRuntimeFailure("ORDERBOOK_COMMITMENT_U32_INVALID", `ORDERBOOK_COMMITMENT_U32_INVALID:${String(value)}`);
   }
   return Uint8Array.of(value >>> 24, value >>> 16, value >>> 8, value);
 };
@@ -33,7 +35,7 @@ const concat = (parts: readonly Uint8Array[]): Uint8Array => {
 const text = (value: string): Uint8Array => UTF8.encode(value);
 const bigint = (value: bigint): Uint8Array => text(value.toString());
 const number = (value: number): Uint8Array => {
-  if (!Number.isSafeInteger(value)) throw new Error(`ORDERBOOK_COMMITMENT_NUMBER_INVALID:${String(value)}`);
+  if (!Number.isSafeInteger(value)) throw haltRuntimeFailure("ORDERBOOK_COMMITMENT_NUMBER_INVALID", `ORDERBOOK_COMMITMENT_NUMBER_INVALID:${String(value)}`);
   return text(String(value));
 };
 
@@ -60,7 +62,7 @@ const computeLevelHash = (book: BookState, level: PriceLevelState): string => {
   if (level.commitmentHash) return level.commitmentHash;
   const orders = level.orderIds.map((orderId) => {
     const order = book.orders.get(orderId);
-    if (!order) throw new Error(`ORDERBOOK_COMMITMENT_ORDER_MISSING:${orderId}`);
+    if (!order) throw haltRuntimeFailure("ORDERBOOK_COMMITMENT_ORDER_MISSING", `ORDERBOOK_COMMITMENT_ORDER_MISSING:${orderId}`);
     return integrityChecksumFromHex(computeOrderHash(order));
   });
   level.commitmentHash = hashParts('xln.orderbook.level', [
@@ -76,7 +78,7 @@ const computeBucketHash = (book: BookState, bucket: PriceBucketState): string =>
   if (bucket.commitmentHash) return bucket.commitmentHash;
   const levels = bucket.pricesAsc.map((priceTicks) => {
     const level = bucket.levels.get(priceTicks.toString());
-    if (!level) throw new Error(`ORDERBOOK_COMMITMENT_LEVEL_MISSING:${priceTicks.toString()}`);
+    if (!level) throw haltRuntimeFailure("ORDERBOOK_COMMITMENT_LEVEL_MISSING", `ORDERBOOK_COMMITMENT_LEVEL_MISSING:${priceTicks.toString()}`);
     return integrityChecksumFromHex(computeLevelHash(book, level));
   });
   bucket.commitmentHash = hashParts('xln.orderbook.bucket', [
@@ -92,7 +94,7 @@ const computeSideHash = (book: BookState, side: Side): string => {
   const buckets = side === 0 ? book.bidBuckets : book.askBuckets;
   const hashes = bucketIds.map((bucketId) => {
     const bucket = buckets.get(bucketId.toString());
-    if (!bucket) throw new Error(`ORDERBOOK_COMMITMENT_BUCKET_MISSING:${bucketId.toString()}`);
+    if (!bucket) throw haltRuntimeFailure("ORDERBOOK_COMMITMENT_BUCKET_MISSING", `ORDERBOOK_COMMITMENT_BUCKET_MISSING:${bucketId.toString()}`);
     return integrityChecksumFromHex(computeBucketHash(book, bucket));
   });
   return hashParts('xln.orderbook.side', [number(side), u32(bucketIds.length), ...hashes]);

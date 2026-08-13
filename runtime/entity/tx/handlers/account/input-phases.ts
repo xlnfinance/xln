@@ -23,6 +23,7 @@ import {
 import { verifyHankoForHash } from '../../../../hanko/signing';
 import type { AccountJClaimNodeChanges } from '../../../../types/finance/account-j-claims';
 import type { ApplyEntityTxOptions } from '../../apply';
+import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
 import {
   applySuccessfulAccountInput,
   type CommittedAccountEffects,
@@ -157,7 +158,10 @@ const finishRejectedAccountInput = (
       error: failureMessage,
     });
     addMessage(state, `❌ ${failureMessage}`);
-    throw new Error(`FRAME_CONSENSUS_FAILED: ${failureMessage || 'unknown'}`);
+    throw haltRuntimeFailure(
+      'FRAME_CONSENSUS_FAILED',
+      `FRAME_CONSENSUS_FAILED: ${failureMessage || 'unknown'}`,
+    );
   }
   return assertNeverAccountResult(result.rejection);
 };

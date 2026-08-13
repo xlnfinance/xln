@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
+
 import { addMessage } from '../frame-events';
 import {
   applyCertifiedBoardRegistryEvent,
@@ -25,7 +27,7 @@ export const applyCertifiedBoardJEvent = (
     event.type !== 'EntityRegistered' &&
     event.type !== 'BoardActivated'
   ) {
-    throw new Error(`J_EVENT_BOARD_ROUTE_MISMATCH:${event.type}`);
+    throw haltRuntimeFailure("J_EVENT_BOARD_ROUTE_MISMATCH", `J_EVENT_BOARD_ROUTE_MISMATCH:${event.type}`);
   }
   const jurisdiction = newState.config.jurisdiction;
   if (!jurisdiction) throw new Error('CERTIFIED_BOARD_ENTITY_JURISDICTION_MISSING');

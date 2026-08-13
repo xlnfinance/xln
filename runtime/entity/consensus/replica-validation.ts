@@ -4,6 +4,7 @@ import { safeStringify } from '../../protocol/serialization';
 import type { EntityTx } from '../../types/entity-tx';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState } from '../types';
 import { validateProposedEntityFrame } from './frame/validation';
+import { getEntityInputPhaseCombinationError } from './input/phase-views';
 
 const hasWellFormedEntityTxs = (input: EntityInput): boolean => {
   if (!input.entityTxs) return true;
@@ -115,6 +116,11 @@ export const isEntityInputWellFormed = (input: EntityInput): boolean => {
   try {
     if (!input.entityId || typeof input.entityId !== 'string') {
       log.error(`❌ Invalid entityId: ${input.entityId}`);
+      return false;
+    }
+    const phaseError = getEntityInputPhaseCombinationError(input);
+    if (phaseError) {
+      log.error(`❌ Invalid EntityInput phase combination: ${phaseError}`);
       return false;
     }
     return (

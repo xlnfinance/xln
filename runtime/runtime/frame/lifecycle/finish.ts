@@ -4,8 +4,7 @@ import {
   rollbackReliableIngressCommit,
 } from '../../reliable/reliable-delivery.ts';
 import { requireRuntimeMempool } from '../../input-pipeline/input-queue';
-import { transitionRuntimeLifecycle } from '../../lifecycle';
-import { ensureRuntimeInfrastructure } from '../../infrastructure/runtime-infrastructure';
+import { haltRuntimeRequiresOperator } from '../../lifecycle';
 import {
   prependOlderRuntimeInput,
 } from '../transaction';
@@ -29,15 +28,11 @@ const haltMutatedRuntime = (
   env: RuntimeReplica,
   error: unknown,
 ): void => {
-  const state = ensureRuntimeInfrastructure(env);
   const cause = error instanceof Error ? error : new Error(String(error));
-  transitionRuntimeLifecycle(state, 'halted');
-  state.fatalDebugPayload = {
-    message: `RUNTIME_MUTATION_FAILED_RELOAD_REQUIRED:${cause.message}`,
-    height: Math.max(0, env.state.height),
-    timestamp: Math.max(0, env.state.timestamp),
-  };
-  state.stopLoop?.();
+  haltRuntimeRequiresOperator(
+    env,
+    new Error(`RUNTIME_MUTATION_FAILED_RELOAD_REQUIRED:${cause.message}`, { cause }),
+  );
 };
 
 export const handleRuntimeFrameFailure = async (

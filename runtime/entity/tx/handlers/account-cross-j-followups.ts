@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 import { normalizeEntityRef } from '../account-key';
 import type { AccountTx, RuntimeOverlayRecord } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
@@ -61,7 +63,7 @@ const assertTerminalPullReplay = (
     proof.cumulativeSourceAmount !== committed.filledSourceAmount ||
     proof.cumulativeTargetAmount !== committed.filledTargetAmount
   ) {
-    throw new Error(`CROSS_J_TERMINAL_PULL_REPLAY_MISMATCH: route=${route.orderId} ratio=${fillRatio}`);
+    throw haltRuntimeFailure("CROSS_J_TERMINAL_PULL_REPLAY_MISMATCH", `CROSS_J_TERMINAL_PULL_REPLAY_MISMATCH: route=${route.orderId} ratio=${fillRatio}`);
   }
   if (
     suppliedProof &&
@@ -74,7 +76,7 @@ const assertTerminalPullReplay = (
       normalizeEntityRef(suppliedProof.binaryHash) !== normalizeEntityRef(proof.binaryHash)
     )
   ) {
-    throw new Error(`CROSS_J_TERMINAL_PULL_PROOF_REPLAY_MISMATCH: route=${route.orderId}`);
+    throw haltRuntimeFailure("CROSS_J_TERMINAL_PULL_PROOF_REPLAY_MISMATCH", `CROSS_J_TERMINAL_PULL_PROOF_REPLAY_MISMATCH: route=${route.orderId}`);
   }
   return true;
 };
@@ -86,10 +88,10 @@ const assertCrossPullCloseAllowed = (
 ): void => {
   if (fillRatio <= 0) return;
   if (isCrossJurisdictionTerminalStatus(route.status)) {
-    throw new Error(`CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} status=${route.status}`);
+    throw haltRuntimeFailure("CROSS_J_PULL_CLOSE_STATE_INVALID", `CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} status=${route.status}`);
   }
   if (leg === 'source' && route.status !== 'clearing' && route.status !== 'clear_requested') {
-    throw new Error(`CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} leg=source status=${route.status}`);
+    throw haltRuntimeFailure("CROSS_J_PULL_CLOSE_STATE_INVALID", `CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} leg=source status=${route.status}`);
   }
   if (
     leg === 'target' &&
@@ -98,7 +100,7 @@ const assertCrossPullCloseAllowed = (
     route.status !== 'clear_requested' &&
     route.status !== 'clearing'
   ) {
-    throw new Error(`CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} leg=target status=${route.status}`);
+    throw haltRuntimeFailure("CROSS_J_PULL_CLOSE_STATE_INVALID", `CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} leg=target status=${route.status}`);
   }
   // CANON (owner, 2026-08-07): informational fill progress never gates a
   // close. The Account layer already verified the ladder reveal against
@@ -109,10 +111,8 @@ const assertCrossPullCloseAllowed = (
   // the hub rewriting history, not lagging delivery.
   const committedRatio = committedCrossJurisdictionRatio(route);
   if (fillRatio < committedRatio) {
-    throw new Error(
-      `CROSS_J_PULL_CLOSE_ROLLBACK: route=${route.orderId} ` +
-      `ratio=${fillRatio} informed=${committedRatio}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_PULL_CLOSE_ROLLBACK", `CROSS_J_PULL_CLOSE_ROLLBACK: route=${route.orderId} ` +
+      `ratio=${fillRatio} informed=${committedRatio}`);
   }
 };
 
@@ -157,7 +157,7 @@ const requireRouteSignerHint = (
   entityId: string,
 ): string => {
   const signerId = crossJurisdictionRouteSignerHint(route, entityId);
-  if (!signerId) throw new Error(`CROSS_J_ROUTE_SIGNER_MISSING:${route.orderId}:${entityId}`);
+  if (!signerId) throw haltRuntimeFailure("CROSS_J_ROUTE_SIGNER_MISSING", `CROSS_J_ROUTE_SIGNER_MISSING:${route.orderId}:${entityId}`);
   return signerId;
 };
 
@@ -199,7 +199,7 @@ const requireCrossFillAckNumber = (
 ): number => {
   const value = accountTx.data[field];
   if (!Number.isFinite(Number(value))) {
-    throw new Error(`CROSS_J_FILL_ACK_FIELD_MISSING: offer=${accountTx.data.offerId} field=${field}`);
+    throw haltRuntimeFailure("CROSS_J_FILL_ACK_FIELD_MISSING", `CROSS_J_FILL_ACK_FIELD_MISSING: offer=${accountTx.data.offerId} field=${field}`);
   }
   return Math.floor(Number(value));
 };
@@ -214,7 +214,7 @@ const requireCrossFillAckBigInt = (
 ): bigint => {
   const value = accountTx.data[field];
   if (value === undefined) {
-    throw new Error(`CROSS_J_FILL_ACK_FIELD_MISSING: offer=${accountTx.data.offerId} field=${field}`);
+    throw haltRuntimeFailure("CROSS_J_FILL_ACK_FIELD_MISSING", `CROSS_J_FILL_ACK_FIELD_MISSING: offer=${accountTx.data.offerId} field=${field}`);
   }
   return BigInt(value);
 };
@@ -336,10 +336,10 @@ const admitCommittedSourcePullToBook = (
   storageChanges: RuntimeOverlayRecord[],
 ): void => {
   addMessage(state, `🌉 Cross-j swap ${route.orderId} committed by both Account legs`);
-  if (!state.crontabState) throw new Error(`CROSS_J_EXPIRY_CRONTAB_MISSING:${route.orderId}`);
+  if (!state.crontabState) throw haltRuntimeFailure("CROSS_J_EXPIRY_CRONTAB_MISSING", `CROSS_J_EXPIRY_CRONTAB_MISSING:${route.orderId}`);
   const expiresAt = Math.floor(Number(route.expiresAt || 0));
   if (!Number.isSafeInteger(expiresAt) || expiresAt <= state.timestamp) {
-    throw new Error(`CROSS_J_EXPIRY_INVALID:${route.orderId}:${String(route.expiresAt)}`);
+    throw haltRuntimeFailure("CROSS_J_EXPIRY_INVALID", `CROSS_J_EXPIRY_INVALID:${route.orderId}:${String(route.expiresAt)}`);
   }
   scheduleHook(state.crontabState, {
     id: `cross-j-expiry:${route.orderId}`,
@@ -384,14 +384,14 @@ const queueBookAdmissionOnCommittedPull = (
 ): boolean => {
   const carriedRoute = accountTx.data.crossJurisdictionRoute;
   if (accountTx.data.crossJurisdiction && !carriedRoute) {
-    throw new Error(`CROSS_J_COMMITTED_PULL_ROUTE_MISSING:${accountTx.data.pullId}`);
+    throw haltRuntimeFailure("CROSS_J_COMMITTED_PULL_ROUTE_MISSING", `CROSS_J_COMMITTED_PULL_ROUTE_MISSING:${accountTx.data.pullId}`);
   }
   if (carriedRoute) {
     const route = cloneCrossJurisdictionRoute(carriedRoute);
     newState.crossJurisdictionSwaps ||= new Map();
     const existing = newState.crossJurisdictionSwaps.get(route.orderId);
     if (existing?.routeHash && route.routeHash && existing.routeHash.toLowerCase() !== route.routeHash.toLowerCase()) {
-      throw new Error(`CROSS_J_COMMITTED_PULL_ROUTE_CONFLICT:${route.orderId}`);
+      throw haltRuntimeFailure("CROSS_J_COMMITTED_PULL_ROUTE_CONFLICT", `CROSS_J_COMMITTED_PULL_ROUTE_CONFLICT:${route.orderId}`);
     }
     newState.crossJurisdictionSwaps.set(route.orderId, { ...existing, ...route });
   }
@@ -408,7 +408,7 @@ const queueBookAdmissionOnCommittedPull = (
     );
     if (!role) continue;
     if (!committedPullMatchesRoute(accountTx, route, role.leg)) {
-      throw new Error(`CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH: route=${route.orderId} leg=${role.leg} pull=${accountTx.data.pullId}`);
+      throw haltRuntimeFailure("CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH", `CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH: route=${route.orderId} leg=${role.leg} pull=${accountTx.data.pullId}`);
     }
     const userLeg =
       currentEntityId === normalizeEntityRef(route.source.entityId) ||
@@ -419,7 +419,7 @@ const queueBookAdmissionOnCommittedPull = (
         !authorization ||
         normalizeEntityRef(authorization.routeHash || '') !== normalizeEntityRef(route.routeHash || '')
       ) {
-        throw new Error(`CROSS_J_COMMITTED_PULL_AUTH_MISSING:${route.orderId}:${currentEntityId}`);
+        throw haltRuntimeFailure("CROSS_J_COMMITTED_PULL_AUTH_MISSING", `CROSS_J_COMMITTED_PULL_AUTH_MISSING:${route.orderId}:${currentEntityId}`);
       }
       // This mutates only the staged Entity candidate. Runtime publishes both
       // user sibling candidates together, so neither one-shot authorization is
@@ -460,7 +460,7 @@ const queueBookAdmissionOnCommittedPull = (
 
 const requireCrossPullCloseFillRatio = (fillRatio: number): number => {
   if (!Number.isSafeInteger(fillRatio) || fillRatio < 0 || fillRatio > CROSS_J_MAX_FILL_RATIO) {
-    throw new Error(`CROSS_J_CLOSE_PROOF_RATIO_INVALID:${fillRatio}`);
+    throw haltRuntimeFailure("CROSS_J_CLOSE_PROOF_RATIO_INVALID", `CROSS_J_CLOSE_PROOF_RATIO_INVALID:${fillRatio}`);
   }
   return fillRatio;
 };
@@ -477,9 +477,7 @@ const applyCrossPullCloseFollowup = (
   const fillRatio = requireCrossPullCloseFillRatio(accountTx.data.proof.fillRatio);
   const decoded = decodeHashLadderBinary(accountTx.data.binary);
   if (decoded.fillRatio !== fillRatio) {
-    throw new Error(
-      `CROSS_J_CLOSE_BINARY_RATIO_MISMATCH: pull=${accountTx.data.pullId} binary=${decoded.fillRatio} proof=${fillRatio}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_CLOSE_BINARY_RATIO_MISMATCH", `CROSS_J_CLOSE_BINARY_RATIO_MISMATCH: pull=${accountTx.data.pullId} binary=${decoded.fillRatio} proof=${fillRatio}`);
   }
   const currentEntityId = normalizeEntityRef(newState.entityId);
   const counterpartyEntityId = normalizeEntityRef(counterpartyId);
@@ -668,7 +666,7 @@ const closeOrProgressCrossJurisdictionBook = (
     removeOrRouteCrossJurisdictionBookOrder(env, state, route, outputs, 'fill_ack_closed', storageChanges);
   }
   const signerId = String(state.config.validators[0] || '').trim().toLowerCase();
-  if (!signerId) throw new Error(`CROSS_J_SELF_SIGNER_MISSING:${route.orderId}:${state.entityId}`);
+  if (!signerId) throw haltRuntimeFailure("CROSS_J_SELF_SIGNER_MISSING", `CROSS_J_SELF_SIGNER_MISSING:${route.orderId}:${state.entityId}`);
   outputs.push({
     entityId: state.entityId,
     signerId,
@@ -705,10 +703,8 @@ const applyFillAckFollowup = (
     // A committed account ACK is canonical money progress. If the entity route
     // mirror is gone, silently accepting the ACK leaves the shared book stale
     // and hides projection corruption. Never rehydrate or skip here.
-    throw new Error(
-      `CROSS_J_FILL_ACK_ROUTE_MISSING: entity=${shortId(newState.entityId)} ` +
-      `offer=${shortOrder(accountTx.data.offerId, 12)} ratio=${ratio} cancel=${Boolean(accountTx.data.cancelRemainder)}`,
-    );
+    throw haltRuntimeFailure("CROSS_J_FILL_ACK_ROUTE_MISSING", `CROSS_J_FILL_ACK_ROUTE_MISSING: entity=${shortId(newState.entityId)} ` +
+      `offer=${shortOrder(accountTx.data.offerId, 12)} ratio=${ratio} cancel=${Boolean(accountTx.data.cancelRemainder)}`);
   }
 
   const previousStatus = route.status;
@@ -748,7 +744,7 @@ const applyTargetProgressFollowup = (
   };
   const route = newState.crossJurisdictionSwaps?.get(fillAck.data.offerId);
   if (!route) {
-    throw new Error(`CROSS_J_TARGET_PROGRESS_ROUTE_MISSING:${fillAck.data.offerId}`);
+    throw haltRuntimeFailure("CROSS_J_TARGET_PROGRESS_ROUTE_MISSING", `CROSS_J_TARGET_PROGRESS_ROUTE_MISSING:${fillAck.data.offerId}`);
   }
   const role = getCommittedPullRole(
     route,
@@ -757,7 +753,7 @@ const applyTargetProgressFollowup = (
     accountTx.data.pullId,
   );
   if (role?.leg !== 'target') {
-    throw new Error(`CROSS_J_TARGET_PROGRESS_ACCOUNT_MISMATCH:${fillAck.data.offerId}:${accountTx.data.pullId}`);
+    throw haltRuntimeFailure("CROSS_J_TARGET_PROGRESS_ACCOUNT_MISMATCH", `CROSS_J_TARGET_PROGRESS_ACCOUNT_MISMATCH:${fillAck.data.offerId}:${accountTx.data.pullId}`);
   }
   const ratio = getCrossJurisdictionCommittedProofRatio({
     orderId: fillAck.data.offerId,

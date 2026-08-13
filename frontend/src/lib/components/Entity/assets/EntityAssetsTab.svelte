@@ -111,7 +111,8 @@
   export let submitAssetFaucet: (target: 'account' | 'external' | 'reserve') => void | Promise<void>;
   export let copyMetaValue: (value: string, field: 'entity' | 'external') => void | Promise<void>;
   export let shortHash: (value: unknown) => string;
-  export let enforceOutstandingDebt: (detail: any) => void | Promise<void>;
+  import type { DebtEnforceRequest } from './debt-enforce-request';
+  export let enforceOutstandingDebt: (detail: DebtEnforceRequest) => void | Promise<void>;
   export let openAssetMoveWorkspace: () => void;
   export let openAssetHistoryWorkspace: () => void;
 

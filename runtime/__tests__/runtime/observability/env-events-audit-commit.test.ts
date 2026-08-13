@@ -49,7 +49,7 @@ test('clearing pending audit events drops uncommitted high-signal emits', () => 
   expect(env.infrastructure?.pendingAuditEvents?.size).toBe(0);
 });
 
-test('warn, error, and rebalance diagnostics cannot escape before WAL commit', () => {
+test('warn and error diagnostics cannot escape before WAL commit', () => {
   const env = createEmptyEnv('env-events-structured-log-boundary');
   const forwarded: Array<Record<string, unknown>> = [];
   env.infrastructure!.p2p = {
@@ -62,14 +62,14 @@ test('warn, error, and rebalance diagnostics cannot escape before WAL commit', (
   const error = spyOn(console, 'error').mockImplementation(() => undefined);
 
   try {
-    env.info('account', 'REB_STARTED', { height: 7 });
+    env.info('account', 'ordinary committed diagnostic', { height: 7 });
     env.warn('account', 'signed proposal is stale');
     env.error('runtime', 'candidate failed');
     expect(forwarded).toEqual([]);
-    expect(env.infrastructure?.pendingAuditEvents?.size).toBe(3);
+    expect(env.infrastructure?.pendingAuditEvents?.size).toBe(2);
 
     flushPendingAuditEvents(env);
-    expect(forwarded.map(payload => payload.level)).toEqual(['info', 'warn', 'error']);
+    expect(forwarded.map(payload => payload.level)).toEqual(['warn', 'error']);
   } finally {
     warn.mockRestore();
     error.mockRestore();

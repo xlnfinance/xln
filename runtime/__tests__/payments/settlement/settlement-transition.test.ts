@@ -45,6 +45,7 @@ import { hubRebalanceHandler } from '../../../entity/scheduler/rebalance';
 import { applyFinalizedAccountJEvents } from '../../../account/tx/handlers/j-events/finality';
 import { createEmptyBatch, initJBatch } from '../../../jurisdiction/machine/batch';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
+import { compileOps } from '../../../protocol/settlement/operations';
 import {
   applyCertifiedBoardRegistryEvent,
   cacheCertifiedBoardNodes,
@@ -100,8 +101,12 @@ const signedWorkspaceAccount = async (nonceAtSign: number) => {
     ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
     executorIsLeft: false,
   })).ok).toBe(true);
-  account.state.settlementWorkspace!.leftHanko = '0x1234';
-  account.state.settlementWorkspace!.rightHanko = '0x5678';
+  const workspace = account.state.settlementWorkspace!;
+  const compiled = compileOps(workspace.ops, true);
+  workspace.compiledDiffs = compiled.diffs;
+  workspace.compiledForgiveTokenIds = compiled.forgiveTokenIds;
+  workspace.leftHanko = '0x1234';
+  workspace.rightHanko = '0x5678';
   account.state.settlementWorkspace!.nonceAtSign = nonceAtSign;
   account.state.settlementWorkspace!.settlementHash = `0x${'81'.repeat(32)}`;
   const proofBodyHash = buildAccountProofBody(account, TEST_DELTA_TRANSFORMER).proofBodyHash;
@@ -111,6 +116,7 @@ const signedWorkspaceAccount = async (nonceAtSign: number) => {
     disputeHash: `0x${'82'.repeat(32)}`,
     proofBodyHash,
     nonce: nonceAtSign + 1,
+    proposerIsLeft: true,
   };
   return account;
 };
@@ -1546,6 +1552,9 @@ describe('atomic settlement Account transition', () => {
     });
     expect(first.ok).toBe(true);
     const workspaceHash = account.state.settlementWorkspace!.workspaceHash;
+    const compiled = compileOps(account.state.settlementWorkspace!.ops, true);
+    account.state.settlementWorkspace!.compiledDiffs = compiled.diffs;
+    account.state.settlementWorkspace!.compiledForgiveTokenIds = compiled.forgiveTokenIds;
     account.state.settlementWorkspace!.leftHanko = '0x1234';
     account.state.settlementWorkspace!.nonceAtSign = 1;
     account.state.settlementWorkspace!.settlementHash = `0x${'41'.repeat(32)}`;
@@ -1555,6 +1564,7 @@ describe('atomic settlement Account transition', () => {
       disputeHash: `0x${'42'.repeat(32)}`,
       proofBodyHash: `0x${'43'.repeat(32)}`,
       nonce: 2,
+      proposerIsLeft: true,
     };
     account.state.settlementWorkspace!.status = 'ready_to_submit';
 

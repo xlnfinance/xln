@@ -3,24 +3,26 @@ import type {
   ApplyAccountTxOk,
   ApplyAccountTxRejected,
   ApplyAccountTxResult,
-} from '../../../account/tx/apply-types';
-import { ACCOUNT_TX_REJECTION_CODES } from '../../../account/tx/apply-types';
+} from '../../../../account/tx/apply-types';
+import { ACCOUNT_TX_REJECTION_CODES } from '../../../../account/tx/apply-types';
 import {
   toHashlock,
   toHtlcSecret,
-  toJHeight,
   toLockId,
   toTokenAmount,
   toTokenId,
-  toUnixMs,
   type Hashlock,
   type HtlcSecret,
-  type JHeight,
   type LockId,
   type TokenAmount,
   type TokenId,
+} from '../../../../account/tx/units';
+import {
+  toJHeight,
+  toUnixMs,
+  type JHeight,
   type UnixMs,
-} from '../../../account/tx/units';
+} from '../../../../protocol/units';
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends

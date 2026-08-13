@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
+
 import { getBookOrder, MAX_ORDERBOOK_QTY_LOTS } from '../../../../../../orderbook';
 import { getSwapPairPolicyByBaseQuote } from '../../../../../../account/utils';
 import { swapKey, type CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
@@ -31,14 +33,12 @@ const validateExistingCrossOrder = (
     order.priceTicks !== marketOffer.priceTicks ||
     order.qtyLots !== qtyLots
   ) {
-    throw new Error(
-      `ORDERBOOK_CROSS_J_DUPLICATE_SNAPSHOT_MISMATCH: ` +
+    throw haltRuntimeFailure("ORDERBOOK_CROSS_J_DUPLICATE_SNAPSHOT_MISMATCH", `ORDERBOOK_CROSS_J_DUPLICATE_SNAPSHOT_MISMATCH: ` +
       `pair=${marketOffer.pairId} order=${prepared.namespacedOrderId} ` +
       `storedOwner=${order.ownerId} canonicalOwner=${marketOffer.makerId} ` +
       `storedQty=${order.qtyLots.toString()} canonicalQty=${qtyLots.toString()} ` +
       `storedPrice=${order.priceTicks.toString()} ` +
-      `canonicalPrice=${marketOffer.priceTicks.toString()}`,
-    );
+      `canonicalPrice=${marketOffer.priceTicks.toString()}`);
   }
   return true;
 };

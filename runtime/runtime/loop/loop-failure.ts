@@ -1,13 +1,7 @@
 import { createStructuredLogger } from '../../infra/logger.ts';
 import { normalizeRuntimeFailureCode } from '../../protocol/errors/failure-taxonomy';
 import type { RuntimeReplica } from '../types.ts';
-import { transitionRuntimeLifecycle } from '../lifecycle.ts';
-
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
-
-type FatalLoopDeps = {
-  getRuntimeProcessGlobal(): { exit?: (code: number) => unknown } | null;
-};
+import { haltRuntimeRequiresOperator } from '../lifecycle.ts';
 
 type FatalLoopConfig = {
   onFatal?: (payload: {
@@ -37,20 +31,12 @@ export const emitRuntimeLoopError = (
 
 export const reportFatalLoopError = async (
   env: RuntimeReplica,
-  state: RuntimeLifecycleState,
   config: FatalLoopConfig | undefined,
-  deps: FatalLoopDeps,
   error: unknown,
 ): Promise<string> => {
   const message = error instanceof Error ? error.message : String(error);
   const stack = error instanceof Error ? error.stack : undefined;
-  transitionRuntimeLifecycle(state, 'halted');
-  state.fatalDebugPayload = {
-    message,
-    ...(stack ? { stack } : {}),
-    height: Math.max(0, env.state.height ?? 0),
-    timestamp: Math.max(0, env.state.timestamp ?? 0),
-  };
+  haltRuntimeRequiresOperator(env, error);
   if (config?.onFatal) {
     try {
       await config.onFatal({
@@ -67,6 +53,5 @@ export const reportFatalLoopError = async (
   }
   failureLog.error('error', { message, ...(stack ? { stack } : {}) });
   emitRuntimeLoopError(env, 'RUNTIME_LOOP_ERROR', { message, ...(stack ? { stack } : {}) });
-  deps.getRuntimeProcessGlobal()?.exit?.(1);
   return message;
 };

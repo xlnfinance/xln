@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
+
 import { createStructuredLogger, shortOrder } from '../../../../../../infra/logger';
 import { compareCanonicalText } from '../../../../../../orderbook/swap-execution';
 import {
@@ -45,10 +47,8 @@ const assertPlannedCrossAckConservation = (
     .filter(([, net]) => net !== 0n)
     .sort(([left], [right]) => compareCanonicalText(left, right));
   if (mismatches.length > 0) {
-    throw new Error(
-      `CROSS_J_TRADE_CONSERVATION_FAILED:` +
-      mismatches.map(([asset, net]) => `${asset}=${net}`).join(','),
-    );
+    throw haltRuntimeFailure("CROSS_J_TRADE_CONSERVATION_FAILED", `CROSS_J_TRADE_CONSERVATION_FAILED:` +
+      mismatches.map(([asset, net]) => `${asset}=${net}`).join(','));
   }
 };
 
@@ -62,7 +62,7 @@ const planCrossAcks = (pass: CrossOrderbookPass): PlannedCrossAck[] => {
       pass.crossLiveOfferMeta.get(orderId) ??
       buildCrossMarketOfferFromBookOrder(pass.hubState, orderId);
     if (!meta) {
-      throw new Error(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
+      throw haltRuntimeFailure("ORDERBOOK_CROSS_J_FILL_META_MISSING", `ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
     }
     const { accountId, offerId } = parseNamespacedOrderId(
       orderId,
@@ -86,10 +86,8 @@ const planCrossAcks = (pass: CrossOrderbookPass): PlannedCrossAck[] => {
       fill,
     );
     if (!ack) {
-      throw new Error(
-        `ORDERBOOK_CROSS_J_FILL_ACK_MISSING: order=${orderId} ` +
-        `account=${accountId} offer=${offerId} filledLots=${fill.filledLots}`,
-      );
+      throw haltRuntimeFailure("ORDERBOOK_CROSS_J_FILL_ACK_MISSING", `ORDERBOOK_CROSS_J_FILL_ACK_MISSING: order=${orderId} ` +
+        `account=${accountId} offer=${offerId} filledLots=${fill.filledLots}`);
     }
     planned.push(ack);
   }
@@ -105,7 +103,7 @@ const commitCrossAck = (
     pass.crossLiveOfferMeta.get(orderId) ??
     buildCrossMarketOfferFromBookOrder(pass.hubState, orderId);
   if (!meta) {
-    throw new Error(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
+    throw haltRuntimeFailure("ORDERBOOK_CROSS_J_FILL_META_MISSING", `ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
   }
   const admission = getCrossAdmission(pass, accountId, offerId);
   if (admission) {

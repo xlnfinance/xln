@@ -119,6 +119,29 @@ describe('mergeEntityInputs', () => {
     expect(merged[1]?.entityTxs?.map((tx) => (tx.data as { name: string }).name)).toEqual(['a', 'b']);
   });
 
+  test('never merges distinct certified output identities or local protocol lanes', () => {
+    const certified = (sequence: bigint): RoutedEntityInput => ({
+      ...inputFor('2'),
+      certifiedOutputIdentity: {
+        lane: 'generic',
+        sequence,
+        semanticHash: `0x${sequence.toString(16).padStart(64, '0')}`,
+      },
+    });
+    const localProtocol: RoutedEntityInput = {
+      ...inputFor('2'),
+      localRuntimeProtocol: 'cross-j',
+    };
+
+    const merged = mergeEntityInputs([certified(2n), localProtocol, certified(1n)]);
+
+    expect(merged).toHaveLength(3);
+    expect(merged.filter(input => input.certifiedOutputIdentity).map(
+      input => input.certifiedOutputIdentity!.sequence,
+    )).toEqual([1n, 2n]);
+    expect(merged.some(input => input.localRuntimeProtocol === 'cross-j')).toBe(true);
+  });
+
   test('does not merge remote entity txs across their authenticated runtime origins', () => {
     const target = entityId('2');
     const fromA = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';

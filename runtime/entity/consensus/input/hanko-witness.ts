@@ -14,6 +14,10 @@ import {
   cloneIsolatedAccountInput,
   cloneIsolatedAccountTx,
 } from '../../../protocol/state/account-input-clone';
+import {
+  requireCertifiedAccountFrameAck,
+  requireCertifiedAccountFrameProposal,
+} from '../../../account/consensus/frame/phase-views';
 
 export type HankoWitnessEntry = {
   hanko: HankoString;
@@ -255,6 +259,9 @@ const sealAccountInput = (
     if (account) account.currentDisputeProofHanko = hanko;
     sealed += 1;
   }
+
+  if (ack) requireCertifiedAccountFrameAck(ack);
+  if (proposal) requireCertifiedAccountFrameProposal(proposal);
 
   return sealed;
 };

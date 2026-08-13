@@ -6,6 +6,7 @@ import { addMessage } from '../../../frame-events';
 import { armHtlcSecretAckTimeout, persistVerifiedHtlcSecret } from '../../j-events-htlc/route-lifecycle';
 import { handlePrepareDispute } from '../dispute';
 import type { CommittedAccountEffects } from './committed-input';
+import { hasInboundHtlcRoute } from '../../../htlc/route-views';
 
 type UnsafeFrameContext = {
   env: EntityRuntimeContext;
@@ -34,7 +35,7 @@ const persistDisputeEvidenceSecrets = (context: UnsafeFrameContext): void => {
     const route = state.htlcRoutes.get(hashlock)!;
     const localIsLeft = account.state.leftEntity.toLowerCase() === state.entityId.toLowerCase();
     const localSentLock = lock.senderIsLeft === localIsLeft;
-    if (!localSentLock || !route.inboundEntity || !route.inboundLockId) continue;
+    if (!localSentLock || !hasInboundHtlcRoute(route)) continue;
     effects.accountTxs.push({
       accountId: route.inboundEntity,
       tx: {

@@ -1,9 +1,9 @@
+import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+
 import {
   deterministicEntityTimestamp,
   findAccountByCounterparty,
-  getCrossJurisdictionBookAdmissionError,
-  isCrossJurisdictionBookRiskRejection,
-  isCrossJurisdictionBookAdmissionPending,
+  getTypedCrossJurisdictionBookAdmissionFailure,
 } from '../../../orderbook/cross-j/orderbook';
 import {
   markWorkingOrderbookOffer,
@@ -38,9 +38,7 @@ const requireCommittedOfferAmount = (
   offer: NormalizedOrderbookOffer,
 ): bigint => {
   if (typeof value !== 'bigint' || value <= 0n) {
-    throw new Error(
-      `ORDERBOOK_ORDER_COMMITTED_INCOMPLETE: account=${offer.accountId} offer=${offer.offerId} field=${field}`,
-    );
+    throw haltRuntimeFailure("ORDERBOOK_ORDER_COMMITTED_INCOMPLETE", `ORDERBOOK_ORDER_COMMITTED_INCOMPLETE: account=${offer.accountId} offer=${offer.offerId} field=${field}`);
   }
   return value;
 };
@@ -52,10 +50,10 @@ const requireCommittedSwapOffer = (
   const account = findAccountByCounterparty(state, offer.accountId);
   const committedOffer = account?.state.swapOffers?.get(offer.offerId);
   if (!account || !committedOffer) {
-    throw new Error(`ORDERBOOK_ORDER_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId}`);
+    throw haltRuntimeFailure("ORDERBOOK_ORDER_NOT_COMMITTED", `ORDERBOOK_ORDER_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId}`);
   }
   if (hasQueuedOrderLifecycleTx(account, offer.offerId)) {
-    throw new Error(`ORDERBOOK_ORDER_NOT_READY: account=${offer.accountId} offer=${offer.offerId}`);
+    throw haltRuntimeFailure("ORDERBOOK_ORDER_NOT_READY", `ORDERBOOK_ORDER_NOT_READY: account=${offer.accountId} offer=${offer.offerId}`);
   }
   const committedPriceTicks = requireCommittedOfferAmount(committedOffer.priceTicks, 'priceTicks', offer);
   const committedGive = requireCommittedOfferAmount(committedOffer.quantizedGive, 'quantizedGive', offer);
@@ -63,11 +61,9 @@ const requireCommittedSwapOffer = (
   // The producer keeps the quantized amounts equal to the live amounts; a split
   // between them means the offer was mutated outside the canonical transition.
   if (committedGive !== committedOffer.giveAmount || committedWant !== committedOffer.wantAmount) {
-    throw new Error(
-      `ORDERBOOK_ORDER_COMMITTED_QUANTIZATION_DRIFT: account=${offer.accountId} offer=${offer.offerId} ` +
+    throw haltRuntimeFailure("ORDERBOOK_ORDER_COMMITTED_QUANTIZATION_DRIFT", `ORDERBOOK_ORDER_COMMITTED_QUANTIZATION_DRIFT: account=${offer.accountId} offer=${offer.offerId} ` +
         `give=${committedOffer.giveAmount.toString()}/${committedGive.toString()} ` +
-        `want=${committedOffer.wantAmount.toString()}/${committedWant.toString()}`,
-    );
+        `want=${committedOffer.wantAmount.toString()}/${committedWant.toString()}`);
   }
   // The book candidate carries the already-quantized amounts as its live
   // amounts. When it also restates them, both must agree before comparison.
@@ -75,9 +71,7 @@ const requireCommittedSwapOffer = (
     (offer.quantizedGive !== undefined && offer.quantizedGive !== offer.giveAmount) ||
     (offer.quantizedWant !== undefined && offer.quantizedWant !== offer.wantAmount)
   ) {
-    throw new Error(
-      `ORDERBOOK_ORDER_CANDIDATE_QUANTIZATION_DRIFT: account=${offer.accountId} offer=${offer.offerId}`,
-    );
+    throw haltRuntimeFailure("ORDERBOOK_ORDER_CANDIDATE_QUANTIZATION_DRIFT", `ORDERBOOK_ORDER_CANDIDATE_QUANTIZATION_DRIFT: account=${offer.accountId} offer=${offer.offerId}`);
   }
   if (
     committedOffer.giveTokenId !== offer.giveTokenId ||
@@ -90,7 +84,7 @@ const requireCommittedSwapOffer = (
     committedOffer.makerIsLeft !== offer.makerIsLeft ||
     Boolean(committedOffer.crossJurisdiction) !== Boolean(offer.crossJurisdiction)
   ) {
-    throw new Error(`ORDERBOOK_ORDER_COMMITTED_MISMATCH: account=${offer.accountId} offer=${offer.offerId}`);
+    throw haltRuntimeFailure("ORDERBOOK_ORDER_COMMITTED_MISMATCH", `ORDERBOOK_ORDER_COMMITTED_MISMATCH: account=${offer.accountId} offer=${offer.offerId}`);
   }
   return account;
 };
@@ -101,16 +95,14 @@ const assertSameJurisdictionOrderHoldCommitted = (
 ): void => {
   const committedOffer = account.state.swapOffers.get(offer.offerId);
   if (!committedOffer) {
-    throw new Error(`ORDERBOOK_ORDER_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId}`);
+    throw haltRuntimeFailure("ORDERBOOK_ORDER_NOT_COMMITTED", `ORDERBOOK_ORDER_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId}`);
   }
   const delta = account.state.deltas?.get(committedOffer.giveTokenId);
   const requiredHold = requireCommittedOfferAmount(committedOffer.quantizedGive, 'quantizedGive', offer);
   const committedHold = committedOffer.makerIsLeft ? (delta?.leftHold ?? 0n) : (delta?.rightHold ?? 0n);
   if (requiredHold <= 0n || committedHold < requiredHold) {
-    throw new Error(
-      `ORDERBOOK_ORDER_HOLD_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId} ` +
-        `required=${requiredHold.toString()} committed=${committedHold.toString()}`,
-    );
+    throw haltRuntimeFailure("ORDERBOOK_ORDER_HOLD_NOT_COMMITTED", `ORDERBOOK_ORDER_HOLD_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId} ` +
+        `required=${requiredHold.toString()} committed=${committedHold.toString()}`);
   }
 };
 
@@ -126,28 +118,25 @@ export const admitOrderbookOfferForMatching = (
   if (offer.crossJurisdiction) {
     const crossStatus = offer.crossJurisdiction.status;
     if (crossStatus !== 'resting' && crossStatus !== 'partially_filled') {
-      throw new Error(`CROSS_J_ORDERBOOK_ROUTE_NOT_WORKING: offer=${offer.offerId} status=${crossStatus}`);
+      throw haltRuntimeFailure("CROSS_J_ORDERBOOK_ROUTE_NOT_WORKING", `CROSS_J_ORDERBOOK_ROUTE_NOT_WORKING: offer=${offer.offerId} status=${crossStatus}`);
     }
     const account = findAccountByCounterparty(state, offer.accountId);
     if ((account?.status ?? 'active') !== 'active') return null;
     if (account?.state.swapOffers?.has(offer.offerId)) requireCommittedSwapOffer(state, offer);
-    const admissionError = getCrossJurisdictionBookAdmissionError(
+    const admissionFailure = getTypedCrossJurisdictionBookAdmissionFailure(
       state,
       offer.crossJurisdiction,
       deterministicEntityTimestamp(state, env),
     );
-    if (admissionError) {
-      if (
-        isCrossJurisdictionBookAdmissionPending(admissionError) ||
-        isCrossJurisdictionBookRiskRejection(admissionError)
-      ) {
+    if (admissionFailure) {
+      if (admissionFailure.kind === 'pending' || admissionFailure.kind === 'risk_reject') {
         entityLog.debug('crossj.orderbook.admission_pending', {
           offer: shortOrder(offer.offerId, 8),
-          reason: admissionError,
+          reason: admissionFailure.message,
         });
         return null;
       }
-      throw new Error(admissionError);
+      throw new Error(admissionFailure.message);
     }
   } else {
     const account = requireCommittedSwapOffer(state, offer);

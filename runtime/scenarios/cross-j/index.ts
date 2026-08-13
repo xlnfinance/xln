@@ -144,6 +144,7 @@ const extractJsonAfter = (buffer: string[], marker: string): unknown => {
  * The unused env argument is the CLI shell Runtime; real work happens in children.
  */
 export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
+  if (!_existingEnv) throw new Error('CROSS_J_RUNTIME_REQUIRED');
   console.log('\n🌉 Cross-jurisdiction swap scenario (dual-Runtime P2P)\n');
   const procs: ProcInfo[] = [];
   const relayPort = await getFreePort();
@@ -223,7 +224,7 @@ export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
       180_000,
     );
     console.log('\n✅ cross-j dual-Runtime scenario complete (settled)\n');
-    return _existingEnv ?? ({} as RuntimeReplica);
+    return _existingEnv;
   } finally {
     // Do not delete phase markers until every child has acknowledged SIGTERM;
     // otherwise a still-running Runtime can observe a torn coordination tree.

@@ -32,6 +32,11 @@ import {
   accountTxRejected,
   settlementSealNonceRejection,
 } from '../../apply-result';
+import {
+  assertSettlementWorkspacePhase,
+  isUnsignedSettlementWorkspace,
+  type UnsignedSettlementWorkspace,
+} from './workspace-views';
 
 type SettleTransitionTx = Extract<AccountTx, { type: 'settle_transition' }>;
 type UpsertTransition = Extract<SettleTransitionTx['data'], { kind: 'upsert' }>;
@@ -215,6 +220,7 @@ const assertCurrentWorkspace = (
   assertVersion(revision);
   const workspace = account.state.settlementWorkspace;
   if (!workspace) throw new Error('SETTLEMENT_WORKSPACE_MISSING');
+  assertSettlementWorkspacePhase(workspace, 'SETTLEMENT_WORKSPACE');
   const currentHash = assertCanonicalSettlementWorkspace(account.state, workspace);
   const requestedHash = assertWorkspaceHash(suppliedHash, 'SETTLEMENT_WORKSPACE_TARGET_HASH_INVALID');
   if (workspace.revision !== revision) {
@@ -540,7 +546,7 @@ const buildUpsertWorkspace = (
   transition: UpsertTransition,
   byLeft: boolean,
   timestamp: number,
-): SettlementWorkspace => {
+): UnsignedSettlementWorkspace => {
   assertVersion(transition.revision);
   assertSettlementOps(transition.ops);
   if (typeof transition.executorIsLeft !== 'boolean') {
@@ -568,7 +574,7 @@ const buildUpsertWorkspace = (
       throw new Error(`SETTLEMENT_WORKSPACE_PREVIOUS_HASH_MISMATCH:${currentHash}:${previousHash}`);
     }
   }
-  const workspace: SettlementWorkspace = {
+  const workspace: UnsignedSettlementWorkspace = {
     workspaceHash: '',
     ops: transition.ops.map((op) => ({ ...op })),
     lastModifiedByLeft: byLeft,
@@ -682,10 +688,7 @@ export async function handleSettleTransition(
     }
 
     if (workspace.status === 'submitted') throw new Error('SETTLEMENT_CLEAR_SUBMITTED_FORBIDDEN');
-    if (
-      workspace.settlementHash || workspace.leftHanko || workspace.rightHanko ||
-      workspace.postSettlementDisputeProof
-    ) {
+    if (!isUnsignedSettlementWorkspace(workspace)) {
       throw new Error('SETTLEMENT_CLEAR_SIGNED_FORBIDDEN');
     }
     for (const tokenId of releaseWorkspaceHolds(draft, workspace)) changed.add(tokenId);

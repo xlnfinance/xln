@@ -1,3 +1,5 @@
+import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
+
 /**
  * Stable dispute façade.
  *
@@ -73,10 +75,8 @@ const removeOrderbookRowForDispute = (
   }
   const signerId = crossJurisdictionRouteSignerHint(route, bookOwnerEntityId);
   if (!signerId) {
-    throw new Error(
-      `DISPUTE_CROSS_J_BOOK_OWNER_SIGNER_MISSING: order=${offerId} ` +
-      `owner=${bookOwnerEntityId} source=${sourceEntityId}`,
-    );
+    throw haltRuntimeFailure("DISPUTE_CROSS_J_BOOK_OWNER_SIGNER_MISSING", `DISPUTE_CROSS_J_BOOK_OWNER_SIGNER_MISSING: order=${offerId} ` +
+      `owner=${bookOwnerEntityId} source=${sourceEntityId}`);
   }
   outputs.push({
     entityId: bookOwnerEntityId,
@@ -183,7 +183,7 @@ const targetStartSnapshotHashes = (
   const { signedNonce } = resolveStoredDisputeStartNonce(account, initialHash);
   const initialProposerIsLeft = account.counterpartyDisputeProofProposerIsLeft;
   if (typeof initialProposerIsLeft !== 'boolean') {
-    throw new Error(`DISPUTE_START_PROPOSER_ROLE_MISSING:${counterpartyEntityId}`);
+    throw haltRuntimeFailure("DISPUTE_START_PROPOSER_ROLE_MISSING", `DISPUTE_START_PROPOSER_ROLE_MISSING:${counterpartyEntityId}`);
   }
   const counter = selectCounterDisputeSnapshots(
     account,

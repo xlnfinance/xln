@@ -11,6 +11,7 @@ import type {
 import type {
   ProposalTransactionEffects,
 } from './transactions';
+import { hasLocalCertifiedDisputeProof } from '../dispute/proof-views';
 
 type DisputeSeal = NonNullable<
   Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>['proposal']['disputeSeal']
@@ -30,9 +31,8 @@ const resolveDisputeSeal = (
     };
   }
   if (
-    account.currentDisputeProofHanko &&
-    account.currentDisputeHash &&
-    account.currentDisputeProofBodyHash?.toLowerCase() ===
+    hasLocalCertifiedDisputeProof(account) &&
+    account.currentDisputeProofBodyHash.toLowerCase() ===
       proof.proof.proofBodyHash.toLowerCase() &&
     account.currentDisputeProofProposerIsLeft === proof.proposerIsLeft &&
     Number(account.currentDisputeProofNonce ?? 0) > Number(candidate.state.jNonce ?? 0)
@@ -41,7 +41,7 @@ const resolveDisputeSeal = (
       hanko: account.currentDisputeProofHanko,
       hash: account.currentDisputeHash,
       proofBodyHash: account.currentDisputeProofBodyHash,
-      proofNonce: account.currentDisputeProofNonce!,
+      proofNonce: account.currentDisputeProofNonce,
       proposerIsLeft: proof.proposerIsLeft,
     };
   }

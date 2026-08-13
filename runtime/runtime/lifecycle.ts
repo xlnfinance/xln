@@ -35,12 +35,32 @@ export const transitionRuntimeLifecycle = (
   return next;
 };
 
+export const haltRuntimeRequiresOperator = (
+  env: RuntimeReplica,
+  error: unknown,
+): void => {
+  const state = env.infrastructure ??= {};
+  const cause = error instanceof Error ? error : new Error(String(error));
+  transitionRuntimeLifecycle(state, 'halted');
+  state.operatorStatus = 'HALTED_REQUIRES_OPERATOR';
+  state.fatalDebugPayload = {
+    message: cause.message,
+    ...(cause.stack ? { stack: cause.stack } : {}),
+    height: Math.max(0, env.state.height ?? 0),
+    timestamp: Math.max(0, env.state.timestamp ?? 0),
+  };
+  state.stopLoop?.();
+};
+
 export type RuntimeCommandReadiness =
   | { ready: true; reason: null }
   | { ready: false; reason: string };
 
 export const getRuntimeCommandReadiness = (env: RuntimeReplica): RuntimeCommandReadiness => {
   const state = env.infrastructure ?? {};
+  if (state.operatorStatus === 'HALTED_REQUIRES_OPERATOR') {
+    return { ready: false, reason: 'HALTED_REQUIRES_OPERATOR' };
+  }
   const phase = inferRuntimeLifecyclePhase(state);
   if (phase !== 'running') return { ready: false, reason: `phase=${phase}` };
   if (state.persistencePaused === true || state.persistenceQuiescing === true) {
