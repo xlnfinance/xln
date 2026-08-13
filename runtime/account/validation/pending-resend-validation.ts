@@ -1,4 +1,3 @@
-import type { AccountState } from '../../types/account';
 import {
   FinancialDataCorruptionError,
   validateObject,
@@ -72,8 +71,8 @@ export const validatePendingAccountResend = (
   }
   if (
     !sameAccountStateDomain(
-      normalizeAccountStateDomain(state['domain'] as AccountState['domain']),
-      normalizeAccountStateDomain(input['domain'] as AccountState['domain']),
+      normalizeAccountStateDomain(state['domain']),
+      normalizeAccountStateDomain(input['domain']),
     )
   ) {
     throw new FinancialDataCorruptionError(

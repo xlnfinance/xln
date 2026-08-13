@@ -26,7 +26,7 @@ import {
 import { LIMITS } from '../../../config/constants';
 import { assertReliableCertifiedPayloadIsAtomic } from './envelope';
 import { assertCertifiedEntityOutputAuthorization } from '../../auth/authorization';
-import { FailureDispositionError, haltRuntimeFailure, rejectFailure, retryFailure } from '../../../protocol/errors/failure-taxonomy';
+import { haltRuntimeFailure, rejectFailure, retryFailure } from '../../../protocol/errors/failure-taxonomy';
 import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
 
 const assertCertifiableOutput = (output: EntityOutput, outputIndex: number): EntityTx[] => {
@@ -632,16 +632,8 @@ export const verifyCertifiedEntityOutput = async (
   env: EntityRuntimeContext,
   observerState: EntityState,
   tx: Extract<EntityTx, { type: 'consensusOutput' }>,
-): Promise<VerifiedCertifiedEntityOutput> => {
-  try {
-    return await verifyCertifiedEntityOutputUnchecked(env, observerState, tx);
-  } catch (error) {
-    if (error instanceof FailureDispositionError) throw error;
-    if (error instanceof TypeError) throw error;
-    const message = error instanceof Error ? error.message : String(error);
-    throw rejectFailure('CONSENSUS_OUTPUT_INVALID', message);
-  }
-};
+): Promise<VerifiedCertifiedEntityOutput> =>
+  verifyCertifiedEntityOutputUnchecked(env, observerState, tx);
 
 const verifyCertifiedEntityOutputUnchecked = async (
   env: EntityRuntimeContext,
@@ -650,27 +642,28 @@ const verifyCertifiedEntityOutputUnchecked = async (
 ): Promise<VerifiedCertifiedEntityOutput> => {
   const origin = normalizeConsensusOutputOrigin(tx.data.origin);
   if (typeof tx.data.outputHanko !== 'string' || tx.data.outputHanko.length === 0) {
-    throw new Error('CONSENSUS_OUTPUT_HANKO_MISSING');
+    throw rejectFailure('CONSENSUS_OUTPUT_HANKO_MISSING');
   }
   const targetEntityId = String(tx.data.targetEntityId ?? '')
     .trim()
     .toLowerCase();
-  if (!targetEntityId) throw new Error('CONSENSUS_OUTPUT_TARGET_ENTITY_MISSING');
+  if (!targetEntityId) throw rejectFailure('CONSENSUS_OUTPUT_TARGET_ENTITY_MISSING');
   if (targetEntityId !== observerState.entityId.toLowerCase()) {
-    throw new Error(
+    throw rejectFailure(
+      'CONSENSUS_OUTPUT_TARGET_ENTITY_MISMATCH',
       `CONSENSUS_OUTPUT_TARGET_ENTITY_MISMATCH:expected=${observerState.entityId.toLowerCase()}:` +
         `received=${targetEntityId}`,
     );
   }
   if (!Array.isArray(tx.data.entityTxs) || tx.data.entityTxs.length === 0) {
-    throw new Error('CONSENSUS_OUTPUT_ENTITY_TXS_MISSING');
+    throw rejectFailure('CONSENSUS_OUTPUT_ENTITY_TXS_MISSING');
   }
   if (
     tx.data.entityTxs.some(
       nested => nested.type === 'entityCommand' || nested.type === 'consensusOutput' || nested.type === 'scheduledWake',
     )
   ) {
-    throw new Error('CONSENSUS_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN');
+    throw rejectFailure('CONSENSUS_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN');
   }
   const entityTxs = tx.data.entityTxs;
   assertCertifiedEntityOutputAuthorization(origin.sourceEntityId, targetEntityId, entityTxs, observerState);
@@ -695,7 +688,10 @@ const verifyCertifiedEntityOutputUnchecked = async (
     },
   );
   if (!verified.valid) {
-    throw new Error(`CONSENSUS_OUTPUT_HANKO_INVALID:${origin.sourceEntityId}:${origin.height}:${origin.outputIndex}`);
+    throw rejectFailure(
+      'CONSENSUS_OUTPUT_HANKO_INVALID',
+      `CONSENSUS_OUTPUT_HANKO_INVALID:${origin.sourceEntityId}:${origin.height}:${origin.outputIndex}`,
+    );
   }
   await assertCertifiedEntityOutputWitnesses(entityTxs, origin.sourceEntityId, env, observerState, registeredBoardHash);
   return { origin, targetEntityId, entityTxs, outputHash };

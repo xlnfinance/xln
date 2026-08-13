@@ -19,6 +19,10 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "verbatimModuleSyntax": true,
+    "useUnknownInCatchVariables": true,
 
     // CATCH ERRORS EARLY
     "noUnusedLocals": true,

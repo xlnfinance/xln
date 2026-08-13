@@ -4,6 +4,7 @@ import {
   buildEntityPanelHashRouteFromState,
   canonicalizeEntityPanelRoute,
   resolveEntityPanelDeepLink,
+  resolveEntityPanelDeepLinkFromLocation,
 } from '../../../frontend/src/lib/components/Entity/workspace/entity-panel-routing';
 
 describe('entity panel routing helpers', () => {
@@ -15,6 +16,10 @@ describe('entity panel routing helpers', () => {
   });
 
   test('resolves hash routes into tab state updates', () => {
+    expect(resolveEntityPanelDeepLink({ hashRoute: 'pay/0xabc' })).toEqual({
+      activeTab: 'accounts',
+      accountWorkspaceTab: 'send',
+    });
     expect(resolveEntityPanelDeepLink({ hashRoute: 'assets/history' })).toEqual({
       activeTab: 'assets',
       assetWorkspaceTab: 'history',
@@ -26,6 +31,16 @@ describe('entity panel routing helpers', () => {
     expect(resolveEntityPanelDeepLink({ hashRoute: 'accounts/lending' })).toEqual({
       activeTab: 'accounts',
       accountWorkspaceTab: 'lending',
+    });
+  });
+
+  test('preserves a canonical invoice payload while selecting the send workspace', () => {
+    expect(resolveEntityPanelDeepLinkFromLocation({
+      hash: '#pay/0xabc%3Ftoken%3D1',
+      search: '',
+    })).toEqual({
+      activeTab: 'accounts',
+      accountWorkspaceTab: 'send',
     });
   });
 

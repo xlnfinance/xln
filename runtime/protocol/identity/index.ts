@@ -95,6 +95,7 @@ export const isValidJId = (s: string): s is JId => {
   return typeof s === 'string' && s.length > 0;
 };
 
+/** Runtime IDs are canonical lowercase EVM addresses at every routing boundary. */
 export const isValidRuntimeId = (s: string): s is RuntimeId =>
   /^0x[0-9a-f]{40}$/.test(s);
 

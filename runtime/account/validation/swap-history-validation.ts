@@ -39,21 +39,23 @@ const assertOptionalAmount = (value: unknown, context: string): void => {
   }
 };
 
-const validateResolve = (
-  value: unknown,
+const assertResolve: (
+  resolve: Record<string, unknown>,
   context: string,
-): SwapOrderResolveHistoryEntry => {
-  const resolve = validateObject(value, context);
+) => asserts resolve is Record<string, unknown> & SwapOrderResolveHistoryEntry = (
+  resolve,
+  context,
+) => {
   assertExactFields(resolve, RESOLVE_FIELDS, context);
-  const ratio = Number(resolve['fillRatio']);
-  if (!Number.isInteger(ratio) || ratio < 0 || ratio > 0xffff) {
+  const ratio = resolve['fillRatio'];
+  if (typeof ratio !== 'number' || !Number.isInteger(ratio) || ratio < 0 || ratio > 0xffff) {
     throw new FinancialDataCorruptionError(`${context}.fillRatio must be uint16`);
   }
   if (typeof resolve['cancelRemainder'] !== 'boolean') {
     throw new FinancialDataCorruptionError(`${context}.cancelRemainder must be boolean`);
   }
-  const height = Number(resolve['height']);
-  if (!Number.isSafeInteger(height) || height < 0) {
+  const height = resolve['height'];
+  if (typeof height !== 'number' || !Number.isSafeInteger(height) || height < 0) {
     throw new FinancialDataCorruptionError(
       `${context}.height must be a non-negative safe integer`,
     );
@@ -86,15 +88,26 @@ const validateResolve = (
       `${context}.comment must be at most ${LIMITS.MAX_ACCOUNT_SWAP_HISTORY_TEXT} characters`,
     );
   }
-  return value as SwapOrderResolveHistoryEntry;
 };
 
-const validateEntry = (
-  key: unknown,
+const validateResolve = (
   value: unknown,
   context: string,
-): SwapOrderHistoryEntry => {
-  const entry = validateObject(value, context);
+): SwapOrderResolveHistoryEntry => {
+  const resolve = validateObject(value, context);
+  assertResolve(resolve, context);
+  return resolve;
+};
+
+const assertEntry: (
+  key: unknown,
+  entry: Record<string, unknown>,
+  context: string,
+) => asserts entry is Record<string, unknown> & SwapOrderHistoryEntry = (
+  key,
+  entry,
+  context,
+) => {
   assertExactFields(entry, HISTORY_FIELDS, context);
   if (
     typeof key !== 'string' ||
@@ -155,10 +168,19 @@ const validateEntry = (
       `ACCOUNT_SWAP_RESOLVE_HISTORY_LIMIT_EXCEEDED:${context}`,
     );
   }
-  resolves.forEach((resolve, index) =>
-    validateResolve(resolve, `${context}.resolves[${index}]`),
-  );
-  return value as SwapOrderHistoryEntry;
+  resolves.forEach((resolve, index) => {
+    validateResolve(resolve, `${context}.resolves[${index}]`);
+  });
+};
+
+const validateEntry = (
+  key: unknown,
+  value: unknown,
+  context: string,
+): SwapOrderHistoryEntry => {
+  const entry = validateObject(value, context);
+  assertEntry(key, entry, context);
+  return entry;
 };
 
 export const validateSwapHistoryMap = (
@@ -173,8 +195,10 @@ export const validateSwapHistoryMap = (
       `${limitCode}:${context}:size=${history.size}:max=${maxSize}`,
     );
   }
+  const validated = new Map<string, SwapOrderHistoryEntry>();
   for (const [key, entry] of history) {
-    validateEntry(key, entry, `${context}[${String(key)}]`);
+    const decoded = validateEntry(key, entry, `${context}[${String(key)}]`);
+    validated.set(decoded.offerId, decoded);
   }
-  return value as Map<string, SwapOrderHistoryEntry>;
+  return validated;
 };

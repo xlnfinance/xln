@@ -22,7 +22,9 @@ export type EntityPanelDeepLinkUpdate = Partial<EntityPanelRouteState & {
   selectedJurisdictionName: string | null;
 }>;
 
-export function getLocationHashRoute(location: Location): string | null {
+type RouteLocation = Pick<Location, 'hash' | 'search'>;
+
+export function getLocationHashRoute(location: RouteLocation): string | null {
   const hashRaw = location.hash.startsWith('#') ? location.hash.slice(1) : location.hash;
   if (!hashRaw) return null;
   const queryIndex = hashRaw.indexOf('?');
@@ -31,7 +33,7 @@ export function getLocationHashRoute(location: Location): string | null {
   return routePart.trim().toLowerCase() || null;
 }
 
-export function getLocationHashParams(location: Location): URLSearchParams | null {
+export function getLocationHashParams(location: RouteLocation): URLSearchParams | null {
   const hashRaw = location.hash.startsWith('#') ? location.hash.slice(1) : location.hash;
   if (!hashRaw) return null;
   const queryIndex = hashRaw.indexOf('?');
@@ -44,7 +46,7 @@ export function getLocationHashParams(location: Location): URLSearchParams | nul
   return hashRaw.includes('=') ? new URLSearchParams(hashRaw) : null;
 }
 
-export function getLocationParamValue(location: Location, keys: string[]): string | null {
+export function getLocationParamValue(location: RouteLocation, keys: string[]): string | null {
   const searchParams = new URLSearchParams(location.search);
   const hashParams = getLocationHashParams(location);
   for (const key of keys) {
@@ -110,7 +112,12 @@ export function canonicalizeEntityPanelRoute(routeRaw: string | null): string | 
 
 export function resolveEntityPanelDeepLink(input: EntityPanelDeepLinkRequest): EntityPanelDeepLinkUpdate {
   const update: EntityPanelDeepLinkUpdate = {};
-  const hashRoute = canonicalizeEntityPanelRoute(input.hashRoute ?? null);
+  const rawHashRoute = String(input.hashRoute || '').trim().toLowerCase();
+  // `pay/<invoice>` is the canonical invoice route. The payload remains owned
+  // by PaymentPanel; this router selects only the Account send workspace.
+  const hashRoute = rawHashRoute.startsWith('pay/')
+    ? 'accounts/send'
+    : canonicalizeEntityPanelRoute(rawHashRoute);
   const view = String(hashRoute || '').trim().toLowerCase();
   const jurisdiction = String(input.jurisdiction || '').trim();
 
@@ -210,10 +217,10 @@ export function resolveEntityPanelDeepLink(input: EntityPanelDeepLinkRequest): E
 }
 
 export function resolveEntityPanelDeepLinkFromLocation(
-  location: Location,
+  location: RouteLocation,
   availableJurisdictionNames: readonly (string | null | undefined)[] = [],
 ): EntityPanelDeepLinkUpdate {
-  const hashRoute = canonicalizeEntityPanelRoute(getLocationHashRoute(location));
+  const hashRoute = getLocationHashRoute(location);
   return resolveEntityPanelDeepLink({
     hashRoute,
     jurisdiction: getLocationParamValue(location, ['jurisdiction']),

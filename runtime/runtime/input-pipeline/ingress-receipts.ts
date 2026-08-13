@@ -146,6 +146,22 @@ export const fingerprintRuntimeIngressInput = (input: RuntimeInput): string[] =>
         hashPrecommits: entityInput.hashPrecommits,
       }));
     }
+    if (entityInput.jPrefixAttestations && entityInput.jPrefixAttestations.size > 0) {
+      fingerprints.push(hashRuntimeIngressPart({
+        kind: 'jPrefixAttestations',
+        entityId,
+        signerId,
+        jPrefixAttestations: entityInput.jPrefixAttestations,
+      }));
+    }
+    if (entityInput.leaderTimeoutVote) {
+      fingerprints.push(hashRuntimeIngressPart({
+        kind: 'leaderTimeoutVote',
+        entityId,
+        signerId,
+        leaderTimeoutVote: entityInput.leaderTimeoutVote,
+      }));
+    }
   }
   for (const jInput of normalized.jInputs ?? []) {
     for (const jTx of jInput.jTxs ?? []) {

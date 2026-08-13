@@ -111,13 +111,14 @@ describe('entity leader policy', () => {
   });
 
   test('accepts a leader-timeout vote as a standalone routed entity input', () => {
+    const routedState = { ...state(), entityId: `0x${'12'.repeat(32)}` };
     const vote = {
-      ...buildEntityLeaderVoteBody(state()),
+      ...buildEntityLeaderVoteBody(routedState),
       voterId: 'alice',
       signature: '',
     };
     expect(decodeRoutedEntityInput({
-      entityId: state().entityId,
+      entityId: routedState.entityId,
       signerId: 'alice',
       leaderTimeoutVote: vote,
     }).leaderTimeoutVote).toEqual(vote);

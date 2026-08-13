@@ -552,18 +552,6 @@ export const applyEntityTx = async (
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    // A TypeError is a programming fault, not an invalid user transaction.
-    // Converting it to skippedError destroys the source stack and mislabels a
-    // deterministic reducer bug as malformed ingress. Halt with the original
-    // error so the Runtime can preserve state and report the exact fault.
-    if (error instanceof TypeError) {
-      entityTxLog.error('local_bug', {
-        type: String(entityTx.type),
-        error: message,
-        stack: error.stack,
-      });
-      throw error;
-    }
     if (!(error instanceof FailureDispositionError) || error.disposition !== 'reject') {
       entityTxLog.error('failed_invariant', { type: String(entityTx.type), error: message });
       throw error;

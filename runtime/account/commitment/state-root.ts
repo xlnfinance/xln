@@ -68,13 +68,17 @@ export const accountStateDomainFromJurisdiction = (
 }, 'ACCOUNT_STATE_DOMAIN');
 
 export const normalizeAccountStateDomain = (
-  domain: AccountStateDomain,
+  domain: unknown,
   code = 'ACCOUNT_STATE_DOMAIN',
 ): AccountStateDomain => {
-  const chainId = Number(domain?.chainId);
-  const depositoryAddress = String(domain?.depositoryAddress || '');
+  const value: { readonly chainId?: unknown; readonly depositoryAddress?: unknown } =
+    typeof domain === 'object' && domain !== null && !Array.isArray(domain)
+      ? domain
+      : {};
+  const chainId = Number(value.chainId);
+  const depositoryAddress = String(value.depositoryAddress || '');
   if (!Number.isSafeInteger(chainId) || chainId <= 0 || !ethers.isAddress(depositoryAddress)) {
-    throw new Error(`${code}_INVALID: chainId=${String(domain?.chainId)} depository=${depositoryAddress || 'missing'}`);
+    throw new Error(`${code}_INVALID: chainId=${String(value.chainId)} depository=${depositoryAddress || 'missing'}`);
   }
   return { chainId, depositoryAddress: depositoryAddress.toLowerCase() };
 };

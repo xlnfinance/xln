@@ -470,7 +470,7 @@ const parseProfileAccounts = (raw: unknown, entityId: string): DecodedProfileAcc
     return {
       counterpartyId,
       domain: normalizeAccountStateDomain(
-        accountRaw['domain'] as AccountStateDomain,
+        accountRaw['domain'],
         `GOSSIP_PROFILE_ACCOUNT_DOMAIN:${entityId}:${counterpartyId}`,
       ),
       tokenCapacities,

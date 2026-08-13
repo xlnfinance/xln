@@ -32,9 +32,9 @@ import {
   type UnixMs,
 } from '../../protocol/units';
 
-const assertEntityMessagePayload = (
+const assertEntityMessagePayload: (
   input: Record<string, unknown>,
-): void => {
+) => asserts input is Record<string, unknown> & EntityOutput = input => {
   if (
     input['entityTxs'] === undefined &&
     input['proposedFrame'] === undefined &&
@@ -205,10 +205,10 @@ export const decodeEntityOutput = (
   }
   if (value['signerId'] !== undefined) {
     assertRoutedEntityInput(value);
-    return output as RoutedEntityInput;
+    return value;
   }
   assertEntityMessagePayload(value);
-  return output as EntityOutput;
+  return value;
 };
 
 /** Network delivery additionally requires an already resolved Runtime. */

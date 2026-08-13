@@ -8,11 +8,12 @@ import {
   toEntityId,
   toRuntimeId,
   toSignerId,
-  type EntityId,
-  type RuntimeId,
-  type SignerId,
 } from '../../protocol/identity';
 import { toUnixMs, type UnixMs } from '../../protocol/units';
+import {
+  decodeRoutedEntityInput,
+  type ValidatedRoutedEntityInput,
+} from '../routing/routing-validation';
 import { validateRuntimeTx } from './runtime-tx';
 
 const requireInputArray = (
@@ -38,12 +39,7 @@ export type DecodedRuntimeInput = Omit<RuntimeInput, 'timestamp' | 'queuedAt'> &
   entityInputs: DecodedRuntimeEntityInput[];
 }>;
 
-type DecodedRuntimeEntityInput = RuntimeInput['entityInputs'][number] & {
-  entityId: EntityId;
-  signerId: SignerId;
-  runtimeId?: RuntimeId;
-  from?: RuntimeId;
-};
+type DecodedRuntimeEntityInput = ValidatedRoutedEntityInput;
 
 function assertRuntimeEntityInputIdentity(
   entityInput: Record<string, unknown>,
@@ -81,9 +77,7 @@ const decodeRuntimeEntityInput = (
     `${code}_ENTITY_INPUT_INVALID:index=${index}`,
   );
   assertRuntimeEntityInputIdentity(entityInput, code, index);
-  // The child Entity-input decoder owns the remaining fields. This Runtime
-  // boundary proves only the routing identity it consumes before delegation.
-  return entityInput;
+  return decodeRoutedEntityInput(entityInput);
 };
 
 export const decodeRuntimeInput = (

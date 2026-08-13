@@ -651,6 +651,22 @@ same persisted RuntimeInput bytes
 Each milestone is one coherent, independently revertible commit. No adapters,
 V2 aliases, parallel readers, or compatibility branches survive the commit.
 
+The implementation through Milestone 11 is present on the current candidate.
+Completion is executable, not editorial: `bun run soundcheck:fast` owns the
+fast FinTS policy, `bun run check` owns the complete source/build gate, and the
+release E2E profiles own browser/runtime evidence. A checked milestone may not
+be claimed while any owning gate is red.
+
+| FinTS invariant | Executable owner |
+| --- | --- |
+| Strict compiler/module policy | `check:fints-compiler-policy` |
+| Decoder-only brand minting and negative types | `check:fints-negative-types` |
+| No unsafe casts, suppressions, new non-null debt, or JS-error guessing | `check:unsafe-types` |
+| Determinism, including randomness, clocks, and weak collections | `check:determinism:static`, `check:no-weak-collections` |
+| Dependency direction and dead surface | `check:runtime-dependencies`, `check:dead-code`, `check:unused-surface` |
+| Hash-reachable field coverage | `check:nested-hash-coverage` |
+| Typed failure disposition and fail-stop | `security:failure-taxonomy` |
+
 ### Milestone 0: behavioral prerequisites
 
 Before type reshaping, fix and test active correctness blockers on the same

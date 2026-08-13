@@ -12,10 +12,15 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {};
 // Suppressions can hide unrelated errors on the same line. The empty ratchet
 // makes their removal permanent.
 const TS_SUPPRESSION_DEBT: Readonly<Record<string, number>> = {};
+const NON_NULL_ASSERTION_FILES = 193;
+const NON_NULL_ASSERTION_COUNT = 735;
+const NON_NULL_ASSERTION_SHA256 = 'ed111044f100948a6178383151e5a1c7b0b8761bb3f446eafe3b4abd1d9421d8';
 
 type UnsafeTypeCounts = {
   explicitAnyLines: number[];
   doubleAssertionLines: number[];
+  errorSubtypeControlLines: number[];
+  nonNullAssertionLines: number[];
   suppressionLines: number[];
 };
 
@@ -37,6 +42,8 @@ const inspectFile = (file: string): UnsafeTypeCounts => {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const explicitAnyLines: number[] = [];
   const doubleAssertionLines: number[] = [];
+  const errorSubtypeControlLines: number[] = [];
+  const nonNullAssertionLines: number[] = [];
 
   const visit = (node: ts.Node): void => {
     if (node.kind === ts.SyntaxKind.AnyKeyword) {
@@ -49,6 +56,18 @@ const inspectFile = (file: string): UnsafeTypeCounts => {
     ) {
       doubleAssertionLines.push(lineOf(source, node.getStart(source)));
     }
+    if (
+      ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.InstanceOfKeyword
+      && ts.isIdentifier(node.right)
+      && ['TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'EvalError', 'URIError']
+        .includes(node.right.text)
+    ) {
+      errorSubtypeControlLines.push(lineOf(source, node.getStart(source)));
+    }
+    if (ts.isNonNullExpression(node)) {
+      nonNullAssertionLines.push(lineOf(source, node.getStart(source)));
+    }
     ts.forEachChild(node, visit);
   };
   visit(source);
@@ -56,7 +75,13 @@ const inspectFile = (file: string): UnsafeTypeCounts => {
   const suppressionLines = text
     .split(/\r?\n/)
     .flatMap((line, index) => (/@ts-(?:ignore|nocheck|expect-error)\b/.test(line) ? [index + 1] : []));
-  return { explicitAnyLines, doubleAssertionLines, suppressionLines };
+  return {
+    explicitAnyLines,
+    doubleAssertionLines,
+    errorSubtypeControlLines,
+    nonNullAssertionLines,
+    suppressionLines,
+  };
 };
 
 const files = collectFiles('runtime').sort();
@@ -64,6 +89,7 @@ const errors: string[] = [];
 const observedDoubleAssertions = new Map<string, number>();
 const observedSuppressions = new Map<string, number>();
 let explicitAnyCount = 0;
+const nonNullAssertionRows: string[] = [];
 
 const checkDebt = (
   file: string,
@@ -85,6 +111,12 @@ for (const file of files) {
   if (counts.explicitAnyLines.length > 0) {
     errors.push(`EXPLICIT_ANY ${file}:${counts.explicitAnyLines.join(',')}`);
   }
+  if (counts.errorSubtypeControlLines.length > 0) {
+    errors.push(`ERROR_SUBTYPE_CONTROL_FLOW ${file}:${counts.errorSubtypeControlLines.join(',')}`);
+  }
+  if (counts.nonNullAssertionLines.length > 0) {
+    nonNullAssertionRows.push(`${file}|${counts.nonNullAssertionLines.length}`);
+  }
   checkDebt(file, counts.doubleAssertionLines, DOUBLE_ASSERTION_DEBT, observedDoubleAssertions, 'DOUBLE_ASSERTION');
   checkDebt(file, counts.suppressionLines, TS_SUPPRESSION_DEBT, observedSuppressions, 'TS_SUPPRESSION');
 }
@@ -101,6 +133,25 @@ const findStaleDebt = (
 findStaleDebt(DOUBLE_ASSERTION_DEBT, observedDoubleAssertions, 'DOUBLE_ASSERTION');
 findStaleDebt(TS_SUPPRESSION_DEBT, observedSuppressions, 'TS_SUPPRESSION');
 
+const nonNullCount = nonNullAssertionRows.reduce(
+  (sum, row) => sum + Number(row.slice(row.lastIndexOf('|') + 1)),
+  0,
+);
+const nonNullHash = new Bun.CryptoHasher('sha256')
+  .update(nonNullAssertionRows.sort().join('\n'))
+  .digest('hex');
+if (
+  nonNullAssertionRows.length !== NON_NULL_ASSERTION_FILES
+  || nonNullCount !== NON_NULL_ASSERTION_COUNT
+  || nonNullHash !== NON_NULL_ASSERTION_SHA256
+) {
+  errors.push(
+    `NON_NULL_ASSERTION_DEBT_CHANGED expected=${NON_NULL_ASSERTION_FILES}/` +
+      `${NON_NULL_ASSERTION_COUNT}/${NON_NULL_ASSERTION_SHA256} actual=` +
+      `${nonNullAssertionRows.length}/${nonNullCount}/${nonNullHash}`,
+  );
+}
+
 if (errors.length > 0) {
   console.error('Unsafe TypeScript surface invariant failed:\n');
   for (const error of errors) console.error(`- ${error}`);
@@ -113,4 +164,5 @@ const total = (values: ReadonlyMap<string, number>): number =>
 console.log(
   `UNSAFE_TYPES_OK files=${files.length} explicitAny=${explicitAnyCount} ` +
     `doubleAssertions=${total(observedDoubleAssertions)} suppressions=${total(observedSuppressions)}`,
+    `nonNullAssertions=${nonNullCount}`,
 );

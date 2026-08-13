@@ -28,7 +28,7 @@ const hasText = (value: string | undefined): value is string =>
   typeof value === 'string' && value.length > 0;
 
 const hasNonce = (value: number | undefined): value is number =>
-  Number.isSafeInteger(value) && value! > 0;
+  typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 
 export const hasLocalUnsignedDisputeProof = (
   account: AccountReplica,

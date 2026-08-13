@@ -158,7 +158,7 @@ function assertAccountReplica(
     );
   }
   try {
-    normalizeAccountStateDomain(state['domain'] as AccountReplica['state']['domain']);
+    normalizeAccountStateDomain(state['domain']);
   } catch (error) {
     throw new FinancialDataCorruptionError(`${context}.domain is invalid`, {
       cause: error instanceof Error ? error.message : String(error),
