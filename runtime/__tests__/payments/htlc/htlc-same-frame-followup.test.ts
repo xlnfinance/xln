@@ -103,6 +103,14 @@ describe('same-frame incoming HTLC followup', () => {
     expect(fixture.state.htlcRoutes.size).toBe(1);
   });
 
+  test('ACK replay commits the sender frame without consuming recipient onion context', async () => {
+    const fixture = setup('forward');
+    fixture.context.infraContext = undefined;
+    await applyCommittedHtlcLockFollowup(fixture.context as never, fixture.tx, fixture.frame as never, false);
+    expect(fixture.accountTxs).toEqual([]);
+    expect(fixture.state.htlcRoutes.size).toBe(0);
+  });
+
   test('same Entity frame rejects a second peer lock with an active hashlock without replacing its route', async () => {
     const first = setup('forward');
     await applyCommittedHtlcLockFollowup(first.context as never, first.tx, first.frame as never, true);
@@ -168,6 +176,12 @@ describe('same-frame incoming HTLC followup', () => {
       accountId: id('1'),
       tx: { type: 'htlc_resolve', data: { lockId: id('4'), outcome: 'secret', secret: id('7') } },
     }]);
+    expect(fixture.state.htlcRoutes.get(fixture.hashlock)).toMatchObject({
+      inboundEntity: fixture.from,
+      inboundLockId: fixture.lockId,
+      amount: 10n,
+      tokenId: 1,
+    });
   });
 
   test('committed downstream resolution queues upstream once across exact replay', () => {

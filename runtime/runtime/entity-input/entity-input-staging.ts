@@ -35,7 +35,10 @@ import {
 } from './entity-input-output.ts';
 import { cacheCommittedConsumptionNodeChanges } from '../../entity/consumption/consumption-store';
 import { cacheCommittedAccountJClaimNodeChanges } from '../../entity/account/account-j-claim-node-store';
-import { collectRuntimeEntityContext } from './entity-context-collection';
+import {
+  collectRuntimeEntityContext,
+  describeEntityInputCommitShape,
+} from './entity-context-collection';
 
 export const collectCommittedAccountFrames = (
   input: RoutedEntityInput,
@@ -200,7 +203,14 @@ export const collectStagedEntityInput = (
     throw new Error(`RUNTIME_ENTITY_CONTEXT_WITHOUT_COMMITTED_FRAME:${replicaKey}`);
   }
   if (result.entityFrameCommitted && result.entityContext) {
-    collectRuntimeEntityContext(context.entityContexts, input.entityId, replicaKey, result.entityContext);
+    collectRuntimeEntityContext(
+      context.entityContexts,
+      input.entityId,
+      replicaKey,
+      result.entityContext,
+      describeEntityInputCommitShape(input),
+      context.entityCommitInputShapes,
+    );
   }
   context.inputOutcomes.push({
     inputIndex,

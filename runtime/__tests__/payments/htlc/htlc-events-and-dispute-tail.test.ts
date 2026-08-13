@@ -548,7 +548,7 @@ describe('htlc event contract and dispute tail', () => {
         revealBeforeHeight: 10,
       },
     });
-    replica.htlcNotes = new Map([[`lock:${outboundLockId}`, 'invoice-42']]);
+    replica.htlcNotes = new Map([[`hashlock:${hashlock}`, 'invoice-42']]);
     replica.state.htlcRoutes.set(hashlock, {
       hashlock,
       tokenId: 1,

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { getBytes } from 'ethers';
-import { createOnionEnvelopes, computeHtlcEnvelopeContextHash, unwrapEnvelope } from '../../../protocol/htlc/codec/envelope';
+import { createOnionEnvelopes, computeHtlcEnvelopeContextHash, deriveHtlcLockIdAtHop, unwrapEnvelope } from '../../../protocol/htlc/codec/envelope';
 import { decryptOpaqueHtlcBytes } from '../../../protocol/htlc/multi-recipient';
 
 const hex = (bytes: Uint8Array): string =>
@@ -72,7 +72,7 @@ describe('opaque Entity HTLC encryption', () => {
     expect(() => decryptOpaqueHtlcBytes(
       hubLayer.innerEnvelope, publicKeys.get(target)!, hubSecret,
       computeHtlcEnvelopeContextHash({
-        fromEntityId: hub, toEntityId: target, domain, lockId: `${binding.rootLockId}-fwd`,
+        fromEntityId: hub, toEntityId: target, domain, lockId: deriveHtlcLockIdAtHop(binding.rootLockId, 2),
         hashlock: binding.hashlock, tokenId: 1, amount: 9n,
         timelock: 100_000n - BigInt(30_000), revealBeforeHeight: 98,
       }),

@@ -290,6 +290,46 @@ test('HTLC note text validation rejects before adding the hashlock key', () => {
   expect(replica.htlcNotes).toBeUndefined();
 });
 
+test('certified final onion context indexes the recipient private note', () => {
+  const replica = makeReplica();
+  const hashlock = `0x${'34'.repeat(32)}`;
+  indexCertifiedEntityFrameNotes(replica, {
+    txs: [],
+    entityContext: {
+      version: 1,
+      proposerReplicaId: `${replica.entityId}:${replica.signerId}`,
+      entityId: replica.entityId,
+      proposerSignerId: replica.signerId,
+      parentFrameHash: 'genesis',
+      height: 1,
+      gossipProfiles: [],
+      peerAssertions: [],
+      htlc: {
+        version: 1,
+        originated: [],
+        entries: [{
+          binding: {
+            fromEntityId: leftEntity,
+            toEntityId: rightEntity,
+            domain: { chainId: 31337, depositoryAddress: `0x${'11'.repeat(20)}` },
+            accountFrameHash: `0x${'12'.repeat(32)}`,
+            accountHeight: 1,
+            lockId: `0x${'13'.repeat(32)}`,
+            envelopeHash: `0x${'14'.repeat(32)}`,
+            hashlock,
+            tokenId: 1,
+            amount: 1n,
+            timelock: 1n,
+            revealBeforeHeight: 1,
+          },
+          outcome: { kind: 'final', secret: `0x${'15'.repeat(32)}`, description: 'recipient invoice' },
+        }],
+      },
+    },
+  });
+  expect(replica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('recipient invoice');
+});
+
 test('certified proposal and executed vote frames index nested HTLC descriptions', () => {
   const hashlock = `0x${'45'.repeat(32)}`;
   const nestedPayment = {

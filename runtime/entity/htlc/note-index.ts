@@ -2,6 +2,7 @@ import { LIMITS } from '../../config/constants';
 import type { HtlcNoteKey } from '../../types/account';
 import type { EntityTx } from '../../types/entity-tx';
 import type { EntityFrame, EntityReplica } from '../types';
+import type { EntityInfraContext } from '../../types/entity/infra-context';
 
 type NoteBinding = Readonly<{
   hashlock: string;
@@ -87,10 +88,17 @@ const indexTx = (
  */
 export const indexCertifiedEntityFrameNotes = (
   replica: EntityReplica,
-  frame: Pick<EntityFrame, 'txs'>,
+  frame: Pick<EntityFrame, 'txs'> & { entityContext?: EntityInfraContext },
 ): void => {
   const notes = replica.htlcNotes ?? new Map<HtlcNoteKey, string>();
   for (const tx of frame.txs) indexTx(replica, notes, tx);
+  // The final recipient learns the private note only by decrypting its onion;
+  // it never sees the sender's htlcPayment tx. Index the exact certified
+  // prepared outcome so the later ACK-backed HtlcReceived event can attach it.
+  for (const entry of frame.entityContext?.htlc.entries ?? []) {
+    if (entry.outcome.kind !== 'final' || !entry.outcome.description) continue;
+    putNote(notes, `hashlock:${entry.binding.hashlock}`, entry.outcome.description);
+  }
   if (notes.size > 0) replica.htlcNotes = notes;
   else delete replica.htlcNotes;
 };

@@ -23,7 +23,7 @@ const validatePreparedEntries = (context: HtlcPreparedInfraContext): void => {
     bytes32(binding.fromEntityId, 'HTLC_PREPARED_FROM_ENTITY_INVALID');
     bytes32(binding.toEntityId, 'HTLC_PREPARED_TO_ENTITY_INVALID');
     bytes32(binding.accountFrameHash, 'HTLC_PREPARED_ACCOUNT_FRAME_INVALID');
-    bytes32(binding.lockId, 'HTLC_PREPARED_LOCK_ID_INVALID');
+    bytes32(binding.lockId, `HTLC_PREPARED_LOCK_ID_INVALID:${String(binding.lockId).slice(0, 80)}`);
     bytes32(binding.envelopeHash, 'HTLC_PREPARED_ENVELOPE_HASH_INVALID');
     bytes32(binding.hashlock, 'HTLC_PREPARED_HASHLOCK_INVALID');
     if (!Number.isSafeInteger(binding.accountHeight) || binding.accountHeight < 1) throw new Error('HTLC_PREPARED_ACCOUNT_HEIGHT_INVALID');

@@ -5,7 +5,6 @@ import { dirname } from 'node:path';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { importEntity } from '../../../runtime/registration/entity-creation';
-import { deriveMnemonicCustodySeed } from '../../../runtime/registration/entity-creation/mnemonic-seed';
 import {
   buildDefaultEntitySwapPairs,
   getSwapPairOrientation,
@@ -689,7 +688,7 @@ export const createMarketMakerEntityContext = async (
             profileName,
             position,
           },
-          entitySeed: deriveMnemonicCustodySeed(resolvedArgs.seed),
+          entitySeed: resolvedArgs.seed,
         }),
       ],
       entityInputs: [],

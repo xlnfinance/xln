@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { collectRuntimeEntityContext } from '../../../runtime/entity-input/entity-context-collection';
+import {
+  collectRuntimeEntityContext,
+  describeEntityInputCommitShape,
+} from '../../../runtime/entity-input/entity-context-collection';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 
 const makeContext = (online = true): EntityInfraContext => ({
@@ -36,10 +39,62 @@ describe('Runtime Entity context collection', () => {
   test('allows an exact duplicate and rejects a conflicting slice', () => {
     const contexts = new Map<string, EntityInfraContext>();
     const appliedReplicaId = `0x${'aa'.repeat(32)}:signer-b`;
-    collectRuntimeEntityContext(contexts, `0x${'aa'.repeat(32)}`, appliedReplicaId, makeContext());
-    collectRuntimeEntityContext(contexts, `0x${'aa'.repeat(32)}`, appliedReplicaId, makeContext());
-    expect(() => collectRuntimeEntityContext(contexts, `0x${'aa'.repeat(32)}`, appliedReplicaId, makeContext(false)))
-      .toThrow(`RUNTIME_ENTITY_CONTEXT_COLLISION:${appliedReplicaId}`);
+    const shapes = new Map<string, string>();
+    const first = describeEntityInputCommitShape({
+      entityTxs: [{ type: 'setHubConfig' }],
+    });
+    const second = describeEntityInputCommitShape({
+      entityTxs: [],
+      jPrefixAttestations: new Map([['signer-a', { targetEntityHeight: 2 }]]),
+    });
+    collectRuntimeEntityContext(
+      contexts,
+      `0x${'aa'.repeat(32)}`,
+      appliedReplicaId,
+      makeContext(),
+      first,
+      shapes,
+    );
+    collectRuntimeEntityContext(
+      contexts,
+      `0x${'aa'.repeat(32)}`,
+      appliedReplicaId,
+      makeContext(),
+      first,
+      shapes,
+    );
+    expect(() => collectRuntimeEntityContext(
+      contexts,
+      `0x${'aa'.repeat(32)}`,
+      appliedReplicaId,
+      makeContext(false),
+      second,
+      shapes,
+    )).toThrow(
+      `RUNTIME_ENTITY_CONTEXT_COLLISION:${appliedReplicaId}:existing=1/genesis:incoming=1/genesis:` +
+      `existingInput=${first}:incomingInput=${second}`,
+    );
+  });
+
+  test('describes commit-capable input fields without hashes or signatures', () => {
+    expect(describeEntityInputCommitShape({
+      from: `0x${'cc'.repeat(20)}`,
+      runtimeId: `0x${'dd'.repeat(20)}`,
+      entityTxs: [{ type: 'setHubConfig' }, { type: 'initOrderbookExt' }],
+      proposedFrame: { height: 3, hash: `0x${'ab'.repeat(32)}` },
+      hashPrecommits: new Map([['a', 'b']]),
+      hashPrecommitFrame: { height: 3 },
+      jPrefixAttestations: new Map([['signer-a', { targetEntityHeight: 2 }]]),
+      leaderTimeoutVote: { targetHeight: 4 },
+    })).toBe(
+      `from=0x${'cc'.repeat(20)};` +
+      `runtimeId=0x${'dd'.repeat(20)};` +
+      `txs=setHubConfig,initOrderbookExt*2;` +
+      `proposed=3/0xababababab..;` +
+      `precommit=3*1;` +
+      `jPrefix=2*1;` +
+      `leader=4`,
+    );
   });
 
   test('rejects an input/context Entity binding mismatch', () => {

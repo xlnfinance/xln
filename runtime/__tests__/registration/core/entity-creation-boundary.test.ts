@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { createEmptyEnv } from '../../../runtime';
-import { importEntity } from '../../../runtime/registration/entity-creation';
+import { canonicalEntitySeed, importEntity } from '../../../runtime/registration/entity-creation';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { deriveMnemonicCustodySeed } from '../../../runtime/registration/entity-creation/mnemonic-seed';
+import { deriveMeshChildSeed } from '../../../orchestrator/mesh/mesh-seeds';
 import { applyRuntimeTx } from '../../../runtime/transactions/tx-handlers';
 import { deserializeTaggedJson, serializeTaggedJson } from '../../../protocol/serialization';
 import { validateRuntimeTx } from '../../../runtime/input-schema/runtime-tx';
@@ -48,6 +49,27 @@ describe('Entity creation custody boundary', () => {
       .toEqual(deriveMnemonicCustodySeed(phrase));
     expect(() => deriveMnemonicCustodySeed('not a valid bip39 phrase'))
       .toThrow();
+  });
+
+  test('opaque mesh child seeds import through canonicalEntitySeed while BIP39 stays strict', () => {
+    const childSeed = deriveMeshChildSeed('xln-e2e-mesh-root:db', 'runtime:h1');
+    expect(childSeed).toMatch(/^[0-9a-f]{64}$/);
+    expect(() => deriveMnemonicCustodySeed(childSeed)).toThrow();
+    expect(() => deriveMnemonicCustodySeed('not a valid bip39 phrase')).toThrow();
+
+    const build = (seed: string) => importEntity({
+      entityId: ENTITY_ID,
+      signerId: SIGNER_ID,
+      entitySeed: seed,
+      data: { config: CONFIG, isProposer: true },
+    });
+    const first = build(childSeed);
+    const second = build(childSeed);
+    expect(first.data.entitySeed).toBe(canonicalEntitySeed(childSeed));
+    expect(second.data.entitySeed).toBe(first.data.entitySeed);
+    expect(first.data.entitySeed).toMatch(/^0x[0-9a-f]{128}$/);
+    expect(build('opaque-override-not-bip39').data.entitySeed)
+      .toBe(canonicalEntitySeed('opaque-override-not-bip39'));
   });
 
   test('rejects every non-canonical import seed representation', () => {

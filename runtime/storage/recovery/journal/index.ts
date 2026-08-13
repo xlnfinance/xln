@@ -129,6 +129,10 @@ const replayOneFrame = async (
     `RECOVERY_JOURNAL_TIMESTAMP_INVALID:height=${height}`,
   );
   installReplayOutputSignerHints(env, collectOutputSignerHints(frame, height));
+  if (!env.infrastructure) throw new Error('RECOVERY_RUNTIME_INFRASTRUCTURE_REQUIRED');
+  env.infrastructure.replayEntityContexts = new Map(
+    [...frame.entityContexts].map(([replicaId, context]) => [replicaId, structuredClone(context)]),
+  );
   writeRuntimeMetadata(env, APPLY_ALLOWED, true);
   try {
     if (nodeProcess?.env?.['XLN_STORAGE_DEBUG_REPLICA_META'] === '1') {
@@ -177,6 +181,7 @@ const replayOneFrame = async (
     dropPendingHistoryRecords(env, history.length);
     verifyRecoveryJournalFrame(env, frame, height, result);
   } finally {
+    if (env.infrastructure) delete env.infrastructure.replayEntityContexts;
     clearReplayOutputSignerHints(env);
     writeRuntimeMetadata(env, APPLY_ALLOWED, false);
   }

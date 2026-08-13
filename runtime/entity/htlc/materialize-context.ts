@@ -21,6 +21,8 @@ import { assertOriginatedHtlcPayments, materializeOriginatedHtlcPayments } from 
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import { validateHtlcPreparedInfraContext } from './prepared-context-validation';
+import { getEffectiveEntityInputTxs } from '../consensus/output/envelope';
+import { resolveCanonicalEntityBoardShares } from '../auth/authorization';
 
 export type MaterializeHtlcPreparedContextInput = Readonly<{
   state: EntityState;
@@ -40,6 +42,37 @@ export type AssertHtlcPreparedInfraContextInput = Readonly<{
   context: EntityInfraContext;
   entityEncryptionPrivateKey: string;
 }>;
+
+/** Reducer-visible txs whose HTLC facts must be committed by the frame context. */
+export const getEffectiveHtlcFrameTxs = (
+  state: EntityState,
+  proposalTxs: readonly EntityTx[],
+): EntityTx[] => {
+  const shares = resolveCanonicalEntityBoardShares(state.config);
+  const expand = (tx: EntityTx): EntityTx[] => {
+    if (tx.type === 'entityCommand') return tx.data.txs.flatMap(expand);
+    if (tx.type === 'propose' && tx.data.action.type === 'entity_transaction') {
+      const proposerShare = shares.bySigner.get(tx.data.proposer.trim().toLowerCase()) ?? 0n;
+      return proposerShare >= state.config.threshold ? tx.data.action.data.txs.flatMap(expand) : [];
+    }
+    if (tx.type === 'vote') {
+      const proposal = state.proposals.get(tx.data.proposalId);
+      if (!proposal || proposal.status !== 'pending' || tx.data.choice !== 'yes') return [];
+      const currentYes = [...proposal.votes.entries()].reduce((total, [signerId, rawVote]) => {
+        const choice = typeof rawVote === 'object' ? rawVote.choice : rawVote;
+        return choice === 'yes' ? total + (shares.bySigner.get(signerId) ?? 0n) : total;
+      }, 0n);
+      const voterShare = proposal.votes.has(tx.data.voter.trim().toLowerCase())
+        ? 0n
+        : (shares.bySigner.get(tx.data.voter.trim().toLowerCase()) ?? 0n);
+      return currentYes + voterShare >= state.config.threshold && proposal.action.type === 'entity_transaction'
+        ? proposal.action.data.txs.flatMap(expand)
+        : [];
+    }
+    return [tx];
+  };
+  return getEffectiveEntityInputTxs({ entityTxs: [...proposalTxs] }).flatMap(expand);
+};
 
 const reject = (
   binding: PreparedHtlcEntry['binding'],
@@ -197,13 +230,14 @@ export const materializeHtlcPreparedInfraContext = async (
   // Infrastructure/key provisioning failures are never peer-rejectable data.
   // Validate once, outside the attacker-controlled envelope loop, and fail loud.
   assertEntityEncryptionKeypair(input.entityEncryptionPublicKey, input.entityEncryptionPrivateKey);
-  const entries = canonicalizeInboundEntries(collectInboundEntries(input));
+  const effectiveInput = { ...input, proposalTxs: getEffectiveHtlcFrameTxs(input.state, input.proposalTxs) };
+  const entries = canonicalizeInboundEntries(collectInboundEntries(effectiveInput));
   const originated = await materializeOriginatedHtlcPayments({
-    state: input.state,
-    proposalTxs: input.proposalTxs,
-    profiles: input.profiles,
-    height: input.height,
-    resolveRoute: input.resolveRoute,
+    state: effectiveInput.state,
+    proposalTxs: effectiveInput.proposalTxs,
+    profiles: effectiveInput.profiles,
+    height: effectiveInput.height,
+    resolveRoute: effectiveInput.resolveRoute,
   });
   return { version: 1, entries, originated };
 };
@@ -212,11 +246,12 @@ export const materializeHtlcPreparedInfraContext = async (
 export const assertHtlcPreparedInfraContext = async (
   input: AssertHtlcPreparedInfraContextInput,
 ): Promise<void> => {
+  const effectiveProposalTxs = getEffectiveHtlcFrameTxs(input.state, input.proposalTxs);
   const actual = validateHtlcPreparedInfraContext(input.context.htlc);
   const online = new Map(input.context.peerAssertions.map(assertion => [assertion.entityId, assertion.online]));
   const replayInput: MaterializeHtlcPreparedContextInput = {
     state: input.state,
-    proposalTxs: input.proposalTxs,
+    proposalTxs: effectiveProposalTxs,
     entityEncryptionPublicKey: input.state.entityEncryptionPublicKey,
     entityEncryptionPrivateKey: input.entityEncryptionPrivateKey,
     isEntityOnline: entityId => online.get(entityId) === true,
@@ -232,7 +267,7 @@ export const assertHtlcPreparedInfraContext = async (
   }
   assertOriginatedHtlcPayments({
     state: input.state,
-    proposalTxs: input.proposalTxs,
+    proposalTxs: effectiveProposalTxs,
     profiles: input.context.gossipProfiles,
     height: input.context.height,
     originated: actual.originated,

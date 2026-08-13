@@ -20,6 +20,7 @@ import { keccak256 } from 'ethers';
 import { HTLC, LIMITS } from '../../../config/constants';
 import { safeStringify } from '../../serialization';
 import { encryptOpaqueHtlcBytes, type OpaqueHtlcCiphertext } from '../multi-recipient';
+import { deriveForwardHtlcLockId } from '../utils';
 import { decodeOnionLayer, encodeOnionLayer, type DecodedOnionLayer } from './onion';
 
 const MAX_ENVELOPE_SERIALIZED_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
@@ -62,8 +63,11 @@ export const computeHtlcEnvelopeContextHash = (context: HtlcEnvelopeContext): st
     revealBeforeHeight: context.revealBeforeHeight,
   })));
 
-const inboundLockIdAt = (rootLockId: string, hopIndex: number): string =>
-  `${rootLockId}${'-fwd'.repeat(Math.max(0, hopIndex - 1))}`;
+export const deriveHtlcLockIdAtHop = (rootLockId: string, hopIndex: number): string => {
+  let lockId = rootLockId;
+  for (let index = 1; index < hopIndex; index += 1) lockId = deriveForwardHtlcLockId(lockId);
+  return lockId;
+};
 
 const inboundAmountAt = (
   route: string[],
@@ -88,7 +92,7 @@ const contextAt = (
   fromEntityId: route[hopIndex - 1]!,
   toEntityId: route[hopIndex]!,
   domain: hopAccountDomains[hopIndex - 1] ?? (() => { throw new Error(`Missing Account domain for hop ${hopIndex}`); })(),
-  lockId: inboundLockIdAt(binding.rootLockId, hopIndex),
+  lockId: deriveHtlcLockIdAtHop(binding.rootLockId, hopIndex),
   hashlock: binding.hashlock,
   tokenId: binding.tokenId,
   amount: inboundAmountAt(route, hopIndex, binding.senderLockAmount, hopForwardAmounts),

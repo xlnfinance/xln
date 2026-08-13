@@ -170,7 +170,7 @@ async function readBrainvaultRecoverySheet(page: Page): Promise<BrainvaultCliOut
   const runtimeIdLine = sheet.split(/\r?\n/).find(line => line.startsWith('Runtime ID:')) || '';
   return {
     mnemonic24: phraseAfter(sheet, '24-word recovery phrase:'),
-    mnemonic12: phraseAfter(sheet, '12-word compatibility phrase:'),
+    mnemonic12: phraseAfter(sheet, '12-word interoperability phrase:'),
     runtimeId: runtimeIdLine.slice('Runtime ID:'.length).trim().toLowerCase(),
   };
 }
@@ -221,6 +221,14 @@ async function waitForCanonicalProfile(page: Page, expectedProfileName: string):
       const [keyEntityId = '', signerId = ''] = String(replicaKey).split(':');
       const entityId = String(replica?.state?.entityId || replica?.entityId || '').toLowerCase();
       if (replica?.state?.profile?.name !== profileName || entityId !== keyEntityId.toLowerCase()) continue;
+      const accounts = Array.from(replica?.state?.accounts?.entries?.() ?? []);
+      const pendingAccountIds = accounts
+        .filter(([, account]) => Boolean((account as { pendingFrame?: unknown })?.pendingFrame))
+        .map(([counterpartyId]) => String(counterpartyId).toLowerCase())
+        .sort();
+      // Account opening is bilateral and may require later Runtime frames than
+      // the Entity profile. Observe only the durable onboarding terminal state.
+      if (accounts.length !== 3 || pendingAccountIds.length > 0) continue;
       return {
         runtimeId: String(env?.runtimeId || '').toLowerCase(),
         replicaKey: String(replicaKey).toLowerCase(),
@@ -228,15 +236,9 @@ async function waitForCanonicalProfile(page: Page, expectedProfileName: string):
         signerId: signerId.toLowerCase(),
         height: Number(replica?.state?.height || 0),
         profileName: replica.state.profile.name,
-        accountCount: Number(replica?.state?.accounts?.size || 0),
-        accountIds: Array.from(replica?.state?.accounts?.keys?.() ?? [])
-          .map(String)
-          .map(value => value.toLowerCase())
-          .sort(),
-        pendingAccountIds: Array.from(replica?.state?.accounts?.entries?.() ?? [])
-          .filter(([, account]) => Boolean((account as { pendingFrame?: unknown })?.pendingFrame))
-          .map(([counterpartyId]) => String(counterpartyId).toLowerCase())
-          .sort(),
+        accountCount: accounts.length,
+        accountIds: accounts.map(([counterpartyId]) => String(counterpartyId).toLowerCase()).sort(),
+        pendingAccountIds,
       };
     }
     return null;

@@ -358,10 +358,12 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.ok).toBe(true);
-    expect(result.swapOfferCreated?.crossJurisdiction).toEqual(route);
-    expect(result.swapOfferCreated?.maxFee).toBe(0n);
-    expect(result.swapOfferCreated?.minNetReceive).toBe(route.target.amount);
+    if (!result.ok || result.outcome !== 'swap_offer_created') {
+      throw new Error('EXPECTED_CROSS_J_SWAP_OFFER_CREATED');
+    }
+    expect(result.swapOfferCreated.crossJurisdiction).toEqual(route);
+    expect(result.swapOfferCreated.maxFee).toBe(0n);
+    expect(result.swapOfferCreated.minNetReceive).toBe(route.target.amount);
     expect(account.state.swapOffers.get(route.orderId)?.crossJurisdiction).toEqual(route);
   });
 
@@ -907,7 +909,9 @@ describe('cross-jurisdiction hashledger swap', () => {
       1,
     );
 
-    expect(result.ok).toBe(true);
+    if (!result.ok || result.outcome !== 'swap_offer_created') {
+      throw new Error('EXPECTED_CROSS_J_SWAP_OFFER_CREATED');
+    }
     expect(account.state.swapOffers.has(route.orderId)).toBe(true);
     expect(account.state.pulls?.has(route.sourcePull!.pullId)).toBe(true);
     const updatedRoute = account.state.swapOffers.get(route.orderId)?.crossJurisdiction;
@@ -917,8 +921,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(updatedRoute?.updatedAt).toBe(2_000);
     expect(account.state.swapOffers.get(route.orderId)?.maxFee).toBe(0n);
     expect(account.state.swapOffers.get(route.orderId)?.minNetReceive).toBe(450n);
-    expect(result.swapOfferCreated?.maxFee).toBe(0n);
-    expect(result.swapOfferCreated?.minNetReceive).toBe(450n);
+    expect(result.swapOfferCreated.maxFee).toBe(0n);
+    expect(result.swapOfferCreated.minNetReceive).toBe(450n);
     expect(account.mempool.some(tx => tx.type === 'cross_pull_close')).toBe(false);
   });
 

@@ -14,8 +14,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../protocol/boundary-validation';
-import { deriveMnemonicCustodySeed } from '../runtime/registration/entity-creation/mnemonic-seed';
-import { importEntity } from '../runtime/registration/entity-creation';
+import { canonicalEntitySeed, importEntity } from '../runtime/registration/entity-creation';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
@@ -197,7 +196,7 @@ export const deriveManagedEntityIdentity = (config: ManagedEntityConfig): Manage
     entityId: hashBoard(encodeBoard(consensusConfig)),
     signerId,
     privateKeyHex: ethers.hexlify(signerPrivateKey).toLowerCase(),
-    entitySeed: ethers.hexlify(deriveMnemonicCustodySeed(config.seed)).toLowerCase(),
+    entitySeed: canonicalEntitySeed(config.seed),
     consensusConfig,
     position: config.position ?? { x: 0, y: 0, z: 0 },
     name: config.name,

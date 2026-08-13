@@ -285,11 +285,17 @@ export const validatePreparedHtlcPayment = (
   if (!infraContext) throw new Error('HTLC_PAYMENT_INFRA_CONTEXT_REQUIRED');
   const txHash = hashRawHtlcPaymentTx(tx);
   const prepared = infraContext.htlc.originated.find(entry => entry.txHash === txHash);
-  if (!prepared) throw new Error(`HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:${txHash}`);
+  if (!prepared) {
+    const available = infraContext.htlc.originated.slice(0, 8).map(entry => entry.txHash).join(',');
+    throw new Error(
+      `HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:${txHash}:` +
+      `available=${infraContext.htlc.originated.length}[${available}]`,
+    );
+  }
   if (prepared.targetEntityId !== tx.data.targetEntityId.toLowerCase()
     || prepared.tokenId !== tx.data.tokenId || prepared.recipientAmount !== tx.data.amount
     || prepared.maxSenderDebit !== tx.data.maxSenderDebit || prepared.deliveryMode !== tx.data.deliveryMode
-    || prepared.startedAtMs !== (tx.data.startedAtMs ?? state.timestamp)) {
+    || (tx.data.startedAtMs !== undefined && prepared.startedAtMs !== tx.data.startedAtMs)) {
     throw new Error(`HTLC_PAYMENT_PREPARED_CONTEXT_MISMATCH:${txHash}`);
   }
   if (state.htlcRoutes.has(prepared.hashlock)) {

@@ -1,6 +1,8 @@
 import type { EntityReplica } from '../../entity/types';
-import type { RuntimeReplica, RoutedEntityInput, RuntimeInput } from '../types';
+import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
+import { entityInputMergeKey } from '../../entity/consensus/input/merge';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
+import { safeStringify } from '../../protocol/serialization';
 import { getInputReliableIdentity } from '../reliable/reliable-delivery.ts';
 import { reliableIdentityExactKey } from '../reliable/reliable-frontier.ts';
 import { atomicCrossJInputCohortKey } from '../routing/entity-routing';
@@ -39,11 +41,13 @@ const possibleCommittedHeight = (
   if (input.hashPrecommits?.size) {
     return positiveHeight(input.hashPrecommitFrame?.height);
   }
-  // A single-signer Entity can commit ordinary txs (including scheduled wakes)
-  // immediately. Treat that transition as H+1 so a bundled H+2 certificate is
-  // retained for the next durable R-frame instead of crossing the WAL boundary.
+  // Any remaining input can advance a single-signer Entity from replica-local
+  // work. In particular, J-prefix/leader inputs can finish consensus work that
+  // was already pending before this Runtime frame. Treating those envelopes as
+  // non-committing allowed a following local command to commit H+2 under the
+  // same Runtime-frame context key.
   if ((input.entityTxs?.length ?? 0) > 0) return currentHeight + 1;
-  return null;
+  return currentHeight + 1;
 };
 
 const dedupeDeferredReliableInputs = (
@@ -73,6 +77,28 @@ const dedupeDeferredReliableInputs = (
   return retained;
 };
 
+const importingReplicaLanes = (runtimeTxs: readonly RuntimeTx[]): Set<string> => {
+  const lanes = new Set<string>();
+  for (const tx of runtimeTxs) {
+    if (tx.type !== 'importReplica') continue;
+    const key = `${normalize(tx.entityId)}:${normalize(tx.signerId)}`;
+    if (key !== ':') lanes.add(key);
+  }
+  return lanes;
+};
+
+const resolveLaneHeight = (
+  env: RuntimeReplica,
+  key: string,
+  importingLanes: ReadonlySet<string>,
+): number | null => {
+  const [entityId, signerId] = key.split(':');
+  if (!entityId || !signerId) return null;
+  const replica = findExactReplica(env, entityId, signerId);
+  if (replica) return replica.state.height;
+  return importingLanes.has(key) ? 0 : null;
+};
+
 /**
  * One R-frame may make at most one new certified Entity height durable per
  * entity+signer lane. Different lanes remain independent. Higher certificates
@@ -84,16 +110,14 @@ export const applyEntityHeightDurabilityBarrier = (
   mempool: RuntimeInput,
   queuedAt: number,
 ): number => {
+  const importingLanes = importingReplicaLanes(runtimeInput.runtimeTxs);
   const laneState = new Map<string, { currentHeight: number; firstFutureHeight: number }>();
 
   for (const input of runtimeInput.entityInputs) {
     const key = laneKey(input);
     if (!key) continue;
-    const [entityId, signerId] = key.split(':');
-    if (!entityId || !signerId) continue;
-    const replica = findExactReplica(env, entityId, signerId);
-    if (!replica) continue;
-    const currentHeight = replica.state.height;
+    const currentHeight = resolveLaneHeight(env, key, importingLanes);
+    if (currentHeight === null) continue;
     const candidateHeight = possibleCommittedHeight(input, currentHeight);
     if (candidateHeight === null || candidateHeight <= currentHeight) continue;
     const prior = laneState.get(key);
@@ -103,36 +127,66 @@ export const applyEntityHeightDurabilityBarrier = (
   }
 
   if (laneState.size === 0) return 0;
-  const blockedAtomicCohorts = new Set<string>();
-  for (const input of runtimeInput.entityInputs) {
+  // Walk in arrival order. Keep the first H+1 merge group per lane so same-`from`
+  // txs can still collapse, then defer the tail. A later same-key tx after a
+  // distinct loopback must not jump ahead of that deferred work.
+  const acceptedMergeKeyByLane = new Map<string, string>();
+  const acceptedScheduledWakeByLane = new Map<string, string>();
+  const closedLanes = new Set<string>();
+  const commitBlocked = (input: RoutedEntityInput): boolean => {
     const key = laneKey(input);
     const state = key ? laneState.get(key) : undefined;
-    if (!state) continue;
+    if (!key || !state) return false;
+    if (closedLanes.has(key)) return true;
     const candidateHeight = possibleCommittedHeight(input, state.currentHeight);
-    if (candidateHeight !== null && candidateHeight > state.firstFutureHeight) {
-      const cohortKey = atomicCrossJInputCohortKey(input);
-      if (cohortKey) blockedAtomicCohorts.add(cohortKey);
+    if (candidateHeight === null || candidateHeight <= state.currentHeight) return false;
+    if (candidateHeight > state.firstFutureHeight) return true;
+    const mergeKey = entityInputMergeKey(input);
+    const scheduledWake = input.entityTxs?.find(tx => tx.type === 'scheduledWake');
+    const scheduledWakeKey = scheduledWake ? safeStringify(scheduledWake) : null;
+    const accepted = acceptedMergeKeyByLane.get(key);
+    if (!accepted) {
+      acceptedMergeKeyByLane.set(key, mergeKey);
+      if (scheduledWakeKey) acceptedScheduledWakeByLane.set(key, scheduledWakeKey);
+      return false;
     }
-  }
+    if (mergeKey === accepted) {
+      const acceptedWake = acceptedScheduledWakeByLane.get(key);
+      if (scheduledWakeKey && acceptedWake && scheduledWakeKey !== acceptedWake) {
+        // Scheduler payloads are state-derived snapshots. Merging two distinct
+        // snapshots would create an invalid Entity frame with two wake txs.
+        // Preserve the first frame and retry the later snapshot after its
+        // predecessor is durable; ordinary same-origin commands may still
+        // merge beside the unique wake, which is ordered first by Entity.
+        closedLanes.add(key);
+        return true;
+      }
+      if (scheduledWakeKey && !acceptedWake) {
+        acceptedScheduledWakeByLane.set(key, scheduledWakeKey);
+      }
+      return false;
+    }
+    closedLanes.add(key);
+    return true;
+  };
+  const heightBlocked = runtimeInput.entityInputs.map(input => commitBlocked(input));
+  const blockedAtomicCohorts = new Set<string>();
+  runtimeInput.entityInputs.forEach((input, index) => {
+    if (!heightBlocked[index]) return;
+    const cohortKey = atomicCrossJInputCohortKey(input);
+    if (cohortKey) blockedAtomicCohorts.add(cohortKey);
+  });
 
   const selected: RoutedEntityInput[] = [];
   const deferred: RoutedEntityInput[] = [];
-  for (const input of runtimeInput.entityInputs) {
-    const key = laneKey(input);
-    const state = key ? laneState.get(key) : undefined;
-    const candidateHeight = state
-      ? possibleCommittedHeight(input, state.currentHeight)
-      : null;
-    const heightBlocked = Boolean(
-      state && candidateHeight !== null && candidateHeight > state.firstFutureHeight,
-    );
+  runtimeInput.entityInputs.forEach((input, index) => {
     const cohortKey = atomicCrossJInputCohortKey(input);
-    if (heightBlocked || (cohortKey !== null && blockedAtomicCohorts.has(cohortKey))) {
+    if (heightBlocked[index] || (cohortKey !== null && blockedAtomicCohorts.has(cohortKey))) {
       deferred.push(input);
     } else {
       selected.push(input);
     }
-  }
+  });
 
   if (deferred.length === 0) return 0;
   runtimeInput.entityInputs = selected;

@@ -152,6 +152,7 @@ export type RuntimeEntityInputBatchContext = {
   localEventCount: number;
   externalApplyMs: number;
   immediateCrossJApplyMs: number;
+  entityCommitInputShapes: Map<string, string>;
 };
 
 export const createRuntimeEntityInputBatchContext = (
@@ -170,4 +171,5 @@ export const createRuntimeEntityInputBatchContext = (
   localEventCount: 0,
   externalApplyMs: 0,
   immediateCrossJApplyMs: 0,
+  entityCommitInputShapes: new Map(),
 });

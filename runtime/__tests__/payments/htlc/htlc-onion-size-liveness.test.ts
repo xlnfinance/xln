@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { HTLC, LIMITS } from '../../../config/constants';
-import { computeHtlcEnvelopeContextHash, createOnionEnvelopes } from '../../../protocol/htlc/codec/envelope';
+import { computeHtlcEnvelopeContextHash, createOnionEnvelopes, deriveHtlcLockIdAtHop } from '../../../protocol/htlc/codec/envelope';
 import { decodeOnionLayer } from '../../../protocol/htlc/codec/onion';
 import { decryptOpaqueHtlcBytes } from '../../../protocol/htlc/multi-recipient';
 
@@ -41,7 +41,7 @@ test('MAX_HOPS opaque onion stays bounded and every Entity decrypts one layer', 
       encrypted, publicKeys.get(hop)!, privateKeys.get(hop)!,
       computeHtlcEnvelopeContextHash({
         fromEntityId: route[hopIndex - 1]!, toEntityId: hop, domain,
-        lockId: `${rootLockId}${'-fwd'.repeat(hopIndex - 1)}`, hashlock, tokenId: 1, amount,
+        lockId: deriveHtlcLockIdAtHop(rootLockId, hopIndex), hashlock, tokenId: 1, amount,
         timelock: timelock - BigInt(hopIndex - 1) * BigInt(HTLC.MIN_TIMELOCK_DELTA_MS),
         revealBeforeHeight: revealBeforeHeight - (hopIndex - 1) * HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
       }),

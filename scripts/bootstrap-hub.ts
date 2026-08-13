@@ -18,7 +18,6 @@ import { requireJurisdictionBlockTimeMs } from '../runtime/orchestrator/mesh/mes
 import type { ConsensusConfig } from '../runtime/entity/types';
 import type { RuntimeReplica } from '../runtime/runtime/types';
 import { importEntity } from '../runtime/runtime/registration/entity-creation';
-import { deriveMnemonicCustodySeed } from '../runtime/runtime/registration/entity-creation/mnemonic-seed';
 
 const args = process.argv.slice(2);
 
@@ -146,7 +145,7 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
         profileName: hubConfig.name,
         position: hubConfig.position || { x: 0, y: 0, z: 0 },
       },
-      entitySeed: deriveMnemonicCustodySeed(hubConfig.seed),
+      entitySeed: hubConfig.seed,
     }));
 
     await processRuntime(env, []);

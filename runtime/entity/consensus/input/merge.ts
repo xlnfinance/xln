@@ -184,7 +184,7 @@ export const prioritizeEntityConsensusInputs = <T extends EntityConsensusInput>(
   return result;
 };
 
-const entityInputMergeKey = (input: EntityConsensusInput): string => {
+export const entityInputMergeKey = (input: EntityConsensusInput): string => {
   const base = `${input.entityId.toLowerCase()}:${String(input.signerId || '').toLowerCase()}`;
   const atomicCrossJ = input.atomicCrossJurisdictionPair;
   if (atomicCrossJ) {

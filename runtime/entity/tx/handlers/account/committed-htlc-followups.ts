@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountPeerInput, AccountReplica, AccountTx } from '../../../../types/account';
+import type { AccountFrame, AccountPeerInput, AccountReplica, AccountTx, HtlcLock } from '../../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../infra/debug-flags';
@@ -15,8 +15,10 @@ import type { AccountTxTarget } from './orderbook/queue';
 import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 import type { EntityInfraContext } from '../../../../types/entity/infra-context';
 import { preparedHtlcBindingKey } from '../../../../types/entity/htlc-infra-context';
+import type { PreparedHtlcEntry } from '../../../../types/entity/htlc-infra-context';
 import { HTLC } from '../../../../config/constants';
 import { sameAccountStateDomain } from '../../../../account/commitment/state-root';
+import { deriveForwardHtlcLockId } from '../../../../protocol/htlc/utils';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
@@ -42,38 +44,20 @@ type HtlcSecretFollowupContext = Pick<
 const getJurisdictionId = (state: EntityState, env: EntityRuntimeContext): string =>
   String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 
-/**
- * Account replay validates only canonical opaque bytes and their committed
- * hash. The owning Entity frame consumes its required prepared context in the
- * same transition; no post-commit forward action exists.
- */
-export async function applyCommittedHtlcLockFollowup(
+const requirePreparedHtlcEntry = (
   ctx: HtlcFollowupContext,
-  accountTx: AccountTx,
+  lock: HtlcLock,
   committedFrame: AccountFrame,
-  _committedViaNewFrame: boolean,
-): Promise<void> {
-  if (accountTx.type !== 'htlc_lock') return;
-  const { account } = ctx;
-  const lock = account.state.locks.get(accountTx.data.lockId);
-  if (!lock || accountTx.data.envelope === undefined) return;
-  const layer = encryptedHtlcLayer(accountTx.data.envelope);
-  if (!layer) throw new Error(`HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`);
-  if (lock.envelopeHash !== hashEncryptedHtlcLayer(layer)) {
-    throw new Error(`HTLC_ONION_COMMITTED_HASH_MISMATCH:${lock.lockId}`);
-  }
+): PreparedHtlcEntry => {
   const prepared = ctx.infraContext?.htlc.entries.find(entry =>
     entry.binding.accountFrameHash === committedFrame.stateHash.toLowerCase()
     && entry.binding.lockId === lock.lockId.toLowerCase()
-    && entry.binding.envelopeHash === lock.envelopeHash?.toLowerCase()
-  );
+    && entry.binding.envelopeHash === lock.envelopeHash?.toLowerCase());
   if (!prepared) throw new Error(`HTLC_PREPARED_CONTEXT_REQUIRED:${lock.lockId}`);
-  const preparedKey = preparedHtlcBindingKey(prepared.binding);
+  const key = preparedHtlcBindingKey(prepared.binding);
   if (!ctx.consumedPreparedHtlcBindings) throw new Error('HTLC_PREPARED_CONSUMPTION_TRACKER_REQUIRED');
-  if (ctx.consumedPreparedHtlcBindings.has(preparedKey)) {
-    throw new Error(`HTLC_PREPARED_CONTEXT_REUSED:${preparedKey}`);
-  }
-  ctx.consumedPreparedHtlcBindings.add(preparedKey);
+  if (ctx.consumedPreparedHtlcBindings.has(key)) throw new Error(`HTLC_PREPARED_CONTEXT_REUSED:${key}`);
+  ctx.consumedPreparedHtlcBindings.add(key);
   const binding = prepared.binding;
   if (
     binding.fromEntityId !== ctx.input.fromEntityId.toLowerCase()
@@ -86,62 +70,84 @@ export async function applyCommittedHtlcLockFollowup(
     || binding.timelock !== lock.timelock
     || binding.revealBeforeHeight !== lock.revealBeforeHeight
   ) throw new Error(`HTLC_PREPARED_BINDING_MISMATCH:${lock.lockId}`);
+  return prepared;
+};
+
+const applyPreparedHtlcOutcome = (
+  ctx: HtlcFollowupContext,
+  lock: HtlcLock,
+  prepared: PreparedHtlcEntry,
+): void => {
+  const inboundEntity = ctx.input.fromEntityId.toLowerCase();
+  if (ctx.newState.htlcRoutes.has(lock.hashlock) || prepared.outcome.kind === 'reject') {
+    const reason = ctx.newState.htlcRoutes.has(lock.hashlock)
+      ? 'hashlock_already_active'
+      : prepared.outcome.kind === 'reject' ? prepared.outcome.reason : 'hashlock_already_active';
+    ctx.accountTxs.push({ accountId: inboundEntity, tx: {
+      type: 'htlc_resolve', data: { lockId: lock.lockId, outcome: 'error', reason },
+    } });
+    return;
+  }
+  if (prepared.outcome.kind === 'final') {
+    ctx.newState.htlcRoutes.set(lock.hashlock, {
+      hashlock: lock.hashlock, tokenId: lock.tokenId, amount: lock.amount,
+      ...(prepared.outcome.startedAtMs !== undefined ? { startedAtMs: prepared.outcome.startedAtMs } : {}),
+      inboundEntity, inboundLockId: lock.lockId, createdTimestamp: ctx.newState.timestamp,
+    });
+    ctx.accountTxs.push({ accountId: inboundEntity, tx: {
+      type: 'htlc_resolve', data: { lockId: lock.lockId, outcome: 'secret', secret: prepared.outcome.secret },
+    } });
+    return;
+  }
+  const outboundLockId = deriveForwardHtlcLockId(lock.lockId);
+  ctx.newState.htlcRoutes.set(lock.hashlock, {
+    hashlock: lock.hashlock, tokenId: lock.tokenId, amount: lock.amount,
+    inboundEntity, inboundLockId: lock.lockId,
+    outboundEntity: prepared.outcome.nextHopEntityId, outboundLockId,
+    createdTimestamp: ctx.newState.timestamp,
+  });
+  ctx.accountTxs.push({ accountId: prepared.outcome.nextHopEntityId, tx: { type: 'htlc_lock', data: {
+    lockId: outboundLockId, hashlock: lock.hashlock, tokenId: lock.tokenId,
+    amount: prepared.outcome.forwardAmount,
+    timelock: lock.timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS),
+    revealBeforeHeight: lock.revealBeforeHeight - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
+    envelope: prepared.outcome.innerEnvelope,
+  } } });
+};
+
+/**
+ * Account replay validates only canonical opaque bytes and their committed
+ * hash. The owning Entity frame consumes its required prepared context in the
+ * same transition; no post-commit forward action exists.
+ */
+export async function applyCommittedHtlcLockFollowup(
+  ctx: HtlcFollowupContext,
+  accountTx: AccountTx,
+  committedFrame: AccountFrame,
+  committedViaNewFrame: boolean,
+): Promise<void> {
+  if (accountTx.type !== 'htlc_lock') return;
+  // Only the Entity receiving a peer proposal decrypts and advances the onion.
+  // The proposer later replays the same frame on ACK solely to commit its own
+  // outbound Account state; requiring recipient context there would execute the
+  // payment twice and ask the sender to decrypt ciphertext addressed to its peer.
+  if (!committedViaNewFrame) return;
+  const { account } = ctx;
+  const lock = account.state.locks.get(accountTx.data.lockId);
+  if (!lock || accountTx.data.envelope === undefined) return;
+  const layer = encryptedHtlcLayer(accountTx.data.envelope);
+  if (!layer) throw new Error(`HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`);
+  if (lock.envelopeHash !== hashEncryptedHtlcLayer(layer)) {
+    throw new Error(`HTLC_ONION_COMMITTED_HASH_MISMATCH:${lock.lockId}`);
+  }
+  const prepared = requirePreparedHtlcEntry(ctx, lock, committedFrame);
   // A hashlock is the Entity-wide identity of one live routed payment. Without
   // this guard, a peer can commit a second lock through another Account and
   // replace the honest route below. The eventual preimage would then settle
   // the attacker's inbound lock while the honest upstream lock times out,
   // transferring the hub's outbound principal. The Account lock is already
   // committed, so reject only that colliding lock and preserve the first route.
-  if (ctx.newState.htlcRoutes.has(lock.hashlock)) {
-    ctx.accountTxs.push({
-      accountId: ctx.input.fromEntityId.toLowerCase(),
-      tx: {
-        type: 'htlc_resolve',
-        data: { lockId: lock.lockId, outcome: 'error', reason: 'hashlock_already_active' },
-      },
-    });
-    return;
-  }
-  if (prepared.outcome.kind === 'reject') {
-    ctx.accountTxs.push({
-      accountId: ctx.input.fromEntityId.toLowerCase(),
-      tx: { type: 'htlc_resolve', data: { lockId: lock.lockId, outcome: 'error', reason: prepared.outcome.reason } },
-    });
-    return;
-  }
-  if (prepared.outcome.kind === 'final') {
-    ctx.accountTxs.push({
-      accountId: ctx.input.fromEntityId.toLowerCase(),
-      tx: { type: 'htlc_resolve', data: { lockId: lock.lockId, outcome: 'secret', secret: prepared.outcome.secret } },
-    });
-    return;
-  }
-  const outboundLockId = `${lock.lockId}-fwd`;
-  ctx.newState.htlcRoutes.set(lock.hashlock, {
-    hashlock: lock.hashlock,
-    tokenId: lock.tokenId,
-    amount: lock.amount,
-    inboundEntity: ctx.input.fromEntityId.toLowerCase(),
-    inboundLockId: lock.lockId,
-    outboundEntity: prepared.outcome.nextHopEntityId,
-    outboundLockId,
-    createdTimestamp: ctx.newState.timestamp,
-  });
-  ctx.accountTxs.push({
-    accountId: prepared.outcome.nextHopEntityId,
-    tx: {
-      type: 'htlc_lock',
-      data: {
-        lockId: outboundLockId,
-        hashlock: lock.hashlock,
-        tokenId: lock.tokenId,
-        amount: prepared.outcome.forwardAmount,
-        timelock: lock.timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS),
-        revealBeforeHeight: lock.revealBeforeHeight - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
-        envelope: prepared.outcome.innerEnvelope,
-      },
-    },
-  });
+  applyPreparedHtlcOutcome(ctx, lock, prepared);
 }
 
 export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {

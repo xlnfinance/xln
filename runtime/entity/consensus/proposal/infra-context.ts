@@ -7,7 +7,10 @@ import { compareStableText } from '../../../protocol/serialization';
 import { getPrevFrameHash } from '../frame/lineage';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { LIMITS } from '../../../config/constants';
-import { materializeHtlcPreparedInfraContext } from '../../htlc/materialize-context';
+import {
+  getEffectiveHtlcFrameTxs,
+  materializeHtlcPreparedInfraContext,
+} from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
 
@@ -35,7 +38,12 @@ export const materializeEntityInfraContext = async (
 ): Promise<EntityInfraContext> => {
   const entityId = replica.entityId.trim().toLowerCase();
   const proposerSignerId = replica.signerId.trim().toLowerCase();
-  const htlcTxs = proposalTxs.filter(entityTxNeedsHtlcInfra);
+  const replayContext = env.infrastructure?.replayEntityContexts?.get(`${entityId}:${proposerSignerId}`);
+  if (replayContext) {
+    await assertEntityInfraContextAuthority(env, replayContext, replica.state);
+    return structuredClone(replayContext);
+  }
+  const htlcTxs = getEffectiveHtlcFrameTxs(replica.state, proposalTxs).filter(entityTxNeedsHtlcInfra);
   const needsHtlcInfra = htlcTxs.length > 0;
   const getProfiles = (env as ProposerInfraContext).gossip?.getProfiles;
   if (needsHtlcInfra && !getProfiles) throw new Error('ENTITY_INFRA_GOSSIP_UNAVAILABLE');

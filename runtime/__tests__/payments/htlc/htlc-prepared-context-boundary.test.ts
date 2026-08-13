@@ -1,10 +1,40 @@
 import { describe, expect, test } from 'bun:test';
 import { validateHtlcPreparedInfraContext } from '../../../entity/htlc/prepared-context-validation';
+import { getEffectiveHtlcFrameTxs } from '../../../entity/htlc/materialize-context';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { EntityState } from '../../../entity/types';
 
 const id = (byte: string): string => `0x${byte.repeat(64)}`;
 const envelope = { version: 'xln:htlc-opaque:v1' as const, ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' };
 
 describe('HTLC prepared Entity context boundary', () => {
+  test('discovers a payment inside its signed Entity command wrapper', () => {
+    const signerId = `0x${'33'.repeat(20)}`;
+    const state = {
+      config: { threshold: 1n, validators: [signerId], shares: { [signerId]: 1n } },
+      proposals: new Map(),
+    } as unknown as EntityState;
+    const payment = {
+      type: 'htlcPayment',
+      data: {
+        targetEntityId: id('2'), tokenId: 1, amount: 10n, maxSenderDebit: 11n,
+        route: [id('1'), id('2')], deliveryMode: 'instant',
+      },
+    } as EntityTx;
+    const wrapped = {
+      type: 'entityCommand',
+      data: { txs: [{
+        type: 'propose',
+        data: {
+          proposer: signerId,
+          action: { type: 'entity_transaction', data: { version: 1, actionHash: id('9'), txs: [payment] } },
+        },
+      }] },
+    } as EntityTx;
+
+    expect(getEffectiveHtlcFrameTxs(state, [wrapped])).toEqual([payment]);
+  });
+
   test('accepts the exact empty canonical context', () => {
     expect(validateHtlcPreparedInfraContext({ version: 1, entries: [], originated: [] }))
       .toEqual({ version: 1, entries: [], originated: [] });

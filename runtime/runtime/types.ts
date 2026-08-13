@@ -33,6 +33,7 @@ import type {
  */
 
 import type { GossipLayer } from '../network/p2p/gossip';
+import type { EntityInfraContext } from '../types/entity/infra-context';
 import type { Profile } from '../entity/profile';
 import type { RuntimeP2PConfig } from './infrastructure/p2p-types';
 
@@ -507,6 +508,8 @@ interface RuntimeInfrastructure {
   entityEncryptionPrivateKeys?: Map<string, string>;
   /** Canonical import seeds retained in authoritative snapshots after WAL compaction. */
   entityEncryptionSeeds?: Map<string, string>;
+  /** Exact WAL-committed contexts installed only while replaying one Runtime frame. */
+  replayEntityContexts?: Map<string, EntityInfraContext>;
   /**
    * Process-local chain clients, keyed by canonical jurisdiction name.
    *

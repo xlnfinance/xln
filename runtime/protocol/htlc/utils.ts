@@ -76,6 +76,16 @@ export function generateLockId(
   );
 }
 
+/** Derive the next hop's canonical bytes32 lock identifier from the current hop. */
+export function deriveForwardHtlcLockId(currentLockId: string): string {
+  if (!ethers.isHexString(currentLockId, 32)) {
+    throw new Error(`HTLC current lock ID must be 32-byte hex (got ${currentLockId.length} chars)`);
+  }
+  return ethers.keccak256(
+    ethers.toUtf8Bytes(`xln:htlc-forward-lock:v1:${currentLockId.toLowerCase()}`),
+  );
+}
+
 /**
  * Hash HTLC secret using the on-chain convention (keccak256(abi.encode(secret))).
  */

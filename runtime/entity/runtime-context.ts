@@ -6,6 +6,7 @@ import type {
   ConsumptionNodeStore,
 } from './consumption/consumption-accumulator-types';
 import type { EntityReplica } from './types';
+import type { EntityInfraContext } from '../types/entity/infra-context';
 
 /**
  * Runtime-owned capabilities visible during one Entity transition.
@@ -39,6 +40,8 @@ export interface EntityRuntimeContext {
     entityEncryptionSeeds?: Map<string, string>;
     /** Proposer-only snapshot of unverified socket liveness; never used implicitly. */
     observeOnlineEntityIds?: (entityIds: readonly string[]) => ReadonlySet<string>;
+    /** Exact WAL-committed contexts installed only while replaying one Runtime frame. */
+    replayEntityContexts?: Map<string, EntityInfraContext>;
     consumptionNodes?: ConsumptionNodeStore;
     pendingConsumptionNodes?: ConsumptionNodeStore;
     pendingConsumptionNodeDeletes?: Set<string>;
