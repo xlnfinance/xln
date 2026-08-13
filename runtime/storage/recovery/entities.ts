@@ -81,7 +81,8 @@ const installPersistedEntityReplicas = async (
       assertValidatorJHistoryIntegrity(persistedReplicaState, meta?.jHistory);
       const replicaState = cloneEntityState(persistedReplicaState, true);
       // Process-local private keys are rederived from the authoritative
-      // Runtime snapshot seed map before this persisted replica is installed.
+      // Runtime snapshot seed map after all persisted replicas are installed,
+      // then asserted before the recovered Runtime can be returned or used.
       const restoredReplica: EntityReplica = {
         entityId,
         signerId,

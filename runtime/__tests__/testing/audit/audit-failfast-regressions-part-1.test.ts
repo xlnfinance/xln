@@ -1010,6 +1010,25 @@ describe('audit fail-fast regressions', () => {
     expect(discardRejectedEntityInput(localEnv, runtimeInput, unroutableError, true))
       .toEqual({ runtimeTxs: [], entityInputs: [] });
 
+    const sameReplicaLane = {
+      ...entityInput,
+      entityTxs: [{ type: 'openAccount', data: {
+        targetEntityId: `0x${'95'.repeat(32)}`,
+        tokenId: 1,
+        creditAmount: 1n,
+      } }],
+    } as typeof entityInput;
+    const otherReplicaLane = {
+      ...entityInput,
+      entityId: `0x${'94'.repeat(32)}`,
+    };
+    expect(discardRejectedEntityInput(
+      localEnv,
+      { runtimeTxs: [], entityInputs: [entityInput, sameReplicaLane, otherReplicaLane] },
+      unroutableError,
+      true,
+    )?.entityInputs).toEqual([otherReplicaLane]);
+
     const remoteEntityInput = { ...entityInput, from: `0x${'97'.repeat(20)}` };
     const unrelatedInput = {
       ...entityInput,

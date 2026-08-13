@@ -3,6 +3,8 @@ import { describe, expect, test } from 'bun:test';
 import { deriveDelta } from '../../../account/utils';
 import { handleDirectPayment } from '../../../account/tx/handlers/balance/direct-payment';
 import { handleSetCreditLimit } from '../../../account/tx/handlers/balance/set-credit-limit';
+import { validateDelta } from '../../../account/validation/delta-validation';
+import { FINANCIAL } from '../../../config/constants';
 import type { Delta, DerivedDelta } from '../../../types/account';
 import { makeAccount } from '../../helpers/cross-j';
 
@@ -90,6 +92,29 @@ const expectNonNegative = (derived: DerivedDelta): void => {
 };
 
 describe('deriveDelta deterministic property invariants', () => {
+  test('uses one exact credit-limit bound at mutation and durable decode boundaries', () => {
+    const account = makeAccount(`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`);
+    const accepted = handleSetCreditLimit(account.state, {
+      type: 'set_credit_limit',
+      data: { tokenId: 1, amount: FINANCIAL.MAX_CREDIT_LIMIT },
+    }, true);
+    expect(accepted.ok).toBe(true);
+    expect(account.state.deltas.get(1)?.rightCreditLimit).toBe(FINANCIAL.MAX_CREDIT_LIMIT);
+    expect(() => validateDelta(makeDelta({
+      leftCreditLimit: FINANCIAL.MAX_CREDIT_LIMIT,
+      rightCreditLimit: FINANCIAL.MAX_CREDIT_LIMIT,
+    }), 'credit-limit-boundary')).not.toThrow();
+
+    const rejected = handleSetCreditLimit(account.state, {
+      type: 'set_credit_limit',
+      data: { tokenId: 1, amount: FINANCIAL.MAX_CREDIT_LIMIT + 1n },
+    }, false);
+    expect(rejected.ok).toBe(false);
+    expect(() => validateDelta(makeDelta({
+      leftCreditLimit: FINANCIAL.MAX_CREDIT_LIMIT + 1n,
+    }), 'credit-limit-boundary')).toThrow('leftCreditLimit exceeds maximum');
+  });
+
   test('left and right perspectives mirror capacity and accounting fields', () => {
     for (const delta of propertyCases()) {
       const left = deriveDelta(delta, true);
