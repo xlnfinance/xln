@@ -37,7 +37,7 @@ interface CrossJurisdictionDisputeConfig {
 
 type CrossJurisdictionBookLeg = 'source' | 'target';
 
-type CrossJurisdictionBookStatus =
+export type CrossJurisdictionBookStatus =
   | 'pending'
   | 'admitted'
   | 'resolving'

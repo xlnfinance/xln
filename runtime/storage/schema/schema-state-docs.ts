@@ -11,6 +11,7 @@ import { validateEntityState } from '../../entity/state/state-validation';
 import { FINANCIAL, LIMITS, TOKENS } from '../../config/constants';
 import { normalizeAccountWatchSeed } from '../../protocol/identity/account-watch-seed';
 import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../../protocol/boundary/integer-ranges';
+import { HASHABLE_DELTA_FIELDS } from '../../types/hash-coverage/account-nested';
 import type { AccountFrame, AccountState, Delta } from '../../types/account';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../types';
 import { normalizeEntityId } from '../keys';
@@ -146,13 +147,9 @@ const ACCOUNT_STATE_OPTIONAL = [
   'pulls', 'subcontracts', 'lendingIntents', 'settlementWorkspace',
   'rebalanceFeePolicies',
 ] as const;
-const DELTA_FIELDS = [
-  'tokenId', 'collateral', 'ondelta', 'offdelta', 'leftCreditLimit', 'rightCreditLimit', 'leftAllowance',
-  'rightAllowance', 'leftHold', 'rightHold',
-] as const;
 const validateStorageDelta = (value: unknown, code: string): number => {
   const delta = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(delta, DELTA_FIELDS, [], `${code}_FIELDS`);
+  requireExactBoundaryKeys(delta, HASHABLE_DELTA_FIELDS, [], `${code}_FIELDS`);
   const tokenId = requireBoundaryInteger(delta['tokenId'], `${code}_TOKEN`);
   if (tokenId > TOKENS.MAX_TOKEN_ID) throw new Error(`${code}_TOKEN`);
   for (const field of ['collateral', 'leftCreditLimit', 'rightCreditLimit', 'leftAllowance', 'rightAllowance', 'leftHold', 'rightHold']) {

@@ -22,6 +22,7 @@ const gates: Gate[] = [
   { name: 'no-weak-collections', command: ['bun', 'runtime/scripts/checks/policy/check-no-weak-collections.ts'] },
   { name: 'runtime-dependencies', command: ['bun', 'runtime/scripts/checks/architecture/check-runtime-dependencies.ts'] },
   { name: 'fints-negative-types', command: ['bun', 'run', 'check:fints-negative-types'] },
+  { name: 'nested-hash-coverage', command: ['bun', 'run', 'check:nested-hash-coverage'] },
 ];
 
 const results = gates.map(gate => {

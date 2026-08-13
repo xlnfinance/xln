@@ -15,6 +15,10 @@ import {
 import { exactFillRatioToUint16 } from '../../orderbook/swap-execution';
 import { getSwapLotScale } from '../../orderbook';
 import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
+import {
+  requireCrossJurisdictionBookStatus,
+  requireCrossJurisdictionSwapStatus,
+} from './status';
 
 export {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
@@ -742,9 +746,6 @@ const optionalNumber = (value: unknown): number | undefined =>
 const optionalBigInt = (value: unknown): bigint | undefined =>
   value === undefined || value === null ? undefined : BigInt(value as bigint | number | string);
 
-const optionalStatus = (value: unknown): CrossJurisdictionSwapStatus | undefined =>
-  typeof value === 'string' ? (value as CrossJurisdictionSwapStatus) : undefined;
-
 const cloneCrossJurisdictionSwapLeg = (value: CrossJurisdictionSwapLeg): CrossJurisdictionSwapLeg => ({
   jurisdiction: String(value.jurisdiction || ''),
   entityId: String(value.entityId || ''),
@@ -911,7 +912,7 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
       leftResponseSeconds: Number(route.targetDisputeConfig.leftResponseSeconds),
       rightResponseSeconds: Number(route.targetDisputeConfig.rightResponseSeconds),
     },
-    status: optionalStatus(route.status) ?? 'intent',
+    status: requireCrossJurisdictionSwapStatus(route.status),
     createdAt: Number(route.createdAt || 0),
     updatedAt: Number(route.updatedAt || 0),
   };
@@ -1051,7 +1052,7 @@ export function cloneCrossJurisdictionPullBinding(
   if (binding.sourceCloseProof) {
     clone.sourceCloseProof = cloneCrossJurisdictionCloseProof(binding.sourceCloseProof);
   }
-  if (binding.status) clone.status = binding.status;
+  if (binding.status !== undefined) clone.status = requireCrossJurisdictionSwapStatus(binding.status);
   const cumulativeFillRatio = optionalNumber(binding.cumulativeFillRatio);
   const fillSeq = optionalNumber(binding.fillSeq);
   const fillNumerator = optionalBigInt(binding.fillNumerator);
@@ -1138,7 +1139,7 @@ export function cloneCrossJurisdictionBookAdmission(
     routeHash: String(admission.routeHash || ''),
     sourceEntityId: String(admission.sourceEntityId || ''),
     bookOwnerEntityId: String(admission.bookOwnerEntityId || ''),
-    status: admission.status || 'pending',
+    status: requireCrossJurisdictionBookStatus(admission.status),
     route: cloneCrossJurisdictionRoute(admission.route),
     updatedAt: Number(admission.updatedAt || 0),
   };

@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
+import { computeAccountStateRoot } from '../../../account/commitment/state-root';
 import { handlePullLock } from '../../../account/tx/handlers/settlement/pull';
+import { ACCOUNT_TX_REJECTION_CODES, type ApplyAccountTxResult } from '../../../account/tx/apply-types';
+import type { AccountState, AccountTx } from '../../../types/account';
 import {
   buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionRoute,
@@ -8,7 +11,6 @@ import {
 } from '../../../extensions/cross-j';
 import { createEmptyEnv } from '../../../runtime';
 import { selectMatchedCrossJAccountInputPairs } from '../../../runtime/routing/entity-routing';
-import type { AccountTx } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { RoutedEntityInput } from '../../../runtime/types';
 import {
@@ -283,6 +285,23 @@ describe('cross-j fat-frame opening admission', () => {
   });
 });
 
+const expectPullHashCollisionRejected = (
+  result: ApplyAccountTxResult,
+  account: AccountState,
+  rootBefore: string,
+  livePullId: string,
+): void => {
+  if (result.ok) throw new Error(`ACCOUNT_TX_TEST_EXPECTED_REJECTION:${result.outcome}`);
+  expect(result.rejection).toEqual({
+    kind: 'validation',
+    code: ACCOUNT_TX_REJECTION_CODES.validation,
+    message: `Pull hash material collides with live pull ${livePullId}`,
+  });
+  expect(result.events).toEqual([]);
+  expect([...account.pulls.keys()]).toEqual([livePullId]);
+  expect(computeAccountStateRoot(account)).toBe(rootBefore);
+};
+
 describe('cross-j pull hash material durability', () => {
   test('handlePullLock rejects a later order that reuses fullHash or partialRoot', async () => {
     const sourceJ = makeJurisdiction('Source', 1, '11', '12');
@@ -358,9 +377,9 @@ describe('cross-j pull hash material durability', () => {
         crossJurisdictionRoute: collidingRoute,
       },
     };
+    const rootBefore = computeAccountStateRoot(account.state);
     const fullCollision = await handlePullLock(account.state, collideFull, true, 1, 1_000);
-    expect(fullCollision.success).toBe(false);
-    expect(fullCollision.error).toContain('hash material collides');
+    expectPullHashCollisionRejected(fullCollision, account.state, rootBefore, 'order-a-source');
 
     const collidePartialRoute = withCanonicalCrossJurisdictionRouteHash({
       ...collidingRoute,
@@ -394,7 +413,6 @@ describe('cross-j pull hash material durability', () => {
       },
     };
     const partialCollision = await handlePullLock(account.state, collidePartial, true, 1, 1_000);
-    expect(partialCollision.success).toBe(false);
-    expect(partialCollision.error).toContain('hash material collides');
+    expectPullHashCollisionRejected(partialCollision, account.state, rootBefore, 'order-a-source');
   });
 });

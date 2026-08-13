@@ -1,4 +1,6 @@
 import { LIMITS, TOKENS } from '../../config/constants.ts';
+import { HASHABLE_HTLC_LOCK_FIELDS, HASHABLE_PULL_COMMITMENT_FIELDS } from '../../types/hash-coverage/account-nested';
+import { HASHABLE_CROSS_J_PULL_BINDING_FIELDS } from '../../types/hash-coverage/cross-j-nested';
 import { requireBoundaryInteger, requireExactBoundaryKeys } from '../../protocol/boundary-validation.ts';
 import {
   FinancialDataCorruptionError,
@@ -43,10 +45,12 @@ const requireTokenId = (value: unknown, context: string): number => {
 
 const validateHtlcLock = (key: unknown, value: unknown, context: string): void => {
   const lock = validateObject(value, context);
-  requireExactBoundaryKeys(lock, [
-    'lockId', 'hashlock', 'timelock', 'revealBeforeHeight', 'amount', 'tokenId',
-    'senderIsLeft', 'createdHeight', 'createdTimestamp',
-  ], ['envelopeHash'], `${context}.fields`);
+  requireExactBoundaryKeys(
+    lock,
+    HASHABLE_HTLC_LOCK_FIELDS.filter(field => field !== 'envelopeHash'),
+    ['envelopeHash'],
+    `${context}.fields`,
+  );
   const lockId = requireHash(lock['lockId'], `${context}.lockId`);
   if (key !== lockId) corrupt(context, 'Map key must equal lockId');
   requireHash(lock['hashlock'], `${context}.hashlock`);
@@ -60,13 +64,15 @@ const validateHtlcLock = (key: unknown, value: unknown, context: string): void =
   if (lock['envelopeHash'] !== undefined) requireHash(lock['envelopeHash'], `${context}.envelopeHash`);
 };
 
+const PULL_BINDING_REQUIRED = new Set(['orderId', 'routeHash', 'leg']);
 const validatePullBinding = (value: unknown, context: string): void => {
   const binding = validateObject(value, context);
-  requireExactBoundaryKeys(binding, ['orderId', 'routeHash', 'leg'], [
-    'sourceCloseProof', 'status', 'cumulativeFillRatio', 'fillSeq',
-    'fillNumerator', 'fillDenominator', 'claimedRatio', 'filledSourceAmount',
-    'filledTargetAmount', 'sourceClaimed', 'targetClaimed', 'clearingPolicy',
-  ], `${context}.fields`);
+  requireExactBoundaryKeys(
+    binding,
+    ['orderId', 'routeHash', 'leg'],
+    HASHABLE_CROSS_J_PULL_BINDING_FIELDS.filter(field => !PULL_BINDING_REQUIRED.has(field)),
+    `${context}.fields`,
+  );
   validateString(binding['orderId'], `${context}.orderId`);
   requireHash(binding['routeHash'], `${context}.routeHash`);
   if (binding['leg'] !== 'source' && binding['leg'] !== 'target') corrupt(context, 'leg is invalid');
@@ -78,12 +84,15 @@ const validatePullBinding = (value: unknown, context: string): void => {
   }
 };
 
+const PULL_OPTIONAL = new Set(['claimedRatio', 'claimedAmount']);
 const validatePull = (key: unknown, value: unknown, context: string): void => {
   const pull = validateObject(value, context);
-  requireExactBoundaryKeys(pull, [
-    'pullId', 'tokenId', 'amount', 'fullHash', 'partialRoot', 'crossJurisdiction',
-    'createdHeight', 'createdTimestamp',
-  ], ['claimedRatio', 'claimedAmount'], `${context}.fields`);
+  requireExactBoundaryKeys(
+    pull,
+    HASHABLE_PULL_COMMITMENT_FIELDS.filter(field => !PULL_OPTIONAL.has(field)),
+    ['claimedRatio', 'claimedAmount'],
+    `${context}.fields`,
+  );
   const pullId = validateString(pull['pullId'], `${context}.pullId`);
   if (key !== pullId || pullId.includes(':')) corrupt(context, 'Map key/pullId is invalid');
   requireTokenId(pull['tokenId'], `${context}.tokenId`);
