@@ -353,33 +353,67 @@ async function getActiveRuntimeId(page: Page): Promise<string> {
 }
 
 async function waitForRuntimeOnline(page: Page, label: string): Promise<void> {
-  await expect
-    .poll(async () => {
-      return await page.evaluate(() => {
+  const deadline = Date.now() + 30_000;
+  let last: Record<string, unknown> = {};
+  while (Date.now() < deadline) {
+    last = await page.evaluate(() => {
+        const env = (window as typeof window & {
+          isolatedEnv?: { runtimeId?: string; infrastructure?: { p2p?: unknown } };
+        }).isolatedEnv;
         const connectivity = (window as typeof window & {
           __xln?: {
             runtimeConnectivity?: {
+              selectedRuntimeId?: string;
+              hasSelectedEnv?: boolean;
+              runtimeId?: string;
+              lifecyclePhase?: string | null;
+              loopActive?: boolean;
+              persistencePaused?: boolean;
               connected?: boolean;
+              connecting?: boolean;
+              relayUrls?: string[];
+              reconnectState?: unknown;
               connect?: () => void;
               reconnect?: () => void;
             };
           };
         }).__xln?.runtimeConnectivity;
-        if (!connectivity) return false;
-        if (connectivity.connected === true) return true;
+        if (!connectivity) return {
+          surface: false,
+          envRuntimeId: String(env?.runtimeId || ''),
+          hasP2P: Boolean(env?.infrastructure?.p2p),
+        };
+        if (connectivity.connected === true) return { connected: true };
         if (typeof connectivity.connect === 'function') {
           connectivity.connect();
         } else if (typeof connectivity.reconnect === 'function') {
           connectivity.reconnect();
         }
-        return false;
-      }).catch(() => false);
-    }, {
-      timeout: 30_000,
-      intervals: [250, 500, 1_000],
-      message: `${label} runtime must reconnect after restore`,
-    })
-    .toBe(true);
+        return {
+          surface: true,
+          selectedRuntimeId: connectivity.selectedRuntimeId,
+          hasSelectedEnv: connectivity.hasSelectedEnv,
+          runtimeId: connectivity.runtimeId,
+          lifecyclePhase: connectivity.lifecyclePhase,
+          loopActive: connectivity.loopActive,
+          persistencePaused: connectivity.persistencePaused,
+          connected: connectivity.connected === true,
+          connecting: connectivity.connecting === true,
+          relayUrls: connectivity.relayUrls,
+          reconnectState: connectivity.reconnectState,
+          envRuntimeId: String(env?.runtimeId || ''),
+          hasP2P: Boolean(env?.infrastructure?.p2p),
+        };
+      }).catch(error => ({ evaluateError: error instanceof Error ? error.message : String(error) }));
+    if (last['connected'] === true) return;
+    await page.waitForTimeout(500);
+  }
+  throw new Error(
+    `${label} runtime must reconnect after restore: ${JSON.stringify({
+      ...last,
+      ui: await readRecoveryUiDiagnostics(page),
+    })}`,
+  );
 }
 
 async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs = CHANNEL_OP_TIMEOUT_MS): Promise<void> {
@@ -547,6 +581,11 @@ async function createRuntimeViaUi(
   await startButton.click({ force: true });
 
   const identity = await waitForLocalRuntimeIdentity(page);
+  if (!await displayNameInput.waitFor({ state: 'hidden', timeout: 30_000 }).then(() => true).catch(() => false)) {
+    throw new Error(
+      `runtime creation must finish after publishing identity: ${JSON.stringify(await readRecoveryUiDiagnostics(page))}`,
+    );
+  }
   if (options.requireOnline !== false) {
     await expect
       .poll(async () => {
@@ -697,6 +736,7 @@ async function readRecoveryUiDiagnostics(page: Page): Promise<Record<string, unk
       envHeight: Number(env?.state?.height || 0),
       envReplicaCount: Number(env?.state?.eReplicas?.size || 0),
       envJurisdictionCount: Number(env?.state?.jReplicas?.size || 0),
+      creationError: String(document.querySelector<HTMLElement>('.matrix-status.error')?.innerText || ''),
       visibleButtons: Array.from(document.querySelectorAll('button'))
         .map((button) => String((button as HTMLButtonElement).innerText || '').trim())
         .filter(Boolean)

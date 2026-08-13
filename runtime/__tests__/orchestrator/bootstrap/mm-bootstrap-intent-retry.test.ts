@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   consumeExpiredBootstrapIntentAttempt,
+  hasPendingBootstrapIntentAttempt,
   isBootstrapIntentAttemptExpired,
   MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS,
 } from '../../../orchestrator/market-maker/node/mm-node-core';
@@ -43,6 +44,26 @@ describe('bootstrap cross-j intent attempt retry', () => {
   test('consumeExpiredBootstrapIntentAttempt is a no-op for an offerId that was never attempted', () => {
     const attempted = new Map<string, number>();
     expect(consumeExpiredBootstrapIntentAttempt(attempted, 'offer-never-tried', 1_000_000)).toBe(false);
+    expect(attempted.size).toBe(0);
+  });
+
+  test('one fresh intent blocks every later offer on the same source Account', () => {
+    const attempted = new Map([['offer-a', 1_000_000]]);
+    expect(hasPendingBootstrapIntentAttempt(
+      attempted,
+      ['offer-a', 'offer-b', 'offer-c'],
+      1_000_500,
+    )).toBe(true);
+    expect(attempted).toEqual(new Map([['offer-a', 1_000_000]]));
+  });
+
+  test('an expired source-Account intent is pruned so the same slot can retry', () => {
+    const attempted = new Map([['offer-a', 1_000_000]]);
+    expect(hasPendingBootstrapIntentAttempt(
+      attempted,
+      ['offer-a', 'offer-b'],
+      1_000_000 + MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS,
+    )).toBe(false);
     expect(attempted.size).toBe(0);
   });
 

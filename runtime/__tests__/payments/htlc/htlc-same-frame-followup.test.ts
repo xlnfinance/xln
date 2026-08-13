@@ -163,6 +163,40 @@ describe('same-frame incoming HTLC followup', () => {
     expect(first.state.htlcFeesEarned).toBe(1n);
   });
 
+  test('final self-cycle leg augments only its own originated route', async () => {
+    const hashlock = id('5');
+    const state = {
+      entityId: id('2'),
+      timestamp: 1,
+      htlcRoutes: new Map([[hashlock, {
+        hashlock,
+        tokenId: 1,
+        amount: 8n,
+        originated: true as const,
+        outboundEntity: id('9'),
+        outboundLockId: id('a'),
+        createdTimestamp: 1,
+      }]]),
+      lockBook: new Map(),
+    };
+    const fixture = setup('final', { hashlock, state });
+
+    await applyCommittedHtlcLockFollowup(fixture.context as never, fixture.tx, fixture.frame as never, true);
+
+    expect(fixture.accountTxs).toEqual([{
+      accountId: fixture.from,
+      tx: { type: 'htlc_resolve', data: { lockId: fixture.lockId, outcome: 'secret', secret: id('7') } },
+    }]);
+    expect(state.htlcRoutes.get(hashlock)).toMatchObject({
+      originated: true,
+      outboundEntity: id('9'),
+      outboundLockId: id('a'),
+      inboundEntity: fixture.from,
+      inboundLockId: fixture.lockId,
+      amount: 8n,
+    });
+  });
+
   test('queues reject and refuses consuming one prepared binding twice', async () => {
     const fixture = setup('reject');
     await applyCommittedHtlcLockFollowup(fixture.context as never, fixture.tx, fixture.frame as never, true);

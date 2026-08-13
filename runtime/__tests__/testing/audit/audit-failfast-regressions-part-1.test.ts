@@ -1001,6 +1001,15 @@ describe('audit fail-fast regressions', () => {
     const localError = new RuntimeEntityInputApplyError(entityInput, false, cause);
     expect(discardRejectedEntityInput(localEnv, runtimeInput, localError, true)).toBeNull();
 
+    const unroutableError = new RuntimeEntityInputApplyError(
+      entityInput,
+      false,
+      cause,
+      'unroutable-ingress',
+    );
+    expect(discardRejectedEntityInput(localEnv, runtimeInput, unroutableError, true))
+      .toEqual({ runtimeTxs: [], entityInputs: [] });
+
     const remoteEntityInput = { ...entityInput, from: `0x${'97'.repeat(20)}` };
     const unrelatedInput = {
       ...entityInput,

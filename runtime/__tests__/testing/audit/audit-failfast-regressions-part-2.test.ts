@@ -943,9 +943,9 @@ describe('audit fail-fast regressions', () => {
     attachSigningReplica(env, right.entityId, right.signerId);
     const secret = `0x${'91'.repeat(32)}`;
     const hashlock = hashHtlcSecret(secret);
-    const lockId = 'late-secret-lock';
+    const lockId = `0x${'92'.repeat(32)}`;
     const upstreamEntityId = `0x${'73'.repeat(32)}`;
-    const upstreamLockId = 'late-secret-upstream-lock';
+    const upstreamLockId = `0x${'93'.repeat(32)}`;
     const amount = 7n;
     const timelock = BigInt(env.state.timestamp + HTLC_ENFORCEMENT_RESERVE_MS - 1);
     const resolveTx: AccountTx = {
@@ -1709,9 +1709,10 @@ describe('audit fail-fast regressions', () => {
       },
     } as const;
 
-    const rejected = await applyEntityTx(proposerEnv, state, rawTx);
-    expect(rejected.skippedError).toBe('OPEN_ACCOUNT_WATCH_SEED_REQUIRED');
-    expect(rejected.newState.accounts.size).toBe(0);
+    await expect(applyEntityTx(proposerEnv, state, rawTx)).rejects.toThrow(
+      'OPEN_ACCOUNT_WATCH_SEED_REQUIRED',
+    );
+    expect(state.accounts.size).toBe(0);
 
     const [commandTx] = prepareLocallyAuthoredEntityTxs(proposerEnv, state, author.signerId, [rawTx]);
     if (commandTx?.type !== 'entityCommand') throw new Error('TEST_OPEN_ACCOUNT_COMMAND_MISSING');

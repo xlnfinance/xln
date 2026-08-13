@@ -150,6 +150,7 @@ export const prepareEntityInputIngress = (
       storageChanges: [],
       frameHash,
       promoteCandidateState,
+      usePersistedReplayContext: !trustedLocalCrossJurisdiction,
     },
     entityDisplay,
     quietRuntimeLogs: env.quietRuntimeLogs === true,

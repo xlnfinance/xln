@@ -7,7 +7,6 @@ import { canonicalAccountDisputeConfig } from '../../account/config/dispute-conf
 import { validateAccountReplica } from '../../account/validation/state-validation';
 import { assertCanonicalSettlementWorkspace } from '../../account/tx/handlers/settlement/transition';
 import { assertSettlementWorkspacePhase } from '../../account/tx/handlers/settlement/workspace-views';
-import { MAX_CREDIT_LIMIT } from '../../account/tx/handlers/balance/set-credit-limit';
 import { validateEntityState } from '../../entity/state/state-validation';
 import { FINANCIAL, LIMITS, TOKENS } from '../../config/constants';
 import { normalizeAccountWatchSeed } from '../../protocol/identity/account-watch-seed';
@@ -154,7 +153,7 @@ const validateStorageDelta = (value: unknown, code: string): number => {
   const tokenId = requireBoundaryInteger(delta['tokenId'], `${code}_TOKEN`);
   if (tokenId > TOKENS.MAX_TOKEN_ID) throw new Error(`${code}_TOKEN`);
   for (const field of ['collateral', 'leftCreditLimit', 'rightCreditLimit', 'leftAllowance', 'rightAllowance', 'leftHold', 'rightHold']) {
-    requireStorageBigInt(delta[field], `${code}_${field}`, 0n, field.endsWith('CreditLimit') ? MAX_CREDIT_LIMIT : UINT256_MAX);
+    requireStorageBigInt(delta[field], `${code}_${field}`, 0n, field.endsWith('CreditLimit') ? FINANCIAL.MAX_CREDIT_LIMIT : UINT256_MAX);
   }
   for (const field of ['ondelta', 'offdelta']) requireStorageBigInt(delta[field], `${code}_${field}`, INT256_MIN, INT256_MAX);
   return tokenId;

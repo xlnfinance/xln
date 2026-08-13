@@ -63,6 +63,13 @@ export type ApplyEntityInputContext = {
   frameHash: string;
   /** False while Runtime stages one touched-only Entity candidate. */
   promoteCandidateState: boolean;
+  /**
+   * Trusted same-Runtime cross-J cascades are separate Entity frames created
+   * after the persisted external input commits. They must materialize their
+   * own height/parent-bound context during replay instead of reusing the
+   * external input's context stored under the same local replica key.
+   */
+  usePersistedReplayContext: boolean;
   canonicalAppliedInput?: EntityInput;
   entityContext?: EntityInfraContext;
 };

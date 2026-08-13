@@ -167,6 +167,8 @@ const makeCanonicalAccountFixture = () => ({
   proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 0 },
   proofBody: { tokenIds: [1], deltas: [0n] },
   pendingWithdrawals: new Map(),
+  swapOrderHistory: new Map(),
+  swapClosedOrders: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   disputeProofBodiesByHash: {
     proof: makeProofBodyStruct(),
@@ -432,6 +434,27 @@ describe('state cloning', () => {
     expect(owned.newState.accounts).not.toBeInstanceOf(EntityAccountCandidateMap);
     expect(computeCanonicalEntityConsensusStateHash(owned.newState))
       .toBe(computeCanonicalEntityConsensusStateHash(isolated.newState));
+  });
+
+  test('trusted same-Runtime cascades do not reuse the external replay context', async () => {
+    const env = createEmptyEnv('same-Runtime replay context isolation');
+    const replica = makeProjectionReplica();
+    const persisted = await materializeEntityInfraContext(env, replica, [], {
+      usePersistedReplayContext: false,
+    });
+    env.infrastructure.replayEntityContexts = new Map([
+      [`${replica.entityId}:${replica.signerId}`, persisted],
+    ]);
+    replica.state.height += 1;
+    replica.state.prevFrameHash = `0x${'99'.repeat(32)}`;
+
+    const internal = await materializeEntityInfraContext(env, replica, [], {
+      usePersistedReplayContext: false,
+    });
+
+    expect(persisted.height).toBe(1);
+    expect(internal.height).toBe(2);
+    expect(internal).not.toEqual(persisted);
   });
 
   test('clone diagnostics use structured logging only', () => {

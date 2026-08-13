@@ -74,7 +74,7 @@ import {
 } from '../../tx/handlers/account';
 import { normalizeSwapOfferForOrderbook } from '../../../orderbook/swap-execution';
 import { buildSettlementSealDraft } from '../../tx/handlers/payments/settle';
-import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../tx/j-events-htlc/route-lifecycle';
+import { assertOriginatedHtlcRoutesHaveLiveLocks, terminateHtlcRoute } from '../../tx/j-events-htlc/route-lifecycle';
 import { hasInboundHtlcRoute } from '../../htlc/route-views';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 import { normalizeEntityProposalBoard } from '../../tx/processing/proposals';
@@ -1130,7 +1130,23 @@ const prepareEntityFrameWorkingSet = async (
     entityContext.parentFrameHash !== expectedParentFrameHash ||
     entityContext.height !== entityState.height + 1
   ) {
-    throw new Error('ENTITY_INFRA_CONTEXT_BINDING_MISMATCH');
+    throw new Error(
+      `ENTITY_INFRA_CONTEXT_BINDING_MISMATCH:${safeStringify({
+        actual: {
+          entityId: entityContext.entityId,
+          height: entityContext.height,
+          parentFrameHash: entityContext.parentFrameHash,
+          proposerReplicaId: entityContext.proposerReplicaId,
+          proposerSignerId: entityContext.proposerSignerId,
+        },
+        expected: {
+          entityId: expectedEntityId,
+          height: entityState.height + 1,
+          parentFrameHash: expectedParentFrameHash,
+          proposerReplicaId: `${expectedEntityId}:${entityContext.proposerSignerId}`,
+        },
+      })}`,
+    );
   }
   assertEntityFrameTxByteBudget(entityTxs);
   assertEntityFrameJRangeBudget(entityTxs);
@@ -1226,7 +1242,6 @@ type PostEntityTxPhases = {
   currentEntityState: EntityState;
   orderbookStats: OrderbookFrameStats;
   accountsToProposeFramesCount: number;
-  prunedOriginatedHtlcRoutes: number;
 };
 
 const refreshChangedAccountCommitments = (
@@ -1332,15 +1347,11 @@ const applyPostEntityTxPhases = async (
     currentEntityState,
     context.allOutputs,
   );
-  const prunedOriginatedHtlcRoutes = pruneSettledOriginatedHtlcRoutes(
-    currentEntityState,
-    currentEntityState.timestamp,
-  );
+  assertOriginatedHtlcRoutesHaveLiveLocks(currentEntityState);
   return {
     currentEntityState,
     orderbookStats,
     accountsToProposeFramesCount,
-    prunedOriginatedHtlcRoutes,
   };
 };
 
@@ -1366,7 +1377,6 @@ const logEntityFrameProfile = (
       context.allSwapCancelRequests.length + context.allSwapOffersCancelled.length,
     hasOrderbookExt: Boolean(post.currentEntityState.orderbookExt),
     ...post.orderbookStats,
-    prunedOriginatedHtlcRoutes: post.prunedOriginatedHtlcRoutes,
     phases: cumulativeMarksToPhases(frameProfileMarks, elapsedMs),
     txTypeTotals: Array.from(context.frameProfileTxTotals.entries())
       .map(([type, value]) => ({ type, ...value }))

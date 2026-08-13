@@ -5,8 +5,7 @@ import {
   validateObject,
 } from '../../protocol/boundary/validation-primitives';
 import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../../protocol/boundary/integer-ranges';
-import { TOKENS } from '../../config/constants';
-import { MAX_CREDIT_LIMIT } from '../tx/handlers/balance/set-credit-limit';
+import { FINANCIAL, TOKENS } from '../../config/constants';
 
 const BIGINT_FIELDS = [
   'collateral',
@@ -71,7 +70,7 @@ export const validateDelta = (
     if (typeof fieldValue === 'bigint' && fieldValue < 0n) {
       errors.push(`${field} must be non-negative, got: ${fieldValue}`);
     } else if (typeof fieldValue === 'bigint') {
-      const maximum = field.endsWith('CreditLimit') ? MAX_CREDIT_LIMIT : UINT256_MAX;
+      const maximum = field.endsWith('CreditLimit') ? FINANCIAL.MAX_CREDIT_LIMIT : UINT256_MAX;
       if (fieldValue > maximum) errors.push(`${field} exceeds maximum ${maximum}, got: ${fieldValue}`);
     }
   }

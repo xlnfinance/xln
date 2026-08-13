@@ -10,7 +10,8 @@ import { deriveCanonicalCrossJurisdictionMarket } from '../../../extensions/cros
 import { hasCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
 import { compareStableText,safeStringify } from '../../../protocol/serialization';
 import {
-submitCrossJurisdictionIntent
+submitCrossJurisdictionIntent,
+submitCrossJurisdictionIntents,
 } from '../../../runtime';
 import { computeCanonicalEntityHashesFromEnv } from '../../../storage/canonical-hash';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
@@ -51,6 +52,7 @@ buildMarketMakerOfferSpecs,
 collectOfferIdsForAccount,
 collectPendingCrossRequestOrderIds,
 consumeExpiredBootstrapIntentAttempt,
+hasPendingBootstrapIntentAttempt,
 countCommittedMarketMakerOffersForHub,
 countCommittedMarketMakerOffersForHubPair,
 countCrossPairCoverageGaps,
@@ -66,6 +68,7 @@ getMarketMakerTokenIds,
 hasCrossRouteRegistered,
 hasCrossSpecBootstrapProgress,
 hasFinalizedMarketMakerCrossOffer,
+hasUncommittedMarketMakerCrossOffer,
 hasMarketMakerCrossOffer,
 hasMarketMakerRuntimeBacklog,
 hubRoleName,
@@ -672,6 +675,15 @@ const maintainBootstrapCrossQuotes = async (
       targetTokenIds,
     );
     if (sourceHubSpecs.length === 0) continue;
+    if (hasPendingBootstrapIntentAttempt(
+      attemptedBootstrapIntentOrderIds,
+      sourceHubSpecs.map(spec => spec.offerId),
+    )) continue;
+    // Route registration precedes bilateral swap_offer commitment. Starting a
+    // second intent on the same source Account in that interval creates two
+    // proposal lanes that can wait on each other. Advance this hub only after
+    // its prior visible route is committed into Account state.
+    if (hasUncommittedMarketMakerCrossOffer(env, sourceHubSpecs)) continue;
     const coverageGaps = countCrossPairCoverageGaps(env, sourceHubSpecs);
     const progress = countCrossSpecBootstrapProgress(env, sourceHubSpecs, getPendingCrossRequestOrderIds);
     const existingOfferIds = collectOfferIdsForAccount(account);
@@ -710,8 +722,15 @@ const maintainBootstrapCrossQuotes = async (
         existingOfferIds,
       );
       candidateCount += candidates.length;
-      for (const spec of candidates.slice(0, allowedNewOffers)) {
-        await submitCrossJurisdictionIntent(env, spec.crossJurisdiction!);
+      const selected = candidates.slice(0, allowedNewOffers);
+      if (selected.length > 0) {
+        const routes = selected.map(spec => spec.crossJurisdiction).filter(
+          (route): route is CrossJurisdictionSwapRoute => route !== undefined,
+        );
+        if (routes.length !== selected.length) throw new Error('MARKET_MAKER_CROSS_ROUTE_MISSING');
+        await submitCrossJurisdictionIntents(env, routes);
+      }
+      for (const spec of selected) {
         attemptedBootstrapIntentOrderIds.set(spec.offerId, Date.now());
         existingOfferIds.add(spec.offerId);
         submittedIntentCount += 1;

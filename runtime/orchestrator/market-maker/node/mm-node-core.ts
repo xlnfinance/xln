@@ -317,11 +317,13 @@ export const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
       String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK),
   ),
 );
-// Each source-hub Entity independently admits at most 45 intents per frame.
-// Bootstrap may fill all three independent hub groups in one wave; the old
-// global limit of 45 serialized them into needless consensus roundtrips.
+// One bilateral Account may have only one proposal lane in flight. Submitting
+// many cross-j intents for the same source hub before its ACK is observable
+// races retries against a still-pending frame and can starve the MM event loop.
+// Even independent Accounts share one Runtime event loop, so bootstrap admits
+// one bounded cross-j batch globally per tick and waits for the next tick.
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 45;
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 135;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 45;
 export const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   1,
   Number(
@@ -338,7 +340,7 @@ export const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
 );
 export const MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '3'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'),
 );
 // A cross-j offerId is stable for one MARKET_MAKER_CROSS_EXPIRY_MS generation
 // (default 24h): the same (hub, pair, level) reproduces the exact same offerId
@@ -376,6 +378,19 @@ export const consumeExpiredBootstrapIntentAttempt = (
   attemptedBootstrapIntentOrderIds.delete(offerId);
   return false;
 };
+
+/**
+ * A source Account has one bilateral proposal lane. Keep that lane single-file
+ * while any submitted cross-j intent for the Account is still inside its retry
+ * window. The route is registered before the bilateral swap_offer exists, so
+ * looking only at offers cannot prevent a second intent from racing the first.
+ */
+export const hasPendingBootstrapIntentAttempt = (
+  attemptedBootstrapIntentOrderIds: Map<string, number>,
+  offerIds: readonly string[],
+  nowMs: number = Date.now(),
+): boolean => offerIds.some(offerId =>
+  consumeExpiredBootstrapIntentAttempt(attemptedBootstrapIntentOrderIds, offerId, nowMs));
 export const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
   Number(process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '1000'),
@@ -2043,6 +2058,12 @@ export const hasFinalizedMarketMakerCrossOffer = (env: RuntimeReplica, spec: Mar
   if (!route) return false;
   return Boolean(getCommittedSourceAccountCrossOffer(env, route));
 };
+
+export const hasUncommittedMarketMakerCrossOffer = (
+  env: RuntimeReplica,
+  specs: readonly MarketMakerOfferSpec[],
+): boolean => specs.some(spec =>
+  hasMarketMakerCrossOffer(env, spec) && !hasFinalizedMarketMakerCrossOffer(env, spec));
 
 export const hasMarketMakerAccountBacklog = (env: RuntimeReplica, entityId: string, hubEntityId: string): boolean => {
   const account = getAccountReplica(env, entityId, hubEntityId);

@@ -48,6 +48,7 @@ import { computeProfileHash, signProfileRuntimeRoute } from '../../../entity/pro
 import { createTestJReplica } from '../.././helpers/j-replica';
 import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-witness';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
+import { requireEntityEncryptionPrivateKey } from '../../../entity/auth/crypto';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const x25519 = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -248,6 +249,8 @@ describe('runtime recovery tower', () => {
     expect(restoredEnv.runtimeMempool).toEqual(env.runtimeMempool);
     expect(restoredEnv.runtimeConfig).toEqual(env.runtimeConfig);
     expect(restoredEnv.infrastructure?.maxEntityInputsPerFrame).toBe(123);
+    expect(requireEntityEncryptionPrivateKey(restoredEnv, entityId))
+      .toBe(requireEntityEncryptionPrivateKey(env, entityId));
     expect(restoredEnv.pendingOutputs).toEqual(env.pendingOutputs);
     expect(restoredEnv.networkInbox).toEqual(env.networkInbox);
   });

@@ -1,11 +1,37 @@
-import { ethers } from 'ethers';
+import { ethers, getBytes } from 'ethers';
+import {
+  assertLocalEntityCryptoKeys,
+  provisionEntityEncryptionKey,
+} from '../../entity/auth/crypto';
 import { safeStringify } from '../../protocol/serialization';
+import { deriveEntityEncryptionPrivateKey } from '../../runtime/registration/entity-creation/crypto';
 import type { RuntimeReplica } from '../../runtime/types';
 import { canonicalizeStorageAuditValue } from '../canonical-hash';
 import {
   buildReplayVerifiableRuntimeMachineSnapshot,
   projectReplayVerifiableRuntimeMachine,
 } from '../wal/snapshot';
+
+export const restoreEntityKeysFromAuthoritativeSnapshot = (
+  env: RuntimeReplica,
+): void => {
+  const retainedSeeds = env.infrastructure?.entityEncryptionSeeds;
+  if (!retainedSeeds) return;
+  for (const [entityId, seed] of retainedSeeds) {
+    provisionEntityEncryptionKey(
+      env,
+      entityId,
+      deriveEntityEncryptionPrivateKey(getBytes(seed), entityId),
+    );
+  }
+};
+
+export const restoreAndAssertLocalEntityCryptoKeys = (
+  env: RuntimeReplica,
+): void => {
+  restoreEntityKeysFromAuthoritativeSnapshot(env);
+  assertLocalEntityCryptoKeys(env);
+};
 
 const normalizeEmptyIngress = (
   machine: Record<string, unknown>,

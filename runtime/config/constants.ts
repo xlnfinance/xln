@@ -112,8 +112,11 @@ export const FINANCIAL = {
   /** Minimum payment amount (prevents dust spam) */
   MIN_PAYMENT_AMOUNT: 1n, // Smallest unit - actual dust prevention is per-token
 
-  /** Maximum credit limit in USDC (prevents unbounded credit) */
-  MAX_CREDIT_LIMIT: 1_000_000_000n * 10n ** 6n, // 1 billion USDC
+  /** Maximum bilateral credit limit in token base units. */
+  // Credit limits are token-base-unit values, so a USDC-denominated ceiling
+  // would silently reject ordinary 18-decimal assets. Keep one unit-agnostic
+  // bound large enough for bilateral credit while every payment remains U128.
+  MAX_CREDIT_LIMIT: (2n ** 128n - 1n) * 1000n,
 
   /** Maximum collateral per account (sanity check) */
   MAX_COLLATERAL: 2n ** 64n - 1n, // U64 max

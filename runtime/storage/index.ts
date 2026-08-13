@@ -732,7 +732,10 @@ export const recoverStorageDbFromHistory = async (options: {
       options.onPersistenceProgress?.('recovery-current-verified');
     } catch (error) {
       currentProjectionInvalid = true;
-      storageLog.warn('current_projection.invalid_rebuilding', {
+      // `current` is a disposable cache, never financial authority. Preserve
+      // the exact diagnostic, rebuild from verified WAL, and keep browser
+      // health warnings reserved for conditions requiring operator action.
+      storageLog.info('current_projection.rebuilding_from_wal', {
         error: error instanceof Error ? error.message : String(error),
         height: currentMaterializedHeight,
       });

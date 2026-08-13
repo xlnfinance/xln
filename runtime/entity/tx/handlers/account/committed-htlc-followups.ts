@@ -81,8 +81,12 @@ const applyPreparedHtlcOutcome = (
   prepared: PreparedHtlcEntry,
 ): void => {
   const inboundEntity = ctx.input.fromEntityId.toLowerCase();
-  if (ctx.newState.htlcRoutes.has(lock.hashlock) || prepared.outcome.kind === 'reject') {
-    const reason = ctx.newState.htlcRoutes.has(lock.hashlock)
+  const existingRoute = ctx.newState.htlcRoutes.get(lock.hashlock);
+  const closesOriginatedSelfCycle = prepared.outcome.kind === 'final'
+    && existingRoute?.originated === true
+    && !hasInboundHtlcRoute(existingRoute);
+  if ((existingRoute && !closesOriginatedSelfCycle) || prepared.outcome.kind === 'reject') {
+    const reason = existingRoute
       ? 'hashlock_already_active'
       : prepared.outcome.kind === 'reject' ? prepared.outcome.reason : 'hashlock_already_active';
     ctx.accountTxs.push({ accountId: inboundEntity, tx: {
@@ -91,11 +95,16 @@ const applyPreparedHtlcOutcome = (
     return;
   }
   if (prepared.outcome.kind === 'final') {
-    ctx.newState.htlcRoutes.set(lock.hashlock, {
-      hashlock: lock.hashlock, tokenId: lock.tokenId, amount: lock.amount,
-      ...(prepared.outcome.startedAtMs !== undefined ? { startedAtMs: prepared.outcome.startedAtMs } : {}),
-      inboundEntity, inboundLockId: lock.lockId, createdTimestamp: ctx.newState.timestamp,
-    });
+    if (closesOriginatedSelfCycle) {
+      existingRoute.inboundEntity = inboundEntity;
+      existingRoute.inboundLockId = lock.lockId;
+    } else {
+      ctx.newState.htlcRoutes.set(lock.hashlock, {
+        hashlock: lock.hashlock, tokenId: lock.tokenId, amount: lock.amount,
+        ...(prepared.outcome.startedAtMs !== undefined ? { startedAtMs: prepared.outcome.startedAtMs } : {}),
+        inboundEntity, inboundLockId: lock.lockId, createdTimestamp: ctx.newState.timestamp,
+      });
+    }
     ctx.accountTxs.push({ accountId: inboundEntity, tx: {
       type: 'htlc_resolve', data: { lockId: lock.lockId, outcome: 'secret', secret: prepared.outcome.secret },
     } });

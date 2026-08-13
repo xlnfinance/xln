@@ -1439,7 +1439,8 @@ test.describe('Rebalance E2E', () => {
       eventName: 'account_settled_finalized_bilateral',
       entityId,
       predicate: (event) =>
-        String(event.data?.accountId || '').toLowerCase() === hubId.toLowerCase(),
+        String(event.data?.accountId || '').toLowerCase() === hubId.toLowerCase()
+        && event.frameHeight > firstTrigger.committed.frameHeight,
     });
     const { phaseMarkers, debugErrors, frameEvents } = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
     const debugDump = buildRebalanceFailureDump({
@@ -1550,7 +1551,9 @@ test.describe('Rebalance E2E', () => {
       eventName: 'account_settled_finalized_bilateral',
       entityId,
       predicate: (event) =>
-        String(event.data?.accountId || '').toLowerCase() === hubId.toLowerCase(),
+        String(event.data?.accountId || '').toLowerCase() === hubId.toLowerCase()
+        && event.frameHeight > secondTrigger.committed.frameHeight
+        && event.frameHeight > firstSettlement.frameHeight,
     });
     expect(
       secondSecuredCycleMs,
@@ -1757,7 +1760,9 @@ test.describe('Rebalance E2E', () => {
       cursor: firstSettlementCursor,
       eventName: 'account_settled_finalized_bilateral',
       entityId,
-      predicate: (event) => persistedEventHasAccount(event, hubId),
+      predicate: (event) =>
+        persistedEventHasAccount(event, hubId)
+        && event.frameHeight > firstPersistTrigger.committed.frameHeight,
     });
     const claimSnapshotBeforeReload = await readAccountJEventClaims(page, hubId);
     const uniqueSettleKeysBeforeReload = new Set(
@@ -1840,7 +1845,10 @@ test.describe('Rebalance E2E', () => {
       cursor: secondSettlementCursor,
       eventName: 'account_settled_finalized_bilateral',
       entityId,
-      predicate: (event) => persistedEventHasAccount(event, hubId),
+      predicate: (event) =>
+        persistedEventHasAccount(event, hubId)
+        && event.frameHeight > secondPersistTrigger.committed.frameHeight
+        && event.frameHeight > firstSettlement.frameHeight,
     });
     const claimSnapshotAfterReload = await readAccountJEventClaims(page, hubId);
     const uniqueSettleKeysAfterReload = new Set(

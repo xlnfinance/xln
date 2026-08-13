@@ -113,14 +113,14 @@ function accountHasLiveLockReference(state: EntityState, counterpartyId: string 
   );
 }
 
-export function pruneSettledOriginatedHtlcRoutes(state: EntityState, timestamp: number): number {
-  let pruned = 0;
-  for (const [hashlock, route] of state.htlcRoutes.entries()) {
+export function assertOriginatedHtlcRoutesHaveLiveLocks(state: EntityState): void {
+  for (const route of state.htlcRoutes.values()) {
     if (route.inboundEntity || !route.outboundLockId) continue;
     if (accountHasLiveLockReference(state, route.outboundEntity, route.outboundLockId)) continue;
-    state.lockBook.delete(route.outboundLockId);
-    terminateHtlcRoute(state, hashlock, timestamp);
-    pruned += 1;
+    // Absence is not proof of settlement. A committed resolve/timeout/error
+    // must terminate the route explicitly after emitting its terminal effect.
+    // Silently pruning here can erase the only metadata that binds a later
+    // preimage reveal to its originating payment.
+    throw new Error(`HTLC_ORIGINATED_ROUTE_LIVE_LOCK_MISSING:${route.hashlock}:${route.outboundLockId}`);
   }
-  return pruned;
 }

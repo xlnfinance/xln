@@ -12,7 +12,10 @@ import {
   materializeHtlcPreparedInfraContext,
 } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
-import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
+import {
+  assertEntityInfraContextAuthority,
+  validateEntityInfraContext,
+} from '../frame/infra-context-validation';
 
 type ProposerInfraContext = EntityRuntimeContext & {
   gossip?: {
@@ -35,13 +38,17 @@ export const materializeEntityInfraContext = async (
   env: EntityRuntimeContext,
   replica: EntityReplica,
   proposalTxs: readonly EntityTx[],
+  options: { usePersistedReplayContext?: boolean } = {},
 ): Promise<EntityInfraContext> => {
   const entityId = replica.entityId.trim().toLowerCase();
   const proposerSignerId = replica.signerId.trim().toLowerCase();
-  const replayContext = env.infrastructure?.replayEntityContexts?.get(`${entityId}:${proposerSignerId}`);
+  const replayContext = options.usePersistedReplayContext === false
+    ? undefined
+    : env.infrastructure?.replayEntityContexts?.get(`${entityId}:${proposerSignerId}`);
   if (replayContext) {
-    await assertEntityInfraContextAuthority(env, replayContext, replica.state);
-    return structuredClone(replayContext);
+    const decodedReplayContext = validateEntityInfraContext(replayContext);
+    await assertEntityInfraContextAuthority(env, decodedReplayContext, replica.state);
+    return structuredClone(decodedReplayContext);
   }
   const htlcTxs = getEffectiveHtlcFrameTxs(replica.state, proposalTxs).filter(entityTxNeedsHtlcInfra);
   const needsHtlcInfra = htlcTxs.length > 0;
@@ -91,6 +98,7 @@ export const materializeEntityInfraContext = async (
     for (const routeEntityId of originated.route) routeEntityIds.add(routeEntityId);
     isEntityOnline(originated.nextHopEntityId);
   }
+  for (const observedEntityId of observedOnline.keys()) routeEntityIds.add(observedEntityId);
   const gossipProfiles = canonicalProfiles
     .filter(profile => routeEntityIds.has(profile.entityId.toLowerCase()))
     .sort((left, right) => compareStableText(left.entityId, right.entityId));
@@ -103,7 +111,7 @@ export const materializeEntityInfraContext = async (
       entityId: peerEntityId,
       online: observedOnline.get(peerEntityId) ?? isEntityOnline(peerEntityId),
     }));
-  const context: EntityInfraContext = {
+  const context = validateEntityInfraContext({
     version: 1,
     proposerReplicaId: `${entityId}:${proposerSignerId}`,
     entityId,
@@ -113,7 +121,7 @@ export const materializeEntityInfraContext = async (
     gossipProfiles,
     peerAssertions,
     htlc,
-  };
+  });
   await assertEntityInfraContextAuthority(env, context, replica.state);
   const byteLength = new TextEncoder().encode(encodeCanonicalConsensusValue(context)).byteLength;
   if (byteLength > LIMITS.MAX_FRAME_SIZE_BYTES) {

@@ -27,14 +27,22 @@ let localDebugEnv: RuntimeReplica | null = null;
 let localRuntimeEnv: RuntimeReplica | null = null;
 registerDebugSurface('env', () => localDebugEnv);
 registerDebugSurface('runtimeConnectivity', () => {
-  const p2p = localRuntimeEnv?.infrastructure?.p2p;
+  const selectedRuntimeId = String(get(activeRuntimeId) || '').toLowerCase();
+  const selectedEnv = selectedRuntimeId ? get(runtimes).get(selectedRuntimeId)?.env : null;
+  const runtimeEnv = unwrapLiveRuntimeEnv(selectedEnv) ?? localRuntimeEnv;
+  const p2p = runtimeEnv?.infrastructure?.p2p;
   return {
-    runtimeId: String(localRuntimeEnv?.runtimeId || ''),
+    selectedRuntimeId,
+    hasSelectedEnv: Boolean(selectedEnv),
+    runtimeId: String(runtimeEnv?.runtimeId || ''),
+    lifecyclePhase: runtimeEnv?.infrastructure?.lifecyclePhase ?? null,
+    loopActive: runtimeEnv?.infrastructure?.loopActive === true,
+    persistencePaused: runtimeEnv?.infrastructure?.persistencePaused === true,
     connected: Boolean(p2p?.isConnected?.()),
     connecting: Boolean(p2p?.isConnecting?.()),
     relayClientCount: p2p?.getRelayClientCount?.() ?? 0,
-    relayUrls: [...(localRuntimeEnv?.infrastructure?.lastP2PConfig?.relayUrls ?? [])],
-    profiles: (localRuntimeEnv?.gossip.getProfiles() ?? []).map(profile => ({
+    relayUrls: [...(runtimeEnv?.infrastructure?.lastP2PConfig?.relayUrls ?? [])],
+    profiles: (runtimeEnv?.gossip.getProfiles() ?? []).map(profile => ({
       entityId: profile.entityId,
       runtimeId: profile.runtimeId,
       wsUrl: profile.wsUrl,

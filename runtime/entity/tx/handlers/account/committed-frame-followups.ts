@@ -3,7 +3,7 @@ import type { EntityCandidateEffect, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../infra/debug-flags';
 import { cancelHook } from '../../../scheduler';
-import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../j-events-htlc/route-lifecycle';
+import { terminateHtlcRoute } from '../../j-events-htlc/route-lifecycle';
 import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../infra/logger';
 import type { AccountTxTarget } from './orderbook/queue';
@@ -125,5 +125,4 @@ export function applyCommittedAccountFrameFollowups(
     if (accountTx.type === 'j_event_claim') continue;
 
   }
-  pruneSettledOriginatedHtlcRoutes(newState, newState.timestamp);
 }

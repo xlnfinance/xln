@@ -12,9 +12,6 @@ import { ensureDelta } from '../../delta-utils';
 import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
-// Maximum credit limit (prevents overflow attacks)
-export const MAX_CREDIT_LIMIT = FINANCIAL.MAX_PAYMENT_AMOUNT * 1000n; // 1000x max payment
-
 export function handleSetCreditLimit(
   account: AccountState,
   accountTx: Extract<AccountTx, { type: 'set_credit_limit' }>,
@@ -26,9 +23,9 @@ export function handleSetCreditLimit(
   if (amount < 0n) {
     return accountTxValidationRejected(`Credit limit cannot be negative: ${amount}`, events);
   }
-  if (amount > MAX_CREDIT_LIMIT) {
+  if (amount > FINANCIAL.MAX_CREDIT_LIMIT) {
     return accountTxValidationRejected(
-      `Credit limit exceeds maximum: ${amount} > ${MAX_CREDIT_LIMIT}`,
+      `Credit limit exceeds maximum: ${amount} > ${FINANCIAL.MAX_CREDIT_LIMIT}`,
       events,
     );
   }

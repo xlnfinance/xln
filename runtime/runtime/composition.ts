@@ -374,4 +374,5 @@ const runtimeCommandApi = createRuntimeCommandApi({
 });
 
 export const submitCrossJurisdictionIntent = runtimeCommandApi.submitCrossJurisdictionIntent;
+export const submitCrossJurisdictionIntents = runtimeCommandApi.submitCrossJurisdictionIntents;
 export const submitCrossJurisdictionSwap = runtimeCommandApi.submitCrossJurisdictionSwap;

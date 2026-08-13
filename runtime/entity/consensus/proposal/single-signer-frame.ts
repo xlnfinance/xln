@@ -155,7 +155,12 @@ const buildSingleSignerFrame = async (
   const applyFrame = context.promoteCandidateState
     ? applyRuntimeOwnedEntityFrame
     : applyEntityFrame;
-  const entityContext = await materializeEntityInfraContext(env, workingReplica, proposalTxs);
+  const entityContext = await materializeEntityInfraContext(
+    env,
+    workingReplica,
+    proposalTxs,
+    { usePersistedReplayContext: context.usePersistedReplayContext },
+  );
   await assertHtlcPreparedInfraContext({
     state: workingReplica.state,
     proposalTxs,

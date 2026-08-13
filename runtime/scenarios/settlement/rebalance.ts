@@ -24,6 +24,7 @@ import {
   findReplica,
   processJEvents,
   setScenarioStorageEnabled,
+  enableStrictScenario,
 } from '../harness/helpers';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { deriveDelta } from '../../account/utils';
@@ -100,6 +101,7 @@ export async function runRebalanceScenario(): Promise<void> {
   env.state.timestamp = 1000000;
   env.scenarioMode = true;
   setScenarioStorageEnabled(env, false);
+  const restoreStrict = enableStrictScenario(env, 'rebalance');
 
   ensureSignerKeysFromSeed(env, ['2','3','4','5','6'], 'rebalance');
 
@@ -856,6 +858,7 @@ export async function runRebalanceScenario(): Promise<void> {
 
   // Cleanup
   await jadapter.close();
+  restoreStrict();
 }
 
 // Run if executed directly

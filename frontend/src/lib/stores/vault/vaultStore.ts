@@ -783,12 +783,15 @@ async function ensureRuntimePipelineAlive(runtime: Runtime | null, xln: XLNModul
 
   let p2p = getRuntimeP2PHandle(xln, env);
   if (!p2p) {
-    xln.startP2P(env, {
+    const startedP2P = xln.startP2P(env, {
       signerId: resolvedRuntimeId,
       relayUrls: resolveRelayUrls(),
       gossipPollMs: BROWSER_GOSSIP_POLL_MS,
     });
-    p2p = getRuntimeP2PHandle(xln, env);
+    p2p = getRuntimeP2PHandle(xln, env) ?? startedP2P;
+    if (!p2p) {
+      throw new Error(`RUNTIME_P2P_START_FAILED:${resolvedRuntimeId}`);
+    }
   } else if (typeof p2p.isConnected === 'function' && !p2p.isConnected()) {
     const waitDeadline = Date.now() + 2_000;
     while (Date.now() < waitDeadline) {
@@ -1775,6 +1778,7 @@ export const vaultOperations = {
     runtimeOperations.setActiveRuntimeId(normalizedRuntimeId);
     registerRuntimeEnvChange(normalizedRuntimeId, restoredEnv, xln);
     setXlnEnvironment(restoredEnv);
+    await ensureRuntimePipelineAlive({ ...updatedRuntime, env: restoredEnv }, xln);
     this.syncRuntime({ ...updatedRuntime, env: restoredEnv });
     toasts.info('Runtime restored from encrypted backup', 6_000);
     return updatedRuntime;
@@ -1881,6 +1885,10 @@ export const vaultOperations = {
   // Create new runtime from seed
   async createRuntime(name: string, seed: string, options: CreateRuntimeOptions = {}): Promise<Runtime> {
     registerRuntimeResumeListener();
+    // Initialization owns restoration and active-Runtime selection. Creating a
+    // Runtime concurrently lets its final empty selection overwrite the newly
+    // restored Runtime and immediately quiesce its transport.
+    if (initializePromise && !initialized) await initializePromise;
     const markPerf = (_step: string): void => {};
     const flushPerf = (_status: 'ok' | 'existing'): void => {};
 
@@ -2266,17 +2274,10 @@ export const vaultOperations = {
       registerRuntimeEnvChange(runtimeId, newEnv!, xln);
       markPerf('attach_runtime_to_store');
 
-      ensureRuntimeLoopRunning(newEnv!, xln, `create:${runtimeId.slice(0, 12)}`);
-
-      // Start P2P for this runtime's env (one WS per runtime, stays alive across switches)
-      if (xln.startP2P) {
-        const relayUrls = resolveRelayUrls();
-        xln.startP2P(newEnv!, {
-          signerId: runtimeId,
-          relayUrls,
-          gossipPollMs: BROWSER_GOSSIP_POLL_MS,
-        });
-      }
+      // Fresh and recovered runtimes share one lifecycle boundary. Keeping loop
+      // and P2P startup here prevents a restored Runtime from becoming a valid
+      // but permanently offline state.
+      await ensureRuntimePipelineAlive({ ...runtime, env: newEnv! }, xln);
       markPerf('start_p2p');
 
       // Sync metadata (no P2P — already started above)

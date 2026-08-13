@@ -422,13 +422,17 @@ export const assertCertifiedOutputSemanticIdentity = (
   const native = nativeOutputIdentity(entityTxs);
   if (native) {
     if (origin.lane !== native.lane || origin.sequence !== native.sequence) {
-      throw new Error(
+      throw rejectFailure(
+        'CONSENSUS_OUTPUT_NATIVE_IDENTITY_MISMATCH',
         `CONSENSUS_OUTPUT_NATIVE_IDENTITY_MISMATCH:${origin.lane}:${origin.sequence}:` +
           `${native.lane}:${native.sequence}`,
       );
     }
   } else if (origin.lane !== 'generic') {
-    throw new Error(`CONSENSUS_OUTPUT_GENERIC_LANE_INVALID:${origin.lane}`);
+    throw rejectFailure(
+      'CONSENSUS_OUTPUT_GENERIC_LANE_INVALID',
+      `CONSENSUS_OUTPUT_GENERIC_LANE_INVALID:${origin.lane}`,
+    );
   }
   const semanticHash = hashCertifiedEntityOutputSemantic(
     origin.sourceEntityId,
@@ -438,7 +442,10 @@ export const assertCertifiedOutputSemanticIdentity = (
     entityTxs,
   );
   if (semanticHash !== origin.semanticHash.toLowerCase()) {
-    throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_HASH_MISMATCH:${origin.sourceEntityId}:${origin.sequence}`);
+    throw rejectFailure(
+      'CONSENSUS_OUTPUT_SEMANTIC_HASH_MISMATCH',
+      `CONSENSUS_OUTPUT_SEMANTIC_HASH_MISMATCH:${origin.sourceEntityId}:${origin.sequence}`,
+    );
   }
   return semanticHash;
 };
@@ -594,7 +601,10 @@ export const assertCertifiedEntityOutputWitnesses = async (
       },
     );
     if (!verified.valid) {
-      throw new Error(`CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID:${witness.context}:${witness.hash}`);
+      throw rejectFailure(
+        'CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID',
+        `CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID:${witness.context}:${witness.hash}`,
+      );
     }
   }
 };

@@ -1865,7 +1865,7 @@ const selectQuoteEngineCrossJobs = (
 ): Array<{ index: number; job: CrossQuoteJob }> => {
   const cursor = mode === 'bootstrap' ? state.bootstrapCrossCursor : state.steadyCrossCursor;
   const limit =
-    mode === 'bootstrap' ? jobs.length : Math.min(MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK, jobs.length);
+    mode === 'bootstrap' ? Math.min(1, jobs.length) : Math.min(MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK, jobs.length);
   const selection = selectMarketMakerCrossQuoteJobs(jobs, cursor, limit);
   if (mode === 'steady') state.steadyCrossCursor = selection.nextCursor;
   return selection.jobs;

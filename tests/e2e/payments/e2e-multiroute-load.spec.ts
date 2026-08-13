@@ -53,6 +53,7 @@ import {
 } from '../../utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from '../../utils/e2e-connect';
 import { enqueueEntityTxs } from '../../utils/runtime/e2e-runtime-input';
+import { expectUiPaymentNoRoute } from '../../utils/runtime/e2e-pay-ui';
 import { getTokenInfo } from '../../../runtime/account/utils';
 import { closeRuntimeContext } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 
@@ -703,22 +704,14 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     const aliceCapBefore = await outCap(pageFor('alice'), users.alice!.entityId, h1!);
     const overAmount = aliceCapBefore + toWei(1); // more than Alice has
 
-    await enqueueEntityTxs(pageFor('alice'), users.alice!.entityId, users.alice!.signerId, [{
-      type: 'htlcPayment',
-      data: {
-        targetEntityId: users.dave!.entityId,
-        tokenId: 1,
-        amount: overAmount,
-        maxSenderDebit: overAmount * 2n,
-        route: [users.alice!.entityId, h1!, users.dave!.entityId],
-        deliveryMode: 'instant',
-      },
-    }]);
-
-    // Wait for any state changes to settle
-    await pageFor('alice').waitForTimeout(5000);
+    await expectUiPaymentNoRoute(pageFor('alice'), {
+      recipientEntityId: users.dave!.entityId,
+      tokenId: 1,
+      amount: overAmount,
+      routeEntityIds: [],
+    });
     const aliceCapAfter = await outCap(pageFor('alice'), users.alice!.entityId, h1!);
-    console.log('[E2E] Overspend payment enqueued; verifying balance stayed unchanged');
+    console.log('[E2E] Overspend rejected before enqueue; verifying balance stayed unchanged');
     console.log(`[E2E] Alice OUT: ${formatUsd(aliceCapBefore)} -> ${formatUsd(aliceCapAfter)}`);
     expect(aliceCapAfter, 'TC16: Overspend must NOT change Alice balance').toBe(aliceCapBefore);
     console.log('[E2E] TC16 PASS: Overspend rejected');

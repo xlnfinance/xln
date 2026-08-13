@@ -9,7 +9,7 @@ import {
 import { applyCommittedAccountFrameFollowups } from '../../../entity/tx/handlers/account/index';
 import { applyHtlcSecretFollowups } from '../../../entity/tx/handlers/account/committed-htlc-followups';
 import { handleResolveHtlcLockEntityTx } from '../../../entity/tx/handlers/htlc/direct';
-import { pruneSettledOriginatedHtlcRoutes } from '../../../entity/tx/j-events-htlc/route-lifecycle';
+import { assertOriginatedHtlcRoutesHaveLiveLocks } from '../../../entity/tx/j-events-htlc/route-lifecycle';
 import { publishEntityCandidateEffects } from '../../../runtime/observability/env-events';
 import { createEmptyEnv } from '../../../runtime';
 import type { AccountReplica } from '../../../types/account';
@@ -690,15 +690,17 @@ describe('htlc event contract and dispute tail', () => {
       createdTimestamp: replica.state.timestamp - 1000,
     });
 
-    expect(pruneSettledOriginatedHtlcRoutes(replica.state, replica.state.timestamp)).toBe(0);
+    expect(() => assertOriginatedHtlcRoutesHaveLiveLocks(replica.state)).not.toThrow();
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(true);
 
     account.mempool = [];
-    expect(pruneSettledOriginatedHtlcRoutes(replica.state, replica.state.timestamp)).toBe(1);
-    expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
+    expect(() => assertOriginatedHtlcRoutesHaveLiveLocks(replica.state)).toThrow(
+      `HTLC_ORIGINATED_ROUTE_LIVE_LOCK_MISSING:${hashlock}:${outboundLockId}`,
+    );
+    expect(replica.state.htlcRoutes.has(hashlock)).toBe(true);
   });
 
-  test('prunes originated outbound route when only stale committed frame still names the lock', () => {
+  test('rejects an originated route whose lock exists only in historical committed evidence', () => {
     const entityId = `0x${'11'.repeat(32)}`;
     const counterpartyId = `0x${'22'.repeat(32)}`;
     const outboundLockId = 'lock-stale-current-frame';
@@ -737,8 +739,10 @@ describe('htlc event contract and dispute tail', () => {
       createdTimestamp: replica.state.timestamp - 1000,
     });
 
-    expect(pruneSettledOriginatedHtlcRoutes(replica.state, replica.state.timestamp)).toBe(1);
-    expect(replica.state.lockBook.has(outboundLockId)).toBe(false);
-    expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
+    expect(() => assertOriginatedHtlcRoutesHaveLiveLocks(replica.state)).toThrow(
+      `HTLC_ORIGINATED_ROUTE_LIVE_LOCK_MISSING:${hashlock}:${outboundLockId}`,
+    );
+    expect(replica.state.lockBook.has(outboundLockId)).toBe(true);
+    expect(replica.state.htlcRoutes.has(hashlock)).toBe(true);
   });
 });

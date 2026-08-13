@@ -39,8 +39,9 @@ test.describe('Browser storage writer serialization', () => {
     // The test imports the exact browser bundle that production loads.
     await page.goto('/llms.txt', { waitUntil: 'domcontentloaded' });
     const namespace = `xln-browser-storage-writer-${process.pid}-${testInfo.workerIndex}`;
+    const runtimeId = `0x${(process.pid + testInfo.workerIndex + 1).toString(16).padStart(40, '0')}`;
 
-    const result = await page.evaluate(async (dbNamespace): Promise<StorageWriterResult> => {
+    const result = await page.evaluate(async ({ dbNamespace, runtimeId }): Promise<StorageWriterResult> => {
       const runtimeUrl = new URL(`/runtime.js?v=storage-writer-lock-${Date.now()}`, window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
       (window as typeof window & { XLN?: typeof XLN }).XLN = XLN;
@@ -64,7 +65,7 @@ test.describe('Browser storage writer serialization', () => {
 
       const makeEnv = (seed: string, height: number, timestamp: number) => {
         const env = XLN.createEmptyEnv(seed);
-        env.runtimeId = dbNamespace;
+        env.runtimeId = runtimeId;
         env.dbNamespace = dbNamespace;
         env.state.height = height;
         env.state.timestamp = timestamp;
@@ -176,7 +177,7 @@ test.describe('Browser storage writer serialization', () => {
         await closeEnv(envA);
         await closeEnv(envB);
       }
-    }, namespace);
+    }, { dbNamespace: namespace, runtimeId });
 
     expect(result.beforeRelease).toEqual({
       held: 1,

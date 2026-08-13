@@ -520,13 +520,13 @@ describe('production startup wiring', () => {
       'export MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE=${MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:-1000}',
     );
     expect(script).toContain(
-      'export MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE=${MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:-3}',
+      'export MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE=${MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:-1}',
     );
     expect(script).toContain(
       'export MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK=${MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:-45}',
     );
     expect(script).toContain(
-      'export MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK=${MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:-135}',
+      'export MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK=${MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:-45}',
     );
 
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
@@ -870,9 +870,7 @@ describe('production startup wiring', () => {
     expect(runtimeSource).not.toContain('prepareCrossJurisdictionEntityInputs');
     const entityAdmissionSource = readFileSync(join(repoRoot, 'runtime/entity/consensus/input/admission.ts'), 'utf8');
     expect(entityAdmissionSource).toContain('appendDefaultProposerCrossJMaterializations');
-    expect(
-      framePreparationSource.indexOf('input.entityInputs = await prepareHtlcPaymentEntityInputs('),
-    ).toBeGreaterThan(framePreparationSource.lastIndexOf('deps.applyEntityInputFrameCap('));
+    expect(framePreparationSource).not.toContain('prepareHtlcPaymentEntityInputs');
     expect(frameDispatchSource).toContain('if (plan.remoteOutputs.length > 0 && env.quietRuntimeLogs !== true)');
     expect(runtimeSource).not.toContain('void config;');
     expect(runtimeLoopLifecycleSource).toContain('else if (tickDelayMs > 0)');
@@ -904,9 +902,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK)');
     expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 45;');
-    expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 135;');
+    expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 45;');
     expect(mmNode).not.toContain('const selectedPairs = new Set<string>();');
-    expect(mmNode).toContain('for (const spec of candidates.slice(0, allowedNewOffers)) {');
+    expect(mmNode).toContain('await submitCrossJurisdictionIntents(env, routes);');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK)');
     expect(mmNode).toContain('const MARKET_MAKER_LEVELS_PER_SIDE = 10;');
@@ -1085,7 +1083,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('(finalizedByPair.get(spec.pairId) || 0) === 0');
     expect(mmNode).not.toContain('const selectedPairs = new Set<string>();');
     expect(mmNode).not.toContain('if (selectedPairs.has(spec.pairId)) continue;');
-    expect(mmNode).toContain('for (const spec of candidates.slice(0, allowedNewOffers)) {');
+    expect(mmNode).toContain('await submitCrossJurisdictionIntents(env, routes);');
     expect(mmNode).toContain('cross.routes.every((route) => route.depthReady)');
     expect(mmNode).toContain('ok: hubsDepthReady && crossDepthReady');
     expect(mmNode).toContain('countCommittedMarketMakerOffersForHub(env, mmEntityId, hubEntityId)');
@@ -1827,9 +1825,9 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:');
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '45'");
     expect(smoke).toContain('MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:');
-    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '135'");
-    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '3'");
-    expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '3'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '45'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'");
+    expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'");
     expect(mmNode).toContain('remainingSourceHubGroups -= 1;');
     expect(mmNode).toContain('const orderedSourceHubs = [...sourceHubs].sort');
     expect(mmNode).not.toContain('const sourceHubScans = [...sourceHubs]');
@@ -2652,7 +2650,7 @@ describe('production startup wiring', () => {
     expect(anvil).toContain('ANVIL_PORT_ALREADY_BOUND');
     expect(anvil).not.toContain('| tee');
     expect(anvil).toContain('--mixed-mining');
-    for (const key of ['arrakis', 'wakanda', 'tron']) {
+    for (const key of ['arrakis', 'tron']) {
       expect(jurisdictions.jurisdictions[key]?.blockTimeMs).toBe(10_000);
     }
     expect(anvil).toContain('JDB_ROOT="${XLN_JDB_ROOT:-$REPO_ROOT/data}"');

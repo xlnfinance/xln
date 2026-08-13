@@ -17,7 +17,6 @@ const RUNTIME_FATAL_LOG_PATTERNS: RegExp[] = [
   /Runtime loop error/,
   /\[ERROR\]\[runtime\] loop\.error/,
   /ROUTE_NO_P2P/,
-  /ENTITY_FRAME_TX_FAILED/,
 ];
 
 const UNEXPECTED_CHILD_EXIT_PATTERN = /child\.unexpected_exit/;

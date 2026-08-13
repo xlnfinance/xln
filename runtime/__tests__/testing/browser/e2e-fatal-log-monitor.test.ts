@@ -85,6 +85,19 @@ test('cross-j pair-drop warnings remain observable without killing the E2E stack
   });
 });
 
+test('typed Entity transaction rejection remains observable without aborting the E2E stack', () => {
+  withLog(path => {
+    const scanner = createIncrementalRuntimeFatalLogScanner(path);
+    appendFileSync(
+      path,
+      '[INFO][runtime.entity_inputs] entity_input.rejected '
+      + '{"cause":"ENTITY_FRAME_TX_FAILED: type=htlcPayment '
+      + 'error=HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT"}\n',
+    );
+    expect(scanner.scan()).toBeNull();
+  });
+});
+
 test('recoverable child exits remain observable without aborting the E2E stack', () => {
   withLog(path => {
     const scanner = createIncrementalRuntimeFatalLogScanner(path);
