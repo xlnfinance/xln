@@ -369,7 +369,7 @@ describe('production startup wiring', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vault/vaultStore.ts'), 'utf8');
 
-    expect(runtimeCreation).toContain("url.searchParams.set('access', 'admin')");
+    expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
     expect(runtimeCreation).not.toContain("url.searchParams.set('allowPartial', '1')");
     expect(xlnStore).toContain("importSource.searchParams.set('access', 'admin')");
     expect(xlnStore).not.toContain("importSource.searchParams.set('allowPartial', '1')");

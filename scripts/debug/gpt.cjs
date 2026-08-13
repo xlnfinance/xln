@@ -42,6 +42,30 @@ const PRODUCTION_CONTRACT_FILES = discoverSourceFiles(path.join(PROJECT_ROOT, 'j
   excludeFiles: ['console.sol'],
 }).filter((file) => file.endsWith('.sol') && !file.endsWith('Mock.sol'));
 
+// Every non-Solidity audit pack carries the durable Runtime spine. Focused
+// packs still need this context: without the WAL boundary, recovery rules,
+// Merkle implementation, and R/E/A roots an auditor cannot distinguish a
+// locally valid transition from a durably committed one. These paths are
+// deliberately explicit so a move fails generation instead of silently
+// dropping a critical authority or persistence boundary.
+const CORE_CRITICAL_RUNTIME_FILES = [
+  'runtime.ts',
+  'runtime/frame/process.ts',
+  'runtime/input-pipeline/input-queue.ts',
+  'storage/index.ts',
+  'storage/commit/commit.ts',
+  'storage/wal/index.ts',
+  'storage/wal/hash.ts',
+  'storage/wal/snapshot.ts',
+  'storage/recovery/load.ts',
+  'storage/recovery/restore.ts',
+  'storage/read/live-integrity.ts',
+  'storage/canonical-hash.ts',
+  'protocol/state/radix-merkle.ts',
+  'entity/consensus/state-root.ts',
+  'account/commitment/state-root.ts',
+];
+
 function resolveGitDir(projectRoot) {
   const dotGit = path.join(projectRoot, '.git');
   if (!fs.existsSync(dotGit)) return null;
@@ -110,9 +134,9 @@ const CORE_FILES = {
     'runtime.ts',            // Narrow public facade
     'runtime/composition.ts', // Runtime composition root and dependency wiring
     'runtime/frame/process.ts', // take -> apply -> WAL -> install -> dispatch pipeline
-    'runtime/input-queue.ts', // The single Runtime mempool
-    'runtime/output-routing.ts', // Post-commit output routing
-    'runtime/live-restore.ts', // Durable Runtime restore boundary
+    'runtime/input-pipeline/input-queue.ts', // The single Runtime mempool
+    'runtime/routing/output-routing.ts', // Post-commit output routing
+    'runtime/recovery/live-restore.ts', // Durable Runtime restore boundary
     'entity/consensus/index.ts',   // Entity input -> candidate -> Hanko certificate -> commit
     'account/consensus/index.ts',  // Bilateral account consensus between entities
     'account/input.ts',      // Canonical AccountInput boundary
@@ -137,7 +161,7 @@ const CORE_FILES = {
     'entity/tx/handlers/dispute/index.ts',         // Dispute/salvage gateway and evidence handling
 
     // Swaps, orderbooks, and cross-jurisdiction markets (critical for current product)
-    'runtime/swap-pairs.ts',                 // Canonical same-chain swap pair orientation and policies
+    'runtime/finance/swap-pairs.ts',         // Canonical same-chain swap pair orientation and policies
     'orderbook/swap-execution.ts',                     // Swap lifecycle helpers and terminal settlement summaries
     'orderbook/swap-keys.ts',                          // Swap/order identifier keys and namespacing
     'orderbook/open-swap-offers.ts',                   // Open swap offer projection
@@ -167,7 +191,7 @@ const CORE_FILES = {
     'account/tx/handlers/swap/resolve/index.ts',   // Swap settlement / hashladder resolution
     'account/tx/handlers/swap/lifecycle/cancel.ts',    // Swap cancellation
     'account/tx/handlers/swap/cross-fill-ack/index.ts', // Cross-j fill acknowledgement processing
-    'orderbook/cross-j.ts',                  // Cross-j book types and conversion helpers
+    'orderbook/cross-j/index.ts',            // Cross-j book types and conversion helpers
     'network/relay/market/snapshot.ts',            // Market snapshot projection
     'network/relay/market/subscriptions.ts',       // Orderbook streaming subscriptions
     'network/relay/market/subscription-limiter.ts', // Stream rate limiting
@@ -307,12 +331,12 @@ const CROSS_FILES = {
     'runtime.ts',
     'runtime/composition.ts',
     'runtime/frame/process.ts',
-    'runtime/input-queue.ts',
-    'runtime/live-restore.ts',
+    'runtime/input-pipeline/input-queue.ts',
+    'runtime/recovery/live-restore.ts',
     'runtime/jurisdiction-api.ts',
-    'runtime/swap-pairs.ts',
-    'runtime/output-routing.ts',
-    'runtime/j-submit.ts',
+    'runtime/finance/swap-pairs.ts',
+    'runtime/routing/output-routing.ts',
+    'runtime/jurisdiction/j-submit.ts',
     'account/input.ts',
     'account/settlement/j-finality.ts',
     'entity/consensus/index.ts',
@@ -369,7 +393,7 @@ const CROSS_FILES = {
     'orderbook/index.ts',
     'orderbook/types.ts',
     'orderbook/core.ts',
-    'orderbook/cross-j.ts',
+    'orderbook/cross-j/index.ts',
     'orderbook/validity.ts',
     'network/relay/market/snapshot.ts',
     'network/relay/market/subscription-limiter.ts',
@@ -449,11 +473,11 @@ const RUNTIME_FILES = {
     'runtime.ts',
     'runtime/composition.ts',
     'runtime/frame/process.ts',
-    'runtime/input-queue.ts',
-    'runtime/live-restore.ts',
-    'runtime/tx-handlers.ts',
-    'runtime/output-routing.ts',
-    'runtime/j-submit.ts',
+    'runtime/input-pipeline/input-queue.ts',
+    'runtime/recovery/live-restore.ts',
+    'runtime/transactions/tx-handlers.ts',
+    'runtime/routing/output-routing.ts',
+    'runtime/jurisdiction/j-submit.ts',
     'entity/consensus/index.ts',
     'entity/consensus/frame.ts',
     'entity/consensus/input/hanko-witness.ts',
@@ -503,7 +527,7 @@ const RUNTIME_FILES = {
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
-    'runtime/env-events.ts',
+    'runtime/observability/env-events.ts',
     'infra/logger.ts',
     'jurisdiction/machine/jurisdiction-runtime/index.ts',
     'jurisdiction/adapter/core/config.ts',
@@ -558,7 +582,7 @@ const ORDERBOOK_FILES = {
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
-    'runtime/swap-pairs.ts',
+    'runtime/finance/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
     'orderbook/open-swap-offers.ts',
@@ -577,7 +601,7 @@ const ORDERBOOK_FILES = {
     'orderbook/index.ts',
     'orderbook/types.ts',
     'orderbook/core.ts',
-    'orderbook/cross-j.ts',
+    'orderbook/cross-j/index.ts',
     'orderbook/validity.ts',
     'network/relay/market/snapshot.ts',
     'network/relay/market/subscription-limiter.ts',
@@ -626,7 +650,7 @@ const SWAP_FILES = {
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
-    'runtime/swap-pairs.ts',
+    'runtime/finance/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
     'orderbook/open-swap-offers.ts',
@@ -1350,6 +1374,15 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
   const runtimeDir = path.join(projectRoot, 'runtime');
   const docsDir = path.join(projectRoot, 'docs');
   const frontendDir = path.join(projectRoot, 'frontend');
+  const resolvedFileGroups = solOnly
+    ? fileGroups
+    : {
+        ...fileGroups,
+        runtime: uniqueFiles([
+          ...CORE_CRITICAL_RUNTIME_FILES,
+          ...fileGroups.runtime,
+        ]),
+      };
 
   // Track file sizes for token breakdown
   const fileStats = [];
@@ -1358,7 +1391,7 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
   const allFiles = [];
 
   addFiles({
-    files: fileGroups.contracts,
+    files: resolvedFileGroups.contracts,
     baseDir: contractsDir,
     statPrefix: 'contracts/',
     outputPrefix: 'jurisdictions/contracts/',
@@ -1369,7 +1402,7 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
   // Skip runtime/docs/frontend if --sol flag is present
   if (!solOnly) {
     addFiles({
-      files: fileGroups.root || [],
+      files: resolvedFileGroups.root || [],
       baseDir: projectRoot,
       statPrefix: '',
       outputPrefix: '',
@@ -1378,7 +1411,7 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
     });
 
     addFiles({
-      files: fileGroups.runtime,
+      files: resolvedFileGroups.runtime,
       baseDir: runtimeDir,
       statPrefix: 'runtime/',
       outputPrefix: 'runtime/',
@@ -1387,7 +1420,7 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
     });
 
     addFiles({
-      files: fileGroups.docs,
+      files: resolvedFileGroups.docs,
       baseDir: docsDir,
       statPrefix: 'docs/',
       outputPrefix: 'docs/',
@@ -1396,7 +1429,7 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
     });
 
     addFiles({
-      files: fileGroups.swapUi,
+      files: resolvedFileGroups.swapUi,
       baseDir: frontendDir,
       statPrefix: 'frontend/',
       outputPrefix: 'frontend/',
@@ -1405,7 +1438,7 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
     });
 
     addFiles({
-      files: fileGroups.tests,
+      files: resolvedFileGroups.tests,
       baseDir: projectRoot,
       statPrefix: '',
       outputPrefix: '',
@@ -1415,7 +1448,7 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
 
     if (includeFrontend) {
       addFiles({
-        files: fileGroups.frontend,
+        files: resolvedFileGroups.frontend,
         baseDir: frontendDir,
         statPrefix: 'frontend/',
         outputPrefix: 'frontend/',
@@ -1437,7 +1470,7 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
     frontendDir,
     totalTokens,
     includeFrontend,
-    fileGroups,
+    resolvedFileGroups,
     profile,
   );
   let output = overview;
@@ -1448,7 +1481,7 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
     output += content + '\n';
   });
 
-  return { output, fileStats, overview, allFiles, fileGroups };
+  return { output, fileStats, overview, allFiles, fileGroups: resolvedFileGroups };
 }
 
 function makeChunkPreamble({ outputFilename, partIndex, totalParts, allChunkNames, files }) {
