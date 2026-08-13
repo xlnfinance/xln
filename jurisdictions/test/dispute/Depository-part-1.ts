@@ -20,22 +20,14 @@ import { createWatchedErc20TokenReader } from '../../../runtime/jurisdiction/ada
 const abi = ethers.AbiCoder.defaultAbiCoder();
 const COOPERATIVE_UPDATE = 0;
 const DISPUTE_PROOF = 1;
-const COOPERATIVE_DISPUTE_PROOF = 3;
 const MAX_FILL_RATIO = 65535n;
-const SETTLEMENT_DIFFS_ABI =
-  'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]';
+const SETTLEMENT_DIFFS_ABI = 'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]';
 const PROOF_BODY_ABI =
   'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 const TEST_WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('xln:test-watch-seed'));
 const TRANSFORMER_MODE = {
-  add: 0,
-  absolute: 1,
-  revertCall: 2,
-  exhaustGas: 3,
-  shortReturn: 4,
-  wrongLength: 5,
-  malformedReturn: 6,
-  returnBomb: 7,
+  add: 0, absolute: 1, revertCall: 2, exhaustGas: 3,
+  shortReturn: 4, wrongLength: 5, malformedReturn: 6, returnBomb: 7,
 } as const;
 type TestActor = {
   signer: HardhatEthersSigner;
@@ -114,29 +106,6 @@ async function disputeProofHash(
     abi.encode(
       ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bool', 'bytes32', 'bytes32'],
       [DISPUTE_PROOF, chainId, await depository.getAddress(), accountKey, nonce, proposerIsLeft, proofbodyHash, watchSeed],
-    ),
-  );
-}
-async function cooperativeDisputeProofHash(
-  depository: Depository,
-  accountKey: string,
-  nonce: bigint,
-  proofbody: Record<string, unknown>,
-  starterInitialArguments: string,
-): Promise<string> {
-  const chainId = (await ethers.provider.getNetwork()).chainId;
-  return ethers.keccak256(
-    abi.encode(
-      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-      [
-        COOPERATIVE_DISPUTE_PROOF,
-        chainId,
-        await depository.getAddress(),
-        accountKey,
-        nonce,
-        proofBodyHash(proofbody),
-        ethers.keccak256(starterInitialArguments),
-      ],
     ),
   );
 }
