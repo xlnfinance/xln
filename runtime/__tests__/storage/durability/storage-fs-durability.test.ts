@@ -148,7 +148,7 @@ describe('storage filesystem durability', () => {
       infrastructure: {
         storageDb: poisonedHandle,
         storageDbOpenPromise: Promise.resolve(true),
-        storageVerifiedCurrentHeight: 7,
+        storageCurrentProjectionVerified: true,
       },
     } as unknown as RuntimeReplica;
     const deps = {
@@ -161,7 +161,7 @@ describe('storage filesystem durability', () => {
     );
     expect(env.infrastructure?.storageDb).toBeNull();
     expect(env.infrastructure?.storageDbOpenPromise).toBeNull();
-    expect(env.infrastructure?.storageVerifiedCurrentHeight).toBeUndefined();
+    expect(env.infrastructure?.storageCurrentProjectionVerified).toBeUndefined();
 
     rejectClose!(new Error('injected close failure'));
     await expect(closing).rejects.toThrow('injected close failure');

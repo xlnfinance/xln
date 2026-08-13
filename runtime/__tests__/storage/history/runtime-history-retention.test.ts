@@ -109,7 +109,7 @@ test('production RuntimeReplica retains only the bounded canonical debug tail', 
       entityId: secondEntityId,
       signerId: secondSigner,
       data: {
-        isProposer: false,
+        isProposer: true,
         config: {
           mode: 'proposer-based',
           threshold: 1n,

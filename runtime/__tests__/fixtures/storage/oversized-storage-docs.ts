@@ -11,6 +11,7 @@ export const storagePairId = 'testnet:2/tron:1';
 
 const entityDoc = (bioLength: number): StorageEntityCoreDoc => ({
   entityId: storageEntityId,
+  entityEncryptionPublicKey: `0x${'66'.repeat(32)}`,
   height: 7,
   timestamp: 7_000,
   nonces: new Map(),
@@ -118,5 +119,7 @@ export const oversizedAccount = (): StorageAccountDoc => ({
   },
   proofBody: { tokenIds: [], deltas: [] },
   pendingWithdrawals: new Map(),
+  swapOrderHistory: new Map(),
+  swapClosedOrders: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
 });

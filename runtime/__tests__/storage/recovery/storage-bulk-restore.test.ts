@@ -19,6 +19,7 @@ const jurisdiction: JurisdictionConfig = {
 
 const makeState = (entityId: string, height: number): EntityState => ({
   entityId,
+  entityEncryptionPublicKey: `0x${'66'.repeat(32)}`,
   height,
   timestamp: height * 100,
   nonces: new Map(),

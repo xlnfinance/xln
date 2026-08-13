@@ -17,6 +17,7 @@ import type { StorageAccountDoc } from '../../../storage/types';
 import { entity, makeAccount } from '../.././helpers/cross-j';
 
 const digest = (byte: string): string => `0x${byte.repeat(32)}`;
+const TEST_LOCK_ID = digest('30');
 const object = (value: unknown): Record<string, unknown> => value as Record<string, unknown>;
 
 type ValidationContext = {
@@ -36,8 +37,8 @@ const makeFixture = async (): Promise<ValidationContext> => {
   const counterparty = entity('22');
   const account = makeAccount(owner, counterparty);
   const delta = account.state.deltas.get(1)!;
-  account.state.locks.set('lock-1', {
-    lockId: 'lock-1',
+  account.state.locks.set(TEST_LOCK_ID, {
+    lockId: TEST_LOCK_ID,
     hashlock: digest('31'),
     timelock: 2_000n,
     revealBeforeHeight: 20,
@@ -233,25 +234,25 @@ const mutations: Mutation[] = [
     mutate: ({ doc }) => { doc.currentFrame.deltas[0]!.leftAllowance = -1n; },
   },
   {
-    name: 'opaque HTLC hashlock accepted by Account transition semantics',
-    expected: 'accept',
-    mutate: ({ doc }) => { object(doc.state.locks.get('lock-1'))['hashlock'] = 'not-a-hash'; },
+    name: 'non-canonical string HTLC hashlock',
+    expected: 'reject',
+    mutate: ({ doc }) => { object(doc.state.locks.get(TEST_LOCK_ID))['hashlock'] = 'not-a-hash'; },
   },
   {
     name: 'negative HTLC lock amount',
     expected: 'reject',
-    mutate: ({ doc }) => { object(doc.state.locks.get('lock-1'))['amount'] = -1n; },
+    mutate: ({ doc }) => { object(doc.state.locks.get(TEST_LOCK_ID))['amount'] = -1n; },
   },
   {
     name: 'non-string HTLC hashlock',
     expected: 'reject',
-    mutate: ({ doc }) => { object(doc.state.locks.get('lock-1'))['hashlock'] = { nested: true }; },
+    mutate: ({ doc }) => { object(doc.state.locks.get(TEST_LOCK_ID))['hashlock'] = { nested: true }; },
   },
   {
     name: 'HTLC lock map above the transition limit',
     expected: 'reject',
     mutate: ({ doc }) => {
-      const lock = doc.state.locks.get('lock-1')!;
+      const lock = doc.state.locks.get(TEST_LOCK_ID)!;
       doc.state.locks = new Map(Array.from(
         { length: LIMITS.MAX_ACCOUNT_HTLC_LOCKS + 1 },
         (_, index) => [`lock-${index}`, { ...lock, lockId: `lock-${index}` }],
@@ -403,10 +404,10 @@ describe('persisted AccountReplica semantic boundary', () => {
     expect(deriveDelta(admitted.state.deltas.get(1)!, true).outCapacity).toBe(baseline);
   });
 
-  test('the audited matrix remains 35 rejects plus 2 design-valid accepts', () => {
+  test('the audited matrix remains 36 rejects plus 1 design-valid accept', () => {
     expect(mutations).toHaveLength(37);
-    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(35);
-    expect(mutations.filter(({ expected }) => expected === 'accept')).toHaveLength(2);
+    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(36);
+    expect(mutations.filter(({ expected }) => expected === 'accept')).toHaveLength(1);
   });
 
   test('authoritative WAL diff binds an Account put to its owner/proof orientation', async () => {

@@ -265,7 +265,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       entityInputs: Array<{ sourceRuntimeFrame: { height: number } }>;
     }).entityInputs[0]!.sourceRuntimeFrame.height = -1;
     expect(() => validateDurableRuntimeMachineSnapshot(malformedIngress, 'RUNTIME_MACHINE'))
-      .toThrow('RUNTIME_MACHINE_RUNTIME_INPUT_ENTITY_INPUT_0_SOURCE_RUNTIME_FRAME_HEIGHT:-1');
+      .toThrow('ENTITY_INPUT_SOURCE_RUNTIME_HEIGHT_INVALID:-1');
   });
 
   test('recursively rejects malformed EntityTx payloads in every nested carrier', () => {

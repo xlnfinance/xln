@@ -33,6 +33,7 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../../../entity/consensus/state-root';
+import { materializeEntityInfraContext } from '../../../entity/consensus/proposal/infra-context';
 import type { StoragePersistenceBoundary } from '../../../storage';
 import type { AccountReplica } from '../../../types/account';
 import type { CertifiedEntityFrameLink, JurisdictionConfig } from '../../../entity/types';
@@ -149,6 +150,8 @@ const oversizedAccount: AccountReplica = {
   proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
   proofBody: { tokenIds: [], deltas: [] },
   pendingWithdrawals: new Map(),
+  swapOrderHistory: new Map(),
+  swapClosedOrders: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
 };
 replica.state.accounts.set(counterpartyId, oversizedAccount);
@@ -184,6 +187,7 @@ const commitConsumption = async (height: number): Promise<void> => {
   const authorityRoot = computeEntityFrameAuthorityRoot(postAuthority);
   const parentFrameHash = preState.height === 0 ? 'genesis' : String(preState.prevFrameHash || '');
   const txs = [];
+  const entityContext = await materializeEntityInfraContext(env, replica, txs);
   const hash = createEntityFrameHashFromStateRoot(
     parentFrameHash,
     entityHeight,
@@ -193,6 +197,7 @@ const commitConsumption = async (height: number): Promise<void> => {
     entityId,
     stateRoot,
     authorityRoot,
+    entityContext,
   );
   const hashesToSign = [{
     hash,
@@ -210,6 +215,7 @@ const commitConsumption = async (height: number): Promise<void> => {
       hash,
       stateRoot,
       authorityRoot,
+      entityContext,
       leader: {
         proposerSignerId: signerId,
         view: getEntityLeaderState(preState).view,
