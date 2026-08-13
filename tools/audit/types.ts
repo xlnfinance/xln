@@ -32,14 +32,14 @@ export const AGENT_RUN_STATES = ['RUNNING', 'COMPLETED', 'BLOCKED'] as const;
 export const REVIEWER_STATES = ['PROVISIONAL', 'RANKED'] as const;
 
 export type EvidenceKind = typeof EVIDENCE_KINDS[number];
-export type EvidenceState = typeof EVIDENCE_STATES[number];
+type EvidenceState = typeof EVIDENCE_STATES[number];
 export type ModuleCriticality = typeof MODULE_CRITICALITIES[number];
 export type FindingSeverity = typeof FINDING_SEVERITIES[number];
-export type FindingState = typeof FINDING_STATES[number];
-export type AgentRunState = typeof AGENT_RUN_STATES[number];
-export type ReviewerState = typeof REVIEWER_STATES[number];
+type FindingState = typeof FINDING_STATES[number];
+type AgentRunState = typeof AGENT_RUN_STATES[number];
+type ReviewerState = typeof REVIEWER_STATES[number];
 
-export type AuditPolicy = Readonly<{
+type AuditPolicy = Readonly<{
   evidenceWeights: Readonly<Record<EvidenceKind, number>>;
   releaseCoverageMinimum: number;
   independentConfidenceThreshold: number;
@@ -48,7 +48,7 @@ export type AuditPolicy = Readonly<{
   idealReviewFamilyQuorum: number;
 }>;
 
-export type AuditScope = Readonly<{
+type AuditScope = Readonly<{
   sourceGlobs: readonly string[];
   testGlobs: readonly string[];
   exclusions: readonly Readonly<{ glob: string; reason: string }>[];
@@ -107,7 +107,7 @@ export type AuditFinding = Readonly<{
   todoRef?: string;
 }>;
 
-export type AuditReviewer = Readonly<{
+type AuditReviewer = Readonly<{
   id: string;
   label: string;
   family: string;

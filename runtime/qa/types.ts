@@ -1,8 +1,5 @@
-export type { QaSeverity, QaSeveritySignal } from './severity';
-
 export type {
   QaSlowStep,
-  QaAuthoredScenarioStep,
   QaScenarioMetadata,
   QaArtifactKind,
   QaArtifact,
@@ -17,8 +14,6 @@ export type {
   QaPerfSummaryView,
   QaBrowserIssue,
   QaBrowserHealthSummary,
-  QaFailureClass,
-  QaBenchmarkStatus,
   QaBenchmarkMetricDelta,
   QaBenchmarkComparison,
   QaRegressionStatus,

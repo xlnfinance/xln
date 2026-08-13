@@ -60,7 +60,7 @@ export function isLocalProxyRequest(requestUrl: string, clientAddress?: string):
   return LOOPBACK_CLIENTS.has(normalizeClientAddress(clientAddress));
 }
 
-export function findForbiddenRpcProxyMethod(bodyText: string): string | null {
+function findForbiddenRpcProxyMethod(bodyText: string): string | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(bodyText);

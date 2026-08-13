@@ -72,7 +72,7 @@ type BootstrapTimelineBacklog = {
   total: number;
 };
 
-export type BootstrapTimeline = {
+type BootstrapTimeline = {
   readyHash: string | null;
   runtimeStateHash: string | null;
   entityStateHash: string | null;

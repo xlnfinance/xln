@@ -1,4 +1,5 @@
-import { join } from 'node:path';
+import { dirname, join, normalize } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 type KnipSymbol = { name: string };
 type KnipIssue = {
@@ -14,48 +15,121 @@ type KnipIssue = {
 
 type KnipReport = { issues?: KnipIssue[] };
 
-export const UNUSED_SURFACE_DEBT = new Set([
-  'runtime/api/server/rpc/proxy-safety.ts::export:findForbiddenRpcProxyMethod',
-  'runtime/api/server/rpc/proxy-safety.ts::export:isLocalProxyRequest',
-  'runtime/config/constants.ts::export:TIME_MACHINE',
-  'runtime/entity/consensus/state-root.ts::type:AccountReplicaFieldCoverage',
-  'runtime/entity/consensus/state-root.ts::type:AccountStateFieldCoverage',
-  'runtime/entity/consensus/state-root.ts::type:EntityConsensusStateFieldCoverage',
-  'runtime/network/relay/market/wire.ts::export:decodeMarketWireResponse',
-  'runtime/network/relay/market/wire.ts::type:MarketWireResponse',
-  'runtime/orchestrator/orchestrator-types.ts::type:BootstrapTimeline',
-  'runtime/qa/report-types.ts::type:QaShardView',
-  'runtime/qa/report.ts::type:QaSeverity',
-  'runtime/qa/report.ts::type:QaSeveritySignal',
-  'runtime/qa/severity.ts::type:QaSeverity',
-  ...[
-    'QaAuthoredScenarioStep', 'QaBenchmarkComparison', 'QaBenchmarkMetricDelta',
-    'QaBenchmarkStatus', 'QaBrowserHealthSummary', 'QaFailureClass',
-    'QaFatalMarker', 'QaHistoryBackfillResult', 'QaHistoryEntry', 'QaPerfSummaryView',
-    'QaPhaseKey', 'QaPhaseTimings', 'QaPhaseWaterfall',
-    'QaPhaseWaterfallSegment', 'QaRegressionBaselineComparison', 'QaRegressionBaselineKind',
-    'QaRegressionMetricDelta', 'QaRegressionReport', 'QaRegressionStatus',
-    'QaRetentionPurgeResult', 'QaRunCategory', 'QaRunLedgerEntry', 'QaRunSummary',
-    'QaRunTimingSummary', 'QaRunView', 'QaSeverity', 'QaSeveritySignal', 'QaShardView',
-    'QaStoryScreenshot', 'QaSystemVerdict', 'QaSystemVerdictStatus', 'QaTestLedgerEntry',
-    'QaUxReleasePackAudit',
-  ].map(name => `runtime/qa/types.ts::type:${name}`),
-  'runtime/storage/schema/account-field-tags.ts::type:StorageAccountReplicaFieldCoverage',
-  'runtime/storage/schema/account-field-tags.ts::type:StorageAccountStateFieldCoverage',
-  'runtime/storage/schema/merkle-namespace-tags.ts::export:STORAGE_MERKLE_NAMESPACE_BY_TAG',
-  'runtime/storage/types.ts::type:AccountPersistenceCoverage',
-  'runtime/storage/types.ts::type:EntityPersistenceCoverage',
-  'runtime/storage/types.ts::type:ReplicaPersistenceCoverage',
-  'tools/audit/types.ts::type:AgentRunState',
-  'tools/audit/types.ts::type:AuditPolicy',
-  'tools/audit/types.ts::type:AuditReviewer',
-  'tools/audit/types.ts::type:AuditScope',
-  'tools/audit/types.ts::type:EvidenceState',
-  'tools/audit/types.ts::type:FindingState',
-  'tools/audit/types.ts::type:ReviewerState',
-  'tools/frozen-core/types.ts::type:FrozenPolicyChange',
-  'tools/release-snapshot/types.ts::type:ReleaseManifestEntry',
-]);
+type ExternalRuntimeConsumer = {
+  consumer: string;
+  specifier: string;
+  downstream?: { consumer: string; specifier: string };
+};
+
+const EXTERNAL_RUNTIME_CONSUMERS: Readonly<Record<string, readonly ExternalRuntimeConsumer[]>> = {
+  'runtime/api/server/rpc/proxy-safety.ts': [{
+    consumer: 'frontend/src/routes/rpc-proxy-safety.ts',
+    specifier: '@xln/runtime/api/server/rpc/proxy-safety',
+    downstream: {
+      consumer: 'frontend/src/routes/rpc/+server.ts',
+      specifier: '../rpc-proxy-safety',
+    },
+  }, {
+    consumer: 'frontend/src/routes/rpc-proxy-safety.ts',
+    specifier: '@xln/runtime/api/server/rpc/proxy-safety',
+    downstream: {
+      consumer: 'frontend/src/routes/rpc2/+server.ts',
+      specifier: '../rpc-proxy-safety',
+    },
+  }],
+  'runtime/config/constants.ts': [{
+    consumer: 'frontend/src/lib/view/core/TimeMachine.svelte',
+    specifier: '@xln/runtime/config/constants',
+  }],
+  'runtime/network/relay/market/wire.ts': [{
+    consumer: 'frontend/src/lib/components/Trading/OrderbookPanel.svelte',
+    specifier: '@xln/runtime/network/relay/market/wire',
+  }],
+  'runtime/qa/report-types.ts': [{
+    consumer: 'runtime/qa/types.ts',
+    specifier: './report-types',
+    downstream: {
+      consumer: 'frontend/src/lib/qa/types.ts',
+      specifier: '@xln/runtime/qa/types',
+    },
+  }],
+  'runtime/qa/severity.ts': [{
+    consumer: 'frontend/src/routes/health/+page.svelte',
+    specifier: '@xln/runtime/qa/severity',
+  }],
+  'runtime/qa/types.ts': [{
+    consumer: 'frontend/src/lib/qa/types.ts',
+    specifier: '@xln/runtime/qa/types',
+  }],
+  'runtime/storage/schema/merkle-namespace-tags.ts': [{
+    consumer: 'frontend/src/lib/components/Settings/IndexedDbInspector.svelte',
+    specifier: '@xln/runtime/storage/schema/merkle-namespace-tags',
+  }],
+};
+
+type NamedBinding = { localName: string; reexport: boolean };
+
+export const findNamedBinding = (source: string, specifier: string, symbol: string): NamedBinding | null => {
+  const importPattern = /(?:import|export)\s+(?:type\s+)?\{([\s\S]*?)\}\s+from\s+['"]([^'"]+)['"]/g;
+  for (const match of source.matchAll(importPattern)) {
+    if (match[2] !== specifier) continue;
+    for (const part of (match[1] ?? '').split(',')) {
+      const [imported, local] = part.trim().replace(/^type\s+/, '').split(/\s+as\s+/);
+      if (imported !== symbol) continue;
+      return {
+        localName: local?.trim() || imported,
+        reexport: match[0].trimStart().startsWith('export'),
+      };
+    }
+  }
+  return null;
+};
+
+export const usesNamedBinding = (source: string, binding: NamedBinding): boolean => {
+  if (binding.reexport) return false;
+  const withoutModuleStatements = source.replace(
+    /(?:import|export)\s+(?:type\s+)?\{[\s\S]*?\}\s+from\s+['"][^'"]+['"];?/g,
+    '',
+  );
+  const codeOnly = withoutModuleStatements
+    .replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g, '')
+    .replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g, '');
+  const escaped = binding.localName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`).test(codeOnly);
+};
+
+export const resolveProofTarget = (consumer: string, specifier: string): string => {
+  if (specifier.startsWith('@xln/')) return `${specifier.slice('@xln/'.length)}.ts`;
+  return normalize(join(dirname(consumer), `${specifier}.ts`));
+};
+
+const provesConsumer = (
+  repoRoot: string,
+  sourceFile: string,
+  proof: ExternalRuntimeConsumer,
+  symbol: string,
+): boolean => {
+  if (resolveProofTarget(proof.consumer, proof.specifier) !== sourceFile) return false;
+  const consumer = readFileSync(join(repoRoot, proof.consumer), 'utf8');
+  const binding = findNamedBinding(consumer, proof.specifier, symbol);
+  if (!binding) return false;
+  if (!proof.downstream) return usesNamedBinding(consumer, binding);
+  if (!binding.reexport) return false;
+  if (resolveProofTarget(proof.downstream.consumer, proof.downstream.specifier) !== proof.consumer) return false;
+  const downstream = readFileSync(join(repoRoot, proof.downstream.consumer), 'utf8');
+  const downstreamBinding = findNamedBinding(downstream, proof.downstream.specifier, symbol);
+  return downstreamBinding !== null && usesNamedBinding(downstream, downstreamBinding);
+};
+
+const provenConsumerIndexes = (repoRoot: string, key: string): number[] => {
+  const match = /^(.+)::(?:export|nsExport|type|nsType|enum|namespace):(.+)$/.exec(key);
+  if (!match) return [];
+  const [, file = '', symbol = ''] = match;
+  const proofs = EXTERNAL_RUNTIME_CONSUMERS[file];
+  return proofs?.flatMap((proof, index) =>
+    provesConsumer(repoRoot, file, proof, symbol) ? [index] : [],
+  ) ?? [];
+};
 
 const symbolKeys = (file: string, kind: string, values: readonly KnipSymbol[] = []): string[] =>
   values.map(value => `${file}::${kind}:${value.name}`);
@@ -70,17 +144,6 @@ export const collectUnusedSurface = (report: KnipReport): string[] =>
     ...symbolKeys(issue.file, 'namespace', issue.namespaceMembers),
     ...(issue.cycles ?? []).map(cycle => `${issue.file}::cycle:${cycle}`),
   ]).sort();
-
-export const evaluateUnusedSurface = (
-  actual: readonly string[],
-  debt: ReadonlySet<string> = UNUSED_SURFACE_DEBT,
-): string[] => {
-  const actualSet = new Set(actual);
-  return [
-    ...actual.filter(key => !debt.has(key)).map(key => `NEW_UNUSED_SURFACE:${key}`),
-    ...[...debt].filter(key => !actualSet.has(key)).map(key => `STALE_UNUSED_SURFACE_DEBT:${key}`),
-  ].sort();
-};
 
 const run = (): void => {
   const repoRoot = join(import.meta.dir, '..', '..', '..', '..');
@@ -98,11 +161,33 @@ const run = (): void => {
   }
   const report = JSON.parse(result.stdout.toString()) as KnipReport;
   const actual = collectUnusedSurface(report);
-  const errors = evaluateUnusedSurface(actual);
+  const runtimeActual = actual.filter(key => key.startsWith('runtime/'));
+  const provenEntries = new Set<string>();
+  const externalRuntime = runtimeActual.filter(key => {
+    const file = key.split('::', 1)[0] ?? '';
+    const indexes = provenConsumerIndexes(repoRoot, key);
+    for (const index of indexes) provenEntries.add(`${file}[${index}]`);
+    return indexes.length > 0;
+  });
+  const runtimeDebt = runtimeActual.filter(key => !externalRuntime.includes(key));
+  const nonRuntimeActual = actual.filter(key => !key.startsWith('runtime/'));
+  const errors = [
+    ...runtimeDebt.map(key => `UNUSED_RUNTIME_SURFACE:${key}`),
+    ...Object.entries(EXTERNAL_RUNTIME_CONSUMERS).flatMap(([file, proofs]) =>
+      proofs.flatMap((_, index) => {
+        const entry = `${file}[${index}]`;
+        return provenEntries.has(entry) ? [] : [`STALE_EXTERNAL_RUNTIME_PROOF:${entry}`];
+      }),
+    ),
+    ...nonRuntimeActual.map(key => `UNUSED_NON_RUNTIME_SURFACE:${key}`),
+  ];
   if (errors.length > 0) {
     throw new Error(`UNUSED_SURFACE_RATCHET_FAILED\n${errors.join('\n')}`);
   }
-  console.log(`UNUSED_SURFACE_OK debt=${actual.length} new=0 stale=0`);
+  console.log(
+    `UNUSED_SURFACE_OK runtimeDebt=0 externalRuntime=${externalRuntime.length} ` +
+    `nonRuntimeDebt=${nonRuntimeActual.length} new=0 stale=0`,
+  );
 };
 
 if (import.meta.main) run();

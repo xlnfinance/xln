@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 
 import type { AccountReplica, AccountState } from '../../types/account';
+import type { AssertNever, Covered } from '../../types/hash-coverage/coverage';
 import type { ConsensusConfig, EntityFrameAuthority, EntityLeaderState, EntityState } from '../types';
 import { compareStableText } from '../../protocol/serialization';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
@@ -74,14 +75,11 @@ export const ENTITY_STATE_ROOT_EXCLUDED_FIELDS = [
   'jBlockChain',
 ] as const satisfies readonly (keyof EntityState)[];
 
-type AssertNoMissingEntityStateField<T extends never> = T;
-export type EntityConsensusStateFieldCoverage = AssertNoMissingEntityStateField<
-  Exclude<
-    keyof EntityState,
-    | (typeof ENTITY_STATE_ROOT_FIELDS)[number]
-    | (typeof ENTITY_STATE_ROOT_EXCLUDED_FIELDS)[number]
-  >
->;
+type CoveredEntityState = Covered<EntityState, AssertNever<Exclude<
+  keyof EntityState,
+  | (typeof ENTITY_STATE_ROOT_FIELDS)[number]
+  | (typeof ENTITY_STATE_ROOT_EXCLUDED_FIELDS)[number]
+>>>;
 
 const projectPendingWithdrawals = (withdrawals: AccountReplica['pendingWithdrawals']): Map<string, unknown> =>
   new Map(
@@ -137,11 +135,6 @@ const ACCOUNT_ROOT_COMMITTED_FIELDS = [
   'requestedRebalanceFeeState',
   'rebalanceFeePolicies',
 ] as const satisfies readonly (keyof AccountState)[];
-
-type AssertNoMissingAccountStateField<T extends never> = T;
-export type AccountStateFieldCoverage = AssertNoMissingAccountStateField<
-  Exclude<keyof AccountState, (typeof ACCOUNT_ROOT_COMMITTED_FIELDS)[number]>
->;
 
 /**
  * Deterministic Account replica fields committed by the parent Entity.
@@ -200,16 +193,20 @@ const ACCOUNT_ENTITY_LOCAL_FIELDS = [
   'counterpartySettlementHanko',
 ] as const satisfies readonly (keyof AccountReplica)[];
 
-export type AccountReplicaFieldCoverage = AssertNoMissingAccountStateField<
-  Exclude<
+type CoveredAccountReplica = Covered<AccountReplica,
+  | AssertNever<Exclude<
+    keyof AccountState,
+    (typeof ACCOUNT_ROOT_COMMITTED_FIELDS)[number]
+  >>
+  | AssertNever<Exclude<
     keyof AccountReplica,
     | 'state'
     | (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number]
     | (typeof ACCOUNT_ENTITY_LOCAL_FIELDS)[number]
-  >
+  >>
 >;
 
-const projectAccountConsensusState = (account: AccountReplica): Record<string, unknown> => {
+const projectAccountConsensusState = (account: CoveredAccountReplica): Record<string, unknown> => {
   const projected: Record<string, unknown> = {};
   for (const field of ACCOUNT_ENTITY_COMMITTED_FIELDS) {
     const value: unknown = account[field];
@@ -323,7 +320,7 @@ const projectConsensusConfigCommitment = (config: ConsensusConfig): Record<strin
   };
 };
 
-const projectEntityConsensusState = (state: EntityState, expandAccounts = true): Record<string, unknown> => {
+const projectEntityConsensusState = (state: CoveredEntityState, expandAccounts = true): Record<string, unknown> => {
   // Preserve property presence exactly: optional fields that are absent from
   // the live State must remain absent from the signed projection. Symbols such
   // as the frame-local event collector cannot enter through this string-key

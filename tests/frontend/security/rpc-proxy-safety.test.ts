@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { findForbiddenRpcProxyMethod, isLocalProxyRequest } from '../../../frontend/src/routes/rpc-proxy-safety';
+import { isLocalProxyRequest, readRpcProxyRequest } from '../../../frontend/src/routes/rpc-proxy-safety';
 
 const ORIGINAL_NODE_ENV = process.env['NODE_ENV'];
 const ORIGINAL_ALLOW_LOCAL_RPC_PROXY = process.env['XLN_ALLOW_LOCAL_RPC_PROXY'];
@@ -41,12 +41,24 @@ describe('rpc proxy safety', () => {
     expect(isLocalProxyRequest('http://localhost/rpc2', '127.0.0.1')).toBe(false);
   });
 
-  test('allows only the explicit read-only RPC surface', () => {
-    expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'anvil_setBalance', params: [] }))).toBe('anvil_setBalance');
-    expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'wallet_addEthereumChain', params: [] }))).toBe('wallet_addEthereumChain');
-    expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_signTypedData_v4', params: [] }))).toBe('eth_signTypedData_v4');
-    expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_sendRawTransaction', params: [] }))).toBe('eth_sendRawTransaction');
-    expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_futureReadMethod', params: [] }))).toBe('eth_futureReadMethod');
-    expect(findForbiddenRpcProxyMethod(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }))).toBeNull();
+  test('allows only the explicit read-only RPC surface', async () => {
+    for (const method of [
+      'anvil_setBalance',
+      'wallet_addEthereumChain',
+      'eth_signTypedData_v4',
+      'eth_sendRawTransaction',
+      'eth_futureReadMethod',
+    ]) {
+      const request = new Request('http://localhost/rpc', {
+        method: 'POST',
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: [] }),
+      });
+      expect((await readRpcProxyRequest(request)).forbiddenMethod).toBe(method);
+    }
+    const allowed = new Request('http://localhost/rpc', {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+    });
+    expect((await readRpcProxyRequest(allowed)).forbiddenMethod).toBeNull();
   });
 });

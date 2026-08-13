@@ -9,5 +9,6 @@
  * intersection and would hide variant-only payload keys.
  */
 export type AssertNever<T extends never> = T;
+export type Covered<T, _Coverage extends never> = T;
 export type AllKeys<T> = T extends unknown ? keyof T : never;
 export type FieldGap<T, Fields extends readonly PropertyKey[]> = Exclude<AllKeys<T>, Fields[number]>;

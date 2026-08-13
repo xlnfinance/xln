@@ -107,7 +107,7 @@ export type ReleaseSnapshot = {
   attestation?: ReleaseAttestation;
 };
 
-export type ReleaseManifestEntry = {
+type ReleaseManifestEntry = {
   version: string;
   tag: string;
   generatedAt: string;

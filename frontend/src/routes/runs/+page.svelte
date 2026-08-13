@@ -1,10 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { DISPLAY, QA } from '@xln/runtime/config/constants';
+  import type { QaRegressionStatus, QaRunCategory } from '@xln/runtime/qa/report-types';
   import { consumeQaTokenFromUrl, qaFetch, readQaToken, writeQaToken } from '$lib/qa/apiClient';
 
-  type QaBenchmarkStatus = 'ok' | 'faster' | 'slower' | 'mixed' | 'failed' | 'insufficient';
-  type QaRunCategory = 'unit' | 'contract' | 'e2e' | 'scenario' | 'benchmark' | 'release' | 'unknown';
   type RunSortKey = 'date-desc' | 'date-asc' | 'stack-fast' | 'stack-slow' | 'browser-fast' | 'browser-slow';
 
   type QaRunLedgerEntry = {
@@ -35,7 +34,7 @@
     browserErrors: number;
     browserWarnings: number;
     networkFailures: number;
-    benchmarkStatus: QaBenchmarkStatus | null;
+    benchmarkStatus: QaRegressionStatus | null;
     benchmarkDeltaPct: number | null;
     benchmarkComparedRunId: string | null;
     auditAction: string | null;
@@ -135,7 +134,7 @@
     return 'UNKNOWN';
   }
 
-  function benchmarkLabel(status: QaBenchmarkStatus | null): string {
+  function benchmarkLabel(status: QaRegressionStatus | null): string {
     if (!status) return 'n/a';
     if (status === 'insufficient') return 'NEW';
     return status.toUpperCase();

@@ -1,6 +1,5 @@
 export {
   fetchRpcProxyText,
-  findForbiddenRpcProxyMethod,
   isLocalProxyRequest,
   readRpcProxyRequest,
   RpcProxyError,

@@ -11,6 +11,7 @@ import type { DurableOutputRetryState } from '../runtime/delivery/durable-output
 import type { EntityInfraContext } from '../types/entity/infra-context';
 import type { RadixMerkleRadix, RadixMerkleRootKind } from '../protocol/state/radix-merkle';
 import type { StorageMerkleNamespace } from './keys';
+import type { Covered } from '../types/hash-coverage/coverage';
 
 export type RuntimeDbLike = {
   get: (key: Buffer) => Promise<Buffer>;
@@ -287,21 +288,22 @@ type EntityPersistenceSplitKeys =
   | 'orderbookExt';
 type ReplicaPersistenceSplitKeys = never;
 
-export type AccountPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
-  Exclude<keyof AccountReplica, keyof StorageAccountDoc | 'state'>
->;
-export type EntityPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
-  Exclude<keyof EntityState, keyof StorageEntityCoreDoc | EntityPersistenceSplitKeys>
->;
-export type ReplicaPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
-  Exclude<keyof EntityReplica, keyof StorageReplicaMeta | ReplicaPersistenceSplitKeys>
->;
+type PersistenceCoverage =
+  | AssertNoUnclassifiedPersistenceKeys<Exclude<keyof AccountReplica, keyof StorageAccountDoc | 'state'>>
+  | AssertNoUnclassifiedPersistenceKeys<Exclude<
+    keyof EntityState,
+    keyof StorageEntityCoreDoc | EntityPersistenceSplitKeys
+  >>
+  | AssertNoUnclassifiedPersistenceKeys<Exclude<
+    keyof EntityReplica,
+    keyof StorageReplicaMeta | ReplicaPersistenceSplitKeys
+  >>;
 
-export type StorageDiffRecord = {
+export type StorageDiffRecord = Covered<{
   height: number;
   puts: StorageDoc[];
   dels: StorageDocRef[];
-};
+}, PersistenceCoverage>;
 
 export type StorageSnapshotManifest = {
   height: number;

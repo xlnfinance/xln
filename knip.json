@@ -13,9 +13,7 @@
     "tools/*.ts",
     "tests/**/*.spec.ts",
     "tests/**/*.test.ts",
-    "brainvault/cli.ts",
     "custody/**/*.ts",
-    "playwright.config.ts",
     "runtime/orchestrator/hub-node.ts",
     "runtime/orchestrator/mm-node.ts",
     "runtime/orchestrator/orchestrator.ts",
@@ -35,21 +33,7 @@
     "brainvault/**/*.ts"
   ],
   "ignore": [
-    "**/generated/**",
-    "jurisdictions/**",
-    "frontend/**",
-    "packages/**",
-    "native/**",
-    "dist/**"
-  ],
-  "ignoreBinaries": [
-    "anvil",
-    "forge",
-    "pm2",
-    "rg",
-    "prettier",
-    "pgrep",
-    "du"
+    "frontend/**"
   ],
   "ignoreDependencies": [
     "argon2",
@@ -66,7 +50,6 @@
     "@tsconfig/node20",
     "@types/minimatch",
     "@stryker-mutator/command-runner",
-    "three",
-    "svelte"
+    "three"
   ]
 }

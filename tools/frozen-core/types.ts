@@ -18,7 +18,7 @@ export type FrozenApproval = {
   comment: string;
 };
 
-export type FrozenPolicyChange = {
+type FrozenPolicyChange = {
   action: 'freeze' | 'unfreeze';
   path: string;
   contentHash: string;

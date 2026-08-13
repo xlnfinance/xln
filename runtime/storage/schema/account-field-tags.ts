@@ -1,4 +1,5 @@
 import type { AccountReplica, AccountState } from '../../types/account';
+import type { AssertNever, Covered } from '../../types/hash-coverage/coverage';
 
 /**
  * Stable physical tags for the canonical nested AccountReplica document.
@@ -39,11 +40,14 @@ type TaggedStateField = StorageAccountField extends infer Field
   ? Field extends `state.${infer StateField}` ? StateField : never
   : never;
 type TaggedReplicaField = Exclude<StorageAccountField, `state.${string}`>;
-type AssertNever<T extends never> = T;
 
-export type StorageAccountStateFieldCoverage = AssertNever<Exclude<keyof AccountState, TaggedStateField>>;
-export type StorageAccountReplicaFieldCoverage = AssertNever<Exclude<keyof AccountReplica, TaggedReplicaField | 'state'>>;
+type StorageAccountFieldCoverage =
+  | AssertNever<Exclude<keyof AccountState, TaggedStateField>>
+  | AssertNever<Exclude<keyof AccountReplica, TaggedReplicaField | 'state'>>;
 
-export const STORAGE_ACCOUNT_FIELD_BY_TAG = new Map<number, StorageAccountField>(
+export const STORAGE_ACCOUNT_FIELD_BY_TAG: Covered<
+  Map<number, StorageAccountField>,
+  StorageAccountFieldCoverage
+> = new Map<number, StorageAccountField>(
   Object.entries(STORAGE_ACCOUNT_FIELD_TAG).map(([field, tag]) => [tag, field as StorageAccountField]),
 );

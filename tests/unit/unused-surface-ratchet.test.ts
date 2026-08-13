@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   collectUnusedSurface,
-  evaluateUnusedSurface,
+  findNamedBinding,
+  resolveProofTarget,
+  usesNamedBinding,
 } from '../../runtime/scripts/checks/repository/check-unused-surface';
 
 describe('unused surface ratchet', () => {
@@ -19,15 +21,41 @@ describe('unused surface ratchet', () => {
     ]);
   });
 
-  test('rejects growth and forces debt removal after cleanup', () => {
-    const debt = new Set(['a.ts::export:old']);
-    expect(evaluateUnusedSurface(['a.ts::export:old'], debt)).toEqual([]);
-    expect(evaluateUnusedSurface(['a.ts::export:new'], debt)).toEqual([
-      'NEW_UNUSED_SURFACE:a.ts::export:new',
-      'STALE_UNUSED_SURFACE_DEBT:a.ts::export:old',
-    ]);
-    expect(evaluateUnusedSurface([], debt)).toEqual([
-      'STALE_UNUSED_SURFACE_DEBT:a.ts::export:old',
-    ]);
+  test('proves exact imported usage instead of accepting a stale import or re-export', () => {
+    const usedSource = `
+      import { type RuntimeId as Id } from '@xln/runtime/protocol/identity';
+      export type View = { id: Id };
+    `;
+    const used = findNamedBinding(usedSource, '@xln/runtime/protocol/identity', 'RuntimeId');
+    expect(used).toEqual({ localName: 'Id', reexport: false });
+    expect(used && usesNamedBinding(usedSource, used)).toBe(true);
+
+    const staleSource = `import { RuntimeId } from '@xln/runtime/protocol/identity';`;
+    const stale = findNamedBinding(staleSource, '@xln/runtime/protocol/identity', 'RuntimeId');
+    expect(stale && usesNamedBinding(staleSource, stale)).toBe(false);
+
+    const commentOnly = `
+      import { RuntimeId } from '@xln/runtime/protocol/identity';
+      // RuntimeId is intentionally not used.
+      const label = 'RuntimeId';
+    `;
+    const commentBinding = findNamedBinding(commentOnly, '@xln/runtime/protocol/identity', 'RuntimeId');
+    expect(commentBinding && usesNamedBinding(commentOnly, commentBinding)).toBe(false);
+
+    const reexportSource = `export type { RuntimeId } from '@xln/runtime/protocol/identity';`;
+    const reexport = findNamedBinding(reexportSource, '@xln/runtime/protocol/identity', 'RuntimeId');
+    expect(reexport).toEqual({ localName: 'RuntimeId', reexport: true });
+    expect(reexport && usesNamedBinding(reexportSource, reexport)).toBe(false);
+  });
+
+  test('resolves proof specifiers to the exact source file', () => {
+    expect(resolveProofTarget(
+      'frontend/src/lib/view.svelte',
+      '@xln/runtime/protocol/identity',
+    )).toBe('runtime/protocol/identity.ts');
+    expect(resolveProofTarget(
+      'frontend/src/routes/rpc/+server.ts',
+      '../rpc-proxy-safety',
+    )).toBe('frontend/src/routes/rpc-proxy-safety.ts');
   });
 });

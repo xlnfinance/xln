@@ -76,7 +76,6 @@ import {
   type QaUxReleasePackAudit,
 } from './report-types';
 
-export type { QaSeverity, QaSeveritySignal } from './severity';
 export * from './report-types';
 
 export const auditQaUxReleasePack = (stories: QaStoryScreenshot[]): QaUxReleasePackAudit => {
