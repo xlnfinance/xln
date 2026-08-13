@@ -3,5 +3,4 @@
 /* eslint-disable */
 export { Depository__factory } from "./Depository__factory";
 export { IERC20__factory } from "./IERC20__factory";
-export { IERC721__factory } from "./IERC721__factory";
 export { ReentrancyGuardLite__factory } from "./ReentrancyGuardLite__factory";

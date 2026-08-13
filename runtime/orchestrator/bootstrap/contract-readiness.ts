@@ -34,6 +34,7 @@ const CONTRACT_ARTIFACT_NAMES = {
   deltaTransformer: 'DeltaTransformer',
   hankoVerifier: 'HankoVerifier',
   hashLadderRegistry: 'HashLadderRegistry',
+  nftCustody: 'NftCustody',
 } as const;
 type CanonicalArtifactKey = keyof typeof CONTRACT_ARTIFACT_NAMES;
 
@@ -324,7 +325,8 @@ export const assertCanonicalRpcContractStack = async (
     depositoryCode,
     'HashLadderRegistry',
   );
-  const [depositoryBoundsCode, hashLadderRegistryCode] = await Promise.all([
+  const nftCustodyAddress = readLinkedLibraryAddress(artifacts.depository, depositoryCode, 'NftCustody');
+  const [depositoryBoundsCode, hashLadderRegistryCode, nftCustodyCode] = await Promise.all([
     readRpcCodeAt(
       rpcUrl,
       depositoryBoundsAddress,
@@ -337,6 +339,7 @@ export const assertCanonicalRpcContractStack = async (
       `${context}_HASH_LADDER_REGISTRY`,
       timeoutMs,
     ),
+    readRpcCodeAt(rpcUrl, nftCustodyAddress, `${context}_NFT_CUSTODY`, timeoutMs),
   ]);
   if (depositoryBoundsCode.toLowerCase() !== artifacts.depositoryBounds.deployedBytecode.toLowerCase()) {
     throw new Error(`${context}_CODE_MISMATCH:depositoryBounds`);
@@ -353,6 +356,9 @@ export const assertCanonicalRpcContractStack = async (
   if (hashLadderRegistryCode.toLowerCase() !== expectedHashLadderRegistryCode.toLowerCase()) {
     throw new Error(`${context}_CODE_MISMATCH:hashLadderRegistry`);
   }
+  if (nftCustodyCode.toLowerCase() !== artifacts.nftCustody.deployedBytecode.toLowerCase()) {
+    throw new Error(`${context}_CODE_MISMATCH:nftCustody`);
+  }
   for (const key of REQUIRED_RPC_CONTRACT_KEYS) {
     const actual = String(codes.get(key)).toLowerCase();
     const linkedExpected = linkDeployedBytecode(artifacts[key], {
@@ -360,6 +366,7 @@ export const assertCanonicalRpcContractStack = async (
       DepositoryBounds: depositoryBoundsAddress,
       HankoVerifier: hankoVerifierAddress,
       HashLadderRegistry: hashLadderRegistryAddress,
+      NftCustody: nftCustodyAddress,
     });
     const expected = materializeImmutableReferences(key, artifacts[key], linkedExpected, actual, contracts, context);
     const normalizedExpected = expected.toLowerCase();

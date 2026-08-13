@@ -3,6 +3,8 @@
 /* eslint-disable */
 import type * as noReturnErc20MockSol from "./NoReturnERC20Mock.sol";
 export type { noReturnErc20MockSol };
+import type * as noopNftMocksSol from "./NoopNftMocks.sol";
+export type { noopNftMocksSol };
 export type { DepositoryDebtHarness } from "./DepositoryDebtHarness";
 export type { EntityProviderSupplyHarness } from "./EntityProviderSupplyHarness";
 export type { FeeOnTransferERC20 } from "./FeeOnTransferERC20";

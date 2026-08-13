@@ -93,6 +93,11 @@ async function main() {
     hashLadderRegistryAddr,
     "HASH_LADDER_REGISTRY",
   );
+  const NftCustody = await hre.ethers.getContractFactory("NftCustody");
+  const nftCustody = await NftCustody.deploy();
+  await nftCustody.waitForDeployment();
+  const nftCustodyAddr = await nftCustody.getAddress();
+  const nftCustodyDeployment = await deploymentEvidence(nftCustody, nftCustodyAddr, "NFT_CUSTODY");
 
   // 4. Deploy Depository with one immutable transformer and all linked logic.
   console.log("4️⃣ Deploying Depository...");
@@ -101,6 +106,7 @@ async function main() {
       Account: accountAddr,
       DepositoryBounds: depositoryBoundsAddr,
       HashLadderRegistry: hashLadderRegistryAddr,
+      NftCustody: nftCustodyAddr,
     },
   });
   const depository = await Depository.deploy(entityProviderAddr, deltaTransformerAddr);
@@ -175,6 +181,7 @@ async function main() {
       account: accountAddr,
       depositoryBounds: depositoryBoundsAddr,
       hashLadderRegistry: hashLadderRegistryAddr,
+      nftCustody: nftCustodyAddr,
       hankoVerifier: hankoVerifierAddr,
       entityProvider: entityProviderAddr,
       depository: depositoryAddr,
@@ -184,6 +191,7 @@ async function main() {
       account: accountDeployment,
       depositoryBounds: depositoryBoundsDeployment,
       hashLadderRegistry: hashLadderRegistryDeployment,
+      nftCustody: nftCustodyDeployment,
       hankoVerifier: hankoVerifierDeployment,
       entityProvider: entityProviderDeployment,
       depository: depositoryDeployment,

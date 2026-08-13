@@ -405,6 +405,36 @@ describe('Depository', () => {
     expect(reserve).to.equal(50);
     expect(await erc1155.balanceOf(user0.address, 0)).to.equal(50);
   });
+  it('rejects ERC721 deposits when the registered token reports a successful no-op transfer', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const NoopERC721 = await hre.ethers.getContractFactory('NoopERC721Mock');
+    const token = await NoopERC721.deploy(user0.address);
+    await token.waitForDeployment();
+    await expect(depository.connect(user0).adminRegisterExternalToken({
+      entity: ethers.ZeroHash,
+      contractAddress: await token.getAddress(),
+      externalTokenId: 1,
+      tokenType: 1,
+      internalTokenId: 0,
+      amount: 1,
+    })).to.be.revertedWithCustomError(depository, 'E11');
+    expect(await depository._reserves(addressEntityId(user0.address), 1)).to.equal(0);
+  });
+  it('rejects ERC1155 deposits when the registered token reports a successful no-op transfer', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const NoopERC1155 = await hre.ethers.getContractFactory('NoopERC1155Mock');
+    const token = await NoopERC1155.deploy(user0.address);
+    await token.waitForDeployment();
+    await expect(depository.connect(user0).adminRegisterExternalToken({
+      entity: ethers.ZeroHash,
+      contractAddress: await token.getAddress(),
+      externalTokenId: 1,
+      tokenType: 2,
+      internalTokenId: 0,
+      amount: 10,
+    })).to.be.revertedWithCustomError(depository, 'E11');
+    expect(await depository._reserves(addressEntityId(user0.address), 1)).to.equal(0);
+  });
   it('reserveToReserve transfers between entities', async function () {
     const { depository } = await loadFixture(deployFixture);
     const fromEntity = singleSignerLazyEntityId(user0.address);
@@ -750,6 +780,66 @@ describe('Depository', () => {
     ).to.be.revertedWithCustomError(depository, 'E1');
     expect(await erc721.ownerOf(1)).to.equal(await depository.getAddress());
     expect(await depository._reserves(actor.entityId, erc721id)).to.equal(1n);
+  });
+  it('rejects a successful no-op ERC721 withdrawal without reducing reserve', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const actor = lazyActor(user0, 0);
+    const recipientEntity = addressEntityId(user1.address);
+    const ToggleNoopERC721 = await hre.ethers.getContractFactory('ToggleNoopERC721Mock');
+    const token = await ToggleNoopERC721.deploy(user0.address);
+    await token.waitForDeployment();
+    await depository.registerExternalToken(1, await token.getAddress(), 1);
+    const deposit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, emptyBatch({
+      externalTokenToReserve: [{
+        entity: ethers.ZeroHash,
+        contractAddress: await token.getAddress(),
+        externalTokenId: 1,
+        tokenType: 1,
+        internalTokenId: 0,
+        amount: 1n,
+      }],
+    }));
+    await depository.connect(user0).processBatch(deposit.encodedBatch, deposit.hankoData, deposit.nonce);
+    const tokenId = (await depository.getTokensLength()) - 1n;
+    await token.setNoop(true);
+    const withdrawal = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, emptyBatch({
+      reserveToExternalToken: [{ receivingEntity: recipientEntity, tokenId, amount: 1n }],
+    }));
+    await expect(
+      depository.connect(user0).processBatch(withdrawal.encodedBatch, withdrawal.hankoData, withdrawal.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E11');
+    expect(await token.ownerOf(1)).to.equal(await depository.getAddress());
+    expect(await depository._reserves(actor.entityId, tokenId)).to.equal(1n);
+  });
+  it('rejects a successful no-op ERC1155 withdrawal without reducing reserve', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const actor = lazyActor(user0, 0);
+    const recipientEntity = addressEntityId(user1.address);
+    const ToggleNoopERC1155 = await hre.ethers.getContractFactory('ToggleNoopERC1155Mock');
+    const token = await ToggleNoopERC1155.deploy(user0.address);
+    await token.waitForDeployment();
+    await depository.registerExternalToken(2, await token.getAddress(), 1);
+    const deposit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, emptyBatch({
+      externalTokenToReserve: [{
+        entity: ethers.ZeroHash,
+        contractAddress: await token.getAddress(),
+        externalTokenId: 1,
+        tokenType: 2,
+        internalTokenId: 0,
+        amount: 10n,
+      }],
+    }));
+    await depository.connect(user0).processBatch(deposit.encodedBatch, deposit.hankoData, deposit.nonce);
+    const tokenId = (await depository.getTokensLength()) - 1n;
+    await token.setNoop(true);
+    const withdrawal = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, emptyBatch({
+      reserveToExternalToken: [{ receivingEntity: recipientEntity, tokenId, amount: 4n }],
+    }));
+    await expect(
+      depository.connect(user0).processBatch(withdrawal.encodedBatch, withdrawal.hankoData, withdrawal.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E11');
+    expect(await token.balanceOf(await depository.getAddress(), 1)).to.equal(10n);
+    expect(await depository._reserves(actor.entityId, tokenId)).to.equal(10n);
   });
   it('requires strictly sequential entity batch nonces and binds signatures to nonce and calldata', async function () {
     const { depository } = await loadFixture(deployFixture);

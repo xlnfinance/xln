@@ -6,6 +6,8 @@ import { resolveRuntimeImportAppUrl } from '../../utils/runtime/e2e-runtime-impo
 import { captureLocatorScreenshot, capturePageScreenshot } from '../../utils/e2e-screenshots';
 
 const SWAP_CONNECT_TOKEN_IDS = [1, 2, 3] as const;
+const LAPTOP_VIEWPORT = { width: 1440, height: 900 } as const;
+const WIDE_VIEWPORT = { width: 2560, height: 1440 } as const;
 
 const platformFromPrefix = (prefix: string): 'desktop' | 'mobile' =>
   prefix.startsWith('mobile') ? 'mobile' : 'desktop';
@@ -38,9 +40,8 @@ async function captureUxPage(
 }
 
 async function waitForRpcProxyReachable(page: Page, timeoutMs = 30_000): Promise<void> {
-  const startedAt = Date.now();
   let lastError = '';
-  while (Date.now() - startedAt < timeoutMs) {
+  await expect.poll(async () => {
     try {
       const response = await page.request.post(`${APP_BASE_URL}/rpc`, {
         data: {
@@ -52,15 +53,18 @@ async function waitForRpcProxyReachable(page: Page, timeoutMs = 30_000): Promise
         headers: { 'Cache-Control': 'no-store' },
         timeout: 5_000,
       });
-      const body = await response.json().catch(() => null) as { result?: unknown; error?: unknown } | null;
-      if (response.ok() && typeof body?.result === 'string' && body.result.length > 0) return;
-      lastError = `status=${response.status()} body=${JSON.stringify(body)}`;
+      const body = await response.text();
+      if (response.ok() && /^\s*\{.*"result"\s*:\s*"0x[0-9a-f]+".*\}\s*$/i.test(body)) return true;
+      lastError = `status=${response.status()} body=${body}`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
-    await page.waitForTimeout(250);
-  }
-  throw new Error(`/rpc did not become reachable before health screenshot: ${lastError}`);
+    return false;
+  }, {
+    timeout: timeoutMs,
+    intervals: [100, 250, 500, 1_000],
+    message: `/rpc did not become reachable before health screenshot: ${lastError}`,
+  }).toBe(true);
 }
 
 async function captureUxLocator(
@@ -107,9 +111,9 @@ async function openSettingsTab(page: Page): Promise<void> {
 async function openAccountWorkspaceTab(page: Page, tabId: string): Promise<void> {
   const testId = `account-workspace-tab-${tabId}`;
   const visibleTab = page.locator(`[data-testid="${testId}"]:visible`).first();
-  if (!(await visibleTab.isVisible().catch(() => false))) {
+  if (!await visibleTab.isVisible()) {
     const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
-    if (await mobileToggle.isVisible().catch(() => false)) {
+    if (await mobileToggle.isVisible()) {
       await mobileToggle.click();
     }
   }
@@ -127,22 +131,13 @@ async function ensureSwapScope(page: Page, desired: 'aggregated' | 'selected'): 
   const scopeToggle = page.getByTestId('swap-scope-toggle').first();
   await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
   if (await readSwapScopeMode(page) === desired) return;
-  if (!await scopeToggle.isEnabled().catch(() => false)) return;
-  try {
-    await expect
-      .poll(async () => {
-        const current = await readSwapScopeMode(page);
-        if (current !== desired) {
-          await scopeToggle.click({ force: true });
-          await page.waitForTimeout(150);
-        }
-        return await readSwapScopeMode(page);
-      }, { timeout: 5_000, intervals: [50, 100, 200] })
-      .toBe(desired);
-  } catch {
-    // Mobile layouts can make the scope control hard to operate; the screenshot
-    // gate below still requires a terminal ready book with visible ask/bid rows.
-  }
+  await expect(scopeToggle).toBeEnabled({ timeout: 20_000 });
+  await scopeToggle.click({ force: true });
+  await expect.poll(() => readSwapScopeMode(page), {
+    timeout: 5_000,
+    intervals: [50, 100, 200],
+    message: `swap scope must switch to ${desired} before visual capture`,
+  }).toBe(desired);
 }
 
 async function expectSwapOrderbookReady(page: Page): Promise<void> {
@@ -351,19 +346,18 @@ async function captureMainTabs(
     tags: ['accounts', 'credit'],
   });
   const firstDeltaToggle = page.locator('[data-counterparty-id] .delta-capacity-bar[role="button"]').first();
-  if (await firstDeltaToggle.isVisible().catch(() => false)) {
-    await firstDeltaToggle.click();
-    await expect(
-      page.locator('[data-counterparty-id] .inline-detail-row, [data-counterparty-id] .inline-details-stack').first(),
-    ).toBeVisible({ timeout: 20_000 });
-    await captureUxPage(page, output, `${prefix}-accounts-expanded.png`, {
-      title: `${platform} account capacity detail`,
-      group: 'Accounts',
-      description: uxDescription('Expanded account row showing directional credit capacity.'),
-      platform,
-      tags: ['accounts', 'capacity'],
-    });
-  }
+  await expect(firstDeltaToggle).toBeVisible({ timeout: 20_000 });
+  await firstDeltaToggle.click();
+  await expect(
+    page.locator('[data-counterparty-id] .inline-detail-row, [data-counterparty-id] .inline-details-stack').first(),
+  ).toBeVisible({ timeout: 20_000 });
+  await captureUxPage(page, output, `${prefix}-accounts-expanded.png`, {
+    title: `${platform} account capacity detail`,
+    group: 'Accounts',
+    description: uxDescription('Expanded account row showing directional credit capacity.'),
+    platform,
+    tags: ['accounts', 'capacity'],
+  });
   await captureAccountWorkspaces(page, prefix, output);
   await openSettingsTab(page);
   await captureUxPage(page, output, `${prefix}-settings.png`, {
@@ -439,15 +433,24 @@ async function captureOnboardingScreens(
 }
 
 test('ui screenshot smoke captures onboarding and testnet tools across viewports', { tag: '@functional' }, async ({ browser, page }, testInfo) => {
-  test.setTimeout(240_000);
+  test.setTimeout(360_000);
   await captureTestnetTools(page, testInfo, 'desktop');
   await captureOnboardingScreens(page, testInfo, 'desktop');
 
+  let laptopContext: BrowserContext | null = null;
   let wideContext: BrowserContext | null = null;
   let mobileContext: BrowserContext | null = null;
   try {
+    laptopContext = await browser.newContext({
+      viewport: LAPTOP_VIEWPORT,
+      ignoreHTTPSErrors: true,
+    });
+    const laptopPage = await laptopContext.newPage();
+    await captureTestnetTools(laptopPage, testInfo, 'laptop');
+    await captureOnboardingScreens(laptopPage, testInfo, 'laptop');
+
     wideContext = await browser.newContext({
-      viewport: { width: 1728, height: 1117 },
+      viewport: WIDE_VIEWPORT,
       ignoreHTTPSErrors: true,
     });
     const widePage = await wideContext.newPage();
@@ -462,8 +465,9 @@ test('ui screenshot smoke captures onboarding and testnet tools across viewports
     await captureTestnetTools(mobilePage, testInfo, 'mobile-iphone15pro');
     await captureOnboardingScreens(mobilePage, testInfo, 'mobile-iphone15pro');
   } finally {
-    await mobileContext?.close().catch(() => {});
-    await wideContext?.close().catch(() => {});
+    await mobileContext?.close();
+    await wideContext?.close();
+    await laptopContext?.close();
   }
 });
 
@@ -553,8 +557,8 @@ test('ui screenshot smoke captures operator admin surfaces', { tag: '@functional
   });
 });
 
-test('ui screenshot smoke captures desktop and mobile main tabs', { tag: '@functional' }, async ({ browser, page }, testInfo) => {
-  test.setTimeout(240_000);
+test('ui screenshot smoke captures main tabs across viewports', { tag: '@functional' }, async ({ browser, page }, testInfo) => {
+  test.setTimeout(600_000);
 
   await ensureE2EBaseline(page, {
     timeoutMs: 120_000,
@@ -571,8 +575,30 @@ test('ui screenshot smoke captures desktop and mobile main tabs', { tag: '@funct
   await connectVisualRuntimeToHubs(page, { entityId: alice.entityId, signerId: alice.signerId }, hubIds);
   await captureMainTabs(page, 'desktop', testInfo);
 
+  let laptopContext: BrowserContext | null = null;
+  let wideContext: BrowserContext | null = null;
   let mobileContext: BrowserContext | null = null;
   try {
+    laptopContext = await browser.newContext({
+      viewport: LAPTOP_VIEWPORT,
+      ignoreHTTPSErrors: true,
+    });
+    const laptopPage = await laptopContext.newPage();
+    await gotoApp(laptopPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+    const carol = await createRuntimeIdentity(laptopPage, 'carol-visual', selectDemoMnemonic('carol'));
+    await connectVisualRuntimeToHubs(laptopPage, { entityId: carol.entityId, signerId: carol.signerId }, hubIds);
+    await captureMainTabs(laptopPage, 'laptop', testInfo);
+
+    wideContext = await browser.newContext({
+      viewport: WIDE_VIEWPORT,
+      ignoreHTTPSErrors: true,
+    });
+    const widePage = await wideContext.newPage();
+    await gotoApp(widePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+    const dave = await createRuntimeIdentity(widePage, 'dave-visual', selectDemoMnemonic('dave'));
+    await connectVisualRuntimeToHubs(widePage, { entityId: dave.entityId, signerId: dave.signerId }, hubIds);
+    await captureMainTabs(widePage, 'wide', testInfo);
+
     mobileContext = await browser.newContext({
       ...devices['iPhone 15 Pro'],
       ignoreHTTPSErrors: true,
@@ -583,6 +609,8 @@ test('ui screenshot smoke captures desktop and mobile main tabs', { tag: '@funct
     await connectVisualRuntimeToHubs(mobilePage, { entityId: bob.entityId, signerId: bob.signerId }, hubIds);
     await captureMainTabs(mobilePage, 'mobile-iphone15pro', testInfo);
   } finally {
-    await mobileContext?.close().catch(() => {});
+    await mobileContext?.close();
+    await wideContext?.close();
+    await laptopContext?.close();
   }
 });

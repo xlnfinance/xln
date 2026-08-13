@@ -5,15 +5,16 @@ import {
   ASYNC_PAYMENT_EXPIRY_MS,
   type PaymentDeliveryMode,
 } from '../../types/finance/payment';
+import { toJHeight, type JHeight, type UnixMs } from '../units';
 
 export type ConditionalPaymentMode = Extract<PaymentDeliveryMode, 'instant' | 'async'>;
 
 export const resolvePaymentDeadlineWindow = (input: {
   mode: ConditionalPaymentMode;
-  runtimeJHeight: number;
-  timestamp: number;
+  runtimeJHeight: JHeight;
+  timestamp: UnixMs;
   totalHops: number;
-}): { baseTimelock: bigint; baseHeight: number } => {
+}): { baseTimelock: bigint; baseHeight: JHeight } => {
   const minExpiryMs = input.totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC.MIN_FORWARD_TIMELOCK_MS;
   const expiryMs = input.mode === 'async'
     ? Math.max(ASYNC_PAYMENT_EXPIRY_MS, minExpiryMs)
@@ -21,7 +22,7 @@ export const resolvePaymentDeadlineWindow = (input: {
   const expiryBlocks = input.mode === 'async' ? ASYNC_PAYMENT_EXPIRY_BLOCKS : 50;
   return {
     baseTimelock: BigInt(input.timestamp + expiryMs),
-    baseHeight: input.runtimeJHeight + expiryBlocks,
+    baseHeight: toJHeight(input.runtimeJHeight + expiryBlocks),
   };
 };
 

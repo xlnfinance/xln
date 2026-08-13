@@ -106,11 +106,10 @@ export const hasVerifiedEntityCommitPrecertificate = (
       return false;
     }
     seen.add(signerId);
-    if (
-      hashes.some(
-        (hash, index) => !signatures[index] || !verifyAccountSignature(env, signerId, hash.hash, signatures[index]!),
-      )
-    )
+    if (hashes.some((hash, index) => {
+      const signature = signatures[index];
+      return !signature || !verifyAccountSignature(env, signerId, hash.hash, signature);
+    }))
       return false;
     power += shares;
   }

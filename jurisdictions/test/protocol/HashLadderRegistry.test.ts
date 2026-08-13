@@ -143,6 +143,9 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const RegistryFactory = await hre.ethers.getContractFactory('HashLadderRegistry');
     const registryLib = await RegistryFactory.deploy();
     await registryLib.waitForDeployment();
+    const NftCustodyFactory = await hre.ethers.getContractFactory('NftCustody');
+    const nftCustodyLib = await NftCustodyFactory.deploy();
+    await nftCustodyLib.waitForDeployment();
     const TransformerFactory = await hre.ethers.getContractFactory('DeltaTransformer');
     const transformer = await TransformerFactory.deploy();
     await transformer.waitForDeployment();
@@ -151,6 +154,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
         Account: await accountLib.getAddress(),
         DepositoryBounds: await boundsLib.getAddress(),
         HashLadderRegistry: await registryLib.getAddress(),
+        NftCustody: await nftCustodyLib.getAddress(),
       },
     });
     const depository = (await DepositoryFactory.deploy(

@@ -8,6 +8,7 @@ import "./Account.sol";
 import "./HankoEncoding.sol";
 import "./HashLadderRegistry.sol";
 import "./DepositoryBounds.sol";
+import "./custody/NftCustody.sol";
 
 abstract contract ReentrancyGuardLite {
   error E0();
@@ -27,9 +28,6 @@ interface IERC20 {
   function transfer(address to, uint256 value) external returns (bool);
   function transferFrom(address from, address to, uint256 value) external returns (bool);
   function balanceOf(address account) external view returns (uint256);
-}
-interface IERC721 {
-  function transferFrom(address from, address to, uint256 tokenId) external;
 }
 // IERC1155 already defined in @openzeppelin/contracts (imported via EntityProvider.sol)
 
@@ -699,10 +697,10 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       params.amount = balanceAfter - balanceBefore;
       if (params.amount == 0) revert E3();
     } else if (params.tokenType == TypeERC721) {
-      IERC721(params.contractAddress).transferFrom(msg.sender, address(this), uint(params.externalTokenId));
+      NftCustody.depositERC721(params.contractAddress, params.externalTokenId);
       params.amount = 1;
     } else if (params.tokenType == TypeERC1155) {
-      IERC1155(params.contractAddress).safeTransferFrom(msg.sender, address(this), uint(params.externalTokenId), params.amount, "");
+      NftCustody.depositERC1155(params.contractAddress, params.externalTokenId, params.amount);
     }
 
     _increaseReserve(targetEntity, params.internalTokenId, params.amount);
@@ -734,9 +732,9 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
         recipientBalanceAfter - recipientBalanceBefore != params.amount
       ) revert E11();
     } else if (meta.tokenType == TypeERC721) {
-      IERC721(meta.contractAddress).transferFrom(address(this), recipient, uint(meta.externalTokenId));
+      NftCustody.withdrawERC721(meta.contractAddress, meta.externalTokenId, recipient);
     } else if (meta.tokenType == TypeERC1155) {
-      IERC1155(meta.contractAddress).safeTransferFrom(address(this), recipient, uint(meta.externalTokenId), params.amount, "");
+      NftCustody.withdrawERC1155(meta.contractAddress, meta.externalTokenId, params.amount, recipient);
     }
     return true;
   }

@@ -23,12 +23,15 @@ describe('Depository current-debt forgiveness', () => {
     const bounds = await Bounds.deploy();
     const Registry = await ethers.getContractFactory('HashLadderRegistry');
     const registry = await Registry.deploy();
+    const NftCustody = await ethers.getContractFactory('NftCustody');
+    const nftCustody = await NftCustody.deploy();
     const Transformer = await ethers.getContractFactory('DeltaTransformer');
     const transformer = await Transformer.deploy();
     await Promise.all([
       account.waitForDeployment(),
       bounds.waitForDeployment(),
       registry.waitForDeployment(),
+      nftCustody.waitForDeployment(),
       transformer.waitForDeployment(),
     ]);
     const Harness = await ethers.getContractFactory('DepositoryDebtHarness', {
@@ -36,6 +39,7 @@ describe('Depository current-debt forgiveness', () => {
         Account: await account.getAddress(),
         DepositoryBounds: await bounds.getAddress(),
         HashLadderRegistry: await registry.getAddress(),
+        NftCustody: await nftCustody.getAddress(),
       },
     });
     const harness = await Harness.deploy(
@@ -84,12 +88,15 @@ describe('Depository current-debt forgiveness', () => {
     const bounds = await Bounds.deploy();
     const Registry = await ethers.getContractFactory('HashLadderRegistry');
     const registry = await Registry.deploy();
+    const NftCustody = await ethers.getContractFactory('NftCustody');
+    const nftCustody = await NftCustody.deploy();
     const Transformer = await ethers.getContractFactory('DeltaTransformer');
     const transformer = await Transformer.deploy();
     await Promise.all([
       account.waitForDeployment(),
       bounds.waitForDeployment(),
       registry.waitForDeployment(),
+      nftCustody.waitForDeployment(),
       transformer.waitForDeployment(),
     ]);
     const Harness = await ethers.getContractFactory('DepositoryDebtHarness', {
@@ -97,6 +104,7 @@ describe('Depository current-debt forgiveness', () => {
         Account: await account.getAddress(),
         DepositoryBounds: await bounds.getAddress(),
         HashLadderRegistry: await registry.getAddress(),
+        NftCustody: await nftCustody.getAddress(),
       },
     });
     const harness = await Harness.deploy(

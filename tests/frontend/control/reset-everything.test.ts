@@ -37,9 +37,10 @@ test('browser reset deletes every enumerated durable store and unregisters worke
 });
 
 test('browser reset fails loudly when a database deletion is blocked', async () => {
+  const cleared: string[] = [];
   const restore = [
-    replaceGlobal('localStorage', { clear: () => {} }),
-    replaceGlobal('sessionStorage', { clear: () => {} }),
+    replaceGlobal('localStorage', { clear: () => cleared.push('local') }),
+    replaceGlobal('sessionStorage', { clear: () => cleared.push('session') }),
     replaceGlobal('indexedDB', {
       databases: async () => [{ name: 'runtime' }],
       deleteDatabase: () => {
@@ -53,6 +54,7 @@ test('browser reset fails loudly when a database deletion is blocked', async () 
   ];
   try {
     await expect(clearBrowserRuntimeData()).rejects.toThrow('RESET_INDEXED_DB_DELETE_BLOCKED:runtime');
+    expect(cleared).toEqual([]);
   } finally {
     restore.reverse().forEach(restoreGlobal => restoreGlobal());
   }

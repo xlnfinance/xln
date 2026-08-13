@@ -19,27 +19,42 @@ import type {
   TypedEventLog,
   TypedListener,
   TypedContractMethod,
-} from "../../common";
+} from "../../../common";
 
-export interface IERC721Interface extends Interface {
-  getFunction(nameOrSignature: "transferFrom"): FunctionFragment;
+export interface NoopERC1155MockInterface extends Interface {
+  getFunction(
+    nameOrSignature: "balanceOf" | "safeTransferFrom" | "totalSupply"
+  ): FunctionFragment;
 
   encodeFunctionData(
-    functionFragment: "transferFrom",
-    values: [AddressLike, AddressLike, BigNumberish]
+    functionFragment: "balanceOf",
+    values: [AddressLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "safeTransferFrom",
+    values: [AddressLike, AddressLike, BigNumberish, BigNumberish, BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "totalSupply",
+    values: [BigNumberish]
   ): string;
 
+  decodeFunctionResult(functionFragment: "balanceOf", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "transferFrom",
+    functionFragment: "safeTransferFrom",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "totalSupply",
     data: BytesLike
   ): Result;
 }
 
-export interface IERC721 extends BaseContract {
-  connect(runner?: ContractRunner | null): IERC721;
+export interface NoopERC1155Mock extends BaseContract {
+  connect(runner?: ContractRunner | null): NoopERC1155Mock;
   waitForDeployment(): Promise<this>;
 
-  interface: IERC721Interface;
+  interface: NoopERC1155MockInterface;
 
   queryFilter<TCEvent extends TypedContractEvent>(
     event: TCEvent,
@@ -78,23 +93,53 @@ export interface IERC721 extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
-  transferFrom: TypedContractMethod<
-    [from: AddressLike, to: AddressLike, tokenId: BigNumberish],
-    [void],
-    "nonpayable"
+  balanceOf: TypedContractMethod<
+    [owner: AddressLike, arg1: BigNumberish],
+    [bigint],
+    "view"
   >;
+
+  safeTransferFrom: TypedContractMethod<
+    [
+      arg0: AddressLike,
+      arg1: AddressLike,
+      arg2: BigNumberish,
+      arg3: BigNumberish,
+      arg4: BytesLike
+    ],
+    [void],
+    "view"
+  >;
+
+  totalSupply: TypedContractMethod<[arg0: BigNumberish], [bigint], "view">;
 
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
 
   getFunction(
-    nameOrSignature: "transferFrom"
+    nameOrSignature: "balanceOf"
   ): TypedContractMethod<
-    [from: AddressLike, to: AddressLike, tokenId: BigNumberish],
-    [void],
-    "nonpayable"
+    [owner: AddressLike, arg1: BigNumberish],
+    [bigint],
+    "view"
   >;
+  getFunction(
+    nameOrSignature: "safeTransferFrom"
+  ): TypedContractMethod<
+    [
+      arg0: AddressLike,
+      arg1: AddressLike,
+      arg2: BigNumberish,
+      arg3: BigNumberish,
+      arg4: BytesLike
+    ],
+    [void],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "totalSupply"
+  ): TypedContractMethod<[arg0: BigNumberish], [bigint], "view">;
 
   filters: {};
 }

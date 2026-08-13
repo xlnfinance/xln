@@ -1613,7 +1613,7 @@ const readQaForensicCommitment = (logsDir: string | undefined, shard: number): R
   };
 };
 
-export const buildQaForensicManifest = (run: QaRunManifest, logsDir?: string): Record<string, unknown> => ({
+const buildQaForensicManifest = (run: QaRunManifest, logsDir?: string): Record<string, unknown> => ({
   version: 1,
   runId: run.runId,
   status: run.status,

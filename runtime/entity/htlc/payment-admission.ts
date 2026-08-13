@@ -19,6 +19,7 @@ import type { EntityInfraContext } from '../../types/entity/infra-context';
 import type { PreparedOriginatedHtlcPayment } from '../../types/entity/htlc-infra-context';
 import type { EntityTx } from '../../types/entity-tx';
 import { rejectFailure } from '../../protocol/errors/failure-taxonomy';
+import { toJHeight, toUnixMs } from '../../protocol/units';
 import type { Profile } from '../profile';
 import type { EntityState } from '../types';
 
@@ -143,8 +144,8 @@ export const materializeOriginatedHtlcPayments = async (
     if (quote.senderLockAmount > candidate.data.maxSenderDebit) rejectHtlcPayment('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
     const window = resolvePaymentDeadlineWindow({
       mode: candidate.data.deliveryMode,
-      runtimeJHeight: input.state.lastFinalizedJHeight,
-      timestamp: startedAtMs,
+      runtimeJHeight: toJHeight(input.state.lastFinalizedJHeight),
+      timestamp: toUnixMs(startedAtMs),
       totalHops: route.length - 1,
     });
     const timelock = calculateHopTimelock(window.baseTimelock, 0);
@@ -249,8 +250,8 @@ const assertOriginEconomics = (
   if (quote.senderLockAmount > tx.data.maxSenderDebit) rejectHtlcPayment('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
   const window = resolvePaymentDeadlineWindow({
     mode: tx.data.deliveryMode,
-    runtimeJHeight: input.state.lastFinalizedJHeight,
-    timestamp: startedAtMs,
+    runtimeJHeight: toJHeight(input.state.lastFinalizedJHeight),
+    timestamp: toUnixMs(startedAtMs),
     totalHops: origin.route.length - 1,
   });
   const expected = {

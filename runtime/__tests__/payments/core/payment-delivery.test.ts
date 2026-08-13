@@ -6,13 +6,14 @@ import {
 import { HTLC } from '../../../config/constants';
 import { calculateHopRevealHeight, calculateHopTimelock } from '../../../protocol/htlc/utils';
 import { ASYNC_PAYMENT_EXPIRY_BLOCKS, ASYNC_PAYMENT_EXPIRY_MS } from '../../../types/finance/payment';
+import { toJHeight, toUnixMs } from '../../../protocol/units';
 
 describe('payment delivery modes', () => {
   test('async is a deterministic 24-hour window', () => {
     const deadline = resolvePaymentDeadlineWindow({
       mode: 'async',
-      runtimeJHeight: 123,
-      timestamp: 1_000,
+      runtimeJHeight: toJHeight(123),
+      timestamp: toUnixMs(1_000),
       totalHops: 3,
     });
     expect(deadline.baseTimelock).toBe(BigInt(1_000 + ASYNC_PAYMENT_EXPIRY_MS));
@@ -22,8 +23,8 @@ describe('payment delivery modes', () => {
   test('instant retains the short bounded window', () => {
     const deadline = resolvePaymentDeadlineWindow({
       mode: 'instant',
-      runtimeJHeight: 123,
-      timestamp: 1_000,
+      runtimeJHeight: toJHeight(123),
+      timestamp: toUnixMs(1_000),
       totalHops: 3,
     });
     expect(deadline.baseTimelock).toBe(121_000n);
@@ -44,8 +45,8 @@ describe('payment delivery modes', () => {
   test('charges the timelock delta exactly once per actual forward', () => {
     const sixHopWindow = resolvePaymentDeadlineWindow({
       mode: 'instant',
-      runtimeJHeight: 0,
-      timestamp: 0,
+      runtimeJHeight: toJHeight(0),
+      timestamp: toUnixMs(0),
       totalHops: 6,
     });
     expect(calculateHopTimelock(sixHopWindow.baseTimelock, 0)).toBe(sixHopWindow.baseTimelock);
@@ -53,8 +54,8 @@ describe('payment delivery modes', () => {
 
     const maxHopWindow = resolvePaymentDeadlineWindow({
       mode: 'instant',
-      runtimeJHeight: 0,
-      timestamp: 0,
+      runtimeJHeight: toJHeight(0),
+      timestamp: toUnixMs(0),
       totalHops: HTLC.MAX_HOPS,
     });
     const finalHop = calculateHopTimelock(maxHopWindow.baseTimelock, HTLC.MAX_HOPS - 1);

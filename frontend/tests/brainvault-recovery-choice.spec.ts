@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
 
+declare global {
+  interface Window {
+    __xlnWorkerInitTimeouts?: number;
+  }
+}
+
 const TEST_URL = '/app?locktest=1&scenarioPreview=1';
 const TEST_MNEMONIC = 'test test test test test test test test test test test junk';
 const VIEWPORTS = [
@@ -8,18 +14,16 @@ const VIEWPORTS = [
   { label: 'wide', width: 2560, height: 1440 },
 ] as const;
 
-test.describe('Recovery choice guidance', () => {
+test.describe('Wallet recovery guidance', () => {
   for (const viewport of VIEWPORTS) {
     test(`shows concise tradeoffs at ${viewport.label} size`, { tag: '@functional' }, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport);
       await page.goto(TEST_URL);
 
-      await expect(page.getByTestId('brainvault-tradeoffs')).toBeVisible();
-      await expect(page.getByText('No secret paper, photo, or cloud backup to protect', { exact: true })).toBeVisible();
-      await expect(page.getByTestId('wallet-recovery-warning')).toContainText('Support cannot recover either secret.');
-      await expect(page.getByTestId('wallet-recovery-warning')).toContainText('multisig child entities inside your primary entity');
-      await expect(page.getByText(/estimated bits/i)).toHaveCount(0);
-      await page.waitForTimeout(800);
+      await expect(page.getByRole('heading', { name: 'Create xln wallet', exact: true })).toBeVisible();
+      await expect(page.getByText('Your name and private secret recreate the same wallet. No backup phrase is required.')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Derive wallet', exact: true })).toBeVisible();
+      await expect(page.getByTestId('recovery-rehearsal-option')).toHaveCount(0);
       await page.screenshot({ path: testInfo.outputPath(`${viewport.label}-brainvault.png`), fullPage: true });
 
       await page.getByRole('tab', { name: 'Mnemonic', exact: true }).click();
@@ -29,42 +33,19 @@ test.describe('Recovery choice guidance', () => {
       const rngIncident = page.getByRole('link', { name: 'Coldcard RNG incident', exact: true });
       await expect(rngIncident).toBeVisible();
       await expect(rngIncident).toHaveAttribute('href', 'https://www.cryptotimes.io/2026/07/31/bitcoins-invisible-risk-coldcard-mk3-firmware-bug-leaves-btc-wallet-seeds-exposed-38m-drained/');
-      await page.waitForTimeout(250);
+      await expect(page.getByRole('button', { name: 'Continue with seed', exact: true })).toBeDisabled();
       await page.screenshot({ path: testInfo.outputPath(`${viewport.label}-mnemonic.png`), fullPage: true });
     });
   }
 
-  test('requires the work factor to be rehearsed explicitly', { tag: '@functional' }, async ({ page }, testInfo) => {
-    test.setTimeout(90_000);
+  test('opens Brain Vault without a recovery rehearsal', { tag: '@functional' }, async ({ page }) => {
     await page.setViewportSize(VIEWPORTS[0]);
     await page.goto(TEST_URL);
 
-    await page.getByLabel('Vault name public derivation input').fill('rehearsal@example.org');
-    await page.getByLabel('Secret passphrase').fill('correct horse battery staple');
-    await page.getByRole('button', { name: /Security work factor/ }).click();
-    await page.getByRole('button', { name: '1 Test', exact: true }).click();
-    await page.getByTestId('recovery-rehearsal-option').getByRole('checkbox').check();
-    await page.getByRole('button', { name: 'Derive in browser', exact: true }).click();
-
-    await expect(page.getByTestId('recovery-rehearsal-active')).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByLabel('Vault name public derivation input')).toHaveValue('');
-    await expect(page.getByLabel('Secret passphrase')).toHaveValue('');
-    await expect(page.getByRole('button', { name: /Choose the same factor again/ })).toBeVisible();
-
-    await page.getByLabel('Vault name public derivation input').fill('rehearsal@example.org');
-    await page.getByLabel('Secret passphrase').fill('correct horse battery staple');
-    await expect(page.getByRole('button', { name: 'Verify recovery', exact: true })).toBeDisabled();
-    await page.getByRole('button', { name: /Choose the same factor again/ }).click();
-    await page.waitForTimeout(250);
-    await page.screenshot({ path: testInfo.outputPath('rehearsal-factor-required.png'), fullPage: true });
-
-    await page.getByRole('button', { name: '1 Test', exact: true }).click();
-    await expect(page.getByRole('button', { name: '1 Test', exact: true })).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Verify recovery', exact: true })).toBeEnabled();
-    await page.waitForTimeout(250);
-    await page.screenshot({ path: testInfo.outputPath('rehearsal-ready.png'), fullPage: true });
-    await page.getByRole('button', { name: 'Cancel rehearsal', exact: true }).click();
-    await expect(page.getByLabel('Secret passphrase')).toHaveValue('');
+    await expect(page.getByRole('heading', { name: 'Create xln wallet', exact: true })).toBeVisible();
+    await expect(page.getByTestId('recovery-rehearsal-option')).toHaveCount(0);
+    await expect(page.getByTestId('recovery-rehearsal-active')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Derive wallet', exact: true })).toBeDisabled();
   });
 
   test('wallet tabs follow the keyboard tab pattern', { tag: '@functional' }, async ({ page }) => {
@@ -102,17 +83,26 @@ test.describe('Recovery choice guidance', () => {
     await page.goto(TEST_URL);
     await page.getByLabel('Vault name public derivation input').fill('cache-check');
     await page.getByLabel('Secret passphrase').fill('secret123456');
-    await page.getByRole('button', { name: /Security work factor/ }).click();
+    await page.getByRole('button', { name: /^Advanced\b/ }).click();
     await page.getByRole('button', { name: '1 Test', exact: true }).click();
-    await page.getByRole('button', { name: 'Derive in browser', exact: true }).click();
+    await page.getByRole('button', { name: 'Derive wallet', exact: true }).click();
     await expect(page.getByText(/BRAINVAULT_WORKER_SPEC_MISMATCH:stale-v0/)).toBeVisible();
   });
 
   test('cancelled worker initialization cannot terminate a restarted derivation', { tag: '@functional' }, async ({ page }) => {
     await page.addInitScript(() => {
       const nativeSetTimeout = window.setTimeout.bind(window);
+      let workerInitTimeouts = 0;
+      Object.defineProperty(window, '__xlnWorkerInitTimeouts', {
+        configurable: false,
+        get: () => workerInitTimeouts,
+      });
       window.setTimeout = ((handler: TimerHandler, timeout = 0, ...args: unknown[]) =>
-        nativeSetTimeout(handler, timeout === 30_000 ? 1_000 : timeout, ...args)) as typeof window.setTimeout;
+        nativeSetTimeout(() => {
+          if (timeout === 30_000) workerInitTimeouts += 1;
+          if (typeof handler === 'function') handler(...args);
+          else new Function(handler)();
+        }, timeout === 30_000 ? 1_000 : timeout)) as typeof window.setTimeout;
     });
 
     let workerRequests = 0;
@@ -134,16 +124,20 @@ test.describe('Recovery choice guidance', () => {
     await page.goto(TEST_URL);
     await page.getByLabel('Vault name public derivation input').fill('restart-race');
     await page.getByLabel('Secret passphrase').fill('secret123456');
-    await page.getByRole('button', { name: /Security work factor/ }).click();
+    await page.getByRole('button', { name: /^Advanced\b/ }).click();
     await page.getByRole('button', { name: '1 Test', exact: true }).click();
 
-    await page.getByRole('button', { name: 'Derive in browser', exact: true }).click();
+    await page.getByRole('button', { name: 'Derive wallet', exact: true }).click();
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(page.getByLabel('Secret passphrase')).toHaveValue('');
     await page.getByLabel('Secret passphrase').fill('secret123456');
-    await page.getByRole('button', { name: 'Derive in browser', exact: true }).click();
+    await page.getByRole('button', { name: 'Derive wallet', exact: true }).click();
 
-    await page.waitForTimeout(1_300);
+    await expect.poll(() => workerRequests, { timeout: 5_000 }).toBe(2);
+    await expect.poll(() => page.evaluate(() => window.__xlnWorkerInitTimeouts ?? 0), {
+      timeout: 5_000,
+      message: 'the cancelled worker initialization timeout must fire before the restarted derivation is accepted',
+    }).toBe(1);
     await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
     await expect(page.getByText(/Worker init timeout/)).toHaveCount(0);
     expect(workerRequests).toBe(2);

@@ -67,22 +67,27 @@ const unregisterServiceWorkers = async (): Promise<void> => {
 };
 
 export const clearBrowserRuntimeData = async (): Promise<void> => {
+  await Promise.all([clearIndexedDatabases(), clearBrowserCaches(), unregisterServiceWorkers()]);
   localStorage.clear();
   sessionStorage.clear();
-  await Promise.all([clearIndexedDatabases(), clearBrowserCaches(), unregisterServiceWorkers()]);
 };
 
 export async function resetEverything(request: ResetEverythingRequest): Promise<void> {
   assertResetConfirmed(request);
   if (activeResetPromise) return activeResetPromise;
 
-  activeResetPromise = (async () => {
+  const resetPromise = (async () => {
     await stopCurrentRuntimeActivity();
     requestOtherTabsShutdown();
     await sleep(RESET_TAB_SETTLE_MS);
     await clearBrowserRuntimeData();
     window.location.replace('/app');
   })();
+  activeResetPromise = resetPromise;
 
-  return activeResetPromise;
+  try {
+    await resetPromise;
+  } finally {
+    if (activeResetPromise === resetPromise) activeResetPromise = null;
+  }
 }

@@ -83,6 +83,10 @@ export const deployDepositoryStack = async (entityProviderAddress: string) => {
   const hashLadderRegistry = await HashLadderRegistryFactory.deploy();
   await hashLadderRegistry.waitForDeployment();
 
+  const NftCustodyFactory = await ethers.getContractFactory('NftCustody');
+  const nftCustody = await NftCustodyFactory.deploy();
+  await nftCustody.waitForDeployment();
+
   const DeltaTransformerFactory = await ethers.getContractFactory('DeltaTransformer');
   const deltaTransformer = await DeltaTransformerFactory.deploy();
   await deltaTransformer.waitForDeployment();
@@ -92,6 +96,7 @@ export const deployDepositoryStack = async (entityProviderAddress: string) => {
       Account: await account.getAddress(),
       DepositoryBounds: await depositoryBounds.getAddress(),
       HashLadderRegistry: await hashLadderRegistry.getAddress(),
+      NftCustody: await nftCustody.getAddress(),
     },
   });
   const depository = await DepositoryFactory.deploy(
@@ -100,7 +105,7 @@ export const deployDepositoryStack = async (entityProviderAddress: string) => {
   );
   await depository.waitForDeployment();
 
-  return { account, depositoryBounds, hashLadderRegistry, deltaTransformer, depository };
+  return { account, depositoryBounds, hashLadderRegistry, nftCustody, deltaTransformer, depository };
 };
 
 export const encodeBatch = (batch: unknown): string =>

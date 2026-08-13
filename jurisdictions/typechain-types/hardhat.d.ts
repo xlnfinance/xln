@@ -94,6 +94,18 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Account__factory>;
     getContractFactory(
+      name: "INftCustodyERC1155",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.INftCustodyERC1155__factory>;
+    getContractFactory(
+      name: "INftCustodyERC721",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.INftCustodyERC721__factory>;
+    getContractFactory(
+      name: "NftCustody",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.NftCustody__factory>;
+    getContractFactory(
       name: "DeltaTransformer",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.DeltaTransformer__factory>;
@@ -109,10 +121,6 @@ declare module "hardhat/types/runtime" {
       name: "IERC20",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.IERC20__factory>;
-    getContractFactory(
-      name: "IERC721",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC721__factory>;
     getContractFactory(
       name: "ReentrancyGuardLite",
       signerOrOptions?: ethers.Signer | FactoryOptions
@@ -181,6 +189,22 @@ declare module "hardhat/types/runtime" {
       name: "MockRevealRegistry",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.MockRevealRegistry__factory>;
+    getContractFactory(
+      name: "NoopERC1155Mock",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.NoopERC1155Mock__factory>;
+    getContractFactory(
+      name: "NoopERC721Mock",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.NoopERC721Mock__factory>;
+    getContractFactory(
+      name: "ToggleNoopERC1155Mock",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.ToggleNoopERC1155Mock__factory>;
+    getContractFactory(
+      name: "ToggleNoopERC721Mock",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.ToggleNoopERC721Mock__factory>;
     getContractFactory(
       name: "FalseReturnERC20Mock",
       signerOrOptions?: ethers.Signer | FactoryOptions
@@ -303,6 +327,21 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.Account>;
     getContractAt(
+      name: "INftCustodyERC1155",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.INftCustodyERC1155>;
+    getContractAt(
+      name: "INftCustodyERC721",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.INftCustodyERC721>;
+    getContractAt(
+      name: "NftCustody",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.NftCustody>;
+    getContractAt(
       name: "DeltaTransformer",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -322,11 +361,6 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.IERC20>;
-    getContractAt(
-      name: "IERC721",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC721>;
     getContractAt(
       name: "ReentrancyGuardLite",
       address: string | ethers.Addressable,
@@ -412,6 +446,26 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.MockRevealRegistry>;
+    getContractAt(
+      name: "NoopERC1155Mock",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.NoopERC1155Mock>;
+    getContractAt(
+      name: "NoopERC721Mock",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.NoopERC721Mock>;
+    getContractAt(
+      name: "ToggleNoopERC1155Mock",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.ToggleNoopERC1155Mock>;
+    getContractAt(
+      name: "ToggleNoopERC721Mock",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.ToggleNoopERC721Mock>;
     getContractAt(
       name: "FalseReturnERC20Mock",
       address: string | ethers.Addressable,
@@ -519,6 +573,18 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Account>;
     deployContract(
+      name: "INftCustodyERC1155",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.INftCustodyERC1155>;
+    deployContract(
+      name: "INftCustodyERC721",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.INftCustodyERC721>;
+    deployContract(
+      name: "NftCustody",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NftCustody>;
+    deployContract(
       name: "DeltaTransformer",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.DeltaTransformer>;
@@ -534,10 +600,6 @@ declare module "hardhat/types/runtime" {
       name: "IERC20",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IERC20>;
-    deployContract(
-      name: "IERC721",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC721>;
     deployContract(
       name: "ReentrancyGuardLite",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -606,6 +668,22 @@ declare module "hardhat/types/runtime" {
       name: "MockRevealRegistry",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockRevealRegistry>;
+    deployContract(
+      name: "NoopERC1155Mock",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NoopERC1155Mock>;
+    deployContract(
+      name: "NoopERC721Mock",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NoopERC721Mock>;
+    deployContract(
+      name: "ToggleNoopERC1155Mock",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.ToggleNoopERC1155Mock>;
+    deployContract(
+      name: "ToggleNoopERC721Mock",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.ToggleNoopERC721Mock>;
     deployContract(
       name: "FalseReturnERC20Mock",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -728,6 +806,21 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Account>;
     deployContract(
+      name: "INftCustodyERC1155",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.INftCustodyERC1155>;
+    deployContract(
+      name: "INftCustodyERC721",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.INftCustodyERC721>;
+    deployContract(
+      name: "NftCustody",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NftCustody>;
+    deployContract(
       name: "DeltaTransformer",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -747,11 +840,6 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IERC20>;
-    deployContract(
-      name: "IERC721",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC721>;
     deployContract(
       name: "ReentrancyGuardLite",
       args: any[],
@@ -837,6 +925,26 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockRevealRegistry>;
+    deployContract(
+      name: "NoopERC1155Mock",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NoopERC1155Mock>;
+    deployContract(
+      name: "NoopERC721Mock",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NoopERC721Mock>;
+    deployContract(
+      name: "ToggleNoopERC1155Mock",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.ToggleNoopERC1155Mock>;
+    deployContract(
+      name: "ToggleNoopERC721Mock",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.ToggleNoopERC721Mock>;
     deployContract(
       name: "FalseReturnERC20Mock",
       args: any[],

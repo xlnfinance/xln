@@ -15,6 +15,7 @@ import {
   EntityProvider__factory,
   HankoVerifier__factory,
   HashLadderRegistry__factory,
+  NftCustody__factory,
 } from '../../../../jurisdictions/typechain-types/index.ts';
 import {
   TOKEN_REGISTRATION_AMOUNT,
@@ -143,10 +144,13 @@ const deployDepository = async (
   await bounds.waitForDeployment();
   const registry = await new HashLadderRegistry__factory(signer).deploy();
   await registry.waitForDeployment();
+  const nftCustody = await new NftCustody__factory(signer).deploy();
+  await nftCustody.waitForDeployment();
   const bytecode = linkArtifactBytecode(Depository__factory.bytecode, {
     'contracts/Account.sol:Account': addresses.account,
     'contracts/DepositoryBounds.sol:DepositoryBounds': await bounds.getAddress(),
     'contracts/HashLadderRegistry.sol:HashLadderRegistry': await registry.getAddress(),
+    'contracts/custody/NftCustody.sol:NftCustody': await nftCustody.getAddress(),
   });
   const factory = new ethers.ContractFactory(
     Depository__factory.abi,

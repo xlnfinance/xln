@@ -406,6 +406,7 @@ const deployTron = async (chain, options) => {
   const account = await deployTronContract(tronWeb, 'Account');
   const depositoryBounds = await deployTronContract(tronWeb, 'DepositoryBounds');
   const hashLadderRegistry = await deployTronContract(tronWeb, 'HashLadderRegistry');
+  const nftCustody = await deployTronContract(tronWeb, 'NftCustody');
   const deltaTransformer = await deployTronContract(tronWeb, 'DeltaTransformer');
   const foundationRecipient = tronWeb.defaultAddress.base58;
   const hankoVerifier = await deployTronContract(tronWeb, 'HankoVerifier');
@@ -423,6 +424,7 @@ const deployTron = async (chain, options) => {
       Account: account,
       DepositoryBounds: depositoryBounds,
       HashLadderRegistry: hashLadderRegistry,
+      NftCustody: nftCustody,
     },
   );
   const depositoryArtifact = loadTronArtifact('Depository');

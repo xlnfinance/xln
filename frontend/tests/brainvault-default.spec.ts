@@ -32,11 +32,10 @@ test.describe('BrainVault default flow', () => {
     await page.getByLabel('Vault name public derivation input').fill('vault-test@example.com');
     await page.getByLabel('Secret passphrase').fill('A_VeryHARDpassword123!');
 
-    // Security work factor presets are collapsed under the "Advanced" toggle now
-    await page.getByRole('button', { name: /Security work factor/i }).click();
+    await page.getByRole('button', { name: /^Advanced\b/ }).click();
     await page.getByRole('button', { name: /^1\s+Test$/ }).click();
 
-    const deriveButton = page.getByRole('button', { name: 'Derive in browser', exact: true });
+    const deriveButton = page.getByRole('button', { name: 'Derive wallet', exact: true });
     await expect(deriveButton).toBeEnabled({ timeout: 10_000 });
     await deriveButton.click();
 
@@ -54,11 +53,10 @@ test.describe('BrainVault default flow', () => {
     await page.getByLabel('Vault name public derivation input').fill('vault-tes2t@example.com');
     await page.getByLabel('Secret passphrase').fill('NotHardEnough!11');
 
-    // Security work factor presets are collapsed under the "Advanced" toggle now
-    await page.getByRole('button', { name: /Security work factor/i }).click();
+    await page.getByRole('button', { name: /^Advanced\b/ }).click();
     await page.getByRole('button', { name: /^2\s+Basic$/ }).click();
 
-    const deriveButton = page.getByRole('button', { name: 'Derive in browser', exact: true });
+    const deriveButton = page.getByRole('button', { name: 'Derive wallet', exact: true });
     await expect(deriveButton).toBeEnabled({ timeout: 10_000 });
     await deriveButton.click();
 

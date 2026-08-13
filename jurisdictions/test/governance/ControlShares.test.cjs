@@ -58,6 +58,10 @@ describe("Entity Control-Shares System", function () {
     const registry = await RegistryFactory.deploy();
     await registry.waitForDeployment();
 
+    const NftCustodyFactory = await ethers.getContractFactory("NftCustody");
+    const nftCustody = await NftCustodyFactory.deploy();
+    await nftCustody.waitForDeployment();
+
     const TransformerFactory = await ethers.getContractFactory("DeltaTransformer");
     const transformer = await TransformerFactory.deploy();
     await transformer.waitForDeployment();
@@ -67,7 +71,8 @@ describe("Entity Control-Shares System", function () {
       libraries: {
         Account: await account.getAddress(),
         DepositoryBounds: await bounds.getAddress(),
-        HashLadderRegistry: await registry.getAddress()
+        HashLadderRegistry: await registry.getAddress(),
+        NftCustody: await nftCustody.getAddress()
       }
     });
     depository = await DepositoryFactory.deploy(

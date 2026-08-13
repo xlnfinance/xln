@@ -13,6 +13,23 @@ export type VaultSecrets = {
   mnemonic12?: string;
 };
 
+const decodeVaultSecrets = (value: unknown): VaultSecrets => {
+  if (!isRecord(value)) throw new Error('VAULT_SECRET_PAYLOAD_INVALID');
+  const allowed = new Set(['seed', 'mnemonic12']);
+  const extras = Object.keys(value).filter(key => !allowed.has(key));
+  if (extras.length > 0) throw new Error(`VAULT_SECRET_FIELDS_INVALID:${extras.join(',')}`);
+  const seed = value['seed'];
+  if (typeof seed !== 'string' || !seed.trim()) throw new Error('VAULT_SECRET_SEED_INVALID');
+  const mnemonic12 = value['mnemonic12'];
+  if (mnemonic12 !== undefined && (typeof mnemonic12 !== 'string' || !mnemonic12.trim())) {
+    throw new Error('VAULT_SECRET_MNEMONIC_INVALID');
+  }
+  return {
+    seed,
+    ...(typeof mnemonic12 === 'string' ? { mnemonic12 } : {}),
+  };
+};
+
 const PROTECTED_VAULT_KEYS = ['version', 'keyId', 'iv', 'ciphertext', 'unlockUntil'] as const;
 const KEY_ID_PATTERN = /^[0-9a-f]{32}$/;
 
@@ -218,12 +235,7 @@ export const unprotectVaultSecrets = async (
       key,
       asArrayBuffer(base64ToBytes(protectedSecrets.ciphertext)),
     );
-    const parsed = JSON.parse(new TextDecoder().decode(plaintext)) as Partial<VaultSecrets>;
-    if (typeof parsed.seed !== 'string' || !parsed.seed.trim()) throw new Error('VAULT_SECRET_SEED_INVALID');
-    return {
-      seed: parsed.seed,
-      ...(typeof parsed.mnemonic12 === 'string' && parsed.mnemonic12 ? { mnemonic12: parsed.mnemonic12 } : {}),
-    };
+    return decodeVaultSecrets(JSON.parse(new TextDecoder().decode(plaintext)) as unknown);
   } catch (error) {
     throw new Error(`VAULT_DEVICE_DECRYPT_FAILED:${error instanceof Error ? error.message : String(error)}`);
   }

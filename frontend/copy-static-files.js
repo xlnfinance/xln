@@ -41,6 +41,7 @@ const files = [
   { src: '../jurisdictions/artifacts/contracts/EntityProvider.sol/EntityProvider.json', dest: 'static/contracts/EntityProvider.json' },
   { src: '../jurisdictions/artifacts/contracts/HankoVerifier.sol/HankoVerifier.json', dest: 'static/contracts/HankoVerifier.json' },
   { src: '../jurisdictions/artifacts/contracts/HashLadderRegistry.sol/HashLadderRegistry.json', dest: 'static/contracts/HashLadderRegistry.json' },
+  { src: '../jurisdictions/artifacts/contracts/custody/NftCustody.sol/NftCustody.json', dest: 'static/contracts/NftCustody.json' },
   { src: '../jurisdictions/artifacts/contracts/DeltaTransformer.sol/DeltaTransformer.json', dest: 'static/contracts/DeltaTransformer.json' },
   { src: '../jurisdictions/artifacts/contracts/ERC20Mock.sol/ERC20Mock.json', dest: 'static/contracts/ERC20Mock.json' },
 ];

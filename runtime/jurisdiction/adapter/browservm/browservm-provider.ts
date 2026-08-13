@@ -26,6 +26,7 @@ import {
   Depository__factory,
   DepositoryBounds__factory,
   HashLadderRegistry__factory,
+  NftCustody__factory,
 } from '../../../../jurisdictions/typechain-types/index';
 import { safeStringify } from '../../../protocol/serialization/index.js';
 import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
@@ -216,6 +217,7 @@ export class BrowserVMProvider {
   private deltaTransformerAddress: Address | null = null;
   private depositoryBoundsAddress: Address | null = null;
   private hashLadderRegistryAddress: Address | null = null;
+  private nftCustodyAddress: Address | null = null;
   private deployerPrivKey: Uint8Array;
   private deployerAddress: Address;
   private nonce = 0n;
@@ -339,6 +341,7 @@ export class BrowserVMProvider {
     await this.deployDeltaTransformer();
     await this.deployDepositoryBounds();
     await this.deployHashLadderRegistry();
+    await this.deployNftCustody();
     await this.deployDepository();
     await this.deployDefaultTokens();
 
@@ -358,6 +361,7 @@ export class BrowserVMProvider {
     this.deltaTransformerAddress = null;
     this.depositoryBoundsAddress = null;
     this.hashLadderRegistryAddress = null;
+    this.nftCustodyAddress = null;
     this.nonce = 0n;
     this.blockHeight = 0;
     this.blockHash = '0x0000000000000000000000000000000000000000000000000000000000000000';
@@ -405,13 +409,14 @@ export class BrowserVMProvider {
     if (!this.entityProviderAddress) {
       throw new Error('EntityProvider must be deployed before Depository');
     }
-    if (!this.deltaTransformerAddress || !this.depositoryBoundsAddress || !this.hashLadderRegistryAddress) {
+    if (!this.deltaTransformerAddress || !this.depositoryBoundsAddress || !this.hashLadderRegistryAddress || !this.nftCustodyAddress) {
       throw new Error('Depository dependencies must be deployed first');
     }
     const linkedBytecode = Depository__factory.linkBytecode({
       'contracts/Account.sol:Account': this.accountAddress.toString(),
       'contracts/DepositoryBounds.sol:DepositoryBounds': this.depositoryBoundsAddress.toString(),
       'contracts/HashLadderRegistry.sol:HashLadderRegistry': this.hashLadderRegistryAddress.toString(),
+      'contracts/custody/NftCustody.sol:NftCustody': this.nftCustodyAddress.toString(),
     });
     const constructorArgs = ethers.AbiCoder.defaultAbiCoder().encode(
       ['address', 'address'],
@@ -547,6 +552,10 @@ export class BrowserVMProvider {
       'HashLadderRegistry',
       HashLadderRegistry__factory.bytecode,
     );
+  }
+
+  private async deployNftCustody(): Promise<void> {
+    this.nftCustodyAddress = await this.deployLibrary('NftCustody', NftCustody__factory.bytecode);
   }
 
   /** Get DeltaTransformer contract address */

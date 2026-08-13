@@ -7,7 +7,9 @@ import type {
   RuntimeRecoveryTowerFailureSummary,
   RuntimeRecoveryTowerReceiptSummary,
   Signer,
+  RuntimesState,
 } from './vault-recovery';
+import { normalizeRuntimeId } from './vault-recovery';
 
 type RecordValue = Record<string, unknown>;
 
@@ -125,13 +127,51 @@ export const decodePersistedRuntime = (value: unknown, persistedKey: string): Ru
   if (!Array.isArray(raw['signers'])) throw new Error('VAULT_STORAGE_SIGNERS_INVALID');
   const loginType = raw['loginType'];
   if (loginType !== undefined && loginType !== 'manual' && loginType !== 'demo') throw new Error('VAULT_STORAGE_LOGIN_TYPE_INVALID');
+  const id = normalizeRuntimeId(string(raw['id'], 'VAULT_STORAGE_RUNTIME_ID_INVALID'));
+  const canonicalPersistedKey = normalizeRuntimeId(persistedKey);
+  if (!id || !canonicalPersistedKey || persistedKey !== canonicalPersistedKey || id !== canonicalPersistedKey) {
+    throw new Error(`VAULT_STORAGE_RUNTIME_ID_KEY_MISMATCH:${persistedKey}:${String(raw['id'])}`);
+  }
+  const signers = raw['signers'].map(decodeSigner);
+  const activeSignerIndex = integer(raw['activeSignerIndex'], 'VAULT_STORAGE_ACTIVE_SIGNER_INVALID');
+  if (activeSignerIndex >= signers.length) throw new Error('VAULT_STORAGE_ACTIVE_SIGNER_OUT_OF_RANGE');
   return {
-    id: string(raw['id'] ?? persistedKey, 'VAULT_STORAGE_RUNTIME_ID_INVALID'), label: string(raw['label'], 'VAULT_STORAGE_LABEL_INVALID'), seed: '',
-    signers: raw['signers'].map(decodeSigner), activeSignerIndex: integer(raw['activeSignerIndex'], 'VAULT_STORAGE_ACTIVE_SIGNER_INVALID'),
+    id, label: string(raw['label'], 'VAULT_STORAGE_LABEL_INVALID'), seed: '',
+    signers, activeSignerIndex,
     createdAt: integer(raw['createdAt'], 'VAULT_STORAGE_CREATED_AT_INVALID'),
     ...(raw['protectedSecrets'] === undefined ? {} : { protectedSecrets: decodeProtectedVaultSecrets(raw['protectedSecrets']) }),
     ...(loginType === undefined ? {} : { loginType }),
     ...(raw['requiresOnboarding'] === undefined ? {} : { requiresOnboarding: boolean(raw['requiresOnboarding'], 'VAULT_STORAGE_ONBOARDING_INVALID') }),
     ...(raw['recovery'] === undefined ? {} : { recovery: decodeRecovery(raw['recovery']) }),
   };
+};
+
+export const decodePersistedVaultState = (value: unknown): RuntimesState => {
+  const raw = record(value, 'VAULT_STORAGE_ROOT_INVALID');
+  exactKeys(raw, ['activeRuntimeId', 'runtimes'], 'VAULT_STORAGE_ROOT_KEYS_INVALID');
+  const rawRuntimes = record(raw['runtimes'], 'VAULT_STORAGE_RUNTIMES_INVALID');
+  const runtimes: Record<string, Runtime> = {};
+  for (const [persistedKey, encodedRuntime] of Object.entries(rawRuntimes)) {
+    const runtime = decodePersistedRuntime(encodedRuntime, persistedKey);
+    if (Object.hasOwn(runtimes, runtime.id)) {
+      throw new Error(`VAULT_STORAGE_DUPLICATE_RUNTIME_ID:${runtime.id}`);
+    }
+    runtimes[runtime.id] = runtime;
+  }
+
+  const activeRuntimeId = raw['activeRuntimeId'];
+  if (Object.keys(runtimes).length === 0) {
+    if (activeRuntimeId !== null) throw new Error('VAULT_STORAGE_ACTIVE_RUNTIME_INVALID');
+    return { runtimes, activeRuntimeId: null };
+  }
+  if (typeof activeRuntimeId !== 'string') throw new Error('VAULT_STORAGE_ACTIVE_RUNTIME_INVALID');
+  const normalizedActiveRuntimeId = normalizeRuntimeId(activeRuntimeId);
+  if (
+    !normalizedActiveRuntimeId
+    || activeRuntimeId !== normalizedActiveRuntimeId
+    || !Object.hasOwn(runtimes, normalizedActiveRuntimeId)
+  ) {
+    throw new Error(`VAULT_STORAGE_ACTIVE_RUNTIME_INVALID:${activeRuntimeId}`);
+  }
+  return { runtimes, activeRuntimeId: normalizedActiveRuntimeId };
 };

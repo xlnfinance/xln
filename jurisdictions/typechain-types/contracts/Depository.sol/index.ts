@@ -3,5 +3,4 @@
 /* eslint-disable */
 export type { Depository } from "./Depository";
 export type { IERC20 } from "./IERC20";
-export type { IERC721 } from "./IERC721";
 export type { ReentrancyGuardLite } from "./ReentrancyGuardLite";
