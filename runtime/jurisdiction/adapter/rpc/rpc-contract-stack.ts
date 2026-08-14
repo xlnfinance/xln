@@ -23,7 +23,6 @@ import {
   getDefaultTokenSupply,
 } from '../../machine/config/default-tokens';
 import { requireUsableContractAddress } from '../../machine/contract-address';
-import { packTokenReference } from '../events/contract-codec';
 import { DEV_CHAIN_IDS } from '../chain-ids';
 import type { RpcChainIo } from './rpc-chain-io';
 import { rpcLog } from '../rpc-public';
@@ -211,7 +210,7 @@ const deployBootstrapTokens = async (
       await chainIo.buildFeeOverrides(),
     );
     await chainIo.waitForReceipt(registration, `depository.externalTokenToReserve.${token.symbol}`);
-    const tokenId = await depository.tokenToId(packTokenReference(0, tokenAddress, 0n));
+    const tokenId = (await depository.getTokensLength()) - 1n;
     if (tokenId === 0n) throw new Error(`JADAPTER_BOOTSTRAP_TOKEN_REGISTRATION_FAILED:${token.symbol}`);
   }
   return tokens.map(token => token.symbol);

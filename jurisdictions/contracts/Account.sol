@@ -88,17 +88,27 @@ library Account {
     if (nonce > JS_SAFE_NONCE_MAX) revert E10();
   }
 
-  function _readFixedTokenSupply(uint8 tokenType, address token, uint96 externalTokenId)
+  function _readFixedTokenSupply(
+    uint8 tokenType,
+    address token,
+    uint256 externalTokenId,
+    address entityProvider
+  )
     private view returns (uint256 supply, bool valid)
   {
     if (tokenType > 2) return (0, false);
     if (tokenType == 1) return (1, true);
-    bytes4 selector = tokenType == 0
-      ? bytes4(keccak256("totalSupply()"))
-      : bytes4(keccak256("totalSupply(uint256)"));
-    bytes memory callData = tokenType == 0
-      ? abi.encodeWithSelector(selector)
-      : abi.encodeWithSelector(selector, uint256(externalTokenId));
+    bool entityProviderShare = tokenType == 2 && token == entityProvider;
+    bytes4 selector = entityProviderShare
+      ? bytes4(keccak256("balanceOf(address,uint256)"))
+      : tokenType == 0
+        ? bytes4(keccak256("totalSupply()"))
+        : bytes4(keccak256("totalSupply(uint256)"));
+    bytes memory callData = entityProviderShare
+      ? abi.encodeWithSelector(selector, address(uint160(externalTokenId)), externalTokenId)
+      : tokenType == 0
+        ? abi.encodeWithSelector(selector)
+        : abi.encodeWithSelector(selector, externalTokenId);
     bool success;
     uint256 returnSize;
     uint256 gasLimit = TOKEN_SUPPLY_GAS_LIMIT;
@@ -115,10 +125,15 @@ library Account {
     valid = supply > 0 && supply <= uint256(type(int256).max);
   }
 
-  function readFixedTokenSupply(uint8 tokenType, address token, uint96 externalTokenId)
+  function readFixedTokenSupply(
+    uint8 tokenType,
+    address token,
+    uint256 externalTokenId,
+    address entityProvider
+  )
     external view returns (uint256 supply, bool valid)
   {
-    return _readFixedTokenSupply(tokenType, token, externalTokenId);
+    return _readFixedTokenSupply(tokenType, token, externalTokenId, entityProvider);
   }
 
   function addDebt(
@@ -1264,12 +1279,9 @@ library Account {
     bytes32 entityId,
     InitialDisputeProof[] memory disputeStarts,
     address entityProvider
-  ) external returns (bool completeSuccess) {
-    completeSuccess = true;
+  ) external {
     for (uint i = 0; i < disputeStarts.length; i++) {
-      if (!_disputeStart(_accounts, entityId, disputeStarts[i], entityProvider)) {
-        completeSuccess = false;
-      }
+      _disputeStart(_accounts, entityId, disputeStarts[i], entityProvider);
     }
   }
 
@@ -1631,7 +1643,7 @@ library Account {
     bytes32 entityId,
     InitialDisputeProof memory params,
     address entityProvider
-  ) internal returns (bool) {
+  ) internal {
     // Validate the full signed body and every gas-bound before touching nonce
     // or dispute storage. Reverts roll back anyway, but this ordering also
     // keeps the mutation boundary auditable and prevents hash-only gas bombs.
@@ -1763,7 +1775,6 @@ library Account {
       leftResponseSeconds,
       rightResponseSeconds
     );
-    return true;
   }
 
   /**

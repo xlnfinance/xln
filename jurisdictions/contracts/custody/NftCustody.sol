@@ -23,13 +23,13 @@ interface INftCustodyERC1155 {
 library NftCustody {
   error E11();
 
-  function depositERC721(address token, uint96 externalTokenId) external {
+  function depositERC721(address token, uint256 externalTokenId) external {
     INftCustodyERC721 nft = INftCustodyERC721(token);
     nft.transferFrom(msg.sender, address(this), uint256(externalTokenId));
     if (nft.ownerOf(uint256(externalTokenId)) != address(this)) revert E11();
   }
 
-  function depositERC1155(address token, uint96 externalTokenId, uint256 amount) external {
+  function depositERC1155(address token, uint256 externalTokenId, uint256 amount) external {
     INftCustodyERC1155 nft = INftCustodyERC1155(token);
     uint256 beforeBalance = nft.balanceOf(address(this), uint256(externalTokenId));
     nft.safeTransferFrom(msg.sender, address(this), uint256(externalTokenId), amount, "");
@@ -37,14 +37,14 @@ library NftCustody {
     if (afterBalance < beforeBalance || afterBalance - beforeBalance != amount) revert E11();
   }
 
-  function withdrawERC721(address token, uint96 externalTokenId, address recipient) external {
+  function withdrawERC721(address token, uint256 externalTokenId, address recipient) external {
     INftCustodyERC721 nft = INftCustodyERC721(token);
     if (nft.ownerOf(uint256(externalTokenId)) != address(this)) revert E11();
     nft.transferFrom(address(this), recipient, uint256(externalTokenId));
     if (nft.ownerOf(uint256(externalTokenId)) != recipient) revert E11();
   }
 
-  function withdrawERC1155(address token, uint96 externalTokenId, uint256 amount, address recipient) external {
+  function withdrawERC1155(address token, uint256 externalTokenId, uint256 amount, address recipient) external {
     INftCustodyERC1155 nft = INftCustodyERC1155(token);
     uint256 beforeSender = nft.balanceOf(address(this), uint256(externalTokenId));
     uint256 beforeRecipient = nft.balanceOf(recipient, uint256(externalTokenId));

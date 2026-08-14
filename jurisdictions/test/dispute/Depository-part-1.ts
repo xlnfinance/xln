@@ -544,9 +544,6 @@ describe('Depository', () => {
     const { depository, erc20 } = await loadFixture(deployFixture);
     const readWatchedTokens = createWatchedErc20TokenReader(depository, () => undefined);
     const tokenAddress = await erc20.getAddress();
-    const packedToken = ethers.keccak256(
-      ethers.AbiCoder.defaultAbiCoder().encode(['uint8', 'address', 'uint96'], [0, tokenAddress, 0]),
-    );
     await expect(depository.connect(user1).registerExternalToken(0, tokenAddress, 0)).to.be.revertedWithCustomError(
       depository,
       'E2',
@@ -556,10 +553,8 @@ describe('Depository', () => {
       .to.emit(depository, 'TokenRegistered')
       .withArgs(1n, 0, tokenAddress, 0n);
     expect(await readWatchedTokens()).to.deep.equal([{ tokenId: 1, address: tokenAddress.toLowerCase() }]);
-    expect(await depository.tokenToId(packedToken)).to.equal(1n);
     await depository.connect(user0).registerExternalToken(0, tokenAddress, 0);
     expect(await depository.getTokensLength()).to.equal(2n);
-    expect(await depository.tokenToId(packedToken)).to.equal(1n);
   });
   it('accepts ERC1155 custody without allocating an unregistered token ID', async function () {
     const { depository, erc1155 } = await loadFixture(deployFixture);

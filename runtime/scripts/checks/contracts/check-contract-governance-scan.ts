@@ -168,6 +168,19 @@ assertFunctionHeaderIncludes(depository, depositoryPath, 'processBatch', 'extern
 assertFunctionHeaderIncludes(depository, depositoryPath, 'watchtowerCounterDispute', 'external nonReentrant');
 assertFunctionHeaderIncludes(depository, depositoryPath, 'mintToReserve', 'external onlyLocalDevAdmin');
 assertFunctionHeaderIncludes(depository, depositoryPath, 'adminRegisterExternalToken', 'external onlyLocalDevAdmin nonReentrant');
+const tokenRegistration = getFunctionBody(depository, 'registerExternalToken', depositoryPath);
+assertIncludes(
+  tokenRegistration,
+  'msg.sender != admin && (tokenType != TypeERC1155 || contractAddress != entityProvider)',
+  `${depositoryPath}:registerExternalToken`,
+);
+const erc1155Receiver = getFunctionBody(depository, 'onERC1155Received', depositoryPath);
+assertIncludes(erc1155Receiver, 'msg.sender != entityProvider', `${depositoryPath}:onERC1155Received`);
+assertIncludes(
+  erc1155Receiver,
+  'from != address(uint160(id))',
+  `${depositoryPath}:onERC1155Received`,
+);
 assertIncludes(depository, 'Account.computeBatchHankoHash(DOMAIN_SEPARATOR, encodedBatch, nonce)', depositoryPath);
 assertIncludes(depository, 'if (nonce != entityNonces[entityId] + 1) revert E2();', depositoryPath);
 assertIncludes(depository, 'entityNonces[entityId] = nonce;', depositoryPath);

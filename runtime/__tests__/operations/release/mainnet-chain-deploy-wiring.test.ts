@@ -55,7 +55,7 @@ describe('mainnet chain deployment wiring', () => {
   test('canonical EVM deploy pins the configured stablecoin to tokenId 1 before publishing', () => {
     const script = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-stack.cjs'), 'utf8');
     expect(script).not.toContain('ID will be assigned on first use');
-    expect(script).toMatch(/tokenToId\s*\(/);
+    expect(script).toMatch(/getTokensLength\s*\(/);
     expect(script).toMatch(/stablecoinTokenId\s*!==\s*1n/);
     expect(script).toContain('await stablecoin.decimals()');
     expect(script).toContain('STABLECOIN_DECIMALS_MISMATCH');

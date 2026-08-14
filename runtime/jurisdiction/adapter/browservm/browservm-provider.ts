@@ -39,7 +39,7 @@ import {
   assertEntityProviderActionResolutionReceipt,
 } from '../../../entity/entity-provider-action';
 import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } from '../../machine/batch';
-import { buildExternalTokenToReserveBatch, packTokenReference } from '../events/contract-codec';
+import { buildExternalTokenToReserveBatch } from '../events/contract-codec';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../../../hanko/batch';
 import { decodeHankoEnvelope } from '../../../hanko/codec';
 import {
@@ -663,7 +663,6 @@ export class BrowserVMProvider {
   }
 
   private async registerErc20Token(tokenAddress: string): Promise<number> {
-    const packedToken = packTokenReference(0, tokenAddress, 0n);
     await this.approveErc20(this.deployerPrivKey, tokenAddress, this.depositoryAddress!.toString(), TOKEN_REGISTRATION_AMOUNT);
 
     const callData = this.depositoryInterface!.encodeFunctionData('adminRegisterExternalToken', [{
@@ -688,23 +687,21 @@ export class BrowserVMProvider {
       throw new Error(`adminRegisterExternalToken failed: ${result.execResult.exceptionError}`);
     }
 
-    const tokenId = await this.lookupTokenId(packedToken);
-    return tokenId;
-  }
-
-  private async lookupTokenId(packedToken: string): Promise<number> {
-    const callData = this.depositoryInterface!.encodeFunctionData('tokenToId', [packedToken]);
-    const result = await this.runReadOnlyCall({
+    const lengthCallData = this.depositoryInterface!.encodeFunctionData('getTokensLength');
+    const lengthResult = await this.runReadOnlyCall({
       to: this.depositoryAddress!,
       caller: this.deployerAddress,
-      data: hexToBytes(callData as `0x${string}`),
+      data: hexToBytes(lengthCallData as `0x${string}`),
       gasLimit: 100000n,
     });
-    if (result.execResult.exceptionError) {
-      throw new Error(`tokenToId failed: ${result.execResult.exceptionError}`);
+    if (lengthResult.execResult.exceptionError) {
+      throw new Error(`getTokensLength failed: ${lengthResult.execResult.exceptionError}`);
     }
-    const decoded = this.depositoryInterface!.decodeFunctionResult('tokenToId', result.execResult.returnValue);
-    return Number(decoded[0]);
+    const decoded = this.depositoryInterface!.decodeFunctionResult(
+      'getTokensLength',
+      lengthResult.execResult.returnValue,
+    );
+    return Number(decoded[0]) - 1;
   }
 
   async getErc20Balance(tokenAddress: string, owner: string): Promise<bigint> {

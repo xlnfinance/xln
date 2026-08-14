@@ -112,11 +112,6 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     _;
   }
 
-  modifier onlyAdmin() {
-    _requireAdmin();
-    _;
-  }
-
   function _requireAdmin() private view {
     if (msg.sender != admin) revert E2();
   }
@@ -188,7 +183,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     bool targetRole,
     uint256 revealedAt
   );
-  event TokenRegistered(uint256 indexed tokenId, uint8 tokenType, address indexed contractAddress, uint96 externalTokenId);
+  event TokenRegistered(uint256 indexed tokenId, uint8 tokenType, address indexed contractAddress, uint256 externalTokenId);
 
   //event ChannelUpdated(address indexed receiver, address indexed addr, uint tokenId);
 
@@ -199,14 +194,14 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
   struct TokenMetadata {
     address contractAddress;
-    uint96 externalTokenId;
+    uint256 externalTokenId;
     uint8 tokenType;
   }
 
   TokenMetadata[] public _tokens;
   
   // Efficient token lookup: packedToken -> internalTokenId
-  mapping(bytes32 => uint256) public tokenToId;
+  mapping(bytes32 => uint256) private tokenToId;
 
   constructor(address _entityProvider, address _deltaTransformer) {
     if (_entityProvider == address(0) || _deltaTransformer == address(0)) revert E7();
@@ -243,24 +238,28 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     return _tokens.length;
   }
 
-  function registerExternalToken(uint8 tokenType, address contractAddress, uint96 externalTokenId)
+  function registerExternalToken(uint8 tokenType, address contractAddress, uint256 externalTokenId)
     external
-    onlyAdmin
-    returns (uint256 tokenId)
   {
-    return _registerExternalToken(tokenType, contractAddress, externalTokenId);
+    if (msg.sender != admin && (tokenType != TypeERC1155 || contractAddress != entityProvider)) revert E2();
+    _registerExternalToken(tokenType, contractAddress, externalTokenId);
   }
 
-  function _registerExternalToken(uint8 tokenType, address contractAddress, uint96 externalTokenId)
+  function _registerExternalToken(uint8 tokenType, address contractAddress, uint256 externalTokenId)
     private
     returns (uint256 tokenId)
   {
-    if (tokenType > TypeERC1155 || contractAddress.code.length == 0) revert E11();
-    (, bool validSupply) = Account.readFixedTokenSupply(tokenType, contractAddress, externalTokenId);
-    if (!validSupply) revert E11();
+    if (contractAddress.code.length == 0) revert E11();
     bytes32 packedToken = _packTokenReference(tokenType, contractAddress, externalTokenId);
     tokenId = tokenToId[packedToken];
     if (tokenId != 0) return tokenId;
+    (, bool validSupply) = Account.readFixedTokenSupply(
+      tokenType,
+      contractAddress,
+      externalTokenId,
+      entityProvider
+    );
+    if (!validSupply) revert E11();
 
     _tokens.push(TokenMetadata({
       contractAddress: contractAddress,
@@ -531,9 +530,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     }
 
     if (batch.disputeStarts.length > 0) {
-      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, entityProvider)) {
-        revert E4();
-      }
+      Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, entityProvider);
     }
 
     // Counter-proofs are state-selection responses, not early settlement.
@@ -645,7 +642,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     return reserve > outstanding ? reserve - outstanding : 0;
   }
 
-  function _packTokenReference(uint8 tokenType, address contractAddress, uint96 externalTokenId) private pure returns (bytes32) {
+  function _packTokenReference(uint8 tokenType, address contractAddress, uint256 externalTokenId) private pure returns (bytes32) {
     return keccak256(abi.encode(tokenType, contractAddress, externalTokenId));
   }
 
@@ -1075,9 +1072,15 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   /// @dev Single ERC1155 custody is required for registered external assets.
   /// Batch receipt stays unsupported so one callback can never imply that an
   /// arbitrary token set was registered or credited.
-  function onERC1155Received(address, address, uint256, uint256, bytes calldata)
-    external pure returns (bytes4)
+  function onERC1155Received(address, address from, uint256 id, uint256 amount, bytes calldata data)
+    external returns (bytes4)
   {
+    if (data.length != 0) {
+      if (msg.sender != entityProvider || from != address(uint160(id))) revert E11();
+      uint256 tokenId = tokenToId[_packTokenReference(TypeERC1155, entityProvider, id)];
+      if (tokenId == 0) revert E11();
+      _increaseReserve(bytes32(uint256(uint160(from))), tokenId, amount);
+    }
     return 0xf23a6e61;
   }
 }

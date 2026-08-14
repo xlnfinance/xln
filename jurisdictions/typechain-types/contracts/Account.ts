@@ -264,7 +264,7 @@ export interface AccountInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "readFixedTokenSupply",
-    values: [BigNumberish, AddressLike, BigNumberish]
+    values: [BigNumberish, AddressLike, BigNumberish, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "validateDisputeProofs",
@@ -568,7 +568,8 @@ export interface Account extends BaseContract {
     [
       tokenType: BigNumberish,
       token: AddressLike,
-      externalTokenId: BigNumberish
+      externalTokenId: BigNumberish,
+      entityProvider: AddressLike
     ],
     [[bigint, boolean] & { supply: bigint; valid: boolean }],
     "view"
@@ -620,7 +621,8 @@ export interface Account extends BaseContract {
     [
       tokenType: BigNumberish,
       token: AddressLike,
-      externalTokenId: BigNumberish
+      externalTokenId: BigNumberish,
+      entityProvider: AddressLike
     ],
     [[bigint, boolean] & { supply: bigint; valid: boolean }],
     "view"

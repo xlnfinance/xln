@@ -161,11 +161,7 @@ async function main() {
   if (!registrationReceipt || registrationReceipt.status !== 1) {
     throw new Error("STABLECOIN_REGISTRATION_RECEIPT_INVALID");
   }
-  const tokenReference = hre.ethers.keccak256(hre.ethers.AbiCoder.defaultAbiCoder().encode(
-    ["uint8", "address", "uint96"],
-    [0, stablecoinAddress, 0],
-  ));
-  const stablecoinTokenId = await depository.tokenToId(tokenReference);
+  const stablecoinTokenId = (await depository.getTokensLength()) - 1n;
   if (stablecoinTokenId !== 1n) {
     throw new Error(`STABLECOIN_TOKEN_ID_MISMATCH:expected=1:actual=${stablecoinTokenId}`);
   }

@@ -19,7 +19,7 @@ export const packTokenReference = (
 ): string =>
   ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
-      ['uint8', 'address', 'uint96'],
+      ['uint8', 'address', 'uint256'],
       [tokenType, contractAddress, externalTokenId],
     ),
   );

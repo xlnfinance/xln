@@ -208,7 +208,6 @@ export interface DepositoryInterface extends Interface {
       | "onERC1155Received"
       | "processBatch"
       | "registerExternalToken"
-      | "tokenToId"
       | "watchtowerCounterDispute"
   ): FunctionFragment;
 
@@ -332,10 +331,6 @@ export interface DepositoryInterface extends Interface {
     values: [BigNumberish, AddressLike, BigNumberish]
   ): string;
   encodeFunctionData(
-    functionFragment: "tokenToId",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
     functionFragment: "watchtowerCounterDispute",
     values: [
       BytesLike,
@@ -420,7 +415,6 @@ export interface DepositoryInterface extends Interface {
     functionFragment: "registerExternalToken",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(functionFragment: "tokenToId", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "watchtowerCounterDispute",
     data: BytesLike
@@ -1042,13 +1036,13 @@ export interface Depository extends BaseContract {
   onERC1155Received: TypedContractMethod<
     [
       arg0: AddressLike,
-      arg1: AddressLike,
-      arg2: BigNumberish,
-      arg3: BigNumberish,
-      arg4: BytesLike
+      from: AddressLike,
+      id: BigNumberish,
+      amount: BigNumberish,
+      data: BytesLike
     ],
     [string],
-    "view"
+    "nonpayable"
   >;
 
   processBatch: TypedContractMethod<
@@ -1063,11 +1057,9 @@ export interface Depository extends BaseContract {
       contractAddress: AddressLike,
       externalTokenId: BigNumberish
     ],
-    [bigint],
+    [void],
     "nonpayable"
   >;
-
-  tokenToId: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   watchtowerCounterDispute: TypedContractMethod<
     [
@@ -1255,13 +1247,13 @@ export interface Depository extends BaseContract {
   ): TypedContractMethod<
     [
       arg0: AddressLike,
-      arg1: AddressLike,
-      arg2: BigNumberish,
-      arg3: BigNumberish,
-      arg4: BytesLike
+      from: AddressLike,
+      id: BigNumberish,
+      amount: BigNumberish,
+      data: BytesLike
     ],
     [string],
-    "view"
+    "nonpayable"
   >;
   getFunction(
     nameOrSignature: "processBatch"
@@ -1278,12 +1270,9 @@ export interface Depository extends BaseContract {
       contractAddress: AddressLike,
       externalTokenId: BigNumberish
     ],
-    [bigint],
+    [void],
     "nonpayable"
   >;
-  getFunction(
-    nameOrSignature: "tokenToId"
-  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "watchtowerCounterDispute"
   ): TypedContractMethod<
@@ -1537,7 +1526,7 @@ export interface Depository extends BaseContract {
       SecretRevealedEvent.OutputObject
     >;
 
-    "TokenRegistered(uint256,uint8,address,uint96)": TypedContractEvent<
+    "TokenRegistered(uint256,uint8,address,uint256)": TypedContractEvent<
       TokenRegisteredEvent.InputTuple,
       TokenRegisteredEvent.OutputTuple,
       TokenRegisteredEvent.OutputObject

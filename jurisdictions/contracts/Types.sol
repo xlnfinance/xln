@@ -239,7 +239,7 @@ struct EntityAmount {
 struct ExternalTokenToReserve {
   bytes32 entity; // Entity to credit. If bytes32(0), defaults to batch initiator / caller self
   address contractAddress;
-  uint96 externalTokenId;
+  uint256 externalTokenId;
   uint8 tokenType;
   uint internalTokenId;
   uint amount;

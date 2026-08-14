@@ -780,6 +780,10 @@ describe('canonical on-chain Hanko domains', function () {
     const nextReleaseAuthorization = { ...releaseAuthorization, actionNonce: 2n };
     const nextReleaseHash = hashReleaseControlSharesHankoPayload(providerDomain, nextReleaseAuthorization);
     const nextReleaseHanko = buildSingleSignerHanko(numberedEntityId, nextReleaseHash, entityPrivateKey);
+    const [controlTokenId] = await entityProvider.getTokenIds(entityNumber);
+    await depository.connect(recipient).registerExternalToken(
+      2, await entityProvider.getAddress(), controlTokenId,
+    );
     const releaseTx = await entityProvider.releaseControlShares(
       entityNumber,
       depositoryAddress,
@@ -981,9 +985,25 @@ describe('canonical on-chain Hanko domains', function () {
     };
     const releaseHash = hashReleaseControlSharesHankoPayload(domain, authorization);
     const hanko = buildSingleSignerHanko(entityId(entityNumber), releaseHash, entityPrivateKey);
-
     const controlBefore = await entityProvider.balanceOf(source, controlTokenId);
     const dividendBefore = await entityProvider.balanceOf(source, dividendTokenId);
+
+    await expect(entityProvider.releaseControlShares(
+      entityNumber, depositoryAddress, controlAmount, dividendAmount,
+      purpose, hanko,
+    )).to.be.revertedWithCustomError(depository, 'E11');
+    expect(await entityProvider.entityActionNonces(entityId(entityNumber))).to.equal(0n);
+    expect(await entityProvider.balanceOf(source, controlTokenId)).to.equal(controlBefore);
+    expect(await entityProvider.balanceOf(source, dividendTokenId)).to.equal(dividendBefore);
+
+    await depository.connect(fixture.recipient).registerExternalToken(
+      2, await entityProvider.getAddress(), controlTokenId,
+    );
+    await depository.connect(fixture.recipient).registerExternalToken(
+      2, await entityProvider.getAddress(), dividendTokenId,
+    );
+    expect(await depository.getTokensLength()).to.equal(3n);
+
     const releaseTx = await entityProvider.releaseControlShares(
       entityNumber, depositoryAddress, controlAmount, dividendAmount,
       purpose, hanko,
@@ -997,6 +1017,8 @@ describe('canonical on-chain Hanko domains', function () {
     expect(await entityProvider.balanceOf(source, dividendTokenId)).to.equal(dividendBefore - dividendAmount);
     expect(await entityProvider.balanceOf(depositoryAddress, controlTokenId)).to.equal(controlAmount);
     expect(await entityProvider.balanceOf(depositoryAddress, dividendTokenId)).to.equal(dividendAmount);
+    expect(await depository._reserves(entityId(entityNumber), 1n)).to.equal(controlAmount);
+    expect(await depository._reserves(entityId(entityNumber), 2n)).to.equal(dividendAmount);
     expect(await entityProvider.entityActionNonces(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32))).to.equal(1);
 
     const assertPrimaryUnchanged = async (attempt: () => Promise<unknown>): Promise<void> => {
