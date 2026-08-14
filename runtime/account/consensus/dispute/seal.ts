@@ -158,6 +158,25 @@ export const getDisputeSealRequirementError = (
   if (!expectedProofBodyHash) {
     return seal ? 'DISPUTE_SEAL_UNEXPECTED_WITHOUT_LOCAL_PROOF' : undefined;
   }
+  if (seal && seal.nonce <= jNonce) {
+    return `DISPUTE_SEAL_NONCE_ALREADY_FINALIZED: received=${seal.nonce} jNonce=${jNonce}`;
+  }
+  if (
+    seal
+    && previousCounterpartyProofNonce !== undefined
+    && seal.nonce < previousCounterpartyProofNonce
+  ) {
+    return `DISPUTE_SEAL_NONCE_REGRESSION: received=${seal.nonce} previous=${previousCounterpartyProofNonce}`;
+  }
+  if (
+    seal
+    && previousCounterpartyProofNonce !== undefined
+    && seal.nonce === previousCounterpartyProofNonce
+    && previousCounterpartyProofBodyHash !== undefined
+    && seal.proofBodyHash.toLowerCase() !== previousCounterpartyProofBodyHash.toLowerCase()
+  ) {
+    return `DISPUTE_SEAL_NONCE_REUSE: nonce=${seal.nonce}`;
+  }
   if (seal && seal.proofBodyHash.toLowerCase() !== expectedProofBodyHash.toLowerCase()) {
     return `DISPUTE_SEAL_PROOFBODY_MISMATCH: expected=${expectedProofBodyHash} received=${seal.proofBodyHash}`;
   }

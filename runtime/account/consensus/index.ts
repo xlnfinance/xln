@@ -1007,6 +1007,20 @@ const handleStandaloneDispute = async (session: AccountInputSession): Promise<Ha
       'ACCOUNT_DISPUTE',
       securityContext,
     );
+    const sealError = getDisputeSealRequirementError(
+      account.currentDisputeProofBodyHash,
+      account.counterpartyDisputeProofBodyHash,
+      account.counterpartyDisputeProofNonce,
+      Number(account.state.jNonce ?? 0),
+      seal,
+    );
+    if (sealError) {
+      return rejectAccountPeerInput(
+        'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
+        sealError,
+        events,
+      );
+    }
     storeCounterpartyDisputeSeal(account, seal);
     return accountInputApplied({ events });
   } catch (error) {

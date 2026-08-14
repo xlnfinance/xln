@@ -42,6 +42,10 @@ test('Stack Manager exposes the canonical deployment workflow at every supported
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await expect(page.getByText('Jurisdiction deployment', { exact: true })).toBeVisible();
     await expect(page.getByTestId('stack-manager-deploy')).toBeDisabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+    expect(await page.getByTestId('stack-manager-v1').evaluate((root) =>
+      [...root.querySelectorAll('*')].some((element) => element.getBoundingClientRect().right > window.innerWidth + 1),
+    )).toBe(false);
     await page.screenshot({
       path: testInfo.outputPath(`stack-manager-${viewport.name}.png`),
       animations: 'disabled',

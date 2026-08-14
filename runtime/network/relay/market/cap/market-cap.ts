@@ -123,17 +123,22 @@ export const buildShareMarketPairs = (
   catalog: MarketCapCatalog,
   entityNumbers: readonly bigint[],
 ): Map<string, EntityShareMarketPair> => {
-  const usdcTokens = catalog.tokens.filter(token => token.symbol === 'USDC' && token.tokenType === 0);
-  if (usdcTokens.length > 1) throw new Error(`MARKET_CAP_USDC_AMBIGUOUS:${catalog.jurisdictionRef}`);
-  const usdc = usdcTokens[0] ?? null;
+  const usdtTokens = catalog.tokens.filter(token =>
+    token.symbol === 'USDT'
+    && token.tokenType === 0
+    && token.tokenId === 1
+    && token.decimals === 6
+  );
+  if (usdtTokens.length > 1) throw new Error(`MARKET_CAP_USDT_AMBIGUOUS:${catalog.jurisdictionRef}`);
+  const usdt = usdtTokens[0] ?? null;
   const pairs = new Map<string, EntityShareMarketPair>();
   for (const entityNumber of entityNumbers) {
     const control = shareToken(catalog.tokens, catalog.entityProviderAddress, entityNumber, 'CONTROL');
     const dividend = shareToken(catalog.tokens, catalog.entityProviderAddress, entityNumber, 'DIVIDEND');
     pairs.set(entityNumber.toString(), {
       entityNumber,
-      controlPairId: usdc && control ? pairId(usdc.tokenId, control.tokenId) : null,
-      dividendPairId: usdc && dividend ? pairId(usdc.tokenId, dividend.tokenId) : null,
+      controlPairId: usdt && control ? pairId(usdt.tokenId, control.tokenId) : null,
+      dividendPairId: usdt && dividend ? pairId(usdt.tokenId, dividend.tokenId) : null,
     });
   }
   return pairs;

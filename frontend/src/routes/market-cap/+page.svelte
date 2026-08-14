@@ -145,7 +145,7 @@
     <div class="supply-note">
       <span>VALUATION BASIS</span>
       <strong>100B + 100B shares</strong>
-      <small>Latest verified USDC trades · stale after 5 minutes</small>
+      <small>Latest verified USDT trades · stale after 5 minutes</small>
     </div>
   </header>
 

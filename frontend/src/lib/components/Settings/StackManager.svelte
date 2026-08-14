@@ -288,16 +288,17 @@
   {/if}
 </section>
 <style>
-  .stack-manager { max-width: 860px; color: #e7e7e7; }
+  .stack-manager { width: 100%; min-width: 0; max-width: 860px; color: #e7e7e7; }
   header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
   h4 { margin: 2px 0 0; font-size: 20px; }
   h4 span { padding: 3px 7px; margin-left: 6px; color: #9fd1ff; background: #12324b; border: 1px solid #275f88; border-radius: 999px; font-size: 11px; vertical-align: middle; }
   .eyebrow { margin: 0; color: #72b7ef; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
   .intro, .notice { color: #a8a8a8; font-size: 12px; line-height: 1.5; }
   .form-grid, .advanced-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .form-grid > *, .advanced-grid > * { min-width: 0; }
   label { display: flex; flex-direction: column; gap: 6px; color: #c8c8c8; font-size: 12px; }
   .wide { grid-column: 1 / -1; }
-  input, select { min-width: 0; padding: 9px 10px; color: #f1f1f1; background: #222; border: 1px solid #444; border-radius: 6px; font: inherit; }
+  input, select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; padding: 9px 10px; color: #f1f1f1; background: #222; border: 1px solid #444; border-radius: 6px; font: inherit; }
   input:focus, select:focus { border-color: #3d91cf; outline: 2px solid rgba(61,145,207,.2); }
   .probe-row { display: grid; grid-template-columns: 120px minmax(160px, 1fr) auto; align-items: end; gap: 10px; margin: 14px 0; padding: 12px; background: #202020; border: 1px solid #333; border-radius: 8px; }
   .probe-row div { display: flex; flex-direction: column; gap: 3px; }
@@ -311,7 +312,7 @@
   summary { cursor: pointer; color: #d7d7d7; font-size: 12px; font-weight: 650; }
   .advanced-grid { margin-top: 14px; }
   .confirm { flex-direction: row; align-items: flex-start; margin-top: 14px; line-height: 1.35; }
-  .confirm input { margin: 1px 0 0; }
+  .confirm input { width: 18px; min-width: 18px; max-width: 18px; margin: 1px 0 0; }
   .guidance, .message, .result { margin-top: 12px; padding: 12px; border-radius: 7px; font-size: 12px; }
   .guidance { color: #ffd18b; background: #352b17; border: 1px solid #6b5525; overflow-wrap: anywhere; }
   .error { color: #ffaaa5; background: #3d2020; border: 1px solid #773333; }

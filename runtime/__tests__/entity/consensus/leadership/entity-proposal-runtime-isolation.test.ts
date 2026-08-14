@@ -152,4 +152,44 @@ describe('Entity proposal Runtime isolation', () => {
     expect(replica.candidate).toBeUndefined();
     expect(await readPersistedFrameJournal(env, 2)).toBeNull();
   }, 30_000);
+
+  test('remote raw board handover cannot enter mempool or stall honest frames', async () => {
+    const { env, signerId } = await installPersistedProposalValidator();
+    const replicaKey = `${durableProposalFixture.entityId}:${signerId}`;
+    const before = env.state.eReplicas.get(replicaKey)!;
+    const remoteEnv = createEmptyEnv('raw-board-handover-remote');
+    const remoteRuntimeId = remoteEnv.runtimeId!;
+    const config = before.state.config;
+    expect(() => handleInboundP2PEntityInputs(
+      env,
+      remoteRuntimeId,
+      signRuntimeEntityInputsEnvelope(remoteEnv, env.runtimeId!, {
+        sourceRuntimeId: remoteRuntimeId,
+        sourceRuntimeHeight: 1,
+        sourceRuntimeTimestamp: 1_000,
+        entityInputs: [{
+          entityId: durableProposalFixture.entityId,
+          signerId,
+          runtimeId: env.runtimeId!,
+          entityTxs: [{
+            type: 'boardHandover',
+            data: {
+              board: {
+                mode: config.mode,
+                threshold: config.threshold,
+                validators: [...config.validators],
+                shares: { ...config.shares },
+              },
+            },
+          }],
+        }],
+      }),
+    )).toThrow('INBOUND_ENTITY_UNSIGNED_USER_COMMAND');
+    const after = env.state.eReplicas.get(replicaKey)!;
+    expect(env.infrastructure?.halted).toBe(false);
+    expect(env.state.height).toBe(1);
+    expect(after.state.height).toBe(before.state.height);
+    expect(after.mempool).toEqual([]);
+    expect(await readPersistedFrameJournal(env, 2)).toBeNull();
+  }, 30_000);
 });

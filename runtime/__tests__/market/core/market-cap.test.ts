@@ -53,7 +53,7 @@ const catalog: MarketCapCatalog = {
   jurisdictionRef,
   entityProviderAddress: provider,
   tokens: [
-    { symbol: 'USDC', address: `0x${'a'.repeat(40)}`, decimals: 6, tokenId: 1, tokenType: 0, externalTokenId: 1n },
+    { symbol: 'USDT', address: `0x${'a'.repeat(40)}`, decimals: 6, tokenId: 1, tokenType: 0, externalTokenId: 1n },
     { symbol: 'CONTROL-7', address: provider, decimals: 0, tokenId: 2, tokenType: 2, externalTokenId: 7n },
     {
       symbol: 'DIVIDEND-7',
