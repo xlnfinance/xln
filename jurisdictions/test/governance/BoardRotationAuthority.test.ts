@@ -5,6 +5,7 @@ import hre from 'hardhat';
 import {
   buildFoundationAction,
   buildSingleSignerHanko,
+  deployDepositoryStack,
   deployEntityProvider,
   deriveHardhatPrivateKey,
   singleSignerLazyEntityId,
@@ -450,14 +451,16 @@ describe('EntityProvider board-rotation authority', function () {
     )).to.emit(fx.provider, 'EntityProviderActionCancelled');
 
     const purpose = 'current-board-only';
+    const { depository } = await deployDepositoryStack(await fx.provider.getAddress());
+    const custodyRecipient = await depository.getAddress();
     const releaseHash = await fx.provider.computeReleaseControlSharesHankoHash(
-      2n, fx.signers[7].address, 0n, 1n, purpose, 3n,
+      2n, custodyRecipient, 0n, 1n, purpose, 3n,
     );
     await expect(fx.provider.releaseControlShares(
-      2n, fx.signers[7].address, 0n, 1n, purpose, oldHanko(releaseHash),
+      2n, custodyRecipient, 0n, 1n, purpose, oldHanko(releaseHash),
     )).to.be.revertedWith('Invalid entity signature');
     await expect(fx.provider.releaseControlShares(
-      2n, fx.signers[7].address, 0n, 1n, purpose, currentHanko(releaseHash),
+      2n, custodyRecipient, 0n, 1n, purpose, currentHanko(releaseHash),
     )).to.emit(fx.provider, 'EntityProviderActionExecuted');
     expect(await fx.provider.entityActionNonces(ENTITY_ID)).to.equal(3n);
   });

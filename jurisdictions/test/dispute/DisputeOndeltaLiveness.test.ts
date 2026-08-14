@@ -53,8 +53,8 @@ const registerFixedErc20 = async (depository: Depository, supply: bigint) => {
   const tokenFactory = await ethers.getContractFactory('ERC20Mock');
   const token = await tokenFactory.deploy('Fixed Supply', 'FIXED', 0, supply);
   await token.waitForDeployment();
-  const tokenId = await depository.registerExternalToken.staticCall(0, await token.getAddress(), 0);
   await depository.registerExternalToken(0, await token.getAddress(), 0);
+  const tokenId = (await depository.getTokensLength()) - 1n;
   return { token, tokenId };
 };
 
@@ -142,6 +142,7 @@ describe('dispute ondelta liveness', function () {
       disputeStarts: [{
         counterentity: right.entityId,
         nonce: proofNonce,
+        proposerIsLeft: false,
         proofbodyHash,
         initialProofbody: proofbody,
         watchSeed: WATCH_SEED,
@@ -170,6 +171,7 @@ describe('dispute ondelta liveness', function () {
         counterentity: right.entityId,
         initialNonce: proofNonce,
         finalNonce: proofNonce,
+        proposerIsLeft: false,
         initialProofbodyHash: proofbodyHash,
         finalProofbody: proofbody,
         starterArguments: '0x',
@@ -222,6 +224,7 @@ describe('dispute ondelta liveness', function () {
       disputeStarts: [{
         counterentity: right.entityId,
         nonce: proofNonce,
+        proposerIsLeft: false,
         proofbodyHash,
         initialProofbody: proofbody,
         watchSeed: WATCH_SEED,
@@ -238,6 +241,7 @@ describe('dispute ondelta liveness', function () {
         counterentity: right.entityId,
         initialNonce: proofNonce,
         finalNonce: proofNonce,
+        proposerIsLeft: false,
         initialProofbodyHash: proofbodyHash,
         finalProofbody: proofbody,
         starterArguments: '0x',
@@ -300,6 +304,7 @@ describe('dispute ondelta liveness', function () {
       disputeStarts: disputes.map((dispute) => ({
         counterentity: dispute.creditor.entityId,
         nonce: 1n,
+        proposerIsLeft: false,
         proofbodyHash: dispute.proofbodyHash,
         initialProofbody: dispute.proofbody,
         watchSeed: WATCH_SEED,
@@ -320,6 +325,7 @@ describe('dispute ondelta liveness', function () {
           counterentity: dispute.creditor.entityId,
           initialNonce: 1n,
           finalNonce: 1n,
+          proposerIsLeft: false,
           initialProofbodyHash: dispute.proofbodyHash,
           finalProofbody: dispute.proofbody,
           starterArguments: '0x',
@@ -390,6 +396,7 @@ describe('dispute ondelta liveness', function () {
       disputeStarts: [{
         counterentity: creditor.entityId,
         nonce: 1n,
+        proposerIsLeft: false,
         proofbodyHash,
         initialProofbody: proofbody,
         watchSeed: WATCH_SEED,
@@ -405,6 +412,7 @@ describe('dispute ondelta liveness', function () {
         counterentity: creditor.entityId,
         initialNonce: 1n,
         finalNonce: 1n,
+        proposerIsLeft: false,
         initialProofbodyHash: proofbodyHash,
         finalProofbody: proofbody,
         starterArguments: '0x',
@@ -427,8 +435,8 @@ describe('dispute ondelta liveness', function () {
       const supplyFactory = await ethers.getContractFactory('SupplyLivenessHarness');
       const token = await supplyFactory.deploy(100n);
       await token.waitForDeployment();
-      const tokenId = await depository.registerExternalToken.staticCall(0, await token.getAddress(), 0);
       await depository.registerExternalToken(0, await token.getAddress(), 0);
+      const tokenId = (await depository.getTokensLength()) - 1n;
 
       const accountKey = await depository.accountKey(debtor.entityId, creditor.entityId);
       const debtorIsLeft = BigInt(debtor.entityId) < BigInt(creditor.entityId);
@@ -446,6 +454,7 @@ describe('dispute ondelta liveness', function () {
         disputeStarts: [{
           counterentity: creditor.entityId,
           nonce: 1n,
+          proposerIsLeft: false,
           proofbodyHash,
           initialProofbody: proofbody,
           watchSeed: WATCH_SEED,
@@ -463,6 +472,7 @@ describe('dispute ondelta liveness', function () {
           counterentity: creditor.entityId,
           initialNonce: 1n,
           finalNonce: 1n,
+          proposerIsLeft: false,
           initialProofbodyHash: proofbodyHash,
           finalProofbody: proofbody,
           starterArguments: '0x',
