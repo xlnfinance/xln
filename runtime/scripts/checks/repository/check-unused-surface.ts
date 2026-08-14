@@ -45,6 +45,10 @@ const EXTERNAL_RUNTIME_CONSUMERS: Readonly<Record<string, readonly ExternalRunti
     consumer: 'frontend/src/lib/components/Trading/OrderbookPanel.svelte',
     specifier: '@xln/runtime/network/relay/market/wire',
   }],
+  'runtime/network/relay/market/cap/market-cap-wire.ts': [{
+    consumer: 'frontend/src/routes/market-cap/+page.svelte',
+    specifier: '@xln/runtime/network/relay/market/cap/market-cap-wire',
+  }],
   'runtime/qa/report-types.ts': [{
     consumer: 'runtime/qa/types.ts',
     specifier: './report-types',

@@ -24,24 +24,16 @@ const rejectBoardReseal = (
 ): HandleAccountInputResult =>
   rejectAccountPeerInput('ACCOUNT_PEER_BOARD_RESEAL_INVALID', error, events);
 
-const validateBoardResealMetadata = (
-  account: AccountReplica,
-  input: AccountInput,
+type BoardResealActivation = Pick<
+  ValidatedBoardResealMetadata,
+  'activationJHeight' | 'activationLogIndex'
+>;
+
+const validateBoardResealActivation = (
   reseal: BoardResealPayload,
   securityContext: AccountInputSecurityContext,
   events: string[],
-): HandleAccountInputResult | ValidatedBoardResealMetadata => {
-  const expectedFrom = account.proofHeader.toEntity.toLowerCase();
-  const expectedTo = account.proofHeader.fromEntity.toLowerCase();
-  if (
-    input.fromEntityId.toLowerCase() !== expectedFrom
-    || input.toEntityId.toLowerCase() !== expectedTo
-  ) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_PARTY_MISMATCH:${input.fromEntityId}:${input.toEntityId}`,
-      events,
-    );
-  }
+): HandleAccountInputResult | BoardResealActivation => {
   const activationJHeight = Number(reseal.boardActivationJHeight);
   const activationLogIndex = Number(reseal.boardActivationLogIndex);
   if (!Number.isSafeInteger(activationJHeight) || activationJHeight < 1) {
@@ -71,15 +63,21 @@ const validateBoardResealMetadata = (
       events,
     );
   }
+  return { activationJHeight, activationLogIndex };
+};
 
+const validateBoardResealFrame = (
+  account: AccountReplica,
+  reseal: BoardResealPayload,
+  activation: BoardResealActivation,
+  events: string[],
+): HandleAccountInputResult | Pick<ValidatedBoardResealMetadata, 'frameHeight' | 'currentFrameHash'> => {
+  const { activationJHeight, activationLogIndex } = activation;
   const frameHeight = Number(reseal.height);
   const previous = account.counterpartyBoardReseal;
   const notNewer = previous && (
     activationJHeight < previous.activationJHeight
-    || (
-      activationJHeight === previous.activationJHeight
-      && activationLogIndex <= previous.activationLogIndex
-    )
+    || (activationJHeight === previous.activationJHeight && activationLogIndex <= previous.activationLogIndex)
   );
   const exactRetry = previous && (
     activationJHeight === previous.activationJHeight
@@ -89,13 +87,12 @@ const validateBoardResealMetadata = (
   );
   if (notNewer && !exactRetry) {
     return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_ACTIVATION_ORDER_INVALID:` +
-        `${activationJHeight}:${activationLogIndex}:` +
-        `${previous.activationJHeight}:${previous.activationLogIndex}`,
+      `ACCOUNT_BOARD_RESEAL_ACTIVATION_ORDER_INVALID:`
+        + `${activationJHeight}:${activationLogIndex}:`
+        + `${previous.activationJHeight}:${previous.activationLogIndex}`,
       events,
     );
   }
-
   const currentHeight = Number(account.currentHeight);
   if (
     !Number.isSafeInteger(frameHeight)
@@ -110,25 +107,45 @@ const validateBoardResealMetadata = (
   }
   const currentFrameHash = String(account.currentFrame.stateHash || '').toLowerCase();
   const resealFrameHash = String(reseal.frameHash || '').toLowerCase();
-  if (
-    !/^0x[0-9a-f]{64}$/.test(resealFrameHash)
-    || resealFrameHash !== currentFrameHash
-  ) {
+  if (!/^0x[0-9a-f]{64}$/.test(resealFrameHash) || resealFrameHash !== currentFrameHash) {
     return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISMATCH:` +
-        `${resealFrameHash || 'missing'}:${currentFrameHash || 'missing'}`,
+      `ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISMATCH:`
+        + `${resealFrameHash || 'missing'}:${currentFrameHash || 'missing'}`,
       events,
     );
   }
   if (!reseal.frameHanko) {
     return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_FRAME_HANKO_MISSING', events);
   }
+  return { frameHeight, currentFrameHash };
+};
+
+const validateBoardResealMetadata = (
+  account: AccountReplica,
+  input: AccountInput,
+  reseal: BoardResealPayload,
+  securityContext: AccountInputSecurityContext,
+  events: string[],
+): HandleAccountInputResult | ValidatedBoardResealMetadata => {
+  const expectedFrom = account.proofHeader.toEntity.toLowerCase();
+  const expectedTo = account.proofHeader.fromEntity.toLowerCase();
+  if (
+    input.fromEntityId.toLowerCase() !== expectedFrom
+    || input.toEntityId.toLowerCase() !== expectedTo
+  ) {
+    return rejectBoardReseal(
+      `ACCOUNT_BOARD_RESEAL_PARTY_MISMATCH:${input.fromEntityId}:${input.toEntityId}`,
+      events,
+    );
+  }
+  const activation = validateBoardResealActivation(reseal, securityContext, events);
+  if ('ok' in activation) return activation;
+  const frame = validateBoardResealFrame(account, reseal, activation, events);
+  if ('ok' in frame) return frame;
   return {
     expectedFrom,
-    activationJHeight,
-    activationLogIndex,
-    frameHeight,
-    currentFrameHash,
+    ...activation,
+    ...frame,
   };
 };
 
