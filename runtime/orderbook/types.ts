@@ -131,7 +131,7 @@ export const baseAmountAtPrice = (
   );
 };
 
-export const baseAmountAtPriceForDecimals = (
+const baseAmountAtPriceForDecimals = (
   baseTokenDecimals: number,
   quoteTokenDecimals: number,
   quoteAmount: bigint,
