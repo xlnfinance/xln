@@ -11,19 +11,6 @@ export const computeAccountKey = (entity1: string, entity2: string): string => {
   return ethers.solidityPacked(['bytes32', 'bytes32'], [left, right]);
 };
 
-/** Commit an external token identity into the Depository token namespace. */
-export const packTokenReference = (
-  tokenType: number,
-  contractAddress: string,
-  externalTokenId: ethers.BigNumberish,
-): string =>
-  ethers.keccak256(
-    ethers.AbiCoder.defaultAbiCoder().encode(
-      ['uint8', 'address', 'uint256'],
-      [tokenType, contractAddress, externalTokenId],
-    ),
-  );
-
 export const buildExternalTokenToReserveBatch = (params: {
   entityId: string;
   tokenAddress: string;
