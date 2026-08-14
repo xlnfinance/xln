@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import type { JTokenInfo } from './types';
+import type { JTokenInfo } from '../types';
 
 const DIVIDEND_CLASS_BIT = 1n << 255n;
 

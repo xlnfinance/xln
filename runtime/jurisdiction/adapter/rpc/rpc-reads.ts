@@ -5,7 +5,7 @@ import { normalizeEntityId } from '../../../entity/id';
 import { computeAccountKey } from '../events/contract-codec';
 import type { JAdapter, JEvent, JTokenInfo, JWalletSnapshot, JWalletSnapshotRequest } from '../types';
 import { readRpcWalletSnapshot } from './wallet/rpc-wallet-snapshot';
-import { buildNonFungibleTokenInfo } from '../token-metadata';
+import { buildNonFungibleTokenInfo } from '../registry/token-metadata';
 
 type ReadMethods = Omit<
   Pick<

@@ -47,7 +47,7 @@ import {
   hashDisputeProofHankoPayload,
 } from '../../../hanko/onchain-domain';
 import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../../machine/config/default-tokens';
-import { buildNonFungibleTokenInfo } from '../token-metadata';
+import { buildNonFungibleTokenInfo } from '../registry/token-metadata';
 import { getBootstrapTokenAmountBySymbol } from '../../machine/config/bootstrap-economy';
 import {
   decodeBrowserVmEvents,
