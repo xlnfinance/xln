@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { browser } from '$app/environment';
-  import { replaceState } from '$app/navigation';
   import { page } from '$app/stores';
   import RuntimeStateCard from '$lib/components/shared/RuntimeStateCard.svelte';
   import { appState } from '$lib/stores/appStateStore';
@@ -115,12 +114,14 @@
     if (!isResetHashActive()) return false;
     const confirmed = window.confirm('reset everything');
     if (confirmed) {
-      replaceState('/app', {});
       await resetEverything({ confirmed: true, reason: 'hash-reset' });
       return true;
     }
-    replaceState('/app', {});
-    return false;
+    // Reset is a hard lifecycle boundary. SvelteKit navigation is unsafe while
+    // the root component is still mounting (`#reset` can arrive on first load),
+    // so leave the current document instead of mutating router state in-place.
+    window.location.replace('/app');
+    return true;
   }
 
   async function handleResetEverything(): Promise<void> {

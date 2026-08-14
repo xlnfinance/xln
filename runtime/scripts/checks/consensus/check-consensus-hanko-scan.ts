@@ -250,7 +250,7 @@ assertIncludes(hankoSigning, 'validateBoardAuthority: (entityId, reconstructedBo
 assertIncludes(hankoCodec, 'HANKO_PACKED_SIGNATURE_PADDING_NONZERO', hankoCodecPath);
 assertIncludes(hankoCodec, 'if (encodeHankoEnvelope(envelope).toLowerCase() !== canonicalInput)', hankoCodecPath);
 assertIncludes(hankoClaims, 'HANKO_FIRST_MEMBER_EOA_REQUIRED', hankoClaimsPath);
-assertIncludes(hankoClaims, "if (reachable.size !== claims.length) throw new Error('HANKO_UNUSED_CLAIM');", hankoClaimsPath);
+assertIncludes(hankoClaims, "if (reachable.size !== claims.length) invalidHanko('HANKO_UNUSED_CLAIM');", hankoClaimsPath);
 assertIncludes(hankoClaims, 'claim.delays.boardChangeDelay', hankoClaimsPath);
 
 assertIncludes(onchainHankoDomain, "ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1')", onchainHankoDomainPath);

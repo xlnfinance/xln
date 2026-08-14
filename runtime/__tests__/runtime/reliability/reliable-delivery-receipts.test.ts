@@ -55,6 +55,7 @@ import type { EntityReplica } from '../../../entity/types';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JPrefixAttestation } from '../../../types/jurisdiction-events';
 import { makeAccount } from '../../helpers/cross-j';
+import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
 
 const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -595,6 +596,7 @@ describe('durable scoped reliable delivery receipts', () => {
 
     const validatorId = receiver.runtimeId!;
     const targetEntityId = generateLazyEntityId([validatorId], 1n).toLowerCase();
+    const targetEncryptionKeys = provisionTestEntityEncryptionKey(receiver, targetEntityId);
     const sourceSignerId = deriveSignerAddressSync(receiver.runtimeSeed!, 'frozen-prefix-source').toLowerCase();
     registerSignerKey(
       receiver,
@@ -652,6 +654,7 @@ describe('durable scoped reliable delivery receipts', () => {
 
     const state = {
       entityId: targetEntityId,
+      entityEncryptionPublicKey: targetEncryptionKeys.publicKey,
       height: 0,
       prevFrameHash: 'genesis',
       timestamp: 1_000,
@@ -1857,6 +1860,11 @@ describe('durable scoped reliable delivery receipts', () => {
     futureFrame.height = 2;
     futureFrame.parentFrameHash = certified.frame.hash;
     futureFrame.hash = `0x${'fe'.repeat(32)}`;
+    futureFrame.entityContext = {
+      ...futureFrame.entityContext,
+      height: 2,
+      parentFrameHash: certified.frame.hash,
+    };
     const output = catchupFixtureDeliverable(
       receiver.runtimeId!,
       initialState.entityId,

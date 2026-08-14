@@ -322,8 +322,12 @@ export const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
 // races retries against a still-pending frame and can starve the MM event loop.
 // Even independent Accounts share one Runtime event loop, so bootstrap admits
 // one bounded cross-j batch globally per tick and waits for the next tick.
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 45;
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 45;
+// Cross-j intent materialization is substantially heavier than an ordinary
+// quote: every route is prepared by both sibling Entities and then persisted.
+// Keep the production wave bounded so storage rotation cannot monopolize the
+// MM event loop while preserving the exact two-sibling RuntimeInput boundary.
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 8;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 8;
 export const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   1,
   Number(

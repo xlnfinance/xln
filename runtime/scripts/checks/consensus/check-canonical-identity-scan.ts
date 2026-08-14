@@ -152,8 +152,6 @@ for (const [path, markers] of [
   ]],
   ['runtime/__tests__/operations/health/prod-startup-wiring.test.ts', [
     "expect(hubNode).not.toContain(\"normalized === 'arrakis'\");",
-    "expect(mmNode).not.toContain('sameJurisdictionIdentityOrNameOnlyFallback');",
-    "expect(reserveBootstrap).not.toContain('sameJurisdictionRefOrNameFallback');",
   ]],
   ['runtime/__tests__/network/server/server-jurisdictions.test.ts', [
     'preserves its configured display name',

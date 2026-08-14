@@ -425,7 +425,7 @@ const parseArgs = (): CliArgs => {
   );
   const phaseWarnRaw = Number(getFlag('phase-warn-ms') || '30000');
   const maxFailuresRaw = Number(getFlag('max-failures') || '1');
-  const maxMmConcurrencyRaw = Number(getFlag('max-mm-concurrency') || String(Math.min(2, shardsRaw || defaultShards)));
+  const maxMmConcurrencyRaw = Number(getFlag('max-mm-concurrency') || '1');
   const maxResetConcurrencyRaw = Number(getFlag('max-reset-concurrency') || String(Math.min(4, shardsRaw || defaultShards)));
   const workersPerShardRaw = Number(getFlag('workers-per-shard') || '1');
   const startAtRaw = Number(getFlag('start-at') || '0');
@@ -2602,23 +2602,43 @@ async function main(): Promise<void> {
     const abortController = new AbortController();
     let claimedCount = 0;
     let activeMarketMakerTasks = 0;
+    let activePlainTasks = 0;
     let failureState = initialE2ERunFailureState();
     const claimTask = async (): Promise<{ taskIndex: number; task: RunTask } | null> => {
       if (abortController.signal.aborted) return null;
       while (claimedCount < tasks.length) {
         if (abortController.signal.aborted) return null;
-        const prioritizedMarketMakerIndex = activeMarketMakerTasks < args.maxMmConcurrency
-          ? tasks.findIndex((task, index) => !claimed[index] && task.requireMarketMaker)
-          : -1;
-        const plainTaskIndex = tasks.findIndex((task, index) => !claimed[index] && !task.requireMarketMaker);
-        const taskIndex = prioritizedMarketMakerIndex >= 0 ? prioritizedMarketMakerIndex : plainTaskIndex;
-        if (taskIndex >= 0) {
-          const task = tasks[taskIndex];
-          if (!task) throw new Error(`E2E_TASK_MISSING: index=${taskIndex}`);
-          claimed[taskIndex] = true;
+        const pendingMarketMakerIndex = tasks.findIndex(
+          (task, index) => !claimed[index] && task.requireMarketMaker,
+        );
+        // A market-maker stack runs six Runtime processes and two jurisdictions.
+        // Mixing it with ordinary full stacks caused deterministic bootstrap work
+        // to be starved until the outer timeout. Drain the bounded MM lane first;
+        // ordinary targets remain fully parallel once that resource-heavy phase ends.
+        if (pendingMarketMakerIndex >= 0) {
+          if (activePlainTasks > 0 || activeMarketMakerTasks >= args.maxMmConcurrency) {
+            await scheduler.wait(250);
+            continue;
+          }
+          const task = tasks[pendingMarketMakerIndex];
+          if (!task) throw new Error(`E2E_TASK_MISSING: index=${pendingMarketMakerIndex}`);
+          claimed[pendingMarketMakerIndex] = true;
           claimedCount += 1;
-          if (task.requireMarketMaker) activeMarketMakerTasks += 1;
-          return { taskIndex, task };
+          activeMarketMakerTasks += 1;
+          return { taskIndex: pendingMarketMakerIndex, task };
+        }
+        if (activeMarketMakerTasks > 0) {
+          await scheduler.wait(250);
+          continue;
+        }
+        const plainTaskIndex = tasks.findIndex((task, index) => !claimed[index] && !task.requireMarketMaker);
+        if (plainTaskIndex >= 0) {
+          const task = tasks[plainTaskIndex];
+          if (!task) throw new Error(`E2E_TASK_MISSING: index=${plainTaskIndex}`);
+          claimed[plainTaskIndex] = true;
+          claimedCount += 1;
+          activePlainTasks += 1;
+          return { taskIndex: plainTaskIndex, task };
         }
         await scheduler.wait(250);
       }
@@ -2658,7 +2678,11 @@ async function main(): Promise<void> {
               abortController.abort(createE2EGlobalFailFastAbortReason(primaryFailure));
           }
         } finally {
-          if (claim.task.requireMarketMaker) activeMarketMakerTasks = Math.max(0, activeMarketMakerTasks - 1);
+          if (claim.task.requireMarketMaker) {
+            activeMarketMakerTasks = Math.max(0, activeMarketMakerTasks - 1);
+          } else {
+            activePlainTasks = Math.max(0, activePlainTasks - 1);
+          }
         }
       }
     };

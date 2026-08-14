@@ -65,7 +65,7 @@ const requirements: CoverageRequirement[] = [
       'restores a wiped runtime from standalone tower backup',
       'deriveRuntimeRecoveryLookupKey',
       '/api/tower/receipt/',
-      '/resetdb?returnTo=/app',
+      '/app#reset',
     ],
   },
   {

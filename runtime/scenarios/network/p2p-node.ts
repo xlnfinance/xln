@@ -759,6 +759,30 @@ const run = async () => {
   });
   await processRuntime(env);
 
+  // Import installs the replica at height zero. Commit the initial Profile as
+  // an Entity transaction before networking so it has a board Hanko; P2P must
+  // never advertise an uncertified profile merely because transport is ready.
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'profile-update',
+        data: {
+          profile: {
+            entityId,
+            name: role,
+            avatar: '',
+            bio: '',
+            website: '',
+          },
+        },
+      }],
+    }],
+  });
+  await processRuntime(env);
+
   console.log(`🔧 P2P_CONFIG: role=${role} entityId=${entityId.slice(-4)}`);
 
   const p2p = startP2P(env, {

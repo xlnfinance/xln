@@ -233,7 +233,10 @@ const reconcileDurablyAbortedBatch = (
   queueBatchResult(env, deps, jurisdictionName, jTx, 'reconciled', {
     message: 'committed-batch-cancelled-before-submit',
   });
-  jSubmitLog.warn('sealed_batch.durable_abort_reconciled', {
+  // This is a successful idempotent recovery outcome: the durable abort is
+  // already authoritative and the stale external attempt is tombstoned.
+  // Keep it observable without classifying a healthy recovery as a warning.
+  jSubmitLog.info('sealed_batch.durable_abort_reconciled', {
     entityId: shortId(jTx.entityId),
     jurisdictionName,
     attemptId: jTx.data.runtimeSubmitAttempt.attemptId,

@@ -913,9 +913,9 @@ async function main() {
                 if (!commandMarker || commandMarker.type !== 'recordRuntimeAdapterCommand') {
                   throw new Error('BENCH_RUNTIME_ADAPTER_COMMAND_MARKER_MISSING');
                 }
-                const data = ((input.entityInputs?.[0]?.entityTxs?.[0] as { data?: { start?: number; count?: number } } | undefined)?.data ?? {});
-                const start = Math.max(0, Math.floor(Number(data.start ?? 0))) % Math.max(1, cli.hotAccounts);
-                const count = Math.max(1, Math.floor(Number(data.count ?? cli.touchPerRound)));
+                const round = commandMarker.data.sequence - 1;
+                const start = (round * cli.touchPerRound) % Math.max(1, cli.hotAccounts);
+                const count = cli.touchPerRound;
                 pendingWrite = pendingWrite
                   .then(() => touchAccounts(cli, db, env, entityHashDocsRef, entityId, start, count))
                   .then(async (durableMs) => {
@@ -1089,11 +1089,7 @@ async function main() {
       const sendStarted = nowMs();
       await adapter.send({
         runtimeTxs: [],
-        entityInputs: [{
-          entityId,
-          signerId: 'bench-signer',
-          entityTxs: [{ type: 'benchTouchAccounts', data: { start, count: cli.touchPerRound } } as never],
-        }],
+        entityInputs: [],
       }, {
         commandId: `benchmark-touch-command:${round.toString().padStart(8, '0')}`,
         commandSequence: adapter.nextCommandSequence ?? round + 1,

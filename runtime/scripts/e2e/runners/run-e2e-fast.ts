@@ -109,7 +109,7 @@ const args = [
   ...passthrough,
   `--shards=${stackConcurrency}`,
   '--workers-per-shard=1',
-  `--max-mm-concurrency=${isCi ? 1 : 2}`,
+  '--max-mm-concurrency=1',
   `--max-reset-concurrency=${isCi ? 1 : 4}`,
   '--stack-timeout-ms=300000',
   '--pw-project=chromium',

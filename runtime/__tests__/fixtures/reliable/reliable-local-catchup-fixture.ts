@@ -107,6 +107,7 @@ export const prepareCatchupFixtureReplica = async (
   const leader = installReplica(env, state, leaderSignerId);
   installFixtureEncryptionKeys(env, target);
   installFixtureEncryptionKeys(env, leader);
+  state.entityEncryptionPublicKey = target.state.entityEncryptionPublicKey;
   env.state.eReplicas.delete(`${state.entityId}:${leaderSignerId}`);
   const profileHash = computeProfileHash(buildLocalEntityProfile(env, target.state, 1));
   const signatures = state.config.validators.map(signerId => ({
@@ -139,12 +140,18 @@ export const buildCatchupFixtureCertificate = async (
   };
   const parentFrameHash = state.height === 0 ? 'genesis' : state.prevFrameHash;
   if (!parentFrameHash) throw new Error(`CATCHUP_FIXTURE_PARENT_MISSING:${state.height}`);
+  const entityContext = {
+    ...execution.entityContext,
+    height,
+    parentFrameHash,
+  };
   const frameHash = await createEntityFrameHash(
     parentFrameHash,
     height,
     timestamp,
     [],
     nextStateBeforeLink,
+    entityContext,
     undefined,
     execution.events,
   );
@@ -178,6 +185,7 @@ export const buildCatchupFixtureCertificate = async (
     authorityRoot: computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(nextStateBeforeLink)),
     timestamp,
     txs: [],
+    entityContext,
     events: structuredClone(execution.events),
     hash: frameHash,
     leader: { proposerSignerId: state.config.validators[0]!, view: 0 },

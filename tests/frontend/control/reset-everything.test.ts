@@ -1,5 +1,12 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { clearBrowserRuntimeData } from '../../../frontend/src/lib/utils/control/resetEverything';
+
+const appLayoutSource = readFileSync(
+  join(import.meta.dir, '../../../frontend/src/routes/app/+layout.svelte'),
+  'utf8',
+);
 
 const replaceGlobal = (key: string, value: unknown): (() => void) => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, key);
@@ -58,4 +65,11 @@ test('browser reset fails loudly when a database deletion is blocked', async () 
   } finally {
     restore.reverse().forEach(restoreGlobal => restoreGlobal());
   }
+});
+
+test('hash reset never enters SvelteKit navigation during root mount', () => {
+  expect(appLayoutSource).not.toContain("from '$app/navigation'");
+  expect(appLayoutSource).not.toContain("replaceState('/app'");
+  expect(appLayoutSource).toContain("await resetEverything({ confirmed: true, reason: 'hash-reset' })");
+  expect(appLayoutSource).toContain("window.location.replace('/app')");
 });

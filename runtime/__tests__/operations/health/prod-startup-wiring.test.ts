@@ -523,10 +523,10 @@ describe('production startup wiring', () => {
       'export MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE=${MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:-1}',
     );
     expect(script).toContain(
-      'export MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK=${MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:-45}',
+      'export MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK=${MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:-8}',
     );
     expect(script).toContain(
-      'export MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK=${MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:-45}',
+      'export MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK=${MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:-8}',
     );
 
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
@@ -901,8 +901,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK = 1000;');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK)');
-    expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 45;');
-    expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 45;');
+    expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 8;');
+    expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 8;');
     expect(mmNode).not.toContain('const selectedPairs = new Set<string>();');
     expect(mmNode).toContain('await submitCrossJurisdictionIntents(env, routes);');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK)');
@@ -911,7 +911,6 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000'");
     expect(mmNode).toContain('pairs.slice(0, MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE)');
     expect(mmNode).not.toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR']");
-    expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '6'");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '6'");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '36'");
     expect(mmNode).toContain("role: 'source-mm-hub' | 'target-mm-hub';");
@@ -1253,15 +1252,17 @@ describe('production startup wiring', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-fast.ts'), 'utf8');
     expect(runner).toContain('const stackConcurrency = isCi ? 1 : 8;');
     expect(runner).toContain('`--shards=${stackConcurrency}`');
-    expect(runner).toContain('`--max-mm-concurrency=${isCi ? 1 : 2}`');
+    expect(runner).toContain("'--max-mm-concurrency=1'");
     expect(runner).toContain('`--max-reset-concurrency=${isCi ? 1 : 4}`');
   });
 
-  test('isolated e2e overlaps the bounded market-maker queue with plain stacks', () => {
+  test('isolated e2e keeps the bounded market-maker queue exclusive from plain stacks', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts'), 'utf8');
-    expect(runner).toContain('const prioritizedMarketMakerIndex = activeMarketMakerTasks < args.maxMmConcurrency');
+    expect(runner).toContain('const pendingMarketMakerIndex = tasks.findIndex(');
     expect(runner).toContain('!claimed[index] && task.requireMarketMaker');
     expect(runner).toContain('!claimed[index] && !task.requireMarketMaker');
+    expect(runner).toContain('activePlainTasks > 0 || activeMarketMakerTasks >= args.maxMmConcurrency');
+    expect(runner).toContain('if (activeMarketMakerTasks > 0)');
   });
 
   test('managed runtime teardown stops J-event producers before draining runtime and network IO', () => {
@@ -1823,9 +1824,9 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] || '0'");
     expect(smoke).not.toContain('XLN_MARKET_MAKER_DISABLE_STORAGE');
     expect(smoke).toContain('MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:');
-    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '45'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '8'");
     expect(smoke).toContain('MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:');
-    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '45'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '8'");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'");
     expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'");
     expect(mmNode).toContain('remainingSourceHubGroups -= 1;');
@@ -2057,16 +2058,16 @@ describe('production startup wiring', () => {
       '"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --market-maker-only',
     );
     expect(packageJson).toContain(
-      '"test:e2e:full": "bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
+      '"test:e2e:full": "bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=1',
     );
     expect(packageJson).toContain(
       '"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --exclude-market-maker --strict-browser-health --shards=7',
     );
     expect(packageJson).toContain(
-      '"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --market-maker-only --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
+      '"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --market-maker-only --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=1',
     );
     expect(packageJson).toContain(
-      '"test:e2e:all": "bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
+      '"test:e2e:all": "bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=1',
     );
     expect(packageJson).toContain(
       '"test:p2p:relay": "bun runtime/scripts/e2e/runners/run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/network/p2p-relay.ts"',

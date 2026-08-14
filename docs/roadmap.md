@@ -195,17 +195,38 @@ blocker list:
 
 ## Company formation, IPO and takeover
 
-- Create an Entity and all seed-derived signers in one action, progressing from
-  founder 1-of-1 to directors 2-of-3 with restart persistence.
+- Orchestrate one company-formation action that creates the company Entity,
+  registers it, opens its Account with the selected hub, and proves restart
+  persistence. Cover both founder 1-of-1 and directors 2-of-3 companies.
 - Mint separate control and dividend token classes owned initially by the
-  company treasury; the listing hub receives no ownership.
-- List treasury collateral through a chosen hub so buyers can immediately trade
-  USDT/UTC for shares; implement buybacks as ordinary treasury bids.
-- Allow a collateralized holder proving more than 50% of control to schedule a
-  board replacement after at least seven days without invalidating proofs early.
-- Cover issuance, partial sales, multiple buyers, failed and successful
-  takeovers, delayed rotation, replay and continued trading in one TradFi-style
-  screenshot flow.
+  company treasury; BOARD remains encoded Hanko authority and is never a token.
+  The listing hub receives no ownership.
+- Create CONTROL/USDT and DIVIDEND/USDT books automatically. The company may
+  sell treasury shares, make ordinary payments and buy shares back with ordinary
+  treasury bids; founders invest through ordinary buyer Accounts.
+- Allow a holder proving more than 50% of CONTROL to schedule on-chain board
+  replacement without approval from the old board. Preserve the existing
+  seven-day historical-proof grace instead of invalidating old proofs early.
+- Build the deterministic scenario first, then real E2E/UI coverage for issuance,
+  partial sales, multiple buyers, company payment, buyback, failed/successful
+  takeover, delayed rotation, replay and continued trading. Save and inspect
+  screenshots for founder, investor, company treasury and governance states.
+
+## Human-audit source context and lean LLM bundles
+
+- Add a concise 3–4 line header to each production `runtime/` source file:
+  purpose, key authority/invariant, principal entrypoints and audit importance
+  `/100`. Do not comment obvious helpers or restate types; function-level `why`
+  comments are reserved for financial, consensus, storage, crypto and other
+  non-obvious authority boundaries.
+- Extend `scripts/debug/gpt.cjs` with a second deterministic audit profile that
+  includes the same mandatory Runtime/WAL/storage/Merkle/crypto manifest but
+  removes comments with a parser/tokenizer rather than regular expressions.
+  Preserve licenses and compiler directives. Keep the ordinary annotated bundle
+  so reviewers can compare implementation alone against documented intent.
+- Gate both bundle manifests for required critical files, exact source hashes and
+  deterministic output. Audit comment quality separately from protocol code so
+  documentation changes cannot silently alter the clean-code evidence bundle.
 
 ## Historical Reference
 

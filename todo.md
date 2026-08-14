@@ -6,12 +6,14 @@ product backlog; long-term work belongs in `docs/roadmap.md`.
 ## Current candidate — 2026-08-14
 
 - Branch: `main` (the only writable release worktree).
-- Open mainnet protocol/code blockers: **4**. Testnet remains the active product target.
+- Open mainnet protocol/code blockers: **3**. Testnet remains the active product target.
 - The executable mainnet gate currently blocks uncapped launch until aggregate
   financial-risk enforcement and the bilateral/on-chain lending covenant are real.
-- Cross-j Pulls use independent jurisdiction dispute clocks. Runtime sibling
-  fanout is operational recovery, not an on-chain atomicity guarantee. Fix both
-  signed legs with enforceable shared settlement timing; do not disable the product.
+- Cross-j Pulls intentionally use independent jurisdiction dispute clocks. Any
+  observed leg dispute must make the user or hub Runtime atomically start every
+  sibling dispute in one WAL candidate and port Source evidence to Target. This
+  best-effort recovery invariant does not impose a shared settlement epoch and
+  does not disable the product.
 - Hash-ladder publication is an independent Sprites-like `processBatch`
   operation authenticated by the publishing Entity. The registry stores the
   account-scoped ladder record; it does not authorize against, retain, or

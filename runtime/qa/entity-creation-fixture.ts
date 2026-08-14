@@ -13,7 +13,11 @@ export const provisionTestEntityEncryptionKey = (
   env: RuntimeReplica,
   entityId: string,
 ): Readonly<{ publicKey: string; privateKey: string }> => {
-  const privateKey = deriveEntityEncryptionPrivateKey(testEntitySeed(entityId), entityId);
+  const seed = testEntitySeed(entityId);
+  const privateKey = deriveEntityEncryptionPrivateKey(seed, entityId);
+  env.infrastructure ??= {};
+  env.infrastructure.entityEncryptionSeeds ??= new Map();
+  env.infrastructure.entityEncryptionSeeds.set(entityId.toLowerCase(), `0x${Buffer.from(seed).toString('hex')}`);
   return { privateKey, publicKey: provisionEntityEncryptionKey(env, entityId, privateKey) };
 };
 

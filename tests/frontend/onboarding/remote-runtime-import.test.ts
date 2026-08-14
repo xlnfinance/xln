@@ -20,10 +20,6 @@ import {
 } from '../../../frontend/src/lib/utils/onboarding/remoteRuntimeImport';
 import { writeRemoteRuntimeImportSummary } from '../../../frontend/src/lib/utils/onboarding/remoteRuntimeImportFlow';
 import {
-  LIVE_RUNTIME_DISCOVERY_MAX_RETRIES,
-  shouldRetryLiveRuntimeDiscovery,
-} from '../../../frontend/src/lib/components/Views/runtime-creation-model';
-import {
   buildRemoteRuntimeRecoveryPeerSources,
   buildRuntimeWsRecoveryPeerSource,
   buildRuntimeWsRecoveryPeerSources,
@@ -242,15 +238,6 @@ describe('remote runtime import manager utilities', () => {
       'ws://127.0.0.1:8093/rpc',
     ]);
   });
-
-  test('live runtime auto-discovery retries empty startup responses but not fatal failures', () => {
-    expect(shouldRetryLiveRuntimeDiscovery({ ready: true }, 0, 0)).toBe(true);
-    expect(shouldRetryLiveRuntimeDiscovery({ ready: false, retryable: true }, 0, 1)).toBe(true);
-    expect(shouldRetryLiveRuntimeDiscovery({ ready: false, fatal: true }, 0, 1)).toBe(false);
-    expect(shouldRetryLiveRuntimeDiscovery({ ready: false }, 1, 0)).toBe(false);
-    expect(shouldRetryLiveRuntimeDiscovery({ ready: false }, 0, LIVE_RUNTIME_DISCOVERY_MAX_RETRIES)).toBe(false);
-  });
-
 
   test('rejects more than 100 remote runtime capability lines', () => {
     const lines = Array.from({ length: MAX_REMOTE_RUNTIME_IMPORTS + 1 }, (_, index) => makeEntry(index + 1));
@@ -650,15 +637,8 @@ describe('remote runtime import manager utilities', () => {
     expect(xlnStore).toContain("importSource.searchParams.set('access', 'admin')");
     expect(xlnStore).not.toContain("importSource.searchParams.set('allowPartial', '1')");
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString(), { optional: true })');
-    expect(runtimeCreation).toContain("url.searchParams.set('access', 'admin')");
-    expect(runtimeCreation).not.toContain("url.searchParams.set('allowPartial', '1')");
-    expect(runtimeCreation).toContain('await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { optional: silent })');
-    expect(runtimeCreation.match(/runtimeOperations\.hydrateRemoteRuntimeImportSource\(url\.toString\(\), \{ optional: silent \}\)/g))
-      .toHaveLength(1);
-    expect(runtimeCreation).toContain('scheduleLiveRuntimeDiscoveryRetry(payload, next.length)');
-    expect(runtimeCreation).toContain('setTimeout(() => {');
-    expect(runtimeCreation).toContain('clearLiveRuntimeDiscoveryRetry();');
-    expect(runtimeCreation).toContain('liveRuntimesLoading || liveRuntimesRetrying');
+    expect(runtimeCreation).not.toContain('live-runtime-section');
+    expect(runtimeCreation).not.toContain('hydrateRemoteRuntimeImportSource');
     expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
     expect(runtimeCreation).toContain('recoveryCheckedPeers = discovery.checkedPeers');
     expect(runtimeCreation).toContain("import { errorLog } from '$lib/stores/errorLogStore';");

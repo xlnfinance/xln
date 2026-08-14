@@ -228,6 +228,7 @@ import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bo
 import { fitCrossAmountsToOrderbook } from '../../../orchestrator/mm-node';
 
 import { cloneAccountReplica } from '../../../account/state/state-clone';
+import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
@@ -359,6 +360,8 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
     },
     status: 'active',
     mempool: [...mempool],
+    swapOrderHistory: new Map(),
+    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -907,6 +910,7 @@ describe('audit fail-fast regressions', () => {
       priceTicks: 25_000_000n,
       crossJurisdiction: route,
     });
+    recordSwapOfferLifecycle(sourceAccount, sourceAccount.state.swapOffers.get(orderId)!);
 
     const second = await applyEntityFrameWithMaterializedTestInfraContext(env, stateWithOffer, []);
     expect(second.newState.pendingCrossJurisdictionFillAcks?.size ?? 0).toBe(0);
@@ -1487,10 +1491,12 @@ describe('audit fail-fast regressions', () => {
     attachSigningReplica(env, hubId, 'hub-signer');
     const account = makeProposalAccount([], hubId, userId);
     account.state.deltas.set(1, createDefaultDelta(1));
-    account.state.locks.set('counter-await-secret-lock', {
-      lockId: 'counter-await-secret-lock',
+    const awaitSecretLockId = `0x${'54'.repeat(32)}`;
+    account.state.locks.set(awaitSecretLockId, {
+      lockId: awaitSecretLockId,
       hashlock: `0x${'55'.repeat(32)}`,
       timelock: BigInt(hubState.timestamp + 60_000),
+      revealBeforeHeight: 100,
       amount: 10n,
       tokenId: 1,
       senderIsLeft: false,
@@ -1542,11 +1548,11 @@ describe('audit fail-fast regressions', () => {
       tokenId: 1,
       amount: 10n,
       inboundEntity: userId,
-      inboundLockId: 'counter-await-secret-lock',
+      inboundLockId: awaitSecretLockId,
       createdTimestamp: hubState.timestamp,
     });
-    hubState.lockBook.set('counter-await-secret-lock', {
-      lockId: 'counter-await-secret-lock',
+    hubState.lockBook.set(awaitSecretLockId, {
+      lockId: awaitSecretLockId,
       accountId: userId,
       tokenId: 1,
       amount: 10n,

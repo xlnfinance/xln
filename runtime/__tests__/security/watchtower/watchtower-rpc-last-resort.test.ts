@@ -169,6 +169,7 @@ const deployWatchtowerContracts = async (
   const accountArtifact = await artifact('Account.sol/Account.json');
   const boundsArtifact = await artifact('DepositoryBounds.sol/DepositoryBounds.json');
   const registryArtifact = await artifact('HashLadderRegistry.sol/HashLadderRegistry.json');
+  const nftCustodyArtifact = await artifact('custody/NftCustody.sol/NftCustody.json');
   const transformerArtifact = await artifact('DeltaTransformer.sol/DeltaTransformer.json');
   const hankoVerifierArtifact = await artifact('HankoVerifier.sol/HankoVerifier.json');
   const entityProviderArtifact = await artifact('EntityProvider.sol/EntityProvider.json');
@@ -188,6 +189,7 @@ const deployWatchtowerContracts = async (
   const account = await deploy(accountArtifact, accountArtifact.bytecode);
   const bounds = await deploy(boundsArtifact, boundsArtifact.bytecode);
   const registry = await deploy(registryArtifact, registryArtifact.bytecode);
+  const nftCustody = await deploy(nftCustodyArtifact, nftCustodyArtifact.bytecode);
   const transformer = await deploy(transformerArtifact, transformerArtifact.bytecode);
   const hankoVerifier = await deploy(hankoVerifierArtifact, hankoVerifierArtifact.bytecode);
   const entityProvider = await deploy(
@@ -203,6 +205,7 @@ const deployWatchtowerContracts = async (
       'contracts/Account.sol:Account': await account.getAddress(),
       'contracts/DepositoryBounds.sol:DepositoryBounds': await bounds.getAddress(),
       'contracts/HashLadderRegistry.sol:HashLadderRegistry': await registry.getAddress(),
+      'contracts/custody/NftCustody.sol:NftCustody': await nftCustody.getAddress(),
     }),
     deployer,
   ).deploy(await entityProvider.getAddress(), await transformer.getAddress(), {

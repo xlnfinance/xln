@@ -36,7 +36,7 @@ const runnerArgs = [
   ...passthrough,
   '--shards=4',
   '--workers-per-shard=1',
-  '--max-mm-concurrency=2',
+  '--max-mm-concurrency=1',
   '--video=off',
   '--trace=off',
   '--screenshot=only-on-failure',

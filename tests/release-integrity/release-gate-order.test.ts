@@ -69,7 +69,7 @@ describe('release gate ordering', () => {
     const expectedFamily = collectCrossJReleaseTests('runtime/__tests__').sort();
 
     expect(result.exitCode).toBe(0);
-    expect(expectedFamily).toHaveLength(19);
+    expect(expectedFamily).toHaveLength(20);
     expect(plannedFamily).toEqual(expectedFamily);
   });
 

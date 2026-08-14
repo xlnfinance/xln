@@ -755,27 +755,30 @@ export async function gotoApp(
   // Directly injecting the raw shard API URL into the page makes browser-only paths
   // diverge from production and can bypass normal origin/proxy behavior.
   const apiBaseUrl = appBaseUrl;
-  await page.addInitScript((configuredApiBaseUrl: string) => {
-    try {
-      const target = window as typeof window & {
-        __XLN_API_BASE_URL__?: string;
-        __xln?: Record<string, unknown>;
-        isolatedEnv?: unknown;
-      };
-      target.__XLN_API_BASE_URL__ = configuredApiBaseUrl;
-      Object.defineProperty(target, 'isolatedEnv', {
-        configurable: true,
-        enumerable: false,
-        get() {
-          const debugRoot = target.__xln;
-          return debugRoot?.liveRuntimeSnapshot || debugRoot?.env || null;
-        },
-      });
-      localStorage.setItem('xln-api-base-url', configuredApiBaseUrl);
-    } catch {
-      // no-op
-    }
-  }, apiBaseUrl);
+  const installPageBindings = (configuredApiBaseUrl: string): void => {
+    const target = window as typeof window & {
+      __XLN_API_BASE_URL__?: string;
+      __xln?: Record<string, unknown>;
+      isolatedEnv?: unknown;
+    };
+    target.__XLN_API_BASE_URL__ = configuredApiBaseUrl;
+    Object.defineProperty(target, 'isolatedEnv', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        const debugRoot = target.__xln;
+        return debugRoot?.liveRuntimeSnapshot || debugRoot?.env || null;
+      },
+    });
+    localStorage.setItem('xln-api-base-url', configuredApiBaseUrl);
+  };
+  await page.addInitScript(installPageBindings, apiBaseUrl);
+  // addInitScript covers future documents. Reset flows can finish their hard
+  // navigation before gotoApp is called, so install the same binding into the
+  // already-live app document before the readiness fast path returns.
+  if (/^https?:\/\//.test(page.url())) {
+    await page.evaluate(installPageBindings, apiBaseUrl);
+  }
 
   const waitForAppReady = async (): Promise<boolean> => {
     if (page.isClosed()) return false;

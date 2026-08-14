@@ -43,6 +43,7 @@ import { readCliOption } from '../../config/cli';
 import { buildCrossJurisdictionSwapSubmission } from '../../runtime/jurisdiction-api';
 import type { EntityReplica } from '../../entity/types';
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
+import { advanceScenarioTime } from '../harness/helpers';
 import {
   bindScenarioJReplica,
   createJReplica,
@@ -217,6 +218,11 @@ const waitUntil = async (
 ): Promise<void> => {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    // Both child Runtimes advance by the same bounded tick. Jumping one child
+    // directly to its private retry deadline can move a signed cross-j route
+    // into the future of its sibling; fixed ticks preserve clock parity while
+    // still making durable transport retries become due.
+    advanceScenarioTime(env, 100, true);
     await processRuntime(env);
     if (await pred()) return;
     await sleep(100);

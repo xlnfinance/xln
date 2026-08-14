@@ -96,6 +96,21 @@ describe('e2e demo user helper', () => {
     expect(createRuntime).toContain('onboardingLabel: label');
   });
 
+  test('installs runtime page bindings in both future and already-loaded documents', () => {
+    const helper = readFileSync(join(repoRoot, 'tests/utils/e2e-demo-users.ts'), 'utf8');
+    const gotoStart = helper.indexOf('export async function gotoApp');
+    const gotoEnd = helper.indexOf('export async function createRuntime');
+    expect(gotoStart).toBeGreaterThanOrEqual(0);
+    expect(gotoEnd).toBeGreaterThan(gotoStart);
+
+    const body = helper.slice(gotoStart, gotoEnd);
+    expect(body).toContain('await page.addInitScript(installPageBindings, apiBaseUrl)');
+    expect(body).toContain('await page.evaluate(installPageBindings, apiBaseUrl)');
+    expect(body.indexOf('await page.evaluate(installPageBindings, apiBaseUrl)')).toBeLessThan(
+      body.indexOf('const waitForAppReady'),
+    );
+  });
+
   test('never bypasses visible profile onboarding through browser storage', () => {
     const helper = readFileSync(join(repoRoot, 'tests/utils/e2e-demo-users.ts'), 'utf8');
     const dismissStart = helper.indexOf('async function dismissOnboardingIfVisible');

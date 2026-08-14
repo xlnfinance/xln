@@ -12,10 +12,6 @@ import {
 } from '../../../tests/fixtures/onchain-hanko-golden.ts';
 
 import {
-  BOARD_PROPOSAL_CANCEL_HANKO_DOMAIN,
-  BOARD_PROPOSAL_HANKO_DOMAIN,
-  DEPOSITORY_BATCH_HANKO_DOMAIN,
-  WATCHTOWER_COUNTER_DISPUTE_HANKO_DOMAIN,
   encodeCooperativeDisputeProofHankoPayload,
   encodeBoardProposalCancelHankoPayload,
   encodeBoardProposalHankoPayload,
@@ -51,6 +47,16 @@ import {
 } from '../helpers/hanko.ts';
 
 const { ethers } = hre;
+const DEPOSITORY_BATCH_HANKO_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1'));
+const WATCHTOWER_COUNTER_DISPUTE_HANKO_DOMAIN = ethers.keccak256(
+  ethers.toUtf8Bytes('XLN_WATCHTOWER_COUNTER_DISPUTE_V1'),
+);
+const BOARD_PROPOSAL_HANKO_DOMAIN = ethers.keccak256(
+  ethers.toUtf8Bytes('XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_V1'),
+);
+const BOARD_PROPOSAL_CANCEL_HANKO_DOMAIN = ethers.keccak256(
+  ethers.toUtf8Bytes('XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_CANCEL_V1'),
+);
 const BOARD_ABI = [
   'tuple(uint16 votingThreshold, bytes32[] entityIds, uint16[] votingPowers, uint32 boardChangeDelay, uint32 controlChangeDelay, uint32 dividendChangeDelay)',
 ];

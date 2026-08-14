@@ -840,7 +840,7 @@ test.describe('watchtower runtime recovery', () => {
         }), {
           timeout: 10_000,
           intervals: [100, 250, 500],
-          message: 'standalone tower override must survive resetdb navigation',
+          message: 'standalone tower override must survive reset navigation',
         })
         .toBe(tower.baseUrl);
 
@@ -970,12 +970,15 @@ test.describe('watchtower runtime recovery', () => {
         })
         .toBe(recipientAfterPayment);
     } finally {
-      const cleanup = await Promise.allSettled([
+      // Close every Runtime page before stopping the tower. Parallel teardown
+      // races the page's final appointment/health polls against tower shutdown
+      // and turns a successful recovery into a false connection-refused error.
+      const contextCleanup = await Promise.allSettled([
         closeRuntimeContext(context),
         ...(recipientContext ? [closeRuntimeContext(recipientContext)] : []),
-        stopWatchtower(tower),
       ]);
-      const failures = cleanup
+      const towerCleanup = await Promise.allSettled([stopWatchtower(tower)]);
+      const failures = [...contextCleanup, ...towerCleanup]
         .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
         .map((result) => result.reason);
       if (failures.length > 0) {

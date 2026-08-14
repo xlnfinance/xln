@@ -241,6 +241,7 @@ import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bo
 import { fitCrossAmountsToOrderbook } from '../../../orchestrator/mm-node';
 
 import { cloneAccountReplica } from '../../../account/state/state-clone';
+import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
@@ -374,6 +375,8 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
     },
     status: 'active',
     mempool: [...mempool],
+    swapOrderHistory: new Map(),
+    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -2200,6 +2203,7 @@ describe('audit fail-fast regressions', () => {
       priceTicks: 25_000_000n,
       crossJurisdiction: makerRoute,
     });
+    recordSwapOfferLifecycle(makerSourceAccount, makerSourceAccount.state.swapOffers.get(makerRoute.orderId)!);
     sourceState.accounts.set(remoteMaker, makerSourceAccount);
 
     const bookOwnerState = makeEntityState(bookOwnerHub);
@@ -2305,6 +2309,7 @@ describe('audit fail-fast regressions', () => {
       priceTicks: 25_000_000n,
       crossJurisdiction: takerRoute,
     });
+    recordSwapOfferLifecycle(takerAccount, takerAccount.state.swapOffers.get(takerRoute.orderId)!);
     bookOwnerState.accounts.set(localTaker, takerAccount);
 
     const collisionOwner = `0x${'35'.repeat(32)}`;
@@ -2327,6 +2332,7 @@ describe('audit fail-fast regressions', () => {
       priceTicks: 25_000_000n,
       crossJurisdiction: makerRoute,
     });
+    recordSwapOfferLifecycle(collisionAccount, collisionAccount.state.swapOffers.get(makerRoute.orderId)!);
     collisionState.accounts.set(remoteMaker, collisionAccount);
     env.state.eReplicas.set(`${collisionOwner}:${collisionSigner}`, {
       entityId: collisionOwner,
@@ -2478,6 +2484,7 @@ describe('audit fail-fast regressions', () => {
       priceTicks: 25_000_000n,
       crossJurisdiction: restingRoute,
     });
+    recordSwapOfferLifecycle(account, account.state.swapOffers.get(orderId)!);
     sourceState.accounts.set(user, account);
 
     const conflictingRoute = buildPreparedCrossJurisdictionRoute(

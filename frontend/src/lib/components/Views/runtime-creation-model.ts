@@ -1,8 +1,3 @@
-import {
-  parseRemoteRuntimeImportSourcePayload,
-  type RemoteRuntimeImportAccess,
-} from '../../utils/onboarding/remoteRuntimeImport';
-
 export type FactorInfo = {
   factor: number;
   shards: number;
@@ -145,79 +140,4 @@ export function formatMemoryLabel(memoryMb: number): string {
   if (memoryMb >= 1024 * 1024) return `${(memoryMb / (1024 * 1024)).toFixed(1)} TB`;
   if (memoryMb >= 1024) return `${(memoryMb / 1024).toFixed(1)} GB`;
   return `${Math.floor(memoryMb)} MB`;
-}
-
-
-export type LiveRuntimeImportStatusPayload = {
-  ready?: boolean;
-  partial?: boolean;
-  retryable?: boolean;
-  fatal?: boolean;
-  reason?: unknown;
-  error?: unknown;
-  code?: unknown;
-  degraded?: unknown;
-};
-
-export const LIVE_RUNTIME_DISCOVERY_RETRY_MS = 2_000;
-export const LIVE_RUNTIME_DISCOVERY_MAX_RETRIES = 60;
-
-export type LiveRuntimeChoice = {
-  label: string;
-  access: RemoteRuntimeImportAccess;
-  wsUrl: string;
-  token: string;
-};
-
-const hasRuntimeImportEntries = (value: unknown): boolean => {
-  const source = value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-  const manifest = source?.['manifest'];
-  const entries = manifest !== null && typeof manifest === 'object' && !Array.isArray(manifest)
-    ? (manifest as Record<string, unknown>)['entries']
-    : source?.['entries'];
-  return Array.isArray(entries) && entries.length > 0;
-};
-
-export function parseLiveRuntimeChoices(payload: unknown): LiveRuntimeChoice[] {
-  if (!hasRuntimeImportEntries(payload)) return [];
-  return parseRemoteRuntimeImportSourcePayload(payload).map((entry) => ({
-    label: entry.label,
-    access: entry.access,
-    wsUrl: entry.wsUrl,
-    token: entry.token,
-  }));
-}
-
-export function shouldRetryLiveRuntimeDiscovery(
-  payload: LiveRuntimeImportStatusPayload,
-  entryCount: number,
-  attempts: number,
-): boolean {
-  if (entryCount > 0) return false;
-  if (attempts >= LIVE_RUNTIME_DISCOVERY_MAX_RETRIES) return false;
-  if (payload.fatal === true && payload.retryable !== true) return false;
-  return true;
-}
-
-export function formatLiveRuntimeImportStatus(
-  payload: LiveRuntimeImportStatusPayload,
-  entryCount: number,
-): string {
-  if (payload.ready !== false) return '';
-  const prefix = payload.partial || entryCount > 0
-    ? `Runtime network still converging; showing ${entryCount} import target${entryCount === 1 ? '' : 's'}.`
-    : 'Runtime import is not ready.';
-  const reason = String(payload.reason || payload.error || '').trim();
-  const code = String(payload.code || '').trim();
-  const degraded = Array.isArray(payload.degraded)
-    ? payload.degraded.map(value => String(value).trim()).filter(Boolean).join(',')
-    : '';
-  const details = [
-    code ? `code=${code}` : '',
-    reason ? `reason=${reason}` : '',
-    degraded ? `degraded=${degraded}` : '',
-  ].filter(Boolean);
-  return details.length > 0 ? `${prefix} ${details.join(' · ')}` : prefix;
 }
