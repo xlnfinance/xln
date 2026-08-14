@@ -2798,19 +2798,6 @@ async function releaseCompanyTreasuryShares(): Promise<void> {
     companyBusyAction = null;
   }
 }
-function openCompanyTrading(): void {
-  activeTab = "accounts";
-  accountWorkspaceTab = "swap";
-}
-function openCompanyPayments(): void {
-  activeTab = "accounts";
-  accountWorkspaceTab = "send";
-}
-function openCompanyGovernance(): void {
-  activeTab = "settings";
-  settingsSubview = "consensus";
-}
-// Tab config
 // Pending batch count for Accounts tab badge
 $: pendingBatchCount = pendingBatchState.count;
 $: pendingBatchMode = pendingBatchState.mode;
@@ -2986,9 +2973,9 @@ $: if (typeof window !== "undefined") {
             error={companyError}
             onJoinHub={joinDefaultCompanyHub}
             onReleaseShares={releaseCompanyTreasuryShares}
-            onOpenTrading={openCompanyTrading}
-            onOpenPayments={openCompanyPayments}
-            onOpenGovernance={openCompanyGovernance}
+            onOpenTrading={() => { activeTab = "accounts"; accountWorkspaceTab = "swap"; }}
+            onOpenPayments={() => { activeTab = "accounts"; accountWorkspaceTab = "send"; }}
+            onOpenGovernance={() => { activeTab = "settings"; settingsSubview = "consensus"; }}
           />
         {:else if activeTab === 'settings'}
           <EntitySettingsProjectionPanel
