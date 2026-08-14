@@ -2180,8 +2180,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   );
   console.log(`   Bob reserve += $100K collateral ✅`);
 
-  // Verify DebtCreated event received by entities
-  // H14 AUDIT FIX: Verify actual debt amount, not just event existence
+  // Verify the canonical debt ledger first. Human-readable event text is only
+  // presentation evidence and must never drive a financial assertion.
   const [, bobFinal] = findReplica(env, bob.id);
   const bobFrameMessages = readEntityFrameEventMessages(bobFinal.state);
   if (AHB_DEBUG) {
@@ -2196,24 +2196,29 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   );
   assert(debtMessage, 'PHASE 7: Bob did not receive DebtCreated event');
 
-  // H14: Parse and verify DebtCreated event fields
-  // Format: "🔴 DEBT: {debtor} owes {amount} USDC to {creditor} | Block {block}"
-  const debtAmountMatch = debtMessage?.match(/owes\s+([\d.]+)\s+USDC/);
-  const debtAmount = debtAmountMatch ? parseFloat(debtAmountMatch[1] ?? '0') : 0;
-  const expectedDebtAmount = 50000; // $50K debt (delta $150K - collateral $100K)
+  const hubId = hub.id.toLowerCase();
+  const bobId = bob.id.toLowerCase();
+  const debt = Array.from(bobFinal.state.inDebtsByToken?.get(USDC_TOKEN_ID)?.values() ?? [])
+    .find(entry =>
+      entry.debtor.toLowerCase() === hubId &&
+      entry.creditor.toLowerCase() === bobId
+    );
+  assert(debt, 'H14: Bob canonical incoming debt from Hub is missing');
   assert(
-    Math.abs(debtAmount - expectedDebtAmount) < 1, // Allow small float tolerance
-    `H14: DebtCreated amount mismatch: got ${debtAmount}, expected ${expectedDebtAmount}`
+    debt.createdAmount === disputeShortfall,
+    `H14: DebtCreated amount mismatch: got ${debt.createdAmount}, expected ${disputeShortfall}`
   );
   assert(
-    debtMessage?.includes(hub.id.slice(-8)),
-    'H14: DebtCreated debtor should be Hub'
+    debt.remainingAmount === disputeShortfall && debt.paidAmount === 0n,
+    `H14: DebtCreated balance mismatch: remaining=${debt.remainingAmount}, paid=${debt.paidAmount}`
   );
   assert(
-    debtMessage?.includes(bob.id.slice(-8)),
-    'H14: DebtCreated creditor should be Bob'
+    debt.direction === 'in' && debt.status === 'open',
+    `H14: DebtCreated state mismatch: direction=${debt.direction}, status=${debt.status}`
   );
-  console.log(`   DebtCreated event verified: Hub owes Bob $${debtAmount} USDC ✅`);
+  assert(debtMessage.includes(hub.id.slice(-8)), 'H14: DebtCreated message should name Hub');
+  assert(debtMessage.includes(bob.id.slice(-8)), 'H14: DebtCreated message should name Bob');
+  console.log('   DebtCreated ledger verified: Hub owes Bob $50K USDC ✅');
 
   // H10 AUDIT FIX: Verify solvency AFTER dispute finalized. DisputeFinalized now
   // clears finalized collateral/ondelta in runtime state, matching Depository.sol.
