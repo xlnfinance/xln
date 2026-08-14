@@ -19,7 +19,9 @@ export type WatchedErc20Token = {
 
 type WatchedTokenRegistry = {
   getTokensLength(): Promise<bigint>;
-  _tokens(tokenId: number): Promise<readonly [string, bigint, bigint]>;
+  _tokens(tokenId: number): Promise<
+    readonly [contractAddress: string, externalTokenId: bigint, tokenType: bigint]
+  >;
 };
 
 export type AuthenticatedTxLocation = Readonly<{
@@ -221,7 +223,8 @@ export const createWatchedErc20TokenReader = (
     try {
       const length = Number(await depository.getTokensLength());
       for (let tokenId = 1; tokenId < length; tokenId += 1) {
-        const [contractAddress] = await depository._tokens(tokenId);
+        const [contractAddress, , tokenType] = await depository._tokens(tokenId);
+        if (tokenType !== 0n) continue;
         const address = normalizeEvmAddress(contractAddress);
         if (address && address !== ethers.ZeroAddress) tokens.push({ tokenId, address });
       }

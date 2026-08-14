@@ -35,6 +35,7 @@ import {
 } from '../../../jurisdiction/adapter/watcher';
 import { findReserveUpdatedEvidence } from '../../../jurisdiction/machine/events/event-evidence';
 import { decodeAuthenticatedWatcherEvents } from '../../../jurisdiction/adapter/rpc-watcher-events';
+import { createWatchedErc20TokenReader } from '../../../jurisdiction/adapter/rpc-watcher-inputs';
 import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/event-observation';
 import {
   buildLocalJPrefixAttestation,
@@ -122,6 +123,30 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
   }) as EntityReplica;
 
 describe('JAdapter watcher ingress', () => {
+  test('receipt watcher excludes non-ERC20 registry entries sharing one contract', async () => {
+    const erc20 = `0x${'41'.repeat(20)}`;
+    const entityProvider = `0x${'42'.repeat(20)}`;
+    const entries = [
+      [`0x${'00'.repeat(20)}`, 0n, 0n],
+      [erc20, 0n, 0n],
+      [entityProvider, 7n, 2n],
+      [entityProvider, 8n, 2n],
+    ] as const;
+    const readWatchedTokens = createWatchedErc20TokenReader(
+      {
+        getTokensLength: async () => BigInt(entries.length),
+        _tokens: async tokenId => {
+          const entry = entries[tokenId];
+          if (!entry) throw new Error(`TEST_TOKEN_MISSING:${tokenId}`);
+          return entry;
+        },
+      },
+      () => undefined,
+    );
+
+    expect(await readWatchedTokens()).toEqual([{ tokenId: 1, address: erc20 }]);
+  });
+
   test('custom token events do not wedge wallet log projection', async () => {
     const env = createEmptyEnv('jadapter-custom-token-event');
     const tokenAddress = `0x${'61'.repeat(20)}`;
