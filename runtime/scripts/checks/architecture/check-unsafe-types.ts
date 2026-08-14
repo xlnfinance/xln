@@ -13,8 +13,8 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {};
 // makes their removal permanent.
 const TS_SUPPRESSION_DEBT: Readonly<Record<string, number>> = {};
 const NON_NULL_ASSERTION_FILES = 192;
-const NON_NULL_ASSERTION_COUNT = 733;
-const NON_NULL_ASSERTION_SHA256 = '2f22849f8d1018f2fcea9811fe05ef6ed8f1d9d8678f44873c07dd90bb8eeddf';
+const NON_NULL_ASSERTION_COUNT = 732;
+const NON_NULL_ASSERTION_SHA256 = 'c022dd82166dad75ab311c3ef17dd7f13d5ceb9c8ae86717749157bad878e629';
 
 type UnsafeTypeCounts = {
   explicitAnyLines: number[];
