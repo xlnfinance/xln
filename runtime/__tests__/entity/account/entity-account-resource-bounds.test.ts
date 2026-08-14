@@ -9,6 +9,7 @@ import { createLocalAccountInput } from '../../../account/input';
 import { computeAccountStateRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../../../account/commitment/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { LIMITS } from '../../../config/constants';
+import { createOrderbookExtState, DEFAULT_SPREAD_DISTRIBUTION } from '../../../orderbook';
 import { applyEntityInput } from '../../../entity/consensus';
 import { assertEntityAccountInsertionCapacity } from '../../../entity/account/account-capacity';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../../../entity/factory';
@@ -20,6 +21,7 @@ import { applyAccountSettledJEvent } from '../../../entity/tx/j-events-account-s
 import { createEmptyEnv } from '../../../runtime';
 import { hydrateAccountDocFromStorage, hydrateEntityStateFromStorage } from '../../../storage/read/hydration';
 import { projectAccountDoc, projectEntityCoreDoc } from '../../../storage/read/projections';
+import { validateStorageEntityCoreDocValue } from '../../../storage/schema/authoritative-schema';
 import { signEntityHashes } from '../../../hanko/signing';
 import type { AccountReplica, AccountTx } from '../../../types/account';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
@@ -169,6 +171,33 @@ test('storage hydration rejects an orderbook projection without its exact hub po
   };
   expect(() => hydrateEntityStateFromStorage({ core, accounts: new Map(), books: new Map() }))
     .toThrow(`STORAGE_ORDERBOOK_HUBPROFILE_MISSING:${entityId}`);
+});
+
+test('storage boundary rejects malformed committed orderbook pair dimensions', () => {
+  const state = makeState();
+  state.orderbookExt = createOrderbookExtState({
+    entityId,
+    name: 'bounds-hub',
+    spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+    referenceTokenId: 1,
+    usdQuoteAuthorityEntityId: entityId,
+    minTradeSize: 1n,
+    supportedPairs: ['1/2'],
+  });
+  state.orderbookExt.pairDimensions.set('1/2', {
+    baseTokenDecimals: 18,
+    quoteTokenDecimals: 6,
+  });
+  const core = projectEntityCoreDoc(state);
+  expect(validateStorageEntityCoreDocValue(core).orderbookPairDimensions?.get('1/2'))
+    .toEqual({ baseTokenDecimals: 18, quoteTokenDecimals: 6 });
+
+  core.orderbookPairDimensions?.set('1/2', {
+    baseTokenDecimals: 256,
+    quoteTokenDecimals: 6,
+  });
+  expect(() => validateStorageEntityCoreDocValue(core))
+    .toThrow('STORAGE_ENTITY_DOC_INVALID_ORDERBOOK_PAIR_DIMENSIONS_baseTokenDecimals');
 });
 
 test('account capacity uses the canonical counterparty key directly', () => {

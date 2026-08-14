@@ -22,6 +22,7 @@ import {
   requireExactBoundaryKeys,
   requireStorageArray,
   requireStorageBigInt,
+  requireStorageBoolean,
   requireStorageHash,
   requireStorageMap,
   requireStorageString,
@@ -116,6 +117,34 @@ const validateStorageOrderbookHubProfile = (
     takerReferrerBps: requireBoundaryInteger(spread['takerReferrerBps'], `${code}_TAKER_REFERRER_BPS`),
   };
   if (!validateSpreadDistribution(canonicalSpread)) throw new Error(`${code}_SPREAD_TOTAL`);
+};
+
+const validateStorageOrderbookPairDimensions = (value: unknown, code: string): void => {
+  const dimensions = requireStorageMap(value, code);
+  for (const [pairIdValue, dimensionValue] of dimensions) {
+    const pairId = requireStorageString(pairIdValue, `${code}_PAIR_ID`);
+    const match = /^(0|[1-9]\d*)\/(0|[1-9]\d*)$/.exec(pairId);
+    if (!match) throw new Error(`${code}_PAIR_ID`);
+    const leftTokenId = requireBoundaryInteger(Number(match[1]), `${code}_LEFT_TOKEN`);
+    const rightTokenId = requireBoundaryInteger(Number(match[2]), `${code}_RIGHT_TOKEN`);
+    if (
+      leftTokenId <= 0 ||
+      leftTokenId >= rightTokenId ||
+      rightTokenId > TOKENS.MAX_TOKEN_ID
+    ) throw new Error(`${code}_PAIR_ID`);
+    const dimension = requireBoundaryRecord(dimensionValue, `${code}_DIMENSION`);
+    requireExactBoundaryKeys(
+      dimension,
+      ['baseTokenDecimals', 'quoteTokenDecimals'],
+      [],
+      `${code}_DIMENSION_FIELDS`,
+    );
+    for (const field of ['baseTokenDecimals', 'quoteTokenDecimals']) {
+      if (requireBoundaryInteger(dimension[field], `${code}_${field}`) > 255) {
+        throw new Error(`${code}_${field}`);
+      }
+    }
+  }
 };
 
 const ACCOUNT_REPLICA_REQUIRED = [
@@ -215,11 +244,25 @@ const validateStorageAccountStateMaps = (state: AccountState, code: string): voi
   for (const offer of requireStorageMap(state.swapOffers, `${code}_OFFERS`).values()) {
     const row = requireBoundaryRecord(offer, `${code}_OFFER`);
     for (const field of ['giveTokenId', 'wantTokenId']) if (requireBoundaryInteger(row[field], `${code}_OFFER_TOKEN`) > TOKENS.MAX_TOKEN_ID) throw new Error(`${code}_OFFER_TOKEN`);
+    for (const field of ['giveTokenDecimals', 'wantTokenDecimals']) {
+      if (requireBoundaryInteger(row[field], `${code}_OFFER_DECIMALS`) > 255) {
+        throw new Error(`${code}_OFFER_DECIMALS`);
+      }
+    }
     // Zero persisted offers are inert financial state and must not survive hydration.
-    requireStorageBigInt(row['giveAmount'], `${code}_OFFER_GIVE`, FINANCIAL.MIN_PAYMENT_AMOUNT, FINANCIAL.MAX_PAYMENT_AMOUNT);
+    const giveAmount = requireStorageBigInt(row['giveAmount'], `${code}_OFFER_GIVE`, FINANCIAL.MIN_PAYMENT_AMOUNT, FINANCIAL.MAX_PAYMENT_AMOUNT);
     const wantAmount = requireStorageBigInt(row['wantAmount'], `${code}_OFFER_WANT`, FINANCIAL.MIN_PAYMENT_AMOUNT, FINANCIAL.MAX_PAYMENT_AMOUNT);
     requireStorageBigInt(row['maxFee'], `${code}_OFFER_MAX_FEE`, 0n, wantAmount);
     requireStorageBigInt(row['minNetReceive'], `${code}_OFFER_MIN_NET`, 0n, wantAmount);
+    requireStorageBigInt(row['priceTicks'], `${code}_OFFER_PRICE_TICKS`, 1n);
+    requireStorageBigInt(row['quantizedGive'], `${code}_OFFER_QUANTIZED_GIVE`, 1n, giveAmount);
+    requireStorageBigInt(row['quantizedWant'], `${code}_OFFER_QUANTIZED_WANT`, 1n, wantAmount);
+    requireStorageBoolean(row['makerIsLeft'], `${code}_OFFER_MAKER_SIDE`);
+    requireBoundaryInteger(row['createdHeight'], `${code}_OFFER_CREATED_HEIGHT`);
+    if (row['timeInForce'] !== undefined) {
+      const timeInForce = requireBoundaryInteger(row['timeInForce'], `${code}_OFFER_TIME_IN_FORCE`);
+      if (timeInForce > 2) throw new Error(`${code}_OFFER_TIME_IN_FORCE`);
+    }
   }
   if (state.subcontracts !== undefined) {
     for (const subcontract of requireStorageMap(state.subcontracts, `${code}_SUBCONTRACTS`).values()) {
@@ -300,7 +343,12 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
     `${code}_ORDERBOOK_HUB_PROFILE`,
   );
   if (doc['orderbookHubProfile'] !== undefined) {
-    requireStorageMap(doc['orderbookPairDimensions'], `${code}_ORDERBOOK_PAIR_DIMENSIONS`);
+    validateStorageOrderbookPairDimensions(
+      doc['orderbookPairDimensions'],
+      `${code}_ORDERBOOK_PAIR_DIMENSIONS`,
+    );
+  } else if (doc['orderbookPairDimensions'] !== undefined) {
+    throw new Error(`${code}_ORDERBOOK_PAIR_DIMENSIONS_WITHOUT_PROFILE`);
   }
   validateDeferredAccountProposals(doc['deferredAccountProposals'], code);
   validateSettlementContinuations(doc['settlementContinuations'], code);

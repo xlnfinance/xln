@@ -66,8 +66,10 @@ const makeFixture = async (): Promise<ValidationContext> => {
   account.state.swapOffers.set('offer-1', {
     offerId: 'offer-1',
     giveTokenId: 1,
+    giveTokenDecimals: 6,
     giveAmount: 5n,
     wantTokenId: 2,
+    wantTokenDecimals: 18,
     wantAmount: 10n,
     maxFee: 0n,
     minNetReceive: 10n,
@@ -285,6 +287,21 @@ const mutations: Mutation[] = [
     mutate: ({ doc }) => { object(doc.state.swapOffers.get('offer-1'))['giveTokenId'] = TOKENS.MAX_TOKEN_ID + 1; },
   },
   {
+    name: 'zero swap offer price ticks',
+    expected: 'reject',
+    mutate: ({ doc }) => { object(doc.state.swapOffers.get('offer-1'))['priceTicks'] = 0n; },
+  },
+  {
+    name: 'zero swap offer quantized give amount',
+    expected: 'reject',
+    mutate: ({ doc }) => { object(doc.state.swapOffers.get('offer-1'))['quantizedGive'] = 0n; },
+  },
+  {
+    name: 'swap offer quantized want amount above its remaining authorization',
+    expected: 'reject',
+    mutate: ({ doc }) => { object(doc.state.swapOffers.get('offer-1'))['quantizedWant'] = 11n; },
+  },
+  {
     name: 'malformed bounded subcontract',
     expected: 'reject',
     mutate: ({ doc }) => { object(doc.state.subcontracts?.get('transformer-1'))['transformerAddress'] = digest('95'); },
@@ -404,9 +421,9 @@ describe('persisted AccountReplica semantic boundary', () => {
     expect(deriveDelta(admitted.state.deltas.get(1)!, true).outCapacity).toBe(baseline);
   });
 
-  test('the audited matrix remains 36 rejects plus 1 design-valid accept', () => {
-    expect(mutations).toHaveLength(37);
-    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(36);
+  test('the audited matrix remains 39 rejects plus 1 design-valid accept', () => {
+    expect(mutations).toHaveLength(40);
+    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(39);
     expect(mutations.filter(({ expected }) => expected === 'accept')).toHaveLength(1);
   });
 
