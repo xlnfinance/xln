@@ -15,7 +15,8 @@ ANVIL_LOG="${ANVIL_LOG:-$REPO_ROOT/logs/anvil.log}"
 ANVIL_BLOCK_TIME=10
 ANVIL_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
 ANVIL_CHAIN_ID="${ANVIL_CHAIN_ID:-31337}"
-ANVIL_TMPDIR="${ANVIL_TMPDIR:-$JDB_ROOT/tmp}"
+ANVIL_TMPDIR="${ANVIL_TMPDIR:-$JDB_ROOT/tmp/anvil-$ANVIL_CHAIN_ID}"
+ANVIL_FOUNDRY_DIR="${ANVIL_FOUNDRY_DIR:-$ANVIL_TMPDIR/foundry}"
 ANVIL_PRUNE_HISTORY="${ANVIL_PRUNE_HISTORY:-128}"
 ANVIL_STATE_INTERVAL="${ANVIL_STATE_INTERVAL:-60}"
 
@@ -53,10 +54,11 @@ fi
 # Ensure foundry binaries are available
 export PATH="$HOME/.bun/bin:$HOME/.local/share/pnpm:$HOME/.foundry/bin:$PATH"
 export TMPDIR="$ANVIL_TMPDIR"
+export FOUNDRY_DIR="$ANVIL_FOUNDRY_DIR"
 
 # Create directories if missing
-mkdir -p "$(dirname "$ANVIL_STATE")" "$(dirname "$ANVIL_LOG")" "$ANVIL_TMPDIR"
-"$REPO_ROOT/scripts/operations/enforce-anvil-storage-budget.sh"
+mkdir -p "$(dirname "$ANVIL_STATE")" "$(dirname "$ANVIL_LOG")" "$ANVIL_TMPDIR" "$ANVIL_FOUNDRY_DIR"
+ANVIL_STORAGE_ALLOW_CLEANUP=1 "$REPO_ROOT/scripts/operations/enforce-anvil-storage-budget.sh"
 
 # Reset is intended for local development. Production deploys delete an exact
 # state file before creating PM2 entries without destructive arguments.

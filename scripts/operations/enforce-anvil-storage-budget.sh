@@ -6,6 +6,9 @@ JDB_ROOT="${XLN_JDB_ROOT:-$REPO_ROOT/data}"
 BUDGET_GIB="${ANVIL_STORAGE_BUDGET_GIB:-10}"
 BUDGET_KIB=$((BUDGET_GIB * 1024 * 1024))
 PROBE_TIMEOUT_SECONDS="${ANVIL_STORAGE_PROBE_TIMEOUT_SECONDS:-5}"
+ANVIL_TMPDIR="${ANVIL_TMPDIR:-$JDB_ROOT/tmp}"
+ANVIL_FOUNDRY_DIR="${ANVIL_FOUNDRY_DIR:-$ANVIL_TMPDIR/foundry}"
+CLEANUP_ALLOWED="${ANVIL_STORAGE_ALLOW_CLEANUP:-0}"
 
 run_bounded() {
   if command -v timeout >/dev/null 2>&1; then
@@ -41,20 +44,28 @@ for state_file in "$JDB_ROOT/anvil-state.json" "$JDB_ROOT/anvil2-state.json"; do
 done
 
 tmp_kib=0
-for tmp_dir in "$JDB_ROOT/tmp" "$HOME/.foundry/anvil/tmp"; do
+for tmp_dir in "$ANVIL_TMPDIR" "$ANVIL_FOUNDRY_DIR/anvil/tmp"; do
   [ -d "$tmp_dir" ] || continue
   if path_kib="$(measure_path_kib "$tmp_dir")"; then
     tmp_kib=$((tmp_kib + path_kib))
     continue
   fi
-  echo "anvil storage probe exceeded ${PROBE_TIMEOUT_SECONDS}s; clearing temp path: $tmp_dir" >&2
+  if [ "$CLEANUP_ALLOWED" != "1" ]; then
+    echo "ANVIL_STORAGE_TEMP_PROBE_TIMEOUT:path=${tmp_dir}:timeout=${PROBE_TIMEOUT_SECONDS}s" >&2
+    exit 1
+  fi
+  echo "anvil storage probe exceeded ${PROBE_TIMEOUT_SECONDS}s before startup; clearing isolated temp path: $tmp_dir" >&2
   rm -rf "$tmp_dir"
   install -d -m 700 "$tmp_dir"
 done
 
 used_kib=$((state_kib + tmp_kib))
 if [ "$used_kib" -gt "$BUDGET_KIB" ]; then
-  for tmp_dir in "$JDB_ROOT/tmp" "$HOME/.foundry/anvil/tmp"; do
+  if [ "$CLEANUP_ALLOWED" != "1" ]; then
+    echo "ANVIL_STORAGE_BUDGET_EXCEEDED: used=${used_kib}KiB budget=${BUDGET_KIB}KiB" >&2
+    exit 1
+  fi
+  for tmp_dir in "$ANVIL_TMPDIR" "$ANVIL_FOUNDRY_DIR/anvil/tmp"; do
     [ -d "$tmp_dir" ] || continue
     rm -rf "$tmp_dir"
     install -d -m 700 "$tmp_dir"

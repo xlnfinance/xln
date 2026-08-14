@@ -56,14 +56,18 @@ describe('Foundry artifact budget', () => {
     expect(DEFAULT_FOUNDRY_MAX_BYTES).toBe(50 * 1024 * 1024 * 1024);
   });
 
-  test('production guard clears Anvil temp when its size probe exceeds the deadline', () => {
+  test('startup guard clears only its isolated Anvil temp when its size probe exceeds the deadline', () => {
     const root = makeRoot();
     const fakeBin = join(root, 'fake-bin');
     const shellHome = join(root, 'shell-home');
-    const staleFile = join(shellHome, '.foundry', 'anvil', 'tmp', 'stale-state', 'state.bin');
-    mkdirSync(join(shellHome, '.foundry', 'anvil', 'tmp', 'stale-state'), { recursive: true });
+    const isolatedTemp = join(root, 'isolated-anvil');
+    const staleFile = join(isolatedTemp, 'stale-state', 'state.bin');
+    const unrelatedFoundryFile = join(shellHome, '.foundry', 'anvil', 'tmp', 'active-state', 'state.bin');
+    mkdirSync(join(isolatedTemp, 'stale-state'), { recursive: true });
+    mkdirSync(join(shellHome, '.foundry', 'anvil', 'tmp', 'active-state'), { recursive: true });
     mkdirSync(fakeBin, { recursive: true });
     writeFileSync(staleFile, 'stale');
+    writeFileSync(unrelatedFoundryFile, 'active');
     writeFileSync(join(fakeBin, 'du'), '#!/bin/sh\nsleep 30\n');
     chmodSync(join(fakeBin, 'du'), 0o755);
 
@@ -74,6 +78,9 @@ describe('Foundry artifact budget', () => {
         PATH: `${fakeBin}:${process.env.PATH || ''}`,
         HOME: shellHome,
         XLN_JDB_ROOT: join(root, 'jdb'),
+        ANVIL_TMPDIR: isolatedTemp,
+        ANVIL_FOUNDRY_DIR: join(root, 'isolated-foundry'),
+        ANVIL_STORAGE_ALLOW_CLEANUP: '1',
         ANVIL_STORAGE_PROBE_TIMEOUT_SECONDS: '1',
       },
       encoding: 'utf8',
@@ -82,7 +89,37 @@ describe('Foundry artifact budget', () => {
 
     expect(result.status).toBe(0);
     expect(Date.now() - startedAt).toBeLessThan(4_000);
-    expect(result.stderr).toContain('anvil storage probe exceeded 1s; clearing temp path');
+    expect(result.stderr).toContain('anvil storage probe exceeded 1s before startup; clearing isolated temp path');
     expect(existsSync(staleFile)).toBe(false);
+    expect(existsSync(unrelatedFoundryFile)).toBe(true);
+  });
+
+  test('live storage guard fails loud instead of deleting active Anvil temp', () => {
+    const root = makeRoot();
+    const fakeBin = join(root, 'fake-bin');
+    const isolatedTemp = join(root, 'active-anvil');
+    const activeFile = join(isolatedTemp, 'active-state', 'state.bin');
+    mkdirSync(join(isolatedTemp, 'active-state'), { recursive: true });
+    mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(activeFile, 'active');
+    writeFileSync(join(fakeBin, 'du'), '#!/bin/sh\nsleep 30\n');
+    chmodSync(join(fakeBin, 'du'), 0o755);
+
+    const result = spawnSync(join(repoRoot, 'scripts/operations/enforce-anvil-storage-budget.sh'), [], {
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH || ''}`,
+        XLN_JDB_ROOT: join(root, 'jdb'),
+        ANVIL_TMPDIR: isolatedTemp,
+        ANVIL_FOUNDRY_DIR: join(root, 'isolated-foundry'),
+        ANVIL_STORAGE_PROBE_TIMEOUT_SECONDS: '1',
+      },
+      encoding: 'utf8',
+      timeout: 5_000,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('ANVIL_STORAGE_TEMP_PROBE_TIMEOUT');
+    expect(existsSync(activeFile)).toBe(true);
   });
 });
