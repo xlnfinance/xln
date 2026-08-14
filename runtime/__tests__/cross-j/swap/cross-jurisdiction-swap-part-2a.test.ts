@@ -131,7 +131,12 @@ import { normalizeEntitySwapTradingPairs } from '../../../runtime/finance/swap-p
 
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, quoteAmountAtPrice } from '../../../orderbook/types';
+import {
+  getStaticSwapTokenDimensions,
+  ORDERBOOK_PRICE_SCALE,
+  SWAP_LOT_SCALE,
+  quoteAmountAtPrice,
+} from '../../../orderbook/types';
 
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 
@@ -345,6 +350,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         data: {
           offerId: route.orderId,
           giveTokenId: route.source.tokenId,
+          ...getStaticSwapTokenDimensions(route.source.tokenId, route.target.tokenId),
           giveAmount: route.source.amount,
           wantTokenId: route.target.tokenId,
           wantAmount: route.target.amount,
