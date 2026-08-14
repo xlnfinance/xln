@@ -127,7 +127,12 @@ import { normalizeEntitySwapTradingPairs } from '../../../runtime/finance/swap-p
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 
 import { createBook, recordAcceptedUsdAskPrice } from '../../../orderbook/core';
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, quoteAmountAtPrice } from '../../../orderbook/types';
+import {
+  getStaticSwapTokenDimensions,
+  ORDERBOOK_PRICE_SCALE,
+  SWAP_LOT_SCALE,
+  quoteAmountAtPrice,
+} from '../../../orderbook/types';
 
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 
@@ -1181,6 +1186,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     sourceHubState.orderbookExt = {
       books: new Map(),
       orderPairs: new Map(),
+      pairDimensions: new Map(),
       referrals: new Map(),
       hubProfile: {
         entityId: sourceHub,
@@ -1201,6 +1207,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       ...sourceHubState.orderbookExt,
       books: new Map(),
       orderPairs: new Map(),
+      pairDimensions: new Map(),
       referrals: new Map(),
       hubProfile: { ...sourceHubState.orderbookExt.hubProfile, entityId: sourceHubB, name: 'source hub B' },
     };
@@ -2707,6 +2714,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const account = state.accounts.get(sourceUser)!;
     account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
+      ...getStaticSwapTokenDimensions(Number(route.source.tokenId), Number(route.target.tokenId)),
       giveTokenId: Number(route.source.tokenId),
       giveAmount: BigInt(route.source.amount),
       wantTokenId: Number(route.target.tokenId),
@@ -2860,6 +2868,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const account = state.accounts.get(sourceUser)!;
     account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
+      ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
       giveAmount: 1_000n,
       wantTokenId: 1,
@@ -2876,6 +2885,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       type: 'swap_offer',
       data: {
         offerId: `${route.orderId}-mempool`,
+        ...getStaticSwapTokenDimensions(1, 1),
         giveTokenId: 1,
         giveAmount: 1_000n,
         wantTokenId: 1,
@@ -2890,6 +2900,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         route.orderId,
         {
           offerId: route.orderId,
+          ...getStaticSwapTokenDimensions(1, 1),
           giveTokenId: 1,
           giveAmount: 1_000n,
           wantTokenId: 1,

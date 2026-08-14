@@ -163,6 +163,7 @@ import {
 import {
   applyCommand,
   createBook,
+  getStaticSwapTokenDimensions,
   getBookOrder,
   getSwapLotScale,
   ORDERBOOK_PRICE_SCALE,
@@ -1888,6 +1889,7 @@ describe('audit fail-fast regressions', () => {
           data: {
             offerId: route.orderId,
             giveTokenId: 1,
+            ...getStaticSwapTokenDimensions(1, 2),
             giveAmount: amount,
             wantTokenId: 2,
             wantAmount: amount,
@@ -1961,6 +1963,7 @@ describe('audit fail-fast regressions', () => {
     const liveOffer = {
       offerId: 'valid-batch-fill',
       giveTokenId: 2,
+      ...getStaticSwapTokenDimensions(2, 1),
       giveAmount,
       wantTokenId: 1,
       wantAmount,
@@ -2034,6 +2037,7 @@ describe('audit fail-fast regressions', () => {
       data: {
         offerId: 'same-frame-maker',
         giveTokenId: 2,
+        ...getStaticSwapTokenDimensions(2, 1),
         giveAmount: baseAmount,
         wantTokenId: 1,
         wantAmount: quoteAmount,
@@ -2046,6 +2050,7 @@ describe('audit fail-fast regressions', () => {
       data: {
         offerId: 'same-frame-taker',
         giveTokenId: 1,
+        ...getStaticSwapTokenDimensions(1, 2),
         giveAmount: quoteAmount,
         wantTokenId: 2,
         wantAmount: baseAmount,
@@ -2062,6 +2067,7 @@ describe('audit fail-fast regressions', () => {
     hubState.orderbookExt = {
       books: new Map(),
       orderPairs: new Map(),
+      pairDimensions: new Map(),
       referrals: new Map(),
       hubProfile: {
         entityId: hub.entityId,

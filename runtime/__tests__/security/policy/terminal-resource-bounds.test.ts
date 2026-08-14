@@ -26,6 +26,7 @@ import type { EntityTx } from '../../../types/entity-tx';
 import { validateAccountReplica } from '../../../account/validation/state-validation';
 import { validateEntityReplica } from '../../../entity/replica/replica-validation';
 import { publishEntityCandidateEffects } from '../../../runtime/observability/env-events';
+import { getStaticSwapTokenDimensions } from '../../../orderbook/types';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
@@ -80,6 +81,7 @@ const makeAccount = (): AccountReplica => ({
 
 const makeOffer = (index: number): SwapOffer => ({
   offerId: `offer-${index.toString().padStart(4, '0')}`,
+  ...getStaticSwapTokenDimensions(1, 2),
   giveTokenId: 1,
   giveAmount: 100n,
   wantTokenId: 2,
@@ -401,6 +403,7 @@ test('decode validation rejects oversized swap history, resolve history, and HTL
   const offer = makeOffer(0);
   oversizedResolves.swapOrderHistory?.set(offer.offerId, {
     offerId: offer.offerId,
+    ...getStaticSwapTokenDimensions(offer.giveTokenId, offer.wantTokenId),
     giveTokenId: offer.giveTokenId,
     giveAmount: offer.giveAmount,
     originalGiveAmount: offer.giveAmount,

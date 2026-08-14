@@ -164,6 +164,7 @@ import {
 import {
   applyCommand,
   createBook,
+  getStaticSwapTokenDimensions,
   getBookOrder,
   getSwapLotScale,
   ORDERBOOK_PRICE_SCALE,
@@ -2384,6 +2385,7 @@ describe('audit fail-fast regressions', () => {
         data: {
           offerId: route.orderId,
           giveTokenId: 1,
+          ...getStaticSwapTokenDimensions(1, 1),
           giveAmount: route.source.amount,
           wantTokenId: 1,
           wantAmount: route.target.amount,
@@ -2503,6 +2505,10 @@ describe('audit fail-fast regressions', () => {
           data: {
             offerId: restingRoute.orderId,
             giveTokenId: restingRoute.source.tokenId,
+            ...getStaticSwapTokenDimensions(
+              restingRoute.source.tokenId,
+              restingRoute.target.tokenId,
+            ),
             giveAmount: restingRoute.source.amount,
             wantTokenId: restingRoute.target.tokenId,
             wantAmount: restingRoute.target.amount,

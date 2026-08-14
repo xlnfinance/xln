@@ -121,7 +121,12 @@ import { normalizeEntitySwapTradingPairs } from '../../../runtime/finance/swap-p
 
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, quoteAmountAtPrice } from '../../../orderbook/types';
+import {
+  getStaticSwapTokenDimensions,
+  ORDERBOOK_PRICE_SCALE,
+  SWAP_LOT_SCALE,
+  quoteAmountAtPrice,
+} from '../../../orderbook/types';
 import { cloneJBatch, createEmptyBatch, initJBatch } from '../../../jurisdiction/machine/batch';
 import { applyHankoBatchProcessedEvent } from '../../../entity/tx/j-events-batch';
 
@@ -560,6 +565,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const account = state.accounts.get(sourceUser)!;
     account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
+      ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
       giveAmount: 1_000n,
       wantTokenId: 1,
@@ -673,6 +679,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const account = sourceHubState.accounts.get(sourceUser)!;
     account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
+      ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
       giveAmount: 1_000n,
       wantTokenId: 1,
@@ -812,6 +819,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     account.currentFrame.prevFrameHash = 'genesis';
     account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
+      ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
       giveAmount: 1_000n,
       wantTokenId: 1,
@@ -1313,6 +1321,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       const account = state.accounts.get(counterparty)!;
       account.state.swapOffers.set(route.orderId, {
         offerId: route.orderId,
+        ...getStaticSwapTokenDimensions(1, 1),
         giveTokenId: 1,
         giveAmount: 1_000n,
         wantTokenId: 1,
@@ -1454,6 +1463,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       const account = state.accounts.get(counterparty)!;
       account.state.swapOffers.set(route.orderId, {
         offerId: route.orderId,
+        ...getStaticSwapTokenDimensions(1, 1),
         giveTokenId: 1,
         giveAmount: sourceTotal,
         wantTokenId: 1,
@@ -1579,6 +1589,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const account = state.accounts.get(sourceUser)!;
     account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
+      ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
       giveAmount: 1_000n,
       wantTokenId: 1,
@@ -1707,6 +1718,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const account = state.accounts.get(sourceUser)!;
     account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
+      ...getStaticSwapTokenDimensions(1, 1),
       giveTokenId: 1,
       giveAmount: 500n,
       wantTokenId: 1,
