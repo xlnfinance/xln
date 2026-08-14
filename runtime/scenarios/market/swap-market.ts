@@ -110,26 +110,6 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
   env.frameLogs = [];
   env.gossip = createGossipLayer();
 
-  if (env.state.jReplicas && env.state.jReplicas.size > 0) {
-    console.log(`[SWAP-MARKET] Clearing ${env.state.jReplicas.size} old jurisdictions from previous scenario`);
-    env.state.jReplicas.clear();
-  }
-  if (env.state.eReplicas && env.state.eReplicas.size > 0) {
-    console.log(`[SWAP-MARKET] Clearing ${env.state.eReplicas.size} old entities from previous scenario`);
-    env.state.eReplicas.clear();
-  }
-  if (env.history && env.history.length > 0) {
-    console.log(`[SWAP-MARKET] Clearing ${env.history.length} old snapshots from previous scenario`);
-    env.history = [];
-  }
-  env.state.height = 0;
-  env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
-  env.pendingOutputs = [];
-  env.pendingNetworkOutputs = [];
-  env.networkInbox = [];
-  env.frameLogs = [];
-  env.gossip = createGossipLayer();
-
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('      SWAP MARKET: Multi-Party Orderbook Simulation            ');
   console.log('═══════════════════════════════════════════════════════════════\n');
