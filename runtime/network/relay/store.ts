@@ -28,7 +28,7 @@ import type { WebSocketSendResult } from '../websocket-send-result';
 import {
   computeJurisdictionGossipHash,
   decodeJurisdictionGossipAnnouncement,
-  MAX_JURISDICTION_GOSSIP_RECORDS,
+  jurisdictionGossipScopeIsFull,
   type JurisdictionGossipAnnouncement,
 } from '../../jurisdiction/gossip/announcement';
 
@@ -485,7 +485,7 @@ export const storeVerifiedJurisdictionAnnouncement = (
   const announcement = decodeJurisdictionGossipAnnouncement(value, store.officialFoundationSignerId);
   const id = computeJurisdictionGossipHash(announcement);
   if (store.gossipJurisdictions.has(id)) return null;
-  if (store.gossipJurisdictions.size >= MAX_JURISDICTION_GOSSIP_RECORDS) {
+  if (jurisdictionGossipScopeIsFull(store.gossipJurisdictions.values(), announcement.scope)) {
     throw new Error('RELAY_JURISDICTION_GOSSIP_CAP_EXCEEDED');
   }
   store.gossipJurisdictions.set(id, announcement);

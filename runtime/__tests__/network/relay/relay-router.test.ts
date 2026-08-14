@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { Wallet, getBytes } from 'ethers';
 import type { Profile } from '../../../entity/profile';
 import { relayRoute as productionRelayRoute } from '../../../network/relay/router';
-import { cacheEncryptionKey, createRelayStore, resolveEncryptionPublicKeyHex } from '../../../network/relay/store';
+import {
+  cacheEncryptionKey,
+  createRelayStore,
+  resolveEncryptionPublicKeyHex,
+  storeVerifiedJurisdictionAnnouncement,
+} from '../../../network/relay/store';
 import { deserializeWsMessage, hashHelloMessage, hashRuntimeWsFrame, type RuntimeWsMessage } from '../../../network/p2p/ws-protocol';
 import { deriveSignerAddressSync, signDigest } from '../../../account/crypto';
 import { encryptJSON, deriveEncryptionKeyPair } from '../../../protocol/crypto/p2p-crypto';
@@ -163,9 +168,12 @@ const buildProfile = (
     : certifySingleSignerProfileFixture(profile, signer.seed, signer.signerId);
 };
 
-const buildJurisdictionAnnouncement = () => createJurisdictionGossipAnnouncement({
-  scope: 'community',
-  key: 'community-chain',
+const buildJurisdictionAnnouncement = (
+  scope: 'community' | 'official' = 'community',
+  key = 'community-chain',
+) => createJurisdictionGossipAnnouncement({
+  scope,
+  key,
   name: 'Community Chain',
   rpcUrl: 'https://community.example/rpc',
   blockTimeMs: 1_000,
@@ -186,7 +194,7 @@ const buildJurisdictionAnnouncement = () => createJurisdictionGossipAnnouncement
     deltaTransformer: `0x${'08'.repeat(20)}`,
   },
   stablecoin: { symbol: 'USDT', address: `0x${'09'.repeat(20)}`, tokenId: 1, decimals: 6 },
-}, getBytes(JURISDICTION_SIGNER_KEY));
+}, getBytes(JURISDICTION_SIGNER_KEY), scope === 'official' ? JURISDICTION_SIGNER : undefined);
 
 describe('relay-router gossip fanout', () => {
   test('rejects oversized gossip before signature verification and closes the session', async () => {
@@ -382,6 +390,24 @@ describe('relay-router gossip fanout', () => {
     });
     expect(store.gossipJurisdictions.size).toBe(1);
     expect(store.debugEvents.some((event) => event.reason === 'GOSSIP_JURISDICTION_DROPPED_INVALID')).toBeTrue();
+  });
+
+  test('community discovery capacity cannot block an official Foundation announcement', () => {
+    const community = buildJurisdictionAnnouncement();
+    const store = createRelayStore(SERVER_RUNTIME_ID, {
+      officialFoundationSignerId: JURISDICTION_SIGNER,
+    });
+    for (let index = 0; index < 128; index += 1) {
+      store.gossipJurisdictions.set(`community-${index}`, community);
+    }
+    const official = buildJurisdictionAnnouncement('official', 'official-chain');
+
+    expect(storeVerifiedJurisdictionAnnouncement(store, official)).toEqual(official);
+    expect(store.gossipJurisdictions.size).toBe(129);
+    expect(() => storeVerifiedJurisdictionAnnouncement(
+      store,
+      buildJurisdictionAnnouncement('community', 'community-over-cap'),
+    )).toThrow('RELAY_JURISDICTION_GOSSIP_CAP_EXCEEDED');
   });
 
   test('serves batched gossip by ids and set filters', async () => {

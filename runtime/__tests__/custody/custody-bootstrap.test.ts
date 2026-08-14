@@ -12,7 +12,7 @@ import {
   type ManagedChild,
 } from '../../orchestrator/bootstrap/custody-bootstrap';
 
-test('daemon control setup result validates the complete secret-bearing identity boundary', () => {
+test('daemon control setup result accepts only the public identity projection', () => {
   const identity = {
     entityId: `0x${'11'.repeat(32)}`,
     signerId: `0x${'22'.repeat(20)}`,
@@ -27,7 +27,8 @@ test('daemon control setup result validates the complete secret-bearing identity
     position: { x: 0, y: 0, z: 0 },
     name: 'Custody',
   };
-  expect(decodeDaemonControlCliResult({ ok: true, command: 'setup-custody', result: identity }))
+  const publicIdentity = { entityId: identity.entityId, signerId: identity.signerId, name: identity.name };
+  expect(decodeDaemonControlCliResult({ ok: true, command: 'setup-custody', result: publicIdentity }))
     .toEqual({
       ok: true,
       command: 'setup-custody',
@@ -36,8 +37,8 @@ test('daemon control setup result validates the complete secret-bearing identity
   expect(() => decodeDaemonControlCliResult({
     ok: true,
     command: 'setup-custody',
-    result: { ...identity, privateKeyHex: '0x01' },
-  })).toThrow('DAEMON_CONTROL_RESULT_PRIVATE_KEY_INVALID');
+    result: identity,
+  })).toThrow('DAEMON_CONTROL_RESULT_IDENTITY_FIELDS_INVALID');
 });
 
 const publicHealth = (runtime: boolean, phase: 'starting' | 'ready'): Record<string, unknown> => ({

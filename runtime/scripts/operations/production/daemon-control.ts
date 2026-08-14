@@ -164,7 +164,11 @@ const run = async (): Promise<void> => {
     const result = command === 'become-hub'
       ? await enableRouting(client, config)
       : await enableRouting(client, config);
-    console.log(serializeTaggedJson({ ok: true, command, result }));
+    console.log(serializeTaggedJson({
+      ok: true,
+      command,
+      result: { entityId: result.entityId, signerId: result.signerId, name: result.name },
+    }));
     return;
   }
 
@@ -194,7 +198,11 @@ const run = async (): Promise<void> => {
       ...(swapTakerFeeBps !== undefined ? { swapTakerFeeBps } : {}),
     };
     const result = await setupCustody(client, config);
-    console.log(serializeTaggedJson({ ok: true, command, result }));
+    console.log(serializeTaggedJson({
+      ok: true,
+      command,
+      result: { entityId: result.entityId, signerId: result.signerId, name: result.name },
+    }));
     return;
   }
 

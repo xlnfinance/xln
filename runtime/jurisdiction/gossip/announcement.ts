@@ -16,6 +16,17 @@ import { encodeCanonicalConsensusValue } from '../../protocol/serialization/cano
 const JURISDICTION_GOSSIP_DOMAIN = 'xln-jurisdiction-gossip-v1' as const;
 export const MAX_JURISDICTION_GOSSIP_RECORDS = 128;
 
+export const jurisdictionGossipScopeIsFull = (
+  announcements: Iterable<JurisdictionGossipAnnouncement>,
+  scope: JurisdictionGossipScope,
+): boolean => {
+  let count = 0;
+  for (const announcement of announcements) {
+    if (announcement.scope === scope && ++count >= MAX_JURISDICTION_GOSSIP_RECORDS) return true;
+  }
+  return false;
+};
+
 type JurisdictionGossipScope = 'community' | 'official';
 
 export type JurisdictionGossipAnnouncement = Readonly<{

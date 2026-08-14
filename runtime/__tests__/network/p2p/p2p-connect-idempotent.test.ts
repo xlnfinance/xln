@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test';
+import { Wallet, getBytes } from 'ethers';
 
 import { RuntimeP2P } from '../../../network/p2p/p2p';
+import { createEmptyEnv } from '../../../runtime';
+import { createJurisdictionGossipAnnouncement } from '../../../jurisdiction/gossip/announcement';
 
 type FakeRelayClient = {
   isOpen: () => boolean;
@@ -65,4 +68,53 @@ test('RuntimeP2P connect preserves a relay client waiting to reconnect', () => {
   expect(p2p.closedClients).toBeUndefined();
   expect(p2p.registeredVisibility).toBe(1);
   expect(p2p.startedPolling).toBe(1);
+});
+
+test('RuntimeP2P reconnect flushes locally queued jurisdiction discovery without local profiles', async () => {
+  const privateKey = `0x${'55'.repeat(32)}`;
+  const signerId = new Wallet(privateKey).address.toLowerCase();
+  const announcement = createJurisdictionGossipAnnouncement({
+    scope: 'community',
+    key: 'queued-chain',
+    name: 'Queued Chain',
+    rpcUrl: 'https://queued.example/rpc',
+    blockTimeMs: 1_000,
+    currency: 'ETH',
+    explorer: '',
+    chainId: 99,
+    deployer: signerId,
+    foundationRecipient: signerId,
+    entityProviderDeploymentBlock: 1,
+    contracts: {
+      account: `0x${'01'.repeat(20)}`,
+      depositoryBounds: `0x${'02'.repeat(20)}`,
+      hashLadderRegistry: `0x${'03'.repeat(20)}`,
+      nftCustody: `0x${'04'.repeat(20)}`,
+      hankoVerifier: `0x${'05'.repeat(20)}`,
+      entityProvider: `0x${'06'.repeat(20)}`,
+      depository: `0x${'07'.repeat(20)}`,
+      deltaTransformer: `0x${'08'.repeat(20)}`,
+    },
+    stablecoin: { symbol: 'USDT', address: `0x${'09'.repeat(20)}`, tokenId: 1, decimals: 6 },
+  }, getBytes(privateKey));
+  const env = createEmptyEnv('queued-jurisdiction-gossip');
+  env.gossip.announceJurisdiction(announcement);
+  const sent: unknown[] = [];
+  const p2p = new RuntimeP2P({
+    env,
+    runtimeId: signerId,
+    onEntityInputs: () => {},
+    onGossipProfiles: () => {},
+  });
+  Object.defineProperty(p2p, 'clients', { value: [{
+    isOpen: () => true,
+    sendGossipAnnounce: (_from: string, payload: unknown) => {
+      sent.push(payload);
+      return true;
+    },
+  }] });
+
+  await p2p.announceLocalProfiles();
+
+  expect(sent).toEqual([{ profiles: [], jurisdictions: [announcement] }]);
 });

@@ -9,7 +9,6 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 import { deserializeTaggedJson } from '../../protocol/serialization';
-import { validateConsensusConfig } from '../../entity/consensus/config-validation';
 import { fetchLoopback } from '../server/loopback-fetch';
 import {
   buildManagedRuntimeChildSecretEnv,
@@ -112,7 +111,7 @@ type DaemonControlCliResult = {
 };
 
 const requireExactHex = (value: unknown, bytes: number, code: string): string => {
-  if (typeof value !== 'string' || !new RegExp(`^0x[0-9a-f]{${bytes * 2}}$`, 'i').test(value)) {
+  if (typeof value !== 'string' || !new RegExp(`^0x[0-9a-f]{${bytes * 2}}$`).test(value)) {
     throw new Error(code);
   }
   return value;
@@ -122,38 +121,13 @@ export const decodeDaemonControlCliResult = (value: unknown): DaemonControlCliRe
   const response = requireBoundaryRecord(value, 'DAEMON_CONTROL_RESULT_INVALID');
   requireExactBoundaryKeys(response, ['ok', 'command', 'result'], [], 'DAEMON_CONTROL_RESULT_FIELDS_INVALID');
   const result = requireBoundaryRecord(response['result'], 'DAEMON_CONTROL_RESULT_IDENTITY_INVALID');
-  requireExactBoundaryKeys(
-    result,
-    ['entityId', 'signerId', 'privateKeyHex', 'entitySeed', 'consensusConfig', 'position', 'name'],
-    [],
-    'DAEMON_CONTROL_RESULT_IDENTITY_FIELDS_INVALID',
-  );
+  requireExactBoundaryKeys(result, ['entityId', 'signerId', 'name'], [], 'DAEMON_CONTROL_RESULT_IDENTITY_FIELDS_INVALID');
   if (typeof response['ok'] !== 'boolean' || typeof response['command'] !== 'string' ||
       typeof result['name'] !== 'string' || !result['name']) {
     throw new Error('DAEMON_CONTROL_RESULT_INVALID');
   }
   const entityId = requireExactHex(result['entityId'], 32, 'DAEMON_CONTROL_RESULT_ENTITY_ID_INVALID');
   const signerId = requireExactHex(result['signerId'], 20, 'DAEMON_CONTROL_RESULT_SIGNER_ID_INVALID');
-  requireExactHex(result['privateKeyHex'], 32, 'DAEMON_CONTROL_RESULT_PRIVATE_KEY_INVALID');
-  requireExactHex(result['entitySeed'], 64, 'DAEMON_CONTROL_RESULT_ENTITY_SEED_INVALID');
-  const consensusConfig = requireBoundaryRecord(
-    result['consensusConfig'],
-    'DAEMON_CONTROL_RESULT_CONSENSUS_CONFIG_INVALID',
-  );
-  requireExactBoundaryKeys(
-    consensusConfig,
-    ['mode', 'shares', 'threshold', 'validators'],
-    [],
-    'DAEMON_CONTROL_RESULT_CONSENSUS_CONFIG_FIELDS_INVALID',
-  );
-  validateConsensusConfig(consensusConfig, 'DAEMON_CONTROL_RESULT_CONSENSUS_CONFIG');
-  const position = requireBoundaryRecord(result['position'], 'DAEMON_CONTROL_RESULT_POSITION_INVALID');
-  requireExactBoundaryKeys(position, ['x', 'y', 'z'], [], 'DAEMON_CONTROL_RESULT_POSITION_FIELDS_INVALID');
-  for (const coordinate of ['x', 'y', 'z'] as const) {
-    if (typeof position[coordinate] !== 'number' || !Number.isFinite(position[coordinate])) {
-      throw new Error(`DAEMON_CONTROL_RESULT_POSITION_${coordinate.toUpperCase()}_INVALID`);
-    }
-  }
   return {
     ok: response['ok'],
     command: response['command'],

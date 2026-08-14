@@ -1201,7 +1201,8 @@ export class RuntimeP2P {
     if (this.closing || this.closed) return;
     const profiles = await this.getLocalProfilesForEntities();
     if (this.closing || this.closed) return;
-    if (profiles.length === 0) return;
+    const jurisdictions = this.env.gossip.getJurisdictions();
+    if (profiles.length === 0 && jurisdictions.length === 0) return;
     for (const profile of profiles) {
       this.env.gossip?.announce?.(profile);
     }
@@ -1211,7 +1212,7 @@ export class RuntimeP2P {
     if (client) {
       client.sendGossipAnnounce(this.runtimeId, {
         profiles,
-        jurisdictions: [],
+        jurisdictions,
       } satisfies GossipResponsePayload);
     }
 

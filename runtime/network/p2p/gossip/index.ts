@@ -17,7 +17,7 @@ import {
 import {
   computeJurisdictionGossipHash,
   decodeJurisdictionGossipAnnouncement,
-  MAX_JURISDICTION_GOSSIP_RECORDS,
+  jurisdictionGossipScopeIsFull,
   type JurisdictionGossipAnnouncement,
 } from '../../../jurisdiction/gossip/announcement';
 
@@ -33,10 +33,6 @@ export interface GossipLayer {
   getJurisdictions: () => JurisdictionGossipAnnouncement[];
   getHubs: () => Profile[];
   setProfiles?: (incoming: Iterable<Profile>) => void;
-  setJurisdictions?: (
-    incoming: Iterable<JurisdictionGossipAnnouncement>,
-    officialFoundationSignerId?: string,
-  ) => void;
   getProfileBundle?: (entityId: string) => { profile?: Profile; peers: Profile[] };
   getNetworkGraph: () => {
     findPaths: (source: string, target: string, amount?: bigint, tokenId?: number) => Promise<PaymentRoute[]>;
@@ -91,7 +87,7 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
     const announcement = decodeJurisdictionGossipAnnouncement(value, officialFoundationSignerId);
     const id = computeJurisdictionGossipHash(announcement);
     if (jurisdictions.has(id)) return false;
-    if (jurisdictions.size >= MAX_JURISDICTION_GOSSIP_RECORDS) {
+    if (jurisdictionGossipScopeIsFull(jurisdictions.values(), announcement.scope)) {
       throw new Error('JURISDICTION_GOSSIP_RECORD_CAP_EXCEEDED');
     }
     jurisdictions.set(id, announcement);
@@ -110,13 +106,6 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
   const setProfiles = (incoming: Iterable<Profile>): void => {
     profiles.clear();
     for (const profile of incoming) announce(profile);
-  };
-  const setJurisdictions = (
-    incoming: Iterable<JurisdictionGossipAnnouncement>,
-    officialFoundationSignerId = options.officialFoundationSignerId,
-  ): void => {
-    jurisdictions.clear();
-    for (const announcement of incoming) announceJurisdiction(announcement, officialFoundationSignerId);
   };
   const getNetworkGraph = () => ({
     findPaths: async (source: string, target: string, amount?: bigint, tokenId = 1) => {
@@ -138,7 +127,6 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
     getJurisdictions,
     getHubs,
     setProfiles,
-    setJurisdictions,
     getProfileBundle,
     getNetworkGraph,
   };
