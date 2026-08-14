@@ -36,7 +36,10 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
   j_broadcast: { optional: { hankoSignature: 'string', feeOverrides: 'record' } },
   entityProviderTransfer: { required: { to: 'string', tokenId: 'bigint', amount: 'bigint' } },
   entityProviderReleaseControlShares: {
-    required: { controlAmount: 'bigint', dividendAmount: 'bigint', purpose: 'string' },
+    required: {
+      recipientAddress: 'string', controlAmount: 'bigint',
+      dividendAmount: 'bigint', purpose: 'string',
+    },
   },
   entityProviderCancelAction: { required: { actionHash: 'string' } },
   j_rebroadcast: { optional: { gasBumpBps: 'integer' } },
@@ -87,7 +90,8 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
   placeSwapOffer: {
     required: {
       counterpartyEntityId: 'string', offerId: 'string', giveTokenId: 'integer',
-      giveAmount: 'bigint', wantTokenId: 'integer', wantAmount: 'bigint',
+      giveTokenDecimals: 'integer', giveAmount: 'bigint', wantTokenId: 'integer',
+      wantTokenDecimals: 'integer', wantAmount: 'bigint',
       maxFee: 'bigint', minNetReceive: 'bigint',
     },
     optional: { priceTicks: 'bigint', timeInForce: 'integer' },

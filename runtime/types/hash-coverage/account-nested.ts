@@ -59,8 +59,10 @@ export const HASHABLE_PULL_COMMITMENT_FIELDS = [
 export const HASHABLE_SWAP_OFFER_FIELDS = [
   'offerId',
   'giveTokenId',
+  'giveTokenDecimals',
   'giveAmount',
   'wantTokenId',
+  'wantTokenDecimals',
   'wantAmount',
   'maxFee',
   'minNetReceive',

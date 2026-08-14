@@ -5,6 +5,7 @@ export * as deltaTransformerSol from "./DeltaTransformer.sol";
 export * as depositorySol from "./Depository.sol";
 export * as typesSol from "./Types.sol";
 export * as custody from "./custody";
+export * as interfaces from "./interfaces";
 export * as mocks from "./mocks";
 export { Account__factory } from "./Account__factory";
 export { DepositoryBounds__factory } from "./DepositoryBounds__factory";

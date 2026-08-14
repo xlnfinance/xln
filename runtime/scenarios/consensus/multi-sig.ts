@@ -53,7 +53,7 @@ const hasFinalizedHankoBatch = (replica: EntityReplica): boolean =>
     (block.events || []).some(event => event.type === 'HankoBatchProcessed'),
   );
 
-const importBoardReplicas = (env: RuntimeReplica, entityId: string, config: ConsensusConfig, x: number) =>
+export const importBoardReplicas = (env: RuntimeReplica, entityId: string, config: ConsensusConfig, x: number) =>
   config.validators.map((signerId, index) => createTestEntityImportRuntimeTx(env, {
     entityId,
     signerId,
@@ -66,7 +66,7 @@ const importBoardReplicas = (env: RuntimeReplica, entityId: string, config: Cons
 
 type GovernanceVote = readonly [signerId: string, choice: 'yes' | 'no'];
 
-const requireReplica = (env: RuntimeReplica, entityId: string, signerId: string): EntityReplica => {
+export const requireReplica = (env: RuntimeReplica, entityId: string, signerId: string): EntityReplica => {
   const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
   if (!replica) throw new Error(`MULTISIG_REPLICA_MISSING:${entityId}:${signerId}`);
   return replica;
@@ -106,11 +106,12 @@ const submitCollectiveProposal = async (
   proposer: string,
   txs: EntityTx[],
   offlineSigners: Set<string>,
+  convergenceCycles = 20,
 ): Promise<string> => {
   const before = new Set(requireReplica(env, entityId, proposer).state.proposals.keys());
   const expectedAction = buildEntityTransactionProposalAction(txs);
   await processWithOffline(env, [{ entityId, signerId: proposer, entityTxs: txs }], offlineSigners);
-  await convergeWithOffline(env, offlineSigners, 20, 'governance-proposal');
+  await convergeWithOffline(env, offlineSigners, convergenceCycles, 'governance-proposal');
 
   const proposals = Array.from(requireReplica(env, entityId, proposer).state.proposals.values()).filter(
     proposal => !before.has(proposal.id),
@@ -138,6 +139,7 @@ const submitGovernanceVote = async (
   proposalId: string,
   choice: 'yes' | 'no',
   offlineSigners: Set<string>,
+  convergenceCycles = 20,
 ): Promise<void> => {
   const voterReplica = requireReplica(env, entityId, voter);
   const leader = getEntityLeaderState(voterReplica.state).activeValidatorId;
@@ -155,10 +157,10 @@ const submitGovernanceVote = async (
     ],
     offlineSigners,
   );
-  await convergeWithOffline(env, offlineSigners, 20, `governance-vote-${voter}`);
+  await convergeWithOffline(env, offlineSigners, convergenceCycles, `governance-vote-${voter}`);
 };
 
-const executeCollectiveWithVotes = async (
+export const executeCollectiveWithVotes = async (
   env: RuntimeReplica,
   params: {
     entityId: string;
@@ -167,6 +169,7 @@ const executeCollectiveWithVotes = async (
     voters: string[];
     txs: EntityTx[];
     offlineSigners: Set<string>;
+    convergenceCycles?: number;
     assertBeforeQuorum?: () => void;
   },
 ): Promise<string> => {
@@ -177,11 +180,20 @@ const executeCollectiveWithVotes = async (
     params.proposer,
     params.txs,
     params.offlineSigners,
+    params.convergenceCycles,
   );
   const votes: GovernanceVote[] = [[params.proposer, 'yes']];
   params.assertBeforeQuorum?.();
   for (const [index, voter] of params.voters.entries()) {
-    await submitGovernanceVote(env, params.entityId, voter, proposalId, 'yes', params.offlineSigners);
+    await submitGovernanceVote(
+      env,
+      params.entityId,
+      voter,
+      proposalId,
+      'yes',
+      params.offlineSigners,
+      params.convergenceCycles,
+    );
     votes.push([voter, 'yes']);
     const expectedStatus = index === params.voters.length - 1 ? 'executed' : 'pending';
     assertGovernanceProposal(

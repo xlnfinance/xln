@@ -212,7 +212,16 @@ test('RPC token registry fails loud when canonical ERC20 metadata is unavailable
       internalTokenId: 0,
       amount: 1n,
     })).wait();
-    expect((await adapter.getTokenRegistry()).some((token) => token.symbol === 'NODEC')).toBe(false);
+    const nftEntry = (await adapter.getTokenRegistry()).find(
+      (token) => token.address === ethers.getAddress(malformedAddress),
+    );
+    expect(nftEntry).toMatchObject({
+      tokenType: 1,
+      externalTokenId: 1n,
+      decimals: 0,
+      symbol: expect.stringMatching(/^ERC721-/),
+      name: 'ERC721 asset #1',
+    });
 
     // Registration now rejects ERC20s without a bounded fixed supply before
     // catalog reads. This existing harness has a valid fixed supply but no

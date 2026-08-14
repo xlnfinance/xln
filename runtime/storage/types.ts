@@ -1,4 +1,4 @@
-import type { BookState, EntityReferral, HubProfile } from '../orderbook';
+import type { BookState, EntityReferral, HubProfile, OrderbookExtState } from '../orderbook';
 import type { CrontabState } from '../entity/scheduler/types';
 import type { JBatchState } from '../jurisdiction/machine/batch';
 import type { AccountReplica, HtlcRoute, RuntimeOverlayRecord } from '../types/account';
@@ -123,6 +123,7 @@ export type StorageEntityCoreDoc = {
   hubRebalanceConfig?: HubRebalanceConfig;
   orderbookHubProfile?: HubProfile;
   orderbookReferrals?: Map<string, EntityReferral>;
+  orderbookPairDimensions?: OrderbookExtState['pairDimensions'];
   lending?: EntityState['lending'];
 };
 

@@ -2,20 +2,22 @@ import { haltRuntimeFailure } from "../../../../../protocol/errors/failure-taxon
 
 import { LIMITS, SWAP_CONSTANTS } from '../../../../../config/constants';
 import {
-  baseAmountFromLots,
+  baseAmountFromLotsForDecimals,
   canonicalPair,
   createBook,
   deriveSide,
   getBookOrder,
-  getSwapLotScale,
+  getSwapLotScaleForDecimals,
+  getSwapPairDimensions,
   MAX_ORDERBOOK_QTY_LOTS,
-  quoteAmountAtPrice,
-  quoteAmountFromWeightedLots,
+  quoteAmountAtPriceForDecimals,
+  quoteAmountFromWeightedLotsForDecimals,
   type BookEvent,
   type BookState,
 } from '../../../../../orderbook';
 import {
   getSwapPairPolicyByBaseQuote,
+  getTokenInfo,
   hasSwapPairPolicyByBaseQuote,
   type SwapPairPolicy,
 } from '../../../../../account/utils';
@@ -58,7 +60,9 @@ type NamespacedOrderRef = {
 
 type CanonicalRestingOffer = {
   giveTokenId: number;
+  giveTokenDecimals: number;
   wantTokenId: number;
+  wantTokenDecimals: number;
   giveAmount: bigint;
   wantAmount: bigint;
   quantizedGive: bigint;
@@ -80,7 +84,9 @@ type CrossTradeFillAggregate = {
 
 type RestingOrderTerms = {
   giveTokenId: number;
+  giveTokenDecimals: number;
   wantTokenId: number;
+  wantTokenDecimals: number;
   giveAmount: bigint;
   wantAmount: bigint;
   maxFee: bigint;
@@ -125,6 +131,8 @@ type SameOrderbookMaterialization = {
   pairId: string;
   base: number;
   quote: number;
+  baseTokenDecimals: number;
+  quoteTokenDecimals: number;
   side: 0 | 1;
   baseAmount: bigint;
   quoteAmount: bigint;
@@ -221,7 +229,8 @@ export const deriveSameOrderbookMaterialization = (
 
   const baseAmount = isSellBase ? offer.giveAmount : offer.wantAmount;
   const quoteAmount = isSellBase ? offer.wantAmount : offer.giveAmount;
-  const lotScale = getSwapLotScale(base);
+  const { baseTokenDecimals, quoteTokenDecimals } = getSwapPairDimensions(side, offer);
+  const lotScale = getSwapLotScaleForDecimals(baseTokenDecimals);
   if (baseAmount <= 0n || quoteAmount <= 0n) {
     return {
       kind: 'reject',
@@ -264,6 +273,8 @@ export const deriveSameOrderbookMaterialization = (
       pairId,
       base,
       quote,
+      baseTokenDecimals,
+      quoteTokenDecimals,
       side,
       baseAmount,
       quoteAmount,
@@ -355,8 +366,10 @@ export const buildCrossMarketOfferFromBookOrder = (
           toEntity: entityRefs.toEntity,
           createdHeight: offer.createdHeight,
           giveTokenId: offer.giveTokenId,
+          giveTokenDecimals: offer.giveTokenDecimals,
           giveAmount: offer.giveAmount,
           wantTokenId: offer.wantTokenId,
+          wantTokenDecimals: offer.wantTokenDecimals,
           wantAmount: offer.wantAmount,
           maxFee: offer.maxFee,
           minNetReceive: offer.minNetReceive,
@@ -385,8 +398,10 @@ export const buildCrossMarketOfferFromBookOrder = (
         toEntity: admission.route.source.counterpartyEntityId,
         createdHeight: 0,
         giveTokenId: Number(admission.route.source.tokenId),
+        giveTokenDecimals: getTokenInfo(Number(admission.route.source.tokenId)).decimals,
         giveAmount: remaining.sourceRemaining,
         wantTokenId: Number(admission.route.target.tokenId),
+        wantTokenDecimals: getTokenInfo(Number(admission.route.target.tokenId)).decimals,
         wantAmount: remaining.targetRemaining,
         maxFee: 0n,
         minNetReceive: remaining.targetRemaining,
@@ -401,18 +416,28 @@ export const buildCrossMarketOfferFromBookOrder = (
 
 const materializeCanonicalRestingOffer = (
   giveTokenId: number,
+  giveTokenDecimals: number,
   wantTokenId: number,
+  wantTokenDecimals: number,
   priceTicks: bigint,
   qtyLots: bigint,
 ): CanonicalRestingOffer => {
-  const { base, quote } = canonicalPair(giveTokenId, wantTokenId);
-  const baseAmount = baseAmountFromLots(base, qtyLots);
   const side = deriveSide(giveTokenId, wantTokenId);
-  const quoteAmount = quoteAmountAtPrice(base, quote, baseAmount, priceTicks);
+  const baseTokenDecimals = side === 1 ? giveTokenDecimals : wantTokenDecimals;
+  const quoteTokenDecimals = side === 1 ? wantTokenDecimals : giveTokenDecimals;
+  const baseAmount = baseAmountFromLotsForDecimals(baseTokenDecimals, qtyLots);
+  const quoteAmount = quoteAmountAtPriceForDecimals(
+    baseTokenDecimals,
+    quoteTokenDecimals,
+    baseAmount,
+    priceTicks,
+  );
   if (side === 1) {
     return {
       giveTokenId,
+      giveTokenDecimals,
       wantTokenId,
+      wantTokenDecimals,
       giveAmount: baseAmount,
       wantAmount: quoteAmount,
       quantizedGive: baseAmount,
@@ -422,7 +447,9 @@ const materializeCanonicalRestingOffer = (
   }
   return {
     giveTokenId,
+    giveTokenDecimals,
     wantTokenId,
+    wantTokenDecimals,
     giveAmount: quoteAmount,
     wantAmount: baseAmount,
     quantizedGive: quoteAmount,
@@ -535,7 +562,9 @@ const resolveSameExecutionOffer = (
   }
   const canonical = materializeCanonicalRestingOffer(
     resting.giveTokenId,
+    resting.giveTokenDecimals,
     resting.wantTokenId,
+    resting.wantTokenDecimals,
     restingPriceTicks,
     originalLots,
   );
@@ -583,14 +612,17 @@ export const buildSameFillResolvePlan = (input: SameFillResolveInput): SameFillR
     restingPriceTicks,
     originalLots,
   );
-  const { base: executionBaseTokenId, quote: executionQuoteTokenId } = canonicalPair(
-    offerForExecution.giveTokenId,
-    offerForExecution.wantTokenId,
-  );
-  const executionBaseWei = baseAmountFromLots(executionBaseTokenId, filledBig);
-  const executionQuoteWei = quoteAmountFromWeightedLots(
-    executionBaseTokenId,
-    executionQuoteTokenId,
+  const executionSide = deriveSide(offerForExecution.giveTokenId, offerForExecution.wantTokenId);
+  const executionBaseDecimals = executionSide === 1
+    ? offerForExecution.giveTokenDecimals
+    : offerForExecution.wantTokenDecimals;
+  const executionQuoteDecimals = executionSide === 1
+    ? offerForExecution.wantTokenDecimals
+    : offerForExecution.giveTokenDecimals;
+  const executionBaseWei = baseAmountFromLotsForDecimals(executionBaseDecimals, filledBig);
+  const executionQuoteWei = quoteAmountFromWeightedLotsForDecimals(
+    executionBaseDecimals,
+    executionQuoteDecimals,
     weightedCost,
   );
   const orderStillInBook = getBookOrder(input.book, input.namespacedOrderId) !== null;

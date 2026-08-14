@@ -5,6 +5,7 @@ import { normalizeEntityId } from '../../../entity/id';
 import { computeAccountKey } from '../events/contract-codec';
 import type { JAdapter, JEvent, JTokenInfo, JWalletSnapshot, JWalletSnapshotRequest } from '../types';
 import { readRpcWalletSnapshot } from './wallet/rpc-wallet-snapshot';
+import { buildNonFungibleTokenInfo } from '../token-metadata';
 
 type ReadMethods = Omit<
   Pick<
@@ -104,12 +105,22 @@ export const createRpcReadMethods = (deps: RpcReadDeps): ReadMethods => {
         ]);
 
         for (let tokenId = 1; tokenId < length; tokenId++) {
-          const [rawContractAddress, _externalTokenId, rawTokenType] = await deps.depository._tokens(tokenId);
-          if (Number(rawTokenType) !== 0) continue;
+          const [rawContractAddress, externalTokenId, rawTokenType] = await deps.depository._tokens(tokenId);
           if (rawContractAddress === ethers.ZeroAddress) {
             throw new TokenRegistryReadError(`TOKEN_REGISTRY_ENTRY_ADDRESS_INVALID:${tokenId}`);
           }
           const contractAddress = ethers.getAddress(rawContractAddress);
+          const tokenType = Number(rawTokenType);
+          if (tokenType !== 0) {
+            tokens.push(buildNonFungibleTokenInfo({
+              tokenId,
+              tokenType: rawTokenType,
+              contractAddress,
+              externalTokenId,
+              entityProviderAddress: await deps.entityProvider.getAddress(),
+            }));
+            continue;
+          }
           const erc20 = new ethers.Contract(contractAddress, erc20Interface, provider);
           const symbolFn = erc20.getFunction('symbol') as () => Promise<string>;
           const nameFn = erc20.getFunction('name') as () => Promise<string>;
@@ -130,7 +141,15 @@ export const createRpcReadMethods = (deps: RpcReadDeps): ReadMethods => {
           if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
             throw new TokenRegistryReadError(`TOKEN_METADATA_INVALID:${tokenId}:decimals:${String(decimals)}`);
           }
-          tokens.push({ symbol, name, address: contractAddress, decimals, tokenId });
+          tokens.push({
+            symbol,
+            name,
+            address: contractAddress,
+            decimals,
+            tokenId,
+            tokenType: 0,
+            externalTokenId,
+          });
         }
 
         return tokens;

@@ -1,8 +1,6 @@
 import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 
 import { addMessage } from '../../frame-events';
-import { getTokenInfo } from '../../../account/utils';
-import { formatTokenAmount } from '../../../account/financial-utils';
 import {
   applySignerEntityExternalWalletDelta,
   applySignerEntityExternalWalletSnapshot,
@@ -12,7 +10,7 @@ import { applyDebtCreated, applyDebtEnforced, applyDebtForgiven } from './debt';
 import type { FinalizedJEventContext } from '../j-events';
 
 const displayTokenAmount = (tokenId: number, amount: unknown): string => {
-  return formatTokenAmount(tokenId, BigInt(amount as string | number | bigint));
+  return `${BigInt(amount as string | number | bigint).toString()} raw units of token #${tokenId}`;
 };
 
 export const applyReserveUpdatedJEvent = (context: FinalizedJEventContext): void => {
@@ -77,7 +75,7 @@ export const applyDebtJEvent = (context: FinalizedJEventContext): void => {
     addMessage(
       newState,
       `🔴 DEBT: ${String(debtor).slice(-8)} owes ` +
-      `${displayTokenAmount(Number(tokenId), amount)} ${getTokenInfo(Number(tokenId)).symbol} ` +
+      `${displayTokenAmount(Number(tokenId), amount)} ` +
       `to ${String(creditor).slice(-8)} | Block ${blockNumber}`,
     );
     return;
@@ -87,8 +85,8 @@ export const applyDebtJEvent = (context: FinalizedJEventContext): void => {
     applyDebtEnforced(newState, event);
     addMessage(
       newState,
-      `✅ DEBT PAID: ${displayTokenAmount(Number(tokenId), amountPaid)} ` +
-      `${getTokenInfo(Number(tokenId)).symbol} to ${String(creditor).slice(-8)} | ` +
+      `✅ DEBT PAID: ${displayTokenAmount(Number(tokenId), amountPaid)} to ` +
+      `${String(creditor).slice(-8)} | ` +
       `Block ${blockNumber}`,
     );
     return;
@@ -98,8 +96,8 @@ export const applyDebtJEvent = (context: FinalizedJEventContext): void => {
     applyDebtForgiven(newState, event);
     addMessage(
       newState,
-      `🩶 DEBT FORGIVEN: ${displayTokenAmount(Number(tokenId), amountForgiven)} ` +
-      `${getTokenInfo(Number(tokenId)).symbol} between ${String(debtor).slice(-8)} ` +
+      `🩶 DEBT FORGIVEN: ${displayTokenAmount(Number(tokenId), amountForgiven)} between ` +
+      `${String(debtor).slice(-8)} ` +
       `and ${String(creditor).slice(-8)} | Block ${blockNumber} · debt #${debtIndex}`,
     );
     return;

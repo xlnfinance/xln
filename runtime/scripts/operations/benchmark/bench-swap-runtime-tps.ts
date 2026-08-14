@@ -4,7 +4,7 @@ import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
 } from '../../../extensions/cross-j/index';
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../orderbook';
+import { getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../orderbook';
 import type { AccountReplica, AccountTx, Delta, SwapOffer } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import { getPerfMs } from '../../../infra/time';
@@ -122,6 +122,7 @@ const seedSameSwapAccount = (swaps: number): AccountReplica => {
     const offer: SwapOffer = {
       offerId: `same-${index}`,
       giveTokenId: 2,
+      ...getStaticSwapTokenDimensions(2, 1),
       giveAmount,
       wantTokenId: 1,
       wantAmount,
@@ -210,6 +211,7 @@ const seedCrossSwapAccount = (swaps: number): AccountReplica => {
     const offer: SwapOffer = {
       offerId: orderId,
       giveTokenId: route.source.tokenId,
+      ...getStaticSwapTokenDimensions(route.source.tokenId, route.target.tokenId),
       giveAmount: route.source.amount,
       wantTokenId: route.target.tokenId,
       wantAmount: route.target.amount,

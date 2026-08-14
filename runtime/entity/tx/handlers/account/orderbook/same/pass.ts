@@ -6,7 +6,7 @@ import {
   deriveSide,
   getBestAsk,
   getBestBid,
-  getSwapLotScale,
+  getSwapLotScaleForDecimals,
   type BookState,
   type OrderbookExtState,
 } from '../../../../../../orderbook';
@@ -94,8 +94,10 @@ const buildLiveSameOfferMeta = (
       toEntity: entityRefs.toEntity,
       createdHeight: liveOffer.createdHeight,
       giveTokenId: liveOffer.giveTokenId,
+      giveTokenDecimals: liveOffer.giveTokenDecimals,
       giveAmount: liveOffer.giveAmount,
       wantTokenId: liveOffer.wantTokenId,
+      wantTokenDecimals: liveOffer.wantTokenDecimals,
       wantAmount: liveOffer.wantAmount,
       maxFee: liveOffer.maxFee,
       minNetReceive: liveOffer.minNetReceive,
@@ -245,13 +247,13 @@ export const assertSameBookMatchesAccounts = (
     }
     pass.orderbookOfferMeta.set(order.orderId, meta);
     const side = deriveSide(meta.giveTokenId, meta.wantTokenId);
-    const baseTokenId = side === 1 ? meta.giveTokenId : meta.wantTokenId;
+    const baseTokenDecimals = side === 1 ? meta.giveTokenDecimals : meta.wantTokenDecimals;
     const baseAmount =
       side === 1 ? (meta.quantizedGive ?? meta.giveAmount) : meta.wantAmount;
     if (
       order.priceTicks !== meta.priceTicks ||
       order.ownerId !== (meta.makerIsLeft ? meta.fromEntity : meta.toEntity) ||
-      order.qtyLots !== baseAmount / getSwapLotScale(baseTokenId)
+      order.qtyLots !== baseAmount / getSwapLotScaleForDecimals(baseTokenDecimals)
     ) {
       throw haltRuntimeFailure("ORDERBOOK_CACHE_MISMATCH", `ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} ` +
         `storedPrice=${order.priceTicks.toString()} ` +

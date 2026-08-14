@@ -64,8 +64,10 @@ export interface PullCommitment {
 export interface SwapOffer {
   offerId: string;              // UUID for this offer
   giveTokenId: number;          // Token maker is giving
+  giveTokenDecimals: number;    // Signed unit scale used by deterministic orderbook math
   giveAmount: bigint;           // Original amount (partial fills reduce this)
   wantTokenId: number;          // Token maker wants in return
+  wantTokenDecimals: number;    // Signed unit scale used by deterministic orderbook math
   wantAmount: bigint;           // Corresponding want amount (maintains ratio)
   maxFee: bigint;               // Maximum total fee authorized for this remaining offer
   minNetReceive: bigint;        // Minimum net receive authorized for this remaining offer
@@ -96,9 +98,11 @@ export interface SwapOrderResolveHistoryEntry {
 export interface SwapOrderHistoryEntry {
   offerId: string;
   giveTokenId: number;
+  giveTokenDecimals: number;
   giveAmount: bigint;
   originalGiveAmount?: bigint;
   wantTokenId: number;
+  wantTokenDecimals: number;
   wantAmount: bigint;
   originalWantAmount?: bigint;
   priceTicks?: bigint;
@@ -924,8 +928,10 @@ export type AccountTx =
       data: {
         offerId: string;          // UUID, not array index
         giveTokenId: number;
+        giveTokenDecimals: number;
         giveAmount: bigint;
         wantTokenId: number;
+        wantTokenDecimals: number;
         wantAmount: bigint;       // at this ratio
         maxFee: bigint;           // Maximum fee across the full offered amount
         minNetReceive: bigint;    // Minimum net receive across the full offered amount

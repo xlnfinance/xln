@@ -1,8 +1,8 @@
 import {
   canonicalPair,
-  computeSwapPriceTicks,
+  computeSwapPriceTicksForDimensions,
   deriveSide,
-  getSwapLotScale,
+  getSwapLotScaleForDecimals,
   getBookOrders,
   MAX_ORDERBOOK_QTY_LOTS,
   type BookOrderState,
@@ -120,7 +120,8 @@ const normalizeOpenOfferForBook = (
 
   const baseAmount = side === 1 ? offer.giveAmount : offer.wantAmount;
   const quoteAmount = side === 1 ? offer.wantAmount : offer.giveAmount;
-  const lotScale = getSwapLotScale(base);
+  const baseTokenDecimals = side === 1 ? offer.giveTokenDecimals : offer.wantTokenDecimals;
+  const lotScale = getSwapLotScaleForDecimals(baseTokenDecimals);
   if (baseAmount <= 0n || quoteAmount <= 0n) return { invalid: { swapKey: key, reason: 'zero-amount' } };
   if (baseAmount % lotScale !== 0n) return { invalid: { swapKey: key, reason: 'lot-misaligned' } };
 
@@ -130,11 +131,12 @@ const normalizeOpenOfferForBook = (
   const priceTicks =
     typeof offer.priceTicks === 'bigint' && offer.priceTicks > 0n
       ? offer.priceTicks
-      : computeSwapPriceTicks(
+      : computeSwapPriceTicksForDimensions(
           offer.giveTokenId,
           offer.wantTokenId,
           offer.giveAmount,
           offer.wantAmount,
+          offer,
         );
   if (priceTicks <= 0n) return { invalid: { swapKey: key, reason: 'invalid-price' } };
 

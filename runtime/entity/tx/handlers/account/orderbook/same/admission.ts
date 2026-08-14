@@ -1,6 +1,6 @@
 import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
 
-import { getBestAsk, getBestBid, getBookOrder } from '../../../../../../orderbook';
+import { equalSwapPairDimensions, getBestAsk, getBestBid, getBookOrder } from '../../../../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../../infra/logger';
 import type { SameJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
 import {
@@ -55,10 +55,17 @@ export const materializeSameOffer = (
     return null;
   }
   const order = materialized.order;
+  const committedDimensions = pass.ext.pairDimensions.get(order.pairId);
+  if (committedDimensions && !equalSwapPairDimensions(committedDimensions, order)) {
+    pass.rejectInvalidOffer(accountId, offer.offerId, 'pair-decimals-mismatch');
+    return null;
+  }
   return {
     offer,
     accountId,
     bookKey: order.pairId,
+    baseTokenDecimals: order.baseTokenDecimals,
+    quoteTokenDecimals: order.quoteTokenDecimals,
     side: order.side,
     priceTicks: order.priceTicks,
     qtyLots: order.qtyLots,

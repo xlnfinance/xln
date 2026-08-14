@@ -80,9 +80,11 @@ export function recordSwapOfferLifecycle(
   history.set(offer.offerId, {
     offerId: offer.offerId,
     giveTokenId: offer.giveTokenId,
+    giveTokenDecimals: offer.giveTokenDecimals,
     giveAmount: offer.giveAmount,
     originalGiveAmount: offer.giveAmount,
     wantTokenId: offer.wantTokenId,
+    wantTokenDecimals: offer.wantTokenDecimals,
     wantAmount: offer.wantAmount,
     originalWantAmount: offer.wantAmount,
     priceTicks: offer.priceTicks,

@@ -7,6 +7,10 @@ export type ExternalToken = {
   balance: bigint;
   decimals: number;
   tokenId: number | undefined;
+  /** Canonical Depository token class: 0 ERC20, 1 ERC721, 2 ERC1155. */
+  tokenType?: 0 | 1 | 2;
+  /** Decimal uint256 so HTTP JSON never truncates an NFT/share identifier. */
+  externalTokenId?: string;
   readError?: string;
 };
 

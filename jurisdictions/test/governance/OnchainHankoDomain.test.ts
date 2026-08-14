@@ -988,22 +988,7 @@ describe('canonical on-chain Hanko domains', function () {
     const controlBefore = await entityProvider.balanceOf(source, controlTokenId);
     const dividendBefore = await entityProvider.balanceOf(source, dividendTokenId);
 
-    await expect(entityProvider.releaseControlShares(
-      entityNumber, depositoryAddress, controlAmount, dividendAmount,
-      purpose, hanko,
-    )).to.be.revertedWithCustomError(depository, 'E11');
-    expect(await entityProvider.entityActionNonces(entityId(entityNumber))).to.equal(0n);
-    expect(await entityProvider.balanceOf(source, controlTokenId)).to.equal(controlBefore);
-    expect(await entityProvider.balanceOf(source, dividendTokenId)).to.equal(dividendBefore);
-
-    await depository.connect(fixture.recipient).registerExternalToken(
-      2, await entityProvider.getAddress(), controlTokenId,
-    );
-    await depository.connect(fixture.recipient).registerExternalToken(
-      2, await entityProvider.getAddress(), dividendTokenId,
-    );
-    expect(await depository.getTokensLength()).to.equal(3n);
-
+    expect(await depository.getTokensLength()).to.equal(1n);
     const releaseTx = await entityProvider.releaseControlShares(
       entityNumber, depositoryAddress, controlAmount, dividendAmount,
       purpose, hanko,
@@ -1017,6 +1002,15 @@ describe('canonical on-chain Hanko domains', function () {
     expect(await entityProvider.balanceOf(source, dividendTokenId)).to.equal(dividendBefore - dividendAmount);
     expect(await entityProvider.balanceOf(depositoryAddress, controlTokenId)).to.equal(controlAmount);
     expect(await entityProvider.balanceOf(depositoryAddress, dividendTokenId)).to.equal(dividendAmount);
+    expect(await depository.getTokensLength()).to.equal(3n);
+    const controlMetadata = await depository._tokens(1n);
+    const dividendMetadata = await depository._tokens(2n);
+    expect(controlMetadata.contractAddress).to.equal(await entityProvider.getAddress());
+    expect(controlMetadata.externalTokenId).to.equal(controlTokenId);
+    expect(controlMetadata.tokenType).to.equal(2n);
+    expect(dividendMetadata.contractAddress).to.equal(await entityProvider.getAddress());
+    expect(dividendMetadata.externalTokenId).to.equal(dividendTokenId);
+    expect(dividendMetadata.tokenType).to.equal(2n);
     expect(await depository._reserves(entityId(entityNumber), 1n)).to.equal(controlAmount);
     expect(await depository._reserves(entityId(entityNumber), 2n)).to.equal(dividendAmount);
     expect(await entityProvider.entityActionNonces(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32))).to.equal(1);

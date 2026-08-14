@@ -13,6 +13,7 @@ import type { RoutedEntityInput, RuntimeReplica } from '../../runtime/types';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { deriveDisputeTokenFinalization } from '../../protocol/dispute/finalization';
 import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
+import { getStaticSwapTokenDimensions } from '../../orderbook';
 import { safeStringify } from '../../protocol/serialization';
 import { releaseUncommittedReliableIngress } from '../../runtime/reliable/reliable-delivery.ts';
 import { bootScenario, fundEntities, registerEntities } from '../harness/boot';
@@ -467,7 +468,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [
-        { type: 'placeSwapOffer', data: { counterpartyEntityId: hub.id, offerId: 'alice-maker-left', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount: aliceWantAmount, ...deriveSwapNetAuthorization(aliceWantAmount, 1) } },
+        { type: 'placeSwapOffer', data: { counterpartyEntityId: hub.id, offerId: 'alice-maker-left', giveTokenId: WETH, giveAmount, wantTokenId: USDC, ...getStaticSwapTokenDimensions(WETH, USDC), wantAmount: aliceWantAmount, ...deriveSwapNetAuthorization(aliceWantAmount, 1) } },
       ],
     }]);
     await converge(env, 16);
@@ -513,6 +514,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
             counterpartyEntityId: alice.id,
             offerId: 'hub-maker-right',
             giveTokenId: WETH,
+            ...getStaticSwapTokenDimensions(WETH, USDC),
             giveAmount: hubGiveAmount,
             wantTokenId: USDC,
             wantAmount: hubWantAmount,
@@ -541,6 +543,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
           counterpartyEntityId: hub.id,
           offerId: 'bob-taker-hub',
           giveTokenId: USDC,
+          ...getStaticSwapTokenDimensions(USDC, WETH),
           giveAmount: 16_384n * 3_000n,
           wantTokenId: WETH,
           wantAmount: 16_384n * WETH_LOT,
@@ -564,6 +567,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
           counterpartyEntityId: alice.id,
           offerId: 'carol-taker-alice',
           giveTokenId: USDC,
+          ...getStaticSwapTokenDimensions(USDC, WETH),
           giveAmount: 32_768n * 3_100n,
           wantTokenId: WETH,
           wantAmount: 32_768n * WETH_LOT,

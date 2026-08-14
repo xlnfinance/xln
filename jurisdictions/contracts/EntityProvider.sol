@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "./HankoEncoding.sol";
 import "./EntityTypes.sol";
 import "./HankoVerifier.sol";
+import "./interfaces/IEntityShareDepository.sol";
 
 contract EntityProvider is ERC1155 { 
   error InvalidHankoWeight();
@@ -958,10 +959,10 @@ contract EntityProvider is ERC1155 {
 
   /**
    * @notice Release entity control and/or dividend shares to an explicit custodian.
-   * @dev This operation transfers ERC1155 shares only; it does not credit a
-   *      Depository reserve. The quorum must therefore name the actual wallet
-   *      or custody contract that will account for the shares. An implicit
-   *      Depository destination would accept the callback but strand the assets.
+   * @dev This operation targets an IEntityShareDepository. Each released class
+   *      is registered while its Entity treasury balance still proves a fixed
+   *      supply, then the ERC1155 callback credits that Entity's reserve. Direct
+   *      wallet transfers use entityTransferTokens instead.
    * @param entityNumber The entity number
    * @param recipient Explicit custody address receiving the shares
    * @param controlAmount Amount of control tokens to release (0 to skip)
@@ -1003,6 +1004,7 @@ contract EntityProvider is ERC1155 {
     // Transfer control tokens if requested
     if (controlAmount > 0) {
       require(balanceOf(entityAddress, controlTokenId) >= controlAmount, "Insufficient control tokens");
+      IEntityShareDepository(recipient).registerExternalToken(2, address(this), controlTokenId);
       _safeTransferFrom(entityAddress, recipient, controlTokenId, controlAmount,
         abi.encode("CONTROL_SHARE_RELEASE", purpose));
     }
@@ -1010,6 +1012,7 @@ contract EntityProvider is ERC1155 {
     // Transfer dividend tokens if requested  
     if (dividendAmount > 0) {
       require(balanceOf(entityAddress, dividendTokenId) >= dividendAmount, "Insufficient dividend tokens");
+      IEntityShareDepository(recipient).registerExternalToken(2, address(this), dividendTokenId);
       _safeTransferFrom(entityAddress, recipient, dividendTokenId, dividendAmount,
         abi.encode("DIVIDEND_SHARE_RELEASE", purpose));
     }

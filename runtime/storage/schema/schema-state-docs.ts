@@ -42,7 +42,7 @@ const ENTITY_OPTIONAL = [
   'crossJurisdictionSwaps', 'pendingCrossJurisdictionFillAcks',
   'crossJurisdictionAuthorizations',
   'crossJurisdictionBookAdmissions', 'hubRebalanceConfig', 'orderbookHubProfile',
-  'orderbookReferrals', 'lending',
+  'orderbookReferrals', 'orderbookPairDimensions', 'lending',
 ] as const;
 
 const HUB_REBALANCE_CONFIG_REQUIRED = [
@@ -299,6 +299,9 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
     String(doc['entityId']),
     `${code}_ORDERBOOK_HUB_PROFILE`,
   );
+  if (doc['orderbookHubProfile'] !== undefined) {
+    requireStorageMap(doc['orderbookPairDimensions'], `${code}_ORDERBOOK_PAIR_DIMENSIONS`);
+  }
   validateDeferredAccountProposals(doc['deferredAccountProposals'], code);
   validateSettlementContinuations(doc['settlementContinuations'], code);
   const {

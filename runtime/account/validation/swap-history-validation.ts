@@ -8,8 +8,8 @@ import {
 } from '../../protocol/boundary/validation-primitives';
 
 const HISTORY_FIELDS = new Set([
-  'offerId', 'giveTokenId', 'giveAmount', 'originalGiveAmount', 'wantTokenId',
-  'wantAmount', 'originalWantAmount', 'priceTicks', 'createdHeight',
+  'offerId', 'giveTokenId', 'giveTokenDecimals', 'giveAmount', 'originalGiveAmount', 'wantTokenId',
+  'wantTokenDecimals', 'wantAmount', 'originalWantAmount', 'priceTicks', 'createdHeight',
   'crossJurisdiction', 'cancelRequested', 'lastUpdatedHeight', 'resolves',
 ]);
 const RESOLVE_FIELDS = new Set([
@@ -124,6 +124,13 @@ const assertEntry: (
     if (!Number.isSafeInteger(entry[field]) || Number(entry[field]) <= 0) {
       throw new FinancialDataCorruptionError(
         `${context}.${field} must be a positive safe integer`,
+      );
+    }
+  }
+  for (const field of ['giveTokenDecimals', 'wantTokenDecimals'] as const) {
+    if (!Number.isSafeInteger(entry[field]) || Number(entry[field]) < 0 || Number(entry[field]) > 255) {
+      throw new FinancialDataCorruptionError(
+        `${context}.${field} must be an integer between 0 and 255`,
       );
     }
   }

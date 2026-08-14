@@ -27,6 +27,7 @@ import { normalizeEntityRef } from '../../account-key';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import { safeStringify } from '../../../../protocol/serialization';
+import { getTokenInfo } from '../../../../account/utils';
 import type { CrossJurisdictionSwapRoute } from '../../../../types/cross-jurisdiction';
 import type { EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
@@ -402,8 +403,10 @@ const buildSourceRegistrationTxs = (
         data: {
           offerId: route.orderId,
           giveTokenId: route.source.tokenId,
+          giveTokenDecimals: getTokenInfo(route.source.tokenId).decimals,
           giveAmount: route.source.amount,
           wantTokenId: route.target.tokenId,
+          wantTokenDecimals: getTokenInfo(route.target.tokenId).decimals,
           wantAmount: route.target.amount,
           // Cross-j settlement has no independent Account fee debit. Bind the
           // source offer to the exact target amount instead of inheriting the

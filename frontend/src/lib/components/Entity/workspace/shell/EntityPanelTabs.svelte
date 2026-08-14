@@ -5,6 +5,7 @@ import { onDestroy, onMount } from "svelte";
 import type { ComponentType } from "svelte";
 import { MaxUint256, Wallet, hexlify, isAddress, parseEther, ZeroAddress } from "ethers";
 import type { AccountReplica, EntityTx, RuntimeReplica, EnvSnapshot, JAdapter, Profile, RoutedEntityInput, RuntimeAdapterViewFrame, RuntimeInput, XLNModule } from "@xln/runtime/api/public/runtime-module";
+import { isNumberedEntity, toEntityId } from "@xln/runtime/api/public/runtime-module";
 import { buildDebtEnforcementRuntimeInputFromProjection } from "@xln/runtime/runtime/transactions/debt-enforcement-input";
 import { getDraftBatchReserveDelta } from "@xln/runtime/jurisdiction/machine/batch";
 import type { Tab, EntityReplica } from "$lib/types/ui";
@@ -25,7 +26,7 @@ import { getGossipProfiles } from "$lib/utils/identity/entityNaming";
 import { entityAvatar } from "$lib/utils/identity/avatar";
 import { getJurisdictionBadgeInfo } from "$lib/utils/identity/jurisdictionBadge";
 import { resetEverything } from "$lib/utils/control/resetEverything";
-import { Landmark, Settings, Users } from "lucide-svelte";
+import { Building2, Landmark, Settings, Users } from "lucide-svelte";
 import AccountWorkspaceView from "../AccountWorkspaceView.svelte";
 import EntityAssetsTab from "../../assets/EntityAssetsTab.svelte";
 import EntityFocusedAccountView from "./EntityFocusedAccountView.svelte";
@@ -35,6 +36,8 @@ import EntityPanelShell from "../EntityPanelShell.svelte";
 import RuntimeCommandGateBanner from "../../payments/RuntimeCommandGateBanner.svelte";
 import EntitySelectionEmptyState from "./EntitySelectionEmptyState.svelte";
 import EntitySettingsProjectionPanel from "./EntitySettingsProjectionPanel.svelte";
+import CompanyPanel from "../../company/CompanyPanel.svelte";
+import { buildCompanyShareReleaseInput, projectCompanyShareTokens, selectDefaultCompanyHub } from "../../company/company-flow";
 import { buildEntityConsensusSettingsView } from "../entity-consensus-settings";
 import { importJMachineViaRuntime, type JMachineCreateDetail } from "$lib/components/Jurisdiction/import-jmachine-runtime";
 import { OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS, faucetPendingKey, type FaucetApiResult, type PendingReserveFaucet, readJsonResponse, reconcilePendingReserveFaucets } from "../../account/account-faucet";
@@ -2740,6 +2743,73 @@ async function broadcastPendingBatch(): Promise<void> {
 async function rebroadcastPendingBatch(): Promise<void> {
   await runPendingBatchAction("rebroadcast");
 }
+let companyBusyAction: "hub" | "release" | null = null;
+let companyError = "";
+$: companyIsNumbered = (() => {
+  if (!activeXlnFunctions || !currentEntityValue) return false;
+  try {
+    return isNumberedEntity(toEntityId(currentEntityValue));
+  } catch {
+    return false;
+  }
+})();
+$: companyShareTokens = companyIsNumbered
+  ? projectCompanyShareTokens(toEntityId(currentEntityValue), externalTokens, onchainReserves)
+  : [];
+$: companyConnectedHub = hubDiscoveryProjection.localHubs.find((hub) => hub.isConnected) ?? null;
+$: companyOpeningHub = hubDiscoveryProjection.localHubs.find((hub) => hub.isOpening) ?? null;
+$: companyDefaultHub = companyConnectedHub
+  ?? companyOpeningHub
+  ?? selectDefaultCompanyHub(hubDiscoveryProjection.localHubs);
+$: companyActionState = replica?.state?.entityProviderActionState ?? null;
+$: companyPendingAction = companyActionState?.pending ?? null;
+$: companyPendingRelease = companyPendingAction?.payload.kind === "releaseControlShares"
+  ? companyPendingAction
+  : null;
+async function joinDefaultCompanyHub(): Promise<void> {
+  if (!companyDefaultHub) throw new Error("COMPANY_DEFAULT_HUB_UNAVAILABLE");
+  companyBusyAction = "hub";
+  companyError = "";
+  try {
+    await openAccountWithFullId(companyDefaultHub.entityId);
+  } catch (error) {
+    companyError = toErrorMessage(error, "Company hub join failed");
+    logEntityPanelDiagnostic("Company hub join failed", { error: companyError });
+    toasts.error(companyError);
+  } finally {
+    companyBusyAction = null;
+  }
+}
+async function releaseCompanyTreasuryShares(): Promise<void> {
+  if (!activeXlnFunctions) throw new Error("COMPANY_RUNTIME_MODULE_UNAVAILABLE");
+  const entityId = toEntityId(currentEntityValue);
+  const signerId = resolveEntitySigner(entityId, "company-share-release");
+  const depositoryAddress = String(replica?.state?.config?.jurisdiction?.depositoryAddress || "");
+  companyBusyAction = "release";
+  companyError = "";
+  try {
+    await submitEntityInputs([buildCompanyShareReleaseInput({ entityId, signerId, depositoryAddress })]);
+    toasts.info("Company share issuance submitted to the board");
+  } catch (error) {
+    companyError = toErrorMessage(error, "Company share issuance failed");
+    logEntityPanelDiagnostic("Company share issuance failed", { error: companyError });
+    toasts.error(companyError);
+  } finally {
+    companyBusyAction = null;
+  }
+}
+function openCompanyTrading(): void {
+  activeTab = "accounts";
+  accountWorkspaceTab = "swap";
+}
+function openCompanyPayments(): void {
+  activeTab = "accounts";
+  accountWorkspaceTab = "send";
+}
+function openCompanyGovernance(): void {
+  activeTab = "settings";
+  settingsSubview = "consensus";
+}
 // Tab config
 // Pending batch count for Accounts tab badge
 $: pendingBatchCount = pendingBatchState.count;
@@ -2748,6 +2818,7 @@ $: pendingBatchPreview = buildPendingBatchPreview(pendingBatchState.previewBatch
 const tabs: IconBadgeTabConfig<ViewTab>[] = [
   { id: "assets", icon: Landmark, label: "Assets" },
   { id: "accounts", icon: Users, label: "Accounts" },
+  { id: "company", icon: Building2, label: "Company" },
   { id: "settings", icon: Settings, label: "Settings" },
 ];
 $: hasAnyAccounts = accountIds.length > 0;
@@ -2894,6 +2965,30 @@ $: if (typeof window !== "undefined") {
             getMovePrimaryActionLabel={getPanelMovePrimaryActionLabel}
             onMoveVisualRoot={moveVisualController.setRoot}
             {handleMoveWorkspaceError}
+          />
+        {:else if activeTab === 'company'}
+          <CompanyPanel
+            companyName={heroDisplayName}
+            entityId={currentEntityValue}
+            isNumbered={companyIsNumbered}
+            activeIsLive={activeCommandsReady}
+            boardThreshold={replica.state.config.threshold}
+            boardMemberCount={replica.state.config.validators.length}
+            defaultHubName={companyDefaultHub?.name ?? ''}
+            hubConnected={companyConnectedHub !== null}
+            hubOpening={companyOpeningHub !== null}
+            shareTokens={companyShareTokens}
+            releasePendingHash={companyPendingRelease?.actionHash ?? ''}
+            releasePendingNonce={companyPendingRelease?.actionNonce ?? null}
+            releaseConfirmedNonce={companyActionState?.confirmedNonce ?? 0n}
+            releaseBlocked={companyPendingAction !== null && companyPendingRelease === null}
+            busyAction={companyBusyAction}
+            error={companyError}
+            onJoinHub={joinDefaultCompanyHub}
+            onReleaseShares={releaseCompanyTreasuryShares}
+            onOpenTrading={openCompanyTrading}
+            onOpenPayments={openCompanyPayments}
+            onOpenGovernance={openCompanyGovernance}
           />
         {:else if activeTab === 'settings'}
           <EntitySettingsProjectionPanel

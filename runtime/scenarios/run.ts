@@ -32,6 +32,7 @@ const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'swap-market':       { file: './market/swap-market',       fn: 'swapMarket' },
   'swap-tps':          { file: './market/swap-tps',          fn: 'swapTps' },
   'multi-sig':         { file: './consensus/multi-sig',         fn: 'multiSig' },
+  'company-ipo':       { file: './company-ipo',                  fn: 'companyIpo' },
   'rapid-fire':        { file: './consensus/rapid-fire',        fn: 'rapidFire' },
   'settle-rebalance':  { file: './settlement/settle-rebalance',  fn: 'runSettleRebalance' },
   'processbatch':      { file: './settlement/processbatch',      fn: 'runProcessBatchScenario' },
@@ -47,6 +48,7 @@ const DEFAULT_PARALLEL_SET = [
   'settle-rebalance',
   'swap-tps',
   'lock-ahb',
+  'company-ipo',
   'dispute-lifecycle',
   'dispute-transformer',
 ];
@@ -66,6 +68,7 @@ const ALL_PARALLEL_SET = [
   'swap-market',
   'swap-tps',
   'multi-sig',
+  'company-ipo',
   'rapid-fire',
 ];
 

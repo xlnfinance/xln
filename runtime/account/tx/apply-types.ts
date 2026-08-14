@@ -10,8 +10,10 @@ export interface SwapOfferEvent {
   accountId?: string;
   createdHeight?: number;
   giveTokenId: number;
+  giveTokenDecimals: number;
   giveAmount: bigint;
   wantTokenId: number;
+  wantTokenDecimals: number;
   wantAmount: bigint;
   maxFee: bigint;
   minNetReceive: bigint;

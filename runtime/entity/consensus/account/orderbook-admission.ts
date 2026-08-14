@@ -75,7 +75,9 @@ const requireCommittedSwapOffer = (
   }
   if (
     committedOffer.giveTokenId !== offer.giveTokenId ||
+    committedOffer.giveTokenDecimals !== offer.giveTokenDecimals ||
     committedOffer.wantTokenId !== offer.wantTokenId ||
+    committedOffer.wantTokenDecimals !== offer.wantTokenDecimals ||
     committedGive !== offer.giveAmount ||
     committedWant !== offer.wantAmount ||
     committedOffer.maxFee !== offer.maxFee ||

@@ -24,6 +24,10 @@ export const processSameOrderbookOffer = (
   if (!result) return;
   try {
     processSameCommandEvents(pass, prepared, result);
+    pass.ext.pairDimensions.set(prepared.bookKey, {
+      baseTokenDecimals: prepared.baseTokenDecimals,
+      quoteTokenDecimals: prepared.quoteTokenDecimals,
+    });
     pass.bookCache.set(prepared.bookKey, result.state);
     if (!pass.debugRebuildProjectionOnly) {
       pass.bookUpdates.push({ pairId: prepared.bookKey, book: result.state });

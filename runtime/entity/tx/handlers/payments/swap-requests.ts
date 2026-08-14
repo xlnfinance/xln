@@ -45,7 +45,7 @@ export const handlePlaceSwapOfferRequest = (
   const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
-  const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, maxFee, minNetReceive, priceTicks, timeInForce } =
+  const { counterpartyEntityId, offerId, giveTokenId, giveTokenDecimals, giveAmount, wantTokenId, wantTokenDecimals, wantAmount, maxFee, minNetReceive, priceTicks, timeInForce } =
     entityTx.data;
 
   requireSwapAccount(newState, counterpartyEntityId, 'placeSwapOffer');
@@ -55,8 +55,10 @@ export const handlePlaceSwapOfferRequest = (
     data: {
       offerId,
       giveTokenId,
+      giveTokenDecimals,
       giveAmount,
       wantTokenId,
+      wantTokenDecimals,
       wantAmount,
       maxFee,
       minNetReceive,

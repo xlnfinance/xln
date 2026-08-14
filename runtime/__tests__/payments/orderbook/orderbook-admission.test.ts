@@ -13,7 +13,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { admitOrderbookOfferForMatching } from '../../../entity/consensus/account/orderbook-admission';
 import { normalizeSwapOfferForOrderbook } from '../../../orderbook/swap-execution';
-import { SWAP_LOT_SCALE } from '../../../orderbook/types';
+import { getStaticSwapTokenDimensions, SWAP_LOT_SCALE } from '../../../orderbook/types';
 import type { EntityRuntimeContext } from '../../../entity/runtime-context';
 import type { EntityState } from '../../../entity/types';
 import type { SwapOffer } from '../../../types/account';
@@ -30,6 +30,7 @@ const jurisdiction = makeJurisdiction('Ethereum', 1, '11', '12');
 const committedOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
   offerId: 'admission-offer',
   giveTokenId: 2,
+  ...getStaticSwapTokenDimensions(2, 1),
   giveAmount: LOT,
   wantTokenId: 1,
   wantAmount: LOT,
@@ -71,8 +72,10 @@ const candidateFor = (offer: SwapOffer, overrides: Record<string, unknown> = {})
         toEntity: TAKER,
         createdHeight: offer.createdHeight,
         giveTokenId: offer.giveTokenId,
+        giveTokenDecimals: offer.giveTokenDecimals,
         giveAmount: offer.giveAmount,
         wantTokenId: offer.wantTokenId,
+        wantTokenDecimals: offer.wantTokenDecimals,
         wantAmount: offer.wantAmount,
         maxFee: offer.maxFee,
         minNetReceive: offer.minNetReceive,
@@ -139,7 +142,9 @@ describe('orderbook admission', () => {
     ['giveAmount', { giveAmount: LOT * 2n }],
     ['wantAmount', { wantAmount: LOT * 2n }],
     ['giveTokenId', { giveTokenId: 7 }],
+    ['giveTokenDecimals', { giveTokenDecimals: 17 }],
     ['wantTokenId', { wantTokenId: 7 }],
+    ['wantTokenDecimals', { wantTokenDecimals: 17 }],
     ['makerIsLeft', { makerIsLeft: !committedOffer().makerIsLeft }],
   ])('rejects a candidate whose %s differs from the committed offer', (_field, override) => {
     const offer = committedOffer();

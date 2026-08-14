@@ -1,10 +1,10 @@
 import { FINANCIAL } from '../../../../../config/constants';
 import {
-  computePriceTicksForBaseQuote,
+  computePriceTicksForBaseQuoteDecimals,
   deriveSide,
-  getSwapLotScale,
-  prepareSwapOrder,
-  quoteAmountAtPrice,
+  prepareSwapOrderForDimensions,
+  quoteAmountAtPriceForDecimals,
+  getSwapLotScaleForDecimals,
 } from '../../../../../orderbook';
 import { deriveCanonicalCrossJurisdictionMarket } from '../../../../../extensions/cross-j';
 import { getSwapPairPolicyByBaseQuote } from '../../../../utils';
@@ -21,7 +21,10 @@ const resolveSameJurisdictionPrice = (
   stepTicks: bigint,
 ): { ok: true; priceTicks: bigint } | { ok: false; message: string } => {
   const { giveTokenId, wantTokenId, giveAmount, wantAmount, priceTicks: input } = tx.data;
-  const prepared = prepareSwapOrder(giveTokenId, wantTokenId, giveAmount, wantAmount);
+  const prepared = prepareSwapOrderForDimensions(giveTokenId, wantTokenId, giveAmount, wantAmount, {
+    giveTokenDecimals: tx.data.giveTokenDecimals,
+    wantTokenDecimals: tx.data.wantTokenDecimals,
+  });
   if (!prepared) {
     return { ok: false, message: 'Invalid price ratio or order too small after canonical quantization' };
   }
@@ -99,7 +102,9 @@ export const prepareSwapOfferAmounts = (
   const rawQuoteAmount = side === 1 ? wantAmount : giveAmount;
   const baseTokenId = side === 1 ? giveTokenId : wantTokenId;
   const quoteTokenId = side === 1 ? wantTokenId : giveTokenId;
-  const lotScale = getSwapLotScale(baseTokenId);
+  const baseTokenDecimals = side === 1 ? tx.data.giveTokenDecimals : tx.data.wantTokenDecimals;
+  const quoteTokenDecimals = side === 1 ? tx.data.wantTokenDecimals : tx.data.giveTokenDecimals;
+  const lotScale = getSwapLotScaleForDecimals(baseTokenDecimals);
   if (rawBaseAmount < lotScale) {
     return { ok: false, message: `Order too small for lot size (${lotScale.toString()} base units)` };
   }
@@ -120,12 +125,14 @@ export const prepareSwapOfferAmounts = (
     return { ok: false, message: sameJurisdictionPrice.message };
   }
   const priceTicks = sameJurisdictionPrice === null
-    ? computePriceTicksForBaseQuote(
+    ? computePriceTicksForBaseQuoteDecimals(
         side,
         baseTokenId,
         quoteTokenId,
         rawBaseAmount,
         rawQuoteAmount,
+        baseTokenDecimals,
+        quoteTokenDecimals,
       )
     : sameJurisdictionPrice.priceTicks;
   if (crossMarket && priceTicks <= 0n) {
@@ -138,7 +145,12 @@ export const prepareSwapOfferAmounts = (
     : (rawBaseAmount / lotScale) * lotScale;
   const recomputedQuote = crossMarket
     ? rawQuoteAmount
-    : quoteAmountAtPrice(baseTokenId, quoteTokenId, quantizedBaseAmount, priceTicks);
+    : quoteAmountAtPriceForDecimals(
+        baseTokenDecimals,
+        quoteTokenDecimals,
+        quantizedBaseAmount,
+        priceTicks,
+      );
   const effectiveGiveAmount = side === 1 ? quantizedBaseAmount : recomputedQuote;
   const effectiveWantAmount = side === 1 ? recomputedQuote : quantizedBaseAmount;
   const amountError = validatePreparedAmounts(

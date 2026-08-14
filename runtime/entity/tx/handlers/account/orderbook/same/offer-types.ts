@@ -6,6 +6,8 @@ export type MaterializedSameOffer = {
   offer: SameJurisdictionWorkingOrderbookOffer;
   accountId: string;
   bookKey: string;
+  baseTokenDecimals: number;
+  quoteTokenDecimals: number;
   side: 0 | 1;
   priceTicks: bigint;
   qtyLots: bigint;

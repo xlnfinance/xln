@@ -1,4 +1,4 @@
-export type ViewTab = 'assets' | 'accounts' | 'settings';
+export type ViewTab = 'assets' | 'accounts' | 'company' | 'settings';
 export type SettingsSubview = 'wallet' | 'consensus' | 'recovery' | 'display' | 'network' | 'data' | 'log' | 'entity';
 export type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'lending' | 'history' | 'configure' | 'appearance';
 export type AssetWorkspaceTab = 'move' | 'history';
@@ -88,6 +88,8 @@ export function canonicalizeEntityPanelRoute(routeRaw: string | null): string | 
       return 'accounts/activity';
     case 'accounts/appearance':
       return 'accounts/appearance';
+    case 'company':
+      return 'company';
     case 'settings':
     case 'settings/wallet':
       return 'settings';
@@ -171,6 +173,9 @@ export function resolveEntityPanelDeepLink(input: EntityPanelDeepLinkRequest): E
       update.activeTab = 'accounts';
       update.accountWorkspaceTab = 'appearance';
       break;
+    case 'company':
+      update.activeTab = 'company';
+      break;
     case 'settings':
       update.activeTab = 'settings';
       update.settingsSubview = 'wallet';
@@ -235,6 +240,7 @@ export function buildEntityPanelHashRouteFromState(state: EntityPanelRouteState)
   if (state.activeTab === 'settings') {
     return state.settingsSubview === 'wallet' ? 'settings' : `settings/${state.settingsSubview}`;
   }
+  if (state.activeTab === 'company') return 'company';
   if (state.accountWorkspaceTab === 'open') return 'accounts';
   return `accounts/${state.accountWorkspaceTab}`;
 }

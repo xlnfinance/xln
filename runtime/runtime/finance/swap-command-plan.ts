@@ -1,5 +1,5 @@
 import {
-  requantizeRemainingSwapAtPrice,
+  requantizeRemainingSwapAtPriceForDimensions,
 } from '../../orderbook';
 import type { AccountState } from '../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
@@ -38,7 +38,9 @@ export type SwapCommandPlanInput = Readonly<{
   logicalHeight: number;
   routeValue: string;
   giveTokenId: number;
+  giveTokenDecimals: number;
   wantTokenId: number;
+  wantTokenDecimals: number;
   giveAmount: bigint;
   priceTicks: bigint;
   maxFee: bigint;
@@ -117,11 +119,15 @@ const prepareOrder = (input: SwapCommandPlanInput): SwapCommandPreparedOrder => 
   requirePositiveInteger(input.wantTokenId, 'SWAP_COMMAND_WANT_TOKEN_INVALID');
   if (input.giveAmount <= 0n) throw new Error('SWAP_COMMAND_GIVE_AMOUNT_INVALID');
   if (input.priceTicks <= 0n) throw new Error('SWAP_COMMAND_PRICE_TICKS_INVALID');
-  const prepared = requantizeRemainingSwapAtPrice(
+  const prepared = requantizeRemainingSwapAtPriceForDimensions(
     input.giveTokenId,
     input.wantTokenId,
     input.giveAmount,
     input.priceTicks,
+    {
+      giveTokenDecimals: input.giveTokenDecimals,
+      wantTokenDecimals: input.wantTokenDecimals,
+    },
   );
   if (!prepared) throw new Error('SWAP_COMMAND_ORDER_TOO_SMALL');
   return {
@@ -270,8 +276,10 @@ export const planSwapCommand = (input: SwapCommandPlanInput): SwapCommandPlan =>
             offerId,
             counterpartyEntityId: source.hubEntityId,
             giveTokenId: input.giveTokenId,
+            giveTokenDecimals: input.giveTokenDecimals,
             giveAmount: preparedOrder.effectiveGive,
             wantTokenId: input.wantTokenId,
+            wantTokenDecimals: input.wantTokenDecimals,
             wantAmount: preparedOrder.effectiveWant,
             maxFee: input.maxFee,
             minNetReceive: input.minNetReceive,

@@ -1,11 +1,10 @@
 import { haltRuntimeFailure } from "../protocol/errors/failure-taxonomy";
 
 import { compareCanonicalText, swapKey, type SwapKey } from './swap-keys.ts';
-import { deriveSide } from './types.ts';
+import { computeSwapPriceTicksForDimensions, deriveSide } from './types.ts';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { UINT16_MAX } from '../config/constants.ts';
 import { deriveTransferOffdeltaChange } from '../protocol/transform/delta-movement';
-import { computeSwapPriceTicks } from './types.ts';
 
 export const MAX_SWAP_FILL_RATIO = UINT16_MAX;
 
@@ -26,7 +25,9 @@ export function deriveSwapOffdeltaChanges(
 
 export interface SwapOfferLike {
   giveTokenId: number;
+  giveTokenDecimals: number;
   wantTokenId: number;
+  wantTokenDecimals: number;
   giveAmount: bigint;
   quantizedGive?: bigint;
   quantizedWant?: bigint;
@@ -56,8 +57,10 @@ export interface OrderbookOfferInput {
   toEntity: string;
   createdHeight?: number | undefined;
   giveTokenId: number;
+  giveTokenDecimals: number;
   giveAmount: bigint;
   wantTokenId: number;
+  wantTokenDecimals: number;
   wantAmount: bigint;
   maxFee: bigint;
   minNetReceive: bigint;
@@ -73,7 +76,13 @@ export const normalizeSwapOfferForOrderbook = (
 ): NormalizedOrderbookOffer => {
   const priceTicks = offer.priceTicks && offer.priceTicks > 0n
     ? offer.priceTicks
-    : computeSwapPriceTicks(offer.giveTokenId, offer.wantTokenId, offer.giveAmount, offer.wantAmount);
+    : computeSwapPriceTicksForDimensions(
+        offer.giveTokenId,
+        offer.wantTokenId,
+        offer.giveAmount,
+        offer.wantAmount,
+        offer,
+      );
   if (priceTicks <= 0n) throw haltRuntimeFailure("ORDERBOOK_NORMALIZE_INVALID_PRICE", `ORDERBOOK_NORMALIZE_INVALID_PRICE: offer=${offer.offerId}`);
   return {
     offerId: offer.offerId,
@@ -83,8 +92,10 @@ export const normalizeSwapOfferForOrderbook = (
     toEntity: offer.toEntity,
     createdHeight: offer.createdHeight ?? 0,
     giveTokenId: offer.giveTokenId,
+    giveTokenDecimals: offer.giveTokenDecimals,
     giveAmount: offer.giveAmount,
     wantTokenId: offer.wantTokenId,
+    wantTokenDecimals: offer.wantTokenDecimals,
     wantAmount: offer.wantAmount,
     maxFee: offer.maxFee,
     minNetReceive: offer.minNetReceive,

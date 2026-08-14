@@ -1,6 +1,6 @@
 import type { AccountState } from '../../../../../types/account';
 import { MAX_SWAP_FILL_RATIO } from '../../../../../orderbook/swap-execution';
-import { requantizeRemainingSwapAtPrice } from '../../../../../orderbook/types';
+import { requantizeRemainingSwapAtPriceForDimensions } from '../../../../../orderbook/types';
 import { releaseHold } from '../../../hold-utils';
 import type {
   AppliedSwapResolve,
@@ -84,11 +84,15 @@ export const applySwapResolveRemainder = (
 
   const remainingGive = resolve.canonicalQuantizedGive - resolve.filledGive;
   const priceTicks = resolve.canonicalPriceTicks;
-  const requantized = requantizeRemainingSwapAtPrice(
+  const requantized = requantizeRemainingSwapAtPriceForDimensions(
     resolve.offer.giveTokenId,
     resolve.offer.wantTokenId,
     remainingGive,
     priceTicks,
+    {
+      giveTokenDecimals: resolve.offer.giveTokenDecimals,
+      wantTokenDecimals: resolve.offer.wantTokenDecimals,
+    },
   );
   if (!requantized) {
     const releaseFailure = releaseGiveHold(resolve, remainingGive, events);

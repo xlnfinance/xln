@@ -47,6 +47,7 @@ import {
   hashDisputeProofHankoPayload,
 } from '../../../hanko/onchain-domain';
 import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../../machine/config/default-tokens';
+import { buildNonFungibleTokenInfo } from '../token-metadata';
 import { getBootstrapTokenAmountBySymbol } from '../../machine/config/bootstrap-economy';
 import {
   decodeBrowserVmEvents,
@@ -54,7 +55,7 @@ import {
   type BrowserVmEventCarrier,
   type EthereumLog,
 } from './browservm-events';
-import type { JEvent } from '../types';
+import type { JEvent, JTokenInfo } from '../types';
 import {
   computeCanonicalReceiptsRoot,
   createCanonicalReceiptProofs,
@@ -231,7 +232,7 @@ export class BrowserVMProvider {
   private entityProviderInterface: ethers.Interface | null = null;
   private accountInterface: ethers.Interface | null = null;
   private erc20Interface: ethers.Interface | null = null;
-  private tokenRegistry: Map<string, { address: string; name: string; symbol: string; decimals: number; tokenId: number }> = new Map();
+  private tokenRegistry: Map<string, JTokenInfo> = new Map();
   private fundedAddresses: Set<string> = new Set();
   private initialized = false;
   private quietLogs = false;
@@ -567,8 +568,32 @@ export class BrowserVMProvider {
   }
 
   /** Token registry (symbol → metadata) */
-  getTokenRegistry(): Array<{ symbol: string; name: string; address: string; decimals: number; tokenId: number }> {
-    return Array.from(this.tokenRegistry.values());
+  async getTokenRegistry(): Promise<JTokenInfo[]> {
+    const knownErc20 = new Map(
+      Array.from(this.tokenRegistry.values()).map(token => [token.tokenId, token] as const),
+    );
+    const length = await this.getTokensLength();
+    const tokens: JTokenInfo[] = [];
+    for (let tokenId = 1; tokenId < length; tokenId += 1) {
+      const metadata = await this.getRegisteredTokenMetadata(tokenId);
+      if (metadata.tokenType === 0) {
+        const known = knownErc20.get(tokenId);
+        if (!known || known.address.toLowerCase() !== metadata.contractAddress.toLowerCase()) {
+          throw new Error(`BROWSERVM_TOKEN_METADATA_UNAVAILABLE:${tokenId}`);
+        }
+        tokens.push(known);
+        continue;
+      }
+      if (!this.entityProviderAddress) throw new Error('EntityProvider not deployed');
+      tokens.push(buildNonFungibleTokenInfo({
+        tokenId,
+        tokenType: metadata.tokenType,
+        contractAddress: metadata.contractAddress,
+        externalTokenId: metadata.externalTokenId,
+        entityProviderAddress: this.entityProviderAddress.toString(),
+      }));
+    }
+    return tokens;
   }
 
   getTokenAddress(symbol: string): string | null {
@@ -634,6 +659,8 @@ export class BrowserVMProvider {
         symbol: token.symbol,
         decimals: token.decimals,
         tokenId,
+        tokenType: 0,
+        externalTokenId: 0n,
       });
       console.log(`[BrowserVM] Token registered: ${token.symbol} id=${tokenId} addr=${address.slice(0, 10)}... (depository pre-funded)`);
     }
@@ -1006,6 +1033,32 @@ export class BrowserVMProvider {
 
     const decoded = this.depositoryInterface.decodeFunctionResult('getTokensLength', returnData);
     return Number(decoded[0]);
+  }
+
+  private async getRegisteredTokenMetadata(tokenId: number): Promise<{
+    contractAddress: string;
+    externalTokenId: bigint;
+    tokenType: number;
+  }> {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
+      throw new Error('Depository not deployed');
+    }
+    const callData = this.depositoryInterface.encodeFunctionData('_tokens', [tokenId]);
+    const result = await this.runReadOnlyCall({
+      to: this.depositoryAddress,
+      caller: this.deployerAddress,
+      data: hexToBytes(callData as `0x${string}`),
+      gasLimit: 100000n,
+    });
+    if (result.execResult.exceptionError || result.execResult.returnValue.length === 0) {
+      throw new Error(`BROWSERVM_TOKEN_METADATA_READ_FAILED:${tokenId}`);
+    }
+    const decoded = this.depositoryInterface.decodeFunctionResult('_tokens', result.execResult.returnValue);
+    return {
+      contractAddress: String(decoded[0]),
+      externalTokenId: BigInt(decoded[1]),
+      tokenType: Number(decoded[2]),
+    };
   }
 
   /** Debug: Fund entity reserves (uses admin mintToReserve) - emits ReserveUpdated event */

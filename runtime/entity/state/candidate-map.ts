@@ -192,6 +192,9 @@ const cloneBook = (book: BookState): BookState =>
   structuredCloneOrThrow(book, 'ENTITY_ORDERBOOK_BOOK_CLONE_FAILED');
 
 const clonePairs = (pairs: string[]): string[] => [...pairs];
+const clonePairDimensions = (dimensions: OrderbookExtState['pairDimensions'] extends Map<string, infer Value>
+  ? Value
+  : never) => ({ ...dimensions });
 
 const cloneReferral = (
   referral: OrderbookExtState['referrals'] extends Map<string, infer Value>
@@ -204,6 +207,7 @@ export const createEntityOrderbookCandidate = (
 ): OrderbookExtState => ({
   books: new EntityCandidateMap(source.books, cloneBook, false),
   orderPairs: new EntityCandidateMap(source.orderPairs, clonePairs, false),
+  pairDimensions: new EntityCandidateMap(source.pairDimensions, clonePairDimensions, false),
   referrals: new EntityCandidateMap(source.referrals, cloneReferral, false),
   hubProfile: structuredCloneOrThrow(source.hubProfile, 'ENTITY_ORDERBOOK_PROFILE_CLONE_FAILED'),
 });
@@ -215,6 +219,9 @@ export const snapshotEntityOrderbookCandidate = (
   orderPairs: source.orderPairs instanceof EntityCandidateMap
     ? source.orderPairs.snapshot()
     : source.orderPairs,
+  pairDimensions: source.pairDimensions instanceof EntityCandidateMap
+    ? source.pairDimensions.snapshot()
+    : source.pairDimensions,
   referrals: source.referrals instanceof EntityCandidateMap
     ? source.referrals.snapshot()
     : source.referrals,
@@ -228,6 +235,9 @@ export const commitEntityOrderbookCandidate = (
   orderPairs: source.orderPairs instanceof EntityCandidateMap
     ? source.orderPairs.commit()
     : source.orderPairs,
+  pairDimensions: source.pairDimensions instanceof EntityCandidateMap
+    ? source.pairDimensions.commit()
+    : source.pairDimensions,
   referrals: source.referrals instanceof EntityCandidateMap
     ? source.referrals.commit()
     : source.referrals,

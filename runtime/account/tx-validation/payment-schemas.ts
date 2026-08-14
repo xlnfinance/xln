@@ -48,8 +48,8 @@ export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
   cross_pull_progress: { required: { pullId: 'string', fill: 'record' } },
   swap_offer: {
     required: {
-      offerId: 'string', giveTokenId: 'integer', giveAmount: 'bigint',
-      wantTokenId: 'integer', wantAmount: 'bigint', maxFee: 'bigint',
+      offerId: 'string', giveTokenId: 'integer', giveTokenDecimals: 'integer', giveAmount: 'bigint',
+      wantTokenId: 'integer', wantTokenDecimals: 'integer', wantAmount: 'bigint', maxFee: 'bigint',
       minNetReceive: 'bigint',
     },
     optional: { priceTicks: 'bigint', timeInForce: 'integer', crossJurisdiction: 'record' },

@@ -12,21 +12,23 @@
   import { activeRuntime } from '../../../stores/vault/vaultStore';
   import { tabOperations } from '../../../stores/ui/tabStore';
   import { generateLazyEntityIdPreview } from '../../../utils/identity/lazyEntityId';
-  import { Plus, X, Download, Upload, Shield, Hash, Tag, Zap } from 'lucide-svelte';
+  import { Plus, X, Download, Upload, Shield, Hash, Landmark, Tag, Zap } from 'lucide-svelte';
   import {
     emptyFormationRuntimeProjection,
     hasProjectedEntityId,
     type FormationRuntimeProjection,
   } from './formation-runtime-projection';
 
-  export let onCreated: ((entityId: string) => void) | undefined = undefined;
+  export let onCreated: ((entityId: string, purpose: 'entity' | 'company') => void) | undefined = undefined;
   export let runtimeProjection: FormationRuntimeProjection = emptyFormationRuntimeProjection();
 
   const dispatch = createEventDispatcher();
   $: vault = $activeRuntime;
 
   // Form state
+  type FormationPurpose = 'entity' | 'company';
   type EntityType = 'numbered' | 'lazy' | 'named';
+  let formationPurpose: FormationPurpose = 'entity';
   let entityType: EntityType = 'numbered';
   let entityName = 'ACME';
   let selectedJurisdiction = '';
@@ -104,6 +106,11 @@
     if (!userModifiedThreshold) {
       threshold = validators.reduce((sum, v) => sum + v.weight, 0);
     }
+  }
+
+  function selectFormationPurpose(next: FormationPurpose): void {
+    formationPurpose = next;
+    if (next === 'company') entityType = 'numbered';
   }
 
   function removeValidator(idx: number) {
@@ -239,17 +246,17 @@
           entityInputs: [],
         });
         tabOperations.addTab(entityId, localSignerId, selectedJurisdiction);
-        success = `Entity created: ${formatShortId(entityId)}`;
+        success = `${formationPurpose === 'company' ? 'Company' : 'Entity'} created: ${formatShortId(entityId)}`;
       } else if (entityType === 'numbered' && numberedImported) {
         tabOperations.addTab(entityId, localSignerId, selectedJurisdiction);
-        success = `Entity created: ${formatShortId(entityId)}`;
+        success = `${formationPurpose === 'company' ? 'Company' : 'Entity'} created: ${formatShortId(entityId)}`;
       } else {
         success = `Board created: ${formatShortId(entityId)}. Import this configuration in a member wallet.`;
       }
 
       // Callback
-      if (onCreated) onCreated(entityId);
-      dispatch('created', { entityId });
+      if (onCreated) onCreated(entityId, formationPurpose);
+      dispatch('created', { entityId, purpose: formationPurpose });
 
       // Reset form
       resetForm();
@@ -273,6 +280,7 @@
   function exportConfig() {
     const config = {
       entityType,
+      formationPurpose,
       entityName,
       jurisdiction: selectedJurisdiction,
       validators,
@@ -293,6 +301,9 @@
     try {
       const config = JSON.parse(importJson);
       if (config.entityType) entityType = config.entityType;
+      if (config.formationPurpose === 'entity' || config.formationPurpose === 'company') {
+        selectFormationPurpose(config.formationPurpose);
+      }
       if (config.entityName) entityName = config.entityName;
       if (config.jurisdiction) selectedJurisdiction = config.jurisdiction;
       if (config.validators) validators = config.validators;
@@ -308,7 +319,7 @@
 
 <div class="formation-panel">
   <header class="panel-header">
-    <h3>Create Entity</h3>
+    <h3>Create {formationPurpose === 'company' ? 'Company' : 'Entity'}</h3>
     <div class="header-actions">
       <button class="icon-btn" on:click={() => showImport = !showImport} title="Import Config">
         <Upload size={14} />
@@ -333,6 +344,19 @@
     </div>
   {/if}
 
+  <div class="field">
+    <div class="field-label">Formation</div>
+    <div class="type-selector">
+      <button class="type-option" class:active={formationPurpose === 'entity'} on:click={() => selectFormationPurpose('entity')}>
+        <Shield size={16} /><span>Entity</span><small>Personal or operational</small>
+      </button>
+      <button data-testid="formation-company" class="type-option" class:active={formationPurpose === 'company'} on:click={() => selectFormationPurpose('company')}>
+        <Landmark size={16} /><span>Company</span><small>Shares, hub and governance</small>
+      </button>
+    </div>
+  </div>
+
+  {#if formationPurpose === 'entity'}
   <div class="field">
     <div class="field-label">Entity Type</div>
     <div class="type-selector three-col">
@@ -365,15 +389,16 @@
       </button>
     </div>
   </div>
+  {/if}
 
   <div class="field">
-    <div class="field-label">Entity Name</div>
+    <div class="field-label">{formationPurpose === 'company' ? 'Company' : 'Entity'} Name</div>
     <input
       type="text"
       bind:value={entityName}
       placeholder="e.g., ACME Corp"
     />
-    <p class="field-hint">Display name for your entity</p>
+    <p class="field-hint">{formationPurpose === 'company' ? 'The numbered Entity that owns the treasury and signs company actions' : 'Display name for your entity'}</p>
   </div>
 
   <div class="field">
@@ -485,7 +510,7 @@
       on:click={createEntity}
       disabled={creating || !selectedJurisdiction || validators.some(v => !v.name) || Boolean(previewError)}
     >
-      {creating ? 'Creating...' : 'Create Entity'}
+      {creating ? 'Creating...' : `Create ${formationPurpose === 'company' ? 'Company' : 'Entity'}`}
     </button>
   </div>
 </div>

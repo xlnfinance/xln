@@ -37,6 +37,7 @@ export const scenarioRegistry: ScenarioEntry[] = [
   { key: 'swap-tps', name: 'Swap TPS', load: async () => (await import('./market/swap-tps')).swapTps },
   { key: 'grid', name: 'Grid', load: async () => (await import('./consensus/grid')).grid },
   { key: 'multi-sig', name: 'Multi-Sig', load: async () => (await import('./consensus/multi-sig')).multiSig },
+  { key: 'company-ipo', name: 'Company IPO', load: async () => (await import('./company-ipo')).companyIpo },
   {
     key: 'rapid-fire',
     name: 'Rapid Fire',

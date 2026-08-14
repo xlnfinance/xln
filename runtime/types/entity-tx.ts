@@ -642,8 +642,10 @@ type EntityTxPayload =
         counterpartyEntityId: string; // Hub
         offerId: string;
         giveTokenId: number;
+        giveTokenDecimals: number;
         giveAmount: bigint;
         wantTokenId: number;
+        wantTokenDecimals: number;
         wantAmount: bigint;
         maxFee: bigint;
         minNetReceive: bigint;

@@ -44,12 +44,20 @@ const validateOfferCapacityLimits = (
 const validateOfferShape = (tx: SwapOfferTx): string | null => {
   const {
     giveTokenId,
+    giveTokenDecimals,
     giveAmount,
     wantTokenId,
+    wantTokenDecimals,
     wantAmount,
     timeInForce,
     crossJurisdiction,
   } = tx.data;
+  if (
+    !Number.isSafeInteger(giveTokenDecimals) || giveTokenDecimals < 0 || giveTokenDecimals > 255 ||
+    !Number.isSafeInteger(wantTokenDecimals) || wantTokenDecimals < 0 || wantTokenDecimals > 255
+  ) {
+    return `Invalid token decimals: give=${String(giveTokenDecimals)} want=${String(wantTokenDecimals)}`;
+  }
   if (giveAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || giveAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
     return `Invalid giveAmount: ${giveAmount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`;
   }

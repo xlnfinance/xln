@@ -1,5 +1,6 @@
 import { isAddress, ZeroAddress } from 'ethers';
 import type { JAdapter } from '@xln/runtime/api/public/runtime-module';
+import { safeParse } from '@xln/runtime/protocol/serialization';
 import type { EntityReplica } from '$lib/types/ui';
 import { readJsonResponse } from './account/account-faucet';
 import type { ExternalToken } from './assets/entity-asset-catalog';
@@ -16,6 +17,24 @@ import {
 const REQUEST_TIMEOUT_MS = 5_000;
 type JTokenRegistryItem = Awaited<ReturnType<JAdapter['getTokenRegistry']>>[number];
 type ExternalWalletState = EntityReplica['state']['externalWallet'];
+
+const normalizeOptionalTokenType = (value: unknown): 0 | 1 | 2 | undefined => {
+  if (value === undefined) return undefined;
+  if (value === 0 || value === 1 || value === 2) return value;
+  throw new Error(`TOKEN_CATALOG_TYPE_INVALID:${String(value)}`);
+};
+
+const normalizeOptionalExternalTokenId = (value: unknown): string | undefined => {
+  if (value === undefined) return undefined;
+  let tokenId: bigint;
+  try {
+    tokenId = typeof value === 'bigint' ? value : BigInt(String(value));
+  } catch {
+    throw new Error(`TOKEN_CATALOG_EXTERNAL_ID_INVALID:${String(value)}`);
+  }
+  if (tokenId < 0n) throw new Error(`TOKEN_CATALOG_EXTERNAL_ID_INVALID:${String(value)}`);
+  return tokenId.toString();
+};
 
 function cloneTokenCatalog(tokens: ExternalToken[]): ExternalToken[] {
   return tokens.map(token => ({ ...token, balance: 0n }));
@@ -46,8 +65,13 @@ export function createExternalTokenCatalogLoader(fetchCatalog: () => Promise<Ext
       if (registry?.length) {
         tokens = registry.map((token: JTokenRegistryItem) => {
           const decimals = Number(token.decimals);
+          const tokenType = normalizeOptionalTokenType(token.tokenType);
+          const externalTokenId = normalizeOptionalExternalTokenId(token.externalTokenId);
           if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
             throw new Error(`TOKEN_CATALOG_DECIMALS_INVALID:${String(token.tokenId)}:${String(token.decimals)}`);
+          }
+          if (tokenType === undefined || externalTokenId === undefined) {
+            throw new Error(`TOKEN_CATALOG_ASSET_CLASS_MISSING:${String(token.tokenId)}`);
           }
           return {
             symbol: token.symbol,
@@ -55,6 +79,8 @@ export function createExternalTokenCatalogLoader(fetchCatalog: () => Promise<Ext
             balance: 0n,
             decimals,
             tokenId: normalizeOptionalTokenId(token.tokenId),
+            tokenType,
+            externalTokenId,
           };
         });
       }
@@ -112,21 +138,44 @@ export async function fetchExternalTokenCatalog(apiBase: string): Promise<Extern
   const response = await fetch(`${apiBase}/api/tokens`, {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-  const data = await readJsonResponse<{ success?: boolean; tokens?: ExternalToken[]; error?: string }>(response);
-  if (!response.ok || !data?.success || !Array.isArray(data.tokens)) {
-    throw new Error(data?.error || `Token catalog failed (${response.status})`);
+  const raw = await response.text();
+  const decoded = safeParse<unknown>(raw);
+  if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
+    throw new Error('TOKEN_CATALOG_RESPONSE_INVALID:expected-object');
   }
-  return data.tokens.map(token => {
-    const decimals = Number(token.decimals);
+  const data = decoded as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(typeof data['error'] === 'string' ? data['error'] : `Token catalog failed (${response.status})`);
+  }
+  if (!Array.isArray(data['tokens'])) throw new Error('TOKEN_CATALOG_RESPONSE_INVALID:tokens');
+  return data['tokens'].map((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`TOKEN_CATALOG_ENTRY_INVALID:${index}:expected-object`);
+    }
+    const token = value as Record<string, unknown>;
+    const symbol = typeof token['symbol'] === 'string' ? token['symbol'].trim() : '';
+    const address = typeof token['address'] === 'string' ? token['address'].trim() : '';
+    const decimals = Number(token['decimals']);
+    const tokenId = normalizeOptionalTokenId(token['tokenId']);
+    const tokenType = normalizeOptionalTokenType(token['tokenType']);
+    const externalTokenId = normalizeOptionalExternalTokenId(token['externalTokenId']);
+    if (!symbol) throw new Error(`TOKEN_CATALOG_SYMBOL_INVALID:${index}`);
+    if (!isAddress(address) || address === ZeroAddress) throw new Error(`TOKEN_CATALOG_ADDRESS_INVALID:${index}`);
     if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
-      throw new Error(`TOKEN_CATALOG_DECIMALS_INVALID:${String(token.tokenId)}:${String(token.decimals)}`);
+      throw new Error(`TOKEN_CATALOG_DECIMALS_INVALID:${String(tokenId)}:${String(token['decimals'])}`);
+    }
+    if (tokenId === undefined || tokenId < 1) throw new Error(`TOKEN_CATALOG_TOKEN_ID_INVALID:${index}`);
+    if (tokenType === undefined || externalTokenId === undefined) {
+      throw new Error(`TOKEN_CATALOG_ASSET_CLASS_MISSING:${tokenId}`);
     }
     return {
-      symbol: token.symbol,
-      address: token.address,
+      symbol,
+      address,
       balance: 0n,
       decimals,
-      tokenId: normalizeOptionalTokenId(token.tokenId),
+      tokenId,
+      tokenType,
+      externalTokenId,
     };
   });
 }

@@ -1,6 +1,7 @@
 import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
 
 import { normalizeEntityRef } from '../../account-key';
+import { getTokenInfo } from '../../../../account/utils';
 import {
   deterministicEntityTimestamp,
   getTypedCrossJurisdictionBookAdmissionFailure,
@@ -96,8 +97,10 @@ const buildCommittedCrossJurisdictionOfferEvent = (
       toEntity: normalizeEntityRef(route.source.counterpartyEntityId),
       createdHeight: 0,
       giveTokenId: Number(route.source.tokenId),
+      giveTokenDecimals: getTokenInfo(Number(route.source.tokenId)).decimals,
       giveAmount: remaining.sourceRemaining,
       wantTokenId: Number(route.target.tokenId),
+      wantTokenDecimals: getTokenInfo(Number(route.target.tokenId)).decimals,
       wantAmount: remaining.targetRemaining,
       maxFee: 0n,
       minNetReceive: remaining.targetRemaining,
@@ -113,8 +116,10 @@ const buildCommittedCrossJurisdictionOfferEvent = (
     toEntity: account.state.rightEntity,
     createdHeight: offer.createdHeight,
     giveTokenId: offer.giveTokenId,
+    giveTokenDecimals: offer.giveTokenDecimals,
     giveAmount: remaining.sourceRemaining,
     wantTokenId: offer.wantTokenId,
+    wantTokenDecimals: offer.wantTokenDecimals,
     wantAmount: remaining.targetRemaining,
     maxFee: 0n,
     minNetReceive: remaining.targetRemaining,

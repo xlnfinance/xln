@@ -9,6 +9,8 @@ import type * as typesSol from "./Types.sol";
 export type { typesSol };
 import type * as custody from "./custody";
 export type { custody };
+import type * as interfaces from "./interfaces";
+export type { interfaces };
 import type * as mocks from "./mocks";
 export type { mocks };
 export type { Account } from "./Account";

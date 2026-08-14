@@ -64,10 +64,12 @@ export type JEvent = JEventIngress & {
 
 export interface JTokenInfo {
   symbol: string;
-  name?: string;
+  name: string;
   address: string;
   decimals: number;
-  tokenId?: number;
+  tokenId: number;
+  tokenType: 0 | 1 | 2;
+  externalTokenId: bigint;
 }
 
 export interface JWalletAllowanceRead {

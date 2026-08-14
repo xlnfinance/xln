@@ -23,7 +23,7 @@ import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authoriz
 import { getLiveJAdapterEntries } from '../../runtime/jurisdiction/live-jadapters';
 import type { EntityInput } from '../../entity/types';
 import { ethers } from 'ethers';
-import { getBestAsk, SWAP_LOT_SCALE } from '../../orderbook';
+import { getBestAsk, getStaticSwapTokenDimensions, SWAP_LOT_SCALE } from '../../orderbook';
 import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig } from '../harness/boot';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { formatRuntime } from '../../qa/runtime-ascii';
@@ -530,6 +530,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
         giveTokenId: ETH_TOKEN_ID,
         giveAmount: eth(TRADE_ETH),
         wantTokenId: USDC_TOKEN_ID,
+        ...getStaticSwapTokenDimensions(ETH_TOKEN_ID, USDC_TOKEN_ID),
         wantAmount: usdc(TRADE_USDC_MAIN_UNITS),
         ...deriveSwapNetAuthorization(usdc(TRADE_USDC_MAIN_UNITS), 1),
       },
@@ -576,6 +577,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
         giveTokenId: USDC_TOKEN_ID,
         giveAmount: usdcForEth(TRADE_ETH_HALF, ETH_PRICE_HIGH),
         wantTokenId: ETH_TOKEN_ID,
+        ...getStaticSwapTokenDimensions(USDC_TOKEN_ID, ETH_TOKEN_ID),
         wantAmount: eth(TRADE_ETH_HALF),
         ...deriveSwapNetAuthorization(eth(TRADE_ETH_HALF), 1),
       },
@@ -769,6 +771,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
         giveTokenId: ETH_TOKEN_ID,
         giveAmount: eth(disputeEth),
         wantTokenId: USDC_TOKEN_ID,
+        ...getStaticSwapTokenDimensions(ETH_TOKEN_ID, USDC_TOKEN_ID),
         wantAmount: usdc(disputeUsdc),
         ...deriveSwapNetAuthorization(usdc(disputeUsdc), 1),
       },
@@ -788,6 +791,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
         giveTokenId: USDC_TOKEN_ID,
         giveAmount: usdcForEth(disputeFillEth, ETH_PRICE_MAIN),
         wantTokenId: ETH_TOKEN_ID,
+        ...getStaticSwapTokenDimensions(USDC_TOKEN_ID, ETH_TOKEN_ID),
         wantAmount: eth(disputeFillEth),
         ...deriveSwapNetAuthorization(eth(disputeFillEth), 1),
       },
@@ -1127,6 +1131,7 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
         giveTokenId: ETH_TOKEN_ID,
         giveAmount: eth(CAROL_SELL_ETH),
         wantTokenId: USDC_TOKEN_ID,
+        ...getStaticSwapTokenDimensions(ETH_TOKEN_ID, USDC_TOKEN_ID),
         wantAmount: usdcForEth(CAROL_SELL_ETH, ETH_PRICE_LOW),
         ...deriveSwapNetAuthorization(usdcForEth(CAROL_SELL_ETH, ETH_PRICE_LOW), 1),
       },
@@ -1158,6 +1163,7 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
         giveTokenId: USDC_TOKEN_ID,
         giveAmount: usdcForEth(DAVE_BUY_ETH, ETH_PRICE_MAIN),
         wantTokenId: ETH_TOKEN_ID,
+        ...getStaticSwapTokenDimensions(USDC_TOKEN_ID, ETH_TOKEN_ID),
         wantAmount: eth(DAVE_BUY_ETH),
         ...deriveSwapNetAuthorization(eth(DAVE_BUY_ETH), 1),
       },
@@ -1188,6 +1194,7 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
         giveTokenId: ETH_TOKEN_ID,
         giveAmount: eth(CAROL_SELL_2_ETH),
         wantTokenId: USDC_TOKEN_ID,
+        ...getStaticSwapTokenDimensions(ETH_TOKEN_ID, USDC_TOKEN_ID),
         wantAmount: usdcForEth(CAROL_SELL_2_ETH, ETH_PRICE_HIGH),
         ...deriveSwapNetAuthorization(usdcForEth(CAROL_SELL_2_ETH, ETH_PRICE_HIGH), 1),
       },
@@ -1218,6 +1225,7 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
         giveTokenId: USDC_TOKEN_ID,
         giveAmount: usdcForEth(DAVE_SWEEP_ETH, ETH_PRICE_SWEEP),
         wantTokenId: ETH_TOKEN_ID,
+        ...getStaticSwapTokenDimensions(USDC_TOKEN_ID, ETH_TOKEN_ID),
         wantAmount: eth(DAVE_SWEEP_ETH),
         ...deriveSwapNetAuthorization(eth(DAVE_SWEEP_ETH), 1),
       },

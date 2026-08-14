@@ -20,7 +20,10 @@ export const commitSwapOffer = (
   prepared: PreparedSwapOfferAmounts,
   currentHeight: number,
 ): ApplyAccountTxResult => {
-  const { offerId, giveTokenId, wantTokenId, timeInForce, crossJurisdiction } = tx.data;
+  const {
+    offerId, giveTokenId, giveTokenDecimals, wantTokenId, wantTokenDecimals,
+    timeInForce, crossJurisdiction,
+  } = tx.data;
   const { priceTicks, effectiveGiveAmount, effectiveWantAmount } = prepared;
   let authorization: SwapNetAuthorization;
   try {
@@ -51,8 +54,10 @@ export const commitSwapOffer = (
   const offer: SwapOffer = {
     offerId,
     giveTokenId,
+    giveTokenDecimals,
     giveAmount: effectiveGiveAmount,
     wantTokenId,
+    wantTokenDecimals,
     wantAmount: effectiveWantAmount,
     ...authorization,
     priceTicks,
@@ -84,8 +89,10 @@ export const commitSwapOffer = (
     toEntity: admission.rightEntity,
     createdHeight: currentHeight,
     giveTokenId,
+    giveTokenDecimals,
     giveAmount: effectiveGiveAmount,
     wantTokenId,
+    wantTokenDecimals,
     wantAmount: effectiveWantAmount,
     ...authorization,
     priceTicks,

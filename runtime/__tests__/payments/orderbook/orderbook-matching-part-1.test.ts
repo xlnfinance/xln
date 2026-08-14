@@ -4,7 +4,7 @@ import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j
 
 import { createBook, applyCommand, getBestAsk, getBestBid, getBookOrder, getBookSideLevels } from '../../../orderbook/core';
 
-import { getSwapLotScale, ORDERBOOK_PRICE_SCALE, quoteAmountAtPrice, SWAP_LOT_SCALE } from '../../../orderbook/types';
+import { getStaticSwapTokenDimensions, getSwapLotScale, getSwapPairDimensions, ORDERBOOK_PRICE_SCALE, quoteAmountAtPrice, SWAP_LOT_SCALE } from '../../../orderbook/types';
 
 import { removeCrossJurisdictionBookOrderByRouteId } from '../../../orderbook/cross-j';
 
@@ -40,10 +40,41 @@ const CROSS_WETH_USDC_PAIR = `cross:${TESTNET_STACK}:2/${TRON_STACK}:1`;
 
 const CROSS_USDC_USDC_PAIR = `cross:${TESTNET_STACK}:1/${TRON_STACK}:1`;
 
+const fixtureEntityId = (byte: string): string => `0x${byte.repeat(32)}`;
+const HUB_ENTITY = fixtureEntityId('01');
+const ALICE = fixtureEntityId('02');
+const MAKER_ACCOUNT = fixtureEntityId('03');
+const MAKER_ACCOUNT_ONE = fixtureEntityId('04');
+const MAKER_ACCOUNT_TWO = fixtureEntityId('05');
+const ALICE_MAKER_ACCOUNT = fixtureEntityId('06');
+const ALICE_TAKER_ACCOUNT = fixtureEntityId('07');
+const ASK_MAKER_ACCOUNT = fixtureEntityId('08');
+const BID_MAKER_ACCOUNT = fixtureEntityId('09');
+const BOB_MAKER_ACCOUNT = fixtureEntityId('0a');
+const FAR_MAKER_ACCOUNT = fixtureEntityId('0b');
+const NEAR_MAKER_ACCOUNT = fixtureEntityId('0c');
+const NEW_TAKER_ACCOUNT = fixtureEntityId('0d');
+const TAKER_ACCOUNT = fixtureEntityId('0e');
+const MAKER_ENTITY = fixtureEntityId('0f');
+const TAKER_ENTITY = fixtureEntityId('10');
+const FIXTURE_PEER = fixtureEntityId('11');
+const MAKER_ONE = fixtureEntityId('12');
+const MAKER_TWO = fixtureEntityId('13');
+const BOB = fixtureEntityId('14');
+const orderKey = (entityId: string, offerId: string): string => `${entityId}:${offerId}`;
+
 const withZeroFeeTestAuthorization = <T extends { wantAmount: bigint }>(offer: T): T & {
   maxFee: bigint;
   minNetReceive: bigint;
-} => ({ maxFee: 0n, minNetReceive: offer.wantAmount, ...offer });
+} => ({
+  maxFee: 0n,
+  minNetReceive: offer.wantAmount,
+  ...getStaticSwapTokenDimensions(
+    Number(Reflect.get(offer, 'giveTokenId')),
+    Number(Reflect.get(offer, 'wantTokenId')),
+  ),
+  ...offer,
+});
 
 const processCommittedOrderbookSwaps = (
   state: Parameters<typeof processOrderbookSwaps>[0],
@@ -86,8 +117,8 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
 
   const account: AccountReplica = {
     state: {
-      leftEntity: firstOffer?.fromEntity ?? 'hub-entity',
-      rightEntity: firstOffer?.toEntity ?? 'fixture-peer',
+      leftEntity: firstOffer?.fromEntity ?? HUB_ENTITY,
+      rightEntity: firstOffer?.toEntity ?? FIXTURE_PEER,
       domain: {
         chainId: 31337,
         depositoryAddress: '0x1111111111111111111111111111111111111111',
@@ -123,8 +154,8 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: {
-      fromEntity: firstOffer?.fromEntity ?? 'hub-entity',
-      toEntity: firstOffer?.toEntity ?? 'fixture-peer',
+      fromEntity: firstOffer?.fromEntity ?? HUB_ENTITY,
+      toEntity: firstOffer?.toEntity ?? FIXTURE_PEER,
       nextProofNonce: 0,
     },
     proofBody: { tokenIds: [], deltas: [] },
@@ -145,9 +176,9 @@ function makeAccountIndex(offerIds: readonly string[]): AccountReplica {
     offerIds.map((offerId) => ({
       offerId,
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'fixture-peer',
-      accountId: 'fixture-peer',
+      fromEntity: HUB_ENTITY,
+      toEntity: FIXTURE_PEER,
+      accountId: FIXTURE_PEER,
       createdHeight: 0,
       giveTokenId: 1,
       giveAmount: SWAP_LOT_SCALE,
@@ -164,9 +195,9 @@ describe('orderbook matching execution mapping', () => {
     const rawOffer = {
       offerId: 'raw-offer',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'alice',
-      accountId: 'alice',
+      fromEntity: HUB_ENTITY,
+      toEntity: ALICE,
+      accountId: ALICE,
       createdHeight: 1,
       giveTokenId: 2,
       giveAmount: SWAP_LOT_SCALE,
@@ -176,11 +207,11 @@ describe('orderbook matching execution mapping', () => {
       priceTicks: 1000n,
     };
     const entityState = {
-      entityId: 'hub-entity',
-      accounts: new Map([['alice', makeAccountMachine([])]]),
+      entityId: HUB_ENTITY,
+      accounts: new Map([[ALICE, makeAccountMachine([])]]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -194,7 +225,9 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['1/2'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
@@ -213,8 +246,8 @@ describe('orderbook matching execution mapping', () => {
 
     book = applyCommand(book, {
       kind: 0,
-      ownerId: 'maker1',
-      orderId: 'maker1:maker-ask-1',
+      ownerId: MAKER_ONE,
+      orderId: orderKey(MAKER_ONE, 'maker-ask-1'),
       side: 1,
       tif: 0,
       postOnly: false,
@@ -223,8 +256,8 @@ describe('orderbook matching execution mapping', () => {
     }).state;
     book = applyCommand(book, {
       kind: 0,
-      ownerId: 'maker2',
-      orderId: 'maker2:maker-ask-2',
+      ownerId: MAKER_TWO,
+      orderId: orderKey(MAKER_TWO, 'maker-ask-2'),
       side: 1,
       tif: 0,
       postOnly: false,
@@ -239,9 +272,9 @@ describe('orderbook matching execution mapping', () => {
     const swapOffer = {
       offerId: 'taker-buy',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'alice',
-      accountId: 'alice',
+      fromEntity: HUB_ENTITY,
+      toEntity: ALICE,
+      accountId: ALICE,
       giveTokenId: 5,
       giveAmount: quoteAmount,
       wantTokenId: 2,
@@ -253,9 +286,9 @@ describe('orderbook matching execution mapping', () => {
     const makerOffer1 = {
       offerId: 'maker-ask-1',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'maker1',
-      accountId: 'maker1',
+      fromEntity: HUB_ENTITY,
+      toEntity: MAKER_ONE,
+      accountId: MAKER_ONE,
       giveTokenId: 2,
       giveAmount: lot,
       wantTokenId: 5,
@@ -267,9 +300,9 @@ describe('orderbook matching execution mapping', () => {
     const makerOffer2 = {
       offerId: 'maker-ask-2',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'maker2',
-      accountId: 'maker2',
+      fromEntity: HUB_ENTITY,
+      toEntity: MAKER_TWO,
+      accountId: MAKER_TWO,
       giveTokenId: 2,
       giveAmount: lot,
       wantTokenId: 5,
@@ -280,15 +313,15 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['maker1', makeAccountMachine([makerOffer1])],
-        ['maker2', makeAccountMachine([makerOffer2])],
-        ['alice', makeAccountMachine([])],
+        [MAKER_ONE, makeAccountMachine([makerOffer1])],
+        [MAKER_TWO, makeAccountMachine([makerOffer2])],
+        [ALICE, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -302,12 +335,14 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map([['2/5', book]]),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [swapOffer]);
-    const op = result.accountTxs.find(item => item.accountId === 'alice' && item.tx.type === 'swap_resolve');
+    const op = result.accountTxs.find(item => item.accountId === ALICE && item.tx.type === 'swap_resolve');
 
     expect(op).toBeDefined();
     expect(op!.tx.data.fillRatio).toBe(deriveCanonicalSwapFillRatio(quoteAmount, 210_000_000_000n));
@@ -326,9 +361,9 @@ describe('orderbook matching execution mapping', () => {
     const makerOffer = {
       offerId: 'maker-ask',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'maker-entity',
-      accountId: 'maker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: MAKER_ENTITY,
+      accountId: MAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: makerBaseQty,
       wantTokenId: 5,
@@ -341,9 +376,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'taker-buy',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker-entity',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ENTITY,
+      accountId: TAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: takerQuoteQty,
       wantTokenId: 2,
@@ -354,14 +389,14 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['maker-account', makeAccountMachine([makerOffer])],
-        ['taker-account', makeAccountMachine([])],
+        [MAKER_ACCOUNT, makeAccountMachine([makerOffer])],
+        [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -375,16 +410,18 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
     const makerResolve = result.accountTxs.find(
-      item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
+      item => item.accountId === MAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
     const takerResolve = result.accountTxs.find(
-      item => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve',
+      item => item.accountId === TAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
 
     expect(makerResolve).toBeDefined();
@@ -412,9 +449,9 @@ describe('orderbook matching execution mapping', () => {
     const makerOffer = {
       offerId: 'maker-ask',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'maker-entity',
-      accountId: 'maker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: MAKER_ENTITY,
+      accountId: MAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: makerBaseQty,
       wantTokenId: 5,
@@ -427,9 +464,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'taker-buy',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker-entity',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ENTITY,
+      accountId: TAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: takerQuoteQty,
       wantTokenId: 2,
@@ -440,14 +477,14 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['maker-account', makeAccountMachine([])],
-        ['taker-account', makeAccountMachine([])],
+        [MAKER_ACCOUNT, makeAccountMachine([])],
+        [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -461,16 +498,18 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
     const makerResolve = result.accountTxs.find(
-      item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
+      item => item.accountId === MAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
     const takerResolve = result.accountTxs.find(
-      item => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve',
+      item => item.accountId === TAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
     const finalBook = result.bookUpdates.at(-1)?.book;
 
@@ -486,7 +525,7 @@ describe('orderbook matching execution mapping', () => {
     expect(takerResolve!.tx.data.executionGiveAmount).toBe(makerQuoteQty);
     expect(takerResolve!.tx.data.executionWantAmount).toBe(makerBaseQty);
 
-    expect(getBookOrder(finalBook!, 'taker-account:taker-buy')).not.toBeNull();
+    expect(getBookOrder(finalBook!, orderKey(TAKER_ACCOUNT, 'taker-buy'))).not.toBeNull();
   });
 
   test('allows a taker to sweep multiple resting price levels without requiring integral VWAP', () => {
@@ -495,9 +534,9 @@ describe('orderbook matching execution mapping', () => {
     const makerAsk1 = {
       offerId: 'maker-ask-1',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'maker-1',
-      accountId: 'maker-account-1',
+      accountId: MAKER_ACCOUNT_ONE,
       giveTokenId: 2,
       giveAmount: 2n * lot,
       wantTokenId: 5,
@@ -510,9 +549,9 @@ describe('orderbook matching execution mapping', () => {
     const makerAsk2 = {
       offerId: 'maker-ask-2',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'maker-2',
-      accountId: 'maker-account-2',
+      accountId: MAKER_ACCOUNT_TWO,
       giveTokenId: 2,
       giveAmount: lot,
       wantTokenId: 5,
@@ -525,9 +564,9 @@ describe('orderbook matching execution mapping', () => {
     const takerBuy = {
       offerId: 'taker-buy',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker-entity',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ENTITY,
+      accountId: TAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: (3n * lot * 10_100n) / 10_000n,
       wantTokenId: 2,
@@ -538,15 +577,15 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['maker-account-1', makeAccountMachine([])],
-        ['maker-account-2', makeAccountMachine([])],
-        ['taker-account', makeAccountMachine([])],
+        [MAKER_ACCOUNT_ONE, makeAccountMachine([])],
+        [MAKER_ACCOUNT_TWO, makeAccountMachine([])],
+        [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -560,19 +599,21 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerAsk1, makerAsk2, takerBuy] as any);
     const takerResolve = result.accountTxs.find(
-      item => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve',
+      item => item.accountId === TAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
     const makerResolve1 = result.accountTxs.find(
-      item => item.accountId === 'maker-account-1' && item.tx.type === 'swap_resolve',
+      item => item.accountId === MAKER_ACCOUNT_ONE && item.tx.type === 'swap_resolve',
     );
     const makerResolve2 = result.accountTxs.find(
-      item => item.accountId === 'maker-account-2' && item.tx.type === 'swap_resolve',
+      item => item.accountId === MAKER_ACCOUNT_TWO && item.tx.type === 'swap_resolve',
     );
 
     const executionQuoteWei = (30_100n * lot) / 10_000n;
@@ -602,9 +643,9 @@ describe('orderbook matching execution mapping', () => {
     const selfMakerOffer = {
       offerId: 'self-ask',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'alice',
-      accountId: 'alice-maker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: ALICE,
+      accountId: ALICE_MAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: selfAskBaseQty,
       wantTokenId: 5,
@@ -617,9 +658,9 @@ describe('orderbook matching execution mapping', () => {
     const otherAskOffer = {
       offerId: 'other-ask',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'bob',
-      accountId: 'bob-maker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: BOB,
+      accountId: BOB_MAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: otherAskBaseQty,
       wantTokenId: 5,
@@ -632,9 +673,9 @@ describe('orderbook matching execution mapping', () => {
     const takerBuyOffer = {
       offerId: 'alice-buy',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'alice',
-      accountId: 'alice-taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: ALICE,
+      accountId: ALICE_TAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: takerQuoteQty,
       wantTokenId: 2,
@@ -645,15 +686,15 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['alice-maker-account', makeAccountMachine([])],
-        ['bob-maker-account', makeAccountMachine([])],
-        ['alice-taker-account', makeAccountMachine([])],
+        [ALICE_MAKER_ACCOUNT, makeAccountMachine([])],
+        [BOB_MAKER_ACCOUNT, makeAccountMachine([])],
+        [ALICE_TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -667,19 +708,21 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [selfMakerOffer, otherAskOffer, takerBuyOffer]);
     const takerResolve = result.accountTxs.find(
-      item => item.accountId === 'alice-taker-account' && item.tx.type === 'swap_resolve',
+      item => item.accountId === ALICE_TAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
     const otherMakerResolve = result.accountTxs.find(
-      item => item.accountId === 'bob-maker-account' && item.tx.type === 'swap_resolve',
+      item => item.accountId === BOB_MAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
     const selfMakerResolve = result.accountTxs.find(
-      item => item.accountId === 'alice-maker-account' && item.tx.type === 'swap_resolve',
+      item => item.accountId === ALICE_MAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
 
     expect(takerResolve).toBeDefined();
@@ -687,7 +730,7 @@ describe('orderbook matching execution mapping', () => {
     expect(selfMakerResolve).toBeUndefined();
 
     expect(takerResolve!.tx.data.cancelRemainder).toBe(true);
-    expect(takerResolve!.tx.data.comment).toBe('STP:alice-maker-account:self-ask');
+    expect(takerResolve!.tx.data.comment).toBe(`STP:${ALICE_MAKER_ACCOUNT}:self-ask`);
     expect(takerResolve!.tx.data.executionGiveAmount).toBe(otherAskQuoteQty);
     expect(takerResolve!.tx.data.executionWantAmount).toBe(otherAskBaseQty);
   });
@@ -699,9 +742,9 @@ describe('orderbook matching execution mapping', () => {
     const makerAsk = {
       offerId: 'maker-ask',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'ask-maker',
-      accountId: 'ask-maker-account',
+      accountId: ASK_MAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: 3n * lot,
       wantTokenId: 5,
@@ -714,9 +757,9 @@ describe('orderbook matching execution mapping', () => {
     const restingBid = {
       offerId: 'resting-bid',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'bid-maker',
-      accountId: 'bid-maker-account',
+      accountId: BID_MAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: (2n * lot * makerBidPriceTicks) / 10_000n,
       wantTokenId: 2,
@@ -727,14 +770,14 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['ask-maker-account', makeAccountMachine([])],
-        ['bid-maker-account', makeAccountMachine([])],
+        [ASK_MAKER_ACCOUNT, makeAccountMachine([])],
+        [BID_MAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -748,7 +791,9 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
@@ -756,7 +801,7 @@ describe('orderbook matching execution mapping', () => {
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(finalBook).toBeDefined();
 
-    expect(getBookOrder(finalBook!, 'bid-maker-account:resting-bid')?.priceTicks).toBe(makerBidPriceTicks);
+    expect(getBookOrder(finalBook!, orderKey(BID_MAKER_ACCOUNT, 'resting-bid'))?.priceTicks).toBe(makerBidPriceTicks);
   });
 
   test('uses midpoint band when both sides of the book exist for buys', () => {
@@ -764,9 +809,9 @@ describe('orderbook matching execution mapping', () => {
     const makerBid = {
       offerId: 'maker-bid',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'bid-maker',
-      accountId: 'bid-maker-account',
+      accountId: BID_MAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: (1000n * lot) / 10_000n,
       wantTokenId: 2,
@@ -779,9 +824,9 @@ describe('orderbook matching execution mapping', () => {
     const makerAsk = {
       offerId: 'maker-ask',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'ask-maker',
-      accountId: 'ask-maker-account',
+      accountId: ASK_MAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: lot,
       wantTokenId: 5,
@@ -794,9 +839,9 @@ describe('orderbook matching execution mapping', () => {
     const takerBuy = {
       offerId: 'taker-buy-between-sides',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'taker',
-      accountId: 'taker-account',
+      accountId: TAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: (1400n * 2n * lot) / 10_000n,
       wantTokenId: 2,
@@ -807,15 +852,15 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['bid-maker-account', makeAccountMachine([])],
-        ['ask-maker-account', makeAccountMachine([])],
-        ['taker-account', makeAccountMachine([])],
+        [BID_MAKER_ACCOUNT, makeAccountMachine([])],
+        [ASK_MAKER_ACCOUNT, makeAccountMachine([])],
+        [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -829,14 +874,16 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerBid, makerAsk, takerBuy]);
     const takerResolve = result.accountTxs.find(
       item =>
-        item.accountId === 'taker-account' &&
+        item.accountId === TAKER_ACCOUNT &&
         item.tx.type === 'swap_resolve' &&
         item.tx.data.offerId === 'taker-buy-between-sides',
     );
@@ -844,7 +891,7 @@ describe('orderbook matching execution mapping', () => {
     expect(takerResolve).toBeDefined();
     expect(takerResolve!.tx.data.cancelRemainder).toBe(false);
     expect(finalBook).toBeDefined();
-    expect(getBookOrder(finalBook!, 'taker-account:taker-buy-between-sides')).not.toBeNull();
+    expect(getBookOrder(finalBook!, orderKey(TAKER_ACCOUNT, 'taker-buy-between-sides'))).not.toBeNull();
   });
 
   test('uses midpoint band when both sides of the book exist for sells', () => {
@@ -852,9 +899,9 @@ describe('orderbook matching execution mapping', () => {
     const makerBid = {
       offerId: 'maker-bid',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'bid-maker',
-      accountId: 'bid-maker-account',
+      accountId: BID_MAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: (1000n * lot) / 10_000n,
       wantTokenId: 2,
@@ -867,9 +914,9 @@ describe('orderbook matching execution mapping', () => {
     const makerAsk = {
       offerId: 'maker-ask',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'ask-maker',
-      accountId: 'ask-maker-account',
+      accountId: ASK_MAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: lot,
       wantTokenId: 5,
@@ -882,9 +929,9 @@ describe('orderbook matching execution mapping', () => {
     const takerSell = {
       offerId: 'taker-sell-between-sides',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'taker',
-      accountId: 'taker-account',
+      accountId: TAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: 2n * lot,
       wantTokenId: 5,
@@ -895,15 +942,15 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['bid-maker-account', makeAccountMachine([])],
-        ['ask-maker-account', makeAccountMachine([])],
-        ['taker-account', makeAccountMachine([])],
+        [BID_MAKER_ACCOUNT, makeAccountMachine([])],
+        [ASK_MAKER_ACCOUNT, makeAccountMachine([])],
+        [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -917,14 +964,16 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerBid, makerAsk, takerSell]);
     const takerResolve = result.accountTxs.find(
       item =>
-        item.accountId === 'taker-account' &&
+        item.accountId === TAKER_ACCOUNT &&
         item.tx.type === 'swap_resolve' &&
         item.tx.data.offerId === 'taker-sell-between-sides',
     );
@@ -932,7 +981,7 @@ describe('orderbook matching execution mapping', () => {
     expect(takerResolve).toBeDefined();
     expect(takerResolve!.tx.data.cancelRemainder).toBe(false);
     expect(finalBook).toBeDefined();
-    expect(getBookOrder(finalBook!, 'taker-account:taker-sell-between-sides')).not.toBeNull();
+    expect(getBookOrder(finalBook!, orderKey(TAKER_ACCOUNT, 'taker-sell-between-sides'))).not.toBeNull();
   });
 
   test('matches persisted book orders after snapshot restore without rebuilding the book', () => {
@@ -945,8 +994,8 @@ describe('orderbook matching execution mapping', () => {
 
     historicalBook = applyCommand(historicalBook, {
       kind: 0,
-      ownerId: 'maker',
-      orderId: 'maker-account:maker-ask-historical',
+      ownerId: MAKER_ACCOUNT,
+      orderId: orderKey(MAKER_ACCOUNT, 'maker-ask-historical'),
       side: 1,
       tif: 0,
       postOnly: false,
@@ -957,9 +1006,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'taker-buy-restored-book',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ACCOUNT,
+      accountId: TAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: (1250n * 2n * lot) / 10_000n,
       wantTokenId: 2,
@@ -970,21 +1019,22 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
         [
-          'maker-account',
+          MAKER_ACCOUNT,
           {
             ...makeAccountMachine([]),
             state: {
               ...makeAccountMachine([]).state,
-              leftEntity: 'hub-entity',
-              rightEntity: 'maker',
+              leftEntity: HUB_ENTITY,
+              rightEntity: MAKER_ACCOUNT,
               swapOffers: new Map([
                 [
                   'maker-ask-historical',
                   {
                     offerId: 'maker-ask-historical',
+                    ...getStaticSwapTokenDimensions(2, 5),
                     giveTokenId: 2,
                     giveAmount: lot,
                     wantTokenId: 5,
@@ -1002,11 +1052,11 @@ describe('orderbook matching execution mapping', () => {
             },
           },
         ],
-        ['taker-account', makeAccountMachine([])],
+        [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -1020,14 +1070,19 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map([['2/5', historicalBook]]),
-        pairConfig: new Map(),
+        orderPairs: new Map([[orderKey(MAKER_ACCOUNT, 'maker-ask-historical'), ['2/5']]]),
+        pairDimensions: new Map([[
+          '2/5',
+          getSwapPairDimensions(1, getStaticSwapTokenDimensions(2, 5)),
+        ]]),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [takerOffer]);
     const makerResolve = result.accountTxs.find(
       item =>
-        item.accountId === 'maker-account' &&
+        item.accountId === MAKER_ACCOUNT &&
         item.tx.type === 'swap_resolve' &&
         item.tx.data.offerId === 'maker-ask-historical',
     );
@@ -1084,9 +1139,9 @@ describe('orderbook matching execution mapping', () => {
     const hugePriceOffer = {
       offerId: 'maker-huge-price',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'alice',
-      accountId: 'alice',
+      fromEntity: HUB_ENTITY,
+      toEntity: ALICE,
+      accountId: ALICE,
       giveTokenId: 2,
       giveAmount: lot,
       wantTokenId: 5,
@@ -1099,11 +1154,11 @@ describe('orderbook matching execution mapping', () => {
     } satisfies SwapOffer;
 
     const entityState = {
-      entityId: 'hub-entity',
-      accounts: new Map([['alice', makeAccountMachine(hugePriceOffer)]]),
+      entityId: HUB_ENTITY,
+      accounts: new Map([[ALICE, makeAccountMachine(hugePriceOffer)]]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -1117,7 +1172,9 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
@@ -1126,7 +1183,7 @@ describe('orderbook matching execution mapping', () => {
 
     expect(result.accountTxs.some((item: any) => item.tx?.type === 'swap_resolve')).toBe(false);
     expect(book).toBeDefined();
-    expect(getBookOrder(book!, 'alice:maker-huge-price')?.priceTicks).toBe(hugePriceTicks);
+    expect(getBookOrder(book!, orderKey(ALICE, 'maker-huge-price'))?.priceTicks).toBe(hugePriceTicks);
   });
 
   test('charges 1bp taker fee in the taker received asset without changing gross execution', async () => {
@@ -1138,9 +1195,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'taker-buy-with-fee',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker-entity',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ENTITY,
+      accountId: TAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: makerQuoteQty,
       wantTokenId: 2,
@@ -1153,7 +1210,7 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const makeFeeEntityState = () => ({
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       hubRebalanceConfig: {
         matchingStrategy: 'amount',
         policyVersion: 1,
@@ -1165,12 +1222,12 @@ describe('orderbook matching execution mapping', () => {
         rebalanceTimeoutMs: 10 * 60 * 1000,
       },
       accounts: new Map([
-        ['maker-account', makeAccountMachine([])],
-        ['taker-account', makeAccountMachine([])],
+        [MAKER_ACCOUNT, makeAccountMachine([])],
+        [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -1184,16 +1241,18 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any);
 
     const makerOffer = {
       offerId: 'maker-ask-fee',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'maker-entity',
-      accountId: 'maker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: MAKER_ENTITY,
+      accountId: MAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: makerBaseQty,
       wantTokenId: 5,
@@ -1209,10 +1268,10 @@ describe('orderbook matching execution mapping', () => {
       minNetReceive: makerBaseQty,
     }]);
     expect(unauthorized.accountTxs.some(
-      item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
+      item => item.accountId === MAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     )).toBe(false);
     expect(unauthorized.accountTxs).toContainEqual(expect.objectContaining({
-      accountId: 'taker-account',
+      accountId: TAKER_ACCOUNT,
       tx: expect.objectContaining({
         type: 'swap_resolve',
         data: expect.objectContaining({
@@ -1227,7 +1286,7 @@ describe('orderbook matching execution mapping', () => {
     const result = processCommittedOrderbookSwaps(makeFeeEntityState(), [makerOffer, takerOffer]);
     const takerResolve = result.accountTxs.find(
       item =>
-        item.accountId === 'taker-account' &&
+        item.accountId === TAKER_ACCOUNT &&
         item.tx.type === 'swap_resolve' &&
         item.tx.data.offerId === 'taker-buy-with-fee',
     );
@@ -1250,11 +1309,11 @@ describe('orderbook matching execution mapping', () => {
       [makerOffer, improvedTakerOffer],
     );
     const improvedMakerResolve = improved.accountTxs.find(
-      item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
+      item => item.accountId === MAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
     const improvedTakerResolve = improved.accountTxs.find(
       item =>
-        item.accountId === 'taker-account' &&
+        item.accountId === TAKER_ACCOUNT &&
         item.tx.type === 'swap_resolve' &&
         item.tx.data.offerId === improvedTakerOffer.offerId,
     );
@@ -1273,9 +1332,9 @@ describe('orderbook matching execution mapping', () => {
     const makerBid = {
       offerId: 'maker-bid-price-improvement',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'maker-entity',
-      accountId: 'maker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: MAKER_ENTITY,
+      accountId: MAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: betterBidQuoteQty,
       wantTokenId: 2,
@@ -1287,9 +1346,9 @@ describe('orderbook matching execution mapping', () => {
     const improvedSellTaker = {
       offerId: 'taker-sell-with-price-improvement',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker-entity',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ENTITY,
+      accountId: TAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: makerBaseQty,
       wantTokenId: 5,
@@ -1305,11 +1364,11 @@ describe('orderbook matching execution mapping', () => {
       [makerBid, improvedSellTaker],
     );
     const improvedSellMakerResolve = improvedSell.accountTxs.find(
-      item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
+      item => item.accountId === MAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
     const improvedSellTakerResolve = improvedSell.accountTxs.find(
       item =>
-        item.accountId === 'taker-account' &&
+        item.accountId === TAKER_ACCOUNT &&
         item.tx.type === 'swap_resolve' &&
         item.tx.data.offerId === improvedSellTaker.offerId,
     );
@@ -1469,9 +1528,9 @@ describe('orderbook matching execution mapping', () => {
     const makerOffer = {
       offerId: 'maker-ask',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'maker-entity',
-      accountId: 'maker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: MAKER_ENTITY,
+      accountId: MAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: makerBaseQty,
       wantTokenId: 5,
@@ -1484,9 +1543,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'taker-buy-too-high',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker-entity',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ENTITY,
+      accountId: TAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: takerQuoteQty,
       wantTokenId: 2,
@@ -1497,14 +1556,14 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['maker-account', makeAccountMachine([])],
-        ['taker-account', makeAccountMachine([])],
+        [MAKER_ACCOUNT, makeAccountMachine([])],
+        [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -1518,14 +1577,16 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
     const cancelOp = result.accountTxs.find(
       item =>
-        item.accountId === 'taker-account' &&
+        item.accountId === TAKER_ACCOUNT &&
         item.tx.type === 'swap_resolve' &&
         item.tx.data.offerId === 'taker-buy-too-high',
     );
@@ -1535,7 +1596,7 @@ describe('orderbook matching execution mapping', () => {
     expect(cancelOp!.tx.data.fillRatio).toBe(0);
     expect(cancelOp!.tx.data.cancelRemainder).toBe(true);
     expect(finalBook).toBeDefined();
-    expect(getBookOrder(finalBook!, 'taker-account:taker-buy-too-high')).toBeNull();
+    expect(getBookOrder(finalBook!, orderKey(TAKER_ACCOUNT, 'taker-buy-too-high'))).toBeNull();
   });
 
   test('sweeps far resting orders outside the pair band before matching new flow', () => {
@@ -1547,9 +1608,9 @@ describe('orderbook matching execution mapping', () => {
     const nearAskOffer = {
       offerId: 'near-ask',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'near-maker',
-      accountId: 'near-maker-account',
+      accountId: NEAR_MAKER_ACCOUNT,
       createdHeight: 1,
       giveTokenId: 2,
       giveAmount: lot,
@@ -1561,9 +1622,9 @@ describe('orderbook matching execution mapping', () => {
     const farAskOffer = {
       offerId: 'far-ask',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'far-maker',
-      accountId: 'far-maker-account',
+      accountId: FAR_MAKER_ACCOUNT,
       createdHeight: 2,
       giveTokenId: 2,
       giveAmount: lot,
@@ -1575,9 +1636,9 @@ describe('orderbook matching execution mapping', () => {
     const incomingBidOffer = {
       offerId: 'fresh-bid',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'taker',
-      accountId: 'taker-account',
+      accountId: TAKER_ACCOUNT,
       createdHeight: 3,
       giveTokenId: 1,
       giveAmount: (lot * bidPriceTicks) / 10_000n,
@@ -1588,15 +1649,15 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['near-maker-account', makeAccountMachine([nearAskOffer])],
-        ['far-maker-account', makeAccountMachine([farAskOffer])],
-        ['taker-account', makeAccountMachine([])],
+        [NEAR_MAKER_ACCOUNT, makeAccountMachine([nearAskOffer])],
+        [FAR_MAKER_ACCOUNT, makeAccountMachine([farAskOffer])],
+        [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -1617,7 +1678,7 @@ describe('orderbook matching execution mapping', () => {
               book = applyCommand(book, {
                 kind: 0,
                 ownerId: 'near-maker',
-                orderId: 'near-maker-account:near-ask',
+                orderId: orderKey(NEAR_MAKER_ACCOUNT, 'near-ask'),
                 side: 1,
                 tif: 0,
                 postOnly: false,
@@ -1627,7 +1688,7 @@ describe('orderbook matching execution mapping', () => {
               book = applyCommand(book, {
                 kind: 0,
                 ownerId: 'far-maker',
-                orderId: 'far-maker-account:far-ask',
+                orderId: orderKey(FAR_MAKER_ACCOUNT, 'far-ask'),
                 side: 1,
                 tif: 0,
                 postOnly: false,
@@ -1638,14 +1699,16 @@ describe('orderbook matching execution mapping', () => {
             })(),
           ],
         ]),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [incomingBidOffer] as any);
     const farCancel = result.accountTxs.find(
       item =>
-        item.accountId === 'far-maker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'far-ask',
+        item.accountId === FAR_MAKER_ACCOUNT && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'far-ask',
     );
     const finalBook = result.bookUpdates.at(-1)?.book;
 
@@ -1653,18 +1716,18 @@ describe('orderbook matching execution mapping', () => {
     expect(farCancel!.tx.data.fillRatio).toBe(0);
     expect(farCancel!.tx.data.cancelRemainder).toBe(true);
     expect(finalBook).toBeDefined();
-    expect(getBookOrder(finalBook!, 'far-maker-account:far-ask')).toBeNull();
-    expect(getBookOrder(finalBook!, 'near-maker-account:near-ask')).not.toBeNull();
-    expect(getBookOrder(finalBook!, 'taker-account:fresh-bid')).not.toBeNull();
+    expect(getBookOrder(finalBook!, orderKey(FAR_MAKER_ACCOUNT, 'far-ask'))).toBeNull();
+    expect(getBookOrder(finalBook!, orderKey(NEAR_MAKER_ACCOUNT, 'near-ask'))).not.toBeNull();
+    expect(getBookOrder(finalBook!, orderKey(TAKER_ACCOUNT, 'fresh-bid'))).not.toBeNull();
   });
 
   test('does not enqueue duplicate fail-closed cancel when the same offer is already pending in mempool or pendingFrame', () => {
     const makerOffer = {
       offerId: 'maker-ask',
       makerIsLeft: true,
-      fromEntity: 'maker-entity',
-      toEntity: 'hub-entity',
-      accountId: 'maker-account',
+      fromEntity: MAKER_ENTITY,
+      toEntity: HUB_ENTITY,
+      accountId: MAKER_ACCOUNT,
       giveTokenId: 2,
       giveAmount: SWAP_LOT_SCALE,
       wantTokenId: 5,
@@ -1679,9 +1742,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'taker-buy-too-high',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker-entity',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ENTITY,
+      accountId: TAKER_ACCOUNT,
       giveTokenId: 5,
       giveAmount: (1400n * SWAP_LOT_SCALE) / 10_000n,
       wantTokenId: 2,
@@ -1694,19 +1757,19 @@ describe('orderbook matching execution mapping', () => {
     } satisfies SwapOffer;
 
     const takerAccount = makeAccountMachine(takerOffer);
-    takerAccount.leftEntity = 'taker-entity';
-    takerAccount.rightEntity = 'hub-entity';
-    takerAccount.proofHeader = { fromEntity: 'taker-entity', toEntity: 'hub-entity', nextProofNonce: 0 };
+    takerAccount.leftEntity = TAKER_ENTITY;
+    takerAccount.rightEntity = HUB_ENTITY;
+    takerAccount.proofHeader = { fromEntity: TAKER_ENTITY, toEntity: HUB_ENTITY, nextProofNonce: 0 };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['maker-account', makeAccountMachine(makerOffer)],
-        ['taker-account', takerAccount],
+        [MAKER_ACCOUNT, makeAccountMachine(makerOffer)],
+        [TAKER_ACCOUNT, takerAccount],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -1720,13 +1783,15 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       },
     } as any;
 
     const firstPass = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
     expect(firstPass.accountTxs).toHaveLength(1);
-    expect(firstPass.accountTxs[0]?.accountId).toBe('taker-account');
+    expect(firstPass.accountTxs[0]?.accountId).toBe(TAKER_ACCOUNT);
     expect(firstPass.accountTxs[0]?.tx.type).toBe('swap_resolve');
     expect(firstPass.accountTxs[0]?.tx.data.offerId).toBe('taker-buy-too-high');
     expect(firstPass.accountTxs[0]?.tx.data.cancelRemainder).toBe(true);
@@ -1752,14 +1817,14 @@ describe('orderbook matching execution mapping', () => {
 
   test('sorts live offers canonically before inserting into the book', () => {
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['alice', makeAccountIndex(['offer-a'])],
-        ['bob', makeAccountIndex(['offer-b'])],
+        [ALICE, makeAccountIndex(['offer-a'])],
+        [BOB, makeAccountIndex(['offer-b'])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -1773,7 +1838,9 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
@@ -1781,9 +1848,9 @@ describe('orderbook matching execution mapping', () => {
       {
         offerId: 'offer-b',
         makerIsLeft: false,
-        fromEntity: 'hub-entity',
-        toEntity: 'bob',
-        accountId: 'bob',
+        fromEntity: HUB_ENTITY,
+        toEntity: BOB,
+        accountId: BOB,
         createdHeight: 7,
         giveTokenId: 2,
         giveAmount: SWAP_LOT_SCALE,
@@ -1795,9 +1862,9 @@ describe('orderbook matching execution mapping', () => {
       {
         offerId: 'offer-a',
         makerIsLeft: false,
-        fromEntity: 'hub-entity',
-        toEntity: 'alice',
-        accountId: 'alice',
+        fromEntity: HUB_ENTITY,
+        toEntity: ALICE,
+        accountId: ALICE,
         createdHeight: 3,
         giveTokenId: 2,
         giveAmount: SWAP_LOT_SCALE,
@@ -1812,19 +1879,19 @@ describe('orderbook matching execution mapping', () => {
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(finalBook).toBeDefined();
     expect(getBestAsk(finalBook!)).toBe(1000n);
-    expect(getBookSideLevels(finalBook!, 1, 1)[0]?.orderIds[0]).toBe('alice:offer-a');
+    expect(getBookSideLevels(finalBook!, 1, 1)[0]?.orderIds[0]).toBe(orderKey(ALICE, 'offer-a'));
   });
 
   test('debug projection rebuild reports crossed offers without emitting swap_resolve side effects', () => {
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['alice', makeAccountIndex(['offer-a'])],
-        ['bob', makeAccountIndex(['offer-b'])],
+        [ALICE, makeAccountIndex(['offer-a'])],
+        [BOB, makeAccountIndex(['offer-b'])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -1838,7 +1905,9 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['2/5'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
@@ -1846,9 +1915,9 @@ describe('orderbook matching execution mapping', () => {
       {
         offerId: 'offer-a',
         makerIsLeft: false,
-        fromEntity: 'hub-entity',
-        toEntity: 'alice',
-        accountId: 'alice',
+        fromEntity: HUB_ENTITY,
+        toEntity: ALICE,
+        accountId: ALICE,
         createdHeight: 1,
         giveTokenId: 2,
         giveAmount: SWAP_LOT_SCALE,
@@ -1860,9 +1929,9 @@ describe('orderbook matching execution mapping', () => {
       {
         offerId: 'offer-b',
         makerIsLeft: false,
-        fromEntity: 'hub-entity',
-        toEntity: 'bob',
-        accountId: 'bob',
+        fromEntity: HUB_ENTITY,
+        toEntity: BOB,
+        accountId: BOB,
         createdHeight: 2,
         giveTokenId: 5,
         giveAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
@@ -1876,7 +1945,7 @@ describe('orderbook matching execution mapping', () => {
     const result = processCommittedOrderbookSwaps(entityState, offers as any, { debugRebuildProjectionOnly: true });
     expect(result.accountTxs).toHaveLength(0);
     expect(result.bookUpdates).toEqual([]);
-    expect(result.debugProjectionRejects.map(offer => `${offer.accountId}:${offer.offerId}`)).toEqual(['bob:offer-b']);
+    expect(result.debugProjectionRejects.map(offer => `${offer.accountId}:${offer.offerId}`)).toEqual([orderKey(BOB, 'offer-b')]);
     expect(result.debugProjectionRejects[0]?.reason).toBe('post-only-reject:postOnly would cross');
     expect(entityState.orderbookExt.books.size).toBe(0);
   });
@@ -1884,11 +1953,11 @@ describe('orderbook matching execution mapping', () => {
   test('preserves exact aligned price when creating an exact book', () => {
     const priceTicks = 24_999_992n;
     const entityState = {
-      entityId: 'hub-entity',
-      accounts: new Map([['alice', makeAccountIndex(['offer-a'])]]),
+      entityId: HUB_ENTITY,
+      accounts: new Map([[ALICE, makeAccountIndex(['offer-a'])]]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -1902,16 +1971,18 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['1/2'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const offer = {
       offerId: 'offer-a',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'alice',
-      accountId: 'alice',
+      fromEntity: HUB_ENTITY,
+      toEntity: ALICE,
+      accountId: ALICE,
       createdHeight: 1,
       giveTokenId: 2,
       giveAmount: 30_000n * SWAP_LOT_SCALE,
@@ -1925,22 +1996,22 @@ describe('orderbook matching execution mapping', () => {
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(finalBook).toBeDefined();
 
-    expect(getBookOrder(finalBook!, 'alice:offer-a')?.priceTicks).toBe(priceTicks);
+    expect(getBookOrder(finalBook!, orderKey(ALICE, 'offer-a'))?.priceTicks).toBe(priceTicks);
   });
 
   test('keeps wide exact prices in the pair book without widening or snapping', () => {
     const anchorPriceTicks = 25_015_002n;
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
         [
-          'alice',
+          ALICE,
           makeAccountIndex(['offer-a', 'offer-b', 'offer-c']),
         ],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -1954,16 +2025,18 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['1/2'],
         },
         books: new Map(),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const makeOffer = (offerId: string, priceTicks: bigint, size: bigint) => ({
       offerId,
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'alice',
-      accountId: 'alice',
+      fromEntity: HUB_ENTITY,
+      toEntity: ALICE,
+      accountId: ALICE,
       createdHeight: 1,
       giveTokenId: 2,
       giveAmount: size,
@@ -1978,15 +2051,15 @@ describe('orderbook matching execution mapping', () => {
       makeOffer('offer-b', 25_137_562n, 600n * SWAP_LOT_SCALE),
       makeOffer('offer-c', 25_262_625n, 960n * SWAP_LOT_SCALE),
     ];
-    entityState.accounts.get('alice')!.swapOffers = new Map(offers.map(offer => [offer.offerId, offer]));
+    entityState.accounts.get(ALICE)!.swapOffers = new Map(offers.map(offer => [offer.offerId, offer]));
 
     const result = processCommittedOrderbookSwaps(entityState, offers as any);
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(finalBook).toBeDefined();
     expect(finalBook!.params.bucketWidthTicks).toBe(10_000n);
-    expect(getBookOrder(finalBook!, 'alice:offer-a')?.priceTicks).toBe(anchorPriceTicks);
-    expect(getBookOrder(finalBook!, 'alice:offer-b')?.priceTicks).toBe(25_137_562n);
-    expect(getBookOrder(finalBook!, 'alice:offer-c')?.priceTicks).toBe(25_262_625n);
+    expect(getBookOrder(finalBook!, orderKey(ALICE, 'offer-a'))?.priceTicks).toBe(anchorPriceTicks);
+    expect(getBookOrder(finalBook!, orderKey(ALICE, 'offer-b'))?.priceTicks).toBe(25_137_562n);
+    expect(getBookOrder(finalBook!, orderKey(ALICE, 'offer-c'))?.priceTicks).toBe(25_262_625n);
   });
 
   test('fails fast when a stale persisted pair book diverges from account offers', () => {
@@ -2000,8 +2073,8 @@ describe('orderbook matching execution mapping', () => {
     });
     staleBook = applyCommand(staleBook, {
       kind: 0,
-      ownerId: 'maker-entity',
-      orderId: 'maker-account:maker-ask',
+      ownerId: MAKER_ENTITY,
+      orderId: orderKey(MAKER_ACCOUNT, 'maker-ask'),
       side: 1,
       tif: 0,
       postOnly: false,
@@ -2012,9 +2085,9 @@ describe('orderbook matching execution mapping', () => {
     const makerOffer = {
       offerId: 'maker-ask',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'maker-entity',
-      accountId: 'maker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: MAKER_ENTITY,
+      accountId: MAKER_ACCOUNT,
       createdHeight: 1,
       giveTokenId: 2,
       giveAmount: lot,
@@ -2026,9 +2099,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'taker-bid',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker-entity',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ENTITY,
+      accountId: TAKER_ACCOUNT,
       createdHeight: 2,
       giveTokenId: 1,
       giveAmount: (lot * bidPriceTicks) / 10_000n,
@@ -2039,14 +2112,14 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['maker-account', makeAccountMachine([makerOffer])],
-        ['taker-account', makeAccountMachine([])],
+        [MAKER_ACCOUNT, makeAccountMachine([makerOffer])],
+        [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -2060,7 +2133,9 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['1/2'],
         },
         books: new Map([['1/2', staleBook]]),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
@@ -2077,8 +2152,8 @@ describe('orderbook matching execution mapping', () => {
     });
     staleBook = applyCommand(staleBook, {
       kind: 0,
-      ownerId: 'maker-entity',
-      orderId: 'maker-account:maker-cross',
+      ownerId: MAKER_ENTITY,
+      orderId: orderKey(MAKER_ACCOUNT, 'maker-cross'),
       side: 1,
       tif: 0,
       postOnly: false,
@@ -2088,21 +2163,21 @@ describe('orderbook matching execution mapping', () => {
 
     const route = {
       orderId: 'taker-cross',
-      bookOwnerEntityId: 'hub-entity',
+      bookOwnerEntityId: HUB_ENTITY,
       venueId: pairId,
-      makerEntityId: 'taker-entity',
-      hubEntityId: 'hub-entity',
+      makerEntityId: TAKER_ENTITY,
+      hubEntityId: HUB_ENTITY,
       source: {
         jurisdiction: TESTNET_STACK,
-        entityId: 'taker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: TAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: lot,
       },
       target: {
         jurisdiction: TRON_STACK,
-        entityId: 'taker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: TAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: lot,
       },
@@ -2114,9 +2189,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'taker-cross',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker-entity',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ENTITY,
+      accountId: TAKER_ACCOUNT,
       createdHeight: 2,
       giveTokenId: 1,
       giveAmount: lot,
@@ -2128,14 +2203,14 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['maker-account', makeAccountMachine([])],
-        ['taker-account', makeAccountMachine([takerOffer])],
+        [MAKER_ACCOUNT, makeAccountMachine([])],
+        [TAKER_ACCOUNT, makeAccountMachine([takerOffer])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -2149,7 +2224,9 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: [pairId],
         },
         books: new Map([[pairId, staleBook]]),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
@@ -2167,7 +2244,7 @@ describe('orderbook matching execution mapping', () => {
     const remainingSource = sourceTotal - filledSourceAmount;
     const remainingTarget = targetTotal - filledTargetAmount;
     const pairId = CROSS_WETH_USDC_PAIR;
-    const namespacedOrderId = 'maker-account:maker-cross-partial';
+    const namespacedOrderId = orderKey(MAKER_ACCOUNT, 'maker-cross-partial');
     let staleBook = createBook({
       bucketWidthTicks: 10_000n,
       maxOrders: 10_000,
@@ -2175,7 +2252,7 @@ describe('orderbook matching execution mapping', () => {
     });
     staleBook = applyCommand(staleBook, {
       kind: 0,
-      ownerId: 'maker-entity',
+      ownerId: MAKER_ENTITY,
       orderId: namespacedOrderId,
       side: 1,
       tif: 0,
@@ -2186,21 +2263,21 @@ describe('orderbook matching execution mapping', () => {
 
     const route = {
       orderId: 'maker-cross-partial',
-      bookOwnerEntityId: 'hub-entity',
+      bookOwnerEntityId: HUB_ENTITY,
       venueId: pairId,
-      makerEntityId: 'maker-entity',
-      hubEntityId: 'hub-entity',
+      makerEntityId: MAKER_ENTITY,
+      hubEntityId: HUB_ENTITY,
       source: {
         jurisdiction: TESTNET_STACK,
-        entityId: 'maker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: MAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: sourceTotal,
       },
       target: {
         jurisdiction: TRON_STACK,
-        entityId: 'maker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: MAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: targetTotal,
       },
@@ -2220,9 +2297,9 @@ describe('orderbook matching execution mapping', () => {
     const offer = {
       offerId: 'maker-cross-partial',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'maker-entity',
-      accountId: 'maker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: MAKER_ENTITY,
+      accountId: MAKER_ACCOUNT,
       createdHeight: 2,
       giveTokenId: 2,
       giveAmount: remainingSource,
@@ -2236,11 +2313,11 @@ describe('orderbook matching execution mapping', () => {
     };
 
     const entityState = {
-      entityId: 'hub-entity',
-      accounts: new Map([['maker-account', makeAccountMachine([offer])]]),
+      entityId: HUB_ENTITY,
+      accounts: new Map([[MAKER_ACCOUNT, makeAccountMachine([offer])]]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -2254,7 +2331,9 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: [pairId],
         },
         books: new Map([[pairId, staleBook]]),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
@@ -2271,7 +2350,7 @@ describe('orderbook matching execution mapping', () => {
     const fillSource = 10_000n * lot;
     const fillTarget = quoteAmountAtPrice(2, 1, fillSource, 25_000_000n);
     const pairId = CROSS_WETH_USDC_PAIR;
-    const makerOrderId = 'maker-account:maker-cross-partial-live';
+    const makerOrderId = orderKey(MAKER_ACCOUNT, 'maker-cross-partial-live');
     let book = createBook({
       bucketWidthTicks: 10_000n,
       maxOrders: 10_000,
@@ -2279,7 +2358,7 @@ describe('orderbook matching execution mapping', () => {
     });
     book = applyCommand(book, {
       kind: 0,
-      ownerId: 'maker-entity',
+      ownerId: MAKER_ENTITY,
       orderId: makerOrderId,
       side: 1,
       tif: 0,
@@ -2290,21 +2369,21 @@ describe('orderbook matching execution mapping', () => {
 
     const makerRoute = {
       orderId: 'maker-cross-partial-live',
-      bookOwnerEntityId: 'hub-entity',
+      bookOwnerEntityId: HUB_ENTITY,
       venueId: pairId,
-      makerEntityId: 'maker-entity',
-      hubEntityId: 'hub-entity',
+      makerEntityId: MAKER_ENTITY,
+      hubEntityId: HUB_ENTITY,
       source: {
         jurisdiction: TESTNET_STACK,
-        entityId: 'maker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: MAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: sourceTotal,
       },
       target: {
         jurisdiction: TRON_STACK,
-        entityId: 'maker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: MAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: targetTotal,
       },
@@ -2315,18 +2394,18 @@ describe('orderbook matching execution mapping', () => {
     const takerRoute = {
       ...makerRoute,
       orderId: 'taker-cross-partial-live',
-      makerEntityId: 'taker-entity',
+      makerEntityId: TAKER_ENTITY,
       source: {
         jurisdiction: TRON_STACK,
-        entityId: 'taker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: TAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: fillTarget,
       },
       target: {
         jurisdiction: TESTNET_STACK,
-        entityId: 'taker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: TAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: fillSource,
       },
@@ -2334,9 +2413,9 @@ describe('orderbook matching execution mapping', () => {
     const makerOffer = {
       offerId: 'maker-cross-partial-live',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'maker-entity',
-      accountId: 'maker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: MAKER_ENTITY,
+      accountId: MAKER_ACCOUNT,
       createdHeight: 1,
       giveTokenId: 2,
       giveAmount: sourceTotal,
@@ -2351,9 +2430,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'taker-cross-partial-live',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker-entity',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ENTITY,
+      accountId: TAKER_ACCOUNT,
       createdHeight: 1,
       giveTokenId: 1,
       giveAmount: fillTarget,
@@ -2366,14 +2445,14 @@ describe('orderbook matching execution mapping', () => {
       crossJurisdiction: takerRoute,
     };
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['maker-account', makeAccountMachine([makerOffer])],
-        ['taker-account', makeAccountMachine([takerOffer])],
+        [MAKER_ACCOUNT, makeAccountMachine([makerOffer])],
+        [TAKER_ACCOUNT, makeAccountMachine([takerOffer])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -2387,13 +2466,15 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: [pairId],
         },
         books: new Map([[pairId, book]]),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
     const makerAck = result.accountTxs.find(
-      op => op.accountId === 'maker-account' && op.tx.type === 'cross_swap_fill_ack',
+      op => op.accountId === MAKER_ACCOUNT && op.tx.type === 'cross_swap_fill_ack',
     );
 
     expect(makerAck?.tx.data.cancelRemainder).toBe(false);
@@ -2412,7 +2493,7 @@ describe('orderbook matching execution mapping', () => {
     const fillSource = lot;
     const fillTarget = quoteAmountAtPrice(2, 1, fillSource, ORDERBOOK_PRICE_SCALE);
     const pairId = CROSS_WETH_USDC_PAIR;
-    const makerOrderId = 'maker-account:maker-cross-tiny-fill';
+    const makerOrderId = orderKey(MAKER_ACCOUNT, 'maker-cross-tiny-fill');
     let book = createBook({
       bucketWidthTicks: 10_000n,
       maxOrders: 10_000_000,
@@ -2420,7 +2501,7 @@ describe('orderbook matching execution mapping', () => {
     });
     book = applyCommand(book, {
       kind: 0,
-      ownerId: 'maker-entity',
+      ownerId: MAKER_ENTITY,
       orderId: makerOrderId,
       side: 1,
       tif: 0,
@@ -2431,21 +2512,21 @@ describe('orderbook matching execution mapping', () => {
 
     const makerRoute = {
       orderId: 'maker-cross-tiny-fill',
-      bookOwnerEntityId: 'hub-entity',
+      bookOwnerEntityId: HUB_ENTITY,
       venueId: pairId,
-      makerEntityId: 'maker-entity',
-      hubEntityId: 'hub-entity',
+      makerEntityId: MAKER_ENTITY,
+      hubEntityId: HUB_ENTITY,
       source: {
         jurisdiction: TESTNET_STACK,
-        entityId: 'maker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: MAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: sourceTotal,
       },
       target: {
         jurisdiction: TRON_STACK,
-        entityId: 'maker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: MAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: targetTotal,
       },
@@ -2459,18 +2540,18 @@ describe('orderbook matching execution mapping', () => {
     const takerRoute = {
       ...makerRoute,
       orderId: 'taker-cross-tiny-fill',
-      makerEntityId: 'taker-entity',
+      makerEntityId: TAKER_ENTITY,
       source: {
         jurisdiction: TRON_STACK,
-        entityId: 'taker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: TAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: fillTarget,
       },
       target: {
         jurisdiction: TESTNET_STACK,
-        entityId: 'taker-entity',
-        counterpartyEntityId: 'hub-entity',
+        entityId: TAKER_ENTITY,
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: fillSource,
       },
@@ -2480,9 +2561,9 @@ describe('orderbook matching execution mapping', () => {
     const makerOffer = {
       offerId: 'maker-cross-tiny-fill',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'maker-entity',
-      accountId: 'maker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: MAKER_ENTITY,
+      accountId: MAKER_ACCOUNT,
       createdHeight: 1,
       giveTokenId: 2,
       giveAmount: sourceTotal,
@@ -2497,9 +2578,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'taker-cross-tiny-fill',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
-      toEntity: 'taker-entity',
-      accountId: 'taker-account',
+      fromEntity: HUB_ENTITY,
+      toEntity: TAKER_ENTITY,
+      accountId: TAKER_ACCOUNT,
       createdHeight: 1,
       giveTokenId: 1,
       giveAmount: fillTarget,
@@ -2512,14 +2593,14 @@ describe('orderbook matching execution mapping', () => {
       crossJurisdiction: takerRoute,
     };
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
-        ['maker-account', makeAccountMachine([makerOffer])],
-        ['taker-account', makeAccountMachine([takerOffer])],
+        [MAKER_ACCOUNT, makeAccountMachine([makerOffer])],
+        [TAKER_ACCOUNT, makeAccountMachine([takerOffer])],
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -2533,7 +2614,9 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: [pairId],
         },
         books: new Map([[pairId, book]]),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
@@ -2565,21 +2648,21 @@ describe('orderbook matching execution mapping', () => {
 
     const staleRoute = {
       orderId: 'old-cross',
-      bookOwnerEntityId: 'hub-entity',
+      bookOwnerEntityId: HUB_ENTITY,
       venueId: pairId,
       makerEntityId: 'old-maker',
-      hubEntityId: 'hub-entity',
+      hubEntityId: HUB_ENTITY,
       source: {
         jurisdiction: TESTNET_STACK,
         entityId: 'old-maker',
-        counterpartyEntityId: 'hub-entity',
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: lot,
       },
       target: {
         jurisdiction: TRON_STACK,
         entityId: 'old-maker',
-        counterpartyEntityId: 'hub-entity',
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
@@ -2594,14 +2677,14 @@ describe('orderbook matching execution mapping', () => {
       source: {
         jurisdiction: TRON_STACK,
         entityId: 'new-taker',
-        counterpartyEntityId: 'hub-entity',
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
       target: {
         jurisdiction: TESTNET_STACK,
         entityId: 'new-taker',
-        counterpartyEntityId: 'hub-entity',
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: lot,
       },
@@ -2610,9 +2693,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'new-taker',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'new-taker',
-      accountId: 'new-taker-account',
+      accountId: NEW_TAKER_ACCOUNT,
       createdHeight: 2,
       giveTokenId: 1,
       giveAmount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
@@ -2625,8 +2708,8 @@ describe('orderbook matching execution mapping', () => {
       crossJurisdiction: takerRoute,
     };
     const entityState = {
-      entityId: 'hub-entity',
-      accounts: new Map([['new-taker-account', makeAccountMachine([takerOffer])]]),
+      entityId: HUB_ENTITY,
+      accounts: new Map([[NEW_TAKER_ACCOUNT, makeAccountMachine([takerOffer])]]),
       crossJurisdictionSwaps: new Map([['old-cross', staleRoute]]),
       crossJurisdictionBookAdmissions: new Map([
         [
@@ -2635,7 +2718,7 @@ describe('orderbook matching execution mapping', () => {
             orderId: 'old-cross',
             routeHash: 'hash',
             sourceEntityId: 'old-maker',
-            bookOwnerEntityId: 'hub-entity',
+            bookOwnerEntityId: HUB_ENTITY,
             status: 'admitted',
             route: { ...staleRoute, status: 'resting' },
             updatedAt: 1,
@@ -2644,7 +2727,7 @@ describe('orderbook matching execution mapping', () => {
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -2658,7 +2741,9 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: [pairId],
         },
         books: new Map([[pairId, book]]),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 
@@ -2691,21 +2776,21 @@ describe('orderbook matching execution mapping', () => {
 
     const staleRoute = {
       orderId: 'old-cross',
-      bookOwnerEntityId: 'hub-entity',
+      bookOwnerEntityId: HUB_ENTITY,
       venueId: pairId,
       makerEntityId: 'old-maker',
-      hubEntityId: 'hub-entity',
+      hubEntityId: HUB_ENTITY,
       source: {
         jurisdiction: TESTNET_STACK,
         entityId: 'old-maker',
-        counterpartyEntityId: 'hub-entity',
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: lot,
       },
       target: {
         jurisdiction: TRON_STACK,
         entityId: 'old-maker',
-        counterpartyEntityId: 'hub-entity',
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
@@ -2716,7 +2801,7 @@ describe('orderbook matching execution mapping', () => {
     const makerOffer = {
       offerId: 'old-cross',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'old-maker',
       accountId: 'old-maker',
       createdHeight: 1,
@@ -2737,14 +2822,14 @@ describe('orderbook matching execution mapping', () => {
       source: {
         jurisdiction: TRON_STACK,
         entityId: 'new-taker',
-        counterpartyEntityId: 'hub-entity',
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
       target: {
         jurisdiction: TESTNET_STACK,
         entityId: 'new-taker',
-        counterpartyEntityId: 'hub-entity',
+        counterpartyEntityId: HUB_ENTITY,
         tokenId: 2,
         amount: lot,
       },
@@ -2752,9 +2837,9 @@ describe('orderbook matching execution mapping', () => {
     const takerOffer = {
       offerId: 'new-taker',
       makerIsLeft: false,
-      fromEntity: 'hub-entity',
+      fromEntity: HUB_ENTITY,
       toEntity: 'new-taker',
-      accountId: 'new-taker-account',
+      accountId: NEW_TAKER_ACCOUNT,
       createdHeight: 2,
       giveTokenId: 1,
       giveAmount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
@@ -2767,10 +2852,10 @@ describe('orderbook matching execution mapping', () => {
       crossJurisdiction: takerRoute,
     };
     const entityState = {
-      entityId: 'hub-entity',
+      entityId: HUB_ENTITY,
       accounts: new Map([
         ['old-maker', makeAccountMachine([makerOffer])],
-        ['new-taker-account', makeAccountMachine([takerOffer])],
+        [NEW_TAKER_ACCOUNT, makeAccountMachine([takerOffer])],
       ]),
       crossJurisdictionSwaps: new Map([['old-cross', staleRoute]]),
       crossJurisdictionBookAdmissions: new Map([
@@ -2780,7 +2865,7 @@ describe('orderbook matching execution mapping', () => {
             orderId: 'old-cross',
             routeHash: 'hash',
             sourceEntityId: 'old-maker',
-            bookOwnerEntityId: 'hub-entity',
+            bookOwnerEntityId: HUB_ENTITY,
             status: 'closed',
             route: staleRoute,
             updatedAt: 2,
@@ -2789,7 +2874,7 @@ describe('orderbook matching execution mapping', () => {
       ]),
       orderbookExt: {
         hubProfile: {
-          entityId: 'hub-entity',
+          entityId: HUB_ENTITY,
           name: 'Hub',
           minTradeSize: 0n,
           spreadDistribution: {
@@ -2803,7 +2888,9 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: [pairId],
         },
         books: new Map([[pairId, book]]),
-        pairConfig: new Map(),
+        orderPairs: new Map(),
+        pairDimensions: new Map(),
+        referrals: new Map(),
       } as any,
     } as any;
 

@@ -101,6 +101,7 @@ const projectOrderbookConsensusState = (
       Array.from(orderbookExt.books.entries()).map(([pairId, book]) => [pairId, computeBookCommitmentHash(book)]),
     ),
     // orderPairs is a deterministic cancel index rebuilt from books.
+    pairDimensions: orderbookExt.pairDimensions,
     hubProfile: orderbookExt.hubProfile,
     referrals: orderbookExt.referrals,
   };

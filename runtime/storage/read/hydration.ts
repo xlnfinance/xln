@@ -32,13 +32,17 @@ export const hydrateEntityStateFromStorage = (options: {
   const { core, accounts, books } = options;
   assertEntityAccountCountWithinLimit(accounts, `storage.entity:${core.entityId}`);
   let orderbookExt: OrderbookExtState | undefined;
-  if (books.size > 0 || core.orderbookHubProfile || core.orderbookReferrals) {
+  if (books.size > 0 || core.orderbookHubProfile || core.orderbookReferrals || core.orderbookPairDimensions) {
     if (!core.orderbookHubProfile) {
       throw new Error(`STORAGE_ORDERBOOK_HUBPROFILE_MISSING:${core.entityId}`);
+    }
+    if (!(core.orderbookPairDimensions instanceof Map)) {
+      throw new Error(`STORAGE_ORDERBOOK_PAIR_DIMENSIONS_MISSING:${core.entityId}`);
     }
     orderbookExt = {
       books,
       orderPairs: new Map(),
+      pairDimensions: core.orderbookPairDimensions,
       referrals: core.orderbookReferrals ?? new Map(),
       hubProfile: core.orderbookHubProfile,
     };

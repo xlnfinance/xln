@@ -71,6 +71,13 @@ export const SCENARIOS: ScenarioMetadata[] = [
     run: async (env: RuntimeReplica) => (await import('../consensus/multi-sig')).multiSig(env),
   },
   {
+    id: 'company-ipo',
+    name: 'Company IPO Lifecycle',
+    description: '1-of-1 and 2-of-3 companies, share custody, IPO trading, payment, and buyback',
+    tags: ['company', 'governance', 'orderbook', 'multi-sig'],
+    run: async (env: RuntimeReplica) => (await import('../company-ipo')).companyIpo(env),
+  },
+  {
     id: 'rapid-fire',
     name: 'Rapid-Fire Stress Test',
     description: '200 payments in 10s, bidirectional high-load, rollback handling',

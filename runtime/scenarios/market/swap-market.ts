@@ -30,6 +30,7 @@ import {
 import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from '../harness/helpers';
 import { createGossipLayer } from '../../network/p2p/gossip';
 import { getBookOrders } from '../../orderbook/core';
+import { getStaticSwapTokenDimensions } from '../../orderbook';
 
 type MarketHub = { name: string; id: string; signer: string; role: string; pairs: string[] };
 type MarketTrader = { name: string; id: string; signer: string; role: string };
@@ -371,6 +372,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveTokenId: ETH,
           giveAmount: eth(10),
           wantTokenId: USDC,
+          ...getStaticSwapTokenDimensions(ETH, USDC),
           wantAmount: usdc(31000), // $3100/ETH
           ...deriveSwapNetAuthorization(usdc(31000), 1),
         },
@@ -388,6 +390,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveTokenId: ETH,
           giveAmount: eth(5),
           wantTokenId: USDC,
+          ...getStaticSwapTokenDimensions(ETH, USDC),
           wantAmount: usdc(15250), // $3050/ETH
           ...deriveSwapNetAuthorization(usdc(15250), 1),
         },
@@ -405,6 +408,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveTokenId: USDC,
           giveAmount: usdc(23600), // $2950/ETH * 8
           wantTokenId: ETH,
+          ...getStaticSwapTokenDimensions(USDC, ETH),
           wantAmount: eth(8),
           ...deriveSwapNetAuthorization(eth(8), 1),
         },
@@ -431,6 +435,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveTokenId: WBTC,
           giveAmount: wbtc(2),
           wantTokenId: USDC,
+          ...getStaticSwapTokenDimensions(WBTC, USDC),
           wantAmount: usdc(122000), // $61000/WBTC
           ...deriveSwapNetAuthorization(usdc(122000), 1),
         },
@@ -448,6 +453,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveTokenId: USDC,
           giveAmount: usdc(59000), // $59000/WBTC
           wantTokenId: WBTC,
+          ...getStaticSwapTokenDimensions(USDC, WBTC),
           wantAmount: wbtc(1),
           ...deriveSwapNetAuthorization(wbtc(1), 1),
         },
@@ -474,6 +480,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveTokenId: DAI,
           giveAmount: dai(500),
           wantTokenId: USDC,
+          ...getStaticSwapTokenDimensions(DAI, USDC),
           wantAmount: usdc(501), // ~$1.002/DAI
           ...deriveSwapNetAuthorization(usdc(501), 1),
         },
@@ -491,6 +498,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveTokenId: USDC,
           giveAmount: usdc(299), // ~$0.997/DAI * 300
           wantTokenId: DAI,
+          ...getStaticSwapTokenDimensions(USDC, DAI),
           wantAmount: dai(300),
           ...deriveSwapNetAuthorization(dai(300), 1),
         },
@@ -546,6 +554,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
         giveTokenId: USDC,
         giveAmount: usdc(9300), // $3100/ETH * 3 ETH
         wantTokenId: ETH,
+        ...getStaticSwapTokenDimensions(USDC, ETH),
         wantAmount: eth(3),
         ...deriveSwapNetAuthorization(eth(3), 1),
       },
@@ -567,6 +576,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
         giveTokenId: WBTC,
         giveAmount: wbtc(1),
         wantTokenId: USDC,
+        ...getStaticSwapTokenDimensions(WBTC, USDC),
         wantAmount: usdc(58000), // Lower than Alice's bid
         ...deriveSwapNetAuthorization(usdc(58000), 1),
       },
@@ -588,6 +598,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
         giveTokenId: USDC,
         giveAmount: usdc(101), // ~$1.01/DAI * 100
         wantTokenId: DAI,
+        ...getStaticSwapTokenDimensions(USDC, DAI),
         wantAmount: dai(100),
         ...deriveSwapNetAuthorization(dai(100), 1),
       },
@@ -673,6 +684,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
         giveTokenId: ETH,
         giveAmount: eth(10),
         wantTokenId: USDC,
+        ...getStaticSwapTokenDimensions(ETH, USDC),
         wantAmount: usdc(30200), // $3020/ETH (better price)
         ...deriveSwapNetAuthorization(usdc(30200), 1),
       },
@@ -960,6 +972,7 @@ export async function swapMarketStress(env: RuntimeReplica): Promise<void> {
               giveTokenId: USDC,
               giveAmount: usdc(qty * price),
               wantTokenId: ETH,
+              ...getStaticSwapTokenDimensions(USDC, ETH),
               wantAmount: eth(qty),
               ...deriveSwapNetAuthorization(eth(qty), 1),
             },
@@ -978,6 +991,7 @@ export async function swapMarketStress(env: RuntimeReplica): Promise<void> {
               giveTokenId: ETH,
               giveAmount: eth(qty),
               wantTokenId: USDC,
+              ...getStaticSwapTokenDimensions(ETH, USDC),
               wantAmount: usdc(qty * price),
               ...deriveSwapNetAuthorization(usdc(qty * price), 1),
             },

@@ -58,6 +58,7 @@ export const projectEntityCoreDoc = (
   ...withDefinedProperty('hubRebalanceConfig', state.hubRebalanceConfig),
   ...withDefinedProperty('orderbookHubProfile', state.orderbookExt?.hubProfile),
   ...withDefinedProperty('orderbookReferrals', state.orderbookExt?.referrals),
+  ...withDefinedProperty('orderbookPairDimensions', state.orderbookExt?.pairDimensions),
   ...withDefinedProperty('lending', state.lending),
 });
 

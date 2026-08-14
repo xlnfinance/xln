@@ -15,7 +15,7 @@ import {
 } from '../../../extensions/cross-j/index';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { MAX_ACCOUNT_FRAME_TXS } from '../../../account/consensus/frame/hash';
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../orderbook';
+import { getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../orderbook';
 import { createEmptyEnv } from '../../../runtime';
 import type { AccountInput, AccountReplica, AccountTx, Delta, SwapOffer } from '../../../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
@@ -329,6 +329,7 @@ const makeSameCase = (
     const offer: SwapOffer = {
       offerId,
       giveTokenId: 2,
+      ...getStaticSwapTokenDimensions(2, 1),
       giveAmount,
       wantTokenId: 1,
       wantAmount,
@@ -439,6 +440,7 @@ const makeCrossCase = (
     const offer: SwapOffer = {
       offerId,
       giveTokenId: admittedRoute.source.tokenId,
+      ...getStaticSwapTokenDimensions(admittedRoute.source.tokenId, admittedRoute.target.tokenId),
       giveAmount: admittedRoute.source.amount,
       wantTokenId: admittedRoute.target.tokenId,
       wantAmount: admittedRoute.target.amount,
