@@ -61,7 +61,6 @@ countCrossSpecBootstrapProgressByPair,
 countCrossSpecVisibleOffersByPair,
 emitMarketMakerBootstrapDebugEvent,
 ensureMarketMakerHubConnectivity,
-getCommittedSourceAccountCrossOffer,
 getMarketMakerOfferLevel,
 getMarketMakerRuntimeBacklogSnapshot,
 getMarketMakerTokenIds,
@@ -1117,8 +1116,10 @@ const requireCanonicalRole = (roles: Map<string, string>, entityId: string, labe
 
 const canonicalSwapOfferEconomics = (offer: SwapOffer): Record<string, unknown> => ({
   giveTokenId: Number(offer.giveTokenId),
+  giveTokenDecimals: Number(offer.giveTokenDecimals),
   giveAmount: String(offer.giveAmount),
   wantTokenId: Number(offer.wantTokenId),
+  wantTokenDecimals: Number(offer.wantTokenDecimals),
   wantAmount: String(offer.wantAmount),
   priceTicks: offer.priceTicks === undefined ? null : String(offer.priceTicks),
   timeInForce: Number(offer.timeInForce ?? 0),
@@ -1183,37 +1184,31 @@ const collectCommittedMarketMakerCrossOfferFingerprints = (
   env: RuntimeReplica,
   contexts: MarketMakerEntityContext[],
   visibleHubs: HubProfile[],
-  tokenIdsByContext: MarketMakerTokenIdsByContext,
   contextRoles: Map<string, string>,
   hubRoles: Map<string, string>,
 ): Array<Record<string, unknown>> => {
   const committed: Array<Record<string, unknown>> = [];
   for (const sourceContext of contexts) {
     const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
-    if (sourceHubs.length === 0) continue;
-    const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
-    for (const targetContext of contexts) {
-      if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
-      const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
-      if (targetHubs.length === 0) continue;
-      const specs = buildMarketMakerCrossOfferSpecs(
-        env,
-        sourceContext,
-        targetContext,
-        sourceHubs,
-        targetHubs,
-        sourceTokenIds,
-        getMarketMakerTokenIds(tokenIdsByContext, targetContext),
-      );
-      for (const spec of specs) {
-        if (!spec.crossJurisdiction || !hasFinalizedMarketMakerCrossOffer(env, spec)) continue;
-        const offer = getCommittedSourceAccountCrossOffer(env, spec.crossJurisdiction);
-        if (!offer) continue;
-        const parsed = parseMarketMakerCrossOfferId(spec.offerId);
-        const sourceMmRole = requireCanonicalRole(contextRoles, spec.crossJurisdiction.source.entityId, 'MM');
-        const targetMmRole = requireCanonicalRole(contextRoles, spec.crossJurisdiction.target.counterpartyEntityId, 'MM');
-        const sourceHubRole = requireCanonicalRole(hubRoles, spec.crossJurisdiction.source.counterpartyEntityId, 'HUB');
-        const targetHubRole = requireCanonicalRole(hubRoles, spec.crossJurisdiction.target.entityId, 'HUB');
+    for (const sourceHub of sourceHubs) {
+      const account = getAccountReplica(env, sourceContext.entityId, sourceHub.entityId);
+      for (const [offerId, offer] of account?.state.swapOffers ?? []) {
+        if (!String(offerId).startsWith('mmx-')) continue;
+        const route = offer.crossJurisdiction;
+        if (!route) {
+          throw new Error(`MARKET_MAKER_BOOTSTRAP_FINGERPRINT_CROSS_ROUTE_MISSING:${offerId}`);
+        }
+        if (
+          normalizeEntityRef(route.source.entityId) !== normalizeEntityRef(sourceContext.entityId) ||
+          normalizeEntityRef(route.source.counterpartyEntityId) !== normalizeEntityRef(sourceHub.entityId)
+        ) {
+          throw new Error(`MARKET_MAKER_BOOTSTRAP_FINGERPRINT_CROSS_SOURCE_MISMATCH:${offerId}`);
+        }
+        const parsed = parseMarketMakerCrossOfferId(String(offerId));
+        const sourceMmRole = requireCanonicalRole(contextRoles, route.source.entityId, 'MM');
+        const targetMmRole = requireCanonicalRole(contextRoles, route.target.counterpartyEntityId, 'MM');
+        const sourceHubRole = requireCanonicalRole(hubRoles, route.source.counterpartyEntityId, 'HUB');
+        const targetHubRole = requireCanonicalRole(hubRoles, route.target.entityId, 'HUB');
         committed.push({
           offer: `mmx:${sourceMmRole}->${targetMmRole}:${sourceHubRole}->${targetHubRole}:${parsed.sourceTokenId}/${parsed.targetTokenId}:${parsed.side}:${parsed.level}`,
           sourceMm: sourceMmRole,
@@ -1224,7 +1219,7 @@ const collectCommittedMarketMakerCrossOfferFingerprints = (
           targetTokenId: parsed.targetTokenId,
           side: parsed.side,
           level: parsed.level,
-          routeStatus: spec.crossJurisdiction.status,
+          routeStatus: route.status,
           ...canonicalSwapOfferEconomics(offer),
         });
       }
@@ -1318,7 +1313,6 @@ export const buildMarketMakerBootstrapFingerprint = (
             env,
             contexts,
             visibleHubs,
-            tokenIdsByContext,
             contextRoles,
             hubRoles,
           )

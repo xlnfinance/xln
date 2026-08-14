@@ -1348,9 +1348,8 @@ const resolveEntityRuntimeIdForCrossJ = (
 };
 
 const isCrossJurisdictionRouteTwoRuntime = (env: RuntimeReplica, route: CrossJurisdictionSwapRoute): boolean => {
-  const canonical = withCanonicalCrossJurisdictionRouteHash(route);
   return Boolean(
-    resolveCrossJurisdictionRuntimeTopology(canonical, (entityId, signerId) =>
+    resolveCrossJurisdictionRuntimeTopology(route, (entityId, signerId) =>
       resolveEntityRuntimeIdForCrossJ(env, entityId, signerId),
     ),
   );
@@ -2030,13 +2029,13 @@ const hasSourceAccountCrossOffer = (env: RuntimeReplica, route: CrossJurisdictio
   );
 };
 
-export const getCommittedSourceAccountCrossOffer = (
+const getCommittedSourceAccountCrossOffer = (
   env: RuntimeReplica,
   route: CrossJurisdictionSwapRoute,
 ): SwapOffer | null => {
   const account = getAccountReplica(env, route.source.entityId, route.source.counterpartyEntityId);
   const committed = account?.state.swapOffers?.get(route.orderId);
-  return isMatchingCrossOfferRoute(committed?.crossJurisdiction, route) ? committed! : null;
+  return isMatchingCrossOfferRoute(committed?.crossJurisdiction, route) ? (committed ?? null) : null;
 };
 
 export const collectPendingCrossRequestOrderIds = (env: RuntimeReplica, entityId: string): Set<string> => {

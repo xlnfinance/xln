@@ -4,7 +4,7 @@ import {
   createMarketMakerServerState,
   getMarketMakerHealth as getServerMarketMakerHealth,
 } from '../../../api/server/health/market-maker';
-import { buildDefaultEntitySwapPairs } from '../../../account/utils';
+import { buildDefaultEntitySwapPairs, getTokenInfo } from '../../../account/utils';
 import { deriveSwapNetAuthorization } from '../../../account/swap/swap-net-authorization';
 import { handleSwapOffer } from '../../../account/tx/handlers/swap/offer/index';
 import { deriveSameOrderbookMaterialization } from '../../../entity/tx/handlers/account/orderbook/helpers';
@@ -246,8 +246,10 @@ test('five-token market maker depth remains canonical through Account and hub ad
       data: {
         offerId: spec.offerId,
         giveTokenId: spec.giveTokenId,
+        giveTokenDecimals: getTokenInfo(spec.giveTokenId).decimals,
         giveAmount: spec.giveAmount,
         wantTokenId: spec.wantTokenId,
+        wantTokenDecimals: getTokenInfo(spec.wantTokenId).decimals,
         wantAmount: spec.wantAmount,
         ...netAuthorization,
         priceTicks: spec.priceTicks,
@@ -266,8 +268,10 @@ test('five-token market maker depth remains canonical through Account and hub ad
       toEntity: account.state.rightEntity,
       createdHeight: offer.createdHeight,
       giveTokenId: offer.giveTokenId,
+      giveTokenDecimals: offer.giveTokenDecimals,
       giveAmount: offer.giveAmount,
       wantTokenId: offer.wantTokenId,
+      wantTokenDecimals: offer.wantTokenDecimals,
       wantAmount: offer.wantAmount,
       quantizedGive: offer.quantizedGive,
       quantizedWant: offer.quantizedWant,
@@ -780,16 +784,49 @@ test('market maker finalized cross matching requires the exact immutable route h
   account.state.swapOffers.set(spec.offerId, {
     offerId: spec.offerId,
     giveTokenId: spec.giveTokenId,
+    giveTokenDecimals: getTokenInfo(spec.giveTokenId).decimals,
     giveAmount: spec.giveAmount,
     wantTokenId: spec.wantTokenId,
+    wantTokenDecimals: getTokenInfo(spec.wantTokenId).decimals,
     wantAmount: spec.wantAmount,
+    maxFee: 0n,
+    minNetReceive: 0n,
     priceTicks: route.priceTicks,
     makerIsLeft: true,
     createdHeight: 1,
+    quantizedGive: spec.giveAmount,
+    quantizedWant: spec.wantAmount,
     crossJurisdiction: route,
-  } as any);
+  } satisfies SwapOffer);
 
   expect(hasFinalizedMarketMakerCrossOffer(env, spec)).toBe(true);
+  const fingerprintHealth: MarketMakerHealth = {
+    enabled: true,
+    ok: false,
+    entityId: sourceContext.entityId,
+    expectedOffersPerHub: 0,
+    expectedOffersPerPair: 0,
+    hubs: [],
+    cross: buildMarketMakerCrossHealth(env, contexts, visibleHubs, new Map(
+      contexts.map(context => [context.entityId, [1, 2, 3]]),
+    )),
+  };
+  const fingerprint = buildMarketMakerBootstrapFingerprint(
+    env,
+    contexts,
+    visibleHubs,
+    new Map(contexts.map(context => [context.entityId, [1, 2, 3]])),
+    fingerprintHealth,
+  );
+  const committed = (fingerprint.payload['cross'] as {
+    offersCommitted: Array<Record<string, unknown>>;
+  }).offersCommitted;
+  expect(committed).toHaveLength(1);
+  expect(committed[0]).toMatchObject({
+    giveTokenDecimals: getTokenInfo(spec.giveTokenId).decimals,
+    wantTokenDecimals: getTokenInfo(spec.wantTokenId).decimals,
+    routeStatus: route.status,
+  });
   account.state.swapOffers.set(spec.offerId, {
     ...account.state.swapOffers.get(spec.offerId),
     crossJurisdiction: {
