@@ -1610,9 +1610,10 @@ export class BrowserVMProvider {
       throw new Error('EntityProvider not deployed');
     }
     const entityProviderAddress = this.entityProviderAddress;
-    if (!/^0x[0-9a-f]+$/i.test(hankoData) || hankoData.length <= 2) {
+    if (hankoData === '0x') {
       throw new Error('ENTITY_PROVIDER_ACTION_HANKO_MISSING');
     }
+    decodeHankoEnvelope(hankoData);
     assertEntityProviderActionIntent(intent, {
       chainId: this.getChainId(),
       entityProviderAddress: this.entityProviderAddress.toString(),

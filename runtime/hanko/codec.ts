@@ -42,7 +42,7 @@ export function invalidHanko(message: string): never {
 }
 
 const asHex = (value: string, label: string): HankoHex => {
-  if (!ethers.isHexString(value)) invalidHanko(`HANKO_${label}_HEX_INVALID`);
+  if (!/^0x(?:[0-9a-f]{2})*$/i.test(value)) invalidHanko(`HANKO_${label}_HEX_INVALID`);
   return ethers.hexlify(value).toLowerCase() as HankoHex;
 };
 

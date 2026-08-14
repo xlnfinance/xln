@@ -78,6 +78,8 @@ describe('canonical Hanko wire codec', () => {
   });
 
   test('rejects non-zero unused V bits and trailing ABI bytes', () => {
+    expect(() => decodeHankoEnvelope('0x1')).toThrow('HANKO_ENVELOPE_HEX_INVALID');
+
     const packed = ethers.getBytes(packHankoSignatures([signature(0)]));
     packed[packed.length - 1] = packed[packed.length - 1]! | 0x80;
     expect(() => unpackHankoSignatures(ethers.hexlify(packed)))

@@ -11,6 +11,7 @@ import { parseReceiptLogsToJEvents } from '../../j-event-log-decoder';
 import { eventCarriers, type FeeOverrides, type RpcReceipt } from '../rpc-boundary';
 import type { JEvent, JSubmitResult } from '../../types';
 import { hashBoardProposalHankoPayload } from '../../../../hanko/onchain-domain';
+import { decodeHankoEnvelope } from '../../../../hanko/codec';
 
 type EntityProviderJTx = Extract<
   JTx,
@@ -123,6 +124,7 @@ export const submitEntityProviderAction = async (
     };
   }
   try {
+    decodeHankoEnvelope(hankoSignature);
     if (context.watchOnly && !signerPrivateKey) {
       throw new Error('JADAPTER_WATCH_ONLY_SIGNER_REQUIRED:entityProviderAction');
     }
