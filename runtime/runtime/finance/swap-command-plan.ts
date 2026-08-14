@@ -224,6 +224,52 @@ const buildCrossIntent = (
   },
 });
 
+const buildSameJurisdictionPlan = (
+  input: SwapCommandPlanInput,
+  source: SwapCommandParty,
+  offerId: string,
+  preparedOrder: SwapCommandPreparedOrder,
+  sourceOutCapacity: bigint,
+): SameJurisdictionSwapCommandPlan => {
+  if (input.giveTokenId === input.wantTokenId) {
+    throw new Error('SWAP_COMMAND_SAME_J_TOKEN_PAIR_INVALID');
+  }
+  if (
+    input.maxFee < 0n ||
+    input.minNetReceive <= 0n ||
+    input.maxFee >= preparedOrder.effectiveWant ||
+    input.minNetReceive > preparedOrder.effectiveWant
+  ) throw new Error('SWAP_COMMAND_NET_AUTHORIZATION_INVALID');
+  const capacityPlan = inboundPlan(source, input.wantTokenId, preparedOrder.effectiveWant, false);
+  return {
+    mode: 'same',
+    offerId,
+    preparedOrder,
+    sourceOutCapacity,
+    runtimeInput: runtimeInputFor(source, [
+      ...capacityPlan.setupTxs,
+      {
+        type: 'placeSwapOffer',
+        data: {
+          offerId,
+          counterpartyEntityId: source.hubEntityId,
+          giveTokenId: input.giveTokenId,
+          giveTokenDecimals: input.giveTokenDecimals,
+          giveAmount: preparedOrder.effectiveGive,
+          wantTokenId: input.wantTokenId,
+          wantTokenDecimals: input.wantTokenDecimals,
+          wantAmount: preparedOrder.effectiveWant,
+          maxFee: input.maxFee,
+          minNetReceive: input.minNetReceive,
+          priceTicks: preparedOrder.priceTicks,
+        },
+      },
+    ]),
+    targetSetupInput: null,
+    crossJurisdictionIntent: null,
+  };
+};
+
 export const planSwapCommand = (input: SwapCommandPlanInput): SwapCommandPlan => {
   const source = requireParty(input.source, 'SOURCE');
   const preparedOrder = prepareOrder(input);
@@ -246,50 +292,7 @@ export const planSwapCommand = (input: SwapCommandPlanInput): SwapCommandPlan =>
   });
 
   if (input.mode === 'same') {
-    if (input.giveTokenId === input.wantTokenId) {
-      throw new Error('SWAP_COMMAND_SAME_J_TOKEN_PAIR_INVALID');
-    }
-    if (
-      input.maxFee < 0n ||
-      input.minNetReceive <= 0n ||
-      input.maxFee >= preparedOrder.effectiveWant ||
-      input.minNetReceive > preparedOrder.effectiveWant
-    ) {
-      throw new Error('SWAP_COMMAND_NET_AUTHORIZATION_INVALID');
-    }
-    const capacityPlan = inboundPlan(
-      source,
-      input.wantTokenId,
-      preparedOrder.effectiveWant,
-      false,
-    );
-    return {
-      mode: 'same',
-      offerId,
-      preparedOrder,
-      sourceOutCapacity,
-      runtimeInput: runtimeInputFor(source, [
-        ...capacityPlan.setupTxs,
-        {
-          type: 'placeSwapOffer',
-          data: {
-            offerId,
-            counterpartyEntityId: source.hubEntityId,
-            giveTokenId: input.giveTokenId,
-            giveTokenDecimals: input.giveTokenDecimals,
-            giveAmount: preparedOrder.effectiveGive,
-            wantTokenId: input.wantTokenId,
-            wantTokenDecimals: input.wantTokenDecimals,
-            wantAmount: preparedOrder.effectiveWant,
-            maxFee: input.maxFee,
-            minNetReceive: input.minNetReceive,
-            priceTicks: preparedOrder.priceTicks,
-          },
-        },
-      ]),
-      targetSetupInput: null,
-      crossJurisdictionIntent: null,
-    };
+    return buildSameJurisdictionPlan(input, source, offerId, preparedOrder, sourceOutCapacity);
   }
 
   const target = input.target ? requireParty(input.target, 'TARGET') : null;
