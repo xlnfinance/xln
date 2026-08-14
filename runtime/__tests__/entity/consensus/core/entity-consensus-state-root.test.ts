@@ -408,7 +408,7 @@ test('Entity Account commitment cache has a cold oracle for missed invalidation'
 });
 
 test('Entity consensus root binds incremental book commitments but not the derived cancel index', () => {
-  const makeOrderbookExt = () =>
+  const makeOrderbookExt = (): NonNullable<EntityState['orderbookExt']> =>
     ({
       books: new Map([
         [
@@ -430,6 +430,7 @@ test('Entity consensus root binds incremental book commitments but not the deriv
         ],
       ]),
       orderPairs: new Map(),
+      pairDimensions: new Map(),
       referrals: new Map(),
       hubProfile: {
         entityId,
@@ -446,7 +447,7 @@ test('Entity consensus root binds incremental book commitments but not the deriv
         minTradeSize: 0n,
         supportedPairs: ['1/2'],
       },
-    }) as NonNullable<EntityState['orderbookExt']>;
+    }) satisfies NonNullable<EntityState['orderbookExt']>;
 
   const baseline = baseState();
   baseline.orderbookExt = makeOrderbookExt();
