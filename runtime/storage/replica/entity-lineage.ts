@@ -26,6 +26,10 @@ import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, ConsensusC
 import type { RuntimeReplica } from '../../runtime/types';
 import { validateConsensusConfig } from '../../entity/consensus/config-validation';
 import { validateProposedEntityFrame } from '../../entity/consensus/frame/validation';
+import {
+  getBoardHandoverFrameConfig,
+  getBoardHandoverLeaderState,
+} from '../../entity/consensus/authority/board-handover';
 import { normalizeEntityId } from '../keys';
 import type { StorageReplicaLookup } from '../types';
 
@@ -147,7 +151,7 @@ const assertLeaderTransition = (
   entityId: string,
   link: CertifiedEntityFrameLink,
   preAuthority: EntityFrameAuthority,
-): void => {
+): ConsensusConfig => {
   const { frame, postAuthority } = link;
   assertAuthorityShape(preAuthority, frame.height - 1, 'STORAGE_ENTITY_LINEAGE_PRE_AUTHORITY');
   assertAuthorityShape(postAuthority, frame.height, 'STORAGE_ENTITY_LINEAGE_POST_AUTHORITY');
@@ -158,6 +162,30 @@ const assertLeaderTransition = (
     config: preAuthority.config,
     leaderState: preAuthority.leaderState,
   };
+  const handoverConfig = getBoardHandoverFrameConfig(env, preState, frame.txs);
+  if (handoverConfig) {
+    const handoverLeader = handoverConfig.validators[0];
+    if (encodeCanonicalConsensusValue(postAuthority.config) !== encodeCanonicalConsensusValue(handoverConfig)) {
+      throw new Error(`STORAGE_ENTITY_LINEAGE_HANDOVER_CONFIG_MISMATCH:${frame.height}`);
+    }
+    const expectedLeader = getBoardHandoverLeaderState(env, preState, frame.txs);
+    if (
+      !expectedLeader ||
+      encodeCanonicalConsensusValue(postAuthority.leaderState) !== encodeCanonicalConsensusValue(expectedLeader)
+    ) {
+      throw new Error(`STORAGE_ENTITY_LINEAGE_HANDOVER_LEADER_MISMATCH:${frame.height}`);
+    }
+    if (
+      !handoverLeader ||
+      normalizeEntityId(frame.leader.proposerSignerId) !== normalizeEntityId(handoverLeader) ||
+      frame.leader.view !== 0 ||
+      frame.leader.certificate ||
+      frame.leader.relayCertificate
+    ) {
+      throw new Error(`STORAGE_ENTITY_LINEAGE_HANDOVER_FRAME_LEADER_INVALID:${frame.height}`);
+    }
+    return handoverConfig;
+  }
   if (!verifyEntityLeaderCertificate(env, preState, frame)) {
     throw new Error(`STORAGE_ENTITY_LINEAGE_LEADER_CERT_INVALID:${frame.height}`);
   }
@@ -168,6 +196,7 @@ const assertLeaderTransition = (
   if (encodeCanonicalConsensusValue(postAuthority.leaderState) !== encodeCanonicalConsensusValue(expectedPostLeader)) {
     throw new Error(`STORAGE_ENTITY_LINEAGE_POST_LEADER_MISMATCH:${frame.height}`);
   }
+  return preAuthority.config;
 };
 
 const assertFrameBody = (entityId: string, link: CertifiedEntityFrameLink): EntityFrame => {
@@ -211,13 +240,13 @@ const assertCertificateVariant = (
   preAuthority: EntityFrameAuthority,
 ): void => {
   const frame = assertFrameBody(entityId, link);
-  assertLeaderTransition(env, entityId, link, preAuthority);
+  const signingConfig = assertLeaderTransition(env, entityId, link, preAuthority);
   const manifest = frame.hashesToSign!;
   const bundles = frame.collectedSigs;
   if (!(bundles instanceof Map) || bundles.size === 0) {
     throw new Error(`STORAGE_ENTITY_LINEAGE_SIGNATURES_MISSING:${frame.height}:${frame.hash}`);
   }
-  const { validators, shares } = normalizeConfigSigners(preAuthority.config);
+  const { validators, shares } = normalizeConfigSigners(signingConfig);
   const seen = new Set<string>();
   let power = 0n;
   for (const [rawSignerId, signatures] of bundles) {
@@ -246,10 +275,10 @@ const assertCertificateVariant = (
     }
     power += shares.get(signerId)!;
   }
-  if (power < preAuthority.config.threshold) {
+  if (power < signingConfig.threshold) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_QUORUM_INSUFFICIENT:height=${frame.height}:` +
-        `power=${power}:threshold=${preAuthority.config.threshold}`,
+        `power=${power}:threshold=${signingConfig.threshold}`,
     );
   }
 };

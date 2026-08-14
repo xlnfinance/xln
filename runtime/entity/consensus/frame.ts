@@ -9,7 +9,9 @@ import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
 import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/events/event-normalization';
-import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame/hash';
+import {
+  canonicalInboundAccountTxForEntityFrameHash,
+} from '../../account/consensus/frame/hash';
 import {
   computeCanonicalEntityConsensusStateHash,
   buildEntityFrameAuthority,
@@ -112,7 +114,7 @@ const canonicalNestedAccountFrameForFrameHash = (value: unknown): unknown => {
   if (!Array.isArray(frame['accountTxs'])) return value;
   return {
     ...frame,
-    accountTxs: frame['accountTxs'].map(tx => canonicalAccountTxForFrameHash(tx as AccountTx)),
+    accountTxs: frame['accountTxs'].map(tx => canonicalInboundAccountTxForEntityFrameHash(tx as AccountTx)),
   };
 };
 

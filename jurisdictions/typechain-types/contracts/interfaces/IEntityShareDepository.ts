@@ -22,13 +22,34 @@ import type {
 } from "../../common";
 
 export interface IEntityShareDepositoryInterface extends Interface {
-  getFunction(nameOrSignature: "registerExternalToken"): FunctionFragment;
+  getFunction(
+    nameOrSignature:
+      | "_reserves"
+      | "_status"
+      | "entityProvider"
+      | "registerExternalToken"
+  ): FunctionFragment;
 
+  encodeFunctionData(
+    functionFragment: "_reserves",
+    values: [BytesLike, BigNumberish]
+  ): string;
+  encodeFunctionData(functionFragment: "_status", values?: undefined): string;
+  encodeFunctionData(
+    functionFragment: "entityProvider",
+    values?: undefined
+  ): string;
   encodeFunctionData(
     functionFragment: "registerExternalToken",
     values: [BigNumberish, AddressLike, BigNumberish]
   ): string;
 
+  decodeFunctionResult(functionFragment: "_reserves", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "_status", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "entityProvider",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "registerExternalToken",
     data: BytesLike
@@ -78,13 +99,23 @@ export interface IEntityShareDepository extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  _reserves: TypedContractMethod<
+    [entityId: BytesLike, tokenId: BigNumberish],
+    [bigint],
+    "view"
+  >;
+
+  _status: TypedContractMethod<[], [bigint], "view">;
+
+  entityProvider: TypedContractMethod<[], [string], "view">;
+
   registerExternalToken: TypedContractMethod<
     [
       tokenType: BigNumberish,
       contractAddress: AddressLike,
       externalTokenId: BigNumberish
     ],
-    [void],
+    [bigint],
     "nonpayable"
   >;
 
@@ -93,6 +124,19 @@ export interface IEntityShareDepository extends BaseContract {
   ): T;
 
   getFunction(
+    nameOrSignature: "_reserves"
+  ): TypedContractMethod<
+    [entityId: BytesLike, tokenId: BigNumberish],
+    [bigint],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "_status"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "entityProvider"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
     nameOrSignature: "registerExternalToken"
   ): TypedContractMethod<
     [
@@ -100,7 +144,7 @@ export interface IEntityShareDepository extends BaseContract {
       contractAddress: AddressLike,
       externalTokenId: BigNumberish
     ],
-    [void],
+    [bigint],
     "nonpayable"
   >;
 

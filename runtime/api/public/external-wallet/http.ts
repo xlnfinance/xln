@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import type { JAdapter, JWalletAllowanceRead } from '../../../jurisdiction/adapter/types';
 import { createStructuredLogger } from '../../../infra/logger';
 import { safeStringify } from '../../../protocol/serialization';
+import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
 
 export const MAX_WALLET_SNAPSHOT_BODY_BYTES = 32 * 1024;
 export const MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES = 128;
@@ -64,10 +65,11 @@ const parseCappedJsonRecord = async (
   } catch {
     throw new RequestBodyError(400, `${codePrefix}_JSON_INVALID`, 'expected-object');
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  try {
+    return requireBoundaryRecord(parsed, `${codePrefix}_BODY_INVALID`);
+  } catch {
     throw new RequestBodyError(400, `${codePrefix}_BODY_INVALID`, 'expected-object');
   }
-  return parsed as Record<string, unknown>;
 };
 
 export interface FaucetRequestBody {
@@ -144,7 +146,8 @@ export const readExternalWalletSnapshotSource = async (
 };
 
 export const readFaucetBody = async (request: Request): Promise<FaucetRequestBody> => {
-  const body = (await request.json()) as Record<string, unknown>;
+  const body = await parseCappedJsonRecord(request, MAX_WALLET_SNAPSHOT_BODY_BYTES, 'FAUCET');
+  requireExactBoundaryKeys(body, ['userAddress'], ['tokenSymbol', 'amount'], 'FAUCET_BODY_FIELDS_INVALID');
   return {
     userAddress: String(body['userAddress'] || '').trim(),
     tokenSymbol: String(body['tokenSymbol'] || 'USDC')
@@ -155,7 +158,8 @@ export const readFaucetBody = async (request: Request): Promise<FaucetRequestBod
 };
 
 export const readGasFaucetBody = async (request: Request): Promise<GasFaucetRequestBody> => {
-  const body = (await request.json()) as Record<string, unknown>;
+  const body = await parseCappedJsonRecord(request, MAX_WALLET_SNAPSHOT_BODY_BYTES, 'GAS_FAUCET');
+  requireExactBoundaryKeys(body, ['userAddress'], ['amount'], 'GAS_FAUCET_BODY_FIELDS_INVALID');
   return {
     userAddress: String(body['userAddress'] || '').trim(),
     amount: String(body['amount'] || '0.1').trim(),
@@ -231,7 +235,8 @@ export const readWalletSnapshotBody = async (request: Request): Promise<WalletSn
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_FIELD_INVALID', `allowances[${index}]`);
     }
-    const entry = value as Record<string, unknown>;
+    const entry = requireBoundaryRecord(value, 'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_INVALID');
+    requireExactBoundaryKeys(entry, ['tokenAddress', 'spender'], [], 'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_FIELDS_INVALID');
     const tokenAddress = normalizeSnapshotAddress(
       entry['tokenAddress'],
       `allowances[${index}].tokenAddress`,

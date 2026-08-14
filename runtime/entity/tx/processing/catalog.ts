@@ -11,12 +11,13 @@ import type { EntityTx } from '../../../types/entity-tx';
  */
 export const ENTITY_TX_TYPES = [
   'accountInput', 'admitCrossJurisdictionBookOrder', 'applyCrossJurisdictionBookProgress',
-  'chat', 'chatMessage',
+  'boardHandover', 'chat', 'chatMessage',
   'consensusOutput', 'crossJurisdictionBookOrderRemoved', 'crossJurisdictionFillNotice',
   'crossJurisdictionForceSiblingDispute',
   'crossJurisdictionSalvage',
   'crossPullClose', 'directPayment', 'disputeFinalize', 'disputeStart', 'e2r',
-  'entityCommand', 'entityProviderCancelAction', 'entityProviderReleaseControlShares',
+  'entityCommand', 'entityProviderActivateBoard', 'entityProviderCancelAction',
+  'entityProviderProposeControlBoard', 'entityProviderReleaseControlShares',
   'entityProviderTransfer', 'extendCredit', 'htlcPayment',
   'initOrderbookExt', 'j_abort_sent_batch', 'j_broadcast', 'j_clear_batch', 'j_event',
   'j_rebroadcast', 'lendingBorrow', 'lendingClosePosition',

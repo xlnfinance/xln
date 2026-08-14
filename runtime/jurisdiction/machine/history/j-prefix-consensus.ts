@@ -361,8 +361,10 @@ const findOutOfRoundAuthority = (
 /**
  * Authenticate a delayed or early vote without reinterpreting it against the
  * current Entity/J head. The full canonical body and signature are checked,
- * but no stale claim can mutate consensus state. Authority is deliberately
- * limited to the bounded configs already retained by this replica.
+ * but no stale claim can mutate consensus state. Future claims still require
+ * known authority. A stale claim may outlive the compact in-memory board
+ * lineage, so its exact signer signature is sufficient to retire only that
+ * signer's already-obsolete reliable-delivery lane.
  */
 export const verifyOutOfRoundJPrefixAttestation = (
   env: EntityRuntimeContext,
@@ -389,9 +391,15 @@ export const verifyOutOfRoundJPrefixAttestation = (
   const validatorId = normalizeText(raw.validatorId);
   if (!validatorId) throw new Error('J_PREFIX_VALIDATOR_MISSING');
   const authority = findOutOfRoundAuthority(authorityConfigs, validatorId);
-  if (!authority) throw new Error(`J_PREFIX_OUT_OF_ROUND_AUTHORITY_MISSING:${validatorId}`);
+  if (!authority && disposition !== 'stale') {
+    throw new Error(`J_PREFIX_OUT_OF_ROUND_AUTHORITY_MISSING:${validatorId}`);
+  }
   const claim = normalizeClaimEnvelope(getJEventJurisdictionRef(state.config.jurisdiction), raw);
-  const { headers, signature } = normalizeAttestationClaimEvidence(raw, claim, authority.validators);
+  const { headers, signature } = normalizeAttestationClaimEvidence(
+    raw,
+    claim,
+    authority?.validators ?? [validatorId],
+  );
   const attestation: JPrefixAttestation = {
     version: 1,
     entityId,

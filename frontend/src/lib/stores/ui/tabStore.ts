@@ -1,12 +1,33 @@
 import { writable, get } from 'svelte/store';
 import type { Tab } from '$lib/types/ui';
 import { errorLog } from '../errorLogStore';
+import { parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
 
 export const tabs = writable<Tab[]>([]);
 export const activeTabId = writable<string | null>(null);
 export const nextTabId = writable<number>(1);
 
 const STORAGE_KEY = 'xln-entity-tabs';
+
+const decodePersistedTab = (value: unknown): Tab => {
+  const record = requireUnknownRecord(value, 'TAB_STORAGE_TAB_INVALID');
+  rejectExtraKeys(record, ['id', 'title', 'jurisdiction', 'signerId', 'entityId', 'accountId', 'isActive'], 'TAB_STORAGE_TAB_EXTRA_FIELD');
+  if (typeof record['id'] !== 'string' || typeof record['title'] !== 'string' || typeof record['jurisdiction'] !== 'string' ||
+    typeof record['signerId'] !== 'string' || typeof record['entityId'] !== 'string' || typeof record['isActive'] !== 'boolean' ||
+    (record['accountId'] !== undefined && typeof record['accountId'] !== 'string')) throw new Error('TAB_STORAGE_TAB_FIELD_INVALID');
+  return {
+    id: record['id'], title: record['title'], jurisdiction: record['jurisdiction'], signerId: record['signerId'], entityId: record['entityId'], isActive: record['isActive'],
+    ...(record['accountId'] === undefined ? {} : { accountId: record['accountId'] }),
+  };
+};
+
+const decodePersistedTabs = (value: unknown): { tabs: Tab[]; activeTabId: string | null; nextTabId: number } => {
+  const record = requireUnknownRecord(value, 'TAB_STORAGE_INVALID');
+  rejectExtraKeys(record, ['tabs', 'activeTabId', 'nextTabId'], 'TAB_STORAGE_EXTRA_FIELD');
+  if (!Array.isArray(record['tabs']) || (record['activeTabId'] !== null && typeof record['activeTabId'] !== 'string') ||
+    typeof record['nextTabId'] !== 'number' || !Number.isSafeInteger(record['nextTabId']) || record['nextTabId'] < 1) throw new Error('TAB_STORAGE_FIELD_INVALID');
+  return { tabs: record['tabs'].map(decodePersistedTab), activeTabId: record['activeTabId'], nextTabId: record['nextTabId'] };
+};
 
 const tabOperations = {
   loadFromStorage() {
@@ -15,10 +36,10 @@ const tabOperations = {
       
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const tabData = JSON.parse(saved);
-        tabs.set(tabData.tabs || []);
-        activeTabId.set(tabData.activeTabId || null);
-        nextTabId.set(tabData.nextTabId || 1);
+        const tabData = decodePersistedTabs(parseJsonUnknown(saved, 'TAB_STORAGE_JSON_INVALID'));
+        tabs.set(tabData.tabs);
+        activeTabId.set(tabData.activeTabId);
+        nextTabId.set(tabData.nextTabId);
       }
     } catch (error) {
       errorLog.log('Failed to load tabs; clearing corrupted storage', 'Tabs', error);

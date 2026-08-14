@@ -8,6 +8,7 @@ import {
   type RuntimeTimelineFrame,
   type RuntimeTimelineIndex,
 } from './timeline/runtimeGraphTimeline';
+import { parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
 
 export type NetworkMachineTimelineMode = 'all-frames' | 'graph-changes';
 
@@ -194,7 +195,77 @@ export const compileNetworkMachine = (
 };
 
 export const parseNetworkMachineConfig = (value: string): NetworkMachineConfig => {
-  const parsed: unknown = JSON.parse(value);
-  if (!parsed || typeof parsed !== 'object') throw new Error('NETWORK_MACHINE_CONFIG_INVALID');
-  return normalizeNetworkMachineConfig(parsed as NetworkMachineConfig);
+  const config = requireUnknownRecord(parseJsonUnknown(value, 'NETWORK_MACHINE_CONFIG_JSON_INVALID'), 'NETWORK_MACHINE_CONFIG_INVALID');
+  rejectExtraKeys(config, ['version', 'id', 'title', 'description', 'runtimeIds', 'timelineMode', 'cues'], 'NETWORK_MACHINE_CONFIG_EXTRA_FIELD');
+  if (config['version'] !== 1 || typeof config['id'] !== 'string' || typeof config['title'] !== 'string' ||
+    (config['description'] !== undefined && typeof config['description'] !== 'string') ||
+    (config['runtimeIds'] !== undefined && (!Array.isArray(config['runtimeIds']) || !config['runtimeIds'].every((id) => typeof id === 'string'))) ||
+    (config['timelineMode'] !== 'all-frames' && config['timelineMode'] !== 'graph-changes') || !Array.isArray(config['cues'])) {
+    throw new Error('NETWORK_MACHINE_CONFIG_FIELD_INVALID');
+  }
+  return normalizeNetworkMachineConfig({
+    version: 1,
+    id: config['id'],
+    title: config['title'],
+    ...(config['description'] === undefined ? {} : { description: config['description'] }),
+    ...(config['runtimeIds'] === undefined ? {} : { runtimeIds: config['runtimeIds'] }),
+    timelineMode: config['timelineMode'],
+    cues: config['cues'].map(decodeNetworkMachineCue),
+  });
+};
+
+const decodeNetworkMachineFrameRef = (value: unknown, field: string): NetworkMachineFrameRef => {
+  const record = requireUnknownRecord(value, `NETWORK_MACHINE_${field}_INVALID`);
+  rejectExtraKeys(record, ['runtimeId', 'height', 'timestamp'], `NETWORK_MACHINE_${field}_EXTRA_FIELD`);
+  if (typeof record['runtimeId'] !== 'string' || typeof record['height'] !== 'number' || !Number.isFinite(record['height']) ||
+    typeof record['timestamp'] !== 'number' || !Number.isFinite(record['timestamp'])) throw new Error(`NETWORK_MACHINE_${field}_FIELD_INVALID`);
+  return { runtimeId: record['runtimeId'], height: record['height'], timestamp: record['timestamp'] };
+};
+
+const decodeNetworkMachinePoint = (value: unknown, field: string): { x: number; y: number; z: number } => {
+  const record = requireUnknownRecord(value, `NETWORK_MACHINE_${field}_INVALID`);
+  rejectExtraKeys(record, ['x', 'y', 'z'], `NETWORK_MACHINE_${field}_EXTRA_FIELD`);
+  if (typeof record['x'] !== 'number' || !Number.isFinite(record['x']) || typeof record['y'] !== 'number' || !Number.isFinite(record['y']) ||
+    typeof record['z'] !== 'number' || !Number.isFinite(record['z'])) throw new Error(`NETWORK_MACHINE_${field}_FIELD_INVALID`);
+  return { x: record['x'], y: record['y'], z: record['z'] };
+};
+
+const decodeNetworkMachineCue = (value: unknown): NetworkMachineCue => {
+  const record = requireUnknownRecord(value, 'NETWORK_MACHINE_CUE_INVALID');
+  rejectExtraKeys(record, ['id', 'at', 'until', 'title', 'subtitle', 'focusEntityIds', 'focusAccountIds', 'focusJMachineIds', 'camera', 'accent'], 'NETWORK_MACHINE_CUE_EXTRA_FIELD');
+  const stringArray = (name: string): string[] | undefined => {
+    const values = record[name];
+    if (values === undefined) return undefined;
+    if (!Array.isArray(values) || !values.every((entry) => typeof entry === 'string')) throw new Error(`NETWORK_MACHINE_CUE_${name.toUpperCase()}_INVALID`);
+    return values;
+  };
+  if (typeof record['id'] !== 'string' || typeof record['title'] !== 'string' ||
+    (record['subtitle'] !== undefined && typeof record['subtitle'] !== 'string') ||
+    (record['accent'] !== undefined && typeof record['accent'] !== 'string')) throw new Error('NETWORK_MACHINE_CUE_FIELD_INVALID');
+  const focusEntityIds = stringArray('focusEntityIds');
+  const focusAccountIds = stringArray('focusAccountIds');
+  const focusJMachineIds = stringArray('focusJMachineIds');
+  let camera: NetworkMachineCameraCue | undefined;
+  if (record['camera'] !== undefined) {
+    const rawCamera = requireUnknownRecord(record['camera'], 'NETWORK_MACHINE_CAMERA_INVALID');
+    rejectExtraKeys(rawCamera, ['position', 'target', 'fov'], 'NETWORK_MACHINE_CAMERA_EXTRA_FIELD');
+    if (rawCamera['fov'] !== undefined && (typeof rawCamera['fov'] !== 'number' || !Number.isFinite(rawCamera['fov']))) throw new Error('NETWORK_MACHINE_CAMERA_FOV_INVALID');
+    camera = {
+      position: decodeNetworkMachinePoint(rawCamera['position'], 'camera_position'),
+      target: decodeNetworkMachinePoint(rawCamera['target'], 'camera_target'),
+      ...(rawCamera['fov'] === undefined ? {} : { fov: rawCamera['fov'] }),
+    };
+  }
+  return {
+    id: record['id'],
+    at: decodeNetworkMachineFrameRef(record['at'], 'cue_at'),
+    ...(record['until'] === undefined ? {} : { until: decodeNetworkMachineFrameRef(record['until'], 'cue_until') }),
+    title: record['title'],
+    ...(record['subtitle'] === undefined ? {} : { subtitle: record['subtitle'] }),
+    ...(focusEntityIds === undefined ? {} : { focusEntityIds }),
+    ...(focusAccountIds === undefined ? {} : { focusAccountIds }),
+    ...(focusJMachineIds === undefined ? {} : { focusJMachineIds }),
+    ...(camera === undefined ? {} : { camera }),
+    ...(record['accent'] === undefined ? {} : { accent: record['accent'] }),
+  };
 };

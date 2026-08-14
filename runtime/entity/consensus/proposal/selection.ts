@@ -17,6 +17,10 @@ import { getReplicaProposalLeader } from '../leader';
 import { entityLog } from '../entity-log';
 import { isSingleSignerEntity } from '../replica-validation';
 import { selectProposableEntityTxs } from './policy';
+import {
+  getPendingBoardHandoverConfig,
+  withBoardAuthority,
+} from '../authority/board-handover';
 
 export type EntityProposalSelection = {
   hasProposableAccountMempool: boolean;
@@ -37,6 +41,7 @@ export type EntityProposalSelectionOptions = {
 const addCertifiedJRange = (
   env: EntityRuntimeContext,
   replica: EntityReplica,
+  authorityReplica: EntityReplica,
   trustedLocalCrossJurisdiction: boolean,
   certificate: NonNullable<ReturnType<typeof buildJPrefixCertificate>>,
 ): Extract<EntityTx, { type: 'j_event' }> | null => {
@@ -47,9 +52,9 @@ const addCertifiedJRange = (
   }
   const certifiedRange = buildCertifiedJPrefixTx(
     env,
-    replica,
+    authorityReplica,
     certificate,
-    getReplicaProposalLeader(replica).activeValidatorId,
+    getReplicaProposalLeader(authorityReplica).activeValidatorId,
   );
   if (!trustedLocalCrossJurisdiction) {
     replica.mempool = prioritizeScheduledWakeTransactions([
@@ -65,15 +70,20 @@ export const selectEntityProposal = async (
   replica: EntityReplica,
   options: EntityProposalSelectionOptions,
 ): Promise<EntityProposalSelection> => {
+  const pendingConfig = getPendingBoardHandoverConfig(replica.state, replica.mempool);
+  const authorityReplica = pendingConfig
+    ? { ...replica, state: withBoardAuthority(replica.state, pendingConfig) }
+    : replica;
   const hasProposableAccountMempool = hasProposableAccount(replica.state);
   const proposalJPrefixCertificate =
     options.localCanPropose && replica.jPrefixRound
-      ? buildJPrefixCertificate(replica.state, replica.jPrefixRound.attestations)
+      ? buildJPrefixCertificate(authorityReplica.state, replica.jPrefixRound.attestations)
       : null;
   const certifiedJRange = proposalJPrefixCertificate
     ? addCertifiedJRange(
         env,
         replica,
+        authorityReplica,
         options.trustedLocalCrossJurisdiction,
         proposalJPrefixCertificate,
       )
@@ -81,7 +91,7 @@ export const selectEntityProposal = async (
   const jPrefixProposalBlocked =
     options.localCanPropose &&
     !proposalJPrefixCertificate &&
-    (entityRequiresJPrefixCertificate(replica.state) ||
+    (entityRequiresJPrefixCertificate(authorityReplica.state) ||
       hasPendingLocalJEvent(replica.state, replica.jHistory));
   const shouldRollFrozenBaseJPrefixRound = isFrozenBaseJPrefixRollAuthorized(
     replica,
@@ -133,7 +143,7 @@ export const selectEntityProposal = async (
   }
   return {
     hasProposableAccountMempool,
-    isSingleSigner: isSingleSignerEntity(replica.state),
+    isSingleSigner: isSingleSignerEntity(authorityReplica.state),
     proposalJPrefixCertificate,
     proposalSelection,
     proposalTxs,

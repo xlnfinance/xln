@@ -14,6 +14,7 @@ import {
   collectDueEntityProviderActionRuntimeTxs,
   getNextEntityProviderActionRetryTimestamp,
 } from '../registration/entity-provider-action-submit-scheduler';
+import { getNextGovernanceSubmitTimestamp } from '../registration/governance-submit-state';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
@@ -41,10 +42,12 @@ export const hasDueEntityHooksWithDeps = (env: RuntimeReplica, deps: RuntimeWake
   const dueAt = getNextScheduledWakeTimestamp(env);
   const jDueAt = getNextJSubmitRetryTimestamp(env);
   const actionDueAt = getNextEntityProviderActionRetryTimestamp(env);
+  const governanceDueAt = getNextGovernanceSubmitTimestamp(env);
   const now = deps.getRuntimeNowMs(env);
   return (dueAt !== null && dueAt <= now) ||
     (jDueAt !== null && jDueAt <= now) ||
-    (actionDueAt !== null && actionDueAt <= now);
+    (actionDueAt !== null && actionDueAt <= now) ||
+    (governanceDueAt !== null && governanceDueAt <= now);
 };
 
 export const getEarliestWallClockDueTimestampWithDeps = (env: RuntimeReplica, _deps: RuntimeWakeDeps): number | null => {
@@ -53,6 +56,7 @@ export const getEarliestWallClockDueTimestampWithDeps = (env: RuntimeReplica, _d
     getNextScheduledWakeTimestamp(env),
     getNextJSubmitRetryTimestamp(env),
     getNextEntityProviderActionRetryTimestamp(env),
+    getNextGovernanceSubmitTimestamp(env),
   ]
     .filter((value): value is number => value !== null && value <= wallClockNow);
   return due.length > 0 ? Math.min(...due) : null;
@@ -63,6 +67,7 @@ export const getNextWallClockWakeTimestampWithDeps = (env: RuntimeReplica, _deps
     getNextScheduledWakeTimestamp(env),
     getNextJSubmitRetryTimestamp(env),
     getNextEntityProviderActionRetryTimestamp(env),
+    getNextGovernanceSubmitTimestamp(env),
   ]
     .filter((value): value is number => value !== null);
   return due.length > 0 ? Math.min(...due) : null;

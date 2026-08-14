@@ -170,6 +170,7 @@
     "check:frontend-file-size": "bun runtime/scripts/checks/policy/check-frontend-file-size.ts",
     "check:fints-negative-types": "bun runtime/scripts/checks/fints/check-fints-negative-types.ts",
     "check:fints-compiler-policy": "bun runtime/scripts/checks/fints/check-compiler-policy.ts",
+    "check:fints-decoder-authority": "bun runtime/scripts/checks/fints/check-decoder-authority.ts",
     "test:mutation:fints": "bunx stryker run stryker.fints.config.mjs",
     "check:nested-hash-coverage": "bun runtime/scripts/checks/fints/check-nested-hash-coverage.ts",
     "check:runtime-types": "bun run check:runtime-types:ts7",

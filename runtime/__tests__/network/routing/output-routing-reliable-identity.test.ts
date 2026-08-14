@@ -345,6 +345,50 @@ describe('reliable output logical identities', () => {
       .toThrow('ROUTE_ACCOUNT_ACK_EVIDENCE_CONFLICT');
   });
 
+  test('frame_ack identity excludes nested settlement Hankos but binds their signed target', () => {
+    const first = accountFrameAckOutput(7, '0xaccount-frame-7', '0xproposal-state-8');
+    const sameTarget = structuredClone(first);
+    const changedTarget = structuredClone(first);
+    const firstTx = first.entityTxs?.[0];
+    const sameTx = sameTarget.entityTxs?.[0];
+    const changedTx = changedTarget.entityTxs?.[0];
+    if (
+      firstTx?.type !== 'accountInput' || firstTx.data.kind !== 'frame_ack' ||
+      sameTx?.type !== 'accountInput' || sameTx.data.kind !== 'frame_ack' ||
+      changedTx?.type !== 'accountInput' || changedTx.data.kind !== 'frame_ack'
+    ) {
+      throw new Error('TEST_FRAME_ACK_INPUT_MISSING');
+    }
+    const settlementTx = (hanko: string, settlementHash = '0xsettlement-target') => ({
+      type: 'settle_transition',
+      data: {
+        kind: 'seal',
+        revision: 1,
+        workspaceHash: '0xworkspace',
+        settlementNonce: 9,
+        settlementHash,
+        settlementHanko: hanko,
+        postProof: {
+          nonce: 10,
+          proposerIsLeft: true,
+          proofBodyHash: '0xproof-body',
+          disputeHash: '0xdispute',
+          hanko: `${hanko}-post`,
+        },
+      },
+    });
+    firstTx.data.proposal.frame.accountTxs = [settlementTx('0xhanko-subset-a') as never];
+    sameTx.data.proposal.frame.accountTxs = [settlementTx('0xhanko-subset-b') as never];
+    changedTx.data.proposal.frame.accountTxs = [
+      settlementTx('0xhanko-subset-a', '0xdifferent-settlement-target') as never,
+    ];
+
+    expect(buildRouteOutputKey(first)).toBe(buildRouteOutputKey(sameTarget));
+    expect(buildPendingNetworkOutputs([first, sameTarget])).toHaveLength(1);
+    expect(() => buildPendingNetworkOutputs([first, changedTarget]))
+      .toThrow('ROUTE_ACCOUNT_ACK_EVIDENCE_CONFLICT');
+  });
+
   test('J finality identity excludes signature bytes but binds the unsigned range', () => {
     const first = jFinalityOutput(12, '0xrange-12', '0xsignature-b');
     const second = jFinalityOutput(12, '0xrange-12', '0xsignature-a');

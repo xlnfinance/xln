@@ -299,9 +299,42 @@ export function getSwapPairPolicyByBaseQuote(baseTokenId: number, quoteTokenId: 
   return SWAP_PAIR_POLICY_BY_BASE_QUOTE[key] ?? DEFAULT_SWAP_PAIR_POLICY;
 }
 
-export function hasSwapPairPolicyByBaseQuote(baseTokenId: number, quoteTokenId: number): boolean {
+function hasSwapPairPolicyByBaseQuote(baseTokenId: number, quoteTokenId: number): boolean {
   const key = `${baseTokenId}/${quoteTokenId}`;
   return Object.prototype.hasOwnProperty.call(SWAP_PAIR_POLICY_BY_BASE_QUOTE, key);
+}
+
+/**
+ * Internal token IDs are jurisdiction-local registry slots. A newly registered
+ * ERC1155 can therefore reuse the number of a built-in token on another stack.
+ * Static price policy is authority only when both signed token dimensions also
+ * match that built-in pair; otherwise the arbitrary asset starts unanchored.
+ */
+export function hasSwapPairPolicyForDimensions(
+  baseTokenId: number,
+  quoteTokenId: number,
+  baseTokenDecimals: number,
+  quoteTokenDecimals: number,
+): boolean {
+  if (!hasSwapPairPolicyByBaseQuote(baseTokenId, quoteTokenId)) return false;
+  return getTokenInfo(baseTokenId).decimals === baseTokenDecimals &&
+    getTokenInfo(quoteTokenId).decimals === quoteTokenDecimals;
+}
+
+export function getSwapPairPolicyForDimensions(
+  baseTokenId: number,
+  quoteTokenId: number,
+  baseTokenDecimals: number,
+  quoteTokenDecimals: number,
+): SwapPairPolicy {
+  return hasSwapPairPolicyForDimensions(
+    baseTokenId,
+    quoteTokenId,
+    baseTokenDecimals,
+    quoteTokenDecimals,
+  )
+    ? getSwapPairPolicyByBaseQuote(baseTokenId, quoteTokenId)
+    : DEFAULT_SWAP_PAIR_POLICY;
 }
 
 export function buildDefaultEntitySwapPairs(

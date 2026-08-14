@@ -1,4 +1,5 @@
 import { compareStableText, safeStringify } from '../protocol/serialization';
+import { requireBoundaryRecord } from '../protocol/boundary-validation';
 import { maybeHandleRelayDebugRequest } from '../network/relay/debug-http';
 import type { RelayStore } from '../network/relay/store';
 import { buildKnownProfileBundle } from '../api/server/network/gossip-profiles';
@@ -114,6 +115,49 @@ type ActivityPageLike = {
   events?: Array<Record<string, unknown>>;
 };
 
+const decodeActivityPage = (value: unknown): ActivityPageLike => {
+  const page = requireBoundaryRecord(value, 'DEBUG_ACTIVITY_RESPONSE_INVALID');
+  const events = page['events'];
+  if (events !== undefined && (!Array.isArray(events) || events.some(event => {
+    try {
+      requireBoundaryRecord(event, 'DEBUG_ACTIVITY_EVENT_INVALID');
+      return false;
+    } catch {
+      return true;
+    }
+  }))) {
+    throw new Error('DEBUG_ACTIVITY_EVENTS_INVALID');
+  }
+  const integer = (key: 'latestHeight' | 'scannedFrames' | 'returned'): number | undefined => {
+    const raw = page[key];
+    if (raw === undefined) return undefined;
+    if (!Number.isSafeInteger(raw) || Number(raw) < 0) throw new Error(`DEBUG_ACTIVITY_${key.toUpperCase()}_INVALID`);
+    return Number(raw);
+  };
+  const nextBeforeHeight = page['nextBeforeHeight'];
+  if (nextBeforeHeight !== undefined && nextBeforeHeight !== null &&
+      (!Number.isSafeInteger(nextBeforeHeight) || Number(nextBeforeHeight) < 0)) {
+    throw new Error('DEBUG_ACTIVITY_NEXT_BEFORE_HEIGHT_INVALID');
+  }
+  if (page['ok'] !== undefined && typeof page['ok'] !== 'boolean') throw new Error('DEBUG_ACTIVITY_OK_INVALID');
+  if (page['runtimeId'] !== undefined && typeof page['runtimeId'] !== 'string') throw new Error('DEBUG_ACTIVITY_RUNTIME_ID_INVALID');
+  const latestHeight = integer('latestHeight');
+  const scannedFrames = integer('scannedFrames');
+  const returned = integer('returned');
+  const decodedNextBeforeHeight: number | null | undefined = nextBeforeHeight === undefined || nextBeforeHeight === null
+    ? nextBeforeHeight
+    : Number(nextBeforeHeight);
+  return {
+    ...(page['ok'] === undefined ? {} : { ok: page['ok'] }),
+    ...(page['runtimeId'] === undefined ? {} : { runtimeId: page['runtimeId'] }),
+    ...(latestHeight === undefined ? {} : { latestHeight }),
+    ...(scannedFrames === undefined ? {} : { scannedFrames }),
+    ...(returned === undefined ? {} : { returned }),
+    ...(decodedNextBeforeHeight === undefined ? {} : { nextBeforeHeight: decodedNextBeforeHeight }),
+    ...(events === undefined ? {} : { events: events.map(event => requireBoundaryRecord(event, 'DEBUG_ACTIVITY_EVENT_INVALID')) }),
+  };
+};
+
 const handleDebugActivity = async (deps: OrchestratorDebugApiDeps): Promise<Response> => {
   await deps.pollAllHubHealth();
   const limit = Math.max(1, Math.min(500, Number(deps.url.searchParams.get('limit') || '100')));
@@ -130,7 +174,7 @@ const handleDebugActivity = async (deps: OrchestratorDebugApiDeps): Promise<Resp
         failures.push({ hub: child.name, apiPort: child.apiPort, error: `HTTP ${response.status}: ${text.slice(0, 240)}` });
         return;
       }
-      const parsed = JSON.parse(text) as ActivityPageLike;
+      const parsed = decodeActivityPage(JSON.parse(text));
       hubPages.push(parsed);
     } catch (error) {
       failures.push({

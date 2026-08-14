@@ -14,7 +14,6 @@ import {
 import type { AccountReplica } from '../../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
-import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../../types/jurisdiction-events';
 import { createDefaultDelta } from '../../account/state/delta';
 import { hexlify } from 'ethers';
@@ -82,7 +81,7 @@ export const makeConfig = (signerId: string, jurisdiction: JurisdictionConfig): 
 export const makeAccount = (
   selfId: string,
   counterpartyId: string,
-  jurisdiction: Pick<JurisdictionConfig, 'chainId' | 'depositoryAddress'> = {
+  jurisdiction: { chainId: number; depositoryAddress: string } = {
     chainId: 31_337,
     depositoryAddress: addr('dd'),
   },
@@ -151,7 +150,11 @@ export const makeState = (
   const entityEncryptionPrivateKey = hexlify(deriveSignerKeySync(entityId, 'entity-encryption'));
   const accounts = new Map<string, AccountReplica>();
   if (counterpartyId) {
-    const account = makeAccount(entityId, counterpartyId, jurisdiction);
+    const { chainId, depositoryAddress } = jurisdiction;
+    if (!Number.isSafeInteger(chainId) || chainId === undefined || !depositoryAddress) {
+      throw new Error(`CROSS_J_TEST_JURISDICTION_INCOMPLETE:${jurisdiction.name}`);
+    }
+    const account = makeAccount(entityId, counterpartyId, { chainId, depositoryAddress });
     accounts.set(counterpartyId, account);
   }
   return {

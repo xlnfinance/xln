@@ -10,6 +10,7 @@ const deployerAccounts = () => {
 const requiredRpcPlaceholder = (envName: string) => process.env[envName] || "http://127.0.0.1:0";
 const typechainOutDir = process.env.XLN_TYPECHAIN_OUT_DIR || "typechain-types";
 const etherscanApiKey = process.env.ETHERSCAN_API_KEY || "";
+const stackManagerChainId = Number(process.env.XLN_STACK_MANAGER_CHAIN_ID || 0);
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -31,6 +32,13 @@ const config: HardhatUserConfig = {
     apiKey: etherscanApiKey,
   },
   networks: {
+    "stack-manager": {
+      url: requiredRpcPlaceholder("XLN_STACK_MANAGER_RPC_URL"),
+      ...(Number.isSafeInteger(stackManagerChainId) && stackManagerChainId > 0
+        ? { chainId: stackManagerChainId }
+        : {}),
+      accounts: deployerAccounts(),
+    },
     localhost: {
       url: "http://127.0.0.1:8545",
       allowUnlimitedContractSize: true,

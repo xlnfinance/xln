@@ -40,6 +40,11 @@ import { validateProposedEntityFrame } from '../frame/validation';
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
+import {
+  getBoardHandoverLeaderState,
+  getEntityFrameConsensusConfig,
+  withBoardAuthority,
+} from '../authority/board-handover';
 
 const replayPreparedFrameForRelay = async (
   env: EntityRuntimeContext,
@@ -66,7 +71,9 @@ const replayPreparedFrameForRelay = async (
     entityId: replica.state.entityId,
     height: frame.height,
     timestamp: frame.timestamp,
-    leaderState: expectedCommittedLeaderState(replica.state, frame),
+    leaderState:
+      getBoardHandoverLeaderState(env, replica.state, frame.txs) ??
+      expectedCommittedLeaderState(replica.state, frame),
   };
   const stateRoot = computeCanonicalEntityConsensusStateHash(state);
   if (stateRoot !== frame.stateRoot) {
@@ -160,7 +167,7 @@ export const relayPreparedFrameIfReady = async (
   workingReplica.proposal = cloneIsolatedProposedEntityFrame(preparedFrame);
   workingReplica.proposal.leader.relayCertificate =
     cloneIsolatedEntityLeaderCertificate(certificate);
-  for (const validatorId of workingReplica.state.config.validators) {
+  for (const validatorId of workingReplica.candidate.state.config.validators) {
     if (validatorId.toLowerCase() === workingReplica.signerId.toLowerCase()) continue;
     entityOutbox.push({
       entityId: entityInput.entityId,
@@ -198,24 +205,29 @@ const shouldStartProposal = (
 };
 
 const buildProposalState = (
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   appliedState: EntityState,
+  txs: readonly import('../../../types/entity-tx').EntityTx[],
   height: number,
   timestamp: number,
   view: number,
-): EntityState => ({
-  ...appliedState,
-  entityId: replica.state.entityId,
-  height,
-  timestamp,
-  leaderState: {
-    activeValidatorId: replica.signerId.toLowerCase(),
-    view,
-    changedAtHeight: replica.pendingLeaderCertificate
-      ? height
-      : (replica.state.leaderState?.changedAtHeight ?? 0),
-  },
-});
+): EntityState => {
+  const handoverLeader = getBoardHandoverLeaderState(env, replica.state, txs);
+  return {
+    ...appliedState,
+    entityId: replica.state.entityId,
+    height,
+    timestamp,
+    leaderState: handoverLeader ?? {
+      activeValidatorId: replica.signerId.toLowerCase(),
+      view,
+      changedAtHeight: replica.pendingLeaderCertificate
+        ? height
+        : (replica.state.leaderState?.changedAtHeight ?? 0),
+    },
+  };
+};
 
 const signProposalManifest = async (
   env: EntityRuntimeContext,
@@ -226,7 +238,7 @@ const signProposalManifest = async (
   await assertEntityConfigBoardAuthority(
     env,
     replica.state.entityId,
-    replica.state.config,
+    state.config,
     state,
   );
   return Promise.all(
@@ -311,14 +323,27 @@ const buildMultiSignerProposal = async (
 ): Promise<EntityFrame> => {
   const { env, workingReplica } = context;
   const { proposalJPrefixCertificate, proposalTxs } = selection;
-  const leader = getReplicaProposalLeader(workingReplica);
-  assertMultiSignerProposalPrefix(env, workingReplica, selection, leader.view);
+  const authorityConfig = getEntityFrameConsensusConfig(
+    env,
+    workingReplica.state,
+    proposalTxs,
+  );
+  const authorityReplica = authorityConfig === workingReplica.state.config
+    ? workingReplica
+    : {
+        ...workingReplica,
+        state: withBoardAuthority(workingReplica.state, authorityConfig),
+      };
+  const leader = getReplicaProposalLeader(authorityReplica);
+  assertMultiSignerProposalPrefix(env, authorityReplica, selection, leader.view);
   const entityContext = await materializeEntityInfraContext(env, workingReplica, proposalTxs);
   const applied = await applyEntityFrame(env, workingReplica.state, entityContext, proposalTxs, env.state.timestamp);
   const height = workingReplica.state.height + 1;
   const state = buildProposalState(
+    env,
     workingReplica,
     applied.newState,
+    proposalTxs,
     height,
     env.state.timestamp,
     leader.view,
@@ -378,7 +403,11 @@ export const startMultiSignerProposalIfReady = async (
     txs: proposal.txs.length,
     hashes: proposal.hashesToSign?.length ?? 0,
   });
-  for (const validatorId of context.workingReplica.state.config.validators) {
+  const proposalValidators = proposal.txs.some(tx => tx.type === 'boardHandover')
+    ? context.workingReplica.candidate?.state.config.validators
+    : context.workingReplica.state.config.validators;
+  if (!proposalValidators) throw new Error('ENTITY_PROPOSAL_CANDIDATE_MISSING');
+  for (const validatorId of proposalValidators) {
     if (validatorId === context.workingReplica.signerId) continue;
     context.entityOutbox.push({
       entityId: context.entityInput.entityId,

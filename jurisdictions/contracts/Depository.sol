@@ -12,9 +12,9 @@ import "./custody/NftCustody.sol";
 
 abstract contract ReentrancyGuardLite {
   error E0();
-  uint256 private constant _NOT_ENTERED = 1;
-  uint256 private constant _ENTERED = 2;
-  uint256 private _status = _NOT_ENTERED;
+  uint256 internal constant _NOT_ENTERED = 1;
+  uint256 internal constant _ENTERED = 2;
+  uint256 public _status = _NOT_ENTERED;
 
   modifier nonReentrant() {
     if (_status == _ENTERED) revert E0();
@@ -240,9 +240,10 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
   function registerExternalToken(uint8 tokenType, address contractAddress, uint256 externalTokenId)
     external
+    returns (uint256 tokenId)
   {
     if (msg.sender != admin && (tokenType != TypeERC1155 || contractAddress != entityProvider)) revert E2();
-    _registerExternalToken(tokenType, contractAddress, externalTokenId);
+    tokenId = _registerExternalToken(tokenType, contractAddress, externalTokenId);
   }
 
   function _registerExternalToken(uint8 tokenType, address contractAddress, uint256 externalTokenId)
@@ -318,7 +319,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     bytes calldata encodedBatch,
     bytes calldata hankoData,
     uint256 nonce
-  ) external nonReentrant returns (bool completeSuccess) {
+  ) external nonReentrant {
     if (nonce > JS_SAFE_NONCE_MAX) revert E10();
     if (encodedBatch.length > MAX_ENCODED_BATCH_BYTES) revert E10();
     Batch memory batch = abi.decode(encodedBatch, (Batch));
@@ -338,7 +339,6 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     if (nonce != entityNonces[entityId] + 1) revert E2();
     entityNonces[entityId] = nonce;
     _processBatch(entityId, batch);
-    completeSuccess = true;
     emit HankoBatchProcessed(entityId, batchHash, nonce);
   }
 
@@ -760,7 +760,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
 
 
-  function accountKey(bytes32 e1, bytes32 e2) public pure returns (bytes memory) {
+  function _accountKey(bytes32 e1, bytes32 e2) private pure returns (bytes memory) {
     return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
   }
 
@@ -786,7 +786,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       bytes32 counterentity = params.pairs[i].entity;
       uint amount = params.pairs[i].amount;
 
-      bytes memory acct_key = accountKey(receivingEntity, counterentity);
+      bytes memory acct_key = _accountKey(receivingEntity, counterentity);
 
       
         AccountCollateral storage col = _collaterals[acct_key][tokenId];
@@ -814,12 +814,12 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
           ondelta: col.ondelta
         });
         AccountSettlement[] memory settled = new AccountSettlement[](1);
-        if (_accounts[accountKey(leftEntity, rightEntity)].nonce > JS_SAFE_NONCE_MAX) revert E10();
+        if (_accounts[_accountKey(leftEntity, rightEntity)].nonce > JS_SAFE_NONCE_MAX) revert E10();
         settled[0] = AccountSettlement({
           left: leftEntity,
           right: rightEntity,
           tokens: tokens,
-          nonce: _accounts[accountKey(leftEntity, rightEntity)].nonce
+          nonce: _accounts[_accountKey(leftEntity, rightEntity)].nonce
         });
         emit Account.AccountSettled(settled);
     }
@@ -867,7 +867,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
   /// @notice Internal dispute finalize with full storage access
   function _disputeFinalizeInternal(bytes32 entityId, FinalDisputeProof memory params) private {
-    bytes memory acct_key = accountKey(entityId, params.counterentity);
+    bytes memory acct_key = _accountKey(entityId, params.counterentity);
     AccountInfo storage account = _accounts[acct_key];
     bool initialProposerIsLeft = account.disputeInitialProposerIsLeft;
     (
@@ -967,7 +967,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
     bytes32 leftAddr = entity1 < entity2 ? entity1 : entity2;
     bytes32 rightAddr = entity1 < entity2 ? entity2 : entity1;
-    bytes memory acct_key = accountKey(leftAddr, rightAddr);
+    bytes memory acct_key = _accountKey(leftAddr, rightAddr);
 
     // Account owns bilateral delta arithmetic and signed transformer execution;
     // Depository owns only the resulting custody, reserve, and debt effects.

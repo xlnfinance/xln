@@ -30,6 +30,7 @@ export type ScheduledHookType =
   | 'watchdog'
   | 'hub_rebalance_kick'
   | 'board_reseal'
+  | 'counterparty_board_reseal_deadline'
   | 'cross_j_orderbook_sweep';
 
 type ScheduledHookBase<TType extends ScheduledHookType, TData extends Record<string, unknown>> = {
@@ -69,6 +70,12 @@ type BoardResealHook = ScheduledHookBase<'board_reseal', {
   afterCounterpartyId: string;
 }>;
 
+type CounterpartyBoardResealDeadlineHook = ScheduledHookBase<'counterparty_board_reseal_deadline', {
+  accountId: string;
+  activationJHeight: number;
+  activationLogIndex: number;
+}>;
+
 type CrossJurisdictionOrderbookSweepHook = ScheduledHookBase<'cross_j_orderbook_sweep', {
   reason: string;
 }>;
@@ -81,6 +88,7 @@ export type ScheduledHook =
   | WatchdogHook
   | HubRebalanceKickHook
   | BoardResealHook
+  | CounterpartyBoardResealDeadlineHook
   | CrossJurisdictionOrderbookSweepHook;
 
 export interface CrontabState {

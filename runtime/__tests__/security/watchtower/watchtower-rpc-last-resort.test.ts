@@ -9,6 +9,7 @@ import { Contract, ContractFactory, HDNodeWallet, JsonRpcProvider, Wallet, ether
 import { buildSingleSignerHanko } from '../../../hanko/batch';
 import { computeBatchHankoHash, createEmptyBatch, encodeJBatch, type JBatch } from '../../../jurisdiction/machine/batch';
 import { linkArtifactBytecode } from '../../../jurisdiction/adapter/rpc-utils';
+import { computeAccountKey } from '../../../jurisdiction/adapter/events/contract-codec';
 import {
   buildTowerAppointmentOwnerMessage,
   deriveRuntimeRecoveryActionLookupKey,
@@ -305,7 +306,7 @@ describe('watchtower rpc last-resort integration', () => {
       { nonce: await nextNonce(watched.wallet) },
     )).wait();
 
-    const accountKey = await depository.accountKey(watched.entityId, counterparty.entityId);
+    const accountKey = computeAccountKey(watched.entityId, counterparty.entityId);
     const initialProofbody = proofBody(watchSeed, [0n], [tokenId]);
     const initialProofbodyHash = proofBodyHash(initialProofbody);
     const startHash = await disputeProofHash(depository, accountKey, disputeNonce, true, initialProofbodyHash, watchSeed);
@@ -455,7 +456,6 @@ describe('watchtower rpc last-resort integration', () => {
       towerPrivateKey: tower.privateKey,
       providerFactory: () => provider,
       contractFactory: () => ({
-        accountKey: (entityId: string, counterentity: string) => liveContract.accountKey(entityId, counterentity),
         _accounts: (acctKey: string) => liveContract._accounts(acctKey),
         watchtowerCounterDispute: (
           entityId: string,
@@ -600,7 +600,7 @@ describe('watchtower rpc last-resort integration', () => {
       { nonce: await nextNonce(watched.wallet) },
     )).wait();
 
-    const accountKey = await depository.accountKey(watched.entityId, counterparty.entityId);
+    const accountKey = computeAccountKey(watched.entityId, counterparty.entityId);
     const initialProofbody = proofBody(watchSeed, [0n], [tokenId]);
     const initialProofbodyHash = proofBodyHash(initialProofbody);
     const startHash = await disputeProofHash(depository, accountKey, disputeNonce, true, initialProofbodyHash, watchSeed);
@@ -781,7 +781,6 @@ describe('watchtower rpc last-resort integration', () => {
       contractFactory: () => {
         const liveContract = depository.connect(tower);
         return {
-          accountKey: (entityId: string, counterentity: string) => liveContract.accountKey(entityId, counterentity),
           _accounts: (acctKey: string) => liveContract._accounts(acctKey),
           watchtowerCounterDispute: (
             entityId: string,

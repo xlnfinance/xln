@@ -1,4 +1,5 @@
 import { classifyRuntimeTransportFailure, type RuntimeFailureSignal } from '../protocol/errors/failure-taxonomy';
+import { requireBoundaryRecord } from '../protocol/boundary-validation';
 import { safeStringify } from '../protocol/serialization';
 import { readPositiveIntegerEnv } from '../config/environment';
 import {
@@ -83,8 +84,8 @@ const rewriteHubRuntimeInputStatusUrl = (value: unknown, hubEntityId: string): s
 const rewriteProxiedHubJsonBody = (text: string, hubEntityId: string): string => {
   if (!text || !hubEntityId) return text;
   try {
-    const parsed = JSON.parse(text) as { statusUrl?: unknown };
-    const rewrittenStatusUrl = rewriteHubRuntimeInputStatusUrl(parsed?.statusUrl, hubEntityId);
+    const parsed = requireBoundaryRecord(JSON.parse(text), 'HUB_PROXY_RESPONSE_INVALID');
+    const rewrittenStatusUrl = rewriteHubRuntimeInputStatusUrl(parsed['statusUrl'], hubEntityId);
     if (!rewrittenStatusUrl) return text;
     return safeStringify({ ...parsed, statusUrl: rewrittenStatusUrl });
   } catch {
@@ -203,14 +204,21 @@ const proxyHubApi = async (
       ...extra,
     });
     let bodyText = '';
-    let bodyJson: { hubEntityId?: string } | null = null;
+    let requestedHubId = '';
     try {
       bodyText = await readCappedRequestText(
         request,
         MAX_PUBLIC_HUB_PROXY_BODY_BYTES,
         'HUB_FAUCET_PROXY',
       );
-      bodyJson = bodyText ? JSON.parse(bodyText) as { hubEntityId?: string } : {};
+      const bodyJson = bodyText
+        ? requireBoundaryRecord(JSON.parse(bodyText), 'HUB_FAUCET_PROXY_BODY_INVALID')
+        : {};
+      const hubEntityId = bodyJson['hubEntityId'];
+      if (hubEntityId !== undefined && typeof hubEntityId !== 'string') {
+        throw new RequestBodyError(400, 'HUB_FAUCET_PROXY_HUB_ENTITY_ID_INVALID', 'hubEntityId');
+      }
+      requestedHubId = typeof hubEntityId === 'string' ? hubEntityId.trim().toLowerCase() : '';
     } catch (error) {
       const bodyError = error instanceof RequestBodyError ? error : null;
       return new Response(safeStringify({
@@ -223,7 +231,6 @@ const proxyHubApi = async (
       });
     }
 
-    const requestedHubId = String(bodyJson?.hubEntityId || '').toLowerCase();
     const child = deps.getHubChildByEntityId(requestedHubId);
     if (!child) {
       return new Response(safeStringify(proxyFailureBody({
@@ -283,23 +290,21 @@ const proxyEntityHubApi = async (
       ...extra,
     });
     let bodyText = '';
-    let bodyJson: { entityId?: string } | null = null;
+    let requestedEntityId = '';
     try {
       bodyText = await readCappedRequestText(
         request,
         MAX_WALLET_SNAPSHOT_BODY_BYTES,
         'EXTERNAL_WALLET_SNAPSHOT',
       );
-      const parsed: unknown = bodyText ? JSON.parse(bodyText) : {};
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_BODY_INVALID', 'expected-object');
-      }
-      bodyJson = parsed as { entityId?: string };
-      if (typeof bodyJson.entityId !== 'string') {
+      const parsed = bodyText
+        ? requireBoundaryRecord(JSON.parse(bodyText), 'EXTERNAL_WALLET_SNAPSHOT_BODY_INVALID')
+        : {};
+      if (typeof parsed['entityId'] !== 'string') {
         throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_ENTITY_ID_INVALID', 'entityId');
       }
-      bodyJson.entityId = bodyJson.entityId.trim().toLowerCase();
-      if (!/^0x[0-9a-f]{64}$/.test(bodyJson.entityId)) {
+      requestedEntityId = parsed['entityId'].trim().toLowerCase();
+      if (!/^0x[0-9a-f]{64}$/.test(requestedEntityId)) {
         throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_ENTITY_ID_INVALID', 'entityId');
       }
     } catch (error) {
@@ -314,7 +319,6 @@ const proxyEntityHubApi = async (
       });
     }
 
-    const requestedEntityId = String(bodyJson?.entityId || '').toLowerCase();
     let child = deps.getHubChildByEntityId(requestedEntityId);
     const routedByEntity = true;
     if (!child) {

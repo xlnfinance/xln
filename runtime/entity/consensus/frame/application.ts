@@ -1423,7 +1423,18 @@ const applyEntityFrameWithIsolation = async (
       txs: entityTxs.length,
       finalizedJHeight: working.currentEntityState.lastFinalizedJHeight,
     });
-    appendFinalProfileHash(working.currentEntityState);
+    // A board handover must re-certify the current public profile even when
+    // its descriptor bytes did not change. The hash-keyed witness slot may
+    // otherwise retain the retired board's Hanko and fail current-board-only
+    // profile authentication immediately after the transition.
+    const profileHash = computeEntityProfileDescriptorHash(
+      buildEntityProfileDescriptor(working.currentEntityState),
+    );
+    working.context.collectedHashes.push({
+      hash: profileHash,
+      type: 'profile',
+      context: `profile:${profileHash}`,
+    });
     return buildEntityFrameResult(
       working.currentEntityState,
       working.context,

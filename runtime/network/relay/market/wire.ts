@@ -267,7 +267,7 @@ export const decodeMarketWireMessage = (raw: unknown): MarketWireMessage => {
   const bytes = new TextEncoder().encode(raw).byteLength;
   const max = marketMaxMessageBytes();
   if (bytes > max) throw new Error(`MARKET_WIRE_TOO_LARGE:bytes=${bytes}:max=${max}`);
-  return stripEnvelope(validateMarketEnvelope(deserializeTaggedJson<unknown>(raw)));
+  return stripEnvelope(validateMarketEnvelope(deserializeTaggedJson(raw)));
 };
 
 export const decodeMarketWireRequest = (raw: unknown): MarketWireRequest => {

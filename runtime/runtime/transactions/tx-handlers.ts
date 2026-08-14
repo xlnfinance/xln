@@ -31,6 +31,7 @@ import {
   applyRetryEntityProviderActionRuntimeTx,
 } from '../registration/entity-provider-action-submit-state';
 import { applyRecordEntityProviderActionResultRuntimeTx } from '../registration/entity-provider-action-submit-result';
+import { applyGovernanceSubmitResultRuntimeTx } from '../registration/governance-submit-state';
 import { DEBUG } from '../../infra/debug-flags';
 import { createStructuredLogger } from '../../infra/logger';
 import { encodeBoard, hashBoard } from '../../entity/factory';
@@ -145,6 +146,10 @@ export const applyRuntimeTx = async (
   }
   if (runtimeTx.type === 'recordEntityProviderActionSubmitResult') {
     applyRecordEntityProviderActionResultRuntimeTx(env, runtimeTx);
+    return [];
+  }
+  if (runtimeTx.type === 'recordGovernanceJSubmitResult') {
+    applyGovernanceSubmitResultRuntimeTx(env, runtimeTx);
     return [];
   }
   const exhaustive: never = runtimeTx;

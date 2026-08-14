@@ -59,6 +59,7 @@ abstract contract XlnFixture is Test {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entity[actorIndex]) + 1;
     bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
-    return dep.processBatch(encoded, _hanko(actorIndex, h), nonce);
+    dep.processBatch(encoded, _hanko(actorIndex, h), nonce);
+    return true;
   }
 }

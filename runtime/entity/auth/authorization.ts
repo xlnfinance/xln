@@ -64,6 +64,7 @@ export const resolveCanonicalEntityBoardShares = (
 };
 
 const protocolTxTypes = new Set<EntityTx['type']>([
+  'boardHandover',
   'entityCommand',
   'consensusOutput',
   'runtimeOutput',

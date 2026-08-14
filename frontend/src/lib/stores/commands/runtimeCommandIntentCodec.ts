@@ -1,6 +1,7 @@
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type { RuntimeInput } from '@xln/runtime/api/public/runtime-module';
 import { safeParse, safeStringify } from '@xln/runtime/protocol/serialization';
+import { decodeRuntimeInput } from '@xln/runtime/runtime/input-schema';
 
 export type RemoteRuntimeCommandIntentStatus = 'pending' | 'accepted';
 
@@ -79,7 +80,7 @@ export const canonicalRuntimeInput = (
   }
   return {
     encoded,
-    input: safeParse<RuntimeInput>(encoded),
+    input: decodeRuntimeInput(safeParse(encoded), 'RUNTIME_COMMAND_INTENT_INPUT'),
     hash: keccak256(toUtf8Bytes(encoded)).toLowerCase(),
   };
 };

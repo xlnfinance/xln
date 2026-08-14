@@ -5,7 +5,13 @@ import type { AssertNever, Covered } from '../../types/hash-coverage/coverage';
 import type { ConsensusConfig, EntityFrameAuthority, EntityLeaderState, EntityState } from '../types';
 import { compareStableText } from '../../protocol/serialization';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
-import { cloneAccountInputWithoutPostCommitHankos, cloneAccountTxWithoutPostCommitHankos } from './input/hanko-witness';
+import { cloneAccountInputWithoutPostCommitHankos } from './input/hanko-witness';
+import {
+  accountFrameWithoutLocalPostCommitHankos,
+  accountFrameWithoutPostCommitHankos,
+  accountTxWithoutPostCommitHankos,
+  counterpartySettlementHankos,
+} from '../../account/settlement/witness-projection';
 import { computeBookCommitmentHash } from '../../orderbook/commitment';
 import { createStructuredLogger } from '../../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../../infra/performance/runtime-flags';
@@ -162,6 +168,9 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'abiProofBody',
   'boardResealMigration',
   'counterpartyBoardReseal',
+  'counterpartyFrameHanko',
+  'counterpartyDisputeProofHanko',
+  'counterpartySettlementHanko',
   'currentDisputeProofNonce',
   'currentDisputeProofProposerIsLeft',
   'currentDisputeProofBodyHash',
@@ -188,10 +197,7 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
 const ACCOUNT_ENTITY_LOCAL_FIELDS = [
   'hankoSignature',
   'currentFrameHanko',
-  'counterpartyFrameHanko',
   'currentDisputeProofHanko',
-  'counterpartyDisputeProofHanko',
-  'counterpartySettlementHanko',
 ] as const satisfies readonly (keyof AccountReplica)[];
 
 type CoveredAccountReplica = Covered<AccountReplica,
@@ -209,11 +215,33 @@ type CoveredAccountReplica = Covered<AccountReplica,
 
 const projectAccountConsensusState = (account: CoveredAccountReplica): Record<string, unknown> => {
   const projected: Record<string, unknown> = {};
+  const localEntityId = account.proofHeader.fromEntity.toLowerCase();
+  const localIsLeft = localEntityId === account.state.leftEntity.toLowerCase();
+  if (!localIsLeft && localEntityId !== account.state.rightEntity.toLowerCase()) {
+    throw new Error(`ENTITY_ACCOUNT_OWNER_MISMATCH:${localEntityId}`);
+  }
   for (const field of ACCOUNT_ENTITY_COMMITTED_FIELDS) {
     const value: unknown = account[field];
     if (value !== undefined) projected[field] = value;
   }
-  projected['mempool'] = account.mempool.map(cloneAccountTxWithoutPostCommitHankos);
+  projected['mempool'] = account.mempool.map(accountTxWithoutPostCommitHankos);
+  if (account.currentFrame) {
+    projected['currentFrame'] = accountFrameWithoutLocalPostCommitHankos(account.currentFrame, localIsLeft);
+  } else {
+    delete projected['currentFrame'];
+  }
+  const peerSettlementHankos = counterpartySettlementHankos(
+    account.state.settlementWorkspace,
+    localIsLeft,
+  );
+  if (peerSettlementHankos) {
+    projected['counterpartySettlementHankos'] = peerSettlementHankos;
+  }
+  if (account.pendingFrame) {
+    projected['pendingFrame'] = accountFrameWithoutPostCommitHankos(account.pendingFrame);
+  } else {
+    delete projected['pendingFrame'];
+  }
   projected['pendingWithdrawals'] = projectPendingWithdrawals(account.pendingWithdrawals);
   if (account.pendingAccountInput) {
     projected['pendingAccountInput'] = cloneAccountInputWithoutPostCommitHankos(account.pendingAccountInput);
@@ -568,6 +596,45 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
 /** Cold test/restore oracle: never trusts an in-memory Account leaf cache. */
 export const computeCanonicalEntityConsensusStateHashCold = (state: EntityState): string =>
   computeEntityRootFromSections(commitEntityConsensusSections(projectEntityConsensusState(state, false), state, true));
+
+/**
+ * Compact cold-oracle evidence for diagnosing a consensus-root mismatch.
+ * Values are never logged; only per-section digests identify the first
+ * divergent authority or financial section without exposing private state.
+ */
+export const computeEntityConsensusSectionDigestsCold = (
+  state: EntityState,
+): ReadonlyArray<Readonly<{ field: string; digest: string }>> =>
+  commitEntityConsensusSections(projectEntityConsensusState(state, false), state, true)
+    .map(({ field, digest }) => ({ field, digest }));
+
+export const computeEntityAccountDigests = (
+  state: EntityState,
+): ReadonlyArray<Readonly<{ counterpartyId: string; digest: string }>> =>
+  [...entityAccountCommitmentEntries(state.accounts)]
+    .map(([counterpartyId, account]) => ({
+      counterpartyId,
+      digest: accountCommitmentValueHash(account),
+    }))
+    .sort((left, right) => compareStableText(left.counterpartyId, right.counterpartyId));
+
+export const computeEntityAccountFieldDigests = (
+  state: EntityState,
+): ReadonlyArray<Readonly<{
+  counterpartyId: string;
+  fields: ReadonlyArray<Readonly<{ field: string; digest: string }>>;
+}>> =>
+  [...entityAccountCommitmentEntries(state.accounts)]
+    .map(([counterpartyId, account]) => ({
+      counterpartyId,
+      fields: Object.entries(projectAccountConsensusState(account))
+        .map(([field, value]) => ({
+          field,
+          digest: computeIntegrityDigest(UTF8.encode(encodeCanonicalConsensusValue(value))),
+        }))
+        .sort((left, right) => compareStableText(left.field, right.field)),
+    }))
+    .sort((left, right) => compareStableText(left.counterpartyId, right.counterpartyId));
 
 export const assertEntityStateRootCache = (state: EntityState): string => {
   const incremental = computeCanonicalEntityConsensusStateHash(state);

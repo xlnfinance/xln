@@ -1,3 +1,5 @@
+import { parseJsonUnknown } from '$lib/utils/boundary';
+
 export type VaultUnlockDurationMs = 600_000 | 86_400_000 | null;
 
 export type ProtectedVaultSecrets = {
@@ -235,7 +237,7 @@ export const unprotectVaultSecrets = async (
       key,
       asArrayBuffer(base64ToBytes(protectedSecrets.ciphertext)),
     );
-    return decodeVaultSecrets(JSON.parse(new TextDecoder().decode(plaintext)) as unknown);
+    return decodeVaultSecrets(parseJsonUnknown(new TextDecoder().decode(plaintext), 'VAULT_SECRET_PAYLOAD_JSON_INVALID'));
   } catch (error) {
     throw new Error(`VAULT_DEVICE_DECRYPT_FAILED:${error instanceof Error ? error.message : String(error)}`);
   }

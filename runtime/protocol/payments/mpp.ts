@@ -155,11 +155,10 @@ export const canonicalizeMppJson = (value: unknown): string =>
 export const encodeMppJson = (value: unknown): string =>
   bytesToBase64Url(toUtf8Bytes(canonicalizeMppJson(value)));
 
-export const decodeMppJson = <T = MppJsonValue>(value: string): T => {
+export const decodeMppJson = (value: string): MppJsonValue => {
   const text = utf8Decoder.decode(base64UrlToBytes(value, 'MPP_JSON'));
   const parsed = JSON.parse(text) as unknown;
-  normalizeMppJsonValue(parsed, 'MPP_JSON');
-  return parsed as T;
+  return normalizeMppJsonValue(parsed, 'MPP_JSON');
 };
 
 const validateChallenge = (challenge: MppChallenge): MppChallenge => {
@@ -378,7 +377,7 @@ export const parseMppCredentialHeader = (header: string): MppCredential => {
   }
   if (!/^\s/u.test(trimmed.slice(PAYMENT_SCHEME.length))) throw new Error('MPP_PAYMENT_PARAMS_REQUIRED');
   const encoded = trimmed.slice(PAYMENT_SCHEME.length).trim();
-  const decoded = decodeMppJson<MppJsonRecord>(encoded);
+  const decoded = decodeMppJson(encoded);
   if (!isRecord(decoded)) throw new Error('MPP_CREDENTIAL_OBJECT_REQUIRED');
   const credential: MppCredential = {
     challenge: challengeFromUnknown(decoded['challenge'], 'MPP_CREDENTIAL_CHALLENGE'),
@@ -402,7 +401,7 @@ const validateReceipt = (receipt: MppReceipt): MppReceipt => {
 export const buildMppReceiptHeader = (receipt: MppReceipt): string => encodeMppJson(validateReceipt(receipt));
 
 export const parseMppReceiptHeader = (header: string): MppReceipt => {
-  const decoded = decodeMppJson<MppJsonRecord>(header.trim());
+  const decoded = decodeMppJson(header.trim());
   if (!isRecord(decoded)) throw new Error('MPP_RECEIPT_OBJECT_REQUIRED');
   return validateReceipt({
     status: decoded['status'] as 'success',

@@ -24,6 +24,7 @@ import type {
 import { buildRuntimeActivityEvents } from '../../../../../runtime/api/public/activity-history';
 import { deserializeTaggedJson, serializeTaggedJson } from '@xln/runtime/protocol/serialization';
 import { normalizeRuntimeTimelineIndex, type RuntimeTimelineIndex } from './runtimeGraphTimeline';
+import { isUnknownRecord, rejectExtraKeys } from '$lib/utils/boundary';
 
 const INDEX_PAGE_SIZE = 250;
 const INDEX_SCAN_LIMIT = 2_000;
@@ -58,6 +59,40 @@ const requireHeight = (height: number, label: string): number => {
 
 const compareActivity = (left: RuntimeActivityEvent, right: RuntimeActivityEvent): number =>
   left.height - right.height || String(left.id).localeCompare(String(right.id));
+
+const isRuntimeAdapterGraphFrame = (value: unknown, runtimeId: string, height: number): value is RuntimeAdapterGraphFrame =>
+  isUnknownRecord(value) && typeof value['runtimeId'] === 'string' && normalizeId(value['runtimeId']) === runtimeId &&
+  typeof value['height'] === 'number' && Number.isFinite(value['height']) && Math.floor(value['height']) === height &&
+  typeof value['timestamp'] === 'number' && Number.isFinite(value['timestamp']) && typeof value['stateHash'] === 'string' &&
+  isUnknownRecord(value['head']) && Array.isArray(value['entities']);
+
+const isRuntimeActivityEvent = (value: unknown): value is RuntimeActivityEvent =>
+  isUnknownRecord(value) && typeof value['id'] === 'string' && typeof value['height'] === 'number' && Number.isFinite(value['height']) &&
+  typeof value['timestamp'] === 'number' && Number.isFinite(value['timestamp']) && typeof value['kind'] === 'string' &&
+  typeof value['type'] === 'string' && typeof value['source'] === 'string' && typeof value['direction'] === 'string' &&
+  typeof value['title'] === 'string' && typeof value['subtitle'] === 'string' && typeof value['status'] === 'string' && typeof value['rawType'] === 'string';
+
+const decodeRuntimeTimelineIndex = (value: unknown): RuntimeTimelineIndex => {
+  if (!isUnknownRecord(value)) throw new Error('NETWORK_TRAIL_INDEX_INVALID');
+  rejectExtraKeys(value, ['runtimeId', 'frames'], 'NETWORK_TRAIL_INDEX_EXTRA_FIELD');
+  if (typeof value['runtimeId'] !== 'string' || !Array.isArray(value['frames'])) throw new Error('NETWORK_TRAIL_INDEX_FIELD_INVALID');
+  return {
+    runtimeId: value['runtimeId'],
+    frames: value['frames'].map((frame, index) => {
+      if (!isUnknownRecord(frame)) throw new Error(`NETWORK_TRAIL_INDEX_FRAME_INVALID:${index}`);
+      rejectExtraKeys(frame, ['runtimeId', 'height', 'timestamp', 'stateHash', 'materialized', 'graphChanged'], `NETWORK_TRAIL_INDEX_FRAME_EXTRA_FIELD:${index}`);
+      if (typeof frame['runtimeId'] !== 'string' || typeof frame['height'] !== 'number' || !Number.isFinite(frame['height']) ||
+        typeof frame['timestamp'] !== 'number' || !Number.isFinite(frame['timestamp']) || typeof frame['stateHash'] !== 'string' ||
+        typeof frame['materialized'] !== 'boolean' || (frame['graphChanged'] !== undefined && typeof frame['graphChanged'] !== 'boolean')) {
+        throw new Error(`NETWORK_TRAIL_INDEX_FRAME_FIELD_INVALID:${index}`);
+      }
+      return {
+        runtimeId: frame['runtimeId'], height: frame['height'], timestamp: frame['timestamp'], stateHash: frame['stateHash'], materialized: frame['materialized'],
+        ...(frame['graphChanged'] === undefined ? {} : { graphChanged: frame['graphChanged'] }),
+      };
+    }),
+  };
+};
 
 export const adapterNetworkTimelineSource = (
   runtimeId: string,
@@ -358,10 +393,34 @@ export const serializeNetworkTrail = (trail: NetworkTrail): string => {
 };
 
 export const parseNetworkTrail = (text: string): NetworkTrail => {
-  const parsed = deserializeTaggedJson<NetworkTrail>(String(text || ''));
-  if (parsed?.version !== 1) throw new Error('NETWORK_TRAIL_VERSION_UNSUPPORTED');
-  if (!normalizeId(parsed.runtimeId)) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
-  return parsed;
+  const parsed = deserializeTaggedJson(String(text || ''));
+  if (!isUnknownRecord(parsed)) throw new Error('NETWORK_TRAIL_PAYLOAD_INVALID');
+  rejectExtraKeys(parsed, ['version', 'runtimeId', 'index', 'frames', 'activity'], 'NETWORK_TRAIL_EXTRA_FIELD');
+  if (parsed['version'] !== 1) throw new Error('NETWORK_TRAIL_VERSION_UNSUPPORTED');
+  if (typeof parsed['runtimeId'] !== 'string' || !normalizeId(parsed['runtimeId'])) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
+  if (!isUnknownRecord(parsed['index']) || !isUnknownRecord(parsed['frames']) || !Array.isArray(parsed['activity'])) {
+    throw new Error('NETWORK_TRAIL_STRUCTURE_INVALID');
+  }
+  // The graph index/frame/activity projections are already canonical runtime adapter
+  // values at capture time. Revalidate their shared runtime and frame index before use.
+  const index = normalizeRuntimeTimelineIndex(decodeRuntimeTimelineIndex(parsed['index']));
+  if (normalizeId(index.runtimeId) !== normalizeId(parsed['runtimeId'])) throw new Error('NETWORK_TRAIL_RUNTIME_MISMATCH');
+  const frames: Record<string, RuntimeAdapterGraphFrame> = {};
+  const runtimeId = normalizeId(parsed['runtimeId']);
+  for (const [height, frame] of Object.entries(parsed['frames'])) {
+    if (!/^\d+$/.test(height) || !isRuntimeAdapterGraphFrame(frame, runtimeId, Number(height))) {
+      throw new Error(`NETWORK_TRAIL_FRAME_INVALID:${height}`);
+    }
+    frames[height] = frame;
+  }
+  const activity: RuntimeActivityEvent[] = [];
+  for (const event of parsed['activity']) {
+    if (!isRuntimeActivityEvent(event)) {
+      throw new Error('NETWORK_TRAIL_ACTIVITY_INVALID');
+    }
+    activity.push(event);
+  }
+  return { version: 1, runtimeId: parsed['runtimeId'], index, frames, activity };
 };
 
 const toBase64Url = (bytes: Uint8Array): string => {

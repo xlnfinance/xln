@@ -3,6 +3,7 @@ import {
   advanceRpcToUnixSeconds,
   mineRpcToBlockExact,
   readRpcUnixSeconds,
+  requireRpcBlockMiningProvider,
 } from '../../../scenarios/harness/rpc-block-mining';
 
 type FakeProvider = {
@@ -45,6 +46,18 @@ const createProvider = (startBlock: bigint, unsupported = new Set<string>()): Fa
 };
 
 describe('exact RPC batch mining', () => {
+  test('requires and receiver-binds the JSON-RPC send method', async () => {
+    const provider = {
+      marker: 'bound',
+      send(this: { marker: string }, method: string): Promise<unknown> {
+        return Promise.resolve(`${this.marker}:${method}`);
+      },
+    };
+    await expect(requireRpcBlockMiningProvider(provider).send('eth_blockNumber', []))
+      .resolves.toBe('bound:eth_blockNumber');
+    expect(() => requireRpcBlockMiningProvider({})).toThrow('RPC_BLOCK_MINING_PROVIDER_SEND_MISSING');
+  });
+
   test('mines the exact contiguous block count in one Anvil call', async () => {
     const provider = createProvider(10n);
     const result = await mineRpcToBlockExact(provider, 5_770n);

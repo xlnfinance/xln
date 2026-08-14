@@ -1,6 +1,7 @@
 import type { BrowserVMState } from '../../../runtime/types';
 import type { BrowserVmChainCheckpoint, BrowserVMProvider } from './browservm-provider';
 import type { JAdapter, SnapshotId } from '../types';
+import { decodeBrowserVmSerializedState } from './browservm-state';
 
 type BrowserVmStateMethods = Pick<
   JAdapter,
@@ -10,7 +11,7 @@ type BrowserVmStateMethods = Pick<
 const requireBrowserVmState = (state: BrowserVMState | string): BrowserVMState => {
   if (typeof state !== 'string') return state;
   try {
-    return JSON.parse(state) as BrowserVMState;
+    return decodeBrowserVmSerializedState(JSON.parse(state));
   } catch {
     throw new Error('BrowserVM loadState requires serialized BrowserVMState JSON or object');
   }

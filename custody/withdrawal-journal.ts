@@ -65,7 +65,7 @@ export const bindCustodyWithdrawalInitiation = (
   const amountMinor = BigInt(requiredString(data['amount'], 'AMOUNT'));
   const hashlock = requiredString(data['hashlock'], 'HASHLOCK').toLowerCase();
   const route = parseRoute(data['route']);
-  const storedRoute = deserializeTaggedJson<unknown>(withdrawal.routeJson ?? 'null');
+  const storedRoute = deserializeTaggedJson(withdrawal.routeJson ?? 'null');
 
   if (
     description !== withdrawal.description

@@ -5,6 +5,7 @@ import {
   verifyAccountSignature,
 } from '../../../account/crypto';
 import { serializeTaggedJson } from '../../../protocol/serialization';
+import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
 import { buildRuntimeRecoveryCheckpointSnapshot } from '../../wal';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type {
@@ -19,6 +20,25 @@ const MAX_RECOVERY_JOURNAL_FRAMES = 10_000;
 const RECOVERY_BUNDLE_SIGNATURE_DOMAIN = 'xln:runtime-recovery-bundle:v1';
 
 type UnsignedRuntimeRecoveryBundleV1 = Omit<RuntimeRecoveryBundleV1, 'signature'>;
+
+function assertRuntimeRecoveryBundleBoundary(
+  value: unknown,
+): asserts value is RuntimeRecoveryBundleV1 | UnsignedRuntimeRecoveryBundleV1 {
+  const bundle = requireBoundaryRecord(value, 'RECOVERY_BUNDLE_INVALID');
+  requireExactBoundaryKeys(
+    bundle,
+    ['version', 'runtimeId', 'runtimeHeight', 'runtimeTimestamp', 'createdAt', 'signers'],
+    ['kind', 'checkpoint', 'checkpointHash', 'baseRuntimeHeight', 'baseCheckpointHash', 'frames', 'meta', 'signature'],
+    'RECOVERY_BUNDLE_FIELDS_INVALID',
+  );
+  if (typeof bundle['version'] !== 'number' || typeof bundle['runtimeId'] !== 'string' ||
+      typeof bundle['runtimeHeight'] !== 'number' || typeof bundle['runtimeTimestamp'] !== 'number' ||
+      typeof bundle['createdAt'] !== 'number' || !Array.isArray(bundle['signers']) ||
+      (bundle['kind'] !== undefined && bundle['kind'] !== 'snapshot' && bundle['kind'] !== 'journal_tail') ||
+      (bundle['signature'] !== undefined && typeof bundle['signature'] !== 'string')) {
+    throw new Error('RECOVERY_BUNDLE_INVALID');
+  }
+}
 
 const normalizeRuntimeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
@@ -65,8 +85,9 @@ const computeRuntimeRecoveryBundleSignatureDigest = (
 };
 
 const normalizeAndValidateBundleFields = (
-  bundle: RuntimeRecoveryBundleV1 | UnsignedRuntimeRecoveryBundleV1,
+  bundle: unknown,
 ): UnsignedRuntimeRecoveryBundleV1 => {
+  assertRuntimeRecoveryBundleBoundary(bundle);
   if (!bundle || bundle.version !== RECOVERY_BUNDLE_VERSION) {
     throw new Error(`RECOVERY_BUNDLE_VERSION_UNSUPPORTED: ${String(bundle?.version ?? 'unknown')}`);
   }
@@ -161,8 +182,10 @@ const normalizeAndValidateBundleFields = (
   };
 };
 
-export const validateRuntimeRecoveryBundle = (bundle: RuntimeRecoveryBundleV1): RuntimeRecoveryBundleV1 => {
+export const validateRuntimeRecoveryBundle = (bundle: unknown): RuntimeRecoveryBundleV1 => {
+  assertRuntimeRecoveryBundleBoundary(bundle);
   const unsigned = normalizeAndValidateBundleFields(bundle);
+  if (!('signature' in bundle)) throw new Error('RECOVERY_BUNDLE_SIGNATURE_REQUIRED');
   const signature = String(bundle.signature || '').trim().toLowerCase();
   const digest = computeRuntimeRecoveryBundleSignatureDigest(unsigned);
   if (!verifyAccountSignature({ quietRuntimeLogs: true }, unsigned.runtimeId, digest, signature)) {
@@ -172,7 +195,7 @@ export const validateRuntimeRecoveryBundle = (bundle: RuntimeRecoveryBundleV1): 
 };
 
 export const assertRuntimeRecoveryBundleAuthenticity = (
-  bundle: RuntimeRecoveryBundleV1,
+  bundle: unknown,
   runtimeSeed: string,
   expectedRuntimeId?: string | null,
 ): RuntimeRecoveryBundleV1 => {

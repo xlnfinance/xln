@@ -7,6 +7,8 @@ import { resolveJurisdictionsJsonPath } from '../../../jurisdiction/adapter/juri
 import { computeJurisdictionsNetworkVersion } from '../../../jurisdiction/adapter/core/jurisdictions-version';
 import { toPublicRpcUrl } from '../../../network/p2p/loopback-url';
 import { createStructuredLogger } from '../../../infra/logger';
+import { validateJurisdictionsDataValue } from '../../../jurisdiction/adapter/core/jurisdiction-loader';
+import { safeStringify } from '../../../protocol/serialization';
 import { isRecord } from '../utils';
 
 const serverLog = createStructuredLogger('server');
@@ -40,15 +42,10 @@ export const updateJurisdictionsJson = async (
     const publicRpc = toPublicRpcUrl(String(process.env['PUBLIC_RPC'] || rpcUrl || '/rpc'));
     await mkdir(dirname(canonicalPath), { recursive: true });
 
-    type MutableJurisdictionsJson = Record<string, unknown> & {
-      defaults?: Record<string, unknown> & { rebalancePolicyUsd?: unknown };
-      jurisdictions?: Record<string, WritableJurisdictionEntry>;
-    };
-    let data: MutableJurisdictionsJson = {};
+    let data: Record<string, unknown> = {};
     try {
-      const parsed = JSON.parse(await readFile(canonicalPath, 'utf-8'));
-      if (!isPlainRecord(parsed)) throw new Error('JURISDICTIONS_ROOT_INVALID');
-      data = parsed as MutableJurisdictionsJson;
+      const parsed: unknown = JSON.parse(await readFile(canonicalPath, 'utf-8'));
+      data = validateJurisdictionsDataValue(parsed);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       data = {};
@@ -56,10 +53,10 @@ export const updateJurisdictionsJson = async (
     const updatedAt = new Date().toISOString();
     data['version'] = String(data['version'] || '').trim() || '1';
     data['lastUpdated'] = updatedAt;
-    if (data.defaults !== undefined && !isPlainRecord(data.defaults)) {
+    if (data['defaults'] !== undefined && !isPlainRecord(data['defaults'])) {
       throw new Error('JURISDICTIONS_DEFAULTS_INVALID');
     }
-    const defaults = data.defaults ?? {
+    const defaults = data['defaults'] ?? {
       timeout: 30000,
       retryAttempts: 3,
       gasLimit: 1_000_000,
@@ -69,17 +66,22 @@ export const updateJurisdictionsJson = async (
         maxFee: 15,
       },
     };
-    defaults.rebalancePolicyUsd = defaults.rebalancePolicyUsd ?? {
+    defaults['rebalancePolicyUsd'] = defaults['rebalancePolicyUsd'] ?? {
       r2cRequestSoftLimit: 500,
       hardLimit: 10_000,
       maxFee: 15,
     };
-    data.defaults = defaults;
+    data['defaults'] = defaults;
     if (data['testnet']) delete data['testnet'];
-    if (data.jurisdictions !== undefined && !isPlainRecord(data.jurisdictions)) {
+    if (data['jurisdictions'] !== undefined && !isPlainRecord(data['jurisdictions'])) {
       throw new Error('JURISDICTIONS_MAP_INVALID');
     }
-    const jurisdictions: Record<string, WritableJurisdictionEntry> = data.jurisdictions ?? {};
+    const jurisdictions: Record<string, WritableJurisdictionEntry> = Object.fromEntries(
+      Object.entries(data['jurisdictions'] ?? {}).map(([key, value]) => {
+        if (!isPlainRecord(value)) throw new Error(`JURISDICTION_ENTRY_INVALID:${key}`);
+        return [key, value];
+      }),
+    );
     const rawTargetKeyOverride = String(targetKeyOverride || '').trim();
     const requestedTargetKey = rawTargetKeyOverride ? normalizeJurisdictionKey(rawTargetKeyOverride) : '';
     const existingRequestedKey = requestedTargetKey
@@ -94,9 +96,12 @@ export const updateJurisdictionsJson = async (
       primary: previous['primary'] ?? true,
       status: previous['status'] ?? 'active',
       chainId: chainIdOverride ?? 31337,
+      blockTimeMs: previous['blockTimeMs'] ?? 1_000,
+      explorer: previous['explorer'] ?? '',
+      currency: previous['currency'] ?? 'ETH',
       entityProviderDeploymentBlock,
       rpc: publicRpc,
-      rebalancePolicyUsd: previous['rebalancePolicyUsd'] ?? defaults.rebalancePolicyUsd,
+      rebalancePolicyUsd: previous['rebalancePolicyUsd'] ?? defaults['rebalancePolicyUsd'],
       contracts: {
         account: contracts.account,
         depository: contracts.depository,
@@ -104,12 +109,13 @@ export const updateJurisdictionsJson = async (
         deltaTransformer: contracts.deltaTransformer,
       },
     };
-    data.jurisdictions = jurisdictions;
+    data['jurisdictions'] = jurisdictions;
     const networkVersion = computeJurisdictionsNetworkVersion(data, String(data['version'] || '1'));
     data['deployVersion'] = networkVersion;
     data['networkVersion'] = networkVersion;
 
-    const payload = JSON.stringify(data, null, 2);
+    validateJurisdictionsDataValue(data);
+    const payload = safeStringify(data, 2);
     await writeFile(canonicalPath, payload);
     serverLog.info('jurisdictions.updated', { path: canonicalPath });
     return { key: targetKey, name: displayName };
@@ -124,8 +130,8 @@ export const readCanonicalJurisdictionsJson = async (): Promise<string> =>
 
 const readCanonicalJurisdictionsVersion = async (): Promise<string> => {
   const raw = await readCanonicalJurisdictionsJson();
-  const parsed = JSON.parse(raw) as { version?: unknown };
-  const version = String(parsed.version || '').trim();
+  const parsed = validateJurisdictionsDataValue(JSON.parse(raw));
+  const version = String(parsed['version'] || '').trim();
   if (!version) {
     throw new Error('MISSING_JURISDICTIONS_VERSION');
   }
@@ -134,11 +140,7 @@ const readCanonicalJurisdictionsVersion = async (): Promise<string> => {
 
 const readCanonicalNetworkVersion = async (): Promise<string> => {
   const raw = await readCanonicalJurisdictionsJson();
-  const parsed = JSON.parse(raw) as {
-    deployVersion?: unknown;
-    networkVersion?: unknown;
-    lastUpdated?: unknown;
-  };
+  const parsed = validateJurisdictionsDataValue(JSON.parse(raw));
   return computeJurisdictionsNetworkVersion(parsed, await readCanonicalJurisdictionsVersion());
 };
 

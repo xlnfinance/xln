@@ -67,8 +67,8 @@ export async function probeRpcHealth(options: RpcHealthProbeOptions = {}): Promi
           status: response.status,
         };
       } else {
-        const body = (await response.json()) as { result?: string; error?: unknown };
-        if (typeof body.result === 'string' && body.result.length > 0) {
+        const body = await readJsonUnknown(response);
+        if (isUnknownRecord(body) && typeof body['result'] === 'string' && body['result'].length > 0) {
           return {
             ok: true,
             attempts: attempt,
@@ -80,7 +80,7 @@ export async function probeRpcHealth(options: RpcHealthProbeOptions = {}): Promi
           ok: false,
           attempts: attempt,
           latencyMs,
-          error: body.error ? JSON.stringify(body.error) : 'No chainId result',
+          error: isUnknownRecord(body) && body['error'] !== undefined ? JSON.stringify(body['error']) : 'No chainId result',
           body,
         };
       }
@@ -100,3 +100,4 @@ export async function probeRpcHealth(options: RpcHealthProbeOptions = {}): Promi
 
   return last;
 }
+import { isUnknownRecord, readJsonUnknown } from '$lib/utils/boundary';

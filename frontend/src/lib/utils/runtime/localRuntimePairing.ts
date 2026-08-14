@@ -4,6 +4,7 @@ import {
   parseRemoteRuntimeImportSourcePayload,
   type RemoteRuntimeImportEntry,
 } from '../onboarding/remoteRuntimeImport';
+import { readJsonUnknown, requireUnknownRecord } from '../boundary';
 
 export const LOCAL_RUNTIME_PAIR_HASH_PARAM = 'xlnPair';
 
@@ -45,9 +46,10 @@ export const consumeLocalRuntimePairing = async (
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ pairingToken: token }),
   });
-  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  const payload = await readJsonUnknown(response).catch((): Record<string, unknown> => ({}));
   if (!response.ok) {
-    throw new Error(String(payload['error'] || `LOCAL_PAIRING_FAILED:${response.status}`));
+    const errorPayload = requireUnknownRecord(payload, 'LOCAL_PAIRING_ERROR_PAYLOAD_INVALID');
+    throw new Error(typeof errorPayload['error'] === 'string' ? errorPayload['error'] : `LOCAL_PAIRING_FAILED:${response.status}`);
   }
   return parseRemoteRuntimeImportSourcePayload(payload);
 };

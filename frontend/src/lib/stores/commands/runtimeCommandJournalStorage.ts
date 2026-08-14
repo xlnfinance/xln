@@ -192,7 +192,7 @@ export const decryptProtectedRemoteRuntimeCommandIntentRecord = async (
   if (plaintext.byteLength !== record.payloadBytes) {
     throw new Error('RUNTIME_COMMAND_INTENT_STORAGE_CORRUPT: plaintext size');
   }
-  const payload = validatedPayload(safeParse<unknown>(decoder.decode(plaintext)));
+  const payload = validatedPayload(safeParse(decoder.decode(plaintext)));
   const canonical = canonicalRuntimeInput(payload.input);
   if (await computeRuntimeCommandInputHmac(record.runtimeId, record.commandId, canonical.encoded) !== record.inputHmac) {
     throw new Error('RUNTIME_COMMAND_INTENT_STORAGE_CORRUPT: input HMAC');

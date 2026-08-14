@@ -8,6 +8,7 @@ import { requireCanonicalJurisdictionEvents } from '../../../jurisdiction/machin
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from '../constants';
 import { LIMITS } from '../../../config/constants';
 import { serializeCanonicalTaggedJson } from '../../../protocol/serialization';
+import { accountTxWithoutPostCommitHankos } from '../../settlement/witness-projection';
 
 export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
 // A peer controls its proposed timestamp. Reject future time because it could
@@ -106,10 +107,19 @@ export const canonicalAccountTxForFrameHash = (tx: AccountTx): Record<string, un
   if (tx.type === 'j_event_claim') {
     return { type: tx.type, data: canonicalJEventClaimForFrameHash(tx.data) };
   }
+  const unsigned = accountTxWithoutPostCommitHankos(tx);
   return {
-    type: tx.type,
-    data: tx.data,
+    type: unsigned.type,
+    data: unsigned.data,
   };
+};
+
+/** An inbound peer frame is already exact Entity input; retain its witnesses. */
+export const canonicalInboundAccountTxForEntityFrameHash = (tx: AccountTx): Record<string, unknown> => {
+  if (tx.type === 'j_event_claim') {
+    return { type: tx.type, data: canonicalJEventClaimForFrameHash(tx.data) };
+  }
+  return { type: tx.type, data: tx.data };
 };
 
 const computeCanonicalAccountFrameHash = (frame: AccountFrame): string => {

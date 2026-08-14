@@ -1,6 +1,7 @@
 import { decodeAccountPeerInput } from '../../account/validation/input-validation';
 import type { EntityTx } from '../../types/entity-tx';
 import { assertEntityProposalAction } from '../auth/authorization';
+import { validateConsensusConfig } from '../consensus/config-validation';
 import { normalizeSignedEntityCommand } from '../command/command-codec';
 import { normalizeConsensusOutputBoardAuthority } from '../consensus/output/certification';
 import type { ProposalAction } from '../types';
@@ -135,6 +136,19 @@ const validateScheduledWake = (value: unknown, code: string): void => {
   });
 };
 
+const validateBoardHandover = (value: unknown, code: string): void => {
+  const data = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(data, ['board'], [], `${code}_FIELDS`);
+  const board = requireBoundaryRecord(data['board'], `${code}_BOARD`);
+  requireExactBoundaryKeys(
+    board,
+    ['mode', 'threshold', 'validators', 'shares'],
+    [],
+    `${code}_BOARD_FIELDS`,
+  );
+  validateConsensusConfig(board, `${code}_BOARD`);
+};
+
 const HTLC_PAYMENT_FIELDS = ['amount', 'deliveryMode', 'maxSenderDebit', 'route', 'targetEntityId', 'tokenId'] as const;
 
 const validatePreparedHtlcPayment = (value: unknown, code: string): void => {
@@ -216,6 +230,7 @@ function assertEntityTxRecord(
   const type = requireKnownEntityTxType(tx, code);
   requireBoundaryRecord(tx['data'], `${code}_DATA`);
   if (type === 'entityCommand') validateEntityCommand(tx['data'], `${code}_DATA`, depth);
+  else if (type === 'boardHandover') validateBoardHandover(tx['data'], `${code}_DATA`);
   else if (type === 'propose') validateProposal(tx['data'], `${code}_DATA`, depth);
   else if (type === 'consensusOutput') validateConsensusOutput(tx['data'], `${code}_DATA`, depth);
   else if (type === 'runtimeOutput') validateRuntimeOutput(tx['data'], `${code}_DATA`, depth);

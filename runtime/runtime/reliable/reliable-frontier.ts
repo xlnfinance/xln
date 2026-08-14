@@ -2,7 +2,7 @@ import { encodeCanonicalConsensusValue } from '../../protocol/serialization/cano
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
-import { compareStableText, safeStringify } from '../../protocol/serialization';
+import { compareStableText, safeParse, safeStringify } from '../../protocol/serialization';
 import type { ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, ReliableDeliveryReceipt } from '../types.ts';
 
 const CANONICAL_DIGEST_PATTERN = /^0x[0-9a-f]{64}$/;
@@ -70,6 +70,28 @@ export const receiverFrontierKey = (sourceRuntimeIdRaw: string, identity: Reliab
   const sourceRuntimeId = normalizeRuntimeId(sourceRuntimeIdRaw);
   if (!sourceRuntimeId) throw new Error('RELIABLE_INGRESS_SENDER_RUNTIME_INVALID');
   return safeStringify({ sourceRuntimeId, laneKey: identity.laneKey });
+};
+
+export const parseReceiverFrontierKey = (value: string): Readonly<{
+  sourceRuntimeId: string;
+  laneKey: string;
+}> => {
+  const decoded = safeParse(value);
+  if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
+    throw new Error('RELIABLE_INGRESS_FRONTIER_KEY_INVALID');
+  }
+  const keys = Object.keys(decoded);
+  if (keys.length !== 2 || !keys.includes('sourceRuntimeId') || !keys.includes('laneKey')) {
+    throw new Error('RELIABLE_INGRESS_FRONTIER_KEY_FIELDS_INVALID');
+  }
+  const record = decoded as Record<string, unknown>;
+  const sourceRuntimeId = normalizeRuntimeId(record['sourceRuntimeId']);
+  if (!sourceRuntimeId) throw new Error('RELIABLE_INGRESS_FRONTIER_SOURCE_RUNTIME_INVALID');
+  const laneKey = record['laneKey'];
+  if (typeof laneKey !== 'string' || laneKey.length === 0) {
+    throw new Error('RELIABLE_INGRESS_FRONTIER_LANE_KEY_INVALID');
+  }
+  return { sourceRuntimeId, laneKey };
 };
 
 export const assertReliableIngressSourceLaneCapacity = (existingKeys: Iterable<string>, candidateKey: string): void => {

@@ -231,7 +231,12 @@ export const createRpcContractStack = async (
   await attachRpcReplicaContracts(config, provider, signer, addresses, state);
   const verifyBinding = async (context: string): Promise<void> => {
     state.bindingVerified = false;
-    await assertDepositoryEntityProviderBinding(context, requireContract('depository', state.depository), addresses.entityProvider);
+    await assertDepositoryEntityProviderBinding(
+      context,
+      requireContract('depository', state.depository),
+      addresses.entityProvider,
+      requireContract('entity_provider', state.entityProvider),
+    );
     state.bindingVerified = true;
   };
   if (state.deployed) {
@@ -249,6 +254,13 @@ export const createRpcContractStack = async (
     await deployEntityProvider(config, signer, addresses, state);
     await deployDeltaTransformer(signer, addresses, state);
     await deployDepository(config, provider, signer, addresses, state);
+    await chainIo.waitForReceipt(
+      await requireContract('entity_provider', state.entityProvider).bindShareDepository(
+        addresses.depository,
+        await chainIo.buildFeeOverrides(),
+      ),
+      'entity-provider.bind-share-depository',
+    );
     await verifyBinding('rpc_deploy');
     const tokens = await deployBootstrapTokens(
       config,

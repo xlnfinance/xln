@@ -1,17 +1,23 @@
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { expect, test } from 'bun:test';
 import type { spawn } from 'node:child_process';
 
 import {
+  createManagedRuntimeLeaseManager,
   killManagedProcessIds,
   managedLeaseMatchesProcessBirth,
   parseManagedProcessTable,
   readManagedProcessTable,
   type ManagedProcessOps,
 } from '../../../orchestrator/process/managed-runtime-leases';
+import type { ManagedRuntimeSpec } from '../../../orchestrator/orchestrator-types';
 import { closeRelayClientsForReset } from '../../../network/relay/reset';
 import { createRelayStore } from '../../../network/relay/store';
+import { safeStringify } from '../../../protocol/serialization';
 
 const fakePsChild = () => {
   const child = new EventEmitter() as EventEmitter & {
@@ -54,6 +60,24 @@ test('managed process table binds a PID to its OS birth time', () => {
     ...entries[0]!,
     processStartedAt: entries[0]!.processStartedAt + 1_000,
   })).toBe(false);
+});
+
+test('malformed persisted runtime lease fails closed instead of being ignored', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'xln-managed-lease-invalid-'));
+  const spec: ManagedRuntimeSpec = {
+    role: 'hub', name: 'H1', script: 'runtime/orchestrator/hub-node.ts', apiPort: 21001, dbPath: '/tmp/h1',
+  };
+  try {
+    const manager = createManagedRuntimeLeaseManager({ controlPlaneDir: directory, ownerId: 'owner' });
+    writeFileSync(manager.leasePathFor(spec), safeStringify({
+      role: 'hub', name: 'H1', script: 'runtime/orchestrator/hub-node.ts', apiPort: 21001, dbPath: '/tmp/h1',
+      ownerId: 'owner', orchestratorPid: 1, pid: 2, cwd: '/tmp', startedAt: 1, processStartedAt: 1, updatedAt: 1,
+      unexpected: true,
+    }));
+    expect(() => manager.readLease(spec)).toThrow('MANAGED_RUNTIME_LEASE_INVALID');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('managed stale process termination verifies the PID after SIGKILL', async () => {

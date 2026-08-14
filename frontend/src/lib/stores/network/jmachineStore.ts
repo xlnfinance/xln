@@ -8,6 +8,7 @@
 import { writable, get } from 'svelte/store';
 import { ethers } from 'ethers';
 import { compareStableText } from '$lib/utils/stableSort';
+import { parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
 import { errorLog } from '../errorLogStore';
 
 export interface JMachineConfig {
@@ -154,12 +155,55 @@ export function normalizeJMachineConfigList(raw: unknown): JMachineConfig[] {
 }
 
 export function parseJMachineConfigJson(raw: string): JMachineConfig {
-  const parsed = normalizeJMachineConfig(JSON.parse(raw));
+  const parsed = normalizeJMachineConfig(parseJsonUnknown(raw, 'J_MACHINE_JSON_INVALID'));
   if (!parsed) {
     throw new Error('Invalid jurisdiction JSON');
   }
   return parsed;
 }
+
+const decodePersistedJMachineConfig = (value: unknown): JMachineConfig => {
+  const record = requireUnknownRecord(value, 'J_MACHINE_STORAGE_CONFIG_INVALID');
+  rejectExtraKeys(record, [
+    'name', 'mode', 'chainId', 'ticker', 'rpcs', 'blockTimeMs',
+    'entityProviderDeploymentBlock', 'contracts', 'createdAt',
+  ], 'J_MACHINE_STORAGE_CONFIG_EXTRA_FIELD');
+  if (
+    typeof record['name'] !== 'string' ||
+    (record['mode'] !== 'browservm' && record['mode'] !== 'rpc') ||
+    typeof record['chainId'] !== 'number' || !Number.isSafeInteger(record['chainId']) ||
+    typeof record['ticker'] !== 'string' ||
+    !Array.isArray(record['rpcs']) || !record['rpcs'].every((entry) => typeof entry === 'string') ||
+    typeof record['blockTimeMs'] !== 'number' || !Number.isSafeInteger(record['blockTimeMs']) ||
+    typeof record['createdAt'] !== 'number' || !Number.isSafeInteger(record['createdAt'])
+  ) throw new Error('J_MACHINE_STORAGE_CONFIG_FIELD_INVALID');
+  if (record['entityProviderDeploymentBlock'] !== undefined && (
+    typeof record['entityProviderDeploymentBlock'] !== 'number' || !Number.isSafeInteger(record['entityProviderDeploymentBlock'])
+  )) throw new Error('J_MACHINE_STORAGE_DEPLOYMENT_BLOCK_INVALID');
+  if (record['contracts'] !== undefined) {
+    const contracts = requireUnknownRecord(record['contracts'], 'J_MACHINE_STORAGE_CONTRACTS_INVALID');
+    rejectExtraKeys(contracts, ['depository', 'entityProvider', 'account', 'deltaTransformer'], 'J_MACHINE_STORAGE_CONTRACTS_EXTRA_FIELD');
+    if (Object.values(contracts).some((address) => address !== undefined && typeof address !== 'string')) {
+      throw new Error('J_MACHINE_STORAGE_CONTRACTS_FIELD_INVALID');
+    }
+  }
+  const normalized = normalizeJMachineConfig(record);
+  if (!normalized) throw new Error('J_MACHINE_STORAGE_CONFIG_SEMANTIC_INVALID');
+  return normalized;
+};
+
+const decodePersistedJMachineState = (value: unknown): JMachineStoreState => {
+  const record = requireUnknownRecord(value, 'J_MACHINE_STORAGE_INVALID');
+  rejectExtraKeys(record, ['configs', 'activeJMachine'], 'J_MACHINE_STORAGE_EXTRA_FIELD');
+  if (!Array.isArray(record['configs'])) throw new Error('J_MACHINE_STORAGE_CONFIGS_INVALID');
+  const configs = record['configs'].map(decodePersistedJMachineConfig);
+  const activeJMachine = record['activeJMachine'];
+  if (activeJMachine !== null && typeof activeJMachine !== 'string') throw new Error('J_MACHINE_STORAGE_ACTIVE_INVALID');
+  if (activeJMachine !== null && !configs.some((config) => config.name.toLowerCase() === activeJMachine.toLowerCase())) {
+    throw new Error('J_MACHINE_STORAGE_ACTIVE_UNKNOWN');
+  }
+  return { configs, activeJMachine };
+};
 
 // Main store
 export const jmachineState = writable<JMachineStoreState>(defaultState);
@@ -252,16 +296,7 @@ export const jmachineOperations = {
 
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved) as Partial<JMachineStoreState>;
-        const configs = normalizeJMachineConfigList(parsed.configs);
-        const activeName = typeof parsed.activeJMachine === 'string' ? parsed.activeJMachine : null;
-        const activeExists = activeName
-          ? configs.some((config) => config.name.toLowerCase() === activeName.toLowerCase())
-          : false;
-        jmachineState.set({
-          configs,
-          activeJMachine: activeExists ? activeName : configs[0]?.name ?? null,
-        });
+        jmachineState.set(decodePersistedJMachineState(parseJsonUnknown(saved, 'J_MACHINE_STORAGE_JSON_INVALID')));
       }
     } catch (error) {
       errorLog.log('Failed to load J-Machine configs; clearing corrupted storage', 'J-Machine Store', error);

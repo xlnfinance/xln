@@ -57,9 +57,15 @@ const normalizeIncomingPrecommits = (
 ): Map<string, string[]> | ApplyEntityInputResult => {
   const { entityInput, workingReplica } = context;
   const proposal = workingReplica.proposal ?? workingReplica.lockedFrame!;
+  const execution = getValidatorExecutionForFrame(workingReplica, proposal);
+  if (!execution) {
+    throw new Error(
+      `ENTITY_VALIDATOR_EXECUTION_MISSING:${proposal.height}:${proposal.hash}`,
+    );
+  }
   try {
     proposal.collectedSigs = normalizePrecommitBundles(
-      workingReplica.state.config,
+      execution.state.config,
       proposal.collectedSigs ?? new Map(),
       'COLLECTED_PRECOMMITS_REJECTED',
     );
@@ -72,7 +78,7 @@ const normalizeIncomingPrecommits = (
   try {
     return entityInput.hashPrecommits?.size
       ? normalizePrecommitBundles(
-          workingReplica.state.config,
+          execution.state.config,
           entityInput.hashPrecommits,
           'PRECOMMIT_REJECTED',
         )
@@ -156,20 +162,21 @@ export const handleHashPrecommits = async (
     );
   }
   const signers = [...(proposal.collectedSigs?.keys() ?? [])];
-  const power = calculateQuorumPower(workingReplica.state.config, signers);
+  const authorityConfig = execution.state.config;
+  const power = calculateQuorumPower(authorityConfig, signers);
   if (!validateVotingPower(power)) {
     throw new Error(`ENTITY_CONSENSUS_FATAL_INVALID_VOTING_POWER:${power}`);
   }
   if (DEBUG) {
     const totalShares = Object.values(
-      workingReplica.state.config.shares,
+      authorityConfig.shares,
     ).reduce((sum, value) => sum + value, 0n);
     log.info(
       `    🔍 Threshold check: ${power} / ${totalShares} ` +
-        `[${((Number(power) / Number(workingReplica.state.config.threshold)) * 100).toFixed(1)}%]`,
+        `[${((Number(power) / Number(authorityConfig.threshold)) * 100).toFixed(1)}%]`,
     );
   }
-  if (power < workingReplica.state.config.threshold) return null;
+  if (power < authorityConfig.threshold) return null;
 
   const emitterId =
     proposal.leader.relayCertificate?.preparedFrameHash === proposal.hash

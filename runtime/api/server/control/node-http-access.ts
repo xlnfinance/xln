@@ -6,6 +6,7 @@ const PRIVATE_EXACT_PATHS = new Set([
   '/api/health/full',
   '/api/reset',
   '/api/runtime-import',
+  '/api/stack-manager/status',
 ]);
 
 export const requiresLocalNodeOperator = (url: URL): boolean =>

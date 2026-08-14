@@ -32,6 +32,11 @@ const BATCH_DOMAIN_SEPARATOR = ethers.keccak256(ethers.toUtf8Bytes("XLN_DEPOSITO
 
 export const addressEntityId = (address: string): string => ethers.zeroPadValue(address, 32);
 
+export const canonicalAccountKey = (left: string, right: string): string => {
+  const [first, second] = BigInt(left) < BigInt(right) ? [left, right] : [right, left];
+  return ethers.solidityPacked(['bytes32', 'bytes32'], [first, second]);
+};
+
 export const singleSignerLazyEntityId = (address: string): string => {
   const signerEntityId = addressEntityId(address);
   const encodedBoard = ethers.AbiCoder.defaultAbiCoder().encode(BOARD_ABI, [[
@@ -104,6 +109,8 @@ export const deployDepositoryStack = async (entityProviderAddress: string) => {
     await deltaTransformer.getAddress(),
   );
   await depository.waitForDeployment();
+  const entityProvider = await ethers.getContractAt('EntityProvider', entityProviderAddress);
+  await (await entityProvider.bindShareDepository(await depository.getAddress())).wait();
 
   return { account, depositoryBounds, hashLadderRegistry, nftCustody, deltaTransformer, depository };
 };

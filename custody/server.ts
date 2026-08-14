@@ -492,7 +492,7 @@ const withPaymentSubmissionLock = async <T>(operation: () => Promise<T>): Promis
 
 const routeFromWithdrawal = (withdrawal: WithdrawalRecord): string[] => {
   if (!withdrawal.routeJson) throw new Error(`CUSTODY_WITHDRAWAL_ROUTE_MISSING:${withdrawal.id}`);
-  const decoded = deserializeTaggedJson<unknown>(withdrawal.routeJson);
+  const decoded = deserializeTaggedJson(withdrawal.routeJson);
   if (!Array.isArray(decoded) || decoded.some(entry => typeof entry !== 'string')) {
     throw new Error(`CUSTODY_WITHDRAWAL_ROUTE_INVALID:${withdrawal.id}`);
   }

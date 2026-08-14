@@ -10,6 +10,7 @@ import {
   STORAGE_ACCOUNT_FIELD_TAG,
   type StorageAccountField,
 } from './account-field-tags';
+import { validateStorageAccountDocValue } from './schema-state-docs';
 
 export { STORAGE_ACCOUNT_FIELD_TAG } from './account-field-tags';
 
@@ -222,7 +223,11 @@ export const readAccountStorageLayout = async (
   if (!root) return null;
   const manifest = decodeAccountFieldsManifest(root);
   if (!manifest) {
-    return { doc: decodeBuffer<StorageAccountDoc>(root), logicalValue: root, representation: 'inline' };
+    return {
+      doc: validateStorageAccountDocValue(decodeBuffer(root)),
+      logicalValue: root,
+      representation: 'inline',
+    };
   }
   const state: Partial<Record<keyof AccountState, unknown>> = {};
   const replica: Partial<Record<keyof AccountReplica, unknown>> = {};
@@ -234,11 +239,11 @@ export const readAccountStorageLayout = async (
         `STORAGE_ACCOUNT_FIELD_HASH_MISMATCH:field=${entry.field}:actual=${actualHash}:expected=${entry.hash}`,
       );
     }
-    const decoded = decodeBuffer<unknown>(value);
+    const decoded = decodeBuffer(value);
     if (isStateField(entry.field)) state[stateFieldName(entry.field)] = decoded;
     else replica[entry.field as keyof AccountReplica] = decoded;
   }
-  const doc = { ...replica, state } as StorageAccountDoc;
+  const doc = validateStorageAccountDocValue({ ...replica, state });
   const logicalValue = encodeBuffer(doc);
   if (logicalValue.byteLength !== manifest.logicalBytes) {
     throw new Error(
@@ -249,6 +254,6 @@ export const readAccountStorageLayout = async (
   if (logicalHash !== manifest.logicalHash) {
     throw new Error(`STORAGE_ACCOUNT_LOGICAL_HASH_MISMATCH:actual=${logicalHash}:expected=${manifest.logicalHash}`);
   }
-  return { doc: doc as StorageAccountDoc, logicalValue, representation: 'fields' };
+  return { doc, logicalValue, representation: 'fields' };
 };
 import { Buffer } from '../../infra/platform-crypto';

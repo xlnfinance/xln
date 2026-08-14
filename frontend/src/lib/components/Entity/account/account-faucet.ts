@@ -45,14 +45,55 @@ export type ReserveFaucetCompletion = {
   currentBalance: bigint;
 };
 
-export async function readJsonResponse<T = unknown>(response: Response): Promise<T | null> {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
+  Object.keys(value).every((key) => allowed.includes(key));
+
+const isFaucetReceipt = (value: unknown): value is NonNullable<FaucetApiResult['receipt']> => {
+  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'status', 'counts', 'enqueuedHeight', 'observedHeight', 'note'])) return false;
+  if (value['id'] !== undefined && value['id'] !== null && typeof value['id'] !== 'string') return false;
+  if (value['status'] !== undefined && typeof value['status'] !== 'string') return false;
+  if (value['enqueuedHeight'] !== undefined && value['enqueuedHeight'] !== null && (typeof value['enqueuedHeight'] !== 'number' || !Number.isFinite(value['enqueuedHeight']))) return false;
+  if (value['observedHeight'] !== undefined && value['observedHeight'] !== null && (typeof value['observedHeight'] !== 'number' || !Number.isFinite(value['observedHeight']))) return false;
+  if (value['note'] !== undefined && value['note'] !== null && typeof value['note'] !== 'string') return false;
+  const counts = value['counts'];
+  return counts === undefined || (isRecord(counts) && hasOnlyKeys(counts, ['runtimeTxs', 'entityInputs', 'jInputs']) &&
+    Object.values(counts).every((count) => typeof count === 'number' && Number.isFinite(count)));
+};
+
+export const isFaucetApiResult = (value: unknown): value is FaucetApiResult => {
+  if (!isRecord(value) || !hasOnlyKeys(value, ['success', 'status', 'error', 'code', 'details', 'requestId', 'statusUrl', 'receipt', 'accountReady', 'serverDurationMs', 'events'])) return false;
+  if (value['success'] !== undefined && typeof value['success'] !== 'boolean') return false;
+  for (const field of ['status', 'error', 'code', 'requestId', 'statusUrl'] as const) if (value[field] !== undefined && typeof value[field] !== 'string') return false;
+  if (value['accountReady'] !== undefined && typeof value['accountReady'] !== 'boolean') return false;
+  if (value['serverDurationMs'] !== undefined && (typeof value['serverDurationMs'] !== 'number' || !Number.isFinite(value['serverDurationMs']))) return false;
+  if (value['receipt'] !== undefined && !isFaucetReceipt(value['receipt'])) return false;
+  if (!Array.isArray(value['events']) && value['events'] !== undefined) return false;
+  return value['events'] === undefined || value['events'].every((event) => isRecord(event) && hasOnlyKeys(event, ['name', 'args', 'blockNumber', 'blockHash', 'transactionHash']) &&
+    typeof event['name'] === 'string' && isRecord(event['args']) && typeof event['blockNumber'] === 'number' && Number.isFinite(event['blockNumber']) &&
+    typeof event['blockHash'] === 'string' && typeof event['transactionHash'] === 'string');
+};
+
+export const decodeFaucetApiResult = (value: unknown): FaucetApiResult => {
+  if (!isFaucetApiResult(value)) throw new Error('FAUCET_RESPONSE_INVALID');
+  return value;
+};
+
+export async function readJsonResponse(response: Response): Promise<unknown | null> {
   const raw = await response.text();
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as T;
+    return parseJsonUnknown(raw, 'FAUCET_RESPONSE_JSON_INVALID');
   } catch {
     return null;
   }
+}
+
+export async function readFaucetApiResult(response: Response): Promise<FaucetApiResult | null> {
+  const value = await readJsonResponse(response);
+  return value === null ? null : decodeFaucetApiResult(value);
 }
 
 export function faucetPendingKey(hubEntityId: string, tokenId: number): string {
@@ -83,3 +124,4 @@ export function reconcilePendingReserveFaucets(
   }
   return { remaining, received, timedOut };
 }
+import { parseJsonUnknown } from '$lib/utils/boundary';

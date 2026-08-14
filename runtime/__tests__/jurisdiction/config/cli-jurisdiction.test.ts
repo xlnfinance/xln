@@ -60,6 +60,12 @@ describe('CLI jurisdiction selection', () => {
     expect(selected.key).toBe('base');
   });
 
+  test('rejects a malformed network document before selecting a jurisdiction', () => {
+    expect(() => selectCliJurisdiction({ jurisdictions: { base: [] } }, {
+      rpcUrl: 'https://xln.finance/rpc',
+    })).toThrow('CLI_JURISDICTION_ENTRY_INVALID:base');
+  });
+
   test('CLI source does not contain stale deployed contract constants', () => {
     const source = readFileSync(join(process.cwd(), 'runtime/api/server/cli.ts'), 'utf8');
     expect(source).not.toContain('0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9');

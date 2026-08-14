@@ -6,11 +6,15 @@ export const getReplicaJRangeValidationError = (
   try {
     const budgetError = getEntityFrameJRangeBudgetError(txs);
     if (budgetError) return budgetError;
-    const activeProposerId = getEntityLeaderState(replica.state).activeValidatorId;
+    const handoverConfig = getBoardHandoverFrameConfig(env, replica.state, txs);
+    const authorityState = handoverConfig
+      ? withBoardAuthority(replica.state, handoverConfig)
+      : replica.state;
+    const activeProposerId = getEntityLeaderState(authorityState).activeValidatorId;
     for (const tx of txs) {
       if (tx.type !== 'j_event') continue;
       const error = getJEventRangeValidationError(
-        replica.state,
+        authorityState,
         replica.jHistory,
         tx.data,
         activeProposerId,
@@ -46,7 +50,16 @@ export const getFrameJPrefixValidationError = (
   frame: EntityFrame,
 ): JPrefixValidationFailure | null => {
   try {
-    assertFrameJPrefix(env, replica, frame);
+    const handoverConfig = getBoardHandoverFrameConfig(env, replica.state, frame.txs);
+    let authorityReplica = replica;
+    if (handoverConfig) {
+      const { jPrefixRound: _retiredRound, ...replicaWithoutRound } = replica;
+      authorityReplica = {
+        ...replicaWithoutRound,
+        state: withBoardAuthority(replica.state, handoverConfig, frame.height),
+      };
+    }
+    assertFrameJPrefix(env, authorityReplica, frame);
     return null;
   } catch (error) {
     if (isCertifiedJHistoryCorruption(error)) throw error;
@@ -78,7 +91,8 @@ export const ensureLocalJPrefixAttestation = (
   entityOutbox: EntityOutput[],
   force: boolean,
 ): boolean => {
-  if (hasCurrentRoundJPrefixAttestation(replica)) return false;
+  const pendingConfig = getPendingBoardHandoverConfig(replica.state, replica.mempool);
+  if (!pendingConfig && hasCurrentRoundJPrefixAttestation(replica)) return false;
   if (replica.proposal || replica.lockedFrame) return false;
   if (
     !force &&
@@ -104,19 +118,22 @@ export const ensureLocalJPrefixAttestation = (
     });
     return false;
   }
-  const attestation = buildLocalJPrefixAttestation(env, replica, history);
+  const authorityReplica = pendingConfig
+    ? { ...replica, state: withBoardAuthority(replica.state, pendingConfig) }
+    : replica;
+  const attestation = buildLocalJPrefixAttestation(env, authorityReplica, history);
   if (!attestation) {
     throw new Error(`J_PREFIX_LOCAL_ATTESTATION_MISSING:${replica.entityId}:${history.scannedThroughHeight}`);
   }
   const sourceValidatorId = replica.signerId.trim().toLowerCase();
   replica.jPrefixRound = mergeJPrefixAttestations(
     env,
-    replica.state,
-    replica.jPrefixRound,
+    authorityReplica.state,
+    pendingConfig ? undefined : replica.jPrefixRound,
     new Map([[sourceValidatorId, attestation]]),
   );
   replica.lastConsensusProgressAt = env.state.timestamp;
-  for (const validatorId of replica.state.config.validators) {
+  for (const validatorId of authorityReplica.state.config.validators) {
     if (validatorId.trim().toLowerCase() === sourceValidatorId) continue;
     entityOutbox.push({
       entityId: replica.entityId,
@@ -190,3 +207,8 @@ import type { EntityOutput, EntityReplica, EntityFrame } from '../../types';
 import { getEntityLeaderState, isEntityActiveLeader } from '../leader';
 import { entityLog } from '../entity-log';
 import { FailureDispositionError, retryFailure } from '../../../protocol/errors/failure-taxonomy';
+import {
+  getBoardHandoverFrameConfig,
+  getPendingBoardHandoverConfig,
+  withBoardAuthority,
+} from '../authority/board-handover';

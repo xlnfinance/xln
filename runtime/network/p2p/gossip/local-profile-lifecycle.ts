@@ -2,8 +2,11 @@ import { getSignerAddress, getSignerPrivateKeyIfAvailable } from '../../../accou
 import type { RuntimeReplica } from '../../../runtime/types';
 import { compareStableText } from '../../../protocol/serialization';
 import { buildLocalEntityProfile } from './helper';
-import { signProfileRuntimeRoute } from '../../../entity/profile/profile-signing';
-import { computeProfileHash } from '../../../entity/profile/profile-signing';
+import {
+  computeProfileHash,
+  hasCurrentProfileBoardAuthority,
+  signProfileRuntimeRoute,
+} from '../../../entity/profile/profile-signing';
 import type { EntityReplica } from '../../../entity/types';
 
 const normalize = (value: string): string => value.trim().toLowerCase();
@@ -33,6 +36,7 @@ export const announceCertifiedLocalProfiles = async (
       .sort((left, right) => compareStableText(left.signerId, right.signerId));
     const replica = defaultRouteReplica(env, candidates);
     if (!replica) continue;
+    if (!(await hasCurrentProfileBoardAuthority(env, replica.state))) continue;
     const profile = buildLocalEntityProfile(env, replica.state);
     const certification = replica.hankoWitness?.get(computeProfileHash(profile));
     if (!certification || certification.type !== 'profile') continue;

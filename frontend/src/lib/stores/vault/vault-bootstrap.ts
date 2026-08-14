@@ -1,5 +1,6 @@
 import type { JurisdictionConfig } from '@xln/runtime/api/public/runtime-module';
 import { errorLog } from '../errorLogStore';
+import { isUnknownRecord, parseJsonUnknown, readJsonUnknown } from '$lib/utils/boundary';
 import {
   type FaucetResult,
   type HealthMachine,
@@ -7,6 +8,11 @@ import {
   type JurisdictionsPayload,
   type Runtime,
 } from './vault-recovery';
+
+const isJurisdictionsPayload = (value: unknown): value is JurisdictionsPayload =>
+  isUnknownRecord(value) && isUnknownRecord(value['jurisdictions']) &&
+  (value['version'] === undefined || typeof value['version'] === 'string') &&
+  Object.values(value['jurisdictions']).every(isUnknownRecord);
 
 export const summarizeHealth = (payload: HealthPayload | null): Record<string, unknown> => {
   if (!payload) return {};
@@ -61,7 +67,9 @@ export const fetchJurisdictions = async (baseOrigin?: string): Promise<Jurisdict
         lastError = new Error(`HTTP ${resp.status}`);
         continue;
       }
-      const payload = (await resp.json()) as JurisdictionsPayload;
+      const payload = await readJsonUnknown(resp);
+      if (!isJurisdictionsPayload(payload)) throw new Error('JURISDICTIONS_RESPONSE_INVALID');
+      // Each jurisdiction is decoded again before use by the runtime bootstrap.
       return payload;
     } catch (err) {
       lastError = err;
@@ -88,7 +96,19 @@ export async function fundSignerWalletViaFaucet(address: string): Promise<void> 
     let result: FaucetResult | null = null;
     if (raw) {
       try {
-        result = JSON.parse(raw);
+        const payload = parseJsonUnknown(raw, 'FAUCET_RESPONSE_JSON_INVALID');
+        if (isUnknownRecord(payload) &&
+          (payload['success'] === undefined || typeof payload['success'] === 'boolean') &&
+          (payload['txHash'] === undefined || typeof payload['txHash'] === 'string') &&
+          (payload['error'] === undefined || typeof payload['error'] === 'string')) {
+          result = {
+            ...(payload['success'] === undefined ? {} : { success: payload['success'] }),
+            ...(payload['txHash'] === undefined ? {} : { txHash: payload['txHash'] }),
+            ...(payload['error'] === undefined ? {} : { error: payload['error'] }),
+          };
+        } else {
+          throw new Error('FAUCET_RESPONSE_INVALID');
+        }
       } catch {
         /* ignore */
       }

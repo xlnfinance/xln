@@ -112,6 +112,7 @@ describe('persistence inspection issue model', () => {
         runtimeId: '0xABCDEF',
         lookupKey: 'lookup',
         height: 41,
+        createdAt: 1,
         bundleHash: '0xbundle',
         iv: '00',
         ciphertext: '01',

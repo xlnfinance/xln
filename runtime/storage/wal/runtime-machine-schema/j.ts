@@ -13,6 +13,7 @@ import {
   type JHeight,
   type UnixMs,
 } from '../../../protocol/units';
+import { toBoardHash, toBoardProposalHash } from '../../../protocol/hashes';
 import { validateJBatch } from '../../../jurisdiction/machine/batch-validation';
 import {
   requireArray,
@@ -39,6 +40,20 @@ const validateAttempt = (value: unknown, code: string): void => {
   requireBoundaryInteger(attempt['attemptNumber'], `${code}_NUMBER`, 1);
   requireBoundaryInteger(attempt['attemptedAt'], `${code}_AT`);
   requireBoundaryInteger(attempt['batchGeneration'], `${code}_GENERATION`);
+};
+
+const validateGovernanceAttempt = (value: unknown, code: string): void => {
+  const attempt = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(
+    attempt,
+    ['attemptId', 'attemptNumber', 'attemptedAt', 'eligibleAt'],
+    [],
+    `${code}_FIELDS`,
+  );
+  requireString(attempt['attemptId'], `${code}_ID`);
+  requireBoundaryInteger(attempt['attemptNumber'], `${code}_NUMBER`, 1);
+  requireBoundaryInteger(attempt['attemptedAt'], `${code}_AT`);
+  requireBoundaryInteger(attempt['eligibleAt'], `${code}_ELIGIBLE_AT`);
 };
 
 const validateFeeOverrides = (value: unknown, code: string): void => {
@@ -164,6 +179,37 @@ function assertJTx(value: unknown, code: string): asserts value is DecodedJTx {
     requireExactBoundaryKeys(data, ['tokenId', 'maxIterations'], ['signerId'], `${code}_DATA_FIELDS`);
     requireBoundaryInteger(data['tokenId'], `${code}_DATA_TOKEN`);
     requireBigInt(data['maxIterations'], `${code}_DATA_MAX_ITERATIONS`, 0n);
+    if (data['signerId'] !== undefined) requireString(data['signerId'], `${code}_DATA_SIGNER`);
+  } else if (tx['type'] === 'entityProviderProposeControlBoard') {
+    requireExactBoundaryKeys(data, [
+      'targetEntityId', 'newBoardHash', 'boardEpoch', 'actionNonce',
+      'proposalHash', 'supporterVotes',
+    ], ['signerId', 'runtimeSubmitAttempt'], `${code}_DATA_FIELDS`);
+    toEntityId(requireString(data['targetEntityId'], `${code}_DATA_TARGET_ENTITY`));
+    toBoardHash(requireString(data['newBoardHash'], `${code}_DATA_BOARD_HASH`));
+    requireBigInt(data['boardEpoch'], `${code}_DATA_BOARD_EPOCH`, 0n);
+    requireBigInt(data['actionNonce'], `${code}_DATA_ACTION_NONCE`, 1n);
+    toBoardProposalHash(requireString(data['proposalHash'], `${code}_DATA_PROPOSAL_HASH`));
+    const votes = requireArray(data['supporterVotes'], `${code}_DATA_SUPPORTERS`);
+    if (votes.length === 0 || votes.length > 256) throw new Error(`${code}_DATA_SUPPORTERS_COUNT`);
+    let previous = '';
+    for (let index = 0; index < votes.length; index += 1) {
+      const vote = requireBoundaryRecord(votes[index], `${code}_DATA_SUPPORTER_${index}`);
+      requireExactBoundaryKeys(vote, ['entityId'], ['hankoSignature'], `${code}_DATA_SUPPORTER_${index}_FIELDS`);
+      const entityId = toEntityId(requireString(vote['entityId'], `${code}_DATA_SUPPORTER_${index}_ENTITY`)).toLowerCase();
+      if (previous && entityId <= previous) throw new Error(`${code}_DATA_SUPPORTERS_ORDER`);
+      previous = entityId;
+      if (vote['hankoSignature'] !== undefined) {
+        requireString(vote['hankoSignature'], `${code}_DATA_SUPPORTER_${index}_HANKO`);
+      }
+    }
+    if (data['signerId'] !== undefined) requireString(data['signerId'], `${code}_DATA_SIGNER`);
+    if (data['runtimeSubmitAttempt'] !== undefined) {
+      validateGovernanceAttempt(data['runtimeSubmitAttempt'], `${code}_DATA_ATTEMPT`);
+    }
+  } else if (tx['type'] === 'entityProviderActivateBoard') {
+    requireExactBoundaryKeys(data, ['targetEntityId'], ['signerId'], `${code}_DATA_FIELDS`);
+    toEntityId(requireString(data['targetEntityId'], `${code}_DATA_TARGET_ENTITY`));
     if (data['signerId'] !== undefined) requireString(data['signerId'], `${code}_DATA_SIGNER`);
   } else if (
     tx['type'] === 'entityProviderTransfer' ||

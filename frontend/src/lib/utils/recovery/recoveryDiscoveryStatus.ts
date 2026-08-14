@@ -26,14 +26,14 @@ const storageKey = (runtimeId: string): string =>
   `${STORAGE_PREFIX}${normalizeRuntimeId(runtimeId)}`;
 
 const normalizeFailureStatus = (failure: unknown): RuntimeRecoveryDiscoveryFailureStatus | null => {
-  if (!failure || typeof failure !== 'object') return null;
-  const source = String((failure as { source?: unknown }).source || '').trim();
-  const category = String((failure as { category?: unknown }).category || '').trim();
+  if (!isUnknownRecord(failure)) return null;
+  const source = String(failure['source'] || '').trim();
+  const category = String(failure['category'] || '').trim();
   if (source !== 'tower' && source !== 'peer') return null;
   if (category !== 'ExpectedEmpty' && category !== 'TransientRace' && category !== 'Contradiction') return null;
-  const sourceLabel = String((failure as { sourceLabel?: unknown }).sourceLabel || source).trim() || source;
-  const code = String((failure as { code?: unknown }).code || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
-  const message = String((failure as { message?: unknown }).message || code).trim() || code;
+  const sourceLabel = String(failure['sourceLabel'] || source).trim() || source;
+  const code = String(failure['code'] || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
+  const message = String(failure['message'] || code).trim() || code;
   return { source, sourceLabel, category, code, message };
 };
 
@@ -80,19 +80,19 @@ export function readRuntimeRecoveryDiscoveryStatus(
   const raw = localStorage.getItem(storageKey(normalizedRuntimeId));
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as Partial<RuntimeRecoveryDiscoveryStatus>;
-    if (normalizeRuntimeId(parsed.runtimeId) !== normalizedRuntimeId) return null;
+    const parsed = parseJsonUnknown(raw, 'RUNTIME_RECOVERY_DISCOVERY_JSON_INVALID');
+    if (!isUnknownRecord(parsed) || normalizeRuntimeId(typeof parsed['runtimeId'] === 'string' ? parsed['runtimeId'] : null) !== normalizedRuntimeId) return null;
     return {
       runtimeId: normalizedRuntimeId,
-      checkedTowers: Math.max(0, Math.floor(Number(parsed.checkedTowers || 0))),
-      checkedPeers: Math.max(0, Math.floor(Number(parsed.checkedPeers || 0))),
-      peerBackupCount: Math.max(0, Math.floor(Number(parsed.peerBackupCount || 0))),
-      backupCount: Math.max(0, Math.floor(Number(parsed.backupCount || 0))),
-      errors: Array.isArray(parsed.errors)
-        ? parsed.errors.map((entry) => String(entry || '')).filter(Boolean)
+      checkedTowers: Math.max(0, Math.floor(Number(parsed['checkedTowers'] || 0))),
+      checkedPeers: Math.max(0, Math.floor(Number(parsed['checkedPeers'] || 0))),
+      peerBackupCount: Math.max(0, Math.floor(Number(parsed['peerBackupCount'] || 0))),
+      backupCount: Math.max(0, Math.floor(Number(parsed['backupCount'] || 0))),
+      errors: Array.isArray(parsed['errors'])
+        ? parsed['errors'].map((entry) => String(entry || '')).filter(Boolean)
         : [],
-      failures: normalizeFailureStatuses(parsed.failures),
-      checkedAt: Math.max(0, Math.floor(Number(parsed.checkedAt || 0))),
+      failures: normalizeFailureStatuses(parsed['failures']),
+      checkedAt: Math.max(0, Math.floor(Number(parsed['checkedAt'] || 0))),
     };
   } catch {
     localStorage.removeItem(storageKey(normalizedRuntimeId));
@@ -106,3 +106,4 @@ export function clearRuntimeRecoveryDiscoveryStatus(runtimeId: string | null | u
   if (!normalizedRuntimeId) return;
   localStorage.removeItem(storageKey(normalizedRuntimeId));
 }
+import { isUnknownRecord, parseJsonUnknown } from '$lib/utils/boundary';

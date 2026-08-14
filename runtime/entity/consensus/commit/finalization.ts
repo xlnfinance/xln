@@ -101,7 +101,7 @@ const buildCommitHankos = async (
         workingReplica.state.entityId,
         hashInfo.hash,
         signatures,
-        workingReplica.state.config,
+        execution.state.config,
         execution.state,
       ),
     );

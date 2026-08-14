@@ -5,6 +5,10 @@ type DepositoryEntityProviderReader = {
   getAddress(): Promise<string>;
 };
 
+type EntityProviderShareDepositoryReader = {
+  shareDepository(): Promise<string>;
+};
+
 export const canonicalJStackAddress = (label: string, value: unknown): string => {
   const raw = String(value ?? '').trim();
   if (!ethers.isAddress(raw) || raw === ethers.ZeroAddress) {
@@ -38,6 +42,7 @@ export const assertDepositoryEntityProviderBinding = async (
   context: string,
   depository: DepositoryEntityProviderReader,
   configuredEntityProvider: unknown,
+  entityProvider?: EntityProviderShareDepositoryReader,
 ): Promise<void> => {
   const depositoryAddress = canonicalJStackAddress(
     `${context}:depository`,
@@ -56,5 +61,17 @@ export const assertDepositoryEntityProviderBinding = async (
       `J_STACK_ENTITY_PROVIDER_MISMATCH:${context}` +
       `:depository=${depositoryAddress}:configured=${configured}:linked=${linked}`,
     );
+  }
+  if (entityProvider) {
+    const reverseLinked = canonicalJStackAddress(
+      `${context}:linked_share_depository`,
+      await entityProvider.shareDepository(),
+    );
+    if (reverseLinked !== depositoryAddress) {
+      throw new Error(
+        `J_STACK_SHARE_DEPOSITORY_MISMATCH:${context}` +
+        `:entityProvider=${configured}:expected=${depositoryAddress}:actual=${reverseLinked}`,
+      );
+    }
   }
 };

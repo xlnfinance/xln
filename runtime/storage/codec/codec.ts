@@ -24,9 +24,9 @@ const requireStorageMsgpack = (buffer: Buffer): void => {
   }
 };
 
-export const decodeBuffer = <T>(buffer: Buffer): T => {
+export const decodeBuffer = (buffer: Buffer): unknown => {
   requireStorageMsgpack(buffer);
-  return decodeBinaryPayload<T>(buffer);
+  return decodeBinaryPayload(buffer);
 };
 
 export const decodeValidatedBuffer = <T>(

@@ -7,6 +7,7 @@ import type { BrowserVMProvider } from './browservm-provider';
 import type { JAdapter, JAdapterAddresses, JBatchReceipt, JEvent, JSubmitResult } from '../types';
 import { makeJAdapterFailureResult } from '../core/failure';
 import { submitDebtEnforcement, submitMint } from '../rpc/write/rpc-submit-basic';
+import { hashBoardProposalHankoPayload } from '../../../hanko/onchain-domain';
 
 type BrowserVmSubmitContext = {
   chainId: number;
@@ -67,6 +68,43 @@ const submitEntityProviderAction = async (
       blockNumber: receipt.blockNumber,
       events,
     };
+  } catch (error) {
+    return makeJAdapterFailureResult(error);
+  }
+};
+
+const submitControlBoardProposal = async (
+  context: BrowserVmSubmitContext,
+  jTx: Extract<JTx, { type: 'entityProviderProposeControlBoard' }>,
+): Promise<JSubmitResult> => {
+  try {
+    const expectedHash = hashBoardProposalHankoPayload(
+      {
+        chainId: context.chainId,
+        entityProviderAddress: context.addresses.entityProvider,
+        boardEpoch: jTx.data.boardEpoch,
+      },
+      {
+        entityId: jTx.data.targetEntityId,
+        newBoardHash: jTx.data.newBoardHash,
+        authority: 1,
+        actionNonce: jTx.data.actionNonce,
+      },
+    ).toLowerCase();
+    if (expectedHash !== jTx.data.proposalHash.toLowerCase()) {
+      throw new Error(`CONTROL_BOARD_PROPOSAL_HASH_MISMATCH:${jTx.data.proposalHash}:${expectedHash}`);
+    }
+    const hankos = jTx.data.supporterVotes.map((vote) => {
+      if (!vote.hankoSignature) throw new Error(`CONTROL_BOARD_PROPOSAL_HANKO_MISSING:${vote.entityId}`);
+      return vote.hankoSignature;
+    });
+    const events = await context.browserVM.submitControlBoardProposal(
+      jTx.data.targetEntityId,
+      jTx.data.newBoardHash,
+      hankos,
+    );
+    const receipt = receiptFromEvents(events);
+    return { success: true, txHash: receipt.txHash, blockNumber: receipt.blockNumber, events };
   } catch (error) {
     return makeJAdapterFailureResult(error);
   }
@@ -138,6 +176,18 @@ export const createBrowserVmSubmitTx =
       jTx.type === 'entityProviderCancelAction'
     ) {
       return submitEntityProviderAction(context, jTx);
+    }
+    if (jTx.type === 'entityProviderProposeControlBoard') {
+      return submitControlBoardProposal(context, jTx);
+    }
+    if (jTx.type === 'entityProviderActivateBoard') {
+      try {
+        const events = await context.browserVM.activateBoard(jTx.data.targetEntityId);
+        const receipt = receiptFromEvents(events);
+        return { success: true, txHash: receipt.txHash, blockNumber: receipt.blockNumber, events };
+      } catch (error) {
+        return makeJAdapterFailureResult(error);
+      }
     }
     if (jTx.type === 'batch') return submitBatch(context, jTx, options);
     const unhandled: never = jTx;

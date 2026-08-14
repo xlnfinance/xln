@@ -536,6 +536,35 @@ type EntityTxPayload =
       };
     }
   | {
+      /** Current shareholder Entity quorum votes settled CONTROL for one exact board proposal. */
+      type: 'entityProviderProposeControlBoard';
+      data: {
+        targetEntityId: string;
+        newBoardHash: string;
+        actionNonce: bigint;
+        supporterVotes?: Array<{ entityId: string; hankoSignature: string }>;
+      };
+    }
+  | {
+      /** Permissionless liveness call after the proposal delay has elapsed. */
+      type: 'entityProviderActivateBoard';
+      data: { targetEntityId: string };
+    }
+  | {
+      /**
+       * Exact post-activation Entity authority preimage. The preceding
+       * certified BoardActivated J range is the authority; these bytes only
+       * let validators deterministically materialize that on-chain decision.
+       */
+      type: 'boardHandover';
+      data: {
+        board: Pick<
+          import('../entity/types').ConsensusConfig,
+          'mode' | 'threshold' | 'validators' | 'shares'
+        >;
+      };
+    }
+  | {
       // J-Rebroadcast: resend current sentBatch with same nonce/hash and optional fee bump.
       type: 'j_rebroadcast';
       data: {

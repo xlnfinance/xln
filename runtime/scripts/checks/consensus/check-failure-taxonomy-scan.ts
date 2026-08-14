@@ -619,7 +619,7 @@ for (const [path, markers] of [
   ],
   [
     'runtime/orchestrator/process/managed-runtime-leases.ts',
-    ["createStructuredLogger('orchestrator.managed_leases')", 'stale_processes.kill', 'lease.unreadable_ignored'],
+    ["createStructuredLogger('orchestrator.managed_leases')", 'stale_processes.kill', 'MANAGED_RUNTIME_LEASE_INVALID'],
   ],
   [
     'runtime/infra/process/parent-watch.ts',

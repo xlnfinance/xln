@@ -1,12 +1,13 @@
 /**
- * Unified snapshot encoder/decoder.
- * JSON mode is canonical, deterministic, and BigInt-safe via serialization-utils.
+ * Canonical tagged-JSON snapshot codec for public debug and test tooling.
+ * Decoding intentionally returns unknown: callers must validate persisted or
+ * network-controlled bytes before treating them as a protocol type.
  */
 
 import { deserializeTaggedJson, serializeTaggedJson } from '../../protocol/serialization';
 
-export const encode = <T>(data: T): Buffer => Buffer.from(serializeTaggedJson(data));
+export const encode = (data: unknown): Buffer => Buffer.from(serializeTaggedJson(data));
 
-export const decode = <T>(buffer: Buffer): T => deserializeTaggedJson<T>(buffer.toString());
+export const decode = (buffer: Buffer): unknown => deserializeTaggedJson(buffer.toString());
 
 import { Buffer } from '../../infra/platform-crypto';

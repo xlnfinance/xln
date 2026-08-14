@@ -14,6 +14,8 @@ import { findReplica, syncChain } from '../harness/helpers';
 import { executeCompanyAction } from './governance';
 import {
   CONTROL_SUPPLY,
+  CONTROL_IPO_AMOUNT,
+  COMPANY_USDT_FUNDING,
   DIVIDEND_SUPPLY,
   USDT,
   USDT_UNIT,
@@ -81,7 +83,7 @@ export const prepareCompanyAccounts = async (
     await executeCompanyAction(env, actor, [accountOpenTx(env, actor, actors.hub)]);
     assertAccount(env, actor, actors.hub);
   }
-  const usdtFunding = 1_000n * USDT_UNIT;
+  const usdtFunding = COMPANY_USDT_FUNDING;
   await fundEntities(env, actors.jadapter, [
     { id: actors.soloCompany.id, tokenId: USDT, amount: usdtFunding },
     { id: actors.investor.id, tokenId: USDT, amount: usdtFunding },
@@ -90,7 +92,10 @@ export const prepareCompanyAccounts = async (
     [shares.controlTokenId, CONTROL_SUPPLY] as const,
     [shares.dividendTokenId, DIVIDEND_SUPPLY] as const,
   ];
-  await fundCollateral(env, actors.boardCompany, actors.hub, shareCapacity);
+  await fundCollateral(env, actors.boardCompany, actors.hub, [
+    [shares.controlTokenId, CONTROL_IPO_AMOUNT],
+    [shares.dividendTokenId, DIVIDEND_SUPPLY],
+  ]);
   await fundCollateral(env, actors.investor, actors.hub, [[USDT, usdtFunding]]);
   await fundCollateral(env, actors.soloCompany, actors.hub, [[USDT, 100n * USDT_UNIT]]);
   // The hub temporarily intermediates the two bilateral legs. Each recipient

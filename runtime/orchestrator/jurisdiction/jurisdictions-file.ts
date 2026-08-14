@@ -1,15 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { requireBoundaryRecord } from '../../protocol/boundary-validation';
 
-export const readJurisdictionsFile = <T extends object = Record<string, unknown>>(
+/** Raw disk boundary only: callers must apply their product-specific decoder. */
+export const readJurisdictionsFile = (
   filePath: string,
-): T | null => {
+): Record<string, unknown> | null => {
   if (!existsSync(filePath)) return null;
   try {
     const parsed: unknown = JSON.parse(readFileSync(filePath, 'utf8'));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('root must be a JSON object');
-    }
-    return parsed as T;
+    return requireBoundaryRecord(parsed, 'root must be a JSON object');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`JURISDICTIONS_FILE_INVALID:path=${filePath}:error=${message}`, { cause: error });

@@ -36,7 +36,10 @@ const processSecretAckTimeout = (
     return;
   }
   if (account.activeDispute) return;
-  plan.disputePrepareCounterparties.add(counterpartyEntityId);
+  plan.disputePrepareCounterparties.set(
+    counterpartyEntityId,
+    'auto-prepare-dispute-after-secret-ack-timeout',
+  );
   crontabLog.warn('htlc_secret_ack_timeout', {
     counterparty: shortId(counterpartyEntityId),
     hashlock: shortHash(hashlock),
@@ -82,6 +85,29 @@ const processDueHook = (
     case 'board_reseal':
       processBoardResealHook(env, hook, replica, context, plan);
       return;
+    case 'counterparty_board_reseal_deadline': {
+      const account = replica.state.accounts.get(hook.data.accountId);
+      if (!account || Number(account.currentHeight) < 1) return;
+      const reseal = account.counterpartyBoardReseal;
+      const hasCurrentReseal = Boolean(reseal && (
+        reseal.activationJHeight > hook.data.activationJHeight ||
+        (
+          reseal.activationJHeight === hook.data.activationJHeight &&
+          reseal.activationLogIndex >= hook.data.activationLogIndex
+        )
+      ));
+      if (hasCurrentReseal || account.activeDispute || account.disputePrepare) return;
+      plan.disputePrepareCounterparties.set(
+        hook.data.accountId,
+        'counterparty-board-reseal-deadline-expired',
+      );
+      crontabLog.warn('counterparty_board_reseal_deadline.expired', {
+        counterparty: shortId(hook.data.accountId),
+        activationJHeight: hook.data.activationJHeight,
+        activationLogIndex: hook.data.activationLogIndex,
+      });
+      return;
+    }
     case 'cross_j_orderbook_sweep':
       plan.outputs.push({
         entityId: replica.entityId,
@@ -118,11 +144,11 @@ const appendBatchedHookOutputs = (
     plan.outputs.push({
       entityId: replica.entityId,
       signerId: firstValidator,
-      entityTxs: [...plan.disputePrepareCounterparties].map(counterpartyEntityId => ({
+      entityTxs: [...plan.disputePrepareCounterparties].map(([counterpartyEntityId, description]) => ({
         type: 'prepareDispute',
         data: {
           counterpartyEntityId,
-          description: 'auto-prepare-dispute-after-secret-ack-timeout',
+          description,
         },
       })),
     });

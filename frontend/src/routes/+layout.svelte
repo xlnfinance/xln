@@ -7,6 +7,7 @@
 	import XlnMascot from '$lib/components/XlnMascot/XlnMascot.svelte';
 	import { initializeNativeShell } from '$lib/native/capacitor';
 	import { installRangeSliderProgress } from '$lib/utils/rangeSliderProgress';
+	import { optionalString, readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
 	import '$lib/styles/apple-glass.css';
 	import '$lib/styles/checkbox-controls.css';
 	import '$lib/styles/form-controls.css';
@@ -64,12 +65,12 @@
 				},
 			});
 			if (!response.ok) return;
-			const payload = await response.json() as {
-				deployVersion?: unknown;
-				networkVersion?: unknown;
-				version?: unknown;
-			};
-			const version = String(payload?.deployVersion || payload?.networkVersion || payload?.version || '').trim();
+			const payload = requireUnknownRecord(await readJsonUnknown(response), 'DEPLOY_LABEL_PAYLOAD_INVALID');
+			rejectExtraKeys(payload, ['deployVersion', 'networkVersion', 'version'], 'DEPLOY_LABEL_PAYLOAD_EXTRA_FIELD');
+			const version = (optionalString(payload['deployVersion'], 'DEPLOY_LABEL_VERSION_INVALID')
+				?? optionalString(payload['networkVersion'], 'DEPLOY_LABEL_NETWORK_VERSION_INVALID')
+				?? optionalString(payload['version'], 'DEPLOY_LABEL_BASE_VERSION_INVALID')
+				?? '').trim();
 			deployLabel = /^\d{10,}$/.test(version) ? '' : version;
 		} catch {
 			deployLabel = '';

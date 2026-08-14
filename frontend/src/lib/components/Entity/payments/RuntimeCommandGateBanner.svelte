@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import { optionalString, readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
 
   export let ready = false;
   export let reason: string | null = null;
@@ -10,6 +11,22 @@
     fingerprint?: string;
     code?: string;
   };
+
+  function decodeIncidentPayload(value: unknown): Incident[] {
+    const record = requireUnknownRecord(value, 'DEBUG_INCIDENT_RESPONSE_INVALID');
+    rejectExtraKeys(record, ['ok', 'incidents'], 'DEBUG_INCIDENT_RESPONSE_EXTRA_FIELD');
+    if (record['ok'] !== true || !Array.isArray(record['incidents'])) throw new Error('DEBUG_INCIDENT_RESPONSE_INVALID');
+    return record['incidents'].map((entry) => {
+      const incident = requireUnknownRecord(entry, 'DEBUG_INCIDENT_INVALID');
+      rejectExtraKeys(incident, ['fingerprint', 'code'], 'DEBUG_INCIDENT_EXTRA_FIELD');
+      const fingerprint = optionalString(incident['fingerprint'], 'DEBUG_INCIDENT_FINGERPRINT_INVALID');
+      const code = optionalString(incident['code'], 'DEBUG_INCIDENT_CODE_INVALID');
+      const result: Incident = {};
+      if (fingerprint !== undefined) result.fingerprint = fingerprint;
+      if (code !== undefined) result.code = code;
+      return result;
+    });
+  }
 
   let mounted = false;
   let requestGeneration = 0;
@@ -38,11 +55,7 @@
         url.searchParams.set('limit', '1');
         const response = await fetch(url, { cache: 'no-store' });
         if (!response.ok) throw new Error(`HTTP_${response.status}`);
-        const payload = await response.json() as { ok?: boolean; incidents?: Incident[] };
-        if (payload.ok !== true || !Array.isArray(payload.incidents)) {
-          throw new Error('DEBUG_INCIDENT_RESPONSE_INVALID');
-        }
-        const incident = payload.incidents[0];
+        const incident = decodeIncidentPayload(await readJsonUnknown(response))[0];
         if (incident?.fingerprint) {
           incidentFingerprint = String(incident.fingerprint);
           incidentCode = String(incident.code || '');

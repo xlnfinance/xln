@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { compareStableText } from '../protocol/serialization';
+import { requireBoundaryInteger } from '../protocol/boundary-validation';
 import type { RuntimeReplica } from '../runtime/types';
 import { buildDurableRuntimeMachineSnapshot } from './wal/snapshot';
 import {
@@ -353,7 +354,19 @@ const nodeSlotUnder = (parentPath: number[], childPath: number[]): number =>
 
 const merklePathKey = (path: number[]): string => JSON.stringify(path);
 
-const parseMerklePathKey = (key: string): number[] => JSON.parse(key) as number[];
+const parseMerklePathKey = (key: string): number[] => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(key);
+  } catch (error) {
+    throw new Error('STORAGE_MERKLE_PATH_KEY_INVALID:json', { cause: error });
+  }
+  if (!Array.isArray(parsed)) throw new Error('STORAGE_MERKLE_PATH_KEY_INVALID:array');
+  return parsed.map((slot, index) => requireBoundaryInteger(
+    slot,
+    `STORAGE_MERKLE_PATH_KEY_INVALID:slot=${index}`,
+  ));
+};
 
 const cloneMerklePathSet = (paths: Set<string>): number[][] =>
   Array.from(paths)

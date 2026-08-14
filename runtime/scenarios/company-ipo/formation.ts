@@ -98,7 +98,11 @@ export const formCompanyActors = async (env: RuntimeReplica): Promise<CompanySce
   ], jurisdiction);
   const [hub, investor, soloCompany] = singles;
   if (!hub || !investor || !soloCompany) throw new Error('COMPANY_SINGLE_REGISTRATION_INCOMPLETE');
-  const boardValidators = ['4', '5', '6'].map(alias => resolveScenarioBoardSigner(env, alias));
+  // The investor starts as a minority director (1 of 3, threshold 2). This is
+  // a realistic pre-approved successor path: CONTROL ownership may later make
+  // that director the sole board without requiring the retired board to hand
+  // over the Entity encryption key after the takeover.
+  const boardValidators = ['2', '5', '6'].map(alias => resolveScenarioBoardSigner(env, alias));
   const boardCompany = await registerBoardCompany(env, { jadapter, jurisdiction }, boardValidators);
   return {
     jadapter,

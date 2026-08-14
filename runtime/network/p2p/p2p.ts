@@ -12,7 +12,12 @@ import { canonicalizeRuntimeWsAudience, directRuntimeWsAudience } from './ws-pro
 import { buildLocalEntityProfile } from './gossip/helper';
 import { extractEntityId } from '../../protocol/identity';
 import { getSignerAddress, getSignerPrivateKeyIfAvailable } from '../../account/crypto';
-import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../../entity/profile/profile-signing';
+import {
+  computeProfileHash,
+  hasCurrentProfileBoardAuthority,
+  signProfileRuntimeRoute,
+  verifyProfileSignature,
+} from '../../entity/profile/profile-signing';
 import { inspectHankoForHash } from '../../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../../protocol/crypto/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
@@ -37,6 +42,7 @@ import {
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/entity-input/entity-input-envelope-auth.ts';
 import { retryFailure } from '../../protocol/errors/failure-taxonomy';
+import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
@@ -113,6 +119,39 @@ type RuntimeP2POptions = {
 
 type GossipResponsePayload = {
   profiles: Profile[];
+};
+
+const decodeGossipProfileRequest = (value: unknown): GossipProfileBatchRequest => {
+  const request = requireBoundaryRecord(value, 'P2P_GOSSIP_REQUEST_INVALID');
+  requireExactBoundaryKeys(request, [], ['ids', 'set', 'updatedSince', 'limit'], 'P2P_GOSSIP_REQUEST_FIELDS_INVALID');
+  const ids = request['ids'];
+  if (ids !== undefined && (!Array.isArray(ids) || ids.some(id => typeof id !== 'string' || id.length > 128))) {
+    throw new Error('P2P_GOSSIP_REQUEST_IDS_INVALID');
+  }
+  const set = request['set'];
+  if (set !== undefined && set !== 'default' && set !== 'hubs') throw new Error('P2P_GOSSIP_REQUEST_SET_INVALID');
+  for (const field of ['updatedSince', 'limit'] as const) {
+    const candidate = request[field];
+    if (candidate !== undefined && (!Number.isSafeInteger(candidate) || Number(candidate) < 0)) {
+      throw new Error(`P2P_GOSSIP_REQUEST_${field.toUpperCase()}_INVALID`);
+    }
+  }
+  return {
+    ...(ids === undefined ? {} : { ids: [...ids] }),
+    ...(set === undefined ? {} : { set }),
+    ...(request['updatedSince'] === undefined ? {} : { updatedSince: Number(request['updatedSince']) }),
+    ...(request['limit'] === undefined ? {} : { limit: Number(request['limit']) }),
+  };
+};
+
+const decodeGossipProfiles = (value: unknown): unknown[] => {
+  const response = requireBoundaryRecord(value, 'P2P_GOSSIP_RESPONSE_INVALID');
+  requireExactBoundaryKeys(response, ['profiles'], [], 'P2P_GOSSIP_RESPONSE_FIELDS_INVALID');
+  if (!Array.isArray(response['profiles'])) throw new Error('P2P_GOSSIP_RESPONSE_PROFILES_INVALID');
+  if (response['profiles'].length > DEFAULT_GOSSIP_BATCH_LIMIT) {
+    throw new Error('P2P_GOSSIP_RESPONSE_BATCH_TOO_LARGE');
+  }
+  return response['profiles'];
 };
 
 type GossipRefreshMode = 'incremental' | 'full';
@@ -1260,6 +1299,7 @@ export class RuntimeP2P {
         continue;
       }
       if (getSignerPrivateKeyIfAvailable(this.env, replicaSignerId) === null) continue;
+      if (!(await hasCurrentProfileBoardAuthority(this.env, replica.state))) continue;
       const normalizedEntityId = normalizeId(entityId);
       if (seen.has(normalizedEntityId)) continue;
       if (advertisedSet && !advertisedSet.has(normalizedEntityId)) continue;
@@ -1294,7 +1334,7 @@ export class RuntimeP2P {
 
   private handleGossipRequest(from: string, payload: unknown) {
     if (!this.env.gossip?.getProfiles) return;
-    const request = payload as GossipProfileBatchRequest;
+    const request = decodeGossipProfileRequest(payload);
     const profiles = this.getLocalProfileBatch(request);
 
     const client = this.getActiveClient();
@@ -1308,28 +1348,20 @@ export class RuntimeP2P {
   }
 
   private handleGossipResponse(from: string, payload: unknown) {
-    const response = payload as GossipResponsePayload;
-    const profiles = Array.isArray(response?.profiles) ? response.profiles : [];
-    if (profiles.length > DEFAULT_GOSSIP_BATCH_LIMIT) {
-      throw new Error('P2P_GOSSIP_RESPONSE_BATCH_TOO_LARGE');
-    }
+    const profiles = decodeGossipProfiles(payload);
     this.applyIncomingProfiles(from, profiles).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
     });
   }
 
   private handleGossipAnnounce(from: string, payload: unknown) {
-    const response = payload as GossipResponsePayload;
-    const profiles = Array.isArray(response?.profiles) ? response.profiles : [];
-    if (profiles.length > DEFAULT_GOSSIP_BATCH_LIMIT) {
-      throw new Error('P2P_GOSSIP_ANNOUNCE_BATCH_TOO_LARGE');
-    }
+    const profiles = decodeGossipProfiles(payload);
     this.applyIncomingProfiles(from, profiles).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
     });
   }
 
-  private async applyIncomingProfiles(from: string, profiles: Profile[]) {
+  private async applyIncomingProfiles(from: string, profiles: readonly unknown[]) {
     if (this.closing || this.closed) return;
     if (profiles.length === 0) return;
     let accepted = 0;

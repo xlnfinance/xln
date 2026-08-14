@@ -267,7 +267,7 @@ const listReplicaMetas = async (
   const seenSigners = new Set<string>();
   const expectedEntityId = normalizeEntityId(entityId);
   for await (const key of iterateKeys(db, { prefix })) {
-    const decoded = decodeBuffer<unknown>(await db.get(key));
+    const decoded = decodeBuffer(await db.get(key));
     let candidate = decoded;
     if (
       decoded && typeof decoded === 'object' && !Array.isArray(decoded) &&

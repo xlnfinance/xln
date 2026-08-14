@@ -23,6 +23,7 @@ import type { LogCategory, FrameLogEntry } from '../../types/logging';
 import { storageOverlayRecordKey } from '../../protocol/state/overlay';
 import { invalidateEntityAccountCommitment } from '../../entity/consensus/state-root';
 import { refreshAccountWorkIndex } from '../../entity/consensus/account/work-index';
+import { accountFrameWithoutPostCommitHankos } from '../../account/settlement/witness-projection';
 import {
   consumeHtlcRuntimeEvent,
   indexCertifiedEntityFrameNotes,
@@ -267,6 +268,10 @@ export const recordAccountFrameHistory = (
   const counterpartyId = String(record.counterpartyId || '').toLowerCase();
   const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
   if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) return;
+  // History is the certified semantic chain. Quorum witnesses are retained in
+  // EntityReplica.hankoWitness; persisting their non-unique byte encodings in
+  // the frame record would manufacture forks between honest threshold subsets.
+  const canonicalFrame = accountFrameWithoutPostCommitHankos(record.frame);
   const pending = getPendingHistoryRecords(env);
   const existing = pending.find(
     (candidate): candidate is Extract<RuntimeHistoryRecord, { kind: 'accountFrame' }> =>
@@ -276,7 +281,7 @@ export const recordAccountFrameHistory = (
       candidate.accountHeight === Math.floor(accountHeight),
   );
   if (existing) {
-    if (encodeCanonicalConsensusValue(existing.frame) !== encodeCanonicalConsensusValue(record.frame)) {
+    if (encodeCanonicalConsensusValue(existing.frame) !== encodeCanonicalConsensusValue(canonicalFrame)) {
       throw new Error(
         `CERTIFIED_ACCOUNT_FRAME_FORK:entity=${entityId}:counterparty=${counterpartyId}:height=${accountHeight}`,
       );
@@ -289,7 +294,7 @@ export const recordAccountFrameHistory = (
     counterpartyId,
     accountHeight: Math.floor(accountHeight),
     source: record.source,
-    frame: structuredClone(record.frame),
+    frame: canonicalFrame,
   });
   applyRuntimeStorageChanges(env, [{ family: 'account', entityId, counterpartyId }]);
 };

@@ -6,6 +6,7 @@
   import { marked } from 'marked';
   import { sanitizeRenderedHtml } from '$lib/security/safe-markdown';
   import { Archive, BookOpen, Compass, ExternalLink, FileText, Menu, Search, Shield, Wrench, X } from 'lucide-svelte';
+  import { readJsonUnknown, requireBoolean, rejectExtraKeys, requireFiniteNumber, requireString, requireUnknownRecord } from '$lib/utils/boundary';
 
   interface DocEntry {
     id: string;
@@ -56,6 +57,54 @@
     title: string;
     id: string;
   }
+
+  const decodeDocEntry = (value: unknown): DocEntry => {
+    const record = requireUnknownRecord(value, 'DOCS_ENTRY_INVALID');
+    rejectExtraKeys(record, ['id', 'path', 'title', 'summary', 'role', 'status', 'audience', 'kind', 'sectionId', 'sectionTitle', 'featured', 'url'], 'DOCS_ENTRY_EXTRA_FIELD');
+    if (record['kind'] !== 'live' && record['kind'] !== 'archive') throw new Error('DOCS_ENTRY_KIND_INVALID');
+    const kind = record['kind'];
+    return {
+      id: requireString(record['id'], 'DOCS_ENTRY_ID_INVALID'),
+      path: requireString(record['path'], 'DOCS_ENTRY_PATH_INVALID'),
+      title: requireString(record['title'], 'DOCS_ENTRY_TITLE_INVALID'),
+      summary: requireString(record['summary'], 'DOCS_ENTRY_SUMMARY_INVALID'),
+      role: requireString(record['role'], 'DOCS_ENTRY_ROLE_INVALID'),
+      status: requireString(record['status'], 'DOCS_ENTRY_STATUS_INVALID'),
+      audience: requireString(record['audience'], 'DOCS_ENTRY_AUDIENCE_INVALID'),
+      kind,
+      sectionId: requireString(record['sectionId'], 'DOCS_ENTRY_SECTION_ID_INVALID'),
+      sectionTitle: requireString(record['sectionTitle'], 'DOCS_ENTRY_SECTION_TITLE_INVALID'),
+      featured: requireBoolean(record['featured'], 'DOCS_ENTRY_FEATURED_INVALID'),
+      url: requireString(record['url'], 'DOCS_ENTRY_URL_INVALID'),
+    };
+  };
+
+  const decodeDocsManifest = (value: unknown): DocsManifest => {
+    const record = requireUnknownRecord(value, 'DOCS_MANIFEST_INVALID');
+    rejectExtraKeys(record, ['generatedAt', 'counts', 'featured', 'readingPaths', 'sections', 'items'], 'DOCS_MANIFEST_EXTRA_FIELD');
+    const counts = requireUnknownRecord(record['counts'], 'DOCS_MANIFEST_COUNTS_INVALID');
+    rejectExtraKeys(counts, ['total', 'live', 'archive'], 'DOCS_MANIFEST_COUNTS_EXTRA_FIELD');
+    const generatedAt = requireString(record['generatedAt'], 'DOCS_MANIFEST_GENERATED_AT_INVALID');
+    const total = requireFiniteNumber(counts['total'], 'DOCS_MANIFEST_TOTAL_INVALID');
+    const live = requireFiniteNumber(counts['live'], 'DOCS_MANIFEST_LIVE_INVALID');
+    const archive = requireFiniteNumber(counts['archive'], 'DOCS_MANIFEST_ARCHIVE_INVALID');
+    if (!Array.isArray(record['featured']) || !Array.isArray(record['readingPaths']) || !Array.isArray(record['sections']) || !Array.isArray(record['items'])) throw new Error('DOCS_MANIFEST_FIELD_INVALID');
+    const sections: DocSection[] = record['sections'].map((value): DocSection => {
+      const section = requireUnknownRecord(value, 'DOCS_SECTION_INVALID');
+      rejectExtraKeys(section, ['id', 'title', 'description', 'kind', 'order', 'items'], 'DOCS_SECTION_EXTRA_FIELD');
+      if (section['kind'] !== 'live' && section['kind'] !== 'archive') throw new Error('DOCS_SECTION_KIND_INVALID');
+      if (!Array.isArray(section['items'])) throw new Error('DOCS_SECTION_ITEMS_INVALID');
+      const kind: DocSection['kind'] = section['kind'] === 'live' ? 'live' : 'archive';
+      return { id: requireString(section['id'], 'DOCS_SECTION_ID_INVALID'), title: requireString(section['title'], 'DOCS_SECTION_TITLE_INVALID'), description: requireString(section['description'], 'DOCS_SECTION_DESCRIPTION_INVALID'), kind, order: requireFiniteNumber(section['order'], 'DOCS_SECTION_ORDER_INVALID'), items: section['items'].map(decodeDocEntry) };
+    });
+    const readingPaths = record['readingPaths'].map((value) => {
+      const path = requireUnknownRecord(value, 'DOCS_READING_PATH_INVALID');
+      rejectExtraKeys(path, ['id', 'title', 'description', 'items'], 'DOCS_READING_PATH_EXTRA_FIELD');
+      if (!Array.isArray(path['items'])) throw new Error('DOCS_READING_PATH_ITEMS_INVALID');
+      return { id: requireString(path['id'], 'DOCS_READING_PATH_ID_INVALID'), title: requireString(path['title'], 'DOCS_READING_PATH_TITLE_INVALID'), description: requireString(path['description'], 'DOCS_READING_PATH_DESCRIPTION_INVALID'), items: path['items'].map(decodeDocEntry) };
+    });
+    return { generatedAt, counts: { total, live, archive }, featured: record['featured'].map(decodeDocEntry), readingPaths, sections, items: record['items'].map(decodeDocEntry) };
+  };
 
   let manifest = $state<DocsManifest | null>(null);
   let searchQuery = $state('');
@@ -240,7 +289,7 @@
     try {
       const response = await fetch('/docs-catalog/manifest.json', { cache: 'no-store' });
       if (!response.ok) throw new Error(`manifest request failed: ${response.status}`);
-      manifest = await response.json() as DocsManifest;
+      manifest = decodeDocsManifest(await readJsonUnknown(response));
     } catch (error) {
       loadError = `Failed to load docs catalog: ${errorMessage(error)}`;
     } finally {

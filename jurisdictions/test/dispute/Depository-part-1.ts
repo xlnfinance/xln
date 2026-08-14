@@ -8,6 +8,7 @@ import { Contract, type ContractTransactionReceipt } from 'ethers';
 import {
   addressEntityId,
   buildSingleSignerHanko,
+  canonicalAccountKey,
   computeDepositoryBatchHash,
   deployDepositoryStack,
   deployEntityProvider,
@@ -65,14 +66,15 @@ function signEntityHash(entityId: string, hash: string, privateKey: string): str
   return buildSingleSignerHanko(entityId, hash, privateKey);
 }
 async function accountKeyFor(depository: Depository, left: string, right: string): Promise<string> {
-  return depository.accountKey(left, right);
+  void depository;
+  return canonicalAccountKey(left, right);
 }
 async function advancePastDisputeTimeout(
   target: Depository,
   left: string,
   right: string,
 ): Promise<void> {
-  const key = await target.accountKey(left, right);
+  const key = canonicalAccountKey(left, right);
   const timeout = (await target._accounts(key)).disputeTimeout;
   // disputeTimeout is an absolute unix second. Mining a number of blocks would
   // silently reintroduce chain-specific block-time policy into the test.
@@ -449,11 +451,11 @@ describe('Depository', () => {
     expect(await depository.entityNonces(actor.entityId)).to.equal(0n);
     expect(await depository._reserves(actor.entityId, tokenId)).to.equal(10n);
     expect(
-      (await depository._collaterals(await depository.accountKey(actor.entityId, firstCounterparty), tokenId))
+      (await depository._collaterals(canonicalAccountKey(actor.entityId, firstCounterparty), tokenId))
         .collateral,
     ).to.equal(0n);
     expect(
-      (await depository._collaterals(await depository.accountKey(actor.entityId, secondCounterparty), tokenId))
+      (await depository._collaterals(canonicalAccountKey(actor.entityId, secondCounterparty), tokenId))
         .collateral,
     ).to.equal(0n);
   });
@@ -461,7 +463,7 @@ describe('Depository', () => {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = await registerFixedSupplyErc20(depository, 1_000_000n);
-    const accountKey = await depository.accountKey(left.entityId, right.entityId);
+    const accountKey = canonicalAccountKey(left.entityId, right.entityId);
     const c2rNonce = 1n;
     const c2rDiffs = [
       {

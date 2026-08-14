@@ -4,6 +4,10 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { deriveRuntimeAdapterCapabilityToken } from '../../api/runtime-adapter/security/auth';
+import {
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../../protocol/boundary-validation';
 import { deserializeTaggedJson } from '../../protocol/serialization';
 import { fetchLoopback } from '../server/loopback-fetch';
 import {
@@ -87,25 +91,11 @@ export type DebugEntitySummary = {
   publicAccounts?: unknown[];
 };
 
-type DebugEntitiesResponse = {
-  entities?: DebugEntitySummary[];
-};
-
 export type CustodyJurisdictionTarget = {
   key: string;
   name: string;
   chainId?: number;
   depositoryAddress?: string;
-};
-
-type DebugTokenCapacitySummary = {
-  inCapacity?: bigint;
-  outCapacity?: bigint;
-};
-
-type DebugAccountSummary = {
-  counterpartyId?: string;
-  tokenCapacities?: Record<string, DebugTokenCapacitySummary>;
 };
 
 export type ManagedIdentity = {
@@ -118,6 +108,24 @@ type DaemonControlCliResult = {
   ok: boolean;
   command: string;
   result: ManagedIdentity;
+};
+
+const decodeDaemonControlCliResult = (value: unknown): DaemonControlCliResult => {
+  const response = requireBoundaryRecord(value, 'DAEMON_CONTROL_RESULT_INVALID');
+  requireExactBoundaryKeys(response, ['ok', 'command', 'result'], [], 'DAEMON_CONTROL_RESULT_FIELDS_INVALID');
+  const result = requireBoundaryRecord(response['result'], 'DAEMON_CONTROL_RESULT_IDENTITY_INVALID');
+  requireExactBoundaryKeys(result, ['entityId', 'signerId', 'name'], [], 'DAEMON_CONTROL_RESULT_IDENTITY_FIELDS_INVALID');
+  if (typeof response['ok'] !== 'boolean' || typeof response['command'] !== 'string' ||
+      typeof result['entityId'] !== 'string' || !result['entityId'] ||
+      typeof result['signerId'] !== 'string' || !result['signerId'] ||
+      typeof result['name'] !== 'string' || !result['name']) {
+    throw new Error('DAEMON_CONTROL_RESULT_INVALID');
+  }
+  return {
+    ok: response['ok'],
+    command: response['command'],
+    result: { entityId: result['entityId'], signerId: result['signerId'], name: result['name'] },
+  };
 };
 
 export type ManagedChild = {
@@ -326,11 +334,17 @@ export const isPublicDaemonHealthReady = (payload: unknown): boolean => {
   // Bootstrap consumes only the unauthenticated health contract. Private adapter
   // details are intentionally redacted there, while `ready` is published only
   // after jurisdiction adapters and P2P have completed startup.
-  const body = payload as {
-    system?: { runtime?: boolean };
-    boot?: { phase?: string };
-  } | null;
-  return body?.system?.runtime === true && body.boot?.phase === 'ready';
+  try {
+    const body = requireBoundaryRecord(payload, 'PUBLIC_DAEMON_HEALTH_INVALID');
+    requireExactBoundaryKeys(body, ['system', 'boot'], [], 'PUBLIC_DAEMON_HEALTH_FIELDS_INVALID');
+    const system = requireBoundaryRecord(body['system'], 'PUBLIC_DAEMON_HEALTH_SYSTEM_INVALID');
+    requireExactBoundaryKeys(system, ['runtime'], [], 'PUBLIC_DAEMON_HEALTH_SYSTEM_FIELDS_INVALID');
+    const boot = requireBoundaryRecord(body['boot'], 'PUBLIC_DAEMON_HEALTH_BOOT_INVALID');
+    requireExactBoundaryKeys(boot, ['phase'], [], 'PUBLIC_DAEMON_HEALTH_BOOT_FIELDS_INVALID');
+    return system['runtime'] === true && boot['phase'] === 'ready';
+  } catch {
+    return false;
+  }
 };
 
 const isDaemonHealthReady = (_response: Response, bodyText: string): boolean => {
@@ -392,7 +406,7 @@ const runDaemonControl = async (
         return;
       }
       try {
-        resolve(deserializeTaggedJson<DaemonControlCliResult>(lastLine));
+        resolve(decodeDaemonControlCliResult(deserializeTaggedJson(lastLine)));
       } catch (error) {
         reject(
           new Error(
@@ -412,8 +426,47 @@ const fetchDebugEntities = async (apiBaseUrl: string): Promise<DebugEntitySummar
   if (!response.ok) {
     throw new Error(`debug entities endpoint failed (${response.status})`);
   }
-  const body = deserializeTaggedJson<DebugEntitiesResponse>(await response.text());
-  return Array.isArray(body.entities) ? body.entities : [];
+  const body = requireBoundaryRecord(deserializeTaggedJson(await response.text()), 'DEBUG_ENTITIES_RESPONSE_INVALID');
+  requireExactBoundaryKeys(body, ['entities'], [], 'DEBUG_ENTITIES_RESPONSE_FIELDS_INVALID');
+  if (!Array.isArray(body['entities'])) throw new Error('DEBUG_ENTITIES_RESPONSE_ENTITIES_INVALID');
+  return body['entities'].map((entry, index) => {
+    const entity = requireBoundaryRecord(entry, `DEBUG_ENTITY_INVALID:index=${index}`);
+    requireExactBoundaryKeys(
+      entity,
+      ['entityId', 'name', 'isHub', 'online', 'lastUpdated', 'accounts', 'publicAccounts', 'metadata'],
+      ['runtimeId', 'apiPort', 'exitCode', 'dbPath'],
+      `DEBUG_ENTITY_FIELDS_INVALID:index=${index}`,
+    );
+    if (typeof entity['entityId'] !== 'string' || typeof entity['name'] !== 'string' ||
+        typeof entity['isHub'] !== 'boolean' || typeof entity['online'] !== 'boolean' ||
+        !Array.isArray(entity['accounts']) || !Array.isArray(entity['publicAccounts'])) {
+      throw new Error(`DEBUG_ENTITY_INVALID:index=${index}`);
+    }
+    const metadata = requireBoundaryRecord(entity['metadata'], `DEBUG_ENTITY_METADATA_INVALID:index=${index}`);
+    const jurisdictionRaw = metadata['jurisdiction'];
+    let jurisdiction: NonNullable<DebugEntitySummary['metadata']>['jurisdiction'];
+    if (jurisdictionRaw !== undefined) {
+      const raw = requireBoundaryRecord(jurisdictionRaw, `DEBUG_ENTITY_JURISDICTION_INVALID:index=${index}`);
+      requireExactBoundaryKeys(raw, ['name'], ['chainId', 'depositoryAddress', 'entityProviderAddress'], `DEBUG_ENTITY_JURISDICTION_FIELDS_INVALID:index=${index}`);
+      if (typeof raw['name'] !== 'string' ||
+          (raw['chainId'] !== undefined && (!Number.isSafeInteger(raw['chainId']) || Number(raw['chainId']) <= 0)) ||
+          (raw['depositoryAddress'] !== undefined && typeof raw['depositoryAddress'] !== 'string') ||
+          (raw['entityProviderAddress'] !== undefined && typeof raw['entityProviderAddress'] !== 'string')) {
+        throw new Error(`DEBUG_ENTITY_JURISDICTION_INVALID:index=${index}`);
+      }
+      jurisdiction = {
+        name: raw['name'],
+        ...(raw['chainId'] === undefined ? {} : { chainId: Number(raw['chainId']) }),
+        ...(raw['depositoryAddress'] === undefined ? {} : { depositoryAddress: raw['depositoryAddress'] }),
+        ...(raw['entityProviderAddress'] === undefined ? {} : { entityProviderAddress: raw['entityProviderAddress'] }),
+      };
+    }
+    return {
+      entityId: entity['entityId'], name: entity['name'], isHub: entity['isHub'], online: entity['online'],
+      accounts: entity['accounts'], publicAccounts: entity['publicAccounts'],
+      ...(jurisdiction === undefined ? {} : { metadata: { jurisdiction } }),
+    };
+  });
 };
 
 const toLowerId = (value: unknown): string => {
@@ -429,19 +482,24 @@ const readCustodyJurisdictionTarget = async (
   const normalizedKey = key.trim();
   if (!normalizedKey) throw new Error('CUSTODY_JURISDICTION_ID_MISSING');
   const raw = await readFile(jurisdictionsPath, 'utf8');
-  const payload = JSON.parse(raw) as {
-    jurisdictions?: Record<string, {
-      name?: unknown;
-      chainId?: unknown;
-      contracts?: { depository?: unknown };
-    }>;
-  };
-  const entry = payload.jurisdictions?.[normalizedKey];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error('CUSTODY_JURISDICTIONS_FILE_INVALID:json', { cause: error });
+  }
+  const payload = requireBoundaryRecord(parsed, 'CUSTODY_JURISDICTIONS_FILE_INVALID');
+  const jurisdictions = requireBoundaryRecord(payload['jurisdictions'], 'CUSTODY_JURISDICTIONS_ENTRIES_INVALID');
+  const rawEntry = jurisdictions[normalizedKey];
+  const entry = rawEntry === undefined
+    ? undefined
+    : requireBoundaryRecord(rawEntry, `CUSTODY_JURISDICTION_INVALID:${normalizedKey}`);
   if (!entry) throw new Error(`CUSTODY_JURISDICTION_NOT_FOUND:${normalizedKey}`);
-  const name = String(entry.name || normalizedKey).trim();
-  const chainId = Number(entry.chainId);
-  const depositoryAddress = toLowerId(entry.contracts?.depository);
-  if (!name || !Number.isFinite(chainId) || !depositoryAddress) {
+  const contracts = requireBoundaryRecord(entry['contracts'], `CUSTODY_JURISDICTION_CONTRACTS_INVALID:${normalizedKey}`);
+  const name = typeof entry['name'] === 'string' ? entry['name'].trim() : '';
+  const chainId = entry['chainId'];
+  const depositoryAddress = toLowerId(contracts['depository']);
+  if (!name || typeof chainId !== 'number' || !Number.isSafeInteger(chainId) || chainId <= 0 || !depositoryAddress) {
     throw new Error(`CUSTODY_JURISDICTION_INCOMPLETE:${normalizedKey}`);
   }
   return {
@@ -480,13 +538,15 @@ const hasAccountCapacityForToken = (
   const counterpartyNorm = counterpartyId.toLowerCase();
   const tokenKey = String(tokenId);
   for (const rawAccount of entry.accounts) {
-    const account = rawAccount as DebugAccountSummary;
-    if (toLowerId(account.counterpartyId) !== counterpartyNorm) continue;
-    const capacities = account.tokenCapacities;
-    if (!capacities || typeof capacities !== 'object') continue;
-    const capacity = capacities[tokenKey];
+    if (!rawAccount || typeof rawAccount !== 'object' || Array.isArray(rawAccount)) continue;
+    const account = rawAccount as Record<string, unknown>;
+    if (toLowerId(account['counterpartyId']) !== counterpartyNorm) continue;
+    const capacities = account['tokenCapacities'];
+    if (!capacities || typeof capacities !== 'object' || Array.isArray(capacities)) continue;
+    const capacity = (capacities as Record<string, unknown>)[tokenKey];
     if (!capacity || typeof capacity !== 'object') continue;
-    if (hasPositiveCapacity(capacity.inCapacity) || hasPositiveCapacity(capacity.outCapacity)) {
+    const capacityRecord = capacity as Record<string, unknown>;
+    if (hasPositiveCapacity(capacityRecord['inCapacity']) || hasPositiveCapacity(capacityRecord['outCapacity'])) {
       return true;
     }
   }

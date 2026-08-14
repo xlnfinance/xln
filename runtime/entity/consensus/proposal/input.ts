@@ -131,7 +131,7 @@ const signAndLockProposal = async (
   await assertEntityConfigBoardAuthority(
     env,
     workingReplica.state.entityId,
-    workingReplica.state.config,
+    execution.state.config,
     execution.state,
   );
   const localSignatures = await Promise.all(
@@ -142,7 +142,7 @@ const signAndLockProposal = async (
   let proposedBundles: Map<string, string[]>;
   try {
     proposedBundles = normalizePrecommitBundles(
-      workingReplica.state.config,
+      execution.state.config,
       frame.collectedSigs ?? new Map(),
       'PROPOSAL_PRECOMMIT_REJECTED',
     );
@@ -189,7 +189,7 @@ const signAndLockProposal = async (
   };
   workingReplica.candidate = execution;
   workingReplica.lastConsensusProgressAt = env.state.timestamp;
-  for (const validatorId of workingReplica.state.config.validators) {
+  for (const validatorId of execution.state.config.validators) {
     if (validatorId.toLowerCase() === localSignerId) continue;
     entityOutbox.push({
       entityId: entityInput.entityId,
@@ -203,7 +203,7 @@ const signAndLockProposal = async (
   entityLog.debug('proposal.precommit_sent', {
     recipients: Math.max(
       0,
-      workingReplica.state.config.validators.length - 1,
+      execution.state.config.validators.length - 1,
     ),
     frame: context.frameHash,
     signatures: localSignatures.length,

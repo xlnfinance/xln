@@ -10,6 +10,7 @@ import type {
   TowerReceiptV1,
   XLNModule,
 } from '@xln/runtime/api/public/runtime-module';
+import { parseJsonUnknown } from '$lib/utils/boundary';
 import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath } from 'ethers';
 import {
   redactVaultRuntimeForPersistence,
@@ -476,7 +477,7 @@ export const parseRecoveryTowerUrls = (value: unknown): string[] => {
     const trimmed = value.trim();
     if (!trimmed) return [];
     try {
-      return parseRecoveryTowerUrls(JSON.parse(trimmed));
+      return parseRecoveryTowerUrls(parseJsonUnknown(trimmed, 'RECOVERY_TOWER_URLS_JSON_INVALID'));
     } catch {
       return trimmed
         .split(',')
@@ -917,7 +918,7 @@ export async function parseRuntimeRecoveryCandidateFile(
   if (!runtimeId) throw new Error('RECOVERY_RUNTIME_ID_INVALID');
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fileContents);
+    parsed = parseJsonUnknown(fileContents, 'RECOVERY_BACKUP_FILE_JSON_INVALID');
   } catch {
     throw new Error('RECOVERY_BACKUP_FILE_JSON_INVALID');
   }

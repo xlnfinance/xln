@@ -130,3 +130,58 @@ test('candidate Account history is idempotent and conflicting bytes fail fast', 
     frame: { ...frame, stateHash: '0x03' },
   }])).toThrow('CERTIFIED_ACCOUNT_FRAME_FORK');
 });
+
+test('candidate Account history stores one semantic frame across valid Hanko subsets', () => {
+  const env = createEmptyEnv('candidate-account-history-hanko-subsets');
+  const frame = {
+    height: 1,
+    timestamp: 100,
+    jHeight: 0,
+    accountTxs: [{
+      type: 'settle_transition' as const,
+      data: {
+        kind: 'seal' as const,
+        revision: 1,
+        workspaceHash: '0xworkspace',
+        settlementNonce: 2,
+        settlementHash: '0xsettlement',
+        settlementHanko: '0xsubset-a',
+        postProof: {
+          nonce: 3,
+          proposerIsLeft: true,
+          proofBodyHash: '0xproof',
+          disputeHash: '0xdispute',
+          hanko: '0xpost-a',
+        },
+      },
+    }],
+    prevFrameHash: 'genesis',
+    accountStateRoot: '0x01',
+    stateHash: '0x02',
+    byLeft: true,
+    deltas: [],
+  };
+  const second = structuredClone(frame);
+  second.accountTxs[0].data.settlementHanko = '0xsubset-b';
+  second.accountTxs[0].data.postProof.hanko = '0xpost-b';
+  const base = {
+    kind: 'accountFrameHistory' as const,
+    entityId: '0x01',
+    counterpartyId: '0x02',
+    accountHeight: 1,
+    source: 'peerCommit' as const,
+  };
+
+  publishEntityCandidateEffects(env, null, [{ ...base, frame }, { ...base, frame: second }]);
+
+  const records = env.infrastructure?.pendingHistoryRecords ?? [];
+  expect(records).toHaveLength(1);
+  const stored = records[0];
+  if (stored?.kind !== 'accountFrame') throw new Error('TEST_ACCOUNT_HISTORY_MISSING');
+  const storedTx = stored.frame.accountTxs[0];
+  if (storedTx?.type !== 'settle_transition' || storedTx.data.kind !== 'seal') {
+    throw new Error('TEST_SETTLEMENT_FRAME_MISSING');
+  }
+  expect(storedTx.data.settlementHanko).toBeUndefined();
+  expect(storedTx.data.postProof.hanko).toBeUndefined();
+});

@@ -14,6 +14,10 @@ import {
 } from '../../../entity/tx/state-effects/board-rotation-reseal';
 import { buildQuorumHanko } from '../../../hanko/signing';
 import { handleScheduledWakeEntityTx } from '../../../entity/tx/handlers/system/scheduled-wake';
+import {
+  COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
+  counterpartyBoardResealDeadlineHookId,
+} from '../../../entity/tx/j-events-board';
 import { safeStringify } from '../../../protocol/serialization';
 import { createEmptyEnv } from '../../../runtime';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
@@ -75,6 +79,24 @@ const scheduledWakeForHook = (
 ): Extract<EntityTx, { type: 'scheduledWake' }> => {
   const hook = state.crontabState?.hooks.get(BOARD_RESEAL_HOOK_ID);
   if (!hook || hook.type !== 'board_reseal') throw new Error('TEST_BOARD_RESEAL_HOOK_MISSING');
+  return {
+    type: 'scheduledWake',
+    data: {
+      version: 1,
+      proposerSignerId,
+      dueAt: hook.triggerAt,
+      jobs: [{ kind: 'hook', id: hook.id, dueAt: hook.triggerAt }],
+    },
+  };
+};
+
+const scheduledWakeForId = (
+  state: EntityState,
+  proposerSignerId: string,
+  hookId: string,
+): Extract<EntityTx, { type: 'scheduledWake' }> => {
+  const hook = state.crontabState?.hooks.get(hookId);
+  if (!hook) throw new Error(`TEST_SCHEDULED_HOOK_MISSING:${hookId}`);
   return {
     type: 'scheduledWake',
     data: {
@@ -260,4 +282,76 @@ test('1000 board reseals drain in deterministic 32-account frames across restart
   expect(batches).toBe(32);
   expect(delivered).toEqual([...state.accounts.keys()].sort());
   expect([...state.accounts.values()].some(account => account.boardResealMigration)).toBe(false);
+});
+
+test('missing counterparty reseal starts canonical dispute preparation after 24 hours', async () => {
+  const signerId = deriveSignerAddressSync('counterparty-reseal-deadline', '1').toLowerCase();
+  const sourceEntityId = digest(30_001);
+  const counterpartyId = digest(30_002);
+  const env = createEmptyEnv('counterparty-reseal-deadline');
+  const state = makeState(sourceEntityId, signerId, jurisdiction);
+  state.timestamp = 50_000;
+  state.crontabState = initCrontab();
+  state.accounts.set(counterpartyId, makeCommittedAccount(sourceEntityId, counterpartyId, digest(30_003)));
+  const hookId = counterpartyBoardResealDeadlineHookId(counterpartyId, 44, 3);
+  scheduleHook(state.crontabState, {
+    id: hookId,
+    triggerAt: state.timestamp + COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
+    type: 'counterparty_board_reseal_deadline',
+    data: { accountId: counterpartyId, activationJHeight: 44, activationLogIndex: 3 },
+  });
+  state.timestamp += COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS;
+
+  const result = await handleScheduledWakeEntityTx(
+    env,
+    state,
+    scheduledWakeForId(state, signerId, hookId),
+    false,
+  );
+
+  expect(result.outputs).toEqual([]);
+  expect(result.approvedEntityTxs).toEqual([{
+    type: 'prepareDispute',
+    data: {
+      counterpartyEntityId: counterpartyId,
+      description: 'counterparty-board-reseal-deadline-expired',
+    },
+  }]);
+  expect(result.newState.crontabState?.hooks.has(hookId)).toBe(false);
+});
+
+test('fresh counterparty reseal satisfies every older activation deadline', async () => {
+  const signerId = deriveSignerAddressSync('counterparty-reseal-satisfied', '1').toLowerCase();
+  const sourceEntityId = digest(31_001);
+  const counterpartyId = digest(31_002);
+  const env = createEmptyEnv('counterparty-reseal-satisfied');
+  const state = makeState(sourceEntityId, signerId, jurisdiction);
+  state.timestamp = 60_000;
+  state.crontabState = initCrontab();
+  const account = makeCommittedAccount(sourceEntityId, counterpartyId, digest(31_003));
+  account.counterpartyBoardReseal = {
+    activationJHeight: 45,
+    activationLogIndex: 0,
+    frameHeight: 1,
+    frameHash: digest(31_003),
+  };
+  state.accounts.set(counterpartyId, account);
+  const hookId = counterpartyBoardResealDeadlineHookId(counterpartyId, 44, 9);
+  scheduleHook(state.crontabState, {
+    id: hookId,
+    triggerAt: state.timestamp,
+    type: 'counterparty_board_reseal_deadline',
+    data: { accountId: counterpartyId, activationJHeight: 44, activationLogIndex: 9 },
+  });
+
+  const result = await handleScheduledWakeEntityTx(
+    env,
+    state,
+    scheduledWakeForId(state, signerId, hookId),
+    false,
+  );
+
+  expect(result.outputs).toEqual([]);
+  expect(result.approvedEntityTxs).toBeUndefined();
+  expect(result.newState.crontabState?.hooks.has(hookId)).toBe(false);
 });

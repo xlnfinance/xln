@@ -23,6 +23,13 @@ import {
   type ActionJTx,
 } from '../registration/entity-provider-action-submit-state';
 import { makeEntityProviderActionResultRuntimeTx } from '../registration/entity-provider-action-submit-result';
+import {
+  governanceAttemptIsDue,
+  isGovernanceJTx,
+  makeGovernanceSubmitResultRuntimeTx,
+  requireCanonicalGovernanceAttempt,
+  type GovernanceJTx,
+} from '../registration/governance-submit-state';
 import { isEntityActiveLeader } from '../../entity/consensus/leader';
 import { requireRuntimeMempool } from '../input-pipeline/input-queue';
 
@@ -164,8 +171,20 @@ const queueEntityProviderActionResult = (
   });
 };
 
+const queueGovernanceResult = (
+  env: RuntimeReplica,
+  deps: RuntimeJSubmitDeps,
+  jurisdictionName: string,
+  jTx: GovernanceJTx,
+  outcome: Extract<RuntimeTx, { type: 'recordGovernanceJSubmitResult' }>['data']['outcome'],
+  extra: { message?: string; txHash?: string; adapterFailure?: JAdapterFailure } = {},
+): void => {
+  const resultTx = makeGovernanceSubmitResultRuntimeTx(jurisdictionName, jTx, outcome, extra);
+  deps.enqueueRuntimeInputs(env, undefined, [resultTx], undefined, env.state.timestamp);
+};
+
 const shouldSubmitFromThisRuntime = (env: RuntimeReplica, jTx: JTx): boolean => {
-  if (jTx.type !== 'batch' && !isEntityProviderActionJTx(jTx)) return true;
+  if (jTx.type !== 'batch' && !isEntityProviderActionJTx(jTx) && !isGovernanceJTx(jTx)) return true;
   const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId.toLowerCase() : '';
   const runtimeId = typeof env.runtimeId === 'string' ? env.runtimeId.toLowerCase() : '';
   if (!signerId || !runtimeId) return true;
@@ -266,6 +285,10 @@ const queueKnownFailure = (
     queueEntityProviderActionResult(env, deps, jurisdictionName, jTx, outcome, extra);
     return true;
   }
+  if (isGovernanceJTx(jTx)) {
+    queueGovernanceResult(env, deps, jurisdictionName, jTx, outcome, extra);
+    return true;
+  }
   return false;
 };
 
@@ -276,7 +299,8 @@ const collectActiveJTxs = (
 ): JTx[] =>
   jInput.jTxs.filter(jTx =>
     !reconcileDurablyAbortedBatch(env, deps, jInput.jurisdictionName, jTx) &&
-    !reconcileDurablyStaleEntityProviderAction(env, deps, jInput.jurisdictionName, jTx));
+    !reconcileDurablyStaleEntityProviderAction(env, deps, jInput.jurisdictionName, jTx) &&
+    (!isGovernanceJTx(jTx) || governanceAttemptIsDue(jTx, env.state.timestamp)));
 
 const queueUnavailableAdapterResults = (
   env: RuntimeReplica,
@@ -348,13 +372,18 @@ const deferSealedAttemptsForAuthenticatedEvents = (
       queueEntityProviderActionResult(env, deps, jurisdictionName, jTx, 'transientFailure', {
         message: 'authenticated-j-events-before-submit',
       });
+    } else if (isGovernanceJTx(jTx)) {
+      queueGovernanceResult(env, deps, jurisdictionName, jTx, 'transientFailure', {
+        message: 'authenticated-j-events-before-submit',
+      });
     }
   }
   jSubmitLog.info('outbox.deferred_for_j_events', {
     jurisdictionName,
     authenticatedJInputs,
   });
-  return activeJTxs.filter(jTx => jTx.type !== 'batch' && !isEntityProviderActionJTx(jTx));
+  return activeJTxs.filter(jTx =>
+    jTx.type !== 'batch' && !isEntityProviderActionJTx(jTx) && !isGovernanceJTx(jTx));
 };
 
 const validateSubmitAttempt = (
@@ -366,6 +395,7 @@ const validateSubmitAttempt = (
   try {
     validateSealedBatchJTx(jTx);
     validateDurableEntityProviderAction(jurisdictionName, jTx);
+    if (isGovernanceJTx(jTx)) requireCanonicalGovernanceAttempt(jurisdictionName, jTx);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (jTx.type === 'batch') {
@@ -374,6 +404,10 @@ const validateSubmitAttempt = (
     }
     if (isEntityProviderActionJTx(jTx) && jTx.data.runtimeSubmitAttempt) {
       queueEntityProviderActionResult(env, deps, jurisdictionName, jTx, 'terminalFailure', { message });
+      return false;
+    }
+    if (isGovernanceJTx(jTx) && jTx.data.runtimeSubmitAttempt) {
+      queueGovernanceResult(env, deps, jurisdictionName, jTx, 'terminalFailure', { message });
       return false;
     }
     throw error;
@@ -387,6 +421,10 @@ const validateSubmitAttempt = (
   } else if (isEntityProviderActionJTx(jTx)) {
     queueEntityProviderActionResult(env, deps, jurisdictionName, jTx, 'terminalFailure', {
       message: 'entity_provider_action_non_local_submitter',
+    });
+  } else if (isGovernanceJTx(jTx)) {
+    queueGovernanceResult(env, deps, jurisdictionName, jTx, 'terminalFailure', {
+      message: 'governance_non_local_submitter',
     });
   }
   return false;
@@ -430,6 +468,8 @@ const recordSuccessfulSubmit = async (
     queueBatchResult(env, deps, jurisdictionName, jTx, 'submitted', extra);
   } else if (isEntityProviderActionJTx(jTx)) {
     queueEntityProviderActionResult(env, deps, jurisdictionName, jTx, 'submitted', extra);
+  } else if (isGovernanceJTx(jTx)) {
+    queueGovernanceResult(env, deps, jurisdictionName, jTx, 'submitted', extra);
   }
 };
 

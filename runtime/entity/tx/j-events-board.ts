@@ -14,6 +14,14 @@ import {
 } from './state-effects/board-rotation-reseal';
 import type { FinalizedJEventContext } from './j-events';
 
+export const COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS = 24 * 60 * 60 * 1_000;
+
+export const counterpartyBoardResealDeadlineHookId = (
+  counterpartyId: string,
+  activationJHeight: number,
+  activationLogIndex: number,
+): string => `counterparty-board-reseal:${counterpartyId.toLowerCase()}:${activationJHeight}:${activationLogIndex}`;
+
 /**
  * Applies the three events that advance certified board authority. Pending
  * EntityProvider actions are compared only with the newly certified epoch.
@@ -69,7 +77,31 @@ export const applyCertifiedBoardJEvent = (
 
   const reseal = markBoardRotationResealsPending(newState, event);
   for (const accountId of reseal.dirtyAccounts) dirtyAccounts.add(accountId);
-  if (!isLocalEntity) return;
+  if (!isLocalEntity) {
+    const counterpartyId = event.data.entityId.toLowerCase();
+    const account = newState.accounts.get(counterpartyId);
+    if (!account || Number(account.currentHeight) < 1) return;
+    if (!newState.crontabState) throw new Error('COUNTERPARTY_BOARD_RESEAL_CRONTAB_MISSING');
+    scheduleHook(newState.crontabState, {
+      id: counterpartyBoardResealDeadlineHookId(
+        counterpartyId,
+        reseal.activation.jHeight,
+        reseal.activation.logIndex,
+      ),
+      triggerAt: newState.timestamp + COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
+      type: 'counterparty_board_reseal_deadline',
+      data: {
+        accountId: counterpartyId,
+        activationJHeight: reseal.activation.jHeight,
+        activationLogIndex: reseal.activation.logIndex,
+      },
+    });
+    addMessage(
+      newState,
+      `⏳ Awaiting current-board Account reseal from ${counterpartyId.slice(-4)} within 24h`,
+    );
+    return;
+  }
   if (reseal.dirtyAccounts.length === 0) {
     if (newState.crontabState) cancelHook(newState.crontabState, BOARD_RESEAL_HOOK_ID);
     return;

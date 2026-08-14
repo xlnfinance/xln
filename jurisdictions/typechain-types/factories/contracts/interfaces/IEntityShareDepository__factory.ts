@@ -12,6 +12,56 @@ const _abi = [
   {
     inputs: [
       {
+        internalType: "bytes32",
+        name: "entityId",
+        type: "bytes32",
+      },
+      {
+        internalType: "uint256",
+        name: "tokenId",
+        type: "uint256",
+      },
+    ],
+    name: "_reserves",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "_status",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "entityProvider",
+    outputs: [
+      {
+        internalType: "address",
+        name: "",
+        type: "address",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      {
         internalType: "uint8",
         name: "tokenType",
         type: "uint8",
@@ -28,7 +78,13 @@ const _abi = [
       },
     ],
     name: "registerExternalToken",
-    outputs: [],
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "tokenId",
+        type: "uint256",
+      },
+    ],
     stateMutability: "nonpayable",
     type: "function",
   },

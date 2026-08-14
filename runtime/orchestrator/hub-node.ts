@@ -29,7 +29,6 @@ import { attachLiveJAdapter, getLiveJAdapter } from '../runtime/jurisdiction/liv
 import {
   normalizeJurisdictionKey,
   selectWritableJurisdictionKey,
-  type WritableJurisdictionEntry,
 } from '../jurisdiction/machine/config/jurisdiction-key';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
@@ -48,6 +47,7 @@ import { applyJEventsToEnv } from '../jurisdiction/adapter/watcher';
 import { drainJWatcherBacklog } from '../jurisdiction/adapter/operations/backlog-drain';
 import { createRelayStore } from '../network/relay/store';
 import { safeStringify } from '../protocol/serialization';
+import { requireBoundaryRecord, requireExactBoundaryKeys } from '../protocol/boundary-validation';
 import { writeDurableFile } from '../storage/fs-durability';
 import { createStructuredLogger } from '../infra/logger';
 import { getPerfMs } from '../infra/time';
@@ -63,7 +63,7 @@ import {
 import { restoredRuntimeRouteRelocated } from './mesh/restored-gossip-route';
 import { readInheritedChildSecrets, resolveChildSecret } from '../infra/process/child-secrets';
 import { findMissingRpcContractCode } from './bootstrap/contract-readiness';
-import { readJurisdictionsFile } from './jurisdiction/jurisdictions-file';
+import { parseShardJurisdictions, type ShardJurisdictionsFile } from './jurisdiction/jurisdictions';
 import { getTokenIdsForJurisdiction } from '../account/utils';
 import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../api/server/health/redaction';
 import { requiresLocalNodeOperator } from '../api/server/control/node-http-access';
@@ -306,28 +306,7 @@ type LocalHealthResponse = {
 
 type JurisdictionConfig = ResolvedMeshJurisdictionConfig;
 
-type JurisdictionsFile = {
-  version?: string;
-  deployVersion?: string;
-  networkVersion?: string;
-  lastUpdated?: string;
-  jurisdictions?: Record<string, WritableJurisdictionEntry & {
-    name?: string;
-    chainId?: number;
-    rpc?: string;
-    blockTimeMs?: number;
-    explorer?: string;
-    currency?: string;
-    status?: string;
-    contracts?: {
-      depository?: string;
-      entityProvider?: string;
-      account?: string;
-      deltaTransformer?: string;
-    };
-  }>;
-  defaults?: Record<string, unknown>;
-};
+type JurisdictionsFile = ShardJurisdictionsFile;
 
 const normalizeJurisdictionName = (value: unknown): string =>
   normalizeJurisdictionDisplayName(value).trim().toLowerCase();
@@ -479,19 +458,27 @@ const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
   if (!Array.isArray(parsed)) throw new Error('SUPPORT_PEER_IDENTITIES_JSON_INVALID:expected array');
 
   return parsed.map((rawEntry, index) => {
-    if (!rawEntry || typeof rawEntry !== 'object') {
-      throw new Error(`SUPPORT_PEER_IDENTITIES_JSON_INVALID:index=${index}:expected object`);
+    const entry = requireBoundaryRecord(rawEntry, `SUPPORT_PEER_IDENTITIES_JSON_INVALID:index=${index}:expected object`);
+    requireExactBoundaryKeys(
+      entry,
+      ['name', 'entityId', 'signerId', 'jurisdictionName'],
+      ['chainId', 'depositoryAddress'],
+      `SUPPORT_PEER_IDENTITIES_JSON_FIELDS_INVALID:index=${index}`,
+    );
+    const rawChainId = entry['chainId'];
+    const chainId = rawChainId === undefined
+      ? null
+      : (typeof rawChainId === 'number' && Number.isSafeInteger(rawChainId) && rawChainId > 0 ? rawChainId : null);
+    if (rawChainId !== undefined && chainId === null) {
+      throw new Error(`SUPPORT_PEER_IDENTITIES_JSON_INVALID:index=${index}:chainId`);
     }
-    const entry = rawEntry as Record<string, unknown>;
-    const rawChainId = Number(entry['chainId']);
-    const chainId = Number.isInteger(rawChainId) && rawChainId > 0 ? rawChainId : null;
-    const depositoryAddress = String(entry['depositoryAddress'] || '').trim();
+    const depositoryAddress = typeof entry['depositoryAddress'] === 'string' ? entry['depositoryAddress'].trim() : '';
     const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });
     const identity: SupportPeerIdentity = {
-      name: String(entry['name'] || '').trim(),
-      entityId: String(entry['entityId'] || '').trim().toLowerCase(),
-      signerId: String(entry['signerId'] || '').trim().toLowerCase(),
-      jurisdictionName: normalizeJurisdictionDisplayName(entry['jurisdictionName'] || ''),
+      name: typeof entry['name'] === 'string' ? entry['name'].trim() : '',
+      entityId: typeof entry['entityId'] === 'string' ? entry['entityId'].trim().toLowerCase() : '',
+      signerId: typeof entry['signerId'] === 'string' ? entry['signerId'].trim().toLowerCase() : '',
+      jurisdictionName: normalizeJurisdictionDisplayName(entry['jurisdictionName']),
       ...(chainId !== null ? { chainId } : {}),
       ...(depositoryAddress ? { depositoryAddress } : {}),
       jurisdictionRef,
@@ -738,7 +725,10 @@ const resolveJurisdictionPaths = (): string[] => {
 const readCurrentJurisdictionsFile = (): JurisdictionsFile | null => {
   for (const filePath of resolveJurisdictionPaths()) {
     try {
-      const parsed = readJurisdictionsFile<JurisdictionsFile>(filePath);
+      const parsed = parseShardJurisdictions(
+        readFileSync(filePath, 'utf8'),
+        `JURISDICTIONS_FILE_INVALID:path=${filePath}`,
+      );
       if (parsed) return parsed;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -756,9 +746,9 @@ const readCurrentJurisdictionsVersion = (): string => {
 
 const readCurrentNetworkVersion = (): string => {
   const parsed = readCurrentJurisdictionsFile();
-  const explicit = String(parsed?.deployVersion || parsed?.networkVersion || '').trim();
+  const explicit = String(parsed?.['deployVersion'] || parsed?.['networkVersion'] || '').trim();
   if (explicit) return explicit;
-  const lastUpdated = Date.parse(String(parsed?.lastUpdated || ''));
+  const lastUpdated = Date.parse(String(parsed?.['lastUpdated'] || ''));
   if (Number.isFinite(lastUpdated)) return String(lastUpdated);
   return readCurrentJurisdictionsVersion();
 };
@@ -788,12 +778,12 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
     jurisdictions[targetKey] = {
       ...previous,
       name: displayName,
-      primary: previous.primary ?? true,
+      primary: previous['primary'] ?? true,
       chainId: requireJurisdictionChainId(jadapter.chainId, 'HUB_JADAPTER_CHAIN_ID_INVALID'),
       rpc: publicRpcUrl,
-      explorer: previous.explorer ?? '',
-      currency: previous.currency ?? 'USD',
-      status: previous.status ?? 'active',
+      explorer: previous['explorer'] ?? '',
+      currency: previous['currency'] ?? 'USD',
+      status: previous['status'] ?? 'active',
       contracts: {
         ...(previous.contracts ?? {}),
         account: jadapter.addresses.account,

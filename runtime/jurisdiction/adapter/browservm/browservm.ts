@@ -70,7 +70,7 @@ export async function createBrowserVMAdapter(
       addresses.entityProvider,
       browserVM.getEntityProviderAddress(),
     );
-    await assertDepositoryEntityProviderBinding(context, depository, addresses.entityProvider);
+    await assertDepositoryEntityProviderBinding(context, depository, addresses.entityProvider, entityProvider);
     stackBindingVerified = true;
   };
   await verifyStackBinding('browservm_connect');

@@ -3,7 +3,9 @@
 /* eslint-disable */
 import type {
   BaseContract,
+  BytesLike,
   FunctionFragment,
+  Result,
   Interface,
   ContractRunner,
   ContractMethod,
@@ -14,9 +16,16 @@ import type {
   TypedDeferredTopicFilter,
   TypedEventLog,
   TypedListener,
+  TypedContractMethod,
 } from "../../common";
 
-export interface ReentrancyGuardLiteInterface extends Interface {}
+export interface ReentrancyGuardLiteInterface extends Interface {
+  getFunction(nameOrSignature: "_status"): FunctionFragment;
+
+  encodeFunctionData(functionFragment: "_status", values?: undefined): string;
+
+  decodeFunctionResult(functionFragment: "_status", data: BytesLike): Result;
+}
 
 export interface ReentrancyGuardLite extends BaseContract {
   connect(runner?: ContractRunner | null): ReentrancyGuardLite;
@@ -61,9 +70,15 @@ export interface ReentrancyGuardLite extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  _status: TypedContractMethod<[], [bigint], "view">;
+
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
+
+  getFunction(
+    nameOrSignature: "_status"
+  ): TypedContractMethod<[], [bigint], "view">;
 
   filters: {};
 }

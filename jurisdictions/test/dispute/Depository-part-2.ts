@@ -15,6 +15,7 @@ import { Contract, type ContractTransactionReceipt } from 'ethers';
 import {
   addressEntityId,
   buildSingleSignerHanko,
+  canonicalAccountKey,
   computeDepositoryBatchHash,
   deployDepositoryStack,
   deployEntityProvider,
@@ -94,7 +95,8 @@ function signEntityHash(entityId: string, hash: string, privateKey: string): str
 }
 
 async function accountKeyFor(depository: Depository, left: string, right: string): Promise<string> {
-  return depository.accountKey(left, right);
+  void depository;
+  return canonicalAccountKey(left, right);
 }
 
 async function advancePastDisputeTimeout(
@@ -102,7 +104,7 @@ async function advancePastDisputeTimeout(
   left: string,
   right: string,
 ): Promise<void> {
-  const key = await target.accountKey(left, right);
+  const key = canonicalAccountKey(left, right);
   const timeout = (await target._accounts(key)).disputeTimeout;
   await time.increaseTo(Number(timeout + 1n));
 }

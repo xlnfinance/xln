@@ -1,3 +1,5 @@
+import { parseJsonUnknown } from '$lib/utils/boundary';
+
 export type BirdViewBarsMode = 'close' | 'spread';
 export type BirdViewMode = '2d' | '3d';
 export type BirdViewEntityMode = 'sphere' | 'identicon';
@@ -93,7 +95,7 @@ export function normalizeBirdViewSettings(value: unknown): BirdViewSettings {
 
 export function readBirdViewSettings(storage: BirdViewSettingsStorage | null | undefined): BirdViewSettings {
   const saved = storage?.getItem(BIRD_VIEW_SETTINGS_STORAGE_KEY);
-  return saved ? normalizeBirdViewSettings(JSON.parse(saved)) : cloneDefaultBirdViewSettings();
+  return saved ? normalizeBirdViewSettings(parseJsonUnknown(saved, 'BIRD_VIEW_SETTINGS_JSON_INVALID')) : cloneDefaultBirdViewSettings();
 }
 
 export function buildBirdViewSettings(input: BirdViewSettingsInput): BirdViewSettings {

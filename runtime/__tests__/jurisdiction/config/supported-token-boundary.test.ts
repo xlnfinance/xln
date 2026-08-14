@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getTokenInfo } from '../../../account/utils';
+import {
+  getSwapPairPolicyForDimensions,
+  getTokenInfo,
+  hasSwapPairPolicyForDimensions,
+} from '../../../account/utils';
 import { defaultTokensForJurisdiction } from '../../../jurisdiction/machine/config/default-tokens';
 import { getBootstrapCreditAmount } from '../../../orchestrator/mesh/mesh-common';
 
@@ -20,5 +24,15 @@ describe('supported-token metadata boundary', () => {
 
   test('unknown compact token IDs never invent 18-decimal metadata', () => {
     expect(() => getTokenInfo(999_999)).toThrow('TOKEN_METADATA_UNAVAILABLE');
+  });
+
+  test('jurisdiction-local token IDs cannot inherit another asset policy', () => {
+    expect(hasSwapPairPolicyForDimensions(4, 3, 6, 6)).toBeTrue();
+    expect(getSwapPairPolicyForDimensions(4, 3, 6, 6).mmMidPriceTicks).toBe(1_200n);
+
+    // Depository slot 4 can be an ERC1155 company share with zero decimals,
+    // not the six-decimal built-in TRX asset from another jurisdiction.
+    expect(hasSwapPairPolicyForDimensions(4, 3, 0, 6)).toBeFalse();
+    expect(getSwapPairPolicyForDimensions(4, 3, 0, 6).mmMidPriceTicks).toBe(10_000n);
   });
 });

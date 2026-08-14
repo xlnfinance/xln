@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Wallet, getBytes, hexlify } from 'ethers';
 
-import { serializeTaggedJson, deserializeTaggedJson } from '../../../protocol/serialization';
+import { serializeTaggedJson, deserializeTaggedJson, safeStringify } from '../../../protocol/serialization';
 import {
   buildPersistedRuntimeRecording,
   closeInfraDb,
@@ -395,7 +395,7 @@ describe('runtime recovery tower', () => {
         signature,
       },
     };
-    expect(JSON.stringify(appointment).length, 'compressed appointment must fit the default tower HTTP body cap').toBeLessThan(128 * 1024);
+    expect(safeStringify(appointment).length, 'compressed appointment must fit the default tower HTTP body cap').toBeLessThan(128 * 1024);
 
     const decrypted = await decryptRuntimeRecoveryBundle(encrypted, runtimeSeed);
     expect(decrypted.checkpointHash).toBe(bundle.checkpointHash);
@@ -549,10 +549,19 @@ describe('runtime recovery tower', () => {
       now: () => 1000,
     });
 
+    const malformedAppointmentResponse = await handleTowerAppointment(
+      new Request('http://xln.test/api/tower/appointment', {
+        method: 'PUT',
+        body: safeStringify({ ...appointment, untrustedExtra: true }),
+      }),
+      store,
+    );
+    expect(malformedAppointmentResponse.status).toBe(400);
+
     const appointmentResponse = await handleTowerAppointment(
       new Request('http://xln.test/api/tower/appointment', {
         method: 'PUT',
-        body: JSON.stringify(appointment),
+        body: safeStringify(appointment),
       }),
       store,
     );
@@ -566,7 +575,7 @@ describe('runtime recovery tower', () => {
     const discoverResponse = await handleRecoveryDiscover(
       new Request('http://xln.test/api/recovery/discover', {
         method: 'POST',
-        body: JSON.stringify({ lookupKey: encrypted.lookupKey }),
+        body: safeStringify({ lookupKey: encrypted.lookupKey }),
       }),
       store,
     );
@@ -579,7 +588,7 @@ describe('runtime recovery tower', () => {
     const restoreResponse = await handleTowerRestore(
       new Request('http://xln.test/api/tower/restore', {
         method: 'POST',
-        body: JSON.stringify({ lookupKey: encrypted.lookupKey }),
+        body: safeStringify({ lookupKey: encrypted.lookupKey }),
       }),
       store,
     );

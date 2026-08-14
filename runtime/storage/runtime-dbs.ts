@@ -2,6 +2,11 @@ import { Level } from 'level';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { createStructuredLogger } from '../infra/logger';
 import { nodeProcess } from '../infra/process/runtime-process';
+import {
+  requireBoundaryInteger,
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../protocol/boundary-validation';
 import { dbRootPath } from '../runtime/platform';
 import type { RuntimeReplica } from '../runtime/types';
 import {
@@ -145,23 +150,52 @@ type StorageWriterLockBody = {
   expiresAt: number;
 };
 
-const parseStorageWriterLock = (raw: string): StorageWriterLockBody | null => {
+const parseStorageWriterLock = (raw: string): StorageWriterLockBody => {
+  let parsed: unknown;
   try {
-    const body = JSON.parse(raw) as Partial<StorageWriterLockBody>;
-    if (!body || typeof body !== 'object') return null;
-    const expiresAt = Number(body.expiresAt);
-    if (!Number.isFinite(expiresAt)) return null;
-    return {
-      owner: String(body.owner || 'unknown'),
-      ...(typeof body.pid === 'number' ? { pid: body.pid } : {}),
-      ...(typeof body.runtimeId === 'string' ? { runtimeId: body.runtimeId } : {}),
-      ...(typeof body.frameHeight === 'number' ? { frameHeight: body.frameHeight } : {}),
-      acquiredAt: Number.isFinite(Number(body.acquiredAt)) ? Number(body.acquiredAt) : 0,
-      expiresAt,
-    };
-  } catch {
-    return null;
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error('STORAGE_WRITER_LOCK_INVALID:json', { cause: error });
   }
+  const body = requireBoundaryRecord(parsed, 'STORAGE_WRITER_LOCK_INVALID');
+  requireExactBoundaryKeys(
+    body,
+    ['owner', 'acquiredAt', 'expiresAt'],
+    ['pid', 'runtimeId', 'frameHeight'],
+    'STORAGE_WRITER_LOCK_FIELDS_INVALID',
+  );
+  const owner = body['owner'];
+  if (typeof owner !== 'string' || !owner.trim()) {
+    throw new Error('STORAGE_WRITER_LOCK_OWNER_INVALID');
+  }
+  const acquiredAt = body['acquiredAt'];
+  const expiresAt = body['expiresAt'];
+  if (typeof acquiredAt !== 'number' || !Number.isFinite(acquiredAt) ||
+      typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) {
+    throw new Error('STORAGE_WRITER_LOCK_TIME_INVALID');
+  }
+  const pid = body['pid'];
+  if (pid !== undefined && (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0)) {
+    throw new Error('STORAGE_WRITER_LOCK_PID_INVALID');
+  }
+  const runtimeId = body['runtimeId'];
+  if (runtimeId !== undefined && (typeof runtimeId !== 'string' || !runtimeId.trim())) {
+    throw new Error('STORAGE_WRITER_LOCK_RUNTIME_ID_INVALID');
+  }
+  const frameHeight = body['frameHeight'];
+  const normalizedPid = pid === undefined ? undefined : pid;
+  const normalizedRuntimeId = runtimeId === undefined ? undefined : runtimeId;
+  const normalizedFrameHeight = frameHeight === undefined
+    ? undefined
+    : requireBoundaryInteger(frameHeight, 'STORAGE_WRITER_LOCK_FRAME_HEIGHT_INVALID');
+  return {
+    owner,
+    ...(normalizedPid === undefined ? {} : { pid: normalizedPid }),
+    ...(normalizedRuntimeId === undefined ? {} : { runtimeId: normalizedRuntimeId }),
+    ...(normalizedFrameHeight === undefined ? {} : { frameHeight: normalizedFrameHeight }),
+    acquiredAt,
+    expiresAt,
+  };
 };
 
 const storageWriterLockHeldError = (lockPath: string, lock: StorageWriterLockBody | null): Error => {
@@ -624,27 +658,34 @@ const readStorageRotationMarker = async (env: RuntimeReplica): Promise<StorageEp
     throw new Error(`STORAGE_EPOCH_MARKER_READ_FAILED:path=${markerPath}`, { cause: error });
   }
 
-  let parsed: Partial<StorageEpochRotationMarker>;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw) as Partial<StorageEpochRotationMarker>;
+    parsed = JSON.parse(raw);
   } catch (error) {
     throw new Error(`STORAGE_EPOCH_MARKER_INVALID:path=${markerPath}`, { cause: error });
   }
+  const marker = requireBoundaryRecord(parsed, `STORAGE_EPOCH_MARKER_INVALID:path=${markerPath}`);
+  requireExactBoundaryKeys(
+    marker,
+    ['snapshotHeight', 'currentPath', 'previousPath', 'nextPath', 'createdAt'],
+    [],
+    `STORAGE_EPOCH_MARKER_FIELDS_INVALID:path=${markerPath}`,
+  );
   if (
-    typeof parsed.currentPath !== 'string' || !parsed.currentPath ||
-    typeof parsed.previousPath !== 'string' || !parsed.previousPath ||
-    typeof parsed.nextPath !== 'string' || !parsed.nextPath ||
-    !Number.isSafeInteger(parsed.snapshotHeight) || Number(parsed.snapshotHeight) <= 0 ||
-    !Number.isFinite(Number(parsed.createdAt ?? 0))
+    typeof marker['currentPath'] !== 'string' || !marker['currentPath'] ||
+    typeof marker['previousPath'] !== 'string' || !marker['previousPath'] ||
+    typeof marker['nextPath'] !== 'string' || !marker['nextPath'] ||
+    !Number.isSafeInteger(marker['snapshotHeight']) || Number(marker['snapshotHeight']) <= 0 ||
+    typeof marker['createdAt'] !== 'number' || !Number.isFinite(marker['createdAt'])
   ) {
     throw new Error(`STORAGE_EPOCH_MARKER_INVALID:path=${markerPath}`);
   }
   return {
-    snapshotHeight: Number(parsed.snapshotHeight),
-    currentPath: parsed.currentPath,
-    previousPath: parsed.previousPath,
-    nextPath: parsed.nextPath,
-    createdAt: Number(parsed.createdAt ?? 0),
+    snapshotHeight: Number(marker['snapshotHeight']),
+    currentPath: marker['currentPath'],
+    previousPath: marker['previousPath'],
+    nextPath: marker['nextPath'],
+    createdAt: marker['createdAt'],
   };
 };
 

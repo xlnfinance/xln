@@ -6,6 +6,7 @@ import {
   resolveRuntimeAdapterAuthSeed,
 } from '../../runtime-adapter/security/auth';
 import { safeStringify } from '../../../protocol/serialization';
+import { requireBoundaryRecord } from '../../../protocol/boundary-validation';
 import type { RuntimeReplica } from '../../../runtime/types';
 
 const DEFAULT_PAIRING_TTL_MS = 60_000;
@@ -78,7 +79,7 @@ const readJsonBody = async (request: Request): Promise<Record<string, unknown>> 
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('LOCAL_PAIRING_BODY_INVALID');
   }
-  return value as Record<string, unknown>;
+  return requireBoundaryRecord(value, 'LOCAL_PAIRING_BODY_INVALID');
 };
 
 const runtimeWsUrl = (requestUrl: string): string => {

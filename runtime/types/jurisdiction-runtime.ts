@@ -146,4 +146,31 @@ export type JTx =
       entityId: string;
       data: EntityProviderActionJTxData;
       timestamp: number;
+    }
+  | {
+      type: 'entityProviderProposeControlBoard';
+      entityId: string;
+      data: {
+        targetEntityId: string;
+        newBoardHash: string;
+        boardEpoch: bigint;
+        actionNonce: bigint;
+        proposalHash: string;
+        supporterVotes: Array<{ entityId: string; hankoSignature?: string }>;
+        signerId?: string;
+        /** Runtime-local durable submission identity. Never ABI-encoded. */
+        runtimeSubmitAttempt?: {
+          attemptId: string;
+          attemptNumber: number;
+          attemptedAt: number;
+          eligibleAt: number;
+        };
+      };
+      timestamp: number;
+    }
+  | {
+      type: 'entityProviderActivateBoard';
+      entityId: string;
+      data: { targetEntityId: string; signerId?: string };
+      timestamp: number;
     };

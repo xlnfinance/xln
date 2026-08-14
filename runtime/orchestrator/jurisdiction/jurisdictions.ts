@@ -5,6 +5,7 @@ import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../../jurisdiction/adapter/core/jurisdictions-version';
 import { normalizeLoopbackUrl, toPublicRpcUrl } from '../../network/p2p/loopback-url';
+import { requireBoundaryRecord } from '../../protocol/boundary-validation';
 import {
   assertCanonicalRpcContractStack,
   findRpcContractDeploymentBlock,
@@ -26,10 +27,70 @@ export type OrchestratorJurisdictionsConfig = {
   ephemeralTestnet?: boolean;
 };
 
-type ShardJurisdictionsFile = Record<string, unknown> & {
+export type ShardJurisdictionsFile = Record<string, unknown> & {
   version?: unknown;
   jurisdictions?: Record<string, HubJurisdictionEntry>;
   defaults?: Record<string, unknown>;
+};
+
+const decodeHubJurisdictionEntry = (value: unknown, code: string): HubJurisdictionEntry => {
+  const entry = requireBoundaryRecord(value, code);
+  const name = entry['name'];
+  const chainId = entry['chainId'];
+  const deploymentBlock = entry['entityProviderDeploymentBlock'];
+  const rpc = entry['rpc'];
+  const contractsRaw = entry['contracts'];
+  if ((name !== undefined && typeof name !== 'string') ||
+      (chainId !== undefined && (!Number.isSafeInteger(chainId) || Number(chainId) <= 0)) ||
+      (deploymentBlock !== undefined && (!Number.isSafeInteger(deploymentBlock) || Number(deploymentBlock) < 1)) ||
+      (rpc !== undefined && typeof rpc !== 'string')) {
+    throw new Error(`${code}_FIELDS_INVALID`);
+  }
+  let contracts: Record<string, unknown> | undefined;
+  if (contractsRaw !== undefined) {
+    const rawContracts = requireBoundaryRecord(contractsRaw, `${code}_CONTRACTS_INVALID`);
+    for (const [key, address] of Object.entries(rawContracts)) {
+      if (typeof address !== 'string') throw new Error(`${code}_CONTRACT_${key}_INVALID`);
+    }
+    contracts = { ...rawContracts };
+  }
+  return {
+    ...entry,
+    ...(name === undefined ? {} : { name }),
+    ...(chainId === undefined ? {} : { chainId: Number(chainId) }),
+    ...(deploymentBlock === undefined ? {} : { entityProviderDeploymentBlock: Number(deploymentBlock) }),
+    ...(rpc === undefined ? {} : { rpc }),
+    ...(contracts === undefined ? {} : { contracts }),
+  };
+};
+
+export const parseShardJurisdictions = (raw: string, label: string): ShardJurisdictionsFile => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`${label}:json`, { cause: error });
+  }
+  const root = requireBoundaryRecord(parsed, `${label}:root`);
+  const version = root['version'];
+  const defaults = root['defaults'];
+  if (version !== undefined && typeof version !== 'string') throw new Error(`${label}:version`);
+  if (defaults !== undefined) requireBoundaryRecord(defaults, `${label}:defaults`);
+  const rawJurisdictions = root['jurisdictions'];
+  let jurisdictions: Record<string, HubJurisdictionEntry> | undefined;
+  if (rawJurisdictions !== undefined) {
+    const entries = requireBoundaryRecord(rawJurisdictions, `${label}:jurisdictions`);
+    jurisdictions = Object.fromEntries(Object.entries(entries).map(([key, entry]) => {
+      if (!key.trim()) throw new Error(`${label}:jurisdiction_key`);
+      return [key, decodeHubJurisdictionEntry(entry, `${label}:jurisdiction=${key}`)];
+    }));
+  }
+  return {
+    ...root,
+    ...(version === undefined ? {} : { version }),
+    ...(defaults === undefined ? {} : { defaults: requireBoundaryRecord(defaults, `${label}:defaults`) }),
+    ...(jurisdictions === undefined ? {} : { jurisdictions }),
+  };
 };
 
 type CompleteRpcContractAddresses = Record<(typeof REQUIRED_RPC_CONTRACT_KEYS)[number], string>;
@@ -134,9 +195,9 @@ export const readShardJurisdictions = (config: OrchestratorJurisdictionsConfig):
   const canonical = existsSync(canonicalPath) ? readFileSync(canonicalPath, 'utf8') : '';
   const shard = readFileSync(config.shardJurisdictionsPath, 'utf8');
   try {
-    const shardPayload = JSON.parse(shard) as { version?: unknown };
+    const shardPayload = parseShardJurisdictions(shard, `JURISDICTIONS_VERSION_SYNC_INVALID:path=${config.shardJurisdictionsPath}`);
     const canonicalVersion = canonical
-      ? String((JSON.parse(canonical) as { version?: unknown }).version || '').trim() || '1'
+      ? String(parseShardJurisdictions(canonical, `JURISDICTIONS_VERSION_SYNC_INVALID:path=${canonicalPath}`)['version'] || '').trim() || '1'
       : String(shardPayload.version || '').trim() || '1';
     const shardVersion = String(shardPayload.version || '').trim();
     if (shardVersion !== canonicalVersion) {
@@ -158,7 +219,10 @@ export const readShardJurisdictions = (config: OrchestratorJurisdictionsConfig):
 export const hasShardRpc2Jurisdiction = (config: OrchestratorJurisdictionsConfig): boolean => {
   if (!existsSync(config.shardJurisdictionsPath)) return false;
   try {
-    const payload = JSON.parse(readFileSync(config.shardJurisdictionsPath, 'utf8')) as ShardJurisdictionsFile;
+    const payload = parseShardJurisdictions(
+      readFileSync(config.shardJurisdictionsPath, 'utf8'),
+      `SHARD_JURISDICTIONS_INVALID:path=${config.shardJurisdictionsPath}`,
+    );
     return Object.entries(payload.jurisdictions ?? {}).some(([key, jurisdiction]) =>
       Boolean(
         jurisdiction?.contracts?.depository &&
@@ -178,7 +242,10 @@ export const hasShardRpc2Jurisdiction = (config: OrchestratorJurisdictionsConfig
 export const resolvePrimaryHubJurisdiction = (config: OrchestratorJurisdictionsConfig): PrimaryHubJurisdiction | null => {
   if (!existsSync(config.shardJurisdictionsPath)) return null;
   try {
-    const payload = JSON.parse(readFileSync(config.shardJurisdictionsPath, 'utf8')) as ShardJurisdictionsFile;
+    const payload = parseShardJurisdictions(
+      readFileSync(config.shardJurisdictionsPath, 'utf8'),
+      `SHARD_JURISDICTIONS_INVALID:path=${config.shardJurisdictionsPath}`,
+    );
     return selectPrimaryHubJurisdiction(payload, config);
   } catch (error) {
     throw new Error(
@@ -304,7 +371,10 @@ export const provisionPrimaryRpcJurisdictionStack = async (
   if (!existsSync(config.shardJurisdictionsPath)) {
     throw new Error(`PRIMARY_RPC_JURISDICTIONS_MISSING:${config.shardJurisdictionsPath}`);
   }
-  const payload = JSON.parse(readFileSync(config.shardJurisdictionsPath, 'utf8')) as ShardJurisdictionsFile;
+  const payload = parseShardJurisdictions(
+    readFileSync(config.shardJurisdictionsPath, 'utf8'),
+    `PRIMARY_RPC_JURISDICTIONS_INVALID:path=${config.shardJurisdictionsPath}`,
+  );
   const primary = selectPrimaryHubJurisdiction(payload, config);
   if (!primary) throw new Error('PRIMARY_RPC_JURISDICTION_UNRESOLVED');
   const jurisdiction = payload.jurisdictions?.[primary.key];
@@ -359,7 +429,10 @@ export const deployRpc2JurisdictionStack = async (config: OrchestratorJurisdicti
   const startedAt = Date.now();
   const chainId = await readRpcChainId(config.rpc2Url);
   const current: ShardJurisdictionsFile = existsSync(config.shardJurisdictionsPath)
-    ? JSON.parse(readFileSync(config.shardJurisdictionsPath, 'utf8'))
+    ? parseShardJurisdictions(
+        readFileSync(config.shardJurisdictionsPath, 'utf8'),
+        `SHARD_JURISDICTIONS_INVALID:path=${config.shardJurisdictionsPath}`,
+      )
     : {};
   const jurisdictions = current.jurisdictions ?? {};
   const primary = selectPrimaryHubJurisdiction(current, config);
@@ -470,16 +543,7 @@ export const toPublicJurisdictionsPayload = (
   config: OrchestratorJurisdictionsConfig,
   raw: string,
 ): string => {
-  let parsed: ShardJurisdictionsFile;
-  try {
-    parsed = JSON.parse(raw) as ShardJurisdictionsFile;
-  } catch (error) {
-    throw new Error(
-      `PUBLIC_JURISDICTIONS_JSON_INVALID:` +
-      `${error instanceof Error ? error.message : String(error)}`,
-      error instanceof Error ? { cause: error } : undefined,
-    );
-  }
+  const parsed = parseShardJurisdictions(raw, 'PUBLIC_JURISDICTIONS_JSON_INVALID');
   if (!parsed || typeof parsed !== 'object' || !parsed.jurisdictions) return raw;
   const networkVersion = computeJurisdictionsNetworkVersion(parsed, String(parsed.version || '1'));
   parsed['deployVersion'] = networkVersion;
@@ -517,7 +581,7 @@ export const isolateEphemeralJurisdictions = (
   config: OrchestratorJurisdictionsConfig,
   raw: string,
 ): string => {
-  const payload = JSON.parse(raw) as ShardJurisdictionsFile;
+  const payload = parseShardJurisdictions(raw, 'EPHEMERAL_JURISDICTIONS_INVALID');
   const primary = selectPrimaryHubJurisdiction(payload, config);
   if (!primary) throw new Error('EPHEMERAL_PRIMARY_JURISDICTION_UNRESOLVED');
   for (const [key, jurisdiction] of Object.entries(payload.jurisdictions ?? {})) {

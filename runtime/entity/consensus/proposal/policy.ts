@@ -15,6 +15,10 @@ import {
   verifyEntityLeaderCertificate,
   verifyEntityRelayCertificate,
 } from '../leader/certificates';
+import {
+  getBoardHandoverFrameConfig,
+  withBoardAuthority,
+} from '../authority/board-handover';
 
 const FOUNDATION_ENTITY_ID = `0x${'0'.repeat(63)}1`;
 
@@ -76,10 +80,26 @@ export const selectProposableEntityTxs = async (
   const selfAuthorityRanges = jRanges
     .map(tx => ({ tx, target: getSelfAuthorityTargetFromJRange(tx, normalizedEntityId) }))
     .filter((entry): entry is { tx: Extract<EntityTx, { type: 'j_event' }>; target: string } => Boolean(entry.target));
+  const handovers = mempool.filter(
+    (tx): tx is Extract<EntityTx, { type: 'boardHandover' }> => tx.type === 'boardHandover',
+  );
 
   if (selfAuthorityRanges.length > 0) {
-    const latestTarget = selfAuthorityRanges.at(-1)!.target;
+    const latestRange = selfAuthorityRanges.at(-1);
+    if (!latestRange) throw new Error('SELF_BOARD_AUTHORITY_RANGE_MISSING');
+    const latestTarget = latestRange.target;
     if (latestTarget !== configBoardHash) {
+      if (handovers.length === 1) {
+        const handover = handovers[0];
+        if (!handover) throw new Error('SELF_BOARD_HANDOVER_MISSING');
+        const transitionTxs: EntityTx[] = [latestRange.tx, handover];
+        getBoardHandoverFrameConfig(env, state, transitionTxs);
+        return {
+          txs: transitionTxs,
+          currentAuthorityReady: true,
+          reason: 'SELF_BOARD_HANDOVER_PRIORITY',
+        };
+      }
       return { txs: [], currentAuthorityReady, reason: 'SELF_BOARD_CONFIG_HANDOVER_REQUIRED' };
     }
     return applyJRangeBudgetToSelection({
@@ -87,6 +107,16 @@ export const selectProposableEntityTxs = async (
       currentAuthorityReady,
       reason: currentAuthorityReady ? 'SELF_BOARD_ROTATION_PRIORITY' : 'SELF_BOARD_BOOTSTRAP_PRIORITY',
     });
+  }
+  if (handovers.length > 0) {
+    if (handovers.length !== 1) {
+      throw new Error(`BOARD_HANDOVER_COUNT_INVALID:${handovers.length}`);
+    }
+    return {
+      txs: [],
+      currentAuthorityReady,
+      reason: 'SELF_BOARD_ACTIVATION_REQUIRED',
+    };
   }
   if (!currentAuthorityReady) {
     return { txs: [], currentAuthorityReady: false, reason: 'SELF_BOARD_CERTIFICATION_REQUIRED' };
@@ -120,6 +150,7 @@ export const isSelfBoardAuthorityTransitionFrame = async (
   state: EntityState,
   entityTxs: EntityTx[],
 ): Promise<boolean> => {
+  if (getBoardHandoverFrameConfig(env, state, entityTxs)) return true;
   if (entityTxs.length === 0 || entityTxs.some(tx => tx.type !== 'j_event')) return false;
   const configBoardHash = await getEntityConfigBoardHash(env, state.config);
   if (configBoardHash === state.entityId.toLowerCase()) return false;
@@ -136,7 +167,24 @@ export const validateProposedFrameLeader = (
   env: EntityRuntimeContext,
   state: EntityState,
   frame: EntityFrame,
-): boolean =>
-  Boolean(
-    frame.leader && verifyEntityLeaderCertificate(env, state, frame) && verifyEntityRelayCertificate(env, state, frame),
+): boolean => {
+  const handoverConfig = getBoardHandoverFrameConfig(env, state, frame.txs);
+  if (handoverConfig) {
+    const handoverLeader = handoverConfig.validators[0];
+    if (
+      !handoverLeader ||
+      frame.leader.view !== 0 ||
+      frame.leader.certificate ||
+      frame.leader.relayCertificate ||
+      frame.leader.proposerSignerId.toLowerCase() !== handoverLeader.toLowerCase()
+    ) return false;
+  }
+  const authorityState = handoverConfig
+    ? withBoardAuthority(state, handoverConfig, frame.height)
+    : state;
+  return Boolean(
+    frame.leader &&
+    verifyEntityLeaderCertificate(env, authorityState, frame) &&
+    verifyEntityRelayCertificate(env, authorityState, frame)
   );
+};

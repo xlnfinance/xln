@@ -1,5 +1,6 @@
 import { readdir, readFile, writeFile } from 'fs/promises';
 import { deserializeTaggedJson, safeStringify } from '../../../protocol/serialization';
+import { requireBoundaryRecord } from '../../../protocol/boundary-validation';
 import { pushDebugEvent, type RelayStore } from '../../../network/relay/store';
 import {
   DEBUG_DUMPS_DIR,
@@ -10,9 +11,11 @@ import {
 const readDumpPayload = async (req: Request): Promise<Record<string, unknown>> => {
   const rawBody = await req.text();
   const parsed = rawBody
-    ? deserializeTaggedJson<Record<string, unknown>>(rawBody)
+    ? deserializeTaggedJson(rawBody)
     : null;
-  return parsed && typeof parsed === 'object' ? parsed : { rawBody };
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? requireBoundaryRecord(parsed, 'DEBUG_DUMP_BODY_INVALID')
+    : { rawBody };
 };
 
 const readDumpPreview = async (filePath: string): Promise<unknown> => {

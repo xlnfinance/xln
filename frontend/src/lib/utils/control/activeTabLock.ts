@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import { parseJsonUnknown, requireUnknownRecord } from '$lib/utils/boundary';
 
 const ACTIVE_TAB_WEB_LOCK_NAME = 'xln-active-runtime';
 const ACTIVE_TAB_CHANNEL_NAME = 'xln-active-tab-lock';
@@ -190,8 +191,12 @@ const installActiveTabCoordination = (
   };
   const onStorage = (event: StorageEvent): void => {
     if (event.key !== ACTIVE_TAB_HARD_RESET_KEY || !event.newValue) return;
-    const payload = JSON.parse(event.newValue) as { tabId?: unknown };
-    void handleHardResetRequest(typeof payload.tabId === 'string' ? payload.tabId : '').catch(failAsync);
+    try {
+      const payload = requireUnknownRecord(parseJsonUnknown(event.newValue, 'ACTIVE_TAB_RESET_JSON_INVALID'), 'ACTIVE_TAB_RESET_PAYLOAD_INVALID');
+      void handleHardResetRequest(typeof payload['tabId'] === 'string' ? payload['tabId'] : '').catch(failAsync);
+    } catch (error) {
+      failAsync(error);
+    }
   };
   window.addEventListener('storage', onStorage);
   activeStorageHandler = onStorage;

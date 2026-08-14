@@ -265,11 +265,12 @@ export const serializeCanonicalTaggedJson = (value: unknown): string =>
 /**
  * BigInt-safe JSON.parse replacement.
  */
-export function safeParse<T = unknown>(jsonString: string): T {
+export function safeParse(jsonString: string): unknown {
   try {
-    return JSON.parse(jsonString, (_key, value) => decodeTaggedJson(value)) as T;
+    return JSON.parse(jsonString, (_key, value) => decodeTaggedJson(value)) as unknown;
   } catch (err) {
-    throw new Error(`Failed to parse JSON: ${(err as Error).message}`);
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse JSON: ${message}`, err instanceof Error ? { cause: err } : undefined);
   }
 }
 

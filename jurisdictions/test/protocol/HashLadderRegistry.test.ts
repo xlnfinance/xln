@@ -9,6 +9,7 @@ import type { Depository } from '../../typechain-types/index.js';
 
 import {
   buildSingleSignerHanko,
+  canonicalAccountKey,
   computeDepositoryBatchHash,
   deployEntityProvider,
   deriveHardhatPrivateKey,
@@ -221,7 +222,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       ],
     );
     const bodyHash = proofBodyHash(body);
-    const acctKey = await depository.accountKey(left.entityId, right.entityId);
+    const acctKey = canonicalAccountKey(left.entityId, right.entityId);
     const nonce = 1n;
     const starter = options.starter === 'left' ? left : right;
     const counterparty = starter === left ? right : left;
@@ -865,7 +866,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       ],
     );
     const bodyHash = proofBodyHash(body);
-    const acctKey = await depository.accountKey(left.entityId, right.entityId);
+    const acctKey = canonicalAccountKey(left.entityId, right.entityId);
     const nonce = 1n;
     const startHash = await disputeProofHashFor(depository, acctKey, nonce, bodyHash);
     const counterpartySig = buildSingleSignerHanko(left.entityId, startHash, left.privateKey);

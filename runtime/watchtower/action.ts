@@ -6,6 +6,7 @@ import {
 } from '../protocol/boundary-validation';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
+import { computeAccountKey } from '../jurisdiction/adapter/events/contract-codec';
 import type {
   TowerCounterDisputeRemedy,
   TowerFinalDisputeProof,
@@ -15,7 +16,6 @@ import { decryptTowerPayloadWithWatchSeed } from '../storage/recovery/bundle/cry
 import type { LastResortTowerAppointment, WatchtowerStore, StoredTowerActionReceipt } from './store';
 
 const DEPOSITORY_MINIMAL_ABI = [
-  'function accountKey(bytes32 e1, bytes32 e2) view returns (bytes)',
   'function _accounts(bytes acctKey) view returns (uint256 nonce, bytes32 disputeHash, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds, bytes32 disputeInitialProofbodyHash, bool disputeInitialProposerIsLeft, uint256 disputeCounterNonce, bytes32 disputeCounterProofbodyHash, bool disputeCounterProposerIsLeft, bytes32 starterInitialArgumentsCommitment, bytes32 starterCounterArgumentsCommitment, bytes32 starterCounterProofCommitment, bool disputeStartedByLeft)',
   'function watchtowerCounterDispute(bytes32 entityId, (bytes32 counterentity,uint256 initialNonce,uint256 finalNonce,bool proposerIsLeft,bytes32 initialProofbodyHash,(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,(address transformerAddress,bytes encodedBatch,(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers) finalProofbody,bytes starterArguments,bytes otherArguments,bytes sig,bool startedByLeft,bool cooperative) params, uint256 lastResortWindowSeconds, uint256 appointmentSequence, bytes ownerAuthorizationHanko) returns (bool)',
   'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
@@ -248,7 +248,7 @@ export const decodeTowerCounterDisputeRemedy = async (
     ? await decryptTowerPayloadWithWatchSeed(payload, watchSeed)
     : String(payload || '').trim();
   if (!raw) throw new Error('WATCHTOWER_REMEDY_EMPTY');
-  const parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
+  const parsed = requireBoundaryRecord(deserializeTaggedJson(raw), 'WATCHTOWER_REMEDY_INVALID');
   requireExactBoundaryKeys(
     parsed,
     [
@@ -335,7 +335,6 @@ type WatchtowerSweepOptions = {
     towerWallet: Wallet,
     provider: WatchtowerSweepProvider | JsonRpcProvider,
   ) => {
-    accountKey: (entityId: string, counterentity: string) => Promise<string>;
     _accounts: (acctKey: string) => Promise<{
       nonce: bigint;
       disputeHash: string;
@@ -833,7 +832,7 @@ const processLastResortAppointment = async (
     : assertWatchtowerRpcUrlAllowed(watch.rpcUrl, context.allowedRpcUrls);
   const provider = context.providerFactory(rpcUrl, watch.chainId);
   const depository = context.contractFactory(watch, context.towerWallet, provider);
-  const acctKey = await depository.accountKey(watch.watchedEntityId, watch.counterentity);
+  const acctKey = computeAccountKey(watch.watchedEntityId, watch.counterentity);
   const account = await depository._accounts(acctKey);
   const currentBlockNumber = await readProviderBlockNumber(provider);
   const currentBlock = BigInt(currentBlockNumber);

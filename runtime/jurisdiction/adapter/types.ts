@@ -288,6 +288,8 @@ export interface BrowserVMProvider {
   processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<unknown[]>;
   enforceDebts(entityId: string, tokenId: number, maxIterations?: number | bigint): Promise<void>;
   setBlockTimestamp(timestamp: number): void;
+  getBlockNumber(): bigint;
+  mineEmptyBlock(timestampMs?: number): Promise<number>;
   getChainId(): bigint;
   getDepositoryAddress(): string;
   getEntityProviderAddress(): string;

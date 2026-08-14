@@ -155,7 +155,10 @@ try {
   if (network.chainId !== BigInt(jurisdiction.chainId)) {
     throw new Error(`PUBLIC_PROOF_CHAIN_ID_MISMATCH:${network.chainId}:${jurisdiction.chainId}`);
   }
-  const accountKey = await depository.accountKey(ownerEntityId, counterpartyEntityId);
+  const [leftEntity, rightEntity] = BigInt(ownerEntityId) < BigInt(counterpartyEntityId)
+    ? [ownerEntityId, counterpartyEntityId]
+    : [counterpartyEntityId, ownerEntityId];
+  const accountKey = ethers.solidityPacked(['bytes32', 'bytes32'], [leftEntity, rightEntity]);
   const accountBefore = await depository._accounts(accountKey);
   const ownerReserveBefore = await depository._reserves(ownerEntityId, 1) as bigint;
   const counterpartyReserveBefore = await depository._reserves(counterpartyEntityId, 1) as bigint;

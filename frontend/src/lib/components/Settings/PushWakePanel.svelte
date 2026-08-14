@@ -18,6 +18,7 @@
   import { normalizeTowerMode } from '$lib/utils/recovery/recoverySettings';
   import { Bell, BellOff, Check, LoaderCircle } from 'lucide-svelte';
   import { onMount } from 'svelte';
+  import { parseJsonUnknown, requireUnknownRecord } from '$lib/utils/boundary';
 
   export let runtime: Runtime | null = null;
   export let env: RuntimeReplica | null = null;
@@ -63,7 +64,7 @@
   const parseJson = async (response: Response): Promise<Record<string, unknown>> => {
     const text = await response.text();
     if (!text.trim()) return {};
-    return JSON.parse(text) as Record<string, unknown>;
+    return requireUnknownRecord(parseJsonUnknown(text, 'PUSH_WAKE_RESPONSE_JSON_INVALID'), 'PUSH_WAKE_RESPONSE_INVALID');
   };
 
   $: towerList = configuredTowers(towers || [], runtime?.recovery?.towers || []);

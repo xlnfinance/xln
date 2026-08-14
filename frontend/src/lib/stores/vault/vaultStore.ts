@@ -1,4 +1,5 @@
 import { derived, get, writable } from 'svelte/store';
+import { parseJsonUnknown } from '$lib/utils/boundary';
 
 import { Wallet } from 'ethers';
 
@@ -289,7 +290,7 @@ const readPersistedVaultProtection = (runtimeId: string): ProtectedVaultSecrets 
   if (typeof localStorage === 'undefined') return undefined;
   const serialized = localStorage.getItem(VAULT_STORAGE_KEY);
   if (!serialized) return undefined;
-  const state = decodePersistedVaultState(JSON.parse(serialized) as unknown);
+  const state = decodePersistedVaultState(parseJsonUnknown(serialized, 'VAULT_STORAGE_JSON_INVALID'));
   return state.runtimes[runtimeId]?.protectedSecrets;
 };
 
@@ -1837,7 +1838,7 @@ export const vaultOperations = {
 
       const saved = localStorage.getItem(VAULT_STORAGE_KEY);
       if (saved) {
-        runtimesState.set(decodePersistedVaultState(JSON.parse(saved) as unknown));
+        runtimesState.set(decodePersistedVaultState(parseJsonUnknown(saved, 'VAULT_STORAGE_JSON_INVALID')));
       }
       vaultStorageLoaded.set(true);
     } catch (error) {

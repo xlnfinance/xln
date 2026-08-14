@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import type { JAdapter } from '../../../jurisdiction/adapter';
+import { requireBoundaryRecord } from '../../../protocol/boundary-validation';
 
 const STACK_COMPATIBILITY_PROBE_ENTITY = `0x${'11'.repeat(32)}`;
 
@@ -67,14 +68,17 @@ export const fetchRpcCode = async (
       throw new Error(`ETH_GET_CODE_HTTP_${response.status}`);
     }
 
-    const body = await response.json() as { result?: unknown; error?: { message?: string } };
-    if (body.error) {
-      throw new Error(`ETH_GET_CODE_RPC:${body.error.message || 'unknown'}`);
+    const body = requireBoundaryRecord(await response.json(), 'ETH_GET_CODE_INVALID_RESPONSE');
+    const error = body['error'];
+    if (error !== undefined) {
+      const errorRecord = requireBoundaryRecord(error, 'ETH_GET_CODE_INVALID_RESPONSE');
+      const message = typeof errorRecord['message'] === 'string' ? errorRecord['message'] : 'unknown';
+      throw new Error(`ETH_GET_CODE_RPC:${message}`);
     }
-    if (typeof body.result !== 'string') {
+    if (typeof body['result'] !== 'string') {
       throw new Error('ETH_GET_CODE_INVALID_RESULT');
     }
-    return body.result;
+    return body['result'];
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') {
       throw new Error(`ETH_GET_CODE_TIMEOUT:${address}`);

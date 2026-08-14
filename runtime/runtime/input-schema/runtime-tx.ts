@@ -183,6 +183,28 @@ const validateEntityProviderSubmit = (value: unknown, code: string, result: bool
   if (data['txHash'] !== undefined) requireString(data['txHash'], `${code}_TX_HASH`);
 };
 
+const validateGovernanceSubmitResult = (value: unknown, code: string): void => {
+  const data = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(data, [
+    'entityId', 'signerId', 'jurisdictionName', 'proposalHash', 'payloadHash',
+    'attemptId', 'attemptNumber', 'attemptedAt', 'outcome',
+  ], ['message', 'adapterFailure', 'txHash'], `${code}_FIELDS`);
+  for (const field of ['entityId', 'signerId', 'jurisdictionName']) {
+    requireString(data[field], `${code}_${field.toUpperCase()}`);
+  }
+  requireBytes32(data['proposalHash'], `${code}_PROPOSAL_HASH`);
+  requireBytes32(data['payloadHash'], `${code}_PAYLOAD_HASH`);
+  requireBytes32(data['attemptId'], `${code}_ATTEMPT_ID`);
+  requireBoundaryInteger(data['attemptNumber'], `${code}_ATTEMPT_NUMBER`, 1);
+  requireBoundaryInteger(data['attemptedAt'], `${code}_ATTEMPTED_AT`);
+  if (!['submitted', 'transientFailure', 'terminalFailure', 'reconciled'].includes(String(data['outcome']))) {
+    throw new Error(`${code}_OUTCOME`);
+  }
+  if (data['message'] !== undefined) requireString(data['message'], `${code}_MESSAGE`);
+  if (data['adapterFailure'] !== undefined) validateAdapterFailure(data['adapterFailure'], `${code}_ADAPTER_FAILURE`);
+  if (data['txHash'] !== undefined) requireString(data['txHash'], `${code}_TX_HASH`);
+};
+
 const validateCompleteImport = (value: unknown, code: string): void => {
   const data = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(data, [
@@ -244,6 +266,7 @@ const validateRuntimeTxData = (type: string, value: unknown, code: string): void
   else if (type === 'recordJSubmitResult') validateJSubmit(value, code, true);
   else if (type === 'retryEntityProviderAction') validateEntityProviderSubmit(value, code, false);
   else if (type === 'recordEntityProviderActionSubmitResult') validateEntityProviderSubmit(value, code, true);
+  else if (type === 'recordGovernanceJSubmitResult') validateGovernanceSubmitResult(value, code);
   else if (type === 'importJ') {
     validateJurisdictionImportRequest(value, code);
     normalizeJurisdictionImportRequest(value as JurisdictionImportRequest);

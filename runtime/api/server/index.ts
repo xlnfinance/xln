@@ -105,6 +105,7 @@ import { requiresLocalNodeOperator } from './control/node-http-access';
 import { handleP2PControl } from './control/p2p';
 import { handleRuntimeInputControl, handleRuntimeInputStatus } from './control/runtime-input';
 import { handleSignerRegistration } from './control/signer';
+import { createStackManagerController } from './control/stack-manager';
 import { fetchRpcCode, probeLocalAnvilContractStack } from './rpc/stack-probe';
 import { handleRuntimeActivityRequest } from './health/activity';
 import {
@@ -141,6 +142,10 @@ const localPairingController = createLocalPairingController({
 });
 const tokenCatalogController = createTokenCatalogController({
   getAdapter: () => globalJAdapter,
+});
+const stackManagerController = createStackManagerController({
+  parseBody: parseTaggedControlBody,
+  headers: JSON_HEADERS,
 });
 
 const requireWatcherConfirmationDepth = (adapter: JAdapter): number => {
@@ -413,6 +418,17 @@ const maybeHandleControlApi = async (
   env: RuntimeReplica | null,
   headers: typeof JSON_HEADERS,
 ): Promise<Response | null> => {
+  if (pathname === '/api/stack-manager/status' && req.method === 'GET') {
+    return stackManagerController.status(req, env);
+  }
+  if (pathname === '/api/control/stack-manager/deploy' && req.method === 'POST') {
+    const authError = requireDaemonControlAuth(req, env);
+    if (authError) return authError;
+    if (!env) {
+      return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
+    }
+    return stackManagerController.deploy(req, env);
+  }
   if (pathname === '/api/control/entities' && req.method === 'GET') {
     const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;

@@ -9,6 +9,7 @@
   import BigIntInput from '../../../Common/BigIntInput.svelte';
   import EntitySelect from '../../workspace/shell/EntitySelect.svelte';
   import { requireTokenDecimals } from '../../token-metadata';
+  import { optionalBoolean, optionalFiniteNumber, optionalString, readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
 
   export let entityId: string;
   export let actionRuntimeEnv: RuntimeReplica | null = null;
@@ -76,6 +77,61 @@
     };
   };
 
+  function decodeCreditRequestResponse(value: unknown): CreditRequestResponse {
+    const record = requireUnknownRecord(value, 'CREDIT_REQUEST_RESPONSE_INVALID');
+    rejectExtraKeys(record, ['success', 'status', 'error', 'approvedAmount', 'requestId', 'statusUrl', 'runtimeId', 'receipt'], 'CREDIT_REQUEST_RESPONSE_EXTRA_FIELD');
+    const receiptValue = record['receipt'];
+    let receipt: CreditRequestResponse['receipt'];
+    if (receiptValue !== undefined) {
+      const rawReceipt = requireUnknownRecord(receiptValue, 'CREDIT_REQUEST_RECEIPT_INVALID');
+      rejectExtraKeys(rawReceipt, ['id', 'status', 'counts', 'enqueuedHeight', 'observedHeight', 'note'], 'CREDIT_REQUEST_RECEIPT_EXTRA_FIELD');
+      let counts: NonNullable<CreditRequestResponse['receipt']>['counts'];
+      if (rawReceipt['counts'] !== undefined && rawReceipt['counts'] !== null) {
+        const rawCounts = requireUnknownRecord(rawReceipt['counts'], 'CREDIT_REQUEST_RECEIPT_COUNTS_INVALID');
+        rejectExtraKeys(rawCounts, ['runtimeTxs', 'entityInputs', 'jInputs'], 'CREDIT_REQUEST_RECEIPT_COUNTS_EXTRA_FIELD');
+        const runtimeTxs = optionalFiniteNumber(rawCounts['runtimeTxs'], 'CREDIT_REQUEST_RECEIPT_RUNTIME_TXS_INVALID');
+        const entityInputs = optionalFiniteNumber(rawCounts['entityInputs'], 'CREDIT_REQUEST_RECEIPT_ENTITY_INPUTS_INVALID');
+        const jInputs = optionalFiniteNumber(rawCounts['jInputs'], 'CREDIT_REQUEST_RECEIPT_J_INPUTS_INVALID');
+        counts = {};
+        if (runtimeTxs !== undefined) counts.runtimeTxs = runtimeTxs;
+        if (entityInputs !== undefined) counts.entityInputs = entityInputs;
+        if (jInputs !== undefined) counts.jInputs = jInputs;
+      }
+      const nullableString = (raw: unknown, code: string): string | null | undefined => raw === null ? null : optionalString(raw, code);
+      const nullableNumber = (raw: unknown, code: string): number | null | undefined => raw === null ? null : optionalFiniteNumber(raw, code);
+      const id = nullableString(rawReceipt['id'], 'CREDIT_REQUEST_RECEIPT_ID_INVALID');
+      const status = optionalString(rawReceipt['status'], 'CREDIT_REQUEST_RECEIPT_STATUS_INVALID');
+      const enqueuedHeight = nullableNumber(rawReceipt['enqueuedHeight'], 'CREDIT_REQUEST_RECEIPT_ENQUEUED_HEIGHT_INVALID');
+      const observedHeight = nullableNumber(rawReceipt['observedHeight'], 'CREDIT_REQUEST_RECEIPT_OBSERVED_HEIGHT_INVALID');
+      const note = nullableString(rawReceipt['note'], 'CREDIT_REQUEST_RECEIPT_NOTE_INVALID');
+      receipt = {};
+      if (id !== undefined) receipt.id = id;
+      if (status !== undefined) receipt.status = status;
+      if (counts !== undefined) receipt.counts = counts;
+      if (enqueuedHeight !== undefined) receipt.enqueuedHeight = enqueuedHeight;
+      if (observedHeight !== undefined) receipt.observedHeight = observedHeight;
+      if (note !== undefined) receipt.note = note;
+    }
+    const nullableString = (raw: unknown, code: string): string | null | undefined => raw === null ? null : optionalString(raw, code);
+    const success = optionalBoolean(record['success'], 'CREDIT_REQUEST_SUCCESS_INVALID');
+    const status = optionalString(record['status'], 'CREDIT_REQUEST_STATUS_INVALID');
+    const error = optionalString(record['error'], 'CREDIT_REQUEST_ERROR_INVALID');
+    const approvedAmount = optionalString(record['approvedAmount'], 'CREDIT_REQUEST_AMOUNT_INVALID');
+    const requestId = optionalString(record['requestId'], 'CREDIT_REQUEST_ID_INVALID');
+    const statusUrl = optionalString(record['statusUrl'], 'CREDIT_REQUEST_STATUS_URL_INVALID');
+    const runtimeId = nullableString(record['runtimeId'], 'CREDIT_REQUEST_RUNTIME_ID_INVALID');
+    const result: CreditRequestResponse = {};
+    if (success !== undefined) result.success = success;
+    if (status !== undefined) result.status = status;
+    if (error !== undefined) result.error = error;
+    if (approvedAmount !== undefined) result.approvedAmount = approvedAmount;
+    if (requestId !== undefined) result.requestId = requestId;
+    if (statusUrl !== undefined) result.statusUrl = statusUrl;
+    if (runtimeId !== undefined) result.runtimeId = runtimeId;
+    if (receipt !== undefined) result.receipt = receipt;
+    return result;
+  }
+
   async function submitExtendCredit(_successMessage: string) {
     if (!effectiveCounterparty) return;
     try {
@@ -139,7 +195,7 @@
           amount: creditAmountBigInt.toString(),
         }),
       });
-      const result = await response.json() as CreditRequestResponse;
+      const result = decodeCreditRequestResponse(await readJsonUnknown(response));
       if (!response.ok || result.success !== true) {
         throw new Error(result.error || `Credit request failed (${response.status})`);
       }

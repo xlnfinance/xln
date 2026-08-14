@@ -40,6 +40,7 @@ import {
   relayPreparedFrameIfReady,
   startMultiSignerProposalIfReady,
 } from '../proposal/multi-signer';
+import { getEntityFrameConsensusConfig } from '../authority/board-handover';
 
 export type { EntityInputOutcome } from './types';
 
@@ -74,10 +75,15 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
     proposedFrame,
   );
   if (authenticationResult) return authenticationResult;
+  const authorityConfig = getEntityFrameConsensusConfig(
+    context.env,
+    workingReplica.state,
+    proposedFrame.txs,
+  );
   let frameCollectedSigs: Map<string, string[]>;
   try {
     frameCollectedSigs = normalizePrecommitBundles(
-      workingReplica.state.config,
+      authorityConfig,
       rawFrameCollectedSigs,
       'COMMIT_REJECTED',
     );
@@ -87,8 +93,8 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
   }
   proposedFrame.collectedSigs = frameCollectedSigs;
   const signers = Array.from(frameCollectedSigs.keys());
-  const totalPower = calculateQuorumPower(workingReplica.state.config, signers);
-  if (totalPower < workingReplica.state.config.threshold) {
+  const totalPower = calculateQuorumPower(authorityConfig, signers);
+  if (totalPower < authorityConfig.threshold) {
     return null;
   }
 

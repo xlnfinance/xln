@@ -5,6 +5,7 @@ import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signer
 import type { Depository } from '../../typechain-types/index.js';
 import {
   buildSingleSignerHanko,
+  canonicalAccountKey,
   computeDepositoryBatchHash,
   deriveHardhatPrivateKey,
   deployDepositoryStack,
@@ -45,7 +46,7 @@ const deployFixture = async () => {
 };
 
 const advancePastTimeout = async (depository: Depository, left: string, right: string): Promise<void> => {
-  const timeout = (await depository._accounts(await depository.accountKey(left, right))).disputeTimeout;
+  const timeout = (await depository._accounts(canonicalAccountKey(left, right))).disputeTimeout;
   if (BigInt(await time.latest()) <= timeout) await time.increaseTo(Number(timeout + 1n));
 };
 
@@ -115,7 +116,7 @@ describe('dispute ondelta liveness', function () {
     const laterCollateral = 1n;
     const signedOffdelta = 10n;
     const proofNonce = 1n;
-    const accountKey = await depository.accountKey(left.entityId, right.entityId);
+    const accountKey = canonicalAccountKey(left.entityId, right.entityId);
 
     await depository.mintToReserve(left.entityId, tokenId, initialCollateral + laterCollateral);
     await processBatch(depository, left, emptyBatch({
@@ -197,7 +198,7 @@ describe('dispute ondelta liveness', function () {
     const collateralAmount = 100n;
     const signedOffdelta = -(1n << 255n);
     const proofNonce = 1n;
-    const accountKey = await depository.accountKey(left.entityId, right.entityId);
+    const accountKey = canonicalAccountKey(left.entityId, right.entityId);
 
     // RIGHT-funded collateral does not change LEFT-oriented ondelta.
     await depository.mintToReserve(right.entityId, tokenId, collateralAmount);
@@ -278,7 +279,7 @@ describe('dispute ondelta liveness', function () {
     const requestedDebts = [60n, 60n, 10n] as const;
 
     const disputes = await Promise.all(creditors.map(async (creditor, index) => {
-      const accountKey = await depository.accountKey(debtor.entityId, creditor.entityId);
+      const accountKey = canonicalAccountKey(debtor.entityId, creditor.entityId);
       const debtorIsLeft = BigInt(debtor.entityId) < BigInt(creditor.entityId);
       const proofbody = {
         watchSeed: WATCH_SEED,
@@ -378,7 +379,7 @@ describe('dispute ondelta liveness', function () {
     const creditor = actor(signer1, 1);
     const tokenId = 999n;
     const requested = 5n;
-    const accountKey = await depository.accountKey(debtor.entityId, creditor.entityId);
+    const accountKey = canonicalAccountKey(debtor.entityId, creditor.entityId);
     const debtorIsLeft = BigInt(debtor.entityId) < BigInt(creditor.entityId);
     const proofbody = {
       watchSeed: WATCH_SEED,
@@ -438,7 +439,7 @@ describe('dispute ondelta liveness', function () {
       await depository.registerExternalToken(0, await token.getAddress(), 0);
       const tokenId = (await depository.getTokensLength()) - 1n;
 
-      const accountKey = await depository.accountKey(debtor.entityId, creditor.entityId);
+      const accountKey = canonicalAccountKey(debtor.entityId, creditor.entityId);
       const debtorIsLeft = BigInt(debtor.entityId) < BigInt(creditor.entityId);
       const proofbody = {
         watchSeed: WATCH_SEED,

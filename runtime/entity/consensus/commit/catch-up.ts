@@ -26,6 +26,7 @@ import {
 } from '../jurisdiction/prefix-round';
 import { getPrevFrameHash } from '../frame/lineage';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
+import { getBoardHandoverLeaderState } from '../authority/board-handover';
 
 export type CommitExecutionResolution =
   | { kind: 'execution'; execution: EntityCandidate }
@@ -60,7 +61,14 @@ const validateCatchUpJRange = (
     return deferEntityConsensusInput(context, 'COMMIT_J_PREFIX_HISTORY_WAIT');
   }
   if (prefixError.disposition !== 'retry') {
-    entityLog.error('commit.j_prefix_rejected', { error: prefixError.message });
+    entityLog.error('commit.j_prefix_rejected', {
+      error: prefixError.message,
+      frame: shortHash(frame.hash),
+      frameHeight: frame.height,
+      localHeight: workingReplica.state.height,
+      certificateSigners: [...(frame.jPrefixCertificate?.attestations.keys() ?? [])],
+      frameTxs: frame.txs.map(tx => tx.type),
+    });
     return rejectEntityConsensusInput(context, 'COMMIT_J_RANGE_MISMATCH');
   }
   // Catch-up must apply H before reaching H+1, which finalizes the newer local
@@ -174,7 +182,9 @@ const replayCommitFrame = async (
     entityId: workingReplica.state.entityId,
     height: frame.height,
     timestamp: frame.timestamp,
-    leaderState: expectedCommittedLeaderState(workingReplica.state, frame),
+    leaderState:
+      getBoardHandoverLeaderState(env, workingReplica.state, frame.txs) ??
+      expectedCommittedLeaderState(workingReplica.state, frame),
   };
   const commitments = validateReplayedCommitments(context, frame, state);
   if (commitments.kind === 'result') return commitments;

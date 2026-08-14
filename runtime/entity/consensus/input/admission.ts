@@ -14,6 +14,10 @@ import {
   isReplicaProposalLeader,
 } from '../leader';
 import { entityLog } from '../entity-log';
+import {
+  getPendingBoardHandoverConfig,
+  withBoardAuthority,
+} from '../authority/board-handover';
 
 export type EntityTransactionAdmission = {
   localCanPropose: boolean;
@@ -65,10 +69,11 @@ const addAdmittedTransactions = (
 const forwardValidatorMempool = (
   context: ApplyEntityInputContext,
   localCanPropose: boolean,
+  authorityReplica: typeof context.workingReplica,
 ): void => {
   const { entityInput, entityOutbox, workingReplica } = context;
   if (localCanPropose || workingReplica.mempool.length === 0) return;
-  const proposerId = getReplicaProposalLeader(workingReplica).activeValidatorId;
+  const proposerId = getReplicaProposalLeader(authorityReplica).activeValidatorId;
   if (!proposerId) {
     throw new Error(
       `ENTITY_CONSENSUS_FATAL_PROPOSER_MISSING:` +
@@ -91,11 +96,18 @@ export const admitEntityTransactions = async (
   trustedLocalCrossJurisdiction: boolean,
 ): Promise<EntityTransactionAdmission> => {
   const { env, entityInput, workingReplica } = context;
-  const warning = getEntityQuorumSafetyWarning(workingReplica.state.config);
+  const pendingConfig = getPendingBoardHandoverConfig(
+    workingReplica.state,
+    [...workingReplica.mempool, ...(entityInput.entityTxs ?? [])],
+  );
+  const authorityReplica = pendingConfig
+    ? { ...workingReplica, state: withBoardAuthority(workingReplica.state, pendingConfig) }
+    : workingReplica;
+  const warning = getEntityQuorumSafetyWarning(authorityReplica.state.config);
   if (warning && workingReplica.state.height === 0) {
     entityLog.warn('board.quorum_safety', { warning });
   }
-  const localCanPropose = isReplicaProposalLeader(workingReplica);
+  const localCanPropose = isReplicaProposalLeader(authorityReplica);
   workingReplica.isProposer = localCanPropose;
   if (
     localCanPropose &&
@@ -134,6 +146,6 @@ export const admitEntityTransactions = async (
       localRuntime: trustedLocalEntityTxs.length,
     });
   }
-  forwardValidatorMempool(context, localCanPropose);
+  forwardValidatorMempool(context, localCanPropose, authorityReplica);
   return { localCanPropose, trustedLocalEntityTxs };
 };

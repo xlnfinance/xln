@@ -57,6 +57,12 @@ import { materializeEntityInfraContext } from './infra-context';
 import { validateProposedEntityFrame } from '../frame/validation';
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
+import {
+  getBoardHandoverFrameConfig,
+  getBoardHandoverLeaderState,
+  getEntityFrameConsensusConfig,
+  withBoardAuthority,
+} from '../authority/board-handover';
 
 export type SingleSignerFrameOptions = Pick<
   EntityProposalSelection,
@@ -79,7 +85,11 @@ const buildSingleSignerCommitments = (
   entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
 ) => {
   const { env, workingReplica } = context;
-  const leader = getEntityLeaderState(workingReplica.state);
+  const leader = getBoardHandoverLeaderState(
+    env,
+    workingReplica.state,
+    options.proposalTxs,
+  ) ?? getEntityLeaderState(workingReplica.state);
   const height = workingReplica.state.height + 1;
   const timestamp = env.state.timestamp;
   const parentFrameHash = getPrevFrameHash(workingReplica.state);
@@ -132,49 +142,47 @@ const buildSingleSignerCommitments = (
   };
 };
 
-const buildSingleSignerFrame = async (
+const applySingleSignerProposal = async (
   context: ApplyEntityInputContext,
   options: SingleSignerFrameOptions,
 ) => {
   const { env, workingReplica } = context;
   const { proposalJPrefixCertificate, proposalTxs } = options;
-  const leader = getEntityLeaderState(workingReplica.state);
+  const authorityConfig = getEntityFrameConsensusConfig(env, workingReplica.state, proposalTxs);
+  const authorityReplica = authorityConfig === workingReplica.state.config
+    ? workingReplica
+    : { ...workingReplica, state: withBoardAuthority(workingReplica.state, authorityConfig) };
+  const leader = getEntityLeaderState(authorityReplica.state);
   assertProposerJRangesMatchLocalHistory(env, workingReplica, proposalTxs);
-  assertFrameJPrefix(env, workingReplica, {
+  assertFrameJPrefix(env, authorityReplica, {
     height: workingReplica.state.height + 1,
     parentFrameHash: getPrevFrameHash(workingReplica.state),
-    leader: {
-      proposerSignerId: workingReplica.signerId.toLowerCase(),
-      view: leader.view,
-    },
+    leader: { proposerSignerId: workingReplica.signerId.toLowerCase(), view: leader.view },
     txs: proposalTxs,
-    ...(proposalJPrefixCertificate
-      ? { jPrefixCertificate: proposalJPrefixCertificate }
-      : {}),
+    ...(proposalJPrefixCertificate ? { jPrefixCertificate: proposalJPrefixCertificate } : {}),
   });
-  const applyFrame = context.promoteCandidateState
-    ? applyRuntimeOwnedEntityFrame
-    : applyEntityFrame;
-  const entityContext = await materializeEntityInfraContext(
-    env,
-    workingReplica,
-    proposalTxs,
-    { usePersistedReplayContext: context.usePersistedReplayContext },
-  );
+  const entityContext = await materializeEntityInfraContext(env, workingReplica, proposalTxs, {
+    usePersistedReplayContext: context.usePersistedReplayContext,
+  });
   await assertHtlcPreparedInfraContext({
     state: workingReplica.state,
     proposalTxs,
     context: entityContext,
     entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, workingReplica.entityId),
   });
-  const applied = await applyFrame(
-    env,
-    workingReplica.state,
-    entityContext,
-    proposalTxs,
-    env.state.timestamp,
-  );
+  const applyFrame = context.promoteCandidateState ? applyRuntimeOwnedEntityFrame : applyEntityFrame;
+  const applied = await applyFrame(env, workingReplica.state, entityContext, proposalTxs, env.state.timestamp);
   options.checkpoint('frameApply');
+  return { applied, entityContext };
+};
+
+const buildSingleSignerFrame = async (
+  context: ApplyEntityInputContext,
+  options: SingleSignerFrameOptions,
+) => {
+  const { env, workingReplica } = context;
+  const { proposalJPrefixCertificate, proposalTxs } = options;
+  const { applied, entityContext } = await applySingleSignerProposal(context, options);
   const commitments = buildSingleSignerCommitments(context, options, applied, entityContext);
   options.checkpoint('commitments');
   const hankos = await signEntityHashes(
@@ -293,6 +301,11 @@ const installSingleSignerFrame = async (
   context.consumptionNodeChanges = execution.consumptionNodeChanges;
   context.accountJClaimNodeChanges = execution.accountJClaimNodeChanges;
   const priorState = workingReplica.state;
+  const handoverConfig = getBoardHandoverFrameConfig(
+    env,
+    priorState,
+    options.proposalTxs,
+  );
   emitCommittedPendingFrameWarnings(priorState, committedState);
   if (context.promoteCandidateState) {
     commitEntityFrameCandidateState(committedState);
@@ -321,6 +334,19 @@ const installSingleSignerFrame = async (
   await runLocalPostCommitHooks(env, workingReplica, entityOutbox);
   workingReplica.lastConsensusProgressAt = env.state.timestamp;
   entityOutbox.push(...commitOutputs);
+  if (handoverConfig) {
+    // Retired validators remain full-state observers. Deliver the certified
+    // transition to every old board member so their replica advances to the
+    // same post-handover state, but never gives them authority over H+1.
+    for (const validatorId of priorState.config.validators) {
+      if (validatorId.toLowerCase() === workingReplica.signerId.toLowerCase()) continue;
+      entityOutbox.push({
+        entityId: workingReplica.entityId,
+        signerId: validatorId,
+        proposedFrame: execution.frame,
+      });
+    }
+  }
   jOutbox.push(...execution.jOutputs);
   workingReplica.mempool = removeCommittedTxsFromMempool(
     workingReplica.mempool,

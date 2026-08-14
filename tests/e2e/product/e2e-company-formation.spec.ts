@@ -1,4 +1,4 @@
-import { expect, test } from '../../tests/global-setup.mts';
+import { expect, test } from '../../global-setup.mts';
 
 async function deriveCompanyOwner(page: import('@playwright/test').Page): Promise<void> {
   await page.goto('/app');

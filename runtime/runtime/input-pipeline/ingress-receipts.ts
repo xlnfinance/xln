@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { RuntimeInput } from '../types';
 import { serializeTaggedJson } from '../../protocol/serialization';
-import { requireBoundaryInteger } from '../../protocol/boundary-validation';
+import {
+  requireBoundaryInteger,
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../../protocol/boundary-validation';
 
 type RuntimeIngressReceiptStatus = 'pending' | 'observed' | 'expired';
 
@@ -25,6 +29,75 @@ export type RuntimeIngressReceipt = {
   observedHeight?: number;
   expiresAt: number;
   note?: string;
+};
+
+/** Exact decoder for a receipt received back from an authenticated Runtime API. */
+export const decodeRuntimeIngressReceipt = (value: unknown): RuntimeIngressReceipt => {
+  const receipt = requireBoundaryRecord(value, 'RUNTIME_INGRESS_RECEIPT_INVALID');
+  requireExactBoundaryKeys(
+    receipt,
+    ['id', 'kind', 'status', 'counts', 'enqueuedAt', 'enqueuedHeight', 'expiresAt'],
+    [
+      'inputHash', 'inputFingerprints', 'observedFingerprintCount',
+      'requiredFingerprintCount', 'observedHeight', 'note',
+    ],
+    'RUNTIME_INGRESS_RECEIPT_FIELDS_INVALID',
+  );
+  if (typeof receipt['id'] !== 'string' || !receipt['id'] ||
+      typeof receipt['kind'] !== 'string' || !receipt['kind']) {
+    throw new Error('RUNTIME_INGRESS_RECEIPT_IDENTITY_INVALID');
+  }
+  if (receipt['status'] !== 'pending' && receipt['status'] !== 'observed' && receipt['status'] !== 'expired') {
+    throw new Error('RUNTIME_INGRESS_RECEIPT_STATUS_INVALID');
+  }
+  const counts = requireBoundaryRecord(receipt['counts'], 'RUNTIME_INGRESS_RECEIPT_COUNTS_INVALID');
+  requireExactBoundaryKeys(
+    counts,
+    ['runtimeTxs', 'entityInputs', 'jInputs'],
+    [],
+    'RUNTIME_INGRESS_RECEIPT_COUNTS_FIELDS_INVALID',
+  );
+  if (receipt['inputHash'] !== undefined && typeof receipt['inputHash'] !== 'string') {
+    throw new Error('RUNTIME_INGRESS_RECEIPT_INPUT_HASH_INVALID');
+  }
+  if (receipt['inputFingerprints'] !== undefined &&
+      (!Array.isArray(receipt['inputFingerprints']) || receipt['inputFingerprints'].some(item => typeof item !== 'string'))) {
+    throw new Error('RUNTIME_INGRESS_RECEIPT_FINGERPRINTS_INVALID');
+  }
+  if (receipt['note'] !== undefined && typeof receipt['note'] !== 'string') {
+    throw new Error('RUNTIME_INGRESS_RECEIPT_NOTE_INVALID');
+  }
+  return {
+    id: receipt['id'],
+    kind: receipt['kind'],
+    status: receipt['status'],
+    counts: {
+      runtimeTxs: requireBoundaryInteger(counts['runtimeTxs'], 'RUNTIME_INGRESS_RECEIPT_RUNTIME_TXS_INVALID'),
+      entityInputs: requireBoundaryInteger(counts['entityInputs'], 'RUNTIME_INGRESS_RECEIPT_ENTITY_INPUTS_INVALID'),
+      jInputs: requireBoundaryInteger(counts['jInputs'], 'RUNTIME_INGRESS_RECEIPT_J_INPUTS_INVALID'),
+    },
+    enqueuedAt: requireBoundaryInteger(receipt['enqueuedAt'], 'RUNTIME_INGRESS_RECEIPT_ENQUEUED_AT_INVALID'),
+    enqueuedHeight: requireBoundaryInteger(receipt['enqueuedHeight'], 'RUNTIME_INGRESS_RECEIPT_ENQUEUED_HEIGHT_INVALID'),
+    ...(receipt['inputHash'] === undefined ? {} : { inputHash: receipt['inputHash'] }),
+    ...(receipt['inputFingerprints'] === undefined ? {} : { inputFingerprints: [...receipt['inputFingerprints']] }),
+    ...(receipt['observedFingerprintCount'] === undefined ? {} : {
+      observedFingerprintCount: requireBoundaryInteger(
+        receipt['observedFingerprintCount'],
+        'RUNTIME_INGRESS_RECEIPT_OBSERVED_FINGERPRINT_COUNT_INVALID',
+      ),
+    }),
+    ...(receipt['requiredFingerprintCount'] === undefined ? {} : {
+      requiredFingerprintCount: requireBoundaryInteger(
+        receipt['requiredFingerprintCount'],
+        'RUNTIME_INGRESS_RECEIPT_REQUIRED_FINGERPRINT_COUNT_INVALID',
+      ),
+    }),
+    ...(receipt['observedHeight'] === undefined ? {} : {
+      observedHeight: requireBoundaryInteger(receipt['observedHeight'], 'RUNTIME_INGRESS_RECEIPT_OBSERVED_HEIGHT_INVALID'),
+    }),
+    expiresAt: requireBoundaryInteger(receipt['expiresAt'], 'RUNTIME_INGRESS_RECEIPT_EXPIRES_AT_INVALID'),
+    ...(receipt['note'] === undefined ? {} : { note: receipt['note'] }),
+  };
 };
 
 export type RegisterReceiptOptions = {

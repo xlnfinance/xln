@@ -19,7 +19,11 @@ import {
   rpcLog,
 } from '../../rpc-public';
 import { submitDebtEnforcement, submitMint } from './rpc-submit-basic';
-import { submitEntityProviderAction } from './rpc-submit-entity-provider';
+import {
+  submitBoardActivation,
+  submitControlBoardProposal,
+  submitEntityProviderAction,
+} from './rpc-submit-entity-provider';
 import type { RpcTransactionSequencer } from './rpc-transaction-sequencer';
 import type { JAdapter, JAdapterConfig, JSubmitResult } from '../../types';
 import type { RpcWriteMethods } from './rpc-write-methods';
@@ -456,6 +460,46 @@ export const createRpcSubmitTx = (
     jTx.type === 'entityProviderCancelAction'
   ) {
     return submitEntityProviderAction(
+      {
+        chainId: context.config.chainId,
+        watchOnly: context.watchOnly,
+        signer: context.signer,
+        entityProvider: context.stack.entityProvider,
+        depository: context.stack.depository,
+        getDepositoryAddress: () => context.stack.getDepositoryAddress(),
+        getEntityProviderAddress: () => context.stack.getEntityProviderAddress(),
+        signerForPrivateKey: context.chainIo.signerForPrivateKey,
+        readActionReceipt: context.receipts.readEntityProviderActionReceipt,
+        runSerialized: context.sequencer.run,
+        estimateGas: context.chainIo.estimateGas,
+        send: context.sequencer.send,
+      },
+      jTx,
+      options.signerPrivateKey,
+    );
+  }
+  if (jTx.type === 'entityProviderProposeControlBoard') {
+    return submitControlBoardProposal(
+      {
+        chainId: context.config.chainId,
+        watchOnly: context.watchOnly,
+        signer: context.signer,
+        entityProvider: context.stack.entityProvider,
+        depository: context.stack.depository,
+        getDepositoryAddress: () => context.stack.getDepositoryAddress(),
+        getEntityProviderAddress: () => context.stack.getEntityProviderAddress(),
+        signerForPrivateKey: context.chainIo.signerForPrivateKey,
+        readActionReceipt: context.receipts.readEntityProviderActionReceipt,
+        runSerialized: context.sequencer.run,
+        estimateGas: context.chainIo.estimateGas,
+        send: context.sequencer.send,
+      },
+      jTx,
+      options.signerPrivateKey,
+    );
+  }
+  if (jTx.type === 'entityProviderActivateBoard') {
+    return submitBoardActivation(
       {
         chainId: context.config.chainId,
         watchOnly: context.watchOnly,

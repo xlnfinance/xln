@@ -10,10 +10,10 @@ import {
   accountInputDisputeSeal,
   accountInputProposal,
 } from '../../../account/consensus/flush';
+import { cloneIsolatedAccountInput } from '../../../protocol/state/account-input-clone';
 import {
-  cloneIsolatedAccountInput,
-  cloneIsolatedAccountTx,
-} from '../../../protocol/state/account-input-clone';
+  accountFrameWithoutPostCommitHankos,
+} from '../../../account/settlement/witness-projection';
 import {
   requireCertifiedAccountFrameAck,
   requireCertifiedAccountFrameProposal,
@@ -101,6 +101,7 @@ export const cloneAccountInputWithoutPostCommitHankos = <T extends AccountInput>
   }
   const proposal = accountInputProposal(unsigned);
   if (proposal) {
+    proposal.frame = accountFrameWithoutPostCommitHankos(proposal.frame);
     delete proposal.frameHanko;
     if (proposal.disputeSeal) delete proposal.disputeSeal.hanko;
   }
@@ -108,15 +109,6 @@ export const cloneAccountInputWithoutPostCommitHankos = <T extends AccountInput>
   if (disputeSeal) delete disputeSeal.hanko;
   const reseal = accountInputBoardReseal(unsigned);
   if (reseal) delete reseal.frameHanko;
-  return unsigned;
-};
-
-export const cloneAccountTxWithoutPostCommitHankos = (tx: AccountTx): AccountTx => {
-  const unsigned = cloneIsolatedAccountTx(tx);
-  if (unsigned.type === 'settle_transition' && unsigned.data.kind === 'seal') {
-    delete unsigned.data.settlementHanko;
-    delete unsigned.data.postProof.hanko;
-  }
   return unsigned;
 };
 
@@ -367,6 +359,22 @@ export const attachHankoWitnessToOutputs = (
           'entityProviderAction',
           entityHeight,
           jTx.data.hankoSignature,
+        );
+        attachedCount++;
+      }
+      if (jTx.type === 'entityProviderProposeControlBoard') {
+        const ownVote = jTx.data.supporterVotes.find(
+          (vote) => vote.entityId === jTx.entityId,
+        );
+        if (!ownVote || ownVote.hankoSignature) {
+          throw new Error(`CONTROL_BOARD_PROPOSAL_OWN_VOTE_INVALID:${jTx.entityId}`);
+        }
+        ownVote.hankoSignature = requireDraftWitness(
+          hankoWitness,
+          jTx.data.proposalHash,
+          'entityProviderAction',
+          entityHeight,
+          ownVote.hankoSignature,
         );
         attachedCount++;
       }

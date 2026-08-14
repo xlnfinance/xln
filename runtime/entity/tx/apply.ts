@@ -92,6 +92,11 @@ import {
   handleEntityProviderReleaseControlShares,
   handleEntityProviderTransfer,
 } from './handlers/entity-provider-action';
+import {
+  handleEntityProviderActivateBoard,
+  handleEntityProviderProposeControlBoard,
+} from './handlers/control-board-proposal';
+import { handleBoardHandoverEntityTx } from './handlers/board-handover';
 import type { AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
 
 const entityTxLog = createStructuredLogger('entity.tx');
@@ -326,6 +331,12 @@ const entityTxDispatchers = {
     options?.mutableFrameState,
   ),
   j_event: handleJEventEntityTx,
+  boardHandover: (env, state, tx, options) => handleBoardHandoverEntityTx(
+    state,
+    tx as Extract<EntityTx, { type: 'boardHandover' }>,
+    env,
+    options?.mutableFrameState,
+  ),
   accountInput: handleAccountInputEntityTx,
   openAccount: (_env, state, tx, options) => handleOpenAccountEntityTx(
     state,
@@ -384,6 +395,18 @@ const entityTxDispatchers = {
     tx as Extract<EntityTx, { type: 'entityProviderCancelAction' }>,
     env,
     options?.mutableFrameState,
+  ),
+  entityProviderProposeControlBoard: (env, state, tx, options) => handleEntityProviderProposeControlBoard(
+    state,
+    tx as Extract<EntityTx, { type: 'entityProviderProposeControlBoard' }>,
+    env,
+    options?.mutableFrameState,
+  ),
+  entityProviderActivateBoard: (env, state, tx, options) => handleEntityProviderActivateBoard(
+    state,
+    tx as Extract<EntityTx, { type: 'entityProviderActivateBoard' }>,
+    env,
+    options.mutableFrameState,
   ),
   j_rebroadcast: (env, state, tx, options) => handleJRebroadcast(
     state,

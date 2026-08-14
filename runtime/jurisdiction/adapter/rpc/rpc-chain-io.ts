@@ -139,8 +139,19 @@ const readTronSolidifiedBlockNumber = async (config: JAdapterConfig): Promise<nu
     body: '{}',
   });
   if (!response.ok) throw new Error(`TRON_SOLIDIFIED_HEAD_HTTP:${response.status}`);
-  const payload = (await response.json()) as { block_header?: { raw_data?: { number?: unknown } } };
-  return parseBlockNumber(payload.block_header?.raw_data?.number);
+  const rawPayload: unknown = await response.json();
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
+    throw new Error('TRON_SOLIDIFIED_HEAD_PAYLOAD_INVALID');
+  }
+  const header = (rawPayload as Record<string, unknown>)['block_header'];
+  if (!header || typeof header !== 'object' || Array.isArray(header)) {
+    throw new Error('TRON_SOLIDIFIED_HEAD_PAYLOAD_INVALID');
+  }
+  const rawData = (header as Record<string, unknown>)['raw_data'];
+  if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) {
+    throw new Error('TRON_SOLIDIFIED_HEAD_PAYLOAD_INVALID');
+  }
+  return parseBlockNumber((rawData as Record<string, unknown>)['number']);
 };
 
 const sendTronRpcCall = async (
@@ -162,11 +173,32 @@ const sendTronRpcCall = async (
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`TRON_RPC_HTTP:${request.method}:${response.status}`);
-    const payload = (await response.json()) as RpcBatchResponse;
-    if (payload.id !== request.id) {
-      throw new Error(`TRON_RPC_ID_MISMATCH:${request.method}:${request.id}:${String(payload.id)}`);
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error(`TRON_RPC_RESPONSE_INVALID:${request.method}`);
     }
-    return payload;
+    const record = payload as Record<string, unknown>;
+    const id = record['id'];
+    if (id !== undefined && (!Number.isSafeInteger(id) || Number(id) < 0)) {
+      throw new Error(`TRON_RPC_RESPONSE_INVALID:${request.method}`);
+    }
+    const error = record['error'];
+    if (error !== undefined && (!error || typeof error !== 'object' || Array.isArray(error))) {
+      throw new Error(`TRON_RPC_RESPONSE_INVALID:${request.method}`);
+    }
+    const errorRecord = error && typeof error === 'object' && !Array.isArray(error)
+      ? error as Record<string, unknown>
+      : undefined;
+    const errorMessage = typeof errorRecord?.['message'] === 'string' ? errorRecord['message'] : undefined;
+    const typedPayload: RpcBatchResponse = {
+      ...(id === undefined ? {} : { id: Number(id) }),
+      ...(Object.hasOwn(record, 'result') ? { result: record['result'] } : {}),
+      ...(error === undefined ? {} : errorMessage === undefined ? { error: {} } : { error: { message: errorMessage } }),
+    };
+    if (typedPayload.id !== request.id) {
+      throw new Error(`TRON_RPC_ID_MISMATCH:${request.method}:${request.id}:${String(typedPayload.id)}`);
+    }
+    return typedPayload;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(`TRON_RPC_TIMEOUT:${request.method}`);

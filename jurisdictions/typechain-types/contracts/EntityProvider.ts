@@ -55,6 +55,7 @@ export interface EntityProviderInterface extends Interface {
       | "assignName"
       | "balanceOf"
       | "balanceOfBatch"
+      | "bindShareDepository"
       | "boardActionNonces"
       | "boardEpochs"
       | "cancelBoardProposal"
@@ -74,6 +75,7 @@ export interface EntityProviderInterface extends Interface {
       | "entityActionNonces"
       | "entityIdToNumber"
       | "entityTransferTokens"
+      | "foundationDeployer"
       | "foundationRegisterEntity"
       | "getEntityInfo"
       | "getTokenIds"
@@ -92,6 +94,7 @@ export interface EntityProviderInterface extends Interface {
       | "setApprovalForAll"
       | "setNameQuota"
       | "setReservedName"
+      | "shareDepository"
       | "supportsInterface"
       | "transferName"
       | "uri"
@@ -114,6 +117,7 @@ export interface EntityProviderInterface extends Interface {
       | "NameAssigned"
       | "NameTransferred"
       | "ProposalCancelled"
+      | "ShareDepositoryBound"
       | "TransferBatch"
       | "TransferSingle"
       | "URI"
@@ -186,6 +190,10 @@ export interface EntityProviderInterface extends Interface {
   encodeFunctionData(
     functionFragment: "balanceOfBatch",
     values: [AddressLike[], BigNumberish[]]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "bindShareDepository",
+    values: [AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "boardActionNonces",
@@ -287,6 +295,10 @@ export interface EntityProviderInterface extends Interface {
     values: [BigNumberish, AddressLike, BigNumberish, BigNumberish, BytesLike]
   ): string;
   encodeFunctionData(
+    functionFragment: "foundationDeployer",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
     functionFragment: "foundationRegisterEntity",
     values: [BytesLike, EntityArticlesStruct, BytesLike, BigNumberish]
   ): string;
@@ -372,6 +384,10 @@ export interface EntityProviderInterface extends Interface {
     values: [string, boolean, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
+    functionFragment: "shareDepository",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
     functionFragment: "supportsInterface",
     values: [BytesLike]
   ): string;
@@ -452,6 +468,10 @@ export interface EntityProviderInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "bindShareDepository",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "boardActionNonces",
     data: BytesLike
   ): Result;
@@ -525,6 +545,10 @@ export interface EntityProviderInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "foundationDeployer",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "foundationRegisterEntity",
     data: BytesLike
   ): Result;
@@ -588,6 +612,10 @@ export interface EntityProviderInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "setReservedName",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "shareDepository",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -919,6 +947,18 @@ export namespace ProposalCancelledEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace ShareDepositoryBoundEvent {
+  export type InputTuple = [depository: AddressLike];
+  export type OutputTuple = [depository: string];
+  export interface OutputObject {
+    depository: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export namespace TransferBatchEvent {
   export type InputTuple = [
     operator: AddressLike,
@@ -1084,6 +1124,12 @@ export interface EntityProvider extends BaseContract {
     [accounts: AddressLike[], ids: BigNumberish[]],
     [bigint[]],
     "view"
+  >;
+
+  bindShareDepository: TypedContractMethod<
+    [depository: AddressLike],
+    [void],
+    "nonpayable"
   >;
 
   boardActionNonces: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
@@ -1281,6 +1327,8 @@ export interface EntityProvider extends BaseContract {
     "nonpayable"
   >;
 
+  foundationDeployer: TypedContractMethod<[], [string], "view">;
+
   foundationRegisterEntity: TypedContractMethod<
     [
       boardHash: BytesLike,
@@ -1416,6 +1464,8 @@ export interface EntityProvider extends BaseContract {
     "nonpayable"
   >;
 
+  shareDepository: TypedContractMethod<[], [string], "view">;
+
   supportsInterface: TypedContractMethod<
     [interfaceId: BytesLike],
     [boolean],
@@ -1519,6 +1569,9 @@ export interface EntityProvider extends BaseContract {
     [bigint[]],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "bindShareDepository"
+  ): TypedContractMethod<[depository: AddressLike], [void], "nonpayable">;
   getFunction(
     nameOrSignature: "boardActionNonces"
   ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
@@ -1734,6 +1787,9 @@ export interface EntityProvider extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "foundationDeployer"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
     nameOrSignature: "foundationRegisterEntity"
   ): TypedContractMethod<
     [
@@ -1879,6 +1935,9 @@ export interface EntityProvider extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "shareDepository"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
     nameOrSignature: "supportsInterface"
   ): TypedContractMethod<[interfaceId: BytesLike], [boolean], "view">;
   getFunction(
@@ -2001,6 +2060,13 @@ export interface EntityProvider extends BaseContract {
     ProposalCancelledEvent.InputTuple,
     ProposalCancelledEvent.OutputTuple,
     ProposalCancelledEvent.OutputObject
+  >;
+  getEvent(
+    key: "ShareDepositoryBound"
+  ): TypedContractEvent<
+    ShareDepositoryBoundEvent.InputTuple,
+    ShareDepositoryBoundEvent.OutputTuple,
+    ShareDepositoryBoundEvent.OutputObject
   >;
   getEvent(
     key: "TransferBatch"
@@ -2166,6 +2232,17 @@ export interface EntityProvider extends BaseContract {
       ProposalCancelledEvent.InputTuple,
       ProposalCancelledEvent.OutputTuple,
       ProposalCancelledEvent.OutputObject
+    >;
+
+    "ShareDepositoryBound(address)": TypedContractEvent<
+      ShareDepositoryBoundEvent.InputTuple,
+      ShareDepositoryBoundEvent.OutputTuple,
+      ShareDepositoryBoundEvent.OutputObject
+    >;
+    ShareDepositoryBound: TypedContractEvent<
+      ShareDepositoryBoundEvent.InputTuple,
+      ShareDepositoryBoundEvent.OutputTuple,
+      ShareDepositoryBoundEvent.OutputObject
     >;
 
     "TransferBatch(address,address,address,uint256[],uint256[])": TypedContractEvent<

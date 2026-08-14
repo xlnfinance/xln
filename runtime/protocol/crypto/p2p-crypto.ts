@@ -136,15 +136,15 @@ export function encryptJSON(
 /**
  * Decrypt JSON object with our private key
  */
-export function decryptJSON<T = unknown>(
+export function decryptJSON(
   encryptedBase64: string,
   privateKey: Uint8Array
-): T {
+): unknown {
   const encrypted = decodeBase64Bytes(encryptedBase64);
   const plaintext = decryptMessage(encrypted, privateKey);
   const json = new TextDecoder().decode(plaintext);
   // CRITICAL: Use safeParse to restore BigInt values from string encoding
-  return safeParse(json) as T;
+  return safeParse(json);
 }
 
 /**

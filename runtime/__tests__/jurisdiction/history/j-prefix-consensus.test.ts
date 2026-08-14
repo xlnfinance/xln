@@ -884,6 +884,11 @@ describe('validator J-prefix consensus', () => {
       ...structuredClone(preState),
       height: 1,
       prevFrameHash: `0x${'a7'.repeat(32)}`,
+      config: {
+        ...structuredClone(preState.config),
+        validators: [receiverId],
+        shares: { [receiverId]: 1n },
+      },
     };
     const receiverReplica: EntityReplica = {
       entityId,
@@ -917,17 +922,18 @@ describe('validator J-prefix consensus', () => {
     const { signature: _signature, ...staleUnsigned } = stale;
     const futureUnsigned = {
       ...staleUnsigned,
+      validatorId: receiverId,
       targetEntityHeight: 3,
       parentFrameHash: `0x${'b8'.repeat(32)}`,
     };
     const future = {
       ...futureUnsigned,
-      signature: signAccountFrame(env, sourceId, hashJPrefixAttestation(futureUnsigned)),
+      signature: signAccountFrame(env, receiverId, hashJPrefixAttestation(futureUnsigned)),
     };
     const futureResult = await applyEntityInput(env, receiverReplica, {
       entityId,
       signerId: receiverId,
-      jPrefixAttestations: new Map([[sourceId, future]]),
+      jPrefixAttestations: new Map([[receiverId, future]]),
     });
     expect(futureResult.outcome).toEqual({ kind: 'deferred', reason: 'J_PREFIX_FUTURE_HEIGHT' });
     expect(futureResult.workingReplica.state).toEqual(committedState);

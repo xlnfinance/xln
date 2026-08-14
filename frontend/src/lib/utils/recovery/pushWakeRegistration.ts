@@ -11,6 +11,7 @@ import type {
   PushUnregisterRequestV1,
 } from '@xln/runtime/watchtower/push/types';
 import { requestNativePaymentWakeNotifications } from '$lib/native/capacitor';
+import { parseJsonUnknown } from '$lib/utils/boundary';
 
 export type PushWakeDeviceToken = {
   token: string;
@@ -301,7 +302,7 @@ const readAllRecords = (): PushWakeRegistrationRecord[] => {
   if (typeof localStorage === 'undefined') return [];
   const raw = localStorage.getItem(PUSH_WAKE_RECORDS_KEY);
   if (!raw) return [];
-  const parsed = JSON.parse(raw) as unknown;
+  const parsed = parseJsonUnknown(raw, 'PUSH_WAKE_RECORDS_JSON_INVALID');
   if (!Array.isArray(parsed)) return [];
   const records: PushWakeRegistrationRecord[] = [];
   for (const candidate of parsed) {

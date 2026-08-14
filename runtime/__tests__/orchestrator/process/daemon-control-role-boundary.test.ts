@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
 import { DaemonControlClient } from '../../../orchestrator/daemon-control';
+import { safeStringify } from '../../../protocol/serialization';
 
 const originalFetch = globalThis.fetch;
 const ENTITY = `0x${'11'.repeat(32)}`;
@@ -10,7 +11,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-const responseWith = (entity: Record<string, unknown>): Response => new Response(JSON.stringify({
+const responseWith = (entity: Record<string, unknown>): Response => new Response(safeStringify({
   ok: true,
   runtimeId: null,
   entities: [entity],
@@ -50,7 +51,7 @@ describe('daemon control committed role boundary', () => {
   });
 
   test('binds every committed role row to the authenticated Runtime response', async () => {
-    globalThis.fetch = async () => new Response(JSON.stringify({
+    globalThis.fetch = async () => new Response(safeStringify({
       ok: true,
       runtimeId: `0x${'33'.repeat(20)}`,
       entities: [{ ...validEntity(), runtimeId: `0x${'44'.repeat(20)}` }],
@@ -58,5 +59,17 @@ describe('daemon control committed role boundary', () => {
     await expect(
       new DaemonControlClient({ baseUrl: 'http://control.test' }).listEntities(),
     ).rejects.toThrow('CONTROL_ENTITIES_RESPONSE_RUNTIME_ID_MISMATCH');
+  });
+
+  test('rejects a trailing field on the authenticated Runtime response', async () => {
+    globalThis.fetch = async () => new Response(safeStringify({
+      ok: true,
+      runtimeId: null,
+      entities: [validEntity()],
+      unexpected: true,
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    await expect(
+      new DaemonControlClient({ baseUrl: 'http://control.test' }).listEntities(),
+    ).rejects.toThrow('CONTROL_ENTITIES_RESPONSE_FIELDS_INVALID');
   });
 });

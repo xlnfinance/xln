@@ -19,10 +19,11 @@ import {
   tryOpenStorageDb,
 } from '../../../storage/runtime-dbs';
 import type { RuntimeReplica } from '../../../runtime/types';
+import { safeStringify } from '../../../protocol/serialization';
 
 const fixture = join(import.meta.dir, '..', '..', 'fixtures/storage/storage-marker-crash-child.ts');
 const tempRoots: string[] = [];
-const markerBody = `${JSON.stringify({ snapshotHeight: 7, generation: 'durable-marker-v1' })}\n`;
+const markerBody = `${safeStringify({ snapshotHeight: 7, generation: 'durable-marker-v1' })}\n`;
 
 const makeMarkerPath = (label: string): string => {
   const root = mkdtempSync(join(tmpdir(), `xln-storage-${label}-`));
@@ -120,6 +121,40 @@ describe('storage filesystem durability', () => {
       await expect(tryOpenStorageDb(env, {
         ensureRuntimeInfrastructure: target => (target.infrastructure ??= {}),
       })).rejects.toThrow('STORAGE_EPOCH_MARKER_INVALID');
+    } finally {
+      if (env.infrastructure?.storageDb) await closeStorageDb(env);
+      rmSync(basePath, { recursive: true, force: true });
+      rmSync(`${basePath}-storage-current`, { recursive: true, force: true });
+      rmSync(`${basePath}-storage-previous`, { recursive: true, force: true });
+      rmSync(markerPath, { force: true });
+      rmSync(`${markerPath}.tmp`, { force: true });
+    }
+  });
+
+  test('rejects a durable rotation marker with trailing fields', async () => {
+    const namespace = `storage-marker-trailing-${process.pid}-${Date.now()}`;
+    const env = {
+      state: { height: 0, timestamp: 0 },
+      runtimeId: namespace,
+      dbNamespace: namespace,
+      infrastructure: {},
+    } as RuntimeReplica;
+    const basePath = resolveDbPath(env);
+    const markerPath = `${basePath}-storage-rotation.json`;
+    mkdirSync(dirname(markerPath), { recursive: true });
+    writeFileSync(markerPath, safeStringify({
+      snapshotHeight: 7,
+      currentPath: `${basePath}-storage-current`,
+      previousPath: `${basePath}-storage-previous`,
+      nextPath: `${basePath}-storage-next`,
+      createdAt: 1,
+      unexpected: true,
+    }), 'utf8');
+
+    try {
+      await expect(tryOpenStorageDb(env, {
+        ensureRuntimeInfrastructure: target => (target.infrastructure ??= {}),
+      })).rejects.toThrow('STORAGE_EPOCH_MARKER_FIELDS_INVALID');
     } finally {
       if (env.infrastructure?.storageDb) await closeStorageDb(env);
       rmSync(basePath, { recursive: true, force: true });

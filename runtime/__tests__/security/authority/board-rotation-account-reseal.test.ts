@@ -34,6 +34,10 @@ import {
   restoreDurableRuntimeSnapshot,
 } from '../../../storage/wal/snapshot';
 import { applyJEventRange } from '../../helpers/j-history';
+import {
+  COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
+  counterpartyBoardResealDeadlineHookId,
+} from '../../../entity/tx/j-events-board';
 import { addr, makeAccount, makeState } from '../../helpers/cross-j';
 import {
   accountInputFailureMessage,
@@ -404,6 +408,7 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
   } as unknown as EntityReplica);
   const state = {
     entityId: sourceEntityId,
+    timestamp: 0,
     accounts: new Map([
       [uncertifiedId, uncertified],
       [certifiedId, certified],
@@ -560,7 +565,7 @@ test('one board reseal pass emits at most 32 deterministic Accounts', async () =
       },
     } as unknown as EntityReplica);
   }
-  const state = { entityId: sourceEntityId, accounts } as unknown as EntityState;
+  const state = { entityId: sourceEntityId, timestamp: 0, accounts } as unknown as EntityState;
   const activation = {
     type: 'BoardActivated',
     blockNumber: 9,
@@ -704,4 +709,102 @@ test('two board rotations in one finalized J range collapse to the latest reseal
     type: 'board_reseal',
     data: { activationJHeight: 3, activationLogIndex: 9, afterCounterpartyId: '' },
   }]]));
+});
+
+test('certified counterparty board activation arms an exact 24-hour reseal deadline', async () => {
+  const env = createEmptyEnv('counterparty-board-reseal-deadline-event');
+  const signerId = deriveSignerAddressSync('counterparty-board-reseal-deadline-event', '1').toLowerCase();
+  registerSignerKey(env, signerId, deriveSignerKeySync('counterparty-board-reseal-deadline-event', '1'));
+  const ownerEntityId = digest('81');
+  const counterpartyId = `0x${'0'.repeat(63)}2`;
+  const jurisdiction = {
+    name: 'counterparty-board-reseal-deadline-event',
+    address: 'http://127.0.0.1:8545',
+    chainId: 31_337,
+    depositoryAddress: addr('d1'),
+    entityProviderAddress: addr('e1'),
+  } satisfies JurisdictionConfig;
+  let state = makeState(ownerEntityId, signerId, jurisdiction);
+  state.timestamp = 90_000;
+  state.crontabState = initCrontab();
+  const account = makeAccount(ownerEntityId, counterpartyId);
+  account.currentHeight = 1;
+  account.currentFrame = {
+    ...account.currentFrame,
+    height: 1,
+    timestamp: 1,
+    jHeight: 1,
+    prevFrameHash: 'genesis',
+    stateHash: digest('83'),
+    accountStateRoot: digest('83'),
+  };
+  state.accounts.set(counterpartyId, account);
+
+  const foundation = {
+    type: 'FoundationBootstrapped',
+    blockNumber: 1,
+    blockHash: digest('01'),
+    transactionHash: digest('11'),
+    logIndex: 0,
+    data: {
+      recipient: addr('f1'),
+      boardHash: digest('31'),
+      controlTokenId: '2',
+      dividendTokenId: '3',
+    },
+  } satisfies JurisdictionEvent;
+  state = (await applyJEventRange(state, {
+    from: signerId,
+    jurisdictionRef: '',
+    event: foundation,
+    observedAt: 1,
+    blockNumber: 1,
+    blockHash: foundation.blockHash,
+  }, env)).newState;
+  const registration = {
+    type: 'EntityRegistered',
+    blockNumber: 2,
+    blockHash: digest('02'),
+    transactionHash: digest('12'),
+    logIndex: 0,
+    data: { entityId: counterpartyId, entityNumber: '2', boardHash: digest('32') },
+  } satisfies JurisdictionEvent;
+  state = (await applyJEventRange(state, {
+    from: signerId,
+    jurisdictionRef: '',
+    event: registration,
+    observedAt: 2,
+    blockNumber: 2,
+    blockHash: registration.blockHash,
+  }, env)).newState;
+  const rotation = {
+    type: 'BoardActivated',
+    blockNumber: 3,
+    blockHash: digest('03'),
+    transactionHash: digest('13'),
+    logIndex: 7,
+    data: {
+      entityId: counterpartyId,
+      previousBoardHash: digest('32'),
+      newBoardHash: digest('33'),
+      previousBoardValidUntil: '1700604800',
+    },
+  } satisfies JurisdictionEvent;
+  const applied = await applyJEventRange(state, {
+    from: signerId,
+    jurisdictionRef: '',
+    event: rotation,
+    observedAt: 3,
+    blockNumber: 3,
+    blockHash: rotation.blockHash,
+  }, env);
+
+  const hookId = counterpartyBoardResealDeadlineHookId(counterpartyId, 3, 7);
+  expect(applied.newState.crontabState?.hooks.get(hookId)).toEqual({
+    id: hookId,
+    triggerAt: state.timestamp + COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
+    type: 'counterparty_board_reseal_deadline',
+    data: { accountId: counterpartyId, activationJHeight: 3, activationLogIndex: 7 },
+  });
+  expect(applied.newState.accounts.get(counterpartyId)?.boardResealMigration).toBeUndefined();
 });

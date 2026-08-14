@@ -47,6 +47,35 @@ export type ExternalWalletSnapshotIngressDecision =
   | 'cancel-runtime-changed'
   | 'cancel-runtime-quiescing';
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
+  Object.keys(value).every((key) => allowed.includes(key));
+
+const isOptionalString = (value: unknown): boolean => value === undefined || typeof value === 'string';
+const isOptionalFiniteNumber = (value: unknown): boolean => value === undefined || (typeof value === 'number' && Number.isFinite(value));
+
+export const isExternalWalletSnapshotResponse = (value: unknown): value is ExternalWalletSnapshotResponse => {
+  if (!isRecord(value) || !hasOnlyKeys(value, ['success', 'entityId', 'owner', 'blockNumber', 'blockHash', 'sourceHeight', 'sourceHash', 'finalityDepth', 'headBlockNumber', 'transactionHash', 'nativeBalance', 'tokenBalances', 'allowances', 'tokenErrors', 'allowanceErrors', 'error'])) return false;
+  if (value['success'] !== undefined && typeof value['success'] !== 'boolean') return false;
+  for (const field of ['entityId', 'owner', 'blockHash', 'sourceHash', 'transactionHash', 'nativeBalance', 'error'] as const) if (!isOptionalString(value[field])) return false;
+  for (const field of ['blockNumber', 'sourceHeight', 'finalityDepth', 'headBlockNumber'] as const) if (!isOptionalFiniteNumber(value[field])) return false;
+  const tokenBalances = value['tokenBalances'];
+  const allowances = value['allowances'];
+  const tokenErrors = value['tokenErrors'];
+  const allowanceErrors = value['allowanceErrors'];
+  return (tokenBalances === undefined || (Array.isArray(tokenBalances) && tokenBalances.every((entry) => isRecord(entry) && hasOnlyKeys(entry, ['tokenAddress', 'tokenId', 'balance', 'error']) && isOptionalString(entry['tokenAddress']) && isOptionalFiniteNumber(entry['tokenId']) && isOptionalString(entry['balance']) && isOptionalString(entry['error'])))) &&
+    (allowances === undefined || (Array.isArray(allowances) && allowances.every((entry) => isRecord(entry) && hasOnlyKeys(entry, ['tokenAddress', 'spender', 'allowance', 'error']) && isOptionalString(entry['tokenAddress']) && isOptionalString(entry['spender']) && isOptionalString(entry['allowance']) && isOptionalString(entry['error'])))) &&
+    (tokenErrors === undefined || (Array.isArray(tokenErrors) && tokenErrors.every((entry) => isRecord(entry) && hasOnlyKeys(entry, ['tokenAddress', 'error']) && isOptionalString(entry['tokenAddress']) && isOptionalString(entry['error'])))) &&
+    (allowanceErrors === undefined || (Array.isArray(allowanceErrors) && allowanceErrors.every((entry) => isRecord(entry) && hasOnlyKeys(entry, ['tokenAddress', 'spender', 'error']) && isOptionalString(entry['tokenAddress']) && isOptionalString(entry['spender']) && isOptionalString(entry['error']))));
+};
+
+export const decodeExternalWalletSnapshotResponse = (value: unknown): ExternalWalletSnapshotResponse => {
+  if (!isExternalWalletSnapshotResponse(value)) throw new Error('EXTERNAL_WALLET_SNAPSHOT_RESPONSE_INVALID');
+  return value;
+};
+
 export function resolveExternalWalletSnapshotIngress(
   expectedRuntimeId: string,
   currentEnv: RuntimeReplica | null,

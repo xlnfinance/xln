@@ -5,6 +5,7 @@ import {
   type RelayDebugIncidentState,
   type RelayStore,
 } from './store';
+import { requireBoundaryRecord } from '../../protocol/boundary-validation';
 
 export type RelayDebugHttpInput = {
   request: Request;
@@ -22,6 +23,11 @@ const boundedString = (value: unknown, maxLength: number): string | undefined =>
   const text = optionalString(value);
   return text ? text.slice(0, maxLength) : undefined;
 };
+
+const optionalBoundaryRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? requireBoundaryRecord(value, 'RELAY_DEBUG_BODY_INVALID')
+    : null;
 
 const json = (
   input: RelayDebugHttpInput,
@@ -81,7 +87,7 @@ const handleMark = async (input: RelayDebugHttpInput): Promise<Response> => {
   if (!input.operatorAuthorized) {
     return json(input, { ok: false, error: 'OPERATOR_AUTH_REQUIRED' }, 403);
   }
-  const body = await input.request.json().catch(() => null) as Record<string, unknown> | null;
+  const body = optionalBoundaryRecord(await input.request.json().catch(() => null));
   const label = optionalString(body?.['label']);
   if (!label) return json(input, { ok: false, error: 'DEBUG_MARK_LABEL_REQUIRED' }, 400);
   const runtimeId = optionalString(body?.['runtimeId']);
@@ -117,9 +123,9 @@ const handleBrowserIngest = async (input: RelayDebugHttpInput): Promise<Response
   } catch {
     return json(input, { ok: false, error: 'DEBUG_INGEST_JSON_INVALID' }, 400);
   }
-  const records = parsed && typeof parsed === 'object' && Array.isArray((parsed as { events?: unknown }).events)
-    ? (parsed as { events: unknown[] }).events
-    : [parsed];
+  const envelope = optionalBoundaryRecord(parsed);
+  const events = envelope?.['events'];
+  const records = Array.isArray(events) ? events : [parsed];
   if (records.length === 0 || records.length > 20) {
     return json(input, { ok: false, error: 'DEBUG_INGEST_EVENT_COUNT_INVALID' }, 400);
   }
@@ -127,7 +133,7 @@ const handleBrowserIngest = async (input: RelayDebugHttpInput): Promise<Response
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       return json(input, { ok: false, error: 'DEBUG_INGEST_EVENT_INVALID' }, 400);
     }
-    const event = item as Record<string, unknown>;
+    const event = requireBoundaryRecord(item, 'DEBUG_INGEST_EVENT_INVALID');
     const message = boundedString(event['message'], 4000);
     if (!message) return json(input, { ok: false, error: 'DEBUG_INGEST_MESSAGE_REQUIRED' }, 400);
     const kind = boundedString(event['kind'], 80) ?? 'console_error';
@@ -180,9 +186,12 @@ const handleIncidents = (input: RelayDebugHttpInput): Response => {
 
 const handleIncidentState = async (input: RelayDebugHttpInput): Promise<Response> => {
   if (!input.operatorAuthorized) return json(input, { ok: false, error: 'OPERATOR_AUTH_REQUIRED' }, 403);
-  const body = await input.request.json().catch(() => null) as Record<string, unknown> | null;
+  const body = optionalBoundaryRecord(await input.request.json().catch(() => null));
   const fingerprint = boundedString(body?.['fingerprint'], 300);
-  const state = boundedString(body?.['state'], 30) as RelayDebugIncidentState | undefined;
+  const stateValue = boundedString(body?.['state'], 30);
+  const state: RelayDebugIncidentState | undefined = stateValue === 'unread' || stateValue === 'acknowledged' || stateValue === 'resolved'
+    ? stateValue
+    : undefined;
   const states = new Set<RelayDebugIncidentState>(['unread', 'acknowledged', 'resolved']);
   if (!fingerprint || !state || !states.has(state)) {
     return json(input, { ok: false, error: 'DEBUG_INCIDENT_STATE_INPUT_INVALID' }, 400);

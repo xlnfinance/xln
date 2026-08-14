@@ -57,6 +57,7 @@
     type OnboardingRuntimeProjection,
   } from './onboarding-runtime-input';
   import { hubDiscoveryJurisdictionKey } from './hub-discovery-profile';
+  import { readJsonUnknown, rejectExtraKeys, requireFiniteNumber, requireString, requireUnknownRecord } from '$lib/utils/boundary';
   import type {
     AccountRoleEvidence,
     AccountRoleEvidenceSource,
@@ -119,15 +120,49 @@
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   type PublicHubResponse = {
-    ok: boolean;
-    hubs?: Array<{
-      entityId?: string;
-      roleSource?: AccountRoleEvidenceSource;
-      metadata?: {
-        isHub?: boolean;
-        jurisdiction?: { name?: string; chainId?: number | string; depositoryAddress?: string };
+    ok: true;
+    count: number;
+    serverTime: number;
+    hubs: Array<{
+      entityId: string;
+      roleSource: AccountRoleEvidenceSource;
+      metadata: {
+        isHub: true;
+        jurisdiction?: { name: string; chainId?: number; depositoryAddress?: string; entityProviderAddress?: string };
       };
     }>;
+  };
+
+  const decodePublicHubResponse = (value: unknown): PublicHubResponse => {
+    const record = requireUnknownRecord(value, 'PUBLIC_HUB_RESPONSE_INVALID');
+    rejectExtraKeys(record, ['ok', 'count', 'serverTime', 'hubs'], 'PUBLIC_HUB_RESPONSE_EXTRA_FIELD');
+    if (record['ok'] !== true || !Array.isArray(record['hubs'])) throw new Error('PUBLIC_HUB_RESPONSE_SHAPE_INVALID');
+    const hubs = record['hubs'].map((value) => {
+      const hub = requireUnknownRecord(value, 'PUBLIC_HUB_INVALID');
+      rejectExtraKeys(hub, ['entityId', 'runtimeId', 'name', 'bio', 'website', 'wsUrl', 'publicAccounts', 'metadata', 'lastUpdated', 'online', 'roleSource'], 'PUBLIC_HUB_EXTRA_FIELD');
+      const metadata = requireUnknownRecord(hub['metadata'], 'PUBLIC_HUB_METADATA_INVALID');
+      rejectExtraKeys(metadata, ['isHub', 'jurisdiction'], 'PUBLIC_HUB_METADATA_EXTRA_FIELD');
+      if (metadata['isHub'] !== true || (hub['roleSource'] !== 'operator-config' && hub['roleSource'] !== 'verified-gossip-profile')) throw new Error('PUBLIC_HUB_AUTHORITY_INVALID');
+      const rawJurisdiction = metadata['jurisdiction'];
+      let jurisdiction: PublicHubResponse['hubs'][number]['metadata']['jurisdiction'];
+      if (rawJurisdiction !== undefined) {
+        const item = requireUnknownRecord(rawJurisdiction, 'PUBLIC_HUB_JURISDICTION_INVALID');
+        rejectExtraKeys(item, ['name', 'chainId', 'depositoryAddress', 'entityProviderAddress'], 'PUBLIC_HUB_JURISDICTION_EXTRA_FIELD');
+        jurisdiction = {
+          name: requireString(item['name'], 'PUBLIC_HUB_JURISDICTION_NAME_INVALID'),
+          ...(item['chainId'] === undefined ? {} : { chainId: requireFiniteNumber(item['chainId'], 'PUBLIC_HUB_JURISDICTION_CHAIN_ID_INVALID') }),
+          ...(item['depositoryAddress'] === undefined ? {} : { depositoryAddress: requireString(item['depositoryAddress'], 'PUBLIC_HUB_JURISDICTION_DEPOSITORY_INVALID') }),
+          ...(item['entityProviderAddress'] === undefined ? {} : { entityProviderAddress: requireString(item['entityProviderAddress'], 'PUBLIC_HUB_JURISDICTION_PROVIDER_INVALID') }),
+        };
+      }
+      const decoded: PublicHubResponse['hubs'][number] = {
+        entityId: requireString(hub['entityId'], 'PUBLIC_HUB_ENTITY_ID_INVALID'),
+        roleSource: hub['roleSource'] === 'operator-config' ? 'operator-config' : 'verified-gossip-profile',
+        metadata: { isHub: true, ...(jurisdiction === undefined ? {} : { jurisdiction }) },
+      };
+      return decoded;
+    });
+    return { ok: true, count: requireFiniteNumber(record['count'], 'PUBLIC_HUB_COUNT_INVALID'), serverTime: requireFiniteNumber(record['serverTime'], 'PUBLIC_HUB_SERVER_TIME_INVALID'), hubs };
   };
 
   type OnboardingTarget = OnboardingRuntimeTarget & { jurisdiction: string };
@@ -505,17 +540,15 @@
       url.searchParams.set('ts', String(Date.now()));
       const response = await fetch(url.toString(), { cache: 'no-store', signal: controller.signal });
       if (!response.ok) throw new Error(`HTTP_${response.status}`);
-      const payload = await response.json() as PublicHubResponse;
-      if (payload.ok !== true) throw new Error('RESPONSE_NOT_OK');
+      const payload = decodePublicHubResponse(await readJsonUnknown(response));
       const advertisedHubEntityIds: string[] = [];
       const eligibleHubEntityIds: string[] = [];
       const roleEvidenceByEntityId: Record<string, AccountRoleEvidence> = {};
-      for (const hub of payload.hubs || []) {
-        if (!hub?.entityId || hub.metadata?.isHub !== true) continue;
+      for (const hub of payload.hubs) {
         const normalized = normalizeEntityId(hub.entityId);
         if (!normalized || normalized === normalizeEntityId(target.entityId)) continue;
-        const jurisdiction = String(hub.metadata?.jurisdiction?.name || '').trim();
-        const jurisdictionKey = hubDiscoveryJurisdictionKey(hub.metadata?.jurisdiction);
+        const jurisdiction = hub.metadata.jurisdiction?.name ?? '';
+        const jurisdictionKey = hubDiscoveryJurisdictionKey(hub.metadata.jurisdiction);
         const evidence = authenticatedHubEvidence(normalized, hub.roleSource);
         const candidate: OnboardingHubCandidate = {
           entityId: hub.entityId,

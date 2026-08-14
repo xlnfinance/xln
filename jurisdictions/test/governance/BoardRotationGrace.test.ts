@@ -5,6 +5,7 @@ import hre from 'hardhat';
 import {
   buildClaimsHanko,
   buildSingleSignerHanko,
+  canonicalAccountKey,
   computeDepositoryBatchHash,
   deployDepositoryStack,
   deployEntityProvider,
@@ -30,9 +31,6 @@ const SETTLEMENT_DIFFS_ABI =
   'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]';
 const PROOF_BODY_ABI =
   'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
-
-const entityAddress = (entityNumber: bigint): string =>
-  ethers.getAddress(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 20));
 
 const anchoredEntityMemberBoardHash = (anchor: string, memberEntityId: string): string =>
   ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
@@ -92,7 +90,7 @@ const cooperativeUpdateHash = async (
 
 describe('EntityProvider board rotation grace', function () {
   async function fixture() {
-    const [foundation, oldSigner, newSigner, dividendHolder, outsider] = await ethers.getSigners();
+    const [foundation, oldSigner, newSigner, , outsider] = await ethers.getSigners();
     const provider = await deployEntityProvider(foundation.address);
 
     const oldBoardHash = singleSignerLazyEntityId(oldSigner.address);
@@ -100,33 +98,10 @@ describe('EntityProvider board rotation grace', function () {
     await provider.registerNumberedEntity(oldBoardHash);
     const entityNumber = 2n;
     const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
-    const address = entityAddress(entityNumber);
-    const [controlTokenId, dividendTokenId] = await provider.getTokenIds(entityNumber);
-    const totalSupply = await provider.TOTAL_CONTROL_SUPPLY();
-
-    await ethers.provider.send('hardhat_impersonateAccount', [address]);
-    await foundation.sendTransaction({ to: address, value: ethers.parseEther('1') });
-    const entitySigner = await ethers.getSigner(address);
-    await provider.connect(entitySigner).safeTransferFrom(
-      address,
-      foundation.address,
-      controlTokenId,
-      (totalSupply * 60n) / 100n,
-      '0x',
-    );
-    await provider.connect(entitySigner).safeTransferFrom(
-      address,
-      dividendHolder.address,
-      dividendTokenId,
-      1n,
-      '0x',
-    );
-    await ethers.provider.send('hardhat_stopImpersonatingAccount', [address]);
-
     const proposalSignature = async (newHash: string, privateKey: string): Promise<string> => {
       const nonce = await provider.boardActionNonces(entityId) + 1n;
-      const digest = await provider.computeBoardProposalHash(entityId, newHash, 1, nonce);
-      return ethers.Signature.from(new ethers.SigningKey(privateKey).sign(digest)).serialized;
+      const digest = await provider.computeBoardProposalHash(entityId, newHash, 0, nonce);
+      return buildSingleSignerHanko(entityId, digest, privateKey);
     };
 
     return {
@@ -134,14 +109,11 @@ describe('EntityProvider board rotation grace', function () {
       foundation,
       oldSigner,
       newSigner,
-      dividendHolder,
       outsider,
       entityId,
       oldBoardHash,
       newBoardHash,
       proposalSignature,
-      controlTokenId,
-      totalSupply,
     };
   }
 
@@ -156,8 +128,8 @@ describe('EntityProvider board rotation grace', function () {
       newBoardHash,
       proposalSignature,
     } = await fixture();
-    const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(0));
-    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 1, [support]);
+    const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
+    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [support]);
     await mine(DEFAULT_ARTICLES.controlDelay);
 
     const activation = await provider.activateBoard(entityId);
@@ -227,8 +199,8 @@ describe('EntityProvider board rotation grace', function () {
       newBoardHash,
       proposalSignature,
     } = await fixture();
-    const firstSupport = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(0));
-    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 1, [firstSupport]);
+    const firstSupport = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
+    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [firstSupport]);
     await mine(DEFAULT_ARTICLES.controlDelay);
     const firstActivation = await (await provider.activateBoard(entityId)).wait();
     const firstActivationBlock = await ethers.provider.getBlock(firstActivation!.blockNumber);
@@ -273,8 +245,8 @@ describe('EntityProvider board rotation grace', function () {
 
   it('applies current-only rotation authority to every registered claim in a recursive Hanko', async function () {
     const { provider, foundation, outsider, entityId, newBoardHash, proposalSignature } = await fixture();
-    const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(0));
-    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 1, [support]);
+    const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
+    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [support]);
     await mine(DEFAULT_ARTICLES.controlDelay);
     await provider.activateBoard(entityId);
 
@@ -319,8 +291,8 @@ describe('EntityProvider board rotation grace', function () {
       newBoardHash,
       proposalSignature,
     } = await fixture();
-    const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(0));
-    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 1, [support]);
+    const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
+    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [support]);
     await mine(DEFAULT_ARTICLES.controlDelay);
     await provider.activateBoard(entityId);
 
@@ -359,8 +331,8 @@ describe('EntityProvider board rotation grace', function () {
       newBoardHash,
       proposalSignature,
     } = await fixture();
-    const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(0));
-    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 1, [support]);
+    const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
+    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [support]);
     await mine(DEFAULT_ARTICLES.controlDelay);
     await provider.activateBoard(entityId);
 
@@ -371,7 +343,7 @@ describe('EntityProvider board rotation grace', function () {
     const oldBoardKey = deriveHardhatPrivateKey(1);
     const currentBoardKey = deriveHardhatPrivateKey(2);
     const tokenId = 1n;
-    const accountKey = await depository.accountKey(initiator, entityId);
+    const accountKey = canonicalAccountKey(initiator, entityId);
     const signBatch = async (
       signerEntity: string,
       signerKey: string,
@@ -502,7 +474,7 @@ describe('EntityProvider board rotation grace', function () {
     // dispute: evidence survives rotation; direct money authority does not.
     const peer = singleSignerLazyEntityId(foundation.address);
     const peerKey = deriveHardhatPrivateKey(0);
-    const historicalAccountKey = await depository.accountKey(entityId, peer);
+    const historicalAccountKey = canonicalAccountKey(entityId, peer);
     const historicalStartHash = await disputeProofHash(
       depository,
       historicalAccountKey,
@@ -576,8 +548,8 @@ describe('EntityProvider board rotation grace', function () {
       newBoardHash,
       proposalSignature,
     } = await fixture();
-    const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(0));
-    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 1, [support]);
+    const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
+    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [support]);
     await mine(DEFAULT_ARTICLES.controlDelay);
     await provider.activateBoard(entityId);
 
@@ -585,7 +557,7 @@ describe('EntityProvider board rotation grace', function () {
     const disputeDelay = 5n;
 
     const counterentity = singleSignerLazyEntityId(outsider.address);
-    const accountKey = await depository.accountKey(entityId, counterentity);
+    const accountKey = canonicalAccountKey(entityId, counterentity);
     const initialNonce = 1n;
     const initialProofbody = emptyProofBody();
     const initialProofbodyHash = proofBodyHash(initialProofbody);

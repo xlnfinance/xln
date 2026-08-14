@@ -41,6 +41,9 @@ contract EntityProvider is ERC1155 {
   error InvalidFoundationAuthorization();
   error InvalidFoundationActionNonce();
   error BoardGracePeriodActive();
+  error ShareDepositoryAlreadyBound();
+  error ShareDepositoryBindingInvalid();
+  error ShareDepositoryRequired();
 
   enum EntityProviderActionKind { ENTITY_TRANSFER, RELEASE_CONTROL_SHARES }
 
@@ -65,6 +68,9 @@ contract EntityProvider is ERC1155 {
   mapping(bytes32 => uint256) public entityActionNonces;       // entity-authorized ERC1155 actions
   mapping(bytes32 => uint256) public boardActionNonces;        // board proposal/cancel replay fence
   mapping(bytes32 => uint256) public boardEpochs;              // increments only on BoardActivated
+  address public immutable foundationDeployer;
+  address public shareDepository;
+  mapping(bytes32 => uint256) private controlReserveTokenIds;
   
   // Fixed token supplies for all entities (immutable and fair)
   uint256 public constant TOTAL_CONTROL_SUPPLY = 100_000_000_000;
@@ -134,6 +140,7 @@ contract EntityProvider is ERC1155 {
     uint256 indexed actionNonce,
     bytes32 indexed argumentsHash
   );
+  event ShareDepositoryBound(address indexed depository);
 
   function _singleSignerBoardHash(address signer) internal pure returns (bytes32) {
     bytes32[] memory entityIds = new bytes32[](1);
@@ -152,6 +159,7 @@ contract EntityProvider is ERC1155 {
 
   constructor(address foundationRecipient) ERC1155("https://xln.com/entity/{id}.json") {
     require(foundationRecipient != address(0), "Invalid foundation recipient");
+    foundationDeployer = foundationRecipient;
 
     // Reserve some premium names
     reservedNames["coinbase"] = true;
@@ -189,6 +197,19 @@ contract EntityProvider is ERC1155 {
     emit FoundationBootstrapped(foundationRecipient, foundationQuorum, controlTokenId, dividendTokenId);
     
     nextNumber = 2; // Foundation takes #1, next entity will be #2
+  }
+
+  /** One-time stack binding; the Foundation deployment signer has no authority after it succeeds. */
+  function bindShareDepository(address depository) external {
+    if (msg.sender != foundationDeployer || depository.code.length == 0) {
+      revert ShareDepositoryBindingInvalid();
+    }
+    if (shareDepository != address(0)) revert ShareDepositoryAlreadyBound();
+    if (IEntityShareDepository(depository).entityProvider() != address(this)) {
+      revert ShareDepositoryBindingInvalid();
+    }
+    shareDepository = depository;
+    emit ShareDepositoryBound(depository);
   }
 
   function computeFoundationActionHash(
@@ -690,14 +711,48 @@ contract EntityProvider is ERC1155 {
     if (totalSupport <= fixedSupply / 2) revert InsufficientShareSupport();
   }
 
+  function _requireReserveControlMajority(
+    bytes32 targetEntityId,
+    bytes32 digest,
+    bytes[] calldata hankos
+  ) internal view {
+    address depository = shareDepository;
+    if (depository == address(0)) revert ShareDepositoryRequired();
+    IEntityShareDepository custody = IEntityShareDepository(depository);
+    if (custody._status() == 2) revert InvalidShareSupportSignature();
+    if (hankos.length == 0) revert MissingShareSupport();
+    if (hankos.length > MAX_SHARE_SUPPORTERS) revert TooManyShareSupporters();
+    uint256 internalTokenId = controlReserveTokenIds[targetEntityId];
+    if (internalTokenId == 0) revert ShareDepositoryRequired();
+    uint256 totalSupport = 0;
+    bytes32 previousShareholder = bytes32(0);
+    for (uint256 i = 0; i < hankos.length; i++) {
+      (bytes32 shareholderEntityId, bool valid) = _verifyCurrentHankoSignature(hankos[i], digest);
+      if (!valid || shareholderEntityId == bytes32(0)) revert InvalidShareSupportSignature();
+      if (i > 0) {
+        if (shareholderEntityId == previousShareholder) revert DuplicateShareSupporter();
+        if (shareholderEntityId < previousShareholder) revert ShareSupportersNotSorted();
+      }
+      uint256 balance = custody._reserves(shareholderEntityId, internalTokenId);
+      if (balance == 0) revert ShareSupporterHasNoShares();
+      totalSupport += balance;
+      previousShareholder = shareholderEntityId;
+    }
+    if (totalSupport <= TOTAL_CONTROL_SUPPLY / 2) revert InsufficientShareSupport();
+  }
+
   function _requireBoardAuthority(
     bytes32 entityId,
     ProposerType authority,
     bytes32 digest,
     bytes[] calldata authorizations
   ) internal view {
-    if (authority == ProposerType.CONTROL || authority == ProposerType.DIVIDEND) {
-      _requireStrictShareMajority(entityId, digest, authority == ProposerType.CONTROL, authorizations);
+    if (authority == ProposerType.CONTROL) {
+      _requireReserveControlMajority(entityId, digest, authorizations);
+      return;
+    }
+    if (authority == ProposerType.DIVIDEND) {
+      _requireStrictShareMajority(entityId, digest, false, authorizations);
       return;
     }
 
@@ -978,7 +1033,7 @@ contract EntityProvider is ERC1155 {
     string calldata purpose,
     bytes calldata hankoData
   ) external {
-    require(recipient != address(0), "Invalid recipient address");
+    if (recipient == address(0) || recipient != shareDepository) revert ShareDepositoryRequired();
     require(controlAmount > 0 || dividendAmount > 0, "Must release some tokens");
     
     bytes32 entityId = bytes32(entityNumber);
@@ -1004,7 +1059,8 @@ contract EntityProvider is ERC1155 {
     // Transfer control tokens if requested
     if (controlAmount > 0) {
       require(balanceOf(entityAddress, controlTokenId) >= controlAmount, "Insufficient control tokens");
-      IEntityShareDepository(recipient).registerExternalToken(2, address(this), controlTokenId);
+      controlReserveTokenIds[entityId] = IEntityShareDepository(recipient)
+        .registerExternalToken(2, address(this), controlTokenId);
       _safeTransferFrom(entityAddress, recipient, controlTokenId, controlAmount,
         abi.encode("CONTROL_SHARE_RELEASE", purpose));
     }

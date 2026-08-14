@@ -157,6 +157,7 @@ describe('push registration signature', () => {
 
     expect(() => verifyPushRegistration({ ...request, entityId: entityId(8) })).toThrow(/SIGNATURE_INVALID/);
     expect(() => verifyPushRegistration({ ...request, rpcUrl: 'https://attacker.invalid/' })).toThrow(/SIGNATURE_INVALID/);
+    expect(() => verifyPushRegistration({ ...request, untrusted: true })).toThrow(/FIELDS_INVALID/);
     expect(() => verifyPushRegistration(request, { now: signedAt + 48 * 60 * 60 * 1000 })).toThrow(/STALE/);
   });
 

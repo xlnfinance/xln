@@ -4,6 +4,7 @@
   import { STORAGE_ACCOUNT_FIELD_BY_TAG } from '@xln/runtime/storage/schema/account-field-tags';
   import { STORAGE_MERKLE_NAMESPACE_BY_TAG } from '@xln/runtime/storage/schema/merkle-namespace-tags';
   import { compareStableText } from '$lib/utils/stableSort';
+  import { parseJsonUnknown } from '$lib/utils/boundary';
 
   type DbKindFilter = 'all' | 'core' | 'infra';
 
@@ -257,7 +258,7 @@
       return null;
     }
     try {
-      return JSON.stringify(JSON.parse(trimmed), null, 2);
+      return JSON.stringify(parseJsonUnknown(trimmed, 'INDEXED_DB_INSPECTOR_JSON_INVALID'), null, 2);
     } catch {
       return null;
     }

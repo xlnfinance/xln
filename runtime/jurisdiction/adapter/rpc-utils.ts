@@ -18,6 +18,32 @@ export type RpcBatchResponse = {
   error?: { message?: string };
 };
 
+const decodeRpcBatchResponse = (value: unknown): RpcBatchResponse => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('RPC_BATCH_ITEM_INVALID');
+  }
+  const item = value as Record<string, unknown>;
+  const id = item['id'];
+  if (id !== undefined && (!Number.isSafeInteger(id) || Number(id) < 0)) {
+    throw new Error('RPC_BATCH_ITEM_ID_INVALID');
+  }
+  const error = item['error'];
+  if (error !== undefined && (!error || typeof error !== 'object' || Array.isArray(error))) {
+    throw new Error('RPC_BATCH_ITEM_ERROR_INVALID');
+  }
+  const errorRecord = error && typeof error === 'object' && !Array.isArray(error)
+    ? error as Record<string, unknown>
+    : undefined;
+  const errorMessage = typeof errorRecord?.['message'] === 'string'
+    ? errorRecord['message']
+    : undefined;
+  return {
+    ...(id === undefined ? {} : { id: Number(id) }),
+    ...(Object.hasOwn(item, 'result') ? { result: item['result'] } : {}),
+    ...(error === undefined ? {} : errorMessage === undefined ? { error: {} } : { error: { message: errorMessage } }),
+  };
+};
+
 const DEFAULT_RPC_BATCH_TIMEOUT_MS = 5_000;
 
 export const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
@@ -58,13 +84,14 @@ export const sendRpcBatch = async (
   if (!response.ok) {
     throw new Error(`RPC_BATCH_HTTP_${response.status}`);
   }
-  const json = await response.json();
+  const json: unknown = await response.json();
   if (!Array.isArray(json)) {
     throw new Error('RPC_BATCH_INVALID_RESPONSE');
   }
   const byId = new Map<number, RpcBatchResponse>();
-  for (const item of json as RpcBatchResponse[]) {
-    if (item && typeof item.id === 'number') {
+  for (const rawItem of json) {
+    const item = decodeRpcBatchResponse(rawItem);
+    if (item.id !== undefined) {
       byId.set(item.id, item);
     }
   }

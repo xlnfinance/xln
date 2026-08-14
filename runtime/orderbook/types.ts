@@ -26,7 +26,11 @@ export {
   MAX_ORDERBOOK_QTY_LOTS,
 } from './core';
 
-import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenInfo } from '../account/utils';
+import {
+  getSwapPairOrientation,
+  getSwapPairPolicyForDimensions,
+  getTokenInfo,
+} from '../account/utils';
 
 // Price tick precision used for ratio encoding in orderbook flows.
 // 10000 = 4 decimals (e.g. 1.2345)
@@ -277,7 +281,12 @@ export function computePriceTicksForBaseQuoteDecimals(
 ): bigint {
   if (rawBaseAmount <= 0n || rawQuoteAmount <= 0n) return 0n;
 
-  const pairPolicy = getSwapPairPolicyByBaseQuote(baseTokenId, quoteTokenId);
+  const pairPolicy = getSwapPairPolicyForDimensions(
+    baseTokenId,
+    quoteTokenId,
+    baseTokenDecimals,
+    quoteTokenDecimals,
+  );
   const stepTicks = BigInt(Math.max(1, pairPolicy.priceStepTicks));
 
   const numerator = rawQuoteAmount * tokenScaleForDecimals(baseTokenDecimals) * ORDERBOOK_PRICE_SCALE;

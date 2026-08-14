@@ -14,6 +14,7 @@ import { loadJurisdictions } from './jurisdiction-loader';
 import { createStructuredLogger } from '../../../infra/logger';
 import { parseRebalancePolicyUsd } from '../../../extensions/rebalance/usd';
 import { isBrowser } from '../../../infra/platform-crypto';
+import { requireBoundaryRecord } from '../../../protocol/boundary-validation';
 
 const jurisdictionConfigLog = createStructuredLogger('runtime.jurisdiction_config');
 
@@ -77,7 +78,7 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
     }
 
     try {
-      config = await response.json() as Record<string, unknown>;
+      config = requireBoundaryRecord(await response.json(), 'JURISDICTIONS_BROWSER_CONFIG_INVALID');
     } catch (parseError: unknown) {
       jurisdictionConfigLog.error('browser_config_invalid', { error: errorMessage(parseError) });
       throw new Error(`JURISDICTIONS_BROWSER_CONFIG_INVALID:${errorMessage(parseError)}`);

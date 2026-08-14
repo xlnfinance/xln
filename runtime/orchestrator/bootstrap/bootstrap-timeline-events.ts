@@ -57,7 +57,7 @@ const decodeBootstrapEvent = (
   line: string,
 ): LastBootstrapEvent | null => {
   try {
-    const parsed = JSON.parse(line) as unknown;
+    const parsed: unknown = JSON.parse(line);
     if (!deps.isRecord(parsed)) return null;
     const event = String(parsed['event'] || '').trim();
     if (!event) return null;

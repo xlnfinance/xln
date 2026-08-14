@@ -193,8 +193,8 @@ export interface DepositoryDebtHarnessInterface extends Interface {
       | "_debtIndex"
       | "_debts"
       | "_reserves"
+      | "_status"
       | "_tokens"
-      | "accountKey"
       | "adminRegisterExternalToken"
       | "computeWatchtowerCounterDisputeHash"
       | "debtOutstanding"
@@ -264,13 +264,10 @@ export interface DepositoryDebtHarnessInterface extends Interface {
     functionFragment: "_reserves",
     values: [BytesLike, BigNumberish]
   ): string;
+  encodeFunctionData(functionFragment: "_status", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "_tokens",
     values: [BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "accountKey",
-    values: [BytesLike, BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "adminRegisterExternalToken",
@@ -371,8 +368,8 @@ export interface DepositoryDebtHarnessInterface extends Interface {
   decodeFunctionResult(functionFragment: "_debtIndex", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "_debts", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "_reserves", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "_status", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "_tokens", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "accountKey", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "adminRegisterExternalToken",
     data: BytesLike
@@ -976,6 +973,8 @@ export interface DepositoryDebtHarness extends BaseContract {
     "view"
   >;
 
+  _status: TypedContractMethod<[], [bigint], "view">;
+
   _tokens: TypedContractMethod<
     [arg0: BigNumberish],
     [
@@ -985,12 +984,6 @@ export interface DepositoryDebtHarness extends BaseContract {
         tokenType: bigint;
       }
     ],
-    "view"
-  >;
-
-  accountKey: TypedContractMethod<
-    [e1: BytesLike, e2: BytesLike],
-    [string],
     "view"
   >;
 
@@ -1082,7 +1075,7 @@ export interface DepositoryDebtHarness extends BaseContract {
 
   processBatch: TypedContractMethod<
     [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
-    [boolean],
+    [void],
     "nonpayable"
   >;
 
@@ -1092,7 +1085,7 @@ export interface DepositoryDebtHarness extends BaseContract {
       contractAddress: AddressLike,
       externalTokenId: BigNumberish
     ],
-    [void],
+    [bigint],
     "nonpayable"
   >;
 
@@ -1195,6 +1188,9 @@ export interface DepositoryDebtHarness extends BaseContract {
     "view"
   >;
   getFunction(
+    nameOrSignature: "_status"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
     nameOrSignature: "_tokens"
   ): TypedContractMethod<
     [arg0: BigNumberish],
@@ -1207,9 +1203,6 @@ export interface DepositoryDebtHarness extends BaseContract {
     ],
     "view"
   >;
-  getFunction(
-    nameOrSignature: "accountKey"
-  ): TypedContractMethod<[e1: BytesLike, e2: BytesLike], [string], "view">;
   getFunction(
     nameOrSignature: "adminRegisterExternalToken"
   ): TypedContractMethod<
@@ -1313,7 +1306,7 @@ export interface DepositoryDebtHarness extends BaseContract {
     nameOrSignature: "processBatch"
   ): TypedContractMethod<
     [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
-    [boolean],
+    [void],
     "nonpayable"
   >;
   getFunction(
@@ -1324,7 +1317,7 @@ export interface DepositoryDebtHarness extends BaseContract {
       contractAddress: AddressLike,
       externalTokenId: BigNumberish
     ],
-    [void],
+    [bigint],
     "nonpayable"
   >;
   getFunction(

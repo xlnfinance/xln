@@ -47,8 +47,8 @@ const normalizeHubJoinPreference = (value: unknown): HubJoinPreference => {
 };
 
 const normalizePolicyDefaults = (value: unknown): PolicyDefaults | null => {
-  if (!value || typeof value !== 'object') return null;
-  const raw = value as Record<string, unknown>;
+  if (!isUnknownRecord(value)) return null;
+  const raw = value;
   const softLimitUsd = toUsdInt(raw['r2cRequestSoftLimit'], DEFAULT_POLICY.softLimitUsd);
   const hardLimitUsd = toUsdInt(raw['hardLimit'], DEFAULT_POLICY.hardLimitUsd);
   const maxFeeUsd = toUsdInt(raw['maxFee'], DEFAULT_POLICY.maxFeeUsd);
@@ -75,18 +75,21 @@ const loadPolicyDefaultsFromJurisdictions = async (): Promise<Map<string, Policy
         cachedPolicyDefaultsByJurisdiction = result;
         return result;
       }
-      const payload = await response.json() as {
-        defaults?: { rebalancePolicyUsd?: unknown };
-        jurisdictions?: Record<string, { name?: unknown; rebalancePolicyUsd?: unknown }>;
-      };
-      const globalDefaults = normalizePolicyDefaults(payload.defaults?.rebalancePolicyUsd) ?? DEFAULT_POLICY;
+      const payload = await readJsonUnknown(response);
+      if (!isUnknownRecord(payload)) throw new Error('ONBOARDING_POLICY_PAYLOAD_INVALID');
+      const defaults = payload['defaults'];
+      const jurisdictionsValue = payload['jurisdictions'];
+      if (defaults !== undefined && !isUnknownRecord(defaults)) throw new Error('ONBOARDING_POLICY_DEFAULTS_INVALID');
+      if (jurisdictionsValue !== undefined && !isUnknownRecord(jurisdictionsValue)) throw new Error('ONBOARDING_POLICY_JURISDICTIONS_INVALID');
+      const globalDefaults = normalizePolicyDefaults(defaults?.['rebalancePolicyUsd']) ?? DEFAULT_POLICY;
       result.set('default', globalDefaults);
 
-      const jurisdictions = payload.jurisdictions ?? {};
+      const jurisdictions = jurisdictionsValue ?? {};
       for (const [key, value] of Object.entries(jurisdictions)) {
-        const jurisdictionDefaults = normalizePolicyDefaults(value?.rebalancePolicyUsd) ?? globalDefaults;
+        if (!isUnknownRecord(value)) throw new Error(`ONBOARDING_POLICY_JURISDICTION_INVALID:${key}`);
+        const jurisdictionDefaults = normalizePolicyDefaults(value['rebalancePolicyUsd']) ?? globalDefaults;
         result.set(String(key).trim().toLowerCase(), jurisdictionDefaults);
-        const nameKey = String(value?.name || '').trim().toLowerCase();
+        const nameKey = typeof value['name'] === 'string' ? value['name'].trim().toLowerCase() : '';
         if (nameKey) result.set(nameKey, jurisdictionDefaults);
       }
     } catch {
@@ -116,13 +119,14 @@ export const readSavedCollateralPolicy = (): SavedCollateralPolicy => {
   try {
     const raw = localStorage.getItem(COLLATERAL_POLICY_KEY);
     if (!raw) return { mode: 'autopilot', ...defaults, timestamp: 0 };
-    const parsed = JSON.parse(raw) as Partial<SavedCollateralPolicy>;
+    const parsed = parseJsonUnknown(raw, 'COLLATERAL_POLICY_JSON_INVALID');
+    if (!isUnknownRecord(parsed)) throw new Error('COLLATERAL_POLICY_INVALID');
 
-    const softLimitUsd = toUsdInt(parsed.softLimitUsd, defaults.softLimitUsd);
-    const hardLimitUsd = toUsdInt(parsed.hardLimitUsd, defaults.hardLimitUsd);
-    const maxFeeUsd = toUsdInt(parsed.maxFeeUsd, defaults.maxFeeUsd);
-    const mode = parsed.mode === 'manual' ? 'manual' : 'autopilot';
-    const timestamp = Number(parsed.timestamp || 0);
+    const softLimitUsd = toUsdInt(parsed['softLimitUsd'], defaults.softLimitUsd);
+    const hardLimitUsd = toUsdInt(parsed['hardLimitUsd'], defaults.hardLimitUsd);
+    const maxFeeUsd = toUsdInt(parsed['maxFeeUsd'], defaults.maxFeeUsd);
+    const mode = parsed['mode'] === 'manual' ? 'manual' : 'autopilot';
+    const timestamp = Number(parsed['timestamp'] || 0);
 
     return {
       mode,
@@ -186,3 +190,4 @@ export const getOpenAccountRebalancePolicyData = (tokenDecimals: number): {
   if (r2cRequestSoftLimit <= 0n || hardLimit < r2cRequestSoftLimit || maxAcceptableFee < 0n) return null;
   return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
 };
+import { isUnknownRecord, parseJsonUnknown, readJsonUnknown } from '$lib/utils/boundary';

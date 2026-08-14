@@ -6,7 +6,6 @@ import { reconcileJEventRangeWithFinalizedState } from '../../jurisdiction/machi
 import { decodeUnsignedJEventRange } from '../../jurisdiction/machine/j-event-range-validation/index.ts';
 import {
   getJPrefixAttestationTemporalDisposition,
-  verifyOutOfRoundJPrefixAttestation,
 } from '../../jurisdiction/machine/history/j-prefix-consensus.ts';
 import {
   assertReliableLaneCompatible,
@@ -237,9 +236,11 @@ const jPrefixLineageCoversIdentity = (
 });
 
 /**
- * Only an input that passed full stale-vote authentication in this applied
- * Runtime frame may bypass retained lineage. Pending transport identities do
- * not carry their signed body and must never become terminal by height alone.
+ * Only an exact stale vote body that the Entity transition already consumed
+ * in this Runtime frame may bypass retained lineage. A board handover can
+ * retire its signer before delivery completes. The Entity transition has
+ * already authenticated the exact stale body against retained board lineage;
+ * this helper only proves that Runtime is terminalizing those same bytes.
  */
 export const isAuthenticatedAppliedStaleJPrefixInput = (
   env: RuntimeReplica,
@@ -257,24 +258,13 @@ export const isAuthenticatedAppliedStaleJPrefixInput = (
   if (!entry) throw new Error('RELIABLE_AUTHORITY_J_PREFIX_INPUT_MISSING');
   const [rawSignerId, rawAttestation] = entry;
   if (getJPrefixAttestationTemporalDisposition(replica.state, rawAttestation) !== 'stale') return false;
-  const authorityConfigs = [
-    replica.state.config,
-    ...(replica.certifiedFrameAnchor ? [replica.certifiedFrameAnchor.authority.config] : []),
-    ...(replica.certifiedFrameLineage ?? []).map(link => link.postAuthority.config),
-  ];
-  const attestation = verifyOutOfRoundJPrefixAttestation(
-    env,
-    replica.state,
-    rawAttestation,
-    authorityConfigs,
-  );
-  if (normalize(rawSignerId) !== attestation.validatorId) {
+  if (normalize(rawSignerId) !== normalize(rawAttestation.validatorId)) {
     throw new Error(`RELIABLE_AUTHORITY_J_PREFIX_SIGNER_MISMATCH:${rawSignerId}`);
   }
   const candidate = getReliableOutputIdentity({
     entityId: replica.entityId,
     signerId: replica.signerId,
-    jPrefixAttestations: new Map([[rawSignerId, attestation]]),
+    jPrefixAttestations: new Map([[rawSignerId, rawAttestation]]),
   });
   if (!candidate) throw new Error('RELIABLE_AUTHORITY_J_PREFIX_IDENTITY_MISSING');
   const { order: _order, variantOrder: _variantOrder, ...durableIdentity } = candidate;

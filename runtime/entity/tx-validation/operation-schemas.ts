@@ -42,6 +42,11 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
     },
   },
   entityProviderCancelAction: { required: { actionHash: 'string' } },
+  entityProviderProposeControlBoard: {
+    required: { targetEntityId: 'string', newBoardHash: 'string', actionNonce: 'bigint' },
+    optional: { supporterVotes: 'array' },
+  },
+  entityProviderActivateBoard: { required: { targetEntityId: 'string' } },
   j_rebroadcast: { optional: { gasBumpBps: 'integer' } },
   j_abort_sent_batch: { optional: { reason: 'string', requeueToCurrent: 'boolean' } },
   j_clear_batch: { optional: { reason: 'string' } },

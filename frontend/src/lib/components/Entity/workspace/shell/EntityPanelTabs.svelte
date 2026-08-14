@@ -40,7 +40,7 @@ import CompanyPanel from "../../company/CompanyPanel.svelte";
 import { buildCompanyShareReleaseInput, projectCompanyShareTokens, selectDefaultCompanyHub } from "../../company/company-flow";
 import { buildEntityConsensusSettingsView } from "../entity-consensus-settings";
 import { importJMachineViaRuntime, type JMachineCreateDetail } from "$lib/components/Jurisdiction/import-jmachine-runtime";
-import { OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS, faucetPendingKey, type FaucetApiResult, type PendingReserveFaucet, readJsonResponse, reconcilePendingReserveFaucets } from "../../account/account-faucet";
+import { OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS, faucetPendingKey, type FaucetApiResult, type PendingReserveFaucet, readFaucetApiResult, reconcilePendingReserveFaucets } from "../../account/account-faucet";
 import { buildMoveArrowPath, buildMoveRouteSteps, canAddMoveRouteToDraft, getMovePrimaryActionLabel, getMoveRouteKey, isImmediateMoveExecutionRoute, isMoveRouteSupported, moveNeedsExternalRecipient, moveNeedsReserveRecipient, routeRequiresExplicitExternalAllowance, MOVE_ENDPOINT_LABEL, MOVE_ENDPOINTS, type MoveEndpoint } from "../../move-routes";
 import { buildMoveAllowanceContextSignature, buildMoveAllowanceStatusLabel, getMoveRequiredAllowanceAmount, isMoveAllowanceSatisfied } from "../../move/move-allowance";
 import { choosePreferredMoveAssetSymbol, computeMoveSourceAvailableBalanceForEndpoint, getMoveMaxAmountForEndpoint, getPreferredMoveSourceAccountId } from "../../move/move-balance";
@@ -1060,7 +1060,7 @@ async function requestExternalGasFaucet(owner: string, amount = "0.1"): Promise<
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ userAddress: owner, amount }),
   });
-  const result = await readJsonResponse<FaucetApiResult>(response);
+  const result = await readFaucetApiResult(response);
   if (!response.ok || !result?.success) {
     throw new Error(result?.error || `Gas faucet failed (${response.status})`);
   }
@@ -1279,7 +1279,7 @@ async function faucetReserves(tokenId: number = 1, symbolHint?: string) {
         amount: amountStr,
       }),
     });
-    const result = await readJsonResponse<FaucetApiResult>(response);
+    const result = await readFaucetApiResult(response);
     if (!response.ok || !result?.success) {
       throw new Error(result?.error || `Faucet failed (${response.status})`);
     }
@@ -1355,7 +1355,7 @@ async function faucetOffchain(hubEntityId: string, tokenId: number = 1) {
           amount: amountStr,
         }),
       });
-      result = await readJsonResponse<FaucetApiResult>(response);
+      result = await readFaucetApiResult(response);
     } catch (error: unknown) {
       const aborted = error instanceof DOMException && error.name === "AbortError";
       const message = aborted ? `Faucet request timed out after ${requestTimeoutMs}ms` : toErrorMessage(error, "Faucet request failed");
@@ -2445,7 +2445,7 @@ async function faucetExternalTokens(tokenSymbol: string = "USDC") {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const result = await readJsonResponse<FaucetApiResult>(response);
+    const result = await readFaucetApiResult(response);
     if (!response.ok || !result?.success) {
       throw new Error(result?.error || `Faucet failed (${response.status})`);
     }

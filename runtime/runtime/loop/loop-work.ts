@@ -23,6 +23,7 @@ import { requireRuntimeMempool } from '../input-pipeline/input-queue.ts';
 import { ensureRuntimeConfig } from './loop-environment.ts';
 import { enqueueRuntimeInputs } from './loop-infrastructure.ts';
 import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure.ts';
+import { hasReadyCommittedJOutbox } from '../registration/governance-submit-state.ts';
 import type { EntityInput, EntityReplica } from '../../entity/types.ts';
 import type { RoutedEntityInput, RuntimeReplica, RuntimeInput } from '../types.ts';
 import { atomicCrossJInputCohortKey } from '../routing/entity-routing.ts';
@@ -151,7 +152,7 @@ export const resolveRuntimeWorkReason = (
   if ((env.infrastructure?.pendingProfileCertificationEntityIds?.size ?? 0) > 0) {
     return 'profile-certification';
   }
-  if ((env.infrastructure?.pendingCommittedJOutbox?.length ?? 0) > 0) return 'committed-j-outbox';
+  if (hasReadyCommittedJOutbox(env, getWallClockMs())) return 'committed-j-outbox';
   if ((env.infrastructure?.pendingJurisdictionImports?.size ?? 0) > 0) return 'jurisdiction-import';
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return 'runtime-mempool';
   if ((mempool.jInputs?.length ?? 0) > 0) return 'j-input';

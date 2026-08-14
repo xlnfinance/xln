@@ -12,6 +12,7 @@
   import { activeRuntime } from '../../../stores/vault/vaultStore';
   import { tabOperations } from '../../../stores/ui/tabStore';
   import { generateLazyEntityIdPreview } from '../../../utils/identity/lazyEntityId';
+  import { parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
   import { Plus, X, Download, Upload, Shield, Hash, Landmark, Tag, Zap } from 'lucide-svelte';
   import {
     emptyFormationRuntimeProjection,
@@ -299,15 +300,22 @@
 
   function importConfig() {
     try {
-      const config = JSON.parse(importJson);
-      if (config.entityType) entityType = config.entityType;
-      if (config.formationPurpose === 'entity' || config.formationPurpose === 'company') {
-        selectFormationPurpose(config.formationPurpose);
+      const config = requireUnknownRecord(parseJsonUnknown(importJson, 'ENTITY_FORMATION_CONFIG_JSON_INVALID'), 'ENTITY_FORMATION_CONFIG_INVALID');
+      rejectExtraKeys(config, ['entityType', 'formationPurpose', 'entityName', 'jurisdiction', 'validators', 'threshold', 'exportedAt'], 'ENTITY_FORMATION_CONFIG_EXTRA_FIELD');
+      if (config['entityType'] !== undefined && config['entityType'] !== 'numbered' && config['entityType'] !== 'lazy' && config['entityType'] !== 'named') throw new Error('ENTITY_FORMATION_CONFIG_ENTITY_TYPE_INVALID');
+      if (config['formationPurpose'] !== undefined && config['formationPurpose'] !== 'entity' && config['formationPurpose'] !== 'company') throw new Error('ENTITY_FORMATION_CONFIG_PURPOSE_INVALID');
+      if (config['entityName'] !== undefined && typeof config['entityName'] !== 'string') throw new Error('ENTITY_FORMATION_CONFIG_NAME_INVALID');
+      if (config['jurisdiction'] !== undefined && typeof config['jurisdiction'] !== 'string') throw new Error('ENTITY_FORMATION_CONFIG_JURISDICTION_INVALID');
+      if (config['validators'] !== undefined && !Array.isArray(config['validators'])) throw new Error('ENTITY_FORMATION_CONFIG_VALIDATORS_INVALID');
+      if (config['threshold'] !== undefined && (typeof config['threshold'] !== 'number' || !Number.isSafeInteger(config['threshold']))) throw new Error('ENTITY_FORMATION_CONFIG_THRESHOLD_INVALID');
+      if (config['entityType'] !== undefined) entityType = config['entityType'];
+      if (config['formationPurpose'] === 'entity' || config['formationPurpose'] === 'company') {
+        selectFormationPurpose(config['formationPurpose']);
       }
-      if (config.entityName) entityName = config.entityName;
-      if (config.jurisdiction) selectedJurisdiction = config.jurisdiction;
-      if (config.validators) validators = config.validators;
-      if (config.threshold) threshold = config.threshold;
+      if (config['entityName'] !== undefined) entityName = config['entityName'];
+      if (config['jurisdiction'] !== undefined) selectedJurisdiction = config['jurisdiction'];
+      if (config['validators'] !== undefined) validators = config['validators'];
+      if (config['threshold'] !== undefined) threshold = config['threshold'];
       showImport = false;
       importJson = '';
       success = 'Config imported';

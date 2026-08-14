@@ -186,7 +186,7 @@ describe('canonical account state root', () => {
     expect(computeAccountShadowRoot(new Map([[RIGHT, withdrawal]]))).not.toBe(overlayRoot);
   });
 
-  test('commits settlement Hankos bilaterally while excluding post-consensus overlay signatures', () => {
+  test('commits settlement targets but excludes non-unique quorum Hanko bytes', () => {
     const base = account();
     base.state.settlementWorkspace = {
       workspaceHash: `0x${'88'.repeat(32)}`,
@@ -221,7 +221,7 @@ describe('canonical account state root', () => {
     base.pendingWithdrawals.get('withdraw-1')!.signature = '0xbeef';
 
     const sealedBilateralRoot = computeAccountStateRoot(base.state);
-    expect(sealedBilateralRoot).not.toBe(bilateralRoot);
+    expect(sealedBilateralRoot).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).toBe(overlayRoot);
 
     base.pendingWithdrawals.get('withdraw-1')!.signature = '0xcafe';

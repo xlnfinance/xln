@@ -7,6 +7,7 @@ import { markRestoredJSubmitRuntimeTxs } from '../../runtime/jurisdiction/j-subm
 import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/machine/registration-evidence';
 import { markRestoredJImportResultRuntimeTxs } from '../../runtime/jurisdiction/jurisdiction-import';
 import { markRestoredEntityProviderActionRuntimeTxs } from '../../runtime/registration/entity-provider-action-submit-auth';
+import { markRestoredGovernanceResultRuntimeTxs } from '../../runtime/registration/governance-submit-state';
 import { markRestoredNumberedRegistrationTxs } from '../../runtime/registration/numbered-registration-auth';
 import { markRestoredRuntimeAdapterCommandTxs } from '../../runtime/command/frontier-auth';
 import {
@@ -37,6 +38,7 @@ export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): Runti
   markRestoredJAuthorityRuntimeTxs(runtimeInput.runtimeTxs);
   markRestoredJImportResultRuntimeTxs(runtimeInput.runtimeTxs);
   markRestoredEntityProviderActionRuntimeTxs(runtimeInput.runtimeTxs);
+  markRestoredGovernanceResultRuntimeTxs(runtimeInput.runtimeTxs);
   markRestoredNumberedRegistrationTxs(runtimeInput.runtimeTxs);
   markRestoredRuntimeAdapterCommandTxs(runtimeInput.runtimeTxs);
   return runtimeInput;

@@ -3,6 +3,11 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { join } from 'node:path';
 import { scheduler } from 'node:timers/promises';
 import { createStructuredLogger } from '../../infra/logger';
+import {
+  requireBoundaryInteger,
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../../protocol/boundary-validation';
 import { safeStringify } from '../../protocol/serialization';
 import type { ManagedRuntimeLease, ManagedRuntimeSpec } from '../orchestrator-types';
 
@@ -22,6 +27,38 @@ type ManagedRuntimeLeaseManagerConfig = {
 const formatError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 const managedLeaseLog = createStructuredLogger('orchestrator.managed_leases');
+
+const decodeManagedRuntimeLease = (value: unknown): ManagedRuntimeLease => {
+  const lease = requireBoundaryRecord(value, 'MANAGED_RUNTIME_LEASE_INVALID');
+  requireExactBoundaryKeys(
+    lease,
+    ['role', 'name', 'script', 'apiPort', 'dbPath', 'ownerId', 'orchestratorPid', 'pid', 'cwd', 'startedAt', 'processStartedAt', 'updatedAt'],
+    [],
+    'MANAGED_RUNTIME_LEASE_FIELDS_INVALID',
+  );
+  if ((lease['role'] !== 'hub' && lease['role'] !== 'market-maker') ||
+      (lease['script'] !== 'runtime/orchestrator/hub-node.ts' && lease['script'] !== 'runtime/orchestrator/mm-node.ts') ||
+      typeof lease['name'] !== 'string' || !lease['name'] ||
+      typeof lease['dbPath'] !== 'string' || !lease['dbPath'] ||
+      typeof lease['ownerId'] !== 'string' || !lease['ownerId'] ||
+      typeof lease['cwd'] !== 'string' || !lease['cwd']) {
+    throw new Error('MANAGED_RUNTIME_LEASE_IDENTITY_INVALID');
+  }
+  return {
+    role: lease['role'],
+    name: lease['name'],
+    script: lease['script'],
+    apiPort: requireBoundaryInteger(lease['apiPort'], 'MANAGED_RUNTIME_LEASE_API_PORT_INVALID', 1),
+    dbPath: lease['dbPath'],
+    ownerId: lease['ownerId'],
+    orchestratorPid: requireBoundaryInteger(lease['orchestratorPid'], 'MANAGED_RUNTIME_LEASE_ORCHESTRATOR_PID_INVALID', 1),
+    pid: requireBoundaryInteger(lease['pid'], 'MANAGED_RUNTIME_LEASE_PID_INVALID', 1),
+    cwd: lease['cwd'],
+    startedAt: requireBoundaryInteger(lease['startedAt'], 'MANAGED_RUNTIME_LEASE_STARTED_AT_INVALID'),
+    processStartedAt: requireBoundaryInteger(lease['processStartedAt'], 'MANAGED_RUNTIME_LEASE_PROCESS_STARTED_AT_INVALID', 1),
+    updatedAt: requireBoundaryInteger(lease['updatedAt'], 'MANAGED_RUNTIME_LEASE_UPDATED_AT_INVALID'),
+  };
+};
 
 const defaultProcessOps: ManagedProcessOps = {
   kill: (pid, signal) => process.kill(pid, signal),
@@ -163,7 +200,7 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
     const path = leasePathFor(spec);
     if (!existsSync(path)) return null;
     try {
-      const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<ManagedRuntimeLease>;
+      const parsed = decodeManagedRuntimeLease(JSON.parse(readFileSync(path, 'utf8')));
       if (
         parsed.role === spec.role &&
         parsed.name === spec.name &&
@@ -190,10 +227,10 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
           updatedAt: Number(parsed.updatedAt || 0),
         };
       }
+      return null;
     } catch (error) {
-      managedLeaseLog.warn('lease.unreadable_ignored', { path, error: formatError(error) });
+      throw new Error(`MANAGED_RUNTIME_LEASE_INVALID:path=${path}:error=${formatError(error)}`, { cause: error });
     }
-    return null;
   };
 
   const writeLease = async (spec: ManagedRuntimeSpec, pid: number, startedAt: number): Promise<void> => {

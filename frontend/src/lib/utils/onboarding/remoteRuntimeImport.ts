@@ -1,4 +1,5 @@
 import { normalizeWsConnectUrl } from '../runtime/wsUrl';
+import { parseJsonUnknown } from '$lib/utils/boundary';
 import { REMOTE_RUNTIME } from '@xln/runtime/config/constants';
 
 export const REMOTE_RUNTIME_IMPORT_HASH_PARAM = REMOTE_RUNTIME.IMPORT_HASH_PARAM;
@@ -290,7 +291,7 @@ export const parseRemoteRuntimeImportText = (text: string): RemoteRuntimeImportE
   const trimmed = String(text || '').trim();
   if (!trimmed) throw new Error('REMOTE_RUNTIME_IMPORT_EMPTY');
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    return entriesFromJson(JSON.parse(trimmed));
+    return entriesFromJson(parseJsonUnknown(trimmed, 'REMOTE_RUNTIME_IMPORT_JSON_INVALID'));
   }
   const entries = trimmed
     .split(/\r?\n/)
@@ -365,7 +366,7 @@ export const readStoredRemoteRuntimeImports = (
   let parsed: unknown;
   let rawEntries: unknown[];
   try {
-    parsed = JSON.parse(raw) as unknown;
+    parsed = parseJsonUnknown(raw, 'REMOTE_RUNTIME_IMPORT_JSON_INVALID');
     rawEntries = rawImportEntriesFromUnknown(parsed);
   } catch (error) {
     if (options.dropInvalid === true) {

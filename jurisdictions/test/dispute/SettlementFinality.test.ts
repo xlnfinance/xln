@@ -5,6 +5,7 @@ import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signer
 import type { Depository } from '../../typechain-types/index.js';
 import {
   buildSingleSignerHanko,
+  canonicalAccountKey,
   computeDepositoryBatchHash,
   deriveHardhatPrivateKey,
   deployDepositoryStack,
@@ -61,7 +62,7 @@ describe('settlement finality events', function () {
     const [left, right] = orderedActors(actor(signer0, 0), actor(signer1, 1));
     const settlementNonce = 1n;
     const forgiveTokenIds = [1n];
-    const accountKey = await depository.accountKey(left.entityId, right.entityId);
+    const accountKey = canonicalAccountKey(left.entityId, right.entityId);
     const settlementHash = await cooperativeUpdateHash(
       depository,
       accountKey,

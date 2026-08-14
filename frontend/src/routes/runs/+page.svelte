@@ -3,6 +3,8 @@
   import { DISPLAY, QA } from '@xln/runtime/config/constants';
   import type { QaRegressionStatus, QaRunCategory } from '@xln/runtime/qa/report-types';
   import { consumeQaTokenFromUrl, qaFetch, readQaToken, writeQaToken } from '$lib/qa/apiClient';
+  import { readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
+  import { decodeQaAuthInfo, isQaRunLedgerEntry } from '$lib/qa/boundary';
 
   type RunSortKey = 'date-desc' | 'date-asc' | 'stack-fast' | 'stack-slow' | 'browser-fast' | 'browser-slow';
 
@@ -149,15 +151,19 @@
     error = '';
     try {
       const response = await qaFetch('/api/qa/runs?limit=50', { cache: 'no-store' });
-      const payload = await response.json() as {
-        ok?: boolean;
-        error?: string;
-        qaAuth?: { disabled?: boolean; scope?: string };
-        ledger?: QaRunLedgerEntry[];
-      };
-      if (!response.ok || payload.ok === false) throw new Error(payload.error || `QA runs HTTP ${response.status}`);
-      qaAuthLabel = payload.qaAuth?.disabled ? 'open' : payload.qaAuth?.scope ?? 'locked';
-      ledger = payload.ledger ?? [];
+      const payload = requireUnknownRecord(await readJsonUnknown(response), 'RUNS_RESPONSE_INVALID');
+      rejectExtraKeys(payload, ['ok', 'error', 'qaAuth', 'ledger'], 'RUNS_RESPONSE_EXTRA_FIELD');
+      if (payload['ok'] !== true) throw new Error(typeof payload['error'] === 'string' ? payload['error'] : `QA runs HTTP ${response.status}`);
+      const qaAuth = decodeQaAuthInfo(payload['qaAuth']);
+      qaAuthLabel = qaAuth?.disabled ? 'open' : qaAuth?.scope ?? 'locked';
+      const rawLedger = payload['ledger'];
+      if (rawLedger === undefined) {
+        ledger = [];
+      } else if (Array.isArray(rawLedger) && rawLedger.every(isQaRunLedgerEntry)) {
+        ledger = rawLedger;
+      } else {
+        throw new Error('RUNS_LEDGER_INVALID');
+      }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     } finally {

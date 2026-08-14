@@ -58,7 +58,7 @@ export const encodeRuntimeAdapterMessageForBrowser = (message: RuntimeAdapterWir
 export const decodeRuntimeAdapterBrowserMessage = (raw: unknown): RuntimeAdapterWireMessage => {
   assertRuntimeAdapterMessageSize(raw);
   if (typeof raw !== 'string') throw new Error('RADAPTER_BROWSER_JSON_REQUIRED');
-  return validateRuntimeAdapterWireMessage(deserializeTaggedJson<unknown>(raw));
+  return validateRuntimeAdapterWireMessage(deserializeTaggedJson(raw));
 };
 
 export const decodeRuntimeAdapterMessage = (raw: unknown): RuntimeAdapterWireMessage => {

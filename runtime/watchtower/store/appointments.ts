@@ -11,6 +11,7 @@ import {
   computeTowerLastResortPayloadDigest,
 } from '../../storage/recovery/bundle/crypto';
 import { deserializeTaggedJson } from '../../protocol/serialization';
+import { requireBoundaryRecord } from '../../protocol/boundary-validation';
 import {
   computeStoredLookupBytes,
   emptyStoredDoc,
@@ -32,7 +33,7 @@ const assertEncryptedLastResortPayload = (payload: TowerLastResortPayloadV1 | nu
   if (!raw) throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_MISSING');
   let parsed: Record<string, unknown>;
   try {
-    parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
+    parsed = requireBoundaryRecord(deserializeTaggedJson(raw), 'TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
   } catch {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
   }

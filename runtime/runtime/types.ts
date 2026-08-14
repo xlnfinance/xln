@@ -403,6 +403,24 @@ export type RuntimeTx =
       data: RecordEntityProviderActionSubmitResultData;
     }
   | {
+      /** Internal result for one exact reserve-governance write retained in the committed J outbox. */
+      type: 'recordGovernanceJSubmitResult';
+      data: {
+        entityId: string;
+        signerId: string;
+        jurisdictionName: string;
+        proposalHash: string;
+        payloadHash: string;
+        attemptId: string;
+        attemptNumber: number;
+        attemptedAt: number;
+        outcome: 'submitted' | 'transientFailure' | 'terminalFailure' | 'reconciled';
+        message?: string;
+        adapterFailure?: JAdapterFailure;
+        txHash?: string;
+      };
+    }
+  | {
       type: 'importJ';
       data: JurisdictionImportRequest;
     }

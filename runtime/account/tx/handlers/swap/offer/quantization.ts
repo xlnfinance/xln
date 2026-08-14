@@ -7,7 +7,7 @@ import {
   getSwapLotScaleForDecimals,
 } from '../../../../../orderbook';
 import { deriveCanonicalCrossJurisdictionMarket } from '../../../../../extensions/cross-j';
-import { getSwapPairPolicyByBaseQuote } from '../../../../utils';
+import { getSwapPairPolicyForDimensions } from '../../../../utils';
 import type { SwapOfferTx } from './admission';
 
 export type PreparedSwapOfferAmounts = {
@@ -116,7 +116,12 @@ export const prepareSwapOfferAmounts = (
   }
   const pairPolicy = crossMarket
     ? null
-    : getSwapPairPolicyByBaseQuote(baseTokenId, quoteTokenId);
+    : getSwapPairPolicyForDimensions(
+        baseTokenId,
+        quoteTokenId,
+        baseTokenDecimals,
+        quoteTokenDecimals,
+      );
   const stepTicks = BigInt(Math.max(1, pairPolicy?.priceStepTicks ?? 1));
   const sameJurisdictionPrice = crossMarket
     ? null

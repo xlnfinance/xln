@@ -4,6 +4,7 @@ import { assertEntityProviderActionRuntimeTxAuthorized } from '../registration/e
 import { assertJSubmitRuntimeTxAuthorized } from '../jurisdiction/j-submit-state';
 import { assertJImportResultRuntimeTxAuthorized } from '../jurisdiction/jurisdiction-import';
 import { assertNumberedRegistrationTxAuthorized } from '../registration/numbered-registration-auth';
+import { assertGovernanceResultRuntimeTxAuthorized } from '../registration/governance-submit-state';
 import type { RuntimeInput, RuntimeTx } from '../types';
 
 /**
@@ -23,6 +24,7 @@ export const assertRuntimeTxCapabilitiesAuthorized = (
   assertEntityProviderActionRuntimeTxAuthorized(tx, replay);
   assertRuntimeAdapterCommandTxAuthorized(tx, replay);
   assertNumberedRegistrationTxAuthorized(tx, replay);
+  assertGovernanceResultRuntimeTxAuthorized(tx, replay);
 };
 
 export const assertRuntimeInputCapabilitiesAuthorized = (

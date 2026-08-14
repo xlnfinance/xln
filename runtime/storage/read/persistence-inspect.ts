@@ -13,10 +13,9 @@ import {
   verifyRuntimeChain,
 } from '../../runtime';
 import { deserializeTaggedJson } from '../../protocol/serialization';
+import { requireBoundaryInteger, requireBoundaryRecord, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
 import type { RuntimeReplica } from '../../runtime/types';
 import type {
-  EncryptedRuntimeRecoveryBundleV1,
-  RuntimeRecoveryBundleV1,
   TowerReceiptV1,
 } from '../recovery/bundle/types';
 
@@ -212,15 +211,15 @@ const buildWalTail = async (env: RuntimeReplica, latestHeight: number, tail: num
 
 const parseBundleFile = (path: string): unknown => {
   const raw = readFileSync(path, 'utf8');
-  return deserializeTaggedJson<unknown>(raw);
+  return deserializeTaggedJson(raw);
 };
 
 export const inspectRecoveryBundleFile = (path?: string): PersistenceBundleSummary => {
   if (!path) return { checked: false, valid: false, encrypted: false };
   try {
-    const parsed = parseBundleFile(path) as Partial<RuntimeRecoveryBundleV1 & EncryptedRuntimeRecoveryBundleV1>;
-    if (parsed && typeof parsed === 'object' && typeof parsed.checkpointHash === 'string') {
-      const bundle = validateRuntimeRecoveryBundle(parsed as RuntimeRecoveryBundleV1);
+    const parsed = requireBoundaryRecord(parseBundleFile(path), 'RECOVERY_BUNDLE_FORMAT_UNKNOWN');
+    if (typeof parsed['checkpointHash'] === 'string') {
+      const bundle = validateRuntimeRecoveryBundle(parsed);
       return {
         checked: true,
         valid: true,
@@ -230,14 +229,27 @@ export const inspectRecoveryBundleFile = (path?: string): PersistenceBundleSumma
         checkpointHash: bundle.checkpointHash!,
       };
     }
-    if (parsed && typeof parsed === 'object' && typeof parsed.bundleHash === 'string' && typeof parsed.ciphertext === 'string') {
+    if (typeof parsed['bundleHash'] === 'string' && typeof parsed['ciphertext'] === 'string') {
+      requireExactBoundaryKeys(
+        parsed,
+        ['version', 'runtimeId', 'lookupKey', 'height', 'createdAt', 'bundleHash', 'iv', 'ciphertext'],
+        ['kind', 'baseRuntimeHeight', 'baseCheckpointHash', 'compression'],
+        'RECOVERY_ENCRYPTED_BUNDLE_FIELDS_INVALID',
+      );
+      if (parsed['version'] !== 1 || typeof parsed['runtimeId'] !== 'string' ||
+          typeof parsed['lookupKey'] !== 'string' || typeof parsed['createdAt'] !== 'number' ||
+          typeof parsed['iv'] !== 'string' ||
+          (parsed['kind'] !== undefined && parsed['kind'] !== 'snapshot' && parsed['kind'] !== 'journal_tail') ||
+          (parsed['compression'] !== undefined && parsed['compression'] !== 'gzip')) {
+        throw new Error('RECOVERY_ENCRYPTED_BUNDLE_INVALID');
+      }
       return {
         checked: true,
         valid: true,
         encrypted: true,
-        runtimeId: String(parsed.runtimeId || '').toLowerCase(),
-        height: Math.max(0, Math.floor(Number(parsed.height || 0))),
-        bundleHash: String(parsed.bundleHash || ''),
+        runtimeId: parsed['runtimeId'].toLowerCase(),
+        height: requireBoundaryInteger(parsed['height'], 'RECOVERY_ENCRYPTED_BUNDLE_HEIGHT_INVALID'),
+        bundleHash: parsed['bundleHash'],
       };
     }
     return { checked: true, valid: false, encrypted: false, error: 'RECOVERY_BUNDLE_FORMAT_UNKNOWN' };

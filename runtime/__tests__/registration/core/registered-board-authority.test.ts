@@ -10,6 +10,7 @@ import {
 } from '../../../account/crypto';
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../../../entity/factory';
 import { applyEntityInput, selectProposableEntityTxs } from '../../../entity/consensus';
+import { getBoardHandoverFrameConfig } from '../../../entity/consensus/authority/board-handover';
 import {
   buildConsensusOutputOriginForState,
   assertCertifiedEntityOutputWitnesses,
@@ -56,6 +57,7 @@ import type { EntityReplica, EntityState, JurisdictionConfig } from '../../../en
 import type { RuntimeReplica, RoutedEntityInput } from '../../../runtime/types';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { addr, entity, makeAccount, makeState, provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
+import { provisionTestEntityEncryptionKey as provisionCanonicalTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
 import { buildJEventRangeData } from '../../helpers/j-history';
 
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
@@ -251,6 +253,10 @@ const buildRegisteredProfile = async (): Promise<{
   state.config = config;
   const localEnv = createEmptyEnv('registered-board-authority:local');
   localEnv.runtimeSeed = 'registered-board-authority:runtime';
+  state.entityEncryptionPublicKey = provisionCanonicalTestEntityEncryptionKey(
+    localEnv,
+    registeredEntityId,
+  ).publicKey;
   registerSignerKey(localEnv, signer, privateKey);
   localEnv.state.eReplicas.set(`${registeredEntityId}:${signer}`, {
     entityId: registeredEntityId,
@@ -673,6 +679,64 @@ describe('registered Entity certified board authority', () => {
       expect(selection.reason).toBe('SELF_BOARD_BOOTSTRAP_PRIORITY');
       expect(selection.txs.map((tx) => tx.type)).toEqual(['j_event']);
     }
+  });
+
+  test('board handover accepts only the exact activated board and two-transaction frame shape', () => {
+    const env = createEmptyEnv('registry-board-handover-shape');
+    const signerA = addr('a1');
+    const signerB = addr('b1');
+    const oldConfig = {
+      mode: 'proposer-based' as const,
+      threshold: 1n,
+      validators: [signerA],
+      shares: { [signerA]: 1n },
+      jurisdiction,
+    };
+    const newConfig = {
+      ...oldConfig,
+      validators: [signerB],
+      shares: { [signerB]: 1n },
+    };
+    const state = makeState(registeredEntityId, signerA, jurisdiction);
+    state.config = oldConfig;
+    const oldBoard = hashBoard(encodeBoard(oldConfig, env)).toLowerCase();
+    const newBoard = hashBoard(encodeBoard(newConfig, env)).toLowerCase();
+    const activation = event('BoardActivated', newBoard, {
+      height: 3,
+      previousBoardHash: oldBoard,
+    });
+    const handover = {
+      type: 'boardHandover',
+      data: {
+        board: {
+          mode: newConfig.mode,
+          threshold: newConfig.threshold,
+          validators: [...newConfig.validators],
+          shares: { ...newConfig.shares },
+        },
+      },
+    } satisfies EntityTx;
+    const range = jRangeTx(signerB, [activation]);
+
+    expect(getBoardHandoverFrameConfig(env, state, [range, handover])).toEqual(newConfig);
+    expect(() => getBoardHandoverFrameConfig(env, state, [range, handover, {
+      type: 'chat',
+      data: { from: signerB, message: 'smuggled' },
+    }])).toThrow('BOARD_HANDOVER_FRAME_SHAPE_INVALID');
+
+    const brokenActivation = event('BoardActivated', newBoard, {
+      height: 3,
+      previousBoardHash: blockHash('99'),
+    });
+    expect(() => getBoardHandoverFrameConfig(env, state, [
+      jRangeTx(signerB, [brokenActivation]),
+      handover,
+    ])).toThrow('BOARD_HANDOVER_ACTIVATION_CHAIN_INVALID');
+
+    const tampered = structuredClone(handover);
+    tampered.data.board.threshold = 2n;
+    expect(() => getBoardHandoverFrameConfig(env, state, [range, tampered]))
+      .toThrow('BOARD_HANDOVER_CONFIG');
   });
 
   test('partial board config cannot precommit rotation; synchronized validators commit it', async () => {

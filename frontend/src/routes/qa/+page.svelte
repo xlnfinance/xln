@@ -48,6 +48,25 @@
     type QaAdminHealthSnapshot,
   } from '$lib/qa/adminEvidence';
   import { QA } from '@xln/runtime/config/constants';
+  import { readJsonUnknown } from '$lib/utils/boundary';
+  import {
+    decodeQaAuthInfo,
+    decodeQaEnvelope,
+    isQaCatalogEntry,
+    isQaHistoryBackfillResult,
+    isQaHistoryEntry,
+    isQaRegressionReport,
+    isQaRestartAuditEntry,
+    isQaRetentionPurgeResult,
+    isQaRun,
+    isQaRunLedgerEntry,
+    isQaStoryScreenshot,
+    isQaSummary,
+    isQaSystemVerdict,
+    isQaTestLedgerEntry,
+    isQaUxReleasePackAudit,
+    isRestartStatus,
+  } from '$lib/qa/boundary';
   import type {
     QaArtifact,
     QaAuthInfo,
@@ -75,6 +94,17 @@
     RunSortKey,
     ShardSortKey,
   } from '$lib/qa/types';
+
+  const requireDecodedArray = <T>(value: unknown, code: string, guard: (entry: unknown) => entry is T): T[] => {
+    if (!Array.isArray(value) || !value.every(guard)) throw new Error(code);
+    return value;
+  };
+
+  const optionalDecoded = <T>(value: unknown, code: string, guard: (entry: unknown) => entry is T): T | undefined => {
+    if (value === undefined) return undefined;
+    if (!guard(value)) throw new Error(code);
+    return value;
+  };
 
   let runs = $state<QaSummary[]>([]);
   let catalog = $state<QaCatalogEntry[]>([]);
@@ -355,6 +385,11 @@
     qaAuthLabel = auth.disabled ? 'open' : auth.scope ?? 'locked';
   }
 
+  function applyDecodedQaAuth(value: unknown): void {
+    const qaAuth = decodeQaAuthInfo(value);
+    applyQaAuth(qaAuth === undefined ? {} : { qaAuth });
+  }
+
   const selectedShardWaterfall = $derived(
     selectedShard
       ? selectedPhaseP95
@@ -610,25 +645,14 @@
     error = null;
     try {
       const response = await qaFetch('/api/qa/runs?limit=20', { cache: 'no-store' });
-      const payload = await response.json() as {
-        ok?: boolean;
-        qaAuth?: QaAuthInfo;
-        runs?: QaSummary[];
-        ledger?: QaRunLedgerEntry[];
-        testLedger?: QaTestLedgerEntry[];
-        regression?: QaRegressionReport;
-        verdict?: QaSystemVerdict;
-        error?: string;
-      };
-      applyQaAuth(payload);
-      if (!response.ok || !payload.ok || !Array.isArray(payload.runs)) {
-        throw new Error(payload.error || 'Failed to load QA runs');
-      }
-      runs = payload.runs;
-      ledger = payload.ledger ?? [];
-      testLedger = payload.testLedger ?? [];
-      regression = payload.regression ?? null;
-      systemVerdict = payload.verdict ?? null;
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'qaAuth', 'runs', 'ledger', 'testLedger', 'regression', 'verdict', 'error']);
+      if (!response.ok) throw new Error('Failed to load QA runs');
+      applyDecodedQaAuth(payload['qaAuth']);
+      runs = requireDecodedArray(payload['runs'], 'QA_RUNS_INVALID', isQaSummary);
+      ledger = payload['ledger'] === undefined ? [] : requireDecodedArray(payload['ledger'], 'QA_LEDGER_INVALID', isQaRunLedgerEntry);
+      testLedger = payload['testLedger'] === undefined ? [] : requireDecodedArray(payload['testLedger'], 'QA_TEST_LEDGER_INVALID', isQaTestLedgerEntry);
+      regression = optionalDecoded(payload['regression'], 'QA_REGRESSION_INVALID', isQaRegressionReport) ?? null;
+      systemVerdict = optionalDecoded(payload['verdict'], 'QA_VERDICT_INVALID', isQaSystemVerdict) ?? null;
       const requestedRunId = requestedRunIdFromUrl();
       const nextRunId = preserveSelection && selectedRunId && runs.some((run) => run.runId === selectedRunId)
         ? selectedRunId
@@ -654,15 +678,15 @@
     error = null;
     try {
       const response = await qaFetch(`/api/qa/run?runId=${encodeURIComponent(runId)}`, { cache: 'no-store' });
-      const payload = await response.json() as { ok?: boolean; qaAuth?: QaAuthInfo; run?: QaRun; error?: string };
-      applyQaAuth(payload);
-      if (!response.ok || !payload.ok || !payload.run) {
-        throw new Error(payload.error || 'Failed to load QA run');
-      }
-      selectedRun = payload.run;
-      selectedShardIndex = pickUrlShardIndex(payload.run) ?? pickDefaultShard(payload.run);
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'qaAuth', 'run', 'error']);
+      if (!response.ok) throw new Error('Failed to load QA run');
+      applyDecodedQaAuth(payload['qaAuth']);
+      const run = optionalDecoded(payload['run'], 'QA_RUN_INVALID', isQaRun);
+      if (!run) throw new Error('Failed to load QA run');
+      selectedRun = run;
+      selectedShardIndex = pickUrlShardIndex(run) ?? pickDefaultShard(run);
       showRawLogTail = false;
-      rememberRunInUrl(payload.run.runId, payload.run.shards[selectedShardIndex]?.shard);
+      rememberRunInUrl(run.runId, run.shards[selectedShardIndex]?.shard);
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     } finally {
@@ -679,58 +703,24 @@
         qaFetch('/api/qa/restart-audit?limit=25', { cache: 'no-store' }),
         qaFetch('/api/qa/stories?limit=200', { cache: 'no-store' }),
       ]);
-      const catalogPayload = await catalogResponse.json() as {
-        ok?: boolean;
-        qaAuth?: QaAuthInfo;
-        catalog?: QaCatalogEntry[];
-        restart?: RestartStatus;
-        restartAllowed?: boolean;
-        error?: string;
-      };
-      if (!catalogResponse.ok || !catalogPayload.ok || !Array.isArray(catalogPayload.catalog)) {
-        throw new Error(catalogPayload.error || 'Failed to load QA catalog');
-      }
-      applyQaAuth(catalogPayload);
-      const historyPayload = await historyResponse.json() as {
-        ok?: boolean;
-        qaAuth?: QaAuthInfo;
-        history?: QaHistoryEntry[];
-        restart?: RestartStatus;
-        restartAllowed?: boolean;
-        error?: string;
-      };
-      if (!historyResponse.ok || !historyPayload.ok || !Array.isArray(historyPayload.history)) {
-        throw new Error(historyPayload.error || 'Failed to load QA history');
-      }
-      applyQaAuth(historyPayload);
-      const auditPayload = await auditResponse.json() as {
-        ok?: boolean;
-        qaAuth?: QaAuthInfo;
-        audit?: QaRestartAuditEntry[];
-        error?: string;
-      };
-      if (!auditResponse.ok || !auditPayload.ok || !Array.isArray(auditPayload.audit)) {
-        throw new Error(auditPayload.error || 'Failed to load QA restart audit');
-      }
-      applyQaAuth(auditPayload);
-      const storiesPayload = await storiesResponse.json() as {
-        ok?: boolean;
-        qaAuth?: QaAuthInfo;
-        stories?: QaStoryScreenshot[];
-        releasePack?: QaUxReleasePackAudit;
-        error?: string;
-      };
-      if (!storiesResponse.ok || !storiesPayload.ok || !Array.isArray(storiesPayload.stories)) {
-        throw new Error(storiesPayload.error || 'Failed to load UX screenshots');
-      }
-      applyQaAuth(storiesPayload);
-      catalog = catalogPayload.catalog;
-      stories = storiesPayload.stories;
-      uxReleasePack = storiesPayload.releasePack ?? null;
-      history = historyPayload.history;
-      restartAudit = auditPayload.audit;
-      restart = historyPayload.restart ?? catalogPayload.restart ?? { active: false };
-      restartAllowed = Boolean(catalogPayload.restartAllowed || historyPayload.restartAllowed);
+      const catalogPayload = decodeQaEnvelope(await readJsonUnknown(catalogResponse), ['ok', 'qaAuth', 'catalog', 'restart', 'restartAllowed', 'error']);
+      const historyPayload = decodeQaEnvelope(await readJsonUnknown(historyResponse), ['ok', 'qaAuth', 'history', 'restart', 'restartAllowed', 'error']);
+      const auditPayload = decodeQaEnvelope(await readJsonUnknown(auditResponse), ['ok', 'qaAuth', 'audit', 'error']);
+      const storiesPayload = decodeQaEnvelope(await readJsonUnknown(storiesResponse), ['ok', 'qaAuth', 'stories', 'releasePack', 'error']);
+      if (!catalogResponse.ok || !historyResponse.ok || !auditResponse.ok || !storiesResponse.ok) throw new Error('Failed to load QA metadata');
+      applyDecodedQaAuth(catalogPayload['qaAuth']);
+      applyDecodedQaAuth(historyPayload['qaAuth']);
+      applyDecodedQaAuth(auditPayload['qaAuth']);
+      applyDecodedQaAuth(storiesPayload['qaAuth']);
+      catalog = requireDecodedArray(catalogPayload['catalog'], 'QA_CATALOG_INVALID', isQaCatalogEntry);
+      stories = requireDecodedArray(storiesPayload['stories'], 'QA_STORIES_INVALID', isQaStoryScreenshot);
+      uxReleasePack = optionalDecoded(storiesPayload['releasePack'], 'QA_RELEASE_PACK_INVALID', isQaUxReleasePackAudit) ?? null;
+      history = requireDecodedArray(historyPayload['history'], 'QA_HISTORY_INVALID', isQaHistoryEntry);
+      restartAudit = requireDecodedArray(auditPayload['audit'], 'QA_RESTART_AUDIT_INVALID', isQaRestartAuditEntry);
+      const historyRestart = optionalDecoded(historyPayload['restart'], 'QA_HISTORY_RESTART_INVALID', isRestartStatus);
+      const catalogRestart = optionalDecoded(catalogPayload['restart'], 'QA_CATALOG_RESTART_INVALID', isRestartStatus);
+      restart = historyRestart ?? catalogRestart ?? { active: false };
+      restartAllowed = catalogPayload['restartAllowed'] === true || historyPayload['restartAllowed'] === true;
     } catch (err) {
       actionError = err instanceof Error ? err.message : String(err);
     } finally {
@@ -743,10 +733,10 @@
     adminHealthError = null;
     try {
       const response = await qaFetch('/api/health', { cache: 'no-store' });
-      const payload = await response.json();
+      const payload = await readJsonUnknown(response);
       if (!response.ok) {
-        const message = payload && typeof payload === 'object' && 'error' in payload
-          ? String((payload as { error?: unknown }).error || '')
+        const message = payload && typeof payload === 'object' && !Array.isArray(payload) && 'error' in payload
+          ? String(payload['error'] || '')
           : '';
         throw new Error(message || `Health HTTP ${response.status}`);
       }
@@ -780,21 +770,15 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ runId: selectedRun.runId, shard: selectedShard.shard }),
       });
-      const payload = await response.json() as {
-        ok?: boolean;
-        command?: string[];
-        expectedGitHead?: string | null;
-        codeHash?: string;
-        dirty?: boolean;
-        error?: string;
-      };
-      if (!response.ok || !payload.ok || !Array.isArray(payload.command)) {
-        throw new Error(payload.error || 'Failed to plan QA restart');
-      }
-      restartPlan = payload.command;
-      restartExpectedGitHead = payload.expectedGitHead ?? '';
-      restartCodeHash = payload.codeHash ?? '';
-      restartDirty = Boolean(payload.dirty);
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'command', 'expectedGitHead', 'codeHash', 'dirty', 'error']);
+      if (!response.ok || !Array.isArray(payload['command']) || !payload['command'].every((entry) => typeof entry === 'string')) throw new Error('Failed to plan QA restart');
+      if (payload['expectedGitHead'] !== undefined && payload['expectedGitHead'] !== null && typeof payload['expectedGitHead'] !== 'string') throw new Error('QA_RESTART_PLAN_HEAD_INVALID');
+      if (payload['codeHash'] !== undefined && typeof payload['codeHash'] !== 'string') throw new Error('QA_RESTART_PLAN_HASH_INVALID');
+      if (payload['dirty'] !== undefined && typeof payload['dirty'] !== 'boolean') throw new Error('QA_RESTART_PLAN_DIRTY_INVALID');
+      restartPlan = payload['command'];
+      restartExpectedGitHead = typeof payload['expectedGitHead'] === 'string' ? payload['expectedGitHead'] : '';
+      restartCodeHash = typeof payload['codeHash'] === 'string' ? payload['codeHash'] : '';
+      restartDirty = payload['dirty'] === true;
     } catch (err) {
       actionError = err instanceof Error ? err.message : String(err);
     }
@@ -817,11 +801,10 @@
           expectedGitHead: restartExpectedGitHead.trim(),
         }),
       });
-      const payload = await response.json() as { ok?: boolean; restart?: RestartStatus; error?: string };
-      if (!response.ok || !payload.ok || !payload.restart) {
-        throw new Error(payload.error || 'Failed to start QA restart');
-      }
-      restart = payload.restart;
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'restart', 'error']);
+      const nextRestart = optionalDecoded(payload['restart'], 'QA_RESTART_INVALID', isRestartStatus);
+      if (!response.ok || !nextRestart) throw new Error('Failed to start QA restart');
+      restart = nextRestart;
       await loadMeta();
     } catch (err) {
       actionError = err instanceof Error ? err.message : String(err);
@@ -839,11 +822,10 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirm: retentionConfirm.trim() }),
       });
-      const payload = await response.json() as { ok?: boolean; result?: QaRetentionPurgeResult; error?: string };
-      if (!response.ok || !payload.ok || !payload.result) {
-        throw new Error(payload.error || 'Failed to purge old QA runs');
-      }
-      retentionResult = payload.result;
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'result', 'error']);
+      const result = optionalDecoded(payload['result'], 'QA_RETENTION_RESULT_INVALID', isQaRetentionPurgeResult);
+      if (!response.ok || !result) throw new Error('Failed to purge old QA runs');
+      retentionResult = result;
       retentionConfirm = '';
       await Promise.all([loadRuns(false), loadMeta()]);
     } catch (err) {
@@ -864,11 +846,10 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirm: historyBackfillConfirm.trim(), limit: 500 }),
       });
-      const payload = await response.json() as { ok?: boolean; result?: QaHistoryBackfillResult; error?: string };
-      if (!response.ok || !payload.ok || !payload.result) {
-        throw new Error(payload.error || 'Failed to backfill QA history');
-      }
-      historyBackfillResult = payload.result;
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'result', 'error']);
+      const result = optionalDecoded(payload['result'], 'QA_HISTORY_BACKFILL_RESULT_INVALID', isQaHistoryBackfillResult);
+      if (!response.ok || !result) throw new Error('Failed to backfill QA history');
+      historyBackfillResult = result;
       historyBackfillConfirm = '';
       await Promise.all([loadRuns(false), loadMeta()]);
     } catch (err) {
@@ -888,11 +869,10 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirm: restartAbortConfirm.trim() }),
       });
-      const payload = await response.json() as { ok?: boolean; restart?: RestartStatus; error?: string };
-      if (!response.ok || !payload.ok || !payload.restart) {
-        throw new Error(payload.error || 'Failed to abort QA restart');
-      }
-      restart = payload.restart;
+      const payload = decodeQaEnvelope(await readJsonUnknown(response), ['ok', 'restart', 'error']);
+      const nextRestart = optionalDecoded(payload['restart'], 'QA_RESTART_ABORT_INVALID', isRestartStatus);
+      if (!response.ok || !nextRestart) throw new Error('Failed to abort QA restart');
+      restart = nextRestart;
       restartAbortConfirm = '';
       await loadMeta();
     } catch (err) {

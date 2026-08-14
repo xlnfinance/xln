@@ -14,7 +14,10 @@ import {
 import { buildCertifiedEntityOutputHashes } from '../output/certification';
 import {
   buildEntityFrameAuthority,
+  computeEntityAccountDigests,
+  computeEntityAccountFieldDigests,
   computeCanonicalEntityConsensusStateHash,
+  computeEntityConsensusSectionDigestsCold,
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
 import {
@@ -26,6 +29,7 @@ import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-er
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
+import { getBoardHandoverLeaderState } from '../authority/board-handover';
 
 export type ProposalReplayResult =
   | { accepted: true; execution: EntityCandidate }
@@ -46,6 +50,9 @@ const verifyProposalRoots = (
     entityLog.error('proposal.state_root_rejected', {
       expected: stateRoot,
       received: frame.stateRoot,
+      sections: computeEntityConsensusSectionDigestsCold(state),
+      accounts: computeEntityAccountDigests(state),
+      accountFields: computeEntityAccountFieldDigests(state),
     });
     return rejectProposal(context, 'PROPOSAL_STATE_ROOT_MISMATCH');
   }
@@ -182,7 +189,12 @@ export const replayProposedEntityFrame = async (
     entityId: context.workingReplica.state.entityId,
     height: frame.height,
     timestamp: frame.timestamp,
-    leaderState: expectedCommittedLeaderState(context.workingReplica.state, frame),
+    leaderState:
+      getBoardHandoverLeaderState(
+        context.env,
+        context.workingReplica.state,
+        frame.txs,
+      ) ?? expectedCommittedLeaderState(context.workingReplica.state, frame),
   };
   const rootFailure = verifyProposalRoots(context, frame, state);
   if (rootFailure) return rootFailure;

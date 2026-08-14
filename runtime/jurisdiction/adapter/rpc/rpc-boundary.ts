@@ -64,7 +64,24 @@ export const eventCarriers = (
     interface: contract.interface as ethers.Interface,
   }));
 
-export const asRpcTxResponse = (tx: unknown): RpcTxResponse => tx as RpcTxResponse;
+/** Provider objects are foreign values; only a hash plus receipt waiter may cross this boundary. */
+export const asRpcTxResponse = (tx: unknown): RpcTxResponse => {
+  if (!tx || typeof tx !== 'object' || Array.isArray(tx)) {
+    throw new Error('J_ADAPTER_TX_RESPONSE_INVALID');
+  }
+  const value = tx as Record<string, unknown>;
+  if (!ethers.isHexString(value['hash'], 32) || typeof value['wait'] !== 'function') {
+    throw new Error('J_ADAPTER_TX_RESPONSE_INVALID');
+  }
+  const wait = value['wait'];
+  return {
+    hash: value['hash'],
+    wait: async (confirms, timeout) => {
+      const receipt: unknown = await Reflect.apply(wait, tx, [confirms, timeout]);
+      return receipt;
+    },
+  };
+};
 
 const decodeRpcLog = (
   value: unknown,

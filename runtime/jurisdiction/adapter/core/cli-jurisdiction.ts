@@ -1,6 +1,7 @@
 import { isUsableContractAddress } from '../../machine/contract-address';
 import { loadJurisdictions } from './jurisdiction-loader';
 import { normalizeLoopbackUrl } from '../../../network/p2p/loopback-url';
+import { requireBoundaryRecord } from '../../../protocol/boundary-validation';
 
 type RawJurisdictionEntry = Record<string, unknown> & {
   name?: unknown;
@@ -9,10 +10,6 @@ type RawJurisdictionEntry = Record<string, unknown> & {
   primary?: unknown;
   status?: unknown;
   contracts?: Record<string, unknown>;
-};
-
-type RawJurisdictionsPayload = Record<string, unknown> & {
-  jurisdictions?: Record<string, RawJurisdictionEntry>;
 };
 
 type CliJurisdictionContracts = {
@@ -105,7 +102,17 @@ export const selectCliJurisdiction = (
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('CLI_JURISDICTIONS_PAYLOAD_INVALID');
   }
-  const jurisdictions = (payload as RawJurisdictionsPayload).jurisdictions ?? {};
+  const root = requireBoundaryRecord(payload, 'CLI_JURISDICTIONS_PAYLOAD_INVALID');
+  const jurisdictionsRaw = root['jurisdictions'];
+  if (!jurisdictionsRaw || typeof jurisdictionsRaw !== 'object' || Array.isArray(jurisdictionsRaw)) {
+    throw new Error('CLI_JURISDICTIONS_PAYLOAD_INVALID');
+  }
+  const jurisdictions: Record<string, RawJurisdictionEntry> = Object.fromEntries(
+    Object.entries(jurisdictionsRaw).map(([key, entry]) => [
+      key,
+      requireBoundaryRecord(entry, `CLI_JURISDICTION_ENTRY_INVALID:${key}`),
+    ]),
+  );
   const allEntries = Object.entries(jurisdictions);
 
   const requestedKey = String(options.jurisdictionKey || '').trim().toLowerCase();

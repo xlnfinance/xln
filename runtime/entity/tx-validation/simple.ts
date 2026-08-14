@@ -17,6 +17,7 @@ export type SimpleEntityTxType = keyof typeof ENTITY_TX_SIMPLE_SCHEMAS;
 
 type SpecializedEntityTxType =
   | 'accountInput'
+  | 'boardHandover'
   | 'chat'
   | 'consensusOutput'
   | 'entityCommand'

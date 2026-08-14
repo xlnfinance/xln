@@ -128,8 +128,8 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entityOf[actor]) + 1;
     bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
-    try dep.processBatch(encoded, _hanko(actor, h), nonce) returns (bool complete) {
-      return complete;
+    try dep.processBatch(encoded, _hanko(actor, h), nonce) {
+      return true;
     } catch {
       return false;
     }

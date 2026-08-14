@@ -18,6 +18,7 @@
 
 <script lang="ts">
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+  import { parseJsonUnknown } from '$lib/utils/boundary';
   import { formatEntityId } from '$lib/utils/format';
   import { resolveOrderbookRelayWsUrl } from './orderbook-relay-url';
   import {
@@ -158,7 +159,7 @@
     try {
       const raw = window.localStorage.getItem(PRICE_STEP_STORAGE_KEY);
       if (!raw) return;
-      const parsed: unknown = JSON.parse(raw);
+      const parsed = parseJsonUnknown(raw, 'ORDERBOOK_PRICE_STEP_STORAGE_JSON_INVALID');
       if (!isUnknownRecord(parsed)) throw new Error('ORDERBOOK_PRICE_STEP_STORAGE_INVALID');
       const next: Record<string, string> = {};
       for (const [pair, step] of Object.entries(parsed)) {

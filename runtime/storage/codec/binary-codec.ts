@@ -177,21 +177,21 @@ export const encodeBinaryPayload = (
   return encoded;
 };
 
-export const decodeBinaryPayload = <T>(
+export const decodeBinaryPayload = (
   bytes: Uint8Array,
-): T => {
+): unknown => {
   const magic = bytes[0];
   const codec = magic === undefined ? undefined : XLN_BINARY_CODEC_BY_MAGIC.get(magic);
   if (!codec) {
     throw new Error(`XLN_BINARY_CODEC_MAGIC_MISSING: firstByte=${magic ?? 'none'}`);
   }
   const body = bytes.subarray(1);
-  if (codec === 'json') return deserializeTaggedJson<T>(textDecoder.decode(body));
-  return msgpackCodec.unpack(body) as T;
+  if (codec === 'json') return deserializeTaggedJson(textDecoder.decode(body));
+  return msgpackCodec.unpack(body) as unknown;
 };
 
 export const decodeValidatedBinaryPayload = <T>(
   bytes: Uint8Array,
   validator: BinaryPayloadValidator<T>,
-): T => validator(decodeBinaryPayload<unknown>(bytes));
+): T => validator(decodeBinaryPayload(bytes));
 import { Buffer } from '../../infra/platform-crypto';

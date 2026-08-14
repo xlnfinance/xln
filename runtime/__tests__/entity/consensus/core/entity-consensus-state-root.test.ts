@@ -12,6 +12,7 @@ import {
 } from '../../../../entity/consensus/state-root';
 import { createEntityFrameHash } from '../../../../entity/consensus/frame';
 import type { EntityState } from '../../../../entity/types';
+import { makeAccount as makeAccountReplica } from '../../../helpers/cross-j';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
@@ -96,7 +97,7 @@ const mutators = {
     state.reserves.set(1, 10n);
   },
   accounts: state => {
-    state.accounts.set(counterpartyId, { status: 'active', mempool: [], pendingWithdrawals: new Map() } as never);
+    state.accounts.set(counterpartyId, makeAccountReplica(entityId, counterpartyId));
   },
   externalWallet: state => {
     state.externalWallet = { balances: new Map(), allowances: new Map() };
@@ -365,15 +366,11 @@ test('Entity consensus root excludes only typed Account replica caches', () => {
   const left = baseState();
   const right = baseState();
   left.accounts.set(counterpartyId, {
-    status: 'active',
-    mempool: [],
-    pendingWithdrawals: new Map(),
+    ...makeAccountReplica(entityId, counterpartyId),
     frameHistory: [{ stateHash: 'left-cache' }],
   } as never);
   right.accounts.set(counterpartyId, {
-    status: 'active',
-    mempool: [],
-    pendingWithdrawals: new Map(),
+    ...makeAccountReplica(entityId, counterpartyId),
     frameHistory: [{ stateHash: 'right-cache' }],
   } as never);
   expect(computeCanonicalEntityConsensusStateHash(left)).toBe(computeCanonicalEntityConsensusStateHash(right));
@@ -394,11 +391,7 @@ test('Entity consensus root excludes only typed Account replica caches', () => {
 
 test('Entity Account commitment cache has a cold oracle for missed invalidation', () => {
   const state = baseState();
-  state.accounts.set(counterpartyId, {
-    status: 'active',
-    mempool: [],
-    pendingWithdrawals: new Map(),
-  } as never);
+  state.accounts.set(counterpartyId, makeAccountReplica(entityId, counterpartyId));
   const before = computeCanonicalEntityConsensusStateHash(state);
   (state.accounts.get(counterpartyId) as unknown as { status: string }).status = 'disputed';
   expect(computeCanonicalEntityConsensusStateHash(state)).toBe(before);
@@ -475,29 +468,46 @@ test('Entity consensus root binds incremental book commitments but not the deriv
   expect(computeCanonicalEntityConsensusStateHash(policyChanged)).not.toBe(baselineRoot);
 });
 
-test('Entity consensus root strips only typed post-hash Account witnesses', () => {
-  const makeAccount = (hanko: string, frameHash: string) => {
+test('Entity consensus root commits peer Hankos while own post-quorum subsets stay shadow', () => {
+  const makeWitnessAccount = (ownHanko: string, peerHanko: string, frameHash: string) => {
     const pendingFrame = {
       height: 1,
       timestamp: 100,
       jHeight: 0,
-      accountTxs: [],
+      accountTxs: [{
+        type: 'settle_transition' as const,
+        data: {
+          kind: 'seal' as const,
+          revision: 1,
+          workspaceHash: `0x${'71'.repeat(32)}`,
+          settlementNonce: 1,
+          settlementHash: `0x${'72'.repeat(32)}`,
+          settlementHanko: ownHanko,
+          postProof: {
+            proofBodyHash: `0x${'73'.repeat(32)}`,
+            disputeHash: `0x${'74'.repeat(32)}`,
+            nonce: 1,
+            proposerIsLeft: true,
+            hanko: ownHanko,
+          },
+        },
+      }],
       prevFrameHash: `0x${'66'.repeat(32)}`,
       accountStateRoot: `0x${'55'.repeat(32)}`,
       stateHash: frameHash,
       deltas: [],
       byLeft: true,
     };
-    return {
-      status: 'active',
-      mempool: [],
-      currentFrameHanko: hanko,
-      counterpartyFrameHanko: hanko,
-      currentDisputeProofHanko: hanko,
-      counterpartyDisputeProofHanko: hanko,
-      counterpartySettlementHanko: hanko,
-      hankoSignature: hanko,
-      pendingWithdrawals: new Map([
+    const account = makeAccountReplica(entityId, counterpartyId);
+    account.currentFrame = pendingFrame;
+    account.currentHeight = pendingFrame.height;
+    account.currentFrameHanko = ownHanko;
+    account.counterpartyFrameHanko = peerHanko;
+    account.currentDisputeProofHanko = ownHanko;
+    account.counterpartyDisputeProofHanko = peerHanko;
+    account.counterpartySettlementHanko = peerHanko;
+    account.hankoSignature = ownHanko;
+    account.pendingWithdrawals = new Map([
         [
           'withdrawal',
           {
@@ -507,56 +517,62 @@ test('Entity consensus root strips only typed post-hash Account witnesses', () =
             requestedAt: 100,
             direction: 'outgoing',
             status: 'approved',
-            signature: hanko,
+            signature: ownHanko,
           },
         ],
-      ]),
-      pendingFrame,
-      pendingAccountInput: {
+      ]);
+    account.pendingFrame = pendingFrame;
+    account.pendingAccountInput = {
         kind: 'frame',
         fromEntityId: entityId,
         toEntityId: counterpartyId,
-        proposal: { frame: pendingFrame, frameHanko: hanko },
-      },
-      lastOutboundFrameAck: {
+        domain: account.state.domain,
+        disputeConfig: account.state.disputeConfig,
+        proposal: { frame: pendingFrame, frameHanko: ownHanko },
+      };
+    account.lastOutboundFrameAck = {
         height: 1,
         counterpartyEntityId: counterpartyId,
         response: {
           kind: 'ack',
           fromEntityId: entityId,
           toEntityId: counterpartyId,
-          ack: { height: 1, frameHash, frameHanko: hanko },
+          domain: account.state.domain,
+          disputeConfig: account.state.disputeConfig,
+          ack: { height: 1, frameHash, frameHanko: ownHanko },
         },
-      },
-      settlementWorkspace: {
-        ops: [],
-        leftHanko: hanko,
-        rightHanko: hanko,
+      };
+    account.state.settlementWorkspace = {
+      ops: [],
+      workspaceHash: `0x${'76'.repeat(32)}`,
+      revision: 1,
+      leftHanko: ownHanko,
+        rightHanko: peerHanko,
         settlementHash: `0x${'77'.repeat(32)}`,
         lastModifiedByLeft: true,
         status: 'ready_to_submit',
-        version: 1,
         createdAt: 100,
         lastUpdatedAt: 100,
         executorIsLeft: true,
         postSettlementDisputeProof: {
-          leftHanko: hanko,
-          rightHanko: hanko,
+          leftHanko: ownHanko,
+          rightHanko: peerHanko,
           disputeHash: `0x${'88'.repeat(32)}`,
           proofBodyHash: `0x${'99'.repeat(32)}`,
           nonce: 1,
+          proposerIsLeft: true,
         },
-      },
-    };
+      };
+    return account;
   };
   const left = baseState();
   const right = baseState();
   const frameHash = `0x${'aa'.repeat(32)}`;
-  left.accounts.set(counterpartyId, makeAccount('0xleft-witness', frameHash) as never);
-  right.accounts.set(counterpartyId, makeAccount('0xright-witness', frameHash) as never);
+  left.accounts.set(counterpartyId, makeWitnessAccount('0xown-subset-a', '0xpeer-fixed', frameHash));
+  right.accounts.set(counterpartyId, makeWitnessAccount('0xown-subset-b', '0xpeer-fixed', frameHash));
   expect(computeCanonicalEntityConsensusStateHash(left)).toBe(computeCanonicalEntityConsensusStateHash(right));
 
-  right.accounts.set(counterpartyId, makeAccount('0xright-witness', `0x${'bb'.repeat(32)}`) as never);
+  right.accounts.set(counterpartyId, makeWitnessAccount('0xown-subset-b', '0xpeer-changed', frameHash));
   // Account Map writes are reducer-owned dirty-page operations. The
   // incremental parent commitment never scans a million untouched Accounts
   // merely to discover an object replacement.

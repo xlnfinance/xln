@@ -1,17 +1,18 @@
 import { isAddress, ZeroAddress } from 'ethers';
 import type { JAdapter } from '@xln/runtime/api/public/runtime-module';
 import { safeParse } from '@xln/runtime/protocol/serialization';
+import { isUnknownRecord } from '$lib/utils/boundary';
 import type { EntityReplica } from '$lib/types/ui';
 import { readJsonResponse } from './account/account-faucet';
 import type { ExternalToken } from './assets/entity-asset-catalog';
 import {
   assertExternalSnapshotCount,
+  decodeExternalWalletSnapshotResponse,
   normalizeOptionalTokenId,
   readExternalWalletSnapshotSource,
   requireExternalSnapshotBigInt,
   type ExternalAllowanceRead,
   type ExternalWalletReadResult,
-  type ExternalWalletSnapshotResponse,
 } from './assets/external-wallet-snapshot';
 
 const REQUEST_TIMEOUT_MS = 5_000;
@@ -139,20 +140,20 @@ export async function fetchExternalTokenCatalog(apiBase: string): Promise<Extern
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const raw = await response.text();
-  const decoded = safeParse<unknown>(raw);
-  if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
+  const decoded = safeParse(raw);
+  if (!isUnknownRecord(decoded)) {
     throw new Error('TOKEN_CATALOG_RESPONSE_INVALID:expected-object');
   }
-  const data = decoded as Record<string, unknown>;
+  const data = decoded;
   if (!response.ok) {
     throw new Error(typeof data['error'] === 'string' ? data['error'] : `Token catalog failed (${response.status})`);
   }
   if (!Array.isArray(data['tokens'])) throw new Error('TOKEN_CATALOG_RESPONSE_INVALID:tokens');
   return data['tokens'].map((value, index) => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    if (!isUnknownRecord(value)) {
       throw new Error(`TOKEN_CATALOG_ENTRY_INVALID:${index}:expected-object`);
     }
-    const token = value as Record<string, unknown>;
+    const token = value;
     const symbol = typeof token['symbol'] === 'string' ? token['symbol'].trim() : '';
     const address = typeof token['address'] === 'string' ? token['address'].trim() : '';
     const decimals = Number(token['decimals']);
@@ -343,7 +344,8 @@ export async function requestExternalWalletSnapshot(
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     body: JSON.stringify({ entityId, owner, tokenAddresses, allowances: allowanceReads }),
   });
-  const data = await readJsonResponse<ExternalWalletSnapshotResponse>(response);
+  const rawData = await readJsonResponse(response);
+  const data = rawData === null ? null : decodeExternalWalletSnapshotResponse(rawData);
   if (!response.ok || !data?.success) {
     throw new Error(data?.error || `External wallet snapshot failed (${response.status})`);
   }

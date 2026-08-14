@@ -101,7 +101,7 @@ const normalizeSignedAt = (value: unknown): number => {
 
 const decodeStoredRegistrationValue = (raw: string): StoredPushRegistration => {
   const value = requireBoundaryRecord(
-    deserializeTaggedJson<unknown>(raw),
+    deserializeTaggedJson(raw),
     'PUSH_STORED_REGISTRATION_OBJECT_INVALID',
   );
   requireExactBoundaryKeys(value, [
@@ -170,20 +170,38 @@ export const buildPushUnregisterMessage = (runtimeId: string, tokenHash: string,
   `${PUSH_UNREGISTER_DOMAIN}|${runtimeId.toLowerCase()}|${tokenHash.toLowerCase()}|${Math.floor(signedAt)}`;
 
 export const verifyPushRegistration = (
-  request: PushRegistrationRequestV1,
+  value: unknown,
   options?: { now?: number; maxClockSkewMs?: number },
 ): StoredPushRegistration => {
-  if (!request || request.type !== 'push_registration' || request.version !== 1) {
+  const request = requireBoundaryRecord(value, 'PUSH_REGISTRATION_INVALID');
+  requireExactBoundaryKeys(request, [
+    'type', 'version', 'runtimeId', 'entityId', 'token', 'platform', 'chainId',
+    'depositoryAddress', 'rpcUrl', 'signedAt', 'ownerSignature',
+  ], [], 'PUSH_REGISTRATION_FIELDS_INVALID');
+  if (request['type'] !== 'push_registration' || request['version'] !== 1) {
     throw new Error('PUSH_REGISTRATION_INVALID');
   }
-  const runtimeId = normalizeRuntimeId(request.runtimeId);
-  const entityId = normalizeEntityId(request.entityId);
-  const token = normalizeToken(request.token);
-  const platform = normalizePlatform(request.platform);
-  const chainId = normalizeChainId(request.chainId);
-  const depositoryAddress = normalizeAddress(request.depositoryAddress);
-  const rpcUrl = normalizePushRpcUrl(request.rpcUrl);
-  const signedAt = normalizeSignedAt(request.signedAt);
+  const runtimeId = normalizeRuntimeId(request['runtimeId']);
+  const entityId = normalizeEntityId(request['entityId']);
+  const token = normalizeToken(request['token']);
+  const platform = normalizePlatform(request['platform']);
+  const chainId = normalizeChainId(request['chainId']);
+  const depositoryAddress = normalizeAddress(request['depositoryAddress']);
+  const rpcUrl = normalizePushRpcUrl(request['rpcUrl']);
+  const signedAt = normalizeSignedAt(request['signedAt']);
+  const decodedRequest: PushRegistrationRequestV1 = {
+    type: 'push_registration',
+    version: 1,
+    runtimeId,
+    entityId,
+    token,
+    platform,
+    chainId,
+    depositoryAddress,
+    rpcUrl,
+    signedAt,
+    ownerSignature: String(request['ownerSignature'] || ''),
+  };
   assertFresh(signedAt, options);
   const tokenHash = hashPushToken(token);
   const message = buildPushRegistrationMessage(
@@ -196,7 +214,7 @@ export const verifyPushRegistration = (
     rpcUrl,
     signedAt,
   );
-  const recovered = ethers.verifyMessage(message, String(request.ownerSignature || '')).toLowerCase();
+  const recovered = ethers.verifyMessage(message, decodedRequest.ownerSignature).toLowerCase();
   if (recovered !== runtimeId) {
     throw new Error(`PUSH_REGISTRATION_SIGNATURE_INVALID: recovered=${recovered} expected=${runtimeId}`);
   }
@@ -215,19 +233,34 @@ export const verifyPushRegistration = (
 };
 
 export const verifyPushUnregister = (
-  request: PushUnregisterRequestV1,
+  value: unknown,
   options?: { now?: number; maxClockSkewMs?: number },
 ): { runtimeId: string; tokenHash: string } => {
-  if (!request || request.type !== 'push_unregister' || request.version !== 1) {
+  const request = requireBoundaryRecord(value, 'PUSH_UNREGISTER_INVALID');
+  requireExactBoundaryKeys(
+    request,
+    ['type', 'version', 'runtimeId', 'signedAt', 'ownerSignature'],
+    ['token', 'tokenHash'],
+    'PUSH_UNREGISTER_FIELDS_INVALID',
+  );
+  if (request['type'] !== 'push_unregister' || request['version'] !== 1) {
     throw new Error('PUSH_UNREGISTER_INVALID');
   }
-  const runtimeId = normalizeRuntimeId(request.runtimeId);
-  const token = String(request.token || '').trim();
-  const tokenHash = token ? hashPushToken(normalizeToken(token)) : normalizeTokenHash(request.tokenHash);
-  const signedAt = normalizeSignedAt(request.signedAt);
+  const runtimeId = normalizeRuntimeId(request['runtimeId']);
+  const token = String(request['token'] || '').trim();
+  const tokenHash = token ? hashPushToken(normalizeToken(token)) : normalizeTokenHash(request['tokenHash']);
+  const signedAt = normalizeSignedAt(request['signedAt']);
+  const decodedRequest: PushUnregisterRequestV1 = {
+    type: 'push_unregister',
+    version: 1,
+    runtimeId,
+    ...(token ? { token } : { tokenHash }),
+    signedAt,
+    ownerSignature: String(request['ownerSignature'] || ''),
+  };
   assertFresh(signedAt, options);
   const message = buildPushUnregisterMessage(runtimeId, tokenHash, signedAt);
-  const recovered = ethers.verifyMessage(message, String(request.ownerSignature || '')).toLowerCase();
+  const recovered = ethers.verifyMessage(message, decodedRequest.ownerSignature).toLowerCase();
   if (recovered !== runtimeId) {
     throw new Error(`PUSH_UNREGISTER_SIGNATURE_INVALID: recovered=${recovered} expected=${runtimeId}`);
   }

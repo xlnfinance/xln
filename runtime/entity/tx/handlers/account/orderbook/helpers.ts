@@ -16,9 +16,9 @@ import {
   type BookState,
 } from '../../../../../orderbook';
 import {
-  getSwapPairPolicyByBaseQuote,
+  getSwapPairPolicyForDimensions,
   getTokenInfo,
-  hasSwapPairPolicyByBaseQuote,
+  hasSwapPairPolicyForDimensions,
   type SwapPairPolicy,
 } from '../../../../../account/utils';
 import {
@@ -213,10 +213,6 @@ export const deriveSameOrderbookMaterialization = (
   const side = deriveSide(offer.giveTokenId, offer.wantTokenId);
   const isSellBase = offer.giveTokenId === base && offer.wantTokenId === quote;
   const isBuyBase = offer.giveTokenId === quote && offer.wantTokenId === base;
-  const pairPolicy = getSwapPairPolicyByBaseQuote(base, quote);
-  const hasExplicitPairPolicy = hasSwapPairPolicyByBaseQuote(base, quote);
-  const bucketWidthTicks = Math.max(1, pairPolicy.bookBucketWidthTicks);
-
   if (!isSellBase && !isBuyBase) {
     return {
       kind: 'reject',
@@ -230,6 +226,19 @@ export const deriveSameOrderbookMaterialization = (
   const baseAmount = isSellBase ? offer.giveAmount : offer.wantAmount;
   const quoteAmount = isSellBase ? offer.wantAmount : offer.giveAmount;
   const { baseTokenDecimals, quoteTokenDecimals } = getSwapPairDimensions(side, offer);
+  const pairPolicy = getSwapPairPolicyForDimensions(
+    base,
+    quote,
+    baseTokenDecimals,
+    quoteTokenDecimals,
+  );
+  const hasExplicitPairPolicy = hasSwapPairPolicyForDimensions(
+    base,
+    quote,
+    baseTokenDecimals,
+    quoteTokenDecimals,
+  );
+  const bucketWidthTicks = Math.max(1, pairPolicy.bookBucketWidthTicks);
   const lotScale = getSwapLotScaleForDecimals(baseTokenDecimals);
   if (baseAmount <= 0n || quoteAmount <= 0n) {
     return {

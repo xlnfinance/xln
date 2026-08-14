@@ -3,6 +3,7 @@ import hre from 'hardhat';
 
 import {
   buildSingleSignerHanko,
+  canonicalAccountKey,
   computeDepositoryBatchHash,
   deployEntityProvider,
   deriveHardhatPrivateKey,
@@ -124,7 +125,7 @@ describe('Depository current-debt forgiveness', () => {
     const blockedAmount = 9n;
     await harness.harnessAddDebt(left.entityId, tokenId, blocker, blockedAmount);
 
-    const accountKey = await harness.accountKey(left.entityId, right.entityId);
+    const accountKey = canonicalAccountKey(left.entityId, right.entityId);
     const chainId = (await ethers.provider.getNetwork()).chainId;
     const settlementHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
       [

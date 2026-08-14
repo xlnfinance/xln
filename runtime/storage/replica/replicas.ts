@@ -171,10 +171,17 @@ export const inspectStorageReplicaMetaEntries = (
   value: decodeBuffer(entry.value),
 })).sort((left, right) => compareStableText(left.key, right.key));
 
+const requireDecodedRecord = (value: unknown, key: Buffer): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`STORAGE_REPLICA_META_RECORD_REQUIRED:key=0x${key.toString('hex')}`);
+  }
+  return value as Record<string, unknown>;
+};
+
 export const summarizeStorageReplicaMetaFields = (
   entries: readonly { key: Buffer; value: Buffer }[],
 ): Array<{ key: string; fields: Array<{ name: string; valueHash: string }> }> => entries.map(entry => {
-  const value = decodeBuffer<Record<string, unknown>>(entry.value);
+  const value = requireDecodedRecord(decodeBuffer(entry.value), entry.key);
   return {
     key: entry.key.toString('hex'),
     fields: Object.keys(value).sort(compareStableText).map(name => ({
@@ -187,7 +194,7 @@ export const summarizeStorageReplicaMetaFields = (
 export const summarizeStorageReplicaMetaHeads = (
   entries: readonly { key: Buffer; value: Buffer }[],
 ): Array<{ key: string; entityHead: unknown; latestLineageHead: unknown }> => entries.map(entry => {
-  const value = decodeBuffer<Record<string, unknown>>(entry.value);
+  const value = requireDecodedRecord(decodeBuffer(entry.value), entry.key);
   const latestLineage = value['latestLineage'] as {
     frame?: {
       height?: unknown;

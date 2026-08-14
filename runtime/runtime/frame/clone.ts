@@ -9,6 +9,7 @@ import { encodeBuffer } from '../../storage/codec/codec';
 import { copyLocalEntityProviderActionRuntimeTxAuthorization } from '../registration/entity-provider-action-submit-auth';
 import { copyLocalJImportResultRuntimeTxAuthorization } from '../jurisdiction/jurisdiction-import';
 import { copyLocalJSubmitRuntimeTxAuthorization } from '../jurisdiction/j-submit-state';
+import { copyLocalGovernanceResultAuthorization } from '../registration/governance-submit-state';
 import { copyLocalScheduledWakeAuthorization } from '../input-pipeline/scheduled-wake';
 
 export const cloneRuntimeFrameMempool = (input: RuntimeInput): RuntimeInput => {
@@ -22,6 +23,7 @@ export const cloneRuntimeFrameMempool = (input: RuntimeInput): RuntimeInput => {
     copyLocalEntityProviderActionRuntimeTxAuthorization(source, target);
     copyLocalRuntimeAdapterCommandAuthorization(source, target);
     copyLocalNumberedRegistrationAuthorization(source, target);
+    copyLocalGovernanceResultAuthorization(source, target);
   });
   input.entityInputs.forEach((source, inputIndex) => {
     const target = cloned.entityInputs[inputIndex];

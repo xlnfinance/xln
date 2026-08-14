@@ -12,6 +12,7 @@ import { hashJPrefixAttestation } from '../../jurisdiction/machine/history/j-pre
 import { assertCertifiedOutputSemanticIdentity } from '../../entity/consensus/output/certification';
 import { getCertifiedOutputNestedTxs, getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
 import { accountInputProposal } from '../../account/consensus/flush';
+import { accountFrameWithoutPostCommitHankos } from '../../account/settlement/witness-projection';
 
 export const carriesEntityCommitNotification = (output: RoutedEntityInput): boolean =>
   hasEntityCommitCertificate(output.proposedFrame);
@@ -323,7 +324,11 @@ const getAccountAckIdentity = (
   const proposalIdentity =
     data.kind === 'frame_ack'
       ? {
-          frame: data.proposal.frame,
+          // The Account frame commits every settlement/dispute target, but
+          // post-commit Hankos are non-unique quorum witnesses. Two honest
+          // 2-of-3 subsets can therefore carry different witness bytes for
+          // this exact frame without equivocating on any state or amount.
+          frame: accountFrameWithoutPostCommitHankos(data.proposal.frame),
           disputeSeal: withoutDisputeHanko(data.proposal.disputeSeal),
         }
       : null;

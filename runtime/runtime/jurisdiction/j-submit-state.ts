@@ -16,13 +16,20 @@ import {
   type ActionJTx,
 } from '../registration/entity-provider-action-submit-state';
 import { markLocalEntityProviderActionRuntimeTx } from '../registration/entity-provider-action-submit-auth';
+import {
+  isGovernanceJTx,
+  materializeInitialGovernanceAttempt,
+  requireCanonicalGovernanceAttempt,
+  type GovernanceJTx,
+} from '../registration/governance-submit-state';
 
 type RetryJSubmitTx = Extract<RuntimeTx, { type: 'retryJSubmit' }>;
 type RecordJSubmitResultTx = Extract<RuntimeTx, { type: 'recordJSubmitResult' }>;
 type BatchJTx = Extract<JTx, { type: 'batch' }>;
 type DurableAttempt =
   | NonNullable<BatchJTx['data']['runtimeSubmitAttempt']>
-  | NonNullable<ActionJTx['data']['runtimeSubmitAttempt']>;
+  | NonNullable<ActionJTx['data']['runtimeSubmitAttempt']>
+  | NonNullable<GovernanceJTx['data']['runtimeSubmitAttempt']>;
 
 const LOCAL_J_SUBMIT_RUNTIME_TX = Symbol.for('xln.runtime.j-submit.local');
 
@@ -102,6 +109,7 @@ const attemptOf = (jTx: JTx): DurableAttempt | undefined => {
   if (isEntityProviderActionJTx(jTx)) {
     return jTx.data.runtimeSubmitAttempt;
   }
+  if (isGovernanceJTx(jTx)) return jTx.data.runtimeSubmitAttempt;
   return undefined;
 };
 
@@ -114,6 +122,7 @@ const requireCanonicalPendingAttempt = (
   if (isEntityProviderActionJTx(jTx)) {
     return requireCanonicalEntityProviderActionAttempt(jurisdictionName, jTx);
   }
+  if (isGovernanceJTx(jTx)) return requireCanonicalGovernanceAttempt(jurisdictionName, jTx);
   if (jTx.type !== 'batch') throw new Error('J_SUBMIT_PENDING_ATTEMPT_UNSUPPORTED');
   const batchAttempt = jTx.data.runtimeSubmitAttempt;
   if (!batchAttempt) throw new Error('J_SUBMIT_PENDING_ATTEMPT_METADATA_MISSING');
@@ -407,7 +416,9 @@ export const splitJOutboxForDurableSubmit = (
     const maintenanceTxs: JTx[] = [];
     const durableTxs: JTx[] = [];
     for (const jTx of input.jTxs) {
-      if (isEntityProviderActionJTx(jTx)) {
+      if (isGovernanceJTx(jTx)) {
+        durableTxs.push(materializeInitialGovernanceAttempt(input.jurisdictionName, jTx));
+      } else if (isEntityProviderActionJTx(jTx)) {
         if (jTx.data.runtimeSubmitAttempt) {
           requireCanonicalEntityProviderActionAttempt(input.jurisdictionName, jTx);
           durableTxs.push(jTx);
@@ -429,13 +440,19 @@ export const splitJOutboxForDurableSubmit = (
             },
           }));
         }
-      } else if (jTx.type === 'mint' || jTx.type === 'debtEnforcement') {
+      } else if (
+        jTx.type === 'mint' ||
+        jTx.type === 'debtEnforcement' ||
+        jTx.type === 'entityProviderActivateBoard'
+      ) {
         // These are deliberately not consensus settlement commands:
         // - mint is a local-dev/testnet admin utility and is unavailable on
         //   production chains;
         // - enforceDebts is permissionless monotonic queue maintenance. Every
         //   monetary contract path enforces debt too, so this call is only a
-        //   liveness hint and repeating it can only advance valid FIFO debt.
+        //   liveness hint and repeating it can only advance valid FIFO debt;
+        // - activateBoard is permissionless after the signed proposal delay;
+        //   retries cannot change the selected board or bypass its delay.
         // Submit both after WAL, but never replay them as durable financial
         // intents. New JTx kinds must choose an explicit durable design rather
         // than silently entering this maintenance lane.

@@ -1,4 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
+import { isUnknownRecord, parseJsonUnknown, readJsonUnknown } from '$lib/utils/boundary';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
 import { activeEnv, activeRuntimeId, registerRuntimeAdapterSwitcher, runtimes, runtimeOperations } from './runtimeStore';
@@ -533,7 +534,7 @@ export const readOrCreateEmbeddedRuntimeSeed = async (): Promise<string | undefi
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(stored);
+      parsed = parseJsonUnknown(stored, 'EMBEDDED_RUNTIME_SEED_STORAGE_INVALID_JSON');
     } catch {
       throw new Error('EMBEDDED_RUNTIME_SEED_STORAGE_INVALID_JSON');
     }
@@ -1217,19 +1218,18 @@ async function fetchPaymentGossipProfiles(entityIds: string[]): Promise<GossipPr
     try {
       const response = await fetch(`/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`);
       if (!response.ok) continue;
-      const payload = await response.json() as unknown;
-      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      const payload = await readJsonUnknown(response);
+      if (!isUnknownRecord(payload)) {
         throw new Error(`PAYMENT_GOSSIP_RESPONSE_INVALID: entity=${entityId}`);
       }
-      const record = payload as { profile?: unknown; peers?: unknown };
-      if (record.profile !== undefined && record.profile !== null) {
-        profiles.push(parseProfile(record.profile));
+      if (payload['profile'] !== undefined && payload['profile'] !== null) {
+        profiles.push(parseProfile(payload['profile']));
       }
-      if (record.peers !== undefined) {
-        if (!Array.isArray(record.peers)) {
+      if (payload['peers'] !== undefined) {
+        if (!Array.isArray(payload['peers'])) {
           throw new Error(`PAYMENT_GOSSIP_PEERS_INVALID: entity=${entityId}`);
         }
-        profiles.push(...record.peers.map(parseProfile));
+        profiles.push(...payload['peers'].map(parseProfile));
       }
     } catch (error) {
       errorLog.log('Payment gossip profile fetch failed', 'Payment Gossip', { entityId, error });

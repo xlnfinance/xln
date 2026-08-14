@@ -2,6 +2,20 @@ type RpcBlockMiningProvider = {
   send: (method: string, params: unknown[]) => Promise<unknown>;
 };
 
+/** Require the JSON-RPC method surface before any scenario mutates chain time. */
+export const requireRpcBlockMiningProvider = (value: unknown): RpcBlockMiningProvider => {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('RPC_BLOCK_MINING_PROVIDER_INVALID');
+  }
+  const send = Reflect.get(value, 'send');
+  if (typeof send !== 'function') {
+    throw new Error('RPC_BLOCK_MINING_PROVIDER_SEND_MISSING');
+  }
+  return {
+    send: (method, params) => Reflect.apply(send, value, [method, params]),
+  };
+};
+
 export type ExactBlockMiningResult = {
   startBlock: bigint;
   finalBlock: bigint;

@@ -102,7 +102,7 @@ const decodeJurisdiction = (
   ], [
     'description', 'rebalancePolicyUsd',
     'entityProviderDeploymentBlock', 'tokens', 'tronContracts', 'evmContracts',
-    'primary',
+    'primary', 'stackVersion', 'deployer', 'foundationRecipient',
   ], `${code}_FIELDS`);
   const contracts = requireBoundaryRecord(entry['contracts'], `${code}_CONTRACTS`);
   requireExactBoundaryKeys(
@@ -140,6 +140,14 @@ const decodeJurisdiction = (
   for (const field of ['tokens', 'tronContracts', 'evmContracts'] as const) {
     if (entry[field] !== undefined) {
       validateStorageSafeValue(entry[field], `${code}_${field.toUpperCase()}`);
+    }
+  }
+  if (entry['stackVersion'] !== undefined && entry['stackVersion'] !== 'V1') {
+    throw new Error(`${code}_STACK_VERSION_INVALID`);
+  }
+  for (const field of ['deployer', 'foundationRecipient'] as const) {
+    if (entry[field] !== undefined && !/^0x[0-9a-fA-F]{40}$/.test(requireString(entry[field], `${code}_${field}`))) {
+      throw new Error(`${code}_${field.toUpperCase()}_INVALID`);
     }
   }
   return {
@@ -240,6 +248,11 @@ const decodeJurisdictionsData = (value: unknown): JurisdictionsData => {
           }),
     },
   };
+};
+
+export const validateJurisdictionsDataValue = (value: unknown): Record<string, unknown> => {
+  decodeJurisdictionsData(value);
+  return requireBoundaryRecord(value, 'JURISDICTIONS_ROOT_INVALID');
 };
 
 const readNodeEnvFlag = (name: string): boolean =>

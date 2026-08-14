@@ -24,6 +24,7 @@ const isHookType = (value: unknown): value is ScheduledHookType =>
   value === 'watchdog' ||
   value === 'hub_rebalance_kick' ||
   value === 'board_reseal' ||
+  value === 'counterparty_board_reseal_deadline' ||
   value === 'cross_j_orderbook_sweep';
 
 const rejectUnexpectedKeys = (
@@ -113,6 +114,35 @@ const validateBoardResealData = (
   };
 };
 
+const validateCounterpartyBoardResealDeadlineData = (
+  data: Record<string, unknown>,
+  context: string,
+): Extract<ScheduledHook, { type: 'counterparty_board_reseal_deadline' }>['data'] => {
+  rejectUnexpectedKeys(
+    data,
+    ['accountId', 'activationJHeight', 'activationLogIndex'],
+    context,
+  );
+  const accountId = validateString(data['accountId'], `${context}.accountId`);
+  const activationJHeight = validateNumber(
+    data['activationJHeight'],
+    `${context}.activationJHeight`,
+  );
+  const activationLogIndex = validateNumber(
+    data['activationLogIndex'],
+    `${context}.activationLogIndex`,
+  );
+  if (
+    !Number.isSafeInteger(activationJHeight) || activationJHeight < 1 ||
+    !Number.isSafeInteger(activationLogIndex) || activationLogIndex < 0
+  ) {
+    throw new FinancialDataCorruptionError(
+      `${context} counterparty board activation position is invalid`,
+    );
+  }
+  return { accountId, activationJHeight, activationLogIndex };
+};
+
 const validateHookData = (
   type: ScheduledHookType,
   data: Record<string, unknown>,
@@ -162,6 +192,8 @@ const validateHookData = (
       };
     case 'board_reseal':
       return validateBoardResealData(data, context);
+    case 'counterparty_board_reseal_deadline':
+      return validateCounterpartyBoardResealDeadlineData(data, context);
     case 'cross_j_orderbook_sweep':
       rejectUnexpectedKeys(data, ['reason'], context);
       return {

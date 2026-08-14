@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { TextDecoder, TextEncoder } from 'util';
 import { deriveSignerAddressSync } from '../../../account/crypto';
 import { deserializeTaggedJson, serializeTaggedJson } from '../../../protocol/serialization';
+import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
 import {
   assertRuntimeRecoveryBundleAuthenticity,
   computeRuntimeRecoveryBundleHash,
@@ -107,19 +108,31 @@ export const decryptTowerPayloadWithWatchSeed = async (
 ): Promise<string> => {
   const raw = String(payload || '').trim();
   if (!raw) throw new Error('TOWER_PAYLOAD_EMPTY');
-  const parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
+  const parsed = requireBoundaryRecord(
+    deserializeTaggedJson(raw),
+    'TOWER_PAYLOAD_INVALID',
+  );
+  requireExactBoundaryKeys(
+    parsed,
+    ['version', 'type', 'alg', 'iv', 'ciphertext'],
+    [],
+    'TOWER_PAYLOAD_FIELDS_INVALID',
+  );
   if (parsed['type'] !== 'tower_encrypted_payload') {
     throw new Error('TOWER_PAYLOAD_NOT_ENCRYPTED');
   }
   if (parsed['version'] !== 1 || parsed['alg'] !== 'watch-seed-aes-256-gcm') {
     throw new Error('TOWER_PAYLOAD_ENCRYPTION_UNSUPPORTED');
   }
+  if (typeof parsed['iv'] !== 'string' || typeof parsed['ciphertext'] !== 'string') {
+    throw new Error('TOWER_PAYLOAD_CIPHERTEXT_INVALID');
+  }
   const key = await importTowerWatchSeedPayloadAesKey(watchSeed);
   return decoder.decode(new Uint8Array(
     await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: toOwnedArrayBuffer(ethers.getBytes(String(parsed['iv'] || '0x'))) },
+      { name: 'AES-GCM', iv: toOwnedArrayBuffer(ethers.getBytes(parsed['iv'])) },
       key,
-      toOwnedArrayBuffer(ethers.getBytes(String(parsed['ciphertext'] || '0x'))),
+      toOwnedArrayBuffer(ethers.getBytes(parsed['ciphertext'])),
     ),
   ));
 };
@@ -245,7 +258,7 @@ export const decryptRuntimeRecoveryBundle = async (
   const plaintext = encrypted.compression === 'gzip'
     ? await gunzipBytes(encryptedPlaintext)
     : encryptedPlaintext;
-  const parsed = deserializeTaggedJson<RuntimeRecoveryBundleV1>(decoder.decode(plaintext));
+  const parsed = deserializeTaggedJson(decoder.decode(plaintext));
   const validated = assertRuntimeRecoveryBundleAuthenticity(parsed, runtimeSeed, trustedRuntimeId);
   const bundleHash = computeRuntimeRecoveryBundleHash(validated);
   if (bundleHash !== encrypted.bundleHash) {

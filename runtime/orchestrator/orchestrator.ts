@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { scheduler } from 'node:timers/promises';
 import { compareStableText, safeStringify } from '../protocol/serialization';
+import { requireBoundaryRecord } from '../protocol/boundary-validation';
 import { REMOTE_RUNTIME } from '../config/constants';
 import { readBooleanEnv } from '../config/environment';
 import { createStructuredLogger, registerStructuredLogSink } from '../infra/logger';
@@ -1207,8 +1208,10 @@ const captureManagedChildErrorLine = (child: RecoverableChild, line: string): vo
   let structuredError = '';
   if (jsonStart >= 0) {
     try {
-      const parsed = JSON.parse(boundedLine.slice(jsonStart)) as { error?: unknown; message?: unknown };
-      structuredError = String(parsed.error || parsed.message || '').trim();
+      const parsed = requireBoundaryRecord(JSON.parse(boundedLine.slice(jsonStart)), 'MANAGED_CHILD_ERROR_JSON_INVALID');
+      const error = parsed['error'];
+      const detail = parsed['message'];
+      structuredError = String(error || detail || '').trim();
     } catch {
       structuredError = '';
     }
@@ -2337,10 +2340,28 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
     const primary = resolvePrimaryHubJurisdiction(jurisdictionsConfig);
     let contracts: RpcContractAddresses | null = null;
     if (primary) {
-      const payload = JSON.parse(readShardJurisdictions(jurisdictionsConfig)) as {
-        jurisdictions?: Record<string, { contracts?: RpcContractAddresses }>;
-      };
-      contracts = payload.jurisdictions?.[primary.key]?.contracts ?? null;
+      const payload = requireBoundaryRecord(
+        JSON.parse(readShardJurisdictions(jurisdictionsConfig)),
+        'SHARD_JURISDICTIONS_INVALID',
+      );
+      const jurisdictions = requireBoundaryRecord(payload['jurisdictions'], 'SHARD_JURISDICTIONS_ENTRIES_INVALID');
+      const entryRaw = jurisdictions[primary.key];
+      if (entryRaw !== undefined) {
+        const entry = requireBoundaryRecord(entryRaw, `SHARD_JURISDICTION_INVALID:${primary.key}`);
+        const rawContracts = entry['contracts'];
+        if (rawContracts !== undefined) {
+          const record = requireBoundaryRecord(rawContracts, `SHARD_JURISDICTION_CONTRACTS_INVALID:${primary.key}`);
+          const allowed = ['account', 'depository', 'entityProvider', 'deltaTransformer'] as const;
+          if (Object.keys(record).some(key => !allowed.some(allowedKey => allowedKey === key)) ||
+              Object.values(record).some(value => typeof value !== 'string')) {
+            throw new Error(`SHARD_JURISDICTION_CONTRACTS_INVALID:${primary.key}`);
+          }
+          contracts = Object.fromEntries(allowed.flatMap(key => {
+            const address = record[key];
+            return address === undefined ? [] : [[key, address] as const];
+          }));
+        }
+      }
     }
     let missingCode: string[] = ['primary:unavailable'];
     let probeError = '';

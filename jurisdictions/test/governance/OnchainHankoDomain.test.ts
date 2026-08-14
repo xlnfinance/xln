@@ -1048,7 +1048,7 @@ describe('canonical on-chain Hanko domains', function () {
     await expect(otherEntityProvider.releaseControlShares(
       entityNumber, depositoryAddress, controlAmount, dividendAmount,
       purpose, hanko,
-    )).to.be.revertedWith('Invalid entity signature');
+    )).to.be.revertedWithCustomError(otherEntityProvider, 'ShareDepositoryRequired');
     expect(await otherEntityProvider.entityActionNonces(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32))).to.equal(otherNonceBefore);
     expect(await otherEntityProvider.balanceOf(source, controlTokenId)).to.equal(otherControlBefore);
     expect(await otherEntityProvider.balanceOf(source, dividendTokenId)).to.equal(otherDividendBefore);

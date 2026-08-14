@@ -10,7 +10,12 @@ import { requireReplica } from '../consensus/multi-sig';
 import { prepareCompanyAccounts, proveOrdinaryCompanyPayment } from './accounts';
 import { releaseCompanySharesToCustody } from './custody';
 import { formCompanyActors } from './formation';
-import { runCompanyMarket } from './trading';
+import { runCompanyBuyback, runCompanyMarket } from './trading';
+import {
+  activateInvestorBoardAndHandover,
+  proposeInvestorBoard,
+  settleInvestorControlReserve,
+} from './takeover';
 
 const assertBoardThresholdEvidence = (
   env: RuntimeReplica,
@@ -40,7 +45,19 @@ export async function companyIpo(env: RuntimeReplica): Promise<RuntimeReplica> {
     await proveOrdinaryCompanyPayment(env, actors);
     await runCompanyMarket(env, actors, shares);
     assertBoardThresholdEvidence(env, actors.boardCompany.id, actors.boardCompany.validators);
-    console.log('COMPANY_IPO_PASS: 1-of-1 + 2-of-3 + CONTROL/DIVIDEND + payment + buyback');
+    await settleInvestorControlReserve(env, actors, shares);
+    const investorBoard = await proposeInvestorBoard(env, actors);
+    await activateInvestorBoardAndHandover(env, actors, investorBoard);
+    const postTakeoverActors = {
+      ...actors,
+      boardCompany: {
+        ...actors.boardCompany,
+        validators: [...investorBoard.config.validators],
+        config: investorBoard.config,
+      },
+    };
+    await runCompanyBuyback(env, postTakeoverActors, shares);
+    console.log('COMPANY_IPO_PASS: 1-of-1 + 2-of-3 + CONTROL/DIVIDEND + settled takeover/handover + buyback');
     return env;
   } finally {
     env.scenarioMode = previousScenarioMode ?? false;

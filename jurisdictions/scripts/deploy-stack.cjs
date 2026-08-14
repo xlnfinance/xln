@@ -121,6 +121,14 @@ async function main() {
 
   console.log(`   DeltaTransformer: ${deltaTransformerAddr}`);
 
+  const bindReceipt = await (await entityProvider.bindShareDepository(depositoryAddr)).wait();
+  if (!bindReceipt || bindReceipt.status !== 1) {
+    throw new Error("SHARE_DEPOSITORY_BINDING_RECEIPT_INVALID");
+  }
+  if ((await entityProvider.shareDepository()).toLowerCase() !== depositoryAddr.toLowerCase()) {
+    throw new Error("SHARE_DEPOSITORY_BINDING_MISMATCH");
+  }
+
   // 5. Register the canonical external stablecoin as tokenId 1. Public
   // testnets deploy an explicit faucet token when no address is configured;
   // mainnet callers must provide the real token address.
@@ -168,6 +176,7 @@ async function main() {
   console.log(`   USDT: ${stablecoinAddress} (tokenId 1)`);
 
   const result = {
+    stackVersion: "V1",
     network: hre.network.name,
     chainId: Number(network.chainId),
     deployer: deployer.address,

@@ -4,7 +4,10 @@ import { getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
-import type { RuntimeIngressReceipt } from '../runtime/input-pipeline/ingress-receipts';
+import {
+  decodeRuntimeIngressReceipt,
+  type RuntimeIngressReceipt,
+} from '../runtime/input-pipeline/ingress-receipts';
 import type { ConsensusConfig } from '../entity/types';
 import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';
 import { scaleWholeTokenAmount } from '../types/finance/rebalance';
@@ -110,6 +113,131 @@ type GossipProfileResponse = {
   ok: boolean;
   found: boolean;
   profile?: { entityId?: string } | null;
+};
+
+const responseErrorMessage = (value: unknown, defaultMessage: string): string => {
+  try {
+    const response = requireBoundaryRecord(value, 'CONTROL_RESPONSE_INVALID');
+    return typeof response['error'] === 'string' && response['error'].trim()
+      ? response['error']
+      : defaultMessage;
+  } catch {
+    return defaultMessage;
+  }
+};
+
+const decodeControlOkResponse = (value: unknown, code: string): void => {
+  const response = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(response, ['ok'], [], `${code}_FIELDS_INVALID`);
+  if (response['ok'] !== true) throw new Error(code);
+};
+
+const decodeControlQueueResponse = (value: unknown): ControlQueueResponse => {
+  const response = requireBoundaryRecord(value, 'CONTROL_RUNTIME_INPUT_RESPONSE_INVALID');
+  requireExactBoundaryKeys(
+    response,
+    ['ok'],
+    ['accepted', 'receipt', 'statusUrl', 'error'],
+    'CONTROL_RUNTIME_INPUT_RESPONSE_FIELDS_INVALID',
+  );
+  if (typeof response['ok'] !== 'boolean') throw new Error('CONTROL_RUNTIME_INPUT_RESPONSE_OK_INVALID');
+  const acceptedRaw = response['accepted'];
+  let accepted: ControlQueueResponse['accepted'];
+  if (acceptedRaw !== undefined) {
+    const raw = requireBoundaryRecord(acceptedRaw, 'CONTROL_RUNTIME_INPUT_ACCEPTED_INVALID');
+    requireExactBoundaryKeys(raw, ['runtimeTxs', 'entityInputs', 'jInputs'], [], 'CONTROL_RUNTIME_INPUT_ACCEPTED_FIELDS_INVALID');
+    accepted = {
+      runtimeTxs: requireBoundaryInteger(raw['runtimeTxs'], 'CONTROL_RUNTIME_INPUT_ACCEPTED_RUNTIME_TXS_INVALID'),
+      entityInputs: requireBoundaryInteger(raw['entityInputs'], 'CONTROL_RUNTIME_INPUT_ACCEPTED_ENTITY_INPUTS_INVALID'),
+      jInputs: requireBoundaryInteger(raw['jInputs'], 'CONTROL_RUNTIME_INPUT_ACCEPTED_J_INPUTS_INVALID'),
+    };
+  }
+  if (response['statusUrl'] !== undefined && typeof response['statusUrl'] !== 'string') {
+    throw new Error('CONTROL_RUNTIME_INPUT_STATUS_URL_INVALID');
+  }
+  if (response['error'] !== undefined && typeof response['error'] !== 'string') {
+    throw new Error('CONTROL_RUNTIME_INPUT_ERROR_INVALID');
+  }
+  return {
+    ok: response['ok'],
+    ...(accepted === undefined ? {} : { accepted }),
+    ...(response['receipt'] === undefined ? {} : { receipt: decodeRuntimeIngressReceipt(response['receipt']) }),
+    ...(response['statusUrl'] === undefined ? {} : { statusUrl: response['statusUrl'] }),
+    ...(response['error'] === undefined ? {} : { error: response['error'] }),
+  };
+};
+
+const decodeGossipProfileResponse = (value: unknown): GossipProfileResponse => {
+  const response = requireBoundaryRecord(value, 'GOSSIP_PROFILE_RESPONSE_INVALID');
+  requireExactBoundaryKeys(response, ['ok', 'found'], ['profile'], 'GOSSIP_PROFILE_RESPONSE_FIELDS_INVALID');
+  if (typeof response['ok'] !== 'boolean' || typeof response['found'] !== 'boolean') {
+    throw new Error('GOSSIP_PROFILE_RESPONSE_FLAGS_INVALID');
+  }
+  const profile = response['profile'];
+  if (profile !== undefined && profile !== null) {
+    const record = requireBoundaryRecord(profile, 'GOSSIP_PROFILE_RESPONSE_PROFILE_INVALID');
+    requireExactBoundaryKeys(record, [], ['entityId'], 'GOSSIP_PROFILE_RESPONSE_PROFILE_FIELDS_INVALID');
+    if (record['entityId'] !== undefined && typeof record['entityId'] !== 'string') {
+      throw new Error('GOSSIP_PROFILE_RESPONSE_ENTITY_ID_INVALID');
+    }
+  }
+  let decodedProfile: GossipProfileResponse['profile'] | undefined;
+  if (profile === null) {
+    decodedProfile = null;
+  } else if (profile !== undefined) {
+    const record = requireBoundaryRecord(profile, 'GOSSIP_PROFILE_RESPONSE_PROFILE_INVALID');
+    decodedProfile = record['entityId'] === undefined ? {} : { entityId: record['entityId'] as string };
+  }
+  return {
+    ok: response['ok'],
+    found: response['found'],
+    ...(decodedProfile === undefined ? {} : { profile: decodedProfile }),
+  };
+};
+
+const decodeControlRuntimeStatusResponse = (value: unknown): ControlRuntimeStatusResponse => {
+  const response = requireBoundaryRecord(value, 'CONTROL_RUNTIME_STATUS_RESPONSE_INVALID');
+  requireExactBoundaryKeys(
+    response,
+    ['ok'],
+    ['receipt', 'currentHeight', 'runtime', 'error'],
+    'CONTROL_RUNTIME_STATUS_RESPONSE_FIELDS_INVALID',
+  );
+  if (typeof response['ok'] !== 'boolean') throw new Error('CONTROL_RUNTIME_STATUS_RESPONSE_OK_INVALID');
+  const currentHeight = response['currentHeight'];
+  if (currentHeight !== undefined) requireBoundaryInteger(currentHeight, 'CONTROL_RUNTIME_STATUS_CURRENT_HEIGHT_INVALID');
+  const runtime = response['runtime'];
+  if (runtime !== undefined && runtime !== null) {
+    const record = requireBoundaryRecord(runtime, 'CONTROL_RUNTIME_STATUS_RUNTIME_INVALID');
+    requireExactBoundaryKeys(record, [], ['halted', 'fatalDebugPayload'], 'CONTROL_RUNTIME_STATUS_RUNTIME_FIELDS_INVALID');
+    if (record['halted'] !== undefined && typeof record['halted'] !== 'boolean') {
+      throw new Error('CONTROL_RUNTIME_STATUS_HALTED_INVALID');
+    }
+  }
+  let decodedRuntime: ControlRuntimeStatusResponse['runtime'] | undefined;
+  if (runtime === null) {
+    decodedRuntime = null;
+  } else if (runtime !== undefined) {
+    const record = requireBoundaryRecord(runtime, 'CONTROL_RUNTIME_STATUS_RUNTIME_INVALID');
+    decodedRuntime = {
+      ...(record['halted'] === undefined ? {} : { halted: record['halted'] as boolean }),
+      ...(record['fatalDebugPayload'] === undefined ? {} : { fatalDebugPayload: record['fatalDebugPayload'] }),
+    };
+  }
+  if (response['error'] !== undefined && typeof response['error'] !== 'string') {
+    throw new Error('CONTROL_RUNTIME_STATUS_ERROR_INVALID');
+  }
+  return {
+    ok: response['ok'],
+    ...(response['receipt'] === undefined
+      ? {}
+      : { receipt: response['receipt'] === null ? null : decodeRuntimeIngressReceipt(response['receipt']) }),
+    ...(currentHeight === undefined ? {} : {
+      currentHeight: requireBoundaryInteger(currentHeight, 'CONTROL_RUNTIME_STATUS_CURRENT_HEIGHT_INVALID'),
+    }),
+    ...(decodedRuntime === undefined ? {} : { runtime: decodedRuntime }),
+    ...(response['error'] === undefined ? {} : { error: response['error'] }),
+  };
 };
 
 export type ManagedEntityConfig = {
@@ -221,7 +349,7 @@ export class DaemonControlClient {
     };
   }
 
-  private async get<T>(path: string): Promise<T> {
+  private async get(path: string): Promise<unknown> {
     const response = await fetchWithTimeout(
       `${this.baseUrl}${path}`,
       {
@@ -232,18 +360,14 @@ export class DaemonControlClient {
       `GET ${path}`,
     );
     const raw = await response.text();
-    const payload = raw.trim().length > 0 ? deserializeTaggedJson<T | { error?: string }>(raw) : ({} as T);
+    const payload = raw.trim().length > 0 ? deserializeTaggedJson(raw) : {};
     if (!response.ok) {
-      const message =
-        typeof (payload as { error?: string })?.error === 'string'
-          ? (payload as { error?: string }).error!
-          : `${response.status} ${response.statusText}`;
-      throw new Error(message);
+      throw new Error(responseErrorMessage(payload, `${response.status} ${response.statusText}`));
     }
-    return payload as T;
+    return payload;
   }
 
-  private async post<TResponse, TBody>(path: string, body: TBody): Promise<TResponse> {
+  private async post(path: string, body: unknown): Promise<unknown> {
     const response = await fetchWithTimeout(
       `${this.baseUrl}${path}`,
       {
@@ -255,19 +379,15 @@ export class DaemonControlClient {
       `POST ${path}`,
     );
     const raw = await response.text();
-    const payload = raw.trim().length > 0 ? deserializeTaggedJson<TResponse | { error?: string }>(raw) : ({} as TResponse);
+    const payload = raw.trim().length > 0 ? deserializeTaggedJson(raw) : {};
     if (!response.ok) {
-      const message =
-        typeof (payload as { error?: string })?.error === 'string'
-          ? (payload as { error?: string }).error!
-          : `${response.status} ${response.statusText}`;
-      throw new Error(message);
+      throw new Error(responseErrorMessage(payload, `${response.status} ${response.statusText}`));
     }
-    return payload as TResponse;
+    return payload;
   }
 
   async listEntities(): Promise<ControlEntitySummary[]> {
-    const raw = await this.get<unknown>('/api/control/entities');
+    const raw = await this.get('/api/control/entities');
     const response = requireBoundaryRecord(raw, 'CONTROL_ENTITIES_RESPONSE_INVALID');
     requireExactBoundaryKeys(
       response,
@@ -294,14 +414,19 @@ export class DaemonControlClient {
   }
 
   async registerSigner(signerId: string, privateKeyHex: string): Promise<void> {
-    await this.post<{ ok: boolean; signerId: string }, { signerId: string; privateKeyHex: string }>(
+    const raw = await this.post(
       '/api/control/signers/register',
       { signerId, privateKeyHex },
     );
+    const response = requireBoundaryRecord(raw, 'CONTROL_SIGNER_REGISTER_RESPONSE_INVALID');
+    requireExactBoundaryKeys(response, ['ok', 'signerId'], [], 'CONTROL_SIGNER_REGISTER_RESPONSE_FIELDS_INVALID');
+    if (response['ok'] !== true || typeof response['signerId'] !== 'string' || !response['signerId']) {
+      throw new Error('CONTROL_SIGNER_REGISTER_RESPONSE_INVALID');
+    }
   }
 
   async queueRuntimeInput(input: RuntimeInput): Promise<ControlQueueResponse> {
-    const response = await this.post<ControlQueueResponse, RuntimeInput>('/api/control/runtime-input', input);
+    const response = decodeControlQueueResponse(await this.post('/api/control/runtime-input', input));
     if (response.ok !== true) {
       throw new Error(response.error || 'CONTROL_RUNTIME_INPUT_REJECTED');
     }
@@ -312,9 +437,9 @@ export class DaemonControlClient {
   }
 
   async hasGossipProfile(entityId: string): Promise<boolean> {
-    const response = await this.get<GossipProfileResponse>(
+    const response = decodeGossipProfileResponse(await this.get(
       `/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`,
-    );
+    ));
     return response.ok === true && response.found === true;
   }
 
@@ -323,12 +448,12 @@ export class DaemonControlClient {
     advertiseEntityIds?: string[];
     gossipPollMs?: number;
   }): Promise<void> {
-    await this.post<{ ok: boolean }, typeof config>('/api/control/p2p', config);
+    decodeControlOkResponse(await this.post('/api/control/p2p', config), 'CONTROL_P2P_RESPONSE_INVALID');
   }
 
   async getRuntimeInputStatus(statusUrl: string): Promise<ControlRuntimeStatusResponse> {
     const path = statusUrl.startsWith('/') ? statusUrl : `/${statusUrl}`;
-    const response = await this.get<ControlRuntimeStatusResponse>(path);
+    const response = decodeControlRuntimeStatusResponse(await this.get(path));
     if (response.ok !== true) {
       throw new Error(response.error || 'CONTROL_RUNTIME_INPUT_STATUS_FAILED');
     }

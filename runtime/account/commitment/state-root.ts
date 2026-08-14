@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import type { AccountReplica, AccountState, AccountStateDomain, SettlementWorkspace } from '../../types/account';
+import type { AccountReplica, AccountState, AccountStateDomain } from '../../types/account';
 import type { JurisdictionConfig } from '../../protocol/config/jurisdiction-config';
 import { compareStableText } from '../../protocol/serialization';
 import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../../protocol/state/radix-merkle';
@@ -13,6 +13,7 @@ import {
 import { createStructuredLogger } from '../../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../../infra/performance/runtime-flags';
 import { getPerfMs } from '../../infra/time';
+import { settlementWorkspaceWithoutHankos } from '../settlement/witness-projection';
 
 const accountRootLog = createStructuredLogger('account.state-root');
 
@@ -322,11 +323,10 @@ const accountStateRootEntries = (
     swapOffersRoot: mapRoot('swapOffers'),
     subcontractsRoot: mapRoot('subcontracts'),
     lendingIntentsRoot: mapRoot('lendingIntents'),
-    // Settlement is bilateral Account state, not an Entity-local UI overlay.
-    // Bind the full sealed workspace, including its exact Hankos, so every
-    // later Account frame proves the same executable authorization. Undefined
-    // is omitted by canonicalRlpNode, preserving roots for accounts without one.
-    settlementWorkspace: account.settlementWorkspace,
+    // Bind every settlement decision, amount, nonce and signed target. Exact
+    // Hanko bytes are excluded because different valid threshold subsets can
+    // authorize the same target; each witness is verified before application.
+    settlementWorkspace: settlementWorkspaceWithoutHankos(account.settlementWorkspace),
     }],
     ['jurisdiction', {
     lastFinalizedJHeight: account.lastFinalizedJHeight,
@@ -371,7 +371,9 @@ const accountCommitmentSectionDetail = (
   lendingIntentsRoot: computeAccountMapCommitment(account, 'lendingIntents', encodeAccountStateValue, cold),
   settlementWorkspaceHash: account.settlementWorkspace === undefined
     ? null
-    : computeIntegrityDigest(encodeAccountStateValue(account.settlementWorkspace)),
+    : computeIntegrityDigest(encodeAccountStateValue(
+        settlementWorkspaceWithoutHankos(account.settlementWorkspace),
+      )),
 });
 
 /** Exact per-map breakdown emitted only after a commitment-section mismatch. */
@@ -437,25 +439,6 @@ export const computeAccountStateRootCold = (account: AccountState): string => {
   ).root;
 };
 
-const settlementOverlayState = (
-  workspace: SettlementWorkspace | undefined,
-): unknown => {
-  if (!workspace) return undefined;
-  const {
-    leftHanko: _leftHanko,
-    rightHanko: _rightHanko,
-    postSettlementDisputeProof,
-    ...state
-  } = workspace;
-  if (!postSettlementDisputeProof) return state;
-  const {
-    leftHanko: _postLeftHanko,
-    rightHanko: _postRightHanko,
-    ...postSettlementState
-  } = postSettlementDisputeProof;
-  return { ...state, postSettlementDisputeProof: postSettlementState };
-};
-
 const pendingWithdrawalOverlayState = (
   withdrawals: AccountReplica['pendingWithdrawals'],
 ): Map<string, Omit<AccountReplica['pendingWithdrawals'] extends Map<string, infer Entry> ? Entry : never, 'signature'>> =>
@@ -467,7 +450,7 @@ const pendingWithdrawalOverlayState = (
 const accountEntityOverlayState = (account: AccountReplica): unknown => ({
   status: account.status,
   disputePrepare: account.disputePrepare,
-  settlementWorkspace: settlementOverlayState(account.state.settlementWorkspace),
+  settlementWorkspace: settlementWorkspaceWithoutHankos(account.state.settlementWorkspace),
   activeDispute: account.activeDispute,
   pendingForwards: account.pendingForwards,
   pendingWithdrawals: pendingWithdrawalOverlayState(account.pendingWithdrawals),

@@ -36,7 +36,11 @@ const executeSingleBoard = async (
     signerId: proposer,
     entityTxs: txs,
   }], new Set());
-  await converge(env, 20);
+  // A single-signer action can immediately emit J-events observed by a
+  // multi-validator target Entity. Drain that certified prefix fanout too;
+  // stopping when only the origin proposal is executed leaves the target's
+  // read model behind the chain event this action just produced.
+  await converge(env, 50);
   const proposalId = newestProposalId(before, actor, env);
   const proposal = requireReplica(env, actor.id, proposer).state.proposals.get(proposalId);
   if (proposal?.status !== 'executed') {

@@ -2,11 +2,16 @@ import { Signature, keccak256, recoverAddress } from 'ethers';
 import { canonicalizeProfile, type Profile } from './';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { HankoString } from '../../types/hanko';
-import { resolveHankoDefaultProposerSignerId, verifyHankoForHash } from '../../hanko/signing';
+import {
+  getEntityConfigBoardHash,
+  resolveHankoDefaultProposerSignerId,
+  verifyHankoForHash,
+} from '../../hanko/signing';
 import {
   getCertifiedBoardNodeStore,
   getCertifiedBoardStackKey,
   resolveCertifiedRegisteredBoardHash,
+  resolveObserverCertifiedBoardRecord,
   resolveObserverCertifiedBoardHash,
 } from '../../jurisdiction/machine/board-registry';
 import { getSignerAddress, signAccountFrame } from '../../account/crypto';
@@ -16,6 +21,27 @@ import {
   profileToEntityProfileDescriptor,
 } from './profile-descriptor';
 import type { EntityState } from '../types';
+
+export const hasCurrentProfileBoardAuthority = async (
+  env: EntityRuntimeContext,
+  state: EntityState,
+): Promise<boolean> => {
+  const configBoardHash = (await getEntityConfigBoardHash(env, state.config)).toLowerCase();
+  if (configBoardHash === state.entityId.toLowerCase()) return true;
+  const record = resolveObserverCertifiedBoardRecord(
+    state,
+    getCertifiedBoardNodeStore(env),
+    state.entityId,
+  );
+  const jurisdiction = state.config.jurisdiction;
+  if (!jurisdiction) return false;
+  const discoveredBoardHash = resolveCertifiedRegisteredBoardHash(env, state.entityId, {
+    chainId: Number(jurisdiction.chainId),
+    depositoryAddress: jurisdiction.depositoryAddress,
+    entityProviderAddress: jurisdiction.entityProviderAddress,
+  });
+  return record?.boardHash === configBoardHash && discoveredBoardHash === configBoardHash;
+};
 
 const PROFILE_ROUTE_DOMAIN = 'xln-profile-runtime-route-v1';
 const SECP256K1_HALF_ORDER = BigInt('0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0');

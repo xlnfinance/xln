@@ -1,5 +1,9 @@
 import { ethers } from 'ethers';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
+import {
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../protocol/boundary-validation';
 import type {
   TowerAppointmentV1,
   TowerDiscoverResponseV1,
@@ -19,7 +23,6 @@ import {
   verifyPushRegistration,
   verifyPushUnregister,
 } from './push/registration';
-import type { PushRegistrationRequestV1, PushUnregisterRequestV1 } from './push/types';
 
 const DEFAULT_MAX_JSON_BODY_BYTES = 128 * 1024;
 const SMALL_MAX_JSON_BODY_BYTES = 8 * 1024;
@@ -69,12 +72,75 @@ const readCappedRequestBody = async (request: Request, maxBytes: number): Promis
   return new TextDecoder().decode(buffer);
 };
 
-const parseJsonBody = async <T>(request: Request, maxBytes = DEFAULT_MAX_JSON_BODY_BYTES): Promise<T> => {
+/** HTTP bytes are untrusted until the endpoint-specific decoder accepts them. */
+const parseJsonBody = async (request: Request, maxBytes = DEFAULT_MAX_JSON_BODY_BYTES): Promise<unknown> => {
   const raw = await readCappedRequestBody(request, maxBytes);
   if (!raw.trim()) {
     throw new Error('TOWER_BODY_EMPTY');
   }
-  return JSON.parse(raw) as T;
+  return JSON.parse(raw) as unknown;
+};
+
+const decodeTowerRestoreRequest = (value: unknown): TowerRestoreRequestV1 => {
+  const body = requireBoundaryRecord(value, 'TOWER_RESTORE_BODY_INVALID');
+  requireExactBoundaryKeys(body, ['lookupKey'], [], 'TOWER_RESTORE_BODY_FIELDS_INVALID');
+  return { lookupKey: normalizeLookupKey(body['lookupKey']) };
+};
+
+const decodeTowerRecord = (value: unknown, code: string): Record<string, unknown> =>
+  requireBoundaryRecord(value, code);
+
+/**
+ * Decode the transport envelope before any signed appointment field is read.
+ * Signature verification authenticates values; it must not also be asked to
+ * compensate for malformed JSON structure or unexpected schema fields.
+ */
+const decodeTowerAppointmentEnvelope = (value: unknown): TowerAppointmentV1 => {
+  const appointment = decodeTowerRecord(value, 'TOWER_APPOINTMENT_INVALID');
+  requireExactBoundaryKeys(
+    appointment,
+    ['type', 'version', 'lookupKey', 'bundle', 'ownerProof'],
+    ['towerMode', 'slot', 'lastResortPayload'],
+    'TOWER_APPOINTMENT_FIELDS_INVALID',
+  );
+  if (appointment['type'] !== 'tower_appointment' || appointment['version'] !== 1) {
+    throw new Error('TOWER_APPOINTMENT_INVALID');
+  }
+  const bundle = decodeTowerRecord(appointment['bundle'], 'TOWER_BUNDLE_INVALID');
+  requireExactBoundaryKeys(
+    bundle,
+    ['version', 'runtimeId', 'lookupKey', 'height', 'createdAt', 'bundleHash', 'iv', 'ciphertext'],
+    ['kind', 'baseRuntimeHeight', 'baseCheckpointHash', 'compression'],
+    'TOWER_BUNDLE_FIELDS_INVALID',
+  );
+  const ownerProof = decodeTowerRecord(appointment['ownerProof'], 'TOWER_APPOINTMENT_OWNER_PROOF_INVALID');
+  requireExactBoundaryKeys(
+    ownerProof,
+    ['runtimeId', 'signedAt', 'signature'],
+    [],
+    'TOWER_APPOINTMENT_OWNER_PROOF_FIELDS_INVALID',
+  );
+  const lastResortPayload = appointment['lastResortPayload'];
+  if (lastResortPayload !== undefined) {
+    const payload = decodeTowerRecord(lastResortPayload, 'TOWER_LAST_RESORT_PAYLOAD_INVALID');
+    requireExactBoundaryKeys(
+      payload,
+      [
+        'triggerHint', 'watch', 'encryptedRemedy', 'actionKind', 'appointmentSequence', 'proofNonce',
+        'proofBodyHash', 'responseMode', 'lastResortWindowSeconds',
+      ],
+      ['maxFeeToken', 'feeBudget'],
+      'TOWER_LAST_RESORT_PAYLOAD_FIELDS_INVALID',
+    );
+    const watch = decodeTowerRecord(payload['watch'], 'TOWER_LAST_RESORT_PAYLOAD_WATCH_MISSING');
+    requireExactBoundaryKeys(
+      watch,
+      ['rpcUrl', 'chainId', 'depositoryAddress', 'watchedEntityId', 'counterentity'],
+      [],
+      'TOWER_LAST_RESORT_PAYLOAD_WATCH_FIELDS_INVALID',
+    );
+  }
+  return appointment as TowerAppointmentV1;
 };
 
 const normalizeLookupKey = (lookupKey: unknown): string => {
@@ -143,7 +209,7 @@ const assertEncryptedLastResortPayload = (lastResortPayload: TowerAppointmentV1[
   }
   let parsed: Record<string, unknown>;
   try {
-    parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
+    parsed = requireBoundaryRecord(deserializeTaggedJson(raw), 'TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
   } catch {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
   }
@@ -205,7 +271,8 @@ const verifyLastResortPayload = (lastResortPayload: TowerAppointmentV1['lastReso
   assertEncryptedLastResortPayload(lastResortPayload);
 };
 
-const verifyTowerAppointment = (appointment: TowerAppointmentV1): TowerAppointmentV1 => {
+const verifyTowerAppointment = (input: unknown): TowerAppointmentV1 => {
+  const appointment = decodeTowerAppointmentEnvelope(input);
   if (!appointment || appointment.type !== 'tower_appointment' || appointment.version !== 1) {
     throw new Error('TOWER_APPOINTMENT_INVALID');
   }
@@ -284,7 +351,7 @@ export const handleTowerAppointment = async (req: Request, store: WatchtowerStor
     // storage quota can accept. Keep a bounded allowance for signatures and
     // appointment metadata; the store still enforces the authoritative quota.
     const appointment = verifyTowerAppointment(
-      await parseJsonBody<TowerAppointmentV1>(req, resolveAppointmentBodyLimit(store)),
+      await parseJsonBody(req, resolveAppointmentBodyLimit(store)),
     );
     const receipt = await store.upsertAppointment(appointment);
     return new Response(serializeTaggedJson({ ok: true, receipt }), {
@@ -297,8 +364,8 @@ export const handleTowerAppointment = async (req: Request, store: WatchtowerStor
 
 export const handleTowerRestore = async (req: Request, store: WatchtowerStore): Promise<Response> => {
   try {
-    const body = await parseJsonBody<TowerRestoreRequestV1>(req);
-    const lookupKey = normalizeLookupKey(body.lookupKey);
+    const body = decodeTowerRestoreRequest(await parseJsonBody(req));
+    const lookupKey = body.lookupKey;
     const restored = await store.getLatest(lookupKey);
     if (!restored) {
       return new Response(serializeTaggedJson({ ok: false, error: 'TOWER_BUNDLE_NOT_FOUND' }), {
@@ -340,8 +407,8 @@ export const handleTowerReceipt = async (lookupKey: string, store: WatchtowerSto
 
 export const handleRecoveryDiscover = async (req: Request, store: WatchtowerStore): Promise<Response> => {
   try {
-    const body = await parseJsonBody<TowerRestoreRequestV1>(req);
-    const lookupKey = normalizeLookupKey(body.lookupKey);
+    const body = decodeTowerRestoreRequest(await parseJsonBody(req));
+    const lookupKey = body.lookupKey;
     const latestReceipt = await store.getLatestReceipt(lookupKey);
     const response: TowerDiscoverResponseV1 = {
       ok: true,
@@ -368,7 +435,7 @@ export const handleRecoveryComplaint = async (req: Request, store: WatchtowerSto
         headers: { 'content-type': 'application/json' },
       });
     }
-    const body = await parseJsonBody<Record<string, unknown>>(req, SMALL_MAX_JSON_BODY_BYTES);
+    const body = decodeTowerRecord(await parseJsonBody(req, SMALL_MAX_JSON_BODY_BYTES), 'TOWER_COMPLAINT_BODY_INVALID');
     await store.appendComplaint({
       type: 'recovery_complaint',
       lookupKey: typeof body['lookupKey'] === 'string' ? body['lookupKey'] : undefined,
@@ -389,7 +456,7 @@ export const handleWatchtowerSweep = async (
   options?: { towerPrivateKey?: string },
 ): Promise<Response> => {
   try {
-    const body = await parseJsonBody<Record<string, unknown>>(req);
+    const body = decodeTowerRecord(await parseJsonBody(req), 'TOWER_SWEEP_BODY_INVALID');
     const lookupKey = typeof body['lookupKey'] === 'string' ? normalizeLookupKey(body['lookupKey']) : undefined;
     const result = await runWatchtowerSweep(store, {
       ...(lookupKey ? { lookupKey } : {}),
@@ -417,7 +484,7 @@ export const handleWatchtowerActions = async (lookupKey: string, store: Watchtow
 
 export const handlePushRegister = async (req: Request, store: PushStore): Promise<Response> => {
   try {
-    const body = await parseJsonBody<PushRegistrationRequestV1>(req, SMALL_MAX_JSON_BODY_BYTES);
+    const body = await parseJsonBody(req, SMALL_MAX_JSON_BODY_BYTES);
     const registration = verifyPushRegistration(body, {
       now: Date.now(),
       maxClockSkewMs: PUSH_REGISTRATION_MAX_CLOCK_SKEW_MS,
@@ -433,7 +500,7 @@ export const handlePushRegister = async (req: Request, store: PushStore): Promis
 
 export const handlePushUnregister = async (req: Request, store: PushStore): Promise<Response> => {
   try {
-    const body = await parseJsonBody<PushUnregisterRequestV1>(req, SMALL_MAX_JSON_BODY_BYTES);
+    const body = await parseJsonBody(req, SMALL_MAX_JSON_BODY_BYTES);
     const { runtimeId, tokenHash } = verifyPushUnregister(body, {
       now: Date.now(),
       maxClockSkewMs: PUSH_REGISTRATION_MAX_CLOCK_SKEW_MS,

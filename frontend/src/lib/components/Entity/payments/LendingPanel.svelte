@@ -13,6 +13,7 @@
   import BigIntInput from '../../Common/BigIntInput.svelte';
   import EntitySelect from '../workspace/shell/EntitySelect.svelte';
   import { requireTokenDecimals } from '../token-metadata';
+  import { parseJsonUnknown, requireUnknownRecord } from '$lib/utils/boundary';
 
   export let entityId: string;
   export let replica: EntityReplica | null = null;
@@ -177,7 +178,7 @@
     const raw = await response.text();
     if (!raw) return {};
     try {
-      return JSON.parse(raw) as Record<string, unknown>;
+      return requireUnknownRecord(parseJsonUnknown(raw, 'LENDING_RESPONSE_JSON_INVALID'), 'LENDING_RESPONSE_INVALID');
     } catch {
       return { success: false, error: raw };
     }

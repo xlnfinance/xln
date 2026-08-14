@@ -15,6 +15,7 @@
   import IndexedDbInspector from '$lib/components/Settings/IndexedDbInspector.svelte';
   import RuntimeStorageLimits from '$lib/components/Settings/RuntimeStorageLimits.svelte';
   import RuntimePerformanceBudgets from '$lib/components/Settings/RuntimePerformanceBudgets.svelte';
+  import StackManager from '$lib/components/Settings/StackManager.svelte';
   import TabStylePicker from '$lib/components/Settings/TabStylePicker.svelte';
   import { TAB_STYLE_OPTIONS } from '$lib/utils/ui-style-options';
   import { settings as appSettings, settingsOperations } from '$lib/stores/settingsStore';
@@ -113,7 +114,7 @@
   };
 
   let settings: ViewSettings = { ...DEFAULT_SETTINGS };
-  let activeCategory: 'storage' | 'scene' | 'camera' | 'entities' | 'effects' | 'performance' | 'console' | 'advanced' | 'layout' = 'storage';
+  let activeCategory: 'storage' | 'stack-manager' | 'scene' | 'camera' | 'entities' | 'effects' | 'performance' | 'console' | 'advanced' | 'layout' = 'storage';
 
   // Layout config state
   let layoutJson = '';
@@ -379,6 +380,13 @@
       🗄️ Storage
     </button>
     <button
+      data-testid="settings-stack-manager-tab"
+      class:active={activeCategory === 'stack-manager'}
+      on:click={() => activeCategory = 'stack-manager'}
+    >
+      🏗️ Stack Manager
+    </button>
+    <button
       class:active={activeCategory === 'scene'}
       on:click={() => activeCategory = 'scene'}
     >
@@ -432,6 +440,9 @@
     {#if activeCategory === 'storage'}
       <RuntimeStorageLimits {runtimeFrameEnv} />
       <IndexedDbInspector />
+
+    {:else if activeCategory === 'stack-manager'}
+      <StackManager />
 
     {:else if activeCategory === 'scene'}
       <h4>Scene Configuration</h4>
@@ -1063,12 +1074,13 @@
 
   .category-tabs {
     display: flex;
+    overflow-x: auto;
     border-bottom: 1px solid #333;
     background: #0d0d0d;
   }
 
   .category-tabs button {
-    flex: 1;
+    flex: 0 0 auto;
     padding: 12px 8px;
     background: transparent;
     border: none;
@@ -1076,6 +1088,7 @@
     color: #888;
     cursor: pointer;
     font-size: 12px;
+    white-space: nowrap;
     transition: all 0.2s;
   }
 

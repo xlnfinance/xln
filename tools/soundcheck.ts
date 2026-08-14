@@ -24,6 +24,7 @@ const gates: Gate[] = [
   { name: 'runtime-dependencies', command: ['bun', 'runtime/scripts/checks/architecture/check-runtime-dependencies.ts'] },
   { name: 'fints-negative-types', command: ['bun', 'run', 'check:fints-negative-types'] },
   { name: 'fints-compiler-policy', command: ['bun', 'run', 'check:fints-compiler-policy'] },
+  { name: 'fints-decoder-authority', command: ['bun', 'run', 'check:fints-decoder-authority'] },
   { name: 'nested-hash-coverage', command: ['bun', 'run', 'check:nested-hash-coverage'] },
 ];
 

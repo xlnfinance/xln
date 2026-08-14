@@ -39,7 +39,7 @@ import {
   assertEntityProviderActionResolutionReceipt,
 } from '../../../entity/entity-provider-action';
 import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } from '../../machine/batch';
-import { buildExternalTokenToReserveBatch } from '../events/contract-codec';
+import { buildExternalTokenToReserveBatch, computeAccountKey } from '../events/contract-codec';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../../../hanko/batch';
 import { decodeHankoEnvelope } from '../../../hanko/codec';
 import {
@@ -64,6 +64,7 @@ import {
 } from '../../machine/receipt-codec';
 import {
   BROWSERVM_CONTRACT_VERSION,
+  decodeBrowserVmSerializedState,
   decodeBrowserVmStateRoot,
   normalizeBrowserVmAddress,
   restoreBrowserVmTrieData,
@@ -344,6 +345,7 @@ export class BrowserVMProvider {
     await this.deployHashLadderRegistry();
     await this.deployNftCustody();
     await this.deployDepository();
+    await this.bindShareDepository();
     await this.deployDefaultTokens();
 
     this.initialized = true;
@@ -448,6 +450,29 @@ export class BrowserVMProvider {
     const code = await this.vm.stateManager.getCode(this.depositoryAddress!);
     if (code.length === 0) {
       throw new Error('Depository deployment failed - no code at address');
+    }
+  }
+
+  /** Complete the one-time bidirectional stack binding before any share release. */
+  private async bindShareDepository(): Promise<void> {
+    if (!this.entityProviderAddress || !this.depositoryAddress || !this.entityProviderInterface) {
+      throw new Error('Share Depository binding requires both deployed contracts');
+    }
+    const entityProviderAddress = this.entityProviderAddress;
+    const callData = this.entityProviderInterface.encodeFunctionData(
+      'bindShareDepository',
+      [this.depositoryAddress.toString()],
+    );
+    const { result } = await this.runTxWithNonce(this.deployerAddress, (currentNonce) =>
+      createLegacyTx({
+        to: entityProviderAddress,
+        gasLimit: 1_000_000n,
+        gasPrice: 10n,
+        data: callData as `0x${string}`,
+        nonce: currentNonce,
+      }, { common: this.common }).sign(this.deployerPrivKey));
+    if (result.execResult.exceptionError) {
+      throw new Error(`Share Depository binding failed: ${result.execResult.exceptionError}`);
     }
   }
 
@@ -1151,26 +1176,7 @@ export class BrowserVMProvider {
   async getCollateral(entityId: string, counterpartyId: string, tokenId: number): Promise<{ collateral: bigint; ondelta: bigint }> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
-    // Use ethers Interface for ABI encoding (same as mainnet)
-    // Solidity mapping: _collaterals(bytes accountKey, uint tokenId) -> AccountCollateral
-    // Need to compute accountKey first via accountKey(e1, e2), then call the mapping getter
-    const accountKeyData = this.depositoryInterface.encodeFunctionData('accountKey', [entityId, counterpartyId]);
-    const accountKeyResult = await this.runReadOnlyCall({
-      to: this.depositoryAddress,
-      caller: this.deployerAddress,
-      data: hexToBytes(accountKeyData as `0x${string}`),
-      gasLimit: 100000n,
-    });
-    if (accountKeyResult.execResult.exceptionError) {
-      const error = String(accountKeyResult.execResult.exceptionError);
-      browserVmLog.error('read.account_key_failed', { entityId, counterpartyId, tokenId, error });
-      throw new Error(`BROWSERVM_ACCOUNT_KEY_READ_FAILED:${error}`);
-    }
-    const accountKeyDecoded = this.depositoryInterface.decodeFunctionResult(
-      'accountKey',
-      accountKeyResult.execResult.returnValue
-    );
-    const accountKey = accountKeyDecoded[0];
+    const accountKey = computeAccountKey(entityId, counterpartyId);
 
     const callData = this.depositoryInterface.encodeFunctionData('_collaterals', [accountKey, tokenId]);
 
@@ -1281,16 +1287,6 @@ export class BrowserVMProvider {
   }
 
   /**
-   * Get the account key for two entities (canonical order: left < right)
-   */
-  private getAccountKey(leftEntity: string, rightEntity: string): string {
-    const isLeft = isLeftEntity(leftEntity, rightEntity);
-    const left = isLeft ? leftEntity : rightEntity;
-    const right = isLeft ? rightEntity : leftEntity;
-    return ethers.solidityPacked(['bytes32', 'bytes32'], [left, right]);
-  }
-
-  /**
    * Sign a settlement message (CooperativeUpdate).
    * The COUNTERPARTY must sign, not the initiator.
    *
@@ -1316,7 +1312,7 @@ export class BrowserVMProvider {
     const isLeft = isLeftEntity(initiatorEntityId, counterpartyEntityId);
     const leftEntity = isLeft ? initiatorEntityId : counterpartyEntityId;
     const rightEntity = isLeft ? counterpartyEntityId : initiatorEntityId;
-    const accountKey = this.getAccountKey(leftEntity, rightEntity);
+    const accountKey = computeAccountKey(leftEntity, rightEntity);
     if (!this.depositoryAddress) throw new Error('Depository not deployed');
 
     const hash = hashCooperativeUpdateHankoPayload(
@@ -1350,7 +1346,7 @@ export class BrowserVMProvider {
     proofbodyHash: string,
     watchSeed: string,
   ): Promise<string> {
-    const accountKey = this.getAccountKey(entityId, counterpartyEntityId);
+    const accountKey = computeAccountKey(entityId, counterpartyEntityId);
     if (!this.depositoryAddress) throw new Error('Depository not deployed');
 
     const hash = hashDisputeProofHankoPayload(
@@ -1371,23 +1367,7 @@ export class BrowserVMProvider {
   async getAccountInfo(entityId: string, counterpartyId: string): Promise<{ nonce: bigint; disputeHash: string; disputeTimeout: bigint }> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
-    const accountKeyData = this.depositoryInterface.encodeFunctionData('accountKey', [entityId, counterpartyId]);
-    const accountKeyResult = await this.runReadOnlyCall({
-      to: this.depositoryAddress,
-      caller: this.deployerAddress,
-      data: hexToBytes(accountKeyData as `0x${string}`),
-      gasLimit: 100000n,
-    });
-    if (accountKeyResult.execResult.exceptionError) {
-      throw new Error(
-        `BROWSERVM_ACCOUNT_KEY_READ_FAILED:${safeStringify(accountKeyResult.execResult.exceptionError)}`,
-      );
-    }
-    const accountKeyDecoded = this.depositoryInterface.decodeFunctionResult(
-      'accountKey',
-      accountKeyResult.execResult.returnValue
-    );
-    const accountKey = accountKeyDecoded[0];
+    const accountKey = computeAccountKey(entityId, counterpartyId);
 
     const callData = this.depositoryInterface.encodeFunctionData('_accounts', [accountKey]);
     const result = await this.runReadOnlyCall({
@@ -1629,6 +1609,7 @@ export class BrowserVMProvider {
     if (!this.entityProviderAddress || !this.entityProviderInterface) {
       throw new Error('EntityProvider not deployed');
     }
+    const entityProviderAddress = this.entityProviderAddress;
     if (!/^0x[0-9a-f]+$/i.test(hankoData) || hankoData.length <= 2) {
       throw new Error('ENTITY_PROVIDER_ACTION_HANKO_MISSING');
     }
@@ -1682,7 +1663,7 @@ export class BrowserVMProvider {
           ]);
     const { tx, result } = await this.runTxWithNonce(this.deployerAddress, (currentNonce) =>
       createLegacyTx({
-        to: this.entityProviderAddress!,
+        to: entityProviderAddress,
         gasLimit: 10_000_000n,
         gasPrice: 10n,
         data: hexToBytes(callData as `0x${string}`),
@@ -1708,6 +1689,78 @@ export class BrowserVMProvider {
       throw new Error(`ENTITY_PROVIDER_ACTION_RECEIPT_COUNT_INVALID:${exact.length}`);
     }
     assertEntityProviderActionResolutionReceipt(intent, exact[0]!);
+    return events;
+  }
+
+  /** Submit a reserve-backed CONTROL proposal; Runtime signer only pays gas. */
+  async submitControlBoardProposal(
+    targetEntityId: string,
+    newBoardHash: string,
+    supporterHankos: string[],
+  ): Promise<JEvent[]> {
+    if (!this.entityProviderAddress || !this.entityProviderInterface) {
+      throw new Error('EntityProvider not deployed');
+    }
+    const entityProviderAddress = this.entityProviderAddress;
+    if (supporterHankos.length === 0 || supporterHankos.some((hanko) => !/^0x(?:[0-9a-f]{2})+$/i.test(hanko))) {
+      throw new Error('CONTROL_BOARD_PROPOSAL_HANKOS_INVALID');
+    }
+    const callData = this.entityProviderInterface.encodeFunctionData('proposeBoard', [
+      targetEntityId,
+      newBoardHash,
+      1,
+      supporterHankos,
+    ]);
+    const { tx, result } = await this.runTxWithNonce(this.deployerAddress, (currentNonce) =>
+      createLegacyTx({
+        to: entityProviderAddress,
+        gasLimit: 10_000_000n,
+        gasPrice: 10n,
+        data: hexToBytes(callData as `0x${string}`),
+        nonce: currentNonce,
+      }, { common: this.common }).sign(this.deployerPrivKey));
+    if (result.execResult.exceptionError) {
+      const returnData = bytesToHex(result.execResult.returnValue || new Uint8Array());
+      let reason = String(result.execResult.exceptionError.error || result.execResult.exceptionError);
+      if (returnData !== '0x') {
+        try {
+          const parsed = this.entityProviderInterface.parseError(returnData);
+          if (parsed) reason = `${parsed.name}(${parsed.args.map((arg: unknown) => String(arg)).join(',')})`;
+        } catch {
+          // Preserve the raw EVM error and return data below.
+        }
+      }
+      throw new Error(`CONTROL_BOARD_PROPOSAL_SUBMIT_FAILED:${reason}:returnData=${returnData}`);
+    }
+    const events = await this.emitEvents(result.execResult.logs || [], bytesToHex(tx.hash()));
+    if (events.filter((event) => event.name === 'BoardProposed').length !== 1) {
+      throw new Error('CONTROL_BOARD_PROPOSAL_RECEIPT_INVALID');
+    }
+    return events;
+  }
+
+  async activateBoard(targetEntityId: string): Promise<JEvent[]> {
+    if (!this.entityProviderAddress || !this.entityProviderInterface) {
+      throw new Error('EntityProvider not deployed');
+    }
+    const entityProviderAddress = this.entityProviderAddress;
+    const callData = this.entityProviderInterface.encodeFunctionData('activateBoard', [targetEntityId]);
+    const { tx, result } = await this.runTxWithNonce(this.deployerAddress, (currentNonce) =>
+      createLegacyTx({
+        to: entityProviderAddress,
+        gasLimit: 10_000_000n,
+        gasPrice: 10n,
+        data: hexToBytes(callData as `0x${string}`),
+        nonce: currentNonce,
+      }, { common: this.common }).sign(this.deployerPrivKey));
+    if (result.execResult.exceptionError) {
+      const returnData = bytesToHex(result.execResult.returnValue || new Uint8Array());
+      throw new Error(`CONTROL_BOARD_ACTIVATION_FAILED:${String(result.execResult.exceptionError)}:${returnData}`);
+    }
+    const events = await this.emitEvents(result.execResult.logs || [], bytesToHex(tx.hash()));
+    if (events.filter((event) => event.name === 'BoardActivated').length !== 1) {
+      throw new Error('CONTROL_BOARD_ACTIVATION_RECEIPT_INVALID');
+    }
     return events;
   }
 
@@ -2256,7 +2309,7 @@ export class BrowserVMProvider {
         return false;
       }
 
-      const data = JSON.parse(json);
+      const data = decodeBrowserVmSerializedState(JSON.parse(json));
 
       await this.restoreState(data);
       this.log(`[BrowserVM] Loaded state from localStorage: ${key} (v${data.version})`);

@@ -1,7 +1,6 @@
 import { isLocalEntityLeaderTimeoutVote } from '../../../entity/consensus/leader';
 import { createStructuredLogger } from '../../../infra/logger';
 import { createGossipLayer } from '../../../network/p2p/gossip';
-import { normalizeRuntimeId } from '../../../network/p2p/auth/runtime-id';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import {
@@ -11,7 +10,7 @@ import {
   type ReliableIngressCommit,
 } from '../../reliable/reliable-delivery.ts';
 import { mergeDurableReceiptOnlyInputs } from '../../reliable/reliable-durable-inputs.ts';
-import { reliableIdentityExactKey } from '../../reliable/reliable-frontier.ts';
+import { parseReceiverFrontierKey, reliableIdentityExactKey } from '../../reliable/reliable-frontier.ts';
 import { splitRoutedOutputByDeliveryLane } from '../../routing/output-routing';
 
 const runtimeLog = createStructuredLogger('runtime');
@@ -131,9 +130,7 @@ const durableIngressSources = (
     env.infrastructure?.reliableIngressTerminalWatermarks,
   ]) {
     for (const [frontierKey, receipt] of ledger ?? []) {
-      const parsed = JSON.parse(frontierKey) as { sourceRuntimeId?: unknown };
-      const source = normalizeRuntimeId(parsed.sourceRuntimeId);
-      if (!source) throw new Error('RELIABLE_INGRESS_FRONTIER_SOURCE_RUNTIME_INVALID');
+      const source = parseReceiverFrontierKey(frontierKey).sourceRuntimeId;
       const key = reliableIdentityExactKey(receipt.body.identity);
       const sources = sourcesByIdentity.get(key) ?? new Set<string>();
       sources.add(source);

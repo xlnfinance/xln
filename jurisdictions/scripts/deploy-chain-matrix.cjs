@@ -427,6 +427,12 @@ const deployTron = async (chain, options) => {
       NftCustody: nftCustody,
     },
   );
+  const entityProviderArtifact = loadTronArtifact('EntityProvider');
+  const entityProviderContract = await tronWeb.contract(entityProviderArtifact.abi, entityProvider.base58);
+  await entityProviderContract.bindShareDepository(depository.base58).send({
+    feeLimit: Number(process.env.TRON_FEE_LIMIT || '15000000000'),
+    shouldPollResponse: true,
+  });
   const depositoryArtifact = loadTronArtifact('Depository');
   const depositoryContract = await tronWeb.contract(depositoryArtifact.abi, depository.base58);
   await depositoryContract.registerExternalToken(0, usdt.base58, 0).send({

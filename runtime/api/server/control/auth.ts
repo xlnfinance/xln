@@ -110,5 +110,5 @@ export const parseTaggedControlBody = async (
 ): Promise<unknown> => {
   const raw = await readCappedControlBody(req, maxBytes);
   if (!raw.trim()) return {};
-  return deserializeTaggedJson<unknown>(raw);
+  return deserializeTaggedJson(raw);
 };

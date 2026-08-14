@@ -6,12 +6,18 @@
 
 import type { RuntimeReplica } from '../../runtime/types';
 import type { EntityTx } from '../../types/entity-tx';
-import { getSwapPairPolicyByBaseQuote } from '../../account/utils';
 import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
 import { DEFAULT_SPREAD_DISTRIBUTION, quoteAmountAtPriceForDecimals } from '../../orderbook';
 import { converge, findReplica, processUntil } from '../harness/helpers';
 import { executeCompanyAction } from './governance';
-import { USDT, type CompanyScenarioActors, type CompanyShareTokens } from './model';
+import {
+  COMPANY_SHARE_PRICE_TICKS,
+  CONTROL_BUYBACK_AMOUNT,
+  CONTROL_IPO_AMOUNT,
+  USDT,
+  type CompanyScenarioActors,
+  type CompanyShareTokens,
+} from './model';
 
 const pairId = (left: number, right: number): string =>
   `${Math.min(left, right)}/${Math.max(left, right)}`;
@@ -66,15 +72,13 @@ type CompanyMarketQuotes = Readonly<{
   buyback: bigint;
 }>;
 
-const deriveMarketQuotes = (shares: CompanyShareTokens): CompanyMarketQuotes => {
-  const quote = (tokenId: number, amount: bigint): bigint => {
-    const price = getSwapPairPolicyByBaseQuote(tokenId, USDT).mmMidPriceTicks;
-    return quoteAmountAtPriceForDecimals(0, 6, amount, price);
-  };
+const deriveMarketQuotes = (): CompanyMarketQuotes => {
+  const quote = (amount: bigint): bigint =>
+    quoteAmountAtPriceForDecimals(0, 6, amount, COMPANY_SHARE_PRICE_TICKS);
   return {
-    controlSale: quote(shares.controlTokenId, 40n),
-    dividendSale: quote(shares.dividendTokenId, 100n),
-    buyback: quote(shares.controlTokenId, 10n),
+    controlSale: quote(CONTROL_IPO_AMOUNT),
+    dividendSale: quote(100n),
+    buyback: quote(CONTROL_BUYBACK_AMOUNT),
   };
 };
 
@@ -111,7 +115,7 @@ const placeTreasuryOffers = async (
       offerId: 'ipo-control-ask',
       giveTokenId: shares.controlTokenId,
       giveTokenDecimals: 0,
-      giveAmount: 40n,
+      giveAmount: CONTROL_IPO_AMOUNT,
       wantTokenId: USDT,
       wantTokenDecimals: 6,
       wantAmount: quotes.controlSale,
@@ -161,8 +165,8 @@ const completeInvestorPurchase = async (
     giveAmount: quote,
     wantTokenId: shares.controlTokenId,
     wantTokenDecimals: 0,
-    wantAmount: 40n,
-    ...deriveSwapNetAuthorization(40n, 1),
+    wantAmount: CONTROL_IPO_AMOUNT,
+    ...deriveSwapNetAuthorization(CONTROL_IPO_AMOUNT, 1),
   })]);
   await waitForClosedPair(env, actors,
     [actors.boardCompany.id, 'ipo-control-ask'],
@@ -184,15 +188,15 @@ const completeBuyback = async (
     giveAmount: quote,
     wantTokenId: shares.controlTokenId,
     wantTokenDecimals: 0,
-    wantAmount: 10n,
-    ...deriveSwapNetAuthorization(10n, 1),
+    wantAmount: CONTROL_BUYBACK_AMOUNT,
+    ...deriveSwapNetAuthorization(CONTROL_BUYBACK_AMOUNT, 1),
   })]);
   await executeCompanyAction(env, actors.investor, [offer({
     counterpartyEntityId: actors.hub.id,
     offerId: 'investor-control-resale',
     giveTokenId: shares.controlTokenId,
     giveTokenDecimals: 0,
-    giveAmount: 10n,
+    giveAmount: CONTROL_BUYBACK_AMOUNT,
     wantTokenId: USDT,
     wantTokenDecimals: 6,
     wantAmount: quote,
@@ -234,10 +238,17 @@ export const runCompanyMarket = async (
   actors: CompanyScenarioActors,
   shares: CompanyShareTokens,
 ): Promise<void> => {
-  const quotes = deriveMarketQuotes(shares);
+  const quotes = deriveMarketQuotes();
   await initializeBooks(env, actors, shares);
   await placeTreasuryOffers(env, actors, shares, quotes);
   await completeInvestorPurchase(env, actors, shares, quotes.controlSale);
-  await completeBuyback(env, actors, shares, quotes.buyback);
   assertDividendOfferResting(env, actors, shares);
+};
+
+export const runCompanyBuyback = async (
+  env: RuntimeReplica,
+  actors: CompanyScenarioActors,
+  shares: CompanyShareTokens,
+): Promise<void> => {
+  await completeBuyback(env, actors, shares, deriveMarketQuotes().buyback);
 };
