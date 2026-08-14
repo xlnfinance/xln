@@ -472,6 +472,19 @@ describe('production startup wiring', () => {
     expect(isolatedBuild).not.toContain('XLN_SVELTE_KIT_OUT_DIR: relative(frontendRoot, artifacts.svelteKitOutDir)');
   });
 
+  test('audit context exposes a deterministic comment-free Runtime profile with hashes', () => {
+    const generator = readFileSync(join(repoRoot, 'scripts/debug/gpt.cjs'), 'utf8');
+
+    expect(generator).toContain("flag: '--no-comments'");
+    expect(generator).toContain("outputFilename: 'llms_no_comments.txt'");
+    expect(generator).toContain("profile === 'nocomments'");
+    expect(generator).toContain('stripSourceCommentsForAudit(file.content)');
+    expect(generator).toContain('AUDIT_CONTEXT_CRITICAL_FILE_MISSING');
+    expect(generator).toContain('sha256(chunk.content)');
+    expect(generator).toContain('source=${file.sourceSha256}');
+    expect(generator).not.toContain("'runtime/input-queue.ts'");
+  });
+
   test('start-server exposes the secondary Tron RPC to the orchestrator and children', () => {
     const script = readFileSync(join(repoRoot, 'scripts/operations/start-server.sh'), 'utf8');
     expect(script).toContain('RPC2_PORT="${ANVIL2_PORT:-$(xln_rpc2_port)}"');

@@ -2,6 +2,8 @@
 // Output: frontend/static/llms*.txt. No profile flag refreshes every LLM pack.
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const ts = require('typescript');
 
 const DEFAULT_CHUNK_TOKEN_LIMIT = 180_000;
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -899,7 +901,9 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir
   // Get git commit and timestamp. Read .git directly so static context generation
   // does not depend on Apple/Xcode git being licensed on local machines.
   const gitCommit = readGitCommit(projectRoot);
-  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const timestamp = profile === 'nocomments'
+    ? 'deterministic-source-tree'
+    : new Date().toISOString().replace('T', ' ').substring(0, 19);
 
   if (profile === 'cross') {
     return generateCrossSemanticOverview(totalTokens, timestamp, gitCommit, fileSizes, fileGroups);
@@ -1356,14 +1360,42 @@ function readFileContent(baseDir, relativePath) {
   }
 }
 
+const sha256 = value => crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+
+const preserveAuditComment = comment =>
+  /SPDX-License-Identifier|@license|Copyright|@ts-(?:check|nocheck|ignore|expect-error)/i.test(comment);
+
+/** Strip source comments with the TypeScript lexer while preserving line coordinates. */
+function stripSourceCommentsForAudit(content) {
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, content);
+  const removals = [];
+  for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
+    if (token !== ts.SyntaxKind.SingleLineCommentTrivia && token !== ts.SyntaxKind.MultiLineCommentTrivia) continue;
+    const start = scanner.getTokenPos();
+    const end = scanner.getTextPos();
+    if (!preserveAuditComment(content.slice(start, end))) removals.push([start, end]);
+  }
+  if (removals.length === 0) return content;
+  // Scanner offsets and String#split both use UTF-16 code units. Code-point
+  // spreading would shift every removal after the first astral character.
+  const chars = content.split('');
+  for (const [start, end] of removals) {
+    for (let index = start; index < end; index += 1) {
+      if (chars[index] !== '\n' && chars[index] !== '\r') chars[index] = ' ';
+    }
+  }
+  return chars.join('');
+}
+
 function addFiles({ files, baseDir, statPrefix, outputPrefix, fileStats, allFiles }) {
   files.forEach(file => {
     const content = readFileContent(baseDir, file);
     if (content) {
       const lines = countLines(content);
       const bytes = Buffer.byteLength(content, 'utf8');
-      fileStats.push({ file: `${statPrefix}${file}`, lines, bytes });
-      allFiles.push({ path: `${outputPrefix}${file}`, content, lines });
+      const sourceSha256 = sha256(content);
+      fileStats.push({ file: `${statPrefix}${file}`, lines, bytes, sourceSha256 });
+      allFiles.push({ path: `${outputPrefix}${file}`, content, lines, sourceSha256 });
     }
   });
 }
@@ -1455,6 +1487,25 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
         fileStats,
         allFiles,
       });
+    }
+  }
+
+  if (profile === 'nocomments') {
+    for (let index = 0; index < allFiles.length; index += 1) {
+      const file = allFiles[index];
+      const stat = fileStats[index];
+      if (!file || !stat) throw new Error('AUDIT_CONTEXT_FILE_STATS_MISMATCH');
+      file.content = stripSourceCommentsForAudit(file.content);
+      stat.bytes = Buffer.byteLength(file.content, 'utf8');
+      stat.auditSha256 = sha256(file.content);
+    }
+  }
+
+  if (!solOnly) {
+    const included = new Set(allFiles.map(file => file.path));
+    for (const required of CORE_CRITICAL_RUNTIME_FILES) {
+      const requiredPath = `runtime/${required}`;
+      if (!included.has(requiredPath)) throw new Error(`AUDIT_CONTEXT_CRITICAL_FILE_MISSING:${requiredPath}`);
     }
   }
 
@@ -1552,7 +1603,7 @@ function buildManifest({ outputFilename, chunkFiles, fileStats, tokenLimit }) {
   const chunkRows = chunkFiles.map((chunk, index) => {
     const tokens = estimateTokens(chunk.content);
     const files = chunk.files.map((file) => file.path).join(', ');
-    return `${index + 1}. ${chunk.filename} - ~${tokens.toLocaleString()} tokens - ${files}`;
+    return `${index + 1}. ${chunk.filename} - sha256=${sha256(chunk.content)} - ~${tokens.toLocaleString()} tokens - ${files}`;
   }).join('\n');
   const topFiles = fileStats
     .map((file) => ({ ...file, tokens: estimateTokens(file.bytes) }))
@@ -1584,6 +1635,9 @@ ${chunkRows}
 
 Largest files:
 ${topFiles}
+
+Source hashes:
+${fileStats.map(file => `- ${file.file}: source=${file.sourceSha256}${file.auditSha256 ? ` audit=${file.auditSha256}` : ''}`).join('\n')}
 `;
 }
 
@@ -1619,6 +1673,13 @@ const PROFILE_CONFIGS = {
   runtime: {
     flag: '--runtime',
     outputFilename: 'llms_runtime.txt',
+    fileGroups: COMPLETE_RUNTIME_FILES,
+    includeFrontend: false,
+    solOnly: false,
+  },
+  nocomments: {
+    flag: '--no-comments',
+    outputFilename: 'llms_no_comments.txt',
     fileGroups: COMPLETE_RUNTIME_FILES,
     includeFrontend: false,
     solOnly: false,
