@@ -25,6 +25,12 @@ import {
 } from '../p2p/gossip/profile-batch';
 import { redactTelemetryValue } from '../../infra/telemetry-redaction';
 import type { WebSocketSendResult } from '../websocket-send-result';
+import {
+  computeJurisdictionGossipHash,
+  decodeJurisdictionGossipAnnouncement,
+  MAX_JURISDICTION_GOSSIP_RECORDS,
+  type JurisdictionGossipAnnouncement,
+} from '../../jurisdiction/gossip/announcement';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -88,6 +94,8 @@ export type RelayStore = {
   clients: Map<string, RelayClient>;
   maxGossipProfiles: number;
   gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
+  gossipJurisdictions: Map<string, JurisdictionGossipAnnouncement>;
+  officialFoundationSignerId?: string | undefined;
   runtimeEncryptionKeys: Map<string, string>;
   applicationBudgets: Map<string, { windowStartedAt: number; messageCount: number; bytes: number }>;
   debugEvents: RelayDebugEvent[];
@@ -141,6 +149,7 @@ export type RelayStoreOptions = {
   initialIncidents?: Iterable<RelayDebugIncident>;
   debugIdAllocator?: () => number;
   incidentSink?: (incident: RelayDebugIncident) => void;
+  officialFoundationSignerId?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -159,6 +168,10 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
     clients: new Map(),
     maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
     gossipProfiles: new Map(),
+    gossipJurisdictions: new Map(),
+    ...(options.officialFoundationSignerId
+      ? { officialFoundationSignerId: options.officialFoundationSignerId }
+      : {}),
     runtimeEncryptionKeys: new Map(),
     applicationBudgets: new Map(),
     debugEvents: [],
@@ -464,6 +477,24 @@ export const storeVerifiedGossipProfile = (store: RelayStore, profile: Profile):
 
 export const getAllGossipProfiles = (store: RelayStore): Profile[] =>
   Array.from(store.gossipProfiles.values()).map(v => v.profile);
+
+export const storeVerifiedJurisdictionAnnouncement = (
+  store: RelayStore,
+  value: unknown,
+): JurisdictionGossipAnnouncement | null => {
+  const announcement = decodeJurisdictionGossipAnnouncement(value, store.officialFoundationSignerId);
+  const id = computeJurisdictionGossipHash(announcement);
+  if (store.gossipJurisdictions.has(id)) return null;
+  if (store.gossipJurisdictions.size >= MAX_JURISDICTION_GOSSIP_RECORDS) {
+    throw new Error('RELAY_JURISDICTION_GOSSIP_CAP_EXCEEDED');
+  }
+  store.gossipJurisdictions.set(id, announcement);
+  return announcement;
+};
+
+export const getAllGossipJurisdictions = (
+  store: RelayStore,
+): JurisdictionGossipAnnouncement[] => Array.from(store.gossipJurisdictions.values());
 
 export const getDefaultGossipProfiles = (
   store: RelayStore,

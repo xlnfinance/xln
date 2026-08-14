@@ -1,3 +1,9 @@
+/**
+ * Produces a detached post-commit Runtime view for Svelte consumers.
+ * Consensus candidates, live infrastructure, and mutable Gossip maps must not
+ * alias the UI projection or render uncommitted financial state. [88/100]
+ */
+
 import type { RuntimeReplica, EnvSnapshot } from '@xln/runtime/api/public/runtime-module';
 import type { Profile } from '@xln/runtime/api/public/runtime-module';
 
@@ -14,12 +20,16 @@ const createDetachedGossip = (liveEnv: RuntimeReplica): RuntimeReplica['gossip']
     structuredClone(Array.from(liveEnv.gossip.profiles.entries())),
   );
   const getProfiles = (): Profile[] => Array.from(profiles.values());
+  const jurisdictions = new Map(structuredClone(Array.from(liveEnv.gossip.jurisdictions.entries())));
   const hubProfiles = structuredClone(liveEnv.gossip.getHubs());
   return {
     profiles,
+    jurisdictions,
     announce: detachedMutation,
+    announceJurisdiction: detachedMutation,
     setProfiles: detachedMutation,
     getProfiles,
+    getJurisdictions: () => Array.from(jurisdictions.values()),
     getHubs: () => [...hubProfiles],
     getProfileBundle: (entityId: string) => {
       const profile = profiles.get(entityId);

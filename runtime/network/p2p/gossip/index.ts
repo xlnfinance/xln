@@ -14,13 +14,29 @@ import {
   isHubProfile,
   type Profile,
 } from '../../../entity/profile';
+import {
+  computeJurisdictionGossipHash,
+  decodeJurisdictionGossipAnnouncement,
+  MAX_JURISDICTION_GOSSIP_RECORDS,
+  type JurisdictionGossipAnnouncement,
+} from '../../../jurisdiction/gossip/announcement';
 
 export interface GossipLayer {
   profiles: Map<string, Profile>;
+  jurisdictions: Map<string, JurisdictionGossipAnnouncement>;
   announce: (profile: Profile) => void;
+  announceJurisdiction: (
+    announcement: JurisdictionGossipAnnouncement,
+    officialFoundationSignerId?: string,
+  ) => boolean;
   getProfiles: () => Profile[];
+  getJurisdictions: () => JurisdictionGossipAnnouncement[];
   getHubs: () => Profile[];
   setProfiles?: (incoming: Iterable<Profile>) => void;
+  setJurisdictions?: (
+    incoming: Iterable<JurisdictionGossipAnnouncement>,
+    officialFoundationSignerId?: string,
+  ) => void;
   getProfileBundle?: (entityId: string) => { profile?: Profile; peers: Profile[] };
   getNetworkGraph: () => {
     findPaths: (source: string, target: string, amount?: bigint, tokenId?: number) => Promise<PaymentRoute[]>;
@@ -30,10 +46,12 @@ export interface GossipLayer {
 type GossipLayerOptions = {
   onAnnounce?: (profile: Profile) => void;
   getLiveProfiles?: () => Profile[];
+  officialFoundationSignerId?: string;
 };
 
 export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer {
   const profiles = new Map<string, Profile>();
+  const jurisdictions = new Map<string, JurisdictionGossipAnnouncement>();
 
   const announce = (profile: Profile): void => {
     logDebug('GOSSIP', `📢 gossip.announce INPUT: ${profile.entityId.slice(-4)} accounts=${profile.accounts.length}`);
@@ -66,6 +84,20 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
   };
 
   const getProfiles = (): Profile[] => Array.from(profiles.values());
+  const announceJurisdiction = (
+    value: JurisdictionGossipAnnouncement,
+    officialFoundationSignerId = options.officialFoundationSignerId,
+  ): boolean => {
+    const announcement = decodeJurisdictionGossipAnnouncement(value, officialFoundationSignerId);
+    const id = computeJurisdictionGossipHash(announcement);
+    if (jurisdictions.has(id)) return false;
+    if (jurisdictions.size >= MAX_JURISDICTION_GOSSIP_RECORDS) {
+      throw new Error('JURISDICTION_GOSSIP_RECORD_CAP_EXCEEDED');
+    }
+    jurisdictions.set(id, announcement);
+    return true;
+  };
+  const getJurisdictions = (): JurisdictionGossipAnnouncement[] => Array.from(jurisdictions.values());
   const getHubs = (): Profile[] => getProfiles().filter(isHubProfile);
   const getProfileBundle = (entityId: string): { profile?: Profile; peers: Profile[] } => {
     const profile = profiles.get(entityId);
@@ -79,6 +111,13 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
     profiles.clear();
     for (const profile of incoming) announce(profile);
   };
+  const setJurisdictions = (
+    incoming: Iterable<JurisdictionGossipAnnouncement>,
+    officialFoundationSignerId = options.officialFoundationSignerId,
+  ): void => {
+    jurisdictions.clear();
+    for (const announcement of incoming) announceJurisdiction(announcement, officialFoundationSignerId);
+  };
   const getNetworkGraph = () => ({
     findPaths: async (source: string, target: string, amount?: bigint, tokenId = 1) => {
       const graphProfiles = new Map(profiles);
@@ -90,5 +129,17 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
     },
   });
 
-  return { profiles, announce, getProfiles, getHubs, setProfiles, getProfileBundle, getNetworkGraph };
+  return {
+    profiles,
+    jurisdictions,
+    announce,
+    announceJurisdiction,
+    getProfiles,
+    getJurisdictions,
+    getHubs,
+    setProfiles,
+    setJurisdictions,
+    getProfileBundle,
+    getNetworkGraph,
+  };
 }

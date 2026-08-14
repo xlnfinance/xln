@@ -9,6 +9,7 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 import { deserializeTaggedJson } from '../../protocol/serialization';
+import { validateConsensusConfig } from '../../entity/consensus/config-validation';
 import { fetchLoopback } from '../server/loopback-fetch';
 import {
   buildManagedRuntimeChildSecretEnv,
@@ -110,21 +111,53 @@ type DaemonControlCliResult = {
   result: ManagedIdentity;
 };
 
-const decodeDaemonControlCliResult = (value: unknown): DaemonControlCliResult => {
+const requireExactHex = (value: unknown, bytes: number, code: string): string => {
+  if (typeof value !== 'string' || !new RegExp(`^0x[0-9a-f]{${bytes * 2}}$`, 'i').test(value)) {
+    throw new Error(code);
+  }
+  return value;
+};
+
+export const decodeDaemonControlCliResult = (value: unknown): DaemonControlCliResult => {
   const response = requireBoundaryRecord(value, 'DAEMON_CONTROL_RESULT_INVALID');
   requireExactBoundaryKeys(response, ['ok', 'command', 'result'], [], 'DAEMON_CONTROL_RESULT_FIELDS_INVALID');
   const result = requireBoundaryRecord(response['result'], 'DAEMON_CONTROL_RESULT_IDENTITY_INVALID');
-  requireExactBoundaryKeys(result, ['entityId', 'signerId', 'name'], [], 'DAEMON_CONTROL_RESULT_IDENTITY_FIELDS_INVALID');
+  requireExactBoundaryKeys(
+    result,
+    ['entityId', 'signerId', 'privateKeyHex', 'entitySeed', 'consensusConfig', 'position', 'name'],
+    [],
+    'DAEMON_CONTROL_RESULT_IDENTITY_FIELDS_INVALID',
+  );
   if (typeof response['ok'] !== 'boolean' || typeof response['command'] !== 'string' ||
-      typeof result['entityId'] !== 'string' || !result['entityId'] ||
-      typeof result['signerId'] !== 'string' || !result['signerId'] ||
       typeof result['name'] !== 'string' || !result['name']) {
     throw new Error('DAEMON_CONTROL_RESULT_INVALID');
+  }
+  const entityId = requireExactHex(result['entityId'], 32, 'DAEMON_CONTROL_RESULT_ENTITY_ID_INVALID');
+  const signerId = requireExactHex(result['signerId'], 20, 'DAEMON_CONTROL_RESULT_SIGNER_ID_INVALID');
+  requireExactHex(result['privateKeyHex'], 32, 'DAEMON_CONTROL_RESULT_PRIVATE_KEY_INVALID');
+  requireExactHex(result['entitySeed'], 64, 'DAEMON_CONTROL_RESULT_ENTITY_SEED_INVALID');
+  const consensusConfig = requireBoundaryRecord(
+    result['consensusConfig'],
+    'DAEMON_CONTROL_RESULT_CONSENSUS_CONFIG_INVALID',
+  );
+  requireExactBoundaryKeys(
+    consensusConfig,
+    ['mode', 'shares', 'threshold', 'validators'],
+    [],
+    'DAEMON_CONTROL_RESULT_CONSENSUS_CONFIG_FIELDS_INVALID',
+  );
+  validateConsensusConfig(consensusConfig, 'DAEMON_CONTROL_RESULT_CONSENSUS_CONFIG');
+  const position = requireBoundaryRecord(result['position'], 'DAEMON_CONTROL_RESULT_POSITION_INVALID');
+  requireExactBoundaryKeys(position, ['x', 'y', 'z'], [], 'DAEMON_CONTROL_RESULT_POSITION_FIELDS_INVALID');
+  for (const coordinate of ['x', 'y', 'z'] as const) {
+    if (typeof position[coordinate] !== 'number' || !Number.isFinite(position[coordinate])) {
+      throw new Error(`DAEMON_CONTROL_RESULT_POSITION_${coordinate.toUpperCase()}_INVALID`);
+    }
   }
   return {
     ok: response['ok'],
     command: response['command'],
-    result: { entityId: result['entityId'], signerId: result['signerId'], name: result['name'] },
+    result: { entityId, signerId, name: result['name'] },
   };
 };
 
@@ -336,11 +369,15 @@ export const isPublicDaemonHealthReady = (payload: unknown): boolean => {
   // after jurisdiction adapters and P2P have completed startup.
   try {
     const body = requireBoundaryRecord(payload, 'PUBLIC_DAEMON_HEALTH_INVALID');
-    requireExactBoundaryKeys(body, ['system', 'boot'], [], 'PUBLIC_DAEMON_HEALTH_FIELDS_INVALID');
+    requireExactBoundaryKeys(body, [
+      'timestamp', 'uptime', 'failures', 'system', 'source', 'bootstrap',
+      'boot', 'relay', 'hubMesh',
+      'marketMaker', 'custody', 'bootstrapReserves', 'disk', 'storage', 'hubs',
+    ], ['coreOk', 'systemOk', 'degraded'], 'PUBLIC_DAEMON_HEALTH_FIELDS_INVALID');
     const system = requireBoundaryRecord(body['system'], 'PUBLIC_DAEMON_HEALTH_SYSTEM_INVALID');
-    requireExactBoundaryKeys(system, ['runtime'], [], 'PUBLIC_DAEMON_HEALTH_SYSTEM_FIELDS_INVALID');
+    requireExactBoundaryKeys(system, ['runtime', 'p2p', 'relay'], [], 'PUBLIC_DAEMON_HEALTH_SYSTEM_FIELDS_INVALID');
     const boot = requireBoundaryRecord(body['boot'], 'PUBLIC_DAEMON_HEALTH_BOOT_INVALID');
-    requireExactBoundaryKeys(boot, ['phase'], [], 'PUBLIC_DAEMON_HEALTH_BOOT_FIELDS_INVALID');
+    requireExactBoundaryKeys(boot, ['phase', 'startedAt', 'completedAt', 'error'], [], 'PUBLIC_DAEMON_HEALTH_BOOT_FIELDS_INVALID');
     return system['runtime'] === true && boot['phase'] === 'ready';
   } catch {
     return false;

@@ -4,6 +4,8 @@
  * request, manifest, persistence record, logs, or publication result. [95/100]
  */
 
+import type { JurisdictionGossipAnnouncement } from '../../gossip/announcement';
+
 export const JURISDICTION_STACK_VERSION = 'V1' as const;
 
 type StackPublicationScope = 'local' | 'community' | 'official';
@@ -64,11 +66,9 @@ export type JurisdictionStackManifest = Readonly<{
 type StackPublicationResult =
   | Readonly<{ status: 'not_requested'; scope: 'local' }>
   | Readonly<{
-      status: 'pending';
+      status: 'queued' | 'published';
       scope: 'community' | 'official';
-      reason:
-        | 'JURISDICTION_GOSSIP_PUBLICATION_PROTOCOL_UNAVAILABLE'
-        | 'FOUNDATION_PUBLICATION_AUTHORITY_UNAVAILABLE';
+      announcement: JurisdictionGossipAnnouncement;
     }>;
 
 export type DeployJurisdictionStackResult = Readonly<{

@@ -9,6 +9,10 @@ import type {
   StackManagerStatus as RuntimeStackManagerStatus,
 } from '@xln/runtime/jurisdiction/adapter/stack-manager/types';
 import { safeStringify } from '@xln/runtime/protocol/serialization';
+import {
+  decodeJurisdictionGossipAnnouncementStructure,
+  type JurisdictionGossipAnnouncement,
+} from '@xln/runtime/jurisdiction/gossip/announcement';
 export const STACK_VERSION = 'V1' as const;
 export type StackPublicationRequest = DeployJurisdictionStackRequest['publication'];
 export type StackManagerStatus = RuntimeStackManagerStatus;
@@ -32,11 +36,9 @@ export type StackContractAddresses = Readonly<{
 export type StackPublicationResult =
   | Readonly<{ status: 'not_requested'; scope: 'local' }>
   | Readonly<{
-      status: 'pending';
+      status: 'queued' | 'published';
       scope: 'community' | 'official';
-      reason:
-        | 'JURISDICTION_GOSSIP_PUBLICATION_PROTOCOL_UNAVAILABLE'
-        | 'FOUNDATION_PUBLICATION_AUTHORITY_UNAVAILABLE';
+      announcement: JurisdictionGossipAnnouncement;
     }>;
 export type StackManagerDeployResult = Readonly<{
   manifest: Readonly<{
@@ -183,23 +185,36 @@ const decodeDeployResult = (value: unknown): StackManagerDeployResult => {
   const local = record(raw['localJurisdiction'], 'STACK_MANAGER_LOCAL_JURISDICTION_INVALID');
   exactKeys(local, ['key', 'name'], [], 'STACK_MANAGER_LOCAL_JURISDICTION_KEYS_INVALID');
   const publication = record(raw['publication'], 'STACK_MANAGER_PUBLICATION_INVALID');
-  exactKeys(publication, ['status', 'scope'], ['reason'], 'STACK_MANAGER_PUBLICATION_KEYS_INVALID');
-  const publicationStatus = oneOf(publication['status'], ['not_requested', 'pending'], 'STACK_MANAGER_PUBLICATION_STATUS_INVALID');
+  const publicationStatus = oneOf(publication['status'], ['not_requested', 'queued', 'published'], 'STACK_MANAGER_PUBLICATION_STATUS_INVALID');
   const scope = oneOf(publication['scope'], ['local', 'community', 'official'], 'STACK_MANAGER_PUBLICATION_SCOPE_INVALID');
-  const reason = publication['reason'] === undefined ? undefined : nonEmpty(publication['reason'], 'STACK_MANAGER_PUBLICATION_REASON_INVALID');
-  if (publicationStatus === 'not_requested' && (scope !== 'local' || reason !== undefined)) {
+  exactKeys(
+    publication,
+    ['status', 'scope', ...(publicationStatus === 'not_requested' ? [] : ['announcement'])],
+    [],
+    'STACK_MANAGER_PUBLICATION_KEYS_INVALID',
+  );
+  if (publicationStatus === 'not_requested' && scope !== 'local') {
     throw new Error('STACK_MANAGER_LOCAL_PUBLICATION_INVALID');
   }
   let decodedPublication: StackPublicationResult;
   if (publicationStatus === 'not_requested') {
     decodedPublication = { status: 'not_requested', scope: 'local' };
   } else {
-    if (scope === 'local'
-      || (reason !== 'JURISDICTION_GOSSIP_PUBLICATION_PROTOCOL_UNAVAILABLE'
-        && reason !== 'FOUNDATION_PUBLICATION_AUTHORITY_UNAVAILABLE')) {
-      throw new Error('STACK_MANAGER_PENDING_PUBLICATION_INVALID');
+    if (scope === 'local') throw new Error('STACK_MANAGER_GOSSIP_PUBLICATION_INVALID');
+    const announcement = decodeJurisdictionGossipAnnouncementStructure(publication['announcement']);
+    if (
+      announcement.scope !== scope ||
+      announcement.chainId !== manifest['chainId'] ||
+      announcement.deployer !== String(manifest['deployer']).toLowerCase() ||
+      announcement.foundationRecipient !== String(manifest['foundationRecipient']).toLowerCase()
+    ) throw new Error('STACK_MANAGER_GOSSIP_MANIFEST_MISMATCH');
+    const decodedContracts = decodeContracts(manifest['contracts']);
+    for (const [name, contractAddress] of Object.entries(decodedContracts)) {
+      if (announcement.contracts[name as keyof StackContractAddresses] !== contractAddress.toLowerCase()) {
+        throw new Error('STACK_MANAGER_GOSSIP_MANIFEST_MISMATCH');
+      }
     }
-    decodedPublication = { status: 'pending', scope, reason };
+    decodedPublication = { status: publicationStatus, scope, announcement };
   }
   return {
     manifest: {

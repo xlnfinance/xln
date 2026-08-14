@@ -42,6 +42,7 @@
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
   import type { JMachineCreateDetail } from '$lib/components/Jurisdiction/import-jmachine-runtime';
   import PushWakePanel from '$lib/components/Settings/PushWakePanel.svelte';
+  import StackManager from '$lib/components/Settings/StackManager.svelte';
   import EntityConsensusSettingsPanel from './EntityConsensusSettingsPanel.svelte';
   import type { EntityConsensusSettingsView } from '../entity-consensus-settings';
   import type { SettingsSubview } from '../entity-panel-routing';
@@ -404,10 +405,22 @@
     >
       Recovery
     </button>
+    <button
+      type="button"
+      data-testid="settings-stack-manager-tab"
+      class:active={settingsSubview === 'stack-manager'}
+      on:click={() => settingsSubview = 'stack-manager'}
+    >
+      Stack Manager
+    </button>
   </nav>
 
   {#if settingsSubview === 'consensus'}
     <EntityConsensusSettingsPanel view={consensusView} />
+  {:else if settingsSubview === 'stack-manager'}
+    <section class="panel" data-testid="settings-stack-manager-panel">
+      <StackManager />
+    </section>
   {:else if settingsSubview === 'recovery'}
     <section class="panel recovery-panel" data-testid="settings-recovery-panel">
       <div class="panel-title">
@@ -1217,6 +1230,15 @@
     .settings-head {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .settings-tabs {
+      flex-wrap: wrap;
+    }
+
+    .settings-tabs button {
+      flex: 1 1 30%;
+      padding-inline: 8px;
     }
 
     .settings-control--mascot {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { Wallet } from 'ethers';
+import { Wallet, getBytes } from 'ethers';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -12,8 +12,16 @@ import {
   acquireStackManagerDeploymentLock,
   persistVerifiedJurisdictionStack,
 } from '../../jurisdiction/adapter/stack-manager/persistence';
-import { buildStackManagerChildEnv } from '../../jurisdiction/adapter/stack-manager/deploy';
+import {
+  buildStackManagerChildEnv,
+  deployJurisdictionStack,
+} from '../../jurisdiction/adapter/stack-manager/deploy';
 import { validateJurisdictionsDataValue } from '../../jurisdiction/adapter/core/jurisdiction-loader';
+import {
+  computeJurisdictionGossipHash,
+  createJurisdictionGossipAnnouncement,
+  decodeJurisdictionGossipAnnouncement,
+} from '../../jurisdiction/gossip/announcement';
 
 const signer = new Wallet(`0x${'11'.repeat(32)}`).address;
 const foundation = new Wallet(`0x${'22'.repeat(32)}`).address;
@@ -23,6 +31,7 @@ const names = [
   'account', 'depositoryBounds', 'hashLadderRegistry', 'nftCustody',
   'hankoVerifier', 'entityProvider', 'depository', 'deltaTransformer',
 ] as const;
+const signerPrivateKey = `0x${'11'.repeat(32)}`;
 
 const request = () => ({
   stackVersion: 'V1',
@@ -58,6 +67,27 @@ const manifest = () => ({
   },
   registeredTokens: { USDT: { address: address('a'), tokenId: 1, decimals: 6 } },
 });
+
+const announcement = () => {
+  const decodedRequest = decodeDeployJurisdictionStackRequest(request());
+  const decodedManifest = decodeJurisdictionStackManifest(manifest());
+  return createJurisdictionGossipAnnouncement({
+    scope: 'community',
+    key: decodedRequest.key,
+    name: decodedRequest.name,
+    rpcUrl: decodedRequest.rpcUrl,
+    blockTimeMs: decodedRequest.blockTimeMs,
+    currency: decodedRequest.currency,
+    explorer: decodedRequest.explorer,
+    ...(decodedRequest.description ? { description: decodedRequest.description } : {}),
+    chainId: decodedManifest.chainId,
+    deployer: decodedManifest.deployer,
+    foundationRecipient: decodedManifest.foundationRecipient,
+    entityProviderDeploymentBlock: decodedManifest.entityProviderDeploymentBlock,
+    contracts: decodedManifest.contracts,
+    stablecoin: { symbol: 'USDT', ...decodedManifest.registeredTokens.USDT },
+  }, getBytes(signerPrivateKey));
+};
 
 describe('Stack Manager exact boundaries', () => {
   test('accepts canonical V1 operator input and normalizes EOAs', () => {
@@ -116,12 +146,17 @@ describe('Stack Manager exact boundaries', () => {
     try {
       const decodedRequest = decodeDeployJurisdictionStackRequest(request());
       const decodedManifest = decodeJurisdictionStackManifest(manifest());
-      await persistVerifiedJurisdictionStack(decodedRequest, decodedManifest);
+      const signedAnnouncement = announcement();
+      await persistVerifiedJurisdictionStack(decodedRequest, decodedManifest, signedAnnouncement);
       const persisted = validateJurisdictionsDataValue(JSON.parse(await readFile(path, 'utf8')));
       const jurisdictions = persisted['jurisdictions'] as Record<string, Record<string, unknown>>;
       expect(jurisdictions['arbitrum-one']?.['stackVersion']).toBe('V1');
       expect(jurisdictions['arbitrum-one']?.['evmContracts']).toBeDefined();
       expect(jurisdictions['arbitrum-one']?.['blockTimeMs']).toBe(250);
+      const announcements = persisted['jurisdictionAnnouncements'] as unknown[];
+      expect(announcements).toHaveLength(1);
+      expect(computeJurisdictionGossipHash(decodeJurisdictionGossipAnnouncement(announcements[0])))
+        .toBe(computeJurisdictionGossipHash(signedAnnouncement));
       await expect(persistVerifiedJurisdictionStack(decodedRequest, decodedManifest))
         .rejects.toThrow('STACK_MANAGER_JURISDICTION_KEY_EXISTS');
     } finally {
@@ -129,6 +164,26 @@ describe('Stack Manager exact boundaries', () => {
       else process.env['XLN_JURISDICTIONS_PATH'] = previous;
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  test('signs exact community discovery and rejects payload or signature mutation', () => {
+    const signed = announcement();
+    expect(decodeJurisdictionGossipAnnouncement(signed)).toEqual(signed);
+    expect(() => decodeJurisdictionGossipAnnouncement({ ...signed, rpcUrl: 'https://evil.example/rpc' }))
+      .toThrow('JURISDICTION_GOSSIP_SIGNATURE_INVALID');
+    expect(() => decodeJurisdictionGossipAnnouncement({ ...signed, signature: `0x${'00'.repeat(65)}` }))
+      .toThrow('JURISDICTION_GOSSIP_SIGNATURE_INVALID');
+  });
+
+  test('rejects official publication before RPC or gas unless the configured root signer owns the stack', async () => {
+    const officialRequest = decodeDeployJurisdictionStackRequest({
+      ...request(),
+      foundationRecipient: signer,
+      publication: 'official',
+    });
+    await expect(deployJurisdictionStack(officialRequest, {
+      signerPrivateKey: getBytes(signerPrivateKey),
+    })).rejects.toThrow('FOUNDATION_PUBLICATION_AUTHORITY_UNAVAILABLE');
   });
 
   test('serializes CLI and server deployment with one cross-process lock', async () => {

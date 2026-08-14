@@ -19,6 +19,10 @@ import {
   requireString,
   validateStorageSafeValue,
 } from '../../../protocol/boundary/boundary-primitives';
+import {
+  decodeJurisdictionGossipAnnouncement,
+  type JurisdictionGossipAnnouncement,
+} from '../../gossip/announcement';
 
 const jurisdictionLoaderLog = createStructuredLogger('runtime.jurisdiction_loader');
 
@@ -46,7 +50,7 @@ interface JurisdictionConfig {
   status: string;
 }
 
-interface JurisdictionsData {
+export interface JurisdictionsData {
   version: string;
   lastUpdated: string;
   jurisdictions: Record<string, JurisdictionConfig>;
@@ -60,6 +64,8 @@ interface JurisdictionsData {
       maxFee: number;
     };
   };
+  officialFoundationSignerId?: string;
+  jurisdictionAnnouncements?: JurisdictionGossipAnnouncement[];
 }
 
 let cachedJurisdictions: JurisdictionsData | null = null;
@@ -191,13 +197,28 @@ const decodeJurisdictionsData = (value: unknown): JurisdictionsData => {
   requireExactBoundaryKeys(
     root,
     ['version', 'lastUpdated', 'jurisdictions', 'defaults'],
-    ['deployVersion', 'networkVersion'],
+    ['deployVersion', 'networkVersion', 'officialFoundationSignerId', 'jurisdictionAnnouncements'],
     'JURISDICTIONS_ROOT_FIELDS',
   );
   for (const field of ['deployVersion', 'networkVersion'] as const) {
     if (root[field] !== undefined) {
       requireString(root[field], `JURISDICTIONS_${field.toUpperCase()}_INVALID`);
     }
+  }
+  let officialFoundationSignerId: string | undefined;
+  if (root['officialFoundationSignerId'] !== undefined) {
+    const decoded = requireString(
+      root['officialFoundationSignerId'],
+      'JURISDICTIONS_OFFICIAL_FOUNDATION_SIGNER_INVALID',
+    );
+    if (!/^0x[0-9a-f]{40}$/.test(decoded)) {
+      throw new Error('JURISDICTIONS_OFFICIAL_FOUNDATION_SIGNER_INVALID');
+    }
+    officialFoundationSignerId = decoded;
+  }
+  const announcementValues = root['jurisdictionAnnouncements'];
+  if (announcementValues !== undefined && !Array.isArray(announcementValues)) {
+    throw new Error('JURISDICTIONS_GOSSIP_ANNOUNCEMENTS_INVALID');
   }
   const rawEntries = requireBoundaryRecord(
     root['jurisdictions'],
@@ -245,8 +266,14 @@ const decodeJurisdictionsData = (value: unknown): JurisdictionsData => {
               defaults['rebalancePolicyUsd'],
               'JURISDICTIONS_DEFAULT_REBALANCE',
             ),
-          }),
+      }),
     },
+    ...(officialFoundationSignerId === undefined ? {} : { officialFoundationSignerId }),
+    ...(announcementValues === undefined ? {} : {
+      jurisdictionAnnouncements: announcementValues.map((announcement) =>
+        decodeJurisdictionGossipAnnouncement(announcement, officialFoundationSignerId),
+      ),
+    }),
   };
 };
 
@@ -310,6 +337,23 @@ export function loadJurisdictions(): JurisdictionsData {
     throw new Error(`JURISDICTIONS_LOAD_FAILED:path=${filePath || 'unknown'}:${message}`);
   }
 }
+
+export const getConfiguredOfficialFoundationSignerId = (): string | undefined => {
+  const configured = typeof process === 'undefined'
+    ? undefined
+    : process.env?.['XLN_OFFICIAL_FOUNDATION_SIGNER_ID'];
+  if (configured !== undefined) {
+    const normalized = configured.trim().toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(normalized)) {
+      throw new Error('JURISDICTIONS_OFFICIAL_FOUNDATION_SIGNER_INVALID');
+    }
+    return normalized;
+  }
+  if (isBrowser) return undefined;
+  const fs = require('fs') as { existsSync(path: string): boolean };
+  if (!fs.existsSync(resolveJurisdictionsJsonPath())) return undefined;
+  return loadJurisdictions().officialFoundationSignerId;
+};
 
 /**
  * Clear the cache (useful for testing or when file is updated)

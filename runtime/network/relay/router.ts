@@ -18,6 +18,8 @@ import {
   storeVerifiedGossipProfile,
   getDefaultGossipProfiles,
   getProfileBatch,
+  getAllGossipJurisdictions,
+  storeVerifiedJurisdictionAnnouncement,
   DEFAULT_GOSSIP_SYNC_LIMIT,
   registerClient,
   removeClient,
@@ -26,13 +28,19 @@ import {
   classifyRelayDeliveryEvent,
 } from './store';
 import { classifyWebSocketSendResult } from '../websocket-send-result';
-import type { Profile } from '../../entity/profile';
+import { parseProfile, type Profile } from '../../entity/profile';
 import { verifyProfileSignature, type ProfileVerifyResult } from '../../entity/profile/profile-signing';
 import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from '../p2p/auth/hello-auth';
 import type { HelloChallengeBinding } from '../p2p/auth/hello-challenge';
 import { isDeliveryDelivered, type DeliveryResult } from '../../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
+import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
+import {
+  MAX_JURISDICTION_GOSSIP_RECORDS,
+  type JurisdictionGossipAnnouncement,
+} from '../../jurisdiction/gossip/announcement';
+import { decodeGossipProfileBatchRequest } from '../p2p/gossip/profile-batch';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
@@ -387,7 +395,7 @@ type StoredGossipProfiles = {
 
 const storeAnnouncedProfiles = async (
   context: RelayRouteContext,
-  profiles: Profile[],
+  profiles: unknown[],
 ): Promise<StoredGossipProfiles> => {
   const { config, from, fromKey, type, traceId } = context;
   const result: StoredGossipProfiles = {
@@ -398,10 +406,10 @@ const storeAnnouncedProfiles = async (
     profiles: [],
   };
   const verifyProfile = config.verifyProfile ?? verifyProfileSignature;
-  for (const profile of profiles) {
-    if (!profile || typeof profile !== 'object') continue;
-    const normalized: Profile = { ...profile, runtimeId: profile.runtimeId || fromKey };
+  for (const value of profiles) {
     try {
+      const profile = parseProfile(value);
+      const normalized: Profile = { ...profile, runtimeId: profile.runtimeId || fromKey };
       const verified = await verifyProfile(normalized);
       if (!verified.valid) {
         result.droppedInvalidSignature += 1;
@@ -433,7 +441,9 @@ const storeAnnouncedProfiles = async (
         status: 'rejected',
         reason: 'GOSSIP_PROFILE_DROPPED_MALFORMED',
         details: {
-          entityId: typeof normalized.entityId === 'string' ? normalized.entityId : null,
+          entityId: value && typeof value === 'object' && 'entityId' in value
+            ? String((value as { entityId?: unknown }).entityId ?? '')
+            : null,
           message: error instanceof Error ? error.message : String(error),
           traceId,
         },
@@ -446,8 +456,9 @@ const storeAnnouncedProfiles = async (
 const broadcastGossipProfiles = (
   context: RelayRouteContext,
   storedProfiles: Profile[],
+  storedJurisdictions: JurisdictionGossipAnnouncement[] = [],
 ): number => {
-  if (storedProfiles.length === 0) return 0;
+  if (storedProfiles.length === 0 && storedJurisdictions.length === 0) return 0;
   const { config, fromKey, id } = context;
   const defaultEntityIds = new Set(
     getDefaultGossipProfiles(config.store, DEFAULT_GOSSIP_SYNC_LIMIT)
@@ -456,7 +467,7 @@ const broadcastGossipProfiles = (
   const profiles = storedProfiles.filter(
     profile => defaultEntityIds.has(profile.entityId.toLowerCase()) || profile.metadata.isHub === true,
   );
-  if (profiles.length === 0) return 0;
+  if (profiles.length === 0 && storedJurisdictions.length === 0) return 0;
   let targets = 0;
   for (const [runtimeId, client] of config.store.clients.entries()) {
     if (!client?.ws || (fromKey && runtimeId === fromKey)) continue;
@@ -466,7 +477,7 @@ const broadcastGossipProfiles = (
       from: config.store.serverId,
       to: runtimeId,
       timestamp: Date.now(),
-      payload: { profiles },
+      payload: { profiles, jurisdictions: storedJurisdictions },
       ...(id ? { inReplyTo: id } : {}),
     }));
     targets += 1;
@@ -492,23 +503,50 @@ const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean
     }));
     return true;
   }
-  const value = payload && typeof payload === 'object' ? payload as { profiles?: unknown } : {};
-  const announced = (Array.isArray(value.profiles) ? value.profiles : []) as Profile[];
+  const value = requireBoundaryRecord(payload, 'RELAY_GOSSIP_ANNOUNCE_INVALID');
+  requireExactBoundaryKeys(value, ['profiles', 'jurisdictions'], [], 'RELAY_GOSSIP_ANNOUNCE_FIELDS_INVALID');
+  if (!Array.isArray(value['profiles']) || !Array.isArray(value['jurisdictions'])) {
+    throw new Error('RELAY_GOSSIP_ANNOUNCE_ARRAYS_INVALID');
+  }
+  const announced = value['profiles'];
+  const jurisdictionValues = value['jurisdictions'];
   if (
     announced.length > DEFAULT_GOSSIP_SYNC_LIMIT ||
-    !consumeGossipBudget(ws, announced.length)
+    jurisdictionValues.length > MAX_JURISDICTION_GOSSIP_RECORDS ||
+    !consumeGossipBudget(ws, announced.length + jurisdictionValues.length)
   ) {
     pushDebugEvent(config.store, {
       event: 'error', from, msgType: type, status: 'rejected',
       reason: 'GOSSIP_ANNOUNCE_RATE_LIMITED',
-      details: { announced: announced.length, maxBatch: DEFAULT_GOSSIP_SYNC_LIMIT, traceId },
+      details: {
+        announced: announced.length,
+        jurisdictions: jurisdictionValues.length,
+        maxBatch: DEFAULT_GOSSIP_SYNC_LIMIT,
+        traceId,
+      },
     });
     config.send(ws, serializeWsMessage({ type: 'error', error: 'GOSSIP_ANNOUNCE_RATE_LIMITED' }));
     closeInvalidRelaySession(config.store, ws, 'relay-gossip-rate-limited');
     return true;
   }
   const stored = await storeAnnouncedProfiles(context, announced);
-  const broadcastTargets = broadcastGossipProfiles(context, stored.profiles);
+  const storedJurisdictions: JurisdictionGossipAnnouncement[] = [];
+  for (const jurisdiction of jurisdictionValues) {
+    try {
+      const accepted = storeVerifiedJurisdictionAnnouncement(config.store, jurisdiction);
+      if (accepted) storedJurisdictions.push(accepted);
+    } catch (error) {
+      pushDebugEvent(config.store, {
+        event: 'error',
+        from,
+        msgType: type,
+        status: 'rejected',
+        reason: 'GOSSIP_JURISDICTION_DROPPED_INVALID',
+        details: { message: error instanceof Error ? error.message : String(error), traceId },
+      });
+    }
+  }
+  const broadcastTargets = broadcastGossipProfiles(context, stored.profiles, storedJurisdictions);
   pushDebugEvent(config.store, {
     event: 'gossip_store',
     from,
@@ -519,6 +557,7 @@ const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean
       stored: stored.stored,
       droppedMalformed: stored.droppedMalformed,
       droppedInvalidSignature: stored.droppedInvalidSignature,
+      jurisdictionsStored: storedJurisdictions.length,
       broadcastTargets,
       traceId,
     },
@@ -529,13 +568,11 @@ const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean
 const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
   const { config, ws, payload, type, from, to, id, traceId } = context;
   if (type === 'gossip_request') {
-    const request = payload && typeof payload === 'object' ? payload as {
-      ids?: string[];
-      set?: 'default' | 'hubs';
-      updatedSince?: number;
-      limit?: number;
-    } : {};
+    const request = decodeGossipProfileBatchRequest(payload);
     const profiles = getProfileBatch(config.store, request);
+    const jurisdictions = request.includeJurisdictions === true
+      ? getAllGossipJurisdictions(config.store)
+      : [];
     pushDebugEvent(config.store, {
       event: 'gossip_request',
       from,
@@ -543,6 +580,7 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
       msgType: type,
       details: {
         returnedProfiles: profiles.length,
+        returnedJurisdictions: jurisdictions.length,
         idCount: Array.isArray(request.ids) ? request.ids.length : 0,
         set: request.set ?? 'default',
         updatedSince: request.updatedSince ?? null,
@@ -556,7 +594,7 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
       from: config.store.serverId,
       ...(from ? { to: from } : {}),
       timestamp: Date.now(),
-      payload: { profiles },
+      payload: { profiles, jurisdictions },
       ...(id ? { inReplyTo: id } : {}),
     }));
     return true;

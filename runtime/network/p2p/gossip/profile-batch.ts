@@ -1,14 +1,60 @@
+/**
+ * Exact wire decoder and deterministic selector for bounded Gossip batches.
+ * Profiles and jurisdiction discovery share this request so relay and Runtime
+ * cannot disagree about filters, limits, or optional discovery authority. [82/100]
+ */
+
 import { isHubProfile, type Profile } from '../../../entity/profile';
 import { compareStableText } from '../../../protocol/serialization';
+import {
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../../../protocol/boundary-validation';
 
 export type GossipProfileBatchRequest = {
   ids?: string[];
   set?: 'default' | 'hubs';
   updatedSince?: number;
   limit?: number;
+  includeJurisdictions?: boolean;
 };
 
 export const DEFAULT_GOSSIP_BATCH_LIMIT = 1000;
+
+export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBatchRequest => {
+  const request = requireBoundaryRecord(value, 'P2P_GOSSIP_REQUEST_INVALID');
+  requireExactBoundaryKeys(
+    request,
+    [],
+    ['ids', 'set', 'updatedSince', 'limit', 'includeJurisdictions'],
+    'P2P_GOSSIP_REQUEST_FIELDS_INVALID',
+  );
+  const ids = request['ids'];
+  if (ids !== undefined && (!Array.isArray(ids) || ids.some(
+    id => typeof id !== 'string' || id.length > 128,
+  ))) throw new Error('P2P_GOSSIP_REQUEST_IDS_INVALID');
+  const set = request['set'];
+  if (set !== undefined && set !== 'default' && set !== 'hubs') {
+    throw new Error('P2P_GOSSIP_REQUEST_SET_INVALID');
+  }
+  for (const field of ['updatedSince', 'limit'] as const) {
+    const candidate = request[field];
+    if (candidate !== undefined && (!Number.isSafeInteger(candidate) || Number(candidate) < 0)) {
+      throw new Error(`P2P_GOSSIP_REQUEST_${field.toUpperCase()}_INVALID`);
+    }
+  }
+  const includeJurisdictions = request['includeJurisdictions'];
+  if (includeJurisdictions !== undefined && typeof includeJurisdictions !== 'boolean') {
+    throw new Error('P2P_GOSSIP_REQUEST_INCLUDE_JURISDICTIONS_INVALID');
+  }
+  return {
+    ...(ids === undefined ? {} : { ids: [...ids] }),
+    ...(set === undefined ? {} : { set }),
+    ...(request['updatedSince'] === undefined ? {} : { updatedSince: Number(request['updatedSince']) }),
+    ...(request['limit'] === undefined ? {} : { limit: Number(request['limit']) }),
+    ...(includeJurisdictions === undefined ? {} : { includeJurisdictions }),
+  };
+};
 
 const normalizeEntityId = (entityId: unknown): string => String(entityId || '').toLowerCase();
 

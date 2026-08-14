@@ -224,8 +224,8 @@
         Publication
         <select data-testid="stack-manager-publication" bind:value={publication}>
           <option value="local">Local discovery only</option>
-          <option value="community">Request community Gossip publication</option>
-          <option value="official">Request official Foundation publication</option>
+          <option value="community">Publish to community Gossip</option>
+          <option value="official">Publish as official Foundation stack</option>
         </select>
       </label>
       <label>
@@ -254,7 +254,7 @@
       </label>
     </div>
     {#if publication !== 'local'}
-      <p class="notice">Deployment is saved locally first. Gossip remains pending until {publication === 'official' ? 'Foundation Hanko authorizes the official entry' : 'the community publication protocol is available'}.</p>
+      <p class="notice">The verified deployment is signed by the Runtime deployer and saved for Gossip. Official publication additionally requires the configured Foundation trust anchor.</p>
     {/if}
   </details>
   <label class="confirm">

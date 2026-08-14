@@ -3,7 +3,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { clearJurisdictionsCache, loadJurisdictions } from '../../../jurisdiction/adapter/core/jurisdiction-loader';
+import {
+  clearJurisdictionsCache,
+  getConfiguredOfficialFoundationSignerId,
+  loadJurisdictions,
+} from '../../../jurisdiction/adapter/core/jurisdiction-loader';
 
 const tempRoots: string[] = [];
 
@@ -65,6 +69,12 @@ describe('jurisdiction loader diagnostics', () => {
         .toThrow(`JURISDICTIONS_LOAD_FAILED:path=unknown:JURISDICTIONS_CONFIG_MISSING:path=${path}`);
     });
     expect(messages).toEqual([]);
+  });
+
+  test('missing optional official trust root does not block community startup', () => {
+    useTempJurisdictionsPath();
+
+    expect(getConfiguredOfficialFoundationSignerId()).toBeUndefined();
   });
 
   test('invalid config fails loud with path-scoped load error', () => {

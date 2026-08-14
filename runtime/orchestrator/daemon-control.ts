@@ -18,6 +18,7 @@ import {
   requireExactBoundaryKeys,
 } from '../protocol/boundary-validation';
 import { canonicalEntitySeed, importEntity } from '../runtime/registration/entity-creation';
+import { parseProfile } from '../entity/profile';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
@@ -104,6 +105,7 @@ type ControlRuntimeStatusResponse = {
   currentHeight?: number;
   runtime?: {
     halted?: boolean;
+    operatorStatus?: 'HALTED_REQUIRES_OPERATOR' | null;
     fatalDebugPayload?: unknown;
   } | null;
   error?: string;
@@ -126,10 +128,29 @@ const responseErrorMessage = (value: unknown, defaultMessage: string): string =>
   }
 };
 
-const decodeControlOkResponse = (value: unknown, code: string): void => {
-  const response = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(response, ['ok'], [], `${code}_FIELDS_INVALID`);
-  if (response['ok'] !== true) throw new Error(code);
+const decodeNullableStringList = (value: unknown, code: string): void => {
+  if (value === null) return;
+  if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string' || entry.length === 0)) {
+    throw new Error(code);
+  }
+};
+
+const decodeP2PControlResponse = (value: unknown): void => {
+  const response = requireBoundaryRecord(value, 'CONTROL_P2P_RESPONSE_INVALID');
+  requireExactBoundaryKeys(response, ['ok', 'config'], [], 'CONTROL_P2P_RESPONSE_FIELDS_INVALID');
+  if (response['ok'] !== true) throw new Error('CONTROL_P2P_RESPONSE_INVALID');
+  const config = requireBoundaryRecord(response['config'], 'CONTROL_P2P_RESPONSE_CONFIG_INVALID');
+  requireExactBoundaryKeys(
+    config,
+    ['relayUrls', 'advertiseEntityIds', 'gossipPollMs'],
+    [],
+    'CONTROL_P2P_RESPONSE_CONFIG_FIELDS_INVALID',
+  );
+  decodeNullableStringList(config['relayUrls'], 'CONTROL_P2P_RESPONSE_RELAY_URLS_INVALID');
+  decodeNullableStringList(config['advertiseEntityIds'], 'CONTROL_P2P_RESPONSE_ENTITY_IDS_INVALID');
+  if (config['gossipPollMs'] !== null) {
+    requireBoundaryInteger(config['gossipPollMs'], 'CONTROL_P2P_RESPONSE_GOSSIP_POLL_MS_INVALID', 250);
+  }
 };
 
 const decodeControlQueueResponse = (value: unknown): ControlQueueResponse => {
@@ -169,29 +190,31 @@ const decodeControlQueueResponse = (value: unknown): ControlQueueResponse => {
 
 const decodeGossipProfileResponse = (value: unknown): GossipProfileResponse => {
   const response = requireBoundaryRecord(value, 'GOSSIP_PROFILE_RESPONSE_INVALID');
-  requireExactBoundaryKeys(response, ['ok', 'found'], ['profile'], 'GOSSIP_PROFILE_RESPONSE_FIELDS_INVALID');
+  requireExactBoundaryKeys(
+    response,
+    ['ok', 'entityId', 'found', 'profile', 'peers'],
+    [],
+    'GOSSIP_PROFILE_RESPONSE_FIELDS_INVALID',
+  );
   if (typeof response['ok'] !== 'boolean' || typeof response['found'] !== 'boolean') {
     throw new Error('GOSSIP_PROFILE_RESPONSE_FLAGS_INVALID');
   }
-  const profile = response['profile'];
-  if (profile !== undefined && profile !== null) {
-    const record = requireBoundaryRecord(profile, 'GOSSIP_PROFILE_RESPONSE_PROFILE_INVALID');
-    requireExactBoundaryKeys(record, [], ['entityId'], 'GOSSIP_PROFILE_RESPONSE_PROFILE_FIELDS_INVALID');
-    if (record['entityId'] !== undefined && typeof record['entityId'] !== 'string') {
-      throw new Error('GOSSIP_PROFILE_RESPONSE_ENTITY_ID_INVALID');
-    }
+  if (typeof response['entityId'] !== 'string' || response['entityId'].length === 0) {
+    throw new Error('GOSSIP_PROFILE_RESPONSE_ENTITY_ID_INVALID');
   }
-  let decodedProfile: GossipProfileResponse['profile'] | undefined;
-  if (profile === null) {
-    decodedProfile = null;
-  } else if (profile !== undefined) {
-    const record = requireBoundaryRecord(profile, 'GOSSIP_PROFILE_RESPONSE_PROFILE_INVALID');
-    decodedProfile = record['entityId'] === undefined ? {} : { entityId: record['entityId'] as string };
+  const profile = response['profile'];
+  if ((profile !== null) !== response['found']) {
+    throw new Error('GOSSIP_PROFILE_RESPONSE_FOUND_MISMATCH');
+  }
+  const decodedProfile = profile === null ? null : parseProfile(profile);
+  if (!Array.isArray(response['peers'])) throw new Error('GOSSIP_PROFILE_RESPONSE_PEERS_INVALID');
+  for (const peer of response['peers']) {
+    parseProfile(peer);
   }
   return {
     ok: response['ok'],
     found: response['found'],
-    ...(decodedProfile === undefined ? {} : { profile: decodedProfile }),
+    profile: decodedProfile,
   };
 };
 
@@ -209,9 +232,13 @@ const decodeControlRuntimeStatusResponse = (value: unknown): ControlRuntimeStatu
   const runtime = response['runtime'];
   if (runtime !== undefined && runtime !== null) {
     const record = requireBoundaryRecord(runtime, 'CONTROL_RUNTIME_STATUS_RUNTIME_INVALID');
-    requireExactBoundaryKeys(record, [], ['halted', 'fatalDebugPayload'], 'CONTROL_RUNTIME_STATUS_RUNTIME_FIELDS_INVALID');
+    requireExactBoundaryKeys(record, [], ['halted', 'operatorStatus', 'fatalDebugPayload'], 'CONTROL_RUNTIME_STATUS_RUNTIME_FIELDS_INVALID');
     if (record['halted'] !== undefined && typeof record['halted'] !== 'boolean') {
       throw new Error('CONTROL_RUNTIME_STATUS_HALTED_INVALID');
+    }
+    if (record['operatorStatus'] !== undefined && record['operatorStatus'] !== null &&
+        record['operatorStatus'] !== 'HALTED_REQUIRES_OPERATOR') {
+      throw new Error('CONTROL_RUNTIME_STATUS_OPERATOR_INVALID');
     }
   }
   let decodedRuntime: ControlRuntimeStatusResponse['runtime'] | undefined;
@@ -221,6 +248,9 @@ const decodeControlRuntimeStatusResponse = (value: unknown): ControlRuntimeStatu
     const record = requireBoundaryRecord(runtime, 'CONTROL_RUNTIME_STATUS_RUNTIME_INVALID');
     decodedRuntime = {
       ...(record['halted'] === undefined ? {} : { halted: record['halted'] as boolean }),
+      ...(record['operatorStatus'] === undefined
+        ? {}
+        : { operatorStatus: record['operatorStatus'] as 'HALTED_REQUIRES_OPERATOR' | null }),
       ...(record['fatalDebugPayload'] === undefined ? {} : { fatalDebugPayload: record['fatalDebugPayload'] }),
     };
   }
@@ -448,7 +478,7 @@ export class DaemonControlClient {
     advertiseEntityIds?: string[];
     gossipPollMs?: number;
   }): Promise<void> {
-    decodeControlOkResponse(await this.post('/api/control/p2p', config), 'CONTROL_P2P_RESPONSE_INVALID');
+    decodeP2PControlResponse(await this.post('/api/control/p2p', config));
   }
 
   async getRuntimeInputStatus(statusUrl: string): Promise<ControlRuntimeStatusResponse> {

@@ -30,6 +30,80 @@ const validEntity = (): Record<string, unknown> => ({
 });
 
 describe('daemon control committed role boundary', () => {
+  test('accepts only the exact P2P control response contract', async () => {
+    globalThis.fetch = async () => new Response(safeStringify({
+      ok: true,
+      config: {
+        relayUrls: ['wss://relay.example'],
+        advertiseEntityIds: [ENTITY],
+        gossipPollMs: 1_000,
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    await expect(new DaemonControlClient({ baseUrl: 'http://control.test' }).configureP2P({
+      relayUrls: ['wss://relay.example'],
+      advertiseEntityIds: [ENTITY],
+      gossipPollMs: 1_000,
+    })).resolves.toBeUndefined();
+
+    globalThis.fetch = async () => new Response(safeStringify({
+      ok: true,
+      config: {
+        relayUrls: null,
+        advertiseEntityIds: null,
+        gossipPollMs: null,
+        unexpected: true,
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    await expect(new DaemonControlClient({ baseUrl: 'http://control.test' }).configureP2P({}))
+      .rejects.toThrow('CONTROL_P2P_RESPONSE_CONFIG_FIELDS_INVALID');
+  });
+
+  test('validates the complete gossip profile response before trusting found', async () => {
+    globalThis.fetch = async () => new Response(safeStringify({
+      ok: true,
+      entityId: ENTITY,
+      found: false,
+      profile: null,
+      peers: [],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    await expect(new DaemonControlClient({ baseUrl: 'http://control.test' }).hasGossipProfile(ENTITY))
+      .resolves.toBe(false);
+
+    globalThis.fetch = async () => new Response(safeStringify({
+      ok: true,
+      entityId: ENTITY,
+      found: false,
+      profile: null,
+      peers: [{ entityId: ENTITY }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    await expect(new DaemonControlClient({ baseUrl: 'http://control.test' }).hasGossipProfile(ENTITY))
+      .rejects.toThrow();
+  });
+
+  test('decodes the exact Runtime operator status contract', async () => {
+    globalThis.fetch = async () => new Response(safeStringify({
+      ok: true,
+      currentHeight: 7,
+      runtime: {
+        halted: false,
+        operatorStatus: null,
+        fatalDebugPayload: null,
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+
+    await expect(
+      new DaemonControlClient({ baseUrl: 'http://control.test' }).getRuntimeInputStatus('/status'),
+    ).resolves.toMatchObject({ runtime: { halted: false, operatorStatus: null } });
+
+    globalThis.fetch = async () => new Response(safeStringify({
+      ok: true,
+      runtime: { halted: false, operatorStatus: 'keep-going', fatalDebugPayload: null },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    await expect(
+      new DaemonControlClient({ baseUrl: 'http://control.test' }).getRuntimeInputStatus('/status'),
+    ).rejects.toThrow('CONTROL_RUNTIME_STATUS_OPERATOR_INVALID');
+  });
+
   test('preserves an explicit committed false role', async () => {
     globalThis.fetch = async () => responseWith(validEntity());
     const entities = await new DaemonControlClient({ baseUrl: 'http://control.test' }).listEntities();

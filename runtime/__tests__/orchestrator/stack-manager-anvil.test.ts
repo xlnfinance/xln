@@ -74,7 +74,7 @@ describe('Stack Manager real Anvil deployment', () => {
         signerId: wallet.address,
         foundationRecipient: wallet.address,
         stablecoin: { kind: 'test' },
-        publication: 'local',
+        publication: 'community',
         confirmations: 1,
       });
       const result = await deployJurisdictionStack(request, {
@@ -82,10 +82,12 @@ describe('Stack Manager real Anvil deployment', () => {
         onPhase: phase => phases.push(phase),
       });
       expect(phases).toEqual(['preflight', 'deploying', 'verifying', 'persisting', 'complete']);
-      expect(result.publication).toEqual({ status: 'not_requested', scope: 'local' });
+      expect(result.publication.status).toBe('queued');
+      expect(result.publication.scope).toBe('community');
       const persisted = validateJurisdictionsDataValue(JSON.parse(await readFile(path, 'utf8')));
       const jurisdictions = persisted['jurisdictions'];
       expect(jurisdictions && typeof jurisdictions === 'object').toBeTrue();
+      expect(persisted['jurisdictionAnnouncements']).toHaveLength(1);
 
       const provider = new JsonRpcProvider(rpcUrl);
       try {

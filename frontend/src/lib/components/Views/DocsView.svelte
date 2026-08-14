@@ -20,6 +20,8 @@
     sectionId: string;
     sectionTitle: string;
     featured: boolean;
+    order: number;
+    sectionOrder: number;
     url: string;
   }
 
@@ -60,7 +62,7 @@
 
   const decodeDocEntry = (value: unknown): DocEntry => {
     const record = requireUnknownRecord(value, 'DOCS_ENTRY_INVALID');
-    rejectExtraKeys(record, ['id', 'path', 'title', 'summary', 'role', 'status', 'audience', 'kind', 'sectionId', 'sectionTitle', 'featured', 'url'], 'DOCS_ENTRY_EXTRA_FIELD');
+    rejectExtraKeys(record, ['id', 'path', 'title', 'summary', 'role', 'status', 'audience', 'kind', 'sectionId', 'sectionTitle', 'featured', 'order', 'sectionOrder', 'url'], 'DOCS_ENTRY_EXTRA_FIELD');
     if (record['kind'] !== 'live' && record['kind'] !== 'archive') throw new Error('DOCS_ENTRY_KIND_INVALID');
     const kind = record['kind'];
     return {
@@ -75,6 +77,8 @@
       sectionId: requireString(record['sectionId'], 'DOCS_ENTRY_SECTION_ID_INVALID'),
       sectionTitle: requireString(record['sectionTitle'], 'DOCS_ENTRY_SECTION_TITLE_INVALID'),
       featured: requireBoolean(record['featured'], 'DOCS_ENTRY_FEATURED_INVALID'),
+      order: requireFiniteNumber(record['order'], 'DOCS_ENTRY_ORDER_INVALID'),
+      sectionOrder: requireFiniteNumber(record['sectionOrder'], 'DOCS_ENTRY_SECTION_ORDER_INVALID'),
       url: requireString(record['url'], 'DOCS_ENTRY_URL_INVALID'),
     };
   };

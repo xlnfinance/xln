@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Wallet, getBytes } from 'ethers';
 import type { Profile } from '../../../entity/profile';
 import { relayRoute as productionRelayRoute } from '../../../network/relay/router';
 import { cacheEncryptionKey, createRelayStore, resolveEncryptionPublicKeyHex } from '../../../network/relay/store';
@@ -16,6 +17,7 @@ import {
   certifySingleSignerProfileFixture,
   deriveSingleSignerFixtureEntityId,
 } from '../../helpers/cryptographic-profile';
+import { createJurisdictionGossipAnnouncement } from '../../../jurisdiction/gossip/announcement';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
 const SEED_A = 'relay-router-test-seed-a';
@@ -25,6 +27,8 @@ const RUNTIME_A = deriveSignerAddressSync(SEED_A, '1');
 const RUNTIME_B = deriveSignerAddressSync(SEED_B, '2');
 const KEY_A = '0x' + '11'.repeat(32);
 const KEY_B = '0x' + '22'.repeat(32);
+const JURISDICTION_SIGNER_KEY = `0x${'33'.repeat(32)}`;
+const JURISDICTION_SIGNER = new Wallet(JURISDICTION_SIGNER_KEY).address.toLowerCase();
 const ENTITY_A = deriveSingleSignerFixtureEntityId(SEED_A, '1');
 const ENTITY_B = deriveSingleSignerFixtureEntityId(SEED_B, '2');
 const ENTITY_C = deriveSingleSignerFixtureEntityId(SEED_C, '3');
@@ -159,6 +163,31 @@ const buildProfile = (
     : certifySingleSignerProfileFixture(profile, signer.seed, signer.signerId);
 };
 
+const buildJurisdictionAnnouncement = () => createJurisdictionGossipAnnouncement({
+  scope: 'community',
+  key: 'community-chain',
+  name: 'Community Chain',
+  rpcUrl: 'https://community.example/rpc',
+  blockTimeMs: 1_000,
+  currency: 'ETH',
+  explorer: 'https://community.example/explorer',
+  chainId: 42_161,
+  deployer: JURISDICTION_SIGNER,
+  foundationRecipient: JURISDICTION_SIGNER,
+  entityProviderDeploymentBlock: 7,
+  contracts: {
+    account: `0x${'01'.repeat(20)}`,
+    depositoryBounds: `0x${'02'.repeat(20)}`,
+    hashLadderRegistry: `0x${'03'.repeat(20)}`,
+    nftCustody: `0x${'04'.repeat(20)}`,
+    hankoVerifier: `0x${'05'.repeat(20)}`,
+    entityProvider: `0x${'06'.repeat(20)}`,
+    depository: `0x${'07'.repeat(20)}`,
+    deltaTransformer: `0x${'08'.repeat(20)}`,
+  },
+  stablecoin: { symbol: 'USDT', address: `0x${'09'.repeat(20)}`, tokenId: 1, decimals: 6 },
+}, getBytes(JURISDICTION_SIGNER_KEY));
+
 describe('relay-router gossip fanout', () => {
   test('rejects oversized gossip before signature verification and closes the session', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
@@ -184,7 +213,10 @@ describe('relay-router gossip fanout', () => {
       type: 'gossip_announce',
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
-      payload: { profiles: Array.from({ length: DEFAULT_GOSSIP_BATCH_LIMIT + 1 }, () => ({})) },
+      payload: {
+        profiles: Array.from({ length: DEFAULT_GOSSIP_BATCH_LIMIT + 1 }, () => ({})),
+        jurisdictions: [],
+      },
     });
 
     expect(verifies).toBe(0);
@@ -292,6 +324,7 @@ describe('relay-router gossip fanout', () => {
         profiles: [
           buildProfile(ENTITY_A, RUNTIME_A, KEY_A, { lastUpdated: 123, name: 'alice' }),
         ],
+        jurisdictions: [],
       },
     });
 
@@ -305,6 +338,50 @@ describe('relay-router gossip fanout', () => {
     expect(gossipUpdate?.payload?.profiles?.[0]?.entityId).toBe(ENTITY_A);
     expect(sentBySocket.get(wsA)?.some((message) => (message as { type?: string }).type === 'gossip_update') ?? false).toBeFalse();
     expect(store.gossipProfiles.get(ENTITY_A)?.profile?.name).toBe('alice');
+  });
+
+  test('verifies and broadcasts signed community jurisdiction discovery', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: Uint8Array) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(deserializeWsMessage(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'jurisdiction-source' };
+    const wsB: FakeWs = { label: 'jurisdiction-target' };
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
+    const announcement = buildJurisdictionAnnouncement();
+
+    await relayRoute(config, wsA, {
+      type: 'gossip_announce',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      payload: { profiles: [], jurisdictions: [announcement] },
+    });
+
+    expect(store.gossipJurisdictions.size).toBe(1);
+    expect(sentBySocket.get(wsB)?.some((message) =>
+      (message as { payload?: { jurisdictions?: unknown[] } }).payload?.jurisdictions?.length === 1,
+    )).toBeTrue();
+
+    await relayRoute(config, wsA, {
+      type: 'gossip_announce',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      payload: {
+        profiles: [],
+        jurisdictions: [{ ...announcement, rpcUrl: 'https://attacker.example/rpc' }],
+      },
+    });
+    expect(store.gossipJurisdictions.size).toBe(1);
+    expect(store.debugEvents.some((event) => event.reason === 'GOSSIP_JURISDICTION_DROPPED_INVALID')).toBeTrue();
   });
 
   test('serves batched gossip by ids and set filters', async () => {
@@ -340,6 +417,7 @@ describe('relay-router gossip fanout', () => {
           }),
           buildProfile(ENTITY_C, RUNTIME_B, KEY_B, { lastUpdated: 300, name: 'leaf-c' }),
         ],
+        jurisdictions: [],
       },
     });
 
@@ -399,7 +477,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: SERVER_RUNTIME_ID,
-      payload: { profiles: [] },
+      payload: { profiles: [], jurisdictions: [] },
     });
 
     expect(store.clients.get(RUNTIME_A)?.ws).toBe(fresh);
@@ -848,7 +926,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: RUNTIME_B,
-      payload: { profiles: [] },
+      payload: { profiles: [], jurisdictions: [] },
     });
 
     expect(sentBySocket.get(sender)?.at(-1)).toMatchObject({
@@ -1181,7 +1259,10 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: SERVER_RUNTIME_ID,
-      payload: { profiles: [buildProfile(ENTITY_A, RUNTIME_A, KEY_A, { certified: false })] },
+      payload: {
+        profiles: [buildProfile(ENTITY_A, RUNTIME_A, KEY_A, { certified: false })],
+        jurisdictions: [],
+      },
     });
 
     expect(store.gossipProfiles.size).toBe(0);

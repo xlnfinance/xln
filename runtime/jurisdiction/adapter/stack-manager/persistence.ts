@@ -15,6 +15,12 @@ import {
 } from '../core/jurisdiction-loader';
 import type { DeployJurisdictionStackRequest, JurisdictionStackManifest } from './types';
 import { safeStringify } from '../../../protocol/serialization';
+import {
+  computeJurisdictionGossipHash,
+  decodeJurisdictionGossipAnnouncement,
+  MAX_JURISDICTION_GOSSIP_RECORDS,
+  type JurisdictionGossipAnnouncement,
+} from '../../gossip/announcement';
 
 const readRoot = async (path: string): Promise<Record<string, unknown>> => {
   try {
@@ -81,6 +87,8 @@ export const acquireStackManagerDeploymentLock = async (): Promise<() => Promise
 export const persistVerifiedJurisdictionStack = async (
   request: DeployJurisdictionStackRequest,
   manifest: JurisdictionStackManifest,
+  announcement?: JurisdictionGossipAnnouncement,
+  officialFoundationSignerId?: string,
 ): Promise<{ key: string; name: string }> => {
   const path = resolveJurisdictionsJsonPath();
   const root = await readRoot(path);
@@ -117,11 +125,42 @@ export const persistVerifiedJurisdictionStack = async (
     evmContracts: manifest.evmContracts,
   };
   const version = String(root['version'] || '1');
+  const persistedOfficialSigner = typeof root['officialFoundationSignerId'] === 'string'
+    ? root['officialFoundationSignerId']
+    : undefined;
+  if (
+    persistedOfficialSigner && officialFoundationSignerId &&
+    persistedOfficialSigner !== officialFoundationSignerId
+  ) throw new Error('JURISDICTIONS_OFFICIAL_FOUNDATION_SIGNER_CONFLICT');
+  const trustedOfficialSigner = officialFoundationSignerId ?? persistedOfficialSigner;
+  if (announcement?.scope === 'official' && !trustedOfficialSigner) {
+    throw new Error('JURISDICTIONS_OFFICIAL_FOUNDATION_SIGNER_MISSING');
+  }
   const next = {
     ...root,
     version,
     lastUpdated: new Date().toISOString(),
     jurisdictions,
+    ...(trustedOfficialSigner ? { officialFoundationSignerId: trustedOfficialSigner } : {}),
+    ...(announcement ? {
+      jurisdictionAnnouncements: (() => {
+        const existingRaw = root['jurisdictionAnnouncements'];
+        if (existingRaw !== undefined && !Array.isArray(existingRaw)) {
+          throw new Error('JURISDICTIONS_GOSSIP_ANNOUNCEMENTS_INVALID');
+        }
+        const existing = (existingRaw ?? []).map((value) =>
+          decodeJurisdictionGossipAnnouncement(value, trustedOfficialSigner),
+        );
+        const id = computeJurisdictionGossipHash(announcement);
+        const records = existing.some((entry) => computeJurisdictionGossipHash(entry) === id)
+          ? existing
+          : [...existing, announcement];
+        if (records.length > MAX_JURISDICTION_GOSSIP_RECORDS) {
+          throw new Error('JURISDICTIONS_GOSSIP_ANNOUNCEMENT_CAP_EXCEEDED');
+        }
+        return records;
+      })(),
+    } : {}),
   };
   const networkVersion = computeJurisdictionsNetworkVersion(next, version);
   const persisted = { ...next, deployVersion: networkVersion, networkVersion };

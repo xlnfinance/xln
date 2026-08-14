@@ -1,6 +1,16 @@
+/**
+ * Owns the process-local RuntimeP2P lifecycle and binds network callbacks to
+ * one Runtime replica. It restores signed discovery records but never moves
+ * transport state into deterministic Runtime/Entity/Account state. [91/100]
+ */
+
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { RuntimeP2P, type P2PConfig } from '../../network/p2p/p2p';
+import {
+  getConfiguredOfficialFoundationSignerId,
+  loadJurisdictions,
+} from '../../jurisdiction/adapter/core/jurisdiction-loader';
 import { isRuntimeId } from '../../network/p2p/auth/runtime-id';
 import {
   provisionEntityEncryptionKey,
@@ -100,6 +110,13 @@ const buildRuntimeP2POptions = (
   runtimeId: string,
   deps: RuntimeP2PLifecycleDeps,
 ): ConstructorParameters<typeof RuntimeP2P>[0] => {
+  const discovery = typeof window === 'undefined' ? loadJurisdictions() : null;
+  const officialFoundationSignerId = typeof window === 'undefined'
+    ? getConfiguredOfficialFoundationSignerId()
+    : undefined;
+  for (const announcement of discovery?.jurisdictionAnnouncements ?? []) {
+    env.gossip.announceJurisdiction(announcement, officialFoundationSignerId);
+  }
   const options: ConstructorParameters<typeof RuntimeP2P>[0] = {
     env,
     runtimeId,
@@ -130,7 +147,18 @@ const buildRuntimeP2POptions = (
         });
       }
     },
+    onGossipJurisdictions: (_from, announcements) => {
+      if (announcements.length === 0) return;
+      deps.notifyEnvChange(env);
+      env.info('network', 'GOSSIP_JURISDICTION_UPDATE', {
+        count: announcements.length,
+        keys: announcements.map(announcement => announcement.key),
+      });
+    },
   };
+  if (officialFoundationSignerId !== undefined) {
+    options.officialFoundationSignerId = officialFoundationSignerId;
+  }
   if (config.signerId !== undefined) options.signerId = config.signerId;
   if (config.relayUrls !== undefined) options.relayUrls = config.relayUrls;
   const wsUrl = (config as P2PConfig & { wsUrl?: string | null }).wsUrl;

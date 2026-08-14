@@ -13,6 +13,7 @@ describe('entity panel routing helpers', () => {
     expect(canonicalizeEntityPanelRoute('borrow')).toBeNull();
     expect(canonicalizeEntityPanelRoute('/settings/recovery/')).toBe('settings/recovery');
     expect(canonicalizeEntityPanelRoute('/settings/consensus/')).toBe('settings/consensus');
+    expect(canonicalizeEntityPanelRoute('/settings/stack-manager/')).toBe('settings/stack-manager');
   });
 
   test('resolves hash routes into tab state updates', () => {

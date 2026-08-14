@@ -106,6 +106,7 @@ import { handleP2PControl } from './control/p2p';
 import { handleRuntimeInputControl, handleRuntimeInputStatus } from './control/runtime-input';
 import { handleSignerRegistration } from './control/signer';
 import { createStackManagerController } from './control/stack-manager';
+import { getConfiguredOfficialFoundationSignerId } from '../../jurisdiction/adapter/core/jurisdiction-loader';
 import { fetchRpcCode, probeLocalAnvilContractStack } from './rpc/stack-probe';
 import { handleRuntimeActivityRequest } from './health/activity';
 import {
@@ -1363,7 +1364,9 @@ const bindServerSession = (options: XlnServerOptions): BoundServerSession => {
     process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`,
   ).trim();
   const incidentJournal = openRelayIncidentJournal(incidentJournalPath);
+  const officialFoundationSignerId = getConfiguredOfficialFoundationSignerId();
   relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server', {
+    ...(officialFoundationSignerId ? { officialFoundationSignerId } : {}),
     initialDebugId: incidentJournal.debugId,
     initialIncidents: incidentJournal.incidents,
     debugIdAllocator: () => incidentJournal.allocateDebugId(),

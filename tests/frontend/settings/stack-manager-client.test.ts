@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { Wallet, getBytes } from 'ethers';
 
 import {
   decodeStackManagerDeployResponse,
@@ -7,8 +8,11 @@ import {
   deployStack,
   fetchStackManagerStatus,
 } from '../../../frontend/src/lib/components/Settings/stack-manager-client';
+import { createJurisdictionGossipAnnouncement } from '../../../runtime/jurisdiction/gossip/announcement';
 
 const ADDRESS = '0x1111111111111111111111111111111111111111';
+const SIGNER_KEY = `0x${'22'.repeat(32)}`;
+const SIGNER = new Wallet(SIGNER_KEY).address.toLowerCase();
 const TX_HASH = `0x${'a'.repeat(64)}`;
 const DEPLOYMENTS = [
   'account',
@@ -28,8 +32,8 @@ const deploymentResponse = () => ({
       stackVersion: 'V1',
       network: 'Arbitrum One',
       chainId: 42161,
-      deployer: ADDRESS,
-      foundationRecipient: ADDRESS,
+      deployer: SIGNER,
+      foundationRecipient: SIGNER,
       entityProviderDeploymentBlock: 12,
       contracts: Object.fromEntries(DEPLOYMENTS.map((name) => [name, ADDRESS])),
       evmContracts: {
@@ -71,18 +75,33 @@ describe('Stack Manager browser boundary', () => {
     const invalid = deploymentResponse();
     expect(() => decodeStackManagerDeployResponse({
       ...invalid,
-      result: { ...invalid.result, publication: { status: 'pending', scope: 'local' } },
-    })).toThrow('STACK_MANAGER_PENDING_PUBLICATION_INVALID');
+      result: { ...invalid.result, publication: { status: 'queued', scope: 'local', announcement: {} } },
+    })).toThrow('STACK_MANAGER_GOSSIP_PUBLICATION_INVALID');
 
     const official = deploymentResponse();
+    const announcement = createJurisdictionGossipAnnouncement({
+      scope: 'official',
+      key: official.result.localJurisdiction.key,
+      name: official.result.localJurisdiction.name,
+      rpcUrl: 'https://arb.example/rpc',
+      blockTimeMs: 250,
+      currency: 'ETH',
+      explorer: 'https://arbiscan.io',
+      chainId: official.result.manifest.chainId,
+      deployer: SIGNER,
+      foundationRecipient: SIGNER,
+      entityProviderDeploymentBlock: official.result.manifest.entityProviderDeploymentBlock,
+      contracts: official.result.manifest.contracts,
+      stablecoin: { symbol: 'USDT', ...official.result.manifest.registeredTokens.USDT },
+    }, getBytes(SIGNER_KEY), SIGNER);
     const decodedOfficial = decodeStackManagerDeployResponse({
       ...official,
       result: {
         ...official.result,
         publication: {
-          status: 'pending',
+          status: 'published',
           scope: 'official',
-          reason: 'FOUNDATION_PUBLICATION_AUTHORITY_UNAVAILABLE',
+          announcement,
         },
       },
     });

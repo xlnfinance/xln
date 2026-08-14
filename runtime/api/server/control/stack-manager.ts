@@ -12,6 +12,8 @@ import { deployJurisdictionStack, probeJurisdictionStackTarget } from '../../../
 import { decodeDeployJurisdictionStackRequest } from '../../../jurisdiction/adapter/stack-manager/validation';
 import type { StackManagerStatus } from '../../../jurisdiction/adapter/stack-manager/types';
 import { getErrorMessage } from '../utils';
+import { getConfiguredOfficialFoundationSignerId } from '../../../jurisdiction/adapter/core/jurisdiction-loader';
+import { decodeJurisdictionGossipAnnouncementStructure } from '../../../jurisdiction/gossip/announcement';
 
 type StackManagerControllerDeps = Readonly<{
   parseBody: (req: Request) => Promise<unknown>;
@@ -76,10 +78,17 @@ export const createStackManagerController = (
         setPhase('preflight');
         const signerPrivateKey = getLocalSignerPrivateKey(env, request.signerId);
         if (!signerPrivateKey) throw new Error(`STACK_MANAGER_SIGNER_NOT_OWNED:${request.signerId}`);
+        const officialFoundationSignerId = getConfiguredOfficialFoundationSignerId();
         const result = await deployJurisdictionStack(request, {
           signerPrivateKey,
+          ...(officialFoundationSignerId ? { officialFoundationSignerId } : {}),
+          publishJurisdiction: announcement =>
+            env.infrastructure?.p2p?.announceJurisdiction(announcement) ?? false,
           onPhase: phase => setPhase(phase),
         });
+        if (result.publication.status !== 'not_requested') {
+          decodeJurisdictionGossipAnnouncementStructure(result.publication.announcement);
+        }
         return new Response(serializeTaggedJson({ ok: true, result }), { headers: deps.headers });
       } catch (error) {
         const message = getErrorMessage(error);

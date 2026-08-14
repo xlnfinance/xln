@@ -23,7 +23,12 @@ import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } fr
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './auth/runtime-id';
 import { compareStableText } from '../../protocol/serialization';
-import { DEFAULT_GOSSIP_BATCH_LIMIT, selectProfileBatch, type GossipProfileBatchRequest } from './gossip/profile-batch';
+import {
+  DEFAULT_GOSSIP_BATCH_LIMIT,
+  decodeGossipProfileBatchRequest,
+  selectProfileBatch,
+  type GossipProfileBatchRequest,
+} from './gossip/profile-batch';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../../infra/performance/runtime-flags';
 import {
@@ -43,6 +48,11 @@ import { isRetryableIngressBackpressure } from './ingress-backpressure';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/entity-input/entity-input-envelope-auth.ts';
 import { retryFailure } from '../../protocol/errors/failure-taxonomy';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
+import {
+  decodeJurisdictionGossipAnnouncement,
+  MAX_JURISDICTION_GOSSIP_RECORDS,
+  type JurisdictionGossipAnnouncement,
+} from '../../jurisdiction/gossip/announcement';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
@@ -115,43 +125,27 @@ type RuntimeP2POptions = {
   onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => void;
   onReliableReceipt?: (from: string, receipt: ReliableDeliveryReceipt) => void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
+  onGossipJurisdictions?: (from: string, announcements: JurisdictionGossipAnnouncement[]) => void;
+  officialFoundationSignerId?: string;
 };
 
 type GossipResponsePayload = {
   profiles: Profile[];
+  jurisdictions: JurisdictionGossipAnnouncement[];
 };
 
-const decodeGossipProfileRequest = (value: unknown): GossipProfileBatchRequest => {
-  const request = requireBoundaryRecord(value, 'P2P_GOSSIP_REQUEST_INVALID');
-  requireExactBoundaryKeys(request, [], ['ids', 'set', 'updatedSince', 'limit'], 'P2P_GOSSIP_REQUEST_FIELDS_INVALID');
-  const ids = request['ids'];
-  if (ids !== undefined && (!Array.isArray(ids) || ids.some(id => typeof id !== 'string' || id.length > 128))) {
-    throw new Error('P2P_GOSSIP_REQUEST_IDS_INVALID');
-  }
-  const set = request['set'];
-  if (set !== undefined && set !== 'default' && set !== 'hubs') throw new Error('P2P_GOSSIP_REQUEST_SET_INVALID');
-  for (const field of ['updatedSince', 'limit'] as const) {
-    const candidate = request[field];
-    if (candidate !== undefined && (!Number.isSafeInteger(candidate) || Number(candidate) < 0)) {
-      throw new Error(`P2P_GOSSIP_REQUEST_${field.toUpperCase()}_INVALID`);
-    }
-  }
-  return {
-    ...(ids === undefined ? {} : { ids: [...ids] }),
-    ...(set === undefined ? {} : { set }),
-    ...(request['updatedSince'] === undefined ? {} : { updatedSince: Number(request['updatedSince']) }),
-    ...(request['limit'] === undefined ? {} : { limit: Number(request['limit']) }),
-  };
-};
-
-const decodeGossipProfiles = (value: unknown): unknown[] => {
+const decodeGossipPayload = (value: unknown): Readonly<{ profiles: unknown[]; jurisdictions: unknown[] }> => {
   const response = requireBoundaryRecord(value, 'P2P_GOSSIP_RESPONSE_INVALID');
-  requireExactBoundaryKeys(response, ['profiles'], [], 'P2P_GOSSIP_RESPONSE_FIELDS_INVALID');
+  requireExactBoundaryKeys(response, ['profiles', 'jurisdictions'], [], 'P2P_GOSSIP_RESPONSE_FIELDS_INVALID');
   if (!Array.isArray(response['profiles'])) throw new Error('P2P_GOSSIP_RESPONSE_PROFILES_INVALID');
+  if (!Array.isArray(response['jurisdictions'])) throw new Error('P2P_GOSSIP_RESPONSE_JURISDICTIONS_INVALID');
   if (response['profiles'].length > DEFAULT_GOSSIP_BATCH_LIMIT) {
     throw new Error('P2P_GOSSIP_RESPONSE_BATCH_TOO_LARGE');
   }
-  return response['profiles'];
+  if (response['jurisdictions'].length > MAX_JURISDICTION_GOSSIP_RECORDS) {
+    throw new Error('P2P_GOSSIP_RESPONSE_JURISDICTION_BATCH_TOO_LARGE');
+  }
+  return { profiles: response['profiles'], jurisdictions: response['jurisdictions'] };
 };
 
 type GossipRefreshMode = 'incremental' | 'full';
@@ -298,6 +292,8 @@ export class RuntimeP2P {
   private onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => void;
   private onReliableReceipt: (from: string, receipt: ReliableDeliveryReceipt) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
+  private onGossipJurisdictions: (from: string, announcements: JurisdictionGossipAnnouncement[]) => void;
+  private officialFoundationSignerId: string | undefined;
   private clients: RuntimeWsClient[] = [];
   private directClients = new Map<string, RuntimeWsClient>();
   private directClientUrls = new Map<string, string>();
@@ -343,6 +339,8 @@ export class RuntimeP2P {
         throw new Error('P2P_RELIABLE_RECEIPT_HANDLER_MISSING');
       });
     this.onGossipProfiles = options.onGossipProfiles;
+    this.onGossipJurisdictions = options.onGossipJurisdictions ?? (() => {});
+    this.officialFoundationSignerId = options.officialFoundationSignerId;
     if (!this.env.infrastructure) this.env.infrastructure = {};
     this.verifiedProfileRoutes = this.env.infrastructure.verifiedProfileRoutes ?? new Map();
     this.env.infrastructure.verifiedProfileRoutes = this.verifiedProfileRoutes;
@@ -857,6 +855,7 @@ export class RuntimeP2P {
     client.sendGossipRequest(normalizedRuntimeId, {
       set: 'default',
       limit: DEFAULT_GOSSIP_BATCH_LIMIT,
+      includeJurisdictions: true,
     } satisfies GossipProfileBatchRequest);
   }
 
@@ -868,7 +867,20 @@ export class RuntimeP2P {
     if (!normalizedRuntimeId) return;
     const client = this.getActiveClient();
     if (!client) return;
-    client.sendGossipAnnounce(normalizedRuntimeId, { profiles } satisfies GossipResponsePayload);
+    client.sendGossipAnnounce(normalizedRuntimeId, {
+      profiles,
+      jurisdictions: [],
+    } satisfies GossipResponsePayload);
+  }
+
+  announceJurisdiction(announcement: JurisdictionGossipAnnouncement): boolean {
+    this.env.gossip.announceJurisdiction(announcement, this.officialFoundationSignerId);
+    const client = this.getActiveClient();
+    if (!client) return false;
+    return client.sendGossipAnnounce(this.runtimeId, {
+      profiles: [],
+      jurisdictions: [announcement],
+    } satisfies GossipResponsePayload);
   }
 
   isConnected(): boolean {
@@ -1197,7 +1209,10 @@ export class RuntimeP2P {
     // ALWAYS announce to relay for storage (relay stores regardless of 'to' field)
     const client = this.getActiveClient();
     if (client) {
-      client.sendGossipAnnounce(this.runtimeId, { profiles } satisfies GossipResponsePayload);
+      client.sendGossipAnnounce(this.runtimeId, {
+        profiles,
+        jurisdictions: [],
+      } satisfies GossipResponsePayload);
     }
 
     // Also send to specific seeds if configured (for direct peer notification)
@@ -1261,7 +1276,10 @@ export class RuntimeP2P {
     }
     const client = this.getActiveClient();
     if (client) {
-      client.sendGossipAnnounce(this.runtimeId, { profiles } satisfies GossipResponsePayload);
+      client.sendGossipAnnounce(this.runtimeId, {
+        profiles,
+        jurisdictions: [],
+      } satisfies GossipResponsePayload);
     }
     for (const seedId of this.seedRuntimeIds) {
       this.announceProfilesTo(seedId, profiles);
@@ -1334,12 +1352,15 @@ export class RuntimeP2P {
 
   private handleGossipRequest(from: string, payload: unknown) {
     if (!this.env.gossip?.getProfiles) return;
-    const request = decodeGossipProfileRequest(payload);
+    const request = decodeGossipProfileBatchRequest(payload);
     const profiles = this.getLocalProfileBatch(request);
 
     const client = this.getActiveClient();
     if (!client) return;
-    client.sendGossipResponse(from, { profiles } satisfies GossipResponsePayload);
+    const jurisdictions = request.includeJurisdictions
+      ? this.env.gossip.getJurisdictions()
+      : [];
+    client.sendGossipResponse(from, { profiles, jurisdictions } satisfies GossipResponsePayload);
   }
 
   private getLocalProfileBatch(request: GossipProfileBatchRequest = {}): Profile[] {
@@ -1348,17 +1369,37 @@ export class RuntimeP2P {
   }
 
   private handleGossipResponse(from: string, payload: unknown) {
-    const profiles = decodeGossipProfiles(payload);
-    this.applyIncomingProfiles(from, profiles).catch(err => {
+    const decoded = decodeGossipPayload(payload);
+    this.applyIncomingJurisdictions(from, decoded.jurisdictions);
+    this.applyIncomingProfiles(from, decoded.profiles).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
     });
   }
 
   private handleGossipAnnounce(from: string, payload: unknown) {
-    const profiles = decodeGossipProfiles(payload);
-    this.applyIncomingProfiles(from, profiles).catch(err => {
+    const decoded = decodeGossipPayload(payload);
+    this.applyIncomingJurisdictions(from, decoded.jurisdictions);
+    this.applyIncomingProfiles(from, decoded.profiles).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
     });
+  }
+
+  private applyIncomingJurisdictions(from: string, values: readonly unknown[]): void {
+    const accepted: JurisdictionGossipAnnouncement[] = [];
+    for (const value of values) {
+      try {
+        const announcement = decodeJurisdictionGossipAnnouncement(value, this.officialFoundationSignerId);
+        if (this.env.gossip.announceJurisdiction(announcement, this.officialFoundationSignerId)) {
+          accepted.push(announcement);
+        }
+      } catch (error) {
+        p2pLog.warn('jurisdiction.dropped_invalid', {
+          from: shortId(from),
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    if (accepted.length > 0) this.onGossipJurisdictions(from, accepted);
   }
 
   private async applyIncomingProfiles(from: string, profiles: readonly unknown[]) {

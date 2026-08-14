@@ -87,6 +87,7 @@ import {
 import { evaluateBootstrapProgressDeadline } from './bootstrap/bootstrap-progress-deadline';
 import { fetchLoopback } from './server/loopback-fetch';
 import { validateHubHealthPayload, validateHubInfoPayload } from './bootstrap/bootstrap-health-validation';
+import { getConfiguredOfficialFoundationSignerId } from '../jurisdiction/adapter/core/jurisdiction-loader';
 import {
   createManagedRuntimeLeaseManager,
   readManagedProcessTable,
@@ -287,7 +288,9 @@ const jurisdictionsConfig: OrchestratorJurisdictionsConfig = {
   ephemeralTestnet: process.env['XLN_EPHEMERAL_TESTNET'] === '1',
 };
 
+const officialFoundationSignerId = getConfiguredOfficialFoundationSignerId();
 const relayStore: RelayStore = createRelayStore('mesh-relay', {
+  ...(officialFoundationSignerId ? { officialFoundationSignerId } : {}),
   initialDebugId: debugIncidentJournal.debugId,
   initialIncidents: debugIncidentJournal.incidents,
   debugIdAllocator: () => debugIncidentJournal.allocateDebugId(),

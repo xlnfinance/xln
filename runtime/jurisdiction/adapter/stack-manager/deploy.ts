@@ -15,6 +15,10 @@ import {
   persistVerifiedJurisdictionStack,
 } from './persistence';
 import { verifyJurisdictionStack } from './verification';
+import {
+  createJurisdictionGossipAnnouncement,
+  type JurisdictionGossipAnnouncement,
+} from '../../gossip/announcement';
 import type {
   DeployJurisdictionStackRequest,
   DeployJurisdictionStackResult,
@@ -24,7 +28,8 @@ import type {
 
 export type StackDeploymentOptions = Readonly<{
   signerPrivateKey: Uint8Array;
-  officialAuthorityVerified?: boolean;
+  officialFoundationSignerId?: string;
+  publishJurisdiction?: (announcement: JurisdictionGossipAnnouncement) => boolean;
   onPhase?: (phase: StackManagerPhase) => void;
 }>;
 
@@ -113,8 +118,15 @@ export const deployJurisdictionStack = async (
   options.onPhase?.('preflight');
   const signerPrivateKeyHex = hexlify(options.signerPrivateKey);
   const wallet = new Wallet(signerPrivateKeyHex);
+  const officialFoundationSignerId = options.officialFoundationSignerId?.toLowerCase();
   if (wallet.address.toLowerCase() !== request.signerId.toLowerCase()) {
     throw new Error('STACK_MANAGER_SIGNER_KEY_MISMATCH');
+  }
+  if (request.publication === 'official') {
+    const authority = officialFoundationSignerId;
+    if (!authority || authority !== request.signerId.toLowerCase() || authority !== request.foundationRecipient.toLowerCase()) {
+      throw new Error('FOUNDATION_PUBLICATION_AUTHORITY_UNAVAILABLE');
+    }
   }
   const probe = await probeJurisdictionStackTarget(request);
   if (BigInt(probe.nativeBalanceWei) === 0n) throw new Error('STACK_MANAGER_SIGNER_GAS_BALANCE_EMPTY');
@@ -160,21 +172,36 @@ export const deployJurisdictionStack = async (
     }
     options.onPhase?.('verifying');
     await verifyJurisdictionStack(provider, manifest, request.confirmations);
+    const announcement = request.publication === 'local' ? undefined : createJurisdictionGossipAnnouncement({
+      scope: request.publication,
+      key: request.key,
+      name: request.name,
+      rpcUrl: request.rpcUrl,
+      blockTimeMs: request.blockTimeMs,
+      currency: request.currency,
+      explorer: request.explorer,
+      ...(request.description ? { description: request.description } : {}),
+      chainId: manifest.chainId,
+      deployer: manifest.deployer,
+      foundationRecipient: manifest.foundationRecipient,
+      entityProviderDeploymentBlock: manifest.entityProviderDeploymentBlock,
+      contracts: manifest.contracts,
+      stablecoin: { symbol: 'USDT', ...manifest.registeredTokens.USDT },
+    }, options.signerPrivateKey, officialFoundationSignerId);
     options.onPhase?.('persisting');
-    const localJurisdiction = await persistVerifiedJurisdictionStack(request, manifest);
-    const publication = request.publication === 'local'
+    const localJurisdiction = await persistVerifiedJurisdictionStack(
+      request,
+      manifest,
+      announcement,
+      officialFoundationSignerId,
+    );
+    const publication = !announcement
       ? { status: 'not_requested' as const, scope: 'local' as const }
-      : request.publication === 'official' && !options.officialAuthorityVerified
-        ? {
-            status: 'pending' as const,
-            scope: 'official' as const,
-            reason: 'FOUNDATION_PUBLICATION_AUTHORITY_UNAVAILABLE' as const,
-          }
-        : {
-            status: 'pending' as const,
-            scope: request.publication,
-            reason: 'JURISDICTION_GOSSIP_PUBLICATION_PROTOCOL_UNAVAILABLE' as const,
-          };
+      : {
+          status: options.publishJurisdiction?.(announcement) ? 'published' as const : 'queued' as const,
+          scope: announcement.scope,
+          announcement,
+        };
     options.onPhase?.('complete');
     return { manifest, localJurisdiction, publication };
   } finally {
