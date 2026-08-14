@@ -6,6 +6,10 @@
    */
   import { activeRuntime } from '$lib/stores/vault/vaultStore';
   import {
+    getRuntimeControllerConfig,
+    runtimeControllerHandle,
+  } from '$lib/stores/runtimeControllerStore';
+  import {
     STACK_VERSION,
     deployStack,
     fetchStackManagerStatus,
@@ -29,7 +33,6 @@
   let currency = 'ETH';
   let explorer = '';
   let description = '';
-  let adminCapability = '';
   let confirmed = false;
   let probing = false;
   let deploying = false;
@@ -49,6 +52,10 @@
   $: if (signerId && !foundationRecipient) foundationRecipient = signerId;
   $: balanceWei = probe?.nativeBalanceWei ?? '';
   $: hasGas = balanceWei !== '' && BigInt(balanceWei) > 0n;
+  $: runtimeAdminCapability = $runtimeControllerHandle.mode === 'remote'
+    ? String(getRuntimeControllerConfig()?.authKey || '')
+    : '';
+  $: isInBrowserRuntime = $runtimeControllerHandle.mode === 'embedded';
   $: hasRequiredConfig = Boolean(
     networkName.trim()
     && jurisdictionKey.trim()
@@ -56,7 +63,7 @@
     && Number.isSafeInteger(blockTimeMs)
     && blockTimeMs > 0
     && currency.trim()
-    && adminCapability.trim()
+    && runtimeAdminCapability
     && (stablecoinKind === 'test' || stablecoinAddress.trim()),
   );
   $: canDeploy = !deploying && !probing && probe !== null && probe.signerId === signerId && hasGas && confirmed && hasRequiredConfig;
@@ -97,7 +104,8 @@
     try {
       if (!rpcUrl.trim()) throw new Error('STACK_MANAGER_RPC_URL_REQUIRED');
       if (!signerId) throw new Error('STACK_MANAGER_RUNTIME_SIGNER_REQUIRED');
-      const response = await fetchStackManagerStatus(rpcUrl.trim(), signerId, adminCapability.trim());
+      if (isInBrowserRuntime) throw new Error('STACK_MANAGER_DAEMON_RUNTIME_REQUIRED');
+      const response = await fetchStackManagerStatus(rpcUrl.trim(), signerId, runtimeAdminCapability);
       status = response.status;
       if (!response.probe) throw new Error('STACK_MANAGER_RPC_PROBE_MISSING');
       if (response.probe.rpcUrl !== rpcUrl.trim()) throw new Error('STACK_MANAGER_PROBE_RPC_MISMATCH');
@@ -138,10 +146,9 @@
         stablecoin,
         publication,
         confirmations,
-      }, adminCapability.trim());
+      }, runtimeAdminCapability);
       result = response.result;
       confirmed = false;
-      adminCapability = '';
     } catch (value) {
       error = errorMessage(value);
     } finally {
@@ -161,6 +168,9 @@
     <div class="message error" role="alert">{status.error}</div>
   {/if}
   <p class="intro">Probe the exact RPC and Runtime signer before deploying. A stack is saved only after receipt and bytecode verification.</p>
+  {#if isInBrowserRuntime}
+    <div class="message warning" role="status">In-browser Runtime is active. Stack deployment requires a daemon Runtime because deployment keys and subprocesses must stay outside the browser.</div>
+  {/if}
   <div class="form-grid">
     <label>
       RPC URL
@@ -186,13 +196,10 @@
   <div class="probe-row">
     <div><small>Chain ID</small><strong>{probe?.chainId ?? '—'}</strong></div>
     <div><small>Signer balance</small><strong class:warning={balanceWei === '0'}>{formatNativeBalance(balanceWei)}</strong></div>
-    <button data-testid="stack-manager-refresh" class="secondary" on:click={refreshProbe} disabled={probing || deploying || !rpcUrl.trim() || !signerId || !adminCapability.trim()}>
+    <button data-testid="stack-manager-refresh" class="secondary" on:click={refreshProbe} disabled={probing || deploying || !rpcUrl.trim() || !signerId || !runtimeAdminCapability}>
       {probing ? 'Checking…' : 'Refresh RPC & balance'}
     </button>
   </div>
-  {#if !adminCapability.trim()}
-    <p class="notice">Open Advanced and enter the daemon admin capability before probing an arbitrary RPC.</p>
-  {/if}
   {#if probe && !hasGas}
     <div class="guidance" role="status">Fund <code>{signerId}</code> with native gas on chain {probe.chainId}, then refresh.</div>
   {/if}
@@ -247,10 +254,6 @@
       <label class="wide">
         Description
         <input data-testid="stack-manager-description" bind:value={description} placeholder="Community-operated jurisdiction" />
-      </label>
-      <label class="wide">
-        Daemon admin capability
-        <input data-testid="stack-manager-capability" type="password" bind:value={adminCapability} autocomplete="off" placeholder="Held in this panel only; never persisted" />
       </label>
     </div>
     {#if publication !== 'local'}
@@ -308,6 +311,7 @@
   .guidance, .message, .result { margin-top: 12px; padding: 12px; border-radius: 7px; font-size: 12px; }
   .guidance { color: #ffd18b; background: #352b17; border: 1px solid #6b5525; overflow-wrap: anywhere; }
   .error { color: #ffaaa5; background: #3d2020; border: 1px solid #773333; }
+  .warning { color: #ffd18b; background: #352b17; border: 1px solid #6b5525; }
   .result { color: #cdebd5; background: #183225; border: 1px solid #2e6e45; }
   .result h5 { margin: 0 0 4px; font-size: 14px; }
   .result p { margin: 0 0 10px; }

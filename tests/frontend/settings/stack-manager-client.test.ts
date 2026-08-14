@@ -148,12 +148,14 @@ describe('Stack Manager browser boundary', () => {
     expect(String(captured?.body)).not.toContain('admin-secret');
   });
 
-  test('wires a dedicated tab and never persists the admin capability', () => {
+  test('wires a dedicated tab and reuses the active Runtime authority without exposing it', () => {
     const panel = readFileSync('frontend/src/lib/view/panels/SettingsPanel.svelte', 'utf8');
     const component = readFileSync('frontend/src/lib/components/Settings/StackManager.svelte', 'utf8');
     expect(panel).toContain('data-testid="settings-stack-manager-tab"');
     expect(panel).toContain('<StackManager />');
-    expect(component).toContain('type="password"');
+    expect(component).toContain('getRuntimeControllerConfig()?.authKey');
+    expect(component).not.toContain('stack-manager-capability');
+    expect(component).not.toContain('Daemon admin capability');
     expect(component).not.toContain('localStorage');
     expect(component).not.toContain('sessionStorage');
   });

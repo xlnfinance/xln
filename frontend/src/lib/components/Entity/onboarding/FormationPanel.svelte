@@ -5,33 +5,30 @@
   Features: Jurisdiction, entity type (numbered/lazy/named), validators with weights, threshold.
 -->
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
   import { isTronChainId, type ConsensusConfig } from '@xln/runtime/api/public/runtime-module';
   import { getXLN, registerActiveNumberedEntities, submitRuntimeInput } from '../../../stores/xlnStore';
   import { errorLog } from '../../../stores/errorLogStore';
   import { activeRuntime } from '../../../stores/vault/vaultStore';
   import { tabOperations } from '../../../stores/ui/tabStore';
   import { generateLazyEntityIdPreview } from '../../../utils/identity/lazyEntityId';
-  import { parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
-  import { Plus, X, Download, Upload, Shield, Hash, Landmark, Tag, Zap } from 'lucide-svelte';
+  import { Plus, X, Shield, Hash, UserRound, UsersRound, Zap } from 'lucide-svelte';
   import {
     emptyFormationRuntimeProjection,
     hasProjectedEntityId,
     type FormationRuntimeProjection,
   } from './formation-runtime-projection';
 
-  export let onCreated: ((entityId: string, purpose: 'entity' | 'company') => void) | undefined = undefined;
+  export let onCreated: ((entityId: string) => void) | undefined = undefined;
   export let runtimeProjection: FormationRuntimeProjection = emptyFormationRuntimeProjection();
 
-  const dispatch = createEventDispatcher();
   $: vault = $activeRuntime;
 
   // Form state
-  type FormationPurpose = 'entity' | 'company';
-  type EntityType = 'numbered' | 'lazy' | 'named';
-  let formationPurpose: FormationPurpose = 'entity';
+  type EntityType = 'numbered' | 'lazy';
+  type BoardMode = 'personal' | 'shared';
   let entityType: EntityType = 'numbered';
-  let entityName = 'ACME';
+  let boardMode: BoardMode = 'personal';
+  let entityName = '';
   let selectedJurisdiction = '';
   let threshold = 1;
   let validators: Array<{ name: string; weight: number }> = [{ name: '', weight: 1 }];
@@ -40,10 +37,6 @@
   let error = '';
   let success = '';
   let userModifiedThreshold = false;
-
-  // Import/Export state
-  let showImport = false;
-  let importJson = '';
 
   $: jurisdictions = runtimeProjection.jurisdictions;
   $: selectableJurisdictions = entityType === 'numbered'
@@ -67,13 +60,15 @@
     seededSignerAddress = mySignerAddress;
   }
 
-  // Total weight calculation
-  $: totalWeight = validators.reduce((sum, v) => sum + v.weight, 0);
+  $: formationValidators = boardMode === 'personal'
+    ? [{ name: mySignerAddress, weight: 1 }]
+    : validators;
+  $: totalWeight = formationValidators.reduce((sum, validator) => sum + validator.weight, 0);
 
   // Auto-update threshold when validators change (if user hasn't manually changed it)
   $: {
     if (!userModifiedThreshold && totalWeight > 0) {
-      if (validators.length === 1) {
+      if (boardMode === 'personal') {
         threshold = 1;
       } else {
         threshold = totalWeight; // Default to all validators required
@@ -86,7 +81,7 @@
   $: {
     try {
       quorumHash = entityType === 'lazy'
-        ? generateLazyEntityIdPreview(validators, BigInt(threshold))
+        ? generateLazyEntityIdPreview(formationValidators, BigInt(threshold))
         : '';
       previewError = '';
     } catch (cause) {
@@ -95,13 +90,6 @@
     }
   }
 
-  // Expected entity ID preview
-  $: expectedEntityId = (() => {
-    if (entityType === 'lazy') return quorumHash || 'Invalid board';
-    if (entityType === 'numbered') return '#(next)';
-    return entityName.toLowerCase().replace(/\s+/g, '-');
-  })();
-
   function addValidator() {
     validators = [...validators, { name: '', weight: 1 }];
     if (!userModifiedThreshold) {
@@ -109,9 +97,19 @@
     }
   }
 
-  function selectFormationPurpose(next: FormationPurpose): void {
-    formationPurpose = next;
-    if (next === 'company') entityType = 'numbered';
+  function selectPersonalBoard(): void {
+    boardMode = 'personal';
+    threshold = 1;
+    userModifiedThreshold = false;
+  }
+
+  function selectSharedBoard(): void {
+    boardMode = 'shared';
+    if (validators.length === 1) {
+      validators = [validators[0] ?? { name: mySignerAddress, weight: 1 }, { name: '', weight: 1 }];
+    }
+    threshold = validators.reduce((sum, validator) => sum + validator.weight, 0);
+    userModifiedThreshold = false;
   }
 
   function removeValidator(idx: number) {
@@ -141,7 +139,7 @@
       return;
     }
 
-    if (validators.some(v => !v.name.trim())) {
+    if (formationValidators.some(validator => !validator.name.trim())) {
       error = 'All validators must have names';
       return;
     }
@@ -154,7 +152,7 @@
       const xln = await getXLN();
       if (!xln) throw new Error('XLN not initialized');
 
-      const boardMembers = validators.map((validator) => ({
+      const boardMembers = formationValidators.map((validator) => ({
         name: validator.name.trim(),
         weight: Number(validator.weight),
       }));
@@ -247,18 +245,16 @@
           entityInputs: [],
         });
         tabOperations.addTab(entityId, localSignerId, selectedJurisdiction);
-        success = `${formationPurpose === 'company' ? 'Company' : 'Entity'} created: ${formatShortId(entityId)}`;
+        success = `Entity created: ${formatShortId(entityId)}`;
       } else if (entityType === 'numbered' && numberedImported) {
         tabOperations.addTab(entityId, localSignerId, selectedJurisdiction);
-        success = `${formationPurpose === 'company' ? 'Company' : 'Entity'} created: ${formatShortId(entityId)}`;
+        success = `Entity created: ${formatShortId(entityId)}`;
       } else {
         success = `Board created: ${formatShortId(entityId)}. Import this configuration in a member wallet.`;
       }
 
       // Callback
-      if (onCreated) onCreated(entityId, formationPurpose);
-      dispatch('created', { entityId, purpose: formationPurpose });
-
+      if (onCreated) onCreated(entityId);
       // Reset form
       resetForm();
 
@@ -271,146 +267,27 @@
   }
 
   function resetForm() {
-    entityName = 'ACME';
+    entityName = '';
     entityType = 'numbered';
+    boardMode = 'personal';
     validators = [{ name: mySignerAddress, weight: 1 }];
     threshold = 1;
     userModifiedThreshold = false;
   }
 
-  function exportConfig() {
-    const config = {
-      entityType,
-      formationPurpose,
-      entityName,
-      jurisdiction: selectedJurisdiction,
-      validators,
-      threshold,
-      exportedAt: new Date().toISOString(),
-    };
-
-    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `xln-entity-config-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function importConfig() {
-    try {
-      const config = requireUnknownRecord(parseJsonUnknown(importJson, 'ENTITY_FORMATION_CONFIG_JSON_INVALID'), 'ENTITY_FORMATION_CONFIG_INVALID');
-      rejectExtraKeys(config, ['entityType', 'formationPurpose', 'entityName', 'jurisdiction', 'validators', 'threshold', 'exportedAt'], 'ENTITY_FORMATION_CONFIG_EXTRA_FIELD');
-      if (config['entityType'] !== undefined && config['entityType'] !== 'numbered' && config['entityType'] !== 'lazy' && config['entityType'] !== 'named') throw new Error('ENTITY_FORMATION_CONFIG_ENTITY_TYPE_INVALID');
-      if (config['formationPurpose'] !== undefined && config['formationPurpose'] !== 'entity' && config['formationPurpose'] !== 'company') throw new Error('ENTITY_FORMATION_CONFIG_PURPOSE_INVALID');
-      if (config['entityName'] !== undefined && typeof config['entityName'] !== 'string') throw new Error('ENTITY_FORMATION_CONFIG_NAME_INVALID');
-      if (config['jurisdiction'] !== undefined && typeof config['jurisdiction'] !== 'string') throw new Error('ENTITY_FORMATION_CONFIG_JURISDICTION_INVALID');
-      if (config['validators'] !== undefined && !Array.isArray(config['validators'])) throw new Error('ENTITY_FORMATION_CONFIG_VALIDATORS_INVALID');
-      if (config['threshold'] !== undefined && (typeof config['threshold'] !== 'number' || !Number.isSafeInteger(config['threshold']))) throw new Error('ENTITY_FORMATION_CONFIG_THRESHOLD_INVALID');
-      if (config['entityType'] !== undefined) entityType = config['entityType'];
-      if (config['formationPurpose'] === 'entity' || config['formationPurpose'] === 'company') {
-        selectFormationPurpose(config['formationPurpose']);
-      }
-      if (config['entityName'] !== undefined) entityName = config['entityName'];
-      if (config['jurisdiction'] !== undefined) selectedJurisdiction = config['jurisdiction'];
-      if (config['validators'] !== undefined) validators = config['validators'];
-      if (config['threshold'] !== undefined) threshold = config['threshold'];
-      showImport = false;
-      importJson = '';
-      success = 'Config imported';
-    } catch (err) {
-      error = err instanceof Error ? `Invalid entity config: ${err.message}` : 'Invalid entity config';
-    }
-  }
 </script>
 
-<div class="formation-panel">
+<div class="formation-panel" data-testid="entity-formation-panel">
   <header class="panel-header">
-    <h3>Create {formationPurpose === 'company' ? 'Company' : 'Entity'}</h3>
-    <div class="header-actions">
-      <button class="icon-btn" on:click={() => showImport = !showImport} title="Import Config">
-        <Upload size={14} />
-      </button>
-      <button class="icon-btn" on:click={exportConfig} title="Export Config">
-        <Download size={14} />
-      </button>
+    <div>
+      <p class="eyebrow">New subject</p>
+      <h3>Create Entity</h3>
+      <p class="header-copy">Every person, company, and hub starts as the same Entity.</p>
     </div>
   </header>
 
-  {#if showImport}
-    <div class="import-section">
-      <textarea
-        bind:value={importJson}
-        placeholder="Paste entity config JSON..."
-        rows="4"
-      ></textarea>
-      <div class="import-actions">
-        <button class="btn-secondary" on:click={() => { showImport = false; importJson = ''; }}>Cancel</button>
-        <button class="btn-primary" on:click={importConfig}>Import</button>
-      </div>
-    </div>
-  {/if}
-
   <div class="field">
-    <div class="field-label">Formation</div>
-    <div class="type-selector">
-      <button class="type-option" class:active={formationPurpose === 'entity'} on:click={() => selectFormationPurpose('entity')}>
-        <Shield size={16} /><span>Entity</span><small>Personal or operational</small>
-      </button>
-      <button data-testid="formation-company" class="type-option" class:active={formationPurpose === 'company'} on:click={() => selectFormationPurpose('company')}>
-        <Landmark size={16} /><span>Company</span><small>Shares, hub and governance</small>
-      </button>
-    </div>
-  </div>
-
-  {#if formationPurpose === 'entity'}
-  <div class="field">
-    <div class="field-label">Entity Type</div>
-    <div class="type-selector three-col">
-      <button
-        class="type-option"
-        class:active={entityType === 'numbered'}
-        on:click={() => entityType = 'numbered'}
-      >
-        <Hash size={16} />
-        <span>Numbered</span>
-        <small>On-chain ID</small>
-      </button>
-      <button
-        class="type-option"
-        class:active={entityType === 'lazy'}
-        on:click={() => entityType = 'lazy'}
-      >
-        <Zap size={16} />
-        <span>Lazy</span>
-        <small>Free, instant</small>
-      </button>
-      <button
-        class="type-option"
-        class:active={entityType === 'named'}
-        on:click={() => entityType = 'named'}
-      >
-        <Tag size={16} />
-        <span>Named</span>
-        <small>Premium</small>
-      </button>
-    </div>
-  </div>
-  {/if}
-
-  <div class="field">
-    <div class="field-label">{formationPurpose === 'company' ? 'Company' : 'Entity'} Name</div>
-    <input
-      type="text"
-      bind:value={entityName}
-      placeholder="e.g., ACME Corp"
-    />
-    <p class="field-hint">{formationPurpose === 'company' ? 'The numbered Entity that owns the treasury and signs company actions' : 'Display name for your entity'}</p>
-  </div>
-
-  <div class="field">
-    <div class="field-label">Jurisdiction</div>
+    <div class="field-label">1 · Jurisdiction</div>
     {#if selectableJurisdictions.length === 0}
       <div class="empty-hint">
         {entityType === 'numbered'
@@ -437,7 +314,31 @@
   </div>
 
   <div class="field">
-    <div class="field-label">Ordered board ({validators.length})</div>
+    <div class="field-label">2 · Entity name</div>
+    <input type="text" bind:value={entityName} placeholder="e.g., ACME" />
+    <p class="field-hint">A display name only. The canonical identity comes from registration and the board.</p>
+  </div>
+
+  <div class="field">
+    <div class="field-label">3 · Control</div>
+    <div class="type-selector">
+      <button data-testid="formation-personal" class="type-option" class:active={boardMode === 'personal'} on:click={selectPersonalBoard}>
+        <UserRound size={18} /><span>Personal</span><small>One Runtime signer</small>
+      </button>
+      <button data-testid="formation-shared" class="type-option" class:active={boardMode === 'shared'} on:click={selectSharedBoard}>
+        <UsersRound size={18} /><span>Shared board</span><small>Weighted multisig</small>
+      </button>
+    </div>
+  </div>
+
+  {#if boardMode === 'personal'}
+    <div class="personal-signer">
+      <small>Runtime signer</small>
+      <code>{mySignerAddress || 'Unlock a Runtime signer first'}</code>
+    </div>
+  {:else}
+  <div class="field">
+    <div class="field-label">Board members ({validators.length})</div>
     <div class="validators-list">
       {#each validators as v, idx}
         <div class="validator-row">
@@ -455,8 +356,9 @@
             min="1"
             class="v-weight"
             placeholder="Weight"
+            aria-label={`Board member ${idx + 1} weight`}
           />
-          <button class="v-remove" on:click={() => removeValidator(idx)} disabled={validators.length <= 1}>
+          <button class="v-remove" aria-label={`Remove board member ${idx + 1}`} on:click={() => removeValidator(idx)} disabled={validators.length <= 1}>
             <X size={12} />
           </button>
         </div>
@@ -478,6 +380,7 @@
           max={totalWeight}
           bind:value={threshold}
           on:input={onThresholdChange}
+          aria-label="Board signing threshold"
         />
         <span class="threshold-display">{threshold} of {totalWeight}</span>
       </div>
@@ -486,23 +389,35 @@
       </p>
     </div>
   {/if}
-
-  {#if entityType === 'lazy'}
-    <div class="preview-box">
-      <div class="preview-label">Canonical Board Hash</div>
-      <code>{quorumHash}</code>
-      <small>This hash becomes your entity ID</small>
-    </div>
   {/if}
+
+  <details class="advanced">
+    <summary>Advanced identity settings</summary>
+    <div class="advanced-content">
+      <div class="field">
+        <div class="field-label">Registration</div>
+        <div class="type-selector">
+          <button class="type-option" class:active={entityType === 'numbered'} on:click={() => entityType = 'numbered'}>
+            <Hash size={16} /><span>Numbered</span><small>Registered on-chain</small>
+          </button>
+          <button class="type-option" class:active={entityType === 'lazy'} on:click={() => entityType = 'lazy'}>
+            <Zap size={16} /><span>Lazy</span><small>Board hash identity</small>
+          </button>
+        </div>
+      </div>
+      {#if entityType === 'lazy'}
+        <div class="preview-box">
+          <div class="preview-label">Canonical Board Hash</div>
+          <code>{quorumHash}</code>
+          <small>This hash becomes your entity ID</small>
+        </div>
+      {/if}
+    </div>
+  </details>
 
   {#if previewError}
     <div class="message error">{previewError}</div>
   {/if}
-
-  <div class="preview-box">
-    <div class="preview-label">Expected Entity ID</div>
-    <code class="entity-id">{expectedEntityId}</code>
-  </div>
 
   {#if error}
     <div class="message error">{error}</div>
@@ -516,9 +431,9 @@
     <button
       class="btn-create"
       on:click={createEntity}
-      disabled={creating || !selectedJurisdiction || validators.some(v => !v.name) || Boolean(previewError)}
+      disabled={creating || !entityName.trim() || !selectedJurisdiction || formationValidators.some(validator => !validator.name) || Boolean(previewError)}
     >
-      {creating ? 'Creating...' : `Create ${formationPurpose === 'company' ? 'Company' : 'Entity'}`}
+      {creating ? 'Creating...' : 'Create Entity'}
     </button>
   </div>
 </div>
@@ -527,7 +442,14 @@
   .formation-panel {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 20px;
+    width: min(100%, 760px);
+    margin: 0 auto;
+    padding: clamp(18px, 3vw, 28px);
+    box-sizing: border-box;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 78%, transparent);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 72%, transparent);
   }
 
   .panel-header {
@@ -543,54 +465,18 @@
     color: var(--theme-text-primary, #e4e4e7);
   }
 
-  .header-actions {
-    display: flex;
-    gap: 6px;
+  .eyebrow, .header-copy { margin: 0; }
+  .eyebrow {
+    color: var(--theme-accent, #fbbf24);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
   }
-
-  .icon-btn {
-    width: 28px;
-    height: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
-    border-radius: 6px;
+  .header-copy {
+    margin-top: 5px;
     color: var(--theme-text-muted, #71717a);
-    cursor: pointer;
-  }
-
-  .icon-btn:hover {
-    border-color: color-mix(in srgb, var(--theme-border, #27272a) 84%, white 16%);
-    color: var(--theme-text-secondary, #a1a1aa);
-  }
-
-  /* Import Section */
-  .import-section {
-    padding: 12px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
-    border-radius: 8px;
-  }
-
-  .import-section textarea {
-    width: 100%;
-    padding: 10px;
-    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent);
-    border: 1px solid color-mix(in srgb, var(--theme-input-border, #27272a) 82%, transparent);
-    border-radius: 6px;
-    color: var(--theme-text-primary, #e4e4e7);
-    font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    resize: vertical;
-  }
-
-  .import-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 10px;
-    justify-content: flex-end;
   }
 
   /* Fields */
@@ -634,10 +520,6 @@
     gap: 8px;
   }
 
-  .type-selector.three-col {
-    grid-template-columns: 1fr 1fr 1fr;
-  }
-
   .type-option {
     display: flex;
     flex-direction: column;
@@ -671,6 +553,18 @@
   .type-option.active small {
     color: color-mix(in srgb, var(--theme-accent, #fbbf24) 78%, #7c2d12);
   }
+
+  .personal-signer {
+    display: grid;
+    gap: 6px;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
+  }
+
+  .personal-signer small { color: var(--theme-text-muted, #71717a); font-size: 10px; text-transform: uppercase; }
+  .personal-signer code { color: var(--theme-text-secondary, #a1a1aa); font-size: 11px; overflow-wrap: anywhere; }
 
   .empty-hint {
     padding: 16px;
@@ -816,6 +710,25 @@
     color: var(--theme-accent, #fbbf24);
   }
 
+  .advanced {
+    padding: 12px 14px;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
+    border-radius: 10px;
+  }
+
+  .advanced summary {
+    cursor: pointer;
+    color: var(--theme-text-secondary, #a1a1aa);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .advanced-content {
+    display: grid;
+    gap: 14px;
+    margin-top: 14px;
+  }
+
   .threshold-selector {
     display: flex;
     align-items: center;
@@ -867,10 +780,6 @@
     word-break: break-all;
   }
 
-  .preview-box code.entity-id {
-    color: #fbbf24;
-  }
-
   .preview-box small {
     display: block;
     font-size: 10px;
@@ -916,17 +825,6 @@
     border-color: color-mix(in srgb, var(--theme-border, #27272a) 84%, white 16%);
   }
 
-  .btn-primary {
-    padding: 8px 14px;
-    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--theme-accent, #fbbf24) 34%, transparent);
-    border-radius: 6px;
-    color: var(--theme-accent, #fbbf24);
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-  }
-
   .btn-create {
     flex: 1;
     padding: 12px;
@@ -954,5 +852,12 @@
       max-height: none;
       overflow: visible;
     }
+  }
+
+  @media (max-width: 560px) {
+    .formation-panel { padding: 16px; border-radius: 14px; }
+    .type-selector { grid-template-columns: 1fr; }
+    .validator-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
+    .v-weight { grid-column: 2 / 3; width: auto; }
   }
 </style>

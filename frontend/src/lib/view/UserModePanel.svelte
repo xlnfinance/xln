@@ -822,11 +822,8 @@
     activeInlinePanel = 'none';
   }
 
-  function handleEntityFormationCreated(_entityId: string, purpose: 'entity' | 'company'): void {
+  function handleEntityFormationCreated(_entityId: string): void {
     activeInlinePanel = 'none';
-    if (purpose === 'company' && typeof window !== 'undefined') {
-      window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#company`);
-    }
   }
 
   function handleGoToLiveOverride(): void {
@@ -842,7 +839,6 @@
     <div class="inline-panel">
       <div class="inline-panel-header">
         <button class="back-btn" onclick={handleEntityFormationClose}>← Back</button>
-        <h3>Create Entity or Company</h3>
       </div>
       <FormationPanel runtimeProjection={formationRuntimeProjection} onCreated={handleEntityFormationCreated} />
     </div>

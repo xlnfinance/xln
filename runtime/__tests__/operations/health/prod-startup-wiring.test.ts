@@ -772,7 +772,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(hubNode).toContain('const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);');
     expect(hubNode).toContain('visibleDirectSupportPeers');
-    expect(hubNode).toContain("jurisdictionName: normalizeJurisdictionDisplayName(entry['jurisdictionName'] || '')");
+    expect(hubNode).toContain("jurisdictionName: normalizeJurisdictionDisplayName(entry['jurisdictionName'])");
     expect(hubNode).toContain('SUPPORT_PEER_IDENTITIES_JSON_INVALID:malformed JSON');
     expect(hubNode).not.toContain('} catch {\n    return [];\n  }\n};\n\nconst resolvedArgs');
     expect(hubNode).not.toContain("normalized === 'arrakis'");
@@ -2524,76 +2524,31 @@ describe('production startup wiring', () => {
 
   test('custody hub discovery filters hubs by jurisdiction stack identity', async () => {
     const originalFetch = globalThis.fetch;
+    const debugHub = (
+      entityId: string,
+      jurisdictionName: string,
+      chainId: number,
+      depositoryAddress: string,
+    ) => ({
+      entityId,
+      name: `hub-${entityId.slice(-2)}`,
+      isHub: true,
+      online: true,
+      lastUpdated: 1,
+      accounts: [],
+      publicAccounts: [],
+      metadata: { jurisdiction: { name: jurisdictionName, chainId, depositoryAddress } },
+    });
     globalThis.fetch = (async () =>
       new Response(
         JSON.stringify({
           entities: [
-            {
-              entityId: '0x' + 'a'.repeat(64),
-              isHub: true,
-              metadata: {
-                jurisdiction: {
-                  name: 'Tron',
-                  chainId: 31338,
-                  depositoryAddress: '0x2222222222222222222222222222222222222222',
-                },
-              },
-            },
-            {
-              entityId: '0x' + 'b'.repeat(64),
-              isHub: true,
-              metadata: {
-                jurisdiction: {
-                  name: 'Tron',
-                  chainId: 31338,
-                  depositoryAddress: '0x2222222222222222222222222222222222222222',
-                },
-              },
-            },
-            {
-              entityId: '0x' + 'c'.repeat(64),
-              isHub: true,
-              metadata: {
-                jurisdiction: {
-                  name: 'Tron',
-                  chainId: 31338,
-                  depositoryAddress: '0x2222222222222222222222222222222222222222',
-                },
-              },
-            },
-            {
-              entityId: '0x' + '1'.repeat(64),
-              isHub: true,
-              metadata: {
-                jurisdiction: {
-                  name: 'Testnet',
-                  chainId: 31337,
-                  depositoryAddress: '0x1111111111111111111111111111111111111111',
-                },
-              },
-            },
-            {
-              entityId: '0x' + '2'.repeat(64),
-              isHub: true,
-              metadata: {
-                jurisdiction: {
-                  name: 'Testnet',
-                  chainId: 31337,
-                  depositoryAddress: '0x1111111111111111111111111111111111111111',
-                },
-              },
-            },
-            {
-              entityId: '0x' + '3'.repeat(64),
-              isHub: true,
-              metadata: {
-                jurisdiction: {
-                  name: 'Testnet',
-                  chainId: 31337,
-                  depositoryAddress: '0x1111111111111111111111111111111111111111',
-                },
-              },
-            },
+            debugHub('0x' + 'a'.repeat(64), 'Tron', 31338, '0x2222222222222222222222222222222222222222'),
+            debugHub('0x' + 'b'.repeat(64), 'Tron', 31338, '0x2222222222222222222222222222222222222222'),
+            debugHub('0x' + 'c'.repeat(64), 'Tron', 31338, '0x2222222222222222222222222222222222222222'),
+            debugHub('0x' + '1'.repeat(64), 'Testnet', 31337, '0x1111111111111111111111111111111111111111'),
+            debugHub('0x' + '2'.repeat(64), 'Testnet', 31337, '0x1111111111111111111111111111111111111111'),
+            debugHub('0x' + '3'.repeat(64), 'Testnet', 31337, '0x1111111111111111111111111111111111111111'),
           ],
         }),
       )) as typeof fetch;

@@ -15,21 +15,22 @@ async function deriveCompanyOwner(page: import('@playwright/test').Page): Promis
   await expect(page.getByTestId('tab-accounts')).toBeVisible({ timeout: 30_000 });
 }
 
-async function openCompanyFormation(page: import('@playwright/test').Page): Promise<void> {
+async function openEntityFormation(page: import('@playwright/test').Page): Promise<void> {
   await page.getByTestId('context-current').click();
   await page.getByRole('button', { name: '+ Entity', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Create Entity or Company', exact: true })).toBeVisible();
-  await page.getByTestId('formation-company').click();
-  await expect(page.getByRole('heading', { name: 'Create Company', exact: true })).toBeVisible();
-  await expect(page.getByText('Shares, hub and governance', { exact: true })).toBeVisible();
-  await expect(page.getByText('The numbered Entity that owns the treasury and signs company actions')).toBeVisible();
+  const panel = page.getByTestId('entity-formation-panel');
+  await expect(panel.getByRole('heading', { name: 'Create Entity', exact: true })).toBeVisible();
+  await expect(panel.getByText('Every person, company, and hub starts as the same Entity.')).toBeVisible();
+  await expect(panel.getByTestId('formation-personal')).toHaveClass(/active/);
+  await panel.getByTestId('formation-shared').click();
+  await expect(panel.getByText('Board members (2)', { exact: true })).toBeVisible();
 }
 
-test.describe('Company formation', () => {
-  test('shows the canonical numbered-company workflow at every supported viewport', { tag: '@functional' }, async ({ page }, testInfo) => {
+test.describe('Entity formation', () => {
+  test('shows one canonical personal or shared Entity workflow at every supported viewport', { tag: '@functional' }, async ({ page }, testInfo) => {
     test.setTimeout(5 * 60 * 1000);
     await deriveCompanyOwner(page);
-    await openCompanyFormation(page);
+    await openEntityFormation(page);
 
     for (const viewport of [
       { name: 'iphone', width: 393, height: 852 },
@@ -37,8 +38,8 @@ test.describe('Company formation', () => {
       { name: 'wide', width: 1920, height: 1080 },
     ] as const) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      await expect(page.getByRole('heading', { name: 'Create Company', exact: true })).toBeVisible();
-      await page.screenshot({ path: testInfo.outputPath(`company-formation-${viewport.name}.png`), fullPage: true });
+      await expect(page.getByTestId('entity-formation-panel').getByRole('heading', { name: 'Create Entity', exact: true })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`entity-formation-${viewport.name}.png`), fullPage: true });
     }
   });
 });

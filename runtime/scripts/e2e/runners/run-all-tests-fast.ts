@@ -18,6 +18,7 @@ import {
   withoutTestArtifactCleanupDoneEnv,
 } from '../harness/test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
+import { assertBroadRunHasNoUnresolvedReruns } from '../harness/selective-rerun/ledger';
 
 type CliArgs = {
   scenarioWorkers: number;
@@ -82,7 +83,12 @@ const runJob = async (
 };
 
 async function main(): Promise<void> {
+  if (process.argv.slice(2).some(argument => argument === '--help' || argument === '-h')) {
+    console.log('Usage: bun runtime/scripts/e2e/runners/run-all-tests-fast.ts [--quick|--smoke] [--scenario-workers=N] [--e2e-shards=N]');
+    return;
+  }
   const args = parseArgs();
+  assertBroadRunHasNoUnresolvedReruns();
   console.log('\n' + '='.repeat(72));
   console.log('Fast Full Suite (parallel + isolated)');
   console.log('='.repeat(72));

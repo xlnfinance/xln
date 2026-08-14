@@ -1,18 +1,18 @@
 import type { EntityId, EntityTx, RoutedEntityInput } from '@xln/runtime/api/public/runtime-module';
 
-export const COMPANY_SHARE_SUPPLY = 100_000_000_000n;
-export const COMPANY_DIVIDEND_TOKEN_FLAG = 1n << 255n;
+export const ENTITY_SHARE_SUPPLY = 100_000_000_000n;
+export const ENTITY_DIVIDEND_TOKEN_FLAG = 1n << 255n;
 
-export type CompanyShareClass = 'control' | 'dividend';
+export type EntityShareClass = 'control' | 'dividend';
 
-export type CompanyShareTokenProjection = Readonly<{
-  shareClass: CompanyShareClass;
+export type EntityShareTokenProjection = Readonly<{
+  shareClass: EntityShareClass;
   externalTokenId: bigint;
   internalTokenId: number | null;
   reserve: bigint;
 }>;
 
-type CompanyCatalogToken = Readonly<{
+type EntityCatalogToken = Readonly<{
   tokenId: number | undefined;
   tokenType?: number;
   externalTokenId?: string;
@@ -25,21 +25,21 @@ const numberedEntityValue = (entityId: EntityId): bigint => {
   } catch {
     throw new Error(`COMPANY_NUMBERED_ENTITY_REQUIRED:${entityId || 'missing'}`);
   }
-  if (value <= 0n || value >= COMPANY_DIVIDEND_TOKEN_FLAG) {
-    throw new Error(`COMPANY_NUMBERED_ENTITY_REQUIRED:${entityId || 'missing'}`);
+  if (value <= 0n || value >= ENTITY_DIVIDEND_TOKEN_FLAG) {
+    throw new Error(`ENTITY_SHARE_NUMBERED_ID_REQUIRED:${entityId || 'missing'}`);
   }
   return value;
 };
 
-export const getCompanyShareExternalTokenIds = (entityId: EntityId): Readonly<{
+export const getEntityShareExternalTokenIds = (entityId: EntityId): Readonly<{
   control: bigint;
   dividend: bigint;
 }> => {
   const control = numberedEntityValue(entityId);
-  return { control, dividend: control | COMPANY_DIVIDEND_TOKEN_FLAG };
+  return { control, dividend: control | ENTITY_DIVIDEND_TOKEN_FLAG };
 };
 
-const parseCatalogExternalTokenId = (token: CompanyCatalogToken): bigint | null => {
+const parseCatalogExternalTokenId = (token: EntityCatalogToken): bigint | null => {
   if (token.tokenType !== 2 || typeof token.externalTokenId !== 'string') return null;
   try {
     const value = BigInt(token.externalTokenId);
@@ -49,13 +49,13 @@ const parseCatalogExternalTokenId = (token: CompanyCatalogToken): bigint | null 
   }
 };
 
-export const projectCompanyShareTokens = (
+export const projectEntityShareTokens = (
   entityId: EntityId,
-  catalog: readonly CompanyCatalogToken[],
+  catalog: readonly EntityCatalogToken[],
   reserves: ReadonlyMap<number, bigint>,
-): readonly CompanyShareTokenProjection[] => {
-  const ids = getCompanyShareExternalTokenIds(entityId);
-  const project = (shareClass: CompanyShareClass, externalTokenId: bigint): CompanyShareTokenProjection => {
+): readonly EntityShareTokenProjection[] => {
+  const ids = getEntityShareExternalTokenIds(entityId);
+  const project = (shareClass: EntityShareClass, externalTokenId: bigint): EntityShareTokenProjection => {
     const token = catalog.find((candidate) => parseCatalogExternalTokenId(candidate) === externalTokenId);
     const internalTokenId = Number.isSafeInteger(token?.tokenId) && Number(token?.tokenId) > 0
       ? Number(token?.tokenId)
@@ -70,7 +70,7 @@ export const projectCompanyShareTokens = (
   return [project('control', ids.control), project('dividend', ids.dividend)];
 };
 
-export const buildCompanyShareReleaseInput = (input: Readonly<{
+export const buildEntityShareReleaseInput = (input: Readonly<{
   entityId: EntityId;
   signerId: string;
   depositoryAddress: string;
@@ -80,34 +80,20 @@ export const buildCompanyShareReleaseInput = (input: Readonly<{
 }>): RoutedEntityInput => {
   const signerId = input.signerId.trim().toLowerCase();
   const depositoryAddress = input.depositoryAddress.trim().toLowerCase();
-  const controlAmount = input.controlAmount ?? COMPANY_SHARE_SUPPLY;
-  const dividendAmount = input.dividendAmount ?? COMPANY_SHARE_SUPPLY;
-  const purpose = input.purpose?.trim() || 'Company treasury issuance';
+  const controlAmount = input.controlAmount ?? ENTITY_SHARE_SUPPLY;
+  const dividendAmount = input.dividendAmount ?? ENTITY_SHARE_SUPPLY;
+  const purpose = input.purpose?.trim() || 'Entity treasury issuance';
   numberedEntityValue(input.entityId);
-  if (!signerId) throw new Error('COMPANY_SIGNER_REQUIRED');
+  if (!signerId) throw new Error('ENTITY_SHARE_SIGNER_REQUIRED');
   if (!/^0x[0-9a-f]{40}$/.test(depositoryAddress)) {
-    throw new Error(`COMPANY_DEPOSITORY_ADDRESS_INVALID:${depositoryAddress || 'missing'}`);
+    throw new Error(`ENTITY_SHARE_DEPOSITORY_ADDRESS_INVALID:${depositoryAddress || 'missing'}`);
   }
   if (controlAmount < 0n || dividendAmount < 0n || controlAmount + dividendAmount === 0n) {
-    throw new Error('COMPANY_SHARE_RELEASE_AMOUNT_INVALID');
+    throw new Error('ENTITY_SHARE_RELEASE_AMOUNT_INVALID');
   }
   const release: EntityTx = {
     type: 'entityProviderReleaseControlShares',
     data: { recipientAddress: depositoryAddress, controlAmount, dividendAmount, purpose },
   };
   return { entityId: input.entityId, signerId, entityTxs: [release] };
-};
-
-export const selectDefaultCompanyHub = <T extends Readonly<{
-  entityId: string;
-  isConnected: boolean;
-  isOpening: boolean;
-  metadata: Readonly<{ fee: number; peerCount: number }>;
-}>>(hubs: readonly T[]): T | null => {
-  const available = hubs.filter((hub) => !hub.isConnected && !hub.isOpening);
-  return [...available].sort((left, right) =>
-    left.metadata.fee - right.metadata.fee
-    || right.metadata.peerCount - left.metadata.peerCount
-    || left.entityId.localeCompare(right.entityId)
-  )[0] ?? null;
 };

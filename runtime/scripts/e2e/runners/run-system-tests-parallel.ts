@@ -22,6 +22,7 @@ import {
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
 } from '../harness/test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
+import { assertBroadRunHasNoUnresolvedReruns } from '../harness/selective-rerun/ledger';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -297,7 +298,12 @@ async function runScenarioOnWorker(
 }
 
 async function main(): Promise<void> {
+  if (process.argv.slice(2).some(argument => argument === '--help' || argument === '-h')) {
+    console.log('Usage: bun runtime/scripts/e2e/runners/run-system-tests-parallel.ts [--scenarios=a,b] [--workers=N]');
+    return;
+  }
   const args = parseArgs();
+  assertBroadRunHasNoUnresolvedReruns();
   cleanupTestArtifactsBeforeRun({ reason: 'system-tests' });
   process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
   const scenarios = args.scenarios;

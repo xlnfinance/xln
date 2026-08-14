@@ -7,6 +7,7 @@ import {
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
 } from '../harness/test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
+import { assertBroadRunHasNoUnresolvedReruns } from '../harness/selective-rerun/ledger';
 
 const FAST_E2E_TARGETS = [
   {
@@ -93,6 +94,11 @@ const FAST_E2E_TARGETS = [
 
 const fastTargets = FAST_E2E_TARGETS.map((target) => `${target.file}::${target.title}`);
 const passthrough = process.argv.slice(2);
+if (passthrough.some(argument => argument === '--help' || argument === '-h')) {
+  console.log('Usage: bun runtime/scripts/e2e/runners/run-e2e-fast.ts [isolated-runner options]');
+  process.exit(0);
+}
+assertBroadRunHasNoUnresolvedReruns();
 const isCi = process.env['CI'] === 'true';
 // A GitHub four-core runner cannot bootstrap one five-runtime stack while
 // Playwright reads another: the second bootstrap can starve the first

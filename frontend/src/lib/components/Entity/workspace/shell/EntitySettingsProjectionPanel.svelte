@@ -368,11 +368,12 @@
       <p class="eyebrow">Settings</p>
       <h2>{profile?.name || shortId(normalizedEntityId, 16)}</h2>
     </div>
-    <div class="runtime-pill" title={normalizedRuntimeId}>
-      <ShieldCheck size={15} />
-      <span>{$runtimeControllerHandle.mode}</span>
-      <strong>{$runtimeControllerHandle.authLevel || 'local'}</strong>
-    </div>
+    {#if $runtimeControllerHandle.mode === 'embedded'}
+      <div class="runtime-pill" title={normalizedRuntimeId}>
+        <ShieldCheck size={15} />
+        <strong>In-browser Runtime</strong>
+      </div>
+    {/if}
   </header>
 
   <nav class="settings-tabs" aria-label="Settings sections">

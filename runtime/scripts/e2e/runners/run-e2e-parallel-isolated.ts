@@ -78,6 +78,12 @@ import {
   readPlaywrightFailureReport,
 } from '../harness/e2e-failure-capsule';
 import { cleanupTestArtifactsBeforeRun } from '../harness/test-artifact-cleanup';
+import {
+  assertBroadRunHasNoUnresolvedReruns,
+  recordSelectiveRerunFailure,
+  recordSelectiveRerunPass,
+  selectiveE2ETarget,
+} from '../harness/selective-rerun/ledger';
 import { listPlaywrightTestMetadata } from '../harness/playwright-test-metadata';
 import {
   assertE2EBrowserHealthGate,
@@ -2451,6 +2457,8 @@ async function main(): Promise<void> {
     return;
   }
   const args = parseArgs();
+  const exactRequestedTarget = args.pwFiles.length === 1 && /^.+\.spec\.ts::.+$/.test(args.pwFiles[0] ?? '');
+  if (!exactRequestedTarget) assertBroadRunHasNoUnresolvedReruns();
   // Artifact retention changes only deletion policy. Every top-level run must
   // still acquire a fresh lease so Playwright children can prove that their
   // parent owns the shared evidence workspace.
@@ -2779,6 +2787,13 @@ async function main(): Promise<void> {
 
     if (failed.length > 0) {
       for (const f of failed) {
+        recordSelectiveRerunFailure({
+          kind: 'e2e',
+          target: selectiveE2ETarget(f.target, f.title),
+          failedCodeHash: codeFingerprint.codeHash,
+          failedAt: new Date().toISOString(),
+          reason: `${f.resultClass}:${String(f.error || 'failed').replace(/[\r\n]+/g, ' ').slice(0, 450)}`,
+        });
         console.log(`\n--- shard ${f.shard} (tail: ${f.logPath}) ---`);
         console.log(tailLog(f.logPath, 80));
       }
@@ -2788,8 +2803,24 @@ async function main(): Promise<void> {
     try {
       assertE2EBrowserHealthGate(manifest.browserHealth, args.strictBrowserHealth);
     } catch (error) {
+      for (const shard of manifest.shards.filter(entry => (entry.browserHealth?.issueCount ?? 0) > 0)) {
+        const task = tasks.find(entry => entry.shard === shard.shard);
+        if (!task) continue;
+        recordSelectiveRerunFailure({
+          kind: 'e2e',
+          target: selectiveE2ETarget(task.pwTargets[0] ?? `shard-${task.shard}`, task.title ?? task.pwTargets[0] ?? `shard-${task.shard}`),
+          failedCodeHash: codeFingerprint.codeHash,
+          failedAt: new Date().toISOString(),
+          reason: 'browser-health',
+        });
+      }
       console.error(`❌ ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
+    }
+
+    if (exactRequestedTarget && completedResults.length === 1 && completedResults[0]?.status === 'passed') {
+      const passed = completedResults[0];
+      recordSelectiveRerunPass('e2e', selectiveE2ETarget(passed.target, passed.title));
     }
 
     process.exit(0);

@@ -26,6 +26,7 @@
     "custody:prod": "bun runtime/scripts/operations/custody/start-custody-prod.ts",
     "notify:done": "bash ./scripts/notify.sh 'Task complete' 'XLN Agent' 'All done'",
     "notify:fail": "bash ./scripts/notify.sh 'Task failed' 'XLN Agent' 'Check logs' 'Basso'",
+    "progress:note": "bun tools/progress-timeline.ts",
     "test:e2e:notify": "bun run test:e2e:fast && bash ./scripts/notify.sh 'E2E fast passed' 'XLN Agent' || bash ./scripts/notify.sh 'E2E fast failed' 'XLN Agent' 'See report' 'Basso'",
     "test:e2e": "bun run test:e2e:fast",
     "test:e2e:monitor": "bun runtime/scripts/e2e/harness/e2e-fail-fast-monitor.ts",

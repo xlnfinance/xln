@@ -18,6 +18,12 @@ import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
 } from '../scripts/e2e/harness/test-artifact-cleanup';
+import {
+  assertBroadRunHasNoUnresolvedReruns,
+  recordSelectiveRerunFailure,
+  recordSelectiveRerunPass,
+} from '../scripts/e2e/harness/selective-rerun/ledger';
+import { computeRepositoryCodeFingerprint } from '../qa/tools/code-fingerprint';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -335,12 +341,18 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
 }
 
 async function main() {
+  if (process.argv.slice(2).some(argument => argument === '--help' || argument === '-h')) {
+    console.log('Usage: bun runtime/scenarios/run.ts [all|<scenario>] [--mode=browservm|rpc] [--rpc=URL] [--workers=N] [--single]');
+    console.log(`\nAvailable scenarios: ${unique(Object.keys(SCENARIOS)).join(', ')}`);
+    return;
+  }
   const { scenario, mode, rpc, workers, set, single } = parseArgs();
 
   const requestedMode = (mode || process.env['JADAPTER_MODE'] || 'rpc').toLowerCase();
   const runAll = !single && (!scenario || scenario === 'all');
 
   if (runAll) {
+    assertBroadRunHasNoUnresolvedReruns();
     const code = await runParallelScenarios(requestedMode, workers, set);
     process.exit(code);
   }
@@ -378,25 +390,35 @@ async function main() {
   if (effectiveRpc) console.log(`  RPC: ${effectiveRpc}`);
   console.log(`${'='.repeat(60)}\n`);
 
-  // Create fresh env — scenario self-boots from here
-  const { createEmptyEnv } = await import('../runtime');
-  const env = createEmptyEnv(`${scenario}-cli-seed-42`);
+  const codeHash = computeRepositoryCodeFingerprint().codeHash;
+  try {
+    // Create fresh env — scenario self-boots from here
+    const { createEmptyEnv } = await import('../runtime');
+    const env = createEmptyEnv(`${scenario}-cli-seed-42`);
 
-  // Dynamic import and run
-  const mod = await import(entry.file);
-  const fn = mod[entry.fn];
-  if (!fn) {
-    console.error(`Function "${entry.fn}" not found in ${entry.file}`);
-    process.exit(1);
+    // Dynamic import and run
+    const mod = await import(entry.file);
+    const fn = mod[entry.fn];
+    if (!fn) throw new Error(`SCENARIO_FUNCTION_MISSING:${entry.fn}:${entry.file}`);
+
+    await fn(env);
+    recordSelectiveRerunPass('scenario', scenario);
+
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`  ${scenario} COMPLETE`);
+    console.log(`  Frames: ${env.history?.length || 0}`);
+    console.log(`${'='.repeat(60)}\n`);
+    process.exit(0);
+  } catch (error) {
+    recordSelectiveRerunFailure({
+      kind: 'scenario',
+      target: scenario,
+      failedCodeHash: codeHash,
+      failedAt: new Date().toISOString(),
+      reason: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
+    });
+    throw error;
   }
-
-  await fn(env);
-
-  console.log(`\n${'='.repeat(60)}`);
-  console.log(`  ${scenario} COMPLETE`);
-  console.log(`  Frames: ${env.history?.length || 0}`);
-  console.log(`${'='.repeat(60)}\n`);
-  process.exit(0);
 }
 
 main().catch((error: unknown) => {
