@@ -48,6 +48,7 @@ describe('release gate ordering', () => {
     expect(result.exitCode).toBe(0);
     expect(browserE2eCommands).toEqual(['bun run test:e2e:full']);
     expect(commands.at(-1)).toBe('bun run test:e2e:full');
+    expect(stdout).toContain('25. full E2E gate\n   bun run test:e2e:full\n   timeoutMs=3600000');
   });
 
   test('release runtime core includes the exact recursive cross-j family', () => {

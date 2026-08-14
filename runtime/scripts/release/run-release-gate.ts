@@ -147,7 +147,10 @@ const releaseSteps: GateStep[] = [
   { name: 'Foundation release Hanko', command: 'bun run foundation-release:verify', timeoutMs: 30_000 },
   // Full browser E2E is intentionally last. A failure in any cheaper release
   // check must never invalidate an expensive 125-target evidence run.
-  { name: 'full E2E gate', command: 'bun run test:e2e:full', timeoutMs: 1_800_000 },
+  // The canonical 127-target isolated run is measured at roughly 42 minutes
+  // on the Mac Studio. Keep a bounded margin for startup/quiescence scans;
+  // 30 minutes deterministically killed a healthy run after target 113.
+  { name: 'full E2E gate', command: 'bun run test:e2e:full', timeoutMs: 3_600_000 },
 ];
 
 // A release candidate has not been deployed yet, so querying the current production
@@ -217,6 +220,7 @@ function printPlan(profile: GateProfile, steps: GateStep[]): void {
   steps.forEach((step, index) => {
     console.log(`${index + 1}. ${step.name}`);
     console.log(`   ${step.command}`);
+    console.log(`   timeoutMs=${step.timeoutMs ?? 0}`);
   });
   console.log('='.repeat(76));
   console.log('');
