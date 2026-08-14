@@ -14,20 +14,30 @@ describe('frontend market JSON protocol', () => {
     timestamp: 1,
     payload: {
       format: 'exact-price-levels',
-      hubEntityId: `0x${'11'.repeat(32)}`,
       pairId: '1/2',
+      jurisdictionRef: `stack:1:0x${'c'.repeat(40)}`,
       depth: 20,
       displayDecimals: 4,
       priceScale: '10000',
-      bucketWidthTicks: '1',
-      bids: [{ price: '10000', size: '5', total: '5' }],
-      asks: [{ price: '10001', size: '7', total: '7' }],
+      bids: [{ price: '10000', size: '5', total: '5', sourceHubEntityIds: [`0x${'11'.repeat(32)}`] }],
+      asks: [{ price: '10001', size: '7', total: '7', sourceHubEntityIds: [`0x${'11'.repeat(32)}`] }],
       spread: '1',
       spreadPercent: '0.010',
-      source: 'orderbookExt',
-      entityHeight: 3,
-      entityStateHash: `0x${'22'.repeat(32)}`,
-      hubUpdatedAt: 4,
+      lastTradePrice: '10000',
+      lastTradeObservedAt: 4,
+      lastTradeHubEntityId: `0x${'11'.repeat(32)}`,
+      source: 'relayAggregate',
+      sourceCount: 1,
+      sources: [{
+        hubEntityId: `0x${'11'.repeat(32)}`,
+        jurisdictionRef: `stack:1:0x${'c'.repeat(40)}`,
+        entityHeight: 3,
+        entityStateHash: `0x${'22'.repeat(32)}`,
+        hubUpdatedAt: 4,
+        snapshotUpdatedAt: 5,
+        tradeCount: 1,
+        lastTradePrice: '10000',
+      }],
       updatedAt: 5,
       ...overrides,
     },
@@ -64,9 +74,15 @@ describe('frontend market JSON protocol', () => {
     expect(() => decodeMarketWireMessage(snapshotEnvelope({
       bids: [{ price: 'not-an-integer', size: '5', total: '5' }],
     }))).toThrow('MARKET_WIRE_LEVEL_PRICE_INVALID');
-    expect(() => decodeMarketWireMessage(snapshotEnvelope({ hubEntityId: 'hub-alias' })))
-      .toThrow('MARKET_WIRE_SNAPSHOT_hubEntityId_INVALID');
+    expect(() => decodeMarketWireMessage(snapshotEnvelope({ lastTradeHubEntityId: 'hub-alias' })))
+      .toThrow('MARKET_WIRE_AGGREGATE_LAST_TRADE_HUB_INVALID');
+    expect(() => decodeMarketWireMessage(snapshotEnvelope({ lastTradeHubEntityId: `0x${'33'.repeat(32)}` })))
+      .toThrow('MARKET_WIRE_AGGREGATE_LAST_TRADE_SOURCE_INVALID');
+    expect(() => decodeMarketWireMessage(snapshotEnvelope({ lastTradePrice: '9999' })))
+      .toThrow('MARKET_WIRE_AGGREGATE_LAST_TRADE_SOURCE_INVALID');
     expect(() => decodeMarketWireMessage(snapshotEnvelope({ pairId: '2/1' })))
-      .toThrow('MARKET_WIRE_SNAPSHOT_pairId_INVALID');
+      .toThrow('MARKET_WIRE_AGGREGATE_PAIR_INVALID');
+    expect(() => decodeMarketWireMessage('{"v":1,"type":"market_subscribe","id":"x","hubEntityIds":[],"pairs":["1/2"]}'))
+      .toThrow('MARKET_WIRE_FIELDS_INVALID');
   });
 });

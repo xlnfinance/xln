@@ -59,7 +59,12 @@ import { createLocalDeliveryHandler } from '../../network/relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdictions-path';
 import { createStructuredLogger, registerStructuredLogSink, shortId } from '../../infra/logger';
 import { startParentLivenessWatch } from '../../infra/process/parent-watch';
-import { buildMarketSnapshotForReplica, type MarketSnapshotPayload } from '../../network/relay/market/snapshot';
+import {
+  buildMarketPairCatalogForReplica,
+  buildMarketSnapshotForReplica,
+  normalizeMarketEntityId,
+  type MarketSnapshotPayload,
+} from '../../network/relay/market/snapshot';
 import { createMarketSubscriptionStack } from '../../network/relay/market/subscriptions';
 import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../../network/relay/market/wire';
 import { JSON_HEADERS, getErrorMessage, resolveRequiredAnvilRpc } from './utils';
@@ -381,6 +386,13 @@ const marketSubscriptionStack = createMarketSubscriptionStack<RelaySocket>({
   maxSubscriptionsPerIp: RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP,
   maxCellsPerSubscription: RELAY_MARKET_MAX_SUBSCRIPTION_CELLS,
   getClientIp: getRelayClientIp,
+  getConnectedHubEntityIds: () => {
+    const env = serverEnv;
+    if (!env) return [];
+    return Array.from(env.state.eReplicas.values())
+      .filter(replica => Boolean(replica.state.orderbookExt))
+      .map(replica => replica.state.entityId);
+  },
   isReady: () => Boolean(serverEnv),
   readyError: 'Runtime not ready',
   fetchSnapshots: async (hubEntityId, pairIds, depth) => {
@@ -735,6 +747,22 @@ const maybeHandleFinancialApi = (
   env: RuntimeReplica | null,
   headers: typeof JSON_HEADERS,
 ): Promise<Response> | Response | null => {
+  if (pathname === '/api/market/catalog' && req.method === 'GET') {
+    if (!env) return new Response(safeStringify({ error: 'Runtime not ready' }), { status: 503, headers });
+    const url = new URL(req.url);
+    const hubEntityId = normalizeMarketEntityId(url.searchParams.get('hubEntityId'));
+    if (!hubEntityId) {
+      return new Response(safeStringify({ error: 'Invalid hubEntityId', code: 'E_BAD_QUERY' }), { status: 400, headers });
+    }
+    const replica = getEntityReplicaById(env, hubEntityId);
+    if (!replica) {
+      return new Response(safeStringify({ error: `Unknown market hub: ${hubEntityId}`, code: 'E_UNKNOWN_HUB' }), {
+        status: 404,
+        headers,
+      });
+    }
+    return new Response(safeStringify(buildMarketPairCatalogForReplica(replica, hubEntityId)), { headers });
+  }
   if (pathname === '/api/tokens') {
     return externalWalletApi.handleTokens();
   }

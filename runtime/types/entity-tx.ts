@@ -6,9 +6,12 @@ import type { ProposalAction } from '../entity/types';
 import type { PaymentDeliveryMode } from './finance/payment';
 import type { CertifiedBoardAuthorityBinding } from './entity-board-registry';
 import type { ConsumptionProof } from '../entity/consumption/consumption-accumulator-types';
+import type { ProfileEntityKind, ProfileEntitySector } from '../entity/profile';
 
 type ProfileUpdateTx = {
   name?: string;
+  entityKind?: ProfileEntityKind | null;
+  sectors?: ProfileEntitySector[];
   avatar?: string;
   bio?: string;
   website?: string;

@@ -5,7 +5,12 @@ import type { EntityInput, EntityState, Proposal } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { log } from '../../../../infra/diagnostics';
-import { normalizeEntityName } from '../../../profile';
+import {
+  isProfileEntityKind,
+  isProfileEntitySector,
+  normalizeEntityName,
+} from '../../../profile';
+import { compareStableText } from '../../../../protocol/serialization';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage, addTextMessage } from '../../../frame-events';
 import {
@@ -298,10 +303,30 @@ export const handleProfileUpdateEntityTx = (
   if (!profileData || profileData.entityId !== entityState.entityId) {
     throw new Error(`PROFILE_UPDATE_INVALID_ENTITY: expected=${entityState.entityId} got=${String(profileData?.entityId || '')}`);
   }
+  const entityKind = profileData.entityKind === undefined
+    ? entityState.profile.entityKind
+    : profileData.entityKind === null
+      ? undefined
+      : profileData.entityKind;
+  if (entityKind !== undefined && !isProfileEntityKind(entityKind)) {
+    throw new Error(`PROFILE_UPDATE_ENTITY_KIND_INVALID:${String(entityKind)}`);
+  }
+  const sectors = profileData.sectors === undefined
+    ? entityState.profile.sectors ?? []
+    : profileData.sectors;
+  if (!Array.isArray(sectors) || sectors.length > 4 || sectors.some(value => !isProfileEntitySector(value))) {
+    throw new Error('PROFILE_UPDATE_ENTITY_SECTORS_INVALID');
+  }
+  const canonicalSectors = [...sectors].sort(compareStableText);
+  if (new Set(sectors).size !== sectors.length || canonicalSectors.some((value, index) => value !== sectors[index])) {
+    throw new Error('PROFILE_UPDATE_ENTITY_SECTORS_NONCANONICAL');
+  }
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   newState.profile = {
     name: normalizeEntityName(profileData.name ?? newState.profile?.name, newState.entityId),
     isHub: newState.profile.isHub,
+    ...(entityKind ? { entityKind } : {}),
+    ...(canonicalSectors.length ? { sectors: canonicalSectors } : {}),
     avatar: typeof profileData.avatar === 'string' ? profileData.avatar : (newState.profile?.avatar ?? ''),
     bio: typeof profileData.bio === 'string' ? profileData.bio : (newState.profile?.bio ?? ''),
     website: typeof profileData.website === 'string' ? profileData.website : (newState.profile?.website ?? ''),

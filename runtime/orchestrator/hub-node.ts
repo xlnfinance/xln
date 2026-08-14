@@ -39,6 +39,7 @@ import {
   RPC_MARKET_DEFAULT_DEPTH,
   RPC_MARKET_MAX_DEPTH,
 } from '../network/relay/market/snapshot';
+import { handleMarketPairCatalogRequest } from './hub/market-catalog-http';
 import { toPublicRpcUrl } from '../network/p2p/loopback-url';
 import { startParentLivenessWatch } from '../infra/process/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
@@ -2216,6 +2217,13 @@ const handleHubHttpRequest = async (
       headers: JSON_HEADERS,
     });
   }
+  const marketCatalogResponse = handleMarketPairCatalogRequest(
+    context.env,
+    request,
+    url,
+    bootstrap.entityId,
+  );
+  if (marketCatalogResponse) return marketCatalogResponse;
   const marketResponse = handleMarketSnapshotsRequest(
     context.env,
     request,

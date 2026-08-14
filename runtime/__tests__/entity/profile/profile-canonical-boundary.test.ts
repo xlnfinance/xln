@@ -143,3 +143,22 @@ test('certified route authority comes from the verified Hanko claim, never an em
   };
   expect(() => parseProfile(forged)).toThrow('GOSSIP_PROFILE_METADATA_UNKNOWN_FIELD');
 });
+
+test('signed gossip profile taxonomy accepts only canonical kinds and sorted sectors', () => {
+  const profile = buildCryptographicProfileFixture({
+    entityId: deriveSingleSignerFixtureEntityId('profile-taxonomy'),
+    signingSeed: 'profile-taxonomy',
+    name: 'taxonomy',
+  }) as unknown as { metadata: Record<string, unknown> };
+  profile.metadata['entityKind'] = 'company';
+  profile.metadata['sectors'] = ['finance', 'technology'];
+  expect(parseProfile(profile).metadata).toMatchObject({
+    entityKind: 'company',
+    sectors: ['finance', 'technology'],
+  });
+  profile.metadata['sectors'] = ['technology', 'finance'];
+  expect(() => parseProfile(profile)).toThrow('GOSSIP_PROFILE_ENTITY_SECTORS_NONCANONICAL');
+  profile.metadata['sectors'] = ['technology'];
+  profile.metadata['entityKind'] = 'tech-company';
+  expect(() => parseProfile(profile)).toThrow('GOSSIP_PROFILE_ENTITY_KIND_INVALID');
+});

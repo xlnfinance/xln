@@ -37,8 +37,42 @@ export const normalizeEntityName = (raw: unknown, entityId: string): string => {
   return `Entity ${entityId.slice(-4)}`;
 };
 
+export const PROFILE_ENTITY_KINDS = [
+  'company',
+  'foundation',
+  'government',
+  'nonprofit',
+  'person',
+  'protocol',
+] as const;
+
+export const PROFILE_ENTITY_SECTORS = [
+  'commerce',
+  'education',
+  'energy',
+  'finance',
+  'healthcare',
+  'infrastructure',
+  'media',
+  'professional-services',
+  'public-sector',
+  'real-estate',
+  'technology',
+] as const;
+
+export type ProfileEntityKind = typeof PROFILE_ENTITY_KINDS[number];
+export type ProfileEntitySector = typeof PROFILE_ENTITY_SECTORS[number];
+
+export const isProfileEntityKind = (value: unknown): value is ProfileEntityKind =>
+  typeof value === 'string' && PROFILE_ENTITY_KINDS.includes(value as ProfileEntityKind);
+
+export const isProfileEntitySector = (value: unknown): value is ProfileEntitySector =>
+  typeof value === 'string' && PROFILE_ENTITY_SECTORS.includes(value as ProfileEntitySector);
+
 type ProfileMetadata = {
   isHub: boolean;
+  entityKind?: ProfileEntityKind;
+  sectors?: ProfileEntitySector[];
   hubName?: string;
   routingFeePPM: number;
   baseFee: bigint;
@@ -174,6 +208,8 @@ const ALLOWED_PROFILE_KEYS = [
 
 const ALLOWED_PROFILE_METADATA_KEYS = [
   'isHub',
+  'entityKind',
+  'sectors',
   'hubName',
   'routingFeePPM',
   'baseFee',
@@ -269,6 +305,29 @@ const normalizeStringArray = (raw: unknown): string[] => {
     result.push(normalized);
   }
   return result;
+};
+
+const parseProfileEntityKind = (raw: unknown, entityId: string): ProfileEntityKind | undefined => {
+  if (raw === undefined) return undefined;
+  if (!isProfileEntityKind(raw)) {
+    throw new Error(`GOSSIP_PROFILE_ENTITY_KIND_INVALID: entity=${entityId}`);
+  }
+  return raw as ProfileEntityKind;
+};
+
+const parseProfileEntitySectors = (raw: unknown, entityId: string): ProfileEntitySector[] | undefined => {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 4) {
+    throw new Error(`GOSSIP_PROFILE_ENTITY_SECTORS_INVALID: entity=${entityId}`);
+  }
+  const sectors = raw.map(value => {
+    if (!isProfileEntitySector(value)) {
+      throw new Error(`GOSSIP_PROFILE_ENTITY_SECTOR_INVALID: entity=${entityId}`);
+    }
+    return value as ProfileEntitySector;
+  });
+  assertCanonicalStringList(sectors, 4, 32, `GOSSIP_PROFILE_ENTITY_SECTORS_NONCANONICAL: entity=${entityId}`);
+  return sectors;
 };
 
 const normalizeWsUrl = (raw: unknown): string | null => {
@@ -502,8 +561,12 @@ const parseProfileMetadata = (
   const rebalanceBaseFee = uint('rebalanceBaseFee', 'GOSSIP_PROFILE_REBALANCE_BASE_FEE_INVALID');
   const rebalanceLiquidityFeeBps = uint('rebalanceLiquidityFeeBps', 'GOSSIP_PROFILE_REBALANCE_LIQUIDITY_FEE_INVALID');
   const rebalanceGasFee = uint('rebalanceGasFee', 'GOSSIP_PROFILE_REBALANCE_GAS_FEE_INVALID');
+  const entityKind = parseProfileEntityKind(metadataRaw['entityKind'], entityId);
+  const sectors = parseProfileEntitySectors(metadataRaw['sectors'], entityId);
   return {
     isHub: metadataRaw['isHub'] === true,
+    ...(entityKind ? { entityKind } : {}),
+    ...(sectors ? { sectors } : {}),
     ...(hubName ? { hubName } : {}),
     routingFeePPM: parseRoutingFeePPM(metadataRaw['routingFeePPM'], entityId),
     baseFee: parseBigIntValue(metadataRaw['baseFee'] ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
@@ -614,11 +677,15 @@ const canonicalizeProfileMetadata = (
     : undefined;
   const optionalText = (key: 'rebalanceBaseFee' | 'rebalanceLiquidityFeeBps' | 'rebalanceGasFee') =>
     typeof metadata[key] === 'string' && metadata[key]!.trim() ? metadata[key]!.trim() : undefined;
+  const entityKind = parseProfileEntityKind(metadata['entityKind'], entityId);
+  const sectors = parseProfileEntitySectors(metadata['sectors'], entityId);
   return {
     ...(hubName ? { hubName } : {}),
     routingFeePPM: parseRoutingFeePPM(metadata['routingFeePPM'], entityId),
     baseFee: parseBigIntValue(metadata['baseFee'] ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
     ...(swapTakerFeeBps !== undefined ? { swapTakerFeeBps } : {}),
+    ...(entityKind ? { entityKind } : {}),
+    ...(sectors ? { sectors } : {}),
     ...(jurisdiction ? { jurisdiction } : {}),
     ...(mirrors ? { mirrors } : {}),
     ...(typeof metadata['policyVersion'] === 'number' && Number.isFinite(metadata['policyVersion']) ? { policyVersion: Math.floor(metadata['policyVersion']) } : {}),

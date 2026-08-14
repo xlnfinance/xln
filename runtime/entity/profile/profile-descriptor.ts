@@ -9,6 +9,8 @@ import { encodeCanonicalConsensusValue } from '../../protocol/serialization/cano
 import type {
   Profile,
   ProfileAccount,
+  ProfileEntityKind,
+  ProfileEntitySector,
   ProfileJurisdiction,
   ProfileTokenCapacity,
 } from './';
@@ -24,6 +26,8 @@ export type EntityProfileDescriptor = Readonly<{
   accounts: ProfileAccount[];
   metadata: Readonly<{
     isHub: boolean;
+    entityKind?: ProfileEntityKind;
+    sectors?: ProfileEntitySector[];
     routingFeePPM: number;
     baseFee: bigint;
     swapTakerFeeBps?: number;
@@ -150,6 +154,8 @@ export const buildEntityProfileDescriptor = (
     accounts,
     metadata: {
       isHub,
+      ...(state.profile.entityKind ? { entityKind: state.profile.entityKind } : {}),
+      ...(state.profile.sectors?.length ? { sectors: [...state.profile.sectors] } : {}),
       routingFeePPM: hubConfig?.routingFeePPM ?? 1,
       baseFee: hubConfig?.baseFee ?? 0n,
       ...(hubConfig?.swapTakerFeeBps !== undefined ? { swapTakerFeeBps: hubConfig.swapTakerFeeBps } : {}),
@@ -220,6 +226,8 @@ export const profileToEntityProfileDescriptor = (profile: Profile): EntityProfil
     accounts: profile.accounts,
     metadata: {
       isHub: metadata.isHub,
+      ...(metadata.entityKind ? { entityKind: metadata.entityKind } : {}),
+      ...(metadata.sectors?.length ? { sectors: [...metadata.sectors] } : {}),
       routingFeePPM: metadata.routingFeePPM,
       baseFee: metadata.baseFee,
       ...(metadata.swapTakerFeeBps !== undefined ? { swapTakerFeeBps: metadata.swapTakerFeeBps } : {}),

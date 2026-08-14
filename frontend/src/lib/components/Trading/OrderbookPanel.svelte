@@ -60,21 +60,7 @@
     sourceStatus: SourceStatus;
     updatedAt: number;
   };
-  type MarketSnapshotPayload = {
-    format?: 'exact-price-levels';
-    hubEntityId: string;
-    pairId: string;
-    depth: number;
-    displayDecimals?: number;
-    priceScale?: string;
-    bucketWidthTicks?: string | null;
-    bids: Array<{ price: bigint | string; size: bigint | string | number; total: bigint | string | number; ownerIds?: string[]; orderIds?: string[] }>;
-    asks: Array<{ price: bigint | string; size: bigint | string | number; total: bigint | string | number; ownerIds?: string[]; orderIds?: string[] }>;
-    spread: bigint | string | null;
-    spreadPercent: string;
-    hubUpdatedAt?: number;
-    updatedAt: number;
-  };
+  type MarketSnapshotPayload = Extract<MarketWireResponse, { type: 'market_snapshot' }>['payload'];
   type StreamMarketSnapshotPayload = MarketSnapshotPayload & { receivedAt: number };
   type MarketErrorMessage = Extract<MarketWireResponse, { type: 'error' }>;
   type MarketStatusMessage = Extract<MarketWireResponse, { type: 'market_status' }>;
@@ -86,18 +72,13 @@
     owners?: string[];
     accountIds?: string[];
   }
-  type SourceOrderLevel = {
-    price: bigint;
-    size: bigint;
-    sourceHubId: string;
-    ownerIds?: string[];
-  };
   type SourceStatus = 'ready' | 'syncing' | 'empty' | 'no-market' | 'error';
 
   let bids: OrderLevel[] = [];
   let asks: OrderLevel[] = [];
   let spread: bigint | null = null;
   let spreadPercent: string = '-';
+  let lastTradePriceTicks: bigint | null = null;
   let lastUpdate = 0;
   let sourceCount = 0;
   let expectedSourceCount = 0;
@@ -253,7 +234,10 @@
   }
 
   function hasFreshSnapshotFor(sourceHubId: string, pair: string): boolean {
-    const snapshot = streamSnapshots.get(streamKey(sourceHubId, pair));
+    const snapshot = Array.from(streamSnapshots.values()).find(candidate =>
+      candidate.pairId === pair
+      && candidate.sources.some(source => source.hubEntityId === sourceHubId)
+    );
     if (!snapshot) return false;
     const receivedAt = Number(snapshot.receivedAt || 0);
     return Number.isFinite(receivedAt) && Date.now() - receivedAt <= STREAM_STALE_MS;
@@ -399,8 +383,8 @@
     return `${hh}:${mm}:${ss}.${mss}`;
   }
 
-  function streamKey(hubEntityId: string, streamPairId: string): string {
-    return `${hubEntityId}:${streamPairId}`;
+  function streamKey(jurisdictionRef: string, streamPairId: string): string {
+    return `${jurisdictionRef}:${streamPairId}`;
   }
 
   function buildOrderLevels(
@@ -430,35 +414,6 @@
   function isOwnLevel(level: OrderLevel): boolean {
     if (ownEntityIdSet.size === 0) return false;
     return (level.owners || []).some((owner) => ownEntityIdSet.has(String(owner || '').trim().toLowerCase()));
-  }
-
-  function buildPerSourceOrderLevels(rawLevels: SourceOrderLevel[], side: 'bid' | 'ask'): OrderLevel[] {
-    const sorted = rawLevels
-      .filter((level) => level.price > 0n && level.size > 0n && Boolean(level.sourceHubId))
-      .sort((a, b) => {
-        if (a.price !== b.price) {
-          if (side === 'bid') return a.price > b.price ? -1 : 1;
-          return a.price < b.price ? -1 : 1;
-        }
-        return sourceLabelForSort(a.sourceHubId).localeCompare(sourceLabelForSort(b.sourceHubId));
-      })
-      .slice(0, visibleDepth());
-
-    let cumulative = 0n;
-    return sorted.map((level) => {
-      cumulative += level.size;
-      return {
-        price: level.price,
-        size: level.size,
-        total: cumulative,
-        accountIds: [level.sourceHubId],
-        owners: level.ownerIds || [],
-      };
-    });
-  }
-
-  function sourceLabelForSort(sourceId: string): string {
-    return String(sourceLabels[sourceId] || sourceId || '').trim().toLowerCase();
   }
 
   function getSelectedPriceStepTicks(): bigint {
@@ -619,6 +574,7 @@
     }
     if (nextStatus !== 'error') sourceErrorLabel = '';
     sourceStatus = nextStatus;
+    if (sourceStatus === 'no-market' || sourceStatus === 'error') lastTradePriceTicks = null;
     sourceLabel = sourceLabelFor(actualSources, requestedSources.length, sourceStatus);
     if (sourceStatus !== 'syncing') {
       clearMarketSyncTimer();
@@ -660,98 +616,44 @@
   }
 
   function applyStreamOrderbook(sources: string[], pair: string): boolean {
+    const now = Date.now();
+    const snapshot = Array.from(streamSnapshots.values()).find(candidate => {
+      if (candidate.pairId !== pair || now - candidate.receivedAt > STREAM_STALE_MS) return false;
+      const available = new Set(candidate.sources.map(source => source.hubEntityId));
+      return sources.every(source => available.has(source));
+    });
+    if (!snapshot) {
+      updateView([], [], pair, [], sources, Date.now());
+      lastTradePriceTicks = null;
+      return false;
+    }
     const bidSizes = new Map<bigint, bigint>();
     const askSizes = new Map<bigint, bigint>();
     const bidOwners = new Map<bigint, Set<string>>();
     const askOwners = new Map<bigint, Set<string>>();
     const bidSources = new Map<bigint, Set<string>>();
     const askSources = new Map<bigint, Set<string>>();
-    const rawBidLevels: SourceOrderLevel[] = [];
-    const rawAskLevels: SourceOrderLevel[] = [];
-    const actualSources: string[] = [];
-    let hasAnyLevel = false;
-    let newestSnapshotUpdate = 0;
-    let newestHubUpdate = 0;
-    const now = Date.now();
-
-    for (const sourceHubId of sources) {
-      const snapshot = streamSnapshots.get(streamKey(sourceHubId, pair));
-      if (!snapshot) continue;
-      const snapshotReceivedAt = Number(snapshot.receivedAt || 0);
-      if (!Number.isFinite(snapshotReceivedAt) || now - snapshotReceivedAt > STREAM_STALE_MS) continue;
-      actualSources.push(sourceHubId);
-      if (snapshotReceivedAt > newestSnapshotUpdate) {
-        newestSnapshotUpdate = snapshotReceivedAt;
-      }
-      const hubUpdatedAt = Number(snapshot.hubUpdatedAt || snapshot.updatedAt || 0);
-      if (Number.isFinite(hubUpdatedAt) && hubUpdatedAt > newestHubUpdate) {
-        newestHubUpdate = hubUpdatedAt;
-      }
-      for (const level of snapshot.bids || []) {
+    for (const [side, sizes, owners, sourceIds] of [
+      [snapshot.bids, bidSizes, bidOwners, bidSources],
+      [snapshot.asks, askSizes, askOwners, askSources],
+    ] as const) {
+      for (const level of side) {
         const price = toPriceTicks(level.price);
         const size = toQtyLots(level.size);
         if (price === null || size === null) continue;
-        hasAnyLevel = true;
-        const ownerIds = (level.ownerIds || [])
-          .map((ownerId) => String(ownerId || '').trim().toLowerCase())
-          .filter(Boolean);
-        rawBidLevels.push({ price, size, sourceHubId, ownerIds });
-        bidSizes.set(price, (bidSizes.get(price) || 0n) + size);
-        const ownerSet = bidOwners.get(price) || new Set<string>();
-        for (const ownerId of ownerIds) ownerSet.add(ownerId);
-        if (ownerSet.size > 0) bidOwners.set(price, ownerSet);
-        const sourcesSet = bidSources.get(price) || new Set<string>();
-        sourcesSet.add(sourceHubId);
-        bidSources.set(price, sourcesSet);
+        sizes.set(price, size);
+        owners.set(price, new Set(level.ownerIds ?? []));
+        sourceIds.set(price, new Set(level.sourceHubEntityIds ?? []));
       }
-      for (const level of snapshot.asks || []) {
-        const price = toPriceTicks(level.price);
-        const size = toQtyLots(level.size);
-        if (price === null || size === null) continue;
-        hasAnyLevel = true;
-        const ownerIds = (level.ownerIds || [])
-          .map((ownerId) => String(ownerId || '').trim().toLowerCase())
-          .filter(Boolean);
-        rawAskLevels.push({ price, size, sourceHubId, ownerIds });
-        askSizes.set(price, (askSizes.get(price) || 0n) + size);
-        const ownerSet = askOwners.get(price) || new Set<string>();
-        for (const ownerId of ownerIds) ownerSet.add(ownerId);
-        if (ownerSet.size > 0) askOwners.set(price, ownerSet);
-        const sourcesSet = askSources.get(price) || new Set<string>();
-        sourcesSet.add(sourceHubId);
-        askSources.set(price, sourcesSet);
-      }
-    }
-
-    if (actualSources.length === 0) {
-      updateView([], [], pair, [], sources, newestSnapshotUpdate || newestHubUpdate);
-      return false;
-    }
-    if (actualSources.length < sources.length) {
-      updateView([], [], pair, actualSources, sources, newestSnapshotUpdate || newestHubUpdate);
-      return true;
-    }
-    if (!hasAnyLevel) {
-      updateView([], [], pair, actualSources, sources, newestSnapshotUpdate || newestHubUpdate);
-      return true;
-    }
-    if (sources.length > 1) {
-      updateView(
-        buildPerSourceOrderLevels(rawBidLevels, 'bid'),
-        buildPerSourceOrderLevels(rawAskLevels, 'ask'),
-        pair,
-        actualSources,
-        sources,
-        newestSnapshotUpdate || newestHubUpdate,
-      );
-      return true;
     }
     applySmartOrSavedStep(bidSizes, askSizes);
     const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, bidSources, 'bid');
     const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, askSources, 'ask');
     const nextBids = buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, aggregatedBids.sources, 'bid');
     const nextAsks = buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, aggregatedAsks.sources, 'ask');
-    updateView(nextBids, nextAsks, pair, actualSources, sources, newestSnapshotUpdate || newestHubUpdate);
+    const actualSources = snapshot.sources.map(source => source.hubEntityId);
+    lastTradePriceTicks = snapshot.lastTradePrice === null ? null : BigInt(snapshot.lastTradePrice);
+    updateView(nextBids, nextAsks, pair, actualSources, sources, snapshot.updatedAt);
     return true;
   }
 
@@ -873,7 +775,6 @@
       type: 'market_subscribe',
       id: wsMessageId('market_sub'),
       replace,
-      hubEntityIds: sources,
       pairs: [normalizedPair],
       depth: subscribedRawDepth(),
     }));
@@ -966,12 +867,10 @@
       }
       if (msg?.type !== 'market_snapshot') return;
       const payload = msg.payload;
-      const hubEntityId = payload.hubEntityId.toLowerCase();
       const streamPairId = normalizePairId(payload.pairId);
       if (!streamPairId) throw new Error('MARKET_WIRE_CANONICAL_PAIR_INVARIANT');
-      streamSnapshots.set(streamKey(hubEntityId, streamPairId), {
+      streamSnapshots.set(streamKey(payload.jurisdictionRef, streamPairId), {
         ...payload,
-        hubEntityId,
         pairId: streamPairId,
         receivedAt: Date.now(),
       });
@@ -1129,6 +1028,8 @@
     <span class="spread-label">Spread</span>
     <span class="spread-value">{spread !== null ? formatPrice(spread) : '-'}</span>
     <span class="spread-percent">({spreadPercent}%)</span>
+    <span class="last-trade-label">Last</span>
+    <span class="last-trade-value">{lastTradePriceTicks !== null ? formatPrice(lastTradePriceTicks) : 'No trade'}</span>
   </div>
 
   <div class="book-container">
@@ -1401,7 +1302,7 @@
 
   .spread-row {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: auto auto 1fr auto auto;
     align-items: center;
     gap: 10px;
     padding: 6px 0 8px;
@@ -1426,8 +1327,20 @@
   }
 
   .spread-percent {
-    justify-self: end;
+    justify-self: start;
     color: var(--text-primary, #fff);
+    letter-spacing: 0.02em;
+    text-transform: none;
+  }
+
+  .last-trade-label {
+    justify-self: end;
+  }
+
+  .last-trade-value {
+    color: var(--text-primary, #fff);
+    font-size: 11px;
+    font-weight: 700;
     letter-spacing: 0.02em;
     text-transform: none;
   }
@@ -1770,7 +1683,7 @@
     }
 
     .spread-row {
-      grid-template-columns: auto auto auto;
+      grid-template-columns: auto auto 1fr auto auto;
       gap: 6px;
       font-size: 9px;
     }

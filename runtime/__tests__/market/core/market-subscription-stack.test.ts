@@ -21,6 +21,7 @@ const makeSocket = (ip = '127.0.0.1'): FakeSocket => ({
 const makeSnapshot = (hubEntityId: string, pairId: string, depth: number): MarketSnapshotPayload => ({
   format: 'exact-price-levels',
   hubEntityId,
+  jurisdictionRef: `stack:1:0x${'c'.repeat(40)}`,
   pairId,
   depth,
   displayDecimals: 4,
@@ -30,6 +31,8 @@ const makeSnapshot = (hubEntityId: string, pairId: string, depth: number): Marke
   asks: [],
   spread: null,
   spreadPercent: '-',
+  lastTradePrice: null,
+  tradeCount: 0,
   source: 'orderbookExt',
   entityHeight: 1,
   entityStateHash: null,
@@ -46,13 +49,13 @@ test('market subscription stack subscribes, sends snapshots, and cleans up count
     maxSubscriptionsPerIp: 1,
     maxCellsPerSubscription: 4,
     getClientIp: socket => socket.ip,
+    getConnectedHubEntityIds: () => [HUB_ID],
     fetchSnapshots: (hubEntityId, pairIds, depth) => pairIds.map(pairId => makeSnapshot(hubEntityId, pairId, depth)),
   });
 
   await stack.handleMessage(ws, {
     type: 'market_subscribe',
     id: 'sub-1',
-    hubEntityId: HUB_ID,
     pairs: ['3/1'],
     depth: 5,
   });
@@ -66,7 +69,7 @@ test('market subscription stack subscribes, sends snapshots, and cleans up count
   });
   expect(ws.sent[1]).toMatchObject({
     type: 'market_snapshot',
-    payload: { hubEntityId: HUB_ID, pairId: '1/3', depth: 5 },
+    payload: { source: 'relayAggregate', sourceCount: 1, pairId: '1/3', depth: 5 },
   });
   expect(stack.snapshot().total).toBe(1);
 
@@ -83,6 +86,7 @@ test('market subscription stack accepts cross-j venue ids without numeric-pair c
     maxSubscriptionsPerIp: 1,
     maxCellsPerSubscription: 4,
     getClientIp: socket => socket.ip,
+    getConnectedHubEntityIds: () => [HUB_ID],
     fetchSnapshots: (hubEntityId, pairIds, depth) => pairIds.map(pairId => makeSnapshot(hubEntityId, pairId, depth)),
   });
   const venueId = `cross:stack:1:0x${'b'.repeat(40)}:3/stack:2:0x${'c'.repeat(40)}:3`;
@@ -90,7 +94,6 @@ test('market subscription stack accepts cross-j venue ids without numeric-pair c
   await stack.handleMessage(ws, {
     type: 'market_subscribe',
     id: 'sub-cross',
-    hubEntityId: HUB_ID,
     pairs: [venueId],
     depth: 5,
   });
@@ -104,7 +107,7 @@ test('market subscription stack accepts cross-j venue ids without numeric-pair c
   });
   expect(ws.sent[1]).toMatchObject({
     type: 'market_snapshot',
-    payload: { hubEntityId: HUB_ID, pairId: venueId, depth: 5 },
+    payload: { source: 'relayAggregate', sourceCount: 1, pairId: venueId, depth: 5 },
   });
   expect(stack.snapshot().total).toBe(1);
   stack.clear();
@@ -117,6 +120,7 @@ test('market subscription stack preserves semantic cross-j venue order', async (
     maxSubscriptionsPerIp: 1,
     maxCellsPerSubscription: 4,
     getClientIp: socket => socket.ip,
+    getConnectedHubEntityIds: () => [HUB_ID],
     fetchSnapshots: (hubEntityId, pairIds, depth) => pairIds.map(pairId => makeSnapshot(hubEntityId, pairId, depth)),
   });
   const venueId = 'cross:tron:2/testnet:1';
@@ -124,7 +128,6 @@ test('market subscription stack preserves semantic cross-j venue order', async (
   await stack.handleMessage(ws, {
     type: 'market_subscribe',
     id: 'sub-cross-order',
-    hubEntityId: HUB_ID,
     pairs: [venueId],
     depth: 5,
   });
@@ -149,13 +152,13 @@ test('market subscription stack reports terminal no-market when a valid subscrip
     maxSubscriptionsPerIp: 1,
     maxCellsPerSubscription: 4,
     getClientIp: socket => socket.ip,
+    getConnectedHubEntityIds: () => [HUB_ID],
     fetchSnapshots: () => [],
   });
 
   await stack.handleMessage(ws, {
     type: 'market_subscribe',
     id: 'sub-empty',
-    hubEntityId: HUB_ID,
     pairs: ['1/2'],
     depth: 5,
   });
@@ -183,13 +186,13 @@ test('market subscription stack rejects overbroad subscriptions', async () => {
     maxSubscriptionsPerIp: 2,
     maxCellsPerSubscription: 2,
     getClientIp: socket => socket.ip,
+    getConnectedHubEntityIds: () => [HUB_ID],
     fetchSnapshots: () => [],
   });
 
   await stack.handleMessage(ws, {
     type: 'market_subscribe',
     id: 'sub-wide',
-    hubEntityIds: [HUB_ID],
     pairs: ['1/2', '1/3', '1/4'],
   });
 
@@ -214,6 +217,7 @@ test('market subscription stack reports snapshot fetch errors instead of leaving
     maxSubscriptionsPerIp: 1,
     maxCellsPerSubscription: 4,
     getClientIp: socket => socket.ip,
+    getConnectedHubEntityIds: () => [HUB_ID],
     fetchSnapshots: () => {
       const error = new Error(`Unknown market hub: ${HUB_ID}`) as Error & { code?: string };
       error.code = 'E_UNKNOWN_HUB';
@@ -225,7 +229,6 @@ test('market subscription stack reports snapshot fetch errors instead of leaving
   await stack.handleMessage(ws, {
     type: 'market_subscribe',
     id: 'sub-unknown-hub',
-    hubEntityId: HUB_ID,
     pairs: ['1/2'],
     depth: 5,
   });
@@ -257,6 +260,7 @@ test('market subscription publisher removes failing subscribers instead of repea
     maxSubscriptionsPerIp: 1,
     maxCellsPerSubscription: 4,
     getClientIp: socket => socket.ip,
+    getConnectedHubEntityIds: () => [HUB_ID],
     fetchSnapshots: (hubEntityId, pairIds, depth) => {
       fetchCalls += 1;
       if (fetchCalls > 1) {
@@ -272,7 +276,6 @@ test('market subscription publisher removes failing subscribers instead of repea
   await stack.handleMessage(ws, {
     type: 'market_subscribe',
     id: 'sub-publisher-fail',
-    hubEntityId: HUB_ID,
     pairs: ['1/2'],
     depth: 5,
   });
@@ -313,6 +316,7 @@ test('market subscription cleanup survives failure to send the structured socket
     maxSubscriptionsPerIp: 1,
     maxCellsPerSubscription: 4,
     getClientIp: socket => socket.ip,
+    getConnectedHubEntityIds: () => [HUB_ID],
     fetchSnapshots: (hubEntityId, pairIds, depth) =>
       pairIds.map(pairId => makeSnapshot(hubEntityId, pairId, depth)),
     onHandlerError: error => handlerErrors.push(error),
@@ -321,7 +325,6 @@ test('market subscription cleanup survives failure to send the structured socket
   await expect(stack.handleMessage(ws, {
     type: 'market_subscribe',
     id: 'sub-send-fail',
-    hubEntityId: HUB_ID,
     pairs: ['1/2'],
     depth: 5,
   })).resolves.toBeUndefined();

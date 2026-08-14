@@ -11,6 +11,8 @@ declare const JHeightBrand: unique symbol;
 declare const RuntimeHeightBrand: unique symbol;
 declare const EntityHeightBrand: unique symbol;
 declare const AccountHeightBrand: unique symbol;
+declare const UsdPriceTicksBrand: unique symbol;
+declare const UsdMarketCapTicksBrand: unique symbol;
 
 export type UnixMs = number & { readonly [UnixMsBrand]: typeof UnixMsBrand };
 export type UnixS = number & { readonly [UnixSBrand]: typeof UnixSBrand };
@@ -18,6 +20,8 @@ export type JHeight = number & { readonly [JHeightBrand]: typeof JHeightBrand };
 export type RuntimeHeight = number & { readonly [RuntimeHeightBrand]: typeof RuntimeHeightBrand };
 export type EntityHeight = number & { readonly [EntityHeightBrand]: typeof EntityHeightBrand };
 export type AccountHeight = number & { readonly [AccountHeightBrand]: typeof AccountHeightBrand };
+export type UsdPriceTicks = bigint & { readonly [UsdPriceTicksBrand]: typeof UsdPriceTicksBrand };
+export type UsdMarketCapTicks = bigint & { readonly [UsdMarketCapTicksBrand]: typeof UsdMarketCapTicksBrand };
 
 const requireCoordinate = (value: number, code: string): number => {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -43,6 +47,16 @@ export const toEntityHeight = (value: number): EntityHeight =>
 
 export const toAccountHeight = (value: number): AccountHeight =>
   requireCoordinate(value, 'PROTOCOL_ACCOUNT_HEIGHT_INVALID') as AccountHeight;
+
+export const toUsdPriceTicks = (value: bigint): UsdPriceTicks => {
+  if (value <= 0n) throw new Error(`PROTOCOL_USD_PRICE_TICKS_INVALID:${value}`);
+  return value as UsdPriceTicks;
+};
+
+export const toUsdMarketCapTicks = (value: bigint): UsdMarketCapTicks => {
+  if (value <= 0n) throw new Error(`PROTOCOL_USD_MARKET_CAP_TICKS_INVALID:${value}`);
+  return value as UsdMarketCapTicks;
+};
 
 /** Exact, named conversion at the off-chain/on-chain time-unit boundary. */
 export const unixMsToUnixSFloor = (value: UnixMs): UnixS =>

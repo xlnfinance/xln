@@ -269,6 +269,8 @@ export interface EntityState {
   profile: {
     name: string;
     isHub: boolean;
+    entityKind?: import('./profile').ProfileEntityKind;
+    sectors?: import('./profile').ProfileEntitySector[];
     avatar: string;
     bio: string;
     website: string;

@@ -1,4 +1,5 @@
 import type { MarketSnapshotPayload } from './snapshot';
+import type { RelayTradeObservationStore } from './aggregate';
 import type { MarketSubscriptionLimiter, MarketSubscriptionLimiterSnapshot } from './subscription-limiter';
 import type { isMarketMessageType, MarketWireRequest } from './wire';
 
@@ -18,6 +19,8 @@ export type MarketSubscriptionStackOptions<WS extends MarketSocket> = {
   maxSubscriptionsPerIp: number;
   maxCellsPerSubscription: number;
   getClientIp: (ws: WS) => string;
+  /** Canonical venue scope: every currently connected Hub on this relay. */
+  getConnectedHubEntityIds: () => string[];
   fetchSnapshots: (
     hubEntityId: string,
     pairIds: string[],
@@ -45,6 +48,7 @@ export type MarketSubscriptionContext<WS extends MarketSocket> = {
   limiter: MarketSubscriptionLimiter;
   publisherTimer: ReturnType<typeof setInterval> | null;
   publisherInFlight: boolean;
+  tradeObservations: RelayTradeObservationStore;
 };
 
 type MarketPublishMessage = { type: 'market_publish' };

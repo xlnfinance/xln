@@ -1,4 +1,6 @@
-import { RPC_MARKET_PUBLISH_MS } from './snapshot';
+import { RPC_MARKET_PUBLISH_MS, type MarketSnapshotPayload } from './snapshot';
+import { aggregateMarketSnapshots } from './aggregate';
+import { normalizeMarketEntityId } from './identifiers';
 import { encodeMarketWireMessage } from './wire';
 import type {
   MarketHandlerMessage,
@@ -78,6 +80,7 @@ export const clearSubscriptions = <WS extends MarketSocket>(
 ): void => {
   context.subscriptions.clear();
   context.limiter.clear();
+  context.tradeObservations.clear();
   if (context.publisherTimer) clearInterval(context.publisherTimer);
   context.publisherTimer = null;
   context.publisherInFlight = false;
@@ -90,18 +93,35 @@ export const sendSnapshot = async <WS extends MarketSocket>(
 ): Promise<boolean> => {
   let sentAny = false;
   const pairIds = Array.from(subscription.pairIds);
-  for (const hubEntityId of subscription.hubIds) {
-    const snapshots = await context.options.fetchSnapshots(
-      hubEntityId,
-      pairIds,
-      subscription.depth,
-    );
-    for (const payload of snapshots) {
+  const connectedHubIds = Array.from(new Set(
+    context.options.getConnectedHubEntityIds()
+      .map(normalizeMarketEntityId)
+      .filter((value): value is string => value !== null),
+  )).sort();
+  subscription.hubIds = new Set(connectedHubIds);
+  const snapshots: MarketSnapshotPayload[] = (await Promise.all(
+    connectedHubIds.map(hubEntityId => context.options.fetchSnapshots(
+      hubEntityId, pairIds, subscription.depth,
+    )),
+  )).flat();
+  const observedAt = Date.now();
+  for (const pairId of pairIds) {
+    const pairSnapshots = snapshots.filter(snapshot => snapshot.pairId === pairId);
+    if (pairSnapshots.length === 0) continue;
+    const jurisdictionRefs = Array.from(new Set(pairSnapshots.map(snapshot => snapshot.jurisdictionRef))).sort();
+    for (const jurisdictionRef of jurisdictionRefs) {
+      const scopedSnapshots = pairSnapshots.filter(snapshot => snapshot.jurisdictionRef === jurisdictionRef);
+      const payload = aggregateMarketSnapshots(
+        scopedSnapshots,
+        subscription.depth,
+        observedAt,
+        context.tradeObservations,
+      );
       subscription.seq += 1;
       ws.send(encodeMarketWireMessage({
         type: 'market_snapshot',
-        id: `market_${Date.now()}_${subscription.seq}`,
-        timestamp: Date.now(),
+        id: `market_${observedAt}_${subscription.seq}`,
+        timestamp: observedAt,
         payload,
       }));
       sentAny = true;

@@ -1,5 +1,6 @@
 import type { EntityReplica } from '../../../entity/types';
 import { ORDERBOOK_PRICE_SCALE, getBookSideLevels, type BookState } from '../../../orderbook';
+import { getJurisdictionIdentityRef } from '../../../jurisdiction/machine/jurisdiction-runtime';
 export { normalizeMarketEntityId, normalizeMarketPairId } from './identifiers';
 
 export type MarketSideLevel = {
@@ -9,11 +10,23 @@ export type MarketSideLevel = {
   orderCount?: number;
   ownerIds?: string[];
   orderIds?: string[];
+  sourceHubEntityIds?: string[];
+};
+
+export type MarketPairCatalogPayload = {
+  format: 'market-pair-catalog';
+  hubEntityId: string;
+  jurisdictionRef: string;
+  pairIds: string[];
+  entityHeight: number;
+  entityStateHash: string | null;
+  updatedAt: number;
 };
 
 export type MarketSnapshotPayload = {
   format: 'exact-price-levels';
   hubEntityId: string;
+  jurisdictionRef: string;
   pairId: string;
   depth: number;
   displayDecimals: number;
@@ -23,6 +36,10 @@ export type MarketSnapshotPayload = {
   asks: MarketSideLevel[];
   spread: string | null;
   spreadPercent: string;
+  /** Maker price of the most recently committed trade in this exact Hub book. */
+  lastTradePrice: string | null;
+  /** Monotonic committed trade counter used by the relay to detect a new trade. */
+  tradeCount: number;
   source: 'orderbookExt';
   entityHeight: number;
   entityStateHash: string | null;
@@ -80,14 +97,20 @@ export const buildMarketSnapshotForReplica = (
   const spreadPercent = bestBidTicks !== null && bestAskTicks !== null
     ? formatPercent3(Number(spreadTicks ?? 0n), Number(bestAskTicks))
     : '-';
+  const lastTradePrice = book && book.tradeCount > 0 && book.lastTradePriceTicks > 0n
+    ? book.lastTradePriceTicks.toString()
+    : null;
   const entityHeight = Number(replica?.state?.height || 0) || 0;
   const entityStateHash = typeof replica?.lockedFrame?.hash === 'string'
     ? replica.lockedFrame.hash
     : null;
   const hubUpdatedAt = Number(replica?.state?.timestamp || 0);
+  const jurisdictionRef = getJurisdictionIdentityRef(replica?.state?.config?.jurisdiction);
+  if (!jurisdictionRef) throw new Error(`MARKET_JURISDICTION_REF_MISSING:${hubEntityId}`);
   return {
     format: 'exact-price-levels',
     hubEntityId,
+    jurisdictionRef,
     pairId,
     depth: Math.max(1, Math.min(depth, RPC_MARKET_MAX_DEPTH)),
     displayDecimals: 4,
@@ -97,10 +120,35 @@ export const buildMarketSnapshotForReplica = (
     asks,
     spread: spreadTicks?.toString() ?? null,
     spreadPercent,
+    lastTradePrice,
+    tradeCount: book?.tradeCount ?? 0,
     source: 'orderbookExt',
     entityHeight,
     entityStateHash,
     hubUpdatedAt,
+    updatedAt: Date.now(),
+  };
+};
+
+export const buildMarketPairCatalogForReplica = (
+  replica: EntityReplica | null | undefined,
+  hubEntityId: string,
+): MarketPairCatalogPayload => {
+  const jurisdictionRef = getJurisdictionIdentityRef(replica?.state?.config?.jurisdiction);
+  if (!jurisdictionRef) throw new Error(`MARKET_JURISDICTION_REF_MISSING:${hubEntityId}`);
+  const books = replica?.state?.orderbookExt?.books;
+  const pairIds = books instanceof Map
+    ? Array.from(books.keys()).sort()
+    : [];
+  return {
+    format: 'market-pair-catalog',
+    hubEntityId,
+    jurisdictionRef,
+    pairIds,
+    entityHeight: Number(replica?.state?.height || 0) || 0,
+    entityStateHash: typeof replica?.lockedFrame?.hash === 'string'
+      ? replica.lockedFrame.hash
+      : null,
     updatedAt: Date.now(),
   };
 };

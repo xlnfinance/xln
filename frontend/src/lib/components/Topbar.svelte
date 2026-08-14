@@ -41,6 +41,7 @@
 
   <div class="topbar-links">
     <a href="/app" class="topbar-link" class:active={currentPath === '/app'}>App</a>
+    <a href="/market-cap" class="topbar-link" class:active={currentPath === '/market-cap'}>Market Cap</a>
     <a href="/install" class="topbar-link" class:active={currentPath === '/install'}>Install</a>
     <a href="/docs" class="topbar-link" class:active={currentPath === '/docs'}>Docs</a>
     <a href="/rcpan" class="topbar-link optional-link" class:active={currentPath === '/rcpan'}>RCPAN</a>

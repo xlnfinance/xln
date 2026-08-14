@@ -32,11 +32,19 @@ import { canonicalizeRuntimeWsAudience, deserializeWsMessage, resolveRuntimeWsMa
 import { createHelloChallengeRegistry } from '../network/p2p/auth/hello-challenge';
 import { type MarketSnapshotPayload } from '../network/relay/market/snapshot';
 import { createMarketSubscriptionStack } from '../network/relay/market/subscriptions';
+import { createMarketCapController } from '../network/relay/market/cap/market-cap-controller';
 import {
   decodeMarketWireRequest,
   encodeMarketWireMessage,
   type MarketWireRequest,
 } from '../network/relay/market/wire';
+import {
+  fetchMarketPairCatalogFromHub,
+  fetchMarketSnapshotsFromHub,
+  fetchMarketTokensFromHub,
+  listConnectedMarketHubEntityIds,
+} from './hub/market-client';
+import { handleMarketCapRequest } from './hub/market-cap-http';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from '../infra/storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { serveStaticApp } from '../api/server/static-assets';
@@ -691,6 +699,7 @@ const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
 const clearRelayState = (): void => {
   closeRelayClientsForReset(relayStore);
   relayStore.gossipProfiles.clear();
+  marketCapController.clear();
   relayStore.runtimeEncryptionKeys.clear();
   relayStore.activeHubEntityIds = [];
   clearDebugTimeline(relayStore);
@@ -792,6 +801,8 @@ const getHubChildByEntityId = (hubEntityId: string): HubChild | null => {
   }) || null;
 };
 
+const getConnectedMarketHubEntityIds = (): string[] => listConnectedMarketHubEntityIds(hubChildren);
+
 const getHealthyHubChild = (): HubChild | null =>
   hubChildren.find((candidate) =>
     candidate.proc?.exitCode === null && candidate.proc?.signalCode === null && candidate.lastHealth
@@ -808,40 +819,20 @@ const fetchHubMarketSnapshots = async (
   hubEntityId: string,
   pairIds: string[],
   depth: number,
-): Promise<MarketSnapshotPayload[]> => {
-  const params = new URLSearchParams();
-  params.set('hubEntityId', hubEntityId);
-  params.set('depth', String(depth));
-  for (const pairId of pairIds) params.append('pair', pairId);
-  const url = `http://${args.host}:${child.apiPort}/api/market/snapshots?${params.toString()}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2_000);
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    const payload = await response.json().catch(() => null) as {
-      error?: unknown;
-      code?: unknown;
-      snapshots?: unknown;
-    } | null;
-    if (!response.ok || !Array.isArray(payload?.snapshots)) {
-      const message = typeof payload?.error === 'string' && payload.error
-        ? payload.error
-        : `Market snapshots unavailable for hub: ${hubEntityId}`;
-      const error = new Error(message) as Error & { code?: string };
-      error.code = typeof payload?.code === 'string' && /^E_[A-Z0-9_]+$/.test(payload.code)
-        ? payload.code
-        : 'E_MARKET_SNAPSHOT_UNAVAILABLE';
-      throw error;
-    }
-    return payload.snapshots as MarketSnapshotPayload[];
-  } catch (error) {
-    if (error instanceof Error && (error as Error & { code?: string }).code) throw error;
-    const wrapped = new Error(`Market snapshots unavailable for hub: ${hubEntityId}`) as Error & { code?: string };
-    wrapped.code = 'E_MARKET_SNAPSHOT_UNAVAILABLE';
-    throw wrapped;
-  } finally {
-    clearTimeout(timer);
-  }
+): Promise<MarketSnapshotPayload[]> => fetchMarketSnapshotsFromHub(
+  { host: args.host, apiPort: child.apiPort, hubEntityId }, pairIds, depth,
+);
+
+const fetchHubMarketPairCatalog = async (hubEntityId: string) => {
+  const child = getHubChildByEntityId(hubEntityId);
+  if (!child) throw new Error(`MARKET_CAP_UNKNOWN_HUB:${hubEntityId}`);
+  return fetchMarketPairCatalogFromHub({ host: args.host, apiPort: child.apiPort, hubEntityId });
+};
+
+const fetchHubMarketTokens = async (hubEntityId: string) => {
+  const child = getHubChildByEntityId(hubEntityId);
+  if (!child) throw new Error(`MARKET_CAP_UNKNOWN_HUB:${hubEntityId}`);
+  return fetchMarketTokensFromHub({ host: args.host, apiPort: child.apiPort, hubEntityId });
 };
 
 const marketSubscriptionStack = createMarketSubscriptionStack<OrchestratorWebSocket>({
@@ -849,6 +840,7 @@ const marketSubscriptionStack = createMarketSubscriptionStack<OrchestratorWebSoc
   maxSubscriptionsPerIp: RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP,
   maxCellsPerSubscription: RELAY_MARKET_MAX_SUBSCRIPTION_CELLS,
   getClientIp: ws => String(ws?.data?.clientIp || 'unknown'),
+  getConnectedHubEntityIds: getConnectedMarketHubEntityIds,
   fetchSnapshots: async (hubEntityId, pairIds, depth) => {
     const child = getHubChildByEntityId(hubEntityId);
     if (!child) {
@@ -866,6 +858,20 @@ const marketSubscriptionStack = createMarketSubscriptionStack<OrchestratorWebSoc
     });
   },
 });
+
+const marketCapController = createMarketCapController({
+  relayStore,
+  getConnectedHubEntityIds: getConnectedMarketHubEntityIds,
+  fetchPairCatalog: fetchHubMarketPairCatalog,
+  fetchTokenCatalog: fetchHubMarketTokens,
+  fetchSnapshots: async (hubEntityId, pairIds, depth) => {
+    const child = getHubChildByEntityId(hubEntityId);
+    if (!child) throw new Error(`MARKET_CAP_UNKNOWN_HUB:${hubEntityId}`);
+    return fetchHubMarketSnapshots(child, hubEntityId, pairIds, depth);
+  },
+});
+
+const reportMarketCapFailure = (event: 'warn' | 'error', reason: string, message: string): void => void pushDebugEvent(relayStore, { event, reason, details: { message } });
 
 const cleanupRpcMarketSubscription = (ws: OrchestratorWebSocket): void => marketSubscriptionStack.cleanup(ws);
 
@@ -2807,6 +2813,10 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
         relayStore,
         defaultJurisdiction: resolvePrimaryHubJurisdiction(jurisdictionsConfig),
       })), { headers });
+    }
+
+    if (pathname === '/api/market-cap' && request.method === 'GET') {
+      return handleMarketCapRequest({ url, headers, controller: marketCapController, report: reportMarketCapFailure });
     }
 
     const debugResponse = await maybeHandleOrchestratorDebugApi({

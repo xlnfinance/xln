@@ -30,6 +30,7 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
     ),
     publisherTimer: null,
     publisherInFlight: false,
+    tradeObservations: new Map(),
   };
   return {
     cleanup: ws => cleanupSubscription(context, ws),

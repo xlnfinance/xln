@@ -25,6 +25,7 @@ import {
 } from '../p2p/gossip/profile-batch';
 import { redactTelemetryValue } from '../../infra/telemetry-redaction';
 import type { WebSocketSendResult } from '../websocket-send-result';
+import type { EntityMarketCapEntry } from './market/cap/market-cap';
 import {
   computeJurisdictionGossipHash,
   decodeJurisdictionGossipAnnouncement,
@@ -94,6 +95,8 @@ export type RelayStore = {
   clients: Map<string, RelayClient>;
   maxGossipProfiles: number;
   gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
+  marketCapEntries: Map<string, EntityMarketCapEntry>;
+  marketCapUpdatedAt: number;
   gossipJurisdictions: Map<string, JurisdictionGossipAnnouncement>;
   officialFoundationSignerId?: string | undefined;
   runtimeEncryptionKeys: Map<string, string>;
@@ -168,6 +171,8 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
     clients: new Map(),
     maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
     gossipProfiles: new Map(),
+    marketCapEntries: new Map(),
+    marketCapUpdatedAt: 0,
     gossipJurisdictions: new Map(),
     ...(options.officialFoundationSignerId
       ? { officialFoundationSignerId: options.officialFoundationSignerId }

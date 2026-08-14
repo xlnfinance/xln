@@ -18,31 +18,27 @@ import type {
 } from './subscription-types';
 import { encodeMarketWireMessage, type MarketWireRequest } from './wire';
 
-const valuesFor = (
-  message: MarketWireRequest,
-  kind: 'hub' | 'pair',
-): unknown[] => {
-  const plural = kind === 'hub'
-    ? ('hubEntityIds' in message ? message.hubEntityIds : undefined)
-    : ('pairs' in message ? message.pairs : undefined);
+const valuesFor = (message: MarketWireRequest): unknown[] => {
+  const plural = 'pairs' in message ? message.pairs : undefined;
   if (Array.isArray(plural)) return plural;
-  const single = kind === 'hub'
-    ? ('hubEntityId' in message ? message.hubEntityId : undefined)
-    : ('pairId' in message ? message.pairId : undefined);
+  const single = 'pairId' in message ? message.pairId : undefined;
   return single ? [single] : [];
 };
 
-const normalizedValues = (
-  message: MarketWireRequest,
-  kind: 'hub' | 'pair',
-): string[] => {
-  const normalize = kind === 'hub' ? normalizeMarketEntityId : normalizeMarketPairId;
+const normalizedPairs = (message: MarketWireRequest): string[] => {
   return Array.from(new Set(
-    valuesFor(message, kind)
-      .map(normalize)
+    valuesFor(message)
+      .map(normalizeMarketPairId)
       .filter((value): value is string => value !== null),
   ));
 };
+
+const connectedHubIds = <WS extends MarketSocket>(context: MarketSubscriptionContext<WS>): string[] =>
+  Array.from(new Set(
+    context.options.getConnectedHubEntityIds()
+      .map(normalizeMarketEntityId)
+      .filter((value): value is string => value !== null),
+  )).sort();
 
 const sendError = (
   ws: MarketSocket,
@@ -112,10 +108,10 @@ const handleSubscribe = async <WS extends MarketSocket>(
     sendError(ws, message.id, options.readyError || 'Runtime not ready');
     return;
   }
-  const hubIds = normalizedValues(message, 'hub');
-  const pairIds = normalizedValues(message, 'pair');
+  const hubIds = connectedHubIds(context);
+  const pairIds = normalizedPairs(message);
   if (hubIds.length === 0 || pairIds.length === 0) {
-    sendError(ws, message.id, 'market_subscribe requires valid hubEntityId(s) and pair(s)');
+    sendError(ws, message.id, 'market_subscribe requires connected Hubs and valid pair(s)');
     return;
   }
 
@@ -174,14 +170,12 @@ const handleUnsubscribe = <WS extends MarketSocket>(
     sendUnsubscribeAck(ws, message.id);
     return;
   }
-  const hubIds = normalizedValues(message, 'hub');
-  const pairIds = normalizedValues(message, 'pair');
-  if (hubIds.length === 0 && pairIds.length === 0) {
+  const pairIds = normalizedPairs(message);
+  if (pairIds.length === 0) {
     cleanupSubscription(context, ws);
     sendUnsubscribeAck(ws, message.id);
     return;
   }
-  hubIds.forEach(hubId => existing.hubIds.delete(hubId));
   pairIds.forEach(pairId => existing.pairIds.delete(pairId));
   if (existing.hubIds.size === 0 || existing.pairIds.size === 0) {
     cleanupSubscription(context, ws);
