@@ -37,7 +37,13 @@ import RuntimeCommandGateBanner from "../../payments/RuntimeCommandGateBanner.sv
 import EntitySelectionEmptyState from "./EntitySelectionEmptyState.svelte";
 import EntitySettingsProjectionPanel from "./EntitySettingsProjectionPanel.svelte";
 import OwnershipPanel from "../../ownership/OwnershipPanel.svelte";
-import { buildEntityShareReleaseInput, projectEntityShareTokens } from "../../ownership/ownership-flow";
+import {
+  buildControlBoardActivationInputs,
+  buildControlBoardProposalInput,
+  buildEntityShareReleaseInput,
+  projectEntityShareTokens,
+  type ControlTakeoverBoard,
+} from "../../ownership/ownership-flow";
 import { buildEntityConsensusSettingsView } from "../entity-consensus-settings";
 import { importJMachineViaRuntime, type JMachineCreateDetail } from "$lib/components/Jurisdiction/import-jmachine-runtime";
 import { OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS, faucetPendingKey, type FaucetApiResult, type PendingReserveFaucet, readFaucetApiResult, reconcilePendingReserveFaucets } from "../../account/account-faucet";
@@ -2745,6 +2751,14 @@ async function rebroadcastPendingBatch(): Promise<void> {
 }
 let ownershipBusy = false;
 let ownershipError = "";
+let ownershipTakeoverTargetId = "";
+let ownershipTakeoverStatus: null | {
+  targetEntityId: string;
+  currentBoardHash: string;
+  proposedBoardHash: string;
+  currentBlock: bigint;
+  activateAtBlock: bigint;
+} = null;
 $: ownershipIsNumbered = (() => {
   if (!activeXlnFunctions || !currentEntityValue) return false;
   try {
@@ -2761,6 +2775,137 @@ $: ownershipPendingAction = ownershipActionState?.pending ?? null;
 $: ownershipPendingRelease = ownershipPendingAction?.payload.kind === "releaseControlShares"
   ? ownershipPendingAction
   : null;
+$: ownershipTakeoverTargets = (() => {
+  const currentEntityId = currentEntityValue.toLowerCase();
+  const signerId = currentSignerId.toLowerCase();
+  const currentProvider = String(replica?.state.config.jurisdiction?.entityProviderAddress || "").toLowerCase();
+  const candidates = new Map<string, { entityId: string; name: string }>();
+  for (const candidate of activeReplicas?.values() ?? []) {
+    const entityId = String(candidate.state.entityId || candidate.entityId || "").toLowerCase();
+    const candidateSigner = String(candidate.signerId || "").toLowerCase();
+    const provider = String(candidate.state.config.jurisdiction?.entityProviderAddress || "").toLowerCase();
+    if (
+      !entityId
+      || entityId === currentEntityId
+      || candidateSigner !== signerId
+      || !candidate.state.config.validators.some((validator) => validator.toLowerCase() === signerId)
+      || !currentProvider
+      || provider !== currentProvider
+    ) continue;
+    candidates.set(entityId, {
+      entityId,
+      name: panelView.entityNames.get(entityId) || entityId,
+    });
+  }
+  return [...candidates.values()].sort((left, right) => left.name.localeCompare(right.name));
+})();
+$: if (
+  ownershipTakeoverTargetId
+  && !ownershipTakeoverTargets.some((target) => target.entityId === ownershipTakeoverTargetId)
+) {
+  ownershipTakeoverTargetId = "";
+  ownershipTakeoverStatus = null;
+}
+function requireOwnershipTakeoverTarget(targetEntityId: string): EntityReplica {
+  const normalizedTarget = toEntityId(targetEntityId);
+  const signerId = currentSignerId.toLowerCase();
+  const target = activeReplicas?.get(`${normalizedTarget}:${signerId}`)
+    ?? [...(activeReplicas?.values() ?? [])].find((candidate) => (
+      String(candidate.state.entityId || candidate.entityId || "").toLowerCase() === normalizedTarget
+      && String(candidate.signerId || "").toLowerCase() === signerId
+    ));
+  if (!target) throw new Error(`CONTROL_TAKEOVER_TARGET_REPLICA_MISSING:${normalizedTarget}:${signerId}`);
+  if (!target.state.config.validators.some((validator) => validator.toLowerCase() === signerId)) {
+    throw new Error(`CONTROL_TAKEOVER_MINORITY_VALIDATOR_REQUIRED:${normalizedTarget}:${signerId}`);
+  }
+  return target;
+}
+function buildOwnershipTakeoverBoard(target: EntityReplica): ControlTakeoverBoard {
+  const signerId = currentSignerId.toLowerCase();
+  return {
+    mode: target.state.config.mode,
+    threshold: 1n,
+    validators: [signerId],
+    shares: { [signerId]: 1n },
+  };
+}
+async function refreshOwnershipTakeover(targetEntityId: string): Promise<void> {
+  ownershipBusy = true;
+  ownershipError = "";
+  try {
+    const xln = await getXLN();
+    const env = requireRuntimeEnv(actionRuntimeEnv, "control-takeover-refresh");
+    const target = requireOwnershipTakeoverTarget(targetEntityId);
+    const jadapter = getCurrentEntityJAdapter(xln, env, "control-takeover-refresh");
+    const entity = await jadapter.entityProvider.entities(target.state.entityId);
+    ownershipTakeoverTargetId = target.state.entityId.toLowerCase();
+    ownershipTakeoverStatus = {
+      targetEntityId: ownershipTakeoverTargetId,
+      currentBoardHash: String(entity.currentBoardHash).toLowerCase(),
+      proposedBoardHash: String(entity.proposedBoardHash).toLowerCase(),
+      currentBlock: BigInt(await jadapter.provider.getBlockNumber()),
+      activateAtBlock: BigInt(entity.activateAtBlock),
+    };
+  } catch (error) {
+    ownershipError = toErrorMessage(error, "CONTROL takeover status failed");
+    toasts.error(ownershipError);
+  } finally {
+    ownershipBusy = false;
+  }
+}
+async function proposeOwnershipTakeover(targetEntityId: string): Promise<void> {
+  ownershipBusy = true;
+  ownershipError = "";
+  try {
+    const xln = await getXLN();
+    const env = requireRuntimeEnv(actionRuntimeEnv, "control-takeover-propose");
+    const target = requireOwnershipTakeoverTarget(targetEntityId);
+    const signerId = resolveEntitySigner(currentEntityValue, "control-takeover-propose").toLowerCase();
+    const board = buildOwnershipTakeoverBoard(target);
+    const boardHash = xln.hashBoard(xln.encodeBoard({
+      ...board,
+      ...(target.state.config.jurisdiction
+        ? { jurisdiction: structuredClone(target.state.config.jurisdiction) }
+        : {}),
+    }, env)).toLowerCase();
+    const jadapter = getCurrentEntityJAdapter(xln, env, "control-takeover-propose");
+    const actionNonce = BigInt(await jadapter.entityProvider.boardActionNonces(target.state.entityId)) + 1n;
+    await submitEntityInputs([buildControlBoardProposalInput({
+      shareholderEntityId: toEntityId(currentEntityValue),
+      signerId,
+      targetEntityId: toEntityId(target.state.entityId),
+      newBoardHash: boardHash,
+      actionNonce,
+    })]);
+    toasts.info("CONTROL board proposal submitted through Entity consensus");
+  } catch (error) {
+    ownershipError = toErrorMessage(error, "CONTROL board proposal failed");
+    toasts.error(ownershipError);
+  } finally {
+    ownershipBusy = false;
+  }
+}
+async function activateOwnershipTakeover(targetEntityId: string): Promise<void> {
+  ownershipBusy = true;
+  ownershipError = "";
+  try {
+    const target = requireOwnershipTakeoverTarget(targetEntityId);
+    const signerId = resolveEntitySigner(currentEntityValue, "control-takeover-activate").toLowerCase();
+    const board = buildOwnershipTakeoverBoard(target);
+    await submitEntityInputs([...buildControlBoardActivationInputs({
+      shareholderEntityId: toEntityId(currentEntityValue),
+      targetEntityId: toEntityId(target.state.entityId),
+      signerId,
+      board,
+    })]);
+    toasts.info("Board activation and state handover submitted");
+  } catch (error) {
+    ownershipError = toErrorMessage(error, "Board activation failed");
+    toasts.error(ownershipError);
+  } finally {
+    ownershipBusy = false;
+  }
+}
 async function releaseEntityTreasuryShares(): Promise<void> {
   if (!activeXlnFunctions) throw new Error("ENTITY_SHARE_RUNTIME_MODULE_UNAVAILABLE");
   const entityId = toEntityId(currentEntityValue);
@@ -2949,7 +3094,13 @@ $: if (typeof window !== "undefined") {
             releaseBlocked={ownershipPendingAction !== null && ownershipPendingRelease === null}
             busy={ownershipBusy}
             error={ownershipError}
+            takeoverTargets={ownershipTakeoverTargets}
+            takeoverTargetId={ownershipTakeoverTargetId}
+            takeoverStatus={ownershipTakeoverStatus}
             onReleaseShares={releaseEntityTreasuryShares}
+            onRefreshTakeover={refreshOwnershipTakeover}
+            onProposeTakeover={proposeOwnershipTakeover}
+            onActivateTakeover={activateOwnershipTakeover}
           />
         {:else if activeTab === 'settings'}
           <EntitySettingsProjectionPanel

@@ -28,6 +28,11 @@ test('Entity ownership keeps share issuance optional and separate from hub listi
   await expect(page.getByText(/Both classes first land in this Entity's Depository reserve/)).toBeVisible();
   await expect(page.getByText(/open an Account with the chosen hub/i)).toHaveCount(0);
   await expect(page.getByRole('button', { name: /join hub|create market|list shares/i })).toHaveCount(0);
+  await expect(page.getByTestId('ownership-control-takeover')).toBeVisible();
+  await expect(page.getByText('CONTROL governance', { exact: true })).toBeVisible();
+  await expect(page.getByText(/First join the target board as a minority validator/i)).toBeVisible();
+  await expect(page.getByTestId('ownership-takeover-propose')).toHaveCount(0);
+  await expect(page.getByTestId('ownership-takeover-activate')).toHaveCount(0);
 
   for (const viewport of [
     { name: 'iphone', width: 393, height: 852 },

@@ -652,6 +652,19 @@ const throwScenarioConvergenceTimeout = (
   label: string,
   maxCycles: number,
 ): never => {
+  const pendingInputJobs = (env.runtimeMempool?.entityInputs ?? []).flatMap(input =>
+    (input.entityTxs ?? []).flatMap(tx => tx.type === 'scheduledWake'
+      ? tx.data.jobs.map(job => `${input.entityId.slice(-4)}:${job.kind}:${job.id}@${job.dueAt}`)
+      : [`${input.entityId.slice(-4)}:${tx.type}`])
+  ).sort();
+  const boardResealMarkers = [...env.state.eReplicas.values()].flatMap(replica =>
+    [...replica.state.accounts.entries()].flatMap(([counterpartyId, account]) => {
+      const marker = account.boardResealMigration;
+      return marker
+        ? [`${replica.entityId.slice(-4)}@${replica.signerId.slice(-4)}>${counterpartyId.slice(-4)}:${marker.reason}`]
+        : [];
+    })
+  ).sort();
   const entityBacklog = [...env.state.eReplicas.values()]
     .flatMap(replica => {
       const pendingAccounts = [...replica.state.accounts.values()]
@@ -672,6 +685,8 @@ const throwScenarioConvergenceTimeout = (
     `self=${String(env.runtimeId ?? 'none').slice(0, 10)},` +
     `outputs=${env.pendingOutputs?.length ?? 0},network=${env.pendingNetworkOutputs?.length ?? 0},` +
     `inbox=${env.networkInbox?.length ?? 0},inputs=${env.runtimeMempool?.entityInputs?.length ?? 0},` +
+    `inputJobs=[${pendingInputJobs.join(',')}],` +
+    `boardReseals=[${boardResealMarkers.join(',')}],` +
     `networkLanes=[${pendingNetworkDiagnostics(env)}],entities=[${entityBacklog.join(';')}]`,
   );
 };

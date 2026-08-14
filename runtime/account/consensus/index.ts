@@ -280,7 +280,7 @@ const replayIncomingFrameOnClone = async (
       true,
       context,
       jClaimSession,
-      securityContext.counterpartyCertifiedBoardHash,
+      securityContext.counterpartyCertifiedBoard?.boardHash,
       {
         timestamp: securityContext.entityTimestamp,
         jHeight: securityContext.finalizedJHeight,
@@ -410,7 +410,7 @@ const reexecuteIncomingFrame = async (
       false,
       context,
       committedJClaims,
-      securityContext.counterpartyCertifiedBoardHash,
+      securityContext.counterpartyCertifiedBoard?.boardHash,
       {
         timestamp: securityContext.entityTimestamp,
         jHeight: securityContext.finalizedJHeight,

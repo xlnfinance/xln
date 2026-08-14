@@ -12,6 +12,7 @@ import { buildSignedEntityCommand } from '../../entity/command';
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 import { signedEntityCommandTx } from '../../entity/command/command-codec';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
+import { materializeEntityInfraContext } from '../../entity/consensus/proposal/infra-context';
 import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
 import { getEntityLeaderState } from '../../entity/consensus/leader';
 import type { EntityFrame } from '../../entity/types';
@@ -178,10 +179,10 @@ export const installPersistedProposalValidator = async (): Promise<{
   return { env, signerId };
 };
 
-export const buildAuthenticatedInvalidProposal = (
+export const buildAuthenticatedInvalidProposal = async (
   env: RuntimeReplica,
   signerId: string,
-): EntityFrame => {
+): Promise<EntityFrame> => {
   const entityId = durableProposalFixture.entityId;
   const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
   if (!replica) throw new Error('TEST_PROPOSAL_REPLICA_MISSING');
@@ -212,6 +213,11 @@ export const buildAuthenticatedInvalidProposal = (
     stateRoot,
     authorityRoot,
   );
+  const entityContext = await materializeEntityInfraContext(
+    env,
+    { ...replica, signerId: proposerId },
+    txs,
+  );
   return {
     height,
     parentFrameHash: 'genesis',
@@ -220,6 +226,66 @@ export const buildAuthenticatedInvalidProposal = (
     timestamp,
     txs,
     events: [],
+    entityContext,
+    hash,
+    leader: {
+      proposerSignerId: leader.activeValidatorId,
+      view: leader.view,
+    },
+    hashesToSign: buildEntityHashesToSign(entityId, height, hash),
+    collectedSigs: new Map([[
+      proposerId,
+      [signAccountFrame(proposer.env, proposerId, hash)],
+    ]]),
+  };
+};
+
+export const buildMalformedBoardHandoverProposal = async (
+  env: RuntimeReplica,
+  signerId: string,
+): Promise<EntityFrame> => {
+  const entityId = durableProposalFixture.entityId;
+  const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
+  if (!replica) throw new Error('TEST_PROPOSAL_REPLICA_MISSING');
+  const proposer = durableProposalFixture.createValidator('1');
+  const proposerId = durableProposalFixture.validators[0]!;
+  const board = {
+    mode: replica.state.config.mode,
+    threshold: replica.state.config.threshold,
+    validators: [...replica.state.config.validators],
+    shares: { ...replica.state.config.shares },
+  };
+  const handover = { type: 'boardHandover', data: { board } } as const;
+  const txs = [handover, structuredClone(handover)];
+  const leader = getEntityLeaderState(replica.state);
+  const stateRoot = `0x${'61'.repeat(32)}`;
+  const authorityRoot = `0x${'62'.repeat(32)}`;
+  const height = replica.state.height + 1;
+  const timestamp = env.state.timestamp;
+  const hash = createEntityFrameHashFromStateRoot(
+    'genesis',
+    height,
+    timestamp,
+    txs,
+    [],
+    entityId,
+    stateRoot,
+    authorityRoot,
+  );
+  const entityContext = await materializeEntityInfraContext(
+    env,
+    { ...replica, signerId: proposerId },
+    txs,
+  );
+  return {
+    height,
+    parentFrameHash: 'genesis',
+    stateRoot,
+    authorityRoot,
+    timestamp,
+    txs,
+    events: [],
+    entityContext,
     hash,
     leader: {
       proposerSignerId: leader.activeValidatorId,

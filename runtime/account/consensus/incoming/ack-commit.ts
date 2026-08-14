@@ -103,9 +103,9 @@ const verifyPendingAckCertificate = async (
     ack.frameHanko,
     frameHash,
     expectedEntity,
-    securityContext.counterpartyCertifiedBoardHash
+    securityContext.counterpartyCertifiedBoard
       ? {
-          registeredBoardHash: securityContext.counterpartyCertifiedBoardHash,
+          registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash,
           allowPreviousBoard: false,
         }
       : { allowPreviousBoard: false },

@@ -1,3 +1,8 @@
+/**
+ * Computes the bilateral Account state root and its deterministic nested Merkle maps.
+ * Key projections: money, locks, disputes, Hankos, and lifecycle evidence exactly once.
+ * Human-audit importance: 100/100 — both peers and on-chain recovery trust this commitment.
+ */
 import { ethers } from 'ethers';
 
 import type { AccountReplica, AccountState, AccountStateDomain } from '../../types/account';

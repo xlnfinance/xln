@@ -47,4 +47,6 @@ export type ApplyEntityTxsInOrderContext = {
   authorizedCollective?: true | undefined;
   authorizedCertifiedOutput?: true | undefined;
   authorizedRuntimeOutput?: true | undefined;
+  /** Exact authority proven from this frame's contiguous BoardActivated chain. */
+  authorizedBoardHandoverConfig?: EntityState['config'];
 };

@@ -483,6 +483,19 @@ describe('production startup wiring', () => {
     expect(generator).toContain('sha256(chunk.content)');
     expect(generator).toContain('source=${file.sourceSha256}');
     expect(generator).not.toContain("'runtime/input-queue.ts'");
+
+    const criticalList = generator.match(/const CORE_CRITICAL_RUNTIME_FILES = \[([\s\S]*?)\n\];/);
+    if (!criticalList?.[1]) throw new Error('AUDIT_CONTEXT_CRITICAL_LIST_MISSING');
+    const criticalFiles = [...criticalList[1].matchAll(/'([^']+)'/g)]
+      .map((match) => match[1])
+      .filter((value): value is string => typeof value === 'string');
+    expect(criticalFiles.length).toBeGreaterThanOrEqual(15);
+    for (const relativePath of criticalFiles) {
+      const source = readFileSync(join(repoRoot, 'runtime', relativePath), 'utf8');
+      const header = source.match(/^\/\*\*([\s\S]*?)\*\//)?.[1] ?? '';
+      expect(header).toContain('Human-audit importance:');
+      expect(header).toMatch(/Key (entrypoint|entrypoints|surface|builders|checks|functions|paths|projection|projections):/);
+    }
   });
 
   test('start-server exposes the secondary Tron RPC to the orchestrator and children', () => {

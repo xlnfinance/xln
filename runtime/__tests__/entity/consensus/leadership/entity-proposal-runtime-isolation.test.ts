@@ -14,10 +14,12 @@ import {
   handleInboundP2PEntityInputs,
   processRuntime,
   readPersistedFrameJournal,
+  createEmptyEnv,
 } from '../../../../runtime';
 import { signRuntimeEntityInputsEnvelope } from '../../../../runtime/entity-input/entity-input-envelope-auth.ts';
 import {
   buildAuthenticatedInvalidProposal,
+  buildMalformedBoardHandoverProposal,
   cleanupPersistedProposalFixtures,
   deliverEncryptedProposal,
   durableProposalFixture,
@@ -63,7 +65,7 @@ describe('Entity proposal Runtime isolation', () => {
   test('encrypted wire rejection leaves no frame, candidate, CAS, or restart residue', async () => {
     const { env, signerId } = await installPersistedProposalValidator();
     expect(env.state.height).toBe(1);
-    const frame = buildAuthenticatedInvalidProposal(env, signerId);
+    const frame = await buildAuthenticatedInvalidProposal(env, signerId);
     const { inboundResults, remoteRuntimeId, remoteEnv } = await deliverEncryptedProposal(env, frame);
     expect(inboundResults).toEqual([expect.objectContaining({ kind: 'queued' })]);
 
@@ -117,5 +119,37 @@ describe('Entity proposal Runtime isolation', () => {
     expect(restoredReplica.leaderVotes?.has(voterId)).toBe(true);
     expect(getConsumptionNodeStore(restored).size).toBe(consumptionBefore);
     expect(getAccountJClaimNodeStore(restored).size).toBe(claimsBefore);
+  }, 30_000);
+
+  test('remote duplicate board handover is discarded without halting Runtime', async () => {
+    const { env, signerId } = await installPersistedProposalValidator();
+    const frame = await buildMalformedBoardHandoverProposal(env, signerId);
+    const remoteEnv = createEmptyEnv('duplicate-board-handover-remote');
+    const remoteRuntimeId = remoteEnv.runtimeId!;
+    const inbound = handleInboundP2PEntityInputs(
+      env,
+      remoteRuntimeId,
+      signRuntimeEntityInputsEnvelope(remoteEnv, env.runtimeId!, {
+        sourceRuntimeId: remoteRuntimeId,
+        sourceRuntimeHeight: 1,
+        sourceRuntimeTimestamp: 1_000,
+        entityInputs: [{
+          entityId: durableProposalFixture.entityId,
+          signerId,
+          runtimeId: env.runtimeId!,
+          proposedFrame: frame,
+        }],
+      }),
+    );
+    expect(inbound.kind).toBe('queued');
+
+    await processRuntime(env, []);
+    const replica = env.state.eReplicas.get(`${durableProposalFixture.entityId}:${signerId}`)!;
+    expect(env.infrastructure?.halted).toBe(false);
+    expect(env.state.height).toBe(1);
+    expect(replica.state.height).toBe(0);
+    expect(replica.proposal).toBeUndefined();
+    expect(replica.candidate).toBeUndefined();
+    expect(await readPersistedFrameJournal(env, 2)).toBeNull();
   }, 30_000);
 });

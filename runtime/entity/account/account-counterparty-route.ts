@@ -6,7 +6,6 @@ import { verifyCanonicalHanko } from '../../hanko/claims';
 import { invalidHanko } from '../../hanko/codec';
 import { resolveObserverCertifiedBoardRecord } from '../../jurisdiction/machine/board-registry';
 import type { EntityState } from '../types';
-import { toUnixMs, unixMsToUnixSFloor } from '../../protocol/units';
 
 const normalize = (value: string): string => String(value || '').trim().toLowerCase();
 
@@ -33,7 +32,6 @@ export const resolveObserverCertifiedAccountCounterpartyProposer = (
     throw new Error(`ACCOUNT_COUNTERPARTY_ROUTE_FRAME_HASH_INVALID:${frameHash || 'missing'}`);
   }
   const expectedTarget = ethers.toBeHex(BigInt(counterparty), 32).toLowerCase() as `0x${string}`;
-  const timestampSeconds = unixMsToUnixSFloor(toUnixMs(observerState.timestamp));
   const verified = verifyCanonicalHanko({
     hanko,
     digest: frameHash,
@@ -41,10 +39,11 @@ export const resolveObserverCertifiedAccountCounterpartyProposer = (
     validateBoardAuthority: (entityId, reconstructedBoardHash) => {
       const record = resolveObserverCertifiedBoardRecord(observerState, store, entityId);
       if (!record) return false;
-      if (record.boardHash === reconstructedBoardHash) return true;
-      return record.previousBoardHash !== ethers.ZeroHash &&
-        record.previousBoardHash === reconstructedBoardHash &&
-        timestampSeconds < record.previousBoardValidUntil;
+      // Transport follows current corporate authority immediately after the
+      // certified BoardActivated event. The previous board remains valid only
+      // for historical dispute evidence; it must never receive fresh Account
+      // protocol traffic during its seven-day court grace period.
+      return record.boardHash === reconstructedBoardHash;
     },
   });
   const target = verified.claims.at(-1);

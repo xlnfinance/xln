@@ -4,6 +4,10 @@ import type { EntityRuntimeContext } from '../../runtime-context';
 import type { ConsensusConfig, EntityState } from '../../types';
 import { encodeBoard, hashBoard } from '../../factory';
 import { validateConsensusConfig } from '../config-validation';
+import {
+  FailureDispositionError,
+  rejectFailure,
+} from '../../../protocol/errors/failure-taxonomy';
 
 type BoardHandoverTx = Extract<EntityTx, { type: 'boardHandover' }>;
 type JEventTx = Extract<EntityTx, { type: 'j_event' }>;
@@ -12,9 +16,13 @@ type BoardAuthorityState = Pick<EntityState, 'entityId' | 'height' | 'config'>;
 
 const canonicalSigner = (value: string): string => value.trim().toLowerCase();
 
+const rejectBoardHandover = (code: string, detail?: string): never => {
+  throw rejectFailure(code, detail ? `${code}:${detail}` : code);
+};
+
 const requireFirstValidator = (config: ConsensusConfig): string => {
   const validator = config.validators[0];
-  if (!validator) throw new Error('BOARD_HANDOVER_VALIDATOR_MISSING');
+  if (!validator) return rejectBoardHandover('BOARD_HANDOVER_VALIDATOR_MISSING');
   return validator;
 };
 
@@ -22,23 +30,35 @@ const assertCanonicalConfig = (
   state: BoardAuthorityState,
   rawBoard: BoardHandoverTx['data']['board'],
 ): ConsensusConfig => {
-  const config = validateConsensusConfig({
-    ...rawBoard,
-    ...(state.config.jurisdiction
-      ? { jurisdiction: structuredClone(state.config.jurisdiction) }
-      : {}),
-  }, 'BOARD_HANDOVER_CONFIG');
+  let config: ConsensusConfig;
+  try {
+    config = validateConsensusConfig({
+      ...rawBoard,
+      ...(state.config.jurisdiction
+        ? { jurisdiction: structuredClone(state.config.jurisdiction) }
+        : {}),
+    }, 'BOARD_HANDOVER_CONFIG');
+  } catch (error) {
+    if (error instanceof FailureDispositionError) throw error;
+    return rejectBoardHandover(
+      'BOARD_HANDOVER_CONFIG_INVALID',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
   if (config.mode !== state.config.mode) {
-    throw new Error(`BOARD_HANDOVER_MODE_CHANGE_FORBIDDEN:${state.config.mode}:${config.mode}`);
+    return rejectBoardHandover(
+      'BOARD_HANDOVER_MODE_CHANGE_FORBIDDEN',
+      `${state.config.mode}:${config.mode}`,
+    );
   }
   for (const validator of config.validators) {
     if (validator !== canonicalSigner(validator)) {
-      throw new Error(`BOARD_HANDOVER_VALIDATOR_NON_CANONICAL:${validator}`);
+      return rejectBoardHandover('BOARD_HANDOVER_VALIDATOR_NON_CANONICAL', validator);
     }
   }
   for (const signer of Object.keys(config.shares)) {
     if (signer !== canonicalSigner(signer)) {
-      throw new Error(`BOARD_HANDOVER_SHARE_SIGNER_NON_CANONICAL:${signer}`);
+      return rejectBoardHandover('BOARD_HANDOVER_SHARE_SIGNER_NON_CANONICAL', signer);
     }
   }
   return structuredClone(config);
@@ -58,12 +78,17 @@ const selfBoardActivations = (
 const requireSingleHandoverTx = (txs: readonly EntityTx[]): BoardHandoverTx | null => {
   const handovers = txs.filter((tx): tx is BoardHandoverTx => tx.type === 'boardHandover');
   if (handovers.length === 0) return null;
-  if (handovers.length !== 1) throw new Error(`BOARD_HANDOVER_COUNT_INVALID:${handovers.length}`);
+  if (handovers.length !== 1) {
+    return rejectBoardHandover('BOARD_HANDOVER_COUNT_INVALID', String(handovers.length));
+  }
   if (txs.length !== 2 || txs[0]?.type !== 'j_event' || txs[1]?.type !== 'boardHandover') {
-    throw new Error(`BOARD_HANDOVER_FRAME_SHAPE_INVALID:${txs.map(tx => tx.type).join(',')}`);
+    return rejectBoardHandover(
+      'BOARD_HANDOVER_FRAME_SHAPE_INVALID',
+      txs.map(tx => tx.type).join(','),
+    );
   }
   const handover = handovers[0];
-  if (!handover) throw new Error('BOARD_HANDOVER_MISSING');
+  if (!handover) return rejectBoardHandover('BOARD_HANDOVER_MISSING');
   return handover;
 };
 
@@ -80,18 +105,26 @@ export const getBoardHandoverFrameConfig = (
   if (!handover) return null;
   const config = assertCanonicalConfig(state, handover.data.board);
   const activations = selfBoardActivations(state, txs[0] as JEventTx);
-  if (activations.length === 0) throw new Error('BOARD_HANDOVER_ACTIVATION_MISSING');
+  if (activations.length === 0) {
+    return rejectBoardHandover('BOARD_HANDOVER_ACTIVATION_MISSING');
+  }
   let expectedPrevious = hashBoard(encodeBoard(state.config, env)).toLowerCase();
   for (const activation of activations) {
     const receivedPrevious = activation.data.previousBoardHash.toLowerCase();
     if (receivedPrevious !== expectedPrevious) {
-      throw new Error(`BOARD_HANDOVER_ACTIVATION_CHAIN_INVALID:${receivedPrevious}:${expectedPrevious}`);
+      return rejectBoardHandover(
+        'BOARD_HANDOVER_ACTIVATION_CHAIN_INVALID',
+        `${receivedPrevious}:${expectedPrevious}`,
+      );
     }
     expectedPrevious = activation.data.newBoardHash.toLowerCase();
   }
   const configHash = hashBoard(encodeBoard(config, env)).toLowerCase();
   if (configHash !== expectedPrevious) {
-    throw new Error(`BOARD_HANDOVER_CONFIG_HASH_MISMATCH:${configHash}:${expectedPrevious}`);
+    return rejectBoardHandover(
+      'BOARD_HANDOVER_CONFIG_HASH_MISMATCH',
+      `${configHash}:${expectedPrevious}`,
+    );
   }
   return config;
 };
@@ -127,9 +160,11 @@ export const getPendingBoardHandoverConfig = (
 ): ConsensusConfig | null => {
   const handovers = txs.filter((tx): tx is BoardHandoverTx => tx.type === 'boardHandover');
   if (handovers.length === 0) return null;
-  if (handovers.length !== 1) throw new Error(`BOARD_HANDOVER_COUNT_INVALID:${handovers.length}`);
+  if (handovers.length !== 1) {
+    return rejectBoardHandover('BOARD_HANDOVER_COUNT_INVALID', String(handovers.length));
+  }
   const handover = handovers[0];
-  if (!handover) throw new Error('BOARD_HANDOVER_MISSING');
+  if (!handover) return rejectBoardHandover('BOARD_HANDOVER_MISSING');
   return assertCanonicalConfig(state, handover.data.board);
 };
 

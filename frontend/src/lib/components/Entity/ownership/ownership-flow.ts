@@ -1,4 +1,10 @@
-import type { EntityId, EntityTx, RoutedEntityInput } from '@xln/runtime/api/public/runtime-module';
+import type {
+  ConsensusConfig,
+  EntityId,
+  EntityTx,
+  RoutedEntityInput,
+} from '@xln/runtime/api/public/runtime-module';
+import { toEntityId } from '@xln/runtime/api/public/runtime-module';
 
 export const ENTITY_SHARE_SUPPLY = 100_000_000_000n;
 export const ENTITY_DIVIDEND_TOKEN_FLAG = 1n << 255n;
@@ -96,4 +102,76 @@ export const buildEntityShareReleaseInput = (input: Readonly<{
     data: { recipientAddress: depositoryAddress, controlAmount, dividendAmount, purpose },
   };
   return { entityId: input.entityId, signerId, entityTxs: [release] };
+};
+
+export type ControlTakeoverBoard = Pick<
+  ConsensusConfig,
+  'mode' | 'threshold' | 'validators' | 'shares'
+>;
+
+const requireSignerId = (value: string): string => {
+  const signerId = value.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(signerId)) {
+    throw new Error(`CONTROL_TAKEOVER_SIGNER_INVALID:${signerId || 'missing'}`);
+  }
+  return signerId;
+};
+
+const requireBoardHash = (value: string): string => {
+  const boardHash = value.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(boardHash)) {
+    throw new Error(`CONTROL_TAKEOVER_BOARD_HASH_INVALID:${boardHash || 'missing'}`);
+  }
+  return boardHash;
+};
+
+export const buildControlBoardProposalInput = (input: Readonly<{
+  shareholderEntityId: EntityId;
+  signerId: string;
+  targetEntityId: EntityId;
+  newBoardHash: string;
+  actionNonce: bigint;
+}>): RoutedEntityInput => {
+  const signerId = requireSignerId(input.signerId);
+  const targetEntityId = toEntityId(input.targetEntityId);
+  const newBoardHash = requireBoardHash(input.newBoardHash);
+  if (typeof input.actionNonce !== 'bigint' || input.actionNonce <= 0n) {
+    throw new Error(`CONTROL_TAKEOVER_ACTION_NONCE_INVALID:${String(input.actionNonce)}`);
+  }
+  return {
+    entityId: toEntityId(input.shareholderEntityId),
+    signerId,
+    entityTxs: [{
+      type: 'entityProviderProposeControlBoard',
+      data: { targetEntityId, newBoardHash, actionNonce: input.actionNonce },
+    }],
+  };
+};
+
+export const buildControlBoardActivationInputs = (input: Readonly<{
+  shareholderEntityId: EntityId;
+  targetEntityId: EntityId;
+  signerId: string;
+  board: ControlTakeoverBoard;
+}>): readonly RoutedEntityInput[] => {
+  const signerId = requireSignerId(input.signerId);
+  const shareholderEntityId = toEntityId(input.shareholderEntityId);
+  const targetEntityId = toEntityId(input.targetEntityId);
+  if (
+    input.board.threshold !== 1n
+    || input.board.validators.length !== 1
+    || input.board.validators[0]?.toLowerCase() !== signerId
+    || input.board.shares[signerId] !== 1n
+  ) {
+    throw new Error('CONTROL_TAKEOVER_SINGLE_SUCCESSOR_BOARD_REQUIRED');
+  }
+  return [{
+    entityId: targetEntityId,
+    signerId,
+    entityTxs: [{ type: 'boardHandover', data: { board: structuredClone(input.board) } }],
+  }, {
+    entityId: shareholderEntityId,
+    signerId,
+    entityTxs: [{ type: 'entityProviderActivateBoard', data: { targetEntityId } }],
+  }];
 };

@@ -8,6 +8,7 @@ import type {
   FunctionFragment,
   Result,
   Interface,
+  EventFragment,
   ContractRunner,
   ContractMethod,
   Listener,
@@ -16,6 +17,7 @@ import type {
   TypedContractEvent,
   TypedDeferredTopicFilter,
   TypedEventLog,
+  TypedLogDescription,
   TypedListener,
   TypedContractMethod,
 } from "../../common";
@@ -126,6 +128,8 @@ export interface DeltaTransformerInterface extends Interface {
       | "revealSecret"
   ): FunctionFragment;
 
+  getEvent(nameOrSignatureOrTopic: "SecretRevealed"): EventFragment;
+
   encodeFunctionData(
     functionFragment: "applyBatch",
     values: [
@@ -194,6 +198,19 @@ export interface DeltaTransformerInterface extends Interface {
     functionFragment: "revealSecret",
     data: BytesLike
   ): Result;
+}
+
+export namespace SecretRevealedEvent {
+  export type InputTuple = [hashlock: BytesLike, secret: BytesLike];
+  export type OutputTuple = [hashlock: string, secret: string];
+  export interface OutputObject {
+    hashlock: string;
+    secret: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
 }
 
 export interface DeltaTransformer extends BaseContract {
@@ -335,5 +352,24 @@ export interface DeltaTransformer extends BaseContract {
     nameOrSignature: "revealSecret"
   ): TypedContractMethod<[secret: BytesLike], [void], "nonpayable">;
 
-  filters: {};
+  getEvent(
+    key: "SecretRevealed"
+  ): TypedContractEvent<
+    SecretRevealedEvent.InputTuple,
+    SecretRevealedEvent.OutputTuple,
+    SecretRevealedEvent.OutputObject
+  >;
+
+  filters: {
+    "SecretRevealed(bytes32,bytes32)": TypedContractEvent<
+      SecretRevealedEvent.InputTuple,
+      SecretRevealedEvent.OutputTuple,
+      SecretRevealedEvent.OutputObject
+    >;
+    SecretRevealed: TypedContractEvent<
+      SecretRevealedEvent.InputTuple,
+      SecretRevealedEvent.OutputTuple,
+      SecretRevealedEvent.OutputObject
+    >;
+  };
 }

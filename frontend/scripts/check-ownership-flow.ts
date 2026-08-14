@@ -3,6 +3,8 @@ import { toEntityId } from '../../runtime/protocol/identity';
 import {
   ENTITY_DIVIDEND_TOKEN_FLAG,
   ENTITY_SHARE_SUPPLY,
+  buildControlBoardActivationInputs,
+  buildControlBoardProposalInput,
   buildEntityShareReleaseInput,
   getEntityShareExternalTokenIds,
   projectEntityShareTokens,
@@ -45,6 +47,46 @@ assert.deepEqual(release.entityTxs, [{
   },
 }]);
 
+const signerId = '0x1111111111111111111111111111111111111111';
+const targetEntityId = toEntityId(`0x${'0'.repeat(63)}2`);
+const proposal = buildControlBoardProposalInput({
+  shareholderEntityId: entityId,
+  signerId,
+  targetEntityId,
+  newBoardHash: `0x${'ab'.repeat(32)}`,
+  actionNonce: 4n,
+});
+assert.deepEqual(proposal.entityTxs, [{
+  type: 'entityProviderProposeControlBoard',
+  data: {
+    targetEntityId,
+    newBoardHash: `0x${'ab'.repeat(32)}`,
+    actionNonce: 4n,
+  },
+}]);
+
+const takeoverBoard = {
+  mode: 'proposer-based' as const,
+  threshold: 1n,
+  validators: [signerId],
+  shares: { [signerId]: 1n },
+};
+assert.deepEqual(buildControlBoardActivationInputs({
+  shareholderEntityId: entityId,
+  targetEntityId,
+  signerId,
+  board: takeoverBoard,
+}).map((input) => [input.entityId, input.entityTxs[0]?.type]), [
+  [targetEntityId, 'boardHandover'],
+  [entityId, 'entityProviderActivateBoard'],
+]);
+assert.throws(() => buildControlBoardActivationInputs({
+  shareholderEntityId: entityId,
+  targetEntityId,
+  signerId,
+  board: { ...takeoverBoard, threshold: 2n },
+}), /CONTROL_TAKEOVER_SINGLE_SUCCESSOR_BOARD_REQUIRED/);
+
 assert.deepEqual(resolveEntityPanelDeepLink({ hashRoute: 'ownership' }), { activeTab: 'ownership' });
 assert.equal(buildEntityPanelHashRouteFromState({
   activeTab: 'ownership',
@@ -52,4 +94,4 @@ assert.equal(buildEntityPanelHashRouteFromState({
   accountWorkspaceTab: 'open',
   settingsSubview: 'wallet',
 }), 'ownership');
-console.info('OWNERSHIP_FLOW_CHECK_OK cases=5');
+console.info('OWNERSHIP_FLOW_CHECK_OK cases=8');

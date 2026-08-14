@@ -13,11 +13,14 @@ describe('DeltaTransformer secret reveal liveness', function () {
     const hash = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(['bytes32'], [secret]),
     );
-    await transformer.revealSecret(secret);
+    await expect(transformer.revealSecret(secret))
+      .to.emit(transformer, 'SecretRevealed')
+      .withArgs(hash, secret);
     const firstTimestamp = await transformer.hashToTimestamp(hash);
     expect(firstTimestamp).to.be.gt(0n);
 
-    await expect(transformer.revealSecret(secret)).not.to.be.reverted;
+    await expect(transformer.revealSecret(secret))
+      .not.to.emit(transformer, 'SecretRevealed');
     expect(await transformer.hashToTimestamp(hash)).to.equal(firstTimestamp);
   });
 });

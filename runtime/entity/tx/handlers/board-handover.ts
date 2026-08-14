@@ -17,6 +17,7 @@ export const handleBoardHandoverEntityTx = (
   tx: BoardHandoverTx,
   env: EntityRuntimeContext,
   mutableFrameState = false,
+  authorizedConfig?: EntityState['config'],
 ): EntityTxReducerResult => {
   const config = validateConsensusConfig({
     ...tx.data.board,
@@ -25,6 +26,9 @@ export const handleBoardHandoverEntityTx = (
       : {}),
   }, 'BOARD_HANDOVER_CONFIG');
   if (config.mode !== entityState.config.mode) throw new Error('BOARD_HANDOVER_MODE_CHANGE_FORBIDDEN');
+  if (!authorizedConfig) {
+    throw new Error('BOARD_HANDOVER_TRANSITION_PROOF_REQUIRED');
+  }
   const record = resolveObserverCertifiedBoardRecord(
     entityState,
     getCertifiedBoardNodeStore(env),
@@ -35,10 +39,12 @@ export const handleBoardHandoverEntityTx = (
   }
   const previousHash = hashBoard(encodeBoard(entityState.config, env)).toLowerCase();
   const nextHash = hashBoard(encodeBoard(config, env)).toLowerCase();
-  if (record.previousBoardHash !== previousHash || record.boardHash !== nextHash) {
+  const authorizedHash = hashBoard(encodeBoard(authorizedConfig, env)).toLowerCase();
+  if (authorizedHash !== nextHash || record.boardHash !== nextHash) {
     throw new Error(
       `BOARD_HANDOVER_CERTIFIED_AUTHORITY_MISMATCH:` +
-        `previous=${record.previousBoardHash}:${previousHash}:next=${record.boardHash}:${nextHash}`,
+        `previous=${record.previousBoardHash}:${previousHash}:` +
+        `certified=${record.boardHash}:authorized=${authorizedHash}:next=${nextHash}`,
     );
   }
   const newState = prepareEntityTxState(entityState, mutableFrameState);

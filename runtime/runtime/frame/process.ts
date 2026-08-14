@@ -1,3 +1,8 @@
+/**
+ * Canonical Runtime frame transaction: validate, mutate an isolated candidate,
+ * commit the authoritative WAL, publish live state, then run external effects.
+ * Key entrypoint: applyAndCommitRuntimeFrame. Human-audit importance: 100/100.
+ */
 import { TIMING } from '../../config/constants';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { recordRuntimeHistoryTraceForTesting } from '../observability/history-retention';

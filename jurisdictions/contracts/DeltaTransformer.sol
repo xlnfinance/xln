@@ -41,6 +41,7 @@ contract DeltaTransformer {
   error PullRevealWindowActive(uint256 disputeTimeout);
   error PullRevealRegistryUnavailable(address caller);
   error InvalidPullAmount();
+  event SecretRevealed(bytes32 indexed hashlock, bytes32 secret);
   // Sole payment-secret evidence store. `hashToTimestamp[hash] != 0` means
   // revealed; `revealedAt` is the first-seen block.timestamp (sticky).
   // Former hashToBlock / hashRevealed / cleanSecret were a closed dead set —
@@ -395,6 +396,10 @@ contract DeltaTransformer {
 
 
 
+  /// @notice Persist optional public recovery evidence for a payment secret.
+  /// @dev Normal payment finalization supplies secrets just in time through
+  /// transformer arguments. This registry remains the canonical primitive for
+  /// durable dispute recovery and future permissionless/watchtower callers.
   function revealSecret(bytes32 secret) public {
     bytes32 hash = keccak256(abi.encode(secret));
     // Exact retries are expected after response loss or crash recovery. A
@@ -405,5 +410,6 @@ contract DeltaTransformer {
     // timestamp and rewrite revealedAt for still-live disputes.
     if (hashToTimestamp[hash] != 0) return;
     hashToTimestamp[hash] = block.timestamp;
+    emit SecretRevealed(hash, secret);
   }
 }

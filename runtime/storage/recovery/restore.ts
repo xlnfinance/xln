@@ -1,3 +1,8 @@
+/**
+ * Replays committed WAL/history into a Runtime and reconstructs durable output delivery.
+ * Key paths: restore one canonical head without executing pre-commit external effects.
+ * Human-audit importance: 100/100 — this is the event-sourcing equivalence proof path.
+ */
 import { Level } from 'level';
 import { type RuntimeOutputRoutingDeps } from '../../runtime/routing/output-routing';
 import {

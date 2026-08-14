@@ -1,3 +1,8 @@
+/**
+ * Storage composition root for authoritative WAL/history and disposable live views.
+ * Key entrypoint: saveEnvToDB enforces durable history before cache publication.
+ * Human-audit importance: 100/100 — this is the crash-consistency boundary.
+ */
 import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec/codec';
 import {
   deleteKeyRange,

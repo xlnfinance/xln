@@ -1,3 +1,8 @@
+/**
+ * Commits every deterministic Entity field plus complete Account replica projections.
+ * Key projection: exhaustive Entity fields plus complete Account replica leaves.
+ * Human-audit importance: 100/100 — this root is the Entity quorum's signed state.
+ */
 import { ethers } from 'ethers';
 
 import type { AccountReplica, AccountState } from '../../types/account';

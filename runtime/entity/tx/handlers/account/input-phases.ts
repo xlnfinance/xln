@@ -18,7 +18,7 @@ import { addMessage } from '../../../frame-events';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import {
   getCertifiedBoardNodeStore,
-  resolveObserverCertifiedBoardHash,
+  resolveObserverCertifiedBoardRecord,
 } from '../../../../jurisdiction/machine/board-registry';
 import { verifyHankoForHash } from '../../../../hanko/signing';
 import type { AccountJClaimNodeChanges } from '../../../../types/finance/account-j-claims';
@@ -195,7 +195,7 @@ export const applyAccountConsensusInput = async (context: AccountInputPhaseConte
     from: shortId(input.fromEntityId),
     pending: account.pendingFrame?.height ?? null,
   });
-  const boardHash = resolveObserverCertifiedBoardHash(
+  const certifiedBoard = resolveObserverCertifiedBoardRecord(
     state,
     getCertifiedBoardNodeStore(env),
     input.fromEntityId,
@@ -209,7 +209,15 @@ export const applyAccountConsensusInput = async (context: AccountInputPhaseConte
         ...authority,
         observerState: state,
       }),
-    ...(boardHash ? { counterpartyCertifiedBoardHash: boardHash } : {}),
+    ...(certifiedBoard
+      ? {
+          counterpartyCertifiedBoard: {
+            boardHash: certifiedBoard.boardHash,
+            activatedAtJHeight: certifiedBoard.activatedAtJHeight,
+            logIndex: certifiedBoard.logIndex,
+          },
+        }
+      : {}),
   });
   context.checkpointProfile('consensus');
   logCrossFillAckResult(context, result, pendingBeforeTxs, inputFrameTxs);

@@ -5,6 +5,7 @@ import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { resolveObserverCertifiedAccountCounterpartyProposer } from '../../account/account-counterparty-route';
 import { HankoValidationError } from '../../../hanko/codec';
 import { buildCertifiedEntityOutput } from '../j-events-htlc/cross-j-outputs';
+import { createStructuredLogger } from '../../../infra/logger';
 
 type BoardActivatedEvent = Extract<JurisdictionEvent, { type: 'BoardActivated' }>;
 
@@ -38,7 +39,8 @@ type ActivationPosition = readonly [jHeight: number, logIndex: number];
 
 const MAX_BOARD_RESEALS_PER_FRAME = 32;
 export const BOARD_RESEAL_HOOK_ID = 'board-reseal';
-export const BOARD_RESEAL_RETRY_MS = 1_000;
+export const BOARD_RESEAL_RETRY_MS = 60_000;
+const resealLog = createStructuredLogger('entity.board-reseal');
 
 const bytes32 = (value: string): boolean => /^0x[0-9a-f]{64}$/.test(value.toLowerCase());
 
@@ -121,10 +123,75 @@ const migration = (
   activationJHeight: number,
   activationLogIndex: number,
   reason: AccountBoardResealMigration['reason'] | null,
+  issued?: { height: number; frameHash: string },
 ): BoardRotationAccountMigration => ({
   counterpartyId,
-  marker: reason ? { activationJHeight, activationLogIndex, reason } : null,
+  marker: reason ? {
+    activationJHeight,
+    activationLogIndex,
+    reason,
+    ...(issued ? {
+      issuedFrameHeight: issued.height,
+      issuedFrameHash: issued.frameHash,
+    } : {}),
+  } : null,
 });
+
+export const accountNeedsBoardResealForActivation = (
+  account: AccountReplica,
+  activation: Pick<BoardResealActivation, 'jHeight' | 'logIndex'>,
+): boolean => {
+  const marker = account.boardResealMigration;
+  if (
+    !marker ||
+    marker.activationJHeight !== activation.jHeight ||
+    marker.activationLogIndex !== activation.logIndex
+  ) return false;
+  if (marker.reason !== 'issued') return true;
+  return marker.issuedFrameHeight !== Number(account.currentHeight) ||
+    marker.issuedFrameHash?.toLowerCase() !== String(account.currentFrame.stateHash || '').toLowerCase();
+};
+
+type BoardResealEvidence = ReadonlyArray<string | number | bigint | boolean | undefined>;
+
+const boardResealEvidence = (
+  account: AccountReplica,
+): BoardResealEvidence => [
+  account.currentHeight,
+  account.currentFrame.height,
+  account.currentFrame.stateHash,
+  account.currentFrameHanko,
+  account.counterpartyFrameHanko,
+  account.currentDisputeProofHanko,
+  account.counterpartyDisputeProofHanko,
+  account.currentDisputeHash,
+  account.counterpartyDisputeHash,
+  account.currentDisputeProofBodyHash,
+  account.counterpartyDisputeProofBodyHash,
+  account.currentDisputeProofNonce,
+  account.counterpartyDisputeProofNonce,
+  account.currentDisputeProofProposerIsLeft,
+  account.counterpartyDisputeProofProposerIsLeft,
+];
+
+/** Capture only Account bytes whose change can make a fresh reseal possible. */
+export const captureAccountBoardResealEvidence = (
+  state: Pick<EntityState, 'accounts'>,
+): ReadonlyMap<string, BoardResealEvidence> => new Map(
+  Array.from(state.accounts, ([accountId, account]) => [
+    accountId.toLowerCase(),
+    boardResealEvidence(account),
+  ]),
+);
+
+/** A marker-only mutation must never schedule another consensus frame. */
+export const accountBoardResealEvidenceChanged = (
+  previous: BoardResealEvidence | undefined,
+  current: AccountReplica,
+): boolean => {
+  if (!previous) return true;
+  return boardResealEvidence(current).some((value, index) => value !== previous[index]);
+};
 
 const activationPosition = (event: BoardActivatedEvent): ActivationPosition => {
   const jHeight = Number(event.blockNumber);
@@ -187,12 +254,22 @@ const buildResealOutput = (
       account,
       counterpartyId,
     );
-    if (!signerId) return undefined;
+    if (!signerId) {
+      resealLog.warn('route.unavailable', {
+        counterpartyId,
+        reason: account.counterpartyFrameHanko ? 'proposer-unresolved' : 'counterparty-frame-hanko-missing',
+      });
+      return undefined;
+    }
     return buildCertifiedEntityOutput(counterpartyId, signerId, input);
   } catch (error) {
     // An absent/non-authoritative bilateral witness is retryable. Corrupt
     // Account identity, frame hashes, or certified Patricia nodes remain loud.
     if (error instanceof HankoValidationError) {
+      resealLog.warn('route.unavailable', {
+        counterpartyId,
+        reason: error.message,
+      });
       return undefined;
     }
     throw error;
@@ -233,7 +310,7 @@ const buildCertifiedAccountResealDraft = (
       reseal,
     },
   }]);
-  const issue = output ? null : 'output-route-unavailable';
+  const issue = output ? 'issued' : 'output-route-unavailable';
   const context = `board-reseal:${activation.jHeight}:${activation.logIndex}:${counterpartyId}`;
   const hashesToSign: HashToSign[] = output
     ? [{ hash: frameHash, type: 'accountFrame', context: `${context}:frame` }]
@@ -241,7 +318,16 @@ const buildCertifiedAccountResealDraft = (
   if (output && dispute.seal) {
     hashesToSign.push({ hash: dispute.seal.hash, type: 'dispute', context: `${context}:dispute` });
   }
-  return { ...(output ? { output } : {}), hashesToSign, migration: migration(counterpartyId, ...position, issue) };
+  return {
+    ...(output ? { output } : {}),
+    hashesToSign,
+    migration: migration(
+      counterpartyId,
+      ...position,
+      issue,
+      output ? { height: account.currentHeight, frameHash } : undefined,
+    ),
+  };
 };
 
 const buildAccountResealDraft = (
@@ -300,8 +386,7 @@ const buildBoardRotationResealDraftsForActivation = (
     .filter(([counterpartyId, account]) => {
       if (counterpartyId <= String(options.afterCounterpartyId ?? '').toLowerCase()) return false;
       if (!options.pendingOnly) return true;
-      return account.boardResealMigration?.activationJHeight === position[0] &&
-        account.boardResealMigration.activationLogIndex === position[1];
+      return accountNeedsBoardResealForActivation(account, activation);
     })
     .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
 
@@ -318,7 +403,13 @@ const buildBoardRotationResealDraftsForActivation = (
     hashesToSign,
     accountMigrations,
     hasMore: orderedAccounts.length > batch.length,
-    retryRequired: accountMigrations.some(update => update.marker !== null),
+    // Only transport discovery can improve without an Account transition.
+    // Structural/certification issues remain visible in the bounded marker
+    // and are re-armed by scheduleChangedAccountBoardReseals when that Account
+    // actually changes. Polling them every second creates an infinite wake
+    // loop while adding no new evidence.
+    retryRequired: accountMigrations.some(update =>
+      update.marker?.reason === 'output-route-unavailable'),
     nextAfterCounterpartyId: batch.at(-1)?.[0] ?? String(options.afterCounterpartyId ?? '').toLowerCase(),
   };
 };

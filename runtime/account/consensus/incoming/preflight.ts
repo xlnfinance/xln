@@ -50,9 +50,9 @@ const verifyIncomingFrameHanko = async (
     hankoToVerify,
     receivedFrame.stateHash,
     input.fromEntityId,
-    securityContext.counterpartyCertifiedBoardHash
+    securityContext.counterpartyCertifiedBoard
       ? {
-          registeredBoardHash: securityContext.counterpartyCertifiedBoardHash,
+          registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash,
           allowPreviousBoard: false,
         }
       : { allowPreviousBoard: false },

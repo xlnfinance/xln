@@ -1,3 +1,8 @@
+/**
+ * Owns Runtime input admission, deterministic queue order, and bounded batching.
+ * Key entrypoints: enqueue and drain validated work for the single-writer loop.
+ * Human-audit importance: 96/100 — queue drift changes replayed transaction order.
+ */
 import { LIMITS, TIMING } from '../../config/constants';
 import type { EntityInput } from '../../entity/types';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeInput, RuntimeTx } from '../types';

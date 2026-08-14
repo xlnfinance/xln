@@ -1,3 +1,8 @@
+/**
+ * Verifies the disposable current-state cache against committed document and Merkle data.
+ * Key checks: reject incomplete cells so startup can rebuild from authoritative history.
+ * Human-audit importance: 94/100 — it prevents corrupted cache reuse after recovery.
+ */
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 import { decodeValidatedBuffer, encodeBuffer } from '../codec/codec';
 import { docRefCellKey } from '../schema/doc-refs';

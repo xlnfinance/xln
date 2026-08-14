@@ -10,8 +10,12 @@ export type AccountInputSecurityContext = {
   entityTimestamp: number;
   finalizedJHeight: number;
   owningEntityIsHub: boolean;
-  /** Counterparty board from the consuming Entity's own finalized registry. */
-  counterpartyCertifiedBoardHash?: string;
+  /** Exact counterparty authority from the consuming Entity's finalized registry. */
+  counterpartyCertifiedBoard?: {
+    boardHash: string;
+    activatedAtJHeight: number;
+    logIndex: number;
+  };
   /** Parent-provided Hanko authority; Account never reads Runtime/Entity state. */
   verifyHanko(
     hanko: HankoString,

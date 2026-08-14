@@ -134,6 +134,8 @@ export interface ApplyEntityTxOptions {
   storageChanges?: RuntimeOverlayRecord[];
   /** Notification collector bound to the same candidate frame. */
   candidateEffects?: EntityCandidateEffect[];
+  /** Exact authority resolved from this frame's contiguous BoardActivated chain. */
+  authorizedBoardHandoverConfig?: EntityState['config'];
 }
 
 type EntityTxExecutionOptions = ApplyEntityTxOptions & {
@@ -336,6 +338,7 @@ const entityTxDispatchers = {
     tx as Extract<EntityTx, { type: 'boardHandover' }>,
     env,
     options?.mutableFrameState,
+    options.authorizedBoardHandoverConfig,
   ),
   accountInput: handleAccountInputEntityTx,
   openAccount: (_env, state, tx, options) => handleOpenAccountEntityTx(

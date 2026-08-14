@@ -37,6 +37,11 @@ const requireActionNonce = (value: bigint): bigint => {
   return value;
 };
 
+// Delaware's written-consent model permits holders of the required voting
+// power to act without a meeting or outgoing-board approval (8 Del. C. § 228).
+// Here each Entity signs the exact proposal hash under its current board; the
+// contract reads its settled CONTROL reserve at execution and counts it once.
+// https://delcode.delaware.gov/title8/c001/sc07/
 const verifyControlSupporterVotes = async (
   entityState: EntityState,
   env: EntityRuntimeContext,

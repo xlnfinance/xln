@@ -1,3 +1,8 @@
+/**
+ * Loads a durable Runtime head and reconstitutes exact machine authority and keys.
+ * Key checks: canonical Runtime and per-Entity hashes before returning live state.
+ * Human-audit importance: 100/100 — corrupted or mismatched recovery must fail closed.
+ */
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,

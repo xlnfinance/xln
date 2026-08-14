@@ -418,8 +418,12 @@ export interface AccountReplica {
 export type AccountBoardResealMigration = {
   activationJHeight: number;
   activationLogIndex: number;
+  /** Latest Account frame for which a durable reseal output was issued. */
+  issuedFrameHeight?: number;
+  issuedFrameHash?: string;
   reason:
     | 'pending'
+    | 'issued'
     | 'account-identity-invalid'
     | 'bilateral-frame-uncertified'
     | 'certified-frame-invalid'

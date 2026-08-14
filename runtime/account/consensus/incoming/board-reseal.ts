@@ -28,6 +28,7 @@ const validateBoardResealMetadata = (
   account: AccountReplica,
   input: AccountInput,
   reseal: BoardResealPayload,
+  securityContext: AccountInputSecurityContext,
   events: string[],
 ): HandleAccountInputResult | ValidatedBoardResealMetadata => {
   const expectedFrom = account.proofHeader.toEntity.toLowerCase();
@@ -52,6 +53,21 @@ const validateBoardResealMetadata = (
   if (!Number.isSafeInteger(activationLogIndex) || activationLogIndex < 0) {
     return rejectBoardReseal(
       `ACCOUNT_BOARD_RESEAL_ACTIVATION_LOG_INDEX_INVALID:${activationLogIndex}`,
+      events,
+    );
+  }
+  const certifiedBoard = securityContext.counterpartyCertifiedBoard;
+  if (!certifiedBoard) {
+    return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_CERTIFIED_BOARD_MISSING', events);
+  }
+  if (
+    activationJHeight !== certifiedBoard.activatedAtJHeight
+    || activationLogIndex !== certifiedBoard.logIndex
+  ) {
+    return rejectBoardReseal(
+      `ACCOUNT_BOARD_RESEAL_ACTIVATION_MISMATCH:`
+        + `${activationJHeight}:${activationLogIndex}:`
+        + `${certifiedBoard.activatedAtJHeight}:${certifiedBoard.logIndex}`,
       events,
     );
   }
@@ -128,8 +144,8 @@ const verifyBoardResealWitnesses = async (
   | { verifiedDispute?: ValidatedCounterpartyDisputeSeal }
 > => {
   const frameAuthority = {
-    ...(securityContext.counterpartyCertifiedBoardHash
-      ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash }
+    ...(securityContext.counterpartyCertifiedBoard
+      ? { registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash }
       : {}),
     allowPreviousBoard: false,
   };
@@ -186,7 +202,7 @@ export const handleBoardReseal = async (
   const reseal = accountInputBoardReseal(input);
   if (!reseal) return undefined;
   const events: string[] = [];
-  const metadata = validateBoardResealMetadata(account, input, reseal, events);
+  const metadata = validateBoardResealMetadata(account, input, reseal, securityContext, events);
   if ('ok' in metadata) return metadata;
   const witnesses = await verifyBoardResealWitnesses(
     account,

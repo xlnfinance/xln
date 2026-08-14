@@ -1,3 +1,8 @@
+/**
+ * Serializes one Runtime commit under the writer lock and classifies crash outcomes.
+ * Key paths: pre-commit rollback and post-WAL recovery-required failure handling.
+ * Human-audit importance: 100/100 — mistakes can publish or replay the wrong head.
+ */
 import { runtimeIsBrowser } from '../../infra/process/runtime-process';
 import { getPerfMs } from '../../infra/time';
 import {

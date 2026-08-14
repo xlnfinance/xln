@@ -1,3 +1,8 @@
+/**
+ * Computes deterministic hashes for Runtime inputs, frames, and recovery checkpoints.
+ * Key functions: ordered input, frame, and checkpoint digest constructors.
+ * Human-audit importance: 98/100 — hash drift breaks replay and lineage verification.
+ */
 import { ethers } from 'ethers';
 
 import { safeStringify } from '../../protocol/serialization';

@@ -10,7 +10,11 @@ import {
 } from '../../../account/crypto';
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../../../entity/factory';
 import { applyEntityInput, selectProposableEntityTxs } from '../../../entity/consensus';
-import { getBoardHandoverFrameConfig } from '../../../entity/consensus/authority/board-handover';
+import {
+  getBoardHandoverFrameConfig,
+  getPendingBoardHandoverConfig,
+} from '../../../entity/consensus/authority/board-handover';
+import { applyEntityTx } from '../../../entity/tx/apply';
 import {
   buildConsensusOutputOriginForState,
   assertCertifiedEntityOutputWitnesses,
@@ -59,6 +63,8 @@ import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { addr, entity, makeAccount, makeState, provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 import { provisionTestEntityEncryptionKey as provisionCanonicalTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
 import { buildJEventRangeData } from '../../helpers/j-history';
+import { FailureDispositionError } from '../../../protocol/errors/failure-taxonomy';
+import { resolveObserverCertifiedAccountCounterpartyProposer } from '../../../entity/account/account-counterparty-route';
 
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
 const entityProviderAddress = addr('e1');
@@ -316,6 +322,43 @@ const remoteObserverEnv = (boardHash: string): RuntimeReplica => {
 };
 
 describe('registered Entity certified board authority', () => {
+  test('Account transport stops addressing the previous board immediately after activation', async () => {
+    const { profile, boardHash } = await buildRegisteredProfile();
+    const env = remoteObserverEnv(boardHash);
+    const observer = [...env.state.eReplicas.values()][0]!.state;
+    const frameHash = computeProfileHash(profile);
+    const account = makeAccount(observer.entityId, registeredEntityId);
+    account.currentHeight = 1;
+    account.currentFrame = {
+      ...account.currentFrame,
+      height: 1,
+      stateHash: frameHash,
+      accountStateRoot: frameHash,
+    };
+    account.counterpartyFrameHanko = profile.metadata.profileHanko!;
+
+    expect(resolveObserverCertifiedAccountCounterpartyProposer(
+      getCertifiedBoardNodeStore(env),
+      observer,
+      account,
+      registeredEntityId,
+    )).toBe(profile.runtimeId);
+
+    installEvents(env, observer, [event('BoardActivated', blockHash('66'), {
+      height: 3,
+      previousBoardHash: boardHash,
+      previousBoardValidUntil: 1_700_604_800,
+    })]);
+    observer.timestamp = 1_700_000_000_000;
+
+    expect(() => resolveObserverCertifiedAccountCounterpartyProposer(
+      getCertifiedBoardNodeStore(env),
+      observer,
+      account,
+      registeredEntityId,
+    )).toThrow();
+  });
+
   test('certified output origin cannot omit its source board authority', () => {
     const env = createEmptyEnv('registry-output-origin');
     const state = makeState(registeredEntityId, addr('77'), jurisdiction);
@@ -737,6 +780,85 @@ describe('registered Entity certified board authority', () => {
     tampered.data.board.threshold = 2n;
     expect(() => getBoardHandoverFrameConfig(env, state, [range, tampered]))
       .toThrow('BOARD_HANDOVER_CONFIG');
+
+    try {
+      getPendingBoardHandoverConfig(state, [handover, structuredClone(handover)]);
+      throw new Error('TEST_EXPECTED_BOARD_HANDOVER_REJECTION');
+    } catch (error) {
+      expect(error).toBeInstanceOf(FailureDispositionError);
+      expect((error as FailureDispositionError).disposition).toBe('reject');
+      expect((error as FailureDispositionError).code).toBe('BOARD_HANDOVER_COUNT_INVALID');
+    }
+  });
+
+  test('one frame applies a contiguous multi-activation board handover', async () => {
+    const env = createEmptyEnv('registry-board-handover-chain');
+    const signerA = addr('a1');
+    const signerB = addr('b1');
+    const signerC = addr('c1');
+    const oldConfig = {
+      mode: 'proposer-based' as const,
+      threshold: 1n,
+      validators: [signerA],
+      shares: { [signerA]: 1n },
+      jurisdiction,
+    };
+    const intermediateConfig = {
+      ...oldConfig,
+      validators: [signerB],
+      shares: { [signerB]: 1n },
+    };
+    const finalConfig = {
+      ...oldConfig,
+      validators: [signerC],
+      shares: { [signerC]: 1n },
+    };
+    const state = makeState(registeredEntityId, signerA, jurisdiction);
+    state.config = oldConfig;
+    const oldBoard = hashBoard(encodeBoard(oldConfig, env)).toLowerCase();
+    const intermediateBoard = hashBoard(encodeBoard(intermediateConfig, env)).toLowerCase();
+    const finalBoard = hashBoard(encodeBoard(finalConfig, env)).toLowerCase();
+    const first = event('BoardActivated', intermediateBoard, {
+      height: 3,
+      logIndex: 0,
+      previousBoardHash: oldBoard,
+    });
+    const second = event('BoardActivated', finalBoard, {
+      height: 3,
+      logIndex: 1,
+      previousBoardHash: intermediateBoard,
+    });
+    const handover = {
+      type: 'boardHandover',
+      data: {
+        board: {
+          mode: finalConfig.mode,
+          threshold: finalConfig.threshold,
+          validators: [...finalConfig.validators],
+          shares: { ...finalConfig.shares },
+        },
+      },
+    } satisfies EntityTx;
+    const txs = [jRangeTx(signerC, [first, second]), handover] satisfies EntityTx[];
+    const authorizedConfig = getBoardHandoverFrameConfig(env, state, txs);
+    expect(authorizedConfig).toEqual(finalConfig);
+    if (!authorizedConfig) throw new Error('TEST_BOARD_HANDOVER_CONFIG_MISSING');
+
+    installEvents(env, state, [
+      event('FoundationBootstrapped', blockHash('31')),
+      event('EntityRegistered', oldBoard),
+      first,
+      second,
+    ]);
+    const applied = await applyEntityTx(env, state, handover, {
+      authorizedBoardHandoverConfig: authorizedConfig,
+    });
+    expect(applied.newState.config).toEqual(finalConfig);
+    expect(applied.newState.leaderState).toEqual({
+      activeValidatorId: signerC,
+      view: 0,
+      changedAtHeight: state.height + 1,
+    });
   });
 
   test('partial board config cannot precommit rotation; synchronized validators commit it', async () => {
@@ -1033,7 +1155,13 @@ describe('registered Entity certified board authority', () => {
     const resealCommitted = await applyEntityInput(env, wakeProposed.workingReplica, structuredClone(wakePrecommit));
     const resealedAccount = resealCommitted.workingReplica.state.accounts.get(counterpartyEntityId);
     if (!resealedAccount) throw new Error('TEST_BOARD_ROTATION_RESEALED_ACCOUNT_MISSING');
-    expect(resealedAccount.boardResealMigration).toBeUndefined();
+    expect(resealedAccount.boardResealMigration).toEqual({
+      activationJHeight: 3,
+      activationLogIndex: 0,
+      reason: 'issued',
+      issuedFrameHeight: 7,
+      issuedFrameHash: certifiedFrameHash,
+    });
     const certifiedResealOutput = resealCommitted.outputs.find(output => output.entityTxs?.some(tx =>
       tx.type === 'consensusOutput' && tx.data.entityTxs.some(nested =>
         nested.type === 'accountInput' && nested.data.kind === 'board_reseal')));

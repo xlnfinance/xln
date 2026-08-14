@@ -42,8 +42,25 @@ import { addr, makeAccount, makeState } from '../../helpers/cross-j';
 import {
   accountInputFailureMessage,
 } from '../../../account/consensus/result';
+import type { AccountInputSecurityContext } from '../../../account/consensus/dispute/deadline-policy';
 
 const digest = (byte: string): string => `0x${byte.repeat(32)}`;
+
+const certifiedResealContext = (
+  env: ReturnType<typeof createEmptyEnv>,
+  boardHash: string,
+  activatedAtJHeight: number,
+  logIndex: number,
+): AccountInputSecurityContext => {
+  const context = createAccountConsensusContext(env);
+  return {
+    entityTimestamp: env.state.timestamp,
+    finalizedJHeight: env.state.jHeight,
+    owningEntityIsHub: false,
+    verifyHanko: context.verifyHanko,
+    counterpartyCertifiedBoard: { boardHash, activatedAtJHeight, logIndex },
+  };
+};
 
 test('board reseal replaces only the exact current counterparty Hanko', async () => {
   const env = createEmptyEnv('board-rotation-account-reseal');
@@ -105,10 +122,13 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
       observedAuthorities.push(authority);
       return baseContext.verifyHanko(hanko, hash, expectedEntityId, authority);
     },
-  }, account, input);
+  }, account, input, certifiedResealContext(env, sourceEntityId, 19, 2));
 
   expect(applied.ok, accountInputFailureMessage(applied)).toBe(true);
-  expect(observedAuthorities[0]).toEqual({ allowPreviousBoard: false });
+  expect(observedAuthorities[0]).toEqual({
+    registeredBoardHash: sourceEntityId,
+    allowPreviousBoard: false,
+  });
   expect(account.counterpartyFrameHanko).toBe(frameHanko);
   expect(account.currentFrame).toEqual(beforeFrame);
   expect(account.currentHeight).toBe(7);
@@ -124,26 +144,37 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   expect(restored.counterpartyFrameHanko).toBe(frameHanko);
 
   const beforeExactRetry = structuredClone(account);
-  expect((await applyAccountInput(createAccountConsensusContext(env), account, structuredClone(input))).ok).toBe(true);
+  expect((await applyAccountInput(
+    createAccountConsensusContext(env),
+    account,
+    structuredClone(input),
+    certifiedResealContext(env, sourceEntityId, 19, 2),
+  )).ok).toBe(true);
   expect(account).toEqual(beforeExactRetry);
 
   const sameBlockSuccessor = structuredClone(input);
   sameBlockSuccessor.reseal.boardActivationLogIndex = 3;
-  expect((await applyAccountInput(createAccountConsensusContext(env), account, sameBlockSuccessor)).ok).toBe(true);
-  expect(account.counterpartyBoardReseal).toEqual({
-    activationJHeight: 19,
-    activationLogIndex: 3,
-    frameHeight: 7,
-    frameHash,
-  });
+  const successorRejected = await applyAccountInput(
+    createAccountConsensusContext(env),
+    account,
+    sameBlockSuccessor,
+    certifiedResealContext(env, sourceEntityId, 19, 2),
+  );
+  expect(successorRejected.ok).toBe(false);
+  expect(accountInputFailureMessage(successorRejected)).toContain('ACCOUNT_BOARD_RESEAL_ACTIVATION_MISMATCH');
 
   const beforeRejected = structuredClone(account);
   const tampered = structuredClone(input);
-  tampered.reseal.boardActivationJHeight = 20;
-  tampered.reseal.frameHash = digest('a2');
-  const rejected = await applyAccountInput(createAccountConsensusContext(env), account, tampered);
+  tampered.reseal.boardActivationJHeight = Number.MAX_SAFE_INTEGER;
+  tampered.reseal.boardActivationLogIndex = Number.MAX_SAFE_INTEGER;
+  const rejected = await applyAccountInput(
+    createAccountConsensusContext(env),
+    account,
+    tampered,
+    certifiedResealContext(env, sourceEntityId, 19, 2),
+  );
   expect(rejected.ok).toBe(false);
-  expect(accountInputFailureMessage(rejected)).toContain('ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISMATCH');
+  expect(accountInputFailureMessage(rejected)).toContain('ACCOUNT_BOARD_RESEAL_ACTIVATION_MISMATCH');
   expect(account).toEqual(beforeRejected);
 });
 
@@ -234,7 +265,12 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
   };
 
   expect(registerReliableIngress(receiver, senderRuntimeId, output).kind).toBe('enqueue');
-  const appliedReseal = await applyAccountInput(createAccountConsensusContext(receiver), account, reseal);
+  const appliedReseal = await applyAccountInput(
+    createAccountConsensusContext(receiver),
+    account,
+    reseal,
+    certifiedResealContext(receiver, sourceEntityId, 23, 5),
+  );
   expect(appliedReseal.ok, accountInputFailureMessage(appliedReseal)).toBe(true);
   const replica = {
     entityId: receiverEntityId,
@@ -274,7 +310,12 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
   expect(buildPendingNetworkOutputs([sameBlockOutput, output]).map(candidate =>
     getReliableOutputIdentity(candidate)?.logIndex)).toEqual([5, 6]);
   expect(registerReliableIngress(receiver, senderRuntimeId, sameBlockOutput).kind).toBe('enqueue');
-  expect((await applyAccountInput(createAccountConsensusContext(receiver), account, sameBlockReseal)).ok).toBe(true);
+  expect((await applyAccountInput(
+    createAccountConsensusContext(receiver),
+    account,
+    sameBlockReseal,
+    certifiedResealContext(receiver, sourceEntityId, 23, 6),
+  )).ok).toBe(true);
   const sameBlockCommits = commitReliableIngress(receiver, [sameBlockOutput]);
   expect(sameBlockCommits).toHaveLength(1);
   expect(sameBlockCommits[0]?.receipt?.body.identity).toMatchObject({
@@ -358,7 +399,16 @@ test('board reseal routing is identical with sparse and populated validator topo
   expect(sparseDraft.hashesToSign).toEqual([
     expect.objectContaining({ hash: frameHash, type: 'accountFrame' }),
   ]);
-  expect(sparseDraft.accountMigrations).toEqual([{ counterpartyId: targetEntityId, marker: null }]);
+  expect(sparseDraft.accountMigrations).toEqual([{
+    counterpartyId: targetEntityId,
+    marker: {
+      activationJHeight: 24,
+      activationLogIndex: 2,
+      reason: 'issued',
+      issuedFrameHeight: 4,
+      issuedFrameHash: frameHash,
+    },
+  }]);
 });
 
 test('one uncertified Account cannot block BoardActivated reseals for certified peers', async () => {
@@ -449,13 +499,24 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
         reason: 'bilateral-frame-uncertified',
       },
     },
-    { counterpartyId: certifiedId, marker: null },
+    {
+      counterpartyId: certifiedId,
+      marker: {
+        activationJHeight: 7,
+        activationLogIndex: 0,
+        reason: 'issued',
+        issuedFrameHeight: 2,
+        issuedFrameHash: digest('d2'),
+      },
+    },
   ].sort((left, right) => left.counterpartyId.localeCompare(right.counterpartyId)));
   applyBoardRotationResealMigrations(state, result.accountMigrations);
   expect(uncertified.boardResealMigration).toEqual(
     result.accountMigrations.find(update => update.counterpartyId === uncertifiedId)?.marker,
   );
-  expect(certified.boardResealMigration).toBeUndefined();
+  expect(certified.boardResealMigration).toEqual(
+    result.accountMigrations.find(update => update.counterpartyId === certifiedId)?.marker,
+  );
   const withoutMarker = structuredClone(uncertified);
   delete withoutMarker.boardResealMigration;
   expect(withoutMarker).toEqual(uncertifiedBefore);

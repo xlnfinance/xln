@@ -117,6 +117,9 @@ import {
 } from '../account/cross-j-fill-ack';
 import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/j-events-htlc/cross-j-outputs';
 import { isSelfBoardAuthorityTransitionFrame } from '../proposal/policy';
+import { getBoardHandoverFrameConfig } from '../authority/board-handover';
+import { scheduleChangedAccountBoardReseals } from '../../scheduler/board-reseal-hook';
+import { captureAccountBoardResealEvidence } from '../../tx/state-effects/board-rotation-reseal';
 
 const recordFrameAccountChange = (
   storageChanges: RuntimeOverlayRecord[],
@@ -320,6 +323,9 @@ const applyRegularEntityTx = async (
     manualBroadcastInInput,
     accountJClaimNodeStore: context.accountJClaimNodeStore,
     accountConsensusContext: context.accountConsensusContext,
+    ...(context.authorizedBoardHandoverConfig
+      ? { authorizedBoardHandoverConfig: context.authorizedBoardHandoverConfig }
+      : {}),
   });
   if (result.skippedError) {
     throw new MalformedEntityFrameInputError(String(tx.type), result.skippedError);
@@ -1000,6 +1006,7 @@ type EntityFrameWorkingSet = {
   authorityTransitionOnly: boolean;
   crossJSetupPhase: boolean;
   currentEntityState: EntityState;
+  boardResealEvidenceBefore: ReturnType<typeof captureAccountBoardResealEvidence>;
   context: ApplyEntityTxsInOrderContext;
   frameProfileStartMs: number;
   frameProfileMarks: Record<string, number>;
@@ -1057,6 +1064,7 @@ const createEntityFrameApplyContext = (
   entityTxs: EntityTx[],
   currentEntityState: EntityState,
   verifiedCertifiedOutputs: ApplyEntityTxsInOrderContext['verifiedCertifiedOutputs'],
+  authorizedBoardHandoverConfig: EntityState['config'] | undefined,
 ): ApplyEntityTxsInOrderContext => {
   const accountJClaimNewNodes = new Map<string, AccountJClaimNode>();
   const committedClaimNodes = getAccountJClaimNodeStore(env);
@@ -1086,6 +1094,7 @@ const createEntityFrameApplyContext = (
     candidateEffects: [],
     storageChanges: [],
     verifiedCertifiedOutputs,
+    ...(authorizedBoardHandoverConfig ? { authorizedBoardHandoverConfig } : {}),
   };
 };
 
@@ -1168,17 +1177,20 @@ const prepareEntityFrameWorkingSet = async (
     normalized,
     entityTxs,
   );
-  const authorityTransitionOnly = await isSelfBoardAuthorityTransitionFrame(
+  const authorizedBoardHandoverConfig = getBoardHandoverFrameConfig(
     env,
     normalized,
     entityTxs,
   );
+  const authorityTransitionOnly = authorizedBoardHandoverConfig !== null ||
+    await isSelfBoardAuthorityTransitionFrame(env, normalized, entityTxs);
   const frameProfileStartMs = getPerfMs();
   const frameProfileMarks: Record<string, number> = {};
   const markFrameProfile = (label: string): void => {
     frameProfileMarks[label] = Math.round(getPerfMs() - frameProfileStartMs);
   };
   entityLog.debug('frame.apply', { txs: entityTxs.map(tx => tx.type) });
+  const boardResealEvidenceBefore = captureAccountBoardResealEvidence(normalized);
   const currentEntityState = initializeEntityFrameState(
     env,
     normalized,
@@ -1192,6 +1204,7 @@ const prepareEntityFrameWorkingSet = async (
     entityTxs,
     currentEntityState,
     verifiedCertifiedOutputs,
+    authorizedBoardHandoverConfig ?? undefined,
   );
   if (!authorityTransitionOnly) {
     await primeEntityFrameAccountWork(context);
@@ -1200,6 +1213,7 @@ const prepareEntityFrameWorkingSet = async (
     authorityTransitionOnly,
     crossJSetupPhase,
     currentEntityState,
+    boardResealEvidenceBefore,
     context,
     frameProfileStartMs,
     frameProfileMarks,
@@ -1246,6 +1260,7 @@ type PostEntityTxPhases = {
 
 const refreshChangedAccountCommitments = (
   state: EntityState,
+  boardResealEvidenceBefore: ReturnType<typeof captureAccountBoardResealEvidence>,
   context: ApplyEntityTxsInOrderContext,
 ): void => {
   const entityId = state.entityId.toLowerCase();
@@ -1263,6 +1278,7 @@ const refreshChangedAccountCommitments = (
     invalidateEntityAccountCommitment(state, accountId);
     refreshAccountWorkIndex(state, accountId);
   }
+  scheduleChangedAccountBoardReseals(state, boardResealEvidenceBefore, changedAccountIds);
 };
 
 const applyPostEntityTxPhases = async (
@@ -1342,7 +1358,11 @@ const applyPostEntityTxPhases = async (
   // (pending frame, Hanko and resend state). Refresh each dirty leaf only
   // after that final mutation. Doing it earlier would preserve a valid-looking
   // but stale incremental Entity root.
-  refreshChangedAccountCommitments(currentEntityState, context);
+  refreshChangedAccountCommitments(
+    currentEntityState,
+    working.boardResealEvidenceBefore,
+    context,
+  );
   currentEntityState = assignCertifiedOutputIdentities(
     currentEntityState,
     context.allOutputs,

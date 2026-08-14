@@ -1,3 +1,8 @@
+/**
+ * Derives canonical hashes for durable Runtime and Entity recovery projections.
+ * Key projections: durable Runtime and Entity state without volatile infrastructure.
+ * Human-audit importance: 98/100 — equality here is the recovery identity contract.
+ */
 import { ethers } from 'ethers';
 import { projectEntityStateWithoutFrameEvents } from '../entity/frame-events';
 import { compareStableText } from '../protocol/serialization';

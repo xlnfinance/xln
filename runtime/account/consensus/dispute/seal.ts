@@ -112,8 +112,8 @@ export const validateCounterpartyDisputeSeal = async (
     expectedHash,
     input.fromEntityId,
     {
-      ...(securityContext.counterpartyCertifiedBoardHash
-        ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash }
+      ...(securityContext.counterpartyCertifiedBoard
+        ? { registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash }
         : {}),
       allowPreviousBoard,
     },

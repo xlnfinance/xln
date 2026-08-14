@@ -1,3 +1,8 @@
+/**
+ * Pure fixed-radix Merkle construction and verification for consensus/storage maps.
+ * Key functions: domain-separated node hashing plus canonical proof verification.
+ * Human-audit importance: 99/100 — roots bind large state without iteration ambiguity.
+ */
 import { ethers } from 'ethers';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 
