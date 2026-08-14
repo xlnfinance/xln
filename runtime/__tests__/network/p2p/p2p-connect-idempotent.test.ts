@@ -118,3 +118,52 @@ test('RuntimeP2P reconnect flushes locally queued jurisdiction discovery without
 
   expect(sent).toEqual([{ profiles: [], jurisdictions: [announcement] }]);
 });
+
+test('RuntimeP2P accepts a reconnect batch above one authority-scope cap and rejects above both caps', () => {
+  const privateKey = `0x${'56'.repeat(32)}`;
+  const signerId = new Wallet(privateKey).address.toLowerCase();
+  const announcement = createJurisdictionGossipAnnouncement({
+    scope: 'community',
+    key: 'full-scope-chain',
+    name: 'Full Scope Chain',
+    rpcUrl: 'https://full-scope.example/rpc',
+    blockTimeMs: 1_000,
+    currency: 'ETH',
+    explorer: '',
+    chainId: 100,
+    deployer: signerId,
+    foundationRecipient: signerId,
+    entityProviderDeploymentBlock: 1,
+    contracts: {
+      account: `0x${'11'.repeat(20)}`,
+      depositoryBounds: `0x${'12'.repeat(20)}`,
+      hashLadderRegistry: `0x${'13'.repeat(20)}`,
+      nftCustody: `0x${'14'.repeat(20)}`,
+      hankoVerifier: `0x${'15'.repeat(20)}`,
+      entityProvider: `0x${'16'.repeat(20)}`,
+      depository: `0x${'17'.repeat(20)}`,
+      deltaTransformer: `0x${'18'.repeat(20)}`,
+    },
+    stablecoin: { symbol: 'USDT', address: `0x${'19'.repeat(20)}`, tokenId: 1, decimals: 6 },
+  }, getBytes(privateKey));
+  const accepted: unknown[] = [];
+  const p2p = new RuntimeP2P({
+    env: createEmptyEnv('full-scope-jurisdiction-gossip'),
+    runtimeId: signerId,
+    onEntityInputs: () => {},
+    onGossipProfiles: () => {},
+    onGossipJurisdictions: (_from, values) => accepted.push(...values),
+  });
+  const handle = Reflect.get(p2p, 'handleGossipAnnounce');
+  expect(typeof handle).toBe('function');
+
+  expect(() => Reflect.apply(handle, p2p, [signerId, {
+    profiles: [],
+    jurisdictions: Array.from({ length: 129 }, () => announcement),
+  }])).not.toThrow();
+  expect(accepted).toEqual([announcement]);
+  expect(() => Reflect.apply(handle, p2p, [signerId, {
+    profiles: [],
+    jurisdictions: Array.from({ length: 257 }, () => announcement),
+  }])).toThrow('P2P_GOSSIP_RESPONSE_JURISDICTION_BATCH_TOO_LARGE');
+});

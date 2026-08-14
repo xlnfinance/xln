@@ -37,7 +37,7 @@ import { createStructuredLogger } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
 import {
-  MAX_JURISDICTION_GOSSIP_RECORDS,
+  MAX_JURISDICTION_GOSSIP_BATCH_RECORDS,
   type JurisdictionGossipAnnouncement,
 } from '../../jurisdiction/gossip/announcement';
 import { decodeGossipProfileBatchRequest } from '../p2p/gossip/profile-batch';
@@ -512,7 +512,7 @@ const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean
   const jurisdictionValues = value['jurisdictions'];
   if (
     announced.length > DEFAULT_GOSSIP_SYNC_LIMIT ||
-    jurisdictionValues.length > MAX_JURISDICTION_GOSSIP_RECORDS ||
+    jurisdictionValues.length > MAX_JURISDICTION_GOSSIP_BATCH_RECORDS ||
     !consumeGossipBudget(ws, announced.length + jurisdictionValues.length)
   ) {
     pushDebugEvent(config.store, {

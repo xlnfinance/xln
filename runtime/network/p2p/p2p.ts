@@ -50,7 +50,7 @@ import { retryFailure } from '../../protocol/errors/failure-taxonomy';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../protocol/boundary-validation';
 import {
   decodeJurisdictionGossipAnnouncement,
-  MAX_JURISDICTION_GOSSIP_RECORDS,
+  MAX_JURISDICTION_GOSSIP_BATCH_RECORDS,
   type JurisdictionGossipAnnouncement,
 } from '../../jurisdiction/gossip/announcement';
 
@@ -142,7 +142,7 @@ const decodeGossipPayload = (value: unknown): Readonly<{ profiles: unknown[]; ju
   if (response['profiles'].length > DEFAULT_GOSSIP_BATCH_LIMIT) {
     throw new Error('P2P_GOSSIP_RESPONSE_BATCH_TOO_LARGE');
   }
-  if (response['jurisdictions'].length > MAX_JURISDICTION_GOSSIP_RECORDS) {
+  if (response['jurisdictions'].length > MAX_JURISDICTION_GOSSIP_BATCH_RECORDS) {
     throw new Error('P2P_GOSSIP_RESPONSE_JURISDICTION_BATCH_TOO_LARGE');
   }
   return { profiles: response['profiles'], jurisdictions: response['jurisdictions'] };

@@ -15,6 +15,10 @@ import { encodeCanonicalConsensusValue } from '../../protocol/serialization/cano
 
 const JURISDICTION_GOSSIP_DOMAIN = 'xln-jurisdiction-gossip-v1' as const;
 export const MAX_JURISDICTION_GOSSIP_RECORDS = 128;
+// The cache admits this many records per authority scope. A transport batch
+// must therefore carry both full scopes during reconnect without rejecting its
+// own valid cache contents.
+export const MAX_JURISDICTION_GOSSIP_BATCH_RECORDS = MAX_JURISDICTION_GOSSIP_RECORDS * 2;
 
 export const jurisdictionGossipScopeIsFull = (
   announcements: Iterable<JurisdictionGossipAnnouncement>,

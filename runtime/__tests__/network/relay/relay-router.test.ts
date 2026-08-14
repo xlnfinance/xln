@@ -410,6 +410,39 @@ describe('relay-router gossip fanout', () => {
     )).toThrow('RELAY_JURISDICTION_GOSSIP_CAP_EXCEEDED');
   });
 
+  test('accepts one reconnect batch above a single jurisdiction authority-scope cap', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID, {
+      officialFoundationSignerId: JURISDICTION_SIGNER,
+    });
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: Uint8Array) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(deserializeWsMessage(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'full-scope-source' };
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    const announcement = buildJurisdictionAnnouncement();
+
+    await relayRoute(config, wsA, {
+      type: 'gossip_announce',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      payload: {
+        profiles: [],
+        jurisdictions: Array.from({ length: 129 }, () => announcement),
+      },
+    });
+
+    expect(store.gossipJurisdictions.size).toBe(1);
+    expect(store.debugEvents.some(event => event.reason === 'GOSSIP_ANNOUNCE_RATE_LIMITED')).toBeFalse();
+  });
+
   test('serves batched gossip by ids and set filters', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
