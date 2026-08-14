@@ -2762,9 +2762,9 @@ $: ownershipPendingRelease = ownershipPendingAction?.payload.kind === "releaseCo
   ? ownershipPendingAction
   : null;
 async function releaseEntityTreasuryShares(): Promise<void> {
-  if (!activeXlnFunctions) throw new Error("COMPANY_RUNTIME_MODULE_UNAVAILABLE");
+  if (!activeXlnFunctions) throw new Error("ENTITY_SHARE_RUNTIME_MODULE_UNAVAILABLE");
   const entityId = toEntityId(currentEntityValue);
-  const signerId = resolveEntitySigner(entityId, "company-share-release");
+  const signerId = resolveEntitySigner(entityId, "entity-share-release");
   const depositoryAddress = String(replica?.state?.config?.jurisdiction?.depositoryAddress || "");
   ownershipBusy = true;
   ownershipError = "";

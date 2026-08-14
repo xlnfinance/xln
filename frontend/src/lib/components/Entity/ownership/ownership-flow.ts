@@ -23,7 +23,7 @@ const numberedEntityValue = (entityId: EntityId): bigint => {
   try {
     value = BigInt(entityId);
   } catch {
-    throw new Error(`COMPANY_NUMBERED_ENTITY_REQUIRED:${entityId || 'missing'}`);
+    throw new Error(`ENTITY_SHARE_NUMBERED_ID_REQUIRED:${entityId || 'missing'}`);
   }
   if (value <= 0n || value >= ENTITY_DIVIDEND_TOKEN_FLAG) {
     throw new Error(`ENTITY_SHARE_NUMBERED_ID_REQUIRED:${entityId || 'missing'}`);

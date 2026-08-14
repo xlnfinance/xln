@@ -11,12 +11,14 @@
   } from '$lib/stores/runtimeControllerStore';
   import {
     STACK_VERSION,
+    defaultStackStablecoinKind,
     deployStack,
     fetchStackManagerStatus,
     type StackManagerDeployResult,
     type StackManagerProbe,
     type StackManagerStatus,
     type StackPublicationRequest,
+    type StackStablecoinKind,
   } from './stack-manager-client';
   type SignerOption = Readonly<{ id: string; label: string }>;
   let rpcUrl = '';
@@ -25,7 +27,8 @@
   let keyEdited = false;
   let signerId = '';
   let foundationRecipient = '';
-  let stablecoinKind: 'existing' | 'test' = 'existing';
+  let stablecoinKind: StackStablecoinKind = 'existing';
+  let stablecoinEdited = false;
   let stablecoinAddress = '';
   let publication: StackPublicationRequest = 'local';
   let confirmations = 12;
@@ -112,6 +115,7 @@
       if (response.probe.signerId !== signerId) throw new Error('STACK_MANAGER_PROBE_SIGNER_MISMATCH');
       probe = response.probe;
       confirmations = probe.chainId === 31_337 || probe.chainId === 1_337 ? 1 : 12;
+      if (!stablecoinEdited) stablecoinKind = defaultStackStablecoinKind(probe.chainId);
     } catch (value) {
       probe = null;
       error = errorMessage(value);
@@ -216,7 +220,7 @@
       </label>
       <label>
         Stablecoin
-        <select bind:value={stablecoinKind}>
+        <select bind:value={stablecoinKind} on:change={() => stablecoinEdited = true}>
           <option value="existing">Existing 6-decimal USDT address</option>
           <option value="test">Deploy explicit test token</option>
         </select>

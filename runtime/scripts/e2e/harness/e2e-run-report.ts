@@ -75,7 +75,6 @@ export const buildE2EGateConfig = (args: CliArgs, tasks: readonly RunTask[]): Re
     pwGrep: args.pwGrep ?? null,
     pwProject: args.pwProject ?? null,
     pwFiles: [...args.pwFiles],
-    batchFiles: args.batchFiles,
     includeAllSpecs: args.includeAllSpecs,
     excludeMarketMaker: args.excludeMarketMaker,
     marketMakerOnly: args.marketMakerOnly,

@@ -2,7 +2,7 @@
   FormationPanel.svelte - Entity formation as proper panel
 
   Entity formation with jurisdiction, type, validator, and threshold controls.
-  Features: Jurisdiction, entity type (numbered/lazy/named), validators with weights, threshold.
+  Features: Jurisdiction, numbered/lazy identity, validators with weights, threshold.
 -->
 <script lang="ts">
   import { isTronChainId, type ConsensusConfig } from '@xln/runtime/api/public/runtime-module';
@@ -185,7 +185,7 @@
 
         const result = xln.createLazyEntity(entityName, boardMembers, thresholdBigInt, jurisdictionReplica);
         config = result.config;
-      } else if (entityType === 'numbered') {
+      } else {
         // Numbered entity - on-chain registration
         const registrationSignerId = mySignerAddress.trim().toLowerCase();
         if (!registrationSignerId) {
@@ -220,9 +220,6 @@
         config = creation.config;
         entityId = creation.entityId;
         numberedImported = creation.imported;
-      } else {
-        // Named entity - requires admin approval
-        throw new Error('Named entities require admin approval (not yet implemented)');
       }
 
       const localSignerId = mySignerAddress.toLowerCase();

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { Wallet, getBytes } from 'ethers';
 
 import {
+  defaultStackStablecoinKind,
   decodeStackManagerDeployResponse,
   decodeStackManagerStatusResponse,
   deployStack,
@@ -52,6 +53,12 @@ const deploymentResponse = () => ({
 });
 
 describe('Stack Manager browser boundary', () => {
+  test('defaults local development chains to an explicit test token', () => {
+    expect(defaultStackStablecoinKind(31_337)).toBe('test');
+    expect(defaultStackStablecoinKind(31_338)).toBe('test');
+    expect(defaultStackStablecoinKind(42_161)).toBe('existing');
+  });
+
   test('decodes an exact status and rejects response drift', () => {
     const valid = {
       ok: true,
