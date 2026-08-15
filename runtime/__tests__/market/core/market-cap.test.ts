@@ -131,6 +131,22 @@ test('market cap requires CONTROL and DIVIDEND and marks relay-observed prices s
   expect(missing[0]).toMatchObject({ status: 'no-price', marketCapUsdTicks: null });
 });
 
+test('rejects catalogs that assign the same USDT tokenId to different contracts', () => {
+  const divergentCatalog: MarketCapCatalog = {
+    ...catalog,
+    tokens: catalog.tokens.map(token => token.symbol === 'USDT'
+      ? { ...token, address: `0x${'b'.repeat(40)}` }
+      : token),
+  };
+  expect(() => buildEntityMarketCapEntries({
+    profiles: [profile(numberedEntityId(7), 'Seven')],
+    onlineRuntimeIds: new Set(),
+    catalogs: [catalog, divergentCatalog],
+    markets: [],
+    now: toUnixMs(1_000),
+  })).toThrow(`MARKET_CAP_CATALOG_DIVERGENCE:${jurisdictionRef}`);
+});
+
 test('top list query is exact, capped at 100, and supports canonical profile facets', () => {
   const params = new URLSearchParams(`status=fresh&role=hub&jurisdiction=${jurisdictionRef}&kind=company&sector=technology&sort=control&direction=desc&limit=10&q=seven`);
   const query = decodeMarketCapQuery(params);

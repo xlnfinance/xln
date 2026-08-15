@@ -24,6 +24,7 @@ const entityId = entity('11');
 const counterpartyId = entity('22');
 const signerId = addr('41');
 const transformerAddress = addr('51');
+const proofLockId = `0x${'71'.repeat(32)}`;
 
 const installTrustedJurisdiction = (env: ReturnType<typeof createEmptyEnv>): void => {
   const replica = createJReplica(env, jurisdiction.name, jurisdiction.depositoryAddress!);
@@ -42,8 +43,8 @@ const installObservedDispute = (state: ReturnType<typeof makeState>): string => 
   const account = state.accounts.get(counterpartyId)!;
   const proofSecret = secret('61');
   const hashlock = hashHtlcSecret(proofSecret);
-  account.state.locks.set('proof-lock', {
-    lockId: 'proof-lock',
+  account.state.locks.set(proofLockId, {
+    lockId: proofLockId,
     hashlock,
     timelock: 1_000_000n,
     revealBeforeHeight: 1_000,
@@ -79,7 +80,7 @@ const installObservedDispute = (state: ReturnType<typeof makeState>): string => 
     tokenId: 1,
     amount: 10n,
     inboundEntity: counterpartyId,
-    inboundLockId: 'proof-lock',
+    inboundLockId: proofLockId,
     createdTimestamp: state.timestamp,
   });
   return proofSecret;
@@ -147,7 +148,7 @@ describe('HTLC dispute secret publication liveness', () => {
         tokenId: 1,
         amount: 1n,
         inboundEntity: counterpartyId,
-        inboundLockId: `old-lock-${index}`,
+        inboundLockId: `0x${(index + 200).toString(16).padStart(64, '0')}`,
         createdTimestamp: state.timestamp - index - 1,
       });
     }

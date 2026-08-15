@@ -14,7 +14,11 @@ import { decodeAccountTx } from '../../../account/tx-validation';
 import { validateAccountReplica } from '../../../account/validation/state-validation';
 import { buildEntityTransactionProposalAction } from '../../../entity/auth/authorization';
 import { validateEntityTx } from '../../../entity/tx-validation';
-import { computeSwapPriceTicks, SWAP_LOT_SCALE } from '../../../orderbook/types';
+import {
+  computeSwapPriceTicks,
+  getStaticSwapTokenDimensions,
+  SWAP_LOT_SCALE,
+} from '../../../orderbook/types';
 import { exactFillRatioToUint16 } from '../../../orderbook/swap-execution';
 import type { AccountReplica, SwapOffer } from '../../../types/account';
 import { makeAccount } from '../../helpers/cross-j';
@@ -22,6 +26,7 @@ import { makeAccount } from '../../helpers/cross-j';
 const authorizationOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
   offerId: 'net-authorized-offer',
   giveTokenId: 2,
+  ...getStaticSwapTokenDimensions(2, 1),
   giveAmount: 100n,
   wantTokenId: 1,
   wantAmount: 100n,
@@ -146,6 +151,7 @@ describe('swap net authorization', () => {
     const data = {
       offerId: 'schema-offer',
       giveTokenId: 1,
+      ...getStaticSwapTokenDimensions(1, 2),
       giveAmount: 100n,
       wantTokenId: 2,
       wantAmount: 100n,
@@ -166,6 +172,7 @@ describe('swap net authorization', () => {
         counterpartyEntityId: 'hub',
         offerId: 'nested-storage-offer',
         giveTokenId: 1,
+        ...getStaticSwapTokenDimensions(1, 2),
         giveAmount: 100n,
         wantTokenId: 2,
         wantAmount: 90n,
@@ -191,6 +198,7 @@ describe('swap net authorization', () => {
       data: {
         offerId: 'committed-authorization',
         giveTokenId: 1,
+        ...getStaticSwapTokenDimensions(1, 2),
         giveAmount: amount,
         wantTokenId: 2,
         wantAmount: amount,
@@ -209,6 +217,7 @@ describe('swap net authorization', () => {
       data: {
         offerId: 'invalid-authorization',
         giveTokenId: 1,
+        ...getStaticSwapTokenDimensions(1, 2),
         giveAmount: amount,
         wantTokenId: 2,
         wantAmount: amount,

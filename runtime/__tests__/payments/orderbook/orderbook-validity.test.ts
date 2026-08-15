@@ -1,15 +1,35 @@
 import { describe, expect, test } from 'bun:test';
 
 import { applyCommand, createBook, type BookState } from '../../../orderbook/core';
-import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
-import { createOrderbookExtState, ORDERBOOK_PRICE_SCALE, replaceOrderbookPair, SWAP_LOT_SCALE } from '../../../orderbook/types';
+import {
+  createOrderbookExtState,
+  getStaticSwapTokenDimensions,
+  ORDERBOOK_PRICE_SCALE,
+  replaceOrderbookPair,
+  SWAP_LOT_SCALE,
+} from '../../../orderbook/types';
 import { validateBookAgainstOffers, validateBookStructure, validateEntityOrderbooks } from '../../../orderbook/validity';
 import type { AccountReplica, SwapOffer } from '../../../types/account';
 import type { EntityState } from '../../../entity/types';
+import {
+  addr,
+  entity,
+  makeAccount as makeTestAccount,
+  makeJurisdiction,
+  makeState as makeTestState,
+} from '../../helpers/cross-j';
+
+const aliceId = entity('aa');
+const hubId = entity('bb');
+const ghostId = entity('cc');
+const wrongOwnerId = entity('dd');
+const offerKey = `${aliceId}:offer-1`;
+const ghostKey = `${ghostId}:offer-x`;
 
 const makeOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
   offerId: 'offer-1',
   giveTokenId: 2,
+  ...getStaticSwapTokenDimensions(2, 1),
   giveAmount: SWAP_LOT_SCALE,
   wantTokenId: 1,
   wantAmount: (SWAP_LOT_SCALE * 1000n) / ORDERBOOK_PRICE_SCALE,
@@ -20,52 +40,20 @@ const makeOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
   ...overrides,
 });
 
-const makeAccount = (offerId: string, offer: SwapOffer): AccountReplica =>
-  ({
-    state: {
-      leftEntity: 'alice',
-      rightEntity: 'hub',
-      domain: {
-        chainId: 31337,
-        depositoryAddress: '0x1111111111111111111111111111111111111111',
-      },
-      watchSeed: `0x${'11'.repeat(32)}`,
-      deltas: new Map(),
-      locks: new Map(),
-      swapOffers: new Map([[offerId, offer]]),
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
-      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-      lastFinalizedJHeight: 0,
-      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-      jNonce: 0,
-    },
-    status: 'active',
-    mempool: [],
-    currentFrame: {
-      height: 0,
-      timestamp: 0,
-      jHeight: 0,
-      accountTxs: [],
-      prevFrameHash: '',
-      accountStateRoot: `0x${'00'.repeat(32)}`,
-      deltas: [],
-      stateHash: '',
-      byLeft: true,
-    },
-    currentHeight: 0,
-    pendingSignatures: [],
-    rollbackCount: 0,
-    proofHeader: { fromEntity: 'alice', toEntity: 'hub', nextProofNonce: 1 },
-    proofBody: { tokenIds: [], deltas: [] },
-    pendingWithdrawals: new Map(),
-    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+const makeAccount = (offerId: string, offer: SwapOffer): AccountReplica => {
+  const account = makeTestAccount(aliceId, hubId, {
+    chainId: 31_337,
+    depositoryAddress: addr('11'),
   });
+  account.state.swapOffers = new Map([[offerId, offer]]);
+  return account;
+};
 
 const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): EntityState => {
+  const jurisdiction = makeJurisdiction('orderbook-validity', 31_337, '11', '12');
+  const state = makeTestState(hubId, addr('13'), jurisdiction, aliceId);
   const orderbookExt = createOrderbookExtState({
-    entityId: 'hub',
+    entityId: hubId,
     name: 'Hub',
     spreadDistribution: {
       makerBps: 0,
@@ -75,29 +63,16 @@ const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): E
       takerReferrerBps: 0,
     },
     referenceTokenId: 2,
-    usdQuoteAuthorityEntityId: 'alice',
+    usdQuoteAuthorityEntityId: aliceId,
     minTradeSize: 0n,
     supportedPairs: ['1/2'],
   });
   replaceOrderbookPair(orderbookExt, '1/2', book);
-
-  return ({
-    entityId: 'hub',
-    height: 1,
-    timestamp: 0,
-    nonces: new Map(),
-    proposals: new Map(),
-    config: {} as EntityState['config'],
-    reserves: new Map(),
-    accounts: new Map([['alice', makeAccount(offerId, offer)]]),
-    lastFinalizedJHeight: 0,
-    jBlockChain: [],
-    profile: { name: 'Hub', isHub: true, avatar: '', bio: '', website: '' },
-    htlcRoutes: new Map(),
-    htlcFeesEarned: 0n,
-    orderbookExt,
-    lockBook: new Map(),
-  }) as EntityState;
+  state.timestamp = 0;
+  state.profile = { name: 'Hub', isHub: true, avatar: '', bio: '', website: '' };
+  state.accounts.set(aliceId, makeAccount(offerId, offer));
+  state.orderbookExt = orderbookExt;
+  return state;
 };
 
 describe('orderbook validity', () => {
@@ -106,8 +81,8 @@ describe('orderbook validity', () => {
       createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
       {
         kind: 0,
-        ownerId: 'hub',
-        orderId: 'alice:offer-1',
+        ownerId: hubId,
+        orderId: offerKey,
         side: 1,
         tif: 0,
         postOnly: false,
@@ -127,8 +102,8 @@ describe('orderbook validity', () => {
     let book = createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 });
     book = applyCommand(book, {
       kind: 0,
-      ownerId: 'wrong-owner',
-      orderId: 'alice:offer-1',
+      ownerId: wrongOwnerId,
+      orderId: offerKey,
       side: 1,
       tif: 0,
       postOnly: false,
@@ -137,8 +112,8 @@ describe('orderbook validity', () => {
     }).state;
     book = applyCommand(book, {
       kind: 0,
-      ownerId: 'ghost',
-      orderId: 'ghost:offer-x',
+      ownerId: ghostId,
+      orderId: ghostKey,
       side: 1,
       tif: 0,
       postOnly: false,
@@ -148,9 +123,9 @@ describe('orderbook validity', () => {
 
     const report = validateBookAgainstOffers(makeState(book));
     expect(report.ok).toBe(false);
-    expect(report.orphanedInBook).toContain('ghost:offer-x');
-    expect(report.mismatched.some((item) => item.swapKey === 'alice:offer-1' && item.field === 'priceTicks')).toBe(true);
-    expect(report.mismatched.some((item) => item.swapKey === 'alice:offer-1' && item.field === 'ownerId')).toBe(true);
+    expect(report.orphanedInBook).toContain(ghostKey);
+    expect(report.mismatched.some((item) => item.swapKey === offerKey && item.field === 'priceTicks')).toBe(true);
+    expect(report.mismatched.some((item) => item.swapKey === offerKey && item.field === 'ownerId')).toBe(true);
   });
 
   test('reports invalid open offers that cannot be represented in the book', () => {
@@ -158,7 +133,7 @@ describe('orderbook validity', () => {
     const invalidOffer = makeOffer({ giveAmount: SWAP_LOT_SCALE - 1n });
     const report = validateBookAgainstOffers(makeState(book, 'offer-1', invalidOffer));
     expect(report.ok).toBe(false);
-    expect(report.invalidOffers).toEqual([{ swapKey: 'alice:offer-1', reason: 'lot-misaligned' }]);
+    expect(report.invalidOffers).toEqual([{ swapKey: offerKey, reason: 'lot-misaligned' }]);
   });
 
   test('accepts offers with priceTicks above qty-lot limits', () => {
@@ -167,8 +142,8 @@ describe('orderbook validity', () => {
       createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
       {
         kind: 0,
-        ownerId: 'hub',
-        orderId: 'alice:offer-1',
+        ownerId: hubId,
+        orderId: offerKey,
         side: 1,
         tif: 0,
         postOnly: false,
@@ -190,8 +165,8 @@ describe('orderbook validity', () => {
       createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
       {
         kind: 0,
-        ownerId: 'hub',
-        orderId: 'alice:offer-1',
+        ownerId: hubId,
+        orderId: offerKey,
         side: 1,
         tif: 0,
         postOnly: false,
@@ -217,8 +192,8 @@ describe('orderbook validity', () => {
       createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
       {
         kind: 0,
-        ownerId: 'hub',
-        orderId: 'alice:offer-1',
+        ownerId: hubId,
+        orderId: offerKey,
         side: 1,
         tif: 0,
         postOnly: false,
@@ -229,15 +204,15 @@ describe('orderbook validity', () => {
 
     const state = makeState(book);
     state.orderbookExt!.orderPairs = new Map([
-      ['alice:offer-1', ['9/9']],
-      ['ghost:offer-x', ['4/6']],
+      [offerKey, ['9/9']],
+      [ghostKey, ['4/6']],
     ]);
 
     const report = validateBookAgainstOffers(state);
     expect(report.ok).toBe(false);
     expect(
       report.mismatched.some((item) =>
-        item.swapKey === 'alice:offer-1'
+        item.swapKey === offerKey
         && item.field === 'pairIndex'
         && item.expected === '1/2'
         && item.actual === '9/9',
@@ -245,7 +220,7 @@ describe('orderbook validity', () => {
     ).toBe(true);
     expect(
       report.mismatched.some((item) =>
-        item.swapKey === 'ghost:offer-x'
+        item.swapKey === ghostKey
         && item.field === 'pairIndex'
         && item.expected === ''
         && item.actual === '4/6',

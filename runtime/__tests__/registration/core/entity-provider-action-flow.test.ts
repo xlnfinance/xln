@@ -1067,7 +1067,9 @@ describe('EntityProvider action flow', () => {
       const releaseResult = await applyEntityTx(env, afterTransfer, {
         type: 'entityProviderReleaseControlShares',
         data: {
-          recipientAddress: signerId,
+          // Share issuance enters custody first so the ERC1155 callback can
+          // atomically register the asset and credit the Entity reserve.
+          recipientAddress: adapter.addresses.depository,
           controlAmount: 3n,
           dividendAmount: 4n,
           purpose: 'BrowserVM integration',

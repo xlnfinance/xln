@@ -994,11 +994,12 @@ const handleAccountAckPhase = async (
   return unmatched ? { kind: 'return', result: unmatched } : { kind: 'continue', ackProcessed };
 };
 
-const handleStandaloneDispute = async (session: AccountInputSession): Promise<HandleAccountInputResult> => {
-  const { account, input, securityContext, events } = session;
-  if (input.kind !== 'dispute') {
-    throw new Error(`ACCOUNT_DISPUTE_PHASE_KIND_INVALID:${input.kind}`);
-  }
+const handleStandaloneDispute = async (
+  account: AccountReplica,
+  input: Extract<AccountPeerInput, { kind: 'dispute' }>,
+  securityContext: AccountInputSecurityContext,
+  events: string[],
+): Promise<HandleAccountInputResult> => {
   try {
     const seal = await validateCounterpartyDisputeSeal(
       account,
@@ -1057,7 +1058,6 @@ const handleAccountProposalPhase = async (
   } catch (error) {
     return rejectAccountPeerEvidenceError(error, events);
   }
-  if (input.kind === 'dispute') return handleStandaloneDispute(session);
   const incoming = await handleIncomingAccountFrame(
     context,
     account,
@@ -1135,8 +1135,33 @@ export async function applyAccountInput(
   if (input.kind === 'external_finality') {
     return applyExternalFinalityInput(account, input);
   }
+  return applyPeerAccountInput(context, account, input, providedSecurityContext);
+}
+
+const applyPeerAccountInput = async (
+  context: AccountConsensusContext,
+  account: AccountReplica,
+  input: Exclude<AccountInput, { kind: 'txs' | 'external_finality' }>,
+  providedSecurityContext: AccountInputSecurityContext | undefined,
+): Promise<HandleAccountInputResult> => {
   const accountJClaimNodeStore = context.jClaimNodeStore;
   const securityContext = resolveAccountInputSecurityContext(context, account, providedSecurityContext);
+  if (input.kind === 'dispute') {
+    const events: string[] = [];
+    const disputeHankoShapeError = getDisputeHankoShapeError(input);
+    if (disputeHankoShapeError) {
+      return rejectAccountPeerInput(
+        'ACCOUNT_PEER_HANKO_SHAPE_INVALID',
+        disputeHankoShapeError,
+        events,
+      );
+    }
+    // A standalone dispute witness is sequenced by its signed proof nonce, not
+    // by an Account frame height. Route it before frame-height normalization so
+    // adversarial peer evidence can only be accepted or rejected, never turn a
+    // valid heightless protocol lane into a local-bug Runtime halt.
+    return handleStandaloneDispute(account, input, securityContext, events);
+  }
   const heightNormalization = normalizeAccountInputHeight(input);
   if (!heightNormalization.ok) {
     return rejectAccountPeerInput(
@@ -1206,4 +1231,4 @@ export async function applyAccountInput(
       committedFrames: session.committedFrames,
     }),
   }));
-}
+};

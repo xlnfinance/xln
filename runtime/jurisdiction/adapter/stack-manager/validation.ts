@@ -182,6 +182,11 @@ export const decodeJurisdictionStackManifest = (value: unknown): JurisdictionSta
     name,
     decodeDeployment(deploymentsInput[name], name),
   ])) as Record<StackContractName, StackContractDeployment>;
+  for (const name of CONTRACT_NAMES) {
+    if (contracts[name] !== deployments[name].address) {
+      throw new Error(`STACK_MANAGER_CONTRACT_DEPLOYMENT_ADDRESS_MISMATCH:${name}`);
+    }
+  }
   const registeredTokens = record(manifest['registeredTokens'], 'STACK_MANAGER_TOKENS_INVALID');
   exactKeys(registeredTokens, ['USDT'], [], 'STACK_MANAGER_TOKEN_KEYS_INVALID');
   const usdt = record(registeredTokens['USDT'], 'STACK_MANAGER_USDT_INVALID');

@@ -4,7 +4,7 @@
  * outside those compiler-declared slots rejects the deployment. [99/100]
  */
 
-import { JsonRpcProvider } from 'ethers';
+import { Interface, JsonRpcProvider } from 'ethers';
 import { readFile } from 'node:fs/promises';
 import type { JurisdictionStackManifest, StackContractName } from './types';
 import { bindCompilerImmutables, readCompilerBytecodeEvidence } from './compiler-bytecode';
@@ -39,6 +39,35 @@ const LIBRARY_ADDRESSES: Readonly<Record<string, StackContractName>> = {
 const SOLIDITY_LIBRARY_NAMES = new Set<StackContractName>([
   'account', 'depositoryBounds', 'hashLadderRegistry', 'nftCustody', 'hankoVerifier',
 ]);
+
+const DEPOSITORY_REGISTRATION_INTERFACE = new Interface([
+  'function registerExternalToken(uint8 tokenType,address contractAddress,uint256 externalTokenId)',
+]);
+
+type StablecoinRegistrationTransaction = Readonly<{
+  from: string;
+  to: string | null;
+  data: string;
+}>;
+
+export const assertCanonicalStablecoinRegistration = (
+  transaction: StablecoinRegistrationTransaction,
+  manifest: JurisdictionStackManifest,
+): void => {
+  if (transaction.from.toLowerCase() !== manifest.deployer.toLowerCase()) {
+    throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_SENDER_MISMATCH');
+  }
+  if ((transaction.to || '').toLowerCase() !== manifest.contracts.depository.toLowerCase()) {
+    throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_TARGET_MISMATCH');
+  }
+  const expectedData = DEPOSITORY_REGISTRATION_INTERFACE.encodeFunctionData(
+    'registerExternalToken',
+    [0, manifest.registeredTokens.USDT.address, 0],
+  ).toLowerCase();
+  if (transaction.data.toLowerCase() !== expectedData) {
+    throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
+  }
+};
 
 const artifactUrl = (path: string): URL =>
   new URL(`../../../../jurisdictions/artifacts/${path}`, import.meta.url);
@@ -157,6 +186,9 @@ export const verifyJurisdictionStack = async (
     }
   }
   const registration = manifest.evmContracts.stablecoinRegistration;
+  const registrationTransaction = await provider.getTransaction(registration.transactionHash);
+  if (!registrationTransaction) throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_TX_MISSING');
+  assertCanonicalStablecoinRegistration(registrationTransaction, manifest);
   const registrationReceipt = await provider.getTransactionReceipt(registration.transactionHash);
   if (
     !registrationReceipt ||

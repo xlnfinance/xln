@@ -37,6 +37,7 @@ export type MarketCapCatalog = Readonly<{
 
 export type EntityShareMarketPair = Readonly<{
   entityNumber: bigint;
+  quoteTokenAddress: string | null;
   controlPairId: string | null;
   dividendPairId: string | null;
 }>;
@@ -137,6 +138,7 @@ export const buildShareMarketPairs = (
     const dividend = shareToken(catalog.tokens, catalog.entityProviderAddress, entityNumber, 'DIVIDEND');
     pairs.set(entityNumber.toString(), {
       entityNumber,
+      quoteTokenAddress: usdt?.address.toLowerCase() ?? null,
       controlPairId: usdt && control ? pairId(usdt.tokenId, control.tokenId) : null,
       dividendPairId: usdt && dividend ? pairId(usdt.tokenId, dividend.tokenId) : null,
     });
@@ -176,6 +178,7 @@ const sameSharePairs = (
     if (
       !candidate
       || candidate.entityNumber !== pair.entityNumber
+      || candidate.quoteTokenAddress !== pair.quoteTokenAddress
       || candidate.controlPairId !== pair.controlPairId
       || candidate.dividendPairId !== pair.dividendPairId
     ) return false;

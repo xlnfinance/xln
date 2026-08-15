@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { Wallet, getBytes } from 'ethers';
+import { Interface, Wallet, getBytes } from 'ethers';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -16,6 +16,7 @@ import {
   buildStackManagerChildEnv,
   deployJurisdictionStack,
 } from '../../jurisdiction/adapter/stack-manager/deploy';
+import { assertCanonicalStablecoinRegistration } from '../../jurisdiction/adapter/stack-manager/verification';
 import { validateJurisdictionsDataValue } from '../../jurisdiction/adapter/core/jurisdiction-loader';
 import {
   computeJurisdictionGossipHash,
@@ -132,6 +133,31 @@ describe('Stack Manager exact boundaries', () => {
     const missing = manifest();
     delete (missing.contracts as Record<string, unknown>)['account'];
     expect(() => decodeJurisdictionStackManifest(missing)).toThrow('STACK_MANAGER_CONTRACT_KEYS_INVALID');
+    const mismatched = manifest();
+    mismatched.contracts.account = address('f');
+    expect(() => decodeJurisdictionStackManifest(mismatched))
+      .toThrow('STACK_MANAGER_CONTRACT_DEPLOYMENT_ADDRESS_MISMATCH:account');
+  });
+
+  test('binds the stablecoin registration to deployer, Depository and exact USDT identity', () => {
+    const decoded = decodeJurisdictionStackManifest(manifest());
+    const codec = new Interface([
+      'function registerExternalToken(uint8 tokenType,address contractAddress,uint256 externalTokenId)',
+    ]);
+    const canonical = {
+      from: decoded.deployer,
+      to: decoded.contracts.depository,
+      data: codec.encodeFunctionData('registerExternalToken', [0, decoded.registeredTokens.USDT.address, 0]),
+    };
+    expect(() => assertCanonicalStablecoinRegistration(canonical, decoded)).not.toThrow();
+    expect(() => assertCanonicalStablecoinRegistration({ ...canonical, from: foundation }, decoded))
+      .toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_SENDER_MISMATCH');
+    expect(() => assertCanonicalStablecoinRegistration({ ...canonical, to: decoded.contracts.account }, decoded))
+      .toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_TARGET_MISMATCH');
+    expect(() => assertCanonicalStablecoinRegistration({
+      ...canonical,
+      data: codec.encodeFunctionData('registerExternalToken', [0, address('b'), 0]),
+    }, decoded)).toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
   });
 
   test('keeps arbitrary-RPC status behind operator authority', () => {
