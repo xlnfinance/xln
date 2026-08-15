@@ -217,6 +217,27 @@ const stageBudgetsMs = {
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
+const runProductionSwapLoadSmoke = (): void => {
+  if (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] !== '1') return;
+  const swaps = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SWAPS'] || '1';
+  recordStage('production-swap-load:start', { mode: 'same', burstSize: swaps });
+  const worker = join(
+    repoRoot,
+    'runtime/scripts/operations/benchmark/production-swap-load/worker.ts',
+  );
+  const result = spawnSync(process.execPath, [
+    worker,
+    '--work-dir', workDir,
+    '--port-base', String(portBase),
+    '--mode', 'same',
+    '--swaps', swaps,
+  ], { cwd: repoRoot, env: inheritedProcessEnv, stdio: 'inherit' });
+  if (result.status !== 0) {
+    throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_FAILED:${String(result.status)}`);
+  }
+  recordStage('production-swap-load:complete', { mode: 'same', burstSize: swaps });
+};
+
 const recordStage = (stage: string, details?: unknown): void => {
   const entry: BootstrapStage = {
     stage,
@@ -1099,6 +1120,8 @@ const main = async (): Promise<void> => {
     }
     recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));
   }
+
+  runProductionSwapLoadSmoke();
 
   // Optional adversary branch AFTER same+cross books are green. Profiles only
   // exercise orchestrator recovery — they never alter MM quote formulas.

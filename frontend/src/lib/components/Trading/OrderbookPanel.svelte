@@ -171,7 +171,7 @@
     const normalized = raw
       .map((id) => String(id || '').trim().toLowerCase())
       .filter(Boolean);
-    return Array.from(new Set(normalized));
+    return Array.from(new Set(normalized)).sort();
   }
 
   function sourceLabelFor(actualSources: string[], expectedCount: number, status: SourceStatus = 'ready'): string {

@@ -115,6 +115,47 @@ test('market subscription stack fetches only the explicitly selected connected H
   stack.clear();
 });
 
+test('explicit Hub selection leaves follow-all mode without retaining old venues', async () => {
+  const ws = makeSocket('10.0.0.8');
+  const fetchedHubIds: string[] = [];
+  const stack = createMarketSubscriptionStack<FakeSocket>({
+    maxSubscriptions: 2,
+    maxSubscriptionsPerIp: 1,
+    maxCellsPerSubscription: 4,
+    getClientIp: socket => socket.ip,
+    getConnectedHubEntityIds: () => [HUB_ID, SECOND_HUB_ID],
+    fetchSnapshots: (hubEntityId, pairIds, depth) => {
+      fetchedHubIds.push(hubEntityId);
+      return pairIds.map(pairId => makeSnapshot(hubEntityId, pairId, depth));
+    },
+  });
+
+  await stack.handleMessage(ws, {
+    type: 'market_subscribe',
+    id: 'sub-follow-all',
+    pairs: ['1/3'],
+    depth: 5,
+  });
+  fetchedHubIds.length = 0;
+
+  await stack.handleMessage(ws, {
+    type: 'market_subscribe',
+    id: 'sub-explicit',
+    hubEntityIds: [SECOND_HUB_ID],
+    pairs: ['1/3'],
+    depth: 5,
+    replace: false,
+  });
+
+  expect(fetchedHubIds).toEqual([SECOND_HUB_ID]);
+  expect(ws.sent.at(-2)).toMatchObject({
+    type: 'ack',
+    inReplyTo: 'sub-explicit',
+    data: { hubEntityIds: [SECOND_HUB_ID] },
+  });
+  stack.clear();
+});
+
 test('market subscription stack accepts cross-j venue ids without numeric-pair coercion', async () => {
   const ws = makeSocket('10.0.0.2');
   const stack = createMarketSubscriptionStack<FakeSocket>({

@@ -461,4 +461,11 @@ describe('swap panel helpers', () => {
       'availableAccountIds.find((id) => hubAccountIds.includes(id)) || activeOrderAccountId',
     );
   });
+
+  test('OrderbookPanel sends canonical sorted Hub subscriptions', async () => {
+    const panel = await Bun.file('frontend/src/lib/components/Trading/OrderbookPanel.svelte').text();
+    const start = panel.indexOf('function uniqueSourceHubIds');
+    const end = panel.indexOf('function sourceLabelFor', start);
+    expect(panel.slice(start, end)).toContain('Array.from(new Set(normalized)).sort()');
+  });
 });

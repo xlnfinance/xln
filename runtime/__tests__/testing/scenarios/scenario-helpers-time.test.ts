@@ -24,4 +24,17 @@ describe('scenario helper time ownership', () => {
 
     expect(env.state.timestamp).toBe(1_000);
   });
+
+  test('processUntil does not advance the clock after its satisfying frame', async () => {
+    const env = createEmptyEnv('scenario-helper-terminal-clock');
+    env.scenarioMode = true;
+    env.state.timestamp = 1_000;
+    let satisfied = false;
+
+    await processUntil(env, () => satisfied, 2, 'terminal-clock', () => {
+      satisfied = true;
+    });
+
+    expect(env.state.timestamp).toBe(1_000);
+  });
 });

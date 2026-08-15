@@ -69,8 +69,11 @@ const buildSubscription = (
   replace: boolean,
   followsConnectedHubs: boolean,
 ): MarketSubscription => {
-  const followAll = followsConnectedHubs || (!replace && existing?.followsConnectedHubs === true);
-  const hubSet = replace || !existing || followAll ? new Set<string>() : new Set(existing.hubIds);
+  const followAll = followsConnectedHubs;
+  const leavesFollowAll = !followAll && existing?.followsConnectedHubs === true;
+  const hubSet = replace || !existing || followAll || leavesFollowAll
+    ? new Set<string>()
+    : new Set(existing.hubIds);
   const pairSet = replace || !existing ? new Set<string>() : new Set(existing.pairIds);
   hubIds.forEach(hubId => hubSet.add(hubId));
   pairIds.forEach(pairId => pairSet.add(pairId));

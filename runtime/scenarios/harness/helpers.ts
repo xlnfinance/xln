@@ -589,10 +589,14 @@ export async function processUntil(
     // Check first
     if (predicate()) return;
 
+    // Time is input to the next frame. Advance only when a previous frame did
+    // not satisfy the predicate; advancing after the terminal frame would put
+    // live state ahead of the last durable WAL frame.
+    if (round > 0) advanceScenarioTime(env);
+
     // Process local state
     await process(env);
     onTick?.(round + 1);
-    advanceScenarioTime(env);
 
     // Yield to event loop to allow WS messages to be received
     await new Promise(resolve => setTimeout(resolve, 10));
