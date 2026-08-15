@@ -810,6 +810,39 @@ test('market maker advances only the cross quote slot that committed a close', (
     .toEqual(replenished.map(spec => [spec.offerId, spec.crossJurisdiction?.routeHash]));
 });
 
+test('market maker does not reuse a terminal cross route after bounded close history prunes it', () => {
+  const { env, contexts, visibleHubs } = buildBootstrapTopology();
+  const sourceContext = contexts[0]!;
+  const targetContext = contexts[1]!;
+  const sourceHub = visibleHubs[0]!;
+  const targetHub = visibleHubs[1]!;
+  const sourceAccount = makeAccount(sourceContext.entityId, sourceHub.entityId);
+  addReplica(env, sourceContext.entityId, sourceContext.signerId, new Map([[sourceHub.entityId, sourceAccount]]));
+  addReplica(env, targetContext.entityId, targetContext.signerId);
+  const build = () => buildMarketMakerCrossOfferSpecs(
+    env,
+    sourceContext,
+    targetContext,
+    [sourceHub],
+    [targetHub],
+    [1],
+    [1],
+  );
+  const terminal = build()[0]!;
+  const sourceReplica = env.state.eReplicas.get(`${sourceContext.entityId}:${sourceContext.signerId}`)!;
+  sourceReplica.state.crossJurisdictionSwaps = new Map([[terminal.offerId, {
+    ...terminal.crossJurisdiction!,
+    status: 'settled',
+    updatedAt: env.state.timestamp + 7,
+    settledAt: env.state.timestamp + 7,
+  }]]);
+  sourceAccount.swapClosedOrders.clear();
+
+  const replenished = build();
+  expect(replenished[0]!.offerId).not.toBe(terminal.offerId);
+  expect(build().map(spec => spec.offerId)).toEqual(replenished.map(spec => spec.offerId));
+});
+
 test('market maker finalized cross matching requires the exact immutable route hash', () => {
   const { env, contexts, visibleHubs } = buildBootstrapTopology();
   const sourceContext = contexts[0]!;

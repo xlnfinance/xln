@@ -198,7 +198,7 @@ import {
   normalizeRuntimeFailureCode,
 } from '../protocol/errors/failure-taxonomy';
 import { STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
-import { deriveManagedSignerInventory, deriveMeshChildSeed, readMeshSeedOverrides, requireMeshRootSeed } from './mesh/mesh-seeds';
+import { deriveManagedSignerInventory, deriveMeshChildSeed, readMeshSeedOverrides, requireMeshRootSeed, resolveMeshRuntimeSeed } from './mesh/mesh-seeds';
 import {
   createResetCoordinator,
   resolveActiveResetOptions,
@@ -362,8 +362,7 @@ const radapterAuthSeeds = readMeshSeedOverrides(
   process.env['XLN_MESH_RADAPTER_AUTH_SEEDS_JSON'],
   'XLN_MESH_RADAPTER_AUTH_SEEDS_JSON',
 );
-const runtimeSeedFor = (name: string): string =>
-  runtimeSeedOverrides[name.toUpperCase()] || deriveMeshChildSeed(meshRootSeed, `runtime:${name}`);
+const runtimeSeedFor = (name: string): string => resolveMeshRuntimeSeed(meshRootSeed, runtimeSeedOverrides, name);
 const radapterAuthSeedFor = (name: string): string =>
   radapterAuthSeeds[name.toUpperCase()] || deriveMeshChildSeed(meshRootSeed, `radapter:${name}`);
 

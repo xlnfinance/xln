@@ -27,6 +27,7 @@ import { resolveCrossJurisdictionRuntimeTopology } from '../../../extensions/cro
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
+  isCrossJurisdictionTerminalStatus,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j/index';
 import { crossJurisdictionBookOwnerRef } from '../../../extensions/cross-j/orderbook';
@@ -1431,7 +1432,9 @@ const buildMarketMakerCrossRouteBase = (
   };
 };
 
-const latestClosedCrossOfferGeneration = (
+const latestCommittedCrossOfferGeneration = (
+  env: RuntimeReplica,
+  sourceEntityId: string,
   account: AccountReplica | null | undefined,
   offerSlotPrefix: string,
   offerSlotSuffix: string,
@@ -1442,12 +1445,24 @@ const latestClosedCrossOfferGeneration = (
       generation = Math.max(generation, order.lastUpdatedHeight);
     }
   }
+  const sourceReplica = getEntityReplicaById(env, sourceEntityId);
+  for (const [offerId, route] of sourceReplica?.state.crossJurisdictionSwaps ?? []) {
+    if (
+      isCrossJurisdictionTerminalStatus(route.status) &&
+      offerId.startsWith(offerSlotPrefix) &&
+      offerId.endsWith(offerSlotSuffix)
+    ) {
+      generation = Math.max(generation, route.updatedAt);
+    }
+  }
   return generation;
 };
 
 type CrossOfferSlot = Readonly<{ prefix: string; suffix: string; draftId: string }>;
 
 const buildCrossOfferSlot = (
+  env: RuntimeReplica,
+  sourceEntityId: string,
   account: AccountReplica | null | undefined,
   sourceHubSuffix: string,
   targetHubSuffix: string,
@@ -1457,7 +1472,13 @@ const buildCrossOfferSlot = (
 ): CrossOfferSlot => {
   const prefix = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${sourceTokenId}-${targetTokenId}-`;
   const suffix = `-sell-${levelId}`;
-  const generation = latestClosedCrossOfferGeneration(account, prefix, suffix);
+  const generation = latestCommittedCrossOfferGeneration(
+    env,
+    sourceEntityId,
+    account,
+    prefix,
+    suffix,
+  );
   return { prefix, suffix, draftId: `${prefix}generation-${generation}${suffix}` };
 };
 
@@ -1568,7 +1589,7 @@ export const buildMarketMakerCrossOfferSpecs = (
           if (quoteAmount < minimumTradeAmount(oriented.quoteTokenId)) continue;
           if (!isWithinPairBand(canonicalMidTicks, amounts.priceTicks)) continue;
           const offerSlot = buildCrossOfferSlot(
-            sourceAccount, sourceHubSuffix, targetHubSuffix,
+            env, sourceContext.entityId, sourceAccount, sourceHubSuffix, targetHubSuffix,
             pair.sourceTokenId, pair.targetTokenId, levelId,
           );
           // A terminal cross-j route remains durable evidence, so reusing its

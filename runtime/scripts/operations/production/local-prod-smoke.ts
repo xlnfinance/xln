@@ -220,7 +220,13 @@ const stageBudgetsMs = {
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
-const runProductionSwapWorker = (mode: string, swaps: string): void => {
+type RestartProcessIds = Readonly<{ before: number; after: number }>;
+
+const runProductionSwapWorker = (
+  mode: string,
+  swaps: string,
+  restartProcessIds?: RestartProcessIds,
+): void => {
   const worker = join(
     repoRoot,
     'runtime/scripts/operations/benchmark/production-swap-load/worker.ts',
@@ -231,6 +237,10 @@ const runProductionSwapWorker = (mode: string, swaps: string): void => {
     '--port-base', String(portBase),
     '--mode', mode,
     '--swaps', swaps,
+    ...(restartProcessIds ? [
+      '--server-pid-before-restart', String(restartProcessIds.before),
+      '--server-pid-after-restart', String(restartProcessIds.after),
+    ] : []),
   ], { cwd: repoRoot, env: inheritedProcessEnv, stdio: 'inherit' });
   if (result.status !== 0) {
     throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_FAILED:${mode}:${String(result.status)}`);
@@ -250,10 +260,10 @@ const runProductionSwapLoadSmoke = async (): Promise<void> => {
     throw new Error('LOCAL_PROD_SMOKE_SWAP_LOAD_RECOVERY_REQUIRES_CROSS_N1');
   }
   recordStage('production-swap-load:restart-start');
-  await restartManaged('server');
+  const restartProcessIds = await restartManaged('server');
   await waitForHealth();
   recordStage('production-swap-load:restart-ready');
-  runProductionSwapWorker('cross-recovery', '1');
+  runProductionSwapWorker('cross-recovery', '1', restartProcessIds);
   recordStage('production-swap-load:recovery-complete');
 };
 
@@ -362,7 +372,12 @@ const assertNoFatalChildLogs = (stage: string): void => {
   }
 };
 
-const startManaged = (name: string, command: string, args: string[], env: Record<string, string>): void => {
+const startManaged = (
+  name: string,
+  command: string,
+  args: string[],
+  env: Record<string, string>,
+): ManagedProcess => {
   mkdirSync(workDir, { recursive: true });
   const out = openSync(logPath(name), 'a');
   const proc = spawn(command, args, {
@@ -375,19 +390,25 @@ const startManaged = (name: string, command: string, args: string[], env: Record
     stdio: ['ignore', out, out],
   });
   closeSync(out);
-  children.push({ name, proc, command, args: [...args], env: { ...env } });
+  const managed = { name, proc, command, args: [...args], env: { ...env } };
+  children.push(managed);
+  return managed;
 };
 
-const restartManaged = async (name: string): Promise<void> => {
+const restartManaged = async (name: string): Promise<RestartProcessIds> => {
   const current = children.findLast(child => child.name === name && child.proc.exitCode === null);
   if (!current?.proc.pid) throw new Error(`LOCAL_PROD_SMOKE_PROCESS_NOT_RUNNING:${name}`);
+  const before = current.proc.pid;
   await stopProcessGroup({
-    pid: current.proc.pid,
+    pid: before,
     termTimeoutMs: 5_000,
     killTimeoutMs: 5_000,
     timeoutError: `LOCAL_PROD_SMOKE_RESTART_TIMEOUT:name=${name}:pid=${current.proc.pid}`,
   });
-  startManaged(current.name, current.command, current.args, current.env);
+  const restarted = startManaged(current.name, current.command, current.args, current.env);
+  const after = restarted.proc.pid;
+  if (!after || after === before) throw new Error(`LOCAL_PROD_SMOKE_PROCESS_NOT_REPLACED:${name}:${before}`);
+  return { before, after };
 };
 
 const readClosedStorageHead = async (path: string): Promise<StorageHead> => {

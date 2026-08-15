@@ -13,6 +13,7 @@ import {
   selectMarketMakerCrossRoute,
 } from '../../../scripts/operations/benchmark/production-swap-load/cross/cross-boundary';
 import { decodeCrossRecoveryReport } from '../../../scripts/operations/benchmark/production-swap-load/cross/cross-recovery-boundary';
+import { parseWorkerArgs } from '../../../scripts/operations/benchmark/production-swap-load/worker-runtime';
 
 const entity = (byte: string): string => `0x${byte.repeat(64)}`;
 const signer = (byte: string): string => `0x${byte.repeat(40)}`;
@@ -60,6 +61,17 @@ const hubCore = (routes: ReadonlyMap<string, unknown>) => ({
 });
 
 describe('production cross-j swap load boundaries', () => {
+  test('recovery worker requires a complete old/new process identity pair', () => {
+    const base = ['--work-dir', '/tmp/xln-load', '--port-base', '20000', '--mode', 'cross-recovery', '--swaps', '1'];
+    expect(() => parseWorkerArgs([...base, '--server-pid-before-restart', '101']))
+      .toThrow('PRODUCTION_SWAP_LOAD_RESTART_PIDS_INCOMPLETE');
+    expect(parseWorkerArgs([
+      ...base,
+      '--server-pid-before-restart', '101',
+      '--server-pid-after-restart', '202',
+    ])).toMatchObject({ serverPidBeforeRestart: 101, serverPidAfterRestart: 202 });
+  });
+
   test('relative shard RPCs bind to the production server origin', () => {
     expect(resolveLoadJurisdictionRpc('/rpc2', 'http://127.0.0.1:20004')).toBe('http://127.0.0.1:20004/rpc2');
     expect(() => resolveLoadJurisdictionRpc('ws://127.0.0.1:20004/rpc2', 'http://127.0.0.1:20004'))
@@ -143,7 +155,9 @@ describe('production cross-j swap load boundaries', () => {
     const frame = { height: 10, canonicalStateHash: `0x${'cd'.repeat(32)}` };
     const report = {
       schema: 'xln-production-cross-swap-recovery-v1',
-      completionAuthority: 'committed_route_and_descendant_runtime_heads',
+      completionAuthority: 'committed_route_descendant_heads_and_process_replacement',
+      serverPidBeforeRestart: 101,
+      serverPidAfterRestart: 202,
       loadOrderId: 'load-1', sourceAmount: '100', targetAmount: '90', routeStatus: 'settled',
       hubBeforeRestart: frame, hubAfterRecovery: { ...frame, height: 11 },
       loadBeforeRestart: frame, loadAfterRecovery: frame,
@@ -155,5 +169,11 @@ describe('production cross-j swap load boundaries', () => {
     })).toThrow('PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_HEIGHT_REGRESSION');
     expect(() => decodeCrossRecoveryReport({ ...report, sourceAmount: '1e2' }))
       .toThrow('PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_SOURCE_AMOUNT_INVALID');
+    expect(() => decodeCrossRecoveryReport({ ...report, serverPidAfterRestart: 101 }))
+      .toThrow('PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_PROCESS_NOT_REPLACED');
+    expect(() => decodeCrossRecoveryReport({
+      ...report,
+      loadAfterRecovery: { ...frame, canonicalStateHash: `0x${'ef'.repeat(32)}` },
+    })).toThrow('PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_SAME_HEIGHT_FORK');
   });
 });

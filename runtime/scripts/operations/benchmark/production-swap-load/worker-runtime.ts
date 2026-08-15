@@ -32,6 +32,8 @@ export type WorkerArgs = Readonly<{
   portBase: number;
   mode: string;
   swaps: number;
+  serverPidBeforeRestart?: number;
+  serverPidAfterRestart?: number;
 }>;
 export type ConnectedRuntime = Readonly<{
   adapter: RemoteRuntimeAdapter;
@@ -63,17 +65,29 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
     if (values.has(key)) throw new Error(`PRODUCTION_SWAP_LOAD_ARGUMENT_DUPLICATE:${key}`);
     values.set(key, value);
   }
-  const allowed = new Set(['--work-dir', '--port-base', '--mode', '--swaps']);
+  const allowed = new Set([
+    '--work-dir', '--port-base', '--mode', '--swaps',
+    '--server-pid-before-restart', '--server-pid-after-restart',
+  ]);
   for (const key of values.keys()) if (!allowed.has(key)) throw new Error(`PRODUCTION_SWAP_LOAD_ARGUMENT_UNKNOWN:${key}`);
   const workDir = String(values.get('--work-dir') ?? '').trim();
   if (!workDir) throw new Error('PRODUCTION_SWAP_LOAD_WORK_DIR_REQUIRED');
   const swaps = parsePositiveInteger(values.get('--swaps') ?? '1', 'PRODUCTION_SWAP_LOAD_SWAPS_INVALID');
   if (swaps > 1_000) throw new Error('PRODUCTION_SWAP_LOAD_SWAPS_EXCEED_ACCOUNT_FRAME_MAX');
+  const beforePid = values.get('--server-pid-before-restart');
+  const afterPid = values.get('--server-pid-after-restart');
+  if ((beforePid === undefined) !== (afterPid === undefined)) {
+    throw new Error('PRODUCTION_SWAP_LOAD_RESTART_PIDS_INCOMPLETE');
+  }
   return {
     workDir,
     portBase: parsePositiveInteger(values.get('--port-base'), 'PRODUCTION_SWAP_LOAD_PORT_BASE_INVALID'),
     mode: String(values.get('--mode') ?? 'same').trim(),
     swaps,
+    ...(beforePid === undefined ? {} : {
+      serverPidBeforeRestart: parsePositiveInteger(beforePid, 'PRODUCTION_SWAP_LOAD_RESTART_PID_BEFORE_INVALID'),
+      serverPidAfterRestart: parsePositiveInteger(afterPid, 'PRODUCTION_SWAP_LOAD_RESTART_PID_AFTER_INVALID'),
+    }),
   };
 };
 

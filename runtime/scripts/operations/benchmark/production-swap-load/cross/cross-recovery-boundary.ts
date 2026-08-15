@@ -9,7 +9,9 @@ import type { LoadFrame } from '../worker-boundary';
 
 export type CrossRecoveryReport = Readonly<{
   schema: 'xln-production-cross-swap-recovery-v1';
-  completionAuthority: 'committed_route_and_descendant_runtime_heads';
+  completionAuthority: 'committed_route_descendant_heads_and_process_replacement';
+  serverPidBeforeRestart: number;
+  serverPidAfterRestart: number;
   loadOrderId: string;
   sourceAmount: string;
   targetAmount: string;
@@ -41,13 +43,14 @@ const requireDecimal = (value: unknown, code: string): string => {
 export const decodeCrossRecoveryReport = (value: unknown): CrossRecoveryReport => {
   const report = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_INVALID');
   requireExactBoundaryKeys(report, [
-    'schema', 'completionAuthority', 'loadOrderId', 'sourceAmount', 'targetAmount',
+    'schema', 'completionAuthority', 'serverPidBeforeRestart', 'serverPidAfterRestart',
+    'loadOrderId', 'sourceAmount', 'targetAmount',
     'routeStatus', 'hubBeforeRestart', 'hubAfterRecovery', 'loadBeforeRestart',
     'loadAfterRecovery',
   ], [], 'PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_FIELDS_INVALID');
   if (
     report['schema'] !== 'xln-production-cross-swap-recovery-v1' ||
-    report['completionAuthority'] !== 'committed_route_and_descendant_runtime_heads' ||
+    report['completionAuthority'] !== 'committed_route_descendant_heads_and_process_replacement' ||
     report['routeStatus'] !== 'settled'
   ) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_SCHEMA_INVALID');
   const loadOrderId = report['loadOrderId'];
@@ -58,13 +61,34 @@ export const decodeCrossRecoveryReport = (value: unknown): CrossRecoveryReport =
   const hubAfterRecovery = decodeFrame(report['hubAfterRecovery'], 'PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_HUB_AFTER');
   const loadBeforeRestart = decodeFrame(report['loadBeforeRestart'], 'PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_LOAD_BEFORE');
   const loadAfterRecovery = decodeFrame(report['loadAfterRecovery'], 'PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_LOAD_AFTER');
+  const serverPidBeforeRestart = requireBoundaryInteger(
+    report['serverPidBeforeRestart'],
+    'PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_PID_BEFORE',
+    1,
+  );
+  const serverPidAfterRestart = requireBoundaryInteger(
+    report['serverPidAfterRestart'],
+    'PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_PID_AFTER',
+    1,
+  );
+  if (serverPidBeforeRestart === serverPidAfterRestart) {
+    throw new Error('PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_PROCESS_NOT_REPLACED');
+  }
   if (
     hubAfterRecovery.height < hubBeforeRestart.height ||
     loadAfterRecovery.height < loadBeforeRestart.height
   ) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_HEIGHT_REGRESSION');
+  if (
+    (hubAfterRecovery.height === hubBeforeRestart.height &&
+      hubAfterRecovery.canonicalStateHash !== hubBeforeRestart.canonicalStateHash) ||
+    (loadAfterRecovery.height === loadBeforeRestart.height &&
+      loadAfterRecovery.canonicalStateHash !== loadBeforeRestart.canonicalStateHash)
+  ) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_SAME_HEIGHT_FORK');
   return {
     schema: report['schema'],
     completionAuthority: report['completionAuthority'],
+    serverPidBeforeRestart,
+    serverPidAfterRestart,
     loadOrderId: loadOrderId.trim(),
     sourceAmount: requireDecimal(report['sourceAmount'], 'PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_SOURCE_AMOUNT_INVALID'),
     targetAmount: requireDecimal(report['targetAmount'], 'PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_TARGET_AMOUNT_INVALID'),

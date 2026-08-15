@@ -56,3 +56,9 @@ export const readMeshSeedOverrides = (
   }
   return out;
 };
+
+export const resolveMeshRuntimeSeed = (
+  rootSeed: string,
+  overrides: Readonly<Record<string, string>>,
+  runtimeName: string,
+): string => overrides[runtimeName.toUpperCase()] || deriveMeshChildSeed(rootSeed, `runtime:${runtimeName}`);

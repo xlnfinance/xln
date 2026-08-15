@@ -5,6 +5,7 @@ import {
   deriveMeshChildSeed,
   readMeshSeedOverrides,
   requireMeshRootSeed,
+  resolveMeshRuntimeSeed,
 } from '../../../orchestrator/mesh/mesh-seeds';
 
 describe('mesh operator seed derivation', () => {
@@ -25,6 +26,9 @@ describe('mesh operator seed derivation', () => {
   test('accepts explicit named seeds only through a validated override map', () => {
     expect(readMeshSeedOverrides('{"h1":"test-seed"}', 'TEST_SEEDS')).toEqual({ H1: 'test-seed' });
     expect(() => readMeshSeedOverrides('{"h1":""}', 'TEST_SEEDS')).toThrow('TEST_SEEDS_INVALID');
+    expect(resolveMeshRuntimeSeed('root', { CUSTODY: 'override' }, 'custody')).toBe('override');
+    expect(resolveMeshRuntimeSeed('root', {}, 'custody'))
+      .toBe(deriveMeshChildSeed('root', 'runtime:custody'));
   });
 
   test('production mesh startup contains no public child runtime seeds', () => {

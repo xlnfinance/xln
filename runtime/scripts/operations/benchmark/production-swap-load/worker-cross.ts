@@ -11,7 +11,10 @@ import {
   requireJurisdictionBlockTimeMs,
   type ResolvedMeshJurisdictionConfig,
 } from '../../../../orchestrator/mesh/mesh-jurisdictions';
-import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
+import {
+  readMeshSeedOverrides,
+  resolveMeshRuntimeSeed,
+} from '../../../../orchestrator/mesh/mesh-seeds';
 import {
   decodeCrossLoadReport,
   decodeCommittedCrossRoutes,
@@ -100,7 +103,11 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
   process.env['XLN_JURISDICTIONS_PATH'] = join(args.workDir, 'prod-main', 'jurisdictions.json');
   const meshRootSeed = readFileSync(join(args.workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
   if (!meshRootSeed) throw new Error('PRODUCTION_SWAP_LOAD_MESH_ROOT_SEED_MISSING');
-  const custodyRuntimeSeed = deriveMeshChildSeed(meshRootSeed, 'runtime:CUSTODY');
+  const runtimeSeedOverrides = readMeshSeedOverrides(
+    process.env['XLN_MESH_RUNTIME_SEEDS_JSON'],
+    'XLN_MESH_RUNTIME_SEEDS_JSON',
+  );
+  const custodyRuntimeSeed = resolveMeshRuntimeSeed(meshRootSeed, runtimeSeedOverrides, 'CUSTODY');
   const entries = decodeRuntimeManifestEntries(JSON.parse(readFileSync(
     join(args.workDir, 'prod-mesh', 'runtime-import-manifest.json'), 'utf8',
   )) as unknown);
