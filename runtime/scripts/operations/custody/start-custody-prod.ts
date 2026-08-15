@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 import { deriveManagedEntityIdentity, DaemonControlClient, setupCustody } from '../../../orchestrator/daemon-control';
 import { resolveJurisdictionsJsonPath } from '../../../jurisdiction/adapter/jurisdictions-path';
 import { deriveRuntimeAdapterCapabilityToken } from '../../../api/runtime-adapter/security/auth';
+import { safeStringify } from '../../../protocol/serialization';
 import {
   isPublicDaemonHealthReady,
   spawnBunChild,
@@ -269,8 +270,7 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
       XLN_DB_PATH: `${DB_ROOT}/daemon-db`,
     },
     {
-      startupSignerSeed: SEED,
-      startupSignerLabel: SIGNER_LABEL,
+      startupSignersJson: safeStringify([{ seed: SEED, label: SIGNER_LABEL }]),
     },
   );
   mirrorChildLogs('custody-daemon', daemonChild);

@@ -122,6 +122,7 @@ import {
 import { selectPredeployedJurisdiction } from './catalog/predeployed-jurisdiction';
 import { getJurisdictionIdentityRef } from '../../jurisdiction/machine/jurisdiction-runtime';
 import { readInheritedChildSecrets } from '../../infra/process/child-secrets';
+import { decodeStartupSigners } from './startup-signers';
 import { createLocalPairingController } from './ownership/local-pairing';
 import { createGossipProfileAdmission } from './network/gossip-admission';
 import { createBrainVaultOwnerController } from './ownership/brainvault';
@@ -208,14 +209,9 @@ const SERVER_RUNTIME_SEED = (() => {
   }
   return seed;
 })();
-const STARTUP_SIGNER = (() => {
+const STARTUP_SIGNERS = (() => {
   const secrets = readInheritedChildSecrets();
-  const seed = String(secrets['startupSignerSeed'] || '').trim();
-  const label = String(secrets['startupSignerLabel'] || '').trim();
-  if (Boolean(seed) !== Boolean(label)) {
-    throw new Error('STARTUP_SIGNER_DERIVATION_INCOMPLETE');
-  }
-  return seed && label ? { seed, label } : null;
+  return decodeStartupSigners(secrets['startupSignersJson']);
 })();
 const LOCAL_RUNTIME_OWNER = (() => {
   const label = String(process.env['XLN_LOCAL_OWNER_LABEL'] || '').trim();
@@ -1488,7 +1484,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     env = await main(SERVER_RUNTIME_SEED, {
       trustedJurisdictionRpcBindings: resolveTrustedServerRestoreRpcBindings(),
       localSigners: [
-        ...(STARTUP_SIGNER ? [STARTUP_SIGNER] : []),
+        ...STARTUP_SIGNERS,
         ...(LOCAL_RUNTIME_OWNER ? [{ label: LOCAL_RUNTIME_OWNER.label }] : []),
       ],
     });

@@ -637,11 +637,11 @@ describe('production startup wiring', () => {
     expect(standaloneServer).toContain('throw new Error(`PREDEPLOYED_CONTRACT_CODE_MISSING:');
     expect(standaloneServer).toContain('throw new Error(`PREDEPLOYED_STACK_DEPLOY_FORBIDDEN:${reason}`)');
     expect(standaloneServer).toContain('await globalJAdapter?.close();');
-    expect(custodyBootstrap).toContain('startupSignerSeed: options.seed');
-    expect(custodyBootstrap).toContain('startupSignerLabel: options.signerLabel');
-    expect(standaloneServer).toContain('const STARTUP_SIGNER = (() => {');
+    expect(custodyBootstrap).toContain('startupSignersJson: safeStringify([');
+    expect(custodyBootstrap).toContain('...(options.additionalStartupSigners ?? [])');
+    expect(standaloneServer).toContain('const STARTUP_SIGNERS = (() => {');
     expect(standaloneServer).toContain('localSigners: [');
-    expect(standaloneServer).toContain('...(STARTUP_SIGNER ? [STARTUP_SIGNER] : [])');
+    expect(standaloneServer).toContain('...STARTUP_SIGNERS');
     expect(standaloneServer).toContain('...(LOCAL_RUNTIME_OWNER ? [{ label: LOCAL_RUNTIME_OWNER.label }] : [])');
     expect(standaloneServer).not.toContain('registerSignerKey(');
     expect(standaloneServer).not.toContain('globalJAdapter?.close().catch(() => undefined)');

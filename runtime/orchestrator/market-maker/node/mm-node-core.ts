@@ -1431,6 +1431,47 @@ const buildMarketMakerCrossRouteBase = (
   };
 };
 
+const latestClosedCrossOfferGeneration = (
+  account: AccountReplica | null | undefined,
+  offerSlotPrefix: string,
+  offerSlotSuffix: string,
+): number => {
+  let generation = 0;
+  for (const [offerId, order] of account?.swapClosedOrders ?? []) {
+    if (offerId.startsWith(offerSlotPrefix) && offerId.endsWith(offerSlotSuffix)) {
+      generation = Math.max(generation, order.lastUpdatedHeight);
+    }
+  }
+  return generation;
+};
+
+type CrossOfferSlot = Readonly<{ prefix: string; suffix: string; draftId: string }>;
+
+const buildCrossOfferSlot = (
+  account: AccountReplica | null | undefined,
+  sourceHubSuffix: string,
+  targetHubSuffix: string,
+  sourceTokenId: number,
+  targetTokenId: number,
+  levelId: number,
+): CrossOfferSlot => {
+  const prefix = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${sourceTokenId}-${targetTokenId}-`;
+  const suffix = `-sell-${levelId}`;
+  const generation = latestClosedCrossOfferGeneration(account, prefix, suffix);
+  return { prefix, suffix, draftId: `${prefix}generation-${generation}${suffix}` };
+};
+
+const finalizeCrossOfferRoute = (
+  draftRoute: CrossJurisdictionSwapRoute,
+  slot: CrossOfferSlot,
+): Readonly<{ offerId: string; route: CrossJurisdictionSwapRoute }> => {
+  if (!draftRoute.routeHash) throw new Error(`MARKET_MAKER_CROSS_FINGERPRINT_MISSING:${slot.draftId}`);
+  const fingerprint = keccak256(toUtf8Bytes(safeStringify(draftRoute))).slice(2).toLowerCase();
+  const offerId = `${slot.prefix}${fingerprint}${slot.suffix}`;
+  const { routeHash: _draftRouteHash, ...draftTerms } = draftRoute;
+  return { offerId, route: withCanonicalCrossJurisdictionRouteHash({ ...draftTerms, orderId: offerId }) };
+};
+
 export const buildMarketMakerCrossOfferSpecs = (
   env: RuntimeReplica,
   sourceContext: MarketMakerEntityContext,
@@ -1466,6 +1507,7 @@ export const buildMarketMakerCrossOfferSpecs = (
       generationStartedAt,
       expiresAt,
     );
+    const sourceAccount = getAccountReplica(env, sourceContext.entityId, sourceHub.entityId);
 
     const hubSpecStart = specs.length;
     for (const pair of crossPairs) {
@@ -1525,10 +1567,18 @@ export const buildMarketMakerCrossOfferSpecs = (
           const quoteAmount = market.sourceIsBase ? amounts.targetAmount : amounts.sourceAmount;
           if (quoteAmount < minimumTradeAmount(oriented.quoteTokenId)) continue;
           if (!isWithinPairBand(canonicalMidTicks, amounts.priceTicks)) continue;
-          const offerSlotId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.sourceTokenId}-${pair.targetTokenId}-sell-${levelId}`;
+          const offerSlot = buildCrossOfferSlot(
+            sourceAccount, sourceHubSuffix, targetHubSuffix,
+            pair.sourceTokenId, pair.targetTokenId, levelId,
+          );
+          // A terminal cross-j route remains durable evidence, so reusing its
+          // orderId would make this quote level look permanently complete after
+          // restart. Bind only this slot's latest committed close height into
+          // the next route fingerprint. Other levels stay byte-identical, and
+          // retries before a close reproduce the same immutable route.
           const draftRoute = canonicalizeLocalCrossJurisdictionRoute(env, {
             ...routeBase,
-            orderId: offerSlotId,
+            orderId: offerSlot.draftId,
             priceTicks: amounts.priceTicks,
             source: {
               jurisdiction: sourceJurisdictionRef,
@@ -1546,17 +1596,10 @@ export const buildMarketMakerCrossOfferSpecs = (
             },
           });
           if (!draftRoute) continue;
-          if (!draftRoute.routeHash) throw new Error(`MARKET_MAKER_CROSS_FINGERPRINT_MISSING:${offerSlotId}`);
-          const termsFingerprint = keccak256(toUtf8Bytes(safeStringify(draftRoute))).slice(2).toLowerCase();
-          const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.sourceTokenId}-${pair.targetTokenId}-${termsFingerprint}-sell-${levelId}`;
           // Topology ownership was already proven for the draft above. Changing
           // only the order identity cannot change either owner Runtime; hash the
           // final immutable identity directly instead of resolving topology twice.
-          const { routeHash: _draftRouteHash, ...draftTerms } = draftRoute;
-          const route = withCanonicalCrossJurisdictionRouteHash({
-            ...draftTerms,
-            orderId: offerId,
-          });
+          const { offerId, route } = finalizeCrossOfferRoute(draftRoute, offerSlot);
           specs.push({
             offerId,
             pairId: market.venueId,

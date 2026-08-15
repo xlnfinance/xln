@@ -37,6 +37,9 @@ import {
 type ManagedProcess = {
   name: string;
   proc: ChildProcess;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
 };
 
 type EpochRotationEvidence = {
@@ -217,12 +220,7 @@ const stageBudgetsMs = {
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
-const runProductionSwapLoadSmoke = (): void => {
-  if (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] !== '1') return;
-  const swaps = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SWAPS'] || '1';
-  const mode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || 'same';
-  if (mode !== 'same' && mode !== 'cross') throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_MODE_INVALID:${mode}`);
-  recordStage('production-swap-load:start', { mode, burstSize: swaps });
+const runProductionSwapWorker = (mode: string, swaps: string): void => {
   const worker = join(
     repoRoot,
     'runtime/scripts/operations/benchmark/production-swap-load/worker.ts',
@@ -235,9 +233,28 @@ const runProductionSwapLoadSmoke = (): void => {
     '--swaps', swaps,
   ], { cwd: repoRoot, env: inheritedProcessEnv, stdio: 'inherit' });
   if (result.status !== 0) {
-    throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_FAILED:${String(result.status)}`);
+    throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_FAILED:${mode}:${String(result.status)}`);
   }
+};
+
+const runProductionSwapLoadSmoke = async (): Promise<void> => {
+  if (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] !== '1') return;
+  const swaps = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SWAPS'] || '1';
+  const mode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || 'same';
+  if (mode !== 'same' && mode !== 'cross') throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_MODE_INVALID:${mode}`);
+  recordStage('production-swap-load:start', { mode, burstSize: swaps });
+  runProductionSwapWorker(mode, swaps);
   recordStage('production-swap-load:complete', { mode, burstSize: swaps });
+  if (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_RECOVERY'] !== '1') return;
+  if (mode !== 'cross' || swaps !== '1') {
+    throw new Error('LOCAL_PROD_SMOKE_SWAP_LOAD_RECOVERY_REQUIRES_CROSS_N1');
+  }
+  recordStage('production-swap-load:restart-start');
+  await restartManaged('server');
+  await waitForHealth();
+  recordStage('production-swap-load:restart-ready');
+  runProductionSwapWorker('cross-recovery', '1');
+  recordStage('production-swap-load:recovery-complete');
 };
 
 const recordStage = (stage: string, details?: unknown): void => {
@@ -358,7 +375,19 @@ const startManaged = (name: string, command: string, args: string[], env: Record
     stdio: ['ignore', out, out],
   });
   closeSync(out);
-  children.push({ name, proc });
+  children.push({ name, proc, command, args: [...args], env: { ...env } });
+};
+
+const restartManaged = async (name: string): Promise<void> => {
+  const current = children.findLast(child => child.name === name && child.proc.exitCode === null);
+  if (!current?.proc.pid) throw new Error(`LOCAL_PROD_SMOKE_PROCESS_NOT_RUNNING:${name}`);
+  await stopProcessGroup({
+    pid: current.proc.pid,
+    termTimeoutMs: 5_000,
+    killTimeoutMs: 5_000,
+    timeoutError: `LOCAL_PROD_SMOKE_RESTART_TIMEOUT:name=${name}:pid=${current.proc.pid}`,
+  });
+  startManaged(current.name, current.command, current.args, current.env);
 };
 
 const readClosedStorageHead = async (path: string): Promise<StorageHead> => {
@@ -1123,7 +1152,7 @@ const main = async (): Promise<void> => {
     recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));
   }
 
-  runProductionSwapLoadSmoke();
+  await runProductionSwapLoadSmoke();
 
   // Optional adversary branch AFTER same+cross books are green. Profiles only
   // exercise orchestrator recovery — they never alter MM quote formulas.

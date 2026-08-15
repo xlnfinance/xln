@@ -204,6 +204,7 @@ test('market snapshots expose order counts for aggregated price levels', () => {
   const snapshot = buildMarketSnapshotForReplica({
     state: {
       orderbookExt: { books: new Map([['cross:a/b', book]]) },
+      config: { jurisdiction: { chainId: 31337, depositoryAddress: addr('aa') } },
       height: 3,
       timestamp: 100,
     },
@@ -760,6 +761,53 @@ test('market maker cross order identity is stable within one expiry generation',
   expect(revisedTerms.map(spec => spec.offerId)).not.toEqual(nextGeneration.map(spec => spec.offerId));
   expect(revisedTerms.map(spec => spec.crossJurisdiction?.routeHash))
     .not.toEqual(nextGeneration.map(spec => spec.crossJurisdiction?.routeHash));
+});
+
+test('market maker advances only the cross quote slot that committed a close', () => {
+  const { env, contexts, visibleHubs } = buildBootstrapTopology();
+  const sourceContext = contexts[0]!;
+  const targetContext = contexts[1]!;
+  const sourceHub = visibleHubs[0]!;
+  const targetHub = visibleHubs[1]!;
+  const sourceAccount = makeAccount(sourceContext.entityId, sourceHub.entityId);
+  addReplica(env, sourceContext.entityId, sourceContext.signerId, new Map([[sourceHub.entityId, sourceAccount]]));
+  addReplica(env, targetContext.entityId, targetContext.signerId);
+  const build = () => buildMarketMakerCrossOfferSpecs(
+    env,
+    sourceContext,
+    targetContext,
+    [sourceHub],
+    [targetHub],
+    [1],
+    [1],
+  );
+  const initial = build();
+  const closed = initial[0]!;
+  sourceAccount.swapClosedOrders.set(closed.offerId, {
+    offerId: closed.offerId,
+    giveTokenId: closed.giveTokenId,
+    giveTokenDecimals: getTokenInfo(closed.giveTokenId).decimals,
+    giveAmount: closed.giveAmount,
+    wantTokenId: closed.wantTokenId,
+    wantTokenDecimals: getTokenInfo(closed.wantTokenId).decimals,
+    wantAmount: closed.wantAmount,
+    priceTicks: closed.priceTicks,
+    createdHeight: 6,
+    crossJurisdiction: closed.crossJurisdiction,
+    cancelRequested: false,
+    lastUpdatedHeight: 7,
+    resolves: [],
+  });
+
+  const replenished = build();
+  expect(replenished).toHaveLength(initial.length);
+  expect(replenished[0]!.offerId).not.toBe(closed.offerId);
+  expect(replenished[0]!.crossJurisdiction?.routeHash)
+    .not.toBe(closed.crossJurisdiction?.routeHash);
+  expect(replenished.slice(1).map(spec => spec.offerId))
+    .toEqual(initial.slice(1).map(spec => spec.offerId));
+  expect(build().map(spec => [spec.offerId, spec.crossJurisdiction?.routeHash]))
+    .toEqual(replenished.map(spec => [spec.offerId, spec.crossJurisdiction?.routeHash]));
 });
 
 test('market maker finalized cross matching requires the exact immutable route hash', () => {

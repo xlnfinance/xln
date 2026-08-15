@@ -8,7 +8,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
-import { deserializeTaggedJson } from '../../protocol/serialization';
+import { deserializeTaggedJson, safeStringify } from '../../protocol/serialization';
 import { fetchLoopback } from '../server/loopback-fetch';
 import {
   buildManagedRuntimeChildSecretEnv,
@@ -162,6 +162,7 @@ export type StartCustodySupportOptions = {
   seed: string;
   daemonRuntimeSeed?: string;
   signerLabel: string;
+  additionalStartupSigners?: readonly Readonly<{ seed: string; label: string }>[];
   profileName: string;
   jurisdictionId: string;
 };
@@ -709,8 +710,10 @@ export const startCustodySupport = async (
         XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       },
       {
-        startupSignerSeed: options.seed,
-        startupSignerLabel: options.signerLabel,
+        startupSignersJson: safeStringify([
+          { seed: options.seed, label: options.signerLabel },
+          ...(options.additionalStartupSigners ?? []),
+        ]),
       },
     );
     const [, hubIds] = await Promise.all([

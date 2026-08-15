@@ -198,11 +198,7 @@ import {
   normalizeRuntimeFailureCode,
 } from '../protocol/errors/failure-taxonomy';
 import { STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
-import {
-  deriveMeshChildSeed,
-  readMeshSeedOverrides,
-  requireMeshRootSeed,
-} from './mesh/mesh-seeds';
+import { deriveManagedSignerInventory, deriveMeshChildSeed, readMeshSeedOverrides, requireMeshRootSeed } from './mesh/mesh-seeds';
 import {
   createResetCoordinator,
   resolveActiveResetOptions,
@@ -2538,6 +2534,10 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
           dbRoot: args.custodyDbRoot,
           seed: runtimeSeedFor('CUSTODY'),
           signerLabel: 'custody-mesh-1',
+          additionalStartupSigners: deriveManagedSignerInventory(runtimeSeedFor('CUSTODY'),
+            process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] === '1' &&
+            process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] === 'cross'
+              ? ['production-load-source', 'production-load-target'] : []),
           profileName: 'Custody',
           jurisdictionId: primaryJurisdiction.key,
         });

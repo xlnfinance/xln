@@ -11,7 +11,8 @@ import {
   decodeCrossLoadReport,
   decodeCommittedCrossRoutes,
   selectMarketMakerCrossRoute,
-} from '../../../scripts/operations/benchmark/production-swap-load/cross-boundary';
+} from '../../../scripts/operations/benchmark/production-swap-load/cross/cross-boundary';
+import { decodeCrossRecoveryReport } from '../../../scripts/operations/benchmark/production-swap-load/cross/cross-recovery-boundary';
 
 const entity = (byte: string): string => `0x${byte.repeat(64)}`;
 const signer = (byte: string): string => `0x${byte.repeat(40)}`;
@@ -136,5 +137,23 @@ describe('production cross-j swap load boundaries', () => {
       .toThrow('PRODUCTION_SWAP_LOAD_CROSS_REPORT_SCHEMA_INVALID');
     expect(() => decodeCrossLoadReport({ ...report, commandObservedElapsedMs: 4 }))
       .toThrow('PRODUCTION_SWAP_LOAD_CROSS_REPORT_TIMING_INVALID');
+  });
+
+  test('recovery evidence requires the settled route and descendant Runtime heads', () => {
+    const frame = { height: 10, canonicalStateHash: `0x${'cd'.repeat(32)}` };
+    const report = {
+      schema: 'xln-production-cross-swap-recovery-v1',
+      completionAuthority: 'committed_route_and_descendant_runtime_heads',
+      loadOrderId: 'load-1', sourceAmount: '100', targetAmount: '90', routeStatus: 'settled',
+      hubBeforeRestart: frame, hubAfterRecovery: { ...frame, height: 11 },
+      loadBeforeRestart: frame, loadAfterRecovery: frame,
+    };
+    expect(decodeCrossRecoveryReport(report).hubAfterRecovery.height).toBe(11);
+    expect(() => decodeCrossRecoveryReport({
+      ...report,
+      hubAfterRecovery: { ...frame, height: 9 },
+    })).toThrow('PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_HEIGHT_REGRESSION');
+    expect(() => decodeCrossRecoveryReport({ ...report, sourceAmount: '1e2' }))
+      .toThrow('PRODUCTION_SWAP_LOAD_CROSS_RECOVERY_SOURCE_AMOUNT_INVALID');
   });
 });

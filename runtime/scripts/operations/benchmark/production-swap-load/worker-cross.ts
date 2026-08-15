@@ -5,18 +5,18 @@ import { withCanonicalCrossJurisdictionRouteHash } from '../../../../extensions/
 import { getJurisdictionStackId } from '../../../../jurisdiction/machine/jurisdiction-runtime';
 import type { JurisdictionConfig } from '../../../../protocol/config/jurisdiction-config';
 import { safeStringify } from '../../../../protocol/serialization';
-import { DaemonControlClient, setupCustody } from '../../../../orchestrator/daemon-control';
 import {
   resolveMeshJurisdictionConfig,
   resolveSecondaryJurisdictions,
   requireJurisdictionBlockTimeMs,
   type ResolvedMeshJurisdictionConfig,
 } from '../../../../orchestrator/mesh/mesh-jurisdictions';
+import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
 import {
   decodeCrossLoadReport,
   decodeCommittedCrossRoutes,
   selectMarketMakerCrossRoute,
-} from './cross-boundary';
+} from './cross/cross-boundary';
 import {
   decodeEntitySummaries,
   decodeLoadFrame,
@@ -36,11 +36,11 @@ import {
   type ConnectedRuntime,
   type WorkerArgs,
 } from './worker-runtime';
+import { setupCrossLoadCohort, waitForSettledCrossRoute } from './cross/worker-cross-state';
 
 const SOURCE_CHAIN_ID = 31_337;
 const TARGET_CHAIN_ID = 31_338;
 const SETUP_CREDIT_MULTIPLIER = 4n;
-const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 export const resolveLoadJurisdictionRpc = (rpc: string, apiBaseUrl: string): string => {
   const resolved = new URL(rpc, apiBaseUrl);
@@ -95,74 +95,12 @@ const importJurisdiction = async (
   await waitForRuntimeHeight(runtime, observed.result.height + 1);
 };
 
-const setupLoadCohort = async (options: {
-  runtime: ConnectedRuntime;
-  relayUrl: string;
-  sourceHubEntityId: string;
-  targetHubEntityId: string;
-  sourceJurisdiction: JurisdictionConfig;
-  targetJurisdiction: JurisdictionConfig;
-  sourceTokenId: number;
-  targetTokenId: number;
-  sourceCredit: bigint;
-  targetCredit: bigint;
-}) => {
-  const client = new DaemonControlClient({
-    baseUrl: httpBaseForRuntimeWsUrl(options.runtime.wsUrl),
-    authKey: options.runtime.entry.token,
-    timeoutMs: 30_000,
-  });
-  const source = await setupCustody(client, {
-    name: 'Production Load Source', seed: 'production-load-source', signerLabel: 'production-load-source',
-    jurisdiction: options.sourceJurisdiction, relayUrl: options.relayUrl, gossipPollMs: 250,
-    hubEntityIds: [options.sourceHubEntityId], creditTokenIds: [options.sourceTokenId],
-    creditAmount: options.sourceCredit,
-  });
-  const target = await setupCustody(client, {
-    name: 'Production Load Target', seed: 'production-load-target', signerLabel: 'production-load-target',
-    jurisdiction: options.targetJurisdiction, relayUrl: options.relayUrl, gossipPollMs: 250,
-    hubEntityIds: [options.targetHubEntityId], creditTokenIds: [options.targetTokenId],
-    creditAmount: options.targetCredit,
-  });
-  await client.configureP2P({
-    relayUrls: [options.relayUrl],
-    advertiseEntityIds: [source.entityId, target.entityId],
-    gossipPollMs: 250,
-  });
-  return { source, target };
-};
-
-const waitForSettledRoute = async (
-  hub: ConnectedRuntime,
-  sourceHubEntityId: string,
-  targetHubEntityId: string,
-  orderId: string,
-  sourceAmount: bigint,
-  targetAmount: bigint,
-) => {
-  const deadline = Date.now() + 120_000;
-  while (Date.now() < deadline) {
-    const sourceRoutes = decodeCommittedCrossRoutes(
-      await hub.adapter.read<unknown>(`entity/${sourceHubEntityId}`),
-    );
-    const targetRoutes = decodeCommittedCrossRoutes(
-      await hub.adapter.read<unknown>(`entity/${targetHubEntityId}`),
-    );
-    const source = sourceRoutes.find(route => route.orderId === orderId);
-    const target = targetRoutes.find(route => route.orderId === orderId);
-    if (
-      source?.status === 'settled' && target?.status === 'settled' &&
-      source.filledSourceAmount === sourceAmount && source.filledTargetAmount === targetAmount &&
-      target.filledSourceAmount === sourceAmount && target.filledTargetAmount === targetAmount
-    ) return source;
-    await sleep(250);
-  }
-  throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_FILL_NOT_COMMITTED:${orderId}`);
-};
-
 export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void> => {
   if (args.swaps !== 1) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_ONLY_N1_IMPLEMENTED');
   process.env['XLN_JURISDICTIONS_PATH'] = join(args.workDir, 'prod-main', 'jurisdictions.json');
+  const meshRootSeed = readFileSync(join(args.workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
+  if (!meshRootSeed) throw new Error('PRODUCTION_SWAP_LOAD_MESH_ROOT_SEED_MISSING');
+  const custodyRuntimeSeed = deriveMeshChildSeed(meshRootSeed, 'runtime:CUSTODY');
   const entries = decodeRuntimeManifestEntries(JSON.parse(readFileSync(
     join(args.workDir, 'prod-mesh', 'runtime-import-manifest.json'), 'utf8',
   )) as unknown);
@@ -192,7 +130,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       getJurisdictionStackId(targetJurisdiction) !== marketMakerRoute.target.jurisdiction
     ) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_JURISDICTION_ROUTE_MISMATCH');
     await importJurisdiction(load, targetJ);
-    const cohort = await setupLoadCohort({
+    const cohort = await setupCrossLoadCohort({
       runtime: load,
       relayUrl: `ws://127.0.0.1:${args.portBase + 4}/relay`,
       sourceHubEntityId: sourceHub.entityId,
@@ -203,6 +141,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       targetTokenId: marketMakerRoute.target.tokenId,
       sourceCredit: marketMakerRoute.source.amount * SETUP_CREDIT_MULTIPLIER,
       targetCredit: marketMakerRoute.target.amount * SETUP_CREDIT_MULTIPLIER,
+      custodyRuntimeSeed,
     });
     await sendObserved(hub, `prod-cross-credit-${targetHub.entityId.slice(-8)}`, {
       runtimeTxs: [],
@@ -272,7 +211,7 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
         { entityId: cohort.source.entityId, signerId: cohort.source.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
       ],
     });
-    const settled = await waitForSettledRoute(
+    const settled = await waitForSettledCrossRoute(
       hub, sourceHub.entityId, targetHub.entityId, loadOrderId,
       marketMakerRoute.target.amount, marketMakerRoute.source.amount,
     );

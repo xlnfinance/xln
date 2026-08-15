@@ -19,6 +19,20 @@ export const deriveMeshChildSeed = (rootSeed: string, purpose: string): string =
     .digest('hex');
 };
 
+export const deriveManagedSignerSeed = (runtimeSeed: string, signerLabel: string): string => {
+  const normalizedLabel = String(signerLabel || '').trim().toLowerCase();
+  if (!normalizedLabel) throw new Error('XLN_MANAGED_SIGNER_LABEL_MISSING');
+  return deriveMeshChildSeed(runtimeSeed, `managed-signer:${normalizedLabel}`);
+};
+
+export const deriveManagedSignerInventory = (
+  runtimeSeed: string,
+  signerLabels: readonly string[],
+): readonly Readonly<{ seed: string; label: string }>[] => signerLabels.map(label => ({
+  label,
+  seed: deriveManagedSignerSeed(runtimeSeed, label),
+}));
+
 export const readMeshSeedOverrides = (
   raw: string | undefined,
   variableName: string,
