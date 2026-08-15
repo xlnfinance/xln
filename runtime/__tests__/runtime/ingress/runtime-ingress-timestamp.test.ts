@@ -4,7 +4,10 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from 
 import { TIMING } from '../../../config/constants';
 import { initCrontab, scheduleHook } from '../../../entity/scheduler';
 import { generateLazyEntityId } from '../../../entity/factory';
-import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
+import {
+  createTestEntityImportRuntimeTx,
+  provisionTestEntityEncryptionKey,
+} from '../../../qa/entity-creation-fixture';
 import { processEventBatch } from '../../../jurisdiction/adapter/watcher';
 import { createRuntimeIngressReceiptStore } from '../../../runtime/input-pipeline/ingress-receipts';
 import { buildJEventRangeData } from '../../helpers/j-history';
@@ -25,9 +28,9 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { getWallClockMs } from '../../../infra/time';
 import { attachLiveJAdapter } from '../../../runtime/jurisdiction/live-jadapters';
+import { rebuildScheduledWakeIndex } from '../../../runtime/input-pipeline/scheduled-wake';
 import type { JAdapter } from '../../../jurisdiction/adapter/types';
 import { applyEntityInputFrameCap, applyEntityTxFrameCap } from '../../../runtime/loop/loop-work.ts';
-import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,
@@ -669,6 +672,9 @@ describe('runtime ingress timestamp', () => {
       type: 'watchdog',
       data: {},
     });
+    // Production rebuilds this ephemeral index after every committed frame.
+    // This fixture mutates committed state directly, so mirror that boundary.
+    rebuildScheduledWakeIndex(env);
     let committedScheduledWake = false;
     registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
       committedScheduledWake = runtimeInput.entityInputs.some(input =>
@@ -681,7 +687,11 @@ describe('runtime ingress timestamp', () => {
       entityInputs: [{ entityId, signerId, entityTxs: [] }],
     });
 
-    await processRuntime(env);
+    // A scheduled wake follows the normal Entity proposal/certification path;
+    // drain its three bounded single-signer Runtime phases, not just ingress.
+    for (let phase = 0; phase < 3 && !committedScheduledWake; phase += 1) {
+      await processRuntime(env);
+    }
 
     expect(env.state.timestamp).toBeGreaterThanOrEqual(10_000);
     expect(env.state.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);

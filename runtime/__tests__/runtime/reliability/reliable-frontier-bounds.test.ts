@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { advanceReliableFrontier } from '../../../runtime/reliable/reliable-frontier.ts';
 import type { ReliableDeliveryIdentity } from '../../../runtime/types';
+import { safeStringify } from '../../../protocol/serialization';
 
 const entityId = `0x${'71'.repeat(32)}`;
 const signerId = `0x${'72'.repeat(20)}`;
@@ -12,10 +13,10 @@ const identityAt = (height: number): ReliableDeliveryIdentity => ({
   kind: 'entity-frame',
   entityId,
   signerId,
-  laneKey: JSON.stringify({ kind: 'entity-frame', entityId, signerId }),
+  laneKey: safeStringify({ kind: 'entity-frame', entityId, signerId }),
   height,
   frameHash: `0x${height.toString(16).padStart(64, '0')}`,
-  logicalKey: JSON.stringify({ kind: 'entity-frame', entityId, height }),
+  logicalKey: safeStringify({ kind: 'entity-frame', entityId, height }),
   evidenceVersion: 1,
   evidenceKind: 'entity-certificate',
   evidenceDigest,
@@ -35,6 +36,6 @@ describe('bounded reliable terminal frontiers', () => {
 
     expect(ledgers.size).toBe(1);
     expect(ledgers.get(laneKey)?.height).toBe(100_000);
-    expect(JSON.stringify([...ledgers]).length).toBeLessThan(1_000);
+    expect(safeStringify([...ledgers]).length).toBeLessThan(1_000);
   });
 });

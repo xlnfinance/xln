@@ -222,7 +222,7 @@ import { encodeSignedHanko } from '../../../hanko/codec';
 import { resolveHankoBoardDelays } from '../../../hanko/claims';
 
 import { verifyHankoForHash } from '../../../hanko/signing';
-import { sealAccountDraftAsEntity } from '../../helpers/account-draft';
+import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
 
 import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
 

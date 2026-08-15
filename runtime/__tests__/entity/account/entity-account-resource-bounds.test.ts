@@ -28,7 +28,7 @@ import type { EntityReplica, EntityState, JurisdictionConfig } from '../../../en
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { validateAccountReplica } from '../../../account/validation/state-validation';
 import { validateEntityState } from '../../../entity/state/state-validation';
-import { sealAccountDraftAsEntity } from '../../helpers/account-draft';
+import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
 import {
   isProposedAccountFrame,
   proposeAccountFrameMessage,

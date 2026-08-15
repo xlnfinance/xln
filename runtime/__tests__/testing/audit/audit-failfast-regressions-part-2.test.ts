@@ -224,7 +224,7 @@ import { encodeSignedHanko } from '../../../hanko/codec';
 import { resolveHankoBoardDelays } from '../../../hanko/claims';
 
 import { signEntityHashes, verifyHankoForHash } from '../../../hanko/signing';
-import { sealAccountDraftAsEntity } from '../../helpers/account-draft';
+import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
 
 
 import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bootstrap-fail-fast';

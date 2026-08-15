@@ -41,7 +41,7 @@ import type { EntityReplica, JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { getPerfMs } from '../../../infra/time';
 import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
-import { sealAccountDraftAsEntity } from '../../helpers/account-draft';
+import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import {
   accountInputFailureMessage,

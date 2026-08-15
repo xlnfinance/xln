@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
-import { sealAccountDraftAsEntity } from '../../helpers/account-draft';
+import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
 
 import { x25519 } from '@noble/curves/ed25519.js';
 

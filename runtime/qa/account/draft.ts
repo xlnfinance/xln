@@ -1,6 +1,6 @@
 import { signEntityHashes } from '../../hanko/signing';
-import type { AccountInput } from '../../types/account';
 import type { RuntimeReplica } from '../../runtime/types';
+import type { AccountInput } from '../../types/account';
 
 type AccountDraft = {
   accountInput?: AccountInput;
@@ -13,8 +13,8 @@ type AccountDraft = {
 
 /**
  * Account consensus is signer-blind: it returns hashes, then Entity authority
- * seals the draft. Tests entering below Entity consensus must reproduce that
- * boundary instead of feeding an impossible unsigned peer input.
+ * seals the draft. QA and benchmarks entering below Entity consensus must
+ * reproduce that boundary instead of feeding an impossible unsigned input.
  */
 export const sealAccountDraftAsEntity = async (
   env: RuntimeReplica,
@@ -23,7 +23,7 @@ export const sealAccountDraftAsEntity = async (
   draft: AccountDraft,
 ): Promise<AccountInput> => {
   if (!draft.accountInput || !draft.hashesToSign?.length) {
-    throw new Error('TEST_ACCOUNT_DRAFT_MANIFEST_REQUIRED');
+    throw new Error('QA_ACCOUNT_DRAFT_MANIFEST_REQUIRED');
   }
   const input = structuredClone(draft.accountInput);
   const hankos = await signEntityHashes(
@@ -35,13 +35,13 @@ export const sealAccountDraftAsEntity = async (
   const witnesses = new Map(
     draft.hashesToSign.map((entry, index) => {
       const hanko = hankos[index];
-      if (!hanko) throw new Error(`TEST_ACCOUNT_DRAFT_HANKO_MISSING:${entry.context}`);
+      if (!hanko) throw new Error(`QA_ACCOUNT_DRAFT_HANKO_MISSING:${entry.context}`);
       return [entry.hash.toLowerCase(), hanko] as const;
     }),
   );
-  const requireWitness = (hash: string) => {
+  const requireWitness = (hash: string): string => {
     const hanko = witnesses.get(hash.toLowerCase());
-    if (!hanko) throw new Error(`TEST_ACCOUNT_DRAFT_WITNESS_UNDECLARED:${hash}`);
+    if (!hanko) throw new Error(`QA_ACCOUNT_DRAFT_WITNESS_UNDECLARED:${hash}`);
     return hanko;
   };
 

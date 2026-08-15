@@ -17,7 +17,7 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { MAX_ACCOUNT_FRAME_TXS } from '../../../account/consensus/frame/hash';
 import { getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../orderbook';
 import { createEmptyEnv } from '../../../runtime';
-import type { AccountInput, AccountReplica, AccountTx, Delta, SwapOffer } from '../../../types/account';
+import type { AccountReplica, AccountTx, Delta, SwapOffer } from '../../../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
@@ -25,6 +25,13 @@ import { getPerfMs } from '../../../infra/time';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
+import { sealAccountDraftAsEntity } from '../../../qa/account/draft';
+import {
+  encodeHubConsensusWorkerResult,
+  extractHubConsensusWorkerResult,
+  type HubConsensusBenchmarkResult,
+  type HubConsensusStageMetrics,
+} from './swap-hub-consensus-result';
 
 type Cli = {
   swaps: number;
@@ -46,56 +53,68 @@ type BenchAccountCase = {
   swapCount: number;
 };
 
-type HubConsensusBenchmarkResult = {
-  benchmark: 'swap-hub-account-consensus';
-  sameSwaps: number;
-  crossSwaps: number;
-  elapsedMs: number;
-  tps: number;
-  minTps: number;
-  passed: boolean;
-  sameTps: number;
-  crossTps: number;
-  committedFrames: number;
-  batchSize: number;
-  users: number;
-  sameUsers: number;
-  crossUsers: number;
-  uniqueUserAccounts: number;
-  committedSwaps: number;
-  concurrency: number;
-  processes: number;
-  scope: string;
-  stageMs?: {
-    propose: number;
-    receive: number;
-    commit: number;
-  };
-  stageMsByKind?: {
-    same: NonNullable<HubConsensusBenchmarkResult['stageMs']>;
-    cross: NonNullable<HubConsensusBenchmarkResult['stageMs']>;
-  };
-};
-
 type StageTotals = {
-  propose: number;
-  receive: number;
-  commit: number;
+  proposalBuild: number;
+  proposalSeal: number;
+  peerReplay: number;
+  ackSeal: number;
+  proposerCommit: number;
   count: number;
 };
 
 const DEFAULT_BENCH_BATCH_SIZE = 10;
 const DEFAULT_BENCH_PROCESSES = 4;
 
-const createStageTotals = (): StageTotals => ({ propose: 0, receive: 0, commit: 0, count: 0 });
+const createStageTotals = (): StageTotals => ({
+  proposalBuild: 0,
+  proposalSeal: 0,
+  peerReplay: 0,
+  ackSeal: 0,
+  proposerCommit: 0,
+  count: 0,
+});
 
 const averageStageMs = (stages: StageTotals): HubConsensusBenchmarkResult['stageMs'] | undefined => {
   if (stages.count === 0) return undefined;
   return {
-    propose: Number((stages.propose / stages.count).toFixed(3)),
-    receive: Number((stages.receive / stages.count).toFixed(3)),
-    commit: Number((stages.commit / stages.count).toFixed(3)),
+    proposalBuild: Number((stages.proposalBuild / stages.count).toFixed(3)),
+    proposalSeal: Number((stages.proposalSeal / stages.count).toFixed(3)),
+    peerReplay: Number((stages.peerReplay / stages.count).toFixed(3)),
+    ackSeal: Number((stages.ackSeal / stages.count).toFixed(3)),
+    proposerCommit: Number((stages.proposerCommit / stages.count).toFixed(3)),
   };
+};
+
+const weightedStageMs = (
+  entries: ReadonlyArray<{ metrics: HubConsensusStageMetrics; weight: number }>,
+): HubConsensusStageMetrics => {
+  const totalWeight = entries.reduce((sum, entry) => sum + entry.weight, 0);
+  if (totalWeight <= 0) throw new Error('CONSENSUS_STAGE_WEIGHT_INVALID');
+  const average = (key: keyof HubConsensusStageMetrics): number => Number((
+    entries.reduce((sum, entry) => sum + entry.metrics[key] * entry.weight, 0) / totalWeight
+  ).toFixed(3));
+  return {
+    proposalBuild: average('proposalBuild'),
+    proposalSeal: average('proposalSeal'),
+    peerReplay: average('peerReplay'),
+    ackSeal: average('ackSeal'),
+    proposerCommit: average('proposerCommit'),
+  };
+};
+
+export const partitionConsensusLoad = (
+  total: number,
+  partitions: number,
+  index: number,
+): number => {
+  if (!Number.isSafeInteger(total) || total < 0) throw new Error('CONSENSUS_LOAD_TOTAL_INVALID');
+  if (!Number.isSafeInteger(partitions) || partitions <= 0) {
+    throw new Error('CONSENSUS_LOAD_PARTITIONS_INVALID');
+  }
+  if (!Number.isSafeInteger(index) || index < 0 || index >= partitions) {
+    throw new Error('CONSENSUS_LOAD_INDEX_INVALID');
+  }
+  return Math.floor(total / partitions) + (index < total % partitions ? 1 : 0);
 };
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -215,7 +234,6 @@ const registerBenchIdentity = (
   slot: string,
 ): { entityId: string; signerId: string } => {
   const signerId = deriveSignerAddressSync(seed, slot);
-  registerSignerKey(seed, signerId, deriveSignerKeySync(seed, slot));
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
   return { entityId, signerId };
 };
@@ -491,11 +509,6 @@ const makeCrossCase = (
   };
 };
 
-const expectInput = (input: AccountInput | undefined, context: string): AccountInput => {
-  if (!input) throw new Error(`${context}:missing_account_input`);
-  return input;
-};
-
 const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: StageTotals): Promise<void> => {
   benchCase.proposer.mempool.push(...benchCase.txs);
   const proposerContext = createAccountConsensusContext(benchCase.proposerEnv);
@@ -506,27 +519,54 @@ const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: Stage
     benchCase.proposer,
     benchCase.proposerEnv.state.timestamp,
   );
-  const receiveStartedAt = getPerfMs();
+  const proposalBuiltAt = getPerfMs();
   if (!isProposedAccountFrame(proposed)) {
     throw new Error(`${benchCase.kind}:propose_failed:${proposeAccountFrameMessage(proposed)}`);
   }
+  const proposerEntity = benchCase.proposer.proofHeader.fromEntity;
+  const proposerSigner = benchCase.proposerEnv.state.eReplicas.values().next().value?.signerId;
+  if (!proposerSigner) throw new Error(`${benchCase.kind}:proposer_signer_missing`);
+  const sealedProposal = await sealAccountDraftAsEntity(
+    benchCase.proposerEnv,
+    proposerEntity,
+    proposerSigner,
+    proposed,
+  );
+  const proposalSealedAt = getPerfMs();
   const received = await applyAccountInput(
     receiverContext,
     benchCase.receiver,
-    expectInput(proposed.accountInput, benchCase.kind),
+    sealedProposal,
   );
-  const commitStartedAt = getPerfMs();
+  const peerReplayedAt = getPerfMs();
   if (!received.ok) throw new Error(`${benchCase.kind}:receive_failed:${accountInputFailureMessage(received)}`);
+  if (!received.response || !received.hashesToSign?.length) {
+    throw new Error(`${benchCase.kind}:receive_draft_missing`);
+  }
+  const receiverSigner = benchCase.receiverEnv.state.eReplicas.values().next().value?.signerId;
+  if (!receiverSigner) throw new Error(`${benchCase.kind}:receiver_signer_missing`);
+  const sealedAck = await sealAccountDraftAsEntity(
+    benchCase.receiverEnv,
+    benchCase.receiver.proofHeader.fromEntity,
+    receiverSigner,
+    {
+      accountInput: received.response,
+      hashesToSign: received.hashesToSign,
+    },
+  );
+  const ackSealedAt = getPerfMs();
   const committed = await applyAccountInput(
     proposerContext,
     benchCase.proposer,
-    expectInput(received.response, benchCase.kind),
+    sealedAck,
   );
   const committedAt = getPerfMs();
   if (stages) {
-    stages.propose += receiveStartedAt - proposeStartedAt;
-    stages.receive += commitStartedAt - receiveStartedAt;
-    stages.commit += committedAt - commitStartedAt;
+    stages.proposalBuild += proposalBuiltAt - proposeStartedAt;
+    stages.proposalSeal += proposalSealedAt - proposalBuiltAt;
+    stages.peerReplay += peerReplayedAt - proposalSealedAt;
+    stages.ackSeal += ackSealedAt - peerReplayedAt;
+    stages.proposerCommit += committedAt - ackSealedAt;
     stages.count += 1;
   }
   if (!committed.ok) throw new Error(`${benchCase.kind}:commit_failed:${accountInputFailureMessage(committed)}`);
@@ -544,7 +584,10 @@ const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: Stage
 };
 
 const makeParticipantEnv = (seed: string, jurisdiction: JurisdictionConfig): RuntimeReplica => {
-  const env = createEmptyEnv(seed);
+  // Each benchmark Account represents an Entity, not a separate production
+  // Runtime. Avoid prewarming 20 unused BrainVault keys per synthetic peer;
+  // the exact peer signer is registered immediately below by the caller.
+  const env = createEmptyEnv(null);
   env.runtimeSeed = seed;
   env.state.timestamp = 1_000;
   env.quietRuntimeLogs = true;
@@ -625,19 +668,17 @@ const runPass = async (
 }> => {
   const { env, jurisdiction, hubId } = makeEnv(seed);
   const { same, cross } = buildCases(env, jurisdiction, hubId, swaps, batchSize, users);
-  const stages = concurrency === 1
-    ? { same: createStageTotals(), cross: createStageTotals() }
-    : undefined;
+  const stages = { same: createStageTotals(), cross: createStageTotals() };
   const startedAt = getPerfMs();
-  const sameResult = await runMeasuredCases(same, concurrency, stages?.same);
-  const crossResult = await runMeasuredCases(cross, concurrency, stages?.cross);
+  const sameResult = await runMeasuredCases(same, concurrency, stages.same);
+  const crossResult = await runMeasuredCases(cross, concurrency, stages.cross);
   return {
     sameElapsedMs: sameResult.elapsedMs,
     crossElapsedMs: crossResult.elapsedMs,
     sameSwaps: sameResult.swaps,
     crossSwaps: crossResult.swaps,
     elapsedMs: getPerfMs() - startedAt,
-    stages: stages ?? { same: createStageTotals(), cross: createStageTotals() },
+    stages,
     frames: same.length + cross.length,
     sameUsers: same.length,
     crossUsers: cross.length,
@@ -649,21 +690,26 @@ const scriptPath = (): string => fileURLToPath(import.meta.url);
 const runWorkerProcess = (
   cli: Cli,
   workerIndex: number,
+  workerCount: number,
 ): Promise<HubConsensusBenchmarkResult> => new Promise((resolve, reject) => {
+  const workerSwaps = partitionConsensusLoad(cli.swaps, workerCount, workerIndex);
+  const workerWarmup = partitionConsensusLoad(cli.warmup, workerCount, workerIndex);
+  const workerUsers = partitionConsensusLoad(cli.users, workerCount, workerIndex);
   const child = spawn(process.execPath, [
     scriptPath(),
-    '--swaps', String(cli.swaps),
-    '--warmup', String(cli.warmup),
+    '--swaps', String(workerSwaps),
+    '--warmup', String(workerWarmup),
     '--min-tps', '1',
     '--concurrency', String(cli.concurrency),
     '--batch-size', String(cli.batchSize),
-    '--users', String(cli.users),
+    '--users', String(workerUsers),
     '--processes', '1',
   ], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       XLN_SWAP_CONSENSUS_WORKER: String(workerIndex),
+      XLN_ACCOUNT_PROPOSAL_SLOW_MS: '1000000000',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -678,17 +724,18 @@ const runWorkerProcess = (
       return;
     }
     try {
-      const parsed = JSON.parse(stdout.trim()) as HubConsensusBenchmarkResult;
-      resolve(parsed);
+      resolve(extractHubConsensusWorkerResult(stdout));
     } catch (error) {
-      reject(new Error(`SWAP_CONSENSUS_WORKER_BAD_JSON:${workerIndex}:${(error as Error).message}\n${stdout}\n${stderr}`));
+      const tail = `${stdout}\n${stderr}`.split(/\r?\n/).slice(-20).join('\n');
+      reject(new Error(`SWAP_CONSENSUS_WORKER_BAD_RESULT:${workerIndex}:${(error as Error).message}\n${tail}`));
     }
   });
 });
 
 const runDistributedWorkers = async (cli: Cli): Promise<HubConsensusBenchmarkResult> => {
+  const workerCount = Math.min(cli.processes, cli.swaps, cli.users);
   const workers = await Promise.all(
-    Array.from({ length: cli.processes }, (_, index) => runWorkerProcess(cli, index)),
+    Array.from({ length: workerCount }, (_, index) => runWorkerProcess(cli, index, workerCount)),
   );
   const sameSwaps = workers.reduce((sum, worker) => sum + worker.sameSwaps, 0);
   const crossSwaps = workers.reduce((sum, worker) => sum + worker.crossSwaps, 0);
@@ -706,6 +753,18 @@ const runDistributedWorkers = async (cli: Cli): Promise<HubConsensusBenchmarkRes
   ), 0.001);
   const totalSwaps = sameSwaps + crossSwaps;
   const tps = totalSwaps / Math.max(elapsedMs / 1000, 0.001);
+  const sameStageMs = workers.map(worker => {
+    if (!worker.stageMsByKind) throw new Error('SWAP_CONSENSUS_WORKER_STAGE_METRICS_MISSING');
+    return { metrics: worker.stageMsByKind.same, weight: worker.sameUsers };
+  });
+  const crossStageMs = workers.map(worker => {
+    if (!worker.stageMsByKind) throw new Error('SWAP_CONSENSUS_WORKER_STAGE_METRICS_MISSING');
+    return { metrics: worker.stageMsByKind.cross, weight: worker.crossUsers };
+  });
+  const stageMsByKind = {
+    same: weightedStageMs(sameStageMs),
+    cross: weightedStageMs(crossStageMs),
+  };
   const output: HubConsensusBenchmarkResult = {
     benchmark: 'swap-hub-account-consensus',
     sameSwaps,
@@ -724,8 +783,13 @@ const runDistributedWorkers = async (cli: Cli): Promise<HubConsensusBenchmarkRes
     uniqueUserAccounts,
     committedSwaps,
     concurrency: cli.concurrency,
-    processes: cli.processes,
-    scope: `batched distributed account consensus throughput across ${uniqueUserAccounts} user accounts aggregated across worker processes; each worker runs hub propose/commit + user ACK with hanko sign/verify and dispute proof`,
+    processes: workerCount,
+    scope: `batched distributed account consensus throughput across ${uniqueUserAccounts} user accounts and ${workerCount} worker processes; requested totals are partitioned, each worker runs hub propose/commit + user ACK with hanko sign/verify and dispute proof`,
+    stageMs: weightedStageMs([
+      { metrics: stageMsByKind.same, weight: sameUsers },
+      { metrics: stageMsByKind.cross, weight: crossUsers },
+    ]),
+    stageMsByKind,
   };
   return output;
 };
@@ -787,9 +851,10 @@ export const runSwapHubConsensusBenchmark = async (cli: Cli): Promise<HubConsens
     scope: `batched distributed account consensus throughput across ${sameUsers + crossUsers} user accounts: hub propose/commit + user ACK on independent accounts; up to ${cli.batchSize} swap txs per account frame; includes hanko sign/verify and dispute proof, excludes entity frame and storage flush`,
     ...(sameStageMs && crossStageMs ? {
       stageMs: {
-        propose: Number((sameStageMs.propose + crossStageMs.propose).toFixed(3)),
-        receive: Number((sameStageMs.receive + crossStageMs.receive).toFixed(3)),
-        commit: Number((sameStageMs.commit + crossStageMs.commit).toFixed(3)),
+        ...weightedStageMs([
+          { metrics: sameStageMs, weight: sameUsers },
+          { metrics: crossStageMs, weight: crossUsers },
+        ]),
       },
       stageMsByKind: { same: sameStageMs, cross: crossStageMs },
     } : {}),
@@ -799,6 +864,8 @@ export const runSwapHubConsensusBenchmark = async (cli: Cli): Promise<HubConsens
 
 if (import.meta.main) {
   const output = await runSwapHubConsensusBenchmark(parseCli(globalThis.process.argv.slice(2)));
-  console.log(JSON.stringify(output, null, 2));
+  console.log(process.env['XLN_SWAP_CONSENSUS_WORKER'] === undefined
+    ? JSON.stringify(output, null, 2)
+    : encodeHubConsensusWorkerResult(output));
   globalThis.process.exit(output.passed ? 0 : 1);
 }

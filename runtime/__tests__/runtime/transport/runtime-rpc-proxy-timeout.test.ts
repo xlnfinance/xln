@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createRelayStore } from '../../../network/relay/store';
 import { handleRuntimeRpcProxy } from '../../../api/server/rpc/proxy';
+import { safeStringify } from '../../../protocol/serialization';
 
 describe('runtime RPC proxy timeouts', () => {
   test('fails fast when configured upstream never responds', async () => {
@@ -18,7 +19,7 @@ describe('runtime RPC proxy timeouts', () => {
         req: new Request('http://127.0.0.1/rpc', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'eth_chainId', params: [] }),
+          body: safeStringify({ id: 1, jsonrpc: '2.0', method: 'eth_chainId', params: [] }),
         }),
         pathname: '/rpc',
         env: null,
@@ -62,7 +63,7 @@ describe('runtime RPC proxy timeouts', () => {
         headers: { 'content-type': 'application/json' },
         operatorAuthorized: false,
       });
-      const encoded = `${await response.text()}\n${JSON.stringify(relayStore.debugEvents)}`;
+      const encoded = `${await response.text()}\n${safeStringify(relayStore.debugEvents)}`;
       expect(response.status).toBe(503);
       expect(encoded).not.toContain(secret);
       expect(encoded).not.toContain('/rpc/');
