@@ -7,6 +7,7 @@ import { execFileSync, spawn, spawnSync, type ChildProcessByStdio } from 'node:c
 import { freemem, loadavg, totalmem } from 'node:os';
 import type { Readable } from 'node:stream';
 import { sanitizeChildProcessEnv } from '../../api/server/child-process-env';
+import { safeStringify } from '../../protocol/serialization';
 
 type SoakProfile = 'quick' | 'release' | 'swap' | 'mainnet';
 
@@ -66,6 +67,7 @@ type SoakResultEvidence = {
   sameTps?: number;
   crossTps?: number;
   aggregateTps?: number;
+  aggregateAccountConsensusTps?: number;
   paymentTps?: number;
   openHtlcLocks?: number;
   currentSnapshotBytes?: number;
@@ -173,8 +175,8 @@ const profileCommands: Record<SoakProfile, SoakCommand[]> = {
       timeoutMs: 180_000,
     },
     {
-      name: '100-user hub consensus swap 100 TPS',
-      command: 'bun runtime/scripts/operations/benchmark/bench-swap-hub-consensus-tps.ts --swaps 300 --warmup 30 --min-tps 100 --batch-size 100 --users 100 --processes 2',
+      name: '100-user single-hub-cohort Account consensus 100 TPS',
+      command: 'bun runtime/scripts/operations/benchmark/bench-swap-hub-consensus-tps.ts --swaps 300 --warmup 30 --min-aggregate-account-consensus-tps 100 --batch-size 100 --users 100 --independent-hub-cohorts 1',
       timeoutMs: 240_000,
     },
   ],
@@ -368,6 +370,10 @@ const extractResultEvidence = (stdoutTail: string): SoakResultEvidence | undefin
   setNumber('sameTps', numberOf(parsed, 'sameTps'));
   setNumber('crossTps', numberOf(parsed, 'crossTps'));
   setNumber('aggregateTps', numberOf(parsed, 'aggregateTps'));
+  setNumber(
+    'aggregateAccountConsensusTps',
+    numberOf(parsed, 'aggregateAccountConsensusTps'),
+  );
   setNumber('paymentTps', numberOf(parsed, 'paymentTps'));
   setNumber('openHtlcLocks', numberOf(parsed, 'openHtlcLocks'));
   setNumber('currentSnapshotBytes', numberOf(parsed, 'currentSnapshotBytes'));
@@ -595,7 +601,7 @@ const runCommand = async (command: SoakCommand, iteration: number, streamOutput:
 
 const writeSummary = (path: string, payload: unknown): void => {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`);
+  writeFileSync(path, `${safeStringify(payload, 2)}\n`);
 };
 
 type E2eRunForPrune = {

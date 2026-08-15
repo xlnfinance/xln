@@ -5,24 +5,16 @@ import {
 } from '../../../protocol/boundary-validation';
 import { safeStringify } from '../../../protocol/serialization';
 
-export type HubConsensusStageMetrics = {
-  proposalBuild: number;
-  proposalSeal: number;
-  peerReplay: number;
-  ackSeal: number;
-  proposerCommit: number;
-};
-
 export type HubConsensusBenchmarkResult = {
   benchmark: 'swap-hub-account-consensus';
   sameSwaps: number;
   crossSwaps: number;
   elapsedMs: number;
-  tps: number;
-  minTps: number;
+  aggregateAccountConsensusTps: number;
+  minAggregateAccountConsensusTps: number;
   passed: boolean;
-  sameTps: number;
-  crossTps: number;
+  aggregateSameAccountConsensusTps: number;
+  aggregateCrossAccountConsensusTps: number;
   committedFrames: number;
   batchSize: number;
   users: number;
@@ -31,10 +23,8 @@ export type HubConsensusBenchmarkResult = {
   uniqueUserAccounts: number;
   committedSwaps: number;
   concurrency: number;
-  processes: number;
+  independentHubCohorts: number;
   scope: string;
-  stageMs?: HubConsensusStageMetrics;
-  stageMsByKind?: { same: HubConsensusStageMetrics; cross: HubConsensusStageMetrics };
 };
 
 const WORKER_RESULT_PREFIX = 'XLN_SWAP_CONSENSUS_RESULT=';
@@ -56,59 +46,38 @@ const requireMetric = (value: unknown, code: string): number => {
   return value;
 };
 
-const decodeStageMetrics = (value: unknown, code: string): HubConsensusStageMetrics => {
-  const record = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(record, [
-    'proposalBuild', 'proposalSeal', 'peerReplay', 'ackSeal', 'proposerCommit',
-  ], [], code);
-  return {
-    proposalBuild: requireMetric(record['proposalBuild'], code),
-    proposalSeal: requireMetric(record['proposalSeal'], code),
-    peerReplay: requireMetric(record['peerReplay'], code),
-    ackSeal: requireMetric(record['ackSeal'], code),
-    proposerCommit: requireMetric(record['proposerCommit'], code),
-  };
-};
-
-const decodeStagesByKind = (
-  value: unknown,
-  code: string,
-): HubConsensusBenchmarkResult['stageMsByKind'] => {
-  if (value === undefined) return undefined;
-  const record = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(record, ['same', 'cross'], [], code);
-  return {
-    same: decodeStageMetrics(record['same'], `${code}:same`),
-    cross: decodeStageMetrics(record['cross'], `${code}:cross`),
-  };
-};
-
 export const decodeHubConsensusBenchmarkResult = (value: unknown): HubConsensusBenchmarkResult => {
   const code = 'SWAP_CONSENSUS_WORKER_RESULT_INVALID';
   const record = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(record, [
-    'benchmark', 'sameSwaps', 'crossSwaps', 'elapsedMs', 'tps', 'minTps', 'passed',
-    'sameTps', 'crossTps', 'committedFrames', 'batchSize', 'users', 'sameUsers',
-    'crossUsers', 'uniqueUserAccounts', 'committedSwaps', 'concurrency', 'processes', 'scope',
-  ], ['stageMs', 'stageMsByKind'], code);
+    'benchmark', 'sameSwaps', 'crossSwaps', 'elapsedMs', 'aggregateAccountConsensusTps',
+    'minAggregateAccountConsensusTps', 'passed', 'aggregateSameAccountConsensusTps',
+    'aggregateCrossAccountConsensusTps', 'committedFrames', 'batchSize', 'users', 'sameUsers',
+    'crossUsers', 'uniqueUserAccounts', 'committedSwaps', 'concurrency',
+    'independentHubCohorts', 'scope',
+  ], [], code);
   if (record['benchmark'] !== 'swap-hub-account-consensus' || typeof record['passed'] !== 'boolean') {
     throw new Error(code);
   }
   if (typeof record['scope'] !== 'string' || record['scope'].length === 0) throw new Error(code);
-  const stageMs = record['stageMs'] === undefined
-    ? undefined
-    : decodeStageMetrics(record['stageMs'], `${code}:stageMs`);
-  const stageMsByKind = decodeStagesByKind(record['stageMsByKind'], `${code}:stageMsByKind`);
   return {
     benchmark: 'swap-hub-account-consensus',
     sameSwaps: requireBoundaryInteger(record['sameSwaps'], `${code}:sameSwaps`),
     crossSwaps: requireBoundaryInteger(record['crossSwaps'], `${code}:crossSwaps`),
     elapsedMs: requireMetric(record['elapsedMs'], `${code}:elapsedMs`),
-    tps: requireMetric(record['tps'], `${code}:tps`),
-    minTps: requireMetric(record['minTps'], `${code}:minTps`),
+    aggregateAccountConsensusTps: requireMetric(
+      record['aggregateAccountConsensusTps'], `${code}:aggregateAccountConsensusTps`,
+    ),
+    minAggregateAccountConsensusTps: requireMetric(
+      record['minAggregateAccountConsensusTps'], `${code}:minAggregateAccountConsensusTps`,
+    ),
     passed: record['passed'],
-    sameTps: requireMetric(record['sameTps'], `${code}:sameTps`),
-    crossTps: requireMetric(record['crossTps'], `${code}:crossTps`),
+    aggregateSameAccountConsensusTps: requireMetric(
+      record['aggregateSameAccountConsensusTps'], `${code}:aggregateSameAccountConsensusTps`,
+    ),
+    aggregateCrossAccountConsensusTps: requireMetric(
+      record['aggregateCrossAccountConsensusTps'], `${code}:aggregateCrossAccountConsensusTps`,
+    ),
     committedFrames: requireBoundaryInteger(record['committedFrames'], `${code}:committedFrames`),
     batchSize: requireBoundaryInteger(record['batchSize'], `${code}:batchSize`, 1),
     users: requireBoundaryInteger(record['users'], `${code}:users`, 1),
@@ -117,9 +86,9 @@ export const decodeHubConsensusBenchmarkResult = (value: unknown): HubConsensusB
     uniqueUserAccounts: requireBoundaryInteger(record['uniqueUserAccounts'], `${code}:uniqueUserAccounts`),
     committedSwaps: requireBoundaryInteger(record['committedSwaps'], `${code}:committedSwaps`),
     concurrency: requireBoundaryInteger(record['concurrency'], `${code}:concurrency`, 1),
-    processes: requireBoundaryInteger(record['processes'], `${code}:processes`, 1),
+    independentHubCohorts: requireBoundaryInteger(
+      record['independentHubCohorts'], `${code}:independentHubCohorts`, 1,
+    ),
     scope: record['scope'],
-    ...(stageMs === undefined ? {} : { stageMs }),
-    ...(stageMsByKind === undefined ? {} : { stageMsByKind }),
   };
 };

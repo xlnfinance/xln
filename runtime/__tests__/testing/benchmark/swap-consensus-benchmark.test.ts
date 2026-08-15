@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
-import { partitionConsensusLoad } from '../../../scripts/operations/benchmark/bench-swap-hub-consensus-tps';
+import {
+  assertKnownSwapHubConsensusArgs,
+  partitionConsensusLoad,
+} from '../../../scripts/operations/benchmark/bench-swap-hub-consensus-tps';
 import {
   decodeHubConsensusBenchmarkResult,
   encodeHubConsensusWorkerResult,
@@ -12,11 +15,11 @@ const workerResult = (): Record<string, unknown> => ({
   sameSwaps: 10,
   crossSwaps: 10,
   elapsedMs: 5,
-  tps: 4_000,
-  minTps: 1,
+  aggregateAccountConsensusTps: 4_000,
+  minAggregateAccountConsensusTps: 1,
   passed: true,
-  sameTps: 2_000,
-  crossTps: 2_000,
+  aggregateSameAccountConsensusTps: 2_000,
+  aggregateCrossAccountConsensusTps: 2_000,
   committedFrames: 2,
   batchSize: 10,
   users: 1,
@@ -25,7 +28,7 @@ const workerResult = (): Record<string, unknown> => ({
   uniqueUserAccounts: 2,
   committedSwaps: 20,
   concurrency: 1,
-  processes: 1,
+  independentHubCohorts: 1,
   scope: 'test worker',
 });
 
@@ -44,10 +47,19 @@ describe('swap consensus benchmark workload', () => {
     expect(() => partitionConsensusLoad(1, 1, 1)).toThrow('CONSENSUS_LOAD_INDEX_INVALID');
   });
 
+  test('rejects retired and unknown CLI flags instead of silently using defaults', () => {
+    expect(() => assertKnownSwapHubConsensusArgs(['--min-tps', '100']))
+      .toThrow('UNKNOWN_ARG:--min-tps');
+    expect(() => assertKnownSwapHubConsensusArgs(['--independent-hub-cohorts']))
+      .toThrow('MISSING_ARG_VALUE:--independent-hub-cohorts');
+  });
+
   test('rejects malformed child-process metrics before aggregation', () => {
     expect(decodeHubConsensusBenchmarkResult(workerResult()).committedSwaps).toBe(20);
-    expect(() => decodeHubConsensusBenchmarkResult({ ...workerResult(), tps: '4000' }))
-      .toThrow('SWAP_CONSENSUS_WORKER_RESULT_INVALID:tps');
+    expect(() => decodeHubConsensusBenchmarkResult({
+      ...workerResult(),
+      aggregateAccountConsensusTps: '4000',
+    })).toThrow('SWAP_CONSENSUS_WORKER_RESULT_INVALID:aggregateAccountConsensusTps');
     expect(() => decodeHubConsensusBenchmarkResult({ ...workerResult(), injected: true }))
       .toThrow('SWAP_CONSENSUS_WORKER_RESULT_INVALID');
   });

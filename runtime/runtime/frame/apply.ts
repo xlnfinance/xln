@@ -132,11 +132,11 @@ export const applyPreparedRuntimeFrame = async (
         [...result.entityContexts].map(([replicaId, context]) => [replicaId, structuredClone(context)]),
       );
       frame.immediateReliableReceiptDeliveries = result.immediateReliableReceipts;
-      refreshScheduledWakeIndex(
-        env,
-        new Set(input.entityInputs.map(entityInput => entityInput.entityId.toLowerCase())),
-      );
       changedEntityIds = collectChangedEntityIds(input, result.appliedRuntimeInput);
+      // Output planning runs due hooks before publish performs its full rebuild.
+      // Refresh changed replicas now so hooks scheduled by this frame can enter
+      // the next Runtime input without waiting for an unrelated later tick.
+      refreshScheduledWakeIndex(env, changedEntityIds);
       profile.mark('fingerprints');
     } finally {
       deps.setApplyAllowed(env, false);
