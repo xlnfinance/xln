@@ -2055,7 +2055,12 @@ function handleOrderbookLevelClick(event: CustomEvent<SwapOrderbookLevelClickDet
   if ((side !== 'ask' && side !== 'bid') || parsedPriceTicks === null || parsedPriceTicks <= 0n || rawSize === null || rawSize <= 0n) {
     return;
   }
-  const availableAccountIds = Array.isArray(event.detail?.accountIds) ? event.detail.accountIds.map((id) => String(id || '').trim()).filter(Boolean) : [];
+  const availableAccountIds = Array.isArray(event.detail?.accountIds)
+    ? event.detail.accountIds
+      .map((id) => String(id || '').trim())
+      .filter(Boolean)
+      .sort(compareStableText)
+    : [];
   const clickedAccountId =
     swapRouteMode === 'cross'
       ? String(activeBookHubId || availableAccountIds[0] || '')

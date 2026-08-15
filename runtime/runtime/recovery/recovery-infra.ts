@@ -50,10 +50,12 @@ const registerSingleSignerWallet = (
     throw new Error(`ENTITY_SINGLE_SIGNER_MISSING:${replica.entityId}`);
   }
   if (String(replica.signerId || '').trim().toLowerCase() !== signerId) {
-    throw new Error(
-      `ENTITY_SINGLE_SIGNER_REPLICA_MISMATCH:${replica.entityId}:` +
-      `${replica.signerId}:${signerId}`,
-    );
+    // A board rotation keeps retired validator replicas as durable observers:
+    // their Account proofs and Entity history remain part of the recoverable
+    // machine, while only the replica owned by the current one-member board
+    // may bind that board's key to BrowserVM. A signer mismatch is therefore
+    // expected historical state, not corruption and not wallet authority.
+    return;
   }
   const privateKey = getLocalSignerPrivateKey(env, signerId);
   if (privateKey === null) return;

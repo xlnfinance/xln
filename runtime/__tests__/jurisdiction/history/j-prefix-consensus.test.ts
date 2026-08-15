@@ -910,7 +910,8 @@ describe('validator J-prefix consensus', () => {
     expect(staleResult.workingReplica.jPrefixRound).toBeUndefined();
     expect(staleResult.outputs).toEqual([]);
 
-    const forged = { ...stale, signature: `${stale.signature.slice(0, -2)}ff` };
+    const replacement = stale.signature.endsWith('ff') ? '00' : 'ff';
+    const forged = { ...stale, signature: `${stale.signature.slice(0, -2)}${replacement}` };
     const forgedResult = await applyEntityInput(env, receiverReplica, {
       entityId,
       signerId: receiverId,

@@ -775,6 +775,7 @@
       type: 'market_subscribe',
       id: wsMessageId('market_sub'),
       replace,
+      hubEntityIds: sources,
       pairs: [normalizedPair],
       depth: subscribedRawDepth(),
     }));

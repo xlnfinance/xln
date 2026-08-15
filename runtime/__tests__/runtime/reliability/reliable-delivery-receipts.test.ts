@@ -32,6 +32,8 @@ import {
 import { generateLazyEntityId } from '../../../entity/factory';
 import { applyMergedEntityInputs } from '../../../runtime/input-pipeline/entity-inputs';
 import { orderReliableEntityInputsWithinSourceLanes } from '../../../runtime/frame/input/admission';
+import { dispatchCommittedReceipts } from '../../../runtime/frame/dispatch';
+import { createFrameExecutionState } from '../../../runtime/frame/input/execution-state';
 import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-history';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../../../storage/wal/snapshot';
 import {
@@ -908,7 +910,8 @@ describe('durable scoped reliable delivery receipts', () => {
     const forged = structuredClone(signedStaleJPrefixOutput(forgedReceiver, source));
     const forgedAttestation = forged.jPrefixAttestations?.values().next().value;
     if (!forgedAttestation) throw new Error('TEST_FORGED_STALE_J_PREFIX_MISSING');
-    forgedAttestation.signature = `${forgedAttestation.signature.slice(0, -2)}ff`;
+    const replacement = forgedAttestation.signature.endsWith('ff') ? '00' : 'ff';
+    forgedAttestation.signature = `${forgedAttestation.signature.slice(0, -2)}${replacement}`;
     installStaleJPrefixAuthority(forgedReceiver, forged);
     expect(registerReliableIngress(forgedReceiver, source.runtimeId!, forged).kind).toBe('enqueue');
     expect(() => commitReliableIngress(forgedReceiver, [forged]))
@@ -1792,6 +1795,24 @@ describe('durable scoped reliable delivery receipts', () => {
 
     handleInboundReliableReceipt(sender, receiver.runtimeId!, commits[0]!.receipt);
     expect(sender.runtimeMempool?.reliableReceipts ?? []).toEqual([]);
+  });
+
+  test('loopback receipt queues a durable RuntimeInput before mutating sender state', () => {
+    const sender = runtime(`reliable-receipt-loopback-sender-${TEST_RUN_ID}`);
+    const receiver = runtime(`reliable-receipt-loopback-sender-${TEST_RUN_ID}`);
+    const output = frameOutput(sender.runtimeId!);
+    sender.pendingNetworkOutputs = [output];
+    const receipt = commitAtReceiver(receiver, sender.runtimeId!, output)[0]!.receipt;
+    const frame = createFrameExecutionState();
+    frame.reliableReceiptDeliveries = [{ runtimeId: sender.runtimeId!, receipt }];
+
+    dispatchCommittedReceipts(sender, frame, queued => {
+      sender.runtimeMempool!.reliableReceipts = [queued];
+    });
+
+    expect(sender.runtimeMempool?.reliableReceipts).toEqual([receipt]);
+    expect(sender.pendingNetworkOutputs).toEqual([output]);
+    expect(sender.infrastructure?.receivedReliableReceiptLedger).toBeUndefined();
   });
 
   test('terminal receipt-only ingress advances a replayable Runtime frame before ACK', async () => {

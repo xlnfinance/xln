@@ -4,6 +4,7 @@ import type { MarketSubscriptionLimiter, MarketSubscriptionLimiterSnapshot } fro
 import type { isMarketMessageType, MarketWireRequest } from './wire';
 
 export type MarketSubscription = {
+  followsConnectedHubs: boolean;
   hubIds: Set<string>;
   pairIds: Set<string>;
   depth: number;

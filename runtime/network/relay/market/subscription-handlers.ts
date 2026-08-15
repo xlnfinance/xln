@@ -67,12 +67,15 @@ const buildSubscription = (
   pairIds: string[],
   depth: number,
   replace: boolean,
+  followsConnectedHubs: boolean,
 ): MarketSubscription => {
-  const hubSet = replace || !existing ? new Set<string>() : new Set(existing.hubIds);
+  const followAll = followsConnectedHubs || (!replace && existing?.followsConnectedHubs === true);
+  const hubSet = replace || !existing || followAll ? new Set<string>() : new Set(existing.hubIds);
   const pairSet = replace || !existing ? new Set<string>() : new Set(existing.pairIds);
   hubIds.forEach(hubId => hubSet.add(hubId));
   pairIds.forEach(pairId => pairSet.add(pairId));
   return {
+    followsConnectedHubs: followAll,
     hubIds: hubSet,
     pairIds: pairSet,
     depth,
@@ -108,7 +111,13 @@ const handleSubscribe = async <WS extends MarketSocket>(
     sendError(ws, message.id, options.readyError || 'Runtime not ready');
     return;
   }
-  const hubIds = connectedHubIds(context);
+  const availableHubIds = connectedHubIds(context);
+  const requestedHubIds = message.hubEntityIds;
+  const hubIds = requestedHubIds ?? availableHubIds;
+  if (requestedHubIds?.some(hubId => !availableHubIds.includes(hubId))) {
+    sendError(ws, message.id, 'market_subscribe contains a disconnected Hub', 'E_BAD_QUERY');
+    return;
+  }
   const pairIds = normalizedPairs(message);
   if (hubIds.length === 0 || pairIds.length === 0) {
     sendError(ws, message.id, 'market_subscribe requires connected Hubs and valid pair(s)');
@@ -128,6 +137,7 @@ const handleSubscribe = async <WS extends MarketSocket>(
     pairIds,
     requestedDepth(message.depth),
     message.replace === true,
+    requestedHubIds === undefined,
   );
   const cellCount = subscription.hubIds.size * subscription.pairIds.size;
   if (cellCount > options.maxCellsPerSubscription) {

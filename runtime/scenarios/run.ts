@@ -27,7 +27,13 @@ import { computeRepositoryCodeFingerprint } from '../qa/tools/code-fingerprint';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
-const SCENARIOS: Record<string, { file: string; fn: string }> = {
+type ScenarioEntry = {
+  file: string;
+  fn: string;
+  provePersistence?: boolean;
+};
+
+const SCENARIOS: Record<string, ScenarioEntry> = {
   'rebalance': { file: './settlement/rebalance', fn: 'runRebalanceScenario' },
   'lock-ahb':  { file: './payments/lock-ahb',  fn: 'lockAhb' },
   'ahb':       { file: './consensus/ahb',       fn: 'ahb' },
@@ -38,7 +44,7 @@ const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'swap-market':       { file: './market/swap-market',       fn: 'swapMarket' },
   'swap-tps':          { file: './market/swap-tps',          fn: 'swapTps' },
   'multi-sig':         { file: './consensus/multi-sig',         fn: 'multiSig' },
-  'company-ipo':       { file: './company-ipo',                  fn: 'companyIpo' },
+  'company-ipo':       { file: './company-ipo', fn: 'companyIpo', provePersistence: true },
   'rapid-fire':        { file: './consensus/rapid-fire',        fn: 'rapidFire' },
   'settle-rebalance':  { file: './settlement/settle-rebalance',  fn: 'runSettleRebalance' },
   'processbatch':      { file: './settlement/processbatch',      fn: 'runProcessBatchScenario' },
@@ -180,6 +186,50 @@ async function stopProcess(proc: PipedChildProcess | null): Promise<void> {
   }
   if (proc.exitCode === null) proc.kill('SIGKILL');
 }
+
+const verifyScenarioPersistence = async (
+  env: import('../runtime/types').RuntimeReplica,
+  scenario: string,
+): Promise<void> => {
+  const { closeInfraDb, closeRuntimeDb, getLiveJAdapterEntries, loadEnvFromDB } = await import('../runtime');
+  const {
+    computeCanonicalEntityHashesFromEnv,
+    computeCanonicalStateHashFromEnv,
+  } = await import('../storage/canonical-hash');
+  const { buildDurableRuntimeMachineSnapshot } = await import('../storage/wal/snapshot');
+  const { buildRuntimeStateDiffReport } = await import('../qa/tools/runtime-state-diff');
+  const { safeStringify } = await import('../protocol/serialization');
+  const expected = computeCanonicalStateHashFromEnv(env);
+  await Promise.all(getLiveJAdapterEntries(env).map(({ adapter }) => adapter.stopWatchingAndWait()));
+  await closeRuntimeDb(env);
+  await closeInfraDb(env);
+  const restored = await loadEnvFromDB(env.runtimeId, env.runtimeSeed);
+  if (!restored) throw new Error(`SCENARIO_RECOVERY_MISSING:${scenario}`);
+  try {
+    const actual = computeCanonicalStateHashFromEnv(restored);
+    if (actual !== expected) {
+      const entityDiff = buildRuntimeStateDiffReport(
+        computeCanonicalEntityHashesFromEnv(env),
+        computeCanonicalEntityHashesFromEnv(restored),
+      );
+      const runtimeDiff = buildRuntimeStateDiffReport(
+        buildDurableRuntimeMachineSnapshot(env),
+        buildDurableRuntimeMachineSnapshot(restored),
+      );
+      throw new Error(
+        `SCENARIO_RECOVERY_ROOT_MISMATCH:${scenario}:expected=${expected}:actual=${actual}:` +
+        `liveHeight=${env.state.height}:restoredHeight=${restored.state.height}:` +
+        `liveTimestamp=${env.state.timestamp}:restoredTimestamp=${restored.state.timestamp}:` +
+        `entity=${safeStringify(entityDiff.firstDifference)}:` +
+        `runtime=${safeStringify(runtimeDiff.firstDifference)}`,
+      );
+    }
+    console.log(`SCENARIO_RECOVERY_PASS:${scenario}:height=${restored.state.height}:root=${actual}`);
+  } finally {
+    await closeRuntimeDb(restored);
+    await closeInfraDb(restored);
+  }
+};
 
 type ParallelResult = {
   scenario: string;
@@ -373,6 +423,12 @@ async function main() {
   process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
   process.env['XLN_ENTITY_STATE_ROOT_AUDIT'] = '1';
 
+  if (!process.env['XLN_DB_PATH']) {
+    const dbPath = resolve(process.cwd(), '.logs', 'scenarios-single', tsTag(), scenario, 'db');
+    mkdirSync(dbPath, { recursive: true });
+    process.env['XLN_DB_PATH'] = dbPath;
+  }
+
   // Set env vars — scenarios read these via getJAdapterMode() / ensureJAdapter()
   if (mode) process.env['JADAPTER_MODE'] = mode;
 
@@ -402,6 +458,7 @@ async function main() {
     if (!fn) throw new Error(`SCENARIO_FUNCTION_MISSING:${entry.fn}:${entry.file}`);
 
     await fn(env);
+    if (entry.provePersistence) await verifyScenarioPersistence(env, scenario);
     recordSelectiveRerunPass('scenario', scenario);
 
     console.log(`\n${'='.repeat(60)}`);

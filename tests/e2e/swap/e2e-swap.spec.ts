@@ -138,11 +138,19 @@ async function readRowSourceIds(row: Locator): Promise<string[]> {
   );
 }
 
-async function expectVisibleOrderbookRowsUseSingleHub(page: Page): Promise<void> {
+async function expectVisibleOrderbookRowsHaveCanonicalSources(page: Page): Promise<void> {
   await expect
     .poll(async () => await page.locator('[data-testid="orderbook-ask-row"],[data-testid="orderbook-bid-row"]').evaluateAll((rows) => {
       if (rows.length === 0) return false;
-      return rows.every((row) => row.querySelectorAll('[data-testid="orderbook-source-icon"]').length === 1);
+      return rows.every((row) => {
+        const sourceIds = [...row.querySelectorAll<HTMLElement>('[data-testid="orderbook-source-icon"]')]
+          .map(icon => String(icon.dataset.sourceId || '').trim().toLowerCase());
+        const sorted = [...sourceIds].sort();
+        return sourceIds.length > 0
+          && new Set(sourceIds).size === sourceIds.length
+          && sourceIds.every(Boolean)
+          && sourceIds.every((sourceId, index) => sourceId === sorted[index]);
+      });
     }), { timeout: 10_000, intervals: [50, 100, 200] })
     .toBe(true);
 }
@@ -1220,7 +1228,7 @@ async function waitForSwapOrderbookLiquidity(
 
   let lastState = await tryWaitOnce(45_000);
   if (isReadyState(lastState)) {
-    if (desiredScope === 'Aggregated') await expectVisibleOrderbookRowsUseSingleHub(page);
+    if (desiredScope === 'Aggregated') await expectVisibleOrderbookRowsHaveCanonicalSources(page);
     return;
   }
 
@@ -1232,7 +1240,7 @@ async function waitForSwapOrderbookLiquidity(
   await openSwapWorkspace(page);
   lastState = await tryWaitOnce(45_000);
   if (isReadyState(lastState)) {
-    if (desiredScope === 'Aggregated') await expectVisibleOrderbookRowsUseSingleHub(page);
+    if (desiredScope === 'Aggregated') await expectVisibleOrderbookRowsHaveCanonicalSources(page);
     return;
   }
 
@@ -1466,7 +1474,8 @@ async function executeOrderbookClickFill(
     }).not.toBe('');
     const routedCounterpartyId = String(await selectedHub.inputValue()).trim();
     if (desiredScope === 'aggregated' && clickTarget !== 'mid-price') {
-      expect(clickedSourceIds, 'All Hubs click row must map to one concrete hub').toHaveLength(1);
+      expect(clickedSourceIds.length, 'All Hubs click row must expose at least one concrete hub').toBeGreaterThan(0);
+      expect(clickedSourceIds, 'All Hubs click row sources must be canonical').toEqual([...clickedSourceIds].sort());
       expect(routedCounterpartyId.toLowerCase()).toBe(clickedSourceIds[0]);
     }
     const fillTokenIds = [

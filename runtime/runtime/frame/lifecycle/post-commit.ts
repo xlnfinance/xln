@@ -1,7 +1,7 @@
 import { materializePendingJurisdictionImportResults } from '../../jurisdiction/jurisdiction-import';
 import { submitRuntimeJOutbox, type RuntimeJOutboxQueue } from '../../jurisdiction/j-submit';
 import { ensureRuntimeInfrastructure } from '../../infrastructure/runtime-infrastructure';
-import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../../types';
+import type { ReliableDeliveryReceipt, RuntimeReplica, RuntimeInput, RuntimeTx } from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import { getWallClockMs } from '../../../infra/time';
 import {
@@ -16,7 +16,14 @@ import type { RuntimeProcessProfile } from '../process-profile';
 import type { RuntimeOutputRoutingDeps } from '../../routing/output-routing';
 
 export type CommittedRuntimeEffectDeps = {
-  enqueueRuntimeInputs: RuntimeJOutboxQueue;
+  enqueueRuntimeInputs(
+    env: RuntimeReplica,
+    inputs?: Parameters<RuntimeJOutboxQueue>[1],
+    runtimeTxs?: RuntimeTx[],
+    jInputs?: JInput[],
+    explicitTimestamp?: number,
+    reliableReceipts?: ReliableDeliveryReceipt[],
+  ): void;
   reconcileRuntimeInfraEffects(env: RuntimeReplica, runtimeTxs: readonly RuntimeTx[]): Promise<void>;
   notifyEnvChange(env: RuntimeReplica): void;
 };
@@ -76,7 +83,9 @@ export const runCommittedRuntimeEffects = async (
   profile.mark('dispatchOutputs');
 
   // Business outputs precede receipts on the same ordered post-WAL lane.
-  dispatchCommittedReceipts(env, frame);
+  dispatchCommittedReceipts(env, frame, receipt => {
+    deps.enqueueRuntimeInputs(env, undefined, undefined, undefined, env.state.timestamp, [receipt]);
+  });
   profile.mark('dispatchReceipts');
   await submitRuntimeJOutbox(env, effects.jOutbox, {
     enqueueRuntimeInputs: deps.enqueueRuntimeInputs,

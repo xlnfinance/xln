@@ -2,10 +2,10 @@ import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import { extractEntityId, extractSignerId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
-import { applyReliableDeliveryReceipts, registerReliableReceiptIngress } from '../reliable/reliable-sender.ts';
+import { registerReliableReceiptIngress } from '../reliable/reliable-sender.ts';
 import { announceCertifiedLocalProfiles } from '../../network/p2p/gossip/local-profile-lifecycle';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
-import type { RuntimeReplica, RoutedEntityInput } from '../types';
+import type { ReliableDeliveryReceipt, RuntimeReplica, RoutedEntityInput } from '../types';
 import {
   buildPendingNetworkOutputs,
   dispatchEntityOutputs,
@@ -132,7 +132,11 @@ export const finalizeCommittedReceiptDeliveries = (
   }
 };
 
-export const dispatchCommittedReceipts = (env: RuntimeReplica, frame: FrameExecutionState): void => {
+export const dispatchCommittedReceipts = (
+  env: RuntimeReplica,
+  frame: FrameExecutionState,
+  enqueueReceipt: (receipt: ReliableDeliveryReceipt) => void,
+): void => {
   if (frame.reliableReceiptDeliveries.length === 0) return;
   const state = ensureRuntimeInfrastructure(env);
   const p2p = state.p2p ?? null;
@@ -143,12 +147,12 @@ export const dispatchCommittedReceipts = (env: RuntimeReplica, frame: FrameExecu
     // retires a retained local output is addressed to this Runtime itself.
     // There is no transport to self: without this it is reported as
     // RELIABLE_RECEIPT_SEND_DEFERRED and dropped, the retained output never
-    // retires, and its lane blocks forever. Apply it directly instead.
-    // registerReliableReceiptIngress only dedupes; applyReliableDeliveryReceipts
-    // installs sender ledgers and prunes the retained outbox.
+    // retires, and its lane blocks forever. Queue it through the same durable
+    // RuntimeInput lane as a remote receipt. Applying it here would mutate the
+    // sender ledger after WAL commit and make restart replay diverge.
     if (selfRuntimeId && normalizeRuntimeId(delivery.runtimeId) === selfRuntimeId) {
       if (registerReliableReceiptIngress(env, delivery.receipt) === 'enqueue') {
-        applyReliableDeliveryReceipts(env, [delivery.receipt]);
+        enqueueReceipt(delivery.receipt);
       }
       continue;
     }

@@ -209,9 +209,14 @@ export const validateRuntimeInputIngress = (
 ): Omit<PreparedRuntimeIngress, 'immediateReliableReceipts'> => {
   validateRuntimeInputShapeAndLimits(env, runtimeInput, rejectRuntimeInput);
   const jOutbox = collectJOutbox(env, runtimeInput);
-  const entityInputs = orderReliableEntityInputsWithinSourceLanes(
-    validateEntityInputs(env, runtimeInput, isReplay, deps),
-  );
+  const validatedEntityInputs = validateEntityInputs(env, runtimeInput, isReplay, deps);
+  // Live transport may arrive out of order and must be normalized per lane.
+  // WAL already stores the canonical applied order and may combine multiple
+  // receipt-only lanes into one EntityInput; decoding that merged input as one
+  // transport identity is both unnecessary and invalid.
+  const entityInputs = isReplay
+    ? validatedEntityInputs
+    : orderReliableEntityInputsWithinSourceLanes(validatedEntityInputs);
   validateExternalEntityInputTargets(env, entityInputs, runtimeInput.runtimeTxs);
   return {
     runtimeTxs: [...runtimeInput.runtimeTxs],

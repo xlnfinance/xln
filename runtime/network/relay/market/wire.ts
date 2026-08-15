@@ -26,7 +26,13 @@ type MarketSelector = {
 };
 
 export type MarketWireRequest =
-  | ({ type: 'market_subscribe'; id: string; replace?: boolean; depth?: number } & MarketSelector)
+  | ({
+      type: 'market_subscribe';
+      id: string;
+      replace?: boolean;
+      depth?: number;
+      hubEntityIds?: string[];
+    } & MarketSelector)
   | ({ type: 'market_unsubscribe'; id: string } & MarketSelector)
   | { type: 'market_snapshot_request'; id: string };
 
@@ -88,6 +94,21 @@ const requireCanonicalMarketId = (
 const requireStringArray = (value: unknown, code: string): string[] => {
   if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string')) throw new Error(code);
   return value;
+};
+
+const validateHubSelector = (message: Record<string, unknown>): void => {
+  if (message['hubEntityIds'] !== undefined) {
+    const hubEntityIds = requireStringArray(message['hubEntityIds'], 'MARKET_WIRE_HUB_IDS_INVALID');
+    if (
+      hubEntityIds.length === 0
+      || hubEntityIds.some(hubEntityId => normalizeMarketEntityId(hubEntityId) !== hubEntityId)
+      || new Set(hubEntityIds).size !== hubEntityIds.length
+      || hubEntityIds.some((hubEntityId, index) => {
+        const previous = hubEntityIds[index - 1];
+        return index > 0 && previous !== undefined && previous >= hubEntityId;
+      })
+    ) throw new Error('MARKET_WIRE_HUB_IDS_INVALID');
+  }
 };
 
 const validateSelector = (message: Record<string, unknown>): void => {
@@ -380,9 +401,10 @@ const validateMarketEnvelope = (value: unknown): MarketWireEnvelope => {
 
   if (type === 'market_subscribe') {
     requireExactBoundaryKeys(message, ['v', 'type', 'id'], [
-      'replace', 'depth', 'pairs', 'pairId',
+      'replace', 'depth', 'hubEntityIds', 'pairs', 'pairId',
     ], 'MARKET_WIRE_FIELDS_INVALID');
     requireString(message['id'], 'MARKET_WIRE_ID_INVALID');
+    validateHubSelector(message);
     validateSelector(message);
     if (message['replace'] !== undefined && typeof message['replace'] !== 'boolean') {
       throw new Error('MARKET_WIRE_REPLACE_INVALID');

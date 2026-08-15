@@ -5,7 +5,7 @@
  */
 
 import type { RuntimeReplica } from '../../runtime/types';
-import { enableStrictScenario, setScenarioStorageEnabled } from '../harness/helpers';
+import { enableStrictScenario } from '../harness/helpers';
 import { requireReplica } from '../consensus/multi-sig';
 import { prepareCompanyAccounts, proveOrdinaryCompanyPayment } from './accounts';
 import { releaseCompanySharesToCustody } from './custody';
@@ -34,7 +34,6 @@ const assertBoardThresholdEvidence = (
 export async function companyIpo(env: RuntimeReplica): Promise<RuntimeReplica> {
   const restoreStrict = enableStrictScenario(env, 'Company IPO');
   const previousScenarioMode = env.scenarioMode;
-  setScenarioStorageEnabled(env, false);
   try {
     env.scenarioMode = true;
     if (env.state.height === 0) env.state.timestamp = 1;

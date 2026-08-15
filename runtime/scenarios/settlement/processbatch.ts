@@ -245,7 +245,10 @@ export async function runProcessBatchScenario(_existingEnv?: RuntimeReplica): Pr
     signerId: hub.signer,
     entityTxs: [{ type: 'j_broadcast', data: {} }],
   }]);
-  await converge(env, 6);
+  // One batch fans settlement ACKs into four independent Account lanes, then
+  // drains their coalesced maintenance wakes. Six cycles covered the old
+  // post-frame clock bug; twelve proves the complete canonical queue is empty.
+  await converge(env, 12);
 
   const hubAfterBroadcast = findReplica(env, hub.id)[1];
   const batchHashBeforeFinalize = hubAfterBroadcast.state.jBatchState?.sentBatch?.batchHash;

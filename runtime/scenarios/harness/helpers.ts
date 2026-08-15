@@ -534,7 +534,6 @@ export async function converge(env: RuntimeReplica, maxCycles = 10): Promise<voi
   const process = await getProcess();
   for (let i = 0; i < maxCycles; i++) {
     await process(env);
-    advanceScenarioTime(env);
     let hasWork = false;
     const pendingOutputs = env.pendingOutputs?.length || 0;
     const pendingNetwork = env.pendingNetworkOutputs?.length || 0;
@@ -546,9 +545,6 @@ export async function converge(env: RuntimeReplica, maxCycles = 10): Promise<voi
     // Retained reliable outputs release on a retry deadline, not on more ticks.
     // Jump every cycle that still has network backlog: waiting for inputs/
     // inbox to clear first deadlocks catch-up after offline restore.
-    if (pendingNetwork > 0) {
-      advanceScenarioToNextNetworkRetry(env);
-    }
     for (const [, replica] of env.state.eReplicas) {
       // Check entity-level work (multi-signer consensus)
       if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame) {
@@ -565,6 +561,13 @@ export async function converge(env: RuntimeReplica, maxCycles = 10): Promise<voi
       if (hasWork) break;
     }
     if (!hasWork) return;
+    // Time is an input to the next frame, not a side effect of the frame that
+    // just converged. Advancing after the terminal cycle leaves live state
+    // ahead of its WAL and makes an immediate restart appear divergent.
+    advanceScenarioTime(env);
+    if (pendingNetwork > 0) {
+      advanceScenarioToNextNetworkRetry(env);
+    }
   }
   throwScenarioConvergenceTimeout(env, 'converge', maxCycles);
 }
@@ -615,7 +618,6 @@ export async function convergeWithOffline(
 ): Promise<void> {
   for (let i = 0; i < maxCycles; i++) {
     await processWithOffline(env, undefined, offlineSigners, reason);
-    advanceScenarioTime(env);
     let hasWork = false;
     const pendingOutputs = env.pendingOutputs?.length || 0;
     const pendingNetwork = countOnlinePendingNetworkOutputs(env, offlineSigners);
@@ -623,9 +625,6 @@ export async function convergeWithOffline(
     const pendingInputs = env.runtimeMempool?.entityInputs?.length || 0;
     if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
       hasWork = true;
-    }
-    if (pendingNetwork > 0) {
-      advanceScenarioToNextNetworkRetry(env);
     }
     for (const [, replica] of env.state.eReplicas) {
       // Check entity-level work (multi-signer consensus) - CRITICAL for multi-sig
@@ -643,6 +642,10 @@ export async function convergeWithOffline(
       if (hasWork) break;
     }
     if (!hasWork) return;
+    advanceScenarioTime(env);
+    if (pendingNetwork > 0) {
+      advanceScenarioToNextNetworkRetry(env);
+    }
   }
   throwScenarioConvergenceTimeout(env, `convergeWithOffline:${reason}`, maxCycles);
 }

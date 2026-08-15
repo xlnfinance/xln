@@ -6,6 +6,7 @@ import { reconcileJEventRangeWithFinalizedState } from '../../jurisdiction/machi
 import { decodeUnsignedJEventRange } from '../../jurisdiction/machine/j-event-range-validation/index.ts';
 import {
   getJPrefixAttestationTemporalDisposition,
+  verifyOutOfRoundJPrefixAttestation,
 } from '../../jurisdiction/machine/history/j-prefix-consensus.ts';
 import {
   assertReliableLaneCompatible,
@@ -258,6 +259,12 @@ export const isAuthenticatedAppliedStaleJPrefixInput = (
   if (!entry) throw new Error('RELIABLE_AUTHORITY_J_PREFIX_INPUT_MISSING');
   const [rawSignerId, rawAttestation] = entry;
   if (getJPrefixAttestationTemporalDisposition(replica.state, rawAttestation) !== 'stale') return false;
+  // Runtime's WAL/receipt boundary must authenticate the exact stale bytes it
+  // terminalizes. `appliedInputs` is not a branded proof of Entity admission,
+  // and accepting it on identity alone lets an internal caller ACK forged
+  // evidence. Stale votes need no current-board authority, but their original
+  // validator signature remains mandatory.
+  verifyOutOfRoundJPrefixAttestation(env, replica.state, rawAttestation, []);
   if (normalize(rawSignerId) !== normalize(rawAttestation.validatorId)) {
     throw new Error(`RELIABLE_AUTHORITY_J_PREFIX_SIGNER_MISMATCH:${rawSignerId}`);
   }

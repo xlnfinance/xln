@@ -448,4 +448,14 @@ describe('swap panel helpers', () => {
       expect(setTokensSource).not.toContain('wantTokenId = String(nextWantToken);\n    selectedOrderLevel = null;');
     });
   });
+
+  test('aggregated orderbook clicks route through the first canonical source Hub', async () => {
+    const panel = await Bun.file('frontend/src/lib/components/Entity/swap/SwapPanel.svelte').text();
+    const start = panel.indexOf('function handleOrderbookLevelClick');
+    const end = panel.indexOf('function resolveSuggestedInitialPriceTicks', start);
+    const handler = panel.slice(start, end);
+
+    expect(handler).toContain('.sort(compareStableText)');
+    expect(handler).toContain('availableAccountIds.find((id) => hubAccountIds.includes(id))');
+  });
 });

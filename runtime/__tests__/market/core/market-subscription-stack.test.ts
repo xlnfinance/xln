@@ -9,6 +9,7 @@ type FakeSocket = {
 };
 
 const HUB_ID = `0x${'a'.repeat(64)}`;
+const SECOND_HUB_ID = `0x${'b'.repeat(64)}`;
 
 const makeSocket = (ip = '127.0.0.1'): FakeSocket => ({
   ip,
@@ -76,6 +77,41 @@ test('market subscription stack subscribes, sends snapshots, and cleans up count
   await stack.handleMessage(ws, { type: 'market_unsubscribe', id: 'unsub-1' });
   expect(ws.sent.at(-1)).toEqual({ v: 1, type: 'ack', inReplyTo: 'unsub-1', status: 'market_unsubscribed' });
   expect(stack.snapshot().total).toBe(0);
+  stack.clear();
+});
+
+test('market subscription stack fetches only the explicitly selected connected Hub', async () => {
+  const ws = makeSocket('10.0.0.7');
+  const fetchedHubIds: string[] = [];
+  const stack = createMarketSubscriptionStack<FakeSocket>({
+    maxSubscriptions: 2,
+    maxSubscriptionsPerIp: 1,
+    maxCellsPerSubscription: 4,
+    getClientIp: socket => socket.ip,
+    getConnectedHubEntityIds: () => [HUB_ID, SECOND_HUB_ID],
+    fetchSnapshots: (hubEntityId, pairIds, depth) => {
+      fetchedHubIds.push(hubEntityId);
+      return pairIds.map(pairId => makeSnapshot(hubEntityId, pairId, depth));
+    },
+  });
+
+  await stack.handleMessage(ws, {
+    type: 'market_subscribe',
+    id: 'sub-selected',
+    hubEntityIds: [SECOND_HUB_ID],
+    pairs: ['1/3'],
+    depth: 5,
+  });
+
+  expect(fetchedHubIds).toEqual([SECOND_HUB_ID]);
+  expect(ws.sent[0]).toMatchObject({
+    type: 'ack',
+    data: { hubEntityIds: [SECOND_HUB_ID] },
+  });
+  expect(ws.sent[1]).toMatchObject({
+    type: 'market_snapshot',
+    payload: { sourceCount: 1, sources: [{ hubEntityId: SECOND_HUB_ID }] },
+  });
   stack.clear();
 });
 

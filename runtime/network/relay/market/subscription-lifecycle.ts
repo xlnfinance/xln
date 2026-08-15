@@ -98,9 +98,12 @@ export const sendSnapshot = async <WS extends MarketSocket>(
       .map(normalizeMarketEntityId)
       .filter((value): value is string => value !== null),
   )).sort();
-  subscription.hubIds = new Set(connectedHubIds);
+  if (subscription.followsConnectedHubs) subscription.hubIds = new Set(connectedHubIds);
+  const subscribedHubIds = subscription.followsConnectedHubs
+    ? connectedHubIds
+    : Array.from(subscription.hubIds).filter(hubEntityId => connectedHubIds.includes(hubEntityId));
   const snapshots: MarketSnapshotPayload[] = (await Promise.all(
-    connectedHubIds.map(hubEntityId => context.options.fetchSnapshots(
+    subscribedHubIds.map(hubEntityId => context.options.fetchSnapshots(
       hubEntityId, pairIds, subscription.depth,
     )),
   )).flat();

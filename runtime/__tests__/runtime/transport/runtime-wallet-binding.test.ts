@@ -74,7 +74,7 @@ const createWalletBindingFixture = (mode: JAdapter['mode']) => {
     },
   } as JAdapter;
   attachLiveJAdapter(env, jurisdictionName, adapter);
-  return { env, boundKeys };
+  return { env, boundKeys, signerId };
 };
 
 test('only BrowserVM adapters receive committed entity private keys', () => {
@@ -88,4 +88,19 @@ test('only BrowserVM adapters receive committed entity private keys', () => {
   registerCommittedSingleSignerWallets(env);
   expect(boundKeys).toHaveLength(1);
   expect(boundKeys[0]).toMatch(/^0x[0-9a-f]{64}$/);
+});
+
+test('retired board replicas remain recoverable without receiving the current wallet', () => {
+  const { env, boundKeys, signerId } = createWalletBindingFixture('browservm');
+  const current = env.state.eReplicas.get(`${entityId}:${signerId}`);
+  if (!current) throw new Error('WALLET_BINDING_CURRENT_REPLICA_MISSING');
+  const retiredSignerId = `0x${'aa'.repeat(20)}`;
+  env.state.eReplicas.set(`${entityId}:${retiredSignerId}`, {
+    ...current,
+    signerId: retiredSignerId,
+    isProposer: false,
+  });
+
+  expect(() => registerCommittedSingleSignerWallets(env)).not.toThrow();
+  expect(boundKeys).toHaveLength(1);
 });

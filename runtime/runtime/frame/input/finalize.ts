@@ -1,7 +1,13 @@
 import { isLocalEntityLeaderTimeoutVote } from '../../../entity/consensus/leader';
 import { createStructuredLogger } from '../../../infra/logger';
 import { createGossipLayer } from '../../../network/p2p/gossip';
-import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
+import type {
+  ReliableDeliveryReceipt,
+  RuntimeReplica,
+  RoutedEntityInput,
+  RuntimeInput,
+  RuntimeTx,
+} from '../../types';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import {
   commitReliableIngress,
@@ -10,7 +16,11 @@ import {
   type ReliableIngressCommit,
 } from '../../reliable/reliable-delivery.ts';
 import { mergeDurableReceiptOnlyInputs } from '../../reliable/reliable-durable-inputs.ts';
-import { parseReceiverFrontierKey, reliableIdentityExactKey } from '../../reliable/reliable-frontier.ts';
+import {
+  parseReceiverFrontierKey,
+  reliableIdentityExactKey,
+  reliableReceiptCoversIdentity,
+} from '../../reliable/reliable-frontier.ts';
 import { splitRoutedOutputByDeliveryLane } from '../../routing/output-routing';
 
 const runtimeLog = createStructuredLogger('runtime');
@@ -114,26 +124,65 @@ export const advanceAppliedRuntimeFrame = (
   return entityInputCount;
 };
 
-const durableIngressSources = (
+type DurableReceiptSource = {
+  receipt: ReliableDeliveryReceipt;
+  source: string;
+};
+
+const collectDurableReceiptSources = (
   env: RuntimeReplica,
   commits: readonly ReliableIngressCommit[],
-): Map<string, Set<string>> => {
-  const sourcesByIdentity = new Map<string, Set<string>>();
+): DurableReceiptSource[] => {
+  const sources: DurableReceiptSource[] = [];
   for (const commit of commits) {
-    if (!commit.key) continue;
-    const sources = sourcesByIdentity.get(commit.key) ?? new Set<string>();
-    commit.targetRuntimeIds.forEach(source => sources.add(source));
-    sourcesByIdentity.set(commit.key, sources);
+    const receipt = commit.receipt;
+    if (!receipt) continue;
+    commit.targetRuntimeIds.forEach(source => sources.push({ receipt, source }));
   }
   for (const ledger of [
     env.infrastructure?.reliableIngressReceiptLedger,
     env.infrastructure?.reliableIngressTerminalWatermarks,
   ]) {
     for (const [frontierKey, receipt] of ledger ?? []) {
-      const source = parseReceiverFrontierKey(frontierKey).sourceRuntimeId;
-      const key = reliableIdentityExactKey(receipt.body.identity);
+      sources.push({
+        receipt,
+        source: parseReceiverFrontierKey(frontierKey).sourceRuntimeId,
+      });
+    }
+  }
+  return sources;
+};
+
+const indexReceiptSourcesByLane = (
+  sources: readonly DurableReceiptSource[],
+): Map<string, DurableReceiptSource[]> => {
+  const byLane = new Map<string, DurableReceiptSource[]>();
+  for (const candidate of sources) {
+    const lane = byLane.get(candidate.receipt.body.identity.laneKey) ?? [];
+    lane.push(candidate);
+    byLane.set(candidate.receipt.body.identity.laneKey, lane);
+  }
+  return byLane;
+};
+
+const durableIngressSources = (
+  env: RuntimeReplica,
+  commits: readonly ReliableIngressCommit[],
+  receivedInputs: readonly RoutedEntityInput[],
+): Map<string, Set<string>> => {
+  const byLane = indexReceiptSourcesByLane(collectDurableReceiptSources(env, commits));
+  const sourcesByIdentity = new Map<string, Set<string>>();
+  for (const input of receivedInputs) {
+    for (const lane of splitRoutedOutputByDeliveryLane(input)) {
+      const identity = getInputReliableIdentity(lane);
+      if (!identity) continue;
+      const key = reliableIdentityExactKey(identity);
       const sources = sourcesByIdentity.get(key) ?? new Set<string>();
-      sources.add(source);
+      for (const candidate of byLane.get(identity.laneKey) ?? []) {
+        if (reliableReceiptCoversIdentity(candidate.receipt, identity)) {
+          sources.add(candidate.source);
+        }
+      }
       sourcesByIdentity.set(key, sources);
     }
   }
@@ -171,7 +220,7 @@ export const buildAppliedRuntimeInput = (
 ): RuntimeInput => {
   const receiptInputs = durableReceiptInputs(
     receivedInputs,
-    durableIngressSources(env, commits),
+    durableIngressSources(env, commits, receivedInputs),
   );
   // Annotate the canonical merged input. Replacing it with one receipt lane
   // would silently lose sibling txs and make crash replay diverge.

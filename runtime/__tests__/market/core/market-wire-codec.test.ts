@@ -83,6 +83,8 @@ describe('frontend market JSON protocol', () => {
     expect(() => decodeMarketWireMessage(snapshotEnvelope({ pairId: '2/1' })))
       .toThrow('MARKET_WIRE_AGGREGATE_PAIR_INVALID');
     expect(() => decodeMarketWireMessage('{"v":1,"type":"market_subscribe","id":"x","hubEntityIds":[],"pairs":["1/2"]}'))
-      .toThrow('MARKET_WIRE_FIELDS_INVALID');
+      .toThrow('MARKET_WIRE_HUB_IDS_INVALID');
+    expect(() => decodeMarketWireMessage('{"v":1,"type":"market_subscribe","id":"x","hubEntityIds":["hub-alias"],"pairs":["1/2"]}'))
+      .toThrow('MARKET_WIRE_HUB_IDS_INVALID');
   });
 });
