@@ -19,6 +19,10 @@ import {
   isSimpleEntityTxType,
   validateSimpleEntityTxData,
 } from './simple';
+import {
+  assertCrossJurisdictionSwapRoute,
+  validateCrossJurisdictionRouteEntityTx,
+} from './cross-j-route';
 
 const ENTITY_TX_NESTING_LIMIT = 16;
 
@@ -189,7 +193,7 @@ const validateCrossJMaterialization = (value: unknown, code: string): void => {
   const data = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(data, ['proposerSignerId', 'route'], [], `${code}_FIELDS`);
   requireString(data['proposerSignerId'], `${code}_PROPOSER_SIGNER`);
-  requireBoundaryRecord(data['route'], `${code}_ROUTE`);
+  assertCrossJurisdictionSwapRoute(data['route'], `${code}_ROUTE`);
 };
 
 const validateCrossJClearMaterialization = (value: unknown, code: string): void => {
@@ -241,7 +245,10 @@ function assertEntityTxRecord(
   else if (type === 'materializeCrossJurisdictionClear') validateCrossJClearMaterialization(tx['data'], `${code}_DATA`);
   else if (type === 'materializeCrossJurisdictionSwap') validateCrossJMaterialization(tx['data'], `${code}_DATA`);
   else if (type === 'chat' || type === 'vote') validateSimpleIdentityTx(type, tx['data'], `${code}_DATA`);
-  else if (isSimpleEntityTxType(type)) validateSimpleEntityTxData(type, tx['data'], `${code}_DATA`);
+  else if (isSimpleEntityTxType(type)) {
+    validateSimpleEntityTxData(type, tx['data'], `${code}_DATA`);
+    validateCrossJurisdictionRouteEntityTx(type, tx['data'], `${code}_DATA`);
+  }
   else {
     const unhandledType: never = type;
     throw new Error(`${code}_TYPE_UNHANDLED:${String(unhandledType)}`);

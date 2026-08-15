@@ -9,6 +9,7 @@ import {
   type RuntimeIngressReceipt,
 } from '../runtime/input-pipeline/ingress-receipts';
 import type { ConsensusConfig } from '../entity/types';
+import type { JurisdictionConfig } from '../protocol/config/jurisdiction-config';
 import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';
 import { scaleWholeTokenAmount } from '../types/finance/rebalance';
 import { defaultAccountDisputeConfigForRoleEvidence } from '../account/config/dispute-config';
@@ -275,6 +276,7 @@ export type ManagedEntityConfig = {
   seed: string;
   signerLabel: string;
   position?: { x: number; y: number; z: number };
+  jurisdiction?: JurisdictionConfig;
 };
 
 export type EnableRoutingConfig = ManagedEntityConfig & {
@@ -349,6 +351,7 @@ export const deriveManagedEntityIdentity = (config: ManagedEntityConfig): Manage
     threshold: 1n,
     validators: [signerId],
     shares: { [signerId]: 1n },
+    ...(config.jurisdiction ? { jurisdiction: config.jurisdiction } : {}),
   };
   return {
     entityId: hashBoard(encodeBoard(consensusConfig)),

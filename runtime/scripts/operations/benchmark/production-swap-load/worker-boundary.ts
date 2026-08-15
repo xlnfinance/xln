@@ -131,7 +131,7 @@ export const selectLocalHubIdentity = (
   return { entityId: matches[0].entityId, signerId: matches[0].signerId };
 };
 
-export const decodeHubMinTradeSize = (value: unknown): bigint => {
+export const decodeHubCoreRecord = (value: unknown): Record<string, unknown> => {
   const core = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_HUB_CORE_INVALID');
   requireExactBoundaryKeys(core, [
     'entityId', 'entityEncryptionPublicKey', 'height', 'timestamp', 'profile', 'config',
@@ -144,6 +144,11 @@ export const decodeHubMinTradeSize = (value: unknown): bigint => {
     'pendingCrossJurisdictionFillAcks', 'crossJurisdictionBookAdmissions',
     'orderbookReferrals', 'orderbookHubProfile', 'hubRebalanceConfig',
   ], 'PRODUCTION_SWAP_LOAD_HUB_CORE_FIELDS_INVALID');
+  return core;
+};
+
+export const decodeHubMinTradeSize = (value: unknown): bigint => {
+  const core = decodeHubCoreRecord(value);
   const profile = requireBoundaryRecord(
     core['orderbookHubProfile'],
     'PRODUCTION_SWAP_LOAD_HUB_PROFILE_MISSING',

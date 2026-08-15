@@ -21,6 +21,8 @@ import {
   decodeAccountPage,
   decodeEntitySummaries,
   decodeLoadBurstReport,
+  decodeLoadFrame,
+  type LoadFrame,
   type LoadRuntimeEntry,
 } from './worker-boundary';
 import { decodeLoadBookPage, type LoadBookSnapshot } from './worker-book-boundary';
@@ -31,7 +33,11 @@ export type WorkerArgs = Readonly<{
   mode: string;
   swaps: number;
 }>;
-export type ConnectedRuntime = Readonly<{ adapter: RemoteRuntimeAdapter; entry: LoadRuntimeEntry }>;
+export type ConnectedRuntime = Readonly<{
+  adapter: RemoteRuntimeAdapter;
+  entry: LoadRuntimeEntry;
+  wsUrl: string;
+}>;
 export type ObservedCommand = Readonly<{
   result: RuntimeAdapterSendResult;
   enqueueAckElapsedMs: number;
@@ -84,7 +90,11 @@ export const resolveWalPath = (runtimeDir: string): string => {
   return join(runtimeDir, matches[0]!.name);
 };
 
-export const persistReport = (path: string, value: unknown): void => {
+export const persistReport = (
+  path: string,
+  value: unknown,
+  decode: (value: unknown) => unknown = decodeLoadBurstReport,
+): void => {
   const encoded = `${safeStringify(value, 2)}\n`;
   const temporary = `${path}.tmp-${process.pid}`;
   const descriptor = openSync(temporary, 'wx', 0o600);
@@ -95,7 +105,7 @@ export const persistReport = (path: string, value: unknown): void => {
     closeSync(descriptor);
   }
   renameSync(temporary, path);
-  decodeLoadBurstReport(JSON.parse(readFileSync(path, 'utf8')) as unknown);
+  decode(JSON.parse(readFileSync(path, 'utf8')) as unknown);
 };
 
 export const entryByLabel = (entries: readonly LoadRuntimeEntry[], label: string): LoadRuntimeEntry => {
@@ -114,7 +124,7 @@ export const connectRuntime = async (
     adapter.disconnect();
     throw new Error(`PRODUCTION_SWAP_LOAD_RUNTIME_NOT_COMMAND_READY:${entry.label}`);
   }
-  return { adapter, entry };
+  return { adapter, entry, wsUrl };
 };
 
 export const sendObserved = async (
@@ -162,6 +172,7 @@ export const waitForCredit = async (
   runtime: ConnectedRuntime,
   entityId: string,
   hubEntityId: string,
+  tokenId: number,
   minimum: bigint,
 ): Promise<void> => {
   const deadline = Date.now() + 60_000;
@@ -170,11 +181,38 @@ export const waitForCredit = async (
       `entity/${entityId}/accounts`,
       { accountId: hubEntityId, accountsLimit: 1 },
     ));
-    const delta = account?.state.deltas.get(QUOTE_TOKEN_ID);
+    const delta = account?.state.deltas.get(tokenId);
     if (account && delta && deriveDelta(delta, isLeftEntity(entityId, hubEntityId)).outCapacity >= minimum) return;
     await sleep(250);
   }
   throw new Error('PRODUCTION_SWAP_LOAD_CREDIT_NOT_ACKNOWLEDGED');
+};
+
+export const readLoadAccount = async (
+  runtime: ConnectedRuntime,
+  entityId: string,
+  hubEntityId: string,
+): Promise<import('../../../../types/account').AccountReplica | null> => decodeAccountPage(await runtime.adapter.read<unknown>(
+  `entity/${entityId}/accounts`,
+  { accountId: hubEntityId, accountsLimit: 1 },
+));
+
+export const waitForRuntimeHeight = async (
+  runtime: ConnectedRuntime,
+  targetHeight: number,
+): Promise<LoadFrame> => {
+  const deadline = Date.now() + 60_000;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const frame = decodeLoadFrame(await runtime.adapter.read<unknown>('frame/latest'));
+      if (frame.height >= targetHeight) return frame;
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(100);
+  }
+  throw new Error(`PRODUCTION_SWAP_LOAD_RUNTIME_HEIGHT_NOT_REACHED:${targetHeight}`, { cause: lastError });
 };
 
 export const waitForTradeCount = async (

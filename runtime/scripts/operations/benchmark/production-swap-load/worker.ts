@@ -8,7 +8,9 @@
 
 import { parseWorkerArgs } from './worker-runtime';
 import { runSameProductionSwapLoad } from './worker-same';
+import { runCrossProductionSwapLoad } from './worker-cross';
 
 const args = parseWorkerArgs(process.argv.slice(2));
-if (args.mode !== 'same') throw new Error(`PRODUCTION_SWAP_LOAD_MODE_NOT_IMPLEMENTED:${args.mode}`);
-await runSameProductionSwapLoad(args);
+if (args.mode === 'same') await runSameProductionSwapLoad(args);
+else if (args.mode === 'cross') await runCrossProductionSwapLoad(args);
+else throw new Error(`PRODUCTION_SWAP_LOAD_MODE_NOT_IMPLEMENTED:${args.mode}`);

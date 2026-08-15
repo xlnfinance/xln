@@ -220,7 +220,9 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 const runProductionSwapLoadSmoke = (): void => {
   if (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] !== '1') return;
   const swaps = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SWAPS'] || '1';
-  recordStage('production-swap-load:start', { mode: 'same', burstSize: swaps });
+  const mode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || 'same';
+  if (mode !== 'same' && mode !== 'cross') throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_MODE_INVALID:${mode}`);
+  recordStage('production-swap-load:start', { mode, burstSize: swaps });
   const worker = join(
     repoRoot,
     'runtime/scripts/operations/benchmark/production-swap-load/worker.ts',
@@ -229,13 +231,13 @@ const runProductionSwapLoadSmoke = (): void => {
     worker,
     '--work-dir', workDir,
     '--port-base', String(portBase),
-    '--mode', 'same',
+    '--mode', mode,
     '--swaps', swaps,
   ], { cwd: repoRoot, env: inheritedProcessEnv, stdio: 'inherit' });
   if (result.status !== 0) {
     throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_FAILED:${String(result.status)}`);
   }
-  recordStage('production-swap-load:complete', { mode: 'same', burstSize: swaps });
+  recordStage('production-swap-load:complete', { mode, burstSize: swaps });
 };
 
 const recordStage = (stage: string, details?: unknown): void => {

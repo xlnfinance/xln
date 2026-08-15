@@ -160,7 +160,7 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
         }],
       }],
     });
-    await waitForCredit(load, loadIdentity.entityId, hubIdentity.entityId, requiredCredit);
+    await waitForCredit(load, loadIdentity.entityId, hubIdentity.entityId, QUOTE_TOKEN_ID, requiredCredit);
 
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', 'h1'));
     const walBytesBefore = directoryBytes(walPath);
