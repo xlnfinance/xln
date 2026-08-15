@@ -1797,6 +1797,18 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(sender.runtimeMempool?.reliableReceipts ?? []).toEqual([]);
   });
 
+  test('authenticated receipt without a pending output is ignored before Runtime mutation', () => {
+    const sender = runtime(`reliable-receipt-unsolicited-sender-${TEST_RUN_ID}`);
+    const receiver = runtime(`reliable-receipt-unsolicited-receiver-${TEST_RUN_ID}`);
+    const unsolicitedOutput = frameOutput(receiver.runtimeId!, 91, `0x${'91'.repeat(32)}`);
+    const receipt = commitAtReceiver(receiver, sender.runtimeId!, unsolicitedOutput)[0]!.receipt;
+
+    expect(handleInboundReliableReceipt(sender, receiver.runtimeId!, receipt)).toBe('duplicate');
+    expect(sender.runtimeMempool?.reliableReceipts ?? []).toEqual([]);
+    expect(sender.pendingNetworkOutputs ?? []).toEqual([]);
+    expect(sender.infrastructure?.receivedReliableReceiptLedger).toBeUndefined();
+  });
+
   test('loopback receipt queues a durable RuntimeInput before mutating sender state', () => {
     const sender = runtime(`reliable-receipt-loopback-sender-${TEST_RUN_ID}`);
     const receiver = runtime(`reliable-receipt-loopback-sender-${TEST_RUN_ID}`);

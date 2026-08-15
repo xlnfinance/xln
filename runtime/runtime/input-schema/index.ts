@@ -15,6 +15,7 @@ import {
   type ValidatedRoutedEntityInput,
 } from '../routing/routing-validation';
 import { validateRuntimeTx } from './runtime-tx';
+import { decodeReliableDeliveryReceipt } from '../reliable/reliable-receipt-schema';
 
 const requireInputArray = (
   input: Record<string, unknown>,
@@ -120,7 +121,8 @@ export const decodeRuntimeInput = (
   });
   const reliableReceipts = input['reliableReceipts'] === undefined
     ? undefined
-    : requireInputArray(input, 'reliableReceipts', code);
+    : requireInputArray(input, 'reliableReceipts', code).map((receipt, index) =>
+        decodeReliableDeliveryReceipt(receipt, `${code}_RELIABLE_RECEIPT_${index}`));
   const timestamp = input['timestamp'] === undefined
     ? undefined
     : toUnixMs(requireBoundaryInteger(input['timestamp'], `${code}_TIMESTAMP_INVALID`));
@@ -135,10 +137,7 @@ export const decodeRuntimeInput = (
       : { jInputs: jInputs as NonNullable<RuntimeInput['jInputs']> }),
     ...(reliableReceipts === undefined
       ? {}
-      : {
-          reliableReceipts:
-            reliableReceipts as NonNullable<RuntimeInput['reliableReceipts']>,
-        }),
+      : { reliableReceipts }),
     ...(timestamp === undefined ? {} : { timestamp }),
     ...(queuedAt === undefined ? {} : { queuedAt }),
   };

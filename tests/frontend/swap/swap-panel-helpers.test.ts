@@ -457,5 +457,8 @@ describe('swap panel helpers', () => {
 
     expect(handler).toContain('.sort(compareStableText)');
     expect(handler).toContain('availableAccountIds.find((id) => hubAccountIds.includes(id))');
+    expect(handler).not.toContain(
+      'availableAccountIds.find((id) => hubAccountIds.includes(id)) || activeOrderAccountId',
+    );
   });
 });

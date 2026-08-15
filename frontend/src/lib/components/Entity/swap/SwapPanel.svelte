@@ -2065,7 +2065,7 @@ function handleOrderbookLevelClick(event: CustomEvent<SwapOrderbookLevelClickDet
     swapRouteMode === 'cross'
       ? String(activeBookHubId || availableAccountIds[0] || '')
       : orderbookScopeMode === 'aggregated'
-        ? String(availableAccountIds.find((id) => hubAccountIds.includes(id)) || activeOrderAccountId || '')
+        ? String(availableAccountIds.find((id) => hubAccountIds.includes(id)) || '')
         : String(selectedBookAccountId || availableAccountIds.find((id) => hubAccountIds.includes(id)) || '');
   if (!clickedAccountId) {
     submitError = 'Pick a priced level from a connected account.';

@@ -156,12 +156,9 @@ export const registerReliableReceiptIngress = (
   if (validationError) throw new Error(validationError);
   const crossCoverage = terminalCrossCoverage(env, receipt);
   if (crossCoverage === 'covered') return 'duplicate';
-  if (
-    crossCoverage === 'lower-exact' &&
-    !(env.pendingNetworkOutputs ?? []).some(output => reliableReceiptMatchesOutput(output, receipt))
-  ) {
-    return 'duplicate';
-  }
+  const matchesPendingOutput = (env.pendingNetworkOutputs ?? []).some(output =>
+    reliableReceiptMatchesOutput(output, receipt));
+  if (crossCoverage === 'lower-exact' && !matchesPendingOutput) return 'duplicate';
   const candidates = receiptCandidates(env, receipt);
   if (candidates.some(candidate => reliableReceiptExactKey(candidate) === reliableReceiptExactKey(receipt))) {
     return 'duplicate';
@@ -170,7 +167,11 @@ export const registerReliableReceiptIngress = (
   for (const candidate of candidates.slice(1)) {
     if (!newest || receiptAdvancesSameCoverage(newest, candidate)) newest = candidate;
   }
-  return newest && !receiptAdvancesSameCoverage(newest, receipt) ? 'duplicate' : 'enqueue';
+  if (newest && !receiptAdvancesSameCoverage(newest, receipt)) return 'duplicate';
+  // A receiver can authenticate only its observation, not arbitrary future
+  // sender state. Unknown receipts are stale/unsolicited network input; the
+  // reducer retains the loud throw to detect corrupted WAL replay.
+  return matchesPendingOutput ? 'enqueue' : 'duplicate';
 };
 
 const applyReceiptToSenderLedgers = (
