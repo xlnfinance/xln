@@ -2462,10 +2462,10 @@ describe('production startup wiring', () => {
     const driveMeshBootstrap = hubNode.slice(driveStart, driveEnd);
     expect(driveMeshBootstrap).toContain('getEntityJurisdiction(input.env, input.bootstrap.entityId)');
     expect(driveMeshBootstrap).toContain('readVisibleHubProfiles(input.env, jurisdiction)');
-    expect(driveMeshBootstrap).toContain('if (requiredProfiles.length !== resolvedArgs.meshHubNames.length) return;');
+    expect(driveMeshBootstrap).toContain('if (requiredProfiles.length !== resolvedArgs.meshHubNames.length) return false;');
     expect(hubNode).toContain('peerReady = peerProfiles.length >= expected;');
     expect(driveMeshBootstrap).toContain('input.milestones.reserveReady = await ensureHubMeshReserves(input);');
-    const creditFence = driveMeshBootstrap.indexOf('if (!creditReady) return;');
+    const creditFence = driveMeshBootstrap.indexOf('if (!creditReady) return false;');
     const reserveProvision = driveMeshBootstrap.indexOf('if (!input.milestones.reserveReady) {');
     expect(creditFence).toBeGreaterThan(0);
     expect(reserveProvision).toBeGreaterThan(creditFence);
@@ -2486,6 +2486,29 @@ describe('production startup wiring', () => {
       'if (resolvedArgs.deployTokens) {\n    void externalWalletApi.provisionFaucetWallet()',
     );
     expect(hubNode).not.toContain('void externalWalletApi.provisionFaucetWallet()');
+  });
+
+  test('hub mesh bootstrap releases its interval only after declared support peers are provisioned', () => {
+    const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const readinessStart = hubNode.indexOf('const supportPeerProvisioningReady = (');
+    const healthStart = hubNode.indexOf('const buildPairHealth = (', readinessStart);
+    const controllerStart = hubNode.indexOf('const createHubMeshBootstrapController = (');
+    const shutdownStart = hubNode.indexOf('const installHubShutdownHandlers = (', controllerStart);
+    expect(readinessStart).toBeGreaterThan(0);
+    expect(healthStart).toBeGreaterThan(readinessStart);
+    expect(controllerStart).toBeGreaterThan(healthStart);
+    expect(shutdownStart).toBeGreaterThan(controllerStart);
+
+    const readiness = hubNode.slice(readinessStart, healthStart);
+    expect(readiness).toContain('if (peers.length !== expected.length) return false;');
+    expect(readiness).toContain('if (!account || account.pendingFrame || account.mempool.length > 0) return false;');
+    expect(readiness).toContain('getCreditGrantedByEntity(account, owner.entityId, tokenId) >=');
+
+    const controller = hubNode.slice(controllerStart, shutdownStart);
+    expect(controller).toContain('const complete = await advanceHubMeshBootstrap({');
+    expect(controller).toContain("markProgress('complete');");
+    expect(controller).toContain('if (loop) clearInterval(loop);');
+    expect(controller).toContain('loop = null;');
   });
 
   test('secondary hubs wait until every primary contract address has deployed bytecode', () => {

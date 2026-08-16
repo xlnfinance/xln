@@ -1737,6 +1737,28 @@ const planMeshBootstrapInputs = (
   };
 };
 
+const supportPeerProvisioningReady = (
+  env: RuntimeReplica,
+  hubBootstraps: HubBootstrapEntry[],
+  identities: SupportPeerIdentity[],
+  profiles: ReturnType<NonNullable<RuntimeReplica['gossip']>['getProfiles']>,
+): boolean => hubBootstraps.every(owner => {
+  const expected = identities.filter(identity =>
+    identity.entityId !== owner.entityId && sameJurisdictionRef(identity, owner),
+  );
+  const peers = visibleDirectSupportPeers(expected, profiles, owner.entityId, owner);
+  if (peers.length !== expected.length) return false;
+  const tokenIds = tokenIdsForHubJurisdiction(owner);
+  return peers.every(peer => {
+    const account = getAccountReplica(env, owner.entityId, peer.entityId);
+    if (!account || account.pendingFrame || account.mempool.length > 0) return false;
+    return tokenIds.every(tokenId =>
+      getCreditGrantedByEntity(account, owner.entityId, tokenId) >=
+      getBootstrapCreditAmount(tokenId),
+    );
+  });
+});
+
 const buildPairHealth = (env: RuntimeReplica, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
   return peers.map(peer => {
     const account = getAccountReplica(env, selfEntityId, peer.entityId);
@@ -2334,7 +2356,7 @@ const ensureHubMeshReserves = async (
 
 const advanceHubMeshBootstrap = async (
   input: HubMeshBootstrapInput,
-): Promise<void> => {
+): Promise<boolean> => {
   const jurisdiction =
     getEntityJurisdiction(input.env, input.bootstrap.entityId) ||
     getEntityJurisdictionName(input.env, input.bootstrap.entityId) ||
@@ -2365,7 +2387,7 @@ const advanceHubMeshBootstrap = async (
   } else if (!input.milestones.gossipReady) {
     startTiming('gossip_ready');
   }
-  if (requiredProfiles.length !== resolvedArgs.meshHubNames.length) return;
+  if (requiredProfiles.length !== resolvedArgs.meshHubNames.length) return false;
 
   const peers = requiredProfiles.filter(
     profile => profile.entityId !== input.bootstrap.entityId.toLowerCase(),
@@ -2379,7 +2401,7 @@ const advanceHubMeshBootstrap = async (
   // never reach the gate that was willing to tolerate it.
   if (!directHubPeersReady(input.env, peers)) {
     const waitedMs = Date.now() - input.totalStartedAt;
-    if (waitedMs < HUB_DIRECT_LINK_BOOTSTRAP_GRACE_MS) return;
+    if (waitedMs < HUB_DIRECT_LINK_BOOTSTRAP_GRACE_MS) return false;
     // Relay is the canonical availability path after the bounded direct-link
     // preference window. Do not log this once per hub: the owning orchestrator
     // publishes the single mesh-wide direct-link baseline and still enforces
@@ -2443,7 +2465,7 @@ const advanceHubMeshBootstrap = async (
         getBootstrapCreditAmount,
       ),
     );
-  if (!creditReady) return;
+  if (!creditReady) return false;
   if (!input.milestones.creditReady) {
     finishTiming(
       'mesh_credit',
@@ -2454,14 +2476,23 @@ const advanceHubMeshBootstrap = async (
   if (!input.milestones.reserveReady) {
     input.milestones.reserveReady = await ensureHubMeshReserves(input);
   }
+  const supportReady = supportPeerProvisioningReady(
+    input.env,
+    input.hubBootstraps,
+    supportPeerIdentities,
+    input.env.gossip?.getProfiles?.() || [],
+  );
+  if (!supportReady || !input.milestones.reserveReady) return false;
   if (
-    input.milestones.reserveReady &&
     (timings['mesh_ready_total']?.ms ?? null) === null
   ) {
     input.markProgress('external-faucet-provision');
     await input.ensureFaucetReady();
     finishTiming('mesh_ready_total', input.totalStartedAt);
   }
+  return input.milestones.gossipReady &&
+    input.milestones.accountsReady &&
+    input.milestones.creditReady;
 };
 
 const requireHubTokenCatalog = async (live: HubNodeLiveContext): Promise<JTokenInfo[]> => {
@@ -2709,7 +2740,7 @@ const createHubMeshBootstrapController = (
       if (hasPendingRuntimeWork(live.env)) return;
       live.meshLoopInFlight = true;
       try {
-        await advanceHubMeshBootstrap({
+        const complete = await advanceHubMeshBootstrap({
           env: live.env,
           bootstrap: live.bootstrap,
           hubBootstraps: live.hubBootstraps,
@@ -2720,6 +2751,11 @@ const createHubMeshBootstrapController = (
           markProgress,
           ensureFaucetReady,
         });
+        if (complete) {
+          markProgress('complete');
+          if (loop) clearInterval(loop);
+          loop = null;
+        }
       } finally {
         live.meshLoopInFlight = false;
       }
