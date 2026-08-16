@@ -12,6 +12,7 @@ import {
 } from '../../../entity/state/persistent-account-map';
 import { makeAccount } from '../../helpers/cross-j';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { listOpenSwapOffers } from '../../../orderbook/open-swap-offers';
 
 const hash = (value: AccountReplica): string =>
   `0x${String((value as unknown as { marker: number }).marker).padStart(64, '0')}`;
@@ -44,6 +45,37 @@ const offdeltaHash = (value: AccountReplica): string =>
   `0x${(value.state.deltas.get(1)?.offdelta ?? 0n).toString(16).padStart(64, '0')}`;
 
 describe('PersistentEntityAccountMap', () => {
+  test('orderbook discovery reads committed Patricia Account collections', () => {
+    const replica = productionAccount();
+    replica.state.swapOffers = replica.state.swapOffers.updated('offer-1', {
+      offerId: 'offer-1',
+      giveTokenId: 1,
+      giveTokenDecimals: 6,
+      giveAmount: 10_000_000n,
+      wantTokenId: 2,
+      wantTokenDecimals: 18,
+      wantAmount: 4_000_000_000_000_000n,
+      maxFee: 0n,
+      minNetReceive: 4_000_000_000_000_000n,
+      priceTicks: 2_500_000n,
+      makerIsLeft: true,
+      createdHeight: 7,
+      quantizedGive: 10_000_000n,
+      quantizedWant: 4_000_000_000_000_000n,
+    });
+    const accounts = PersistentEntityAccountMap.fromMap(
+      new Map([[RIGHT, replica]]),
+      LEFT,
+      computeEntityAccountValueHash,
+    );
+
+    expect(listOpenSwapOffers({ accounts })).toEqual([expect.objectContaining({
+      offerId: 'offer-1',
+      accountId: RIGHT,
+      createdHeight: 7,
+    })]);
+  });
+
   test('rejection leaves the committed base unchanged', () => {
     const alice = id('1');
     const base = PersistentEntityAccountMap.fromMap(

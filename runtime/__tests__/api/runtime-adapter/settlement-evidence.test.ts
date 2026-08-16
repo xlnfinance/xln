@@ -9,7 +9,15 @@ import {
 import { handleRuntimeAdapterMessage } from '../../../api/runtime-adapter/server';
 import { validateRuntimeAdapterWireMessage } from '../../../api/runtime-adapter/wire-schema';
 import { createEmptyEnv } from '../../../runtime';
-import { addReplica, addr, entity, makeJurisdiction, makeState } from '../../helpers/cross-j';
+import {
+  addReplica,
+  addr,
+  entity,
+  makeAccount,
+  makeJurisdiction,
+  makeState,
+  openWritableEntityAccounts,
+} from '../../helpers/cross-j';
 
 const leftId = entity('11');
 const rightId = entity('22');
@@ -18,8 +26,9 @@ const offerId = 'settlement-offer-1';
 const makeSettlementEnv = () => {
   const env = createEmptyEnv('settlement-evidence');
   const signerId = addr('aa');
-  const state = makeState(leftId, signerId, makeJurisdiction('J1', 31_337, 'dd', 'ee'), rightId);
-  const account = state.accounts.get(rightId)!;
+  const jurisdiction = makeJurisdiction('J1', 31_337, 'dd', 'ee');
+  const state = makeState(leftId, signerId, jurisdiction);
+  const account = makeAccount(leftId, rightId, jurisdiction);
   const offer = {
     offerId, giveTokenId: 1, giveTokenDecimals: 6, giveAmount: 10n,
     wantTokenId: 2, wantTokenDecimals: 18, wantAmount: 20n,
@@ -39,6 +48,9 @@ const makeSettlementEnv = () => {
     accountStateRoot: `0x${'12'.repeat(32)}`,
     stateHash: `0x${'34'.repeat(32)}`,
   };
+  const accounts = openWritableEntityAccounts(state);
+  accounts.set(rightId, account);
+  state.accounts = accounts.sealCandidate();
   addReplica(env, state, signerId);
   return env;
 };

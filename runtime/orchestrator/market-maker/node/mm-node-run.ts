@@ -45,6 +45,7 @@ import { createRuntimeIngressReceiptStore } from '../../../runtime/input-pipelin
 import { readRuntimeSecurityIncidentTelemetry } from '../../../runtime/observability/security-incidents';
 import { requiresLocalNodeOperator } from '../../../api/server/control/node-http-access';
 import { handleRuntimeInputStatus } from '../../../api/server/control/runtime-input';
+import { resolveRuntimeAdminControl } from '../../../api/server/control/runtime-admin';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
 import type { ReliableDeliveryReceipt, RuntimeReplica } from '../../../runtime/types';
 import {
@@ -930,6 +931,7 @@ const createMarketMakerRuntimeAdapterHandler =
         registerReceipt: receipt => deps.runtimeIngressReceipts.register(receipt),
         readReceipt: id => deps.runtimeIngressReceipts.get(id),
         buildRuntimeInputStatusUrl: deps.runtimeInputStatusUrl,
+        controlRuntime: resolveRuntimeAdminControl,
         isMutatingIngressReady: deps.isMutatingIngressReady,
         readHead: env => readPersistedStorageHead(env),
         readFrame: (env, height) => readPersistedStorageFrameRecord(env, height),

@@ -27,6 +27,7 @@ import {
 } from '../../runtime';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { BrainVaultOwnerController } from '../../api/server/ownership/brainvault';
+import { resolveRuntimeAdminControl } from '../../api/server/control/runtime-admin';
 
 export type HubServerSocket = DirectWebSocket &
   RuntimeAdapterSocket & { data?: { type?: string } };
@@ -158,6 +159,7 @@ export const createHubRadapterMessageHandler = (
         registerReceipt: receipt => receipts.register(receipt),
         readReceipt: id => receipts.get(id),
         buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
+        controlRuntime: resolveRuntimeAdminControl,
         isMutatingIngressReady: isIngressReady,
         deriveBrainVault: async (targetEnv, input, options) => {
           if (!isBrainVaultReady()) throw new Error('BRAINVAULT_OWNER_STARTUP_PENDING');

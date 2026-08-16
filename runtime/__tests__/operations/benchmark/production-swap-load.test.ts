@@ -171,10 +171,10 @@ describe('production swap load evidence', () => {
       '--work-dir', '/tmp/load', '--port-base', '20000', '--mode', 'same',
       '--swaps', '31', '--lanes', '32',
     ])).toThrow('PRODUCTION_SWAP_LOAD_LANES_WITHOUT_ORDERS');
-    expect(() => parseWorkerArgs([
+    expect(parseWorkerArgs([
       '--work-dir', '/tmp/load', '--port-base', '20000', '--mode', 'same',
       '--swaps', '481', '--lanes', '481',
-    ])).toThrow('PRODUCTION_SWAP_LOAD_LANES_EXCEED_HUB_ACCOUNT_MAX');
+    ]).lanes).toBe(481);
     expect(distributeLoadOrders(13, 3)).toEqual([5, 4, 4]);
     expect(distributeLoadOrders(32, 32)).toEqual(Array.from({ length: 32 }, () => 1));
     expect(() => distributeLoadOrders(16, 3))

@@ -46,6 +46,18 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 };
 
 describe('production startup wiring', () => {
+  test('every production Runtime host exposes one canonical admin control resolver', () => {
+    const sources = [
+      'runtime/api/server/network/rpc-ws.ts',
+      'runtime/orchestrator/hub/hub-runtime-transport.ts',
+      'runtime/orchestrator/market-maker/node/mm-node-run.ts',
+    ].map(path => readFileSync(join(repoRoot, path), 'utf8'));
+
+    for (const source of sources) {
+      expect(source).toContain('controlRuntime: resolveRuntimeAdminControl');
+    }
+  });
+
   test('managed hub BrainVault prewarms before WAL replay and opens custody only after restore', () => {
     const hub = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const transport = readFileSync(join(repoRoot, 'runtime/orchestrator/hub/hub-runtime-transport.ts'), 'utf8');

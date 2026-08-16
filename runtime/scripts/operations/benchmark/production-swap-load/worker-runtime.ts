@@ -15,7 +15,7 @@ import { deriveDelta, isLeftEntity } from '../../../../account/utils';
 import { RemoteRuntimeAdapter } from '../../../../api/runtime-adapter/remote';
 import type { RuntimeAdapterSendResult } from '../../../../api/runtime-adapter/types';
 import { canonicalPair } from '../../../../orderbook';
-import { safeStringify } from '../../../../protocol/serialization';
+import { safeParse, safeStringify } from '../../../../protocol/serialization';
 import type { RuntimeInput } from '../../../../runtime/types';
 import {
   decodeAccountPage,
@@ -76,10 +76,6 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
   if (!workDir) throw new Error('PRODUCTION_SWAP_LOAD_WORK_DIR_REQUIRED');
   const swaps = parsePositiveInteger(values.get('--swaps') ?? '1', 'PRODUCTION_SWAP_LOAD_SWAPS_INVALID');
   const lanes = parsePositiveInteger(values.get('--lanes') ?? '1', 'PRODUCTION_SWAP_LOAD_LANES_INVALID');
-  // Parallel same-j mode creates one maker and one taker Account per lane.
-  // Keep headroom below the Hub's 1,000-Account hard cap for its bootstrap,
-  // MM, custody and peer Accounts instead of making a benchmark-only limit.
-  if (lanes > 480) throw new Error('PRODUCTION_SWAP_LOAD_LANES_EXCEED_HUB_ACCOUNT_MAX');
   const mode = String(values.get('--mode') ?? 'same').trim();
   if (mode === 'same' && swaps < lanes) {
     throw new Error('PRODUCTION_SWAP_LOAD_LANES_WITHOUT_ORDERS');
@@ -134,7 +130,7 @@ export const persistReport = (
     closeSync(descriptor);
   }
   renameSync(temporary, path);
-  decode(JSON.parse(readFileSync(path, 'utf8')) as unknown);
+  decode(safeParse(readFileSync(path, 'utf8')));
 };
 
 export const entryByLabel = (entries: readonly LoadRuntimeEntry[], label: string): LoadRuntimeEntry => {

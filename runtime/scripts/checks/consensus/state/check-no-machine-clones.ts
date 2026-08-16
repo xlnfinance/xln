@@ -44,6 +44,15 @@ const forbiddenTypeNames = new Set([
   'AccountReplica',
   'AccountState',
 ]);
+const persistentCollectionTypeNames = new Set([
+  'PersistentRadixValueMap',
+  'PersistentAccountStateMap',
+  'PersistentEntityAccountMap',
+  'EntityAccountCandidateMap',
+  'PersistentEntityCollectionMap',
+  'EntityCollectionCandidateMap',
+  'BookBranchMap',
+]);
 
 const typeContainsForbiddenMachine = (
   type: ts.Type,
@@ -61,6 +70,24 @@ const typeContainsForbiddenMachine = (
   const reference = type as ts.TypeReference;
   return (reference.typeArguments ?? [])
     .some(argument => typeContainsForbiddenMachine(argument, seen));
+};
+
+const typeContainsPersistentCollection = (
+  type: ts.Type,
+  seen = new Set<ts.Type>(),
+): boolean => {
+  if (seen.has(type)) return false;
+  seen.add(type);
+  const names = [type.aliasSymbol?.getName(), type.getSymbol()?.getName()];
+  if (names.some(name => name !== undefined && persistentCollectionTypeNames.has(name))) {
+    return true;
+  }
+  if (type.isUnionOrIntersection()) {
+    return type.types.some(member => typeContainsPersistentCollection(member, seen));
+  }
+  const reference = type as ts.TypeReference;
+  return (reference.typeArguments ?? [])
+    .some(argument => typeContainsPersistentCollection(argument, seen));
 };
 
 const rootExpression = (node: ts.Expression): ts.Expression => {
@@ -103,6 +130,16 @@ for (const source of sourceFiles) {
     ) {
       const position = source.getLineAndCharacterOfPosition(node.getStart(source));
       violations.push(`${source.fileName}:${position.line + 1}:Proxy`);
+    }
+    if (
+      ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.InstanceOfKeyword
+      && ts.isIdentifier(node.right)
+      && node.right.text === 'Map'
+      && typeContainsPersistentCollection(checker.getTypeAtLocation(node.left))
+    ) {
+      const position = source.getLineAndCharacterOfPosition(node.getStart(source));
+      violations.push(`${source.fileName}:${position.line + 1}:persistent collection instanceof Map`);
     }
     if (ts.isCallExpression(node)) {
       const callee = node.expression;

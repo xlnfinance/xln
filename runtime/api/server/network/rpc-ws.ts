@@ -9,16 +9,14 @@ import {
   loadEntityViewPageFromStorageDb,
   readPersistedRuntimeActivityPage,
   readPersistedRuntimeActivityJournal,
-  readPersistedAccountFrameHistory,
   readPersistedAccountSwapHistoryPage,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
   submitCrossJurisdictionIntent,
-  verifyLiveRuntimeStorage,
 } from '../../../runtime.ts';
 import { handleRuntimeAdapterMessage, type RuntimeAdapterServerDeps } from '../../runtime-adapter/server';
 import { RuntimeAdapterError } from '../../runtime-adapter/errors';
-import { buildSettlementEvidence } from '../../runtime-adapter/control/settlement-evidence';
+import { resolveRuntimeAdminControl } from '../control/runtime-admin';
 import type {
   RuntimeAdapterFrameReceiptResponse,
   RuntimeAdapterPaymentRoutesResponse,
@@ -149,13 +147,7 @@ export const createServerRpcMessageHandler = ({
       submitCrossJurisdictionIntent: async (targetEnv, route) => {
         await submitCrossJurisdictionIntent(targetEnv, route);
       },
-      controlRuntime: (targetEnv, action) => {
-        if (action === 'verify-chain') return verifyLiveRuntimeStorage(targetEnv);
-        if (action.type === 'settlement-evidence') {
-          return buildSettlementEvidence(targetEnv, action, readPersistedAccountFrameHistory);
-        }
-        throw new RuntimeAdapterError('E_BAD_QUERY', 'unsupported runtime control');
-      },
+      controlRuntime: resolveRuntimeAdminControl,
       ...(validateRuntimeInputAdmission ? { validateRuntimeInputAdmission } : {}),
       ...(registerRuntimeInputReceipt ? { registerReceipt: registerRuntimeInputReceipt } : {}),
       ...(readRuntimeInputReceipt ? { readReceipt: readRuntimeInputReceipt } : {}),
