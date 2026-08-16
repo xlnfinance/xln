@@ -457,7 +457,7 @@ export const buildRadixMerkle = (
   leaves: RadixMerkleLeaf[],
   options?: RadixMerkleOptions,
 ): RadixMerkleResult => {
-  const radix = options?.radix === 256 ? 256 : 16;
+  const radix = options?.radix ?? 16;
   const hashAlgorithm = options?.hashAlgorithm ?? 'integrity';
   if (leaves.length === 0) {
     return {
@@ -536,7 +536,7 @@ export const buildRadixMerkleMaterialized = (
   leaves: RadixMerkleLeaf[],
   options?: RadixMerkleOptions,
 ): RadixMerkleMaterializedResult => {
-  const radix = options?.radix === 256 ? 256 : 16;
+  const radix = options?.radix ?? 16;
   const hashAlgorithm = options?.hashAlgorithm ?? 'integrity';
   if (leaves.length === 0) {
     return {
