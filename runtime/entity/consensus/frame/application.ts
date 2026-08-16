@@ -96,6 +96,7 @@ import { filterEntityFrameBroadcastContinuations } from '../jurisdiction/broadca
 import { applyEntityTxReturnedEffects } from './tx-effects';
 import { selectSettlementContinuation } from '../account/settlement-continuation';
 import {
+  buildChangedEntityProfileHashToSign,
   buildEntityProfileDescriptor,
   computeEntityProfileDescriptorHash,
 } from '../../profile/profile-descriptor';
@@ -125,6 +126,7 @@ import {
   copyProposableAccounts,
   dirtyAccountIdsFromState,
 } from '../account/touched-accounts';
+import { createCanonicalAccountWorklist } from '../account/canonical-worklist';
 
 const recordFrameAccountChange = (
   storageChanges: RuntimeOverlayRecord[],
@@ -550,6 +552,7 @@ const proposeAccountFrameCandidate = async (
   accountKey: string,
   account: AccountReplica,
   crossJOpeningProposalTxs: AccountTx[] | undefined,
+  scheduleAccount: (accountId: string) => void,
 ): Promise<AccountFrameProposal | undefined> => {
   const { env, currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
   if (!accountHasProposableMempool(account, state)) return undefined;
@@ -592,6 +595,7 @@ const proposeAccountFrameCandidate = async (
         if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
         recordFrameAccountChange(storageChanges, state.entityId, route.inboundEntity);
         proposableAccounts.add(route.inboundEntity);
+        scheduleAccount(route.inboundEntity);
       }
     }
     terminateHtlcRoute(state, hashlock, state.timestamp);
@@ -657,15 +661,12 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     proposableAccounts,
     requiredAccountResponses,
   } = context;
-  const processedAccounts = new Set<string>();
+  const worklist = createCanonicalAccountWorklist(proposableAccounts);
   let proposedFrames = 0;
 
   while (true) {
-    const accountKey = [...proposableAccounts]
-      .filter(candidate => !processedAccounts.has(candidate))
-      .sort(compareStableText)[0];
+    const accountKey = worklist.take();
     if (!accountKey) break;
-    processedAccounts.add(accountKey);
     const account = getEntityAccountForWrite(currentEntityState.accounts, accountKey);
     const { counterparty: cpId } = account
       ? getAccountPerspective(account.state, currentEntityState.entityId)
@@ -690,8 +691,13 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       accountKey,
       account,
       crossJOpeningProposalTxs,
+      accountId => { worklist.add(accountId); },
     );
-    if (proposal) proposedFrames += 1;
+    // Idle/rejected Account attempts are not frames. Counting either result as
+    // committed work keeps an otherwise empty Entity preview alive, advances
+    // Entity height, and immediately schedules the same impossible attempt
+    // again. Only an actual Account proposal is causal work worth certifying.
+    if (proposal && isProposedAccountFrame(proposal)) proposedFrames += 1;
 
     const finalAccountInput = proposal && isProposedAccountFrame(proposal)
       ? proposal.accountInput
@@ -1437,8 +1443,7 @@ const applyEntityFrameWithIsolation = async (
   isolateState: boolean,
 ): Promise<EntityFrameResult> => {
   entityContext = validateEntityInfraContext(entityContext);
-  const profileCertificationRequested =
-    entityState.height === 0 || entityTxs.some(tx => tx.type === 'profile-update');
+  const previousProfileHash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(entityState));
   const working = await prepareEntityFrameWorkingSet(
     env,
     entityState,
@@ -1453,10 +1458,12 @@ const applyEntityFrameWithIsolation = async (
     working.currentEntityState,
   );
   working.markFrameProfile('entityTxLoop');
-  const appendRequestedProfileHash = (state: EntityState): void => {
-    if (!profileCertificationRequested) return;
-    const hash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(state));
-    working.context.collectedHashes.push({ hash, type: 'profile', context: `profile:${hash}` });
+  const appendFinalProfileHash = (state: EntityState): void => {
+    const changed = buildChangedEntityProfileHashToSign(
+      state,
+      entityState.height === 0 ? null : previousProfileHash,
+    );
+    if (changed) working.context.collectedHashes.push(changed);
   };
   if (working.authorityTransitionOnly) {
     working.currentEntityState = assignCertifiedOutputIdentities(
@@ -1486,7 +1493,7 @@ const applyEntityFrameWithIsolation = async (
     );
   }
   const post = await applyPostEntityTxPhases(working);
-  appendRequestedProfileHash(post.currentEntityState);
+  appendFinalProfileHash(post.currentEntityState);
   logEntityFrameProfile(working, entityTxs, post);
   return buildEntityFrameResult(
     post.currentEntityState,

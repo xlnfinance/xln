@@ -203,7 +203,7 @@ import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/code
 
 import { createDefaultDelta } from '../../../account/state/delta';
 
-import { cloneEntityState } from '../../../entity/state-clone';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
 
 import { buildDisputeArgumentsForSnapshot } from '../../../entity/dispute-arguments';
 import {
@@ -1064,7 +1064,7 @@ describe('audit fail-fast regressions', () => {
     });
     const sealedBatchBefore = encodeJBatch(state.jBatchState.sentBatch!.batch);
     state.jBatchState.sentBatch!.encodedBatch = sealedBatchBefore;
-    const clonedSealedBatch = cloneEntityState(state).jBatchState!.sentBatch!.batch;
+    const clonedSealedBatch = createEntityFrameCandidateState(state).jBatchState!.sentBatch!.batch;
     expect(safeStringify(clonedSealedBatch)).toBe(safeStringify(state.jBatchState.sentBatch!.batch));
     const finalized = await applyJEventRange(
       state,

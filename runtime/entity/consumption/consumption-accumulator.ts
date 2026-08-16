@@ -39,9 +39,6 @@ export const EMPTY_CONSUMPTION_ROOT = domain('xln.consumption-frontier.empty.v1'
 export const MAX_CONSUMPTION_PROOF_NODES = 257;
 const MAX_CONSUMPTION_PROOF_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 const MAX_CONSUMPTION_HANKO_BYTES = HANKO_MAX_BYTES;
-export const MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY = BigInt(
-  LIMITS.MAX_ACCOUNTS_PER_ENTITY * 5,
-);
 const UINT64_MAX = (1n << 64n) - 1n;
 const CONSUMPTION_LANES = new Set<ConsumptionOutputIdentity['lane']>([
   'generic',
@@ -365,11 +362,6 @@ const parseState = (state: ConsumptionAccumulatorState): ConsumptionAccumulatorS
   if (source['version'] !== 1) throw new Error(`CONSUMPTION_STATE_VERSION_INVALID:${String(source['version'])}`);
   if (typeof source['count'] !== 'bigint') throw new Error(`CONSUMPTION_COUNT_INVALID:${String(source['count'])}`);
   const count = boundedUint(source['count'], UINT64_MAX, 'CONSUMPTION_COUNT');
-  if (count > MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY) {
-    throw new Error(
-      `CONSUMPTION_RELATIONSHIP_LIMIT_EXCEEDED:${count}:${MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY}`,
-    );
-  }
   const root = bytes32(source['root'], 'CONSUMPTION_ROOT');
   if ((root === EMPTY_CONSUMPTION_ROOT) !== (count === 0n)) throw new Error('CONSUMPTION_STATE_ROOT_COUNT_MISMATCH');
   return Object.freeze({ version: 1, root, count });
@@ -471,11 +463,6 @@ export const applyConsumptionOutput = (
   const identity = normalizeIdentity(identityInput);
   const key = getConsumptionKey(identity);
   const inspected = inspectProof(state.root, key, proof);
-  if (inspected.result.status === 'absent' && state.count >= MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY) {
-    throw new Error(
-      `CONSUMPTION_RELATIONSHIP_LIMIT_EXCEEDED:${state.count}:${MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY}`,
-    );
-  }
   const unchangedResult = getUnchangedConsumptionResult(state, identity, inspected);
   if (unchangedResult) return unchangedResult;
 

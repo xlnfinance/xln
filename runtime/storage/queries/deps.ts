@@ -25,7 +25,11 @@ export type PersistenceQueryDeps = {
     runtimeId?: string | null,
     runtimeSeed?: string | null,
     targetHeightOverride?: number,
-    options?: { prunedTargetReturnsNull?: boolean },
+    options?: {
+      prunedTargetReturnsNull?: boolean;
+      borrowRuntimeWalFrom?: RuntimeReplica;
+      readOnly?: boolean;
+    },
   ): Promise<{ env: RuntimeReplica } | null>;
   closeRuntimeDb(env: RuntimeReplica): Promise<void>;
   restoreEnvFromRecoveryBundles(

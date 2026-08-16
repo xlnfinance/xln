@@ -25,7 +25,6 @@ import {
 } from '../../../../account/input/peer-rejection';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import { addMessage } from '../../../frame-events';
-import { getEntityAccountInsertionCapacityError } from '../../../account/account-capacity';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { isLeftEntity } from '../../../id';
 import { canonicalAccountDisputeConfig } from '../../../../account/config/dispute-config';
@@ -233,14 +232,6 @@ export const resolveInboundAccount = (
     );
   }
   const watchSeed = input.watchSeed.toLowerCase();
-  const capacityError = getEntityAccountInsertionCapacityError(
-    state.accounts,
-    counterpartyId,
-    `accountInput:${state.entityId}`,
-  );
-  if (capacityError) {
-    return rejectPeerInput('ACCOUNT_PEER_CAPACITY_EXCEEDED', capacityError);
-  }
   accountHandlerLog.debug('machine.create', { counterparty: shortId(counterpartyId) });
   const account = createInboundAccountState(
     state,

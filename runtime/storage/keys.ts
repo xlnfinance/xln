@@ -9,9 +9,6 @@ import {
   type RuntimeHeight,
 } from '../protocol/units';
 import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../infra/integrity-checksum';
-import { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './schema/merkle-namespace-tags';
-
-export type { StorageMerkleNamespace } from './schema/merkle-namespace-tags';
 
 /**
  * xln testnet has one canonical storage format. We deliberately do not carry
@@ -25,7 +22,6 @@ export const STORAGE_FRAME_FORMAT = Object.freeze({
   domain: 'xln.storage.frame',
   postStateDomain: 'xln.storage.postState',
   algorithmId: INTEGRITY_DIGEST_ALGORITHM_ID,
-  hashMode: 'storage-merkle-v1',
 } as const);
 
 class StorageSchemaMismatchError extends Error {
@@ -88,9 +84,6 @@ export const KEY_LIVE_ACCOUNT = 0x22;
 export const KEY_LIVE_BOOK = 0x23;
 export const KEY_LIVE_ACCOUNT_FIELD = 0x24;
 export const KEY_LIVE_REPLICA_META = 0x26;
-export const KEY_MERKLE_ROOT = 0x27;
-export const KEY_MERKLE_BRANCH = 0x28;
-export const KEY_MERKLE_LEAF = 0x29;
 export const KEY_CERTIFIED_BOARD_NODE = 0x2a;
 export const KEY_CONSUMPTION_NODE = 0x2b;
 export const KEY_ACCOUNT_J_CLAIM_NODE = 0x2c;
@@ -452,30 +445,6 @@ export const keyConsumptionNodePrefix = (): Buffer => Buffer.from([KEY_CONSUMPTI
 export const keyAccountJClaimNode = (hash: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_ACCOUNT_J_CLAIM_NODE]), hexBytes(hash)]);
 export const keyAccountJClaimNodePrefix = (): Buffer => Buffer.from([KEY_ACCOUNT_J_CLAIM_NODE]);
-
-const merkleNamespaceByte = (namespace: StorageMerkleNamespace): Buffer =>
-  Buffer.from([STORAGE_MERKLE_NAMESPACE_TAG[namespace]]);
-
-export const keyMerkleRoot = (entityId: string, namespace: StorageMerkleNamespace): Buffer =>
-  Buffer.concat([Buffer.from([KEY_MERKLE_ROOT]), hexBytes(entityId), merkleNamespaceByte(namespace)]);
-export const keyMerkleRootPrefix = (entityId?: string): Buffer =>
-  entityId ? Buffer.concat([Buffer.from([KEY_MERKLE_ROOT]), hexBytes(entityId)]) : Buffer.from([KEY_MERKLE_ROOT]);
-
-export const keyMerkleBranch = (entityId: string, namespace: StorageMerkleNamespace, packedPath: Uint8Array | Buffer): Buffer =>
-  Buffer.concat([Buffer.from([KEY_MERKLE_BRANCH]), hexBytes(entityId), merkleNamespaceByte(namespace), Buffer.from(packedPath)]);
-export const keyMerkleBranchPrefix = (entityId?: string, namespace?: StorageMerkleNamespace): Buffer => {
-  if (entityId && namespace) return Buffer.concat([Buffer.from([KEY_MERKLE_BRANCH]), hexBytes(entityId), merkleNamespaceByte(namespace)]);
-  if (entityId) return Buffer.concat([Buffer.from([KEY_MERKLE_BRANCH]), hexBytes(entityId)]);
-  return Buffer.from([KEY_MERKLE_BRANCH]);
-};
-
-export const keyMerkleLeaf = (entityId: string, namespace: StorageMerkleNamespace, packedPath: Uint8Array | Buffer): Buffer =>
-  Buffer.concat([Buffer.from([KEY_MERKLE_LEAF]), hexBytes(entityId), merkleNamespaceByte(namespace), Buffer.from(packedPath)]);
-export const keyMerkleLeafPrefix = (entityId?: string, namespace?: StorageMerkleNamespace): Buffer => {
-  if (entityId && namespace) return Buffer.concat([Buffer.from([KEY_MERKLE_LEAF]), hexBytes(entityId), merkleNamespaceByte(namespace)]);
-  if (entityId) return Buffer.concat([Buffer.from([KEY_MERKLE_LEAF]), hexBytes(entityId)]);
-  return Buffer.from([KEY_MERKLE_LEAF]);
-};
 
 export const keyHistoryViewAccountFrame = (
   entityId: string,

@@ -1,7 +1,10 @@
 import { ethers } from 'ethers';
 
 import type { AccountReplica } from '../../types/account';
-import { PersistentRadixValueMap } from '../../protocol/state/persistent-radix-value-map';
+import {
+  PersistentRadixValueMap,
+  type RadixFoldMutation,
+} from '../../protocol/state/persistent-radix-value-map';
 import { createStructuredLogger } from '../../infra/logger';
 import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
 import { sealCommittedAccountValue } from '../../account/state/account-value-seal';
@@ -18,13 +21,14 @@ import {
 const candidateLog = createStructuredLogger('entity.account.candidate');
 
 export type AccountValueHash = (account: AccountReplica) => string;
+export type EntityAccountDirtyMutation = RadixFoldMutation<string, AccountReplica>;
 
 const ACCOUNT_RADIX = 16 as const;
 const ZERO_VALUE_HASH = `0x${'00'.repeat(32)}`;
 
 const accountMapOptions = (valueHash: AccountValueHash) => ({
   radix: ACCOUNT_RADIX,
-  sealKey: (entityId: string): string => entityId.trim().toLowerCase(),
+  ownKey: (entityId: string): string => entityId.trim().toLowerCase(),
   keyBytes: (entityId: string): Uint8Array => {
     const normalized = entityId.trim().toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
@@ -33,12 +37,12 @@ const accountMapOptions = (valueHash: AccountValueHash) => ({
     return ethers.getBytes(normalized);
   },
   valueHash,
-  sealValue: sealCommittedAccountValue,
+  ownValue: sealCommittedAccountValue,
 });
 
 const workMapOptions = () => ({
   radix: ACCOUNT_RADIX,
-  sealKey: (entityId: string): string => entityId.trim().toLowerCase(),
+  ownKey: (entityId: string): string => entityId.trim().toLowerCase(),
   keyBytes: (entityId: string): Uint8Array => {
     const normalized = entityId.trim().toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
@@ -47,7 +51,7 @@ const workMapOptions = () => ({
     return ethers.getBytes(normalized);
   },
   valueHash: (_value: AccountWorkMask): string => ZERO_VALUE_HASH,
-  sealValue: (value: AccountWorkMask): AccountWorkMask => value,
+  ownValue: (value: AccountWorkMask): AccountWorkMask => value,
   commitment: false,
 });
 
@@ -175,6 +179,51 @@ export class PersistentEntityAccountMap implements ReadonlyMap<string, AccountRe
         pending: updateWorkCount(this.#workCounts.pending, previous, undefined, ACCOUNT_WORK_PENDING),
         rebalance: updateWorkCount(this.#workCounts.rebalance, previous, undefined, ACCOUNT_WORK_REBALANCE),
       },
+      this.#ownerEntityId,
+      this.#valueHash,
+    );
+  }
+
+  /**
+   * Publish one Entity-frame Account overlay with two Patricia folds: the
+   * committed Account values and their RAM-only scheduler masks. Repeating
+   * `updated()` per dirty Account would allocate the shared ancestor path for
+   * every mutation; one fold groups all dirty children before path-copy.
+   */
+  foldDirty(
+    mutations: Iterable<EntityAccountDirtyMutation>,
+    reset = false,
+  ): PersistentEntityAccountMap {
+    const last = new Map<string, EntityAccountDirtyMutation>();
+    for (const mutation of mutations) {
+      const entityId = mutation.key.trim().toLowerCase();
+      last.set(entityId, mutation.kind === 'put'
+        ? { kind: 'put', key: entityId, value: mutation.value }
+        : { kind: 'delete', key: entityId });
+    }
+    const ordered = [...last.values()].sort((left, right) =>
+      left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
+    const workBase = reset ? this.#work.emptied() : this.#work;
+    let counts = reset ? emptyWorkCounts() : this.#workCounts;
+    const workMutations: RadixFoldMutation<string, AccountWorkMask>[] = [];
+    for (const mutation of ordered) {
+      const previous = workBase.get(mutation.key);
+      const next = mutation.kind === 'put'
+        ? classifyAccountWork(this.#ownerEntityId, mutation.key, mutation.value)
+        : 0;
+      workMutations.push(next === 0
+        ? { kind: 'delete', key: mutation.key }
+        : { kind: 'put', key: mutation.key, value: next });
+      counts = {
+        queued: updateWorkCount(counts.queued, previous, next || undefined, ACCOUNT_WORK_QUEUED),
+        pending: updateWorkCount(counts.pending, previous, next || undefined, ACCOUNT_WORK_PENDING),
+        rebalance: updateWorkCount(counts.rebalance, previous, next || undefined, ACCOUNT_WORK_REBALANCE),
+      };
+    }
+    return new PersistentEntityAccountMap(
+      this.#values.foldMutations(ordered, reset),
+      this.#work.foldMutations(workMutations, reset),
+      counts,
       this.#ownerEntityId,
       this.#valueHash,
     );
@@ -377,6 +426,7 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
 
   sealCandidate(): PersistentEntityAccountMap {
     const committed = this.#project(true);
+    committed.rootHash();
     this.#active = false;
     candidateLog.debug('candidate.sealed', {
       base: this.#base.size,
@@ -436,13 +486,18 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
 
   #project(finalize: boolean): PersistentEntityAccountMap {
     this.#requireActive();
-    let committed = this.#cleared ? this.#base.emptied() : this.#base;
-    for (const entityId of [...this.#deleted].sort()) committed = committed.removed(entityId);
+    const mutations: EntityAccountDirtyMutation[] = [...this.#deleted]
+      .sort()
+      .map(entityId => ({ kind: 'delete', key: entityId }));
     for (const [entityId, account] of [...this.#shells].sort(([left], [right]) =>
       left < right ? -1 : left > right ? 1 : 0)) {
-      committed = committed.updated(entityId, finalize ? account : forkAccountReplicaShell(account));
+      mutations.push({
+        kind: 'put',
+        key: entityId,
+        value: finalize ? account : forkAccountReplicaShell(account),
+      });
     }
-    return committed;
+    return this.#base.foldDirty(mutations, this.#cleared);
   }
 
   #requireActive(): void {

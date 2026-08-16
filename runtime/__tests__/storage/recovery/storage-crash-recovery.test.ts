@@ -11,35 +11,22 @@ import {
   readHistoryViewHead,
   readHistoryViewRuntimeActivity,
 } from '../../../storage/history/history-view';
-import { decodeBuffer, decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/codec';
+import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
 import { liveKeyForDoc } from '../../../storage/schema/doc-refs';
 import {
-  computeStorageFrameHash,
-  computeStorageStateRoot,
-  prepareStorageStateHashes,
-} from '../../../storage/hashes';
-import {
   KEY_HEAD,
-  KEY_MERKLE_BRANCH,
-  KEY_MERKLE_LEAF,
   STORAGE_SCHEMA_VERSION,
-  ZERO_FRAME_HASH,
   keyCertifiedBoardNode,
   keyConsumptionNode,
   keyDiff,
-  keyFrame,
 } from '../../../storage/keys';
 import type {
   RuntimeDbLike,
-  StorageAccountDoc,
   StorageDiffRecord,
   StorageDoc,
   StorageEntityCoreDoc,
   StorageHead,
-  StorageMerkleBranchDoc,
-  StorageMerkleLeafDoc,
   StorageRuntimeConfig,
-  RuntimeFrame,
 } from '../../../storage/types';
 import {
   EMPTY_CERTIFIED_BOARD_ROOT,
@@ -55,18 +42,8 @@ import {
 } from '../../../entity/consumption/consumption-accumulator';
 import { getConsumptionNodeStore } from '../../../entity/consumption/consumption-store';
 import { createEmptyEnv } from '../../../runtime';
-import { createBook } from '../../../orderbook/core';
-import { decodeStorageBookHeader } from '../../../storage/schema/book-graph-codec';
-import { projectStorageBookGraphRows } from '../../../storage/schema/book-graph-codec';
-import { readStorageBookGraph } from '../../../storage/read/book-graph';
-import { applyCommand, commitBookOverlay } from '../../../orderbook';
-import { computeIntegrityDigest } from '../../../infra/integrity-checksum';
-import { computeStorageReplicaMetaDigest } from '../../../storage/replica/replica-meta-digest';
-import { buildDurableRuntimeMachineSnapshot } from '../../../storage/wal/snapshot';
-import { prepareRuntimeMachineGraphRows } from '../../../storage/wal/runtime-machine-graph';
 
 const entityId = `0x${'11'.repeat(32)}`;
-type PreparedStorageHashes = Awaited<ReturnType<typeof prepareStorageStateHashes>>;
 
 const config: Required<StorageRuntimeConfig> = {
   enabled: true,
@@ -148,42 +125,6 @@ const entityDiff = (height: number): StorageDiffRecord => {
   return { height, puts: [doc], dels: [] };
 };
 
-const accountId = (prefix: string): string => `0x${prefix.padEnd(64, '0')}`;
-
-const accountDoc = (counterpartyId: string, version: number): StorageAccountDoc => ({
-  rightEntity: counterpartyId,
-  currentHeight: version,
-} as unknown as StorageAccountDoc);
-
-const accountPut = (counterpartyId: string, version: number): StorageDoc => ({
-  family: 'account',
-  entityId,
-  counterpartyId,
-  value: accountDoc(counterpartyId, version),
-});
-
-const merkleEntries = (prepared: PreparedStorageHashes): Array<[Buffer, Buffer]> =>
-  prepared.merklePuts.map((item) => [item.key, item.value] as [Buffer, Buffer]);
-
-const applyMerkleDiff = (
-  entries: Array<[Buffer, Buffer]>,
-  prepared: PreparedStorageHashes,
-): Array<[Buffer, Buffer]> => {
-  const rows = new Map<string, [Buffer, Buffer]>();
-  for (const [key, value] of entries) rows.set(key.toString('hex'), [Buffer.from(key), Buffer.from(value)]);
-  for (const key of prepared.merkleDels) rows.delete(key.toString('hex'));
-  for (const put of prepared.merklePuts) rows.set(put.key.toString('hex'), [Buffer.from(put.key), Buffer.from(put.value)]);
-  return Array.from(rows.values()).sort(([left], [right]) => Buffer.compare(left, right));
-};
-
-const entityHash = (prepared: PreparedStorageHashes): string =>
-  prepared.entityHashDocs.get(entityId)?.hash ?? '';
-
-const expectNoMerklePutDeleteOverlap = (prepared: PreparedStorageHashes): void => {
-  const putKeys = new Set(prepared.merklePuts.map((item) => item.key.toString('hex')));
-  expect(prepared.merkleDels.some((key) => putKeys.has(key.toString('hex')))).toBe(false);
-};
-
 const head = (latestHeight: number, latestMaterializedHeight: number): StorageHead => ({
   schemaVersion: STORAGE_SCHEMA_VERSION,
   latestHeight,
@@ -197,161 +138,7 @@ const head = (latestHeight: number, latestMaterializedHeight: number): StorageHe
   retainedHistoryBytes: 0,
 });
 
-const materializedFrame = (
-  height: number,
-  prepared: PreparedStorageHashes,
-): RuntimeFrame => {
-  const runtimeMachineGraph = prepareRuntimeMachineGraphRows(
-    height,
-    buildDurableRuntimeMachineSnapshot(createEmptyEnv(`storage-frame-${height}`)),
-  );
-  if (!runtimeMachineGraph.root) throw new Error('TEST_RUNTIME_MACHINE_ROOT_MISSING');
-  const base: RuntimeFrame = {
-    height,
-    timestamp: height,
-    prevFrameHash: ZERO_FRAME_HASH,
-    replicaMetaDigest: computeStorageReplicaMetaDigest([]),
-    replicaMetaCheckpoint: true,
-    replicaMetaStateMode: 'shared-entity-state',
-    postStateHash: ZERO_FRAME_HASH,
-    stateHash: computeStorageStateRoot(prepared.entityHashes),
-    hashMode: 'storage-merkle-v1',
-    materializedState: true,
-    entityHashes: prepared.entityHashes,
-    runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    runtimeMachineRoot: runtimeMachineGraph.root,
-    touchedEntities: [entityId],
-    touchedAccounts: [],
-    touchedBookEntities: [],
-  };
-  return { ...base, frameHash: computeStorageFrameHash(base) };
-};
-
-const materializedFrameMachineRows = (height: number) =>
-  prepareRuntimeMachineGraphRows(
-    height,
-    buildDurableRuntimeMachineSnapshot(createEmptyEnv(`storage-frame-${height}`)),
-  ).rows.map(({ key, value }) => [key, value] as [Buffer, Buffer]);
-
 describe('storage crash recovery', () => {
-  test('rebuilds direct Book Patricia rows after WAL commit wins the cache race', async () => {
-    let book = createBook({ bucketWidthTicks: 10n, maxOrders: 32, stpPolicy: 1 });
-    book = commitBookOverlay(applyCommand(book, {
-      kind: 0,
-      ownerId: entityId,
-      orderId: 'maker',
-      side: 1,
-      tif: 0,
-      postOnly: true,
-      priceTicks: 120n,
-      qtyLots: 4n,
-    }).state);
-    const bookDoc: StorageDoc = {
-      family: 'book',
-      entityId,
-      pairId: '1/2',
-      value: book,
-    };
-    const prepared = await prepareStorageStateHashes({
-      db: makeMemoryDb(),
-      puts: [bookDoc],
-      dels: [],
-    });
-    const frame = materializedFrame(1, prepared);
-    const historyDb = makeMemoryDb([
-      [KEY_HEAD, encodeBuffer(head(1, 1))],
-      [keyDiff(1), encodeBuffer({ height: 1, puts: [], dels: [] })],
-      [keyFrame(1), encodeBuffer(frame)],
-      ...materializedFrameMachineRows(1),
-      ...prepared.docPuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
-      ...prepared.merklePuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
-      ...projectStorageBookGraphRows(entityId, '1/2', book)
-        .map(({ key, value }) => [key, value] as [Buffer, Buffer]),
-    ]);
-    const currentDb = makeMemoryDb();
-
-    const recovered = await recoverStorageDbFromHistory({
-      db: currentDb,
-      walDb: historyDb,
-      config,
-    });
-
-    expect(recovered.recovered).toBe(true);
-    const restored = await readStorageBookGraph(currentDb, entityId, '1/2');
-    expect(restored?.orders.get('maker')?.qtyLots).toBe(4n);
-    expect(restored?.commitmentHash).toBe(book.commitmentHash);
-  });
-
-  test('heals an equal-HEAD current projection whose live document no longer matches its Merkle commitment', async () => {
-    const diff = entityDiff(1);
-    const prepared = await prepareStorageStateHashes({
-      db: makeMemoryDb(),
-      puts: diff.puts,
-      dels: [],
-    });
-    const storageHead = head(1, 1);
-    const frame = materializedFrame(1, prepared);
-    const historyDb = makeMemoryDb([
-      [KEY_HEAD, encodeBuffer(storageHead)],
-      [keyDiff(1), encodeBuffer(diff)],
-      [keyFrame(1), encodeBuffer(frame)],
-      ...materializedFrameMachineRows(1),
-    ]);
-    const currentDb = makeMemoryDb([
-      [KEY_HEAD, encodeBuffer(storageHead)],
-      ...prepared.docPuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
-      ...prepared.merklePuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
-    ]);
-    const corrupted = entityDoc(99);
-    const corruptBatch = currentDb.batch();
-    corruptBatch.put(liveKeyForDoc(diff.puts[0]!), encodeBuffer(corrupted));
-    await corruptBatch.write();
-
-    const result = await recoverStorageDbFromHistory({
-      db: currentDb,
-      walDb: historyDb,
-      config,
-    });
-
-    expect(result.recovered).toBe(true);
-    expect(decodeBuffer<StorageEntityCoreDoc>(
-      await currentDb.get(liveKeyForDoc(diff.puts[0]!)),
-    ).height).toBe(1);
-  });
-
-  test('removes current-only content-addressed nodes even when HEAD and live Merkle state match', async () => {
-    const diff = entityDiff(1);
-    const prepared = await prepareStorageStateHashes({
-      db: makeMemoryDb(),
-      puts: diff.puts,
-      dels: [],
-    });
-    const storageHead = head(1, 1);
-    const frame = materializedFrame(1, prepared);
-    const orphanKey = keyCertifiedBoardNode(`0x${'99'.repeat(32)}`);
-    const currentDb = makeMemoryDb([
-      [KEY_HEAD, encodeBuffer(storageHead)],
-      ...prepared.docPuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
-      ...prepared.merklePuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
-      [orphanKey, Buffer.from([0xc0])],
-    ]);
-    const historyDb = makeMemoryDb([
-      [KEY_HEAD, encodeBuffer(storageHead)],
-      [keyDiff(1), encodeBuffer(diff)],
-      [keyFrame(1), encodeBuffer(frame)],
-      ...materializedFrameMachineRows(1),
-    ]);
-
-    const result = await recoverStorageDbFromHistory({
-      db: currentDb,
-      walDb: historyDb,
-      config,
-    });
-
-    expect(result.recovered).toBe(true);
-    await expect(currentDb.get(orphanKey)).rejects.toMatchObject({ code: 'LEVEL_NOT_FOUND' });
-  });
-
   test('copies immutable certified-board nodes before publishing recovered current head', async () => {
     const stackKey = getCertifiedBoardStackKey({
       chainId: 31_337,
@@ -379,47 +166,6 @@ describe('storage crash recovery', () => {
     ]);
     await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
     expect(decodeBuffer(await currentDb.get(keyCertifiedBoardNode(nodeHash)))).toEqual(node);
-    expect(decodeBuffer<StorageHead>(await currentDb.get(KEY_HEAD)).latestHeight).toBe(1);
-  });
-
-  test('recovers committed consumption witnesses before publishing current head', async () => {
-    const inserted = applyConsumptionOutput(createEmptyConsumptionAccumulator(), {
-      targetEntityId: entityId,
-      sourceEntityId: `0x${'22'.repeat(32)}`,
-      lane: 'generic',
-      sequence: 1,
-      semanticHash: `0x${'33'.repeat(32)}`,
-      outputHash: `0x${'44'.repeat(32)}`,
-      outputHanko: '0x01',
-    }, { version: 1, nodes: [] });
-    const node = inserted.newNodes[0]!;
-    const stale = applyConsumptionOutput(createEmptyConsumptionAccumulator(), {
-      targetEntityId: entityId,
-      sourceEntityId: `0x${'55'.repeat(32)}`,
-      lane: 'generic',
-      sequence: 1,
-      semanticHash: `0x${'66'.repeat(32)}`,
-      outputHash: `0x${'77'.repeat(32)}`,
-      outputHanko: '0x02',
-    }, { version: 1, nodes: [] }).newNodes[0]!;
-    const currentDb = makeMemoryDb([[keyConsumptionNode(stale.hash), encodeBuffer(stale.node)]]);
-    const core = entityDoc(1);
-    core.consumptionAccumulator = inserted.state;
-    const historyDb = makeMemoryDb([
-      [KEY_HEAD, encodeBuffer(head(1, 1))],
-      [keyDiff(1), encodeBuffer({
-        height: 1,
-        puts: [{ family: 'entity', entityId, value: core }],
-        dels: [],
-      } satisfies StorageDiffRecord)],
-      [keyConsumptionNode(node.hash), encodeBuffer(node.node)],
-    ]);
-
-    await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
-    expect(decodeBuffer(await currentDb.get(keyConsumptionNode(node.hash)))).toEqual(node.node);
-    await expect(currentDb.get(keyConsumptionNode(stale.hash))).rejects.toMatchObject({
-      code: 'LEVEL_NOT_FOUND',
-    });
     expect(decodeBuffer<StorageHead>(await currentDb.get(KEY_HEAD)).latestHeight).toBe(1);
   });
 
@@ -476,28 +222,6 @@ describe('storage crash recovery', () => {
     )).rejects.toThrow('CONSUMPTION_NODE_MISSING');
   });
 
-  test('replays materialized diffs into current DB and catches up head from history DB', async () => {
-    const diff1 = entityDiff(1);
-    const diff2 = entityDiff(2);
-    const currentDb = makeMemoryDb();
-    const historyDb = makeMemoryDb([
-      [KEY_HEAD, encodeBuffer(head(3, 2))],
-      [keyDiff(1), encodeBuffer(diff1)],
-      [keyDiff(2), encodeBuffer(diff2)],
-    ]);
-
-    const result = await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
-    expect(result.recovered).toBe(true);
-
-    const recoveredHead = decodeBuffer<StorageHead>(await currentDb.get(KEY_HEAD));
-    expect(recoveredHead.latestHeight).toBe(3);
-    expect(recoveredHead.latestMaterializedHeight).toBe(2);
-
-    const recoveredDoc = decodeBuffer<StorageEntityCoreDoc>(await currentDb.get(liveKeyForDoc(diff2.puts[0]!)));
-    expect(recoveredDoc.height).toBe(2);
-    expect(recoveredDoc.profile.name).toBe('entity-2');
-  });
-
   test('rejects current DB state that is ahead of authoritative history DB', async () => {
     const currentDb = makeMemoryDb([[KEY_HEAD, encodeBuffer(head(4, 4))]]);
     const historyDb = makeMemoryDb([[KEY_HEAD, encodeBuffer(head(3, 3))]]);
@@ -530,177 +254,4 @@ describe('storage crash recovery', () => {
     expect(frameHead.retainedBytes).toBe(plan.writtenBytes);
   });
 
-  test('storage hash preparation remains usable on recovered live docs', async () => {
-    const diff1 = entityDiff(1);
-    const diff2 = entityDiff(2);
-    const currentDb = makeMemoryDb();
-    const historyDb = makeMemoryDb([
-      [KEY_HEAD, encodeBuffer(head(2, 2))],
-      [keyDiff(1), encodeBuffer(diff1)],
-      [keyDiff(2), encodeBuffer(diff2)],
-    ]);
-
-    const result = await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
-    const diff3 = entityDiff(3);
-    const prepared = await prepareStorageStateHashes({
-      db: currentDb,
-      puts: diff3.puts,
-      dels: [],
-      ...(result.entityHashDocs ? { entityHashDocs: result.entityHashDocs } : {}),
-    });
-
-    expect(prepared.entityHashes).toHaveLength(1);
-    expect(prepared.entityHashes[0]?.entityId).toBe(entityId);
-  });
-
-  test('hashes the canonical persisted book value after commitment caches warm', async () => {
-    const bookDoc: StorageDoc = {
-      family: 'book',
-      entityId,
-      pairId: '1/2',
-      value: createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
-    };
-    const prepared = await prepareStorageStateHashes({
-      db: makeMemoryDb(),
-      puts: [bookDoc],
-      dels: [],
-    });
-    const logicalKey = liveKeyForDoc(bookDoc);
-    const persisted = prepared.docPuts.find(({ key }) => key.equals(logicalKey))?.value;
-    expect(persisted).toBeDefined();
-
-    const validated = decodeValidatedBuffer(persisted!, decodeStorageBookHeader);
-    const canonicalHash = computeIntegrityDigest(encodeBuffer(validated));
-    const leaf = prepared.merklePuts
-      .filter(({ key }) => key[0] === KEY_MERKLE_LEAF)
-      .map(({ value }) => decodeBuffer<StorageMerkleLeafDoc>(value))
-      .find(({ key }) => key.startsWith('0x03'));
-
-    expect(leaf?.valueHash).toBe(canonicalHash);
-    expect(computeIntegrityDigest(persisted!)).toBe(canonicalHash);
-  });
-
-  test('merkle flush diff cancels split then collapse in one frame', async () => {
-    const left = accountId('1');
-    const right = accountId('2');
-    const initial = await prepareStorageStateHashes({
-      db: makeMemoryDb(),
-      puts: [accountPut(left, 1)],
-      dels: [],
-    });
-
-    const prepared = await prepareStorageStateHashes({
-      db: makeMemoryDb(merkleEntries(initial)),
-      puts: [accountPut(right, 1)],
-      dels: [{ family: 'account', entityId, counterpartyId: right }],
-    });
-
-    expect(entityHash(prepared)).toBe(entityHash(initial));
-    expect(prepared.entityHashDocs.get(entityId)?.cellCount).toBe(1);
-    expect(prepared.merkleDels).toHaveLength(0);
-    expectNoMerklePutDeleteOverlap(prepared);
-  });
-
-  test('merkle flush diff handles collapse then split without deleting surviving leaves', async () => {
-    const survivor = accountId('1');
-    const removed = accountId('2');
-    const addedUnderSurvivorPrefix = accountId('12');
-    const initial = await prepareStorageStateHashes({
-      db: makeMemoryDb(),
-      puts: [accountPut(survivor, 1), accountPut(removed, 1)],
-      dels: [],
-    });
-
-    const prepared = await prepareStorageStateHashes({
-      db: makeMemoryDb(merkleEntries(initial)),
-      puts: [accountPut(addedUnderSurvivorPrefix, 1)],
-      dels: [{ family: 'account', entityId, counterpartyId: removed }],
-    });
-    const reference = await prepareStorageStateHashes({
-      db: makeMemoryDb(),
-      puts: [accountPut(survivor, 1), accountPut(addedUnderSurvivorPrefix, 1)],
-      dels: [],
-    });
-
-    expect(entityHash(prepared)).toBe(entityHash(reference));
-    expect(prepared.entityHashDocs.get(entityId)?.cellCount).toBe(2);
-    expect(prepared.merkleDels.length).toBeGreaterThan(0);
-    expectNoMerklePutDeleteOverlap(prepared);
-  });
-
-  test('merkle editor can flush, reload from db, and continue to the same root', async () => {
-    const a = accountId('1');
-    const b = accountId('2');
-    const c = accountId('3');
-    const d = accountId('31');
-    const initial = await prepareStorageStateHashes({
-      db: makeMemoryDb(),
-      puts: [accountPut(a, 1), accountPut(b, 1), accountPut(c, 1)],
-      dels: [],
-    });
-    const first = await prepareStorageStateHashes({
-      db: makeMemoryDb(merkleEntries(initial)),
-      puts: [accountPut(a, 2)],
-      dels: [{ family: 'account', entityId, counterpartyId: b }],
-    });
-    const afterFirstEntries = applyMerkleDiff(merkleEntries(initial), first);
-
-    const second = await prepareStorageStateHashes({
-      db: makeMemoryDb(afterFirstEntries),
-      puts: [accountPut(c, 2), accountPut(d, 1)],
-      dels: [],
-    });
-    const reference = await prepareStorageStateHashes({
-      db: makeMemoryDb(merkleEntries(initial)),
-      puts: [accountPut(a, 2), accountPut(c, 2), accountPut(d, 1)],
-      dels: [{ family: 'account', entityId, counterpartyId: b }],
-    });
-
-    expect(entityHash(second)).toBe(entityHash(reference));
-    expect(second.entityHashDocs.get(entityId)?.cellCount).toBe(3);
-    expectNoMerklePutDeleteOverlap(first);
-    expectNoMerklePutDeleteOverlap(second);
-  });
-
-  test('incremental merkle edit rejects a corrupted persisted branch hash', async () => {
-    const a = accountId('1');
-    const b = accountId('2');
-    const initial = await prepareStorageStateHashes({
-      db: makeMemoryDb(),
-      puts: [accountPut(a, 1), accountPut(b, 1)],
-      dels: [],
-    });
-    const corrupted = merkleEntries(initial).map(([key, value]) => {
-      if (key[0] !== KEY_MERKLE_BRANCH) return [key, value] as [Buffer, Buffer];
-      const branch = decodeBuffer<StorageMerkleBranchDoc>(value);
-      return [key, encodeBuffer({ ...branch, hash: `0x${'ff'.repeat(32)}` })] as [Buffer, Buffer];
-    });
-
-    await expect(prepareStorageStateHashes({
-      db: makeMemoryDb(corrupted),
-      puts: [accountPut(a, 2)],
-      dels: [],
-    })).rejects.toThrow('STORAGE_MERKLE_BRANCH_INTEGRITY_MISMATCH');
-  });
-
-  test('incremental merkle edit rejects a corrupted persisted leaf hash', async () => {
-    const a = accountId('1');
-    const b = accountId('2');
-    const initial = await prepareStorageStateHashes({
-      db: makeMemoryDb(),
-      puts: [accountPut(a, 1), accountPut(b, 1)],
-      dels: [],
-    });
-    const corrupted = merkleEntries(initial).map(([key, value]) => {
-      if (key[0] !== KEY_MERKLE_LEAF) return [key, value] as [Buffer, Buffer];
-      const leaf = decodeBuffer<StorageMerkleLeafDoc>(value);
-      return [key, encodeBuffer({ ...leaf, hash: `0x${'ff'.repeat(32)}` })] as [Buffer, Buffer];
-    });
-
-    await expect(prepareStorageStateHashes({
-      db: makeMemoryDb(corrupted),
-      puts: [accountPut(a, 2)],
-      dels: [],
-    })).rejects.toThrow('STORAGE_MERKLE_LEAF_INTEGRITY_MISMATCH');
-  });
 });

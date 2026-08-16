@@ -23,7 +23,6 @@ import {
   resolveObserverCertifiedBoardHash,
   resolveObserverCertifiedBoardRecord,
 } from '../../../jurisdiction/machine/board-registry';
-import { LIMITS } from '../../../config/constants';
 import { assertReliableCertifiedPayloadIsAtomic } from './envelope';
 import { assertCertifiedEntityOutputAuthorization } from '../../auth/authorization';
 import { haltRuntimeFailure, rejectFailure, retryFailure } from '../../../protocol/errors/failure-taxonomy';
@@ -459,11 +458,6 @@ export const assertCertifiedOutputSemanticIdentity = (
 export const assignCertifiedOutputIdentities = (sourceState: EntityState, outputs: EntityOutput[]): EntityState => {
   const sourceEntityId = sourceState.entityId.toLowerCase();
   const sequences = new Map(sourceState.certifiedOutputSequences ?? []);
-  if (sequences.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
-    throw new Error(
-      `CONSENSUS_OUTPUT_SOURCE_RELATIONSHIP_LIMIT_EXCEEDED:${sequences.size}:${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-    );
-  }
   let sequenceStateChanged = false;
   for (let outputIndex = 0; outputIndex < outputs.length; outputIndex += 1) {
     const output = outputs[outputIndex]!;
@@ -523,11 +517,6 @@ export const assignCertifiedOutputIdentities = (sourceState: EntityState, output
     }
 
     const previous = sequences.get(targetEntityId);
-    if (!previous && sequences.size >= LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
-      throw new Error(
-        `CONSENSUS_OUTPUT_SOURCE_RELATIONSHIP_LIMIT_EXCEEDED:${sequences.size}:${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-      );
-    }
     const sequence = (previous?.lastSequence ?? 0n) + 1n;
     const semanticHash = hashCertifiedEntityOutputSemantic(
       sourceEntityId,

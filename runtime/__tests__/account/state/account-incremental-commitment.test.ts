@@ -10,7 +10,7 @@ import {
   computeAccountStateRootCold,
 } from '../../../account/commitment/state-root';
 import { cloneAccountReplica } from '../../../account/state/state-clone';
-import { cloneEntityState } from '../../../entity/state-clone';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
 import type { SwapOffer } from '../../../types/account';
 import type { EntityState } from '../../../entity/types';
 import { createDefaultDelta } from '../../../account/state/delta';
@@ -107,7 +107,7 @@ describe('incremental Account commitment', () => {
       lastFinalizedJHeight: 0,
     } as EntityState;
 
-    const cloned = cloneEntityState(state);
+    const cloned = createEntityFrameCandidateState(state);
     const clonedAccount = cloned.accounts.get(RIGHT)!;
     const changedOffer = clonedAccount.state.swapOffers.get('offer-05000')!;
     changedOffer.giveAmount += 1n;
@@ -153,7 +153,7 @@ describe('incremental Account commitment', () => {
       accounts: new Map([[RIGHT, base]]),
       lastFinalizedJHeight: 0,
     } as EntityState;
-    const afterRuntimeBoundary = cloneEntityState(state).accounts.get(RIGHT)!;
+    const afterRuntimeBoundary = createEntityFrameCandidateState(state).accounts.get(RIGHT)!;
 
     // ACK re-executes the certified tx on the real state before promoting the
     // staged future cache. Mirror that deterministic transition here.

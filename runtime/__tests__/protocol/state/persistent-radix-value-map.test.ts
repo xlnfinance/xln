@@ -14,10 +14,10 @@ import {
 
 const options = {
   radix: 16 as const,
-  sealKey: (key: string): string => key,
+  ownKey: (key: string): string => key,
   keyBytes: (key: string): Uint8Array => new TextEncoder().encode(key),
   valueHash: (value: string): string => ethers.keccak256(new TextEncoder().encode(value)),
-  sealValue: (value: string): string => value,
+  ownValue: (value: string): string => value,
 };
 
 const fromEntries = <K, V>(
@@ -123,10 +123,10 @@ describe('PersistentRadixValueMap', () => {
       ethers.keccak256(Uint8Array.of(value.value));
     const radix256 = {
       radix: 256 as const,
-      sealKey: options.sealKey,
+      ownKey: options.ownKey,
       keyBytes: options.keyBytes,
       valueHash: hash,
-      sealValue: (value: { value: number }): { value: number } => Object.freeze({ ...value }),
+      ownValue: (value: { value: number }): { value: number } => Object.freeze({ ...value }),
     };
     const base = fromEntries([['a', ref], ['b', { value: 2 }]], radix256);
     const next = base.updated('b', { value: 3 });
@@ -143,11 +143,11 @@ describe('PersistentRadixValueMap', () => {
     const suppliedValue = { value: 7 };
     const immutable = {
       radix: 16 as const,
-      sealKey: (key: string): string => key,
+      ownKey: (key: string): string => key,
       keyBytes: (_key: string): Uint8Array => suppliedKeyBytes,
       valueHash: (value: { value: number }): string =>
         ethers.keccak256(Uint8Array.of(value.value)),
-      sealValue: (value: { value: number }): { value: number } => Object.freeze({ ...value }),
+      ownValue: (value: { value: number }): { value: number } => Object.freeze({ ...value }),
     };
     const map = fromEntries([['external', suppliedValue]], immutable);
     const root = map.rootHash();
@@ -162,10 +162,10 @@ describe('PersistentRadixValueMap', () => {
     type ObjectKey = Readonly<{ group: number; item: number }>;
     const objectOptions = {
       radix: 16 as const,
-      sealKey: (key: ObjectKey): ObjectKey => Object.freeze({ ...key }),
+      ownKey: (key: ObjectKey): ObjectKey => Object.freeze({ ...key }),
       keyBytes: (key: ObjectKey): Uint8Array => Uint8Array.of(key.group, key.item),
       valueHash: options.valueHash,
-      sealValue: options.sealValue,
+      ownValue: options.ownValue,
     };
     const supplied = { group: 1, item: 2 };
     const map = PersistentRadixValueMap.empty<ObjectKey, string>(objectOptions)
@@ -260,7 +260,7 @@ describe('PersistentRadixValueMap', () => {
       keyBytes: encodeRawRadixTextKey,
       valueHash: (value: string | undefined): string =>
         ethers.keccak256(new TextEncoder().encode(value === undefined ? '' : value)),
-      sealValue: (value: string | undefined): string | undefined => value,
+      ownValue: (value: string | undefined): string | undefined => value,
     };
     const map = PersistentRadixValueMap.empty<string, string | undefined>(withUndefined)
       .updated('ghost', undefined);
@@ -311,5 +311,108 @@ describe('PersistentRadixValueMap', () => {
     const orphan = [...records, { ...records.at(-1)!, path: [15, 15, 15] }];
     expect(() => PersistentRadixValueMap.fromNodeRecords(orphan, treeOptions))
       .toThrow('PERSISTENT_RADIX_NODE_ORPHAN');
+  });
+
+  test('second rootHash does no extra value hashing', () => {
+    let hashes = 0;
+    const counting = {
+      ...options,
+      valueHash: (value: string): string => {
+        hashes += 1;
+        return options.valueHash(value);
+      },
+    };
+    const map = fromMap([['a', '1'], ['b', '2']], counting);
+    map.rootHash();
+    const afterFirst = hashes;
+    expect(afterFirst).toBeGreaterThan(0);
+    map.rootHash();
+    expect(hashes).toBe(afterFirst);
+    expect(map.hashStats().valueHashes).toBe(afterFirst);
+  });
+
+  test('commitment:false locators cannot serialize or root', () => {
+    let hashed = 0;
+    const locator = {
+      ...options,
+      commitment: false as const,
+      valueHash: (value: string): string => {
+        hashed += 1;
+        return options.valueHash(value);
+      },
+    };
+    const map = PersistentRadixValueMap.empty(locator).updated('ab', '1').updated('cd', '2');
+    expect(map.get('ab')).toBe('1');
+    expect(hashed).toBe(0);
+    expect(() => map.rootHash()).toThrow('PERSISTENT_RADIX_COMMITMENT_DISABLED');
+    expect(() => [...map.nodeRecords()]).toThrow('PERSISTENT_RADIX_NODE_STORAGE_REQUIRES_COMMITMENT');
+    expect(() => PersistentRadixValueMap.fromNodeRecords([], locator))
+      .toThrow('PERSISTENT_RADIX_NODE_STORAGE_REQUIRES_COMMITMENT');
+  });
+
+  test('foldMutations matches sequential updated roots without hashing until rootHash', () => {
+    let hashes = 0;
+    const counting = {
+      ...options,
+      keyBytes: encodeRawRadixTextKey,
+      valueHash: (value: string): string => {
+        hashes += 1;
+        return options.valueHash(value);
+      },
+    };
+    const base = fromMap([['a', '1'], ['b', '2']], counting);
+    base.rootHash();
+    const afterBase = hashes;
+    const sequential = base.updated('a', '9').removed('b').updated('c', '3');
+    expect(hashes).toBe(afterBase);
+    const folded = base.foldMutations([
+      { kind: 'put', key: 'a', value: '9' },
+      { kind: 'delete', key: 'b' },
+      { kind: 'put', key: 'c', value: '3' },
+    ]);
+    expect(hashes).toBe(afterBase);
+    expect(folded.rootHash()).toBe(sequential.rootHash());
+    expect([...folded]).toEqual([...sequential]);
+  });
+
+  test('foldMutations preserves leaf count when deleting and replacing a compressed slot', () => {
+    const base = fromMap([['a', '1']], options);
+    const replaced = base.foldMutations([
+      { kind: 'delete', key: 'a' },
+      { kind: 'put', key: 'b', value: '2' },
+    ]);
+    const emptied = base.foldMutations([
+      { kind: 'delete', key: 'a' },
+      { kind: 'delete', key: 'b' },
+    ]);
+
+    expect(replaced.size).toBe(1);
+    expect([...replaced]).toEqual([['b', '2']]);
+    expect(replaced.rootHash()).toBe(base.removed('a').updated('b', '2').rootHash());
+    expect(emptied.size).toBe(0);
+    expect([...emptied]).toEqual([]);
+    expect(emptied.rootHash()).toBe(PersistentRadixValueMap.empty(options).rootHash());
+  });
+
+  test('foldMutations owns canonical keys and mutable values at its public boundary', () => {
+    type Value = { amount: number };
+    const owned = {
+      radix: 16 as const,
+      ownKey: (key: string): string => key.toLowerCase(),
+      keyBytes: (key: string): Uint8Array => new TextEncoder().encode(key),
+      valueHash: (value: Value): string => ethers.keccak256(Uint8Array.of(value.amount)),
+      ownValue: (value: Value): Value => Object.freeze({ ...value }),
+    };
+    const supplied = { amount: 7 };
+    const folded = PersistentRadixValueMap.empty(owned).foldMutations([
+      { kind: 'put', key: 'A', value: supplied },
+    ]);
+    const root = folded.rootHash();
+    supplied.amount = 9;
+
+    expect(folded.get('a')).toEqual({ amount: 7 });
+    expect([...folded.keys()]).toEqual(['a']);
+    expect(Object.isFrozen(folded.get('a'))).toBe(true);
+    expect(folded.rootHash()).toBe(root);
   });
 });

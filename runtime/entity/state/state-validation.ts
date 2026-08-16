@@ -1,5 +1,4 @@
 import { validateAccountReplica } from '../../account/validation/state-validation';
-import { LIMITS } from '../../config/constants';
 import {
   FinancialDataCorruptionError,
   validateMapInstance,
@@ -9,7 +8,6 @@ import {
 } from '../../protocol/boundary/validation-primitives';
 import { PersistentEntityAccountMap } from './persistent-account-map';
 import type { ConsensusConfig, EntityState } from '../types';
-import { assertEntityAccountCountWithinLimit } from '../account/account-capacity';
 import { validateEntityAccountMetadata } from '../account/account-metadata-validation';
 import { validateEntityCommandState } from '../command/command-state-validation';
 import { validateConsensusConfig } from '../consensus/config-validation';
@@ -83,11 +81,6 @@ const validateCertifiedOutputSequences = (
     value,
     `${context}.certifiedOutputSequences`,
   );
-  if (sequences.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
-    throw new FinancialDataCorruptionError(
-      `${context}.certifiedOutputSequences exceeds ${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-    );
-  }
   for (const [rawTarget, rawFrontier] of sequences) {
     const target = String(rawTarget ?? '').toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(target) || target !== rawTarget) {
@@ -175,10 +168,6 @@ const validateAccounts = (
       value instanceof PersistentEntityAccountMap
     ? value
     : validateMapInstance(value, `${context}.accounts`);
-  assertEntityAccountCountWithinLimit(
-    accounts,
-    `${context}.accounts`,
-  );
   const canonicalEntityId = entityId.trim().toLowerCase();
   for (const [rawAccountId, value] of accounts) {
     if (

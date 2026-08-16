@@ -1,124 +1,14 @@
 import type { CertifiedBoardPatriciaNode } from '../../types/entity-board-registry';
 import type { ConsumptionNode } from '../../entity/consumption/consumption-accumulator';
 import type { AccountJClaimNode } from '../../account/j-claims/j-claim-accumulator';
-import type {
-  StorageMerkleBranchDoc,
-  StorageMerkleLeafDoc,
-  StorageMerkleRootDoc,
-} from '../types';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
-  requireStorageArray,
   requireStorageBigInt,
   requireStorageHash,
-  requireStorageHex,
-  requireStoragePath,
-  requireStorageRadix,
   requireStorageString,
 } from './schema-primitives';
-
-const NAMESPACES = new Set([
-  'runtime-roots', 'entity-core', 'accounts', 'books', 'lock-book',
-  'account-deltas', 'account-locks', 'account-swap-offers', 'htlc-routes',
-]);
-
-const merklePathSlots = (radix: 16 | 256): number => radix === 16 ? 66 : 33;
-
-const requireMerklePath = (
-  value: unknown,
-  radix: 16 | 256,
-  kind: 'branch' | 'leaf' | 'root',
-  code: string,
-): number[] => {
-  const path = requireStoragePath(value, radix, code);
-  const fullLength = merklePathSlots(radix);
-  if (kind === 'leaf' ? path.length !== fullLength : path.length >= fullLength) throw new Error(code);
-  return path;
-};
-
-const requireNamespace = (value: unknown, code: string): StorageMerkleRootDoc['namespace'] => {
-  if (!NAMESPACES.has(String(value))) throw new Error(code);
-  return value as StorageMerkleRootDoc['namespace'];
-};
-
-export const validateStorageMerkleRootDocValue = (value: unknown): StorageMerkleRootDoc => {
-  const code = 'STORAGE_MERKLE_ROOT_INVALID';
-  const root = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(root, [
-    'entityId', 'namespace', 'radix', 'rootHash', 'rootKind', 'rootPath', 'leafCount',
-  ], [], `${code}_FIELDS`);
-  requireStorageString(root['entityId'], `${code}_ENTITY_ID`);
-  requireNamespace(root['namespace'], `${code}_NAMESPACE`);
-  const radix = requireStorageRadix(root['radix'], `${code}_RADIX`);
-  requireStorageHash(root['rootHash'], `${code}_HASH`);
-  if (!['empty', 'branch', 'leaf'].includes(String(root['rootKind']))) throw new Error(`${code}_KIND`);
-  const rootKind = String(root['rootKind']) as StorageMerkleRootDoc['rootKind'];
-  if (rootKind === 'empty') {
-    if (requireStoragePath(root['rootPath'], radix, `${code}_PATH`).length !== 0) throw new Error(`${code}_PATH`);
-  } else {
-    requireMerklePath(root['rootPath'], radix, rootKind, `${code}_PATH`);
-  }
-  const leafCount = requireBoundaryInteger(root['leafCount'], `${code}_LEAF_COUNT`);
-  if (leafCount < 0 || (rootKind === 'empty' ? leafCount !== 0 : leafCount === 0)) {
-    throw new Error(`${code}_LEAF_COUNT`);
-  }
-  return root as StorageMerkleRootDoc;
-};
-
-export const validateStorageMerkleBranchDocValue = (value: unknown): StorageMerkleBranchDoc => {
-  const code = 'STORAGE_MERKLE_BRANCH_INVALID';
-  const branch = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(branch, [
-    'entityId', 'namespace', 'radix', 'path', 'hash', 'children',
-  ], [], `${code}_FIELDS`);
-  requireStorageString(branch['entityId'], `${code}_ENTITY_ID`);
-  requireNamespace(branch['namespace'], `${code}_NAMESPACE`);
-  const radix = requireStorageRadix(branch['radix'], `${code}_RADIX`);
-  const path = requireMerklePath(branch['path'], radix, 'branch', `${code}_PATH`);
-  requireStorageHash(branch['hash'], `${code}_HASH`);
-  const children = requireStorageArray(branch['children'], `${code}_CHILDREN`);
-  if (children.length < 2 || children.length > radix) throw new Error(`${code}_CHILDREN`);
-  const slots = new Set<number>();
-  for (const [index, raw] of children.entries()) {
-    const slot = validateMerkleChild(raw, radix, path, `${code}_CHILD_${index}`);
-    if (slots.has(slot)) throw new Error(`${code}_CHILD_SLOT_DUPLICATE`);
-    slots.add(slot);
-  }
-  return branch as StorageMerkleBranchDoc;
-};
-
-const validateMerkleChild = (value: unknown, radix: 16 | 256, parentPath: number[], code: string): number => {
-  const child = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(child, ['slot', 'kind', 'path', 'hash'], [], `${code}_FIELDS`);
-  const slot = requireBoundaryInteger(child['slot'], `${code}_SLOT`);
-  if (slot < 0 || slot >= radix) throw new Error(`${code}_SLOT`);
-  if (child['kind'] !== 'branch' && child['kind'] !== 'leaf') throw new Error(`${code}_KIND`);
-  const path = requireMerklePath(child['path'], radix, child['kind'], `${code}_PATH`);
-  if (path.length <= parentPath.length || path[parentPath.length] !== slot) throw new Error(`${code}_PATH`);
-  for (const [index, parentSlot] of parentPath.entries()) {
-    if (path[index] !== parentSlot) throw new Error(`${code}_PATH`);
-  }
-  requireStorageHash(child['hash'], `${code}_HASH`);
-  return slot;
-};
-
-export const validateStorageMerkleLeafDocValue = (value: unknown): StorageMerkleLeafDoc => {
-  const code = 'STORAGE_MERKLE_LEAF_INVALID';
-  const leaf = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(leaf, [
-    'entityId', 'namespace', 'radix', 'path', 'key', 'valueHash', 'hash',
-  ], [], `${code}_FIELDS`);
-  requireStorageString(leaf['entityId'], `${code}_ENTITY_ID`);
-  requireNamespace(leaf['namespace'], `${code}_NAMESPACE`);
-  const radix = requireStorageRadix(leaf['radix'], `${code}_RADIX`);
-  requireMerklePath(leaf['path'], radix, 'leaf', `${code}_PATH`);
-  requireStorageHex(leaf['key'], `${code}_KEY`);
-  requireStorageHash(leaf['valueHash'], `${code}_VALUE_HASH`);
-  requireStorageHash(leaf['hash'], `${code}_HASH`);
-  return leaf as StorageMerkleLeafDoc;
-};
 
 const validatePatriciaBranch = (node: Record<string, unknown>, version: number, code: string): void => {
   requireExactBoundaryKeys(node, ['version', 'type', 'bit', 'left', 'right'], [], `${code}_FIELDS`);

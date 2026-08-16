@@ -98,7 +98,8 @@ const collectRadixLeaves = <K, V>(
  * path-copies their radix ancestry; rejection drops the candidate. Pure reads
  * never allocate or claim values for mutation.
  */
-export class EntityCandidateMap<K, V> extends Map<K, V> {
+export class EntityCandidateMap<K, V> implements Map<K, V> {
+  readonly [Symbol.toStringTag] = 'Map';
   #root: RadixNode<K, V> | undefined;
   readonly #changes = new Map<K, V>();
   readonly #deleted = new Set<K>();
@@ -116,7 +117,6 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
     _cloneOnIteration = false,
     radix: CandidateMapRadix = 16,
   ) {
-    super();
     this.#forkValue = forkValue;
     this.#radix = base instanceof EntityCandidateMap ? base.#radix : radix;
     if (base instanceof EntityCandidateMap) {
@@ -143,7 +143,7 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
     this.#nextOrder = order;
   }
 
-  override get size(): number {
+  get size(): number {
     if (this.#cleared) return this.#changes.size;
     let size = this.#baseSize - this.#deleted.size;
     for (const key of this.#changes.keys()) {
@@ -152,7 +152,7 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
     return size;
   }
 
-  override has(key: K): boolean {
+  has(key: K): boolean {
     return !this.#deleted.has(key) &&
       (this.#changes.has(key) || (!this.#cleared && radixGet(
         this.#root,
@@ -161,7 +161,7 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
       ) !== undefined));
   }
 
-  override get(key: K): V | undefined {
+  get(key: K): V | undefined {
     if (this.#deleted.has(key)) return undefined;
     if (this.#changes.has(key)) return this.#changes.get(key);
     if (this.#cleared) return undefined;
@@ -180,7 +180,7 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
     return candidate;
   }
 
-  override set(key: K, value: V): this {
+  set(key: K, value: V): this {
     if (this.#sealed) throw new Error('ENTITY_CANDIDATE_MAP_SEALED');
     this.#deleted.delete(key);
     if (!this.has(key) && !this.#changeOrders.has(key)) {
@@ -190,8 +190,21 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
     this.#changes.set(key, value);
     return this;
   }
+  getOrInsert(key: K, defaultValue: V): V {
+    const current = this.get(key);
+    if (current !== undefined || this.has(key)) return current as V;
+    this.set(key, defaultValue);
+    return defaultValue;
+  }
+  getOrInsertComputed(key: K, callback: (key: K) => V): V {
+    const current = this.get(key);
+    if (current !== undefined || this.has(key)) return current as V;
+    const value = callback(key);
+    this.set(key, value);
+    return value;
+  }
 
-  override delete(key: K): boolean {
+  delete(key: K): boolean {
     if (this.#sealed) throw new Error('ENTITY_CANDIDATE_MAP_SEALED');
     const existed = this.has(key);
     this.#changes.delete(key);
@@ -202,7 +215,7 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
     return existed;
   }
 
-  override clear(): void {
+  clear(): void {
     if (this.#sealed) throw new Error('ENTITY_CANDIDATE_MAP_SEALED');
     this.#changes.clear();
     this.#deleted.clear();
@@ -210,15 +223,15 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
     this.#cleared = true;
   }
 
-  override *keys(): MapIterator<K> {
+  *keys(): MapIterator<K> {
     for (const [key] of this.entries()) yield key;
   }
 
-  override *values(): MapIterator<V> {
+  *values(): MapIterator<V> {
     for (const [, value] of this.entries()) yield value;
   }
 
-  override *entries(): MapIterator<[K, V]> {
+  *entries(): MapIterator<[K, V]> {
     const leaves: RadixLeaf<K, V>[] = [];
     if (!this.#cleared) collectRadixLeaves(this.#root, leaves);
     const visible: Array<RadixLeaf<K, V>> = [];
@@ -241,11 +254,11 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
     for (const leaf of visible) yield [leaf.key, leaf.value];
   }
 
-  override [Symbol.iterator](): MapIterator<[K, V]> {
+  [Symbol.iterator](): MapIterator<[K, V]> {
     return this.entries();
   }
 
-  override forEach(
+  forEach(
     callback: (value: V, key: K, map: Map<K, V>) => void,
     thisArg?: unknown,
   ): void {

@@ -14,6 +14,7 @@ import { verifyHashLadderBinary } from '../../../../protocol/htlc/hash-ladder';
 import { buildCrossJurisdictionCancelAck } from '../../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../../orderbook/cross-j';
 import { prepareEntityTxState } from '../../../state-clone';
+import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
 import { addMessage } from '../../../frame-events';
 import type { CrossJurisdictionSwapRoute } from '../../../../types/cross-jurisdiction';
 import type { EntityInput, EntityState } from '../../../types';
@@ -240,8 +241,11 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
-  let route = newState.crossJurisdictionSwaps?.get(orderId);
-  if (!route) {
+  const routes = newState.crossJurisdictionSwaps;
+  let route = routes
+    ? getEntityCollectionValueForWrite(routes, orderId)
+    : undefined;
+  if (!routes || !route) {
     throw haltRuntimeFailure("CROSS_J_CLEAR_ROUTE_MISSING", `CROSS_J_CLEAR_ROUTE_MISSING:${orderId}`);
   }
 
@@ -251,8 +255,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
     // route mirror must agree exactly; falling back to either side would be
     // rehydration and could reveal a pull for stale economics.
     route = mergeCrossJurisdictionRoute(route, withCanonicalCrossJurisdictionRouteHash(offerRoute.route));
-    newState.crossJurisdictionSwaps ||= new Map();
-    newState.crossJurisdictionSwaps.set(orderId, route);
+    routes.set(orderId, route);
   }
 
   const context = { env, entityState, newState, outputs, accountTxs, orderId, cancelRemainder };

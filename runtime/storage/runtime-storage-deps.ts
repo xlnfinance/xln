@@ -14,6 +14,9 @@ type RuntimeModule = typeof import('../runtime');
  */
 export type RuntimeStorageApiDeps =
   Pick<RuntimeModule, 'closeRuntimeDb' | 'closeInfraDb' | 'createEmptyEnv'> & {
+    ensureRuntimeInfrastructure(
+      env: RuntimeReplica,
+    ): NonNullable<RuntimeReplica['infrastructure']>;
     getStorageDb(env: RuntimeReplica, role?: StorageDbRole): Level<Buffer, Buffer>;
     getRuntimeWalDb(env: RuntimeReplica): Level<Buffer, Buffer>;
     getHistoryViewDb(env: RuntimeReplica): Level<Buffer, Buffer>;

@@ -47,9 +47,15 @@ const encodeDeltaTransformerArgs = (
   );
 };
 
-const wrapTransformerArgs = (args: string): string => {
+const wrapTransformerArgs = (args: string, canonicalArgumentClauseCount: number): string => {
+  if (canonicalArgumentClauseCount < 1 || canonicalArgumentClauseCount > 2) {
+    throw new Error(`DISPUTE_ARGUMENT_CANONICAL_CLAUSE_COUNT_INVALID:${canonicalArgumentClauseCount}`);
+  }
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  return abiCoder.encode(['bytes[]'], [[args]]);
+  return abiCoder.encode(
+    ['bytes[]'],
+    [Array.from({ length: canonicalArgumentClauseCount }, () => args)],
+  );
 };
 
 const buildPendingSwapFillRatios = (
@@ -166,12 +172,24 @@ export function buildDisputeArgumentsFromSnapshot(
   const rightSecrets = options.secretsSide === 'right' ? [...secrets] : [];
   const leftArgs = encodeDeltaTransformerArgs(leftFillRatios, leftSecrets);
   const rightArgs = encodeDeltaTransformerArgs(rightFillRatios, rightSecrets);
+  // The signed builder emits a dense payment→swap prefix and then the pull
+  // clause. Both non-pull clauses consume the same compact Arguments tuple but
+  // ignore the irrelevant half (payments ignore ratios; swaps ignore secrets).
+  // Derive arity from the signed snapshot plan, never mutable live Account
+  // maps. Pulls and user subcontracts receive no trailing argument slots.
+  const canonicalArgumentClauseCount =
+    Number(snapshot.plan.paymentHashlocks.length > 0)
+    + Number(snapshot.plan.leftSwapOfferIds.length + snapshot.plan.rightSwapOfferIds.length > 0);
   const left = sanitizeOptionalDisputeArgument(
-    hasArgumentData(leftFillRatios, leftSecrets) ? wrapTransformerArgs(leftArgs) : '0x',
+    hasArgumentData(leftFillRatios, leftSecrets)
+      ? wrapTransformerArgs(leftArgs, canonicalArgumentClauseCount)
+      : '0x',
     'dispute.snapshot.left',
   );
   const right = sanitizeOptionalDisputeArgument(
-    hasArgumentData(rightFillRatios, rightSecrets) ? wrapTransformerArgs(rightArgs) : '0x',
+    hasArgumentData(rightFillRatios, rightSecrets)
+      ? wrapTransformerArgs(rightArgs, canonicalArgumentClauseCount)
+      : '0x',
     'dispute.snapshot.right',
   );
   return {

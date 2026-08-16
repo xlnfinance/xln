@@ -17,6 +17,7 @@ import {
   assertReliableLaneCompatible,
   compareReliableIdentityPosition,
   receiverFrontierKey,
+  reliableActiveIsStaleBelowTerminal,
   reliableFrontierCovers,
   reliableIdentityExactKey,
   reliableReceiptCoversIdentity,
@@ -99,14 +100,14 @@ const installTerminalFrontier = (
   const receipt = createReliableDeliveryReceipt(env, nextIdentity, 'terminal');
   state.reliableIngressTerminalWatermarks!.set(key, receipt);
   const active = state.reliableIngressReceiptLedger!.get(key);
+  // Exact H+1 receipts do not cover H, so a later terminal used to leave the
+  // lower active in place. That leftover HOL-blocked every later Account ACK
+  // on the lane (H=1 active + H=2 terminal → H=4 pending forever).
   if (
     active &&
     (
       reliableReceiptCoversIdentity(receipt, active.body.identity) ||
-      (
-        nextIdentity.kind === 'j-finality' &&
-        active.body.identity.height < nextIdentity.height
-      )
+      reliableActiveIsStaleBelowTerminal(active.body.identity, nextIdentity)
     )
   ) {
     state.reliableIngressReceiptLedger!.delete(key);
@@ -123,6 +124,11 @@ const refreshTerminalFrontiers = (
   const commits: ReliableIngressCommit[] = [];
   for (const [frontierKey, active] of state.reliableIngressReceiptLedger!) {
     const identity = active.body.identity;
+    const terminal = state.reliableIngressTerminalWatermarks!.get(frontierKey);
+    if (reliableActiveIsStaleBelowTerminal(identity, terminal?.body.identity)) {
+      state.reliableIngressReceiptLedger!.delete(frontierKey);
+      continue;
+    }
     if (!shouldRefresh(frontierKey, identity)) continue;
     const appliedJPrefixRoundCommitted = identity.kind === 'j-prefix-attestation' &&
       [...env.state.eReplicas.values()].some(replica =>

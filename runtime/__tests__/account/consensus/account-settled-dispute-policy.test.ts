@@ -17,7 +17,9 @@ import {
   makeState,
   registerTestSigner,
   secret,
+  openWritableEntityAccounts,
 } from '../../helpers/cross-j';
+import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 
 test('persisted dispute preparation suppresses unbounded settlement claims without losing reserve finality', () => {
   const env = createEmptyEnv('account-settled-dispute-policy');
@@ -28,7 +30,8 @@ test('persisted dispute preparation suppresses unbounded settlement claims witho
   const entityId = entity('11');
   const counterpartyId = entity('22');
   const state = makeState(entityId, signerId, jurisdiction, counterpartyId);
-  const account = state.accounts.get(counterpartyId)!;
+  openWritableEntityAccounts(state);
+  const account = getEntityAccountForWrite(state.accounts, counterpartyId)!;
   account.status = 'dispute_preparing';
   account.disputePrepare = {
     startedAt: 1,

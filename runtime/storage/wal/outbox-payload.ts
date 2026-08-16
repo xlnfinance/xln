@@ -11,11 +11,14 @@ import type { EntityTx } from '../../types/entity-tx';
 import { decodeAccountTx } from '../../account/tx-validation';
 import type { AccountTx } from '../../types/account';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
+import {
+  toRuntimeOutputPayloadHash,
+  type RuntimeOutputPayloadHash,
+} from '../../protocol/hashes';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import { keyRuntimeOutputPayload } from '../keys';
 import type {
   RuntimeDbLike,
-  RuntimeOutputPayloadHash,
 } from '../types';
 
 export const MAX_RUNTIME_OUTPUT_PAYLOAD_BYTES = 10_000;
@@ -25,13 +28,6 @@ export type RuntimeOutputPayloadRow = Readonly<{
   key: Buffer;
   value: Buffer;
 }>;
-
-const toRuntimeOutputPayloadHash = (value: string): RuntimeOutputPayloadHash => {
-  if (!/^0x[0-9a-f]{64}$/.test(value)) {
-    throw new Error(`STORAGE_RUNTIME_OUTPUT_HASH_INVALID:${value}`);
-  }
-  return value as RuntimeOutputPayloadHash;
-};
 
 const hashPayload = (value: Uint8Array): RuntimeOutputPayloadHash =>
   toRuntimeOutputPayloadHash(computeIntegrityDigest(value).toLowerCase());

@@ -1,56 +1,43 @@
 # Storage Map
 
-> Normative protocol: [`../wal.md`](../wal.md). This page is a component map;
-> any older description of complete-frame or blob persistence is non-normative.
+> Normative protocol: [`../wal.md`](../wal.md). This page is a file map only.
+> Complete-frame blobs, `StorageDoc` graphs, `runtime-machine-graph`, and
+> snapshot+diff recovery are non-canonical.
 
-This folder owns persistence, replay, canonical restore verification, and
-rebuildable history views.
+This folder implements `RuntimeStore`: one `commitFrame` that syncs a thin
+Runtime WAL record, and `recover` / `rotateEpoch` over the same typed Patricia
+graph that live execution uses.
 
 ## What it does
 
-- projects runtime/entity/account/book state into durable docs
-- appends complete Runtime frames to the authoritative WAL
-- materializes filterable Entity/Account/J activity views after WAL commit
-- restores state by snapshot + diff replay
-- verifies restore against canonical runtime-state hashes
+- commits one RuntimeFrame per `sync:true` (header + input records + outbox refs)
+- accumulates dirty Patricia/header `set/delete` ops and materializes every 100 frames
+- recovers by materialized graph + WAL replay with Hanko verification
+- rotates a new epoch DB from live canonical records every 10k frames
+- materializes history views after WAL commit; history is a rebuildable index, never authority
 
-## Daemon checkpoint and restore
+## Persistence roles
 
-1. **Load and decode.** The daemon reads the retained snapshot plus its frame/diff tail. Every Runtime, Entity, Account, replica metadata, Merkle node, and DAG node crosses a domain-local validator before entering memory.
-2. **Rebuild and verify.** Hydration reconstructs Maps and reachable immutable node stores, then checks replica lineage, J-history roots, materialized state, and the canonical runtime/entity hashes. Any missing or malformed authoritative record aborts restore.
-3. **Start live work.** Only after exact restore succeeds does the caller attach trusted RPC/network adapters and start the runtime loop. New J-events are admitted normally and the durable outbox is retried from its restored exact payload and signer route.
+1. Authoritative LevelDB: current graph headers/branches/leaves, Runtime WAL, outbox, HEAD.
+2. History DBs: certified Entity/Account frames, rebuildable from WAL bytes.
+3. RAM overlay: dirty mutations only; never written. Crash rebuilds it from graph + WAL inputs.
 
-Persistence has three physical roles:
-
-1. `current` is the hot, rebuildable Runtime state.
-2. `runtimeWal` is the authoritative sequence of complete Runtime frames.
-3. `historyViews` contains rebuildable Entity/Account/J frame and activity
-   indexes for inspection and UI filtering.
-
-The Runtime WAL is committed first. History views advance only after that
-durable commit and record their own Runtime-height cursor. If the process dies
-between databases, startup replays the WAL from `cursor + 1`; it never rolls the
-authoritative Runtime back to a secondary view. The current-state database is
-published last and is likewise rebuilt from the WAL when it lags.
+`localhost:8080` uses the daemon Runtime and this LevelDB store. An in-browser
+Runtime is an explicit ephemeral mode until the same `RuntimeStore` exists on IndexedDB.
 
 ## Main files
 
-- `index.ts`
-  High-level persistence orchestration and config.
-- `read.ts`
-  Restore/replay path from snapshot + diffs.
-- `projections.ts`
-  Entity/account/book projection and hydration.
-- `canonical-hash.ts`
-  Canonical runtime-state commitment for fail-fast restore.
-- `hashes.ts`
-  Frame/entity storage hashes.
-- `history-view.ts`, `history-view-schema.ts`
-  Rebuildable Entity/Account/J frame and activity indexes.
-- `runtime-dbs.ts`
-  Explicit handles and paths for current state, Runtime WAL, and history views.
-- `verify.ts`, `safety.ts`, `lifecycle.ts`
-  Storage checks, compaction safety, and lifecycle helpers.
+- `index.ts` — `commitFrame` orchestration
+- `types.ts` — `RuntimeFrame` and storage records
+- `codec/` — exact encode/decode; the only LevelDB write path
+- `wal/` — frame hash, outbox CAS payloads, checkpoint headers
+- `read/` — recover/hydrate from typed nodes
+- `commit/` — batch assembly and safety
+- `database/` — epoch handles, lifecycle, LevelDB
+- `history/` — rebuildable certified-frame indexes
+- `queries/` — inspection APIs over history/WAL
+
+Overlays and the Patricia engine live in `runtime/protocol/state/`, not here.
 
 ## Called by
 
@@ -59,14 +46,6 @@ published last and is likewise rebuilt from the WAL when it lags.
 
 ## Calls into
 
-- `types.ts`
-- `account/state/state-clone.ts`
-- `entity/state-clone.ts`
-- `entity/replica-clone.ts`
-- `wal/`
-
-## Audit note
-
-If a field is added to runtime/entity/account state, check projection,
-hydration, and canonical hash assumptions together. Restore bugs come from
-schema drift, not from one file in isolation.
+- `protocol/state/persistent-radix-value-map.ts`
+- `protocol/state/radix-overlay.ts`
+- Entity/Account/Book typed maps

@@ -30,6 +30,7 @@ import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../../infra/logger';
 import { removeCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
 import { addMessage } from '../../frame-events';
+import { getEntityCollectionValueForWrite } from '../../state/persistent-collection-map';
 import { cancelHook, scheduleHook } from '../../scheduler';
 import {
   buildCrossJurisdictionEntityOutput,
@@ -698,7 +699,10 @@ const applyFillAckFollowup = (
     fillNumerator: accountTx.data.fillNumerator,
     fillDenominator: accountTx.data.fillDenominator,
   });
-  const route = newState.crossJurisdictionSwaps?.get(accountTx.data.offerId);
+  const routes = newState.crossJurisdictionSwaps;
+  const route = routes
+    ? getEntityCollectionValueForWrite(routes, accountTx.data.offerId)
+    : undefined;
   if (!route) {
     // A committed account ACK is canonical money progress. If the entity route
     // mirror is gone, silently accepting the ACK leaves the shared book stale
@@ -742,7 +746,10 @@ const applyTargetProgressFollowup = (
     type: 'cross_swap_fill_ack',
     data: accountTx.data.fill,
   };
-  const route = newState.crossJurisdictionSwaps?.get(fillAck.data.offerId);
+  const routes = newState.crossJurisdictionSwaps;
+  const route = routes
+    ? getEntityCollectionValueForWrite(routes, fillAck.data.offerId)
+    : undefined;
   if (!route) {
     throw haltRuntimeFailure("CROSS_J_TARGET_PROGRESS_ROUTE_MISSING", `CROSS_J_TARGET_PROGRESS_ROUTE_MISSING:${fillAck.data.offerId}`);
   }

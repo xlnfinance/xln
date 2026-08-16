@@ -1,5 +1,5 @@
 import { decodeRuntimeInput } from '../../runtime/input-schema';
-import { assertStorageSchemaVersion, STORAGE_FRAME_FORMAT } from '../keys';
+import { assertStorageSchemaVersion } from '../keys';
 import type {
   StorageDiffRecord,
   StorageDoc,
@@ -78,11 +78,10 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   const frame = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(frame, [
     'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest', 'replicaMetaCheckpoint',
-    'replicaMetaStateMode', 'postStateHash', 'stateHash',
-    'hashMode', 'materializedState', 'runtimeInput',
+    'replicaMetaStateMode', 'postStateHash', 'materializedState', 'runtimeInput',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
-  ], ['entityHashes', 'canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'pendingRuntimeInput', 'entityContextRefs', 'runtimeOutputRefs', 'runtimeOutputRetryState'], `${code}_FIELDS`);
+  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'pendingRuntimeInput', 'entityContextRefs', 'runtimeOutputRefs', 'runtimeOutputRetryState'], `${code}_FIELDS`);
   requireBoundaryInteger(frame['height'], `${code}_HEIGHT`, 1);
   requireBoundaryInteger(frame['timestamp'], `${code}_TIMESTAMP`);
   requireStorageHash(frame['prevFrameHash'], `${code}_PREV_HASH`);
@@ -100,13 +99,11 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     throw new Error(`${code}_REPLICA_META_STATE_MODE_CHECKPOINT`);
   }
   requireStorageHash(frame['postStateHash'], `${code}_POST_STATE_HASH`);
-  if (typeof frame['stateHash'] !== 'string') throw new Error(`${code}_STATE_HASH`);
-  if (frame['hashMode'] !== STORAGE_FRAME_FORMAT.hashMode) throw new Error(`${code}_HASH_MODE`);
   requireStorageBoolean(frame['materializedState'], `${code}_MATERIALIZED`);
   if (frame['materializedState'] === true) {
-    validateFrameEntityHashes(frame['entityHashes'], `${code}_ENTITY_HASHES`);
-  } else if (frame['entityHashes'] !== undefined) {
-    throw new Error(`${code}_NON_MATERIALIZED_ENTITY_HASHES_FORBIDDEN`);
+    if (frame['canonicalStateHash'] === undefined || frame['canonicalEntityHashes'] === undefined) {
+      throw new Error(`${code}_MATERIALIZED_CANONICAL_ROOTS_REQUIRED`);
+    }
   }
   if (frame['runtimeStateHash'] !== undefined) {
     requireStorageHash(frame['runtimeStateHash'], `${code}_RUNTIME_STATE_HASH`);

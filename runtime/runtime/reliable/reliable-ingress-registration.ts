@@ -14,6 +14,7 @@ import {
   assertReliableLaneCompatible,
   compareReliableIdentityPosition,
   receiverFrontierKey,
+  reliableActiveIsStaleBelowTerminal,
   reliableIdentityExactKey,
   reliableReceiptCoversIdentity,
 } from './reliable-frontier.ts';
@@ -134,7 +135,9 @@ const registerAgainstDurableFrontiers = (
     throw new Error(`RELIABLE_INGRESS_TERMINAL_EXACT_CONFLICT:${identity.height}`);
   }
   const active = env.infrastructure?.reliableIngressReceiptLedger?.get(key);
-  if (!active) {
+  // A later terminal on this lane leaves a lower exact active in place because
+  // H+1 receipts do not cover H. That leftover must not HOL-block H+2..n.
+  if (!active || reliableActiveIsStaleBelowTerminal(active.body.identity, terminal?.body.identity)) {
     if (terminal && compareReliableIdentityPosition(identity, terminal.body.identity) < 0) {
       throw new Error(`RELIABLE_INGRESS_TERMINAL_ORDER_CONFLICT:${identity.kind}:${identity.height}`);
     }

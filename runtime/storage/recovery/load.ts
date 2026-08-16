@@ -20,6 +20,7 @@ import {
   computeCanonicalStateHashFromEnv,
 } from '../canonical-hash';
 import type { PersistedStorageReadApi } from '../read/persisted-read';
+import { borrowOpenRuntimeWalDb } from '../runtime-dbs';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 import { assertStorageSafetyOverridesAllowed } from '../commit/safety';
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
@@ -142,6 +143,9 @@ export const loadPersistedRuntime = async (
   options: import('./journal/replay').ReplayOptions = {},
 ): Promise<LoadedRuntimeStorage | null> => {
   const env = reads.createPersistedStorageEnv(runtimeId, runtimeSeed);
+  if (options.borrowRuntimeWalFrom) {
+    await borrowOpenRuntimeWalDb(options.borrowRuntimeWalFrom, env, deps);
+  }
   assertStorageSafetyOverridesAllowed();
   let returningEnv = false;
   try {

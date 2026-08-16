@@ -16,6 +16,7 @@ import { createRuntimeLoopApi } from './loop/loop.ts';
 import { createRuntimeRecoveryApi } from '../storage/recovery/restore';
 import { createRuntimeStateApi } from './state-create';
 import { loadGossipProfilesFromInfraDb } from './infrastructure/gossip-store';
+import { ensureRuntimeInfrastructure } from './infrastructure/runtime-infrastructure';
 import { withStorageConsistentRead } from '../storage/runtime-dbs';
 import {
   createRuntimeCommandApi,
@@ -268,6 +269,7 @@ const registerCommittedSingleSignerWallets = runtimeRecoveryApi.registerCommitte
 const applyCommittedLocalReliableReceipts = runtimeRecoveryApi.applyCommittedLocalReliableReceipts;
 
 const runtimeStorageApi = createRuntimeStorageApi({
+  ensureRuntimeInfrastructure,
   getStorageDb,
   getRuntimeWalDb,
   getHistoryViewDb,

@@ -56,7 +56,7 @@ import { createDefaultDelta } from '../../../account/state/delta';
 
 import { cloneAccountReplica } from '../../../account/state/state-clone';
 import { cloneEntityReplica } from '../../../entity/replica/replica-clone';
-import { cloneEntityState } from '../../../entity/state-clone';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
 
 import { projectAccountDoc, projectEntityCoreDoc } from '../../../storage/read/projections';
 
@@ -2053,7 +2053,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       events: [disputeStartedEvent],
       jurisdictionRef: jref(eth),
     });
-    const stateBehindSentBatch = cloneEntityState(state);
+    const stateBehindSentBatch = createEntityFrameCandidateState(state);
     stateBehindSentBatch.jBatchState = initJBatch();
     stateBehindSentBatch.jBatchState.status = 'sent';
     stateBehindSentBatch.jBatchState.sentBatch = {
@@ -2125,7 +2125,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       binary,
       buildSourceRevealRange,
     } = makeBidirectionalSalvageRuntimeFixture('cross-dispute-salvage');
-    const alternateBefore = cloneEntityState(env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state);
+    const alternateBefore = env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state;
     const range = buildSourceRevealRange();
     const result = await applyMergedEntityInputs(
       env,
@@ -2167,7 +2167,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(sourceRoute?.sourceRegistryRecord).toEqual({ fillRatio, revealedAt: 30 });
     // The source mirror is not touched by a port at all.
     expect(sourceRoute?.status).toBe('target_prepared');
-    expect(env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state).toEqual(alternateBefore);
+    expect(env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state).toBe(alternateBefore);
 
     const replay = makeBidirectionalSalvageRuntimeFixture('cross-dispute-salvage');
     const replayResult = await applyMergedEntityInputs(
@@ -2195,7 +2195,7 @@ describe('cross-jurisdiction hashledger swap', () => {
   test('reveal port fails loud instead of rebinding to another local target signer', async () => {
     const { env, sourceUser, targetUser, sourceSigner, targetSigner, alternateTargetSigner, buildSourceRevealRange } =
       makeBidirectionalSalvageRuntimeFixture('cross-salvage-pinned-target-signer');
-    const alternateBefore = cloneEntityState(env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state);
+    const alternateBefore = env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state;
     env.state.eReplicas.delete(`${targetUser}:${targetSigner}`);
 
     await expect(
@@ -2215,7 +2215,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       ),
     ).rejects.toThrow('RUNTIME_OUTPUT_TARGET_NOT_LOCAL');
 
-    expect(env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state).toEqual(alternateBefore);
+    expect(env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state).toBe(alternateBefore);
   });
 
   test('reveal port fails loud on a corrupt target pull commitment', async () => {

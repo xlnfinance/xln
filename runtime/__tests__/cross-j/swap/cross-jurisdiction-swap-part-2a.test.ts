@@ -56,7 +56,6 @@ import { createDefaultDelta } from '../../../account/state/delta';
 
 import { cloneAccountReplica } from '../../../account/state/state-clone';
 import { cloneEntityReplica } from '../../../entity/replica/replica-clone';
-import { cloneEntityState } from '../../../entity/state-clone';
 
 import { projectAccountDoc, projectEntityCoreDoc } from '../../../storage/read/projections';
 

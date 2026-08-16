@@ -30,8 +30,8 @@ export const ACCOUNT_STATE_MAP_NAMESPACES = [
 
 export type AccountStateMapNamespace = (typeof ACCOUNT_STATE_MAP_NAMESPACES)[number];
 export type AccountStateMapKey = number | string;
-export type AccountStateRadixKey<N extends AccountStateMapNamespace> = Uint8Array & {
-  readonly __accountStateRadixKey: N;
+export type AccountStateRadixKey = Uint8Array & {
+  readonly __accountStateRadixKey: 'AccountStateRadixKey';
 };
 
 export const ACCOUNT_STATE_COLLECTION: unique symbol = Symbol('ACCOUNT_STATE_COLLECTION');
@@ -73,9 +73,9 @@ const tokenKeyBytes = (tokenId: number): Uint8Array => {
 export const encodeAccountStateRadixKey = <N extends AccountStateMapNamespace>(
   _namespace: N,
   key: AccountStateMapKey,
-): AccountStateRadixKey<N> => {
+): AccountStateRadixKey => {
   const bytes = typeof key === 'number' ? tokenKeyBytes(key) : encodeRawRadixTextKey(key);
-  return bytes as AccountStateRadixKey<N>;
+  return bytes as AccountStateRadixKey;
 };
 
 const sealValue = <V>(value: V): V => {
@@ -113,10 +113,10 @@ const namespaceOptions = <K extends AccountStateMapKey, V>(
   namespace: AccountStateMapNamespace,
 ): PersistentRadixValueMapOptions<K, V> => ({
   radix: 16,
-  sealKey: (key: K): K => key,
+  ownKey: (key: K): K => key,
   keyBytes: (key: K): Uint8Array => encodeAccountStateRadixKey(namespace, key),
   valueHash: (value: V): string => valueHash(namespace, value),
-  sealValue: (value: V): V => sealValue(value),
+  ownValue: (value: V): V => sealValue(value),
 });
 
 /**

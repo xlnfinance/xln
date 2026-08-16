@@ -17,64 +17,77 @@ const encodeBookOrderLocatorKey = (key: string): Uint8Array => {
 };
 const bookOrderMapOptions = {
   radix: 16,
-  sealKey: (key: string): string => key,
+  ownKey: (key: string): string => key,
   keyBytes: encodeBookOrderLocatorKey,
   valueHash: (): string => { throw new Error('BOOK_ORDER_LOCATOR_HASH_FORBIDDEN'); },
-  sealValue: sealOrder,
+  ownValue: sealOrder,
   commitment: false,
 } as const;
 
 type PublishedBookOrderMap = PersistentRadixValueMap<string, BookOrderState>;
 
 /** RAM-only order locator overlay. Its root is never persisted or committed. */
-export class BookBranchMap<Value> extends Map<string, Value> {
+export class BookBranchMap<Value> implements Map<string, Value> {
+  readonly [Symbol.toStringTag] = 'Map';
   readonly #base: ReadonlyMap<string, Value>;
   readonly #changes = new Map<string, Value>();
   readonly #deleted = new Set<string>();
 
   constructor(base: ReadonlyMap<string, Value>) {
-    super();
     this.#base = base;
   }
-  override get size(): number {
+  get size(): number {
     let size = this.#base.size - this.#deleted.size;
     for (const key of this.#changes.keys()) if (!this.#base.has(key)) size += 1;
     return size;
   }
-  override get(key: string): Value | undefined {
+  get(key: string): Value | undefined {
     return this.#deleted.has(key) ? undefined : this.#changes.get(key) ?? this.#base.get(key);
   }
-  override has(key: string): boolean {
+  has(key: string): boolean {
     return !this.#deleted.has(key) && (this.#changes.has(key) || this.#base.has(key));
   }
-  override set(key: string, value: Value): this {
+  set(key: string, value: Value): this {
     this.#deleted.delete(key);
     this.#changes.set(key, value);
     return this;
   }
-  override delete(key: string): boolean {
+  getOrInsert(key: string, defaultValue: Value): Value {
+    const current = this.get(key);
+    if (current !== undefined || this.has(key)) return current as Value;
+    this.set(key, defaultValue);
+    return defaultValue;
+  }
+  getOrInsertComputed(key: string, callback: (key: string) => Value): Value {
+    const current = this.get(key);
+    if (current !== undefined || this.has(key)) return current as Value;
+    const value = callback(key);
+    this.set(key, value);
+    return value;
+  }
+  delete(key: string): boolean {
     const existed = this.has(key);
     this.#changes.delete(key);
     if (this.#base.has(key)) this.#deleted.add(key);
     return existed;
   }
-  override clear(): void {
+  clear(): void {
     this.#changes.clear();
     for (const key of this.#base.keys()) this.#deleted.add(key);
   }
-  override *keys(): MapIterator<string> {
+  *keys(): MapIterator<string> {
     for (const key of this.#base.keys()) if (!this.#deleted.has(key)) yield key;
     for (const key of this.#changes.keys()) if (!this.#base.has(key)) yield key;
   }
-  override *entries(): MapIterator<[string, Value]> {
+  *entries(): MapIterator<[string, Value]> {
     for (const key of this.keys()) {
       const value = this.get(key);
       if (value !== undefined) yield [key, value];
     }
   }
-  override *values(): MapIterator<Value> { for (const [, value] of this.entries()) yield value; }
-  override [Symbol.iterator](): MapIterator<[string, Value]> { return this.entries(); }
-  override forEach(
+  *values(): MapIterator<Value> { for (const [, value] of this.entries()) yield value; }
+  [Symbol.iterator](): MapIterator<[string, Value]> { return this.entries(); }
+  forEach(
     callback: (value: Value, key: string, map: Map<string, Value>) => void,
     thisArg?: unknown,
   ): void {
@@ -158,11 +171,15 @@ const copyScalars = (target: MutableBookState, source: BookState): void => {
 };
 const sealOverlay = (overlay: BookOverlayState): BookState => {
   const changes = overlay.orders as BookBranchMap<BookOrderState>;
-  let orders: PublishedBookOrderMap = overlay.base.orders instanceof PersistentRadixValueMap
+  const ordersBase: PublishedBookOrderMap = overlay.base.orders instanceof PersistentRadixValueMap
     ? overlay.base.orders
     : PersistentRadixValueMap.fromMap(overlay.base.orders, bookOrderMapOptions);
-  for (const key of changes.deletedKeysView()) orders = orders.removed(key);
-  for (const [key, value] of changes.changedEntries()) orders = orders.updated(key, value);
+  const orders = ordersBase.foldMutations([
+    ...[...changes.deletedKeysView()].sort().map(key => ({ kind: 'delete' as const, key })),
+    ...[...changes.changedEntries()]
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([key, value]) => ({ kind: 'put' as const, key, value })),
+  ]);
   const sealed: BookState = {
     params: Object.freeze({ ...overlay.params }),
     orders,

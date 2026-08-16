@@ -46,7 +46,11 @@ export const createPersistenceRecordingQueries = (
         env.runtimeId,
         env.runtimeSeed,
         targetHeight,
-        { prunedTargetReturnsNull: true },
+        {
+          prunedTargetReturnsNull: true,
+          borrowRuntimeWalFrom: env,
+          readOnly: true,
+        },
       );
       if (!restored || restored.env.state.height !== targetHeight) {
         if (restored?.env) await deps.closeRuntimeDb(restored.env);

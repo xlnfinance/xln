@@ -2,7 +2,6 @@
   import { onMount } from 'svelte';
   import { decodeBinaryPayload } from '@xln/runtime/storage/codec/binary-codec';
   import { STORAGE_ACCOUNT_FIELD_BY_TAG } from '@xln/runtime/storage/schema/account-field-tags';
-  import { STORAGE_MERKLE_NAMESPACE_BY_TAG } from '@xln/runtime/storage/schema/merkle-namespace-tags';
   import { compareStableText } from '$lib/utils/stableSort';
   import { parseJsonUnknown } from '$lib/utils/boundary';
 
@@ -147,13 +146,6 @@
     }
     if (tag === 0x26 && bytes.byteLength === 65) {
       return generic(`live/replica-meta/${readEntityId(bytes, 1)}/${readEntityId(bytes, 33)}`);
-    }
-    if (tag === 0x27 || tag === 0x28 || tag === 0x29) {
-      const family = tag === 0x27 ? 'merkle/root' : tag === 0x28 ? 'merkle/branch' : 'merkle/leaf';
-      const entityId = readEntityId(bytes, 1);
-      const namespace = STORAGE_MERKLE_NAMESPACE_BY_TAG.get(bytes[33] ?? -1);
-      const path = bytes.byteLength > 34 ? `/${bytesToFullHex(bytes.slice(34))}` : '';
-      if (entityId && namespace) return generic(`${family}/${entityId}/${namespace}${path}`);
     }
     if ((tag === 0x2a || tag === 0x2b || tag === 0x2c) && bytes.byteLength === 33) {
       const family = tag === 0x2a ? 'certified-board' : tag === 0x2b ? 'consumption' : 'account-j-claim';

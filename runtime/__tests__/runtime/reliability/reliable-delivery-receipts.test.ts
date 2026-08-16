@@ -1133,6 +1133,43 @@ describe('durable scoped reliable delivery receipts', () => {
     });
   });
 
+  test('stale active Account ACK below a higher terminal does not HOL-block a later ACK', () => {
+    const sender = runtime('reliable-receipt-sender-stale-active-account-ack');
+    const receiver = runtime('reliable-receipt-receiver-stale-active-account-ack');
+    const first = accountFrameAckOutput(receiver.runtimeId!, 1, '0xaccount-frame-2');
+    const second = accountFrameAckOutput(receiver.runtimeId!, 2, '0xaccount-frame-3');
+    const later = accountAckOutput(receiver.runtimeId!, 4, '0xaccount-frame-4');
+
+    expect(registerReliableIngress(receiver, sender.runtimeId!, first).kind).toBe('enqueue');
+    ensureAppliedAuthority(receiver, first);
+    const replica = receiver.state.eReplicas.get(`${first.entityId}:${first.signerId}`);
+    if (!replica) throw new Error('TEST_STALE_ACTIVE_REPLICA_MISSING');
+    const account = makeAccount(first.entityId, entityId('d1'));
+    account.currentHeight = 1;
+    account.currentFrame = {
+      ...account.currentFrame,
+      height: 1,
+      stateHash: '0xaccount-frame-1',
+    };
+    replica.state.accounts.set(entityId('d1'), account);
+    finalizeReliableIngressCommit(receiver, commitReliableIngress(receiver, [first]));
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size).toBe(1);
+
+    expect(registerReliableIngress(receiver, sender.runtimeId!, second).kind).toBe('enqueue');
+    ensureAppliedAuthority(receiver, second);
+    account.currentHeight = 3;
+    account.currentFrame = {
+      height: 3,
+      prevFrameHash: '0xaccount-frame-2',
+      stateHash: '0xaccount-frame-3',
+    } as never;
+    delete account.pendingFrame;
+    finalizeReliableIngressCommit(receiver, commitReliableIngress(receiver, [second]));
+
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(registerReliableIngress(receiver, sender.runtimeId!, later).kind).toBe('enqueue');
+  });
+
   test('terminal plain ACK reissues a richer terminal receipt only when its proposal is already committed', () => {
     const sender = runtime('reliable-receipt-sender-terminal-plain-rich-reissue');
     const receiver = runtime('reliable-receipt-receiver-terminal-plain-rich-reissue');

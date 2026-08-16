@@ -205,7 +205,6 @@ import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/code
 
 import { createDefaultDelta } from '../../../account/state/delta';
 
-import { cloneEntityState } from '../../../entity/state-clone';
 
 import { buildDisputeArgumentsForSnapshot } from '../../../entity/dispute-arguments';
 import {

@@ -933,6 +933,13 @@ export const closeRuntimeWalDb = async (env: RuntimeReplica): Promise<void> => {
   const state = env.infrastructure;
   const db = state?.runtimeWalDb as Level<Buffer, Buffer> | undefined;
   if (!db) return;
+  if (state?.runtimeWalDbBorrowed) {
+    state.runtimeWalDb = null;
+    state.runtimeWalDbOpenPromise = null;
+    delete state.runtimeWalDbBorrowed;
+    delete state.storageVerifiedWalHeight;
+    return;
+  }
   beginRuntimeDbClose(env, 'runtime-wal');
   state!.runtimeWalDb = null;
   state!.runtimeWalDbOpenPromise = null;
@@ -944,6 +951,34 @@ export const closeRuntimeWalDb = async (env: RuntimeReplica): Promise<void> => {
     throw error;
   } finally {
     endRuntimeDbClose(env, 'runtime-wal');
+  }
+};
+
+/**
+ * Give a detached replay replica read access to the writer's open WAL handle.
+ * LevelDB permits one process handle per path; opening a second handle either
+ * deadlocks recovery behind LOCK or fails. Ownership stays with `source`, so
+ * closing the replay replica can never interrupt the live Runtime writer.
+ */
+export const borrowOpenRuntimeWalDb = async (
+  source: RuntimeReplica,
+  target: RuntimeReplica,
+  deps: RuntimeStorageDbDeps,
+): Promise<void> => {
+  const sourceState = deps.ensureRuntimeInfrastructure(source);
+  const sourceOpen = sourceState.runtimeWalDbOpenPromise;
+  if (!sourceState.runtimeWalDb || !sourceOpen || !(await sourceOpen)) {
+    throw new Error('RUNTIME_WAL_BORROW_SOURCE_NOT_OPEN');
+  }
+  const targetState = deps.ensureRuntimeInfrastructure(target);
+  if (targetState.runtimeWalDb || targetState.runtimeWalDbOpenPromise) {
+    throw new Error('RUNTIME_WAL_BORROW_TARGET_ALREADY_BOUND');
+  }
+  targetState.runtimeWalDb = sourceState.runtimeWalDb;
+  targetState.runtimeWalDbOpenPromise = Promise.resolve(true);
+  targetState.runtimeWalDbBorrowed = true;
+  if (sourceState.storageVerifiedWalHeight !== undefined) {
+    targetState.storageVerifiedWalHeight = sourceState.storageVerifiedWalHeight;
   }
 };
 

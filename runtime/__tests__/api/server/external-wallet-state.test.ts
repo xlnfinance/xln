@@ -12,7 +12,7 @@ import {
   generateLazyEntityId,
 } from '../../../runtime';
 import { applySignerEntityExternalWalletSnapshot } from '../../../entity/auth/signer-wallet';
-import { cloneEntityState } from '../../../entity/state-clone';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../../../storage/read/projections';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
@@ -179,7 +179,7 @@ describe('external wallet observed state', () => {
     expect(ownerState?.get(TOKEN)?.tokenId).toBe(7);
     expect(result.newState.externalWallet?.allowances.get(signerId)?.get(`${TOKEN}:${SPENDER}`)?.allowance).toBe(900n);
 
-    const cloned = cloneEntityState(result.newState);
+    const cloned = createEntityFrameCandidateState(result.newState);
     expect(cloned.externalWallet?.balances.get(signerId)?.get(TOKEN)?.balance).toBe(2_500n);
 
     const hydrated = hydrateEntityStateFromStorage({
@@ -246,7 +246,7 @@ describe('external wallet observed state', () => {
         transactionHash: `0x${'10'.repeat(32)}`,
       }]])]]),
     };
-    const mutated = cloneEntityState(baseline);
+    const mutated = createEntityFrameCandidateState(baseline);
     mutated.externalWallet!.balances.get(signerId)!.get(TOKEN)!.balance = 2_501n;
 
     const hashBaseline = await createEntityFrameHash('genesis', 1, 1_000, [], baseline);

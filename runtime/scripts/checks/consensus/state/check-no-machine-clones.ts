@@ -87,6 +87,23 @@ const sourceFiles = program.getSourceFiles().filter(source => {
 
 for (const source of sourceFiles) {
   const visit = (node: ts.Node): void => {
+    if (
+      ts.isClassDeclaration(node)
+      && node.heritageClauses?.some(clause =>
+        clause.token === ts.SyntaxKind.ExtendsKeyword
+        && clause.types.some(type => type.expression.getText(source) === 'Map'))
+    ) {
+      const position = source.getLineAndCharacterOfPosition(node.getStart(source));
+      violations.push(`${source.fileName}:${position.line + 1}:extends Map`);
+    }
+    if (
+      (ts.isNewExpression(node) || ts.isCallExpression(node))
+      && ts.isIdentifier(node.expression)
+      && node.expression.text === 'Proxy'
+    ) {
+      const position = source.getLineAndCharacterOfPosition(node.getStart(source));
+      violations.push(`${source.fileName}:${position.line + 1}:Proxy`);
+    }
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
       const helperName = ts.isIdentifier(callee) ? callee.text : undefined;

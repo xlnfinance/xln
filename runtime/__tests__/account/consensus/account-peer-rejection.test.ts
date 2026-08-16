@@ -5,6 +5,7 @@ import type { AccountConsensusContext } from '../../../account/consensus/context
 import { createFrameHash } from '../../../account/consensus/frame/hash';
 import { computeAccountStateRoot } from '../../../account/commitment/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import type { AccountInput, AccountReplica } from '../../../types/account';
 import { safeStringify } from '../../../protocol/serialization';
 import { createEmptyEnv } from '../../../runtime';
@@ -20,7 +21,8 @@ import {
   accountInputFailureMessage,
   accountInputPeerRejectionCode,
 } from '../../../account/consensus/result';
-import { fintsPositiveAccountConsensusResult } from '../../types/fints/account-consensus-result.positive';
+import { fintsPositiveAccountConsensusResult } from '../../types/fints/results/account-consensus-result.positive';
+import { openWritableEntityAccounts } from '../../helpers/cross-j';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
@@ -37,17 +39,17 @@ const createAccount = (localEntity = leftEntity, peerEntity = rightEntity): Acco
       rightEntity: localEntity < peerEntity ? peerEntity : localEntity,
       domain: { ...domain },
       watchSeed,
-      deltas: new Map(),
-      locks: new Map(),
-      swapOffers: new Map(),
-      pulls: new Map(),
+      deltas: PersistentAccountStateMap.empty('deltas'),
+      locks: PersistentAccountStateMap.empty('locks'),
+      swapOffers: PersistentAccountStateMap.empty('swapOffers'),
+      pulls: PersistentAccountStateMap.empty('pulls'),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
+      requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+      requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
     },
     status: 'active',
     mempool: [],
@@ -71,10 +73,13 @@ const createAccount = (localEntity = leftEntity, peerEntity = rightEntity): Acco
       nextProofNonce: 1,
     },
     proofBody: { tokenIds: [], deltas: [] },
-    pendingWithdrawals: new Map(),
-    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
+    pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+    shadow: {
+      rebalance: {
+        policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+        submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+      },
+    },
   };
   account.currentFrame.accountStateRoot = computeAccountStateRoot(account.state);
   return account;
@@ -133,7 +138,6 @@ describe('typed Account peer rejection', () => {
   test('bad domain, party, watch seed, and height are typed no-mutation rejections', async () => {
     const env = createEmptyEnv('account-peer-boundary-rejection');
     env.quietRuntimeLogs = true;
-    const base = createAccount();
     const cases: Array<{
       code: string;
       mutate(input: Extract<AccountInput, { kind: 'ack' }>): void;
@@ -165,7 +169,7 @@ describe('typed Account peer rejection', () => {
     ];
 
     for (const candidate of cases) {
-      const account = structuredClone(base);
+      const account = createAccount();
       const input = ackInput(account);
       candidate.mutate(input);
       const before = safeStringify(account);
@@ -308,13 +312,22 @@ describe('typed Account peer rejection', () => {
     ];
     for (const candidate of cases) {
       if (candidate.name === 'row capacity') {
-        for (let tokenId = 1; tokenId <= LIMITS.MAX_ACCOUNT_TOKEN_ROWS; tokenId += 1) {
-          candidate.account.state.deltas.set(tokenId, createDefaultDelta(tokenId));
-        }
+        candidate.account.state.deltas = PersistentAccountStateMap.fromEntries(
+          'deltas',
+          Array.from({ length: LIMITS.MAX_ACCOUNT_TOKEN_ROWS }, (_, index) => {
+            const tokenId = index + 1;
+            return [tokenId, createDefaultDelta(tokenId)] as const;
+          }),
+        );
         candidate.account.currentFrame.accountStateRoot = computeAccountStateRoot(candidate.account.state);
       }
-      const poisonedState = structuredClone(candidate.account.state);
-      poisonedState.deltas.set(candidate.tokenId, createDefaultDelta(candidate.tokenId));
+      const poisonedState = {
+        ...candidate.account.state,
+        deltas: candidate.account.state.deltas.updated(
+          candidate.tokenId,
+          createDefaultDelta(candidate.tokenId),
+        ),
+      };
       const frame = {
         height: 1,
         timestamp: 0,
@@ -405,7 +418,7 @@ test('authenticated Runtime Account poison is consumed and the next honest Entit
   const peerEntity = `0x${'77'.repeat(32)}`;
   const account = createAccount(fixture.entityId, peerEntity);
   installPendingFrame(account);
-  target.replica.state.accounts.set(peerEntity, account);
+  openWritableEntityAccounts(target.replica.state).set(peerEntity, account);
   target.env.runtimeId = `0x${'88'.repeat(20)}`;
   target.env.infrastructure ??= {};
   target.env.infrastructure.entityRuntimeHints = new Map();
@@ -467,94 +480,4 @@ test('authenticated Runtime Account poison is consumed and the next honest Entit
   expect(target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`)?.state.height).toBe(
     heightAfterPoison + 1,
   );
-});
-
-test('full Account capacity consumes unknown peer genesis and Runtime continues', async () => {
-  const fixture = createEntityProposalFixture('account-peer-full-capacity', 1n);
-  const target = fixture.createValidator('1');
-  target.replica.state.config.jurisdiction = {
-    name: 'account-peer-full-capacity',
-    address: 'http://localhost:8545',
-    chainId: domain.chainId,
-    depositoryAddress: domain.depositoryAddress,
-    entityProviderAddress: `0x${'55'.repeat(20)}`,
-  };
-  const unknownPeer = `0x${'ee'.repeat(32)}`;
-  target.replica.state.accounts.clear();
-  for (let index = 1; index <= LIMITS.MAX_ACCOUNTS_PER_ENTITY; index += 1) {
-    const peer = `0x${index.toString(16).padStart(64, '0')}`;
-    target.replica.state.accounts.set(peer, createAccount(fixture.entityId, peer));
-  }
-  target.env.runtimeId = `0x${'88'.repeat(20)}`;
-  target.env.infrastructure ??= {};
-  target.env.infrastructure.entityRuntimeHints = new Map();
-  target.env.state.eReplicas.set(`${fixture.entityId}:${target.signerId}`, target.replica);
-  const poison: Extract<AccountInput, { kind: 'frame' }> = {
-    kind: 'frame',
-    fromEntityId: unknownPeer,
-    toEntityId: fixture.entityId,
-    domain: { ...domain },
-    disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-    watchSeed: `0x${'dd'.repeat(32)}`,
-    proposal: {
-      frame: {
-        height: 1,
-        timestamp: 1,
-        jHeight: 0,
-        accountTxs: [],
-        prevFrameHash: 'genesis',
-        accountStateRoot: `0x${'aa'.repeat(32)}`,
-        deltas: [],
-        stateHash: `0x${'bb'.repeat(32)}`,
-        byLeft: unknownPeer < fixture.entityId,
-      },
-      frameHanko: `0x${'cc'.repeat(65)}`,
-    },
-  };
-  const routingDeps = {
-    ensureRuntimeInfrastructure: () => target.env.infrastructure!,
-    enqueueRuntimeInputs: () => {},
-    extractEntityId: (replicaKey: string) => replicaKey.split(':')[0] ?? '',
-    hasLocalSignerForEntity: () => true,
-    hasLocalSignerForEntitySigner: () => true,
-    resolveSoleLocalSignerForEntity: () => target.signerId,
-    getP2P: () => null,
-  };
-
-  const poisoned = await applyMergedEntityInputs(
-    target.env,
-    [
-      {
-        from: `0x${'99'.repeat(20)}`,
-        sourceRuntimeFrame: { height: 1, timestamp: 1 },
-        entityId: fixture.entityId,
-        signerId: target.signerId,
-        entityTxs: [{ type: 'accountInput', data: poison }],
-      },
-    ],
-    [],
-    { isReplay: false, routingDeps },
-  );
-  expect(poisoned.inputOutcomes[0]?.outcome.kind).toBe('committed');
-  const afterPoison = target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`);
-  expect(afterPoison?.state.accounts.size).toBe(LIMITS.MAX_ACCOUNTS_PER_ENTITY);
-  expect(afterPoison?.state.accounts.has(unknownPeer)).toBe(false);
-  if (!afterPoison) throw new Error('TEST_COMMITTED_ENTITY_REPLICA_MISSING');
-  const command = buildSignedEntityCommand(target.env, afterPoison.state, target.signerId, [
-    { type: 'chat', data: { from: target.signerId, message: 'capacity-poison-consumed' } },
-  ]);
-  const honest = await applyMergedEntityInputs(
-    target.env,
-    [
-      {
-        entityId: fixture.entityId,
-        signerId: target.signerId,
-        entityTxs: [signedEntityCommandTx(command)],
-      },
-    ],
-    [],
-    { isReplay: false, routingDeps },
-  );
-  expect(honest.inputOutcomes[0]?.outcome.kind).toBe('committed');
-  expect(honest.inputOutcomes[0]?.entityFrameCommitted).toBe(true);
 });

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 import {
-  MAX_ACCOUNT_DISPUTE_PROOF_LEAF_BYTES,
+  MAX_ACCOUNT_DISPUTE_PROOF_ATOM_BYTES,
   buildAccountProofBody,
   createDisputeProofHash,
   createDisputeProofHashWithNonce,
@@ -9,7 +9,6 @@ import {
 import { encodeAccountStateValue } from '../../../account/commitment/state-root';
 import { proofBodyHasPulls } from '../../../entity/tx/handlers/dispute/start-admission';
 import { encodeBuffer } from '../../../storage/codec/codec';
-import { MAX_ACCOUNT_ENVELOPE_ROW_BYTES } from '../../../storage/schema/account-envelope-graph';
 
 const DEPOSITORY = '0x4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1';
 const HANKO_DOMAIN = { chainId: 31337, depositoryAddress: DEPOSITORY } as const;
@@ -38,10 +37,34 @@ describe('proof-builder dispute hash', () => {
     proofHeader: { nextProofNonce: 1 },
   });
 
-  const proofWithSameJOffers = (count: number) => buildAccountProofBody(proofAccount({
+  const proofWithSameJOffers = (
+    count: number,
+    pullCount = 0,
+    lockCount = 0,
+  ) => buildAccountProofBody(proofAccount({
     deltas: new Map([[1, { offdelta: 0n }], [2, { offdelta: 0n }]]),
-    locks: new Map(),
-    pulls: new Map(),
+    locks: new Map(Array.from({ length: lockCount }, (_, index) => [
+      `lock-${index}`,
+      {
+        tokenId: index % 2 === 0 ? 1 : 2,
+        senderIsLeft: index % 2 === 0,
+        amount: 1n,
+        timelock: 100_000n,
+        revealBeforeHeight: 100,
+        hashlock: `0x${(index + 501).toString(16).padStart(64, '0')}`,
+      },
+    ])),
+    pulls: new Map(Array.from({ length: pullCount }, (_, index) => [
+      `pull-${index}`,
+      {
+        tokenId: 1,
+        amount: 1n,
+        claimedRatio: 0,
+        fullHash: `0x${(index + 1).toString(16).padStart(64, '0')}`,
+        partialRoot: `0x${(index + 101).toString(16).padStart(64, '0')}`,
+        crossJurisdiction: { leg: 'target' },
+      },
+    ])),
     swapOffers: new Map(Array.from({ length: count }, (_, index) => [
       `offer-${index}`,
       {
@@ -55,19 +78,32 @@ describe('proof-builder dispute hash', () => {
     watchSeed: TEST_WATCH_SEED,
   }), DEPOSITORY);
 
-  test('keeps one full maker pair inside the physical evidence-leaf budget', () => {
-    const proof = proofWithSameJOffers(20);
-    expect(encodeAccountStateValue(proof.proofBodyStruct).byteLength)
-      .toBeLessThan(MAX_ACCOUNT_DISPUTE_PROOF_LEAF_BYTES);
+  test('keeps every growing transformer atom inside the physical storage-row budget', () => {
+    const proof = proofWithSameJOffers(20, 18, 32);
+    // The complete object exceeds the retired 9 KB pseudo-leaf limit, but it
+    // is a Patricia graph whose actual scalar records remain independently
+    // storable. This is the exact MM + cross-j combination that wedged H3.
+    expect(encodeAccountStateValue(proof.proofBodyStruct).byteLength).toBeGreaterThan(9_000);
+    expect(proof.runtimeProofBody.transformers).toHaveLength(3);
+    const [paymentClause, marketClause, pullClause] = proof.runtimeProofBody.transformers;
+    expect(paymentClause?.batch.payments).toHaveLength(32);
+    expect(paymentClause?.batch.swaps).toHaveLength(0);
+    expect(paymentClause?.batch.pulls).toHaveLength(0);
+    expect(marketClause?.batch.payments).toHaveLength(0);
+    expect(marketClause?.batch.swaps).toHaveLength(20);
+    expect(marketClause?.batch.pulls).toHaveLength(0);
+    expect(pullClause?.batch.payments).toHaveLength(0);
+    expect(pullClause?.batch.swaps).toHaveLength(0);
+    expect(pullClause?.batch.pulls).toHaveLength(18);
     for (const transformer of proof.proofBodyStruct.transformers) {
       expect(encodeBuffer({ kind: 'atom', value: transformer.encodedBatch }).byteLength)
-        .toBeLessThan(MAX_ACCOUNT_ENVELOPE_ROW_BYTES);
+        .toBeLessThan(MAX_ACCOUNT_DISPUTE_PROOF_ATOM_BYTES);
     }
   });
 
   test('rejects an oversized signed program before its hash enters consensus', () => {
-    expect(() => proofWithSameJOffers(25)).toThrow(
-      'ACCOUNT_DISPUTE_PROOF_LEAF_BYTES_EXCEEDED',
+    expect(() => proofWithSameJOffers(30)).toThrow(
+      'ACCOUNT_DISPUTE_PROOF_ATOM_BYTES_EXCEEDED',
     );
   });
 
@@ -289,13 +325,17 @@ describe('proof-builder dispute hash', () => {
     });
 
     const proof = buildAccountProofBody(accountMachine, DEPOSITORY);
-    const allowances = proof.runtimeProofBody.transformers[0]?.allowances;
-    expect(allowances).toEqual([
-      // Left-sender HTLC (11), maker-left give (17), and negative pull (29)
-      // can only move token 1 from left to right: 11 + 17 + 29 = 57.
-      { deltaIndex: 0, rightAllowance: 57n, leftAllowance: 0n },
-      // Right-sender HTLC (13) and maker-left want (19) move token 2 right→left.
-      { deltaIndex: 1, rightAllowance: 0n, leftAllowance: 32n },
+    expect(proof.runtimeProofBody.transformers).toHaveLength(3);
+    expect(proof.runtimeProofBody.transformers[0]?.allowances).toEqual([
+      { deltaIndex: 0, rightAllowance: 11n, leftAllowance: 0n },
+      { deltaIndex: 1, rightAllowance: 0n, leftAllowance: 13n },
+    ]);
+    expect(proof.runtimeProofBody.transformers[1]?.allowances).toEqual([
+      { deltaIndex: 0, rightAllowance: 17n, leftAllowance: 0n },
+      { deltaIndex: 1, rightAllowance: 0n, leftAllowance: 19n },
+    ]);
+    expect(proof.runtimeProofBody.transformers[2]?.allowances).toEqual([
+      { deltaIndex: 0, rightAllowance: 29n, leftAllowance: 0n },
       { deltaIndex: 2, rightAllowance: 0n, leftAllowance: 23n },
     ]);
   });

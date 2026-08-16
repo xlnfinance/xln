@@ -124,6 +124,33 @@ describe('PersistentEntityAccountMap', () => {
     expect(hashes).toBe(2);
   });
 
+  test('one publication folds 1,000 dirty Accounts with canonical root order', () => {
+    const total = 1_000;
+    let hashes = 0;
+    const countedHash = (value: AccountReplica): string => {
+      hashes += 1;
+      return hash(value);
+    };
+    const base = PersistentEntityAccountMap.empty(LEFT, countedHash);
+    const ascending = new EntityAccountCandidateMap(base);
+    const descending = new EntityAccountCandidateMap(base);
+    for (let index = 1; index <= total; index += 1) {
+      ascending.set(id(index.toString(16)), account(index));
+    }
+    for (let index = total; index >= 1; index -= 1) {
+      descending.set(id(index.toString(16)), account(index));
+    }
+
+    const asc = ascending.sealCandidate();
+    expect(asc.size).toBe(total);
+    expect(hashes).toBe(total);
+    const desc = descending.sealCandidate();
+    expect(desc.size).toBe(total);
+    expect(desc.rootHash()).toBe(asc.rootHash());
+    expect(hashes).toBe(total * 2);
+    expect(base.size).toBe(0);
+  });
+
   test('committed Account top-level alias mutation is rejected', () => {
     const alice = id('1');
     const stored = account(1);
@@ -163,11 +190,40 @@ describe('PersistentEntityAccountMap', () => {
     expect(() => {
       stored.currentFrame.accountTxs.push({} as never);
     }).toThrow();
+    const committedDelta = stored.state.deltas.get(1);
+    if (!committedDelta) throw new Error('TEST_DELTA_MISSING');
+    expect(() => {
+      committedDelta.offdelta = 9n;
+    }).toThrow();
     expect(typeof (stored.state.deltas as { set?: unknown }).set).toBe('undefined');
 
     const overlay = new EntityAccountCandidateMap(base);
     expect(overlay.get(RIGHT)).toBe(stored);
+    expect(() => {
+      const visible = overlay.get(RIGHT);
+      if (!visible) throw new Error('TEST_ACCOUNT_MISSING');
+      visible.status = 'disputed';
+    }).toThrow();
     expect(overlay.stats().changed).toBe(0);
+  });
+
+  test('claimed Entity shell cannot mutate a committed Account leaf by alias', () => {
+    const base = PersistentEntityAccountMap.fromMap(
+      new Map([[RIGHT, productionAccount()]]),
+      LEFT,
+      computeEntityAccountValueHash,
+    );
+    const overlay = new EntityAccountCandidateMap(base);
+    const shell = overlay.getForWrite(RIGHT);
+    if (!shell) throw new Error('TEST_WRITE_SHELL_MISSING');
+    const sharedDelta = shell.state.deltas.get(1);
+    if (!sharedDelta) throw new Error('TEST_DELTA_MISSING');
+
+    expect(() => {
+      sharedDelta.offdelta += 1n;
+    }).toThrow();
+    expect(overlay.stats()).toEqual({ base: 1, changed: 1, deleted: 0 });
+    expect(shell.state.deltas).toBe(base.get(RIGHT)?.state.deltas);
   });
 
   test('direct Account state transitions publish into the Entity write shell', async () => {

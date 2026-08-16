@@ -33,7 +33,6 @@ export const LIMITS = {
   MAX_STORAGE_VALUE_BYTES: 10_000,
 
   /** Maximum number of accounts per entity (prevents state bloat) */
-  MAX_ACCOUNTS_PER_ENTITY: 1000,
 
   /** Maximum live proposals per entity; at most one pending per board signer. */
   MAX_PENDING_PROPOSALS_PER_ENTITY: 100,

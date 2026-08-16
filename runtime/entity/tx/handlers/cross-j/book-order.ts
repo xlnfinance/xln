@@ -32,6 +32,7 @@ import type { EntityCandidateEffect, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import type { RuntimeOverlayRecord } from '../../../../types/account';
+import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
 import { crossJurisdictionBookQtyLots } from '../../../../orderbook';
 import {
   materializeCrossJurisdictionBookRemainder,
@@ -328,7 +329,10 @@ export const applyCrossJurisdictionBookProgressToState = (
   assertCrossJurisdictionPriceImprovementMode(data.priceImprovementMode, data.orderId);
   const now = deterministicEntityTimestamp(newState, env);
   const admissionKey = crossJurisdictionBookAdmissionKeyFor(data.sourceEntityId, data.orderId);
-  const admission = newState.crossJurisdictionBookAdmissions?.get(admissionKey);
+  const admissions = newState.crossJurisdictionBookAdmissions;
+  const admission = admissions
+    ? getEntityCollectionValueForWrite(admissions, admissionKey)
+    : undefined;
   if (!admission) {
     throw haltRuntimeFailure("CROSS_J_BOOK_PROGRESS_ADMISSION_MISSING", `CROSS_J_BOOK_PROGRESS_ADMISSION_MISSING: order=${data.orderId} source=${data.sourceEntityId}`);
   }

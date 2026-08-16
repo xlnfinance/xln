@@ -5,7 +5,6 @@ import { mkdirSync, readdirSync, rmSync, statSync } from 'fs';
 import { join } from 'path';
 import { Level } from 'level';
 import type { ServerWebSocket } from 'bun';
-import { ethers } from 'ethers';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { createFrameHash } from '../../../account/consensus/frame/hash';
@@ -26,20 +25,15 @@ import {
   handleRuntimeAdapterMessage,
 } from '../../../api/runtime-adapter/server';
 import { encodeBuffer, writeBatch } from '../../../storage/codec/codec';
-import { docRefCellKey, docRefForDoc, docValueKey, liveKeyForDoc } from '../../../storage/schema/doc-refs';
-import { prepareStorageStateHashes, storageMerkleCellHexKey } from '../../../storage/hashes';
+import { prepareStorageBookGraphWrite } from '../../../storage/commit/book-graph';
+import { prepareLiveStateGraph } from '../../../storage/commit/live-state-graph';
 import {
-  DEFAULT_ACCOUNT_MERKLE_RADIX,
   KEY_HEAD,
   STORAGE_SCHEMA_VERSION,
   normalizeEntityId,
-  keyMerkleBranch,
-  keyMerkleLeaf,
-  keyMerkleRoot,
 } from '../../../storage/keys';
 import { inspectStorage } from '../../../storage/read/inspect';
 import { createSnapshot, seedFreshStorageEpoch } from '../../../storage/database/lifecycle';
-import { buildHexKeyedMerkleMaterialized, packRadixMerklePath } from '../../../protocol/state/radix-merkle';
 import { projectEntityCoreDoc } from '../../../storage/read/projections';
 import { deriveRuntimeIdFromSeed } from '../../../storage/runtime-dbs';
 import {
@@ -51,11 +45,7 @@ import {
 import type {
   RuntimeDbLike,
   StorageDoc,
-  StorageEntityHashDoc,
   StorageHead,
-  StorageMerkleBranchDoc,
-  StorageMerkleLeafDoc,
-  StorageMerkleRootDoc,
 } from '../../../storage/types';
 import type { AccountReplica } from '../../../types/account';
 import type { EntityReplica, EntityState } from '../../../entity/types';
@@ -389,50 +379,43 @@ const makeHead = (height: number): StorageHead => ({
   retainedHistoryBytes: 0,
 });
 
+const projectBookDocs = (state: EntityState): StorageDoc[] =>
+  [...(state.orderbookExt?.books ?? [])].map(([pairId, value]) => ({
+    family: 'book' as const,
+    entityId: state.entityId,
+    pairId,
+    value,
+  }));
+
 const writeDocs = async (
   db: RuntimeDbLike,
   docs: StorageDoc[],
-  entityHashDocs: Map<string, StorageEntityHashDoc>,
   headHeight: number,
-): Promise<Map<string, StorageEntityHashDoc>> => {
-  const prepared = await prepareStorageStateHashes({
+): Promise<void> => {
+  const prepared = await prepareLiveStateGraph({
     db,
     puts: docs,
     dels: [],
-    entityHashDocs,
   });
+  const bookWrites = await Promise.all(
+    docs
+      .filter((doc): doc is Extract<StorageDoc, { family: 'book' }> => doc.family === 'book')
+      .map((doc) => prepareStorageBookGraphWrite({
+        db,
+        entityId: doc.entityId,
+        pairId: doc.pairId,
+        next: doc.value,
+      })),
+  );
   const batch = db.batch();
-  for (const doc of docs) {
-    const raw = prepared.docValueBuffers.get(docValueKey(doc));
-    if (!raw) throw new Error(`DOC_BUFFER_MISSING: ${docValueKey(doc)}`);
-    batch.put(liveKeyForDoc(doc), raw);
+  for (const key of prepared.dels) batch.del?.(key);
+  for (const put of prepared.puts) batch.put(put.key, put.value);
+  for (const write of bookWrites) {
+    for (const key of write.dels) batch.del?.(key);
+    for (const put of write.puts) batch.put(put.key, put.value);
   }
-  for (const key of prepared.merkleDels) batch.del?.(key);
-  for (const put of prepared.merklePuts) batch.put(put.key, put.value);
   batch.put(KEY_HEAD, encodeBuffer(makeHead(headHeight)));
   await writeBatch(batch);
-  return prepared.entityHashDocs;
-};
-
-const encodedDoc = (doc: StorageDoc): { raw: Buffer; hash: string; hashBytes: Buffer } => {
-  const raw = encodeBuffer(doc.value);
-  const hash = ethers.keccak256(raw);
-  return { raw, hash, hashBytes: Buffer.from(hash.slice(2), 'hex') };
-};
-
-const writeBatchEntries = async (
-  db: RuntimeDbLike,
-  entries: Array<{ key: Buffer; value?: Buffer }>,
-): Promise<void> => {
-  const chunkSize = 1000;
-  for (let offset = 0; offset < entries.length; offset += chunkSize) {
-    const batch = db.batch();
-    for (const entry of entries.slice(offset, offset + chunkSize)) {
-      if (entry.value) batch.put(entry.key, entry.value);
-      else batch.del?.(entry.key);
-    }
-    await writeBatch(batch);
-  }
 };
 
 const forceGc = (trace: Trace, label: string): void => {
@@ -458,104 +441,33 @@ const seedHubBulk = async (
   db: RuntimeDbLike,
   entityId: string,
   state: EntityState,
-): Promise<Map<string, StorageEntityHashDoc>> => {
-  const leaves: Array<{ hexKey: string; value: Buffer }> = [];
-  let pending: Array<{ key: Buffer; value: Buffer }> = [];
-  const flushPending = async (label: string, extra: Record<string, unknown>): Promise<void> => {
-    if (pending.length === 0) return;
-    await writeBatchEntries(db, pending);
-    pending = [];
-    trace.mark(label, extra);
-  };
-
-  const appendDoc = (doc: StorageDoc): void => {
-    const encoded = encodedDoc(doc);
-    const ref = docRefForDoc(doc);
-    pending.push({ key: liveKeyForDoc(doc), value: encoded.raw });
-    leaves.push({ hexKey: storageMerkleCellHexKey(docRefCellKey(ref)), value: encoded.hashBytes });
-  };
-
+): Promise<void> => {
   state.height = 2;
   state.timestamp = 1_002;
-  appendDoc({
-    family: 'entity',
-    entityId,
-    value: projectEntityCoreDoc(state),
-  });
+  await writeDocs(db, [
+    {
+      family: 'entity',
+      entityId,
+      value: projectEntityCoreDoc(state),
+    },
+    ...projectBookDocs(state),
+  ], state.height);
   for (let offset = 0; offset < cli.accounts; offset += cli.chunk) {
     const end = Math.min(cli.accounts, offset + cli.chunk);
+    const docs: StorageDoc[] = [];
     for (let index = offset; index < end; index += 1) {
       const counterpartyId = normalizeEntityId(randomEntityId(cli.seed, index));
       const accountHeight = 2;
       const timestamp = 1_000 + accountHeight;
       const account = await makeAccount(entityId, counterpartyId, accountHeight, timestamp);
-      appendDoc({ family: 'account', entityId, counterpartyId, value: account });
+      docs.push({ family: 'account', entityId, counterpartyId, value: account });
       if (cli.memory === 'all' || (cli.memory === 'hot' && index < cli.hotAccounts)) {
         putResidentAccount(state, counterpartyId, account);
       }
     }
-    await flushPending('seed.bulk.docs', { accounts: end, pendingLeaves: leaves.length });
+    await writeDocs(db, docs, state.height);
+    trace.mark('seed.bulk.graph', { accounts: end });
   }
-
-  trace.mark('seed.bulk.build-merkle.start', { leaves: leaves.length });
-  const built = buildHexKeyedMerkleMaterialized(leaves, { radix: DEFAULT_ACCOUNT_MERKLE_RADIX });
-  trace.mark('seed.bulk.build-merkle.done', {
-    leaves: built.leafCount,
-    branches: built.branches.length,
-    root: built.root,
-    maxDepth: built.maxDepth,
-  });
-
-  const rootDoc: StorageMerkleRootDoc = {
-    entityId,
-    namespace: 'runtime-roots',
-    radix: DEFAULT_ACCOUNT_MERKLE_RADIX,
-    rootHash: built.root,
-    rootKind: built.rootKind,
-    rootPath: built.rootPath,
-    leafCount: built.leafCount,
-  };
-  const entityHashDoc: StorageEntityHashDoc = { entityId, hash: built.root, cellCount: built.leafCount };
-  const merkleRows: Array<{ key: Buffer; value: Buffer }> = [
-    { key: keyMerkleRoot(entityId, 'runtime-roots'), value: encodeBuffer(rootDoc) },
-    { key: KEY_HEAD, value: encodeBuffer(makeHead(state.height)) },
-  ];
-  for (const branch of built.branches) {
-    const doc: StorageMerkleBranchDoc = {
-      entityId,
-      namespace: 'runtime-roots',
-      radix: DEFAULT_ACCOUNT_MERKLE_RADIX,
-      path: branch.path,
-      hash: branch.hash,
-      children: branch.children,
-    };
-    merkleRows.push({
-      key: keyMerkleBranch(entityId, 'runtime-roots', packRadixMerklePath(DEFAULT_ACCOUNT_MERKLE_RADIX, branch.path)),
-      value: encodeBuffer(doc),
-    });
-  }
-  for (const leaf of built.leaves) {
-    const doc: StorageMerkleLeafDoc = {
-      entityId,
-      namespace: 'runtime-roots',
-      radix: DEFAULT_ACCOUNT_MERKLE_RADIX,
-      path: leaf.path,
-      key: leaf.key,
-      valueHash: leaf.valueHash,
-      hash: leaf.hash,
-    };
-    merkleRows.push({
-      key: keyMerkleLeaf(entityId, 'runtime-roots', packRadixMerklePath(DEFAULT_ACCOUNT_MERKLE_RADIX, leaf.path)),
-      value: encodeBuffer(doc),
-    });
-  }
-  await writeBatchEntries(db, merkleRows);
-  trace.mark('seed.bulk.persist-merkle.done', {
-    accounts: cli.accounts,
-    inMemoryAccounts: state.accounts.size,
-    rows: merkleRows.length,
-  });
-  return new Map([[entityId, entityHashDoc]]);
 };
 
 const seedHub = async (
@@ -564,14 +476,16 @@ const seedHub = async (
   db: RuntimeDbLike,
   entityId: string,
   state: EntityState,
-): Promise<Map<string, StorageEntityHashDoc>> => {
+): Promise<void> => {
   let height = 1;
-  let entityHashDocs = new Map<string, StorageEntityHashDoc>();
-  entityHashDocs = await writeDocs(db, [{
-    family: 'entity',
-    entityId,
-    value: projectEntityCoreDoc(state),
-  }], entityHashDocs, height);
+  await writeDocs(db, [
+    {
+      family: 'entity',
+      entityId,
+      value: projectEntityCoreDoc(state),
+    },
+    ...projectBookDocs(state),
+  ], height);
   trace.mark('seed.core', { height });
 
   for (let offset = 0; offset < cli.accounts; offset += cli.chunk) {
@@ -593,7 +507,7 @@ const seedHub = async (
       }
     }
     height += 1;
-    entityHashDocs = await writeDocs(db, docs, entityHashDocs, height);
+    await writeDocs(db, docs, height);
     if (offset === 0 || end === cli.accounts || end % (cli.chunk * 10) === 0) {
       trace.mark('seed.accounts.chunk', { accounts: end, height, chunk: docs.length });
     }
@@ -601,20 +515,18 @@ const seedHub = async (
 
   state.height = height + 1;
   state.timestamp = 1_000 + state.height;
-  entityHashDocs = await writeDocs(db, [{
+  await writeDocs(db, [{
     family: 'entity',
     entityId,
     value: projectEntityCoreDoc(state),
-  }], entityHashDocs, state.height);
+  }], state.height);
   trace.mark('seed.final-core', { height: state.height, inMemoryAccounts: state.accounts.size });
-  return entityHashDocs;
 };
 
 const touchAccounts = async (
   cli: Cli,
   db: RuntimeDbLike,
   env: RuntimeReplica,
-  entityHashDocsRef: { current: Map<string, StorageEntityHashDoc> },
   entityId: string,
   startIndex: number,
   count: number,
@@ -638,7 +550,7 @@ const touchAccounts = async (
     value: projectEntityCoreDoc(state),
   });
   const writeStarted = nowMs();
-  entityHashDocsRef.current = await writeDocs(db, docs, entityHashDocsRef.current, env.state.height);
+  await writeDocs(db, docs, env.state.height);
   return nowMs() - writeStarted;
 };
 
@@ -646,7 +558,6 @@ const insertNewAccountsAfterRead = async (
   cli: Cli,
   db: RuntimeDbLike,
   env: RuntimeReplica,
-  entityHashDocsRef: { current: Map<string, StorageEntityHashDoc> },
   entityId: string,
   startIndex: number,
   count: number,
@@ -670,7 +581,7 @@ const insertNewAccountsAfterRead = async (
     value: projectEntityCoreDoc(state),
   });
   const writeStarted = nowMs();
-  entityHashDocsRef.current = await writeDocs(db, docs, entityHashDocsRef.current, env.state.height);
+  await writeDocs(db, docs, env.state.height);
   return nowMs() - writeStarted;
 };
 
@@ -764,11 +675,11 @@ const runSnapshotRotationProbe = async (
       nextStats.liveEntityCount !== currentStats.liveEntityCount ||
       nextStats.liveAccountCount !== currentStats.liveAccountCount ||
       nextStats.liveBookCount !== currentStats.liveBookCount ||
-      nextStats.merkleLeafCount !== currentStats.merkleLeafCount
+      nextStats.accountGraphLeafCount !== currentStats.accountGraphLeafCount
     ) {
       throw new Error(
-        `ROTATION_PROBE_NEXT_LIVE_MISMATCH: current=${currentStats.liveAccountCount}/${currentStats.merkleLeafCount} ` +
-          `next=${nextStats.liveAccountCount}/${nextStats.merkleLeafCount}`,
+        `ROTATION_PROBE_NEXT_LIVE_MISMATCH: current=${currentStats.liveAccountCount}/${currentStats.accountGraphLeafCount} ` +
+          `next=${nextStats.liveAccountCount}/${nextStats.accountGraphLeafCount}`,
       );
     }
     const historyStats = await inspectStorage({
@@ -841,7 +752,6 @@ async function main() {
   process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] || String(4 * 1024 * 1024);
 
   let server: Bun.Server<undefined> | null = null;
-  const entityHashDocsRef = { current: new Map<string, StorageEntityHashDoc>() };
   let pendingWrite: Promise<number> = Promise.resolve(0);
   const readLatencyMs: number[] = [];
   const touchDurableMs: number[] = [];
@@ -854,9 +764,8 @@ async function main() {
   let rotationProbeResult: RotationProbeResult | null = null;
   try {
     trace.mark('start');
-    entityHashDocsRef.current = cli.seedMode === 'bulk'
-      ? await seedHubBulk(cli, trace, db, entityId, state)
-      : await seedHub(cli, trace, db, entityId, state);
+    if (cli.seedMode === 'bulk') await seedHubBulk(cli, trace, db, entityId, state);
+    else await seedHub(cli, trace, db, entityId, state);
     env.state.height = state.height;
     env.state.timestamp = state.timestamp;
     storageReadHeight = state.height;
@@ -930,7 +839,7 @@ async function main() {
                 const start = (round * cli.touchPerRound) % Math.max(1, cli.hotAccounts);
                 const count = cli.touchPerRound;
                 pendingWrite = pendingWrite
-                  .then(() => touchAccounts(cli, db, env, entityHashDocsRef, entityId, start, count))
+                  .then(() => touchAccounts(cli, db, env, entityId, start, count))
                   .then(async (durableMs) => {
                     applyRuntimeAdapterCommandMarker(env, commandMarker.data);
                     await broadcastRuntimeAdapterTick(env);
@@ -1084,7 +993,7 @@ async function main() {
 
     if (cli.newAfterRead > 0) {
       const started = nowMs();
-      newAfterReadDurableMs = await insertNewAccountsAfterRead(cli, db, env, entityHashDocsRef, entityId, cli.accounts, cli.newAfterRead);
+      newAfterReadDurableMs = await insertNewAccountsAfterRead(cli, db, env, entityId, cli.accounts, cli.newAfterRead);
       await broadcastRuntimeAdapterTick(env);
       newAfterReadMs = nowMs() - started;
       touchDurableMs.push(newAfterReadDurableMs);

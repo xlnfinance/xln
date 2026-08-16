@@ -6,6 +6,7 @@ import { createSettlementWorkspaceHash } from '../../../account/tx/handlers/sett
 import { applyEntityInput } from '../../../entity/consensus';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { createEmptyEnv, hasRuntimeWork } from '../../../runtime';
+import { buildEntityFrameAuthority, computeCanonicalEntityConsensusStateHash } from '../../../entity/consensus/state-root';
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../../../jurisdiction/machine/event-observation';
 import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-history';
 import { buildLocalJPrefixAttestation } from '../../../jurisdiction/machine/history/j-prefix-consensus';
@@ -22,6 +23,7 @@ import {
   makeAccount,
   makeJurisdiction,
   makeState,
+  openWritableEntityAccounts,
   registerTestSigner,
 } from '../../helpers/cross-j';
 
@@ -67,7 +69,7 @@ const frozenRepaymentReplica = () => {
   const account = makeAccount(entityId, counterpartyId, jurisdiction);
   account.state.settlementWorkspace = signedWorkspace(account);
   account.mempool = [repayment(entityId, counterpartyId)];
-  state.accounts.set(counterpartyId, account);
+  openWritableEntityAccounts(state).set(counterpartyId, account);
   addReplica(env, state, signerId);
   addReplica(env, makeState(counterpartyId, counterpartySignerId, jurisdiction), counterpartySignerId);
   const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
@@ -170,6 +172,13 @@ describe('deferred Account mempool scheduling', () => {
     // the same durable local J event must be re-attested for the new parent.
     replica.state.height += 1;
     replica.state.prevFrameHash = `0x${'53'.repeat(32)}`;
+    replica.certifiedFrameAnchor = {
+      entityId,
+      height: replica.state.height,
+      frameHash: replica.state.prevFrameHash,
+      stateRoot: computeCanonicalEntityConsensusStateHash(replica.state),
+      authority: buildEntityFrameAuthority(replica.state),
+    };
     const heightBeforeApply = replica.state.height;
 
     const result = await applyEntityInput(env, replica, {

@@ -6,6 +6,7 @@ import { encodeRawRadixTextKey } from '../../protocol/state/radix-merkle';
 import {
   PersistentRadixValueMap,
   type PersistentRadixValueMapOptions,
+  type RadixFoldMutation,
 } from '../../protocol/state/persistent-radix-value-map';
 
 const UTF8 = new TextEncoder();
@@ -36,20 +37,20 @@ const sealEntityCollectionValue = <Value>(value: Value): Value => {
 
 const options = <Value>(): PersistentRadixValueMapOptions<string, Value> => ({
   radix: 16 as const,
-  sealKey: (key: string): string => key,
+  ownKey: (key: string): string => key,
   keyBytes: encodeRawRadixTextKey,
   valueHash: (value: Value): string => valueHash(value),
   // A leaf and every nested record are immutable behind the committed root.
   // Candidate mutation must first fork this one bounded (<10 KiB) leaf.
-  sealValue: (value: Value): Value => sealEntityCollectionValue(value),
+  ownValue: (value: Value): Value => sealEntityCollectionValue(value),
 });
 
 /** Committed map: raw keys and typed values in leaves; hashes exist only on branches. */
-export class PersistentEntityCollectionMap<Value> extends Map<string, Value> {
+export class PersistentEntityCollectionMap<Value> implements Map<string, Value> {
+  readonly [Symbol.toStringTag] = 'Map';
   readonly #values: PersistentRadixValueMap<string, Value>;
 
   private constructor(values: PersistentRadixValueMap<string, Value>) {
-    super();
     this.#values = values;
   }
 
@@ -75,52 +76,67 @@ export class PersistentEntityCollectionMap<Value> extends Map<string, Value> {
     return new PersistentEntityCollectionMap(this.#values.removed(key));
   }
 
+  foldDirty(
+    mutations: Iterable<RadixFoldMutation<string, Value>>,
+    reset = false,
+  ): PersistentEntityCollectionMap<Value> {
+    return new PersistentEntityCollectionMap(this.#values.foldMutations(mutations, reset));
+  }
+
   rootHash(): string { return this.#values.rootHash(); }
-  override get size(): number { return this.#values.size; }
-  override get(key: string): Value | undefined { return this.#values.get(key); }
-  override has(key: string): boolean { return this.#values.has(key); }
-  override entries(): MapIterator<[string, Value]> { return this.#values.entries(); }
-  override keys(): MapIterator<string> { return this.#values.keys(); }
-  override values(): MapIterator<Value> { return this.#values.values(); }
-  override [Symbol.iterator](): MapIterator<[string, Value]> { return this.entries(); }
-  override forEach(
+  get size(): number { return this.#values.size; }
+  get(key: string): Value | undefined { return this.#values.get(key); }
+  has(key: string): boolean { return this.#values.has(key); }
+  entries(): MapIterator<[string, Value]> { return this.#values.entries(); }
+  keys(): MapIterator<string> { return this.#values.keys(); }
+  values(): MapIterator<Value> { return this.#values.values(); }
+  [Symbol.iterator](): MapIterator<[string, Value]> { return this.entries(); }
+  forEach(
     callback: (value: Value, key: string, map: Map<string, Value>) => void,
     thisArg?: unknown,
   ): void {
     for (const [key, value] of this) callback.call(thisArg, value, key, this);
   }
-  override set(_key: string, _value: Value): this { throw new Error('PERSISTENT_ENTITY_COLLECTION_IMMUTABLE'); }
-  override delete(_key: string): boolean { throw new Error('PERSISTENT_ENTITY_COLLECTION_IMMUTABLE'); }
-  override clear(): void { throw new Error('PERSISTENT_ENTITY_COLLECTION_IMMUTABLE'); }
+  set(_key: string, _value: Value): this { throw new Error('PERSISTENT_ENTITY_COLLECTION_IMMUTABLE'); }
+  delete(_key: string): boolean { throw new Error('PERSISTENT_ENTITY_COLLECTION_IMMUTABLE'); }
+  clear(): void { throw new Error('PERSISTENT_ENTITY_COLLECTION_IMMUTABLE'); }
+  getOrInsert(_key: string, _defaultValue: Value): Value {
+    throw new Error('PERSISTENT_ENTITY_COLLECTION_IMMUTABLE');
+  }
+  getOrInsertComputed(_key: string, _callback: (key: string) => Value): Value {
+    throw new Error('PERSISTENT_ENTITY_COLLECTION_IMMUTABLE');
+  }
 }
 
 /** RAM-only dirty-key overlay. Rejection drops it; certification path-copies only changed branches. */
-export class EntityCollectionCandidateMap<Value> extends Map<string, Value> {
+export class EntityCollectionCandidateMap<Value> implements Map<string, Value> {
+  readonly [Symbol.toStringTag] = 'Map';
   readonly #base: PersistentEntityCollectionMap<Value>;
   readonly #forkValue: (value: Value) => Value;
   readonly #changes = new Map<string, Value>();
   readonly #deleted = new Set<string>();
   #projection: PersistentEntityCollectionMap<Value> | undefined;
+  #cleared = false;
   #sealed = false;
 
   constructor(source: ReadonlyMap<string, Value>, forkValue: (value: Value) => Value) {
-    super();
     this.#base = PersistentEntityCollectionMap.from(source);
     this.#forkValue = forkValue;
   }
 
-  override get size(): number {
+  get size(): number {
+    if (this.#cleared) return this.#changes.size;
     let size = this.#base.size - this.#deleted.size;
     for (const key of this.#changes.keys()) if (!this.#base.has(key)) size += 1;
     return size;
   }
 
-  override get(key: string): Value | undefined {
+  get(key: string): Value | undefined {
     this.#requireActive();
     if (this.#deleted.has(key)) return undefined;
     const changed = this.#changes.get(key);
     if (changed !== undefined) return changed;
-    return this.#base.get(key);
+    return this.#cleared ? undefined : this.#base.get(key);
   }
 
   /** Claim one exact leaf for mutation; ordinary reads never dirty the root. */
@@ -129,7 +145,7 @@ export class EntityCollectionCandidateMap<Value> extends Map<string, Value> {
     if (this.#deleted.has(key)) return undefined;
     const changed = this.#changes.get(key);
     if (changed !== undefined) return changed;
-    const committed = this.#base.get(key);
+    const committed = this.#cleared ? undefined : this.#base.get(key);
     if (committed === undefined) return undefined;
     const forked = this.#forkValue(committed);
     this.#changes.set(key, forked);
@@ -137,44 +153,64 @@ export class EntityCollectionCandidateMap<Value> extends Map<string, Value> {
     return forked;
   }
 
-  override has(key: string): boolean {
-    return !this.#deleted.has(key) && (this.#changes.has(key) || this.#base.has(key));
+  has(key: string): boolean {
+    return !this.#deleted.has(key) && (
+      this.#changes.has(key) || (!this.#cleared && this.#base.has(key))
+    );
   }
 
-  override set(key: string, value: Value): this {
+  set(key: string, value: Value): this {
     this.#requireActive();
     this.#deleted.delete(key);
     this.#changes.set(key, value);
     this.#projection = undefined;
     return this;
   }
+  getOrInsert(key: string, defaultValue: Value): Value {
+    const current = this.get(key);
+    if (current !== undefined || this.has(key)) return current as Value;
+    this.set(key, defaultValue);
+    return defaultValue;
+  }
+  getOrInsertComputed(key: string, callback: (key: string) => Value): Value {
+    const current = this.get(key);
+    if (current !== undefined || this.has(key)) return current as Value;
+    const value = callback(key);
+    this.set(key, value);
+    return value;
+  }
 
-  override delete(key: string): boolean {
+  delete(key: string): boolean {
     this.#requireActive();
     const existed = this.has(key);
     this.#changes.delete(key);
-    if (this.#base.has(key)) this.#deleted.add(key);
+    if (!this.#cleared && this.#base.has(key)) this.#deleted.add(key);
     this.#projection = undefined;
     return existed;
   }
 
-  override clear(): void {
+  clear(): void {
     this.#requireActive();
     this.#changes.clear();
-    for (const key of this.#base.keys()) this.#deleted.add(key);
+    this.#deleted.clear();
+    this.#cleared = true;
     this.#projection = undefined;
   }
 
-  override *entries(): MapIterator<[string, Value]> {
-    for (const [key, value] of this.#base) {
-      if (!this.#deleted.has(key)) yield [key, this.#changes.get(key) ?? value];
+  *entries(): MapIterator<[string, Value]> {
+    if (!this.#cleared) {
+      for (const [key, value] of this.#base) {
+        if (!this.#deleted.has(key)) yield [key, this.#changes.get(key) ?? value];
+      }
     }
-    for (const [key, value] of this.#changes) if (!this.#base.has(key)) yield [key, value];
+    for (const [key, value] of this.#changes) {
+      if (this.#cleared || !this.#base.has(key)) yield [key, value];
+    }
   }
-  override *keys(): MapIterator<string> { for (const [key] of this.entries()) yield key; }
-  override *values(): MapIterator<Value> { for (const [, value] of this.entries()) yield value; }
-  override [Symbol.iterator](): MapIterator<[string, Value]> { return this.entries(); }
-  override forEach(
+  *keys(): MapIterator<string> { for (const [key] of this.entries()) yield key; }
+  *values(): MapIterator<Value> { for (const [, value] of this.entries()) yield value; }
+  [Symbol.iterator](): MapIterator<[string, Value]> { return this.entries(); }
+  forEach(
     callback: (value: Value, key: string, map: Map<string, Value>) => void,
     thisArg?: unknown,
   ): void {
@@ -193,11 +229,14 @@ export class EntityCollectionCandidateMap<Value> extends Map<string, Value> {
 
   #project(): PersistentEntityCollectionMap<Value> {
     if (this.#projection) return this.#projection;
-    let projected = this.#base;
-    for (const key of this.#deleted) projected = projected.removed(key);
-    for (const [key, value] of this.#changes) projected = projected.updated(key, value);
-    this.#projection = projected;
-    return projected;
+    const mutations: RadixFoldMutation<string, Value>[] = [
+      ...[...this.#deleted].sort().map(key => ({ kind: 'delete' as const, key })),
+      ...[...this.#changes]
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+        .map(([key, value]) => ({ kind: 'put' as const, key, value })),
+    ];
+    this.#projection = this.#base.foldDirty(mutations, this.#cleared);
+    return this.#projection;
   }
 
   #requireActive(): void {
@@ -215,6 +254,14 @@ export const getEntityCollectionValueForWrite = <Value>(
   }
   return source.getForWrite(key);
 };
+
+/** Start an optional growing collection inside an already-owned Entity frame. */
+export const createEmptyEntityCollectionCandidate = <Value>(
+  forkValue: (value: Value) => Value,
+): EntityCollectionCandidateMap<Value> => new EntityCollectionCandidateMap(
+  PersistentEntityCollectionMap.empty<Value>(),
+  forkValue,
+);
 
 export const entityCollectionCommitment = <Value>(source: ReadonlyMap<string, Value>): Readonly<{
   radix: 16;

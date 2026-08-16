@@ -32,6 +32,7 @@ type RawBatch = {
 type RawDb = {
   get(key: Buffer): Promise<Buffer>;
   put?(key: Buffer, value: Buffer, options?: { sync?: boolean }): Promise<void>;
+  del?(key: Buffer, options?: { sync?: boolean }): Promise<void>;
   batch(): RawBatch;
   keys?(options?: { gte?: Buffer; lt?: Buffer; reverse?: boolean }): AsyncIterable<Buffer | Uint8Array | string>;
 };
@@ -428,28 +429,30 @@ const rebranchedBatch = (db: RawDb): RawBatch => {
  * node keys are derived only from the logical key plus their packed tree path;
  * content hashes verify values but never address them.
  */
-export const withRebranchedValues = <T extends RawDb>(db: T): T => new Proxy(db, {
-  get(target, property, receiver) {
-    if (property === 'get') return (key: Buffer) => readRebranchedValue(target, key);
-    if (property === 'put') {
-      return async (key: Buffer, value: Buffer, options?: { sync?: boolean }): Promise<void> => {
-        const batch = rebranchedBatch(target);
-        batch.put(key, value);
-        await batch.write(options);
-      };
-    }
-    if (property === 'del') {
-      return async (key: Buffer, options?: { sync?: boolean }): Promise<void> => {
-        const batch = rebranchedBatch(target);
-        batch.del!(key);
-        await batch.write(options);
-      };
-    }
-    if (property === 'batch') return () => rebranchedBatch(target);
-    if (property === 'keys') return (options?: { gte?: Buffer; lt?: Buffer; reverse?: boolean }) => logicalKeys(target, options);
-    const value = Reflect.get(target, property, receiver);
-    return typeof value === 'function' ? value.bind(target) : value;
+/**
+ * Explicit logical-value adapter. A Proxy made the storage contract depend on
+ * invisible property interception, so adding a RawDb method could silently
+ * bypass rebranching. The adapter intentionally exposes only the canonical
+ * logical database surface and delegates every mutation through one batch.
+ */
+export const withRebranchedValues = (db: RawDb): RawDb => ({
+  get: (key: Buffer): Promise<Buffer> => readRebranchedValue(db, key),
+  put: async (
+    key: Buffer,
+    value: Buffer,
+    options?: { sync?: boolean },
+  ): Promise<void> => {
+    const batch = rebranchedBatch(db);
+    batch.put(key, value);
+    await batch.write(options);
   },
+  del: async (key: Buffer, options?: { sync?: boolean }): Promise<void> => {
+    const batch = rebranchedBatch(db);
+    batch.del!(key);
+    await batch.write(options);
+  },
+  batch: (): RawBatch => rebranchedBatch(db),
+  keys: (options?: { gte?: Buffer; lt?: Buffer; reverse?: boolean }) => logicalKeys(db, options),
 });
 
 export const STORAGE_MAX_PHYSICAL_VALUE_BYTES = MAX_PHYSICAL_VALUE_BYTES;

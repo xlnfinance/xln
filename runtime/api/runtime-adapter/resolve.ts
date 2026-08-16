@@ -259,10 +259,8 @@ export type RuntimeAdapterFrameSummary = {
   frameHash?: string;
   postStateHash: string;
   stateHash: string;
-  hashMode?: RuntimeFrame['hashMode'];
   materializedState?: boolean;
   canonicalStateHash?: string;
-  entityHashes?: RuntimeFrame['entityHashes'];
   canonicalEntityHashes?: RuntimeFrame['canonicalEntityHashes'];
   runtimeInputCounts: {
     runtimeTxs: number;
@@ -1728,7 +1726,7 @@ const projectGraphFrame = async (
     runtimeId: capturedRuntimeId,
     height,
     timestamp,
-    stateHash: String(record?.stateHash || ''),
+    stateHash: String(record?.canonicalStateHash || ''),
     entities,
   };
   assertRuntimeAdapterGraphFrameWireBudget(frame);
@@ -1782,11 +1780,9 @@ const compactFrameRecordForRemote = (frame: RuntimeFrame): RuntimeAdapterFrameSu
     ...(frame.prevFrameHash ? { prevFrameHash: frame.prevFrameHash } : {}),
     ...(frame.frameHash ? { frameHash: frame.frameHash } : {}),
     postStateHash: frame.postStateHash,
-    stateHash: frame.stateHash,
-    ...(frame.hashMode ? { hashMode: frame.hashMode } : {}),
+    stateHash: frame.canonicalStateHash ?? '',
     ...(frame.materializedState !== undefined ? { materializedState: frame.materializedState } : {}),
     ...(frame.canonicalStateHash ? { canonicalStateHash: frame.canonicalStateHash } : {}),
-    ...(frame.entityHashes ? { entityHashes: frame.entityHashes } : {}),
     ...(frame.canonicalEntityHashes ? { canonicalEntityHashes: frame.canonicalEntityHashes } : {}),
     runtimeInputCounts: {
       runtimeTxs: runtimeInput.runtimeTxs?.length ?? 0,
@@ -1851,7 +1847,7 @@ const projectTimelineIndex = async (
       runtimeId,
       height: Math.max(1, Math.floor(Number(frame.height || 0))),
       timestamp,
-      stateHash: String(frame.stateHash || ''),
+      stateHash: String(frame.canonicalStateHash || ''),
       materialized: frame.materializedState === true,
       graphChanged: (frame.touchedEntities?.length ?? 0) > 0
         || (frame.touchedAccounts?.length ?? 0) > 0

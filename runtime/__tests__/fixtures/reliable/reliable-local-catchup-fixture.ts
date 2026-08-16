@@ -55,8 +55,9 @@ export const createCatchupFixtureState = (
   targetSignerId: string,
 ): EntityState => {
   const validators = [leaderSignerId, targetSignerId];
+  const entityId = generateLazyEntityId(validators, 2n).toLowerCase();
   return {
-    entityId: generateLazyEntityId(validators, 2n).toLowerCase(),
+    entityId,
     height: 0,
     timestamp: 0,
     nonces: new Map(),
@@ -68,7 +69,7 @@ export const createCatchupFixtureState = (
       shares: { [leaderSignerId]: 1n, [targetSignerId]: 1n },
     },
     reserves: new Map(),
-    accounts: PersistentEntityAccountMap.empty(computeEntityAccountValueHash),
+    accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
     deferredAccountProposals: new Map(),
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,

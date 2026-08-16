@@ -11,7 +11,7 @@ test('account consensus core uses structured logging only', () => {
     .join('\n');
 
   expect(source).toContain("createStructuredLogger('account')");
-  expect(source).toContain("accountLog.error('frame.commit.failed'");
+  expect(source).toContain("accountLog.debug('frame.commit.complete'");
   expect(source).toContain("preflightLog.warn('frame.prev_hash_mismatch'");
   expect(source).toContain("accountLog.warn('frame.state_root_mismatch'");
   expect(source).toContain("accountLog.debug('return.no_response'");

@@ -77,7 +77,7 @@ const makeGenesis = (env: RuntimeReplica, signerId: string): EntityState => {
       jurisdiction: lineageJurisdiction,
     },
     reserves: new Map(),
-    accounts: PersistentEntityAccountMap.empty(computeEntityAccountValueHash),
+    accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
     deferredAccountProposals: new Map(),
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,
@@ -213,7 +213,7 @@ const installCertifiedImportFixture = async (
   const certified = await certifyNextFrame(env, signerId, genesis, []);
   installReplica(env, signerId, certified.state, {
     anchor: genesisAnchor(genesis),
-    lineage: [certified.link],
+    head: certified.link,
   });
   return { env, signerId, state: certified.state };
 };
@@ -298,7 +298,7 @@ describe('certified Entity storage lineage', () => {
     ]);
     installReplica(env, signerId, certified.state, {
       anchor: genesisAnchor(genesis),
-      lineage: [certified.link],
+      head: certified.link,
     });
 
     const plan = buildCertifiedEntityLineagePlan(env);
@@ -321,7 +321,7 @@ describe('certified Entity storage lineage', () => {
     };
     genesis.entityId = generateLazyEntityId([signerId, observerId], 1n).toLowerCase();
     const certified = await certifyNextFrame(env, signerId, genesis, []);
-    const observerState = structuredClone(certified.state);
+    const observerState: EntityState = { ...certified.state };
     env.state.height = 100;
     env.state.eReplicas = new Map([
       [`${genesis.entityId}:${signerId}`, {
@@ -465,16 +465,18 @@ describe('certified Entity storage lineage', () => {
     const { env, signerId, genesis } = makeRuntime('storage-lineage-bounded-checkpoint');
     env.state.height = 20;
     let state = genesis;
-    const lineage: CertifiedEntityFrameLink[] = [];
+    const replica = installReplica(env, signerId, genesis, {
+      anchor: genesisAnchor(genesis),
+    });
     for (let height = 1; height <= 20; height += 1) {
       const certified = await certifyNextFrame(env, signerId, state, []);
       state = certified.state;
-      lineage.push(certified.link);
+      replica.state = certified.state;
+      replica.certifiedFrameHead = certified.link;
+      if (height < 20) {
+        applyCertifiedEntityLineagePlan(env, buildRuntimeCheckpointLineagePlan(env));
+      }
     }
-    const replica = installReplica(env, signerId, state, {
-      anchor: genesisAnchor(genesis),
-      lineage,
-    });
     const stateRootBefore = computeCanonicalEntityConsensusStateHash(state);
     const runtimeRootBefore = computeCanonicalStateHashFromEnv(env);
 
@@ -485,7 +487,7 @@ describe('certified Entity storage lineage', () => {
     expect(meta.certifiedFrameAnchor?.height).toBe(20);
     expect(meta.certifiedFrameAnchor?.frameHash).toBe(state.prevFrameHash);
     expect(meta.certifiedFrameAnchor?.stateRoot).toBe(stateRootBefore);
-    expect(computeCanonicalEntityConsensusStateHash(meta.state)).toBe(stateRootBefore);
+    expect('state' in meta).toBeFalse();
 
     replica.certifiedFrameAnchor = structuredClone(meta.certifiedFrameAnchor!);
     delete replica.certifiedFrameHead;
@@ -560,6 +562,9 @@ describe('certified Entity storage lineage', () => {
     expect(replica.certifiedFrameHead).toBeUndefined();
 
     const heightTwo = await certifyNextFrame(env, signerId, heightOne, []);
+    replica.state = heightTwo.state;
+    replica.certifiedFrameHead = heightTwo.link;
+    applyCertifiedEntityLineagePlan(env, buildRuntimeCheckpointLineagePlan(env));
     const heightThree = await certifyNextFrame(env, signerId, heightTwo.state, []);
     replica.state = heightThree.state;
     replica.certifiedFrameHead = heightThree.link;
@@ -663,7 +668,7 @@ describe('certified Entity storage lineage', () => {
     certified.link.frame.collectedSigs = new Map([[signerId, [`0x${'00'.repeat(65)}`]]]);
     installReplica(env, signerId, certified.state, {
       anchor: genesisAnchor(genesis),
-      lineage: [certified.link],
+      head: certified.link,
     });
 
     expect(() => buildCertifiedEntityLineagePlan(env))
@@ -675,9 +680,13 @@ describe('certified Entity storage lineage', () => {
     const certified = await certifyNextFrame(env, signerId, genesis, []);
     const conflictingVariant = structuredClone(certified.link);
     conflictingVariant.frame.hashesToSign![0]!.context = 'attacker-controlled-context';
-    installReplica(env, signerId, certified.state, {
+    const replica = installReplica(env, signerId, certified.state, {
       anchor: genesisAnchor(genesis),
-      lineage: [certified.link, conflictingVariant],
+      head: certified.link,
+    });
+    env.state.eReplicas.set(`${certified.state.entityId}:${signerId}:conflict`, {
+      ...replica,
+      certifiedFrameHead: conflictingVariant,
     });
 
     expect(() => buildCertifiedEntityLineagePlan(env))

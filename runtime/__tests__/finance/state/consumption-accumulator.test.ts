@@ -3,9 +3,9 @@ import { ethers } from 'ethers';
 
 import {
   EMPTY_CONSUMPTION_ROOT,
-  MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY,
   MAX_CONSUMPTION_PROOF_NODES,
   applyConsumptionOutput,
+  assertConsumptionAccumulatorState,
   createConsumptionProof,
   createEmptyConsumptionAccumulator,
   getConsumptionKey,
@@ -89,35 +89,14 @@ test('relationship storage depends on counterparties, never lifetime output coun
   expect(millionOutputs * 0n + oneRelationshipBytes).toBe(148n);
 });
 
-test('relationship cardinality has an atomic finite protocol boundary', () => {
-  const store = new Map<string, ConsumptionNode>();
-  let state = createEmptyConsumptionAccumulator();
-  const limit = Number(MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY);
-  const relationshipOutput = output(1);
-  for (let index = 0; index < limit; index += 1) {
-    const identity = { ...relationshipOutput, sourceEntityId: entity(index + 10) };
-    const applied = applyConsumptionOutput(
-      state,
-      identity,
-      createConsumptionProof(store, state.root, getConsumptionKey(identity)),
-    );
-    commitNodes(store, applied);
-    state = applied.state;
-  }
-  expect(state.count).toBe(MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY);
-  expect(store.size).toBe(limit * 2 - 1);
-
-  const rootBeforeReject = state.root;
-  const nodesBeforeReject = store.size;
-  const overflow = { ...relationshipOutput, sourceEntityId: entity(limit + 10) };
-  const proof = createConsumptionProof(store, state.root, getConsumptionKey(overflow));
-  expect(() => applyConsumptionOutput(state, overflow, proof))
-    .toThrow(`CONSUMPTION_RELATIONSHIP_LIMIT_EXCEEDED:${limit}:${limit}`);
-  expect(state.root).toBe(rootBeforeReject);
-  expect(store.size).toBe(nodesBeforeReject);
-  // This intentionally executes every authenticated insertion up to the hard
-  // protocol limit. The explicit ceiling keeps it exhaustive and performance-bounded.
-}, 15_000);
+test('relationship cardinality has no fixed Account-count ceiling', () => {
+  const uint64Max = (1n << 64n) - 1n;
+  expect(assertConsumptionAccumulatorState({
+    version: 1,
+    root: bytes32('77'),
+    count: uint64Max,
+  }).count).toBe(uint64Max);
+});
 
 test('exact retry and board-recertified retry are no-ops; stale and gap never mutate state', () => {
   const store = new Map<string, ConsumptionNode>();

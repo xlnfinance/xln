@@ -7,17 +7,24 @@ import {
   hashAccountJClaimNode,
   type AccountJClaimNode,
 } from '../../account/j-claims/j-claim-accumulator';
-import { docValueKey, liveKeyForDoc } from '../schema/doc-refs';
 import {
   computeStorageFrameHash,
   computeStoragePostStateHash,
   computeRuntimePostStateComponentDigests,
-  prepareStorageStateHashes,
 } from '../hashes';
+import { prepareLiveStateGraph } from '../commit/live-state-graph';
+import { prepareStorageBookGraphWrite } from '../commit/book-graph';
 import { computeStorageReplicaMetaDigest } from '../replica/replica-meta-digest';
 import { deleteKeyRange, iterateKeys } from './level';
 import {
   KEY_HEAD,
+  KEY_LIVE_ACCOUNT,
+  KEY_LIVE_ACCOUNT_BRANCH,
+  KEY_LIVE_ACCOUNT_LEAF,
+  KEY_LIVE_BOOK,
+  KEY_LIVE_BOOK_BRANCH,
+  KEY_LIVE_BOOK_LEAF,
+  KEY_LIVE_ENTITY,
   KEY_SNAPSHOT_ACCOUNT,
   KEY_SNAPSHOT_BOOK,
   KEY_SNAPSHOT_ENTITY,
@@ -30,6 +37,7 @@ import {
   keyConsumptionNode,
   keyAccountJClaimNode,
   keySnapshotManifest,
+  keySnapshotGraph,
 } from '../keys';
 import { readStorageFrameRecord, readStorageHead } from '../read/read';
 import { verifyStorageSnapshotIntegrity } from '../read/verify';
@@ -40,7 +48,6 @@ import { buildHistoryViewPuts } from '../history/history-view';
 import type {
   RuntimeDbLike,
   StorageDoc,
-  StorageEntityHashDoc,
   StorageFrameEntityHash,
   RuntimeFrame,
   StorageHead,
@@ -74,14 +81,24 @@ export type RestoredStorageBaseOptions = {
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
 };
 
-const snapshotKeyForDoc = (height: number, doc: StorageDoc): Buffer => {
-  const prefix =
-    doc.family === 'entity' ? KEY_SNAPSHOT_ENTITY : doc.family === 'account' ? KEY_SNAPSHOT_ACCOUNT : KEY_SNAPSHOT_BOOK;
-  return Buffer.concat([Buffer.from([prefix]), encodeHeight(height), liveKeyForDoc(doc).subarray(1)]);
-};
+type PhysicalRow = Readonly<{ key: Buffer; value: Buffer }>;
 
-const encodedDocValue = (doc: StorageDoc, prepared: Awaited<ReturnType<typeof prepareStorageStateHashes>>): Buffer =>
-  prepared.docValueBuffers.get(docValueKey(doc)) ?? encodeBuffer(doc.value);
+const snapshotKeyForLiveRow = (height: number, key: Buffer): Buffer => {
+  if (key[0] === KEY_LIVE_ENTITY) {
+    return Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height), key.subarray(1)]);
+  }
+  if (key[0] === KEY_LIVE_ACCOUNT) {
+    return Buffer.concat([Buffer.from([KEY_SNAPSHOT_ACCOUNT]), encodeHeight(height), key.subarray(1)]);
+  }
+  if (key[0] === KEY_LIVE_BOOK) {
+    return Buffer.concat([Buffer.from([KEY_SNAPSHOT_BOOK]), encodeHeight(height), key.subarray(1)]);
+  }
+  if (
+    key[0] === KEY_LIVE_ACCOUNT_BRANCH || key[0] === KEY_LIVE_ACCOUNT_LEAF ||
+    key[0] === KEY_LIVE_BOOK_BRANCH || key[0] === KEY_LIVE_BOOK_LEAF
+  ) return keySnapshotGraph(height, key);
+  throw new Error(`RECOVERY_IMPORT_LIVE_ROW_TAG_INVALID:${String(key[0])}`);
+};
 
 const invalidateCurrentCache = async (
   db: RuntimeDbLike,
@@ -104,16 +121,12 @@ const invalidateCurrentCache = async (
 
 const queueCurrentBody = (
   batch: ReturnType<RuntimeDbLike['batch']>,
-  docs: readonly StorageDoc[],
-  prepared: Awaited<ReturnType<typeof prepareStorageStateHashes>>,
+  rows: readonly PhysicalRow[],
   certifiedBoardNodes: readonly { key: Buffer; value: Buffer }[],
   consumptionNodes: readonly { key: Buffer; value: Buffer }[],
   accountJClaimNodes: readonly { key: Buffer; value: Buffer }[],
 ): void => {
-  void docs;
-  for (const key of prepared.docDels) batch.del(key);
-  for (const item of prepared.docPuts) batch.put(item.key, item.value);
-  for (const item of prepared.merklePuts) batch.put(item.key, item.value);
+  for (const item of rows) batch.put(item.key, item.value);
   for (const item of certifiedBoardNodes) batch.put(item.key, item.value);
   for (const item of consumptionNodes) batch.put(item.key, item.value);
   for (const item of accountJClaimNodes) batch.put(item.key, item.value);
@@ -121,12 +134,11 @@ const queueCurrentBody = (
 
 const buildSnapshotEntries = (
   height: number,
-  docs: readonly StorageDoc[],
-  prepared: Awaited<ReturnType<typeof prepareStorageStateHashes>>,
+  rows: readonly PhysicalRow[],
 ): Array<{ key: Buffer; value: Buffer }> =>
-  docs.map(doc => ({
-    key: snapshotKeyForDoc(height, doc),
-    value: encodedDocValue(doc, prepared),
+  rows.map(row => ({
+    key: snapshotKeyForLiveRow(height, row.key),
+    value: row.value,
   }));
 
 const buildSnapshotReplicaMetaEntries = (
@@ -242,6 +254,97 @@ const prepareCertifiedNodes = (
   return { certifiedBoardNodes, consumptionNodes, accountJClaimNodes };
 };
 
+type RestoreNodeRows = ReturnType<typeof prepareCertifiedNodes>;
+
+const publishNewHistoryBase = async (
+  options: RestoredStorageBaseOptions,
+  liveRows: readonly PhysicalRow[],
+  nodes: RestoreNodeRows,
+  replicaMetaDigest: string,
+  postStateHash: string,
+): Promise<void> => {
+  const snapshotEntries = buildSnapshotEntries(options.height, liveRows);
+  const snapshotReplicaMetaEntries = buildSnapshotReplicaMetaEntries(options.height, options.replicaMetas);
+  const runtimeMachineGraph = prepareRuntimeMachineGraphRows(options.height, options.runtimeMachine);
+  if (!runtimeMachineGraph.root) throw new Error('RECOVERY_IMPORT_RUNTIME_MACHINE_ROOT_MISSING');
+  const manifestEntry = {
+    key: keySnapshotManifest(options.height),
+    value: encodeBuffer({
+      height: options.height,
+      createdAt: options.timestamp,
+      docCount: snapshotEntries.length + snapshotReplicaMetaEntries.length,
+    } satisfies StorageSnapshotManifest),
+  };
+  const touchedAccounts = options.docs
+    .filter((doc): doc is Extract<StorageDoc, { family: 'account' }> => doc.family === 'account')
+    .map(doc => ({ entityId: doc.entityId, counterpartyId: doc.counterpartyId }));
+  const touchedBookEntities = Array.from(new Set(options.docs
+    .filter((doc): doc is Extract<StorageDoc, { family: 'book' }> => doc.family === 'book')
+    .map(doc => doc.entityId))).sort();
+  const frameBase: RuntimeFrame = {
+    height: options.height,
+    timestamp: options.timestamp,
+    prevFrameHash: ZERO_FRAME_HASH,
+    replicaMetaDigest,
+    replicaMetaCheckpoint: true,
+    replicaMetaStateMode: 'shared-entity-state',
+    postStateHash,
+    materializedState: true,
+    canonicalStateHash: options.canonicalStateHash,
+    canonicalEntityHashes: options.canonicalEntityHashes,
+    runtimeStateHash: options.canonicalStateHash,
+    runtimeMachineRoot: runtimeMachineGraph.root,
+    runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    touchedEntities: Array.from(new Set(options.docs.map(doc => doc.entityId))).sort(),
+    touchedAccounts,
+    touchedBookEntities,
+  };
+  const frame: RuntimeFrame = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
+  const frameEntry = { key: keyFrame(options.height), value: encodeBuffer(frame) };
+  const [activityEntry] = buildHistoryViewPuts({
+    height: options.height,
+    timestamp: options.timestamp,
+    runtimeInput: frame.runtimeInput,
+    logs: [],
+    touchedEntities: frame.touchedEntities,
+    touchedAccounts,
+    touchedBookEntities,
+  });
+  if (!activityEntry) throw new Error('RESTORE_RUNTIME_ACTIVITY_ENTRY_MISSING');
+  const durableRows = [
+    ...snapshotEntries,
+    ...snapshotReplicaMetaEntries,
+    manifestEntry,
+    frameEntry,
+    activityEntry,
+    ...options.replicaMetas,
+    ...nodes.certifiedBoardNodes,
+    ...nodes.consumptionNodes,
+    ...nodes.accountJClaimNodes,
+    ...runtimeMachineGraph.rows,
+    ...liveRows,
+  ];
+  const head: StorageHead = {
+    ...options.headConfig,
+    latestHeight: options.height,
+    latestMaterializedHeight: options.height,
+    latestSnapshotHeight: options.height,
+    epochReplayBytes: 0,
+    retainedHistoryBytes: entriesBytes(durableRows),
+  };
+  const walBatch = await queueHistoryReplacement(options.walDb, [
+    ...durableRows,
+    { key: KEY_HEAD, value: encodeBuffer(head) },
+  ]);
+  await writeBatch(walBatch, { sync: true });
+  await options.onPersistenceBoundary?.('after-restore-authoritative-swap');
+  await verifyStorageSnapshotIntegrity(options.walDb, head);
+  const currentHead = options.currentDb.batch();
+  currentHead.put(KEY_HEAD, encodeBuffer(head));
+  await writeBatch(currentHead);
+  await options.onPersistenceBoundary?.('after-restore-current-head');
+};
+
 /**
  * Publish a restored checkpoint without an empty-history window. The current
  * database is only a cache: its head is removed first, so every crash before
@@ -250,16 +353,29 @@ const prepareCertifiedNodes = (
  */
 export const replaceRestoredStorageBase = async (
   options: RestoredStorageBaseOptions,
-): Promise<{ entityHashDocs: Map<string, StorageEntityHashDoc> }> => {
+): Promise<void> => {
   assertUniqueReplicaMetas(options.replicaMetas);
-  const { certifiedBoardNodes, consumptionNodes, accountJClaimNodes } = prepareCertifiedNodes(options);
+  const nodes = prepareCertifiedNodes(options);
   const existing = await decideExistingHistory(options);
   await invalidateCurrentCache(options.currentDb, options.onPersistenceBoundary);
-  const prepared = await prepareStorageStateHashes({
+  const liveStateGraph = await prepareLiveStateGraph({
     db: options.currentDb,
     puts: options.docs,
     dels: [],
   });
+  const bookRows: PhysicalRow[] = [];
+  for (const doc of options.docs) {
+    if (doc.family !== 'book') continue;
+    const planned = await prepareStorageBookGraphWrite({
+      db: options.currentDb,
+      entityId: doc.entityId,
+      pairId: doc.pairId,
+      next: doc.value,
+    });
+    if (planned.dels.length > 0) throw new Error('RECOVERY_IMPORT_UNEXPECTED_BOOK_DELETIONS');
+    bookRows.push(...planned.puts);
+  }
+  const liveRows = [...liveStateGraph.puts, ...bookRows];
   const replicaMetaDigest = computeStorageReplicaMetaDigest(options.replicaMetas);
   const postStateHash = computeStoragePostStateHash({
     height: options.height,
@@ -272,16 +388,19 @@ export const replaceRestoredStorageBase = async (
   });
 
   const currentBody = options.currentDb.batch();
-  queueCurrentBody(currentBody, options.docs, prepared, certifiedBoardNodes, consumptionNodes, accountJClaimNodes);
+  queueCurrentBody(
+    currentBody,
+    liveRows,
+    nodes.certifiedBoardNodes,
+    nodes.consumptionNodes,
+    nodes.accountJClaimNodes,
+  );
   await writeBatch(currentBody);
   await options.onPersistenceBoundary?.('after-restore-current-body');
 
   if (existing.kind === 'idempotent') {
-    if (prepared.stateHash !== existing.frame.stateHash) {
-      throw new Error(
-        `RECOVERY_IMPORT_SAME_HEIGHT_STORAGE_HASH_CONFLICT:height=${options.height}:` +
-          `existingHash=${existing.frame.stateHash}:candidateHash=${prepared.stateHash}`,
-      );
+    if (existing.frame.canonicalStateHash !== options.canonicalStateHash) {
+      throw new Error(`RECOVERY_IMPORT_SAME_HEIGHT_CANONICAL_HASH_CONFLICT:height=${options.height}`);
     }
     if (postStateHash !== existing.frame.postStateHash) {
       throw new Error(
@@ -293,112 +412,9 @@ export const replaceRestoredStorageBase = async (
     currentHead.put(KEY_HEAD, encodeBuffer(existing.head));
     await writeBatch(currentHead);
     await options.onPersistenceBoundary?.('after-restore-current-head');
-    return { entityHashDocs: prepared.entityHashDocs };
+    return;
   }
 
-  const snapshotEntries = buildSnapshotEntries(options.height, options.docs, prepared);
-  const snapshotReplicaMetaEntries = buildSnapshotReplicaMetaEntries(options.height, options.replicaMetas);
-  const runtimeMachineGraph = prepareRuntimeMachineGraphRows(
-    options.height,
-    options.runtimeMachine,
-  );
-  if (!runtimeMachineGraph.root) {
-    throw new Error('RECOVERY_IMPORT_RUNTIME_MACHINE_ROOT_MISSING');
-  }
-  const manifestEntry = {
-    key: keySnapshotManifest(options.height),
-    value: encodeBuffer({
-      height: options.height,
-      createdAt: options.timestamp,
-      docCount: snapshotEntries.length + snapshotReplicaMetaEntries.length,
-    } satisfies StorageSnapshotManifest),
-  };
-  const frameBase: RuntimeFrame = {
-    height: options.height,
-    timestamp: options.timestamp,
-    prevFrameHash: ZERO_FRAME_HASH,
-    replicaMetaDigest,
-    replicaMetaCheckpoint: true,
-    replicaMetaStateMode: 'shared-entity-state',
-    postStateHash,
-    stateHash: prepared.stateHash,
-    hashMode: 'storage-merkle-v1',
-    materializedState: true,
-    entityHashes: prepared.entityHashes,
-    canonicalStateHash: options.canonicalStateHash,
-    canonicalEntityHashes: options.canonicalEntityHashes,
-    runtimeStateHash: options.canonicalStateHash,
-    runtimeMachineRoot: runtimeMachineGraph.root,
-    runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    touchedEntities: Array.from(new Set(options.docs.map(doc => doc.entityId))).sort(),
-    touchedAccounts: options.docs
-      .filter((doc): doc is Extract<StorageDoc, { family: 'account' }> => doc.family === 'account')
-      .map(doc => ({ entityId: doc.entityId, counterpartyId: doc.counterpartyId })),
-    touchedBookEntities: Array.from(
-      new Set(
-        options.docs
-          .filter((doc): doc is Extract<StorageDoc, { family: 'book' }> => doc.family === 'book')
-          .map(doc => doc.entityId),
-      ),
-    ).sort(),
-  };
-  const frame: RuntimeFrame = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
-  const frameEntry = { key: keyFrame(options.height), value: encodeBuffer(frame) };
-  const [activityEntry] = buildHistoryViewPuts({
-    height: options.height,
-    timestamp: options.timestamp,
-    runtimeInput: frame.runtimeInput,
-    logs: [],
-    touchedEntities: frame.touchedEntities,
-    touchedAccounts: frame.touchedAccounts,
-    touchedBookEntities: frame.touchedBookEntities,
-  });
-  if (!activityEntry) throw new Error('RESTORE_RUNTIME_ACTIVITY_ENTRY_MISSING');
-  const retainedHistoryBytes = entriesBytes([
-    ...snapshotEntries,
-    ...snapshotReplicaMetaEntries,
-    manifestEntry,
-    frameEntry,
-    activityEntry,
-    ...options.replicaMetas,
-    ...certifiedBoardNodes,
-    ...consumptionNodes,
-    ...accountJClaimNodes,
-    ...runtimeMachineGraph.rows,
-  ]);
-  const head: StorageHead = {
-    ...options.headConfig,
-    latestHeight: options.height,
-    latestMaterializedHeight: options.height,
-    latestSnapshotHeight: options.height,
-    epochReplayBytes: 0,
-    retainedHistoryBytes,
-  };
-  const walEntries = [
-    ...snapshotEntries,
-    ...snapshotReplicaMetaEntries,
-    manifestEntry,
-    frameEntry,
-    activityEntry,
-    ...options.replicaMetas,
-    ...certifiedBoardNodes,
-    ...consumptionNodes,
-    ...accountJClaimNodes,
-    ...runtimeMachineGraph.rows,
-    { key: KEY_HEAD, value: encodeBuffer(head) },
-  ];
-  const walBatch = await queueHistoryReplacement(options.walDb, walEntries);
-  // This swap establishes the authoritative restore point. Match the normal
-  // Runtime WAL commit boundary explicitly; process exit after this await must
-  // never acknowledge bytes that only reached an OS cache.
-  await writeBatch(walBatch, { sync: true });
-  await options.onPersistenceBoundary?.('after-restore-authoritative-swap');
-  await verifyStorageSnapshotIntegrity(options.walDb, head);
-
-  const currentHead = options.currentDb.batch();
-  currentHead.put(KEY_HEAD, encodeBuffer(head));
-  await writeBatch(currentHead);
-  await options.onPersistenceBoundary?.('after-restore-current-head');
-  return { entityHashDocs: prepared.entityHashDocs };
+  await publishNewHistoryBase(options, liveRows, nodes, replicaMetaDigest, postStateHash);
 };
 import { Buffer } from '../../infra/platform-crypto';

@@ -42,7 +42,7 @@ const makeState = (): EntityState => ({
   proposals: new Map(),
   config: makeConfig(),
   reserves: new Map(),
-  accounts: PersistentEntityAccountMap.empty(computeEntityAccountValueHash),
+  accounts: PersistentEntityAccountMap.empty(HUB, computeEntityAccountValueHash),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   profile: { name: 'Hub', isHub: true, avatar: '', bio: '', website: '' },

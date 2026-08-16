@@ -11,7 +11,6 @@ import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j
 import { LIMITS } from '../../../config/constants';
 import { createOrderbookExtState, DEFAULT_SPREAD_DISTRIBUTION } from '../../../orderbook';
 import { applyEntityInput } from '../../../entity/consensus';
-import { assertEntityAccountInsertionCapacity } from '../../../entity/account/account-capacity';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../../../entity/factory';
 import { provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 import { isLeftEntity } from '../../../entity/id';
@@ -113,54 +112,9 @@ const makeState = (): EntityState => ({
   lockBook: new Map(),
 });
 
-const fillAccounts = (state: EntityState, count: number): void => {
-  const account = makeAccount();
-  for (let index = 0; index < count; index += 1) {
-    state.accounts.set(`account-${index}`, account);
-  }
-};
-
 const memoTx = (index: number): AccountTx => ({
   type: 'add_delta',
   data: { tokenId: index + 1 },
-});
-
-test('Entity validation and storage hydration reject more than MAX_ACCOUNTS_PER_ENTITY', () => {
-  const state = makeState();
-  fillAccounts(state, LIMITS.MAX_ACCOUNTS_PER_ENTITY + 1);
-  expect(() => validateEntityState(state, 'oversizedEntity')).toThrow(
-    'ENTITY_ACCOUNT_LIMIT_EXCEEDED',
-  );
-
-  const core = projectEntityCoreDoc(makeState());
-  const accountDoc = projectAccountDoc(makeAccount());
-  const storedAccounts = new Map(
-    Array.from({ length: LIMITS.MAX_ACCOUNTS_PER_ENTITY + 1 }, (_, index) => [
-      `stored-${index}`,
-      accountDoc,
-    ]),
-  );
-  expect(() => hydrateEntityStateFromStorage({ core, accounts: storedAccounts, books: new Map() }))
-    .toThrow('ENTITY_ACCOUNT_LIMIT_EXCEEDED');
-});
-
-test('Entity validation and storage hydration reject an unbounded generic output frontier', () => {
-  const sequences = new Map(Array.from(
-    { length: LIMITS.MAX_ACCOUNTS_PER_ENTITY + 1 },
-    (_, index) => [
-      `0x${BigInt(index + 1).toString(16).padStart(64, '0')}`,
-      { lastSequence: 1n, lastSemanticHash: `0x${'66'.repeat(32)}` },
-    ],
-  ));
-  const state = { ...makeState(), certifiedOutputSequences: sequences };
-  expect(() => validateEntityState(state, 'oversizedOutputFrontier')).toThrow(
-    `certifiedOutputSequences exceeds ${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-  );
-  expect(() => hydrateEntityStateFromStorage({
-    core: { ...projectEntityCoreDoc(makeState()), certifiedOutputSequences: sequences },
-    accounts: new Map(),
-    books: new Map(),
-  })).toThrow('STORAGE_CERTIFIED_OUTPUT_RELATIONSHIP_LIMIT_EXCEEDED');
 });
 
 test('storage hydration rejects an orderbook projection without its exact hub policy', () => {
@@ -197,49 +151,6 @@ test('storage boundary rejects malformed committed orderbook pair dimensions', (
   });
   expect(() => validateStorageEntityCoreDocValue(core))
     .toThrow('STORAGE_ENTITY_DOC_INVALID_ORDERBOOK_PAIR_DIMENSIONS_baseTokenDecimals');
-});
-
-test('account capacity uses the canonical counterparty key directly', () => {
-  const accounts = new Map<string, unknown>();
-  for (let index = 0; index < LIMITS.MAX_ACCOUNTS_PER_ENTITY; index += 1) {
-    accounts.set(`account-${index}`, {});
-  }
-  accounts.delete('account-0');
-  accounts.set(counterpartyId, {});
-
-  expect(assertEntityAccountInsertionCapacity(accounts, counterpartyId, 'replacement')).toBe(false);
-  expect(() => assertEntityAccountInsertionCapacity(accounts, `0x${'99'.repeat(32)}`, 'new'))
-    .toThrow('ENTITY_ACCOUNT_LIMIT_EXCEEDED');
-  expect(accounts).toHaveLength(LIMITS.MAX_ACCOUNTS_PER_ENTITY);
-});
-
-test('local account opening rejects capacity overflow before cloning or insertion', () => {
-  const state = makeState();
-  fillAccounts(state, LIMITS.MAX_ACCOUNTS_PER_ENTITY);
-  const env = createEmptyEnv('local-account-capacity');
-  env.state.eReplicas.set(`${counterpartyId}:peer`, {
-    entityId: counterpartyId,
-    signerId: 'peer',
-    entityEncPubKey: '',
-    isProposer: true,
-    mempool: [],
-    state: { ...makeState(), entityId: counterpartyId },
-  } as EntityReplica);
-
-  expect(() => handleOpenAccountEntityTx(state, {
-    type: 'openAccount',
-    data: {
-      targetEntityId: counterpartyId,
-      watchSeed,
-      accountDomain: {
-        chainId: jurisdiction.chainId,
-        depositoryAddress: jurisdiction.depositoryAddress,
-      },
-      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-    },
-  }, createAccountConsensusContext(env))).toThrow('ENTITY_ACCOUNT_LIMIT_EXCEEDED');
-  expect(state.accounts.size).toBe(LIMITS.MAX_ACCOUNTS_PER_ENTITY);
-  expect(state.accounts.has(counterpartyId)).toBe(false);
 });
 
 test('ordinary openAccount cannot replace a permanently disputed Account', async () => {
@@ -321,47 +232,6 @@ test('settlements update Entity reserve without filling a permanently closed Acc
   expect(accountTxs).toEqual([]);
   expect(dirtyAccounts.size).toBe(0);
   expect(finalized.mempool).toEqual([]);
-});
-
-test('inbound peer capacity overflow is a deterministic no-op', async () => {
-  const state = makeState();
-  fillAccounts(state, LIMITS.MAX_ACCOUNTS_PER_ENTITY);
-  const env = createEmptyEnv('inbound-account-capacity');
-  env.state.eReplicas.set(`${counterpartyId}:peer`, {
-    entityId: counterpartyId,
-    signerId: 'peer',
-    entityEncPubKey: '',
-    isProposer: true,
-    mempool: [],
-    state: { ...makeState(), entityId: counterpartyId },
-  } as EntityReplica);
-
-  await applyAccountInputToEntity(state, {
-    kind: 'frame',
-    fromEntityId: counterpartyId,
-    toEntityId: entityId,
-    domain: {
-      chainId: jurisdiction.chainId,
-      depositoryAddress: jurisdiction.depositoryAddress,
-    },
-    watchSeed,
-    proposal: {
-      frame: {
-        height: 1,
-        timestamp: state.timestamp,
-        jHeight: 0,
-        accountTxs: [],
-        prevFrameHash: 'genesis',
-        accountStateRoot: `0x${'66'.repeat(32)}`,
-        stateHash: `0x${'77'.repeat(32)}`,
-        byLeft: false,
-        deltas: [],
-      },
-      frameHanko: `0x${'88'.repeat(65)}`,
-    },
-  }, env, createAccountConsensusContext(env));
-  expect(state.accounts.size).toBe(LIMITS.MAX_ACCOUNTS_PER_ENTITY);
-  expect(state.accounts.has(counterpartyId)).toBe(false);
 });
 
 test('only an accepted signed genesis can reserve an Account slot', async () => {

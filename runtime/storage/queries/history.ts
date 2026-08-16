@@ -377,7 +377,7 @@ export const readAccountSwapHistoryPage = async (
   };
 };
 
-export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
+const createFrameHistoryQueries = (deps: PersistenceQueryDeps) => {
   const readPersistedFrameJournal = async (
     env: RuntimeReplica,
     height: number,
@@ -412,61 +412,80 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     }>,
   ) => readAccountSwapHistoryPage(deps, env, entityId, counterpartyId, options);
 
-  const readPersistedEntityFrameHistory = async (
-    env: RuntimeReplica,
-    entityId: string,
-    limit = 50,
-    opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
-  ): Promise<CertifiedEntityFrameLink[]> => {
-    await requireStorageDbOpen(
-      () => deps.tryOpenRuntimeWalDb(env),
-      'runtime-wal:certified-entity-frames',
-    );
-    const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
-      ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
-      : Number.POSITIVE_INFINITY;
-    const maxEntityHeight = Number.isFinite(Number(opts?.maxEntityHeight))
-      ? Math.max(0, Math.floor(Number(opts?.maxEntityHeight)))
-      : Number.POSITIVE_INFINITY;
-    const records = await readHistoryViewEntityFrames(deps.getRuntimeWalDb(env), entityId, {
-      limit: Math.max(1, Math.min(1000, Math.floor(Number(limit || 50)))),
-      ...(Number.isSafeInteger(maxRuntimeHeight) ? { maxRuntimeHeight } : {}),
-      ...(Number.isSafeInteger(maxEntityHeight) ? { maxEntityHeight } : {}),
-    });
-    return records.map((record) => structuredClone(record.link));
+  return {
+    readPersistedFrameJournal,
+    readPersistedRuntimeActivityJournal,
+    readPersistedAccountFrameHistory,
+    readPersistedAccountSwapHistoryPage,
   };
+};
 
-  const readPersistedFrameJournals = async (
-    env: RuntimeReplica,
-    opts?: { fromHeight?: number; toHeight?: number; limit?: number },
-  ): Promise<PersistedFrameJournal[]> => {
-    const latestHeight = await deps.resolvePersistedLatestHeight(env);
-    if (latestHeight <= 0) return [];
-    const fromHeight = Math.max(1, Math.floor(opts?.fromHeight ?? 1));
-    const toHeight = Math.min(
-      latestHeight,
-      Math.max(fromHeight, Math.floor(opts?.toHeight ?? latestHeight)),
-    );
-    const pageToHeight = Math.min(
-      toHeight,
-      fromHeight + Math.max(1, Math.min(10_000, Math.floor(opts?.limit ?? 200))) - 1,
-    );
-    const receipts: PersistedFrameJournal[] = [];
-    for (let height = fromHeight; height <= pageToHeight; height += 1) {
-      const receipt = await readPersistedFrameJournal(env, height);
-      if (receipt) receipts.push(receipt);
-    }
-    return receipts;
-  };
+const readPersistedEntityFrameHistory = async (
+  deps: PersistenceQueryDeps,
+  env: RuntimeReplica,
+  entityId: string,
+  limit = 50,
+  opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
+): Promise<CertifiedEntityFrameLink[]> => {
+  await requireStorageDbOpen(
+    () => deps.tryOpenRuntimeWalDb(env),
+    'runtime-wal:certified-entity-frames',
+  );
+  const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
+    ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
+    : Number.POSITIVE_INFINITY;
+  const maxEntityHeight = Number.isFinite(Number(opts?.maxEntityHeight))
+    ? Math.max(0, Math.floor(Number(opts?.maxEntityHeight)))
+    : Number.POSITIVE_INFINITY;
+  const records = await readHistoryViewEntityFrames(deps.getRuntimeWalDb(env), entityId, {
+    limit: Math.max(1, Math.min(1000, Math.floor(Number(limit || 50)))),
+    ...(Number.isSafeInteger(maxRuntimeHeight) ? { maxRuntimeHeight } : {}),
+    ...(Number.isSafeInteger(maxEntityHeight) ? { maxEntityHeight } : {}),
+  });
+  return records.map((record) => structuredClone(record.link));
+};
 
-  const readPersistedRuntimeActivityPage = async (
+const readPersistedFrameJournals = async (
+  deps: PersistenceQueryDeps,
+  readPersistedFrameJournal: (
     env: RuntimeReplica,
-    opts: RuntimeActivityFilters & {
-      beforeHeight?: number | undefined;
-      limit?: number | undefined;
-      scanLimit?: number | undefined;
-    } = {},
-  ): Promise<PersistedRuntimeActivityPage> => {
+    height: number,
+  ) => Promise<PersistedFrameJournal | null>,
+  env: RuntimeReplica,
+  opts?: { fromHeight?: number; toHeight?: number; limit?: number },
+): Promise<PersistedFrameJournal[]> => {
+  const latestHeight = await deps.resolvePersistedLatestHeight(env);
+  if (latestHeight <= 0) return [];
+  const fromHeight = Math.max(1, Math.floor(opts?.fromHeight ?? 1));
+  const toHeight = Math.min(
+    latestHeight,
+    Math.max(fromHeight, Math.floor(opts?.toHeight ?? latestHeight)),
+  );
+  const pageToHeight = Math.min(
+    toHeight,
+    fromHeight + Math.max(1, Math.min(10_000, Math.floor(opts?.limit ?? 200))) - 1,
+  );
+  const receipts: PersistedFrameJournal[] = [];
+  for (let height = fromHeight; height <= pageToHeight; height += 1) {
+    const receipt = await readPersistedFrameJournal(env, height);
+    if (receipt) receipts.push(receipt);
+  }
+  return receipts;
+};
+
+const readPersistedRuntimeActivityPage = async (
+  deps: PersistenceQueryDeps,
+  readPersistedRuntimeActivityJournal: (
+    env: RuntimeReplica,
+    height: number,
+  ) => Promise<(PersistedActivityJournal & { logs: FrameLogEntry[] }) | null>,
+  env: RuntimeReplica,
+  opts: RuntimeActivityFilters & {
+    beforeHeight?: number | undefined;
+    limit?: number | undefined;
+    scanLimit?: number | undefined;
+  } = {},
+): Promise<PersistedRuntimeActivityPage> => {
     const latestHeight = await deps.resolvePersistedLatestHeight(env);
     const limit = Math.max(1, Math.min(500, Math.floor(Number(opts.limit ?? 100))));
     const scanLimit = Math.max(1, Math.min(1000, Math.floor(Number(opts.scanLimit ?? 100))));
@@ -527,15 +546,35 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
       filters: opts,
       events: returned,
     };
-  };
+};
+
+export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
+  const frameQueries = createFrameHistoryQueries(deps);
 
   return {
-    readPersistedFrameJournal,
-    readPersistedRuntimeActivityJournal,
-    readPersistedAccountFrameHistory,
-    readPersistedAccountSwapHistoryPage,
-    readPersistedEntityFrameHistory,
-    readPersistedFrameJournals,
-    readPersistedRuntimeActivityPage,
+    ...frameQueries,
+    readPersistedEntityFrameHistory: (
+      env: RuntimeReplica,
+      entityId: string,
+      limit = 50,
+      opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
+    ) => readPersistedEntityFrameHistory(deps, env, entityId, limit, opts),
+    readPersistedFrameJournals: (
+      env: RuntimeReplica,
+      opts?: { fromHeight?: number; toHeight?: number; limit?: number },
+    ) => readPersistedFrameJournals(deps, frameQueries.readPersistedFrameJournal, env, opts),
+    readPersistedRuntimeActivityPage: (
+      env: RuntimeReplica,
+      opts: RuntimeActivityFilters & {
+        beforeHeight?: number | undefined;
+        limit?: number | undefined;
+        scanLimit?: number | undefined;
+      } = {},
+    ) => readPersistedRuntimeActivityPage(
+      deps,
+      frameQueries.readPersistedRuntimeActivityJournal,
+      env,
+      opts,
+    ),
   };
 };

@@ -228,7 +228,11 @@ const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, 
     newState: result.newState,
     outputs: result.outputs,
     accountTxs: result.accountTxs,
-    accountChanges: [entityTx.data.fromEntityId],
+    // Rejected unknown-peer genesis never created an Account. Marking it dirty
+    // made Hanko seal look up a missing leaf and halt the next honest frame.
+    accountChanges: result.newState.accounts.has(entityTx.data.fromEntityId)
+      ? [entityTx.data.fromEntityId]
+      : [],
     candidateEffects: result.candidateEffects,
     swapOffersCreated: result.swapOffersCreated,
     swapCancelRequests: result.swapCancelRequests,

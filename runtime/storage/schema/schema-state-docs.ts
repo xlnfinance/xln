@@ -360,9 +360,6 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
 const validateSettlementContinuations = (value: unknown, code: string): void => {
   if (value === undefined) return;
   const continuations = requireStorageMap(value, `${code}_SETTLEMENT_CONTINUATIONS`);
-  if (continuations.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
-    throw new Error(`${code}_SETTLEMENT_CONTINUATIONS_LIMIT`);
-  }
   for (const [accountId, continuation] of continuations) {
     if (!/^0x[0-9a-f]{64}$/.test(String(accountId))) {
       throw new Error(`${code}_SETTLEMENT_CONTINUATION_ACCOUNT_ID`);
@@ -376,7 +373,6 @@ const validateSettlementContinuations = (value: unknown, code: string): void => 
 const validateDeferredAccountProposals = (value: unknown, code: string): void => {
   if (value === undefined) return;
   const proposals = requireStorageMap(value, `${code}_DEFERRED_ACCOUNTS`);
-  if (proposals.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) throw new Error(`${code}_DEFERRED_ACCOUNTS_LIMIT`);
   for (const [accountId, workspaceHash] of proposals) {
     if (!/^0x[0-9a-f]{64}$/.test(String(accountId))) throw new Error(`${code}_DEFERRED_ACCOUNT_ID`);
     if (!/^0x[0-9a-f]{64}$/.test(String(workspaceHash))) throw new Error(`${code}_DEFERRED_WORKSPACE_HASH`);

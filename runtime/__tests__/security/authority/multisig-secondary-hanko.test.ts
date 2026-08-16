@@ -37,7 +37,6 @@ import { handleExtendCreditEntityTx } from '../../../entity/tx/handlers/account/
 import { buildQuorumHanko, verifyHankoForHash } from '../../../hanko/signing';
 import { createEmptyEnv } from '../../../runtime';
 import { safeStringify } from '../../../protocol/serialization';
-import { LIMITS } from '../../../config/constants';
 import {
   hydrateEntityStateFromStorage,
   projectAccountDoc,
@@ -64,7 +63,6 @@ import { PersistentAccountStateMap } from '../../../account/state/persistent-sta
 import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
 import {
   createEntityFrameCandidateState,
-  cloneEntityState,
 } from '../../../entity/state-clone';
 import {
   getEntityAccountForWrite,
@@ -783,9 +781,10 @@ describe('multisig secondary Hanko production', () => {
     expect(buildCertifiedEntityOutputHashes(setup.state, setup.env, 1, digest('d'), realTrigger)).toEqual([]);
   });
 
-  test('bounds generic source target frontiers while allowing an existing relationship to advance', () => {
+  test('generic source target frontiers have no fixed Account-count ceiling', () => {
     const setup = createMultisigAccountState(validators[0]);
-    const frontierEntries = Array.from({ length: LIMITS.MAX_ACCOUNTS_PER_ENTITY }, (_, index) => [
+    const relationshipCount = 1_001;
+    const frontierEntries = Array.from({ length: relationshipCount }, (_, index) => [
       `0x${BigInt(index + 1).toString(16).padStart(64, '0')}`,
       { lastSequence: 1n, lastSemanticHash: digest('a') },
     ] as const);
@@ -801,20 +800,19 @@ describe('multisig secondary Hanko production', () => {
       entityTxs: existingPayload,
     }];
     const advanced = assignCertifiedOutputIdentities(fullState, advancedOutputs);
-    expect(advanced.certifiedOutputSequences?.size).toBe(LIMITS.MAX_ACCOUNTS_PER_ENTITY);
+    expect(advanced.certifiedOutputSequences?.size).toBe(relationshipCount);
     expect(advanced.certifiedOutputSequences?.get(existingTarget)?.lastSequence).toBe(2n);
 
-    const newTarget = `0x${BigInt(LIMITS.MAX_ACCOUNTS_PER_ENTITY + 1).toString(16).padStart(64, '0')}`;
-    const overflowOutputs: EntityInput[] = [{
+    const newTarget = `0x${BigInt(relationshipCount + 1).toString(16).padStart(64, '0')}`;
+    const newRelationshipOutputs: EntityInput[] = [{
       entityId: newTarget,
       signerId: validators[0]!,
       entityTxs: [buildUnverifiedBoardResealTx(setup.entityId, newTarget)],
     }];
-    expect(() => assignCertifiedOutputIdentities(fullState, overflowOutputs)).toThrow(
-      `CONSENSUS_OUTPUT_SOURCE_RELATIONSHIP_LIMIT_EXCEEDED:` +
-      `${LIMITS.MAX_ACCOUNTS_PER_ENTITY}:${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-    );
-    expect(fullState.certifiedOutputSequences?.size).toBe(LIMITS.MAX_ACCOUNTS_PER_ENTITY);
+    const expanded = assignCertifiedOutputIdentities(fullState, newRelationshipOutputs);
+    expect(expanded.certifiedOutputSequences?.size).toBe(relationshipCount + 1);
+    expect(expanded.certifiedOutputSequences?.get(newTarget)?.lastSequence).toBe(1n);
+    expect(fullState.certifiedOutputSequences?.size).toBe(relationshipCount);
   });
 
   test('outbound proposals expose no proposer state or entity encryption secret', async () => {
@@ -1293,7 +1291,7 @@ describe('multisig secondary Hanko production', () => {
       entityId: targetEntityId,
       signerId: targetValidators[0]!,
       entityEncPubKey: '',
-      state: cloneEntityState(targetTemplate),
+      state: createEntityFrameCandidateState(targetTemplate),
       mempool: [],
       isProposer: true,
     };
@@ -1301,7 +1299,7 @@ describe('multisig secondary Hanko production', () => {
       entityId: targetEntityId,
       signerId: targetValidators[1]!,
       entityEncPubKey: '',
-      state: cloneEntityState(targetTemplate),
+      state: createEntityFrameCandidateState(targetTemplate),
       mempool: [],
       isProposer: false,
     };

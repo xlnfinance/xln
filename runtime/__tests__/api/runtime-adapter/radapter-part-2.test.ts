@@ -5,6 +5,7 @@ import { createHmac } from 'crypto';
 import { computeAddress, hexlify, keccak256, recoverAddress, SigningKey, toUtf8Bytes } from 'ethers';
 
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 import {
   deriveRuntimeAdapterCapabilityToken,
@@ -52,8 +53,6 @@ import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
 
 import { prepareAccountStorageLayout } from '../../../storage/schema/account-layout';
 
-import { MAX_PERSISTED_MERKLE_NODE_BYTES, prepareStorageStateHashes } from '../../../storage/hashes';
-
 import { verifyLiveStorageIntegrity } from '../../../storage/read/live-integrity';
 
 import {
@@ -62,9 +61,6 @@ import {
   hexBytes,
   keyLiveAccount,
   keyLiveEntity,
-  keyMerkleBranchPrefix,
-  keyMerkleLeafPrefix,
-  keyMerkleRoot,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
   keySnapshotEntity,
@@ -75,8 +71,6 @@ import {
 
 import { projectAccountDoc, projectEntityCoreDoc, projectEntityReplicaCoreView } from '../../../storage/read/projections';
 
-import { withRebranchedValues } from '../../../storage/database/rebranched-db';
-
 import {
   loadEntityAccountDocFromStorage,
   loadEntityStateFromStorage,
@@ -85,15 +79,12 @@ import {
 
 import type {
   RuntimeDbLike,
-  StorageEntityHashDoc,
   RuntimeFrame,
   StorageHead,
-  StorageMerkleLeafDoc,
-  StorageMerkleRootDoc,
   StorageSnapshotManifest,
 } from '../../../storage/types';
 
-import type { AccountTx, Delta } from '../../../types/account';
+import type { AccountReplica, AccountTx, Delta } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityReplica } from '../../../entity/types';
 import type { RuntimeReplica, RuntimeInput } from '../../../runtime/types';
@@ -239,6 +230,34 @@ const makeEnv = (): RuntimeReplica =>
       loopActive: true,
     },
   }) as RuntimeReplica;
+
+/** The canonical storage graph accepts only committed Patricia collections. */
+const prepareAccountFixtureForGraph = (account: AccountReplica): AccountReplica => {
+  account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', account.state.deltas);
+  account.state.locks = PersistentAccountStateMap.fromEntries('locks', account.state.locks);
+  account.state.swapOffers = PersistentAccountStateMap.fromEntries('swapOffers', account.state.swapOffers);
+  account.state.requestedRebalance = PersistentAccountStateMap.fromEntries(
+    'requestedRebalance',
+    account.state.requestedRebalance,
+  );
+  account.state.requestedRebalanceFeeState = PersistentAccountStateMap.fromEntries(
+    'requestedRebalanceFeeState',
+    account.state.requestedRebalanceFeeState,
+  );
+  account.pendingWithdrawals = PersistentAccountStateMap.fromEntries(
+    'pendingWithdrawals',
+    account.pendingWithdrawals,
+  );
+  account.shadow.rebalance.policy = PersistentAccountStateMap.fromEntries(
+    'rebalanceShadowPolicy',
+    account.shadow.rebalance.policy,
+  );
+  account.shadow.rebalance.submittedAtByToken = PersistentAccountStateMap.fromEntries(
+    'rebalanceShadowSubmitted',
+    account.shadow.rebalance.submittedAtByToken,
+  );
+  return account;
+};
 
 const makeBook = (_price: bigint): BookState => ({
   params: { bucketWidthTicks: 1n, maxOrders: 100, stpPolicy: 0 },
@@ -736,280 +755,36 @@ test('storage readers reject requested heights beyond the persisted head', async
   ).rejects.toThrow('STORAGE_HEIGHT_UNAVAILABLE');
 });
 
-test('storage live recovery verifies doc values through merkle leaves', async () => {
-  const previous = process.env['XLN_STORAGE_VERIFY_DOC_HASHES'];
-  process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = '1';
-  try {
-    const env = makeEnv();
-    const replica = Array.from(env.state.eReplicas.values())[0]!;
-    const account = replica.state.accounts.get(counterpartyId)!;
-    const head: StorageHead = {
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      latestHeight: env.state.height,
-      latestMaterializedHeight: env.state.height,
-      latestSnapshotHeight: 0,
-      snapshotPeriodFrames: 256,
-      retainSnapshots: 3,
-      epochMaxBytes: 1,
-      accountMerkleRadix: 16,
-      epochReplayBytes: 0,
-      retainedHistoryBytes: 0,
-    };
-    const coreDoc = projectEntityCoreDoc(replica.state);
-    const accountDoc = projectAccountDoc(account);
-    const prepared = await prepareStorageStateHashes({
-      db: makeMemoryDb([]),
-      puts: [
-        { family: 'entity', entityId, value: coreDoc },
-        { family: 'account', entityId, counterpartyId, value: accountDoc },
-      ],
-      dels: [],
-    });
-    const db = makeMemoryDb([
-      [KEY_HEAD, encodeBuffer(head)],
-      [keyLiveEntity(entityId), prepared.docValueBuffers.get(`e:${entityId}`)!],
-      [keyLiveAccount(entityId, counterpartyId), prepared.docValueBuffers.get(`a:${entityId}:${counterpartyId}`)!],
-      ...prepared.merklePuts.map(item => [item.key, item.value] as [Buffer, Buffer]),
-    ]);
-
-    const state = await loadEntityStateFromStorage({
-      env,
-      tryOpenDb: async () => true,
-      getRuntimeDb: () => db,
-      entityId,
-    });
-    expect(state?.accounts.has(counterpartyId)).toBe(true);
-  } finally {
-    if (previous === undefined) delete process.env['XLN_STORAGE_VERIFY_DOC_HASHES'];
-    else process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = previous;
-  }
-});
-
-test('storage live recovery hydrates a typed split Account through its logical layout', async () => {
+test('storage startup verifies canonical live Entity and Account key bindings', async () => {
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
-  const account = replica.state.accounts.get(counterpartyId)!;
-  account.pendingSignatures = Array.from(
-    { length: 160 },
-    (_, index) => `signature-${index.toString().padStart(3, '0')}-${'ab'.repeat(48)}`,
-  );
-  const head: StorageHead = {
-    schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: env.state.height,
-    latestMaterializedHeight: env.state.height,
-    latestSnapshotHeight: 0,
-    snapshotPeriodFrames: 256,
-    retainSnapshots: 3,
-    epochMaxBytes: 1,
-    accountMerkleRadix: 16,
-    epochReplayBytes: 0,
-    retainedHistoryBytes: 0,
-  };
-  const rawDb = makeMemoryDb([
-    [KEY_HEAD, encodeBuffer(head)],
-    [keyLiveEntity(entityId), encodeBuffer(projectEntityCoreDoc(replica.state))],
-  ]);
-  const db = withRebranchedValues(rawDb);
+  replica.state.entityEncryptionPublicKey = `0x${'12'.repeat(32)}`;
+  const account = prepareAccountFixtureForGraph(replica.state.accounts.get(counterpartyId)!);
   const layout = await prepareAccountStorageLayout(
-    db,
+    makeMemoryDb([]),
     entityId,
     counterpartyId,
     keyLiveAccount(entityId, counterpartyId),
     projectAccountDoc(account),
   );
-  expect(layout.representation).toBe('fields');
-  const batch = db.batch();
-  for (const key of layout.dels) batch.del?.(key);
-  for (const put of layout.puts) batch.put(put.key, put.value);
-  await batch.write();
-
-  const restored = await loadEntityStateFromStorage({
-    env,
-    tryOpenDb: async () => true,
-    getRuntimeDb: () => db,
-    entityId,
-  });
-  expect(restored?.accounts.get(counterpartyId)?.pendingSignatures).toEqual(account.pendingSignatures);
-});
-
-test('storage live recovery rejects live docs that do not match merkle leaf value hashes', async () => {
-  const previous = process.env['XLN_STORAGE_VERIFY_DOC_HASHES'];
-  process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = '1';
-  try {
-    const env = makeEnv();
-    const replica = Array.from(env.state.eReplicas.values())[0]!;
-    const account = replica.state.accounts.get(counterpartyId)!;
-    const head: StorageHead = {
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      latestHeight: env.state.height,
-      latestMaterializedHeight: env.state.height,
-      latestSnapshotHeight: 0,
-      snapshotPeriodFrames: 256,
-      retainSnapshots: 3,
-      epochMaxBytes: 1,
-      accountMerkleRadix: 16,
-      epochReplayBytes: 0,
-      retainedHistoryBytes: 0,
-    };
-    const coreDoc = projectEntityCoreDoc(replica.state);
-    const accountDoc = projectAccountDoc(account);
-    const prepared = await prepareStorageStateHashes({
-      db: makeMemoryDb([]),
-      puts: [
-        { family: 'entity', entityId, value: coreDoc },
-        { family: 'account', entityId, counterpartyId, value: accountDoc },
-      ],
-      dels: [],
-    });
-    const corruptedAccountRaw = encodeBuffer({ ...accountDoc, currentHeight: accountDoc.currentHeight + 1 });
-    const db = makeMemoryDb([
-      [KEY_HEAD, encodeBuffer(head)],
-      [keyLiveEntity(entityId), prepared.docValueBuffers.get(`e:${entityId}`)!],
-      [keyLiveAccount(entityId, counterpartyId), corruptedAccountRaw],
-      ...prepared.merklePuts.map(item => [item.key, item.value] as [Buffer, Buffer]),
-    ]);
-
-    await expect(
-      loadEntityStateFromStorage({
-        env,
-        tryOpenDb: async () => true,
-        getRuntimeDb: () => db,
-        entityId,
-      }),
-    ).rejects.toThrow('STORAGE_DOC_HASH_MISMATCH');
-  } finally {
-    if (previous === undefined) delete process.env['XLN_STORAGE_VERIFY_DOC_HASHES'];
-    else process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = previous;
-  }
-});
-
-test('storage live recovery can deep verify merkle side records', async () => {
-  const previous = process.env['XLN_STORAGE_VERIFY_MERKLE'];
-  process.env['XLN_STORAGE_VERIFY_MERKLE'] = 'deep';
-  try {
-    const env = makeEnv();
-    const replica = Array.from(env.state.eReplicas.values())[0]!;
-    const account = replica.state.accounts.get(counterpartyId)!;
-    const coreDoc = projectEntityCoreDoc(replica.state);
-    const accountDoc = projectAccountDoc(account);
-    const prepared = await prepareStorageStateHashes({
-      db: makeMemoryDb([]),
-      puts: [
-        { family: 'entity', entityId, value: coreDoc },
-        { family: 'account', entityId, counterpartyId, value: accountDoc },
-      ],
-      dels: [],
-    });
-    const head: StorageHead = {
-      schemaVersion: STORAGE_SCHEMA_VERSION,
-      latestHeight: env.state.height,
-      latestMaterializedHeight: env.state.height,
-      latestSnapshotHeight: 0,
-      snapshotPeriodFrames: 256,
-      retainSnapshots: 3,
-      epochMaxBytes: 1,
-      accountMerkleRadix: 16,
-      epochReplayBytes: 0,
-      retainedHistoryBytes: 0,
-    };
-    const entries: Array<[Buffer, Buffer]> = [
-      [KEY_HEAD, encodeBuffer(head)],
-      [keyLiveEntity(entityId), prepared.docValueBuffers.get(`e:${entityId}`)!],
-      [keyLiveAccount(entityId, counterpartyId), prepared.docValueBuffers.get(`a:${entityId}:${counterpartyId}`)!],
-      ...prepared.merklePuts.map(item => [item.key, item.value] as [Buffer, Buffer]),
-    ];
-    const db = makeMemoryDb(entries);
-
-    const state = await loadEntityStateFromStorage({
-      env,
-      tryOpenDb: async () => true,
-      getRuntimeDb: () => db,
-      entityId,
-    });
-    expect(state?.accounts.has(counterpartyId)).toBe(true);
-
-    const leafEntry = entries.find(
-      ([key]) =>
-        Buffer.compare(
-          key.subarray(0, keyMerkleLeafPrefix(entityId, 'runtime-roots').length),
-          keyMerkleLeafPrefix(entityId, 'runtime-roots'),
-        ) === 0,
-    );
-    const leaf = decodeBuffer<StorageMerkleLeafDoc>(leafEntry![1]);
-    const corrupted = { ...leaf, hash: `0x${'ff'.repeat(32)}` };
-    const corruptedDb = makeMemoryDb(
-      entries.map(([key, value]) =>
-        key === leafEntry![0]
-          ? ([key, encodeBuffer(corrupted)] as [Buffer, Buffer])
-          : ([key, value] as [Buffer, Buffer]),
-      ),
-    );
-
-    await expect(
-      loadEntityStateFromStorage({
-        env,
-        tryOpenDb: async () => true,
-        getRuntimeDb: () => corruptedDb,
-        entityId,
-      }),
-    ).rejects.toThrow('STORAGE_MERKLE_LEAF_HASH_MISMATCH');
-  } finally {
-    if (previous === undefined) delete process.env['XLN_STORAGE_VERIFY_MERKLE'];
-    else process.env['XLN_STORAGE_VERIFY_MERKLE'] = previous;
-  }
-});
-
-test('storage startup verifies live key bindings and the complete materialized merkle tree', async () => {
-  const env = makeEnv();
-  const replica = Array.from(env.state.eReplicas.values())[0]!;
-  const account = replica.state.accounts.get(counterpartyId)!;
-  const coreDoc = projectEntityCoreDoc(replica.state);
-  const accountDoc = projectAccountDoc(account);
-  const prepared = await prepareStorageStateHashes({
-    db: makeMemoryDb([]),
-    puts: [
-      { family: 'entity', entityId, value: coreDoc },
-      { family: 'account', entityId, counterpartyId, value: accountDoc },
-    ],
-    dels: [],
-  });
   const entries: Array<[Buffer, Buffer]> = [
-    [keyLiveEntity(entityId), prepared.docValueBuffers.get(`e:${entityId}`)!],
-    [keyLiveAccount(entityId, counterpartyId), prepared.docValueBuffers.get(`a:${entityId}:${counterpartyId}`)!],
-    ...prepared.merklePuts.map(item => [item.key, item.value] as [Buffer, Buffer]),
+    [keyLiveEntity(entityId), encodeBuffer(projectEntityCoreDoc(replica.state))],
+    ...layout.puts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
   ];
 
-  await expect(verifyLiveStorageIntegrity(makeMemoryDb(entries))).resolves.toBeUndefined();
+  await verifyLiveStorageIntegrity(makeMemoryDb(entries));
 
   const accountKey = keyLiveAccount(entityId, counterpartyId);
   const movedAccount = entries.map(
     ([key, value]) =>
-      (key.equals(accountKey) ? [Buffer.concat([key, Buffer.from([0])]), value] : [key, value]) as [Buffer, Buffer],
+      (key.equals(accountKey)
+        ? [Buffer.concat([key, Buffer.from([0])]), value]
+        : [key, value]) as [Buffer, Buffer],
   );
   await expect(verifyLiveStorageIntegrity(makeMemoryDb(movedAccount))).rejects.toThrow(
     'STORAGE_LIVE_ACCOUNT_KEY_INVALID',
   );
-
-  const leafPrefix = keyMerkleLeafPrefix(entityId, 'runtime-roots');
-  const movedLeaf = entries.map(
-    ([key, value]) =>
-      (key.subarray(0, leafPrefix.length).equals(leafPrefix)
-        ? [Buffer.concat([key, Buffer.from([0])]), value]
-        : [key, value]) as [Buffer, Buffer],
-  );
-  await expect(verifyLiveStorageIntegrity(makeMemoryDb(movedLeaf))).rejects.toThrow('STORAGE_MERKLE_LEAF_KEY_MISMATCH');
-
-  const branchPrefix = keyMerkleBranchPrefix(entityId, 'runtime-roots');
-  const corruptBranch = entries.map(([key, value]) => {
-    if (!key.subarray(0, branchPrefix.length).equals(branchPrefix)) return [key, value] as [Buffer, Buffer];
-    const branch = decodeBuffer<Record<string, unknown>>(value);
-    return [key, encodeBuffer({ ...branch, hash: `0x${'ff'.repeat(32)}` })] as [Buffer, Buffer];
-  });
-  await expect(verifyLiveStorageIntegrity(makeMemoryDb(corruptBranch))).rejects.toThrow(
-    'STORAGE_MERKLE_BRANCH_MISMATCH',
-  );
 });
-
 test('runtime adapter account pagination avoids full sort materialization', async () => {
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
@@ -2682,221 +2457,6 @@ test('remote adapter rejects send without a caller-owned commandId before transp
   expect(() => adapter.send({ runtimeTxs: [], entityInputs: [], jInputs: [] })).toThrow(
     'remote runtime send requires a caller-owned commandId',
   );
-});
-
-test('storage entity hash docs persist root metadata only', async () => {
-  const env = makeEnv();
-  const replica = Array.from(env.state.eReplicas.values())[0]!;
-  const base = replica.state.accounts.get(counterpartyId)!;
-  const accountCount = 4_100;
-  const puts = Array.from({ length: accountCount }, (_, index) => {
-    const id = `0x${(index + 1).toString(16).padStart(64, '0')}`;
-    return {
-      family: 'account' as const,
-      entityId,
-      counterpartyId: id,
-      value: projectAccountDoc({
-        ...base,
-        state: { ...base.state, rightEntity: id },
-        proofHeader: { ...base.proofHeader, toEntity: id },
-      }),
-    };
-  });
-
-  const first = await prepareStorageStateHashes({
-    db: makeMemoryDb([]),
-    puts,
-    dels: [],
-  });
-  const firstDoc = first.entityHashDocs.get(entityId)!;
-
-  expect(firstDoc.cellCount).toBe(accountCount);
-  expect('cells' in firstDoc).toBe(false);
-  expect(first.entityHashes[0]?.cellCount).toBe(accountCount);
-  const firstRootPut = first.merklePuts.find(
-    item => Buffer.compare(item.key, keyMerkleRoot(entityId, 'runtime-roots')) === 0,
-  );
-  const firstRoot = decodeBuffer<StorageMerkleRootDoc>(firstRootPut!.value);
-  expect(firstRoot.rootHash).toBe(firstDoc.hash);
-  expect(firstRoot.leafCount).toBe(accountCount);
-  expect(firstRoot.rootKind).toBe('branch');
-  expect(Array.isArray(firstRoot.rootPath)).toBe(true);
-  expect(first.merklePuts.every(({ value }) => value.byteLength < MAX_PERSISTED_MERKLE_NODE_BYTES)).toBe(true);
-
-  const unchangedId = `0x${(1).toString(16).padStart(64, '0')}`;
-  const unchanged = await prepareStorageStateHashes({
-    db: makeMemoryDb(first.merklePuts.map(item => [item.key, item.value] as [Buffer, Buffer])),
-    puts: [
-      {
-        family: 'account',
-        entityId,
-        counterpartyId: unchangedId,
-        value: projectAccountDoc({
-          ...base,
-          state: { ...base.state, rightEntity: unchangedId },
-          proofHeader: { ...base.proofHeader, toEntity: unchangedId },
-        }),
-      },
-    ],
-    dels: [],
-    entityHashDocs: first.entityHashDocs,
-  });
-  expect(unchanged.entityHashDocs.get(entityId)?.hash).toBe(firstDoc.hash);
-  expect(unchanged.merklePuts).toHaveLength(0);
-  expect(unchanged.merkleDels).toHaveLength(0);
-
-  const oldRoot = firstDoc.hash;
-  const changedId = `0x${(2_001).toString(16).padStart(64, '0')}`;
-  const second = await prepareStorageStateHashes({
-    db: makeMemoryDb([...first.merklePuts.map(item => [item.key, item.value] as [Buffer, Buffer])]),
-    puts: [
-      {
-        family: 'account',
-        entityId,
-        counterpartyId: changedId,
-        value: projectAccountDoc({
-          ...base,
-          state: { ...base.state, rightEntity: changedId },
-          currentHeight: 999,
-          proofHeader: { ...base.proofHeader, toEntity: changedId },
-        }),
-      },
-    ],
-    dels: [],
-    entityHashDocs: first.entityHashDocs,
-  });
-  const secondDoc = second.entityHashDocs.get(entityId)!;
-
-  expect(secondDoc.cellCount).toBe(accountCount);
-  expect('cells' in secondDoc).toBe(false);
-  expect(secondDoc.hash).not.toBe(oldRoot);
-  expect(second.merklePuts.length).toBeLessThan(50);
-  expect(second.merkleDels).toHaveLength(0);
-
-  const cold = await prepareStorageStateHashes({
-    db: makeMemoryDb([...first.merklePuts.map(item => [item.key, item.value] as [Buffer, Buffer])]),
-    puts: [
-      {
-        family: 'account',
-        entityId,
-        counterpartyId: changedId,
-        value: projectAccountDoc({
-          ...base,
-          state: { ...base.state, rightEntity: changedId },
-          currentHeight: 999,
-          proofHeader: { ...base.proofHeader, toEntity: changedId },
-        }),
-      },
-    ],
-    dels: [],
-  });
-  const coldDoc = cold.entityHashDocs.get(entityId)!;
-  expect(coldDoc.cellCount).toBe(accountCount);
-  expect('cells' in coldDoc).toBe(false);
-  expect(coldDoc.hash).toBe(secondDoc.hash);
-  expect(cold.merklePuts.length).toBeLessThan(50);
-
-  const staleDoc: StorageEntityHashDoc = {
-    entityId,
-    hash: `0x${'11'.repeat(32)}`,
-    cellCount: 1,
-  };
-  const staleRuntimeFields = await prepareStorageStateHashes({
-    db: makeMemoryDb([...first.merklePuts.map(item => [item.key, item.value] as [Buffer, Buffer])]),
-    puts: [
-      {
-        family: 'account',
-        entityId,
-        counterpartyId: changedId,
-        value: projectAccountDoc({
-          ...base,
-          state: { ...base.state, rightEntity: changedId },
-          currentHeight: 999,
-          proofHeader: { ...base.proofHeader, toEntity: changedId },
-        }),
-      },
-    ],
-    dels: [],
-    entityHashDocs: new Map([[entityId, staleDoc]]),
-  });
-  const staleRuntimeDoc = staleRuntimeFields.entityHashDocs.get(entityId)!;
-  expect(staleRuntimeDoc.cellCount).toBe(accountCount);
-  expect(staleRuntimeDoc.hash).toBe(secondDoc.hash);
-  expect(staleRuntimeFields.merklePuts.length).toBeLessThan(50);
-
-  const persistedRootOnly = await prepareStorageStateHashes({
-    db: makeMemoryDb([
-      [keyLiveEntity(entityId), encodeBuffer(projectEntityCoreDoc(replica))],
-      ...first.merklePuts.map(item => [item.key, item.value] as [Buffer, Buffer]),
-    ]),
-    puts: [
-      {
-        family: 'account',
-        entityId,
-        counterpartyId: changedId,
-        value: projectAccountDoc({
-          ...base,
-          state: { ...base.state, rightEntity: changedId },
-          currentHeight: 999,
-          proofHeader: { ...base.proofHeader, toEntity: changedId },
-        }),
-      },
-    ],
-    dels: [],
-  });
-  const persistedRootOnlyDoc = persistedRootOnly.entityHashDocs.get(entityId)!;
-  expect(persistedRootOnlyDoc.cellCount).toBe(accountCount);
-  expect(persistedRootOnlyDoc.hash).toBe(secondDoc.hash);
-
-  await expect(
-    prepareStorageStateHashes({
-      db: makeMemoryDb([[keyLiveEntity(entityId), encodeBuffer(projectEntityCoreDoc(replica))]]),
-      puts: [
-        {
-          family: 'account',
-          entityId,
-          counterpartyId: changedId,
-          value: projectAccountDoc({
-            ...base,
-            state: { ...base.state, rightEntity: changedId },
-            currentHeight: 999,
-            proofHeader: { ...base.proofHeader, toEntity: changedId },
-          }),
-        },
-      ],
-      dels: [],
-    }),
-  ).rejects.toThrow('STORAGE_MERKLE_ROOT_MISSING');
-
-  const putThenDelete = await prepareStorageStateHashes({
-    db: makeMemoryDb([...first.merklePuts.map(item => [item.key, item.value] as [Buffer, Buffer])]),
-    puts: [
-      {
-        family: 'account',
-        entityId,
-        counterpartyId: changedId,
-        value: projectAccountDoc({
-          ...base,
-          state: { ...base.state, rightEntity: changedId },
-          currentHeight: 999,
-          proofHeader: { ...base.proofHeader, toEntity: changedId },
-        }),
-      },
-    ],
-    dels: [{ family: 'account', entityId, counterpartyId: changedId }],
-  });
-  const merklePutKeys = new Set(putThenDelete.merklePuts.map(item => item.key.toString('hex')));
-  expect(putThenDelete.merkleDels.some(key => merklePutKeys.has(key.toString('hex')))).toBe(false);
-
-  const coldDelete = await prepareStorageStateHashes({
-    db: makeMemoryDb([...first.merklePuts.map(item => [item.key, item.value] as [Buffer, Buffer])]),
-    puts: [],
-    dels: [{ family: 'account', entityId, counterpartyId: changedId }],
-  });
-  const coldDeleteDoc = coldDelete.entityHashDocs.get(entityId)!;
-  expect(coldDeleteDoc.cellCount).toBe(accountCount - 1);
-  expect(coldDelete.merkleDels.length).toBeGreaterThan(0);
-  expect(coldDelete.merklePuts.length).toBeLessThan(50);
 });
 
 test('a superseded connection failure cannot close the newer authenticated socket', async () => {

@@ -15,7 +15,6 @@ import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fix
 import {
   applyConsumptionOutput,
   createEmptyConsumptionAccumulator,
-  MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY,
 } from '../../../entity/consumption/consumption-accumulator';
 import {
   cacheCommittedConsumptionNodeChanges,
@@ -29,14 +28,12 @@ import {
 import { applyRuntimeStorageChanges } from '../../../runtime/observability/env-events';
 import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../../../storage';
 import { decodeBuffer } from '../../../storage/codec/codec';
-import { KEY_HEAD, keyConsumptionNode, keyDiff, keyLiveEntity } from '../../../storage/keys';
+import { KEY_HEAD, keyConsumptionNode, keyFrame, keyLiveEntity } from '../../../storage/keys';
 import type { RuntimeDbLike, StorageEntityCoreDoc, StorageHead } from '../../../storage/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import type { JurisdictionConfig } from '../../../entity/types';
 import { getPerfMs } from '../../../infra/time';
 import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
-import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../../../storage/read/projections';
-import { LIMITS } from '../../../config/constants';
 
 type RecordedDb = RuntimeDbLike & { writes: string[][] };
 
@@ -195,14 +192,13 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
 
   const atomicHistoryWrite = historyDb.writes.find((keys) => (
     keys.includes(KEY_HEAD.toString('hex')) &&
-    keys.includes(keyDiff(env.state.height).toString('hex')) &&
+    keys.includes(keyFrame(env.state.height).toString('hex')) &&
     keys.includes(keyConsumptionNode(node.hash).toString('hex'))
   ));
   expect(atomicHistoryWrite).toBeDefined();
   expect(decodeBuffer(await historyDb.get(keyConsumptionNode(node.hash)))).toEqual(node.node);
-  // Frame 1 is also the mandatory recovery snapshot anchor, so its diff is
-  // pruned only after the complete snapshot is published. The atomic write
-  // above proves the root-bearing diff and witness node crossed the durable
+  // Frame 1 is also the mandatory recovery snapshot anchor. The atomic write
+  // above proves the root-bearing Runtime frame and witness node crossed the durable
   // boundary together; the materialized cache proves the published value.
   const persistedEntity = decodeBuffer<StorageEntityCoreDoc>(await currentDb.get(keyLiveEntity(entityId)));
   expect(persistedEntity.consumptionAccumulator).toEqual(applied.state);
@@ -225,30 +221,4 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
   });
   expect(decodeBuffer(await rebuiltCurrent.get(keyConsumptionNode(node.hash)))).toEqual(node.node);
   expect(decodeBuffer<StorageHead>(await rebuiltCurrent.get(KEY_HEAD)).latestHeight).toBe(env.state.height);
-
-  const projected = projectEntityCoreDoc(replica.state);
-  const overflowSequences = new Map(Array.from(
-    { length: LIMITS.MAX_ACCOUNTS_PER_ENTITY + 1 },
-    (_, index) => [
-      `0x${BigInt(index + 1).toString(16).padStart(64, '0')}`,
-      { lastSequence: 1n, lastSemanticHash: `0x${'55'.repeat(32)}` },
-    ],
-  ));
-  expect(() => hydrateEntityStateFromStorage({
-    core: { ...projected, certifiedOutputSequences: overflowSequences },
-    accounts: new Map(),
-    books: new Map(),
-  })).toThrow('STORAGE_CERTIFIED_OUTPUT_RELATIONSHIP_LIMIT_EXCEEDED');
-  expect(() => hydrateEntityStateFromStorage({
-    core: {
-      ...projected,
-      consumptionAccumulator: {
-        version: 1,
-        root: `0x${'66'.repeat(32)}`,
-        count: MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY + 1n,
-      },
-    },
-    accounts: new Map(),
-    books: new Map(),
-  })).toThrow('CONSUMPTION_RELATIONSHIP_LIMIT_EXCEEDED');
 });

@@ -4,6 +4,7 @@ import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j
 
 import { buildDisputeArgumentsForSnapshot } from '../../../entity/dispute-arguments';
 import {
+  buildDisputeArgumentsFromSnapshot,
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
 } from '../../../protocol/dispute/arguments';
@@ -162,7 +163,11 @@ describe('dispute argument snapshots', () => {
 
   test('keeps maximum honest dynamic arguments within the jurisdiction byte cap', () => {
     const abi = ethers.AbiCoder.defaultAbiCoder();
-    const encodeArguments = (fillRatioCount: number, secretCount: number): string => {
+    const encodeArguments = (
+      fillRatioCount: number,
+      secretCount: number,
+      canonicalArgumentClauseCount: 1 | 2,
+    ): string => {
       const transformerArgs = abi.encode(
         ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
         [{
@@ -173,7 +178,9 @@ describe('dispute argument snapshots', () => {
           ),
         }],
       );
-      return abi.encode(['bytes[]'], [[transformerArgs]]);
+      return abi.encode(['bytes[]'], [
+        Array.from({ length: canonicalArgumentClauseCount }, () => transformerArgs),
+      ]);
     };
     const encodedBytes = (value: string): number => ethers.getBytes(value).length;
     const maxOffers = LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS;
@@ -182,7 +189,7 @@ describe('dispute argument snapshots', () => {
     // All live same-j offers may belong to one maker side, and every live HTLC
     // may reveal a secret on that same side. This is the largest honest wrapper
     // one participant can supply for the signed DeltaTransformer plan.
-    const maximumSide = encodeArguments(maxOffers, maxSecrets);
+    const maximumSide = encodeArguments(maxOffers, maxSecrets, 2);
     expect(encodedBytes(maximumSide)).toBeLessThanOrEqual(
       J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes,
     );
@@ -194,8 +201,8 @@ describe('dispute argument snapshots', () => {
     // Splitting the same maximum Account state across both makers adds a second
     // bytes[] wrapper, so it is the aggregate-cap boundary the pair sanitizer
     // must preserve without erasing either side's honest evidence.
-    const left = encodeArguments(Math.ceil(maxOffers / 2), maxSecrets);
-    const right = encodeArguments(Math.floor(maxOffers / 2), 0);
+    const left = encodeArguments(Math.ceil(maxOffers / 2), maxSecrets, 2);
+    const right = encodeArguments(Math.floor(maxOffers / 2), 0, 2);
     expect(encodedBytes(left)).toBeLessThanOrEqual(
       J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes,
     );
@@ -235,6 +242,55 @@ describe('dispute argument snapshots', () => {
 
     expect(decodeFirstRatio(args.leftArguments)).toBe(222);
     expect(decodeFirstRatio(args.rightArguments)).toBe(111);
+  });
+
+  test('aligns one argument tuple with both canonical payment and swap clauses', () => {
+    const account = accountWithSwaps([
+      ['right-owned', offer('right-owned', false, 2, 1)],
+    ]);
+    account.state.locks.set('lock', {
+      lockId: 'lock',
+      hashlock: `0x${'ab'.repeat(32)}`,
+      timelock: 100_000n,
+      amount: 1n,
+      tokenId: 1,
+      senderIsLeft: true,
+      createdHeight: 1,
+      createdTimestamp: 1,
+    });
+    const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
+    expect(proof.runtimeProofBody.transformers).toHaveLength(2);
+    const snapshot = captureDisputeArgumentSnapshot(
+      account,
+      proof.proofBodyHash,
+      1,
+      true,
+      proof.proofBodyStruct,
+    );
+    storeDisputeArgumentSnapshot(account, snapshot);
+    account.mempool = [{
+      type: 'swap_resolve',
+      data: { offerId: 'right-owned', fillRatio: 32_768, cancelRemainder: false },
+    }];
+    const secret = `0x${'cd'.repeat(32)}`;
+    const built = buildDisputeArgumentsFromSnapshot(
+      account,
+      proof.proofBodyHash,
+      { secretsSide: 'left' },
+      [secret],
+    );
+    const [clauses] = ethers.AbiCoder.defaultAbiCoder().decode(
+      ['bytes[]'],
+      built.leftArguments,
+    ) as unknown as [string[]];
+    expect(clauses).toHaveLength(2);
+    expect(clauses[0]).toBe(clauses[1]);
+    const [decoded] = ethers.AbiCoder.defaultAbiCoder().decode(
+      ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
+      clauses[1]!,
+    ) as unknown as [{ fillRatios: bigint[]; secrets: string[] }];
+    expect(Array.from(decoded.fillRatios, Number)).toEqual([32_768]);
+    expect(decoded.secrets).toEqual([secret]);
   });
 
   test('uses a late Account mempool fill omitted from the optimistic pending frame', () => {

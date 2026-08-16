@@ -13,10 +13,14 @@ import {
 import { encodeBuffer } from '../../../storage/codec/codec';
 import { buildStorageLiveReplicaMetaCommitment } from '../../../storage/replica/replicas';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { encodeBoard, hashBoard } from '../../../entity/factory';
 import { applyCommand, createBook, replaceOrderbookPair } from '../../../orderbook';
 import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../../../storage/read/projections';
-import { cloneEntityState } from '../../../entity/state-clone';
+import {
+  commitEntityFrameCandidateState,
+  createEntityFrameCandidateState,
+} from '../../../entity/state-clone';
 import type { RuntimeFrame } from '../../../storage/types';
 import type { AccountReplica } from '../../../types/account';
 import type { EntityReplica } from '../../../entity/types';
@@ -47,7 +51,8 @@ const makeAccount = (frameStateHash: string): AccountReplica => {
     depositoryAddress: `0x${'de'.repeat(20)}`,
   });
   account.state.watchSeed = `0x${'ac'.repeat(32)}`;
-  account.state.deltas.get(1)!.offdelta = 10n;
+  const delta = account.state.deltas.get(1)!;
+  account.state.deltas = account.state.deltas.updated(1, { ...delta, offdelta: 10n });
   account.currentHeight = 1;
   account.currentFrame = {
     height: 1,
@@ -97,6 +102,7 @@ const makeEnv = (account: AccountReplica, reserves: Array<[number, bigint]>): Ru
           reserves: new Map(reserves),
           accounts: PersistentEntityAccountMap.fromMap(
             new Map([[counterpartyId, account]]),
+            entityId,
             computeEntityAccountValueHash,
           ),
           deferredAccountProposals: new Map(),
@@ -134,6 +140,7 @@ const makeEnvWithOrderbookPairs = (pairIds: string[]): RuntimeReplica => {
   const orderbookExt = {
     books: new Map(),
     orderPairs: new Map(),
+    pairDimensions: new Map(),
     referrals: new Map(),
     hubProfile: {},
   };
@@ -358,7 +365,7 @@ test('canonical Entity hash excludes validator-private J history', () => {
 test('validator-local HTLC notes neither diverge shared storage nor leak into Entity core', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
   const first = Array.from(env.state.eReplicas.values())[0]!;
-  const second = structuredClone(first);
+  const second: EntityReplica = { ...first, state: { ...first.state } };
   second.signerId = signerIds[1]!;
   first.htlcNotes = new Map([[`hashlock:0x${'33'.repeat(32)}`, 'validator-one']]);
   second.htlcNotes = new Map([[`hashlock:0x${'33'.repeat(32)}`, 'validator-two']]);
@@ -374,7 +381,7 @@ test('validator-local HTLC notes neither diverge shared storage nor leak into En
 test('canonical storage rejects conflicting validator replicas of one Entity', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
   const first = Array.from(env.state.eReplicas.values())[0]!;
-  const conflicting = structuredClone(first);
+  const conflicting: EntityReplica = { ...first, state: { ...first.state } };
   conflicting.signerId = signerIds[1]!;
   conflicting.state.profile = { ...conflicting.state.profile, name: 'validator-local-conflict' };
   env.state.eReplicas.set(`${entityId}:${signerIds[1]}`, conflicting);
@@ -387,7 +394,11 @@ test('storage projection round-trip preserves canonical account optional-field s
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const state = replica.state;
-  const account = state.accounts.get(counterpartyId)!;
+  const currentAccount = state.accounts.get(counterpartyId)!;
+  const account: AccountReplica = {
+    ...currentAccount,
+    state: { ...currentAccount.state },
+  };
   account.hankoSignature = '0xaccount-proof-hanko';
   account.pendingForwards = [{
     tokenId: 1,
@@ -395,8 +406,8 @@ test('storage projection round-trip preserves canonical account optional-field s
     route: [entityId, counterpartyId],
     description: 'projection-round-trip',
   }];
-  account.state.lendingIntents = new Map([['lend-0123456789abcdef', 'fund']]);
-  account.state.subcontracts = new Map([['custom-transformer', {
+  account.state.lendingIntents = PersistentAccountStateMap.fromEntries('lendingIntents', [['lend-0123456789abcdef', 'fund']]);
+  account.state.subcontracts = PersistentAccountStateMap.fromEntries('subcontracts', [['custom-transformer', {
     transformerAddress: `0x${'33'.repeat(20)}`,
     encodedBatch: '0x1234',
     allowances: [{ deltaIndex: 0, rightAllowance: 3n, leftAllowance: 4n }],
@@ -431,8 +442,8 @@ test('storage projection round-trip preserves canonical account optional-field s
   };
 
   expect(account.state.pulls).toBeUndefined();
-  expect(account.swapOrderHistory).toEqual(new Map());
-  expect(account.swapClosedOrders).toEqual(new Map());
+  expect(account.swapOrderHistory).toBeUndefined();
+  expect(account.swapClosedOrders).toBeUndefined();
   expect(projectAccountDoc(account)).toBe(account);
 
   const hydratedState = hydrateEntityStateFromStorage({
@@ -440,14 +451,15 @@ test('storage projection round-trip preserves canonical account optional-field s
     accounts: new Map([[counterpartyId, projectAccountDoc(account)]]),
     books: new Map(),
   });
+  state.accounts = state.accounts.updated(counterpartyId, account);
 
   const before = computeCanonicalEntityHash(replica);
   const after = computeCanonicalEntityHash({ ...replica, state: hydratedState });
 
   expect(hydratedState.accounts.get(counterpartyId)?.state.pulls).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.state.domain).toEqual(account.state.domain);
-  expect(hydratedState.accounts.get(counterpartyId)?.swapOrderHistory).toEqual(new Map());
-  expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toEqual(new Map());
+  expect(hydratedState.accounts.get(counterpartyId)?.swapOrderHistory).toBeUndefined();
+  expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.hankoSignature).toBe(account.hankoSignature);
   expect(hydratedState.accounts.get(counterpartyId)?.pendingForwards).toEqual(account.pendingForwards);
   expect(hydratedState.accounts.get(counterpartyId)?.state.lendingIntents).toEqual(account.state.lendingIntents);
@@ -474,21 +486,18 @@ test('replica metadata projection preserves in-flight consensus and layout state
 
   const meta = projectReplicaMeta(replica);
 
-  expect(meta.state).toBe(replica.state);
+  expect('state' in meta).toBeFalse();
   expect(meta.mempool).toBe(replica.mempool);
   expect(meta.mempool).toEqual(replica.mempool);
   expect(meta.position).toEqual(replica.position);
   expect(meta.jHistory).toEqual(replica.jHistory);
-  expect(meta.state).toEqual(cloneEntityState(replica.state, true));
-  expect(meta.state.accounts.get(counterpartyId)?.state.pulls).toBeUndefined();
   expect('entityEncPrivKey' in meta).toBeFalse();
 });
 
 test('immediate replica metadata encoding matches the persistent recovery view', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
   const replica = Array.from(env.state.eReplicas.values())[0]!;
-  const account = replica.state.accounts.get(counterpartyId)!;
-  Object.defineProperty(account, Symbol('ephemeral-account-marker'), {
+  Object.defineProperty(replica, Symbol('ephemeral-replica-marker'), {
     configurable: true,
     enumerable: true,
     value: true,
@@ -503,15 +512,11 @@ test('immediate replica metadata encoding matches the persistent recovery view',
 test('live replica metadata omits transient commitment caches at every in-flight state level', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
   const replica = Array.from(env.state.eReplicas.values())[0]!;
-  const validatorState = cloneEntityState(replica.state, true);
+  const validatorState = commitEntityFrameCandidateState(
+    createEntityFrameCandidateState(replica.state),
+  );
   const transientEntityCache = Symbol('xln.entity.account-commitment-cache');
-  const transientAccountCache = Symbol('xln.account.commitment-cache');
   Object.defineProperty(validatorState, transientEntityCache, {
-    configurable: true,
-    enumerable: false,
-    value: new Map(),
-  });
-  Object.defineProperty(validatorState.accounts.get(counterpartyId)!, transientAccountCache, {
     configurable: true,
     enumerable: false,
     value: new Map(),

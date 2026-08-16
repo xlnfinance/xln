@@ -1,18 +1,27 @@
 import type { AccountReplica } from '../../types/account';
 import type { EntityReplica, EntityState } from '../../entity/types';
 import { encodeBuffer } from '../codec/codec';
-import { DEFAULT_ACCOUNT_MERKLE_RADIX, normalizeEntityId } from '../keys';
-import { buildHexKeyedMerkle, type RadixMerkleRadix } from '../../protocol/state/radix-merkle';
+import { normalizeEntityId } from '../keys';
 import type { StorageAccountDoc, StorageEntityCoreDoc, StorageReplicaMeta } from '../types';
 import {
   withDefinedProperty,
 } from './entity-core-boundary';
 import { pruneFinalizedValidatorJHistory } from '../../jurisdiction/machine/local-history';
+import { cloneCrossJurisdictionRoute } from '../../extensions/cross-j';
 
 export {
   hydrateAccountDocFromStorage,
   hydrateEntityStateFromStorage,
 } from './hydration';
+
+/** Storage codecs accept boundary-native maps, never live overlay containers. */
+const projectStorageMap = <Key, Value>(source: ReadonlyMap<Key, Value>): Map<Key, Value> =>
+  new Map(source.entries());
+
+const projectCrossJurisdictionRoutes = (
+  source: ReadonlyMap<string, import('../../types/cross-jurisdiction').CrossJurisdictionSwapRoute>,
+): Map<string, import('../../types/cross-jurisdiction').CrossJurisdictionSwapRoute> =>
+  new Map([...source].map(([orderId, route]) => [orderId, cloneCrossJurisdictionRoute(route)]));
 
 export const projectEntityCoreDoc = (
   state: EntityState,
@@ -31,9 +40,9 @@ export const projectEntityCoreDoc = (
   ...withDefinedProperty('jHistoryFinality', state.jHistoryFinality),
   ...withDefinedProperty('certifiedBoardState', state.certifiedBoardState),
   profile: state.profile,
-  htlcRoutes: state.htlcRoutes,
+  htlcRoutes: projectStorageMap(state.htlcRoutes),
   htlcFeesEarned: state.htlcFeesEarned,
-  lockBook: state.lockBook,
+  lockBook: projectStorageMap(state.lockBook),
   ...withDefinedProperty('prevFrameHash', state.prevFrameHash),
   ...withDefinedProperty('leaderState', state.leaderState),
   ...withDefinedProperty('deferredAccountProposals', state.deferredAccountProposals),
@@ -46,14 +55,32 @@ export const projectEntityCoreDoc = (
   ...withDefinedProperty('outDebtsByToken', state.outDebtsByToken),
   ...withDefinedProperty('inDebtsByToken', state.inDebtsByToken),
   ...withDefinedProperty('swapTradingPairs', state.swapTradingPairs),
-  ...withDefinedProperty('crossJurisdictionSwaps', state.crossJurisdictionSwaps),
-  ...withDefinedProperty('crossJurisdictionAuthorizations', state.crossJurisdictionAuthorizations),
-  ...withDefinedProperty('pendingCrossJurisdictionFillAcks', state.pendingCrossJurisdictionFillAcks),
-  ...withDefinedProperty('crossJurisdictionBookAdmissions', state.crossJurisdictionBookAdmissions),
+  ...withDefinedProperty(
+    'crossJurisdictionSwaps',
+    state.crossJurisdictionSwaps && projectCrossJurisdictionRoutes(state.crossJurisdictionSwaps),
+  ),
+  ...withDefinedProperty(
+    'crossJurisdictionAuthorizations',
+    state.crossJurisdictionAuthorizations && projectCrossJurisdictionRoutes(state.crossJurisdictionAuthorizations),
+  ),
+  ...withDefinedProperty(
+    'pendingCrossJurisdictionFillAcks',
+    state.pendingCrossJurisdictionFillAcks && projectStorageMap(state.pendingCrossJurisdictionFillAcks),
+  ),
+  ...withDefinedProperty(
+    'crossJurisdictionBookAdmissions',
+    state.crossJurisdictionBookAdmissions && projectStorageMap(state.crossJurisdictionBookAdmissions),
+  ),
   ...withDefinedProperty('hubRebalanceConfig', state.hubRebalanceConfig),
   ...withDefinedProperty('orderbookHubProfile', state.orderbookExt?.hubProfile),
-  ...withDefinedProperty('orderbookReferrals', state.orderbookExt?.referrals),
-  ...withDefinedProperty('orderbookPairDimensions', state.orderbookExt?.pairDimensions),
+  ...withDefinedProperty(
+    'orderbookReferrals',
+    state.orderbookExt && projectStorageMap(state.orderbookExt.referrals),
+  ),
+  ...withDefinedProperty(
+    'orderbookPairDimensions',
+    state.orderbookExt && projectStorageMap(state.orderbookExt.pairDimensions),
+  ),
   ...withDefinedProperty('lending', state.lending),
 });
 
@@ -150,16 +177,3 @@ export const encodeReplicaMeta = (
 
 export const projectAccountDoc = (account: AccountReplica): StorageAccountDoc =>
   account;
-
-export const buildAccountMerkleFromState = (
-  accounts: ReadonlyMap<string, AccountReplica>,
-  radix: RadixMerkleRadix = DEFAULT_ACCOUNT_MERKLE_RADIX,
-) => {
-  return buildHexKeyedMerkle(
-    Array.from(accounts.entries()).map(([counterpartyId, account]) => ({
-      hexKey: counterpartyId,
-      value: encodeBuffer(projectAccountDoc(account)),
-    })),
-    { radix },
-  );
-};

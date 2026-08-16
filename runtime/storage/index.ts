@@ -18,14 +18,10 @@ import {
   reconcileHistoryViews,
 } from './history/history-view';
 import {
-  assertEntityHashesEqual,
   computeStorageFrameHash,
   computeStoragePostStateHash,
   computeRuntimePostStateComponentDigests,
   prepareStorageCanonicalStateHashes,
-  prepareStorageStateHashes,
-  readAllEntityHashDocs,
-  toFrameEntityHashes,
 } from './hashes';
 import {
   createSnapshot,
@@ -54,18 +50,16 @@ import {
   HISTORY_VIEW_ACCOUNT_FRAME,
   HISTORY_VIEW_ENTITY_FRAME,
   KEY_LIVE_ACCOUNT,
+  KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_FIELD,
+  KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_BOOK,
   KEY_LIVE_ENTITY,
-  KEY_MERKLE_BRANCH,
-  KEY_MERKLE_LEAF,
-  KEY_MERKLE_ROOT,
   KEY_CERTIFIED_BOARD_NODE,
   KEY_CONSUMPTION_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
   KEY_LIVE_BOOK_BRANCH,
   KEY_LIVE_BOOK_LEAF,
-  STORAGE_FRAME_FORMAT,
   STORAGE_SCHEMA_VERSION,
   ZERO_FRAME_HASH,
   decodeTaggedStorageHash,
@@ -155,7 +149,6 @@ import type {
   RuntimeDbLike,
   StorageDoc,
   StorageDocRef,
-  StorageEntityHashDoc,
   RuntimeFrame,
   StorageHead,
   StoragePersistenceBoundaryHook,
@@ -164,15 +157,13 @@ import type {
 } from './types';
 import { resolveStorageRuntimeConfig } from './database/config';
 import { prepareStorageBookGraphWrite } from './commit/book-graph';
+import { prepareLiveStateGraph } from './commit/live-state-graph';
 import {
   prepareRuntimeOutputPayloadRows,
 } from './wal/outbox-payload';
 import { prepareEntityContextPayloadRows } from './wal/entity-context-payload';
 import { prepareRuntimeMachineGraphRows } from './wal/runtime-machine-graph';
 export { resolveStorageRuntimeConfig } from './database/config';
-export {
-  buildAccountMerkleFromState,
-} from './read/projections';
 export {
   readHistoryViewAccountFrames,
   readHistoryViewAccountSwapEvents,
@@ -230,7 +221,6 @@ export type {
   RuntimeDbLike,
   RuntimeFramePayloads,
   StorageAccountDoc,
-  StorageEntityHashDoc,
   RuntimeFrame,
   StorageHead,
   StoragePersistenceBoundary,
@@ -273,11 +263,10 @@ const materializedHeightOf = (head: StorageHead): number =>
 const CURRENT_RECOVERY_PREFIXES = [
   KEY_LIVE_ENTITY,
   KEY_LIVE_ACCOUNT,
+  KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_FIELD,
+  KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_BOOK,
-  KEY_MERKLE_ROOT,
-  KEY_MERKLE_BRANCH,
-  KEY_MERKLE_LEAF,
   KEY_CERTIFIED_BOARD_NODE,
   KEY_CONSUMPTION_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
@@ -303,11 +292,10 @@ const synchronizeLiveStateProjection = async (
   for (const tag of [
     KEY_LIVE_ENTITY,
     KEY_LIVE_ACCOUNT,
+    KEY_LIVE_ACCOUNT_BRANCH,
     KEY_LIVE_ACCOUNT_FIELD,
+    KEY_LIVE_ACCOUNT_LEAF,
     KEY_LIVE_BOOK,
-    KEY_MERKLE_ROOT,
-    KEY_MERKLE_BRANCH,
-    KEY_MERKLE_LEAF,
     KEY_LIVE_BOOK_BRANCH,
     KEY_LIVE_BOOK_LEAF,
   ] as const) {
@@ -376,10 +364,11 @@ const synchronizeConsumptionNodes = async (
   walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
   batch?: ReturnType<RuntimeDbLike['batch']>,
+  stateDb: RuntimeDbLike = currentDb,
 ): Promise<boolean> => {
   const states: ConsumptionAccumulatorState[] = [];
-  for await (const key of iterateKeys(currentDb, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
-    const doc = decodeValidatedBuffer(await currentDb.get(key), validateStorageEntityCoreDocValue);
+  for await (const key of iterateKeys(stateDb, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
+    const doc = decodeValidatedBuffer(await stateDb.get(key), validateStorageEntityCoreDocValue);
     if (doc.consumptionAccumulator) states.push(doc.consumptionAccumulator);
   }
   const authoritative = new Map<string, ConsumptionNode>();
@@ -523,11 +512,12 @@ const synchronizeAccountJClaimNodes = async (
   walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
   batch?: ReturnType<RuntimeDbLike['batch']>,
+  stateDb: RuntimeDbLike = currentDb,
 ): Promise<boolean> => {
   const states: AccountJClaimAccumulatorState[] = [];
-  for await (const key of iterateKeys(currentDb, { prefix: Buffer.from([KEY_LIVE_ACCOUNT]) })) {
+  for await (const key of iterateKeys(stateDb, { prefix: Buffer.from([KEY_LIVE_ACCOUNT]) })) {
     const parsed = parseLiveAccountKey(key);
-    const stored = await readAccountStorageLayout(currentDb, parsed.entityId, parsed.counterpartyId, key);
+    const stored = await readAccountStorageLayout(stateDb, parsed.entityId, parsed.counterpartyId, key);
     if (!stored) throw new Error(`STORAGE_LIVE_ACCOUNT_MISSING:${key.toString('hex')}`);
     const doc = validateStorageAccountDocValue(stored.doc);
     states.push(doc.state.leftPendingJClaims, doc.state.rightPendingJClaims);
@@ -567,27 +557,16 @@ const assertCurrentProjectionIntegrity = async (
   currentDb: RuntimeDbLike,
   walDb: RuntimeDbLike,
   walHead: StorageHead,
-  requireFrameHashes = true,
-): Promise<Map<string, StorageEntityHashDoc>> => {
+): Promise<void> => {
   await verifyLiveStorageIntegrity(currentDb);
-  const entityHashDocs = await readAllEntityHashDocs(currentDb);
   const materializedHeight = materializedHeightOf(walHead);
   if (materializedHeight > 0) {
     const frame = await readStorageFrameRecord(walDb, materializedHeight);
-    if (!frame?.entityHashes && requireFrameHashes) {
+    if (!frame?.canonicalEntityHashes || !frame.canonicalStateHash) {
       throw new Error(
-        `STORAGE_CURRENT_PROJECTION_FRAME_HASHES_MISSING:height=${materializedHeight}`,
+        `STORAGE_CURRENT_PROJECTION_CANONICAL_ROOTS_MISSING:height=${materializedHeight}`,
       );
     }
-    if (frame?.entityHashes) {
-      assertEntityHashesEqual(
-        toFrameEntityHashes(entityHashDocs.values()),
-        frame.entityHashes,
-        `currentMaterializedHeight=${materializedHeight}`,
-      );
-    }
-  } else if (entityHashDocs.size > 0) {
-    throw new Error('STORAGE_CURRENT_PROJECTION_UNEXPECTED_ENTITY_HASHES');
   }
 
   const boardChanged = await synchronizeCertifiedBoardNodes(walDb, currentDb);
@@ -599,7 +578,6 @@ const assertCurrentProjectionIntegrity = async (
         `board=${boardChanged}:consumption=${consumptionChanged}:accountJ=${accountJClaimChanged}`,
     );
   }
-  return entityHashDocs;
 };
 
 const pruneUnreachableAccountJClaimHistoryNodes = async (
@@ -650,7 +628,7 @@ export const recoverStorageDbFromHistory = async (options: {
   config: Required<StorageRuntimeConfig>;
   onPersistenceProgress?: StoragePersistenceProgressHook;
   verifyCurrentProjection?: boolean;
-}): Promise<{ recovered: boolean; entityHashDocs?: Map<string, StorageEntityHashDoc> }> => {
+}): Promise<{ recovered: boolean }> => {
   const walHead = await readHead(options.walDb, options.config);
   const rawCurrentHead = await readRawOrNull(options.db, KEY_HEAD);
   const currentHead = rawCurrentHead ? await readHead(options.db, options.config) : defaultStorageHead(options.config);
@@ -674,7 +652,6 @@ export const recoverStorageDbFromHistory = async (options: {
   }
   if (historyLatestHeight === 0) return { recovered: false };
 
-  let entityHashDocs: Map<string, StorageEntityHashDoc> | undefined;
   const headsMatch = Boolean(rawCurrentHead) && storageHeadsEqual(walHead, currentHead);
   const shouldVerifyCurrent = headsMatch && options.verifyCurrentProjection !== false;
   let currentProjectionInvalid = false;
@@ -683,7 +660,7 @@ export const recoverStorageDbFromHistory = async (options: {
     // than being copied into the disposable current projection.
     await verifyStorageTailIntegrity(options.walDb);
     try {
-      entityHashDocs = await assertCurrentProjectionIntegrity(
+      await assertCurrentProjectionIntegrity(
         options.db,
         options.walDb,
         walHead,
@@ -737,11 +714,11 @@ export const recoverStorageDbFromHistory = async (options: {
     : false;
   options.onPersistenceProgress?.('recovery-board-nodes-synchronized');
   const consumptionNodesChanged = headChanged
-    ? await synchronizeConsumptionNodes(options.walDb, options.db, batch)
+    ? await synchronizeConsumptionNodes(options.walDb, options.db, batch, options.walDb)
     : false;
   options.onPersistenceProgress?.('recovery-consumption-nodes-synchronized');
   const accountJClaimNodesChanged = headChanged
-    ? await synchronizeAccountJClaimNodes(options.walDb, options.db, batch)
+    ? await synchronizeAccountJClaimNodes(options.walDb, options.db, batch, options.walDb)
     : false;
   options.onPersistenceProgress?.('recovery-account-j-nodes-synchronized');
   if (
@@ -763,15 +740,14 @@ export const recoverStorageDbFromHistory = async (options: {
     recovered = true;
   }
   if (shouldVerifyCurrent || resetFromHistory || headChanged) {
-    entityHashDocs = await assertCurrentProjectionIntegrity(
+    await assertCurrentProjectionIntegrity(
       options.db,
       options.walDb,
       walHead,
-      shouldVerifyCurrent,
     );
     options.onPersistenceProgress?.('recovery-current-reverified');
   }
-  return { recovered, ...(entityHashDocs ? { entityHashDocs } : {}) };
+  return { recovered };
 };
 
 export type StorageFrameSaveResult = {
@@ -863,7 +839,7 @@ const runStorageSnapshotLifecycle = async (
   if (snapshotDue || snapshotRequiredByBytes) {
     options.onPersistenceProgress?.('snapshot-start');
     const startedAt = options.getPerfMs();
-    const projection = await recoverStorageDbFromHistory({
+    await recoverStorageDbFromHistory({
       db,
       walDb,
       config,
@@ -872,10 +848,6 @@ const runStorageSnapshotLifecycle = async (
         ? { onPersistenceProgress: options.onPersistenceProgress }
         : {}),
     });
-    if (projection.entityHashDocs) {
-      options.env.infrastructure ??= {};
-      options.env.infrastructure.storageEntityHashDocs = projection.entityHashDocs;
-    }
     const snapshot = await createSnapshot(
       db,
       walDb,
@@ -1007,7 +979,7 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   }
   const walDb = options.getRuntimeWalDb(options.env);
   const state = options.env.infrastructure ??= {};
-  const recovered = await recoverStorageDbFromHistory({
+  await recoverStorageDbFromHistory({
     db,
     walDb,
     config,
@@ -1017,9 +989,6 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
       : {}),
   });
   state.storageCurrentProjectionVerified = true;
-  if (recovered.entityHashDocs) {
-    state.storageEntityHashDocs = recovered.entityHashDocs;
-  }
   options.onPersistenceProgress?.('opened');
   const openMs = options.getPerfMs() - openStartedAt;
   const head = await readHead(walDb, config);
@@ -1287,25 +1256,18 @@ const prepareStorageStateCommitments = async (
   const materializedDels = shouldMaterialize
     ? buildBookDeletionsFromOverlay(overlayRecords)
     : [];
-  const cachedEntityHashDocs =
-    state.storageEntityHashDocs instanceof Map
-      ? state.storageEntityHashDocs as Map<string, StorageEntityHashDoc>
-      : undefined;
-  const preparedHashes = shouldMaterialize
-    ? await prepareStorageStateHashes({
+  const liveStateGraph = shouldMaterialize
+    ? await prepareLiveStateGraph({
         db,
         puts: materializedPuts,
         dels: materializedDels,
         ...(state.storagePersistedAccounts instanceof Map
           ? { previousAccounts: state.storagePersistedAccounts }
           : {}),
-        ...(cachedEntityHashDocs
-          ? { entityHashDocs: cachedEntityHashDocs }
-          : {}),
       })
     : null;
-  options.onPersistenceProgress?.('materialized-hashes-built');
-  checkpoint('materializedHashes');
+  options.onPersistenceProgress?.('materialized-graph-built');
+  checkpoint('materializedGraph');
 
   const bookGraphWrites = shouldMaterialize
     ? await prepareBookGraphWrites(prepared, materializedPuts, materializedDels)
@@ -1317,10 +1279,11 @@ const prepareStorageStateCommitments = async (
       };
   checkpoint('bookGraph');
 
-  const canonicalHashDue =
+  const canonicalHashDue = shouldMaterialize || (
     config.canonicalHashPeriodFrames > 0 &&
     (options.env.state.height === 1 ||
-      options.env.state.height % config.canonicalHashPeriodFrames === 0);
+      options.env.state.height % config.canonicalHashPeriodFrames === 0)
+  );
   const pendingNetworkOutputs =
     options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [];
   const runtimeComponentDigests = computeRuntimePostStateComponentDigests(
@@ -1405,7 +1368,7 @@ const prepareStorageStateCommitments = async (
   checkpoint('replicaHistoryScan');
   options.onPersistenceProgress?.('replica-metadata-read');
   return {
-    preparedHashes,
+    liveStateGraph,
     runtimeComponentDigests,
     runtimeMachine,
     runtimeStateHashes,
@@ -1490,12 +1453,7 @@ const buildStorageRuntimeFrame = (
       runtimeComponentDigests: commitments.runtimeComponentDigests,
       runtimeOutputRefs,
     }),
-    stateHash: commitments.preparedHashes?.stateHash ?? '',
-    hashMode: STORAGE_FRAME_FORMAT.hashMode,
     materializedState: shouldMaterialize,
-    ...(commitments.preparedHashes
-      ? { entityHashes: commitments.preparedHashes.entityHashes }
-      : {}),
     ...(commitments.runtimeStateHashes
       ? {
           canonicalStateHash:
@@ -1705,12 +1663,10 @@ const buildStorageCommitBatches = (
   // authoritative commit and the disposable current-cache write from losing
   // Patricia pages that cannot be reconstructed from header-only documents.
   if (prepared.shouldMaterialize) {
-    const hashes = commitments.preparedHashes;
-    if (!hashes) throw new Error('STORAGE_MATERIALIZED_HASHES_MISSING');
-    for (const key of hashes.docDels) walBatch.del(key);
-    for (const row of hashes.docPuts) walBatch.put(row.key, row.value);
-    for (const key of hashes.merkleDels) walBatch.del(key);
-    for (const row of hashes.merklePuts) walBatch.put(row.key, row.value);
+    const graph = commitments.liveStateGraph;
+    if (!graph) throw new Error('STORAGE_MATERIALIZED_GRAPH_MISSING');
+    for (const key of graph.dels) walBatch.del(key);
+    for (const row of graph.puts) walBatch.put(row.key, row.value);
     for (const key of commitments.bookGraphWrites.dels) walBatch.del(key);
     for (const row of commitments.bookGraphWrites.puts) {
       walBatch.put(row.key, row.value);
@@ -1743,12 +1699,10 @@ const buildStorageCommitBatches = (
   for (const hash of safeAccountJClaimDeletes) {
     currentBatch.del(keyAccountJClaimNode(hash));
   }
-  const hashes = commitments.preparedHashes;
-  if (hashes) {
-    for (const key of hashes.docDels) currentBatch.del(key);
-    for (const item of hashes.docPuts) currentBatch.put(item.key, item.value);
-    for (const key of hashes.merkleDels) currentBatch.del(key);
-    for (const item of hashes.merklePuts) {
+  const graph = commitments.liveStateGraph;
+  if (graph) {
+    for (const key of graph.dels) currentBatch.del(key);
+    for (const item of graph.puts) {
       currentBatch.put(item.key, item.value);
     }
   }
@@ -1848,8 +1802,8 @@ const commitStorageFrame = async (
     const accountCache = options.env.infrastructure.storagePersistedAccounts instanceof Map
       ? options.env.infrastructure.storagePersistedAccounts
       : new Map();
-    for (const key of commitments.preparedHashes?.accountCacheDels ?? []) accountCache.delete(key);
-    for (const [key, account] of commitments.preparedHashes?.accountCachePuts ?? []) {
+    for (const key of commitments.liveStateGraph?.accountCacheDels ?? []) accountCache.delete(key);
+    for (const [key, account] of commitments.liveStateGraph?.accountCachePuts ?? []) {
       accountCache.set(key, account);
     }
     options.env.infrastructure.storagePersistedAccounts = accountCache;
@@ -1877,11 +1831,6 @@ const commitStorageFrame = async (
     options.env,
     batches.safeAccountJClaimDeletes,
   );
-  if (commitments.preparedHashes) {
-    state.storageEntityHashDocs =
-      commitments.preparedHashes.entityHashDocs;
-  }
-
   let historyViewPrunedBytes = 0;
   let historyViewRetainedBytes = 0;
   let historyViewPrunedKeys = 0;

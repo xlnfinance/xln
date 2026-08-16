@@ -1,24 +1,46 @@
 import type { RadixMerkleRadix } from './radix-merkle';
 
-export type RadixValueLeaf<K, V> = Readonly<{
-  kind: 'leaf';
-  key: K;
-  keyBytes: Uint8Array;
-  path: readonly number[];
-  value: V;
-  /** Cached leaf commitment; persisted only in this node's parent reference. */
-  hash: string;
+export type PersistentRadixValueMapOptions<K, V> = Readonly<{
+  radix: RadixMerkleRadix;
+  /** Own an immutable key for a leaf/DB record. Not a Merkle seal. */
+  ownKey(key: K): K;
+  keyBytes(key: K): Uint8Array;
+  valueHash(value: V): string;
+  /** Own an immutable value for a leaf. Not a Merkle seal. */
+  ownValue(value: V): V;
+  /** Derived indexes may reuse the path-copy trie without paying for a second commitment. */
+  commitment?: boolean;
 }>;
 
-export type RadixValueBranch<K, V> = Readonly<{
-  kind: 'branch';
-  path: readonly number[];
-  /** Slot-indexed fanout: canonical order is structural, never sorted at runtime. */
-  children: readonly (RadixValueNode<K, V> | undefined)[];
-  /** Parent-owned child commitments in the same slot layout. */
-  edgeHashes: readonly (string | undefined)[];
-  hash: string;
+export type RadixHashStats = Readonly<{
+  valueHashes: number;
+  leafHashes: number;
+  branchHashes: number;
 }>;
+
+export type RadixFoldMutation<K, V> =
+  | Readonly<{ kind: 'put'; key: K; value: V }>
+  | Readonly<{ kind: 'delete'; key: K }>;
+
+/** Mutable `.hash` is a derived RAM cache. Disk records never store it on this node. */
+export type RadixValueLeaf<K, V> = {
+  readonly kind: 'leaf';
+  readonly key: K;
+  readonly keyBytes: Uint8Array;
+  readonly path: readonly number[];
+  readonly value: V;
+  hash?: string;
+};
+
+export type RadixValueBranch<K, V> = {
+  readonly kind: 'branch';
+  readonly path: readonly number[];
+  /** Slot-indexed fanout: canonical order is structural, never sorted at runtime. */
+  readonly children: readonly (RadixValueNode<K, V> | undefined)[];
+  /** Parent-owned child commitments. Missing means this slot is not sealed yet. */
+  readonly edgeHashes: (string | undefined)[];
+  hash?: string;
+};
 
 export type RadixValueNode<K, V> = RadixValueLeaf<K, V> | RadixValueBranch<K, V>;
 

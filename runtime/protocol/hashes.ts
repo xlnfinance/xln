@@ -4,12 +4,24 @@ declare const StateHashBrand: unique symbol;
 declare const EvidenceHashBrand: unique symbol;
 declare const BoardHashBrand: unique symbol;
 declare const BoardProposalHashBrand: unique symbol;
+declare const RuntimeOutputPayloadHashBrand: unique symbol;
+declare const EntityContextPayloadHashBrand: unique symbol;
+declare const RuntimeMachineRootHashBrand: unique symbol;
 
 export type FrameHash = string & { readonly [FrameHashBrand]: typeof FrameHashBrand };
 export type StateHash = string & { readonly [StateHashBrand]: typeof StateHashBrand };
 export type EvidenceHash = string & { readonly [EvidenceHashBrand]: typeof EvidenceHashBrand };
 export type BoardHash = string & { readonly [BoardHashBrand]: typeof BoardHashBrand };
 export type BoardProposalHash = string & { readonly [BoardProposalHashBrand]: typeof BoardProposalHashBrand };
+export type RuntimeOutputPayloadHash = string & {
+  readonly [RuntimeOutputPayloadHashBrand]: typeof RuntimeOutputPayloadHashBrand;
+};
+export type EntityContextPayloadHash = string & {
+  readonly [EntityContextPayloadHashBrand]: typeof EntityContextPayloadHashBrand;
+};
+export type RuntimeMachineRootHash = string & {
+  readonly [RuntimeMachineRootHashBrand]: typeof RuntimeMachineRootHashBrand;
+};
 
 const requireBytes32 = (value: string, code: string): string => {
   if (!/^0x[0-9a-fA-F]{64}$/.test(value)) throw new Error(`${code}:${value}`);
@@ -30,3 +42,12 @@ export const toBoardHash = (value: string): BoardHash =>
 
 export const toBoardProposalHash = (value: string): BoardProposalHash =>
   requireBytes32(value, 'PROTOCOL_BOARD_PROPOSAL_HASH_INVALID').toLowerCase() as BoardProposalHash;
+
+export const toRuntimeOutputPayloadHash = (value: string): RuntimeOutputPayloadHash =>
+  requireBytes32(value, 'PROTOCOL_RUNTIME_OUTPUT_PAYLOAD_HASH_INVALID').toLowerCase() as RuntimeOutputPayloadHash;
+
+export const toEntityContextPayloadHash = (value: string): EntityContextPayloadHash =>
+  requireBytes32(value, 'PROTOCOL_ENTITY_CONTEXT_PAYLOAD_HASH_INVALID').toLowerCase() as EntityContextPayloadHash;
+
+export const toRuntimeMachineRootHash = (value: string): RuntimeMachineRootHash =>
+  requireBytes32(value, 'PROTOCOL_RUNTIME_MACHINE_ROOT_HASH_INVALID').toLowerCase() as RuntimeMachineRootHash;

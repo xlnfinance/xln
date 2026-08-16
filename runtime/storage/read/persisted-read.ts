@@ -255,7 +255,7 @@ const createPersistedStorageEntityReadApi = (
           // The counterparty may be remote and have no Entity core document in
           // this Runtime. Graph projection creates that endpoint separately.
         }
-        for (const entry of frame?.entityHashes ?? []) {
+        for (const entry of frame?.canonicalEntityHashes ?? []) {
           const entityId = String(entry?.entityId || '').toLowerCase();
           if (entityId) entityIds.add(entityId);
         }

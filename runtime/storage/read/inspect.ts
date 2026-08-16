@@ -3,16 +3,17 @@ import {
   KEY_DIFF,
   KEY_FRAME,
   KEY_LIVE_ACCOUNT,
+  KEY_LIVE_ACCOUNT_BRANCH,
   KEY_LIVE_ACCOUNT_FIELD,
+  KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_BOOK,
+  KEY_LIVE_BOOK_BRANCH,
+  KEY_LIVE_BOOK_LEAF,
   KEY_LIVE_ENTITY,
   KEY_LIVE_REPLICA_META,
   KEY_CERTIFIED_BOARD_NODE,
   KEY_CONSUMPTION_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
-  KEY_MERKLE_BRANCH,
-  KEY_MERKLE_LEAF,
-  KEY_MERKLE_ROOT,
   KEY_SNAPSHOT_ACCOUNT,
   KEY_SNAPSHOT_BOOK,
   KEY_SNAPSHOT_ENTITY,
@@ -51,9 +52,10 @@ export const inspectStorage = async (options: {
     liveAccountFieldStats,
     liveBookStats,
     liveReplicaMetaStats,
-    merkleRootStats,
-    merkleBranchStats,
-    merkleLeafStats,
+    accountGraphBranchStats,
+    accountGraphLeafStats,
+    bookGraphBranchStats,
+    bookGraphLeafStats,
     certifiedBoardNodeStats,
     consumptionNodeStats,
     accountJClaimNodeStats,
@@ -71,9 +73,10 @@ export const inspectStorage = async (options: {
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_ACCOUNT_FIELD])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_BOOK])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_REPLICA_META])),
-    measurePrefixBytes(db, Buffer.from([KEY_MERKLE_ROOT])),
-    measurePrefixBytes(db, Buffer.from([KEY_MERKLE_BRANCH])),
-    measurePrefixBytes(db, Buffer.from([KEY_MERKLE_LEAF])),
+    measurePrefixBytes(db, Buffer.from([KEY_LIVE_ACCOUNT_BRANCH])),
+    measurePrefixBytes(db, Buffer.from([KEY_LIVE_ACCOUNT_LEAF])),
+    measurePrefixBytes(db, Buffer.from([KEY_LIVE_BOOK_BRANCH])),
+    measurePrefixBytes(db, Buffer.from([KEY_LIVE_BOOK_LEAF])),
     measurePrefixBytes(db, Buffer.from([KEY_CERTIFIED_BOARD_NODE])),
     measurePrefixBytes(db, Buffer.from([KEY_CONSUMPTION_NODE])),
     measurePrefixBytes(db, Buffer.from([KEY_ACCOUNT_J_CLAIM_NODE])),
@@ -91,9 +94,10 @@ export const inspectStorage = async (options: {
     liveAccountFieldStats.bytes +
     liveBookStats.bytes +
     liveReplicaMetaStats.bytes +
-    merkleRootStats.bytes +
-    merkleBranchStats.bytes +
-    merkleLeafStats.bytes +
+    accountGraphBranchStats.bytes +
+    accountGraphLeafStats.bytes +
+    bookGraphBranchStats.bytes +
+    bookGraphLeafStats.bytes +
     certifiedBoardNodeStats.bytes +
     consumptionNodeStats.bytes +
     accountJClaimNodeStats.bytes;
@@ -110,9 +114,10 @@ export const inspectStorage = async (options: {
     liveAccountFieldCount: liveAccountFieldStats.count,
     liveAccountFieldBytes: liveAccountFieldStats.bytes,
     liveBookCount: liveBookStats.count,
-    merkleRootCount: merkleRootStats.count,
-    merkleBranchCount: merkleBranchStats.count,
-    merkleLeafCount: merkleLeafStats.count,
+    accountGraphBranchCount: accountGraphBranchStats.count,
+    accountGraphLeafCount: accountGraphLeafStats.count,
+    bookGraphBranchCount: bookGraphBranchStats.count,
+    bookGraphLeafCount: bookGraphLeafStats.count,
     certifiedBoardNodeCount: certifiedBoardNodeStats.count,
     consumptionNodeCount: consumptionNodeStats.count,
     accountJClaimNodeCount: accountJClaimNodeStats.count,

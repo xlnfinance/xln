@@ -9,6 +9,7 @@ import {
   KEY_SNAPSHOT_GRAPH,
   STORAGE_SCHEMA_VERSION,
   keyLiveAccount,
+  keySnapshotAccount,
   keySnapshotGraph,
 } from '../../../storage/keys';
 import { inspectSnapshotGraphRows } from '../../../storage/read/snapshot-graph-integrity';
@@ -56,7 +57,7 @@ test('Account snapshot copies and relinks the exact Patricia graph without live 
   headBatch.put(KEY_HEAD, encodeBuffer(head()));
   await headBatch.write();
 
-  await createSnapshot(source, snapshot, 1, 1_000);
+  const created = await createSnapshot(source, snapshot, 1, 1_000);
   const restored = await readSnapshotDocs(snapshot, 1);
   const accountDoc = restored.find(
     (doc): doc is Extract<(typeof restored)[number], { family: 'account' }> =>
@@ -68,6 +69,7 @@ test('Account snapshot copies and relinks the exact Patricia graph without live 
     Number.parseInt(key.slice(0, 2), 16) === KEY_SNAPSHOT_GRAPH);
   expect(graphKeys.length).toBeGreaterThan(0);
   expect(await inspectSnapshotGraphRows(snapshot, 1)).toBe(graphKeys.length);
+  expect(created.docCount).toBe(graphKeys.length + 1);
 
   const corruptKey = graphKeys.at(-1);
   if (!corruptKey) throw new Error('TEST_SNAPSHOT_ACCOUNT_GRAPH_MISSING');
@@ -108,5 +110,75 @@ test('snapshot graph verification rejects an orphan row', async () => {
 
   await expect(inspectSnapshotGraphRows(snapshot, 1)).rejects.toThrow(
     'STORAGE_SNAPSHOT_GRAPH_OWNER_MISSING',
+  );
+});
+
+test('snapshot graph verification rejects an Account namespace absent from its header', async () => {
+  const source = new MemoryRuntimeDb();
+  const snapshot = new MemoryRuntimeDb();
+  const account = makeAccount(entityId, counterpartyId);
+  const rootKey = keyLiveAccount(entityId, counterpartyId);
+  const layout = await prepareAccountStorageLayout(
+    source,
+    entityId,
+    counterpartyId,
+    rootKey,
+    account,
+  );
+  const liveBatch = source.batch();
+  for (const row of layout.puts) liveBatch.put(row.key, row.value);
+  await liveBatch.write();
+  const headBatch = snapshot.batch();
+  headBatch.put(KEY_HEAD, encodeBuffer(head()));
+  await headBatch.write();
+  await createSnapshot(source, snapshot, 1, 1_000);
+
+  const graphHex = [...snapshot.rows.keys()].find(key =>
+    Number.parseInt(key.slice(0, 2), 16) === KEY_SNAPSHOT_GRAPH);
+  if (!graphHex) throw new Error('TEST_SNAPSHOT_ACCOUNT_GRAPH_MISSING');
+  const graphKey = Buffer.from(graphHex, 'hex');
+  const unknownNamespaceLiveKey = Buffer.from(graphKey.subarray(9));
+  unknownNamespaceLiveKey[65] = 0xfe;
+  const batch = snapshot.batch();
+  batch.put(
+    keySnapshotGraph(1, unknownNamespaceLiveKey),
+    Buffer.from(snapshot.rows.get(graphHex)!),
+  );
+  await batch.write();
+
+  await expect(inspectSnapshotGraphRows(snapshot, 1)).rejects.toThrow(
+    'STORAGE_SNAPSHOT_GRAPH_ACCOUNT_NAMESPACE_UNDECLARED',
+  );
+});
+
+test('snapshot graph verification typeguards the owning Account header', async () => {
+  const source = new MemoryRuntimeDb();
+  const snapshot = new MemoryRuntimeDb();
+  const account = makeAccount(entityId, counterpartyId);
+  const rootKey = keyLiveAccount(entityId, counterpartyId);
+  const layout = await prepareAccountStorageLayout(
+    source,
+    entityId,
+    counterpartyId,
+    rootKey,
+    account,
+  );
+  const liveBatch = source.batch();
+  for (const row of layout.puts) liveBatch.put(row.key, row.value);
+  await liveBatch.write();
+  const headBatch = snapshot.batch();
+  headBatch.put(KEY_HEAD, encodeBuffer(head()));
+  await headBatch.write();
+  await createSnapshot(source, snapshot, 1, 1_000);
+
+  const corruptHeader = snapshot.batch();
+  corruptHeader.put(
+    keySnapshotAccount(1, entityId, counterpartyId),
+    encodeBuffer({ version: 1, envelope: {}, trees: [], unexpected: true }),
+  );
+  await corruptHeader.write();
+
+  await expect(inspectSnapshotGraphRows(snapshot, 1)).rejects.toThrow(
+    'STORAGE_ACCOUNT_MANIFEST_FIELDS',
   );
 });

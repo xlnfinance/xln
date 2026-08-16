@@ -6,21 +6,17 @@
 import type { EntityInfraContext } from '../../types/entity/infra-context';
 import { validateEntityInfraContext } from '../../entity/consensus/frame/infra-context-validation';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
+import {
+  toEntityContextPayloadHash,
+  type EntityContextPayloadHash,
+} from '../../protocol/hashes';
 import { decodeValidatedBuffer, encodeBuffer } from '../codec/codec';
 import { keyEntityContextPayload } from '../keys';
 import type {
-  EntityContextPayloadHash,
   RuntimeDbLike,
 } from '../types';
 
 export const MAX_ENTITY_CONTEXT_PAYLOAD_BYTES = 10_000;
-
-const toEntityContextPayloadHash = (value: string): EntityContextPayloadHash => {
-  if (!/^0x[0-9a-f]{64}$/.test(value)) {
-    throw new Error(`STORAGE_ENTITY_CONTEXT_HASH_INVALID:${value}`);
-  }
-  return value as EntityContextPayloadHash;
-};
 
 const hashContext = (value: Uint8Array): EntityContextPayloadHash =>
   toEntityContextPayloadHash(computeIntegrityDigest(value).toLowerCase());

@@ -65,10 +65,6 @@ const EXTERNAL_RUNTIME_CONSUMERS: Readonly<Record<string, readonly ExternalRunti
     consumer: 'frontend/src/lib/qa/types.ts',
     specifier: '@xln/runtime/qa/types',
   }],
-  'runtime/storage/schema/merkle-namespace-tags.ts': [{
-    consumer: 'frontend/src/lib/components/Settings/IndexedDbInspector.svelte',
-    specifier: '@xln/runtime/storage/schema/merkle-namespace-tags',
-  }],
 };
 
 type NamedBinding = { localName: string; reexport: boolean };

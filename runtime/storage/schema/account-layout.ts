@@ -161,7 +161,8 @@ const decodeTreeDescriptor = (value: unknown, index: number): StorageAccountTree
   };
 };
 
-const decodeManifest = (value: Buffer): AccountGraphManifest => {
+/** Strict boundary decoder shared by recovery and snapshot graph verification. */
+export const decodeAccountGraphManifest = (value: Buffer): AccountGraphManifest => {
   const manifest = record(decodeBuffer(value), 'STORAGE_ACCOUNT_MANIFEST_INVALID');
   exactKeys(manifest, ['version', 'envelope', 'trees'], 'STORAGE_ACCOUNT_MANIFEST');
   if (manifest['version'] !== 1 || !Array.isArray(manifest['trees'])) {
@@ -227,7 +228,7 @@ export const prepareAccountStorageDelete = async (
 ): Promise<Buffer[]> => {
   const root = await readRawOrNull(db, rootKey);
   if (!root) return [];
-  decodeManifest(root);
+  decodeAccountGraphManifest(root);
   return [
     rootKey,
     ...await accountTreeStorageKeys(db, entityId, counterpartyId),
@@ -267,7 +268,7 @@ export const readAccountStorageLayout = async (
 ): Promise<{ doc: StorageAccountDoc; logicalValue: Buffer; representation: 'graph' } | null> => {
   const root = await readRawOrNull(db, rootKey);
   if (!root) return null;
-  const manifest = decodeManifest(root);
+  const manifest = decodeAccountGraphManifest(root);
   const replica = record(
     await readAccountEnvelopeGraph(db, entityId, counterpartyId, manifest.envelope),
     'STORAGE_ACCOUNT_ENVELOPE_INVALID',

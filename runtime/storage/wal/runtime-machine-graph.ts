@@ -5,6 +5,9 @@
  */
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 import {
+  toRuntimeMachineRootHash,
+} from '../../protocol/hashes';
+import {
   PersistentRadixValueMap,
   type PersistentRadixBranchRecord,
   type PersistentRadixNodeRecord,
@@ -29,7 +32,6 @@ import {
 import type {
   RuntimeDbLike,
   RuntimeMachineGraphRoot,
-  RuntimeMachineRootHash,
 } from '../types';
 import { validateDurableRuntimeMachineSnapshot } from './runtime-machine-schema';
 
@@ -138,12 +140,12 @@ export const storageValueGraphPathBytes = (path: StorageValueGraphPath): Uint8Ar
 
 export const STORAGE_VALUE_GRAPH_OPTIONS = Object.freeze({
   radix: 16 as const,
-  sealKey: (path: StorageValueGraphPath): StorageValueGraphPath =>
+  ownKey: (path: StorageValueGraphPath): StorageValueGraphPath =>
     cloneDecoded(path, decodeStorageValueGraphPath, 'STORAGE_VALUE_GRAPH_PATH'),
   keyBytes: storageValueGraphPathBytes,
   valueHash: (value: StorageValueGraphValue): string =>
     computeIntegrityDigest(encodeBuffer(value, { omitSymbolKeys: true })).toLowerCase(),
-  sealValue: (value: StorageValueGraphValue): StorageValueGraphValue =>
+  ownValue: (value: StorageValueGraphValue): StorageValueGraphValue =>
     cloneDecoded(value, decodeStorageValueGraphValue, 'STORAGE_VALUE_GRAPH_VALUE'),
 });
 
@@ -237,13 +239,6 @@ export const storageValueGraphBranchValue = (branch: PersistentRadixBranchRecord
   })),
 });
 
-const toRootHash = (value: string): RuntimeMachineRootHash => {
-  if (!/^0x[0-9a-f]{64}$/.test(value)) {
-    throw new Error(`STORAGE_RUNTIME_MACHINE_ROOT_HASH_INVALID:${value}`);
-  }
-  return value as RuntimeMachineRootHash;
-};
-
 export const prepareRuntimeMachineGraphRows = (
   height: number,
   machine: Readonly<Record<string, unknown>> | undefined,
@@ -257,7 +252,10 @@ export const prepareRuntimeMachineGraphRows = (
     ? boundedRow(keyRuntimeMachineBranch(height, record.path), storageValueGraphBranchValue(record))
     : boundedRow(keyRuntimeMachineLeaf(height, record.keyBytes), record.value));
   return {
-    root: Object.freeze({ rootHash: toRootHash(graph.rootHash()), leafCount: graph.size }),
+    root: Object.freeze({
+      rootHash: toRuntimeMachineRootHash(graph.rootHash()),
+      leafCount: graph.size,
+    }),
     rows,
   };
 };
@@ -269,7 +267,7 @@ export const decodeRuntimeMachineGraphRoot = (
   const source = record(value, code);
   exactKeys(source, ['rootHash', 'leafCount'], code);
   return Object.freeze({
-    rootHash: toRootHash(String(source['rootHash'])),
+    rootHash: toRuntimeMachineRootHash(String(source['rootHash'])),
     leafCount: index(source['leafCount'], `${code}_LEAF_COUNT`),
   });
 };

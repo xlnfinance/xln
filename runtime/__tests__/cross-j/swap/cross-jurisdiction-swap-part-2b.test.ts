@@ -58,7 +58,6 @@ import { createDefaultDelta } from '../../../account/state/delta';
 
 import { cloneAccountReplica } from '../../../account/state/state-clone';
 import { cloneEntityReplica } from '../../../entity/replica/replica-clone';
-import { cloneEntityState } from '../../../entity/state-clone';
 
 import { projectAccountDoc, projectEntityCoreDoc } from '../../../storage/read/projections';
 
@@ -899,7 +898,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         },
       }),
     );
-    const before = cloneEntityState(capacityState);
+    const beforeAccount = capacityState.accounts.get(sourceUser);
+    const beforeRoute = capacityState.crossJurisdictionSwaps?.get(route.orderId);
     const frameTxs = prepareLocallyAuthoredEntityTxs(
       env,
       capacityState,
@@ -910,7 +910,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     await expect(
       applyEntityFrameWithMaterializedTestInfraContext(env, capacityState, frameTxs, env.state.timestamp),
     ).rejects.toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
-    expect(capacityState).toEqual(before);
+    expect(capacityState.accounts.get(sourceUser)).toBe(beforeAccount);
+    expect(capacityState.crossJurisdictionSwaps?.get(route.orderId)).toBe(beforeRoute);
     expect(capacityState.accounts.get(sourceUser)!.mempool).toHaveLength(
       LIMITS.ACCOUNT_MEMPOOL_SIZE - 1,
     );

@@ -86,7 +86,7 @@ export const buildMarketSnapshotForReplica = (
   depth: number,
 ): MarketSnapshotPayload => {
   const books = replica?.state?.orderbookExt?.books;
-  const book = books instanceof Map ? books.get(pairId) ?? null : null;
+  const book = books?.get(pairId) ?? null;
   const bids = book ? extractMarketSideLevels(book, 0, depth) : [];
   const asks = book ? extractMarketSideLevels(book, 1, depth) : [];
   const bestBid = bids[0];
@@ -137,9 +137,7 @@ export const buildMarketPairCatalogForReplica = (
   const jurisdictionRef = getJurisdictionIdentityRef(replica?.state?.config?.jurisdiction);
   if (!jurisdictionRef) throw new Error(`MARKET_JURISDICTION_REF_MISSING:${hubEntityId}`);
   const books = replica?.state?.orderbookExt?.books;
-  const pairIds = books instanceof Map
-    ? Array.from(books.keys()).sort()
-    : [];
+  const pairIds = books ? Array.from(books.keys()).sort() : [];
   return {
     format: 'market-pair-catalog',
     hubEntityId,

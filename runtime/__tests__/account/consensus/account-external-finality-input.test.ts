@@ -6,9 +6,11 @@ import {
   createAccountDisputeStartedInput,
 } from '../../../account/input';
 import { cloneIsolatedAccountInput } from '../../../protocol/state/account-input-clone';
+import { safeStringify } from '../../../protocol/serialization';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { createEmptyEnv } from '../../../runtime';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { addr, makeAccount } from '../../helpers/cross-j';
 
 test('authenticated J finality enters the canonical AccountInput boundary', async () => {
@@ -18,22 +20,27 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
     chainId: 31_337,
     depositoryAddress: addr('dd'),
   });
-  const delta = account.state.deltas.get(1)!;
-  delta.collateral = 7n;
-  delta.ondelta = 3n;
-  delta.offdelta = -2n;
-  delta.leftHold = 1n;
-  const omitted = createDefaultDelta(2);
-  account.state.deltas.set(2, omitted);
-  omitted.collateral = 11n;
-  omitted.ondelta = -4n;
-  omitted.offdelta = 9n;
-  omitted.leftHold = 3n;
-  omitted.rightHold = 5n;
-  omitted.leftAllowance = 6n;
-  omitted.rightAllowance = 7n;
-  account.state.pulls = new Map([
-    ['stale-after-finality', {
+  const token1 = {
+    ...account.state.deltas.get(1)!,
+    collateral: 7n,
+    ondelta: 3n,
+    offdelta: -2n,
+    leftHold: 1n,
+  };
+  const token2 = {
+    ...createDefaultDelta(2),
+    collateral: 11n,
+    ondelta: -4n,
+    offdelta: 9n,
+    leftHold: 3n,
+    rightHold: 5n,
+    leftAllowance: 6n,
+    rightAllowance: 7n,
+  };
+  account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [[1, token1], [2, token2]]);
+  account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [[
+    'stale-after-finality',
+    {
       pullId: 'stale-after-finality',
       tokenId: 1,
       amount: -1n,
@@ -43,8 +50,8 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
       partialRoot: `0x${'bb'.repeat(32)}`,
       createdHeight: 1,
       createdTimestamp: 1,
-    }],
-  ]);
+    },
+  ]]);
   account.mempool = [{
     type: 'j_event_claim',
     data: {
@@ -175,7 +182,7 @@ test('invalid DisputeStarted finality leaves Account byte-identical', async () =
   const leftEntity = `0x${'11'.repeat(32)}`;
   const rightEntity = `0x${'22'.repeat(32)}`;
   const account = makeAccount(leftEntity, rightEntity);
-  const before = structuredClone(account);
+  const before = safeStringify(account);
   const input = createAccountDisputeStartedInput(account.state, leftEntity, {
     kind: 'dispute_started',
     starterEntityId: rightEntity,
@@ -199,7 +206,7 @@ test('invalid DisputeStarted finality leaves Account byte-identical', async () =
       input,
     ),
   ).rejects.toThrow('ACCOUNT_DISPUTE_CLOCK_MISMATCH:100:100:10:10:10:10');
-  expect(account).toEqual(before);
+  expect(safeStringify(account)).toBe(before);
 });
 
 test('zero-window DisputeStarted accepts the exact same-second deadline', async () => {

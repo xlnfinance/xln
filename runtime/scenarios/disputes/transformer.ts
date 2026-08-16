@@ -262,12 +262,16 @@ const advancePastDisputeTimeout = async (
   return await advanceScenarioPastDisputeTimeout(env, jadapter, timeoutUnixSeconds);
 };
 
-const transformerClauseArguments = (encoded: string, context: string): string => {
+const transformerClauseArguments = (
+  encoded: string,
+  context: string,
+  clauseIndex = 0,
+): string => {
   if (encoded === '0x') throw new Error(`DISPUTE_TRANSFORMER_ARGUMENTS_EMPTY:${context}`);
   const coder = ethers.AbiCoder.defaultAbiCoder();
   const [clauses] = coder.decode(['bytes[]'], encoded) as unknown as [string[]];
-  const clause = clauses[0];
-  if (!clause) throw new Error(`DISPUTE_TRANSFORMER_CLAUSE_MISSING:${context}`);
+  const clause = clauses[clauseIndex];
+  if (!clause) throw new Error(`DISPUTE_TRANSFORMER_CLAUSE_MISSING:${context}:${clauseIndex}`);
   return clause;
 };
 
@@ -815,34 +819,47 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     // state; dispute finality executes finalProofbody + side-timestamped args,
     // including HTLC payments that never became a bilateral frame.
     const finalProofbody = finalization.finalProofbody;
-    const transformer = finalProofbody.transformers[0];
-    if (!transformer || finalProofbody.transformers.length !== 1) {
-      throw new Error(`DISPUTE_TRANSFORMER_CANONICAL_CLAUSE_COUNT:${finalProofbody.transformers.length}`);
+    const expectedCanonicalClauses = Number(
+      (signedSnapshot?.plan.paymentHashlocks.length ?? 0) > 0,
+    ) + Number(
+      (signedSnapshot?.plan.leftSwapOfferIds.length ?? 0) > 0
+      || (signedSnapshot?.plan.rightSwapOfferIds.length ?? 0) > 0,
+    );
+    if (finalProofbody.transformers.length !== expectedCanonicalClauses) {
+      throw new Error(
+        `DISPUTE_TRANSFORMER_CANONICAL_CLAUSE_COUNT:`
+        + `actual=${finalProofbody.transformers.length}:expected=${expectedCanonicalClauses}`,
+      );
     }
     const finalizedBlock = await jadapter.provider.getBlock('latest');
     if (!finalizedBlock) throw new Error('DISPUTE_TRANSFORMER_FINALIZED_BLOCK_MISSING');
     const startedByLeft = finalization.startedByLeft;
-    const transformed = await jadapter.deltaTransformer.applyBatch.staticCall(
-      finalProofbody.offdeltas,
-      finalProofbody.tokenIds,
-      transformer.encodedBatch,
-      transformerClauseArguments(
-        startedByLeft ? finalization.starterArguments : finalization.otherArguments,
-        'expected.left',
-      ),
-      transformerClauseArguments(
-        startedByLeft ? finalization.otherArguments : finalization.starterArguments,
-        'expected.right',
-      ),
-      startedByLeft ? disputeStartUnix : finalizedBlock.timestamp,
-      startedByLeft ? finalizedBlock.timestamp : disputeStartUnix,
-      alice.id,
-      hub.id,
-      disputeStartUnix,
-      timeoutUnix,
-      finalProofbody.leftResponseSeconds,
-      finalProofbody.rightResponseSeconds,
-    );
+    let transformed = finalProofbody.offdeltas;
+    for (const [clauseIndex, transformer] of finalProofbody.transformers.entries()) {
+      transformed = await jadapter.deltaTransformer.applyBatch.staticCall(
+        transformed,
+        finalProofbody.tokenIds,
+        transformer.encodedBatch,
+        transformerClauseArguments(
+          startedByLeft ? finalization.starterArguments : finalization.otherArguments,
+          'expected.left',
+          clauseIndex,
+        ),
+        transformerClauseArguments(
+          startedByLeft ? finalization.otherArguments : finalization.starterArguments,
+          'expected.right',
+          clauseIndex,
+        ),
+        startedByLeft ? disputeStartUnix : finalizedBlock.timestamp,
+        startedByLeft ? finalizedBlock.timestamp : disputeStartUnix,
+        alice.id,
+        hub.id,
+        disputeStartUnix,
+        timeoutUnix,
+        finalProofbody.leftResponseSeconds,
+        finalProofbody.rightResponseSeconds,
+      );
+    }
     const transformedByToken = new Map(
       finalProofbody.tokenIds.map((tokenId, index) => [Number(tokenId), transformed[index]!] as const),
     );
@@ -853,7 +870,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
       if (transformedOffdelta === undefined) {
         throw new Error(`DISPUTE_TRANSFORMER_FINAL_DELTA_MISSING:${tokenId}`);
       }
-      const input = { ...baseInput, offdelta: transformedOffdelta };
+      const input = { ...baseInput, offdelta: BigInt(transformedOffdelta) };
       const expected = deriveDisputeTokenFinalization({ tokenId, ...input });
       const actual = {
         leftReserve: await jadapter.getReserves(alice.id, tokenId),

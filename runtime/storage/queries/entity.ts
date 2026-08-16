@@ -1,7 +1,6 @@
 import {
   inspectStorage,
   loadEntityAccountDocFromStorage,
-  loadEntityStateFromStorage,
   loadEntityViewPageFromStorage,
   readStorageHead,
   type StorageHead,
@@ -114,16 +113,34 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     entityId: string,
     height?: number,
   ): Promise<EntityState | null> => {
-    const state = await loadEntityStateFromStorage({
-      env,
-      tryOpenDb: deps.tryOpenRuntimeWalDb,
-      getRuntimeDb: deps.getRuntimeWalDb,
-      entityId,
-      ...(height === undefined ? {} : { height }),
-      liveStateReadable: false,
+    return deps.withStorageConsistentRead(env, async () => {
+      // Opening the source handle is part of the borrow contract even when a
+      // caller supplies an exact historical height.
+      const latestHeight = await deps.resolvePersistedLatestHeight(env);
+      const targetHeight = height ?? latestHeight;
+      const restored = await deps.loadEnvFromStorageByReplay(
+        env.runtimeId,
+        env.runtimeSeed,
+        targetHeight,
+        {
+          prunedTargetReturnsNull: true,
+          borrowRuntimeWalFrom: env,
+          readOnly: true,
+        },
+      );
+      if (!restored) return null;
+      try {
+        const normalizedEntityId = entityId.trim().toLowerCase();
+        const replica = [...restored.env.state.eReplicas.values()].find(
+          candidate => candidate.entityId.trim().toLowerCase() === normalizedEntityId,
+        );
+        if (!replica) return null;
+        assertCertifiedJHistoryIntegrity(replica.state);
+        return replica.state;
+      } finally {
+        await deps.closeRuntimeDb(restored.env);
+      }
     });
-    if (state) assertCertifiedJHistoryIntegrity(state);
-    return state;
   };
 
   const loadEntityAccountDocFromStorageDb = (

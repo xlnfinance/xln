@@ -1,4 +1,3 @@
-import { LIMITS } from '../../config/constants';
 import {
   FinancialDataCorruptionError,
   validateMapInstance,
@@ -98,11 +97,6 @@ export const validateEntityAccountMetadata = (
       entity['deferredAccountProposals'],
       `${context}.deferredAccountProposals`,
     );
-    if (deferred.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
-      throw new FinancialDataCorruptionError(
-        `${context}.deferredAccountProposals exceeds ${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-      );
-    }
     for (const [rawAccountId, rawWorkspaceHash] of deferred) {
       validateAccountKey(rawAccountId, 'deferredAccountProposals');
       const workspaceHash = String(rawWorkspaceHash ?? '');
@@ -122,11 +116,6 @@ export const validateEntityAccountMetadata = (
     entity['settlementContinuations'],
     `${context}.settlementContinuations`,
   );
-  if (continuations.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
-    throw new FinancialDataCorruptionError(
-      `${context}.settlementContinuations exceeds ${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-    );
-  }
   for (const [rawAccountId, rawContinuation] of continuations) {
     validateAccountKey(rawAccountId, 'settlementContinuations');
     validateSettlementContinuationValue(

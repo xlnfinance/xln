@@ -36,7 +36,6 @@ export const verifyPersistedFrameState = (
   frame: RuntimeFrame,
 ): PersistedFrameVerification => {
   const expectedStateHash = frame.postStateHash;
-  const storageHashMode = frame.hashMode === 'storage-merkle-v1';
   const lineage = frame.replicaMetaCheckpoint
     ? buildRuntimeCheckpointLineagePlan(env)
     : null;
@@ -55,14 +54,10 @@ export const verifyPersistedFrameState = (
     ),
     runtimeOutputRefs: frame.runtimeOutputRefs ?? [],
   });
-  const expectedCanonicalStateHash = storageHashMode
-    ? String(frame.canonicalStateHash || '')
-    : expectedStateHash;
-  const actualCanonicalStateHash = storageHashMode
-    ? expectedCanonicalStateHash
-      ? computeCanonicalStateHashFromEnv(env)
-      : ''
-    : actualStateHash;
+  const expectedCanonicalStateHash = String(frame.canonicalStateHash || '');
+  const actualCanonicalStateHash = expectedCanonicalStateHash
+    ? computeCanonicalStateHashFromEnv(env)
+    : '';
   return {
     expectedStateHash,
     actualStateHash,

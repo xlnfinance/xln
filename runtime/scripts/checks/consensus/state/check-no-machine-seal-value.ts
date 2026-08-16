@@ -115,10 +115,10 @@ const walkSealGraph = (
 };
 
 const sealValueExpression = (node: ts.Node): ts.Expression | undefined => {
-  if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === 'sealValue') {
+  if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === 'ownValue') {
     return node.initializer;
   }
-  if (ts.isShorthandPropertyAssignment(node) && node.name.text === 'sealValue') {
+  if (ts.isShorthandPropertyAssignment(node) && node.name.text === 'ownValue') {
     return node.name;
   }
   return undefined;

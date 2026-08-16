@@ -4,9 +4,7 @@ import type { EntityState } from '../../entity/types';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../types';
 import { assertAccountMempoolWithinLimit } from '../../account/input/mempool';
 import { assertAccountJClaimAccumulatorState } from '../../account/j-claims/j-claim-accumulator';
-import { assertEntityAccountCountWithinLimit } from '../../entity/account/account-capacity';
 import { assertConsumptionAccumulatorState } from '../../entity/consumption/consumption-accumulator';
-import { LIMITS } from '../../config/constants';
 import { assertJBatchWithinContractLimits } from '../../jurisdiction/machine/batch';
 import { createStructuredLogger } from '../../infra/logger';
 
@@ -36,7 +34,6 @@ export const hydrateEntityStateFromStorage = (options: {
   books: Map<string, BookState>;
 }): EntityState => {
   const { core, accounts, books } = options;
-  assertEntityAccountCountWithinLimit(accounts, `storage.entity:${core.entityId}`);
   let orderbookExt: OrderbookExtState | undefined;
   if (books.size > 0 || core.orderbookHubProfile || core.orderbookReferrals || core.orderbookPairDimensions) {
     if (!core.orderbookHubProfile) {
@@ -59,12 +56,6 @@ export const hydrateEntityStateFromStorage = (options: {
   if (core.certifiedOutputSequences) {
     if (!(core.certifiedOutputSequences instanceof Map)) {
       throw new Error('STORAGE_CERTIFIED_OUTPUT_SEQUENCES_INVALID');
-    }
-    if (core.certifiedOutputSequences.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
-      throw new Error(
-        `STORAGE_CERTIFIED_OUTPUT_RELATIONSHIP_LIMIT_EXCEEDED:` +
-        `${core.certifiedOutputSequences.size}:${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-      );
     }
   }
   if (core.jBatchState) {

@@ -44,6 +44,7 @@ const persistentAccounts = (
   entries: Iterable<readonly [string, ReturnType<typeof makeAccountReplica>]> = [],
 ): PersistentEntityAccountMap => PersistentEntityAccountMap.fromMap(
   new Map([...entries].map(([accountId, account]) => [accountId, persistentEnvelope(account)])),
+  entityId,
   computeEntityAccountValueHash,
 );
 

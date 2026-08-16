@@ -1,14 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-
-import { cloneAccountReplica } from '../../../account/state/state-clone';
 import {
-  cloneEntityReplica,
   forkEntityReplicaForInput,
 } from '../../../entity/replica/replica-clone';
 import {
-  cloneEntityState,
-  cloneTrustedEntityState,
   commitEntityFrameCandidateState,
   createEntityFrameCandidateState,
 } from '../../../entity/state-clone';
@@ -17,6 +11,8 @@ import {
   EntityAccountCandidateMap,
   getEntityCandidateValueForWrite,
 } from '../../../entity/state/candidate-map';
+import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
+import { getEntityCollectionValueForWrite } from '../../../entity/state/persistent-collection-map';
 import {
   computeCanonicalEntityConsensusStateHash,
   computeCanonicalEntityConsensusStateHashCold,
@@ -43,6 +39,7 @@ import type { AccountReplica } from '../../../types/account';
 import type { EntityState } from '../../../entity/types';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 const TEST_RIGHT_ENTITY_ID = `0x${'bb'.repeat(32)}`;
 
@@ -119,7 +116,7 @@ const makeCanonicalAccountFixture = () => ({
       depositoryAddress: `0x${'dd'.repeat(20)}`,
     },
     watchSeed: `0x${'11'.repeat(32)}`,
-    deltas: new Map([[1, {
+    deltas: PersistentAccountStateMap.fromEntries('deltas', [[1, {
       tokenId: 1,
       collateral: 0n,
       ondelta: 0n,
@@ -131,8 +128,8 @@ const makeCanonicalAccountFixture = () => ({
       leftHold: 0n,
       rightHold: 0n,
     }]]),
-    locks: new Map(),
-    swapOffers: new Map([['offer-1', {
+    locks: PersistentAccountStateMap.empty('locks'),
+    swapOffers: PersistentAccountStateMap.fromEntries('swapOffers', [['offer-1', {
       offerId: 'offer-1',
       giveTokenId: 1,
       giveAmount: 10n,
@@ -148,13 +145,13 @@ const makeCanonicalAccountFixture = () => ({
       quantizedWant: 20n,
       crossJurisdiction: makeCrossJurisdictionRoute(),
     }]]),
-    pulls: new Map(),
+    pulls: PersistentAccountStateMap.empty('pulls'),
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
     disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
+    requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+    requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
   },
   status: 'active',
   mempool: [{
@@ -184,8 +181,11 @@ const makeCanonicalAccountFixture = () => ({
   rollbackCount: 0,
   proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 0 },
   proofBody: { tokenIds: [1], deltas: [0n] },
-  pendingWithdrawals: new Map(),
-  shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+  pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+  shadow: { rebalance: {
+    policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+    submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+  } },
   disputeProofBodiesByHash: {
     proof: makeProofBodyStruct(),
   },
@@ -269,11 +269,11 @@ describe('state cloning', () => {
       deleted: 0,
     });
 
-    const candidateAccount = candidate.accounts.get(counterpartyId);
+    const candidateAccount = getEntityAccountForWrite(candidate.accounts, counterpartyId);
     if (!candidateAccount) throw new Error('TEST_ENTITY_CANDIDATE_ACCOUNT_MISSING');
-    candidateAccount.state.deltas.get(1)!.collateral = 99n;
+    candidateAccount.currentHeight = 99;
 
-    expect(source.accounts.get(counterpartyId)?.state.deltas.get(1)?.collateral).toBe(0n);
+    expect(source.accounts.get(counterpartyId)?.currentHeight).toBe(0);
     expect((candidate.accounts as EntityAccountCandidateMap).stats().changed).toBe(1);
   });
 
@@ -297,14 +297,14 @@ describe('state cloning', () => {
     expect(accounts.stats().changed).toBe(0);
 
     const touchedId = `0x${'b2'.repeat(32)}`;
-    candidate.accounts.get(touchedId)!.state.deltas.get(1)!.collateral = 7n;
+    getEntityAccountForWrite(candidate.accounts, touchedId)!.currentHeight = 7;
     expect(accounts.stats().changed).toBe(1);
     const incremental = computeCanonicalEntityConsensusStateHash(candidate);
     expect(incremental).toBe(computeCanonicalEntityConsensusStateHashCold(candidate));
     expect(accounts.stats().changed).toBe(1);
   });
 
-  test('Entity Account candidate preserves the full-clone root and promotes only at commit', () => {
+  test('independent Entity Account candidates preserve roots and promote only at commit', () => {
     const source = makeProjectionReplica().state as EntityState;
     const counterpartyId = `0x${'cc'.repeat(32)}`;
     const accountFixture = makeCanonicalAccountFixture();
@@ -313,24 +313,24 @@ describe('state cloning', () => {
     bindAccountParticipants(accountFixture, source.entityId, counterpartyId);
     putCommittedAccount(source, counterpartyId, account);
 
-    const fullClone = cloneTrustedEntityState(source);
+    const independent = createEntityFrameCandidateState(source);
     const candidate = createEntityFrameCandidateState(source);
-    const fullAccount = fullClone.accounts.get(counterpartyId);
-    const candidateAccount = candidate.accounts.get(counterpartyId);
-    if (!fullAccount || !candidateAccount) {
+    const independentAccount = getEntityAccountForWrite(independent.accounts, counterpartyId);
+    const candidateAccount = getEntityAccountForWrite(candidate.accounts, counterpartyId);
+    if (!independentAccount || !candidateAccount) {
       throw new Error('TEST_ENTITY_CANDIDATE_ACCOUNT_MISSING');
     }
-    fullAccount.state.deltas.get(1)!.offdelta = 25n;
-    candidateAccount.state.deltas.get(1)!.offdelta = 25n;
+    independentAccount.currentHeight = 25;
+    candidateAccount.currentHeight = 25;
 
     expect(computeCanonicalEntityConsensusStateHash(candidate))
-      .toBe(computeCanonicalEntityConsensusStateHash(fullClone));
-    expect(source.accounts.get(counterpartyId)?.state.deltas.get(1)?.offdelta).toBe(0n);
+      .toBe(computeCanonicalEntityConsensusStateHash(independent));
+    expect(source.accounts.get(counterpartyId)?.currentHeight).toBe(0);
 
     candidate.accounts = commitEntityAccountCandidate(candidate.accounts);
     expect(candidate.accounts).not.toBe(source.accounts);
-    expect(candidate.accounts.get(counterpartyId)?.state.deltas.get(1)?.offdelta).toBe(25n);
-    expect(source.accounts.get(counterpartyId)?.state.deltas.get(1)?.offdelta).toBe(0n);
+    expect(candidate.accounts.get(counterpartyId)?.currentHeight).toBe(25);
+    expect(source.accounts.get(counterpartyId)?.currentHeight).toBe(0);
   });
 
   test('a planner flattens a prior candidate without linking commit to certified state', () => {
@@ -343,14 +343,14 @@ describe('state cloning', () => {
     putCommittedAccount(source, counterpartyId, account);
 
     const first = createEntityFrameCandidateState(source);
-    first.accounts.get(counterpartyId)!.state.deltas.get(1)!.collateral = 11n;
+    getEntityAccountForWrite(first.accounts, counterpartyId)!.currentHeight = 11;
     const second = createEntityFrameCandidateState(first);
-    second.accounts.get(counterpartyId)!.state.deltas.get(1)!.collateral = 22n;
+    getEntityAccountForWrite(second.accounts, counterpartyId)!.currentHeight = 22;
     second.accounts = commitEntityAccountCandidate(second.accounts);
 
-    expect(source.accounts.get(counterpartyId)?.state.deltas.get(1)?.collateral).toBe(0n);
-    expect(first.accounts.get(counterpartyId)?.state.deltas.get(1)?.collateral).toBe(11n);
-    expect(second.accounts.get(counterpartyId)?.state.deltas.get(1)?.collateral).toBe(22n);
+    expect(source.accounts.get(counterpartyId)?.currentHeight).toBe(0);
+    expect(first.accounts.get(counterpartyId)?.currentHeight).toBe(11);
+    expect(second.accounts.get(counterpartyId)?.currentHeight).toBe(22);
     expect(second.accounts).not.toBe(source.accounts);
   });
 
@@ -381,7 +381,7 @@ describe('state cloning', () => {
     source.orderbookExt.books.set(firstPair, createPairBook());
     source.orderbookExt.books.set(secondPair, createPairBook());
 
-    const fullClone = cloneTrustedEntityState(source);
+    const independent = createEntityFrameCandidateState(source);
     const candidate = createEntityFrameCandidateState(source);
     const candidateBooks = candidate.orderbookExt?.books;
     if (!(candidateBooks instanceof EntityCandidateMap)) {
@@ -410,7 +410,7 @@ describe('state cloning', () => {
       });
       books.set(firstPair, applied.state);
     };
-    addOrder(fullClone);
+    addOrder(independent);
     addOrder(candidate);
 
     expect(candidateBooks.stats()).toEqual({
@@ -423,7 +423,7 @@ describe('state cloning', () => {
       .find(([pairId]) => pairId === secondPair)?.[1];
     expect(untouchedCandidateBook).toBe(source.orderbookExt.books.get(secondPair));
     expect(computeCanonicalEntityConsensusStateHash(candidate))
-      .toBe(computeCanonicalEntityConsensusStateHash(fullClone));
+      .toBe(computeCanonicalEntityConsensusStateHash(independent));
 
     commitEntityFrameCandidateState(candidate);
     expect(candidate.orderbookExt?.books).not.toBe(source.orderbookExt.books);
@@ -436,7 +436,9 @@ describe('state cloning', () => {
     const env = createEmptyEnv('single-signer owned Entity frame');
     env.state.timestamp = 2;
     const isolatedSource = makeProjectionReplica().state as EntityState;
-    const ownedSource = cloneTrustedEntityState(isolatedSource);
+    const ownedSource = commitEntityFrameCandidateState(
+      createEntityFrameCandidateState(isolatedSource),
+    );
 
     const isolated = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
@@ -507,36 +509,13 @@ describe('state cloning', () => {
     expect(internal).not.toEqual(persisted);
   });
 
-  test('clone diagnostics use structured logging only', () => {
-    const source = [
-      readFileSync('runtime/account/state/state-clone.ts', 'utf8'),
-      readFileSync('runtime/entity/state-clone.ts', 'utf8'),
-    ].join('\n');
-
-    expect(source).toContain(
-      "const cloneLog = createStructuredLogger('entity.state_clone');",
-    );
-    expect(source).toContain("cloneLog.error('entity_id_corrupt'");
-    expect(source).toContain("cloneLog.error('last_finalized_j_height_corrupt'");
-    expect(source).toContain('ACCOUNT_STATE_STRUCTURED_CLONE_FAILED');
-    expect(source).not.toContain('manualClone');
-    expect(source).not.toContain('console.');
-  });
-
-  test('entity state clone fails loudly when j-height is corrupt', () => {
-    const corruptState = makeProjectionReplica().state as any;
-    corruptState.lastFinalizedJHeight = undefined;
-
-    expect(() => cloneEntityState(corruptState)).toThrow('lastFinalizedJHeight was not preserved');
-  });
-
-  test('entity clone preserves aliased cross-j route carriers from original state', () => {
+  test('Entity candidate shares untouched Accounts and forks the exact growing leaf claimed for write', () => {
     const state = makeProjectionReplica().state as any;
     const route = makeCrossJurisdictionRoute();
     const account = makeCanonicalAccountFixture() as any;
     delete account.uncloneable;
     bindAccountParticipants(account, state.entityId, TEST_RIGHT_ENTITY_ID);
-    account.state.swapOffers = new Map([[
+    account.state.swapOffers = PersistentAccountStateMap.fromEntries('swapOffers', [[
       route.orderId,
       {
         offerId: route.orderId,
@@ -558,32 +537,28 @@ describe('state cloning', () => {
     state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
     putCommittedAccount(state, TEST_RIGHT_ENTITY_ID, account);
 
-    const cloned = cloneEntityState(state);
-    const clonedRoute = cloned.crossJurisdictionSwaps!.get(route.orderId)!;
-    const clonedOfferRoute = cloned.accounts.get(TEST_RIGHT_ENTITY_ID)!.state.swapOffers.get(route.orderId)!.crossJurisdiction!;
+    const candidate = createEntityFrameCandidateState(state);
+    expect(candidate.accounts.get(TEST_RIGHT_ENTITY_ID)).toBe(state.accounts.get(TEST_RIGHT_ENTITY_ID));
+    const writableRoute = getEntityCollectionValueForWrite(
+      candidate.crossJurisdictionSwaps!,
+      route.orderId,
+    );
+    if (!writableRoute) throw new Error('TEST_ENTITY_CANDIDATE_ROUTE_MISSING');
+    writableRoute.source.amount = 999n;
 
-    expect(clonedRoute).not.toBe(route);
-    expect(clonedOfferRoute).not.toBe(route);
-    expect(clonedRoute.source).toEqual(route.source);
-    expect(clonedRoute.target).toEqual(route.target);
-    expect(clonedOfferRoute.source).toEqual(route.source);
-    expect(clonedOfferRoute.target).toEqual(route.target);
+    expect(candidate.crossJurisdictionSwaps!.get(route.orderId)!.source.amount).toBe(999n);
+    expect(state.crossJurisdictionSwaps.get(route.orderId).source.amount).toBe(100n);
   });
 
-  test('rejects non-canonical and mismatched Account map keys at the Entity boundary', () => {
+  test('rejects a non-persistent Account map at the Entity candidate boundary', () => {
     const state = makeProjectionReplica().state as any;
     const account = makeCanonicalAccountFixture() as any;
     delete account.uncloneable;
     bindAccountParticipants(account, state.entityId, TEST_RIGHT_ENTITY_ID);
 
     state.accounts = new Map([[TEST_RIGHT_ENTITY_ID.toUpperCase(), account]]);
-    expect(() => cloneEntityState(state)).toThrow(
-      'non-canonical counterparty key',
-    );
-
-    state.accounts = new Map([[`0x${'cc'.repeat(32)}`, account]]);
-    expect(() => cloneEntityState(state)).toThrow(
-      'counterparty key does not match Account participants',
+    expect(() => createEntityFrameCandidateState(state)).toThrow(
+      'ENTITY_FRAME_CANDIDATE_ACCOUNTS_INVALID',
     );
   });
 
@@ -682,11 +657,6 @@ describe('state cloning', () => {
     })).toThrow('contains unknown attempt2');
   });
 
-  test('clones projection-shaped replicas without a transient mempool', () => {
-    const cloned = cloneEntityReplica(makeProjectionReplica() as any);
-    expect(cloned.mempool).toEqual([]);
-  });
-
   test('Entity input fork shares frame State but isolates mutable envelope maps', () => {
     const replica = {
       ...makeProjectionReplica(),
@@ -727,25 +697,6 @@ describe('state cloning', () => {
     expect(fork.htlcNotes.get('hashlock:0x01')).toBe('private invoice');
   });
 
-  test('clones local Hanko witnesses without losing or aliasing committed proofs', () => {
-    const replica = { ...makeProjectionReplica(), mempool: [] } as any;
-    const hash = `0x${'ab'.repeat(32)}`;
-    replica.hankoWitness = new Map([[hash, {
-      hanko: '0x01',
-      type: 'profile',
-      entityHeight: 7,
-      createdAt: 123,
-    }]]);
-
-    const cloned = cloneEntityReplica(replica);
-    const clonedWitness = cloned.hankoWitness?.get(hash);
-    if (!clonedWitness) throw new Error('TEST_CLONED_HANKO_WITNESS_MISSING');
-    clonedWitness.createdAt = 456;
-
-    expect(cloned.hankoWitness).not.toBe(replica.hankoWitness);
-    expect(replica.hankoWitness.get(hash)?.createdAt).toBe(123);
-  });
-
   test('runtime frame snapshot fails fast with the non-cloneable field path', () => {
     for (const absentField of ['deferredAccountProposals'] as const) {
       const replica = { ...makeProjectionReplica(), mempool: [] } as any;
@@ -760,83 +711,7 @@ describe('state cloning', () => {
     }
   });
 
-  test('clones validator-private J history without aliasing durable evidence', () => {
-    const replica = makeProjectionReplica() as any;
-    replica.jHistory = {
-      jurisdictionRef: 'testnet:1',
-      scannedThroughHeight: 12,
-      contiguousThroughHeight: 0,
-      tipBlockHash: `0x${'12'.repeat(32)}`,
-      eventBlocks: new Map([[12, {
-        jurisdictionRef: 'testnet:1',
-        jHeight: 12,
-        jBlockHash: `0x${'12'.repeat(32)}`,
-        eventsHash: `0x${'34'.repeat(32)}`,
-        events: [],
-      }]]),
-      blockHashes: new Map([[12, `0x${'12'.repeat(32)}`]]),
-    };
-
-    const cloned = cloneEntityReplica(replica);
-    cloned.jHistory!.eventBlocks.get(12)!.eventsHash = `0x${'ff'.repeat(32)}`;
-    cloned.jHistory!.blockHashes.set(13, `0x${'13'.repeat(32)}`);
-
-    expect(replica.jHistory.eventBlocks.get(12).eventsHash).toBe(`0x${'34'.repeat(32)}`);
-    expect(replica.jHistory.blockHashes.has(13)).toBe(false);
-  });
-
-  test('account clone fails fast instead of normalizing non-cloneable state', () => {
-    const account = {
-      currentFrame: {
-        height: 0,
-        timestamp: 0,
-        jHeight: 0,
-        accountTxs: [],
-        prevFrameHash: '',
-        stateHash: '',
-        accountStateRoot: `0x${'00'.repeat(32)}`,
-        byLeft: true,
-        deltas: [],
-      },
-      deltas: new Map(),
-      locks: new Map(),
-      swapOffers: new Map(),
-      pulls: new Map(),
-      shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-      uncloneable: () => undefined,
-    } as any;
-
-    expect(() => cloneAccountReplica(account))
-      .toThrow('ACCOUNT_STATE_STRUCTURED_CLONE_FAILED:path=$.uncloneable');
-  });
-
-  test('account clones preserve absence of optional pulls consensus state', () => {
-    const account = makeCanonicalAccountFixture() as any;
-    delete account.state.pulls;
-    delete account.uncloneable;
-
-    const cloned = cloneAccountReplica(account);
-
-    expect(Object.hasOwn(cloned, 'pulls')).toBe(false);
-  });
-
-  test('account clone isolates mempool, dispute evidence, and cross-j routes', () => {
-    const account = makeCanonicalAccountFixture();
-    delete (account as Record<string, unknown>).uncloneable;
-    const cloned = cloneAccountReplica(account as any);
-
-    (cloned.mempool[0] as any).data.amount = 999n;
-    (cloned.disputeProofBodiesByHash as any).proof.offdeltas[0] = 999n;
-    (cloned.disputeArgumentSnapshotsByHash as any).proof.plan.paymentHashlocks.push('hashlock-2');
-    (cloned.state.swapOffers.get('offer-1') as any).crossJurisdiction.source.amount = 999n;
-
-    expect((account.mempool[0] as any).data.amount).toBe(10n);
-    expect((account.disputeProofBodiesByHash as any).proof.offdeltas).toEqual([1n]);
-    expect((account.disputeArgumentSnapshotsByHash as any).proof.plan.paymentHashlocks).toEqual(['hashlock-1']);
-    expect((account.state.swapOffers.get('offer-1') as any).crossJurisdiction.source.amount).toBe(100n);
-  });
-
-  test('entity clone isolates pending cross-j fill ack tx data', () => {
+  test('Entity candidate isolates only claimed cross-j leaves', () => {
     const state = makeProjectionReplica().state as any;
     state.crossJurisdictionSwaps = new Map([['order-1', makeCrossJurisdictionRoute()]]);
     state.pendingCrossJurisdictionFillAcks = new Map([[
@@ -858,9 +733,12 @@ describe('state cloning', () => {
       },
     ]]);
 
-    const cloned = cloneEntityState(state);
-    cloned.crossJurisdictionSwaps!.get('order-1')!.source.amount = 999n;
-    (cloned.pendingCrossJurisdictionFillAcks!.get('ack-1')!.tx as any).data.fillNumerator = 999n;
+    const candidate = createEntityFrameCandidateState(state);
+    const route = getEntityCollectionValueForWrite(candidate.crossJurisdictionSwaps!, 'order-1');
+    const pending = getEntityCollectionValueForWrite(candidate.pendingCrossJurisdictionFillAcks!, 'ack-1');
+    if (!route || !pending) throw new Error('TEST_ENTITY_CANDIDATE_CROSS_J_LEAF_MISSING');
+    route.source.amount = 999n;
+    (pending.tx as any).data.fillNumerator = 999n;
 
     expect(state.crossJurisdictionSwaps.get('order-1').source.amount).toBe(100n);
     expect(state.pendingCrossJurisdictionFillAcks.get('ack-1').tx.data.fillNumerator).toBe(1n);

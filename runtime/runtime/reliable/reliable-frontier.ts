@@ -244,6 +244,13 @@ export const sameReliableIdentityPosition = (
   right: ReliableDeliveryIdentity,
 ): boolean => compareReliableIdentityPosition(left, right) === 0;
 
+/** Receiver active below an already-installed terminal is leftover, not HOL. */
+export const reliableActiveIsStaleBelowTerminal = (
+  active: ReliableDeliveryIdentity,
+  terminal: ReliableDeliveryIdentity | undefined,
+): boolean =>
+  Boolean(terminal && compareReliableIdentityPosition(active, terminal) < 0);
+
 export const assertReliableLaneCompatible = (
   existing: ReliableDeliveryIdentity,
   incoming: ReliableDeliveryIdentity,

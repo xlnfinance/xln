@@ -1,13 +1,10 @@
 import type { BookState } from '../../orderbook';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
-import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 import { decodeBuffer, decodeValidatedBuffer } from '../codec/codec';
-import { docRefCellKey, docRefKey, docValueKey } from '../schema/doc-refs';
-import { storageMerkleCellHexKey } from '../hashes';
+import { docRefKey, docValueKey } from '../schema/doc-refs';
 import {
   KEY_LIVE_ACCOUNT,
-  DEFAULT_ACCOUNT_MERKLE_RADIX,
   KEY_HEAD,
   KEY_LIVE_ENTITY,
   decodeEntityId,
@@ -17,15 +14,11 @@ import {
   keyConsumptionNode,
   keyAccountJClaimNode,
   keyFrame,
-  keyMerkleLeaf,
   keyLiveAccount,
   keyLiveAccountPrefix,
   keyLiveBook,
   keyLiveBookPrefix,
   keyLiveEntity,
-  keyMerkleBranchPrefix,
-  keyMerkleLeafPrefix,
-  keyMerkleRoot,
   keyLiveReplicaMeta,
   keyLiveReplicaMetaPrefix,
   keySnapshotAccountPrefix,
@@ -46,13 +39,6 @@ import { readAccountStorageLayout } from '../schema/account-layout';
 import { iterateKeys, readRawOrNull, readValidatedOrNull } from '../database/level';
 import { listSnapshotHeights } from '../database/lifecycle';
 import { compareAscii } from '../../infra/sorted-map-index';
-import {
-  buildHexKeyedMerkle,
-  computeRadixMerkleBranchHash,
-  computeRadixMerkleLeafHash,
-  packRadixMerklePath,
-  radixMerklePathSlots,
-} from '../../protocol/state/radix-merkle';
 import { hydrateEntityStateFromStorage } from './projections';
 import { requireStorageDbOpen } from '../commit/availability';
 import {
@@ -68,7 +54,6 @@ import {
   collectReachableConsumptionNodes,
   getConsumptionNodeStore,
 } from '../../entity/consumption/consumption-store';
-import { assertEntityAccountInsertionCapacity } from '../../entity/account/account-capacity';
 import {
   EMPTY_ACCOUNT_J_CLAIM_ROOT,
   collectReachableAccountJClaimNodes,
@@ -88,9 +73,6 @@ import {
   validateStorageEntityCoreDocValue,
   validateStorageFrameRecordValue,
   validateStorageHeadValue,
-  validateStorageMerkleBranchDocValue,
-  validateStorageMerkleLeafDocValue,
-  validateStorageMerkleRootDocValue,
 } from '../schema/authoritative-schema';
 import { readSnapshotBookGraph, readStorageBookGraph } from './book-graph';
 import { readRuntimeOutputPayloads } from '../wal/outbox-payload';
@@ -396,101 +378,6 @@ const findLatestSnapshotAtOrBelow = async (db: RuntimeDbLike, height: number): P
   return best;
 };
 
-const storageVerifyDocHashesEnabled = (): boolean => {
-  const raw = String(typeof process !== 'undefined' ? process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] ?? '' : '')
-    .trim()
-    .toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes';
-};
-
-const storageVerifyMerkleMode = (): 'none' | 'deep' => {
-  const raw = String(typeof process !== 'undefined' ? process.env['XLN_STORAGE_VERIFY_MERKLE'] ?? '' : '')
-    .trim()
-    .toLowerCase();
-  if (raw === 'deep' || raw === '1' || raw === 'true' || raw === 'yes') return 'deep';
-  return 'none';
-};
-
-const hashRawDocValue = (value: Buffer | Uint8Array): string =>
-  computeIntegrityDigest(value instanceof Uint8Array ? value : Uint8Array.from(value));
-
-const assertLiveDocHash = async (options: {
-  db: RuntimeDbLike;
-  ref: StorageDocRef;
-  raw: Buffer | Uint8Array;
-  enabled: boolean;
-}): Promise<void> => {
-  if (!options.enabled) return;
-  const key = docRefKey(options.ref);
-  const entityId = normalizeEntityId(options.ref.entityId);
-  const leafKeyHex = storageMerkleCellHexKey(docRefCellKey(options.ref));
-  const leafKeyBytes = Buffer.from(leafKeyHex.slice(2), 'hex');
-  const leafPath = radixMerklePathSlots(leafKeyBytes, DEFAULT_ACCOUNT_MERKLE_RADIX);
-  const leaf = await readValidatedOrNull(
-    options.db,
-    keyMerkleLeaf(entityId, 'runtime-roots', packRadixMerklePath(DEFAULT_ACCOUNT_MERKLE_RADIX, leafPath)),
-    validateStorageMerkleLeafDocValue,
-  );
-  if (!leaf) throw new Error(`STORAGE_DOC_HASH_MISSING: ${key}`);
-  const expected = String(leaf.valueHash || '');
-  const actual = hashRawDocValue(options.raw);
-  if (actual !== expected) {
-    throw new Error(`STORAGE_DOC_HASH_MISMATCH: ${key} actual=${actual} expected=${expected}`);
-  }
-  const valueBytes = Buffer.from(expected.replace(/^0x/, ''), 'hex');
-  const actualLeafHash = computeRadixMerkleLeafHash(leafKeyBytes, valueBytes);
-  if (actualLeafHash !== leaf.hash) {
-    throw new Error(`STORAGE_MERKLE_LEAF_HASH_MISMATCH: entity=${entityId} path=${leaf.path.join('..')}`);
-  }
-};
-
-const assertLiveMerkleIntegrity = async (
-  db: RuntimeDbLike,
-  entityId: string,
-  mode: 'none' | 'deep',
-): Promise<void> => {
-  if (mode === 'none') return;
-  const normalized = normalizeEntityId(entityId);
-  const root = await readValidatedOrNull(
-    db,
-    keyMerkleRoot(normalized, 'runtime-roots'),
-    validateStorageMerkleRootDocValue,
-  );
-  if (!root) throw new Error(`STORAGE_MERKLE_ROOT_MISSING: entity=${normalized}`);
-
-  let branchCount = 0;
-  for await (const key of iterateKeys(db, { prefix: keyMerkleBranchPrefix(normalized, 'runtime-roots') })) {
-    const branch = decodeValidatedBuffer(await db.get(key), validateStorageMerkleBranchDocValue);
-    const actual = computeRadixMerkleBranchHash(
-      branch.radix,
-      branch.children.map((child) => [child.slot, child.hash]),
-    );
-    if (actual !== branch.hash) {
-      throw new Error(`STORAGE_MERKLE_BRANCH_HASH_MISMATCH: entity=${normalized} path=${branch.path.join('..')}`);
-    }
-    branchCount += 1;
-  }
-
-  const leaves: Array<{ hexKey: string; value: Uint8Array }> = [];
-  for await (const key of iterateKeys(db, { prefix: keyMerkleLeafPrefix(normalized, 'runtime-roots') })) {
-    const leaf = decodeValidatedBuffer(await db.get(key), validateStorageMerkleLeafDocValue);
-    const keyBytes = Buffer.from(String(leaf.key || '').replace(/^0x/, ''), 'hex');
-    const valueBytes = Buffer.from(String(leaf.valueHash || '').replace(/^0x/, ''), 'hex');
-    const actual = computeRadixMerkleLeafHash(keyBytes, valueBytes);
-    if (actual !== leaf.hash) {
-      throw new Error(`STORAGE_MERKLE_LEAF_HASH_MISMATCH: entity=${normalized} path=${leaf.path.join('..')}`);
-    }
-    leaves.push({ hexKey: leaf.key, value: valueBytes });
-  }
-  if (leaves.length !== root.leafCount) {
-    throw new Error(`STORAGE_MERKLE_DEEP_LEAF_COUNT_MISMATCH: entity=${normalized} actual=${leaves.length} expected=${root.leafCount}`);
-  }
-  const rebuilt = buildHexKeyedMerkle(leaves, { radix: root.radix });
-  if (rebuilt.root !== root.rootHash) {
-    throw new Error(`STORAGE_MERKLE_DEEP_ROOT_MISMATCH: entity=${normalized} actual=${rebuilt.root} expected=${root.rootHash} branches=${branchCount}`);
-  }
-};
-
 const readPageLimit = (query?: StoragePageQuery): number => {
   const raw = Number(query?.limit ?? 10);
   return Number.isFinite(raw) ? Math.max(1, Math.min(500, Math.floor(raw))) : 10;
@@ -779,7 +666,6 @@ const hydrateEntityStatesFromDocs = async (
       cores.set(entityId, doc.value);
     } else if (doc.family === 'account') {
       const entityAccounts = accounts.get(entityId) ?? new Map<string, StorageAccountDoc>();
-      assertEntityAccountInsertionCapacity(entityAccounts, doc.counterpartyId, `storage.bulk:${entityId}`);
       entityAccounts.set(normalizeEntityId(doc.counterpartyId), doc.value);
       accounts.set(entityId, entityAccounts);
     } else {
@@ -934,12 +820,6 @@ const loadAccountDocAtHeight = async (
       keyLiveAccount(normalized, counterparty),
     );
     if (!stored) return null;
-    await assertLiveDocHash({
-      db,
-      ref: { family: 'account', entityId: normalized, counterpartyId: counterparty },
-      raw: stored.logicalValue,
-      enabled: storageVerifyDocHashesEnabled(),
-    });
     return assertStorageAccountDocBinding(
       validateStorageAccountDocValue(stored.doc),
       normalized,
@@ -1249,16 +1129,8 @@ export const loadEntityStateFromStorage = async (options: {
   );
 
   if (options.liveStateReadable !== false && targetHeight === latestMaterializedHeight) {
-    const verifyDocHashes = storageVerifyDocHashesEnabled();
-    const verifyMerkleMode = storageVerifyMerkleMode();
     const entityRaw = await readRawOrNull(db, keyLiveEntity(entityId));
     if (!entityRaw) return null;
-    await assertLiveDocHash({
-      db,
-      ref: { family: 'entity', entityId },
-      raw: entityRaw,
-      enabled: verifyDocHashes,
-    });
     const entityCore = assertStorageEntityDocBinding(
       decodeValidatedBuffer(entityRaw, validateStorageEntityCoreDocValue),
       entityId,
@@ -1275,40 +1147,21 @@ export const loadEntityStateFromStorage = async (options: {
         key,
       );
       if (!stored) throw new Error(`STORAGE_LIVE_ACCOUNT_LAYOUT_MISSING:${key.toString('hex')}`);
-      await assertLiveDocHash({
-        db,
-        ref: { family: 'account', entityId: parsed.entityId, counterpartyId: parsed.counterpartyId },
-        raw: stored.logicalValue,
-        enabled: verifyDocHashes,
-      });
       const doc = assertStorageAccountDocBinding(
         validateStorageAccountDocValue(stored.doc),
         parsed.entityId,
         parsed.counterpartyId,
         'live-state',
       );
-      assertEntityAccountInsertionCapacity(
-        accounts,
-        parsed.counterpartyId,
-        `storage.live:${entityId}`,
-      );
       accounts.set(parsed.counterpartyId, doc);
     }
     const books = new Map<string, BookState>();
     for await (const key of iterateKeys(db, { prefix: keyLiveBookPrefix(entityId) })) {
       const parsed = parseLiveBookKey(key);
-      const raw = await db.get(key);
-      await assertLiveDocHash({
-        db,
-        ref: { family: 'book', entityId: parsed.entityId, pairId: parsed.pairId },
-        raw,
-        enabled: verifyDocHashes,
-      });
       const book = await readStorageBookGraph(db, parsed.entityId, parsed.pairId);
       if (!book) throw new Error(`STORAGE_BOOK_GRAPH_MISSING:${parsed.entityId}:${parsed.pairId}`);
       books.set(parsed.pairId, book);
     }
-    await assertLiveMerkleIntegrity(db, entityId, verifyMerkleMode);
     return hydrateEntityWithCertifiedBoardNodes(options.env, db, entityCore, accounts, books);
   }
 
@@ -1330,11 +1183,6 @@ export const loadEntityStateFromStorage = async (options: {
   const books = new Map<string, BookState>();
   for (const doc of docs.values()) {
     if (doc.family === 'account' && normalizeEntityId(doc.entityId) === entityId) {
-      assertEntityAccountInsertionCapacity(
-        accounts,
-        doc.counterpartyId,
-        `storage.snapshot:${entityId}`,
-      );
       accounts.set(doc.counterpartyId, doc.value);
     } else if (doc.family === 'book' && normalizeEntityId(doc.entityId) === entityId) {
       books.set(doc.pairId, doc.value);

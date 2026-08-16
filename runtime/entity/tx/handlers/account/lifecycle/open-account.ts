@@ -25,7 +25,6 @@ import {
 } from '../../../../../account/commitment/state-root';
 import { applyAccountInput } from '../../../../../account/consensus';
 import { createLocalAccountInput } from '../../../../../account/input';
-import { assertEntityAccountInsertionCapacity } from '../../../../account/account-capacity';
 import { createEmptyAccountJClaimAccumulator } from '../../../../../account/j-claims/j-claim-accumulator';
 import { resolveJurisdictionRebalanceDefaults } from '../../../../../account/config/defaults';
 import { buildHubRebalancePolicyTx } from './admin';
@@ -203,12 +202,6 @@ export const handleOpenAccountEntityTx = async (
     });
     throw new Error(error);
   }
-  assertEntityAccountInsertionCapacity(
-    entityState.accounts,
-    counterpartyId,
-    `openAccount:${entityState.entityId}`,
-  );
-
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
 

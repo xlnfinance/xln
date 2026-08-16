@@ -21,7 +21,7 @@ import {
   storeDisputeArgumentSnapshot,
 } from '../../../../protocol/dispute/arguments';
 import { createEmptyEnv } from '../../../../runtime';
-import { cloneEntityState } from '../../../../entity/state-clone';
+import { createEntityFrameCandidateState } from '../../../../entity/state-clone';
 import type { EntityState } from '../../../../entity/types';
 import type { RuntimeReplica } from '../../../../runtime/types';
 import type { EntityTx } from '../../../../types/entity-tx';
@@ -201,13 +201,13 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     } satisfies Extract<EntityTx, { type: 'scheduledWake' }>;
     const lagging = await handleScheduledWakeEntityTx(
       envAt(110),
-      cloneEntityState(state),
+      createEntityFrameCandidateState(state),
       tx,
       false,
     );
     const leading = await handleScheduledWakeEntityTx(
       envAt(130),
-      cloneEntityState(state),
+      createEntityFrameCandidateState(state),
       tx,
       false,
     );

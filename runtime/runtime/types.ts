@@ -632,6 +632,12 @@ interface RuntimeInfrastructure {
   currentStorageOverlayMarks?: Map<string, RuntimeOverlayRecord>;
   runtimeWalDb?: Level<Buffer, Buffer> | null | undefined;
   runtimeWalDbOpenPromise?: Promise<boolean> | null | undefined;
+  /**
+   * Read-only replay replicas may borrow the live Runtime's already-open WAL.
+   * Their cleanup must release only this reference; the writer owns the Level
+   * handle and is the only replica allowed to close it.
+   */
+  runtimeWalDbBorrowed?: boolean;
   /** Rebuildable Entity/Account/J history indexes. Runtime WAL remains authoritative. */
   historyViewDb?: Level<Buffer, Buffer> | null | undefined;
   historyViewDbOpenPromise?: Promise<boolean> | null | undefined;

@@ -14,7 +14,6 @@ import {
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { converge } from '../../../scenarios/harness/helpers';
 import { serializeTaggedJson } from '../../../protocol/serialization';
-import { buildAccountMerkleFromState } from '../../../storage';
 import { inspectStorageDb, loadEntityStateFromStorageDb } from '../../../runtime';
 import {
   applyRuntimeInput,
@@ -894,12 +893,12 @@ async function main() {
     }
     const liveHubReplica = findReplica(env, hub);
     const liveMerkleStartedAt = getPerfMs();
-    storageLiveMerkleRoot = buildAccountMerkleFromState(liveHubReplica.state.accounts, accountMerkleRadix).root;
+    storageLiveMerkleRoot = liveHubReplica.state.accounts.rootHash();
     const latestLoadStartedAt = getPerfMs();
     const loaded = await loadEntityStateFromStorageDb(env, hub.entityId);
     storageLatestLoadMs = getPerfMs() - latestLoadStartedAt;
     storageLoadedAccountCount = loaded?.accounts.size ?? null;
-    storageLoadedMerkleRoot = loaded ? buildAccountMerkleFromState(loaded.accounts, accountMerkleRadix).root : null;
+    storageLoadedMerkleRoot = loaded ? loaded.accounts.rootHash() : null;
     if (loaded) {
       const comparison = compareAccountDocs(liveHubReplica.state.accounts, loaded.accounts);
       storageLatestAccountMismatches = comparison.mismatches;
@@ -935,7 +934,7 @@ async function main() {
       throw new Error(`HISTORICAL_LOAD_FAILED: height=${storageHistoricalHeight}`);
     }
     storageHistoricalAccountCount = historical?.accounts.size ?? null;
-    storageHistoricalMerkleRoot = historical ? buildAccountMerkleFromState(historical.accounts, accountMerkleRadix).root : null;
+    storageHistoricalMerkleRoot = historical ? historical.accounts.rootHash() : null;
     if ((storageWorstLoadMs ?? 0) > recoveryBudgetMs) {
       throw new Error(
         `RECOVERY_BUDGET_EXCEEDED: worst=${storageWorstLoadMs?.toFixed(2)}ms ` +
@@ -1003,7 +1002,7 @@ async function main() {
         `budget=${recoveryBudgetMs}ms`,
     );
     console.log(
-      `Storage account merkle: radix=${accountMerkleRadix} build=${storageMerkleBuildMs?.toFixed(2) ?? 'null'}ms ` +
+      `Storage canonical Account root: read=${storageMerkleBuildMs?.toFixed(2) ?? 'null'}ms ` +
         `live=${storageLiveMerkleRoot ?? 'null'} latest=${storageLoadedMerkleRoot ?? 'null'} ` +
         `historical=${storageHistoricalMerkleRoot ?? 'null'}`,
     );

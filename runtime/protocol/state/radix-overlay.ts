@@ -160,12 +160,13 @@ class RadixOverlayTransaction<K, V> implements RadixOverlayOwner<K, V> {
 
   prepare(): PreparedRadixOverlay<K, V> {
     this.requireActive();
-    let values = this.#reset ? this.#base.emptied() : this.#base;
-    for (const mutation of this.sortedMutations()) {
-      values = mutation.kind === 'put'
-        ? values.updated(mutation.key, mutation.value)
-        : values.removed(mutation.key);
-    }
+    this.#base.rootHash();
+    const values = this.#base.foldMutations(
+      this.sortedMutations().map(mutation => mutation.kind === 'put'
+        ? { kind: 'put', key: mutation.key, value: mutation.value }
+        : { kind: 'delete', key: mutation.key }),
+      this.#reset,
+    );
     const prepared = Object.freeze({
       baseRoot: this.#base.rootHash(),
       root: values.rootHash(),

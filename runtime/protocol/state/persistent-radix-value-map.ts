@@ -1,18 +1,35 @@
 import { createStructuredLogger } from '../../infra/logger';
 
 import {
-  computeRadixMerkleBranchHashFromSlots,
-  computeRadixMerkleEdgeHash,
-  computeRadixMerkleLeafHash,
   EMPTY_RADIX_MERKLE_ROOT,
-  radixMerklePathSlots,
-  type RadixMerkleRadix,
 } from './radix-merkle';
 import {
   buildRadixValueTree,
+  type PersistentRadixValueMapOptions,
+  type RadixFoldMutation,
+  type RadixHashStats,
   type RadixValueBranch,
   type RadixValueLeaf,
   type RadixValueNode,
+} from './persistent-radix-value-build';
+import {
+  deleteRadixNode,
+  emptyRadixHashStats,
+  ensureRadixRootBranch,
+  foldRadixMutations,
+  makeRadixBranch,
+  makeRadixLeaf,
+  putRadixNode,
+  radixBytesKey,
+  radixPathSlots,
+  radixPathStartsWith,
+  sealRadixNode,
+} from './persistent-radix-value-ops';
+
+export type {
+  PersistentRadixValueMapOptions,
+  RadixFoldMutation,
+  RadixHashStats,
 } from './persistent-radix-value-build';
 
 type ValueLeaf<K, V> = RadixValueLeaf<K, V>;
@@ -51,132 +68,15 @@ export type PersistentRadixNodeChanges<K, V> = Readonly<{
   dels: readonly PersistentRadixNodeRef[];
 }>;
 
-export type PersistentRadixValueMapOptions<K, V> = Readonly<{
-  radix: RadixMerkleRadix;
-  /** Return an immutable key safe to retain in a committed leaf and DB record. */
-  sealKey(key: K): K;
-  keyBytes(key: K): Uint8Array;
-  valueHash(value: V): string;
-  /** Return an immutable/persistent value safe to retain behind a committed root. */
-  sealValue(value: V): V;
-  /** Derived indexes may reuse the path-copy trie without paying for a second commitment. */
-  commitment?: boolean;
-}>;
-
 const radixLog = createStructuredLogger('persistent-radix');
-
-const pathSlots = (bytes: Uint8Array, radix: RadixMerkleRadix): readonly number[] =>
-  radixMerklePathSlots(bytes, radix);
-
-const commonPrefixLength = (left: readonly number[], right: readonly number[]): number => {
-  const limit = Math.min(left.length, right.length);
-  let index = 0;
-  while (index < limit && left[index] === right[index]) index += 1;
-  return index;
-};
-
-const pathStartsWith = (path: readonly number[], prefix: readonly number[]): boolean =>
-  prefix.every((slot, index) => path[index] === slot);
-
-const bytesKey = (bytes: Uint8Array): string => {
-  let output = '0x';
-  for (const byte of bytes) output += byte.toString(16).padStart(2, '0');
-  return output;
-};
-
-const strictHexBytes = (value: string): Uint8Array => {
-  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(value)) {
-    throw new Error(`PERSISTENT_RADIX_VALUE_HASH_INVALID:${value}`);
-  }
-  const output = new Uint8Array((value.length - 2) / 2);
-  for (let index = 0; index < output.length; index += 1) {
-    output[index] = Number.parseInt(value.slice(2 + index * 2, 4 + index * 2), 16);
-  }
-  return output;
-};
-
-const childSlot = <K, V>(parentPath: readonly number[], child: ValueNode<K, V>): number => {
-  const slot = child.path[parentPath.length];
-  if (slot === undefined) throw new Error('PERSISTENT_RADIX_CHILD_SLOT_MISSING');
-  return slot;
-};
-
-const childEdgeHash = <K, V>(
-  options: PersistentRadixValueMapOptions<K, V>,
-  parentPath: readonly number[],
-  child: ValueNode<K, V>,
-): string => computeRadixMerkleEdgeHash(
-  options.radix,
-  [...parentPath],
-  child.kind,
-  [...child.path],
-  child.kind === 'branch'
-    ? child.hash
-    : child.hash,
-);
-
-const makeBranch = <K, V>(
-  options: PersistentRadixValueMapOptions<K, V>,
-  path: readonly number[],
-  nodes: readonly ValueNode<K, V>[],
-  previous?: ValueBranch<K, V>,
-): ValueBranch<K, V> => {
-  const children: Array<ValueNode<K, V> | undefined> = Array(options.radix);
-  const edgeHashes: Array<string | undefined> = Array(options.radix);
-  for (const child of nodes) {
-    const slot = childSlot(path, child);
-    if (children[slot]) throw new Error('PERSISTENT_RADIX_BRANCH_SLOT_COLLISION');
-    children[slot] = child;
-    if (options.commitment !== false) {
-      const previousHash = previous?.children[slot] === child
-        ? previous.edgeHashes[slot]
-        : undefined;
-      edgeHashes[slot] = previousHash ?? childEdgeHash(options, path, child);
-    }
-  }
-  return {
-    kind: 'branch',
-    path: [...path],
-    children,
-    edgeHashes,
-    hash: options.commitment === false
-      ? EMPTY_RADIX_MERKLE_ROOT
-      : computeRadixMerkleBranchHashFromSlots(options.radix, edgeHashes),
-  };
-};
-
-const makeLeaf = <K, V>(
-  options: PersistentRadixValueMapOptions<K, V>,
-  key: K,
-  value: V,
-): ValueLeaf<K, V> => {
-  const sealedKey = options.sealKey(key);
-  const keyBytes = Uint8Array.from(options.keyBytes(sealedKey));
-  if (keyBytes.length === 0) throw new Error('PERSISTENT_RADIX_KEY_EMPTY');
-  const sealedValue = options.sealValue(value);
-  const hash = options.commitment === false
-    ? EMPTY_RADIX_MERKLE_ROOT
-    : computeRadixMerkleLeafHash(
-        keyBytes,
-        strictHexBytes(options.valueHash(sealedValue)),
-      );
-  return {
-    kind: 'leaf',
-    key: sealedKey,
-    keyBytes,
-    path: pathSlots(keyBytes, options.radix),
-    value: sealedValue,
-    hash,
-  };
-};
 
 const getLeaf = <K, V>(
   node: ValueNode<K, V> | null,
   path: readonly number[],
   keyHex: string,
 ): ValueLeaf<K, V> | undefined => {
-  if (!node || !pathStartsWith(path, node.path)) return undefined;
-  if (node.kind === 'leaf') return bytesKey(node.keyBytes) === keyHex ? node : undefined;
+  if (!node || !radixPathStartsWith(path, node.path)) return undefined;
+  if (node.kind === 'leaf') return radixBytesKey(node.keyBytes) === keyHex ? node : undefined;
   const slot = path[node.path.length];
   return slot === undefined ? undefined : getLeaf(node.children[slot] ?? null, path, keyHex);
 };
@@ -186,7 +86,9 @@ const prefixNode = <K, V>(
   prefix: readonly number[],
 ): ValueNode<K, V> | null => {
   if (!node) return null;
-  const shared = commonPrefixLength(node.path, prefix);
+  let shared = 0;
+  const limit = Math.min(node.path.length, prefix.length);
+  while (shared < limit && node.path[shared] === prefix[shared]) shared += 1;
   if (shared < Math.min(node.path.length, prefix.length)) return null;
   if (prefix.length <= node.path.length) return node;
   if (node.kind === 'leaf') return null;
@@ -211,71 +113,6 @@ const extremeLeaf = <K, V>(
     }
   }
   return undefined;
-};
-
-const putNode = <K, V>(
-  options: PersistentRadixValueMapOptions<K, V>,
-  node: ValueNode<K, V> | null,
-  leaf: ValueLeaf<K, V>,
-): Readonly<{ node: ValueNode<K, V>; inserted: boolean }> => {
-  if (!node) return { node: leaf, inserted: true };
-  if (node.kind === 'leaf') {
-    if (bytesKey(node.keyBytes) === bytesKey(leaf.keyBytes)) {
-      return { node: node.value === leaf.value ? node : leaf, inserted: false };
-    }
-    const shared = commonPrefixLength(node.path, leaf.path);
-    if (shared >= node.path.length || shared >= leaf.path.length) {
-      throw new Error('PERSISTENT_RADIX_KEY_PREFIX_COLLISION');
-    }
-    return { node: makeBranch(options, node.path.slice(0, shared), [node, leaf]), inserted: true };
-  }
-  const shared = commonPrefixLength(node.path, leaf.path);
-  if (shared < node.path.length) {
-    return { node: makeBranch(options, node.path.slice(0, shared), [node, leaf]), inserted: true };
-  }
-  const slot = leaf.path[node.path.length];
-  if (slot === undefined) throw new Error('PERSISTENT_RADIX_LEAF_SLOT_MISSING');
-  const previous = node.children[slot] ?? null;
-  const updated = putNode(options, previous, leaf);
-  if (updated.node === previous) return { node, inserted: updated.inserted };
-  const children = [...node.children];
-  children[slot] = updated.node;
-  return { node: makeBranch(options, node.path, children.filter(Boolean) as ValueNode<K, V>[], node), inserted: updated.inserted };
-};
-
-const deleteNode = <K, V>(
-  options: PersistentRadixValueMapOptions<K, V>,
-  node: ValueNode<K, V> | null,
-  path: readonly number[],
-  keyHex: string,
-): Readonly<{ node: ValueNode<K, V> | null; deleted: boolean }> => {
-  if (!node || !pathStartsWith(path, node.path)) return { node, deleted: false };
-  if (node.kind === 'leaf') {
-    return bytesKey(node.keyBytes) === keyHex
-      ? { node: null, deleted: true }
-      : { node, deleted: false };
-  }
-  const slot = path[node.path.length];
-  if (slot === undefined) return { node, deleted: false };
-  const previous = node.children[slot];
-  if (!previous) return { node, deleted: false };
-  const updated = deleteNode(options, previous, path, keyHex);
-  if (!updated.deleted) return { node, deleted: false };
-  const children = [...node.children];
-  children[slot] = updated.node ?? undefined;
-  const remaining = children.filter(Boolean) as ValueNode<K, V>[];
-  if (remaining.length === 0) return { node: null, deleted: true };
-  if (remaining.length === 1) return { node: remaining[0]!, deleted: true };
-  return { node: makeBranch(options, node.path, remaining, node), deleted: true };
-};
-
-const ensureRootBranch = <K, V>(
-  options: PersistentRadixValueMapOptions<K, V>,
-  node: ValueNode<K, V> | null,
-): ValueBranch<K, V> | null => {
-  if (!node) return null;
-  if (node.kind === 'branch' && node.path.length === 0) return node;
-  return makeBranch(options, [], [node]);
 };
 
 function* iterateLeaves<K, V>(node: ValueNode<K, V> | null): Generator<ValueLeaf<K, V>> {
@@ -380,8 +217,8 @@ const relinkNodeRecords = <K, V>(
     visiting.add(recordKey);
     let node: ValueNode<K, V>;
     if (record.kind === 'leaf') {
-      node = makeLeaf(options, record.key, record.value);
-      if (!samePath(node.path, record.path) || bytesKey(node.keyBytes) !== bytesKey(record.keyBytes)) {
+      node = makeRadixLeaf(options, record.key, record.value);
+      if (!samePath(node.path, record.path) || radixBytesKey(node.keyBytes) !== radixBytesKey(record.keyBytes)) {
         throw new Error(`PERSISTENT_RADIX_LEAF_KEY_MISMATCH:${recordKey}`);
       }
       leafCount += 1;
@@ -391,8 +228,7 @@ const relinkNodeRecords = <K, V>(
         if (!target) throw new Error(`PERSISTENT_RADIX_CHILD_MISSING:${recordKey}:${child.slot}`);
         return link(target);
       });
-      node = makeBranch(options, record.path, children);
-      assertBranchRecordMatches(record, node);
+      node = makeRadixBranch(options, record.path, children);
     }
     visiting.delete(recordKey);
     linked.set(recordKey, node);
@@ -406,6 +242,19 @@ const relinkNodeRecords = <K, V>(
   return { root, leafCount };
 };
 
+const verifyPersistedBranchRecords = <K, V>(
+  node: ValueNode<K, V>,
+  indexed: ReadonlyMap<string, PersistentRadixNodeRecord<K, V>>,
+): void => {
+  if (node.kind === 'leaf') return;
+  const record = indexed.get(nodePathKey('branch', node.path));
+  if (!record || record.kind !== 'branch') {
+    throw new Error(`PERSISTENT_RADIX_BRANCH_RECORD_MISSING:${node.path.join('.')}`);
+  }
+  assertBranchRecordMatches(record, node);
+  for (const child of childrenInSlotOrder(node)) verifyPersistedBranchRecords(child, indexed);
+};
+
 const nodeAtPath = <K, V>(
   root: ValueNode<K, V> | null,
   kind: 'branch' | 'leaf',
@@ -414,7 +263,7 @@ const nodeAtPath = <K, V>(
   let node = root ?? undefined;
   while (node) {
     if (node.kind === kind && samePath(node.path, path)) return node;
-    if (node.kind === 'leaf' || !pathStartsWith(path, node.path)) return undefined;
+    if (node.kind === 'leaf' || !radixPathStartsWith(path, node.path)) return undefined;
     const slot = path[node.path.length];
     node = slot === undefined ? undefined : node.children[slot];
   }
@@ -459,7 +308,12 @@ const collectChangedNodePuts = <K, V>(
   // may independently rebuild the same typed graph from validated RAM. A
   // commitment-identical node is still the exact same durable subtree, so
   // avoid rewriting it and descend only through genuinely dirty branches.
-  if (previous === node || previous?.hash === node.hash) return;
+  if (previous === node) return;
+  if (
+    previous?.hash !== undefined
+    && node.hash !== undefined
+    && previous.hash === node.hash
+  ) return;
   output.push(nodeRecord(node));
   if (node.kind === 'branch') {
     for (const child of childrenInSlotOrder(node)) {
@@ -475,7 +329,12 @@ const collectChangedNodeDels = <K, V>(
 ): void => {
   if (!node) return;
   const replacement = nodeAtPath(nextRoot, node.kind, node.path);
-  if (replacement === node || replacement?.hash === node.hash) return;
+  if (replacement === node) return;
+  if (
+    replacement?.hash !== undefined
+    && node.hash !== undefined
+    && replacement.hash === node.hash
+  ) return;
   // A changed node retains its physical `(kind,path)` key. It is replaced by
   // the corresponding put, never deleted afterwards. Only nodes unreachable
   // from the new root become delete operations.
@@ -491,12 +350,13 @@ const collectChangedNodeDels = <K, V>(
   }
 };
 
-/** One immutable value store and Merkle commitment; updates path-copy only. */
+/** Overlay-first value store. Mutations do not hash; rootHash seals dirty nodes once. */
 export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
   readonly #root: ValueBranch<K, V> | null;
-  readonly #hash: string;
+  #hash: string | undefined;
   readonly #leafCount: number;
   readonly #options: PersistentRadixValueMapOptions<K, V>;
+  readonly #stats = emptyRadixHashStats();
 
   private constructor(
     root: ValueBranch<K, V> | null,
@@ -504,9 +364,10 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     options: PersistentRadixValueMapOptions<K, V>,
   ) {
     this.#root = root;
-    this.#hash = root?.hash ?? EMPTY_RADIX_MERKLE_ROOT;
     this.#leafCount = leafCount;
     this.#options = options;
+    if (root === null && options.commitment !== false) this.#hash = EMPTY_RADIX_MERKLE_ROOT;
+    else if (root?.hash !== undefined) this.#hash = root.hash;
   }
 
   static empty<K, V>(
@@ -523,8 +384,8 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     const leaves: ValueLeaf<K, V>[] = [];
     const seen = new Set<string>();
     for (const [key, value] of source) {
-      const leaf = makeLeaf(options, key, value);
-      const hex = bytesKey(leaf.keyBytes);
+      const leaf = makeRadixLeaf(options, key, value);
+      const hex = radixBytesKey(leaf.keyBytes);
       if (seen.has(hex)) throw new Error(`PERSISTENT_RADIX_DUPLICATE_KEY:${hex}`);
       seen.add(hex);
       leaves.push(leaf);
@@ -535,10 +396,10 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
       : buildRadixValueTree(
           options.radix,
           leaves,
-          (_radix, path, nodes) => makeBranch(options, path, nodes),
+          (_radix, path, nodes) => makeRadixBranch(options, path, nodes),
         );
     return new PersistentRadixValueMap(
-      ensureRootBranch(options, built),
+      ensureRadixRootBranch(options, built),
       leaves.length,
       options,
     );
@@ -555,7 +416,10 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     const indexed = indexNodeRecords(records);
     if (indexed.size === 0) return PersistentRadixValueMap.empty(options);
     const linked = relinkNodeRecords(indexed, options);
-    return new PersistentRadixValueMap(linked.root, linked.leafCount, options);
+    const hydrated = new PersistentRadixValueMap(linked.root, linked.leafCount, options);
+    hydrated.rootHash();
+    verifyPersistedBranchRecords(linked.root, indexed);
+    return hydrated;
   }
 
   get size(): number {
@@ -564,7 +428,7 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
 
   get(key: K): V | undefined {
     const keyBytes = this.#options.keyBytes(key);
-    return getLeaf(this.#root, pathSlots(keyBytes, this.#options.radix), bytesKey(keyBytes))?.value;
+    return getLeaf(this.#root, radixPathSlots(keyBytes, this.#options.radix), radixBytesKey(keyBytes))?.value;
   }
 
   /** Presence-preserving lookup for collections whose value domain includes undefined. */
@@ -572,8 +436,8 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     const keyBytes = this.#options.keyBytes(key);
     const leaf = getLeaf(
       this.#root,
-      pathSlots(keyBytes, this.#options.radix),
-      bytesKey(keyBytes),
+      radixPathSlots(keyBytes, this.#options.radix),
+      radixBytesKey(keyBytes),
     );
     return leaf ? [leaf.key, leaf.value] : undefined;
   }
@@ -584,7 +448,7 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
    */
   has(key: K): boolean {
     const keyBytes = this.#options.keyBytes(key);
-    return getLeaf(this.#root, pathSlots(keyBytes, this.#options.radix), bytesKey(keyBytes)) !== undefined;
+    return getLeaf(this.#root, radixPathSlots(keyBytes, this.#options.radix), radixBytesKey(keyBytes)) !== undefined;
   }
 
   encodeKey(key: K): Uint8Array {
@@ -595,17 +459,38 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
 
   /** Overlay boundary: snapshot the key object and its canonical bytes once. */
   prepareKey(key: K): Readonly<{ key: K; keyBytes: Uint8Array }> {
-    const sealed = this.#options.sealKey(key);
-    return { key: sealed, keyBytes: this.encodeKey(sealed) };
+    const owned = this.#options.ownKey(key);
+    return { key: owned, keyBytes: this.encodeKey(owned) };
   }
 
   /** Overlay boundary: own an immutable candidate value before retaining it. */
   prepareValue(value: V): V {
-    return this.#options.sealValue(value);
+    return this.#options.ownValue(value);
+  }
+
+  /** One-shot overlay fold. Does not hash; call rootHash at the Runtime boundary. */
+  foldMutations(
+    mutations: Iterable<RadixFoldMutation<K, V>>,
+    reset = false,
+  ): PersistentRadixValueMap<K, V> {
+    const folded = foldRadixMutations(
+      this.#options,
+      this.#root,
+      this.#leafCount,
+      [...mutations],
+      reset,
+    );
+    if (folded.root === this.#root && folded.leafCount === this.#leafCount) return this;
+    radixLog.debug('fold', { leaves: folded.leafCount, reset });
+    return new PersistentRadixValueMap(folded.root, folded.leafCount, this.#options);
+  }
+
+  hashStats(): RadixHashStats {
+    return { ...this.#stats };
   }
 
   updated(key: K, value: V): PersistentRadixValueMap<K, V> {
-    const result = putNode(this.#options, this.#root, makeLeaf(
+    const result = putRadixNode(this.#options, this.#root, makeRadixLeaf(
       this.#options,
       key,
       value,
@@ -613,7 +498,7 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     return result.node === this.#root
       ? this
       : new PersistentRadixValueMap(
-          ensureRootBranch(this.#options, result.node),
+          ensureRadixRootBranch(this.#options, result.node),
           this.#leafCount + (result.inserted ? 1 : 0),
           this.#options,
         );
@@ -621,15 +506,15 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
 
   removed(key: K): PersistentRadixValueMap<K, V> {
     const keyBytes = this.#options.keyBytes(key);
-    const result = deleteNode(
+    const result = deleteRadixNode(
       this.#options,
       this.#root,
-      pathSlots(keyBytes, this.#options.radix),
-      bytesKey(keyBytes),
+      radixPathSlots(keyBytes, this.#options.radix),
+      radixBytesKey(keyBytes),
     );
     return result.deleted
       ? new PersistentRadixValueMap(
-          ensureRootBranch(this.#options, result.node),
+          ensureRadixRootBranch(this.#options, result.node),
           this.#leafCount - 1,
           this.#options,
         )
@@ -646,6 +531,12 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     if (this.#options.commitment === false) {
       throw new Error('PERSISTENT_RADIX_COMMITMENT_DISABLED');
     }
+    if (this.#hash !== undefined) return this.#hash;
+    if (!this.#root) {
+      this.#hash = EMPTY_RADIX_MERKLE_ROOT;
+      return this.#hash;
+    }
+    this.#hash = sealRadixNode(this.#options, this.#root, this.#stats);
     return this.#hash;
   }
 
@@ -661,6 +552,7 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     if (this.#options.commitment === false) {
       throw new Error('PERSISTENT_RADIX_NODE_STORAGE_REQUIRES_COMMITMENT');
     }
+    this.rootHash();
     const visit = function* (
       node: ValueNode<K, V> | null,
     ): Generator<PersistentRadixNodeRecord<K, V>> {
@@ -685,6 +577,8 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
     if (this.#options.commitment === false) {
       throw new Error('PERSISTENT_RADIX_NODE_STORAGE_REQUIRES_COMMITMENT');
     }
+    this.rootHash();
+    previous.rootHash();
     const puts: PersistentRadixNodeRecord<K, V>[] = [];
     const dels: PersistentRadixNodeRef[] = [];
     collectChangedNodePuts(this.#root, previous.#root, puts);
@@ -714,7 +608,7 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
   firstEntryWithPrefix(prefixBytes: Uint8Array): [K, V] | undefined {
     if (prefixBytes.length === 0) throw new Error('PERSISTENT_RADIX_PREFIX_EMPTY');
     const leaf = extremeLeaf(
-      prefixNode(this.#root, pathSlots(prefixBytes, this.#options.radix)),
+      prefixNode(this.#root, radixPathSlots(prefixBytes, this.#options.radix)),
       'first',
     );
     return leaf ? [leaf.key, leaf.value] : undefined;
@@ -723,7 +617,7 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
   lastEntryWithPrefix(prefixBytes: Uint8Array): [K, V] | undefined {
     if (prefixBytes.length === 0) throw new Error('PERSISTENT_RADIX_PREFIX_EMPTY');
     const leaf = extremeLeaf(
-      prefixNode(this.#root, pathSlots(prefixBytes, this.#options.radix)),
+      prefixNode(this.#root, radixPathSlots(prefixBytes, this.#options.radix)),
       'last',
     );
     return leaf ? [leaf.key, leaf.value] : undefined;
@@ -731,7 +625,7 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
 
   *entriesWithPrefix(prefixBytes: Uint8Array): MapIterator<[K, V]> {
     if (prefixBytes.length === 0) throw new Error('PERSISTENT_RADIX_PREFIX_EMPTY');
-    const node = prefixNode(this.#root, pathSlots(prefixBytes, this.#options.radix));
+    const node = prefixNode(this.#root, radixPathSlots(prefixBytes, this.#options.radix));
     for (const leaf of iterateLeaves(node)) yield [leaf.key, leaf.value];
   }
 

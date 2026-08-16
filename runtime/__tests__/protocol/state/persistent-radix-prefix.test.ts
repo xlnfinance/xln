@@ -9,10 +9,10 @@ const keyBytes = (key: string): Uint8Array => Uint8Array.from(
 
 const options = {
   radix: 16 as const,
-  sealKey: (key: string): string => key,
+  ownKey: (key: string): string => key,
   keyBytes,
   valueHash: (value: string) => computeIntegrityDigest(new TextEncoder().encode(value)),
-  sealValue: (value: string) => value,
+  ownValue: (value: string) => value,
 };
 
 test('prefix extrema walk only the selected Patricia subtree', () => {

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { validateProposalTransactions } from '../../../account/consensus/proposal/transactions';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
-import { applyAccountTx } from '../../../account/tx/apply';
+import { applyAccountTxToMutableReplica } from '../../../account/tx/apply';
 import { ACCOUNT_TX_REJECTION_CODES } from '../../../account/tx/apply-types';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { TOKENS } from '../../../config/constants';
@@ -38,7 +38,7 @@ const payment = (): Extract<AccountTx, { type: 'direct_payment' }> => ({
 describe('Account tx proposal disposition', () => {
   test('signed settlement freeze defers a payment instead of removing it', async () => {
     const account = makeAccount(LEFT, RIGHT);
-    const upserted = await applyAccountTx(account, {
+    const upserted = await applyAccountTxToMutableReplica(account, {
       type: 'settle_transition',
       data: {
         kind: 'upsert',
@@ -102,7 +102,7 @@ describe('Account tx proposal disposition', () => {
 
   test('payment then HTLC lock/secret resolve on one Account replica', async () => {
     const account = makeAccount(LEFT, RIGHT);
-    const paid = await applyAccountTx(account, payment(), true, 1_000, 0);
+    const paid = await applyAccountTxToMutableReplica(account, payment(), true, 1_000, 0);
     expect(paid.ok).toBe(true);
     if (!paid.ok) throw new Error('ACCOUNT_TX_L2_PAYMENT');
     expect(paid.outcome).toBe('applied');
@@ -110,7 +110,7 @@ describe('Account tx proposal disposition', () => {
 
     const secret = HEX32('44');
     const lockId = 'lock-l2-secret';
-    const locked = await applyAccountTx(account, {
+    const locked = await applyAccountTxToMutableReplica(account, {
       type: 'htlc_lock',
       data: {
         lockId,
@@ -124,7 +124,7 @@ describe('Account tx proposal disposition', () => {
     expect(locked.ok).toBe(true);
     expect(account.state.locks.has(lockId)).toBe(true);
 
-    const revealed = await applyAccountTx(account, {
+    const revealed = await applyAccountTxToMutableReplica(account, {
       type: 'htlc_resolve',
       data: { lockId, outcome: 'secret', secret },
     }, false, 1_002, 1);

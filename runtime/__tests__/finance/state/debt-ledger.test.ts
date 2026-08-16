@@ -3,7 +3,7 @@ import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 
 import { getJEventJurisdictionRef } from '../../../jurisdiction/machine/event-observation';
 import { decode, encode } from '../../../storage/codec/snapshot-coder';
-import { cloneEntityState } from '../../../entity/state-clone';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
 import {
   applyJEventRange,
   buildJEventRangeData,
@@ -212,7 +212,7 @@ describe('debt ledger', () => {
     expect(bobPartial.paidAmount).toBe(100n);
     expect(bobPartial.remainingAmount).toBe(50n);
 
-    const cloned = cloneEntityState(aliceState);
+    const cloned = createEntityFrameCandidateState(aliceState);
     const clonedDebt = findOnlyDebt(cloned, 'out');
     expect(Object.hasOwn(clonedDebt, 'updates')).toBe(false);
     expect(clonedDebt.remainingAmount).toBe(50n);

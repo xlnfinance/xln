@@ -3,7 +3,7 @@ import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../../../ru
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
 import { encodeBoard, hashBoard } from '../../../entity/factory';
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
-import { cloneEntityState } from '../../../entity/state-clone';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
 import { handleSetHubConfigEntityTx } from '../../../entity/tx/handlers/account/lifecycle/admin';
 import type { ConsensusConfig, EntityState } from '../../../entity/types';
 import type { HubRebalanceConfig } from '../../../types/finance/rebalance';
@@ -101,7 +101,7 @@ describe('entity hub profile classification', () => {
     expect(stateBefore.profile.isHub).toBe(false);
     expect(buildLocalEntityProfile(env, stateBefore, 1).metadata.isHub).toBe(false);
 
-    const configOnlyState = cloneEntityState(stateBefore);
+    const configOnlyState = createEntityFrameCandidateState(stateBefore);
     configOnlyState.hubRebalanceConfig = { ...DEFAULT_HUB_CONFIG };
     expect(buildLocalEntityProfile(env, configOnlyState, 2).metadata.isHub).toBe(false);
 

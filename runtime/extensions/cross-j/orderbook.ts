@@ -1,6 +1,7 @@
 import { normalizeEntityRef } from '../../entity/tx/account-key';
 import {
   CROSS_J_MAX_FILL_RATIO,
+  cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionRoute,
   compareCrossJurisdictionRouteStatus,
   deriveCanonicalCrossJurisdictionMarket,
@@ -8,6 +9,10 @@ import {
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
 } from './index';
+import {
+  createEmptyEntityCollectionCandidate,
+  getEntityCollectionValueForWrite,
+} from '../../entity/state/persistent-collection-map';
 import {
   baseAmountFromLots,
   computePriceTicksForBaseQuote,
@@ -229,7 +234,8 @@ export const mergeCrossJurisdictionBookAdmission = (
 ): CrossJurisdictionBookAdmission => {
   const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
   const key = crossJurisdictionBookAdmissionKey(canonicalRoute);
-  currentEntityState.crossJurisdictionBookAdmissions ||= new Map();
+  currentEntityState.crossJurisdictionBookAdmissions ??=
+    createEmptyEntityCollectionCandidate(cloneCrossJurisdictionBookAdmission);
   const existing = currentEntityState.crossJurisdictionBookAdmissions.get(key);
   const mergedRoute = mergeAdmissionRoute(existing?.route, canonicalRoute);
   const current: CrossJurisdictionBookAdmission = existing
@@ -259,7 +265,10 @@ export const markCrossJurisdictionBookAdmissionResolving = (
 ): void => {
   const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
   const key = crossJurisdictionBookAdmissionKey(canonicalRoute);
-  const admission = currentEntityState.crossJurisdictionBookAdmissions?.get(key);
+  const admissions = currentEntityState.crossJurisdictionBookAdmissions;
+  const admission = admissions
+    ? getEntityCollectionValueForWrite(admissions, key)
+    : undefined;
   if (!admission || admission.status === 'closed') return;
   admission.status = 'resolving';
   admission.resolvingAt = now;
@@ -276,7 +285,10 @@ export const markCrossJurisdictionBookCancelPending = (
 ): CrossJurisdictionBookAdmission => {
   const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
   const key = crossJurisdictionBookAdmissionKey(canonicalRoute);
-  const admission = currentEntityState.crossJurisdictionBookAdmissions?.get(key);
+  const admissions = currentEntityState.crossJurisdictionBookAdmissions;
+  const admission = admissions
+    ? getEntityCollectionValueForWrite(admissions, key)
+    : undefined;
   if (!admission) {
     throw new Error(
       `CROSS_J_CANCEL_ADMISSION_MISSING:order=${canonicalRoute.orderId}:source=${canonicalRoute.source.entityId}`,
@@ -345,7 +357,10 @@ export const markCrossJurisdictionBookAdmissionClosed = (
   reason: string,
 ): void => {
   const key = crossJurisdictionBookAdmissionKeyFor(sourceEntityId, orderId);
-  const admission = currentEntityState.crossJurisdictionBookAdmissions?.get(key);
+  const admissions = currentEntityState.crossJurisdictionBookAdmissions;
+  const admission = admissions
+    ? getEntityCollectionValueForWrite(admissions, key)
+    : undefined;
   if (!admission) return;
   admission.status = 'closed';
   admission.closedAt = now;

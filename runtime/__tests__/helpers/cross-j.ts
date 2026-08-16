@@ -18,7 +18,10 @@ import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../../types
 import { createDefaultDelta } from '../../account/state/delta';
 import { hexlify } from 'ethers';
 import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
-import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
+import {
+  EntityAccountCandidateMap,
+  PersistentEntityAccountMap,
+} from '../../entity/state/persistent-account-map';
 import { PersistentAccountStateMap } from '../../account/state/persistent-state-map';
 
 export const addr = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -180,6 +183,17 @@ export const makeState = (
     crossJurisdictionSwaps: new Map(),
     swapTradingPairs: [],
   };
+};
+
+/** Entity-frame write overlay. Committed Patricia maps reject `.set` and in-place status edits. */
+export const openWritableEntityAccounts = (state: EntityState): EntityAccountCandidateMap => {
+  if (state.accounts instanceof EntityAccountCandidateMap) return state.accounts;
+  const committed = state.accounts instanceof PersistentEntityAccountMap
+    ? state.accounts
+    : PersistentEntityAccountMap.fromMap(state.accounts, state.entityId, computeEntityAccountValueHash);
+  const overlay = new EntityAccountCandidateMap(committed);
+  state.accounts = overlay;
+  return overlay;
 };
 
 export const addReplica = (env: RuntimeReplica, state: EntityState, signerId: string, isProposer = true): void => {

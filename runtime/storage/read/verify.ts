@@ -1,12 +1,5 @@
 import { computeCanonicalRuntimeStateHash } from '../canonical-hash';
-import {
-  assertEntityHashesEqual,
-  computeStorageEntityHashesFromDocs,
-  computeStorageFrameHash,
-  computeStorageStateRoot,
-  readAllEntityHashDocs,
-  toFrameEntityHashes,
-} from '../hashes';
+import { computeStorageFrameHash } from '../hashes';
 import { computeStorageReplicaMetaDigest } from '../replica/replica-meta-digest';
 import { readSnapshotDocs } from '../database/lifecycle';
 import { verifyLiveStorageIntegrity } from './live-integrity';
@@ -102,18 +95,24 @@ export const verifyStorageSnapshotAtHeight = async (
   if (snapshotFrame.materializedState === false) {
     throw new Error(`STORAGE_VERIFY_SNAPSHOT_NOT_MATERIALIZED: height=${snapshotHeight}`);
   }
-  const snapshotDocs = await readSnapshotDocs(db, snapshotHeight);
-  const snapshotEntityHashes = computeStorageEntityHashesFromDocs(snapshotDocs);
-  assertEntityHashesEqual(
-    snapshotEntityHashes,
-    snapshotFrame.entityHashes,
-    `snapshotHeight=${snapshotHeight}`,
+  // This hydrates and verifies every declared Account/Book Patricia root.
+  // The replay loader then compares the reconstructed Entity roots with the
+  // frame's canonical roots; no parallel document-Merkle is consulted.
+  await readSnapshotDocs(db, snapshotHeight);
+  if (!snapshotFrame.canonicalStateHash || !snapshotFrame.canonicalEntityHashes) {
+    throw new Error(`STORAGE_VERIFY_SNAPSHOT_CANONICAL_ROOTS_MISSING:height=${snapshotHeight}`);
+  }
+  const payloads = await readStorageFramePayloads(db, snapshotFrame);
+  const snapshotStateHash = computeCanonicalRuntimeStateHash(
+    snapshotFrame.height,
+    snapshotFrame.timestamp,
+    snapshotFrame.canonicalEntityHashes,
+    payloads.runtimeMachine,
   );
-  const snapshotStateHash = computeStorageStateRoot(snapshotEntityHashes);
-  if (snapshotFrame.stateHash !== snapshotStateHash) {
+  if (snapshotFrame.canonicalStateHash !== snapshotStateHash) {
     throw new Error(
-      `STORAGE_VERIFY_SNAPSHOT_STATE_HASH_MISMATCH:height=${snapshotHeight}:` +
-        `expected=${snapshotFrame.stateHash || 'missing'}:actual=${snapshotStateHash}`,
+      `STORAGE_VERIFY_SNAPSHOT_CANONICAL_HASH_MISMATCH:height=${snapshotHeight}:` +
+        `expected=${snapshotFrame.canonicalStateHash}:actual=${snapshotStateHash}`,
     );
   }
   const actualReplicaMetaDigest = await computeSnapshotReplicaMetaDigest(db, snapshotHeight);
@@ -174,15 +173,6 @@ export const verifyStorageTailIntegrity = async (
     if (!skipPrevHashCheck && record.prevFrameHash !== previousHash) {
       throw new Error(`STORAGE_VERIFY_FRAME_CHAIN_BROKEN: height=${height} expectedPrev=${previousHash} actualPrev=${record.prevFrameHash ?? 'none'}`);
     }
-    if (record.materializedState !== false) {
-      if (!Array.isArray(record.entityHashes)) {
-        throw new Error(`STORAGE_VERIFY_ENTITY_HASHES_MISSING: height=${height}`);
-      }
-      const expectedStateHash = computeStorageStateRoot(record.entityHashes);
-      if (record.stateHash !== expectedStateHash) {
-        throw new Error(`STORAGE_VERIFY_STATE_HASH_MISMATCH: height=${height} expected=${expectedStateHash} actual=${record.stateHash}`);
-      }
-    }
     if (record.canonicalStateHash || Array.isArray(record.canonicalEntityHashes)) {
       if (!Array.isArray(record.canonicalEntityHashes) || !record.canonicalStateHash) {
         throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISSING: height=${height}`);
@@ -222,23 +212,6 @@ export const verifyStorageTailIntegrity = async (
       throw new Error(
         `STORAGE_VERIFY_REPLICA_META_DIGEST_MISMATCH: height=${replicaCheckpointHeight} ` +
         `expected=${replicaCheckpointRecord.replicaMetaDigest || 'missing'} actual=${actualReplicaMetaDigest}`,
-      );
-    }
-    const liveEntityHashes = await readAllEntityHashDocs(db);
-    if (liveEntityHashes.size > 0) {
-      const materializedRecord = await readStorageFrameRecord(
-        db,
-        Math.max(1, Math.floor(Number(head.latestMaterializedHeight))),
-      );
-      if (!materializedRecord?.entityHashes) {
-        throw new Error(
-          `STORAGE_VERIFY_MATERIALIZED_ENTITY_HASHES_MISSING:height=${head.latestMaterializedHeight}`,
-        );
-      }
-      assertEntityHashesEqual(
-        toFrameEntityHashes(liveEntityHashes.values()),
-        materializedRecord.entityHashes,
-        `materializedHeight=${head.latestMaterializedHeight}`,
       );
     }
   }

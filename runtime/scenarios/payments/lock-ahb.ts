@@ -19,7 +19,7 @@ import type { RuntimeReplica } from '../../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
 import type { EntityInput } from '../../entity/types';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
-import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput } from '../harness/helpers';
+import { getProcess, usd, snap, assertRuntimeIdle, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, setScenarioStorageEnabled } from '../harness/helpers';
 import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, isScenarioJAdapterMissingError, resolveScenarioBoardSigner } from '../harness/boot';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { isLeftEntity } from '../../account/utils';
@@ -805,7 +805,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log('🔒 HTLC: Locks created, continuing to test reveal...');
     console.log('═══════════════════════════════════════\n');
 
-    // Continue to let Bob process the HTLC (remove early return)
+    await converge(env, htlcRouteConvergenceCycleBudget(1));
 
     await pushSnapshot(env, 'Frame 13: Payment 1 complete', {
       title: 'Payment 1/2 Complete',
@@ -876,7 +876,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     await process(env);
     logPending();
 
-    env = await drainRuntime(env);
+    await converge(env, htlcRouteConvergenceCycleBudget(1));
     assertRuntimeIdle(env, 'HTLC AHB mid-payment drain');
 
     // Verify total shift with recipient-exact HTLC:
@@ -984,7 +984,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // more frames than the two spent above; wait for it rather than counting.
     // The A-H reading below stays an ordering check and is taken from the same
     // committed state: Hub forwards to Alice only in the next frame.
-    env = await drainRuntime(env);
+    await converge(env, htlcRouteConvergenceCycleBudget(1));
 
     // CRITICAL ASSERTION: B→H should be committed BEFORE H→A is initiated
     const bhDelta19 = getOffdelta(env, bob.id, hub.id, USDC_TOKEN_ID);
@@ -1549,7 +1549,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log('Phase 8: Offline simulation');
     console.log('=====================================\n');
     console.log(`[AHB] Runtime frames: ${env.state.height}`);
-    env = await drainRuntime(env);
+    await converge(env, htlcRouteConvergenceCycleBudget(2));
     assertRuntimeIdle(env, 'HTLC AHB');
   } finally {
     restoreStrict();
@@ -1572,6 +1572,7 @@ if (import.meta.main) {
   const cliRuntimeSeed = process.env['XLN_RUNTIME_SEED'] || process.env['RUNTIME_SEED'] || null;
   const env = runtime.createEmptyEnv(cliRuntimeSeed);
   requireRuntimeSeed(env, 'HTLC AHB CLI');
+  setScenarioStorageEnabled(env, false);
 
   if (stopAtFrame !== undefined) {
     env.stopAtFrame = stopAtFrame;

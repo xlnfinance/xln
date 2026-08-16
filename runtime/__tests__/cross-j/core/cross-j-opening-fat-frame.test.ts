@@ -10,6 +10,9 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j';
 import { createEmptyEnv } from '../../../runtime';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
+import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 import { selectMatchedCrossJAccountInputPairs } from '../../../runtime/routing/entity-routing';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { RoutedEntityInput } from '../../../runtime/types';
@@ -250,10 +253,12 @@ describe('cross-j fat-frame opening admission', () => {
   test('rejects a cohort that reuses a hashladder already live on another Entity', () => {
     const env = admissionEnv();
     const liveRoot = secret('zz');
-    const sourceState = env.state.eReplicas.get(`${sourceUser}:${sourceSigner}`)?.state;
-    const account = sourceState?.accounts.get(sourceHub);
-    if (!sourceState || !account) throw new Error('admission fixture missing source account');
-    account.state.pulls = new Map([[
+    const sourceReplica = env.state.eReplicas.get(`${sourceUser}:${sourceSigner}`);
+    if (!sourceReplica) throw new Error('admission fixture missing source replica');
+    const sourceState = createEntityFrameCandidateState(sourceReplica.state);
+    const account = getEntityAccountForWrite(sourceState.accounts, sourceHub);
+    if (!account) throw new Error('admission fixture missing source account');
+    account.state.pulls = PersistentAccountStateMap.empty('pulls').updated(
       'prior-order-source',
       {
         pullId: 'prior-order-source',
@@ -272,7 +277,8 @@ describe('cross-j fat-frame opening admission', () => {
         createdHeight: 1,
         createdTimestamp: 1_000,
       },
-    ]]);
+    );
+    env.state.eReplicas.set(`${sourceUser}:${sourceSigner}`, { ...sourceReplica, state: sourceState });
     const routeA = buildRoute('order-a', secret('r1'), secret('f1'), liveRoot);
     const routeB = buildRoute('order-b', secret('r2'), secret('f2'), secret('p2'));
     const selection = selectMatchedCrossJAccountInputPairs(
@@ -308,7 +314,7 @@ describe('cross-j pull hash material durability', () => {
     const account = makeAccount(sourceUser, sourceHub, sourceJ);
     // Seed a live pull from a prior frame — the durable guard must catch
     // collisions that the single-cohort admission gate cannot see.
-    account.state.pulls = new Map([[
+    account.state.pulls = PersistentAccountStateMap.empty('pulls').updated(
       'order-a-source',
       {
         pullId: 'order-a-source',
@@ -327,7 +333,7 @@ describe('cross-j pull hash material durability', () => {
         createdHeight: 1,
         createdTimestamp: 1_000,
       },
-    ]]);
+    );
 
     const targetJ = makeJurisdiction('Target', 2, '21', '22');
     const collidingRoute = withCanonicalCrossJurisdictionRouteHash({

@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { cloneAccountReplica } from '../../../account/state/state-clone';
+import {
+  accountTransitionView,
+  beginAccountTransition,
+  commitAccountTransition,
+  createAccountTransitionKey,
+} from '../../../account/state/candidate-overlay';
 import {
   computeAccountStateRoot,
   computeAccountStateRootCold,
@@ -11,7 +16,11 @@ import {
   computeCanonicalEntityConsensusStateHashCold,
 } from '../../../entity/consensus/state-root';
 import { generateLazyEntityId } from '../../../entity/factory';
-import { cloneEntityState } from '../../../entity/state-clone';
+import {
+  commitEntityFrameCandidateState,
+  createEntityFrameCandidateState,
+} from '../../../entity/state-clone';
+import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 import { applyEntityTx } from '../../../entity/tx/apply';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
@@ -140,21 +149,33 @@ describe('State and Replica boundary characterization', () => {
     const accountRoot = computeAccountStateRoot(account.state);
     expect(accountRoot).toBe(computeAccountStateRootCold(account.state));
 
-    const bilateralChange = cloneAccountReplica(account, true);
-    bilateralChange.state.deltas.set(1, createDefaultDelta(1));
+    const bilateralTransition = beginAccountTransition(
+      account,
+      createAccountTransitionKey(account, ['boundary', 'bilateral']),
+    );
+    accountTransitionView(bilateralTransition).state.deltas.put(1, createDefaultDelta(1));
+    const bilateralChange = commitAccountTransition(bilateralTransition).account;
     expect(computeAccountStateRoot(bilateralChange.state)).not.toBe(accountRoot);
     expect(computeAccountStateRoot(bilateralChange.state))
       .toBe(computeAccountStateRootCold(bilateralChange.state));
 
-    const entityEnvelopeChange = cloneAccountReplica(account, true);
-    entityEnvelopeChange.mempool.push({
+    const envelopeTransition = beginAccountTransition(
+      account,
+      createAccountTransitionKey(account, ['boundary', 'envelope']),
+    );
+    accountTransitionView(envelopeTransition).mempool.push({
       type: 'direct_payment',
       data: { tokenId: 1, amount: 5n },
     });
+    const entityEnvelopeChange = commitAccountTransition(envelopeTransition).account;
     expect(computeAccountStateRoot(entityEnvelopeChange.state)).toBe(accountRoot);
 
-    const localWitnessChange = cloneAccountReplica(account, true);
-    localWitnessChange.currentFrameHanko = hex('91', 65);
+    const witnessTransition = beginAccountTransition(
+      account,
+      createAccountTransitionKey(account, ['boundary', 'witness']),
+    );
+    accountTransitionView(witnessTransition).currentFrameHanko = hex('91', 65);
+    const localWitnessChange = commitAccountTransition(witnessTransition).account;
     expect(computeAccountStateRoot(localWitnessChange.state)).toBe(accountRoot);
   });
 
@@ -163,22 +184,24 @@ describe('State and Replica boundary characterization', () => {
     // Reducer-unit calls return dirty Account metadata to the enclosing Entity
     // frame. A snapshot clone resets the cache here; the real frame pipeline
     // refreshes those leaves before computing its signed root.
-    const baselineState = cloneEntityState(replica.state, true);
+    const baselineState = commitEntityFrameCandidateState(
+      createEntityFrameCandidateState(replica.state),
+    );
     const entityRoot = computeCanonicalEntityConsensusStateHash(baselineState);
     expect(entityRoot).toBe(computeCanonicalEntityConsensusStateHashCold(baselineState));
 
-    const accountLifecycle = cloneEntityState(baselineState, true);
-    accountLifecycle.accounts.get(counterpartyId)!.mempool.push({
+    const accountLifecycle = createEntityFrameCandidateState(baselineState);
+    getEntityAccountForWrite(accountLifecycle.accounts, counterpartyId)!.mempool.push({
       type: 'direct_payment',
       data: { tokenId: 1, amount: 5n },
     });
     expect(computeCanonicalEntityConsensusStateHash(accountLifecycle)).not.toBe(entityRoot);
 
-    const localWitness = cloneEntityState(baselineState, true);
-    localWitness.accounts.get(counterpartyId)!.currentFrameHanko = hex('92', 65);
+    const localWitness = createEntityFrameCandidateState(baselineState);
+    getEntityAccountForWrite(localWitness.accounts, counterpartyId)!.currentFrameHanko = hex('92', 65);
     expect(computeCanonicalEntityConsensusStateHash(localWitness)).toBe(entityRoot);
 
-    const historyView = cloneEntityState(baselineState, true);
+    const historyView = createEntityFrameCandidateState(baselineState);
     historyView.prevFrameHash = hex('93', 32);
     expect(computeCanonicalEntityConsensusStateHash(historyView)).toBe(entityRoot);
 
@@ -186,7 +209,7 @@ describe('State and Replica boundary characterization', () => {
     replica.htlcNotes = new Map([[`hashlock:${hex('94', 32)}`, 'history-only']]);
     expect(computeCanonicalEntityConsensusStateHash(replica.state)).toBe(replicaStateRoot);
 
-    const committedChange = cloneEntityState(baselineState, true);
+    const committedChange = createEntityFrameCandidateState(baselineState);
     committedChange.reserves.set(1, 1n);
     expect(computeCanonicalEntityConsensusStateHash(committedChange)).not.toBe(entityRoot);
     expect(computeCanonicalEntityConsensusStateHash(committedChange))

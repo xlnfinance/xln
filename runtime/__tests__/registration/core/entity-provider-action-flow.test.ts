@@ -87,7 +87,7 @@ const baseState = (entityId: string, config: ConsensusConfig, timestamp: number)
   proposals: new Map(),
   config,
   reserves: new Map(),
-  accounts: PersistentEntityAccountMap.empty(computeEntityAccountValueHash),
+  accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
   lastFinalizedJHeight: 0,
   profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),

@@ -132,7 +132,7 @@ const persistRestoredRuntimeStateUnlocked = async (
   }
   if (!(await deps.tryOpenRuntimeWalDb(env))) throw new Error('RECOVERY_PERSIST_RUNTIME_WAL_OPEN_FAILED');
 
-  const replacement = await replaceRestoredStorageBase({
+  await replaceRestoredStorageBase({
     currentDb: deps.getStorageDb(env, 'current'),
     walDb: deps.getRuntimeWalDb(env),
     ...coordinates,
@@ -160,7 +160,6 @@ const persistRestoredRuntimeStateUnlocked = async (
     await clearDatabase(deps.getStorageDb(env, 'previous'));
   }
   const state = ensureRuntimeInfrastructure(env);
-  state.storageEntityHashDocs = replacement.entityHashDocs;
   state.currentStorageOverlayMarks = new Map();
 };
 

@@ -32,22 +32,31 @@ import { sortTransformerEntries } from '../transform/transformer-ordering';
 import { normalizeAccountWatchSeed } from '../identity/account-watch-seed';
 import { HASHLADDER_MAX_FILL_RATIO } from '../htlc/hash-ladder.ts';
 import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/machine/batch/index.ts';
-import { encodeAccountStateValue } from '../../account/commitment/state-root.ts';
+import { encodeBuffer } from '../../storage/codec/codec.ts';
+import { MAX_ACCOUNT_ENVELOPE_ROW_BYTES } from '../../storage/schema/account-envelope-graph.ts';
 
 /**
- * Bound the whole signed recovery program before its hash enters consensus.
- * This is a conservative RLP heuristic, not the physical row measurement:
- * storage independently checks each msgpack atom against its exact 10 KiB
- * limit. Production cross-j uses one opening order per cohort because two
- * recovery pulls exceed this budget; other proof clauses remain byte-bounded.
+ * Bound each scalar ProofBody atom before its hash enters consensus. The
+ * Account envelope is a Patricia value graph, so the whole ProofBody is not a
+ * LevelDB leaf: arrays/records become branches and their scalar values become
+ * leaves. Measuring the whole object here used to reject a perfectly storable
+ * proof once unrelated swaps and pulls together crossed 9 KB.
+ *
+ * `encodedBatch` is the only potentially growing scalar in a transformer
+ * clause. Measure its exact canonical storage encoding, not ABI bytes or a
+ * heuristic, so consensus never signs a value that the WAL cannot persist.
  */
-export const MAX_ACCOUNT_DISPUTE_PROOF_LEAF_BYTES = 9_000;
+export const MAX_ACCOUNT_DISPUTE_PROOF_ATOM_BYTES = MAX_ACCOUNT_ENVELOPE_ROW_BYTES;
 
 export class AccountDisputeProofBudgetError extends Error {
-  constructor(readonly encodedBytes: number) {
+  constructor(
+    readonly encodedBytes: number,
+    readonly transformerIndex: number,
+  ) {
     super(
-      `ACCOUNT_DISPUTE_PROOF_LEAF_BYTES_EXCEEDED:` +
-      `${encodedBytes}/${MAX_ACCOUNT_DISPUTE_PROOF_LEAF_BYTES}`,
+      `ACCOUNT_DISPUTE_PROOF_ATOM_BYTES_EXCEEDED:` +
+      `transformer=${transformerIndex}:` +
+      `${encodedBytes}/${MAX_ACCOUNT_DISPUTE_PROOF_ATOM_BYTES}`,
     );
     this.name = 'AccountDisputeProofBudgetError';
   }
@@ -285,24 +294,38 @@ const buildProofTransformers = (
   deltaIndex: ReadonlyMap<number, number>,
   deltaTransformerAddress: string,
 ): RuntimeTransformerClause[] => {
-  const batch: RuntimeBatch = {
+  const payments: RuntimeBatch = {
     payments: buildProofPayments(account, deltaIndex),
+    swaps: [],
+    pulls: [],
+  };
+  const swaps: RuntimeBatch = {
+    payments: [],
     swaps: buildProofSwaps(account, deltaIndex),
+    pulls: [],
+  };
+  const pulls: RuntimeBatch = {
+    payments: [],
+    swaps: [],
     pulls: buildProofPulls(account, deltaIndex),
   };
-  const hasBatch = batch.payments.length > 0 ||
-    batch.swaps.length > 0 ||
-    batch.pulls.length > 0;
-  const batchTransformers: RuntimeTransformerClause[] = hasBatch
-    ? [{
-        transformerAddress: requireContractAddress(
-          'delta_transformer',
-          deltaTransformerAddress,
-        ),
-        batch,
-        allowances: buildTransformerAllowances(batch),
-      }]
-    : [];
+  const batches = [payments, swaps, pulls].filter(batch =>
+    batch.payments.length > 0 || batch.swaps.length > 0 || batch.pulls.length > 0);
+  if (batches.length === 0) return buildSubcontractTransformers(account);
+  const transformerAddress = requireContractAddress('delta_transformer', deltaTransformerAddress);
+  // DeltaTransformer executes clauses sequentially. The canonical order
+  // payment→swap→pull is therefore byte-stable and economically identical to
+  // the former combined batch. Separating the three bounded collections keeps
+  // every independently persisted encodedBatch below the 10 KB record limit
+  // even when all configured collection maxima coexist. Dispute arguments
+  // duplicate the same compact tuple across the present payment/swap prefix;
+  // pulls consume no caller-supplied arguments and read Depository registry
+  // proof only. Never interleave user subcontracts with this canonical prefix.
+  const batchTransformers: RuntimeTransformerClause[] = batches.map(batch => ({
+    transformerAddress,
+    batch,
+    allowances: buildTransformerAllowances(batch),
+  }));
   return [...batchTransformers, ...buildSubcontractTransformers(account)];
 };
 
@@ -341,9 +364,11 @@ export function buildAccountProofBody(
   // Contract executability is the outer protocol boundary and retains its
   // canonical failure code even when the same body also exceeds local storage.
   assertDisputeProofBodyWithinContractLimits(proofBodyStruct, 'account.signing');
-  const proofLeafBytes = encodeAccountStateValue(proofBodyStruct).byteLength;
-  if (proofLeafBytes >= MAX_ACCOUNT_DISPUTE_PROOF_LEAF_BYTES) {
-    throw new AccountDisputeProofBudgetError(proofLeafBytes);
+  for (const [transformerIndex, transformer] of proofBodyStruct.transformers.entries()) {
+    const atomBytes = encodeBuffer({ kind: 'atom', value: transformer.encodedBatch }).byteLength;
+    if (atomBytes >= MAX_ACCOUNT_DISPUTE_PROOF_ATOM_BYTES) {
+      throw new AccountDisputeProofBudgetError(atomBytes, transformerIndex);
+    }
   }
   // This is the final boundary before the hash enters a validator's Hanko.
   // Later J-submit validation cannot repair an already-certified invalid body.

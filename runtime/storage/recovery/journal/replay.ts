@@ -17,6 +17,7 @@ import type { RuntimeStorageApiDeps } from '../../runtime-storage-deps';
 import { assertStorageSafetyOverridesAllowed } from '../../commit/safety';
 import type { LoadedRuntimeStorage } from '../load';
 import { verifyPersistedFrameState } from '../verify';
+import { borrowOpenRuntimeWalDb } from '../../runtime-dbs';
 
 type ReplayTarget = {
   latestHeight: number;
@@ -27,6 +28,10 @@ type ReplayTarget = {
 
 export type ReplayOptions = {
   prunedTargetReturnsNull?: boolean;
+  /** Existing live Runtime whose open WAL handle may be borrowed read-only. */
+  borrowRuntimeWalFrom?: RuntimeReplica;
+  /** Historical queries rebuild State but never mutate auxiliary read models. */
+  readOnly?: boolean;
 };
 
 type LoadPersistedRuntime = (
@@ -48,6 +53,9 @@ const resolveReplayTarget = async (
   // a daemon could silently boot a fresh Runtime under an unsafe configuration.
   assertStorageSafetyOverridesAllowed();
   const env = reads.createPersistedStorageEnv(runtimeId, runtimeSeed);
+  if (options.borrowRuntimeWalFrom) {
+    await borrowOpenRuntimeWalDb(options.borrowRuntimeWalFrom, env, deps);
+  }
   try {
     const latestHeight = await reads.resolvePersistedLatestHeight(env);
     if (latestHeight <= 0) return null;
@@ -239,7 +247,7 @@ export const createRuntimeReplayLoader = (
       target,
       targetFrame,
     );
-    if (target.targetHeight === target.latestHeight) {
+    if (target.targetHeight === target.latestHeight && !options.readOnly) {
       await reconcileMaterializedHistory(deps, restored.env, target.latestHeight);
     }
     restored.latestHeight = target.latestHeight;

@@ -15,10 +15,7 @@ import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
 import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/security/auth';
 import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from '../infra/process/child-secrets';
-import {
-  startCustodySupport,
-  stopManagedChild,
-} from './bootstrap/custody-bootstrap';
+import { startCustodySupport, stopManagedChild } from './bootstrap/custody-bootstrap';
 import {
   clearDebugTimeline,
   createRelayStore,
@@ -35,11 +32,7 @@ import { createHelloChallengeRegistry } from '../network/p2p/auth/hello-challeng
 import { type MarketSnapshotPayload } from '../network/relay/market/snapshot';
 import { createMarketSubscriptionStack } from '../network/relay/market/subscriptions';
 import { createMarketCapController } from '../network/relay/market/cap/market-cap-controller';
-import {
-  decodeMarketWireRequest,
-  encodeMarketWireMessage,
-  type MarketWireRequest,
-} from '../network/relay/market/wire';
+import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../network/relay/market/wire';
 import {
   fetchMarketPairCatalogFromHub,
   fetchMarketSnapshotsFromHub,
@@ -52,11 +45,7 @@ import { maybeHandleQaRequest } from '../qa/api';
 import { serveStaticApp } from '../api/server/static-assets';
 import { enforceFaucetPolicy } from '../api/server/faucet/policy';
 import { handleWatchtowerProxy } from '../api/server/rpc/watchtower-proxy';
-import {
-  createAssistantProxyFromEnv,
-  resolveAssistantDirectClientIp,
-  resolveAssistantRateClientId,
-} from '../api/server/assistant/proxy';
+import { createAssistantProxyFromEnv, resolveAssistantDirectClientIp, resolveAssistantRateClientId } from '../api/server/assistant/proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { publicAggregatedHealth, resolveSocketPeerAddress } from '../api/server/health/redaction';
 import { resolveRequestClientIp } from '../api/server/network/relay-direct';
@@ -103,10 +92,7 @@ import {
   readManagedProcessTable,
   type ManagedProcessTableEntry,
 } from './process/managed-runtime-leases';
-import {
-  scheduleMarketMakerRecoverySpawn,
-  shouldAbortMarketMakerSpawn,
-} from './market-maker/node/mm-recovery-spawn';
+import { scheduleMarketMakerRecoverySpawn, shouldAbortMarketMakerSpawn } from './market-maker/node/mm-recovery-spawn';
 import { buildPrometheusMetrics } from './prometheus';
 import { deriveResetHealthOk } from './health/health-model';
 import {
@@ -142,10 +128,7 @@ import {
 } from './jurisdiction/jurisdictions';
 import { createOrchestratorProxyHandlers, resolveRpcProxyIndex } from './proxy';
 import { createHubApiRoutes } from './hub/hub-api-routes';
-import {
-  findMissingRpcContractCode,
-  type RpcContractAddresses,
-} from './bootstrap/contract-readiness';
+import { findMissingRpcContractCode, type RpcContractAddresses } from './bootstrap/contract-readiness';
 import { maybeHandleOrchestratorDebugApi } from './debug-api';
 import { resolveConfiguredRelayAudience } from './mesh/relay-audience';
 import { areHubChildrenReady } from './hub/hub-mesh-readiness';
@@ -163,9 +146,7 @@ import {
   type ResolvedMeshJurisdictionConfig,
 } from './mesh/mesh-jurisdictions';
 import { buildRuntimeImportLogLine } from './runtime/runtime-import-log';
-import {
-  normalizeMarketMakerHealthPayload,
-} from './market-maker/health/market-maker-health-payload';
+import { normalizeMarketMakerHealthPayload } from './market-maker/health/market-maker-health-payload';
 import { createMarketMakerChildPoller } from './market-maker/health/market-maker-child-poll';
 import { createManagedRuntimeSecurityTelemetrySync } from './health/runtime-security-telemetry';
 import {
@@ -179,17 +160,11 @@ import {
   type PrefixLogState,
   writePrefixedLogChunk,
 } from './process/child-log-buffer';
-import {
-  evaluateHubBaselineDeadlines,
-  type HubBaselineProgressState,
-} from './hub/hub-baseline-progress';
+import { evaluateHubBaselineDeadlines, type HubBaselineProgressState } from './hub/hub-baseline-progress';
 import { resolveRuntimeImportReadiness } from './runtime/runtime-import-readiness';
 import { handleRuntimeImportHttpRequest } from './runtime/runtime-import-http';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from './process/child-failure-diagnostics';
-import {
-  attachManagedChildFatalIpc,
-  type ManagedChildFatalReport,
-} from './process/managed-child-fatal-ipc';
+import { attachManagedChildFatalIpc, type ManagedChildFatalReport } from './process/managed-child-fatal-ipc';
 import {
   decideChildFailure,
   selectChildFailureReason,
@@ -197,10 +172,7 @@ import {
   type ChildFailureDecision,
   type ChildFailureObservation,
 } from './process/child-recovery-policy';
-import {
-  buildRuntimeHealthFailures,
-  normalizeRuntimeFailureCode,
-} from '../protocol/errors/failure-taxonomy';
+import { buildRuntimeHealthFailures, normalizeRuntimeFailureCode } from '../protocol/errors/failure-taxonomy';
 import { STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
 import { deriveManagedSignerInventory, deriveMeshChildSeed, readMeshSeedOverrides, requireMeshRootSeed, resolveMeshRuntimeSeed } from './mesh/mesh-seeds';
 import {

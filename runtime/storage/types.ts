@@ -9,9 +9,19 @@ import type { FrameLogEntry } from '../types/logging';
 import type { HubRebalanceConfig } from '../types/finance/rebalance';
 import type { DurableOutputRetryState } from '../runtime/delivery/durable-output-retry';
 import type { EntityInfraContext } from '../types/entity/infra-context';
-import type { RadixMerkleRadix, RadixMerkleRootKind } from '../protocol/state/radix-merkle';
-import type { StorageMerkleNamespace } from './keys';
+import type { RadixMerkleRadix } from '../protocol/state/radix-merkle';
 import type { Covered } from '../types/hash-coverage/coverage';
+import type {
+  EntityContextPayloadHash,
+  RuntimeMachineRootHash,
+  RuntimeOutputPayloadHash,
+} from '../protocol/hashes';
+
+export type {
+  EntityContextPayloadHash,
+  RuntimeMachineRootHash,
+  RuntimeOutputPayloadHash,
+} from '../protocol/hashes';
 
 export type RuntimeDbLike = {
   get: (key: Buffer) => Promise<Buffer>;
@@ -149,10 +159,7 @@ export type RuntimeFrame = {
   replicaMetaStateMode: 'live-head' | 'shared-entity-state';
   /** Required per-frame replay commitment over Entity heads and durable Runtime state. */
   postStateHash: string;
-  stateHash: string;
-  hashMode?: 'storage-merkle-v1';
   materializedState?: boolean;
-  entityHashes?: StorageFrameEntityHash[];
   /**
    * Independent canonical root computed directly from live EntityReplica data.
    * This intentionally avoids cloneEntityReplica(), project*Doc(), msgpack, and
@@ -186,21 +193,6 @@ export type RuntimeFramePayloads = {
   runtimeOutputs?: RoutedEntityInput[];
 };
 
-declare const runtimeOutputPayloadHashBrand: unique symbol;
-export type RuntimeOutputPayloadHash = string & {
-  readonly [runtimeOutputPayloadHashBrand]: 'RuntimeOutputPayloadHash';
-};
-
-declare const entityContextPayloadHashBrand: unique symbol;
-export type EntityContextPayloadHash = string & {
-  readonly [entityContextPayloadHashBrand]: 'EntityContextPayloadHash';
-};
-
-declare const runtimeMachineRootHashBrand: unique symbol;
-export type RuntimeMachineRootHash = string & {
-  readonly [runtimeMachineRootHashBrand]: 'RuntimeMachineRootHash';
-};
-
 export type RuntimeMachineGraphRoot = Readonly<{
   rootHash: RuntimeMachineRootHash;
   leafCount: number;
@@ -219,46 +211,6 @@ export type PersistedFrameJournal = Pick<RuntimeFrame,
   | 'runtimeOutputRetryState'
   | 'runtimeStateHash'
 > & RuntimeFramePayloads & { logs: FrameLogEntry[] };
-
-export type StorageEntityHashDoc = {
-  entityId: string;
-  hash: string;
-  cellCount: number;
-};
-
-export type StorageMerkleRootDoc = {
-  entityId: string;
-  namespace: StorageMerkleNamespace;
-  radix: RadixMerkleRadix;
-  rootHash: string;
-  rootKind: RadixMerkleRootKind;
-  rootPath: number[];
-  leafCount: number;
-};
-
-export type StorageMerkleBranchDoc = {
-  entityId: string;
-  namespace: StorageMerkleNamespace;
-  radix: RadixMerkleRadix;
-  path: number[];
-  hash: string;
-  children: Array<{
-    slot: number;
-    kind: 'branch' | 'leaf';
-    path: number[];
-    hash: string;
-  }>;
-};
-
-export type StorageMerkleLeafDoc = {
-  entityId: string;
-  namespace: StorageMerkleNamespace;
-  radix: RadixMerkleRadix;
-  path: number[];
-  key: string;
-  valueHash: string;
-  hash: string;
-};
 
 export type StorageFrameEntityHash = {
   entityId: string;
@@ -328,9 +280,10 @@ export type StorageDebugStats = {
   liveAccountFieldCount?: number;
   liveAccountFieldBytes?: number;
   liveBookCount: number;
-  merkleRootCount?: number;
-  merkleBranchCount?: number;
-  merkleLeafCount?: number;
+  accountGraphBranchCount?: number;
+  accountGraphLeafCount?: number;
+  bookGraphBranchCount?: number;
+  bookGraphLeafCount?: number;
   certifiedBoardNodeCount?: number;
   consumptionNodeCount?: number;
   accountJClaimNodeCount?: number;

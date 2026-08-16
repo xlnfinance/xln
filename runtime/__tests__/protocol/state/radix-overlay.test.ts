@@ -22,13 +22,13 @@ const makeOptions = (
   onHash: () => void = () => undefined,
 ): PersistentRadixValueMapOptions<TestKey, TestValue> => ({
   radix: 16,
-  sealKey: entryKey => Object.freeze({ ...entryKey }),
+  ownKey: entryKey => Object.freeze({ ...entryKey }),
   keyBytes: encodeKey,
   valueHash: value => {
     onHash();
     return ethers.keccak256(encodeValue(value));
   },
-  sealValue: value => Object.freeze({ ...value }),
+  ownValue: value => Object.freeze({ ...value }),
 });
 
 const key = (group: number, item: number): TestKey => ({ group, item });
@@ -155,6 +155,54 @@ describe('radix overlay', () => {
     expect(hashes).toBe(1);
   });
 
+  test('N overlay mutations do not hash until fold, then only dirty values', () => {
+    let hashes = 0;
+    const options = makeOptions(() => { hashes += 1; });
+    const first = key(1, 1);
+    const second = key(1, 2);
+    const third = key(2, 1);
+    const base = PersistentRadixValueMap.fromMap([
+      [first, value(1, 'a')],
+      [second, value(2, 'b')],
+      [third, value(3, 'c')],
+    ], options);
+    const untouched = base.get(second);
+    base.rootHash();
+    const afterSeal = hashes;
+    const owner = beginRadixOverlay(base);
+    owner.view.edit(first, previous => value(previous.amount + 1, 'edited'));
+    owner.view.put(key(3, 1), value(9, 'new'));
+    owner.view.del(third);
+    expect(hashes).toBe(afterSeal);
+
+    const prepared = prepareRadixOverlay(owner);
+    expect(hashes).toBe(afterSeal + 2);
+    expect(prepared.values.hashStats().valueHashes).toBe(2);
+    const afterFold = hashes;
+    expect(prepared.values.rootHash()).toBe(prepared.root);
+    expect(hashes).toBe(afterFold);
+    expect(base.get(first)).toEqual(value(1, 'a'));
+    expect(base.get(second)).toBe(untouched);
+    expect(base.rootHash()).not.toBe(prepared.root);
+  });
+
+  test('overlay fold root does not depend on mutation order', () => {
+    const options = makeOptions();
+    const base = PersistentRadixValueMap.fromMap([
+      [key(1, 1), value(1, 'keep')],
+      [key(1, 2), value(2, 'drop')],
+    ], options);
+    const left = beginRadixOverlay(base);
+    left.view.put(key(2, 1), value(3, 'new'));
+    left.view.del(key(1, 2));
+    left.view.edit(key(1, 1), previous => value(previous.amount + 4, 'edited'));
+    const right = beginRadixOverlay(base);
+    right.view.edit(key(1, 1), previous => value(previous.amount + 4, 'edited'));
+    right.view.del(key(1, 2));
+    right.view.put(key(2, 1), value(3, 'new'));
+    expect(prepareRadixOverlay(left).root).toBe(prepareRadixOverlay(right).root);
+  });
+
   test('prepare and discard consume their owner exactly once', () => {
     const options = makeOptions();
     const base = PersistentRadixValueMap.empty(options);
@@ -189,7 +237,7 @@ describe('radix overlay', () => {
       valueHash: entry => ethers.keccak256(
         entry === undefined ? Uint8Array.of(0) : encodeValue(entry),
       ),
-      sealValue: entry => entry === undefined ? undefined : Object.freeze({ ...entry }),
+      ownValue: entry => entry === undefined ? undefined : Object.freeze({ ...entry }),
     };
     const storedKey = key(5, 1);
     const base = PersistentRadixValueMap.fromMap([[storedKey, undefined]], undefinedOptions);

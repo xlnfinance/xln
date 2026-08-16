@@ -29,9 +29,6 @@ const removePair = (
 };
 
 const requireOrderPairIndex = (ext: OrderbookExtState): Map<string, string[]> => {
-  if (!(ext.orderPairs instanceof Map)) {
-    throw new Error('ORDERBOOK_PAIR_INDEX_MAP_REQUIRED');
-  }
   return ext.orderPairs;
 };
 

@@ -22,45 +22,72 @@ import {
   parseSnapshotAccountKey,
   parseSnapshotGraphKey,
 } from '../keys';
+import { decodeValidatedBuffer } from '../codec/codec';
 import { iterateKeys } from '../database/level';
+import { ACCOUNT_TREE_NAMESPACE_TAG } from '../schema/account-graph-codec';
+import { ACCOUNT_ENVELOPE_NAMESPACE_TAG } from '../schema/account-envelope-graph';
+import { decodeAccountGraphManifest } from '../schema/account-layout';
+import { decodeStorageBookHeader } from '../schema/book-graph-codec';
 import type { RuntimeDbLike } from '../types';
 
 const ownerKey = (key: Buffer): string => key.toString('hex');
 
+type SnapshotGraphOwner = Readonly<
+  | { kind: 'account'; namespaceTags: ReadonlySet<number> }
+  | { kind: 'book' }
+>;
+
 const collectSnapshotOwners = async (
   db: RuntimeDbLike,
   height: number,
-): Promise<ReadonlySet<string>> => {
-  const owners = new Set<string>();
+): Promise<ReadonlyMap<string, SnapshotGraphOwner>> => {
+  const owners = new Map<string, SnapshotGraphOwner>();
   for await (const key of iterateKeys(db, { prefix: keySnapshotAccountPrefix(height) })) {
     const parsed = parseSnapshotAccountKey(key);
     if (parsed.height !== height) throw new Error('STORAGE_SNAPSHOT_ACCOUNT_HEIGHT_MISMATCH');
-    owners.add(ownerKey(key));
+    const manifest = decodeAccountGraphManifest(await db.get(key));
+    owners.set(ownerKey(key), {
+      kind: 'account',
+      namespaceTags: new Set([
+        ACCOUNT_ENVELOPE_NAMESPACE_TAG,
+        ...manifest.trees.map(tree => ACCOUNT_TREE_NAMESPACE_TAG[tree.namespace]),
+      ]),
+    });
   }
   for await (const key of iterateKeys(db, { prefix: keySnapshotBookPrefix(height) })) {
     parseLiveBookKey(key, 9);
-    owners.add(ownerKey(key));
+    decodeValidatedBuffer(await db.get(key), decodeStorageBookHeader);
+    owners.set(ownerKey(key), { kind: 'book' });
   }
   return owners;
 };
 
-const graphOwner = (height: number, liveKey: Buffer): Buffer => {
+const graphOwner = (
+  height: number,
+  liveKey: Buffer,
+): Readonly<{ key: Buffer; namespaceTag?: number }> => {
   switch (liveKey[0]) {
     case KEY_LIVE_ACCOUNT_BRANCH: {
       const owner = parseLiveAccountBranchKey(liveKey);
-      return keySnapshotAccount(height, owner.entityId, owner.counterpartyId);
+      return {
+        key: keySnapshotAccount(height, owner.entityId, owner.counterpartyId),
+        namespaceTag: owner.namespaceTag,
+      };
     }
     case KEY_LIVE_ACCOUNT_LEAF: {
       const owner = parseLiveAccountLeafKey(liveKey);
-      return keySnapshotAccount(height, owner.entityId, owner.counterpartyId);
+      return {
+        key: keySnapshotAccount(height, owner.entityId, owner.counterpartyId),
+        namespaceTag: owner.namespaceTag,
+      };
     }
     case KEY_LIVE_BOOK_BRANCH: {
       const owner = parseLiveBookBranchKey(liveKey);
-      return keySnapshotBook(height, owner.entityId, owner.pairId);
+      return { key: keySnapshotBook(height, owner.entityId, owner.pairId) };
     }
     case KEY_LIVE_BOOK_LEAF: {
       const owner = parseLiveBookLeafKey(liveKey);
-      return keySnapshotBook(height, owner.entityId, owner.pairId);
+      return { key: keySnapshotBook(height, owner.entityId, owner.pairId) };
     }
     default:
       throw new Error(`STORAGE_SNAPSHOT_GRAPH_TAG_INVALID:${String(liveKey[0])}`);
@@ -77,9 +104,23 @@ export const inspectSnapshotGraphRows = async (
   for await (const key of iterateKeys(db, { prefix: keySnapshotGraphPrefix(height) })) {
     const parsed = parseSnapshotGraphKey(key);
     if (parsed.height !== height) throw new Error('STORAGE_SNAPSHOT_GRAPH_HEIGHT_MISMATCH');
-    const owner = graphOwner(height, parsed.liveKey);
-    if (!owners.has(ownerKey(owner))) {
-      throw new Error(`STORAGE_SNAPSHOT_GRAPH_OWNER_MISSING:${owner.toString('hex')}`);
+    const ownership = graphOwner(height, parsed.liveKey);
+    const owner = owners.get(ownerKey(ownership.key));
+    if (!owner) {
+      throw new Error(`STORAGE_SNAPSHOT_GRAPH_OWNER_MISSING:${ownership.key.toString('hex')}`);
+    }
+    if (ownership.namespaceTag !== undefined) {
+      if (owner.kind !== 'account') {
+        throw new Error(`STORAGE_SNAPSHOT_GRAPH_OWNER_KIND_INVALID:${ownership.key.toString('hex')}`);
+      }
+      if (!owner.namespaceTags.has(ownership.namespaceTag)) {
+        throw new Error(
+          `STORAGE_SNAPSHOT_GRAPH_ACCOUNT_NAMESPACE_UNDECLARED:` +
+          `owner=${ownership.key.toString('hex')}:namespace=${ownership.namespaceTag}`,
+        );
+      }
+    } else if (owner.kind !== 'book') {
+      throw new Error(`STORAGE_SNAPSHOT_GRAPH_OWNER_KIND_INVALID:${ownership.key.toString('hex')}`);
     }
     count += 1;
   }

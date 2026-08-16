@@ -57,7 +57,10 @@ import { createEmptyEnv, restoreEnvFromCheckpointSnapshot } from '../../../runti
 import { getReliableOutputIdentity } from '../../../runtime/routing/output-routing';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../../../runtime/input-pipeline/scheduled-wake';
 import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
-import { cloneEntityState } from '../../../entity/state-clone';
+import {
+  commitEntityFrameCandidateState,
+  createEntityFrameCandidateState,
+} from '../../../entity/state-clone';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import {
   buildEntityFrameAuthority,
@@ -350,7 +353,7 @@ describe('registered Entity certified board authority', () => {
       website: previousProfile.website,
     };
     expect((await verifyProfileSignature(previousProfile, localEnv)).valid).toBe(true);
-    const previousState = cloneEntityState(state);
+    const previousState = createEntityFrameCandidateState(state);
 
     const currentPrivateKey = deriveSignerKeySync('registered-board-authority:current:2', '1');
     const currentSigner = computeAddress(new SigningKey(hex(currentPrivateKey)).publicKey).toLowerCase();
@@ -366,7 +369,7 @@ describe('registered Entity certified board authority', () => {
       previousBoardHash,
     })]);
     state.config = currentConfig;
-    previousReplica.state = previousState;
+    previousReplica.state = commitEntityFrameCandidateState(previousState);
     registerSignerKey(localEnv, currentSigner, currentPrivateKey);
 
     const currentReplica = {
@@ -793,8 +796,8 @@ describe('registered Entity certified board authority', () => {
       reason: 'SELF_BOARD_CONFIG_HANDOVER_REQUIRED',
     });
 
-    const updatedA = cloneEntityState(oldState);
-    const updatedB = cloneEntityState(oldState);
+    const updatedA = createEntityFrameCandidateState(oldState);
+    const updatedB = createEntityFrameCandidateState(oldState);
     updatedA.config = newConfig;
     updatedB.config = newConfig;
     for (const updated of [updatedA, updatedB]) {
@@ -1069,7 +1072,7 @@ describe('registered Entity certified board authority', () => {
       }],
     }, baseState);
 
-    const newProposerState = cloneEntityState(baseState);
+    const newProposerState = createEntityFrameCandidateState(baseState);
     newProposerState.config = newConfig;
     const proposerReplica = {
       entityId: registeredEntityId,
@@ -1085,7 +1088,7 @@ describe('registered Entity certified board authority', () => {
       entityId: registeredEntityId,
       signerId: signerB,
       entityEncPubKey: '',
-      state: cloneEntityState(newProposerState),
+      state: commitEntityFrameCandidateState(createEntityFrameCandidateState(newProposerState)),
       mempool: [],
       isProposer: false,
       certifiedFrameAnchor: checkpointAnchor(newProposerState),
@@ -1111,7 +1114,7 @@ describe('registered Entity certified board authority', () => {
     expect(proposal.hashesToSign.some(entry => entry.hash === certifiedFrameHash)).toBe(false);
     expect(proposal.hashesToSign.some(entry => entry.hash === certifiedDisputeHash)).toBe(false);
 
-    const oldValidatorState = cloneEntityState(baseState);
+    const oldValidatorState = createEntityFrameCandidateState(baseState);
     oldValidatorState.config = oldConfig;
     const partialReplica = {
       entityId: registeredEntityId,
@@ -1132,7 +1135,7 @@ describe('registered Entity certified board authority', () => {
     expect(partial.outputs.some((output) => output.hashPrecommits?.has(signerB))).toBe(false);
     expect(partial.workingReplica.state.height).toBe(baseState.height);
 
-    const updatedValidatorState = cloneEntityState(baseState);
+    const updatedValidatorState = createEntityFrameCandidateState(baseState);
     updatedValidatorState.config = newConfig;
     const updatedValidatorReplica = {
       entityId: registeredEntityId,
@@ -1201,7 +1204,9 @@ describe('registered Entity certified board authority', () => {
       entityId: registeredEntityId,
       signerId: signerB,
       entityEncPubKey: '',
-      state: cloneEntityState(committed.workingReplica.state),
+      state: commitEntityFrameCandidateState(
+        createEntityFrameCandidateState(committed.workingReplica.state),
+      ),
       mempool: [],
       isProposer: false,
       certifiedFrameAnchor: committed.workingReplica.certifiedFrameAnchor,
@@ -1461,7 +1466,7 @@ describe('registered Entity certified board authority', () => {
     expect(() => applyCertifiedBoardRegistryEvent(undefined, getCertifiedBoardNodeStore(env), jurisdiction, registration))
       .toThrow('CERTIFIED_BOARD_STACK_NOT_BOOTSTRAPPED');
     installEvents(env, state, [foundation, registration]);
-    expect(() => cloneEntityState(state)).not.toThrow();
+    expect(() => commitEntityFrameCandidateState(createEntityFrameCandidateState(state))).not.toThrow();
     expect(resolveObserverCertifiedBoardHash(state, getCertifiedBoardNodeStore(env), registeredEntityId))
       .toBe(blockHash('32'));
     const proof = createCertifiedBoardProof(getCertifiedBoardNodeStore(env), state.certifiedBoardState!, registeredEntityId);
@@ -1580,7 +1585,7 @@ describe('registered Entity certified board authority', () => {
       { ...currentRecord, boardEpoch: currentRecord.boardEpoch + 1 },
     );
     cacheCertifiedBoardNodes(env, conflictUpdate.newNodes);
-    const conflict = cloneEntityState(latest);
+    const conflict = createEntityFrameCandidateState(latest);
     conflict.certifiedBoardState = {
       ...conflict.certifiedBoardState!,
       boardRegistryRoot: conflictUpdate.root,
@@ -1679,7 +1684,7 @@ describe('registered Entity certified board authority', () => {
   test('previous board verifies through nested claims at the exclusive seven-day boundary and survives restore', async () => {
     const { profile, localEnv, boardHash: previousBoardHash, privateKey } = await buildRegisteredProfile();
     const state = [...localEnv.state.eReplicas.values()][0]!.state;
-    const staleObserverState = cloneEntityState(state);
+    const staleObserverState = createEntityFrameCandidateState(state);
     const currentBoardHash = blockHash('66');
     const previousBoardValidUntil = 1_700_604_800;
     installEvents(localEnv, state, [event('BoardActivated', currentBoardHash, {
@@ -1805,7 +1810,7 @@ describe('registered Entity certified board authority', () => {
       currentBoardHash,
     )).rejects.toThrow('CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID');
 
-    const corruptObserver = cloneEntityState(staleObserverState);
+    const corruptObserver = createEntityFrameCandidateState(staleObserverState);
     corruptObserver.certifiedBoardState = {
       ...corruptObserver.certifiedBoardState!,
       stackKey: blockHash('ff'),

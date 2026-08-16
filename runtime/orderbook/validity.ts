@@ -304,7 +304,7 @@ export function validateBookAgainstOffers(state: EntityState): BookMediumReport 
   }
 
   const expectedPairIndex = collectExpectedPairIndex(ext);
-  const actualPairIndex = ext.orderPairs instanceof Map ? ext.orderPairs : new Map<string, string[]>();
+  const actualPairIndex = ext.orderPairs;
   const indexedOrderIds = new Set<string>([
     ...expectedPairIndex.keys(),
     ...actualPairIndex.keys(),

@@ -4,7 +4,7 @@
  * Human-audit importance: 98/100 — equality here is the recovery identity contract.
  */
 import { ethers } from 'ethers';
-import { projectEntityStateWithoutFrameEvents } from '../entity/frame-events';
+import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
 import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
@@ -111,24 +111,14 @@ export const canonicalizeStorageAuditValue = (value: unknown): unknown =>
 
 export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFrameEntityHash => {
   const entityId = normalizeEntityId(replica.entityId || replica.state?.entityId || '');
-  const consensusState = projectEntityStateWithoutFrameEvents(replica.state);
-  // Frame events are signed history derived during one reducer pass, not live
-  // Entity state. The enumerable carrier survives immutable object spreads,
-  // so every persistence/consensus projection must remove it explicitly.
-  // Persisting it here would make a restored state hash depend on whether the
-  // reducer happened to be observed before or after its frame was finalized.
   return {
     entityId,
     cellCount: 1,
-    hash: hashCanonical({
-      kind: 'xln.storage.canonicalEntityHash.v1',
-      entityId,
-      // This hash is a historical replay oracle. It must cover only state that
-      // loadEnvFromStorage(height) can reconstruct for every height. In-flight
-      // proposal/witness metadata is persisted for latest-height crash recovery
-      // via replica meta, but it is not a per-height history source.
-      state: canonicalizeStorageAuditValue(consensusState),
-    }),
+    // The Entity consensus root is already the bounded parent commitment over
+    // Account Patricia roots, Book roots, and the remaining Entity sections.
+    // Re-serializing the complete Entity here would create a second authority
+    // and turn one dirty Account into an O(all Accounts) storage checkpoint.
+    hash: computeCanonicalEntityConsensusStateHash(replica.state),
   };
 };
 

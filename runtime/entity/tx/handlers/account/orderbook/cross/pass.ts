@@ -13,6 +13,7 @@ import type {
   CrossOrderbookPass,
   CrossOrderbookProcessInput,
 } from './types';
+import { getEntityCollectionValueForWrite } from '../../../../../state/persistent-collection-map';
 
 const orderbookCrossLog = createStructuredLogger('orderbook.cross');
 
@@ -50,6 +51,20 @@ export const getCrossAdmission = (
   crossJurisdictionBookAdmissionKeyFor(accountId, offerId),
 );
 
+const getCrossAdmissionForWrite = (
+  pass: CrossOrderbookPass,
+  accountId: string,
+  offerId: string,
+) => {
+  const admissions = pass.hubState.crossJurisdictionBookAdmissions;
+  return admissions
+    ? getEntityCollectionValueForWrite(
+        admissions,
+        crossJurisdictionBookAdmissionKeyFor(accountId, offerId),
+      )
+    : undefined;
+};
+
 export const getWorkingCrossBook = (
   pass: CrossOrderbookPass,
   pairId: string,
@@ -67,7 +82,7 @@ export const assertPendingBookFillAckLive = (
   accountId: string,
   offerId: string,
 ): boolean => {
-  const admission = getCrossAdmission(pass, accountId, offerId);
+  const admission = getCrossAdmissionForWrite(pass, accountId, offerId);
   const pendingFill = admission?.pendingFill;
   if (!pendingFill) return false;
   const now = Number(pass.hubState.timestamp || 0);

@@ -1,70 +1,39 @@
 /**
- * Verifies the disposable current-state cache against committed document and Merkle data.
- * Key checks: reject incomplete cells so startup can rebuild from authoritative history.
- * Human-audit importance: 94/100 — it prevents corrupted cache reuse after recovery.
+ * Verifies the disposable live projection directly from its typed graphs.
+ * Account manifests and Book headers commit their Patricia child roots; every
+ * graph row must belong to one declared owner. No second document Merkle exists.
+ * Human-audit importance: 100/100 — corrupt recovery bytes must fail closed.
  */
-import { computeIntegrityDigest } from '../../infra/integrity-checksum';
-import { decodeValidatedBuffer, encodeBuffer } from '../codec/codec';
-import { docRefCellKey } from '../schema/doc-refs';
-import { storageMerkleCellHexKey } from '../hashes';
+import { decodeValidatedBuffer } from '../codec/codec';
+import { iterateKeys, readRawOrNull } from '../database/level';
 import {
-  DEFAULT_ACCOUNT_MERKLE_RADIX,
+  KEY_LIVE_ACCOUNT_BRANCH,
+  KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_ENTITY,
+  KEY_LIVE_BOOK_BRANCH,
+  KEY_LIVE_BOOK_LEAF,
   decodeEntityId,
-  hexBytes,
   keyLiveAccount,
   keyLiveAccountPrefix,
   keyLiveBook,
   keyLiveBookPrefix,
   keyLiveEntity,
-  keyMerkleBranch,
-  keyMerkleBranchPrefix,
-  keyMerkleLeaf,
-  keyMerkleLeafPrefix,
-  keyMerkleRoot,
-  keyMerkleRootPrefix,
-  normalizeEntityId,
+  parseLiveAccountBranchKey,
   parseLiveAccountKey,
+  parseLiveAccountLeafKey,
+  parseLiveBookBranchKey,
   parseLiveBookKey,
+  parseLiveBookLeafKey,
 } from '../keys';
-import { iterateKeys } from '../database/level';
-import { buildHexKeyedMerkleMaterialized, packRadixMerklePath } from '../../protocol/state/radix-merkle';
+import { readAccountStorageLayout } from '../schema/account-layout';
 import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,
   validateStorageAccountDocValue,
   validateStorageEntityCoreDocValue,
-  validateStorageMerkleBranchDocValue,
-  validateStorageMerkleLeafDocValue,
-  validateStorageMerkleRootDocValue,
 } from '../schema/authoritative-schema';
-import { readAccountStorageLayout } from '../schema/account-layout';
-import type {
-  RuntimeDbLike,
-  StorageMerkleBranchDoc,
-  StorageMerkleLeafDoc,
-  StorageMerkleRootDoc,
-} from '../types';
+import type { RuntimeDbLike } from '../types';
 import { readStorageBookGraph } from './book-graph';
-
-const RUNTIME_ROOTS = 'runtime-roots' as const;
-
-type LiveCell = { hexKey: string; value: Buffer };
-
-const appendCell = (
-  cellsByEntity: Map<string, LiveCell[]>,
-  entityId: string,
-  cellKey: string,
-  raw: Buffer,
-): void => {
-  const normalized = normalizeEntityId(entityId);
-  const cells = cellsByEntity.get(normalized) ?? [];
-  cells.push({
-    hexKey: storageMerkleCellHexKey(cellKey),
-    value: hexBytes(computeIntegrityDigest(raw)),
-  });
-  cellsByEntity.set(normalized, cells);
-};
 
 const assertExactKey = (actual: Buffer, expected: Buffer, code: string): void => {
   if (!actual.equals(expected)) {
@@ -72,33 +41,26 @@ const assertExactKey = (actual: Buffer, expected: Buffer, code: string): void =>
   }
 };
 
-const assertExactDoc = (actual: unknown, expected: unknown, code: string): void => {
-  if (!encodeBuffer(actual).equals(encodeBuffer(expected))) throw new Error(code);
-};
+const accountOwnerKey = (entityId: string, counterpartyId: string): string =>
+  keyLiveAccount(entityId, counterpartyId).toString('hex');
 
-const merklePathKey = (path: number[]): string => JSON.stringify(path);
+const bookOwnerKey = (entityId: string, pairId: string): string =>
+  keyLiveBook(entityId, pairId).toString('hex');
 
-/**
- * Verifies the complete live materialization before a persisted HEAD is used.
- * The frame/state hashes alone are insufficient: a corrupt key can otherwise
- * move a valid value to another namespace while preserving valid-looking rows.
- */
+/** Verify all roots first, then reject every graph row without a typed root. */
 export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<void> => {
-  const cellsByEntity = new Map<string, LiveCell[]>();
-
   for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
     if (key.length !== 33) throw new Error(`STORAGE_LIVE_ENTITY_KEY_INVALID:${key.toString('hex')}`);
     const entityId = decodeEntityId(key.subarray(1));
     assertExactKey(key, keyLiveEntity(entityId), 'STORAGE_LIVE_ENTITY_KEY_MISMATCH');
-    const raw = await db.get(key);
-    const doc = assertStorageEntityDocBinding(
-      decodeValidatedBuffer(raw, validateStorageEntityCoreDocValue),
+    assertStorageEntityDocBinding(
+      decodeValidatedBuffer(await db.get(key), validateStorageEntityCoreDocValue),
       entityId,
       'startup-integrity',
     );
-    appendCell(cellsByEntity, entityId, docRefCellKey({ family: 'entity', entityId: doc.entityId }), raw);
   }
 
+  const accountOwners = new Set<string>();
   for await (const key of iterateKeys(db, { prefix: keyLiveAccountPrefix() })) {
     const parsed = parseLiveAccountKey(key);
     assertExactKey(key, keyLiveAccount(parsed.entityId, parsed.counterpartyId), 'STORAGE_LIVE_ACCOUNT_KEY_MISMATCH');
@@ -110,109 +72,40 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
       parsed.counterpartyId,
       'startup-integrity',
     );
-    appendCell(cellsByEntity, parsed.entityId, docRefCellKey({
-      family: 'account',
-      entityId: parsed.entityId,
-      counterpartyId: parsed.counterpartyId,
-    }), stored.logicalValue);
+    accountOwners.add(accountOwnerKey(parsed.entityId, parsed.counterpartyId));
   }
 
+  const bookOwners = new Set<string>();
   for await (const key of iterateKeys(db, { prefix: keyLiveBookPrefix() })) {
     const parsed = parseLiveBookKey(key);
     assertExactKey(key, keyLiveBook(parsed.entityId, parsed.pairId), 'STORAGE_LIVE_BOOK_KEY_MISMATCH');
-    const raw = await db.get(key);
-    const book = await readStorageBookGraph(db, parsed.entityId, parsed.pairId);
-    if (!book) throw new Error(`STORAGE_BOOK_GRAPH_MISSING:${parsed.entityId}:${parsed.pairId}`);
-    appendCell(cellsByEntity, parsed.entityId, docRefCellKey({
-      family: 'book',
-      entityId: parsed.entityId,
-      pairId: parsed.pairId,
-    }), raw);
-  }
-
-  const roots = new Map<string, StorageMerkleRootDoc>();
-  const branches = new Map<string, Map<string, StorageMerkleBranchDoc>>();
-  const leaves = new Map<string, Map<string, StorageMerkleLeafDoc>>();
-
-  for await (const key of iterateKeys(db, { prefix: keyMerkleRootPrefix() })) {
-    const doc = decodeValidatedBuffer(await db.get(key), validateStorageMerkleRootDocValue);
-    assertExactKey(key, keyMerkleRoot(doc.entityId, doc.namespace), 'STORAGE_MERKLE_ROOT_KEY_MISMATCH');
-    if (doc.namespace === RUNTIME_ROOTS) roots.set(normalizeEntityId(doc.entityId), doc);
-  }
-  for await (const key of iterateKeys(db, { prefix: keyMerkleBranchPrefix() })) {
-    const doc = decodeValidatedBuffer(await db.get(key), validateStorageMerkleBranchDocValue);
-    assertExactKey(
-      key,
-      keyMerkleBranch(doc.entityId, doc.namespace, packRadixMerklePath(doc.radix, doc.path)),
-      'STORAGE_MERKLE_BRANCH_KEY_MISMATCH',
-    );
-    if (doc.namespace !== RUNTIME_ROOTS) continue;
-    const entityId = normalizeEntityId(doc.entityId);
-    const rows = branches.get(entityId) ?? new Map<string, StorageMerkleBranchDoc>();
-    rows.set(merklePathKey(doc.path), doc);
-    branches.set(entityId, rows);
-  }
-  for await (const key of iterateKeys(db, { prefix: keyMerkleLeafPrefix() })) {
-    const doc = decodeValidatedBuffer(await db.get(key), validateStorageMerkleLeafDocValue);
-    assertExactKey(
-      key,
-      keyMerkleLeaf(doc.entityId, doc.namespace, packRadixMerklePath(doc.radix, doc.path)),
-      'STORAGE_MERKLE_LEAF_KEY_MISMATCH',
-    );
-    if (doc.namespace !== RUNTIME_ROOTS) continue;
-    const entityId = normalizeEntityId(doc.entityId);
-    const rows = leaves.get(entityId) ?? new Map<string, StorageMerkleLeafDoc>();
-    rows.set(merklePathKey(doc.path), doc);
-    leaves.set(entityId, rows);
-  }
-
-  const allEntities = new Set([...cellsByEntity.keys(), ...roots.keys(), ...branches.keys(), ...leaves.keys()]);
-  for (const entityId of allEntities) {
-    const cells = cellsByEntity.get(entityId) ?? [];
-    const root = roots.get(entityId);
-    if (!root) throw new Error(`STORAGE_MERKLE_ROOT_MISSING:entity=${entityId}`);
-    const rebuilt = buildHexKeyedMerkleMaterialized(cells, { radix: DEFAULT_ACCOUNT_MERKLE_RADIX });
-    assertExactDoc(root, {
-      entityId,
-      namespace: RUNTIME_ROOTS,
-      radix: rebuilt.radix,
-      rootHash: rebuilt.root,
-      rootKind: rebuilt.rootKind,
-      rootPath: rebuilt.rootPath,
-      leafCount: rebuilt.leafCount,
-    } satisfies StorageMerkleRootDoc, `STORAGE_MERKLE_ROOT_MISMATCH:entity=${entityId}`);
-
-    const actualBranches = branches.get(entityId) ?? new Map<string, StorageMerkleBranchDoc>();
-    if (actualBranches.size !== rebuilt.branches.length) {
-      throw new Error(`STORAGE_MERKLE_BRANCH_COUNT_MISMATCH:entity=${entityId}`);
+    if (!await readStorageBookGraph(db, parsed.entityId, parsed.pairId)) {
+      throw new Error(`STORAGE_BOOK_GRAPH_MISSING:${parsed.entityId}:${parsed.pairId}`);
     }
-    for (const expected of rebuilt.branches) {
-      const path = merklePathKey(expected.path);
-      const actual = actualBranches.get(path);
-      if (!actual) throw new Error(`STORAGE_MERKLE_BRANCH_MISSING:entity=${entityId}:path=${path}`);
-      assertExactDoc(actual, {
-        entityId,
-        namespace: RUNTIME_ROOTS,
-        radix: rebuilt.radix,
-        ...expected,
-      } satisfies StorageMerkleBranchDoc, `STORAGE_MERKLE_BRANCH_MISMATCH:entity=${entityId}:path=${path}`);
-    }
+    bookOwners.add(bookOwnerKey(parsed.entityId, parsed.pairId));
+  }
 
-    const actualLeaves = leaves.get(entityId) ?? new Map<string, StorageMerkleLeafDoc>();
-    if (actualLeaves.size !== rebuilt.leaves.length) {
-      throw new Error(`STORAGE_MERKLE_LEAF_COUNT_MISMATCH:entity=${entityId}`);
+  for (const tag of [KEY_LIVE_ACCOUNT_BRANCH, KEY_LIVE_ACCOUNT_LEAF] as const) {
+    for await (const key of iterateKeys(db, { prefix: Buffer.from([tag]) })) {
+      const parsed = tag === KEY_LIVE_ACCOUNT_BRANCH
+        ? parseLiveAccountBranchKey(key)
+        : parseLiveAccountLeafKey(key);
+      const owner = accountOwnerKey(parsed.entityId, parsed.counterpartyId);
+      if (!accountOwners.has(owner) || !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+        throw new Error(`STORAGE_ACCOUNT_GRAPH_OWNER_MISSING:${owner}`);
+      }
     }
-    for (const expected of rebuilt.leaves) {
-      const path = merklePathKey(expected.path);
-      const actual = actualLeaves.get(path);
-      if (!actual) throw new Error(`STORAGE_MERKLE_LEAF_MISSING:entity=${entityId}:path=${path}`);
-      assertExactDoc(actual, {
-        entityId,
-        namespace: RUNTIME_ROOTS,
-        radix: rebuilt.radix,
-        ...expected,
-      } satisfies StorageMerkleLeafDoc, `STORAGE_MERKLE_LEAF_MISMATCH:entity=${entityId}:path=${path}`);
+  }
+
+  for (const tag of [KEY_LIVE_BOOK_BRANCH, KEY_LIVE_BOOK_LEAF] as const) {
+    for await (const key of iterateKeys(db, { prefix: Buffer.from([tag]) })) {
+      const parsed = tag === KEY_LIVE_BOOK_BRANCH
+        ? parseLiveBookBranchKey(key)
+        : parseLiveBookLeafKey(key);
+      const owner = bookOwnerKey(parsed.entityId, parsed.pairId);
+      if (!bookOwners.has(owner) || !await readRawOrNull(db, Buffer.from(owner, 'hex'))) {
+        throw new Error(`STORAGE_BOOK_GRAPH_OWNER_MISSING:${owner}`);
+      }
     }
   }
 };
-import { Buffer } from '../../infra/platform-crypto';

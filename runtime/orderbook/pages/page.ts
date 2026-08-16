@@ -163,10 +163,10 @@ const sealPage = (page: BookPricePage): BookPricePage => {
 /** One options identity is shared by creation, hydration and path-copy diffs. */
 const BOOK_PRICE_PAGE_MAP_OPTIONS = Object.freeze({
   radix: 16 as const,
-  sealKey: (key: BookPricePageKey): BookPricePageKey => Object.freeze({ ...key }),
+  ownKey: (key: BookPricePageKey): BookPricePageKey => Object.freeze({ ...key }),
   keyBytes: encodeBookPricePageKey,
   valueHash: pageHash,
-  sealValue: sealPage,
+  ownValue: sealPage,
 });
 
 const emptyPage = (): BookPricePage => ({
