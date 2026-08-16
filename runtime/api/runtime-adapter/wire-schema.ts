@@ -47,6 +47,8 @@ const QUERY_KEYS = [
   'eventNames',
   'sourceEntityId',
   'targetEntityId',
+  'crossSourceHubEntityId',
+  'crossTargetHubEntityId',
   'tokenId',
   'amount',
 ] as const;
@@ -78,6 +80,8 @@ const QUERY_STRING_KEYS = [
   'query',
   'sourceEntityId',
   'targetEntityId',
+  'crossSourceHubEntityId',
+  'crossTargetHubEntityId',
   'amount',
 ] as const;
 

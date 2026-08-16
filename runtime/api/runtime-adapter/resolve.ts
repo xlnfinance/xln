@@ -90,7 +90,7 @@ export type RuntimeAdapterResolveContext = {
 };
 
 type RuntimeAdapterAccountPage = {
-  items: StorageAccountDoc[];
+  items: RuntimeAdapterAccountDoc[];
   nextCursor: string | null;
   prevCursor?: string | null;
   firstCursor?: string | null;
@@ -101,6 +101,9 @@ type RuntimeAdapterAccountPage = {
   limit?: number;
   summary?: RuntimeAdapterAccountPageSummary;
 };
+
+/** Compact remote Account view; cached resend inputs are intentionally private. */
+type RuntimeAdapterAccountDoc = Omit<StorageAccountDoc, 'pendingAccountInput'>;
 
 type RuntimeAdapterBookPage = {
   items: Array<{ pairId: string; book: BookState }>;
@@ -727,7 +730,7 @@ const emptyPageMeta = (limit: number): Omit<RuntimeAdapterAccountPage, 'items'> 
 
 const singleAccountPage = (
   accountId: string,
-  account: StorageAccountDoc | null,
+  account: RuntimeAdapterAccountDoc | null,
   limit: number,
 ): RuntimeAdapterAccountPage => account
   ? {
@@ -884,12 +887,12 @@ const compactAccountProofBodyForView = (proofBody: StorageAccountDoc['proofBody'
 const compactAccountDocForView = (
   doc: StorageAccountDoc,
   includeSwapHistory = false,
-): StorageAccountDoc => {
+): RuntimeAdapterAccountDoc => {
   // Settlement workspaces may contain large transient proof material. They are
   // consensus data, but aggregate inspection endpoints must expose the compact
   // settlement status through dedicated views instead of cloning the workspace.
   const { settlementWorkspace: _settlementWorkspace, ...boundedState } = doc.state;
-  const compact: StorageAccountDoc = {
+  const compact: RuntimeAdapterAccountDoc = {
     state: {
       ...boundedState,
       domain: structuredClone(doc.state.domain),
@@ -1092,10 +1095,53 @@ const compactJBatchStateForView = (state: JBatchState | undefined): JBatchState 
   if (typeof state.entityNonce === 'number') compactState.entityNonce = state.entityNonce;
   const sentBatch = compactSentJBatchForView(state.sentBatch);
   if (sentBatch) compactState.sentBatch = sentBatch;
+  const recoveryBatches = compactArrayTail(state.recoveryBatches, 20)
+    ?.map(compactJBatchForView)
+    .filter((batch): batch is JBatch => batch !== undefined);
+  if (recoveryBatches?.length) compactState.recoveryBatches = recoveryBatches;
   return compactState;
 };
 
-const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeAdapterEntityCoreDoc => {
+const crossJurisdictionRoutesForRemote = (
+  routes: RuntimeAdapterEntityCoreDoc['crossJurisdictionSwaps'],
+  query?: RuntimeAdapterReadQuery,
+): RuntimeAdapterEntityCoreDoc['crossJurisdictionSwaps'] => {
+  if (!(routes instanceof Map)) return routes;
+  let selected = routes;
+  if (query?.tokenId !== undefined) {
+    const tokenId = Number(query.tokenId);
+    if (!Number.isSafeInteger(tokenId) || tokenId < 1) {
+      throw new RuntimeAdapterError('E_BAD_QUERY', `cross-j route tokenId must be a positive integer: ${String(query.tokenId)}`);
+    }
+    selected = new Map(Array.from(selected.entries()).filter(([, route]) =>
+      route.source.tokenId === tokenId && route.target.tokenId === tokenId
+    ));
+  }
+  const sourceHubFilter = query?.crossSourceHubEntityId;
+  const targetHubFilter = query?.crossTargetHubEntityId;
+  if ((sourceHubFilter === undefined) !== (targetHubFilter === undefined)) {
+    throw new RuntimeAdapterError(
+      'E_BAD_QUERY',
+      'cross-j source and target hub filters must be provided together',
+    );
+  }
+  if (sourceHubFilter === undefined || targetHubFilter === undefined) return selected;
+  const sourceHub = sourceHubFilter.trim().toLowerCase();
+  const targetHub = targetHubFilter.trim().toLowerCase();
+  if (!sourceHub || !targetHub) {
+    throw new RuntimeAdapterError('E_BAD_QUERY', 'cross-j hub filters must be non-empty');
+  }
+  return new Map(Array.from(selected.entries()).filter(([, route]) =>
+    (route.status === 'resting' || route.status === 'partially_filled') &&
+    route.source.counterpartyEntityId.toLowerCase() === sourceHub &&
+    route.target.entityId.toLowerCase() === targetHub
+  ));
+};
+
+const compactEntityCoreForRemote = (
+  core: RuntimeAdapterEntityCoreDoc,
+  query?: RuntimeAdapterReadQuery,
+): RuntimeAdapterEntityCoreDoc => {
   const compact: RuntimeAdapterEntityCoreDoc = {
     entityId: core.entityId,
     entityEncryptionPublicKey: core.entityEncryptionPublicKey,
@@ -1129,7 +1175,10 @@ const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeA
   const inDebtsByToken = compactDebtLedgerForView(core.inDebtsByToken);
   if (inDebtsByToken) compact.inDebtsByToken = inDebtsByToken;
   if (core.swapTradingPairs) compact.swapTradingPairs = core.swapTradingPairs.slice(0, 50);
-  const crossJurisdictionSwaps = compactMapTail(core.crossJurisdictionSwaps, 20);
+  const crossJurisdictionSwaps = compactMapTail(
+    crossJurisdictionRoutesForRemote(core.crossJurisdictionSwaps, query),
+    20,
+  );
   if (crossJurisdictionSwaps) compact.crossJurisdictionSwaps = crossJurisdictionSwaps;
   const pendingCrossJurisdictionFillAcks = compactMapTail(core.pendingCrossJurisdictionFillAcks, 20);
   if (pendingCrossJurisdictionFillAcks) compact.pendingCrossJurisdictionFillAcks = pendingCrossJurisdictionFillAcks;
@@ -1291,12 +1340,12 @@ const compactViewPageForRemote = (entityId: string, view: {
   core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
-}): {
+}, query?: RuntimeAdapterReadQuery): {
   core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 } => ({
-  core: compactEntityCoreForRemote(view.core),
+  core: compactEntityCoreForRemote(view.core, query),
   accounts: {
     ...view.accounts,
     items: view.accounts.items.map((account) => compactAccountDocForView(account)),
@@ -1412,7 +1461,7 @@ const projectViewFrame = async (
   if (bookQuery.cursor) storedQuery.booksCursor = bookQuery.cursor;
   if (query?.booksPage !== undefined) storedQuery.booksPage = query.booksPage;
   const stored = await loadViewPageForHeight(ctx, activeEntityId, height, isCurrentHeight, storedQuery);
-  const compactStored = compactViewPageForRemote(activeEntityId, stored);
+  const compactStored = compactViewPageForRemote(activeEntityId, stored, query);
   const storedJurisdiction = jurisdictionSummary(compactStored.core.config?.jurisdiction);
   const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
     entityId: activeEntityId,
@@ -1941,7 +1990,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
       }
       const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
       const stored = await loadViewPageForHeight(ctx, entityId, targetHeight, isCurrentHeight, query);
-      const compactStored = compactViewPageForRemote(entityId, stored);
+      const compactStored = compactViewPageForRemote(entityId, stored, query);
       return (parts[2] === 'accounts' ? compactStored.accounts : compactStored.books) as T;
     }
 
@@ -1967,7 +2016,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
       const core = replica
         ? projectEntityReplicaCoreView(state, replica)
         : projectEntityCoreDoc(state);
-      return compactEntityCoreForRemote(core) as RuntimeAdapterEntityCoreDoc as T;
+      return compactEntityCoreForRemote(core, query) as RuntimeAdapterEntityCoreDoc as T;
     }
   }
 

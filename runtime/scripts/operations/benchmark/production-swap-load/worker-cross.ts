@@ -1,7 +1,6 @@
 /** One truthful cross-j economic fill on the production local stack. */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { withCanonicalCrossJurisdictionRouteHash } from '../../../../extensions/cross-j';
 import { getJurisdictionStackId } from '../../../../jurisdiction/machine/jurisdiction-runtime';
 import type { JurisdictionConfig } from '../../../../protocol/config/jurisdiction-config';
 import { safeStringify } from '../../../../protocol/serialization';
@@ -39,7 +38,8 @@ import {
   type ConnectedRuntime,
   type WorkerArgs,
 } from './worker-runtime';
-import { setupCrossLoadCohort, waitForSettledCrossRoute } from './cross/worker-cross-state';
+import { setupCrossLoadCohort } from './cross/worker-cross-state';
+import { executeCrossProductionTrade } from './cross/worker-cross-trade';
 
 const SOURCE_CHAIN_ID = 31_337;
 const TARGET_CHAIN_ID = 31_338;
@@ -77,7 +77,7 @@ export const httpBaseForRuntimeWsUrl = (wsUrl: string): string => {
   return url.origin;
 };
 
-const importJurisdiction = async (
+export const importJurisdiction = async (
   runtime: ConnectedRuntime,
   jurisdiction: ResolvedMeshJurisdictionConfig,
 ): Promise<void> => {
@@ -175,63 +175,32 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
     const hubBefore = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
     const loadBefore = decodeLoadFrame(await load.adapter.read<unknown>('frame/latest'));
     const loadOrderId = `prod-cross-${hubBefore.height}-${marketMakerRoute.orderId}`;
-    const now = Date.now();
-    const route = withCanonicalCrossJurisdictionRouteHash({
-      orderId: loadOrderId,
-      makerEntityId: cohort.target.entityId,
-      hubEntityId: targetHub.entityId,
-      ...(marketMakerRoute.bookOwnerEntityId ? { bookOwnerEntityId: marketMakerRoute.bookOwnerEntityId } : {}),
-      sourceSignerId: cohort.target.signerId,
-      sourceHubSignerId: targetHub.signerId,
-      targetHubSignerId: sourceHub.signerId,
-      targetSignerId: cohort.source.signerId,
-      ...(marketMakerRoute.bookHubSignerId ? { bookHubSignerId: marketMakerRoute.bookHubSignerId } : {}),
-      source: {
-        jurisdiction: marketMakerRoute.target.jurisdiction,
-        entityId: cohort.target.entityId,
-        counterpartyEntityId: targetHub.entityId,
-        tokenId: marketMakerRoute.target.tokenId,
-        amount: marketMakerRoute.target.amount,
-      },
-      target: {
-        jurisdiction: marketMakerRoute.source.jurisdiction,
-        entityId: sourceHub.entityId,
-        counterpartyEntityId: cohort.source.entityId,
-        tokenId: marketMakerRoute.source.tokenId,
-        amount: marketMakerRoute.source.amount,
-      },
-      sourceDisputeConfig: { ...targetAccount.state.disputeConfig },
-      targetDisputeConfig: { ...sourceAccount.state.disputeConfig },
-      ...(marketMakerRoute.priceTicks !== undefined ? { priceTicks: marketMakerRoute.priceTicks } : {}),
-      riskMode: 'fully_collateralized',
-      status: 'intent', createdAt: now, updatedAt: now, expiresAt: now + 10 * 60_000,
-    });
     const hubWal = resolveWalPath(join(args.workDir, 'prod-mesh', 'h1'));
     const loadWal = resolveWalPath(join(args.workDir, 'prod-mesh', 'custody', 'daemon-db'));
     const hubWalBytesBefore = directoryBytes(hubWal);
     const loadWalBytesBefore = directoryBytes(loadWal);
-    const startedAt = performance.now();
-    const observed = await sendObserved(load, loadOrderId, {
-      runtimeTxs: [],
-      entityInputs: [
-        { entityId: cohort.target.entityId, signerId: cohort.target.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
-        { entityId: cohort.source.entityId, signerId: cohort.source.signerId, entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }] },
-      ],
+    const trade = await executeCrossProductionTrade({
+      hubRuntime: hub,
+      loadRuntime: load,
+      marketMakerRoute,
+      sourceHub,
+      targetHub,
+      sourceUser: cohort.source,
+      targetUser: cohort.target,
+      sourceAccount,
+      targetAccount,
+      orderId: loadOrderId,
+      createdAt: Date.now(),
     });
-    const settled = await waitForSettledCrossRoute(
-      hub, sourceHub.entityId, targetHub.entityId, loadOrderId,
-      marketMakerRoute.target.amount, marketMakerRoute.source.amount,
-    );
-    const economicCompletionElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
     const report = decodeCrossLoadReport({
       schema: 'xln-production-cross-swap-load-v1', mode: 'cross', configuredBurstSize: 1,
       completionAuthority: 'committed_cross_route_full_fill',
       marketMakerOrderId: marketMakerRoute.orderId, loadOrderId,
-      sourceAmount: settled.filledSourceAmount!.toString(),
-      targetAmount: settled.filledTargetAmount!.toString(), routeStatus: 'settled',
-      enqueueAckElapsedMs: observed.enqueueAckElapsedMs,
-      commandObservedElapsedMs: observed.commandObservedElapsedMs,
-      economicCompletionElapsedMs,
+      sourceAmount: trade.settled.filledSourceAmount!.toString(),
+      targetAmount: trade.settled.filledTargetAmount!.toString(), routeStatus: 'settled',
+      enqueueAckElapsedMs: trade.enqueueAckElapsedMs,
+      commandObservedElapsedMs: trade.commandObservedElapsedMs,
+      economicCompletionElapsedMs: trade.economicCompletionElapsedMs,
       hubWalBytesBefore, hubWalBytesAfter: directoryBytes(hubWal),
       loadWalBytesBefore, loadWalBytesAfter: directoryBytes(loadWal),
       hubDurableBefore: hubBefore, hubDurableAfter: decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest')),

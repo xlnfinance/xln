@@ -170,6 +170,7 @@ type Args = {
   supportPeerIdentitiesJson: string;
   dbPath: string;
   deployTokens: boolean;
+  swapTakerFeeBps: number;
 };
 
 type SupportPeerIdentity = {
@@ -390,6 +391,13 @@ const parseArgs = (): Args => {
     throw new Error(`Invalid --api-port: ${String(apiPort)}`);
   }
   const rpcUrls = readRpcUrls();
+  const swapTakerFeeBps = Number(getArg(
+    '--swap-taker-fee-bps',
+    process.env['XLN_HUB_SWAP_TAKER_FEE_BPS'] || '1',
+  ));
+  if (!Number.isSafeInteger(swapTakerFeeBps) || swapTakerFeeBps < 0 || swapTakerFeeBps > 10_000) {
+    throw new Error(`Invalid --swap-taker-fee-bps: ${String(swapTakerFeeBps)}`);
+  }
 
   const childSecrets = readInheritedChildSecrets();
   const radapterAuthSeed = resolveChildSecret(
@@ -426,6 +434,7 @@ const parseArgs = (): Args => {
     supportPeerIdentitiesJson: getArg('--support-peer-identities-json', '[]'),
     dbPath: getArg('--db-path', ''),
     deployTokens: hasFlag('--deploy-tokens'),
+    swapTakerFeeBps,
   };
 };
 
@@ -1080,7 +1089,7 @@ const bootstrapHubEntity = async (
     seed: resolvedArgs.seed,
     routingFeePPM: 1,
     baseFee: 0n,
-    swapTakerFeeBps: 1,
+    swapTakerFeeBps: resolvedArgs.swapTakerFeeBps,
     disputeAutoFinalizeMode:
       resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
     rebalanceLiquidityFeeBps: 1n,

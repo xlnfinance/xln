@@ -671,6 +671,7 @@ type MarketMakerHealthControllerDeps = {
 
 const createMarketMakerHealthController = (deps: MarketMakerHealthControllerDeps) => {
   let currentHealth: MarketMakerHealth | null = null;
+  let crossHealthHeight: number | null = null;
   let visibleHubs: HubProfile[] = [];
   let allVisibleHubs: HubProfile[] = [];
   let healthResponseJson: string | null = null;
@@ -742,7 +743,12 @@ const createMarketMakerHealthController = (deps: MarketMakerHealthControllerDeps
     options: { includeCross?: boolean; crossOverride?: MarketMakerHealth['cross'] } = {},
   ): MarketMakerHealth | null => {
     const health = buildSnapshot(options);
-    if (health) currentHealth = health;
+    if (health) {
+      currentHealth = health;
+      if (options.includeCross === true) {
+        crossHealthHeight = Math.max(0, Math.floor(Number(deps.env.state.height || 0)));
+      }
+    }
     rebuildHealthResponse();
     return health;
   };
@@ -753,7 +759,28 @@ const createMarketMakerHealthController = (deps: MarketMakerHealthControllerDeps
     return publish({ includeCross: false, crossOverride: buildPlannedMarketMakerCrossHealth(plan) });
   };
   const publishReady = (): MarketMakerHealth | null => {
-    if (!currentHealth || !isMarketMakerCrossDepthComplete(currentHealth)) return publish({ includeCross: true });
+    const runtimeHeight = Math.max(0, Math.floor(Number(deps.env.state.height || 0)));
+    const wasComplete = Boolean(currentHealth && isMarketMakerCrossDepthComplete(currentHealth));
+    if (!wasComplete || crossHealthHeight !== runtimeHeight) {
+      const previousCrossHealthHeight = crossHealthHeight;
+      const refreshed = publish({ includeCross: true });
+      if (wasComplete && refreshed && !isMarketMakerCrossDepthComplete(refreshed)) {
+        const missingRoutes = refreshed.cross.routes
+          .filter(route => route.depthReady !== true)
+          .map(route => ({
+            sourceHubEntityId: route.sourceHubEntityId,
+            targetHubEntityId: route.targetHubEntityId,
+            offers: route.offers,
+          }));
+        console.log(`[MESH-MM] CROSS_DEPTH_INVALIDATED ${safeStringify({
+          previousHeight: previousCrossHealthHeight,
+          currentHeight: runtimeHeight,
+          expectedOffersPerRoute: refreshed.cross.expectedOffersPerRoute,
+          missingRoutes,
+        })}`);
+      }
+      return refreshed;
+    }
     return publish({ includeCross: false, crossOverride: currentHealth.cross });
   };
   return {
@@ -767,6 +794,7 @@ const createMarketMakerHealthController = (deps: MarketMakerHealthControllerDeps
     readCurrentHealth: (): MarketMakerHealth | null => currentHealth,
     setCurrentHealth: (health: MarketMakerHealth): void => {
       currentHealth = health;
+      crossHealthHeight = Math.max(0, Math.floor(Number(deps.env.state.height || 0)));
     },
     readHealthResponseJson: (): string | null => healthResponseJson,
     readInfoResponseJson: (): string | null => infoResponseJson,

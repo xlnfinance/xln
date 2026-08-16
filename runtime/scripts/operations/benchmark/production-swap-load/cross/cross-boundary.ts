@@ -95,6 +95,16 @@ export const decodeCrossLoadReport = (value: unknown): CrossLoadReport => {
 const isLiveRoute = (route: CrossJurisdictionSwapRoute): boolean =>
   route.status === 'resting' || route.status === 'partially_filled';
 
+const matchesMarketMakerHubPair = (
+  route: CrossJurisdictionSwapRoute,
+  sourceHubEntityId: string,
+  targetHubEntityId: string,
+): boolean =>
+  isLiveRoute(route) &&
+  route.orderId.startsWith('mmx-') &&
+  route.source.counterpartyEntityId.toLowerCase() === sourceHubEntityId.toLowerCase() &&
+  route.target.entityId.toLowerCase() === targetHubEntityId.toLowerCase();
+
 export const decodeCommittedCrossRoutes = (value: unknown): CrossJurisdictionSwapRoute[] => {
   const core = decodeHubCoreRecord(value);
   const rawRoutes = core['crossJurisdictionSwaps'];
@@ -126,10 +136,7 @@ export const selectMarketMakerCrossRoute = (
   const sourceHub = sourceHubEntityId.toLowerCase();
   const targetHub = targetHubEntityId.toLowerCase();
   const matches = routes.filter(route =>
-    isLiveRoute(route) &&
-    route.orderId.startsWith('mmx-') &&
-    route.source.counterpartyEntityId.toLowerCase() === sourceHub &&
-    route.target.entityId.toLowerCase() === targetHub
+    matchesMarketMakerHubPair(route, sourceHub, targetHub)
   );
   if (matches.length === 0) throw new Error('PRODUCTION_SWAP_LOAD_CROSS_MM_ROUTE_MISSING');
   return matches.slice().sort((left, right) => {
@@ -138,4 +145,60 @@ export const selectMarketMakerCrossRoute = (
     if (leftPrice !== rightPrice) return leftPrice < rightPrice ? -1 : 1;
     return left.orderId.localeCompare(right.orderId);
   })[0]!;
+};
+
+export const selectMarketMakerCrossRouteLevel = (
+  routes: readonly CrossJurisdictionSwapRoute[],
+  sourceHubEntityId: string,
+  targetHubEntityId: string,
+  tokenId: number,
+  level: number,
+): CrossJurisdictionSwapRoute => {
+  if (!Number.isSafeInteger(tokenId) || tokenId < 1) {
+    throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_TOKEN_INVALID:${tokenId}`);
+  }
+  if (!Number.isSafeInteger(level) || level < 1) {
+    throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_LEVEL_INVALID:${level}`);
+  }
+  const suffix = `-sell-${level}`;
+  const matches = routes.filter(route =>
+    matchesMarketMakerHubPair(route, sourceHubEntityId, targetHubEntityId) &&
+    route.source.tokenId === tokenId && route.target.tokenId === tokenId &&
+    route.orderId.endsWith(suffix)
+  );
+  if (matches.length !== 1) {
+    throw new Error(
+      `PRODUCTION_SWAP_LOAD_CROSS_MM_LEVEL_NOT_UNIQUE:token=${tokenId}:level=${level}:matches=${matches.length}`,
+    );
+  }
+  return matches[0]!;
+};
+
+export const selectMarketMakerCrossRouteLevelByJurisdictions = (
+  routes: readonly CrossJurisdictionSwapRoute[],
+  sourceJurisdiction: string,
+  targetJurisdiction: string,
+  tokenId: number,
+  level: number,
+): CrossJurisdictionSwapRoute => {
+  if (!Number.isSafeInteger(tokenId) || tokenId < 1) {
+    throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_TOKEN_INVALID:${tokenId}`);
+  }
+  if (!Number.isSafeInteger(level) || level < 1) {
+    throw new Error(`PRODUCTION_SWAP_LOAD_CROSS_LEVEL_INVALID:${level}`);
+  }
+  const suffix = `-sell-${level}`;
+  const matches = routes.filter(route =>
+    isLiveRoute(route) && route.orderId.startsWith('mmx-') &&
+    route.source.jurisdiction === sourceJurisdiction &&
+    route.target.jurisdiction === targetJurisdiction &&
+    route.source.tokenId === tokenId && route.target.tokenId === tokenId &&
+    route.orderId.endsWith(suffix)
+  );
+  if (matches.length !== 1) {
+    throw new Error(
+      `PRODUCTION_SWAP_LOAD_CROSS_MM_JURISDICTION_LEVEL_NOT_UNIQUE:source=${sourceJurisdiction}:target=${targetJurisdiction}:token=${tokenId}:level=${level}:matches=${matches.length}`,
+    );
+  }
+  return matches[0]!;
 };

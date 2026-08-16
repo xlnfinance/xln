@@ -255,6 +255,9 @@ const compactReadQueryForLog = (query: RuntimeAdapterReadQuery | undefined): Rec
     'scanLimit',
     'fromTimestamp',
     'toTimestamp',
+    'crossSourceHubEntityId',
+    'crossTargetHubEntityId',
+    'tokenId',
   ];
   const compact: Record<string, unknown> = {};
   for (const key of keys) {

@@ -1534,6 +1534,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     '--mesh-hub-names', getHubSpecsArg(),
     '--support-peer-identities-json', JSON.stringify(getMarketMakerIdentities()),
     '--db-path', child.dbPath,
+    '--swap-taker-fee-bps', process.env['XLN_HUB_SWAP_TAKER_FEE_BPS'] || '1',
     ...(child.deployTokens ? ['--deploy-tokens'] : []),
   ];
   resetSupervisedChildForSpawn(child);

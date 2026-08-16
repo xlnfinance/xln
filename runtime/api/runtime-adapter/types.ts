@@ -64,6 +64,8 @@ export type RuntimeAdapterReadQuery = {
   eventNames?: string[] | string;
   sourceEntityId?: string;
   targetEntityId?: string;
+  crossSourceHubEntityId?: string;
+  crossTargetHubEntityId?: string;
   tokenId?: number;
   amount?: string;
 };

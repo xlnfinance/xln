@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { deriveDelta, isLeftEntity } from '../../../../account/utils';
+import type { AccountReplicaProjection } from '../../../../account/validation/state-validation';
 import { RemoteRuntimeAdapter } from '../../../../api/runtime-adapter/remote';
 import type { RuntimeAdapterSendResult } from '../../../../api/runtime-adapter/types';
 import { canonicalPair } from '../../../../orderbook';
@@ -206,7 +207,7 @@ export const readLoadAccount = async (
   runtime: ConnectedRuntime,
   entityId: string,
   hubEntityId: string,
-): Promise<import('../../../../types/account').AccountReplica | null> => decodeAccountPage(await runtime.adapter.read<unknown>(
+): Promise<AccountReplicaProjection | null> => decodeAccountPage(await runtime.adapter.read<unknown>(
   `entity/${entityId}/accounts`,
   { accountId: hubEntityId, accountsLimit: 1 },
 ));

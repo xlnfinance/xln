@@ -26,6 +26,12 @@ import { validateSwapHistoryMap } from './swap-history-validation';
 import { assertSwapNetAuthorization } from '../swap/swap-net-authorization';
 import { validateAccountFinancialMaps } from './financial-state-validation';
 
+export type AccountReplicaProjection = Omit<AccountReplica, 'pendingAccountInput'> & {
+  pendingAccountInput?: never;
+};
+
+type AccountReplicaBoundaryKind = 'durable' | 'compact_projection';
+
 const LENDING_INTENTS = new Set([
   'fund',
   'borrow',
@@ -140,6 +146,7 @@ const validateRebalanceState = (
 function assertAccountReplica(
   account: Record<string, unknown>,
   context: string,
+  boundaryKind: AccountReplicaBoundaryKind,
 ): asserts account is Record<string, unknown> & AccountReplica {
   const state = validateObject(account['state'], `${context}.state`);
   const left = validateString(state['leftEntity'], `${context}.state.leftEntity`);
@@ -186,7 +193,18 @@ function assertAccountReplica(
   validateSwapHistories(account, context);
   validateLendingIntents(state['lendingIntents'], `${context}.state.lendingIntents`);
   requireBoundaryInteger(account['currentHeight'], `${context}.currentHeight`);
-  validatePendingAccountResend(account, context);
+  if (boundaryKind === 'durable') {
+    validatePendingAccountResend(account, context);
+  } else {
+    if (account['pendingAccountInput'] !== undefined) {
+      throw new FinancialDataCorruptionError(
+        `${context}.pendingAccountInput must be redacted from compact projections`,
+      );
+    }
+    if (account['pendingFrame'] !== undefined) {
+      decodeAccountFrame(account['pendingFrame'], `${context}.pendingFrame`);
+    }
+  }
   validatePendingSignatures(account, context);
   requireBoundaryInteger(account['rollbackCount'], `${context}.rollbackCount`);
   assertAccountJClaimAccumulatorState(
@@ -210,6 +228,23 @@ export const validateAccountReplica = (
   context = 'AccountReplica',
 ): AccountReplica => {
   const account = validateObject(value, context);
-  assertAccountReplica(account, context);
+  assertAccountReplica(account, context, 'durable');
   return account;
+};
+
+/**
+ * Decode the compact Account view returned by the Runtime adapter.
+ *
+ * The adapter intentionally redacts the cached outbound pendingAccountInput,
+ * so this boundary validates an exposed pendingFrame independently instead of
+ * applying the durable resend-pair invariant. Durable and persisted Accounts
+ * must continue through validateAccountReplica above.
+ */
+export const validateAccountReplicaProjection = (
+  value: unknown,
+  context = 'AccountReplicaProjection',
+): AccountReplicaProjection => {
+  const account = validateObject(value, context);
+  assertAccountReplica(account, context, 'compact_projection');
+  return account as AccountReplicaProjection;
 };

@@ -28,6 +28,7 @@ export const setupCrossLoadCohort = async (options: {
   targetJurisdiction: JurisdictionConfig;
   sourceTokenId: number;
   targetTokenId: number;
+  additionalCreditTokenIds?: readonly number[];
   sourceCredit: bigint;
   targetCredit: bigint;
   custodyRuntimeSeed: string;
@@ -37,6 +38,12 @@ export const setupCrossLoadCohort = async (options: {
     authKey: options.runtime.entry.token,
     timeoutMs: 30_000,
   });
+  const sourceCreditTokenIds = Array.from(new Set([
+    options.sourceTokenId, ...(options.additionalCreditTokenIds ?? []),
+  ])).sort((left, right) => left - right);
+  const targetCreditTokenIds = Array.from(new Set([
+    options.targetTokenId, ...(options.additionalCreditTokenIds ?? []),
+  ])).sort((left, right) => left - right);
   const source = await setupCustody(client, {
     name: 'Production Load Source',
     seed: deriveManagedSignerSeed(options.custodyRuntimeSeed, SOURCE_SIGNER_LABEL),
@@ -45,7 +52,7 @@ export const setupCrossLoadCohort = async (options: {
     relayUrl: options.relayUrl,
     gossipPollMs: 250,
     hubEntityIds: [options.sourceHubEntityId],
-    creditTokenIds: [options.sourceTokenId],
+    creditTokenIds: sourceCreditTokenIds,
     creditAmount: options.sourceCredit,
   });
   const target = await setupCustody(client, {
@@ -56,7 +63,7 @@ export const setupCrossLoadCohort = async (options: {
     relayUrl: options.relayUrl,
     gossipPollMs: 250,
     hubEntityIds: [options.targetHubEntityId],
-    creditTokenIds: [options.targetTokenId],
+    creditTokenIds: targetCreditTokenIds,
     creditAmount: options.targetCredit,
   });
   await client.configureP2P({

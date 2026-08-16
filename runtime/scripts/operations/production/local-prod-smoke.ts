@@ -168,6 +168,7 @@ const custodyDaemonPort = portBase + 8;
 const nodePortBase = portBase + 10;
 const marketMakerApiPort = nodePortBase + 3;
 const workDir = process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || join(tmpdir(), `xln-local-prod-smoke-${portBase}`);
+const configuredSwapLoadMode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || 'same';
 const templateDir = String(process.env['XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR'] || '').trim();
 const useSnapshotTemplate = templateDir.length > 0;
 const children: ManagedProcess[] = [];
@@ -250,8 +251,10 @@ const runProductionSwapWorker = (
 const runProductionSwapLoadSmoke = async (): Promise<void> => {
   if (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] !== '1') return;
   const swaps = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SWAPS'] || '1';
-  const mode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || 'same';
-  if (mode !== 'same' && mode !== 'cross') throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_MODE_INVALID:${mode}`);
+  const mode = configuredSwapLoadMode;
+  if (mode !== 'same' && mode !== 'cross' && mode !== 'cross-netting') {
+    throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_MODE_INVALID:${mode}`);
+  }
   recordStage('production-swap-load:start', { mode, burstSize: swaps });
   runProductionSwapWorker(mode, swaps);
   recordStage('production-swap-load:complete', { mode, burstSize: swaps });
@@ -1076,6 +1079,9 @@ const main = async (): Promise<void> => {
     XLN_MESH_PUBLIC_PORT_BASE: String(nodePortBase),
     XLN_MESH_CUSTODY_PORT: String(custodyPort),
     XLN_MESH_CUSTODY_DAEMON_PORT: String(custodyDaemonPort),
+    XLN_HUB_SWAP_TAKER_FEE_BPS: configuredSwapLoadMode === 'cross-netting'
+      ? '0'
+      : process.env['XLN_HUB_SWAP_TAKER_FEE_BPS'] || '1',
     PUBLIC_WS_BASE_URL: `ws://127.0.0.1:${apiPort}`,
     PUBLIC_RELAY_URL: `ws://127.0.0.1:${apiPort}/relay`,
     INTERNAL_RELAY_URL: `ws://127.0.0.1:${apiPort}/relay`,

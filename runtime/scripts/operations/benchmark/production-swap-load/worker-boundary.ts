@@ -5,8 +5,10 @@
  */
 
 import type { RuntimeAdapterEntitySummary } from '../../../../api/runtime-adapter/types';
-import { validateAccountReplica } from '../../../../account/validation/state-validation';
-import type { AccountReplica } from '../../../../types/account';
+import {
+  validateAccountReplicaProjection,
+  type AccountReplicaProjection,
+} from '../../../../account/validation/state-validation';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -183,10 +185,12 @@ export const decodePageItems = (value: unknown, code: string): unknown[] => {
   return page['items'];
 };
 
-export const decodeAccountPage = (value: unknown): AccountReplica | null => {
+export const decodeAccountPage = (value: unknown): AccountReplicaProjection | null => {
   const items = decodePageItems(value, 'PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_INVALID');
   if (items.length > 1) throw new Error('PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_CARDINALITY_INVALID');
-  return items[0] === undefined ? null : validateAccountReplica(items[0], 'production-swap-load account');
+  return items[0] === undefined
+    ? null
+    : validateAccountReplicaProjection(items[0], 'production-swap-load account projection');
 };
 
 export const decodeLoadFrame = (value: unknown): LoadFrame => {

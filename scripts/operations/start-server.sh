@@ -139,7 +139,13 @@ fi
 unset XLN_LOCAL_TEST_LEASE_MODE XLN_LOCAL_TEST_LEASE_POOL XLN_LOCAL_TEST_LEASE_BASE
 unset XLN_LOCAL_TEST_LEASE_GUARD XLN_LOCAL_TEST_LEASE_OWNER_PID XLN_LOCAL_TEST_LEASE_REPO_ROOT
 
-exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
+BUN_BIN="${BUN_BIN:-$(command -v bun || true)}"
+if [[ -z "$BUN_BIN" || ! -x "$BUN_BIN" ]]; then
+  echo "[start-server] BUN_EXECUTABLE_NOT_FOUND set BUN_BIN or add bun to PATH" >&2
+  exit 1
+fi
+
+exec "$BUN_BIN" runtime/orchestrator/orchestrator.ts \
   --host 127.0.0.1 \
   --port "$API_PORT" \
   --public-ws-base-url "$PUBLIC_WS_BASE_URL" \

@@ -14,6 +14,7 @@ export const PRODUCTION_SWAP_LOAD_SCHEMA = 'xln-production-swap-load-v1' as cons
 export const PRODUCTION_SWAP_LOAD_MODES = [
   'same',
   'cross',
+  'cross-netting',
   'hybrid',
   'crash',
   'dispute',
