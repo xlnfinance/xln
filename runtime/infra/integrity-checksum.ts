@@ -2,6 +2,10 @@ import { sha256 } from '@noble/hashes/sha2.js';
 
 const INTEGRITY_CHECKSUM_BYTES = 16;
 export const INTEGRITY_DIGEST_ALGORITHM_ID = 'sha256' as const;
+const HEX_BYTE_TEXT = Array.from(
+  { length: 256 },
+  (_, value) => value.toString(16).padStart(2, '0'),
+);
 
 type NativeHasher = {
   update(data: Uint8Array): NativeHasher;
@@ -29,7 +33,7 @@ const computeIntegrityChecksumBytes = (bytes: Uint8Array): Uint8Array =>
 
 const integrityChecksumToHex = (bytes: Uint8Array): string => {
   let output = '0x';
-  for (const byte of bytes) output += byte.toString(16).padStart(2, '0');
+  for (const byte of bytes) output += HEX_BYTE_TEXT[byte];
   return output;
 };
 

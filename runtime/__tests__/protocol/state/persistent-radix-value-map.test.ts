@@ -6,6 +6,7 @@ import type { PersistentRadixValueMapOptions } from '../../../protocol/state/per
 import {
   buildRadixMerkle,
   buildRadixMerkleMaterialized,
+  buildHexKeyedMerkle,
   encodeRawRadixTextKey,
   RADIX_MERKLE_RADICES,
   radixMerklePathSlots,
@@ -60,6 +61,16 @@ describe('PersistentRadixValueMap', () => {
           });
         }
       }
+    }
+  });
+
+  test('fast hex decoding preserves bytes and rejects every non-canonical shape', () => {
+    const lower = buildHexKeyedMerkle([{ hexKey: '0xabcd', value: Uint8Array.of(1) }]);
+    const upper = buildHexKeyedMerkle([{ hexKey: '0xABCD', value: Uint8Array.of(1) }]);
+    expect(upper.root).toBe(lower.root);
+    for (const hexKey of ['', '0x', '0x0', '0xgg']) {
+      expect(() => buildHexKeyedMerkle([{ hexKey, value: Uint8Array.of(1) }]))
+        .toThrow('RADIX_MERKLE_HASH_HEX_INVALID');
     }
   });
 
