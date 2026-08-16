@@ -239,7 +239,7 @@ describe('node runtime quiesce', () => {
     expect(env.runtimeMempool?.runtimeTxs).toHaveLength(1);
     expect(hasRuntimeWork(env)).toBe(true);
     expect(env.state.height).toBe(0);
-    expect(env.history).toHaveLength(0);
+    expect('history' in env).toBe(false);
 
     let persisted = false;
     try {

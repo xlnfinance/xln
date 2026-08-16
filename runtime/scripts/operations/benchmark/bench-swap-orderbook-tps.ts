@@ -1,7 +1,9 @@
 import {
   applyCommand,
+  commitBookOverlay,
   computeBookHash,
   createBook,
+  forkBookState,
   getBestAsk,
   getBestBid,
   type BookEvent,
@@ -14,6 +16,7 @@ type Cli = {
   warmup: number;
   minTps: number;
   levels: number;
+  bookCommandsPerOverlay: number;
 };
 
 export type SwapOrderbookBenchmarkResult = {
@@ -25,6 +28,8 @@ export type SwapOrderbookBenchmarkResult = {
   minTps: number;
   passed: boolean;
   activeOrders: number;
+  /** Matcher-only batching; this benchmark does not execute Account or Entity frames. */
+  bookCommandsPerOverlay: number;
   tradeQtySum: string;
   bookHash: string;
 };
@@ -51,15 +56,16 @@ const parseCli = (args: string[]): Cli => ({
   warmup: nonNegativeInt(args, '--warmup', 10_000),
   minTps: positiveInt(args, '--min-tps', 10_000),
   levels: positiveInt(args, '--levels', 32),
+  bookCommandsPerOverlay: positiveInt(args, '--book-commands-per-overlay', 160),
 });
 
 export const runSwapOrderbookBenchmark = (cli: Cli): SwapOrderbookBenchmarkResult => {
   if (cli.warmup > 0) {
-    const warm = runSweep(cli.warmup, cli.levels);
+    const warm = runSweep(cli.warmup, cli.levels, cli.bookCommandsPerOverlay);
     if (warm.trades !== cli.warmup) throw new Error(`WARMUP_TRADE_MISMATCH:${warm.trades}/${cli.warmup}`);
   }
 
-  const result = runSweep(cli.swaps, cli.levels);
+  const result = runSweep(cli.swaps, cli.levels, cli.bookCommandsPerOverlay);
   if (result.trades !== cli.swaps) throw new Error(`TRADE_MISMATCH:${result.trades}/${cli.swaps}`);
   if (result.book.orders.size !== 0) throw new Error(`BOOK_NOT_DRAINED:${result.book.orders.size}`);
   if (getBestAsk(result.book) !== null) throw new Error(`ASKS_LEFT:${String(getBestAsk(result.book))}`);
@@ -76,6 +82,7 @@ export const runSwapOrderbookBenchmark = (cli: Cli): SwapOrderbookBenchmarkResul
     minTps: cli.minTps,
     passed: tps >= cli.minTps,
     activeOrders: result.book.orders.size,
+    bookCommandsPerOverlay: cli.bookCommandsPerOverlay,
     tradeQtySum: result.book.tradeQtySum.toString(),
     bookHash: computeBookHash(result.book),
   };
@@ -88,50 +95,69 @@ export const runSwapOrderbookBenchmark = (cli: Cli): SwapOrderbookBenchmarkResul
 const countTrades = (events: readonly BookEvent[]): number =>
   events.reduce((sum, event) => sum + (event.type === 'TRADE' ? 1 : 0), 0);
 
-const seedAsks = (count: number, levels: number): BookState => {
+const applyFramedCommands = (
+  initial: BookState,
+  count: number,
+  commandsPerFrame: number,
+  commandAt: (index: number) => Parameters<typeof applyCommand>[1],
+  observe: (events: readonly BookEvent[]) => void,
+): BookState => {
+  let published = initial;
+  for (let offset = 0; offset < count; offset += commandsPerFrame) {
+    const frame = forkBookState(published);
+    for (let index = offset; index < Math.min(count, offset + commandsPerFrame); index += 1) {
+      const result = applyCommand(frame, commandAt(index));
+      if (commitBookOverlay(result.state) !== frame) throw new Error('SWAP_FRAME_CHILD_MERGE_FAILED');
+      observe(result.events);
+    }
+    published = commitBookOverlay(frame);
+  }
+  return published;
+};
+
+const seedAsks = (count: number, levels: number, commandsPerFrame: number): BookState => {
   let book = createBook({
     bucketWidthTicks: 100n,
     maxOrders: Math.max(1, count + 16),
     stpPolicy: 1,
   });
-  for (let index = 0; index < count; index += 1) {
-    const priceTicks = 25_000_000n + BigInt(index % levels);
-    const result = applyCommand(book, {
+  book = applyFramedCommands(book, count, commandsPerFrame, index => ({
       kind: 0,
       ownerId: `maker-${index % 4096}`,
       orderId: `ask-${index}`,
       side: 1,
       tif: 0,
       postOnly: false,
-      priceTicks,
+      priceTicks: 25_000_000n + BigInt(index % levels),
       qtyLots: 1n,
+    }), events => {
+      if (events.some(event => event.type === 'REJECT')) {
+        throw new Error(`SEED_REJECT:${JSON.stringify(events)}`);
+      }
     });
-    book = result.state;
-    if (result.events.some((event) => event.type === 'REJECT')) {
-      throw new Error(`SEED_REJECT:${index}:${JSON.stringify(result.events)}`);
-    }
-  }
   return book;
 };
 
-const runSweep = (swaps: number, levels: number): { book: BookState; trades: number; elapsedMs: number } => {
-  let book = seedAsks(swaps, levels);
+const runSweep = (
+  swaps: number,
+  levels: number,
+  commandsPerFrame: number,
+): { book: BookState; trades: number; elapsedMs: number } => {
+  let book = seedAsks(swaps, levels, commandsPerFrame);
   let trades = 0;
   const startedAt = getPerfMs();
-  for (let index = 0; index < swaps; index += 1) {
-    const result = applyCommand(book, {
-      kind: 0,
-      ownerId: `taker-${index % 4096}`,
-      orderId: `buy-${index}`,
-      side: 0,
-      tif: 1,
-      postOnly: false,
-      priceTicks: 25_000_000n + BigInt(levels),
-      qtyLots: 1n,
-    });
-    book = result.state;
-    trades += countTrades(result.events);
-  }
+  book = applyFramedCommands(book, swaps, commandsPerFrame, index => ({
+    kind: 0,
+    ownerId: `taker-${index % 4096}`,
+    orderId: `buy-${index}`,
+    side: 0,
+    tif: 1,
+    postOnly: false,
+    priceTicks: 25_000_000n + BigInt(levels),
+    qtyLots: 1n,
+  }), events => {
+    trades += countTrades(events);
+  });
   return { book, trades, elapsedMs: getPerfMs() - startedAt };
 };
 

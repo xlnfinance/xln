@@ -1,10 +1,15 @@
 import { isLeftEntity } from '../../../../id';
 import { isValidEntityId } from '../../../../../protocol/identity';
-import type { Delta } from '../../../../../types/account';
+import type { Delta, HtlcLock, PullCommitment, SwapOffer } from '../../../../../types/account';
+import type { RebalanceRequestFeeState } from '../../../../../types/finance/rebalance';
+import {
+  PersistentAccountStateMap,
+  requirePersistentAccountStateMap,
+} from '../../../../../account/state/persistent-state-map';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../../types';
 import type { AccountConsensusContext } from '../../../../../account/consensus/context';
 import type { EntityTx } from '../../../../../types/entity-tx';
-import { upsertSortedStringMapEntry } from '../../../../../infra/sorted-map-index';
+import { getEntityAccountForWrite, putEntityAccountCandidate } from '../../../../state/persistent-account-map';
 import { prepareEntityTxState } from '../../../../state-clone';
 import { addMessage } from '../../../../frame-events';
 import { findAccountKey, normalizeEntityRef } from '../../../account-key';
@@ -66,23 +71,23 @@ const insertLocalAccount = (
   });
   const leftEntity = isLeft ? originalEntityId : counterpartyId;
   const rightEntity = isLeft ? counterpartyId : originalEntityId;
-  upsertSortedStringMapEntry(state.accounts, counterpartyId, {
+  putEntityAccountCandidate(state.accounts, counterpartyId, {
     state: {
       leftEntity,
       rightEntity,
       domain: accountDomain,
       watchSeed,
-      deltas: new Map<number, Delta>(),
-      locks: new Map(),
-      swapOffers: new Map(),
-      pulls: new Map(),
+      deltas: PersistentAccountStateMap.empty<number, Delta>('deltas'),
+      locks: PersistentAccountStateMap.empty<string, HtlcLock>('locks'),
+      swapOffers: PersistentAccountStateMap.empty<string, SwapOffer>('swapOffers'),
+      pulls: PersistentAccountStateMap.empty<string, PullCommitment>('pulls'),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       disputeConfig,
       jNonce: 0,
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
+      requestedRebalance: PersistentAccountStateMap.empty<number, bigint>('requestedRebalance'),
+      requestedRebalanceFeeState: PersistentAccountStateMap.empty<number, RebalanceRequestFeeState>('requestedRebalanceFeeState'),
     },
     status: 'active',
     mempool: [],
@@ -102,15 +107,13 @@ const insertLocalAccount = (
     rollbackCount: 0,
     proofHeader: { fromEntity: originalEntityId, toEntity: counterpartyId, nextProofNonce: 1 },
     proofBody: { tokenIds: [], deltas: [] },
-    pendingWithdrawals: new Map(),
+    pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
     shadow: {
       rebalance: {
-        policy: new Map(),
-        submittedAtByToken: new Map(),
+        policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+        submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
       },
     },
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
   });
 };
 
@@ -120,7 +123,7 @@ const seedOpenAccountPolicies = async (
   tx: OpenAccountEntityTx,
   counterpartyId: string,
 ): Promise<void> => {
-  const account = state.accounts.get(counterpartyId);
+  const account = getEntityAccountForWrite(state.accounts, counterpartyId);
   if (!account) throw new Error('OPEN_ACCOUNT_CREATED_MACHINE_MISSING');
   // H=0 is local genesis state, not a signed bilateral Account frame.
   // Keep its stateHash empty: only an accepted frame H>=1 has a frame hash.
@@ -156,7 +159,10 @@ const seedOpenAccountPolicies = async (
     const policy = tx.data.rebalancePolicy && policyTokenId === tokenId
       ? tx.data.rebalancePolicy
       : resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, policyTokenId);
-    account.shadow.rebalance.policy.set(policyTokenId, { ...policy });
+    account.shadow.rebalance.policy = requirePersistentAccountStateMap(
+      account.shadow.rebalance.policy,
+      'rebalanceShadowPolicy',
+    ).updated(policyTokenId, { ...policy });
   }
 };
 

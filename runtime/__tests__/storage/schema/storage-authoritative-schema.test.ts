@@ -7,7 +7,6 @@ import {
   validateCertifiedBoardNodeValue,
   validateConsumptionNodeValue,
   validateStorageAccountDocValue,
-  validateStorageBookDocValue,
   validateStorageDiffRecordValue,
   validateStorageEntityCoreDocValue,
   validateStorageFrameRecordValue,
@@ -42,6 +41,9 @@ import {
   keyMerkleRoot,
   keySnapshotManifest,
 } from '../../../storage/keys';
+import { decodeStorageBookHeader } from '../../../storage/schema/book-graph-codec';
+import { prepareRuntimeMachineGraphRows } from '../../../storage/wal/runtime-machine-graph';
+import { readStorageFramePayloads, readStorageFrameRecord } from '../../../storage/read/read';
 
 const paths: string[] = [];
 
@@ -101,7 +103,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     ['diff', keyDiff(1), validateStorageDiffRecordValue],
     ['entity', keyLiveEntity(entityId), validateStorageEntityCoreDocValue],
     ['account', keyLiveAccount(entityId, counterpartyId), validateStorageAccountDocValue],
-    ['book', keyLiveBook(entityId, '1:2'), validateStorageBookDocValue],
+    ['book-header', keyLiveBook(entityId, '1:2'), decodeStorageBookHeader],
     ['merkle-root', keyMerkleRoot(entityId, 'runtime-roots'), validateStorageMerkleRootDocValue],
     ['merkle-branch', keyMerkleBranch(entityId, 'runtime-roots', Buffer.from([0])), validateStorageMerkleBranchDocValue],
     ['merkle-leaf', keyMerkleLeaf(entityId, 'runtime-roots', Buffer.from([0])), validateStorageMerkleLeafDocValue],
@@ -116,7 +118,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     });
   }
 
-  test('rejects nested runtime-machine outbox corruption at the frame decode boundary', async () => {
+  test('rejects legacy runtime-machine and entity-context bodies at the frame boundary', async () => {
     const env = createEmptyEnv('storage-runtime-machine-schema');
     const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
     runtimeMachine['infrastructure'] = { pendingCommittedJOutbox: 'CORRUPT' };
@@ -128,7 +130,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       replicaMetaDigest: hash,
       postStateHash: hash,
       replicaMetaCheckpoint: true,
-      replicaMetaStateMode: 'full',
+      replicaMetaStateMode: 'shared-entity-state',
       stateHash: hash,
       hashMode: 'storage-merkle-v1',
       materializedState: true,
@@ -148,8 +150,6 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
         peerAssertions: [],
         htlc: { version: 1, entries: [], originated: [] },
       }]]),
-      historyRecords: [],
-      activityLogs: [],
       runtimeMachine,
       touchedEntities: [],
       touchedAccounts: [],
@@ -161,7 +161,31 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       keyFrame(1),
       frame,
       validateStorageFrameRecordValue,
-    )).rejects.toThrow('STORAGE_FRAME_INVALID_MACHINE_RUNTIME_STATE_PENDING_COMMITTED_J_OUTBOX');
+    )).rejects.toThrow('STORAGE_FRAME_INVALID_FIELDS');
+  });
+
+  test('rejects materialization overlays inside a Runtime WAL frame', () => {
+    const frame = {
+      height: 1,
+      timestamp: 1,
+      prevFrameHash: hash,
+      frameHash: hash,
+      replicaMetaDigest: hash,
+      postStateHash: hash,
+      replicaMetaCheckpoint: false,
+      replicaMetaStateMode: 'live-head',
+      stateHash: '',
+      hashMode: 'storage-merkle-v1',
+      materializedState: false,
+      runtimeInput: { runtimeTxs: [], entityInputs: [] },
+      overlayRecords: [],
+      touchedEntities: [],
+      touchedAccounts: [],
+      touchedBookEntities: [],
+    };
+
+    expect(() => validateStorageFrameRecordValue(frame))
+      .toThrow('STORAGE_FRAME_INVALID_FIELDS');
   });
 
   test('rejects unknown runtime-state fields and corrupt nested J entries', () => {
@@ -430,6 +454,8 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       }],
     };
     const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
+    const machineGraph = prepareRuntimeMachineGraphRows(1, runtimeMachine);
+    if (!machineGraph.root) throw new Error('TEST_RUNTIME_MACHINE_ROOT_MISSING');
     const frameBase: RuntimeFrame = {
       height: 1,
       timestamp: 1,
@@ -437,7 +463,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       replicaMetaDigest: hash,
       postStateHash: hash,
       replicaMetaCheckpoint: true,
-      replicaMetaStateMode: 'full',
+      replicaMetaStateMode: 'shared-entity-state',
       stateHash: hash,
       hashMode: 'storage-merkle-v1',
       materializedState: true,
@@ -446,37 +472,33 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       canonicalEntityHashes: [],
       runtimeStateHash: hash,
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
-      entityContexts: new Map([[`0x${'aa'.repeat(32)}:signer-b`, {
-        version: 1,
-        proposerReplicaId: `0x${'aa'.repeat(32)}:signer-a`,
-        entityId: `0x${'aa'.repeat(32)}`,
-        proposerSignerId: 'signer-a',
-        parentFrameHash: 'genesis',
-        height: 1,
-        gossipProfiles: [],
-        peerAssertions: [],
-        htlc: { version: 1, entries: [], originated: [] },
-      }]]),
-      historyRecords: [],
-      activityLogs: [],
-      runtimeMachine,
+      runtimeMachineRoot: machineGraph.root,
       touchedEntities: [],
       touchedAccounts: [],
       touchedBookEntities: [],
     };
     const frame = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
 
-    const decoded = await reopenDecodeValue(
-      'frame-runtime-machine-roundtrip',
-      keyFrame(1),
-      frame,
-      validateStorageFrameRecordValue,
-    );
+    const path = `/tmp/xln-rdb-schema-frame-runtime-machine-roundtrip-${process.pid}-${Date.now()}`;
+    paths.push(path);
+    const first = new Level<Buffer, Buffer>(path, { keyEncoding: 'buffer', valueEncoding: 'buffer' });
+    await first.open();
+    await first.batch([
+      { type: 'put', key: keyFrame(1), value: encodeBuffer(frame) },
+      ...machineGraph.rows.map(row => ({ type: 'put' as const, ...row })),
+    ]);
+    await first.close();
+    const reopened = new Level<Buffer, Buffer>(path, { keyEncoding: 'buffer', valueEncoding: 'buffer' });
+    await reopened.open();
+    const decoded = await readStorageFrameRecord(reopened, 1);
+    expect(decoded).not.toBeNull();
+    if (!decoded) throw new Error('STORAGE_FRAME_ROUNDTRIP_MISSING');
+    const payloads = await readStorageFramePayloads(reopened, decoded);
+    await reopened.close();
     expect(computeStorageFrameHash(decoded)).toBe(frame.frameHash);
-    expect(decoded.entityContexts.get(`0x${'aa'.repeat(32)}:signer-b`)?.peerAssertions)
-      .toEqual([]);
+    expect(payloads.entityContexts).toEqual(new Map());
     const restored = createEmptyEnv('storage-runtime-machine-roundtrip-restored');
-    restoreDurableRuntimeSnapshot(restored, decoded.runtimeMachine!);
+    restoreDurableRuntimeSnapshot(restored, payloads.runtimeMachine!);
     expect(restored.infrastructure?.pendingCommittedJOutbox).toEqual(
       env.infrastructure.pendingCommittedJOutbox,
     );

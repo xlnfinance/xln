@@ -12,9 +12,10 @@
  */
 
 import type { AccountReplica, AccountTx, HtlcLock } from '../../../../types/account';
+import type { AccountDraftReplica } from '../../../state/account-state-draft';
 import { deriveDelta } from '../../../utils';
 import { FINANCIAL, LIMITS } from '../../../../config/constants';
-import { ensureDelta } from '../../delta-utils';
+import { commitDeltaDraft, createDeltaDraft } from '../../delta-utils';
 import { addHold } from '../../hold-utils';
 import { isHtlcTimelockExpired } from '../../../htlc-deadline';
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../../protocol/htlc/codec/onion-layer';
@@ -52,7 +53,7 @@ const validateHtlcLock = (
 };
 
 export async function handleHtlcLock(
-  account: AccountReplica,
+  account: AccountDraftReplica,
   accountTx: HtlcLockTx,
   byLeft: boolean,
   clock: HtlcLockClock,
@@ -60,11 +61,6 @@ export async function handleHtlcLock(
 ): Promise<ApplyAccountTxResult> {
   const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId } = accountTx.data;
   const events: string[] = [];
-
-  // Initialize locks Map if not present (defensive - should be initialized at account creation)
-  if (!account.state.locks) {
-    account.state.locks = new Map();
-  }
 
   const validationError = validateHtlcLock(
     account,
@@ -74,7 +70,7 @@ export async function handleHtlcLock(
   );
   if (validationError) return accountTxValidationRejected(validationError, events);
 
-  const delta = ensureDelta(account.state, tokenId);
+  const delta = createDeltaDraft(account.state, tokenId);
 
   // 5. Determine sender perspective (Channel.ts: byLeft = frame proposer = sender)
   const senderIsLeft = byLeft;
@@ -123,7 +119,8 @@ export async function handleHtlcLock(
   // 9. Add lock to locks Map
   // CRITICAL CONSENSUS FIX: Add during validation too (prevents duplicate lockId in same frame)
   // Validation runs on an isolated clone; commit runs on the real machine.
-  account.state.locks.set(lockId, lock);
+  commitDeltaDraft(account.state, delta);
+  account.state.locks.put(lockId, lock);
 
   events.push(`🔒 HTLC locked: ${amount} token ${tokenId}, expires block ${revealBeforeHeight}, hash ${hashlock.slice(0,16)}...`);
 

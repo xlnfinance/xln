@@ -574,7 +574,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     accounts: new Map(),
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: {
       name: 'Audit Entity',
       isHub: false,
@@ -601,7 +600,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: 'Audit Entity',
     isHub: false,
@@ -2093,6 +2091,7 @@ describe('audit fail-fast regressions', () => {
       env,
       env.state.eReplicas.get(`${hub.entityId}:${hub.signerId}`)!,
       frameTxs,
+      { usePersistedReplayContext: true },
     );
     const result = await applyEntityFrame(env, hubState, entityContext, frameTxs, env.state.timestamp);
 
@@ -2144,7 +2143,7 @@ describe('audit fail-fast regressions', () => {
         } as any,
       ],
     });
-    expect(env.infrastructure?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(env.infrastructure?.currentStorageOverlayMarks ?? new Map()).toEqual(new Map());
     expect(
       result.storageChanges.some(record => record.family === 'entity' && record.entityId === entityId),
     ).toBe(true);
@@ -2169,15 +2168,17 @@ describe('audit fail-fast regressions', () => {
       type: 'profile-update',
       data: { profile: { entityId, name: 'Storage changes' } },
     });
-    expect(env.infrastructure?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(env.infrastructure?.currentStorageOverlayMarks ?? new Map()).toEqual(new Map());
     expect(reduced.storageChanges).toEqual([{ family: 'entity', entityId }]);
     applyStorageChanges(env, reduced.newState, reduced.storageChanges);
-    expect(env.infrastructure?.currentStorageOverlayMarks).toEqual([{ family: 'entity', entityId }]);
+    expect(Array.from(env.infrastructure?.currentStorageOverlayMarks?.values() ?? []))
+      .toEqual([{ family: 'entity', entityId }]);
 
     const rejected = await applyEntityTx(env, reduced.newState, { type: '__unknown__' } as unknown as EntityTx);
     expect(rejected.skippedError).toContain('ENTITY_TX_UNHANDLED');
     expect(rejected.storageChanges).toEqual([]);
-    expect(env.infrastructure?.currentStorageOverlayMarks).toEqual([{ family: 'entity', entityId }]);
+    expect(Array.from(env.infrastructure?.currentStorageOverlayMarks?.values() ?? []))
+      .toEqual([{ family: 'entity', entityId }]);
 
     const cachedRoot = computeCanonicalEntityConsensusStateHash(state);
     state.accounts.get(counterpartyId)!.currentHeight += 1;
@@ -2186,7 +2187,7 @@ describe('audit fail-fast regressions', () => {
     const invalidatedRoot = computeCanonicalEntityConsensusStateHash(state);
     expect(invalidatedRoot).not.toBe(cachedRoot);
     expect(invalidatedRoot).toBe(computeCanonicalEntityConsensusStateHashCold(state));
-    expect(env.infrastructure?.currentStorageOverlayMarks).toContainEqual({
+    expect(Array.from(env.infrastructure?.currentStorageOverlayMarks?.values() ?? [])).toContainEqual({
       family: 'account',
       entityId,
       counterpartyId,
@@ -2224,9 +2225,9 @@ describe('audit fail-fast regressions', () => {
       accountChanges: new Set(),
     });
 
-    const marks = env.infrastructure?.currentStorageOverlayMarks ?? [];
+    const marks = env.infrastructure?.currentStorageOverlayMarks ?? new Map();
     expect(state.crontabState.hooks.has('test-settlement-window')).toBe(false);
-    expect(marks).toEqual([]);
+    expect(marks).toEqual(new Map());
   });
 
   test('single-signer j_broadcast attaches consensus hanko to J batch output', async () => {

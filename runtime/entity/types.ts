@@ -1,9 +1,9 @@
 import type { OrderbookExtState } from '../orderbook';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { DebtEntry } from '../types/finance/debt';
-import type { JBlockFinalized, JHistoryFinality, JPrefixAttestation, JPrefixCertificate, JPrefixRound, ValidatorJHistory } from '../types/jurisdiction-events';
+import type { JHistoryFinality, JPrefixAttestation, JPrefixCertificate, JPrefixRound, ValidatorJHistory } from '../types/jurisdiction-events';
 import type { HankoString } from '../types/hanko';
-import type { AccountFrame, AccountOutput, AccountReplica, AccountTx, AccountHistoryRecord, HtlcNoteKey, HtlcRoute, RuntimeOverlayRecord } from '../types/account';
+import type { AccountFrame, AccountOutput, AccountTx, AccountHistoryRecord, HtlcNoteKey, HtlcRoute, RuntimeOverlayRecord } from '../types/account';
 import type { HubRebalanceConfig } from '../types/finance/rebalance';
 import type { LendingState } from '../types/finance/lending';
 import type {
@@ -24,6 +24,7 @@ import type { RuntimeSecurityIncidentIdentity } from '../protocol/errors/securit
 import type { JurisdictionConfig } from '../protocol/config/jurisdiction-config';
 import type { CrontabState } from './scheduler/types';
 import type { EntityInfraContext } from '../types/entity/infra-context';
+import type { EntityAccountMap } from './state/persistent-account-map';
 export type { JurisdictionConfig } from '../protocol/config/jurisdiction-config';
 
 export interface ConsensusConfig {
@@ -233,7 +234,7 @@ export interface EntityState {
   reserves: Map<number, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
   // The Entity commits the deterministic Account replica envelope; the nested
   // Account frame commits only AccountState through accountStateRoot.
-  accounts: Map<string, AccountReplica>; // canonicalKey "left:right" -> replica
+  accounts: EntityAccountMap; // committed Patricia root or explicit ephemeral frame overlay
   // External EOA balances/allowances observed through finalized J snapshots.
   // Keyed by owner EOA, then token/spender keys, so multi-validator entities
   // keep one deterministic map instead of signer-local side-channel state.
@@ -247,9 +248,8 @@ export interface EntityState {
   settlementContinuations?: Map<string, PendingSettlementContinuation>;
   // 🔭 J-machine tracking (JBlock consensus)
   lastFinalizedJHeight: number;           // Last finalized J-block height
-  // Bounded display/audit cache only. Finalized effects plus jHistoryFinality
-  // are authoritative; deleting these bodies must not change consensus.
-  jBlockChain: JBlockFinalized[];
+  // Finalized J-event bodies are durable history records, never live Entity
+  // state. Consensus retains only the current linked-list finality anchor.
   jHistoryFinality?: JHistoryFinality;
   /** Entity-finalized active board authority for this exact jurisdiction stack. */
   certifiedBoardState?: CertifiedBoardRegistryState;
@@ -530,6 +530,8 @@ export interface EntityCandidate {
   candidateEffects: EntityCandidateEffect[];
   /** Storage invalidations interpreted only after this exact frame commits. */
   storageChanges: RuntimeOverlayRecord[];
+  /** Proposal-envelope Account ids; unioned with storageChanges at Hanko seal. */
+  proposableAccounts?: readonly string[];
   /** Validator-computed CAS delta, published only when this exact frame commits. */
   consumptionNodeChanges?: {
     newNodes: readonly ConsumptionNodeEntry[];
@@ -548,8 +550,8 @@ export interface EntityReplica {
   lockedFrame?: EntityFrame; // Frame this validator is locked/precommitted to
   /** One validator-local speculative frame; commits never trust proposer-supplied post-state. */
   candidate?: EntityCandidate;
-  /** Latest finalized certificate only; historical certificates live in the Runtime WAL and history views. */
-  certifiedFrameLineage?: CertifiedEntityFrameLink[];
+  /** Current finalized certificate only; historical certificates live in the Entity-frame history store. */
+  certifiedFrameHead?: CertifiedEntityFrameLink;
   certifiedFrameAnchor?: CertifiedEntityLineageAnchor;
   isProposer: boolean;
   leaderVotes?: Map<string, EntityLeaderTimeoutVote>;

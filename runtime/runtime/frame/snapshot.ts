@@ -1,6 +1,8 @@
-import { hasRuntimeHistoryTraceForTesting } from '../observability/history-retention';
+import {
+  hasRuntimeHistoryTraceForTesting,
+} from '../observability/history-retention';
+import { readRuntimeFrameEvents } from '../observability/env-events';
 import type { RuntimeReplica, RuntimeInput } from '../types';
-import type { FrameLogEntry } from '../../types/logging';
 import { buildCanonicalEnvSnapshot } from '../../storage/wal/snapshot';
 import type { FrameExecutionState } from './input/execution-state';
 import type { RuntimeProcessProfile } from './process-profile';
@@ -16,9 +18,7 @@ export const prepareRuntimeFrameCommit = (
   const frameAdvanced = env.state.height !== frameHeightBeforeTick;
   profile.metrics.frameAdvanced = frameAdvanced;
   if (frameAdvanced && hasRuntimeHistoryTraceForTesting(liveEnv)) {
-    const logs = Array.isArray(env.frameLogs)
-      ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
-      : [];
+    const logs = readRuntimeFrameEvents(env);
     frame.pendingTraceSnapshot = buildCanonicalEnvSnapshot(env, {
       runtimeInput: appliedInput ?? { runtimeTxs: [], entityInputs: [] },
       runtimeOutputs: env.pendingOutputs ?? [],
@@ -31,10 +31,7 @@ export const prepareRuntimeFrameCommit = (
       gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
     });
   }
-  if (frameAdvanced) {
-    env.history = [];
-    profile.mark('snapshot');
-  }
+  if (frameAdvanced) profile.mark('snapshot');
   env.extra = undefined;
   return frameAdvanced;
 };

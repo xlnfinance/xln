@@ -7,8 +7,13 @@ import type { ConsensusConfig, EntityState } from '../entity/types';
 import type { EntityRuntimeContext } from '../entity/runtime-context';
 import type { HankoBoardDelays, HankoString } from '../types/hanko';
 import { ethers } from 'ethers';
-import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
-import { recoverAddressFromDigestSignature, signDigestBytesWithPrivateKey } from '../account/crypto';
+import { encodeBoard, hashBoard } from '../entity/factory';
+import {
+  getSignerAddress,
+  getSignerPrivateKey,
+  recoverAddressFromDigestSignature,
+  signDigestBytesWithPrivateKey,
+} from '../account/crypto';
 import { compareStableText } from '../protocol/serialization';
 import { haltRuntimeFailure } from '../protocol/errors/failure-taxonomy';
 import { toUnixMs, unixMsToUnixSFloor } from '../protocol/units';
@@ -38,6 +43,19 @@ class CertifiedBoardAuthorityError extends Error {
     this.name = 'CertifiedBoardAuthorityError';
   }
 }
+
+/**
+ * A signing digest is produced by this Runtime, not supplied by a peer.
+ * Keep invariant failures as plain Errors so failure classification halts the
+ * faulty local process instead of misreporting its own bad digest as a remote
+ * protocol rejection.
+ */
+const requireLocalSigningDigest = (hash: string): Uint8Array => {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+    throw new Error(`LOCAL_SIGNING_DIGEST_INVALID:${hash}`);
+  }
+  return ethers.getBytes(hash);
+};
 
 // Browser-compatible Buffer helpers - ALWAYS use manual hex parsing (Node Buffer.from can be broken in some envs)
 const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncoding): Buffer => {
@@ -163,8 +181,9 @@ export async function signEntityHashes(
 
   const hankos: HankoString[] = [];
 
-  // Get private key for this signer (pass env for pure function)
-  const { getSignerPrivateKey, getSignerAddress } = await import('../account/crypto');
+  // Key ownership is scoped by this Runtime's seed. The signer module already
+  // imports the same browser-safe crypto boundary, so a per-seal dynamic import
+  // only adds a Promise/module lookup on the Account consensus hot path.
   const privateKey = getSignerPrivateKey(env, signerId);
   const signerAddress = getSignerAddress(env, signerId);
   if (!signerAddress) {
@@ -177,15 +196,10 @@ export async function signEntityHashes(
     shares: { [signerAddress]: 1n },
   })).toLowerCase();
   const normalizedEntityId = encodeQuorumEntityId(entityId);
-  if (singleSignerBoardHash === normalizedEntityId) {
-    // signEntityHashes builds a single-signer threshold=1 hanko below. The old
-    // guard decoded the just-built hanko and recovered the same ECDSA signature
-    // again for every hash. That was correct but doubled hot-path crypto cost.
-    // The safety invariant is simpler: before signing, the signer address must
-    // reconstruct exactly the lazy entity board hash that the hanko will claim.
-    const reconstructedEntityId = generateLazyEntityId([signerAddress], 1n).toLowerCase();
-    if (reconstructedEntityId !== normalizedEntityId) throw new Error(`LAZY_HANKO_SELF_MISMATCH:${entityId}`);
-  } else {
+  // This board hash is both the authority check and the exact lazy Entity
+  // reconstruction. Rebuilding the same ABI board a second time was pure
+  // duplicate hashing; registered Entities instead bind it to certified J-state.
+  if (singleSignerBoardHash !== normalizedEntityId) {
     const certifiedBoardHash = resolveSigningCertifiedBoardHash(
       env,
       entityId,
@@ -205,12 +219,20 @@ export async function signEntityHashes(
 
   const delays = resolveHankoBoardDelays();
   for (const hash of hashes) {
-    const hashBuffer = bufferFrom(hash.replace('0x', ''), 'hex');
+    const hashBuffer = requireLocalSigningDigest(hash);
     const signed = signDigestBytesWithPrivateKey(privateKey, hashBuffer);
-    const signature = ethers.concat([signed.signature, Uint8Array.of(27 + signed.recovery)]);
+    if (signed.signature.length !== 64) {
+      throw new Error(`LOCAL_SIGNING_SIGNATURE_LENGTH_INVALID:${signed.signature.length}`);
+    }
+    if (signed.recovery !== 0 && signed.recovery !== 1) {
+      throw new Error(`LOCAL_SIGNING_RECOVERY_INVALID:${signed.recovery}`);
+    }
+    const signature = new Uint8Array(65);
+    signature.set(signed.signature);
+    signature[64] = 27 + signed.recovery;
     hankos.push(encodeHankoEnvelope({
       placeholders: [],
-      packedSignatures: packHankoSignatures([ethers.getBytes(signature)]),
+      packedSignatures: packHankoSignatures([signature]),
       claims: [{
         entityId: normalizedEntityId as `0x${string}`,
         entityIndexes: [0n],

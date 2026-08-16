@@ -34,6 +34,7 @@ import type {
   RuntimeAdapterFrameReceiptResponse,
   RuntimeAdapterPaymentRoutesResponse,
   RuntimeAdapterReadQuery,
+  RuntimeAdapterSwapHistoryPage,
   RuntimeAdapterRequest,
   RuntimeAdapterResponse,
   RuntimeAdapterPush,
@@ -60,6 +61,10 @@ import { markLocalRuntimeAdapterCommandTx } from '../../runtime/command/frontier
 import { verifyRuntimeAdapterOwnerBinding } from './security/owner-binding';
 import { encodeBinaryPayload } from '../../storage/codec/binary-codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
+import {
+  classifyWebSocketSendResult,
+  type WebSocketSendResult,
+} from '../../network/websocket-send-result';
 import { withRuntimeCommittedRead } from '../../runtime/frame/lifecycle/writer-lock';
 import {
   ensurePendingNumberedRegistrationsResumed,
@@ -69,6 +74,7 @@ import {
 export type RuntimeAdapterSocket = {
   send: (message: string | Uint8Array) => unknown;
   close?: (code?: number, reason?: string) => unknown;
+  getBufferedAmount?: () => number;
 };
 
 type AdapterClientState = {
@@ -108,6 +114,12 @@ export type RuntimeAdapterServerDeps = {
       scanLimit?: number | undefined;
     },
 	  ) => Promise<RuntimeAdapterActivityPage>;
+	  readAccountSwapHistoryPage?: (
+    env: RuntimeReplica,
+    entityId: string,
+    counterpartyId: string,
+    options: Readonly<{ limit?: number; cursor?: Readonly<{ height: number; offerId: string }> }>,
+  ) => Promise<RuntimeAdapterSwapHistoryPage>;
 	  enqueueRuntimeInput: (env: RuntimeReplica, input: RuntimeInput) => void;
 	  submitCrossJurisdictionIntent?: (env: RuntimeReplica, route: CrossJurisdictionSwapRoute) => Promise<unknown>;
 	  controlRuntime?: (env: RuntimeReplica, action: RuntimeAdapterControlAction) => Promise<unknown>;
@@ -349,16 +361,25 @@ const getClientState = (ws: RuntimeAdapterSocket): AdapterClientState => {
   return state;
 };
 
+const closeRuntimeAdapterSocketIfBackpressured = (ws: RuntimeAdapterSocket): boolean => {
+  const buffered = ws.getBufferedAmount?.() ?? 0;
+  if (buffered <= runtimeAdapterBackpressureBytes()) return false;
+  ws.close?.(1013, 'runtime adapter socket backpressure');
+  return true;
+};
+
+const sendRuntimeAdapterEncoded = (ws: RuntimeAdapterSocket, encoded: string | Uint8Array): void => {
+  if (closeRuntimeAdapterSocketIfBackpressured(ws)) return;
+  const disposition = classifyWebSocketSendResult(ws.send(encoded) as WebSocketSendResult);
+  if (disposition === 'accepted') return;
+  ws.close?.(1013, 'runtime adapter socket backpressure');
+};
+
 const sendResponse = (
   ws: RuntimeAdapterSocket,
   response: RuntimeAdapterResponse,
   diagnostic?: RuntimeAdapterResponseDiagnostic,
 ): void => {
-  const buffered = (ws as RuntimeAdapterSocket & { getBufferedAmount?: () => number }).getBufferedAmount?.() ?? 0;
-  if (buffered > runtimeAdapterBackpressureBytes()) {
-    ws.close?.(1013, 'runtime adapter socket backpressure');
-    return;
-  }
   const encoded = encodeRuntimeAdapterMessageForBrowser(response);
   const encodedBytes = runtimeAdapterMessageByteLength(encoded);
   const maxBytes = runtimeAdapterMaxMessageBytes();
@@ -380,7 +401,7 @@ const sendResponse = (
     } satisfies RuntimeAdapterResponse);
     try {
       assertRuntimeAdapterMessageSize(capped);
-      ws.send(capped);
+      sendRuntimeAdapterEncoded(ws, capped);
     } catch (error) {
       runtimeAdapterLog.warn('response_too_large.error_send_failed', {
         inReplyTo: response.inReplyTo,
@@ -390,7 +411,7 @@ const sendResponse = (
     ws.close?.(1009, 'runtime adapter response too large');
     return;
   }
-  ws.send(encoded);
+  sendRuntimeAdapterEncoded(ws, encoded);
 };
 
 const sendOk = (
@@ -405,7 +426,7 @@ const sendOk = (
 const sendPush = (ws: RuntimeAdapterSocket, message: RuntimeAdapterPush): void => {
   const encoded = encodeRuntimeAdapterMessageForBrowser(message);
   assertRuntimeAdapterMessageSize(encoded);
-  ws.send(encoded);
+  sendRuntimeAdapterEncoded(ws, encoded);
 };
 
 const sendErr = (
@@ -662,6 +683,16 @@ const buildRuntimeAdapterReadContext = (
               'activity reader did not return',
             ),
           ),
+      }
+    : {}),
+  ...(deps.readAccountSwapHistoryPage
+    ? {
+        readAccountSwapHistoryPage: (
+          entityId: string,
+          counterpartyId: string,
+          options: Readonly<{ limit?: number; cursor?: Readonly<{ height: number; offerId: string }> }>,
+        ) => deps.readAccountSwapHistoryPage?.(env, entityId, counterpartyId, options)
+          ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'account swap-history reader did not return')),
       }
     : {}),
   ...(deps.readReceipt

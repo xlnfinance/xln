@@ -6,14 +6,15 @@
  * Uses byLeft (frame property, same on both sides) — NOT perspective-dependent.
  */
 
-import type { AccountState, AccountTx } from '../../../../types/account';
+import type { AccountTx } from '../../../../types/account';
+import type { AccountDraftState } from '../../../state/account-state-draft';
 import { FINANCIAL } from '../../../../config/constants';
-import { ensureDelta } from '../../delta-utils';
+import { commitDeltaDraft, createDeltaDraft } from '../../delta-utils';
 import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
 export function handleSetCreditLimit(
-  account: AccountState,
+  account: AccountDraftState,
   accountTx: Extract<AccountTx, { type: 'set_credit_limit' }>,
   byLeft: boolean
 ): ApplyAccountTxResult {
@@ -37,7 +38,7 @@ export function handleSetCreditLimit(
   const side = byLeft ? 'right' : 'left';
 
   const deltaExisted = account.deltas.has(tokenId);
-  const delta = ensureDelta(account, tokenId);
+  const delta = createDeltaDraft(account, tokenId);
   if (!deltaExisted) {
     events.push(`📊 Created delta for token ${tokenId}`);
   }
@@ -49,6 +50,7 @@ export function handleSetCreditLimit(
     delta.rightCreditLimit = amount;
     events.push(`💳 Right credit limit = ${amount.toString()} for token ${tokenId}`);
   }
+  commitDeltaDraft(account, delta);
 
   return accountTxApplied(events);
 }

@@ -13,14 +13,15 @@ import {
   buildCertifiedFramePuts,
   buildHistoryViewPuts,
   pruneHistoryViewRetention,
+  readHistoryViewRuntimeActivity,
   readHistoryViewHead,
   reconcileHistoryViews,
 } from './history/history-view';
 import {
   assertEntityHashesEqual,
-  canonicalizeStorageDoc,
   computeStorageFrameHash,
   computeStoragePostStateHash,
+  computeRuntimePostStateComponentDigests,
   prepareStorageCanonicalStateHashes,
   prepareStorageStateHashes,
   readAllEntityHashDocs,
@@ -39,12 +40,12 @@ import {
   mergeOverlayRecordsIntoEnv,
   storageRefsFromOverlay,
 } from './schema/overlay-docs';
+import { storageOverlayRecordKey } from '../protocol/state/overlay';
 import {
   applyCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
 } from './replica/entity-lineage';
 import {
-  listStorageSnapshotReplicaMetas,
   readStorageFrameRecord,
   readStorageHead,
 } from './read/read';
@@ -52,7 +53,6 @@ import {
   KEY_HEAD,
   HISTORY_VIEW_ACCOUNT_FRAME,
   HISTORY_VIEW_ENTITY_FRAME,
-  KEY_DIFF,
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_BOOK,
@@ -63,13 +63,12 @@ import {
   KEY_CERTIFIED_BOARD_NODE,
   KEY_CONSUMPTION_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
+  KEY_LIVE_BOOK_BRANCH,
+  KEY_LIVE_BOOK_LEAF,
   STORAGE_FRAME_FORMAT,
   STORAGE_SCHEMA_VERSION,
   ZERO_FRAME_HASH,
-  decodeEntityId,
   decodeTaggedStorageHash,
-  decodeTaggedStorageHeight,
-  keyDiff,
   keyFrame,
   keyLiveReplicaMetaPrefix,
   keyCertifiedBoardNode,
@@ -81,10 +80,10 @@ import {
   parseLiveAccountKey,
   parseHistoryViewAccountFrameKey,
   parseHistoryViewEntityFrameKey,
-  keySnapshotReplicaMetaPrefix,
 } from './keys';
 import { readAccountStorageLayout } from './schema/account-layout';
 import {
+  areStorageCheckpointReplicasQuiescent,
   buildLiveReplicaLookup,
   buildLiveReplicaMetaPlan,
   buildStorageLiveReplicaMetaCommitment,
@@ -97,7 +96,7 @@ import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry'
 import type { FrameLogEntry } from '../types/logging';
 import type { EntityState } from '../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
-import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-pipeline/input-clone';
+import { readRuntimeFrameEvents } from '../runtime/observability/env-events';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
@@ -129,7 +128,7 @@ import {
 import {
   buildDurableRuntimeMempool,
   buildDurableRuntimeMachineSnapshot,
-  buildReplayVerifiableRuntimeMachineSnapshot,
+  buildReplayVerifiableRuntimePostStateView,
 } from './wal/snapshot';
 import { buildDurableOutputRetryState } from '../runtime/delivery/durable-output-retry';
 import {
@@ -142,7 +141,6 @@ import {
   validateCertifiedBoardNodeValue,
   validateConsumptionNodeValue,
   validateStorageAccountDocValue,
-  validateStorageDiffRecordValue,
   validateStorageEntityCoreDocValue,
 } from './schema/authoritative-schema';
 import {
@@ -155,7 +153,6 @@ import type {
   PerfDeps,
   HistoryViewPut,
   RuntimeDbLike,
-  StorageDiffRecord,
   StorageDoc,
   StorageDocRef,
   StorageEntityHashDoc,
@@ -166,12 +163,20 @@ import type {
   StorageRuntimeConfig,
 } from './types';
 import { resolveStorageRuntimeConfig } from './database/config';
+import { prepareStorageBookGraphWrite } from './commit/book-graph';
+import {
+  prepareRuntimeOutputPayloadRows,
+} from './wal/outbox-payload';
+import { prepareEntityContextPayloadRows } from './wal/entity-context-payload';
+import { prepareRuntimeMachineGraphRows } from './wal/runtime-machine-graph';
 export { resolveStorageRuntimeConfig } from './database/config';
 export {
   buildAccountMerkleFromState,
 } from './read/projections';
 export {
   readHistoryViewAccountFrames,
+  readHistoryViewAccountSwapEvents,
+  readHistoryViewAccountSwapRecency,
   readHistoryViewEntityFrames,
   readHistoryViewRuntimeActivity,
   readHistoryViewHead,
@@ -207,6 +212,7 @@ export {
   loadEntityStatesAtHeightFromStorage,
   loadEntityViewPageFromStorage,
   readStorageFrameRecord,
+  readStorageFramePayloads,
   readStorageHead,
 } from './read/read';
 export {
@@ -222,6 +228,7 @@ export type {
 
 export type {
   RuntimeDbLike,
+  RuntimeFramePayloads,
   StorageAccountDoc,
   StorageEntityHashDoc,
   RuntimeFrame,
@@ -260,40 +267,8 @@ const readHead = async (db: RuntimeDbLike, config: Required<StorageRuntimeConfig
   return defaultStorageHead(config);
 };
 
-const buildDiffRecord = (height: number, puts: StorageDoc[], dels: StorageDocRef[]): StorageDiffRecord => ({
-  height,
-  puts: puts.map(canonicalizeStorageDoc),
-  dels,
-});
-
 const materializedHeightOf = (head: StorageHead): number =>
   Math.max(0, Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)));
-
-const applyDiffToLiveDb = async (options: {
-  db: RuntimeDbLike;
-  diff: StorageDiffRecord;
-  entityHashDocs?: Map<string, StorageEntityHashDoc>;
-}): Promise<Map<string, StorageEntityHashDoc>> => {
-  const preparedHashes = await prepareStorageStateHashes({
-    db: options.db,
-    puts: options.diff.puts,
-    dels: options.diff.dels,
-    ...(options.entityHashDocs ? { entityHashDocs: options.entityHashDocs } : {}),
-  });
-  const batch = options.db.batch();
-  for (const key of preparedHashes.docDels) {
-    batch.del(key);
-  }
-  for (const item of preparedHashes.docPuts) batch.put(item.key, item.value);
-  for (const key of preparedHashes.merkleDels) {
-    batch.del(key);
-  }
-  for (const item of preparedHashes.merklePuts) {
-    batch.put(item.key, item.value);
-  }
-  await writeBatch(batch);
-  return preparedHashes.entityHashDocs;
-};
 
 const CURRENT_RECOVERY_PREFIXES = [
   KEY_LIVE_ENTITY,
@@ -306,6 +281,8 @@ const CURRENT_RECOVERY_PREFIXES = [
   KEY_CERTIFIED_BOARD_NODE,
   KEY_CONSUMPTION_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
+  KEY_LIVE_BOOK_BRANCH,
+  KEY_LIVE_BOOK_LEAF,
 ] as const;
 
 const clearCurrentRecoveryState = async (db: RuntimeDbLike): Promise<void> => {
@@ -315,6 +292,41 @@ const clearCurrentRecoveryState = async (db: RuntimeDbLike): Promise<void> => {
   for (const prefix of CURRENT_RECOVERY_PREFIXES) {
     await deleteKeyRange(db, { prefix: Buffer.from([prefix]) });
   }
+};
+
+const synchronizeLiveStateProjection = async (
+  walDb: RuntimeDbLike,
+  currentDb: RuntimeDbLike,
+  batch: ReturnType<RuntimeDbLike['batch']>,
+): Promise<boolean> => {
+  let changed = false;
+  for (const tag of [
+    KEY_LIVE_ENTITY,
+    KEY_LIVE_ACCOUNT,
+    KEY_LIVE_ACCOUNT_FIELD,
+    KEY_LIVE_BOOK,
+    KEY_MERKLE_ROOT,
+    KEY_MERKLE_BRANCH,
+    KEY_MERKLE_LEAF,
+    KEY_LIVE_BOOK_BRANCH,
+    KEY_LIVE_BOOK_LEAF,
+  ] as const) {
+    const prefix = Buffer.from([tag]);
+    const authoritativeKeys = new Set<string>();
+    for await (const key of iterateKeys(walDb, { prefix })) {
+      authoritativeKeys.add(key.toString('hex'));
+      const authoritative = await walDb.get(key);
+      if ((await readRawOrNull(currentDb, key))?.equals(authoritative)) continue;
+      batch.put(key, authoritative);
+      changed = true;
+    }
+    for await (const key of iterateKeys(currentDb, { prefix })) {
+      if (authoritativeKeys.has(key.toString('hex'))) continue;
+      batch.del(key);
+      changed = true;
+    }
+  }
+  return changed;
 };
 
 const storageHeadsEqual = (left: StorageHead, right: StorageHead): boolean =>
@@ -402,27 +414,6 @@ const synchronizeConsumptionNodes = async (
   return changed;
 };
 
-const readSnapshotReplicaStates = async (
-  walDb: RuntimeDbLike,
-  height: number,
-  docs: readonly StorageDoc[],
-): Promise<EntityState[]> => {
-  const entityIds = Array.from(new Set(docs.map((doc) => doc.entityId))).sort();
-  for await (const key of iterateKeys(walDb, { prefix: keySnapshotReplicaMetaPrefix(height) })) {
-    if (key.byteLength !== 73) throw new Error(`STORAGE_SNAPSHOT_REPLICA_META_KEY_LENGTH_INVALID:${key.byteLength}`);
-    entityIds.push(decodeEntityId(key.subarray(9, 41)));
-  }
-  const states: EntityState[] = [];
-  for (const entityId of [...new Set(entityIds)].sort()) {
-    const metas = await listStorageSnapshotReplicaMetas(walDb, height, entityId);
-    for (const meta of metas) {
-      if (!meta.state) throw new Error(`STORAGE_SNAPSHOT_REPLICA_STATE_MISSING:${height}:${entityId}`);
-      states.push(meta.state);
-    }
-  }
-  return states;
-};
-
 const certifiedBoardRoot = (
   state: { certifiedBoardState?: EntityState['certifiedBoardState'] },
 ): string | undefined =>
@@ -440,14 +431,6 @@ const collectCertifiedBoardHistoryRoots = async (
   for (const height of await listSnapshotHeights(walDb)) {
     const docs = await readSnapshotDocs(walDb, height);
     for (const doc of docs) if (doc.family === 'entity') remember(certifiedBoardRoot(doc.value));
-    for (const state of await readSnapshotReplicaStates(walDb, height, docs)) remember(certifiedBoardRoot(state));
-  }
-  for await (const key of iterateKeys(walDb, { prefix: Buffer.from([KEY_DIFF]) })) {
-    const diff = decodeValidatedBuffer(await walDb.get(key), validateStorageDiffRecordValue);
-    if (diff.height !== decodeTaggedStorageHeight(key, KEY_DIFF, 'STORAGE_DIFF_KEY_INVALID')) {
-      throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=board-gc');
-    }
-    for (const doc of diff.puts) if (doc.family === 'entity') remember(certifiedBoardRoot(doc.value));
   }
   return roots;
 };
@@ -507,18 +490,6 @@ const pruneUnreachableConsumptionHistoryNodes = async (
   for (const height of await listSnapshotHeights(walDb)) {
     const docs = await readSnapshotDocs(walDb, height);
     for (const doc of docs) {
-      if (doc.family === 'entity') remember(doc.value.consumptionAccumulator);
-    }
-    for (const state of await readSnapshotReplicaStates(walDb, height, docs)) {
-      remember(state.consumptionAccumulator);
-    }
-  }
-  for await (const key of iterateKeys(walDb, { prefix: Buffer.from([KEY_DIFF]) })) {
-    const diff = decodeValidatedBuffer(await walDb.get(key), validateStorageDiffRecordValue);
-    if (diff.height !== decodeTaggedStorageHeight(key, KEY_DIFF, 'STORAGE_DIFF_KEY_INVALID')) {
-      throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=consumption-gc');
-    }
-    for (const doc of diff.puts) {
       if (doc.family === 'entity') remember(doc.value.consumptionAccumulator);
     }
   }
@@ -647,23 +618,6 @@ const pruneUnreachableAccountJClaimHistoryNodes = async (
       remember(doc.value.state.leftPendingJClaims);
       remember(doc.value.state.rightPendingJClaims);
     }
-    for (const state of await readSnapshotReplicaStates(walDb, height, docs)) {
-      for (const account of state.accounts.values()) {
-        remember(account.state.leftPendingJClaims);
-        remember(account.state.rightPendingJClaims);
-      }
-    }
-  }
-  for await (const key of iterateKeys(walDb, { prefix: Buffer.from([KEY_DIFF]) })) {
-    const diff = decodeValidatedBuffer(await walDb.get(key), validateStorageDiffRecordValue);
-    if (diff.height !== decodeTaggedStorageHeight(key, KEY_DIFF, 'STORAGE_DIFF_KEY_INVALID')) {
-      throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=account-j-gc');
-    }
-    for (const doc of diff.puts) {
-      if (doc.family !== 'account') continue;
-      remember(doc.value.state.leftPendingJClaims);
-      remember(doc.value.state.rightPendingJClaims);
-    }
   }
   const stored = new Map<string, AccountJClaimNode>();
   const bytes = new Map<string, number>();
@@ -751,7 +705,6 @@ export const recoverStorageDbFromHistory = async (options: {
     !rawCurrentHead ||
     currentMaterializedHeight < historySnapshotHeight ||
     currentProjectionInvalid;
-  let replayFromHeight = currentMaterializedHeight;
   let recovered = false;
   if (resetFromHistory) {
     // Validate the authoritative base before clearing the rebuildable cache.
@@ -763,36 +716,19 @@ export const recoverStorageDbFromHistory = async (options: {
     }
     await clearCurrentRecoveryState(options.db);
     options.onPersistenceProgress?.('recovery-current-cleared');
-    replayFromHeight = 0;
     recovered = true;
-    if (historySnapshotHeight > 0) {
-      const snapshotDocs = await readSnapshotDocs(options.walDb, historySnapshotHeight);
-      entityHashDocs = await applyDiffToLiveDb({
-        db: options.db,
-        diff: { height: historySnapshotHeight, puts: snapshotDocs, dels: [] },
-      });
-      replayFromHeight = historySnapshotHeight;
-      options.onPersistenceProgress?.('recovery-snapshot-applied');
-    }
-  }
-  for (let height = replayFromHeight + 1; height <= historyMaterializedHeight; height += 1) {
-    const rawDiff = await readRawOrNull(options.walDb, keyDiff(height));
-    const diff = rawDiff ? decodeValidatedBuffer(rawDiff, validateStorageDiffRecordValue) : null;
-    if (!diff) throw new Error(`STORAGE_RECOVERY_DIFF_MISSING: height=${height}`);
-    if (diff.height !== height) {
-      throw new Error(`STORAGE_DIFF_KEY_HEIGHT_MISMATCH:key=${height}:value=${diff.height}:scope=recovery`);
-    }
-    entityHashDocs = await applyDiffToLiveDb({
-      db: options.db,
-      diff,
-      ...(entityHashDocs ? { entityHashDocs } : {}),
-    });
-    options.onPersistenceProgress?.(`recovery-diff-applied:${height}`);
-    recovered = true;
+    // The authoritative DB already holds the latest materialized Patricia
+    // graph. Copy its exact physical records below; rebuilding coarse snapshot
+    // documents would reintroduce an O(all values) projection and a second
+    // representation of the same state.
   }
 
   const batch = options.db.batch();
   const headChanged = !rawCurrentHead || !headsMatch || currentProjectionInvalid;
+  const liveStateChanged = headChanged
+    ? await synchronizeLiveStateProjection(options.walDb, options.db, batch)
+    : false;
+  options.onPersistenceProgress?.('recovery-live-state-synchronized');
   // History commits before the rebuildable current projection cache.
   // The normal append path writes both DBs and never scans the content-addressed
   // DAG. Only a lagging/current-cache recovery needs to copy immutable nodes.
@@ -808,7 +744,12 @@ export const recoverStorageDbFromHistory = async (options: {
     ? await synchronizeAccountJClaimNodes(options.walDb, options.db, batch)
     : false;
   options.onPersistenceProgress?.('recovery-account-j-nodes-synchronized');
-  if (boardNodesChanged || consumptionNodesChanged || accountJClaimNodesChanged) {
+  if (
+    liveStateChanged ||
+    boardNodesChanged ||
+    consumptionNodesChanged ||
+    accountJClaimNodesChanged
+  ) {
     await writeBatch(batch);
     options.onPersistenceProgress?.('recovery-current-nodes-written');
     recovered = true;
@@ -835,7 +776,7 @@ export const recoverStorageDbFromHistory = async (options: {
 
 export type StorageFrameSaveResult = {
   materialized: boolean;
-  materializedOverlayRecords: number;
+  materializedOverlayKeys: readonly string[];
   historyViewsMaterialized: boolean;
   staleWriterStopped?: boolean;
   latestSnapshotHeight?: number;
@@ -1051,7 +992,7 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
     return {
       skipped: {
         materialized: false,
-        materializedOverlayRecords: 0,
+        materializedOverlayKeys: [],
         historyViewsMaterialized: true,
       } satisfies StorageFrameSaveResult,
     };
@@ -1084,25 +1025,30 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   const head = await readHead(walDb, config);
   const appliedRuntimeInput =
     options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
-  const snapshotDue =
+  const snapshotRequested =
     options.env.state.height === 1 ||
-    options.env.state.height % config.snapshotPeriodFrames === 0;
-  const snapshotRequiredByBytes =
+    options.env.state.height - head.latestSnapshotHeight >= config.snapshotPeriodFrames;
+  const snapshotRequiredByBytesRequested =
     head.epochReplayBytes + encodeBuffer(appliedRuntimeInput).byteLength >=
     config.epochMaxBytes;
-  const shouldMaterialize =
+  const materializationRequested =
     options.env.state.height === 1 ||
-    options.env.state.height % config.materializePeriodFrames === 0 ||
-    snapshotDue ||
-    snapshotRequiredByBytes;
+    options.env.state.height - head.latestMaterializedHeight >= config.materializePeriodFrames ||
+    snapshotRequested ||
+    snapshotRequiredByBytesRequested;
+  const checkpointEligible =
+    !materializationRequested || areStorageCheckpointReplicasQuiescent(options.env);
+  const snapshotDue = snapshotRequested && checkpointEligible;
+  const snapshotRequiredByBytes = snapshotRequiredByBytesRequested && checkpointEligible;
+  const shouldMaterialize = materializationRequested && checkpointEligible;
 
   const planningStartedAt = options.getPerfMs();
   const planningMarks: Record<string, number> = {};
   const checkpoint = (label: string): void => {
     planningMarks[label] = options.getPerfMs() - planningStartedAt;
   };
-  const frameOverlayRecords = Array.isArray(state.currentStorageOverlayMarks)
-    ? state.currentStorageOverlayMarks.map(record => ({ ...record }))
+  const frameOverlayRecords = state.currentStorageOverlayMarks instanceof Map
+    ? Array.from(state.currentStorageOverlayMarks.values(), record => ({ ...record }))
     : [];
   const overlayRecords = mergeOverlayRecordsIntoEnv(options.env, []);
   const frameTouched = storageRefsFromOverlay(frameOverlayRecords);
@@ -1117,12 +1063,6 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   checkpoint('lineage');
   const planningMs = options.getPerfMs() - planningStartedAt;
   const planningStages = cumulativeMarksToDurations(planningMarks, planningMs);
-  const diffStartedAt = options.getPerfMs();
-  const framePuts = buildDocPuts(options.env, frameTouched, replicaLookup);
-  const frameBookDels = buildBookDeletionsFromOverlay(frameOverlayRecords);
-  const diff = buildDiffRecord(options.env.state.height, framePuts, frameBookDels);
-  options.onPersistenceProgress?.('diff-built');
-
   return {
     config,
     state,
@@ -1137,13 +1077,11 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
     openMs,
     planningMs,
     planningStages,
-    diffBuildMs: options.getPerfMs() - diffStartedAt,
     overlayRecords,
     frameTouched,
     checkpointedLineagePlan,
     lineagePlan,
     replicaLookup,
-    diff,
   };
 };
 
@@ -1269,6 +1207,60 @@ const logReplicaMetaDebug = (
   });
 };
 
+const bookCacheKey = (entityId: string, pairId: string): string => `${entityId}\u0000${pairId}`;
+
+const prepareBookGraphWrites = async (
+  prepared: PreparedStorageFrameSave,
+  putsToMaterialize: readonly StorageDoc[],
+  delsToMaterialize: readonly StorageDocRef[],
+): Promise<Readonly<{
+  puts: readonly Readonly<{ key: Buffer; value: Buffer }>[];
+  dels: readonly Buffer[];
+  cachePuts: ReadonlyMap<string, import('../orderbook/core').BookState>;
+  cacheDels: ReadonlySet<string>;
+}>> => {
+  const cache = prepared.state.storagePersistedBooks instanceof Map
+    ? prepared.state.storagePersistedBooks as Map<string, import('../orderbook/core').BookState>
+    : new Map<string, import('../orderbook/core').BookState>();
+  const puts: Array<Readonly<{ key: Buffer; value: Buffer }>> = [];
+  const dels: Buffer[] = [];
+  const cachePuts = new Map<string, import('../orderbook/core').BookState>();
+  const cacheDels = new Set<string>();
+  const bookPuts = putsToMaterialize
+    .filter((doc): doc is Extract<StorageDoc, { family: 'book' }> => doc.family === 'book')
+    .sort((left, right) => `${left.entityId}\u0000${left.pairId}`.localeCompare(`${right.entityId}\u0000${right.pairId}`));
+  for (const doc of bookPuts) {
+    const key = bookCacheKey(doc.entityId, doc.pairId);
+    const planned = await prepareStorageBookGraphWrite({
+      db: prepared.db,
+      entityId: doc.entityId,
+      pairId: doc.pairId,
+      next: doc.value,
+      ...(cache.has(key) ? { previous: cache.get(key)! } : {}),
+    });
+    puts.push(...planned.puts);
+    dels.push(...planned.dels);
+    cachePuts.set(key, doc.value);
+    cacheDels.delete(key);
+  }
+  for (const ref of delsToMaterialize.filter(
+    (candidate): candidate is Extract<StorageDocRef, { family: 'book' }> => candidate.family === 'book',
+  )) {
+    const key = bookCacheKey(ref.entityId, ref.pairId);
+    const planned = await prepareStorageBookGraphWrite({
+      db: prepared.db,
+      entityId: ref.entityId,
+      pairId: ref.pairId,
+      next: null,
+      ...(cache.has(key) ? { previous: cache.get(key)! } : {}),
+    });
+    dels.push(...planned.dels);
+    cachePuts.delete(key);
+    cacheDels.add(key);
+  }
+  return { puts, dels, cachePuts, cacheDels };
+};
+
 const prepareStorageStateCommitments = async (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
@@ -1281,8 +1273,6 @@ const prepareStorageStateCommitments = async (
     state,
     config,
     shouldMaterialize,
-    snapshotDue,
-    snapshotRequiredByBytes,
     overlayRecords,
     checkpointedLineagePlan,
     lineagePlan,
@@ -1306,6 +1296,9 @@ const prepareStorageStateCommitments = async (
         db,
         puts: materializedPuts,
         dels: materializedDels,
+        ...(state.storagePersistedAccounts instanceof Map
+          ? { previousAccounts: state.storagePersistedAccounts }
+          : {}),
         ...(cachedEntityHashDocs
           ? { entityHashDocs: cachedEntityHashDocs }
           : {}),
@@ -1314,20 +1307,33 @@ const prepareStorageStateCommitments = async (
   options.onPersistenceProgress?.('materialized-hashes-built');
   checkpoint('materializedHashes');
 
+  const bookGraphWrites = shouldMaterialize
+    ? await prepareBookGraphWrites(prepared, materializedPuts, materializedDels)
+    : {
+        puts: [],
+        dels: [],
+        cachePuts: new Map(),
+        cacheDels: new Set(),
+      };
+  checkpoint('bookGraph');
+
   const canonicalHashDue =
     config.canonicalHashPeriodFrames > 0 &&
     (options.env.state.height === 1 ||
       options.env.state.height % config.canonicalHashPeriodFrames === 0);
   const pendingNetworkOutputs =
     options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [];
-  const runtimeMachineForPostState =
-    buildReplayVerifiableRuntimeMachineSnapshot(options.env, {
-      pendingNetworkOutputs,
+  const runtimeComponentDigests = computeRuntimePostStateComponentDigests(
+    buildReplayVerifiableRuntimePostStateView(options.env, {
+      // Output bodies are immutable rows. Per-frame replay authority commits
+      // their ordered refs below instead of serializing the same envelopes.
+      pendingNetworkOutputs: [],
       ...(options.pendingRuntimeInput
         ? { runtimeInput: options.pendingRuntimeInput }
         : {}),
       excludePersistedHistoryRecords: true,
-    });
+    }),
+  );
   const runtimeMachine = shouldMaterialize || canonicalHashDue
     ? buildDurableRuntimeMachineSnapshot(options.env, {
         pendingNetworkOutputs,
@@ -1352,18 +1358,12 @@ const prepareStorageStateCommitments = async (
 
   const replicaMetaStateMode: RuntimeFrame['replicaMetaStateMode'] =
     checkpointedLineagePlan
-      ? snapshotDue || snapshotRequiredByBytes
-        ? 'full'
-        : 'shared-entity-state'
+      ? 'shared-entity-state'
       : 'live-head';
   const replicaMetaCommitment = checkpointedLineagePlan
     ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(
         options.env,
         lineagePlan,
-        {
-          omitIntermediateSingleSignerState:
-            replicaMetaStateMode === 'shared-entity-state',
-        },
       )
     : buildStorageLiveReplicaMetaCommitment(options.env);
   const replicaMetaEntries = checkpointedLineagePlan
@@ -1406,7 +1406,7 @@ const prepareStorageStateCommitments = async (
   options.onPersistenceProgress?.('replica-metadata-read');
   return {
     preparedHashes,
-    runtimeMachineForPostState,
+    runtimeComponentDigests,
     runtimeMachine,
     runtimeStateHashes,
     replicaMetaStateMode,
@@ -1414,6 +1414,7 @@ const prepareStorageStateCommitments = async (
     replicaMetaEntries,
     liveReplicaMetaKeys,
     staleReplicaMetaKeys,
+    bookGraphWrites,
   };
 };
 
@@ -1432,9 +1433,7 @@ const summarizeStorageFrameTouches = (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
 ): StorageFrameTouchSummary => ({
-  frameLogs: Array.isArray(options.env.frameLogs)
-    ? options.env.frameLogs.map(entry => ({ ...entry }))
-    : [],
+  frameLogs: readRuntimeFrameEvents(options.env),
   touchedEntities: [...prepared.frameTouched.touchedEntities.values()].sort(),
   touchedAccounts: [...prepared.frameTouched.touchedAccounts.values()]
     .filter(
@@ -1455,11 +1454,13 @@ const buildStorageRuntimeFrame = (
   commitments: PreparedStorageCommitments,
   prevFrameHash: string,
   touches: StorageFrameTouchSummary,
+  runtimeOutputRefs: readonly import('./types').RuntimeOutputPayloadHash[],
+  entityContextRefs: ReadonlyMap<string, import('./types').EntityContextPayloadHash>,
+  runtimeMachineRoot: import('./types').RuntimeMachineGraphRoot | undefined,
 ): RuntimeFrame => {
   const {
     appliedRuntimeInput,
     shouldMaterialize,
-    overlayRecords,
     checkpointedLineagePlan,
   } = prepared;
   const durablePendingInput =
@@ -1486,7 +1487,8 @@ const buildStorageRuntimeFrame = (
       height: options.env.state.height,
       timestamp: options.env.state.timestamp,
       replicaMetaDigest: commitments.replicaMetaCommitment.digest,
-      runtimeMachine: commitments.runtimeMachineForPostState,
+      runtimeComponentDigests: commitments.runtimeComponentDigests,
+      runtimeOutputRefs,
     }),
     stateHash: commitments.preparedHashes?.stateHash ?? '',
     hashMode: STORAGE_FRAME_FORMAT.hashMode,
@@ -1505,26 +1507,17 @@ const buildStorageRuntimeFrame = (
         }
       : {}),
     runtimeInput: appliedRuntimeInput,
-    entityContexts: structuredClone(options.entityContexts),
-    historyRecords: (options.historyRecords ?? []).map(record =>
-      structuredClone(record),
-    ),
-    activityLogs: touches.frameLogs.map(log => structuredClone(log)),
-    ...(hasPendingInput ? { pendingRuntimeInput: durablePendingInput } : {}),
-    ...(commitments.runtimeMachine
-      ? { runtimeMachine: commitments.runtimeMachine }
+    ...(entityContextRefs.size > 0
+      ? { entityContextRefs: new Map(entityContextRefs) }
       : {}),
-    ...(options.currentFrameOutputs?.length
-      ? {
-          runtimeOutputs: cloneIsolatedRoutedEntityInputs(
-            options.currentFrameOutputs,
-          ),
-        }
+    ...(hasPendingInput ? { pendingRuntimeInput: durablePendingInput } : {}),
+    ...(runtimeMachineRoot
+      ? { runtimeMachineRoot }
+      : {}),
+    ...(runtimeOutputRefs.length > 0
+      ? { runtimeOutputRefs: [...runtimeOutputRefs] }
       : {}),
     ...(retryState.length > 0 ? { runtimeOutputRetryState: retryState } : {}),
-    ...(shouldMaterialize && overlayRecords.length > 0
-      ? { overlayRecords: overlayRecords.map(record => ({ ...record })) }
-      : {}),
     touchedEntities: touches.touchedEntities,
     touchedAccounts: touches.touchedAccounts,
     touchedBookEntities: touches.touchedBookEntities,
@@ -1539,21 +1532,32 @@ const buildStorageFrameRecordPlan = (
   prevFrameHash: string,
 ) => {
   const touches = summarizeStorageFrameTouches(options, prepared);
+  const outputPayloads = prepareRuntimeOutputPayloadRows(
+    options.currentFrameOutputs ?? [],
+  );
+  const entityContextPayloads = prepareEntityContextPayloadRows(
+    options.entityContexts,
+  );
+  const runtimeMachineGraph = prepareRuntimeMachineGraphRows(
+    options.env.state.height,
+    commitments.runtimeMachine,
+  );
   const frameBase = buildStorageRuntimeFrame(
     options,
     prepared,
     commitments,
     prevFrameHash,
     touches,
+    outputPayloads.refs,
+    entityContextPayloads.refs,
+    runtimeMachineGraph.root,
   );
   const frameRecord = {
     ...frameBase,
     frameHash: computeStorageFrameHash(frameBase),
   } satisfies RuntimeFrame;
   const frameKey = keyFrame(options.env.state.height);
-  const diffKey = keyDiff(options.env.state.height);
   const frameBuffer = encodeBuffer(frameRecord);
-  const diffBuffer = encodeBuffer(prepared.diff);
   const nodeBytes =
     pendingNodes.boardHistoryBytes +
     pendingNodes.consumptionHistoryBytes +
@@ -1561,14 +1565,25 @@ const buildStorageFrameRecordPlan = (
   const frameBytes =
     frameKey.byteLength +
     frameBuffer.byteLength +
-    diffKey.byteLength +
-    diffBuffer.byteLength +
-    nodeBytes;
+    nodeBytes +
+    outputPayloads.rows.reduce(
+      (total, row) => total + row.key.byteLength + row.value.byteLength,
+      0,
+    ) +
+    entityContextPayloads.rows.reduce(
+      (total, row) => total + row.key.byteLength + row.value.byteLength,
+      0,
+    ) +
+    runtimeMachineGraph.rows.reduce(
+      (total, row) => total + row.key.byteLength + row.value.byteLength,
+      0,
+    );
   return {
     frameKey,
-    diffKey,
     frameBuffer,
-    diffBuffer,
+    outputPayloadRows: outputPayloads.rows,
+    entityContextPayloadRows: entityContextPayloads.rows,
+    runtimeMachineGraphRows: runtimeMachineGraph.rows,
     frameLogs: touches.frameLogs,
     touchedEntities: touches.touchedEntities,
     touchedAccounts: touches.touchedAccounts,
@@ -1676,8 +1691,33 @@ const buildStorageCommitBatches = (
     walBatch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
   }
   walBatch.put(frame.frameKey, frame.frameBuffer);
-  walBatch.put(frame.diffKey, frame.diffBuffer);
+  for (const row of frame.outputPayloadRows) {
+    walBatch.put(row.key, row.value);
+  }
+  for (const row of frame.entityContextPayloadRows) {
+    walBatch.put(row.key, row.value);
+  }
+  for (const row of frame.runtimeMachineGraphRows) {
+    walBatch.put(row.key, row.value);
+  }
+  // The synced WAL DB also owns the latest materialized direct state graph.
+  // Mirroring the exact graph mutations here prevents a crash between the
+  // authoritative commit and the disposable current-cache write from losing
+  // Patricia pages that cannot be reconstructed from header-only documents.
+  if (prepared.shouldMaterialize) {
+    const hashes = commitments.preparedHashes;
+    if (!hashes) throw new Error('STORAGE_MATERIALIZED_HASHES_MISSING');
+    for (const key of hashes.docDels) walBatch.del(key);
+    for (const row of hashes.docPuts) walBatch.put(row.key, row.value);
+    for (const key of hashes.merkleDels) walBatch.del(key);
+    for (const row of hashes.merklePuts) walBatch.put(row.key, row.value);
+    for (const key of commitments.bookGraphWrites.dels) walBatch.del(key);
+    for (const row of commitments.bookGraphWrites.puts) {
+      walBatch.put(row.key, row.value);
+    }
+  }
   for (const put of certifiedHistoryPuts) walBatch.put(put.key, put.value);
+  for (const put of frame.historyViewPuts) walBatch.put(put.key, put.value);
   for (const entry of commitments.replicaMetaEntries) {
     // Recovery metadata shares the authoritative batch with frame, diff, HEAD.
     walBatch.put(entry.key, entry.value);
@@ -1712,6 +1752,8 @@ const buildStorageCommitBatches = (
       currentBatch.put(item.key, item.value);
     }
   }
+  for (const key of commitments.bookGraphWrites.dels) currentBatch.del(key);
+  for (const row of commitments.bookGraphWrites.puts) currentBatch.put(row.key, row.value);
 
   const nextHead: StorageHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -1781,6 +1823,8 @@ const commitStorageFrame = async (
       latestWalHeight: options.env.state.height,
       readWalFrame: height =>
         readStorageFrameRecord(prepared.walDb, height),
+      readWalActivity: height =>
+        readHistoryViewRuntimeActivity(prepared.walDb, height),
       config: prepared.config,
     });
     historyViewBytes = reconciled.writtenBytes;
@@ -1793,6 +1837,23 @@ const commitStorageFrame = async (
   const currentWriteStartedAt = options.getPerfMs();
   options.onPersistenceProgress?.('current-cache-write-start');
   await writeBatch(batches.currentBatch, { sync: false });
+  if (prepared.shouldMaterialize) {
+    options.env.infrastructure ??= {};
+    const bookCache = options.env.infrastructure.storagePersistedBooks instanceof Map
+      ? options.env.infrastructure.storagePersistedBooks
+      : new Map();
+    for (const key of commitments.bookGraphWrites.cacheDels) bookCache.delete(key);
+    for (const [key, book] of commitments.bookGraphWrites.cachePuts) bookCache.set(key, book);
+    options.env.infrastructure.storagePersistedBooks = bookCache;
+    const accountCache = options.env.infrastructure.storagePersistedAccounts instanceof Map
+      ? options.env.infrastructure.storagePersistedAccounts
+      : new Map();
+    for (const key of commitments.preparedHashes?.accountCacheDels ?? []) accountCache.delete(key);
+    for (const [key, account] of commitments.preparedHashes?.accountCachePuts ?? []) {
+      accountCache.set(key, account);
+    }
+    options.env.infrastructure.storagePersistedAccounts = accountCache;
+  }
   const currentCacheWriteMs = options.getPerfMs() - currentWriteStartedAt;
   options.onPersistenceProgress?.('current-cache-write-done');
   await options.onPersistenceBoundary?.('after-current-cache-commit');
@@ -1803,7 +1864,7 @@ const commitStorageFrame = async (
     );
   }
   const state = prepared.state;
-  state.currentStorageOverlayMarks = [];
+  state.currentStorageOverlayMarks = new Map();
   state.pendingCertifiedBoardNodes = new Map();
   if (prepared.checkpointedLineagePlan) {
     state.storageReplicaMetaKeys = new Set(commitments.liveReplicaMetaKeys);
@@ -1873,7 +1934,7 @@ const finishStorageFrameSave = (
     open: prepared.openMs,
     planning: prepared.planningMs,
     planningStages: prepared.planningStages,
-    diff: prepared.diffBuildMs,
+    diff: 0,
     prepare: committed.prepareMs,
     prepareStages: committed.prepareStages,
     authoritativeWrite: committed.authoritativeWriteMs,
@@ -1890,10 +1951,12 @@ const finishStorageFrameSave = (
     storageLog.info('persist.frame', {
       runtimeId: String(options.env.runtimeId || '').slice(0, 12),
       frame: options.env.state.height,
-      puts: prepared.diff.puts.length,
-      dels: prepared.diff.dels.length,
+      puts: prepared.overlayRecords.length,
+      dels: prepared.overlayRecords.filter(
+        record => record.family === 'book' && record.deleted === true,
+      ).length,
       frameBytes: frame.frameBuffer.byteLength,
-      diffBytes: frame.diffBuffer.byteLength,
+      diffBytes: 0,
       historyViewBytes: committed.historyViewBytes,
       historyViewRetainedBytes: committed.historyViewRetainedBytes,
       historyViewPrunedBytes: committed.historyViewPrunedBytes,
@@ -1947,9 +2010,9 @@ const finishStorageFrameSave = (
   }
   return {
     materialized: prepared.shouldMaterialize,
-    materializedOverlayRecords: prepared.shouldMaterialize
-      ? prepared.overlayRecords.length
-      : 0,
+    materializedOverlayKeys: prepared.shouldMaterialize
+      ? prepared.overlayRecords.map(storageOverlayRecordKey)
+      : [],
     historyViewsMaterialized: committed.historyViewsMaterialized,
     latestSnapshotHeight: snapshot.latestSnapshotHeight,
     retainedHistoryBytes: snapshot.retainedHistoryBytes,
@@ -1991,7 +2054,7 @@ export const saveRuntimeFrameToStorage = async (
   if ('staleWriterStopped' in appendPosition) {
     return {
       materialized: false,
-      materializedOverlayRecords: 0,
+      materializedOverlayKeys: [],
       historyViewsMaterialized: false,
       staleWriterStopped: true,
     };

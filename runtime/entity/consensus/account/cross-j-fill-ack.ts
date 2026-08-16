@@ -184,8 +184,10 @@ export const drainPendingCrossJurisdictionFillAcks = async (
       queueCrossJFillAckIncidentEffect(candidateEffects, 'securityIncidentRecord', currentEntityState, pendingAck);
       entityLog.warn('crossj.fill_ack_ttl_expired_preserved', payload);
     }
-    const account = currentEntityState.accounts.get(pendingAck.accountId);
-    if (!account?.state.swapOffers?.has(pendingAck.tx.data.offerId)) continue;
+    const visible = currentEntityState.accounts.get(pendingAck.accountId);
+    if (!visible?.state.swapOffers?.has(pendingAck.tx.data.offerId)) continue;
+    const account = getEntityAccountForWrite(currentEntityState.accounts, pendingAck.accountId);
+    if (!account) continue;
     // An ack whose admission fails must stay pending: deleting it silently
     // loses target-side informational progress, and the later cooperative
     // close then wedges against the stale mirror. The TTL incident resolves
@@ -227,7 +229,7 @@ export const drainCommittedCrossJurisdictionCancelAcks = async (
     if (tx.type !== 'cross_swap_fill_ack') {
       throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_TX_INVALID", `CROSS_J_CANCEL_ACK_TX_INVALID:account=${accountId}:type=${tx.type}`);
     }
-    const account = currentEntityState.accounts.get(accountId);
+    const account = getEntityAccountForWrite(currentEntityState.accounts, accountId);
     if (!account) {
       throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_ACCOUNT_MISSING", `CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
     }
@@ -244,6 +246,7 @@ export const drainCommittedCrossJurisdictionCancelAcks = async (
   return queued;
 };
 import { applyAccountInput } from '../../../account/consensus';
+import { getEntityAccountForWrite } from '../../state/persistent-account-map';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
 import { createLocalAccountInput } from '../../../account/input';
 import {

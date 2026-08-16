@@ -216,8 +216,6 @@ export const shouldSkipRuntimeRecoveryUploadAtHeight = (
   return Boolean(previous?.lastBundleHash && currentHeight <= previousHeight);
 };
 
-export type FrameLogEntry = RuntimeReplica['frameLogs'][number];
-
 export type HealthMachine = { name?: string; status?: string; chainId?: number; lastBlock?: unknown };
 
 export type HealthPayload = {

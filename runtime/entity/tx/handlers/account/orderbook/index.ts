@@ -9,7 +9,6 @@ import { createStructuredLogger, shortId, shortOrder } from '../../../../../infr
 import { type WorkingOrderbookOffer, swapKey } from '../../../../../orderbook/swap-execution';
 import { type CrossJurisdictionFillInstruction } from '../../../../../extensions/cross-j/orderbook';
 import {
-  queueUniqueSwapResolveForEntityState,
   type AccountTxTarget,
 } from './queue';
 import type { MatchResult } from './offers';
@@ -19,10 +18,7 @@ import {
   type OrderbookProcessOptions,
 } from './helpers';
 import { finalizeCrossOrderbookAcks } from './cross/acks';
-import {
-  crossBookQtyLots,
-  primeCommittedCrossBooks,
-} from './cross/book';
+import { crossBookQtyLots } from './cross/book';
 import { processCrossOrderbookOffer } from './cross/offer';
 import { createCrossOrderbookPass } from './cross/pass';
 import type { CrossOrderbookProcessInput } from './cross/types';
@@ -41,7 +37,6 @@ const processCrossJurisdictionOrderbookOffers = (
   input: CrossOrderbookProcessInput,
 ): void => {
   const pass = createCrossOrderbookPass(input);
-  primeCommittedCrossBooks(pass);
   for (const offer of input.crossJurisdictionSwapOffers) {
     processCrossOrderbookOffer(pass, offer);
   }
@@ -124,19 +119,6 @@ export function processOrderbookSwaps(
       reason,
     });
   };
-  const rejectInvalidOffer = (accountId: string, offerId: string, reason: string): void => {
-    if (debugRebuildProjectionOnly) {
-      recordDebugProjectionReject(accountId, offerId, reason);
-      return;
-    }
-    queueUniqueSwapResolveForEntityState(accountTxs, hubState, queuedSwapResolutions, accountId, {
-      offerId,
-      fillRatio: 0,
-      cancelRemainder: true,
-      comment: reason,
-    });
-  };
-
   processCrossJurisdictionOrderbookOffers({
     ...(options.candidateEffects ? { candidateEffects: options.candidateEffects } : {}),
     hubState,
@@ -163,7 +145,6 @@ export function processOrderbookSwaps(
     queuedSwapResolutions,
     debugRebuildProjectionOnly,
     recordDebugProjectionReject,
-    rejectInvalidOffer,
   });
 
   return { accountTxs, crossJurisdictionFills, bookUpdates, debugProjectionRejects };

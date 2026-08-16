@@ -19,8 +19,7 @@ import type {
   RuntimeInput,
   RuntimeReplica,
 } from '../../runtime/types';
-import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
-import { computeCanonicalStateHashFromRuntimeMachine } from '../canonical-hash';
+import { verifyPersistedFrameState } from '../recovery/verify';
 import {
   readStorageFrameRecord,
   readStorageHead,
@@ -55,53 +54,24 @@ class RuntimeFrameStorageError extends Error {
       cause,
     });
     this.name = 'RuntimeFrameStorageError';
+    if (cause instanceof Error && cause.stack && this.stack) {
+      this.stack = `${this.stack}\nCaused by: ${cause.stack}`;
+    }
   }
 }
 
-type RuntimeFrameCommitProof = Pick<
-  RuntimeFrame,
-  'runtimeInput' | 'runtimeMachine' | 'runtimeStateHash'
->;
+type RuntimeFrameCommitProof = Pick<RuntimeFrame, 'runtimeInput'> &
+  Partial<Pick<RuntimeFrame, 'postStateHash'>>;
 
 export const classifyRuntimeFrameCommitProof = (
   frame: RuntimeFrameCommitProof,
   expectedInput: RuntimeInput,
-  expectedRuntimeMachine: ReturnType<typeof buildDurableRuntimeMachineSnapshot>,
-  expectedRuntimeStateHash: string,
+  expectedPostStateHash: string,
 ): RuntimeFrameCommitStatus => {
-  if (!frame.runtimeMachine || !frame.runtimeStateHash) return 'unknown';
+  if (!frame.postStateHash) return 'unknown';
   const inputMatches = safeStringify(frame.runtimeInput) === safeStringify(expectedInput);
-  const runtimeMachineMatches =
-    safeStringify(frame.runtimeMachine) === safeStringify(expectedRuntimeMachine);
-  const stateMatches = frame.runtimeStateHash === expectedRuntimeStateHash;
-  return inputMatches && runtimeMachineMatches && stateMatches ? 'committed' : 'conflict';
-};
-
-export const buildRuntimeFrameCommitProofExpectation = (
-  env: RuntimeReplica,
-  currentFrameOutputs?: RoutedEntityInput[],
-  pendingRuntimeInput?: RuntimeInput,
-): {
-  runtimeMachine: ReturnType<typeof buildDurableRuntimeMachineSnapshot>;
-  runtimeStateHash: string;
-} => {
-  // The authoritative probe must hash the exact Runtime-machine projection
-  // written to the WAL. Rebuilding through a defaulted helper can reintroduce
-  // already-persisted history records or choose different frame outputs,
-  // turning a durable commit into a false conflict after a post-WAL failure.
-  const runtimeMachine = buildDurableRuntimeMachineSnapshot(env, {
-    pendingNetworkOutputs:
-      currentFrameOutputs ?? env.pendingNetworkOutputs ?? [],
-    ...(pendingRuntimeInput ? { runtimeInput: pendingRuntimeInput } : {}),
-    excludePersistedHistoryRecords: true,
-  });
-  return {
-    runtimeMachine,
-    runtimeStateHash: computeCanonicalStateHashFromRuntimeMachine(
-      env,
-      runtimeMachine,
-    ),
-  };
+  const stateMatches = frame.postStateHash === expectedPostStateHash;
+  return inputMatches && stateMatches ? 'committed' : 'conflict';
 };
 
 const resolveAuthoritativeFrameCommitStatus = async (
@@ -116,23 +86,20 @@ const resolveAuthoritativeFrameCommitStatus = async (
   const head = await readStorageHead(walDb);
   const frame = await readStorageFrameRecord(walDb, env.state.height);
   if (frame) {
-    // A frame body without its committed Runtime snapshot and hash can prove
-    // neither success nor conflict. Treating absent proof fields as wildcards
-    // could install an unproven candidate after a timed-out WAL write.
     const expectedInputValue = expectedInput ?? {
       runtimeTxs: [],
       entityInputs: [],
     };
-    const expectedProof = buildRuntimeFrameCommitProofExpectation(
+    void currentFrameOutputs;
+    void pendingRuntimeInput;
+    const expectedPostStateHash = verifyPersistedFrameState(
       env,
-      currentFrameOutputs,
-      pendingRuntimeInput,
-    );
+      frame,
+    ).actualStateHash;
     return classifyRuntimeFrameCommitProof(
       frame,
       expectedInputValue,
-      expectedProof.runtimeMachine,
-      expectedProof.runtimeStateHash,
+      expectedPostStateHash,
     );
   }
   if (!head) return 'unknown';
@@ -249,7 +216,7 @@ const saveRuntimeEnvironment = async (
     dropPendingHistoryRecords(env, pendingHistoryRecords.length);
   }
   if (saveResult.materialized) {
-    dropOverlay(env, saveResult.materializedOverlayRecords);
+    dropOverlay(env, saveResult.materializedOverlayKeys);
   }
   return {
     staleWriterStopped: false,

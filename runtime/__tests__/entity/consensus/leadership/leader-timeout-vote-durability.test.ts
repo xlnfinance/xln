@@ -67,7 +67,6 @@ const installVoteTarget = (env: RuntimeReplica): {
     deferredAccountProposals: new Map(),
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: { name: 'leader vote durability', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,

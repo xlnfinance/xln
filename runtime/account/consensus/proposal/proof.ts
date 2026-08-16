@@ -1,7 +1,10 @@
 import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 
 import type { AccountReplica } from '../../../types/account';
-import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
+import {
+  AccountDisputeProofBudgetError,
+  createDisputeProofHashWithNonce,
+} from '../../../protocol/dispute/proof-builder';
 import {
   buildAccountProofBodyFromJurisdictions,
   getAccountStateDomain,
@@ -68,6 +71,7 @@ const buildDisputeProjection = (
       ),
     };
   } catch (error) {
+    if (error instanceof AccountDisputeProofBudgetError) throw error;
     // Failure here is an invariant fault, not a rejected user transaction:
     // committing without the promised recovery proof would make funds unsafe.
     throw haltRuntimeFailure("DISPUTE_PROOF_BUILD_FAILED", `DISPUTE_PROOF_BUILD_FAILED: ${(error as Error).message}`, error);
@@ -122,7 +126,18 @@ export const prepareProposalProof = async (
     };
   }
 
-  const projection = buildDisputeProjection(jurisdictions, account, candidate);
+  let projection: DisputeProjection;
+  try {
+    projection = buildDisputeProjection(jurisdictions, account, candidate);
+  } catch (error) {
+    if (error instanceof AccountDisputeProofBudgetError) {
+      return {
+        ok: false,
+        result: proposeAccountFrameRejected(error.message, events),
+      };
+    }
+    throw error;
+  }
   checkpointProfile('disputeProof');
   // Account consensus is deliberately signer-blind. It commits the exact
   // hashes that require authority; Entity consensus later creates either a

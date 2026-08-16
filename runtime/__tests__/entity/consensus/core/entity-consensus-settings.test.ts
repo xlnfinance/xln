@@ -61,7 +61,6 @@ const replica = (payment: EntityTx): EntityReplica => ({
     reserves: new Map(),
     accounts: new Map(),
     deferredAccountProposals: new Map(),
-    jBlockChain: [],
     profile: { name: 'Payment board', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,

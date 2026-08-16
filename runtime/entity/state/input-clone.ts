@@ -1,9 +1,15 @@
 import type { EntityInput, EntityOutput, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityFrame } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
-import type { JPrefixAttestation, JPrefixCertificate, JPrefixClaim } from '../../types/jurisdiction-events';
+import type {
+  JPrefixAttestation,
+  JPrefixCertificate,
+  JPrefixClaim,
+  JPrefixRound,
+} from '../../types/jurisdiction-events';
+import { cloneIsolatedProtocolValue } from '../../protocol/state/isolated-value-clone';
 
 export const cloneIsolatedEntityTxs = (txs: readonly EntityTx[]): EntityTx[] =>
-  txs.map(tx => structuredClone(tx));
+  txs.map(tx => cloneIsolatedProtocolValue(tx, 'ENTITY_TX_CLONE'));
 
 const cloneJPrefixClaim = <T extends JPrefixClaim>(claim: T): T => ({
   ...claim,
@@ -105,6 +111,18 @@ const cloneProposedEntityFrame = (
     activeFrames.delete(frame);
   }
 };
+
+export const copyJPrefixRound = (round: JPrefixRound): JPrefixRound => ({
+  targetEntityHeight: round.targetEntityHeight,
+  parentFrameHash: round.parentFrameHash,
+  jurisdictionRef: round.jurisdictionRef,
+  baseHeight: round.baseHeight,
+  attestations: new Map(Array.from(round.attestations, ([signerId, attestation]) => [
+    signerId,
+    cloneJPrefixAttestation(attestation),
+  ])),
+  ...(round.certificate ? { certificate: cloneJPrefixCertificate(round.certificate) } : {}),
+});
 
 export const cloneIsolatedProposedEntityFrame = (
   frame: EntityFrame,

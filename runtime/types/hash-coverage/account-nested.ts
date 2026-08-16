@@ -11,7 +11,7 @@ import type {
 } from '../account';
 import type { AssertNever, FieldGap } from './coverage';
 
-type AccountSubcontract = NonNullable<AccountState['subcontracts']> extends Map<string, infer Value>
+type AccountSubcontract = NonNullable<AccountState['subcontracts']> extends ReadonlyMap<string, infer Value>
   ? Value
   : never;
 type CrossJurisdictionSecretRelay = NonNullable<HtlcRoute['crossJurisdictionRelay']>;

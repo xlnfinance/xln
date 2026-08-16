@@ -9,7 +9,9 @@
  * Pattern: 2019 DeleteLockNew with outcomeType (secret/NoCapacity/invalid/fail)
  */
 
-import type { AccountState, AccountTx, Delta, HtlcLock } from '../../../../types/account';
+import type { AccountTx, Delta, HtlcLock } from '../../../../types/account';
+import type { AccountDraftState } from '../../../state/account-state-draft';
+import { commitDeltaDraft, createDeltaDraft } from '../../delta-utils';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
 import { createStructuredLogger, shortHash } from '../../../../infra/logger';
 import { releaseHold } from '../../hold-utils';
@@ -71,7 +73,7 @@ function getHtlcErrorResolveError(
 }
 
 function applyHtlcResolution(
-  account: AccountState,
+  account: AccountDraftState,
   lock: HtlcLock,
   delta: Delta,
   data: HtlcResolveTx['data'],
@@ -102,7 +104,8 @@ function applyHtlcResolution(
       `returned — ${reason}`,
     );
   }
-  account.locks.delete(lock.lockId);
+  commitDeltaDraft(account, delta);
+  account.locks.del(lock.lockId);
   if (data.outcome === 'secret' && 'secret' in data) {
     return accountTxHtlcSecret(events, data.secret, lock.hashlock, lock.amount, lock.tokenId);
   }
@@ -110,7 +113,7 @@ function applyHtlcResolution(
 }
 
 export async function handleHtlcResolve(
-  account: AccountState,
+  account: AccountDraftState,
   accountTx: HtlcResolveTx,
   byLeft: boolean,
   currentJHeight: number,
@@ -120,8 +123,10 @@ export async function handleHtlcResolve(
   const events: string[] = [];
   const lock = account.locks.get(lockId);
   if (!lock) return accountTxValidationRejected(`Lock ${lockId} not found`, events);
-  const delta = account.deltas.get(lock.tokenId);
-  if (!delta) return accountTxValidationRejected(`Delta ${lock.tokenId} not found`, events);
+  if (!account.deltas.has(lock.tokenId)) {
+    return accountTxValidationRejected(`Delta ${lock.tokenId} not found`, events);
+  }
+  const delta = createDeltaDraft(account, lock.tokenId);
   const validationError = outcome === 'secret'
     ? getHtlcSecretResolveError(
         lock,

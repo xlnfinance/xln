@@ -29,8 +29,23 @@ export type ReliableOutputIdentity = ReliableDeliveryIdentity & {
   variantOrder: number;
 };
 
-export const cloneRoutedOutputWithCachedIdentity = <T extends RoutedEntityInput>(output: T): T => {
-  return structuredClone(output) as T;
+export const copyRoutedOutputForMerge = <T extends RoutedEntityInput>(output: T): T => {
+  // Delivery normalization mutates only the routed envelope's own fields. The
+  // consensus payloads below it are immutable evidence and must not be walked
+  // or copied merely to acquire an isolated merge target. In particular, an
+  // Entity frame can contain a very large Account/order-book projection.
+  return {
+    ...output,
+    ...(output.entityTxs ? { entityTxs: [...output.entityTxs] } : {}),
+    ...(output.hashPrecommits
+      ? {
+          hashPrecommits: new Map(
+            [...output.hashPrecommits].map(([signerId, signatures]) => [signerId, [...signatures]]),
+          ),
+        }
+      : {}),
+    ...(output.jPrefixAttestations ? { jPrefixAttestations: new Map(output.jPrefixAttestations) } : {}),
+  } as T;
 };
 
 export const normalizeRouteText = (value: unknown): string =>
@@ -585,7 +600,9 @@ export const splitRoutedOutputByDeliveryLane = <T extends RoutedEntityInput>(out
     for (const [signerId, attestation] of jPrefixAttestations) {
       const candidate = {
         ...routeInput,
-        jPrefixAttestations: new Map([[signerId, structuredClone(attestation)]]),
+        // Attestations are signed immutable evidence. Split the Map shell, not
+        // the entire payload graph.
+        jPrefixAttestations: new Map([[signerId, attestation]]),
       };
       appendSplit(candidate);
     }
@@ -643,9 +660,7 @@ const senderAccountForProposal = (
   const counterparty = toEntityId.toLowerCase();
   for (const replica of env.state.eReplicas.values()) {
     if (replica.entityId.toLowerCase() !== owner) continue;
-    const account = [...replica.state.accounts.entries()].find(
-      ([counterpartyId]) => counterpartyId.toLowerCase() === counterparty,
-    )?.[1];
+    const account = replica.state.accounts.get(counterparty);
     if (account) return account;
   }
   return null;
@@ -683,8 +698,10 @@ export const accountProposalSettledBySender = (env: RuntimeReplica, output: Rout
   });
 };
 
-export const buildRouteOutputKey = (output: RoutedEntityInput): string => {
-  const reliableIdentity = getReliableOutputIdentity(output);
+export const buildRouteOutputKeyWithIdentity = (
+  output: RoutedEntityInput,
+  reliableIdentity: ReliableOutputIdentity | null,
+): string => {
   if (reliableIdentity) return safeStringify({ reliableIdentity });
   if (output.leaderTimeoutVote) {
     return safeStringify({
@@ -707,3 +724,6 @@ export const buildRouteOutputKey = (output: RoutedEntityInput): string => {
     txs: (output.entityTxs || []).map(tx => txFingerprint(tx)),
   });
 };
+
+export const buildRouteOutputKey = (output: RoutedEntityInput): string =>
+  buildRouteOutputKeyWithIdentity(output, getReliableOutputIdentity(output));

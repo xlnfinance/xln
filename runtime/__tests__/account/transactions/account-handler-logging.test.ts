@@ -36,7 +36,6 @@ const makeEntityState = (): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: 'Account Handler Test Entity',
     isHub: false,

@@ -159,6 +159,24 @@ export class RuntimeQueryClient {
     );
   }
 
+  /**
+   * Certified Account-frame history is intentionally a separate paged read.
+   * The caller owns its exact unknown-to-view decoder at the UI boundary.
+   */
+  readSwapHistory(
+    entityId: string,
+    counterpartyId: string,
+    query: RuntimeAdapterReadQuery = {},
+  ): Promise<unknown> {
+    const owner = String(entityId || '').trim().toLowerCase();
+    const counterparty = String(counterpartyId || '').trim().toLowerCase();
+    if (!owner || !counterparty) throw new Error('RUNTIME_SWAP_HISTORY_ID_MISSING');
+    return this.cachedRead<unknown>(
+      `entity/${encodeURIComponent(owner)}/account/${encodeURIComponent(counterparty)}/swap-history`,
+      query,
+    );
+  }
+
   readHistoryFrameBatch(query: RuntimeAdapterReadQuery): Promise<RuntimeAdapterHistoryFrameBatch> {
     if (!query.heights) throw new Error('history-frame-batch requires heights');
     return this.cachedRead<RuntimeAdapterHistoryFrameBatch>('history-frame-batch', query);

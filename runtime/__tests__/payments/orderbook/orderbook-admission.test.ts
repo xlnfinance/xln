@@ -16,6 +16,8 @@ import { normalizeSwapOfferForOrderbook } from '../../../orderbook/swap-executio
 import { getStaticSwapTokenDimensions, SWAP_LOT_SCALE } from '../../../orderbook/types';
 import type { EntityRuntimeContext } from '../../../entity/runtime-context';
 import type { EntityState } from '../../../entity/types';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import type { SwapOffer } from '../../../types/account';
 import { addr, entity, makeAccount, makeJurisdiction, makeState } from '../../helpers/cross-j';
 
@@ -57,8 +59,11 @@ const makeAdmissionState = (offer: SwapOffer): EntityState => {
       : { rightHold: offer.quantizedGive }),
   });
   account.currentHeight = 1;
-  state.accounts.set(TAKER, account);
-  return state;
+  if (!(state.accounts instanceof PersistentEntityAccountMap)) {
+    throw new Error('ORDERBOOK_ADMISSION_TEST_ACCOUNT_MAP_INVALID');
+  }
+  state.accounts = state.accounts.updated(TAKER, account);
+  return createEntityFrameCandidateState(state);
 };
 
 /** The book candidate the Entity derives from the committed offer event. */
@@ -104,7 +109,9 @@ describe('orderbook admission', () => {
 
   test('rejects a candidate with no committed Account offer behind it', () => {
     const offer = committedOffer();
-    const state = makeState(MAKER, addr('a1'), jurisdiction, TAKER);
+    const state = createEntityFrameCandidateState(
+      makeState(MAKER, addr('a1'), jurisdiction, TAKER),
+    );
     state.accounts.set(TAKER, makeAccount(MAKER, TAKER, jurisdiction));
     expect(() => admitOrderbookOfferForMatching(env, state, candidateFor(offer)))
       .toThrow('ORDERBOOK_ORDER_NOT_COMMITTED');

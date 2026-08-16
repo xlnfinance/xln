@@ -33,6 +33,7 @@ export const assertMarketMakerReadySnapshotParity = (
     entityStateHash: string;
   }>,
   persistedFrame: RuntimeFrame | null,
+  runtimeMachine: Record<string, unknown> | undefined,
 ): string => {
   if (!persistedFrame) {
     throw new Error(`MARKET_MAKER_READY_SNAPSHOT_FRAME_MISSING:height=${expected.height}`);
@@ -46,7 +47,7 @@ export const assertMarketMakerReadySnapshotParity = (
   if (!persistedFrame.frameHash || computeStorageFrameHash(persistedFrame) !== persistedFrame.frameHash) {
     throw new Error(`MARKET_MAKER_READY_SNAPSHOT_FRAME_HASH_MISMATCH:height=${expected.height}`);
   }
-  if (!persistedFrame.runtimeMachine || !persistedFrame.runtimeStateHash) {
+  if (!runtimeMachine || !persistedFrame.runtimeStateHash) {
     throw new Error(`MARKET_MAKER_READY_SNAPSHOT_RUNTIME_ORACLE_MISSING:height=${expected.height}`);
   }
   if (!Array.isArray(persistedFrame.canonicalEntityHashes)) {
@@ -56,7 +57,7 @@ export const assertMarketMakerReadySnapshotParity = (
     persistedFrame.height,
     persistedFrame.timestamp,
     persistedFrame.canonicalEntityHashes,
-    persistedFrame.runtimeMachine,
+    runtimeMachine,
   );
   if (persistedFrame.runtimeStateHash !== persistedRuntimeStateHash) {
     throw new Error(

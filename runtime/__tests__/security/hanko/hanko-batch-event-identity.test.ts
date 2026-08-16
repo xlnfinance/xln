@@ -31,7 +31,6 @@ const makeEntityState = (): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   jBatchState: {
     batch: createEmptyBatch(),
     jurisdiction: null,

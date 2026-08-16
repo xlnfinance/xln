@@ -1,5 +1,6 @@
 import { normalizeEntityRef } from '../../account-key';
 import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
+import { PersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
 import type { EntityState } from '../../../types';
 import {
   accountStateDomainFromJurisdiction,
@@ -25,6 +26,7 @@ import {
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import { addMessage } from '../../../frame-events';
 import { getEntityAccountInsertionCapacityError } from '../../../account/account-capacity';
+import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { isLeftEntity } from '../../../id';
 import { canonicalAccountDisputeConfig } from '../../../../account/config/dispute-config';
 
@@ -40,7 +42,7 @@ export type InboundAccountResolution = {
 };
 
 const findAccountKey = (
-  accounts: Map<string, AccountReplica>,
+  accounts: ReadonlyMap<string, AccountReplica>,
   counterpartyId: string,
 ): string | null => {
   const target = normalizeEntityRef(counterpartyId);
@@ -153,17 +155,17 @@ const createInboundAccountState = (
       rightEntity,
       domain,
       watchSeed,
-      deltas: new Map(),
-      locks: new Map(),
-      swapOffers: new Map(),
-      pulls: new Map(),
+      deltas: PersistentAccountStateMap.empty('deltas'),
+      locks: PersistentAccountStateMap.empty('locks'),
+      swapOffers: PersistentAccountStateMap.empty('swapOffers'),
+      pulls: PersistentAccountStateMap.empty('pulls'),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       disputeConfig: canonicalAccountDisputeConfig(disputeConfig),
       jNonce: 0,
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
+      requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+      requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
     },
     status: 'active',
     mempool: [],
@@ -187,17 +189,20 @@ const createInboundAccountState = (
       nextProofNonce: 1,
     },
     proofBody: { tokenIds: [], deltas: [] },
-    pendingWithdrawals: new Map(),
-    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
+    pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+    shadow: {
+      rebalance: {
+        policy: PersistentAccountStateMap.fromEntries(
+          'rebalanceShadowPolicy',
+          DEFAULT_ACCOUNT_TOKEN_IDS.map(tokenId => [
+            tokenId,
+            resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, tokenId),
+          ] as const),
+        ),
+        submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+      },
+    },
   };
-  for (const tokenId of DEFAULT_ACCOUNT_TOKEN_IDS) {
-    account.shadow.rebalance.policy.set(
-      tokenId,
-      resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, tokenId),
-    );
-  }
   // The inbound replica knows its complete genesis Account state, so it can
   // commit accountStateRoot immediately. It still has no signed Account frame:
   // stateHash remains empty until bilateral consensus accepts H=1.
@@ -213,7 +218,7 @@ export const resolveInboundAccount = (
 ): InboundAccountResolution => {
   const counterpartyId = assertAccountInputParticipants(state, input);
   const existingKey = findAccountKey(state.accounts, counterpartyId);
-  const existing = existingKey ? state.accounts.get(existingKey) : undefined;
+  const existing = existingKey ? getEntityAccountForWrite(state.accounts, existingKey) : undefined;
   if (existing) {
     const envelopeError = getAccountInputEnvelopeError(existing.state, input);
     if (envelopeError) return rejectPeerInput(envelopeError.code, envelopeError.reason);

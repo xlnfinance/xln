@@ -245,8 +245,8 @@ const asset = async (pathname: string, meta?: PageMeta): Promise<Response> => {
         ? 'application/manifest+json; charset=utf-8'
         : 'text/html; charset=utf-8';
   if (fullPath.endsWith('.html')) {
-    const fallback = defaultPageMeta(`http://${HOST}:${PORT}`);
-    const pageMeta = meta || fallback;
+    const defaultMeta = defaultPageMeta(`http://${HOST}:${PORT}`);
+    const pageMeta = meta || defaultMeta;
     const html = (await Bun.file(fullPath).text())
       .replace(/<title>.*?<\/title>/, `<title>${escapeHtml(pageMeta.title)}</title>`)
       .replace('</head>', `${metaTags(pageMeta)}\n  </head>`);
@@ -282,11 +282,11 @@ const serializeMessage = (message: ReturnType<DebatesStore['getMessages']>[numbe
   createdAt: message.createdAt,
 });
 
-const parseJsonSafe = <T>(raw: string, fallback: T): T => {
+const parseJsonSafe = <T>(raw: string, defaultValue: T): T => {
   try {
     return JSON.parse(raw) as T;
   } catch {
-    return fallback;
+    return defaultValue;
   }
 };
 
@@ -323,7 +323,7 @@ const skillPersonas: Record<string, { label: string; persona: string }> = {
   chair: { label: 'Final Arbiter', persona: 'Synthesize the associate judges, apply the configured rules exactly, and explain whether the threshold was met.' },
 };
 
-const fallbackModelCatalog = [
+const bundledModelCatalog = [
   { id: 'gemma3-27b-mlx', name: 'Gemma 3 27B MLX', provider: 'local-gemma', backend: 'mlx', available: true },
   { id: 'qwen3-235b-mlx', name: 'Qwen 3 235B MLX', provider: 'local-gemma', backend: 'mlx', available: true },
   { id: 'gpt-oss-heretic-mlx', name: 'GPT-OSS 120B Heretic MLX', provider: 'local-gemma', backend: 'mlx', available: true },
@@ -340,7 +340,7 @@ const fallbackModelCatalog = [
 
 const aiServerUrl = (): string => String(process.env['DEBATES_AI_SERVER_URL'] || 'http://127.0.0.1:3031').replace(/\/+$/, '');
 
-const fetchAvailableCourtModels = async (): Promise<{ ids: string[]; source: 'live' | 'fallback' }> => {
+const fetchAvailableCourtModels = async (): Promise<{ ids: string[]; source: 'live' | 'bundled' }> => {
   try {
     const response = await fetch(`${aiServerUrl()}/api/models`, { signal: AbortSignal.timeout(1400) });
     if (!response.ok) throw new Error(`model registry ${response.status}`);
@@ -355,12 +355,12 @@ const fetchAvailableCourtModels = async (): Promise<{ ids: string[]; source: 'li
   } catch {
     // Fall through to the local production registry so court creation remains available offline.
   }
-  return { ids: fallbackModelCatalog.map(model => model.id), source: 'fallback' };
+  return { ids: bundledModelCatalog.map(model => model.id), source: 'bundled' };
 };
 
-const compactPrompt = (value: string, fallback: string): string => {
+const compactPrompt = (value: string, defaultValue: string): string => {
   const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
-  return (cleaned || fallback).slice(0, 2400);
+  return (cleaned || defaultValue).slice(0, 2400);
 };
 
 const QUESTION_GUARDRAIL_PROMPT = [
@@ -738,11 +738,11 @@ const resolveSkill = (
   return skillPersonas[skillKey] || skillPersonas['logic']!;
 };
 
-const modelFromBody = (body: Record<string, unknown>, key: string, fallback = DEFAULT_AI_MODEL): string => {
+const modelFromBody = (body: Record<string, unknown>, key: string, defaultModel = DEFAULT_AI_MODEL): string => {
   const selected = String(body[key] || '').trim();
   const custom = String(body[`${key}Custom`] || '').trim();
-  const value = selected === 'custom' ? custom : selected || custom || fallback;
-  return value.slice(0, 160) || fallback;
+  const value = selected === 'custom' ? custom : selected || custom || defaultModel;
+  return value.slice(0, 160) || defaultModel;
 };
 
 const providerFromBody = (value: unknown): JudgeConfig['provider'] => {
@@ -780,12 +780,12 @@ const viralFromBody = (
   resolution: ReturnType<typeof resolutionFromBody>,
 ) => {
   const isRu = hasCyrillic(resolution.originalQuestion || resolution.claim);
-  const fallbackHeadline = isRu
+  const defaultHeadline = isRu
     ? `${stripSentenceEnd(resolution.claim)}. Докажи обратное.`
     : `${stripSentenceEnd(resolution.claim)}. Prove me wrong.`;
   return {
     mode: 'prove_me_wrong',
-    headline: String(body['viralHeadline'] || fallbackHeadline).trim().slice(0, 180) || fallbackHeadline,
+    headline: String(body['viralHeadline'] || defaultHeadline).trim().slice(0, 180) || defaultHeadline,
     hook: String(body['viralHook'] || (isRu
       ? 'Один проверяемый тезис, два участника, AI-судьи обновляют счёт после каждого раунда.'
       : 'One falsifiable claim, two parties, AI judges update the score after every round.')).trim().slice(0, 500),
@@ -797,7 +797,7 @@ const viralFromBody = (
     challengerAction: String(body['challengerAction'] || (isRu
       ? 'Если YES устоит, challenger признает тезис и делится публичным verdict.'
       : 'If YES holds, the challenger concedes the claim and shares the public verdict.')).trim().slice(0, 1000),
-    shareText: String(body['viralShareText'] || fallbackHeadline).trim().slice(0, 500) || fallbackHeadline,
+    shareText: String(body['viralShareText'] || defaultHeadline).trim().slice(0, 500) || defaultHeadline,
   };
 };
 
@@ -817,7 +817,7 @@ const chiefJudgeFromBody = (body: Record<string, unknown>, userId?: string | nul
   };
 };
 
-const buildJudgeBoardFromBody = (body: Record<string, unknown>, fallbackBoardId = 'classic3', userId?: string | null): JudgeConfig[] => {
+const buildJudgeBoardFromBody = (body: Record<string, unknown>, defaultBoardId = 'classic3', userId?: string | null): JudgeConfig[] => {
   const requestedSize = Math.max(0, Math.min(9, Math.floor(Number(body['councilSize'] || 0))));
   const judges: JudgeConfig[] = [];
   for (let index = 1; index <= requestedSize; index += 1) {
@@ -836,7 +836,7 @@ const buildJudgeBoardFromBody = (body: Record<string, unknown>, fallbackBoardId 
     });
   }
   if (judges.length) return judges;
-  return defaultJudgeBoards[fallbackBoardId] || defaultJudgeBoards['classic3']!;
+  return defaultJudgeBoards[defaultBoardId] || defaultJudgeBoards['classic3']!;
 };
 
 const debaterPersonaForSkill = (
@@ -845,8 +845,8 @@ const debaterPersonaForSkill = (
   userId?: string | null,
   inline?: { label: string; persona: string } | null,
 ): string => {
-  const fallback = side === 'A' ? skillPersonas['product']! : skillPersonas['security']!;
-  const skill = resolveSkill(userId, String(skillKey || '').trim() || (side === 'A' ? 'product' : 'security'), inline) || fallback;
+  const defaultSkill = side === 'A' ? skillPersonas['product']! : skillPersonas['security']!;
+  const skill = resolveSkill(userId, String(skillKey || '').trim() || (side === 'A' ? 'product' : 'security'), inline) || defaultSkill;
   const stance = side === 'A'
     ? 'Build the affirmative case and force a clear decision rule.'
     : 'Attack hidden assumptions and offer the judge board a better alternative rule.';
@@ -1312,7 +1312,7 @@ const buildDashboard = (session: SessionRecord) => {
       createdAt: row.created_at,
     })),
     judgeBoards: defaultJudgeBoards,
-    modelCatalog: fallbackModelCatalog,
+    modelCatalog: bundledModelCatalog,
     skillOptions: skillOptionsForUser(session.userId),
     publicChallenges,
     myChallenges,
@@ -1974,12 +1974,12 @@ const server = Bun.serve({
                 vision: Boolean(model['vision']),
               })).filter(model => model.id)
             : [];
-          return json({ ok: true, models: liveModels.length ? liveModels : fallbackModelCatalog, source: 'live' });
+          return json({ ok: true, models: liveModels.length ? liveModels : bundledModelCatalog, source: liveModels.length ? 'live' : 'bundled' });
         } catch (error) {
           return json({
             ok: true,
-            models: fallbackModelCatalog,
-            source: 'fallback',
+            models: bundledModelCatalog,
+            source: 'bundled',
             error: error instanceof Error ? error.message : String(error),
           });
         }

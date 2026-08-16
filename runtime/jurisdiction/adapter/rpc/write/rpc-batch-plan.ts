@@ -55,7 +55,10 @@ export const planRpcBatchSubmission = (
 
   const normalizedEntityId = normalizeEntityId(jTx.entityId);
   for (const settlement of batch.settlements) {
-    if (settlement.diffs.length > 0 && settlement.sig === '0x') {
+    if (
+      (settlement.diffs.length > 0 || settlement.forgiveDebtsInTokenIds.length > 0) &&
+      settlement.sig === '0x'
+    ) {
       return { kind: 'reject', error: 'Settlement missing hanko sig' };
     }
   }

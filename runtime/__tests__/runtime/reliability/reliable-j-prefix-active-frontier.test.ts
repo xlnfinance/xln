@@ -79,7 +79,6 @@ const installTargetReplica = (
       height: entityHeight,
       prevFrameHash: entityHeight === 0 ? 'genesis' : `0x${'a7'.repeat(32)}`,
       lastFinalizedJHeight: 10,
-      jBlockChain: [],
       accounts: new Map(),
       config: {
         mode: 'proposer-based',

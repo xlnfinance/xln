@@ -4,8 +4,10 @@ import { normalizeEntitySwapTradingPairs } from '../finance/swap-pairs';
 import { initCrontab } from '../../entity/scheduler';
 import {
   buildEntityFrameAuthority,
+  computeEntityAccountValueHash,
   computeEntityFrameAuthorityRoot,
 } from '../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
 import {
   backfillEntityJurisdictionBinding,
   requireBoundEntityConfig,
@@ -37,7 +39,6 @@ import { createStructuredLogger } from '../../infra/logger';
 import { encodeBoard, hashBoard } from '../../entity/factory';
 import { isNumberedEntity, toEntityId } from '../../protocol/identity';
 import { getCertifiedBoardStackKey } from '../../jurisdiction/machine/board-registry';
-import { cloneEntityState } from '../../entity/state-clone';
 import { buildRuntimeCheckpointLineagePlan } from '../../storage/replica/entity-lineage';
 import {
   assertCertifiedRegistrationEvidence,
@@ -109,7 +110,11 @@ export const applyRuntimeTx = async (
     }
     env.infrastructure.certifiedRegistrationEvidence.set(
       key,
-      freezeCertifiedRegistrationEvidence(structuredClone(runtimeTx.data)),
+      freezeCertifiedRegistrationEvidence({
+        ...runtimeTx.data,
+        topics: [...runtimeTx.data.topics],
+        receiptProofNodes: [...runtimeTx.data.receiptProofNodes],
+      }),
     );
     return [];
   }
@@ -301,7 +306,7 @@ const entityHasCertifiedCheckpoint = (
   siblings.some(replica =>
     replica.state.height > 0 ||
     Boolean(replica.certifiedFrameAnchor) ||
-    Boolean(replica.certifiedFrameLineage?.length));
+    Boolean(replica.certifiedFrameHead));
 
 const deriveImportedEntityEncryptionKeys = (
   runtimeTx: ImportReplicaRuntimeTx,
@@ -348,7 +353,6 @@ const reuseExistingReplica = (
     replica.state.config = config;
     if (
       replica.state.lastFinalizedJHeight === 0 &&
-      replica.state.jBlockChain.length === 0 &&
       !replica.state.jHistoryFinality
     ) {
       replica.state.lastFinalizedJHeight =
@@ -373,10 +377,11 @@ const buildCheckpointReplica = (
   identity: ReplicaImportIdentity,
   config: EntityState['config'],
 ): EntityReplica => {
-  const state = cloneEntityState(
-    resolveImportCheckpointState(env, identity.entityId, identity.signerId, config),
-    true,
-  );
+  // Certified EntityState is immutable and shared by sibling validator
+  // replicas. Each validator's future proposal uses its own path-copy overlay;
+  // duplicating the complete accounts/orderbook tree here is both unnecessary
+  // and O(total Entity state).
+  const state = resolveImportCheckpointState(env, identity.entityId, identity.signerId, config);
   if (state.entityEncryptionPublicKey !== deriveImportedEntityEncryptionKeys(runtimeTx, identity.entityId).publicKey) {
     throw new Error(`IMPORT_REPLICA_ENTITY_ENCRYPTION_PUBLIC_KEY_MISMATCH:${identity.entityId}`);
   }
@@ -419,10 +424,9 @@ const buildGenesisReplica = (
       config,
       entityEncryptionPublicKey: deriveImportedEntityEncryptionKeys(runtimeTx, identity.entityId).publicKey,
       reserves: new Map(),
-      accounts: new Map(),
+      accounts: PersistentEntityAccountMap.empty(identity.entityId, computeEntityAccountValueHash),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: getJHistoryRegistrationBaseHeight(config.jurisdiction),
-      jBlockChain: [],
       profile: {
         name:
           typeof runtimeTx.data.profileName === 'string' &&

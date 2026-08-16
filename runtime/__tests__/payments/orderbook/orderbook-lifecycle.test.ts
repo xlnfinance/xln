@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { applyCommand, createBook, getBookOrder, getBookOrders } from '../../../orderbook/core';
+import { applyCommand, computeBookHash, createBook, getBookOrder, getBookOrders } from '../../../orderbook/core';
+import { commitBookOverlay } from '../../../orderbook/book-overlay';
 
 const activeOrderIds = (book: ReturnType<typeof createBook>): string[] =>
   getBookOrders(book).map((order) => order.orderId).sort();
@@ -102,14 +103,34 @@ describe('orderbook lifecycle cleanup', () => {
     });
   });
 
-  test('stale top-of-book cleanup also evicts orphaned order map entries', () => {
+  test('FOK partial preview rolls back every maker fill and locator change', () => {
+    const seeded = commitBookOverlay(applyCommand(createBook({
+      bucketWidthTicks: 1n, maxOrders: 16, stpPolicy: 0,
+    }), {
+      kind: 0, ownerId: 'maker', orderId: 'ask', side: 1,
+      tif: 0, postOnly: true, priceTicks: 100n, qtyLots: 5n,
+    }).state);
+    const before = computeBookHash(seeded);
+    const result = applyCommand(seeded, {
+      kind: 0, ownerId: 'taker', orderId: 'fok', side: 0,
+      tif: 2, postOnly: false, priceTicks: 100n, qtyLots: 10n,
+    });
+    expect(result.events).toEqual([{
+      type: 'REJECT', orderId: 'fok', ownerId: 'taker', reason: 'FOK cannot fill entirely',
+    }]);
+    expect(computeBookHash(seeded)).toBe(before);
+    expect(getBookOrder(seeded, 'ask')?.qtyLots).toBe(5n);
+    expect(getBookOrder(result.state, 'ask')?.qtyLots).toBe(5n);
+  });
+
+  test('published order locators cannot diverge from canonical price pages', () => {
     let book = createBook({
       bucketWidthTicks: 100n,
       maxOrders: 16,
       stpPolicy: 0,
     });
 
-    book = applyCommand(book, {
+    book = commitBookOverlay(applyCommand(book, {
       kind: 0,
       ownerId: 'maker-a',
       orderId: 'ask-stale',
@@ -118,28 +139,14 @@ describe('orderbook lifecycle cleanup', () => {
       postOnly: false,
       priceTicks: 110n,
       qtyLots: 5n,
-    }).state;
+    }).state);
 
     const staleOrder = book.orders.get('ask-stale');
     expect(staleOrder).not.toBeUndefined();
     if (!staleOrder) throw new Error('expected stale order to exist');
-    staleOrder.qtyLots = 0;
-
-    const result = applyCommand(book, {
-      kind: 0,
-      ownerId: 'taker-a',
-      orderId: 'buy-cleanup',
-      side: 0,
-      tif: 0,
-      postOnly: false,
-      priceTicks: 120n,
-      qtyLots: 1n,
-    });
-
-    book = result.state;
-
-    expect(getBookOrder(book, 'ask-stale')).toBeNull();
-    expect(book.orders.has('ask-stale')).toBe(false);
-    expect(activeOrderIds(book)).toEqual(['buy-cleanup']);
+    expect(Object.isFrozen(staleOrder)).toBe(true);
+    expect(() => Object.assign(staleOrder, { qtyLots: 0n })).toThrow();
+    expect(getBookOrder(book, 'ask-stale')?.qtyLots).toBe(5n);
+    expect(activeOrderIds(book)).toEqual(['ask-stale']);
   });
 });

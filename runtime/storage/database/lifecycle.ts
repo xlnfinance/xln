@@ -5,8 +5,11 @@ import {
   KEY_FRAME,
   KEY_HEAD,
   KEY_LIVE_ACCOUNT,
-  KEY_LIVE_ACCOUNT_FIELD,
+  KEY_LIVE_ACCOUNT_BRANCH,
+  KEY_LIVE_ACCOUNT_LEAF,
   KEY_LIVE_BOOK,
+  KEY_LIVE_BOOK_BRANCH,
+  KEY_LIVE_BOOK_LEAF,
   KEY_LIVE_ENTITY,
   KEY_LIVE_REPLICA_META,
   KEY_MERKLE_BRANCH,
@@ -20,6 +23,7 @@ import {
   KEY_SNAPSHOT_ENTITY,
   KEY_SNAPSHOT_REPLICA_META,
   KEY_SNAPSHOT_MANIFEST,
+  KEY_SNAPSHOT_GRAPH,
   assertStorageSchemaVersion,
   decodeHeight,
   encodeHeight,
@@ -27,14 +31,17 @@ import {
   keySnapshotBookPrefix,
   keySnapshotEntityPrefix,
   keySnapshotManifest,
+  keySnapshotGraph,
+  keySnapshotGraphPrefix,
   keySnapshotReplicaMetaPrefix,
   parseLiveBookKey,
-  parseLiveAccountKey,
   parseSnapshotAccountKey,
   parseSnapshotEntityKey,
   parseSnapshotManifestHeight,
 } from '../keys';
+import { readSnapshotBookGraph } from '../read/book-graph';
 import { readAccountStorageLayout } from '../schema/account-layout';
+import { createSnapshotAccountGraphView } from './snapshot-graph-view';
 import type {
   RuntimeDbLike,
   StorageDoc,
@@ -47,7 +54,6 @@ import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,
   validateStorageAccountDocValue,
-  validateStorageBookDocValue,
   validateStorageEntityCoreDocValue,
   validateStorageHeadValue,
   validateStorageSnapshotManifestValue,
@@ -74,12 +80,19 @@ export const readSnapshotDocs = async (
   for await (const key of iterateKeys(db, { prefix: keySnapshotAccountPrefix(height) })) {
     const { height: keyHeight, entityId, counterpartyId } = parseSnapshotAccountKey(key);
     if (keyHeight !== height) throw new Error(`STORAGE_SNAPSHOT_ACCOUNT_HEIGHT_MISMATCH:${keyHeight}:${height}`);
+    const stored = await readAccountStorageLayout(
+      createSnapshotAccountGraphView(db, height),
+      entityId,
+      counterpartyId,
+      Buffer.concat([Buffer.from([KEY_LIVE_ACCOUNT]), key.subarray(9)]),
+    );
+    if (!stored) throw new Error(`STORAGE_SNAPSHOT_ACCOUNT_GRAPH_MISSING:${height}:${entityId}:${counterpartyId}`);
     docs.push({
       family: 'account',
       entityId,
       counterpartyId,
       value: assertStorageAccountDocBinding(
-        decodeValidatedBuffer(await db.get(key), validateStorageAccountDocValue),
+        validateStorageAccountDocValue(stored.doc),
         entityId,
         counterpartyId,
         `snapshot:${height}`,
@@ -88,11 +101,13 @@ export const readSnapshotDocs = async (
   }
   for await (const key of iterateKeys(db, { prefix: keySnapshotBookPrefix(height) })) {
     const { entityId, pairId } = parseLiveBookKey(key, 9);
+    const value = await readSnapshotBookGraph(db, height, entityId, pairId);
+    if (!value) throw new Error(`STORAGE_SNAPSHOT_BOOK_GRAPH_MISSING:${height}:${entityId}:${pairId}`);
     docs.push({
       family: 'book',
       entityId,
       pairId,
-      value: decodeValidatedBuffer(await db.get(key), validateStorageBookDocValue),
+      value,
     });
   }
   return docs;
@@ -118,8 +133,11 @@ export const seedFreshStorageEpoch = async (options: {
   const livePrefixes = [
     Buffer.from([KEY_LIVE_ENTITY]),
     Buffer.from([KEY_LIVE_ACCOUNT]),
-    Buffer.from([KEY_LIVE_ACCOUNT_FIELD]),
+    Buffer.from([KEY_LIVE_ACCOUNT_BRANCH]),
+    Buffer.from([KEY_LIVE_ACCOUNT_LEAF]),
     Buffer.from([KEY_LIVE_BOOK]),
+    Buffer.from([KEY_LIVE_BOOK_BRANCH]),
+    Buffer.from([KEY_LIVE_BOOK_LEAF]),
     Buffer.from([KEY_MERKLE_ROOT]),
     Buffer.from([KEY_MERKLE_BRANCH]),
     Buffer.from([KEY_MERKLE_LEAF]),
@@ -190,6 +208,10 @@ const readSnapshotBodyHeights = async (db: RuntimeDbLike): Promise<Set<number>> 
       throw new Error(`STORAGE_SNAPSHOT_BODY_HEIGHT_INVALID: family=book height=${height}`);
     }
     heights.add(height);
+  }
+  for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_SNAPSHOT_GRAPH]) })) {
+    if (key.byteLength <= 10) throw new Error('STORAGE_SNAPSHOT_BODY_KEY_INVALID: family=graph');
+    heights.add(decodeHeight(key));
   }
   return heights;
 };
@@ -268,12 +290,12 @@ export const createSnapshot = async (
   await pruneUnpublishedSnapshots(targetDb, onPersistenceBoundary);
   const liveDocPrefixes = [
     Buffer.from([KEY_LIVE_ENTITY]),
+    Buffer.from([KEY_LIVE_ACCOUNT]),
     Buffer.from([KEY_LIVE_BOOK]),
   ];
 
   let written = 0;
   let bytes = 0;
-  const snapshotBatchSize = 256;
   for (const prefix of liveDocPrefixes) {
     const copied = await copyKeyRange(sourceDb, targetDb, { prefix }, (key) => {
       if (key[0] === KEY_LIVE_ENTITY) {
@@ -282,36 +304,30 @@ export const createSnapshot = async (
       if (key[0] === KEY_LIVE_BOOK) {
         return Buffer.concat([Buffer.from([KEY_SNAPSHOT_BOOK]), encodeHeight(height), key.subarray(1)]);
       }
+      if (key[0] === KEY_LIVE_ACCOUNT) {
+        return Buffer.concat([Buffer.from([KEY_SNAPSHOT_ACCOUNT]), encodeHeight(height), key.subarray(1)]);
+      }
       return null;
     }, async () => onPersistenceBoundary?.('after-snapshot-body-batch'));
     written += copied.count;
     bytes += copied.bytes;
   }
-  let accountBatch = targetDb.batch();
-  let accountBatchCount = 0;
-  const flushAccounts = async (): Promise<void> => {
-    if (accountBatchCount === 0) return;
-    await writeBatch(accountBatch);
-    await onPersistenceBoundary?.('after-snapshot-body-batch');
-    accountBatch = targetDb.batch();
-    accountBatchCount = 0;
-  };
-  for await (const key of iterateKeys(sourceDb, { prefix: Buffer.from([KEY_LIVE_ACCOUNT]) })) {
-    const parsed = parseLiveAccountKey(key);
-    const stored = await readAccountStorageLayout(sourceDb, parsed.entityId, parsed.counterpartyId, key);
-    if (!stored) throw new Error(`STORAGE_SNAPSHOT_ACCOUNT_SOURCE_MISSING:${key.toString('hex')}`);
-    const snapshotKey = Buffer.concat([
-      Buffer.from([KEY_SNAPSHOT_ACCOUNT]),
-      encodeHeight(height),
-      key.subarray(1),
-    ]);
-    accountBatch.put(snapshotKey, stored.logicalValue);
-    accountBatchCount += 1;
-    written += 1;
-    bytes += snapshotKey.byteLength + stored.logicalValue.byteLength;
-    if (accountBatchCount >= snapshotBatchSize) await flushAccounts();
+  for (const graphTag of [
+    KEY_LIVE_BOOK_BRANCH,
+    KEY_LIVE_BOOK_LEAF,
+    KEY_LIVE_ACCOUNT_BRANCH,
+    KEY_LIVE_ACCOUNT_LEAF,
+  ] as const) {
+    const copied = await copyKeyRange(
+      sourceDb,
+      targetDb,
+      { prefix: Buffer.from([graphTag]) },
+      key => keySnapshotGraph(height, key),
+      async () => onPersistenceBoundary?.('after-snapshot-body-batch'),
+    );
+    written += copied.count;
+    bytes += copied.bytes;
   }
-  await flushAccounts();
   const replicaMetas = await copyKeyRange(
     targetDb,
     targetDb,
@@ -344,6 +360,7 @@ const pruneSnapshot = async (
     keySnapshotEntityPrefix(height),
     keySnapshotAccountPrefix(height),
     keySnapshotBookPrefix(height),
+    keySnapshotGraphPrefix(height),
     keySnapshotReplicaMetaPrefix(height),
   ];
   let removedBytes = 0;

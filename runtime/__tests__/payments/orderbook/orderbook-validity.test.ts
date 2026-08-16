@@ -5,12 +5,13 @@ import {
   createOrderbookExtState,
   getStaticSwapTokenDimensions,
   ORDERBOOK_PRICE_SCALE,
-  replaceOrderbookPair,
   SWAP_LOT_SCALE,
 } from '../../../orderbook/types';
+import { replaceOrderbookPair } from '../../../orderbook/order-index';
 import { validateBookAgainstOffers, validateBookStructure, validateEntityOrderbooks } from '../../../orderbook/validity';
 import type { AccountReplica, SwapOffer } from '../../../types/account';
 import type { EntityState } from '../../../entity/types';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import {
   addr,
   entity,
@@ -70,7 +71,10 @@ const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): E
   replaceOrderbookPair(orderbookExt, '1/2', book);
   state.timestamp = 0;
   state.profile = { name: 'Hub', isHub: true, avatar: '', bio: '', website: '' };
-  state.accounts.set(aliceId, makeAccount(offerId, offer));
+  if (!(state.accounts instanceof PersistentEntityAccountMap)) {
+    throw new Error('ORDERBOOK_VALIDITY_TEST_ACCOUNT_MAP_INVALID');
+  }
+  state.accounts = state.accounts.updated(aliceId, makeAccount(offerId, offer));
   state.orderbookExt = orderbookExt;
   return state;
 };

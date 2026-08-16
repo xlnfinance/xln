@@ -29,6 +29,9 @@
   export let formatOrderTime: (ms: number) => string = (ms) => String(ms);
   export let closedOrderStatusLabel: (status: ClosedOrderStatus) => string = (status) => status;
   export let closedOrderStatusTone: (status: ClosedOrderStatus) => 'bid' | 'ask' | 'neutral' = () => 'neutral';
+  export let closedHistoryLoading = false;
+  export let closedHistoryHasMore = false;
+  export let onLoadOlderClosedHistory: () => void | Promise<void> = () => {};
   export let cancelSwapOffer: (offerId: string, accountId: string) => void | Promise<void> = () => {};
   export let requestCrossClear: (offerId: string, cancelRemainder?: boolean) => void | Promise<void> = () => {};
 </script>
@@ -202,6 +205,17 @@
             {/each}
           </tbody>
         </table>
+      </div>
+    {/if}
+    {#if closedHistoryHasMore}
+      <div class="orders-history-more">
+        <button
+          type="button"
+          class="cancel-btn"
+          disabled={closedHistoryLoading}
+          data-testid="swap-closed-orders-load-more"
+          on:click={() => void onLoadOlderClosedHistory()}
+        >{closedHistoryLoading ? 'Loading…' : 'Load older orders'}</button>
       </div>
     {/if}
   {/if}

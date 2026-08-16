@@ -2,8 +2,10 @@ import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-ta
 
 import {
   applyCommand,
+  commitBookOverlay,
   crossJurisdictionBookQtyLots,
   getBookOrder,
+  type BookOrderState,
   type BookState,
 } from '../../../../../../orderbook';
 import { isCrossJurisdictionRouteExpired } from '../../../../../../extensions/cross-j';
@@ -34,11 +36,11 @@ const removeCrossBookOrder = (
 ): BookState => {
   const order = getBookOrder(book, orderId);
   if (!order) return book;
-  const next = applyCommand(book, {
+  const next = commitBookOverlay(applyCommand(book, {
     kind: 1,
     ownerId: order.ownerId,
     orderId,
-  }).state;
+  }).state);
   pass.bookCache.set(pairId, next);
   pass.bookUpdates.push({ pairId, book: next });
   return next;
@@ -60,27 +62,26 @@ export const removeCrossBookOrderAfterFill = (
   });
 };
 
-const validateCrossBookOrder = (
+export const classifyCrossBookMaker = (
   pass: CrossOrderbookPass,
   pairId: string,
-  book: BookState,
-  orderId: string,
-): BookState => {
-  const order = getBookOrder(book, orderId);
-  if (!order) return book;
+  order: Readonly<BookOrderState>,
+): 'eligible' | 'suspended' | 'cancel' => {
+  const orderId = order.orderId;
   const { accountId, offerId } = parseNamespacedOrderId(
     orderId,
     'ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER',
   );
   const account = pass.hubState.accounts.get(accountId);
-  if ((account?.status ?? 'active') !== 'active') {
-    const next = removeCrossBookOrder(pass, pairId, book, orderId);
+  // A remote admitted route is intentionally represented without a local
+  // AccountReplica. Only a locally owned Account can enter dispute here.
+  if (account && account.status !== 'active') {
     orderbookCrossLog.debug('book.remove_disputed_account', {
       pair: pairId,
       order: shortOrder(orderId, 20),
       account: accountId.slice(-8),
     });
-    return next;
+    return 'cancel';
   }
   const queuedAck = findQueuedCrossSwapAckForEntityState(
     pass.hubState,
@@ -90,13 +91,12 @@ const validateCrossBookOrder = (
   const pendingBookAck = assertPendingBookFillAckLive(pass, accountId, offerId);
   const status = committedCrossRouteStatus(pass, accountId, offerId);
   if (status && !isWorkingCrossRouteStatus(status)) {
-    const next = removeCrossBookOrder(pass, pairId, book, orderId);
     orderbookCrossLog.debug('book.remove_non_working', {
       pair: pairId,
       order: shortOrder(orderId, 20),
       status,
     });
-    return next;
+    return 'cancel';
   }
   const meta =
     pass.crossLiveOfferMeta.get(orderId) ??
@@ -107,18 +107,17 @@ const validateCrossBookOrder = (
   }
   pass.crossLiveOfferMeta.set(orderId, meta);
   if (isCrossJurisdictionRouteExpired(meta.route, Number(pass.hubState.timestamp || 0))) {
-    const next = removeCrossBookOrder(pass, pairId, book, orderId);
     orderbookCrossLog.debug('book.remove_expired_before_match', {
       pair: pairId,
       order: shortOrder(orderId, 20),
       expiresAt: meta.route.expiresAt,
       now: pass.hubState.timestamp,
     });
-    return next;
+    return 'cancel';
   }
   if (pendingBookAck || queuedAck) {
     pass.suspendedOrderIds.add(orderId);
-    return book;
+    return 'suspended';
   }
   const canonicalQty = crossBookQtyLots(meta.baseTokenId, meta.baseAmount);
   if (
@@ -137,30 +136,5 @@ const validateCrossBookOrder = (
       `storedQty=${order.qtyLots.toString()} canonicalQty=${canonicalQty.toString()} ` +
       `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`);
   }
-  return book;
-};
-
-export const assertCrossBookMatchesCommittedOffers = (
-  pass: CrossOrderbookPass,
-  pairId: string,
-  initialBook: BookState,
-): BookState => {
-  if (pass.assertedPairs.has(pairId)) return initialBook;
-  pass.assertedPairs.add(pairId);
-  let book = initialBook;
-  for (const order of [...initialBook.orders.values()]) {
-    book = validateCrossBookOrder(pass, pairId, book, order.orderId);
-  }
-  return book;
-};
-
-export const primeCommittedCrossBooks = (pass: CrossOrderbookPass): void => {
-  for (const [pairId, sourceBook] of pass.ext.books) {
-    if (!String(pairId).startsWith('cross:')) continue;
-    const book = pass.bookCache.get(pairId) ?? sourceBook;
-    pass.bookCache.set(
-      pairId,
-      assertCrossBookMatchesCommittedOffers(pass, pairId, book),
-    );
-  }
+  return 'eligible';
 };

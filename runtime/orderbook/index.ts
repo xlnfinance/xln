@@ -9,4 +9,6 @@ export * from './types';
 export * from './core';
 export * from './validity';
 export * from './commitment';
+export * from './book-overlay';
+export * from './order-index';
 export * from './cross-j/quantity';

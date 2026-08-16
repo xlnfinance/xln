@@ -66,20 +66,10 @@ export const runtimeQuiesceWorkSummary = (env: RuntimeReplica) => ({
 
 export const getRuntimeFatalDiagnostics = (env: RuntimeReplica, replicaName?: string): string => {
   const cleanLogs = Array.isArray(env.infrastructure?.cleanLogs) ? env.infrastructure.cleanLogs : [];
-  const recentErrors = env.frameLogs
-    .filter(
-      entry =>
-        entry.level === 'error' || entry.message === 'RUNTIME_LOOP_ERROR' || entry.message === 'RUNTIME_LOOP_HALTED',
-    )
-    .slice(-3)
-    .map(entry => ({
-      level: entry.level ?? null,
-      category: entry.category ?? null,
-      message: entry.message ?? null,
-      data: entry.data ?? null,
-      entityId: entry.entityId ?? null,
-      timestamp: entry.timestamp ?? null,
-    }));
+  // Live Runtime intentionally retains no event timeline. Persisted activity
+  // belongs to the history reader; operator diagnostics use the bounded clean
+  // operational log here.
+  const recentErrors: never[] = [];
   const replica = replicaName ? env.state.jReplicas.get(replicaName) : env.state.jReplicas.values().next().value;
   const jState = replica
     ? {

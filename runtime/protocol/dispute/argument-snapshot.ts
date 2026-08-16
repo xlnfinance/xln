@@ -1,6 +1,3 @@
-import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
-import { cloneProofBodyStruct } from './proof-body';
-
 export type DisputeArgumentSide = 'left' | 'right';
 
 type DisputeArgumentPlan = {
@@ -43,3 +40,5 @@ export const cloneDisputeArgumentSnapshot = (
     rightPullIds: [...snapshot.plan.rightPullIds],
   },
 });
+import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import { cloneProofBodyStruct } from './proof-body';

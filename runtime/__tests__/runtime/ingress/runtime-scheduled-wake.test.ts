@@ -76,7 +76,6 @@ const makeState = (id: string, proposer: string, timestamp: number): EntityState
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: { name: 'wake-test', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,

@@ -1,4 +1,3 @@
-import type { AccountReplica } from '$lib/types/ui';
 import { amountToUsd } from '$lib/utils/assetPricing';
 import { requireTokenDecimals } from './../token-metadata';
 import type { SwapBookEntry } from '@xln/runtime/api/public/runtime-module';
@@ -27,6 +26,8 @@ export type OfferLifecycle = {
   wantAmount: bigint;
   priceTicks: bigint;
   createdAt: number;
+  lastUpdatedAt: number;
+  closed: boolean;
   resolves: ResolveRecord[];
   cancelRequested: boolean;
 };
@@ -97,10 +98,149 @@ export type ComputeSwapPriceTicks = (
 ) => bigint;
 
 export type TokenInfoReader = (tokenId: number) => { decimals?: unknown; symbol?: unknown } | null | undefined;
-export type AccountOrderHistory = Pick<
-  AccountReplica,
-  'swapOrderHistory' | 'swapClosedOrders'
->;
+
+/**
+ * One certified Account-frame lifecycle, reconstructed by the Runtime adapter.
+ * It is deliberately not a live AccountReplica field: frame history belongs to
+ * its dedicated LevelDB log and is always read through the bounded page API.
+ */
+export type SwapHistoryLifecycle = Readonly<{
+  offerId: string;
+  giveTokenId: number;
+  wantTokenId: number;
+  originalGiveAmount: bigint;
+  originalWantAmount: bigint;
+  liveGiveAmount: bigint | null;
+  liveWantAmount: bigint | null;
+  priceTicks: bigint;
+  createdHeight: number;
+  lastUpdatedHeight: number;
+  cancelRequested: boolean;
+  closed: boolean;
+  resolves: readonly ResolveRecord[];
+}>;
+
+export type SwapHistoryPage = Readonly<{
+  entityId: string;
+  accountId: string;
+  latestHeight: number;
+  items: readonly SwapHistoryLifecycle[];
+  nextCursor: string | null;
+}>;
+
+type UnknownRecord = Record<string, unknown>;
+
+const requireRecord = (value: unknown, code: string): UnknownRecord => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(code);
+  return value as UnknownRecord;
+};
+
+const requireExactKeys = (value: UnknownRecord, keys: readonly string[], code: string): void => {
+  if (Object.keys(value).length !== keys.length || keys.some((key) => !Object.hasOwn(value, key))) {
+    throw new Error(code);
+  }
+};
+
+const requireCanonicalId = (value: unknown, code: string): string => {
+  if (typeof value !== 'string' || !/^0x[0-9a-f]{64}$/.test(value)) throw new Error(code);
+  return value;
+};
+
+const requireOfferId = (value: unknown, code: string): string => {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 256 || value.trim() !== value) throw new Error(code);
+  return value;
+};
+
+const requireHistoryCursor = (value: unknown, code: string): string | null => {
+  if (value === null) return null;
+  if (typeof value !== 'string' || value.length === 0 || value.length > 1024) throw new Error(code);
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(decodeURIComponent(value));
+  } catch {
+    throw new Error(code);
+  }
+  if (!Array.isArray(decoded) || decoded.length !== 2) throw new Error(code);
+  if (requireUint(decoded[0], code) < 1) throw new Error(code);
+  requireOfferId(decoded[1], code);
+  return value;
+};
+
+const requireUint = (value: unknown, code: string, max = Number.MAX_SAFE_INTEGER): number => {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > max) throw new Error(code);
+  return value;
+};
+
+const requireBigInt = (value: unknown, code: string): bigint => {
+  if (typeof value !== 'bigint' || value < 0n) throw new Error(code);
+  return value;
+};
+
+const decodeResolveRecord = (value: unknown, index: number): ResolveRecord => {
+  const record = requireRecord(value, `SWAP_HISTORY_RESOLVE_INVALID:${index}`);
+  requireExactKeys(record, [
+    'fillRatio', 'cancelRemainder', 'height', 'executionGiveAmount', 'executionWantAmount', 'feeTokenId', 'feeAmount', 'comment',
+  ], `SWAP_HISTORY_RESOLVE_FIELDS_INVALID:${index}`);
+  const executionGiveAmount = record['executionGiveAmount'];
+  const executionWantAmount = record['executionWantAmount'];
+  const feeTokenId = record['feeTokenId'];
+  const feeAmount = record['feeAmount'];
+  if (typeof record['cancelRemainder'] !== 'boolean' || typeof record['comment'] !== 'string') {
+    throw new Error(`SWAP_HISTORY_RESOLVE_VALUE_INVALID:${index}`);
+  }
+  return {
+    fillRatio: requireUint(record['fillRatio'], `SWAP_HISTORY_RESOLVE_RATIO_INVALID:${index}`, 65535),
+    cancelRemainder: record['cancelRemainder'],
+    height: requireUint(record['height'], `SWAP_HISTORY_RESOLVE_HEIGHT_INVALID:${index}`),
+    executionGiveAmount: executionGiveAmount === null ? null : requireBigInt(executionGiveAmount, `SWAP_HISTORY_RESOLVE_GIVE_INVALID:${index}`),
+    executionWantAmount: executionWantAmount === null ? null : requireBigInt(executionWantAmount, `SWAP_HISTORY_RESOLVE_WANT_INVALID:${index}`),
+    feeTokenId: feeTokenId === null ? null : requireUint(feeTokenId, `SWAP_HISTORY_RESOLVE_FEE_TOKEN_INVALID:${index}`, 0xffffffff),
+    feeAmount: feeAmount === null ? null : requireBigInt(feeAmount, `SWAP_HISTORY_RESOLVE_FEE_INVALID:${index}`),
+    comment: record['comment'],
+  };
+};
+
+const decodeLifecycle = (value: unknown, index: number): SwapHistoryLifecycle => {
+  const record = requireRecord(value, `SWAP_HISTORY_ITEM_INVALID:${index}`);
+  requireExactKeys(record, [
+    'offerId', 'giveTokenId', 'wantTokenId', 'originalGiveAmount', 'originalWantAmount', 'liveGiveAmount', 'liveWantAmount',
+    'priceTicks', 'createdHeight', 'lastUpdatedHeight', 'cancelRequested', 'closed', 'resolves',
+  ], `SWAP_HISTORY_ITEM_FIELDS_INVALID:${index}`);
+  if (typeof record['cancelRequested'] !== 'boolean' || typeof record['closed'] !== 'boolean' || !Array.isArray(record['resolves'])) {
+    throw new Error(`SWAP_HISTORY_ITEM_VALUE_INVALID:${index}`);
+  }
+  return {
+    offerId: requireOfferId(record['offerId'], `SWAP_HISTORY_OFFER_ID_INVALID:${index}`),
+    giveTokenId: requireUint(record['giveTokenId'], `SWAP_HISTORY_GIVE_TOKEN_INVALID:${index}`, 0xffffffff),
+    wantTokenId: requireUint(record['wantTokenId'], `SWAP_HISTORY_WANT_TOKEN_INVALID:${index}`, 0xffffffff),
+    originalGiveAmount: requireBigInt(record['originalGiveAmount'], `SWAP_HISTORY_ORIGINAL_GIVE_INVALID:${index}`),
+    originalWantAmount: requireBigInt(record['originalWantAmount'], `SWAP_HISTORY_ORIGINAL_WANT_INVALID:${index}`),
+    liveGiveAmount: record['liveGiveAmount'] === null ? null : requireBigInt(record['liveGiveAmount'], `SWAP_HISTORY_LIVE_GIVE_INVALID:${index}`),
+    liveWantAmount: record['liveWantAmount'] === null ? null : requireBigInt(record['liveWantAmount'], `SWAP_HISTORY_LIVE_WANT_INVALID:${index}`),
+    priceTicks: requireBigInt(record['priceTicks'], `SWAP_HISTORY_PRICE_INVALID:${index}`),
+    createdHeight: requireUint(record['createdHeight'], `SWAP_HISTORY_CREATED_HEIGHT_INVALID:${index}`),
+    lastUpdatedHeight: requireUint(record['lastUpdatedHeight'], `SWAP_HISTORY_LAST_UPDATED_HEIGHT_INVALID:${index}`),
+    cancelRequested: record['cancelRequested'],
+    closed: record['closed'],
+    resolves: record['resolves'].map((resolve, resolveIndex) => decodeResolveRecord(resolve, resolveIndex)),
+  };
+};
+
+/** Exact browser boundary for the certified, paged Account-frame history API. */
+export const decodeSwapHistoryPage = (value: unknown): SwapHistoryPage => {
+  const page = requireRecord(value, 'SWAP_HISTORY_PAGE_INVALID');
+  requireExactKeys(page, ['entityId', 'accountId', 'latestHeight', 'items', 'nextCursor'], 'SWAP_HISTORY_PAGE_FIELDS_INVALID');
+  if (!Array.isArray(page['items'])) {
+    throw new Error('SWAP_HISTORY_PAGE_VALUE_INVALID');
+  }
+  return {
+    entityId: requireCanonicalId(page['entityId'], 'SWAP_HISTORY_ENTITY_ID_INVALID'),
+    accountId: requireCanonicalId(page['accountId'], 'SWAP_HISTORY_ACCOUNT_ID_INVALID'),
+    latestHeight: requireUint(page['latestHeight'], 'SWAP_HISTORY_LATEST_HEIGHT_INVALID'),
+    items: page['items'].map((item, index) => decodeLifecycle(item, index)),
+    nextCursor: requireHistoryCursor(page['nextCursor'], 'SWAP_HISTORY_PAGE_CURSOR_INVALID'),
+  };
+};
 
 export function offerLifecycleKey(accountId: string, offerId: string): string {
   return `${String(accountId || '').trim()}:${String(offerId || '').trim()}`;
@@ -253,81 +393,22 @@ export function computeOfferExecutionSummary(
   };
 }
 
-export function collectOfferLifecyclesFrom(
-  accountMachines: Array<{ accountId: string; account: AccountOrderHistory }>,
-  selectSource: (account: AccountOrderHistory) => Map<string, unknown> | undefined,
-  computeSwapPriceTicks: ComputeSwapPriceTicks,
-): OfferLifecycle[] {
-  const lifecycles: OfferLifecycle[] = [];
-  for (const { accountId, account } of accountMachines) {
-    const source = selectSource(account);
-    if (!(source instanceof Map)) continue;
-    for (const [offerId, rawEntry] of source.entries()) {
-      if (!rawEntry || typeof rawEntry !== 'object') continue;
-      const entry = rawEntry as {
-        giveTokenId?: unknown;
-        wantTokenId?: unknown;
-        giveAmount?: unknown;
-        originalGiveAmount?: unknown;
-        wantAmount?: unknown;
-        originalWantAmount?: unknown;
-        priceTicks?: unknown;
-        createdHeight?: unknown;
-        cancelRequested?: unknown;
-        resolves?: unknown;
-      };
-      const giveTokenId = Number(entry.giveTokenId || 0);
-      const wantTokenId = Number(entry.wantTokenId || 0);
-      const liveGiveAmount = toBigIntSafe(entry.giveAmount) ?? 0n;
-      const liveWantAmount = toBigIntSafe(entry.wantAmount) ?? 0n;
-      const originalGiveAmount = toBigIntSafe(entry.originalGiveAmount);
-      const originalWantAmount = toBigIntSafe(entry.originalWantAmount);
-      const giveAmount = originalGiveAmount && originalGiveAmount > 0n ? originalGiveAmount : liveGiveAmount;
-      const wantAmount = originalWantAmount && originalWantAmount > 0n ? originalWantAmount : liveWantAmount;
-      if (!Number.isFinite(giveTokenId) || !Number.isFinite(wantTokenId) || giveTokenId <= 0 || wantTokenId <= 0) continue;
-      if (giveAmount <= 0n || wantAmount <= 0n) continue;
-      const priceTicks = toBigIntSafe(entry.priceTicks) ?? computeSwapPriceTicks(giveTokenId, wantTokenId, giveAmount, wantAmount);
-      const resolves = Array.isArray(entry.resolves)
-        ? entry.resolves.map((resolve) => {
-            const rawResolve = resolve as {
-              fillRatio?: unknown;
-              cancelRemainder?: unknown;
-              height?: unknown;
-              executionGiveAmount?: unknown;
-              executionWantAmount?: unknown;
-              feeTokenId?: unknown;
-              feeAmount?: unknown;
-              comment?: unknown;
-            };
-            const feeTokenId = Number(rawResolve.feeTokenId);
-            return {
-              fillRatio: Number.isFinite(Number(rawResolve.fillRatio)) ? Number(rawResolve.fillRatio) : 0,
-              cancelRemainder: Boolean(rawResolve.cancelRemainder),
-              height: Number.isFinite(Number(rawResolve.height)) ? Number(rawResolve.height) : 0,
-              executionGiveAmount: toBigIntSafe(rawResolve.executionGiveAmount),
-              executionWantAmount: toBigIntSafe(rawResolve.executionWantAmount),
-              feeTokenId: Number.isFinite(feeTokenId) ? feeTokenId : null,
-              feeAmount: toBigIntSafe(rawResolve.feeAmount),
-              comment: typeof rawResolve.comment === 'string' ? rawResolve.comment : '',
-            } satisfies ResolveRecord;
-          })
-        : [];
-      lifecycles.push({
-        key: offerLifecycleKey(accountId, String(offerId || '')),
-        offerId: String(offerId || ''),
-        accountId,
-        giveTokenId,
-        wantTokenId,
-        giveAmount,
-        wantAmount,
-        priceTicks,
-        createdAt: Number(entry.createdHeight || 0),
-        resolves,
-        cancelRequested: Boolean(entry.cancelRequested),
-      });
-    }
-  }
-  return lifecycles;
+export function historyPageToOfferLifecycles(page: SwapHistoryPage): OfferLifecycle[] {
+  return page.items.map((item) => ({
+    key: offerLifecycleKey(page.accountId, item.offerId),
+    offerId: item.offerId,
+    accountId: page.accountId,
+    giveTokenId: item.giveTokenId,
+    wantTokenId: item.wantTokenId,
+    giveAmount: item.originalGiveAmount,
+    wantAmount: item.originalWantAmount,
+    priceTicks: item.priceTicks,
+    createdAt: item.createdHeight,
+    lastUpdatedAt: item.lastUpdatedHeight,
+    closed: item.closed,
+    resolves: [...item.resolves],
+    cancelRequested: item.cancelRequested,
+  }));
 }
 
 export function classifyClosedStatus(
@@ -401,8 +482,7 @@ export function buildClosedOrderViews(
       const filledPercent = filledPpm >= deps.filledDisplayPpmThreshold
         ? 100
         : Number((filledPpm * 10_000n) / 1_000_000n) / 100;
-      const resolves = Array.isArray(offer.resolves) ? offer.resolves : [];
-      const latestResolveTs = resolves.length > 0 ? resolves[resolves.length - 1]!.height : offer.createdAt;
+      const latestResolveTs = offer.lastUpdatedAt;
       const closeComment = latestResolveComment(offer);
       return {
         offerId: offer.offerId,

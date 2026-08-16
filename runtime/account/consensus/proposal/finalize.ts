@@ -1,8 +1,11 @@
 import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../../../types/account';
 import { cloneAccountFrame } from '../../state/state-clone';
 import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
-import { cloneIsolatedAccountInput } from '../../../protocol/state/account-input-clone';
-import { stageAccountCommitmentCache } from '../../commitment/map-commitment';
+import {
+  cloneIsolatedAccountInput,
+  copyAccountDisputeConfig,
+  copyAccountStateDomain,
+} from '../../../protocol/state/account-input-clone';
 import type { AccountConsensusHashToSign, ProposeAccountFrameResult } from '../types';
 import { proposeAccountFrameProposed } from '../result';
 import type {
@@ -68,8 +71,8 @@ const buildOutboundAccountInput = (
   const shared = {
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
-    domain: structuredClone(account.state.domain),
-    disputeConfig: structuredClone(account.state.disputeConfig),
+    domain: copyAccountStateDomain(account.state.domain),
+    disputeConfig: copyAccountDisputeConfig(account.state.disputeConfig),
     watchSeed: account.state.watchSeed,
     proposal,
   };
@@ -101,7 +104,6 @@ export const finalizeAccountProposal = (
   // Pending commitment and frame install are one Account-candidate mutation.
   // Late mempool arrivals survive because removal is by exact transaction
   // multiplicity, never by the proposal window's old array position.
-  stageAccountCommitmentCache(account.state, candidate.state);
   account.pendingFrame = frame;
   account.mempool = removeCommittedTxsFromMempool(
     account.mempool,

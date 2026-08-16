@@ -1,29 +1,9 @@
 import { cloneIsolatedEntityInput } from '../../entity/state/input-clone';
 import type { RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
-
-const cloneRuntimeTxValue = (value: unknown, active = new Set<object>()): unknown => {
-  if (value === null || typeof value !== 'object') return value;
-  if (active.has(value)) throw new Error('RUNTIME_INPUT_RUNTIME_TX_CYCLE');
-  active.add(value);
-  try {
-    if (Array.isArray(value)) return value.map(entry => cloneRuntimeTxValue(entry, active));
-    if (value instanceof Map) return new Map(Array.from(value, ([key, entry]) => [
-      cloneRuntimeTxValue(key, active),
-      cloneRuntimeTxValue(entry, active),
-    ]));
-    if (value instanceof Set) return new Set(Array.from(value, entry => cloneRuntimeTxValue(entry, active)));
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return structuredClone(value);
-    const cloned = Object.create(prototype) as Record<string, unknown>;
-    for (const [key, entry] of Object.entries(value)) cloned[key] = cloneRuntimeTxValue(entry, active);
-    return cloned;
-  } finally {
-    active.delete(value);
-  }
-};
+import { cloneIsolatedProtocolValue } from '../../protocol/state/isolated-value-clone';
 
 const cloneIsolatedRuntimeTx = <T extends RuntimeTx>(tx: T): T =>
-  cloneRuntimeTxValue(tx) as T;
+  cloneIsolatedProtocolValue(tx, 'RUNTIME_INPUT_RUNTIME_TX_CLONE');
 
 export const cloneIsolatedRuntimeInput = (input: RuntimeInput): RuntimeInput => {
   if (!Array.isArray(input.runtimeTxs)) throw new Error('RUNTIME_INPUT_RUNTIME_TXS_INVALID');

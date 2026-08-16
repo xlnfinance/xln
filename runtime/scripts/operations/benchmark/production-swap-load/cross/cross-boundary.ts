@@ -7,7 +7,7 @@ import {
   requireExactBoundaryKeys,
 } from '../../../../../protocol/boundary-validation';
 import type { CrossJurisdictionSwapRoute } from '../../../../../types/cross-jurisdiction';
-import { decodeHubCoreRecord, type LoadFrame } from '../worker-boundary';
+import { decodeHubCoreRecord, type LoadFrame } from '../boundary/worker-boundary';
 
 export type CrossLoadReport = Readonly<{
   schema: 'xln-production-cross-swap-load-v1';

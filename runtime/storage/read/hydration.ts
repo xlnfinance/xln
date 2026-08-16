@@ -8,20 +8,26 @@ import { assertEntityAccountCountWithinLimit } from '../../entity/account/accoun
 import { assertConsumptionAccumulatorState } from '../../entity/consumption/consumption-accumulator';
 import { LIMITS } from '../../config/constants';
 import { assertJBatchWithinContractLimits } from '../../jurisdiction/machine/batch';
-import { cloneAccountReplica } from '../../account/state/state-clone';
+import { createStructuredLogger } from '../../infra/logger';
+
+const hydrationLog = createStructuredLogger('storage.hydration');
 import {
-  cloneStoredCrossJurisdictionBookAdmissions,
-  cloneStoredCrossJurisdictionRoutes,
-  cloneStoredPendingCrossJurisdictionFillAcks,
   withDefinedProperty,
 } from './entity-core-boundary';
+import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
+import { PersistentEntityCollectionMap } from '../../entity/state/persistent-collection-map';
 
 export const hydrateAccountDocFromStorage = (doc: StorageAccountDoc): AccountReplica => {
   assertAccountMempoolWithinLimit(doc, 'storage.account.mempool');
-  const account = cloneAccountReplica(doc, true);
-  account.state.leftPendingJClaims = assertAccountJClaimAccumulatorState(account.state.leftPendingJClaims);
-  account.state.rightPendingJClaims = assertAccountJClaimAccumulatorState(account.state.rightPendingJClaims);
-  return account;
+  doc.state.leftPendingJClaims = assertAccountJClaimAccumulatorState(doc.state.leftPendingJClaims);
+  doc.state.rightPendingJClaims = assertAccountJClaimAccumulatorState(doc.state.rightPendingJClaims);
+  hydrationLog.debug('account.ownership_transferred', {
+    from: doc.proofHeader.fromEntity,
+    to: doc.proofHeader.toEntity,
+    height: doc.currentHeight,
+  });
+  return doc;
 };
 
 export const hydrateEntityStateFromStorage = (options: {
@@ -88,15 +94,20 @@ export const hydrateEntityStateFromStorage = (options: {
     entityEncryptionPublicKey: core.entityEncryptionPublicKey,
     reserves: core.reserves,
     ...withDefinedProperty('externalWallet', core.externalWallet),
-    accounts: new Map(Array.from(accounts.entries()).map(([key, value]) => [key, hydrateAccountDocFromStorage(value)])),
+    accounts: PersistentEntityAccountMap.fromEntries(
+      (function* () {
+        for (const [key, value] of accounts) yield [key, hydrateAccountDocFromStorage(value)] as const;
+      })(),
+      core.entityId,
+      computeEntityAccountValueHash,
+    ),
     lastFinalizedJHeight: core.lastFinalizedJHeight,
-    jBlockChain: core.jBlockChain,
     ...withDefinedProperty('jHistoryFinality', core.jHistoryFinality),
     ...withDefinedProperty('certifiedBoardState', core.certifiedBoardState),
     profile: core.profile,
-    htlcRoutes: core.htlcRoutes,
+    htlcRoutes: PersistentEntityCollectionMap.from(core.htlcRoutes),
     htlcFeesEarned: core.htlcFeesEarned,
-    lockBook: core.lockBook,
+    lockBook: PersistentEntityCollectionMap.from(core.lockBook),
     ...withDefinedProperty('prevFrameHash', core.prevFrameHash),
     ...withDefinedProperty('leaderState', core.leaderState),
     ...withDefinedProperty('deferredAccountProposals', core.deferredAccountProposals),
@@ -110,10 +121,22 @@ export const hydrateEntityStateFromStorage = (options: {
     ...withDefinedProperty('inDebtsByToken', core.inDebtsByToken),
     ...withDefinedProperty('orderbookExt', orderbookExt),
     ...withDefinedProperty('swapTradingPairs', core.swapTradingPairs),
-    ...withDefinedProperty('crossJurisdictionSwaps', cloneStoredCrossJurisdictionRoutes(core.crossJurisdictionSwaps)),
-    ...withDefinedProperty('crossJurisdictionAuthorizations', cloneStoredCrossJurisdictionRoutes(core.crossJurisdictionAuthorizations)),
-    ...withDefinedProperty('pendingCrossJurisdictionFillAcks', cloneStoredPendingCrossJurisdictionFillAcks(core.pendingCrossJurisdictionFillAcks)),
-    ...withDefinedProperty('crossJurisdictionBookAdmissions', cloneStoredCrossJurisdictionBookAdmissions(core.crossJurisdictionBookAdmissions)),
+    ...withDefinedProperty(
+      'crossJurisdictionSwaps',
+      core.crossJurisdictionSwaps && PersistentEntityCollectionMap.from(core.crossJurisdictionSwaps),
+    ),
+    ...withDefinedProperty(
+      'crossJurisdictionAuthorizations',
+      core.crossJurisdictionAuthorizations && PersistentEntityCollectionMap.from(core.crossJurisdictionAuthorizations),
+    ),
+    ...withDefinedProperty(
+      'pendingCrossJurisdictionFillAcks',
+      core.pendingCrossJurisdictionFillAcks && PersistentEntityCollectionMap.from(core.pendingCrossJurisdictionFillAcks),
+    ),
+    ...withDefinedProperty(
+      'crossJurisdictionBookAdmissions',
+      core.crossJurisdictionBookAdmissions && PersistentEntityCollectionMap.from(core.crossJurisdictionBookAdmissions),
+    ),
     ...withDefinedProperty('hubRebalanceConfig', core.hubRebalanceConfig),
     ...withDefinedProperty('lending', core.lending),
   };

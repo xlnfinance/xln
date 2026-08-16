@@ -23,6 +23,9 @@ import {
   createJurisdictionGossipAnnouncement,
   decodeJurisdictionGossipAnnouncement,
 } from '../../jurisdiction/gossip/announcement';
+import { createEntityProposalFixture } from '../helpers/entity-proposal-fixture';
+import { getLocalRuntimeSignerIds } from '../../runtime/loop/loop-identity';
+import { registerSignerKey } from '../../account/crypto';
 
 const signer = new Wallet(`0x${'11'.repeat(32)}`).address;
 const foundation = new Wallet(`0x${'22'.repeat(32)}`).address;
@@ -162,6 +165,22 @@ describe('Stack Manager exact boundaries', () => {
 
   test('keeps arbitrary-RPC status behind operator authority', () => {
     expect(requiresLocalNodeOperator(new URL('http://localhost/api/stack-manager/status'))).toBeTrue();
+  });
+
+  test('lists only signer EOAs whose keys belong to this Runtime', () => {
+    const fixture = createEntityProposalFixture('stack-manager-runtime-signer-inventory');
+    const local = fixture.createValidator('1');
+    const remote = fixture.createValidator('2');
+    local.env.state.eReplicas.set(`${fixture.entityId}:${local.signerId}`, local.replica);
+    local.env.state.eReplicas.set(`${fixture.entityId}:${remote.signerId}`, remote.replica);
+
+    expect(getLocalRuntimeSignerIds(local.env)).toEqual([local.signerId]);
+
+    const ownedPrivateKeyHex = `0x${'33'.repeat(32)}`;
+    const ownedPrivateKey = getBytes(ownedPrivateKeyHex);
+    const ownedSignerId = new Wallet(ownedPrivateKeyHex).address.toLowerCase();
+    registerSignerKey(local.env, ownedSignerId, ownedPrivateKey);
+    expect(getLocalRuntimeSignerIds(local.env)).toEqual([local.signerId, ownedSignerId].sort());
   });
 
   test('persists the complete verified manifest atomically and refuses replacement', async () => {

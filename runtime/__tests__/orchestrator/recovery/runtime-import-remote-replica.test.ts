@@ -128,7 +128,7 @@ describe('runtime remote replica import', () => {
 
     expect(env.state.eReplicas.has(`${importedEntityId}:${signerId}`)).toBe(false);
     expect([...env.state.eReplicas.values()].some(replica => replica.certifiedFrameAnchor !== undefined)).toBe(false);
-    expect([...env.state.eReplicas.values()].some(replica => replica.certifiedFrameLineage !== undefined)).toBe(false);
+    expect([...env.state.eReplicas.values()].some(replica => replica.certifiedFrameHead !== undefined)).toBe(false);
     expect(env.state.height).toBe(0);
     expect(env.state.timestamp).toBe(1_000);
     expect(env.runtimeMempool?.runtimeTxs).toEqual(runtimeInput.runtimeTxs);

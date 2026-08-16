@@ -59,7 +59,7 @@ The default model is `gemma3-27b-mlx`, configurable with:
 ```bash
 DEBATES_AI_SERVER_URL=http://127.0.0.1:3031
 DEBATES_AI_MODEL=gemma3-27b-mlx
-DEBATES_AI_FALLBACK=0
+DEBATES_AI_FAILOVER=0
 ```
 
-With fallback enabled, the app still completes the flow if the local model is unavailable. With `DEBATES_AI_FALLBACK=0`, judging fails hard unless the local model returns valid JSON.
+With failover enabled, the app still completes the flow if the local model is unavailable. With `DEBATES_AI_FAILOVER=0`, judging fails hard unless the local model returns valid JSON.

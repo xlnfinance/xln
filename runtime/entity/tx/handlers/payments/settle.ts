@@ -39,7 +39,7 @@ import {
   createSettlementWorkspaceHash,
   hasPendingSettlementTransition,
 } from '../../../../account/tx/handlers/settlement/transition';
-import { projectAccountAfterSettlement } from '../../../../account/settlement/settlement-projection';
+import { projectSettlementDeltaOverrides } from '../../../../account/settlement/settlement-projection';
 import { buildAccountProofBodyFromJurisdictions } from '../../../../account/consensus/helpers';
 
 import type { AccountReplica } from '../../../../types/account';
@@ -58,8 +58,12 @@ const buildPostSettlementDisputeProof = (
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction?.depositoryAddress) throw new Error('POST_SETTLEMENT_JURISDICTION_MISSING');
   const nonce = settlementNonce + 1;
-  const projected = projectAccountAfterSettlement(account, diffs, forgiveTokenIds);
-  const { proofBodyHash } = buildAccountProofBodyFromJurisdictions(env.state, projected);
+  const projectedDeltas = projectSettlementDeltaOverrides(account, diffs, forgiveTokenIds);
+  const { proofBodyHash } = buildAccountProofBodyFromJurisdictions(
+    env.state,
+    account,
+    projectedDeltas,
+  );
   const disputeHash = createDisputeProofHashWithNonce(
     account.state,
     proofBodyHash,

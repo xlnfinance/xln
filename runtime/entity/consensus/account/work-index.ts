@@ -1,223 +1,75 @@
 import type { EntityState } from '../../types';
-import type { AccountReplica } from '../../../types/account';
-import { deriveDelta } from '../../../account/utils';
-import { getDefaultRebalancePolicyForToken } from '../../../account/config/defaults';
-import { hasPendingSettlementTransition } from '../../../account/tx/handlers/settlement/transition';
-import { isLeftEntity } from '../../id';
+import {
+  ACCOUNT_WORK_PENDING,
+  ACCOUNT_WORK_QUEUED,
+  ACCOUNT_WORK_REBALANCE,
+  accountWorkMaskHas,
+  type AccountWorkFlag,
+} from '../../account/account-work-flags';
+import type { EntityAccountMap } from '../../state/persistent-account-map';
 import { accountHasProposableMempool } from './mempool-eligibility';
 
-const QUEUED_ACCOUNT_INDEX = Symbol('xln.entity.queued-account-index');
-const PENDING_ACCOUNT_INDEX = Symbol('xln.entity.pending-account-index');
-const REBALANCE_ACCOUNT_INDEX = Symbol('xln.entity.rebalance-account-index');
-
-type EntityStateWithQueuedAccountIndex = EntityState & {
-  [QUEUED_ACCOUNT_INDEX]?: Set<string>;
-  [PENDING_ACCOUNT_INDEX]?: Set<string>;
-  [REBALANCE_ACCOUNT_INDEX]?: Set<string>;
-};
-
-const readQueuedAccountIndex = (
-  state: EntityState,
-): Set<string> | undefined =>
-  (state as EntityStateWithQueuedAccountIndex)[QUEUED_ACCOUNT_INDEX];
-
-const writeQueuedAccountIndex = (
-  state: EntityState,
-  accountIds: Set<string>,
-): void => {
-  Object.defineProperty(state, QUEUED_ACCOUNT_INDEX, {
-    value: accountIds,
-    configurable: true,
-    writable: true,
-    enumerable: false,
-  });
-};
-
-const readPendingAccountIndex = (
-  state: EntityState,
-): Set<string> | undefined =>
-  (state as EntityStateWithQueuedAccountIndex)[PENDING_ACCOUNT_INDEX];
-
-const writePendingAccountIndex = (
-  state: EntityState,
-  accountIds: Set<string>,
-): void => {
-  Object.defineProperty(state, PENDING_ACCOUNT_INDEX, {
-    value: accountIds,
-    configurable: true,
-    writable: true,
-    enumerable: false,
-  });
-};
-
-const readRebalanceAccountIndex = (
-  state: EntityState,
-): Set<string> | undefined =>
-  (state as EntityStateWithQueuedAccountIndex)[REBALANCE_ACCOUNT_INDEX];
-
-const writeRebalanceAccountIndex = (
-  state: EntityState,
-  accountIds: Set<string>,
-): void => {
-  Object.defineProperty(state, REBALANCE_ACCOUNT_INDEX, {
-    value: accountIds,
-    configurable: true,
-    writable: true,
-    enumerable: false,
-  });
-};
-
-const accountHasRebalanceWork = (
-  state: EntityState,
-  counterpartyId: string,
-  account: AccountReplica,
-): boolean => {
-  if ([...account.state.requestedRebalance.values()].some(amount => amount > 0n)) {
-    return true;
-  }
-  if (account.pendingFrame || hasPendingSettlementTransition(account)) {
-    return false;
-  }
-  const workspace = account.state.settlementWorkspace;
-  const hubIsLeft = isLeftEntity(state.entityId, counterpartyId);
-  if (workspace) {
-    return workspace.status === 'ready_to_submit' &&
-      workspace.lastModifiedByLeft === hubIsLeft &&
-      workspace.executorIsLeft === hubIsLeft &&
-      workspace.ops.length > 0 &&
-      workspace.ops.every(op => op.type === 'c2r') &&
-      Boolean(hubIsLeft ? workspace.rightHanko : workspace.leftHanko);
-  }
-  for (const [tokenId, delta] of account.state.deltas) {
-    if ((account.state.requestedRebalance.get(tokenId) ?? 0n) > 0n) continue;
-    const derived = deriveDelta(delta, hubIsLeft);
-    if (
-      derived.outCollateral - derived.outTotalHold >
-      getDefaultRebalancePolicyForToken(tokenId).r2cRequestSoftLimit
-    ) {
-      return true;
-    }
-  }
-  return false;
-};
-
-const buildQueuedAccountIndex = (state: EntityState): Set<string> => {
-  const accountIds = new Set<string>();
-  for (const [accountId, account] of state.accounts) {
-    if (account.mempool.length > 0) accountIds.add(accountId);
-  }
-  writeQueuedAccountIndex(state, accountIds);
-  return accountIds;
-};
-
-const buildPendingAccountIndex = (state: EntityState): Set<string> => {
-  const accountIds = new Set<string>();
-  for (const [accountId, account] of state.accounts) {
-    if (account.pendingFrame) accountIds.add(accountId);
-  }
-  writePendingAccountIndex(state, accountIds);
-  return accountIds;
-};
-
-const buildRebalanceAccountIndex = (state: EntityState): Set<string> => {
-  const accountIds = new Set<string>();
-  for (const [accountId, account] of state.accounts) {
-    if (accountHasRebalanceWork(state, accountId, account)) {
-      accountIds.add(accountId);
-    }
-  }
-  writeRebalanceAccountIndex(state, accountIds);
-  return accountIds;
-};
-
 /**
- * Returns only Accounts with durable queued transactions. Eligibility still
- * runs against each candidate because settlement/Hanko state can temporarily
- * freeze a non-empty queue without changing its membership.
- */
-export const getQueuedAccountIds = (
-  state: EntityState,
-): ReadonlySet<string> =>
-  readQueuedAccountIndex(state) ?? buildQueuedAccountIndex(state);
-
-export const getPendingAccountIds = (
-  state: EntityState,
-): ReadonlySet<string> =>
-  readPendingAccountIndex(state) ?? buildPendingAccountIndex(state);
-
-/**
- * O(1) after the indexes' first lazy build.
+ * Allocation-free Set view over the Account Patricia map's derived work index.
  *
- * `pendingAccountInput` needs no separate index: Account validation requires
- * it to exist exactly when `pendingFrame` exists. Duplicating that fact would
- * add a second cache that can drift.
+ * The old implementation attached mutable Symbol caches to EntityState. Those
+ * caches were absent after recovery, so live and replay could schedule
+ * different Account proposals from identical committed bytes. Work membership
+ * now changes atomically with the Account leaf and recovery rebuilds it from
+ * the same leaves; this view is never an independent authority.
  */
-export const hasQueuedOrPendingAccountWork = (
-  state: EntityState,
-): boolean =>
-  getQueuedAccountIds(state).size > 0 ||
-  getPendingAccountIds(state).size > 0;
+type AccountWorkIdSet = Readonly<{
+  size: number;
+  has(accountId: string): boolean;
+  [Symbol.iterator](): IterableIterator<string>;
+}>;
 
-export const getRebalanceAccountIds = (
-  state: EntityState,
-): ReadonlySet<string> =>
-  readRebalanceAccountIndex(state) ?? buildRebalanceAccountIndex(state);
+class AccountWorkSetView implements AccountWorkIdSet {
+  constructor(
+    private readonly accounts: EntityAccountMap,
+    private readonly flag: AccountWorkFlag,
+  ) {}
 
-export const refreshAccountWorkIndex = (
-  state: EntityState,
-  rawAccountId: string,
-): void => {
-  const accountId = rawAccountId.trim().toLowerCase();
-  const account = state.accounts.get(accountId);
-  const queued = readQueuedAccountIndex(state);
-  if (queued) {
-    if (account && account.mempool.length > 0) queued.add(accountId);
-    else queued.delete(accountId);
+  get size(): number {
+    return this.accounts.workCount(this.flag);
   }
-  const pending = readPendingAccountIndex(state);
-  if (pending) {
-    if (account?.pendingFrame) pending.add(accountId);
-    else pending.delete(accountId);
-  }
-  const rebalance = readRebalanceAccountIndex(state);
-  if (rebalance) {
-    if (account && accountHasRebalanceWork(state, accountId, account)) {
-      rebalance.add(accountId);
-    } else {
-      rebalance.delete(accountId);
-    }
-  }
-};
 
-export const forkAccountWorkIndexes = (
-  source: EntityState,
-  target: EntityState,
-): void => {
-  const queued = readQueuedAccountIndex(source);
-  if (queued) writeQueuedAccountIndex(target, new Set(queued));
-  const pending = readPendingAccountIndex(source);
-  if (pending) writePendingAccountIndex(target, new Set(pending));
-  const rebalance = readRebalanceAccountIndex(source);
-  if (rebalance) writeRebalanceAccountIndex(target, new Set(rebalance));
-};
+  has(accountId: string): boolean {
+    return accountWorkMaskHas(this.accounts.workMask(accountId), this.flag);
+  }
 
-export const getProposableAccountIds = (
-  state: EntityState,
-): string[] => {
+  [Symbol.iterator](): IterableIterator<string> {
+    return this.accounts.workKeys(this.flag);
+  }
+}
+
+const workSet = (state: EntityState, flag: AccountWorkFlag): AccountWorkIdSet =>
+  new AccountWorkSetView(state.accounts, flag);
+
+export const getQueuedAccountIds = (state: EntityState): AccountWorkIdSet =>
+  workSet(state, ACCOUNT_WORK_QUEUED);
+
+export const getPendingAccountIds = (state: EntityState): AccountWorkIdSet =>
+  workSet(state, ACCOUNT_WORK_PENDING);
+
+export const getRebalanceAccountIds = (state: EntityState): AccountWorkIdSet =>
+  workSet(state, ACCOUNT_WORK_REBALANCE);
+
+export const hasQueuedOrPendingAccountWork = (state: EntityState): boolean =>
+  state.accounts.workCount(ACCOUNT_WORK_QUEUED) > 0 ||
+  state.accounts.workCount(ACCOUNT_WORK_PENDING) > 0;
+
+export const getProposableAccountIds = (state: EntityState): string[] => {
   const accountIds: string[] = [];
-  for (const accountId of getQueuedAccountIds(state)) {
+  for (const accountId of state.accounts.workKeys(ACCOUNT_WORK_QUEUED)) {
     const account = state.accounts.get(accountId);
-    if (account && accountHasProposableMempool(account, state)) {
-      accountIds.push(accountId);
-    }
+    if (account && accountHasProposableMempool(account, state)) accountIds.push(accountId);
   }
   return accountIds;
 };
 
-export const hasProposableAccount = (
-  state: EntityState,
-): boolean => {
-  for (const accountId of getQueuedAccountIds(state)) {
+export const hasProposableAccount = (state: EntityState): boolean => {
+  for (const accountId of state.accounts.workKeys(ACCOUNT_WORK_QUEUED)) {
     const account = state.accounts.get(accountId);
     if (account && accountHasProposableMempool(account, state)) return true;
   }

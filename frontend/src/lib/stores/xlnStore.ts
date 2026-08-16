@@ -31,10 +31,7 @@ import {
   isRuntimeCommandJournalUnlocked,
   signRuntimeAdapterOwnerBinding,
 } from './commands/runtimeCommandJournalKeyring';
-import {
-  findCommittedEmbeddedRuntimeInputHeight,
-  findPersistedEmbeddedRuntimeInputHeight,
-} from './commands/embeddedRuntimeCommandCompletion';
+import { findPersistedEmbeddedRuntimeInputHeight } from './commands/embeddedRuntimeCommandCompletion';
 import {
   REMOTE_HISTORY_SCAN_CACHE_LIMIT,
   ensureRuntimeHistoryContext,
@@ -389,7 +386,9 @@ const updateLocalEnvironmentStores = (xln: XLNModule, env: RuntimeReplica): void
   }
 
   setXlnEnvironment(env);
-  history.set(env.history);
+  // RuntimeReplica has no resident timeline. Timeline playback is populated
+  // only by an explicit browser trace or persisted history query.
+  history.set([]);
   currentHeight.set(env.state.height);
   if (envRuntimeId) {
     upsertRuntimeSnapshot(env, { mode: 'embedded', runtimeId: envRuntimeId }, 'connected');
@@ -1348,8 +1347,6 @@ const drainLocalRuntimeInput = async (
 ): Promise<number> => {
   const startedAt = Date.now();
   for (let i = 0; i < 80; i += 1) {
-    const committedHeight = findCommittedEmbeddedRuntimeInputHeight(env.history ?? [], input, afterHeight);
-    if (committedHeight !== null) return committedHeight;
     const persistedHeight = await findPersistedEmbeddedRuntimeInputHeight(
       (height) => xln.readPersistedStorageFrameRecord(env, height),
       input,

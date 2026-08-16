@@ -77,10 +77,12 @@ export function requireAccountDeltaTransformerAddress(
 export const buildAccountProofBodyFromJurisdictions = (
   jurisdictions: AccountJurisdictionView,
   account: AccountReplica,
+  deltaOverrides?: ReadonlyMap<number, Delta>,
 ) =>
   buildAccountProofBody(
     account,
     requireAccountDeltaTransformerAddress(jurisdictions, account.state),
+    deltaOverrides,
   );
 
 export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {

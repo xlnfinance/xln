@@ -2,7 +2,7 @@ import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
 
 import { ethers } from 'ethers';
 import { isLeftEntity } from '../../entity/id';
-import type { AccountFrame, AccountInput, AccountTx, SwapOffer, SwapOrderHistoryEntry } from '../../types/account';
+import type { AccountFrame, AccountInput, AccountTx, SwapOffer } from '../../types/account';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionCloseProof, CrossJurisdictionRouteDomain, CrossJurisdictionSettlementPolicy, CrossJurisdictionPendingFill, CrossJurisdictionPullBinding, CrossJurisdictionPullLeg, CrossJurisdictionSwapLeg, CrossJurisdictionSwapRoute, CrossJurisdictionSwapStatus, CrossJurisdictionTimePolicy } from '../../types/cross-jurisdiction';
 import type { RuntimeReplica } from '../../runtime/types';
 import {
@@ -1158,11 +1158,6 @@ function cloneCrossJurisdictionCarrierRoute<T extends { crossJurisdiction?: Cros
 
 export const cloneCrossJurisdictionSwapOfferRoute = (offer: SwapOffer): SwapOffer =>
   cloneCrossJurisdictionCarrierRoute({ ...offer });
-
-export const cloneCrossJurisdictionSwapHistoryRoute = (entry: SwapOrderHistoryEntry): SwapOrderHistoryEntry => ({
-  ...cloneCrossJurisdictionCarrierRoute({ ...entry }),
-  resolves: entry.resolves.map(resolve => ({ ...resolve })),
-});
 
 export function cloneCrossJurisdictionAccountTxRoute(tx: AccountTx): AccountTx {
   if (tx.type === 'cross_pull_lock' && tx.data.crossJurisdiction) {

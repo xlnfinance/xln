@@ -112,7 +112,6 @@ const prefixState = (validators: string[]): EntityState => ({
   reserves: new Map(),
   accounts: new Map(),
   lastFinalizedJHeight: 10,
-  jBlockChain: [],
   jHistoryFinality: {
     jurisdictionRef: `stack:31337:0x${'44'.repeat(20)}`,
     baseHeight: 0,

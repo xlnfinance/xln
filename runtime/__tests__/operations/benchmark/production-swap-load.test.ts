@@ -12,25 +12,57 @@ import {
 } from '../../../scripts/operations/benchmark/production-swap-load/metrics';
 import { decodeProductionSwapLoadTopology } from '../../../scripts/operations/benchmark/production-swap-load/topology';
 import {
+  decodeAccountPage,
   decodeLoadBurstReport,
   decodeHubMinTradeSize,
   selectLocalHubIdentity,
-} from '../../../scripts/operations/benchmark/production-swap-load/worker-boundary';
+} from '../../../scripts/operations/benchmark/production-swap-load/boundary/worker-boundary';
 import {
   decodeLoadBookPage,
   deriveExecutableBidForAsk,
   deriveMinimumLotAlignedBaseAmount,
-} from '../../../scripts/operations/benchmark/production-swap-load/worker-book-boundary';
+} from '../../../scripts/operations/benchmark/production-swap-load/boundary/worker-book-boundary';
 import {
+  assertProductionSwapFullySettled,
+  decodeProductionSwapSettlementEvidence,
+} from '../../../scripts/operations/benchmark/production-swap-load/settlement';
+import {
+  applyCommand,
   computeSwapPriceTicksForDimensions,
+  createBook,
   getStaticSwapTokenDimensions,
   getSwapLotScale,
+  getSwapExactQuoteLotMultipleAtPriceForDimensions,
+  quoteAmountFromWeightedLotsForDecimals,
   quoteAmountAtPrice,
 } from '../../../orderbook';
+import { projectBookPricePageTree } from '../../../orderbook/pages/page';
 import {
   assertSwapNetAuthorization,
   deriveSwapNetAuthorization,
 } from '../../../account/swap/swap-net-authorization';
+import { prepareSwapOfferAmounts } from '../../../account/tx/handlers/swap/offer/quantization';
+import { parseWorkerArgs } from '../../../scripts/operations/benchmark/production-swap-load/worker-runtime';
+import {
+  connectedRuntimeHttpBase,
+  deriveLoadLaneIdentities,
+  distributeLoadOrders,
+  runtimeHttpBaseFromWsUrl,
+} from '../../../scripts/operations/benchmark/production-swap-load/same/worker-lanes';
+import {
+  buildIndependentMakerTakerPlan,
+  buildParallelLaneOfferPlan,
+} from '../../../scripts/operations/benchmark/production-swap-load/same/worker-same-plan';
+import {
+  deriveSameOrderbookPriceBandBounds,
+  evaluateSameOrderbookPriceBand,
+} from '../../../entity/tx/handlers/account/orderbook/helpers';
+import { getSwapPairPolicyByBaseQuote } from '../../../account/utils';
+import { admitOrderbookAccountTxBatch } from '../../../entity/consensus/account/orderbook-account-admission';
+import { makeAccount as makeCanonicalAccount } from '../../helpers/cross-j';
+import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
+import { createEmptyEnv } from '../../../runtime';
+import type { AccountTx } from '../../../types/account';
 
 const root = (byte: string): string => `0x${byte.repeat(64)}`;
 const histogram = (...counts: Array<readonly [number, number]>): number[] => {
@@ -65,6 +97,151 @@ const observation = (overrides: Record<string, unknown> = {}) => decodeProductio
 });
 
 describe('production swap load evidence', () => {
+  test('matcher settlements enter one Account lane atomically', async () => {
+    const account = makeCanonicalAccount(`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`);
+    const txs: AccountTx[] = Array.from({ length: 5 }, (_, index) => ({
+      type: 'swap_resolve',
+      data: { offerId: `offer-${index}`, fillRatio: 65_535, cancelRemainder: true },
+    }));
+    await admitOrderbookAccountTxBatch(
+      createAccountConsensusContext(createEmptyEnv('orderbook-account-batch')),
+      account,
+      account.state.leftEntity,
+      txs,
+    );
+    expect(account.mempool).toEqual(txs);
+    await expect(admitOrderbookAccountTxBatch(
+      createAccountConsensusContext(createEmptyEnv('orderbook-account-batch-duplicate')),
+      account,
+      account.state.leftEntity,
+      txs,
+    )).rejects.toThrow('ORDERBOOK_ACCOUNT_TX_ADMISSION_FAILED');
+    expect(account.mempool).toEqual(txs);
+  });
+
+  test('compact Account view decodes consumed state without minting a full replica', () => {
+    const leftEntity = `0x${'11'.repeat(32)}`;
+    const rightEntity = `0x${'22'.repeat(32)}`;
+    const delta = {
+      tokenId: 1, collateral: 0n, ondelta: 0n, offdelta: 0n,
+      leftCreditLimit: 10n, rightCreditLimit: 20n,
+      leftAllowance: 0n, rightAllowance: 0n, leftHold: 0n, rightHold: 0n,
+    };
+    const pendingFrame = {
+      height: 1, timestamp: 1, jHeight: 0, accountTxs: [], prevFrameHash: 'genesis',
+      accountStateRoot: root('a'), stateHash: root('b'), byLeft: true, deltas: [],
+    };
+    const item = {
+      state: {
+        leftEntity, rightEntity, domain: {}, watchSeed: '', deltas: new Map([[1, delta]]),
+        locks: new Map(), swapOffers: new Map(), leftPendingJClaims: {}, rightPendingJClaims: {},
+        lastFinalizedJHeight: 0, disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 20 },
+        jNonce: 0, requestedRebalance: new Map(), requestedRebalanceFeeState: new Map(),
+      },
+      status: 'active', mempool: [], currentFrame: {}, currentHeight: 0,
+      pendingSignatures: [], rollbackCount: 0, proofHeader: {}, proofBody: {},
+      pendingWithdrawals: new Map(), shadow: {},
+      pendingFrame,
+    };
+    const page = {
+      items: [item], nextCursor: null, prevCursor: null, firstCursor: rightEntity,
+      lastCursor: rightEntity, pageIndex: 0, pageCount: 1, totalItems: 1, limit: 1,
+    };
+    const decoded = decodeAccountPage(page);
+    expect(decoded?.state.deltas.get(1)?.rightCreditLimit).toBe(20n);
+    expect(decoded?.state.disputeConfig).toEqual({ leftResponseSeconds: 10, rightResponseSeconds: 20 });
+    expect(() => decodeAccountPage({
+      ...page,
+      items: [{ ...item, pendingFrame: { ...pendingFrame, extra: true } }],
+    })).toThrow('production-swap-load account.pendingFrame.fields');
+  });
+
+  test('same-j load enforces at most five orders per independent Account lane', () => {
+    const args = parseWorkerArgs([
+      '--work-dir', '/tmp/load', '--port-base', '20000', '--mode', 'same',
+      '--swaps', '160', '--lanes', '32',
+    ]);
+    expect(args.lanes).toBe(32);
+    expect(args.swaps).toBe(160);
+    expect(() => parseWorkerArgs([
+      '--work-dir', '/tmp/load', '--port-base', '20000', '--mode', 'same',
+      '--swaps', '161', '--lanes', '32',
+    ])).toThrow('PRODUCTION_SWAP_LOAD_SWAPS_EXCEED_FIVE_PER_ACCOUNT_FRAME');
+    expect(() => parseWorkerArgs([
+      '--work-dir', '/tmp/load', '--port-base', '20000', '--mode', 'same',
+      '--swaps', '31', '--lanes', '32',
+    ])).toThrow('PRODUCTION_SWAP_LOAD_LANES_WITHOUT_ORDERS');
+    expect(() => parseWorkerArgs([
+      '--work-dir', '/tmp/load', '--port-base', '20000', '--mode', 'same',
+      '--swaps', '481', '--lanes', '481',
+    ])).toThrow('PRODUCTION_SWAP_LOAD_LANES_EXCEED_HUB_ACCOUNT_MAX');
+    expect(distributeLoadOrders(13, 3)).toEqual([5, 4, 4]);
+    expect(distributeLoadOrders(32, 32)).toEqual(Array.from({ length: 32 }, () => 1));
+    expect(() => distributeLoadOrders(16, 3))
+      .toThrow('PRODUCTION_SWAP_LOAD_LANE_DISTRIBUTION_EXCEEDS_FRAME_CAP');
+  });
+
+  test('load lanes derive unique identities and an exact authenticated control origin', () => {
+    const identities = deriveLoadLaneIdentities('test-only-load-root', 3);
+    const makers = deriveLoadLaneIdentities('test-only-load-root', 3, 'maker');
+    expect(new Set(identities.map(identity => identity.entityId)).size).toBe(3);
+    expect(new Set(identities.map(identity => identity.signerId)).size).toBe(3);
+    expect(new Set([...identities, ...makers].map(identity => identity.entityId)).size).toBe(6);
+    expect(runtimeHttpBaseFromWsUrl('ws://127.0.0.1:20008/rpc')).toBe('http://127.0.0.1:20008');
+    expect(connectedRuntimeHttpBase({ wsUrl: 'ws://127.0.0.1:20008/rpc' }))
+      .toBe('http://127.0.0.1:20008');
+    expect(() => runtimeHttpBaseFromWsUrl('http://127.0.0.1:20008/rpc'))
+      .toThrow('PRODUCTION_SWAP_LOAD_CONTROL_URL_INVALID');
+  });
+
+  test('parallel lane plan emits exact marketable offers without exceeding five per Account frame', () => {
+    const midpoint = 25_000_000n;
+    const { maxAllowed } = deriveSameOrderbookPriceBandBounds(midpoint);
+    const plans = buildParallelLaneOfferPlan(`0x${'11'.repeat(32)}`, 13, 3, 10_000_000n, maxAllowed);
+    expect(plans.map(plan => plan.offers.length)).toEqual([5, 4, 4]);
+    for (const plan of plans) {
+      expect(plan.quoteCredit).toBeGreaterThan(0n);
+      expect(plan.baseCredit).toBeGreaterThan(0n);
+      for (const tx of plan.offers) {
+        if (tx.type !== 'placeSwapOffer') throw new Error('TEST_LOAD_OFFER_TYPE_INVALID');
+        expect(prepareSwapOfferAmounts({ type: 'swap_offer', data: tx.data }).ok).toBe(true);
+        expect(evaluateSameOrderbookPriceBand({
+          priceTicks: maxAllowed,
+          side: 0,
+          bestBid: 24_995_000n,
+          bestAsk: 25_005_000n,
+          pairPolicy: getSwapPairPolicyByBaseQuote(2, 1),
+          hasExplicitPairPolicy: true,
+        }).rejectReason).toBeUndefined();
+      }
+    }
+  });
+
+  test('independent maker and taker lanes authorize opposite sides at one exact price', () => {
+    const priceTicks = 25_000_000n;
+    const plan = buildIndependentMakerTakerPlan(
+      `0x${'11'.repeat(32)}`,
+      13,
+      3,
+      10_000_000n,
+      priceTicks,
+    );
+    expect(plan.makerPlans.map(item => item.offers.length)).toEqual([5, 4, 4]);
+    expect(plan.takerPlans.map(item => item.offers.length)).toEqual([5, 4, 4]);
+    for (const maker of plan.makerPlans.flatMap(item => item.offers)) {
+      if (maker.type !== 'placeSwapOffer') throw new Error('TEST_LOAD_MAKER_TYPE_INVALID');
+      expect(maker.data.giveTokenId).toBe(2);
+      expect(maker.data.wantTokenId).toBe(1);
+      expect(prepareSwapOfferAmounts({ type: 'swap_offer', data: maker.data }).ok).toBe(true);
+    }
+    for (const taker of plan.takerPlans.flatMap(item => item.offers)) {
+      if (taker.type !== 'placeSwapOffer') throw new Error('TEST_LOAD_TAKER_TYPE_INVALID');
+      expect(taker.data.giveTokenId).toBe(1);
+      expect(taker.data.wantTokenId).toBe(2);
+      expect(prepareSwapOfferAmounts({ type: 'swap_offer', data: taker.data }).ok).toBe(true);
+    }
+  });
+
   test('hub identity selector excludes cohosted secondary and remote gossip hubs', () => {
     const localRuntimeId = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     const entity = (entityId: string, runtimeId: string, chainId: number, signerId?: string) => ({
@@ -86,53 +263,125 @@ describe('production swap load evidence', () => {
     expect(selected.signerId).toBe('0x' + 'a1'.repeat(20));
   });
 
-  test('burst report binds economic completion to committed trade count and durable roots', () => {
+  test('burst report separates matching from fully bilateral settlement', () => {
     const root = `0x${'ab'.repeat(32)}`;
+    const settlementEvidence = {
+      expectedSwaps: 10,
+      tradeCountBefore: 5,
+      tradeCountAfter: 15,
+      matchedElapsedMs: 250,
+      fullySettledElapsedMs: 500,
+      createdOfferIds: Array.from({ length: 10 }, (_, index) => `offer-${index}`),
+      accounts: [{
+        accountKey: 'load/hub',
+        createdOfferIds: Array.from({ length: 10 }, (_, index) => `offer-${index}`),
+        committedOfferIds: Array.from({ length: 10 }, (_, index) => `offer-${index}`),
+        committedResolveIds: Array.from({ length: 10 }, (_, index) => `offer-${index}`),
+        liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
+      }],
+      runtimes: [
+        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingReceipts: 0 },
+        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingReceipts: 0 },
+        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingReceipts: 0 },
+      ],
+      bestBidPriceTicks: 24_999_000n,
+      bestAskPriceTicks: 25_001_000n,
+    };
     const report = decodeLoadBurstReport({
       schema: 'xln-production-swap-load-burst-v1', mode: 'same',
       schedule: 'visible_depth_runtime_input_batches', configuredBurstSize: 10,
+      loadMakerAccountCount: 0, loadTakerAccountCount: 2,
+      loadParticipantAccountCount: 2, maxOrdersPerAccountFrame: 5,
       runtimeInputBatches: 2,
-      completedEconomicSwaps: 10, completionAuthority: 'committed_orderbook_trade_count',
+      matchedEconomicSwaps: 10, fullySettledEconomicSwaps: 10,
+      completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence',
       enqueueAckElapsedMs: 10, commandObservedElapsedMs: 20,
-      economicCompletionElapsedMs: 250, completedTps: 40,
+      matchedElapsedMs: 250, fullySettledElapsedMs: 500,
+      matchedTps: 40, fullySettledTps: 20,
       tradeCountBefore: 5, tradeCountAfter: 15,
       submittedEconomicSwaps: 10, uncompletedEconomicSwapsAfterRun: 0,
       driverRssBefore: 100, driverRssAfter: 110,
       walBytesBefore: 1_000, walBytesAfter: 2_000,
+      crossedBookAfterRun: false,
       durableBefore: { height: 20, canonicalStateHash: root },
       durableAfter: { height: 21, canonicalStateHash: root },
+      loadDurableBefore: { height: 30, canonicalStateHash: root },
+      loadDurableAfter: { height: 31, canonicalStateHash: root },
+      settlementEvidence,
     });
-    expect(report.completedEconomicSwaps).toBe(10);
+    expect(report.matchedTps).toBe(40);
+    expect(report.fullySettledTps).toBe(20);
+    expect(report.loadParticipantAccountCount).toBe(2);
     expect(report.walBytesAfter).toBe(2_000);
     expect(() => decodeLoadBurstReport({ ...report, alternateCompletion: true }))
       .toThrow('PRODUCTION_SWAP_LOAD_REPORT_FIELDS_INVALID');
+    expect(() => decodeLoadBurstReport({ ...report, loadParticipantAccountCount: 3 }))
+      .toThrow('PRODUCTION_SWAP_LOAD_REPORT_ACCOUNT_COUNTS_INVALID');
+    expect(() => decodeLoadBurstReport({ ...report, crossedBookAfterRun: true }))
+      .toThrow('PRODUCTION_SWAP_LOAD_REPORT_CROSSED_BOOK_REMAINS');
   });
 
-  test('book projection rejects malformed network buckets without minting BookState', () => {
+  test('settlement authority rejects pending bilateral and Runtime work', () => {
+    const base = {
+      expectedSwaps: 1, tradeCountBefore: 7, tradeCountAfter: 8,
+      matchedElapsedMs: 10, fullySettledElapsedMs: 20,
+      createdOfferIds: ['offer-1'],
+      accounts: [{
+        accountKey: 'load/hub', createdOfferIds: ['offer-1'],
+        committedOfferIds: ['offer-1'], committedResolveIds: ['offer-1'],
+        liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
+      }],
+      runtimes: [
+        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingReceipts: 0 },
+        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingReceipts: 0 },
+        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingReceipts: 0 },
+      ],
+      bestBidPriceTicks: 10n, bestAskPriceTicks: 11n,
+    };
+    expect(assertProductionSwapFullySettled(decodeProductionSwapSettlementEvidence(base)))
+      .toEqual({ matchedTps: 100, fullySettledTps: 50 });
+    expect(() => decodeProductionSwapSettlementEvidence({ ...base, untrusted: true }))
+      .toThrow('PRODUCTION_SWAP_SETTLEMENT_FIELDS_INVALID');
+    expect(() => assertProductionSwapFullySettled(decodeProductionSwapSettlementEvidence({
+      ...base, accounts: [{ ...base.accounts[0], pendingProposal: true }],
+    }))).toThrow('PRODUCTION_SWAP_SETTLEMENT_ACCOUNT_NOT_DRAINED:load/hub');
+    expect(() => assertProductionSwapFullySettled(decodeProductionSwapSettlementEvidence({
+      ...base,
+      runtimes: base.runtimes.map(runtime => runtime.role === 'load'
+        ? { ...runtime, pendingReceipts: 1 }
+        : runtime),
+    }))).toThrow('PRODUCTION_SWAP_SETTLEMENT_RUNTIME_NOT_DRAINED:load');
+    expect(() => assertProductionSwapFullySettled(decodeProductionSwapSettlementEvidence({
+      ...base, bestBidPriceTicks: 11n,
+    }))).toThrow('PRODUCTION_SWAP_SETTLEMENT_BOOK_CROSSED');
+  });
+
+  test('book projection rejects malformed network pages without minting BookState', () => {
     const price = 25_000_000n;
     const secondPrice = 25_010_000n;
-    const bucketId = 25_000n;
-    const level = { priceTicks: price, orderIds: ['ask-1'], totalQtyLots: 1n };
-    const secondLevel = { priceTicks: secondPrice, orderIds: ['ask-2'], totalQtyLots: 2n };
-    const bucket = {
-      bucketId,
-      pricesAsc: [price, secondPrice],
-      levels: new Map([[price.toString(), level], [secondPrice.toString(), secondLevel]]),
-    };
-    const order = {
-      orderId: 'ask-1', ownerId: 'maker', side: 1, priceTicks: price,
-      qtyLots: 1n, seq: 1, bucketId,
-    };
-    const secondOrder = {
-      orderId: 'ask-2', ownerId: 'maker', side: 1, priceTicks: secondPrice,
-      qtyLots: 2n, seq: 2, bucketId,
+    let canonical = createBook({ bucketWidthTicks: 1_000n, maxOrders: 100, stpPolicy: 1 });
+    canonical = applyCommand(canonical, {
+      kind: 0, ownerId: 'maker', orderId: 'ask-1', side: 1, tif: 0,
+      postOnly: true, priceTicks: price, qtyLots: 1n,
+    }).state;
+    canonical = applyCommand(canonical, {
+      kind: 0, ownerId: 'maker', orderId: 'ask-2', side: 1, tif: 0,
+      postOnly: true, priceTicks: secondPrice, qtyLots: 2n,
+    }).state;
+    const portable = {
+      params: canonical.params,
+      bidPages: projectBookPricePageTree(canonical.bidPages),
+      askPages: projectBookPricePageTree(canonical.askPages),
+      nextSeq: canonical.nextSeq,
+      tradeCount: canonical.tradeCount,
+      tradeQtySum: canonical.tradeQtySum,
+      lastTradePriceTicks: canonical.lastTradePriceTicks,
+      lastAcceptedUsdAskPriceTicks: canonical.lastAcceptedUsdAskPriceTicks,
+      eventHash: canonical.eventHash,
     };
     const page = {
       items: [{ pairId: '1/2', book: {
-        params: { bucketWidthTicks: 1_000n, maxOrders: 100, stpPolicy: 1 },
-        orders: new Map([['ask-1', order], ['ask-2', secondOrder]]), bidBuckets: new Map(),
-        askBuckets: new Map([[bucketId.toString(), bucket]]),
-        bidBucketIdsDesc: [], askBucketIdsAsc: [bucketId], nextSeq: 3,
+        ...portable,
         tradeCount: 7, tradeQtySum: 3n, lastTradePriceTicks: price,
         lastAcceptedUsdAskPriceTicks: price, eventHash: 4n,
       }}],
@@ -141,22 +390,27 @@ describe('production swap load evidence', () => {
     };
     expect(decodeLoadBookPage(page, '1/2')).toEqual({
       tradeCount: 7,
+      bestBidPriceTicks: null,
+      bestAskPriceTicks: price,
       executableAskPriceTicks: [price, secondPrice],
     });
     expect(() => decodeLoadBookPage({
       ...page,
-      items: [{ ...page.items[0], book: { ...page.items[0]!.book, askBuckets: { bad: bucket } } }],
-    }, '1/2')).toThrow('PRODUCTION_SWAP_LOAD_ASK_BUCKETS_INVALID');
+      items: [{ ...page.items[0], book: { ...page.items[0]!.book, askPages: { bad: true } } }],
+    }, '1/2')).toThrow('PRODUCTION_SWAP_LOAD_ASK_PAGES_MAP_INVALID');
+    const askPages = new Map(portable.askPages);
+    const firstPageKey = askPages.keys().next().value;
+    if (!firstPageKey) throw new Error('expected ask page');
+    const firstPage = askPages.get(firstPageKey);
+    if (!firstPage) throw new Error('expected ask page value');
+    askPages.set(firstPageKey, { ...firstPage, totalQtyLots: firstPage.totalQtyLots + 1n });
     expect(() => decodeLoadBookPage({
       ...page,
       items: [{
         ...page.items[0],
-        book: {
-          ...page.items[0]!.book,
-          orders: new Map([['ask-1', order], ['ask-2', { ...secondOrder, priceTicks: price }]]),
-        },
+        book: { ...page.items[0]!.book, askPages },
       }],
-    }, '1/2')).toThrow('PRODUCTION_SWAP_LOAD_ASK_ORDER_INVALID');
+    }, '1/2')).toThrow('BOOK_PAGE_AGGREGATE_INVALID');
   });
 
   test('burst amount is lot-aligned and meets production minimum trade size', () => {
@@ -198,12 +452,92 @@ describe('production swap load evidence', () => {
     )).toThrow('SWAP_NET_AUTH_MIN_RECEIVE_NOT_MET');
   });
 
+  test('same-j orders use the exact quote lattice instead of choosing a rounding winner', () => {
+    const filledBase = 3_077_000_000_000_000n;
+    const filledQuote = quoteAmountFromWeightedLotsForDecimals(18, 6, 25_005_000n * 3_077n);
+    expect(filledQuote).toBe(7_694_038n);
+    expect(getSwapExactQuoteLotMultipleAtPriceForDimensions(18, 6, 25_005_000n)).toBe(2n);
+    const offer = {
+      giveAmount: 10_200_000_000_000_000_000n,
+      wantAmount: 25_505_100_000n,
+      maxFee: 0n,
+      minNetReceive: 25_505_100_000n,
+    };
+    expect(() => assertSwapNetAuthorization(offer, filledBase, filledQuote, 0n, false))
+      .toThrow('SWAP_NET_AUTH_MIN_RECEIVE_NOT_MET');
+    const executableBase = 3_076_000_000_000_000n;
+    const executableQuote = quoteAmountFromWeightedLotsForDecimals(18, 6, 25_005_000n * 3_076n);
+    expect(executableQuote).toBe(7_691_538n);
+    expect(() => assertSwapNetAuthorization(offer, executableBase, executableQuote, 0n, false))
+      .not.toThrow();
+  });
+
+  test('matcher snaps partial fills at the maker price and drops only unexecutable taker dust', () => {
+    const multipleAtPrice = (priceTicks: bigint): bigint =>
+      getSwapExactQuoteLotMultipleAtPriceForDimensions(18, 6, priceTicks);
+    let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 10, stpPolicy: 1 });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'maker',
+      orderId: 'maker-ask',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 25_005_000n,
+      qtyLots: 10_200_000n,
+    }, { executionQtyMultipleAtPrice: multipleAtPrice }).state;
+    const result = applyCommand(book, {
+      kind: 0,
+      ownerId: 'taker',
+      orderId: 'taker-bid',
+      side: 0,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 25_006_000n,
+      qtyLots: 3_077n,
+    }, { executionQtyMultipleAtPrice: multipleAtPrice });
+    expect(result.events.find(event => event.type === 'TRADE')).toMatchObject({
+      price: 25_005_000n,
+      qty: 3_076n,
+    });
+    expect(result.state.orders.get('maker-ask')?.qtyLots).toBe(10_196_924n);
+    expect(result.state.orders.has('taker-bid')).toBe(false);
+  });
+
+  test('every visible maker level survives canonical Account price quantization', () => {
+    const dimensions = getStaticSwapTokenDimensions(1, 2);
+    for (const priceTicks of [25_005_000n, 25_010_000n, 25_015_000n, 25_020_000n, 25_025_000n]) {
+      const bid = deriveExecutableBidForAsk(2, 1, 10_000_000n, priceTicks);
+      const prepared = prepareSwapOfferAmounts({
+        type: 'swap_offer',
+        data: {
+          offerId: `load-${priceTicks}`,
+          giveTokenId: 1,
+          giveAmount: bid.quoteAmount,
+          wantTokenId: 2,
+          wantAmount: bid.baseAmount,
+          ...dimensions,
+          priceTicks,
+          ...deriveSwapNetAuthorization(bid.baseAmount, 1),
+        },
+      });
+      expect(prepared).toEqual({
+        ok: true,
+        prepared: {
+          priceTicks,
+          effectiveGiveAmount: bid.quoteAmount,
+          effectiveWantAmount: bid.baseAmount,
+        },
+      });
+    }
+  });
+
   test('committed Hub profile is the only minimum-trade authority', () => {
     const core = {
       entityId: `0x${'11'.repeat(32)}`, entityEncryptionPublicKey: '0x01',
       height: 4, timestamp: 5, profile: {}, config: {}, nonces: new Map(),
       proposals: new Map(), reserves: new Map(), lastFinalizedJHeight: 0,
-      jBlockChain: [], htlcRoutes: new Map(), htlcFeesEarned: 0n, lockBook: new Map(),
+      htlcRoutes: new Map(), htlcFeesEarned: 0n, lockBook: new Map(),
       orderbookHubProfile: {
         entityId: `0x${'11'.repeat(32)}`, name: 'H1',
         spreadDistribution: {

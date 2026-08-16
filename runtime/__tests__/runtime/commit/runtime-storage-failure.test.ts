@@ -14,12 +14,7 @@ import { handleRuntimeFrameStorageFailure } from '../../../runtime/frame/lifecyc
 import { createRuntimeFrameTransaction } from '../../../runtime/frame/transaction';
 import { dbRootPath } from '../../../runtime/platform';
 import { ensureRuntimeInfrastructure } from '../../../runtime/infrastructure/runtime-infrastructure';
-import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
-import {
-  buildRuntimeFrameCommitProofExpectation,
-  classifyRuntimeFrameCommitProof,
-} from '../../../storage/commit/commit';
-import { buildDurableRuntimeMachineSnapshot } from '../../../storage/wal/snapshot';
+import { classifyRuntimeFrameCommitProof } from '../../../storage/commit/commit';
 
 const fixture = join(import.meta.dir, '..', '..', 'fixtures/storage/runtime-storage-timeout-child.ts');
 
@@ -48,86 +43,42 @@ const prepareFrame = (seed: string) => {
 };
 
 describe('Runtime WAL storage failure boundary', () => {
-  test('requires complete Runtime proof before classifying a timed-out write as committed', () => {
-    const env = createEmptyEnv('wal-commit-proof');
+  test('requires the exact post Runtime root before classifying a timed-out write', () => {
     const runtimeInput = { runtimeTxs: [], entityInputs: [] };
-    const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
-    const runtimeStateHash = computeCanonicalStateHashFromEnv(env);
+    const postStateHash = `0x${'11'.repeat(32)}`;
 
     expect(classifyRuntimeFrameCommitProof(
       { runtimeInput },
       runtimeInput,
-      runtimeMachine,
-      runtimeStateHash,
+      postStateHash,
     )).toBe('unknown');
     expect(classifyRuntimeFrameCommitProof(
-      { runtimeInput, runtimeMachine },
+      { runtimeInput, postStateHash },
       runtimeInput,
-      runtimeMachine,
-      runtimeStateHash,
-    )).toBe('unknown');
-    expect(classifyRuntimeFrameCommitProof(
-      { runtimeInput, runtimeMachine, runtimeStateHash },
-      runtimeInput,
-      runtimeMachine,
-      runtimeStateHash,
+      postStateHash,
     )).toBe('committed');
     expect(classifyRuntimeFrameCommitProof(
-      { runtimeInput, runtimeMachine, runtimeStateHash: `0x${'00'.repeat(32)}` },
+      { runtimeInput, postStateHash: `0x${'00'.repeat(32)}` },
       runtimeInput,
-      runtimeMachine,
-      runtimeStateHash,
+      postStateHash,
     )).toBe('conflict');
     expect(classifyRuntimeFrameCommitProof(
       {
-        runtimeInput,
-        runtimeMachine: { ...runtimeMachine, runtimeId: 'different-runtime' },
-        runtimeStateHash,
+        runtimeInput: { runtimeTxs: [], entityInputs: [], timestamp: 1 },
+        postStateHash,
       },
       runtimeInput,
-      runtimeMachine,
-      runtimeStateHash,
+      postStateHash,
     )).toBe('conflict');
   });
 
-  test('probes the exact WAL projection when persisted history is still pending', () => {
-    const env = createEmptyEnv('wal-commit-proof-history');
-    env.state.height = 8;
-    env.state.timestamp = 800;
-    ensureRuntimeInfrastructure(env).pendingHistoryRecords = [{
-      kind: 'entityFrame',
-      entityId: '0x01',
-      entityHeight: 1,
-      link: {},
-    } as never];
-    env.pendingNetworkOutputs = [{
-      entityId: 'stale-output',
-      signerId: 'stale-signer',
-      entityTxs: [],
-    }];
+  test('does not require a full Runtime-machine blob to prove the frame', () => {
     const runtimeInput = { runtimeTxs: [], entityInputs: [] };
-
-    // The active frame's exact outputs override the live outbox, and history
-    // records already persisted beside the WAL frame are excluded from its
-    // Runtime-machine commitment.
-    const expected = buildRuntimeFrameCommitProofExpectation(
-      env,
-      [],
-      runtimeInput,
-    );
-    expect(expected.runtimeMachine).not.toHaveProperty('pendingNetworkOutputs');
-    expect(expected.runtimeMachine).not.toHaveProperty(
-      'infrastructure.pendingHistoryRecords',
-    );
+    const postStateHash = `0x${'22'.repeat(32)}`;
     expect(classifyRuntimeFrameCommitProof(
-      {
-        runtimeInput,
-        runtimeMachine: expected.runtimeMachine,
-        runtimeStateHash: expected.runtimeStateHash,
-      },
+      { runtimeInput, postStateHash },
       runtimeInput,
-      expected.runtimeMachine,
-      expected.runtimeStateHash,
+      postStateHash,
     )).toBe('committed');
   });
 

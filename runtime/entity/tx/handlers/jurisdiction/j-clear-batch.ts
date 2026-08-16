@@ -17,6 +17,8 @@ import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import { createEmptyBatch, batchOpCount } from '../../../../jurisdiction/machine/batch';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
+import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
+import { requirePersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
@@ -62,14 +64,22 @@ export async function handleJClearBatch(
   newState.jBatchState.status = 'empty';
 
   // Manual recovery: release stale "submitted" latches so hub can retry requests.
-  for (const account of newState.accounts.values()) {
+  for (const accountId of newState.accounts.keys()) {
+    const account = getEntityAccountForWrite(newState.accounts, accountId);
+    if (!account) continue;
     resetSubmittedMarkers += account.shadow.rebalance.submittedAtByToken.size;
-    account.shadow.rebalance.submittedAtByToken.clear();
+    account.shadow.rebalance.submittedAtByToken = requirePersistentAccountStateMap(
+      account.shadow.rebalance.submittedAtByToken,
+      'rebalanceShadowSubmitted',
+    ).emptied();
   }
   if (droppedFinalizeCounterparties.size > 0) {
-    for (const [counterpartyId, account] of newState.accounts.entries()) {
-      if (!account.activeDispute) continue;
+    for (const counterpartyId of newState.accounts.keys()) {
+      const visible = newState.accounts.get(counterpartyId);
+      if (!visible?.activeDispute) continue;
       if (!droppedFinalizeCounterparties.has(counterpartyId.toLowerCase())) continue;
+      const account = getEntityAccountForWrite(newState.accounts, counterpartyId);
+      if (!account?.activeDispute) continue;
       account.activeDispute.finalizeQueued = false;
     }
   }

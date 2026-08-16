@@ -7,6 +7,7 @@ import {
   createBook,
   deriveSide,
   getBookOrder,
+  getSwapExactQuoteLotMultipleAtPriceForDimensions,
   getSwapLotScaleForDecimals,
   getSwapPairDimensions,
   MAX_ORDERBOOK_QTY_LOTS,
@@ -30,6 +31,7 @@ import {
   type NormalizedOrderbookOffer,
   type SameJurisdictionWorkingOrderbookOffer,
   type WorkingOrderbookOffer,
+  swapKey,
 } from '../../../../../orderbook/swap-execution';
 import {
   assertSwapNetAuthorization,
@@ -268,6 +270,18 @@ export const deriveSameOrderbookMaterialization = (
 
   const priceTicks = offer.priceTicks;
   const qtyLots = baseAmount / lotScale;
+  const exactQuoteLots = getSwapExactQuoteLotMultipleAtPriceForDimensions(
+    baseTokenDecimals,
+    quoteTokenDecimals,
+    priceTicks,
+  );
+  if (qtyLots % exactQuoteLots !== 0n) {
+    return {
+      kind: 'reject',
+      reason: `quote-lot-misaligned:${qtyLots.toString()}:${exactQuoteLots.toString()}`,
+      message: `ORDERBOOK_REJECT: quote amount is not integral offer=${offer.offerId} qty=${qtyLots} multiple=${exactQuoteLots}`,
+    };
+  }
   if (qtyLots === 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS || priceTicks <= 0n) {
     return {
       kind: 'reject',
@@ -290,7 +304,7 @@ export const deriveSameOrderbookMaterialization = (
       priceTicks,
       qtyLots,
       makerId: offer.makerIsLeft ? offer.fromEntity : offer.toEntity,
-      namespacedOrderId: `${offer.accountId}:${offer.offerId}`,
+      namespacedOrderId: swapKey(offer.accountId, offer.offerId),
       pairPolicy,
       hasExplicitPairPolicy,
       bucketWidthTicks,
@@ -317,8 +331,7 @@ export const evaluateSameOrderbookPriceBand = (input: {
   );
 
   if (anchor !== null) {
-    const minAllowed = anchor - (anchor * BigInt(rejectBps)) / BigInt(bpsBase);
-    const maxAllowed = anchor + (anchor * BigInt(rejectBps)) / BigInt(bpsBase);
+    const { minAllowed, maxAllowed } = deriveSameOrderbookPriceBandBounds(anchor);
     if (input.priceTicks < minAllowed || input.priceTicks > maxAllowed) {
       return {
         rejectReason: `outside-anchor-band:${input.priceTicks.toString()}`,
@@ -352,6 +365,16 @@ export const evaluateSameOrderbookPriceBand = (input: {
   }
 
   return {};
+};
+
+export const deriveSameOrderbookPriceBandBounds = (
+  anchor: bigint,
+): Readonly<{ minAllowed: bigint; maxAllowed: bigint }> => {
+  if (anchor <= 0n) throw new Error('ORDERBOOK_PRICE_BAND_ANCHOR_INVALID');
+  const offset =
+    (anchor * BigInt(SWAP_CONSTANTS.PRICE_REJECT_BPS)) /
+    BigInt(SWAP_CONSTANTS.BPS_BASE);
+  return { minAllowed: anchor - offset, maxAllowed: anchor + offset };
 };
 
 export const buildCrossMarketOfferFromBookOrder = (

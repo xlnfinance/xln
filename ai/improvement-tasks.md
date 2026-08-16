@@ -139,7 +139,7 @@
 
 ### task-13: notification-toast
 **branch:** `improve/task-13-toasts`
-**files:** NEW `frontend/src/lib/view/components/Toast.svelte`, NEW `frontend/src/lib/stores/toastStore.ts`
+**files:** NEW `frontend/src/lib/view/components/Toast.svelte`, NEW `frontend/src/lib/stores/ui/toastStore.ts`
 **scope:** Create toast notification system
 **details:**
 - Success/error/info/warning variants

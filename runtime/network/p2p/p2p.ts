@@ -11,13 +11,12 @@ import { RuntimeWsClient } from './ws-client';
 import { canonicalizeRuntimeWsAudience, directRuntimeWsAudience } from './ws-protocol';
 import { buildLocalEntityProfile } from './gossip/helper';
 import { extractEntityId } from '../../protocol/identity';
-import { getSignerAddress, getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import {
   computeProfileHash,
-  hasCurrentProfileBoardAuthority,
   signProfileRuntimeRoute,
   verifyProfileSignature,
 } from '../../entity/profile/profile-signing';
+import { hasCurrentBoardProfileRouteAuthority } from './gossip/local-profile-lifecycle';
 import { inspectHankoForHash } from '../../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../../protocol/crypto/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
@@ -1310,15 +1309,7 @@ export class RuntimeP2P {
       if (!replicaSignerId) {
         continue;
       }
-      const defaultSignerId = replica.state.config.validators[0];
-      const defaultSignerAddress = defaultSignerId
-        ? getSignerAddress(this.env, defaultSignerId)?.toLowerCase()
-        : undefined;
-      if (!defaultSignerAddress || getSignerAddress(this.env, replicaSignerId)?.toLowerCase() !== defaultSignerAddress) {
-        continue;
-      }
-      if (getSignerPrivateKeyIfAvailable(this.env, replicaSignerId) === null) continue;
-      if (!(await hasCurrentProfileBoardAuthority(this.env, replica.state))) continue;
+      if (!(await hasCurrentBoardProfileRouteAuthority(this.env, replica, replicaSignerId))) continue;
       const normalizedEntityId = normalizeId(entityId);
       if (seen.has(normalizedEntityId)) continue;
       if (advertisedSet && !advertisedSet.has(normalizedEntityId)) continue;

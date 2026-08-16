@@ -5,10 +5,6 @@ import {
   withCrossJurisdictionFillProgress,
 } from '../../../../../extensions/cross-j';
 import {
-  recordSwapClosedLifecycle,
-  recordSwapResolveLifecycle,
-} from '../lifecycle/history';
-import {
   cancelledOfferResult,
   syncSourcePullBinding,
   type CrossFillProgress,
@@ -76,44 +72,13 @@ const applyRouteFill = (
   };
 };
 
-const recordCrossFillHistory = (
-  prepared: PreparedCrossSwapFillAck,
-  fill: CrossFillProgress,
-  outcome: FillOutcome,
-  height: number,
-): void => {
-  const { account, tx } = prepared;
-  recordSwapResolveLifecycle(
-    account,
-    tx.data.offerId,
-    height,
-    {
-      fillRatio: fill.nextRatio,
-      ...(fill.fillNumerator !== undefined
-        ? { fillNumerator: fill.fillNumerator }
-        : {}),
-      ...(fill.fillDenominator !== undefined
-        ? { fillDenominator: fill.fillDenominator }
-        : {}),
-      cancelRemainder: outcome.terminal,
-      height,
-      executionGiveAmount:
-        tx.data.executionSourceAmount ?? fill.incrementalSourceAmount,
-      executionWantAmount:
-        tx.data.executionTargetAmount ?? fill.incrementalTargetAmount,
-      ...(tx.data.comment ? { comment: tx.data.comment } : {}),
-    },
-  );
-};
-
 const closeCrossOffer = (
   prepared: PreparedCrossSwapFillAck,
   fill: CrossFillProgress,
   outcome: FillOutcome,
 ): CrossSwapFillAckResult => {
   const { account, tx, events } = prepared;
-  account.state.swapOffers?.delete(tx.data.offerId);
-  recordSwapClosedLifecycle(account, tx.data.offerId);
+  account.state.swapOffers.del(tx.data.offerId);
   events.push(
     outcome.shouldClose
       ? `🌉 Cross-j offer ${tx.data.offerId.slice(0, 8)} closed at ` +
@@ -138,6 +103,7 @@ const retainCrossOfferRemainder = (
   // The route price is the cross-j index when the clearing side republished it;
   // otherwise the committed offer keeps the price it was admitted at.
   if (route.priceTicks !== undefined) offer.priceTicks = route.priceTicks;
+  account.state.swapOffers.put(tx.data.offerId, offer);
   events.push(
     `🌉 Cross-j offer ${tx.data.offerId.slice(0, 8)} filled to ` +
     `${fill.nextRatio}/${CROSS_J_MAX_FILL_RATIO}, ` +
@@ -169,10 +135,9 @@ export const commitCrossSwapFillProgress = (
   prepared: PreparedCrossSwapFillAck,
   fill: CrossFillProgress,
   timestamp: number,
-  height: number,
+  _height: number,
 ): CrossSwapFillAckResult => {
   const outcome = applyRouteFill(prepared, fill, timestamp);
-  recordCrossFillHistory(prepared, fill, outcome, height);
   return outcome.terminal
     ? closeCrossOffer(prepared, fill, outcome)
     : retainCrossOfferRemainder(prepared, fill, outcome);

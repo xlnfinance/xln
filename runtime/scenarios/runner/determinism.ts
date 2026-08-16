@@ -5,7 +5,7 @@
  * compares the complete runtime history hash sequence plus final state hash.
  */
 
-import type { RuntimeReplica } from '../../runtime/types';
+import type { EnvSnapshot, RuntimeReplica } from '../../runtime/types';
 import { getLiveJAdapterEntries } from '../../runtime/jurisdiction/live-jadapters';
 import { createHash } from 'node:crypto';
 import { safeStringify } from '../../protocol/serialization';
@@ -271,7 +271,7 @@ const snapshotEnvProjection = (env: RuntimeReplica): Record<string, unknown> => 
   networkInbox: env.networkInbox ?? [],
 });
 
-const snapshotProjection = (snapshot: RuntimeReplica['history'][number]): Record<string, unknown> => ({
+const snapshotProjection = (snapshot: EnvSnapshot): Record<string, unknown> => ({
   height: snapshot.state.height,
   timestamp: snapshot.state.timestamp,
   runtimeId: snapshot.runtimeId,
@@ -293,7 +293,7 @@ const buildFrameHashTrace = (records: EntityFrameHashDebugRecord[]): unknown[] =
 
 const buildOracle = (
   env: RuntimeReplica,
-  history: readonly RuntimeReplica['history'][number][],
+  history: readonly EnvSnapshot[],
   frameHashRecords: EntityFrameHashDebugRecord[],
   accountStateRootRecords: AccountStateRootDebugRecord[],
 ): ScenarioOracle => {
@@ -467,7 +467,7 @@ const runScenarioOnce = async (
   let env: RuntimeReplica | null = null;
   let activeEnv: RuntimeReplica | null = null;
   let stopHistoryTrace: (() => void) | null = null;
-  let fullHistory: readonly RuntimeReplica['history'][number][] = [];
+  let fullHistory: readonly EnvSnapshot[] = [];
   const frameHashRecords: EntityFrameHashDebugRecord[] = [];
   const accountStateRootRecords: AccountStateRootDebugRecord[] = [];
   const restoreFrameHashRecorder = setEntityFrameHashDebugRecorder((record) => {

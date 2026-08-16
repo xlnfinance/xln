@@ -18,6 +18,7 @@ import type { EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
+import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { addMessage } from '../../../frame-events';
 import {
   freezeAccountForDispute,
@@ -202,16 +203,16 @@ export const draftPreparedDisputeStartIfReady = async (
   storageChanges: RuntimeOverlayRecord[] = [],
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
-  const account = entityState.accounts.get(counterpartyEntityId);
-  if (!account || (account.status ?? 'active') !== 'dispute_preparing') {
+  const visible = entityState.accounts.get(counterpartyEntityId);
+  if (!visible || (visible.status ?? 'active') !== 'dispute_preparing') {
     return { newState: entityState, outputs: [] };
   }
   const issues = collectDisputeEvidenceReadinessIssues(
-    account,
+    visible,
     Number(entityState.timestamp ?? 0),
   );
   if (issues.length > 0) return { newState: entityState, outputs: [] };
-  const intent = account.disputePrepare?.startIntent;
+  const intent = visible.disputePrepare?.startIntent;
   return handleDisputeStart(
     entityState,
     {
@@ -287,24 +288,24 @@ export const handlePrepareDispute = async (
   const description = entityTx.data.description ?? 'prepare-dispute';
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
-  const account = newState.accounts.get(counterpartyEntityId);
-  if (!account) {
+  const visible = newState.accounts.get(counterpartyEntityId);
+  if (!visible) {
     addMessage(
       newState,
       `❌ No account with ${counterpartyEntityId.slice(-4)} - cannot prepare dispute`,
     );
     return { newState, outputs };
   }
-  if (account.activeDispute || (account.status ?? 'active') === 'disputed') {
+  if (visible.activeDispute || (visible.status ?? 'active') === 'disputed') {
     addMessage(
       newState,
       `ℹ️ Dispute already active/queued for ${counterpartyEntityId.slice(-4)}`,
     );
     return { newState, outputs };
   }
-  if ((account.status ?? 'active') === 'dispute_preparing') {
+  if ((visible.status ?? 'active') === 'dispute_preparing') {
     const issues = collectDisputeEvidenceReadinessIssues(
-      account,
+      visible,
       Number(newState.timestamp ?? 0),
     );
     if (issues.length === 0) {
@@ -323,6 +324,8 @@ export const handlePrepareDispute = async (
     );
     return { newState, outputs };
   }
+  const account = getEntityAccountForWrite(newState.accounts, counterpartyEntityId);
+  if (!account) throw new Error(`PREPARE_DISPUTE_ACCOUNT_MISSING:${counterpartyEntityId}`);
   const recoveryPlan = planCrossJurisdictionTargetRecovery(
     newState,
     account,

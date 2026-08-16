@@ -135,7 +135,9 @@
     const nextEnv = await submitRuntimeInput(input as RuntimeInput);
     if (nextEnv) {
       runtimeFrameEnv.set(nextEnv);
-      runtimeFrameHistory.set(nextEnv.history || []);
+      // A live Runtime has no resident history; preserve only an explicitly
+      // owned browser trace already selected by the user.
+      runtimeFrameHistory.set($runtimeFrameHistory ?? []);
     }
   }
 
@@ -149,7 +151,7 @@
     return true;
   }
 
-  function publishCurrentEnv(frames: EnvSnapshot[] = $runtimeFrameEnv?.history || []): void {
+  function publishCurrentEnv(frames: EnvSnapshot[] = $runtimeFrameHistory ?? []): void {
     runtimeFrameIsLive.set(true);
     runtimeFrameTimeIndex.set(-1);
     runtimeFrameHistory.set(frames);
@@ -164,10 +166,17 @@
     }
     stopFedPaymentLoop();
     $runtimeFrameEnv.state.eReplicas.clear();
-    $runtimeFrameEnv.history = [];
     publishCurrentEnv([]);
     lastAction = message;
     return true;
+  }
+
+  async function recordScenarioRun(
+    xln: XLNModule,
+    env: RuntimeReplica,
+    run: (target: RuntimeReplica) => Promise<RuntimeReplica | void>,
+  ): Promise<{ env: RuntimeReplica; frames: EnvSnapshot[] }> {
+    return xln.recordRuntimeScenario(env, run);
   }
 
   const DEMO_RUNTIME_SEED = '';
@@ -439,12 +448,10 @@
       const env = ensureScenarioEnv(XLN, 'AHB');
       // CRITICAL: Clear old state BEFORE running demo
       env.state.eReplicas.clear();
-      env.history = [];
 
       // Run the ACTUAL AHB scenario (same code as CLI)
-      await XLN.scenarios.ahb(env);
-
-      const frames = env.history || [];
+      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios.ahb(target));
+      const frames = recording.frames;
 
       publishCurrentEnv(frames);
 
@@ -454,13 +461,7 @@
       // Keep the workspace LIVE on the scenario's final runtime env by default.
     } catch (err: unknown) {
       // CRITICAL: Still update history with frames created before error
-      const frames = $runtimeFrameEnv?.history || [];
-      if (frames.length > 0) {
-        publishCurrentEnv(frames);
-        lastAction = `AHB: ${frames.length} frames (stopped at error). ${errorMessage(err)}`;
-      } else {
-        lastAction = `❌ ${errorMessage(err)}`;
-      }
+      lastAction = `❌ ${errorMessage(err)}`;
       console.error('[Tutorial] AHB error:', err);
     } finally {
       loading = false;
@@ -481,20 +482,12 @@
       const XLN = await getXLN();
       const env = ensureScenarioEnv(XLN, 'Swap');
       env.state.eReplicas.clear();
-      env.history = [];
-      await XLN.scenarios.swap(env);
-
-      const frames = env.history || [];
+      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios.swap(target));
+      const frames = recording.frames;
       publishCurrentEnv(frames);
       lastAction = `Swap: ${frames.length} frames loaded.`;
     } catch (err: unknown) {
-      const frames = $runtimeFrameEnv?.history || [];
-      if (frames.length > 0) {
-        publishCurrentEnv(frames);
-        lastAction = `Swap: ${frames.length} frames (error). ${errorMessage(err)}`;
-      } else {
-        lastAction = `❌ ${errorMessage(err)}`;
-      }
+      lastAction = `❌ ${errorMessage(err)}`;
       console.error('[SWAP] error:', err);
     } finally {
       loading = false;
@@ -511,12 +504,10 @@
 
       const env = ensureScenarioEnv(XLN, 'Swap Market');
       env.state.eReplicas.clear();
-      env.history = [];
       const runSwapMarketScenario = XLN.scenarios.swapMarket;
       if (!runSwapMarketScenario) throw new Error('Swap Market scenario is unavailable');
-      await runSwapMarketScenario(env);
-
-      const frames = env.history || [];
+      const recording = await recordScenarioRun(XLN, env, runSwapMarketScenario);
+      const frames = recording.frames;
       publishCurrentEnv(frames);
 
       lastAction = `Swap Market: ${frames.length} frames`;
@@ -536,12 +527,10 @@
 
       const env = ensureScenarioEnv(XLN, 'Rapid Fire');
       env.state.eReplicas.clear();
-      env.history = [];
       const runRapidFireScenario = XLN.scenarios.rapidFire;
       if (!runRapidFireScenario) throw new Error('Rapid Fire scenario is unavailable');
-      await runRapidFireScenario(env);
-
-      const frames = env.history || [];
+      const recording = await recordScenarioRun(XLN, env, runRapidFireScenario);
+      const frames = recording.frames;
       publishCurrentEnv(frames);
 
       lastAction = `Rapid Fire: ${frames.length} frames`;
@@ -593,12 +582,10 @@
       // Clear old state BEFORE running demo
       env.state.eReplicas.clear();
       env.state.jReplicas?.clear();
-      env.history = [];
 
       // Run the grid scenario
-      await XLN.scenarios.grid(env);
-
-      const frames = env.history || [];
+      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios.grid(target));
+      const frames = recording.frames;
       publishCurrentEnv(frames);
       lastAction = 'Grid Scalability scenario loaded';
     } catch (err: unknown) {
@@ -631,12 +618,10 @@
       // Clear old state BEFORE running demo
       env.state.eReplicas.clear();
       env.state.jReplicas?.clear();
-      env.history = [];
 
       // Run the settle scenario
-      await XLN.scenarios.settle(env);
-
-      const frames = env.history || [];
+      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios.settle(target));
+      const frames = recording.frames;
       publishCurrentEnv(frames);
       lastAction = 'Settlement Workspace scenario loaded';
     } catch (err: unknown) {

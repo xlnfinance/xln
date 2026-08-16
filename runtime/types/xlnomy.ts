@@ -1,4 +1,3 @@
-import type { EnvSnapshot } from '../runtime/types';
 
 // === XLNOMY (JURISDICTION) SYSTEM ===
 
@@ -150,9 +149,8 @@ interface XlnomySnapshot {
   // Entity registry
   entities: string[];
 
-  // Runtime state (replicas + history)
+  // Runtime state projection. Historical frames are queried from WAL/LevelDB.
   infrastructure?: {
     replicas: unknown; // Serialized Map<string, EntityReplica>
-    history: EnvSnapshot[];
   };
 }

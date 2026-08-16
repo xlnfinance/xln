@@ -46,6 +46,8 @@ import {
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
 import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../../../entity/profile/profile-signing';
 import type { Profile } from '../../../entity/profile';
+import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
+import { announceCertifiedLocalProfiles } from '../../../network/p2p/gossip/local-profile-lifecycle';
 import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/event-observation';
 import { getJEventJurisdictionRef } from '../../../jurisdiction/machine/event-observation';
 import { foldJHistoryRoot, EMPTY_J_HISTORY_ROOT } from '../../../jurisdiction/machine/history-consensus';
@@ -56,6 +58,11 @@ import { getReliableOutputIdentity } from '../../../runtime/routing/output-routi
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../../../runtime/input-pipeline/scheduled-wake';
 import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
 import { cloneEntityState } from '../../../entity/state-clone';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import {
+  buildEntityFrameAuthority,
+  computeCanonicalEntityConsensusStateHash,
+} from '../../../entity/consensus/state-root';
 import type { ConsensusOutputOrigin, EntityTx } from '../../../types/entity-tx';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica, RoutedEntityInput } from '../../../runtime/types';
@@ -80,6 +87,14 @@ const jurisdiction = {
 } satisfies JurisdictionConfig;
 const registeredEntityId = generateNumberedEntityId(2).toLowerCase();
 const blockHash = (byte: string): string => `0x${byte.repeat(32)}`;
+
+const checkpointAnchor = (state: EntityState) => ({
+  entityId: state.entityId,
+  height: state.height,
+  frameHash: state.prevFrameHash ?? 'genesis',
+  stateRoot: computeCanonicalEntityConsensusStateHash(state),
+  authority: buildEntityFrameAuthority(state),
+});
 
 const genericOutputIdentity = (
   sourceEntityId: string,
@@ -322,6 +337,72 @@ const remoteObserverEnv = (boardHash: string): RuntimeReplica => {
 };
 
 describe('registered Entity certified board authority', () => {
+  test('replaces the previous-board Gossip route with the current-board certified profile', async () => {
+    const { profile: previousProfile, localEnv, boardHash: previousBoardHash } = await buildRegisteredProfile();
+    localEnv.gossip.announce(previousProfile);
+    const previousReplica = [...localEnv.state.eReplicas.values()][0]!;
+    const state = previousReplica.state;
+    state.profile = {
+      name: previousProfile.name,
+      isHub: previousProfile.metadata.isHub,
+      avatar: previousProfile.avatar,
+      bio: previousProfile.bio,
+      website: previousProfile.website,
+    };
+    expect((await verifyProfileSignature(previousProfile, localEnv)).valid).toBe(true);
+    const previousState = cloneEntityState(state);
+
+    const currentPrivateKey = deriveSignerKeySync('registered-board-authority:current:2', '1');
+    const currentSigner = computeAddress(new SigningKey(hex(currentPrivateKey)).publicKey).toLowerCase();
+    expect(previousReplica.signerId < currentSigner).toBe(true);
+    const currentConfig = {
+      ...state.config,
+      validators: [currentSigner],
+      shares: { [currentSigner]: 1n },
+    };
+    const currentBoardHash = hashBoard(encodeBoard(currentConfig, localEnv)).toLowerCase();
+    installEvents(localEnv, state, [event('BoardActivated', currentBoardHash, {
+      height: 3,
+      previousBoardHash,
+    })]);
+    state.config = currentConfig;
+    previousReplica.state = previousState;
+    registerSignerKey(localEnv, currentSigner, currentPrivateKey);
+
+    const currentReplica = {
+      ...previousReplica,
+      signerId: currentSigner,
+      state,
+      hankoWitness: new Map(),
+    } satisfies EntityReplica;
+    localEnv.state.eReplicas.set(`${registeredEntityId}:${currentSigner}`, currentReplica);
+    const currentProfile = buildLocalEntityProfile(localEnv, state);
+    const currentProfileHash = computeProfileHash(currentProfile);
+    currentReplica.hankoWitness.set(currentProfileHash, {
+      hanko: await buildQuorumHanko(
+        localEnv,
+        registeredEntityId,
+        currentProfileHash,
+        [{ signerId: currentSigner, signature: signDigest(currentPrivateKey, currentProfileHash) }],
+        currentConfig,
+        state,
+      ),
+      type: 'profile',
+      entityHeight: state.height,
+      createdAt: state.timestamp,
+    });
+
+    expect(await announceCertifiedLocalProfiles(localEnv, [registeredEntityId])).toBe(1);
+    const profiles = localEnv.gossip.getProfiles();
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]?.entityId).toBe(registeredEntityId);
+    expect(profiles[0]?.lastUpdated).toBeGreaterThan(previousProfile.lastUpdated);
+    expect(currentBoardHash).not.toBe(previousBoardHash);
+    expect(profiles[0]?.metadata.profileHanko).not.toBe(previousProfile.metadata.profileHanko);
+    expect((await verifyProfileSignature(profiles[0]!, localEnv)).valid).toBe(true);
+    expect((await verifyProfileSignature(previousProfile, localEnv)).valid).toBe(false);
+  });
+
   test('Account transport stops addressing the previous board immediately after activation', async () => {
     const { profile, boardHash } = await buildRegisteredProfile();
     const env = remoteObserverEnv(boardHash);
@@ -859,6 +940,10 @@ describe('registered Entity certified board authority', () => {
       view: 0,
       changedAtHeight: state.height + 1,
     });
+    handover.data.board.validators[0] = signerA;
+    handover.data.board.shares[signerC] = 9n;
+    expect(applied.newState.config.validators).toEqual([signerC]);
+    expect(applied.newState.config.shares).toEqual({ [signerC]: 1n });
   });
 
   test('partial board config cannot precommit rotation; synchronized validators commit it', async () => {
@@ -956,7 +1041,10 @@ describe('registered Entity certified board authority', () => {
       counterpartyState,
     );
     account.state.jNonce = 3;
-    baseState.accounts.set(counterpartyEntityId, account);
+    if (!(baseState.accounts instanceof PersistentEntityAccountMap)) {
+      throw new Error('TEST_PERSISTENT_ACCOUNT_MAP_REQUIRED');
+    }
+    baseState.accounts = baseState.accounts.updated(counterpartyEntityId, account);
     const jurisdictionRef = getJEventJurisdictionRef(jurisdiction);
     const rotationData = buildJEventRangeData(baseState, {
       from: signerA,
@@ -990,6 +1078,7 @@ describe('registered Entity certified board authority', () => {
       state: newProposerState,
       mempool: [],
       isProposer: true,
+      certifiedFrameAnchor: checkpointAnchor(newProposerState),
       jHistory: structuredClone(localHistory),
     } as EntityReplica;
     const validatorReplica = {
@@ -999,6 +1088,7 @@ describe('registered Entity certified board authority', () => {
       state: cloneEntityState(newProposerState),
       mempool: [],
       isProposer: false,
+      certifiedFrameAnchor: checkpointAnchor(newProposerState),
       jHistory: structuredClone(localHistory),
     } as EntityReplica;
     const proposerJPrefix = buildLocalJPrefixAttestation(env, proposerReplica, proposerReplica.jHistory);
@@ -1023,15 +1113,17 @@ describe('registered Entity certified board authority', () => {
 
     const oldValidatorState = cloneEntityState(baseState);
     oldValidatorState.config = oldConfig;
-    const partial = await applyEntityInput(env, {
+    const partialReplica = {
       entityId: registeredEntityId,
       signerId: signerB,
       entityEncPubKey: '',
       state: oldValidatorState,
       mempool: [],
       isProposer: false,
+      certifiedFrameAnchor: checkpointAnchor(oldValidatorState),
       jHistory: structuredClone(localHistory),
-    }, {
+    } as EntityReplica;
+    const partial = await applyEntityInput(env, partialReplica, {
       entityId: registeredEntityId,
       signerId: signerB,
       proposedFrame: structuredClone(proposal),
@@ -1042,15 +1134,17 @@ describe('registered Entity certified board authority', () => {
 
     const updatedValidatorState = cloneEntityState(baseState);
     updatedValidatorState.config = newConfig;
-    const prepared = await applyEntityInput(env, {
+    const updatedValidatorReplica = {
       entityId: registeredEntityId,
       signerId: signerB,
       entityEncPubKey: '',
       state: updatedValidatorState,
       mempool: [],
       isProposer: false,
+      certifiedFrameAnchor: checkpointAnchor(updatedValidatorState),
       jHistory: structuredClone(localHistory),
-    }, {
+    } as EntityReplica;
+    const prepared = await applyEntityInput(env, updatedValidatorReplica, {
       entityId: registeredEntityId,
       signerId: signerB,
       proposedFrame: structuredClone(proposal),
@@ -1088,6 +1182,19 @@ describe('registered Entity certified board authority', () => {
       },
     });
 
+    // A real Runtime WAL commit rebases the current certificate into one
+    // validator-local checkpoint anchor before the next Entity frame.
+    const committedHead = committed.workingReplica.certifiedFrameHead;
+    if (!committedHead) throw new Error('TEST_BOARD_ROTATION_CERTIFIED_HEAD_MISSING');
+    committed.workingReplica.certifiedFrameAnchor = {
+      entityId: registeredEntityId,
+      height: committedHead.frame.height,
+      frameHash: committedHead.frame.hash,
+      stateRoot: committedHead.frame.stateRoot,
+      authority: committedHead.postAuthority,
+    };
+    delete committed.workingReplica.certifiedFrameHead;
+
     env.state.eReplicas.set(`${registeredEntityId}:${signerA}`, committed.workingReplica);
     refreshScheduledWakeIndex(env, new Set([registeredEntityId]));
     const wakeValidatorReplica = {
@@ -1097,6 +1204,8 @@ describe('registered Entity certified board authority', () => {
       state: cloneEntityState(committed.workingReplica.state),
       mempool: [],
       isProposer: false,
+      certifiedFrameAnchor: committed.workingReplica.certifiedFrameAnchor,
+      certifiedFrameHead: committed.workingReplica.certifiedFrameHead,
       jHistory: structuredClone(localHistory),
     } as EntityReplica;
     const wakeProposerPrefix = buildLocalJPrefixAttestation(

@@ -1,47 +1,17 @@
 import type { EntityReplica } from '../types';
 import {
-  cloneIsolatedEntityInput,
   cloneIsolatedEntityLeaderCertificate,
   cloneIsolatedEntityLeaderTimeoutVote,
   cloneIsolatedProposedEntityFrame,
 } from '../state/input-clone';
-import { validateEntityReplica } from './replica-validation';
 import {
-  cloneEntityState,
-  cloneTrustedEntityState,
-} from '../state-clone';
+  copyCertifiedEntityLineageAnchor,
+  copyEntityProviderActionSubmitState,
+  copyJPrefixRound,
+  copyJSubmitState,
+} from './envelope-copy';
 
-type CloneState = typeof cloneEntityState;
-
-const cloneEntityCandidate = (
-  candidate: NonNullable<EntityReplica['candidate']>,
-  cloneState: CloneState,
-): NonNullable<EntityReplica['candidate']> => ({
-  frameHash: candidate.frameHash,
-  height: candidate.height,
-  state: cloneState(candidate.state),
-  outputs: candidate.outputs.map(cloneIsolatedEntityInput),
-  jOutputs: candidate.jOutputs.map(output => structuredClone(output)),
-  hashesToSign: candidate.hashesToSign.map(hash => ({ ...hash })),
-  candidateEffects: structuredClone(candidate.candidateEffects),
-  storageChanges: candidate.storageChanges.map(change => ({ ...change })),
-  ...(candidate.consumptionNodeChanges
-    ? {
-        consumptionNodeChanges: structuredClone(
-          candidate.consumptionNodeChanges,
-        ),
-      }
-    : {}),
-  ...(candidate.accountJClaimNodeChanges
-    ? {
-        accountJClaimNodeChanges: structuredClone(
-          candidate.accountJClaimNodeChanges,
-        ),
-      }
-    : {}),
-});
-
-const cloneJHistory = (
+const copyValidatorJHistory = (
   history: NonNullable<EntityReplica['jHistory']>,
 ): NonNullable<EntityReplica['jHistory']> => ({
   jurisdictionRef: history.jurisdictionRef,
@@ -57,21 +27,20 @@ const cloneJHistory = (
   blockHashes: new Map(history.blockHashes),
 });
 
-const cloneEntityReplicaWithPolicy = (
+/**
+ * Fork only the bounded validator-private envelope for one input attempt.
+ *
+ * The certified Entity State and prepared frame candidate are immutable shared
+ * roots. Copying either graph here would make ingress O(total Accounts/Book)
+ * and would destroy Patricia node identity needed by O(dirty) persistence.
+ */
+export const forkEntityReplicaForInput = (
   replica: EntityReplica,
-  forSnapshot: boolean,
-  validateClone: boolean,
-  shareFrameState = false,
 ): EntityReplica => {
-  const cloneState = validateClone
-    ? cloneEntityState
-    : cloneTrustedEntityState;
-  const cloned: EntityReplica = {
+  const forked: EntityReplica = {
     entityId: replica.entityId,
     signerId: replica.signerId,
-    state: shareFrameState
-      ? replica.state
-      : cloneState(replica.state, forSnapshot),
+    state: replica.state,
     mempool: Array.isArray(replica.mempool) ? [...replica.mempool] : [],
     ...(replica.proposal && {
       proposal: cloneIsolatedProposedEntityFrame(replica.proposal),
@@ -81,16 +50,12 @@ const cloneEntityReplicaWithPolicy = (
     }),
     isProposer: replica.isProposer,
     ...(replica.position && { position: { ...replica.position } }),
-    ...(replica.candidate && {
-      candidate: shareFrameState
-        ? replica.candidate
-        : cloneEntityCandidate(replica.candidate, cloneState),
-    }),
-    ...(replica.certifiedFrameLineage && {
-      certifiedFrameLineage: structuredClone(replica.certifiedFrameLineage),
+    ...(replica.candidate && { candidate: replica.candidate }),
+    ...(replica.certifiedFrameHead && {
+      certifiedFrameHead: replica.certifiedFrameHead,
     }),
     ...(replica.certifiedFrameAnchor && {
-      certifiedFrameAnchor: structuredClone(replica.certifiedFrameAnchor),
+      certifiedFrameAnchor: copyCertifiedEntityLineageAnchor(replica.certifiedFrameAnchor),
     }),
     ...(replica.hankoWitness && {
       hankoWitness: new Map(
@@ -117,16 +82,16 @@ const cloneEntityReplicaWithPolicy = (
       lastConsensusProgressAt: replica.lastConsensusProgressAt,
     }),
     ...(replica.jHistory && {
-      jHistory: cloneJHistory(replica.jHistory),
+      jHistory: copyValidatorJHistory(replica.jHistory),
     }),
     ...(replica.jPrefixRound && {
-      jPrefixRound: structuredClone(replica.jPrefixRound),
+      jPrefixRound: copyJPrefixRound(replica.jPrefixRound),
     }),
     ...(replica.jSubmitState && {
-      jSubmitState: structuredClone(replica.jSubmitState),
+      jSubmitState: copyJSubmitState(replica.jSubmitState),
     }),
     ...(replica.entityProviderActionSubmitState && {
-      entityProviderActionSubmitState: structuredClone(
+      entityProviderActionSubmitState: copyEntityProviderActionSubmitState(
         replica.entityProviderActionSubmitState,
       ),
     }),
@@ -135,34 +100,8 @@ const cloneEntityReplicaWithPolicy = (
     }),
   };
 
-  if (validateClone) {
-    return validateEntityReplica(cloned, 'cloneEntityReplica');
+  if (forked.entityId !== forked.state.entityId) {
+    throw new Error('ENTITY_REPLICA_FORK_ID_MISMATCH');
   }
-  if (cloned.entityId !== cloned.state.entityId) {
-    throw new Error('TRUSTED_ENTITY_REPLICA_CLONE_ID_MISMATCH');
-  }
-  return cloned;
+  return forked;
 };
-
-export const cloneEntityReplica = (
-  replica: EntityReplica,
-  forSnapshot = false,
-): EntityReplica => cloneEntityReplicaWithPolicy(replica, forSnapshot, true);
-
-/**
- * Fork the small consensus envelope without copying Entity frame State.
- *
- * Certified State is read-only until an accepted frame replaces the `state`
- * reference. A pending candidate is also shared intentionally: every expected
- * rejection is checked before commit finalization mutates its Hanko witnesses.
- * Any exception after that mutation is a programming fault, so the owning
- * Runtime halts and reloads WAL truth instead of attempting partial rollback.
- */
-export const forkEntityReplicaForInput = (
-  replica: EntityReplica,
-): EntityReplica => cloneEntityReplicaWithPolicy(
-  replica,
-  false,
-  false,
-  true,
-);

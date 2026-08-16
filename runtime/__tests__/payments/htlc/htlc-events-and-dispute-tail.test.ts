@@ -10,10 +10,22 @@ import { applyCommittedAccountFrameFollowups } from '../../../entity/tx/handlers
 import { applyHtlcSecretFollowups } from '../../../entity/tx/handlers/account/committed-htlc-followups';
 import { handleResolveHtlcLockEntityTx } from '../../../entity/tx/handlers/htlc/direct';
 import { assertOriginatedHtlcRoutesHaveLiveLocks } from '../../../entity/tx/j-events-htlc/route-lifecycle';
-import { publishEntityCandidateEffects } from '../../../runtime/observability/env-events';
+import {
+  publishEntityCandidateEffects,
+  readRuntimeFrameEvents,
+} from '../../../runtime/observability/env-events';
 import { createEmptyEnv } from '../../../runtime';
 import type { AccountReplica } from '../../../types/account';
 import type { EntityCandidateEffect, EntityReplica } from '../../../entity/types';
+import {
+  getEntityAccountForWrite,
+  PersistentEntityAccountMap,
+} from '../../../entity/state/persistent-account-map';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
+import { EntityAccountCandidateMap } from '../../../entity/state/persistent-account-map';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { requirePersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 const makeReplica = (entityId: string, counterpartyId: string): EntityReplica => {
   const account: AccountReplica = {
@@ -24,11 +36,11 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
         chainId: 31337,
         depositoryAddress: `0x${'dd'.repeat(20)}`,
       },
-      deltas: new Map(),
-      locks: new Map(),
-      swapOffers: new Map(),
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
+      deltas: PersistentAccountStateMap.empty('deltas'),
+      locks: PersistentAccountStateMap.empty('locks'),
+      swapOffers: PersistentAccountStateMap.empty('swapOffers'),
+      requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+      requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -54,19 +66,14 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
     rollbackCount: 0,
     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    pendingWithdrawals: new Map(),
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
-    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+    pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+    shadow: { rebalance: {
+      policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+      submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+    } },
   };
 
-  return {
-    entityId,
-    signerId: '1',
-    entityEncPubKey: '',
-    mempool: [],
-    isProposer: true,
-    state: {
+  const state: EntityReplica['state'] = {
       entityId,
       entityEncryptionPublicKey: `0x${'55'.repeat(32)}`,
       height: 0,
@@ -80,10 +87,13 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
         shares: { '1': 1n },
       },
       reserves: new Map(),
-      accounts: new Map([[counterpartyId, account]]),
+      accounts: PersistentEntityAccountMap.fromMap(
+        new Map([[counterpartyId, account]]),
+        entityId,
+        computeEntityAccountValueHash,
+      ),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
-      jBlockChain: [],
       profile: {
         name: 'Replica',
         isHub: false,
@@ -96,7 +106,14 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
       lockBook: new Map(),
       swapTradingPairs: [],
       crontabState: initCrontab(),
-    },
+  };
+  return {
+    entityId,
+    signerId: '1',
+    entityEncPubKey: '',
+    mempool: [],
+    isProposer: true,
+    state: createEntityFrameCandidateState(state),
   };
 };
 
@@ -108,10 +125,10 @@ describe('htlc event contract and dispute tail', () => {
     const secret = `0x${'44'.repeat(32)}`;
     const hashlock = `0x4033fb2e6fa5cf816f87a9a40e8ce681fb6d8aa53c5302e72b80f654141a0e65`;
     const replica = makeReplica(entityId, counterpartyId);
-    const account = replica.state.accounts.get(counterpartyId)!;
+    const account = getEntityAccountForWrite(replica.state.accounts, counterpartyId)!;
     account.state.leftEntity = counterpartyId;
     account.state.rightEntity = entityId;
-    account.state.locks.set(lockId, {
+    account.state.locks = requirePersistentAccountStateMap(account.state.locks, 'locks').updated(lockId, {
       lockId,
       hashlock,
       tokenId: 1,
@@ -153,7 +170,7 @@ describe('htlc event contract and dispute tail', () => {
       data: { counterpartyEntityId: counterpartyId, lockId: `0x${'77'.repeat(32)}`, secret },
     })).toThrow('HTLC_RESOLVE_LOCK_MISSING');
 
-    const conflicted = structuredClone(replica.state);
+    const conflicted = createEntityFrameCandidateState(replica.state);
     conflicted.htlcRoutes.set(hashlock, {
       hashlock,
       tokenId: 1,
@@ -265,10 +282,10 @@ describe('htlc event contract and dispute tail', () => {
       byLeft: true,
     }, [], env, candidateEffects);
 
-    expect(env.frameLogs.filter((entry) => entry.message === 'HtlcReceived')).toHaveLength(0);
+  expect(readRuntimeFrameEvents(env).filter((entry) => entry.message === 'HtlcReceived')).toHaveLength(0);
     publishEntityCandidateEffects(env, replica, candidateEffects);
-    expect(env.frameLogs.filter((entry) => entry.message === 'HtlcReceived')).toHaveLength(1);
-    expect(env.frameLogs.find((entry) => entry.message === 'HtlcReceived')?.data).toMatchObject({
+  expect(readRuntimeFrameEvents(env).filter((entry) => entry.message === 'HtlcReceived')).toHaveLength(1);
+  expect(readRuntimeFrameEvents(env).find((entry) => entry.message === 'HtlcReceived')?.data).toMatchObject({
       entityId,
       fromEntity: counterpartyId,
       toEntity: entityId,
@@ -302,7 +319,7 @@ describe('htlc event contract and dispute tail', () => {
     }];
 
     publishEntityCandidateEffects(env, recipientReplica, effects);
-    expect(env.frameLogs.find((entry) => entry.message === 'HtlcReceived')?.data).toMatchObject({
+  expect(readRuntimeFrameEvents(env).find((entry) => entry.message === 'HtlcReceived')?.data).toMatchObject({
       entityId: recipientEntityId,
       hashlock,
       description: 'uid:recipient-7',
@@ -317,8 +334,8 @@ describe('htlc event contract and dispute tail', () => {
     const env = createEmptyEnv('htlc-dispute-tail-seed');
     env.quietRuntimeLogs = true;
     const replica = makeReplica(entityId, counterpartyId);
-    const account = replica.state.accounts.get(counterpartyId)!;
-    account.state.locks.set(inboundLockId, {
+    const account = getEntityAccountForWrite(replica.state.accounts, counterpartyId)!;
+    account.state.locks = requirePersistentAccountStateMap(account.state.locks, 'locks').updated(inboundLockId, {
       lockId: inboundLockId,
       hashlock,
       tokenId: 1,
@@ -373,8 +390,8 @@ describe('htlc event contract and dispute tail', () => {
     const inboundLockId = 'lock-inbound';
     const hashlock = `0x${'66'.repeat(32)}`;
     const replica = makeReplica(entityId, counterpartyId);
-    const account = replica.state.accounts.get(counterpartyId)!;
-    account.state.locks.set(inboundLockId, {
+    const account = getEntityAccountForWrite(replica.state.accounts, counterpartyId)!;
+    account.state.locks = requirePersistentAccountStateMap(account.state.locks, 'locks').updated(inboundLockId, {
       lockId: inboundLockId,
       hashlock,
       tokenId: 1,
@@ -580,9 +597,9 @@ describe('htlc event contract and dispute tail', () => {
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
     expect(account.mempool).toEqual([]);
-    expect(env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized')).toHaveLength(0);
+  expect(readRuntimeFrameEvents(env).filter((entry) => entry.message === 'HtlcFinalized')).toHaveLength(0);
     publishEntityCandidateEffects(env, replica, candidateEffects);
-    const finalizedEvents = env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized');
+  const finalizedEvents = readRuntimeFrameEvents(env).filter((entry) => entry.message === 'HtlcFinalized');
     expect(finalizedEvents).toHaveLength(1);
     expect(finalizedEvents[0]?.data).toMatchObject({
       entityId,
@@ -614,8 +631,11 @@ describe('htlc event contract and dispute tail', () => {
       const env = createEmptyEnv(`htlc-self-cycle-${order}`);
       env.quietRuntimeLogs = true;
       const replica = makeReplica(entityId, outboundEntity);
-      const inboundAccount = structuredClone(replica.state.accounts.get(outboundEntity)!);
-      inboundAccount.state.rightEntity = inboundEntity;
+      const inboundReplica = makeReplica(entityId, inboundEntity);
+      if (!(inboundReplica.state.accounts instanceof EntityAccountCandidateMap)) {
+        throw new Error('TEST_ENTITY_ACCOUNT_CANDIDATE_REQUIRED');
+      }
+      const inboundAccount = inboundReplica.state.accounts.snapshotCandidate().get(inboundEntity)!;
       replica.state.accounts.set(inboundEntity, inboundAccount);
       replica.state.htlcRoutes.set(hashlock, {
         hashlock,

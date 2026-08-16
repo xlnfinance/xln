@@ -1,4 +1,6 @@
-import type { AccountReplica, AccountTx } from '../../../../types/account';
+import type { AccountTx } from '../../../../types/account';
+import type { AccountDraftReplica } from '../../../state/account-state-draft';
+import { commitDeltaDraft, createDeltaDraft } from '../../delta-utils';
 import { deriveDelta } from '../../../utils';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
 import type { ApplyAccountTxResult } from '../../apply-types';
@@ -7,7 +9,7 @@ import { accountTxApplied, accountTxValidationRejected } from '../../apply-resul
 type RebalanceRefundTx = Extract<AccountTx, { type: 'rebalance_refund' }>;
 
 export function handleRebalanceRefund(
-  account: AccountReplica,
+  account: AccountDraftReplica,
   tx: RebalanceRefundTx,
   byLeft: boolean,
 ): ApplyAccountTxResult {
@@ -47,18 +49,23 @@ export function handleRebalanceRefund(
     );
   }
 
-  feeDelta.offdelta += deriveTransferOffdeltaChange(byLeft, amount);
+  const nextFeeDelta = createDeltaDraft(account.state, feeState.feeTokenId);
+  nextFeeDelta.offdelta += deriveTransferOffdeltaChange(byLeft, amount);
+  commitDeltaDraft(account.state, nextFeeDelta);
   const nextRefunded = refundedAmount + amount;
   if (nextRefunded === feeState.feePaidUpfront) {
-    account.state.requestedRebalance.delete(requestTokenId);
-    account.state.requestedRebalanceFeeState.delete(requestTokenId);
+    account.state.requestedRebalance.del(requestTokenId);
+    account.state.requestedRebalanceFeeState.del(requestTokenId);
     // The submission marker is local execution bookkeeping, but it controls
     // whether a later request may enter J-batch. Clearing the canonical request
     // without clearing this marker permanently suppresses a new request for
     // the same token after a full bilateral refund.
-    account.shadow.rebalance.submittedAtByToken.delete(requestTokenId);
+    account.shadow.rebalance.submittedAtByToken.del(requestTokenId);
   } else {
-    feeState.refund = { reason, refundedAmount: nextRefunded };
+    account.state.requestedRebalanceFeeState.put(requestTokenId, {
+      ...feeState,
+      refund: { reason, refundedAmount: nextRefunded },
+    });
   }
   return accountTxApplied([
     `Rebalance refund ${requestId}: ${nextRefunded}/${feeState.feePaidUpfront}`,

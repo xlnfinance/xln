@@ -7,8 +7,11 @@ import { Level } from 'level';
 import type { ServerWebSocket } from 'bun';
 import { ethers } from 'ethers';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { createFrameHash } from '../../../account/consensus/frame/hash';
 import { transitionRuntimeLifecycle } from '../../../runtime/lifecycle';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 
 import { deriveRuntimeAdapterCapabilityToken } from '../../../api/runtime-adapter/security/auth';
 import { decodeRuntimeAdapterRequest } from '../../../api/runtime-adapter/codec';
@@ -85,6 +88,16 @@ type Cli = {
   maxSnapshotMs: number;
   maxEpochSeedMs: number;
   maxRotationProbeMs: number;
+};
+
+const putResidentAccount = (
+  state: EntityState,
+  counterpartyId: string,
+  account: AccountReplica,
+): void => {
+  state.accounts = state.accounts instanceof PersistentEntityAccountMap
+    ? state.accounts.updated(counterpartyId, account)
+    : state.accounts.set(counterpartyId, account);
 };
 
 type TimedEvent = {
@@ -243,21 +256,19 @@ const makeAccount = async (
       rightEntity,
       domain: { chainId: 31337, depositoryAddress: '0x1111111111111111111111111111111111111111' },
       watchSeed: `0x${'a1'.repeat(32)}`,
-      deltas: new Map(),
-      locks: new Map(),
-      swapOffers: new Map(),
+      deltas: PersistentAccountStateMap.empty('deltas'),
+      locks: PersistentAccountStateMap.empty('locks'),
+      swapOffers: PersistentAccountStateMap.empty('swapOffers'),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
+      requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+      requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
     },
     status: 'active',
     mempool: [],
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
     currentFrame: {
       height,
       timestamp,
@@ -274,8 +285,11 @@ const makeAccount = async (
     rollbackCount: 0,
     proofHeader: { fromEntity: firstEntity, toEntity: secondEntity, nextProofNonce: height },
     proofBody: { tokenIds: [], deltas: [] },
-    pendingWithdrawals: new Map(),
-    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+    pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+    shadow: { rebalance: {
+      policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+      submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+    } },
   };
   // Storage admission validates the same canonical frame commitment used by
   // live Account consensus. Bench fixtures must never invent placeholder or
@@ -293,10 +307,9 @@ const makeHubState = (entityId: string, height: number, timestamp: number): Enti
   proposals: new Map(),
   config: { mode: 'proposer-based', threshold: 1n, validators: ['bench-signer'], shares: { 'bench-signer': 1n } },
   reserves: new Map([[1, 1_000_000_000_000_000_000n]]),
-  accounts: new Map(),
+  accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: { name: 'H1 1M Hub Bench', isHub: true, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -478,7 +491,7 @@ const seedHubBulk = async (
       const account = await makeAccount(entityId, counterpartyId, accountHeight, timestamp);
       appendDoc({ family: 'account', entityId, counterpartyId, value: account });
       if (cli.memory === 'all' || (cli.memory === 'hot' && index < cli.hotAccounts)) {
-        state.accounts.set(counterpartyId, account);
+        putResidentAccount(state, counterpartyId, account);
       }
     }
     await flushPending('seed.bulk.docs', { accounts: end, pendingLeaves: leaves.length });
@@ -576,7 +589,7 @@ const seedHub = async (
         value: account,
       });
       if (cli.memory === 'all' || (cli.memory === 'hot' && index < cli.hotAccounts)) {
-        state.accounts.set(counterpartyId, account);
+        putResidentAccount(state, counterpartyId, account);
       }
     }
     height += 1;
@@ -616,7 +629,7 @@ const touchAccounts = async (
   for (let index = startIndex; index < limit; index += 1) {
     const counterpartyId = normalizeEntityId(randomEntityId(cli.seed, index));
     const account = await makeAccount(entityId, counterpartyId, env.state.height, env.state.timestamp);
-    if (state.accounts.has(counterpartyId)) state.accounts.set(counterpartyId, account);
+    if (state.accounts.has(counterpartyId)) putResidentAccount(state, counterpartyId, account);
     docs.push({ family: 'account', entityId, counterpartyId, value: account });
   }
   docs.push({
@@ -648,7 +661,7 @@ const insertNewAccountsAfterRead = async (
   for (let index = startIndex; index < startIndex + count; index += 1) {
     const counterpartyId = normalizeEntityId(randomEntityId(`${cli.seed}:new-after-read`, index));
     const account = await makeAccount(entityId, counterpartyId, env.state.height, env.state.timestamp);
-    if (cli.memory !== 'none') state.accounts.set(counterpartyId, account);
+    if (cli.memory !== 'none') putResidentAccount(state, counterpartyId, account);
     docs.push({ family: 'account', entityId, counterpartyId, value: account });
   }
   docs.push({

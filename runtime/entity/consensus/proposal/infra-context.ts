@@ -38,11 +38,15 @@ export const materializeEntityInfraContext = async (
   env: EntityRuntimeContext,
   replica: EntityReplica,
   proposalTxs: readonly EntityTx[],
-  options: { usePersistedReplayContext?: boolean } = {},
+  // The caller must state whether these txs belong to the external Entity
+  // input recorded by the WAL or to a Runtime-derived follow-up frame. A
+  // default is unsafe: an omitted flag previously made multi-signer H+1
+  // account-work reuse the external H context during replay.
+  options: { usePersistedReplayContext: boolean },
 ): Promise<EntityInfraContext> => {
   const entityId = replica.entityId.trim().toLowerCase();
   const proposerSignerId = replica.signerId.trim().toLowerCase();
-  const replayContext = options.usePersistedReplayContext === false
+  const replayContext = !options.usePersistedReplayContext
     ? undefined
     : env.infrastructure?.replayEntityContexts?.get(`${entityId}:${proposerSignerId}`);
   if (replayContext) {

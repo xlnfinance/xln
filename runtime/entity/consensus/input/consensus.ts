@@ -140,6 +140,7 @@ const advanceEntityProposal = async (
 ): Promise<ApplyEntityInputResult | null> => {
   const singleSignerResult = selection.isSingleSigner
     ? await commitSingleSignerFrameIfReady(context, {
+        accountWorkOnly: selection.accountWorkOnly,
         localCanPropose,
         hasProposableAccountMempool: selection.hasProposableAccountMempool,
         proposalJPrefixCertificate: selection.proposalJPrefixCertificate,
@@ -154,6 +155,7 @@ const advanceEntityProposal = async (
   if (singleSignerResult) return singleSignerResult;
   await relayPreparedFrameIfReady(context, localCanPropose, selection.isSingleSigner);
   await startMultiSignerProposalIfReady(context, {
+    accountWorkOnly: selection.accountWorkOnly,
     hasProposableAccountMempool: selection.hasProposableAccountMempool,
     isSingleSigner: selection.isSingleSigner,
     proposalJPrefixCertificate: selection.proposalJPrefixCertificate,
@@ -172,7 +174,7 @@ export const applyEntityInput = async (
   entityReplica: EntityReplica,
   entityInput: EntityInput,
   options: {
-    trustedLocalRuntimeProtocol?: 'cross-j';
+    trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work';
     promoteCandidateState?: boolean;
   } = {},
 ): Promise<ApplyEntityInputResult> => {
@@ -182,11 +184,12 @@ export const applyEntityInput = async (
     consensusProfileCheckpoints[label] = Math.round(getPerfMs() - consensusProfileStartedAt);
   };
   const trustedLocalCrossJurisdiction = options.trustedLocalRuntimeProtocol === 'cross-j';
+  const accountWorkOnly = options.trustedLocalRuntimeProtocol === 'account-work';
   const ingress = prepareEntityInputIngress(
     env,
     entityReplica,
     entityInput,
-    trustedLocalCrossJurisdiction,
+    options.trustedLocalRuntimeProtocol,
     options.promoteCandidateState !== false,
   );
   if (!ingress.accepted) return ingress.result;
@@ -200,7 +203,11 @@ export const applyEntityInput = async (
   const jPrefixResult = handleJPrefixAttestations(phaseContext);
   if (jPrefixResult) return jPrefixResult;
   const { localCanPropose, trustedLocalEntityTxs } =
-    await admitEntityTransactions(phaseContext, trustedLocalCrossJurisdiction);
+    await admitEntityTransactions(
+      phaseContext,
+      trustedLocalCrossJurisdiction,
+      accountWorkOnly,
+    );
   checkpointConsensusProfile('admission');
 
   const commitNotificationResult = await handleCommitNotification(phaseContext);
@@ -223,6 +230,7 @@ export const applyEntityInput = async (
     localCanPropose,
     trustedLocalCrossJurisdiction,
     trustedLocalEntityTxs,
+    accountWorkOnly,
     checkpoint: checkpointConsensusProfile,
   });
   const proposalResult = await advanceEntityProposal(

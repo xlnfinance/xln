@@ -172,6 +172,16 @@ blocker list:
   another fee formula or change execution authority.
 - A future fresh typed mutable-path schema for generic oversized Entity/Book
   records. There will be no compatibility reader before mainnet.
+- Replace the fixed per-Entity Account-count ceiling with load-priced admission,
+  but only after paged Account hydration and bounded iteration are proven. The
+  Hub publishes a signed ten-minute policy epoch; a new Account open binds the
+  exact Hub, requester, bilateral pair and epoch to either adaptive Hashcash or
+  a bond paid through an existing Account. Existing Accounts remain usable.
+  Difficulty rises with Account count and measured reducer/WAL/network load;
+  exact retries deduplicate, while new attempts consume per-peer budgets. Track
+  per-Account transactions/second and deterministic machine cost, with separate
+  operator-set budgets for Hub-to-Hub relationships. This is long-term DoS
+  admission work, not a justification for a larger in-memory hard cap today.
 
 ## Next product milestone — universal jurisdiction Stack Manager
 

@@ -82,7 +82,6 @@ const installVoteTarget = (
     deferredAccountProposals: new Map(),
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: { name: 'reliable leader vote', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,

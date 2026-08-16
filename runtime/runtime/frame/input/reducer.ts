@@ -125,7 +125,15 @@ const createLineageRefresh = (env: RuntimeReplica): LineageRefresh => {
         guards.get(entityId)?.finalize();
         guards.delete(entityId);
         refreshRuntimeCheckpointLineageForEntity(env, entityId);
-      } else if (!guards.has(entityId)) {
+      } else {
+        // A causal local cross-j output may certify H+1 after H in the same
+        // atomic Runtime frame. Seal H into a fresh checkpoint anchor before
+        // applying H+1; otherwise the short certified head still contains H
+        // and appendCertifiedEntityFrameLink correctly rejects a second
+        // height as unrebased. Replacing (rather than force-refreshing) the
+        // guard preserves rollback when the later input commits no frame.
+        guards.get(entityId)?.finalize();
+        guards.delete(entityId);
         guards.set(entityId, beginRuntimeCheckpointLineageRefresh(env, entityId));
       }
     },

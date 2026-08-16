@@ -22,16 +22,18 @@ import {
   decodeEntitySummaries,
   decodeLoadBurstReport,
   decodeLoadFrame,
+  type LoadAccountProjection,
   type LoadFrame,
   type LoadRuntimeEntry,
-} from './worker-boundary';
-import { decodeLoadBookPage, type LoadBookSnapshot } from './worker-book-boundary';
+} from './boundary/worker-boundary';
+import { decodeLoadBookPage, type LoadBookSnapshot } from './boundary/worker-book-boundary';
 
 export type WorkerArgs = Readonly<{
   workDir: string;
   portBase: number;
   mode: string;
   swaps: number;
+  lanes: number;
   serverPidBeforeRestart?: number;
   serverPidAfterRestart?: number;
 }>;
@@ -66,14 +68,26 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
     values.set(key, value);
   }
   const allowed = new Set([
-    '--work-dir', '--port-base', '--mode', '--swaps',
+    '--work-dir', '--port-base', '--mode', '--swaps', '--lanes',
     '--server-pid-before-restart', '--server-pid-after-restart',
   ]);
   for (const key of values.keys()) if (!allowed.has(key)) throw new Error(`PRODUCTION_SWAP_LOAD_ARGUMENT_UNKNOWN:${key}`);
   const workDir = String(values.get('--work-dir') ?? '').trim();
   if (!workDir) throw new Error('PRODUCTION_SWAP_LOAD_WORK_DIR_REQUIRED');
   const swaps = parsePositiveInteger(values.get('--swaps') ?? '1', 'PRODUCTION_SWAP_LOAD_SWAPS_INVALID');
-  if (swaps > 1_000) throw new Error('PRODUCTION_SWAP_LOAD_SWAPS_EXCEED_ACCOUNT_FRAME_MAX');
+  const lanes = parsePositiveInteger(values.get('--lanes') ?? '1', 'PRODUCTION_SWAP_LOAD_LANES_INVALID');
+  // Parallel same-j mode creates one maker and one taker Account per lane.
+  // Keep headroom below the Hub's 1,000-Account hard cap for its bootstrap,
+  // MM, custody and peer Accounts instead of making a benchmark-only limit.
+  if (lanes > 480) throw new Error('PRODUCTION_SWAP_LOAD_LANES_EXCEED_HUB_ACCOUNT_MAX');
+  const mode = String(values.get('--mode') ?? 'same').trim();
+  if (mode === 'same' && swaps < lanes) {
+    throw new Error('PRODUCTION_SWAP_LOAD_LANES_WITHOUT_ORDERS');
+  }
+  if (mode === 'same' && swaps > lanes * 5) {
+    throw new Error('PRODUCTION_SWAP_LOAD_SWAPS_EXCEED_FIVE_PER_ACCOUNT_FRAME');
+  }
+  if (mode !== 'same' && lanes !== 1) throw new Error('PRODUCTION_SWAP_LOAD_NON_SAME_LANES_UNSUPPORTED');
   const beforePid = values.get('--server-pid-before-restart');
   const afterPid = values.get('--server-pid-after-restart');
   if ((beforePid === undefined) !== (afterPid === undefined)) {
@@ -82,8 +96,9 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
   return {
     workDir,
     portBase: parsePositiveInteger(values.get('--port-base'), 'PRODUCTION_SWAP_LOAD_PORT_BASE_INVALID'),
-    mode: String(values.get('--mode') ?? 'same').trim(),
+    mode,
     swaps,
+    lanes,
     ...(beforePid === undefined ? {} : {
       serverPidBeforeRestart: parsePositiveInteger(beforePid, 'PRODUCTION_SWAP_LOAD_RESTART_PID_BEFORE_INVALID'),
       serverPidAfterRestart: parsePositiveInteger(afterPid, 'PRODUCTION_SWAP_LOAD_RESTART_PID_AFTER_INVALID'),
@@ -153,7 +168,9 @@ export const sendObserved = async (
   let result = await runtime.adapter.send(input, { commandId, commandSequence });
   const enqueueAckElapsedMs = Math.max(0, Math.ceil(performance.now() - startedAt));
   while (result.status !== 'observed' && Date.now() < deadline) {
-    await sleep(250);
+    // Keep observation noise below a production Account round. The retry is
+    // idempotent because commandId and commandSequence stay byte-identical.
+    await sleep(10);
     result = await runtime.adapter.send(input, { commandId, commandSequence });
   }
   if (result.status !== 'observed') throw new Error(`PRODUCTION_SWAP_LOAD_COMMAND_NOT_OBSERVED:${commandId}`);
@@ -206,7 +223,7 @@ export const readLoadAccount = async (
   runtime: ConnectedRuntime,
   entityId: string,
   hubEntityId: string,
-): Promise<import('../../../../types/account').AccountReplica | null> => decodeAccountPage(await runtime.adapter.read<unknown>(
+): Promise<LoadAccountProjection | null> => decodeAccountPage(await runtime.adapter.read<unknown>(
   `entity/${entityId}/accounts`,
   { accountId: hubEntityId, accountsLimit: 1 },
 ));
@@ -224,7 +241,9 @@ export const waitForRuntimeHeight = async (
     } catch (error) {
       lastError = error;
     }
-    await sleep(100);
+    // Completion authority is committed book state; a coarse poll would turn
+    // observation delay into a fake TPS ceiling.
+    await sleep(10);
   }
   throw new Error(`PRODUCTION_SWAP_LOAD_RUNTIME_HEIGHT_NOT_REACHED:${targetHeight}`, { cause: lastError });
 };
@@ -239,7 +258,9 @@ export const waitForTradeCount = async (
     const book = await readLoadBook(runtime, hubEntityId);
     if (book.tradeCount === target) return book;
     if (book.tradeCount > target) throw new Error(`PRODUCTION_SWAP_LOAD_UNEXPECTED_CONCURRENT_TRADES:${book.tradeCount}:${target}`);
-    await sleep(100);
+    // Use the same observation cadence as the durable-frame poll. A coarse
+    // poll adds driver latency to the measured economic completion time.
+    await sleep(10);
   }
   throw new Error(`PRODUCTION_SWAP_LOAD_TRADE_NOT_COMMITTED:${target}`);
 };

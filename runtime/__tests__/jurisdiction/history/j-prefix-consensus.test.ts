@@ -75,7 +75,6 @@ const makeState = (validators: string[]): EntityState => ({
   reserves: new Map(),
   accounts: new Map(),
   lastFinalizedJHeight: 10,
-  jBlockChain: [],
   jHistoryFinality: {
     jurisdictionRef,
     baseHeight: 0,
@@ -272,7 +271,7 @@ describe('validator J-prefix consensus', () => {
     expect(result.workingReplica.state.lastFinalizedJHeight).toBe(1);
     expect(result.workingReplica.state.reserves.get(1)).toBe(100n);
     expect(result.workingReplica.state.hubRebalanceConfig?.routingFeePPM).toBe(777);
-    const frame = result.workingReplica.certifiedFrameLineage?.at(-1)?.frame;
+    const frame = result.workingReplica.certifiedFrameHead?.frame;
     expect(frame?.jPrefixCertificate?.attestations.has(validatorId)).toBe(true);
     expect(frame?.jPrefixCertificate?.selected.scannedThroughHeight).toBe(1);
   });
@@ -319,7 +318,7 @@ describe('validator J-prefix consensus', () => {
     expect(result.workingReplica.state.height).toBe(1);
     expect(result.workingReplica.state.lastFinalizedJHeight).toBe(11);
     expect(result.workingReplica.state.hubRebalanceConfig?.routingFeePPM).toBe(888);
-    const frame = result.workingReplica.certifiedFrameLineage?.at(-1)?.frame;
+    const frame = result.workingReplica.certifiedFrameHead?.frame;
     expect(frame?.jPrefixCertificate?.attestations.has(validatorId)).toBe(true);
     expect(frame?.jPrefixCertificate?.selected.scannedThroughHeight).toBe(11);
     expect(frame?.jPrefixCertificate?.selected.blocks).toEqual([]);
@@ -444,7 +443,7 @@ describe('validator J-prefix consensus', () => {
     expect(result.workingReplica.state.reserves.has(1)).toBe(false);
     expect(result.workingReplica.jHistory?.scannedThroughHeight).toBe(100);
     expect(result.workingReplica.jHistory?.eventBlocks.has(100)).toBe(true);
-    const frame = result.workingReplica.certifiedFrameLineage?.at(-1)?.frame;
+    const frame = result.workingReplica.certifiedFrameHead?.frame;
     expect(frame?.jPrefixCertificate?.selected.scannedThroughHeight).toBe(25);
   });
 
@@ -1003,7 +1002,7 @@ describe('validator J-prefix consensus', () => {
     expect(rolled.outcome).toEqual({ kind: 'committed' });
     expect(rolled.workingReplica.state.height).toBe(1);
     expect(rolled.workingReplica.state.lastFinalizedJHeight).toBe(10);
-    expect(rolled.workingReplica.certifiedFrameLineage?.at(-1)?.frame.txs).toEqual([]);
+    expect(rolled.workingReplica.certifiedFrameHead?.frame.txs).toEqual([]);
     expect(rolled.workingReplica.jPrefixRound?.targetEntityHeight).toBe(2);
     expect(rolled.workingReplica.jPrefixRound?.certificate?.selected.scannedThroughHeight).toBe(11);
 
@@ -1026,7 +1025,7 @@ describe('validator J-prefix consensus', () => {
     expect(finalized.workingReplica.state.height).toBe(2);
     expect(finalized.workingReplica.state.lastFinalizedJHeight).toBe(11);
     expect(finalized.workingReplica.state.reserves.get(1)).toBe(100n);
-    expect(finalized.workingReplica.certifiedFrameLineage?.at(-1)?.frame.txs.map(tx => tx.type)).toEqual([
+    expect(finalized.workingReplica.certifiedFrameHead?.frame.txs.map(tx => tx.type)).toEqual([
       'scheduledWake',
       'j_event',
     ]);
@@ -1232,7 +1231,7 @@ describe('validator J-prefix consensus', () => {
     expect(third.workingReplica.state.lastFinalizedJHeight).toBe(12);
     expect(third.workingReplica.jPrefixRound).toBeUndefined();
     expect(
-      third.workingReplica.certifiedFrameLineage?.at(-1)?.frame.jPrefixCertificate?.selected.scannedThroughHeight,
+      third.workingReplica.certifiedFrameHead?.frame.jPrefixCertificate?.selected.scannedThroughHeight,
     ).toBe(12);
   });
 

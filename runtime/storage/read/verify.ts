@@ -23,17 +23,23 @@ import {
 } from '../keys';
 import { countKeys, iterateKeys, readValidatedOrNull } from '../database/level';
 import { validateStorageSnapshotManifestValue } from '../schema/authoritative-schema';
-import { readStorageFrameRecord, readStorageHead } from './read';
+import { inspectSnapshotGraphRows } from './snapshot-graph-integrity';
+import {
+  readStorageFramePayloads,
+  readStorageFrameRecord,
+  readStorageHead,
+} from './read';
 import type { RuntimeDbLike, RuntimeFrame, StorageHead } from '../types';
 
 const countSnapshotDocs = async (db: RuntimeDbLike, height: number): Promise<number> => {
-  const [entities, accounts, books, replicaMetas] = await Promise.all([
+  const [entities, accounts, books, graphRows, replicaMetas] = await Promise.all([
     countKeys(db, { prefix: keySnapshotEntityPrefix(height) }),
     countKeys(db, { prefix: keySnapshotAccountPrefix(height) }),
     countKeys(db, { prefix: keySnapshotBookPrefix(height) }),
+    inspectSnapshotGraphRows(db, height),
     countKeys(db, { prefix: keySnapshotReplicaMetaPrefix(height) }),
   ]);
-  return entities + accounts + books + replicaMetas;
+  return entities + accounts + books + graphRows + replicaMetas;
 };
 
 const computeSnapshotReplicaMetaDigest = async (
@@ -181,11 +187,12 @@ export const verifyStorageTailIntegrity = async (
       if (!Array.isArray(record.canonicalEntityHashes) || !record.canonicalStateHash) {
         throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISSING: height=${height}`);
       }
+      const payloads = await readStorageFramePayloads(db, record);
       const expectedCanonicalHash = computeCanonicalRuntimeStateHash(
         record.height,
         record.timestamp,
         record.canonicalEntityHashes,
-        record.runtimeMachine,
+        payloads.runtimeMachine,
       );
       if (record.canonicalStateHash !== expectedCanonicalHash) {
         throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISMATCH: height=${height} expected=${expectedCanonicalHash} actual=${record.canonicalStateHash}`);

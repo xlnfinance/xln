@@ -34,6 +34,9 @@ import {
   restoreDurableRuntimeSnapshot,
 } from '../../../storage/wal/snapshot';
 import { applyJEventRange } from '../../helpers/j-history';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { EntityAccountCandidateMap } from '../../../entity/state/persistent-account-map';
 import {
   COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
   counterpartyBoardResealDeadlineHookId,
@@ -45,6 +48,17 @@ import {
 import type { AccountInputSecurityContext } from '../../../account/consensus/dispute/deadline-policy';
 
 const digest = (byte: string): string => `0x${byte.repeat(32)}`;
+
+const putAccount = (state: EntityState, counterpartyId: string, account: ReturnType<typeof makeAccount>): void => {
+  if (state.accounts instanceof EntityAccountCandidateMap) {
+    state.accounts.set(counterpartyId, account);
+    return;
+  }
+  if (!(state.accounts instanceof PersistentEntityAccountMap)) {
+    throw new Error('TEST_PERSISTENT_ACCOUNT_MAP_REQUIRED');
+  }
+  state.accounts = state.accounts.updated(counterpartyId, account);
+};
 
 const certifiedResealContext = (
   env: ReturnType<typeof createEmptyEnv>,
@@ -283,7 +297,6 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
       height: 1,
       prevFrameHash: digest('00'),
       lastFinalizedJHeight: 23,
-      jBlockChain: [],
       accounts: new Map([[sourceEntityId, account]]),
     },
   } as unknown as EntityReplica;
@@ -423,7 +436,6 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
   uncertified.currentHeight = 1;
   uncertified.currentFrame = { ...uncertified.currentFrame, height: 1, stateHash: digest('d1') };
   uncertified.currentFrameHanko = '0x01';
-  const uncertifiedBefore = structuredClone(uncertified);
   const certified = makeAccount(sourceEntityId, certifiedId);
   certified.currentHeight = 2;
   certified.currentFrame = { ...certified.currentFrame, height: 2, stateHash: digest('d2') };
@@ -441,7 +453,6 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
     activationLogIndex: 9,
     reason: 'bilateral-frame-uncertified',
   };
-  const certifiedBefore = structuredClone(certified);
   env.state.eReplicas.set(`${certifiedId}:${signerId}`, {
     entityId: certifiedId,
     signerId,
@@ -456,14 +467,10 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
       },
     },
   } as unknown as EntityReplica);
-  const state = {
-    entityId: sourceEntityId,
-    timestamp: 0,
-    accounts: new Map([
-      [uncertifiedId, uncertified],
-      [certifiedId, certified],
-    ]),
-  } as unknown as EntityState;
+  const state = makeState(sourceEntityId, signerId);
+  putAccount(state, uncertifiedId, uncertified);
+  putAccount(state, certifiedId, certified);
+  const accountsRootBeforeDraft = state.accounts.rootHash();
   const activation = {
     type: 'BoardActivated',
     blockNumber: 7,
@@ -485,8 +492,7 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
     hash: digest('d2'),
     type: 'accountFrame',
   })]);
-  expect(uncertified).toEqual(uncertifiedBefore);
-  expect(certified).toEqual(certifiedBefore);
+  expect(state.accounts.rootHash()).toBe(accountsRootBeforeDraft);
   expect(uncertified.currentHeight).toBe(1);
   expect(uncertified.currentFrame.stateHash).toBe(digest('d1'));
   expect(uncertified.state.jNonce).toBe(0);
@@ -510,20 +516,23 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
       },
     },
   ].sort((left, right) => left.counterpartyId.localeCompare(right.counterpartyId)));
-  applyBoardRotationResealMigrations(state, result.accountMigrations);
-  expect(uncertified.boardResealMigration).toEqual(
+  const candidate = createEntityFrameCandidateState(state);
+  applyBoardRotationResealMigrations(candidate, result.accountMigrations);
+  const migratedUncertified = candidate.accounts.get(uncertifiedId)!;
+  const migratedCertified = candidate.accounts.get(certifiedId)!;
+  expect(migratedUncertified.boardResealMigration).toEqual(
     result.accountMigrations.find(update => update.counterpartyId === uncertifiedId)?.marker,
   );
-  expect(certified.boardResealMigration).toEqual(
+  expect(migratedCertified.boardResealMigration).toEqual(
     result.accountMigrations.find(update => update.counterpartyId === certifiedId)?.marker,
   );
-  const withoutMarker = structuredClone(uncertified);
-  delete withoutMarker.boardResealMigration;
-  expect(withoutMarker).toEqual(uncertifiedBefore);
-  const restored = hydrateAccountDocFromStorage(projectAccountDoc(uncertified));
-  expect(restored.boardResealMigration).toEqual(uncertified.boardResealMigration);
-  expect(restored.currentFrame).toEqual(uncertified.currentFrame);
-  expect(restored.state.jNonce).toBe(uncertified.state.jNonce);
+  expect(migratedUncertified.currentHeight).toBe(uncertified.currentHeight);
+  expect(migratedUncertified.currentFrame).toEqual(uncertified.currentFrame);
+  expect(migratedUncertified.state.jNonce).toBe(uncertified.state.jNonce);
+  const restored = hydrateAccountDocFromStorage(projectAccountDoc(migratedUncertified));
+  expect(restored.boardResealMigration).toEqual(migratedUncertified.boardResealMigration);
+  expect(restored.currentFrame).toEqual(migratedUncertified.currentFrame);
+  expect(restored.state.jNonce).toBe(migratedUncertified.state.jNonce);
 });
 
 test('partial bilateral dispute evidence never emits a frame-only board reseal', () => {
@@ -714,7 +723,7 @@ test('two board rotations in one finalized J range collapse to the latest reseal
   };
   account.currentFrameHanko = '0x01';
   account.counterpartyFrameHanko = '0x02';
-  state.accounts.set(counterpartyId, account);
+  putAccount(state, counterpartyId, account);
   env.state.eReplicas.set(`${counterpartyId}:${signerId}`, {
     entityId: counterpartyId,
     signerId,
@@ -799,7 +808,7 @@ test('certified counterparty board activation arms an exact 24-hour reseal deadl
     stateHash: digest('83'),
     accountStateRoot: digest('83'),
   };
-  state.accounts.set(counterpartyId, account);
+  putAccount(state, counterpartyId, account);
 
   const foundation = {
     type: 'FoundationBootstrapped',

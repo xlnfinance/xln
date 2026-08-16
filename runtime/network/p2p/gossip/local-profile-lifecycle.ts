@@ -11,17 +11,27 @@ import type { EntityReplica } from '../../../entity/types';
 
 const normalize = (value: string): string => value.trim().toLowerCase();
 
-const defaultRouteReplica = (
+export const hasCurrentBoardProfileRouteAuthority = async (
+  env: RuntimeReplica,
+  replica: EntityReplica,
+  signerId: string,
+): Promise<boolean> => {
+  const defaultSignerId = replica.state.config.validators[0];
+  if (!defaultSignerId) return false;
+  const expectedAddress = getSignerAddress(env, defaultSignerId)?.toLowerCase();
+  if (!expectedAddress || getSignerAddress(env, signerId)?.toLowerCase() !== expectedAddress) return false;
+  if (getSignerPrivateKeyIfAvailable(env, signerId) === null) return false;
+  return hasCurrentProfileBoardAuthority(env, replica.state);
+};
+
+const defaultRouteReplica = async (
   env: RuntimeReplica,
   candidates: readonly EntityReplica[],
-): EntityReplica | undefined => {
-  const defaultSignerId = candidates[0]?.state.config.validators[0];
-  if (!defaultSignerId) return undefined;
-  const expectedAddress = getSignerAddress(env, defaultSignerId)?.toLowerCase();
-  if (!expectedAddress) return undefined;
-  return candidates.find(candidate =>
-    getSignerAddress(env, candidate.signerId)?.toLowerCase() === expectedAddress
-    && getSignerPrivateKeyIfAvailable(env, candidate.signerId) !== null);
+): Promise<EntityReplica | undefined> => {
+  for (const candidate of candidates) {
+    if (await hasCurrentBoardProfileRouteAuthority(env, candidate, candidate.signerId)) return candidate;
+  }
+  return undefined;
 };
 
 /** Publish the EntityState-owned public key through one signed gossip route. */
@@ -34,9 +44,8 @@ export const announceCertifiedLocalProfiles = async (
     const candidates = [...env.state.eReplicas.values()]
       .filter(candidate => normalize(candidate.entityId) === entityId)
       .sort((left, right) => compareStableText(left.signerId, right.signerId));
-    const replica = defaultRouteReplica(env, candidates);
+    const replica = await defaultRouteReplica(env, candidates);
     if (!replica) continue;
-    if (!(await hasCurrentProfileBoardAuthority(env, replica.state))) continue;
     const profile = buildLocalEntityProfile(env, replica.state);
     const certification = replica.hankoWitness?.get(computeProfileHash(profile));
     if (!certification || certification.type !== 'profile') continue;

@@ -34,6 +34,19 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { addr, makeAccount, makeState } from '../../helpers/cross-j';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
+
+const putCommittedAccount = (
+  state: EntityState,
+  counterpartyId: string,
+  account: ReturnType<typeof makeAccount>,
+): void => {
+  if (!(state.accounts instanceof PersistentEntityAccountMap)) {
+    throw new Error('TEST_PERSISTENT_ACCOUNT_MAP_REQUIRED');
+  }
+  state.accounts = state.accounts.updated(counterpartyId, account);
+};
 
 const digest = (value: number): string => `0x${value.toString(16).padStart(64, '0')}`;
 
@@ -169,13 +182,14 @@ test('bad board reseal account cannot block good output and re-arms only after A
   bad.currentDisputeProofNonce = 7;
   bad.currentDisputeProofProposerIsLeft = true;
   bad.currentDisputeProofHanko = '0x03';
-  state.accounts = new Map([[badId, bad], [goodId, good]]);
+  putCommittedAccount(state, badId, bad);
+  putCommittedAccount(state, goodId, good);
   installBoardResealHook(state, activation(sourceEntityId));
 
-  const evidenceBeforeFirst = captureAccountBoardResealEvidence(state);
+  const evidenceBeforeFirst = captureAccountBoardResealEvidence(state, new Set([badId]));
   const first = await handleScheduledWakeEntityTx(
     env,
-    state,
+    createEntityFrameCandidateState(state),
     scheduledWakeForHook(state, signerId),
     false,
   );
@@ -199,7 +213,10 @@ test('bad board reseal account cannot block good output and re-arms only after A
   );
   expect(first.newState.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)).toBe(false);
 
-  const evidenceBeforeCertification = captureAccountBoardResealEvidence(first.newState);
+  const evidenceBeforeCertification = captureAccountBoardResealEvidence(
+    first.newState,
+    new Set([badId]),
+  );
   const updatedBad = first.newState.accounts.get(badId)!;
   updatedBad.counterpartyDisputeHash = updatedBad.currentDisputeHash;
   updatedBad.counterpartyDisputeProofBodyHash = updatedBad.currentDisputeProofBodyHash;
@@ -247,19 +264,22 @@ test('Account advance re-arms the same activation and issues the current frame r
     1n,
     digest(251),
   );
-  state.accounts.set(fixture.counterpartyId, fixture.account);
+  putCommittedAccount(state, fixture.counterpartyId, fixture.account);
   installBoardResealHook(state, activation(sourceEntityId, 7));
 
   const first = await handleScheduledWakeEntityTx(
     env,
-    state,
+    createEntityFrameCandidateState(state),
     scheduledWakeForHook(state, signerId),
     false,
   );
   expect(first.outputs).toHaveLength(1);
   expect(first.newState.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)).toBe(false);
 
-  const evidenceBeforeAdvance = captureAccountBoardResealEvidence(first.newState);
+  const evidenceBeforeAdvance = captureAccountBoardResealEvidence(
+    first.newState,
+    new Set([fixture.counterpartyId]),
+  );
   const advanced = first.newState.accounts.get(fixture.counterpartyId)!;
   advanced.currentHeight = 2;
   advanced.currentFrame = {
@@ -328,7 +348,7 @@ test('1000 board reseals drain in deterministic 32-account frames across restart
       BigInt(index + 1),
       digest(10_000 + index),
     );
-    state.accounts.set(fixture.counterpartyId, fixture.account);
+    putCommittedAccount(state, fixture.counterpartyId, fixture.account);
   }
   installBoardResealHook(state, activation(sourceEntityId, 5));
   const sourceReplica = {
@@ -356,7 +376,12 @@ test('1000 board reseals drain in deterministic 32-account frames across restart
       .sort()
       .slice(0, 32);
     state.timestamp = hook.triggerAt;
-    const result = await handleScheduledWakeEntityTx(env, state, scheduledWakeForHook(state, signerId), false);
+    const result = await handleScheduledWakeEntityTx(
+      env,
+      createEntityFrameCandidateState(state),
+      scheduledWakeForHook(state, signerId),
+      false,
+    );
     expect(result.outputs.length).toBeGreaterThan(0);
     expect(result.accountChanges).toEqual(nextIds);
     expect(result.outputs.length).toBeLessThanOrEqual(32);
@@ -403,7 +428,11 @@ test('missing counterparty reseal starts canonical dispute preparation after 24 
   const state = makeState(sourceEntityId, signerId, jurisdiction);
   state.timestamp = 50_000;
   state.crontabState = initCrontab();
-  state.accounts.set(counterpartyId, makeCommittedAccount(sourceEntityId, counterpartyId, digest(30_003)));
+  putCommittedAccount(
+    state,
+    counterpartyId,
+    makeCommittedAccount(sourceEntityId, counterpartyId, digest(30_003)),
+  );
   const hookId = counterpartyBoardResealDeadlineHookId(counterpartyId, 44, 3);
   scheduleHook(state.crontabState, {
     id: hookId,
@@ -415,7 +444,7 @@ test('missing counterparty reseal starts canonical dispute preparation after 24 
 
   const result = await handleScheduledWakeEntityTx(
     env,
-    state,
+    createEntityFrameCandidateState(state),
     scheduledWakeForId(state, signerId, hookId),
     false,
   );
@@ -446,7 +475,7 @@ test('fresh counterparty reseal satisfies every older activation deadline', asyn
     frameHeight: 1,
     frameHash: digest(31_003),
   };
-  state.accounts.set(counterpartyId, account);
+  putCommittedAccount(state, counterpartyId, account);
   const hookId = counterpartyBoardResealDeadlineHookId(counterpartyId, 44, 9);
   scheduleHook(state.crontabState, {
     id: hookId,
@@ -457,7 +486,7 @@ test('fresh counterparty reseal satisfies every older activation deadline', asyn
 
   const result = await handleScheduledWakeEntityTx(
     env,
-    state,
+    createEntityFrameCandidateState(state),
     scheduledWakeForId(state, signerId, hookId),
     false,
   );

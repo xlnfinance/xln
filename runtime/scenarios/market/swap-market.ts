@@ -16,6 +16,7 @@
  */
 
 import type { RuntimeReplica } from '../../runtime/types';
+import { clearRuntimeFrameEvents } from '../../runtime/observability/env-events';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
 import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
 import type { EntityInput } from '../../entity/types';
@@ -98,16 +99,12 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
     console.log(`[SWAP-MARKET] Clearing ${env.state.eReplicas.size} old entities from previous scenario`);
     env.state.eReplicas.clear();
   }
-  if (env.history && env.history.length > 0) {
-    console.log(`[SWAP-MARKET] Clearing ${env.history.length} old snapshots from previous scenario`);
-    env.history = [];
-  }
   env.state.height = 0;
   env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   env.pendingOutputs = [];
   env.pendingNetworkOutputs = [];
   env.networkInbox = [];
-  env.frameLogs = [];
+  clearRuntimeFrameEvents(env);
   env.gossip = createGossipLayer();
 
   console.log('═══════════════════════════════════════════════════════════════');
@@ -782,7 +779,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
   console.log('\n═══════════════════════════════════════════════════════════════');
   console.log('✅ MULTI-PARTY MARKET SIMULATION COMPLETE!');
   console.log('═══════════════════════════════════════════════════════════════');
-  console.log(`📊 Total frames: ${env.history?.length || 0}`);
+  console.log(`📊 Total frames: ${env.state.height}`);
   console.log(`👥 Participants: 10 (${entities.map(e => e.name).join(', ')})`);
   console.log(`💱 Orderbooks: 3 (USDC/ETH, USDC/WBTC, USDC/DAI)`);
   console.log(`📈 Orders placed: 9`);
@@ -1026,7 +1023,7 @@ export async function swapMarketStress(env: RuntimeReplica): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('                 STRESS TEST RESULTS                           ');
   console.log('═══════════════════════════════════════════════════════════════');
-  console.log(`📊 Total frames: ${env.history?.length || 0}`);
+  console.log(`📊 Total frames: ${env.state.height}`);
   console.log(`📈 Orders placed: ${ordersPlaced}`);
   console.log(`⏱️  Order time: ${orderTime}ms`);
   console.log(`🚀 Throughput: ${(ordersPlaced / (orderTime / 1000)).toFixed(1)} orders/sec`);

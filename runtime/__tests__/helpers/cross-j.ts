@@ -17,6 +17,9 @@ import type { RuntimeReplica } from '../../runtime/types';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../../types/jurisdiction-events';
 import { createDefaultDelta } from '../../account/state/delta';
 import { hexlify } from 'ethers';
+import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
+import { PersistentAccountStateMap } from '../../account/state/persistent-state-map';
 
 export const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 export const entity = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -105,20 +108,18 @@ export const makeAccount = (
         entityId: leftEntity,
         counterpartyId: rightEntity,
       }),
-      deltas: new Map([[1, delta]]),
-      locks: new Map(),
-      swapOffers: new Map(),
+      deltas: PersistentAccountStateMap.fromEntries('deltas', [[1, delta]]),
+      locks: PersistentAccountStateMap.empty('locks'),
+      swapOffers: PersistentAccountStateMap.empty('swapOffers'),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
+      requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+      requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
     },
     status: 'active',
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
     mempool: [],
     currentFrame: {
       height: 0,
@@ -136,8 +137,11 @@ export const makeAccount = (
     rollbackCount: 0,
     proofHeader: { fromEntity: selfId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    pendingWithdrawals: new Map(),
-    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+    pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+    shadow: { rebalance: {
+      policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+      submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+    } },
   };
 };
 
@@ -148,14 +152,14 @@ export const makeState = (
   counterpartyId?: string,
 ): EntityState => {
   const entityEncryptionPrivateKey = hexlify(deriveSignerKeySync(entityId, 'entity-encryption'));
-  const accounts = new Map<string, AccountReplica>();
+  let accounts = PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash);
   if (counterpartyId) {
     const { chainId, depositoryAddress } = jurisdiction;
     if (!Number.isSafeInteger(chainId) || chainId === undefined || !depositoryAddress) {
       throw new Error(`CROSS_J_TEST_JURISDICTION_INCOMPLETE:${jurisdiction.name}`);
     }
     const account = makeAccount(entityId, counterpartyId, { chainId, depositoryAddress });
-    accounts.set(counterpartyId, account);
+    accounts = accounts.updated(counterpartyId, account);
   }
   return {
     entityId,
@@ -169,7 +173,6 @@ export const makeState = (
     reserves: new Map(),
     accounts,
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,

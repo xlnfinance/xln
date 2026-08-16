@@ -235,6 +235,25 @@ describe('PersistentRadixValueMap', () => {
     expect(delOrder).toEqual([...delOrder].sort((left, right) => left < right ? -1 : 1));
   });
 
+  test('diffs independently rebuilt cold projections by commitment, not object identity', () => {
+    const treeOptions = { ...options, keyBytes: encodeRawRadixTextKey };
+    const entries = Array.from(
+      { length: 200 },
+      (_, index) => [`key-${index.toString().padStart(3, '0')}`, String(index)] as const,
+    );
+    const previous = fromMap(entries, treeOptions);
+    const identical = fromMap(entries, treeOptions);
+    expect(identical.nodeChangesSince(previous)).toEqual({ puts: [], dels: [] });
+
+    const changedEntries = entries.map(entry => entry[0] === 'key-100'
+      ? [entry[0], 'changed'] as const
+      : entry);
+    const changed = fromMap(changedEntries, treeOptions).nodeChangesSince(previous);
+    expect(changed.puts.some(record => record.kind === 'leaf' && record.key === 'key-100')).toBe(true);
+    expect(changed.puts.length).toBeLessThan(32);
+    expect(changed.dels.length).toBeLessThan(32);
+  });
+
   test('has tests leaf membership when the stored value is undefined', () => {
     const withUndefined = {
       ...options,

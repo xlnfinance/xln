@@ -73,7 +73,7 @@ describe('aggregateVerdicts', () => {
     expect(result.summary).toContain('did not reach the 700-point threshold');
   });
 
-  test('fallback judge keeps 1000-point scores readable for long transcripts', async () => {
+  test('failover judge keeps 1000-point scores readable for long transcripts', async () => {
     const judge: JudgeConfig = {
       id: 'logic',
       label: 'Logic Judge',

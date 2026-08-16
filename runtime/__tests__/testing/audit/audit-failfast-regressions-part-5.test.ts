@@ -594,7 +594,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     accounts: new Map(),
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: {
       name: 'Audit Entity',
       isHub: false,
@@ -622,7 +621,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: 'Audit Entity',
     isHub: false,

@@ -14,10 +14,16 @@ import { buildCollectiveEntityProposalTx } from '../../../entity/auth/authorizat
 import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
 import { applyEntityInput } from '../../../entity/consensus';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
-import { commitEntityFrameCandidateState } from '../../../entity/state-clone';
+import {
+  commitEntityFrameCandidateState,
+  createEntityFrameCandidateState,
+} from '../../../entity/state-clone';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { applyEntityTx } from '../../../entity/tx/apply';
 import { handleEntityProviderTransfer } from '../../../entity/tx/handlers/entity-provider-action';
+import { handleEntityProviderProposeControlBoard } from '../../../entity/tx/handlers/control-board-proposal';
 import {
   applyEntityProviderActionCancelled,
   applyEntityProviderActionExecuted,
@@ -26,6 +32,7 @@ import { encodeBoard, hashBoard } from '../../../entity/factory';
 import { provisionTestEntityEncryptionKey } from '../../helpers/cross-j';
 import { buildQuorumHanko, verifyHankoForHash } from '../../../hanko/signing';
 import { buildSingleSignerHanko } from '../../../hanko/batch';
+import { hashBoardProposalHankoPayload } from '../../../hanko/onchain-domain';
 import {
   applyRetryEntityProviderActionRuntimeTx,
 } from '../../../runtime/registration/entity-provider-action-submit-state';
@@ -80,9 +87,8 @@ const baseState = (entityId: string, config: ConsensusConfig, timestamp: number)
   proposals: new Map(),
   config,
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: PersistentEntityAccountMap.empty(computeEntityAccountValueHash),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -219,7 +225,120 @@ const buildPending = async (fixture: ReturnType<typeof setup>) => {
   return { result, jTx, pending };
 };
 
+const installRegisteredTarget = (
+  fixture: ReturnType<typeof setup>,
+  targetEntityId: string,
+): void => {
+  const initialBoardHash = hashBoard(encodeBoard(fixture.state.config, fixture.env));
+  applyCertifiedBoardEvent(fixture.env, fixture.state, {
+    type: 'EntityRegistered',
+    data: {
+      entityId: targetEntityId,
+      entityNumber: BigInt(targetEntityId).toString(),
+      boardHash: initialBoardHash,
+    },
+    blockNumber: 3,
+    blockHash: blockHash('13'),
+    transactionHash: blockHash('23'),
+    logIndex: 0,
+  });
+  // Give the target a different epoch from the shareholder. This makes the
+  // domain assertion catch accidentally reading the shareholder board epoch.
+  applyCertifiedBoardEvent(fixture.env, fixture.state, {
+    type: 'BoardActivated',
+    data: {
+      entityId: targetEntityId,
+      previousBoardHash: initialBoardHash,
+      newBoardHash: blockHash('55'),
+      previousBoardValidUntil: '1700604800',
+    },
+    blockNumber: 4,
+    blockHash: blockHash('14'),
+    transactionHash: blockHash('24'),
+    logIndex: 0,
+  });
+};
+
 describe('EntityProvider action flow', () => {
+  test('builds the exact reserve-CONTROL board proposal domain and rejects duplicate or invalid authority', async () => {
+    const fixture = setup('control-board-proposal');
+    const targetEntityId = numberedEntityId(3n);
+    const nextBoardHash = blockHash('7a');
+    installRegisteredTarget(fixture, targetEntityId);
+
+    const result = await handleEntityProviderProposeControlBoard(fixture.state, {
+      type: 'entityProviderProposeControlBoard',
+      data: {
+        targetEntityId,
+        newBoardHash: nextBoardHash,
+        actionNonce: 7n,
+      },
+    }, fixture.env);
+    const output = result.jOutputs?.[0]?.jTxs[0];
+    if (!output || output.type !== 'entityProviderProposeControlBoard') {
+      throw new Error('TEST_CONTROL_BOARD_PROPOSAL_OUTPUT_MISSING');
+    }
+    const target = resolveObserverCertifiedBoardRecord(
+      fixture.state,
+      getCertifiedBoardNodeStore(fixture.env),
+      targetEntityId,
+    );
+    if (!target) throw new Error('TEST_CONTROL_BOARD_TARGET_AUTHORITY_MISSING');
+    expect(target.boardEpoch).toBe(1);
+    const expectedHash = hashBoardProposalHankoPayload({
+      chainId: 31_337n,
+      entityProviderAddress: address('a3'),
+      boardEpoch: 1,
+    }, {
+      entityId: targetEntityId,
+      newBoardHash: nextBoardHash,
+      authority: 1,
+      actionNonce: 7n,
+    }).toLowerCase();
+    expect(output.data).toEqual({
+      targetEntityId,
+      newBoardHash: nextBoardHash,
+      boardEpoch: 1n,
+      actionNonce: 7n,
+      proposalHash: expectedHash,
+      supporterVotes: [{ entityId: fixture.state.entityId }],
+      signerId: fixture.signerId,
+    });
+    expect(result.hashesToSign).toEqual([expect.objectContaining({
+      hash: expectedHash,
+      type: 'entityProviderAction',
+    })]);
+
+    await expect(handleEntityProviderProposeControlBoard(fixture.state, {
+      type: 'entityProviderProposeControlBoard',
+      data: {
+        targetEntityId,
+        newBoardHash: nextBoardHash,
+        actionNonce: 7n,
+        supporterVotes: [{
+          entityId: fixture.state.entityId,
+          hankoSignature: `0x${'11'.repeat(65)}`,
+        }],
+      },
+    }, fixture.env)).rejects.toThrow('CONTROL_BOARD_PROPOSAL_SUPPORTER_DUPLICATE');
+    await expect(handleEntityProviderProposeControlBoard(fixture.state, {
+      type: 'entityProviderProposeControlBoard',
+      data: {
+        targetEntityId: numberedEntityId(99n),
+        newBoardHash: nextBoardHash,
+        actionNonce: 7n,
+      },
+    }, fixture.env)).rejects.toThrow('CONTROL_BOARD_PROPOSAL_TARGET_AUTHORITY_MISSING');
+    await expect(handleEntityProviderProposeControlBoard(fixture.state, {
+      type: 'entityProviderProposeControlBoard',
+      data: {
+        targetEntityId,
+        newBoardHash: nextBoardHash,
+        actionNonce: 0n,
+      },
+    }, fixture.env)).rejects.toThrow('CONTROL_BOARD_PROPOSAL_NONCE_INVALID');
+  });
+
   test('builds exact trusted-domain transfer and release intents', async () => {
     const fixture = setup('exact-domain');
     const transfer = await buildPending(fixture);
@@ -236,7 +355,7 @@ describe('EntityProvider action flow', () => {
     });
     expect(recomputeEntityProviderActionHash(transfer.pending)).toBe(transfer.pending.actionHash);
 
-    const finalized = structuredClone(transfer.result.newState);
+    const finalized = createEntityFrameCandidateState(transfer.result.newState);
     applyEntityProviderActionExecuted(finalized, {
       entityId: finalized.entityId,
       actionNonce: 1n,
@@ -327,7 +446,7 @@ describe('EntityProvider action flow', () => {
       throw new Error('TEST_ENTITY_PROVIDER_CANCEL_PENDING_MISSING');
     }
 
-    const executeWins = structuredClone(cancellation.newState);
+    const executeWins = createEntityFrameCandidateState(cancellation.newState);
     applyEntityProviderActionExecuted(executeWins, {
       entityId: executeWins.entityId,
       actionNonce: original.pending.actionNonce,
@@ -340,7 +459,7 @@ describe('EntityProvider action flow', () => {
       generation: 2,
     });
 
-    const cancelWins = structuredClone(cancellation.newState);
+    const cancelWins = createEntityFrameCandidateState(cancellation.newState);
     applyEntityProviderActionCancelled(cancelWins, {
       entityId: cancelWins.entityId,
       actionNonce: original.pending.actionNonce,
@@ -354,7 +473,7 @@ describe('EntityProvider action flow', () => {
       generation: 2,
     });
 
-    const mismatched = structuredClone(cancellation.newState);
+    const mismatched = createEntityFrameCandidateState(cancellation.newState);
     expect(() => applyEntityProviderActionCancelled(mismatched, {
       entityId: mismatched.entityId,
       actionNonce: original.pending.actionNonce,
@@ -448,14 +567,14 @@ describe('EntityProvider action flow', () => {
       { actionNonce: 1n, actionHash: `0x${'ff'.repeat(32)}`, actionKind: 0 as const },
       { actionNonce: 1n, actionHash: pending.actionHash, actionKind: 1 as const },
     ]) {
-      const state = structuredClone(result.newState);
+      const state = createEntityFrameCandidateState(result.newState);
       expect(() => applyEntityProviderActionExecuted(state, {
         entityId: state.entityId,
         ...bad,
       }, 10)).toThrow(/ENTITY_PROVIDER_ACTION_(EVENT_NONCE_MISMATCH|RECEIPT_MISMATCH)/);
       expect(state.entityProviderActionState?.pending?.actionHash).toBe(pending.actionHash);
     }
-    const state = structuredClone(result.newState);
+    const state = createEntityFrameCandidateState(result.newState);
     applyEntityProviderActionExecuted(state, {
       entityId: state.entityId,
       actionNonce: 1n,
@@ -897,7 +1016,7 @@ describe('EntityProvider action flow', () => {
         entityId,
         signerId,
         entityEncPubKey: '',
-        state: structuredClone(twoVotes.newState),
+        state: createEntityFrameCandidateState(twoVotes.newState),
         mempool: [],
         isProposer: index === 0,
       };
@@ -1057,7 +1176,7 @@ describe('EntityProvider action flow', () => {
       expect(reconciled.events?.filter((event) => event.name === 'EntityProviderActionExecuted'))
         .toHaveLength(1);
 
-      const afterTransfer = structuredClone(result.newState);
+      const afterTransfer = createEntityFrameCandidateState(result.newState);
       applyEntityProviderActionExecuted(afterTransfer, {
         entityId,
         actionNonce: 1n,
@@ -1096,7 +1215,7 @@ describe('EntityProvider action flow', () => {
       expect(String(releaseEvent?.args['actionHash']).toLowerCase())
         .toBe(releaseJTx.data.intent.actionHash);
 
-      const afterRelease = structuredClone(releaseResult.newState);
+      const afterRelease = createEntityFrameCandidateState(releaseResult.newState);
       applyEntityProviderActionExecuted(afterRelease, {
         entityId,
         actionNonce: 2n,

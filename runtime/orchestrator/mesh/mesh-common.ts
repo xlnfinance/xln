@@ -1,7 +1,7 @@
 import type { AccountReplica, Delta } from '../../types/account';
 import type { EntityTx } from '../../types/entity-tx';
 import type { RuntimeReplica } from '../../runtime/types';
-import { deriveDelta, getTokenInfo } from '../../account/utils';
+import { buildDefaultEntitySwapPairs, deriveDelta, getTokenInfo } from '../../account/utils';
 import { encodeBoard, hashBoard } from '../../entity/factory';
 import { getBootstrapTokenAmount } from '../../jurisdiction/machine/config/bootstrap-economy';
 import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
@@ -25,6 +25,24 @@ export const HUB_MESH_CREDIT_AMOUNT = getBootstrapCreditAmount(HUB_MESH_TOKEN_ID
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
 export const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
 export const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** BigInt(getTokenInfo(HUB_MESH_TOKEN_ID).decimals);
+
+export type MarketMakerIdentityLabelPlan = Readonly<{
+  samePairIndex: number;
+  signerLabel: string;
+  profileName: string;
+}>;
+
+/** Hub allowlists and the MM process must derive the exact same pair shards. */
+export const planMarketMakerIdentityLabels = (
+  signerLabel: string,
+  profileName: string,
+  tokenIds: readonly number[],
+): readonly MarketMakerIdentityLabelPlan[] =>
+  buildDefaultEntitySwapPairs(tokenIds).map((_pair, samePairIndex) => Object.freeze({
+    samePairIndex,
+    signerLabel: samePairIndex === 0 ? signerLabel : `${signerLabel}:pair:${samePairIndex + 1}`,
+    profileName: samePairIndex === 0 ? profileName : `${profileName} Pair ${samePairIndex + 1}`,
+  }));
 export const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env['BOOTSTRAP_POLL_MS'] || '50'));
 const RUNTIME_SETTLE_POLL_MS = Math.max(5, Number(process.env['RUNTIME_SETTLE_POLL_MS'] || '10'));
 

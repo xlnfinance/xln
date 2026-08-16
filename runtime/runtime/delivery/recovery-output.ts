@@ -17,6 +17,7 @@ import {
   type ReliableIngressCommit,
 } from '../reliable/reliable-delivery.ts';
 import { reliableIdentityExactKey } from '../reliable/reliable-frontier.ts';
+import { createPreparedOutputGraph } from './prepared-output';
 
 export type RuntimeContinuationEnqueuer = (
   env: RuntimeReplica,
@@ -108,6 +109,7 @@ export const applyRecoveryRuntimeOutputPlan = (
   routing: RuntimeOutputRoutingDeps,
   enqueueRuntimeContinuation: RuntimeContinuationEnqueuer,
 ) => {
+  const preparedOutputGraph = createPreparedOutputGraph();
   const originated = entityOutbox.map(output =>
     output.sourceRuntimeFrame
       ? output
@@ -124,13 +126,15 @@ export const applyRecoveryRuntimeOutputPlan = (
       ...(env.pendingNetworkOutputs ?? []),
       ...originated,
     ]),
+    preparedOutputGraph,
   );
   const { ready, waiting } = splitPendingOutputsByRetryWindow(
     env,
     pending,
     routing,
+    preparedOutputGraph,
   );
-  const plan = planEntityOutputs(env, ready, routing);
+  const plan = planEntityOutputs(env, ready, routing, preparedOutputGraph);
   const retainedLocalReliableOutputs = queueLocalReliableOutputs(
     env,
     plan.localOutputs,
@@ -141,7 +145,7 @@ export const applyRecoveryRuntimeOutputPlan = (
     ...plan.deferredOutputs,
     ...plan.remoteOutputs.map(({ output }) => output),
     ...retainedLocalReliableOutputs,
-  ]);
+  ], preparedOutputGraph);
   return {
     ...plan,
     readyPendingOutputs: ready,

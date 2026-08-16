@@ -10,6 +10,8 @@ import { REMOTE_RUNTIME } from '../config/constants';
 import { readBooleanEnv } from '../config/environment';
 import { createStructuredLogger, registerStructuredLogSink } from '../infra/logger';
 import { deriveSignerAddressSync } from '../account/crypto';
+import { getTokenIdsForJurisdiction } from '../account/utils';
+import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/config/defaults';
 import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/security/auth';
 import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from '../infra/process/child-secrets';
@@ -150,10 +152,12 @@ import { areHubChildrenReady } from './hub/hub-mesh-readiness';
 import {
   HUB_MESH_CREDIT_AMOUNT,
   deriveMarketMakerEntityId,
+  planMarketMakerIdentityLabels,
   type MarketMakerEntityJurisdictionConfig,
 } from './mesh/mesh-common';
 import {
   requireJurisdictionBlockTimeMs,
+  resetMeshJurisdictionsCache,
   resolveMeshJurisdictionConfig,
   resolveSecondaryJurisdictions,
   type ResolvedMeshJurisdictionConfig,
@@ -1020,15 +1024,37 @@ const buildMarketMakerIdentity = (
   };
 };
 
+const buildMarketMakerJurisdictionIdentities = (
+  jurisdiction: MarketMakerJurisdictionConfig,
+  signerLabel: string,
+  name: string,
+): MarketMakerSupportPeerIdentity[] => {
+  const configuredTokenIds = getTokenIdsForJurisdiction({
+    name: jurisdiction.name,
+    chainId: jurisdiction.chainId,
+  });
+  const tokenIds = configuredTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT
+    ? configuredTokenIds
+    : [...DEFAULT_ACCOUNT_TOKEN_IDS];
+  return planMarketMakerIdentityLabels(signerLabel, name, tokenIds).map(plan =>
+    buildMarketMakerIdentity(jurisdiction, plan.signerLabel, plan.profileName));
+};
+
 const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {
+  // Reset may atomically replace the shard jurisdiction file with freshly
+  // deployed contract addresses. Quote-authority identity must bind those
+  // exact bytes, never the process-start cache from before deployment.
+  resetMeshJurisdictionsCache();
   const primary = resolveMeshJurisdictionConfig(args.rpcUrl);
-  const identities: MarketMakerSupportPeerIdentity[] = [
-    buildMarketMakerIdentity(primary, marketMakerChild.signerLabel, marketMakerChild.name),
-  ];
+  const identities = buildMarketMakerJurisdictionIdentities(
+    primary,
+    marketMakerChild.signerLabel,
+    marketMakerChild.name,
+  );
   for (const [index, secondary] of resolveSecondaryJurisdictions(primary.rpc).entries()) {
     const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
     if (!secondaryName) continue;
-    identities.push(buildMarketMakerIdentity(
+    identities.push(...buildMarketMakerJurisdictionIdentities(
       secondary,
       `${marketMakerChild.signerLabel}:${secondaryName}`,
       `${marketMakerChild.name} ${secondaryName}`,

@@ -1,6 +1,6 @@
 import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
 
-import { equalSwapPairDimensions, getBestAsk, getBestBid, getBookOrder } from '../../../../../../orderbook';
+import { equalSwapPairDimensions, forkBookState, getBestAsk, getBestBid, getBookOrder } from '../../../../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../../infra/logger';
 import type { SameJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
 import {
@@ -10,10 +10,9 @@ import {
 } from '../helpers';
 import {
   hasQueuedSwapResolveForEntityState,
-  queueUniqueSwapResolveForEntityState,
 } from '../queue';
 import {
-  assertSameBookMatchesAccounts,
+  queueSameSwapResolve,
   sweepSamePairOutOfBandOffers,
   type SameOrderbookPass,
 } from './pass';
@@ -51,13 +50,31 @@ export const materializeSameOffer = (
       reason: materialized.reason,
       message: materialized.message,
     });
-    pass.rejectInvalidOffer(accountId, offer.offerId, materialized.reason);
+    if (pass.debugRebuildProjectionOnly) {
+      pass.recordDebugProjectionReject(accountId, offer.offerId, materialized.reason);
+    } else {
+      queueSameSwapResolve(pass, accountId, {
+        offerId: offer.offerId,
+        fillRatio: 0,
+        cancelRemainder: true,
+        comment: materialized.reason,
+      });
+    }
     return null;
   }
   const order = materialized.order;
   const committedDimensions = pass.ext.pairDimensions.get(order.pairId);
   if (committedDimensions && !equalSwapPairDimensions(committedDimensions, order)) {
-    pass.rejectInvalidOffer(accountId, offer.offerId, 'pair-decimals-mismatch');
+    if (pass.debugRebuildProjectionOnly) {
+      pass.recordDebugProjectionReject(accountId, offer.offerId, 'pair-decimals-mismatch');
+    } else {
+      queueSameSwapResolve(pass, accountId, {
+        offerId: offer.offerId,
+        fillRatio: 0,
+        cancelRemainder: true,
+        comment: 'pair-decimals-mismatch',
+      });
+    }
     return null;
   }
   return {
@@ -86,10 +103,8 @@ const rejectOutsidePriceBand = (
     pass.recordDebugProjectionReject(offer.accountId, offer.offer.offerId, reason);
     return;
   }
-  queueUniqueSwapResolveForEntityState(
-    pass.accountTxs,
-    pass.hubState,
-    pass.queuedSwapResolutions,
+  queueSameSwapResolve(
+    pass,
     offer.accountId,
     {
       offerId: offer.offer.offerId,
@@ -104,10 +119,13 @@ export const prepareSameOffer = (
   pass: SameOrderbookPass,
   offer: MaterializedSameOffer,
 ): PreparedSameOffer | null => {
-  let book = pass.bookCache.get(offer.bookKey) ?? pass.ext.books.get(offer.bookKey);
-  book = book
-    ? assertSameBookMatchesAccounts(pass, offer.bookKey, book)
-    : createEmptyPairBook(offer.bucketWidthTicks);
+  let book = pass.bookCache.get(offer.bookKey);
+  if (!book) {
+    const committed = pass.ext.books.get(offer.bookKey);
+    book = committed ? forkBookState(committed) : undefined;
+    if (book) pass.bookCache.set(offer.bookKey, book);
+  }
+  book = book ?? forkBookState(createEmptyPairBook(offer.bucketWidthTicks));
   if (!pass.sweptPairs.has(offer.bookKey)) {
     pass.sweptPairs.add(offer.bookKey);
     const swept = sweepSamePairOutOfBandOffers(

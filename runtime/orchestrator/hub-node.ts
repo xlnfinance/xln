@@ -92,6 +92,9 @@ import { enforceFaucetPolicy } from '../api/server/faucet/policy';
 import { createRuntimeIngressReceiptStore } from '../runtime/input-pipeline/ingress-receipts';
 import { readRuntimeSecurityIncidentTelemetry } from '../runtime/observability/security-incidents';
 import { handleRuntimeInputStatus } from '../api/server/control/runtime-input';
+import { createStackManagerController, type StackManagerController } from '../api/server/control/stack-manager';
+import { hasDaemonControlAuth, parseTaggedControlBody } from '../api/server/control/auth';
+import { JSON_HEADERS } from '../api/server/utils';
 import {
   getActiveJAdapter,
   getP2PState,
@@ -433,8 +436,6 @@ const DEFAULT_ANVIL_MNEMONIC = 'test test test test test test test test test tes
 const FAUCET_SIGNER_LABEL = 'faucet-1';
 const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('10');
 const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
-const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
-
 const resolveHubSignerIndex = (name: string): number => {
   const normalized = String(name || '').trim().toUpperCase();
   if (normalized === 'H1') return 0;
@@ -1599,16 +1600,8 @@ const planSupportPeerInputs = (
     NonNullable<RuntimeReplica['gossip']>['getProfiles']
   >,
 ): HubMeshInputPlan => {
-  const openInputs: EntityInput[] = [];
   const creditInputs: EntityInput[] = [];
   const tokenIds = tokenIdsForHubJurisdiction(owner);
-  const ownerReplica = getEntityReplicaById(env, owner.entityId);
-  if (!ownerReplica) throw new Error(`HUB_MESH_OWNER_ROLE_COMMITTED_MISSING:${owner.entityId}`);
-  const ownerRole = committedAccountRoleEvidence(
-    owner.entityId,
-    ownerReplica.state.profile.isHub === true,
-  );
-  const [openTokenId = HUB_MESH_TOKEN_ID, ...extraTokenIds] = tokenIds;
   const peers = visibleDirectSupportPeers(
     supportPeerIdentities,
     visibleProfiles,
@@ -1616,50 +1609,12 @@ const planSupportPeerInputs = (
     owner,
   );
   for (const peer of peers) {
-    const peerReplica = getEntityReplicaById(env, peer.entityId);
-    const peerRole = verifiedGossipAccountRoleEvidence(
-      peer.entityId,
-      peer.roleEvidence.isHub,
-      peerReplica ? peerReplica.state.profile.isHub === true : undefined,
-    );
     const account = getAccountReplica(env, owner.entityId, peer.entityId);
     const canWrite =
       !account?.pendingFrame && Number(account?.mempool?.length || 0) === 0;
-    if (
-      isCanonicalAccountOpener(owner.entityId, peer.entityId) &&
-      !hasAccount(env, owner.entityId, peer.entityId) &&
-      canWrite
-    ) {
-      if (hasQueuedOpenAccount(env, owner.entityId, peer.entityId)) continue;
-      openInputs.push({
-        entityId: owner.entityId,
-        signerId: owner.signerId,
-        entityTxs: [
-          {
-            type: 'openAccount',
-            data: {
-              targetEntityId: peer.entityId,
-              disputeConfig: defaultAccountDisputeConfigForRoleEvidence(
-                ownerRole,
-                peerRole,
-                new Map([[ownerRole.entityId, ownerRole.isHub]]),
-              ),
-              tokenId: openTokenId,
-              creditAmount: getBootstrapCreditAmount(openTokenId),
-            },
-          },
-          ...extraTokenIds.map(tokenId => ({
-            type: 'extendCredit' as const,
-            data: {
-              counterpartyEntityId: peer.entityId,
-              tokenId,
-              amount: getBootstrapCreditAmount(tokenId),
-            },
-          })),
-        ],
-      });
-      continue;
-    }
+    // Managed MM identities exclusively open their Accounts and therefore own
+    // the genesis watchSeed. The Hub only grants reciprocal credit after the
+    // allowlisted Account exists; this prevents two competing H=1 frames.
     if (!account || !canWrite) continue;
     const missingTokenIds = tokenIds.filter(
       tokenId =>
@@ -1680,7 +1635,7 @@ const planSupportPeerInputs = (
       })),
     });
   }
-  return { openInputs, creditInputs };
+  return { openInputs: [], creditInputs };
 };
 
 const planHubPeerInputs = (
@@ -2175,6 +2130,7 @@ type HubHttpContext = {
   };
   handleStatus: (url: URL, operatorAuthorized: boolean) => Response | null;
   handleControl: (request: Request, url: URL) => Promise<Response | null>;
+  stackManagerController: StackManagerController;
 };
 
 const handleHubHttpRequest = async (
@@ -2183,6 +2139,9 @@ const handleHubHttpRequest = async (
   url: URL,
   operatorAuthorized: boolean,
 ): Promise<Response> => {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { headers: JSON_HEADERS });
+  }
   if (requiresLocalNodeOperator(url) && !operatorAuthorized) {
     return new Response(
       safeStringify({ error: 'Operator access required' }),
@@ -2193,6 +2152,12 @@ const handleHubHttpRequest = async (
   if (faucetPolicyResponse) return faucetPolicyResponse;
   const statusResponse = context.handleStatus(url, operatorAuthorized);
   if (statusResponse) return statusResponse;
+  if (url.pathname === '/api/stack-manager/status' && request.method === 'GET') {
+    return context.stackManagerController.status(request, context.env);
+  }
+  if (url.pathname === '/api/control/stack-manager/deploy' && request.method === 'POST') {
+    return context.stackManagerController.deploy(request, context.env);
+  }
   const accountStatusResponse = handleAccountStatusRequest(
     context.env,
     request,
@@ -2610,6 +2575,10 @@ const startHubHttpSurface = (
       live.shuttingDown = true;
     },
   });
+  const stackManagerController = createStackManagerController({
+    parseBody: parseTaggedControlBody,
+    headers: JSON_HEADERS,
+  });
   const context: HubHttpContext = {
     env: live.env,
     hubBootstraps: live.hubBootstraps,
@@ -2622,6 +2591,7 @@ const startHubHttpSurface = (
     getDirectInputDebug: () => ({ ...directInputDebug }),
     handleStatus: createHubStatusHandler(live, bootstrapClockMs),
     handleControl,
+    stackManagerController,
   };
   const server = Bun.serve({
     hostname: resolvedArgs.apiHost,
@@ -2635,7 +2605,7 @@ const startHubHttpSurface = (
         const operatorAuthorized = isLocalOperatorRequest(
           request,
           resolveSocketPeerAddress(serverRef, request),
-        );
+        ) || hasDaemonControlAuth(request, live.env);
         if (request.headers.get('upgrade') === 'websocket' && url.pathname === '/rpc') {
           return serverRef.upgrade(request, { data: { type: 'rpc' } })
             ? undefined

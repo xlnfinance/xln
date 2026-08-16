@@ -107,7 +107,6 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
       accounts: new Map(),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
-      jBlockChain: [],
       profile: {
         name: 'Replica',
         isHub: false,
@@ -548,7 +547,7 @@ describe('JAdapter watcher ingress', () => {
     await applyRuntimeTx(env, env.runtimeMempool!.runtimeTxs[0]!);
     expect(replica.jHistory).toBeUndefined();
     expect(healthy.jHistory?.tipBlockHash).toBe(`0x${'20'.repeat(32)}`);
-    expect(env.overlay).toContainEqual({ family: 'entity', entityId });
+    expect(Array.from(env.overlay?.values() ?? [])).toContainEqual({ family: 'entity', entityId });
   });
 
   test('watcher start block ignores signer j-blocks from unrelated jurisdictions', () => {
@@ -685,6 +684,35 @@ describe('JAdapter watcher ingress', () => {
     )).toThrow(/J_WATCHER_JURISDICTION_NOT_FOUND:history-range/);
     expect(arrakisEntity.jHistory).toBeUndefined();
     expect(wakandaEntity.jHistory).toBeUndefined();
+  });
+
+  test('watcher excludes a retired local board replica after handover', () => {
+    const seed = 'jadapter-retired-board-replica';
+    const env = createEmptyEnv(seed);
+    const entityId = `0x${'6a'.repeat(32)}`;
+    const retiredSignerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const currentSignerId = deriveSignerAddressSync(seed, '2').toLowerCase();
+    const jurisdiction = makeJurisdiction('Board handover', 31337, `0x${'6b'.repeat(20)}`);
+    const watcher = makeJReplica(
+      jurisdiction.name,
+      100n,
+      jurisdiction.depositoryAddress!,
+      jurisdiction.chainId,
+      jurisdiction.entityProviderAddress,
+    );
+    env.state.jReplicas = new Map([[watcher.name, watcher]]);
+
+    const current = makeReplica(entityId, currentSignerId, true);
+    current.state.config.jurisdiction = jurisdiction;
+    const retired = makeReplica(entityId, retiredSignerId, false);
+    retired.state.config = structuredClone(current.state.config);
+    retired.state.config.jurisdiction = jurisdiction;
+    env.state.eReplicas.set(`${entityId}:${retiredSignerId}`, retired);
+    env.state.eReplicas.set(`${entityId}:${currentSignerId}`, current);
+
+    expect(isEntityReplicaRelevantToWatcher(env, retired, watcher)).toBe(false);
+    expect(isEntityReplicaRelevantToWatcher(env, current, watcher)).toBe(true);
+    expect(getMinimumCommittedSignerJHeight(env, watcher)).toBe(current.state.lastFinalizedJHeight);
   });
 
   test('watcher rejects a replica whose exact chain identity is missing', () => {

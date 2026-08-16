@@ -5,6 +5,7 @@ import type {
   RuntimeOutputRoutingDeps,
 } from '../routing/output-routing';
 import type { RuntimeProcessProfile } from './process-profile';
+import type { PreparedOutputGraph } from '../delivery/prepared-output';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -15,6 +16,7 @@ export type RuntimeFrameOutputPlan = {
   readyPendingOutputs: RoutedEntityInput[];
   waitingPendingOutputs: RoutedEntityInput[];
   retainedLocalReliableOutputs: RoutedEntityInput[];
+  preparedOutputGraph: PreparedOutputGraph;
 };
 
 export type RuntimeFrameOutputPlanningDeps = {

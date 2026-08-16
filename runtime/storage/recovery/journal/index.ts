@@ -131,7 +131,7 @@ const replayOneFrame = async (
   installReplayOutputSignerHints(env, collectOutputSignerHints(frame, height));
   if (!env.infrastructure) throw new Error('RECOVERY_RUNTIME_INFRASTRUCTURE_REQUIRED');
   env.infrastructure.replayEntityContexts = new Map(
-    [...frame.entityContexts].map(([replicaId, context]) => [replicaId, structuredClone(context)]),
+    [...(frame.entityContexts ?? new Map())].map(([replicaId, context]) => [replicaId, structuredClone(context)]),
   );
   writeRuntimeMetadata(env, APPLY_ALLOWED, true);
   try {

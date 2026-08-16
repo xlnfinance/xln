@@ -3,11 +3,14 @@ import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-ta
 import type { EntityState } from '../../../../../types';
 import {
   applyCommand,
+  bookOrdersOutsidePriceRange,
+  commitBookOverlay,
   deriveSide,
   getBestAsk,
   getBestBid,
   getSwapLotScaleForDecimals,
   type BookState,
+  type BookOrderState,
   type OrderbookExtState,
 } from '../../../../../../orderbook';
 import { SWAP_CONSTANTS } from '../../../../../../config/constants';
@@ -22,12 +25,15 @@ import {
   hasQueuedSwapResolveForEntityState,
   queueUniqueSwapResolveForEntityState,
   type AccountTxTarget,
+  type SwapResolveEnqueueData,
 } from '../queue';
 import { resolveStoredOfferEntityRefs } from '../offers';
 import {
+  deriveSameOrderbookPriceBandBounds,
   parseNamespacedOrderId,
   resolvePairBandReference,
 } from '../helpers';
+import { swapKey } from '../../../../../../orderbook/swap-execution';
 
 const orderbookSameLog = createStructuredLogger('orderbook.same');
 
@@ -36,12 +42,6 @@ type RecordDebugProjectionReject = (
   offerId: string,
   reason: string,
 ) => true;
-type RejectInvalidOffer = (
-  accountId: string,
-  offerId: string,
-  reason: string,
-) => void;
-
 export type SameOrderbookProcessInput = {
   hubState: EntityState;
   ext: OrderbookExtState;
@@ -54,7 +54,6 @@ export type SameOrderbookProcessInput = {
   queuedSwapResolutions: Set<string>;
   debugRebuildProjectionOnly: boolean;
   recordDebugProjectionReject: RecordDebugProjectionReject;
-  rejectInvalidOffer: RejectInvalidOffer;
 };
 
 export type SameOrderbookPass = SameOrderbookProcessInput & {
@@ -74,7 +73,29 @@ export const createSameOrderbookPass = (
   pairSweepCount: 0,
 });
 
-const buildLiveSameOfferMeta = (
+/**
+ * Same-j resolve admission and matcher visibility are one atomic invariant.
+ * A resolving row may remain in the immutable book projection until its
+ * Account frame commits, but it must never participate in another same-pass
+ * trade. Always suspend even when an identical resolve was already queued.
+ */
+export const queueSameSwapResolve = (
+  pass: SameOrderbookPass,
+  accountId: string,
+  data: SwapResolveEnqueueData,
+): boolean => {
+  const queued = queueUniqueSwapResolveForEntityState(
+    pass.accountTxs,
+    pass.hubState,
+    pass.queuedSwapResolutions,
+    accountId,
+    data,
+  );
+  pass.suspendedSameOrderIds.add(swapKey(accountId, data.offerId));
+  return queued;
+};
+
+export const buildLiveSameOfferMeta = (
   pass: SameOrderbookPass,
   namespacedOrderId: string,
 ): NormalizedOrderbookOffer | null => {
@@ -106,6 +127,46 @@ const buildLiveSameOfferMeta = (
     },
     accountId,
   );
+};
+
+export const classifySameBookMaker = (
+  pass: SameOrderbookPass,
+  pairId: string,
+  order: Readonly<BookOrderState>,
+): 'eligible' | 'suspended' | 'cancel' => {
+  const { accountId } = parseNamespacedOrderId(order.orderId, 'ORDERBOOK_MALFORMED_BOOK_ORDER');
+  const account = pass.hubState.accounts.get(accountId);
+  if (!account) {
+    throw haltRuntimeFailure('ORDERBOOK_SAME_SNAPSHOT_MISSING',
+      `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`);
+  }
+  if (account.status !== undefined && account.status !== 'active') return 'cancel';
+  const meta = pass.orderbookOfferMeta.get(order.orderId) ?? buildLiveSameOfferMeta(pass, order.orderId);
+  if (!meta) {
+    throw haltRuntimeFailure('ORDERBOOK_SAME_SNAPSHOT_MISSING',
+      `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`);
+  }
+  if (hasQueuedSwapResolveForEntityState(
+    pass.hubState, pass.queuedSwapResolutions, meta.accountId, meta.offerId,
+  )) return 'suspended';
+  pass.orderbookOfferMeta.set(order.orderId, meta);
+  const side = deriveSide(meta.giveTokenId, meta.wantTokenId);
+  const baseTokenDecimals = side === 1 ? meta.giveTokenDecimals : meta.wantTokenDecimals;
+  const baseAmount = side === 1 ? (meta.quantizedGive ?? meta.giveAmount) : meta.wantAmount;
+  const canonicalOwner = meta.makerIsLeft ? meta.fromEntity : meta.toEntity;
+  const canonicalQtyLots = baseAmount / getSwapLotScaleForDecimals(baseTokenDecimals);
+  if (
+    order.side !== side || order.priceTicks !== meta.priceTicks ||
+    order.ownerId !== canonicalOwner || order.qtyLots !== canonicalQtyLots
+  ) {
+    throw haltRuntimeFailure('ORDERBOOK_CACHE_MISMATCH',
+      `ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} ` +
+      `storedOwner=${order.ownerId} canonicalOwner=${canonicalOwner} ` +
+      `storedSide=${order.side} canonicalSide=${side} ` +
+      `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()} ` +
+      `storedQtyLots=${order.qtyLots.toString()} canonicalQtyLots=${canonicalQtyLots.toString()}`);
+  }
+  return 'eligible';
 };
 
 export const containSamePairFailure = (
@@ -145,32 +206,23 @@ export const sweepSamePairOutOfBandOffers = (
     bestAsk,
   );
   if (anchor === null) return currentBook;
-  const minAllowed =
-    anchor - (anchor * BigInt(SWAP_CONSTANTS.PRICE_REJECT_BPS)) /
-    BigInt(SWAP_CONSTANTS.BPS_BASE);
-  const maxAllowed =
-    anchor + (anchor * BigInt(SWAP_CONSTANTS.PRICE_REJECT_BPS)) /
-    BigInt(SWAP_CONSTANTS.BPS_BASE);
+  const { minAllowed, maxAllowed } = deriveSameOrderbookPriceBandBounds(anchor);
   let nextBook = currentBook;
   let removed = 0;
-  // Iterate the pre-sweep snapshot: each cancel derives a new immutable book.
-  for (const order of [...currentBook.orders.values()]) {
-    if (pass.suspendedSameOrderIds.has(order.orderId)) continue;
-    const liveOffer = buildLiveSameOfferMeta(pass, order.orderId);
-    if (!liveOffer) {
-      throw haltRuntimeFailure("ORDERBOOK_SAME_SNAPSHOT_MISSING", `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`);
-    }
-    if (order.priceTicks >= minAllowed && order.priceTicks <= maxAllowed) continue;
+  for (const order of bookOrdersOutsidePriceRange(currentBook, minAllowed, maxAllowed)) {
+    const disposition = classifySameBookMaker(pass, pairId, order);
+    if (disposition === 'suspended') continue;
+    const liveOffer = disposition === 'eligible' ? buildLiveSameOfferMeta(pass, order.orderId) : null;
     removed += 1;
     orderbookSameLog.debug('sweep.out_of_band', {
-      offer: shortOrder(liveOffer.offerId, 8),
+      offer: shortOrder(liveOffer?.offerId ?? order.orderId, 8),
       pair: pairId,
       price: order.priceTicks.toString(),
       rejectPct: SWAP_CONSTANTS.PRICE_REJECT_BPS / 100,
       bandLabel: label,
       bandAnchor: anchor.toString(),
     });
-    if (pass.debugRebuildProjectionOnly) {
+    if (pass.debugRebuildProjectionOnly && liveOffer) {
       pass.recordDebugProjectionReject(
         liveOffer.accountId,
         liveOffer.offerId,
@@ -178,87 +230,19 @@ export const sweepSamePairOutOfBandOffers = (
       );
       continue;
     }
-    nextBook = applyCommand(nextBook, {
+    nextBook = commitBookOverlay(applyCommand(nextBook, {
       kind: 1,
       ownerId: order.ownerId,
       orderId: order.orderId,
-    }).state;
-    queueUniqueSwapResolveForEntityState(
-      pass.accountTxs,
-      pass.hubState,
-      pass.queuedSwapResolutions,
-      liveOffer.accountId,
-      {
+    }).state);
+    if (liveOffer) queueSameSwapResolve(pass, liveOffer.accountId, {
         offerId: liveOffer.offerId,
         fillRatio: 0,
         cancelRemainder: true,
         comment: `outside-anchor-band:${order.priceTicks.toString()}`,
-      },
-    );
+      });
   }
   if (removed === 0) return currentBook;
   pass.pairSweepCount += 1;
   return nextBook;
-};
-
-export const assertSameBookMatchesAccounts = (
-  pass: SameOrderbookPass,
-  pairId: string,
-  initialBook: BookState,
-): BookState => {
-  let book = initialBook;
-  for (const order of [...initialBook.orders.values()]) {
-    const { accountId } = parseNamespacedOrderId(
-      order.orderId,
-      'ORDERBOOK_MALFORMED_BOOK_ORDER',
-    );
-    const account = pass.hubState.accounts.get(accountId);
-    if ((account?.status ?? 'active') !== 'active') {
-      book = applyCommand(book, {
-        kind: 1,
-        ownerId: order.ownerId,
-        orderId: order.orderId,
-      }).state;
-      pass.bookCache.set(pairId, book);
-      pass.bookUpdates.push({ pairId, book });
-      orderbookSameLog.debug('book.remove_disputed_account', {
-        pair: pairId,
-        order: shortOrder(order.orderId, 20),
-        account: shortId(accountId, 8),
-      });
-      continue;
-    }
-    const meta =
-      pass.orderbookOfferMeta.get(order.orderId) ??
-      buildLiveSameOfferMeta(pass, order.orderId);
-    if (!meta) {
-      throw haltRuntimeFailure("ORDERBOOK_SAME_SNAPSHOT_MISSING", `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`);
-    }
-    if (
-      hasQueuedSwapResolveForEntityState(
-        pass.hubState,
-        pass.queuedSwapResolutions,
-        meta.accountId,
-        meta.offerId,
-      )
-    ) {
-      pass.suspendedSameOrderIds.add(order.orderId);
-      continue;
-    }
-    pass.orderbookOfferMeta.set(order.orderId, meta);
-    const side = deriveSide(meta.giveTokenId, meta.wantTokenId);
-    const baseTokenDecimals = side === 1 ? meta.giveTokenDecimals : meta.wantTokenDecimals;
-    const baseAmount =
-      side === 1 ? (meta.quantizedGive ?? meta.giveAmount) : meta.wantAmount;
-    if (
-      order.priceTicks !== meta.priceTicks ||
-      order.ownerId !== (meta.makerIsLeft ? meta.fromEntity : meta.toEntity) ||
-      order.qtyLots !== baseAmount / getSwapLotScaleForDecimals(baseTokenDecimals)
-    ) {
-      throw haltRuntimeFailure("ORDERBOOK_CACHE_MISMATCH", `ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} ` +
-        `storedPrice=${order.priceTicks.toString()} ` +
-        `canonicalPrice=${meta.priceTicks.toString()}`);
-    }
-  }
-  return book;
 };

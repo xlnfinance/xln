@@ -12,7 +12,6 @@ export type {
   BookEvent,
   BookOrderState,
   BookState,
-  PriceBucketState,
 } from './core';
 export {
   createBook,
@@ -22,6 +21,8 @@ export {
   getBookOrder,
   getBookOrders,
   getBookSideLevels,
+  projectBookDepth,
+  reduceBookOrderQuantity,
   computeBookHash,
   MAX_ORDERBOOK_QTY_LOTS,
 } from './core';
@@ -93,6 +94,30 @@ export const getSwapLotScale = (baseTokenId: number): bigint => {
 
 export const getSwapLotScaleForDecimals = (decimals: number): bigint =>
   10n ** BigInt(Math.max(0, requireTokenDecimals(decimals) - 6));
+
+const greatestCommonDivisor = (left: bigint, right: bigint): bigint => {
+  let a = left;
+  let b = right;
+  while (b !== 0n) [a, b] = [b, a % b];
+  return a;
+};
+
+/**
+ * Smallest book-lot multiple whose quote amount is integral at one execution
+ * price. Both bilateral swap legs then share one exact integer amount; choosing
+ * floor or ceil per side would violate one maker limit or conservation.
+ */
+export const getSwapExactQuoteLotMultipleAtPriceForDimensions = (
+  baseTokenDecimals: number,
+  quoteTokenDecimals: number,
+  priceTicks: bigint,
+): bigint => {
+  if (priceTicks <= 0n) throw new Error('SWAP_EXACT_QUOTE_PRICE_INVALID');
+  const numeratorPerLot = getSwapLotScaleForDecimals(baseTokenDecimals) *
+    priceTicks * tokenScaleForDecimals(quoteTokenDecimals);
+  const denominator = ORDERBOOK_PRICE_SCALE * tokenScaleForDecimals(baseTokenDecimals);
+  return denominator / greatestCommonDivisor(numeratorPerLot, denominator);
+};
 
 export const quoteAmountAtPriceForDecimals = (
   baseTokenDecimals: number,
@@ -364,7 +389,13 @@ const prepareSwapOrderWithDimensions = (
   );
   if (priceTicks <= 0n) return null;
 
-  const quantizedBaseAmount = (rawBaseAmount / lotScale) * lotScale;
+  const exactQuoteLots = getSwapExactQuoteLotMultipleAtPriceForDimensions(
+    decimals.baseTokenDecimals,
+    decimals.quoteTokenDecimals,
+    priceTicks,
+  );
+  const executionLotScale = lotScale * exactQuoteLots;
+  const quantizedBaseAmount = (rawBaseAmount / executionLotScale) * executionLotScale;
   if (quantizedBaseAmount <= 0n) return null;
 
   const quantizedQuoteAmount = quoteAmountAtPriceForDecimals(
@@ -460,8 +491,13 @@ const requantizeRemainingSwapWithDimensions = (
   const side = deriveSide(giveTokenId, wantTokenId);
   const decimals = getSwapPairDimensions(side, dimensions);
   const lotScale = getSwapLotScaleForDecimals(decimals.baseTokenDecimals);
+  const executionLotScale = lotScale * getSwapExactQuoteLotMultipleAtPriceForDimensions(
+    decimals.baseTokenDecimals,
+    decimals.quoteTokenDecimals,
+    priceTicks,
+  );
   if (side === 1) {
-    const quantizedBaseAmount = (remainingGiveAmount / lotScale) * lotScale;
+    const quantizedBaseAmount = (remainingGiveAmount / executionLotScale) * executionLotScale;
     if (quantizedBaseAmount <= 0n) return null;
     const quantizedQuoteAmount = quoteAmountAtPriceForDecimals(
       decimals.baseTokenDecimals,
@@ -484,7 +520,7 @@ const requantizeRemainingSwapWithDimensions = (
     remainingQuoteAmount,
     priceTicks,
   );
-  const quantizedBaseAmount = (rawBaseAmount / lotScale) * lotScale;
+  const quantizedBaseAmount = (rawBaseAmount / executionLotScale) * executionLotScale;
   if (quantizedBaseAmount <= 0n) return null;
   const quantizedQuoteAmount = quoteAmountAtPriceForDecimals(
     decimals.baseTokenDecimals,
@@ -514,6 +550,43 @@ export function requantizeRemainingSwapAtPriceForDimensions(
     priceTicks,
     dimensions,
   );
+}
+
+/**
+ * Rebuild a partially filled order from its remaining base quantity.
+ *
+ * Price improvement changes the quote actually spent, but never increases the
+ * base quantity the owner ordered. Account and book therefore retain the same
+ * base remainder and release quote-side savings from the hold.
+ */
+export function requantizeRemainingSwapBaseAtPriceForDimensions(
+  giveTokenId: number,
+  wantTokenId: number,
+  remainingBaseAmount: bigint,
+  priceTicks: bigint,
+  dimensions: SwapTokenDimensions,
+): { effectiveGive: bigint; effectiveWant: bigint } | null {
+  if (remainingBaseAmount <= 0n || priceTicks <= 0n) return null;
+  const side = deriveSide(giveTokenId, wantTokenId);
+  const decimals = getSwapPairDimensions(side, dimensions);
+  const baseQuantum = getSwapLotScaleForDecimals(decimals.baseTokenDecimals) *
+    getSwapExactQuoteLotMultipleAtPriceForDimensions(
+      decimals.baseTokenDecimals,
+      decimals.quoteTokenDecimals,
+      priceTicks,
+    );
+  const quantizedBaseAmount = (remainingBaseAmount / baseQuantum) * baseQuantum;
+  if (quantizedBaseAmount <= 0n) return null;
+  const quantizedQuoteAmount = quoteAmountAtPriceForDecimals(
+    decimals.baseTokenDecimals,
+    decimals.quoteTokenDecimals,
+    quantizedBaseAmount,
+    priceTicks,
+  );
+  if (quantizedQuoteAmount <= 0n) return null;
+  return side === 1
+    ? { effectiveGive: quantizedBaseAmount, effectiveWant: quantizedQuoteAmount }
+    : { effectiveGive: quantizedQuoteAmount, effectiveWant: quantizedBaseAmount };
 }
 
 export function requantizeRemainingSwapAtPrice(
@@ -636,70 +709,4 @@ export function createOrderbookExtState(hubProfile: HubProfile): OrderbookExtSta
     referrals: new Map(),
     hubProfile,
   };
-}
-
-const addPairToOrderIndex = (index: Map<string, string[]>, orderId: string, pairId: string): void => {
-  const existing = index.get(orderId);
-  if (!existing) {
-    index.set(orderId, [pairId]);
-    return;
-  }
-  if (!existing.includes(pairId)) existing.push(pairId);
-  existing.sort();
-};
-
-const removePairFromOrderIndex = (index: Map<string, string[]>, orderId: string, pairId: string): void => {
-  const existing = index.get(orderId);
-  if (!existing) return;
-  const filtered = existing.filter((entry) => entry !== pairId);
-  if (filtered.length === 0) index.delete(orderId);
-  else index.set(orderId, filtered);
-};
-
-const normalizeOrderPairIndex = (index: Map<string, string[]>): Map<string, string[]> => {
-  for (const [orderId, pairIds] of index.entries()) {
-    index.set(orderId, Array.from(new Set(pairIds)).sort());
-  }
-  return index;
-};
-
-export function rebuildOrderbookPairIndex(ext: OrderbookExtState): Map<string, string[]> {
-  const next = new Map<string, string[]>();
-  for (const [pairId, book] of ext.books.entries()) {
-    for (const orderId of book.orders.keys()) {
-      addPairToOrderIndex(next, orderId, pairId);
-    }
-  }
-  ext.orderPairs = next;
-  return next;
-}
-
-function ensureOrderbookPairIndex(ext: OrderbookExtState): Map<string, string[]> {
-  if (!(ext.orderPairs instanceof Map)) {
-    return rebuildOrderbookPairIndex(ext);
-  }
-  return normalizeOrderPairIndex(ext.orderPairs);
-}
-
-export function replaceOrderbookPair(ext: OrderbookExtState, pairId: string, book: BookState): void {
-  const orderPairs = ensureOrderbookPairIndex(ext);
-  const previous = ext.books.get(pairId);
-  if (previous) {
-    for (const orderId of previous.orders.keys()) {
-      removePairFromOrderIndex(orderPairs, orderId, pairId);
-    }
-  }
-  ext.books.set(pairId, book);
-  for (const orderId of book.orders.keys()) {
-    addPairToOrderIndex(orderPairs, orderId, pairId);
-  }
-}
-
-export function getOrderbookPairsForOrder(ext: OrderbookExtState, orderId: string): string[] {
-  const index = ensureOrderbookPairIndex(ext);
-  const indexedPairs = index.get(orderId) ?? [];
-  const livePairs = indexedPairs.filter((pairId) => ext.books.get(pairId)?.orders.has(orderId));
-  if (livePairs.length === 0) index.delete(orderId);
-  else if (livePairs.length !== indexedPairs.length) index.set(orderId, livePairs);
-  return [...livePairs];
 }

@@ -3,7 +3,8 @@
  * Creates a new token delta with zero balances (Channel.ts AddDelta pattern)
  */
 
-import type { AccountState, AccountTx } from '../../../../types/account';
+import type { AccountTx } from '../../../../types/account';
+import type { AccountDraftState } from '../../../state/account-state-draft';
 import { AccountDeltaError } from '../../../state/delta';
 import type { ApplyAccountTxResult } from '../../apply-types';
 import {
@@ -11,10 +12,10 @@ import {
   accountTxRejected,
   rejectionFromDeltaError,
 } from '../../apply-result';
-import { ensureDelta } from '../../delta-utils';
+import { commitDeltaDraft, createDeltaDraft } from '../../delta-utils';
 
 export function handleAddDelta(
-  account: AccountState,
+  account: AccountDraftState,
   accountTx: Extract<AccountTx, { type: 'add_delta' }>,
 ): ApplyAccountTxResult {
   const { tokenId } = accountTx.data;
@@ -25,7 +26,7 @@ export function handleAddDelta(
     // A zero-valued row is omitted from AccountFrame.deltas, so frame-shape
     // validation alone cannot stop a signed peer from exhausting this map.
     // Keep the bounded insertion at the mutation sink and reject it as data.
-    ensureDelta(account, tokenId);
+    commitDeltaDraft(account, createDeltaDraft(account, tokenId));
   } catch (error) {
     if (!(error instanceof AccountDeltaError)) throw error;
     return accountTxRejected(rejectionFromDeltaError(error, tokenId), [error.message]);

@@ -7,7 +7,7 @@
  */
 
 import { parseWorkerArgs } from './worker-runtime';
-import { runSameProductionSwapLoad } from './worker-same';
+import { runSameProductionSwapLoad } from './same/worker-same';
 import { runCrossProductionSwapLoad } from './worker-cross';
 import { runCrossProductionRecovery } from './worker-cross-recovery';
 

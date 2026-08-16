@@ -128,11 +128,11 @@ const slugify = (value: string): string => {
   return `${base || 'debate'}-${randomUUID().replaceAll('-', '').slice(0, 8)}`;
 };
 
-const parseJson = <T>(raw: string, fallback: T): T => {
+const parseJson = <T>(raw: string, defaultValue: T): T => {
   try {
     return JSON.parse(raw) as T;
   } catch {
-    return fallback;
+    return defaultValue;
   }
 };
 
@@ -1223,11 +1223,11 @@ export class DebatesStore {
     `).all(userId, limit);
   }
 
-  getStateNumber(key: string, fallback = 0): number {
+  getStateNumber(key: string, defaultValue = 0): number {
     const row = this.db.query<{ value: string }>('SELECT value FROM service_state WHERE key = ?1').get(key);
-    if (!row) return fallback;
+    if (!row) return defaultValue;
     const parsed = Number(row.value);
-    return Number.isFinite(parsed) ? parsed : fallback;
+    return Number.isFinite(parsed) ? parsed : defaultValue;
   }
 
   setStateNumber(key: string, value: number): void {

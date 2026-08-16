@@ -1,8 +1,15 @@
 import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 
 import type { AccountReplica, AccountTx } from '../../../types/account';
+import type { AccountDraftReplica } from '../../state/account-state-draft';
 import type { AccountConsensusContext } from '../context';
-import { cloneAccountReplica } from '../../state/state-clone';
+import {
+  accountTransitionView,
+  beginAccountTransition,
+  commitAccountTransition,
+  createAccountTransitionKey,
+  discardAccountTransition,
+} from '../../state/candidate-overlay';
 import { isLeftEntity } from '../../utils';
 import { HEAVY_LOGS } from '../../../infra/debug-flags';
 import { applyAccountTx } from '../../tx/apply';
@@ -103,7 +110,7 @@ const isRefreshableStaleSettlementSeal = (
 
 const applyProposalTransaction = async (
   context: ProposalTransactionContext,
-  machine: AccountReplica,
+  machine: AccountDraftReplica,
   tx: AccountTx,
   jClaimSession: ReturnType<typeof createAccountJClaimSession>,
 ): Promise<AppliedProposalTx> => {
@@ -182,6 +189,16 @@ const throwCriticalProposalFailure = (
     throw haltRuntimeFailure("CROSS_J_FILL_ACK_PROPOSAL_FAILED", `CROSS_J_FILL_ACK_PROPOSAL_FAILED: offer=${tx.data.offerId} ` +
       `seq=${tx.data.fillSeq} error=${reason}`);
   }
+  // swap_resolve is emitted only by the deterministic matcher. Rejecting it
+  // as ordinary user input would commit the already-matched book while
+  // silently discarding its bilateral settlement, permanently diverging the
+  // cache from Account authority. Fail the isolated Entity candidate instead.
+  if (tx.type === 'swap_resolve') {
+    throw haltRuntimeFailure(
+      'SWAP_RESOLVE_PROPOSAL_FAILED',
+      `SWAP_RESOLVE_PROPOSAL_FAILED: offer=${tx.data.offerId} error=${reason}`,
+    );
+  }
   if (tx.type === 'cross_pull_lock') {
     throw haltRuntimeFailure("CROSS_J_PULL_LOCK_PROPOSAL_FAILED", `CROSS_J_PULL_LOCK_PROPOSAL_FAILED: pull=${tx.data.pullId} ` +
       `order=${tx.data.crossJurisdiction.orderId} error=${reason}`);
@@ -241,15 +258,32 @@ const validateOptimisticBatch = async (
   jClaimSession: ReturnType<typeof createAccountJClaimSession>,
 ): Promise<{ machine: AccountReplica; applied: AppliedProposalTx[] } | null> => {
   if (!shouldUseOptimisticProposalBatch(context.proposalWindow)) return null;
-  const machine = cloneAccountReplica(context.account);
+  const transition = beginAccountTransition(
+    context.account,
+    createAccountTransitionKey(context.account, {
+      purpose: 'proposal-optimistic-batch',
+      txs: context.proposalWindow,
+      frameTimestamp: context.frameTimestamp,
+      frameJHeight: context.frameJHeight,
+    }),
+  );
+  const machine = accountTransitionView(transition);
   const applied: AppliedProposalTx[] = [];
-  for (const tx of context.proposalWindow) {
-    if (HEAVY_LOGS) accountLog.debug('batch.optimistic_tx', { type: tx.type });
-    const result = await applyProposalTransaction(context, machine, tx, jClaimSession);
-    if (!result.result.ok) return null;
-    applied.push(result);
+  try {
+    for (const tx of context.proposalWindow) {
+      if (HEAVY_LOGS) accountLog.debug('batch.optimistic_tx', { type: tx.type });
+      const result = await applyProposalTransaction(context, machine, tx, jClaimSession);
+      if (!result.result.ok) {
+        discardAccountTransition(transition);
+        return null;
+      }
+      applied.push(result);
+    }
+    return { machine: commitAccountTransition(transition).account, applied };
+  } catch (error) {
+    discardAccountTransition(transition);
+    throw error;
   }
-  return { machine, applied };
 };
 
 export const validateProposalTransactions = async (
@@ -286,18 +320,34 @@ export const validateProposalTransactions = async (
     };
   }
 
-  let clonedMachine = cloneAccountReplica(context.account);
+  let clonedMachine = context.account;
   for (const tx of context.proposalWindow) {
     if (HEAVY_LOGS) accountLog.debug('tx.process', { type: tx.type });
-    const txMachine = cloneAccountReplica(clonedMachine);
-    const applied = await applyProposalTransaction(context, txMachine, tx, jClaimSession);
+    const transition = beginAccountTransition(
+      clonedMachine,
+      createAccountTransitionKey(clonedMachine, {
+        purpose: 'proposal-transaction',
+        tx,
+        frameTimestamp: context.frameTimestamp,
+        frameJHeight: context.frameJHeight,
+      }),
+    );
+    const txMachine = accountTransitionView(transition);
+    let applied: AppliedProposalTx;
+    try {
+      applied = await applyProposalTransaction(context, txMachine, tx, jClaimSession);
+    } catch (error) {
+      discardAccountTransition(transition);
+      throw error;
+    }
     if (!applied.result.ok) {
+      discardAccountTransition(transition);
       const disposition = classifyFailedTransaction(clonedMachine, applied, effects);
       if (disposition === 'deferred') deferredTxCount += 1;
       else txsToRemove.push(tx);
       continue;
     }
-    clonedMachine = txMachine;
+    clonedMachine = commitAccountTransition(transition).account;
     collectSuccessfulTransaction(
       context.account,
       effects,

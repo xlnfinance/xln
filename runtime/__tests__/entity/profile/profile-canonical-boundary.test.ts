@@ -45,7 +45,6 @@ const stateWithAccounts = (entityId: string, accountCount: number, tokenCount: n
     } }];
   })) as EntityState['accounts'],
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: { name: 'profile-budget', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -95,7 +94,7 @@ test('profile capacity uses the owning Entity right-side perspective', () => {
     rightEntity: right,
     domain: { chainId: 31_337, depositoryAddress: address },
     deltas: new Map([[1, createDefaultDelta(1, { left: 5n, right: 20n })]]),
-  } } as EntityState['accounts'] extends Map<unknown, infer Value> ? Value : never);
+  } } as EntityState['accounts'] extends ReadonlyMap<unknown, infer Value> ? Value : never);
   const capacities = buildEntityProfileDescriptor(state).accounts[0]!.tokenCapacities as Record<string, { inCapacity: bigint; outCapacity: bigint }>;
   expect(capacities['1']).toEqual({ inCapacity: 5n, outCapacity: 20n });
 });

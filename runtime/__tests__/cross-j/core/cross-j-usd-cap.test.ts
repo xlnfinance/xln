@@ -12,7 +12,10 @@ import { applyCommand, createBook, recordAcceptedUsdAskPrice } from '../../../or
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import { isAuthorizedUsdReferenceAsk } from '../../../entity/tx/handlers/account/orderbook/same/results';
 import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/codec';
-import { validateStorageBookDocValue } from '../../../storage/schema/authoritative-schema';
+import {
+  decodeStorageBookHeader,
+  projectStorageBookHeader,
+} from '../../../storage/schema/book-graph-codec';
 import { jref, makeJurisdiction } from '../../helpers/cross-j';
 import { addr, entity, installJurisdictions, makeState } from '../../helpers/cross-j';
 import { createEmptyEnv } from '../../../runtime';
@@ -93,8 +96,8 @@ describe('cross-j hub USD admission cap', () => {
 
   test('authority price survives the exact authoritative book codec', () => {
     const restored = decodeValidatedBuffer(
-      encodeBuffer(internalWethUsdBook()),
-      validateStorageBookDocValue,
+      encodeBuffer(projectStorageBookHeader(internalWethUsdBook())),
+      decodeStorageBookHeader,
     );
     expect(restored.lastAcceptedUsdAskPriceTicks).toBe(25_000_000n);
   });

@@ -84,7 +84,6 @@ const entityState = (htlcRoute: HtlcRoute): EntityState => ({
   reserves: new Map(),
   accounts: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   certifiedBoardState: {
     stackKey: HEX32('01'),
     boardRegistryRoot: HEX32('02'),

@@ -6,9 +6,17 @@ product backlog; long-term work belongs in `docs/roadmap.md`.
 ## Current candidate — 2026-08-14
 
 - Branch: `main` (the only writable release worktree).
-- Open mainnet protocol/code blockers: **3**. Testnet remains the active product target.
+- Open mainnet protocol/code blockers: **5**. Testnet remains the active product target.
 - The executable mainnet gate currently blocks uncapped launch until aggregate
   financial-risk enforcement and the bilateral/on-chain lending covenant are real.
+- Live Runtime/Entity/Account replicas must contain only the current committed
+  head and bounded in-flight coordination. Historical frames, terminal orders
+  and finalized J-event bodies are moving to their dedicated LevelDB history
+  stores; release remains blocked while any live historical collection remains.
+- Runtime/Entity/Account/Book candidates must use separate recomputable
+  persistent-Merkle overlays. A frame may not clone or traverse the complete
+  machine, and throughput evidence is not valid until every matched swap is
+  bilaterally committed with all Runtime/outbox queues at zero.
 - Cross-j Pulls intentionally use independent jurisdiction dispute clocks. Any
   observed leg dispute must make the user or hub Runtime atomically start every
   sibling dispute in one WAL candidate and port Source evidence to Target. This

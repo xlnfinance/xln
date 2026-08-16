@@ -4,6 +4,7 @@ import type {
   ScheduledHook,
 } from './types';
 import { createStructuredLogger, shortId } from '../../infra/logger';
+import { getEntityAccountForWrite } from '../state/persistent-account-map';
 import { scheduleHook } from './hook-state';
 import type { DueHookPlan } from './due-hook-types';
 import { toUnixMs, unixMsToUnixSFloor } from '../../protocol/units';
@@ -32,15 +33,15 @@ export const processDisputeDeadlineHook = (
   plan: DueHookPlan,
 ): void => {
   const { accountId } = hook.data;
-  const account = replica.state.accounts.get(accountId);
-  if (!account?.activeDispute) return;
+  const visible = replica.state.accounts.get(accountId);
+  if (!visible?.activeDispute) return;
   if (replica.state.hubRebalanceConfig?.disputeAutoFinalizeMode === 'ignore') return;
-  const weAreLeft = account.state.leftEntity === replica.state.entityId;
-  const weAreStarter = weAreLeft === account.activeDispute.startedByLeft;
+  const weAreLeft = visible.state.leftEntity === replica.state.entityId;
+  const weAreStarter = weAreLeft === visible.activeDispute.startedByLeft;
   // L1 disputeTimeout is absolute unix seconds (jurisdiction clock).
-  const timeoutSec = Number(account.activeDispute.disputeTimeout || 0);
+  const timeoutSec = Number(visible.activeDispute.disputeTimeout || 0);
   const nowSec = unixMsToUnixSFloor(toUnixMs(Number(replica.state.timestamp || 0)));
-  if (account.activeDispute.observedOnChain !== true) {
+  if (visible.activeDispute.observedOnChain !== true) {
     retryDisputeDeadline(replica, hook, 5000);
     crontabLog.debug('dispute.wait_onchain_start', {
       account: shortId(accountId),
@@ -51,7 +52,7 @@ export const processDisputeDeadlineHook = (
   // Wait until the on-chain challenge end (seconds). Event-driven fanout
   // starts sibling legs; no sealed pull deadline and no cross-j margin.
   if (!timeoutSec || nowSec < timeoutSec) {
-    const recovery = account.activeDispute.crossJurisdictionRecovery;
+    const recovery = visible.activeDispute.crossJurisdictionRecovery;
     const missingRecoveryResults = recovery
       ? recovery.requiredPullIds.filter(
         (pullId) => !Object.hasOwn(recovery.resultsByPullId, pullId),
@@ -83,6 +84,8 @@ export const processDisputeDeadlineHook = (
   const recoveryHasFinalize = recovered.some(
     entry => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
   );
+  const account = getEntityAccountForWrite(replica.state.accounts, accountId);
+  if (!account?.activeDispute) throw new Error(`DISPUTE_DEADLINE_WRITE_ACCOUNT_MISSING:${accountId}`);
   if (sentHasFinalize || replica.state.jBatchState?.sentBatch) {
     account.activeDispute.finalizeQueued =
       sentHasFinalize || (account.activeDispute.finalizeQueued ?? false);

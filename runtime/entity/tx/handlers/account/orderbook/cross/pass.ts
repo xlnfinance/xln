@@ -1,6 +1,6 @@
 import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
 
-import type { BookState } from '../../../../../../orderbook';
+import { forkBookState, type BookState } from '../../../../../../orderbook';
 import { createStructuredLogger } from '../../../../../../infra/logger';
 import {
   buildCrossJurisdictionMarketOffer,
@@ -21,7 +21,6 @@ export const createCrossOrderbookPass = (
 ): CrossOrderbookPass => ({
   ...input,
   crossLiveOfferMeta: new Map(),
-  assertedPairs: new Set(),
   aggregatedFills: new Map(),
   suspendedOrderIds: new Set(),
   workingBookCache: new Map(),
@@ -58,7 +57,7 @@ export const getWorkingCrossBook = (
 ): BookState => {
   const cached = pass.workingBookCache.get(pairId);
   if (cached) return cached;
-  const working = structuredClone(committedBook) as BookState;
+  const working = forkBookState(committedBook);
   pass.workingBookCache.set(pairId, working);
   return working;
 };

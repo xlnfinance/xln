@@ -2065,11 +2065,11 @@ blockquote {
   overflow: hidden;
 }
 
-.agent-entity.v1 { --entity-accent: #f4c152; }
-.agent-entity.v2 { --entity-accent: #60a5fa; }
-.agent-entity.v3 { --entity-accent: #34d399; }
-.agent-entity.v4 { --entity-accent: #f472b6; }
-.agent-entity.v5 { --entity-accent: #a78bfa; }
+.agent-entity.theme-1 { --entity-accent: #f4c152; }
+.agent-entity.theme-2 { --entity-accent: #60a5fa; }
+.agent-entity.theme-3 { --entity-accent: #34d399; }
+.agent-entity.theme-4 { --entity-accent: #f472b6; }
+.agent-entity.theme-5 { --entity-accent: #a78bfa; }
 
 .agent-entity::before {
   content: "";
@@ -2338,11 +2338,11 @@ blockquote {
   padding: 8px;
 }
 
-.mini-agent.v1 { --entity-accent: #f4c152; }
-.mini-agent.v2 { --entity-accent: #60a5fa; }
-.mini-agent.v3 { --entity-accent: #34d399; }
-.mini-agent.v4 { --entity-accent: #f472b6; }
-.mini-agent.v5 { --entity-accent: #a78bfa; }
+.mini-agent.theme-1 { --entity-accent: #f4c152; }
+.mini-agent.theme-2 { --entity-accent: #60a5fa; }
+.mini-agent.theme-3 { --entity-accent: #34d399; }
+.mini-agent.theme-4 { --entity-accent: #f472b6; }
+.mini-agent.theme-5 { --entity-accent: #a78bfa; }
 
 .mini-face {
   position: relative;

@@ -1,4 +1,5 @@
-import type { AccountReplica, AccountTx } from '../../../../types/account';
+import type { AccountLendingIntentKind, AccountReplica, AccountTx } from '../../../../types/account';
+import type { AccountDraftReplica } from '../../../state/account-state-draft';
 import { normalizeInterestBps, normalizeLendingTerm } from '../../../../extensions/lending';
 import { handleDirectPayment } from './direct-payment';
 import { handleSetCreditLimit } from './set-credit-limit';
@@ -56,13 +57,12 @@ const requireIntentId = (value: string, prefix: 'lend' | 'borrow' | 'loan'): voi
 };
 
 const consumeIntent = (
-  account: AccountReplica,
+  account: AccountDraftReplica,
   key: string,
-  kind: NonNullable<AccountReplica['state']['lendingIntents']> extends Map<string, infer K> ? K : never,
+  kind: AccountLendingIntentKind,
 ): void => {
-  account.state.lendingIntents ??= new Map();
   if (account.state.lendingIntents.has(key)) throw new Error(`LENDING_INTENT_REPLAY:${key}`);
-  account.state.lendingIntents.set(key, kind);
+  account.state.lendingIntents.put(key, kind);
 };
 
 const requireUnusedIntent = (account: AccountReplica, key: string): void => {
@@ -74,7 +74,7 @@ const positiveAmount = (value: bigint, context: string): void => {
 };
 
 const applyPayment = (
-  account: AccountReplica,
+  account: AccountDraftReplica,
   tx: Extract<LendingAccountTx, { type: 'lending_fund' | 'lending_repay' | 'lending_close_payout' }>,
   byLeft: boolean,
 ): LendingResult => {
@@ -107,7 +107,7 @@ const applyPayment = (
 };
 
 export const handleLendingAccountTx = (
-  account: AccountReplica,
+  account: AccountDraftReplica,
   tx: LendingAccountTx,
   byLeft: boolean,
 ): LendingResult => {

@@ -1,9 +1,4 @@
-import {
-  validateFrameLogEntries,
-} from '../../protocol/boundary-validation';
 import { decodeRuntimeInput } from '../../runtime/input-schema';
-import type { RoutedEntityInput } from '../../runtime/types';
-import { decodeRoutedEntityInput } from '../../runtime/routing/routing-validation';
 import { assertStorageSchemaVersion, STORAGE_FRAME_FORMAT } from '../keys';
 import type {
   StorageDiffRecord,
@@ -28,14 +23,12 @@ import {
 import {
   assertStorageAccountDocBinding,
   validateStorageAccountDocValue,
-  validateStorageBookDocValue,
   validateStorageEntityCoreDocValue,
 } from './schema-state-docs';
-import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
-import { validateDurableOutputRetryState } from '../../runtime/delivery/durable-output-retry';
-import { validateRuntimeHistoryRecords } from '../history/history-view-schema';
-import { validateEntityInfraContext } from '../../entity/consensus/frame/infra-context-validation';
-import type { EntityInfraContext } from '../../types/entity/infra-context';
+import { decodeDurableOutputRetryState } from '../../runtime/delivery/durable-output-retry';
+import { decodeRuntimeOutputPayloadRefs } from '../wal/outbox-payload';
+import { decodeEntityContextPayloadRefs } from '../wal/entity-context-payload';
+import { decodeRuntimeMachineGraphRoot } from '../wal/runtime-machine-graph';
 
 export * from './schema-state-docs';
 export * from './schema-merkle-cas';
@@ -86,10 +79,10 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   requireExactBoundaryKeys(frame, [
     'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest', 'replicaMetaCheckpoint',
     'replicaMetaStateMode', 'postStateHash', 'stateHash',
-    'hashMode', 'materializedState', 'runtimeInput', 'entityContexts', 'historyRecords', 'activityLogs',
+    'hashMode', 'materializedState', 'runtimeInput',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
-  ], ['entityHashes', 'canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachine', 'pendingRuntimeInput', 'runtimeOutputs', 'runtimeOutputRetryState', 'overlayRecords'], `${code}_FIELDS`);
+  ], ['entityHashes', 'canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachineRoot', 'pendingRuntimeInput', 'entityContextRefs', 'runtimeOutputRefs', 'runtimeOutputRetryState'], `${code}_FIELDS`);
   requireBoundaryInteger(frame['height'], `${code}_HEIGHT`, 1);
   requireBoundaryInteger(frame['timestamp'], `${code}_TIMESTAMP`);
   requireStorageHash(frame['prevFrameHash'], `${code}_PREV_HASH`);
@@ -98,8 +91,7 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   requireStorageBoolean(frame['replicaMetaCheckpoint'], `${code}_REPLICA_META_CHECKPOINT`);
   if (
     frame['replicaMetaStateMode'] !== 'live-head' &&
-    frame['replicaMetaStateMode'] !== 'shared-entity-state' &&
-    frame['replicaMetaStateMode'] !== 'full'
+    frame['replicaMetaStateMode'] !== 'shared-entity-state'
   ) throw new Error(`${code}_REPLICA_META_STATE_MODE`);
   if (frame['replicaMetaCheckpoint'] === false && frame['replicaMetaStateMode'] !== 'live-head') {
     throw new Error(`${code}_REPLICA_META_STATE_MODE_NON_CHECKPOINT`);
@@ -120,26 +112,22 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
     requireStorageHash(frame['runtimeStateHash'], `${code}_RUNTIME_STATE_HASH`);
   }
   const requiresRuntimeMachine = frame['materializedState'] === true || frame['canonicalStateHash'] !== undefined;
-  if (requiresRuntimeMachine || frame['runtimeMachine'] !== undefined) {
-    frame['runtimeMachine'] = validateDurableRuntimeMachineSnapshot(
-      frame['runtimeMachine'],
-      `${code}_MACHINE`,
+  if (requiresRuntimeMachine || frame['runtimeMachineRoot'] !== undefined) {
+    frame['runtimeMachineRoot'] = decodeRuntimeMachineGraphRoot(
+      frame['runtimeMachineRoot'],
+      `${code}_MACHINE_ROOT`,
     );
   }
   frame['runtimeInput'] = decodeRuntimeInput(
     frame['runtimeInput'],
     `${code}_RUNTIME_INPUT`,
   );
-  frame['entityContexts'] = validateEntityContexts(
-    frame['entityContexts'],
-    Number(frame['height']),
-  );
-  frame['historyRecords'] = validateRuntimeHistoryRecords(
-    frame['historyRecords'],
-    Number(frame['height']),
-    Number(frame['timestamp']),
-  );
-  validateFrameLogEntries(frame['activityLogs'], `${code}_ACTIVITY_LOGS`);
+  if (frame['entityContextRefs'] !== undefined) {
+    frame['entityContextRefs'] = decodeEntityContextPayloadRefs(
+      frame['entityContextRefs'],
+      `${code}_ENTITY_CONTEXT_REFS`,
+    );
+  }
   if (frame['pendingRuntimeInput'] !== undefined) {
     frame['pendingRuntimeInput'] = decodeRuntimeInput(
       frame['pendingRuntimeInput'],
@@ -151,34 +139,12 @@ export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame =>
   requireStringArray(frame['touchedBookEntities'], `${code}_TOUCHED_BOOK_ENTITIES`);
   validateOptionalFrameFields(frame, code);
   if (frame['runtimeOutputRetryState'] !== undefined) {
-    frame['runtimeOutputRetryState'] = validateDurableOutputRetryState(
+    frame['runtimeOutputRetryState'] = decodeDurableOutputRetryState(
       frame['runtimeOutputRetryState'],
-      (frame['runtimeOutputs'] ?? []) as RoutedEntityInput[],
       `${code}_RUNTIME_OUTPUT_RETRY_STATE`,
     );
   }
   return frame as RuntimeFrame;
-};
-
-const validateEntityContexts = (
-  value: unknown,
-  runtimeHeight: number,
-): RuntimeFrame['entityContexts'] => {
-  if (!(value instanceof Map)) throw new Error('STORAGE_FRAME_ENTITY_CONTEXTS_MAP_REQUIRED');
-  const contexts = new Map<string, EntityInfraContext>();
-  for (const [replicaId, raw] of value) {
-    const code = `STORAGE_FRAME_ENTITY_CONTEXT_INVALID:${String(replicaId)}`;
-    if (
-      typeof replicaId !== 'string' ||
-      replicaId !== replicaId.toLowerCase() ||
-      !/^0x[0-9a-f]{64}:[^:\s]+$/.test(replicaId)
-    ) throw new Error(`${code}:REPLICA_ID`);
-    const context = validateEntityInfraContext(raw);
-    if (!replicaId.startsWith(`${context.entityId}:`)) throw new Error(`${code}:ENTITY_BINDING`);
-    contexts.set(replicaId, context);
-  }
-  if (contexts.size > 0 && runtimeHeight < 1) throw new Error('STORAGE_FRAME_ENTITY_CONTEXTS_GENESIS_FORBIDDEN');
-  return contexts;
 };
 
 const validateTouchedAccounts = (value: unknown, code: string): void => {
@@ -201,11 +167,12 @@ const validateOptionalFrameFields = (frame: Record<string, unknown>, code: strin
   if (canonicalFields.some(value => value !== undefined) && canonicalFields.some(value => value === undefined)) {
     throw new Error(`${code}_CANONICAL_CHECKPOINT_INCOMPLETE`);
   }
-  if (frame['runtimeOutputs'] !== undefined) {
-    frame['runtimeOutputs'] = requireStorageArray(frame['runtimeOutputs'], `${code}_OUTPUTS`)
-      .map(decodeRoutedEntityInput);
+  if (frame['runtimeOutputRefs'] !== undefined) {
+    frame['runtimeOutputRefs'] = decodeRuntimeOutputPayloadRefs(
+      frame['runtimeOutputRefs'],
+      `${code}_OUTPUT_REFS`,
+    );
   }
-  if (frame['overlayRecords'] !== undefined) requireStorageArray(frame['overlayRecords'], `${code}_OVERLAYS`);
 };
 
 export const validateStorageSnapshotManifestValue = (value: unknown): StorageSnapshotManifest => {
@@ -231,10 +198,7 @@ const validateStorageDoc = (value: unknown, code: string): StorageDoc => {
     requireStorageString(doc['counterpartyId'], `${code}_COUNTERPARTY_ID`);
     assertStorageAccountDocBinding(validateStorageAccountDocValue(doc['value']), String(doc['entityId']), String(doc['counterpartyId']), code);
   } else if (doc['family'] === 'book') {
-    requireExactBoundaryKeys(doc, ['family', 'entityId', 'pairId', 'value'], [], `${code}_FIELDS`);
-    requireStorageString(doc['entityId'], `${code}_ENTITY_ID`);
-    requireStorageString(doc['pairId'], `${code}_PAIR_ID`);
-    validateStorageBookDocValue(doc['value']);
+    throw new Error(`${code}_BOOK_GRAPH_IN_DIFF_FORBIDDEN`);
   } else throw new Error(`${code}_FAMILY`);
   return doc as StorageDoc;
 };

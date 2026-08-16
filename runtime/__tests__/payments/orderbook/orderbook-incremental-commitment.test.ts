@@ -5,14 +5,19 @@ import {
   computeBookCommitmentHash,
   verifyAndWarmBookCommitment,
 } from '../../../orderbook/commitment';
-import { applyCommand, createBook } from '../../../orderbook/core';
+import { applyCommand, createBook, type BookState } from '../../../orderbook/core';
+import { commitBookOverlay } from '../../../orderbook/book-overlay';
 import { getPerfMs } from '../../../infra/time';
 import { computeIntegrityChecksum, computeIntegrityDigest } from '../../../infra/integrity-checksum';
+import {
+  decodeBookPricePageTree,
+  projectBookPricePageTree,
+} from '../../../orderbook/pages/page';
 
 const buildFatBook = (orderCount: number) => {
-  const book = createBook({ bucketWidthTicks: 10n, maxOrders: orderCount + 1, stpPolicy: 1 });
+  let book = createBook({ bucketWidthTicks: 10n, maxOrders: orderCount + 1, stpPolicy: 1 });
   for (let index = 0; index < orderCount; index += 1) {
-    applyCommand(book, {
+    book = commitBookOverlay(applyCommand(book, {
       kind: 0,
       ownerId: `maker-${index}`,
       orderId: `order-${index}`,
@@ -21,10 +26,17 @@ const buildFatBook = (orderCount: number) => {
       postOnly: true,
       priceTicks: 1_000n + BigInt(index % 100),
       qtyLots: 1n,
-    });
+    }).state);
   }
   return book;
 };
+
+const coldBookProjection = (book: BookState): BookState => ({
+  ...book,
+  orders: new Map([...book.orders].map(([key, order]) => [key, { ...order }])),
+  bidPages: decodeBookPricePageTree(projectBookPricePageTree(book.bidPages), 'TEST_BIDS'),
+  askPages: decodeBookPricePageTree(projectBookPricePageTree(book.askPages), 'TEST_ASKS'),
+});
 
 test('integrity checksum matches the portable SHA-256 golden prefix', () => {
   expect(computeIntegrityChecksum(new TextEncoder().encode('abc')))
@@ -34,16 +46,13 @@ test('integrity checksum matches the portable SHA-256 golden prefix', () => {
 });
 
 test('10k-order book rehashes only the dirty order ancestry', () => {
-  const book = buildFatBook(10_000);
+  let book = buildFatBook(10_000);
 
   const coldStartedAt = getPerfMs();
   const initialRoot = computeBookCommitmentHash(book);
   const coldMs = getPerfMs() - coldStartedAt;
-  const targetBucket = book.askBuckets.get('100')!;
-  const untouchedBucket = book.askBuckets.get('109')!;
-  const untouchedBucketHash = untouchedBucket.commitmentHash;
-  const untouchedLevelHash = untouchedBucket.levels.get('1099')!.commitmentHash;
-  const untouchedOrderHash = book.orders.get('order-9999')!.commitmentHash;
+  const untouchedPage = book.askPages.get({ priceTicks: 1_099n, pageSequence: 0 })!;
+  const untouchedOrder = book.orders.get('order-9999')!;
 
   const cachedStartedAt = getPerfMs();
   for (let index = 0; index < 1_000; index += 1) {
@@ -51,19 +60,24 @@ test('10k-order book rehashes only the dirty order ancestry', () => {
   }
   const cachedReadsMs = getPerfMs() - cachedStartedAt;
 
-  applyCommand(book, { kind: 1, ownerId: 'maker-0', orderId: 'order-0' });
-  expect(book.commitmentHash).toBeUndefined();
-  expect(targetBucket.commitmentHash).toBeUndefined();
-  expect(untouchedBucket.commitmentHash).toBe(untouchedBucketHash);
-  expect(untouchedBucket.levels.get('1099')!.commitmentHash).toBe(untouchedLevelHash);
-  expect(book.orders.get('order-9999')!.commitmentHash).toBe(untouchedOrderHash);
+  const previousBook = book;
+  book = commitBookOverlay(applyCommand(book, {
+    kind: 1,
+    ownerId: 'maker-0',
+    orderId: 'order-0',
+  }).state);
+  expect(previousBook.askPages.get({ priceTicks: 1_000n, pageSequence: 0 })?.slots[0]?.orderId)
+    .toBe('order-0');
+  expect(book.orders.has('order-0')).toBe(false);
+  expect(book.askPages.get({ priceTicks: 1_099n, pageSequence: 0 })).toBe(untouchedPage);
+  expect(book.orders.get('order-9999')).toBe(untouchedOrder);
 
   const incrementalStartedAt = getPerfMs();
   const incrementalRoot = computeBookCommitmentHash(book);
   const incrementalMs = getPerfMs() - incrementalStartedAt;
   expect(incrementalRoot).not.toBe(initialRoot);
 
-  const coldClone = structuredClone(book);
+  const coldClone = coldBookProjection(book);
   clearBookCommitmentCache(coldClone);
   const rebuiltRoot = computeBookCommitmentHash(coldClone);
   expect(rebuiltRoot).toBe(incrementalRoot);
@@ -89,16 +103,16 @@ test('persisted book commitment is cold-verified before its cache is trusted', (
 });
 
 test('incremental root equals a cold rebuild after every add, partial fill, full fill, and cancel', () => {
-  const book = createBook({ bucketWidthTicks: 10n, maxOrders: 200, stpPolicy: 1 });
+  let book = createBook({ bucketWidthTicks: 10n, maxOrders: 200, stpPolicy: 1 });
   const assertColdParity = () => {
     const incremental = computeBookCommitmentHash(book);
-    const cold = structuredClone(book);
+    const cold = coldBookProjection(book);
     clearBookCommitmentCache(cold);
     expect(computeBookCommitmentHash(cold)).toBe(incremental);
   };
 
   for (let index = 0; index < 40; index += 1) {
-    applyCommand(book, {
+    book = commitBookOverlay(applyCommand(book, {
       kind: 0,
       ownerId: `maker-${index}`,
       orderId: `maker-order-${index}`,
@@ -107,11 +121,11 @@ test('incremental root equals a cold rebuild after every add, partial fill, full
       postOnly: true,
       priceTicks: 1_000n + BigInt(index % 4),
       qtyLots: 3n,
-    });
+    }).state);
     assertColdParity();
   }
 
-  applyCommand(book, {
+  book = commitBookOverlay(applyCommand(book, {
     kind: 0,
     ownerId: 'taker-partial',
     orderId: 'taker-partial',
@@ -120,10 +134,10 @@ test('incremental root equals a cold rebuild after every add, partial fill, full
     postOnly: false,
     priceTicks: 1_003n,
     qtyLots: 5n,
-  });
+  }).state);
   assertColdParity();
 
-  applyCommand(book, {
+  book = commitBookOverlay(applyCommand(book, {
     kind: 0,
     ownerId: 'taker-full',
     orderId: 'taker-full',
@@ -132,9 +146,13 @@ test('incremental root equals a cold rebuild after every add, partial fill, full
     postOnly: false,
     priceTicks: 1_003n,
     qtyLots: 7n,
-  });
+  }).state);
   assertColdParity();
 
-  applyCommand(book, { kind: 1, ownerId: 'maker-10', orderId: 'maker-order-10' });
+  book = commitBookOverlay(applyCommand(book, {
+    kind: 1,
+    ownerId: 'maker-10',
+    orderId: 'maker-order-10',
+  }).state);
   assertColdParity();
 });

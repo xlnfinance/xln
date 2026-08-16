@@ -1,22 +1,7 @@
 import type { RuntimeReplica, EnvSnapshot } from '../types';
 
-// Runtime memory is the live finalized state plus the private in-flight clone.
-// Historical views belong to LevelDB or to an explicit test-only collector.
-export const RECENT_RUNTIME_HISTORY_LIMIT = 0;
-
-export const appendRecentRuntimeSnapshot = (
-  history: readonly EnvSnapshot[],
-  snapshot: EnvSnapshot,
-  limit = RECENT_RUNTIME_HISTORY_LIMIT,
-): EnvSnapshot[] => {
-  if (!Number.isSafeInteger(limit) || limit < 0) {
-    throw new Error(`RUNTIME_HISTORY_LIMIT_INVALID:${String(limit)}`);
-  }
-  if (limit === 0) return [];
-  const keepBeforeAppend = Math.max(0, limit - 1);
-  const retained = keepBeforeAppend === 0 ? [] : history.slice(-keepBeforeAppend);
-  return [...retained, snapshot];
-};
+// Runtime memory is the live finalized state plus bounded in-flight machinery.
+// Historical views belong to LevelDB or to an explicitly-owned trace collector.
 
 type RuntimeHistoryTrace = {
   snapshots: EnvSnapshot[];
@@ -26,6 +11,23 @@ const testingTraceByEnv = new Map<RuntimeReplica, RuntimeHistoryTrace>();
 
 export const hasRuntimeHistoryTraceForTesting = (env: RuntimeReplica): boolean =>
   testingTraceByEnv.has(env);
+
+/** Read an active external collector without placing a timeline on RuntimeReplica. */
+export const readRuntimeHistoryTraceForTesting = (
+  env: RuntimeReplica,
+): readonly EnvSnapshot[] | null => testingTraceByEnv.get(env)?.snapshots ?? null;
+
+/** Mutate only the last value in an explicitly-owned collector. */
+export const updateLatestRuntimeHistoryTraceForTesting = (
+  env: RuntimeReplica,
+  update: (snapshot: EnvSnapshot) => void,
+): boolean => {
+  const snapshots = testingTraceByEnv.get(env)?.snapshots;
+  const latest = snapshots?.at(-1);
+  if (!latest) return false;
+  update(latest);
+  return true;
+};
 
 export type RuntimeHistoryTraceCollector = {
   readonly snapshots: readonly EnvSnapshot[];

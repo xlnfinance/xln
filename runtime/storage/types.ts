@@ -1,9 +1,9 @@
 import type { BookState, EntityReferral, HubProfile, OrderbookExtState } from '../orderbook';
 import type { CrontabState } from '../entity/scheduler/types';
 import type { JBatchState } from '../jurisdiction/machine/batch';
-import type { AccountReplica, HtlcRoute, RuntimeOverlayRecord } from '../types/account';
+import type { AccountReplica, HtlcRoute } from '../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, EntitySwapPair, LockBookEntry, Proposal } from '../entity/types';
-import type { RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
+import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';
 import type { DebtEntry } from '../types/finance/debt';
 import type { FrameLogEntry } from '../types/logging';
 import type { HubRebalanceConfig } from '../types/finance/rebalance';
@@ -100,7 +100,6 @@ export type StorageEntityCoreDoc = {
   deferredAccountProposals?: Map<string, string>;
   settlementContinuations?: EntityState['settlementContinuations'];
   lastFinalizedJHeight: number;
-  jBlockChain: EntityState['jBlockChain'];
   jHistoryFinality?: EntityState['jHistoryFinality'];
   certifiedBoardState?: EntityState['certifiedBoardState'];
   crontabState?: CrontabState;
@@ -147,7 +146,7 @@ export type RuntimeFrame = {
   /** Commits the exact validator-local recovery metadata published with this frame. */
   replicaMetaDigest: string;
   replicaMetaCheckpoint: boolean;
-  replicaMetaStateMode: 'live-head' | 'shared-entity-state' | 'full';
+  replicaMetaStateMode: 'live-head' | 'shared-entity-state';
   /** Required per-frame replay commitment over Entity heads and durable Runtime state. */
   postStateHash: string;
   stateHash: string;
@@ -165,32 +164,47 @@ export type RuntimeFrame = {
   /** Sparse canonical Entity + durable R-machine replay oracle. */
   runtimeStateHash?: string;
   runtimeInput: RuntimeInput;
-  /** Exact public infrastructure slices committed by Entity frames in this Runtime frame. */
-  entityContexts: Map<string, EntityInfraContext>;
-  /**
-   * Exact certified child frames produced by this Runtime frame. These live in
-   * the authoritative WAL so every disposable history view can be rebuilt
-   * after a crash or local deletion.
-   */
-  historyRecords: RuntimeHistoryRecord[];
-  /** Exact committed-frame log payload used to rebuild the Activity view. */
-  activityLogs: FrameLogEntry[];
+  /** Replica-id to immutable infrastructure-context payload hash. */
+  entityContextRefs?: Map<string, EntityContextPayloadHash>;
   /** Exact bounded input queue retained after this frame (for deferred H+1 work). */
   pendingRuntimeInput?: RuntimeInput;
-  /** Full durable Runtime state is a sparse materialization checkpoint only. */
-  runtimeMachine?: Record<string, unknown>;
-  /**
-   * Transport envelopes not yet terminally delivered after this committed
-   * frame. They are replayable at-least-once side effects, not consensus state.
-   */
-  runtimeOutputs?: RoutedEntityInput[];
+  /** Root of the exact typed Runtime checkpoint Patricia graph for this height. */
+  runtimeMachineRoot?: RuntimeMachineGraphRoot;
+  /** Ordered immutable payload references; bodies live once in the outbox keyspace. */
+  runtimeOutputRefs?: RuntimeOutputPayloadHash[];
   /** Retry/backoff state for the retained transport outputs. */
   runtimeOutputRetryState?: DurableOutputRetryState[];
-  overlayRecords?: RuntimeOverlayRecord[];
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
   touchedBookEntities: string[];
 };
+
+/** Bodies addressed by one RuntimeFrame. They are never fields of the frame itself. */
+export type RuntimeFramePayloads = {
+  entityContexts: Map<string, EntityInfraContext>;
+  runtimeMachine?: Record<string, unknown>;
+  runtimeOutputs?: RoutedEntityInput[];
+};
+
+declare const runtimeOutputPayloadHashBrand: unique symbol;
+export type RuntimeOutputPayloadHash = string & {
+  readonly [runtimeOutputPayloadHashBrand]: 'RuntimeOutputPayloadHash';
+};
+
+declare const entityContextPayloadHashBrand: unique symbol;
+export type EntityContextPayloadHash = string & {
+  readonly [entityContextPayloadHashBrand]: 'EntityContextPayloadHash';
+};
+
+declare const runtimeMachineRootHashBrand: unique symbol;
+export type RuntimeMachineRootHash = string & {
+  readonly [runtimeMachineRootHashBrand]: 'RuntimeMachineRootHash';
+};
+
+export type RuntimeMachineGraphRoot = Readonly<{
+  rootHash: RuntimeMachineRootHash;
+  leafCount: number;
+}>;
 
 export type PersistedFrameJournal = Pick<RuntimeFrame,
   | 'height'
@@ -200,13 +214,11 @@ export type PersistedFrameJournal = Pick<RuntimeFrame,
   | 'replicaMetaCheckpoint'
   | 'replicaMetaStateMode'
   | 'runtimeInput'
-  | 'entityContexts'
   | 'pendingRuntimeInput'
-  | 'runtimeOutputs'
+  | 'runtimeOutputRefs'
   | 'runtimeOutputRetryState'
-  | 'runtimeMachine'
   | 'runtimeStateHash'
-> & { logs: FrameLogEntry[] };
+> & RuntimeFramePayloads & { logs: FrameLogEntry[] };
 
 export type StorageEntityHashDoc = {
   entityId: string;
@@ -258,12 +270,6 @@ export type StorageReplicaMeta = {
   entityId: string;
   signerId: string;
   isProposer: boolean;
-  /**
-   * Exact validator-local state for multi-validator or checkpoint records.
-   * Intermediate single-signer metadata references the authoritative shared
-   * Entity doc/diff at the same R-frame instead of duplicating it.
-   */
-  state?: EntityState;
   /** Validator-local presentation index rebuilt from certified Entity frames. */
   htlcNotes?: EntityReplica['htlcNotes'];
   mempool: EntityReplica['mempool'];
@@ -271,7 +277,7 @@ export type StorageReplicaMeta = {
   proposal?: EntityReplica['proposal'];
   lockedFrame?: EntityReplica['lockedFrame'];
   candidate?: EntityReplica['candidate'];
-  certifiedFrameLineage?: EntityReplica['certifiedFrameLineage'];
+  certifiedFrameHead?: EntityReplica['certifiedFrameHead'];
   certifiedFrameAnchor?: EntityReplica['certifiedFrameAnchor'];
   hankoWitness?: EntityReplica['hankoWitness'];
   leaderVotes?: EntityReplica['leaderVotes'];
@@ -287,7 +293,7 @@ type AssertNoUnclassifiedPersistenceKeys<T extends never> = T;
 type EntityPersistenceSplitKeys =
   | 'accounts'
   | 'orderbookExt';
-type ReplicaPersistenceSplitKeys = never;
+type ReplicaPersistenceSplitKeys = 'state';
 
 type PersistenceCoverage =
   | AssertNoUnclassifiedPersistenceKeys<Exclude<keyof AccountReplica, keyof StorageAccountDoc | 'state'>>

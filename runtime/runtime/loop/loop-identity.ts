@@ -1,4 +1,8 @@
-import { deriveSignerAddressSync, getSignerPrivateKeyIfAvailable } from '../../account/crypto.ts';
+import {
+  deriveSignerAddressSync,
+  getRegisteredLocalSignerIds,
+  getSignerPrivateKeyIfAvailable,
+} from '../../account/crypto.ts';
 import { extractEntityId, extractSignerId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../infra/logger.ts';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
@@ -27,6 +31,11 @@ export const getLocalSignerIdsForEntity = (env: RuntimeReplica, entityId: string
     if (getSignerPrivateKeyIfAvailable(env, signerId) !== null) signerIds.add(signerId);
   }
   return [...signerIds];
+};
+
+/** Public signer inventory for operator surfaces; private key bytes never leave Runtime. */
+export const getLocalRuntimeSignerIds = (env: RuntimeReplica): string[] => {
+  return getRegisteredLocalSignerIds(env);
 };
 
 export const getLocalEntitySignerKeys = (env: RuntimeReplica): Set<string> => {

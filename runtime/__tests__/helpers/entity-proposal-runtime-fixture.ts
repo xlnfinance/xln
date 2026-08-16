@@ -217,6 +217,7 @@ export const buildAuthenticatedInvalidProposal = async (
     env,
     { ...replica, signerId: proposerId },
     txs,
+    { usePersistedReplayContext: true },
   );
   return {
     height,
@@ -276,6 +277,7 @@ export const buildMalformedBoardHandoverProposal = async (
     env,
     { ...replica, signerId: proposerId },
     txs,
+    { usePersistedReplayContext: true },
   );
   return {
     height,

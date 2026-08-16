@@ -24,6 +24,8 @@ import type {
   CrontabTaskState,
 } from './types';
 import { getRebalanceAccountIds } from '../consensus/account/work-index';
+import { getEntityAccountForWrite } from '../state/persistent-account-map';
+import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 
@@ -364,7 +366,7 @@ const queueR2CTargets = (
         `REBALANCE_TARGET_STATE_CHANGED:${target.counterpartyId}:${target.tokenId}`,
       );
     }
-    return { account, target };
+    return { target };
   });
   const candidate = {
     ...current,
@@ -386,8 +388,13 @@ const queueR2CTargets = (
   current.batch = candidate.batch;
   current.status = candidate.status;
 
-  for (const { account, target } of submissions) {
-    account.shadow.rebalance.submittedAtByToken.set(target.tokenId, run.now);
+  for (const { target } of submissions) {
+    const writableAccount = getEntityAccountForWrite(run.replica.state.accounts, target.counterpartyId);
+    if (!writableAccount) throw new Error(`REBALANCE_TARGET_ACCOUNT_MISSING:${target.counterpartyId}`);
+    writableAccount.shadow.rebalance.submittedAtByToken = requirePersistentAccountStateMap(
+      writableAccount.shadow.rebalance.submittedAtByToken,
+      'rebalanceShadowSubmitted',
+    ).updated(target.tokenId, run.now);
     run.execution.accountChanges.add(target.counterpartyId);
     crontabLog.debug('rebalance.r2c.batch_add', {
       hub: shortId(run.hubId, 8),

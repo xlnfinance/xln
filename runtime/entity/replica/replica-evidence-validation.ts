@@ -127,22 +127,13 @@ export const validateReplicaLineageAndWitnesses = (
   replica: Record<string, unknown>,
   context: string,
 ): void => {
-  if (replica['certifiedFrameLineage'] !== undefined) {
-    const lineage = validateArray<unknown>(
-      replica['certifiedFrameLineage'],
-      `${context}.certifiedFrameLineage`,
-    );
-    lineage.forEach((value, index) => {
-      const item = `${context}.certifiedFrameLineage[${index}]`;
-      const link = validateObject(value, item);
-      validateProposedEntityFrame(link['frame'], `${item}.frame`);
-      const authority = validateObject(link['postAuthority'], `${item}.postAuthority`);
-      validateObject(authority['config'], `${item}.postAuthority.config`);
-      validateObject(
-        authority['leaderState'],
-        `${item}.postAuthority.leaderState`,
-      );
-    });
+  if (replica['certifiedFrameHead'] !== undefined) {
+    const item = `${context}.certifiedFrameHead`;
+    const link = validateObject(replica['certifiedFrameHead'], item);
+    validateProposedEntityFrame(link['frame'], `${item}.frame`);
+    const authority = validateObject(link['postAuthority'], `${item}.postAuthority`);
+    validateObject(authority['config'], `${item}.postAuthority.config`);
+    validateObject(authority['leaderState'], `${item}.postAuthority.leaderState`);
   }
   if (replica['hankoWitness'] === undefined) return;
   const witnesses = validateMapInstance(

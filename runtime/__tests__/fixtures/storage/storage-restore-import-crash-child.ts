@@ -187,7 +187,9 @@ const commitConsumption = async (height: number): Promise<void> => {
   const authorityRoot = computeEntityFrameAuthorityRoot(postAuthority);
   const parentFrameHash = preState.height === 0 ? 'genesis' : String(preState.prevFrameHash || '');
   const txs = [];
-  const entityContext = await materializeEntityInfraContext(env, replica, txs);
+  const entityContext = await materializeEntityInfraContext(env, replica, txs, {
+    usePersistedReplayContext: true,
+  });
   const hash = createEntityFrameHashFromStateRoot(
     parentFrameHash,
     entityHeight,
@@ -226,10 +228,7 @@ const commitConsumption = async (height: number): Promise<void> => {
     postAuthority,
   };
   replica.state = { ...postStateWithoutHead, prevFrameHash: hash };
-  replica.certifiedFrameLineage = [
-    ...(replica.certifiedFrameLineage ?? []),
-    link,
-  ];
+  replica.certifiedFrameHead = link;
   cacheCommittedConsumptionNodeChanges(env, {
     newNodes: applied.newNodes,
     replacedNodeHashes: applied.replacedNodeHashes,

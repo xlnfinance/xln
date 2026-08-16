@@ -6,7 +6,9 @@
 import type { ConsensusConfig } from '../../entity/types';
 import { deriveDelta } from '../../account/utils';
 import { encodeBoard, hashBoard } from '../../entity/factory';
+import { zeroPadValue } from 'ethers';
 import type { RuntimeReplica } from '../../runtime/types';
+import { isBatchEmpty } from '../../jurisdiction/machine/batch';
 import { maybeApproveSettlement } from '../consensus/ahb-helpers';
 import { requireReplica } from '../consensus/multi-sig';
 import {
@@ -202,5 +204,71 @@ export const activateInvestorBoardAndHandover = async (
   const record = await actors.jadapter.entityProvider.entities(actors.boardCompany.id);
   if (String(record.currentBoardHash).toLowerCase() !== next.boardHash) {
     throw new Error('COMPANY_HANDOVER_ONCHAIN_BOARD_MISMATCH');
+  }
+};
+
+export const proveSuccessorReserveControl = async (
+  env: RuntimeReplica,
+  actors: CompanyScenarioActors,
+  shares: CompanyShareTokens,
+): Promise<void> => {
+  const signer = actors.boardCompany.validators[0];
+  if (!signer) throw new Error('COMPANY_SUCCESSOR_SIGNER_MISSING');
+  const companyState = requireReplica(env, actors.boardCompany.id, signer).state;
+  if (
+    companyState.jBatchState &&
+    (!isBatchEmpty(companyState.jBatchState.batch) || companyState.jBatchState.sentBatch)
+  ) {
+    throw new Error('COMPANY_SUCCESSOR_RESERVE_PROOF_REQUIRES_EMPTY_BATCH');
+  }
+  const outstandingDebt = await actors.jadapter.depository.debtOutstanding(
+    actors.boardCompany.id,
+    shares.controlTokenId,
+  );
+  if (outstandingDebt !== 0n) {
+    throw new Error(`COMPANY_SUCCESSOR_CONTROL_DEBT_NOT_ZERO:${outstandingDebt}`);
+  }
+
+  const amount = 1n;
+  const recipient = zeroPadValue(signer, 32).toLowerCase();
+  const beforeReserve = await actors.jadapter.getReserves(
+    actors.boardCompany.id,
+    shares.controlTokenId,
+  );
+  const beforeCustody = await actors.jadapter.entityProvider.balanceOf(
+    actors.jadapter.addresses.depository,
+    shares.controlExternalTokenId,
+  );
+  const beforeRecipient = await actors.jadapter.entityProvider.balanceOf(
+    signer,
+    shares.controlExternalTokenId,
+  );
+
+  await executeCompanyAction(env, actors.boardCompany, [{
+    type: 'r2e',
+    data: { receivingEntity: recipient, tokenId: shares.controlTokenId, amount },
+  }, { type: 'j_broadcast', data: {} }]);
+  await syncChain(env, 12);
+
+  const afterReserve = await actors.jadapter.getReserves(
+    actors.boardCompany.id,
+    shares.controlTokenId,
+  );
+  const afterCustody = await actors.jadapter.entityProvider.balanceOf(
+    actors.jadapter.addresses.depository,
+    shares.controlExternalTokenId,
+  );
+  const afterRecipient = await actors.jadapter.entityProvider.balanceOf(
+    signer,
+    shares.controlExternalTokenId,
+  );
+  if (afterReserve !== beforeReserve - amount) {
+    throw new Error(`COMPANY_SUCCESSOR_RESERVE_DELTA_INVALID:${beforeReserve}:${afterReserve}`);
+  }
+  if (afterCustody !== beforeCustody - amount) {
+    throw new Error(`COMPANY_SUCCESSOR_CUSTODY_DELTA_INVALID:${beforeCustody}:${afterCustody}`);
+  }
+  if (afterRecipient !== beforeRecipient + amount) {
+    throw new Error(`COMPANY_SUCCESSOR_ERC1155_DELTA_INVALID:${beforeRecipient}:${afterRecipient}`);
   }
 };

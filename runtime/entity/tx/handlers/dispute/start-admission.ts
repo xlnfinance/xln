@@ -7,6 +7,7 @@ import type { EntityState } from '../../../types';
 import type { EntityTx } from '../../../../types/entity-tx';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { addMessage } from '../../../frame-events';
+import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { initJBatch } from '../../../../jurisdiction/machine/batch';
 import { isCrossJurisdictionTerminalStatus } from '../../../../extensions/cross-j';
 import { freezeAccountForDispute } from '../../../../account/consensus/dispute/policy';
@@ -124,12 +125,12 @@ export const admitDisputeStart = (
       `ℹ️ disputeStart queued to current batch while sentBatch nonce=${state.jBatchState.sentBatch.entityNonce} is still pending`,
     );
   }
-  const account = state.accounts.get(counterpartyId);
-  if (!account) {
+  const visible = state.accounts.get(counterpartyId);
+  if (!visible) {
     addMessage(state, `❌ No account with ${counterpartyId.slice(-4)} - cannot start dispute`);
     return null;
   }
-  const status = account.status ?? 'active';
+  const status = visible.status ?? 'active';
   if (status === 'disputed') {
     addMessage(state, `❌ Account with ${counterpartyId.slice(-4)} is disputed - reopen required`);
     return null;
@@ -141,6 +142,8 @@ export const admitDisputeStart = (
     );
     return null;
   }
+  const account = getEntityAccountForWrite(state.accounts, counterpartyId);
+  if (!account) return null;
   freezeAccountForDispute(account, true);
   const readinessIssues = collectDisputeEvidenceReadinessIssues(
     account,

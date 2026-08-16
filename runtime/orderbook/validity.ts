@@ -8,7 +8,6 @@ import {
   type BookOrderState,
   type BookState,
   type OrderbookExtState,
-  type PriceBucketState,
 } from './types';
 import { compareCanonicalText, swapKey, type SwapKey } from './swap-execution';
 import type { AccountState, SwapOffer } from '../types/account';
@@ -186,73 +185,46 @@ export function validateBookStructure(book: BookState): BookStructureReport {
   const errors: string[] = [];
   const reachable = new Set<string>();
   const orders = getBookOrders(book);
-
-  const validateSideBuckets = (
-    side: 0 | 1,
-    bucketIds: bigint[],
-    buckets: Map<string, PriceBucketState>,
-    label: 'bid' | 'ask',
-  ): number => {
-    let levelCount = 0;
-    let previousBucket: bigint | null = null;
-    for (const bucketId of bucketIds) {
-      if (previousBucket !== null) {
-        const ordered = side === 0 ? previousBucket > bucketId : previousBucket < bucketId;
-        if (!ordered) errors.push(`${label} bucket order broken: ${previousBucket.toString()} -> ${bucketId.toString()}`);
-      }
-      previousBucket = bucketId;
-      const bucket = buckets.get(bucketId.toString());
-      if (!bucket) {
-        errors.push(`${label} bucket missing from map: ${bucketId.toString()}`);
-        continue;
-      }
-      let previousPrice: bigint | null = null;
-      for (const priceTicks of bucket.pricesAsc) {
-        if (previousPrice !== null && previousPrice >= priceTicks) {
-          errors.push(`${label} bucket ${bucketId.toString()} pricesAsc not strictly ascending`);
-        }
-        previousPrice = priceTicks;
-        const level = bucket.levels.get(priceTicks.toString());
-        if (!level) {
-          errors.push(`${label} bucket ${bucketId.toString()} missing level ${priceTicks.toString()}`);
+  const validateSidePages = (side: 0 | 1, label: 'bid' | 'ask'): number => {
+    const pages = side === 0 ? book.bidPages : book.askPages;
+    const prices = new Set<string>();
+    for (const [key, page] of pages.entries()) {
+      prices.add(key.priceTicks.toString());
+      let computedTotal = 0n;
+      let computedLive = 0;
+      let previousSequence = -1;
+      for (let slot = page.headSlot; slot < page.nextSlot; slot += 1) {
+        const entry = page.slots[slot];
+        if (!entry) continue;
+        computedLive += 1;
+        computedTotal += entry.qtyLots;
+        if (entry.seq <= previousSequence) errors.push(`${label} page FIFO broken at ${entry.orderId}`);
+        previousSequence = entry.seq;
+        if (reachable.has(entry.orderId)) errors.push(`duplicate page order ${entry.orderId}`);
+        reachable.add(entry.orderId);
+        const indexed = book.orders.get(entry.orderId);
+        if (!indexed) {
+          errors.push(`${label} page missing locator ${entry.orderId}`);
           continue;
         }
-        if (level.orderIds.length === 0) errors.push(`${label} level ${priceTicks.toString()} empty orderIds`);
-        let computedTotal = 0n;
-        for (const orderId of level.orderIds) {
-          reachable.add(orderId);
-          const order = book.orders.get(orderId);
-          if (!order) {
-            errors.push(`${label} level ${priceTicks.toString()} missing order ${orderId}`);
-            continue;
-          }
-          if (order.side !== side) errors.push(`${label} level ${priceTicks.toString()} side mismatch for ${orderId}`);
-          if (order.priceTicks !== priceTicks) errors.push(`${label} level ${priceTicks.toString()} price mismatch for ${orderId}`);
-          if (order.bucketId !== bucketId) errors.push(`${label} level ${priceTicks.toString()} bucket mismatch for ${orderId}`);
-          if (order.qtyLots <= 0n) errors.push(`${label} level ${priceTicks.toString()} non-positive qty for ${orderId}`);
-          if (order.qtyLots > 0n) computedTotal += order.qtyLots;
-        }
-        if (computedTotal !== level.totalQtyLots) {
-          errors.push(`${label} level ${priceTicks.toString()} total mismatch expected=${computedTotal} actual=${level.totalQtyLots}`);
-        }
-        levelCount += 1;
+        if (
+          indexed.side !== side || indexed.priceTicks !== key.priceTicks ||
+          indexed.pageSequence !== key.pageSequence || indexed.pageSlot !== slot ||
+          indexed.ownerId !== entry.ownerId || indexed.qtyLots !== entry.qtyLots || indexed.seq !== entry.seq
+        ) errors.push(`${label} page locator mismatch ${entry.orderId}`);
       }
-      for (const [levelKey, level] of bucket.levels.entries()) {
-        if (!bucket.pricesAsc.some((price) => price.toString() === levelKey)) {
-          errors.push(`${label} bucket ${bucketId.toString()} level ${levelKey} missing from pricesAsc`);
-        }
-        if (level.totalQtyLots <= 0n) errors.push(`${label} level ${levelKey} non-positive total`);
-      }
+      if (computedLive !== page.liveCount) errors.push(`${label} page live count mismatch`);
+      if (computedTotal !== page.totalQtyLots) errors.push(`${label} page total mismatch`);
     }
-    return levelCount;
+    return prices.size;
   };
 
-  const bidLevels = validateSideBuckets(0, book.bidBucketIdsDesc, book.bidBuckets, 'bid');
-  const askLevels = validateSideBuckets(1, book.askBucketIdsAsc, book.askBuckets, 'ask');
+  const bidLevels = validateSidePages(0, 'bid');
+  const askLevels = validateSidePages(1, 'ask');
 
   for (const order of orders) {
     if (!reachable.has(order.orderId)) {
-      errors.push(`order ${order.orderId} missing from bucket queues`);
+      errors.push(`order ${order.orderId} missing from price pages`);
     }
   }
 

@@ -1,26 +1,29 @@
-/**
- * Pure Orderbook Core
- *
- * Exact-price limit order book with a bucket index:
- * - canonical truth is always exact `priceTicks`
- * - buckets only accelerate lookup / grouping
- * - no price grid, repricing, or representability window
- */
-
+/** Pure price-page limit order book. Canonical liquidity lives only in two radix trees. */
+import { invalidateBookCommitment } from './commitment';
 import {
-  invalidateBookCommitment,
-  invalidateBookLevelCommitment,
-  invalidateBookOrderCommitment,
-} from './commitment';
+  commitBookOverlay,
+  createPersistentBookOrderMap,
+  forkBookState,
+  getWritableBookOrder,
+  setBookPageTree,
+} from './book-overlay';
+import {
+  appendBookPricePageOrder,
+  createBookPricePageTree,
+  getBestBookPricePage,
+  MAX_BOOK_PAGE_QTY_LOTS,
+  reduceBookPricePageOrder,
+  removeBookPricePageOrder,
+  type BookPricePage,
+  type BookPricePageTree,
+} from './pages/page';
+import { encodeBookPricePrefix, type BookPricePageKey } from './pages/key';
 
-export type Side = 0 | 1;        // 0 = BUY (bids), 1 = SELL (asks)
-type TIF = 0 | 1 | 2;     // 0 = GTC, 1 = IOC, 2 = FOK
+export type Side = 0 | 1;
+type TIF = 0 | 1 | 2;
 
 export class OrderbookCapacityError extends Error {
-  constructor() {
-    super('Out of order slots');
-    this.name = 'OrderbookCapacityError';
-  }
+  constructor() { super('Out of order slots'); this.name = 'OrderbookCapacityError'; }
 }
 
 export type OrderCmd =
@@ -35,12 +38,9 @@ export type BookEvent =
   | { type: 'REDUCED'; orderId: string; ownerId: string; delta: bigint; remain: bigint }
   | { type: 'CANCELED'; orderId: string; ownerId: string };
 
-export interface BookParams {
-  bucketWidthTicks: bigint;
-  maxOrders: number;
-  stpPolicy: 0 | 1; // 0=off, 1=cancel taker
-}
+export interface BookParams { bucketWidthTicks: bigint; maxOrders: number; stpPolicy: 0 | 1 }
 
+/** Derived RAM locator rebuilt from pages on hydration; never persisted or committed. */
 export interface BookOrderState {
   orderId: string;
   ownerId: string;
@@ -48,22 +48,8 @@ export interface BookOrderState {
   priceTicks: bigint;
   qtyLots: bigint;
   seq: number;
-  bucketId: bigint;
-  commitmentHash?: string;
-}
-
-export interface PriceLevelState {
-  priceTicks: bigint;
-  orderIds: string[];
-  totalQtyLots: bigint;
-  commitmentHash?: string;
-}
-
-export interface PriceBucketState {
-  bucketId: bigint;
-  pricesAsc: bigint[];
-  levels: Map<string, PriceLevelState>;
-  commitmentHash?: string;
+  pageSequence: number;
+  pageSlot: number;
 }
 
 export interface BookSideLevel {
@@ -75,17 +61,13 @@ export interface BookSideLevel {
 
 export interface BookState {
   readonly params: BookParams;
-  readonly orders: Map<string, BookOrderState>;
-  readonly bidBuckets: Map<string, PriceBucketState>;
-  readonly askBuckets: Map<string, PriceBucketState>;
-  readonly bidBucketIdsDesc: bigint[];
-  readonly askBucketIdsAsc: bigint[];
+  readonly orders: ReadonlyMap<string, BookOrderState>;
+  readonly bidPages: BookPricePageTree;
+  readonly askPages: BookPricePageTree;
   readonly nextSeq: number;
   readonly tradeCount: number;
   readonly tradeQtySum: bigint;
-  /** Maker price of the most recently committed trade; 0 means no trade yet. */
   readonly lastTradePriceTicks: bigint;
-  /** Latest accepted same-j USD ask from the Hub's signed quote authority. */
   readonly lastAcceptedUsdAskPriceTicks: bigint;
   readonly eventHash: bigint;
   commitmentHash?: string;
@@ -93,389 +75,294 @@ export interface BookState {
 
 export interface ApplyCommandOptions {
   suspendedOrderIds?: ReadonlySet<string>;
+  /** Lazy external-authority verdict for a maker actually consulted by the price walk. */
+  makerDisposition?: (maker: Readonly<BookOrderState>) => 'eligible' | 'suspended' | 'cancel';
+  executionPriceTicksForMatch?: (maker: bigint, taker: bigint, side: Side) => bigint;
+  executionQtyMultipleAtPrice?: (priceTicks: bigint) => bigint;
 }
 
-export const MAX_ORDERBOOK_QTY_LOTS = 10n ** 24n;
-const PRIME = 0x1_0000_01n;
-
-type MutableBookState = {
-  params: BookParams;
-  orders: Map<string, BookOrderState>;
-  bidBuckets: Map<string, PriceBucketState>;
-  askBuckets: Map<string, PriceBucketState>;
-  bidBucketIdsDesc: bigint[];
-  askBucketIdsAsc: bigint[];
-  nextSeq: number;
-  tradeCount: number;
-  tradeQtySum: bigint;
-  lastTradePriceTicks: bigint;
-  lastAcceptedUsdAskPriceTicks: bigint;
-  eventHash: bigint;
+const cacheMakerDisposition = (options: ApplyCommandOptions): ApplyCommandOptions => {
+  const classify = options.makerDisposition;
+  if (!classify) return options;
+  const verdicts = new Map<string, 'eligible' | 'suspended' | 'cancel'>();
+  return {
+    ...options,
+    makerDisposition: maker => {
+      const cached = verdicts.get(maker.orderId);
+      if (cached) return cached;
+      const verdict = classify(maker);
+      verdicts.set(maker.orderId, verdict);
+      return verdict;
+    },
+  };
 };
 
-const sideBucketMap = (state: Pick<BookState, 'bidBuckets' | 'askBuckets'>, side: Side): Map<string, PriceBucketState> =>
-  side === 0 ? state.bidBuckets : state.askBuckets;
+export const MAX_ORDERBOOK_QTY_LOTS = MAX_BOOK_PAGE_QTY_LOTS;
+const PRIME = 0x1_0000_01n;
+type MutableBookState = { -readonly [Key in keyof BookState]: BookState[Key] } & {
+  orders: Map<string, BookOrderState>;
+};
+type PageView = readonly [BookPricePageKey, BookPricePage];
 
-const sideBucketIds = (state: Pick<BookState, 'bidBucketIdsDesc' | 'askBucketIdsAsc'>, side: Side): bigint[] =>
-  side === 0 ? state.bidBucketIdsDesc : state.askBucketIdsAsc;
+const sideTree = (state: BookState, side: Side): BookPricePageTree =>
+  side === 0 ? state.bidPages : state.askPages;
 
-const priceKey = (priceTicks: bigint): string => priceTicks.toString();
-const bucketKey = (bucketId: bigint): string => bucketId.toString();
+const pageOrder = (
+  side: Side,
+  key: BookPricePageKey,
+  page: BookPricePage,
+  slot: number,
+): BookOrderState | null => {
+  const entry = page.slots[slot];
+  return entry ? {
+    ...entry,
+    side,
+    priceTicks: key.priceTicks,
+    pageSequence: key.pageSequence,
+    pageSlot: slot,
+  } : null;
+};
 
-function bucketIdForPrice(priceTicks: bigint, bucketWidthTicks: bigint): bigint {
-  if (priceTicks <= 0n) throw new Error('priceTicks must be positive');
-  if (bucketWidthTicks <= 0n) throw new Error('bucketWidthTicks must be positive');
-  return priceTicks / bucketWidthTicks;
-}
-
-function insertBigIntUnique(sorted: bigint[], value: bigint, descending: boolean): void {
-  let low = 0;
-  let high = sorted.length;
-  while (low < high) {
-    const mid = (low + high) >> 1;
-    const current = sorted[mid]!;
-    if (current === value) return;
-    if (descending ? current > value : current < value) low = mid + 1;
-    else high = mid;
+const pagesByDescendingPrice = function* (tree: BookPricePageTree): Generator<PageView> {
+  let emittedPrice: bigint | undefined;
+  for (const [key] of tree.reverseEntries()) {
+    if (key.priceTicks === emittedPrice) continue;
+    emittedPrice = key.priceTicks;
+    yield* tree.entriesWithPrefix(encodeBookPricePrefix(key.priceTicks));
   }
-  sorted.splice(low, 0, value);
+};
+
+/** Price priority is descending for bids; page sequence remains FIFO ascending. */
+function* orderedPages(state: BookState, side: Side): Generator<PageView> {
+  const tree = sideTree(state, side);
+  if (side === 1) yield* tree.entries();
+  else yield* pagesByDescendingPrice(tree);
 }
 
-function removeBigInt(sorted: bigint[], value: bigint): void {
-  const index = sorted.findIndex((entry) => entry === value);
-  if (index >= 0) sorted.splice(index, 1);
-}
-
-function insertPriceAsc(pricesAsc: bigint[], value: bigint): void {
-  let low = 0;
-  let high = pricesAsc.length;
-  while (low < high) {
-    const mid = (low + high) >> 1;
-    const current = pricesAsc[mid]!;
-    if (current === value) return;
-    if (current < value) low = mid + 1;
-    else high = mid;
+function* pageOrders(side: Side, key: BookPricePageKey, page: BookPricePage): Generator<BookOrderState> {
+  for (let slot = page.headSlot; slot < page.nextSlot; slot += 1) {
+    const order = pageOrder(side, key, page, slot);
+    if (order) yield order;
   }
-  pricesAsc.splice(low, 0, value);
 }
 
-function removeOrderId(orderIds: string[], orderId: string): boolean {
-  const index = orderIds.indexOf(orderId);
-  if (index < 0) return false;
-  orderIds.splice(index, 1);
-  return true;
-}
-
-function ensureBucket(state: MutableBookState, side: Side, bucketId: bigint): PriceBucketState {
-  const buckets = sideBucketMap(state, side);
-  const ids = sideBucketIds(state, side);
-  const key = bucketKey(bucketId);
-  let bucket = buckets.get(key);
-  if (bucket) return bucket;
-  bucket = {
-    bucketId,
-    pricesAsc: [],
-    levels: new Map(),
-  };
-  buckets.set(key, bucket);
-  insertBigIntUnique(ids, bucketId, side === 0);
-  return bucket;
-}
-
-function cleanupBucketIfEmpty(state: MutableBookState, side: Side, bucketId: bigint): void {
-  const buckets = sideBucketMap(state, side);
-  const ids = sideBucketIds(state, side);
-  const key = bucketKey(bucketId);
-  const bucket = buckets.get(key);
-  if (!bucket) return;
-  if (bucket.pricesAsc.length > 0) return;
-  buckets.delete(key);
-  removeBigInt(ids, bucketId);
-}
-
-function addRestingOrder(state: MutableBookState, order: BookOrderState): void {
-  const bucket = ensureBucket(state, order.side, order.bucketId);
-  const levelKey = priceKey(order.priceTicks);
-  let level = bucket.levels.get(levelKey);
-  if (!level) {
-    level = {
-      priceTicks: order.priceTicks,
-      orderIds: [],
-      totalQtyLots: 0n,
-    };
-    bucket.levels.set(levelKey, level);
-    insertPriceAsc(bucket.pricesAsc, order.priceTicks);
+const findBestOrder = (
+  state: BookState,
+  side: Side,
+  options: Pick<ApplyCommandOptions, 'suspendedOrderIds' | 'makerDisposition'>,
+): BookOrderState | null => {
+  if (!options.suspendedOrderIds && !options.makerDisposition) {
+    const best = getBestBookPricePage(sideTree(state, side), side === 0 ? 'highest' : 'lowest');
+    if (!best) return null;
+    for (const order of pageOrders(side, best[0], best[1])) return order;
+    throw new Error('BOOK_PAGE_EMPTY_BEST');
   }
-  level.orderIds.push(order.orderId);
-  level.totalQtyLots += order.qtyLots;
-  state.orders.set(order.orderId, order);
-  invalidateBookOrderCommitment(state, order.orderId);
-}
+  for (const [key, page] of orderedPages(state, side)) {
+    for (const order of pageOrders(side, key, page)) {
+      if (options.suspendedOrderIds?.has(order.orderId)) continue;
+      if ((options.makerDisposition?.(order) ?? 'eligible') === 'eligible') return order;
+    }
+  }
+  return null;
+};
 
-function removeExistingOrder(state: MutableBookState, orderId: string): BookOrderState | null {
+const crosses = (side: Side, taker: bigint, maker: bigint): boolean =>
+  side === 0 ? maker <= taker : maker >= taker;
+
+const bumpHash = (state: MutableBookState, tag: number, a: number | bigint, b: number | bigint): void => {
+  const a32 = Number((typeof a === 'bigint' ? a : BigInt(a)) & 0xffff_ffffn);
+  const b32 = Number((typeof b === 'bigint' ? b : BigInt(b)) & 0xffff_ffffn);
+  state.eventHash = (state.eventHash * PRIME + BigInt((tag * 2_654_435_761 >>> 0) ^ a32 ^ (b32 << 7))) & 0x1f_ffff_ffff_ffffn;
+  invalidateBookCommitment(state);
+};
+
+const addOrder = (state: MutableBookState, input: Omit<BookOrderState, 'pageSequence' | 'pageSlot'>): void => {
+  const appended = appendBookPricePageOrder(sideTree(state, input.side), input.priceTicks, {
+    orderId: input.orderId,
+    ownerId: input.ownerId,
+    qtyLots: input.qtyLots,
+    seq: input.seq,
+  });
+  setBookPageTree(state, input.side, appended.tree);
+  state.orders.set(input.orderId, {
+    ...input,
+    pageSequence: appended.location.key.pageSequence,
+    pageSlot: appended.location.slot,
+  });
+  invalidateBookCommitment(state);
+};
+
+const removeOrder = (state: MutableBookState, orderId: string): BookOrderState | null => {
   const order = state.orders.get(orderId);
   if (!order) return null;
-  invalidateBookOrderCommitment(state, orderId);
-  const buckets = sideBucketMap(state, order.side);
-  const bucket = buckets.get(bucketKey(order.bucketId));
-  if (!bucket) {
-    throw new Error(`BOOK_CORRUPTION: missing bucket for order ${orderId}`);
-  }
-  const level = bucket.levels.get(priceKey(order.priceTicks));
-  if (!level) {
-    throw new Error(`BOOK_CORRUPTION: missing level for order ${orderId}`);
-  }
-  if (!removeOrderId(level.orderIds, orderId)) {
-    throw new Error(`BOOK_CORRUPTION: order ${orderId} missing from level queue`);
-  }
-  const nextTotalQtyLots = level.totalQtyLots - order.qtyLots;
-  if (nextTotalQtyLots < 0n) {
-    throw new Error(`BOOK_CORRUPTION: level quantity underflow while removing ${orderId}`);
-  }
-  level.totalQtyLots = nextTotalQtyLots;
-  if (level.orderIds.length === 0 || level.totalQtyLots === 0n) {
-    bucket.levels.delete(priceKey(order.priceTicks));
-    removeBigInt(bucket.pricesAsc, order.priceTicks);
-  }
-  cleanupBucketIfEmpty(state, order.side, order.bucketId);
+  const tree = removeBookPricePageOrder(sideTree(state, order.side), {
+    key: { priceTicks: order.priceTicks, pageSequence: order.pageSequence },
+    slot: order.pageSlot,
+  }, orderId);
+  setBookPageTree(state, order.side, tree);
   state.orders.delete(orderId);
+  invalidateBookCommitment(state);
   return order;
-}
-
-type OrderedLevelView = {
-  bucketId: bigint;
-  level: PriceLevelState;
 };
 
-function* iterateOrderedLevels(
-  state: Pick<BookState, 'bidBuckets' | 'askBuckets' | 'bidBucketIdsDesc' | 'askBucketIdsAsc'>,
-  side: Side,
-): Generator<OrderedLevelView, void, undefined> {
-  const buckets = sideBucketMap(state, side);
-  const bucketIds = sideBucketIds(state, side);
-  for (const bucketId of bucketIds) {
-    const bucket = buckets.get(bucketKey(bucketId));
-    if (!bucket) continue;
-    if (side === 0) {
-      for (let i = bucket.pricesAsc.length - 1; i >= 0; i -= 1) {
-        const priceTicks = bucket.pricesAsc[i]!;
-        const level = bucket.levels.get(priceKey(priceTicks));
-        if (!level || level.orderIds.length === 0 || level.totalQtyLots <= 0n) continue;
-        yield { bucketId, level };
-      }
-      continue;
-    }
-    for (const priceTicks of bucket.pricesAsc) {
-      const level = bucket.levels.get(priceKey(priceTicks));
-      if (!level || level.orderIds.length === 0 || level.totalQtyLots <= 0n) continue;
-      yield { bucketId, level };
-    }
-  }
-}
-
-function getTopLevel(
-  state: Pick<BookState, 'bidBuckets' | 'askBuckets' | 'bidBucketIdsDesc' | 'askBucketIdsAsc'>,
-  side: Side,
-): OrderedLevelView | null {
-  for (const level of iterateOrderedLevels(state, side)) return level;
-  return null;
-}
-
-function getTopLevelIgnoringSuspended(
-  state: Pick<BookState, 'orders' | 'bidBuckets' | 'askBuckets' | 'bidBucketIdsDesc' | 'askBucketIdsAsc'>,
-  side: Side,
-  suspendedOrderIds?: ReadonlySet<string>,
-): OrderedLevelView | null {
-  if (!suspendedOrderIds || suspendedOrderIds.size === 0) return getTopLevel(state, side);
-  for (const view of iterateOrderedLevels(state, side)) {
-    for (const orderId of view.level.orderIds) {
-      if (suspendedOrderIds.has(orderId)) continue;
-      const order = state.orders.get(orderId);
-      if (order && order.qtyLots > 0n) return view;
-    }
-  }
-  return null;
-}
-
-function getBestPriceIgnoringSuspended(
-  state: Pick<BookState, 'orders' | 'bidBuckets' | 'askBuckets' | 'bidBucketIdsDesc' | 'askBucketIdsAsc'>,
-  side: Side,
-  suspendedOrderIds?: ReadonlySet<string>,
-): bigint | null {
-  const first = getTopLevelIgnoringSuspended(state, side, suspendedOrderIds);
-  return first?.level.priceTicks ?? null;
-}
-
-function getOrderedLevels(state: Pick<BookState, 'bidBuckets' | 'askBuckets' | 'bidBucketIdsDesc' | 'askBucketIdsAsc'>, side: Side): OrderedLevelView[] {
-  return Array.from(iterateOrderedLevels(state, side));
-}
-
-function crosses(takerSide: Side, takerPriceTicks: bigint, makerPriceTicks: bigint): boolean {
-  return takerSide === 0 ? makerPriceTicks <= takerPriceTicks : makerPriceTicks >= takerPriceTicks;
-}
-
-function bumpHash(state: MutableBookState, tag: number, a: number | bigint, b: number | bigint): void {
-  const a32 = Number((typeof a === 'bigint' ? a : BigInt(a)) & 0xffffffffn);
-  const b32 = Number((typeof b === 'bigint' ? b : BigInt(b)) & 0xffffffffn);
-  state.eventHash = (state.eventHash * PRIME + BigInt((tag * 2654435761 >>> 0) ^ a32 ^ (b32 << 7))) & 0x1fffffffffffffn;
+const reduceOrder = (state: MutableBookState, order: BookOrderState, qtyLots: bigint): void => {
+  const tree = reduceBookPricePageOrder(sideTree(state, order.side), {
+    key: { priceTicks: order.priceTicks, pageSequence: order.pageSequence },
+    slot: order.pageSlot,
+  }, order.orderId, qtyLots);
+  setBookPageTree(state, order.side, tree);
+  const writable = getWritableBookOrder(state, order.orderId);
+  if (!writable) throw new Error(`BOOK_ORDER_INDEX_MISSING:${order.orderId}`);
+  writable.qtyLots = qtyLots;
   invalidateBookCommitment(state);
-}
+};
 
-function estimateImmediateFill(
+/** Canonical quantity reduction used by committed cross-j ACK progress. */
+export const reduceBookOrderQuantity = (
   state: BookState,
-  takerSide: Side,
-  takerOwnerId: string,
-  takerPriceTicks: bigint,
-  qtyLots: bigint,
-  suspendedOrderIds?: ReadonlySet<string>,
-): { filledQty: bigint; blockingOrderId?: string } {
-  let remaining = qtyLots;
-  const oppositeSide: Side = takerSide === 0 ? 1 : 0;
-  for (const view of iterateOrderedLevels(state, oppositeSide)) {
-    if (!crosses(takerSide, takerPriceTicks, view.level.priceTicks)) break;
-    for (const makerOrderId of view.level.orderIds) {
-      if (suspendedOrderIds?.has(makerOrderId)) continue;
-      const maker = state.orders.get(makerOrderId);
-      if (!maker || maker.qtyLots <= 0n) continue;
-      if (maker.ownerId === takerOwnerId && state.params.stpPolicy === 1) {
-        // STP cancels the remaining taker quantity from the first self-cross onward.
-        // Better-priced third-party liquidity ahead of that self order is still fillable.
-        return { filledQty: qtyLots - remaining, blockingOrderId: makerOrderId };
-      }
-      remaining -= maker.qtyLots < remaining ? maker.qtyLots : remaining;
-      if (remaining <= 0n) return { filledQty: qtyLots };
-    }
+  orderId: string,
+  nextQtyLots: bigint,
+): BookState => {
+  const current = state.orders.get(orderId);
+  if (!current) throw new Error(`BOOK_ORDER_INDEX_MISSING:${orderId}`);
+  if (nextQtyLots <= 0n || nextQtyLots >= current.qtyLots) {
+    throw new Error(`BOOK_ORDER_REDUCTION_INVALID:${orderId}`);
   }
-  return { filledQty: qtyLots - remaining };
-}
+  const mutable = forkBookState(state) as MutableBookState;
+  reduceOrder(mutable, current, nextQtyLots);
+  return mutable;
+};
 
-function findBestMatchableMaker(
-  state: MutableBookState,
-  takerSide: Side,
-  takerPriceTicks: bigint,
-  suspendedOrderIds?: ReadonlySet<string>,
-): { bucketId: bigint; level: PriceLevelState; makerOrderId: string; maker: BookOrderState | null } | null {
-  const oppositeSide: Side = takerSide === 0 ? 1 : 0;
-  for (const view of iterateOrderedLevels(state, oppositeSide)) {
-    if (!crosses(takerSide, takerPriceTicks, view.level.priceTicks)) break;
-    for (const makerOrderId of view.level.orderIds) {
-      if (suspendedOrderIds?.has(makerOrderId)) continue;
-      return {
-        bucketId: view.bucketId,
-        level: view.level,
-        makerOrderId,
-        maker: state.orders.get(makerOrderId) ?? null,
-      };
-    }
-  }
-  return null;
-}
+const execution = (
+  options: ApplyCommandOptions,
+  makerPrice: bigint,
+  takerPrice: bigint,
+  side: Side,
+  candidateQty: bigint,
+): Readonly<{ price: bigint; qty: bigint }> => {
+  const price = options.executionPriceTicksForMatch?.(makerPrice, takerPrice, side) ?? makerPrice;
+  if (price <= 0n) throw new Error('BOOK_EXECUTION_PRICE_INVALID');
+  const multiple = options.executionQtyMultipleAtPrice?.(price) ?? 1n;
+  if (multiple <= 0n) throw new Error('BOOK_EXECUTION_QTY_MULTIPLE_INVALID');
+  return { price, qty: (candidateQty / multiple) * multiple };
+};
 
-function matchAgainstBook(
+const publishMatchedPage = (
   state: MutableBookState,
-  takerSide: Side,
-  takerOwnerId: string,
-  takerOrderId: string,
-  takerPriceTicks: bigint,
-  takerQtyLots: bigint,
+  side: Side,
+  key: BookPricePageKey,
+  page: BookPricePage,
+): void => {
+  const tree = page.liveCount === 0
+    ? sideTree(state, side).removed(key)
+    : sideTree(state, side).updated(key, page);
+  setBookPageTree(state, side, tree);
+  invalidateBookCommitment(state);
+};
+
+const nextLiveSlot = (
+  slots: readonly (BookPricePage['slots'][number])[],
+  start: number,
+): number => {
+  let slot = start;
+  while (slot < slots.length && slots[slot] === null) slot += 1;
+  return slot;
+};
+
+const matchPricePages = (
+  state: MutableBookState,
+  taker: Readonly<{ side: Side; ownerId: string; orderId: string; priceTicks: bigint; qtyLots: bigint }>,
   events: BookEvent[],
-  suspendedOrderIds?: ReadonlySet<string>,
-): { remaining: bigint; blockingOrderId?: string } {
-  let remaining = takerQtyLots;
-
-  while (remaining > 0n) {
-    const best = findBestMatchableMaker(state, takerSide, takerPriceTicks, suspendedOrderIds);
-    if (!best) break;
-    const { makerOrderId } = best;
-    const maker = best.maker;
-    if (!maker || maker.qtyLots <= 0n) {
-      const oppositeSide: Side = takerSide === 0 ? 1 : 0;
-      invalidateBookLevelCommitment(state, oppositeSide, best.bucketId, best.level.priceTicks);
-      if (!removeOrderId(best.level.orderIds, makerOrderId)) {
-        throw new Error(`BOOK_CORRUPTION: top-of-book order ${makerOrderId} missing from level queue`);
+  options: ApplyCommandOptions,
+): Readonly<{ remaining: bigint; blockingOrderId?: string }> => {
+  let remaining = taker.qtyLots;
+  const makerSide: Side = taker.side === 0 ? 1 : 0;
+  for (const [key, sourcePage] of orderedPages(state, makerSide)) {
+    if (remaining <= 0n || !crosses(taker.side, taker.priceTicks, key.priceTicks)) break;
+    const slots = [...sourcePage.slots];
+    let liveCount = sourcePage.liveCount;
+    let totalQtyLots = sourcePage.totalQtyLots;
+    let stopAfterPage = false;
+    let pageChanged = false;
+    for (let slot = sourcePage.headSlot; slot < sourcePage.nextSlot && remaining > 0n; slot += 1) {
+      const entry = slots[slot];
+      if (!entry) continue;
+      const maker = pageOrder(makerSide, key, sourcePage, slot);
+      if (!maker) throw new Error('BOOK_PAGE_ORDER_MISSING');
+      if (options.suspendedOrderIds?.has(maker.orderId)) continue;
+      const disposition = options.makerDisposition?.(maker) ?? 'eligible';
+      if (disposition === 'suspended') continue;
+      if (disposition === 'cancel') {
+        slots[slot] = null;
+        liveCount -= 1;
+        totalQtyLots -= maker.qtyLots;
+        state.orders.delete(maker.orderId);
+        bumpHash(state, 5, maker.priceTicks, 0);
+        pageChanged = true;
+        continue;
       }
-      state.orders.delete(makerOrderId);
-      if (best.level.orderIds.length === 0) {
-        const bucket = sideBucketMap(state, oppositeSide).get(bucketKey(best.bucketId));
-        if (bucket) {
-          bucket.levels.delete(priceKey(best.level.priceTicks));
-          removeBigInt(bucket.pricesAsc, best.level.priceTicks);
-          cleanupBucketIfEmpty(state, oppositeSide, best.bucketId);
-        }
+      if (maker.ownerId === taker.ownerId && state.params.stpPolicy === 1) {
+        if (pageChanged) publishMatchedPage(state, makerSide, key, {
+          ...sourcePage, headSlot: liveCount === 0 ? 0 : nextLiveSlot(slots, sourcePage.headSlot),
+          liveCount, totalQtyLots, slots,
+        });
+        events.push({ type: 'REJECT', orderId: taker.orderId, ownerId: taker.ownerId, reason: 'STP cancel taker', blockingOrderId: maker.orderId });
+        return { remaining, blockingOrderId: maker.orderId };
       }
-      continue;
-    }
-
-    if (maker.ownerId === takerOwnerId && state.params.stpPolicy === 1) {
+      const fill = execution(options, maker.priceTicks, taker.priceTicks, taker.side,
+        maker.qtyLots < remaining ? maker.qtyLots : remaining);
+      if (fill.qty <= 0n) { stopAfterPage = true; break; }
+      state.tradeCount += 1;
+      state.tradeQtySum += fill.qty;
+      state.lastTradePriceTicks = fill.price;
+      bumpHash(state, 3, fill.price, fill.qty);
       events.push({
-        type: 'REJECT',
-        orderId: takerOrderId,
-        ownerId: takerOwnerId,
-        reason: 'STP cancel taker',
-        blockingOrderId: maker.orderId,
+        type: 'TRADE', price: fill.price, qty: fill.qty,
+        makerOwnerId: maker.ownerId, takerOwnerId: taker.ownerId,
+        makerOrderId: maker.orderId, takerOrderId: taker.orderId,
+        makerQtyBefore: maker.qtyLots, takerQtyTotal: taker.qtyLots,
       });
-      return { remaining, blockingOrderId: maker.orderId };
-    }
-
-    const tradeQty = maker.qtyLots < remaining ? maker.qtyLots : remaining;
-    const makerQtyBefore = maker.qtyLots;
-
-    state.tradeCount += 1;
-    state.tradeQtySum += tradeQty;
-    // Admission risk must use an executed internal price, never an unfilled
-    // quote that its owner can post and cancel. This assignment is inside the
-    // same pure match transition as TRADE, so replica replay cannot observe a
-    // price that was not committed by the corresponding book mutation.
-    state.lastTradePriceTicks = best.level.priceTicks;
-    bumpHash(state, 3, best.level.priceTicks, tradeQty);
-
-    events.push({
-      type: 'TRADE',
-      price: best.level.priceTicks,
-      qty: tradeQty,
-      makerOwnerId: maker.ownerId,
-      takerOwnerId,
-      makerOrderId: maker.orderId,
-      takerOrderId,
-      makerQtyBefore,
-      takerQtyTotal: takerQtyLots,
-    });
-
-    remaining -= tradeQty;
-
-    if (tradeQty === maker.qtyLots) {
-      removeExistingOrder(state, maker.orderId);
-    } else {
-      invalidateBookOrderCommitment(state, maker.orderId);
-      maker.qtyLots -= tradeQty;
-      const nextTotalQtyLots = best.level.totalQtyLots - tradeQty;
-      if (nextTotalQtyLots < 0n) {
-        throw new Error(`BOOK_CORRUPTION: level quantity underflow while reducing ${maker.orderId}`);
+      remaining -= fill.qty;
+      totalQtyLots -= fill.qty;
+      pageChanged = true;
+      if (fill.qty === maker.qtyLots) {
+        slots[slot] = null;
+        liveCount -= 1;
+        state.orders.delete(maker.orderId);
+      } else {
+        const nextQty = maker.qtyLots - fill.qty;
+        slots[slot] = { ...entry, qtyLots: nextQty };
+        const writable = getWritableBookOrder(state, maker.orderId);
+        if (!writable) throw new Error(`BOOK_ORDER_INDEX_MISSING:${maker.orderId}`);
+        writable.qtyLots = nextQty;
+        events.push({ type: 'REDUCED', orderId: maker.orderId, ownerId: maker.ownerId, delta: -fill.qty, remain: nextQty });
+        stopAfterPage = true;
+        break;
       }
-      best.level.totalQtyLots = nextTotalQtyLots;
-      events.push({ type: 'REDUCED', orderId: maker.orderId, ownerId: maker.ownerId, delta: -tradeQty, remain: maker.qtyLots });
     }
+    if (pageChanged) publishMatchedPage(state, makerSide, key, {
+        ...sourcePage,
+        headSlot: liveCount === 0 ? 0 : nextLiveSlot(slots, sourcePage.headSlot),
+        liveCount,
+        totalQtyLots,
+        slots,
+      });
+    if (stopAfterPage) break;
   }
-
   return { remaining };
-}
+};
+
+const matchAgainstBook = matchPricePages;
 
 export function createBook(params: BookParams): BookState {
-  const { bucketWidthTicks, maxOrders, stpPolicy } = params;
-  if (bucketWidthTicks <= 0n) throw new Error('bucketWidthTicks must be positive');
-  if (!Number.isFinite(maxOrders) || maxOrders <= 0) throw new Error('maxOrders must be positive');
-  if (stpPolicy !== 0 && stpPolicy !== 1) throw new Error('unsupported stpPolicy');
+  if (params.bucketWidthTicks <= 0n) throw new Error('bucketWidthTicks must be positive');
+  if (!Number.isFinite(params.maxOrders) || params.maxOrders <= 0) throw new Error('maxOrders must be positive');
+  if (params.stpPolicy !== 0 && params.stpPolicy !== 1) throw new Error('unsupported stpPolicy');
   return {
-    params: {
-      bucketWidthTicks,
-      maxOrders: Math.max(1, Math.floor(maxOrders)),
-      stpPolicy,
-    },
-    orders: new Map(),
-    bidBuckets: new Map(),
-    askBuckets: new Map(),
-    bidBucketIdsDesc: [],
-    askBucketIdsAsc: [],
+    params: { ...params, maxOrders: Math.max(1, Math.floor(params.maxOrders)) },
+    orders: createPersistentBookOrderMap(),
+    bidPages: createBookPricePageTree(),
+    askPages: createBookPricePageTree(),
     nextSeq: 1,
     tradeCount: 0,
     tradeQtySum: 0n,
@@ -485,271 +372,200 @@ export function createBook(params: BookParams): BookState {
   };
 }
 
-/**
- * Commit the single USD risk-price source selected in HubProfile.
- *
- * Authority and same-j/ask checks live at the Entity boundary, where signed
- * maker identity and token orientation are available. Keeping this primitive
- * narrow prevents trades, user quotes, cross-j routes, and cancellations from
- * mutating the admission price accidentally.
- */
 export function recordAcceptedUsdAskPrice(state: BookState, priceTicks: bigint): BookState {
   if (priceTicks <= 0n) throw new Error('BOOK_USD_ASK_PRICE_INVALID');
-  const mutable = state as MutableBookState;
-  if (mutable.lastAcceptedUsdAskPriceTicks === priceTicks) return state;
+  if (state.lastAcceptedUsdAskPriceTicks === priceTicks) return state;
+  const mutable = forkBookState(state) as MutableBookState;
   mutable.lastAcceptedUsdAskPriceTicks = priceTicks;
   bumpHash(mutable, 4, priceTicks, 0);
-  return state;
+  return mutable;
 }
 
-/**
- * Materialize a remainder only after its Account fill progress committed.
- *
- * A newly crossing taker never existed in the committed book: matching happens
- * on a simulation clone. If that taker has a remainder, the committed ACK is
- * the first point where the row is safe to persist. This API deliberately does
- * no matching; callers must already hold consensus proof of the remainder.
- */
 export function materializeCommittedRemainder(
   state: BookState,
   input: Pick<BookOrderState, 'orderId' | 'ownerId' | 'side' | 'priceTicks' | 'qtyLots'>,
 ): BookState {
-  const mutable = state as MutableBookState;
-  if (input.qtyLots <= 0n || input.qtyLots > MAX_ORDERBOOK_QTY_LOTS) {
-    throw new Error(`BOOK_REMAINDER_QTY_INVALID: order=${input.orderId} qty=${input.qtyLots.toString()}`);
-  }
-  if (input.priceTicks <= 0n) {
-    throw new Error(`BOOK_REMAINDER_PRICE_INVALID: order=${input.orderId}`);
-  }
-  if (mutable.orders.has(input.orderId)) {
-    throw new Error(`BOOK_REMAINDER_DUPLICATE: order=${input.orderId}`);
-  }
-  if (mutable.orders.size >= mutable.params.maxOrders) {
-    throw new OrderbookCapacityError();
-  }
-  const order: BookOrderState = {
-    ...input,
-    seq: mutable.nextSeq,
-    bucketId: bucketIdForPrice(input.priceTicks, mutable.params.bucketWidthTicks),
-  };
+  if (input.qtyLots <= 0n || input.qtyLots > MAX_ORDERBOOK_QTY_LOTS) throw new Error('BOOK_REMAINDER_QTY_INVALID');
+  if (input.priceTicks <= 0n) throw new Error('BOOK_REMAINDER_PRICE_INVALID');
+  if (state.orders.has(input.orderId)) throw new Error('BOOK_REMAINDER_DUPLICATE');
+  if (state.orders.size >= state.params.maxOrders) throw new OrderbookCapacityError();
+  const mutable = forkBookState(state) as MutableBookState;
+  addOrder(mutable, { ...input, seq: mutable.nextSeq });
   mutable.nextSeq += 1;
-  addRestingOrder(mutable, order);
-  bumpHash(mutable, 1, order.bucketId, order.qtyLots);
-  return state;
+  bumpHash(mutable, 1, input.priceTicks, input.qtyLots);
+  return mutable;
 }
 
-export function applyCommand(state: BookState, cmd: OrderCmd, options: ApplyCommandOptions = {}): { state: BookState; events: BookEvent[] } {
-  /**
-   * Hot-path note:
-   *
-   * The orderbook no longer clones the full pair book on every command.
-   * That old "pure per-command" shape was convenient, but it multiplied work
-   * and garbage for no real safety benefit at the book layer.
-   *
-   * Why in-place mutation is correct here:
-   * - rollback boundaries live above the book, at runtime/entity/account
-   *   working-state clones, not inside one book command
-   * - a book command is not a persistence boundary
-   * - if a process crashes, canonical recovery is snapshot + WAL replay
-   * - if a pair book corrupts, the caller can rebuild that pair from canonical
-   *   live offers instead of relying on a pre-command copy
-   *
-   * In other words: the book is a hot in-memory cache of canonical offers, not
-   * the source of truth for disaster recovery. The source of truth is the
-   * replicated entity/account state plus persisted snapshot/WAL.
-   *
-   * So `applyCommand` now mutates the provided working book directly and returns
-   * that same object for API compatibility.
-   */
-  const events: BookEvent[] = [];
-  const m = state as MutableBookState;
-
-  if (cmd.kind === 2) {
-    events.push({ type: 'REJECT', orderId: cmd.orderId, ownerId: cmd.ownerId, reason: 'replace unsupported' });
-    return { state, events };
-  }
-
+export function applyCommand(
+  state: BookState,
+  cmd: OrderCmd,
+  options: ApplyCommandOptions = {},
+): { state: BookState; events: BookEvent[] } {
+  if (cmd.kind === 2) return { state: forkBookState(state), events: [{ type: 'REJECT', orderId: cmd.orderId, ownerId: cmd.ownerId, reason: 'replace unsupported' }] };
+  const mutable = forkBookState(state) as MutableBookState;
   if (cmd.kind === 1) {
-    const existing = m.orders.get(cmd.orderId);
-    if (!existing) {
-      events.push({ type: 'REJECT', orderId: cmd.orderId, ownerId: cmd.ownerId, reason: 'not found' });
-      return { state, events };
-    }
-    if (existing.ownerId !== cmd.ownerId) {
-      events.push({ type: 'REJECT', orderId: cmd.orderId, ownerId: cmd.ownerId, reason: 'not owner' });
-      return { state, events };
-    }
-    removeExistingOrder(m, cmd.orderId);
-    events.push({ type: 'CANCELED', orderId: cmd.orderId, ownerId: cmd.ownerId });
-    bumpHash(m, 5, existing.bucketId, 0);
-    return { state, events };
+    const existing = mutable.orders.get(cmd.orderId);
+    if (!existing) return { state: mutable, events: [{ type: 'REJECT', orderId: cmd.orderId, ownerId: cmd.ownerId, reason: 'not found' }] };
+    if (existing.ownerId !== cmd.ownerId) return { state: mutable, events: [{ type: 'REJECT', orderId: cmd.orderId, ownerId: cmd.ownerId, reason: 'not owner' }] };
+    removeOrder(mutable, cmd.orderId);
+    bumpHash(mutable, 5, existing.priceTicks, 0);
+    return { state: mutable, events: [{ type: 'CANCELED', orderId: cmd.orderId, ownerId: cmd.ownerId }] };
   }
-
   const { ownerId, orderId, side, tif, postOnly, priceTicks, qtyLots } = cmd;
-
-  if (qtyLots <= 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS) {
-    events.push({ type: 'REJECT', orderId, ownerId, reason: 'qty out of range' });
-    return { state, events };
+  const commandOptions = cacheMakerDisposition(options);
+  if (qtyLots <= 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS) return { state: mutable, events: [{ type: 'REJECT', orderId, ownerId, reason: 'qty out of range' }] };
+  if (priceTicks <= 0n) return { state: mutable, events: [{ type: 'REJECT', orderId, ownerId, reason: 'price must be positive' }] };
+  if (mutable.orders.has(orderId)) return { state: mutable, events: [{ type: 'REJECT', orderId, ownerId, reason: 'duplicate orderId' }] };
+  const opposite = postOnly
+    ? findBestOrder(mutable, side === 0 ? 1 : 0, commandOptions)
+    : null;
+  if (postOnly && opposite && crosses(side, priceTicks, opposite.priceTicks)) {
+    return { state: mutable, events: [{ type: 'REJECT', orderId, ownerId, reason: 'postOnly would cross' }] };
   }
-  if (priceTicks <= 0n) {
-    events.push({ type: 'REJECT', orderId, ownerId, reason: 'price must be positive' });
-    return { state, events };
+  const events: BookEvent[] = [];
+  const matched = matchAgainstBook(
+    mutable,
+    { side, ownerId, orderId, priceTicks, qtyLots },
+    events,
+    commandOptions,
+  );
+  if (tif === 2 && matched.remaining > 0n) {
+    return { state: forkBookState(state), events: [{ type: 'REJECT', orderId, ownerId, reason: 'FOK cannot fill entirely' }] };
   }
-  if (m.orders.has(orderId)) {
-    events.push({ type: 'REJECT', orderId, ownerId, reason: 'duplicate orderId' });
-    return { state, events };
-  }
-
-  const suspendedOrderIds = options.suspendedOrderIds;
-  const bestBid = getBestPriceIgnoringSuspended(m as BookState, 0, suspendedOrderIds);
-  const bestAsk = getBestPriceIgnoringSuspended(m as BookState, 1, suspendedOrderIds);
-
-  if (postOnly) {
-    if (side === 0 && bestAsk !== null && bestAsk <= priceTicks) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'postOnly would cross' });
-      return { state, events };
-    }
-    if (side === 1 && bestBid !== null && bestBid >= priceTicks) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'postOnly would cross' });
-      return { state, events };
-    }
-  }
-
-  const estimate = estimateImmediateFill(m as BookState, side, ownerId, priceTicks, qtyLots, suspendedOrderIds);
-  if (tif === 2 && estimate.filledQty < qtyLots) {
-    events.push({ type: 'REJECT', orderId, ownerId, reason: 'FOK cannot fill entirely' });
-    return { state, events };
-  }
-  const match = matchAgainstBook(m, side, ownerId, orderId, priceTicks, qtyLots, events, suspendedOrderIds);
-  const remaining = match.remaining;
-  const filledQty = qtyLots - remaining;
-  const stpBlocked = match.blockingOrderId !== undefined;
-
-  if (remaining > 0n) {
-    if (stpBlocked) {
-      // STP is an explicit cancel-remainder outcome. We never rest the leftover taker size.
-    } else if (tif === 1 || tif === 2) {
-      if (filledQty === 0n) {
-        events.push({ type: 'REJECT', orderId, ownerId, reason: 'no fill' });
-      }
-    } else {
-      if (m.orders.size >= m.params.maxOrders) throw new OrderbookCapacityError();
-      const order: BookOrderState = {
-        orderId,
-        ownerId,
-        side,
-        priceTicks,
-        qtyLots: remaining,
-        seq: m.nextSeq,
-        bucketId: bucketIdForPrice(priceTicks, m.params.bucketWidthTicks),
-      };
-      m.nextSeq += 1;
-      addRestingOrder(m, order);
+  if (matched.remaining > 0n && matched.blockingOrderId === undefined && tif === 0) {
+    if (mutable.orders.size >= mutable.params.maxOrders) throw new OrderbookCapacityError();
+    const multiple = options.executionQtyMultipleAtPrice?.(priceTicks) ?? 1n;
+    if (multiple <= 0n) throw new Error('BOOK_EXECUTION_QTY_MULTIPLE_INVALID');
+    const resting = (matched.remaining / multiple) * multiple;
+    if (resting > 0n) {
+      addOrder(mutable, { orderId, ownerId, side, priceTicks, qtyLots: resting, seq: mutable.nextSeq });
+      mutable.nextSeq += 1;
       events.push({ type: 'ACK', orderId, ownerId });
-      bumpHash(m, 1, order.bucketId, remaining);
+      bumpHash(mutable, 1, priceTicks, resting);
+    }
+  } else if (matched.remaining === qtyLots && events.length === 0) {
+    events.push({ type: 'REJECT', orderId, ownerId, reason: 'no fill' });
+  }
+  return { state: mutable, events };
+}
+
+export type ResumeCrossedBookResult = { state: BookState; events: BookEvent[]; takerOrderId: string };
+export function resumeCrossedBook(state: BookState, options: ApplyCommandOptions = {}): ResumeCrossedBookResult | null {
+  const mutable = forkBookState(state) as MutableBookState;
+  const commandOptions = cacheMakerDisposition(options);
+  const bid = findBestOrder(mutable, 0, commandOptions);
+  const ask = findBestOrder(mutable, 1, commandOptions);
+  if (!bid || !ask || bid.priceTicks < ask.priceTicks) return null;
+  if (bid.seq === ask.seq) throw new Error(`BOOK_CORRUPTION: crossed top orders share seq ${bid.seq}`);
+  const taker = bid.seq > ask.seq ? bid : ask;
+  const events: BookEvent[] = [];
+  const matched = matchAgainstBook(mutable, taker, events, commandOptions);
+  if (matched.blockingOrderId !== undefined) {
+    removeOrder(mutable, taker.orderId);
+    bumpHash(mutable, 5, taker.priceTicks, 0);
+  } else if (matched.remaining === 0n) removeOrder(mutable, taker.orderId);
+  else if (matched.remaining < taker.qtyLots) reduceOrder(mutable, taker, matched.remaining);
+  if (events.length === 0) return null;
+  return { state: mutable, events, takerOrderId: taker.orderId };
+}
+
+export const getBestBid = (state: BookState): bigint | null =>
+  getBestBookPricePage(state.bidPages, 'highest')?.[0].priceTicks ?? null;
+export const getBestAsk = (state: BookState): bigint | null =>
+  getBestBookPricePage(state.askPages, 'lowest')?.[0].priceTicks ?? null;
+export const getBookOrder = (state: BookState, orderId: string): BookOrderState | null =>
+  state.orders.get(orderId) ?? null;
+export const getBookOrders = (state: BookState): BookOrderState[] =>
+  Array.from(state.orders.values()).sort((left, right) => left.seq - right.seq);
+
+/** Visit only Patricia tails outside the accepted price interval. */
+export function* bookOrdersOutsidePriceRange(
+  state: BookState,
+  minPriceTicks: bigint,
+  maxPriceTicks: bigint,
+): Generator<BookOrderState> {
+  if (minPriceTicks <= 0n || maxPriceTicks < minPriceTicks) {
+    throw new Error('BOOK_PRICE_RANGE_INVALID');
+  }
+  for (const side of [0, 1] as const) {
+    const tree = sideTree(state, side);
+    for (const [key, page] of tree.entries()) {
+      if (key.priceTicks >= minPriceTicks) break;
+      yield* pageOrders(side, key, page);
+    }
+    for (const [key, page] of pagesByDescendingPrice(tree)) {
+      if (key.priceTicks <= maxPriceTicks) break;
+      yield* pageOrders(side, key, page);
     }
   }
-
-  return { state, events };
 }
 
-export function getBestBid(state: BookState): bigint | null {
-  const first = getTopLevel(state, 0);
-  return first?.level.priceTicks ?? null;
-}
-
-export function getBestAsk(state: BookState): bigint | null {
-  const first = getTopLevel(state, 1);
-  return first?.level.priceTicks ?? null;
-}
-
-export function getBookOrder(state: BookState, orderId: string): BookOrderState | null {
-  return state.orders.get(orderId) ?? null;
-}
-
-export function getBookOrders(state: BookState): BookOrderState[] {
-  return Array.from(state.orders.values()).sort((left, right) => left.seq - right.seq);
+/** Bounded transport projection; canonical state remains the full page trees. */
+export function projectBookDepth(
+  state: BookState,
+  maxLevelsPerSide = 5,
+  maxOrdersPerLevel = 20,
+): BookState {
+  const projected = forkBookState(createBook(state.params)) as MutableBookState;
+  for (const side of [0, 1] as const) {
+    for (const level of getBookSideLevels(state, side, maxLevelsPerSide)) {
+      for (const orderId of level.orderIds.slice(0, maxOrdersPerLevel)) {
+        const source = state.orders.get(orderId);
+        if (!source) throw new Error(`BOOK_VIEW_ORDER_MISSING:${orderId}`);
+        addOrder(projected, {
+          orderId: source.orderId,
+          ownerId: source.ownerId,
+          side: source.side,
+          priceTicks: source.priceTicks,
+          qtyLots: source.qtyLots,
+          seq: source.seq,
+        });
+      }
+    }
+  }
+  projected.nextSeq = state.nextSeq;
+  projected.tradeCount = state.tradeCount;
+  projected.tradeQtySum = state.tradeQtySum;
+  projected.lastTradePriceTicks = state.lastTradePriceTicks;
+  projected.lastAcceptedUsdAskPriceTicks = state.lastAcceptedUsdAskPriceTicks;
+  projected.eventHash = state.eventHash;
+  delete projected.commitmentHash;
+  return commitBookOverlay(projected);
 }
 
 export function getBookSideLevels(state: BookState, side: Side, depth = 10): BookSideLevel[] {
-  const out: BookSideLevel[] = [];
-  for (const view of getOrderedLevels(state, side)) {
-    const ownerIds = new Set<string>();
-    const orderIds: string[] = [];
-    let totalQtyLots = 0n;
-    for (const orderId of view.level.orderIds) {
-      const order = state.orders.get(orderId);
-      if (!order || order.qtyLots <= 0n) continue;
-      ownerIds.add(order.ownerId);
-      orderIds.push(orderId);
-      totalQtyLots += order.qtyLots;
+  const levels: BookSideLevel[] = [];
+  for (const [key, page] of orderedPages(state, side)) {
+    let level = levels.at(-1);
+    if (!level || level.priceTicks !== key.priceTicks) {
+      if (levels.length >= depth) break;
+      level = { priceTicks: key.priceTicks, qtyLots: 0n, ownerIds: [], orderIds: [] };
+      levels.push(level);
     }
-    if (totalQtyLots <= 0n) continue;
-    out.push({
-      priceTicks: view.level.priceTicks,
-      qtyLots: totalQtyLots,
-      ownerIds: Array.from(ownerIds),
-      orderIds,
-    });
-    if (out.length >= depth) break;
+    for (const order of pageOrders(side, key, page)) {
+      level.qtyLots += order.qtyLots;
+      if (!level.ownerIds.includes(order.ownerId)) level.ownerIds.push(order.ownerId);
+      level.orderIds.push(order.orderId);
+    }
   }
-  return out;
+  return levels;
 }
 
 export function computeBookHash(state: BookState): string {
-  const bid = getBestBid(state)?.toString() ?? '-';
-  const ask = getBestAsk(state)?.toString() ?? '-';
-  const combined = `${state.eventHash.toString(16)}|${state.tradeCount}|${state.tradeQtySum}|${state.lastTradePriceTicks}|${state.lastAcceptedUsdAskPriceTicks}|${state.orders.size}|${bid}|${ask}`;
+  const text = `${state.eventHash}|${state.tradeCount}|${state.tradeQtySum}|${getBestBid(state) ?? '-'}|${getBestAsk(state) ?? '-'}`;
   let hash = 0n;
-  for (let i = 0; i < combined.length; i += 1) {
-    hash = (hash * 31n + BigInt(combined.charCodeAt(i))) & 0xffffffffffffffffn;
-  }
+  for (const char of text) hash = (hash * 31n + BigInt(char.charCodeAt(0))) & 0xffff_ffff_ffff_ffffn;
   return hash.toString(16).padStart(16, '0');
 }
 
-export function renderAscii(state: BookState, depth = 10, perLevelOrders = 10, lineWidth = 40): string {
-  const rows: string[] = [];
-  const BOLD = '\x1b[1m';
-  const DIM = '\x1b[2m';
-  const RESET = '\x1b[0m';
-  const GREEN = '\x1b[32m';
-  const RED = '\x1b[31m';
-  const pad = (value: string, width: number) => (value.length >= width ? value : ' '.repeat(width - value.length) + value);
-
-  const bids = getBookSideLevels(state, 0, depth).map((level) => ({
-    px: level.priceTicks,
-    orders: level.orderIds
-      .slice(0, perLevelOrders)
-      .map((orderId) => {
-        const order = state.orders.get(orderId);
-        return order ? `${order.qtyLots}@${order.ownerId.slice(-4)}` : null;
-      })
-      .filter(Boolean)
-      .join(','),
-  }));
-
-  const asks = getBookSideLevels(state, 1, depth).map((level) => ({
-    px: level.priceTicks,
-    orders: level.orderIds
-      .slice(0, perLevelOrders)
-      .map((orderId) => {
-        const order = state.orders.get(orderId);
-        return order ? `${order.qtyLots}@${order.ownerId.slice(-4)}` : null;
-      })
-      .filter(Boolean)
-      .join(','),
-  }));
-
-  rows.push(`${BOLD}     BID (qty@owner)      |      ASK (qty@owner)     ${RESET}`);
-  rows.push(`${DIM}  PX      ORDERS          |   PX      ORDERS         ${RESET}`);
-  for (let i = 0; i < depth; i += 1) {
-    const bid = bids[i];
-    const ask = asks[i];
-    const bidPx = bid ? pad(String(bid.px), 6) : '      ';
-    const askPx = ask ? pad(String(ask.px), 6) : '      ';
-    const bidOrders = bid ? pad(bid.orders.slice(0, lineWidth), lineWidth) : ' '.repeat(lineWidth);
-    const askOrders = ask ? pad(ask.orders.slice(0, lineWidth), lineWidth) : ' '.repeat(lineWidth);
-    rows.push(`${GREEN}${bidPx} ${bidOrders}${RESET} | ${RED}${askPx} ${askOrders}${RESET}`);
+export function renderAscii(state: BookState, depth = 10): string {
+  const bids = getBookSideLevels(state, 0, depth);
+  const asks = getBookSideLevels(state, 1, depth);
+  const rows = ['BID | ASK'];
+  for (let index = 0; index < depth; index += 1) {
+    const bid = bids[index];
+    const ask = asks[index];
+    rows.push(`${bid ? `${bid.priceTicks}:${bid.qtyLots}` : '-'} | ${ask ? `${ask.priceTicks}:${ask.qtyLots}` : '-'}`);
   }
   return rows.join('\n');
 }

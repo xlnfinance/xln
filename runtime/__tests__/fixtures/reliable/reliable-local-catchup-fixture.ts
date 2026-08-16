@@ -11,6 +11,7 @@ import { getEntityLeaderState } from '../../../entity/consensus/leader';
 import { buildCertifiedEntityOutputHashes } from '../../../entity/consensus/output/certification';
 import {
   buildEntityFrameAuthority,
+  computeEntityAccountValueHash,
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../../../entity/consensus/state-root';
@@ -26,6 +27,7 @@ import {
 } from '../../../storage/replica/entity-lineage';
 import type { DeliverableEntityInput, RuntimeReplica } from '../../../runtime/types';
 import type { EntityReplica, EntityState, EntityFrame } from '../../../entity/types';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 
 export const deriveCatchupFixtureSigners = (seed: string): {
   leaderSignerId: string;
@@ -66,11 +68,10 @@ export const createCatchupFixtureState = (
       shares: { [leaderSignerId]: 1n, [targetSignerId]: 1n },
     },
     reserves: new Map(),
-    accounts: new Map(),
+    accounts: PersistentEntityAccountMap.empty(computeEntityAccountValueHash),
     deferredAccountProposals: new Map(),
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: { name: 'SIGKILL catch-up validator', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
@@ -84,17 +85,12 @@ const installReplica = (env: RuntimeReplica, state: EntityState, signerId: strin
     entityId: state.entityId,
     signerId,
     entityEncPubKey: '',
-    state: structuredClone(state),
+    state,
     mempool: [],
     isProposer: false,
   };
   env.state.eReplicas.set(`${state.entityId}:${signerId}`, replica);
   return replica;
-};
-
-const installFixtureEncryptionKeys = (env: RuntimeReplica, replica: EntityReplica): void => {
-  const keys = provisionTestEntityEncryptionKey(env, replica.entityId);
-  replica.state.entityEncryptionPublicKey = keys.publicKey;
 };
 
 export const prepareCatchupFixtureReplica = async (
@@ -103,11 +99,13 @@ export const prepareCatchupFixtureReplica = async (
   leaderSignerId: string,
   targetSignerId: string,
 ): Promise<EntityReplica> => {
-  const target = installReplica(env, state, targetSignerId);
-  const leader = installReplica(env, state, leaderSignerId);
-  installFixtureEncryptionKeys(env, target);
-  installFixtureEncryptionKeys(env, leader);
-  state.entityEncryptionPublicKey = target.state.entityEncryptionPublicKey;
+  const keys = provisionTestEntityEncryptionKey(env, state.entityId);
+  const preparedState = { ...state, entityEncryptionPublicKey: keys.publicKey };
+  state.entityEncryptionPublicKey = keys.publicKey;
+  // Local validators at the same certified endpoint share one immutable state
+  // root. Their envelopes diverge; the unbounded Entity graph does not clone.
+  const target = installReplica(env, preparedState, targetSignerId);
+  installReplica(env, preparedState, leaderSignerId);
   env.state.eReplicas.delete(`${state.entityId}:${leaderSignerId}`);
   const profileHash = computeProfileHash(buildLocalEntityProfile(env, target.state, 1));
   const signatures = state.config.validators.map(signerId => ({

@@ -52,7 +52,6 @@ describe('stale hash-precommit catch-up', () => {
         height: 13,
         prevFrameHash: `0x${'cd'.repeat(32)}`,
         lastFinalizedJHeight: 0,
-        jBlockChain: [],
         accounts: new Map(),
         config: {
           mode: 'proposer-based',

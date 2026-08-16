@@ -1,7 +1,5 @@
 #!/usr/bin/env bun
 
-import { spawnSync } from 'node:child_process';
-
 type Gate = { name: string; command: string[] };
 
 const json = process.argv.includes('--json');
@@ -28,19 +26,29 @@ const gates: Gate[] = [
   { name: 'nested-hash-coverage', command: ['bun', 'run', 'check:nested-hash-coverage'] },
 ];
 
-const results = gates.map(gate => {
+const runGate = async (gate: Gate) => {
   const startedAt = performance.now();
-  const child = spawnSync(gate.command[0]!, gate.command.slice(1), {
+  const child = Bun.spawn(gate.command, {
     cwd: process.cwd(),
-    encoding: 'utf8',
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
+  const [status, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
   return {
     name: gate.name,
-    ok: child.status === 0,
+    ok: status === 0,
     durationMs: Math.round(performance.now() - startedAt),
-    output: `${child.stdout ?? ''}${child.stderr ?? ''}`.trim(),
+    output: `${stdout}${stderr}`.trim(),
   };
-});
+};
+
+// Every member is read-only and independent. Keep declaration-order reporting,
+// but use the Mac Studio cores instead of serially paying ten process startups.
+const results = await Promise.all(gates.map(runGate));
 
 const ok = results.every(result => result.ok);
 if (json) {

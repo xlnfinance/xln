@@ -30,6 +30,7 @@ import { compareStableText, safeStringify } from '../../../protocol/serializatio
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
 import { assertScheduledWakeFrameOrder } from '../../scheduler/scheduled-wake-validation';
 import { createEntityFrameCandidateState } from '../../state-clone';
+import { getEntityAccountForWrite } from '../../state/persistent-account-map';
 import { getAccountPerspective } from '../../../account/state/perspective';
 import { emitScopedEvents } from '../../../infra/scoped-events';
 import { addMessages, clearEntityFrameEvents, readEntityFrameEvents } from '../../frame-events';
@@ -82,7 +83,6 @@ import { accountHasProposableMempool } from '../account/mempool-eligibility';
 import {
   getProposableAccountIds,
   getQueuedAccountIds,
-  refreshAccountWorkIndex,
 } from '../account/work-index';
 import { applyAccountInput } from '../../../account/consensus';
 import { createAccountConsensusContext } from '../../account/account-consensus-context';
@@ -97,7 +97,6 @@ import { applyEntityTxReturnedEffects } from './tx-effects';
 import { selectSettlementContinuation } from '../account/settlement-continuation';
 import {
   buildEntityProfileDescriptor,
-  buildChangedEntityProfileHashToSign,
   computeEntityProfileDescriptorHash,
 } from '../../profile/profile-descriptor';
 
@@ -118,8 +117,14 @@ import {
 import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/j-events-htlc/cross-j-outputs';
 import { isSelfBoardAuthorityTransitionFrame } from '../proposal/policy';
 import { getBoardHandoverFrameConfig } from '../authority/board-handover';
+import { admitOrderbookAccountTxBatch } from '../account/orderbook-account-admission';
 import { scheduleChangedAccountBoardReseals } from '../../scheduler/board-reseal-hook';
 import { captureAccountBoardResealEvidence } from '../../tx/state-effects/board-rotation-reseal';
+import {
+  collectTouchedAccountIds,
+  copyProposableAccounts,
+  dirtyAccountIdsFromState,
+} from '../account/touched-accounts';
 
 const recordFrameAccountChange = (
   storageChanges: RuntimeOverlayRecord[],
@@ -445,11 +450,11 @@ async function materializeDeferredSettlementApprovals(
   for (const [accountId, approvedHash] of [...deferred.entries()].sort(([left], [right]) =>
     compareStableText(left, right),
   )) {
-    const account = state.accounts.get(accountId);
-    if (!account) throw new Error(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${accountId}`);
-    if (account.pendingFrame || hasPendingSettlementTransition(account)) continue;
-    const workspace = account.state.settlementWorkspace;
-    const currentHash = workspace ? assertCanonicalSettlementWorkspace(account.state, workspace) : undefined;
+    const visible = state.accounts.get(accountId);
+    if (!visible) throw new Error(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${accountId}`);
+    if (visible.pendingFrame || hasPendingSettlementTransition(visible)) continue;
+    const workspace = visible.state.settlementWorkspace;
+    const currentHash = workspace ? assertCanonicalSettlementWorkspace(visible.state, workspace) : undefined;
     if (!workspace || currentHash !== approvedHash) {
       deferred.delete(accountId);
       entityLog.warn('settlement.approval_invalidated', {
@@ -469,7 +474,9 @@ async function materializeDeferredSettlementApprovals(
     // cannot drain. Waiting for an empty mempool then deadlocks the only exact
     // counter-seal that can finalize the settlement. Keep those txs queued;
     // proposeAccountFrame skips them and applies the counter-seal unchanged.
-    if (account.mempool.length > 0 && !peerSealPinsAccountState) continue;
+    if (visible.mempool.length > 0 && !peerSealPinsAccountState) continue;
+    const account = getEntityAccountForWrite(state.accounts, accountId);
+    if (!account) throw new Error(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${accountId}`);
     const draft = buildSettlementSealDraft(account, state, accountId, env);
     const admission = await applyAccountInput(
       accountConsensusContext,
@@ -493,13 +500,13 @@ type SettlementSealTx = Omit<SettlementTransitionTx, 'data'> & {
 
 function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChanges: RuntimeOverlayRecord[]): void {
   for (const accountId of [...getQueuedAccountIds(state)].sort(compareStableText)) {
-    const account = state.accounts.get(accountId);
-    if (!account) throw new Error(`QUEUED_ACCOUNT_INDEX_STALE:${accountId}`);
-    const workspace = account.state.settlementWorkspace;
-    if (!workspace || workspace.nonceAtSign !== undefined || account.pendingFrame) continue;
-    const workspaceHash = assertCanonicalSettlementWorkspace(account.state, workspace);
-    const expectedNonce = getNextSettlementNonce(account);
-    const staleSeals = account.mempool.filter(
+    const visible = state.accounts.get(accountId);
+    if (!visible) throw new Error(`QUEUED_ACCOUNT_INDEX_STALE:${accountId}`);
+    const workspace = visible.state.settlementWorkspace;
+    if (!workspace || workspace.nonceAtSign !== undefined || visible.pendingFrame) continue;
+    const workspaceHash = assertCanonicalSettlementWorkspace(visible.state, workspace);
+    const expectedNonce = getNextSettlementNonce(visible);
+    const staleSeals = visible.mempool.filter(
       (tx): tx is SettlementSealTx =>
         tx.type === 'settle_transition' &&
         tx.data.kind === 'seal' &&
@@ -514,6 +521,8 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChang
     // mutate or tolerate that signed seal: discard only the local intent and
     // deterministically request a fresh Entity-quorum witness for this exact
     // workspace at the new nonce.
+    const account = getEntityAccountForWrite(state.accounts, accountId);
+    if (!account) throw new Error(`QUEUED_ACCOUNT_INDEX_STALE:${accountId}`);
     const staleSet = new Set<AccountTx>(staleSeals);
     account.mempool = account.mempool.filter(tx => !staleSet.has(tx));
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
@@ -566,7 +575,7 @@ const proposeAccountFrameCandidate = async (
     if (!route) continue;
     if (route.outboundLockId) state.lockBook.delete(route.outboundLockId);
     if (hasInboundHtlcRoute(route)) {
-      const inboundAccount = state.accounts.get(route.inboundEntity);
+      const inboundAccount = getEntityAccountForWrite(state.accounts, route.inboundEntity);
       if (inboundAccount) {
         const admission = await applyAccountInput(
           context.accountConsensusContext,
@@ -657,7 +666,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       .sort(compareStableText)[0];
     if (!accountKey) break;
     processedAccounts.add(accountKey);
-    const account = currentEntityState.accounts.get(accountKey);
+    const account = getEntityAccountForWrite(currentEntityState.accounts, accountKey);
     const { counterparty: cpId } = account
       ? getAccountPerspective(account.state, currentEntityState.entityId)
       : { counterparty: 'unknown' };
@@ -791,10 +800,11 @@ const applyOrderbookAccountTxs = async (
     proposableAccounts,
     storageChanges,
   } = context;
+  const localBatches = new Map<string, { account: AccountReplica; txs: AccountTx[] }>();
   for (const { accountId, tx } of result.accountTxs) {
-    const account = state.accounts.get(accountId);
+    const visible = state.accounts.get(accountId);
     if (tx.type === 'swap_resolve') {
-      const offer = account?.state.swapOffers?.get(tx.data.offerId);
+      const offer = visible?.state.swapOffers?.get(tx.data.offerId);
       if (offer?.crossJurisdiction) {
         entityLog.warn('crossj.block_plain_swap_resolve', {
           offer: shortOrder(tx.data.offerId, 8),
@@ -802,10 +812,10 @@ const applyOrderbookAccountTxs = async (
         });
         continue;
       }
-      if (!account?.state.swapOffers?.has(tx.data.offerId)) {
+      if (!visible?.state.swapOffers?.has(tx.data.offerId)) {
         throw haltRuntimeFailure("ORDERBOOK_SWAP_OWNER_NOT_LOCAL", `ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${tx.data.offerId} entity=${state.entityId}`);
       }
-    } else if (tx.type === 'cross_swap_fill_ack' && !account?.state.swapOffers?.has(tx.data.offerId)) {
+    } else if (tx.type === 'cross_swap_fill_ack' && !visible?.state.swapOffers?.has(tx.data.offerId)) {
       const routed = buildCrossJurisdictionFillNoticeOutput(state, accountId, tx);
       if (routed) {
         allOutputs.push(routed);
@@ -822,25 +832,36 @@ const applyOrderbookAccountTxs = async (
           state,
           accountId,
           tx,
-          account ? 'source_offer_not_committed' : 'source_account_not_committed',
+          visible ? 'source_offer_not_committed' : 'source_account_not_committed',
         );
         continue;
       }
       throw haltRuntimeFailure("CROSS_J_FILL_ACK_OWNER_MISSING", `CROSS_J_FILL_ACK_OWNER_MISSING: account=${accountId} offer=${tx.data.offerId} current=${state.entityId}`);
     }
-    if (!account) continue;
-    const admission = await applyAccountInput(
-      accountConsensusContext,
-      account,
-      createLocalAccountInput(account.state, state.entityId, [tx]),
-    );
-    if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
-    if (tx.type === 'cross_swap_fill_ack') {
-      appendCrossJurisdictionTargetProgressAfterAdmission(state, tx, allOutputs);
+    if (!visible) {
+      throw haltRuntimeFailure('ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING', `ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING: account=${accountId} entity=${state.entityId} tx=${tx.type}`);
+    }
+    const account = getEntityAccountForWrite(state.accounts, accountId);
+    if (!account) {
+      throw haltRuntimeFailure('ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING', `ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING: account=${accountId} entity=${state.entityId} tx=${tx.type}`);
+    }
+    const batch = localBatches.get(accountId);
+    if (batch) batch.txs.push(tx);
+    else localBatches.set(accountId, { account, txs: [tx] });
+  }
+  for (const [accountId, { account, txs }] of localBatches) {
+    await admitOrderbookAccountTxBatch(accountConsensusContext, account, state.entityId, txs);
+    for (const tx of txs) {
+      if (tx.type === 'cross_swap_fill_ack') {
+        appendCrossJurisdictionTargetProgressAfterAdmission(state, tx, allOutputs);
+      }
     }
     proposableAccounts.add(accountId);
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
-    entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
+    entityLog.debug('orderbook.account_txs_queued', {
+      account: shortId(accountId, 8),
+      count: txs.length,
+    });
   }
 };
 
@@ -944,7 +965,7 @@ async function applySwapCancelRequests(
     if (tx.type !== 'cross_swap_fill_ack') {
       throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_TX_INVALID", `CROSS_J_CANCEL_ACK_TX_INVALID:account=${accountId}:type=${tx.type}`);
     }
-    const account = currentEntityState.accounts.get(accountId);
+    const account = getEntityAccountForWrite(currentEntityState.accounts, accountId);
     if (!account) {
       throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_ACCOUNT_MISSING", `CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
     }
@@ -968,7 +989,7 @@ async function applySwapCancelRequests(
 
   const cancelResult = processOrderbookCancels(currentEntityState, localBookCancels);
   for (const { accountId, tx } of cancelResult.accountTxs) {
-    const account = currentEntityState.accounts.get(accountId);
+    const account = getEntityAccountForWrite(currentEntityState.accounts, accountId);
     if (!account) continue;
     const admission = await applyAccountInput(
       accountConsensusContext,
@@ -996,6 +1017,8 @@ type EntityFrameResult = {
   jOutputs: JInput[];
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
+  proposableAccounts: string[];
+  accountsToProposeFramesCount: number;
   events: EntityFrameEvent[];
   collectedHashes?: Array<{ hash: string; type: HashType; context: string }>;
   consumptionNodeChanges?: ConsumptionNodeChanges;
@@ -1006,7 +1029,6 @@ type EntityFrameWorkingSet = {
   authorityTransitionOnly: boolean;
   crossJSetupPhase: boolean;
   currentEntityState: EntityState;
-  boardResealEvidenceBefore: ReturnType<typeof captureAccountBoardResealEvidence>;
   context: ApplyEntityTxsInOrderContext;
   frameProfileStartMs: number;
   frameProfileMarks: Record<string, number>;
@@ -1190,7 +1212,6 @@ const prepareEntityFrameWorkingSet = async (
     frameProfileMarks[label] = Math.round(getPerfMs() - frameProfileStartMs);
   };
   entityLog.debug('frame.apply', { txs: entityTxs.map(tx => tx.type) });
-  const boardResealEvidenceBefore = captureAccountBoardResealEvidence(normalized);
   const currentEntityState = initializeEntityFrameState(
     env,
     normalized,
@@ -1213,7 +1234,6 @@ const prepareEntityFrameWorkingSet = async (
     authorityTransitionOnly,
     crossJSetupPhase,
     currentEntityState,
-    boardResealEvidenceBefore,
     context,
     frameProfileStartMs,
     frameProfileMarks,
@@ -1224,12 +1244,15 @@ const prepareEntityFrameWorkingSet = async (
 const buildEntityFrameResult = (
   currentEntityState: EntityState,
   context: ApplyEntityTxsInOrderContext,
+  accountsToProposeFramesCount = 0,
 ): EntityFrameResult => ({
   newState: currentEntityState,
   outputs: context.allOutputs,
   jOutputs: context.allJOutputs,
   candidateEffects: context.candidateEffects,
   storageChanges: mergeStorageOverlayRecords(undefined, context.storageChanges),
+  proposableAccounts: copyProposableAccounts(context.proposableAccounts),
+  accountsToProposeFramesCount,
   events: readEntityFrameEvents(currentEntityState),
   collectedHashes: context.collectedHashes,
   ...(context.consumptionNewNodes.size > 0 ||
@@ -1260,25 +1283,26 @@ type PostEntityTxPhases = {
 
 const refreshChangedAccountCommitments = (
   state: EntityState,
-  boardResealEvidenceBefore: ReturnType<typeof captureAccountBoardResealEvidence>,
   context: ApplyEntityTxsInOrderContext,
 ): void => {
-  const entityId = state.entityId.toLowerCase();
-  const changedAccountIds = new Set(context.proposableAccounts);
-  for (const change of context.storageChanges) {
-    if (change.family === 'account' && change.entityId.toLowerCase() === entityId) {
-      changedAccountIds.add(change.counterpartyId.toLowerCase());
-    }
-  }
+  const changedAccountIds = new Set(collectTouchedAccountIds(
+    state.entityId,
+    context.proposableAccounts,
+    context.storageChanges,
+    dirtyAccountIdsFromState(state),
+  ));
   // Every Account mutation contributes a leaf to the signed Entity root.
   // `proposableAccounts` covers proposal-envelope changes, while
   // `storageChanges` also covers transactions such as openAccount that create
   // or mutate a leaf without proposing it until a later Entity frame.
   for (const accountId of changedAccountIds) {
     invalidateEntityAccountCommitment(state, accountId);
-    refreshAccountWorkIndex(state, accountId);
   }
-  scheduleChangedAccountBoardReseals(state, boardResealEvidenceBefore, changedAccountIds);
+  scheduleChangedAccountBoardReseals(
+    state,
+    captureAccountBoardResealEvidence(state, changedAccountIds),
+    changedAccountIds,
+  );
 };
 
 const applyPostEntityTxPhases = async (
@@ -1360,7 +1384,6 @@ const applyPostEntityTxPhases = async (
   // but stale incremental Entity root.
   refreshChangedAccountCommitments(
     currentEntityState,
-    working.boardResealEvidenceBefore,
     context,
   );
   currentEntityState = assignCertifiedOutputIdentities(
@@ -1414,7 +1437,8 @@ const applyEntityFrameWithIsolation = async (
   isolateState: boolean,
 ): Promise<EntityFrameResult> => {
   entityContext = validateEntityInfraContext(entityContext);
-  const previousProfileHash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(entityState));
+  const profileCertificationRequested =
+    entityState.height === 0 || entityTxs.some(tx => tx.type === 'profile-update');
   const working = await prepareEntityFrameWorkingSet(
     env,
     entityState,
@@ -1429,9 +1453,10 @@ const applyEntityFrameWithIsolation = async (
     working.currentEntityState,
   );
   working.markFrameProfile('entityTxLoop');
-  const appendFinalProfileHash = (state: EntityState): void => {
-    const changed = buildChangedEntityProfileHashToSign(state, entityState.height === 0 ? null : previousProfileHash);
-    if (changed) working.context.collectedHashes.push(changed);
+  const appendRequestedProfileHash = (state: EntityState): void => {
+    if (!profileCertificationRequested) return;
+    const hash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(state));
+    working.context.collectedHashes.push({ hash, type: 'profile', context: `profile:${hash}` });
   };
   if (working.authorityTransitionOnly) {
     working.currentEntityState = assignCertifiedOutputIdentities(
@@ -1461,11 +1486,12 @@ const applyEntityFrameWithIsolation = async (
     );
   }
   const post = await applyPostEntityTxPhases(working);
-  appendFinalProfileHash(post.currentEntityState);
+  appendRequestedProfileHash(post.currentEntityState);
   logEntityFrameProfile(working, entityTxs, post);
   return buildEntityFrameResult(
     post.currentEntityState,
     working.context,
+    post.accountsToProposeFramesCount,
   );
 };
 
@@ -1492,13 +1518,9 @@ export const applyEntityFrame = (
   );
 
 /**
- * Execute a single-signer frame against Runtime-owned Entity State.
- *
- * This function is valid only while the enclosing Runtime writer/read barrier
- * is held. The sole signer needs no speculative copy: success is persisted by
- * the same Runtime WAL commit, while any exception after mutation halts the
- * Runtime and reloads durable truth. Never use this for multi-signer proposal
- * validation or touched-only Runtime candidate staging.
+ * Execute a single-signer frame through the same dirty-path candidate boundary.
+ * Runtime ownership does not authorize mutation of the certified Entity root:
+ * rejection and WAL failure must be able to discard the candidate in O(dirty).
  */
 export const applyRuntimeOwnedEntityFrame = (
   env: EntityRuntimeContext,
@@ -1513,7 +1535,7 @@ export const applyRuntimeOwnedEntityFrame = (
     entityContext,
     entityTxs,
     frameTimestamp,
-    false,
+    true,
   );
 
 // === HELPER FUNCTIONS ===

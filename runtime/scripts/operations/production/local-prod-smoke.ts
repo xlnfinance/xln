@@ -7,7 +7,6 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Level } from 'level';
 import { readStorageHead } from '../../../storage';
-import { withRebranchedValues } from '../../../storage/database/rebranched-db';
 import type { StorageHead } from '../../../storage/types';
 import { RemoteRuntimeAdapter } from '../../../api/runtime-adapter/remote';
 import {
@@ -225,6 +224,7 @@ type RestartProcessIds = Readonly<{ before: number; after: number }>;
 const runProductionSwapWorker = (
   mode: string,
   swaps: string,
+  lanes: string,
   restartProcessIds?: RestartProcessIds,
 ): void => {
   const worker = join(
@@ -237,6 +237,7 @@ const runProductionSwapWorker = (
     '--port-base', String(portBase),
     '--mode', mode,
     '--swaps', swaps,
+    '--lanes', lanes,
     ...(restartProcessIds ? [
       '--server-pid-before-restart', String(restartProcessIds.before),
       '--server-pid-after-restart', String(restartProcessIds.after),
@@ -250,11 +251,12 @@ const runProductionSwapWorker = (
 const runProductionSwapLoadSmoke = async (): Promise<void> => {
   if (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] !== '1') return;
   const swaps = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SWAPS'] || '1';
+  const lanes = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_LANES'] || '1';
   const mode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || 'same';
   if (mode !== 'same' && mode !== 'cross') throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_MODE_INVALID:${mode}`);
-  recordStage('production-swap-load:start', { mode, burstSize: swaps });
-  runProductionSwapWorker(mode, swaps);
-  recordStage('production-swap-load:complete', { mode, burstSize: swaps });
+  recordStage('production-swap-load:start', { mode, burstSize: swaps, lanes });
+  runProductionSwapWorker(mode, swaps, lanes);
+  recordStage('production-swap-load:complete', { mode, burstSize: swaps, lanes });
   if (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_RECOVERY'] !== '1') return;
   if (mode !== 'cross' || swaps !== '1') {
     throw new Error('LOCAL_PROD_SMOKE_SWAP_LOAD_RECOVERY_REQUIRES_CROSS_N1');
@@ -263,7 +265,7 @@ const runProductionSwapLoadSmoke = async (): Promise<void> => {
   const restartProcessIds = await restartManaged('server');
   await waitForHealth();
   recordStage('production-swap-load:restart-ready');
-  runProductionSwapWorker('cross-recovery', '1', restartProcessIds);
+  runProductionSwapWorker('cross-recovery', '1', '1', restartProcessIds);
   recordStage('production-swap-load:recovery-complete');
 };
 
@@ -412,9 +414,10 @@ const restartManaged = async (name: string): Promise<RestartProcessIds> => {
 };
 
 const readClosedStorageHead = async (path: string): Promise<StorageHead> => {
-  const db = withRebranchedValues(
-    new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>,
-  );
+  const db = new Level<Buffer, Buffer>(path, {
+    valueEncoding: 'buffer',
+    keyEncoding: 'binary',
+  });
   await db.open();
   try {
     const head = await readStorageHead(db);
@@ -1100,7 +1103,7 @@ const main = async (): Promise<void> => {
     MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:
       process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000',
     MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK:
-      process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000',
+      process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '5',
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK:
       process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000',
     MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:

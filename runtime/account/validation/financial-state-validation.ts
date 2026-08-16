@@ -4,10 +4,10 @@ import { HASHABLE_CROSS_J_PULL_BINDING_FIELDS } from '../../types/hash-coverage/
 import { requireBoundaryInteger, requireExactBoundaryKeys } from '../../protocol/boundary-validation.ts';
 import {
   FinancialDataCorruptionError,
-  validateMapInstance,
   validateObject,
   validateString,
 } from '../../protocol/boundary/validation-primitives.ts';
+import { validateAccountStateCollection } from './collection-validation.ts';
 
 const HASH_32 = /^0x[0-9a-f]{64}$/;
 
@@ -128,14 +128,14 @@ export const validateAccountFinancialMaps = (
   replica: Record<string, unknown>,
   context: string,
 ): void => {
-  const locks = validateMapInstance(state['locks'], `${context}.state.locks`);
+  const locks = validateAccountStateCollection(state['locks'], `${context}.state.locks`);
   if (locks.size > LIMITS.MAX_ACCOUNT_HTLC_LOCKS) corrupt(context, 'HTLC lock limit exceeded');
   for (const [key, lock] of locks) validateHtlcLock(key, lock, `${context}.state.locks.${String(key)}`);
   if (state['pulls'] !== undefined) {
-    const pulls = validateMapInstance(state['pulls'], `${context}.state.pulls`);
+    const pulls = validateAccountStateCollection(state['pulls'], `${context}.state.pulls`);
     if (pulls.size > LIMITS.MAX_ACCOUNT_SWAP_OFFERS) corrupt(context, 'pull limit exceeded');
     for (const [key, pull] of pulls) validatePull(key, pull, `${context}.state.pulls.${String(key)}`);
   }
-  const withdrawals = validateMapInstance(replica['pendingWithdrawals'], `${context}.pendingWithdrawals`);
+  const withdrawals = validateAccountStateCollection(replica['pendingWithdrawals'], `${context}.pendingWithdrawals`);
   for (const [key, withdrawal] of withdrawals) validateWithdrawal(key, withdrawal, `${context}.pendingWithdrawals.${String(key)}`);
 };

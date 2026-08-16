@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 const readText = (path: string): string => {
   if (path !== 'runtime/__tests__/audit-failfast-regressions.test.ts') return readFileSync(path, 'utf8');
@@ -87,5 +87,21 @@ const regression = readText(regressionPath);
 assertIncludes(regression, 'swap requests fail loud when the target account is missing', regressionPath);
 assertIncludes(regression, "rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:placeSwapOffer')", regressionPath);
 assertIncludes(regression, "rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:proposeCancelSwap')", regressionPath);
+
+const sameOrderbookDirectory = 'runtime/entity/tx/handlers/account/orderbook/same';
+const sameOrderbookFiles = readdirSync(sameOrderbookDirectory)
+  .filter(file => file.endsWith('.ts'))
+  .sort();
+for (const file of sameOrderbookFiles) {
+  const path = `${sameOrderbookDirectory}/${file}`;
+  const source = readText(path);
+  if (file === 'pass.ts') {
+    assertIncludes(source, 'queueUniqueSwapResolveForEntityState', path);
+    assertIncludes(source, 'suspendedSameOrderIds.add(', path);
+    continue;
+  }
+  assertNotIncludes(source, 'queueUniqueSwapResolveForEntityState', path);
+  assertNotIncludes(source, 'suspendedSameOrderIds.add(', path);
+}
 
 console.log('swap cancel canonical scan check passed');

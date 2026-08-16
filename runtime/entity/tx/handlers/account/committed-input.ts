@@ -11,7 +11,7 @@ import { emitScopedEvents } from '../../../../infra/scoped-events';
 import { addMessages } from '../../../frame-events';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import { scheduleHook } from '../../../scheduler';
-import { upsertSortedStringMapEntry } from '../../../../infra/sorted-map-index';
+import { putEntityAccountCandidate } from '../../../state/persistent-account-map';
 import { pruneUnreachableDisputeEvidence } from '../../../../account/dispute/evidence-retention';
 import type { ApplyEntityTxOptions } from '../../apply';
 import { buildHubRebalancePolicyTx } from './lifecycle/admin';
@@ -285,7 +285,7 @@ export const applySuccessfulAccountInput = async (
     if (!committedInboundGenesis) {
       throw new Error(`ACCOUNT_GENESIS_COMMIT_REQUIRED:${counterpartyId}`);
     }
-    upsertSortedStringMapEntry(state.accounts, counterpartyId, account);
+    putEntityAccountCandidate(state.accounts, counterpartyId, account);
     accountHandlerLog.debug('machine.created', { counterparty: shortId(counterpartyId) });
   }
 

@@ -29,16 +29,18 @@ export type SignerKeyEnv = {
 
 type SignerKeyScope = SignerKeyEnv | Uint8Array | string;
 
+type NumericSignerKey = {
+  privateKey: Uint8Array;
+  publicKey: Uint8Array;
+  address: string;
+};
+
 type SignerKeyStore = {
   privateKeys: Map<string, Uint8Array>;
   publicKeys: Map<string, Uint8Array>;
   addresses: Map<string, string>;
   externalPublicKeys: Map<string, Uint8Array>;
-  numericKeys: Map<string, {
-    privateKey: Uint8Array;
-    publicKey: Uint8Array;
-    address: string;
-  }>;
+  numericKeys: Map<string, NumericSignerKey>;
   mnemonic?: string;
 };
 
@@ -261,18 +263,25 @@ const assertSignerKeyMatchesId = (signerId: string, privateKey: Uint8Array, cont
   }
 };
 
-const cacheNumericSigner = (seed: Uint8Array | string, signerId: string): Uint8Array => {
+const getOrDeriveNumericSigner = (
+  seed: Uint8Array | string,
+  signerId: string,
+): NumericSignerKey => {
   const key = signerId.toLowerCase();
   const store = getSignerKeyStore(seed, true)!;
   const cached = store.numericKeys.get(key);
-  if (cached) return cached.privateKey;
+  if (cached) return cached;
   const privateKey = deriveSignerKeySync(seed, signerId);
   const address = deriveSignerAddressSync(seed, signerId).toLowerCase();
   const publicKey = secp256k1.getPublicKey(privateKey);
-  store.numericKeys.set(key, { privateKey, publicKey, address });
+  const derived = { privateKey, publicKey, address };
+  store.numericKeys.set(key, derived);
   registerSignerKey(seed, address, privateKey);
-  return privateKey;
+  return derived;
 };
+
+const cacheNumericSigner = (seed: Uint8Array | string, signerId: string): Uint8Array =>
+  getOrDeriveNumericSigner(seed, signerId).privateKey;
 
 const getOrDeriveKey = (envSeed: Uint8Array | string, signerId: string): Uint8Array => {
   const canonicalSignerId = signerId.toLowerCase();
@@ -441,6 +450,13 @@ export function getSignerPrivateKeyIfAvailable(env: SignerKeyEnv, signerId: stri
   throw new Error(`UNSUPPORTED_SIGNER_ID: "${signerId}" is not numeric or a registered EOA address.`);
 }
 
+/** Canonical EOA inventory owned by one Runtime; never exposes key bytes. */
+export function getRegisteredLocalSignerIds(scope: SignerKeyScope): string[] {
+  const privateKeys = getSignerKeyStore(scope)?.privateKeys;
+  if (!privateKeys) return [];
+  return [...privateKeys.keys()].filter(isHexAddress).sort();
+}
+
 // Export for runtime/hanko/signing.ts
 export function getSignerPrivateKey(env: SignerKeyEnv, signerId: string): Uint8Array {
   const privateKey = getSignerPrivateKeyIfAvailable(env, signerId);
@@ -460,8 +476,7 @@ export function getSignerPublicKey(env: SignerKeyEnv, signerId: string): Uint8Ar
     if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
       return null;
     }
-    const privateKey = getOrDeriveKey(env.runtimeSeed, key);
-    return secp256k1.getPublicKey(privateKey);
+    return getOrDeriveNumericSigner(env.runtimeSeed, key).publicKey;
   }
   const store = getSignerKeyStore(env);
   const exactRegistered = getExactRegisteredSignerPublicKey(env, key);
@@ -485,8 +500,7 @@ export function getSignerAddress(env: SignerKeyEnv, signerId: string): string | 
     if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
       return null;
     }
-    const privateKey = getOrDeriveKey(env.runtimeSeed, key);
-    return privateKeyToAddress(privateKey);
+    return getOrDeriveNumericSigner(env.runtimeSeed, key).address;
   }
   const exactRegistered = getExactRegisteredSignerAddress(env, key);
   if (exactRegistered) return exactRegistered;

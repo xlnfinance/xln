@@ -506,7 +506,7 @@ describe('multi-jurisdiction entity binding', () => {
     await importEntity(env, entityA, '47', j1);
     await importEntity(env, entityB, '48', j1);
 
-    const overlayStart = env.overlay?.length ?? 0;
+    const overlayStart = env.overlay?.size ?? 0;
     const result = await applyEntityTx(env, findState(env, entityA)!, {
       type: 'accountInput',
       data: {
@@ -534,7 +534,7 @@ describe('multi-jurisdiction entity binding', () => {
 
     expect(readEntityFrameEventMessages(result.newState).some((message) => message.includes('ACCOUNT_SYNC_REQUIRED'))).toBe(true);
     expect(result.newState.accounts.has(entityB.toLowerCase())).toBe(false);
-    expect((env.overlay ?? []).slice(overlayStart).some((record) => record.family === 'account')).toBe(false);
+    expect(Array.from(env.overlay?.values() ?? []).slice(overlayStart).some((record) => record.family === 'account')).toBe(false);
   });
 
   test('debt enforcement RuntimeInput uses the entity jurisdiction instead of active jurisdiction', async () => {

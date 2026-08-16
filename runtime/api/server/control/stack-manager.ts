@@ -14,6 +14,7 @@ import type { StackManagerStatus } from '../../../jurisdiction/adapter/stack-man
 import { getErrorMessage } from '../utils';
 import { getConfiguredOfficialFoundationSignerId } from '../../../jurisdiction/adapter/core/jurisdiction-loader';
 import { decodeJurisdictionGossipAnnouncementStructure } from '../../../jurisdiction/gossip/announcement';
+import { getLocalRuntimeSignerIds } from '../../../runtime/loop/loop-identity';
 
 type StackManagerControllerDeps = Readonly<{
   parseBody: (req: Request) => Promise<unknown>;
@@ -46,12 +47,17 @@ export const createStackManagerController = (
   return {
     async status(req, env) {
       try {
+        if (!env) {
+          return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), {
+            status: 503,
+            headers: deps.headers,
+          });
+        }
         const url = new URL(req.url);
         const rpcUrl = url.searchParams.get('rpcUrl');
         const signerId = url.searchParams.get('signerId');
         let probe;
         if (rpcUrl || signerId) {
-          if (!env) return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers: deps.headers });
           if (!rpcUrl || !signerId || !isAddress(signerId)) {
             return new Response(serializeTaggedJson({ ok: false, error: 'STACK_MANAGER_PROBE_QUERY_INVALID' }), { status: 400, headers: deps.headers });
           }
@@ -61,7 +67,12 @@ export const createStackManagerController = (
           }
           probe = await probeJurisdictionStackTarget({ rpcUrl, signerId: getAddress(signerId).toLowerCase() });
         }
-        return new Response(serializeTaggedJson({ ok: true, status, ...(probe ? { probe } : {}) }), { headers: deps.headers });
+        return new Response(serializeTaggedJson({
+          ok: true,
+          status,
+          signerIds: getLocalRuntimeSignerIds(env),
+          ...(probe ? { probe } : {}),
+        }), { headers: deps.headers });
       } catch (error) {
         return new Response(
           serializeTaggedJson({ ok: false, error: getErrorMessage(error) }),

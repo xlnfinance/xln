@@ -12,6 +12,8 @@ import {
   getDefaultRebalanceBaseFeeForToken,
 } from '../../../../../account/config/defaults';
 import type { AccountTxTarget } from '..';
+import { getEntityAccountForWrite } from '../../../../state/persistent-account-map';
+import { requirePersistentAccountStateMap } from '../../../../../account/state/persistent-state-map';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
@@ -210,8 +212,12 @@ export const handleSetRebalancePolicyEntityTx = (
   if (r2cRequestSoftLimit < 0n || hardLimit < r2cRequestSoftLimit || maxAcceptableFee < 0n) {
     throw new Error(`REBALANCE_POLICY_INVALID: token=${tokenId}`);
   }
-  const account = newState.accounts.get(counterpartyEntityId)!;
-  account.shadow.rebalance.policy.set(tokenId, {
+  const account = getEntityAccountForWrite(newState.accounts, counterpartyEntityId);
+  if (!account) throw new Error(`REBALANCE_POLICY_ACCOUNT_MISSING:${counterpartyEntityId}`);
+  account.shadow.rebalance.policy = requirePersistentAccountStateMap(
+    account.shadow.rebalance.policy,
+    'rebalanceShadowPolicy',
+  ).updated(tokenId, {
     r2cRequestSoftLimit,
     hardLimit,
     maxAcceptableFee,

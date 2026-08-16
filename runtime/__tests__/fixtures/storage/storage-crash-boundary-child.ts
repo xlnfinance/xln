@@ -1,12 +1,9 @@
 import {
-  closeInfraDb,
-  closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
   getRuntimeWalDb,
   getHistoryViewDb,
   getRuntimeStorageDb,
-  persistRestoredEnvToDB,
   processRuntime,
   tryOpenStorageDb,
   tryOpenRuntimeWalDb,
@@ -54,6 +51,7 @@ import {
   EMPTY_J_HISTORY_ROOT,
   foldJHistoryRoot,
 } from '../../../jurisdiction/machine/history-consensus';
+import { pruneFinalizedValidatorJHistory } from '../../../jurisdiction/machine/local-history';
 import {
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
@@ -68,6 +66,7 @@ import {
   saveRuntimeFrameToStorage,
   type StoragePersistenceBoundary,
 } from '../../../storage';
+import { refreshRuntimeCheckpointLineageForEntity } from '../../../storage/replica/entity-lineage';
 import { encodeBuffer } from '../../../storage/codec/codec';
 import { KEY_HEAD } from '../../../storage/keys';
 import { getPerfMs } from '../../../infra/time';
@@ -82,9 +81,8 @@ import {
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('seed and persistence boundary are required');
-const recoveryLagMode = requestedBoundary === 'restore-certified-lineage-lag';
-const recoveryBoardRootLagMode = requestedBoundary === 'restore-certified-board-root-lag';
 const boundary = requestedBoundary as StoragePersistenceBoundary;
+const crashOnFirstFrame = process.env['XLN_STORAGE_CRASH_ON_FIRST_FRAME'] === '1';
 
 const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
 const signerA = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -205,7 +203,7 @@ const certifyNextFrame = async (
     state,
     mempool: [],
     isProposer: true,
-  }, txs);
+  }, txs, { usePersistedReplayContext: true });
   const applied = await applyEntityFrame(env, state, entityContext, txs, timestamp);
   const postStateWithoutHead: EntityState = {
     ...applied.newState,
@@ -271,7 +269,7 @@ env.runtimeConfig = {
     // The crash-boundary fixture installs an already-certified checkpoint
     // below. Do not persist the earlier synthetic construction steps as if
     // they were a replayable Runtime frame.
-    enabled: recoveryLagMode || recoveryBoardRootLagMode,
+    enabled: false,
     snapshotPeriodFrames: 1,
     retainSnapshots: 1,
     epochMaxBytes: 1_000_000_000,
@@ -346,6 +344,11 @@ const registrationEvidence = await installCanonicalRegisteredBoardAuthority(
   registeredBoardHash,
   { activationHeight: 2 },
 );
+// This fixture installs genesis-only chain authority outside an Entity frame.
+// Rebind every local validator's H0 checkpoint to that exact shared state before
+// constructing H1; otherwise the old bootstrap anchor correctly rejects the
+// test-only mutation as a certified-state mismatch.
+refreshRuntimeCheckpointLineageForEntity(env, entityId);
 const boardEvents = makeBoardEvents(registeredBoardHash, registrationEvidence);
 const collectiveTxs: EntityTx[] = [{
   type: 'r2r',
@@ -389,12 +392,17 @@ const certifiedHeightOne = await certifyNextFrame(
 // Shared storage must materialize the highest committed state, while replica
 // metadata must retain each validator's exact local state for crash recovery.
 firstReplica.state = certifiedHeightOne.state;
-firstReplica.certifiedFrameLineage = [certifiedHeightOne.link];
+firstReplica.certifiedFrameHead = certifiedHeightOne.link;
 
 const replica = Array.from(env.state.eReplicas.values()).find((candidate) => (
   candidate.entityId === entityId && candidate.signerId === signerB
 ));
 if (!replica) throw new Error('crash fixture replica missing');
+// Storage cutpoint tests start from one converged materialization. Replica lag
+// is covered by reliable-local-catchup-real-crash using actual Runtime inputs;
+// this fixture must not smuggle a second EntityState into replica metadata.
+replica.state = certifiedHeightOne.state;
+replica.certifiedFrameHead = certifiedHeightOne.link;
 const voteBody = buildEntityLeaderVoteBody(replica.state);
 const votes = new Map([signerA, signerB].map((voterId) => {
   const unsigned = { ...voteBody, voterId, signature: '' };
@@ -406,8 +414,9 @@ const votes = new Map([signerA, signerB].map((voterId) => {
 replica.leaderVotes = votes;
 replica.pendingLeaderCertificate = buildEntityLeaderCertificate(voteBody, votes);
 replica.lastConsensusProgressAt = 12_345;
+replica.htlcNotes = new Map([['hashlock:0x01', 'crash-recovery-note']]);
 const observedBlockHash = `0x${'ab'.repeat(32)}`;
-replica.jHistory = {
+replica.jHistory = pruneFinalizedValidatorJHistory({
   jurisdictionRef: getJEventJurisdictionRef(jurisdiction),
   scannedThroughHeight: 7,
   contiguousThroughHeight: 7,
@@ -417,7 +426,7 @@ replica.jHistory = {
     const height = index + 1;
     return [height, height === 7 ? observedBlockHash : blockHash(height.toString(16).padStart(2, '0'))];
   })),
-};
+}, replica.state.lastFinalizedJHeight);
 const jPrefixHeads = new Map([signerA, signerB].map((signerId) => {
   const attestation = buildLocalJPrefixAttestation(env, {
     ...replica,
@@ -456,10 +465,16 @@ proposerReplica.hankoWitness = new Map([[batchHash, {
   createdAt: env.state.timestamp,
 }]]);
 
-if (!recoveryLagMode && !recoveryBoardRootLagMode) {
-  env.runtimeConfig.storage = { ...env.runtimeConfig.storage, enabled: true };
-  applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
-  await saveRuntimeFrameToStorage({
+for (const localReplica of env.state.eReplicas.values()) {
+  localReplica.jHistory = pruneFinalizedValidatorJHistory(
+    localReplica.jHistory,
+    localReplica.state.lastFinalizedJHeight,
+  );
+}
+
+env.runtimeConfig.storage = { ...env.runtimeConfig.storage, enabled: true };
+applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
+await saveRuntimeFrameToStorage({
     entityContexts: new Map(),
     env,
     currentFrameInput: { runtimeTxs: [], entityInputs: [] },
@@ -471,99 +486,48 @@ if (!recoveryLagMode && !recoveryBoardRootLagMode) {
     getHistoryViewDb,
     getPerfMs,
     formatPerfMs: (value) => Math.round(value * 1_000) / 1_000,
-  });
-  const historyHead = await readStorageHead(getRuntimeWalDb(env));
-  const currentHead = await readStorageHead(getRuntimeStorageDb(env));
-  if (!historyHead || !currentHead) throw new Error('crash fixture epoch head missing');
-  await getRuntimeWalDb(env).put(
+    ...(crashOnFirstFrame
+      ? {
+          onPersistenceBoundary: (reached: StoragePersistenceBoundary) => {
+            if (reached === boundary) process.kill(process.pid, 'SIGKILL');
+          },
+        }
+      : {}),
+});
+if (crashOnFirstFrame) {
+  throw new Error(`first-frame fault boundary was not reached: ${boundary}`);
+}
+const historyHead = await readStorageHead(getRuntimeWalDb(env));
+const currentHead = await readStorageHead(getRuntimeStorageDb(env));
+if (!historyHead || !currentHead) throw new Error('crash fixture epoch head missing');
+await getRuntimeWalDb(env).put(
     KEY_HEAD,
     encodeBuffer({ ...historyHead, epochReplayBytes: historyHead.epochMaxBytes }),
     { sync: true },
-  );
-  await getRuntimeStorageDb(env).put(
+);
+await getRuntimeStorageDb(env).put(
     KEY_HEAD,
     encodeBuffer({ ...currentHead, epochReplayBytes: currentHead.epochMaxBytes }),
     { sync: true },
-  );
-  // Live process() assigns the new Runtime frame's height and timestamp before
-  // applying its input. Replay does the same, so attempt bytes stay identical.
-  env.state.height += 1;
-  env.state.timestamp += 1;
-}
+);
+// Live process() assigns the new Runtime frame's height and timestamp before
+// applying its input. Replay does the same, so attempt bytes stay identical.
+env.state.height += 1;
+env.state.timestamp += 1;
 const [retry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
 if (!retry) throw new Error('crash fixture J-submit retry missing');
 registerPendingCommittedJOutbox(env, await applyRuntimeTx(env, retry, { isReplay: true }));
 const appliedRuntimeInput = cloneIsolatedRuntimeInput({ runtimeTxs: [retry], entityInputs: [] });
 applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
 
-if (recoveryLagMode || recoveryBoardRootLagMode) {
-  env.state.height += 1;
-  env.state.timestamp += 1;
-  const laggingEntry = Array.from(env.state.eReplicas.entries()).find(([, candidate]) => (
-    candidate.entityId === entityId && candidate.signerId === signerB
-  ));
-  const certifiedEntry = Array.from(env.state.eReplicas.entries()).find(([, candidate]) => (
-    candidate.entityId === entityId && candidate.signerId === signerA
-  ));
-  if (!laggingEntry || !certifiedEntry) throw new Error('recovery lag fixture replicas missing');
-  if (recoveryBoardRootLagMode) {
-    const rotationHeight = certifiedHeightOne.state.lastFinalizedJHeight + 1;
-    const rotation: JurisdictionEvent = {
-      type: 'BoardActivated',
-      data: {
-        entityId,
-        previousBoardHash: registeredBoardHash,
-        newBoardHash: registeredBoardHash,
-        previousBoardValidUntil: String(Math.floor(env.state.timestamp / 1_000) + 7 * 24 * 60 * 60),
-      },
-      blockNumber: rotationHeight,
-      blockHash: blockHash('04'),
-      transactionHash: blockHash('24'),
-      logIndex: 0,
-    };
-    const certifiedHeightTwo = await certifyNextFrame(
-      certifiedHeightOne.state,
-      [buildCertifiedBoardRangeTx(certifiedHeightOne.state, [rotation])],
-    );
-    laggingEntry[1].state = structuredClone(certifiedHeightOne.state);
-    laggingEntry[1].certifiedFrameLineage = [structuredClone(certifiedHeightOne.link)];
-    certifiedEntry[1].state = certifiedHeightTwo.state;
-    certifiedEntry[1].certifiedFrameLineage = [
-      structuredClone(certifiedHeightOne.link),
-      certifiedHeightTwo.link,
-    ];
+for (const localReplica of env.state.eReplicas.values()) {
+  localReplica.jHistory = pruneFinalizedValidatorJHistory(
+    localReplica.jHistory,
+    localReplica.state.lastFinalizedJHeight,
+  );
+}
 
-    // This fixture advances the two replicas by installing already-certified
-    // checkpoints directly. Rebase signer B's validator-local header cache to
-    // the exact Entity-certified hashes before persisting it. Leaving the old
-    // synthetic H2 header here models a finalized reorg, not replica lag, and
-    // restore must correctly reject that corruption.
-    const laggingHistory = laggingEntry[1].jHistory;
-    if (!laggingHistory) throw new Error('recovery board-root lag J-history missing');
-    const certifiedHashes = new Map(
-      laggingEntry[1].state.jBlockChain.map((block) => [block.jHeight, block.jBlockHash]),
-    );
-    laggingEntry[1].jHistory = {
-      ...laggingHistory,
-      blockHashes: new Map(Array.from(laggingHistory.blockHashes, ([height, hash]) => [
-        height,
-        certifiedHashes.get(height) ?? hash,
-      ])),
-    };
-
-    // The direct checkpoint install changes height/parent outside the normal
-    // commit path, so round-scoped votes from the old parent are no longer
-    // valid progress. A normal commit clears them for the same reason.
-    laggingEntry[1].jPrefixRound = undefined;
-    certifiedEntry[1].jPrefixRound = undefined;
-  }
-  // A Map's insertion order is transport timing, never a canonical state selector.
-  env.state.eReplicas = new Map([laggingEntry, certifiedEntry]);
-  await persistRestoredEnvToDB(env);
-  await closeRuntimeDb(env);
-  await closeInfraDb(env);
-} else {
-  await saveRuntimeFrameToStorage({
+await saveRuntimeFrameToStorage({
     entityContexts: new Map(),
     env,
     // WAL stores causal inputs, not a duplicate full RuntimeReplica. The live mutation
@@ -582,6 +546,5 @@ if (recoveryLagMode || recoveryBoardRootLagMode) {
       if (reached !== boundary) return;
       process.kill(process.pid, 'SIGKILL');
     },
-  });
-  throw new Error(`fault boundary was not reached: ${boundary}`);
-}
+});
+throw new Error(`fault boundary was not reached: ${boundary}`);

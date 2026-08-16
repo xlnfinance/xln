@@ -223,7 +223,6 @@ const makeEnv = (): RuntimeReplica =>
               ]),
               deferredAccountProposals: new Map(),
               lastFinalizedJHeight: 0,
-              jBlockChain: [],
               profile: { name: 'Adapter Test', isHub: false, avatar: '', bio: '', website: '' },
               htlcRoutes: new Map(),
               htlcFeesEarned: 0n,

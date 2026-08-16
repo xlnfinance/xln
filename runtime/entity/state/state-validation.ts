@@ -7,6 +7,7 @@ import {
   validateObject,
   validateString,
 } from '../../protocol/boundary/validation-primitives';
+import { PersistentEntityAccountMap } from './persistent-account-map';
 import type { ConsensusConfig, EntityState } from '../types';
 import { assertEntityAccountCountWithinLimit } from '../account/account-capacity';
 import { validateEntityAccountMetadata } from '../account/account-metadata-validation';
@@ -165,9 +166,17 @@ const validateAccounts = (
   entityId: string,
   context: string,
 ): void => {
-  const accounts = validateMapInstance(value, `${context}.accounts`);
+  // Exact decoders still require a real Map at disk/network boundaries. Once
+  // hydrated, EntityState owns the canonical persistent Patricia view instead;
+  // rejecting that typed view made every crash recovery fail immediately after
+  // the no-clone migration. Accept only the two canonical implementations,
+  // never a structural/duck-typed map supplied by untrusted input.
+  const accounts: ReadonlyMap<string, unknown> = value instanceof Map ||
+      value instanceof PersistentEntityAccountMap
+    ? value
+    : validateMapInstance(value, `${context}.accounts`);
   assertEntityAccountCountWithinLimit(
-    accounts as Map<string, unknown>,
+    accounts,
     `${context}.accounts`,
   );
   const canonicalEntityId = entityId.trim().toLowerCase();

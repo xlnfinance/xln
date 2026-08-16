@@ -8,98 +8,20 @@ import type { AccountOutput } from '../../types/account';
 import type { AccountConsensusContext } from '../consensus/context';
 import type { AccountJClaimSession } from '../j-claims/j-claim-session';
 import type { HtlcEnforcementClock } from '../htlc-deadline';
-import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../commitment/map-commitment';
+import type { AccountDraftReplica } from '../state/account-state-draft';
+import {
+  accountTransitionView,
+  beginAccountTransition,
+  commitAccountTransition,
+  createAccountTransitionKey,
+  discardAccountTransition,
+} from '../state/candidate-overlay';
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
 import { withAccountTxCandidateEffects } from './apply-result';
 
-const missingCommitmentInvalidation = (_tx: never): never => {
-  throw new Error('ACCOUNT_TX_COMMITMENT_INVALIDATION_MISSING');
-};
-
-const swapDeltaKeys = (account: AccountReplica, tx: AccountTx): number[] => {
-  if (tx.type === 'swap_offer') return [tx.data.giveTokenId, tx.data.wantTokenId];
-  if (tx.type === 'swap_resolve') {
-    const offer = account.state.swapOffers.get(tx.data.offerId);
-    const keys = [
-      offer?.giveTokenId ?? tx.data.restingGiveTokenId,
-      offer?.wantTokenId ?? tx.data.restingWantTokenId,
-      tx.data.feeTokenId,
-    ];
-    return [...new Set(keys.filter((value): value is number => Number.isSafeInteger(value)))];
-  }
-  return [];
-};
-
-const invalidateCommittedMapsForTx = (
-  account: AccountReplica,
-  tx: AccountTx,
-  deltaKeysBeforeMutation: readonly number[],
-): void => {
-  const invalidate = (namespace: AccountCommittedMap, key?: unknown): void =>
-    invalidateAccountMapCommitment(account.state, namespace, key);
-  switch (tx.type) {
-    case 'add_delta':
-    case 'set_credit_limit':
-    case 'direct_payment':
-    case 'reserve_to_collateral':
-    case 'request_collateral':
-    case 'rebalance_refund':
-    case 'j_event_claim':
-    case 'settle_transition':
-      invalidate('deltas');
-      return;
-    case 'lending_fund':
-    case 'lending_borrow_request':
-    case 'lending_repay':
-    case 'lending_credit':
-    case 'lending_close_request':
-    case 'lending_close_payout':
-      invalidate('deltas');
-      invalidate('lendingIntents');
-      return;
-    case 'htlc_lock':
-    case 'htlc_resolve':
-      invalidate('deltas');
-      invalidate('locks', tx.data.lockId);
-      return;
-    case 'cross_pull_lock':
-    case 'cross_pull_close':
-    case 'cross_pull_progress':
-      invalidate('deltas');
-      invalidate('pulls', tx.data.pullId);
-      return;
-    case 'swap_offer':
-      for (const tokenId of deltaKeysBeforeMutation) invalidate('deltas', tokenId);
-      invalidate('swapOffers', tx.data.offerId);
-      return;
-    case 'swap_resolve':
-      for (const tokenId of deltaKeysBeforeMutation) invalidate('deltas', tokenId);
-      invalidate('swapOffers', tx.data.offerId);
-      return;
-    case 'cross_swap_fill_ack':
-      invalidate('deltas');
-      invalidate('pulls');
-      invalidate('swapOffers', tx.data.offerId);
-      return;
-    case 'swap_cancel_request':
-      // The request emits parent orchestration output and updates only
-      // non-committed lifecycle history; the bilateral committed maps stay
-      // byte-identical until a later swap_resolve applies the cancellation.
-      return;
-    case 'rebalance_policy':
-      return;
-    default:
-      // This is a financial cache-safety boundary, not merely a TypeScript
-      // nicety. Every new AccountTx must explicitly declare which committed
-      // maps it can mutate. Otherwise the incremental root can stay stale
-      // until the expensive cold-root oracle catches it at commit time.
-      return missingCommitmentInvalidation(tx);
-  }
-};
-
 export async function applyAccountTx(
-  account: AccountReplica,
+  account: AccountDraftReplica,
   accountTx: AccountTx,
   byLeft: boolean,
   currentTimestamp: number = 0,
@@ -110,7 +32,6 @@ export async function applyAccountTx(
   counterpartyCertifiedBoardHash?: string,
   htlcEnforcementClock?: HtlcEnforcementClock,
 ): Promise<ApplyAccountTxResult> {
-  const deltaKeysBeforeMutation = swapDeltaKeys(account, accountTx);
   const candidateEffects: AccountOutput[] = [];
   const result = await applyAccountTxMutation(
     account,
@@ -125,8 +46,52 @@ export async function applyAccountTx(
     candidateEffects,
     htlcEnforcementClock,
   );
-  if (result.ok) {
-    invalidateCommittedMapsForTx(account, accountTx, deltaKeysBeforeMutation);
-  }
   return withAccountTxCandidateEffects(result, candidateEffects);
+}
+
+/**
+ * Account-machine boundary for caller-owned mutable Entity candidates. Financial
+ * handlers still receive only the explicit draft; this wrapper owns its full
+ * lifecycle and publishes the resulting bounded shell into the caller-owned
+ * candidate object after a successful transition.
+ */
+export async function applyAccountTxToMutableReplica(
+  account: AccountReplica,
+  accountTx: AccountTx,
+  byLeft: boolean,
+  currentTimestamp: number = 0,
+  currentJHeight: number = 0,
+  isValidation: boolean = false,
+  consensusContext?: AccountConsensusContext,
+  jClaimSession?: AccountJClaimSession,
+  counterpartyCertifiedBoardHash?: string,
+  htlcEnforcementClock?: HtlcEnforcementClock,
+): Promise<ApplyAccountTxResult> {
+  const owner = beginAccountTransition(
+    account,
+    createAccountTransitionKey(account, { purpose: 'account-tx', accountTx }),
+  );
+  try {
+    const result = await applyAccountTx(
+      accountTransitionView(owner),
+      accountTx,
+      byLeft,
+      currentTimestamp,
+      currentJHeight,
+      isValidation,
+      consensusContext,
+      jClaimSession,
+      counterpartyCertifiedBoardHash,
+      htlcEnforcementClock,
+    );
+    if (!result.ok) {
+      discardAccountTransition(owner);
+      return result;
+    }
+    Object.assign(account, commitAccountTransition(owner).account);
+    return result;
+  } catch (error) {
+    if (owner.lifecycle.status === 'active') discardAccountTransition(owner);
+    throw error;
+  }
 }

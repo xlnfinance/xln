@@ -34,6 +34,7 @@ import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/
 import { findExactSignedProofBodyPull } from '../../../account/pull-registry-settlement';
 import { hasInboundHtlcRoute } from '../../htlc/route-views';
 import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
+import { getEntityCollectionValueForWrite } from '../../state/persistent-collection-map';
 
 const jEventHtlcLog = createStructuredLogger('j.event.htlc');
 
@@ -581,7 +582,7 @@ export function queueCrossJurisdictionRevealPorts(
     batches.set(key, batch);
   }
   for (const batch of [...batches.values()].sort((left, right) =>
-    `${left.entityId}\0${left.signerId}`.localeCompare(`${right.entityId}\0${right.signerId}`),
+    compareStableText(`${left.entityId}\0${left.signerId}`, `${right.entityId}\0${right.signerId}`),
   )) {
     outputs.push(buildCrossJurisdictionEntityOutput(batch.entityId, batch.signerId, batch.txs));
   }
@@ -829,7 +830,7 @@ export function queueCrossJurisdictionSiblingDisputeFanout(
     batches.set(key, batch);
   }
   for (const batch of [...batches.values()].sort((left, right) =>
-    `${left.entityId}\0${left.signerId}`.localeCompare(`${right.entityId}\0${right.signerId}`),
+    compareStableText(`${left.entityId}\0${left.signerId}`, `${right.entityId}\0${right.signerId}`),
   )) {
     outputs.push(buildCrossJurisdictionEntityOutput(batch.entityId, batch.signerId, batch.txs));
   }
@@ -912,8 +913,11 @@ export function applyKnownHtlcSecret(
   const secret = String(secretRaw).toLowerCase();
 
   const directRoute = newState.htlcRoutes.get(hashlock);
-  const route = directRoute ?? Array.from(newState.htlcRoutes.entries())
-    .find(([candidateKey]) => candidateKey.toLowerCase() === hashlock)?.[1];
+  const matchedEntry = directRoute
+    ? [hashlock, directRoute] as const
+    : Array.from(newState.htlcRoutes.entries())
+        .find(([candidateKey]) => candidateKey.toLowerCase() === hashlock);
+  const route = matchedEntry?.[1];
 
   if (!route) {
     const recovered = queueInboundResolvesByHashlock(newState, accountTxs, hashlock, secret);
@@ -930,34 +934,39 @@ export function applyKnownHtlcSecret(
     return true;
   }
 
-  route.secret = secret;
+  const writableRoute = getEntityCollectionValueForWrite(
+    newState.htlcRoutes,
+    matchedEntry[0],
+  );
+  if (!writableRoute) throw new Error(`HTLC_ROUTE_WRITE_MISSING:${matchedEntry[0]}`);
+  writableRoute.secret = secret;
 
-  if (route.pendingFee) {
-    newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + route.pendingFee;
-    delete route.pendingFee;
+  if (writableRoute.pendingFee) {
+    newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + writableRoute.pendingFee;
+    delete writableRoute.pendingFee;
   }
 
-  if (route.outboundLockId) {
-    newState.lockBook.delete(route.outboundLockId);
+  if (writableRoute.outboundLockId) {
+    newState.lockBook.delete(writableRoute.outboundLockId);
   }
-  if (route.inboundLockId) {
-    newState.lockBook.delete(route.inboundLockId);
+  if (writableRoute.inboundLockId) {
+    newState.lockBook.delete(writableRoute.inboundLockId);
   }
 
-  if (hasInboundHtlcRoute(route)) {
+  if (hasInboundHtlcRoute(writableRoute)) {
     accountTxs.push({
-      accountId: route.inboundEntity,
+      accountId: writableRoute.inboundEntity,
       tx: {
         type: 'htlc_resolve',
         data: {
-          lockId: route.inboundLockId,
+          lockId: writableRoute.inboundLockId,
           outcome: 'secret' as const,
           secret,
         },
       },
     });
-  } else if (route.crossJurisdictionRelay) {
-    const relay = route.crossJurisdictionRelay;
+  } else if (writableRoute.crossJurisdictionRelay) {
+    const relay = writableRoute.crossJurisdictionRelay;
     pushCrossJurisdictionEntityOutput(outputs, relay.targetEntityId, [{
         type: 'resolveHtlcLock',
         data: {

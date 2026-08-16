@@ -12,7 +12,7 @@ import {
 } from '@xln/runtime/api/public/runtime-module';
 import type { AccountRoleEvidence } from '@xln/runtime/account/config/dispute-config';
 import { submitActiveCrossJurisdictionIntent, submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../../stores/xlnStore';
-import { readRuntimeAccountProjection, readRuntimeEntityProjectionFrame } from '../../../stores/runtimeViewStore';
+import { readRuntimeEntityProjectionFrame, readRuntimeSwapHistory } from '../../../stores/runtimeViewStore';
 import { toasts } from '../../../stores/ui/toastStore';
 import { errorLog } from '../../../stores/errorLogStore';
 import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
@@ -70,10 +70,11 @@ import {
   buildTotalPriceImprovementSummary,
   closedOrderStatusLabel,
   closedOrderStatusTone,
-  collectOfferLifecyclesFrom,
+  decodeSwapHistoryPage,
   extractStpBlockingOrderId,
   formatCloseComment,
   formatOrderTime,
+  historyPageToOfferLifecycles,
   isDustOpenOffer,
   offerLifecycleKey,
   offerPriceTicks,
@@ -81,7 +82,6 @@ import {
   remainingOfferUsd,
   type ClosedOrderStatus,
   type ClosedOrderView,
-  type AccountOrderHistory,
   type OfferLifecycle,
   type OfferLike,
   type SwapCompletionModal,
@@ -247,7 +247,9 @@ let placingSwapOffer = false;
 let swapRuntimeView: SwapPanelRuntimeView = buildSwapPanelRuntimeView(null);
 let detailedSourceReplica: EntityReplica | null = null;
 let detailedTargetReplica: EntityReplica | null = null;
-let detailedOrderAccount: AccountOrderHistory | null = null;
+let swapHistoryItems: OfferLifecycle[] = [];
+let swapHistoryNextCursor: string | null = null;
+let swapHistoryLoading = false;
 let cachedSourceReplica: EntityReplica | null = null;
 const detailedReplicaByEntityId = new Map<
   string,
@@ -342,24 +344,53 @@ async function refreshDetailedOrderAccount(
   accountId: string,
 ): Promise<void> {
   const requestId = ++orderAccountProjectionRequestId;
+  swapHistoryLoading = true;
   try {
-    const projected = await readRuntimeAccountProjection(entityId, accountId);
+    const rawPage = await readRuntimeSwapHistory(entityId, accountId, null);
+    const page = decodeSwapHistoryPage(rawPage);
     if (
       requestId !== orderAccountProjectionRequestId ||
       key !== orderAccountProjectionKey
     ) return;
-    detailedOrderAccount = {
-      swapOrderHistory: projected.swapOrderHistory ?? new Map(),
-      swapClosedOrders: projected.swapClosedOrders ?? new Map(),
-    };
+    swapHistoryItems = historyPageToOfferLifecycles(page);
+    swapHistoryNextCursor = page.nextCursor;
   } catch (error) {
     if (
       requestId !== orderAccountProjectionRequestId ||
       key !== orderAccountProjectionKey
     ) return;
-    detailedOrderAccount = null;
+    swapHistoryItems = [];
+    swapHistoryNextCursor = null;
     submitError = `Account projection unavailable: ${toErrorMessage(error)}`;
     errorLog.log(submitError, 'Swap Panel', { entityId, accountId, error });
+  } finally {
+    if (requestId === orderAccountProjectionRequestId && key === orderAccountProjectionKey) swapHistoryLoading = false;
+  }
+}
+
+async function loadOlderSwapHistory(): Promise<void> {
+  const cursor = swapHistoryNextCursor;
+  const entityId = sourceEntityIdValue;
+  const accountId = activeOrderAccountId;
+  const key = orderAccountProjectionKey;
+  if (!cursor || !entityId || !accountId || swapHistoryLoading) return;
+  const requestId = ++orderAccountProjectionRequestId;
+  swapHistoryLoading = true;
+  try {
+    const page = decodeSwapHistoryPage(await readRuntimeSwapHistory(entityId, accountId, cursor));
+    if (requestId !== orderAccountProjectionRequestId || key !== orderAccountProjectionKey) return;
+    if (page.entityId !== entityId || page.accountId !== accountId) {
+      throw new Error(`SWAP_HISTORY_PAGE_ID_MISMATCH:${page.entityId}:${page.accountId}`);
+    }
+    const known = new Set(swapHistoryItems.map((item) => item.key));
+    const next = historyPageToOfferLifecycles(page).filter((item) => !known.has(item.key));
+    swapHistoryItems = [...swapHistoryItems, ...next];
+    swapHistoryNextCursor = page.nextCursor;
+  } catch (error) {
+    submitError = `Swap history unavailable: ${toErrorMessage(error)}`;
+    errorLog.log(submitError, 'Swap Panel', { entityId, accountId, error });
+  } finally {
+    if (requestId === orderAccountProjectionRequestId && key === orderAccountProjectionKey) swapHistoryLoading = false;
   }
 }
 $: accounts = currentReplica?.state?.accounts ? Array.from(currentReplica.state.accounts.keys()) : [];
@@ -397,7 +428,8 @@ $: {
   const nextKey = `${runtimeHeight}:${sourceEntityIdValue}:${activeOrderAccountId}`;
   if (nextKey !== orderAccountProjectionKey) {
     orderAccountProjectionKey = nextKey;
-    detailedOrderAccount = null;
+    swapHistoryItems = [];
+    swapHistoryNextCursor = null;
     if (activeIsLive && sourceEntityIdValue && activeOrderAccountId) {
       void refreshDetailedOrderAccount(
         nextKey,
@@ -2323,28 +2355,12 @@ $: ownOrderbookEntityIds = Array.from(
       .filter(Boolean),
   ),
 );
-function accountMachines(): Array<{ accountId: string; account: AccountOrderHistory }> {
-  if (!(currentReplica?.state?.accounts instanceof Map)) return [];
-  return Array.from(currentReplica.state.accounts.entries()).map(([accountId, account]) => {
-    const normalizedAccountId = String(accountId).trim().toLowerCase();
-    return {
-      accountId: String(accountId),
-      account:
-        detailedOrderAccount && normalizedAccountId === activeOrderAccountId
-          ? detailedOrderAccount
-          : account,
-    };
-  });
-}
-function collectPanelOfferLifecycles(selectSource: (account: AccountOrderHistory) => Map<string, unknown> | undefined): OfferLifecycle[] {
-  return collectOfferLifecyclesFrom(accountMachines(), selectSource, computeSwapPriceTicksSafe);
-}
 $: {
   currentReplica;
   activeXlnFunctions;
-  detailedOrderAccount;
-  offerLifecycles = collectPanelOfferLifecycles((account) => account.swapOrderHistory);
-  closedOfferLifecycles = collectPanelOfferLifecycles((account) => account.swapClosedOrders);
+  swapHistoryItems;
+  offerLifecycles = swapHistoryItems;
+  closedOfferLifecycles = offerLifecycles.filter((lifecycle) => lifecycle.closed);
 }
 $: closedOrderViews = buildClosedOrderViews(closedOfferLifecycles, {
   ...orderHistoryDeps(),
@@ -2806,6 +2822,9 @@ function useMarketPrice(): void {
     {closedOrderViews}
     {filteredClosedOrderViews}
     {totalPriceImprovementSummary}
+    closedHistoryLoading={swapHistoryLoading}
+    closedHistoryHasMore={swapHistoryNextCursor !== null}
+    onLoadOlderClosedHistory={loadOlderSwapHistory}
     {offerPriceImprovementByKey}
     minOrderNotionalUsd={MIN_ORDER_NOTIONAL_USD}
     {tokenSymbol}

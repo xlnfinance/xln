@@ -5,7 +5,8 @@ import {
 } from '../replica/replicas';
 import { computeCanonicalStateHashFromEnv } from '../canonical-hash';
 import { buildRuntimeCheckpointLineagePlan } from '../replica/entity-lineage';
-import { buildReplayVerifiableRuntimeMachineSnapshot } from '../wal/snapshot';
+import { buildReplayVerifiableRuntimePostStateView } from '../wal/snapshot';
+import { computeRuntimePostStateComponentDigests } from '../hashes';
 import {
   computeStoragePostStateHash,
   type RuntimeFrame,
@@ -40,19 +41,19 @@ export const verifyPersistedFrameState = (
     ? buildRuntimeCheckpointLineagePlan(env)
     : null;
   const replicaMetaDigest = lineage
-    ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(env, lineage, {
-        omitIntermediateSingleSignerState:
-          frame.replicaMetaStateMode === 'shared-entity-state',
-      }).digest
+    ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(env, lineage).digest
     : buildStorageLiveReplicaMetaCommitment(env).digest;
   const actualStateHash = computeStoragePostStateHash({
     height: frame.height,
     timestamp: frame.timestamp,
     replicaMetaDigest,
-    runtimeMachine: buildReplayVerifiableRuntimeMachineSnapshot(env, {
-      pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-      excludePersistedHistoryRecords: true,
-    }),
+    runtimeComponentDigests: computeRuntimePostStateComponentDigests(
+      buildReplayVerifiableRuntimePostStateView(env, {
+        pendingNetworkOutputs: [],
+        excludePersistedHistoryRecords: true,
+      }),
+    ),
+    runtimeOutputRefs: frame.runtimeOutputRefs ?? [],
   });
   const expectedCanonicalStateHash = storageHashMode
     ? String(frame.canonicalStateHash || '')
@@ -137,9 +138,10 @@ export const createRuntimeChainVerifier = (
         throw new Error(`REPLAY_INVARIANT_FAILED: missing persisted frame at height ${height}`);
       }
       if (height > selectedSnapshotHeight) {
+        const payloads = await reads.readPersistedStorageFramePayloads(restored.env, frame);
         await deps.replayRecoveryFrameJournals(
           restored.env,
-          [buildRecoveryJournalFromStorageFrame(frame)],
+          [buildRecoveryJournalFromStorageFrame(frame, payloads)],
         );
       }
       if (height < requestedFromHeight) continue;

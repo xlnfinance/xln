@@ -726,7 +726,7 @@ function votePattern(challenge) {
 
 function cleanArgumentBody(body) {
   return String(body || '')
-    .replace(/\s*\[local-ai-fallback:[^\]]+\]\s*/g, ' ')
+    .replace(/\s*\[local-ai-failover:[^\]]+\]\s*/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -1014,9 +1014,9 @@ function verdictFirstHero(challenge) {
   `;
 }
 
-function judgeVisual(label = '', fallbackIcon = '') {
+function judgeVisual(label = '', suppliedIcon = '') {
   const source = String(label || '').toLowerCase();
-  if (fallbackIcon) return { icon: fallbackIcon, mood: '' };
+  if (suppliedIcon) return { icon: suppliedIcon, mood: '' };
   if (source.includes('refriger') || source.includes('cool')) return { icon: '🧊', mood: 'cold logic' };
   if (source.includes('energy') || source.includes('cost')) return { icon: '⚡', mood: 'cost hawk' };
   if (source.includes('service') || source.includes('technician')) return { icon: '🔧', mood: 'practical' };
@@ -1035,7 +1035,7 @@ function judgeVisual(label = '', fallbackIcon = '') {
 
 function entityVariant(label = '', index = 0) {
   const seed = String(label || 'judge').split('').reduce((sum, char) => sum + char.charCodeAt(0), index * 13);
-  return `v${(seed % 5) + 1}`;
+  return `theme-${(seed % 5) + 1}`;
 }
 
 function agentEntity(judge = {}, { index = 0, score = null, winner = '', compact = false } = {}) {
@@ -1456,7 +1456,7 @@ function challengeView(challenge) {
           <strong>${escapeHtml(message.side === 'A' ? challenge.sideALabel : challenge.sideBLabel)}</strong>
         </div>
         <div class="message-body">${formatArgumentBody(message.body)}</div>
-        ${/\[local-ai-fallback:/i.test(message.body) ? '<div class="message-foot">local fallback used while model was loading</div>' : ''}
+        ${/\[local-ai-failover:/i.test(message.body) ? '<div class="message-foot">local failover used while model was loading</div>' : ''}
       </div>
     </article>
   `).join('');

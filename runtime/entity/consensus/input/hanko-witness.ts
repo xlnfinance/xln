@@ -18,6 +18,7 @@ import {
   requireCertifiedAccountFrameAck,
   requireCertifiedAccountFrameProposal,
 } from '../../../account/consensus/frame/phase-views';
+import { getEntityAccountForWrite } from '../../state/persistent-account-map';
 
 export type HankoWitnessEntry = {
   hanko: HankoString;
@@ -199,9 +200,14 @@ const sealAccountInput = (
   state: EntityState | undefined,
   witness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
+  persistAccountWitness: boolean,
+  writableAccount?: AccountReplica,
 ): number => {
   let sealed = 0;
-  const account = getOutboundAccount(state, input);
+  const accountForWrite = persistAccountWitness ? writableAccount : undefined;
+  if (persistAccountWitness && !accountForWrite) {
+    throw new Error(`HANKO_SEAL_WRITABLE_ACCOUNT_REQUIRED:${input.toEntityId}`);
+  }
   const reseal = accountInputBoardReseal(input);
   if (reseal) {
     reseal.frameHanko = requireDraftWitness(
@@ -211,7 +217,7 @@ const sealAccountInput = (
       entityHeight,
       reseal.frameHanko,
     );
-    if (account) account.currentFrameHanko = reseal.frameHanko;
+    if (accountForWrite) accountForWrite.currentFrameHanko = reseal.frameHanko;
     sealed += 1;
   }
   const ack = accountInputAck(input);
@@ -222,7 +228,7 @@ const sealAccountInput = (
     }
     if (ackHash) {
       ack.frameHanko = requireDraftWitness(witness, ackHash, 'accountFrame', entityHeight, ack.frameHanko);
-      if (account) account.currentFrameHanko = ack.frameHanko;
+      if (accountForWrite) accountForWrite.currentFrameHanko = ack.frameHanko;
       sealed += 1;
     }
   }
@@ -240,7 +246,7 @@ const sealAccountInput = (
       entityHeight,
       proposal.frameHanko,
     );
-    if (account) account.currentFrameHanko = proposal.frameHanko;
+    if (accountForWrite) accountForWrite.currentFrameHanko = proposal.frameHanko;
     sealed += 1;
   }
 
@@ -248,7 +254,7 @@ const sealAccountInput = (
   for (const seal of seals) {
     const hanko = sealDispute(seal, witness, entityHeight);
     if (!hanko) continue;
-    if (account) account.currentDisputeProofHanko = hanko;
+    if (accountForWrite) accountForWrite.currentDisputeProofHanko = hanko;
     sealed += 1;
   }
 
@@ -332,7 +338,13 @@ export const attachHankoWitnessToOutputs = (
       if (tx.type !== 'accountInput') continue;
       const accountInput = tx.data;
       if (!accountInput) continue;
-      attachedCount += sealAccountInput(accountInput, state, hankoWitness, entityHeight);
+      // Account consensus may expose the same certified payload through a
+      // sealed persistent Account value and an outbound Entity output. Hanko
+      // attachment is post-commit witness material, so mutate an isolated
+      // bounded protocol copy instead of writing through the readonly alias.
+      const sealedInput = cloneIsolatedAccountInput(accountInput);
+      attachedCount += sealAccountInput(sealedInput, state, hankoWitness, entityHeight, false);
+      tx.data = sealedInput;
     }
   }
 
@@ -388,19 +400,40 @@ export const sealHankoWitnessInState = (
   state: EntityState,
   hankoWitness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
+  touchedAccountIds: readonly string[],
 ): number => {
   let sealed = 0;
-  for (const account of state.accounts.values()) {
+  for (const accountId of [...new Set(touchedAccountIds.map(value => value.toLowerCase()))].sort()) {
+    // Witness attachment changes the Account envelope, even when the Account
+    // transition itself was read-only. Claim its Entity-frame shell explicitly:
+    // mutating the committed Patricia leaf would either throw (frozen base) or
+    // change bytes behind the already cached leaf hash.
+    const account = getEntityAccountForWrite(state.accounts, accountId);
+    if (!account) throw new Error(`HANKO_SEAL_TOUCHED_ACCOUNT_MISSING:${accountId}`);
     for (const tx of account.mempool) {
       sealed += sealSettlementAccountTx(tx, account, state, hankoWitness, entityHeight);
     }
     // Seal the reusable ACK cache first. A bundled pending frame_ack is newer
     // and must leave currentFrameHanko on its proposal, not on the old ACK.
     if (account.lastOutboundFrameAck) {
-      sealed += sealAccountInput(account.lastOutboundFrameAck.response, state, hankoWitness, entityHeight);
+      sealed += sealAccountInput(
+        account.lastOutboundFrameAck.response,
+        state,
+        hankoWitness,
+        entityHeight,
+        true,
+        account,
+      );
     }
     if (account.pendingAccountInput) {
-      sealed += sealAccountInput(account.pendingAccountInput, state, hankoWitness, entityHeight);
+      sealed += sealAccountInput(
+        account.pendingAccountInput,
+        state,
+        hankoWitness,
+        entityHeight,
+        true,
+        account,
+      );
     }
     // Settlement witnesses are sealed only into an exact AccountTx `seal`
     // above. Mutating the workspace directly here would bypass bilateral

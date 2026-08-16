@@ -8,6 +8,10 @@ type SortedStringKeyCache = {
 type IndexedStringMap<T> = Map<string, T> & {
   [SORTED_STRING_KEYS]?: SortedStringKeyCache;
 };
+type MutableStringMap<T> = ReadonlyMap<string, T> & {
+  set(key: string, value: T): unknown;
+  delete(key: string): boolean;
+};
 
 export const compareAscii = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0;
@@ -38,7 +42,8 @@ const invalidateSortedStringMapKeys = <T>(map: Map<string, T>): void => {
   if (indexed[SORTED_STRING_KEYS]) delete indexed[SORTED_STRING_KEYS];
 };
 
-export const sortedStringMapKeys = <T>(map: Map<string, T>): readonly string[] => {
+export const sortedStringMapKeys = <T>(map: ReadonlyMap<string, T>): readonly string[] => {
+  if (!(map instanceof Map)) return Array.from(map.keys()).sort(compareAscii);
   const indexed: IndexedStringMap<T> = map;
   const cached = indexed[SORTED_STRING_KEYS];
   if (cached && cached.size === map.size) return cached.keys;
@@ -60,20 +65,20 @@ export const sortedStringMapStartIndex = (
 };
 
 export const upsertSortedStringMapEntry = <T>(
-  map: Map<string, T>,
+  map: MutableStringMap<T>,
   key: string,
   value: T,
 ): void => {
   const alreadyPresent = map.has(key);
   map.set(key, value);
-  if (!alreadyPresent) invalidateSortedStringMapKeys(map);
+  if (!alreadyPresent && map instanceof Map) invalidateSortedStringMapKeys(map);
 };
 
 export const removeSortedStringMapEntry = <T>(
-  map: Map<string, T>,
+  map: MutableStringMap<T>,
   key: string,
 ): boolean => {
   const deleted = map.delete(key);
-  if (deleted) invalidateSortedStringMapKeys(map);
+  if (deleted && map instanceof Map) invalidateSortedStringMapKeys(map);
   return deleted;
 };

@@ -106,8 +106,11 @@ const makeAccount = (leftEntity: string, rightEntity: string): AccountReplica =>
   rollbackCount: 0,
   proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 1 },
   proofBody: { tokenIds: [], deltas: [] },
-  pendingWithdrawals: new Map(),
-  shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+  pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+  shadow: { rebalance: {
+    policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+    submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+  } },
 });
 
 const installDelta = (account: AccountReplica, tokenId: number, credit = 10n ** 30n): Delta => {

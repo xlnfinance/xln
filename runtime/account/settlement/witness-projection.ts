@@ -58,9 +58,16 @@ export const accountTxWithoutPostCommitHankos = (tx: AccountTx): AccountTx => {
   return unsigned;
 };
 
+const cloneAccountFrame = (frame: AccountFrame): AccountFrame => ({
+  ...frame,
+  accountTxs: frame.accountTxs.map(cloneIsolatedAccountTx),
+  deltas: frame.deltas.map(delta => ({ ...delta })),
+});
+
 export const accountFrameWithoutPostCommitHankos = (frame: AccountFrame): AccountFrame => ({
-  ...structuredClone(frame),
+  ...frame,
   accountTxs: frame.accountTxs.map(accountTxWithoutPostCommitHankos),
+  deltas: frame.deltas.map(delta => ({ ...delta })),
 });
 
 export const accountFrameWithoutLocalPostCommitHankos = (
@@ -68,4 +75,4 @@ export const accountFrameWithoutLocalPostCommitHankos = (
   localIsLeft: boolean,
 ): AccountFrame => frame.byLeft === localIsLeft
   ? accountFrameWithoutPostCommitHankos(frame)
-  : structuredClone(frame);
+  : cloneAccountFrame(frame);

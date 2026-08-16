@@ -2,7 +2,6 @@ import type { AccountFrame, AccountInput, AccountReplica } from '../../../types/
 import { HEAVY_LOGS } from '../../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
 import { isLeftEntity } from '../../utils';
-import { discardStagedAccountCommitmentCache } from '../../commitment/map-commitment';
 import { accountInputAck, accountInputProposal } from '../flush';
 import { prependUniqueMempoolTxs } from '../helpers';
 import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
@@ -217,7 +216,6 @@ export const applySameHeightIncomingFrameRollback = (
   }
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  discardStagedAccountCommitmentCache(account.state);
   account.rollbackCount = Math.max(1, account.rollbackCount + 1);
   account.lastRollbackFrameHash = receivedFrame.stateHash;
   if (account.rollbackCount > 1) {

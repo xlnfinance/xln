@@ -1,4 +1,5 @@
-import type { AccountOutput, AccountReplica, AccountTx } from '../../types/account';
+import type { AccountOutput, AccountTx } from '../../types/account';
+import type { AccountDraftReplica } from '../state/account-state-draft';
 import type { AccountConsensusContext } from '../consensus/context';
 import { getAccountPerspective } from '../state/perspective';
 import type { AccountJClaimSession } from '../j-claims/j-claim-session';
@@ -37,7 +38,7 @@ import { handleJEventClaim } from './handlers/j-events/claim';
 import { handleLendingAccountTx } from './handlers/balance/lending';
 
 type MutationContext = {
-  account: AccountReplica;
+  account: AccountDraftReplica;
   tx: AccountTx;
   byLeft: boolean;
   timestamp: UnixMs;
@@ -100,7 +101,13 @@ const applyCollateralRequest = (context: MutationContext): ApplyAccountTxResult 
     prepaidFee: String(feeState?.feePaidUpfront ?? 0n),
     requestedAt: Number(feeState?.requestedAt ?? context.timestamp),
   };
-  if (context.consensusContext?.emitRuntimeEvents && !context.isValidation) {
+  // Account effects are inert values until the enclosing Entity transition
+  // commits them. Collect them during deterministic validation as well: the
+  // receiver can then publish the already-validated transition without
+  // executing the same financial transaction a second time. A rejected draft
+  // drops this array together with its overlay, so validation cannot emit an
+  // external effect on its own.
+  if (context.consensusContext?.emitRuntimeEvents) {
     context.candidateEffects.push({
       kind: 'runtimeEvent',
       eventName: 'request_collateral_committed',
@@ -147,7 +154,6 @@ const applyJEventClaim = (context: MutationContext): ApplyAccountTxResult => {
     context.tx,
     context.byLeft,
     context.timestamp,
-    context.isValidation,
     context.myEntityId,
     context.candidateEffects,
     context.consensusContext,
@@ -164,7 +170,7 @@ const applyJEventClaim = (context: MutationContext): ApplyAccountTxResult => {
  * use finalized jurisdiction height.
  */
 export const applyAccountTxMutation = async (
-  account: AccountReplica,
+  account: AccountDraftReplica,
   tx: AccountTx,
   byLeft: boolean,
   rawTimestamp: number,

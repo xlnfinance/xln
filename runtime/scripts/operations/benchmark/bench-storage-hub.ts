@@ -856,7 +856,7 @@ async function main() {
   if (storageEnabled) {
     if (hasFlag('--debug-replica-meta')) {
       for (const replica of env.state.eReplicas.values()) {
-        for (const { frame } of replica.certifiedFrameLineage ?? []) {
+        for (const { frame } of replica.certifiedFrameHead ? [replica.certifiedFrameHead] : []) {
           const recomputed = createEntityFrameHashFromStateRoot(
             frame.parentFrameHash,
             frame.height,

@@ -23,6 +23,7 @@ import {
 } from '../authority/board-handover';
 
 export type EntityProposalSelection = {
+  accountWorkOnly: boolean;
   hasProposableAccountMempool: boolean;
   isSingleSigner: boolean;
   proposalJPrefixCertificate: ReturnType<typeof buildJPrefixCertificate>;
@@ -35,6 +36,7 @@ export type EntityProposalSelectionOptions = {
   localCanPropose: boolean;
   trustedLocalCrossJurisdiction: boolean;
   trustedLocalEntityTxs: EntityTx[];
+  accountWorkOnly: boolean;
   checkpoint(label: string): void;
 };
 
@@ -105,7 +107,11 @@ export const selectEntityProposal = async (
       ? await selectProposableEntityTxs(
           env,
           replica.state,
-          options.trustedLocalCrossJurisdiction ? trustedProposalTxs : replica.mempool,
+          options.accountWorkOnly
+            ? []
+            : options.trustedLocalCrossJurisdiction
+              ? trustedProposalTxs
+              : replica.mempool,
         )
       : {
           txs: [],
@@ -142,6 +148,7 @@ export const selectEntityProposal = async (
     });
   }
   return {
+    accountWorkOnly: options.accountWorkOnly,
     hasProposableAccountMempool,
     isSingleSigner: isSingleSignerEntity(authorityReplica.state),
     proposalJPrefixCertificate,
@@ -150,3 +157,22 @@ export const selectEntityProposal = async (
     shouldRollFrozenBaseJPrefixRound,
   };
 };
+
+/**
+ * Internal Account-work is a causal retry, not a timer frame. If the sibling
+ * cross-j registration is not committed yet, the isolated preview creates no
+ * Account proposal and must be discarded without advancing Entity height or
+ * writing an empty frame to WAL. A later committed sibling registration is the
+ * only event allowed to trigger another attempt.
+ */
+export const shouldKeepPreparedEntityFrame = (
+  selection: Pick<
+    EntityProposalSelection,
+    'accountWorkOnly' | 'proposalTxs' | 'shouldRollFrozenBaseJPrefixRound'
+  >,
+  accountsToProposeFramesCount: number,
+): boolean =>
+  !selection.accountWorkOnly ||
+  selection.proposalTxs.length > 0 ||
+  selection.shouldRollFrozenBaseJPrefixRound ||
+  accountsToProposeFramesCount > 0;

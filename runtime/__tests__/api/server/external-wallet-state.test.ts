@@ -74,7 +74,6 @@ const makeState = (entityId: string, signerId: string): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: 'External wallet test',
     isHub: false,

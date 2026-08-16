@@ -13,9 +13,8 @@ import {
 } from '../helpers';
 import {
   hasQueuedSwapResolveForEntityState,
-  queueUniqueSwapResolveForEntityState,
 } from '../queue';
-import type { SameOrderbookPass } from './pass';
+import { queueSameSwapResolve, type SameOrderbookPass } from './pass';
 import type { PreparedSameOffer } from './offer-types';
 import { normalizeEntityRef } from '../../../../account-key';
 
@@ -63,19 +62,20 @@ const queueSameTradeFills = (
         offerId,
       )
     ) {
-      continue;
+      throw haltRuntimeFailure(
+        'ORDERBOOK_TRADE_PARTICIPANT_ALREADY_RESOLVING',
+        `ORDERBOOK_TRADE_PARTICIPANT_ALREADY_RESOLVING: account=${accountId} offer=${offerId}`,
+      );
     }
     if (HEAVY_LOGS) {
       orderbookSameLog.trace('lookup', {
         account: shortId(accountId, 8),
-        known: [...pass.hubState.accounts.keys()].map(id => shortId(id, 8)),
         found: pass.hubState.accounts.has(accountId),
       });
     }
     const account = pass.hubState.accounts.get(accountId);
     if (!account) {
-      throw haltRuntimeFailure("ORDERBOOK_ACCOUNT_LOOKUP_FAILED", `ORDERBOOK_ACCOUNT_LOOKUP_FAILED: offer=${offerId} accountId=${accountId} ` +
-        `known=[${[...pass.hubState.accounts.keys()].join(',')}]`);
+      throw haltRuntimeFailure("ORDERBOOK_ACCOUNT_LOOKUP_FAILED", `ORDERBOOK_ACCOUNT_LOOKUP_FAILED: offer=${offerId} accountId=${accountId}`);
     }
     const plan = buildSameFillResolvePlan({
       accountId,
@@ -97,10 +97,8 @@ const queueSameTradeFills = (
   // them. A taker fee rejection must discard the preview atomically; otherwise
   // the maker Account could move while the taker Account rejects its half.
   for (const plan of plans) {
-    const queued = queueUniqueSwapResolveForEntityState(
-      pass.accountTxs,
-      pass.hubState,
-      pass.queuedSwapResolutions,
+    const queued = queueSameSwapResolve(
+      pass,
       plan.accountId,
       plan.resolveEnqueueData,
     );
@@ -141,10 +139,8 @@ const rejectUnfilledOffer = (
     pass.recordDebugProjectionReject(offer.accountId, offer.offer.offerId, reason);
     return;
   }
-  const queued = queueUniqueSwapResolveForEntityState(
-    pass.accountTxs,
-    pass.hubState,
-    pass.queuedSwapResolutions,
+  const queued = queueSameSwapResolve(
+    pass,
     offer.accountId,
     {
       offerId: offer.offer.offerId,
@@ -186,7 +182,7 @@ export const processSameCommandEvents = (
       // The accepted command and price reference commit in the same Entity
       // frame. User/cross quotes and trades never enter this branch, so a tiny
       // wash trade cannot move the $6.5m cross-j risk boundary.
-      recordAcceptedUsdAskPrice(result.state, offer.priceTicks);
+      result.state = recordAcceptedUsdAskPrice(result.state, offer.priceTicks);
     }
     queueSameTradeFills(pass, offer, result.state, trades, resolveComment);
   }

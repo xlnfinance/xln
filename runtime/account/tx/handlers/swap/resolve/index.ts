@@ -6,8 +6,7 @@
  * closes the remaining order. Cross-j offers use their separate ACK protocol.
  */
 
-import type { AccountReplica } from '../../../../../types/account';
-import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from '../lifecycle/history';
+import type { AccountDraftReplica } from '../../../../state/account-state-draft';
 import {
   validateSwapResolve,
 } from './validation';
@@ -26,45 +25,11 @@ import {
   accountTxSwapCancelled,
 } from '../../../apply-result';
 
-const recordSwapResolveHistory = (
-  account: AccountReplica,
-  tx: SwapResolveTx,
-  currentHeight: number,
-  resolve: ReturnType<typeof validateSwapResolve> & { ok?: never },
-  closeOrder: boolean,
-): void => {
-  const data = tx.data;
-  recordSwapResolveLifecycle(
-    account,
-    resolve.offerId,
-    currentHeight,
-    {
-      fillRatio: data.fillRatio,
-      fillNumerator: data.fillNumerator ?? resolve.exactFillRatio.numerator,
-      fillDenominator: data.fillDenominator ?? resolve.exactFillRatio.denominator,
-      cancelRemainder: resolve.effectiveCancelRemainder,
-      height: currentHeight,
-      ...(data.executionGiveAmount !== undefined
-        ? { executionGiveAmount: data.executionGiveAmount }
-        : {}),
-      ...(data.executionWantAmount !== undefined
-        ? { executionWantAmount: data.executionWantAmount }
-        : {}),
-      ...(data.feeTokenId !== undefined ? { feeTokenId: data.feeTokenId } : {}),
-      ...(resolve.feeAmount > 0n ? { feeAmount: resolve.feeAmount } : {}),
-      ...(typeof data.comment === 'string' && data.comment.trim()
-        ? { comment: data.comment }
-        : {}),
-    },
-  );
-  if (closeOrder) recordSwapClosedLifecycle(account, resolve.offerId);
-};
-
 export async function handleSwapResolve(
-  account: AccountReplica,
+  account: AccountDraftReplica,
   tx: SwapResolveTx,
   byLeft: boolean,
-  currentHeight: number,
+  _currentHeight: number,
   _isValidation = false,
 ): Promise<SwapResolveResult> {
   const events: string[] = [];
@@ -75,13 +40,6 @@ export async function handleSwapResolve(
   const remainder = applySwapResolveRemainder(account.state, applied, events);
   if (!remainder.ok) return remainder;
 
-  recordSwapResolveHistory(
-    account,
-    tx,
-    currentHeight,
-    validated,
-    remainder.closeOrderInHistory,
-  );
   return remainder.swapOfferCancelled
     ? accountTxSwapCancelled(events, remainder.swapOfferCancelled)
     : accountTxApplied(events);

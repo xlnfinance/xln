@@ -4,30 +4,52 @@
  * been checked; no generic decode<T> can mint trusted financial state here.
  */
 
-import type { RuntimeAdapterEntitySummary } from '../../../../api/runtime-adapter/types';
-import { validateAccountReplica } from '../../../../account/validation/state-validation';
-import type { AccountReplica } from '../../../../types/account';
+import type { RuntimeAdapterEntitySummary } from '../../../../../api/runtime-adapter/types';
+import { canonicalAccountDisputeConfig } from '../../../../../account/config/dispute-config';
+import { validateAccountDeltas } from '../../../../../account/validation/delta-validation';
+import { decodeAccountFrame } from '../../../../../account/validation/frame-validation';
+import type { AccountState, Delta } from '../../../../../types/account';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
-} from '../../../../protocol/boundary-validation';
+} from '../../../../../protocol/boundary-validation';
+import {
+  assertProductionSwapFullySettled,
+  decodeProductionSwapSettlementEvidence,
+  type ProductionSwapSettlementEvidence,
+} from '../settlement';
 
 export type LoadRuntimeEntry = Readonly<{ label: string; token: string; wsUrl: string }>;
 export type LoadFrame = Readonly<{ height: number; canonicalStateHash: string }>;
 export type LoadIdentity = Readonly<{ entityId: string; signerId: string }>;
+export type LoadAccountProjection = Readonly<{
+  state: Readonly<{
+    leftEntity: string;
+    rightEntity: string;
+    deltas: Map<number, Delta>;
+    disputeConfig: AccountState['disputeConfig'];
+  }>;
+}>;
 export type LoadBurstReport = Readonly<{
   schema: 'xln-production-swap-load-burst-v1';
   mode: 'same';
-  schedule: 'visible_depth_runtime_input_batches';
+  schedule: 'visible_depth_runtime_input_batches' | 'independent_maker_taker_account_pairs';
   configuredBurstSize: number;
+  loadMakerAccountCount: number;
+  loadTakerAccountCount: number;
+  loadParticipantAccountCount: number;
+  maxOrdersPerAccountFrame: 5;
   runtimeInputBatches: number;
-  completedEconomicSwaps: number;
-  completionAuthority: 'committed_orderbook_trade_count';
+  matchedEconomicSwaps: number;
+  fullySettledEconomicSwaps: number;
+  completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence';
   enqueueAckElapsedMs: number;
   commandObservedElapsedMs: number;
-  economicCompletionElapsedMs: number;
-  completedTps: number;
+  matchedElapsedMs: number;
+  fullySettledElapsedMs: number;
+  matchedTps: number;
+  fullySettledTps: number;
   tradeCountBefore: number;
   tradeCountAfter: number;
   submittedEconomicSwaps: number;
@@ -36,8 +58,12 @@ export type LoadBurstReport = Readonly<{
   driverRssAfter: number;
   walBytesBefore: number;
   walBytesAfter: number;
+  crossedBookAfterRun: false;
   durableBefore: LoadFrame;
   durableAfter: LoadFrame;
+  loadDurableBefore: LoadFrame;
+  loadDurableAfter: LoadFrame;
+  settlementEvidence: ProductionSwapSettlementEvidence;
 }>;
 
 const requireText = (value: unknown, code: string): string => {
@@ -135,7 +161,7 @@ export const decodeHubCoreRecord = (value: unknown): Record<string, unknown> => 
   const core = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_HUB_CORE_INVALID');
   requireExactBoundaryKeys(core, [
     'entityId', 'entityEncryptionPublicKey', 'height', 'timestamp', 'profile', 'config',
-    'nonces', 'proposals', 'reserves', 'lastFinalizedJHeight', 'jBlockChain',
+    'nonces', 'proposals', 'reserves', 'lastFinalizedJHeight',
     'htlcRoutes', 'htlcFeesEarned', 'lockBook',
   ], [
     'signerId', 'isProposer', 'prevFrameHash', 'externalWallet',
@@ -183,10 +209,96 @@ export const decodePageItems = (value: unknown, code: string): unknown[] => {
   return page['items'];
 };
 
-export const decodeAccountPage = (value: unknown): AccountReplica | null => {
+const ACCOUNT_VIEW_REQUIRED = [
+  'state', 'status', 'mempool', 'currentFrame', 'currentHeight',
+  'pendingSignatures', 'rollbackCount', 'proofHeader', 'proofBody',
+  'pendingWithdrawals', 'shadow',
+] as const;
+const ACCOUNT_VIEW_OPTIONAL = [
+  'pendingFrame', 'pendingAccountInput', 'lastOutboundFrameAck', 'pendingForwards',
+  'hankoSignature', 'lastRollbackFrameHash', 'abiProofBody', 'currentFrameHanko',
+  'counterpartyFrameHanko', 'boardResealMigration', 'counterpartyBoardReseal',
+  'currentDisputeProofHanko', 'currentDisputeProofNonce', 'currentDisputeProofBodyHash',
+  'currentDisputeHash', 'counterpartyDisputeProofHanko', 'counterpartyDisputeProofNonce',
+  'counterpartyDisputeProofBodyHash', 'currentDisputeProofProposerIsLeft',
+  'counterpartyDisputeProofProposerIsLeft', 'counterpartyDisputeHash',
+  'counterpartySettlementHanko', 'disputeProofNoncesByHash', 'disputeProofBodiesByHash',
+  'disputeArgumentSnapshotsByHash', 'disputePrepare', 'activeDispute',
+] as const;
+const ACCOUNT_VIEW_STATE_REQUIRED = [
+  'leftEntity', 'rightEntity', 'domain', 'watchSeed', 'deltas', 'locks',
+  'swapOffers', 'leftPendingJClaims', 'rightPendingJClaims', 'lastFinalizedJHeight',
+  'disputeConfig', 'jNonce', 'requestedRebalance', 'requestedRebalanceFeeState',
+] as const;
+const ACCOUNT_VIEW_STATE_OPTIONAL = [
+  'pulls', 'subcontracts', 'lendingIntents', 'settlementWorkspace', 'rebalanceFeePolicies',
+] as const;
+
+const requireCanonicalEntityId = (value: unknown, code: string): string => {
+  const entityId = requireText(value, code);
+  if (!/^0x[0-9a-f]{64}$/.test(entityId)) throw new Error(code);
+  return entityId;
+};
+
+const decodeAccountView = (value: unknown): LoadAccountProjection => {
+  const account = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_ACCOUNT_INVALID');
+  requireExactBoundaryKeys(
+    account,
+    ACCOUNT_VIEW_REQUIRED,
+    ACCOUNT_VIEW_OPTIONAL,
+    'PRODUCTION_SWAP_LOAD_ACCOUNT_FIELDS_INVALID',
+  );
+  const state = requireBoundaryRecord(account['state'], 'PRODUCTION_SWAP_LOAD_ACCOUNT_STATE_INVALID');
+  requireExactBoundaryKeys(
+    state,
+    ACCOUNT_VIEW_STATE_REQUIRED,
+    ACCOUNT_VIEW_STATE_OPTIONAL,
+    'PRODUCTION_SWAP_LOAD_ACCOUNT_STATE_FIELDS_INVALID',
+  );
+  const leftEntity = requireCanonicalEntityId(state['leftEntity'], 'PRODUCTION_SWAP_LOAD_ACCOUNT_LEFT_INVALID');
+  const rightEntity = requireCanonicalEntityId(state['rightEntity'], 'PRODUCTION_SWAP_LOAD_ACCOUNT_RIGHT_INVALID');
+  if (leftEntity >= rightEntity) throw new Error('PRODUCTION_SWAP_LOAD_ACCOUNT_ORDER_INVALID');
+  const dispute = requireBoundaryRecord(
+    state['disputeConfig'],
+    'PRODUCTION_SWAP_LOAD_ACCOUNT_DISPUTE_CONFIG_INVALID',
+  );
+  requireExactBoundaryKeys(
+    dispute,
+    ['leftResponseSeconds', 'rightResponseSeconds'],
+    [],
+    'PRODUCTION_SWAP_LOAD_ACCOUNT_DISPUTE_CONFIG_FIELDS_INVALID',
+  );
+  // The compact API intentionally omits pendingAccountInput but still exposes
+  // a bounded pendingFrame for status. Decode that frame independently instead
+  // of laundering the projection into a complete AccountReplica.
+  if (account['pendingFrame'] !== undefined) {
+    decodeAccountFrame(account['pendingFrame'], 'production-swap-load account.pendingFrame');
+  }
+  return {
+    state: {
+      leftEntity,
+      rightEntity,
+      deltas: validateAccountDeltas(state['deltas'], 'production-swap-load account.state.deltas'),
+      disputeConfig: canonicalAccountDisputeConfig({
+        leftResponseSeconds: requireBoundaryInteger(
+          dispute['leftResponseSeconds'],
+          'PRODUCTION_SWAP_LOAD_ACCOUNT_LEFT_RESPONSE_INVALID',
+          0,
+        ),
+        rightResponseSeconds: requireBoundaryInteger(
+          dispute['rightResponseSeconds'],
+          'PRODUCTION_SWAP_LOAD_ACCOUNT_RIGHT_RESPONSE_INVALID',
+          0,
+        ),
+      }),
+    },
+  };
+};
+
+export const decodeAccountPage = (value: unknown): LoadAccountProjection | null => {
   const items = decodePageItems(value, 'PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_INVALID');
   if (items.length > 1) throw new Error('PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_CARDINALITY_INVALID');
-  return items[0] === undefined ? null : validateAccountReplica(items[0], 'production-swap-load account');
+  return items[0] === undefined ? null : decodeAccountView(items[0]);
 };
 
 export const decodeLoadFrame = (value: unknown): LoadFrame => {
@@ -214,57 +326,107 @@ const decodeReportLoadFrame = (value: unknown): LoadFrame => {
 export const decodeLoadBurstReport = (value: unknown): LoadBurstReport => {
   const report = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_REPORT_INVALID');
   const numeric = [
-    'configuredBurstSize', 'runtimeInputBatches', 'completedEconomicSwaps', 'enqueueAckElapsedMs',
-    'commandObservedElapsedMs', 'economicCompletionElapsedMs', 'tradeCountBefore',
+    'configuredBurstSize', 'loadMakerAccountCount', 'loadTakerAccountCount',
+    'loadParticipantAccountCount', 'maxOrdersPerAccountFrame',
+    'runtimeInputBatches', 'matchedEconomicSwaps', 'fullySettledEconomicSwaps',
+    'enqueueAckElapsedMs', 'commandObservedElapsedMs', 'matchedElapsedMs',
+    'fullySettledElapsedMs', 'tradeCountBefore',
     'tradeCountAfter', 'submittedEconomicSwaps', 'uncompletedEconomicSwapsAfterRun',
     'driverRssBefore', 'driverRssAfter',
     'walBytesBefore', 'walBytesAfter',
   ] as const;
   requireExactBoundaryKeys(report, [
-    'schema', 'mode', 'schedule', 'configuredBurstSize', 'runtimeInputBatches', 'completedEconomicSwaps',
+    'schema', 'mode', 'schedule', 'configuredBurstSize', 'loadMakerAccountCount',
+    'loadTakerAccountCount', 'loadParticipantAccountCount', 'maxOrdersPerAccountFrame',
+    'runtimeInputBatches', 'matchedEconomicSwaps', 'fullySettledEconomicSwaps',
     'completionAuthority', 'enqueueAckElapsedMs', 'commandObservedElapsedMs',
-    'economicCompletionElapsedMs', 'completedTps', 'tradeCountBefore',
+    'matchedElapsedMs', 'fullySettledElapsedMs', 'matchedTps', 'fullySettledTps', 'tradeCountBefore',
     'tradeCountAfter', 'submittedEconomicSwaps', 'uncompletedEconomicSwapsAfterRun',
     'driverRssBefore', 'driverRssAfter',
-    'walBytesBefore', 'walBytesAfter', 'durableBefore', 'durableAfter',
+    'walBytesBefore', 'walBytesAfter', 'crossedBookAfterRun',
+    'durableBefore', 'durableAfter', 'loadDurableBefore', 'loadDurableAfter',
+    'settlementEvidence',
   ], [], 'PRODUCTION_SWAP_LOAD_REPORT_FIELDS_INVALID');
   if (report['schema'] !== 'xln-production-swap-load-burst-v1' || report['mode'] !== 'same') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEMA_INVALID');
-  if (report['schedule'] !== 'visible_depth_runtime_input_batches') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEDULE_INVALID');
-  if (report['completionAuthority'] !== 'committed_orderbook_trade_count') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_AUTHORITY_INVALID');
+  if (
+    report['schedule'] !== 'visible_depth_runtime_input_batches'
+    && report['schedule'] !== 'independent_maker_taker_account_pairs'
+  ) throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEDULE_INVALID');
+  if (report['completionAuthority'] !== 'committed_trade_count_and_bilateral_runtime_quiescence') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_AUTHORITY_INVALID');
+  if (report['crossedBookAfterRun'] !== false) throw new Error('PRODUCTION_SWAP_LOAD_REPORT_CROSSED_BOOK_REMAINS');
   for (const field of numeric) requireBoundaryInteger(report[field], `PRODUCTION_SWAP_LOAD_REPORT_${field.toUpperCase()}_INVALID`);
-  if (typeof report['completedTps'] !== 'number' || !Number.isFinite(report['completedTps']) || report['completedTps'] < 0) throw new Error('PRODUCTION_SWAP_LOAD_REPORT_TPS_INVALID');
+  for (const field of ['matchedTps', 'fullySettledTps'] as const) {
+    if (typeof report[field] !== 'number' || !Number.isFinite(report[field]) || report[field] < 0) {
+      throw new Error(`PRODUCTION_SWAP_LOAD_REPORT_${field.toUpperCase()}_INVALID`);
+    }
+  }
   const durableBefore = decodeReportLoadFrame(report['durableBefore']);
   const durableAfter = decodeReportLoadFrame(report['durableAfter']);
-  const completed = Number(report['completedEconomicSwaps']);
-  if (Number(report['tradeCountAfter']) - Number(report['tradeCountBefore']) !== completed) {
+  const loadDurableBefore = decodeReportLoadFrame(report['loadDurableBefore']);
+  const loadDurableAfter = decodeReportLoadFrame(report['loadDurableAfter']);
+  const matched = Number(report['matchedEconomicSwaps']);
+  const fullySettled = Number(report['fullySettledEconomicSwaps']);
+  if (Number(report['tradeCountAfter']) - Number(report['tradeCountBefore']) !== matched) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_TRADE_DELTA_MISMATCH');
   }
-  if (Number(report['submittedEconomicSwaps']) !== completed || Number(report['uncompletedEconomicSwapsAfterRun']) !== 0) {
+  if (Number(report['submittedEconomicSwaps']) !== matched || fullySettled !== matched || Number(report['uncompletedEconomicSwapsAfterRun']) !== 0) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SUBMISSION_INVALID');
   }
-  if (Number(report['configuredBurstSize']) !== completed) {
+  if (Number(report['configuredBurstSize']) !== matched) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_BURST_INCOMPLETE');
+  }
+  if (Number(report['maxOrdersPerAccountFrame']) !== 5) {
+    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ACCOUNT_FRAME_CAP_INVALID');
+  }
+  const makerAccounts = Number(report['loadMakerAccountCount']);
+  const takerAccounts = Number(report['loadTakerAccountCount']);
+  const participantAccounts = Number(report['loadParticipantAccountCount']);
+  if (participantAccounts !== makerAccounts + takerAccounts || takerAccounts < 1) {
+    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ACCOUNT_COUNTS_INVALID');
+  }
+  if (matched > takerAccounts * 5 || (makerAccounts > 0 && matched > makerAccounts * 5)) {
+    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ACCOUNT_FRAME_CAP_EXCEEDED');
   }
   if (
     Number(report['enqueueAckElapsedMs']) > Number(report['commandObservedElapsedMs']) ||
-    Number(report['commandObservedElapsedMs']) > Number(report['economicCompletionElapsedMs'])
+    Number(report['commandObservedElapsedMs']) > Number(report['matchedElapsedMs']) ||
+    Number(report['matchedElapsedMs']) > Number(report['fullySettledElapsedMs'])
   ) throw new Error('PRODUCTION_SWAP_LOAD_REPORT_TIMING_ORDER_INVALID');
   if (durableAfter.height < durableBefore.height) throw new Error('PRODUCTION_SWAP_LOAD_REPORT_HEIGHT_REGRESSION');
+  if (loadDurableAfter.height < loadDurableBefore.height) throw new Error('PRODUCTION_SWAP_LOAD_REPORT_LOAD_HEIGHT_REGRESSION');
+  const settlementEvidence = decodeProductionSwapSettlementEvidence(report['settlementEvidence']);
+  const rates = assertProductionSwapFullySettled(settlementEvidence);
+  if (settlementEvidence.expectedSwaps !== matched ||
+    settlementEvidence.tradeCountBefore !== Number(report['tradeCountBefore']) ||
+    settlementEvidence.tradeCountAfter !== Number(report['tradeCountAfter']) ||
+    settlementEvidence.matchedElapsedMs !== Number(report['matchedElapsedMs']) ||
+    settlementEvidence.fullySettledElapsedMs !== Number(report['fullySettledElapsedMs']) ||
+    rates.matchedTps !== report['matchedTps'] || rates.fullySettledTps !== report['fullySettledTps']) {
+    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SETTLEMENT_EVIDENCE_MISMATCH');
+  }
   return {
     schema: report['schema'], mode: report['mode'], schedule: report['schedule'],
     configuredBurstSize: Number(report['configuredBurstSize']),
+    loadMakerAccountCount: makerAccounts,
+    loadTakerAccountCount: takerAccounts,
+    loadParticipantAccountCount: participantAccounts,
+    maxOrdersPerAccountFrame: 5,
     runtimeInputBatches: Number(report['runtimeInputBatches']),
-    completedEconomicSwaps: completed,
+    matchedEconomicSwaps: matched,
+    fullySettledEconomicSwaps: fullySettled,
     completionAuthority: report['completionAuthority'],
     enqueueAckElapsedMs: Number(report['enqueueAckElapsedMs']),
     commandObservedElapsedMs: Number(report['commandObservedElapsedMs']),
-    economicCompletionElapsedMs: Number(report['economicCompletionElapsedMs']),
-    completedTps: report['completedTps'], tradeCountBefore: Number(report['tradeCountBefore']),
+    matchedElapsedMs: Number(report['matchedElapsedMs']),
+    fullySettledElapsedMs: Number(report['fullySettledElapsedMs']),
+    matchedTps: report['matchedTps'], fullySettledTps: report['fullySettledTps'],
+    tradeCountBefore: Number(report['tradeCountBefore']),
     tradeCountAfter: Number(report['tradeCountAfter']),
     submittedEconomicSwaps: Number(report['submittedEconomicSwaps']),
     uncompletedEconomicSwapsAfterRun: Number(report['uncompletedEconomicSwapsAfterRun']),
     driverRssBefore: Number(report['driverRssBefore']),
     driverRssAfter: Number(report['driverRssAfter']), walBytesBefore: Number(report['walBytesBefore']),
-    walBytesAfter: Number(report['walBytesAfter']), durableBefore, durableAfter,
+    walBytesAfter: Number(report['walBytesAfter']), crossedBookAfterRun: false,
+    durableBefore, durableAfter, loadDurableBefore, loadDurableAfter, settlementEvidence,
   };
 };

@@ -23,15 +23,12 @@ import { isRuntimePerfProfileEnabled } from '../../infra/performance/runtime-fla
 import { getPerfMs } from '../../infra/time';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 import {
-  buildEntityAccountCommitment,
-  deleteEntityAccountCommitment,
-  EMPTY_ENTITY_ACCOUNT_COMMITMENT,
-  entityAccountCommitmentRoot,
-  ENTITY_ACCOUNT_COMMITMENT_RADIX,
-  putEntityAccountCommitment,
-  type EntityAccountCommitment,
-} from './account/commitment-tree';
-import { EntityAccountCandidateMap, entityAccountCommitmentEntries } from '../state/candidate-map';
+  ENTITY_ACCOUNT_VALUE_MAP_RADIX,
+  PersistentEntityAccountMap,
+  EntityAccountCandidateMap,
+} from '../state/persistent-account-map';
+import { entityCollectionCommitment } from '../state/persistent-collection-map';
+import { requirePersistentAccountStateMap } from '../../account/state/persistent-state-map';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 
@@ -83,7 +80,6 @@ export const ENTITY_STATE_ROOT_FIELDS = [
 
 export const ENTITY_STATE_ROOT_EXCLUDED_FIELDS = [
   'prevFrameHash',
-  'jBlockChain',
 ] as const satisfies readonly (keyof EntityState)[];
 
 type CoveredEntityState = Covered<EntityState, AssertNever<Exclude<
@@ -92,13 +88,33 @@ type CoveredEntityState = Covered<EntityState, AssertNever<Exclude<
   | (typeof ENTITY_STATE_ROOT_EXCLUDED_FIELDS)[number]
 >>>;
 
-const projectPendingWithdrawals = (withdrawals: AccountReplica['pendingWithdrawals']): Map<string, unknown> =>
-  new Map(
-    Array.from(withdrawals.entries()).map(([requestId, withdrawal]) => {
-      const { signature: _signature, ...unsignedWithdrawal } = withdrawal;
-      return [requestId, unsignedWithdrawal];
-    }),
-  );
+const projectAccountEnvelopeCollections = (account: AccountReplica): Record<string, unknown> => ({
+  pendingWithdrawalsRoot: requirePersistentAccountStateMap(
+    account.pendingWithdrawals,
+    'pendingWithdrawals',
+  ).rootHash(),
+  shadow: {
+    rebalance: {
+      policyRoot: requirePersistentAccountStateMap(
+        account.shadow.rebalance.policy,
+        'rebalanceShadowPolicy',
+      ).rootHash(),
+      submittedAtByTokenRoot: requirePersistentAccountStateMap(
+        account.shadow.rebalance.submittedAtByToken,
+        'rebalanceShadowSubmitted',
+      ).rootHash(),
+      ...(account.shadow.rebalance.activeQuote === undefined
+        ? {}
+        : { activeQuote: account.shadow.rebalance.activeQuote }),
+      ...(account.shadow.rebalance.pendingRequest === undefined
+        ? {}
+        : { pendingRequest: account.shadow.rebalance.pendingRequest }),
+    },
+    ...(account.shadow.rejectedFrameEvidence === undefined
+      ? {}
+      : { rejectedFrameEvidence: account.shadow.rejectedFrameEvidence }),
+  },
+});
 
 const projectOrderbookConsensusState = (
   orderbookExt: EntityState['orderbookExt'],
@@ -159,8 +175,6 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'status',
   'mempool',
   'currentFrame',
-  'swapOrderHistory',
-  'swapClosedOrders',
   'currentHeight',
   'pendingFrame',
   'pendingSignatures',
@@ -247,7 +261,9 @@ const projectAccountConsensusState = (account: CoveredAccountReplica): Record<st
   } else {
     delete projected['pendingFrame'];
   }
-  projected['pendingWithdrawals'] = projectPendingWithdrawals(account.pendingWithdrawals);
+  const envelopeCollections = projectAccountEnvelopeCollections(account);
+  projected['pendingWithdrawals'] = envelopeCollections['pendingWithdrawalsRoot'];
+  projected['shadow'] = envelopeCollections['shadow'];
   if (account.pendingAccountInput) {
     projected['pendingAccountInput'] = cloneAccountInputWithoutPostCommitHankos(account.pendingAccountInput);
   } else {
@@ -361,6 +377,14 @@ const projectEntityConsensusState = (state: CoveredEntityState, expandAccounts =
   // allowlist.
   const projected = Object.fromEntries(
     ENTITY_STATE_ROOT_FIELDS
+      .filter((field) => ![
+        'htlcRoutes',
+        'lockBook',
+        'crossJurisdictionSwaps',
+        'crossJurisdictionAuthorizations',
+        'pendingCrossJurisdictionFillAcks',
+        'crossJurisdictionBookAdmissions',
+      ].includes(field))
       .filter((field) => Object.hasOwn(state, field))
       .map((field) => [field, state[field]]),
   );
@@ -376,6 +400,20 @@ const projectEntityConsensusState = (state: CoveredEntityState, expandAccounts =
           ]),
         )
       : state.accounts,
+    htlcRoutes: entityCollectionCommitment(state.htlcRoutes),
+    lockBook: entityCollectionCommitment(state.lockBook),
+    ...(state.crossJurisdictionSwaps
+      ? { crossJurisdictionSwaps: entityCollectionCommitment(state.crossJurisdictionSwaps) }
+      : {}),
+    ...(state.crossJurisdictionAuthorizations
+      ? { crossJurisdictionAuthorizations: entityCollectionCommitment(state.crossJurisdictionAuthorizations) }
+      : {}),
+    ...(state.pendingCrossJurisdictionFillAcks
+      ? { pendingCrossJurisdictionFillAcks: entityCollectionCommitment(state.pendingCrossJurisdictionFillAcks) }
+      : {}),
+    ...(state.crossJurisdictionBookAdmissions
+      ? { crossJurisdictionBookAdmissions: entityCollectionCommitment(state.crossJurisdictionBookAdmissions) }
+      : {}),
     ...(orderbookExt ? { orderbookExt } : {}),
   };
 };
@@ -394,102 +432,31 @@ type EntitySectionCommitment = {
   encodedBytes: number;
 };
 
-const ENTITY_ACCOUNT_COMMITMENT_CACHE = Symbol('xln.entity.account-commitment-cache');
-type EntityStateWithCommitmentCache = EntityState & {
-  [ENTITY_ACCOUNT_COMMITMENT_CACHE]?: EntityAccountCommitment;
-};
-
-const readEntityAccountCommitmentCache = (state: EntityState): EntityAccountCommitment | undefined =>
-  (state as EntityStateWithCommitmentCache)[ENTITY_ACCOUNT_COMMITMENT_CACHE];
-
-const writeEntityAccountCommitmentCache = (state: EntityState, cache: EntityAccountCommitment): void => {
-  Object.defineProperty(state, ENTITY_ACCOUNT_COMMITMENT_CACHE, {
-    value: cache,
-    configurable: true,
-    writable: true,
-    enumerable: false,
-  });
-};
-
-const accountCommitmentValueHash = (account: AccountReplica): string =>
+export const computeEntityAccountValueHash = (account: AccountReplica): string =>
   computeIntegrityDigest(
     UTF8.encode(
       encodeCanonicalConsensusValue(projectAccountConsensusState(account)),
     ),
   );
 
-const buildEntityAccountsCommitmentFromState = (
-  state: EntityState,
-): EntityAccountCommitment => {
-  const entries: Array<readonly [string, string]> = [];
-  for (const [rawCounterpartyId, account] of entityAccountCommitmentEntries(state.accounts)) {
-    const counterpartyId = rawCounterpartyId.trim().toLowerCase();
-    if (rawCounterpartyId !== counterpartyId) {
-      throw new Error(
-        `ENTITY_ACCOUNT_COMMITMENT_NON_CANONICAL_ID:${rawCounterpartyId}`,
-      );
-    }
-    entries.push([counterpartyId, accountCommitmentValueHash(account)]);
-  }
-  return entries.length === 0
-    ? EMPTY_ENTITY_ACCOUNT_COMMITMENT
-    : buildEntityAccountCommitment(entries);
-};
-
 export const invalidateEntityAccountCommitment = (state: EntityState, counterpartyId: string): void => {
-  const cached = readEntityAccountCommitmentCache(state);
-  if (!cached) return;
-  const normalized = counterpartyId.trim().toLowerCase();
-  const account = state.accounts.get(normalized);
-  writeEntityAccountCommitmentCache(
-    state,
-    account
-      ? putEntityAccountCommitment(
-          cached,
-          normalized,
-          accountCommitmentValueHash(account),
-        )
-      : deleteEntityAccountCommitment(cached, normalized),
-  );
-};
-
-export const forkEntityAccountCommitmentCache = (source: EntityState, target: EntityState): void => {
-  const sourceCache = readEntityAccountCommitmentCache(source);
-  if (!sourceCache) return;
-  // The trie is immutable. Certified State and its candidate share every
-  // untouched node; invalidating one Account replaces only the candidate path.
-  writeEntityAccountCommitmentCache(target, sourceCache);
-};
-
-const encodeEntityAccountsSection = (state: EntityState, cold: boolean): string => {
-  let commitment = cold
-    ? buildEntityAccountsCommitmentFromState(state)
-    : (readEntityAccountCommitmentCache(state) ?? buildEntityAccountsCommitmentFromState(state));
-  if (!cold && state.accounts instanceof EntityAccountCandidateMap) {
-    // Merely reading an Account from the frame overlay materializes a mutable
-    // clone. Its nested State can then change without another Map.set(), so a
-    // cached certified leaf is no longer authoritative for every dirty key.
-    // Refresh only those radix paths before hashing; a full million-account
-    // rebuild would defeat the overlay, while trusting the old leaf can make
-    // incremental and cold Entity roots diverge.
-    for (const rawCounterpartyId of state.accounts.dirtyKeys()) {
-      const counterpartyId = rawCounterpartyId.trim().toLowerCase();
-      if (rawCounterpartyId !== counterpartyId) {
-        throw new Error(`ENTITY_ACCOUNT_COMMITMENT_NON_CANONICAL_ID:${rawCounterpartyId}`);
-      }
-      const account = state.accounts.get(counterpartyId);
-      commitment = account
-        ? putEntityAccountCommitment(commitment, counterpartyId, accountCommitmentValueHash(account))
-        : deleteEntityAccountCommitment(commitment, counterpartyId);
-    }
+  if (
+    !(state.accounts instanceof PersistentEntityAccountMap) &&
+    !(state.accounts instanceof EntityAccountCandidateMap)
+  ) {
+    throw new Error(`ENTITY_ACCOUNT_MAP_NOT_PERSISTENT:${counterpartyId}`);
   }
-  if (!cold) writeEntityAccountCommitmentCache(state, commitment);
+};
+
+export const forkEntityAccountCommitmentCache = (_source: EntityState, _target: EntityState): void => {};
+
+const encodeEntityAccountsSection = (state: EntityState, _cold: boolean): string => {
   return encodeCanonicalConsensusValue({
     domain: 'xln.entity.accounts.radix-merkle',
-    radix: ENTITY_ACCOUNT_COMMITMENT_RADIX,
+    radix: ENTITY_ACCOUNT_VALUE_MAP_RADIX,
     hashAlgorithm: 'integrity',
-    leafCount: commitment.leafCount,
-    root: entityAccountCommitmentRoot(commitment),
+    leafCount: state.accounts.size,
+    root: state.accounts.rootHash(),
   });
 };
 
@@ -616,10 +583,10 @@ export const computeEntityConsensusSectionDigestsCold = (
 export const computeEntityAccountDigests = (
   state: EntityState,
 ): ReadonlyArray<Readonly<{ counterpartyId: string; digest: string }>> =>
-  [...entityAccountCommitmentEntries(state.accounts)]
+  [...state.accounts]
     .map(([counterpartyId, account]) => ({
       counterpartyId,
-      digest: accountCommitmentValueHash(account),
+      digest: computeEntityAccountValueHash(account),
     }))
     .sort((left, right) => compareStableText(left.counterpartyId, right.counterpartyId));
 
@@ -629,7 +596,7 @@ export const computeEntityAccountFieldDigests = (
   counterpartyId: string;
   fields: ReadonlyArray<Readonly<{ field: string; digest: string }>>;
 }>> =>
-  [...entityAccountCommitmentEntries(state.accounts)]
+  [...state.accounts]
     .map(([counterpartyId, account]) => ({
       counterpartyId,
       fields: Object.entries(projectAccountConsensusState(account))

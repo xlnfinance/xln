@@ -56,7 +56,10 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { createDefaultDelta } from '../../../account/state/delta';
 
 import { cloneAccountReplica } from '../../../account/state/state-clone';
-import { cloneEntityReplica } from '../../../entity/replica/replica-clone';
+import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
+import { refreshRuntimeCheckpointLineageForEntity } from '../../../storage/replica/entity-lineage';
+import { resolveEntityProposerId } from '../../../runtime/delivery/entity-output-signer';
+import { cloneEntityReplica, forkEntityReplicaForInput } from '../../../entity/replica/replica-clone';
 import { cloneEntityState } from '../../../entity/state-clone';
 
 import { projectAccountDoc, projectEntityCoreDoc } from '../../../storage/read/projections';
@@ -883,11 +886,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     ).not.toBeNull();
 
     const sourceAccount = sourceRegistration.newState.accounts.get(sourceUser)!;
-    sourceAccount.pendingFrame = {
-      ...sourceAccount.currentFrame,
-      height: sourceAccount.currentHeight + 1,
-      accountTxs: structuredClone(sourceAccount.mempool),
-    };
     const targetAccount = targetCommit.newState.accounts.get(targetUser)!;
     const laterTargetPull = structuredClone(targetAccount.mempool[0]);
     if (laterTargetPull?.type !== 'cross_pull_lock' || !laterTargetPull.data.crossJurisdictionRoute) {
@@ -895,7 +893,40 @@ describe('cross-jurisdiction hashledger swap', () => {
     }
     laterTargetPull.data.crossJurisdiction.orderId = `${intent.orderId}-later`;
     laterTargetPull.data.crossJurisdictionRoute.orderId = `${intent.orderId}-later`;
+    const laterSourceTxs = structuredClone(sourceAccount.mempool).map(tx => {
+      if (tx.type === 'cross_pull_lock') {
+        tx.data.crossJurisdiction.orderId = `${intent.orderId}-later`;
+        tx.data.crossJurisdictionRoute.orderId = `${intent.orderId}-later`;
+      }
+      if (tx.type === 'swap_offer' && tx.data.crossJurisdiction) {
+        tx.data.offerId = `${tx.data.offerId}-later`;
+        tx.data.crossJurisdiction.orderId = `${intent.orderId}-later`;
+      }
+      return tx;
+    });
+    sourceAccount.mempool.push(...laterSourceTxs);
     targetAccount.mempool.push(laterTargetPull);
+
+    // A cross-j opening Account frame carries an on-chain recovery proof.
+    // Even when transport could carry many orders, both sibling Accounts must
+    // independently pick the same proof-bounded cohort. One order is therefore
+    // opened at a time and later orders stay queued.
+    const sourceSelected = selectCrossJOpeningAccountProposalTxs(
+      env,
+      sourceRegistration.newState,
+      sourceAccount,
+    );
+    expect(sourceSelected).toHaveLength(2);
+    expect(sourceSelected?.every(tx =>
+      tx.type === 'cross_pull_lock'
+        ? tx.data.crossJurisdiction.orderId === intent.orderId
+        : tx.type === 'swap_offer' && tx.data.crossJurisdiction?.orderId === intent.orderId,
+    )).toBe(true);
+    sourceAccount.pendingFrame = {
+      ...sourceAccount.currentFrame,
+      height: sourceAccount.currentHeight + 1,
+      accountTxs: structuredClone(sourceSelected ?? []),
+    };
     const selected = selectCrossJOpeningAccountProposalTxs(env, targetCommit.newState, targetAccount);
     expect(selected?.map(tx => tx.type)).toEqual(['cross_pull_lock']);
     expect(selected?.[0]?.type === 'cross_pull_lock' && selected[0].data.crossJurisdiction?.orderId).toBe(intent.orderId);
@@ -932,6 +963,11 @@ describe('cross-jurisdiction hashledger swap', () => {
     } as RuntimeReplica['gossip'];
     const sourceState = makeState(sourceHub, sourceHubSigner, sourceJ, sourceUser);
     const targetState = makeState(targetHub, targetHubSigner, targetJ, targetUser);
+    // This fixture starts from a locally trusted genesis, not from an
+    // unpersisted synthetic H1. The first certified link must therefore be H1
+    // with parent `genesis`; otherwise the lineage gate correctly rejects it.
+    sourceState.height = 0;
+    targetState.height = 0;
     sourceState.prevFrameHash = 'genesis';
     targetState.prevFrameHash = 'genesis';
     const intent = withCanonicalCrossJurisdictionRouteHash({
@@ -1039,7 +1075,11 @@ describe('cross-jurisdiction hashledger swap', () => {
     registerTestSigner(saturatedEnv, seed, '1');
     registerTestSigner(saturatedEnv, seed, '2');
     saturatedEnv.gossip = env.gossip;
-    saturatedEnv.state.eReplicas = new Map([...env.state.eReplicas].map(([key, replica]) => [key, cloneEntityReplica(replica)]));
+    registerVerifiedOwnerRoute(saturatedEnv, sourceUser, sourceUserSigner, saturatedEnv.runtimeId!);
+    registerVerifiedOwnerRoute(saturatedEnv, targetUser, targetUserSigner, saturatedEnv.runtimeId!);
+    saturatedEnv.state.eReplicas = new Map(
+      [...env.state.eReplicas].map(([key, replica]) => [key, forkEntityReplicaForInput(replica)]),
+    );
     provisionTestEntityEncryptionKey(saturatedEnv, sourceHub);
     provisionTestEntityEncryptionKey(saturatedEnv, targetHub);
     const saturatedTarget = saturatedEnv.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)!;
@@ -1051,28 +1091,36 @@ describe('cross-jurisdiction hashledger swap', () => {
     const saturated = await applyMergedEntityInputs(saturatedEnv, [sourceInput], [], {
       isReplay: false,
       routingDeps: makeLocalCrossJRoutingDeps(),
+      beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(saturatedEnv, entityId),
     });
     expect(saturated.appliedEntityInputs.map(input => input.entityId)).toEqual([sourceHub]);
     const committedSaturatedTarget = saturatedEnv.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state;
-    expect(committedSaturatedTarget.height).toBe(targetHeight + 1);
+    // Runtime-private account-work causally adds H+1 after registration. The
+    // saturated Entity mempool cannot suppress this already committed work.
+    expect(committedSaturatedTarget.height).toBe(targetHeight + 2);
     expect(committedSaturatedTarget.crossJurisdictionSwaps?.get(intent.orderId)?.routeHash).toBe(intent.routeHash);
     expect(saturatedEnv.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.mempool).toHaveLength(LIMITS.MEMPOOL_SIZE);
 
     sourceState.crossJurisdictionSwaps?.set(secondForwardIntent.orderId, secondForwardIntent);
     targetState.crossJurisdictionSwaps?.set(reverseIntent.orderId, reverseIntent);
+    expect(resolveEntityProposerId(env, sourceUser, 'cross-j-cascade-fixture')).toBe(sourceUserSigner);
+    expect(resolveEntityProposerId(env, targetUser, 'cross-j-cascade-fixture')).toBe(targetUserSigner);
     const pass = await applyMergedEntityInputs(env, [sourceInput, reverseInput], [], {
       isReplay: false,
       routingDeps: makeLocalCrossJRoutingDeps(),
+      beforeEntityApply: entityId => refreshRuntimeCheckpointLineageForEntity(env, entityId),
     });
 
-    expect(env.state.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.height).toBe(sourceHeight + 3);
-    expect(env.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.height).toBe(targetHeight + 3);
+    expect(env.state.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.height).toBe(sourceHeight + 4);
+    expect(env.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.height).toBe(targetHeight + 4);
     expect(
       env.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.crossJurisdictionSwaps?.get(intent.orderId)
         ?.routeHash,
     ).toBe(intent.routeHash);
     expect(pass.appliedEntityInputs.map(input => input.entityId)).toEqual([sourceHub, targetHub]);
     expect(pass.localCrossJurisdictionEventTrace.map(input => input.entityId)).toEqual([
+      sourceHub,
+      targetHub,
       sourceHub,
       targetHub,
       targetHub,
@@ -1082,45 +1130,35 @@ describe('cross-jurisdiction hashledger swap', () => {
       pass.localCrossJurisdictionEventTrace.map(input =>
         input.entityTxs[0]?.type === 'runtimeOutput' ? input.entityTxs[0].data.entityTxs.length : 0,
       ),
-    ).toEqual([2, 2, 1, 1]);
+    ).toEqual([2, 2, 0, 0, 1, 1]);
     const crossJOrderIds = (txs: readonly AccountTx[]): string[] =>
       txs.flatMap(tx => {
         if (tx.type === 'cross_pull_lock') return tx.data.crossJurisdiction?.orderId ?? [];
         if (tx.type === 'swap_offer') return tx.data.crossJurisdiction?.orderId ?? [];
         return [];
       });
-    const registeredOrderIds = new Set([intent.orderId, secondForwardIntent.orderId, reverseIntent.orderId]);
+    const firstAccountFrameOrderIds = new Set([intent.orderId]);
+    const queuedAccountFrameOrderIds = new Set([
+      secondForwardIntent.orderId,
+      reverseIntent.orderId,
+    ]);
     const sourceRegisteredAccount = env.state.eReplicas
       .get(`${sourceHub}:${sourceHubSigner}`)!
       .state.accounts.get(sourceUser)!;
     const targetRegisteredAccount = env.state.eReplicas
       .get(`${targetHub}:${targetHubSigner}`)!
       .state.accounts.get(targetUser)!;
-    expect(sourceRegisteredAccount.pendingFrame).toBeUndefined();
-    expect(targetRegisteredAccount.pendingFrame).toBeUndefined();
-    expect(new Set(crossJOrderIds(sourceRegisteredAccount.mempool))).toEqual(registeredOrderIds);
-    expect(new Set(crossJOrderIds(targetRegisteredAccount.mempool))).toEqual(registeredOrderIds);
-    expect(pass.entityOutbox).toEqual([]);
-
-    const wakePass = await applyMergedEntityInputs(
-      env,
-      [
-        { entityId: sourceHub, signerId: sourceHubSigner, entityTxs: [] },
-        { entityId: targetHub, signerId: targetHubSigner, entityTxs: [] },
-      ],
-      [],
-      { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
-    );
-    const sourceAccount = env.state.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)!.state.accounts.get(sourceUser)!;
-    const targetAccount = env.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state.accounts.get(targetUser)!;
-    expect(new Set(crossJOrderIds(sourceAccount.pendingFrame?.accountTxs ?? []))).toEqual(registeredOrderIds);
-    expect(new Set(crossJOrderIds(targetAccount.pendingFrame?.accountTxs ?? []))).toEqual(registeredOrderIds);
-    expect(sourceAccount.mempool).toEqual([]);
-    expect(targetAccount.mempool).toEqual([]);
-    expect(env.state.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.height).toBe(sourceHeight + 4);
-    expect(env.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.height).toBe(targetHeight + 4);
+    expect(sourceRegisteredAccount.pendingFrame?.height).toBe(1);
+    expect(targetRegisteredAccount.pendingFrame?.height).toBe(1);
+    expect(new Set(crossJOrderIds(sourceRegisteredAccount.pendingFrame?.accountTxs ?? [])))
+      .toEqual(firstAccountFrameOrderIds);
+    expect(new Set(crossJOrderIds(targetRegisteredAccount.pendingFrame?.accountTxs ?? [])))
+      .toEqual(firstAccountFrameOrderIds);
+    expect(new Set(crossJOrderIds(sourceRegisteredAccount.mempool))).toEqual(queuedAccountFrameOrderIds);
+    expect(new Set(crossJOrderIds(targetRegisteredAccount.mempool))).toEqual(queuedAccountFrameOrderIds);
+    expect(pass.entityOutbox.some(output => output.localRuntimeProtocol !== undefined)).toBe(false);
     expect(
-      wakePass.entityOutbox
+      pass.entityOutbox
         .map(output => ({
           entityId: output.entityId,
           txTypes: output.entityTxs?.map(tx => tx.type) ?? [],
@@ -2414,16 +2452,19 @@ describe('cross-jurisdiction hashledger swap', () => {
       targetRetry.newState,
       conflictingUserAuthorizations[0]!.entityTxs![0]!,
     )).rejects.toThrow('CROSS_J_USER_AUTH_CONFLICT');
-    const targetReceivingAccount = env.state.eReplicas
-      .get(`${targetUser}:${targetUserSigner}`)!.state.accounts.get(targetHub)!;
+    const targetReceivingState = env.state.eReplicas
+      .get(`${targetUser}:${targetUserSigner}`)!.state;
+    const targetReceivingAccount = getEntityAccountForWrite(targetReceivingState.accounts, targetHub);
+    if (!targetReceivingAccount) throw new Error('TEST_TARGET_ACCOUNT_MISSING');
     const targetReceivingDelta = targetReceivingAccount.state.deltas.get(1)!;
-    const previousLeftCredit = targetReceivingDelta.leftCreditLimit;
-    const previousRightCredit = targetReceivingDelta.rightCreditLimit;
-    targetReceivingDelta.leftCreditLimit = 0n;
-    targetReceivingDelta.rightCreditLimit = 0n;
+    const originalTargetDeltas = targetReceivingAccount.state.deltas;
+    targetReceivingAccount.state.deltas = originalTargetDeltas.updated(1, {
+      ...targetReceivingDelta,
+      leftCreditLimit: 0n,
+      rightCreditLimit: 0n,
+    });
     await expect(submitCrossJurisdictionIntent(env, result.route)).rejects.toThrow('CROSS_J_TARGET_INBOUND_NOT_READY');
-    targetReceivingDelta.leftCreditLimit = previousLeftCredit;
-    targetReceivingDelta.rightCreditLimit = previousRightCredit;
+    targetReceivingAccount.state.deltas = originalTargetDeltas;
 
     const queued = sourceAuthorization.outputs;
     expect(result.hashlock).toBeUndefined();
@@ -2476,6 +2517,15 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetRegistration = await applyEntityTx(hubEnv, targetHubState, targetHubOutput!.entityTxs![0]!);
     expect(sourceRegistration.accountTxs?.map(op => op.tx.type)).toEqual(['cross_pull_lock', 'swap_offer']);
     expect(targetRegistration.accountTxs?.map(op => op.tx.type)).toEqual(['cross_pull_lock']);
+    expect(sourceRegistration.outputs).toEqual([]);
+    expect(targetRegistration.outputs).toEqual([]);
+    const exactRetry = await applyEntityTx(
+      hubEnv,
+      sourceRegistration.newState,
+      sourceHubOutput!.entityTxs![0]!,
+    );
+    expect(exactRetry.accountTxs).toBeUndefined();
+    expect(exactRetry.outputs).toEqual([]);
     expect((targetRegistration.accountTxs?.[0]?.tx as any).data.crossJurisdiction).toMatchObject({
       orderId: preparedRoute.orderId,
       routeHash: preparedRoute.routeHash,

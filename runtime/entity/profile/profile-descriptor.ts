@@ -91,7 +91,7 @@ export const MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES = LIMITS.MAX_PROFILE_BYTES - MA
 
 const rankedLiquidProfileCapacities = (
   state: EntityState,
-  account: EntityState['accounts'] extends Map<unknown, infer Value> ? Value : never,
+  account: EntityState['accounts'] extends ReadonlyMap<unknown, infer Value> ? Value : never,
 ): Array<{ tokenId: string; capacity: ProfileTokenCapacity; liquidity: bigint }> =>
   [...account.state.deltas.entries()]
     .map(([tokenId, delta]) => {

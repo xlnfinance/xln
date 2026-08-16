@@ -8,6 +8,7 @@ import { dirname, resolve } from 'node:path';
 
 const OUTPUT_PATH = resolve(process.cwd(), '.logs', 'qa', 'agent-progress.jsonl');
 const MAX_TEXT_LENGTH = 140;
+const MAX_STORED_TEXT_LENGTH = 1_000;
 const STALL_LIMIT_MS = 30 * 60 * 1000;
 
 type ProgressEntry = Readonly<{
@@ -49,9 +50,9 @@ const parseEntry = (value: unknown, index: number): ProgressEntry => {
     typeof record['at'] !== 'string' || !Number.isFinite(Date.parse(record['at'])) ||
     typeof record['percent'] !== 'number' || !Number.isInteger(record['percent']) ||
     record['percent'] < 0 || record['percent'] > 100 ||
-    typeof record['focus'] !== 'string' || !record['focus'] || record['focus'].length > MAX_TEXT_LENGTH ||
-    (blocker !== null && (typeof blocker !== 'string' || !blocker || blocker.length > MAX_TEXT_LENGTH)) ||
-    typeof record['next'] !== 'string' || !record['next'] || record['next'].length > MAX_TEXT_LENGTH
+    typeof record['focus'] !== 'string' || !record['focus'] || record['focus'].length > MAX_STORED_TEXT_LENGTH ||
+    (blocker !== null && (typeof blocker !== 'string' || !blocker || blocker.length > MAX_STORED_TEXT_LENGTH)) ||
+    typeof record['next'] !== 'string' || !record['next'] || record['next'].length > MAX_STORED_TEXT_LENGTH
   ) throw new Error(label + '_INVALID');
   return {
     at: record['at'],
@@ -67,9 +68,27 @@ const readEntries = (): ProgressEntry[] => {
     return readFileSync(OUTPUT_PATH, 'utf8')
       .split('\n')
       .filter(Boolean)
-      .map((line, index) => {
+      .flatMap((line, index) => {
+        if (!line.trimStart().startsWith('{')) return [];
         const parsed: unknown = JSON.parse(line);
-        return parseEntry(parsed, index);
+        if (
+          typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) &&
+          Object.keys(parsed).sort().join(',') === 'at,progress,status'
+        ) return [];
+        if (
+          typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) &&
+          Object.keys(parsed).sort().join(',') === 'blocker,focus,next,progress,time'
+        ) {
+          const legacy = parsed as Record<string, unknown>;
+          return [parseEntry({
+            at: legacy['time'],
+            percent: legacy['progress'],
+            focus: legacy['focus'],
+            blocker: legacy['blocker'],
+            next: legacy['next'],
+          }, index)];
+        }
+        return [parseEntry(parsed, index)];
       });
   } catch (error) {
     const code = error instanceof Error && 'code' in error

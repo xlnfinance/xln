@@ -1,117 +1,244 @@
+type CandidateMapRadix = 16 | 256;
+
+type RadixLeaf<K, V> = Readonly<{
+  key: K;
+  token: string;
+  value: V;
+  order: number;
+}>;
+
+type RadixNode<K, V> = Readonly<{
+  leaf?: RadixLeaf<K, V>;
+  children: ReadonlyMap<number, RadixNode<K, V>>;
+}>;
+
+const EMPTY_CHILDREN: ReadonlyMap<number, RadixNode<never, never>> = new Map<
+  number,
+  RadixNode<never, never>
+>();
+
+const candidateKeyToken = (key: unknown): string => {
+  if (typeof key === 'string') return `s:${key}`;
+  if (typeof key === 'number' && Number.isSafeInteger(key)) return `n:${key}`;
+  if (typeof key === 'bigint') return `b:${key}`;
+  throw new Error(`ENTITY_CANDIDATE_MAP_KEY_UNSUPPORTED:${typeof key}`);
+};
+
+const candidateKeyPath = (token: string, radix: CandidateMapRadix): readonly number[] => {
+  const bytes = new TextEncoder().encode(token);
+  if (radix === 256) return [...bytes];
+  const path: number[] = [];
+  for (const byte of bytes) path.push(byte >>> 4, byte & 0x0f);
+  return path;
+};
+
+const radixGet = <K, V>(
+  root: RadixNode<K, V> | undefined,
+  token: string,
+  radix: CandidateMapRadix,
+): RadixLeaf<K, V> | undefined => {
+  let node = root;
+  for (const slot of candidateKeyPath(token, radix)) {
+    node = node?.children.get(slot);
+    if (!node) return undefined;
+  }
+  if (!node) return undefined;
+  return node.leaf?.token === token ? node.leaf : undefined;
+};
+
+const radixSet = <K, V>(
+  node: RadixNode<K, V> | undefined,
+  path: readonly number[],
+  depth: number,
+  leaf: RadixLeaf<K, V>,
+): RadixNode<K, V> => {
+  if (depth === path.length) {
+    return { ...(node?.leaf ? {} : {}), leaf, children: node?.children ?? EMPTY_CHILDREN };
+  }
+  const slot = path[depth];
+  if (slot === undefined) throw new Error('ENTITY_CANDIDATE_RADIX_PATH_INVALID');
+  const children = new Map(node?.children ?? EMPTY_CHILDREN);
+  children.set(slot, radixSet(children.get(slot), path, depth + 1, leaf));
+  return { ...(node?.leaf ? { leaf: node.leaf } : {}), children };
+};
+
+const radixDelete = <K, V>(
+  node: RadixNode<K, V> | undefined,
+  path: readonly number[],
+  depth: number,
+): RadixNode<K, V> | undefined => {
+  if (!node) return undefined;
+  if (depth === path.length) {
+    return node.children.size === 0 ? undefined : { children: node.children };
+  }
+  const slot = path[depth];
+  if (slot === undefined) throw new Error('ENTITY_CANDIDATE_RADIX_PATH_INVALID');
+  const child = radixDelete(node.children.get(slot), path, depth + 1);
+  if (child === node.children.get(slot)) return node;
+  const children = new Map(node.children);
+  if (child) children.set(slot, child);
+  else children.delete(slot);
+  if (children.size === 0 && !node.leaf) return undefined;
+  return { ...(node.leaf ? { leaf: node.leaf } : {}), children };
+};
+
+const collectRadixLeaves = <K, V>(
+  node: RadixNode<K, V> | undefined,
+  leaves: RadixLeaf<K, V>[],
+): void => {
+  if (!node) return;
+  if (node.leaf) leaves.push(node.leaf);
+  for (const child of node.children.values()) collectRadixLeaves(child, leaves);
+};
+
 /**
- * A frame-local Map overlay. Certified entries remain untouched until commit;
- * only keys read for mutation or explicitly replaced allocate candidate data.
+ * Frame-local persistent radix overlay.
+ *
+ * Certified roots are immutable. A candidate stores only dirty keys and commit
+ * path-copies their radix ancestry; rejection drops the candidate. Pure reads
+ * never allocate or claim values for mutation.
  */
 export class EntityCandidateMap<K, V> extends Map<K, V> {
-  readonly #base: Map<K, V>;
+  #root: RadixNode<K, V> | undefined;
   readonly #changes = new Map<K, V>();
   readonly #deleted = new Set<K>();
-  readonly #cloneValue: (value: V) => V;
-  readonly #cloneOnIteration: boolean;
+  readonly #changeOrders = new Map<K, number>();
+  readonly #forkValue: (value: V) => V;
+  readonly #radix: CandidateMapRadix;
+  #baseSize: number;
+  #nextOrder: number;
+  #cleared = false;
+  #sealed = false;
 
   constructor(
     base: Map<K, V>,
-    cloneValue: (value: V) => V,
-    cloneOnIteration: boolean,
+    forkValue: (value: V) => V,
+    _cloneOnIteration = false,
+    radix: CandidateMapRadix = 16,
   ) {
     super();
-    // Pure planners may feed one uncommitted candidate into the next frame
-    // simulation. Never retain an overlay chain: flatten its visible view into
-    // a private Map so later commit cannot reach or mutate an earlier base.
-    this.#base = base instanceof EntityCandidateMap
-      ? base.snapshot()
-      : base;
-    this.#cloneValue = cloneValue;
-    this.#cloneOnIteration = cloneOnIteration;
+    this.#forkValue = forkValue;
+    this.#radix = base instanceof EntityCandidateMap ? base.#radix : radix;
+    if (base instanceof EntityCandidateMap) {
+      const visible = base.#visibleRoot();
+      this.#root = visible.root;
+      this.#baseSize = visible.size;
+      this.#nextOrder = visible.nextOrder;
+      return;
+    }
+    let root: RadixNode<K, V> | undefined;
+    let order = 0;
+    for (const [key, value] of base) {
+      const token = candidateKeyToken(key);
+      root = radixSet(root, candidateKeyPath(token, this.#radix), 0, {
+        key,
+        token,
+        value,
+        order,
+      });
+      order += 1;
+    }
+    this.#root = root;
+    this.#baseSize = base.size;
+    this.#nextOrder = order;
   }
 
   override get size(): number {
-    let size = this.#base.size - this.#deleted.size;
+    if (this.#cleared) return this.#changes.size;
+    let size = this.#baseSize - this.#deleted.size;
     for (const key of this.#changes.keys()) {
-      if (!this.#base.has(key)) size += 1;
+      if (!radixGet(this.#root, candidateKeyToken(key), this.#radix)) size += 1;
     }
     return size;
   }
 
   override has(key: K): boolean {
     return !this.#deleted.has(key) &&
-      (this.#changes.has(key) || this.#base.has(key));
-  }
-
-  #read(key: K): V | undefined {
-    if (this.#deleted.has(key)) return undefined;
-    return this.#changes.has(key)
-      ? this.#changes.get(key)
-      : this.#base.get(key);
+      (this.#changes.has(key) || (!this.#cleared && radixGet(
+        this.#root,
+        candidateKeyToken(key),
+        this.#radix,
+      ) !== undefined));
   }
 
   override get(key: K): V | undefined {
     if (this.#deleted.has(key)) return undefined;
     if (this.#changes.has(key)) return this.#changes.get(key);
-    const certified = this.#base.get(key);
+    if (this.#cleared) return undefined;
+    return radixGet(this.#root, candidateKeyToken(key), this.#radix)?.value;
+  }
+
+  getForWrite(key: K): V | undefined {
+    if (this.#sealed) throw new Error('ENTITY_CANDIDATE_MAP_SEALED');
+    if (this.#deleted.has(key)) return undefined;
+    if (this.#changes.has(key)) return this.#changes.get(key);
+    if (this.#cleared) return undefined;
+    const certified = radixGet(this.#root, candidateKeyToken(key), this.#radix)?.value;
     if (certified === undefined) return undefined;
-    const candidate = this.#cloneValue(certified);
+    const candidate = this.#forkValue(certified);
     this.#changes.set(key, candidate);
     return candidate;
   }
 
   override set(key: K, value: V): this {
+    if (this.#sealed) throw new Error('ENTITY_CANDIDATE_MAP_SEALED');
     this.#deleted.delete(key);
+    if (!this.has(key) && !this.#changeOrders.has(key)) {
+      this.#changeOrders.set(key, this.#nextOrder);
+      this.#nextOrder += 1;
+    }
     this.#changes.set(key, value);
     return this;
   }
 
   override delete(key: K): boolean {
+    if (this.#sealed) throw new Error('ENTITY_CANDIDATE_MAP_SEALED');
     const existed = this.has(key);
     this.#changes.delete(key);
-    if (this.#base.has(key)) this.#deleted.add(key);
+    this.#changeOrders.delete(key);
+    if (!this.#cleared && radixGet(this.#root, candidateKeyToken(key), this.#radix)) {
+      this.#deleted.add(key);
+    }
     return existed;
   }
 
   override clear(): void {
+    if (this.#sealed) throw new Error('ENTITY_CANDIDATE_MAP_SEALED');
     this.#changes.clear();
-    for (const key of this.#base.keys()) this.#deleted.add(key);
+    this.#deleted.clear();
+    this.#changeOrders.clear();
+    this.#cleared = true;
   }
 
   override *keys(): MapIterator<K> {
-    for (const key of this.#base.keys()) {
-      if (!this.#deleted.has(key)) yield key;
-    }
-    for (const key of this.#changes.keys()) {
-      if (!this.#base.has(key)) yield key;
-    }
+    for (const [key] of this.entries()) yield key;
   }
 
   override *values(): MapIterator<V> {
-    for (const key of this.keys()) {
-      const value = this.#cloneOnIteration
-        ? this.get(key)
-        : this.#read(key);
-      if (value !== undefined) yield value;
-    }
+    for (const [, value] of this.entries()) yield value;
   }
 
   override *entries(): MapIterator<[K, V]> {
-    for (const key of this.keys()) {
-      const value = this.#cloneOnIteration
-        ? this.get(key)
-        : this.#read(key);
-      if (value !== undefined) yield [key, value];
+    const leaves: RadixLeaf<K, V>[] = [];
+    if (!this.#cleared) collectRadixLeaves(this.#root, leaves);
+    const visible: Array<RadixLeaf<K, V>> = [];
+    for (const leaf of leaves) {
+      if (this.#deleted.has(leaf.key)) continue;
+      visible.push(this.#changes.has(leaf.key)
+        ? { ...leaf, value: this.#changes.get(leaf.key) as V }
+        : leaf);
     }
-  }
-
-  /**
-   * Read the visible overlay without claiming base values for mutation.
-   *
-   * Subclasses may expose this only to pure projections. Normal iteration
-   * deliberately keeps clone-on-read semantics for reducers that mutate
-   * nested values while iterating.
-   */
-  protected *visibleEntriesWithoutCloning(): MapIterator<[K, V]> {
-    for (const key of this.keys()) {
-      const value = this.#read(key);
-      if (value !== undefined) yield [key, value];
+    for (const [key, value] of this.#changes) {
+      if (!this.#cleared && radixGet(this.#root, candidateKeyToken(key), this.#radix)) continue;
+      visible.push({
+        key,
+        token: candidateKeyToken(key),
+        value,
+        order: this.#changeOrders.get(key) ?? Number.MAX_SAFE_INTEGER,
+      });
     }
+    visible.sort((left, right) => left.order - right.order);
+    for (const leaf of visible) yield [leaf.key, leaf.value];
   }
 
   override [Symbol.iterator](): MapIterator<[K, V]> {
@@ -132,14 +259,22 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
   }
 
   commit(): Map<K, V> {
-    for (const key of this.#deleted) this.#base.delete(key);
-    for (const [key, value] of this.#changes) this.#base.set(key, value);
-    return this.#base;
+    if (this.#sealed) return this;
+    const visible = this.#visibleRoot();
+    this.#root = visible.root;
+    this.#baseSize = visible.size;
+    this.#nextOrder = visible.nextOrder;
+    this.#changes.clear();
+    this.#deleted.clear();
+    this.#changeOrders.clear();
+    this.#cleared = false;
+    this.#sealed = true;
+    return this;
   }
 
   stats(): Readonly<{ base: number; changed: number; deleted: number }> {
     return {
-      base: this.#base.size,
+      base: this.#baseSize,
       changed: this.#changes.size,
       deleted: this.#deleted.size,
     };
@@ -149,47 +284,70 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
   dirtyKeys(): ReadonlySet<K> {
     return new Set([...this.#changes.keys(), ...this.#deleted]);
   }
+
+  #visibleRoot(): Readonly<{
+    root: RadixNode<K, V> | undefined;
+    size: number;
+    nextOrder: number;
+  }> {
+    let root = this.#cleared ? undefined : this.#root;
+    let size = this.#cleared ? 0 : this.#baseSize;
+    for (const key of this.#deleted) {
+      const token = candidateKeyToken(key);
+      if (radixGet(root, token, this.#radix)) size -= 1;
+      root = radixDelete(root, candidateKeyPath(token, this.#radix), 0);
+    }
+    for (const [key, value] of this.#changes) {
+      const token = candidateKeyToken(key);
+      const existing = radixGet(root, token, this.#radix);
+      if (!existing) size += 1;
+      root = radixSet(root, candidateKeyPath(token, this.#radix), 0, {
+        key,
+        token,
+        value,
+        order: existing?.order ?? this.#changeOrders.get(key) ?? this.#nextOrder,
+      });
+    }
+    return { root, size, nextOrder: this.#nextOrder };
+  }
 }
+
+export const getEntityCandidateValueForWrite = <K, V>(
+  map: Map<K, V>,
+  key: K,
+): V | undefined => map instanceof EntityCandidateMap
+  ? map.getForWrite(key)
+  : map.get(key);
+
+export const createEntityValueCandidateMap = <K, V>(
+  source: Map<K, V>,
+  forkValue: (value: V) => V,
+): EntityCandidateMap<K, V> => new EntityCandidateMap(source, forkValue);
+
+export const commitEntityValueCandidateMap = <K, V>(
+  source: Map<K, V>,
+): Map<K, V> => source instanceof EntityCandidateMap ? source.commit() : source;
 
 /**
- * Account iteration is mutation-capable by convention, so it clones values.
- * This protects older reducers that mutate nested Maps inside `for..of`.
+ * Account values are immutable committed views. getForWrite() owns a bounded
+ * replica shell; Account transitions begin their own Patricia overlays and
+ * publish prepared replacements into that shell.
  */
-export class EntityAccountCandidateMap
-  extends EntityCandidateMap<string, AccountReplica> {
-  constructor(base: Map<string, AccountReplica>) {
-    super(base, cloneAccountReplica, true);
-  }
-
-  /** Pure commitment projection that does not claim untouched values for mutation. */
-  entriesForConsensusCommitment(): MapIterator<[string, AccountReplica]> {
-    return this.visibleEntriesWithoutCloning();
-  }
-}
-
 export const createEntityAccountCandidateMap = (
-  accounts: Map<string, AccountReplica>,
+  accounts: PersistentEntityAccountMap,
 ): EntityAccountCandidateMap => new EntityAccountCandidateMap(accounts);
 
-export const snapshotEntityAccountMap = (
-  accounts: Map<string, AccountReplica>,
-): Map<string, AccountReplica> =>
-  accounts instanceof EntityAccountCandidateMap ? accounts.snapshot() : accounts;
-
 export const commitEntityAccountCandidate = (
-  accounts: Map<string, AccountReplica>,
-): Map<string, AccountReplica> =>
-  accounts instanceof EntityAccountCandidateMap ? accounts.commit() : accounts;
+  accounts: PersistentEntityAccountMap | EntityAccountCandidateMap,
+): PersistentEntityAccountMap =>
+  accounts instanceof EntityAccountCandidateMap ? accounts.sealCandidate() : accounts;
 
 export const entityAccountCommitmentEntries = (
-  accounts: Map<string, AccountReplica>,
+  accounts: PersistentEntityAccountMap | EntityAccountCandidateMap,
 ): MapIterator<[string, AccountReplica]> =>
-  accounts instanceof EntityAccountCandidateMap
-    ? accounts.entriesForConsensusCommitment()
-    : accounts.entries();
+  accounts.entries();
 
-const cloneBook = (book: BookState): BookState =>
-  structuredCloneOrThrow(book, 'ENTITY_ORDERBOOK_BOOK_CLONE_FAILED');
+const forkBook = (book: BookState): BookState => forkBookState(book);
 
 const clonePairs = (pairs: string[]): string[] => [...pairs];
 const clonePairDimensions = (dimensions: OrderbookExtState['pairDimensions'] extends Map<string, infer Value>
@@ -202,36 +360,43 @@ const cloneReferral = (
     : never,
 ) => ({ ...referral });
 
+const forkHubProfile = (source: OrderbookExtState['hubProfile']): OrderbookExtState['hubProfile'] => ({
+  ...source,
+  spreadDistribution: { ...source.spreadDistribution },
+  supportedPairs: [...source.supportedPairs],
+});
+
 export const createEntityOrderbookCandidate = (
   source: OrderbookExtState,
 ): OrderbookExtState => ({
-  books: new EntityCandidateMap(source.books, cloneBook, false),
+  books: new EntityCandidateMap(source.books, forkBook, false),
   orderPairs: new EntityCandidateMap(source.orderPairs, clonePairs, false),
   pairDimensions: new EntityCandidateMap(source.pairDimensions, clonePairDimensions, false),
   referrals: new EntityCandidateMap(source.referrals, cloneReferral, false),
-  hubProfile: structuredCloneOrThrow(source.hubProfile, 'ENTITY_ORDERBOOK_PROFILE_CLONE_FAILED'),
+  hubProfile: forkHubProfile(source.hubProfile),
 });
 
-export const snapshotEntityOrderbookCandidate = (
-  source: OrderbookExtState,
-): OrderbookExtState => ({
-  books: source.books instanceof EntityCandidateMap ? source.books.snapshot() : source.books,
-  orderPairs: source.orderPairs instanceof EntityCandidateMap
-    ? source.orderPairs.snapshot()
-    : source.orderPairs,
-  pairDimensions: source.pairDimensions instanceof EntityCandidateMap
-    ? source.pairDimensions.snapshot()
-    : source.pairDimensions,
-  referrals: source.referrals instanceof EntityCandidateMap
-    ? source.referrals.snapshot()
-    : source.referrals,
-  hubProfile: source.hubProfile,
-});
+const commitBookTransition = (book: BookState): BookState => {
+  let committed = book;
+  while (isBookOverlay(committed)) committed = commitBookOverlay(committed);
+  return committed;
+};
+
+const commitOrderbookBooks = (
+  books: Map<string, BookState>,
+): Map<string, BookState> => {
+  if (!(books instanceof EntityCandidateMap)) return books;
+  for (const pairId of books.dirtyKeys()) {
+    const book = books.get(pairId);
+    if (book) books.set(pairId, commitBookTransition(book));
+  }
+  return books.commit();
+};
 
 export const commitEntityOrderbookCandidate = (
   source: OrderbookExtState,
 ): OrderbookExtState => ({
-  books: source.books instanceof EntityCandidateMap ? source.books.commit() : source.books,
+  books: commitOrderbookBooks(source.books),
   orderPairs: source.orderPairs instanceof EntityCandidateMap
     ? source.orderPairs.commit()
     : source.orderPairs,
@@ -243,7 +408,16 @@ export const commitEntityOrderbookCandidate = (
     : source.referrals,
   hubProfile: source.hubProfile,
 });
-import { cloneAccountReplica } from '../../account/state/state-clone';
 import type { AccountReplica } from '../../types/account';
-import type { BookState, OrderbookExtState } from '../../orderbook';
-import { structuredCloneOrThrow } from '../../protocol/serialization/structured-clone';
+import {
+  EntityAccountCandidateMap,
+  type PersistentEntityAccountMap,
+} from './persistent-account-map';
+export { EntityAccountCandidateMap } from './persistent-account-map';
+import {
+  commitBookOverlay,
+  forkBookState,
+  isBookOverlay,
+  type BookState,
+  type OrderbookExtState,
+} from '../../orderbook';

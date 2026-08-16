@@ -1,10 +1,8 @@
-import { LIMITS } from '../../config/constants';
 import { isLeftEntity } from '../../protocol/identity/entity-id';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import {
   FinancialDataCorruptionError,
   validateArray,
-  validateMapInstance,
   validateObject,
   validateString,
 } from '../../protocol/boundary/validation-primitives';
@@ -22,9 +20,9 @@ import {
   validateRequestedRebalanceFeeState,
 } from './rebalance-validation';
 import { normalizeAccountStateDomain } from '../commitment/state-root';
-import { validateSwapHistoryMap } from './swap-history-validation';
 import { assertSwapNetAuthorization } from '../swap/swap-net-authorization';
 import { validateAccountFinancialMaps } from './financial-state-validation';
+import { validateAccountStateCollection } from './collection-validation';
 
 const LENDING_INTENTS = new Set([
   'fund',
@@ -37,7 +35,7 @@ const LENDING_INTENTS = new Set([
 ]);
 
 const validateSwapOffers = (value: unknown, context: string): void => {
-  const offers = validateMapInstance(value, context);
+  const offers = validateAccountStateCollection(value, context);
   for (const [offerId, value] of offers) {
     const offer = validateObject(value, `${context}.${String(offerId)}`);
     try {
@@ -57,7 +55,7 @@ const validateSwapOffers = (value: unknown, context: string): void => {
 
 const validateLendingIntents = (value: unknown, context: string): void => {
   if (value === undefined) return;
-  const intents = validateMapInstance(value, context);
+  const intents = validateAccountStateCollection(value, context);
   for (const [intentId, kind] of intents) {
     if (
       typeof intentId !== 'string' ||
@@ -70,24 +68,6 @@ const validateLendingIntents = (value: unknown, context: string): void => {
       });
     }
   }
-};
-
-const validateSwapHistories = (
-  account: Record<string, unknown>,
-  context: string,
-): void => {
-  validateSwapHistoryMap(
-    account['swapOrderHistory'],
-    `${context}.swapOrderHistory`,
-    LIMITS.MAX_ACCOUNT_SWAP_OFFERS + LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY,
-    'ACCOUNT_SWAP_HISTORY_LIMIT_EXCEEDED',
-  );
-  validateSwapHistoryMap(
-    account['swapClosedOrders'],
-    `${context}.swapClosedOrders`,
-    LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY,
-    'ACCOUNT_TERMINAL_SWAP_HISTORY_LIMIT_EXCEEDED',
-  );
 };
 
 const validatePendingSignatures = (
@@ -126,8 +106,8 @@ const validateRebalanceState = (
     shadow['rebalance'],
     `${context}.shadow.rebalance`,
   );
-  validateMapInstance(rebalance['policy'], `${context}.shadow.rebalance.policy`);
-  validateMapInstance(
+  validateAccountStateCollection(rebalance['policy'], `${context}.shadow.rebalance.policy`);
+  validateAccountStateCollection(
     rebalance['submittedAtByToken'],
     `${context}.shadow.rebalance.submittedAtByToken`,
   );
@@ -179,11 +159,10 @@ function assertAccountReplica(
     `${context}.mempool`,
   );
   decodeAccountFrame(account['currentFrame'], `${context}.currentFrame`);
-  const deltas = validateMapInstance(state['deltas'], `${context}.state.deltas`);
+  const deltas = validateAccountStateCollection(state['deltas'], `${context}.state.deltas`);
   assertAccountDeltaCapacity(deltas.size, `${context}.deltas`);
   validateSwapOffers(state['swapOffers'], `${context}.state.swapOffers`);
   validateAccountFinancialMaps(state, account, context);
-  validateSwapHistories(account, context);
   validateLendingIntents(state['lendingIntents'], `${context}.state.lendingIntents`);
   requireBoundaryInteger(account['currentHeight'], `${context}.currentHeight`);
   validatePendingAccountResend(account, context);

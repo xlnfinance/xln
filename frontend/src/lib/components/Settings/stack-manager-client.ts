@@ -24,6 +24,7 @@ export type StackManagerProbe = RuntimeStackManagerProbe;
 export type StackManagerStatusResponse = Readonly<{
   ok: true;
   status: StackManagerStatus;
+  signerIds: readonly string[];
   probe?: StackManagerProbe;
 }>;
 export type StackManagerDeployRequest = DeployJurisdictionStackRequest;
@@ -100,6 +101,17 @@ const address = (value: unknown, code: string): string => {
   if (!/^0x[0-9a-fA-F]{40}$/.test(result)) throw new Error(code);
   return result;
 };
+const canonicalSignerIds = (value: unknown): readonly string[] => {
+  if (!Array.isArray(value)) throw new Error('STACK_MANAGER_SIGNER_IDS_INVALID');
+  const signerIds = value.map((entry) => address(entry, 'STACK_MANAGER_SIGNER_ID_INVALID'));
+  if (signerIds.some((signerId) => signerId !== signerId.toLowerCase())) {
+    throw new Error('STACK_MANAGER_SIGNER_ID_NOT_CANONICAL');
+  }
+  if (new Set(signerIds).size !== signerIds.length || signerIds.some((value, index) => index > 0 && signerIds[index - 1]! > value)) {
+    throw new Error('STACK_MANAGER_SIGNER_IDS_NOT_SORTED_UNIQUE');
+  }
+  return signerIds;
+};
 const transactionHash = (value: unknown, code: string): string => {
   const result = nonEmpty(value, code);
   if (!/^0x[0-9a-fA-F]{64}$/.test(result)) throw new Error(code);
@@ -132,10 +144,15 @@ const decodeProbe = (value: unknown): StackManagerProbe => {
 };
 export const decodeStackManagerStatusResponse = (value: unknown): StackManagerStatusResponse => {
   const raw = record(value, 'STACK_MANAGER_STATUS_RESPONSE_INVALID');
-  exactKeys(raw, ['ok', 'status'], ['probe'], 'STACK_MANAGER_STATUS_RESPONSE_KEYS_INVALID');
+  exactKeys(raw, ['ok', 'status', 'signerIds'], ['probe'], 'STACK_MANAGER_STATUS_RESPONSE_KEYS_INVALID');
   literal(raw['ok'], true, 'STACK_MANAGER_STATUS_RESPONSE_NOT_OK');
   const probe = raw['probe'] === undefined ? undefined : decodeProbe(raw['probe']);
-  return { ok: true, status: decodeStatus(raw['status']), ...(probe ? { probe } : {}) };
+  return {
+    ok: true,
+    status: decodeStatus(raw['status']),
+    signerIds: canonicalSignerIds(raw['signerIds']),
+    ...(probe ? { probe } : {}),
+  };
 };
 const decodeContracts = (value: unknown): StackContractAddresses => {
   const raw = record(value, 'STACK_MANAGER_CONTRACTS_INVALID');
@@ -247,27 +264,31 @@ const responseJson = async (response: Response, code: string): Promise<unknown> 
   return value;
 };
 export const fetchStackManagerStatus = async (
+  runtimeApiOrigin: string,
   rpcUrl: string,
   signerId: string,
   adminCapability: string,
   fetcher: FetchLike = fetch,
 ): Promise<StackManagerStatusResponse> => {
   if (!adminCapability) throw new Error('STACK_MANAGER_ADMIN_CAPABILITY_REQUIRED');
-  const query = new URLSearchParams({ rpcUrl });
+  const query = new URLSearchParams();
+  if (rpcUrl) query.set('rpcUrl', rpcUrl);
   if (signerId) query.set('signerId', signerId);
-  const response = await fetcher(`/api/stack-manager/status?${query.toString()}`, {
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  const response = await fetcher(new URL(`/api/stack-manager/status${suffix}`, runtimeApiOrigin), {
     cache: 'no-store',
     headers: { authorization: `Bearer ${adminCapability}` },
   });
   return decodeStackManagerStatusResponse(await responseJson(response, 'STACK_MANAGER_STATUS'));
 };
 export const deployStack = async (
+  runtimeApiOrigin: string,
   request: StackManagerDeployRequest,
   adminCapability: string,
   fetcher: FetchLike = fetch,
 ): Promise<StackManagerDeployResponse> => {
   if (!adminCapability) throw new Error('STACK_MANAGER_ADMIN_CAPABILITY_REQUIRED');
-  const response = await fetcher('/api/control/stack-manager/deploy', {
+  const response = await fetcher(new URL('/api/control/stack-manager/deploy', runtimeApiOrigin), {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${adminCapability}` },
     body: safeStringify({ stackVersion: STACK_VERSION, ...request }),

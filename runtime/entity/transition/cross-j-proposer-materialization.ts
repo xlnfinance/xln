@@ -208,6 +208,16 @@ type CrossJOpeningGroup = Readonly<{
  */
 const CROSS_J_OPENING_COHORT_MAX_TX_BYTES = 256 * 1024;
 
+/**
+ * Every opening order adds recovery clauses to both Accounts' signed
+ * on-chain ProofBody. The proof has a much smaller hard limit than transport
+ * (8KB today), and the two Accounts can have different pre-existing proof
+ * bodies. Keeping one order per atomic opening cohort is the only static bound
+ * that both sides can select independently without signing mismatched cohorts.
+ * Later orders remain queued and are proposed after this pair commits.
+ */
+const CROSS_J_OPENING_COHORT_MAX_ORDERS = 1;
+
 const approximateAccountTxBytes = (txs: readonly AccountTx[]): number =>
   txs.reduce((total, tx) => total + safeStringify(tx).length, 0);
 
@@ -222,6 +232,7 @@ const fitOpeningCohort = (
   let localBytes = 0;
   let siblingBytes = 0;
   for (const orderId of candidateOrderIds) {
+    if (selected.size >= CROSS_J_OPENING_COHORT_MAX_ORDERS) break;
     const oneOrder = new Set([orderId]);
     const nextLocalTxs = selectOpeningTxs(localTxs, oneOrder);
     const nextSiblingTxs = selectOpeningTxs(siblingTxs, oneOrder);

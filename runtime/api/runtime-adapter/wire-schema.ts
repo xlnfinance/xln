@@ -16,6 +16,7 @@ import type {
   RuntimeAdapterResponse,
 } from './types';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
+import { decodeSettlementEvidenceRequest } from './control/settlement-evidence';
 
 export type RuntimeAdapterWireMessage = RuntimeAdapterRequest | RuntimeAdapterResponse | RuntimeAdapterPush;
 
@@ -241,7 +242,7 @@ function assertRequest(
       break;
     case 'control':
       requireExactBoundaryKeys(message, ['v', 'id', 'op', 'action'], [], 'RADAPTER_REQUEST_CONTROL_FIELDS_INVALID');
-      if (message['action'] !== 'verify-chain') throw new Error('RADAPTER_REQUEST_CONTROL_ACTION_INVALID');
+      if (message['action'] !== 'verify-chain') decodeSettlementEvidenceRequest(message['action']);
       break;
     case 'brainvault-derive': {
       requireExactBoundaryKeys(

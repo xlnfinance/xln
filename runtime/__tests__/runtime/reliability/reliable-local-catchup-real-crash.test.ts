@@ -12,7 +12,10 @@ import {
   processRuntime,
 } from '../../../runtime';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
-import { readStorageFrameRecord } from '../../../storage';
+import {
+  readStorageFramePayloads,
+  readStorageFrameRecord,
+} from '../../../storage';
 import {
   createCatchupFixtureState,
   deriveCatchupFixtureSigners,
@@ -78,7 +81,9 @@ test('restores H+1 and deferred H+2 from LevelDB after real SIGKILL', async () =
     const h2Hash = restored.pendingNetworkOutputs?.[0]?.proposedFrame?.hash;
     expect(h2Hash).toMatch(/^0x[0-9a-f]{64}$/);
     const frame = await readStorageFrameRecord(getRuntimeWalDb(restored), 2);
-    expect(frame?.runtimeMachine).toBeTruthy();
+    if (!frame) throw new Error('CATCHUP_CRASH_FRAME_MISSING:2');
+    const payloads = await readStorageFramePayloads(getRuntimeWalDb(restored), frame);
+    expect(payloads.runtimeMachine).toBeTruthy();
     expect(frame?.pendingRuntimeInput?.entityInputs.map(input => input.proposedFrame?.height)).toEqual([2]);
     expect(frame?.runtimeStateHash).toBe(computeCanonicalStateHashFromEnv(restored));
 

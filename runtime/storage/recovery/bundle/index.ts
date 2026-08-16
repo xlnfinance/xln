@@ -161,8 +161,7 @@ const normalizeAndValidateBundleFields = (
       }
       if (
         frame.replicaMetaStateMode !== 'live-head' &&
-        frame.replicaMetaStateMode !== 'shared-entity-state' &&
-        frame.replicaMetaStateMode !== 'full'
+        frame.replicaMetaStateMode !== 'shared-entity-state'
       ) {
         throw new Error(`RECOVERY_BUNDLE_JOURNAL_REPLICA_META_STATE_MODE_REQUIRED:height=${frameHeight}`);
       }

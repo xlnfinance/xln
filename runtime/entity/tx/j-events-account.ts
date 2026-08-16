@@ -3,6 +3,7 @@ import {
   compareCanonicalJurisdictionEvents,
   requireCanonicalJurisdictionEvents,
 } from '../../jurisdiction/machine/events/event-normalization';
+import { compareStableText } from '../../protocol/serialization';
 import type { JEventClaimTx, JEventAccountTx } from './j-events-types';
 
 const isJEventClaimOp = (
@@ -57,9 +58,9 @@ export function mergeJEventClaimOps(ops: JEventAccountTx[]): void {
   }
   const claims = ops.filter(isJEventClaimOp).sort(
     (left, right) =>
-      left.accountId.localeCompare(right.accountId) ||
+      compareStableText(left.accountId, right.accountId) ||
       left.tx.data.jHeight - right.tx.data.jHeight ||
-      left.tx.data.jBlockHash.localeCompare(right.tx.data.jBlockHash),
+      compareStableText(left.tx.data.jBlockHash, right.tx.data.jBlockHash),
   );
   let claimIndex = 0;
   for (let index = 0; index < ops.length; index += 1) {

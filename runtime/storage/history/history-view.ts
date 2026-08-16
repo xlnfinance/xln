@@ -2,6 +2,7 @@ import type { EntityTx } from '../../types/entity-tx';
 import type { FrameLogEntry } from '../../types/logging';
 import type { JInput } from '../../jurisdiction/machine/input';
 import type { RuntimeHistoryRecord, RuntimeInput } from '../../runtime/types';
+import type { AccountTx } from '../../types/account';
 import { cloneIsolatedEntityTxs } from '../../entity/state/input-clone';
 import { decodeValidatedBuffer, encodeBuffer, writeBatch } from '../codec/codec';
 import { deleteKeyRange, iterateKeys, readRawOrNull } from '../database/level';
@@ -10,18 +11,25 @@ import {
   KEY_HISTORY_VIEW_HEAD,
   STORAGE_SCHEMA_VERSION,
   encodeHeight,
+  decodeHeight,
   keyHistoryViewAccountFrame,
   keyHistoryViewAccountFramePrefix,
+  keyHistoryViewAccountSwapEvent,
+  keyHistoryViewAccountSwapEventPrefix,
+  keyHistoryViewAccountSwapRecency,
+  keyHistoryViewAccountSwapRecencyPrefix,
   keyHistoryViewEntityFrame,
   keyHistoryViewEntityFramePrefix,
   keyHistoryViewRuntimeActivity,
   normalizeEntityId,
   parseHistoryViewAccountFrameKey,
+  parseHistoryViewAccountSwapRecencyKey,
   parseHistoryViewEntityFrameKey,
 } from '../keys';
 import {
   validateHistoryViewHeadValue,
   validateStoredAccountFrameValue,
+  validateStoredAccountSwapEventValue,
   validateStoredEntityFrameValue,
   validateStoredRuntimeActivityValue,
 } from './history-view-schema';
@@ -46,6 +54,16 @@ export type StoredAccountFrameValue = {
   frame: Extract<RuntimeHistoryRecord, { kind: 'accountFrame' }>['frame'];
   runtimeHeight: number;
   timestamp: number;
+};
+
+/** A raw certified order-lifecycle transaction. Its two index keys are disposable. */
+export type StoredAccountSwapEventValue = {
+  runtimeHeight: number;
+  timestamp: number;
+  accountHeight: number;
+  tx: Extract<AccountTx, {
+    type: 'swap_offer' | 'swap_cancel_request' | 'swap_resolve' | 'cross_swap_fill_ack';
+  }>;
 };
 
 export type StoredEntityFrameRecord = Extract<RuntimeHistoryRecord, { kind: 'entityFrame' }> & {
@@ -123,6 +141,29 @@ export const buildCertifiedFramePuts = (options: {
       key: keyHistoryViewAccountFrame(entityId, counterpartyId, Math.floor(accountHeight)),
       value: encodeBuffer(stored),
     });
+    for (const tx of record.frame.accountTxs) {
+      if (
+        tx.type !== 'swap_offer'
+        && tx.type !== 'swap_cancel_request'
+        && tx.type !== 'swap_resolve'
+        && tx.type !== 'cross_swap_fill_ack'
+      ) continue;
+      const event: StoredAccountSwapEventValue = {
+        runtimeHeight: stored.runtimeHeight,
+        timestamp: stored.timestamp,
+        accountHeight,
+        tx: structuredClone(tx),
+      };
+      const encoded = encodeBuffer(event);
+      puts.push({
+        key: keyHistoryViewAccountSwapEvent(entityId, counterpartyId, tx.data.offerId, accountHeight),
+        value: encoded,
+      });
+      puts.push({
+        key: keyHistoryViewAccountSwapRecency(entityId, counterpartyId, accountHeight, tx.data.offerId),
+        value: encoded,
+      });
+    }
   }
   return puts;
 };
@@ -229,6 +270,7 @@ export const reconcileHistoryViews = async (options: {
   firstWalHeight: number;
   latestWalHeight: number;
   readWalFrame: (height: number) => Promise<RuntimeFrame | null>;
+  readWalActivity: (height: number) => Promise<StoredRuntimeActivityValue | null>;
   config: Required<StorageRuntimeConfig>;
 }): Promise<{ materializedThroughRuntimeHeight: number; writtenBytes: number }> => {
   const firstWalHeight = Math.max(1, Math.floor(Number(options.firstWalHeight)));
@@ -266,14 +308,16 @@ export const reconcileHistoryViews = async (options: {
   for (let height = head.latestHeight + 1; height <= latestWalHeight; height += 1) {
     const frame = await options.readWalFrame(height);
     if (!frame) throw new Error(`HISTORY_VIEW_WAL_FRAME_MISSING:height=${height}`);
+    const activity = await options.readWalActivity(height);
+    if (!activity) throw new Error(`HISTORY_VIEW_WAL_ACTIVITY_MISSING:height=${height}`);
     const puts = buildHistoryViewPuts({
       height: frame.height,
-      timestamp: frame.timestamp,
+      timestamp: activity.timestamp,
       runtimeInput: frame.runtimeInput,
-      logs: frame.activityLogs,
-      touchedEntities: frame.touchedEntities,
-      touchedAccounts: frame.touchedAccounts,
-      touchedBookEntities: frame.touchedBookEntities,
+      logs: activity.logs,
+      touchedEntities: activity.touchedEntities,
+      touchedAccounts: activity.touchedAccounts,
+      touchedBookEntities: activity.touchedBookEntities,
     });
     const plan = await prepareHistoryViewCommit({
       db: options.viewDb,
@@ -454,6 +498,46 @@ export const readHistoryViewAccountFrames = async (
     if (records.length >= limit) break;
   }
   return records.sort((left, right) => left.accountHeight - right.accountHeight);
+};
+
+export const readHistoryViewAccountSwapEvents = async (
+  db: RuntimeDbLike,
+  entityId: string,
+  counterpartyId: string,
+  offerId: string,
+  maxRuntimeHeight = Number.MAX_SAFE_INTEGER,
+): Promise<StoredAccountSwapEventValue[]> => {
+  const prefix = keyHistoryViewAccountSwapEventPrefix(entityId, counterpartyId, offerId);
+  const events: StoredAccountSwapEventValue[] = [];
+  for await (const key of iterateKeys(db, { prefix })) {
+    const accountHeight = decodeHeight(key, key.byteLength - 8);
+    const event = decodeValidatedBuffer(
+      await db.get(key),
+      decoded => validateStoredAccountSwapEventValue(decoded, accountHeight),
+    );
+    if (event.runtimeHeight <= maxRuntimeHeight) events.push(event);
+  }
+  return events.sort((left, right) => left.accountHeight - right.accountHeight);
+};
+
+export const readHistoryViewAccountSwapRecency = async (
+  db: RuntimeDbLike,
+  entityId: string,
+  counterpartyId: string,
+  options: Readonly<{ maxRuntimeHeight?: number }> = {},
+): Promise<Array<StoredAccountSwapEventValue & { offerId: string }>> => {
+  const maxRuntimeHeight = options.maxRuntimeHeight ?? Number.MAX_SAFE_INTEGER;
+  const prefix = keyHistoryViewAccountSwapRecencyPrefix(entityId, counterpartyId);
+  const events: Array<StoredAccountSwapEventValue & { offerId: string }> = [];
+  for await (const key of iterateKeys(db, { prefix, reverse: true })) {
+    const { accountHeight, offerId } = parseHistoryViewAccountSwapRecencyKey(key);
+    const event = decodeValidatedBuffer(
+      await db.get(key),
+      decoded => validateStoredAccountSwapEventValue(decoded, accountHeight),
+    );
+    if (event.runtimeHeight <= maxRuntimeHeight) events.push({ ...event, offerId });
+  }
+  return events;
 };
 
 export const readHistoryViewEntityFrames = async (

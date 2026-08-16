@@ -5,23 +5,12 @@ import { HEAVY_LOGS } from '../../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
 import { cloneAccountFrame } from '../../state/state-clone';
 import { getAccountPerspective } from '../../state/perspective';
-import { applyAccountTx } from '../../tx/apply';
-import { assertNever } from '../../tx/apply-result';
-import type { ApplyAccountTxOk } from '../../tx/apply-types';
 import { deriveAccountFrameTokenIds } from '../../state/frame';
 import { appendAccountMempoolTxs } from '../../input/mempool';
-import {
-  commitStagedAccountCommitmentCache,
-  discardStagedAccountCommitmentCache,
-} from '../../commitment/map-commitment';
 import type { AccountJClaimSession } from '../../j-claims/j-claim-session';
 import type { AccountInputSecurityContext } from '../dispute/deadline-policy';
 import { accountInputAck, accountInputProposal } from '../flush';
-import {
-  assertNoUnilateralSettlementMutation,
-  captureSettlementVector,
-  runPostFrameAutoRebalanceCheck,
-} from '../helpers';
+import { runPostFrameAutoRebalanceCheck } from '../helpers';
 import { assertLiveCommitMatchesFrame } from './commit-root';
 import {
   getDisputeSealRequirementError,
@@ -30,6 +19,7 @@ import {
 } from '../dispute/seal';
 import type { HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
+import { commitAccountFrameTransition } from '../frame/commit-transition';
 
 const ackLog = createStructuredLogger('account.ack');
 
@@ -141,25 +131,6 @@ const verifyPendingAckCertificate = async (
   return { kind: 'continue', ack, ackHanko: ack.frameHanko, frameHash };
 };
 
-const collectAckCommitOkOutcome = (
-  result: ApplyAccountTxOk,
-  timedOutHashlocks: string[],
-): void => {
-  switch (result.outcome) {
-    case 'htlc_error':
-      timedOutHashlocks.push(result.hashlock);
-      return;
-    case 'applied':
-    case 'htlc_secret':
-    case 'swap_offer_created':
-    case 'swap_cancel_requested':
-    case 'swap_cancelled':
-      return;
-    default:
-      assertNever(result);
-  }
-};
-
 const applyPendingFrameTransactions = async (
   context: AccountConsensusContext,
   account: AccountReplica,
@@ -168,39 +139,15 @@ const applyPendingFrameTransactions = async (
   timedOutHashlocks: string[],
   candidateEffects: AccountOutput[],
 ): Promise<void> => {
-  const jHeight = pendingFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
-  for (const tx of pendingFrame.accountTxs) {
-    const beforeSettlement = captureSettlementVector(account);
-    const result = await applyAccountTx(
-      account,
-      tx,
-      pendingFrame.byLeft,
-      pendingFrame.timestamp,
-      jHeight,
-      false,
-      context,
-      committedJClaims,
-    );
-    candidateEffects.push(...(result.candidateEffects ?? []));
-    if (!result.ok) {
-      ackLog.error('frame.commit.failed', {
-        side: 'proposer',
-        type: tx.type,
-        error: result.rejection.message,
-      });
-      throw new Error(
-        `Frame ${pendingFrame.height} commit failed: ${tx.type} - ${result.rejection.message}`,
-      );
-    }
-    assertNoUnilateralSettlementMutation(
-      account,
-      beforeSettlement,
-      tx,
-      'proposer/commit',
-    );
-    collectAckCommitOkOutcome(result, timedOutHashlocks);
-  }
-  commitStagedAccountCommitmentCache(account.state);
+  const committed = await commitAccountFrameTransition({
+    context,
+    account,
+    frame: pendingFrame,
+    jClaimSession: committedJClaims,
+    role: 'proposer/commit',
+  });
+  candidateEffects.push(...committed.candidateEffects);
+  timedOutHashlocks.push(...committed.timedOutHashlocks);
   assertLiveCommitMatchesFrame(
     account,
     pendingFrame.accountStateRoot,
@@ -218,7 +165,7 @@ const installPendingFrameCommit = (
   validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
   committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
 ): number => {
-  account.currentFrame = structuredClone(pendingFrame);
+  account.currentFrame = cloneAccountFrame(pendingFrame);
   account.currentHeight = pendingFrame.height;
   // The ACK is the second half of this bilateral certificate. It must survive
   // so a later board rotation can prove that both parties committed the frame.
@@ -237,7 +184,6 @@ const installPendingFrameCommit = (
 
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  discardStagedAccountCommitmentCache(account.state);
   if (
     account.lastOutboundFrameAck
     && Number(account.lastOutboundFrameAck.height) < Number(pendingFrame.height)

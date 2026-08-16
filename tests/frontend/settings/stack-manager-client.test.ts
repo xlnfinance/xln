@@ -12,6 +12,7 @@ import {
 import { createJurisdictionGossipAnnouncement } from '../../../runtime/jurisdiction/gossip/announcement';
 
 const ADDRESS = '0x1111111111111111111111111111111111111111';
+const MIXED_CASE_ADDRESS = '0xAbCdEfabcdefabcdefabcdefabcdefabcdefabcd';
 const SIGNER_KEY = `0x${'22'.repeat(32)}`;
 const SIGNER = new Wallet(SIGNER_KEY).address.toLowerCase();
 const TX_HASH = `0x${'a'.repeat(64)}`;
@@ -63,6 +64,7 @@ describe('Stack Manager browser boundary', () => {
     const valid = {
       ok: true,
       status: { phase: 'idle', active: false, updatedAt: '2026-08-14T08:00:00.000Z' },
+      signerIds: [ADDRESS],
       probe: { rpcUrl: 'https://arb.example/rpc', chainId: 42161, signerId: ADDRESS, nativeBalanceWei: '1000000000000000000' },
     };
     expect(decodeStackManagerStatusResponse(valid).probe?.chainId).toBe(42161);
@@ -71,6 +73,14 @@ describe('Stack Manager browser boundary', () => {
       ...valid,
       status: { ...valid.status, updatedAt: 'yesterday' },
     })).toThrow('STACK_MANAGER_UPDATED_AT_INVALID');
+    expect(() => decodeStackManagerStatusResponse({
+      ...valid,
+      signerIds: [ADDRESS, ADDRESS],
+    })).toThrow('STACK_MANAGER_SIGNER_IDS_NOT_SORTED_UNIQUE');
+    expect(() => decodeStackManagerStatusResponse({
+      ...valid,
+      signerIds: [MIXED_CASE_ADDRESS],
+    })).toThrow('STACK_MANAGER_SIGNER_ID_NOT_CANONICAL');
   });
 
   test('decodes canonical V1 deployment evidence and publication state', () => {
@@ -118,21 +128,23 @@ describe('Stack Manager browser boundary', () => {
   test('uses encoded probe query and keeps admin capability out of deployment JSON', async () => {
     let statusUrl = '';
     let statusInit: RequestInit | undefined;
-    await fetchStackManagerStatus('https://arb.example/rpc?a=1', ADDRESS, 'admin-secret', async (input, init) => {
+    await fetchStackManagerStatus('https://runtime.example', 'https://arb.example/rpc?a=1', ADDRESS, 'admin-secret', async (input, init) => {
       statusUrl = String(input);
       statusInit = init;
       return Response.json({
         ok: true,
         status: { phase: 'idle', active: false, updatedAt: '2026-08-14T08:00:00.000Z' },
+        signerIds: [ADDRESS],
         probe: { rpcUrl: 'https://arb.example/rpc?a=1', chainId: 42161, signerId: ADDRESS, nativeBalanceWei: '1' },
       });
     });
+    expect(statusUrl).toStartWith('https://runtime.example/api/stack-manager/status?');
     expect(statusUrl).toContain('rpcUrl=https%3A%2F%2Farb.example%2Frpc%3Fa%3D1');
     expect(statusUrl).toContain(`signerId=${ADDRESS}`);
     expect(new Headers(statusInit?.headers).get('authorization')).toBe('Bearer admin-secret');
 
     let captured: RequestInit | undefined;
-    await deployStack({
+    await deployStack('https://runtime.example', {
       name: 'Arbitrum One',
       key: 'arbitrum-one',
       rpcUrl: 'https://arb.example/rpc',
@@ -160,9 +172,14 @@ describe('Stack Manager browser boundary', () => {
     const component = readFileSync('frontend/src/lib/components/Settings/StackManager.svelte', 'utf8');
     expect(panel).toContain('data-testid="settings-stack-manager-tab"');
     expect(panel).toContain('<StackManager />');
-    expect(component).toContain('getRuntimeControllerConfig()?.authKey');
+    expect(component).toContain('String(runtimeControllerConfig.authKey');
+    expect(component).toContain('runtimeHttpOriginFromWsUrl(runtimeControllerConfig.wsUrl)');
     expect(component).not.toContain('stack-manager-capability');
     expect(component).not.toContain('Daemon admin capability');
+    expect(component).toContain('data-testid="stack-manager-stablecoin"');
+    expect(component).toContain('data-testid="stack-manager-confirmations"');
+    expect(component).toContain("fetchStackManagerStatus(apiOrigin, '', '', capability)");
+    expect(component).not.toContain('activeRuntime');
     expect(component).not.toContain('localStorage');
     expect(component).not.toContain('sessionStorage');
   });

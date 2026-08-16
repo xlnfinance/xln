@@ -1,6 +1,29 @@
-import type { AccountDisputeSeal, AccountFrame, AccountFrameAck, AccountFrameProposal, AccountInput, AccountTx } from '../../types/account';
+import type {
+  AccountDisputeSeal,
+  AccountFrame,
+  AccountFrameAck,
+  AccountFrameProposal,
+  AccountInput,
+  AccountState,
+  AccountStateDomain,
+  AccountTx,
+} from '../../types/account';
+import { cloneIsolatedProtocolValue } from './isolated-value-clone';
 
-export const cloneIsolatedAccountTx = <T extends AccountTx>(tx: T): T => structuredClone(tx);
+export const copyAccountStateDomain = (domain: AccountStateDomain): AccountStateDomain => ({
+  chainId: domain.chainId,
+  depositoryAddress: domain.depositoryAddress,
+});
+
+export const copyAccountDisputeConfig = (
+  config: AccountState['disputeConfig'],
+): AccountState['disputeConfig'] => ({
+  leftResponseSeconds: config.leftResponseSeconds,
+  rightResponseSeconds: config.rightResponseSeconds,
+});
+
+export const cloneIsolatedAccountTx = <T extends AccountTx>(tx: T): T =>
+  cloneIsolatedProtocolValue(tx, 'ACCOUNT_TX_CLONE');
 
 export const cloneIsolatedAccountFrame = (frame: AccountFrame): AccountFrame => ({
   height: frame.height,
@@ -32,8 +55,8 @@ export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
   const base = {
     fromEntityId: input.fromEntityId,
     toEntityId: input.toEntityId,
-    domain: structuredClone(input.domain),
-    disputeConfig: structuredClone(input.disputeConfig),
+    domain: copyAccountStateDomain(input.domain),
+    disputeConfig: copyAccountDisputeConfig(input.disputeConfig),
     ...(input.watchSeed !== undefined ? { watchSeed: input.watchSeed } : {}),
   };
   switch (input.kind) {

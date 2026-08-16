@@ -3,6 +3,7 @@ import { safeStringify } from '../../../protocol/serialization';
 import type { RuntimeInputApplyResult } from '../../../runtime/frame/apply';
 import type { RuntimeReplica } from '../../../runtime/types';
 import { computeStoragePostStateHash } from '../..';
+import { computeRuntimePostStateComponentDigests } from '../../hashes';
 import { computeCanonicalStateHashFromEnv } from '../../canonical-hash';
 import {
   applyCertifiedEntityLineagePlan,
@@ -19,7 +20,7 @@ import {
 import type { PersistedFrameJournal } from '../../types';
 import {
   buildDurableRuntimeMachineSnapshot,
-  buildReplayVerifiableRuntimeMachineSnapshot,
+  buildReplayVerifiableRuntimePostStateView,
 } from '../../wal/snapshot';
 import {
   assertRecoveryRuntimeMachineMatches,
@@ -33,7 +34,7 @@ export const verifyRecoveryJournalFrame = (
   height: number,
   result: RuntimeInputApplyResult,
 ): void => {
-  const expectedEntityContexts = encodeCanonicalConsensusValue(frame.entityContexts);
+  const expectedEntityContexts = encodeCanonicalConsensusValue(frame.entityContexts ?? new Map());
   const actualEntityContexts = encodeCanonicalConsensusValue(result.entityContexts);
   if (actualEntityContexts !== expectedEntityContexts) {
     throw new Error(
@@ -48,10 +49,7 @@ export const verifyRecoveryJournalFrame = (
     ? buildRuntimeCheckpointLineagePlan(env)
     : null;
   const commitment = lineage
-    ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(env, lineage, {
-        omitIntermediateSingleSignerState:
-          frame.replicaMetaStateMode === 'shared-entity-state',
-      })
+    ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(env, lineage)
     : buildStorageLiveReplicaMetaCommitment(env);
   if (commitment.digest !== frame.replicaMetaDigest) {
     const inputs = frame.runtimeInput.entityInputs.map(input => ({
@@ -81,10 +79,13 @@ export const verifyRecoveryJournalFrame = (
     height,
     timestamp: env.state.timestamp,
     replicaMetaDigest: commitment.digest,
-    runtimeMachine: buildReplayVerifiableRuntimeMachineSnapshot(env, {
-      pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-      excludePersistedHistoryRecords: true,
-    }),
+    runtimeComponentDigests: computeRuntimePostStateComponentDigests(
+      buildReplayVerifiableRuntimePostStateView(env, {
+        pendingNetworkOutputs: [],
+        excludePersistedHistoryRecords: true,
+      }),
+    ),
+    runtimeOutputRefs: frame.runtimeOutputRefs ?? [],
   });
   if (postStateHash !== frame.postStateHash) {
     throw new Error(

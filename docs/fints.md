@@ -523,6 +523,70 @@ retry results and never reach this boundary.
 - Tests MUST cover both modes and prove identical committed bytes/effects for
   equivalent certified inputs.
 
+### 10.6 Persistent candidates, never machine clones
+
+Runtime and Entity state are unbounded financial indexes. Their candidate and
+durability paths MUST use persistent overlays and dirty Merkle branches; a
+frame may never copy or traverse the whole machine merely to isolate a
+candidate, compute a root, or append the WAL.
+
+- `RuntimeReplica` and `RuntimeState` are never cloned.
+- `EntityReplica`, `EntityState`, their Account map, and their orderbook maps
+  are never cloned as a unit. Reads do not claim or copy values for mutation.
+- Candidate writes path-copy only the touched branch and replace its hashes up
+  to the committed root. Certification publishes that overlay atomically;
+  rejection drops it without mutating committed state.
+- `AccountReplica` and `AccountState` are not cloned. Account, Entity, Book and
+  Runtime overlays are separate ephemeral transition caches outside every
+  committed `*State` and live `*Replica`; an Entity candidate receives only the
+  resulting touched Account roots/nodes, never ownership of Account overlays.
+- An overlay cache key binds machine identity, committed base root, and the
+  ordered input-prefix/proposed-frame hash. It may be evicted at any time and
+  MUST deterministically rebuild from the committed root plus authoritative WAL
+  inputs. Certification publishes only immutable nodes and the new root;
+  rejection drops the cache without cleanup writes.
+- Live replicas contain no historical frame/order/event collections. Runtime,
+  Entity and Account certified frame histories are separate LevelDB/WAL logs
+  read on demand. Live state retains only the current committed head/root and
+  bounded in-flight coordination required to finish that head.
+- WAL frames retain the applied input and compact commitments. Full Runtime or
+  Entity snapshots are not constructed on the frame path; checkpoint writers
+  stream immutable CAS nodes already reachable from committed roots.
+- Any new clone of a Runtime/Entity/Book object, including through a helper or
+  clone-on-read collection, is a product-gate failure.
+
+The canonical overlay API follows the cascade instead of pretending that all
+roots have the same authority:
+
+- `beginEntityOverlay` is owned by the Entity transition coordinator.
+- `beginAccountOverlay` may run only as a nested child of that Entity overlay.
+  An Account root is independently authenticated by the bilateral Account
+  frame, but it has no independent WAL, snapshot, cursor, or durable publish
+  step. Runtime remains the only durable writer.
+- Financial handlers receive a branded synchronous draft view. They can read,
+  edit, insert, delete, and range-scan their typed prefix lenses; they cannot
+  import or invoke prepare, publish, commit, or discard.
+- A read is dirty-first and allocation-free. An edit receives a deeply
+  readonly old leaf and must return a different value. The owning codec copies,
+  validates, bounds, and seals that value before it can enter the candidate.
+- The machine consumes the overlay exactly once. Use-after-prepare,
+  use-after-discard, stale-base publication, and inserting an open Account
+  draft into an Entity candidate are hard errors.
+
+TypeScript has no linear types, so nominal brands and dependency gates enforce
+the ownership visible to the compiler while one runtime lifecycle token closes
+the remaining double-use case. Proxy traps, weak collections, `Map`
+subclassing, ambient caches keyed by committed objects, and handler-visible
+lifecycle functions are prohibited.
+
+Root composition is lifecycle-partitioned. Small fixed trust-boundary records
+bind child roots; path-compressed Patricia maps exist only below growing
+collection slots. `AccountReplicaRoot` binds the bilaterally signed
+`AccountStateRoot` and the bounded Entity-certified Account envelope root.
+`EntityStateRoot` binds its bounded header, Account-replica index root, unified
+same/cross order-book root, and other typed collection roots. Book pages share
+the Entity lifecycle and therefore are not a separate durable machine.
+
 ## 11. Compiler and static-analysis policy
 
 Runtime compiler options MUST retain:
@@ -665,6 +729,7 @@ be claimed while any owning gate is red.
 | Determinism, including randomness, clocks, and weak collections | `check:determinism:static`, `check:no-weak-collections` |
 | Dependency direction and dead surface | `check:runtime-dependencies`, `check:dead-code`, `check:unused-surface` |
 | Hash-reachable field coverage | `check:nested-hash-coverage` |
+| Persistent Runtime/Entity candidates; no full-machine clones | `check:no-machine-clones` |
 | Typed failure disposition and fail-stop | `security:failure-taxonomy` |
 
 ### Milestone 0: behavioral prerequisites

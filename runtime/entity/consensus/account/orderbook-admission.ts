@@ -15,7 +15,7 @@ import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityState } from '../../types';
 import { entityLog } from '../entity-log';
 
-type EntityAccountState = EntityState['accounts'] extends Map<string, infer State> ? State : never;
+type EntityAccountState = EntityState['accounts'] extends ReadonlyMap<string, infer State> ? State : never;
 
 const hasQueuedOrderLifecycleTx = (account: EntityAccountState, offerId: string): boolean => {
   const isLifecycleTx = (tx: EntityAccountState['mempool'][number]): boolean =>

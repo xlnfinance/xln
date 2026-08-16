@@ -1,7 +1,6 @@
 import { ethers } from 'ethers';
 
-import type { AccountReplica, AccountState, AccountTx, SettlementDiff, SettlementOp, SettlementWorkspace } from '../../../../types/account';
-import { cloneAccountReplica } from '../../../state/state-clone';
+import type { AccountReplica, AccountState, AccountTx, Delta, SettlementDiff, SettlementOp, SettlementWorkspace } from '../../../../types/account';
 import { computeCanonicalMerkleRoot } from '../../../commitment/state-root';
 import { deriveDelta } from '../../../utils';
 import {
@@ -10,7 +9,7 @@ import {
   getMinimumSafeSettlementNonce,
 } from '../../../../protocol/settlement/operations';
 import { createStructuredLogger } from '../../../../infra/logger';
-import { addHold, getHold, releaseHold } from '../../hold-utils';
+import { addHold, releaseHold } from '../../hold-utils';
 import {
   createDisputeProofHashWithNonce,
   createSettlementHashWithNonce,
@@ -21,7 +20,7 @@ import {
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
 } from '../../../../protocol/dispute/arguments';
-import { projectAccountAfterSettlement } from '../../../settlement/settlement-projection';
+import { projectSettlementDeltaOverrides } from '../../../settlement/settlement-projection';
 import { ACCOUNT_TX_REJECTION_CODES } from '../../apply-types';
 import type {
   AccountTxRejection,
@@ -37,6 +36,11 @@ import {
   isUnsignedSettlementWorkspace,
   type UnsignedSettlementWorkspace,
 } from './workspace-views';
+import {
+  isAccountDraftReplica,
+  type AccountDraftReplica,
+} from '../../../state/account-state-draft';
+import { requirePersistentAccountStateMap } from '../../../state/persistent-state-map';
 
 type SettleTransitionTx = Extract<AccountTx, { type: 'settle_transition' }>;
 type UpsertTransition = Extract<SettleTransitionTx['data'], { kind: 'upsert' }>;
@@ -155,16 +159,39 @@ const holdPlan = (diffs: readonly SettlementDiff[]): HoldPlan[] => diffs.map((di
   right: diff.rightDiff < 0n ? -diff.rightDiff : 0n,
 }));
 
-const releaseWorkspaceHolds = (
+type SettlementDeltaPlan = Map<number, Delta>;
+
+const deltaForPlan = (
+  draft: AccountReplica,
+  planned: SettlementDeltaPlan,
+  tokenId: number,
+  operation: 'add' | 'release',
+): Delta => {
+  const plannedDelta = planned.get(tokenId);
+  if (plannedDelta) return plannedDelta;
+  const committed = draft.state.deltas.get(tokenId);
+  if (!committed) {
+    throw new Error(`SETTLEMENT_HOLD_DELTA_MISSING:${operation}:token=${tokenId}`);
+  }
+  const owned = { ...committed };
+  planned.set(tokenId, owned);
+  return owned;
+};
+
+/**
+ * Plan hold changes on owned leaf copies. A rejected settlement tx must not
+ * mutate the surrounding Account transition, so publication happens only
+ * after every hold/capacity check succeeds.
+ */
+const planWorkspaceHoldRelease = (
   draft: AccountReplica,
   workspace: SettlementWorkspace,
-): Set<number> => {
-  const changed = new Set<number>();
+  planned: SettlementDeltaPlan,
+): void => {
   const { diffs } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
   for (const plan of holdPlan(diffs)) {
     if (plan.left === 0n && plan.right === 0n) continue;
-    const delta = draft.state.deltas.get(plan.tokenId);
-    if (!delta) throw new Error(`SETTLEMENT_HOLD_DELTA_MISSING:release:token=${plan.tokenId}`);
+    const delta = deltaForPlan(draft, planned, plan.tokenId, 'release');
     const leftError = releaseHold(
       delta,
       'left',
@@ -179,21 +206,18 @@ const releaseWorkspaceHolds = (
       (hold, amount) => `SETTLEMENT_HOLD_UNDERFLOW:right:token=${plan.tokenId}:hold=${hold}:release=${amount}`,
     );
     if (rightError) throw new Error(rightError);
-    changed.add(plan.tokenId);
   }
-  return changed;
 };
 
-const addWorkspaceHolds = (
+const planWorkspaceHoldAdd = (
   draft: AccountReplica,
   workspace: SettlementWorkspace,
-): Set<number> => {
-  const changed = new Set<number>();
+  planned: SettlementDeltaPlan,
+): void => {
   const { diffs } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
   for (const plan of holdPlan(diffs)) {
     if (plan.left === 0n && plan.right === 0n) continue;
-    const delta = draft.state.deltas.get(plan.tokenId);
-    if (!delta) throw new Error(`SETTLEMENT_HOLD_DELTA_MISSING:add:token=${plan.tokenId}`);
+    const delta = deltaForPlan(draft, planned, plan.tokenId, 'add');
     const workspaceDiff = diffs.find((diff) => diff.tokenId === plan.tokenId);
     const leftReserveDeposit = (workspaceDiff?.leftDiff ?? 0n) < 0n && (workspaceDiff?.collateralDiff ?? 0n) > 0n;
     const rightReserveDeposit = (workspaceDiff?.rightDiff ?? 0n) < 0n && (workspaceDiff?.collateralDiff ?? 0n) > 0n;
@@ -207,9 +231,20 @@ const addWorkspaceHolds = (
     if (leftError) throw new Error(leftError);
     const rightError = addHold(delta, 'right', plan.right);
     if (rightError) throw new Error(rightError);
-    changed.add(plan.tokenId);
   }
-  return changed;
+};
+
+const publishSettlementDeltaPlan = (
+  draft: AccountReplica,
+  planned: SettlementDeltaPlan,
+): void => {
+  if (isAccountDraftReplica(draft)) {
+    for (const [tokenId, delta] of planned) draft.state.deltas.put(tokenId, delta);
+    return;
+  }
+  let deltas = requirePersistentAccountStateMap(draft.state.deltas, 'deltas');
+  for (const [tokenId, delta] of planned) deltas = deltas.updated(tokenId, delta);
+  draft.state.deltas = deltas;
 };
 
 const assertCurrentWorkspace = (
@@ -328,14 +363,15 @@ const prepareSettlementSeal = (
   if (postNonce !== settlementNonce + 1) {
     throw new Error(`POST_SETTLEMENT_PROOF_NONCE_MISMATCH:${postNonce}:${settlementNonce + 1}`);
   }
-  const projectedPostSettlement = projectAccountAfterSettlement(
+  const projectedDeltas = projectSettlementDeltaOverrides(
     draft,
     diffs,
     forgiveTokenIds,
   );
   const { proofBodyHash, proofBodyStruct } = buildAccountProofBodyFromJurisdictions(
     context,
-    projectedPostSettlement,
+    draft,
+    projectedDeltas,
   );
   if (transition.postProof.proofBodyHash.toLowerCase() !== proofBodyHash.toLowerCase()) {
     throw new Error(
@@ -374,7 +410,6 @@ const prepareSettlementSeal = (
     proofBodyHash,
     proofBodyStruct,
     postNonce,
-    projectedPostSettlement,
     expectedSettlementHash,
     expectedDisputeHash,
     proposerIsLeft: transition.postProof.proposerIsLeft,
@@ -448,7 +483,7 @@ const verifySettlementSealHankos = async (
 };
 
 const commitSettlementSeal = (
-  draft: AccountReplica,
+  draft: AccountDraftReplica,
   byLeft: boolean,
   timestamp: number,
   prepared: PreparedSettlementSeal,
@@ -462,26 +497,38 @@ const commitSettlementSeal = (
     proofBodyHash,
     proofBodyStruct,
     postNonce,
-    projectedPostSettlement,
     expectedSettlementHash,
     expectedDisputeHash,
     pinnedPostProof,
   } = prepared;
+  const nextWorkspace: SettlementWorkspace = {
+    ...workspace,
+    ops: workspace.ops.map((op) => ({ ...op })),
+    ...(workspace.compiledDiffs
+      ? { compiledDiffs: workspace.compiledDiffs.map((diff) => ({ ...diff })) }
+      : {}),
+    ...(workspace.compiledForgiveTokenIds
+      ? { compiledForgiveTokenIds: [...workspace.compiledForgiveTokenIds] }
+      : {}),
+    ...(workspace.postSettlementDisputeProof
+      ? { postSettlementDisputeProof: { ...workspace.postSettlementDisputeProof } }
+      : {}),
+  };
   const sourcePostHanko = byLeft
     ? pinnedPostProof?.leftHanko
     : pinnedPostProof?.rightHanko;
   const { postHanko, settlementHanko } = verified;
   assertSameOptionalHanko(sourcePostHanko, postHanko, 'POST_SETTLEMENT_PROOF_EQUIVOCATION');
-  const sourceSettlementHanko = byLeft ? workspace.leftHanko : workspace.rightHanko;
+  const sourceSettlementHanko = byLeft ? nextWorkspace.leftHanko : nextWorkspace.rightHanko;
   if (settlementHanko) {
     assertSameOptionalHanko(sourceSettlementHanko, settlementHanko, 'SETTLEMENT_SEAL_EQUIVOCATION');
   }
 
-  workspace.compiledDiffs = diffs;
-  workspace.compiledForgiveTokenIds = forgiveTokenIds;
-  workspace.nonceAtSign = settlementNonce;
-  workspace.settlementHash = expectedSettlementHash;
-  workspace.postSettlementDisputeProof = {
+  nextWorkspace.compiledDiffs = diffs;
+  nextWorkspace.compiledForgiveTokenIds = forgiveTokenIds;
+  nextWorkspace.nonceAtSign = settlementNonce;
+  nextWorkspace.settlementHash = expectedSettlementHash;
+  nextWorkspace.postSettlementDisputeProof = {
     disputeHash: expectedDisputeHash,
     proofBodyHash,
     nonce: postNonce,
@@ -491,25 +538,35 @@ const commitSettlementSeal = (
     ...(byLeft ? { leftHanko: postHanko } : { rightHanko: postHanko }),
   };
   if (settlementHanko) {
-    if (byLeft) workspace.leftHanko = settlementHanko;
-    else workspace.rightHanko = settlementHanko;
+    if (byLeft) nextWorkspace.leftHanko = settlementHanko;
+    else nextWorkspace.rightHanko = settlementHanko;
   }
-  const nonexecutorHanko = workspace.executorIsLeft ? workspace.rightHanko : workspace.leftHanko;
-  workspace.status = nonexecutorHanko &&
-    workspace.postSettlementDisputeProof.leftHanko &&
-    workspace.postSettlementDisputeProof.rightHanko
+  const nonexecutorHanko = nextWorkspace.executorIsLeft
+    ? nextWorkspace.rightHanko
+    : nextWorkspace.leftHanko;
+  nextWorkspace.status = nonexecutorHanko &&
+    nextWorkspace.postSettlementDisputeProof.leftHanko &&
+    nextWorkspace.postSettlementDisputeProof.rightHanko
     ? 'ready_to_submit'
     : 'awaiting_counterparty';
-  workspace.lastUpdatedAt = timestamp;
+  nextWorkspace.lastUpdatedAt = timestamp;
 
-  draft.disputeProofBodiesByHash ??= {};
-  draft.disputeProofBodiesByHash[proofBodyHash] = proofBodyStruct;
-  draft.disputeProofNoncesByHash ??= {};
-  draft.disputeProofNoncesByHash[proofBodyHash] = postNonce;
+  draft.state.settlementWorkspace = nextWorkspace;
+  draft.disputeProofBodiesByHash = {
+    ...(draft.disputeProofBodiesByHash ?? {}),
+    [proofBodyHash]: proofBodyStruct,
+  };
+  draft.disputeProofNoncesByHash = {
+    ...(draft.disputeProofNoncesByHash ?? {}),
+    [proofBodyHash]: postNonce,
+  };
+  draft.disputeArgumentSnapshotsByHash = {
+    ...(draft.disputeArgumentSnapshotsByHash ?? {}),
+  };
   storeDisputeArgumentSnapshot(
     draft,
     captureDisputeArgumentSnapshot(
-      projectedPostSettlement,
+      draft,
       proofBodyHash,
       postNonce,
       prepared.proposerIsLeft,
@@ -519,7 +576,7 @@ const commitSettlementSeal = (
 };
 
 const applySettlementSeal = async (
-  draft: AccountReplica,
+  draft: AccountDraftReplica,
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
   byLeft: boolean,
   timestamp: number,
@@ -589,34 +646,18 @@ const buildUpsertWorkspace = (
   return workspace;
 };
 
-const commitDraft = (
-  account: AccountReplica,
-  draft: AccountReplica,
-  changedTokens: ReadonlySet<number>,
-): void => {
-  for (const tokenId of changedTokens) {
-    const source = draft.state.deltas.get(tokenId);
-    const target = account.state.deltas.get(tokenId);
-    if (!source || !target) throw new Error(`SETTLEMENT_HOLD_COMMIT_DELTA_MISSING:token=${tokenId}`);
-    target.leftHold = getHold(source, 'left');
-    target.rightHold = getHold(source, 'right');
-  }
-  if (draft.state.settlementWorkspace) account.state.settlementWorkspace = draft.state.settlementWorkspace;
-  else delete account.state.settlementWorkspace;
-};
-
 // AccountSettled is bilateral Account consensus too. If it wins a retry race,
 // release the exact workspace holds before removing the workspace body.
 export function clearFinalizedSettlementWorkspace(account: AccountReplica): void {
-  const draft = cloneAccountReplica(account);
-  const workspace = draft.state.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   if (!workspace) return;
-  assertCanonicalSettlementWorkspace(draft.state, workspace);
-  const changed = workspace.status === 'submitted'
-    ? new Set<number>()
-    : releaseWorkspaceHolds(draft, workspace);
-  delete draft.state.settlementWorkspace;
-  commitDraft(account, draft, changed);
+  assertCanonicalSettlementWorkspace(account.state, workspace);
+  const planned: SettlementDeltaPlan = new Map();
+  if (workspace.status !== 'submitted') {
+    planWorkspaceHoldRelease(account, workspace, planned);
+  }
+  publishSettlementDeltaPlan(account, planned);
+  delete account.state.settlementWorkspace;
 }
 
 export const getSignedSettlementWorkspaceTxError = (
@@ -634,7 +675,7 @@ export const getSignedSettlementWorkspaceTxError = (
 };
 
 export async function handleSettleTransition(
-  account: AccountReplica,
+  account: AccountDraftReplica,
   tx: SettleTransitionTx,
   byLeft: boolean,
   timestamp: number,
@@ -642,32 +683,27 @@ export async function handleSettleTransition(
   registeredBoardHash?: string,
 ): Promise<ApplyAccountTxResult> {
   try {
-    const draft = cloneAccountReplica(account);
-    const changed = new Set<number>();
     const transition = tx.data;
     if (transition.kind === 'upsert') {
-      const previous = draft.state.settlementWorkspace;
-      const next = buildUpsertWorkspace(draft, transition, byLeft, timestamp);
+      const previous = account.state.settlementWorkspace;
+      const next = buildUpsertWorkspace(account, transition, byLeft, timestamp);
+      const planned: SettlementDeltaPlan = new Map();
       if (previous) {
-        for (const tokenId of releaseWorkspaceHolds(draft, previous)) changed.add(tokenId);
+        planWorkspaceHoldRelease(account, previous, planned);
       }
-      draft.state.settlementWorkspace = next;
-      for (const tokenId of addWorkspaceHolds(draft, next)) changed.add(tokenId);
-      commitDraft(account, draft, changed);
+      planWorkspaceHoldAdd(account, next, planned);
+      publishSettlementDeltaPlan(account, planned);
+      account.state.settlementWorkspace = next;
       transitionLog.debug('workspace.upserted', { revision: next.revision, hash: next.workspaceHash });
       return accountTxApplied([`Settlement workspace v${next.revision} committed`]);
     }
 
     if (transition.kind === 'seal') {
-      await applySettlementSeal(draft, transition, byLeft, timestamp, context, registeredBoardHash);
-      commitDraft(account, draft, changed);
-      account.disputeProofBodiesByHash = structuredClone(draft.disputeProofBodiesByHash ?? {});
-      account.disputeProofNoncesByHash = { ...(draft.disputeProofNoncesByHash ?? {}) };
-      account.disputeArgumentSnapshotsByHash = structuredClone(draft.disputeArgumentSnapshotsByHash ?? {});
+      await applySettlementSeal(account, transition, byLeft, timestamp, context, registeredBoardHash);
       return accountTxApplied([`Settlement workspace v${transition.revision} sealed`]);
     }
 
-    const workspace = assertCurrentWorkspace(draft, transition.revision, transition.workspaceHash);
+    const workspace = assertCurrentWorkspace(account, transition.revision, transition.workspaceHash);
     if (transition.kind === 'submit') {
       if (workspace.status === 'submitted') throw new Error('SETTLEMENT_WORKSPACE_ALREADY_SUBMITTED');
       if (byLeft !== workspace.executorIsLeft) throw new Error('SETTLEMENT_SUBMIT_EXECUTOR_MISMATCH');
@@ -680,10 +716,15 @@ export async function handleSettleTransition(
       ) {
         throw new Error('SETTLEMENT_SUBMIT_POST_PROOF_INCOMPLETE');
       }
-      for (const tokenId of releaseWorkspaceHolds(draft, workspace)) changed.add(tokenId);
-      workspace.status = 'submitted';
-      workspace.lastUpdatedAt = timestamp;
-      commitDraft(account, draft, changed);
+      const planned: SettlementDeltaPlan = new Map();
+      planWorkspaceHoldRelease(account, workspace, planned);
+      const submitted: SettlementWorkspace = {
+        ...workspace,
+        status: 'submitted',
+        lastUpdatedAt: timestamp,
+      };
+      publishSettlementDeltaPlan(account, planned);
+      account.state.settlementWorkspace = submitted;
       return accountTxApplied([`Settlement workspace v${workspace.revision} submitted`]);
     }
 
@@ -691,9 +732,10 @@ export async function handleSettleTransition(
     if (!isUnsignedSettlementWorkspace(workspace)) {
       throw new Error('SETTLEMENT_CLEAR_SIGNED_FORBIDDEN');
     }
-    for (const tokenId of releaseWorkspaceHolds(draft, workspace)) changed.add(tokenId);
-    delete draft.state.settlementWorkspace;
-    commitDraft(account, draft, changed);
+    const planned: SettlementDeltaPlan = new Map();
+    planWorkspaceHoldRelease(account, workspace, planned);
+    publishSettlementDeltaPlan(account, planned);
+    delete account.state.settlementWorkspace;
     return accountTxApplied([`Settlement workspace v${workspace.revision} cleared`]);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

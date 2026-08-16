@@ -33,7 +33,6 @@ import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,
   validateStorageAccountDocValue,
-  validateStorageBookDocValue,
   validateStorageEntityCoreDocValue,
   validateStorageMerkleBranchDocValue,
   validateStorageMerkleLeafDocValue,
@@ -46,6 +45,7 @@ import type {
   StorageMerkleLeafDoc,
   StorageMerkleRootDoc,
 } from '../types';
+import { readStorageBookGraph } from './book-graph';
 
 const RUNTIME_ROOTS = 'runtime-roots' as const;
 
@@ -121,7 +121,8 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
     const parsed = parseLiveBookKey(key);
     assertExactKey(key, keyLiveBook(parsed.entityId, parsed.pairId), 'STORAGE_LIVE_BOOK_KEY_MISMATCH');
     const raw = await db.get(key);
-    decodeValidatedBuffer(raw, validateStorageBookDocValue);
+    const book = await readStorageBookGraph(db, parsed.entityId, parsed.pairId);
+    if (!book) throw new Error(`STORAGE_BOOK_GRAPH_MISSING:${parsed.entityId}:${parsed.pairId}`);
     appendCell(cellsByEntity, parsed.entityId, docRefCellKey({
       family: 'book',
       entityId: parsed.entityId,

@@ -1,6 +1,7 @@
 import { validateConsensusConfig } from '../../entity/consensus/config-validation';
 import { validateProposedEntityFrame } from '../../entity/consensus/frame/validation';
 import { decodeAccountFrame } from '../../account/validation/frame-validation';
+import { decodeAccountTxs } from '../../account/tx-validation';
 import { validateEntityTxs } from '../../entity/tx-validation';
 import { validateJInputs } from '../wal/runtime-machine-schema/j';
 import {
@@ -12,6 +13,7 @@ import {
 import { assertStorageSchemaVersion } from '../keys';
 import type {
   StoredAccountFrameValue,
+  StoredAccountSwapEventValue,
   StoredEntityFrameValue,
   StoredRuntimeActivityValue,
 } from './history-view';
@@ -151,6 +153,31 @@ export const validateStoredAccountFrameValue = (
       record['timestamp'],
       `HISTORY_VIEW_ACCOUNT_FRAME_TIMESTAMP_INVALID:height=${accountHeight}`,
     ),
+  };
+};
+
+export const validateStoredAccountSwapEventValue = (
+  value: unknown,
+  accountHeight: number,
+): StoredAccountSwapEventValue => {
+  const code = `HISTORY_VIEW_ACCOUNT_SWAP_EVENT_INVALID:height=${accountHeight}`;
+  const record = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(record, ['runtimeHeight', 'timestamp', 'accountHeight', 'tx'], [], code);
+  const storedHeight = requireBoundaryInteger(record['accountHeight'], `${code}:accountHeight`, 1);
+  if (storedHeight !== accountHeight) throw new Error(`${code}:height_mismatch`);
+  const tx = decodeAccountTxs([record['tx']], `${code}:tx`)[0];
+  if (
+    !tx
+    || (tx.type !== 'swap_offer'
+      && tx.type !== 'swap_cancel_request'
+      && tx.type !== 'swap_resolve'
+      && tx.type !== 'cross_swap_fill_ack')
+  ) throw new Error(`${code}:tx_kind`);
+  return {
+    runtimeHeight: requireBoundaryInteger(record['runtimeHeight'], `${code}:runtimeHeight`, 1),
+    timestamp: requireBoundaryInteger(record['timestamp'], `${code}:timestamp`),
+    accountHeight: storedHeight,
+    tx,
   };
 };
 

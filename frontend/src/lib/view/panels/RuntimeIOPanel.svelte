@@ -119,10 +119,7 @@
         return hist[idx];
       }
     }
-    // Without a selected historical frame, display the canonical live state.
-    if ($runtimeFrameEnv && $runtimeFrameEnv.history && $runtimeFrameEnv.history.length > 0) {
-      return $runtimeFrameEnv.history[$runtimeFrameEnv.history.length - 1];
-    }
+    // RuntimeReplica has no resident timeline; no selected external frame.
     return null;
   })();
 

@@ -22,6 +22,7 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { readHistoryViewRuntimeActivity } from '../../../storage/history/history-view';
 import { keyHistoryViewRuntimeActivity } from '../../../storage/keys';
 import { readFrameReceipts } from '../../../api/server/network/rpc-ws';
+import { replaceRuntimeFrameEvents } from '../../../runtime/observability/env-events';
 import { createTestJReplica } from '../.././helpers/j-replica';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 
@@ -116,7 +117,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
             }],
           }
         : { runtimeTxs: [], entityInputs: [] };
-      env.frameLogs = height === 3
+      replaceRuntimeFrameEvents(env, height === 3
         ? [{
             id: 1,
             timestamp: env.state.timestamp,
@@ -133,7 +134,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
               hashlock: `0x${'dd'.repeat(32)}`,
             },
           }]
-        : [];
+        : []);
       await saveEnvToDB(env, runtimeInput, [], undefined, new Map());
     }
 

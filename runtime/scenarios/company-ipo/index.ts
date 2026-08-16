@@ -13,6 +13,7 @@ import { formCompanyActors } from './formation';
 import { runCompanyBuyback, runCompanyMarket } from './trading';
 import {
   activateInvestorBoardAndHandover,
+  proveSuccessorReserveControl,
   proposeInvestorBoard,
   settleInvestorControlReserve,
 } from './takeover';
@@ -55,8 +56,9 @@ export async function companyIpo(env: RuntimeReplica): Promise<RuntimeReplica> {
         config: investorBoard.config,
       },
     };
+    await proveSuccessorReserveControl(env, postTakeoverActors, shares);
     await runCompanyBuyback(env, postTakeoverActors, shares);
-    console.log('COMPANY_IPO_PASS: 1-of-1 + 2-of-3 + CONTROL/DIVIDEND + settled takeover/handover + buyback');
+    console.log('COMPANY_IPO_PASS: 1-of-1 + 2-of-3 + CONTROL/DIVIDEND + settled takeover/handover + successor reserve control + buyback');
     return env;
   } finally {
     env.scenarioMode = previousScenarioMode ?? false;

@@ -22,8 +22,6 @@ import {
   getInputReliableIdentity,
   getReliableDeliveryReceiptValidationError,
 } from './reliable-receipt.ts';
-import { cloneIsolatedRoutedEntityInputs } from '../input-pipeline/input-clone.ts';
-
 export type ReliableReceiptSenderCheckpoint = {
   pendingNetworkOutputs: RoutedEntityInput[];
   receivedLedger: Map<string, ReliableDeliveryReceipt> | undefined;
@@ -256,16 +254,13 @@ export const applyReliableDeliveryReceipts = (
 export const captureReliableReceiptSenderCheckpoint = (
   env: RuntimeReplica,
 ): ReliableReceiptSenderCheckpoint => ({
-  pendingNetworkOutputs: cloneIsolatedRoutedEntityInputs(env.pendingNetworkOutputs ?? []),
-  receivedLedger: env.infrastructure?.receivedReliableReceiptLedger
-    ? structuredClone(env.infrastructure.receivedReliableReceiptLedger)
-    : undefined,
-  receivedTerminalWatermarks: env.infrastructure?.receivedReliableTerminalWatermarks
-    ? structuredClone(env.infrastructure.receivedReliableTerminalWatermarks)
-    : undefined,
-  deferredNetworkMeta: env.infrastructure?.deferredNetworkMeta
-    ? structuredClone(env.infrastructure.deferredNetworkMeta)
-    : undefined,
+  // Receipt application is copy-on-write: it installs new arrays/maps instead
+  // of mutating these committed containers. Retaining their identities gives a
+  // constant-time rollback checkpoint without copying the Runtime outbox.
+  pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
+  receivedLedger: env.infrastructure?.receivedReliableReceiptLedger,
+  receivedTerminalWatermarks: env.infrastructure?.receivedReliableTerminalWatermarks,
+  deferredNetworkMeta: env.infrastructure?.deferredNetworkMeta,
 });
 
 export const rollbackReliableDeliveryReceipts = (

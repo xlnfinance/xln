@@ -146,7 +146,6 @@ const makeEntityState = (entityId: string, config: ConsensusConfig): EntityState
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: 'Atomicity entity',
     isHub: false,
@@ -941,7 +940,7 @@ describe('runtime frame atomicity', () => {
     expect(restored?.lastConsensusProgressAt).toBeUndefined();
     expect(env.state.eReplicas.has(`${imported.entityId}:${imported.signerId}`)).toBe(false);
     expect([...env.state.eReplicas.values()].some(candidate => candidate.certifiedFrameAnchor)).toBe(false);
-    expect([...env.state.eReplicas.values()].some(candidate => candidate.certifiedFrameLineage?.length)).toBe(false);
+    expect([...env.state.eReplicas.values()].some(candidate => candidate.certifiedFrameHead)).toBe(false);
     expect(safeStringify(env.infrastructure!.entityRuntimeHints)).toBe(hintsBefore);
     expect(env.infrastructure!.entityRuntimeHints?.has(remoteEntityId)).toBe(false);
     expect(safeStringify(exactQueuedInput(env))).toBe(ingressBytes);

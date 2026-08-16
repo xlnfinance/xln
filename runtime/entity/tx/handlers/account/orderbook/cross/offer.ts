@@ -1,6 +1,10 @@
 import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
 
-import { applyCommand } from '../../../../../../orderbook';
+import {
+  applyCommand,
+  commitBookOverlay,
+  getSwapExactQuoteLotMultipleAtPriceForDimensions,
+} from '../../../../../../orderbook';
 import { createStructuredLogger, shortOrder } from '../../../../../../infra/logger';
 import { resolveCrossJurisdictionExecutionPriceTicks } from '../../../../../../extensions/cross-j/orderbook';
 import {
@@ -12,6 +16,7 @@ import {
 } from '../helpers';
 import { hasQueuedCrossSwapAckForEntityState } from '../queue';
 import { prepareCrossOrderbookOffer } from './admission';
+import { classifyCrossBookMaker } from './book';
 import { getWorkingCrossBook } from './pass';
 import type {
   CrossOrderbookPass,
@@ -20,6 +25,32 @@ import type {
 import type { CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
 
 const orderbookCrossLog = createStructuredLogger('orderbook.cross');
+
+// Cross-j price improvement always returns unused source to the buyer, so the
+// executed price is the ask even when the resting order is a bid.
+const crossExecutionPriceTicks = (
+  makerPriceTicks: bigint,
+  takerPriceTicks: bigint,
+  takerSide: 0 | 1,
+): bigint => takerSide === 1 ? takerPriceTicks : makerPriceTicks;
+
+const crossExecutionQtyMultiple = (
+  offer: PreparedCrossOffer,
+  priceTicks: bigint,
+): bigint => {
+  const normalized = offer.marketOffer.offer;
+  const baseTokenDecimals = offer.marketOffer.side === 1
+    ? normalized.giveTokenDecimals
+    : normalized.wantTokenDecimals;
+  const quoteTokenDecimals = offer.marketOffer.side === 1
+    ? normalized.wantTokenDecimals
+    : normalized.giveTokenDecimals;
+  return getSwapExactQuoteLotMultipleAtPriceForDimensions(
+    baseTokenDecimals,
+    quoteTokenDecimals,
+    priceTicks,
+  );
+};
 
 const applySpeculativeCrossCommand = (
   pass: CrossOrderbookPass,
@@ -38,7 +69,16 @@ const applySpeculativeCrossCommand = (
         priceTicks: offer.marketOffer.priceTicks,
         qtyLots: offer.qtyLots,
       },
-      { suspendedOrderIds: pass.suspendedOrderIds },
+      {
+        suspendedOrderIds: pass.suspendedOrderIds,
+        makerDisposition: maker => classifyCrossBookMaker(
+          pass,
+          offer.marketOffer.pairId,
+          maker,
+        ),
+        executionPriceTicksForMatch: crossExecutionPriceTicks,
+        executionQtyMultipleAtPrice: (priceTicks) => crossExecutionQtyMultiple(offer, priceTicks),
+      },
     );
   } catch (error) {
     pass.rejectInvalidCrossOffer(
@@ -75,25 +115,16 @@ const canonicalCrossTradeEvents = (
 const commitRestingCrossOffer = (
   pass: CrossOrderbookPass,
   offer: PreparedCrossOffer,
+  result: ReturnType<typeof applyCommand>,
 ): void => {
-  const result = applyCommand(
-    offer.committedBook,
-    {
-      kind: 0,
-      ownerId: offer.marketOffer.makerId,
-      orderId: offer.namespacedOrderId,
-      side: offer.marketOffer.side,
-      tif: offer.rawOffer.timeInForce,
-      postOnly: pass.debugRebuildProjectionOnly,
-      priceTicks: offer.marketOffer.priceTicks,
-      qtyLots: offer.qtyLots,
-    },
-    { suspendedOrderIds: pass.suspendedOrderIds },
-  );
   if (collectTradeEvents(result.events).length > 0) {
     throw haltRuntimeFailure("ORDERBOOK_CROSS_J_COMMITTED_WRITE_TRADED", `ORDERBOOK_CROSS_J_COMMITTED_WRITE_TRADED: order=${offer.namespacedOrderId}`);
   }
+  // Keep the active Book overlay until the owning Entity frame certifies once.
+  // Sealing here would publish a detached Book and bypass the candidate map's
+  // dirty-key proof, while later same-tick offers still need this exact overlay.
   pass.bookCache.set(offer.marketOffer.pairId, result.state);
+  pass.workingBookCache.set(offer.marketOffer.pairId, result.state);
   pass.bookUpdates.push({ pairId: offer.marketOffer.pairId, book: result.state });
 };
 
@@ -173,11 +204,13 @@ export const processCrossOrderbookOffer = (
     }
     return;
   }
+  const working = commitBookOverlay(result.state);
+  pass.workingBookCache.set(offer.marketOffer.pairId, working);
   if (
     trades.length === 0 &&
     !pass.speculativeTradePairs.has(offer.marketOffer.pairId)
   ) {
-    commitRestingCrossOffer(pass, offer);
+    commitRestingCrossOffer(pass, offer, { ...result, state: working });
   }
   if (trades.length > 0) {
     pass.speculativeTradePairs.add(offer.marketOffer.pairId);

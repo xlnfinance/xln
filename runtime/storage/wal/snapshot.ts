@@ -5,9 +5,9 @@
  */
 import type { EntityReplica } from '../../entity/types';
 import type { RuntimeReplica, EnvSnapshot, RoutedEntityInput, RuntimeInput } from '../../runtime/types';
+import type { FrameLogEntry } from '../../types/logging';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { Profile } from '../../entity/profile';
-import { cloneEntityReplica } from '../../entity/replica/replica-clone';
 import { markRestoredJSubmitRuntimeTxs } from '../../runtime/jurisdiction/j-submit-state';
 import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/machine/registration-evidence';
 import { markRestoredJImportResultRuntimeTxs } from '../../runtime/jurisdiction/jurisdiction-import';
@@ -31,11 +31,8 @@ import {
   getAccountJClaimNodeStore,
   getLiveAccountJClaimAccumulatorStates,
 } from '../../entity/account/account-j-claim-node-store';
-import {
-  cloneIsolatedRoutedEntityInputs,
-  cloneIsolatedRuntimeInput,
-} from '../../runtime/input-pipeline/input-clone';
 import { assertRuntimeInputCapabilitiesAuthorized } from '../../runtime/transactions/internal-tx-auth';
+import { cloneIsolatedRuntimeInput } from '../../runtime/input-pipeline/input-clone';
 import { decodeRuntimeConfig } from './runtime-machine-schema';
 
 export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => {
@@ -49,27 +46,10 @@ export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): Runti
   return runtimeInput;
 };
 
-const cloneHankoWitness = (
-  hankoWitness?: EntityReplica['hankoWitness'],
-): EntityReplica['hankoWitness'] | undefined => {
-  if (!(hankoWitness instanceof Map) || hankoWitness.size === 0) return undefined;
-  return new Map(
-    Array.from(hankoWitness.entries()).map(([hash, entry]) => [
-      hash,
-      {
-        hanko: entry.hanko,
-        type: entry.type,
-        entityHeight: entry.entityHeight,
-        createdAt: entry.createdAt,
-      },
-    ]),
-  );
-};
-
 const isZeroBytes32 = (value: Uint8Array): boolean =>
   value.length === 32 && value.every(byte => byte === 0);
 
-const cloneJStateRoot = (
+const normalizeJStateRoot = (
   stateRoot: unknown,
   options?: { rpcBacked?: boolean },
 ): Uint8Array | null => {
@@ -115,17 +95,35 @@ export const buildCanonicalEntityReplicaSnapshot = (
   replica: EntityReplica,
   options?: { compactTransient?: boolean },
 ): EntityReplica => {
-  const snapshot = cloneEntityReplica(replica, true);
-  const hankoWitness = cloneHankoWitness(replica.hankoWitness);
-  if (options?.compactTransient) {
-    snapshot.mempool = [];
-    delete snapshot.proposal;
-    delete snapshot.lockedFrame;
-    delete snapshot.candidate;
-  }
+  const compactTransient = options?.compactTransient === true;
+  // This is an immutable projection, not an Entity clone. The committed state
+  // and validator metadata are persistent values; the caller encodes this
+  // field view synchronously or retains it as a root-reachable checkpoint.
   return {
-    ...snapshot,
-    ...(hankoWitness ? { hankoWitness } : {}),
+    entityId: replica.entityId,
+    signerId: replica.signerId,
+    state: replica.state,
+    mempool: compactTransient ? [] : replica.mempool,
+    ...(!compactTransient && replica.proposal ? { proposal: replica.proposal } : {}),
+    ...(!compactTransient && replica.lockedFrame ? { lockedFrame: replica.lockedFrame } : {}),
+    ...(!compactTransient && replica.candidate ? { candidate: replica.candidate } : {}),
+    ...(replica.certifiedFrameHead ? { certifiedFrameHead: replica.certifiedFrameHead } : {}),
+    ...(replica.certifiedFrameAnchor ? { certifiedFrameAnchor: replica.certifiedFrameAnchor } : {}),
+    isProposer: replica.isProposer,
+    ...(replica.leaderVotes ? { leaderVotes: replica.leaderVotes } : {}),
+    ...(replica.pendingLeaderCertificate ? { pendingLeaderCertificate: replica.pendingLeaderCertificate } : {}),
+    ...(replica.lastConsensusProgressAt !== undefined
+      ? { lastConsensusProgressAt: replica.lastConsensusProgressAt }
+      : {}),
+    ...(replica.jHistory ? { jHistory: replica.jHistory } : {}),
+    ...(replica.jPrefixRound ? { jPrefixRound: replica.jPrefixRound } : {}),
+    ...(replica.jSubmitState ? { jSubmitState: replica.jSubmitState } : {}),
+    ...(replica.entityProviderActionSubmitState
+      ? { entityProviderActionSubmitState: replica.entityProviderActionSubmitState }
+      : {}),
+    ...(replica.htlcNotes ? { htlcNotes: replica.htlcNotes } : {}),
+    ...(replica.position ? { position: replica.position } : {}),
+    ...(replica.hankoWitness ? { hankoWitness: replica.hankoWitness } : {}),
   };
 };
 
@@ -135,10 +133,10 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   // is attached. Canonical snapshots must still be complete JReplica values;
   // zero means no local tip has been observed yet, not an invented chain tip.
   blockNumber: normalizeJBlockNumber(jr.blockNumber),
-  stateRoot: cloneJStateRoot(jr.stateRoot, { rpcBacked: Boolean(jr.rpcs?.length) }),
+  stateRoot: normalizeJStateRoot(jr.stateRoot, { rpcBacked: Boolean(jr.rpcs?.length) }),
   mempool: (() => {
     if (!Array.isArray(jr.mempool)) throw new Error('RUNTIME_MACHINE_J_MEMPOOL_INVALID');
-    return structuredClone(jr.mempool);
+    return jr.mempool;
   })(),
   blockDelayMs: requireNonNegativeNumber(jr.blockDelayMs, 'BLOCK_DELAY'),
   ...(jr.blockTimeMs !== undefined ? { blockTimeMs: jr.blockTimeMs } : {}),
@@ -179,10 +177,15 @@ const buildDurableJReplicaSnapshot = (jr: JReplica): JReplica => ({
  * into unauthenticated bytes after reload, and could also replay an obsolete
  * wake. Persist only the non-derived work; recovery regenerates due wakes.
  */
-const cloneDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput => {
-  const cloned = cloneIsolatedRuntimeInput(runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
-  const { jInputs, reliableReceipts, queuedAt, timestamp, ...requiredInput } = cloned;
-  const entityInputs = cloned.entityInputs.flatMap(input => {
+const projectDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput => {
+  // Process-local capability Symbols authorize admission but are never durable
+  // protocol bytes. Clone the bounded input graph through its canonical
+  // string-key projection only after authority was checked by the caller.
+  const source = cloneIsolatedRuntimeInput(
+    runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+  );
+  const { jInputs, reliableReceipts, queuedAt, timestamp, ...requiredInput } = source;
+  const entityInputs = source.entityInputs.flatMap(input => {
     const originallyEmptyTrigger = Array.isArray(input.entityTxs) && input.entityTxs.length === 0;
     const durableInput = {
       ...input,
@@ -214,14 +217,14 @@ const cloneDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput =
 export const buildDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput => {
   const source = runtimeInput ?? { runtimeTxs: [], entityInputs: [] };
   assertRuntimeInputCapabilitiesAuthorized(source);
-  return cloneDurableRuntimeMempool(source);
+  return projectDurableRuntimeMempool(source);
 };
 
-const cloneRuntimeInput = (runtimeInput?: RuntimeInput): RuntimeInput =>
-  cloneIsolatedRuntimeInput(runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
+const projectRuntimeInput = (runtimeInput?: RuntimeInput): RuntimeInput =>
+  runtimeInput ?? { runtimeTxs: [], entityInputs: [] };
 
-const cloneRuntimeOutputs = (runtimeOutputs: RoutedEntityInput[]): RoutedEntityInput[] =>
-  cloneIsolatedRoutedEntityInputs(runtimeOutputs);
+const projectRuntimeOutputs = (runtimeOutputs: RoutedEntityInput[]): RoutedEntityInput[] =>
+  runtimeOutputs;
 
 const hasDurableEntries = (value: unknown): boolean => {
   if (Array.isArray(value)) return value.length > 0;
@@ -262,42 +265,42 @@ const buildDurableRuntimeStateSnapshot = (
     ...(state.maxEntityInputsPerFrame !== undefined ? { maxEntityInputsPerFrame: state.maxEntityInputsPerFrame } : {}),
     ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
     ...(!options?.excludePersistedHistoryRecords && hasDurableEntries(state.pendingHistoryRecords)
-      ? { pendingHistoryRecords: structuredClone(state.pendingHistoryRecords) }
+      ? { pendingHistoryRecords: state.pendingHistoryRecords }
       : {}),
-    ...(hasDurableEntries(state.deferredNetworkMeta) ? { deferredNetworkMeta: structuredClone(state.deferredNetworkMeta) } : {}),
+    ...(hasDurableEntries(state.deferredNetworkMeta) ? { deferredNetworkMeta: state.deferredNetworkMeta } : {}),
     ...(hasDurableEntries(state.reliableIngressReceiptLedger)
-      ? { reliableIngressReceiptLedger: structuredClone(state.reliableIngressReceiptLedger) }
+      ? { reliableIngressReceiptLedger: state.reliableIngressReceiptLedger }
       : {}),
     ...(hasDurableEntries(state.reliableIngressTerminalWatermarks)
-      ? { reliableIngressTerminalWatermarks: structuredClone(state.reliableIngressTerminalWatermarks) }
+      ? { reliableIngressTerminalWatermarks: state.reliableIngressTerminalWatermarks }
       : {}),
     ...(hasDurableEntries(state.receivedReliableReceiptLedger)
-      ? { receivedReliableReceiptLedger: structuredClone(state.receivedReliableReceiptLedger) }
+      ? { receivedReliableReceiptLedger: state.receivedReliableReceiptLedger }
       : {}),
     ...(hasDurableEntries(state.receivedReliableTerminalWatermarks)
-      ? { receivedReliableTerminalWatermarks: structuredClone(state.receivedReliableTerminalWatermarks) }
+      ? { receivedReliableTerminalWatermarks: state.receivedReliableTerminalWatermarks }
       : {}),
     ...(options?.includeIngressWorkingState
       ? {
-          pendingReliableIngress: structuredClone(state.pendingReliableIngress ?? new Map()),
-          reliableIngressCommitting: structuredClone(state.reliableIngressCommitting ?? new Set()),
+          pendingReliableIngress: state.pendingReliableIngress ?? new Map(),
+          reliableIngressCommitting: state.reliableIngressCommitting ?? new Set(),
         }
       : {}),
     ...(hasDurableEntries(state.runtimeAdapterCommandFrontiers)
-      ? { runtimeAdapterCommandFrontiers: structuredClone(state.runtimeAdapterCommandFrontiers) }
+      ? { runtimeAdapterCommandFrontiers: state.runtimeAdapterCommandFrontiers }
       : {}),
-    ...(hasDurableEntries(state.pendingCommittedJOutbox) ? { pendingCommittedJOutbox: structuredClone(state.pendingCommittedJOutbox) } : {}),
+    ...(hasDurableEntries(state.pendingCommittedJOutbox) ? { pendingCommittedJOutbox: state.pendingCommittedJOutbox } : {}),
     ...(hasDurableEntries(state.pendingJurisdictionImports)
-      ? { pendingJurisdictionImports: structuredClone(state.pendingJurisdictionImports) }
+      ? { pendingJurisdictionImports: state.pendingJurisdictionImports }
       : {}),
     ...(hasDurableEntries(state.numberedRegistrationIntents)
-      ? { numberedRegistrationIntents: structuredClone(state.numberedRegistrationIntents) }
+      ? { numberedRegistrationIntents: state.numberedRegistrationIntents }
       : {}),
     ...(hasDurableEntries(state.certifiedRegistrationEvidence)
-      ? { certifiedRegistrationEvidence: structuredClone(state.certifiedRegistrationEvidence) }
+      ? { certifiedRegistrationEvidence: state.certifiedRegistrationEvidence }
       : {}),
     ...(hasDurableEntries(state.entityEncryptionSeeds)
-      ? { entityEncryptionSeeds: structuredClone(state.entityEncryptionSeeds) }
+      ? { entityEncryptionSeeds: state.entityEncryptionSeeds }
       : {}),
     ...(options?.includeCertifiedBoardNodes
       ? {
@@ -330,6 +333,8 @@ export const buildDurableRuntimeMachineSnapshot = (
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => {
+  const browserVMState = env.browserVMState;
+  const runtimeConfig = env.runtimeConfig;
   const infrastructure = buildDurableRuntimeStateSnapshot(env, {
     includeIngressWorkingState: options?.includeIngressWorkingState === true,
     excludePersistedHistoryRecords: options?.excludePersistedHistoryRecords === true,
@@ -337,16 +342,16 @@ export const buildDurableRuntimeMachineSnapshot = (
   return {
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
-    ...(env.browserVMState ? { browserVMState: structuredClone(env.browserVMState) } : {}),
-    ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
+    ...(browserVMState ? { browserVMState } : {}),
+    ...(runtimeConfig ? { runtimeConfig } : {}),
     ...(infrastructure ? { infrastructure } : {}),
     runtimeInput: buildDurableRuntimeMempool(
       options?.runtimeInput ?? env.runtimeMempool,
     ),
-    ...(env.pendingOutputs?.length ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
-    ...(env.networkInbox?.length ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
+    ...(env.pendingOutputs?.length ? { pendingOutputs: projectRuntimeOutputs(env.pendingOutputs) } : {}),
+    ...(env.networkInbox?.length ? { networkInbox: projectRuntimeOutputs(env.networkInbox) } : {}),
     ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
-      ? { pendingNetworkOutputs: cloneRuntimeOutputs(options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs ?? []) }
+      ? { pendingNetworkOutputs: projectRuntimeOutputs(options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs ?? []) }
       : {}),
     jReplicas: Array.from(requireRuntimeJReplicas(env).entries()).map(([key, replica]) => [
       key,
@@ -385,12 +390,81 @@ export const buildReplayVerifiableRuntimeMachineSnapshot = (
   buildDurableRuntimeMachineSnapshot(env, options),
 );
 
-const cloneProfiles = (profiles: Profile[] | undefined): Profile[] | undefined => {
-  if (!profiles || profiles.length === 0) return undefined;
-  return profiles.map(profile => structuredClone(profile));
+/**
+ * Per-frame Runtime integrity view. The BrowserVM trie is intentionally absent:
+ * its canonical stateRoot already commits that graph, so serializing every trie
+ * node again would turn each Runtime frame into O(chain state). The remaining
+ * fields are split into independently hashed components by storage/hashes.ts;
+ * unbounded components can therefore migrate to Patricia roots without changing
+ * the parent Runtime-root shape.
+ */
+const projectBrowserVmPostState = (
+  state: NonNullable<RuntimeReplica['browserVMState']>,
+): Omit<NonNullable<RuntimeReplica['browserVMState']>, 'trieData'> => {
+  const { trieData: _committedByStateRoot, ...header } = state;
+  return header;
 };
 
-const cloneLogs = (logs: RuntimeReplica['frameLogs'] | undefined): RuntimeReplica['frameLogs'] | undefined => {
+export const buildReplayVerifiableRuntimePostStateView = (
+  env: RuntimeReplica,
+  options?: {
+    pendingNetworkOutputs?: RoutedEntityInput[];
+    runtimeInput?: RuntimeInput;
+    includeIngressWorkingState?: boolean;
+    excludePersistedHistoryRecords?: boolean;
+  },
+): Record<string, unknown> => {
+  const infrastructure = buildDurableRuntimeStateSnapshot(env, {
+    includeIngressWorkingState: options?.includeIngressWorkingState === true,
+    excludePersistedHistoryRecords: options?.excludePersistedHistoryRecords === true,
+  });
+  return {
+    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
+    ...(env.browserVMState
+      ? { browserVMState: projectBrowserVmPostState(env.browserVMState) }
+      : {}),
+    ...(infrastructure ? { infrastructure } : {}),
+    runtimeInput: buildDurableRuntimeMempool(
+      options?.runtimeInput ?? env.runtimeMempool,
+    ),
+    ...(env.pendingOutputs?.length
+      ? { pendingOutputs: projectRuntimeOutputs(env.pendingOutputs) }
+      : {}),
+    ...(env.networkInbox?.length
+      ? { networkInbox: projectRuntimeOutputs(env.networkInbox) }
+      : {}),
+    ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
+      ? {
+          pendingNetworkOutputs: projectRuntimeOutputs(
+            options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs ?? [],
+          ),
+        }
+      : {}),
+    jReplicas: Array.from(requireRuntimeJReplicas(env).entries()).map(([key, replica]) => [
+      key,
+      buildDurableJReplicaSnapshot(replica),
+    ]),
+  };
+};
+
+export const projectReplayVerifiableRuntimePostStateView = (
+  snapshot: Record<string, unknown>,
+): Record<string, unknown> => {
+  const projected = projectReplayVerifiableRuntimeMachine(snapshot);
+  const browserVMState = projected['browserVMState'];
+  if (browserVMState && typeof browserVMState === 'object' && !Array.isArray(browserVMState)) {
+    const { trieData: _committedByStateRoot, ...header } = browserVMState as Record<string, unknown>;
+    projected['browserVMState'] = header;
+  }
+  return projected;
+};
+
+const projectProfiles = (profiles: Profile[] | undefined): Profile[] | undefined => {
+  if (!profiles || profiles.length === 0) return undefined;
+  return profiles;
+};
+
+const projectLogs = (logs: readonly FrameLogEntry[] | undefined): FrameLogEntry[] | undefined => {
   if (!Array.isArray(logs) || logs.length === 0) return undefined;
   return logs.map(entry => ({ ...entry }));
 };
@@ -414,20 +488,19 @@ export const buildCanonicalRuntimeStateSnapshot = (
     includeCertifiedBoardNodes: options?.includeCertifiedBoardNodes === true,
   });
   const browserVMState = options?.browserVMState ?? env.browserVMState;
+  const runtimeConfig = env.runtimeConfig;
   return {
     height: env.state.height,
     timestamp: env.state.timestamp,
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
-    ...(browserVMState
-      ? { browserVMState: structuredClone(browserVMState) }
-      : {}),
-    ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
+    ...(browserVMState ? { browserVMState } : {}),
+    ...(runtimeConfig ? { runtimeConfig } : {}),
     ...(infrastructure ? { infrastructure } : {}),
     runtimeInput: buildDurableRuntimeMempool(env.runtimeMempool),
-    ...(env.pendingOutputs ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
-    ...(env.networkInbox ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
-    ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: cloneRuntimeOutputs(env.pendingNetworkOutputs) } : {}),
+    ...(env.pendingOutputs ? { pendingOutputs: projectRuntimeOutputs(env.pendingOutputs) } : {}),
+    ...(env.networkInbox ? { networkInbox: projectRuntimeOutputs(env.networkInbox) } : {}),
+    ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: projectRuntimeOutputs(env.pendingNetworkOutputs) } : {}),
     eReplicas: Array.from(env.state.eReplicas.entries()).map(([replicaKey, replica]) => [
       replicaKey,
       buildCanonicalEntityReplicaSnapshot(
@@ -448,7 +521,7 @@ export const buildRuntimeCheckpointSnapshot = (env: RuntimeReplica): Record<stri
 
 export const buildRuntimeRecoveryCheckpointSnapshot = (env: RuntimeReplica): Record<string, unknown> => {
   const snapshot = buildCanonicalRuntimeStateSnapshot(env, { includeCertifiedBoardNodes: true });
-  const gossipProfiles = cloneProfiles(env.gossip?.getProfiles?.());
+  const gossipProfiles = projectProfiles(env.gossip?.getProfiles?.());
   return {
     ...snapshot,
     ...(gossipProfiles ? { gossip: { profiles: gossipProfiles } } : {}),
@@ -465,11 +538,11 @@ export const restoreDurableRuntimeSnapshot = (
   if (typeof snapshot['runtimeId'] === 'string') env.runtimeId = snapshot['runtimeId'];
   if (typeof snapshot['activeJurisdiction'] === 'string') env.activeJurisdiction = snapshot['activeJurisdiction'];
   if (snapshot['browserVMState']) {
-    env.browserVMState = structuredClone(snapshot['browserVMState']) as NonNullable<RuntimeReplica['browserVMState']>;
+    env.browserVMState = snapshot['browserVMState'] as NonNullable<RuntimeReplica['browserVMState']>;
   }
   const runtimeInput = snapshot['runtimeInput'];
   if (runtimeInput && typeof runtimeInput === 'object') {
-    env.runtimeMempool = cloneDurableRuntimeMempool(runtimeInput as RuntimeInput);
+    env.runtimeMempool = projectDurableRuntimeMempool(runtimeInput as RuntimeInput);
   }
   if (snapshot['runtimeConfig'] && typeof snapshot['runtimeConfig'] === 'object') {
     env.runtimeConfig = decodeRuntimeConfig(
@@ -480,24 +553,24 @@ export const restoreDurableRuntimeSnapshot = (
   const retainedRuntimeState = { ...(env.infrastructure ?? {}) };
   for (const key of DURABLE_RUNTIME_STATE_KEYS) delete retainedRuntimeState[key];
   const restoredRuntimeState = snapshot['infrastructure'] && typeof snapshot['infrastructure'] === 'object'
-    ? structuredClone(snapshot['infrastructure']) as NonNullable<RuntimeReplica['infrastructure']>
+    ? snapshot['infrastructure'] as NonNullable<RuntimeReplica['infrastructure']>
     : {};
   env.infrastructure = { ...retainedRuntimeState, ...restoredRuntimeState };
   env.pendingOutputs = Array.isArray(snapshot['pendingOutputs'])
-    ? cloneIsolatedRoutedEntityInputs(snapshot['pendingOutputs'] as RoutedEntityInput[])
+    ? snapshot['pendingOutputs'] as RoutedEntityInput[]
     : [];
   env.networkInbox = Array.isArray(snapshot['networkInbox'])
-    ? cloneIsolatedRoutedEntityInputs(snapshot['networkInbox'] as RoutedEntityInput[])
+    ? snapshot['networkInbox'] as RoutedEntityInput[]
     : [];
   env.pendingNetworkOutputs = Array.isArray(snapshot['pendingNetworkOutputs'])
-    ? cloneIsolatedRoutedEntityInputs(snapshot['pendingNetworkOutputs'] as RoutedEntityInput[])
+    ? snapshot['pendingNetworkOutputs'] as RoutedEntityInput[]
     : [];
   if (Array.isArray(snapshot['jReplicas'])) {
     env.state.jReplicas = new Map(snapshot['jReplicas'].map((entry) => {
       if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') {
         throw new Error('RUNTIME_MACHINE_J_REPLICA_ENTRY_INVALID');
       }
-      return [entry[0], structuredClone(entry[1]) as JReplica];
+      return [entry[0], entry[1] as JReplica];
     }));
   }
 };
@@ -511,7 +584,7 @@ export const buildCanonicalEnvSnapshot = (
     meta?: EnvSnapshot['meta'];
     browserVMState?: RuntimeReplica['browserVMState'];
     gossipProfiles?: Profile[];
-    logs?: RuntimeReplica['frameLogs'];
+    logs?: readonly FrameLogEntry[];
   },
 ): EnvSnapshot => {
   const core = buildCanonicalRuntimeStateSnapshot(env, { browserVMState: options.browserVMState }) as {
@@ -523,25 +596,33 @@ export const buildCanonicalEnvSnapshot = (
     jReplicas: Array<[string, JReplica]>;
   };
 
-  const logs = cloneLogs(options.logs);
+  const logs = projectLogs(options.logs);
+  // Decode the flat Runtime-owned replica directory explicitly. Entity and
+  // Account graphs remain shared persistent values; this does not clone them.
+  const eReplicas = new Map<string, EntityReplica>();
+  for (const [replicaKey, replica] of core.eReplicas) eReplicas.set(replicaKey, replica);
+  const jReplicas = new Map<string, JReplica>();
+  for (const [replicaKey, replica] of core.jReplicas) jReplicas.set(replicaKey, replica);
   return {
     state: {
       height: core.height,
       timestamp: core.timestamp,
-      eReplicas: new Map(core.eReplicas),
-      jReplicas: new Map(core.jReplicas),
+      eReplicas,
+      jReplicas,
     },
     ...(core.runtimeId ? { runtimeId: core.runtimeId } : {}),
     ...(core.browserVMState ? { browserVMState: core.browserVMState } : {}),
-    runtimeInput: cloneRuntimeInput(options.runtimeInput),
-    runtimeOutputs: cloneRuntimeOutputs(options.runtimeOutputs),
+    runtimeInput: projectRuntimeInput(options.runtimeInput),
+    runtimeOutputs: projectRuntimeOutputs(options.runtimeOutputs),
     description: options.description,
-    ...(cloneProfiles(options.gossipProfiles) ? { gossip: { profiles: cloneProfiles(options.gossipProfiles)! } } : {}),
+    ...(projectProfiles(options.gossipProfiles)
+      ? { gossip: { profiles: projectProfiles(options.gossipProfiles)! } }
+      : {}),
     ...(options.meta
       ? {
           meta: {
             ...(options.meta.title ? { title: options.meta.title } : {}),
-            ...(options.meta.subtitle ? { subtitle: structuredClone(options.meta.subtitle) } : {}),
+            ...(options.meta.subtitle ? { subtitle: options.meta.subtitle } : {}),
           },
         }
       : {}),
@@ -566,7 +647,7 @@ export const normalizePersistedSnapshotInPlace = (
       Array.from(jMap.entries()).map(([name, raw]) => {
         const jr = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
         const rpcs = Array.isArray(jr['rpcs']) ? jr['rpcs'] : [];
-        const normalizedStateRoot = cloneJStateRoot(jr['stateRoot'], { rpcBacked: rpcs.length > 0 });
+        const normalizedStateRoot = normalizeJStateRoot(jr['stateRoot'], { rpcBacked: rpcs.length > 0 });
         return [
           String(name),
           {

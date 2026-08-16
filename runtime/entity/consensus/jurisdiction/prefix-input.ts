@@ -35,7 +35,7 @@ const verifyAttestationRound = (context: ApplyEntityInputContext): 'stale' | 'cu
   const authorityConfigs = [
     authorityReplica.state.config,
     ...(workingReplica.certifiedFrameAnchor ? [workingReplica.certifiedFrameAnchor.authority.config] : []),
-    ...(workingReplica.certifiedFrameLineage ?? []).map(link => link.postAuthority.config),
+    ...(workingReplica.certifiedFrameHead ? [workingReplica.certifiedFrameHead.postAuthority.config] : []),
   ];
   const dispositions = new Set(
     [...incoming.values()].map(attestation =>

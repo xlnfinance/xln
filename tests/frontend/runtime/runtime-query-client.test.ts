@@ -44,6 +44,8 @@ test('runtime query client exposes typed projection reads and bounded cache', ()
   expect(source).toContain('readHistoryFrameBatch');
   expect(source).toContain('readActivity');
   expect(source).toContain('readSolvencySummary');
+  expect(source).toContain('readSwapHistory');
+  expect(source).toContain('/swap-history`');
   expect(source).toContain('readReceiptStatus');
   expect(source).toContain('readRecoveryBundles');
   expect(source).toContain("'solvency-summary'");

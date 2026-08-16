@@ -20,6 +20,7 @@ import {
 import {
   prepareAccountStorageDelete,
   prepareAccountStorageLayout,
+  projectAccountStorageRootValue,
 } from './schema/account-layout';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
@@ -40,11 +41,12 @@ import {
 } from './keys';
 import { iterateKeys, readRawOrNull, readValidatedOrNull } from './database/level';
 import {
-  validateStorageBookDocValue,
   validateStorageMerkleBranchDocValue,
   validateStorageMerkleLeafDocValue,
   validateStorageMerkleRootDocValue,
 } from './schema/authoritative-schema';
+import { computeBookCommitmentHash } from '../orderbook/commitment';
+import { projectStorageBookHeader } from './schema/book-graph-codec';
 import {
   buildHexKeyedMerkle,
   computeRadixMerkleBranchHash,
@@ -61,6 +63,7 @@ import type {
   RuntimeDbLike,
   StorageDoc,
   StorageDocRef,
+  StorageAccountDoc,
   StorageEntityHashDoc,
   StorageFrameEntityHash,
   RuntimeFrame,
@@ -97,10 +100,12 @@ const merkleCellPathBytes = (path: string): Buffer => {
 
 export const canonicalizeStorageDoc = (doc: StorageDoc): StorageDoc => {
   if (doc.family !== 'book') return doc;
-  return {
-    ...doc,
-    value: validateStorageBookDocValue(structuredClone(doc.value)),
-  };
+  // Internal write projection is already trusted state. Recompute only dirty
+  // orderbook branches; decoded disk/network Books still pass the full exact
+  // validator on their read boundary. Clearing every cached branch here would
+  // turn one order into an O(total Book) WAL append.
+  computeBookCommitmentHash(doc.value);
+  return doc;
 };
 
 const encodeStorageDocValue = (input: StorageDoc): StorageDocEncodedValue => {
@@ -108,7 +113,11 @@ const encodeStorageDocValue = (input: StorageDoc): StorageDocEncodedValue => {
   // hashes). Hash and persist that exact canonical value so a read/validate/
   // re-encode cycle cannot change the Merkle leaf.
   const doc = canonicalizeStorageDoc(input);
-  const buffer = encodeBuffer(doc.value);
+  const buffer = doc.family === 'book'
+    ? encodeBuffer(projectStorageBookHeader(doc.value))
+    : doc.family === 'account'
+      ? projectAccountStorageRootValue(doc.value)
+      : encodeBuffer(doc.value);
   const hash = hashBuffer(buffer);
   const hashBytes = Buffer.from(hash.slice(2), 'hex');
   return { doc, buffer, hash, hashBytes };
@@ -268,9 +277,9 @@ export const prepareStorageCanonicalStateHashes = (
 };
 
 export const computeStorageFrameHash = (record: RuntimeFrame): string => {
-  // Local WAL integrity intentionally covers the complete persisted record,
-  // including runtimeOutputs/transport state. Cross-replay state identity is
-  // canonicalStateHash, which commits to replayable Entity state instead.
+  // Local WAL integrity covers only the durable frame and its immutable
+  // payload references. Resolved bodies have a separate read-model type and
+  // therefore cannot accidentally enter this hash surface.
   const stableRecord = { ...record };
   delete stableRecord.frameHash;
   return hashStable({
@@ -297,14 +306,32 @@ export const computeStoragePostStateHash = (input: {
   height: number;
   timestamp: number;
   replicaMetaDigest: string;
-  runtimeMachine: Record<string, unknown>;
+  runtimeComponentDigests: readonly Readonly<{
+    key: string;
+    valueHash: string;
+  }>[];
+  runtimeOutputRefs: readonly string[];
 }): string => hashStable({
   kind: STORAGE_FRAME_FORMAT.postStateDomain,
   height: input.height,
   timestamp: input.timestamp,
   replicaMetaDigest: input.replicaMetaDigest,
-  runtimeMachine: input.runtimeMachine,
+  runtimeComponentDigests: input.runtimeComponentDigests,
+  runtimeOutputRefs: input.runtimeOutputRefs,
 });
+
+/**
+ * Parent Runtime integrity stores only child component hashes. This mirrors a
+ * Patricia branch: changing one child never requires serializing its siblings
+ * into the parent. Components that are still legacy collections are hashed at
+ * this boundary today and can be replaced one-for-one by their persistent roots.
+ */
+export const computeRuntimePostStateComponentDigests = (
+  view: Readonly<Record<string, unknown>>,
+): ReadonlyArray<Readonly<{ key: string; valueHash: string }>> =>
+  Object.keys(view)
+    .sort(compareStableText)
+    .map(key => ({ key, valueHash: hashStable(view[key]) }));
 
 type PersistedMerkleLeafNode = {
   kind: 'leaf';
@@ -368,7 +395,7 @@ const parseMerklePathKey = (key: string): number[] => {
   ));
 };
 
-const cloneMerklePathSet = (paths: Set<string>): number[][] =>
+const projectMerklePathSet = (paths: Set<string>): number[][] =>
   Array.from(paths)
     .sort(compareStableText)
     .map(parseMerklePathKey);
@@ -478,8 +505,8 @@ class PersistedEntityMerkleEditor {
       },
       branchPuts,
       leafPuts,
-      branchDels: cloneMerklePathSet(branchDels),
-      leafDels: cloneMerklePathSet(leafDels),
+      branchDels: projectMerklePathSet(branchDels),
+      leafDels: projectMerklePathSet(leafDels),
     };
   }
 
@@ -936,6 +963,7 @@ export const prepareStorageStateHashes = async (options: {
   puts: StorageDoc[];
   dels: StorageDocRef[];
   entityHashDocs?: Map<string, StorageEntityHashDoc>;
+  previousAccounts?: ReadonlyMap<string, StorageAccountDoc>;
 }): Promise<{
   stateHash: string;
   entityHashes: StorageFrameEntityHash[];
@@ -945,6 +973,8 @@ export const prepareStorageStateHashes = async (options: {
   docDels: Buffer[];
   merklePuts: Array<{ key: Buffer; value: Buffer }>;
   merkleDels: Buffer[];
+  accountCachePuts: Array<readonly [string, StorageAccountDoc]>;
+  accountCacheDels: string[];
 }> => {
   const effectivePuts = new Map<string, StorageDoc>();
   for (const doc of options.puts) effectivePuts.set(liveKeyForDoc(doc).toString('hex'), doc);
@@ -962,6 +992,11 @@ export const prepareStorageStateHashes = async (options: {
   const docDels: Buffer[] = [];
   const touchedEntityIds = new Set<string>();
   const persistedEditors = new Map<string, PersistedEntityMerkleEditor>();
+  const accountCachePuts: Array<readonly [string, StorageAccountDoc]> = [];
+  const accountCacheDels: string[] = [];
+
+  const accountCacheKey = (entityId: string, counterpartyId: string): string =>
+    `${normalizeEntityId(entityId)}\u0000${normalizeEntityId(counterpartyId)}`;
 
   const openEntityEditor = async (entityId: string): Promise<PersistedEntityMerkleEditor> => {
     const normalized = normalizeEntityId(entityId);
@@ -998,12 +1033,14 @@ export const prepareStorageStateHashes = async (options: {
     const ref = docRefForDoc(canonicalDoc);
     docValueBuffers.set(docValueKey(canonicalDoc), encoded.buffer);
     if (canonicalDoc.family === 'account') {
+      const cacheKey = accountCacheKey(canonicalDoc.entityId, canonicalDoc.counterpartyId);
       const layout = await prepareAccountStorageLayout(
         options.db,
         normalizeEntityId(canonicalDoc.entityId),
         normalizeEntityId(canonicalDoc.counterpartyId),
         liveKeyForDoc(canonicalDoc),
         canonicalDoc.value,
+        options.previousAccounts?.get(cacheKey),
       );
       if (!layout.logicalValue.equals(encoded.buffer) || layout.logicalHash !== encoded.hash) {
         throw new Error(
@@ -1012,6 +1049,7 @@ export const prepareStorageStateHashes = async (options: {
       }
       docPuts.push(...layout.puts);
       docDels.push(...layout.dels);
+      accountCachePuts.push([cacheKey, canonicalDoc.value]);
     } else {
       docPuts.push({ key: liveKeyForDoc(canonicalDoc), value: encoded.buffer });
     }
@@ -1020,6 +1058,7 @@ export const prepareStorageStateHashes = async (options: {
 
   for (const ref of effectiveDels.values()) {
     if (ref.family === 'account') {
+      accountCacheDels.push(accountCacheKey(ref.entityId, ref.counterpartyId));
       docDels.push(...await prepareAccountStorageDelete(
         options.db,
         normalizeEntityId(ref.entityId),
@@ -1058,6 +1097,8 @@ export const prepareStorageStateHashes = async (options: {
     docDels,
     merklePuts,
     merkleDels: Array.from(merkleDelsByKey.values()),
+    accountCachePuts,
+    accountCacheDels,
   };
 };
 import { Buffer } from '../infra/platform-crypto';

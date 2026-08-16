@@ -105,7 +105,6 @@ const makeReplica = (
       accounts: new Map(),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
-      jBlockChain: [],
       profile: {
         name: 'Replica',
         isHub: false,

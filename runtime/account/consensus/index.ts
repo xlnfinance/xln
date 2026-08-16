@@ -6,10 +6,22 @@
 import type { AccountReplica, AccountDisputeSeal, AccountFrame, AccountInput, AccountPeerInput, Delta } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
 import type { AccountConsensusContext } from './context';
-import { cloneAccountFrame, cloneAccountReplica } from '../state/state-clone';
+import { cloneAccountFrame } from '../state/state-clone';
+import {
+  copyAccountDisputeConfig,
+  copyAccountStateDomain,
+} from '../../protocol/state/account-input-clone';
+import {
+  accountTransitionView,
+  beginAccountTransition,
+  commitAccountTransition,
+  createAccountTransitionKey,
+  discardAccountTransition,
+} from '../state/candidate-overlay';
 import { getAccountPerspective } from '../state/perspective';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { applyAccountTx } from '../tx/apply';
+import type { AccountDraftReplica } from '../state/account-state-draft';
 import type { AccountTxRejection, ApplyAccountTxOk } from '../tx/apply-types';
 import { accountTxFailureMessage, assertNever } from '../tx/apply-result';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
@@ -40,10 +52,12 @@ import type {
 } from './types';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { getMinimumSafeSettlementNonce } from '../../protocol/settlement/operations';
-import { computeAccountStateRoot, computeAccountStateSectionHashes } from '../commitment/state-root';
-import { forkAccountCommitmentCache } from '../commitment/map-commitment';
+import { computeAccountStateSectionHashes } from '../commitment/state-root';
 import { createAccountJClaimSession, type AccountJClaimSession } from '../j-claims/j-claim-session';
-import type { AccountJClaimNodeStore } from '../../types/finance/account-j-claims';
+import type {
+  AccountJClaimNodeChanges,
+  AccountJClaimNodeStore,
+} from '../../types/finance/account-j-claims';
 import {
   getIncomingAccountDeadlineViolation,
   HTLC_ENFORCEMENT_RESERVE_MS,
@@ -53,6 +67,7 @@ import {
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from './flush';
 import { handleBoardReseal } from './incoming/board-reseal';
 import { handlePendingFrameAck } from './incoming/ack-commit';
+import { commitAccountFrameTransition } from './frame/commit-transition';
 import { assertLiveCommitMatchesFrame } from './incoming/commit-root';
 import {
   getDisputeSealRequirementError,
@@ -98,11 +113,14 @@ type AccountSwapCancelRequest = { offerId: string; accountId: string };
 type IncomingFrameValidation = {
   clonedMachine: AccountReplica;
   proofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
+  candidateEffects: AccountOutput[];
+  accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   processEvents: string[];
   revealedSecrets: AccountRevealedSecret[];
   swapOffersCreated: AccountSwapOfferCreated[];
   swapCancelRequests: AccountSwapCancelRequest[];
   swapOffersCancelled: AccountSwapCancelRequest[];
+  timedOutHashlocks: string[];
 };
 
 type IncomingFrameValidationResult =
@@ -222,7 +240,6 @@ type IncomingFrameReplayResult =
 const collectIncomingOkOutcome = (
   result: ApplyAccountTxOk,
   replay: IncomingFrameReplay,
-  timedOutHashlocks: string[],
   fromEntityId: string,
 ): void => {
   switch (result.outcome) {
@@ -232,7 +249,7 @@ const collectIncomingOkOutcome = (
       replay.revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
       return;
     case 'htlc_error':
-      timedOutHashlocks.push(result.hashlock);
+      replay.timedOutHashlocks.push(result.hashlock);
       return;
     case 'swap_offer_created':
       replay.swapOffersCreated.push(result.swapOfferCreated);
@@ -253,12 +270,11 @@ const collectIncomingOkOutcome = (
 
 const replayIncomingFrameOnClone = async (
   context: AccountConsensusContext,
-  clonedMachine: AccountReplica,
+  clonedMachine: AccountDraftReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   frameJHeight: number,
   events: string[],
-  timedOutHashlocks: string[],
   jClaimSession: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
 ): Promise<IncomingFrameReplayResult> => {
@@ -268,6 +284,8 @@ const replayIncomingFrameOnClone = async (
     swapOffersCreated: [],
     swapCancelRequests: [],
     swapOffersCancelled: [],
+    candidateEffects: [],
+    timedOutHashlocks: [],
   };
   for (const accountTx of receivedFrame.accountTxs) {
     const beforeSettlement = captureSettlementVector(clonedMachine);
@@ -301,168 +319,185 @@ const replayIncomingFrameOnClone = async (
       accountLog.debug('receiver.tx.processed', { type: accountTx.type, success: true });
     }
     replay.processEvents.push(...result.events);
-    collectIncomingOkOutcome(result, replay, timedOutHashlocks, input.fromEntityId);
+    replay.candidateEffects.push(...(result.candidateEffects ?? []));
+    collectIncomingOkOutcome(result, replay, input.fromEntityId);
   }
   return { kind: 'continue', replay };
 };
 
-async function validateIncomingFrameOnClone(
+async function validateIncomingFrameOnDraft(
   context: AccountConsensusContext,
   account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   frameJHeight: number,
   events: string[],
-  timedOutHashlocks: string[],
   validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
   accountJClaimNodeStore: AccountJClaimNodeStore,
   securityContext: AccountInputSecurityContext,
 ): Promise<IncomingFrameValidationResult> {
-  const clonedMachine = cloneAccountReplica(account);
+  const transition = beginAccountTransition(
+    account,
+    createAccountTransitionKey(account, {
+      purpose: 'incoming-frame-validation',
+      input,
+      receivedFrame,
+    }),
+  );
+  const clonedMachine = accountTransitionView(transition);
+  let sealed = false;
   const jClaimSession = createAccountJClaimSession(accountJClaimNodeStore);
 
-  accountLog.debug('frame.receiver_validate', {
-    height: receivedFrame.height,
-    txs: receivedFrame.accountTxs.map(tx => tx.type),
-  });
-  const replayResult = await replayIncomingFrameOnClone(
-    context,
-    clonedMachine,
-    input,
-    receivedFrame,
-    frameJHeight,
-    events,
-    timedOutHashlocks,
-    jClaimSession,
-    securityContext,
-  );
-  if (replayResult.kind === 'return') return replayResult;
-
-  const frameHashMismatch = await verifySenderFrameHash(receivedFrame, events);
-  if (frameHashMismatch) return { kind: 'return', result: frameHashMismatch };
-
-  const { deltas: ourFinalDeltas } = collectReceiverValidationDeltas(clonedMachine);
-  const localAccountStateRoot = computeAccountStateRoot(clonedMachine.state);
-  if (
-    localAccountStateRoot !== receivedFrame.accountStateRoot ||
-    !accountFrameDeltasEqual(ourFinalDeltas, receivedFrame.deltas)
-  ) {
-    accountLog.warn('frame.state_root_mismatch', {
+  try {
+    accountLog.debug('frame.receiver_validate', {
       height: receivedFrame.height,
       txs: receivedFrame.accountTxs.map(tx => tx.type),
-      localAccountStateRoot,
-      receivedAccountStateRoot: receivedFrame.accountStateRoot,
-      localDeltas: summarizeDeltasForLog(new Map(ourFinalDeltas.map(delta => [delta.tokenId, delta]))),
-      receivedDeltas: summarizeDeltasForLog(new Map(receivedFrame.deltas.map(delta => [delta.tokenId, delta]))),
-      localAccountStateSectionHashes: computeAccountStateSectionHashes(clonedMachine.state),
-      lastFinalizedJHeight: clonedMachine.state.lastFinalizedJHeight,
-      leftPendingJClaims: clonedMachine.state.leftPendingJClaims,
-      rightPendingJClaims: clonedMachine.state.rightPendingJClaims,
     });
-    return { kind: 'return', result: accountInputValidationRejected('Bilateral account state root mismatch', events) };
-  }
-  const proofResult = buildAccountProofBodyFromJurisdictions(context, clonedMachine);
-  const localProofBodyHash = proofResult.proofBodyHash;
-  const frameSealError = getDisputeSealRequirementError(
-    localProofBodyHash,
-    account.counterpartyDisputeProofBodyHash,
-    account.counterpartyDisputeProofNonce,
-    Number(clonedMachine.state.jNonce ?? account.state.jNonce ?? 0),
-    validatedCounterpartyDisputeSeal,
-  );
-  if (frameSealError) {
-    return { kind: 'return', result: accountInputValidationRejected(frameSealError, events) };
-  }
-
-  accountLog.debug('frame.accept', {
-    height: receivedFrame.height,
-    from: shortId(input.fromEntityId),
-    txs: receivedFrame.accountTxs.map(tx => tx.type),
-  });
-
-  return {
-    kind: 'continue',
-    validation: {
+    const replayResult = await replayIncomingFrameOnClone(
+      context,
       clonedMachine,
-      proofResult,
-      ...replayResult.replay,
-    },
-  };
+      input,
+      receivedFrame,
+      frameJHeight,
+      events,
+      jClaimSession,
+      securityContext,
+    );
+    if (replayResult.kind === 'return') {
+      discardAccountTransition(transition);
+      return replayResult;
+    }
+
+    const frameHashMismatch = await verifySenderFrameHash(receivedFrame, events);
+    if (frameHashMismatch) {
+      discardAccountTransition(transition);
+      return { kind: 'return', result: frameHashMismatch };
+    }
+
+    // Preparing consumes only the ephemeral owner; it does not publish into the
+    // Entity Account index. Hash the prepared persistent roots, never a draft
+    // view whose collections intentionally expose no commitment authority.
+    const committed = commitAccountTransition(transition);
+    sealed = true;
+    const validatedMachine = committed.account;
+    const { deltas: ourFinalDeltas } = collectReceiverValidationDeltas(validatedMachine);
+    const localAccountStateRoot = committed.accountStateRoot;
+    if (
+      localAccountStateRoot !== receivedFrame.accountStateRoot ||
+      !accountFrameDeltasEqual(ourFinalDeltas, receivedFrame.deltas)
+    ) {
+      accountLog.warn('frame.state_root_mismatch', {
+        height: receivedFrame.height,
+        txs: receivedFrame.accountTxs.map(tx => tx.type),
+        localAccountStateRoot,
+        receivedAccountStateRoot: receivedFrame.accountStateRoot,
+        localDeltas: summarizeDeltasForLog(new Map(ourFinalDeltas.map(delta => [delta.tokenId, delta]))),
+        receivedDeltas: summarizeDeltasForLog(new Map(receivedFrame.deltas.map(delta => [delta.tokenId, delta]))),
+        localAccountStateSectionHashes: computeAccountStateSectionHashes(validatedMachine.state),
+        lastFinalizedJHeight: validatedMachine.state.lastFinalizedJHeight,
+        leftPendingJClaims: validatedMachine.state.leftPendingJClaims,
+        rightPendingJClaims: validatedMachine.state.rightPendingJClaims,
+      });
+      return { kind: 'return', result: accountInputValidationRejected('Bilateral account state root mismatch', events) };
+    }
+    const proofResult = buildAccountProofBodyFromJurisdictions(context, validatedMachine);
+    const localProofBodyHash = proofResult.proofBodyHash;
+    const frameSealError = getDisputeSealRequirementError(
+      localProofBodyHash,
+      account.counterpartyDisputeProofBodyHash,
+      account.counterpartyDisputeProofNonce,
+      Number(validatedMachine.state.jNonce ?? account.state.jNonce ?? 0),
+      validatedCounterpartyDisputeSeal,
+    );
+    if (frameSealError) {
+      return { kind: 'return', result: accountInputValidationRejected(frameSealError, events) };
+    }
+
+    accountLog.debug('frame.accept', {
+      height: receivedFrame.height,
+      from: shortId(input.fromEntityId),
+      txs: receivedFrame.accountTxs.map(tx => tx.type),
+    });
+
+    const accountJClaimNodeChanges = jClaimSession.changes();
+    return {
+      kind: 'continue',
+      validation: {
+        clonedMachine: committed.account,
+        proofResult,
+        ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
+        ...replayResult.replay,
+      },
+    };
+  } catch (error) {
+    if (!sealed) discardAccountTransition(transition);
+    throw error;
+  }
 }
 
 const reexecuteIncomingFrame = async (
   context: AccountConsensusContext,
   account: AccountReplica,
   receivedFrame: AccountFrame,
-  frameJHeight: number,
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
   candidateEffects: AccountOutput[],
 ): Promise<void> => {
-  for (const tx of receivedFrame.accountTxs) {
-    const beforeSettlement = captureSettlementVector(account);
-    const commitResult = await applyAccountTx(
-      account,
-      tx,
-      receivedFrame.byLeft,
-      receivedFrame.timestamp,
-      frameJHeight,
-      false,
-      context,
-      committedJClaims,
-      securityContext.counterpartyCertifiedBoard?.boardHash,
-      {
-        timestamp: securityContext.entityTimestamp,
-        jHeight: securityContext.finalizedJHeight,
-      },
-    );
-    candidateEffects.push(...(commitResult.candidateEffects ?? []));
-    if (!commitResult.ok) {
-      accountLog.error('frame.commit.failed', {
-        side: 'receiver',
-        type: tx.type,
-        error: commitResult.rejection.message,
-      });
-      throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.rejection.message}`);
-    }
-    assertNoUnilateralSettlementMutation(account, beforeSettlement, tx, 'receiver/commit');
-  }
+  const committed = await commitAccountFrameTransition({
+    context,
+    account,
+    frame: receivedFrame,
+    jClaimSession: committedJClaims,
+    role: 'receiver/collision-commit',
+    ...(securityContext.counterpartyCertifiedBoard
+      ? { counterpartyCertifiedBoardHash: securityContext.counterpartyCertifiedBoard.boardHash }
+      : {}),
+    htlcEnforcementClock: {
+      timestamp: securityContext.entityTimestamp,
+      jHeight: securityContext.finalizedJHeight,
+    },
+  });
+  candidateEffects.push(...committed.candidateEffects);
 };
 
 async function commitIncomingFrameOnRealState(
-  context: AccountConsensusContext,
   account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
-  frameJHeight: number,
   validation: IncomingFrameValidation,
+  installValidatedTransition: boolean,
   ourEntityId: string,
   validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
   events: string[],
   committedFrames: AccountCommittedFrame[],
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
+  timedOutHashlocks: string[],
   candidateEffects: AccountOutput[],
 ): Promise<void> {
   const { counterparty: cpForCommitLog } = getAccountPerspective(account.state, ourEntityId);
   if (HEAVY_LOGS) {
-    accountLog.debug('receiver.commit.reexecute', {
+    accountLog.debug('receiver.commit.install', {
       txs: receivedFrame.accountTxs.length,
       counterparty: shortId(cpForCommitLog),
+      source: installValidatedTransition ? 'validated-transition' : 'collision-replay',
     });
   }
 
-  await reexecuteIncomingFrame(
-    context,
-    account,
-    receivedFrame,
-    frameJHeight,
-    committedJClaims,
-    securityContext,
-    candidateEffects,
-  );
+  // The ordinary receiver path has no mutation between validation and this
+  // commit. Install the prepared persistent Account value once; replaying the
+  // same txs here doubled handler work and rebuilt every touched Patricia path.
+  // Same-height rollback remains a distinct path because it changes the
+  // Account envelope before the incoming txs must execute.
+  if (installValidatedTransition) {
+    Object.assign(account, validation.clonedMachine);
+    timedOutHashlocks.push(...validation.timedOutHashlocks);
+    candidateEffects.push(...validation.candidateEffects);
+    if (validation.accountJClaimNodeChanges) {
+      committedJClaims.absorb(validation.accountJClaimNodeChanges);
+    }
+  }
 
-  forkAccountCommitmentCache(validation.clonedMachine.state, account.state);
   assertLiveCommitMatchesFrame(
     account,
     receivedFrame.accountStateRoot,
@@ -477,11 +512,10 @@ async function commitIncomingFrameOnRealState(
     height: receivedFrame.height,
     tokens: account.state.deltas.size,
   });
-  if (validation.clonedMachine.pendingForwards?.length) {
-    account.pendingForwards = validation.clonedMachine.pendingForwards;
+  if (account.pendingForwards?.length) {
     accountLog.debug('pending_forwards.copied', {
-      count: validation.clonedMachine.pendingForwards.length,
-      routes: validation.clonedMachine.pendingForwards.map(forward => forward.route.map(r => shortId(r))),
+      count: account.pendingForwards.length,
+      routes: account.pendingForwards.map(forward => forward.route.map(r => shortId(r))),
     });
   }
 
@@ -635,8 +669,8 @@ async function buildIncomingFrameAckMaterial(
     kind: 'ack',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: input.fromEntityId,
-    domain: structuredClone(account.state.domain),
-    disputeConfig: structuredClone(account.state.disputeConfig),
+    domain: copyAccountStateDomain(account.state.domain),
+    disputeConfig: copyAccountDisputeConfig(account.state.disputeConfig),
     watchSeed: account.state.watchSeed,
     ack: {
       height: receivedFrame.height,
@@ -856,14 +890,13 @@ async function handleIncomingAccountFrame(
     return { kind: 'return', result: preflight.result };
   }
 
-  const validationResult = await validateIncomingFrameOnClone(
+  const validationResult = await validateIncomingFrameOnDraft(
     context,
     account,
     input,
     preflight.receivedFrame,
     preflight.frameJHeight,
     events,
-    timedOutHashlocks,
     validatedCounterpartyDisputeSeal,
     committedJClaims.store,
     securityContext,
@@ -874,21 +907,33 @@ async function handleIncomingAccountFrame(
 
   if (preflight.rollbackPendingFrame) {
     applySameHeightIncomingFrameRollback(account, preflight.receivedFrame, events);
+    await reexecuteIncomingFrame(
+      context,
+      account,
+      preflight.receivedFrame,
+      committedJClaims,
+      securityContext,
+      candidateEffects,
+    );
+    // Validation already classified deterministic HTLC timeout outcomes. The
+    // collision replay reapplies money and commit-only effects, but it does
+    // not rediscover outcome metadata; publish the validated hashes once.
+    timedOutHashlocks.push(...validationResult.validation.timedOutHashlocks);
   }
 
   await commitIncomingFrameOnRealState(
-    context,
     account,
     input,
     preflight.receivedFrame,
-    preflight.frameJHeight,
     validationResult.validation,
+    !preflight.rollbackPendingFrame,
     preflight.ourEntityId,
     validatedCounterpartyDisputeSeal,
     events,
     committedFrames,
     committedJClaims,
     securityContext,
+    timedOutHashlocks,
     candidateEffects,
   );
 

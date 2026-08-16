@@ -1,32 +1,30 @@
-import type { AccountReplica } from '../types/account';
 import type { EntityState } from './types';
 import type { LendingLoan, LendingPoolPosition, LendingState } from '../types/finance/lending';
 import {
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionRoute,
 } from '../extensions/cross-j';
-import { createStructuredLogger } from '../infra/logger';
 import { cloneJBatch, type JBatchState } from '../jurisdiction/machine/batch';
 import { structuredCloneOrThrow } from '../protocol/serialization/structured-clone';
 import { cloneCrossJurisdictionAccountTxRoute } from '../extensions/cross-j';
-import { applyAccountClonePolicy } from '../account/state/state-clone';
 import { copyEntityFrameEvents } from './frame-events';
-import { validateEntityState } from './state/state-validation';
 import { forkEntityAccountCommitmentCache } from './consensus/state-root';
-import { forkAccountWorkIndexes } from './consensus/account/work-index';
 import { forkCrossJurisdictionBookAdmissionIndex } from '../extensions/cross-j/orderbook';
 import {
   createEntityAccountCandidateMap,
   commitEntityAccountCandidate,
-  snapshotEntityAccountMap,
 } from './state/candidate-map';
+import {
+  EntityAccountCandidateMap,
+  PersistentEntityAccountMap,
+} from './state/persistent-account-map';
 import {
   commitEntityOrderbookCandidate,
   createEntityOrderbookCandidate,
-  snapshotEntityOrderbookCandidate,
 } from './state/candidate-map';
-
-const cloneLog = createStructuredLogger('entity.state_clone');
+import {
+  EntityCollectionCandidateMap,
+} from './state/persistent-collection-map';
 
 const cloneJBatchState = (state: JBatchState): JBatchState => {
   const cloned: JBatchState = {
@@ -79,172 +77,136 @@ const cloneCrossJurisdictionState = (
   source: EntityState,
 ): void => {
   if (source.crossJurisdictionSwaps) {
-    target.crossJurisdictionSwaps = new Map(
-      Array.from(source.crossJurisdictionSwaps.entries()).map(([id, route]) => [
-        id,
-        cloneCrossJurisdictionRoute(route),
-      ]),
+    target.crossJurisdictionSwaps = new EntityCollectionCandidateMap(
+      source.crossJurisdictionSwaps,
+      cloneCrossJurisdictionRoute,
     );
   }
   if (source.crossJurisdictionAuthorizations) {
-    target.crossJurisdictionAuthorizations = new Map(
-      Array.from(source.crossJurisdictionAuthorizations.entries()).map(([id, route]) => [
-        id,
-        cloneCrossJurisdictionRoute(route),
-      ]),
+    target.crossJurisdictionAuthorizations = new EntityCollectionCandidateMap(
+      source.crossJurisdictionAuthorizations,
+      cloneCrossJurisdictionRoute,
     );
   }
   if (source.pendingCrossJurisdictionFillAcks) {
-    target.pendingCrossJurisdictionFillAcks = new Map(
-      Array.from(source.pendingCrossJurisdictionFillAcks.entries()).map(
-        ([id, pending]) => [
-          id,
-          {
-            ...pending,
-            tx: cloneCrossJurisdictionAccountTxRoute(
-              structuredClone(pending.tx),
-            ) as typeof pending.tx,
-          },
-        ],
-      ),
+    const forkPending = (
+      pending: NonNullable<EntityState['pendingCrossJurisdictionFillAcks']> extends Map<string, infer Value>
+        ? Value
+        : never,
+    ) => ({
+      ...pending,
+      tx: cloneCrossJurisdictionAccountTxRoute(structuredClone(pending.tx)) as typeof pending.tx,
+    });
+    target.pendingCrossJurisdictionFillAcks = new EntityCollectionCandidateMap(
+      source.pendingCrossJurisdictionFillAcks,
+      forkPending,
     );
   }
   if (source.crossJurisdictionBookAdmissions) {
-    target.crossJurisdictionBookAdmissions = new Map(
-      Array.from(source.crossJurisdictionBookAdmissions.entries()).map(
-        ([id, admission]) => [
-          id,
-          cloneCrossJurisdictionBookAdmission(admission),
-        ],
-      ),
+    target.crossJurisdictionBookAdmissions = new EntityCollectionCandidateMap(
+      source.crossJurisdictionBookAdmissions,
+      cloneCrossJurisdictionBookAdmission,
     );
   }
 };
 
-const assertIdentityPreserved = (
+const forkHtlcRoute = (
+  route: EntityState['htlcRoutes'] extends Map<string, infer Value> ? Value : never,
+) => ({
+  ...route,
+  ...(route.crossJurisdictionRelay
+    ? { crossJurisdictionRelay: { ...route.crossJurisdictionRelay } }
+    : {}),
+});
+
+const installGrowingEntityCollections = (
+  target: EntityState,
   source: EntityState,
-  cloned: EntityState,
 ): void => {
-  if (!cloned.entityId || cloned.entityId !== source.entityId) {
-    cloneLog.error('entity_id_corrupt', {
-      original: source.entityId,
-      cloned: cloned.entityId,
-    });
-    throw new Error('cloneEntityState failed: entityId was not preserved');
-  }
-  if (typeof cloned.lastFinalizedJHeight !== 'number') {
-    cloneLog.error('last_finalized_j_height_corrupt', {
-      original: source.lastFinalizedJHeight,
-      originalType: typeof source.lastFinalizedJHeight,
-      cloned: cloned.lastFinalizedJHeight,
-      clonedType: typeof cloned.lastFinalizedJHeight,
-    });
-    throw new Error(
-      'cloneEntityState failed: lastFinalizedJHeight was not preserved',
-    );
-  }
+  target.htlcRoutes = new EntityCollectionCandidateMap(source.htlcRoutes, forkHtlcRoute);
+  target.lockBook = new EntityCollectionCandidateMap(source.lockBook, value => ({ ...value }));
+  cloneCrossJurisdictionState(target, source);
 };
-
-const cloneEntityStateWithPolicy = (
-  source: EntityState,
-  forSnapshot: boolean,
-  validateClone: boolean,
-): EntityState => {
-  const cloneSource = {
-    ...source,
-    accounts: snapshotEntityAccountMap(source.accounts),
-    ...(source.orderbookExt
-      ? {
-          orderbookExt: snapshotEntityOrderbookCandidate(
-            source.orderbookExt,
-          ),
-        }
-      : {}),
-  };
-  // These sections have stricter clone policies below. Keeping them in the
-  // bulk structuredClone duplicates work and can fail on aliased Cross-J route
-  // carriers even though the canonical field clone is valid.
-  delete cloneSource.jBatchState;
-  delete cloneSource.lending;
-  delete cloneSource.crossJurisdictionSwaps;
-  delete cloneSource.crossJurisdictionAuthorizations;
-  delete cloneSource.pendingCrossJurisdictionFillAcks;
-  delete cloneSource.crossJurisdictionBookAdmissions;
-  const cloned = structuredCloneOrThrow(
-    cloneSource,
-    'ENTITY_STATE_STRUCTURED_CLONE_FAILED',
-  );
-  copyEntityFrameEvents(source, cloned);
-  assertIdentityPreserved(source, cloned);
-  if (source.jBatchState) cloned.jBatchState = cloneJBatchState(source.jBatchState);
-  if (source.lending) cloned.lending = cloneLendingState(source.lending);
-  cloneCrossJurisdictionState(cloned, source);
-  for (const [accountId, account] of cloned.accounts) {
-    const sourceAccount = source.accounts.get(accountId);
-    if (sourceAccount) {
-      applyAccountClonePolicy(account, sourceAccount, forSnapshot);
-    }
-  }
-  if (!forSnapshot) {
-    forkEntityAccountCommitmentCache(source, cloned);
-    forkAccountWorkIndexes(source, cloned);
-    forkCrossJurisdictionBookAdmissionIndex(source, cloned);
-  }
-  return validateClone
-    ? validateEntityState(cloned, 'cloneEntityState.structuredClone')
-    : cloned;
-};
-
-export const cloneEntityState = (
-  state: EntityState,
-  forSnapshot = false,
-): EntityState => cloneEntityStateWithPolicy(state, forSnapshot, true);
 
 /**
- * Entity frame replay already owns an isolated candidate. Reducers mutate that
- * candidate directly; standalone callers retain the pure clone-on-entry API.
+ * Isolate only the bounded Entity-frame shell.
+ *
+ * Accounts, Books, HTLC routes and cross-j indexes can contain millions of
+ * leaves, so they are removed before this bounded copy and reattached as
+ * Patricia-backed candidates below. The shell contains only fixed records and
+ * bounded control queues; copying it provides rollback without traversing the
+ * financial graph or hiding writes behind Proxy state.
+ */
+const isolateEntityFrameShell = (
+  source: EntityState,
+): EntityState => {
+  const {
+    accounts: _accounts,
+    orderbookExt: _orderbookExt,
+    htlcRoutes: _htlcRoutes,
+    lockBook: _lockBook,
+    jBatchState: _jBatchState,
+    lending: _lending,
+    crossJurisdictionSwaps: _crossJurisdictionSwaps,
+    crossJurisdictionAuthorizations: _crossJurisdictionAuthorizations,
+    pendingCrossJurisdictionFillAcks: _pendingCrossJurisdictionFillAcks,
+    crossJurisdictionBookAdmissions: _crossJurisdictionBookAdmissions,
+    ...boundedShell
+  } = source;
+  const isolatedShell = structuredCloneOrThrow(
+    boundedShell,
+    'ENTITY_FRAME_SHELL_ISOLATION_FAILED',
+  );
+  const isolated: EntityState = {
+    ...isolatedShell,
+    // These shared roots are replaced by frame-owned candidates before the
+    // shell escapes. Keeping their exact types here makes the boundary honest.
+    accounts: source.accounts,
+    htlcRoutes: source.htlcRoutes,
+    lockBook: source.lockBook,
+  };
+  if (isolated.entityId !== source.entityId) {
+    throw new Error('ENTITY_FRAME_SHELL_ID_MISMATCH');
+  }
+  if (source.jBatchState) isolated.jBatchState = cloneJBatchState(source.jBatchState);
+  if (source.lending) isolated.lending = cloneLendingState(source.lending);
+  return isolated;
+};
+
+/**
+ * Entity frame replay already owns an isolated candidate. Standalone callers
+ * get the same Account/Book overlay candidate, never a full Entity clone.
  */
 export const prepareEntityTxState = (
   state: EntityState,
   mutableFrameState = false,
 ): EntityState =>
-  mutableFrameState ? state : cloneEntityState(state);
-
-/**
- * Clone State that already crossed a validation or consensus boundary.
- * External decode and proposal validation must use cloneEntityState().
- */
-export const cloneTrustedEntityState = (
-  state: EntityState,
-  forSnapshot = false,
-): EntityState => cloneEntityStateWithPolicy(state, forSnapshot, false);
+  mutableFrameState ? state : createEntityFrameCandidateState(state);
 
 /**
  * Build an Entity-frame candidate without copying the potentially million-entry
- * Account map. Every other Entity section remains isolated by structuredClone;
- * Account isolation is provided lazily by EntityAccountCandidateMap.
+ * Account or Book graph. Only the bounded shell is isolated eagerly; every
+ * growing collection is a path-copy candidate owned by this frame.
  */
 export const createEntityFrameCandidateState = (
   source: EntityState,
 ): EntityState => {
-  if (!(source.accounts instanceof Map)) {
+  const accountBase = source.accounts instanceof EntityAccountCandidateMap
+    ? source.accounts.snapshotCandidate()
+    : source.accounts;
+  if (!(accountBase instanceof PersistentEntityAccountMap)) {
     throw new Error('ENTITY_FRAME_CANDIDATE_ACCOUNTS_INVALID');
   }
-  const shellSource = {
-    ...source,
-    accounts: new Map<string, AccountReplica>(),
-  };
-  delete shellSource.orderbookExt;
-  const candidate = cloneEntityStateWithPolicy(shellSource, false, false);
-  candidate.accounts = createEntityAccountCandidateMap(source.accounts);
+  const candidate = isolateEntityFrameShell(source);
+  candidate.accounts = createEntityAccountCandidateMap(accountBase);
   if (source.orderbookExt) {
     candidate.orderbookExt = createEntityOrderbookCandidate(
       source.orderbookExt,
     );
   }
   copyEntityFrameEvents(source, candidate);
+  installGrowingEntityCollections(candidate, source);
   forkEntityAccountCommitmentCache(source, candidate);
-  forkAccountWorkIndexes(source, candidate);
   forkCrossJurisdictionBookAdmissionIndex(source, candidate);
   return candidate;
 };
@@ -255,6 +217,24 @@ export const commitEntityFrameCandidateState = (
   state.accounts = commitEntityAccountCandidate(state.accounts);
   if (state.orderbookExt) {
     state.orderbookExt = commitEntityOrderbookCandidate(state.orderbookExt);
+  }
+  if (state.htlcRoutes instanceof EntityCollectionCandidateMap) {
+    state.htlcRoutes = state.htlcRoutes.sealCandidate();
+  }
+  if (state.lockBook instanceof EntityCollectionCandidateMap) {
+    state.lockBook = state.lockBook.sealCandidate();
+  }
+  if (state.crossJurisdictionSwaps instanceof EntityCollectionCandidateMap) {
+    state.crossJurisdictionSwaps = state.crossJurisdictionSwaps.sealCandidate();
+  }
+  if (state.crossJurisdictionAuthorizations instanceof EntityCollectionCandidateMap) {
+    state.crossJurisdictionAuthorizations = state.crossJurisdictionAuthorizations.sealCandidate();
+  }
+  if (state.pendingCrossJurisdictionFillAcks instanceof EntityCollectionCandidateMap) {
+    state.pendingCrossJurisdictionFillAcks = state.pendingCrossJurisdictionFillAcks.sealCandidate();
+  }
+  if (state.crossJurisdictionBookAdmissions instanceof EntityCollectionCandidateMap) {
+    state.crossJurisdictionBookAdmissions = state.crossJurisdictionBookAdmissions.sealCandidate();
   }
   return state;
 };

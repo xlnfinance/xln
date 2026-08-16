@@ -3,7 +3,9 @@ import { encodeCanonicalConsensusValue } from '../../protocol/serialization/cano
  * XLN Event Emission System (EVM-style)
  *
  * Attaches event emission methods to RuntimeReplica (like Ethereum blocks have logs).
- * Events are stored in env.frameLogs and travel with snapshots for time-travel debugging.
+ * Events are buffered only for the active Runtime frame. WAL persists that
+ * one frame's activity atomically; history readers reconstruct timelines from
+ * storage instead of retaining them on RuntimeReplica.
  *
  * Usage:
  *   env.info('consensus', 'Frame committed', { entityId, height });
@@ -22,7 +24,6 @@ import type { LogCategory, FrameLogEntry } from '../../types/logging';
 
 import { storageOverlayRecordKey } from '../../protocol/state/overlay';
 import { invalidateEntityAccountCommitment } from '../../entity/consensus/state-root';
-import { refreshAccountWorkIndex } from '../../entity/consensus/account/work-index';
 import { accountFrameWithoutPostCommitHankos } from '../../account/settlement/witness-projection';
 import {
   consumeHtlcRuntimeEvent,
@@ -36,6 +37,38 @@ const getLogState = (env: RuntimeReplica) => {
     env.infrastructure.logState = { nextId: 0, mirrorToConsole: true };
   }
   return env.infrastructure.logState;
+};
+
+const getFrameEvents = (env: RuntimeReplica): FrameLogEntry[] => {
+  if (!env.infrastructure) env.infrastructure = {};
+  if (!env.infrastructure.frameEvents) env.infrastructure.frameEvents = [];
+  return env.infrastructure.frameEvents;
+};
+
+/** Read a detached copy so callers cannot mutate the active frame buffer. */
+export const readRuntimeFrameEvents = (env: RuntimeReplica): FrameLogEntry[] =>
+  getFrameEvents(env).map(entry => ({ ...entry }));
+
+/** Remove only events produced after a known frame boundary. */
+export const truncateRuntimeFrameEvents = (env: RuntimeReplica, length: number): void => {
+  if (!Number.isSafeInteger(length) || length < 0) {
+    throw new Error(`RUNTIME_FRAME_EVENT_LENGTH_INVALID:${String(length)}`);
+  }
+  getFrameEvents(env).length = Math.min(length, getFrameEvents(env).length);
+};
+
+/** Clear a frame buffer after durable commit, recovery, or an explicit scenario reset. */
+export const clearRuntimeFrameEvents = (env: RuntimeReplica): void => {
+  getFrameEvents(env).length = 0;
+};
+
+/** Install explicit events for a synthetic frame fixture; never restores history. */
+export const replaceRuntimeFrameEvents = (
+  env: RuntimeReplica,
+  events: readonly FrameLogEntry[],
+): void => {
+  const buffer = getFrameEvents(env);
+  buffer.splice(0, buffer.length, ...events.map(entry => ({ ...entry })));
 };
 
 const MAX_CLEAN_LOGS = 2000;
@@ -88,7 +121,7 @@ const appendFrameLog = (
   cleanLevel: string,
 ): void => {
   const logState = getLogState(env);
-  env.frameLogs.push({
+  getFrameEvents(env).push({
     id: logState.nextId++,
     timestamp: env.state.timestamp,
     ...entry,
@@ -158,29 +191,21 @@ const getPendingHistoryRecords = (env: RuntimeReplica): RuntimeHistoryRecord[] =
   return env.infrastructure.pendingHistoryRecords;
 };
 
-const getOverlay = (env: RuntimeReplica): RuntimeOverlayRecord[] => {
-  if (!env.overlay) env.overlay = [];
+const getOverlay = (env: RuntimeReplica): Map<string, RuntimeOverlayRecord> => {
+  if (!(env.overlay instanceof Map)) env.overlay = new Map();
   return env.overlay;
 };
 
 const pushOverlayRecord = (env: RuntimeReplica, record: RuntimeOverlayRecord): void => {
   const overlay = getOverlay(env);
   const key = storageOverlayRecordKey(record);
-  const existingIndex = overlay.findIndex(candidate => storageOverlayRecordKey(candidate) === key);
-  if (existingIndex >= 0) {
-    overlay[existingIndex] = record;
-  } else {
-    overlay.push(record);
-  }
+  overlay.set(key, record);
 
   const infrastructure = env.infrastructure ?? (env.infrastructure = {});
-  const currentMarks = infrastructure.currentStorageOverlayMarks ?? (infrastructure.currentStorageOverlayMarks = []);
-  const currentIndex = currentMarks.findIndex(candidate => storageOverlayRecordKey(candidate) === key);
-  if (currentIndex >= 0) {
-    currentMarks[currentIndex] = { ...record };
-    return;
-  }
-  currentMarks.push({ ...record });
+  const currentMarks = infrastructure.currentStorageOverlayMarks instanceof Map
+    ? infrastructure.currentStorageOverlayMarks
+    : (infrastructure.currentStorageOverlayMarks = new Map());
+  currentMarks.set(key, { ...record });
 };
 
 const markStorageEntityDirty = (env: RuntimeReplica, entityId: string): void => {
@@ -197,7 +222,6 @@ const markStorageAccountDirty = (env: RuntimeReplica, entityId: string, counterp
   for (const replica of env.state.eReplicas.values()) {
     if (replica.entityId.toLowerCase() === normalizedEntityId) {
       invalidateEntityAccountCommitment(replica.state, normalizedCounterpartyId);
-      refreshAccountWorkIndex(replica.state, normalizedCounterpartyId);
     }
   }
   const record: RuntimeOverlayRecord = {
@@ -240,7 +264,6 @@ const applyEntityStorageChanges = (
   for (const change of changes) {
     if (change.family === 'account' && change.entityId.toLowerCase() === state.entityId.toLowerCase()) {
       invalidateEntityAccountCommitment(state, change.counterpartyId);
-      refreshAccountWorkIndex(state, change.counterpartyId);
     }
   }
 };
@@ -423,14 +446,10 @@ export const dropPendingHistoryRecords = (env: RuntimeReplica, count: number): v
   pending.splice(0, Math.max(0, Math.floor(count)));
 };
 
-export const dropOverlay = (env: RuntimeReplica, count: number): void => {
+export const dropOverlay = (env: RuntimeReplica, keys: readonly string[]): void => {
   const pending = env.overlay;
-  if (!Array.isArray(pending) || pending.length === 0) return;
-  if (Math.max(0, Math.floor(count)) >= pending.length) {
-    env.overlay = [];
-    return;
-  }
-  pending.splice(0, Math.max(0, Math.floor(count)));
+  if (!(pending instanceof Map) || pending.size === 0) return;
+  for (const key of keys) pending.delete(key);
 };
 
 /**

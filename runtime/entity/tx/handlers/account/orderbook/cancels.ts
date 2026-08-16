@@ -4,6 +4,8 @@ import type { EntityInput, EntityState } from '../../../../types';
 import type { EntityRuntimeContext } from '../../../../runtime-context';
 import {
   applyCommand,
+  commitBookOverlay,
+  forkBookState,
   getBookOrder,
   getOrderbookPairsForOrder,
   type BookState,
@@ -30,6 +32,7 @@ import type {
   MatchResult,
   SwapCancelRequestEvent,
 } from './offers';
+import { swapKey } from '../../../../../orderbook/swap-execution';
 
 const orderbookLog = createStructuredLogger('orderbook');
 
@@ -150,7 +153,7 @@ export function processOrderbookCancels(
 ): MatchResult {
   const accountTxs: AccountTxTarget[] = [];
   const crossJurisdictionFills: CrossJurisdictionFillInstruction[] = [];
-  const bookUpdates: { pairId: string; book: BookState }[] = [];
+  const workingBooks = new Map<string, BookState>();
   const debugProjectionRejects: MatchResult['debugProjectionRejects'] = [];
   const queuedSwapResolutions = new Set<string>();
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
@@ -161,13 +164,14 @@ export function processOrderbookCancels(
     const hasOffer = Boolean(account?.state.swapOffers?.has(offerId));
     if (!hasOffer) continue;
 
-    const namespacedOrderId = `${accountId}:${offerId}`;
+    const namespacedOrderId = swapKey(accountId, offerId);
     let orderbookCancelled = false;
     const matchingBooks: Array<{ bookKey: string; book: BookState; ownerId: string }> = [];
 
     for (const bookKey of getOrderbookPairsForOrder(ext, namespacedOrderId)) {
-      const book = ext.books.get(bookKey);
-      if (!book) continue;
+      const source = workingBooks.get(bookKey) ?? ext.books.get(bookKey);
+      if (!source) continue;
+      const book = workingBooks.get(bookKey) ?? forkBookState(source);
       const existingOrder = getBookOrder(book, namespacedOrderId);
       if (!existingOrder) continue;
       matchingBooks.push({ bookKey, book, ownerId: existingOrder.ownerId });
@@ -183,8 +187,13 @@ export function processOrderbookCancels(
         ownerId,
         orderId: namespacedOrderId,
       });
-
-      bookUpdates.push({ pairId: bookKey, book: result.state });
+      if (commitBookOverlay(result.state) !== book) {
+        throw haltRuntimeFailure(
+          'ORDERBOOK_CANCEL_CHILD_MERGE_FAILED',
+          `ORDERBOOK_CANCEL_CHILD_MERGE_FAILED:pair=${bookKey}:order=${namespacedOrderId}`,
+        );
+      }
+      workingBooks.set(bookKey, book);
       orderbookLog.debug('order.cancelled', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8), pair: bookKey });
       orderbookCancelled = true;
     }
@@ -224,5 +233,6 @@ export function processOrderbookCancels(
     }
   }
 
+  const bookUpdates = [...workingBooks].map(([pairId, book]) => ({ pairId, book }));
   return { accountTxs, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
 }

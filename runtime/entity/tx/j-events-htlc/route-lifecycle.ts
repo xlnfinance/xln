@@ -2,6 +2,7 @@ import type { AccountTx, HtlcLock, HtlcRoute } from '../../../types/account';
 import type { EntityState } from '../../types';
 import { cancelHook, scheduleHook } from '../../scheduler/hook-state';
 import { hasInboundHtlcRoute } from '../../htlc/route-views';
+import { getEntityCollectionValueForWrite } from '../../state/persistent-collection-map';
 
 /** Auto-dispute when the upstream peer never acknowledges a returned secret. */
 export const HTLC_SECRET_ACK_TIMEOUT_MS = 30_000;
@@ -24,16 +25,20 @@ export function persistVerifiedHtlcSecret(
   counterpartyId: string,
   lock: HtlcLock,
   secret: string,
-): void {
+): HtlcRoute {
   // The Account proposal may never reach an offline peer. Persist the verified
   // preimage in this signed Entity-frame replay so a later dispute can reveal
   // it; mutating replica state after frame certification would fork lineage.
-  const route = state.htlcRoutes.get(lock.hashlock) ?? {
+  const existingRoute = state.htlcRoutes.get(lock.hashlock);
+  const route = existingRoute
+    ? getEntityCollectionValueForWrite(state.htlcRoutes, lock.hashlock)
+    : {
     hashlock: lock.hashlock,
     tokenId: lock.tokenId,
     amount: lock.amount,
     createdTimestamp: state.timestamp,
   };
+  if (!route) throw new Error(`HTLC_ROUTE_WRITE_MISSING:${lock.hashlock}`);
   if (route.secret && route.secret.toLowerCase() !== secret.toLowerCase()) {
     throw new Error(`HTLC_ROUTE_SECRET_CONFLICT:${lock.hashlock}`);
   }
@@ -54,6 +59,7 @@ export function persistVerifiedHtlcSecret(
     ? { secret, outboundEntity: counterpartyId, outboundLockId: lock.lockId }
     : { secret, inboundEntity: counterpartyId, inboundLockId: lock.lockId });
   state.htlcRoutes.set(lock.hashlock, route);
+  return route;
 }
 
 export function armHtlcSecretAckTimeout(
@@ -86,12 +92,10 @@ export function armHtlcSecretAckTimeout(
 export function terminateHtlcRoute(
   state: EntityState,
   hashlock: string,
-  timestamp: number,
+  _timestamp: number,
 ): void {
   const route = state.htlcRoutes.get(hashlock);
   if (!route) return;
-  route.secretAckPending = false;
-  route.secretAckedAt = timestamp;
   if (state.crontabState) {
     cancelHook(state.crontabState, `htlc-secret-ack:${route.hashlock}`);
   }

@@ -3,8 +3,8 @@ import {
   freezeAccountForDispute,
   isDisputeStartedByLeft,
 } from '../consensus/dispute/policy';
-import { invalidateAccountMapCommitment } from '../commitment/map-commitment';
 import { clearFinalizedSettlementWorkspace } from '../tx/handlers/settlement/transition';
+import { requirePersistentAccountStateMap } from '../state/persistent-state-map';
 export type AccountDisputeFinalityResult = {
   hadActiveDispute: boolean;
   hadSettlementWorkspace: boolean;
@@ -107,6 +107,7 @@ const reconcileFinalizedDeltas = (
   finalizedTokenIds: readonly number[],
 ): void => {
   const finalized = new Set(finalizedTokenIds);
+  let deltas = requirePersistentAccountStateMap(account.state.deltas, 'deltas');
   for (const [tokenId, delta] of account.state.deltas) {
     const tokenWasFinalized = finalized.has(tokenId);
     // Solidity touches collateral/ondelta only for tokenIds in the winning
@@ -119,31 +120,32 @@ const reconcileFinalizedDeltas = (
       delta.rightHold !== 0n ||
       delta.leftAllowance !== 0n ||
       delta.rightAllowance !== 0n;
-    if (tokenWasFinalized) {
-      delta.collateral = 0n;
-      delta.ondelta = 0n;
-    }
-    delta.offdelta = 0n;
-    delta.leftHold = 0n;
-    delta.rightHold = 0n;
-    delta.leftAllowance = 0n;
-    delta.rightAllowance = 0n;
-    if (changed) invalidateAccountMapCommitment(account.state, 'deltas', tokenId);
+    if (!changed) continue;
+    deltas = deltas.updated(tokenId, {
+      ...delta,
+      ...(tokenWasFinalized ? { collateral: 0n, ondelta: 0n } : {}),
+      offdelta: 0n,
+      leftHold: 0n,
+      rightHold: 0n,
+      leftAllowance: 0n,
+      rightAllowance: 0n,
+    });
   }
+  account.state.deltas = deltas;
 };
 
 const clearFinalizedCollections = (account: AccountReplica): void => {
   if (account.state.swapOffers.size > 0) {
-    account.state.swapOffers.clear();
-    invalidateAccountMapCommitment(account.state, 'swapOffers');
+    account.state.swapOffers = requirePersistentAccountStateMap(
+      account.state.swapOffers,
+      'swapOffers',
+    ).emptied();
   }
   if (account.state.locks.size > 0) {
-    account.state.locks.clear();
-    invalidateAccountMapCommitment(account.state, 'locks');
+    account.state.locks = requirePersistentAccountStateMap(account.state.locks, 'locks').emptied();
   }
   if (account.state.pulls && account.state.pulls.size > 0) {
-    account.state.pulls.clear();
-    invalidateAccountMapCommitment(account.state, 'pulls');
+    account.state.pulls = requirePersistentAccountStateMap(account.state.pulls, 'pulls').emptied();
   }
   delete account.disputeProofBodiesByHash;
   delete account.disputeProofNoncesByHash;

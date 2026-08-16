@@ -8,8 +8,9 @@ import {
 } from '../../../account/commitment/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
-import type { AccountReplica, AccountState } from '../../../types/account';
+import type { AccountReplica } from '../../../types/account';
 import { createDefaultDelta } from '../../../account/state/delta';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;
@@ -21,27 +22,30 @@ const account = (): AccountReplica => ({
     rightEntity: RIGHT,
     domain: DOMAIN,
     watchSeed: `0x${'44'.repeat(32)}`,
-    deltas: new Map([[1, createDefaultDelta(1)]]),
-    locks: new Map(),
-    pulls: new Map(),
-    swapOffers: new Map(),
+    deltas: PersistentAccountStateMap.fromEntries('deltas', [[1, createDefaultDelta(1)]]),
+    locks: PersistentAccountStateMap.empty('locks'),
+    pulls: PersistentAccountStateMap.empty('pulls'),
+    swapOffers: PersistentAccountStateMap.empty('swapOffers'),
     jNonce: 0,
     disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     lastFinalizedJHeight: 0,
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
+    requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+    requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
   },
   status: 'active',
-  shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+  shadow: { rebalance: {
+    policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+    submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+  } },
   mempool: [],
   pendingSignatures: [],
   currentFrame: {} as never,
   currentHeight: 0,
   proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nextProofNonce: 1 },
   proofBody: { tokenIds: [], deltas: [] },
-  pendingWithdrawals: new Map(),
+  pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
 });
 
 describe('canonical account state root', () => {
@@ -68,11 +72,11 @@ describe('canonical account state root', () => {
 
   test('is independent of host locale for map keys, object keys, and dispute subcontracts', () => {
     const base = account();
-    base.state.lendingIntents = new Map([
+    base.state.lendingIntents = PersistentAccountStateMap.fromEntries('lendingIntents', [
       ['0xaa12', 'fund'],
       ['0xab34', 'fund'],
     ]);
-    base.state.subcontracts = new Map([
+    base.state.subcontracts = PersistentAccountStateMap.fromEntries('subcontracts', [
       ['0xaa12', {
         transformerAddress: `0x${'66'.repeat(20)}`,
         encodedBatch: '0x12',
@@ -108,20 +112,22 @@ describe('canonical account state root', () => {
     const otherParty = account();
     otherParty.state.rightEntity = `0x${'55'.repeat(32)}`;
     expect(computeAccountStateRoot(otherParty.state)).not.toBe(root);
-    const otherDomain = structuredClone(base);
+    const otherDomain = account();
     otherDomain.state.domain = { ...DOMAIN, chainId: 1 };
     expect(computeAccountStateRoot(otherDomain.state)).not.toBe(root);
 
     for (const mutate of [
-      (machine: AccountState) => { machine.deltas.get(1)!.collateral = 1n; },
-      (machine: AccountState) => { machine.deltas.get(1)!.ondelta = 1n; },
-      (machine: AccountState) => { machine.deltas.get(1)!.offdelta = -1n; },
-      (machine: AccountState) => { machine.deltas.get(1)!.leftCreditLimit = 1n; },
-      (machine: AccountState) => { machine.deltas.get(1)!.rightAllowance = 1n; },
-      (machine: AccountState) => { machine.deltas.get(1)!.leftHold = 1n; },
+      (delta: ReturnType<typeof createDefaultDelta>) => ({ ...delta, collateral: 1n }),
+      (delta: ReturnType<typeof createDefaultDelta>) => ({ ...delta, ondelta: 1n }),
+      (delta: ReturnType<typeof createDefaultDelta>) => ({ ...delta, offdelta: -1n }),
+      (delta: ReturnType<typeof createDefaultDelta>) => ({ ...delta, leftCreditLimit: 1n }),
+      (delta: ReturnType<typeof createDefaultDelta>) => ({ ...delta, rightAllowance: 1n }),
+      (delta: ReturnType<typeof createDefaultDelta>) => ({ ...delta, leftHold: 1n }),
     ]) {
-      const changed = structuredClone(base);
-      mutate(changed.state);
+      const changed = account();
+      const delta = changed.state.deltas.get(1);
+      if (!delta) throw new Error('TEST_DELTA_MISSING');
+      changed.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [[1, mutate(delta)]]);
       expect(computeAccountStateRoot(changed.state)).not.toBe(root);
     }
   });
@@ -143,7 +149,7 @@ describe('canonical account state root', () => {
     const bilateralRoot = computeAccountStateRoot(base.state);
     const overlayRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
 
-    const settlement = structuredClone(base);
+    const settlement = account();
     settlement.state.settlementWorkspace = {
       workspaceHash: `0x${'88'.repeat(32)}`,
       revision: 1,
@@ -157,7 +163,7 @@ describe('canonical account state root', () => {
     expect(computeAccountStateRoot(settlement.state)).not.toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, settlement]]))).not.toBe(overlayRoot);
 
-    const disputed = structuredClone(base);
+    const disputed = account();
     disputed.status = 'disputed';
     disputed.activeDispute = {
       startedByLeft: true,
@@ -173,15 +179,15 @@ describe('canonical account state root', () => {
     expect(computeAccountStateRoot(disputed.state)).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, disputed]]))).not.toBe(overlayRoot);
 
-    const withdrawal = structuredClone(base);
-    withdrawal.pendingWithdrawals.set('withdraw-1', {
+    const withdrawal = account();
+    withdrawal.pendingWithdrawals = PersistentAccountStateMap.fromEntries('pendingWithdrawals', [['withdraw-1', {
       requestId: 'withdraw-1',
       tokenId: 1,
       amount: 5n,
       requestedAt: 10,
       direction: 'outgoing',
       status: 'pending',
-    });
+    }]]);
     expect(computeAccountStateRoot(withdrawal.state)).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, withdrawal]]))).not.toBe(overlayRoot);
   });
@@ -203,14 +209,14 @@ describe('canonical account state root', () => {
         nonce: 2,
       },
     };
-    base.pendingWithdrawals.set('withdraw-1', {
+    base.pendingWithdrawals = PersistentAccountStateMap.fromEntries('pendingWithdrawals', [['withdraw-1', {
       requestId: 'withdraw-1',
       tokenId: 1,
       amount: 5n,
       requestedAt: 10,
       direction: 'outgoing',
       status: 'approved',
-    });
+    }]]);
     const bilateralRoot = computeAccountStateRoot(base.state);
     const overlayRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
 
@@ -218,13 +224,20 @@ describe('canonical account state root', () => {
     base.state.settlementWorkspace.rightHanko = '0x5678';
     base.state.settlementWorkspace.postSettlementDisputeProof!.leftHanko = '0x9abc';
     base.state.settlementWorkspace.postSettlementDisputeProof!.rightHanko = '0xdef0';
-    base.pendingWithdrawals.get('withdraw-1')!.signature = '0xbeef';
+    const pending = base.pendingWithdrawals.get('withdraw-1')!;
+    base.pendingWithdrawals = PersistentAccountStateMap.fromEntries(
+      'pendingWithdrawals',
+      [['withdraw-1', { ...pending, signature: '0xbeef' }]],
+    );
 
     const sealedBilateralRoot = computeAccountStateRoot(base.state);
     expect(sealedBilateralRoot).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).toBe(overlayRoot);
 
-    base.pendingWithdrawals.get('withdraw-1')!.signature = '0xcafe';
+    base.pendingWithdrawals = PersistentAccountStateMap.fromEntries(
+      'pendingWithdrawals',
+      [['withdraw-1', { ...pending, signature: '0xcafe' }]],
+    );
     expect(computeAccountStateRoot(base.state)).toBe(sealedBilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).toBe(overlayRoot);
   });
@@ -234,12 +247,15 @@ describe('canonical account state root', () => {
     const bilateralRoot = computeAccountStateRoot(base.state);
     const shadowRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
 
-    base.shadow.rebalance.policy.set(1, {
+    base.shadow.rebalance.policy = PersistentAccountStateMap.fromEntries('rebalanceShadowPolicy', [[1, {
       r2cRequestSoftLimit: 500n,
       hardLimit: 10_000n,
       maxAcceptableFee: 15n,
-    });
-    base.shadow.rebalance.submittedAtByToken.set(1, 123);
+    }]]);
+    base.shadow.rebalance.submittedAtByToken = PersistentAccountStateMap.fromEntries(
+      'rebalanceShadowSubmitted',
+      [[1, 123]],
+    );
 
     expect(computeAccountStateRoot(base.state)).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).not.toBe(shadowRoot);
@@ -249,14 +265,17 @@ describe('canonical account state root', () => {
     const base = account();
     const root = computeAccountStateRoot(base.state);
 
-    base.state.lendingIntents = new Map([['lend-0123456789abcdef', 'fund']]);
+    base.state.lendingIntents = PersistentAccountStateMap.fromEntries(
+      'lendingIntents',
+      [['lend-0123456789abcdef', 'fund']],
+    );
 
     expect(computeAccountStateRoot(base.state)).not.toBe(root);
   });
 
   test('commits generic custom transformers and preserves opaque ProofBody batches', () => {
     const base = account();
-    base.state.subcontracts = new Map([['custom-risk-engine', {
+    base.state.subcontracts = PersistentAccountStateMap.fromEntries('subcontracts', [['custom-risk-engine', {
       transformerAddress: `0x${'66'.repeat(20)}`,
       encodedBatch: '0x1234',
       allowances: [{ deltaIndex: 0, rightAllowance: 7n, leftAllowance: 9n }],
@@ -270,8 +289,16 @@ describe('canonical account state root', () => {
       encodedBatch: '0x1234',
       allowances: [{ deltaIndex: 0n, rightAllowance: 7n, leftAllowance: 9n }],
     });
-    const changed = structuredClone(base);
-    changed.state.subcontracts!.get('custom-risk-engine')!.encodedBatch = '0xabcd';
+    const changed = account();
+    changed.state.subcontracts = PersistentAccountStateMap.fromEntries('subcontracts', [[
+      'custom-risk-engine',
+      {
+        transformerAddress: `0x${'66'.repeat(20)}`,
+        encodedBatch: '0xabcd',
+        allowances: [{ deltaIndex: 0, rightAllowance: 7n, leftAllowance: 9n }],
+        leftArgumentsHash: `0x${'77'.repeat(32)}`,
+      },
+    ]]);
     expect(computeAccountStateRoot(changed.state)).not.toBe(root);
   });
 });

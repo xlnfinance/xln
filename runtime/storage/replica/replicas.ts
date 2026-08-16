@@ -12,6 +12,52 @@ import { encodeReplicaMeta } from '../read/projections';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import type { StorageReplicaLookup } from '../types';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
+import { computeCanonicalEntityConsensusStateHash } from '../../entity/consensus/state-root';
+
+/**
+ * A compact materialized Entity graph has one committed state per Entity.
+ * Validator-local lag is replay state, so a checkpoint must wait until every
+ * local replica names the same height/head/root; otherwise it would need to
+ * duplicate an unbounded Account/Book graph in replica metadata.
+ */
+export const areStorageCheckpointReplicasConverged = (env: RuntimeReplica): boolean => {
+  const endpoints = new Map<string, { state: EntityState; height: number; head: string; root?: string }>();
+  for (const replica of env.state.eReplicas.values()) {
+    const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
+    if (!entityId) continue;
+    const height = replica.state.height;
+    const head = height === 0 ? 'genesis' : String(replica.state.prevFrameHash || '').toLowerCase();
+    const existing = endpoints.get(entityId);
+    if (!existing) {
+      endpoints.set(entityId, { state: replica.state, height, head });
+      continue;
+    }
+    if (existing.height !== height || existing.head !== head) return false;
+    if (existing.state === replica.state) continue;
+    existing.root ??= computeCanonicalEntityConsensusStateHash(existing.state);
+    if (existing.root !== computeCanonicalEntityConsensusStateHash(replica.state)) return false;
+  }
+  return true;
+};
+
+/**
+ * A materialized checkpoint becomes the new replay floor. Validator-private
+ * proposals and candidates are deterministic overlays rebuilt from the WAL,
+ * so cutting the WAL before they settle would discard their creating input.
+ * Wait for an idle boundary instead of serializing an unbounded candidate.
+ */
+export const areStorageCheckpointReplicasQuiescent = (env: RuntimeReplica): boolean => {
+  if (!areStorageCheckpointReplicasConverged(env)) return false;
+  for (const replica of env.state.eReplicas.values()) {
+    if (
+      replica.mempool.length > 0
+      || replica.proposal !== undefined
+      || replica.lockedFrame !== undefined
+      || replica.candidate !== undefined
+    ) return false;
+  }
+  return true;
+};
 
 export const findReplicaForEntity = (
   env: RuntimeReplica,
@@ -52,8 +98,8 @@ export const buildLiveReplicaMetaPlan = (env: RuntimeReplica): CertifiedEntityLi
   const lineageByReplicaKey = new Map();
   const anchorByReplicaKey = new Map();
   for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-    if (replica.certifiedFrameLineage) {
-      lineageByReplicaKey.set(String(replicaKey), replica.certifiedFrameLineage);
+    if (replica.certifiedFrameHead) {
+      lineageByReplicaKey.set(String(replicaKey), [replica.certifiedFrameHead]);
     }
     if (replica.certifiedFrameAnchor) {
       anchorByReplicaKey.set(String(replicaKey), replica.certifiedFrameAnchor);
@@ -85,7 +131,6 @@ export const buildStorageReplicaMetaCommitment = (
 export const buildStorageReplicaMetaCommitmentFromCheckpointPlan = (
   env: RuntimeReplica,
   checkpointPlan: ReturnType<typeof rebaseCertifiedEntityLineageAtRuntimeCheckpoint>,
-  options: { omitIntermediateSingleSignerState?: boolean } = {},
 ): {
   entries: Array<{ key: Buffer; value: Buffer }>;
   digest: string;
@@ -101,11 +146,8 @@ export const buildStorageReplicaMetaCommitmentFromCheckpointPlan = (
     entries.push({
       key: keyLiveReplicaMeta(entityId, signerId),
       value: encodeReplicaMeta(replica, {
-        certifiedFrameLineage: checkpointPlan.lineageByReplicaKey.get(String(replicaKey)),
+        certifiedFrameHead: checkpointPlan.lineageByReplicaKey.get(String(replicaKey))?.at(-1),
         certifiedFrameAnchor: checkpointPlan.anchorByReplicaKey.get(String(replicaKey)),
-        ...(options.omitIntermediateSingleSignerState === true && replica.state.config.validators.length === 1
-          ? { omitState: true }
-          : {}),
       }),
     });
   }
@@ -122,7 +164,7 @@ export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeReplica): {
     const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
     const signerId = normalizeEntityId(replica.signerId || '');
     if (!entityId || !signerId) throw new Error(`STORAGE_REPLICA_SIGNER_MISSING:${entityId}`);
-    const latestLineage = replica.certifiedFrameLineage?.at(-1);
+    const latestLineage = replica.certifiedFrameHead;
     entries.push({
       key: keyLiveReplicaMeta(entityId, signerId),
       value: encodeBuffer({
@@ -136,10 +178,18 @@ export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeReplica): {
           timestamp: replica.state.timestamp,
           frameHash: replica.state.prevFrameHash ?? '',
         },
-        mempool: replica.mempool,
-        ...(replica.proposal ? { proposal: replica.proposal } : {}),
-        ...(replica.lockedFrame ? { lockedFrame: replica.lockedFrame } : {}),
-        ...(replica.candidate ? { candidate: replica.candidate } : {}),
+        // Ordinary WAL frames commit only bounded identities for speculative
+        // overlays. Their bodies are replay-derived and must never turn one
+        // frame hash into an O(Entity) serialization of every Account/Book.
+        mempoolCount: replica.mempool.length,
+        ...(replica.proposal ? { proposalHash: replica.proposal.hash } : {}),
+        ...(replica.lockedFrame ? { lockedFrameHash: replica.lockedFrame.hash } : {}),
+        ...(replica.candidate
+          ? {
+              candidateFrameHash: replica.candidate.frameHash,
+              candidateHeight: replica.candidate.height,
+            }
+          : {}),
         ...(latestLineage ? { latestLineage } : {}),
         ...(replica.certifiedFrameAnchor ? { certifiedFrameAnchor: replica.certifiedFrameAnchor } : {}),
         ...(replica.leaderVotes ? { leaderVotes: replica.leaderVotes } : {}),

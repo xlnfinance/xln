@@ -134,10 +134,23 @@ const compactRecord = <T>(
 const assertRetainedProofBodies = (
   record: AccountReplica['disputeProofBodiesByHash'],
   reachable: ReadonlySet<string>,
+  account: AccountReplica,
 ): void => {
   for (const hash of reachable) {
     const body = record?.[hash];
-    if (!body) throw haltRuntimeFailure("DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_MISSING", `DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_MISSING:${hash}`);
+    if (!body) {
+      const source = account.currentDisputeProofBodyHash?.toLowerCase() === hash
+        ? 'current'
+        : account.counterpartyDisputeProofBodyHash?.toLowerCase() === hash
+          ? 'counterparty'
+          : account.activeDispute?.initialProofbodyHash?.toLowerCase() === hash
+            ? 'active'
+            : 'pending';
+      throw haltRuntimeFailure(
+        "DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_MISSING",
+        `DISPUTE_EVIDENCE_REACHABLE_PROOFBODY_MISSING:${source}:${hash}:retained=${Object.keys(record ?? {}).join(',') || 'none'}`,
+      );
+    }
     let computed: string;
     try {
       computed = hashProofBodyStruct(body as ProofBodyStruct).toLowerCase();
@@ -193,7 +206,7 @@ export const pruneUnreachableDisputeEvidence = (
   const bodies = compactRecord(account.disputeProofBodiesByHash, reachable, 'proofBodies');
   const nonces = compactRecord(account.disputeProofNoncesByHash, reachable, 'proofNonces');
   const snapshots = compactRecord(account.disputeArgumentSnapshotsByHash, reachable, 'argumentSnapshots');
-  assertRetainedProofBodies(bodies, reachable);
+  assertRetainedProofBodies(bodies, reachable, account);
   assertRetainedNonces(nonces, reachable);
   assertRetainedSnapshots(snapshots, reachable);
 

@@ -1,7 +1,7 @@
 import { createStructuredLogger } from '../../infra/logger';
 
 import {
-  computeRadixMerkleBranchHash,
+  computeRadixMerkleBranchHashFromSlots,
   computeRadixMerkleEdgeHash,
   computeRadixMerkleLeafHash,
   EMPTY_RADIX_MERKLE_ROOT,
@@ -121,17 +121,17 @@ const makeBranch = <K, V>(
   nodes: readonly ValueNode<K, V>[],
   previous?: ValueBranch<K, V>,
 ): ValueBranch<K, V> => {
-  const children = new Map<number, ValueNode<K, V>>();
-  const edgeHashes = new Map<number, string>();
+  const children: Array<ValueNode<K, V> | undefined> = Array(options.radix);
+  const edgeHashes: Array<string | undefined> = Array(options.radix);
   for (const child of nodes) {
     const slot = childSlot(path, child);
-    if (children.has(slot)) throw new Error('PERSISTENT_RADIX_BRANCH_SLOT_COLLISION');
-    children.set(slot, child);
+    if (children[slot]) throw new Error('PERSISTENT_RADIX_BRANCH_SLOT_COLLISION');
+    children[slot] = child;
     if (options.commitment !== false) {
-      const previousHash = previous?.children.get(slot) === child
-        ? previous.edgeHashes.get(slot)
+      const previousHash = previous?.children[slot] === child
+        ? previous.edgeHashes[slot]
         : undefined;
-      edgeHashes.set(slot, previousHash ?? childEdgeHash(options, path, child));
+      edgeHashes[slot] = previousHash ?? childEdgeHash(options, path, child);
     }
   }
   return {
@@ -141,7 +141,7 @@ const makeBranch = <K, V>(
     edgeHashes,
     hash: options.commitment === false
       ? EMPTY_RADIX_MERKLE_ROOT
-      : computeRadixMerkleBranchHash(options.radix, [...edgeHashes]),
+      : computeRadixMerkleBranchHashFromSlots(options.radix, edgeHashes),
   };
 };
 
@@ -178,7 +178,7 @@ const getLeaf = <K, V>(
   if (!node || !pathStartsWith(path, node.path)) return undefined;
   if (node.kind === 'leaf') return bytesKey(node.keyBytes) === keyHex ? node : undefined;
   const slot = path[node.path.length];
-  return slot === undefined ? undefined : getLeaf(node.children.get(slot) ?? null, path, keyHex);
+  return slot === undefined ? undefined : getLeaf(node.children[slot] ?? null, path, keyHex);
 };
 
 const prefixNode = <K, V>(
@@ -191,7 +191,7 @@ const prefixNode = <K, V>(
   if (prefix.length <= node.path.length) return node;
   if (node.kind === 'leaf') return null;
   const slot = prefix[node.path.length];
-  return slot === undefined ? null : prefixNode(node.children.get(slot) ?? null, prefix);
+  return slot === undefined ? null : prefixNode(node.children[slot] ?? null, prefix);
 };
 
 const extremeLeaf = <K, V>(
@@ -200,16 +200,17 @@ const extremeLeaf = <K, V>(
 ): ValueLeaf<K, V> | undefined => {
   if (!node) return undefined;
   if (node.kind === 'leaf') return node;
-  let selectedSlot: number | undefined;
-  for (const slot of node.children.keys()) {
-    if (
-      selectedSlot === undefined ||
-      (direction === 'first' ? slot < selectedSlot : slot > selectedSlot)
-    ) selectedSlot = slot;
+  if (direction === 'first') {
+    for (const child of node.children) {
+      if (child) return extremeLeaf(child, direction);
+    }
+  } else {
+    for (let slot = node.children.length - 1; slot >= 0; slot -= 1) {
+      const child = node.children[slot];
+      if (child) return extremeLeaf(child, direction);
+    }
   }
-  return selectedSlot === undefined
-    ? undefined
-    : extremeLeaf(node.children.get(selectedSlot) ?? null, direction);
+  return undefined;
 };
 
 const putNode = <K, V>(
@@ -234,12 +235,12 @@ const putNode = <K, V>(
   }
   const slot = leaf.path[node.path.length];
   if (slot === undefined) throw new Error('PERSISTENT_RADIX_LEAF_SLOT_MISSING');
-  const previous = node.children.get(slot) ?? null;
+  const previous = node.children[slot] ?? null;
   const updated = putNode(options, previous, leaf);
   if (updated.node === previous) return { node, inserted: updated.inserted };
-  const children = new Map(node.children);
-  children.set(slot, updated.node);
-  return { node: makeBranch(options, node.path, [...children.values()], node), inserted: updated.inserted };
+  const children = [...node.children];
+  children[slot] = updated.node;
+  return { node: makeBranch(options, node.path, children.filter(Boolean) as ValueNode<K, V>[], node), inserted: updated.inserted };
 };
 
 const deleteNode = <K, V>(
@@ -256,16 +257,16 @@ const deleteNode = <K, V>(
   }
   const slot = path[node.path.length];
   if (slot === undefined) return { node, deleted: false };
-  const previous = node.children.get(slot);
+  const previous = node.children[slot];
   if (!previous) return { node, deleted: false };
   const updated = deleteNode(options, previous, path, keyHex);
   if (!updated.deleted) return { node, deleted: false };
-  const children = new Map(node.children);
-  if (updated.node) children.set(slot, updated.node);
-  else children.delete(slot);
-  if (children.size === 0) return { node: null, deleted: true };
-  if (children.size === 1) return { node: children.values().next().value!, deleted: true };
-  return { node: makeBranch(options, node.path, [...children.values()], node), deleted: true };
+  const children = [...node.children];
+  children[slot] = updated.node ?? undefined;
+  const remaining = children.filter(Boolean) as ValueNode<K, V>[];
+  if (remaining.length === 0) return { node: null, deleted: true };
+  if (remaining.length === 1) return { node: remaining[0]!, deleted: true };
+  return { node: makeBranch(options, node.path, remaining, node), deleted: true };
 };
 
 const ensureRootBranch = <K, V>(
@@ -285,8 +286,7 @@ function* iterateLeaves<K, V>(node: ValueNode<K, V> | null): Generator<ValueLeaf
   }
   // Explicit iteration is O(n), but never O(n log n): branch slots already
   // encode canonical raw-key order and fanout is bounded by the radix.
-  const slots = [...node.children.keys()].sort((left, right) => left - right);
-  for (const slot of slots) yield* iterateLeaves(node.children.get(slot) ?? null);
+  for (const child of node.children) if (child) yield* iterateLeaves(child);
 }
 
 function* iterateLeavesReverse<K, V>(node: ValueNode<K, V> | null): Generator<ValueLeaf<K, V>> {
@@ -297,8 +297,10 @@ function* iterateLeavesReverse<K, V>(node: ValueNode<K, V> | null): Generator<Va
   }
   // Fanout is bounded (16 or 256). Reverse traversal visits only the required
   // Patricia branches and never materializes or globally sorts all leaves.
-  const slots = [...node.children.keys()].sort((left, right) => right - left);
-  for (const slot of slots) yield* iterateLeavesReverse(node.children.get(slot) ?? null);
+  for (let slot = node.children.length - 1; slot >= 0; slot -= 1) {
+    const child = node.children[slot];
+    if (child) yield* iterateLeavesReverse(child);
+  }
 }
 
 const samePath = (left: readonly number[], right: readonly number[]): boolean =>
@@ -327,9 +329,7 @@ const compareNodeOrder = (
 };
 
 const childrenInSlotOrder = <K, V>(branch: ValueBranch<K, V>): readonly ValueNode<K, V>[] =>
-  [...branch.children.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([, child]) => child);
+  branch.children.filter((child): child is ValueNode<K, V> => child !== undefined);
 
 const assertCanonicalBranchRecord = (record: PersistentRadixBranchRecord): void => {
   let previous = -1;
@@ -359,7 +359,7 @@ const assertBranchRecordMatches = <K, V>(
   branch: ValueBranch<K, V>,
 ): void => {
   for (const child of record.children) {
-    if (branch.edgeHashes.get(child.slot) !== child.edgeHash) {
+    if (branch.edgeHashes[child.slot] !== child.edgeHash) {
       throw new Error(`PERSISTENT_RADIX_EDGE_HASH_MISMATCH:${record.path.join('.')}:${child.slot}`);
     }
   }
@@ -416,7 +416,7 @@ const nodeAtPath = <K, V>(
     if (node.kind === kind && samePath(node.path, path)) return node;
     if (node.kind === 'leaf' || !pathStartsWith(path, node.path)) return undefined;
     const slot = path[node.path.length];
-    node = slot === undefined ? undefined : node.children.get(slot);
+    node = slot === undefined ? undefined : node.children[slot];
   }
   return undefined;
 };
@@ -424,10 +424,9 @@ const nodeAtPath = <K, V>(
 const branchRecord = <K, V>(branch: ValueBranch<K, V>): PersistentRadixBranchRecord => ({
   kind: 'branch',
   path: [...branch.path],
-  children: [...branch.children.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([slot, child]) => {
-    const edgeHash = branch.edgeHashes.get(slot);
+  children: branch.children.flatMap((child, slot) => {
+    if (!child) return [];
+    const edgeHash = branch.edgeHashes[slot];
     if (!edgeHash) throw new Error(`PERSISTENT_RADIX_EDGE_HASH_MISSING:${slot}`);
     return {
       slot,
@@ -435,7 +434,7 @@ const branchRecord = <K, V>(branch: ValueBranch<K, V>): PersistentRadixBranchRec
       path: [...child.path],
       edgeHash,
     };
-    }),
+  }),
 });
 
 const nodeRecord = <K, V>(node: ValueNode<K, V>): PersistentRadixNodeRecord<K, V> =>
@@ -454,7 +453,13 @@ const collectChangedNodePuts = <K, V>(
   previousRoot: ValueNode<K, V> | null,
   output: PersistentRadixNodeRecord<K, V>[],
 ): void => {
-  if (!node || nodeAtPath(previousRoot, node.kind, node.path) === node) return;
+  if (!node) return;
+  const previous = nodeAtPath(previousRoot, node.kind, node.path);
+  // Hot overlays share node identity. Cold storage projections do not: they
+  // may independently rebuild the same typed graph from validated RAM. A
+  // commitment-identical node is still the exact same durable subtree, so
+  // avoid rewriting it and descend only through genuinely dirty branches.
+  if (previous === node || previous?.hash === node.hash) return;
   output.push(nodeRecord(node));
   if (node.kind === 'branch') {
     for (const child of childrenInSlotOrder(node)) {
@@ -470,7 +475,7 @@ const collectChangedNodeDels = <K, V>(
 ): void => {
   if (!node) return;
   const replacement = nodeAtPath(nextRoot, node.kind, node.path);
-  if (replacement === node) return;
+  if (replacement === node || replacement?.hash === node.hash) return;
   // A changed node retains its physical `(kind,path)` key. It is replaced by
   // the corresponding put, never deleted afterwards. Only nodes unreachable
   // from the new root become delete operations.

@@ -463,7 +463,7 @@ async function main() {
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`  ${scenario} COMPLETE`);
-    console.log(`  Frames: ${env.history?.length || 0}`);
+    console.log(`  Frames: ${env.state.height}`);
     console.log(`${'='.repeat(60)}\n`);
     process.exit(0);
   } catch (error) {

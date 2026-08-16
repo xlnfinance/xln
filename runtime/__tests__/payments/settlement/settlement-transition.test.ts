@@ -55,14 +55,26 @@ import {
 import { createEmptyEnv } from '../../../runtime';
 import { createAccountConsensusContext } from '../../../entity/account/account-consensus-context';
 import { cloneAccountReplica } from '../../../account/state/state-clone';
-import type { AccountTx, SettlementOp } from '../../../types/account';
+import type { AccountReplica, AccountTx, Delta, SettlementOp } from '../../../types/account';
 import type { EntityState, HashToSign, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { LIMITS, TOKENS } from '../../../config/constants';
 import { getDefaultCreditLimit } from '../../../account/utils';
-import { projectAccountAfterSettlement } from '../../../account/settlement/settlement-projection';
+import { projectSettlementDeltaOverrides } from '../../../account/settlement/settlement-projection';
+import { requirePersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import {
+  EntityAccountCandidateMap,
+  PersistentEntityAccountMap,
+} from '../../../entity/state/persistent-account-map';
+import {
+  accountTransitionView,
+  beginAccountTransition,
+  commitAccountTransition,
+  createAccountTransitionKey,
+  discardAccountTransition,
+} from '../../../account/state/candidate-overlay';
 import {
   addReplica,
   addr,
@@ -82,6 +94,49 @@ const transition = (data: Record<string, unknown>): AccountTx => ({
   type: 'settle_transition',
   data,
 } as unknown as AccountTx);
+
+const putDelta = (account: AccountReplica, delta: Delta): void => {
+  account.state.deltas = requirePersistentAccountStateMap(account.state.deltas, 'deltas')
+    .updated(delta.tokenId, delta);
+};
+
+const applyEntityAccountTx = async (
+  state: EntityState,
+  counterpartyId: string,
+  accountTx: AccountTx,
+  byLeft: boolean,
+  timestamp: number,
+  consensusContext?: ReturnType<typeof createAccountConsensusContext>,
+) => {
+  const base = state.accounts.get(counterpartyId);
+  if (!base) throw new Error(`TEST_ACCOUNT_MISSING:${counterpartyId}`);
+  const owner = beginAccountTransition(
+    base,
+    createAccountTransitionKey(base, { purpose: 'test-account-tx', accountTx }),
+  );
+  const result = await applyAccountTx(
+    accountTransitionView(owner),
+    accountTx,
+    byLeft,
+    timestamp,
+    0,
+    false,
+    consensusContext,
+  );
+  if (!result.ok) {
+    discardAccountTransition(owner);
+    return result;
+  }
+  const committed = commitAccountTransition(owner);
+  if (state.accounts instanceof PersistentEntityAccountMap) {
+    state.accounts = state.accounts.updated(counterpartyId, committed.account);
+  } else if (state.accounts instanceof EntityAccountCandidateMap) {
+    state.accounts.set(counterpartyId, committed.account);
+  } else {
+    throw new Error('TEST_ENTITY_ACCOUNT_MAP_INVALID');
+  }
+  return result;
+};
 
 const upsert = async (
   account: ReturnType<typeof makeAccount>,
@@ -237,7 +292,7 @@ const attachSettlementSealWitness = async (
   const account = state.accounts.get(counterpartyId);
   if (!account) throw new Error('TEST_SETTLEMENT_ACCOUNT_MISSING');
   account.mempool.push(tx);
-  expect(sealHankoWitnessInState(state, witness, entityHeight)).toBe(hashesToSign.length);
+  expect(sealHankoWitnessInState(state, witness, entityHeight, [counterpartyId])).toBe(hashesToSign.length);
   return account.mempool.at(-1) as Extract<AccountTx, { type: 'settle_transition' }>;
 };
 
@@ -262,7 +317,7 @@ describe('atomic settlement Account transition', () => {
     for (const tokenId of [1, 2]) {
       const delta = createDefaultDelta(tokenId);
       delta.offdelta = -100n;
-      account.state.deltas.set(tokenId, delta);
+      putDelta(account, delta);
       account.state.requestedRebalance.set(tokenId, 10n);
       account.state.requestedRebalanceFeeState.set(tokenId, {
         feeTokenId: tokenId,
@@ -474,7 +529,7 @@ describe('atomic settlement Account transition', () => {
         createdAt: 2_000,
       });
     });
-    expect(sealHankoWitnessInState(execution.newState, witness, 1)).toBe(2);
+    expect(sealHankoWitnessInState(execution.newState, witness, 1, [RIGHT])).toBe(2);
     expect(seal.data.settlementHanko).toBeDefined();
     expect(seal.data.postProof.hanko).toBeDefined();
     expect(computeCanonicalEntityConsensusStateHash(execution.newState)).toBe(unsignedEntityStateRoot);
@@ -987,18 +1042,18 @@ describe('atomic settlement Account transition', () => {
 
   test('settlement projection bounds new token rows and preserves default credit policy', () => {
     const account = makeAccount(LEFT, RIGHT);
-    const projected = projectAccountAfterSettlement(account, [], [9]);
-    const projectedDelta = projected.state.deltas.get(9);
+    const projected = projectSettlementDeltaOverrides(account, [], [9]);
+    const projectedDelta = projected.get(9);
     const defaultCredit = getDefaultCreditLimit(9);
     expect(projectedDelta?.leftCreditLimit).toBe(defaultCredit);
     expect(projectedDelta?.rightCreditLimit).toBe(defaultCredit);
     expect(account.state.deltas.has(9)).toBe(false);
 
     for (let tokenId = 2; tokenId <= LIMITS.MAX_ACCOUNT_TOKEN_ROWS; tokenId += 1) {
-      account.state.deltas.set(tokenId, createDefaultDelta(tokenId));
+      putDelta(account, createDefaultDelta(tokenId));
     }
     expect(account.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
-    expect(() => projectAccountAfterSettlement(account, [], [TOKENS.MAX_TOKEN_ID]))
+    expect(() => projectSettlementDeltaOverrides(account, [], [TOKENS.MAX_TOKEN_ID]))
       .toThrow('ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED:insert');
     expect(account.state.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
     expect(account.state.deltas.has(TOKENS.MAX_TOKEN_ID)).toBe(false);
@@ -1023,7 +1078,7 @@ describe('atomic settlement Account transition', () => {
       throw new Error('TEST_FORGIVENESS_SETTLEMENT_SEAL_MISSING');
     }
     const expected = cloneAccountReplica(account);
-    expected.state.deltas.set(tokenId, createDefaultDelta(tokenId));
+    putDelta(expected, createDefaultDelta(tokenId));
     expect(draft.data.postProof.proofBodyHash)
       .toBe(buildAccountProofBody(expected, TEST_DELTA_TRANSFORMER).proofBodyHash);
     expect(draft.data.postProof.proofBodyHash)
@@ -1169,16 +1224,16 @@ describe('atomic settlement Account transition', () => {
     addReplica(rightEnv, rightState, rightSigner);
     addReplica(rightEnv, leftState, leftSigner);
     installProofStack(rightEnv, rightState);
-    const rightAccount = rightState.accounts.get(leftEntity)!;
-    const leftAccount = leftState.accounts.get(rightEntity)!;
     const tx = transition({
       kind: 'upsert',
       revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     });
-    expect((await applyAccountTx(rightAccount, tx, true, 1_000)).ok).toBe(true);
-    expect((await applyAccountTx(leftAccount, tx, true, 1_000)).ok).toBe(true);
+    expect((await applyEntityAccountTx(rightState, leftEntity, tx, true, 1_000)).ok).toBe(true);
+    expect((await applyEntityAccountTx(leftState, rightEntity, tx, true, 1_000)).ok).toBe(true);
+    const rightAccount = rightState.accounts.get(leftEntity)!;
+    const leftAccount = leftState.accounts.get(rightEntity)!;
 
     const rightApproval = await handleSettleApprove(
       rightState,
@@ -1220,22 +1275,20 @@ describe('atomic settlement Account transition', () => {
     if (sealedRightTx.data.kind !== 'seal') throw new Error('TEST_RIGHT_SETTLEMENT_SEAL_INVALID');
     expect(sealedRightTx.data.settlementHanko).toBeDefined();
     expect(sealedRightTx.data.postProof.hanko).toBeDefined();
-    expect((await applyAccountTx(
-      rightSealingState.accounts.get(leftEntity)!,
+    expect((await applyEntityAccountTx(
+      rightSealingState,
+      leftEntity,
       sealedRightTx,
       false,
       2_000,
-      0,
-      false,
       createAccountConsensusContext(rightEnv),
     )).ok).toBe(true);
-    expect((await applyAccountTx(
-      leftAccount,
+    expect((await applyEntityAccountTx(
+      leftState,
+      rightEntity,
       sealedRightTx,
       false,
       2_000,
-      0,
-      false,
       createAccountConsensusContext(rightEnv),
     )).ok).toBe(true);
 
@@ -1243,7 +1296,10 @@ describe('atomic settlement Account transition', () => {
       leftState,
       {
         type: 'settle_approve',
-        data: { counterpartyEntityId: rightEntity, workspaceHash: leftAccount.state.settlementWorkspace!.workspaceHash },
+        data: {
+          counterpartyEntityId: rightEntity,
+          workspaceHash: leftState.accounts.get(rightEntity)!.state.settlementWorkspace!.workspaceHash,
+        },
       },
       rightEnv,
     );
@@ -1270,22 +1326,20 @@ describe('atomic settlement Account transition', () => {
     if (sealedLeftTx.data.kind !== 'seal') throw new Error('TEST_LEFT_SETTLEMENT_SEAL_INVALID');
     expect(sealedLeftTx.data.settlementHanko).toBeUndefined();
     expect(sealedLeftTx.data.postProof.hanko).toBeDefined();
-    expect((await applyAccountTx(
-      leftSealingState.accounts.get(rightEntity)!,
+    expect((await applyEntityAccountTx(
+      leftSealingState,
+      rightEntity,
       sealedLeftTx,
       true,
       3_000,
-      0,
-      false,
       createAccountConsensusContext(rightEnv),
     )).ok).toBe(true);
-    expect((await applyAccountTx(
-      rightSealingState.accounts.get(leftEntity)!,
+    expect((await applyEntityAccountTx(
+      rightSealingState,
+      leftEntity,
       sealedLeftTx,
       true,
       3_000,
-      0,
-      false,
       createAccountConsensusContext(rightEnv),
     )).ok).toBe(true);
 
@@ -1458,7 +1512,7 @@ describe('atomic settlement Account transition', () => {
       .toBe(account.state.settlementWorkspace?.workspaceHash);
   });
 
-  test('a multi-token update validates on a clone and commits old-release/new-add atomically', async () => {
+  test('a multi-token update plans on owned leaves and publishes old-release/new-add atomically', async () => {
     const account = makeAccount(LEFT, RIGHT);
     const token2 = createDefaultDelta(2);
     token2.leftCreditLimit = 100n;
@@ -1466,8 +1520,8 @@ describe('atomic settlement Account transition', () => {
     const unrelated = createDefaultDelta(3);
     unrelated.leftHold = 9n;
     unrelated.rightHold = 8n;
-    account.state.deltas.set(2, token2);
-    account.state.deltas.set(3, unrelated);
+    putDelta(account, token2);
+    putDelta(account, unrelated);
 
     const first = await upsert(account, {
       revision: 1,
@@ -1544,7 +1598,7 @@ describe('atomic settlement Account transition', () => {
 
   test('submit requires the elected executor and exact workspace hash, then releases only workspace holds', async () => {
     const account = makeAccount(LEFT, RIGHT);
-    account.state.deltas.get(1)!.rightHold = 7n;
+    putDelta(account, { ...account.state.deltas.get(1)!, rightHold: 7n });
     const first = await upsert(account, {
       revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
@@ -1662,7 +1716,7 @@ describe('atomic settlement Account transition', () => {
 
   test('AccountSettled finality wins a submit retry race by releasing exact workspace holds', async () => {
     const account = makeAccount(LEFT, RIGHT);
-    account.state.deltas.get(1)!.rightHold = 6n;
+    putDelta(account, { ...account.state.deltas.get(1)!, rightHold: 6n });
     const first = await upsert(account, {
       revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
@@ -1819,7 +1873,7 @@ describe('atomic settlement Account transition', () => {
   test('AccountSettled finality rejects cumulative token-row overflow atomically', () => {
     const account = makeAccount(LEFT, RIGHT);
     for (let tokenId = 2; tokenId <= LIMITS.MAX_ACCOUNT_TOKEN_ROWS; tokenId += 1) {
-      account.state.deltas.set(tokenId, createDefaultDelta(tokenId));
+      putDelta(account, createDefaultDelta(tokenId));
     }
     const event = accountSettledEvent(1);
     event.data.tokenId = TOKENS.MAX_TOKEN_ID;
@@ -1933,7 +1987,7 @@ describe('atomic settlement Account transition', () => {
     const token2 = createDefaultDelta(2);
     token2.leftCreditLimit = 100n;
     token2.rightCreditLimit = 100n;
-    account.state.deltas.set(2, token2);
+    putDelta(account, token2);
     expect((await upsert(account, {
       revision: 1,
       ops: [

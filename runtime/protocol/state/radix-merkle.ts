@@ -180,25 +180,52 @@ export const computeRadixMerkleLeafHash = (
   hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => leafHash({ key, value }, hashAlgorithm);
 
-const branchHash = (
+const branchHashOrdered = (
   radix: RadixMerkleRadix,
   children: Array<[number, string]>,
   hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => {
   if (children.length === 0) return EMPTY_RADIX_MERKLE_ROOT;
   const parts: Uint8Array[] = [Uint8Array.of(radixTag(radix))];
-  for (const [slot, hash] of children.sort((left, right) => left[0] - right[0])) {
+  for (const [slot, hash] of children) {
     parts.push(Uint8Array.of(slot));
     parts.push(hexToBytes(hash));
   }
   return hashParts(BRANCH_DOMAIN, parts, hashAlgorithm);
 };
 
+const branchHash = (
+  radix: RadixMerkleRadix,
+  children: Array<[number, string]>,
+  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
+): string => branchHashOrdered(
+  radix,
+  children.sort((left, right) => left[0] - right[0]),
+  hashAlgorithm,
+);
+
 export const computeRadixMerkleBranchHash = (
   radix: RadixMerkleRadix,
   children: Array<[number, string]>,
   hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => branchHash(radix, children, hashAlgorithm);
+
+/** Dense slot form used by the persistent Patricia hot path; no sort is needed. */
+export const computeRadixMerkleBranchHashFromSlots = (
+  radix: RadixMerkleRadix,
+  children: readonly (string | undefined)[],
+  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
+): string => {
+  if (children.length !== radix) {
+    throw new Error(`RADIX_MERKLE_BRANCH_WIDTH_INVALID:${children.length}:${radix}`);
+  }
+  const ordered: Array<[number, string]> = [];
+  for (let slot = 0; slot < children.length; slot += 1) {
+    const hash = children[slot];
+    if (hash !== undefined) ordered.push([slot, hash]);
+  }
+  return branchHashOrdered(radix, ordered, hashAlgorithm);
+};
 
 const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array => {
   const header = uint16Bytes(path.length);

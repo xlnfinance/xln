@@ -1,5 +1,9 @@
 # XLN Storage Merkle Architecture
 
+> Superseded as a normative storage specification by [`wal.md`](wal.md).
+> Retained measurements and historical implementation notes do not authorize a
+> parallel Merkle representation, blob persistence, or full-map hot-path work.
+
 Status: current mainnet-target design, no legacy fallback.
 
 Date: 2026-05-02.

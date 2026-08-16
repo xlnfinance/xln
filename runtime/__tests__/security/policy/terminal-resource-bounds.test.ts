@@ -15,6 +15,7 @@ import {
 import { terminateHtlcRoute } from '../../../entity/tx/j-events-htlc/route-lifecycle';
 import { applyHtlcTimeoutFollowups } from '../../../entity/tx/handlers/account/committed-htlc-followups';
 import { createEmptyEnv } from '../../../runtime';
+import { readRuntimeFrameEvents } from '../../../runtime/observability/env-events';
 import type { AccountReplica, SwapOffer } from '../../../types/account';
 import type {
   EntityCandidateEffect,
@@ -112,7 +113,6 @@ const makeEntity = (): EntityState => ({
   reserves: new Map(),
   accounts: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: { name: 'bounds', isHub: false, avatar: '', bio: '', website: '' },
   entityEncryptionPublicKey: `0x${'77'.repeat(32)}`,
   htlcRoutes: new Map(),
@@ -248,7 +248,7 @@ test('timeout terminal activity is emitted before its HTLC notes are removed', (
   expect(candidateEffects.some((effect) => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcFailed')).toBe(true);
   expect(state.htlcRoutes).toHaveLength(0);
   publishEntityCandidateEffects(env, replica, candidateEffects);
-  expect(env.frameLogs.find(entry => entry.message === 'HtlcFailed')?.data?.description).toBe('timeout note');
+  expect(readRuntimeFrameEvents(env).find(entry => entry.message === 'HtlcFailed')?.data?.description).toBe('timeout note');
   expect(replica.htlcNotes).toBeUndefined();
 });
 

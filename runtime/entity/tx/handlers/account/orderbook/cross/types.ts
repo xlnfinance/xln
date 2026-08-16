@@ -40,7 +40,6 @@ type CrossAggregatedFill = {
 
 export type CrossOrderbookPass = CrossOrderbookProcessInput & {
   crossLiveOfferMeta: Map<string, CrossMarketOffer>;
-  assertedPairs: Set<string>;
   aggregatedFills: Map<string, CrossAggregatedFill>;
   suspendedOrderIds: Set<string>;
   workingBookCache: Map<string, BookState>;

@@ -5,6 +5,7 @@ import { quoteHtlcPaymentRoute } from '../../../routing/htlc-quote';
 import { initCrontab } from '../../../entity/scheduler';
 import { handleHtlcResolve } from '../../../account/tx/handlers/htlc/resolve';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
+import { EntityCollectionCandidateMap } from '../../../entity/state/persistent-collection-map';
 
 const id = (byte: string): string => `0x${byte.repeat(64)}`;
 const domain = { chainId: 31337, depositoryAddress: `0x${'11'.repeat(20)}` };
@@ -18,6 +19,23 @@ type SetupOverrides = {
   hashlock?: string;
   frameHash?: string;
   state?: { entityId: string; timestamp: number; htlcRoutes: Map<string, unknown>; lockBook: Map<string, unknown> };
+};
+
+const withEntityCollectionCandidates = <State extends SetupOverrides['state']>(state: State): State => {
+  if (!state) return state;
+  if (!(state.htlcRoutes instanceof EntityCollectionCandidateMap)) {
+    state.htlcRoutes = new EntityCollectionCandidateMap(
+      state.htlcRoutes,
+      value => structuredClone(value),
+    );
+  }
+  if (!(state.lockBook instanceof EntityCollectionCandidateMap)) {
+    state.lockBook = new EntityCollectionCandidateMap(
+      state.lockBook,
+      value => structuredClone(value),
+    );
+  }
+  return state;
 };
 
 const setup = (kind: 'forward' | 'reject' | 'final', overrides: SetupOverrides = {}) => {
@@ -36,7 +54,9 @@ const setup = (kind: 'forward' | 'reject' | 'final', overrides: SetupOverrides =
     lockId, envelopeHash, hashlock, tokenId: 1, amount: 10n, timelock: 100_000n, revealBeforeHeight: 100,
   };
   const accountTxs: Array<{ accountId: string; tx: unknown }> = [];
-  const state = overrides.state ?? { entityId: to, timestamp: 1, htlcRoutes: new Map(), lockBook: new Map() };
+  const state = withEntityCollectionCandidates(
+    overrides.state ?? { entityId: to, timestamp: 1, htlcRoutes: new Map(), lockBook: new Map() },
+  );
   const outcome = kind === 'forward'
     ? { kind: 'forward' as const, nextHopEntityId: next, forwardAmount: 9n, innerEnvelope: opaque }
     : kind === 'final'
@@ -224,14 +244,14 @@ describe('same-frame incoming HTLC followup', () => {
     const secret = id('7');
     const hashlock = id('5');
     const accountTxs: Array<{ accountId: string; tx: unknown }> = [];
-    const state = {
+    const state = withEntityCollectionCandidates({
       entityId: id('2'), timestamp: 10, htlcFeesEarned: 0n, crontabState: initCrontab(),
       htlcRoutes: new Map([[hashlock, {
         hashlock, tokenId: 1, amount: 10n, inboundEntity: id('1'), inboundLockId: id('4'),
         outboundEntity: id('3'), outboundLockId: id('8'), createdTimestamp: 1,
       }]]),
       lockBook: new Map(),
-    };
+    });
     const context = {
       env: {}, state, newState: state, outputs: [], accountTxs, candidateEffects: [],
     };

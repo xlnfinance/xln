@@ -103,26 +103,39 @@ export const appendCertifiedEntityFrameLink = (
   link: CertifiedEntityFrameLink,
   candidateEffects: EntityCandidateEffect[],
 ): void => {
-  const lineage = replica.certifiedFrameLineage ?? [];
-  const sameHeight = lineage.filter(candidate => candidate.frame.height === link.frame.height);
-  const fork = sameHeight.find(candidate => candidate.frame.hash !== link.frame.hash);
-  if (fork) {
+  const current = replica.certifiedFrameHead;
+  if (current && current.frame.height === link.frame.height && current.frame.hash !== link.frame.hash) {
     throw new Error(
       `ENTITY_CERTIFIED_LINEAGE_FORK:height=${link.frame.height}:` +
-        `existing=${fork.frame.hash}:incoming=${link.frame.hash}`,
+        `existing=${current.frame.hash}:incoming=${link.frame.hash}`,
     );
   }
   const fingerprint = encodeCanonicalConsensusValue(link);
-  if (sameHeight.some(candidate => encodeCanonicalConsensusValue(candidate) === fingerprint)) return;
+  if (current && encodeCanonicalConsensusValue(current) === fingerprint) return;
+  if (current && current.frame.height !== link.frame.height) {
+    throw new Error(
+      `ENTITY_CERTIFIED_HEAD_NOT_REBASED:existing=${current.frame.height}:incoming=${link.frame.height}`,
+    );
+  }
+  const anchor = replica.certifiedFrameAnchor;
+  if (anchor && (anchor.height + 1 !== link.frame.height || anchor.frameHash !== link.frame.parentFrameHash)) {
+    throw new Error(
+      `ENTITY_CERTIFIED_HEAD_ANCHOR_MISMATCH:anchor=${anchor.height}@${anchor.frameHash}:` +
+        `incoming=${link.frame.height}@${link.frame.parentFrameHash}`,
+    );
+  }
+  if (!anchor && (link.frame.height !== 1 || link.frame.parentFrameHash !== 'genesis')) {
+    throw new Error(
+      `ENTITY_CERTIFIED_HEAD_ANCHOR_MISSING:incoming=${link.frame.height}@${link.frame.parentFrameHash}`,
+    );
+  }
   candidateEffects.push({
     kind: 'entityFrameHistory',
     entityId: replica.entityId,
     signerId: replica.signerId,
-    link: structuredClone(link),
+    link,
   });
-  // The exact old history is durable in the Runtime/frame WAL. Keep only the
-  // contiguous links produced after this R-frame's rolling anchor: a cross-j
-  // cascade may certify the same Entity more than once before the R-frame is
-  // committed, and dropping an intermediate link would break its own chain.
-  replica.certifiedFrameLineage = [...lineage, structuredClone(link)];
+  replica.certifiedFrameHead = current && current.frame.height === link.frame.height
+    ? (encodeCanonicalConsensusValue(current) < fingerprint ? current : link)
+    : link;
 };

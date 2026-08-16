@@ -94,6 +94,7 @@ const forwardValidatorMempool = (
 export const admitEntityTransactions = async (
   context: ApplyEntityInputContext,
   trustedLocalCrossJurisdiction: boolean,
+  accountWorkOnly = false,
 ): Promise<EntityTransactionAdmission> => {
   const { env, entityInput, workingReplica } = context;
   const pendingConfig = getPendingBoardHandoverConfig(
@@ -117,11 +118,13 @@ export const admitEntityTransactions = async (
   }
 
   const supplied = entityInput.entityTxs ?? [];
-  const admitted = appendDefaultProposerCrossJMaterializations(
-    env,
-    workingReplica,
-    supplied,
-  );
+  const admitted = accountWorkOnly
+    ? []
+    : appendDefaultProposerCrossJMaterializations(
+        env,
+        workingReplica,
+        supplied,
+      );
   if (nodeProcess?.env?.['XLN_STORAGE_DEBUG_REPLICA_META'] === '1') {
     entityLog.info('replica_meta.admission_debug', {
       entityId: workingReplica.entityId,
@@ -146,6 +149,8 @@ export const admitEntityTransactions = async (
       localRuntime: trustedLocalEntityTxs.length,
     });
   }
-  forwardValidatorMempool(context, localCanPropose, authorityReplica);
+  if (!accountWorkOnly) {
+    forwardValidatorMempool(context, localCanPropose, authorityReplica);
+  }
   return { localCanPropose, trustedLocalEntityTxs };
 };

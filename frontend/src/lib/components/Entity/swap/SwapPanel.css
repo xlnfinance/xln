@@ -1627,6 +1627,12 @@
     overflow: auto;
   }
 
+  .swap-panel .orders-history-more {
+    display: flex;
+    justify-content: center;
+    padding-top: 10px;
+  }
+
   .swap-panel .orders-table {
     width: 100%;
     border-collapse: collapse;

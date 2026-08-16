@@ -2,6 +2,7 @@ import type { Level } from 'level';
 import type { RuntimeP2P } from '../network/p2p/p2p';
 import type {
   AccountHistoryRecord,
+  AccountReplica,
   RuntimeOverlayRecord,
 } from '../types/account';
 import type { FrameLogEntry, LogCategory } from '../types/logging';
@@ -36,6 +37,7 @@ import type { GossipLayer } from '../network/p2p/gossip';
 import type { EntityInfraContext } from '../types/entity/infra-context';
 import type { Profile } from '../entity/profile';
 import type { RuntimeP2PConfig } from './infrastructure/p2p-types';
+import type { BookState } from '../orderbook/core';
 
 import type {
   RuntimeSecurityIncident,
@@ -601,6 +603,13 @@ interface RuntimeInfrastructure {
   storageVerifiedWalHeight?: number;
   storageEpochRotatePromise?: Promise<void> | null;
   storageEntityHashDocs?: unknown;
+  /** Last physically committed Book roots; identity enables O(dirty-path) storage diffs. */
+  storagePersistedBooks?: Map<string, BookState>;
+  /**
+   * Last physically committed Account roots. Values are immutable committed
+   * replicas; the cache itself changes only after the atomic storage batch.
+   */
+  storagePersistedAccounts?: Map<string, AccountReplica>;
   /** Content-addressed board nodes. Authority is the root in EntityState. */
   certifiedBoardNodes?: CertifiedBoardNodeStore;
   /** Newly created immutable nodes awaiting the same atomic batch as a root. */
@@ -619,7 +628,8 @@ interface RuntimeInfrastructure {
   pendingAccountJClaimNodeDeletes?: Set<string>;
   /** Validator-local receipt proofs; never sourced from Entity/peer state. */
   certifiedRegistrationEvidence?: Map<string, CertifiedRegistrationEvidence>;
-  currentStorageOverlayMarks?: RuntimeOverlayRecord[];
+  /** Dirty keys created by only the active Runtime frame. */
+  currentStorageOverlayMarks?: Map<string, RuntimeOverlayRecord>;
   runtimeWalDb?: Level<Buffer, Buffer> | null | undefined;
   runtimeWalDbOpenPromise?: Promise<boolean> | null | undefined;
   /** Rebuildable Entity/Account/J history indexes. Runtime WAL remains authoritative. */
@@ -642,6 +652,12 @@ interface RuntimeInfrastructure {
     nextId: number;
     mirrorToConsole?: boolean;
   };
+  /**
+   * Uncommitted events produced by the single active Runtime frame. This is an
+   * execution buffer, not a timeline: WAL persists it once with that frame and
+   * the buffer is cleared immediately after durable publication.
+   */
+  frameEvents?: FrameLogEntry[];
   /** Exact frame-local event set keyed by canonical bytes; preserves insertion order. */
   pendingAuditEvents?: Map<string, Record<string, unknown>>;
   /** Bounded, replayable wallet security status. Never stores untrusted payload bodies. */
@@ -747,7 +763,8 @@ export interface RuntimeReplica {
   // The sole live Runtime ingress queue. Persisted frames separately call
   // their immutable applied input `runtimeInput`.
   runtimeMempool: RuntimeInput;
-  overlay?: RuntimeOverlayRecord[];
+  /** Process-local accumulated dirty storage keys; never consensus or WAL state. */
+  overlay?: Map<string, RuntimeOverlayRecord>;
   runtimeConfig?: {
     minFrameDelayMs?: number; // Minimum delay between runtime frames
     loopIntervalMs?: number;  // Loop interval for runtime processing
@@ -779,8 +796,6 @@ export interface RuntimeReplica {
     };
   } | undefined;
   infrastructure?: RuntimeInfrastructure | undefined;
-  /** Bounded local/debug timeline. Authoritative history lives in the storage WAL. */
-  history: EnvSnapshot[];
   gossip: GossipLayer;
 
   // The BrowserVM's durable image belongs to the replica. Its live provider is
@@ -822,9 +837,6 @@ export interface RuntimeReplica {
   networkInbox?: RoutedEntityInput[];   // Inbound network messages queued for next tick
   pendingNetworkOutputs?: RoutedEntityInput[]; // Durable, bounded at-least-once transport outbox.
 
-  // Frame-scoped structured logs (captured into snapshot, then reset)
-  frameLogs: FrameLogEntry[];
-
   // Event emission methods (EVM-style - like Ethereum block logs)
   log: (message: string) => void;
   info: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => void;
@@ -833,6 +845,12 @@ export interface RuntimeReplica {
   emit: (eventName: string, data: Record<string, unknown>) => void; // Generic event emission
 }
 
+/**
+ * Detached, explicitly-owned trace of one committed Runtime frame.
+ *
+ * It never belongs to RuntimeReplica. Production inspection reads WAL/LevelDB;
+ * browser demos and tests own a collector with this value type.
+ */
 export interface EnvSnapshot {
   state: RuntimeState;
   runtimeSeed?: string;

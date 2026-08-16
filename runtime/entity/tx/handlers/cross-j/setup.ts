@@ -49,6 +49,23 @@ type CrossJSetupResult = {
   accountTxs?: AccountTxTarget[];
 };
 
+/**
+ * Registration and Account proposal are deliberately separate Entity frames.
+ * Runtime observes the actually committed post-frame Account work index and
+ * creates H+1 causally. Doing that here lost the wake between proposal and
+ * final commit for multi-signer Entities.
+ */
+const registeredAccountWork = (
+  state: EntityState,
+  accountTxs: AccountTxTarget[],
+): CrossJSetupResult => {
+  return {
+    newState: state,
+    accountTxs,
+    outputs: [],
+  };
+};
+
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
   prepareEntityTxState(entityState, options?.mutableFrameState);
@@ -524,10 +541,10 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
       status: 'target_prepared' as const,
     };
     validatePreparedCrossJurisdictionRoute(newState, prepared);
-    return { newState, outputs: [], accountTxs: buildSourceRegistrationTxs(newState, route) };
+    return registeredAccountWork(newState, buildSourceRegistrationTxs(newState, route));
   }
   if (localEntityId === targetHubEntityId) {
-    return { newState, outputs: [], accountTxs: buildTargetRegistrationTxs(newState, route) };
+    return registeredAccountWork(newState, buildTargetRegistrationTxs(newState, route));
   }
   return { newState, outputs: [] };
 };

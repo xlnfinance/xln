@@ -94,6 +94,7 @@ const installRestoredRuntimeFrame = async (
     latestHeight,
     targetHeight,
     frame,
+    payloads,
     selectedSnapshotHeight,
   } = source;
   env.state.height = targetHeight;
@@ -107,16 +108,15 @@ const installRestoredRuntimeFrame = async (
       )
     : { runtimeTxs: [], entityInputs: [] };
   env.pendingNetworkOutputs = cloneIsolatedRoutedEntityInputs(
-    frame.runtimeOutputs ?? [],
+    payloads.runtimeOutputs ?? [],
   );
   restoreDurableOutputRetryState(
     env,
     frame.runtimeOutputRetryState ?? [],
-    frame.runtimeOutputs ?? [],
+    payloads.runtimeOutputs ?? [],
   );
   await reads.restoreOverlayFromFrameLog(env, targetHeight);
-  env.frameLogs = frame.activityLogs.map(entry => ({ ...entry }));
-  if (frame.runtimeMachine) {
+  if (payloads.runtimeMachine) {
     await assertCertifiedRegistrationEvidenceStore(env);
   }
   assertRestoredCanonicalState(env, source);
@@ -131,7 +131,6 @@ const installRestoredRuntimeFrame = async (
           : `snapshot:${selectedSnapshotHeight}`,
     latestHeight,
   });
-  env.history = [];
 };
 
 export const loadPersistedRuntime = async (
@@ -154,12 +153,12 @@ export const loadPersistedRuntime = async (
       options,
     );
     if (!source) return null;
-    if (source.frame.runtimeMachine) {
+    if (source.payloads.runtimeMachine) {
       // Install the durable Runtime-machine envelope once, before rebuilding
       // the Entity graph that references its content-addressed witness stores.
       // Reapplying it afterward is redundant and risks erasing state produced
       // by graph restoration if the two phases ever gain overlapping fields.
-      restoreDurableRuntimeSnapshot(env, source.frame.runtimeMachine);
+      restoreDurableRuntimeSnapshot(env, source.payloads.runtimeMachine);
     }
     await restorePersistedEntityGraph(
       deps,
@@ -169,6 +168,7 @@ export const loadPersistedRuntime = async (
       source.targetHeight,
       source.latestHeight,
       source.selectedSnapshotHeight,
+      source.usesLiveMaterializedCheckpoint,
     );
     restoreAndAssertLocalEntityCryptoKeys(env);
     await installRestoredRuntimeFrame(
@@ -180,7 +180,7 @@ export const loadPersistedRuntime = async (
     return {
       env,
       latestHeight: source.latestHeight,
-      checkpointHeight: source.selectedSnapshotHeight,
+      checkpointHeight: source.targetHeight,
       selectedSnapshotHeight: source.selectedSnapshotHeight,
     };
   } finally {

@@ -85,9 +85,10 @@ export const prepareEntityInputIngress = (
   env: EntityRuntimeContext,
   replica: EntityReplica,
   ingressInput: EntityInput,
-  trustedLocalCrossJurisdiction: boolean,
+  trustedLocalRuntimeProtocol: 'cross-j' | 'account-work' | undefined,
   promoteCandidateState: boolean,
 ): EntityInputIngress => {
+  const trustedLocalCrossJurisdiction = trustedLocalRuntimeProtocol === 'cross-j';
   if (trustedLocalCrossJurisdiction && !isSingleSignerEntity(replica.state)) {
     throw haltRuntimeFailure("CROSS_J_LOCAL_COMMAND_SINGLE_SIGNER_REQUIRED", `CROSS_J_LOCAL_COMMAND_SINGLE_SIGNER_REQUIRED:${replica.entityId}`);
   }
@@ -150,7 +151,11 @@ export const prepareEntityInputIngress = (
       storageChanges: [],
       frameHash,
       promoteCandidateState,
-      usePersistedReplayContext: !trustedLocalCrossJurisdiction,
+      // WAL stores the public context of the external Entity input. Any
+      // Runtime-derived H+1 frame in the same transition must deterministically
+      // materialize its own height/parent-bound context; reusing the external
+      // context makes replay advance from the wrong Entity head.
+      usePersistedReplayContext: trustedLocalRuntimeProtocol === undefined,
     },
     entityDisplay,
     quietRuntimeLogs: env.quietRuntimeLogs === true,

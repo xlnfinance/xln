@@ -1,8 +1,14 @@
-import { applyCommand, OrderbookCapacityError } from '../../../../../../orderbook';
-import { createStructuredLogger, shortId, shortOrder } from '../../../../../../infra/logger';
-import { queueUniqueSwapResolveForEntityState } from '../queue';
 import {
+  applyCommand,
+  getSwapExactQuoteLotMultipleAtPriceForDimensions,
+  OrderbookCapacityError,
+  resumeCrossedBook,
+} from '../../../../../../orderbook';
+import { createStructuredLogger, shortId, shortOrder } from '../../../../../../infra/logger';
+import {
+  classifySameBookMaker,
   containSamePairFailure,
+  queueSameSwapResolve,
   type SameOrderbookPass,
 } from './pass';
 import type { PreparedSameOffer } from './offer-types';
@@ -24,10 +30,8 @@ const rejectFullBook = (
     pass.recordDebugProjectionReject(offer.accountId, offer.offer.offerId, reason);
     return;
   }
-  const queued = queueUniqueSwapResolveForEntityState(
-    pass.accountTxs,
-    pass.hubState,
-    pass.queuedSwapResolutions,
+  const queued = queueSameSwapResolve(
+    pass,
     offer.accountId,
     {
       offerId: offer.offer.offerId,
@@ -57,10 +61,9 @@ export const applySameOfferCommand = (
   });
   try {
     const result = applyCommand(
-      // applyCommand intentionally mutates its BookState hot cache. Matching a
-      // user-authorized fee must therefore run on a detached preview: the
-      // original cache cannot move until every paired Account resolve passes.
-      structuredClone(offer.book),
+      // applyCommand returns a dirty-branch child overlay. The caller keeps it
+      // only after every paired Account resolve passes fee authorization.
+      offer.book,
       {
         kind: 0,
         ownerId: offer.makerId,
@@ -71,7 +74,16 @@ export const applySameOfferCommand = (
         priceTicks: offer.priceTicks,
         qtyLots: offer.qtyLots,
       },
-      { suspendedOrderIds: pass.suspendedSameOrderIds },
+      {
+        suspendedOrderIds: pass.suspendedSameOrderIds,
+        makerDisposition: maker => classifySameBookMaker(pass, offer.bookKey, maker),
+        executionQtyMultipleAtPrice: (priceTicks) =>
+          getSwapExactQuoteLotMultipleAtPriceForDimensions(
+            offer.baseTokenDecimals,
+            offer.quoteTokenDecimals,
+            priceTicks,
+          ),
+      },
     );
     return result;
   } catch (error) {
@@ -87,6 +99,33 @@ export const applySameOfferCommand = (
         message,
       );
     }
+    return null;
+  }
+};
+
+export const resumeCrossedSameBook = (
+  pass: SameOrderbookPass,
+  offer: PreparedSameOffer,
+): ReturnType<typeof resumeCrossedBook> => {
+  try {
+    return resumeCrossedBook(offer.book, {
+      suspendedOrderIds: pass.suspendedSameOrderIds,
+      makerDisposition: maker => classifySameBookMaker(pass, offer.bookKey, maker),
+      executionQtyMultipleAtPrice: (priceTicks) =>
+        getSwapExactQuoteLotMultipleAtPriceForDimensions(
+          offer.baseTokenDecimals,
+          offer.quoteTokenDecimals,
+          priceTicks,
+        ),
+    });
+  } catch (error) {
+    containSamePairFailure(
+      pass,
+      offer.bookKey,
+      offer.accountId,
+      offer.offer.offerId,
+      error instanceof Error ? error.message : String(error),
+    );
     return null;
   }
 };

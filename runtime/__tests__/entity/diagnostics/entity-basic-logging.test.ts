@@ -38,7 +38,6 @@ const makeEntityState = (validators: readonly [string, string], entityId: string
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: 'Basic Test Entity',
     isHub: false,

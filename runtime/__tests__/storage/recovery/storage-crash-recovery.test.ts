@@ -56,10 +56,14 @@ import {
 import { getConsumptionNodeStore } from '../../../entity/consumption/consumption-store';
 import { createEmptyEnv } from '../../../runtime';
 import { createBook } from '../../../orderbook/core';
-import { validateStorageBookDocValue } from '../../../storage/schema/authoritative-schema';
+import { decodeStorageBookHeader } from '../../../storage/schema/book-graph-codec';
+import { projectStorageBookGraphRows } from '../../../storage/schema/book-graph-codec';
+import { readStorageBookGraph } from '../../../storage/read/book-graph';
+import { applyCommand, commitBookOverlay } from '../../../orderbook';
 import { computeIntegrityDigest } from '../../../infra/integrity-checksum';
 import { computeStorageReplicaMetaDigest } from '../../../storage/replica/replica-meta-digest';
 import { buildDurableRuntimeMachineSnapshot } from '../../../storage/wal/snapshot';
+import { prepareRuntimeMachineGraphRows } from '../../../storage/wal/runtime-machine-graph';
 
 const entityId = `0x${'11'.repeat(32)}`;
 type PreparedStorageHashes = Awaited<ReturnType<typeof prepareStorageStateHashes>>;
@@ -127,7 +131,6 @@ const entityDoc = (height: number): StorageEntityCoreDoc => ({
   },
   reserves: new Map([[1, BigInt(height)]]),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: `entity-${height}`,
     isHub: false,
@@ -198,23 +201,25 @@ const materializedFrame = (
   height: number,
   prepared: PreparedStorageHashes,
 ): RuntimeFrame => {
+  const runtimeMachineGraph = prepareRuntimeMachineGraphRows(
+    height,
+    buildDurableRuntimeMachineSnapshot(createEmptyEnv(`storage-frame-${height}`)),
+  );
+  if (!runtimeMachineGraph.root) throw new Error('TEST_RUNTIME_MACHINE_ROOT_MISSING');
   const base: RuntimeFrame = {
     height,
     timestamp: height,
     prevFrameHash: ZERO_FRAME_HASH,
     replicaMetaDigest: computeStorageReplicaMetaDigest([]),
     replicaMetaCheckpoint: true,
-    replicaMetaStateMode: 'full',
+    replicaMetaStateMode: 'shared-entity-state',
     postStateHash: ZERO_FRAME_HASH,
     stateHash: computeStorageStateRoot(prepared.entityHashes),
     hashMode: 'storage-merkle-v1',
     materializedState: true,
     entityHashes: prepared.entityHashes,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    entityContexts: new Map(),
-    historyRecords: [],
-    activityLogs: [],
-    runtimeMachine: buildDurableRuntimeMachineSnapshot(createEmptyEnv(`storage-frame-${height}`)),
+    runtimeMachineRoot: runtimeMachineGraph.root,
     touchedEntities: [entityId],
     touchedAccounts: [],
     touchedBookEntities: [],
@@ -222,7 +227,61 @@ const materializedFrame = (
   return { ...base, frameHash: computeStorageFrameHash(base) };
 };
 
+const materializedFrameMachineRows = (height: number) =>
+  prepareRuntimeMachineGraphRows(
+    height,
+    buildDurableRuntimeMachineSnapshot(createEmptyEnv(`storage-frame-${height}`)),
+  ).rows.map(({ key, value }) => [key, value] as [Buffer, Buffer]);
+
 describe('storage crash recovery', () => {
+  test('rebuilds direct Book Patricia rows after WAL commit wins the cache race', async () => {
+    let book = createBook({ bucketWidthTicks: 10n, maxOrders: 32, stpPolicy: 1 });
+    book = commitBookOverlay(applyCommand(book, {
+      kind: 0,
+      ownerId: entityId,
+      orderId: 'maker',
+      side: 1,
+      tif: 0,
+      postOnly: true,
+      priceTicks: 120n,
+      qtyLots: 4n,
+    }).state);
+    const bookDoc: StorageDoc = {
+      family: 'book',
+      entityId,
+      pairId: '1/2',
+      value: book,
+    };
+    const prepared = await prepareStorageStateHashes({
+      db: makeMemoryDb(),
+      puts: [bookDoc],
+      dels: [],
+    });
+    const frame = materializedFrame(1, prepared);
+    const historyDb = makeMemoryDb([
+      [KEY_HEAD, encodeBuffer(head(1, 1))],
+      [keyDiff(1), encodeBuffer({ height: 1, puts: [], dels: [] })],
+      [keyFrame(1), encodeBuffer(frame)],
+      ...materializedFrameMachineRows(1),
+      ...prepared.docPuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
+      ...prepared.merklePuts.map(({ key, value }) => [key, value] as [Buffer, Buffer]),
+      ...projectStorageBookGraphRows(entityId, '1/2', book)
+        .map(({ key, value }) => [key, value] as [Buffer, Buffer]),
+    ]);
+    const currentDb = makeMemoryDb();
+
+    const recovered = await recoverStorageDbFromHistory({
+      db: currentDb,
+      walDb: historyDb,
+      config,
+    });
+
+    expect(recovered.recovered).toBe(true);
+    const restored = await readStorageBookGraph(currentDb, entityId, '1/2');
+    expect(restored?.orders.get('maker')?.qtyLots).toBe(4n);
+    expect(restored?.commitmentHash).toBe(book.commitmentHash);
+  });
+
   test('heals an equal-HEAD current projection whose live document no longer matches its Merkle commitment', async () => {
     const diff = entityDiff(1);
     const prepared = await prepareStorageStateHashes({
@@ -236,6 +295,7 @@ describe('storage crash recovery', () => {
       [KEY_HEAD, encodeBuffer(storageHead)],
       [keyDiff(1), encodeBuffer(diff)],
       [keyFrame(1), encodeBuffer(frame)],
+      ...materializedFrameMachineRows(1),
     ]);
     const currentDb = makeMemoryDb([
       [KEY_HEAD, encodeBuffer(storageHead)],
@@ -279,6 +339,7 @@ describe('storage crash recovery', () => {
       [KEY_HEAD, encodeBuffer(storageHead)],
       [keyDiff(1), encodeBuffer(diff)],
       [keyFrame(1), encodeBuffer(frame)],
+      ...materializedFrameMachineRows(1),
     ]);
 
     const result = await recoverStorageDbFromHistory({
@@ -508,7 +569,7 @@ describe('storage crash recovery', () => {
     const persisted = prepared.docPuts.find(({ key }) => key.equals(logicalKey))?.value;
     expect(persisted).toBeDefined();
 
-    const validated = decodeValidatedBuffer(persisted!, validateStorageBookDocValue);
+    const validated = decodeValidatedBuffer(persisted!, decodeStorageBookHeader);
     const canonicalHash = computeIntegrityDigest(encodeBuffer(validated));
     const leaf = prepared.merklePuts
       .filter(({ key }) => key[0] === KEY_MERKLE_LEAF)

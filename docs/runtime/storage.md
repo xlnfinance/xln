@@ -1,5 +1,8 @@
 # Storage Map
 
+> Normative protocol: [`../wal.md`](../wal.md). This page is a component map;
+> any older description of complete-frame or blob persistence is non-normative.
+
 This folder owns persistence, replay, canonical restore verification, and
 rebuildable history views.
 

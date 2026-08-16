@@ -40,6 +40,7 @@ import {
 } from '../../../../orderbook/cross-j';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
+import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { findAccountKey } from '../../account-key';
 import {
   mergeCrossJurisdictionRoute,
@@ -455,10 +456,10 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
   if (normalizeEntityRef(newState.entityId) !== normalizeEntityRef(route.source.counterpartyEntityId)) {
     throw haltRuntimeFailure("CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED", `CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED:order=${route.orderId}:entity=${newState.entityId}`);
   }
-  const account = newState.accounts.get(entityTx.data.sourceAccountId);
-  const offer = account?.state.swapOffers?.get(route.orderId);
+  const visible = newState.accounts.get(entityTx.data.sourceAccountId);
+  const offer = visible?.state.swapOffers?.get(route.orderId);
   const currentRoute = newState.crossJurisdictionSwaps?.get(route.orderId);
-  if (!account || !offer?.crossJurisdiction || !currentRoute) {
+  if (!visible || !offer?.crossJurisdiction || !currentRoute) {
     throw haltRuntimeFailure("CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING", `CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING:order=${route.orderId}:` +
         `account=${entityTx.data.sourceAccountId}`);
   }
@@ -469,8 +470,10 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
     entityTx.data.removedAt,
     entityTx.data.reason || 'cancel_request',
   );
-  const pendingDisputeRemovals = account.disputePrepare?.pendingOrderbookRemovalIds;
-  if ((account.status ?? 'active') === 'dispute_preparing' && pendingDisputeRemovals?.includes(route.orderId)) {
+  const pendingDisputeRemovals = visible.disputePrepare?.pendingOrderbookRemovalIds;
+  if ((visible.status ?? 'active') === 'dispute_preparing' && pendingDisputeRemovals?.includes(route.orderId)) {
+    const account = getEntityAccountForWrite(newState.accounts, entityTx.data.sourceAccountId);
+    if (!account?.disputePrepare) throw new Error(`CROSS_J_BOOK_REMOVAL_WRITE_ACCOUNT_MISSING:${entityTx.data.sourceAccountId}`);
     account.disputePrepare!.pendingOrderbookRemovalIds = pendingDisputeRemovals.filter(
       (orderId) => orderId !== route.orderId,
     );

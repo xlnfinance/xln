@@ -1,7 +1,8 @@
 /**
  * Exercises the real hub orderbook: treasury CONTROL sale, a resting DIVIDEND
- * offer, investor purchase, and company buyback. Closed-order history proves
- * settlement instead of inferring success from transient book projections.
+ * offer, investor purchase, and company buyback. The scenario asserts the
+ * authoritative live offer/book state; durable lifecycle inspection belongs
+ * to the Runtime frame-history store, never the Account replica.
  */
 
 import type { RuntimeReplica } from '../../runtime/types';
@@ -34,23 +35,15 @@ const assertClosed = (
   offerId: string,
 ): void => {
   const account = findReplica(env, entityId)[1].state.accounts.get(hubId);
-  if (!account?.swapClosedOrders.has(offerId)) {
-    const history = account?.swapOrderHistory.get(offerId);
-    const resolves = history?.resolves
-      .map(resolve => `${resolve.fillRatio}/${resolve.cancelRemainder}/${resolve.comment ?? ''}`)
-      .join(',') ?? 'missing';
+  if (account?.state.swapOffers.has(offerId)) {
     const hub = findReplica(env, hubId)[1];
     const hubAccount = hub.state.accounts.get(entityId);
-    const hubHistory = hubAccount?.swapOrderHistory.get(offerId);
-    const hubResolves = hubHistory?.resolves
-      .map(resolve => `${resolve.fillRatio}/${resolve.cancelRemainder}/${resolve.comment ?? ''}`)
-      .join(',') ?? 'missing';
     const books = [...(hub.state.orderbookExt?.books ?? [])]
       .map(([key, book]) => `${key}:${book.orders.size}`)
       .join(',');
     throw new Error(
-      `COMPANY_SWAP_NOT_CLOSED:${entityId}:${offerId}:resolves=${resolves}:books=${books}` +
-      `:hubResolves=${hubResolves}:heights=${account?.currentHeight ?? -1}/${hubAccount?.currentHeight ?? -1}` +
+      `COMPANY_SWAP_NOT_CLOSED:${entityId}:${offerId}:books=${books}` +
+      `:heights=${account?.currentHeight ?? -1}/${hubAccount?.currentHeight ?? -1}` +
       `:localPending=${account?.pendingFrame?.height ?? 'none'}/${account?.mempool.length ?? -1}` +
       `:hubPending=${hubAccount?.pendingFrame?.height ?? 'none'}/${hubAccount?.mempool.length ?? -1}` +
       `:runtimeQueues=${env.pendingOutputs?.length ?? 0}/${env.networkInbox?.length ?? 0}`,
@@ -64,7 +57,7 @@ const isClosed = (
   hubId: string,
   offerId: string,
 ): boolean => findReplica(env, entityId)[1]
-  .state.accounts.get(hubId)?.swapClosedOrders.has(offerId) === true;
+  .state.accounts.get(hubId)?.state.swapOffers.has(offerId) === false;
 
 type CompanyMarketQuotes = Readonly<{
   controlSale: bigint;
@@ -221,14 +214,8 @@ const assertDividendOfferResting = (
       .join(',');
     const companyAccount = findReplica(env, actors.boardCompany.id)[1]
       .state.accounts.get(actors.hub.id);
-    const active = [...(companyAccount?.swapOrderHistory.keys() ?? [])].join(',');
-    const closed = [...(companyAccount?.swapClosedOrders.keys() ?? [])].join(',');
-    const dividendHistory = companyAccount?.swapClosedOrders.get('ipo-dividend-ask');
-    const outcomes = dividendHistory?.resolves
-      .map(resolve => `${resolve.fillRatio}/${resolve.cancelRemainder}/${resolve.comment ?? ''}`)
-      .join(',') ?? 'missing';
     throw new Error(
-      `COMPANY_DIVIDEND_BOOK_NOT_RESTING:books=${books}:active=${active}:closed=${closed}:outcomes=${outcomes}`,
+      `COMPANY_DIVIDEND_BOOK_NOT_RESTING:books=${books}:liveOffers=${companyAccount?.state.swapOffers.size ?? -1}`,
     );
   }
 };

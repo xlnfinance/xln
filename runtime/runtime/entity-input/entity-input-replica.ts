@@ -142,7 +142,7 @@ export const applyEntityInputToReplica = async (
   actualSignerId: string,
   isReplay: boolean,
   promoteCandidateState: boolean,
-  trustedLocalCrossJurisdiction = false,
+  trustedLocalRuntimeProtocol?: 'cross-j' | 'account-work',
 ): Promise<AppliedEntityReplicaInput> => {
   if (DEBUG) {
     entityInputLog.debug('input.processing', {
@@ -170,14 +170,14 @@ export const applyEntityInputToReplica = async (
       env,
       entityReplica,
       normalizedInput,
-      trustedLocalCrossJurisdiction
-        ? { trustedLocalRuntimeProtocol: 'cross-j', promoteCandidateState }
+      trustedLocalRuntimeProtocol
+        ? { trustedLocalRuntimeProtocol, promoteCandidateState }
         : { promoteCandidateState },
     );
   } catch (error) {
     throw new RuntimeEntityInputApplyError(
       entityInput,
-      trustedLocalCrossJurisdiction,
+      trustedLocalRuntimeProtocol !== undefined,
       error,
     );
   }

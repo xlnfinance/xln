@@ -155,7 +155,7 @@ export const validateCrossJurisdictionLocalBinding = (
   return null;
 };
 
-type AccountStateFromEntity = EntityState['accounts'] extends Map<string, infer T> ? T : never;
+type AccountStateFromEntity = EntityState['accounts'] extends ReadonlyMap<string, infer T> ? T : never;
 
 export const accountHasCrossPullCloseQueued = (
   account: AccountStateFromEntity,

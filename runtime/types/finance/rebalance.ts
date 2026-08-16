@@ -64,8 +64,8 @@ export interface RebalanceRequestFeeState {
 }
 
 export interface AccountRebalanceShadowState {
-  policy: Map<number, RebalancePolicy>;
-  submittedAtByToken: Map<number, number>;
+  policy: AccountStateCollection<number, RebalancePolicy>;
+  submittedAtByToken: AccountStateCollection<number, number>;
   activeQuote?: RebalanceQuote;
   pendingRequest?: { tokenId: number; targetAmount: bigint };
 }
@@ -96,3 +96,4 @@ export const buildDefaultRebalanceBaseFee = (decimals: number): bigint => {
   if (normalized === 0n) throw new Error('TOKEN_AMOUNT_PRECISION_UNREPRESENTABLE:0.1:0');
   return 10n ** (normalized - 1n);
 };
+import type { AccountStateCollection } from '../../account/state/persistent-state-map';

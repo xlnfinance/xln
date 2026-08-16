@@ -1,4 +1,5 @@
 import type { AccountState, AccountTx, PullCommitment } from '../../../../types/account';
+import type { AccountDraftState } from '../../../state/account-state-draft';
 import type { CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from '../../../../types/cross-jurisdiction';
 import { deriveDelta } from '../../../utils';
 import { FINANCIAL, LIMITS, TOKENS } from '../../../../config/constants';
@@ -17,7 +18,7 @@ import {
   verifyHashLadderBinary,
 } from '../../../../protocol/htlc/hash-ladder';
 import { addHold, releaseHold } from '../../hold-utils';
-import { ensureDelta } from '../../delta-utils';
+import { commitDeltaDraft, createDeltaDraft } from '../../delta-utils';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
 import { createDefaultDelta } from '../../../state/delta';
 import type { ApplyAccountTxResult } from '../../apply-types';
@@ -287,7 +288,7 @@ export const getPullLockAdmissionError = (
 };
 
 export async function handlePullLock(
-  account: AccountState,
+  account: AccountDraftState,
   accountTx: PullLockTx,
   _byLeft: boolean,
   currentHeight: number,
@@ -308,15 +309,15 @@ export async function handlePullLock(
   // is what lets a cross-j Hub propose the source pull while the User Runtime
   // atomically decides whether to ACK it beside the matching target pull.
 
-  const delta = ensureDelta(account, tokenId);
+  const delta = createDeltaDraft(account, tokenId);
 
   const holdError = addHold(delta, loserIsLeft ? 'left' : 'right', absAmount);
   if (holdError) return accountTxValidationRejected(holdError, events);
 
   // No sealed pull reveal deadline. Settlement clock is dispute-relative
   // seconds on L1; cooperative close is event-driven (hashladder reveal).
-  account.pulls ??= new Map();
-  account.pulls.set(pullId, {
+  commitDeltaDraft(account, delta);
+  account.pulls.put(pullId, {
     pullId,
     tokenId,
     amount,
@@ -334,7 +335,7 @@ export async function handlePullLock(
 }
 
 export async function handleCrossPullClose(
-  account: AccountState,
+  account: AccountDraftState,
   accountTx: CrossPullCloseTx,
   byLeft: boolean,
   _currentTimestamp: number,
@@ -367,7 +368,7 @@ export async function handleCrossPullClose(
     );
   }
 
-  const delta = ensureDelta(account, pull.tokenId);
+  const delta = createDeltaDraft(account, pull.tokenId);
 
   const absAmount = absBigInt(pull.amount);
   const previousRatio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(pull.claimedRatio ?? 0) || 0)));
@@ -399,13 +400,14 @@ export async function handleCrossPullClose(
     delta.offdelta += deriveTransferOffdeltaChange(payerIsLeft, applied);
   }
 
-  account.pulls?.delete(pullId);
+  commitDeltaDraft(account, delta);
+  account.pulls.del(pullId);
   events.push(`🪝 Cross-j pull closed: ${pullId.slice(0, 8)}... ratio ${ratio}/${HASHLADDER_MAX_FILL_RATIO} claimed ${applied} released ${remainingHold}`);
   return accountTxApplied(events);
 }
 
 export async function handleCrossPullProgress(
-  account: AccountState,
+  account: AccountDraftState,
   accountTx: CrossPullProgressTx,
   byLeft: boolean,
 ): Promise<ApplyAccountTxResult> {
@@ -413,7 +415,7 @@ export async function handleCrossPullProgress(
   const { pullId, fill } = accountTx.data;
   const pull = account.pulls?.get(pullId);
   if (!pull) return accountTxValidationRejected(`Cross-j target pull ${pullId} not found`, events);
-  const binding = pull.crossJurisdiction;
+  const binding = cloneCrossJurisdictionPullBinding(pull.crossJurisdiction);
   if (binding.leg !== 'target') {
     return accountTxValidationRejected(`Cross-j progress requires target pull`, events);
   }
@@ -488,6 +490,7 @@ export async function handleCrossPullProgress(
     ? 'clear_requested'
     : 'partially_filled';
   if (cancelling) binding.clearingPolicy = 'cancel_and_clear';
+  account.pulls.put(pullId, { ...pull, crossJurisdiction: binding });
   events.push(`🌉 Cross-j target progress ${fill.offerId.slice(0, 8)} ${nextRatio}/${HASHLADDER_MAX_FILL_RATIO}`);
   return accountTxApplied(events);
 }

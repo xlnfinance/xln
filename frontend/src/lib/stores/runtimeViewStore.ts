@@ -207,6 +207,28 @@ export const readRuntimeAccountProjection = async (
   );
 };
 
+/**
+ * History is intentionally not part of the live Account projection. This
+ * returns untrusted adapter bytes; the swap UI owns the exact page decoder.
+ */
+export const readRuntimeSwapHistory = async (
+  entityId: string,
+  counterpartyId: string,
+  cursor: string | null,
+): Promise<unknown> => {
+  const normalizedEntityId = normalizeEntityIdForRuntimeView(entityId);
+  const normalizedCounterpartyId = normalizeEntityIdForRuntimeView(counterpartyId);
+  if (!normalizedEntityId || !normalizedCounterpartyId) {
+    throw new Error('RUNTIME_SWAP_HISTORY_ID_MISSING');
+  }
+  const atHeight = get(runtimeView).atHeight;
+  return runtimeQueryClient.readSwapHistory(
+    normalizedEntityId,
+    normalizedCounterpartyId,
+    runtimeViewQueryAtHeight({ ...(cursor === null ? {} : { cursor }), limit: 100 }, atHeight),
+  );
+};
+
 export const emptyRuntimeViewHistoryScan = (endpoint = ''): RuntimeViewHistoryScanState => ({
   loading: false,
   error: null,

@@ -738,6 +738,10 @@ describe('production startup wiring', () => {
     );
     expect(orchestrator).toContain('const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {');
     expect(orchestrator).toContain(
+      'const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {\n  // Reset may atomically replace',
+    );
+    expect(orchestrator).toContain('resetMeshJurisdictionsCache();\n  const primary = resolveMeshJurisdictionConfig(args.rpcUrl);');
+    expect(orchestrator).toContain(
       'deriveMarketMakerEntityId(signerId, toMarketMakerEntityJurisdictionConfig(jurisdiction))',
     );
     expect(orchestrator).toContain('blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction)');
@@ -864,7 +868,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('buildMarketMakerConsensusConfig(signerId, entityJurisdiction)');
     expect(mmNode).toContain('deriveMarketMakerEntityId(signerId, entityJurisdiction)');
     expect(mmNode).toContain('blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction)');
-    expect(mmNode).toContain('isCanonicalAccountOpener(mmEntityId, hubEntityId)');
+    expect(mmNode).not.toContain('isCanonicalAccountOpener(mmEntityId, hubEntityId)');
     expect(mmNode).not.toContain('dev_bootstrap.storage_disabled');
     expect(mmNode).toContain('const configureMarketMakerRuntimeLogging = (env: RuntimeReplica): void => {');
     expect(mmNode).toContain("if (readBooleanEnv('XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS', false)) return;");

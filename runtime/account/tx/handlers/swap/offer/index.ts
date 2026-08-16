@@ -5,7 +5,8 @@
  * admission → deterministic quantization → cross-J lock binding → commit.
  */
 
-import type { AccountReplica, AccountTx } from '../../../../../types/account';
+import type { AccountTx } from '../../../../../types/account';
+import type { AccountDraftReplica } from '../../../../state/account-state-draft';
 import type { ApplyAccountTxResult } from '../../../apply-types';
 import { accountTxValidationRejected } from '../../../apply-result';
 import { validateSwapOfferAdmission } from './admission';
@@ -14,15 +15,12 @@ import { validateCrossJurisdictionSourceBinding } from './cross-j-binding';
 import { commitSwapOffer } from './commit';
 
 export const handleSwapOffer = async (
-  account: AccountReplica,
+  account: AccountDraftReplica,
   tx: Extract<AccountTx, { type: 'swap_offer' }>,
   byLeft: boolean,
   currentHeight: number,
   _isValidation = false,
 ): Promise<ApplyAccountTxResult> => {
-  // Preserve the canonical empty map even when admission rejects. Both Account
-  // frame validation and commit execute this same transition.
-  account.state.swapOffers ??= new Map();
   const admissionResult = validateSwapOfferAdmission(account.state, tx, byLeft);
   if (!admissionResult.ok) {
     return accountTxValidationRejected(admissionResult.message, []);

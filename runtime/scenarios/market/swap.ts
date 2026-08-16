@@ -18,6 +18,7 @@
 
 import type { AccountReplica } from '../../types/account';
 import type { RuntimeReplica } from '../../runtime/types';
+import { clearRuntimeFrameEvents } from '../../runtime/observability/env-events';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
 import { deriveSwapNetAuthorization } from '../../account/swap/swap-net-authorization';
 import { getLiveJAdapterEntries } from '../../runtime/jurisdiction/live-jadapters';
@@ -263,16 +264,12 @@ export async function swap(env: RuntimeReplica): Promise<void> {
     console.log(`[SWAP] Clearing ${env.state.eReplicas.size} old entities from previous scenario`);
     env.state.eReplicas.clear();
   }
-  if (env.history && env.history.length > 0) {
-    console.log(`[SWAP] Clearing ${env.history.length} old snapshots from previous scenario`);
-    env.history = [];
-  }
   env.state.height = 0; // Reset to frame 0
   env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   env.pendingOutputs = [];
   env.pendingNetworkOutputs = [];
   env.networkInbox = [];
-  env.frameLogs = [];
+  clearRuntimeFrameEvents(env);
   env.gossip = createGossipLayer();
 
   // Setup JAdapter (browservm or rpc, depending on JADAPTER_MODE)

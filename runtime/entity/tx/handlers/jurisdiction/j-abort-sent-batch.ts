@@ -8,8 +8,11 @@ import {
   batchOpCount,
   hasJBatchWork,
   prependRecoveryBatch,
+  type JBatch,
 } from '../../../../jurisdiction/machine/batch';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
+import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
+import { requirePersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
@@ -32,14 +35,15 @@ const dropDisputeFinalizations = (
   });
 };
 
+const accountByCounterparty = (state: EntityState, counterparty: string) =>
+  state.accounts.get(counterparty) ?? state.accounts.get(counterparty.toLowerCase());
+
 const dropStaleCollateralToReserve = (state: EntityState): void => {
   const operations = state.jBatchState?.sentBatch?.batch.collateralToReserve;
   if (!operations?.length) return;
   const retained = operations.filter(operation => {
     const counterparty = String(operation.counterparty).toLowerCase();
-    const account = [...state.accounts.entries()].find(
-      ([accountId]) => accountId.toLowerCase() === counterparty,
-    )?.[1];
+    const account = accountByCounterparty(state, counterparty);
     const jNonce = account?.state.jNonce ?? 0;
     if (operation.nonce > jNonce) return true;
     jBatchActionLog.warn('abort.drop_stale_c2r', {
@@ -61,18 +65,27 @@ const dropStaleCollateralToReserve = (state: EntityState): void => {
   }
 };
 
-const releaseAbortedBatchLatches = (
+const releaseR2CSubmittedLatches = (state: EntityState, batch: JBatch): void => {
+  for (const operation of batch.reserveToCollateral) {
+    for (const pair of operation.pairs) {
+      const accountId = String(pair.entity).toLowerCase();
+      const account = getEntityAccountForWrite(state.accounts, accountId);
+      if (!account) continue;
+      account.shadow.rebalance.submittedAtByToken = requirePersistentAccountStateMap(
+        account.shadow.rebalance.submittedAtByToken,
+        'rebalanceShadowSubmitted',
+      ).removed(operation.tokenId);
+    }
+  }
+};
+
+const releaseFinalizeLatches = (
   state: EntityState,
   droppedFinalizers: Set<string>,
 ): void => {
-  for (const [counterpartyId, account] of state.accounts) {
-    account.shadow.rebalance.submittedAtByToken.clear();
-    if (
-      account.activeDispute &&
-      droppedFinalizers.has(counterpartyId.toLowerCase())
-    ) {
-      account.activeDispute.finalizeQueued = false;
-    }
+  for (const counterpartyId of droppedFinalizers) {
+    const account = getEntityAccountForWrite(state.accounts, counterpartyId);
+    if (account?.activeDispute) account.activeDispute.finalizeQueued = false;
   }
 };
 
@@ -106,12 +119,14 @@ export async function handleJAbortSentBatch(
     dropDisputeFinalizations(newState, droppedFinalizeCounterparties);
     dropStaleCollateralToReserve(newState);
     prependRecoveryBatch(newState.jBatchState, sent.batch);
+  } else {
+    releaseR2CSubmittedLatches(newState, sent.batch);
   }
 
   delete newState.jBatchState.sentBatch;
   newState.jBatchState.status = hasJBatchWork(newState.jBatchState) ? 'accumulating' : 'empty';
 
-  releaseAbortedBatchLatches(newState, droppedFinalizeCounterparties);
+  releaseFinalizeLatches(newState, droppedFinalizeCounterparties);
 
   addMessage(
     newState,

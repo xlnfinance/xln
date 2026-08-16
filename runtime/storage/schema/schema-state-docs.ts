@@ -1,7 +1,4 @@
-import type { BookState } from '../../orderbook';
 import { validateSpreadDistribution } from '../../orderbook';
-import { validateBookStructure } from '../../orderbook/validity';
-import { verifyAndWarmBookCommitment } from '../../orderbook/commitment';
 import { assertAccountFrameHash } from '../../account/consensus/frame/hash';
 import { canonicalAccountDisputeConfig } from '../../account/config/dispute-config';
 import { validateAccountReplica } from '../../account/validation/state-validation';
@@ -30,7 +27,7 @@ import {
 
 const ENTITY_REQUIRED = [
   'entityId', 'height', 'timestamp', 'nonces', 'proposals', 'config',
-  'reserves', 'lastFinalizedJHeight', 'jBlockChain', 'profile', 'htlcRoutes',
+  'reserves', 'lastFinalizedJHeight', 'profile', 'htlcRoutes',
   'htlcFeesEarned', 'lockBook', 'entityEncryptionPublicKey',
 ] as const;
 
@@ -163,7 +160,7 @@ const ACCOUNT_REPLICA_OPTIONAL = [
   'currentDisputeProofProposerIsLeft', 'counterpartyDisputeProofProposerIsLeft',
   'counterpartyDisputeHash', 'counterpartySettlementHanko', 'disputeProofNoncesByHash',
   'disputeProofBodiesByHash', 'disputeArgumentSnapshotsByHash', 'disputePrepare',
-  'activeDispute', 'swapOrderHistory', 'swapClosedOrders',
+  'activeDispute',
 ] as const;
 const ACCOUNT_STATE_REQUIRED = [
   'leftEntity', 'rightEntity', 'domain', 'watchSeed', 'deltas', 'locks',
@@ -326,7 +323,6 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
   requireStorageMap(doc['proposals'], `${code}_PROPOSALS`);
   requireStorageMap(doc['reserves'], `${code}_RESERVES`);
   requireBoundaryInteger(doc['lastFinalizedJHeight'], `${code}_FINALIZED_J_HEIGHT`);
-  requireStorageArray(doc['jBlockChain'], `${code}_J_BLOCK_CHAIN`);
   const profile = requireBoundaryRecord(doc['profile'], `${code}_PROFILE`);
   requireExactBoundaryKeys(profile, ['name', 'isHub', 'avatar', 'bio', 'website'], [], `${code}_PROFILE_FIELDS`);
   for (const key of ['name', 'avatar', 'bio', 'website']) {
@@ -398,43 +394,6 @@ export const validateStorageAccountDocValue = (value: unknown): StorageAccountDo
   const account = validateAccountReplica(doc, code);
   validateStorageAccountStateMaps(account.state, `${code}_STATE`);
   return account;
-};
-
-function assertBookHeader(value: unknown): asserts value is BookState {
-  const code = 'STORAGE_BOOK_DOC_INVALID';
-  const book = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(book, [
-    'params', 'orders', 'bidBuckets', 'askBuckets', 'bidBucketIdsDesc',
-    'askBucketIdsAsc', 'nextSeq', 'tradeCount', 'tradeQtySum',
-    'lastTradePriceTicks', 'lastAcceptedUsdAskPriceTicks', 'eventHash',
-  ], ['commitmentHash'], `${code}_FIELDS`);
-  const params = requireBoundaryRecord(book['params'], `${code}_PARAMS`);
-  requireExactBoundaryKeys(params, ['bucketWidthTicks', 'maxOrders', 'stpPolicy'], [], `${code}_PARAM_FIELDS`);
-  requireStorageBigInt(params['bucketWidthTicks'], `${code}_BUCKET_WIDTH`, 1n);
-  requireBoundaryInteger(params['maxOrders'], `${code}_MAX_ORDERS`, 1);
-  if (params['stpPolicy'] !== 0 && params['stpPolicy'] !== 1) throw new Error(`${code}_STP_POLICY`);
-  requireStorageMap(book['orders'], `${code}_ORDERS`);
-  requireStorageMap(book['bidBuckets'], `${code}_BID_BUCKETS`);
-  requireStorageMap(book['askBuckets'], `${code}_ASK_BUCKETS`);
-  requireStorageArray(book['bidBucketIdsDesc'], `${code}_BID_IDS`);
-  requireStorageArray(book['askBucketIdsAsc'], `${code}_ASK_IDS`);
-  requireBoundaryInteger(book['nextSeq'], `${code}_NEXT_SEQ`);
-  requireBoundaryInteger(book['tradeCount'], `${code}_TRADE_COUNT`);
-  requireStorageBigInt(book['tradeQtySum'], `${code}_TRADE_QTY`);
-  // Retained trade telemetry; it is not cross-j admission authority.
-  requireStorageBigInt(book['lastTradePriceTicks'], `${code}_LAST_TRADE_PRICE`);
-  // This is the signed-authority quote consumed by the cross-j notional cap.
-  // It is intentionally independent of user-controlled trade history.
-  requireStorageBigInt(book['lastAcceptedUsdAskPriceTicks'], `${code}_LAST_USD_ASK_PRICE`);
-  requireStorageBigInt(book['eventHash'], `${code}_EVENT_HASH`);
-}
-
-export const validateStorageBookDocValue = (value: unknown): BookState => {
-  assertBookHeader(value);
-  const report = validateBookStructure(value);
-  if (!report.ok) throw new Error(`STORAGE_BOOK_DOC_STRUCTURE_INVALID:${report.errors.join('|')}`);
-  verifyAndWarmBookCommitment(value, 'STORAGE_BOOK_DOC_COMMITMENT');
-  return value;
 };
 
 export const assertStorageEntityDocBinding = (

@@ -34,7 +34,6 @@ const makeState = (entityId: string, height: number): EntityState => ({
   reserves: new Map([[1, BigInt(height)]]),
   accounts: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: { name: `entity-${entityId.slice(-4)}`, isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,

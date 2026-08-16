@@ -3,10 +3,9 @@ import { entityInputHasCrossJurisdictionIntraRuntimeTx } from '../../extensions/
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import {
-  buildRouteOutputKey,
-  cloneRoutedOutputWithCachedIdentity,
-  splitRoutedOutputByDeliveryLane,
+  copyRoutedOutputForMerge,
 } from './identity';
+import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
 import {
   isTriggerOnlyOutput,
   isTxBearingOutput,
@@ -25,13 +24,34 @@ type PlannedEntityOutput =
   | { kind: 'remote'; output: PlannedRemoteOutput }
   | { kind: 'deferred'; output: RoutedEntityInput };
 
-const dedupeEntityOutputs = (outputs: RoutedEntityInput[]): RoutedEntityInput[] => {
+const dedupeEntityOutputs = (
+  outputs: RoutedEntityInput[],
+  graph: PreparedOutputGraph,
+): RoutedEntityInput[] => {
   const deduped = new Map<string, RoutedEntityInput>();
-  for (const output of outputs.flatMap(candidate => splitRoutedOutputByDeliveryLane(candidate))) {
-    const key = buildRouteOutputKey(output);
+  const mutableMergeTargets = new Set<RoutedEntityInput>();
+  for (const output of outputs.flatMap(candidate => graph.split(candidate))) {
+    const key = graph.prepare(output).routeKey;
     const existing = deduped.get(key);
-    if (existing) mergeRoutedEntityOutput(existing, output);
-    else deduped.set(key, cloneRoutedOutputWithCachedIdentity(output));
+    if (existing) {
+      const target = mutableMergeTargets.has(existing) ? existing : copyRoutedOutputForMerge(existing);
+      if (target !== existing) {
+        deduped.set(key, target);
+        mutableMergeTargets.add(target);
+      }
+      mergeRoutedEntityOutput(
+        target,
+        output,
+        graph.prepare(target).reliableIdentity,
+        graph.prepare(output).reliableIdentity,
+      );
+      graph.invalidate(target);
+    } else {
+      const target = copyRoutedOutputForMerge(output);
+      graph.adopt(output, target);
+      mutableMergeTargets.add(target);
+      deduped.set(key, target);
+    }
   }
   return [...deduped.values()];
 };
@@ -228,21 +248,29 @@ export const planEntityOutputs = (
   env: RuntimeReplica,
   outputs: RoutedEntityInput[],
   deps: RuntimeOutputRoutingDeps,
+  graph: PreparedOutputGraph = createPreparedOutputGraph(),
 ): {
   localOutputs: RoutedEntityInput[];
   remoteOutputs: PlannedRemoteOutput[];
   deferredOutputs: RoutedEntityInput[];
+  preparedOutputGraph: PreparedOutputGraph;
 } => {
   const localOutputs: RoutedEntityInput[] = [];
   const remoteOutputs: PlannedRemoteOutput[] = [];
   const deferredOutputs: RoutedEntityInput[] = [];
-  for (const output of dedupeEntityOutputs(outputs)) {
+  for (const output of dedupeEntityOutputs(outputs, graph)) {
     const decision = resolveLocalEntityOutput(env, output, deps) ??
       planRemoteEntityOutput(env, output, deps);
-    if (decision.kind === 'local') localOutputs.push(decision.output);
-    else if (decision.kind === 'remote') remoteOutputs.push(decision.output);
-    else deferredOutputs.push(decision.output);
+    if (decision.kind === 'local') {
+      graph.prepare(decision.output);
+      localOutputs.push(decision.output);
+    } else if (decision.kind === 'remote') {
+      graph.prepare(decision.output.output);
+      remoteOutputs.push(decision.output);
+    } else {
+      graph.prepare(decision.output);
+      deferredOutputs.push(decision.output);
+    }
   }
-  return { localOutputs, remoteOutputs, deferredOutputs };
+  return { localOutputs, remoteOutputs, deferredOutputs, preparedOutputGraph: graph };
 };
-

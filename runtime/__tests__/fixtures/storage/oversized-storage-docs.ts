@@ -24,7 +24,6 @@ const entityDoc = (bioLength: number): StorageEntityCoreDoc => ({
   },
   reserves: new Map([[1, 1n]]),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: 'typed-rebranch',
     isHub: true,

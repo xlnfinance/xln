@@ -49,15 +49,16 @@ const collectCertifiedStorageDocs = (
 
   for (const [entityId, selected] of lineagePlan.lookup.entries()) {
     const core = projectEntityCoreDoc(selected.state);
-    const accounts = new Map(
-      Array.from(selected.state.accounts, ([counterpartyId, account]) => [
-        String(counterpartyId || '').toLowerCase(),
-        projectAccountDoc(account),
-      ]),
-    );
-    const books = new Map(
-      Array.from(selected.state.orderbookExt?.books ?? [], ([pairId, book]) => [String(pairId || '').trim(), book]),
-    );
+    // This is a cold recovery projection, not a machine clone: each decoded
+    // value is projected once into the exact storage boundary representation.
+    const accounts = new Map<string, ReturnType<typeof projectAccountDoc>>();
+    for (const [counterpartyId, account] of selected.state.accounts) {
+      accounts.set(String(counterpartyId || '').toLowerCase(), projectAccountDoc(account));
+    }
+    const books = new Map<string, NonNullable<typeof selected.state.orderbookExt>['books'] extends ReadonlyMap<string, infer B> ? B : never>();
+    for (const [pairId, book] of selected.state.orderbookExt?.books ?? []) {
+      books.set(String(pairId || '').trim(), book);
+    }
     const projectedState = hydrateEntityStateFromStorage({ core, accounts, books });
     const expectedHash = computeCanonicalEntityHash(selected.replica);
     const projectedHash = computeCanonicalEntityHash({ ...selected.replica, state: projectedState });
@@ -160,7 +161,7 @@ const persistRestoredRuntimeStateUnlocked = async (
   }
   const state = ensureRuntimeInfrastructure(env);
   state.storageEntityHashDocs = replacement.entityHashDocs;
-  state.currentStorageOverlayMarks = [];
+  state.currentStorageOverlayMarks = new Map();
 };
 
 // Import replaces the entire local persistence base. It is never appended to the

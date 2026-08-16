@@ -1,7 +1,7 @@
 import type { EntityState, Proposal, ProposalAction } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import { createHash } from '../../../infra/platform-crypto';
-import { safeStringify } from '../../../protocol/serialization';
+import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { createStructuredLogger, shortHash } from '../../../infra/logger';
 import { canonicalEntityBoardSignerId, hashEntityProposalAction } from '../../auth/authorization';
 import { addMessage } from '../../frame-events';
@@ -65,7 +65,7 @@ export const assertEntityProposalCapacity = (state: EntityState, rawProposer: st
 export const pruneTerminalEntityProposals = (state: EntityState): EntityState => {
   const terminal = Array.from(state.proposals.values())
     .filter(proposal => proposal.status !== 'pending')
-    .sort((left, right) => left.created - right.created || left.id.localeCompare(right.id));
+    .sort((left, right) => left.created - right.created || compareStableText(left.id, right.id));
   const removeCount = Math.max(0, terminal.length - MAX_TERMINAL_ENTITY_PROPOSALS);
   if (removeCount === 0) return state;
   const proposals = new Map(state.proposals);

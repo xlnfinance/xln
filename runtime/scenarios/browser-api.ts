@@ -64,6 +64,24 @@ export type ScenarioRecording = {
   env: RuntimeReplica;
 };
 
+/**
+ * Record an arbitrary browser scenario without teaching RuntimeReplica about
+ * history. The caller owns the returned trace and may release its UI store at
+ * any time; Runtime keeps only its current committed state.
+ */
+export const recordRuntimeScenario = async (
+  env: RuntimeReplica,
+  run: (target: RuntimeReplica) => Promise<RuntimeReplica | void>,
+): Promise<{ frames: EnvSnapshot[]; env: RuntimeReplica }> => {
+  const trace = startRuntimeHistoryTraceForTesting(env);
+  try {
+    const result = await run(env);
+    return { frames: [...trace.snapshots], env: result ?? env };
+  } finally {
+    trace.stop();
+  }
+};
+
 export const scenarioKeys = Object.keys(scenarios) as ScenarioKey[];
 
 /**

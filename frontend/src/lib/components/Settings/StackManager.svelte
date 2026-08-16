@@ -4,11 +4,11 @@
    * It exposes deployment authority explicitly and renders only strictly decoded daemon evidence.
    * Importance: 84/100 — wrong signer, chain, or publication labels can mislead an operator.
    */
-  import { activeRuntime } from '$lib/stores/vault/vaultStore';
   import {
     getRuntimeControllerConfig,
     runtimeControllerHandle,
   } from '$lib/stores/runtimeControllerStore';
+  import { runtimeHttpOriginFromWsUrl } from '$lib/utils/runtime/wsUrl';
   import {
     STACK_VERSION,
     defaultStackStablecoinKind,
@@ -43,22 +43,36 @@
   let probe: StackManagerProbe | null = null;
   let result: StackManagerDeployResult | null = null;
   let error = '';
-  $: signerOptions = ($activeRuntime?.signers ?? [])
-    .map((signer): SignerOption | null => {
-      const id = String(signer.address || '').trim().toLowerCase();
-      return id ? { id, label: String(signer.name || 'Runtime signer').trim() || 'Runtime signer' } : null;
-    })
-    .filter((signer): signer is SignerOption => signer !== null);
+  let signerIds: readonly string[] = [];
+  let loadedSignerCapability = '';
+  let loadedSignerApiOrigin = '';
+  $: signerOptions = signerIds.map((id): SignerOption => ({ id, label: 'Runtime signer' }));
   $: if (signerOptions[0] && !signerOptions.some((signer) => signer.id === signerId)) {
     signerId = signerOptions[0].id;
   }
   $: if (signerId && !foundationRecipient) foundationRecipient = signerId;
   $: balanceWei = probe?.nativeBalanceWei ?? '';
   $: hasGas = balanceWei !== '' && BigInt(balanceWei) > 0n;
-  $: runtimeAdminCapability = $runtimeControllerHandle.mode === 'remote'
-    ? String(getRuntimeControllerConfig()?.authKey || '')
+  $: runtimeControllerConfig = $runtimeControllerHandle.mode === 'remote'
+    ? getRuntimeControllerConfig()
+    : null;
+  $: runtimeAdminCapability = runtimeControllerConfig?.mode === 'remote'
+    ? String(runtimeControllerConfig.authKey || '')
+    : '';
+  $: runtimeApiOrigin = runtimeControllerConfig?.mode === 'remote' && runtimeControllerConfig.wsUrl
+    ? runtimeHttpOriginFromWsUrl(runtimeControllerConfig.wsUrl)
     : '';
   $: isInBrowserRuntime = $runtimeControllerHandle.mode === 'embedded';
+  $: if (
+    runtimeAdminCapability
+    && runtimeApiOrigin
+    && !isInBrowserRuntime
+    && (loadedSignerCapability !== runtimeAdminCapability || loadedSignerApiOrigin !== runtimeApiOrigin)
+  ) {
+    loadedSignerCapability = runtimeAdminCapability;
+    loadedSignerApiOrigin = runtimeApiOrigin;
+    void loadRuntimeSigners(runtimeApiOrigin, runtimeAdminCapability);
+  }
   $: hasRequiredConfig = Boolean(
     networkName.trim()
     && jurisdictionKey.trim()
@@ -100,6 +114,20 @@
       foundationRecipient = signerId;
     }
   };
+  async function loadRuntimeSigners(apiOrigin: string, capability: string): Promise<void> {
+    error = '';
+    try {
+      const response = await fetchStackManagerStatus(apiOrigin, '', '', capability);
+      if (capability !== runtimeAdminCapability || apiOrigin !== runtimeApiOrigin) return;
+      status = response.status;
+      signerIds = response.signerIds;
+      if (signerIds.length === 0) error = 'STACK_MANAGER_RUNTIME_SIGNER_REQUIRED';
+    } catch (value) {
+      if (capability !== runtimeAdminCapability || apiOrigin !== runtimeApiOrigin) return;
+      signerIds = [];
+      error = errorMessage(value);
+    }
+  }
   async function refreshProbe(): Promise<void> {
     probing = true;
     error = '';
@@ -108,8 +136,11 @@
       if (!rpcUrl.trim()) throw new Error('STACK_MANAGER_RPC_URL_REQUIRED');
       if (!signerId) throw new Error('STACK_MANAGER_RUNTIME_SIGNER_REQUIRED');
       if (isInBrowserRuntime) throw new Error('STACK_MANAGER_DAEMON_RUNTIME_REQUIRED');
-      const response = await fetchStackManagerStatus(rpcUrl.trim(), signerId, runtimeAdminCapability);
+      if (!runtimeApiOrigin) throw new Error('STACK_MANAGER_DAEMON_RUNTIME_REQUIRED');
+      const response = await fetchStackManagerStatus(runtimeApiOrigin, rpcUrl.trim(), signerId, runtimeAdminCapability);
       status = response.status;
+      signerIds = response.signerIds;
+      if (!signerIds.includes(signerId)) throw new Error('STACK_MANAGER_SIGNER_NOT_OWNED');
       if (!response.probe) throw new Error('STACK_MANAGER_RPC_PROBE_MISSING');
       if (response.probe.rpcUrl !== rpcUrl.trim()) throw new Error('STACK_MANAGER_PROBE_RPC_MISMATCH');
       if (response.probe.signerId !== signerId) throw new Error('STACK_MANAGER_PROBE_SIGNER_MISMATCH');
@@ -136,7 +167,8 @@
       const stablecoin = stablecoinKind === 'test'
         ? { kind: 'test' as const }
         : { kind: 'existing' as const, address: stablecoinAddress.trim() };
-      const response = await deployStack({
+      if (!runtimeApiOrigin) throw new Error('STACK_MANAGER_DAEMON_RUNTIME_REQUIRED');
+      const response = await deployStack(runtimeApiOrigin, {
         name: networkName.trim(),
         key: jurisdictionKey.trim(),
         rpcUrl: rpcUrl.trim(),
@@ -220,7 +252,7 @@
       </label>
       <label>
         Stablecoin
-        <select bind:value={stablecoinKind} on:change={() => stablecoinEdited = true}>
+        <select data-testid="stack-manager-stablecoin" bind:value={stablecoinKind} on:change={() => stablecoinEdited = true}>
           <option value="existing">Existing 6-decimal USDT address</option>
           <option value="test">Deploy explicit test token</option>
         </select>
@@ -241,7 +273,7 @@
       </label>
       <label>
         Receipt confirmations
-        <input type="number" min="1" step="1" bind:value={confirmations} />
+        <input data-testid="stack-manager-confirmations" type="number" min="1" step="1" bind:value={confirmations} />
       </label>
       <label>
         Block time (ms)

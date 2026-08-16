@@ -22,7 +22,6 @@ import { buildJPrefixCertificate } from '../../../jurisdiction/machine/history/j
 import { generateNumberedEntityId } from '../../../entity/factory';
 import { verifyHankoForHash } from '../../../hanko/signing';
 import {
-  collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
 } from '../../../jurisdiction/machine/board-registry';
@@ -105,71 +104,48 @@ afterEach(() => {
 });
 
 describe('real process storage crash recovery', () => {
-  test('recovery import retains board DAG nodes needed only by a lagging replica root', async () => {
+  test('restores frame one from the authoritative materialized graph before snapshot publication', async () => {
     const dbRoot = dbRootPath;
     mkdirSync(dbRoot, { recursive: true });
-    const seed = `storage recovery board root lag ${process.pid} deterministic seed`;
+    const boundary: StoragePersistenceBoundary = 'after-authoritative-history-commit';
+    const seed = `storage first frame crash ${process.pid} deterministic seed`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     namespaces.push({ dbRoot, runtimeId });
     cleanupRuntimeStorage(dbRoot, runtimeId);
 
     const child = Bun.spawn({
-      cmd: [process.execPath, fixture, seed, 'restore-certified-board-root-lag'],
+      cmd: [process.execPath, fixture, seed, boundary],
       cwd: join(import.meta.dir, '..', '..', '..', '..'),
-      env: { ...process.env, XLN_DB_PATH: dbRoot },
+      env: {
+        ...process.env,
+        XLN_DB_PATH: dbRoot,
+        XLN_STORAGE_CRASH_ON_FIRST_FRAME: '1',
+      },
       stdout: 'pipe',
       stderr: 'pipe',
     });
     const exitCode = await child.exited;
-    const stdout = await new Response(child.stdout).text();
     const stderr = await new Response(child.stderr).text();
-    expect(exitCode, `${stdout}\n${stderr}`).toBe(0);
+    expect(exitCode, stderr).toBe(137);
+    expect(child.signalCode, stderr).toBe('SIGKILL');
 
     const restored = await loadEnvFromDB(runtimeId, seed);
-    if (!restored) throw new Error('board-root lag fixture did not restore');
+    if (!restored) throw new Error('frame-one crash fixture did not restore');
     try {
-      const roots = Array.from(restored.state.eReplicas.values(), (replica) => (
-        replica.state.certifiedBoardState?.boardRegistryRoot
-      )).filter((root): root is string => Boolean(root));
-      expect(new Set(roots).size).toBe(2);
-      const reachable = collectReachableCertifiedBoardNodes(
-        getCertifiedBoardNodeStore(restored),
-        roots,
-      );
-      expect(reachable.size).toBeGreaterThan(0);
-    } finally {
-      await closeRuntimeDb(restored);
-      await closeInfraDb(restored);
-    }
-  }, 30_000);
-
-  test('recovery import materializes the highest certified replica independent of Map order', async () => {
-    const dbRoot = dbRootPath;
-    mkdirSync(dbRoot, { recursive: true });
-    const seed = `storage recovery certified lag ${process.pid} deterministic seed`;
-    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    namespaces.push({ dbRoot, runtimeId });
-    cleanupRuntimeStorage(dbRoot, runtimeId);
-
-    const child = Bun.spawn({
-      cmd: [process.execPath, fixture, seed, 'restore-certified-lineage-lag'],
-      cwd: join(import.meta.dir, '..', '..', '..', '..'),
-      env: { ...process.env, XLN_DB_PATH: dbRoot },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const exitCode = await child.exited;
-    const stdout = await new Response(child.stdout).text();
-    const stderr = await new Response(child.stderr).text();
-    expect(exitCode, `${stdout}\n${stderr}`).toBe(0);
-
-    const restored = await loadEnvFromDB(runtimeId, seed);
-    if (!restored) throw new Error('recovery lag fixture did not restore');
-    try {
+      expect(restored.state.height).toBe(1);
+      expect(restored.state.eReplicas.size).toBe(2);
       const entityId = generateNumberedEntityId(2).toLowerCase();
-      const selected = buildCertifiedEntityLineagePlan(restored).lookup.get(entityId)?.state;
-      expect(selected?.height).toBe(1);
-      expect(selected?.prevFrameHash).toMatch(/^0x[0-9a-f]{64}$/);
+      const signerB = deriveSignerAddressSync(seed, '2').toLowerCase();
+      const replica = Array.from(restored.state.eReplicas.values()).find(candidate =>
+        candidate.entityId === entityId && candidate.signerId === signerB,
+      );
+      expect(replica?.state.height).toBe(1);
+      expect(replica?.htlcNotes).toEqual(
+        new Map([['hashlock:0x01', 'crash-recovery-note']]),
+      );
+      const head = await readStorageHead(getRuntimeWalDb(restored));
+      expect(head?.latestSnapshotHeight).toBe(0);
+      expect(head?.latestMaterializedHeight).toBe(1);
     } finally {
       await closeRuntimeDb(restored);
       await closeInfraDb(restored);
@@ -226,16 +202,17 @@ describe('real process storage crash recovery', () => {
         const replica = Array.from(restored.state.eReplicas.values()).find((candidate) => (
           candidate.entityId === entityId && candidate.signerId === signerB
         ));
-        expect(replica?.state.height).toBe(0);
+        expect(replica?.state.height).toBe(1);
         expect(replica && Object.hasOwn(replica.state, 'messages')).toBeFalse();
         expect(replica?.state.entityEncryptionPublicKey).toBe(expectedKeys.publicKey);
         expect(requireEntityEncryptionPrivateKey(restored, entityId))
           .toBe(expectedKeys.privateKey);
         expect(replica && Object.hasOwn(replica, 'entityEncPrivKey')).toBeFalse();
-        expect(replica?.htlcNotes).toBeUndefined();
-        expect(replica?.state.leaderState).toBeUndefined();
-        expect(replica?.certifiedFrameLineage ?? []).toHaveLength(0);
-        expect(replica?.certifiedFrameAnchor?.height).toBe(0);
+        expect(replica?.htlcNotes).toEqual(
+          new Map([['hashlock:0x01', 'crash-recovery-note']]),
+        );
+        expect(replica?.certifiedFrameHead).toBeUndefined();
+        expect(replica?.certifiedFrameAnchor?.height).toBe(1);
         expect(replica?.certifiedFrameAnchor?.runtimeCheckpoint?.replicaSetRoot)
           .toMatch(/^0x[0-9a-f]{64}$/);
         expect(replica ? getEntityLeaderState(replica.state) : undefined).toEqual({
@@ -247,7 +224,7 @@ describe('real process storage crash recovery', () => {
         expect(replica?.pendingLeaderCertificate?.toView).toBe(1);
         expect(replica?.pendingLeaderCertificate?.votes.size).toBe(2);
         expect(replica?.lastConsensusProgressAt).toBe(12_345);
-        expect(replica?.jPrefixRound?.targetEntityHeight).toBe(1);
+        expect(replica?.jPrefixRound?.targetEntityHeight).toBe(2);
         expect(replica?.jPrefixRound?.attestations.size).toBe(2);
         const rebuiltJPrefixCertificate = replica
           ? buildJPrefixCertificate(replica.state, replica.jPrefixRound!.attestations)
@@ -263,8 +240,10 @@ describe('real process storage crash recovery', () => {
           contiguousThroughHeight: 7,
           tipBlockHash: `0x${'ab'.repeat(32)}`,
           eventBlocks: new Map(),
-          blockHashes: new Map(Array.from({ length: 7 }, (_, index) => {
-            const height = index + 1;
+          // Finalized H1-H2 are already committed by Entity consensus and are
+          // not duplicated in validator-local pending history.
+          blockHashes: new Map(Array.from({ length: 5 }, (_, index) => {
+            const height = index + 3;
             return [
               height,
               height === 7
@@ -282,7 +261,7 @@ describe('real process storage crash recovery', () => {
         // that endpoint and rebuilds only links certified after it, so a
         // checkpoint exactly at H1 restores with an empty in-memory tail.
         expect(submitReplica?.certifiedFrameAnchor?.height).toBe(1);
-        expect(submitReplica?.certifiedFrameLineage ?? []).toHaveLength(0);
+        expect(submitReplica?.certifiedFrameHead).toBeUndefined();
         expect(submitReplica?.certifiedFrameAnchor?.height).toBe(1);
         expect(submitReplica?.certifiedFrameAnchor?.runtimeCheckpoint)
           .toEqual(replica?.certifiedFrameAnchor?.runtimeCheckpoint);

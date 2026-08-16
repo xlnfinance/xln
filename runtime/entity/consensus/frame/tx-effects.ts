@@ -10,6 +10,7 @@ import { shortId, shortOrder } from '../../../infra/logger';
 import { cancelHook, scheduleHook } from '../../scheduler';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
 import { applyAccountInput } from '../../../account/consensus';
+import { getEntityAccountForWrite } from '../../state/persistent-account-map';
 import { createLocalAccountInput } from '../../../account/input';
 import { entityLog } from '../entity-log';
 import {
@@ -49,8 +50,8 @@ const applyReturnedAccountTxs = async (
   accountTxs: Array<{ accountId: string; tx: AccountTx }>,
 ): Promise<void> => {
   for (const { accountId, tx } of accountTxs) {
-    const account = state.accounts.get(accountId);
-    if (tx.type === 'cross_swap_fill_ack' && !account?.state.swapOffers?.has(tx.data.offerId)) {
+    const visible = state.accounts.get(accountId);
+    if (tx.type === 'cross_swap_fill_ack' && !visible?.state.swapOffers?.has(tx.data.offerId)) {
       const routed = buildCrossJurisdictionFillNoticeOutput(state, accountId, tx);
       if (!routed) {
         if (ownsSourceHubRouteForFillAck(state, tx)) {
@@ -59,7 +60,7 @@ const applyReturnedAccountTxs = async (
             state,
             accountId,
             tx,
-            account ? 'source_offer_not_committed' : 'source_account_not_committed',
+            visible ? 'source_offer_not_committed' : 'source_account_not_committed',
           );
           continue;
         }
@@ -74,7 +75,7 @@ const applyReturnedAccountTxs = async (
       });
       continue;
     }
-    if (!account) {
+    if (!visible) {
       if (tx.type === 'cross_swap_fill_ack') {
         throw haltRuntimeFailure("CROSS_J_FILL_ACK_ACCOUNT_MISSING", `CROSS_J_FILL_ACK_ACCOUNT_MISSING: account=${accountId} ` +
           `offer=${tx.data.offerId} entity=${state.entityId}`);
@@ -89,13 +90,20 @@ const applyReturnedAccountTxs = async (
     // catches both ordinary commands issued after a freeze and a certified J
     // range containing AccountSettled before DisputeStarted. Never reintroduce
     // work after the canonical Account policy has closed the proposal lane.
-    if (shouldSuppressReturnedAccountTx(account)) {
+    if (shouldSuppressReturnedAccountTx(visible)) {
       entityLog.info('account_tx.suppressed_non_active', {
         account: shortId(accountId, 8),
-        status: account.status,
+        status: visible.status,
         tx: tx.type,
       });
       continue;
+    }
+    const account = getEntityAccountForWrite(state.accounts, accountId);
+    if (!account) {
+      throw haltRuntimeFailure(
+        'ACCOUNT_TX_WRITE_ACCOUNT_MISSING',
+        `ACCOUNT_TX_WRITE_ACCOUNT_MISSING: account=${accountId} entity=${state.entityId}`,
+      );
     }
     const admission = await applyAccountInput(
       context.accountConsensusContext,

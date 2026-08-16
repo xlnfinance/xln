@@ -11,14 +11,16 @@ import { compareStableText } from '../../protocol/serialization';
 import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../../protocol/state/radix-merkle';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 import { assertAccountJClaimAccumulatorState } from '../j-claims/j-claim-accumulator';
-import {
-  computeAccountMapCommitment,
-  type AccountMapCommitmentTiming,
-} from './map-commitment';
 import { createStructuredLogger } from '../../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../../infra/performance/runtime-flags';
 import { getPerfMs } from '../../infra/time';
 import { settlementWorkspaceWithoutHankos } from '../settlement/witness-projection';
+import {
+  requirePersistentAccountStateMap,
+  type AccountStateCollection,
+  type AccountStateMapKey,
+  type AccountStateMapNamespace,
+} from '../state/persistent-state-map';
 
 const accountRootLog = createStructuredLogger('account.state-root');
 
@@ -52,6 +54,12 @@ export type AccountStateRootTiming = {
   };
   mapMs?: Record<string, number>;
   mapStatus?: Record<string, AccountMapCommitmentTiming>;
+};
+
+export type AccountMapCommitmentTiming = {
+  mode: 'persistent' | 'cold-oracle';
+  entries: number;
+  dirtyKeys: 0;
 };
 
 let accountStateRootDebugRecorder: ((record: AccountStateRootDebugRecord) => void) | null = null;
@@ -301,12 +309,23 @@ const accountStateRootEntries = (
   mapStatuses?: Record<string, AccountMapCommitmentTiming>,
 ): ReadonlyArray<readonly [path: string, value: unknown]> => {
   const domain = normalizeAccountStateDomain(account.domain);
-  const mapRoot = (namespace: Parameters<typeof computeAccountMapCommitment>[1]): string => {
+  const mapRoot = <K extends AccountStateMapKey, V>(
+    namespace: AccountStateMapNamespace,
+    map: AccountStateCollection<K, V> | undefined,
+  ): string => {
     const startedAt = mapTimings ? getPerfMs() : 0;
-    const status = mapStatuses ? {} as AccountMapCommitmentTiming : undefined;
-    const root = computeAccountMapCommitment(account, namespace, encodeAccountStateValue, cold, status);
+    const persistent = map === undefined
+      ? undefined
+      : requirePersistentAccountStateMap(map, namespace);
+    const root = persistent === undefined
+      ? EMPTY_ACCOUNT_STATE_ROOT
+      : cold ? persistent.coldRootHash() : persistent.rootHash();
     if (mapTimings) mapTimings[namespace] = getPerfMs() - startedAt;
-    if (status && mapStatuses) mapStatuses[namespace] = status;
+    if (mapStatuses) mapStatuses[namespace] = {
+      mode: cold ? 'cold-oracle' : 'persistent',
+      entries: map?.size ?? 0,
+      dirtyKeys: 0,
+    };
     return root;
   };
   return [
@@ -318,16 +337,16 @@ const accountStateRootEntries = (
     watchSeed: account.watchSeed.toLowerCase(),
     }],
     ['financial', {
-    deltasRoot: mapRoot('deltas'),
+    deltasRoot: mapRoot('deltas', account.deltas),
     jNonce: account.jNonce,
     disputeConfig: account.disputeConfig,
     }],
     ['commitments', {
-    locksRoot: mapRoot('locks'),
-    pullsRoot: mapRoot('pulls'),
-    swapOffersRoot: mapRoot('swapOffers'),
-    subcontractsRoot: mapRoot('subcontracts'),
-    lendingIntentsRoot: mapRoot('lendingIntents'),
+    locksRoot: mapRoot('locks', account.locks),
+    pullsRoot: mapRoot('pulls', account.pulls),
+    swapOffersRoot: mapRoot('swapOffers', account.swapOffers),
+    subcontractsRoot: mapRoot('subcontracts', account.subcontracts),
+    lendingIntentsRoot: mapRoot('lendingIntents', account.lendingIntents),
     // Bind every settlement decision, amount, nonce and signed target. Exact
     // Hanko bytes are excluded because different valid threshold subsets can
     // authorize the same target; each witness is verified before application.
@@ -339,9 +358,9 @@ const accountStateRootEntries = (
     rightPendingJClaims: assertAccountJClaimAccumulatorState(account.rightPendingJClaims),
     }],
     ['rebalance', {
-    requestedRebalance: account.requestedRebalance,
-    requestedRebalanceFeeState: account.requestedRebalanceFeeState,
-    rebalanceFeePolicies: account.rebalanceFeePolicies,
+    requestedRebalanceRoot: mapRoot('requestedRebalance', account.requestedRebalance),
+    requestedRebalanceFeeStateRoot: mapRoot('requestedRebalanceFeeState', account.requestedRebalanceFeeState),
+    rebalanceFeePoliciesRoot: mapRoot('rebalanceFeePolicies', account.rebalanceFeePolicies),
     }],
   ] as const satisfies ReadonlyArray<readonly [path: string, value: unknown]>;
 };
@@ -368,18 +387,34 @@ export const computeAccountStateSectionHashesCold = (
 const accountCommitmentSectionDetail = (
   account: AccountState,
   cold: boolean,
-): AccountCommitmentSectionDetail => ({
-  locksRoot: computeAccountMapCommitment(account, 'locks', encodeAccountStateValue, cold),
-  pullsRoot: computeAccountMapCommitment(account, 'pulls', encodeAccountStateValue, cold),
-  swapOffersRoot: computeAccountMapCommitment(account, 'swapOffers', encodeAccountStateValue, cold),
-  subcontractsRoot: computeAccountMapCommitment(account, 'subcontracts', encodeAccountStateValue, cold),
-  lendingIntentsRoot: computeAccountMapCommitment(account, 'lendingIntents', encodeAccountStateValue, cold),
+): AccountCommitmentSectionDetail => {
+  const root = <K extends number | string, V>(
+    namespace: 'locks' | 'pulls' | 'swapOffers' | 'subcontracts' | 'lendingIntents',
+    map: AccountStateCollection<K, V> | undefined,
+  ): string => {
+    if (map === undefined) return EMPTY_ACCOUNT_STATE_ROOT;
+    const persistent = requirePersistentAccountStateMap(map, namespace);
+    return cold ? persistent.coldRootHash() : persistent.rootHash();
+  };
+  return {
+  locksRoot: root('locks', account.locks),
+  pullsRoot: account.pulls === undefined
+    ? EMPTY_ACCOUNT_STATE_ROOT
+    : root('pulls', account.pulls),
+  swapOffersRoot: root('swapOffers', account.swapOffers),
+  subcontractsRoot: account.subcontracts === undefined
+    ? EMPTY_ACCOUNT_STATE_ROOT
+    : root('subcontracts', account.subcontracts),
+  lendingIntentsRoot: account.lendingIntents === undefined
+    ? EMPTY_ACCOUNT_STATE_ROOT
+    : root('lendingIntents', account.lendingIntents),
   settlementWorkspaceHash: account.settlementWorkspace === undefined
     ? null
     : computeIntegrityDigest(encodeAccountStateValue(
         settlementWorkspaceWithoutHankos(account.settlementWorkspace),
       )),
-});
+  };
+};
 
 /** Exact per-map breakdown emitted only after a commitment-section mismatch. */
 export const computeAccountCommitmentSectionDetail = (
@@ -444,13 +479,9 @@ export const computeAccountStateRootCold = (account: AccountState): string => {
   ).root;
 };
 
-const pendingWithdrawalOverlayState = (
+const pendingWithdrawalOverlayRoot = (
   withdrawals: AccountReplica['pendingWithdrawals'],
-): Map<string, Omit<AccountReplica['pendingWithdrawals'] extends Map<string, infer Entry> ? Entry : never, 'signature'>> =>
-  new Map(Array.from(withdrawals.entries()).map(([requestId, withdrawal]) => {
-    const { signature: _signature, ...state } = withdrawal;
-    return [requestId, state];
-  }));
+): string => requirePersistentAccountStateMap(withdrawals, 'pendingWithdrawals').rootHash();
 
 const accountEntityOverlayState = (account: AccountReplica): unknown => ({
   status: account.status,
@@ -458,8 +489,22 @@ const accountEntityOverlayState = (account: AccountReplica): unknown => ({
   settlementWorkspace: settlementWorkspaceWithoutHankos(account.state.settlementWorkspace),
   activeDispute: account.activeDispute,
   pendingForwards: account.pendingForwards,
-  pendingWithdrawals: pendingWithdrawalOverlayState(account.pendingWithdrawals),
-  shadow: account.shadow,
+  pendingWithdrawalsRoot: pendingWithdrawalOverlayRoot(account.pendingWithdrawals),
+  shadow: {
+    rebalance: {
+      policyRoot: requirePersistentAccountStateMap(
+        account.shadow.rebalance.policy,
+        'rebalanceShadowPolicy',
+      ).rootHash(),
+      submittedAtByTokenRoot: requirePersistentAccountStateMap(
+        account.shadow.rebalance.submittedAtByToken,
+        'rebalanceShadowSubmitted',
+      ).rootHash(),
+      activeQuote: account.shadow.rebalance.activeQuote,
+      pendingRequest: account.shadow.rebalance.pendingRequest,
+    },
+    rejectedFrameEvidence: account.shadow.rejectedFrameEvidence,
+  },
 });
 
 export const computeAccountShadowRoot = (

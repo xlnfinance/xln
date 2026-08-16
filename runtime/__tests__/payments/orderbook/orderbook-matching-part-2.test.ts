@@ -3,8 +3,9 @@ import { describe, expect, test } from 'bun:test';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 
 import { createBook, applyCommand, getBestAsk, getBestBid, getBookOrder, getBookSideLevels } from '../../../orderbook/core';
+import { commitBookOverlay, setBookPageTree } from '../../../orderbook/book-overlay';
 
-import { getStaticSwapTokenDimensions, getSwapLotScale, ORDERBOOK_PRICE_SCALE, quoteAmountAtPrice, SWAP_LOT_SCALE } from '../../../orderbook/types';
+import { getStaticSwapTokenDimensions, getSwapExactQuoteLotMultipleAtPriceForDimensions, getSwapLotScale, ORDERBOOK_PRICE_SCALE, quoteAmountAtPrice, SWAP_LOT_SCALE } from '../../../orderbook/types';
 
 import { removeCrossJurisdictionBookOrderByRouteId } from '../../../orderbook/cross-j';
 
@@ -31,7 +32,6 @@ import type { AccountReplica, AccountTx, SwapOffer } from '../../../types/accoun
 import type { EntityCandidateEffect } from '../../../entity/types';
 
 import { createDefaultDelta } from '../../../account/state/delta';
-import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 
 const TESTNET_STACK = `stack:31337:0x${'11'.repeat(20)}`;
 
@@ -57,6 +57,10 @@ const MAKER_ENTITY = `0x${'ad'.repeat(32)}`;
 const TAKER_ENTITY = `0x${'ae'.repeat(32)}`;
 const CROSSED_ENTITY = `0x${'af'.repeat(32)}`;
 const orderKey = (entityId: string, offerId: string): string => `${entityId}:${offerId}`;
+const exactWethBaseAmount = (priceTicks: bigint, minimumLots: bigint): bigint => {
+  const multiple = getSwapExactQuoteLotMultipleAtPriceForDimensions(18, 6, priceTicks);
+  return ((minimumLots + multiple - 1n) / multiple) * multiple * SWAP_LOT_SCALE;
+};
 
 const withStaticDimensions = <T extends { giveTokenId: number; wantTokenId: number }>(offer: T) => ({
   ...getStaticSwapTokenDimensions(offer.giveTokenId, offer.wantTokenId),
@@ -120,8 +124,6 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
     },
     status: 'active',
     mempool: [],
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -145,7 +147,6 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
     pendingWithdrawals: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };
-  for (const offer of offers) recordSwapOfferLifecycle(account, offer);
   return account;
 }
 
@@ -387,7 +388,10 @@ describe('orderbook matching execution mapping', () => {
     expect(admission?.route.status).toBe('partially_filled');
     expect(admission?.route.filledSourceAmount).toBe(filledSourceAmount);
     expect(admission?.route.filledTargetAmount).toBe(filledTargetAmount);
-    expect(getBookOrder(book, namespacedOrderId)?.qtyLots).toBe(30_000n);
+    const progressedBook = entityState.orderbookExt.books.get(pairId);
+    expect(progressedBook).toBeDefined();
+    expect(getBookOrder(progressedBook!, namespacedOrderId)?.qtyLots).toBe(30_000n);
+    expect(getBookOrder(book, namespacedOrderId)?.qtyLots).toBe(40_000n);
     const normalizedRemainder = buildCrossMarketOfferFromBookOrder(entityState, namespacedOrderId);
     expect(normalizedRemainder?.offer.maxFee).toBe(0n);
     expect(normalizedRemainder?.offer.minNetReceive).toBe(targetTotal - filledTargetAmount);
@@ -426,7 +430,10 @@ describe('orderbook matching execution mapping', () => {
     expect(removeCrossJurisdictionBookOrderByRouteId(entityState, MAKER_ENTITY, 'maker-cross-progress', [])).toBe(
       true,
     );
-    expect(getBookOrder(book, namespacedOrderId)).toBeNull();
+    const removedBook = entityState.orderbookExt.books.get(pairId);
+    expect(removedBook).toBeDefined();
+    expect(getBookOrder(removedBook!, namespacedOrderId)).toBeNull();
+    expect(getBookOrder(book, namespacedOrderId)).not.toBeNull();
 
     const halfSourceAmount = 20_000n * lot;
     const halfTargetAmount = quoteAmountAtPrice(2, 1, halfSourceAmount, 25_000_000n);
@@ -444,7 +451,10 @@ describe('orderbook matching execution mapping', () => {
       reason: 'committed_taker_remainder',
     });
     expect(materialized).toBe(true);
-    expect(getBookOrder(book, namespacedOrderId)?.qtyLots).toBe(20_000n);
+    const rematerializedBook = entityState.orderbookExt.books.get(pairId);
+    expect(rematerializedBook).toBeDefined();
+    expect(getBookOrder(rematerializedBook!, namespacedOrderId)?.qtyLots).toBe(20_000n);
+    expect(getBookOrder(book, namespacedOrderId)?.qtyLots).toBe(40_000n);
   });
 
   test('suspends a cross-j order while its partial fill ack is pending', () => {
@@ -930,7 +940,11 @@ describe('orderbook matching execution mapping', () => {
     const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
     expect(getBookOrder(book, pendingOrderId)).not.toBeNull();
-    expect(getBookOrder(book, committedOrderId)).toBeNull();
+    expect(getBookOrder(book, committedOrderId)).not.toBeNull();
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    expect(finalBook).toBeDefined();
+    expect(getBookOrder(finalBook!, pendingOrderId)).not.toBeNull();
+    expect(getBookOrder(finalBook!, committedOrderId)).toBeNull();
     expect(result.crossJurisdictionFills.map(fill => fill.offerId).sort()).toEqual([
       'maker-cross-committed',
       'taker-cross',
@@ -1605,6 +1619,7 @@ describe('orderbook matching execution mapping', () => {
       timeInForce: 0,
       priceTicks: 25_000_100n,
     };
+    const takerAmount = exactWethBaseAmount(24_999_900n, 1n);
     const takerBid = {
       offerId: 'taker-bid',
       makerIsLeft: false,
@@ -1613,9 +1628,9 @@ describe('orderbook matching execution mapping', () => {
       accountId: TAKER_ACCOUNT,
       createdHeight: 3,
       giveTokenId: 1,
-      giveAmount: (lot * 24_999_900n) / 10_000n,
+      giveAmount: (takerAmount * 24_999_900n) / 10_000n,
       wantTokenId: 2,
-      wantAmount: lot,
+      wantAmount: takerAmount,
       timeInForce: 0,
       priceTicks: 24_999_900n,
     };
@@ -1716,6 +1731,7 @@ describe('orderbook matching execution mapping', () => {
     });
     const makerOfferA = makeAskOffer('maker-ask-a', 'maker-a', firstAskPriceTicks);
     const makerOfferB = makeAskOffer('maker-ask-b', 'maker-b', secondAskPriceTicks);
+    const takerAmount = exactWethBaseAmount(bidPriceTicks, 1n);
     const takerOffer = {
       offerId: 'taker-bid',
       makerIsLeft: false,
@@ -1724,9 +1740,9 @@ describe('orderbook matching execution mapping', () => {
       accountId: TAKER_ACCOUNT,
       createdHeight: 2,
       giveTokenId: 1,
-      giveAmount: (lot * bidPriceTicks) / 10_000n,
+      giveAmount: (takerAmount * bidPriceTicks) / 10_000n,
       wantTokenId: 2,
-      wantAmount: lot,
+      wantAmount: takerAmount,
       timeInForce: 0,
       priceTicks: bidPriceTicks,
     };
@@ -1892,6 +1908,7 @@ describe('orderbook matching execution mapping', () => {
       } as any,
     } as any;
 
+    const anchorAmount = exactWethBaseAmount(anchorPriceTicks, 210n);
     const anchorOffer = {
       offerId: 'offer-a',
       makerIsLeft: false,
@@ -1900,9 +1917,9 @@ describe('orderbook matching execution mapping', () => {
       accountId: ALICE_ACCOUNT,
       createdHeight: 1,
       giveTokenId: 2,
-      giveAmount: 210n * SWAP_LOT_SCALE,
+      giveAmount: anchorAmount,
       wantTokenId: 1,
-      wantAmount: (210n * SWAP_LOT_SCALE * anchorPriceTicks) / 10_000n,
+      wantAmount: (anchorAmount * anchorPriceTicks) / 10_000n,
       timeInForce: 0,
       priceTicks: anchorPriceTicks,
     };
@@ -1915,6 +1932,7 @@ describe('orderbook matching execution mapping', () => {
 
     entityState.orderbookExt.books = new Map([['1/2', initialBook]]);
 
+    const overflowAmount = exactWethBaseAmount(overflowPriceTicks, 960n);
     const overflowOffer = {
       offerId: 'offer-b',
       makerIsLeft: false,
@@ -1923,9 +1941,9 @@ describe('orderbook matching execution mapping', () => {
       accountId: ALICE_ACCOUNT,
       createdHeight: 2,
       giveTokenId: 2,
-      giveAmount: 960n * SWAP_LOT_SCALE,
+      giveAmount: overflowAmount,
       wantTokenId: 1,
-      wantAmount: (960n * SWAP_LOT_SCALE * overflowPriceTicks) / 10_000n,
+      wantAmount: (overflowAmount * overflowPriceTicks) / 10_000n,
       timeInForce: 0,
       priceTicks: overflowPriceTicks,
     };
@@ -2039,9 +2057,13 @@ describe('orderbook matching execution mapping', () => {
       priceTicks: 10_000n,
       qtyLots: 1n,
     }).state;
-    const corruptedOrder = corruptedBook.orders.get(MAKER_ACCOUNT + ':maker-ask');
-    expect(corruptedOrder).toBeDefined();
-    corruptedOrder!.bucketId = 999_999n;
+    const pageKey = { priceTicks: 10_000n, pageSequence: 0 };
+    const page = corruptedBook.askPages.get(pageKey);
+    expect(page).toBeDefined();
+    if (!page || !page.slots[0]) throw new Error('expected canonical ask page');
+    const slots = [...page.slots];
+    slots[0] = { ...page.slots[0], orderId: 'corrupt-page-order' };
+    setBookPageTree(corruptedBook, 1, corruptedBook.askPages.updated(pageKey, { ...page, slots }));
 
     const entityState = {
       entityId: HUB_ENTITY,
@@ -2079,7 +2101,7 @@ describe('orderbook matching execution mapping', () => {
     );
   });
 
-  test('processOrderbookCancels queues account-level cancel once for an active orderbook order', () => {
+  test('processOrderbookCancels merges two same-frame cancels into one pair overlay', () => {
     const lot = SWAP_LOT_SCALE;
     const offer = {
       offerId: 'offer-cancel',
@@ -2095,14 +2117,15 @@ describe('orderbook matching execution mapping', () => {
       timeInForce: 0,
       priceTicks: 1000n,
     };
+    const secondOffer = { ...offer, offerId: 'offer-cancel-2', priceTicks: 2000n };
 
-    const aliceAccount = makeAccountMachine(offer as any);
+    const aliceAccount = makeAccountMachine([offer as any, secondOffer as any]);
     let book = createBook({
       bucketWidthTicks: 10_000n,
       maxOrders: 10_000,
       stpPolicy: 1,
     });
-    book = applyCommand(book, {
+    book = commitBookOverlay(applyCommand(book, {
       kind: 0,
       ownerId: ALICE_ACCOUNT,
       orderId: ALICE_ACCOUNT + ':offer-cancel',
@@ -2111,7 +2134,17 @@ describe('orderbook matching execution mapping', () => {
       postOnly: false,
       priceTicks: 1000n,
       qtyLots: 1n,
-    }).state;
+    }).state);
+    book = commitBookOverlay(applyCommand(book, {
+      kind: 0,
+      ownerId: ALICE_ACCOUNT,
+      orderId: ALICE_ACCOUNT + ':offer-cancel-2',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 2000n,
+      qtyLots: 1n,
+    }).state);
 
     const entityState = {
       entityId: HUB_ENTITY,
@@ -2132,18 +2165,27 @@ describe('orderbook matching execution mapping', () => {
           supportedPairs: ['1/2'],
         },
         books: new Map([['1/2', book]]),
-        orderPairs: new Map(),
+        orderPairs: new Map([
+          [ALICE_ACCOUNT + ':offer-cancel', ['1/2']],
+          [ALICE_ACCOUNT + ':offer-cancel-2', ['1/2']],
+        ]),
         pairDimensions: new Map(),
         referrals: new Map(),
       } as any,
     } as any;
 
-    const result = processOrderbookCancels(entityState, [{ accountId: ALICE_ACCOUNT, offerId: 'offer-cancel' }]);
-    expect(result.accountTxs).toHaveLength(1);
+    const result = processOrderbookCancels(entityState, [
+      { accountId: ALICE_ACCOUNT, offerId: 'offer-cancel' },
+      { accountId: ALICE_ACCOUNT, offerId: 'offer-cancel-2' },
+    ]);
+    expect(result.accountTxs).toHaveLength(2);
     expect(result.accountTxs[0]!.accountId).toBe(ALICE_ACCOUNT);
     expect(result.accountTxs[0]!.tx.type).toBe('swap_resolve');
     expect(result.accountTxs[0]!.tx.data.offerId).toBe('offer-cancel');
     expect(result.accountTxs[0]!.tx.data.cancelRemainder).toBe(true);
+    expect(result.bookUpdates).toHaveLength(1);
+    expect(getBookOrder(result.bookUpdates[0]!.book, ALICE_ACCOUNT + ':offer-cancel')).toBeNull();
+    expect(getBookOrder(result.bookUpdates[0]!.book, ALICE_ACCOUNT + ':offer-cancel-2')).toBeNull();
   });
 
   test('processOrderbookCancels does not duplicate account-level cancel already pending in frame', () => {

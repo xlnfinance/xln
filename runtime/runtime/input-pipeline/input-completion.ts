@@ -1,9 +1,9 @@
 import { safeStringify } from '../../protocol/serialization';
-import type { EnvSnapshot, RuntimeInput, RuntimeReplica } from '../types';
+import type { RuntimeInput, RuntimeReplica } from '../types';
 import type { RuntimeFrame } from '../../storage/types';
 
 type RuntimeInputCommitRecord =
-  | Pick<EnvSnapshot, 'state' | 'runtimeInput'>
+  | { state: { height: number }; runtimeInput: RuntimeInput }
   | { height: number; runtimeInput: RuntimeInput };
 
 const committedFrameHeight = (frame: RuntimeInputCommitRecord): number =>
@@ -152,10 +152,6 @@ export const waitForRuntimeInputCommitted = async (input: {
   const pollMs = input.pollMs ?? 25;
   const startedAt = Date.now();
   while (Date.now() - startedAt <= timeoutMs) {
-    const inMemory = findCommittedRuntimeInputHeight(
-      input.env.history ?? [], input.submitted, input.afterHeight,
-    );
-    if (inMemory !== null) return inMemory;
     const throughHeight = Math.max(input.afterHeight, Math.floor(Number(input.env.state.height || 0)));
     const persisted = await findPersistedRuntimeInputHeight(
       input.readPersistedFrame, input.submitted, input.afterHeight, throughHeight,

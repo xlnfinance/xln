@@ -3,6 +3,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
+import { isPersistentAccountStateMap } from '../../account/state/persistent-state-map';
 
 export { requireBoundaryInteger, requireBoundaryRecord, requireExactBoundaryKeys };
 
@@ -41,9 +42,9 @@ export const requireStorageArray = <T = unknown>(value: unknown, code: string): 
 export const requireStorageMap = <K = unknown, V = unknown>(
   value: unknown,
   code: string,
-): Map<K, V> => {
-  if (!(value instanceof Map)) throw new Error(code);
-  return value as Map<K, V>;
+): ReadonlyMap<K, V> => {
+  if (!(value instanceof Map) && !isPersistentAccountStateMap(value)) throw new Error(code);
+  return value as ReadonlyMap<K, V>;
 };
 
 export const requireStorageBoolean = (value: unknown, code: string): boolean => {

@@ -15,6 +15,7 @@ import {
 import {
   commitEntityAccountCandidate,
   EntityAccountCandidateMap,
+  getEntityCandidateValueForWrite,
 } from '../../../entity/state/candidate-map';
 import {
   computeCanonicalEntityConsensusStateHash,
@@ -24,6 +25,7 @@ import {
   applyRuntimeOwnedEntityFrame,
 } from '../../../entity/consensus/frame/application';
 import { materializeEntityInfraContext } from '../../../entity/consensus/proposal/infra-context';
+import { prepareEntityInputIngress } from '../../../entity/consensus/input/ingress';
 import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
 import { EntityCandidateMap } from '../../../entity/state/candidate-map';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
@@ -33,11 +35,27 @@ import {
   createOrderbookExtState,
 } from '../../../orderbook';
 import { buildCanonicalEntityReplicaSnapshot } from '../../../storage/wal/snapshot';
+import { encodeBuffer } from '../../../storage/codec/codec';
 import { validateConsensusConfig } from '../../../entity/consensus/config-validation';
 import { validateEntityReplica } from '../../../entity/replica/replica-validation';
 import { createEmptyEnv } from '../../../runtime';
 import type { AccountReplica } from '../../../types/account';
 import type { EntityState } from '../../../entity/types';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+
+const TEST_RIGHT_ENTITY_ID = `0x${'bb'.repeat(32)}`;
+
+const putCommittedAccount = (
+  state: EntityState,
+  counterpartyId: string,
+  account: AccountReplica,
+): void => {
+  if (!(state.accounts instanceof PersistentEntityAccountMap)) {
+    throw new Error('TEST_COMMITTED_ACCOUNT_MAP_REQUIRED');
+  }
+  state.accounts = state.accounts.updated(counterpartyId, account);
+};
 
 const makeCrossJurisdictionRoute = () => ({
   orderId: 'order-1',
@@ -167,8 +185,6 @@ const makeCanonicalAccountFixture = () => ({
   proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 0 },
   proofBody: { tokenIds: [1], deltas: [0n] },
   pendingWithdrawals: new Map(),
-  swapOrderHistory: new Map(),
-  swapClosedOrders: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   disputeProofBodiesByHash: {
     proof: makeProofBodyStruct(),
@@ -191,6 +207,17 @@ const makeCanonicalAccountFixture = () => ({
   uncloneable: () => undefined,
 });
 
+const bindAccountParticipants = (
+  account: ReturnType<typeof makeCanonicalAccountFixture>,
+  localEntityId: string,
+  counterpartyId: string,
+): void => {
+  account.state.leftEntity = localEntityId;
+  account.state.rightEntity = counterpartyId;
+  account.proofHeader.fromEntity = localEntityId;
+  account.proofHeader.toEntity = counterpartyId;
+};
+
 const makeProjectionReplica = () => ({
   entityId: `0x${'aa'.repeat(32)}`,
   signerId: `0x${'11'.repeat(20)}`,
@@ -210,10 +237,12 @@ const makeProjectionReplica = () => ({
       shares: { [`0x${'11'.repeat(20)}`]: 1n },
     },
     reserves: new Map(),
-    accounts: new Map(),
+    accounts: PersistentEntityAccountMap.empty(
+      `0x${'aa'.repeat(32)}`,
+      computeEntityAccountValueHash,
+    ),
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: { name: 'Projection', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
@@ -229,9 +258,8 @@ describe('state cloning', () => {
     const accountFixture = makeCanonicalAccountFixture();
     delete accountFixture.uncloneable;
     const account = accountFixture as unknown as AccountReplica;
-    account.state.leftEntity = source.entityId;
-    account.state.rightEntity = counterpartyId;
-    source.accounts.set(counterpartyId, account);
+    bindAccountParticipants(accountFixture, source.entityId, counterpartyId);
+    putCommittedAccount(source, counterpartyId, account);
 
     const candidate = createEntityFrameCandidateState(source);
     expect(candidate.accounts).toBeInstanceOf(EntityAccountCandidateMap);
@@ -256,9 +284,8 @@ describe('state cloning', () => {
       const accountFixture = makeCanonicalAccountFixture();
       delete accountFixture.uncloneable;
       const account = accountFixture as unknown as AccountReplica;
-      account.state.leftEntity = source.entityId;
-      account.state.rightEntity = counterpartyId;
-      source.accounts.set(counterpartyId, account);
+      bindAccountParticipants(accountFixture, source.entityId, counterpartyId);
+      putCommittedAccount(source, counterpartyId, account);
     }
 
     const sourceRoot = computeCanonicalEntityConsensusStateHashCold(source);
@@ -283,9 +310,8 @@ describe('state cloning', () => {
     const accountFixture = makeCanonicalAccountFixture();
     delete accountFixture.uncloneable;
     const account = accountFixture as unknown as AccountReplica;
-    account.state.leftEntity = source.entityId;
-    account.state.rightEntity = counterpartyId;
-    source.accounts.set(counterpartyId, account);
+    bindAccountParticipants(accountFixture, source.entityId, counterpartyId);
+    putCommittedAccount(source, counterpartyId, account);
 
     const fullClone = cloneTrustedEntityState(source);
     const candidate = createEntityFrameCandidateState(source);
@@ -302,8 +328,9 @@ describe('state cloning', () => {
     expect(source.accounts.get(counterpartyId)?.state.deltas.get(1)?.offdelta).toBe(0n);
 
     candidate.accounts = commitEntityAccountCandidate(candidate.accounts);
-    expect(candidate.accounts).toBe(source.accounts);
-    expect(source.accounts.get(counterpartyId)?.state.deltas.get(1)?.offdelta).toBe(25n);
+    expect(candidate.accounts).not.toBe(source.accounts);
+    expect(candidate.accounts.get(counterpartyId)?.state.deltas.get(1)?.offdelta).toBe(25n);
+    expect(source.accounts.get(counterpartyId)?.state.deltas.get(1)?.offdelta).toBe(0n);
   });
 
   test('a planner flattens a prior candidate without linking commit to certified state', () => {
@@ -312,9 +339,8 @@ describe('state cloning', () => {
     const accountFixture = makeCanonicalAccountFixture();
     delete accountFixture.uncloneable;
     const account = accountFixture as unknown as AccountReplica;
-    account.state.leftEntity = source.entityId;
-    account.state.rightEntity = counterpartyId;
-    source.accounts.set(counterpartyId, account);
+    bindAccountParticipants(accountFixture, source.entityId, counterpartyId);
+    putCommittedAccount(source, counterpartyId, account);
 
     const first = createEntityFrameCandidateState(source);
     first.accounts.get(counterpartyId)!.state.deltas.get(1)!.collateral = 11n;
@@ -368,9 +394,11 @@ describe('state cloning', () => {
     });
 
     const addOrder = (state: EntityState): void => {
-      const book = state.orderbookExt?.books.get(firstPair);
+      const books = state.orderbookExt?.books;
+      if (!books) throw new Error('TEST_ENTITY_CANDIDATE_BOOKS_MISSING');
+      const book = getEntityCandidateValueForWrite(books, firstPair);
       if (!book) throw new Error('TEST_ENTITY_CANDIDATE_BOOK_MISSING');
-      applyCommand(book, {
+      const applied = applyCommand(book, {
         kind: 0,
         ownerId: source.entityId,
         orderId: 'projection-order',
@@ -380,6 +408,7 @@ describe('state cloning', () => {
         priceTicks: 1_000n,
         qtyLots: 10n,
       });
+      books.set(firstPair, applied.state);
     };
     addOrder(fullClone);
     addOrder(candidate);
@@ -397,12 +426,13 @@ describe('state cloning', () => {
       .toBe(computeCanonicalEntityConsensusStateHash(fullClone));
 
     commitEntityFrameCandidateState(candidate);
-    expect(candidate.orderbookExt?.books).toBe(source.orderbookExt.books);
-    expect(source.orderbookExt.books.get(firstPair)?.orders.size).toBe(1);
+    expect(candidate.orderbookExt?.books).not.toBe(source.orderbookExt.books);
+    expect(candidate.orderbookExt?.books.get(firstPair)?.orders.size).toBe(1);
+    expect(source.orderbookExt.books.get(firstPair)?.orders.size).toBe(0);
     expect(source.orderbookExt.books.get(secondPair)?.orders.size).toBe(0);
   });
 
-  test('single-signer Runtime ownership skips the Entity candidate shell', async () => {
+  test('single-signer Runtime ownership preserves the certified Entity root', async () => {
     const env = createEmptyEnv('single-signer owned Entity frame');
     env.state.timestamp = 2;
     const isolatedSource = makeProjectionReplica().state as EntityState;
@@ -418,7 +448,7 @@ describe('state cloning', () => {
       ...makeProjectionReplica(),
       state: ownedSource,
       isProposer: true,
-    }, []);
+    }, [], { usePersistedReplayContext: true });
     const owned = await applyRuntimeOwnedEntityFrame(
       env,
       ownedSource,
@@ -429,9 +459,9 @@ describe('state cloning', () => {
 
     expect(isolatedSource.timestamp).toBe(1);
     expect(isolated.newState.accounts).toBeInstanceOf(EntityAccountCandidateMap);
-    expect(ownedSource.timestamp).toBe(env.state.timestamp);
-    expect(owned.newState.accounts).toBe(ownedSource.accounts);
-    expect(owned.newState.accounts).not.toBeInstanceOf(EntityAccountCandidateMap);
+    expect(ownedSource.timestamp).toBe(1);
+    expect(owned.newState.accounts).not.toBe(ownedSource.accounts);
+    expect(owned.newState.accounts).toBeInstanceOf(EntityAccountCandidateMap);
     expect(computeCanonicalEntityConsensusStateHash(owned.newState))
       .toBe(computeCanonicalEntityConsensusStateHash(isolated.newState));
   });
@@ -439,6 +469,22 @@ describe('state cloning', () => {
   test('trusted same-Runtime cascades do not reuse the external replay context', async () => {
     const env = createEmptyEnv('same-Runtime replay context isolation');
     const replica = makeProjectionReplica();
+    const input = {
+      entityId: replica.entityId,
+      signerId: replica.signerId,
+      entityTxs: [],
+    };
+    const externalIngress = prepareEntityInputIngress(env, replica, input, undefined, true);
+    const crossJurisdictionIngress = prepareEntityInputIngress(env, replica, input, 'cross-j', true);
+    const accountWorkIngress = prepareEntityInputIngress(env, replica, input, 'account-work', true);
+    if (!externalIngress.accepted || !crossJurisdictionIngress.accepted || !accountWorkIngress.accepted) {
+      throw new Error('TEST_ENTITY_INPUT_INGRESS_REJECTED');
+    }
+
+    expect(externalIngress.context.usePersistedReplayContext).toBe(true);
+    expect(crossJurisdictionIngress.context.usePersistedReplayContext).toBe(false);
+    expect(accountWorkIngress.context.usePersistedReplayContext).toBe(false);
+
     const persisted = await materializeEntityInfraContext(env, replica, [], {
       usePersistedReplayContext: false,
     });
@@ -448,11 +494,15 @@ describe('state cloning', () => {
     replica.state.height += 1;
     replica.state.prevFrameHash = `0x${'99'.repeat(32)}`;
 
+    const externalReplay = await materializeEntityInfraContext(env, replica, [], {
+      usePersistedReplayContext: true,
+    });
     const internal = await materializeEntityInfraContext(env, replica, [], {
       usePersistedReplayContext: false,
     });
 
     expect(persisted.height).toBe(1);
+    expect(externalReplay).toEqual(persisted);
     expect(internal.height).toBe(2);
     expect(internal).not.toEqual(persisted);
   });
@@ -482,10 +532,10 @@ describe('state cloning', () => {
 
   test('entity clone preserves aliased cross-j route carriers from original state', () => {
     const state = makeProjectionReplica().state as any;
-    state.entityId = 'left';
     const route = makeCrossJurisdictionRoute();
     const account = makeCanonicalAccountFixture() as any;
     delete account.uncloneable;
+    bindAccountParticipants(account, state.entityId, TEST_RIGHT_ENTITY_ID);
     account.state.swapOffers = new Map([[
       route.orderId,
       {
@@ -506,11 +556,11 @@ describe('state cloning', () => {
       },
     ]]);
     state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
-    state.accounts.set('right', account);
+    putCommittedAccount(state, TEST_RIGHT_ENTITY_ID, account);
 
     const cloned = cloneEntityState(state);
     const clonedRoute = cloned.crossJurisdictionSwaps!.get(route.orderId)!;
-    const clonedOfferRoute = cloned.accounts.get('right')!.state.swapOffers.get(route.orderId)!.crossJurisdiction!;
+    const clonedOfferRoute = cloned.accounts.get(TEST_RIGHT_ENTITY_ID)!.state.swapOffers.get(route.orderId)!.crossJurisdiction!;
 
     expect(clonedRoute).not.toBe(route);
     expect(clonedOfferRoute).not.toBe(route);
@@ -522,16 +572,16 @@ describe('state cloning', () => {
 
   test('rejects non-canonical and mismatched Account map keys at the Entity boundary', () => {
     const state = makeProjectionReplica().state as any;
-    state.entityId = 'left';
     const account = makeCanonicalAccountFixture() as any;
     delete account.uncloneable;
+    bindAccountParticipants(account, state.entityId, TEST_RIGHT_ENTITY_ID);
 
-    state.accounts = new Map([['RIGHT', account]]);
+    state.accounts = new Map([[TEST_RIGHT_ENTITY_ID.toUpperCase(), account]]);
     expect(() => cloneEntityState(state)).toThrow(
       'non-canonical counterparty key',
     );
 
-    state.accounts = new Map([['other', account]]);
+    state.accounts = new Map([[`0x${'cc'.repeat(32)}`, account]]);
     expect(() => cloneEntityState(state)).toThrow(
       'counterparty key does not match Account participants',
     );
@@ -702,11 +752,11 @@ describe('state cloning', () => {
       const account = makeCanonicalAccountFixture() as any;
       delete account.uncloneable;
       account.provider = { getBlockNumber: () => 1 };
-      replica.state.accounts.set('left', account);
+      putCommittedAccount(replica.state, TEST_RIGHT_ENTITY_ID, account);
       delete replica.state[absentField];
 
-      expect(() => buildCanonicalEntityReplicaSnapshot(replica))
-        .toThrow('ENTITY_STATE_STRUCTURED_CLONE_FAILED:path=$.accounts.<map-value:0>.provider.getBlockNumber');
+      expect(() => encodeBuffer(buildCanonicalEntityReplicaSnapshot(replica)))
+        .toThrow();
     }
   });
 

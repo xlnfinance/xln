@@ -10,6 +10,7 @@ import type {
   RebalanceRequestFeeState,
 } from './finance/rebalance';
 import type { AccountJClaimAccumulatorState, AccountJClaimProof } from './finance/account-j-claims';
+import type { AccountStateCollection } from '../account/state/persistent-state-map';
 
 // ═══════════════════════════════════════════════════════════════
 // HTLC (Hash Time-Locked Contracts)
@@ -82,37 +83,6 @@ export interface SwapOffer {
   crossJurisdiction?: CrossJurisdictionSwapRoute;
 }
 
-export interface SwapOrderResolveHistoryEntry {
-  fillRatio: number;
-  fillNumerator?: bigint;
-  fillDenominator?: bigint;
-  cancelRemainder: boolean;
-  height: number;
-  executionGiveAmount?: bigint;
-  executionWantAmount?: bigint;
-  feeTokenId?: number;
-  feeAmount?: bigint;
-  comment?: string;
-}
-
-export interface SwapOrderHistoryEntry {
-  offerId: string;
-  giveTokenId: number;
-  giveTokenDecimals: number;
-  giveAmount: bigint;
-  originalGiveAmount?: bigint;
-  wantTokenId: number;
-  wantTokenDecimals: number;
-  wantAmount: bigint;
-  originalWantAmount?: bigint;
-  priceTicks?: bigint;
-  createdHeight: number;
-  crossJurisdiction?: CrossJurisdictionSwapRoute;
-  cancelRequested: boolean;
-  lastUpdatedHeight: number;
-  resolves: SwapOrderResolveHistoryEntry[];
-}
-
 /**
  * HTLC Routing Context (replaces 2024 User.hashlockMap)
  * Tracks inbound/outbound hops for automatic secret propagation
@@ -170,7 +140,7 @@ interface AccountRejectedFrameEvidence {
   frameHanko: HankoString;
 }
 
-interface AccountSubcontract {
+export interface AccountSubcontract {
   transformerAddress: string;
   encodedBatch: string;
   allowances: Array<{
@@ -184,7 +154,7 @@ interface AccountSubcontract {
   rightArgumentsHash?: string;
 }
 
-type AccountLendingIntentKind =
+export type AccountLendingIntentKind =
   | 'fund'
   | 'borrow'
   | 'repay'
@@ -213,12 +183,12 @@ export interface AccountState {
   rightEntity: string;
   domain: AccountStateDomain;
   watchSeed: string;
-  deltas: Map<number, Delta>;
-  locks: Map<string, HtlcLock>;
-  swapOffers: Map<string, SwapOffer>;
-  pulls?: Map<string, PullCommitment>;
-  subcontracts?: Map<string, AccountSubcontract>;
-  lendingIntents?: Map<string, AccountLendingIntentKind>;
+  deltas: AccountStateCollection<number, Delta>;
+  locks: AccountStateCollection<string, HtlcLock>;
+  swapOffers: AccountStateCollection<string, SwapOffer>;
+  pulls?: AccountStateCollection<string, PullCommitment>;
+  subcontracts?: AccountStateCollection<string, AccountSubcontract>;
+  lendingIntents?: AccountStateCollection<string, AccountLendingIntentKind>;
   leftPendingJClaims: AccountJClaimAccumulatorState;
   rightPendingJClaims: AccountJClaimAccumulatorState;
   lastFinalizedJHeight: number;
@@ -228,9 +198,9 @@ export interface AccountState {
   };
   jNonce: number;
   settlementWorkspace?: SettlementWorkspace;
-  requestedRebalance: Map<number, bigint>;
-  requestedRebalanceFeeState: Map<number, RebalanceRequestFeeState>;
-  rebalanceFeePolicies?: Map<number, BilateralRebalanceFeePolicy>;
+  requestedRebalance: AccountStateCollection<number, bigint>;
+  requestedRebalanceFeeState: AccountStateCollection<number, RebalanceRequestFeeState>;
+  rebalanceFeePolicies?: AccountStateCollection<number, BilateralRebalanceFeePolicy>;
 }
 
 /**
@@ -257,15 +227,6 @@ export interface AccountReplica {
 
   mempool: AccountTx[]; // Unprocessed account transactions
   currentFrame: AccountFrame; // Latest finalized bilateral frame; older frames live in the Runtime WAL and history views.
-
-  // Durable local lifecycle log for swap UI/history.
-  // Keep this in account state so closed/partial orders do not disappear
-  // when the short bilateral frameHistory ring buffer prunes old frames.
-  swapOrderHistory: Map<string, SwapOrderHistoryEntry>;
-  // Terminal swap orders (filled/canceled/closed) used by the UI closed-orders view.
-  // Keep open working state and terminal history separate so the UI does not infer
-  // closed rows by subtracting live offers from a broad lifecycle store.
-  swapClosedOrders: Map<string, SwapOrderHistoryEntry>;
 
   // Frame-based consensus (like old_src Channel, consistent with entity frames)
   currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
@@ -396,7 +357,7 @@ export interface AccountReplica {
   }>;
 
   // Withdrawal tracking (Phase 2: C→R)
-  pendingWithdrawals: Map<string, {
+  pendingWithdrawals: AccountStateCollection<string, {
     requestId: string;
     tokenId: number;
     amount: bigint;
@@ -971,8 +932,8 @@ export type AccountTx =
         executionWantAmount?: bigint;
         // Canonical resting offer state from the matcher/book.
         // Used to keep partial-fill remainder math identical to the book view.
-        // These fields also let the UI reconstruct closed-order history even if
-        // the original swap_offer frame has aged out of the short frameHistory window.
+        // These fields let the disk-backed lifecycle reader render an exact
+        // historical price without inventing a second orderbook formula.
         restingGiveTokenId?: number;
         restingWantTokenId?: number;
         restingPriceTicks?: bigint;

@@ -351,7 +351,11 @@
     return diagnostics;
   }
 
-  async function runRuntimeScenario(xln: XLNModule, option: ScenarioOption, env: RuntimeReplica): Promise<RuntimeReplica> {
+  async function runRuntimeScenario(
+    xln: XLNModule,
+    option: ScenarioOption,
+    env: RuntimeReplica,
+  ): Promise<{ env: RuntimeReplica; frames: EnvSnapshot[] }> {
     const runtimeAny = xln as XLNModule & {
       scenarios?: Record<string, (target: RuntimeReplica) => Promise<RuntimeReplica | void>>;
       getScenario?: (id: string) => { run: (target: RuntimeReplica) => Promise<RuntimeReplica | void> } | undefined;
@@ -359,12 +363,12 @@
     };
     const runner = option.runner ? runtimeAny.scenarios?.[option.runner] : undefined;
     if (runner) {
-      return (await runner(env)) || env;
+      return xln.recordRuntimeScenario(env, runner);
     }
     const entry = runtimeAny.getScenario?.(option.runtimeId)
       || runtimeAny.SCENARIOS?.find((scenario) => scenario.id === option.runtimeId);
     if (!entry) throw new Error(`SCENARIO_NOT_FOUND:${option.runtimeId}`);
-    return (await entry.run(env)) || env;
+    return xln.recordRuntimeScenario(env, entry.run);
   }
 
   function publishFrame(index: number): void {
@@ -404,9 +408,10 @@
     try {
       const xln = await getXLN();
       const env = preparePreviewEnv(xln.createEmptyEnv(`scenario-preview:${option.id}`));
-      const resultEnv = preparePreviewEnv(await runRuntimeScenario(xln, option, env));
+      const recording = await runRuntimeScenario(xln, option, env);
+      const resultEnv = preparePreviewEnv(recording.env);
       appendDiagnostics(stopPreviewInfra(resultEnv, option.title));
-      const nextFrames = Array.isArray(resultEnv.history) ? resultEnv.history : [];
+      const nextFrames = recording.frames;
       if (seq !== loadSeq) return;
       if (nextFrames.length === 0) throw new Error(`SCENARIO_EMPTY_HISTORY:${option.id}`);
 

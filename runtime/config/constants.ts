@@ -58,11 +58,15 @@ export const LIMITS = {
    */
   MAX_ACCOUNT_TOKEN_ROWS: 128,
 
-  /** Aggregate live-offer guard; oversized maps are paged by Account storage. */
-  MAX_ACCOUNT_SWAP_OFFERS: 2000,
+  /** Aggregate live-offer guard; same-j and cross-j proofs have tighter bounds below. */
+  MAX_ACCOUNT_SWAP_OFFERS: 38,
 
-  /** Same-j live offers across all markets in one bilateral Account. */
-  MAX_ACCOUNT_SAME_J_SWAP_OFFERS: 1000,
+  /**
+   * Same-j offers become one signed DeltaTransformer program. Twenty offers
+   * preserve a full 10x2 price ladder while leaving storage-proof headroom.
+   * More market depth belongs in additional maker Entity Accounts.
+   */
+  MAX_ACCOUNT_SAME_J_SWAP_OFFERS: 20,
 
   /**
    * Cross-j live offers/Pulls in one bilateral Account. A zero-second signed
@@ -70,18 +74,12 @@ export const LIMITS = {
    * processBatch as dispute start; Depository accepts at most 32. Signing a
    * 33rd live Pull would create valid bilateral state that cannot be enforced.
    */
-  MAX_ACCOUNT_CROSS_J_SWAP_OFFERS: 32,
+  MAX_ACCOUNT_CROSS_J_SWAP_OFFERS: 18,
 
   /** Maximum live offers for one maker, direction, and economic market. */
   MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: 20,
 
-  /** Recent terminal swap lifecycle rows retained in the live Account projection. */
-  MAX_ACCOUNT_TERMINAL_SWAP_HISTORY: 100,
-
-  /** Recent partial-fill details retained per swap; full frames remain in the Runtime WAL and history views. */
-  MAX_ACCOUNT_SWAP_RESOLVES_PER_ORDER: 100,
-
-  /** Maximum offer-id/comment characters retained in the live swap projection. */
+  /** Maximum canonical swap offer identifier length. */
   MAX_ACCOUNT_SWAP_HISTORY_TEXT: 256,
 
   /** Two lookup keys for every live HTLC across every allowed Entity account. */

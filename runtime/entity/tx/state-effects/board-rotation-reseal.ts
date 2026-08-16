@@ -6,6 +6,11 @@ import { resolveObserverCertifiedAccountCounterpartyProposer } from '../../accou
 import { HankoValidationError } from '../../../hanko/codec';
 import { buildCertifiedEntityOutput } from '../j-events-htlc/cross-j-outputs';
 import { createStructuredLogger } from '../../../infra/logger';
+import { EntityAccountCandidateMap, getEntityAccountForWrite } from '../../state/persistent-account-map';
+import {
+  copyAccountDisputeConfig,
+  copyAccountStateDomain,
+} from '../../../protocol/state/account-input-clone';
 
 type BoardActivatedEvent = Extract<JurisdictionEvent, { type: 'BoardActivated' }>;
 
@@ -177,12 +182,18 @@ const boardResealEvidence = (
 /** Capture only Account bytes whose change can make a fresh reseal possible. */
 export const captureAccountBoardResealEvidence = (
   state: Pick<EntityState, 'accounts'>,
-): ReadonlyMap<string, BoardResealEvidence> => new Map(
-  Array.from(state.accounts, ([accountId, account]) => [
-    accountId.toLowerCase(),
-    boardResealEvidence(account),
-  ]),
-);
+  accountIds: ReadonlySet<string>,
+): ReadonlyMap<string, BoardResealEvidence> => {
+  const evidence = new Map<string, BoardResealEvidence>();
+  for (const rawAccountId of accountIds) {
+    const accountId = rawAccountId.toLowerCase();
+    const account = state.accounts instanceof EntityAccountCandidateMap
+      ? state.accounts.getCertifiedBase(accountId)
+      : state.accounts.get(accountId);
+    if (account) evidence.set(accountId, boardResealEvidence(account));
+  }
+  return evidence;
+};
 
 /** A marker-only mutation must never schedule another consensus frame. */
 export const accountBoardResealEvidenceChanged = (
@@ -221,7 +232,9 @@ export const markBoardRotationResealsPending = (
   const activation = boardResealActivation(event);
   if (activation.entityId !== state.entityId.toLowerCase()) return { activation, dirtyAccounts: [] };
   const dirtyAccounts: string[] = [];
-  for (const [rawCounterpartyId, account] of state.accounts) {
+  for (const rawCounterpartyId of state.accounts.keys()) {
+    const account = getEntityAccountForWrite(state.accounts, rawCounterpartyId);
+    if (!account) continue;
     const counterpartyId = rawCounterpartyId.toLowerCase();
     if (Number(account.currentHeight) < 1) {
       if (account.boardResealMigration) {
@@ -305,8 +318,8 @@ const buildCertifiedAccountResealDraft = (
       kind: 'board_reseal',
       fromEntityId: state.entityId,
       toEntityId: counterpartyId,
-      domain: structuredClone(account.state.domain),
-      disputeConfig: structuredClone(account.state.disputeConfig),
+      domain: copyAccountStateDomain(account.state.domain),
+      disputeConfig: copyAccountDisputeConfig(account.state.disputeConfig),
       reseal,
     },
   }]);
@@ -350,8 +363,11 @@ export const applyBoardRotationResealMigrations = (
   state: EntityState,
   updates: readonly BoardRotationAccountMigration[],
 ): void => {
+  if (!(state.accounts instanceof EntityAccountCandidateMap)) {
+    throw new Error('BOARD_RESEAL_MIGRATION_CANDIDATE_REQUIRED');
+  }
   for (const update of updates) {
-    const account = state.accounts.get(update.counterpartyId);
+    const account = getEntityAccountForWrite(state.accounts, update.counterpartyId);
     if (!account) throw new Error(`BOARD_RESEAL_MIGRATION_ACCOUNT_MISSING:${update.counterpartyId}`);
     if (update.marker) account.boardResealMigration = { ...update.marker };
     else delete account.boardResealMigration;

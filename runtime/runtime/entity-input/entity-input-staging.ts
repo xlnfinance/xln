@@ -52,9 +52,7 @@ export const collectCommittedAccountFrames = (
   );
   return accountInputs.flatMap(accountInput => {
     const counterpartyEntityId = accountInput.fromEntityId.toLowerCase();
-    const account = [...replica.state.accounts.entries()].find(
-      ([entityId]) => entityId.toLowerCase() === counterpartyEntityId,
-    )?.[1];
+    const account = replica.state.accounts.get(counterpartyEntityId);
     if (!account) return [];
     const height = account.currentFrame.height;
     const stateHash = String(account.currentFrame.stateHash || '').toLowerCase();

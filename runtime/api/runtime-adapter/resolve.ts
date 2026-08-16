@@ -1,4 +1,5 @@
-import type { BookState, BookOrderState, PriceBucketState, PriceLevelState } from '../../orderbook';
+import { projectBookDepth, type BookState } from '../../orderbook';
+import { projectBookPricePageTree, type BookPricePage } from '../../orderbook/pages/page';
 import type { AccountTx } from '../../types/account';
 import type { EntityReplica, EntityState, ExternalWalletState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
@@ -27,6 +28,8 @@ import { RuntimeAdapterError } from './errors';
 import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './codec';
 import { detachRuntimeAdapterPayload } from './codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
+import { copyAccountStateDomain } from '../../protocol/state/account-input-clone';
+import { PersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { buildRuntimeRecoveryBundle } from '../../storage/recovery/bundle';
 import {
   deriveRuntimeRecoveryLookupKey,
@@ -44,6 +47,7 @@ import type {
   RuntimeAdapterPaymentRoutesResponse,
   RuntimeAdapterReadQuery,
   RuntimeAdapterSolvencySummary,
+  RuntimeAdapterSwapHistoryPage,
   RuntimeAdapterTimelineIndexPage,
 } from './types';
 
@@ -84,6 +88,14 @@ export type RuntimeAdapterResolveContext = {
       scanLimit?: number | undefined;
     },
   ) => Promise<RuntimeAdapterActivityPage>;
+  readAccountSwapHistoryPage?: (
+    entityId: string,
+    counterpartyId: string,
+    options: Readonly<{
+      limit?: number;
+      cursor?: Readonly<{ height: number; offerId: string }>;
+    }>,
+  ) => Promise<RuntimeAdapterSwapHistoryPage>;
   readReceipt?: (id: string) => Promise<RuntimeIngressReceipt | null> | RuntimeIngressReceipt | null;
   readFrameReceipts?: (query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterFrameReceiptResponse>;
   findPaymentRoutes?: (query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterPaymentRoutesResponse>;
@@ -114,6 +126,15 @@ type RuntimeAdapterBookPage = {
   limit?: number;
 };
 
+type RuntimeAdapterPortableBookPage = Omit<RuntimeAdapterBookPage, 'items'> & {
+  items: Array<{ pairId: string; book: PortableBookState }>;
+};
+
+type PortableBookState = Omit<BookState, 'orders' | 'bidPages' | 'askPages'> & Readonly<{
+  bidPages: ReadonlyMap<string, BookPricePage>;
+  askPages: ReadonlyMap<string, BookPricePage>;
+}>;
+
 type RuntimeAdapterVisibleDeltaSummary = {
   counterpartyId: string;
   tokenId: number;
@@ -136,7 +157,7 @@ type RuntimeAdapterViewEntityFrame = {
   summary: RuntimeAdapterEntitySummary;
   core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
-  books: RuntimeAdapterBookPage;
+  books: RuntimeAdapterPortableBookPage;
 };
 
 export type RuntimeAdapterViewFrame = {
@@ -253,7 +274,6 @@ export type RuntimeAdapterFrameSummary = {
     entities: number;
     accounts: number;
     bookEntities: number;
-    overlays: number;
   };
 };
 
@@ -272,6 +292,30 @@ const readBoundedLimit = (rawValue: unknown, defaultValue: number): number => {
   if (!Number.isFinite(raw)) throw new RuntimeAdapterError('E_BAD_QUERY', 'limit must be finite');
   return Math.max(1, Math.min(500, Math.floor(raw)));
 };
+
+const decodeSwapHistoryCursor = (
+  raw: unknown,
+): Readonly<{ height: number; offerId: string }> | undefined => {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (typeof raw !== 'string') throw new RuntimeAdapterError('E_BAD_QUERY', 'swap history cursor must be text');
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(decodeURIComponent(raw));
+  } catch {
+    throw new RuntimeAdapterError('E_BAD_QUERY', 'swap history cursor is invalid');
+  }
+  if (!Array.isArray(decoded) || decoded.length !== 2) {
+    throw new RuntimeAdapterError('E_BAD_QUERY', 'swap history cursor is invalid');
+  }
+  const [height, offerId] = decoded;
+  if (!Number.isSafeInteger(height) || height < 1 || typeof offerId !== 'string' || !offerId || offerId.length > 256) {
+    throw new RuntimeAdapterError('E_BAD_QUERY', 'swap history cursor is invalid');
+  }
+  return { height, offerId };
+};
+
+const encodeSwapHistoryCursor = (cursor: Readonly<{ height: number; offerId: string }> | null): string | null =>
+  cursor ? encodeURIComponent(JSON.stringify([cursor.height, cursor.offerId])) : null;
 
 const readAtHeight = (query?: RuntimeAdapterReadQuery): number | null => {
   if (query?.atHeight === undefined) return null;
@@ -764,7 +808,7 @@ const projectLiveAccountsPage = (
   }
   const cursor = normalizeEntityId(String(query?.accountsCursor ?? query?.cursor ?? ''));
   const pageIndex = readPageIndex(query?.accountsPage);
-  const orderedKeys = sortedStringMapKeys(state.accounts as Map<string, unknown>);
+  const orderedKeys = sortedStringMapKeys(state.accounts);
   const keys = query?.sortDir === 'desc' ? [...orderedKeys].reverse() : orderedKeys;
   const start = sortedStringMapStartIndex(keys, cursor, pageIndex, limit);
   const visibleKeys = keys.slice(start, start + limit);
@@ -848,11 +892,11 @@ const withDefinedProp = <K extends string, V>(key: K, value: V | undefined): Par
 const compactArrayTail = <T>(value: readonly T[] | undefined, limit = 20): T[] | undefined =>
   Array.isArray(value) ? value.slice(-limit) : undefined;
 
-const compactMapHead = <K, V>(value: Map<K, V> | undefined, limit = 20): Map<K, V> | undefined =>
-  value instanceof Map ? new Map(Array.from(value.entries()).slice(0, limit)) : undefined;
+const compactMapHead = <K, V>(value: ReadonlyMap<K, V> | undefined, limit = 20): Map<K, V> | undefined =>
+  value === undefined ? undefined : new Map(Array.from(value.entries()).slice(0, limit));
 
-const compactMapTail = <K, V>(value: Map<K, V> | undefined, limit = 20): Map<K, V> | undefined =>
-  value instanceof Map ? new Map(Array.from(value.entries()).slice(-limit)) : undefined;
+const compactMapTail = <K, V>(value: ReadonlyMap<K, V> | undefined, limit = 20): Map<K, V> | undefined =>
+  value === undefined ? undefined : new Map(Array.from(value.entries()).slice(-limit));
 
 const compactRecordTail = <V>(value: Record<string, V> | undefined, limit = 20): Record<string, V> | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -883,7 +927,6 @@ const compactAccountProofBodyForView = (proofBody: StorageAccountDoc['proofBody'
 
 const compactAccountDocForView = (
   doc: StorageAccountDoc,
-  includeSwapHistory = false,
 ): StorageAccountDoc => {
   // Settlement workspaces may contain large transient proof material. They are
   // consensus data, but aggregate inspection endpoints must expose the compact
@@ -892,33 +935,51 @@ const compactAccountDocForView = (
   const compact: StorageAccountDoc = {
     state: {
       ...boundedState,
-      domain: structuredClone(doc.state.domain),
+      domain: copyAccountStateDomain(doc.state.domain),
       watchSeed: '',
-      deltas: compactMapHead(doc.state.deltas, 100) ?? new Map(),
-      locks: compactMapTail(doc.state.locks, 20) ?? new Map(),
-      swapOffers: compactMapTail(doc.state.swapOffers, 100) ?? new Map(),
-      requestedRebalance: compactMapHead(doc.state.requestedRebalance, 100) ?? new Map(),
-      requestedRebalanceFeeState: compactMapHead(doc.state.requestedRebalanceFeeState, 100) ?? new Map(),
+      deltas: PersistentAccountStateMap.fromEntries(
+        'deltas',
+        compactMapHead(doc.state.deltas, 100) ?? [],
+      ),
+      locks: PersistentAccountStateMap.fromEntries(
+        'locks',
+        compactMapTail(doc.state.locks, 20) ?? [],
+      ),
+      swapOffers: PersistentAccountStateMap.fromEntries(
+        'swapOffers',
+        compactMapTail(doc.state.swapOffers, 100) ?? [],
+      ),
+      requestedRebalance: PersistentAccountStateMap.fromEntries(
+        'requestedRebalance',
+        compactMapHead(doc.state.requestedRebalance, 100) ?? [],
+      ),
+      requestedRebalanceFeeState: PersistentAccountStateMap.fromEntries(
+        'requestedRebalanceFeeState',
+        compactMapHead(doc.state.requestedRebalanceFeeState, 100) ?? [],
+      ),
     },
     status: doc.status,
     mempool: [],
     currentFrame: compactAccountFrameForView(doc.currentFrame),
-    swapOrderHistory: includeSwapHistory
-      ? compactMapTail(doc.swapOrderHistory, 20) ?? new Map()
-      : new Map(),
-    swapClosedOrders: includeSwapHistory
-      ? compactMapTail(doc.swapClosedOrders, 20) ?? new Map()
-      : new Map(),
     currentHeight: doc.currentHeight,
     pendingSignatures: [],
     rollbackCount: doc.rollbackCount,
     proofHeader: doc.proofHeader,
     proofBody: compactAccountProofBodyForView(doc.proofBody),
-    pendingWithdrawals: compactMapTail(doc.pendingWithdrawals, 20) ?? new Map(),
+    pendingWithdrawals: PersistentAccountStateMap.fromEntries(
+      'pendingWithdrawals',
+      compactMapTail(doc.pendingWithdrawals, 20) ?? [],
+    ),
     shadow: {
       rebalance: {
-        policy: compactMapHead(doc.shadow.rebalance.policy, 100) ?? new Map(),
-        submittedAtByToken: compactMapHead(doc.shadow.rebalance.submittedAtByToken, 100) ?? new Map(),
+        policy: PersistentAccountStateMap.fromEntries(
+          'rebalanceShadowPolicy',
+          compactMapHead(doc.shadow.rebalance.policy, 100) ?? [],
+        ),
+        submittedAtByToken: PersistentAccountStateMap.fromEntries(
+          'rebalanceShadowSubmitted',
+          compactMapHead(doc.shadow.rebalance.submittedAtByToken, 100) ?? [],
+        ),
         ...(doc.shadow.rebalance.activeQuote ? { activeQuote: doc.shadow.rebalance.activeQuote } : {}),
         ...(doc.shadow.rebalance.pendingRequest ? { pendingRequest: doc.shadow.rebalance.pendingRequest } : {}),
       },
@@ -926,7 +987,7 @@ const compactAccountDocForView = (
   };
 
   const pulls = compactMapTail(doc.state.pulls, 20);
-  if (pulls) compact.state.pulls = pulls;
+  if (pulls) compact.state.pulls = PersistentAccountStateMap.fromEntries('pulls', pulls);
   // Account history is a point-read concern. Aggregate Entity views retain
   // the required canonical fields as empty maps instead of multiplying their
   // payload by the page width.
@@ -1109,7 +1170,6 @@ const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeA
     proposals: new Map(Array.from(core.proposals.entries()).slice(-20)),
     reserves: compactMapHead(core.reserves, 100) ?? new Map(),
     lastFinalizedJHeight: core.lastFinalizedJHeight,
-    jBlockChain: core.jBlockChain.slice(-20),
     htlcRoutes: compactMapTail(core.htlcRoutes, 20) ?? new Map(),
     htlcFeesEarned: core.htlcFeesEarned,
     lockBook: new Map(Array.from(core.lockBook.entries()).slice(-20)),
@@ -1198,92 +1258,25 @@ const accountPageSummaryForView = (
   };
 };
 
-const compactBookSideForView = (
-  bucketIds: readonly bigint[],
-  buckets: ReadonlyMap<string, PriceBucketState>,
-  orderSource: ReadonlyMap<string, BookOrderState>,
-  maxLevels: number,
-  maxOrdersPerLevel: number,
-): {
-  bucketIds: bigint[];
-  buckets: Map<string, PriceBucketState>;
-  orders: Map<string, BookOrderState>;
-  levels: number;
-} => {
-  const nextBucketIds: bigint[] = [];
-  const nextBuckets = new Map<string, PriceBucketState>();
-  const nextOrders = new Map<string, BookOrderState>();
-  let levels = 0;
-
-  for (const bucketId of bucketIds) {
-    if (levels >= maxLevels) break;
-    const sourceBucket = buckets.get(String(bucketId));
-    if (!sourceBucket) continue;
-    const nextPrices: bigint[] = [];
-    const nextLevels = new Map<string, PriceLevelState>();
-    for (const priceTicks of sourceBucket.pricesAsc) {
-      if (levels >= maxLevels) break;
-      const sourceLevel = sourceBucket.levels.get(String(priceTicks));
-      if (!sourceLevel) continue;
-      if (sourceLevel.totalQtyLots <= 0n) continue;
-      const selectedOrderIds: string[] = [];
-      for (const orderId of sourceLevel.orderIds) {
-        if (selectedOrderIds.length >= maxOrdersPerLevel) break;
-        const order = orderSource.get(orderId);
-        if (!order || order.qtyLots <= 0n) continue;
-        selectedOrderIds.push(orderId);
-        nextOrders.set(orderId, order);
-      }
-      if (selectedOrderIds.length === 0) continue;
-      nextPrices.push(priceTicks);
-      nextLevels.set(String(priceTicks), {
-        priceTicks: sourceLevel.priceTicks,
-        orderIds: selectedOrderIds,
-        totalQtyLots: sourceLevel.totalQtyLots,
-      });
-      levels += 1;
-    }
-    if (nextLevels.size > 0) {
-      nextBucketIds.push(bucketId);
-      nextBuckets.set(String(bucketId), {
-        bucketId: sourceBucket.bucketId,
-        pricesAsc: nextPrices,
-        levels: nextLevels,
-      });
-    }
-  }
-
-  return { bucketIds: nextBucketIds, buckets: nextBuckets, orders: nextOrders, levels };
-};
-
-const compactBookStateForView = (book: BookState, maxLevelsPerSide = 5, maxOrdersPerLevel = 20): BookState => {
-  const bids = compactBookSideForView(
-    book.bidBucketIdsDesc,
-    book.bidBuckets,
-    book.orders,
-    maxLevelsPerSide,
-    maxOrdersPerLevel,
-  );
-  const asks = compactBookSideForView(
-    book.askBucketIdsAsc,
-    book.askBuckets,
-    book.orders,
-    maxLevelsPerSide,
-    maxOrdersPerLevel,
-  );
+const compactBookStateForView = (
+  book: BookState,
+  maxLevelsPerSide = 5,
+  maxOrdersPerLevel = 20,
+): PortableBookState => {
+  // This is a bounded remote view, never a persistence format. LevelDB stores
+  // the original Patricia header/branch/leaf graph directly.
+  const compact = projectBookDepth(book, maxLevelsPerSide, maxOrdersPerLevel);
   return {
-    params: book.params,
-    orders: new Map([...bids.orders, ...asks.orders]),
-    bidBuckets: bids.buckets,
-    askBuckets: asks.buckets,
-    bidBucketIdsDesc: bids.bucketIds,
-    askBucketIdsAsc: asks.bucketIds,
-    nextSeq: book.nextSeq,
-    tradeCount: book.tradeCount,
-    tradeQtySum: book.tradeQtySum,
-    lastTradePriceTicks: book.lastTradePriceTicks,
-    lastAcceptedUsdAskPriceTicks: book.lastAcceptedUsdAskPriceTicks,
-    eventHash: book.eventHash,
+    params: compact.params,
+    bidPages: projectBookPricePageTree(compact.bidPages),
+    askPages: projectBookPricePageTree(compact.askPages),
+    nextSeq: compact.nextSeq,
+    tradeCount: compact.tradeCount,
+    tradeQtySum: compact.tradeQtySum,
+    lastTradePriceTicks: compact.lastTradePriceTicks,
+    lastAcceptedUsdAskPriceTicks: compact.lastAcceptedUsdAskPriceTicks,
+    eventHash: compact.eventHash,
+    ...(compact.commitmentHash === undefined ? {} : { commitmentHash: compact.commitmentHash }),
   };
 };
 
@@ -1294,7 +1287,7 @@ const compactViewPageForRemote = (entityId: string, view: {
 }): {
   core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
-  books: RuntimeAdapterBookPage;
+  books: RuntimeAdapterPortableBookPage;
 } => ({
   core: compactEntityCoreForRemote(view.core),
   accounts: {
@@ -1492,7 +1485,7 @@ const projectGraphAccount = (doc: StorageAccountDoc): RuntimeAdapterGraphAccount
   mempool: projectGraphAccountActivities(doc.mempool),
   mempoolCount: doc.mempool.length,
   currentFrame: projectGraphAccountFrame(doc.currentFrame),
-  deltas: new Map(doc.state.deltas),
+  deltas: doc.state.deltas,
   currentHeight: doc.currentHeight,
   ...(doc.pendingFrame ? { pendingFrame: projectGraphAccountFrame(doc.pendingFrame) } : {}),
   rollbackCount: doc.rollbackCount,
@@ -1805,7 +1798,6 @@ const compactFrameRecordForRemote = (frame: RuntimeFrame): RuntimeAdapterFrameSu
       entities: frame.touchedEntities?.length ?? 0,
       accounts: frame.touchedAccounts?.length ?? 0,
       bookEntities: frame.touchedBookEntities?.length ?? 0,
-      overlays: frame.overlayRecords?.length ?? 0,
     },
   };
 };
@@ -1929,20 +1921,40 @@ const resolveScopedRuntimeAdapterRead = async <T>(
           const replica = findReplica(ctx.env, entityId);
           if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
           const account = replica.state.accounts.get(accountId);
-          const page = singleAccountPage(accountId, account ? compactAccountDocForView(account, true) : null, limit);
+          const page = singleAccountPage(accountId, account ? compactAccountDocForView(account) : null, limit);
           return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
         }
         if (!ctx.loadEntityAccountDoc) {
           throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
         }
         const account = await ctx.loadEntityAccountDoc(entityId, accountId, targetHeight);
-        const page = singleAccountPage(accountId, account ? compactAccountDocForView(account, true) : null, limit);
+        const page = singleAccountPage(accountId, account ? compactAccountDocForView(account) : null, limit);
         return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
       }
       const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
       const stored = await loadViewPageForHeight(ctx, entityId, targetHeight, isCurrentHeight, query);
       const compactStored = compactViewPageForRemote(entityId, stored);
       return (parts[2] === 'accounts' ? compactStored.accounts : compactStored.books) as T;
+    }
+
+    if (parts.length === 5 && parts[2] === 'account' && parts[4] === 'swap-history') {
+      const counterpartyId = normalizeEntityId(parts[3] ?? '');
+      if (!counterpartyId) throw new RuntimeAdapterError('E_BAD_PATH', 'account id is required');
+      if (readAtHeight(query) !== null) {
+        throw new RuntimeAdapterError('E_BAD_QUERY', 'historical swap-history reads are not available through a live adapter');
+      }
+      if (!ctx.readAccountSwapHistoryPage) {
+        throw new RuntimeAdapterError('E_BAD_QUERY', 'account swap-history reads are unavailable for this adapter');
+      }
+      const cursor = decodeSwapHistoryCursor(query?.cursor);
+      const page = await ctx.readAccountSwapHistoryPage(entityId, counterpartyId, {
+        limit: readBoundedLimit(query?.limit, 25),
+        ...(cursor ? { cursor } : {}),
+      });
+      return {
+        ...page,
+        nextCursor: encodeSwapHistoryCursor(page.nextCursor),
+      } as T;
     }
 
     if (parts.length === 4 && parts[2] === 'account') {
@@ -1954,12 +1966,12 @@ const resolveScopedRuntimeAdapterRead = async <T>(
         }
         const loaded = await ctx.loadEntityAccountDoc(entityId, counterpartyId, height);
         if (!loaded) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found at height ${height}: ${normalizeEntityId(entityId)}/${counterpartyId}`);
-        return compactAccountDocForView(loaded, true) as T;
+        return compactAccountDocForView(loaded) as T;
       }
       const { state } = await resolveEntityState(ctx, entityId, query);
       const account = state.accounts.get(counterpartyId);
       if (!account) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found: ${normalizeEntityId(entityId)}/${counterpartyId}`);
-      return compactAccountDocForView(account, true) as T;
+      return compactAccountDocForView(account) as T;
     }
 
     const { state, replica } = await resolveEntityState(ctx, entityId, query);

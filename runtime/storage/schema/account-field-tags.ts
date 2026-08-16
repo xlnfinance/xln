@@ -28,7 +28,8 @@ export const STORAGE_ACCOUNT_FIELD_TAG = {
   counterpartyDisputeHash: 43, counterpartySettlementHanko: 44, disputeProofNoncesByHash: 45,
   disputeProofBodiesByHash: 46, disputeArgumentSnapshotsByHash: 47, disputePrepare: 48,
   'state.jNonce': 49, 'state.settlementWorkspace': 50, activeDispute: 51,
-  swapOrderHistory: 52, swapClosedOrders: 53, pendingWithdrawals: 54,
+  // Tags 52-53 belonged to retired live swap history; never reuse them.
+  pendingWithdrawals: 54,
   'state.requestedRebalance': 55, 'state.requestedRebalanceFeeState': 56,
   'state.rebalanceFeePolicies': 57, shadow: 58,
   currentDisputeProofProposerIsLeft: 59,

@@ -3,7 +3,6 @@ import type { Level } from 'level';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
-import type { RuntimeOverlayRecord } from '../../types/account';
 import {
   findStorageLatestSnapshotAtOrBelow,
   listStorageReplicaMetas,
@@ -11,11 +10,10 @@ import {
   listStorageSnapshotHeights,
   listStorageSnapshotReplicaMetas,
   readStorageFrameRecord,
+  readStorageFramePayloads,
   readStorageHead,
-  readStorageOverlayRecordsFromDiffs,
   type StorageHead,
 } from '..';
-import { storageOverlayRecordKey } from '../../protocol/state/overlay';
 import { normalizeDbNamespace } from '../runtime-dbs';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 import { requireStorageDbOpen } from '../commit/availability';
@@ -85,33 +83,18 @@ const createPersistedStorageNavigationApi = (
       if (targetHeight > handle.latestHeight) continue;
       const targetFrame = await readStorageFrameRecord(handle.db, targetHeight);
       if (targetFrame?.materializedState !== false) {
-        env.overlay = [];
+        env.overlay = new Map();
         return;
       }
-      const startHeight = Math.max(1, handle.latestMaterializedHeight + 1);
-      if (startHeight > targetHeight) {
-        env.overlay = [];
-        return;
+      // Replay of the exact Runtime inputs rebuilds the same in-memory dirty
+      // map. Loading a second persisted overlay/diff is both redundant and a
+      // consensus hazard because it can disagree with the reducer result.
+      if (!(env.overlay instanceof Map)) {
+        throw new Error(`STORAGE_REPLAY_OVERLAY_MISSING:${targetHeight}`);
       }
-
-      const records = new Map<string, RuntimeOverlayRecord>();
-      const overlays = await readStorageOverlayRecordsFromDiffs(
-        handle.db,
-        startHeight,
-        targetHeight,
-      );
-      for (const record of overlays) {
-        records.set(storageOverlayRecordKey(record), { ...record });
-      }
-      if (records.size === 0 && Array.isArray(targetFrame?.overlayRecords)) {
-        for (const record of targetFrame.overlayRecords) {
-          records.set(storageOverlayRecordKey(record), { ...record });
-        }
-      }
-      env.overlay = Array.from(records.values());
       return;
     }
-    env.overlay = [];
+    env.overlay = new Map();
   };
 
   const resolvePersistedLatestHeight = async (
@@ -151,6 +134,17 @@ const createPersistedStorageNavigationApi = (
     return null;
   };
 
+  const readPersistedStorageFramePayloads = async (
+    env: RuntimeReplica,
+    frame: NonNullable<Awaited<ReturnType<typeof readStorageFrameRecord>>>,
+  ): Promise<Awaited<ReturnType<typeof readStorageFramePayloads>>> => {
+    for (const handle of await listPersistedStorageHandles(env)) {
+      if (frame.height > handle.latestHeight) continue;
+      return readStorageFramePayloads(handle.db, frame);
+    }
+    throw new Error(`STORAGE_FRAME_PAYLOAD_SOURCE_MISSING:${frame.height}`);
+  };
+
   return {
     createPersistedStorageEnv,
     listPersistedStorageHandles,
@@ -158,6 +152,7 @@ const createPersistedStorageNavigationApi = (
     resolvePersistedLatestHeight,
     resolvePersistedCheckpointHeights,
     readPersistedStorageFrameRecord,
+    readPersistedStorageFramePayloads,
   };
 };
 
@@ -193,6 +188,7 @@ const createPersistedStorageEntityReadApi = (
     env: RuntimeReplica,
     snapshotHeight: number,
     entityId: string,
+    sharedState: EntityState,
   ): Promise<Awaited<ReturnType<typeof listStorageSnapshotReplicaMetas>>> => {
     const normalizedEntityId = String(entityId || '').toLowerCase();
     if (!normalizedEntityId || snapshotHeight <= 0) return [];
@@ -204,6 +200,7 @@ const createPersistedStorageEntityReadApi = (
       deps.getRuntimeWalDb(env),
       snapshotHeight,
       normalizedEntityId,
+      sharedState,
     );
   };
 

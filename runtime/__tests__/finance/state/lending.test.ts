@@ -7,6 +7,16 @@ import { applyCommittedAccountFrameFollowups, type AccountTxTarget } from '../..
 import type { AccountFrame, AccountReplica, AccountTx } from '../../../types/account';
 import type { ConsensusConfig, EntityState } from '../../../entity/types';
 import { createDefaultDelta } from '../../../account/state/delta';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import {
+  accountTransitionView,
+  beginAccountTransition,
+  commitAccountTransition,
+  createAccountTransitionKey,
+  discardAccountTransition,
+} from '../../../account/state/candidate-overlay';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const HUB = entity('10');
@@ -32,10 +42,9 @@ const makeState = (): EntityState => ({
   proposals: new Map(),
   config: makeConfig(),
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: PersistentEntityAccountMap.empty(computeEntityAccountValueHash),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: { name: 'Hub', isHub: true, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -54,13 +63,13 @@ const makeAccount = (counterparty: string): AccountReplica => {
       rightEntity: counterparty,
       domain: { chainId: 31_337, depositoryAddress: `0x${'88'.repeat(20)}` },
       watchSeed: `0x${'99'.repeat(32)}`,
-      deltas: new Map([[1, delta]]),
+      deltas: PersistentAccountStateMap.fromEntries('deltas', [[1, delta]]),
       disputeConfig: { leftResponseSeconds: 576, rightResponseSeconds: 576 },
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
-      locks: new Map(),
-      swapOffers: new Map(),
-      pulls: new Map(),
+      requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+      requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
+      locks: PersistentAccountStateMap.empty('locks'),
+      swapOffers: PersistentAccountStateMap.empty('swapOffers'),
+      pulls: PersistentAccountStateMap.empty('pulls'),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -86,8 +95,6 @@ const makeAccount = (counterparty: string): AccountReplica => {
     proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
   };
 };
 
@@ -110,18 +117,52 @@ const commit = async (
   byLeft: boolean,
   timestamp: number,
 ): Promise<AccountTxTarget[]> => {
-  const result = await applyAccountTx(state.accounts.get(counterparty)!, tx, byLeft, timestamp, 0, false);
+  const base = state.accounts.get(counterparty)!;
+  const transition = beginAccountTransition(
+    base,
+    createAccountTransitionKey(base, { purpose: 'lending-test', tx, timestamp }),
+  );
+  const result = await applyAccountTx(
+    accountTransitionView(transition),
+    tx,
+    byLeft,
+    timestamp,
+    0,
+    false,
+  );
   expect(result.ok, result.ok ? undefined : result.rejection.message).toBe(true);
+  state.accounts = state.accounts.updated(counterparty, commitAccountTransition(transition).account);
   const followups: AccountTxTarget[] = [];
   applyCommittedAccountFrameFollowups(state, counterparty, frame(tx, byLeft, timestamp), followups, undefined, []);
   return followups;
 };
 
+const applyOnly = async (
+  state: EntityState,
+  counterparty: string,
+  tx: AccountTx,
+  byLeft: boolean,
+  timestamp: number,
+): Promise<Awaited<ReturnType<typeof applyAccountTx>>> => {
+  const base = state.accounts.get(counterparty)!;
+  const transition = beginAccountTransition(
+    base,
+    createAccountTransitionKey(base, { purpose: 'lending-test-apply', tx, timestamp }),
+  );
+  const result = await applyAccountTx(accountTransitionView(transition), tx, byLeft, timestamp);
+  if (!result.ok) {
+    discardAccountTransition(transition);
+    return result;
+  }
+  state.accounts = state.accounts.updated(counterparty, commitAccountTransition(transition).account);
+  return result;
+};
+
 describe('payer-authenticated hub lending', () => {
   test('projects batched grants and revokes instead of overwriting absolute credit', async () => {
     const state = makeState();
-    state.accounts.set(LENDER, makeAccount(LENDER));
-    state.accounts.set(BORROWER, makeAccount(BORROWER));
+    state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
+    state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
     await commit(state, LENDER, {
       type: 'lending_fund',
       data: {
@@ -148,14 +189,15 @@ describe('payer-authenticated hub lending', () => {
         maxInterestBps: 150,
       },
     }));
-    const borrowerAccount = state.accounts.get(BORROWER)!;
-    for (const tx of borrows) expect((await applyAccountTx(borrowerAccount, tx, false)).ok).toBe(true);
+    for (const tx of borrows) expect((await applyOnly(state, BORROWER, tx, false, 2_000)).ok).toBe(true);
     const grants: AccountTxTarget[] = [];
     applyCommittedAccountFrameFollowups(state, BORROWER, frame(borrows, false, 2_000), grants, undefined, []);
     expect(grants.map(output => output.tx.type === 'lending_credit' ? output.tx.data.creditLimit : 0n))
       .toEqual([20_100n, 20_300n]);
 
-    for (const output of grants) expect((await applyAccountTx(borrowerAccount, output.tx, true)).ok).toBe(true);
+    for (const output of grants) {
+      expect((await applyOnly(state, BORROWER, output.tx, true, 2_001)).ok).toBe(true);
+    }
     applyCommittedAccountFrameFollowups(
       state,
       BORROWER,
@@ -175,7 +217,7 @@ describe('payer-authenticated hub lending', () => {
         amount: loan.repaymentAmount,
       },
     }));
-    for (const tx of repayments) expect((await applyAccountTx(borrowerAccount, tx, false)).ok).toBe(true);
+    for (const tx of repayments) expect((await applyOnly(state, BORROWER, tx, false, 3_000)).ok).toBe(true);
     const revokes: AccountTxTarget[] = [];
     applyCommittedAccountFrameFollowups(state, BORROWER, frame(repayments, false, 3_000), revokes, undefined, []);
     expect(revokes.map(output => output.tx.type === 'lending_credit' ? output.tx.data.creditLimit : 0n))
@@ -184,8 +226,8 @@ describe('payer-authenticated hub lending', () => {
 
   test('fund, borrow, grant, repay, and revoke finalize only after matching bilateral commits', async () => {
     const state = makeState();
-    state.accounts.set(LENDER, makeAccount(LENDER));
-    state.accounts.set(BORROWER, makeAccount(BORROWER));
+    state.accounts = state.accounts.updated(LENDER, makeAccount(LENDER));
+    state.accounts = state.accounts.updated(BORROWER, makeAccount(BORROWER));
 
     const fundTx: AccountTx = {
       type: 'lending_fund',
@@ -259,9 +301,7 @@ describe('payer-authenticated hub lending', () => {
   });
 
   test('rejects forged payer direction and duplicate financial intents before moving delta twice', async () => {
-    const state = makeState();
-    state.accounts.set(LENDER, makeAccount(LENDER));
-    const account = state.accounts.get(LENDER)!;
+    const account = makeAccount(LENDER);
     const tx: AccountTx = {
       type: 'lending_fund',
       data: {

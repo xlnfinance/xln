@@ -5,7 +5,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../../../../protocol/boundary-validation';
-import type { LoadFrame } from '../worker-boundary';
+import type { LoadFrame } from '../boundary/worker-boundary';
 
 export type CrossRecoveryReport = Readonly<{
   schema: 'xln-production-cross-swap-recovery-v1';

@@ -25,6 +25,9 @@ import {
   applyStorageChanges,
   publishEntityCandidateEffects,
 } from '../observability/env-events.ts';
+import { hasProposableAccount } from '../../entity/consensus/account/work-index';
+import { getEntityLeaderState } from '../../entity/consensus/leader';
+import type { EntityReplica, EntityState } from '../../entity/types';
 
 export const recordEntityInputProfile = (
   context: RuntimeEntityInputBatchContext,
@@ -76,7 +79,7 @@ const normalizeRuntimeRef = (value: unknown): string =>
 const decodeCrossJCommand = (
   env: RuntimeReplica,
   output: RoutedEntityInput,
-): CrossJCommand => {
+): Extract<CrossJCommand, { kind: 'entity-txs' }> => {
   if (!isCrossJCommandEnvelope(output)) {
     throw new Error(
       `RUNTIME_CROSS_J_COMMAND_ENVELOPE_INVALID:entity=${output.entityId}`,
@@ -130,6 +133,7 @@ const decodeCrossJCommand = (
     throw new Error(`RUNTIME_CROSS_J_COMMAND_TXS_MISSING:${targetEntityId}`);
   }
   return {
+    kind: 'entity-txs',
     sourceEntityId,
     targetEntityId,
     targetSignerId,
@@ -139,19 +143,25 @@ const decodeCrossJCommand = (
 
 const commandToEntityInput = (
   command: CrossJCommand,
-): RoutedEntityInput => ({
-  entityId: command.targetEntityId,
-  signerId: command.targetSignerId,
-  entityTxs: [{
-    type: 'runtimeOutput',
-    data: {
-      protocol: 'cross-j',
-      sourceEntityId: command.sourceEntityId,
-      targetEntityId: command.targetEntityId,
-      entityTxs: structuredClone(command.entityTxs),
-    },
-  }],
-});
+): RoutedEntityInput => command.kind === 'account-work'
+  ? {
+      entityId: command.targetEntityId,
+      signerId: command.targetSignerId,
+      entityTxs: [],
+    }
+  : {
+      entityId: command.targetEntityId,
+      signerId: command.targetSignerId,
+      entityTxs: [{
+        type: 'runtimeOutput',
+        data: {
+          protocol: 'cross-j',
+          sourceEntityId: command.sourceEntityId,
+          targetEntityId: command.targetEntityId,
+          entityTxs: structuredClone(command.entityTxs),
+        },
+      }],
+    };
 
 const routeCommittedEntityOutputs = (
   env: RuntimeReplica,
@@ -164,13 +174,17 @@ const routeCommittedEntityOutputs = (
   for (const output of outputs) {
     if (isCrossJCommandEnvelope(output)) {
       const command = decodeCrossJCommand(env, output);
-      const key = `${command.sourceEntityId}\0${command.targetEntityId}\0${command.targetSignerId}`;
+      const key = `${command.kind}\0${command.sourceEntityId}\0${command.targetEntityId}\0${command.targetSignerId}`;
       const index = indexes.get(key);
       if (index === undefined) {
         indexes.set(key, commands.length);
         commands.push(command);
       } else {
-        commands[index]!.entityTxs.push(...command.entityTxs);
+        const existing = commands[index]!;
+        if (existing.kind !== 'entity-txs') {
+          throw new Error('RUNTIME_CROSS_J_COMMAND_KIND_COLLISION');
+        }
+        existing.entityTxs.push(...command.entityTxs);
       }
     } else if (output.localRuntimeProtocol === 'cross-j') {
       throw new Error(
@@ -183,16 +197,89 @@ const routeCommittedEntityOutputs = (
   context.crossJCommandQueue.push(...commands);
 };
 
+export const shouldQueueCommittedAccountWork = (
+  entityFrameCommitted: boolean,
+  state: EntityState,
+  entityConsensusInFlight: boolean,
+  causedByAccountWork: boolean,
+): boolean =>
+  entityFrameCommitted &&
+  !entityConsensusInFlight &&
+  !causedByAccountWork &&
+  hasProposableAccount(state);
+
+export const collectReadyLocalAccountWorkTargets = (
+  replicas: Iterable<EntityReplica>,
+): Array<{ entityId: string; signerId: string }> => {
+  const targets = new Map<string, { entityId: string; signerId: string }>();
+  for (const replica of replicas) {
+    const entityId = normalizeRuntimeRef(replica.entityId);
+    const signerId = normalizeRuntimeRef(replica.signerId);
+    const activeValidatorId = normalizeRuntimeRef(
+      getEntityLeaderState(replica.state).activeValidatorId,
+    );
+    if (
+      signerId !== activeValidatorId ||
+      !shouldQueueCommittedAccountWork(
+        true,
+        replica.state,
+        Boolean(replica.proposal || replica.lockedFrame),
+        false,
+      )
+    ) {
+      continue;
+    }
+    targets.set(`${entityId}\0${signerId}`, { entityId, signerId });
+  }
+  return [...targets.values()].sort((left, right) =>
+    `${left.entityId}\0${left.signerId}`.localeCompare(
+      `${right.entityId}\0${right.signerId}`,
+    ));
+};
+
+const queueCommittedAccountWork = (
+  env: RuntimeReplica,
+  result: Awaited<ReturnType<typeof applyEntityInputToReplica>>,
+  context: RuntimeEntityInputBatchContext,
+  causedByAccountWork: boolean,
+): void => {
+  if (!result.entityFrameCommitted || causedByAccountWork) return;
+  // Cross-j Account readiness depends on sibling Entity state in this same
+  // Runtime. A later sibling commit must therefore re-check every small local
+  // Entity cohort, not only the Entity that just committed. This is O(Entity),
+  // never O(Account): hubs may own millions of Accounts but ordinarily host at
+  // most tens of Entity replicas. Empty previews are discarded before WAL.
+  for (const target of collectReadyLocalAccountWorkTargets(
+    env.state.eReplicas.values(),
+  )) {
+    if (context.crossJCommandQueue.some(command =>
+      command.kind === 'account-work' &&
+      command.targetEntityId === target.entityId &&
+      command.targetSignerId === target.signerId
+    )) {
+      continue;
+    }
+    context.crossJCommandQueue.push({
+      kind: 'account-work',
+      sourceEntityId: target.entityId,
+      targetEntityId: target.entityId,
+      targetSignerId: target.signerId,
+    });
+  }
+};
+
 export const collectCommittedEntityResult = (
   env: RuntimeReplica,
   replicaKey: string,
   result: Awaited<ReturnType<typeof applyEntityInputToReplica>>,
   context: RuntimeEntityInputBatchContext,
+  causedByAccountWork = false,
 ): void => {
   env.state.eReplicas.set(replicaKey, result.nextReplica);
   applyStorageChanges(env, result.nextReplica.state, result.storageChanges);
   publishEntityCandidateEffects(env, result.nextReplica, result.candidateEffects);
   routeCommittedEntityOutputs(env, result.outputs, context);
+  queueCommittedAccountWork(env, result, context, causedByAccountWork);
   if (result.jOutputs.length === 0) return;
   entityInputLog.debug('j_outputs.collected', {
     count: result.jOutputs.length,
@@ -219,13 +306,15 @@ export const drainImmediateCrossJurisdictionOutputs = async (
     }
     const signerId = command.targetSignerId;
     const input = commandToEntityInput(command);
-    const fingerprint = safeStringify(command);
-    if (fingerprints.has(fingerprint)) {
-      throw new Error(
-        `RUNTIME_CROSS_J_EVENT_CYCLE:round=${round}:entity=${input.entityId}`,
-      );
+    if (command.kind === 'entity-txs') {
+      const fingerprint = safeStringify(command);
+      if (fingerprints.has(fingerprint)) {
+        throw new Error(
+          `RUNTIME_CROSS_J_EVENT_CYCLE:round=${round}:entity=${input.entityId}`,
+        );
+      }
+      fingerprints.add(fingerprint);
     }
-    fingerprints.add(fingerprint);
     const replicaKey = findEntityReplicaKey(env, input.entityId, signerId);
     assertRuntimeEntityIngress(
       replicaKey,
@@ -250,7 +339,7 @@ export const drainImmediateCrossJurisdictionOutputs = async (
       signerId,
       options.isReplay,
       true,
-      true,
+      command.kind === 'entity-txs' ? 'cross-j' : 'account-work',
     );
     context.localCrossJurisdictionEventTrace.push(result.appliedInput);
     if (result.outcome.kind !== 'committed') {
@@ -273,7 +362,13 @@ export const drainImmediateCrossJurisdictionOutputs = async (
       result,
       { localEventRound: round },
     );
-    collectCommittedEntityResult(env, replicaKey, result, context);
+    collectCommittedEntityResult(
+      env,
+      replicaKey,
+      result,
+      context,
+      command.kind === 'account-work',
+    );
     cacheCommittedConsumptionNodeChanges(env, result.consumptionNodeChanges);
     cacheCommittedAccountJClaimNodeChanges(env, result.accountJClaimNodeChanges);
   }

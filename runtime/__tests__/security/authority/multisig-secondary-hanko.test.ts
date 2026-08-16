@@ -58,6 +58,19 @@ import type { ConsensusOutputOrigin, EntityTx } from '../../../types/entity-tx';
 import type { EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
+import {
+  createEntityFrameCandidateState,
+  cloneEntityState,
+} from '../../../entity/state-clone';
+import {
+  getEntityAccountForWrite,
+  putEntityAccountCandidate,
+} from '../../../entity/state/persistent-account-map';
+import { refreshRuntimeCheckpointLineageForEntity } from '../../../storage/replica/entity-lineage';
 
 const seed = 'multisig-secondary-hanko alpha beta gamma';
 const signerLabels = ['1', '2', '3'];
@@ -67,6 +80,17 @@ const threshold = 3n;
 const digest = (hex: string): string => `0x${hex.repeat(64)}`;
 const mutateHexTail = (value: string): string =>
   `${value.slice(0, -1)}${value.endsWith('0') ? '1' : '0'}`;
+
+const putCommittedAccount = (
+  state: EntityState,
+  counterpartyId: string,
+  account: AccountReplica,
+): void => {
+  if (!(state.accounts instanceof PersistentEntityAccountMap)) {
+    throw new Error('TEST_PERSISTENT_ACCOUNT_MAP_REQUIRED');
+  }
+  state.accounts = state.accounts.updated(counterpartyId, account);
+};
 
 const buildGenericOrigin = (
   sourceEntityId: string,
@@ -111,6 +135,7 @@ const buildUnverifiedBoardResealTx = (
       chainId: 31_337,
       depositoryAddress: `0x${'dd'.repeat(20)}`,
     },
+    disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     reseal: {
       height: 1,
       frameHash: digest('0'),
@@ -171,11 +196,11 @@ const createMultisigAccountState = (
         chainId: jurisdiction.chainId,
         depositoryAddress: jurisdiction.depositoryAddress,
       },
-      deltas: new Map(),
-      locks: new Map(),
-      swapOffers: new Map(),
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
+      deltas: PersistentAccountStateMap.empty('deltas'),
+      locks: PersistentAccountStateMap.empty('locks'),
+      swapOffers: PersistentAccountStateMap.empty('swapOffers'),
+      requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+      requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
@@ -201,10 +226,11 @@ const createMultisigAccountState = (
     rollbackCount: 0,
     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    pendingWithdrawals: new Map(),
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
-    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+    pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+    shadow: { rebalance: {
+      policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+      submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+    } },
   };
   const state = {
     entityId,
@@ -220,10 +246,13 @@ const createMultisigAccountState = (
       jurisdiction,
     },
     reserves: new Map(),
-    accounts: new Map([[counterpartyId, account]]),
+    accounts: PersistentEntityAccountMap.fromMap(
+      new Map([[counterpartyId, account]]),
+      entityId,
+      computeEntityAccountValueHash,
+    ),
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: { name: 'Multisig entity', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
@@ -257,7 +286,7 @@ const createMultisigAccountState = (
         shares: { [counterpartySigner]: 1n },
         jurisdiction,
       },
-      accounts: new Map(),
+      accounts: PersistentEntityAccountMap.empty(counterpartyId, computeEntityAccountValueHash),
     },
   });
   return { env, state, replica, entityId, counterpartyId };
@@ -284,7 +313,7 @@ const installCertifiedOutputTargetAccount = (
   if (existing) return existing;
   const sourceAccount = source.state.accounts.get(source.counterpartyId);
   if (!sourceAccount) throw new Error('TEST_SOURCE_ACCOUNT_MISSING');
-  const account = structuredClone(sourceAccount);
+  const account = forkAccountReplicaShell(sourceAccount);
   const [leftEntity, rightEntity] = [source.entityId, targetEntityId].sort();
   account.state.leftEntity = leftEntity;
   account.state.rightEntity = rightEntity;
@@ -307,7 +336,7 @@ const installCertifiedOutputTargetAccount = (
   account.mempool = [];
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  targetState.accounts.set(source.entityId, account);
+  putCommittedAccount(targetState, source.entityId, account);
   return account;
 };
 
@@ -350,7 +379,7 @@ const buildCertifiedCrossJTx = (
 describe('multisig secondary Hanko production', () => {
   test('invalidates the old Hanko when replacing a local dispute draft', () => {
     const setup = createMultisigAccountState();
-    const account = setup.state.accounts.get(setup.counterpartyId);
+    const account = forkAccountReplicaShell(setup.state.accounts.get(setup.counterpartyId)!);
     if (!account) throw new Error('TEST_ACCOUNT_MISSING');
     account.currentDisputeHash = digest('a');
     account.currentDisputeProofBodyHash = digest('b');
@@ -452,14 +481,14 @@ describe('multisig secondary Hanko production', () => {
     const target = source.env.state.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
     const sharedGenesis = source.state.accounts.get(source.counterpartyId);
     if (!target || !sharedGenesis) throw new Error('TEST_SINGLE_SIGNER_ACCOUNT_PAIR_MISSING');
-    const targetGenesis = structuredClone(sharedGenesis);
+    const targetGenesis = forkAccountReplicaShell(sharedGenesis);
     targetGenesis.proofHeader = {
       ...targetGenesis.proofHeader,
       fromEntity: source.counterpartyId,
       toEntity: source.entityId,
     };
     targetGenesis.currentFrame.byLeft = source.counterpartyId === targetGenesis.state.leftEntity;
-    target.state.accounts.set(source.entityId, targetGenesis);
+    putCommittedAccount(target.state, source.entityId, targetGenesis);
 
     const committed = await applyEntityInput(source.env, source.replica, {
       entityId: source.entityId,
@@ -509,11 +538,14 @@ describe('multisig secondary Hanko production', () => {
     const source = createMultisigAccountState(validators[0]);
     const target = source.env.state.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
     if (!target) throw new Error('TEST_TARGET_REPLICA_MISSING');
-    const account = installCertifiedOutputTargetAccount(
+    installCertifiedOutputTargetAccount(
       source,
       target.state,
       source.counterpartyId,
     );
+    target.state = createEntityFrameCandidateState(target.state);
+    const account = getEntityAccountForWrite(target.state.accounts, source.entityId);
+    if (!account) throw new Error('TEST_TARGET_ACCOUNT_MISSING');
     const proofBodyHash = digest('b');
     const proofNonce = 1;
     const proposerIsLeft = source.entityId === account.state.leftEntity;
@@ -1098,9 +1130,16 @@ describe('multisig secondary Hanko production', () => {
     expect(restoredState.consumptionAccumulator).toEqual(
       firstDelivery.workingReplica.state.consumptionAccumulator,
     );
+    // Entity frames are certified inside a Runtime frame. Before a later
+    // Runtime input can advance the same replica, the prior certified head is
+    // atomically rebased into its durable checkpoint anchor.
+    proposer.env.state.eReplicas.set(targetKey, firstDelivery.workingReplica);
+    refreshRuntimeCheckpointLineageForEntity(proposer.env, proposer.counterpartyId);
+    const rebasedReplica = proposer.env.state.eReplicas.get(targetKey);
+    if (!rebasedReplica) throw new Error('TEST_REBASED_TARGET_REPLICA_MISSING');
     const duplicateDelivery = await applyEntityInput(
       proposer.env,
-      { ...firstDelivery.workingReplica, state: restoredState },
+      { ...rebasedReplica, state: restoredState },
       structuredClone(certifiedInput),
     );
     cacheCommittedConsumptionNodeChanges(proposer.env, duplicateDelivery.consumptionNodeChanges);
@@ -1109,7 +1148,11 @@ describe('multisig secondary Hanko production', () => {
       .map(([counterpartyId, account]) => [counterpartyId, projectAccountDoc(account)]));
     expect(safeStringify(accountAfterDuplicate)).toBe(safeStringify(accountAfterFirst));
     expect(readEntityFrameEventMessages(duplicateDelivery.workingReplica.state)).toEqual([]);
-    const quarantinedDelivery = await applyEntityInput(proposer.env, duplicateDelivery.workingReplica, {
+    proposer.env.state.eReplicas.set(targetKey, duplicateDelivery.workingReplica);
+    refreshRuntimeCheckpointLineageForEntity(proposer.env, proposer.counterpartyId);
+    const twiceRebasedReplica = proposer.env.state.eReplicas.get(targetKey);
+    if (!twiceRebasedReplica) throw new Error('TEST_TWICE_REBASED_TARGET_REPLICA_MISSING');
+    const quarantinedDelivery = await applyEntityInput(proposer.env, twiceRebasedReplica, {
       ...structuredClone(certifiedInput),
       entityTxs: [{
         type: 'consensusOutput',
@@ -1122,7 +1165,11 @@ describe('multisig secondary Hanko production', () => {
       }],
     });
     expect(quarantinedDelivery.outcome.kind).toBe('committed');
-    expect(safeStringify(quarantinedDelivery.workingReplica.state.accounts)).toBe(safeStringify(accountAfterFirst));
+    const accountAfterQuarantine = new Map(
+      Array.from(quarantinedDelivery.workingReplica.state.accounts.entries())
+        .map(([counterpartyId, account]) => [counterpartyId, projectAccountDoc(account)]),
+    );
+    expect(safeStringify(accountAfterQuarantine)).toBe(safeStringify(accountAfterFirst));
     expect(readEntityFrameEventMessages(quarantinedDelivery.workingReplica.state)).toEqual([]);
     cacheCommittedConsumptionNodeChanges(proposer.env, quarantinedDelivery.consumptionNodeChanges);
     expect(quarantinedDelivery.workingReplica.state.consumptionAccumulator?.count).toBe(1n);
@@ -1239,14 +1286,14 @@ describe('multisig secondary Hanko production', () => {
       entityId: targetEntityId,
       entityEncryptionPublicKey: targetEncryptionPublicKey,
       config: targetConfig,
-      accounts: new Map(),
+      accounts: PersistentEntityAccountMap.empty(targetEntityId, computeEntityAccountValueHash),
       leaderState: { activeValidatorId: targetValidators[0]!, view: 0, changedAtHeight: 0 },
     };
     const targetLeader: EntityReplica = {
       entityId: targetEntityId,
       signerId: targetValidators[0]!,
       entityEncPubKey: '',
-      state: structuredClone(targetTemplate),
+      state: cloneEntityState(targetTemplate),
       mempool: [],
       isProposer: true,
     };
@@ -1254,7 +1301,7 @@ describe('multisig secondary Hanko production', () => {
       entityId: targetEntityId,
       signerId: targetValidators[1]!,
       entityEncPubKey: '',
-      state: structuredClone(targetTemplate),
+      state: cloneEntityState(targetTemplate),
       mempool: [],
       isProposer: false,
     };
@@ -1266,7 +1313,7 @@ describe('multisig secondary Hanko production', () => {
       targetLeader.state,
       targetEntityId,
     )];
-    targetFollower.state.accounts = structuredClone(targetLeader.state.accounts);
+    targetFollower.state.accounts = targetLeader.state.accounts;
     const origin = buildGenericOrigin(
       source.entityId,
       targetEntityId,
@@ -1335,6 +1382,7 @@ describe('multisig secondary Hanko production', () => {
           chainId: 31_337,
           depositoryAddress: `0x${'dd'.repeat(20)}`,
         },
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         disputeSeal: {
           hanko: '0x01',
           hash: digest('8'),
@@ -1442,7 +1490,9 @@ describe('multisig secondary Hanko production', () => {
 
   test('seals ACK and next proposal drafts in semantic order with exact frame and dispute Hankos', async () => {
     const setup = createMultisigAccountState();
-    const account = setup.state.accounts.get(setup.counterpartyId);
+    setup.state = createEntityFrameCandidateState(setup.state);
+    setup.replica.state = setup.state;
+    const account = getEntityAccountForWrite(setup.state.accounts, setup.counterpartyId);
     if (!account) throw new Error('TEST_ACCOUNT_MISSING');
     const ackFrameHash = digest('a');
     const proposalFrameHash = digest('b');
@@ -1454,6 +1504,8 @@ describe('multisig secondary Hanko production', () => {
       kind: 'frame_ack',
       fromEntityId: setup.entityId,
       toEntityId: setup.counterpartyId,
+      domain: account.state.domain,
+      disputeConfig: account.state.disputeConfig,
       ack: {
         height: 1,
         frameHash: ackFrameHash,
@@ -1507,12 +1559,17 @@ describe('multisig secondary Hanko production', () => {
       entityTxs: [{ type: 'accountInput' as const, data: routed }],
     }];
     expect(attachHankoWitnessToOutputs(outputs, [], hankos, 1, setup.state)).toBe(4);
-    expect(routed.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
-    expect(routed.proposal.frameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
-    expect(routed.ack.disputeSeal?.hanko).toBe(hankos.get(ackDisputeHash)?.hanko);
-    expect(routed.proposal.disputeSeal?.hanko).toBe(hankos.get(proposalDisputeHash)?.hanko);
+    const sealedTx = outputs[0]?.entityTxs?.[0];
+    if (sealedTx?.type !== 'accountInput') throw new Error('TEST_SEALED_ACCOUNT_OUTPUT_MISSING');
+    const sealedRouted = sealedTx.data;
+    if (sealedRouted.kind !== 'frame_ack') throw new Error('TEST_SEALED_FRAME_ACK_MISSING');
+    expect(routed.ack.frameHanko).toBeUndefined();
+    expect(sealedRouted.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
+    expect(sealedRouted.proposal.frameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
+    expect(sealedRouted.ack.disputeSeal?.hanko).toBe(hankos.get(ackDisputeHash)?.hanko);
+    expect(sealedRouted.proposal.disputeSeal?.hanko).toBe(hankos.get(proposalDisputeHash)?.hanko);
 
-    sealHankoWitnessInState(setup.state, hankos, 1);
+    sealHankoWitnessInState(setup.state, hankos, 1, [setup.counterpartyId]);
     expect(account.lastOutboundFrameAck.response.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
     expect(account.pendingAccountInput.proposal.frameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
     expect(account.currentFrameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
@@ -1521,7 +1578,7 @@ describe('multisig secondary Hanko production', () => {
     // A later Entity frame may leave the same already-certified ACK/proposal in
     // state. It must reuse that exact older witness instead of pretending the
     // secondary hash was signed again at the new Entity height.
-    expect(() => sealHankoWitnessInState(setup.state, hankos, 2)).not.toThrow();
+    expect(() => sealHankoWitnessInState(setup.state, hankos, 2, [setup.counterpartyId])).not.toThrow();
     expect(account.lastOutboundFrameAck.response.ack.frameHanko).toBe(hankos.get(ackFrameHash)?.hanko);
     expect(account.pendingAccountInput.proposal.frameHanko).toBe(hankos.get(proposalFrameHash)?.hanko);
 
@@ -1531,22 +1588,24 @@ describe('multisig secondary Hanko production', () => {
       ...originalAckWitness,
       hanko: `${originalAckWitness.hanko}00` as HankoWitnessEntry['hanko'],
     });
-    expect(() => sealHankoWitnessInState(setup.state, hankos, 2))
+    expect(() => sealHankoWitnessInState(setup.state, hankos, 2, [setup.counterpartyId]))
       .toThrow('HANKO_WITNESS_VALUE_MISMATCH');
     hankos.set(ackFrameHash, { ...originalAckWitness, entityHeight: 3 });
-    expect(() => sealHankoWitnessInState(setup.state, hankos, 2))
+    expect(() => sealHankoWitnessInState(setup.state, hankos, 2, [setup.counterpartyId]))
       .toThrow('HANKO_WITNESS_BINDING_MISMATCH');
     hankos.set(ackFrameHash, originalAckWitness);
   });
 
   test('binds two same-height settlement drafts to their distinct exact digests', async () => {
     const setup = createMultisigAccountState();
-    const firstAccount = setup.state.accounts.get(setup.counterpartyId);
+    setup.state = createEntityFrameCandidateState(setup.state);
+    setup.replica.state = setup.state;
+    const firstAccount = getEntityAccountForWrite(setup.state.accounts, setup.counterpartyId);
     if (!firstAccount) throw new Error('TEST_ACCOUNT_MISSING');
     const secondSigner = deriveSignerAddressSync(seed, '5').toLowerCase();
     const secondCounterpartyId = generateLazyEntityId([secondSigner], 1n).toLowerCase();
     const [secondLeft, secondRight] = [setup.entityId, secondCounterpartyId].sort();
-    const secondAccount = structuredClone(firstAccount);
+    const secondAccount = forkAccountReplicaShell(firstAccount);
     secondAccount.state.leftEntity = secondLeft;
     secondAccount.state.rightEntity = secondRight;
     secondAccount.proofHeader = {
@@ -1554,7 +1613,7 @@ describe('multisig secondary Hanko production', () => {
       fromEntity: setup.entityId,
       toEntity: secondCounterpartyId,
     };
-    setup.state.accounts.set(secondCounterpartyId, secondAccount);
+    putEntityAccountCandidate(setup.state.accounts, secondCounterpartyId, secondAccount);
 
     const firstHash = digest('e');
     const secondHash = digest('f');
@@ -1616,7 +1675,12 @@ describe('multisig secondary Hanko production', () => {
       });
     }
 
-    expect(sealHankoWitnessInState(setup.state, witness, 1)).toBe(4);
+    expect(sealHankoWitnessInState(
+      setup.state,
+      witness,
+      1,
+      [setup.counterpartyId, secondCounterpartyId],
+    )).toBe(4);
     if (firstSeal.data.kind !== 'seal' || secondSeal.data.kind !== 'seal') {
       throw new Error('TEST_SETTLEMENT_SEAL_INVALID');
     }

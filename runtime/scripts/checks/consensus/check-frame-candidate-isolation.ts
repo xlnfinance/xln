@@ -27,6 +27,9 @@ if (
 if (frameApplication.includes('cloneEntityState(normalized)')) {
   throw new Error('ENTITY_FRAME_FULL_STATE_CLONE_FORBIDDEN');
 }
+if (!/export const applyRuntimeOwnedEntityFrame[\s\S]*?frameTimestamp,\s*true,\s*\);/.test(frameApplication)) {
+  throw new Error('SINGLE_SIGNER_ENTITY_CANDIDATE_BOUNDARY_MISSING');
+}
 if (!singleSigner.includes('? applyRuntimeOwnedEntityFrame')) {
   throw new Error('SINGLE_SIGNER_CROSS_J_RUNTIME_OWNED_FRAME_MISSING');
 }
@@ -47,7 +50,7 @@ if (
   throw new Error('ORDINARY_ENTITY_INPUT_CANDIDATE_BOUNDARY_MISSING');
 }
 if (
-  !/applyEntityInputToReplica\([\s\S]*?options\.isReplay,\s*true,\s*true,?\s*\)/.test(
+  !/applyEntityInputToReplica\([\s\S]*?options\.isReplay,\s*true,\s*command\.kind === 'entity-txs' \? 'cross-j' : 'account-work',?\s*\)/.test(
     entityInputOutput,
   )
 ) {
@@ -55,7 +58,7 @@ if (
 }
 
 console.log(
-  '✅ Ordinary Entity inputs use touched candidates; Runtime-private Cross-J retains owned-State apply',
+  '✅ Every Entity frame uses a dirty-path candidate; no Runtime-owned mutation shortcut',
 );
 
 export {};

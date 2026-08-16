@@ -23,6 +23,7 @@ import type { AccountTx } from '../../../../types/account';
 import { QUOTE_EXPIRY_MS } from '../../../../types/finance/rebalance';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
+import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { batchAddReserveToCollateral, initJBatch } from '../../../../jurisdiction/machine/batch';
 import { createStructuredLogger, formatAmount, shortId } from '../../../../infra/logger';
 import { getReserveCandidateIssue } from './j-batch-reserve-admission';
@@ -49,12 +50,12 @@ const collectRebalanceFee = (
     addMessage(state, '❌ Rebalance fee unsupported for remote reserve → account deposits');
     return false;
   }
-  const account = state.accounts.get(counterpartyId);
-  const quote = account?.shadow.rebalance.activeQuote;
+  const visible = state.accounts.get(counterpartyId);
+  const quote = visible?.shadow.rebalance.activeQuote;
   r2cLog.debug('quote.validate', {
     entity: shortId(originalState.entityId),
     counterparty: shortId(counterpartyId),
-    hasAccount: Boolean(account),
+    hasAccount: Boolean(visible),
     quote: quote
       ? {
         quoteId: quote.quoteId,
@@ -77,7 +78,9 @@ const collectRebalanceFee = (
     return false;
   }
   if (originalState.timestamp > quote.quoteId + QUOTE_EXPIRY_MS) {
-    delete account!.shadow.rebalance.activeQuote;
+    const account = getEntityAccountForWrite(state.accounts, counterpartyId);
+    if (!account) throw new Error(`R2C_QUOTE_WRITE_ACCOUNT_MISSING:${counterpartyId}`);
+    delete account.shadow.rebalance.activeQuote;
     addMessage(state, `❌ Rebalance fee: quote expired (age: ${originalState.timestamp - quote.quoteId}ms)`);
     return false;
   }
@@ -106,7 +109,9 @@ const collectRebalanceFee = (
       },
     });
   }
-  delete account!.shadow.rebalance.activeQuote;
+  const account = getEntityAccountForWrite(state.accounts, counterpartyId);
+  if (!account) throw new Error(`R2C_QUOTE_WRITE_ACCOUNT_MISSING:${counterpartyId}`);
+  delete account.shadow.rebalance.activeQuote;
   r2cLog.debug('fee.collected', {
     entity: shortId(originalState.entityId),
     counterparty: shortId(counterpartyId),

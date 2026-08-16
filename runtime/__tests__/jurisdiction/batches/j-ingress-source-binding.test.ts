@@ -79,7 +79,6 @@ const entityReplica = (
     accounts: new Map(),
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: { name: 'source-bound', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,

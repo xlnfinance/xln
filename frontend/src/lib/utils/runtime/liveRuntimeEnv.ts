@@ -49,9 +49,8 @@ export function isRuntimeLikeEnv(value: unknown): value is RuntimeReplica {
   if (!value || typeof value !== 'object') return false;
   const env = value as {
     state?: { eReplicas?: unknown; jReplicas?: unknown };
-    history?: unknown;
   };
-  return env.state?.eReplicas instanceof Map && env.state.jReplicas instanceof Map && Array.isArray(env.history);
+  return env.state?.eReplicas instanceof Map && env.state.jReplicas instanceof Map;
 }
 
 export function attachLiveRuntimeEnv<T extends object>(viewEnv: T, liveEnv: RuntimeReplica): T {
@@ -74,9 +73,7 @@ export function createDetachedRuntimeViewEnv(liveEnv: RuntimeReplica): RuntimeRe
     // add work to headless hubs or to the consensus transition.
     state: structuredClone(liveEnv.state),
     runtimeMempool: structuredClone(liveEnv.runtimeMempool),
-    history: structuredClone(liveEnv.history),
     gossip: createDetachedGossip(liveEnv),
-    frameLogs: structuredClone(liveEnv.frameLogs),
     ...(liveEnv.overlay ? { overlay: structuredClone(liveEnv.overlay) } : {}),
     ...(liveEnv.runtimeConfig ? { runtimeConfig: structuredClone(liveEnv.runtimeConfig) } : {}),
     ...(liveEnv.browserVMState ? { browserVMState: structuredClone(liveEnv.browserVMState) } : {}),

@@ -9,7 +9,8 @@ import type {
   CrossSwapFillAckTx,
   PreparedCrossSwapFillAck,
 } from './types';
-import type { AccountReplica } from '../../../../../types/account';
+import type { AccountDraftReplica } from '../../../../state/account-state-draft';
+import { cloneCrossJurisdictionSwapOfferRoute } from '../../../../../extensions/cross-j';
 import { accountTxValidationRejected } from '../../../apply-result';
 
 const reject = (
@@ -21,7 +22,7 @@ const reject = (
 });
 
 export const prepareCrossSwapFillAck = (
-  account: AccountReplica,
+  account: AccountDraftReplica,
   tx: CrossSwapFillAckTx,
   byLeft: boolean,
 ): CrossSwapFillAckAdmission => {
@@ -37,8 +38,9 @@ export const prepareCrossSwapFillAck = (
   } catch (error) {
     return reject(events, error instanceof Error ? error.message : String(error));
   }
-  const offer = account.state.swapOffers?.get(tx.data.offerId);
-  if (!offer) return reject(events, `Offer ${tx.data.offerId} not found`);
+  const committedOffer = account.state.swapOffers.get(tx.data.offerId);
+  if (!committedOffer) return reject(events, `Offer ${tx.data.offerId} not found`);
+  const offer = cloneCrossJurisdictionSwapOfferRoute(committedOffer);
   if (!offer.crossJurisdiction) {
     return reject(
       events,

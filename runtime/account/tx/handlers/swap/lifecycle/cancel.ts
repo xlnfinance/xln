@@ -13,7 +13,6 @@
 
 import type { AccountReplica, AccountTx } from '../../../../../types/account';
 import { createStructuredLogger, shortOrder } from '../../../../../infra/logger';
-import { recordSwapCancelRequested } from './history';
 import type { ApplyAccountTxResult } from '../../../apply-types';
 import { accountTxSwapCancelRequested, accountTxValidationRejected } from '../../../apply-result';
 
@@ -48,6 +47,5 @@ export async function handleSwapCancelRequest(
   // 3. Emit request event (used by hub orderbook cancel flow)
   events.push(`📨 Swap cancel requested: ${offerId.slice(0, 8)}...`);
   swapCancelLog.debug('cancel_request.accepted', { offer: shortOrder(offerId, 8), phase: isValidation ? 'validation' : 'commit' });
-  recordSwapCancelRequested(account, offerId, _currentHeight);
   return accountTxSwapCancelRequested(events, offerId);
 }

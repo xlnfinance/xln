@@ -4,6 +4,7 @@ import { writeRuntimeMetadata } from '../../../runtime/loop/loop-environment.ts'
 import type { RuntimeReplica } from '../../../runtime/types';
 import {
   listStorageSnapshotHeights,
+  readHistoryViewRuntimeActivity,
   readStorageFrameRecord,
   reconcileHistoryViews,
   resolveStorageRuntimeConfig,
@@ -20,6 +21,7 @@ import { verifyPersistedFrameState } from '../verify';
 type ReplayTarget = {
   latestHeight: number;
   targetHeight: number;
+  selectedCheckpointHeight: number;
   selectedSnapshotHeight: number;
 };
 
@@ -60,8 +62,23 @@ const resolveReplayTarget = async (
     );
     const selectedSnapshotHeight =
       await reads.resolvePersistedSnapshotHeight(env, targetHeight);
-    if (selectedSnapshotHeight > 0) {
-      return { latestHeight, targetHeight, selectedSnapshotHeight };
+    const selectedMaterializedHeight = (await reads.listPersistedStorageHandles(env))
+      .reduce((highest, handle) => (
+        handle.latestMaterializedHeight <= targetHeight
+          ? Math.max(highest, handle.latestMaterializedHeight)
+          : highest
+      ), 0);
+    const selectedCheckpointHeight = Math.max(
+      selectedSnapshotHeight,
+      selectedMaterializedHeight,
+    );
+    if (selectedCheckpointHeight > 0) {
+      return {
+        latestHeight,
+        targetHeight,
+        selectedCheckpointHeight,
+        selectedSnapshotHeight,
+      };
     }
     const latestSnapshotHeight =
       await reads.resolvePersistedSnapshotHeight(env, latestHeight);
@@ -109,11 +126,9 @@ const restoreActivityViews = async (
   env: RuntimeReplica,
   targetHeight: number,
 ): Promise<void> => {
-  // Activity is a rebuildable read model. Deferred Runtime input remains owned
-  // by the authoritative WAL frame and must never be erased by view hydration.
+  // Activity is a rebuildable read model. This restores only the committed
+  // storage overlay; callers query activity from the history-view database.
   await reads.restoreOverlayFromFrameLog(env, targetHeight);
-  const frame = await reads.readPersistedStorageFrameRecord(env, targetHeight);
-  env.frameLogs = frame?.activityLogs.map(entry => ({ ...entry })) ?? [];
 };
 
 const reconcileMaterializedHistory = async (
@@ -134,6 +149,7 @@ const reconcileMaterializedHistory = async (
     firstWalHeight: snapshots[0] ?? 1,
     latestWalHeight: latestHeight,
     readWalFrame: height => readStorageFrameRecord(walDb, height),
+    readWalActivity: height => readHistoryViewRuntimeActivity(walDb, height),
     config: resolveStorageRuntimeConfig(env),
   });
 };
@@ -152,15 +168,14 @@ const finalizeReplay = async (
   );
   await assertCertifiedRegistrationEvidenceStore(restored.env);
   writeRuntimeMetadata(restored.env, '__replayMeta', {
-    checkpointHeight: target.selectedSnapshotHeight,
+    checkpointHeight: target.selectedCheckpointHeight,
     selectedSnapshotHeight: target.selectedSnapshotHeight,
     selectedSnapshotLabel:
-      target.selectedSnapshotHeight <= 1
+      target.selectedCheckpointHeight <= 1
         ? 'genesis:1'
-        : `checkpoint:${target.selectedSnapshotHeight}`,
+        : `checkpoint:${target.selectedCheckpointHeight}`,
     latestHeight: target.latestHeight,
   });
-  restored.env.history = [];
 };
 
 export const createRuntimeReplayLoader = (
@@ -185,7 +200,7 @@ export const createRuntimeReplayLoader = (
   const restored = await loadPersistedRuntime(
     runtimeId,
     runtimeSeed,
-    target.selectedSnapshotHeight,
+    target.selectedCheckpointHeight,
     options,
   );
   if (!restored) return null;
@@ -193,7 +208,7 @@ export const createRuntimeReplayLoader = (
   try {
     let targetFrame: RuntimeFrame | null = null;
     for (
-      let height = target.selectedSnapshotHeight;
+      let height = target.selectedCheckpointHeight;
       height <= target.targetHeight;
       height += 1
     ) {
@@ -205,10 +220,11 @@ export const createRuntimeReplayLoader = (
         throw new Error(`STORAGE_RESTORE_FRAME_MISSING:height=${height}`);
       }
       targetFrame = frame;
-      if (height > target.selectedSnapshotHeight) {
+      if (height > target.selectedCheckpointHeight) {
+        const payloads = await reads.readPersistedStorageFramePayloads(restored.env, frame);
         await deps.replayRecoveryFrameJournals(
           restored.env,
-          [buildRecoveryJournalFromStorageFrame(frame)],
+          [buildRecoveryJournalFromStorageFrame(frame, payloads)],
         );
       }
     }
@@ -227,7 +243,7 @@ export const createRuntimeReplayLoader = (
       await reconcileMaterializedHistory(deps, restored.env, target.latestHeight);
     }
     restored.latestHeight = target.latestHeight;
-    restored.checkpointHeight = target.selectedSnapshotHeight;
+    restored.checkpointHeight = target.selectedCheckpointHeight;
     restored.selectedSnapshotHeight = target.selectedSnapshotHeight;
     returningEnv = true;
     return restored;

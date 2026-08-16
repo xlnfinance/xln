@@ -59,7 +59,6 @@ const makeState = (entityId: string, signerId: string): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: entityId === ALICE ? 'Alice' : 'Bob',
     isHub: false,

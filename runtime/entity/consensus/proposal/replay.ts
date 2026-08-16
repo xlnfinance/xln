@@ -1,6 +1,7 @@
 import { logError, shortHash } from '../../../infra/logger';
 import type { EntityState, EntityFrame, EntityCandidate } from '../../types';
 import { applyEntityFrame } from '../frame/application';
+import { copyProposableAccounts } from '../account/touched-accounts';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from '../frame';
 import {
   buildEntityHashesToSign,
@@ -178,6 +179,7 @@ export const replayProposedEntityFrame = async (
     candidateEffects,
     events,
     storageChanges,
+    proposableAccounts,
     consumptionNodeChanges,
     accountJClaimNodeChanges,
   } = applied;
@@ -221,6 +223,7 @@ export const replayProposedEntityFrame = async (
       hashesToSign,
       candidateEffects,
       storageChanges,
+      proposableAccounts: copyProposableAccounts(proposableAccounts),
       ...(consumptionNodeChanges ? { consumptionNodeChanges } : {}),
       ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
     },

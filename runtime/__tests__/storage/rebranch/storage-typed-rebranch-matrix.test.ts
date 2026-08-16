@@ -1,9 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import {
-  validateStorageBookDocValue,
-  validateStorageEntityCoreDocValue,
-} from '../../../storage/schema/authoritative-schema';
+import { validateStorageEntityCoreDocValue } from '../../../storage/schema/authoritative-schema';
+import { validateStorageBookDocValue } from '../../../storage/schema/schema-state-docs';
 import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/codec';
 import { prepareStorageStateHashes } from '../../../storage/hashes';
 import {

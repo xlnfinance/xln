@@ -197,13 +197,14 @@ const buildExpectedMarketMakerCrossRouteGroups = (
   tokenIdsByContext: MarketMakerTokenIdsByContext,
 ): Map<string, MarketMakerCrossHealthRouteGroup> => {
   const groups = new Map<string, MarketMakerCrossHealthRouteGroup>();
-  for (const sourceContext of contexts) {
+  const crossContexts = contexts.filter(context => context.samePairIndex === 0);
+  for (const sourceContext of crossContexts) {
     const sourceJurisdictionRef = sourceContext.jurisdictionRef;
     const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
     if (!sourceJurisdictionRef || sourceTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
     const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
     if (sourceHubs.length === 0) continue;
-    for (const targetContext of contexts) {
+    for (const targetContext of crossContexts) {
       const targetJurisdictionRef = targetContext.jurisdictionRef;
       if (
         sourceContext.entityId === targetContext.entityId ||
@@ -282,13 +283,14 @@ export const buildMarketMakerCrossPlanSummary = (
   let expectedJobs = 0;
   let expectedRoutes = 0;
   let maxPairsPerRoute = 0;
-  for (const sourceContext of contexts) {
+  const crossContexts = contexts.filter(context => context.samePairIndex === 0);
+  for (const sourceContext of crossContexts) {
     const sourceJurisdictionRef = sourceContext.jurisdictionRef;
     const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
     if (!sourceJurisdictionRef || sourceTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
     const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
     if (sourceHubs.length === 0) continue;
-    for (const targetContext of contexts) {
+    for (const targetContext of crossContexts) {
       const targetJurisdictionRef = targetContext.jurisdictionRef;
       if (
         sourceContext.entityId === targetContext.entityId ||
@@ -930,9 +932,16 @@ export const getMarketMakerHealth = (
     tokenIdsByContext: MarketMakerTokenIdsByContext;
   },
   crossOverride?: MarketMakerHealth['cross'],
+  sameQuoteContexts: readonly MarketMakerEntityContext[] = [],
 ): MarketMakerHealth => {
   const pairs = buildDefaultEntitySwapPairs(tokenIds);
-  const desiredSpecs = buildMarketMakerOfferSpecs(hubEntityIds, tokenIds);
+  const quoteContexts = sameQuoteContexts.length > 0
+    ? [...sameQuoteContexts]
+    : [];
+  const desiredSpecs = quoteContexts.length > 0
+    ? quoteContexts.flatMap(context =>
+        buildMarketMakerOfferSpecs(hubEntityIds, tokenIds, context.samePairIndex))
+    : buildMarketMakerOfferSpecs(hubEntityIds, tokenIds);
   const cross = crossOverride ?? (crossOptions
     ? buildMarketMakerCrossHealth(env, crossOptions.contexts, crossOptions.visibleHubs, crossOptions.tokenIdsByContext)
     : {
@@ -973,13 +982,37 @@ export const getMarketMakerHealth = (
   }
 
   const hubs = hubEntityIds.map((hubEntityId) => {
-    const account = getAccountReplica(env, mmEntityId, hubEntityId);
-    const blocker = describeMarketMakerSameHubBlocker(env, mmEntityId, hubEntityId);
-    const accountReady = !blocker && hasCommittedAccountState(account);
-    const offers = countCommittedMarketMakerOffersForHub(env, mmEntityId, hubEntityId);
+    const contextsForHub = quoteContexts.length > 0
+      ? quoteContexts
+      : [{ entityId: mmEntityId, samePairIndex: 0 }];
+    const blockers = contextsForHub.flatMap(context => {
+      const blocker = context.entityId
+        ? describeMarketMakerSameHubBlocker(env, context.entityId, hubEntityId)
+        : null;
+      return blocker ? [blocker] : [];
+    });
+    const offers = contextsForHub.reduce(
+      (total, context) => total + (
+        context.entityId
+          ? countCommittedMarketMakerOffersForHub(env, context.entityId, hubEntityId)
+          : 0
+      ),
+      0,
+    );
     const expectedHubOffers = expectedOffersByHub.get(hubEntityId) || 0;
-    const pairHealth = pairs.map((pair) => {
-      const pairOffers = countCommittedMarketMakerOffersForHubPair(env, mmEntityId, hubEntityId, pair);
+    const pairHealth = pairs.map((pair, pairIndex) => {
+      const context = contextsForHub.find(candidate => candidate.samePairIndex === pairIndex);
+      const account = context?.entityId
+        ? getAccountReplica(env, context.entityId, hubEntityId)
+        : null;
+      const accountReady = Boolean(
+        context?.entityId
+        && !describeMarketMakerSameHubBlocker(env, context.entityId, hubEntityId)
+        && hasCommittedAccountState(account),
+      );
+      const pairOffers = context?.entityId
+        ? countCommittedMarketMakerOffersForHubPair(env, context.entityId, hubEntityId, pair)
+        : 0;
       const expectedPairOffers = expectedOffersByHubPair.get(`${hubEntityId}:${pair.pairId}`) || 0;
       return {
         pairId: pair.pairId,
@@ -992,9 +1025,9 @@ export const getMarketMakerHealth = (
     return {
       hubEntityId,
       offers,
-      ready: accountReady && expectedHubOffers > 0 && pairHealth.every((pair) => pair.ready),
-      depthReady: accountReady && expectedHubOffers > 0 && offers === expectedHubOffers && pairHealth.every((pair) => pair.depthReady),
-      blockers: blocker ? [blocker] : [],
+      ready: expectedHubOffers > 0 && pairHealth.every((pair) => pair.ready),
+      depthReady: expectedHubOffers > 0 && offers === expectedHubOffers && pairHealth.every((pair) => pair.depthReady),
+      blockers,
       pairs: pairHealth,
     };
   });

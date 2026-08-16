@@ -14,6 +14,8 @@ import {
 } from '../../../account/consensus/index';
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../../../account/commitment/state-root';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
 
 import { resolveCertifiedAccountCounterpartyProposer } from '../../../runtime/routing/account-counterparty-route';
 
@@ -350,21 +352,19 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
         entityId: leftEntity,
         counterpartyId: rightEntity,
       }),
-      deltas: new Map(),
-      locks: new Map(),
-      swapOffers: new Map(),
+      deltas: PersistentAccountStateMap.empty('deltas'),
+      locks: PersistentAccountStateMap.empty('locks'),
+      swapOffers: PersistentAccountStateMap.empty('swapOffers'),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
+      requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
+      requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
     },
     status: 'active',
     mempool: [...mempool],
-    swapOrderHistory: new Map(),
-    swapClosedOrders: new Map(),
     currentFrame: {
       height: 0,
       timestamp: 0,
@@ -381,8 +381,13 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
     rollbackCount: 0,
     proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    pendingWithdrawals: new Map(),
-    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+    pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
+    shadow: {
+      rebalance: {
+        policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
+        submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
+      },
+    },
   };
 };
 
@@ -573,7 +578,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     accounts: new Map(),
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: {
       name: 'Audit Entity',
       isHub: false,
@@ -601,7 +605,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: 'Audit Entity',
     isHub: false,
@@ -1150,7 +1153,10 @@ describe('audit fail-fast regressions', () => {
       left.entityId,
       right.entityId,
     );
-    accountMachine.state.deltas.set(1, createDefaultDelta(1));
+    accountMachine.state.deltas = PersistentAccountStateMap.fromEntries(
+      'deltas',
+      [[1, createDefaultDelta(1)]],
+    );
     accountMachine.currentDisputeProofBodyHash = buildAccountProofBody(accountMachine, '').proofBodyHash;
     accountMachine.currentDisputeProofNonce = 1;
     accountMachine.currentDisputeProofProposerIsLeft = true;
@@ -1191,7 +1197,10 @@ describe('audit fail-fast regressions', () => {
       left.entityId,
       right.entityId,
     );
-    accountMachine.state.deltas.set(1, createDefaultDelta(1));
+    accountMachine.state.deltas = PersistentAccountStateMap.fromEntries(
+      'deltas',
+      [[1, createDefaultDelta(1)]],
+    );
     const proof = buildAccountProofBody(accountMachine, '');
     accountMachine.currentDisputeProofBodyHash = proof.proofBodyHash;
     accountMachine.currentDisputeProofNonce = 7;
@@ -1267,7 +1276,10 @@ describe('audit fail-fast regressions', () => {
         timestamp: env.state.timestamp - 1,
         stateHash: previousStateHash,
       };
-      proposerAccount.state.deltas.set(1, makeFundedDelta());
+      proposerAccount.state.deltas = PersistentAccountStateMap.fromEntries(
+        'deltas',
+        [[1, makeFundedDelta()]],
+      );
 
       const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposerAccount, env.state.timestamp, 0);
       if (!isProposedAccountFrame(proposed)) throw new Error(`ZERO_JHEIGHT_PROPOSAL_FAILED:${proposeAccountFrameMessage(proposed)}`);
@@ -1290,8 +1302,14 @@ describe('audit fail-fast regressions', () => {
         timestamp: env.state.timestamp - 1,
         stateHash: previousStateHash,
       };
-      receiverAccount.state.deltas.set(1, makeFundedDelta());
-      const replayedReceiverAccount = hydrateAccountDocFromStorage(structuredClone(projectAccountDoc(receiverAccount)));
+      receiverAccount.state.deltas = PersistentAccountStateMap.fromEntries(
+        'deltas',
+        [[1, makeFundedDelta()]],
+      );
+      const replayedReceiverAccount = forkAccountReplicaShell(receiverAccount);
+
+      expect(receiverAccount.state.deltas).toBeInstanceOf(PersistentAccountStateMap);
+      expect(replayedReceiverAccount.state.deltas).toBeInstanceOf(PersistentAccountStateMap);
 
       const result = await applyAccountInput(createAccountConsensusContext(env), receiverAccount, sealedProposal);
       const replayResult = await applyAccountInput(createAccountConsensusContext(env), replayedReceiverAccount, sealedProposal);
@@ -2080,8 +2098,13 @@ describe('audit fail-fast regressions', () => {
     attachSigningReplica(env, left.entityId, left.signerId);
     attachSigningReplica(env, right.entityId, right.signerId);
 
+    const collisionHashlock = `0x${'45'.repeat(32)}`;
+    const collisionLockId = 'collision-timeout-lock';
     const leftAccount = makeProposalAccount(
-      [{ type: 'add_delta', data: { tokenId: 1 } }],
+      [{
+        type: 'htlc_resolve',
+        data: { lockId: collisionLockId, outcome: 'error', reason: 'timeout' },
+      }],
       left.entityId,
       right.entityId,
     );
@@ -2095,6 +2118,31 @@ describe('audit fail-fast regressions', () => {
       toEntity: left.entityId,
       nextProofNonce: 0,
     };
+    const collisionDelta = {
+      ...createDefaultDelta(1),
+      leftHold: 1n,
+    };
+    const collisionLock = {
+      lockId: collisionLockId,
+      hashlock: collisionHashlock,
+      timelock: BigInt(env.state.timestamp - 1),
+      revealBeforeHeight: 0,
+      amount: 1n,
+      tokenId: 1,
+      senderIsLeft: true,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    };
+    for (const account of [leftAccount, rightAccount]) {
+      account.state.deltas = PersistentAccountStateMap.fromEntries(
+        'deltas',
+        [[1, collisionDelta]],
+      );
+      account.state.locks = PersistentAccountStateMap.fromEntries(
+        'locks',
+        [[collisionLockId, collisionLock]],
+      );
+    }
 
     const leftProposal = await proposeAccountFrame(createAccountConsensusContext(env), leftAccount, env.state.timestamp);
     const rightProposal = await proposeAccountFrame(createAccountConsensusContext(env), rightAccount, env.state.timestamp);
@@ -2122,6 +2170,7 @@ describe('audit fail-fast regressions', () => {
 
     const accepted = await applyAccountInput(createAccountConsensusContext(env), rightAccount, sealedLeftProposal);
     expect(accepted.ok).toBe(true);
+    expect(accepted.timedOutHashlocks).toEqual([collisionHashlock]);
     expect(rightAccount.currentHeight).toBe(1);
     // Account apply only commits the winning frame and restores the losing
     // intent. The Entity's one final proposableAccounts pass owns creation of
@@ -2216,12 +2265,12 @@ describe('audit fail-fast regressions', () => {
 
     const receiver = makeProposalAccount([{ type: 'add_delta', data: { tokenId: 2 } }], left.entityId, right.entityId);
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
-    receiver.state.deltas.set(1, {
+    receiver.state.deltas = PersistentAccountStateMap.fromEntries('deltas', [[1, {
       ...createDefaultDelta(1),
       rightCreditLimit: 100n,
       rightHold: 5n,
-    });
-    receiver.state.locks.set('existing-lock', {
+    }]]);
+    receiver.state.locks = PersistentAccountStateMap.fromEntries('locks', [['existing-lock', {
       lockId: 'existing-lock',
       hashlock: `0x${'31'.repeat(32)}`,
       timelock: 100_000n,
@@ -2231,8 +2280,8 @@ describe('audit fail-fast regressions', () => {
       senderIsLeft: false,
       createdHeight: 0,
       createdTimestamp: 0,
-    });
-    receiver.state.swapOffers.set('existing-offer', {
+    }]]);
+    receiver.state.swapOffers = PersistentAccountStateMap.fromEntries('swapOffers', [['existing-offer', {
       offerId: 'existing-offer',
       giveTokenId: 1,
       giveAmount: 7n,
@@ -2240,7 +2289,7 @@ describe('audit fail-fast regressions', () => {
       wantAmount: 9n,
       makerIsLeft: false,
       createdHeight: 0,
-    });
+    }]]);
 
     const localPending = await proposeAccountFrame(createAccountConsensusContext(env), receiver, env.state.timestamp);
     if (!isProposedAccountFrame(localPending)) {

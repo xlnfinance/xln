@@ -1,8 +1,9 @@
 import {
   readHistoryViewAccountFrames,
+  readHistoryViewAccountSwapEvents,
+  readHistoryViewAccountSwapRecency,
   readHistoryViewEntityFrames,
   readHistoryViewRuntimeActivity,
-  type RuntimeFrame,
 } from '..';
 import {
   cloneIsolatedRoutedEntityInputs,
@@ -20,15 +21,23 @@ import type {
   RuntimeActivityFilters,
 } from '../views/activity-types';
 import type { AccountFrame } from '../../types/account';
+import type { AccountTx } from '../../types/account';
 import type { CertifiedEntityFrameLink, EntityInput } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
+import { findAccountByCounterparty } from '../../account/state/account-lookup';
+import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import type { FrameLogEntry } from '../../types/logging';
-import type { PersistedFrameJournal } from '../types';
+import type {
+  PersistedFrameJournal,
+  RuntimeFrame,
+  RuntimeFramePayloads,
+} from '../types';
 import type { PersistenceQueryDeps } from './deps';
 import { requireStorageDbOpen } from '../commit/availability';
 
 export const buildRecoveryJournalFromStorageFrame = (
   frame: RuntimeFrame,
+  payloads: RuntimeFramePayloads,
   logs: FrameLogEntry[] = [],
 ): PersistedFrameJournal => ({
   height: frame.height,
@@ -38,18 +47,21 @@ export const buildRecoveryJournalFromStorageFrame = (
   replicaMetaCheckpoint: frame.replicaMetaCheckpoint,
   replicaMetaStateMode: frame.replicaMetaStateMode,
   runtimeInput: frame.runtimeInput,
-  entityContexts: structuredClone(frame.entityContexts),
+  entityContexts: structuredClone(payloads.entityContexts),
   ...(frame.pendingRuntimeInput
     ? { pendingRuntimeInput: cloneIsolatedRuntimeInput(frame.pendingRuntimeInput) }
     : {}),
-  ...(frame.runtimeOutputs?.length
-    ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs) }
+  ...(payloads.runtimeOutputs?.length
+    ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(payloads.runtimeOutputs) }
+    : {}),
+  ...(frame.runtimeOutputRefs?.length
+    ? { runtimeOutputRefs: [...frame.runtimeOutputRefs] }
     : {}),
   ...(frame.runtimeOutputRetryState?.length
     ? { runtimeOutputRetryState: structuredClone(frame.runtimeOutputRetryState) }
     : {}),
-  ...(frame.runtimeMachine
-    ? { runtimeMachine: cloneIsolatedRuntimeSnapshot(frame.runtimeMachine) }
+  ...(payloads.runtimeMachine
+    ? { runtimeMachine: cloneIsolatedRuntimeSnapshot(payloads.runtimeMachine) }
     : {}),
   ...(frame.runtimeStateHash ? { runtimeStateHash: frame.runtimeStateHash } : {}),
   logs,
@@ -113,6 +125,144 @@ type CertifiedHistoryReadDeps = Pick<
   'tryOpenRuntimeWalDb' | 'getRuntimeWalDb'
 >;
 
+/**
+ * Rebuildable Account order lifecycle read-model. This value is derived only
+ * from certified Account frames in the history LevelDB; it is never retained
+ * by AccountState, AccountReplica, EntityState, or RuntimeReplica.
+ */
+export type PersistedAccountSwapHistoryPage = Readonly<{
+  entityId: string;
+  accountId: string;
+  latestHeight: number;
+  items: readonly PersistedAccountSwapLifecycle[];
+  nextCursor: Readonly<{ height: number; offerId: string }> | null;
+}>;
+
+export type PersistedAccountSwapLifecycle = Readonly<{
+  offerId: string;
+  giveTokenId: number;
+  wantTokenId: number;
+  originalGiveAmount: bigint;
+  originalWantAmount: bigint;
+  liveGiveAmount: bigint | null;
+  liveWantAmount: bigint | null;
+  priceTicks: bigint;
+  createdHeight: number;
+  lastUpdatedHeight: number;
+  cancelRequested: boolean;
+  closed: boolean;
+  resolves: readonly PersistedAccountSwapResolve[];
+}>;
+
+export type PersistedAccountSwapResolve = Readonly<{
+  fillRatio: number;
+  cancelRemainder: boolean;
+  height: number;
+  executionGiveAmount: bigint | null;
+  executionWantAmount: bigint | null;
+  feeTokenId: number | null;
+  feeAmount: bigint | null;
+  comment: string;
+}>;
+
+type SwapHistoryTx = Extract<AccountTx, {
+  type: 'swap_offer' | 'swap_cancel_request' | 'swap_resolve' | 'cross_swap_fill_ack';
+}>;
+
+type MutableSwapLifecycle = {
+  offerId: string;
+  giveTokenId: number;
+  wantTokenId: number;
+  originalGiveAmount: bigint;
+  originalWantAmount: bigint;
+  priceTicks: bigint;
+  createdHeight: number;
+  lastUpdatedHeight: number;
+  cancelRequested: boolean;
+  resolves: PersistedAccountSwapResolve[];
+};
+
+const requireSwapLifecycle = (
+  lifecycles: Map<string, MutableSwapLifecycle>,
+  offerId: string,
+  height: number,
+): MutableSwapLifecycle => {
+  const lifecycle = lifecycles.get(offerId);
+  if (!lifecycle) {
+    throw new Error(`ACCOUNT_SWAP_HISTORY_ORIGIN_MISSING:offer=${offerId}:height=${height}`);
+  }
+  return lifecycle;
+};
+
+const appendSwapHistoryTx = (
+  lifecycles: Map<string, MutableSwapLifecycle>,
+  tx: SwapHistoryTx,
+  height: number,
+): void => {
+  if (tx.type === 'swap_offer') {
+    if (lifecycles.has(tx.data.offerId)) {
+      throw new Error(`ACCOUNT_SWAP_HISTORY_DUPLICATE_OFFER:${tx.data.offerId}:${height}`);
+    }
+    if (tx.data.priceTicks === undefined) {
+      throw new Error(`ACCOUNT_SWAP_HISTORY_PRICE_TICKS_MISSING:${tx.data.offerId}:${height}`);
+    }
+    lifecycles.set(tx.data.offerId, {
+      offerId: tx.data.offerId,
+      giveTokenId: tx.data.giveTokenId,
+      wantTokenId: tx.data.wantTokenId,
+      originalGiveAmount: tx.data.giveAmount,
+      originalWantAmount: tx.data.wantAmount,
+      priceTicks: tx.data.priceTicks,
+      createdHeight: height,
+      lastUpdatedHeight: height,
+      cancelRequested: false,
+      resolves: [],
+    });
+    return;
+  }
+
+  const lifecycle = requireSwapLifecycle(lifecycles, tx.data.offerId, height);
+  lifecycle.lastUpdatedHeight = height;
+  if (tx.type === 'swap_cancel_request') {
+    lifecycle.cancelRequested = true;
+    return;
+  }
+  if (tx.type === 'swap_resolve') {
+    lifecycle.priceTicks = tx.data.restingPriceTicks ?? lifecycle.priceTicks;
+    lifecycle.resolves.push({
+      fillRatio: tx.data.fillRatio,
+      cancelRemainder: tx.data.cancelRemainder,
+      height,
+      executionGiveAmount: tx.data.executionGiveAmount ?? null,
+      executionWantAmount: tx.data.executionWantAmount ?? null,
+      feeTokenId: tx.data.feeTokenId ?? null,
+      feeAmount: tx.data.feeAmount ?? null,
+      comment: tx.data.comment ?? '',
+    });
+    return;
+  }
+  lifecycle.priceTicks = tx.data.priceTicks ?? lifecycle.priceTicks;
+  lifecycle.resolves.push({
+    fillRatio: tx.data.cumulativeFillRatio,
+    cancelRemainder: tx.data.cancelRemainder ?? tx.data.ackKind === 'cancel',
+    height,
+    executionGiveAmount: tx.data.executionSourceAmount ?? null,
+    executionWantAmount: tx.data.executionTargetAmount ?? null,
+    feeTokenId: null,
+    feeAmount: null,
+    comment: tx.data.comment ?? '',
+  });
+};
+
+const cursorAfter = (
+  lifecycle: MutableSwapLifecycle,
+  cursor: Readonly<{ height: number; offerId: string }> | undefined,
+): boolean => {
+  if (!cursor) return true;
+  return lifecycle.lastUpdatedHeight < cursor.height
+    || (lifecycle.lastUpdatedHeight === cursor.height && lifecycle.offerId < cursor.offerId);
+};
+
 export const readAccountFrameHistory = async (
   deps: CertifiedHistoryReadDeps,
   env: RuntimeReplica,
@@ -144,6 +294,89 @@ export const readAccountFrameHistory = async (
   return records.map((record) => structuredClone(record.frame));
 };
 
+/**
+ * Read a bounded, complete Account swap lifecycle projection from certified
+ * frame history. The scan never falls back to a live or retained lifecycle
+ * map: if the account history is larger than the safe inspection window, it
+ * fails loudly until a caller uses an indexed archival reader.
+ */
+export const readAccountSwapHistoryPage = async (
+  deps: CertifiedHistoryReadDeps,
+  env: RuntimeReplica,
+  entityId: string,
+  counterpartyId: string,
+  options: Readonly<{
+    limit?: number;
+    cursor?: Readonly<{ height: number; offerId: string }>;
+  }> = {},
+): Promise<PersistedAccountSwapHistoryPage> => {
+  const limit = Math.max(1, Math.min(100, Math.floor(Number(options.limit ?? 25))));
+  if (!Number.isSafeInteger(limit)) throw new Error(`ACCOUNT_SWAP_HISTORY_LIMIT_INVALID:${String(options.limit)}`);
+  await requireStorageDbOpen(
+    () => deps.tryOpenRuntimeWalDb(env),
+    'runtime-wal:account-swap-history',
+  );
+  const recency = await readHistoryViewAccountSwapRecency(
+    deps.getRuntimeWalDb(env),
+    entityId,
+    counterpartyId,
+  );
+  const selectedOfferIds: Array<Readonly<{ offerId: string; height: number }>> = [];
+  const seen = new Set<string>();
+  for (const event of recency) {
+    if (seen.has(event.offerId)) continue;
+    seen.add(event.offerId);
+    if (!cursorAfter({ lastUpdatedHeight: event.accountHeight, offerId: event.offerId } as MutableSwapLifecycle, options.cursor)) {
+      continue;
+    }
+    selectedOfferIds.push({ offerId: event.offerId, height: event.accountHeight });
+    if (selectedOfferIds.length === limit) break;
+  }
+  const replica = getEntityReplicaById(env, entityId);
+  const account = replica
+    ? findAccountByCounterparty(replica.state.accounts, entityId, counterpartyId)
+    : null;
+  if (!account) throw new Error(`ACCOUNT_SWAP_HISTORY_ACCOUNT_NOT_FOUND:${entityId}:${counterpartyId}`);
+  const items = await Promise.all(selectedOfferIds.map(async ({ offerId }): Promise<PersistedAccountSwapLifecycle> => {
+    const events = await readHistoryViewAccountSwapEvents(
+      deps.getRuntimeWalDb(env),
+      entityId,
+      counterpartyId,
+      offerId,
+    );
+    const lifecycles = new Map<string, MutableSwapLifecycle>();
+    for (const event of events) appendSwapHistoryTx(lifecycles, event.tx, event.accountHeight);
+    const lifecycle = lifecycles.get(offerId);
+    if (!lifecycle) throw new Error(`ACCOUNT_SWAP_HISTORY_INDEX_ORIGIN_MISSING:${offerId}`);
+    const liveOffer = account.state.swapOffers.get(lifecycle.offerId);
+    return {
+      offerId: lifecycle.offerId,
+      giveTokenId: lifecycle.giveTokenId,
+      wantTokenId: lifecycle.wantTokenId,
+      originalGiveAmount: lifecycle.originalGiveAmount,
+      originalWantAmount: lifecycle.originalWantAmount,
+      liveGiveAmount: liveOffer?.giveAmount ?? null,
+      liveWantAmount: liveOffer?.wantAmount ?? null,
+      priceTicks: liveOffer?.priceTicks ?? lifecycle.priceTicks,
+      createdHeight: lifecycle.createdHeight,
+      lastUpdatedHeight: lifecycle.lastUpdatedHeight,
+      cancelRequested: lifecycle.cancelRequested,
+      closed: !liveOffer && lifecycle.resolves.length > 0,
+      resolves: lifecycle.resolves.map(resolve => ({ ...resolve })),
+    };
+  }));
+  const last = selectedOfferIds.at(-1);
+  return {
+    entityId,
+    accountId: counterpartyId,
+    latestHeight: account.currentHeight,
+    items,
+    nextCursor: selectedOfferIds.length === limit && last
+      ? { height: last.height, offerId: last.offerId }
+      : null,
+  };
+};
+
 export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   const readPersistedFrameJournal = async (
     env: RuntimeReplica,
@@ -151,7 +384,9 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   ): Promise<PersistedFrameJournal | null> => {
     const frame = await deps.readPersistedStorageFrameRecord(env, height);
     if (!frame) return null;
-    return buildRecoveryJournalFromStorageFrame(frame, frame.activityLogs);
+    const payloads = await deps.readPersistedStorageFramePayloads(env, frame);
+    const activity = await readRuntimeActivityJournal(deps, env, height);
+    return buildRecoveryJournalFromStorageFrame(frame, payloads, activity?.logs ?? []);
   };
 
   const readPersistedRuntimeActivityJournal = (
@@ -166,6 +401,16 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     limit = 50,
     opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
   ) => readAccountFrameHistory(deps, env, entityId, counterpartyId, limit, opts);
+
+  const readPersistedAccountSwapHistoryPage = (
+    env: RuntimeReplica,
+    entityId: string,
+    counterpartyId: string,
+    options?: Readonly<{
+      limit?: number;
+      cursor?: Readonly<{ height: number; offerId: string }>;
+    }>,
+  ) => readAccountSwapHistoryPage(deps, env, entityId, counterpartyId, options);
 
   const readPersistedEntityFrameHistory = async (
     env: RuntimeReplica,
@@ -288,6 +533,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     readPersistedFrameJournal,
     readPersistedRuntimeActivityJournal,
     readPersistedAccountFrameHistory,
+    readPersistedAccountSwapHistoryPage,
     readPersistedEntityFrameHistory,
     readPersistedFrameJournals,
     readPersistedRuntimeActivityPage,

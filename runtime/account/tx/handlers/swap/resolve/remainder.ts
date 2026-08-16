@@ -1,6 +1,9 @@
-import type { AccountState } from '../../../../../types/account';
+import type { AccountDraftState } from '../../../../state/account-state-draft';
 import { MAX_SWAP_FILL_RATIO } from '../../../../../orderbook/swap-execution';
-import { requantizeRemainingSwapAtPriceForDimensions } from '../../../../../orderbook/types';
+import {
+  deriveSide,
+  requantizeRemainingSwapBaseAtPriceForDimensions,
+} from '../../../../../orderbook/types';
 import { releaseHold } from '../../../hold-utils';
 import type {
   AppliedSwapResolve,
@@ -11,6 +14,7 @@ import {
   requantizeSwapNetAuthorization,
   type SwapNetAuthorization,
 } from '../../../../swap/swap-net-authorization';
+import { commitDeltaDraft } from '../../../delta-utils';
 
 export type SwapResolveRemainderResult =
   | {
@@ -40,12 +44,14 @@ const releaseGiveHold = (
 };
 
 const closeSwapOffer = (
-  account: AccountState,
+  account: AccountDraftState,
   resolve: AppliedSwapResolve,
   events: string[],
   message: string,
 ): SwapResolveRemainderResult => {
-  account.swapOffers.delete(resolve.offerId);
+  commitDeltaDraft(account, resolve.giveDelta);
+  commitDeltaDraft(account, resolve.wantDelta);
+  account.swapOffers.del(resolve.offerId);
   const makerId = resolve.offer.makerIsLeft
     ? account.leftEntity
     : account.rightEntity;
@@ -58,7 +64,7 @@ const closeSwapOffer = (
 };
 
 export const applySwapResolveRemainder = (
-  account: AccountState,
+  account: AccountDraftState,
   resolve: AppliedSwapResolve,
   events: string[],
 ): SwapResolveRemainderResult => {
@@ -83,11 +89,17 @@ export const applySwapResolveRemainder = (
   }
 
   const remainingGive = resolve.canonicalQuantizedGive - resolve.filledGive;
+  const side = deriveSide(resolve.offer.giveTokenId, resolve.offer.wantTokenId);
+  const canonicalBaseAmount = side === 1
+    ? resolve.canonicalQuantizedGive
+    : resolve.canonicalQuantizedWant;
+  const filledBaseAmount = side === 1 ? resolve.filledGive : resolve.filledWant;
+  const remainingBaseAmount = canonicalBaseAmount - filledBaseAmount;
   const priceTicks = resolve.canonicalPriceTicks;
-  const requantized = requantizeRemainingSwapAtPriceForDimensions(
+  const requantized = requantizeRemainingSwapBaseAtPriceForDimensions(
     resolve.offer.giveTokenId,
     resolve.offer.wantTokenId,
-    remainingGive,
+    remainingBaseAmount,
     priceTicks,
     {
       giveTokenDecimals: resolve.offer.giveTokenDecimals,
@@ -104,6 +116,13 @@ export const applySwapResolveRemainder = (
       'filled remainder dropped below lot size',
     );
   }
+  const releasedGive = remainingGive - requantized.effectiveGive;
+  if (releasedGive < 0n) {
+    return failure(
+      events,
+      `Swap remainder exceeds held give: remaining=${remainingGive} required=${requantized.effectiveGive}`,
+    );
+  }
   let authorization: SwapNetAuthorization;
   try {
     authorization = requantizeSwapNetAuthorization(
@@ -116,20 +135,31 @@ export const applySwapResolveRemainder = (
   }
   const dustFailure = releaseGiveHold(
     resolve,
-    requantized.releasedGiveDust,
+    releasedGive,
     events,
   );
   if (dustFailure) return dustFailure;
-  resolve.offer.giveAmount = requantized.effectiveGive;
-  resolve.offer.wantAmount = requantized.effectiveWant;
-  resolve.offer.maxFee = authorization.maxFee;
-  resolve.offer.minNetReceive = authorization.minNetReceive;
-  resolve.offer.priceTicks = priceTicks;
-  resolve.offer.quantizedGive = requantized.effectiveGive;
-  resolve.offer.quantizedWant = requantized.effectiveWant;
+  // Patricia leaves are immutable by identity. A partial fill must replace the
+  // resting offer instead of mutating the object returned by `get()`: changing
+  // that frozen leaf would either throw after bilateral ACK or leave its parent
+  // hash stale. Same-j offers have no nested cross-j route, so this bounded
+  // scalar copy is the complete canonical replacement value.
+  const remainingOffer = {
+    ...resolve.offer,
+    giveAmount: requantized.effectiveGive,
+    wantAmount: requantized.effectiveWant,
+    maxFee: authorization.maxFee,
+    minNetReceive: authorization.minNetReceive,
+    priceTicks,
+    quantizedGive: requantized.effectiveGive,
+    quantizedWant: requantized.effectiveWant,
+  };
+  commitDeltaDraft(account, resolve.giveDelta);
+  commitDeltaDraft(account, resolve.wantDelta);
+  account.swapOffers.put(resolve.offerId, remainingOffer);
   events.push(
     `📊 Swap offer ${resolve.offerId.slice(0, 8)}... partially filled, ` +
-    `${resolve.offer.giveAmount} remaining`,
+    `${remainingOffer.giveAmount} remaining`,
   );
   return { ok: true, closeOrderInHistory: false };
 };

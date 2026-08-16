@@ -10,7 +10,6 @@
 
 import type { RuntimeReplica } from '../../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../../account/config/dispute-config';
-import { startRuntimeHistoryTraceForTesting } from '../../runtime/observability/history-retention';
 import { bootScenario, registerEntities, fundEntities } from '../harness/boot';
 import {
   getProcess,
@@ -55,9 +54,6 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
       : {}),
   });
   env.quietRuntimeLogs = true;
-  const visualTrace = _existingEnv?.scenarioMode
-    ? startRuntimeHistoryTraceForTesting(env)
-    : null;
   const scenarioDebug = (globalThis as { process?: { env?: Record<string, string | undefined> } })
     .process?.env?.['XLN_SCENARIO_DEBUG'] === '1';
   if (scenarioDebug) env.scenarioLogLevel = 'debug';
@@ -383,11 +379,9 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
       env,
     );
 
-    if (visualTrace) env.history = [...visualTrace.snapshots];
     console.log('✅ dispute-lifecycle passed');
     return env;
   } finally {
-    visualTrace?.stop();
     restoreStrict();
   }
 }

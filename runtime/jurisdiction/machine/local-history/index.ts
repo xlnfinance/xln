@@ -1,7 +1,6 @@
 import type { EntityState } from '../../../entity/types';
 import { retryFailure } from '../../../protocol/errors/failure-taxonomy';
 import type {
-  JurisdictionEvent,
   JurisdictionEventBlock,
   JurisdictionEventData,
   ValidatorJBlockHeader,
@@ -28,9 +27,6 @@ import {
   type JEventRangeSignatureVerifier,
   validateJEventRangeEnvelope,
 } from '../j-event-range-validation';
-
-/** Bounded UI/audit cache. It is never consulted as consensus authority. */
-export const MAX_CERTIFIED_J_EVENT_BLOCKS = 256;
 
 const normalizedText = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
@@ -103,9 +99,9 @@ export const getEntityCertifiedJAnchor = (state: EntityState): EntityCertifiedJA
   }
   if (!finality) {
     const registrationBase = getJHistoryRegistrationBaseHeight(state.config.jurisdiction);
-    if (stateHeight !== registrationBase || state.jBlockChain.length !== 0) {
+    if (stateHeight !== registrationBase) {
       throw new Error(
-        `J_HISTORY_FINALITY_MISSING:state=${stateHeight}:registrationBase=${registrationBase}:blocks=${state.jBlockChain.length}`,
+        `J_HISTORY_FINALITY_MISSING:state=${stateHeight}:registrationBase=${registrationBase}`,
       );
     }
     return null;
@@ -127,77 +123,9 @@ export const getEntityCertifiedJAnchor = (state: EntityState): EntityCertifiedJA
   return { height, hash, jurisdictionRef, eventHistoryRoot };
 };
 
-const assertDisplayBlockIntegrity = (
-  block: EntityState['jBlockChain'][number],
-  anchor: EntityCertifiedJAnchor,
-  previousHeight: number,
-): number => {
-  const height = Number(block.jHeight);
-  if (!Number.isSafeInteger(height) || height <= previousHeight || height > anchor.height) {
-    const code = height === previousHeight
-      ? 'J_HISTORY_FINALITY_DUPLICATE_BLOCK'
-      : 'J_HISTORY_FINALITY_BLOCK_HEIGHT_CORRUPTION';
-    throw new Error(`${code}:${String(height)}`);
-  }
-  if (normalizedText(block.jurisdictionRef) !== anchor.jurisdictionRef) {
-    throw new Error(`J_HISTORY_FINALITY_BLOCK_JURISDICTION_CORRUPTION:${height}`);
-  }
-  const blockHash = normalizedText(block.jBlockHash);
-  if (!/^0x[0-9a-f]{64}$/.test(blockHash)) {
-    throw new Error(`J_HISTORY_FINALITY_BLOCK_HASH_CORRUPTION:${height}`);
-  }
-  let normalizedEvents: JurisdictionEvent[];
-  try {
-    normalizedEvents = requireCanonicalJurisdictionEvents(block.events);
-  } catch (cause) {
-    // The decoder remains strict, but callers need the certified block height
-    // to locate corrupt durable history. Preserve both layers: a stable
-    // history-integrity code outside and the exact decoder failure as cause.
-    throw new Error(`J_HISTORY_FINALITY_EVENT_BODY_CORRUPTION:${height}`, {
-      cause,
-    });
-  }
-  if (!Array.isArray(block.events) || normalizedEvents.length !== block.events.length) {
-    throw new Error(`J_HISTORY_FINALITY_EVENT_BODY_CORRUPTION:${height}`);
-  }
-  if (normalizedEvents.length === 0) throw new Error(`J_HISTORY_FINALITY_EMPTY_EVENT_BLOCK:${height}`);
-  const orderedEvents = [...normalizedEvents].sort(compareCanonicalJurisdictionEvents);
-  for (let index = 0; index < orderedEvents.length; index += 1) {
-    if (
-      canonicalJurisdictionEventsHash([normalizedEvents[index]!]) !==
-      canonicalJurisdictionEventsHash([orderedEvents[index]!])
-    ) {
-      throw new Error(`J_HISTORY_FINALITY_EVENT_ORDER_CORRUPTION:${height}`);
-    }
-    const event = orderedEvents[index]!;
-    if (Number(event.blockNumber) !== height || normalizedText(event.blockHash) !== blockHash) {
-      throw new Error(`J_HISTORY_FINALITY_EVENT_BLOCK_CORRUPTION:${height}`);
-    }
-  }
-  if (canonicalJurisdictionEventsHash(orderedEvents) !== normalizedText(block.eventsHash)) {
-    throw new Error(`J_HISTORY_FINALITY_EVENTS_HASH_CORRUPTION:${height}`);
-  }
-  if (height === anchor.height && blockHash !== anchor.hash) {
-    throw new Error(`J_HISTORY_FINALITY_TIP_CORRUPTION:${height}`);
-  }
-  return height;
-};
-
-/**
- * Restore validates the current anchor plus the bounded display cache. The
- * cache may be deleted without changing authority; it is never folded to
- * reconstruct the certified root.
- */
+/** Restore validates the one consensus-finalized J-chain anchor. */
 export const assertCertifiedJHistoryIntegrity = (state: EntityState): void => {
-  const anchor = getEntityCertifiedJAnchor(state);
-  if (!anchor) return;
-  if (state.jBlockChain.length > MAX_CERTIFIED_J_EVENT_BLOCKS) {
-    throw new Error(`J_HISTORY_FINALITY_DISPLAY_OVERFLOW:${state.jBlockChain.length}`);
-  }
-  let previousHeight = 0;
-  for (const block of state.jBlockChain) {
-    previousHeight = assertDisplayBlockIntegrity(block, anchor, previousHeight);
-  }
+  getEntityCertifiedJAnchor(state);
 };
 
 const assertValidatorJHistoryMatchesAnchor = (
@@ -251,6 +179,16 @@ export const assertValidatorJHistoryIntegrity = (
   assertValidatorJHistoryMatchesAnchor(anchor, history);
   if (!history) return;
   const baseHeight = Number(state.lastFinalizedJHeight);
+  for (const height of history.eventBlocks.keys()) {
+    if (height <= baseHeight) {
+      throw new Error(`J_HISTORY_LOCAL_FINALIZED_EVENT_BODY_RETAINED:${height}:${baseHeight}`);
+    }
+  }
+  for (const height of history.blockHashes.keys()) {
+    if (height < baseHeight) {
+      throw new Error(`J_HISTORY_LOCAL_FINALIZED_HEADER_RETAINED:${height}:${baseHeight}`);
+    }
+  }
   for (
     let height = baseHeight + 1;
     height <= Math.max(baseHeight, history.contiguousThroughHeight);
@@ -322,7 +260,7 @@ export const recordValidatorJHistory = (
 
   const minimumRetainedHeight = state ? Number(state.lastFinalizedJHeight) : 0;
   const eventBlocks = new Map(
-    [...(current?.eventBlocks ?? [])].filter(([height]) => height >= minimumRetainedHeight),
+    [...(current?.eventBlocks ?? [])].filter(([height]) => height > minimumRetainedHeight),
   );
   const blockHashes = new Map(
     [...(current?.blockHashes ?? [])].filter(([height]) => height >= minimumRetainedHeight),
@@ -351,7 +289,12 @@ export const recordValidatorJHistory = (
   for (const rawBlock of input.blocks) {
     const block = normalizeEventBlock(jurisdictionRef, rawBlock);
     if (block.jHeight > scannedThroughHeight) throw new Error('J_HISTORY_LOCAL_BLOCK_ABOVE_SCAN_TIP');
-    if (anchor && block.jHeight < anchor.height) continue;
+    if (anchor && block.jHeight <= anchor.height) {
+      if (block.jHeight === anchor.height && block.jBlockHash !== anchor.hash) {
+        throw new Error(`J_HISTORY_FINALIZED_REORG:${block.jHeight}`);
+      }
+      continue;
+    }
     if (anchor && block.jHeight === anchor.height && block.jBlockHash !== anchor.hash) {
       throw new Error(`J_HISTORY_FINALIZED_REORG:${block.jHeight}`);
     }
@@ -610,15 +553,6 @@ export const getJEventRangeValidationError = (
     return 'J_RANGE_TIP_HASH_MISMATCH';
   }
   return null;
-};
-
-/** Drop old display bodies; the current head/root live in jHistoryFinality. */
-export const pruneCertifiedJHistory = (state: EntityState): EntityState => {
-  if (state.jBlockChain.length <= MAX_CERTIFIED_J_EVENT_BLOCKS) return state;
-  return {
-    ...state,
-    jBlockChain: state.jBlockChain.slice(-MAX_CERTIFIED_J_EVENT_BLOCKS),
-  };
 };
 
 export const pruneFinalizedValidatorJHistory = (

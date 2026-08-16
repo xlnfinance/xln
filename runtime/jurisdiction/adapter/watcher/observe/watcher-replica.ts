@@ -1,4 +1,4 @@
-import type { JurisdictionConfig } from '../../../../entity/types';
+import type { EntityReplica } from '../../../../entity/types';
 import type { RuntimeReplica } from '../../../../runtime/types';
 import type { JReplica } from '../../../../types/jurisdiction-runtime';
 import { getValidatorJContiguousThroughHeight } from '../../../machine/local-history';
@@ -76,11 +76,35 @@ export const requireWatcherJurisdictionReplica = (
   );
 };
 
+const isCurrentBoardWatcherReplica = (
+  replica: Pick<EntityReplica, 'signerId' | 'state'>,
+): boolean => {
+  const signerId = normalizedLabel(replica.signerId);
+  const validatorMatches = replica.state.config.validators.filter(
+    validator => normalizedLabel(validator) === signerId,
+  );
+  if (validatorMatches.length === 0) return false;
+  if (validatorMatches.length !== 1) {
+    throw new Error(`J_WATCHER_CURRENT_BOARD_VALIDATOR_DUPLICATE:${signerId}`);
+  }
+  const shareMatches = Object.entries(replica.state.config.shares)
+    .filter(([validator]) => normalizedLabel(validator) === signerId)
+    .map(([, shares]) => shares);
+  if (shareMatches.length !== 1 || typeof shareMatches[0] !== 'bigint' || shareMatches[0] <= 0n) {
+    throw new Error(`J_WATCHER_CURRENT_BOARD_VALIDATOR_SHARES_INVALID:${signerId}`);
+  }
+  return true;
+};
+
 export const isEntityReplicaRelevantToWatcher = (
   env: RuntimeReplica,
-  replica: { state?: { config?: { jurisdiction?: JurisdictionConfig } } },
+  replica: Pick<EntityReplica, 'signerId' | 'state'>,
   watcher: JReplica,
 ): boolean => {
+  // A retired or observer replica may retain the complete Entity state for
+  // audit/synchronization, but it no longer votes on future jurisdiction
+  // prefixes and must not hold the shared watcher cursor behind the new board.
+  if (!isCurrentBoardWatcherReplica(replica)) return false;
   const jurisdiction = replica.state?.config?.jurisdiction;
   if (!jurisdiction) return (env.state.jReplicas?.size ?? 0) <= 1;
 
@@ -116,6 +140,7 @@ export const getMinimumCommittedSignerJHeight = (
 ): number | null => {
   let minimum: number | null = null;
   for (const replica of env.state.eReplicas?.values() || []) {
+    if (!isCurrentBoardWatcherReplica(replica)) continue;
     if (watcher && !isEntityReplicaRelevantToWatcher(env, replica, watcher)) continue;
     const height = Number(replica.state?.lastFinalizedJHeight ?? 0);
     if (!Number.isFinite(height) || height < 0) continue;
@@ -130,6 +155,7 @@ export const getMinimumScannedSignerJHeight = (
 ): number | null => {
   let minimum: number | null = null;
   for (const replica of env.state.eReplicas?.values() || []) {
+    if (!isCurrentBoardWatcherReplica(replica)) continue;
     if (watcher && !isEntityReplicaRelevantToWatcher(env, replica, watcher)) continue;
     const height = Number(
       replica.jHistory

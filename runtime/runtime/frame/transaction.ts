@@ -6,6 +6,10 @@ import { getLiveJAdapterEntries } from '../jurisdiction/live-jadapters';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { getInputReliableIdentity } from '../reliable/reliable-delivery.ts';
 import { reliableIdentityExactKey } from '../reliable/reliable-frontier.ts';
+import {
+  readRuntimeFrameEvents,
+  truncateRuntimeFrameEvents,
+} from '../observability/env-events';
 
 export { cloneRuntimeFrameMempool } from './clone';
 
@@ -20,7 +24,7 @@ export { cloneRuntimeFrameMempool } from './clone';
 export type RuntimeFrameTransaction = {
   liveEnv: RuntimeReplica;
   frameMempool: RuntimeInput;
-  liveFrameLogBaseLength: number;
+  liveFrameEventBaseLength: number;
   published: boolean;
 };
 
@@ -42,7 +46,7 @@ export const createRuntimeFrameTransaction = (
   return {
     liveEnv,
     frameMempool,
-    liveFrameLogBaseLength: liveEnv.frameLogs.length,
+    liveFrameEventBaseLength: readRuntimeFrameEvents(liveEnv).length,
     published: false,
   };
 };
@@ -114,8 +118,7 @@ export const publishRuntimeFrameTransaction = (
   const activeMempool = requireRuntimeMempool(liveEnv);
   const mergedMempool = prependOlderRuntimeInput(frameMempool, activeMempool);
   liveEnv.runtimeMempool = mergedMempool;
-  liveEnv.history = [];
-  liveEnv.frameLogs = liveEnv.frameLogs.slice(transaction.liveFrameLogBaseLength);
+  truncateRuntimeFrameEvents(liveEnv, transaction.liveFrameEventBaseLength);
 
   const state = ensureRuntimeInfrastructure(liveEnv);
   state.stateMutationInFlight = false;

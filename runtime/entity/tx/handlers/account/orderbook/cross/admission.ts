@@ -1,6 +1,11 @@
 import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
 
-import { getBookOrder, MAX_ORDERBOOK_QTY_LOTS } from '../../../../../../orderbook';
+import {
+  forkBookState,
+  getBookOrder,
+  getSwapExactQuoteLotMultipleAtPriceForDimensions,
+  MAX_ORDERBOOK_QTY_LOTS,
+} from '../../../../../../orderbook';
 import { getSwapPairPolicyByBaseQuote } from '../../../../../../account/utils';
 import { swapKey, type CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
 import { createEmptyPairBook } from '../helpers';
@@ -13,7 +18,6 @@ import {
   getCrossMarketOffer,
 } from './pass';
 import {
-  assertCrossBookMatchesCommittedOffers,
   crossBookQtyLots,
 } from './book';
 import type {
@@ -71,6 +75,26 @@ export const prepareCrossOrderbookOffer = (
     );
     return null;
   }
+  const normalized = marketOffer.offer;
+  const baseTokenDecimals = marketOffer.side === 1
+    ? normalized.giveTokenDecimals
+    : normalized.wantTokenDecimals;
+  const quoteTokenDecimals = marketOffer.side === 1
+    ? normalized.wantTokenDecimals
+    : normalized.giveTokenDecimals;
+  const exactQuoteLots = getSwapExactQuoteLotMultipleAtPriceForDimensions(
+    baseTokenDecimals,
+    quoteTokenDecimals,
+    marketOffer.priceTicks,
+  );
+  if (qtyLots % exactQuoteLots !== 0n) {
+    pass.rejectInvalidCrossOffer(
+      accountId,
+      rawOffer.offerId,
+      `cross-quote-lot-misaligned:${qtyLots.toString()}:${exactQuoteLots.toString()}`,
+    );
+    return null;
+  }
   pass.crossLiveOfferMeta.set(namespacedOrderId, marketOffer);
   if (
     assertPendingBookFillAckLive(pass, accountId, rawOffer.offerId) ||
@@ -89,17 +113,19 @@ export const prepareCrossOrderbookOffer = (
   ) {
     return null;
   }
-  let committedBook =
-    pass.bookCache.get(marketOffer.pairId) ??
-    pass.ext.books.get(marketOffer.pairId);
-  committedBook = committedBook
-    ? assertCrossBookMatchesCommittedOffers(pass, marketOffer.pairId, committedBook)
-    : createEmptyPairBook(
+  let committedBook = pass.bookCache.get(marketOffer.pairId);
+  if (!committedBook) {
+    const publishedBook = pass.ext.books.get(marketOffer.pairId);
+    committedBook = publishedBook
+      ? forkBookState(publishedBook)
+      : createEmptyPairBook(
       getSwapPairPolicyByBaseQuote(
         rawOffer.giveTokenId,
         rawOffer.wantTokenId,
       ).bookBucketWidthTicks,
     );
+    pass.bookCache.set(marketOffer.pairId, committedBook);
+  }
   const prepared = {
     rawOffer,
     accountId,

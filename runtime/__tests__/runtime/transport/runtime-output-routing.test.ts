@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { keccak256, toUtf8Bytes } from 'ethers';
+
 import { routeInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../../../runtime/routing/entity-routing';
 import {
   buildPendingNetworkOutputs,
@@ -38,6 +40,7 @@ const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 
 const frameParentHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
+const testFrameHash = (value: string): string => keccak256(toUtf8Bytes(value));
 
 const emptyEntityContext = (
   targetEntityId: string,
@@ -97,32 +100,35 @@ const committedOutput = (
   height: number,
   hash: string,
   signature: string,
-): DeliverableEntityInput => ({
-  runtimeId: targetRuntimeId,
-  entityId: targetEntityId,
-  signerId: targetSignerId,
-  entityTxs: [],
-  proposedFrame: {
-    height,
-    timestamp: height,
-    hash,
-    parentFrameHash: frameParentHash(height - 1),
-    stateRoot: `0x${'11'.repeat(32)}`,
-    authorityRoot: `0x${'22'.repeat(32)}`,
-    txs: [],
-    events: [],
-    entityContext: emptyEntityContext(
-      targetEntityId,
-      targetSignerId,
+): DeliverableEntityInput => {
+  const frameHash = testFrameHash(hash);
+  return {
+    runtimeId: targetRuntimeId,
+    entityId: targetEntityId,
+    signerId: targetSignerId,
+    entityTxs: [],
+    proposedFrame: {
       height,
-      frameParentHash(height - 1),
-    ),
-    leader: { proposerSignerId: targetSignerId, view: 0 },
-    hashesToSign: [{ hash, type: 'entityFrame', context: `entity-frame:${height}` }],
-    collectedSigs: new Map([[targetSignerId, [signature]]]),
-    hankos: [`0xhanko-${signature}`],
-  } as never,
-});
+      timestamp: height,
+      hash: frameHash,
+      parentFrameHash: frameParentHash(height - 1),
+      stateRoot: `0x${'11'.repeat(32)}`,
+      authorityRoot: `0x${'22'.repeat(32)}`,
+      txs: [],
+      events: [],
+      entityContext: emptyEntityContext(
+        targetEntityId,
+        targetSignerId,
+        height,
+        frameParentHash(height - 1),
+      ),
+      leader: { proposerSignerId: targetSignerId, view: 0 },
+      hashesToSign: [{ hash: frameHash, type: 'entityFrame', context: `entity-frame:${height}` }],
+      collectedSigs: new Map([[targetSignerId, [signature]]]),
+      hankos: [`0xhanko-${signature}`],
+    } as never,
+  };
+};
 
 const proposalOutput = (
   targetRuntimeId: string,
@@ -839,15 +845,15 @@ describe('runtime output routing', () => {
       height: input.proposedFrame?.height,
       hash: input.proposedFrame?.hash,
     }))).toEqual([
-      { height: 1, hash: '0xcommit01' },
-      { height: 2, hash: '0xcommit02' },
-      { height: 3, hash: '0xcommit03' },
-      { height: 10, hash: '0xcommit10' },
+      { height: 1, hash: testFrameHash('0xcommit01') },
+      { height: 2, hash: testFrameHash('0xcommit02') },
+      { height: 3, hash: testFrameHash('0xcommit03') },
+      { height: 10, hash: testFrameHash('0xcommit10') },
     ]);
     expect(delivered.map(input => ({
       height: input.proposedFrame?.height,
       hash: input.proposedFrame?.hash,
-    }))).toEqual([{ height: 1, hash: '0xcommit01' }]);
+    }))).toEqual([{ height: 1, hash: testFrameHash('0xcommit01') }]);
   });
 
   test('deduplicates exact certificates but preserves different evidence variants', () => {
@@ -1475,6 +1481,7 @@ describe('runtime output routing', () => {
     const secondarySignerId = runtimeId('6c');
     const warnings: string[] = [];
     const errors: string[] = [];
+    const proposalHash = testFrameHash('0xproposal');
     const env = {
       runtimeId: runtimeId('11'),
       warn: (_scope: string, code: string) => warnings.push(code),
@@ -1491,7 +1498,7 @@ describe('runtime output routing', () => {
       proposedFrame: {
         height: 7,
         timestamp: 7,
-        hash: '0xproposal',
+        hash: proposalHash,
         parentFrameHash: frameParentHash(6),
         stateRoot: `0x${'11'.repeat(32)}`,
         authorityRoot: `0x${'22'.repeat(32)}`,
@@ -1504,7 +1511,7 @@ describe('runtime output routing', () => {
           frameParentHash(6),
         ),
         leader: { proposerSignerId: primarySignerId, view: 0 },
-        hashesToSign: [{ hash: '0xproposal', type: 'entityFrame', context: 'entity-frame:7' }],
+        hashesToSign: [{ hash: proposalHash, type: 'entityFrame', context: 'entity-frame:7' }],
         collectedSigs: new Map(),
       } as never,
     }], {
@@ -1521,7 +1528,7 @@ describe('runtime output routing', () => {
     const precommitResult = planEntityOutputs(env, [{
       entityId: targetEntityId,
       signerId: secondarySignerId,
-      hashPrecommitFrame: { height: 7, frameHash: '0xproposal' },
+      hashPrecommitFrame: { height: 7, frameHash: proposalHash },
       hashPrecommits: new Map([[primarySignerId, ['0xsig']]]),
     }], {
       ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,

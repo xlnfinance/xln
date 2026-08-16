@@ -49,9 +49,8 @@ const ONE = 10n ** 18n;
 const usd = (amount: number | bigint) => BigInt(amount) * ONE;
 
 const hasFinalizedHankoBatch = (replica: EntityReplica): boolean =>
-  (replica.state.jBlockChain || []).some(block =>
-    (block.events || []).some(event => event.type === 'HankoBatchProcessed'),
-  );
+  (replica.state.jBatchState?.entityNonce ?? 0) > 0 &&
+  !replica.state.jBatchState?.sentBatch;
 
 export const importBoardReplicas = (env: RuntimeReplica, entityId: string, config: ConsensusConfig, x: number) =>
   config.validators.map((signerId, index) => createTestEntityImportRuntimeTx(env, {
@@ -626,7 +625,7 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
     console.log('═══════════════════════════════════════════════════════════════');
     console.log('✅ MULTI-SIGNER CONSENSUS: ALL TESTS PASS');
     console.log('═══════════════════════════════════════════════════════════════');
-    console.log(`📊 Total frames: ${env.history?.length || 0}`);
+  console.log(`📊 Total frames: ${env.state.height}`);
     console.log('   Entity-level 3-of-4 threshold: ✅');
     console.log('   Lazy + registered on-chain Hanko: ✅');
     console.log('   Proposer alone cannot commit: ✅');

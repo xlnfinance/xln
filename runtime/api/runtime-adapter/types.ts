@@ -1,8 +1,10 @@
 import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../../storage/views/activity-types';
+import type { PersistedAccountSwapHistoryPage } from '../../storage/queries/history';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { RuntimeInput } from '../../runtime/types';
 import type { XlnProtocolVersion } from '../../protocol/version';
 import type { RuntimeIngressReceipt } from '../../runtime/input-pipeline/ingress-receipts';
+import type { SettlementEvidenceRequest } from './control/settlement-evidence';
 import type {
   NumberedRegistrationCommand,
   NumberedRegistrationCommandResult,
@@ -124,6 +126,9 @@ export type RuntimeAdapterActivityPage = {
   events: RuntimeActivityEvent[];
 };
 
+/** Paged lifecycle projection rebuilt from certified Account-frame history only. */
+export type RuntimeAdapterSwapHistoryPage = PersistedAccountSwapHistoryPage;
+
 export type RuntimeAdapterSolvencySummary = {
   ok: true;
   height: number;
@@ -179,7 +184,7 @@ export type RuntimeAdapterCrossJurisdictionIntentResult = {
   delivered: true;
 };
 
-export type RuntimeAdapterControlAction = 'verify-chain';
+export type RuntimeAdapterControlAction = 'verify-chain' | SettlementEvidenceRequest;
 
 /** Exact secret input sent only to the selected trusted node's admin channel. */
 export type RuntimeAdapterBrainVaultInput = Readonly<{

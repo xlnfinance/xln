@@ -195,7 +195,7 @@ test('custom model ids, saved skills, and inline skills persist into a human cha
   await expect(page.getByText('Boardroom Skeptic 2')).toBeVisible();
 });
 
-test('AI model registry endpoint returns local/fallback models for the UI', async ({ request }) => {
+test('AI model registry endpoint returns live or bundled models for the UI', async ({ request }) => {
   const response = await request.get('/api/ai/models');
   expect(response.ok()).toBe(true);
   const body = await response.json();

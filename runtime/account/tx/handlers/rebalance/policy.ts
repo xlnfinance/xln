@@ -1,4 +1,5 @@
-import type { AccountState, AccountTx } from '../../../../types/account';
+import type { AccountTx } from '../../../../types/account';
+import type { AccountDraftState } from '../../../state/account-state-draft';
 import type { RebalanceFeePolicySnapshot } from '../../../../types/finance/rebalance';
 import { TOKENS } from '../../../../config/constants';
 import type { ApplyAccountTxResult } from '../../apply-types';
@@ -15,7 +16,7 @@ const sameTerms = (
   current.gasFee === next.gasFee;
 
 export const handleRebalancePolicy = (
-  account: AccountState,
+  account: AccountDraftState,
   tx: RebalancePolicyTx,
   byLeft: boolean,
   committedTimestamp: number,
@@ -65,8 +66,9 @@ export const handleRebalancePolicy = (
     gasFee,
     updatedAt: committedTimestamp,
   };
-  const policies = account.rebalanceFeePolicies ?? new Map();
-  policies.set(tokenId, { ...policies.get(tokenId), [side]: next });
-  account.rebalanceFeePolicies = policies;
+  account.rebalanceFeePolicies.put(tokenId, {
+    ...account.rebalanceFeePolicies.get(tokenId),
+    [side]: next,
+  });
   return accountTxApplied([`rebalance_policy: ${side} published v${policyVersion} token=${tokenId}`]);
 };

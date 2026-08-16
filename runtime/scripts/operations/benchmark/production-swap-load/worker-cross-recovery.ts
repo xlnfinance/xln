@@ -10,7 +10,7 @@ import {
   decodeLoadFrame,
   decodeRuntimeManifestEntries,
   selectLocalHubIdentity,
-} from './worker-boundary';
+} from './boundary/worker-boundary';
 import { waitForSettledCrossRoute } from './cross/worker-cross-state';
 import {
   connectRuntime,

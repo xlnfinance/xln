@@ -91,7 +91,6 @@ const makeEntityStateFixture = (accountHash: string): EntityState => ({
   })()]),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 42,
-  jBlockChain: [],
   profile: { name: 'Golden Entity', isHub: true, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 12n,

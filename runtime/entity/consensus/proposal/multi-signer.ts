@@ -10,6 +10,7 @@ import type { EntityReplica, EntityState, EntityFrame, EntityCandidate } from '.
 import type { EntityRuntimeContext } from '../../runtime-context';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from '../frame';
 import { applyEntityFrame } from '../frame/application';
+import { copyProposableAccounts } from '../account/touched-accounts';
 import {
   buildEntityHashesToSign,
   getEntityHashManifestMismatch,
@@ -17,7 +18,10 @@ import {
 import type { ApplyEntityInputContext } from '../input/types';
 import { getReplicaProposalLeader } from '../leader';
 import { buildCertifiedEntityOutputHashes } from '../output/certification';
-import type { EntityProposalSelection } from './selection';
+import {
+  shouldKeepPreparedEntityFrame,
+  type EntityProposalSelection,
+} from './selection';
 import {
   expectedCommittedLeaderState,
 } from '../leader/certificates';
@@ -128,6 +132,7 @@ const replayPreparedFrameForRelay = async (
     hashesToSign,
     candidateEffects: applied.candidateEffects,
     storageChanges: applied.storageChanges,
+    proposableAccounts: copyProposableAccounts(applied.proposableAccounts),
     ...(applied.consumptionNodeChanges
       ? { consumptionNodeChanges: applied.consumptionNodeChanges }
       : {}),
@@ -279,6 +284,7 @@ const storeMultiSignerCandidate = (
     hashesToSign,
     candidateEffects: applied.candidateEffects,
     storageChanges: applied.storageChanges,
+    proposableAccounts: copyProposableAccounts(applied.proposableAccounts),
     ...(applied.consumptionNodeChanges ? { consumptionNodeChanges: applied.consumptionNodeChanges } : {}),
     ...(applied.accountJClaimNodeChanges ? { accountJClaimNodeChanges: applied.accountJClaimNodeChanges } : {}),
   };
@@ -320,7 +326,7 @@ const assembleMultiSignerFrame = (
 const buildMultiSignerProposal = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
-): Promise<EntityFrame> => {
+): Promise<EntityFrame | null> => {
   const { env, workingReplica } = context;
   const { proposalJPrefixCertificate, proposalTxs } = selection;
   const authorityConfig = getEntityFrameConsensusConfig(
@@ -336,8 +342,13 @@ const buildMultiSignerProposal = async (
       };
   const leader = getReplicaProposalLeader(authorityReplica);
   assertMultiSignerProposalPrefix(env, authorityReplica, selection, leader.view);
-  const entityContext = await materializeEntityInfraContext(env, workingReplica, proposalTxs);
+  const entityContext = await materializeEntityInfraContext(env, workingReplica, proposalTxs, {
+    usePersistedReplayContext: context.usePersistedReplayContext,
+  });
   const applied = await applyEntityFrame(env, workingReplica.state, entityContext, proposalTxs, env.state.timestamp);
+  if (!shouldKeepPreparedEntityFrame(selection, applied.accountsToProposeFramesCount)) {
+    return null;
+  }
   const height = workingReplica.state.height + 1;
   const state = buildProposalState(
     env,
@@ -397,6 +408,7 @@ export const startMultiSignerProposalIfReady = async (
     txs: selection.proposalTxs.map(tx => tx.type),
   });
   const proposal = await buildMultiSignerProposal(context, selection);
+  if (!proposal) return;
   context.workingReplica.proposal = proposal;
   entityLog.debug('proposal.created', {
     frame: shortHash(proposal.hash),

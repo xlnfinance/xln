@@ -22,7 +22,7 @@ export const handleBoardHandoverEntityTx = (
   const config = validateConsensusConfig({
     ...tx.data.board,
     ...(entityState.config.jurisdiction
-      ? { jurisdiction: structuredClone(entityState.config.jurisdiction) }
+      ? { jurisdiction: entityState.config.jurisdiction }
       : {}),
   }, 'BOARD_HANDOVER_CONFIG');
   if (config.mode !== entityState.config.mode) throw new Error('BOARD_HANDOVER_MODE_CHANGE_FORBIDDEN');
@@ -50,7 +50,16 @@ export const handleBoardHandoverEntityTx = (
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const activeValidatorId = config.validators[0];
   if (!activeValidatorId) throw new Error('BOARD_HANDOVER_VALIDATOR_MISSING');
-  newState.config = structuredClone(config);
+  // The board is tiny consensus metadata, so detach only its mutable leaves.
+  // The jurisdiction object is immutable carry-forward authority and is never
+  // copied with the potentially million-entry Entity state.
+  newState.config = {
+    mode: config.mode,
+    threshold: config.threshold,
+    validators: [...config.validators],
+    shares: { ...config.shares },
+    ...(config.jurisdiction ? { jurisdiction: config.jurisdiction } : {}),
+  };
   newState.leaderState = {
     activeValidatorId,
     view: 0,

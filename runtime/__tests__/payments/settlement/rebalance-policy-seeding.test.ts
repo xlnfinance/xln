@@ -76,7 +76,7 @@ test('both account creation paths seed the local rebalance policy', () => {
 
   for (const handler of [openAccount, inboundAccount]) {
     expect(handler).toContain('resolveJurisdictionRebalanceDefaults');
-    expect(handler).toContain('shadow.rebalance.policy.set');
+    expect(handler).toContain('rebalanceShadowPolicy');
   }
   // Neither side may keep a private copy of the policy maths.
   expect(openAccount).not.toContain('const resolveJurisdictionRebalanceDefaults');

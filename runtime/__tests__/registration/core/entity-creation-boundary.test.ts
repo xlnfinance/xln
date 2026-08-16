@@ -159,8 +159,10 @@ describe('Entity creation custody boundary', () => {
     const seed = new Uint8Array(64).fill(8);
     await applyRuntimeTx(env, importEntity({ entityId, signerId: SIGNER_ID, entitySeed: seed, data: { config, isProposer: true } }));
     await applyRuntimeTx(env, importEntity({ entityId, signerId: second, entitySeed: seed, data: { config, isProposer: false } }));
-    const publicKeys = [...env.state.eReplicas.values()].map(replica => replica.state.entityEncryptionPublicKey);
+    const replicas = [...env.state.eReplicas.values()];
+    const publicKeys = replicas.map(replica => replica.state.entityEncryptionPublicKey);
     expect(new Set(publicKeys).size).toBe(1);
+    expect(replicas[1]!.state).toBe(replicas[0]!.state);
     await expect(applyRuntimeTx(env, importEntity({
       entityId, signerId: second, entitySeed: new Uint8Array(64).fill(9), data: { config, isProposer: false },
     }))).rejects.toThrow();

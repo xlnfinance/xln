@@ -16,6 +16,7 @@ import {
 import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure';
 import { finalizeReliableIngressCommit } from '../reliable/reliable-delivery.ts';
 import type { FrameExecutionState } from './input/execution-state';
+import type { PreparedOutputGraph } from '../delivery/prepared-output';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -29,12 +30,23 @@ const collectLocallySignableEntityIds = (env: RuntimeReplica): Set<string> => {
   return entityIds;
 };
 
+const hasFreshProfileWitness = (env: RuntimeReplica, entityId: string): boolean => {
+  for (const replica of env.state.eReplicas.values()) {
+    if (replica.entityId.toLowerCase() !== entityId) continue;
+    for (const entry of replica.hankoWitness?.values() ?? []) {
+      if (entry.type === 'profile' && entry.entityHeight === replica.state.height) return true;
+    }
+  }
+  return false;
+};
+
 export type CommittedEntityOutputPlan = {
   remoteOutputs: PlannedRemoteOutput[];
   deferredOutputs: RoutedEntityInput[];
   readyPendingOutputs: RoutedEntityInput[];
   waitingPendingOutputs: RoutedEntityInput[];
   retainedLocalReliableOutputs: RoutedEntityInput[];
+  preparedOutputGraph: PreparedOutputGraph;
 };
 
 export const dispatchCommittedEntityOutputs = async (
@@ -45,7 +57,9 @@ export const dispatchCommittedEntityOutputs = async (
 ): Promise<void> => {
   const p2p = ensureRuntimeInfrastructure(env).p2p ?? null;
   const localIds = collectLocallySignableEntityIds(env);
-  const changedLocalIds = [...changedEntityIds].filter(entityId => localIds.has(entityId));
+  const changedLocalIds = [...changedEntityIds].filter(
+    entityId => localIds.has(entityId) && hasFreshProfileWitness(env, entityId),
+  );
   const knownIds = new Set(
     (env.gossip?.getProfiles?.() ?? []).map(profile => profile.entityId.toLowerCase()),
   );
@@ -62,7 +76,12 @@ export const dispatchCommittedEntityOutputs = async (
       remoteOutputs: plan.remoteOutputs.length,
     });
   }
-  const dispatchDeferred = dispatchEntityOutputs(env, plan.remoteOutputs, routing);
+  const dispatchDeferred = dispatchEntityOutputs(
+    env,
+    plan.remoteOutputs,
+    routing,
+    plan.preparedOutputGraph,
+  );
   if (refreshIds.length > 0) {
     p2p?.announceProfilesForEntities(refreshIds, 'routing-profile-refresh');
   }
@@ -76,11 +95,12 @@ export const dispatchCommittedEntityOutputs = async (
     [...plan.deferredOutputs, ...dispatchDeferred],
     plan.waitingPendingOutputs,
     routing,
+    plan.preparedOutputGraph,
   );
   env.pendingNetworkOutputs = buildPendingNetworkOutputs([
     ...rescheduled,
     ...plan.retainedLocalReliableOutputs,
-  ]);
+  ], plan.preparedOutputGraph);
 };
 
 export const runCommittedRecoveryBarrier = async (

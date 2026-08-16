@@ -84,7 +84,6 @@ import {
   validateCertifiedBoardNodeValue,
   validateConsumptionNodeValue,
   validateStorageAccountDocValue,
-  validateStorageBookDocValue,
   validateStorageDiffRecordValue,
   validateStorageEntityCoreDocValue,
   validateStorageFrameRecordValue,
@@ -93,14 +92,20 @@ import {
   validateStorageMerkleLeafDocValue,
   validateStorageMerkleRootDocValue,
 } from '../schema/authoritative-schema';
+import { readSnapshotBookGraph, readStorageBookGraph } from './book-graph';
+import { readRuntimeOutputPayloads } from '../wal/outbox-payload';
+import { validateDurableOutputRetryState } from '../../runtime/delivery/durable-output-retry';
+import { readEntityContextPayloads } from '../wal/entity-context-payload';
+import { readRuntimeMachineGraph } from '../wal/runtime-machine-graph';
 import type {
   RuntimeDbLike,
+  RuntimeFrame,
+  RuntimeFramePayloads,
   StorageAccountDoc,
   StorageDiffRecord,
   StorageDoc,
   StorageDocRef,
   StorageEntityCoreDoc,
-  RuntimeFrame,
   StorageHead,
   StorageReplicaMeta,
 } from '../types';
@@ -256,6 +261,45 @@ export const readStorageFrameRecord = async (
   return frame;
 };
 
+export const readStorageFramePayloads = async (
+  db: RuntimeDbLike,
+  frame: RuntimeFrame,
+): Promise<RuntimeFramePayloads> => {
+  const targetHeight = frame.height;
+  const runtimeOutputs = frame.runtimeOutputRefs?.length
+    ? await readRuntimeOutputPayloads(
+      db,
+      frame.runtimeOutputRefs,
+    )
+    : [];
+  const entityContexts = frame.entityContextRefs?.size
+    ? await readEntityContextPayloads(
+      db,
+      frame.entityContextRefs,
+    )
+    : new Map();
+  const runtimeMachine = frame.runtimeMachineRoot
+    ? await readRuntimeMachineGraph(
+      db,
+      targetHeight,
+      frame.runtimeMachineRoot,
+    )
+    : undefined;
+  const payloads: RuntimeFramePayloads = {
+    entityContexts,
+    ...(runtimeOutputs.length > 0 ? { runtimeOutputs } : {}),
+    ...(runtimeMachine ? { runtimeMachine } : {}),
+  };
+  if (frame?.runtimeOutputRetryState) {
+    validateDurableOutputRetryState(
+      frame.runtimeOutputRetryState,
+      runtimeOutputs,
+      `STORAGE_FRAME_INVALID_RUNTIME_OUTPUT_RETRY_STATE:${targetHeight}`,
+    );
+  }
+  return payloads;
+};
+
 const listReplicaMetas = async (
   db: RuntimeDbLike,
   entityId: string,
@@ -268,20 +312,20 @@ const listReplicaMetas = async (
   const expectedEntityId = normalizeEntityId(entityId);
   for await (const key of iterateKeys(db, { prefix })) {
     const decoded = decodeBuffer(await db.get(key));
-    let candidate = decoded;
-    if (
-      decoded && typeof decoded === 'object' && !Array.isArray(decoded) &&
-      !Object.hasOwn(decoded, 'state') && sharedState
-    ) {
-      candidate = {
-        ...decoded,
-        state: sharedState,
-      };
+    if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
+      throw new Error(`STORAGE_REPLICA_META_RECORD_REQUIRED:0x${key.toString('hex')}`);
     }
-    const meta = validateEntityReplicaMetadata(
-      candidate,
+    if (Object.hasOwn(decoded, 'state')) {
+      throw new Error(`STORAGE_REPLICA_META_STATE_BLOB_FORBIDDEN:0x${key.toString('hex')}`);
+    }
+    if (!sharedState) {
+      throw new Error(`STORAGE_REPLICA_META_SHARED_STATE_REQUIRED:0x${key.toString('hex')}`);
+    }
+    const validated = validateEntityReplicaMetadata(
+      { ...decoded, state: sharedState },
       `StorageReplicaMeta[0x${key.toString('hex')}]`,
-    ) as StorageReplicaMeta;
+    );
+    const { state: _validatedState, ...meta } = validated;
     const metaEntityId = normalizeEntityId(String(meta.entityId || ''));
     const signerId = normalizeEntityId(String(meta.signerId || ''));
     if (!metaEntityId || metaEntityId !== expectedEntityId) {
@@ -292,21 +336,21 @@ const listReplicaMetas = async (
     if (!signerId || !key.equals(expectedKey(metaEntityId, signerId))) {
       throw new Error(`STORAGE_REPLICA_META_KEY_BINDING_MISMATCH:entity=${metaEntityId}:signer=${signerId || 'missing'}`);
     }
-    if (normalizeEntityId(String(meta.state?.entityId || '')) !== metaEntityId) {
+    if (normalizeEntityId(String(sharedState.entityId || '')) !== metaEntityId) {
       throw new Error(
         `STORAGE_REPLICA_META_STATE_ENTITY_MISMATCH:meta=${metaEntityId}:` +
-        `state=${normalizeEntityId(String(meta.state?.entityId || '')) || 'missing'}`,
+        `state=${normalizeEntityId(String(sharedState.entityId || '')) || 'missing'}`,
       );
     }
     if (seenSigners.has(signerId)) {
       throw new Error(`STORAGE_REPLICA_META_DUPLICATE_SIGNER:entity=${metaEntityId}:signer=${signerId}`);
     }
     seenSigners.add(signerId);
-    const validators = meta.state?.config?.validators;
+    const validators = sharedState.config.validators;
     if (!Array.isArray(validators) || !validators.some(validator => normalizeEntityId(validator) === signerId)) {
       throw new Error(`STORAGE_REPLICA_META_SIGNER_NOT_IN_BOARD:entity=${metaEntityId}:signer=${signerId}`);
     }
-    metas.push(meta);
+    metas.push(meta satisfies StorageReplicaMeta);
   }
   return metas.sort((left, right) => compareAscii(String(left.signerId || ''), String(right.signerId || '')));
 };
@@ -327,11 +371,13 @@ export const listStorageSnapshotReplicaMetas = async (
   db: RuntimeDbLike,
   height: number,
   entityId: string,
+  sharedState: EntityState,
 ): Promise<StorageReplicaMeta[]> => listReplicaMetas(
   db,
   entityId,
   keySnapshotReplicaMetaPrefix(height, entityId),
   (metaEntityId, signerId) => keySnapshotReplicaMeta(height, metaEntityId, signerId),
+  sharedState,
 );
 
 export const listStorageSnapshotHeights = async (db: RuntimeDbLike): Promise<number[]> => {
@@ -663,7 +709,8 @@ const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: numb
 
   for await (const key of iterateKeys(db, { prefix: keySnapshotBookPrefix(snapshotHeight, entityId) })) {
     const parsed = parseLiveBookKey(key, 9);
-    const value = decodeValidatedBuffer(await db.get(key), validateStorageBookDocValue);
+    const value = await readSnapshotBookGraph(db, snapshotHeight, parsed.entityId, parsed.pairId);
+    if (!value) throw new Error(`STORAGE_SNAPSHOT_BOOK_GRAPH_MISSING:${snapshotHeight}:${parsed.entityId}:${parsed.pairId}`);
     docs.set(`b:${normalizeEntityId(parsed.entityId)}:${parsed.pairId}`, {
       family: 'book',
       entityId: normalizeEntityId(parsed.entityId),
@@ -706,11 +753,13 @@ const loadSnapshotDocsAtHeight = async (
   }
   for await (const key of iterateKeys(db, { prefix: keySnapshotBookPrefix(snapshotHeight) })) {
     const { entityId, pairId } = parseLiveBookKey(key, 9);
+    const value = await readSnapshotBookGraph(db, snapshotHeight, entityId, pairId);
+    if (!value) throw new Error(`STORAGE_SNAPSHOT_BOOK_GRAPH_MISSING:${snapshotHeight}:${entityId}:${pairId}`);
     docs.set(`b:${normalizeEntityId(entityId)}:${pairId}`, {
       family: 'book',
       entityId,
       pairId,
-      value: decodeValidatedBuffer(await db.get(key), validateStorageBookDocValue),
+      value,
     });
   }
   return docs;
@@ -997,8 +1046,9 @@ const listBookPageFromKeyspace = async (options: {
   limit: number;
   direction: 'asc' | 'desc';
   overlay?: Map<string, BookState | null>;
+  readBook: (pairId: string) => Promise<BookState | null>;
 }): Promise<StorageBookDocPage | null> => {
-  const { db, prefix, parseKey, cursor, limit, direction, overlay } = options;
+  const { db, prefix, parseKey, cursor, limit, direction, overlay, readBook } = options;
   if (typeof db.keys !== 'function') return null;
   const candidates: Array<{ pairId: string; book: BookState }> = [];
   const seen = new Set<string>();
@@ -1018,7 +1068,8 @@ const listBookPageFromKeyspace = async (options: {
     const { pairId } = parseKey(key);
     if (!isAfterBookCursor(pairId, cursor, direction)) continue;
     if (overlay?.has(pairId)) continue;
-    const book = decodeValidatedBuffer(await db.get(key), validateStorageBookDocValue);
+    const book = await readBook(pairId);
+    if (!book) throw new Error(`STORAGE_BOOK_GRAPH_MISSING:${pairId}`);
     pushBookCandidate(candidates, seen, pairId, book, limit, direction);
     const worst = candidates[candidates.length - 1]?.pairId;
     if (!worst || candidates.length <= limit) continue;
@@ -1052,6 +1103,7 @@ const loadBookDocPageAtHeight = async (
       cursor,
       limit,
       direction,
+      readBook: pairId => readStorageBookGraph(db, normalized, pairId),
     });
     if (page) return page;
   }
@@ -1078,6 +1130,7 @@ const loadBookDocPageAtHeight = async (
       limit,
       direction,
       overlay,
+      readBook: pairId => readSnapshotBookGraph(db, baseSnapshotHeight, normalized, pairId),
     });
     if (page) return page;
   }
@@ -1251,7 +1304,9 @@ export const loadEntityStateFromStorage = async (options: {
         raw,
         enabled: verifyDocHashes,
       });
-      books.set(parsed.pairId, decodeValidatedBuffer(raw, validateStorageBookDocValue));
+      const book = await readStorageBookGraph(db, parsed.entityId, parsed.pairId);
+      if (!book) throw new Error(`STORAGE_BOOK_GRAPH_MISSING:${parsed.entityId}:${parsed.pairId}`);
+      books.set(parsed.pairId, book);
     }
     await assertLiveMerkleIntegrity(db, entityId, verifyMerkleMode);
     return hydrateEntityWithCertifiedBoardNodes(options.env, db, entityCore, accounts, books);
@@ -1304,6 +1359,27 @@ export const loadEntityStatesAtHeightFromStorage = async (options: {
   if (!head) return new Map();
   const targetHeight = resolveTargetStorageHeight(head, options.height, 'entity-states');
   if (targetHeight <= 0) return new Map();
+
+  const latestMaterializedHeight = Math.max(
+    0,
+    Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
+  );
+  if (targetHeight === latestMaterializedHeight) {
+    const states = new Map<string, EntityState>();
+    for (const entityId of await listStorageLiveEntityIds(db)) {
+      const state = await loadEntityStateFromStorage({
+        ...options,
+        entityId,
+        height: targetHeight,
+        liveStateReadable: true,
+      });
+      if (!state) {
+        throw new Error(`STORAGE_LIVE_ENTITY_STATE_MISSING:${entityId}:${targetHeight}`);
+      }
+      states.set(entityId, state);
+    }
+    return states;
+  }
 
   const snapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
   const docs = await loadSnapshotDocsAtHeight(db, snapshotHeight);

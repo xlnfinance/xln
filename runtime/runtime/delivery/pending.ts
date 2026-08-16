@@ -34,13 +34,13 @@ import {
   assertReliableEvidenceCompatible,
   buildRouteOutputKey,
   carriesEntityCommitNotification,
-  cloneRoutedOutputWithCachedIdentity,
+  copyRoutedOutputForMerge,
   getEntityFrameIdentity,
   getReliableOutputIdentity,
   normalizeRouteText,
-  splitRoutedOutputByDeliveryLane,
   type ReliableOutputIdentity,
 } from './identity';
+import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
 
 const routeLog = createStructuredLogger('network.route');
 
@@ -496,9 +496,12 @@ const mergeOrdinaryOutput = <T extends RoutedEntityInput>(existing: T, incoming:
   return existing;
 };
 
-export const mergeRoutedEntityOutput = <T extends RoutedEntityInput>(existing: T, incoming: T): T => {
-  const existingReliable = getReliableOutputIdentity(existing);
-  const incomingReliable = getReliableOutputIdentity(incoming);
+export const mergeRoutedEntityOutput = <T extends RoutedEntityInput>(
+  existing: T,
+  incoming: T,
+  existingReliable: ReliableOutputIdentity | null = getReliableOutputIdentity(existing),
+  incomingReliable: ReliableOutputIdentity | null = getReliableOutputIdentity(incoming),
+): T => {
   if (existingReliable || incomingReliable) {
     if (!existingReliable || !incomingReliable) {
       throw new Error('ROUTE_RELIABLE_MERGE_KIND_MISMATCH');
@@ -672,6 +675,7 @@ export const splitPendingOutputsByRetryWindow = (
   env: RuntimeReplica,
   pending: RoutedEntityInput[],
   deps: RuntimeOutputRoutingDeps,
+  graph: PreparedOutputGraph = createPreparedOutputGraph(),
 ): { ready: RoutedEntityInput[]; waiting: RoutedEntityInput[] } => {
   if (pending.length === 0) return { ready: [], waiting: [] };
   const nowMs = getNetworkRetryNowMs(env);
@@ -683,12 +687,12 @@ export const splitPendingOutputsByRetryWindow = (
   // account-ACK and J-finality heights are not mutually comparable; a
   // universal per-Entity queue can deadlock the protocols against each other.
   const blockedReliableLanes = new Set<string>();
-  const orderedPending = buildPendingNetworkOutputs(pending);
+  const orderedPending = buildPendingNetworkOutputs(pending, graph);
   const readyAccountAckLanes = new Set(
     orderedPending.flatMap(output => {
-      const identity = getReliableOutputIdentity(output);
+      const { reliableIdentity: identity, routeKey } = graph.prepare(output);
       if (!identity || !isAccountAckIdentity(identity)) return [];
-      const retry = meta.get(buildRouteOutputKey(output));
+      const retry = meta.get(routeKey);
       return !retry || retry.nextRetryAt <= nowMs ? [identity.laneKey] : [];
     }),
   );
@@ -701,24 +705,24 @@ export const splitPendingOutputsByRetryWindow = (
         waiting.push(...unit.outputs);
         continue;
       }
-      const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
+      const reliableOutputs = unit.outputs.filter(output => graph.prepare(output).reliableIdentity !== null);
       const reliable = reliableOutputs
-        .map(output => getReliableOutputIdentity(output)!)
+        .map(output => graph.prepare(output).reliableIdentity!)
         .filter((identity): identity is ReliableOutputIdentity => identity !== null);
       const retryFenceOutputs = reliableOutputs.length > 0 ? reliableOutputs : unit.outputs;
       const due =
         (restoredReliableDue && reliable.length > 0) ||
         retryFenceOutputs.some(output => {
-          const entry = meta.get(buildRouteOutputKey(output));
+          const entry = meta.get(graph.prepare(output).routeKey);
           return !entry || entry.nextRetryAt <= nowMs;
         });
       if (due) {
         ready.push(...unit.outputs);
       } else {
         logCompleteAtomicUnitWaiting(unit, retryFenceOutputs.map(output => ({
-          key: buildRouteOutputKey(output).slice(0, 160),
-          nextRetryInMs: (meta.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0) - nowMs,
-          attempts: meta.get(buildRouteOutputKey(output))?.attempts ?? 0,
+          key: graph.prepare(output).routeKey.slice(0, 160),
+          nextRetryInMs: (meta.get(graph.prepare(output).routeKey)?.nextRetryAt ?? 0) - nowMs,
+          attempts: meta.get(graph.prepare(output).routeKey)?.attempts ?? 0,
         })));
         waiting.push(...unit.outputs);
         reliable.forEach(identity => blockedReliableLanes.add(identity.laneKey));
@@ -726,12 +730,11 @@ export const splitPendingOutputsByRetryWindow = (
       continue;
     }
     const output = unit.outputs[0]!;
-    const reliable = getReliableOutputIdentity(output);
+    const { reliableIdentity: reliable, routeKey: key } = graph.prepare(output);
     if (reliable && reliable.kind !== 'account-ack' && blockedReliableLanes.has(reliable.laneKey)) {
       waiting.push(output);
       continue;
     }
-    const key = buildRouteOutputKey(output);
     const entry = meta.get(key);
     if ((restoredReliableDue && reliable) || !entry || entry.nextRetryAt <= nowMs) {
       ready.push(output);
@@ -863,9 +866,12 @@ const compareCertifiedOutputDelivery = (left: RoutedEntityInput, right: RoutedEn
   );
 };
 
-export const compareOutputDelivery = (left: RoutedEntityInput, right: RoutedEntityInput): number => {
-  const leftReliable = getReliableOutputIdentity(left);
-  const rightReliable = getReliableOutputIdentity(right);
+export const compareOutputDeliveryWithIdentities = (
+  left: RoutedEntityInput,
+  leftReliable: ReliableOutputIdentity | null,
+  right: RoutedEntityInput,
+  rightReliable: ReliableOutputIdentity | null,
+): number => {
   if (leftReliable && rightReliable) {
     return (
       compareStableText(leftReliable.laneKey, rightReliable.laneKey) ||
@@ -886,12 +892,24 @@ export const compareOutputDelivery = (left: RoutedEntityInput, right: RoutedEnti
   );
 };
 
-export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): RoutedEntityInput[] => {
+export const compareOutputDelivery = (left: RoutedEntityInput, right: RoutedEntityInput): number =>
+  compareOutputDeliveryWithIdentities(
+    left,
+    getReliableOutputIdentity(left),
+    right,
+    getReliableOutputIdentity(right),
+  );
+
+export const buildPendingNetworkOutputs = (
+  outputs: RoutedEntityInput[],
+  graph: PreparedOutputGraph = createPreparedOutputGraph(),
+): RoutedEntityInput[] => {
   const deduped = new Map<string, RoutedEntityInput>();
+  const mutableMergeTargets = new Set<RoutedEntityInput>();
   const identitiesByLaneOrder = new Map<string, ReliableOutputIdentity[]>();
-  const splitOutputs = outputs.flatMap(output => splitRoutedOutputByDeliveryLane(output));
+  const splitOutputs = outputs.flatMap(output => graph.split(output));
   for (const output of splitOutputs) {
-    const reliable = getReliableOutputIdentity(output);
+    const { reliableIdentity: reliable, routeKey: key } = graph.prepare(output);
     if (reliable) {
       const laneOrderKey = safeStringify({
         laneKey: reliable.laneKey,
@@ -905,19 +923,50 @@ export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): Routed
       existingIdentities.push(reliable);
       identitiesByLaneOrder.set(laneOrderKey, existingIdentities);
     }
-    const key = buildRouteOutputKey(output);
     const existing = deduped.get(key);
-    if (existing) mergeRoutedEntityOutput(existing, output);
-    else deduped.set(key, cloneRoutedOutputWithCachedIdentity(output));
+    if (existing) {
+      const target = mutableMergeTargets.has(existing) ? existing : copyRoutedOutputForMerge(existing);
+      if (target !== existing) {
+        deduped.set(key, target);
+        mutableMergeTargets.add(target);
+      }
+      mergeRoutedEntityOutput(
+        target,
+        output,
+        graph.prepare(target).reliableIdentity,
+        reliable,
+      );
+      graph.invalidate(target);
+    } else {
+      const target = copyRoutedOutputForMerge(output);
+      graph.adopt(output, target);
+      mutableMergeTargets.add(target);
+      deduped.set(key, target);
+    }
   }
+  // Identity construction canonically encodes and hashes the complete reliable
+  // evidence. Compute it only after every merge has finished, then reuse it for
+  // this normalization pass. A cross-pass object cache is unsafe because the
+  // merge helpers intentionally enrich an output's evidence in place.
   const pending = [...deduped.values()]
-    .map(output =>
-      output.entityTxs ? { ...output, entityTxs: orderCertifiedOutputsBySequence(output.entityTxs) } : output,
-    )
-    .sort(compareOutputDelivery);
+    .map(output => {
+      if (!output.entityTxs || output.entityTxs.length < 2) return output;
+      const ordered = orderCertifiedOutputsBySequence(output.entityTxs);
+      return ordered.every((tx, index) => tx === output.entityTxs![index])
+        ? output
+        : { ...output, entityTxs: ordered };
+    })
+    .map(output => ({ output, identity: graph.prepare(output).reliableIdentity }))
+    .sort((left, right) =>
+      compareOutputDeliveryWithIdentities(
+        left.output,
+        left.identity,
+        right.output,
+        right.identity,
+      ),
+    );
   const certifiedEntityFrames = new Set<string>();
-  for (const output of pending) {
-    const identity = getReliableOutputIdentity(output);
+  for (const { output, identity } of pending) {
     if (identity?.kind !== 'entity-frame' || identity.evidenceKind !== 'entity-certificate') continue;
     certifiedEntityFrames.add(
       safeStringify({
@@ -927,17 +976,18 @@ export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): Routed
       }),
     );
   }
-  const superseded = pending.filter(output => {
-    const identity = getReliableOutputIdentity(output);
-    if (identity?.kind !== 'entity-frame' || identity.evidenceKind !== 'entity-proposal') return true;
-    return !certifiedEntityFrames.has(
-      safeStringify({
-        runtimeId: normalizeRuntimeId(output.runtimeId),
-        laneKey: identity.laneKey,
-        logicalKey: identity.logicalKey,
-      }),
-    );
-  });
+  const superseded = pending
+    .filter(({ output, identity }) => {
+      if (identity?.kind !== 'entity-frame' || identity.evidenceKind !== 'entity-proposal') return true;
+      return !certifiedEntityFrames.has(
+        safeStringify({
+          runtimeId: normalizeRuntimeId(output.runtimeId),
+          laneKey: identity.laneKey,
+          logicalKey: identity.logicalKey,
+        }),
+      );
+    })
+    .map(({ output }) => output);
   if (superseded.length > MAX_PENDING_NETWORK_OUTPUTS) {
     throw new Error(
       `NETWORK_OUTBOX_CAPACITY_EXCEEDED: pending=${superseded.length} max=${MAX_PENDING_NETWORK_OUTPUTS}`,
@@ -1066,12 +1116,13 @@ export const rescheduleDeferredOutputs = (
   failed: RoutedEntityInput[],
   waiting: RoutedEntityInput[],
   deps: RuntimeOutputRoutingDeps,
+  graph: PreparedOutputGraph = createPreparedOutputGraph(),
 ): RoutedEntityInput[] => {
   const meta = getDeferredNetworkMeta(env, deps);
-  const failedKeys = new Set(failed.map(output => buildRouteOutputKey(output)));
+  const failedKeys = new Set(failed.map(output => graph.prepare(output).routeKey));
 
   for (const output of attemptedPending) {
-    const key = buildRouteOutputKey(output);
+    const key = graph.prepare(output).routeKey;
     if (!failedKeys.has(key)) {
       meta.delete(key);
     }
@@ -1079,7 +1130,7 @@ export const rescheduleDeferredOutputs = (
 
   const nowMs = getNetworkRetryNowMs(env);
   const retriedReliableLanes = new Set<string>();
-  for (const unit of groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(failed))) {
+  for (const unit of groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(failed, graph))) {
     if (!unit.complete) continue;
     // Cross-j Account cohorts retry as one envelope. Both proposal legs are
     // idempotent certified frames; ACK legs additionally carry reliable
@@ -1087,12 +1138,11 @@ export const rescheduleDeferredOutputs = (
     // legs or spinning every Runtime tick after a peer outage.
     const retryOutputs = unit.outputs;
     for (const output of retryOutputs) {
-      const reliable = getReliableOutputIdentity(output);
+      const { reliableIdentity: reliable, routeKey: key } = graph.prepare(output);
       if (!unit.atomic && reliable && reliable.kind !== 'account-ack' && retriedReliableLanes.has(reliable.laneKey)) {
-        meta.delete(buildRouteOutputKey(output));
+        meta.delete(key);
         continue;
       }
-      const key = buildRouteOutputKey(output);
       const attempts = (meta.get(key)?.attempts ?? 0) + 1;
       const retryMaxMs = unit.atomic || reliable ? RELIABLE_NETWORK_RETRY_MAX_MS : NETWORK_RETRY_MAX_MS;
       const delayMs = Math.min(retryMaxMs, NETWORK_RETRY_BASE_MS * 2 ** Math.min(attempts - 1, 5));
@@ -1104,9 +1154,9 @@ export const rescheduleDeferredOutputs = (
     }
   }
 
-  if (attemptedPending.some(output => getReliableOutputIdentity(output) !== null)) {
+  if (attemptedPending.some(output => graph.prepare(output).reliableIdentity !== null)) {
     clearRestoredReliableOutputsDue(env);
   }
 
-  return buildPendingNetworkOutputs([...failed, ...waiting]);
+  return buildPendingNetworkOutputs([...failed, ...waiting], graph);
 };

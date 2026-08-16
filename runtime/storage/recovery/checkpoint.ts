@@ -86,20 +86,23 @@ const restoreCheckpointState = (env: RuntimeReplica, snapshot: Record<string, un
     'RECOVERY_CHECKPOINT_RUNTIME_MACHINE',
   );
   restoreDurableRuntimeSnapshot(env, validatedRuntimeMachine);
-  env.state.eReplicas = new Map(entityEntries.map(([key, replica], index) => [
-    key,
-    validateEntityReplica(replica, `RecoveryCheckpoint.EntityReplica[${index}]`),
-  ]));
-  env.state.jReplicas = new Map(validateJReplicas(
+  env.state.eReplicas = new Map();
+  for (const [index, [key, replica]] of entityEntries.entries()) {
+    env.state.eReplicas.set(
+      key,
+      validateEntityReplica(replica, `RecoveryCheckpoint.EntityReplica[${index}]`),
+    );
+  }
+  env.state.jReplicas = new Map();
+  for (const [key, replica] of validateJReplicas(
     jurisdictionEntries,
     'RECOVERY_CHECKPOINT_J_REPLICA',
-  ));
+  )) env.state.jReplicas.set(key, replica);
   const gossip =
     snapshot['gossip'] && typeof snapshot['gossip'] === 'object'
       ? (snapshot['gossip'] as { profiles?: unknown })
       : null;
-  env.frameLogs = [];
-  env.overlay = [];
+  env.overlay = new Map();
   if (gossip?.profiles === undefined) return [];
   if (!Array.isArray(gossip.profiles)) throw new Error('RECOVERY_CHECKPOINT_GOSSIP_PROFILES_INVALID');
   return gossip.profiles.map(parseProfile);

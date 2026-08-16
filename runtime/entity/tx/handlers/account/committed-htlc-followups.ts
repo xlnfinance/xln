@@ -21,6 +21,7 @@ import { sameAccountStateDomain } from '../../../../account/commitment/state-roo
 import { deriveForwardHtlcLockId } from '../../../../protocol/htlc/utils';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
 import { hasInboundHtlcRoute } from '../../../htlc/route-views';
+import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
@@ -96,8 +97,10 @@ const applyPreparedHtlcOutcome = (
   }
   if (prepared.outcome.kind === 'final') {
     if (closesOriginatedSelfCycle) {
-      existingRoute.inboundEntity = inboundEntity;
-      existingRoute.inboundLockId = lock.lockId;
+      const writableRoute = getEntityCollectionValueForWrite(ctx.newState.htlcRoutes, lock.hashlock);
+      if (!writableRoute) throw new Error(`HTLC_ROUTE_WRITE_MISSING:${lock.hashlock}`);
+      writableRoute.inboundEntity = inboundEntity;
+      writableRoute.inboundLockId = lock.lockId;
     } else {
       ctx.newState.htlcRoutes.set(lock.hashlock, {
         hashlock: lock.hashlock, tokenId: lock.tokenId, amount: lock.amount,
@@ -241,7 +244,7 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
   if (HEAVY_LOGS) accountFollowupLog.debug('htlc.secret_check', { secrets: revealedSecrets.length });
 
   for (const { secret, hashlock } of revealedSecrets) {
-    const route = newState.htlcRoutes.get(hashlock);
+    const route = getEntityCollectionValueForWrite(newState.htlcRoutes, hashlock);
     if (!route || route.secret) continue;
     const outboundLock = route.outboundLockId ? newState.lockBook.get(route.outboundLockId) : undefined;
     const inboundLock = route.inboundLockId ? newState.lockBook.get(route.inboundLockId) : undefined;

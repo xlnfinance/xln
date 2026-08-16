@@ -591,7 +591,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     accounts: new Map(),
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: {
       name: 'Audit Entity',
       isHub: false,
@@ -619,7 +618,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: 'Audit Entity',
     isHub: false,
@@ -2095,15 +2093,15 @@ describe('audit fail-fast regressions', () => {
       ],
       frameTimestamp,
     );
-    env.overlay = [];
-    if (env.infrastructure) env.infrastructure.currentStorageOverlayMarks = [];
+    env.overlay = new Map();
+    if (env.infrastructure) env.infrastructure.currentStorageOverlayMarks = new Map();
     await expect(applyEntityFrameWithMaterializedTestInfraContext(env, state, frameTxs, frameTimestamp)).rejects.toThrow(
       'ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx',
     );
 
     expect(readEntityFrameEventMessages(state)).toHaveLength(0);
     expect(state.nonces.has(signer)).toBe(false);
-    expect(env.infrastructure?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(env.infrastructure?.currentStorageOverlayMarks ?? new Map()).toEqual(new Map());
   });
 
   test('entity frame keeps reducer storage changes local until exact commit', async () => {
@@ -2115,14 +2113,14 @@ describe('audit fail-fast regressions', () => {
     const frameTxs = await buildQuorumAuthorizedFrameTxs(env, state, [
       { type: 'chatMessage', data: { message: 'commit-bound storage change' } } as any,
     ]);
-    env.overlay = [];
-    if (env.infrastructure) env.infrastructure.currentStorageOverlayMarks = [];
+    env.overlay = new Map();
+    if (env.infrastructure) env.infrastructure.currentStorageOverlayMarks = new Map();
 
     const applied = await applyEntityFrameWithMaterializedTestInfraContext(env, state, frameTxs, env.state.timestamp);
 
     expect(readEntityFrameEventMessages(applied.newState)).toHaveLength(1);
     expect(applied.storageChanges).toContainEqual({ family: 'entity', entityId: state.entityId });
-    expect(env.infrastructure?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(env.infrastructure?.currentStorageOverlayMarks ?? new Map()).toEqual(new Map());
   });
 
   test('cross-j remote route cannot seed missing sibling runtime hints before topology validation', async () => {

@@ -20,9 +20,8 @@ const normalize = (value: unknown): string => String(value ?? '').trim().toLower
 const findTargetReplica = (
   env: RuntimeReplica,
   identity: ReliableDeliveryIdentity,
-): EntityReplica | undefined => [...env.state.eReplicas.values()].find(replica =>
-  normalize(replica.entityId || replica.state.entityId) === identity.entityId &&
-  normalize(replica.signerId) === identity.signerId);
+): EntityReplica | undefined =>
+  env.state.eReplicas.get(`${normalize(identity.entityId)}:${normalize(identity.signerId)}`);
 
 const txIdentity = (
   replica: EntityReplica,
@@ -122,10 +121,8 @@ const replicaLeaderVotes = (replica: EntityReplica): EntityLeaderTimeoutVote[] =
     replica.proposal?.leader.relayCertificate,
     replica.lockedFrame?.leader.certificate,
     replica.lockedFrame?.leader.relayCertificate,
-    ...(replica.certifiedFrameLineage ?? []).flatMap(link => [
-      link.frame.leader.certificate,
-      link.frame.leader.relayCertificate,
-    ]),
+    replica.certifiedFrameHead?.frame.leader.certificate,
+    replica.certifiedFrameHead?.frame.leader.relayCertificate,
   ];
   return [
     ...(replica.leaderVotes?.values() ?? []),
@@ -220,7 +217,9 @@ const jPrefixStateCovers = (
 const jPrefixLineageCoversIdentity = (
   replica: EntityReplica,
   identity: ReliableDeliveryIdentity,
-): boolean => (replica.certifiedFrameLineage ?? []).some((link) => {
+): boolean => {
+  const link = replica.certifiedFrameHead;
+  if (!link) return false;
   if (link.frame.height !== identity.height) return false;
   const attestations = link.frame.jPrefixCertificate?.attestations;
   if (!(attestations instanceof Map)) return false;
@@ -234,7 +233,7 @@ const jPrefixLineageCoversIdentity = (
     const { order: _order, variantOrder: _variantOrder, ...durableIdentity } = candidate;
     return reliableIdentityExactKey(durableIdentity) === reliableIdentityExactKey(identity);
   });
-});
+};
 
 /**
  * Only an exact stale vote body that the Entity transition already consumed
@@ -288,11 +287,13 @@ const accountStateCovers = (
 ): boolean => {
   const tx = getEffectiveEntityInputTxs(input).find(candidate => candidate.type === 'accountInput');
   if (!tx || tx.type !== 'accountInput') return false;
-  const account = [...replica.state.accounts.values()].find(candidate =>
-    [candidate.state.leftEntity, candidate.state.rightEntity].map(normalize).includes(normalize(tx.data.fromEntityId)) &&
-    [candidate.state.leftEntity, candidate.state.rightEntity].map(normalize).includes(normalize(tx.data.toEntityId)) &&
-    normalize(candidate.state.watchSeed) === normalize(tx.data.watchSeed));
-  if (!account || account.currentHeight < identity.height) return false;
+  const owner = normalize(replica.entityId);
+  const from = normalize(tx.data.fromEntityId);
+  const to = normalize(tx.data.toEntityId);
+  const counterparty = owner === from ? to : owner === to ? from : undefined;
+  const account = counterparty ? replica.state.accounts.get(counterparty) : undefined;
+  if (!account || normalize(account.state.watchSeed) !== normalize(tx.data.watchSeed)) return false;
+  if (account.currentHeight < identity.height) return false;
   if (account.currentHeight > identity.height) return true;
   return normalize(account.currentFrame?.stateHash) === identity.frameHash;
 };
@@ -445,9 +446,10 @@ const accountForLane = (
   if (!Array.isArray(scope) || scope.length !== 2 || scope.some(value => typeof value !== 'string')) {
     throw new Error('RELIABLE_AUTHORITY_ACCOUNT_SCOPE_INVALID');
   }
-  const ids = scope.map(normalize).sort();
-  return [...replica.state.accounts.values()].find(account =>
-    [normalize(account.state.leftEntity), normalize(account.state.rightEntity)].sort().join(':') === ids.join(':'));
+  const ids = scope.map(normalize);
+  const owner = normalize(replica.entityId);
+  const counterparty = ids[0] === owner ? ids[1] : ids[1] === owner ? ids[0] : undefined;
+  return typeof counterparty === 'string' ? replica.state.accounts.get(counterparty) : undefined;
 };
 
 /**
@@ -509,12 +511,11 @@ const terminalAccountAck = (
 ): boolean => {
   const account = accountForLane(replica, identity);
   if (!account) return false;
-  const terminalHeight = identity.evidenceKind === 'account-frame-ack'
-    ? identity.height + 1
-    : identity.height;
-  if (account.currentHeight > terminalHeight) return true;
-  if (account.currentHeight < terminalHeight) return false;
-  return identity.evidenceKind === 'account-frame-ack' ||
+  if (identity.evidenceKind === 'account-frame-ack') {
+    return account.currentHeight === identity.height + 1 &&
+      normalize(account.currentFrame.prevFrameHash) === identity.frameHash;
+  }
+  return account.currentHeight === identity.height &&
     normalize(account.currentFrame.stateHash) === identity.frameHash;
 };
 

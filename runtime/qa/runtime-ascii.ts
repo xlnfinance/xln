@@ -9,6 +9,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { readRuntimeFrameEvents } from '../runtime/observability/env-events';
 import type { EntityState } from '../entity/types';
 import type { AccountReplica } from '../types/account';
 import { getWallClockMs } from '../infra/time';
@@ -172,11 +173,12 @@ export function formatRuntime(env: RuntimeReplica, options?: FormatOptions): str
   output.push('');
 
   // Events Stack (hierarchical RJEA log)
-  if (env.frameLogs && env.frameLogs.length > 0) {
+  const frameEvents = readRuntimeFrameEvents(env);
+  if (frameEvents.length > 0) {
     output.push('  EVENTS (Hierarchical Stack):');
     output.push('  ' + '─'.repeat(60));
 
-    const recentEvents = env.frameLogs.slice(-50); // Last 50 events
+    const recentEvents = frameEvents.slice(-50); // Last 50 events
 
     for (const event of recentEvents) {
       // Build context tag: entity:account:frame

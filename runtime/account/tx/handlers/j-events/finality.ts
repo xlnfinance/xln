@@ -1,15 +1,29 @@
 import type { AccountReplica } from '../../../../types/account';
+import type { AccountDraftReplica } from '../../../state/account-state-draft';
 import type { JurisdictionEvent } from '../../../../types/jurisdiction-events';
 import { clearFinalizedSettlementWorkspace } from '../settlement/transition';
 import { buildAccountProofBody } from '../../../../protocol/dispute/proof-builder';
-import { invalidateAccountMapCommitment } from '../../../commitment/map-commitment';
-import { ensureSettlementDelta } from '../../../settlement/settlement-projection';
+import { createSettlementDeltaValue } from '../../../settlement/settlement-projection';
+import { commitDeltaDraft } from '../../delta-utils';
 import { assertSettlementTokenId } from '../../../../protocol/settlement/operations';
+import {
+  accountTransitionView,
+  beginAccountTransition,
+  countAccountTransitionNodeChanges,
+  commitAccountTransition,
+  createAccountTransitionKey,
+  discardAccountTransition,
+} from '../../../state/candidate-overlay';
+import { createStructuredLogger } from '../../../../infra/logger';
+
+const jEventFinalityLog = createStructuredLogger('account.j_event.finality');
 
 const normalizedEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
 const assertAccountSettledEvent = (
-  account: AccountReplica,
+  account: Readonly<{
+    state: Readonly<{ leftEntity: string; rightEntity: string }>;
+  }>,
   event: Extract<JurisdictionEvent, { type: 'AccountSettled' }>,
 ): number => {
   const left = normalizedEntityId(event.data.leftEntity);
@@ -27,30 +41,30 @@ const assertAccountSettledEvent = (
   return nonce;
 };
 
-const applyAccountSettledEvent = (account: AccountReplica, event: JurisdictionEvent): void => {
+const applyAccountSettledEvent = (account: AccountDraftReplica, event: JurisdictionEvent): void => {
   if (event.type !== 'AccountSettled') return;
   const { tokenId, collateral, ondelta } = event.data;
   const tokenIdNum = assertSettlementTokenId(tokenId, 'AccountSettled');
-  const delta = ensureSettlementDelta(account, tokenIdNum);
+  const delta = createSettlementDeltaValue(account, tokenIdNum);
   const previousCollateral = delta.collateral;
   delta.collateral = BigInt(collateral);
   delta.ondelta = BigInt(ondelta);
+  commitDeltaDraft(account.state, delta);
   const requested = account.state.requestedRebalance?.get(tokenIdNum) ?? 0n;
   const increase = delta.collateral > previousCollateral ? delta.collateral - previousCollateral : 0n;
   if (requested > 0n && increase > 0n) {
     const remaining = requested > increase ? requested - increase : 0n;
-    if (remaining > 0n) account.state.requestedRebalance.set(tokenIdNum, remaining);
+    if (remaining > 0n) account.state.requestedRebalance.put(tokenIdNum, remaining);
     else {
-      account.state.requestedRebalance.delete(tokenIdNum);
-      account.state.requestedRebalanceFeeState?.delete(tokenIdNum);
+      account.state.requestedRebalance.del(tokenIdNum);
+      account.state.requestedRebalanceFeeState.del(tokenIdNum);
     }
-    account.shadow.rebalance.submittedAtByToken.delete(tokenIdNum);
+    account.shadow.rebalance.submittedAtByToken.del(tokenIdNum);
   }
-  invalidateAccountMapCommitment(account.state, 'deltas', tokenIdNum);
 };
 
 const activatePostSettlementProof = (
-  account: AccountReplica,
+  account: AccountDraftReplica,
   counterpartyId: string,
   finalizedNonce: number,
   deltaTransformerAddress: string,
@@ -135,16 +149,27 @@ const activatePostSettlementProof = (
   clearFinalizedSettlementWorkspace(account);
 };
 
-export const applyFinalizedAccountJEvents = (
-  account: AccountReplica,
-  counterpartyId: string,
-  events: readonly JurisdictionEvent[],
-  deltaTransformerAddress: string,
+const installCommittedAccount = (
+  target: AccountReplica,
+  committed: AccountReplica,
 ): void => {
+  // The prepared replica owns a replacement state shell. Assigning it replaces
+  // the old state object wholesale, so nested optional fields absent from the
+  // committed state disappear without a second delete pass.
+  Object.assign(target, committed);
+};
+
+const collectSettledEvents = (
+  account: AccountReplica,
+  events: readonly JurisdictionEvent[],
+): {
+  settledEvents: Extract<JurisdictionEvent, { type: 'AccountSettled' }>[];
+  finalizedNonce: number;
+} | undefined => {
   const settledEvents = events.filter(
     (event): event is Extract<JurisdictionEvent, { type: 'AccountSettled' }> => event.type === 'AccountSettled',
   );
-  if (settledEvents.length === 0) return;
+  if (settledEvents.length === 0) return undefined;
 
   let previousNonce = account.state.jNonce ?? 0;
   let finalizedNonce = previousNonce;
@@ -156,13 +181,73 @@ export const applyFinalizedAccountJEvents = (
     previousNonce = nonce;
     finalizedNonce = Math.max(finalizedNonce, nonce);
   }
+  return { settledEvents, finalizedNonce };
+};
+
+const applySettledEventsOnView = (
+  account: AccountDraftReplica,
+  counterpartyId: string,
+  settledEvents: readonly Extract<JurisdictionEvent, { type: 'AccountSettled' }>[],
+  finalizedNonce: number,
+  deltaTransformerAddress: string,
+): void => {
+  for (const event of settledEvents) applyAccountSettledEvent(account, event);
+  activatePostSettlementProof(account, counterpartyId, finalizedNonce, deltaTransformerAddress);
+  account.state.jNonce = finalizedNonce;
+};
+
+export const applyFinalizedAccountJEventsOnView = (
+  account: AccountDraftReplica,
+  counterpartyId: string,
+  events: readonly JurisdictionEvent[],
+  deltaTransformerAddress: string,
+): void => {
+  const collected = collectSettledEvents(account, events);
+  if (!collected) return;
+  applySettledEventsOnView(
+    account,
+    counterpartyId,
+    collected.settledEvents,
+    collected.finalizedNonce,
+    deltaTransformerAddress,
+  );
+};
+
+export const applyFinalizedAccountJEvents = (
+  account: AccountReplica,
+  counterpartyId: string,
+  events: readonly JurisdictionEvent[],
+  deltaTransformerAddress: string,
+): void => {
+  const collected = collectSettledEvents(account, events);
+  if (!collected) return;
 
   // J-claim finality is atomic: malformed structural proof data must not leave
   // reserves changed while the workspace/proof transition is rejected.
-  const staged = structuredClone(account);
-  for (const event of settledEvents) applyAccountSettledEvent(staged, event);
-  activatePostSettlementProof(staged, counterpartyId, finalizedNonce, deltaTransformerAddress);
-  staged.state.jNonce = finalizedNonce;
-  Object.assign(account, staged);
-  if (!staged.state.settlementWorkspace) delete account.state.settlementWorkspace;
+  const overlay = beginAccountTransition(
+    account,
+    createAccountTransitionKey(account, {
+      purpose: 'j-event-finality',
+      events: collected.settledEvents,
+      finalizedNonce: collected.finalizedNonce,
+    }),
+  );
+  try {
+    applySettledEventsOnView(
+      accountTransitionView(overlay),
+      counterpartyId,
+      collected.settledEvents,
+      collected.finalizedNonce,
+      deltaTransformerAddress,
+    );
+    const committed = commitAccountTransition(overlay);
+    jEventFinalityLog.debug('finality.overlay_committed', {
+      changedPatriciaNodes: countAccountTransitionNodeChanges(committed.nodeChanges),
+      jNonce: collected.finalizedNonce,
+    });
+    installCommittedAccount(account, committed.account);
+  } catch (error) {
+    if (overlay.lifecycle.status === 'active') discardAccountTransition(overlay);
+    throw error;
+  }
 };

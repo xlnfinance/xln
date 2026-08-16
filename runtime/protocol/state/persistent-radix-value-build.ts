@@ -13,8 +13,10 @@ export type RadixValueLeaf<K, V> = Readonly<{
 export type RadixValueBranch<K, V> = Readonly<{
   kind: 'branch';
   path: readonly number[];
-  children: ReadonlyMap<number, RadixValueNode<K, V>>;
-  edgeHashes: ReadonlyMap<number, string>;
+  /** Slot-indexed fanout: canonical order is structural, never sorted at runtime. */
+  children: readonly (RadixValueNode<K, V> | undefined)[];
+  /** Parent-owned child commitments in the same slot layout. */
+  edgeHashes: readonly (string | undefined)[];
   hash: string;
 }>;
 

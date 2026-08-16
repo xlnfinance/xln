@@ -11,6 +11,7 @@ import { docValueKey, liveKeyForDoc } from '../schema/doc-refs';
 import {
   computeStorageFrameHash,
   computeStoragePostStateHash,
+  computeRuntimePostStateComponentDigests,
   prepareStorageStateHashes,
 } from '../hashes';
 import { computeStorageReplicaMetaDigest } from '../replica/replica-meta-digest';
@@ -33,7 +34,9 @@ import {
 import { readStorageFrameRecord, readStorageHead } from '../read/read';
 import { verifyStorageSnapshotIntegrity } from '../read/verify';
 import { verifyStorageTailIntegrity } from '../read/verify';
-import { projectReplayVerifiableRuntimeMachine } from '../wal/snapshot';
+import { projectReplayVerifiableRuntimePostStateView } from '../wal/snapshot';
+import { prepareRuntimeMachineGraphRows } from '../wal/runtime-machine-graph';
+import { buildHistoryViewPuts } from '../history/history-view';
 import type {
   RuntimeDbLike,
   StorageDoc,
@@ -262,7 +265,10 @@ export const replaceRestoredStorageBase = async (
     height: options.height,
     timestamp: options.timestamp,
     replicaMetaDigest,
-    runtimeMachine: projectReplayVerifiableRuntimeMachine(options.runtimeMachine),
+    runtimeComponentDigests: computeRuntimePostStateComponentDigests(
+      projectReplayVerifiableRuntimePostStateView(options.runtimeMachine),
+    ),
+    runtimeOutputRefs: [],
   });
 
   const currentBody = options.currentDb.batch();
@@ -292,6 +298,13 @@ export const replaceRestoredStorageBase = async (
 
   const snapshotEntries = buildSnapshotEntries(options.height, options.docs, prepared);
   const snapshotReplicaMetaEntries = buildSnapshotReplicaMetaEntries(options.height, options.replicaMetas);
+  const runtimeMachineGraph = prepareRuntimeMachineGraphRows(
+    options.height,
+    options.runtimeMachine,
+  );
+  if (!runtimeMachineGraph.root) {
+    throw new Error('RECOVERY_IMPORT_RUNTIME_MACHINE_ROOT_MISSING');
+  }
   const manifestEntry = {
     key: keySnapshotManifest(options.height),
     value: encodeBuffer({
@@ -306,7 +319,7 @@ export const replaceRestoredStorageBase = async (
     prevFrameHash: ZERO_FRAME_HASH,
     replicaMetaDigest,
     replicaMetaCheckpoint: true,
-    replicaMetaStateMode: 'full',
+    replicaMetaStateMode: 'shared-entity-state',
     postStateHash,
     stateHash: prepared.stateHash,
     hashMode: 'storage-merkle-v1',
@@ -315,13 +328,8 @@ export const replaceRestoredStorageBase = async (
     canonicalStateHash: options.canonicalStateHash,
     canonicalEntityHashes: options.canonicalEntityHashes,
     runtimeStateHash: options.canonicalStateHash,
-    runtimeMachine: options.runtimeMachine,
+    runtimeMachineRoot: runtimeMachineGraph.root,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    // Offline document import creates a synthetic Runtime frame with no replayed
-    // Entity proposals; carrying any Entity context here would be fabricated.
-    entityContexts: new Map(),
-    historyRecords: [],
-    activityLogs: [],
     touchedEntities: Array.from(new Set(options.docs.map(doc => doc.entityId))).sort(),
     touchedAccounts: options.docs
       .filter((doc): doc is Extract<StorageDoc, { family: 'account' }> => doc.family === 'account')
@@ -336,15 +344,27 @@ export const replaceRestoredStorageBase = async (
   };
   const frame: RuntimeFrame = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
   const frameEntry = { key: keyFrame(options.height), value: encodeBuffer(frame) };
+  const [activityEntry] = buildHistoryViewPuts({
+    height: options.height,
+    timestamp: options.timestamp,
+    runtimeInput: frame.runtimeInput,
+    logs: [],
+    touchedEntities: frame.touchedEntities,
+    touchedAccounts: frame.touchedAccounts,
+    touchedBookEntities: frame.touchedBookEntities,
+  });
+  if (!activityEntry) throw new Error('RESTORE_RUNTIME_ACTIVITY_ENTRY_MISSING');
   const retainedHistoryBytes = entriesBytes([
     ...snapshotEntries,
     ...snapshotReplicaMetaEntries,
     manifestEntry,
     frameEntry,
+    activityEntry,
     ...options.replicaMetas,
     ...certifiedBoardNodes,
     ...consumptionNodes,
     ...accountJClaimNodes,
+    ...runtimeMachineGraph.rows,
   ]);
   const head: StorageHead = {
     ...options.headConfig,
@@ -359,10 +379,12 @@ export const replaceRestoredStorageBase = async (
     ...snapshotReplicaMetaEntries,
     manifestEntry,
     frameEntry,
+    activityEntry,
     ...options.replicaMetas,
     ...certifiedBoardNodes,
     ...consumptionNodes,
     ...accountJClaimNodes,
+    ...runtimeMachineGraph.rows,
     { key: KEY_HEAD, value: encodeBuffer(head) },
   ];
   const walBatch = await queueHistoryReplacement(options.walDb, walEntries);

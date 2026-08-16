@@ -221,7 +221,6 @@ const makeEnv = (): RuntimeReplica =>
               ]),
               deferredAccountProposals: new Map(),
               lastFinalizedJHeight: 0,
-              jBlockChain: [],
               profile: { name: 'Adapter Test', isHub: false, avatar: '', bio: '', website: '' },
               htlcRoutes: new Map(),
               htlcFeesEarned: 0n,
@@ -1542,7 +1541,6 @@ test('runtime adapter frame read returns compact summary without raw runtime inp
     entityContexts: new Map(),
     historyRecords: [],
     activityLogs: [],
-    overlayRecords: [{ scope: { family: 'entity', entityId }, key: 'raw', value: new Uint8Array([1, 2, 3]) }],
     touchedEntities: [entityId],
     touchedAccounts: [{ entityId, counterpartyId }],
     touchedBookEntities: [entityId],
@@ -1557,7 +1555,6 @@ test('runtime adapter frame read returns compact summary without raw runtime inp
   );
 
   expect(summary.runtimeInput).toBeUndefined();
-  expect(summary.overlayRecords).toBeUndefined();
   expect(summary.postStateHash).toBe('post-state');
   expect(summary.runtimeInputCounts).toEqual({
     runtimeTxs: 1,
@@ -1569,7 +1566,6 @@ test('runtime adapter frame read returns compact summary without raw runtime inp
     entities: 1,
     accounts: 1,
     bookEntities: 1,
-    overlays: 1,
   });
 });
 

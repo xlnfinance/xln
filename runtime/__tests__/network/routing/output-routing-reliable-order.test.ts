@@ -66,6 +66,8 @@ const requireOnlyEnvelopeInput = (envelope: RuntimeEntityInputsEnvelope): Delive
 
 const entityFrameParentHash = (height: number): string =>
   height === 1 ? 'genesis' : `0x${(height - 1).toString(16).padStart(64, '0')}`;
+const entityFrameHash = (height: number): string =>
+  `0x${height.toString(16).padStart(64, '0')}`;
 
 const emptyEntityContext = (
   target: string,
@@ -94,7 +96,7 @@ const entityFrameOutput = (
   proposedFrame: {
     height,
     timestamp: height,
-    hash: `0xentity-frame-${height}`,
+    hash: entityFrameHash(height),
     parentFrameHash: entityFrameParentHash(height),
     stateRoot: `0x${'11'.repeat(32)}`,
     authorityRoot: `0x${'22'.repeat(32)}`,
@@ -105,7 +107,7 @@ const entityFrameOutput = (
     hashesToSign: buildEntityHashesToSign(
       target,
       height,
-      `0xentity-frame-${height}`,
+      entityFrameHash(height),
     ),
     collectedSigs: new Map([[targetSignerId, [`0xsignature-${height}`]]]),
     ...(hankos ? { hankos } : {}),
@@ -204,8 +206,10 @@ const crossJProposalOutput = (
             data: {
               offerId: route.orderId,
               giveTokenId: 1,
+              giveTokenDecimals: 6,
               giveAmount: 10n,
               wantTokenId: 2,
+              wantTokenDecimals: 18,
               wantAmount: 20n,
               maxFee: 0n,
               minNetReceive: 20n,
@@ -280,7 +284,7 @@ const hashPrecommitOutput = (height: number): DeliverableEntityInput => ({
   sourceRuntimeFrame: sourceRuntimeFrame(4, height),
   hashPrecommitFrame: {
     height,
-    frameHash: `0xentity-frame-${height}`,
+    frameHash: entityFrameHash(height),
   },
   hashPrecommits: new Map([[runtimeId('96'), [`0xprecommit-${height}`]]]),
 } as never);

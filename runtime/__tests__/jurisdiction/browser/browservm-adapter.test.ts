@@ -36,7 +36,6 @@ const makeReplica = (entityId: string, signerId: string): EntityReplica =>
       accounts: new Map(),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
-      jBlockChain: [],
       profile: {
         name: 'BrowserVM Entity',
         isHub: false,

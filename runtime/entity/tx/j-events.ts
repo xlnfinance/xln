@@ -6,6 +6,7 @@ import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventData } from '../../types/jurisdiction-events';
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
 import { prepareEntityTxState } from '../state-clone';
+import { getEntityAccountForWrite } from '../state/persistent-account-map';
 import { addMessage } from '../frame-events';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import {
@@ -69,7 +70,6 @@ import {
 } from '../../jurisdiction/machine/history-consensus';
 import {
   finalizedJHistoryRoot,
-  pruneCertifiedJHistory,
   reconcileJEventRangeWithFinalizedState,
   type ReconciledJEventRange,
 } from '../../jurisdiction/machine/local-history';
@@ -278,8 +278,6 @@ const applyJRangeBlocks = async (
   entityState: EntityState,
   range: Extract<ReconciledJEventRange, { kind: 'suffix' }>,
   jurisdictionRef: string,
-  signerId: string,
-  signature: string,
   env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   candidateEffects: EntityCandidateEffect[],
@@ -304,19 +302,6 @@ const applyJRangeBlocks = async (
         ? { disputeFinalizationEvidenceHash: block.disputeFinalizationEvidenceHash }
         : {}),
     }]);
-    state.jBlockChain.push({
-      jurisdictionRef,
-      jHeight: block.blockNumber,
-      jBlockHash: block.blockHash,
-      eventsHash: block.eventsHash,
-      ...(block.disputeFinalizationEvidenceHash
-        ? { disputeFinalizationEvidenceHash: block.disputeFinalizationEvidenceHash }
-        : {}),
-      events: block.events,
-      finalizedAt: state.timestamp,
-      proposerSignerId: signerId,
-      proposerSignature: signature,
-    });
     state.lastFinalizedJHeight = block.blockNumber;
     for (const event of block.events) {
       const result = await applyFinalizedJEvent(
@@ -333,9 +318,6 @@ const applyJRangeBlocks = async (
       applied.outputs.push(...result.outputs);
       if (result.hashesToSign) applied.hashesToSign.push(...result.hashesToSign);
       for (const accountId of result.dirtyAccounts) applied.dirtyAccounts.add(accountId);
-      if (!state.jBlockChain.some(entry => entry.jHeight === block.blockNumber)) {
-        throw new Error(`j_event invariant: finalized block ${block.blockNumber} lost during apply`);
-      }
     }
   }
   return applied;
@@ -369,8 +351,7 @@ const commitJRangeFinality = (
     range.tipBlockHash,
     range.eventHistoryRoot,
   );
-  state.jBlockChain.sort((left, right) => left.jHeight - right.jHeight);
-  return pruneCertifiedJHistory(state);
+  return state;
 };
 
 export const applyJEvent = async (
@@ -417,8 +398,6 @@ export const applyJEvent = async (
     entityState,
     reconciled,
     jurisdictionRef,
-    signerId,
-    signature,
     env,
     accountConsensusContext,
     candidateEffects,
@@ -487,17 +466,8 @@ function resolveDisputeAccountContext(
   const counterentityStr = normalizeEntityId(counterentity);
   const entityIdNorm = normalizeEntityId(state.entityId);
   const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
-  let counterpartyId = candidateCounterpartyId;
-  let account = state.accounts.get(counterpartyId);
-  if (!account) {
-    for (const [key, value] of state.accounts.entries()) {
-      if (normalizeEntityId(key) === candidateCounterpartyId) {
-        counterpartyId = key;
-        account = value;
-        break;
-      }
-    }
-  }
+  const counterpartyId = candidateCounterpartyId;
+  const account = getEntityAccountForWrite(state.accounts, counterpartyId);
   return {
     senderStr,
     counterentityStr,
@@ -943,19 +913,25 @@ const applyStartedDisputeFollowups = (
     );
   }
   if (!weAreStarter && !counterProofQueued) {
-    const account = newState.accounts.get(counterpartyId);
-    const active = account?.activeDispute;
-    if (!account || !active) {
+    const visible = newState.accounts.get(counterpartyId);
+    const visibleActive = visible?.activeDispute;
+    if (!visible || !visibleActive) {
       throw haltRuntimeFailure("CROSS_J_TARGET_ACTIVE_DISPUTE_MISSING", `CROSS_J_TARGET_ACTIVE_DISPUTE_MISSING:${counterpartyId}`);
     }
     const plan = planCrossJurisdictionTargetRecovery(
       newState,
-      account,
+      visible,
       counterpartyId,
-      [active.initialProofbodyHash],
-      active.crossJurisdictionRecovery?.resultsByPullId ?? {},
+      [visibleActive.initialProofbodyHash],
+      visibleActive.crossJurisdictionRecovery?.resultsByPullId ?? {},
     );
-    if (plan) active.crossJurisdictionRecovery = plan.recovery;
+    if (plan) {
+      const account = getEntityAccountForWrite(newState.accounts, counterpartyId);
+      if (!account?.activeDispute) {
+        throw haltRuntimeFailure('CROSS_J_TARGET_ACTIVE_DISPUTE_WRITE_MISSING', `CROSS_J_TARGET_ACTIVE_DISPUTE_WRITE_MISSING:${counterpartyId}`);
+      }
+      account.activeDispute.crossJurisdictionRecovery = plan.recovery;
+    }
   }
   // Never publish the obsolete initial body while superseding it. The selected
   // body's Source registration was queued beside the counterDispute above, so
@@ -1619,12 +1595,11 @@ const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext):
   const ladderHash = String(data.ladderHash || '').toLowerCase();
   const writerIsSelf = String(data.entity || '').toLowerCase() === self;
   if (writerIsSelf) {
-    for (const [accountId, account] of newState.accounts.entries()) {
-      if (String(accountId).toLowerCase() !== String(data.counterpartyEntity).toLowerCase()) continue;
-      const recovery = account.activeDispute?.crossJurisdictionRecovery;
-      if (!recovery) continue;
-      for (const pullId of recovery.requiredPullIds) {
-        if (Object.hasOwn(recovery.resultsByPullId, pullId)) continue;
+    const accountId = String(data.counterpartyEntity || '').toLowerCase();
+    const visibleRecovery = newState.accounts.get(accountId)?.activeDispute?.crossJurisdictionRecovery;
+    if (visibleRecovery) {
+      for (const pullId of visibleRecovery.requiredPullIds) {
+        if (Object.hasOwn(visibleRecovery.resultsByPullId, pullId)) continue;
         const route = [...(newState.crossJurisdictionSwaps?.values?.() ?? [])]
           .find(candidate =>
             candidate.targetPull?.pullId === pullId || candidate.sourcePull?.pullId === pullId,
@@ -1634,8 +1609,11 @@ const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext):
         if (!pull || ladderHashForPull(pull) !== ladderHash) continue;
         const expectedTargetRole = route.targetPull?.pullId === pullId;
         if (data.targetRole !== expectedTargetRole) continue;
+        const account = getEntityAccountForWrite(newState.accounts, accountId);
+        const recovery = account?.activeDispute?.crossJurisdictionRecovery;
+        if (!recovery) throw new Error(`HASH_LADDER_RECOVERY_WRITE_ACCOUNT_MISSING:${accountId}`);
         recovery.resultsByPullId = { ...recovery.resultsByPullId, [pullId]: String(data.fillRatio) };
-        dirtyAccounts.add(String(accountId).toLowerCase());
+        dirtyAccounts.add(accountId);
       }
     }
   }

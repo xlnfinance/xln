@@ -202,6 +202,6 @@ if (import.meta.main) {
 
   await htlc4hop(env);
 
-  console.log(`✅ 4-hop test complete! Total frames: ${env.history?.length || 0}\n`);
+  console.log(`✅ 4-hop test complete! Total frames: ${env.state.height}\n`);
   process.exit(0);
 }

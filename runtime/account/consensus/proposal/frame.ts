@@ -16,6 +16,7 @@ import {
 } from '../../commitment/state-root';
 import type { ProposeAccountFrameResult } from '../types';
 import { proposeAccountFrameRejected } from '../result';
+import { cloneIsolatedAccountTx } from '../../../protocol/state/account-input-clone';
 
 const accountLog = createStructuredLogger('account');
 
@@ -58,7 +59,7 @@ const buildFrameData = async (
     height: account.currentHeight + 1,
     timestamp,
     jHeight,
-    accountTxs: structuredClone([...validTxs]),
+    accountTxs: validTxs.map(cloneIsolatedAccountTx),
     prevFrameHash: account.currentHeight === 0
       ? 'genesis'
       : account.currentFrame.stateHash || '',

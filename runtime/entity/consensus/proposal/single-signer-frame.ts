@@ -20,6 +20,7 @@ import {
   sealHankoWitnessInState,
   type HankoWitnessEntry,
 } from '../input/hanko-witness';
+import { touchedAccountIdsForHankoSeal } from '../account/touched-accounts';
 import {
   commitEntityConsensusInput,
   type ApplyEntityInputContext,
@@ -27,7 +28,10 @@ import {
 } from '../input/types';
 import { getEntityLeaderState } from '../leader';
 import { buildCertifiedEntityOutputHashes } from '../output/certification';
-import type { EntityProposalSelection } from './selection';
+import {
+  shouldKeepPreparedEntityFrame,
+  type EntityProposalSelection,
+} from './selection';
 import {
   entityFrameProfileEnabled,
   entityFrameSlowMs,
@@ -66,6 +70,7 @@ import {
 
 export type SingleSignerFrameOptions = Pick<
   EntityProposalSelection,
+  | 'accountWorkOnly'
   | 'hasProposableAccountMempool'
   | 'proposalJPrefixCertificate'
   | 'proposalSelection'
@@ -183,6 +188,9 @@ const buildSingleSignerFrame = async (
   const { env, workingReplica } = context;
   const { proposalJPrefixCertificate, proposalTxs } = options;
   const { applied, entityContext } = await applySingleSignerProposal(context, options);
+  if (!shouldKeepPreparedEntityFrame(options, applied.accountsToProposeFramesCount)) {
+    return null;
+  }
   const commitments = buildSingleSignerCommitments(context, options, applied, entityContext);
   options.checkpoint('commitments');
   const hankos = await signEntityHashes(
@@ -233,7 +241,7 @@ const buildSingleSignerFrame = async (
 
 const attachSingleSignerHankos = (
   context: ApplyEntityInputContext,
-  execution: Awaited<ReturnType<typeof buildSingleSignerFrame>>,
+  execution: NonNullable<Awaited<ReturnType<typeof buildSingleSignerFrame>>>,
 ): void => {
   const { workingReplica } = context;
   const { frame, hashesToSign, hankos, state } = execution;
@@ -250,7 +258,16 @@ const attachSingleSignerHankos = (
     });
   }
   const witnesses = workingReplica.hankoWitness as Map<string, HankoWitnessEntry>;
-  const sealed = sealHankoWitnessInState(state, witnesses, frame.height);
+  const sealed = sealHankoWitnessInState(
+    state,
+    witnesses,
+    frame.height,
+    touchedAccountIdsForHankoSeal(
+      state,
+      execution.proposableAccounts,
+      execution.storageChanges,
+    ),
+  );
   const attached = attachHankoWitnessToOutputs(
     execution.outputs,
     execution.jOutputs,
@@ -270,7 +287,7 @@ const attachSingleSignerHankos = (
 const installSingleSignerFrame = async (
   context: ApplyEntityInputContext,
   options: SingleSignerFrameOptions,
-  execution: Awaited<ReturnType<typeof buildSingleSignerFrame>>,
+  execution: NonNullable<Awaited<ReturnType<typeof buildSingleSignerFrame>>>,
 ): Promise<void> => {
   const {
     env,
@@ -387,6 +404,7 @@ export const commitSingleSignerFrameIfReady = async (
     txs: options.proposalTxs.map(tx => tx.type),
   });
   const execution = await buildSingleSignerFrame(context, options);
+  if (!execution) return null;
   context.entityContext = execution.frame.entityContext;
   attachSingleSignerHankos(context, execution);
   await installSingleSignerFrame(context, options, execution);

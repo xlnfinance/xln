@@ -38,8 +38,10 @@ export const mergeOverlayRecordsIntoEnv = (
   env: RuntimeReplica,
   records: readonly RuntimeOverlayRecord[],
 ): RuntimeOverlayRecord[] => {
-  env.overlay = mergeStorageOverlayRecords(env.overlay, records);
-  return env.overlay.map((record) => ({ ...record }));
+  const overlay = env.overlay instanceof Map ? env.overlay : new Map<string, RuntimeOverlayRecord>();
+  for (const record of records) overlay.set(storageOverlayRecordKey(record), { ...record });
+  env.overlay = overlay;
+  return Array.from(overlay.values(), record => ({ ...record }));
 };
 
 const overlayRecordsFromDocs = (

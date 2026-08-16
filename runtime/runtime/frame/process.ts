@@ -18,7 +18,11 @@ import { notifyRuntimeSyncAfterCommit } from '../../storage/runtime-storage';
 import type { EntityInput } from '../../entity/types';
 import type { RuntimeInput, RuntimeReplica } from '../types';
 import { getWallClockMs } from '../../infra/time';
-import { clearPendingAuditEvents, flushPendingAuditEvents } from '../observability/env-events';
+import {
+  clearPendingAuditEvents,
+  clearRuntimeFrameEvents,
+  flushPendingAuditEvents,
+} from '../observability/env-events';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './lifecycle/writer-lock';
 import { createFrameExecutionState, type FrameExecutionState } from './input/execution-state';
 import {
@@ -304,7 +308,7 @@ const publishCommittedRuntimeFrame = (
   frame.reliableReceiptStateDurable = true;
   profile.mark('save');
   flushPendingAuditEvents(candidateEnv);
-  candidateEnv.frameLogs = [];
+  clearRuntimeFrameEvents(candidateEnv);
   const env = publishRuntimeFrameTransaction(frame.transaction);
   const state = ensureRuntimeInfrastructure(env);
   if (frame.pendingTraceSnapshot) {

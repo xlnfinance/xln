@@ -327,7 +327,6 @@ const installStaleJPrefixAuthority = (
       height: 1,
       prevFrameHash: `0x${'a7'.repeat(32)}`,
       lastFinalizedJHeight: 10,
-      jBlockChain: [],
       accounts: new Map(),
       config: {
         mode: 'proposer-based',
@@ -358,7 +357,6 @@ const ensureAppliedAuthority = (env: RuntimeReplica, output: DeliverableEntityIn
       height: 0,
       prevFrameHash: '',
       lastFinalizedJHeight: 0,
-      jBlockChain: [],
       accounts: new Map(),
     },
   } as unknown as EntityReplica);
@@ -679,7 +677,6 @@ describe('durable scoped reliable delivery receipts', () => {
       reserves: new Map(),
       accounts: new Map([[sourceEntityId, account]]),
       lastFinalizedJHeight: 10,
-      jBlockChain: [],
       jHistoryFinality: {
         jurisdictionRef,
         baseHeight: 0,
@@ -853,7 +850,7 @@ describe('durable scoped reliable delivery receipts', () => {
     if (!replica) throw new Error('TEST_J_PREFIX_REPLICA_MISSING');
     replica.state.height = 1;
     const honestAttestation = honest.jPrefixAttestations!.values().next().value!;
-    replica.certifiedFrameLineage = [{
+    replica.certifiedFrameHead = {
       frame: {
         height: 1,
         jPrefixCertificate: {
@@ -877,7 +874,7 @@ describe('durable scoped reliable delivery receipts', () => {
         },
       },
       postAuthority: {},
-    }] as never;
+    } as never;
 
     expect(registerReliableIngress(receiver, sender.runtimeId!, forged).kind).toBe('enqueue');
     expect(commitReliableIngress(receiver, [])).toEqual([]);
@@ -1724,13 +1721,23 @@ describe('durable scoped reliable delivery receipts', () => {
     sender.pendingNetworkOutputs = [output];
     const commits = commitAtReceiver(receiver, sender.runtimeId!, output);
     finalizeReliableIngressCommit(receiver, commits);
+    sender.infrastructure ??= {};
+    const receiptLedger = new Map([['retained-lane', commits[0]!.receipt]]);
+    const deferredNetworkMeta = new Map([['retained-route', { attempts: 1, nextRetryAt: 2 }]]);
+    sender.infrastructure.receivedReliableReceiptLedger = receiptLedger;
+    sender.infrastructure.deferredNetworkMeta = deferredNetworkMeta;
     const checkpoint = captureReliableReceiptSenderCheckpoint(sender);
+    expect(checkpoint.pendingNetworkOutputs).toBe(sender.pendingNetworkOutputs);
+    expect(checkpoint.receivedLedger).toBe(receiptLedger);
+    expect(checkpoint.deferredNetworkMeta).toBe(deferredNetworkMeta);
 
     applyReliableDeliveryReceipts(sender, [commits[0]!.receipt]);
     rollbackReliableDeliveryReceipts(sender, checkpoint);
 
+    expect(sender.pendingNetworkOutputs).toBe(checkpoint.pendingNetworkOutputs);
+    expect(sender.infrastructure.receivedReliableReceiptLedger).toBe(receiptLedger);
+    expect(sender.infrastructure.deferredNetworkMeta).toBe(deferredNetworkMeta);
     expect(sender.pendingNetworkOutputs).toEqual([output]);
-    expect(sender.infrastructure?.receivedReliableReceiptLedger).toBeUndefined();
   });
 
   test('duplicate receipt remains idempotent across sender restart', () => {

@@ -579,7 +579,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     accounts: new Map(),
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: {
       name: 'Audit Entity',
       isHub: false,
@@ -607,7 +606,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   profile: {
     name: 'Audit Entity',
     isHub: false,
@@ -892,7 +890,7 @@ describe('audit fail-fast regressions', () => {
     });
     expect(applied.outcome).toEqual({ kind: 'committed' });
     expect(applied.newState.lastFinalizedJHeight).toBe(rangeData.scannedThroughHeight);
-    expect(env.infrastructure?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(env.infrastructure?.currentStorageOverlayMarks ?? new Map()).toEqual(new Map());
     expect(
       applied.storageChanges.some(
         record =>

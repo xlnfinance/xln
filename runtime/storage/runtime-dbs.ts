@@ -15,7 +15,6 @@ import {
   verifyStorageTailIntegrity,
 } from './';
 import { assertStorageSafetyOverridesAllowed } from './commit/safety';
-import { withRebranchedValues } from './database/rebranched-db';
 import {
   fsyncStorageParentDirectory,
   writeDurableFile,
@@ -52,9 +51,16 @@ const assertRuntimeDbNotClosing = (env: RuntimeReplica, role: RuntimeDbHandleRol
 const formatStorageError = (error: unknown): string =>
   error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 
-const createRebranchedLevel = (path: string): Level<Buffer, Buffer> => withRebranchedValues(
-  new Level<Buffer, Buffer>(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }),
-);
+/**
+ * One logical LevelDB record is one typed RAM graph record. Byte chunking is
+ * forbidden because it creates a second opaque storage layout and defeats the
+ * Patricia branch/leaf boundary. Every owning codec enforces its 10 KB limit.
+ */
+const createRuntimeLevel = (path: string): Level<Buffer, Buffer> =>
+  new Level<Buffer, Buffer>(path, {
+    valueEncoding: 'buffer',
+    keyEncoding: 'binary',
+  });
 
 export type RuntimeStorageDbDeps = {
   ensureRuntimeInfrastructure(env: RuntimeReplica): RuntimeLifecycleState;
@@ -599,7 +605,7 @@ export const getStorageDb = (
   const fields = storageStateFields(role);
   const existing = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
   if (existing) return existing;
-  const db = createRebranchedLevel(resolveStorageDbPath(env, role));
+  const db = createRuntimeLevel(resolveStorageDbPath(env, role));
   state[fields.dbField] = db;
   return db;
 };
@@ -854,7 +860,7 @@ export const rotateStorageEpochDb = async (
     const nextPath = `${currentPath}-next-${snapshotHeight}`;
     const fs = await import('fs/promises');
     const currentDb = getStorageDb(env, deps, 'current');
-    const nextDb = createRebranchedLevel(nextPath);
+    const nextDb = createRuntimeLevel(nextPath);
     await fs.rm(nextPath, { recursive: true, force: true });
     await nextDb.open();
     try {
@@ -906,7 +912,7 @@ export const getInfraDb = (
   const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.infraDb) {
     const path = resolveDbPath(env, 'infra');
-    state.infraDb = createRebranchedLevel(path);
+    state.infraDb = createRuntimeLevel(path);
   }
   return state.infraDb;
 };
@@ -918,7 +924,7 @@ export const getRuntimeWalDb = (
   assertRuntimeDbNotClosing(env, 'runtime-wal');
   const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.runtimeWalDb) {
-    state.runtimeWalDb = createRebranchedLevel(resolveRuntimeWalDbPath(env));
+    state.runtimeWalDb = createRuntimeLevel(resolveRuntimeWalDbPath(env));
   }
   return state.runtimeWalDb as Level<Buffer, Buffer>;
 };
@@ -948,7 +954,7 @@ export const getHistoryViewDb = (
   assertRuntimeDbNotClosing(env, 'history-views');
   const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.historyViewDb) {
-    state.historyViewDb = createRebranchedLevel(resolveHistoryViewDbPath(env));
+    state.historyViewDb = createRuntimeLevel(resolveHistoryViewDbPath(env));
   }
   return state.historyViewDb;
 };

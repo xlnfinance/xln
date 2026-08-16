@@ -5,7 +5,11 @@ import {
   computeCanonicalEntityHash,
   computeCanonicalStateHashFromEnv,
 } from '../../../storage/canonical-hash';
-import { computeStorageFrameHash, computeStoragePostStateHash } from '../../../storage/hashes';
+import {
+  computeRuntimePostStateComponentDigests,
+  computeStorageFrameHash,
+  computeStoragePostStateHash,
+} from '../../../storage/hashes';
 import { encodeBuffer } from '../../../storage/codec/codec';
 import { buildStorageLiveReplicaMetaCommitment } from '../../../storage/replica/replicas';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
@@ -18,10 +22,14 @@ import type { AccountReplica } from '../../../types/account';
 import type { EntityReplica } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import {
+  projectReplayVerifiableRuntimePostStateView,
   buildReplayVerifiableRuntimeMachineSnapshot,
   projectReplayVerifiableRuntimeMachine,
 } from '../../../storage/wal/snapshot';
 import { makeAccount as makeBaseAccount } from '../.././helpers/cross-j';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { prepareRuntimeMachineGraphRows } from '../../../storage/wal/runtime-machine-graph';
 
 const signerIds = [`0x${'11'.repeat(20)}`, `0x${'12'.repeat(20)}`];
 const consensusConfig = {
@@ -87,10 +95,12 @@ const makeEnv = (account: AccountReplica, reserves: Array<[number, bigint]>): Ru
           proposals: new Map(),
           config: consensusConfig,
           reserves: new Map(reserves),
-          accounts: new Map([[counterpartyId, account]]),
+          accounts: PersistentEntityAccountMap.fromMap(
+            new Map([[counterpartyId, account]]),
+            computeEntityAccountValueHash,
+          ),
           deferredAccountProposals: new Map(),
           lastFinalizedJHeight: 0,
-          jBlockChain: [],
           profile: { name: 'canonical-test', isHub: false, avatar: '', bio: '', website: '' },
           htlcRoutes: new Map(),
           htlcFeesEarned: 0n,
@@ -156,7 +166,7 @@ test('canonical storage audit values reject ambiguous or lossy JavaScript values
   }
 });
 
-test('storage frame integrity commits every named runtime-machine field', () => {
+test('storage frame integrity commits Runtime checkpoint graph root, never a blob', () => {
   const base: RuntimeFrame = {
     height: 1,
     timestamp: 100,
@@ -164,28 +174,23 @@ test('storage frame integrity commits every named runtime-machine field', () => 
     postStateHash: `0x${'44'.repeat(32)}`,
     stateHash: `0x${'33'.repeat(32)}`,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    entityContexts: new Map(),
-    historyRecords: [],
-    activityLogs: [],
     touchedEntities: [],
     touchedAccounts: [],
     touchedBookEntities: [],
   };
 
-  const alpha = computeStorageFrameHash({ ...base, runtimeMachine: { provider: 'alpha' } });
-  const beta = computeStorageFrameHash({ ...base, runtimeMachine: { provider: 'beta' } });
+  const alpha = computeStorageFrameHash({
+    ...base,
+    runtimeMachineRoot: prepareRuntimeMachineGraphRows(1, { provider: 'alpha' }).root,
+  });
+  const beta = computeStorageFrameHash({
+    ...base,
+    runtimeMachineRoot: prepareRuntimeMachineGraphRows(1, { provider: 'beta' }).root,
+  });
 
   // Current testnet storage checksum golden. Fresh deploys intentionally keep
   // one format instead of a parallel versioned recovery implementation.
-  expect(alpha).toBe('0xa708bb754d32f836d3692453a0bc19e3dcdce71f6b915db98c902b61e8b2f01f');
   expect(alpha).not.toBe(beta);
-  const ownUndefined = computeStorageFrameHash({ ...base, runtimeMachine: { hidden: undefined } });
-  // Authoritative MessagePack preserves an explicitly named undefined field;
-  // it must therefore remain distinguishable from both an empty and an absent
-  // runtime-machine record in the WAL integrity preimage.
-  expect(ownUndefined).toBe('0x7142fe94d7a74bdd95200b3cca458df4101457bb9e260ab2574244e3bd35ec56');
-  expect(ownUndefined).not.toBe(computeStorageFrameHash({ ...base, runtimeMachine: {} }));
-  expect(ownUndefined).not.toBe(computeStorageFrameHash(base));
 });
 
 test('per-frame post-state hash commits replayed state and frame coordinates', () => {
@@ -193,7 +198,10 @@ test('per-frame post-state hash commits replayed state and frame coordinates', (
     height: 7,
     timestamp: 1234,
     replicaMetaDigest: `0x${'22'.repeat(32)}`,
-    runtimeMachine: { infrastructure: { pendingCommittedJOutbox: new Map([['a', 1]]) } },
+    runtimeComponentDigests: computeRuntimePostStateComponentDigests({
+      infrastructure: { pendingCommittedJOutbox: new Map([['a', 1]]) },
+    }),
+    runtimeOutputRefs: [],
   };
   const hash = computeStoragePostStateHash(base);
 
@@ -205,8 +213,40 @@ test('per-frame post-state hash commits replayed state and frame coordinates', (
   })).not.toBe(hash);
   expect(computeStoragePostStateHash({
     ...base,
-    runtimeMachine: { infrastructure: { pendingCommittedJOutbox: new Map([['a', 2]]) } },
+    runtimeOutputRefs: [`0x${'24'.repeat(32)}`],
   })).not.toBe(hash);
+  expect(computeStoragePostStateHash({
+    ...base,
+    runtimeComponentDigests: computeRuntimePostStateComponentDigests({
+      infrastructure: { pendingCommittedJOutbox: new Map([['a', 2]]) },
+    }),
+  })).not.toBe(hash);
+});
+
+test('per-frame Runtime root trusts BrowserVM stateRoot instead of rehashing trie bytes', () => {
+  const browserVMState = {
+    version: 1,
+    chainId: 31_337,
+    stateRoot: `0x${'31'.repeat(32)}`,
+    trieData: [['0x01', '0xaa']],
+    nonce: '1',
+    entityProviderDeploymentBlock: 1,
+    chain: { blockNumber: 1 },
+    addresses: {
+      depository: `0x${'41'.repeat(20)}`,
+      entityProvider: `0x${'42'.repeat(20)}`,
+    },
+  };
+  const digest = (machine: Record<string, unknown>) =>
+    computeRuntimePostStateComponentDigests(
+      projectReplayVerifiableRuntimePostStateView(machine),
+    );
+  const base = digest({ browserVMState });
+  expect(digest({ browserVMState: { ...browserVMState, trieData: [['0x02', '0xbb']] } }))
+    .toEqual(base);
+  expect(digest({
+    browserVMState: { ...browserVMState, stateRoot: `0x${'32'.repeat(32)}` },
+  })).not.toEqual(base);
 });
 
 test('replay oracle excludes local operator config and active J-adapter selector', () => {
@@ -393,6 +433,7 @@ test('storage projection round-trip preserves canonical account optional-field s
   expect(account.state.pulls).toBeUndefined();
   expect(account.swapOrderHistory).toEqual(new Map());
   expect(account.swapClosedOrders).toEqual(new Map());
+  expect(projectAccountDoc(account)).toBe(account);
 
   const hydratedState = hydrateEntityStateFromStorage({
     core: projectEntityCoreDoc(state),
@@ -433,6 +474,8 @@ test('replica metadata projection preserves in-flight consensus and layout state
 
   const meta = projectReplicaMeta(replica);
 
+  expect(meta.state).toBe(replica.state);
+  expect(meta.mempool).toBe(replica.mempool);
   expect(meta.mempool).toEqual(replica.mempool);
   expect(meta.position).toEqual(replica.position);
   expect(meta.jHistory).toEqual(replica.jHistory);
@@ -441,7 +484,7 @@ test('replica metadata projection preserves in-flight consensus and layout state
   expect('entityEncPrivKey' in meta).toBeFalse();
 });
 
-test('immediate replica metadata encoding matches the isolated recovery projection', () => {
+test('immediate replica metadata encoding matches the persistent recovery view', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
@@ -451,7 +494,7 @@ test('immediate replica metadata encoding matches the isolated recovery projecti
     value: true,
   });
 
-  const expected = encodeBuffer(projectReplicaMeta(replica));
+  const expected = encodeBuffer(projectReplicaMeta(replica), { omitSymbolKeys: true });
   const actual = encodeReplicaMeta(replica);
 
   expect(actual.equals(expected)).toBeTrue();

@@ -10,10 +10,10 @@ import {
   getOrderbookPairsForOrder,
   materializeCommittedRemainder,
   MAX_ORDERBOOK_QTY_LOTS,
+  reduceBookOrderQuantity,
   replaceOrderbookPair,
   type Side,
 } from '..';
-import { invalidateBookOrderCommitment } from '../commitment';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
@@ -116,19 +116,10 @@ const resizeBookOrderById = (
   const match = matches[0];
   if (!match) return false;
 
-  const bucketMap = match.order.side === 0 ? match.book.bidBuckets : match.book.askBuckets;
-  const bucket = bucketMap.get(match.order.bucketId.toString());
-  const level = bucket?.levels.get(match.order.priceTicks.toString());
-  if (!bucket || !level) throw haltRuntimeFailure("ORDERBOOK_RESIZE_CORRUPT", `ORDERBOOK_RESIZE_CORRUPT: order=${namespacedOrderId}`);
-  const nextTotal = level.totalQtyLots - match.order.qtyLots + nextQtyLots;
-  if (nextTotal <= 0n) throw haltRuntimeFailure("ORDERBOOK_RESIZE_UNDERFLOW", `ORDERBOOK_RESIZE_UNDERFLOW: order=${namespacedOrderId}`);
-
   // This is not matcher repair. Cross-j book quantity changes only when the
   // book owner applies an explicit committed account-ACK progress event.
-  invalidateBookOrderCommitment(match.book, namespacedOrderId);
-  match.order.qtyLots = nextQtyLots;
-  level.totalQtyLots = nextTotal;
-  replaceOrderbookPair(ext, match.pairId, match.book);
+  const working = reduceBookOrderQuantity(match.book, namespacedOrderId, nextQtyLots);
+  replaceOrderbookPair(ext, match.pairId, working);
   storageChanges.push({ family: 'book', entityId: state.entityId, pairId: match.pairId });
   return true;
 };
@@ -168,14 +159,14 @@ export const materializeCrossJurisdictionBookRemainder = (
   }
   const book = ext.books.get(input.pairId);
   if (!book) return false;
-  materializeCommittedRemainder(book, {
+  const nextBook = materializeCommittedRemainder(book, {
     orderId: namespacedOrderId,
     ownerId: input.ownerId,
     side: input.side,
     priceTicks: input.priceTicks,
     qtyLots: input.qtyLots,
   });
-  replaceOrderbookPair(ext, input.pairId, book);
+  replaceOrderbookPair(ext, input.pairId, nextBook);
   storageChanges.push({ family: 'book', entityId: state.entityId, pairId: input.pairId });
   return true;
 };

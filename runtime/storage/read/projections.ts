@@ -1,17 +1,13 @@
 import type { AccountReplica } from '../../types/account';
 import type { EntityReplica, EntityState } from '../../entity/types';
-import { cloneAccountReplica } from '../../account/state/state-clone';
-import { cloneEntityState } from '../../entity/state-clone';
 import { encodeBuffer } from '../codec/codec';
 import { DEFAULT_ACCOUNT_MERKLE_RADIX, normalizeEntityId } from '../keys';
 import { buildHexKeyedMerkle, type RadixMerkleRadix } from '../../protocol/state/radix-merkle';
 import type { StorageAccountDoc, StorageEntityCoreDoc, StorageReplicaMeta } from '../types';
 import {
-  cloneStoredCrossJurisdictionBookAdmissions,
-  cloneStoredCrossJurisdictionRoutes,
-  cloneStoredPendingCrossJurisdictionFillAcks,
   withDefinedProperty,
 } from './entity-core-boundary';
+import { pruneFinalizedValidatorJHistory } from '../../jurisdiction/machine/local-history';
 
 export {
   hydrateAccountDocFromStorage,
@@ -32,7 +28,6 @@ export const projectEntityCoreDoc = (
   reserves: state.reserves,
   ...withDefinedProperty('externalWallet', state.externalWallet),
   lastFinalizedJHeight: state.lastFinalizedJHeight,
-  jBlockChain: state.jBlockChain,
   ...withDefinedProperty('jHistoryFinality', state.jHistoryFinality),
   ...withDefinedProperty('certifiedBoardState', state.certifiedBoardState),
   profile: state.profile,
@@ -51,10 +46,10 @@ export const projectEntityCoreDoc = (
   ...withDefinedProperty('outDebtsByToken', state.outDebtsByToken),
   ...withDefinedProperty('inDebtsByToken', state.inDebtsByToken),
   ...withDefinedProperty('swapTradingPairs', state.swapTradingPairs),
-  ...withDefinedProperty('crossJurisdictionSwaps', cloneStoredCrossJurisdictionRoutes(state.crossJurisdictionSwaps)),
-  ...withDefinedProperty('crossJurisdictionAuthorizations', cloneStoredCrossJurisdictionRoutes(state.crossJurisdictionAuthorizations)),
-  ...withDefinedProperty('pendingCrossJurisdictionFillAcks', cloneStoredPendingCrossJurisdictionFillAcks(state.pendingCrossJurisdictionFillAcks)),
-  ...withDefinedProperty('crossJurisdictionBookAdmissions', cloneStoredCrossJurisdictionBookAdmissions(state.crossJurisdictionBookAdmissions)),
+  ...withDefinedProperty('crossJurisdictionSwaps', state.crossJurisdictionSwaps),
+  ...withDefinedProperty('crossJurisdictionAuthorizations', state.crossJurisdictionAuthorizations),
+  ...withDefinedProperty('pendingCrossJurisdictionFillAcks', state.pendingCrossJurisdictionFillAcks),
+  ...withDefinedProperty('crossJurisdictionBookAdmissions', state.crossJurisdictionBookAdmissions),
   ...withDefinedProperty('hubRebalanceConfig', state.hubRebalanceConfig),
   ...withDefinedProperty('orderbookHubProfile', state.orderbookExt?.hubProfile),
   ...withDefinedProperty('orderbookReferrals', state.orderbookExt?.referrals),
@@ -83,25 +78,9 @@ export const projectEntityReplicaCoreView = (
   ...withDefinedProperty('htlcNotes', replica.htlcNotes),
 });
 
-const cloneHankoWitness = (hankoWitness?: EntityReplica['hankoWitness']): EntityReplica['hankoWitness'] | undefined => {
-  if (!(hankoWitness instanceof Map) || hankoWitness.size === 0) return undefined;
-  return new Map(
-    Array.from(hankoWitness.entries()).map(([hash, entry]) => [
-      String(hash),
-      {
-        hanko: entry.hanko,
-        type: entry.type,
-        entityHeight: entry.entityHeight,
-        createdAt: entry.createdAt,
-      },
-    ]),
-  );
-};
-
 type ReplicaMetaProjectionOptions = {
-  certifiedFrameLineage?: EntityReplica['certifiedFrameLineage'];
+  certifiedFrameHead?: EntityReplica['certifiedFrameHead'];
   certifiedFrameAnchor?: EntityReplica['certifiedFrameAnchor'];
-  omitState?: boolean;
 };
 
 const buildReplicaMetaProjection = (
@@ -113,7 +92,6 @@ const buildReplicaMetaProjection = (
   entityId: normalizeEntityId(replica.entityId),
   signerId: normalizeEntityId(replica.signerId),
   isProposer: replica.isProposer,
-  ...(!options?.omitState ? { state } : {}),
   ...withDefinedProperty('htlcNotes', replica.htlcNotes),
   mempool,
   ...withDefinedProperty('position', replica.position),
@@ -121,18 +99,21 @@ const buildReplicaMetaProjection = (
   ...withDefinedProperty('lockedFrame', replica.lockedFrame),
   ...withDefinedProperty('candidate', replica.candidate),
   ...withDefinedProperty(
-    'certifiedFrameLineage',
-    options ? options.certifiedFrameLineage : replica.certifiedFrameLineage,
+    'certifiedFrameHead',
+    options ? options.certifiedFrameHead : replica.certifiedFrameHead,
   ),
   ...withDefinedProperty(
     'certifiedFrameAnchor',
     options ? options.certifiedFrameAnchor : replica.certifiedFrameAnchor,
   ),
-  ...withDefinedProperty('hankoWitness', cloneHankoWitness(replica.hankoWitness)),
+  ...withDefinedProperty('hankoWitness', replica.hankoWitness),
   ...withDefinedProperty('leaderVotes', replica.leaderVotes),
   ...withDefinedProperty('pendingLeaderCertificate', replica.pendingLeaderCertificate),
   ...withDefinedProperty('lastConsensusProgressAt', replica.lastConsensusProgressAt),
-  ...withDefinedProperty('jHistory', replica.jHistory),
+  ...withDefinedProperty(
+    'jHistory',
+    pruneFinalizedValidatorJHistory(replica.jHistory, state.lastFinalizedJHeight),
+  ),
   ...withDefinedProperty('jPrefixRound', replica.jPrefixRound),
   ...withDefinedProperty('jSubmitState', replica.jSubmitState),
   ...withDefinedProperty('entityProviderActionSubmitState', replica.entityProviderActionSubmitState),
@@ -143,15 +124,18 @@ export const projectReplicaMeta = (
   options?: ReplicaMetaProjectionOptions,
 ): StorageReplicaMeta => buildReplicaMetaProjection(
   replica,
-  // Snapshot now. Replica states continue mutating after projection.
-  cloneEntityState(replica.state, true),
-  structuredClone(replica.mempool),
+  // Entity committed state is persistent: frame candidates write overlays and
+  // publication replaces the root instead of mutating this value. The encoder
+  // below consumes this view synchronously, so copying the unbounded Entity
+  // graph would add no isolation and would make checkpoint cost O(Entity).
+  replica.state,
+  replica.mempool,
   options,
 );
 
 /**
- * Encode the authoritative replica metadata synchronously without first making
- * a redundant full structuredClone. encodeBuffer canonicalizes into an
+ * Encode the authoritative replica metadata synchronously from its persistent
+ * field view. encodeBuffer canonicalizes into an
  * isolated tree before returning, so live references cannot escape this call.
  */
 export const encodeReplicaMeta = (
@@ -165,7 +149,7 @@ export const encodeReplicaMeta = (
 ), { omitSymbolKeys: true });
 
 export const projectAccountDoc = (account: AccountReplica): StorageAccountDoc =>
-  cloneAccountReplica(account, true);
+  account;
 
 export const buildAccountMerkleFromState = (
   accounts: ReadonlyMap<string, AccountReplica>,

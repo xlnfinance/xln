@@ -1,11 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 import {
+  MAX_ACCOUNT_DISPUTE_PROOF_LEAF_BYTES,
   buildAccountProofBody,
   createDisputeProofHash,
   createDisputeProofHashWithNonce,
 } from '../../../protocol/dispute/proof-builder';
+import { encodeAccountStateValue } from '../../../account/commitment/state-root';
 import { proofBodyHasPulls } from '../../../entity/tx/handlers/dispute/start-admission';
+import { encodeBuffer } from '../../../storage/codec/codec';
+import { MAX_ACCOUNT_ENVELOPE_ROW_BYTES } from '../../../storage/schema/account-envelope-graph';
 
 const DEPOSITORY = '0x4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1';
 const HANKO_DOMAIN = { chainId: 31337, depositoryAddress: DEPOSITORY } as const;
@@ -32,6 +36,39 @@ describe('proof-builder dispute hash', () => {
   const disputeAccount = (leftEntity: string, rightEntity: string) => ({
     state: { leftEntity, rightEntity, watchSeed: TEST_WATCH_SEED },
     proofHeader: { nextProofNonce: 1 },
+  });
+
+  const proofWithSameJOffers = (count: number) => buildAccountProofBody(proofAccount({
+    deltas: new Map([[1, { offdelta: 0n }], [2, { offdelta: 0n }]]),
+    locks: new Map(),
+    pulls: new Map(),
+    swapOffers: new Map(Array.from({ length: count }, (_, index) => [
+      `offer-${index}`,
+      {
+        makerIsLeft: index % 2 === 0,
+        giveTokenId: index % 2 === 0 ? 1 : 2,
+        giveAmount: 1_000n,
+        wantTokenId: index % 2 === 0 ? 2 : 1,
+        wantAmount: 1_000n,
+      },
+    ])),
+    watchSeed: TEST_WATCH_SEED,
+  }), DEPOSITORY);
+
+  test('keeps one full maker pair inside the physical evidence-leaf budget', () => {
+    const proof = proofWithSameJOffers(20);
+    expect(encodeAccountStateValue(proof.proofBodyStruct).byteLength)
+      .toBeLessThan(MAX_ACCOUNT_DISPUTE_PROOF_LEAF_BYTES);
+    for (const transformer of proof.proofBodyStruct.transformers) {
+      expect(encodeBuffer({ kind: 'atom', value: transformer.encodedBatch }).byteLength)
+        .toBeLessThan(MAX_ACCOUNT_ENVELOPE_ROW_BYTES);
+    }
+  });
+
+  test('rejects an oversized signed program before its hash enters consensus', () => {
+    expect(() => proofWithSameJOffers(25)).toThrow(
+      'ACCOUNT_DISPUTE_PROOF_LEAF_BYTES_EXCEEDED',
+    );
   });
 
   test('uses canonical sorted account key regardless of local left/right orientation', () => {

@@ -31,6 +31,7 @@ import { commitRuntimeInput, processJEvents, waitScenario } from '../harness/hel
 import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 import { canonicalEntitySeed } from '../../runtime/registration/entity-creation';
+import { updateLatestRuntimeHistoryTraceForTesting } from '../../runtime/observability/history-retention';
 
 let payRandomCounter = 0;
 const scenarioBoardSigner = (env: RuntimeReplica, alias: string): string => {
@@ -204,21 +205,16 @@ async function executeEvent(
     await executeAction(env, action, context, actionIndex);
   }
 
-  // Apply narrative metadata to latest snapshot
-  if (env.history && env.history.length > 0) {
-    const latestSnapshot = env.history[env.history.length - 1];
-    if (latestSnapshot) {
-      if (event.title) {
-        latestSnapshot.meta = {
-          ...(latestSnapshot.meta ?? {}),
-          title: event.title,
-        };
-      }
-      if (event.description) {
-        latestSnapshot.narrative = event.description;
-      }
+  // Narrative belongs only to an explicit scenario/browser trace collector.
+  updateLatestRuntimeHistoryTraceForTesting(env, latestSnapshot => {
+    if (event.title) {
+      latestSnapshot.meta = {
+        ...(latestSnapshot.meta ?? {}),
+        title: event.title,
+      };
     }
-  }
+    if (event.description) latestSnapshot.narrative = event.description;
+  });
 
   // Apply view state if present
   if (event.viewState) {
@@ -997,13 +993,10 @@ function applyViewState(
   viewState: ViewState,
   context: ScenarioExecutionContext
 ): void {
-  // Store in context for later application to EnvSnapshot
+  // Store in context for later application to an external frame trace.
   context.viewStateHistory.set(context.currentFrameIndex, viewState);
 
-  // If env has history, apply to latest snapshot
-  if (env.history && env.history.length > 0) {
-    const latestSnapshot = env.history[env.history.length - 1];
-    if (latestSnapshot) {
+  updateLatestRuntimeHistoryTraceForTesting(env, latestSnapshot => {
       // Map scenario entity IDs to actual addresses in viewState
       const mappedViewState: typeof viewState = { ...viewState };
       if (viewState.focus && context.entityMapping.has(viewState.focus)) {
@@ -1013,9 +1006,8 @@ function applyViewState(
         }
       }
 
-      latestSnapshot.viewState = mappedViewState;
+    latestSnapshot.viewState = mappedViewState;
 
-      console.log(`  🎥 VIEW: ${safeStringify(mappedViewState)}`);
-    }
-  }
+    console.log(`  🎥 VIEW: ${safeStringify(mappedViewState)}`);
+  });
 }

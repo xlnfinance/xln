@@ -736,7 +736,7 @@ Help the user understand this entity's state, suggest actions, or answer questio
 
     if (!SpeechRecognition) {
       console.error('Web Speech API not supported');
-      // Fallback: Try to request microphone permission to trigger browser dialog
+      // Request microphone permission explicitly so the browser can show its consent dialog.
       try {
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       } catch (e) {

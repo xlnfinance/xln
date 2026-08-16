@@ -18,16 +18,13 @@ import {
 } from '../../protocol/payments/delivery-result';
 import { selectPotentialCrossJAccountInputPairs } from '../routing/entity-routing';
 import {
-  buildRouteOutputKey,
-  getReliableOutputIdentity,
-  splitRoutedOutputByDeliveryLane,
   type ReliableOutputIdentity,
 } from './identity';
 import { signRuntimeEntityInputsEnvelope } from '../entity-input/entity-input-envelope-auth.ts';
 import {
   buildPendingNetworkOutputs,
   buildRoutingDeliveryResult,
-  compareOutputDelivery,
+  compareOutputDeliveryWithIdentities,
   enqueueP2PEntityInputsDelivery,
   groupAtomicCrossJAdmissionOutputs,
   isCrossJAdmissionSourceProposal,
@@ -44,31 +41,52 @@ import {
 import { planEntityOutputs } from './plan';
 import { recordRuntimeSecurityIncident } from '../observability/security-incidents';
 import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
+import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
 
 const routeLog = createStructuredLogger('network.route');
 
-const batchOutputsByTarget = (outputs: DeliverableEntityInput[]): DeliverableEntityInput[] => {
+const batchOutputsByTarget = (
+  outputs: DeliverableEntityInput[],
+  graph: PreparedOutputGraph,
+): DeliverableEntityInput[] => {
   const batched = new Map<string, DeliverableEntityInput>();
 
-  for (const output of outputs.flatMap(candidate => splitRoutedOutputByDeliveryLane(candidate))) {
-    const reliable = getReliableOutputIdentity(output);
+  for (const output of outputs.flatMap(candidate => graph.split(candidate))) {
+    const { reliableIdentity: reliable, routeKey } = graph.prepare(output);
     const laneKey = `${output.runtimeId}:${output.entityId}:${output.signerId || ''}`;
     const key = reliable
-      ? `${laneKey}:${buildRouteOutputKey(output)}`
+      ? `${laneKey}:${routeKey}`
       : output.leaderTimeoutVote
-        ? `${laneKey}:${buildRouteOutputKey(output)}`
+        ? `${laneKey}:${routeKey}`
         : laneKey;
     const existing = batched.get(key);
 
     if (existing) {
-      mergeRoutedEntityOutput(existing, output);
+      mergeRoutedEntityOutput(
+        existing,
+        output,
+        graph.prepare(existing).reliableIdentity,
+        reliable,
+      );
+      graph.invalidate(existing);
       routeLog.debug('batch.merge', { key, txs: existing.entityTxs?.length || 0 });
     } else {
-      batched.set(key, validateDeliverableEntityInput(structuredClone(output)));
+      const target = validateDeliverableEntityInput({
+        ...output,
+        ...(output.entityTxs ? { entityTxs: [...output.entityTxs] } : {}),
+      });
+      graph.adopt(output, target);
+      batched.set(key, target);
     }
   }
 
-  return Array.from(batched.values()).sort(compareOutputDelivery);
+  return Array.from(batched.values()).sort((left, right) =>
+    compareOutputDeliveryWithIdentities(
+      left,
+      graph.prepare(left).reliableIdentity,
+      right,
+      graph.prepare(right).reliableIdentity,
+    ));
 };
 
 const requireOutputRuntimeFrame = (
@@ -186,6 +204,7 @@ type OutputEnvelopeGroup = {
 
 const buildOutputEnvelopeGroups = (
   outputs: PlannedRemoteOutput[],
+  graph: PreparedOutputGraph,
 ): OutputEnvelopeGroup[] => {
   const structuralOutputs = outputs.map(({ output }) => ({ ...output, runtimeId: '' }));
   for (const pair of selectPotentialCrossJAccountInputPairs(structuralOutputs, {
@@ -220,14 +239,19 @@ const buildOutputEnvelopeGroups = (
       const atomicUnits = units.filter(unit => unit.atomic);
       const ordinary = units.filter(unit => !unit.atomic).flatMap(unit => unit.outputs);
       const ordinaryUnits = ordinary.length > 0
-        ? groupAtomicCrossJAdmissionOutputs(batchOutputsByTarget(ordinary))
+        ? groupAtomicCrossJAdmissionOutputs(batchOutputsByTarget(ordinary, graph))
         : [];
       return [...atomicUnits, ...ordinaryUnits]
         .map(unit => ({ targetRuntimeId: group.targetRuntimeId, ...unit }));
     })
     .sort((left, right) =>
       compareStableText(left.targetRuntimeId, right.targetRuntimeId) ||
-      compareOutputDelivery(left.outputs[0]!, right.outputs[0]!));
+      compareOutputDeliveryWithIdentities(
+        left.outputs[0]!,
+        graph.prepare(left.outputs[0]!).reliableIdentity,
+        right.outputs[0]!,
+        graph.prepare(right.outputs[0]!).reliableIdentity,
+      ));
 };
 
 /**
@@ -276,10 +300,11 @@ const selectSendableOutputs = (
   group: OutputEnvelopeGroup,
   blockedReliableLanes: Set<string>,
   deferredOutputs: RoutedEntityInput[],
+  graph: PreparedOutputGraph,
 ): DeliverableEntityInput[] => {
   const sendable: DeliverableEntityInput[] = [];
   for (const output of group.outputs) {
-    const reliable = getReliableOutputIdentity(output);
+    const reliable = graph.prepare(output).reliableIdentity;
     const blockedByLane =
       !group.atomic &&
       reliable &&
@@ -308,12 +333,13 @@ const retainDeliveredReliableOutputs = (
   sendable: DeliverableEntityInput[],
   atomic: boolean,
   deferredOutputs: RoutedEntityInput[],
+  graph: PreparedOutputGraph,
 ): void => {
   if (atomic) {
     deferredOutputs.push(...sendable);
     return;
   }
-  deferredOutputs.push(...sendable.filter(output => getReliableOutputIdentity(output) !== null));
+  deferredOutputs.push(...sendable.filter(output => graph.prepare(output).reliableIdentity !== null));
 };
 
 const deferOutputsAfterDeliveryFailure = (
@@ -341,6 +367,7 @@ const tryDirectOutputEnvelope = (
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeOutputRoutingDeps,
   deferredOutputs: RoutedEntityInput[],
+  graph: PreparedOutputGraph,
 ): boolean => {
   const state = deps.ensureRuntimeInfrastructure(env);
   const directDispatch = state.directEntityInputsDispatch;
@@ -362,7 +389,7 @@ const tryDirectOutputEnvelope = (
     sourceRuntimeHeight: envelope.sourceRuntimeHeight,
     outputs: summarizeAccountEnvelopeOutputs(sendable),
   });
-  retainDeliveredReliableOutputs(sendable, group.atomic, deferredOutputs);
+  retainDeliveredReliableOutputs(sendable, group.atomic, deferredOutputs, graph);
   return true;
 };
 
@@ -373,12 +400,13 @@ const dispatchP2POutputEnvelope = (
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeOutputRoutingDeps,
   deferredOutputs: RoutedEntityInput[],
+  graph: PreparedOutputGraph,
 ): void => {
   const p2p = deps.getP2P(env);
   if (!p2p) {
     for (const output of sendable) {
       const details = { entityId: output.entityId, runtimeId: group.targetRuntimeId };
-      if (getReliableOutputIdentity(output)) {
+      if (graph.prepare(output).reliableIdentity) {
         env.warn?.('network', 'ROUTE_RELIABLE_DEFERRED_NO_P2P', details);
       } else {
         env.info?.('network', 'ROUTE_DEFERRED_NO_P2P', details);
@@ -410,7 +438,7 @@ const dispatchP2POutputEnvelope = (
         sourceRuntimeHeight: envelope.sourceRuntimeHeight,
         outputs: summarizeAccountEnvelopeOutputs(sendable),
       });
-      retainDeliveredReliableOutputs(sendable, group.atomic, deferredOutputs);
+      retainDeliveredReliableOutputs(sendable, group.atomic, deferredOutputs, graph);
       return;
     }
     if (shouldRetryDelivery(delivery)) {
@@ -458,6 +486,7 @@ const dispatchOutputEnvelope = (
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeOutputRoutingDeps,
   deferredOutputs: RoutedEntityInput[],
+  graph: PreparedOutputGraph,
 ): void => {
   if (
     tryDirectOutputEnvelope(
@@ -467,6 +496,7 @@ const dispatchOutputEnvelope = (
       envelope,
       deps,
       deferredOutputs,
+      graph,
     )
   ) {
     return;
@@ -478,6 +508,7 @@ const dispatchOutputEnvelope = (
     envelope,
     deps,
     deferredOutputs,
+    graph,
   );
 };
 
@@ -485,10 +516,11 @@ export const dispatchEntityOutputs = (
   env: RuntimeReplica,
   outputs: PlannedRemoteOutput[],
   deps: RuntimeOutputRoutingDeps,
+  graph: PreparedOutputGraph = createPreparedOutputGraph(),
 ): RoutedEntityInput[] => {
   const deferredOutputs: RoutedEntityInput[] = [];
   const blockedReliableLanes = new Set<string>();
-  for (const group of buildOutputEnvelopeGroups(outputs)) {
+  for (const group of buildOutputEnvelopeGroups(outputs, graph)) {
     if (!group.complete) {
       deferIncompleteCrossJCohort(env, group, outputs, deferredOutputs);
       continue;
@@ -498,6 +530,7 @@ export const dispatchEntityOutputs = (
       group,
       blockedReliableLanes,
       deferredOutputs,
+      graph,
     );
     if (sendable.length === 0) continue;
     const envelope = buildRuntimeEntityInputsEnvelope(env, group.targetRuntimeId, sendable);
@@ -510,9 +543,15 @@ export const dispatchEntityOutputs = (
         outputs: summarizeAccountEnvelopeOutputs(sendable),
       });
     }
-    dispatchOutputEnvelope(env, group, sendable, envelope, deps, deferredOutputs);
+    dispatchOutputEnvelope(env, group, sendable, envelope, deps, deferredOutputs, graph);
   }
-  return deferredOutputs.sort(compareOutputDelivery);
+  return deferredOutputs.sort((left, right) =>
+    compareOutputDeliveryWithIdentities(
+      left,
+      graph.prepare(left).reliableIdentity,
+      right,
+      graph.prepare(right).reliableIdentity,
+    ));
 };
 
 export const sendEntityInputWithRouting = (
@@ -521,6 +560,7 @@ export const sendEntityInputWithRouting = (
   deps: RuntimeOutputRoutingDeps,
 ): RuntimeEntityInputRoutingResult => {
   const state = deps.ensureRuntimeInfrastructure(env);
+  const preparedOutputGraph = createPreparedOutputGraph();
   const originatedInput: RoutedEntityInput = input.sourceRuntimeFrame
     ? input
     : {
@@ -533,13 +573,19 @@ export const sendEntityInputWithRouting = (
   const pendingBeforePlan = buildPendingNetworkOutputs(pruneReceiptedReliableOutputs(env, [
     ...(env.pendingNetworkOutputs ?? []),
     originatedInput,
-  ]));
+  ]), preparedOutputGraph);
   const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
     env,
     pendingBeforePlan,
     deps,
+    preparedOutputGraph,
   );
-  const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, readyPendingOutputs, deps);
+  const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(
+    env,
+    readyPendingOutputs,
+    deps,
+    preparedOutputGraph,
+  );
   if (remoteOutputs.length > 0 && state.recoveryBackupBarrier) {
     throw new Error('DIRECT_NETWORK_SEND_REQUIRES_COMMITTED_RECOVERY_BACKUP');
   }
@@ -547,7 +593,7 @@ export const sendEntityInputWithRouting = (
   if (localOutputs.length > 0) {
     deps.enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.state.timestamp);
   }
-  const deferred = dispatchEntityOutputs(env, remoteOutputs, deps);
+  const deferred = dispatchEntityOutputs(env, remoteOutputs, deps, preparedOutputGraph);
   const remainingDeferred = [...deferredOutputs, ...deferred];
   env.pendingNetworkOutputs = rescheduleDeferredOutputs(
     env,
@@ -555,6 +601,7 @@ export const sendEntityInputWithRouting = (
     remainingDeferred,
     waitingPendingOutputs,
     deps,
+    preparedOutputGraph,
   );
 
   return {

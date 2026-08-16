@@ -33,19 +33,10 @@ import {
 import { getProcess, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from '../harness/helpers';
 import { submitSignedScenarioBatch } from '../harness/j-batch-submit';
 
-// Simple snapshot helper for this scenario
-function pushSnapshot(env: RuntimeReplica, tag: string, description: string, metadata: Record<string, unknown> = {}) {
-  if (!env.history) env.history = [];
-  const frame = {
-    tag,
-    description,
-    metadata,
-    timestamp: env.state.timestamp,
-    eReplicas: new Map(env.state.eReplicas),
-    jReplicas: env.state.jReplicas ? new Map(env.state.jReplicas) : undefined
-  };
-  env.history.push(frame as unknown as RuntimeReplica['history'][number]);
-  console.log(`📸 Snapshot: ${description}`);
+// Narrative markers are console-only. A scenario must not retain synthetic
+// snapshots on RuntimeReplica; real committed traces use an external collector.
+function pushSnapshot(_env: RuntimeReplica, tag: string, description: string, metadata: Record<string, unknown> = {}) {
+  console.log(`📸 ${tag}: ${description}`, metadata);
 }
 
 // Grid dimensions: 2×2×2 = 8 nodes (3D cube, not flat!)
@@ -412,7 +403,7 @@ export async function grid(env: RuntimeReplica): Promise<void> {
   });
 
   console.log('\n\n✅ GRID SCALABILITY DEMO COMPLETE');
-  console.log(`📊 Total frames: ${env.history?.length || 0}`);
+  console.log(`📊 Total frames: ${env.state.height}`);
   console.log('🎯 Key insight: Hubs aren\'t centralization - they\'re MATH');
   console.log('   O(n²) mesh → O(n) broadcast → O(1) hub-spoke\n');
 

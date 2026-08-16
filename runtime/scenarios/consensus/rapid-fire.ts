@@ -275,7 +275,7 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   console.log(`\n🔍 Final state:`);
   console.log(`   Total mempool items: ${totalMempool}`);
   console.log(`   Pending frames: ${totalPending}`);
-  console.log(`   History frames: ${env.history?.length || 0}`);
+  console.log(`   Runtime frames: ${env.state.height}`);
 
   assert(totalMempool === 0, 'All mempools drained');
   assert(totalPending === 0, 'No pending frames');
@@ -285,7 +285,7 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   console.log(`   Payments: ${forwardCount + reverseCount}`);
   console.log(`   Duration: ${(totalTime / 1000).toFixed(1)}s`);
   console.log(`   Throughput: ${((forwardCount + reverseCount) / (totalTime / 1000)).toFixed(1)} tx/s`);
-  console.log(`   Frames: ${env.history?.length || 0}`);
+  console.log(`   Frames: ${env.state.height}`);
   console.log('═══════════════════════════════════════════════════════════════\n');
   } finally {
     env.scenarioMode = prevScenarioMode ?? false;

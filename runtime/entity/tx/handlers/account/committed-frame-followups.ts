@@ -8,6 +8,8 @@ import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '.
 import { createStructuredLogger } from '../../../../infra/logger';
 import type { AccountTxTarget } from './orderbook/queue';
 import { applyCommittedLendingFollowup } from './committed-lending-followup';
+import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
+import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
 import {
   hasInboundHtlcRoute,
   isForwardingHtlcRoute,
@@ -68,8 +70,10 @@ export function applyCommittedAccountFrameFollowups(
     // Account frames are canonical once committed; keep entity-local indexes in
     // sync here instead of mutating them while the account proposal is still tentative.
     if (accountTx.type === 'htlc_resolve') {
-      const account = newState.accounts.get(counterpartyId);
-      if (account?.mempool?.length) {
+      const visible = newState.accounts.get(counterpartyId);
+      if (visible?.mempool?.length) {
+        const account = getEntityAccountForWrite(newState.accounts, counterpartyId);
+        if (!account) throw new Error(`HTLC_FOLLOWUP_WRITE_ACCOUNT_MISSING:${counterpartyId}`);
         account.mempool = account.mempool.filter((mempoolTx) =>
           !(mempoolTx.type === 'htlc_lock' && mempoolTx.data.lockId === accountTx.data.lockId)
         );
@@ -113,9 +117,11 @@ export function applyCommittedAccountFrameFollowups(
           }
           emitOriginatedHtlcFinalized(env, newState, route, accountTx, candidateEffects);
           if (route.originated && route.inboundEntity) {
-            if (resolvesInbound) route.inboundSettled = true;
-            if (resolvesOriginatedOutbound) route.outboundSettled = true;
-            if (!route.inboundSettled || !route.outboundSettled) continue;
+            const writableRoute = getEntityCollectionValueForWrite(newState.htlcRoutes, hashlock);
+            if (!writableRoute) throw new Error(`HTLC_ROUTE_WRITE_MISSING:${hashlock}`);
+            if (resolvesInbound) writableRoute.inboundSettled = true;
+            if (resolvesOriginatedOutbound) writableRoute.outboundSettled = true;
+            if (!writableRoute.inboundSettled || !writableRoute.outboundSettled) continue;
           }
           terminateHtlcRoute(newState, hashlock, newState.timestamp);
         }

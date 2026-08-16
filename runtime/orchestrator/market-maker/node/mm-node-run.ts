@@ -61,6 +61,7 @@ import {
   getEntityOutCapacity,
   getEntityReplicaById,
   isAccountWriteLaneIdle,
+  planMarketMakerIdentityLabels,
   serializeAccountDelta,
   settleRuntimeFor,
   sleep,
@@ -77,7 +78,6 @@ import { areMarketMakerHubTransportsReady } from './mm-transport';
 import { quiesceNodeRuntime } from '../../process/node-runtime-quiesce';
 import { MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS } from '../../orchestrator-config';
 import { startParentLivenessWatch } from '../../../infra/process/parent-watch';
-
 import {
   activateMarketMakerProcessArgs,
   type CrossQuoteJob,
@@ -421,6 +421,7 @@ const computeMarketMakerHealthSnapshot = (
         }
       : undefined,
     crossOverride ?? (includeCross ? undefined : buildDeferredMarketMakerCrossHealth(crossApplicable)),
+    contexts.filter(context => sameJurisdiction(context, primaryContext)),
   );
   return { health, visibleHubs, allVisibleHubs };
 };
@@ -1012,6 +1013,29 @@ const initializeMarketMakerContexts = async (
   ensureJurisdictionReplica(env, jadapter, resolveImportedJurisdictionRpc(jurisdiction));
   setStartupPhase('token-catalog');
   const tokenCatalog = await waitForTokenCatalog(jadapter);
+  const appendPairShards = async (
+    base: MarketMakerEntityContext,
+    targetJurisdiction: Parameters<typeof createMarketMakerEntityContext>[1],
+    signerLabel: string,
+    profileName: string,
+    position: { x: number; y: number; z: number; jurisdiction?: string },
+  ): Promise<void> => {
+    const tokenIds = getMarketMakerTokenIds(
+      buildMarketMakerTokenIdsByContext(tokenCatalog, [base]),
+      base,
+    );
+    const pairPlans = planMarketMakerIdentityLabels(signerLabel, profileName, tokenIds);
+    for (const plan of pairPlans.slice(1)) {
+      contexts.push(await createMarketMakerEntityContext(
+        env,
+        targetJurisdiction,
+        plan.signerLabel,
+        plan.profileName,
+        { ...position, x: position.x + plan.samePairIndex * 35 },
+        plan.samePairIndex,
+      ));
+    }
+  };
   setStartupPhase('import-replica');
   const primaryContext = await createMarketMakerEntityContext(
     env,
@@ -1022,6 +1046,13 @@ const initializeMarketMakerContexts = async (
   );
   setActiveEntityId(primaryContext.entityId);
   contexts.push(primaryContext);
+  await appendPairShards(
+    primaryContext,
+    jurisdiction,
+    resolvedArgs.signerLabel,
+    resolvedArgs.name,
+    { x: 0, y: -40, z: 120, jurisdiction: jurisdiction.name },
+  );
 
   for (const [index, secondary] of resolveSecondaryJurisdictions(jurisdiction.rpc).entries()) {
     const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
@@ -1038,6 +1069,13 @@ const initializeMarketMakerContexts = async (
       { x: 160 + index * 80, y: -40, z: 120, jurisdiction: secondaryName },
     );
     contexts.push(context);
+    await appendPairShards(
+      context,
+      secondary,
+      `${resolvedArgs.signerLabel}:${secondaryName}`,
+      `${resolvedArgs.name} ${secondaryDisplayName}`,
+      { x: 160 + index * 80, y: -40, z: 120, jurisdiction: secondaryName },
+    );
     nodeLog.debug('sibling_mm.ready', {
       jurisdiction: secondaryName,
       entityId: context.entityId,
@@ -1087,11 +1125,12 @@ const hasMarketMakerCrossAccountBacklog = (
   contexts: readonly MarketMakerEntityContext[],
   visibleHubs: readonly HubProfile[],
 ): boolean => {
-  for (const sourceContext of contexts) {
+  const crossContexts = contexts.filter(context => context.samePairIndex === 0);
+  for (const sourceContext of crossContexts) {
     for (const sourceHub of selectMarketMakerHubsForContext(visibleHubs, sourceContext)) {
       if (hasMarketMakerAccountBacklog(env, sourceContext.entityId, sourceHub.entityId)) return true;
     }
-    for (const targetContext of contexts) {
+    for (const targetContext of crossContexts) {
       if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
       for (const targetHub of selectMarketMakerHubsForContext(visibleHubs, targetContext)) {
         if (hasMarketMakerAccountBacklog(env, targetContext.entityId, targetHub.entityId)) return true;
@@ -1109,7 +1148,11 @@ const describeMarketMakerSameQuoteProgress = (env: RuntimeReplica, job: SameQuot
     hubEntityId: job.hub.entityId,
     tokenIds: job.tokenIds,
     committedOffers: countCommittedMarketMakerOffersForHub(env, job.context.entityId, job.hub.entityId),
-    expectedOffers: buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds).length,
+    expectedOffers: buildMarketMakerOfferSpecs(
+      [job.hub.entityId],
+      job.tokenIds,
+      job.context.samePairIndex,
+    ).length,
     account: account
       ? {
           height: Number(account.currentHeight ?? 0),
@@ -1228,6 +1271,7 @@ const createBootstrapSameQuoteDriver =
           MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK,
           connectivityBudget,
           shouldContinue,
+          entry.context.samePairIndex,
         )
       )
         enqueuedQuotes = true;
@@ -1252,7 +1296,8 @@ const buildMarketMakerCrossQuoteJobs = async (
   shouldContinue: () => boolean,
 ): Promise<CrossQuoteJob[] | null> => {
   const jobs: CrossQuoteJob[] = [];
-  for (const sourceContext of contexts) {
+  const crossContexts = contexts.filter(context => context.samePairIndex === 0);
+  for (const sourceContext of crossContexts) {
     await yieldMarketMakerApi();
     if (!shouldContinue()) return null;
     const sourceHubs = selectMarketMakerHubsForContext(visibleHubs, sourceContext).filter(
@@ -1260,7 +1305,7 @@ const buildMarketMakerCrossQuoteJobs = async (
     );
     if (sourceHubs.length === 0) continue;
     const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
-    for (const targetContext of contexts) {
+    for (const targetContext of crossContexts) {
       await yieldMarketMakerApi();
       if (!shouldContinue()) return null;
       if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
@@ -1853,6 +1898,7 @@ const maintainSameContextQuotes = async (input: SameContextQuoteInput): Promise<
     input.mode === 'bootstrap' ? MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK : MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
     input.connectivityBudget,
     input.shouldContinue,
+    input.context.samePairIndex,
   );
   await yieldMarketMakerApi();
   return enqueued;

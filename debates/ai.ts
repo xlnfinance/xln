@@ -72,7 +72,7 @@ export type AggregatedVerdict = {
 
 const AI_SERVER_URL = String(process.env['DEBATES_AI_SERVER_URL'] || 'http://127.0.0.1:3031').replace(/\/+$/, '');
 const AI_MODEL = String(process.env['DEBATES_AI_MODEL'] || 'gemma3-27b-mlx');
-const AI_FALLBACK = process.env['DEBATES_AI_FALLBACK'] !== '0';
+const AI_FAILOVER = process.env['DEBATES_AI_FAILOVER'] !== '0';
 const AI_TIMEOUT_MS = Math.max(100, Number(process.env['DEBATES_AI_TIMEOUT_MS'] || '15000'));
 
 const clampScore = (value: number): number => Math.max(1, Math.min(10, Math.round(value)));
@@ -383,9 +383,9 @@ export const generateDebateTurn = async (input: DebateTurnInput): Promise<string
     try {
       return await localGemmaDebateTurn(input);
     } catch (error) {
-      if (!AI_FALLBACK) throw error;
-      const fallback = await placeholderDebateTurn(input);
-      return `${fallback} [local-ai-fallback: ${error instanceof Error ? error.message : String(error)}]`;
+      if (!AI_FAILOVER) throw error;
+      const failoverTurn = await placeholderDebateTurn(input);
+      return `${failoverTurn} [local-ai-failover: ${error instanceof Error ? error.message : String(error)}]`;
     }
   }
   return await placeholderDebateTurn(input);
@@ -419,12 +419,12 @@ export const runJudge = async (input: JudgeInput, judge: JudgeConfig): Promise<J
     try {
       return await localGemmaJudge(input, judge);
     } catch (error) {
-      if (!AI_FALLBACK) throw error;
-      const fallback = await placeholderJudge(input, judge);
+      if (!AI_FAILOVER) throw error;
+      const failoverVerdict = await placeholderJudge(input, judge);
       return {
-        ...fallback,
-        ruleViolations: [`local_ai_fallback:${error instanceof Error ? error.message : String(error)}`],
-        reasoning: `Local AI was unavailable, so deterministic fallback judged this run. ${fallback.reasoning}`,
+        ...failoverVerdict,
+        ruleViolations: [`local_ai_failover:${error instanceof Error ? error.message : String(error)}`],
+        reasoning: `Local AI was unavailable, so the deterministic failover judge completed this run. ${failoverVerdict.reasoning}`,
       };
     }
   }

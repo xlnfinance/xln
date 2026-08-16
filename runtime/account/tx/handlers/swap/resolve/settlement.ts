@@ -1,9 +1,10 @@
 import type { AccountState } from '../../../../../types/account';
+import type { AccountDraftState } from '../../../../state/account-state-draft';
 import { deriveDelta } from '../../../../utils';
 import { createDefaultDelta } from '../../../../state/delta';
 import { deriveSwapOffdeltaChanges } from '../../../../../orderbook/swap-execution';
 import { getHold, releaseHold } from '../../../hold-utils';
-import { ensureDelta } from '../../../delta-utils';
+import { createDeltaDraft } from '../../../delta-utils';
 import { deriveTransferOffdeltaChange } from '../../../../../protocol/transform/delta-movement';
 import { accountTxValidationRejected } from '../../../apply-result';
 import type {
@@ -34,12 +35,12 @@ const validateCounterpartyCapacity = (
 };
 
 export const applySwapResolveFinancials = (
-  account: AccountState,
+  account: AccountDraftState,
   resolve: ValidatedSwapResolve,
   events: string[],
 ): AppliedSwapResolve | SwapResolveFailure => {
-  const giveDelta = ensureDelta(account, resolve.offer.giveTokenId);
-  const wantDelta = ensureDelta(account, resolve.offer.wantTokenId);
+  const giveDelta = createDeltaDraft(account, resolve.offer.giveTokenId);
+  const wantDelta = createDeltaDraft(account, resolve.offer.wantTokenId);
   const capacityFailure = validateCounterpartyCapacity(account, resolve, events);
   if (capacityFailure) return capacityFailure;
 

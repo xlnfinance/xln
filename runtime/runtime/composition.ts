@@ -303,6 +303,7 @@ export const RuntimeFrameStorageError = runtimeStorageApi.RuntimeFrameStorageErr
 export type RuntimeFrameStorageError = InstanceType<typeof RuntimeFrameStorageError>;
 export const saveEnvToDB = runtimeStorageApi.saveEnvToDB;
 export const readPersistedStorageFrameRecord = runtimeStorageApi.readPersistedStorageFrameRecord;
+const readPersistedStorageFramePayloads = runtimeStorageApi.readPersistedStorageFramePayloads;
 export const listPersistedEntityIdsAtHeight = runtimeStorageApi.listPersistedEntityIdsAtHeight;
 export const verifyRuntimeChain = runtimeStorageApi.verifyRuntimeChain;
 const resolvePersistedLatestHeight = runtimeStorageApi.resolvePersistedLatestHeight;
@@ -320,6 +321,7 @@ export const {
   readPersistedFrameJournal,
   readPersistedRuntimeActivityJournal,
   readPersistedAccountFrameHistory,
+  readPersistedAccountSwapHistoryPage,
   readPersistedEntityFrameHistory,
   readPersistedFrameJournals,
   readPersistedRuntimeActivityPage,
@@ -336,6 +338,7 @@ export const {
   resolvePersistedLatestHeight,
   resolvePersistedCheckpointHeights,
   readPersistedStorageFrameRecord,
+  readPersistedStorageFramePayloads,
   loadEnvFromStorageByReplay,
   closeRuntimeDb,
   restoreEnvFromRecoveryBundles,

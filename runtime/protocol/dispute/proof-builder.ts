@@ -14,7 +14,7 @@ import { exclusiveUnixMsBigIntToUnixS } from '../units';
  */
 
 import { ethers } from 'ethers';
-import type { AccountReplica, AccountState } from '../../types/account.js';
+import type { AccountReplica, AccountState, Delta } from '../../types/account.js';
 import type {
   RuntimeProofBody,
   RuntimeTransformerClause,
@@ -32,6 +32,26 @@ import { sortTransformerEntries } from '../transform/transformer-ordering';
 import { normalizeAccountWatchSeed } from '../identity/account-watch-seed';
 import { HASHLADDER_MAX_FILL_RATIO } from '../htlc/hash-ladder.ts';
 import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/machine/batch/index.ts';
+import { encodeAccountStateValue } from '../../account/commitment/state-root.ts';
+
+/**
+ * Bound the whole signed recovery program before its hash enters consensus.
+ * This is a conservative RLP heuristic, not the physical row measurement:
+ * storage independently checks each msgpack atom against its exact 10 KiB
+ * limit. Production cross-j uses one opening order per cohort because two
+ * recovery pulls exceed this budget; other proof clauses remain byte-bounded.
+ */
+export const MAX_ACCOUNT_DISPUTE_PROOF_LEAF_BYTES = 9_000;
+
+export class AccountDisputeProofBudgetError extends Error {
+  constructor(readonly encodedBytes: number) {
+    super(
+      `ACCOUNT_DISPUTE_PROOF_LEAF_BYTES_EXCEEDED:` +
+      `${encodedBytes}/${MAX_ACCOUNT_DISPUTE_PROOF_LEAF_BYTES}`,
+    );
+    this.name = 'AccountDisputeProofBudgetError';
+  }
+}
 import { compareStableText } from '../serialization';
 import { deriveSwapOffdeltaChanges } from '../../orderbook/swap-execution.ts';
 import { deriveTransferOffdeltaChange } from '../transform/delta-movement';
@@ -136,11 +156,16 @@ type ProofDeltaIndex = {
   byTokenId: Map<number, number>;
 };
 
-const buildProofDeltaIndex = (account: AccountReplica): ProofDeltaIndex => {
+const buildProofDeltaIndex = (
+  account: AccountReplica,
+  deltaOverrides?: ReadonlyMap<number, Delta>,
+): ProofDeltaIndex => {
   const tokenIds: number[] = [];
   const offdeltas: bigint[] = [];
   const byTokenId = new Map<number, number>();
-  const sorted = Array.from(account.state.deltas.entries())
+  const projected = new Map(account.state.deltas.entries());
+  for (const [tokenId, delta] of deltaOverrides ?? []) projected.set(tokenId, delta);
+  const sorted = Array.from(projected)
     .sort(([left], [right]) => left - right);
   for (const [tokenId, delta] of sorted) {
     assertFinalDeltaCanFinalize(tokenId, delta.ondelta ?? 0n, delta.offdelta);
@@ -297,8 +322,9 @@ const buildProofTransformers = (
 export function buildAccountProofBody(
   account: AccountReplica,
   deltaTransformerAddress: string,
+  deltaOverrides?: ReadonlyMap<number, Delta>,
 ): ProofBodyResult {
-  const deltaIndex = buildProofDeltaIndex(account);
+  const deltaIndex = buildProofDeltaIndex(account, deltaOverrides);
   const runtimeProofBody: RuntimeProofBody = {
     watchSeed: normalizeAccountWatchSeed(account.state.watchSeed, 'PROOF_BODY'),
     leftResponseSeconds: account.state.disputeConfig.leftResponseSeconds,
@@ -312,9 +338,15 @@ export function buildAccountProofBody(
     ),
   };
   const proofBodyStruct = runtimeToProofBodyStruct(runtimeProofBody);
+  // Contract executability is the outer protocol boundary and retains its
+  // canonical failure code even when the same body also exceeds local storage.
+  assertDisputeProofBodyWithinContractLimits(proofBodyStruct, 'account.signing');
+  const proofLeafBytes = encodeAccountStateValue(proofBodyStruct).byteLength;
+  if (proofLeafBytes >= MAX_ACCOUNT_DISPUTE_PROOF_LEAF_BYTES) {
+    throw new AccountDisputeProofBudgetError(proofLeafBytes);
+  }
   // This is the final boundary before the hash enters a validator's Hanko.
   // Later J-submit validation cannot repair an already-certified invalid body.
-  assertDisputeProofBodyWithinContractLimits(proofBodyStruct, 'account.signing');
   const encodedProofBody = encodeProofBodyStruct(proofBodyStruct);
   return {
     runtimeProofBody,

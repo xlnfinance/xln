@@ -5,6 +5,7 @@ import {
   loadEntityStatesAtHeightFromStorage,
   verifyStorageSnapshotAtHeight,
   type RuntimeFrame,
+  type RuntimeFramePayloads,
 } from '..';
 import type {
   PersistedStorageHandle,
@@ -17,7 +18,9 @@ export type PersistedRestoreSource = {
   latestHeight: number;
   targetHeight: number;
   frame: RuntimeFrame;
+  payloads: RuntimeFramePayloads;
   selectedSnapshotHeight: number;
+  usesLiveMaterializedCheckpoint: boolean;
   restoredStates: Map<string, EntityState>;
 };
 
@@ -62,10 +65,14 @@ export const resolvePersistedRestoreSource = async (
     }
     throw new Error(`STORAGE_RESTORE_FRAME_MISSING: height=${targetHeight}`);
   }
+  const payloads = await reads.readPersistedStorageFramePayloads(env, frame);
 
   const selectedSnapshotHeight = await reads.resolvePersistedSnapshotHeight(
     env,
     targetHeight,
+  );
+  const usesLiveMaterializedCheckpoint = persistedHandles.some(handle =>
+    handle.latestMaterializedHeight === targetHeight,
   );
   if (selectedSnapshotHeight > 0) {
     const snapshotHandle = persistedHandles.find(handle =>
@@ -98,7 +105,9 @@ export const resolvePersistedRestoreSource = async (
     latestHeight,
     targetHeight,
     frame,
+    payloads,
     selectedSnapshotHeight,
+    usesLiveMaterializedCheckpoint,
     restoredStates,
   };
 };

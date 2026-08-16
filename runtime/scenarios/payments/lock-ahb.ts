@@ -85,7 +85,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
   try {
     console.log('[AHB] ========================================');
     console.log('[AHB] Starting Alice-Hub-Bob Demo (JAdapter)');
-    console.log('[AHB] BEFORE: eReplicas =', env.state.eReplicas.size, 'history =', env.history?.length || 0);
+    console.log('[AHB] BEFORE: eReplicas =', env.state.eReplicas.size, 'height =', env.state.height);
     console.log('[AHB] ========================================');
 
     // ============================================================================
@@ -1548,7 +1548,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log('Phase 7: 4-Hop HTLC route test');
     console.log('Phase 8: Offline simulation');
     console.log('=====================================\n');
-    console.log(`[AHB] History frames: ${env.history?.length}`);
+    console.log(`[AHB] Runtime frames: ${env.state.height}`);
     env = await drainRuntime(env);
     assertRuntimeIdle(env, 'HTLC AHB');
   } finally {
@@ -1581,7 +1581,7 @@ if (import.meta.main) {
   await lockAhb(env);
 
   console.log('\n✅ HTLC AHB scenario complete!');
-  console.log(`📊 Total frames: ${env.history?.length || 0}`);
+  console.log(`📊 Total frames: ${env.state.height}`);
   console.log('🎉 RJEA event consolidation verified - AccountSettled events working!\n');
 
   // Dump full RuntimeReplica to JSON

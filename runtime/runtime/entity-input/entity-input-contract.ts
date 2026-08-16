@@ -102,6 +102,9 @@ export class RuntimeEntityInputApplyError extends Error {
       { cause },
     );
     this.name = 'RuntimeEntityInputApplyError';
+    if (cause instanceof Error && cause.stack && this.stack) {
+      this.stack += `\nCaused by: ${cause.stack}`;
+    }
     this.entityId = input.entityId;
     this.signerId = input.signerId;
     const sourceRuntimeId = String(input.from ?? '').trim();
@@ -138,12 +141,25 @@ export class RuntimeEntityInputApplyError extends Error {
 }
 
 /** Runtime-private map/reduce command; it is never serialized as EntityInput. */
-export type CrossJCommand = {
-  sourceEntityId: string;
-  targetEntityId: string;
-  targetSignerId: string;
-  entityTxs: EntityTx[];
-};
+export type CrossJCommand =
+  | {
+      kind: 'entity-txs';
+      sourceEntityId: string;
+      targetEntityId: string;
+      targetSignerId: string;
+      entityTxs: EntityTx[];
+    }
+  | {
+      /**
+       * A committed Entity frame queued Account work but could not propose it
+       * in that same frame. Runtime immediately derives H+1 inside the same
+       * atomic Runtime transition; this command is never a network message.
+       */
+      kind: 'account-work';
+      sourceEntityId: string;
+      targetEntityId: string;
+      targetSignerId: string;
+    };
 
 export interface RuntimeEntityInputApplyOptions {
   isReplay: boolean;

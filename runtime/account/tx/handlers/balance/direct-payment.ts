@@ -6,13 +6,14 @@
  */
 
 import type { AccountReplica, AccountTx } from '../../../../types/account';
+import type { AccountDraftReplica } from '../../../state/account-state-draft';
 import { deriveDelta } from '../../../utils';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
 import { FINANCIAL } from '../../../../config/constants';
 import { isLeftEntity } from '../../../../protocol/identity/entity-id';
 import { createStructuredLogger } from '../../../../infra/logger';
 import { getAccountPerspective } from '../../../state/perspective';
-import { ensureDelta } from '../../delta-utils';
+import { commitDeltaDraft, createDeltaDraft } from '../../delta-utils';
 import type { ApplyAccountTxResult } from '../../apply-types';
 import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
 
@@ -181,7 +182,7 @@ const buildPaymentForward = (
 };
 
 export function handleDirectPayment(
-  account: AccountReplica,
+  account: AccountDraftReplica,
   accountTx: DirectPaymentTx,
   byLeft: boolean,
 ): ApplyAccountTxResult {
@@ -195,7 +196,7 @@ export function handleDirectPayment(
   if (routeError) return routeError;
   const { counterparty } = getAccountPerspective(account.state, account.proofHeader.fromEntity);
   const forward = buildPaymentForward(account, accountTx.data, parties.paymentFromEntity, counterparty);
-  const delta = ensureDelta(account.state, tokenId);
+  const delta = createDeltaDraft(account.state, tokenId);
   const senderIsLeft = parties.paymentFromEntity === parties.leftEntity;
   const senderDerived = deriveDelta(delta, senderIsLeft);
   if (amount > senderDerived.outCapacity) {
@@ -205,6 +206,7 @@ export function handleDirectPayment(
     );
   }
   delta.offdelta += deriveTransferOffdeltaChange(senderIsLeft, amount);
+  commitDeltaDraft(account.state, delta);
   appendPaymentEvent(account, accountTx.data, parties, byLeft, counterparty, events);
   if (forward) {
     events.push(`↪️ Forwarding payment to ${forward.route.at(-1)!.slice(-4)} via ${forward.route.length - 1} more hops`);

@@ -24,7 +24,6 @@ const baseState = (): EntityState => ({
   reserves: new Map(),
   accounts: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   certifiedBoardState: {
     stackKey: `0x${'01'.repeat(32)}`,
     boardRegistryRoot: `0x${'02'.repeat(32)}`,

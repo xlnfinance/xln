@@ -4,6 +4,7 @@ import {
   clearPendingAuditEvents,
   flushPendingAuditEvents,
   publishEntityCandidateEffects,
+  readRuntimeFrameEvents,
 } from '../../../runtime/observability/env-events';
 import { createEmptyEnv } from '../../../runtime';
 
@@ -21,7 +22,7 @@ test('every machine event reaches history only after commit flush', () => {
   env.emit('OrdinaryCommittedFact', { entityId: '0x01', amount: '10' });
 
   expect(forwarded).toHaveLength(0);
-  expect(env.frameLogs).toHaveLength(1);
+  expect(readRuntimeFrameEvents(env)).toHaveLength(1);
   expect(env.infrastructure?.pendingAuditEvents?.size).toBe(1);
 
   flushPendingAuditEvents(env);

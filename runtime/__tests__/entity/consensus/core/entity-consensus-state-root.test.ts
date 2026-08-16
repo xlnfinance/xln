@@ -9,14 +9,43 @@ import {
   ENTITY_STATE_ROOT_FIELDS,
   ENTITY_STATE_ROOT_EXCLUDED_FIELDS,
   invalidateEntityAccountCommitment,
+  computeEntityAccountValueHash,
 } from '../../../../entity/consensus/state-root';
 import { createEntityFrameHash } from '../../../../entity/consensus/frame';
 import type { EntityState } from '../../../../entity/types';
 import { makeAccount as makeAccountReplica } from '../../../helpers/cross-j';
+import { PersistentEntityAccountMap } from '../../../../entity/state/persistent-account-map';
+import { createBook } from '../../../../orderbook/core';
+import { PersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
 const signerId = `0x${'33'.repeat(20)}`;
+
+const persistentEnvelope = (account: ReturnType<typeof makeAccountReplica>) => {
+  delete (account as { swapOrderHistory?: unknown }).swapOrderHistory;
+  delete (account as { swapClosedOrders?: unknown }).swapClosedOrders;
+  account.pendingWithdrawals = PersistentAccountStateMap.fromEntries(
+    'pendingWithdrawals',
+    account.pendingWithdrawals,
+  );
+  account.shadow.rebalance.policy = PersistentAccountStateMap.fromEntries(
+    'rebalanceShadowPolicy',
+    account.shadow.rebalance.policy,
+  );
+  account.shadow.rebalance.submittedAtByToken = PersistentAccountStateMap.fromEntries(
+    'rebalanceShadowSubmitted',
+    account.shadow.rebalance.submittedAtByToken,
+  );
+  return account;
+};
+
+const persistentAccounts = (
+  entries: Iterable<readonly [string, ReturnType<typeof makeAccountReplica>]> = [],
+): PersistentEntityAccountMap => PersistentEntityAccountMap.fromMap(
+  new Map([...entries].map(([accountId, account]) => [accountId, persistentEnvelope(account)])),
+  computeEntityAccountValueHash,
+);
 
 const frameContext = (height: number, parentFrameHash: string) => ({
   version: 1 as const,
@@ -39,9 +68,8 @@ const baseState = (): EntityState => ({
   proposals: new Map(),
   config: { mode: 'proposer-based', threshold: 1n, validators: ['1'], shares: { '1': 1n } },
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: persistentAccounts(),
   lastFinalizedJHeight: 0,
-  jBlockChain: [],
   certifiedBoardState: {
     stackKey: `0x${'01'.repeat(32)}`,
     boardRegistryRoot: `0x${'02'.repeat(32)}`,
@@ -97,7 +125,7 @@ const mutators = {
     state.reserves.set(1, 10n);
   },
   accounts: state => {
-    state.accounts.set(counterpartyId, makeAccountReplica(entityId, counterpartyId));
+    state.accounts = persistentAccounts([[counterpartyId, makeAccountReplica(entityId, counterpartyId)]]);
   },
   externalWallet: state => {
     state.externalWallet = { balances: new Map(), allowances: new Map() };
@@ -107,18 +135,6 @@ const mutators = {
   },
   lastFinalizedJHeight: state => {
     state.lastFinalizedJHeight = 9;
-  },
-  jBlockChain: state => {
-    state.jBlockChain.push({
-      jurisdictionRef: 'evm:31337',
-      jHeight: 9,
-      jBlockHash: `0x${'55'.repeat(32)}`,
-      eventsHash: `0x${'66'.repeat(32)}`,
-      events: [],
-      finalizedAt: 100,
-      proposerSignerId: '1',
-      proposerSignature: `0x${'77'.repeat(65)}`,
-    });
   },
   jHistoryFinality: state => {
     state.jHistoryFinality = {
@@ -229,28 +245,6 @@ test('Entity consensus root covers every shared EntityState field', () => {
   }
 });
 
-test('bounded J event bodies are a deletable display cache, not consensus authority', () => {
-  const withDisplayBody = baseState();
-  withDisplayBody.jBlockChain = [
-    {
-      jurisdictionRef: 'evm:31337',
-      jHeight: 9,
-      jBlockHash: `0x${'55'.repeat(32)}`,
-      eventsHash: `0x${'66'.repeat(32)}`,
-      events: [],
-      finalizedAt: 100,
-      proposerSignerId: '1',
-      proposerSignature: `0x${'77'.repeat(65)}`,
-    },
-  ];
-  const withoutDisplayBody = structuredClone(withDisplayBody);
-  withoutDisplayBody.jBlockChain = [];
-
-  expect(computeCanonicalEntityConsensusStateHash(withDisplayBody)).toBe(
-    computeCanonicalEntityConsensusStateHash(withoutDisplayBody),
-  );
-});
-
 test('Entity commitments exclude validator-local jurisdiction locators but bind stack identity and policy', () => {
   const left = baseState();
   left.config.jurisdiction = {
@@ -268,7 +262,8 @@ test('Entity commitments exclude validator-local jurisdiction locators but bind 
       maxFee: 5,
     },
   };
-  const right = structuredClone(left);
+  const right = baseState();
+  right.config = structuredClone(left.config);
   right.config.jurisdiction!.name = 'validator B label';
   right.config.jurisdiction!.address = 'http://127.0.0.1:28545';
 
@@ -301,7 +296,8 @@ test('Entity commitments exclude validator-local jurisdiction locators but bind 
     },
   ];
   for (const mutate of mutateCanonical) {
-    const changed = structuredClone(left);
+    const changed = baseState();
+    changed.config = structuredClone(left.config);
     mutate(changed);
     expect(computeCanonicalEntityConsensusStateHash(changed)).not.toBe(stateRoot);
     expect(computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(changed))).not.toBe(authorityRoot);
@@ -365,38 +361,40 @@ test('Entity consensus root is insertion-order independent without recursive key
 test('Entity consensus root excludes only typed Account replica caches', () => {
   const left = baseState();
   const right = baseState();
-  left.accounts.set(counterpartyId, {
+  const leftAccount = {
     ...makeAccountReplica(entityId, counterpartyId),
     frameHistory: [{ stateHash: 'left-cache' }],
-  } as never);
-  right.accounts.set(counterpartyId, {
+  } as never;
+  const rightAccount = {
     ...makeAccountReplica(entityId, counterpartyId),
     frameHistory: [{ stateHash: 'right-cache' }],
-  } as never);
+  } as never;
+  left.accounts = persistentAccounts([[counterpartyId, leftAccount]]);
+  right.accounts = persistentAccounts([[counterpartyId, rightAccount]]);
   expect(computeCanonicalEntityConsensusStateHash(left)).toBe(computeCanonicalEntityConsensusStateHash(right));
 
-  (right.accounts.get(counterpartyId) as unknown as { status: string }).status = 'disputed';
-  invalidateEntityAccountCommitment(right, counterpartyId);
+  const disputed = { ...makeAccountReplica(entityId, counterpartyId), status: 'disputed' as const };
+  right.accounts = persistentAccounts([[counterpartyId, disputed]]);
   expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(right));
 
-  (right.accounts.get(counterpartyId) as unknown as { status: string }).status = 'active';
-  (right.accounts.get(counterpartyId) as unknown as Record<string, unknown>)['boardResealMigration'] = {
+  const reseal = { ...makeAccountReplica(entityId, counterpartyId), boardResealMigration: {
     activationJHeight: 9,
     activationLogIndex: 2,
-    reason: 'bilateral-frame-uncertified',
-  };
-  invalidateEntityAccountCommitment(right, counterpartyId);
+    reason: 'bilateral-frame-uncertified' as const,
+  } };
+  right.accounts = persistentAccounts([[counterpartyId, reseal]]);
   expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(right));
 });
 
-test('Entity Account commitment cache has a cold oracle for missed invalidation', () => {
+test('Entity Account commitment is immutable and its cold oracle matches the Patricia root', () => {
   const state = baseState();
-  state.accounts.set(counterpartyId, makeAccountReplica(entityId, counterpartyId));
+  state.accounts = persistentAccounts([[counterpartyId, makeAccountReplica(entityId, counterpartyId)]]);
   const before = computeCanonicalEntityConsensusStateHash(state);
-  (state.accounts.get(counterpartyId) as unknown as { status: string }).status = 'disputed';
-  expect(computeCanonicalEntityConsensusStateHash(state)).toBe(before);
-  expect(computeCanonicalEntityConsensusStateHashCold(state)).not.toBe(before);
+  expect(() => {
+    (state.accounts.get(counterpartyId) as unknown as { status: string }).status = 'disputed';
+  }).toThrow();
   invalidateEntityAccountCommitment(state, counterpartyId);
+  expect(computeCanonicalEntityConsensusStateHash(state)).toBe(before);
   expect(computeCanonicalEntityConsensusStateHash(state)).toBe(computeCanonicalEntityConsensusStateHashCold(state));
 });
 
@@ -406,20 +404,7 @@ test('Entity consensus root binds incremental book commitments but not the deriv
       books: new Map([
         [
           '1/2',
-          {
-            params: { bucketWidthTicks: 100n, maxOrders: 10, stpPolicy: 1 },
-            orders: new Map(),
-            bidBuckets: new Map(),
-            askBuckets: new Map(),
-            bidBucketIdsDesc: [],
-            askBucketIdsAsc: [],
-            nextSeq: 1,
-            tradeCount: 0,
-            tradeQtySum: 0n,
-            lastTradePriceTicks: 0n,
-            lastAcceptedUsdAskPriceTicks: 0n,
-            eventHash: 0n,
-          },
+          createBook({ bucketWidthTicks: 100n, maxOrders: 10, stpPolicy: 1 }),
         ],
       ]),
       orderPairs: new Map(),
@@ -446,11 +431,13 @@ test('Entity consensus root binds incremental book commitments but not the deriv
   baseline.orderbookExt = makeOrderbookExt();
   const baselineRoot = computeCanonicalEntityConsensusStateHash(baseline);
 
-  const derivedIndexOnly = structuredClone(baseline);
+  const derivedIndexOnly = baseState();
+  derivedIndexOnly.orderbookExt = makeOrderbookExt();
   derivedIndexOnly.orderbookExt!.orderPairs.set('account:offer', ['1/2']);
   expect(computeCanonicalEntityConsensusStateHash(derivedIndexOnly)).toBe(baselineRoot);
 
-  const bookChanged = structuredClone(baseline);
+  const bookChanged = baseState();
+  bookChanged.orderbookExt = makeOrderbookExt();
   const changedBook = bookChanged.orderbookExt!.books.get('1/2')!;
   const { commitmentHash: _commitmentHash, ...bookWithoutCachedCommitment } = changedBook;
   bookChanged.orderbookExt!.books.set('1/2', {
@@ -459,11 +446,13 @@ test('Entity consensus root binds incremental book commitments but not the deriv
   });
   expect(computeCanonicalEntityConsensusStateHash(bookChanged)).not.toBe(baselineRoot);
 
-  const referralChanged = structuredClone(baseline);
+  const referralChanged = baseState();
+  referralChanged.orderbookExt = makeOrderbookExt();
   referralChanged.orderbookExt!.referrals.set('referral', { marker: 'bound' } as never);
   expect(computeCanonicalEntityConsensusStateHash(referralChanged)).not.toBe(baselineRoot);
 
-  const policyChanged = structuredClone(baseline);
+  const policyChanged = baseState();
+  policyChanged.orderbookExt = makeOrderbookExt();
   policyChanged.orderbookExt!.hubProfile.minTradeSize = 1n;
   expect(computeCanonicalEntityConsensusStateHash(policyChanged)).not.toBe(baselineRoot);
 });
@@ -568,11 +557,20 @@ test('Entity consensus root commits peer Hankos while own post-quorum subsets st
   const left = baseState();
   const right = baseState();
   const frameHash = `0x${'aa'.repeat(32)}`;
-  left.accounts.set(counterpartyId, makeWitnessAccount('0xown-subset-a', '0xpeer-fixed', frameHash));
-  right.accounts.set(counterpartyId, makeWitnessAccount('0xown-subset-b', '0xpeer-fixed', frameHash));
+  left.accounts = persistentAccounts([[
+    counterpartyId,
+    makeWitnessAccount('0xown-subset-a', '0xpeer-fixed', frameHash),
+  ]]);
+  right.accounts = persistentAccounts([[
+    counterpartyId,
+    makeWitnessAccount('0xown-subset-b', '0xpeer-fixed', frameHash),
+  ]]);
   expect(computeCanonicalEntityConsensusStateHash(left)).toBe(computeCanonicalEntityConsensusStateHash(right));
 
-  right.accounts.set(counterpartyId, makeWitnessAccount('0xown-subset-b', '0xpeer-changed', frameHash));
+  right.accounts = persistentAccounts([[
+    counterpartyId,
+    makeWitnessAccount('0xown-subset-b', '0xpeer-changed', frameHash),
+  ]]);
   // Account Map writes are reducer-owned dirty-page operations. The
   // incremental parent commitment never scans a million untouched Accounts
   // merely to discover an object replacement.

@@ -1,4 +1,4 @@
-import type { AccountReplica } from '../../../../../types/account';
+import type { AccountDraftReplica } from '../../../../state/account-state-draft';
 import type { CrossJurisdictionSwapRoute } from '../../../../../types/cross-jurisdiction';
 import {
   CROSS_J_MAX_FILL_RATIO,
@@ -8,10 +8,6 @@ import {
   requireCrossJurisdictionFillProgress,
   transitionCrossJurisdictionRouteStatus,
 } from '../../../../../extensions/cross-j';
-import {
-  recordSwapClosedLifecycle,
-  recordSwapResolveLifecycle,
-} from '../lifecycle/history';
 import { rejectCrossSwapFillAck } from './admission';
 import type {
   CrossSwapFillAckResult,
@@ -24,15 +20,17 @@ export type CrossFillProgress = ReturnType<
 >;
 
 export const syncSourcePullBinding = (
-  account: AccountReplica,
+  account: AccountDraftReplica,
   route: CrossJurisdictionSwapRoute,
 ): void => {
   const pullId = route.sourcePull?.pullId;
   if (!pullId) return;
   const pull = account.state.pulls?.get(pullId);
   if (pull) {
-    pull.crossJurisdiction =
-      buildCommittedCrossJurisdictionPullBinding(route, 'source');
+    account.state.pulls.put(pullId, {
+      ...pull,
+      crossJurisdiction: buildCommittedCrossJurisdictionPullBinding(route, 'source'),
+    });
   }
 };
 
@@ -49,7 +47,7 @@ export const cancelledOfferResult = (
 export const applyUnfilledCrossSwapCancellation = (
   prepared: PreparedCrossSwapFillAck,
   timestamp: number,
-  height: number,
+  _height: number,
 ): CrossSwapFillAckResult | null => {
   const { tx, route, account, offer, currentRatio, events } = prepared;
   const proofRatio = getCrossJurisdictionCommittedProofRatio({
@@ -84,22 +82,7 @@ export const applyUnfilledCrossSwapCancellation = (
   route.clearingPolicy = 'cancel_and_clear';
   offer.crossJurisdiction = route;
   syncSourcePullBinding(account, route);
-  recordSwapResolveLifecycle(account, tx.data.offerId, height, {
-    fillRatio: currentRatio,
-    ...(route.fillNumerator !== undefined
-      ? { fillNumerator: route.fillNumerator }
-      : {}),
-    ...(route.fillDenominator !== undefined
-      ? { fillDenominator: route.fillDenominator }
-      : {}),
-    cancelRemainder: true,
-    height,
-    executionGiveAmount: 0n,
-    executionWantAmount: 0n,
-    ...(tx.data.comment ? { comment: tx.data.comment } : {}),
-  });
-  account.state.swapOffers?.delete(tx.data.offerId);
-  recordSwapClosedLifecycle(account, tx.data.offerId);
+  account.state.swapOffers.del(tx.data.offerId);
   events.push(
     `🌉 Cross-j offer ${tx.data.offerId.slice(0, 8)} cancel requested at ` +
     `${currentRatio}/${CROSS_J_MAX_FILL_RATIO}`,

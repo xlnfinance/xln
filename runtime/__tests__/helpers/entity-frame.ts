@@ -20,7 +20,9 @@ export const applyEntityFrameWithMaterializedTestInfraContext = async (
     mempool: [],
     isProposer: true,
   };
-  const entityContext = await materializeEntityInfraContext(env, replica, txs);
+  const entityContext = await materializeEntityInfraContext(env, replica, txs, {
+    usePersistedReplayContext: true,
+  });
   const result = await applyEntityFrame(env, state, entityContext, txs, timestamp);
   return { ...result, entityContext };
 };

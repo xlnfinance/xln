@@ -45,6 +45,29 @@ describe('progress timeline', () => {
     expect(String(result.stderr)).toContain('PROGRESS_ENTRY_0_FIELDS_INVALID');
   }));
 
+  test('preserves known legacy heartbeats while appending the strict schema', () => withWorkspace(directory => {
+    const output = join(directory, '.logs', 'qa', 'agent-progress.jsonl');
+    mkdirSync(join(directory, '.logs', 'qa'), { recursive: true });
+    writeFileSync(output, [
+      '2026-08-15T15:45:02+03:00 | 97% | legacy heartbeat',
+      safeStringify({ at: '2026-08-15T16:19:00+03:00', progress: 'legacy', status: 'kept on disk' }),
+      safeStringify({
+        time: '2026-08-15T16:20:00+03:00',
+        progress: 40,
+        focus: 'legacy exact heartbeat',
+        blocker: null,
+        next: 'strict heartbeat',
+      }),
+      '',
+    ].join('\n'));
+
+    const result = invoke(directory);
+    expect(result.status).toBe(0);
+    const rows = readFileSync(output, 'utf8').trim().split('\n');
+    expect(rows).toHaveLength(4);
+    expect(JSON.parse(rows[3] ?? 'null')).toMatchObject({ percent: 42, focus: 'exact test' });
+  }));
+
   test('forces escalation after thirty minutes on one stable blocker', () => withWorkspace(directory => {
     const output = join(directory, '.logs', 'qa', 'agent-progress.jsonl');
     mkdirSync(join(directory, '.logs', 'qa'), { recursive: true });

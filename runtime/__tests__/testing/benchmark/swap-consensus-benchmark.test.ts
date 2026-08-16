@@ -29,6 +29,13 @@ const workerResult = (): Record<string, unknown> => ({
   committedSwaps: 20,
   concurrency: 1,
   independentHubCohorts: 1,
+  meanPhaseMsPerAccountFrame: {
+    propose: 1,
+    proposalSeal: 2,
+    receive: 3,
+    ackSeal: 2,
+    commit: 1,
+  },
   scope: 'test worker',
 });
 

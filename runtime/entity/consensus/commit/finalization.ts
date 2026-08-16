@@ -30,6 +30,7 @@ import {
   pruneHankoWitnessToReachableState,
   sealHankoWitnessInState,
 } from '../input/hanko-witness';
+import { touchedAccountIdsForHankoSeal } from '../account/touched-accounts';
 import {
   commitEntityConsensusInput,
   rejectEntityConsensusInput,
@@ -135,6 +136,11 @@ const attachCommitProofsAndOutputs = (
     execution.state,
     workingReplica.hankoWitness,
     frame.height,
+    touchedAccountIdsForHankoSeal(
+      execution.state,
+      execution.proposableAccounts,
+      execution.storageChanges,
+    ),
   );
   attachHankoWitnessToOutputs(
     execution.outputs,

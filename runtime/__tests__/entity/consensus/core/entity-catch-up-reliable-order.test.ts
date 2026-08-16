@@ -51,7 +51,10 @@ import {
   computeCanonicalStateHashFromEnv,
 } from '../../../../storage/canonical-hash';
 import { buildStorageReplicaMetaCommitment } from '../../../../storage/replica/replicas';
-import { computeStoragePostStateHash } from '../../../../storage/hashes';
+import {
+  computeRuntimePostStateComponentDigests,
+  computeStoragePostStateHash,
+} from '../../../../storage/hashes';
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
@@ -61,7 +64,7 @@ import type { EntityReplica, EntityState, EntityFrame } from '../../../../entity
 import type { JurisdictionEvent } from '../../../../types/jurisdiction-events';
 import {
   buildDurableRuntimeMachineSnapshot,
-  buildReplayVerifiableRuntimeMachineSnapshot,
+  buildReplayVerifiableRuntimePostStateView,
   restoreDurableRuntimeSnapshot,
 } from '../../../../storage/wal/snapshot';
 import type { PersistedFrameJournal } from '../../../../storage/types';
@@ -119,7 +122,6 @@ const createEntityState = (
     deferredAccountProposals: new Map(),
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: { name: 'catch-up validator', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
@@ -663,7 +665,7 @@ describe('ordered reliable Entity catch-up', () => {
     const durableMachineAfterHeightOne = buildDurableRuntimeMachineSnapshot(restarted, {
       pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
     });
-    const replayMachineAfterHeightOne = buildReplayVerifiableRuntimeMachineSnapshot(restarted, {
+    const replayPostStateAfterHeightOne = buildReplayVerifiableRuntimePostStateView(restarted, {
       pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
     });
     const replicaMetaDigest = buildStorageReplicaMetaCommitment(restarted).digest;
@@ -675,7 +677,10 @@ describe('ordered reliable Entity catch-up', () => {
         height: committedHistoryFrame.state.height,
         timestamp: committedHistoryFrame.state.timestamp,
         replicaMetaDigest,
-        runtimeMachine: replayMachineAfterHeightOne,
+        runtimeComponentDigests: computeRuntimePostStateComponentDigests(
+          replayPostStateAfterHeightOne,
+        ),
+        runtimeOutputRefs: [],
       }),
       replicaMetaCheckpoint: true,
       replicaMetaStateMode: 'full',

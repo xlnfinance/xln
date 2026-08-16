@@ -3,6 +3,7 @@ import {
   FinancialDataCorruptionError,
   validateMapInstance,
 } from '../../protocol/boundary/validation-primitives';
+import { PersistentEntityAccountMap } from '../state/persistent-account-map';
 
 const ENTITY_ID_PATTERN = /^0x[0-9a-f]{64}$/;
 
@@ -71,7 +72,12 @@ export const validateEntityAccountMetadata = (
   entity: Record<string, unknown>,
   context: string,
 ): void => {
-  const accounts = validateMapInstance(entity['accounts'], `${context}.accounts`);
+  // Hydrated live state uses the canonical persistent Patricia view. Keep the
+  // boundary strict: only that class or an actual decoded Map is accepted.
+  const rawAccounts = entity['accounts'];
+  const accounts: ReadonlyMap<unknown, unknown> = rawAccounts instanceof PersistentEntityAccountMap
+    ? rawAccounts
+    : validateMapInstance(rawAccounts, `${context}.accounts`);
   const validateAccountKey = (rawAccountId: unknown, field: string): string => {
     const accountId = String(rawAccountId ?? '');
     if (!/^0x[0-9a-f]{64}$/.test(accountId) || accountId !== rawAccountId) {

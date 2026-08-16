@@ -21,9 +21,12 @@ import {
 } from '../../../entity/consensus/leader';
 import {
   buildEntityFrameAuthority,
+  computeEntityAccountValueHash,
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../../../entity/consensus/state-root';
+import { appendCertifiedEntityFrameLink } from '../../../entity/consensus/frame/lineage';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { generateLazyEntityId } from '../../../entity/factory';
 import { initCrontab } from '../../../entity/scheduler';
 import { applyRuntimeTx } from '../../../runtime/transactions/tx-handlers';
@@ -38,7 +41,11 @@ import {
   buildRuntimeCheckpointLineagePlan,
   refreshRuntimeCheckpointLineageForEntity,
 } from '../../../storage/replica/entity-lineage';
-import { buildStorageReplicaMetaCommitment } from '../../../storage/replica/replicas';
+import {
+  areStorageCheckpointReplicasConverged,
+  areStorageCheckpointReplicasQuiescent,
+  buildStorageReplicaMetaCommitment,
+} from '../../../storage/replica/replicas';
 import type { StorageReplicaMeta } from '../../../storage/types';
 import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica } from '../../../runtime/types';
@@ -70,11 +77,10 @@ const makeGenesis = (env: RuntimeReplica, signerId: string): EntityState => {
       jurisdiction: lineageJurisdiction,
     },
     reserves: new Map(),
-    accounts: new Map(),
+    accounts: PersistentEntityAccountMap.empty(computeEntityAccountValueHash),
     deferredAccountProposals: new Map(),
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,
-    jBlockChain: [],
     profile: { name: 'lineage', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
@@ -167,7 +173,7 @@ const installReplica = (
   state: EntityState,
   options: {
     anchor?: CertifiedEntityLineageAnchor;
-    lineage?: CertifiedEntityFrameLink[];
+    head?: CertifiedEntityFrameLink;
   } = {},
 ): EntityReplica => {
   const keys = provisionTestEntityEncryptionKey(env, state.entityId);
@@ -179,7 +185,7 @@ const installReplica = (
     mempool: [],
     isProposer: true,
     ...(options.anchor ? { certifiedFrameAnchor: options.anchor } : {}),
-    ...(options.lineage ? { certifiedFrameLineage: options.lineage } : {}),
+    ...(options.head ? { certifiedFrameHead: options.head } : {}),
   };
   env.state.eReplicas = new Map([[`${state.entityId}:${signerId}`, replica]]);
   return replica;
@@ -213,6 +219,33 @@ const installCertifiedImportFixture = async (
 };
 
 describe('certified Entity storage lineage', () => {
+  test('materializes only when validator replicas share one exact Entity endpoint', () => {
+    const { env, signerId, genesis } = makeRuntime('storage-lineage-materialization-barrier');
+    const observerId = deriveSignerAddressSync(env.runtimeSeed!, 'materialization-observer').toLowerCase();
+    const replica = installReplica(env, signerId, genesis);
+    env.state.eReplicas.set(`${genesis.entityId}:${observerId}`, {
+      ...replica,
+      signerId: observerId,
+      isProposer: false,
+      state: { ...genesis },
+    });
+
+    expect(areStorageCheckpointReplicasConverged(env)).toBeTrue();
+    expect(areStorageCheckpointReplicasQuiescent(env)).toBeTrue();
+    replica.mempool.push({
+      type: 'chat',
+      data: { from: genesis.entityId, message: 'checkpoint must wait' },
+    });
+    expect(areStorageCheckpointReplicasConverged(env)).toBeTrue();
+    expect(areStorageCheckpointReplicasQuiescent(env)).toBeFalse();
+    replica.mempool.length = 0;
+    env.state.eReplicas.get(`${genesis.entityId}:${observerId}`)!.state = {
+      ...genesis,
+      profile: { ...genesis.profile, name: 'divergent validator state' },
+    };
+    expect(areStorageCheckpointReplicasConverged(env)).toBeFalse();
+  });
+
   test('publishes a self-certifying H0 anchor for a lazy Entity', () => {
     const { env, signerId, genesis } = makeRuntime('storage-lineage-genesis');
     installReplica(env, signerId, genesis);
@@ -221,6 +254,20 @@ describe('certified Entity storage lineage', () => {
     expect(plan.lookup.get(genesis.entityId)?.state.height).toBe(0);
     expect(plan.anchorByReplicaKey.get(`${genesis.entityId}:${signerId}`))
       .toEqual(genesisAnchor(genesis));
+  });
+
+  test('checkpoint replica metadata contains headers but never an EntityState blob', () => {
+    const { env, signerId, genesis } = makeRuntime('storage-lineage-header-only-meta');
+    env.state.height = 1;
+    const replica = installReplica(env, signerId, genesis);
+    replica.certifiedFrameAnchor = genesisAnchor(genesis);
+
+    const [entry] = buildStorageReplicaMetaCommitment(env).entries;
+    const decoded = decodeBuffer(entry!.value);
+    expect(decoded).toBeObject();
+    expect(Object.hasOwn(decoded as object, 'state')).toBeFalse();
+    expect((decoded as { certifiedFrameAnchor?: { stateRoot?: string } })
+      .certifiedFrameAnchor?.stateRoot).toBe(computeCanonicalEntityConsensusStateHash(genesis));
   });
 
   test('restores an H0 anchor with the exact configured 1-of-2 board threshold', () => {
@@ -285,7 +332,7 @@ describe('certified Entity storage lineage', () => {
         mempool: [],
         isProposer: true,
         certifiedFrameAnchor: genesisAnchor(genesis),
-        certifiedFrameLineage: [certified.link],
+        certifiedFrameHead: certified.link,
       }],
       [`${genesis.entityId}:${observerId}`, {
         entityId: genesis.entityId,
@@ -315,13 +362,15 @@ describe('certified Entity storage lineage', () => {
 
     const idleSignerId = deriveSignerAddressSync(env.runtimeSeed!, 'idle').toLowerCase();
     registerSignerKey(env, idleSignerId, deriveSignerKeySync(env.runtimeSeed!, 'idle'));
-    const idleState = structuredClone(genesis);
-    idleState.entityId = generateLazyEntityId([idleSignerId], 1n).toLowerCase();
-    idleState.config = {
-      ...idleState.config,
+    const idleState: EntityState = {
+      ...genesis,
+      entityId: generateLazyEntityId([idleSignerId], 1n).toLowerCase(),
+      config: {
+      ...genesis.config,
       threshold: 1n,
       validators: [idleSignerId],
       shares: { [idleSignerId]: 1n },
+      },
     };
     const idleReplica: EntityReplica = {
       entityId: idleState.entityId,
@@ -343,6 +392,24 @@ describe('certified Entity storage lineage', () => {
     expect(idleReplica.certifiedFrameAnchor).toEqual(idleAnchorBefore);
   });
 
+  test('rebinds a test-only H0 bootstrap mutation before the next certified frame', () => {
+    const { env, signerId, genesis } = makeRuntime('storage-lineage-bootstrap-rebind');
+    const replica = installReplica(env, signerId, genesis, { anchor: genesisAnchor(genesis) });
+    const oldRoot = replica.certifiedFrameAnchor!.stateRoot;
+
+    // Production state changes only through Entity frames. Storage fixtures may
+    // install chain registration authority at H0; they must explicitly replace
+    // the bootstrap checkpoint before constructing H1, never retain stale proof.
+    genesis.profile = { ...genesis.profile, name: 'registered bootstrap' };
+    env.state.height = 1;
+    refreshRuntimeCheckpointLineageForEntity(env, genesis.entityId);
+
+    const currentRoot = computeCanonicalEntityConsensusStateHash(genesis);
+    expect(replica.certifiedFrameAnchor?.stateRoot).toBe(currentRoot);
+    expect(currentRoot).not.toBe(oldRoot);
+    expect(() => buildCertifiedEntityLineagePlan(env)).not.toThrow();
+  });
+
   test('rolls back checkpoint preparation when an Entity input commits no frame', async () => {
     const { env, signerId, genesis } = makeRuntime('storage-lineage-noop-refresh');
     const replica = installReplica(env, signerId, genesis, { anchor: genesisAnchor(genesis) });
@@ -357,9 +424,41 @@ describe('certified Entity storage lineage', () => {
     const committed = await certifyNextFrame(env, signerId, genesis, []);
     const commitGuard = beginRuntimeCheckpointLineageRefresh(env, genesis.entityId);
     replica.state = committed.state;
-    replica.certifiedFrameLineage = [committed.link];
+    replica.certifiedFrameHead = committed.link;
     expect(commitGuard.finalize()).toBe(true);
     expect(replica.certifiedFrameAnchor?.runtimeCheckpoint?.runtimeHeight).toBe(7);
+  });
+
+  test('rebases two causal Entity heights inside one atomic Runtime frame', async () => {
+    const { env, signerId, genesis } = makeRuntime('storage-lineage-causal-two-height');
+    const replica = installReplica(env, signerId, genesis, { anchor: genesisAnchor(genesis) });
+    env.state.height = 7;
+
+    const firstGuard = beginRuntimeCheckpointLineageRefresh(env, genesis.entityId);
+    const first = await certifyNextFrame(env, signerId, genesis, []);
+    replica.state = first.state;
+    appendCertifiedEntityFrameLink(replica, first.link, []);
+    expect(firstGuard.finalize()).toBe(true);
+
+    const second = await certifyNextFrame(env, signerId, first.state, []);
+    expect(() => appendCertifiedEntityFrameLink(replica, second.link, []))
+      .toThrow('ENTITY_CERTIFIED_HEAD_NOT_REBASED:existing=1:incoming=2');
+
+    const secondGuard = beginRuntimeCheckpointLineageRefresh(env, genesis.entityId);
+    expect(replica.certifiedFrameAnchor?.height).toBe(1);
+    expect(replica.certifiedFrameHead).toBeUndefined();
+    replica.state = second.state;
+    appendCertifiedEntityFrameLink(replica, second.link, []);
+    expect(secondGuard.finalize()).toBe(true);
+    expect(replica.certifiedFrameAnchor?.height).toBe(1);
+    expect(replica.certifiedFrameHead?.frame.height).toBe(2);
+
+    const anchorAfterSecond = structuredClone(replica.certifiedFrameAnchor);
+    const headAfterSecond = structuredClone(replica.certifiedFrameHead);
+    const noOpGuard = beginRuntimeCheckpointLineageRefresh(env, genesis.entityId);
+    expect(noOpGuard.finalize()).toBe(false);
+    expect(replica.certifiedFrameAnchor).toEqual(anchorAfterSecond);
+    expect(replica.certifiedFrameHead).toEqual(headAfterSecond);
   });
 
   test('rebases certified lineage into the atomic runtime WAL checkpoint', async () => {
@@ -382,14 +481,14 @@ describe('certified Entity storage lineage', () => {
     const commitment = buildStorageReplicaMetaCommitment(env);
     const meta = decodeBuffer<StorageReplicaMeta>(commitment.entries[0]!.value);
 
-    expect(meta.certifiedFrameLineage ?? []).toHaveLength(0);
+    expect(meta.certifiedFrameHead).toBeUndefined();
     expect(meta.certifiedFrameAnchor?.height).toBe(20);
     expect(meta.certifiedFrameAnchor?.frameHash).toBe(state.prevFrameHash);
     expect(meta.certifiedFrameAnchor?.stateRoot).toBe(stateRootBefore);
     expect(computeCanonicalEntityConsensusStateHash(meta.state)).toBe(stateRootBefore);
 
     replica.certifiedFrameAnchor = structuredClone(meta.certifiedFrameAnchor!);
-    replica.certifiedFrameLineage = structuredClone(meta.certifiedFrameLineage ?? []);
+    delete replica.certifiedFrameHead;
     const restoredPlan = buildCertifiedEntityLineagePlan(env);
     expect(restoredPlan.lookup.get(state.entityId)?.state.height).toBe(20);
     expect(buildStorageReplicaMetaCommitment(env).digest).toBe(commitment.digest);
@@ -425,7 +524,7 @@ describe('certified Entity storage lineage', () => {
       'storage-lineage-repeat-import-latest-only',
     );
     let state = initialState;
-    let latest = env.state.eReplicas.values().next().value?.certifiedFrameLineage?.at(-1);
+    let latest = env.state.eReplicas.values().next().value?.certifiedFrameHead;
     for (let height = 2; height <= 20; height += 1) {
       const certified = await certifyNextFrame(env, signerId, state, []);
       state = certified.state;
@@ -433,7 +532,7 @@ describe('certified Entity storage lineage', () => {
     }
     const replica = env.state.eReplicas.get(`${state.entityId}:${signerId}`)!;
     replica.state = state;
-    replica.certifiedFrameLineage = [latest!];
+    replica.certifiedFrameHead = latest!;
     delete replica.certifiedFrameAnchor;
     const stateRootBefore = computeCanonicalEntityConsensusStateHash(state);
 
@@ -446,8 +545,8 @@ describe('certified Entity storage lineage', () => {
       },
     }));
 
-    expect(env.state.eReplicas.get(`${state.entityId}:${signerId}`)?.certifiedFrameLineage)
-      .toHaveLength(1);
+    expect(env.state.eReplicas.get(`${state.entityId}:${signerId}`)?.certifiedFrameHead)
+      .toBe(latest);
     expect(computeCanonicalEntityConsensusStateHash(state)).toBe(stateRootBefore);
   });
 
@@ -458,21 +557,17 @@ describe('certified Entity storage lineage', () => {
     applyCertifiedEntityLineagePlan(env, buildRuntimeCheckpointLineagePlan(env));
     const replica = env.state.eReplicas.get(`${heightOne.entityId}:${signerId}`)!;
     expect(replica.certifiedFrameAnchor?.height).toBe(1);
-    expect(replica.certifiedFrameLineage ?? []).toHaveLength(0);
+    expect(replica.certifiedFrameHead).toBeUndefined();
 
     const heightTwo = await certifyNextFrame(env, signerId, heightOne, []);
     const heightThree = await certifyNextFrame(env, signerId, heightTwo.state, []);
     replica.state = heightThree.state;
-    replica.certifiedFrameLineage = [
-      ...(replica.certifiedFrameLineage ?? []),
-      heightTwo.link,
-      heightThree.link,
-    ];
+    replica.certifiedFrameHead = heightThree.link;
 
     expect(() => buildCertifiedEntityLineagePlan(env)).not.toThrow();
     applyCertifiedEntityLineagePlan(env, buildRuntimeCheckpointLineagePlan(env));
     expect(replica.certifiedFrameAnchor?.height).toBe(3);
-    expect(replica.certifiedFrameLineage ?? []).toHaveLength(0);
+    expect(replica.certifiedFrameHead).toBeUndefined();
   });
 
   test('repeat import preserves an already-published H0 anchor exactly', async () => {

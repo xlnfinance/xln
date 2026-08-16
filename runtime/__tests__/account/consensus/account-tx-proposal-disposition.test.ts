@@ -85,6 +85,21 @@ describe('Account tx proposal disposition', () => {
     expect(ACCOUNT_TX_REJECTION_CODES.deltaTokenInvalid).toBe('ACCOUNT_DELTA_TOKEN_INVALID');
   });
 
+  test('matcher-generated swap resolve cannot be silently removed', async () => {
+    const account = makeAccount(LEFT, RIGHT);
+    await expect(validateProposalTransactions({
+      consensusContext: consensusContext(),
+      account,
+      proposalWindow: [{
+        type: 'swap_resolve',
+        data: { offerId: 'missing-matcher-offer', fillRatio: 1, cancelRemainder: true },
+      }],
+      frameTimestamp: 1_000,
+      frameJHeight: 0,
+      jClaimNodeStore: new Map(),
+    })).rejects.toThrow('SWAP_RESOLVE_PROPOSAL_FAILED');
+  });
+
   test('payment then HTLC lock/secret resolve on one Account replica', async () => {
     const account = makeAccount(LEFT, RIGHT);
     const paid = await applyAccountTx(account, payment(), true, 1_000, 0);

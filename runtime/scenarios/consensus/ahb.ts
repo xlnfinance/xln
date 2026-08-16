@@ -32,6 +32,11 @@ import { snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScena
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { deriveDelta, isLeftEntity } from '../../account/utils';
 import { createGossipLayer } from '../../network/p2p/gossip';
+import { clearRuntimeFrameEvents } from '../../runtime/observability/env-events';
+import {
+  readRuntimeHistoryTraceForTesting,
+  startRuntimeHistoryTraceForTesting,
+} from '../../runtime/observability/history-retention';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { readEntityFrameEventMessages } from '../../entity/frame-events';
 import { quoteHtlcPaymentRoute } from '../../routing/htlc-quote';
@@ -60,7 +65,6 @@ import {
   submitReserveToReserveBatch,
   usd,
   type RequiredBrowserVM,
-  type SnapshotLogs,
 } from './ahb-helpers';
 
 // NOTE: Manual J-Machine queuing functions REMOVED
@@ -109,15 +113,11 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       console.log(`[AHB] Clearing ${env.state.eReplicas.size} old entities from previous scenario`);
       env.state.eReplicas.clear();
     }
-    if (env.history && env.history.length > 0) {
-      console.log(`[AHB] Clearing ${env.history.length} old snapshots from previous scenario`);
-      env.history = [];
-    }
     env.state.height = 0;
     env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
     env.pendingOutputs = [];
     env.pendingNetworkOutputs = [];
-    env.frameLogs = [];
+    clearRuntimeFrameEvents(env);
     env.gossip = createGossipLayer();
     env.activeJurisdiction = undefined;
     if (env.scenarioMode) {
@@ -126,7 +126,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
     console.log('[AHB] ========================================');
     console.log('[AHB] Starting Alice-Hub-Bob Demo (JAdapter)');
-    console.log('[AHB] BEFORE: eReplicas =', env.state.eReplicas.size, 'history =', env.history?.length || 0);
+    console.log('[AHB] BEFORE: eReplicas =', env.state.eReplicas.size, 'height =', env.state.height);
     console.log('[AHB] ========================================');
 
     let jadapter: JAdapter;
@@ -1648,20 +1648,24 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   let rollbackDetected = false;
   let leftWinsDetected = false;
 
-  // Run until both payments settle (max 20 rounds for safety)
+  // Run until both payments settle (max 20 rounds for safety). The timeline is
+  // owned by an explicit collector, never by RuntimeReplica.
+  const existingTrace = readRuntimeHistoryTraceForTesting(env);
+  const ownedTrace = existingTrace ? null : startRuntimeHistoryTraceForTesting(env);
+  const consensusTrace = existingTrace ?? ownedTrace!.snapshots;
+  let traceCursor = consensusTrace.length;
   let rounds = 0;
   const maxRounds = 20;
-  while (rounds < maxRounds) {
-    const beforeRound = env.history?.length || 0;
-    await process(env);
-    rounds++;
+  try {
+    while (rounds < maxRounds) {
+      await process(env);
+      rounds++;
 
-    // Collect events from this round
-    const afterRound = env.history?.length || 0;
-    if (afterRound > beforeRound) {
-      for (let i = beforeRound; i < afterRound; i++) {
-        const snapshot = env.history![i];
-        const frameLogs = (snapshot as SnapshotLogs | undefined)?.logs ?? (snapshot as SnapshotLogs | undefined)?.frameLogs ?? [];
+      // Collect events from this round
+      if (consensusTrace.length > traceCursor) {
+        for (; traceCursor < consensusTrace.length; traceCursor++) {
+        const snapshot = consensusTrace[traceCursor];
+        const frameLogs = snapshot?.logs ?? [];
         for (const entry of frameLogs) {
           if (entry.category !== 'consensus') continue;
           const msg = entry.message || '';
@@ -1673,18 +1677,17 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
         }
       }
     }
+      // Check if both payments committed (delta should reflect net change)
+      const currentDelta = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
+      const currentNet = currentDelta - ahDeltaBefore;
+      const targetNet = aliceIsLeftAH6 ? -(aliceToHub - hubToAlice) : (aliceToHub - hubToAlice);
 
-    // Check if both payments committed (delta should reflect net change)
-    const currentDelta = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
-    const currentNet = currentDelta - ahDeltaBefore;
-    const targetNet = aliceIsLeftAH6 ? -(aliceToHub - hubToAlice) : (aliceToHub - hubToAlice);
+      console.log(`   Round ${rounds}: delta=${currentDelta}, net=${currentNet}, target=${targetNet}`);
 
-    console.log(`   Round ${rounds}: delta=${currentDelta}, net=${currentNet}, target=${targetNet}`);
-
-    if (currentNet === targetNet) {
-      console.log(`   ✅ Both payments settled after ${rounds} rounds`);
-      // Ensure pending ACKs are processed before final sync checks.
-      await processUntil(env, () => {
+      if (currentNet === targetNet) {
+        console.log(`   ✅ Both payments settled after ${rounds} rounds`);
+        // Ensure pending ACKs are processed before final sync checks.
+        await processUntil(env, () => {
         const [, aliceRep] = findReplica(env, alice.id);
         const [, hubRep] = findReplica(env, hub.id);
         const aliceAccount = aliceRep.state.accounts.get(hub.id);
@@ -1692,9 +1695,12 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
         const noPendingFrames = !aliceAccount?.pendingFrame && !hubAccount?.pendingFrame;
         const noPendingOutputs = (env.pendingOutputs?.length || 0) === 0;
         return Boolean(noPendingFrames && noPendingOutputs);
-      }, 8, 'Phase 6 ACK drain');
-      break;
+        }, 8, 'Phase 6 ACK drain');
+        break;
+      }
     }
+  } finally {
+    ownedTrace?.stop();
   }
 
   console.log(`\n📊 Consensus flow summary:`);
@@ -2771,9 +2777,12 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     console.log('Phase 7: Dispute game ✅ (Full E→J flow with hanko)');
     console.log('Phase 9: Carol cooperative close ✅');
     console.log('=====================================\n');
-    console.log(`[AHB] History frames: ${env.history?.length}`);
+    console.log(`[AHB] Runtime frames: ${env.state.height}`);
     assertRuntimeIdle(env, 'AHB');
   } finally {
+    // If the loop exited exceptionally before its normal stop, release only
+    // a collector this scenario owns; an enclosing browser/test collector is
+    // never touched.
     restoreStrict();
     env.scenarioMode = false; // ALWAYS re-enable live mode, even on error
   }
@@ -2793,7 +2802,7 @@ if (import.meta.main) {
   await ahb(env);
 
   console.log('\n✅ AHB scenario complete!');
-  console.log(`📊 Total frames: ${env.history?.length || 0}`);
+  console.log(`📊 Total frames: ${env.state.height}`);
   console.log('🎉 RJEA event consolidation verified - AccountSettled events working!\n');
 
   // Dump full RuntimeReplica to JSON

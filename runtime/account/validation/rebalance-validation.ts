@@ -1,10 +1,10 @@
 import { TOKENS } from '../../config/constants';
 import {
   FinancialDataCorruptionError,
-  validateMapInstance,
   validateNumber,
   validateObject,
 } from '../../protocol/boundary/validation-primitives';
+import { validateAccountStateCollection } from './collection-validation';
 
 const POLICY_SIDES = new Set(['left', 'right']);
 const POLICY_FIELDS = new Set([
@@ -32,7 +32,7 @@ export const validateRequestedRebalanceAmounts = (
   value: unknown,
   context: string,
 ): void => {
-  const amounts = validateMapInstance(value, context);
+  const amounts = validateAccountStateCollection(value, context);
   for (const [tokenId, amount] of amounts) {
     if (typeof amount !== 'bigint') {
       throw new FinancialDataCorruptionError(
@@ -47,7 +47,7 @@ export const validateRequestedRebalanceFeeState = (
   value: unknown,
   context: string,
 ): void => {
-  const states = validateMapInstance(value, context);
+  const states = validateAccountStateCollection(value, context);
   for (const [tokenId, rawState] of states) {
     const item = `${context}[${String(tokenId)}]`;
     const state = validateObject(rawState, item);
@@ -93,7 +93,7 @@ export const validateRebalanceFeePolicies = (
   value: unknown,
   context: string,
 ): void => {
-  const policies = validateMapInstance(value, context);
+  const policies = validateAccountStateCollection(value, context);
   for (const [tokenId, rawSides] of policies) {
     if (!Number.isSafeInteger(tokenId) || Number(tokenId) <= 0 || Number(tokenId) > TOKENS.MAX_TOKEN_ID) {
       throw new FinancialDataCorruptionError(`${context} contains invalid tokenId ${String(tokenId)}`);

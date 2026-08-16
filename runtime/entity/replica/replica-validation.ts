@@ -102,6 +102,15 @@ const validateEntityCandidate = (
       throw new FinancialDataCorruptionError(`${item}.family is invalid`);
     }
   });
+  if (candidate['proposableAccounts'] !== undefined) {
+    const proposable = validateArray<unknown>(
+      candidate['proposableAccounts'],
+      `${context}.candidate.proposableAccounts`,
+    );
+    proposable.forEach((value, index) => {
+      validateString(value, `${context}.candidate.proposableAccounts[${index}]`);
+    });
+  }
   for (const field of [
     'consumptionNodeChanges',
     'accountJClaimNodeChanges',

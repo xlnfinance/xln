@@ -49,6 +49,20 @@ const assertOrder = (text: string, path: string, markers: string[]): void => {
   }
 };
 
+const assertDirectCallCount = (path: string, callee: string, expected: number): void => {
+  const text = readText(path);
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let count = 0;
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === callee) {
+      count += 1;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  if (count !== expected) throw new Error(`${path} expected ${expected} direct ${callee} call(s), found ${count}`);
+};
+
 const accountConsensusPaths = [
   'runtime/account/consensus/index.ts',
   'runtime/account/consensus/incoming/ack-commit.ts',
@@ -66,6 +80,7 @@ const accountProposePaths = [
 ];
 const accountProposePath = accountProposePaths.join(', ');
 const accountFramePath = 'runtime/account/consensus/frame/hash.ts';
+const accountCommitTransitionPath = 'runtime/account/consensus/frame/commit-transition.ts';
 const entityConsensusPaths = [
   'runtime/entity/consensus/replica-validation.ts',
   'runtime/entity/consensus/leader/certificates.ts',
@@ -104,6 +119,7 @@ const accountConsensus = accountConsensusPaths.map(readText).join('\n');
 const accountHandler = accountHandlerPaths.map(readText).join('\n');
 const accountPropose = accountProposePaths.map(readText).join('\n');
 const accountFrame = readText(accountFramePath);
+const accountCommitTransition = readText(accountCommitTransitionPath);
 const entityConsensus = entityConsensusPaths.map(readText).join('\n');
 const envEvents = readText(envEventsPath);
 const entityEffectPublication = readText(entityEffectPublicationPath);
@@ -127,9 +143,9 @@ assertInitializer(
   'entityJHeight ?? account.state.lastFinalizedJHeight ?? 0',
 );
 assertInitializer(
-  'runtime/account/consensus/incoming/ack-commit.ts',
+  accountCommitTransitionPath,
   'jHeight',
-  'pendingFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0',
+  'frame.jHeight ?? account.state.lastFinalizedJHeight ?? 0',
 );
 assertInitializer(
   'runtime/account/consensus/incoming/preflight.ts',
@@ -140,30 +156,43 @@ assertIncludes(accountFrame, 'if (!Number.isSafeInteger(frame.jHeight) || frame.
 assertIncludes(accountFrame, 'jHeight: frame.jHeight,', accountFramePath);
 
 assertOrder(accountConsensus, accountConsensusPath, [
-  'async function validateIncomingFrameOnClone',
-  'const clonedMachine = cloneAccountReplica(account);',
+  'async function validateIncomingFrameOnDraft',
+  'const transition = beginAccountTransition(',
+  'const clonedMachine = accountTransitionView(transition);',
   'const replayResult = await replayIncomingFrameOnClone(',
   'const frameHashMismatch = await verifySenderFrameHash',
-  'const localAccountStateRoot = computeAccountStateRoot(clonedMachine.state);',
+  'const committed = commitAccountTransition(transition);',
+  'const validatedMachine = committed.account;',
+  'const localAccountStateRoot = committed.accountStateRoot;',
   'localAccountStateRoot !== receivedFrame.accountStateRoot',
   '!accountFrameDeltasEqual(ourFinalDeltas, receivedFrame.deltas)',
-  'const proofResult = buildAccountProofBodyFromJurisdictions(context, clonedMachine);',
+  'const proofResult = buildAccountProofBodyFromJurisdictions(context, validatedMachine);',
   'const localProofBodyHash = proofResult.proofBodyHash;',
   'const frameSealError = getDisputeSealRequirementError(',
 ]);
 
+assertOrder(accountCommitTransition, accountCommitTransitionPath, [
+  'const owner = beginAccountTransition(',
+  'const draft = accountTransitionView(owner);',
+  'for (const tx of frame.accountTxs) {',
+  'const result = await applyAccountTx(',
+  'assertNoUnilateralSettlementMutation(draft, beforeSettlement, tx, options.role);',
+  'Object.assign(account, commitAccountTransition(owner).account);',
+]);
+assertDirectCallCount(accountCommitTransitionPath, 'beginAccountTransition', 1);
+assertDirectCallCount(accountCommitTransitionPath, 'commitAccountTransition', 1);
+assertDirectCallCount('runtime/account/consensus/index.ts', 'commitAccountFrameTransition', 1);
+assertDirectCallCount('runtime/account/consensus/incoming/ack-commit.ts', 'commitAccountFrameTransition', 1);
 assertOrder(accountConsensus, accountConsensusPath, [
   'const reexecuteIncomingFrame = async (',
-  'const commitResult = await applyAccountTx(',
-  'account,',
-  'false,',
-  "throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.rejection.message}`);",
-  "assertNoUnilateralSettlementMutation(account, beforeSettlement, tx, 'receiver/commit');",
+  'const committed = await commitAccountFrameTransition({',
+  'if (preflight.rollbackPendingFrame) {',
+  'await reexecuteIncomingFrame(',
 ]);
 assertOrder(accountConsensus, accountConsensusPath, [
   'async function commitIncomingFrameOnRealState',
-  'await reexecuteIncomingFrame(',
-  'forkAccountCommitmentCache(validation.clonedMachine.state, account.state);',
+  'if (installValidatedTransition) {',
+  'Object.assign(account, validation.clonedMachine);',
   'assertLiveCommitMatchesFrame(',
   'account.currentFrame = structuredClone(receivedFrame);',
   'const committedFrame = cloneAccountFrame(receivedFrame);',
@@ -208,7 +237,11 @@ assertOrder(entityConsensus, entityConsensusPath, [
   'if (!isEntityInputWellFormed(input)) {',
 ]);
 assertIncludes(entityConsensus, 'const supplied = entityInput.entityTxs ?? [];', entityConsensusPath);
-assertIncludes(entityConsensus, 'const admitted = appendDefaultProposerCrossJMaterializations(', entityConsensusPath);
+assertInitializer(
+  'runtime/entity/consensus/input/admission.ts',
+  'admitted',
+  'accountWorkOnly ? [] : appendDefaultProposerCrossJMaterializations(env, workingReplica, supplied,)',
+);
 assertIncludes(entityConsensus, 'workingReplica.mempool = prioritizeScheduledWakeTransactions(', entityConsensusPath);
 assertIncludes(entityConsensus, 'if (!verifyHashPrecommitSignatures(', entityConsensusPath);
 assertIncludes(entityConsensus, 'const hankos: HankoString[] = [];', entityConsensusPath);
@@ -243,8 +276,15 @@ assertOrder(entityFrame, entityFramePath, [
 
 assertIncludes(hankoSigning, 'throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signEntityHashes called without env.runtimeSeed', hankoSigningPath);
 assertIncludes(hankoSigning, 'const normalizedEntityId = encodeQuorumEntityId(entityId);', hankoSigningPath);
-assertIncludes(hankoSigning, 'const reconstructedEntityId = generateLazyEntityId([signerAddress], 1n).toLowerCase();', hankoSigningPath);
-assertIncludes(hankoSigning, 'if (reconstructedEntityId !== normalizedEntityId)', hankoSigningPath);
+assertIncludes(hankoSigning, 'const singleSignerBoardHash = hashBoard(encodeBoard({', hankoSigningPath);
+assertIncludes(hankoSigning, 'if (singleSignerBoardHash !== normalizedEntityId)', hankoSigningPath);
+assertNotMatches(
+  hankoSigning,
+  /\bgenerateLazyEntityId\b/g,
+  hankoSigningPath,
+  'duplicate lazy board reconstruction',
+);
+assertDirectCallCount(hankoSigningPath, 'hashBoard', 1);
 assertIncludes(hankoSigning, 'const verified = verifyCanonicalHanko({', hankoSigningPath);
 assertIncludes(hankoSigning, 'validateBoardAuthority: (entityId, reconstructedBoardHash) => {', hankoSigningPath);
 assertIncludes(hankoCodec, 'HANKO_PACKED_SIGNATURE_PADDING_NONZERO', hankoCodecPath);

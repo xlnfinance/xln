@@ -9,6 +9,8 @@ import {
   loadEntityViewPageFromStorageDb,
   readPersistedRuntimeActivityPage,
   readPersistedRuntimeActivityJournal,
+  readPersistedAccountFrameHistory,
+  readPersistedAccountSwapHistoryPage,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
   submitCrossJurisdictionIntent,
@@ -16,6 +18,7 @@ import {
 } from '../../../runtime.ts';
 import { handleRuntimeAdapterMessage, type RuntimeAdapterServerDeps } from '../../runtime-adapter/server';
 import { RuntimeAdapterError } from '../../runtime-adapter/errors';
+import { buildSettlementEvidence } from '../../runtime-adapter/control/settlement-evidence';
 import type {
   RuntimeAdapterFrameReceiptResponse,
   RuntimeAdapterPaymentRoutesResponse,
@@ -147,8 +150,11 @@ export const createServerRpcMessageHandler = ({
         await submitCrossJurisdictionIntent(targetEnv, route);
       },
       controlRuntime: (targetEnv, action) => {
-        if (action !== 'verify-chain') throw new RuntimeAdapterError('E_BAD_QUERY', `unsupported runtime control: ${action}`);
-        return verifyLiveRuntimeStorage(targetEnv);
+        if (action === 'verify-chain') return verifyLiveRuntimeStorage(targetEnv);
+        if (action.type === 'settlement-evidence') {
+          return buildSettlementEvidence(targetEnv, action, readPersistedAccountFrameHistory);
+        }
+        throw new RuntimeAdapterError('E_BAD_QUERY', 'unsupported runtime control');
       },
       ...(validateRuntimeInputAdmission ? { validateRuntimeInputAdmission } : {}),
       ...(registerRuntimeInputReceipt ? { registerReceipt: registerRuntimeInputReceipt } : {}),
@@ -166,6 +172,8 @@ export const createServerRpcMessageHandler = ({
         loadEntityViewPageFromStorageDb(targetEnv, entityId, height, query),
       listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
       readActivityPage: (targetEnv, options) => readPersistedRuntimeActivityPage(targetEnv, options),
+      readAccountSwapHistoryPage: (targetEnv, entityId, counterpartyId, options) =>
+        readPersistedAccountSwapHistoryPage(targetEnv, entityId, counterpartyId, options),
       readFrameReceipts,
       findPaymentRoutes,
     });

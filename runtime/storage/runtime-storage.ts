@@ -62,6 +62,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     resolvePersistedLatestHeight,
     resolvePersistedCheckpointHeights,
     readPersistedStorageFrameRecord,
+    readPersistedStorageFramePayloads,
     listPersistedEntityIdsAtHeight,
   } = persistedReadApi;
 
@@ -94,6 +95,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   return {
     ...commitApi,
     readPersistedStorageFrameRecord,
+    readPersistedStorageFramePayloads,
     listPersistedEntityIdsAtHeight,
     verifyRuntimeChain,
     resolvePersistedLatestHeight,

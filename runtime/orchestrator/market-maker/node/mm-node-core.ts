@@ -47,6 +47,7 @@ import {
   baseAmountAtPrice,
   baseAmountAtPriceCeil,
   computePriceTicksForBaseQuote,
+  getSwapExactQuoteLotMultipleAtPriceForDimensions,
   getSwapLotScale,
   MAX_ORDERBOOK_QTY_LOTS,
   ORDERBOOK_PRICE_SCALE,
@@ -80,7 +81,6 @@ import {
   hasQueuedOpenAccount,
   HUB_REQUIRED_TOKEN_COUNT,
   isAccountWriteLaneIdle,
-  isCanonicalAccountOpener,
   settleRuntimeFor,
   sleep,
   waitUntil,
@@ -150,6 +150,8 @@ export type MarketMakerEntityContext = {
   depositoryAddress?: string;
   jurisdictionRef: string;
   roleEvidence: AccountRoleEvidence;
+  /** One bilateral Account owns one full 10x2 ladder for this pair index. */
+  samePairIndex: number;
 };
 
 export type MarketMakerTokenIdsByContext = ReadonlyMap<string, number[]>;
@@ -288,7 +290,7 @@ export const MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
 const MARKET_MAKER_API_YIELD_MS = Math.max(1, Number(process.env['MARKET_MAKER_API_YIELD_MS'] || '5'));
 export const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'),
+  Number(process.env['MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '5'),
 );
 export const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
   4,
@@ -298,7 +300,7 @@ export const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
 // must be committed before offers-ready, so tests do not race background fills.
 // Keep same-chain bootstrap throughput high; correctness is enforced by
 // committed-depth health, not by slowly dripping orders into the producer.
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK = 1000;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK = 5;
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK = 1000;
 export const MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE = Math.max(
   1,
@@ -689,6 +691,7 @@ export const createMarketMakerEntityContext = async (
   signerLabel: string,
   profileName: string,
   position: { x: number; y: number; z: number; jurisdiction?: string },
+  samePairIndex = 0,
 ): Promise<MarketMakerEntityContext> => {
   const privateKey = deriveSignerKeySync(resolvedArgs.seed, signerLabel);
   const signerId = deriveSignerAddressSync(resolvedArgs.seed, signerLabel).toLowerCase();
@@ -734,6 +737,7 @@ export const createMarketMakerEntityContext = async (
       depositoryAddress: jurisdiction.contracts.depository,
     }),
     roleEvidence,
+    samePairIndex,
   };
 };
 
@@ -935,30 +939,31 @@ const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
   return (numerator + denominator - 1n) / denominator;
 };
 
-const alignUpToLot = (baseTokenId: number, amount: bigint): bigint => {
-  if (amount <= 0n) return 0n;
-  const lotScale = getSwapLotScale(baseTokenId);
-  return ceilDiv(amount, lotScale) * lotScale;
-};
-
-const minBaseAmountForQuoteNotional = (baseTokenId: number, quoteTokenId: number, priceTicks: bigint): bigint => {
-  if (priceTicks <= 0n) return 0n;
-  return alignUpToLot(
-    baseTokenId,
-    baseAmountAtPriceCeil(baseTokenId, quoteTokenId, minimumTradeAmount(quoteTokenId), priceTicks),
-  );
-};
-
 const withMinQuoteNotionalBaseSize = (
   baseTokenId: number,
   quoteTokenId: number,
   baseSize: bigint,
   priceTicks: bigint,
 ): bigint => {
-  const minBaseSize = minBaseAmountForQuoteNotional(baseTokenId, quoteTokenId, priceTicks);
+  if (priceTicks <= 0n) return 0n;
+  const baseDecimals = getTokenInfo(baseTokenId).decimals;
+  const quoteDecimals = getTokenInfo(quoteTokenId).decimals;
+  const exactBaseQuantum = getSwapLotScale(baseTokenId) *
+    getSwapExactQuoteLotMultipleAtPriceForDimensions(baseDecimals, quoteDecimals, priceTicks);
+  const minBaseSize = baseAmountAtPriceCeil(
+    baseTokenId,
+    quoteTokenId,
+    minimumTradeAmount(quoteTokenId),
+    priceTicks,
+  );
   const desiredBaseSize = baseSize >= minBaseSize ? baseSize : minBaseSize;
   const maxBaseAmount = orderbookMaxBaseAmount(baseTokenId);
-  return desiredBaseSize <= maxBaseAmount ? desiredBaseSize : maxBaseAmount;
+  const aligned = ceilDiv(desiredBaseSize, exactBaseQuantum) * exactBaseQuantum;
+  if (aligned <= maxBaseAmount) return aligned;
+  const capped = (maxBaseAmount / exactBaseQuantum) * exactBaseQuantum;
+  return quoteAmountAtPrice(baseTokenId, quoteTokenId, capped, priceTicks) >= minimumTradeAmount(quoteTokenId)
+    ? capped
+    : 0n;
 };
 
 const withCrossMinQuoteNotionalSourceAmount = (
@@ -1124,7 +1129,7 @@ export const collectOfferIdsForAccount = (
   account: AccountReplica | null | undefined,
 ): Set<string> => {
   const ids = new Set<string>();
-  if (account?.state.swapOffers instanceof Map) {
+  if (account) {
     for (const offerId of account.state.swapOffers.keys()) ids.add(String(offerId));
   }
   for (const tx of account?.mempool ?? []) {
@@ -1144,7 +1149,7 @@ const collectCommittedOfferIdsForAccount = (
   account: Pick<AccountReplica, 'state'> | null | undefined,
 ): Set<string> => {
   const ids = new Set<string>();
-  if (account?.state.swapOffers instanceof Map) {
+  if (account) {
     for (const offerId of account.state.swapOffers.keys()) ids.add(String(offerId));
   }
   return ids;
@@ -1200,9 +1205,14 @@ const selectByteBudgetedCrossSpecs = (specs: readonly MarketMakerOfferSpec[]): M
   return selected.slice(0, MARKET_MAKER_CROSS_OFFERS_PER_DIRECTED_ROUTE);
 };
 
-export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]): MarketMakerOfferSpec[] => {
+export const buildMarketMakerOfferSpecs = (
+  hubEntityIds: string[],
+  tokenIds: number[],
+  samePairIndex?: number,
+): MarketMakerOfferSpec[] => {
   const specs: MarketMakerOfferSpec[] = [];
-  const defaultPairs = buildDefaultEntitySwapPairs(tokenIds);
+  const allPairs = buildDefaultEntitySwapPairs(tokenIds);
+  const defaultPairs = samePairIndex === undefined ? allPairs : allPairs.slice(samePairIndex, samePairIndex + 1);
   for (const hubEntityId of hubEntityIds) {
     const hubSuffix = hubEntityId.slice(-6).toLowerCase();
     const pairContexts = defaultPairs.map(pair => {
@@ -1310,6 +1320,12 @@ export const normalizeEntityRef = (value: string): string =>
     .toLowerCase();
 
 type MarketMakerEntityTx = NonNullable<EntityInput['entityTxs']>[number];
+
+export const shouldInitiateMarketMakerAccountOpen = (input: Readonly<{
+  hasAccount: boolean;
+  hasPendingConsensus: boolean;
+  hasQueuedOpen: boolean;
+}>): boolean => !input.hasAccount && !input.hasPendingConsensus && !input.hasQueuedOpen;
 
 const pushMarketMakerEntityTx = (
   inputsByEntitySigner: Map<string, EntityInput>,
@@ -1435,16 +1451,11 @@ const buildMarketMakerCrossRouteBase = (
 const latestCommittedCrossOfferGeneration = (
   env: RuntimeReplica,
   sourceEntityId: string,
-  account: AccountReplica | null | undefined,
+  _account: AccountReplica | null | undefined,
   offerSlotPrefix: string,
   offerSlotSuffix: string,
 ): number => {
   let generation = 0;
-  for (const [offerId, order] of account?.swapClosedOrders ?? []) {
-    if (offerId.startsWith(offerSlotPrefix) && offerId.endsWith(offerSlotSuffix)) {
-      generation = Math.max(generation, order.lastUpdatedHeight);
-    }
-  }
   const sourceReplica = getEntityReplicaById(env, sourceEntityId);
   for (const [offerId, route] of sourceReplica?.state.crossJurisdictionSwaps ?? []) {
     if (
@@ -1687,13 +1698,19 @@ export const countCommittedMarketMakerOffersForHub = (
 export const isSameQuoteJobDepthReady = (env: RuntimeReplica, job: SameQuoteJob): boolean => {
   const account = getAccountReplica(env, job.context.entityId, job.hub.entityId);
   if (!hasCommittedAccountState(account)) return false;
-  const specs = buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds);
+  const specs = buildMarketMakerOfferSpecs(
+    [job.hub.entityId],
+    job.tokenIds,
+    job.context.samePairIndex,
+  );
   if (specs.length === 0) return true;
   const expectedByPair = new Map<string, number>();
   for (const spec of specs) {
     expectedByPair.set(spec.pairId, (expectedByPair.get(spec.pairId) || 0) + 1);
   }
-  return buildDefaultEntitySwapPairs(job.tokenIds).every(pair => {
+  return buildDefaultEntitySwapPairs(job.tokenIds)
+    .slice(job.context.samePairIndex, job.context.samePairIndex + 1)
+    .every(pair => {
     const expected = expectedByPair.get(pair.pairId) || 0;
     return (
       expected > 0 &&
@@ -1853,12 +1870,11 @@ export const ensureMarketMakerHubConnectivity = async (
     const hubRole = requireVerifiedMarketMakerHubRole(env, hubEntityId);
     const mmAccount = getAccountReplica(env, mmEntityId, hubEntityId);
     const hasPendingConsensus = Boolean(mmAccount?.pendingFrame) || Number(mmAccount?.mempool?.length || 0) > 0;
-    if (
-      !mmAccount &&
-      !hasPendingConsensus &&
-      isCanonicalAccountOpener(mmEntityId, hubEntityId) &&
-      !hasQueuedOpenAccount(env, mmEntityId, hubEntityId)
-    ) {
+    if (shouldInitiateMarketMakerAccountOpen({
+      hasAccount: Boolean(mmAccount),
+      hasPendingConsensus,
+      hasQueuedOpen: hasQueuedOpenAccount(env, mmEntityId, hubEntityId),
+    })) {
       const [openTokenId = 1, ...extraCreditTokenIds] = normalizePositiveTokenIds(tokenIds);
       const connectivityTxs: NonNullable<EntityInput['entityTxs']> = [
         {
@@ -1954,6 +1970,7 @@ export const maintainMarketMakerQuotes = async (
   maxNewOffersTotal = MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
   connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
   shouldContinue: () => boolean = () => true,
+  samePairIndex?: number,
 ): Promise<boolean> => {
   if (hubEntityIds.length === 0 || tokenIds.length < 3) return false;
   if (!shouldContinue()) return false;
@@ -1966,7 +1983,11 @@ export const maintainMarketMakerQuotes = async (
   if (quoteReadyHubEntityIds.length === 0) {
     return false;
   }
-  const desiredOffers = buildMarketMakerOfferSpecs(quoteReadyHubEntityIds, tokenIds);
+  const desiredOffers = buildMarketMakerOfferSpecs(
+    quoteReadyHubEntityIds,
+    tokenIds,
+    samePairIndex,
+  );
   const grouped = new Map<string, MarketMakerOfferSpec[]>();
   for (const spec of desiredOffers) {
     const arr = grouped.get(spec.hubEntityId) ?? [];

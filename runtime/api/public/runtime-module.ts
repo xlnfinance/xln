@@ -127,6 +127,7 @@ import type {
 	  RuntimeAdapterActivityPage,
 	  RuntimeAdapterEntitySummary,
 	  RuntimeAdapterSolvencySummary,
+	  RuntimeAdapterSwapHistoryPage,
 	  RuntimeAdapterTimelineIndexPage,
 	} from '../runtime-adapter/types';
 
@@ -147,6 +148,7 @@ export type {
 	  RuntimeAdapterActivityPage,
 	  RuntimeAdapterEntitySummary,
 	  RuntimeAdapterSolvencySummary,
+	  RuntimeAdapterSwapHistoryPage,
 	  RuntimeAdapterTimelineIndexPage,
 	};
 

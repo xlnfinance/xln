@@ -75,13 +75,6 @@
   export let userMode = false;
   export let requestedPanelId: string | null = null;
 
-  type RuntimeLogEntry = {
-    id?: number;
-    level?: string;
-    message?: string;
-    data?: Record<string, unknown>;
-  };
-
   const localEnvStore = writable<RuntimeReplica | null>(null);
   const localEnvRevisionStore = writable<number>(0);
   const localHistoryStore = writable<EnvSnapshot[]>([]);
@@ -90,10 +83,7 @@
 
   const unsubLocalEnvSync = () => undefined;
 
-  const LOG_TOAST_COOLDOWN_MS = 12000;
   const RUNTIME_VIEW_REFRESH_MIN_INTERVAL_MS = 250;
-  const lastSeenFrameLogIdByRuntime = new Map<string, number>();
-  const lastToastAtByKey = new Map<string, number>();
   const normalizeRuntimeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
   const runtimeEnvMatchesActiveSelection = (env: RuntimeReplica | null): boolean => {
@@ -258,56 +248,6 @@
       duration: 4200,
     });
   };
-
-  const shouldSurfaceLogAsToast = (entry: RuntimeLogEntry): boolean => {
-    const level = String(entry?.level || '').toLowerCase();
-    const message = String(entry?.message || '').toLowerCase();
-    if (level === 'error') return true;
-    const criticalTokens = [
-      'ws_client_error',
-      'ws_connect_failed',
-      'ws_disconnected',
-      'decrypt_fail',
-      'frame_consensus_failed',
-      'p2p_unencrypted',
-      'jsonrpcprovider failed to detect network',
-      'testnet j-machine not found',
-      'route-defer',
-    ];
-    return criticalTokens.some((token) => message.includes(token));
-  };
-
-  const unsubRuntimeErrorToasts = localEnvStore.subscribe((env) => {
-    if (!env?.frameLogs || !Array.isArray(env.frameLogs)) return;
-    const runtimeKey = String(env.runtimeId || 'unknown');
-    const lastSeen = lastSeenFrameLogIdByRuntime.get(runtimeKey) ?? -1;
-    let newLastSeen = lastSeen;
-
-    for (const entry of env.frameLogs as RuntimeLogEntry[]) {
-      const id = Number(entry?.id);
-      if (!Number.isFinite(id) || id <= lastSeen) continue;
-      if (id > newLastSeen) newLastSeen = id;
-      if (!shouldSurfaceLogAsToast(entry)) continue;
-
-      const level = String(entry?.level || 'warn').toLowerCase();
-      const toastMessage = String(entry?.message || 'Runtime error');
-      const dedupeKey = `${runtimeKey}:${toastMessage}`;
-      const now = Date.now();
-      const lastToastAt = lastToastAtByKey.get(dedupeKey) ?? 0;
-      if (now - lastToastAt < LOG_TOAST_COOLDOWN_MS) continue;
-      lastToastAtByKey.set(dedupeKey, now);
-      if (lastToastAtByKey.size > 1000) lastToastAtByKey.clear();
-
-      const text = `${level === 'error' ? 'Runtime error' : 'Runtime warning'}: ${toastMessage}`;
-      if (level === 'error') toasts.error(text, 9000);
-      else toasts.warning(text, 7000);
-    }
-
-    if (newLastSeen > lastSeen) {
-      lastSeenFrameLogIdByRuntime.set(runtimeKey, newLastSeen);
-      if (lastSeenFrameLogIdByRuntime.size > 200) lastSeenFrameLogIdByRuntime.clear();
-    }
-  });
 
   if (isLocalDebugSurfaceAllowed()) {
     registerDebugSurface('liveRuntimeSnapshot', () => {
@@ -476,7 +416,6 @@
       document.body.classList.remove('xln-user-mode');
     }
     unsubLocalEnvSync();
-    unsubRuntimeErrorToasts();
     unsubRuntimeEnv?.();
     unsubRuntimeHistory?.();
     unsubRuntimeViewPalette?.();
@@ -485,8 +424,6 @@
     unsubPaymentTerminalEntitySelection?.();
     paymentTerminalMonitor?.stop();
     if (runtimeViewRefreshTimer) clearTimeout(runtimeViewRefreshTimer);
-    lastSeenFrameLogIdByRuntime.clear();
-    lastToastAtByKey.clear();
   });
 </script>
 

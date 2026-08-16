@@ -6,6 +6,7 @@ import { addMessage } from '../frame-events';
 import { formatTokenAmount } from '../../account/financial-utils';
 import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/events/event-normalization';
 import { createStructuredLogger, shortId } from '../../infra/logger';
+import { getEntityAccountForWrite } from '../state/persistent-account-map';
 import type { FinalizedJEventContext } from './j-events';
 
 const jEventLog = createStructuredLogger('j.event');
@@ -79,8 +80,8 @@ export const applyAccountSettledJEvent = (
   const counterpartyId = String(myIsLeft ? rightEntity : leftEntity);
   const ownReserve = myIsLeft ? leftReserve : rightReserve;
   applyObservedReserve(newState, tokenIdNum, ownReserve, counterpartyId);
-  const account = newState.accounts.get(counterpartyId);
-  if (!account) {
+  const visible = newState.accounts.get(counterpartyId);
+  if (!visible) {
     jEventLog.warn('account_settled.account_missing', {
       counterparty: shortId(counterpartyId),
     });
@@ -92,7 +93,9 @@ export const applyAccountSettledJEvent = (
   // already frozen by that EntityTx, but never append attacker-fillable work
   // while the peer ACK lane is closed. Entity reserve finality above remains
   // unconditional; terminal on-chain dispute finality owns Account economics.
-  if (suppressNonActiveAccountClaim(newState, account, counterpartyId)) return;
+  if (suppressNonActiveAccountClaim(newState, visible, counterpartyId)) return;
+  const account = getEntityAccountForWrite(newState.accounts, counterpartyId);
+  if (!account) throw new Error(`ACCOUNT_SETTLED_WRITE_ACCOUNT_MISSING:${counterpartyId}`);
   dirtyAccounts.add(counterpartyId.toLowerCase());
   account.state.lastFinalizedJHeight ??= 0;
 

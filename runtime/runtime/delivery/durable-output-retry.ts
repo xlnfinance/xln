@@ -23,13 +23,11 @@ export type DurableOutputRetryState = {
   retryAt: number;
 };
 
-export const validateDurableOutputRetryState = (
+export const decodeDurableOutputRetryState = (
   value: unknown,
-  outputs: readonly RoutedEntityInput[],
   code: string,
 ): DurableOutputRetryState[] => {
   if (!Array.isArray(value) || value.length > 10_000) throw new Error(code);
-  const outputRoutes = indexOutputs(outputs);
   const seen = new Set<string>();
   const entries = value.map((raw, index): DurableOutputRetryState => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${code}:${index}`);
@@ -40,7 +38,6 @@ export const validateDurableOutputRetryState = (
     if (!OUTPUT_HASH_PATTERN.test(outputHash) || seen.has(outputHash)) {
       throw new Error(`${code}:${index}:OUTPUT_HASH`);
     }
-    if (!outputRoutes.has(outputHash)) throw new Error(`${code}:${index}:ORPHAN_OUTPUT`);
     seen.add(outputHash);
     return {
       outputHash,
@@ -50,6 +47,21 @@ export const validateDurableOutputRetryState = (
   });
   for (let index = 1; index < entries.length; index += 1) {
     if (entries[index - 1]!.outputHash >= entries[index]!.outputHash) throw new Error(`${code}:ORDER`);
+  }
+  return entries;
+};
+
+export const validateDurableOutputRetryState = (
+  value: unknown,
+  outputs: readonly RoutedEntityInput[],
+  code: string,
+): DurableOutputRetryState[] => {
+  const outputRoutes = indexOutputs(outputs);
+  const entries = decodeDurableOutputRetryState(value, code);
+  for (const [index, entry] of entries.entries()) {
+    if (!outputRoutes.has(entry.outputHash)) {
+      throw new Error(`${code}:${index}:ORPHAN_OUTPUT`);
+    }
   }
   return entries;
 };

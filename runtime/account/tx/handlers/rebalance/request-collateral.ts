@@ -18,6 +18,8 @@
  */
 
 import type { AccountReplica, AccountTx } from '../../../../types/account';
+import type { AccountDraftReplica } from '../../../state/account-state-draft';
+import { commitDeltaDraft, createDeltaDraft } from '../../delta-utils';
 import { isLeftEntity } from '../../../../protocol/identity/entity-id';
 import { deriveDelta } from '../../../utils';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
@@ -40,7 +42,7 @@ const validateCollateralRequest = (account: AccountReplica, data: RequestCollate
 };
 
 const storeCollateralRequest = (
-  account: AccountReplica,
+  account: AccountDraftReplica,
   tx: RequestCollateralTx,
   requestedByLeft: boolean,
   requestedAmount: bigint,
@@ -48,9 +50,8 @@ const storeCollateralRequest = (
   feePaidUpfront: bigint,
   currentTimestamp: number,
 ): void => {
-  account.state.requestedRebalanceFeeState ||= new Map();
-  account.state.requestedRebalance.set(tx.data.tokenId, requestedAmount);
-  account.state.requestedRebalanceFeeState.set(tx.data.tokenId, {
+  account.state.requestedRebalance.put(tx.data.tokenId, requestedAmount);
+  account.state.requestedRebalanceFeeState.put(tx.data.tokenId, {
     requestId: `rebalance:${requestedByLeft ? 'left' : 'right'}:${tx.data.tokenId}:${account.currentHeight + 1}`,
     feeTokenId,
     feePaidUpfront,
@@ -62,7 +63,7 @@ const storeCollateralRequest = (
 };
 
 export function handleRequestCollateral(
-  account: AccountReplica,
+  account: AccountDraftReplica,
   accountTx: RequestCollateralTx,
   byLeft?: boolean,
   currentTimestamp = 0,
@@ -125,7 +126,9 @@ export function handleRequestCollateral(
   // Convention: positive offdelta means LEFT has more.
   // requester pays hub upfront here. All no-op exits are above this mutation.
   if (effectiveFeeTarget > 0n) {
-    feeDelta.offdelta += deriveTransferOffdeltaChange(requesterIsLeft, effectiveFeeTarget);
+    const nextFeeDelta = createDeltaDraft(account.state, feeToken);
+    nextFeeDelta.offdelta += deriveTransferOffdeltaChange(requesterIsLeft, effectiveFeeTarget);
+    commitDeltaDraft(account.state, nextFeeDelta);
   }
 
   // Hub crontab consumes this immutable request. A later request must not top

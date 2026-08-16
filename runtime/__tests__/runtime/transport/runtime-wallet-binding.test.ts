@@ -57,7 +57,6 @@ const createWalletBindingFixture = (mode: JAdapter['mode']) => {
       reserves: new Map(),
       accounts: new Map(),
       lastFinalizedJHeight: 0,
-      jBlockChain: [],
       profile: { name: 'Wallet binding', isHub: false, avatar: '', bio: '', website: '' },
       htlcRoutes: new Map(),
       htlcFeesEarned: 0n,
