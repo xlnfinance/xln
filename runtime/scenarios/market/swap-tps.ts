@@ -8,11 +8,13 @@ export async function swapTps(_env?: RuntimeReplica): Promise<void> {
     warmup: 10_000,
     minTps: 10_000,
     levels: 32,
+    bookCommandsPerOverlay: 160,
   });
   const runtime = await runSwapRuntimeBenchmark({
     swaps: 25_000,
     warmup: 2_500,
     minTps: 10_000,
+    txsPerFrame: 5,
   });
   console.log(JSON.stringify({ orderbook, runtime }, null, 2));
 }

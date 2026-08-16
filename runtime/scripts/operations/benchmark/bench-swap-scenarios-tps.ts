@@ -329,7 +329,12 @@ const runOrderbookScenarios = (cli: Cli): ScenarioResult[] => [
 export const runSwapScenarioBenchmark = async (cli: Cli): Promise<ScenarioBenchmarkResult> => {
   if (cli.warmup > 0) runOrderbookScenarios({ ...cli, swaps: cli.warmup, warmup: 0, minTps: 1 });
   const scenarios = runOrderbookScenarios(cli);
-  const runtime = await runSwapRuntimeBenchmark({ swaps: cli.swaps, warmup: cli.warmup, minTps: cli.minTps });
+  const runtime = await runSwapRuntimeBenchmark({
+    swaps: cli.swaps,
+    warmup: cli.warmup,
+    minTps: cli.minTps,
+    txsPerFrame: 5,
+  });
   const aggregateOperations = scenarios.reduce((sum, scenario) => sum + scenario.operations, 0) + runtime.sameSwaps + runtime.crossSwaps;
   const aggregateElapsedMs = scenarios.reduce((sum, scenario) => sum + scenario.elapsedMs, 0) + runtime.elapsedMs;
   const aggregateTps = aggregateOperations / Math.max(aggregateElapsedMs / 1000, 0.001);
