@@ -6,7 +6,8 @@
 import { ethers } from 'ethers';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 
-export type RadixMerkleRadix = 16 | 256;
+export const RADIX_MERKLE_RADICES = [2, 4, 16, 256] as const;
+export type RadixMerkleRadix = (typeof RADIX_MERKLE_RADICES)[number];
 export type RadixMerkleHashAlgorithm = 'integrity' | 'keccak256';
 export type RadixMerkleOptions = {
   radix?: RadixMerkleRadix;
@@ -81,7 +82,11 @@ const uint16Bytes = (value: number): Uint8Array => {
   return Uint8Array.of(value >>> 8, value & 0xff);
 };
 
-const bytesToHex = (bytes: Uint8Array): string => ethers.hexlify(bytes).slice(2);
+const bytesToHex = (bytes: Uint8Array): string => {
+  let output = '';
+  for (const byte of bytes) output += byte.toString(16).padStart(2, '0');
+  return output;
+};
 
 const domainBytes = (tag: string): Uint8Array => {
   const raw = UTF8_ENCODER.encode(tag);
@@ -101,14 +106,43 @@ const hashParts = (
   return hashAlgorithm === 'keccak256' ? ethers.keccak256(payload) : computeIntegrityDigest(payload);
 };
 
-const hexToBytes = (hex: string): Uint8Array => {
-  const normalized = String(hex).replace(/^0x/, '');
-  return ethers.getBytes(`0x${normalized}`);
+/** Raw UTF-8 key with an explicit byte length; prefix-free and never hashed. */
+export const encodeRawRadixTextKey = (value: string): Uint8Array => {
+  const raw = UTF8_ENCODER.encode(value);
+  if (raw.length > 0xffff) throw new Error(`RADIX_MERKLE_TEXT_KEY_TOO_LONG:${raw.length}`);
+  return concatBytes(uint16Bytes(raw.length), raw);
 };
 
+const hexToBytes = (hex: string): Uint8Array => {
+  const normalized = String(hex).replace(/^0x/, '');
+  if (!/^(?:[0-9a-fA-F]{2})+$/.test(normalized)) {
+    throw new Error(`RADIX_MERKLE_HASH_HEX_INVALID:${hex}`);
+  }
+  const output = new Uint8Array(normalized.length / 2);
+  for (let index = 0; index < output.length; index += 1) {
+    output[index] = Number.parseInt(normalized.slice(index * 2, index * 2 + 2), 16);
+  }
+  return output;
+};
+
+export const isRadixMerkleRadix = (value: unknown): value is RadixMerkleRadix =>
+  RADIX_MERKLE_RADICES.some(radix => radix === value);
+
+export const radixMerkleBitsPerSlot = (radix: RadixMerkleRadix): number =>
+  Math.log2(radix);
+
+const radixTag = (radix: RadixMerkleRadix): number => radix === 256 ? 0xff : radix;
+
 const pathSlots = (key: Uint8Array, radix: RadixMerkleRadix): number[] => {
-  if (radix === 256) return Array.from(key);
-  return Array.from(key).flatMap((byte) => [byte >> 4, byte & 0x0f]);
+  const bitsPerSlot = radixMerkleBitsPerSlot(radix);
+  const mask = radix - 1;
+  const slots: number[] = [];
+  for (const byte of key) {
+    for (let bitOffset = 0; bitOffset < 8; bitOffset += bitsPerSlot) {
+      slots.push((byte >>> (8 - bitsPerSlot - bitOffset)) & mask);
+    }
+  }
+  return slots;
 };
 
 export const radixMerklePathSlots = (key: Uint8Array, radix: RadixMerkleRadix): number[] =>
@@ -131,7 +165,7 @@ const branchHash = (
   hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => {
   if (children.length === 0) return EMPTY_RADIX_MERKLE_ROOT;
-  const parts: Uint8Array[] = [Uint8Array.of(radix === 256 ? 0xff : 0x10)];
+  const parts: Uint8Array[] = [Uint8Array.of(radixTag(radix))];
   for (const [slot, hash] of children.sort((left, right) => left[0] - right[0])) {
     parts.push(Uint8Array.of(slot));
     parts.push(hexToBytes(hash));
@@ -147,21 +181,48 @@ export const computeRadixMerkleBranchHash = (
 
 const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array => {
   const header = uint16Bytes(path.length);
-  if (radix === 256) return concatBytes(header, Uint8Array.from(path));
-
-  const packed = new Uint8Array(Math.ceil(path.length / 2));
+  const bitsPerSlot = radixMerkleBitsPerSlot(radix);
+  const slotsPerByte = 8 / bitsPerSlot;
+  const packed = new Uint8Array(Math.ceil(path.length / slotsPerByte));
   for (let index = 0; index < path.length; index += 1) {
     const slot = path[index] ?? 0;
-    if (slot < 0 || slot > 0x0f) throw new Error(`RADIX_MERKLE_INVALID_NIBBLE: ${slot}`);
-    const byteIndex = Math.floor(index / 2);
-    if (index % 2 === 0) packed[byteIndex] = (packed[byteIndex] ?? 0) | (slot << 4);
-    else packed[byteIndex] = (packed[byteIndex] ?? 0) | slot;
+    if (!Number.isSafeInteger(slot) || slot < 0 || slot >= radix) {
+      throw new Error(`RADIX_MERKLE_INVALID_SLOT:${radix}:${slot}`);
+    }
+    const byteIndex = Math.floor(index / slotsPerByte);
+    const shift = 8 - bitsPerSlot * ((index % slotsPerByte) + 1);
+    packed[byteIndex] = (packed[byteIndex] ?? 0) | (slot << shift);
   }
   return concatBytes(header, packed);
 };
 
 export const packRadixMerklePath = (radix: RadixMerkleRadix, path: number[]): Uint8Array =>
   encodePathSegment(radix, path);
+
+/** Exact inverse used by typed LevelDB keys; non-zero padding is rejected. */
+export const unpackRadixMerklePath = (
+  radix: RadixMerkleRadix,
+  encoded: Uint8Array,
+): number[] => {
+  if (encoded.byteLength < 2) throw new Error('RADIX_MERKLE_PATH_TRUNCATED');
+  const length = (encoded[0]! << 8) | encoded[1]!;
+  const bitsPerSlot = radixMerkleBitsPerSlot(radix);
+  const slotsPerByte = 8 / bitsPerSlot;
+  const byteLength = Math.ceil(length / slotsPerByte);
+  if (encoded.byteLength !== byteLength + 2) throw new Error('RADIX_MERKLE_PATH_LENGTH_INVALID');
+  const path: number[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const byte = encoded[2 + Math.floor(index / slotsPerByte)]!;
+    const shift = 8 - bitsPerSlot * ((index % slotsPerByte) + 1);
+    path.push((byte >>> shift) & (radix - 1));
+  }
+  const usedBits = length * bitsPerSlot;
+  const paddingBits = byteLength * 8 - usedBits;
+  if (paddingBits > 0 && (encoded.at(-1)! & ((1 << paddingBits) - 1)) !== 0) {
+    throw new Error('RADIX_MERKLE_PATH_PADDING_INVALID');
+  }
+  return path;
+};
 
 const extensionHash = (
   radix: RadixMerkleRadix,
@@ -170,7 +231,7 @@ const extensionHash = (
   hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string =>
   hashParts(EXTENSION_DOMAIN, [
-    Uint8Array.of(radix === 256 ? 0xff : 0x10),
+    Uint8Array.of(radixTag(radix)),
     encodePathSegment(radix, path),
     hexToBytes(childHash),
   ], hashAlgorithm);
@@ -203,6 +264,7 @@ export const computeRadixMerkleRootHash = (
     ? extensionHash(radix, rootPath, rootNodeHash, hashAlgorithm)
     : rootNodeHash;
 };
+
 
 type MerkleItem = {
   keyHex: string;
@@ -395,15 +457,78 @@ export const buildRadixMerkle = (
   leaves: RadixMerkleLeaf[],
   options?: RadixMerkleOptions,
 ): RadixMerkleResult => {
-  const built = buildRadixMerkleMaterialized(leaves, options);
+  const radix = options?.radix === 256 ? 256 : 16;
+  const hashAlgorithm = options?.hashAlgorithm ?? 'integrity';
+  if (leaves.length === 0) {
+    return {
+      radix,
+      depth: 0,
+      leafCount: 0,
+      branchCount: 0,
+      extensionCount: 0,
+      maxDepth: 0,
+      root: EMPTY_RADIX_MERKLE_ROOT,
+    };
+  }
+  const { items, depth } = normalizeMerkleItems(leaves, radix, hashAlgorithm);
+  const counters = { branchCount: 0, extensionCount: 0, maxDepth: 0 };
+  type CompactNode = Readonly<{
+    kind: 'leaf' | 'branch';
+    path: number[];
+    hash: string;
+  }>;
+  const buildCompact = (offset: number, group: MerkleItem[]): CompactNode => {
+    if (group.length === 1 || offset >= depth) {
+      const item = group[0];
+      if (!item) throw new Error('RADIX_MERKLE_EMPTY_COMPACT_NODE');
+      counters.maxDepth = Math.max(counters.maxDepth, offset);
+      return { kind: 'leaf', path: item.path, hash: item.hash };
+    }
+    const shared = commonPrefixLength(group, offset, depth);
+    counters.branchCount += 1;
+    if (shared > 0) counters.extensionCount += 1;
+    const branchOffset = offset + shared;
+    const branchPath = group[0]?.path.slice(0, branchOffset) ?? [];
+    const children = Array.from(bucketMerkleItems(group, branchOffset).entries())
+      .sort(([left], [right]) => left - right)
+      .map(([slot, bucket]) => ({ slot, node: buildCompact(branchOffset + 1, bucket) }));
+    return {
+      kind: 'branch',
+      path: branchPath,
+      hash: branchHash(
+        radix,
+        children.map(({ slot, node }) => [
+          slot,
+          node.kind === 'leaf'
+            ? node.hash
+            : computeRadixMerkleEdgeHash(
+                radix,
+                branchPath,
+                node.kind,
+                node.path,
+                node.hash,
+                hashAlgorithm,
+              ),
+        ]),
+        hashAlgorithm,
+      ),
+    };
+  };
+  const rootNode = buildCompact(0, items);
   return {
-    radix: built.radix,
-    depth: built.depth,
-    leafCount: built.leafCount,
-    branchCount: built.branchCount,
-    extensionCount: built.extensionCount,
-    maxDepth: built.maxDepth,
-    root: built.root,
+    radix,
+    depth,
+    leafCount: leaves.length,
+    branchCount: counters.branchCount,
+    extensionCount: counters.extensionCount,
+    maxDepth: counters.maxDepth,
+    root: computeRadixMerkleRootHash(
+      radix,
+      rootNode.kind,
+      rootNode.path,
+      rootNode.hash,
+      hashAlgorithm,
+    ),
   };
 };
 

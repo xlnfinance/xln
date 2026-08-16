@@ -1,0 +1,285 @@
+import { describe, expect, test } from 'bun:test';
+import { ethers } from 'ethers';
+
+import { PersistentRadixValueMap } from '../../../protocol/state/persistent-radix-value-map';
+import type { PersistentRadixValueMapOptions } from '../../../protocol/state/persistent-radix-value-map';
+import {
+  buildRadixMerkle,
+  buildRadixMerkleMaterialized,
+  encodeRawRadixTextKey,
+  RADIX_MERKLE_RADICES,
+  radixMerklePathSlots,
+} from '../../../protocol/state/radix-merkle';
+
+const options = {
+  radix: 16 as const,
+  sealKey: (key: string): string => key,
+  keyBytes: (key: string): Uint8Array => new TextEncoder().encode(key),
+  valueHash: (value: string): string => ethers.keccak256(new TextEncoder().encode(value)),
+  sealValue: (value: string): string => value,
+};
+
+const fromEntries = <K, V>(
+  entries: Iterable<readonly [K, V]>,
+  treeOptions: PersistentRadixValueMapOptions<K, V>,
+): PersistentRadixValueMap<K, V> => {
+  let tree = PersistentRadixValueMap.empty(treeOptions);
+  for (const [key, value] of entries) tree = tree.updated(key, value);
+  return tree;
+};
+
+const fromMap = <K, V>(
+  entries: Iterable<readonly [K, V]>,
+  treeOptions: PersistentRadixValueMapOptions<K, V>,
+): PersistentRadixValueMap<K, V> => PersistentRadixValueMap.fromMap(entries, treeOptions);
+
+describe('PersistentRadixValueMap', () => {
+  test('compact root projection is byte-identical to the persisted graph projection', () => {
+    const cases = [
+      [],
+      [{ key: Uint8Array.of(0x10), value: Uint8Array.of(1) }],
+      [
+        { key: Uint8Array.of(0x10, 0x01), value: Uint8Array.of(1, 2) },
+        { key: Uint8Array.of(0x10, 0x02), value: Uint8Array.of(3, 4) },
+        { key: Uint8Array.of(0xf0, 0xff), value: Uint8Array.of(5, 6) },
+      ],
+    ];
+    for (const radix of RADIX_MERKLE_RADICES) {
+      for (const hashAlgorithm of ['integrity', 'keccak256'] as const) {
+        for (const leaves of cases) {
+          const compact = buildRadixMerkle(leaves, { radix, hashAlgorithm });
+          const persisted = buildRadixMerkleMaterialized(leaves, { radix, hashAlgorithm });
+          expect(compact).toEqual({
+            radix: persisted.radix,
+            depth: persisted.depth,
+            leafCount: persisted.leafCount,
+            branchCount: persisted.branchCount,
+            extensionCount: persisted.extensionCount,
+            maxDepth: persisted.maxDepth,
+            root: persisted.root,
+          });
+        }
+      }
+    }
+  });
+
+  test('uses raw key bits for every supported power-of-two fanout', () => {
+    for (const radix of RADIX_MERKLE_RADICES) {
+      const slots = radixMerklePathSlots(Uint8Array.of(0b1011_0010), radix);
+      expect(slots).toHaveLength(8 / Math.log2(radix));
+      expect(slots.every(slot => slot >= 0 && slot < radix)).toBe(true);
+    }
+    expect(radixMerklePathSlots(Uint8Array.of(0xab), 2)).toEqual([1, 0, 1, 0, 1, 0, 1, 1]);
+    expect(radixMerklePathSlots(Uint8Array.of(0xab), 4)).toEqual([2, 2, 2, 3]);
+    expect(radixMerklePathSlots(Uint8Array.of(0xab), 16)).toEqual([10, 11]);
+    expect(radixMerklePathSlots(Uint8Array.of(0xab), 256)).toEqual([171]);
+  });
+
+  test('incremental and cold roots agree for every supported fanout', () => {
+    for (const radix of RADIX_MERKLE_RADICES) {
+      const radixOptions = { ...options, radix };
+      const base = fromEntries([['a', '1'], ['b', '2']], radixOptions);
+      const incremental = base.updated('a', '3').updated('c', '4').removed('b');
+      const cold = fromMap([['a', '3'], ['c', '4']], radixOptions);
+      expect(incremental.rootHash()).toBe(cold.rootHash());
+      expect(base.get('a')).toBe('1');
+    }
+  });
+
+  test('incremental root equals a cold build of the same values', () => {
+    const base = fromEntries([['a', '1'], ['b', '2']], options);
+    const incremental = base.updated('a', '3').updated('c', '4').removed('b');
+    const cold = fromMap([['a', '3'], ['c', '4']], options);
+
+    expect(incremental.rootHash()).toBe(cold.rootHash());
+    expect([...incremental]).toEqual([...cold]);
+    expect(base.get('a')).toBe('1');
+    expect(base.get('b')).toBe('2');
+  });
+
+  test('retains the pre-native-hex consensus roots', () => {
+    const empty = PersistentRadixValueMap.empty({ ...options, keyBytes: encodeRawRadixTextKey });
+    expect(empty.rootHash()).toBe(`0x${'00'.repeat(32)}`);
+    expect(empty.updated('a', '1').rootHash())
+      .toBe('0xb48af8cde1f2867eccab9618e09337af84fd76d00078978905c2fd50455344d3');
+    expect(empty.updated('a', '1').updated('ab', '2').rootHash())
+      .toBe('0xfd9bf6a56fc2c2a79995fb4d1ab5e4a5a56bdc5cd17acbdbdedd928811a9882a');
+  });
+
+  test('radix-256 update is deterministic and preserves untouched immutable values', () => {
+    const ref = { value: 1 };
+    const hash = (value: { value: number }): string =>
+      ethers.keccak256(Uint8Array.of(value.value));
+    const radix256 = {
+      radix: 256 as const,
+      sealKey: options.sealKey,
+      keyBytes: options.keyBytes,
+      valueHash: hash,
+      sealValue: (value: { value: number }): { value: number } => Object.freeze({ ...value }),
+    };
+    const base = fromEntries([['a', ref], ['b', { value: 2 }]], radix256);
+    const next = base.updated('b', { value: 3 });
+    const cold = fromMap([['a', ref], ['b', { value: 3 }]], radix256);
+
+    expect(next.rootHash()).toBe(cold.rootHash());
+    expect(next.get('a')).not.toBe(ref);
+    expect(next.get('a')).toEqual(ref);
+    expect(base.get('b')?.value).toBe(2);
+  });
+
+  test('caller mutation cannot change retained key bytes, value, or root', () => {
+    const suppliedKeyBytes = Uint8Array.of(1, 2, 3);
+    const suppliedValue = { value: 7 };
+    const immutable = {
+      radix: 16 as const,
+      sealKey: (key: string): string => key,
+      keyBytes: (_key: string): Uint8Array => suppliedKeyBytes,
+      valueHash: (value: { value: number }): string =>
+        ethers.keccak256(Uint8Array.of(value.value)),
+      sealValue: (value: { value: number }): { value: number } => Object.freeze({ ...value }),
+    };
+    const map = fromEntries([['external', suppliedValue]], immutable);
+    const root = map.rootHash();
+    suppliedKeyBytes[0] = 255;
+    suppliedValue.value = 9;
+
+    expect(map.rootHash()).toBe(root);
+    expect([...map.values()]).toEqual([{ value: 7 }]);
+  });
+
+  test('caller mutation cannot change a retained object key or DB leaf record', () => {
+    type ObjectKey = Readonly<{ group: number; item: number }>;
+    const objectOptions = {
+      radix: 16 as const,
+      sealKey: (key: ObjectKey): ObjectKey => Object.freeze({ ...key }),
+      keyBytes: (key: ObjectKey): Uint8Array => Uint8Array.of(key.group, key.item),
+      valueHash: options.valueHash,
+      sealValue: options.sealValue,
+    };
+    const supplied = { group: 1, item: 2 };
+    const map = PersistentRadixValueMap.empty<ObjectKey, string>(objectOptions)
+      .updated(supplied, 'stable');
+    const root = map.rootHash();
+    supplied.item = 9;
+
+    expect(map.rootHash()).toBe(root);
+    expect([...map.keys()]).toEqual([{ group: 1, item: 2 }]);
+    const leaf = [...map.nodeRecords()].find(record => record.kind === 'leaf');
+    expect(leaf?.kind === 'leaf' ? leaf.key : undefined).toEqual({ group: 1, item: 2 });
+  });
+
+  test('uses raw prefix-free text key bytes without hashing the key', () => {
+    const raw = encodeRawRadixTextKey('order-42');
+    expect(new TextDecoder().decode(raw.subarray(2))).toBe('order-42');
+    expect(raw.subarray(2)).toEqual(new TextEncoder().encode('order-42'));
+
+    expect(raw).not.toEqual(ethers.getBytes(ethers.keccak256(new TextEncoder().encode('order-42'))));
+  });
+
+  test('fromMap matches incremental roots without sorting input keys', () => {
+    const incremental = fromEntries([['c', '3'], ['a', '1'], ['b', '2']], options);
+    const reversed = fromMap([['b', '2'], ['c', '3'], ['a', '1']], options);
+    expect(reversed.rootHash()).toBe(incremental.rootHash());
+    expect([...reversed].sort(([left], [right]) => left < right ? -1 : 1))
+      .toEqual([...incremental].sort(([left], [right]) => left < right ? -1 : 1));
+  });
+
+  test('rejects ambiguous raw prefix keys and accepts length-prefixed text keys', () => {
+    expect(() => fromEntries([['a', '1'], ['ab', '2']], options))
+      .toThrow('PERSISTENT_RADIX_KEY_PREFIX_COLLISION');
+    const prefixFree = {
+      ...options,
+      keyBytes: encodeRawRadixTextKey,
+    };
+    const map = fromEntries([['a', '1'], ['ab', '2']], prefixFree);
+    expect(map.get('a')).toBe('1');
+    expect(map.get('ab')).toBe('2');
+  });
+
+  test('projects the same Patricia graph to DB nodes and diffs only dirty paths', () => {
+    const base = fromMap(
+      Array.from({ length: 1_024 }, (_, index) => [`key-${index.toString().padStart(4, '0')}`, String(index)] as const),
+      { ...options, keyBytes: encodeRawRadixTextKey },
+    );
+    const next = base.updated('key-0512', 'changed');
+    const fullNodeCount = [...base.nodeRecords()].length;
+    const changes = next.nodeChangesSince(base);
+
+    expect(fullNodeCount).toBeGreaterThan(1_024);
+    expect(changes.puts.some(record => record.kind === 'leaf' && record.key === 'key-0512')).toBe(true);
+    expect(changes.puts.length).toBeLessThan(32);
+    expect(changes.dels.length).toBeLessThan(32);
+    const putKeys = new Set(changes.puts.map(record => `${record.kind}:${record.path.join('.')}`));
+    expect(changes.dels.every(record => !putKeys.has(`${record.kind}:${record.path.join('.')}`)))
+      .toBe(true);
+    for (const branch of changes.puts.filter(record => record.kind === 'branch')) {
+      expect(branch.children.map(child => child.slot))
+        .toEqual([...branch.children.map(child => child.slot)].sort((left, right) => left - right));
+    }
+    expect(next.rootHash()).not.toBe(base.rootHash());
+    expect(base.get('key-0512')).toBe('512');
+    const putOrder = changes.puts.map(record => `${record.kind}:${record.path.join('.')}`);
+    const delOrder = changes.dels.map(record => `${record.kind}:${record.path.join('.')}`);
+    expect(putOrder).toEqual([...putOrder].sort((left, right) => left < right ? -1 : 1));
+    expect(delOrder).toEqual([...delOrder].sort((left, right) => left < right ? -1 : 1));
+  });
+
+  test('has tests leaf membership when the stored value is undefined', () => {
+    const withUndefined = {
+      ...options,
+      keyBytes: encodeRawRadixTextKey,
+      valueHash: (value: string | undefined): string =>
+        ethers.keccak256(new TextEncoder().encode(value === undefined ? '' : value)),
+      sealValue: (value: string | undefined): string | undefined => value,
+    };
+    const map = PersistentRadixValueMap.empty<string, string | undefined>(withUndefined)
+      .updated('ghost', undefined);
+    expect(map.get('ghost')).toBeUndefined();
+    expect(map.has('ghost')).toBe(true);
+    expect(map.has('missing')).toBe(false);
+    expect(map.size).toBe(1);
+  });
+
+  test('replacement and delete diffs stay physically disjoint and path-ordered', () => {
+    const treeOptions = { ...options, keyBytes: encodeRawRadixTextKey };
+    const base = fromMap([['a', '1'], ['b', '2'], ['c', '3']], treeOptions);
+    const next = base.updated('b', '9').removed('c').updated('d', '4');
+    const changes = next.nodeChangesSince(base);
+    const putKeys = changes.puts.map(record => `${record.kind}:${record.path.join('.')}`);
+    const delKeys = changes.dels.map(record => `${record.kind}:${record.path.join('.')}`);
+    expect(new Set(putKeys).size).toBe(putKeys.length);
+    expect(delKeys.every(key => !putKeys.includes(key))).toBe(true);
+    expect(putKeys).toEqual([...putKeys].sort((left, right) => left < right ? -1 : 1));
+    expect(delKeys).toEqual([...delKeys].sort((left, right) => left < right ? -1 : 1));
+    const again = base.updated('b', '9').removed('c').updated('d', '4');
+    expect(again.nodeChangesSince(base)).toEqual(changes);
+  });
+
+  test('hydrates the exact persisted graph and rejects corrupt or orphan nodes', () => {
+    const treeOptions = { ...options, keyBytes: encodeRawRadixTextKey };
+    const source = fromMap([['a', '1'], ['b', '2'], ['c', '3']], treeOptions);
+    const records = [...source.nodeRecords()];
+    const hydrated = PersistentRadixValueMap.fromNodeRecords(records, treeOptions);
+    expect(hydrated.rootHash()).toBe(source.rootHash());
+    expect([...hydrated]).toEqual([...source]);
+
+    const root = records.find(record => record.kind === 'branch' && record.path.length === 0);
+    if (!root || root.kind !== 'branch') throw new Error('TEST_ROOT_MISSING');
+    const firstChild = root.children[0];
+    if (!firstChild) throw new Error('TEST_ROOT_CHILD_MISSING');
+    const corrupt = records.map(record => record === root
+      ? {
+          ...record,
+          children: record.children.map(child => child === firstChild
+            ? { ...child, edgeHash: `0x${'ff'.repeat(32)}` }
+            : child),
+        }
+      : record);
+    expect(() => PersistentRadixValueMap.fromNodeRecords(corrupt, treeOptions))
+      .toThrow('PERSISTENT_RADIX_EDGE_HASH_MISMATCH');
+
+    const orphan = [...records, { ...records.at(-1)!, path: [15, 15, 15] }];
+    expect(() => PersistentRadixValueMap.fromNodeRecords(orphan, treeOptions))
+      .toThrow('PERSISTENT_RADIX_NODE_ORPHAN');
+  });
+});
