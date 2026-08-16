@@ -29,7 +29,6 @@ import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './co
 import { detachRuntimeAdapterPayload } from './codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
 import { copyAccountStateDomain } from '../../protocol/state/account-input-clone';
-import { PersistentAccountStateMap } from '../../account/state/persistent-state-map';
 import { buildRuntimeRecoveryBundle } from '../../storage/recovery/bundle';
 import {
   deriveRuntimeRecoveryLookupKey,
@@ -114,6 +113,45 @@ type RuntimeAdapterAccountPage = {
   summary?: RuntimeAdapterAccountPageSummary;
 };
 
+type NativeMapView<T> = T extends ReadonlyMap<infer K, infer V> ? Map<K, V> : never;
+type AccountStateDoc = StorageAccountDoc['state'];
+type RuntimeAdapterAccountStateDoc = Omit<
+  AccountStateDoc,
+  | 'deltas'
+  | 'locks'
+  | 'swapOffers'
+  | 'pulls'
+  | 'subcontracts'
+  | 'lendingIntents'
+  | 'requestedRebalance'
+  | 'requestedRebalanceFeeState'
+  | 'rebalanceFeePolicies'
+> & {
+  deltas: NativeMapView<AccountStateDoc['deltas']>;
+  locks: NativeMapView<AccountStateDoc['locks']>;
+  swapOffers: NativeMapView<AccountStateDoc['swapOffers']>;
+  pulls?: NativeMapView<NonNullable<AccountStateDoc['pulls']>>;
+  subcontracts?: NativeMapView<NonNullable<AccountStateDoc['subcontracts']>>;
+  lendingIntents?: NativeMapView<NonNullable<AccountStateDoc['lendingIntents']>>;
+  requestedRebalance: NativeMapView<AccountStateDoc['requestedRebalance']>;
+  requestedRebalanceFeeState: NativeMapView<AccountStateDoc['requestedRebalanceFeeState']>;
+  rebalanceFeePolicies?: NativeMapView<NonNullable<AccountStateDoc['rebalanceFeePolicies']>>;
+};
+type AccountRebalanceShadow = StorageAccountDoc['shadow']['rebalance'];
+type RuntimeAdapterAccountDoc = Omit<StorageAccountDoc, 'state' | 'pendingWithdrawals' | 'shadow'> & {
+  state: RuntimeAdapterAccountStateDoc;
+  pendingWithdrawals: NativeMapView<StorageAccountDoc['pendingWithdrawals']>;
+  shadow: {
+    rebalance: Omit<AccountRebalanceShadow, 'policy' | 'submittedAtByToken'> & {
+      policy: NativeMapView<AccountRebalanceShadow['policy']>;
+      submittedAtByToken: NativeMapView<AccountRebalanceShadow['submittedAtByToken']>;
+    };
+  };
+};
+type RuntimeAdapterAccountViewPage = Omit<RuntimeAdapterAccountPage, 'items'> & {
+  items: RuntimeAdapterAccountDoc[];
+};
+
 type RuntimeAdapterBookPage = {
   items: Array<{ pairId: string; book: BookState }>;
   nextCursor: string | null;
@@ -156,7 +194,7 @@ type RuntimeAdapterAccountPageSummary = {
 type RuntimeAdapterViewEntityFrame = {
   summary: RuntimeAdapterEntitySummary;
   core: RuntimeAdapterEntityCoreDoc;
-  accounts: RuntimeAdapterAccountPage;
+  accounts: RuntimeAdapterAccountViewPage;
   books: RuntimeAdapterPortableBookPage;
 };
 
@@ -788,7 +826,6 @@ const singleAccountPage = (
 const projectLiveAccountsPage = (
   state: EntityState,
   query?: RuntimeAdapterReadQuery,
-  includeAccountActivity = false,
 ): RuntimeAdapterAccountPage => {
   const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
   const accountId = normalizeEntityId(String(query?.accountId || ''));
@@ -796,11 +833,7 @@ const projectLiveAccountsPage = (
     const account = state.accounts.get(accountId);
     return singleAccountPage(
       accountId,
-      account
-        ? includeAccountActivity
-          ? projectAccountDoc(account)
-          : compactAccountDocForView(account)
-        : null,
+      account ? projectAccountDoc(account) : null,
       limit,
     );
   }
@@ -814,9 +847,7 @@ const projectLiveAccountsPage = (
     items: visibleKeys.map((id) => {
       const account = state.accounts.get(id);
       if (!account) throw new RuntimeAdapterError('E_INTERNAL', `live account index is stale: ${id}`);
-      return includeAccountActivity
-        ? projectAccountDoc(account)
-        : compactAccountDocForView(account);
+      return projectAccountDoc(account);
     }),
     ...buildPageMeta(keys, start, limit, visibleKeys),
   };
@@ -851,7 +882,6 @@ const projectLiveEntityViewPage = (
   ctx: RuntimeAdapterResolveContext,
   entityId: string,
   query?: RuntimeAdapterReadQuery,
-  includeAccountActivity = false,
 ): {
   core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
@@ -861,7 +891,7 @@ const projectLiveEntityViewPage = (
   if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
   return {
     core: projectEntityReplicaCoreView(replica.state, replica),
-    accounts: projectLiveAccountsPage(replica.state, query, includeAccountActivity),
+    accounts: projectLiveAccountsPage(replica.state, query),
     books: projectLiveBooksPage(replica.state, query),
   };
 };
@@ -925,36 +955,35 @@ const compactAccountProofBodyForView = (proofBody: StorageAccountDoc['proofBody'
 
 const compactAccountDocForView = (
   doc: StorageAccountDoc,
-): StorageAccountDoc => {
+): RuntimeAdapterAccountDoc => {
   // Settlement workspaces may contain large transient proof material. They are
   // consensus data, but aggregate inspection endpoints must expose the compact
   // settlement status through dedicated views instead of cloning the workspace.
-  const { settlementWorkspace: _settlementWorkspace, ...boundedState } = doc.state;
-  const compact: StorageAccountDoc = {
+  const {
+    settlementWorkspace: _settlementWorkspace,
+    deltas: _deltas,
+    locks: _locks,
+    swapOffers: _swapOffers,
+    pulls: _pulls,
+    subcontracts: _subcontracts,
+    lendingIntents: _lendingIntents,
+    requestedRebalance: _requestedRebalance,
+    requestedRebalanceFeeState: _requestedRebalanceFeeState,
+    rebalanceFeePolicies: _rebalanceFeePolicies,
+    ...boundedState
+  } = doc.state;
+  const compact: RuntimeAdapterAccountDoc = {
     state: {
       ...boundedState,
       domain: copyAccountStateDomain(doc.state.domain),
       watchSeed: '',
-      deltas: PersistentAccountStateMap.fromEntries(
-        'deltas',
-        compactMapHead(doc.state.deltas, 100) ?? [],
-      ),
-      locks: PersistentAccountStateMap.fromEntries(
-        'locks',
-        compactMapTail(doc.state.locks, 20) ?? [],
-      ),
-      swapOffers: PersistentAccountStateMap.fromEntries(
-        'swapOffers',
-        compactMapTail(doc.state.swapOffers, 100) ?? [],
-      ),
-      requestedRebalance: PersistentAccountStateMap.fromEntries(
-        'requestedRebalance',
-        compactMapHead(doc.state.requestedRebalance, 100) ?? [],
-      ),
-      requestedRebalanceFeeState: PersistentAccountStateMap.fromEntries(
-        'requestedRebalanceFeeState',
-        compactMapHead(doc.state.requestedRebalanceFeeState, 100) ?? [],
-      ),
+      // Runtime-adapter payloads are network DTOs. The Patricia collection is
+      // an internal live-state owner and must never leak into the binary codec.
+      deltas: compactMapHead(doc.state.deltas, 100) ?? new Map(),
+      locks: compactMapTail(doc.state.locks, 20) ?? new Map(),
+      swapOffers: compactMapTail(doc.state.swapOffers, 100) ?? new Map(),
+      requestedRebalance: compactMapHead(doc.state.requestedRebalance, 100) ?? new Map(),
+      requestedRebalanceFeeState: compactMapHead(doc.state.requestedRebalanceFeeState, 100) ?? new Map(),
     },
     status: doc.status,
     mempool: [],
@@ -964,20 +993,11 @@ const compactAccountDocForView = (
     rollbackCount: doc.rollbackCount,
     proofHeader: doc.proofHeader,
     proofBody: compactAccountProofBodyForView(doc.proofBody),
-    pendingWithdrawals: PersistentAccountStateMap.fromEntries(
-      'pendingWithdrawals',
-      compactMapTail(doc.pendingWithdrawals, 20) ?? [],
-    ),
+    pendingWithdrawals: compactMapTail(doc.pendingWithdrawals, 20) ?? new Map(),
     shadow: {
       rebalance: {
-        policy: PersistentAccountStateMap.fromEntries(
-          'rebalanceShadowPolicy',
-          compactMapHead(doc.shadow.rebalance.policy, 100) ?? [],
-        ),
-        submittedAtByToken: PersistentAccountStateMap.fromEntries(
-          'rebalanceShadowSubmitted',
-          compactMapHead(doc.shadow.rebalance.submittedAtByToken, 100) ?? [],
-        ),
+        policy: compactMapHead(doc.shadow.rebalance.policy, 100) ?? new Map(),
+        submittedAtByToken: compactMapHead(doc.shadow.rebalance.submittedAtByToken, 100) ?? new Map(),
         ...(doc.shadow.rebalance.activeQuote ? { activeQuote: doc.shadow.rebalance.activeQuote } : {}),
         ...(doc.shadow.rebalance.pendingRequest ? { pendingRequest: doc.shadow.rebalance.pendingRequest } : {}),
       },
@@ -985,7 +1005,13 @@ const compactAccountDocForView = (
   };
 
   const pulls = compactMapTail(doc.state.pulls, 20);
-  if (pulls) compact.state.pulls = PersistentAccountStateMap.fromEntries('pulls', pulls);
+  if (pulls) compact.state.pulls = pulls;
+  const subcontracts = compactMapTail(doc.state.subcontracts, 20);
+  if (subcontracts) compact.state.subcontracts = subcontracts;
+  const lendingIntents = compactMapTail(doc.state.lendingIntents, 20);
+  if (lendingIntents) compact.state.lendingIntents = lendingIntents;
+  const rebalanceFeePolicies = compactMapHead(doc.state.rebalanceFeePolicies, 100);
+  if (rebalanceFeePolicies) compact.state.rebalanceFeePolicies = rebalanceFeePolicies;
   // Account history is a point-read concern. Aggregate Entity views retain
   // the required canonical fields as empty maps instead of multiplying their
   // payload by the page width.
@@ -1008,7 +1034,6 @@ const compactAccountDocForView = (
   if (doc.counterpartySettlementHanko) compact.counterpartySettlementHanko = doc.counterpartySettlementHanko;
   const disputeProofNoncesByHash = compactRecordTail(doc.disputeProofNoncesByHash, 20);
   if (disputeProofNoncesByHash) compact.disputeProofNoncesByHash = disputeProofNoncesByHash;
-  if (doc.state.rebalanceFeePolicies) compact.state.rebalanceFeePolicies = doc.state.rebalanceFeePolicies;
   return compact;
 };
 
@@ -1201,7 +1226,10 @@ const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeA
   return compact;
 };
 
-const accountCounterpartyIdForView = (entityId: string, doc: StorageAccountDoc): string => {
+const accountCounterpartyIdForView = (
+  entityId: string,
+  doc: StorageAccountDoc | RuntimeAdapterAccountDoc,
+): string => {
   const normalized = normalizeEntityId(entityId);
   const left = normalizeEntityId(doc.state.leftEntity);
   const right = normalizeEntityId(doc.state.rightEntity);
@@ -1212,7 +1240,7 @@ const absoluteBigInt = (value: bigint): bigint => value < 0n ? -value : value;
 
 const accountPageSummaryForView = (
   entityId: string,
-  page: RuntimeAdapterAccountPage,
+  page: RuntimeAdapterAccountPage | RuntimeAdapterAccountViewPage,
 ): RuntimeAdapterAccountPageSummary => {
   const limit = Math.max(1, Number(page.limit ?? (page.items.length || 1)));
   const totalItems = Number.isFinite(Number(page.totalItems)) ? Math.max(0, Math.floor(Number(page.totalItems))) : null;
@@ -1284,7 +1312,7 @@ const compactViewPageForRemote = (entityId: string, view: {
   books: RuntimeAdapterBookPage;
 }): {
   core: RuntimeAdapterEntityCoreDoc;
-  accounts: RuntimeAdapterAccountPage;
+  accounts: RuntimeAdapterAccountViewPage;
   books: RuntimeAdapterPortableBookPage;
 } => ({
   core: compactEntityCoreForRemote(view.core),
@@ -1301,6 +1329,24 @@ const compactViewPageForRemote = (entityId: string, view: {
     })),
   },
 });
+
+const singleAccountViewPage = (
+  accountId: string,
+  account: RuntimeAdapterAccountDoc | null,
+  limit: number,
+): RuntimeAdapterAccountViewPage => account
+  ? {
+      items: [account],
+      nextCursor: null,
+      prevCursor: null,
+      firstCursor: accountId,
+      lastCursor: accountId,
+      pageIndex: 0,
+      pageCount: 1,
+      totalItems: 1,
+      limit,
+    }
+  : { items: [], ...emptyPageMeta(limit) };
 
 const loadViewPageForHeight = async (
   ctx: RuntimeAdapterResolveContext,
@@ -1566,7 +1612,7 @@ const captureLiveGraph = (
       ...query,
       accountsLimit,
       booksLimit: 1,
-    }, true);
+    });
     accountObservationCount += live.accounts.items.length;
     if (accountObservationCount > accountsLimit) {
       throw new RuntimeAdapterError(
@@ -1917,14 +1963,14 @@ const resolveScopedRuntimeAdapterRead = async <T>(
           const replica = findReplica(ctx.env, entityId);
           if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
           const account = replica.state.accounts.get(accountId);
-          const page = singleAccountPage(accountId, account ? compactAccountDocForView(account) : null, limit);
+          const page = singleAccountViewPage(accountId, account ? compactAccountDocForView(account) : null, limit);
           return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
         }
         if (!ctx.loadEntityAccountDoc) {
           throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
         }
         const account = await ctx.loadEntityAccountDoc(entityId, accountId, targetHeight);
-        const page = singleAccountPage(accountId, account ? compactAccountDocForView(account) : null, limit);
+        const page = singleAccountViewPage(accountId, account ? compactAccountDocForView(account) : null, limit);
         return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
       }
       const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);

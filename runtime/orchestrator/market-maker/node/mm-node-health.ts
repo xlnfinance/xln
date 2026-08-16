@@ -1115,7 +1115,11 @@ const canonicalJurisdictionRole = (
 };
 
 const canonicalMarketMakerRole = (context: MarketMakerEntityContext): string =>
-  `mm:${canonicalJurisdictionRole(context)}`;
+  // A jurisdiction owns one MM Entity per same-chain pair shard. Omitting the
+  // shard index makes distinct Entities collide in the restart fingerprint
+  // after all same-chain books are ready, exactly when readiness must become
+  // stable. Cross-j routes still use shard zero by construction.
+  `mm:${canonicalJurisdictionRole(context)}:pair:${context.samePairIndex}`;
 
 const canonicalHubRole = (profile: HubProfile): string =>
   `hub:${canonicalJurisdictionRole(profile)}:${hubRoleName(profile)}`;

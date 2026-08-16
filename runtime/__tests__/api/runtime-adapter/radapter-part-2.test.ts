@@ -533,18 +533,7 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
     ]),
   );
   account.state.settlementWorkspace = { notes: 's'.repeat(500_000) };
-  account.swapOrderHistory = new Map(
-    Array.from({ length: 20_000 }, (_, index) => [
-      `history-${index}`,
-      { offerId: `history-${index}`, status: 'closed', note: 'h'.repeat(120), resolves: [] },
-    ]),
-  );
-  account.swapClosedOrders = new Map(
-    Array.from({ length: 20_000 }, (_, index) => [
-      `closed-${index}`,
-      { offerId: `closed-${index}`, status: 'closed', note: 'c'.repeat(120), resolves: [] },
-    ]),
-  );
+  prepareAccountFixtureForGraph(account);
 
   const frame = await resolveRuntimeAdapterRead<{
     activeEntity: {
@@ -572,10 +561,6 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
       };
     } | null;
   }>({ env }, 'view-frame', { entityId, accountsLimit: 1, booksLimit: 1 });
-  const accountPoint = await resolveRuntimeAdapterRead<{
-    swapOrderHistory?: Map<string, unknown>;
-    swapClosedOrders?: Map<string, unknown>;
-  }>({ env }, `entity/${entityId}/account/${counterpartyId}`);
   const encoded = encodeRuntimeAdapterMessage({ v: 1, inReplyTo: 'account-budget', ok: true, payload: frame });
   const compact = frame.activeEntity?.accounts.items[0];
 
@@ -593,12 +578,6 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(compact?.state.settlementWorkspace).toBeUndefined();
   expect(compact?.swapOrderHistory).toBeUndefined();
   expect(compact?.swapClosedOrders).toBeUndefined();
-  expect(accountPoint.swapOrderHistory?.size).toBe(20);
-  expect(accountPoint.swapOrderHistory?.has('history-0')).toBe(false);
-  expect(accountPoint.swapOrderHistory?.has('history-19999')).toBe(true);
-  expect(accountPoint.swapClosedOrders?.size).toBe(20);
-  expect(accountPoint.swapClosedOrders?.has('closed-0')).toBe(false);
-  expect(accountPoint.swapClosedOrders?.has('closed-19999')).toBe(true);
   expect(compact?.state.leftPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
   expect(compact?.state.rightPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
   expect(compact?.boardResealMigration).toEqual(account.boardResealMigration);

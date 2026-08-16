@@ -67,9 +67,7 @@ const collectCommittedOfferIdsForAccount = (
   account: Pick<AccountReplica, 'state'> | null | undefined,
 ): Set<string> => {
   const ids = new Set<string>();
-  if (account?.state.swapOffers instanceof Map) {
-    for (const offerId of account.state.swapOffers.keys()) ids.add(String(offerId));
-  }
+  for (const offerId of account?.state.swapOffers.keys() ?? []) ids.add(String(offerId));
   return ids;
 };
 

@@ -40,6 +40,10 @@ export const listLocalControlEntities = (
     const signerId = resolveEntityProposerId(env, entityId, 'daemon-control.list');
     seen.add(entityId);
     const profile = replica?.state?.profile as (typeof replica.state.profile & { publicAccounts?: unknown[] }) | undefined;
+    // Entity Accounts are a typed Patricia-backed ReadonlyMap, not a native
+    // Map. `instanceof Map` silently reported zero Accounts after the storage
+    // cutover even though the committed Entity root contained them.
+    const accounts = replica.state.accounts;
     entities.push({
       entityId,
       signerId,
@@ -47,11 +51,11 @@ export const listLocalControlEntities = (
       isRoutingEnabled: !!replica?.state?.hubRebalanceConfig,
       isHub: replica?.state?.profile?.isHub === true,
       runtimeId: typeof env.runtimeId === 'string' && env.runtimeId.trim().length > 0 ? env.runtimeId : null,
-      accountCount: replica?.state?.accounts instanceof Map ? replica.state.accounts.size : 0,
+      accountCount: accounts.size,
       publicAccountCount: Array.isArray(profile?.publicAccounts) ? profile.publicAccounts.length : 0,
-      accountEntityIds: replica?.state?.accounts instanceof Map
-        ? Array.from(replica.state.accounts.keys()).map(value => String(value).toLowerCase()).sort(compareStableText)
-        : [],
+      accountEntityIds: Array.from(accounts.keys())
+        .map(value => String(value).toLowerCase())
+        .sort(compareStableText),
     });
   }
   return entities.sort((left, right) => compareStableText(left.name, right.name));
