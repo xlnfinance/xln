@@ -8,6 +8,7 @@ import {
 } from '../../../api/runtime-adapter/control/settlement-evidence';
 import { handleRuntimeAdapterMessage } from '../../../api/runtime-adapter/server';
 import { validateRuntimeAdapterWireMessage } from '../../../api/runtime-adapter/wire-schema';
+import { applyCommand, canonicalPair, createBook } from '../../../orderbook';
 import { createEmptyEnv } from '../../../runtime';
 import {
   addReplica,
@@ -28,6 +29,19 @@ const makeSettlementEnv = () => {
   const signerId = addr('aa');
   const jurisdiction = makeJurisdiction('J1', 31_337, 'dd', 'ee');
   const state = makeState(leftId, signerId, jurisdiction);
+  const pairId = canonicalPair(1, 2).pairId;
+  let book = createBook({ bucketWidthTicks: 1n, maxOrders: 10, stpPolicy: 0 });
+  book = applyCommand(book, {
+    kind: 0, ownerId: rightId, orderId: 'resting-ask', side: 1, tif: 0,
+    postOnly: true, priceTicks: 2n, qtyLots: 1n,
+  }).state;
+  state.orderbookExt = {
+    books: new Map([[pairId, book]]), orderPairs: new Map(), pairDimensions: new Map(), referrals: new Map(),
+    hubProfile: {
+      entityId: leftId, name: 'Settlement hub', spreadDistribution: 'pro_rata', referenceTokenId: 1,
+      usdQuoteAuthorityEntityId: leftId, minTradeSize: 1n, supportedPairs: [pairId],
+    },
+  };
   const account = makeAccount(leftId, rightId, jurisdiction);
   const offer = {
     offerId, giveTokenId: 1, giveTokenDecimals: 6, giveAmount: 10n,
@@ -57,6 +71,7 @@ const makeSettlementEnv = () => {
 
 const request = {
   type: 'settlement-evidence' as const,
+  book: { entityId: leftId, pairId: canonicalPair(1, 2).pairId },
   accounts: [{ entityId: leftId, counterpartyEntityId: rightId, offerIds: [offerId] }],
 };
 
@@ -70,6 +85,15 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
   );
   expect(response.queues.pendingOutputs.count).toBe(0);
   expect(response.queues.pendingOutputs.digest).toMatch(/^0x[0-9a-f]{64}$/);
+  expect(response.book).toEqual({
+    entityId: leftId,
+    pairId: canonicalPair(1, 2).pairId,
+    tradeCount: 0,
+    bestBidPriceTicks: null,
+    bestAskPriceTicks: 2n,
+    liveOrderCount: 1,
+    digest: expect.stringMatching(/^0x[0-9a-f]{64}$/),
+  });
   expect(response.accounts[0]?.offers).toEqual([{
     offerId, offerCommitted: true, resolveCommitted: true, live: false, closed: true,
   }]);
@@ -79,6 +103,10 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
     ...response,
     queues: { ...response.queues, pendingOutputs: { count: 0, digest: 'bad' } },
   })).toThrow('RADAPTER_SETTLEMENT_RESPONSE_QUEUE_INVALID:pendingOutputs_DIGEST');
+  expect(() => decodeSettlementEvidenceResponse({
+    ...response,
+    book: { ...response.book, liveOrderCount: 'all' },
+  })).toThrow('RADAPTER_SETTLEMENT_BOOK_RESPONSE_LIVE_COUNT_INVALID');
 });
 
 test('settlement evidence control is admin-authenticated and exact on the wire', async () => {

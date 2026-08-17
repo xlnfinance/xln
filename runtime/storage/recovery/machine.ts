@@ -8,7 +8,7 @@ import { deriveEntityEncryptionPrivateKey } from '../../runtime/registration/ent
 import type { RuntimeReplica } from '../../runtime/types';
 import { canonicalizeStorageAuditValue } from '../canonical-hash';
 import {
-  buildReplayVerifiableRuntimeMachineSnapshot,
+  buildStorageRuntimeMachineSnapshot,
   projectReplayVerifiableRuntimeMachine,
 } from '../wal/snapshot';
 
@@ -125,10 +125,12 @@ export const assertRecoveryRuntimeMachineMatches = (
   height: number,
   options?: { includeIngressWorkingState?: boolean },
 ): void => {
-  const actualMachine = buildReplayVerifiableRuntimeMachineSnapshot(env, {
-    includeIngressWorkingState:
-      options?.includeIngressWorkingState === true,
-  });
+  const actualMachine = projectReplayVerifiableRuntimeMachine(
+    buildStorageRuntimeMachineSnapshot(env, {
+      includeIngressWorkingState:
+        options?.includeIngressWorkingState === true,
+    }),
+  );
   const expectedMachineForReplay =
     projectReplayVerifiableRuntimeMachine(expectedMachine);
   const actual = canonicalMachine(actualMachine);

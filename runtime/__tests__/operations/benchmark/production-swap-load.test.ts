@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 import {
   PRODUCTION_SWAP_LOAD_LATENCY_BUCKETS_MS,
@@ -13,7 +14,7 @@ import {
 import { decodeProductionSwapLoadTopology } from '../../../scripts/operations/benchmark/production-swap-load/topology';
 import {
   decodeAccountPage,
-  decodeLoadBurstReport,
+  decodeLoadSustainedReport,
   decodeHubMinTradeSize,
   selectLocalHubIdentity,
 } from '../../../scripts/operations/benchmark/production-swap-load/boundary/worker-boundary';
@@ -26,6 +27,7 @@ import {
   assertProductionSwapFullySettled,
   decodeProductionSwapSettlementEvidence,
 } from '../../../scripts/operations/benchmark/production-swap-load/settlement';
+import { sameBilateralAccountHead } from '../../../scripts/operations/benchmark/production-swap-load/settlement-reader';
 import {
   applyCommand,
   computeSwapPriceTicksForDimensions,
@@ -46,13 +48,16 @@ import { parseWorkerArgs } from '../../../scripts/operations/benchmark/productio
 import {
   connectedRuntimeHttpBase,
   deriveLoadLaneIdentities,
-  distributeLoadOrders,
+  partitionLoadControlBatches,
+  partitionLoadProvisioningBatches,
   runtimeHttpBaseFromWsUrl,
 } from '../../../scripts/operations/benchmark/production-swap-load/same/worker-lanes';
+import { parseSameLoadSchedule } from '../../../scripts/operations/benchmark/production-swap-load/same/load-schedule';
 import {
   buildIndependentMakerTakerPlan,
   buildParallelLaneOfferPlan,
 } from '../../../scripts/operations/benchmark/production-swap-load/same/worker-same-plan';
+import { buildLaneRoundOfferInputs } from '../../../scripts/operations/benchmark/production-swap-load/same/worker-same-lanes';
 import {
   deriveSameOrderbookPriceBandBounds,
   evaluateSameOrderbookPriceBand,
@@ -97,6 +102,12 @@ const observation = (overrides: Record<string, unknown> = {}) => decodeProductio
 });
 
 describe('production swap load evidence', () => {
+  test('configuration has no protocol Account-count ceiling', () => {
+    expect(decodeProductionSwapLoadConfig({
+      ...defaultProductionSwapLoadConfig(),
+      accountsPerHub: 100_000_000,
+    }).accountsPerHub).toBe(100_000_000);
+  });
   test('matcher settlements enter one Account lane atomically', async () => {
     const account = makeCanonicalAccount(`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`);
     const txs: AccountTx[] = Array.from({ length: 5 }, (_, index) => ({
@@ -156,17 +167,20 @@ describe('production swap load evidence', () => {
     })).toThrow('production-swap-load account.pendingFrame.fields');
   });
 
-  test('same-j load enforces at most five orders per independent Account lane', () => {
+  test('same-j sustained load enforces one order per Account per round', () => {
     const args = parseWorkerArgs([
       '--work-dir', '/tmp/load', '--port-base', '20000', '--mode', 'same',
-      '--swaps', '160', '--lanes', '32',
+      '--swaps', '100', '--lanes', '100', '--rounds', '10', '--cadence-ms', '1000',
     ]);
-    expect(args.lanes).toBe(32);
-    expect(args.swaps).toBe(160);
+    expect(args.lanes).toBe(100);
+    expect(args.swaps).toBe(100);
+    expect(args.rounds).toBe(10);
+    expect(args.cadenceMs).toBe(1_000);
+    expect(args.laneOffset).toBe(0);
     expect(() => parseWorkerArgs([
       '--work-dir', '/tmp/load', '--port-base', '20000', '--mode', 'same',
-      '--swaps', '161', '--lanes', '32',
-    ])).toThrow('PRODUCTION_SWAP_LOAD_SWAPS_EXCEED_FIVE_PER_ACCOUNT_FRAME');
+      '--swaps', '100', '--lanes', '99',
+    ])).toThrow('PRODUCTION_SWAP_LOAD_SUSTAINED_REQUIRES_ONE_SWAP_PER_LANE');
     expect(() => parseWorkerArgs([
       '--work-dir', '/tmp/load', '--port-base', '20000', '--mode', 'same',
       '--swaps', '31', '--lanes', '32',
@@ -175,18 +189,29 @@ describe('production swap load evidence', () => {
       '--work-dir', '/tmp/load', '--port-base', '20000', '--mode', 'same',
       '--swaps', '481', '--lanes', '481',
     ]).lanes).toBe(481);
-    expect(distributeLoadOrders(13, 3)).toEqual([5, 4, 4]);
-    expect(distributeLoadOrders(32, 32)).toEqual(Array.from({ length: 32 }, () => 1));
-    expect(() => distributeLoadOrders(16, 3))
-      .toThrow('PRODUCTION_SWAP_LOAD_LANE_DISTRIBUTION_EXCEEDS_FRAME_CAP');
+  });
+
+  test('one-stack same-j ladder allocates disjoint Account lanes and stops on invalid stages', () => {
+    expect(parseSameLoadSchedule('32:32,160:160,640:640,1000:1000')).toEqual([
+      { swaps: 32, lanes: 32, laneOffset: 0 },
+      { swaps: 160, lanes: 160, laneOffset: 32 },
+      { swaps: 640, lanes: 640, laneOffset: 192 },
+      { swaps: 1000, lanes: 1000, laneOffset: 832 },
+    ]);
+    expect(() => parseSameLoadSchedule('32:32,31:31'))
+      .toThrow('PRODUCTION_SWAP_LOAD_SCHEDULE_NOT_ASCENDING');
+    expect(() => parseSameLoadSchedule('161:32'))
+      .toThrow('PRODUCTION_SWAP_LOAD_SCHEDULE_ACCOUNT_FRAME_CAP_INVALID');
   });
 
   test('load lanes derive unique identities and an exact authenticated control origin', () => {
     const identities = deriveLoadLaneIdentities('test-only-load-root', 3);
     const makers = deriveLoadLaneIdentities('test-only-load-root', 3, 'maker');
+    const next = deriveLoadLaneIdentities('test-only-load-root', 3, 'taker', 3);
     expect(new Set(identities.map(identity => identity.entityId)).size).toBe(3);
     expect(new Set(identities.map(identity => identity.signerId)).size).toBe(3);
     expect(new Set([...identities, ...makers].map(identity => identity.entityId)).size).toBe(6);
+    expect(new Set([...identities, ...next].map(identity => identity.entityId)).size).toBe(6);
     expect(runtimeHttpBaseFromWsUrl('ws://127.0.0.1:20008/rpc')).toBe('http://127.0.0.1:20008');
     expect(connectedRuntimeHttpBase({ wsUrl: 'ws://127.0.0.1:20008/rpc' }))
       .toBe('http://127.0.0.1:20008');
@@ -194,11 +219,21 @@ describe('production swap load evidence', () => {
       .toThrow('PRODUCTION_SWAP_LOAD_CONTROL_URL_INVALID');
   });
 
+  test('user provisioning stays below the authenticated Runtime API burst', () => {
+    expect(partitionLoadControlBatches(Array.from({ length: 10 }, (_, index) => index)))
+      .toEqual([[0, 1, 2, 3], [4, 5, 6, 7], [8, 9]]);
+    const provisioning = partitionLoadProvisioningBatches(
+      Array.from({ length: 101 }, (_, index) => index),
+    );
+    expect(provisioning.map(batch => batch.length)).toEqual([16, 16, 16, 16, 16, 16, 5]);
+    expect(provisioning.every(batch => batch.length <= 16)).toBe(true);
+  });
+
   test('parallel lane plan emits exact marketable offers without exceeding five per Account frame', () => {
     const midpoint = 25_000_000n;
     const { maxAllowed } = deriveSameOrderbookPriceBandBounds(midpoint);
-    const plans = buildParallelLaneOfferPlan(`0x${'11'.repeat(32)}`, 13, 3, 10_000_000n, maxAllowed);
-    expect(plans.map(plan => plan.offers.length)).toEqual([5, 4, 4]);
+    const plans = buildParallelLaneOfferPlan(`0x${'11'.repeat(32)}`, 'test-load', 30, 3, 10_000_000n, maxAllowed);
+    expect(plans.map(plan => plan.offers.length)).toEqual([10, 10, 10]);
     for (const plan of plans) {
       expect(plan.quoteCredit).toBeGreaterThan(0n);
       expect(plan.baseCredit).toBeGreaterThan(0n);
@@ -221,13 +256,14 @@ describe('production swap load evidence', () => {
     const priceTicks = 25_000_000n;
     const plan = buildIndependentMakerTakerPlan(
       `0x${'11'.repeat(32)}`,
-      13,
+      'test-load',
+      9,
       3,
       10_000_000n,
       priceTicks,
     );
-    expect(plan.makerPlans.map(item => item.offers.length)).toEqual([5, 4, 4]);
-    expect(plan.takerPlans.map(item => item.offers.length)).toEqual([5, 4, 4]);
+    expect(plan.makerPlans.map(item => item.offers.length)).toEqual([3, 3, 3]);
+    expect(plan.takerPlans.map(item => item.offers.length)).toEqual([3, 3, 3]);
     for (const maker of plan.makerPlans.flatMap(item => item.offers)) {
       if (maker.type !== 'placeSwapOffer') throw new Error('TEST_LOAD_MAKER_TYPE_INVALID');
       expect(maker.data.giveTokenId).toBe(2);
@@ -240,6 +276,25 @@ describe('production swap load evidence', () => {
       expect(taker.data.wantTokenId).toBe(2);
       expect(prepareSwapOfferAmounts({ type: 'swap_offer', data: taker.data }).ok).toBe(true);
     }
+  });
+
+  test('each sustained round emits exactly one order per user Account', () => {
+    const plans = buildIndependentMakerTakerPlan(
+      `0x${'11'.repeat(32)}`,
+      'round-test',
+      30,
+      3,
+      10_000_000n,
+      25_000_000n,
+    );
+    const identities = Array.from({ length: 3 }, (_, index) => ({
+      entityId: `0x${(index + 1).toString(16).padStart(64, '0')}`,
+      signerId: `0x${(index + 1).toString(16).padStart(40, '0')}`,
+    }));
+    const round = buildLaneRoundOfferInputs(identities, plans.takerPlans, 4);
+    expect(round).toHaveLength(3);
+    expect(round.every(input => input.entityTxs.length === 1)).toBe(true);
+    expect(new Set(round.map(input => input.entityTxs[0]!.data.offerId)).size).toBe(3);
   });
 
   test('hub identity selector excludes cohosted secondary and remote gossip hubs', () => {
@@ -263,7 +318,7 @@ describe('production swap load evidence', () => {
     expect(selected.signerId).toBe('0x' + 'a1'.repeat(20));
   });
 
-  test('burst report separates matching from fully bilateral settlement', () => {
+  test('sustained report separates offered order rate from fully bilateral economic settlement', () => {
     const root = `0x${'ab'.repeat(32)}`;
     const settlementEvidence = {
       expectedSwaps: 10,
@@ -287,12 +342,14 @@ describe('production swap load evidence', () => {
       bestBidPriceTicks: 24_999_000n,
       bestAskPriceTicks: 25_001_000n,
     };
-    const report = decodeLoadBurstReport({
-      schema: 'xln-production-swap-load-burst-v1', mode: 'same',
-      schedule: 'visible_depth_runtime_input_batches', configuredBurstSize: 10,
-      loadMakerAccountCount: 0, loadTakerAccountCount: 2,
-      loadParticipantAccountCount: 2, maxOrdersPerAccountFrame: 5,
-      runtimeInputBatches: 2,
+    const report = decodeLoadSustainedReport({
+      schema: 'xln-production-swap-load-sustained-v1', mode: 'same',
+      schedule: 'one_order_per_account_per_round', configuredUsers: 4,
+      configuredRounds: 5, cadenceMs: 1_000,
+      offeredOrderRate: 4, offeredEconomicSwapRate: 2,
+      loadMakerAccountCount: 2, loadTakerAccountCount: 2,
+      loadParticipantAccountCount: 4, maxOrdersPerAccountFrame: 1,
+      runtimeInputBatches: 5, roundSubmissionLagMs: [0, 1, 0, 2, 0],
       matchedEconomicSwaps: 10, fullySettledEconomicSwaps: 10,
       completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence',
       enqueueAckElapsedMs: 10, commandObservedElapsedMs: 20,
@@ -311,13 +368,14 @@ describe('production swap load evidence', () => {
     });
     expect(report.matchedTps).toBe(40);
     expect(report.fullySettledTps).toBe(20);
-    expect(report.loadParticipantAccountCount).toBe(2);
+    expect(report.loadParticipantAccountCount).toBe(4);
+    expect(report.offeredOrderRate).toBe(4);
     expect(report.walBytesAfter).toBe(2_000);
-    expect(() => decodeLoadBurstReport({ ...report, alternateCompletion: true }))
+    expect(() => decodeLoadSustainedReport({ ...report, alternateCompletion: true }))
       .toThrow('PRODUCTION_SWAP_LOAD_REPORT_FIELDS_INVALID');
-    expect(() => decodeLoadBurstReport({ ...report, loadParticipantAccountCount: 3 }))
+    expect(() => decodeLoadSustainedReport({ ...report, loadParticipantAccountCount: 3 }))
       .toThrow('PRODUCTION_SWAP_LOAD_REPORT_ACCOUNT_COUNTS_INVALID');
-    expect(() => decodeLoadBurstReport({ ...report, crossedBookAfterRun: true }))
+    expect(() => decodeLoadSustainedReport({ ...report, crossedBookAfterRun: true }))
       .toThrow('PRODUCTION_SWAP_LOAD_REPORT_CROSSED_BOOK_REMAINS');
   });
 
@@ -354,6 +412,24 @@ describe('production swap load evidence', () => {
     expect(() => assertProductionSwapFullySettled(decodeProductionSwapSettlementEvidence({
       ...base, bestBidPriceTicks: 11n,
     }))).toThrow('PRODUCTION_SWAP_SETTLEMENT_BOOK_CROSSED');
+  });
+
+  test('settlement waits for identical bilateral certified Account heads', () => {
+    const head = { accountKey: `${`0x${'11'.repeat(32)}`}:${`0x${'22'.repeat(32)}`}`, currentHeight: 7, currentStateHash: `0x${'33'.repeat(32)}` };
+    expect(sameBilateralAccountHead(head, { ...head })).toBe(true);
+    expect(sameBilateralAccountHead(head, { ...head, currentHeight: 6 })).toBe(false);
+    expect(sameBilateralAccountHead(head, { ...head, currentStateHash: `0x${'44'.repeat(32)}` })).toBe(false);
+  });
+
+  test('settlement reader never requests or decodes a full Book', () => {
+    const source = readFileSync(new URL(
+      '../../../scripts/operations/benchmark/production-swap-load/settlement-reader.ts',
+      import.meta.url,
+    ), 'utf8');
+    expect(source).not.toContain('readLoadBook');
+    expect(source).not.toContain('.adapter.read<');
+    expect(source).not.toContain('decodeLoadBookPage');
+    expect(source).toContain("type: 'settlement-evidence'");
   });
 
   test('book projection rejects malformed network pages without minting BookState', () => {

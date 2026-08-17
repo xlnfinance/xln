@@ -38,6 +38,7 @@ import type { AccountTx } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import { cloneCrossJurisdictionRoute } from '../../../extensions/cross-j';
+import { MAX_P2P_ENTITY_INPUTS } from '../../../network/p2p/auth/entity-input-envelope';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -898,6 +899,63 @@ describe('ordered reliable output lanes', () => {
     expect(envelopes.map(envelope => envelope.entityInputs.length)).toEqual([2, 2]);
     expect(envelopes.map(envelope => envelope.atomicCrossJurisdictionPair?.pairKey).sort())
       .toEqual([firstPair.pairKey, secondPair.pairKey].sort());
+  });
+
+  test('batches independent same-frame reliable lanes up to the authenticated envelope limit', () => {
+    const sharedFrame = { height: 700, timestamp: 7_000 };
+    const outputs = Array.from({ length: MAX_P2P_ENTITY_INPUTS + 1 }, (_, index) => {
+      const target = `0x${(index + 1).toString(16).padStart(64, '0')}`;
+      return { ...entityFrameOutput(1, target), sourceRuntimeFrame: sharedFrame };
+    });
+    const envelopes: RuntimeEntityInputsEnvelope[] = [];
+    const env = signingEnv('output-routing-same-frame-envelope-batch', {
+      state: { timestamp: sharedFrame.timestamp },
+    });
+
+    const retained = dispatchEntityOutputs(
+      env,
+      outputs.map(output => ({ output, targetRuntimeId })),
+      routingDeps(() => ({
+        enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
+          envelopes.push(envelope);
+          return deliveryAccepted('TEST_BATCH_DELIVERED');
+        },
+      })),
+    );
+
+    expect(envelopes.map(envelope => envelope.entityInputs.length)).toEqual([
+      MAX_P2P_ENTITY_INPUTS,
+      1,
+    ]);
+    expect(envelopes.every(envelope =>
+      envelope.sourceRuntimeHeight === sharedFrame.height &&
+      envelope.sourceRuntimeTimestamp === sharedFrame.timestamp
+    )).toBe(true);
+    expect(retained).toHaveLength(outputs.length);
+  });
+
+  test('keeps ordinary outputs from different source frames in separate envelopes', () => {
+    const outputs = [
+      { ...entityFrameOutput(1, entityId('81')), sourceRuntimeFrame: { height: 10, timestamp: 100 } },
+      { ...entityFrameOutput(1, entityId('82')), sourceRuntimeFrame: { height: 11, timestamp: 101 } },
+    ];
+    const envelopes: RuntimeEntityInputsEnvelope[] = [];
+    const env = signingEnv('output-routing-source-frame-envelope-boundary');
+
+    dispatchEntityOutputs(
+      env,
+      outputs.map(output => ({ output, targetRuntimeId })),
+      routingDeps(() => ({
+        enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
+          envelopes.push(envelope);
+          return deliveryAccepted('TEST_FRAME_BOUNDARY_DELIVERED');
+        },
+      })),
+    );
+
+    expect(envelopes.map(envelope => envelope.entityInputs.length)).toEqual([1, 1]);
+    expect(envelopes.map(envelope => envelope.sourceRuntimeHeight).sort((a, b) => a - b))
+      .toEqual([10, 11]);
   });
 
   test('keeps Account ACK retry cadence below the bilateral liveness timeout', () => {

@@ -368,13 +368,27 @@ const foldBranch = <K, V>(
       else other.push(item);
     }
     const foldedSelf = foldItems(options, branch, into);
-    const foldedOthers = foldEmpty(options, other);
     const nodes: ValueNode<K, V>[] = [];
     if (foldedSelf.node) nodes.push(foldedSelf.node);
-    if (foldedOthers.node) nodes.push(foldedOthers.node);
+    let otherDelta = 0;
+    /*
+     * `other` may span several slots at the new compressed parent. Building
+     * all of it at once would return a branch whose path equals that parent,
+     * then incorrectly try to install the branch as its own child. Fold each
+     * sibling slot independently so every returned child is strictly below
+     * `splitAt`, exactly like the normal branch path below.
+     */
+    const otherBuckets = splitBySlot(other, splitAt);
+    for (let slot = 0; slot < options.radix; slot += 1) {
+      const bucket = otherBuckets.get(slot);
+      if (!bucket) continue;
+      const folded = foldEmpty(options, bucket);
+      otherDelta += folded.delta;
+      if (folded.node) nodes.push(folded.node);
+    }
     return {
       node: collapseChildren(options, branch.path.slice(0, splitAt), nodes),
-      delta: foldedSelf.delta + foldedOthers.delta,
+      delta: foldedSelf.delta + otherDelta,
     };
   }
   const buckets = splitBySlot(items, branch.path.length);

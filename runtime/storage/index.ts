@@ -121,7 +121,7 @@ import {
 } from '../entity/account/account-j-claim-node-store';
 import {
   buildDurableRuntimeMempool,
-  buildDurableRuntimeMachineSnapshot,
+  buildStorageRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimePostStateView,
 } from './wal/snapshot';
 import { buildDurableOutputRetryState } from '../runtime/delivery/durable-output-retry';
@@ -768,6 +768,13 @@ export type StorageFrameSaveResult = {
 };
 
 type StoragePersistencePerf = {
+  /**
+   * Time owned by the Runtime storage wrapper rather than the canonical
+   * LevelDB commit itself. Keeping this split explicit prevents a slow lock,
+   * history projection, or post-commit cleanup from being blamed on LevelDB.
+   */
+  outerStages?: Record<string, number>;
+  outerTotal?: number;
   open: number;
   planning: number;
   planningStages: Record<string, number>;
@@ -1284,13 +1291,12 @@ const prepareStorageStateCommitments = async (
     (options.env.state.height === 1 ||
       options.env.state.height % config.canonicalHashPeriodFrames === 0)
   );
-  const pendingNetworkOutputs =
-    options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [];
   const runtimeComponentDigests = computeRuntimePostStateComponentDigests(
     buildReplayVerifiableRuntimePostStateView(options.env, {
       // Output bodies are immutable rows. Per-frame replay authority commits
       // their ordered refs below instead of serializing the same envelopes.
       pendingNetworkOutputs: [],
+      excludeDeferredNetworkMeta: true,
       ...(options.pendingRuntimeInput
         ? { runtimeInput: options.pendingRuntimeInput }
         : {}),
@@ -1298,8 +1304,7 @@ const prepareStorageStateCommitments = async (
     }),
   );
   const runtimeMachine = shouldMaterialize || canonicalHashDue
-    ? buildDurableRuntimeMachineSnapshot(options.env, {
-        pendingNetworkOutputs,
+    ? buildStorageRuntimeMachineSnapshot(options.env, {
         ...(options.pendingRuntimeInput
           ? { runtimeInput: options.pendingRuntimeInput }
           : {}),
@@ -1452,6 +1457,7 @@ const buildStorageRuntimeFrame = (
       replicaMetaDigest: commitments.replicaMetaCommitment.digest,
       runtimeComponentDigests: commitments.runtimeComponentDigests,
       runtimeOutputRefs,
+      runtimeOutputRetryState: retryState,
     }),
     materializedState: shouldMaterialize,
     ...(commitments.runtimeStateHashes

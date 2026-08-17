@@ -123,7 +123,6 @@ export const decodeProductionSwapLoadConfig = (value: unknown): ProductionSwapLo
   const stepDurationMs = requireBoundaryInteger(record['stepDurationMs'], 'PRODUCTION_SWAP_LOAD_STEP_DURATION_INVALID', 1);
   if (stepDurationMs > 600_000) throw new Error('PRODUCTION_SWAP_LOAD_STEP_DURATION_EXCEEDS_TEN_MINUTES');
   const accountsPerHub = requireBoundaryInteger(record['accountsPerHub'], 'PRODUCTION_SWAP_LOAD_ACCOUNTS_INVALID', 1);
-  if (accountsPerHub > 1_000) throw new Error('PRODUCTION_SWAP_LOAD_ACCOUNTS_EXCEED_ENTITY_LIMIT');
   return {
     schema: PRODUCTION_SWAP_LOAD_SCHEMA,
     mode: record['mode'],

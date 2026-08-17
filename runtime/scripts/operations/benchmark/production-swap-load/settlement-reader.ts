@@ -6,11 +6,13 @@
 
 import {
   decodeSettlementEvidenceResponse,
+  MAX_SETTLEMENT_EVIDENCE_ACCOUNTS,
   type SettlementEvidenceRequest,
   type SettlementEvidenceResponse,
 } from '../../../../api/runtime-adapter/control/settlement-evidence';
+import { safeStringify } from '../../../../protocol/serialization';
 import { assertProductionSwapFullySettled, type ProductionSwapSettlementEvidence } from './settlement';
-import { readLoadBook, type ConnectedRuntime } from './worker-runtime';
+import { PRODUCTION_SWAP_LOAD_PAIR_ID, type ConnectedRuntime } from './worker-runtime';
 
 export type SettlementAccountPair = Readonly<{
   hubEntityId: string;
@@ -21,21 +23,55 @@ export type SettlementAccountPair = Readonly<{
 type RuntimeRole = ProductionSwapSettlementEvidence['runtimes'][number]['role'];
 type AccountResponse = SettlementEvidenceResponse['accounts'][number];
 
+export const sameBilateralAccountHead = (
+  hub: Pick<AccountResponse, 'accountKey' | 'currentHeight' | 'currentStateHash'>,
+  load: Pick<AccountResponse, 'accountKey' | 'currentHeight' | 'currentStateHash'>,
+): boolean => hub.accountKey === load.accountKey && hub.currentHeight === load.currentHeight &&
+  hub.currentStateHash === load.currentStateHash;
+
 const requestFor = (
   pairs: readonly SettlementAccountPair[],
   side: 'hub' | 'load',
+  hubBookEntityId: string,
 ): SettlementEvidenceRequest => ({
   type: 'settlement-evidence',
+  book: side === 'hub'
+    ? { entityId: hubBookEntityId, pairId: PRODUCTION_SWAP_LOAD_PAIR_ID }
+    : null,
   accounts: pairs.map(pair => side === 'hub'
     ? { entityId: pair.hubEntityId, counterpartyEntityId: pair.loadEntityId, offerIds: pair.offerIds }
     : { entityId: pair.loadEntityId, counterpartyEntityId: pair.hubEntityId, offerIds: pair.offerIds }),
 });
 
-const readEvidence = async (
+const readEvidencePage = async (
   runtime: ConnectedRuntime,
   request: SettlementEvidenceRequest,
 ): Promise<SettlementEvidenceResponse> =>
   decodeSettlementEvidenceResponse(await runtime.adapter.control<unknown>(request));
+
+const readEvidence = async (
+  runtime: ConnectedRuntime,
+  request: SettlementEvidenceRequest,
+): Promise<SettlementEvidenceResponse | null> => {
+  if (request.accounts.length === 0) return readEvidencePage(runtime, request);
+  const pages: SettlementEvidenceResponse[] = [];
+  for (let offset = 0; offset < request.accounts.length; offset += MAX_SETTLEMENT_EVIDENCE_ACCOUNTS) {
+    pages.push(await readEvidencePage(runtime, {
+      type: 'settlement-evidence',
+      book: request.book,
+      accounts: request.accounts.slice(offset, offset + MAX_SETTLEMENT_EVIDENCE_ACCOUNTS),
+    }));
+  }
+  const first = pages[0];
+  if (!first) throw new Error('PRODUCTION_SWAP_SETTLEMENT_EVIDENCE_PAGE_MISSING');
+  const queueFingerprint = safeStringify(first.queues);
+  const bookFingerprint = safeStringify(first.book);
+  if (pages.some(page => page.runtimeHeight !== first.runtimeHeight ||
+    safeStringify(page.queues) !== queueFingerprint || safeStringify(page.book) !== bookFingerprint)) {
+    return null;
+  }
+  return { ...first, accounts: pages.flatMap(page => page.accounts) };
+};
 
 const runtimeEvidence = (
   role: RuntimeRole,
@@ -71,16 +107,16 @@ const combineAccount = (
   pair: SettlementAccountPair,
   hub: SettlementEvidenceResponse,
   load: SettlementEvidenceResponse,
-): ProductionSwapSettlementEvidence['accounts'][number] => {
+): ProductionSwapSettlementEvidence['accounts'][number] | null => {
   const hubAccount = requireAccount(hub, pair.hubEntityId, pair.loadEntityId);
   const loadAccount = requireAccount(load, pair.loadEntityId, pair.hubEntityId);
   if (!sameOfferIds(hubAccount, pair.offerIds) || !sameOfferIds(loadAccount, pair.offerIds)) {
     throw new Error(`PRODUCTION_SWAP_SETTLEMENT_OFFER_RESPONSE_MISMATCH:${hubAccount.accountKey}`);
   }
-  if (hubAccount.accountKey !== loadAccount.accountKey || hubAccount.currentHeight !== loadAccount.currentHeight ||
-    hubAccount.currentStateHash !== loadAccount.currentStateHash) {
-    throw new Error(`PRODUCTION_SWAP_SETTLEMENT_BILATERAL_HEAD_MISMATCH:${hubAccount.accountKey}`);
-  }
+  // Account consensus is bilateral: one Runtime may expose H+1 a network tick
+  // before its peer. That is ordinary in-flight work, not divergence. A result
+  // is authoritative only after both certified heads are byte-identical.
+  if (!sameBilateralAccountHead(hubAccount, loadAccount)) return null;
   const committed = pair.offerIds.filter((_id, index) =>
     hubAccount.offers[index]!.offerCommitted && loadAccount.offers[index]!.offerCommitted);
   const resolved = pair.offerIds.filter((_id, index) =>
@@ -115,14 +151,31 @@ export const waitForFullySettledEvidence = async (options: {
   timeoutMs?: number;
 }): Promise<ProductionSwapSettlementEvidence> => {
   const deadline = performance.now() + (options.timeoutMs ?? 60_000);
-  const emptyRequest: SettlementEvidenceRequest = { type: 'settlement-evidence', accounts: [] };
+  const emptyRequest: SettlementEvidenceRequest = { type: 'settlement-evidence', book: null, accounts: [] };
   while (performance.now() <= deadline) {
-    const [hub, load, marketMaker, book] = await Promise.all([
-      readEvidence(options.hub, requestFor(options.pairs, 'hub')),
-      readEvidence(options.load, requestFor(options.pairs, 'load')),
+    const [hub, load, marketMaker] = await Promise.all([
+      readEvidence(options.hub, requestFor(options.pairs, 'hub', options.hubBookEntityId)),
+      readEvidence(options.load, requestFor(options.pairs, 'load', options.hubBookEntityId)),
       readEvidence(options.marketMaker, emptyRequest),
-      readLoadBook(options.hub, options.hubBookEntityId),
     ]);
+    if (hub === null || load === null || marketMaker === null) {
+      await sleep(20);
+      continue;
+    }
+    const accounts: ProductionSwapSettlementEvidence['accounts'][number][] = [];
+    for (const pair of options.pairs) {
+      const account = combineAccount(pair, hub, load);
+      if (account === null) break;
+      accounts.push(account);
+    }
+    if (accounts.length !== options.pairs.length) {
+      await sleep(20);
+      continue;
+    }
+    const book = hub.book;
+    if (!book || book.entityId !== options.hubBookEntityId || book.pairId !== PRODUCTION_SWAP_LOAD_PAIR_ID) {
+      throw new Error('PRODUCTION_SWAP_SETTLEMENT_BOOK_EVIDENCE_MISSING');
+    }
     const evidence: ProductionSwapSettlementEvidence = {
       expectedSwaps: options.expectedSwaps,
       tradeCountBefore: options.tradeCountBefore,
@@ -130,7 +183,7 @@ export const waitForFullySettledEvidence = async (options: {
       matchedElapsedMs: options.matchedElapsedMs,
       fullySettledElapsedMs: Math.max(1, Math.ceil(performance.now() - options.startedAt)),
       createdOfferIds: options.pairs.flatMap(pair => pair.offerIds),
-      accounts: options.pairs.map(pair => combineAccount(pair, hub, load)),
+      accounts,
       runtimes: [runtimeEvidence('hub', hub), runtimeEvidence('load', load), runtimeEvidence('market-maker', marketMaker)],
       bestBidPriceTicks: book.bestBidPriceTicks,
       bestAskPriceTicks: book.bestAskPriceTicks,

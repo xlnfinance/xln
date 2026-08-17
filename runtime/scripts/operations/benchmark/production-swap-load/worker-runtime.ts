@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { deriveDelta, isLeftEntity } from '../../../../account/utils';
+import { RuntimeAdapterError } from '../../../../api/runtime-adapter/errors';
 import { RemoteRuntimeAdapter } from '../../../../api/runtime-adapter/remote';
 import type { RuntimeAdapterSendResult } from '../../../../api/runtime-adapter/types';
 import { canonicalPair } from '../../../../orderbook';
@@ -20,7 +21,7 @@ import type { RuntimeInput } from '../../../../runtime/types';
 import {
   decodeAccountPage,
   decodeEntitySummaries,
-  decodeLoadBurstReport,
+  decodeLoadSustainedReport,
   decodeLoadFrame,
   type LoadAccountProjection,
   type LoadFrame,
@@ -34,6 +35,9 @@ export type WorkerArgs = Readonly<{
   mode: string;
   swaps: number;
   lanes: number;
+  rounds: number;
+  cadenceMs: number;
+  laneOffset: number;
   serverPidBeforeRestart?: number;
   serverPidAfterRestart?: number;
 }>;
@@ -49,7 +53,7 @@ export type ObservedCommand = Readonly<{
 }>;
 
 const QUOTE_TOKEN_ID = 1;
-const PAIR_ID = canonicalPair(2, QUOTE_TOKEN_ID).pairId;
+export const PRODUCTION_SWAP_LOAD_PAIR_ID = canonicalPair(2, QUOTE_TOKEN_ID).pairId;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 const parsePositiveInteger = (raw: string | undefined, code: string): number => {
@@ -68,7 +72,7 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
     values.set(key, value);
   }
   const allowed = new Set([
-    '--work-dir', '--port-base', '--mode', '--swaps', '--lanes',
+    '--work-dir', '--port-base', '--mode', '--swaps', '--lanes', '--rounds', '--cadence-ms', '--lane-offset',
     '--server-pid-before-restart', '--server-pid-after-restart',
   ]);
   for (const key of values.keys()) if (!allowed.has(key)) throw new Error(`PRODUCTION_SWAP_LOAD_ARGUMENT_UNKNOWN:${key}`);
@@ -76,6 +80,13 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
   if (!workDir) throw new Error('PRODUCTION_SWAP_LOAD_WORK_DIR_REQUIRED');
   const swaps = parsePositiveInteger(values.get('--swaps') ?? '1', 'PRODUCTION_SWAP_LOAD_SWAPS_INVALID');
   const lanes = parsePositiveInteger(values.get('--lanes') ?? '1', 'PRODUCTION_SWAP_LOAD_LANES_INVALID');
+  const rounds = parsePositiveInteger(values.get('--rounds') ?? '1', 'PRODUCTION_SWAP_LOAD_ROUNDS_INVALID');
+  const cadenceMs = parsePositiveInteger(values.get('--cadence-ms') ?? '1000', 'PRODUCTION_SWAP_LOAD_CADENCE_INVALID');
+  const laneOffsetRaw = values.get('--lane-offset') ?? '0';
+  const laneOffset = Number(laneOffsetRaw);
+  if (!Number.isSafeInteger(laneOffset) || laneOffset < 0) {
+    throw new Error(`PRODUCTION_SWAP_LOAD_LANE_OFFSET_INVALID:${laneOffsetRaw}`);
+  }
   const mode = String(values.get('--mode') ?? 'same').trim();
   if (mode === 'same' && swaps < lanes) {
     throw new Error('PRODUCTION_SWAP_LOAD_LANES_WITHOUT_ORDERS');
@@ -83,7 +94,13 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
   if (mode === 'same' && swaps > lanes * 5) {
     throw new Error('PRODUCTION_SWAP_LOAD_SWAPS_EXCEED_FIVE_PER_ACCOUNT_FRAME');
   }
+  if (mode === 'same' && swaps !== lanes) {
+    throw new Error('PRODUCTION_SWAP_LOAD_SUSTAINED_REQUIRES_ONE_SWAP_PER_LANE');
+  }
   if (mode !== 'same' && lanes !== 1) throw new Error('PRODUCTION_SWAP_LOAD_NON_SAME_LANES_UNSUPPORTED');
+  if (mode !== 'same' && (rounds !== 1 || cadenceMs !== 1_000)) {
+    throw new Error('PRODUCTION_SWAP_LOAD_NON_SAME_CADENCE_UNSUPPORTED');
+  }
   const beforePid = values.get('--server-pid-before-restart');
   const afterPid = values.get('--server-pid-after-restart');
   if ((beforePid === undefined) !== (afterPid === undefined)) {
@@ -95,6 +112,9 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
     mode,
     swaps,
     lanes,
+    rounds,
+    cadenceMs,
+    laneOffset,
     ...(beforePid === undefined ? {} : {
       serverPidBeforeRestart: parsePositiveInteger(beforePid, 'PRODUCTION_SWAP_LOAD_RESTART_PID_BEFORE_INVALID'),
       serverPidAfterRestart: parsePositiveInteger(afterPid, 'PRODUCTION_SWAP_LOAD_RESTART_PID_AFTER_INVALID'),
@@ -118,7 +138,7 @@ export const resolveWalPath = (runtimeDir: string): string => {
 export const persistReport = (
   path: string,
   value: unknown,
-  decode: (value: unknown) => unknown = decodeLoadBurstReport,
+  decode: (value: unknown) => unknown = decodeLoadSustainedReport,
 ): void => {
   const encoded = `${safeStringify(value, 2)}\n`;
   const temporary = `${path}.tmp-${process.pid}`;
@@ -152,6 +172,32 @@ export const connectRuntime = async (
   return { adapter, entry, wsUrl };
 };
 
+const COMMAND_OBSERVATION_TIMEOUT_MS = 120_000;
+
+const awaitObservedRuntimeCommand = async (
+  runtime: ConnectedRuntime,
+  commandId: string,
+  commandSequence: number,
+  input: RuntimeInput,
+  startedAt: number,
+): Promise<Readonly<{ result: RuntimeAdapterSendResult; enqueueAckElapsedMs: number }>> => {
+  const deadline = Date.now() + COMMAND_OBSERVATION_TIMEOUT_MS;
+  let enqueueAckElapsedMs: number | null = null;
+  while (Date.now() < deadline) {
+    try {
+      const result = await runtime.adapter.send(input, { commandId, commandSequence });
+      enqueueAckElapsedMs ??= Math.max(0, Math.ceil(performance.now() - startedAt));
+      if (result.status === 'observed') return { result, enqueueAckElapsedMs };
+    } catch (error) {
+      if (!(error instanceof RuntimeAdapterError) || !error.retryable) throw error;
+    }
+    // The durable command marker makes this exact retry idempotent even when
+    // the original response arrived after the client's 30-second timeout.
+    await sleep(10);
+  }
+  throw new Error(`PRODUCTION_SWAP_LOAD_COMMAND_NOT_OBSERVED:${commandId}`);
+};
+
 export const sendObserved = async (
   runtime: ConnectedRuntime,
   commandId: string,
@@ -159,21 +205,17 @@ export const sendObserved = async (
 ): Promise<ObservedCommand> => {
   const commandSequence = runtime.adapter.nextCommandSequence;
   if (commandSequence === null) throw new Error(`PRODUCTION_SWAP_LOAD_COMMAND_FRONTIER_MISSING:${runtime.entry.label}`);
-  const deadline = Date.now() + 60_000;
   const startedAt = performance.now();
-  let result = await runtime.adapter.send(input, { commandId, commandSequence });
-  const enqueueAckElapsedMs = Math.max(0, Math.ceil(performance.now() - startedAt));
-  while (result.status !== 'observed' && Date.now() < deadline) {
-    // Keep observation noise below a production Account round. The retry is
-    // idempotent because commandId and commandSequence stay byte-identical.
-    await sleep(10);
-    result = await runtime.adapter.send(input, { commandId, commandSequence });
-  }
-  if (result.status !== 'observed') throw new Error(`PRODUCTION_SWAP_LOAD_COMMAND_NOT_OBSERVED:${commandId}`);
+  const observed = await awaitObservedRuntimeCommand(
+    runtime, commandId, commandSequence, input, startedAt,
+  );
   return {
-    result,
-    enqueueAckElapsedMs,
-    commandObservedElapsedMs: Math.max(enqueueAckElapsedMs, Math.ceil(performance.now() - startedAt)),
+    result: observed.result,
+    enqueueAckElapsedMs: observed.enqueueAckElapsedMs,
+    commandObservedElapsedMs: Math.max(
+      observed.enqueueAckElapsedMs,
+      Math.ceil(performance.now() - startedAt),
+    ),
   };
 };
 
@@ -192,7 +234,7 @@ export const readLoadBook = async (
   hubEntityId: string,
 ): Promise<LoadBookSnapshot> => decodeLoadBookPage(
   await runtime.adapter.read<unknown>(`entity/${hubEntityId}/books`, { booksLimit: 10 }),
-  PAIR_ID,
+  PRODUCTION_SWAP_LOAD_PAIR_ID,
 );
 
 export const waitForCredit = async (

@@ -68,8 +68,8 @@ describe('storage schema boundary', () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(1)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=1:current=${STORAGE_SCHEMA_VERSION}`,
     );
-    await expect(readStorageHead(memoryDbWithHead(currentHead(3)))).rejects.toThrow(
-      `STORAGE_SCHEMA_MISMATCH:stored=3:current=${STORAGE_SCHEMA_VERSION}`,
+    await expect(readStorageHead(memoryDbWithHead(currentHead(2)))).rejects.toThrow(
+      `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`,
     );
     await expect(readStorageHead(memoryDbWithHead(currentHead(4)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=4:current=${STORAGE_SCHEMA_VERSION}`,
@@ -77,12 +77,12 @@ describe('storage schema boundary', () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(6)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=6:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
     );
-    expect(STORAGE_SCHEMA_VERSION).toBe(2);
+    expect(STORAGE_SCHEMA_VERSION).toBe(3);
   });
 
   test('pins the one current frame format as one inseparable descriptor', () => {
     expect(STORAGE_FRAME_FORMAT).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       domain: 'xln.storage.frame',
       postStateDomain: 'xln.storage.postState',
       algorithmId: 'sha256',

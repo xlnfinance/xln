@@ -256,6 +256,7 @@ const buildDurableRuntimeStateSnapshot = (
   options?: {
     includeCertifiedBoardNodes?: boolean;
     includeIngressWorkingState?: boolean;
+    excludeDeferredNetworkMeta?: boolean;
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> | undefined => {
@@ -267,7 +268,9 @@ const buildDurableRuntimeStateSnapshot = (
     ...(!options?.excludePersistedHistoryRecords && hasDurableEntries(state.pendingHistoryRecords)
       ? { pendingHistoryRecords: state.pendingHistoryRecords }
       : {}),
-    ...(hasDurableEntries(state.deferredNetworkMeta) ? { deferredNetworkMeta: state.deferredNetworkMeta } : {}),
+    ...(!options?.excludeDeferredNetworkMeta && hasDurableEntries(state.deferredNetworkMeta)
+      ? { deferredNetworkMeta: state.deferredNetworkMeta }
+      : {}),
     ...(hasDurableEntries(state.reliableIngressReceiptLedger)
       ? { reliableIngressReceiptLedger: state.reliableIngressReceiptLedger }
       : {}),
@@ -330,6 +333,7 @@ export const buildDurableRuntimeMachineSnapshot = (
     pendingNetworkOutputs?: RoutedEntityInput[];
     runtimeInput?: RuntimeInput;
     includeIngressWorkingState?: boolean;
+    excludeDeferredNetworkMeta?: boolean;
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => {
@@ -337,6 +341,7 @@ export const buildDurableRuntimeMachineSnapshot = (
   const runtimeConfig = env.runtimeConfig;
   const infrastructure = buildDurableRuntimeStateSnapshot(env, {
     includeIngressWorkingState: options?.includeIngressWorkingState === true,
+    excludeDeferredNetworkMeta: options?.excludeDeferredNetworkMeta === true,
     excludePersistedHistoryRecords: options?.excludePersistedHistoryRecords === true,
   });
   return {
@@ -359,6 +364,25 @@ export const buildDurableRuntimeMachineSnapshot = (
     ]),
   };
 };
+
+/**
+ * WAL Runtime-machine projection. Transport bodies and retry route keys have
+ * their own bounded frame commitments (`runtimeOutputRefs` and
+ * `runtimeOutputRetryState`), so duplicating them in this Patricia graph would
+ * make a valid output envelope capable of violating the graph row bound.
+ */
+export const buildStorageRuntimeMachineSnapshot = (
+  env: RuntimeReplica,
+  options?: {
+    runtimeInput?: RuntimeInput;
+    includeIngressWorkingState?: boolean;
+    excludePersistedHistoryRecords?: boolean;
+  },
+): Record<string, unknown> => buildDurableRuntimeMachineSnapshot(env, {
+  ...options,
+  pendingNetworkOutputs: [],
+  excludeDeferredNetworkMeta: true,
+});
 
 /**
  * Project the part of a durable Runtime snapshot that deterministic frame
@@ -384,6 +408,7 @@ export const buildReplayVerifiableRuntimeMachineSnapshot = (
     pendingNetworkOutputs?: RoutedEntityInput[];
     runtimeInput?: RuntimeInput;
     includeIngressWorkingState?: boolean;
+    excludeDeferredNetworkMeta?: boolean;
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => projectReplayVerifiableRuntimeMachine(
@@ -411,11 +436,13 @@ export const buildReplayVerifiableRuntimePostStateView = (
     pendingNetworkOutputs?: RoutedEntityInput[];
     runtimeInput?: RuntimeInput;
     includeIngressWorkingState?: boolean;
+    excludeDeferredNetworkMeta?: boolean;
     excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => {
   const infrastructure = buildDurableRuntimeStateSnapshot(env, {
     includeIngressWorkingState: options?.includeIngressWorkingState === true,
+    excludeDeferredNetworkMeta: options?.excludeDeferredNetworkMeta === true,
     excludePersistedHistoryRecords: options?.excludePersistedHistoryRecords === true,
   });
   return {

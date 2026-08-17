@@ -15,7 +15,7 @@ import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../infra/integrity-checksum';
  * migration readers: an incompatible database is rejected and the operator
  * starts a new network instead of replaying ambiguous historical bytes.
  */
-export const STORAGE_SCHEMA_VERSION = 2;
+export const STORAGE_SCHEMA_VERSION = 3;
 
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,

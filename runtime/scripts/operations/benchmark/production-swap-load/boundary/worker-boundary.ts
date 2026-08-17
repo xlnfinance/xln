@@ -31,16 +31,21 @@ export type LoadAccountProjection = Readonly<{
     disputeConfig: AccountState['disputeConfig'];
   }>;
 }>;
-export type LoadBurstReport = Readonly<{
-  schema: 'xln-production-swap-load-burst-v1';
+export type LoadSustainedReport = Readonly<{
+  schema: 'xln-production-swap-load-sustained-v1';
   mode: 'same';
-  schedule: 'visible_depth_runtime_input_batches' | 'independent_maker_taker_account_pairs';
-  configuredBurstSize: number;
+  schedule: 'one_order_per_account_per_round';
+  configuredUsers: number;
+  configuredRounds: number;
+  cadenceMs: number;
+  offeredOrderRate: number;
+  offeredEconomicSwapRate: number;
   loadMakerAccountCount: number;
   loadTakerAccountCount: number;
   loadParticipantAccountCount: number;
-  maxOrdersPerAccountFrame: 5;
+  maxOrdersPerAccountFrame: 1;
   runtimeInputBatches: number;
+  roundSubmissionLagMs: readonly number[];
   matchedEconomicSwaps: number;
   fullySettledEconomicSwaps: number;
   completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence';
@@ -323,10 +328,11 @@ const decodeReportLoadFrame = (value: unknown): LoadFrame => {
   };
 };
 
-export const decodeLoadBurstReport = (value: unknown): LoadBurstReport => {
+export const decodeLoadSustainedReport = (value: unknown): LoadSustainedReport => {
   const report = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_REPORT_INVALID');
   const numeric = [
-    'configuredBurstSize', 'loadMakerAccountCount', 'loadTakerAccountCount',
+    'configuredUsers', 'configuredRounds', 'cadenceMs', 'offeredOrderRate',
+    'offeredEconomicSwapRate', 'loadMakerAccountCount', 'loadTakerAccountCount',
     'loadParticipantAccountCount', 'maxOrdersPerAccountFrame',
     'runtimeInputBatches', 'matchedEconomicSwaps', 'fullySettledEconomicSwaps',
     'enqueueAckElapsedMs', 'commandObservedElapsedMs', 'matchedElapsedMs',
@@ -336,9 +342,10 @@ export const decodeLoadBurstReport = (value: unknown): LoadBurstReport => {
     'walBytesBefore', 'walBytesAfter',
   ] as const;
   requireExactBoundaryKeys(report, [
-    'schema', 'mode', 'schedule', 'configuredBurstSize', 'loadMakerAccountCount',
+    'schema', 'mode', 'schedule', 'configuredUsers', 'configuredRounds', 'cadenceMs',
+    'offeredOrderRate', 'offeredEconomicSwapRate', 'loadMakerAccountCount',
     'loadTakerAccountCount', 'loadParticipantAccountCount', 'maxOrdersPerAccountFrame',
-    'runtimeInputBatches', 'matchedEconomicSwaps', 'fullySettledEconomicSwaps',
+    'runtimeInputBatches', 'roundSubmissionLagMs', 'matchedEconomicSwaps', 'fullySettledEconomicSwaps',
     'completionAuthority', 'enqueueAckElapsedMs', 'commandObservedElapsedMs',
     'matchedElapsedMs', 'fullySettledElapsedMs', 'matchedTps', 'fullySettledTps', 'tradeCountBefore',
     'tradeCountAfter', 'submittedEconomicSwaps', 'uncompletedEconomicSwapsAfterRun',
@@ -347,11 +354,8 @@ export const decodeLoadBurstReport = (value: unknown): LoadBurstReport => {
     'durableBefore', 'durableAfter', 'loadDurableBefore', 'loadDurableAfter',
     'settlementEvidence',
   ], [], 'PRODUCTION_SWAP_LOAD_REPORT_FIELDS_INVALID');
-  if (report['schema'] !== 'xln-production-swap-load-burst-v1' || report['mode'] !== 'same') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEMA_INVALID');
-  if (
-    report['schedule'] !== 'visible_depth_runtime_input_batches'
-    && report['schedule'] !== 'independent_maker_taker_account_pairs'
-  ) throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEDULE_INVALID');
+  if (report['schema'] !== 'xln-production-swap-load-sustained-v1' || report['mode'] !== 'same') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEMA_INVALID');
+  if (report['schedule'] !== 'one_order_per_account_per_round') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEDULE_INVALID');
   if (report['completionAuthority'] !== 'committed_trade_count_and_bilateral_runtime_quiescence') throw new Error('PRODUCTION_SWAP_LOAD_REPORT_AUTHORITY_INVALID');
   if (report['crossedBookAfterRun'] !== false) throw new Error('PRODUCTION_SWAP_LOAD_REPORT_CROSSED_BOOK_REMAINS');
   for (const field of numeric) requireBoundaryInteger(report[field], `PRODUCTION_SWAP_LOAD_REPORT_${field.toUpperCase()}_INVALID`);
@@ -372,21 +376,33 @@ export const decodeLoadBurstReport = (value: unknown): LoadBurstReport => {
   if (Number(report['submittedEconomicSwaps']) !== matched || fullySettled !== matched || Number(report['uncompletedEconomicSwapsAfterRun']) !== 0) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SUBMISSION_INVALID');
   }
-  if (Number(report['configuredBurstSize']) !== matched) {
-    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_BURST_INCOMPLETE');
-  }
-  if (Number(report['maxOrdersPerAccountFrame']) !== 5) {
+  if (Number(report['maxOrdersPerAccountFrame']) !== 1) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ACCOUNT_FRAME_CAP_INVALID');
   }
   const makerAccounts = Number(report['loadMakerAccountCount']);
   const takerAccounts = Number(report['loadTakerAccountCount']);
   const participantAccounts = Number(report['loadParticipantAccountCount']);
-  if (participantAccounts !== makerAccounts + takerAccounts || takerAccounts < 1) {
+  const rounds = Number(report['configuredRounds']);
+  const cadenceMs = Number(report['cadenceMs']);
+  if (participantAccounts !== makerAccounts + takerAccounts || makerAccounts !== takerAccounts || takerAccounts < 1) {
     throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ACCOUNT_COUNTS_INVALID');
   }
-  if (matched > takerAccounts * 5 || (makerAccounts > 0 && matched > makerAccounts * 5)) {
-    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ACCOUNT_FRAME_CAP_EXCEEDED');
+  if (Number(report['configuredUsers']) !== participantAccounts || matched !== takerAccounts * rounds) {
+    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_SCHEDULE_TOTAL_INVALID');
   }
+  if (Number(report['runtimeInputBatches']) !== rounds) {
+    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ROUND_COUNT_INVALID');
+  }
+  const expectedOrderRate = participantAccounts * 1_000 / cadenceMs;
+  const expectedEconomicRate = takerAccounts * 1_000 / cadenceMs;
+  if (report['offeredOrderRate'] !== expectedOrderRate || report['offeredEconomicSwapRate'] !== expectedEconomicRate) {
+    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_OFFERED_RATE_INVALID');
+  }
+  if (!Array.isArray(report['roundSubmissionLagMs']) || report['roundSubmissionLagMs'].length !== rounds) {
+    throw new Error('PRODUCTION_SWAP_LOAD_REPORT_ROUND_LAG_INVALID');
+  }
+  const roundSubmissionLagMs = report['roundSubmissionLagMs'].map((entry, index) =>
+    requireBoundaryInteger(entry, `PRODUCTION_SWAP_LOAD_REPORT_ROUND_LAG_INVALID:${index}`, 0));
   if (
     Number(report['enqueueAckElapsedMs']) > Number(report['commandObservedElapsedMs']) ||
     Number(report['commandObservedElapsedMs']) > Number(report['matchedElapsedMs']) ||
@@ -406,12 +422,15 @@ export const decodeLoadBurstReport = (value: unknown): LoadBurstReport => {
   }
   return {
     schema: report['schema'], mode: report['mode'], schedule: report['schedule'],
-    configuredBurstSize: Number(report['configuredBurstSize']),
+    configuredUsers: Number(report['configuredUsers']), configuredRounds: rounds,
+    cadenceMs, offeredOrderRate: report['offeredOrderRate'],
+    offeredEconomicSwapRate: report['offeredEconomicSwapRate'],
     loadMakerAccountCount: makerAccounts,
     loadTakerAccountCount: takerAccounts,
     loadParticipantAccountCount: participantAccounts,
-    maxOrdersPerAccountFrame: 5,
+    maxOrdersPerAccountFrame: 1,
     runtimeInputBatches: Number(report['runtimeInputBatches']),
+    roundSubmissionLagMs,
     matchedEconomicSwaps: matched,
     fullySettledEconomicSwaps: fullySettled,
     completionAuthority: report['completionAuthority'],

@@ -6,7 +6,13 @@ import {
 } from '../input-pipeline/input-validation.ts';
 import { ensureRuntimeInfrastructure } from '../infrastructure/runtime-infrastructure.ts';
 import type { RuntimeReplica, RuntimeInput } from '../types.ts';
-import { closeRuntimeWalDb, closeHistoryViewDb, closeInfraDb, closeStorageDb } from '../../storage/runtime-dbs.ts';
+import {
+  closeRuntimeWalDb,
+  closeHistoryViewDb,
+  closeInfraDb,
+  closeStorageDb,
+  releaseRetainedStorageWriterLock,
+} from '../../storage/runtime-dbs.ts';
 import {
   ENV_APPLY_ALLOWED_KEY,
   ENV_REPLAY_MODE_KEY,
@@ -118,6 +124,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
       closeHistoryViewDb(env),
     ]);
     throwSettledErrors(closed, 'RUNTIME_DB_CLOSE_FAILED');
+    await releaseRetainedStorageWriterLock(env);
   };
 
   const closeManagedInfraDb = async (env: RuntimeReplica): Promise<void> => {

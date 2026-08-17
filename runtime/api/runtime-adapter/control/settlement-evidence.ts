@@ -11,14 +11,22 @@ import { requireBoundaryInteger, requireBoundaryRecord, requireExactBoundaryKeys
 import { safeStringify } from '../../../protocol/serialization';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { AccountFrame } from '../../../types/account';
+import {
+  buildSettlementBookEvidence,
+  decodeSettlementBookEvidence,
+  decodeSettlementBookRequest,
+  type SettlementBookEvidence,
+  type SettlementBookRequest,
+} from './settlement-book-evidence';
 
-const MAX_ACCOUNTS = 512;
+export const MAX_SETTLEMENT_EVIDENCE_ACCOUNTS = 512;
 const MAX_OFFERS = 4_096;
 const ENTITY_ID = /^0x[0-9a-f]{64}$/;
 const HASH = /^0x[0-9a-f]{64}$/;
 
 export type SettlementEvidenceRequest = Readonly<{
   type: 'settlement-evidence';
+  book: SettlementBookRequest | null;
   accounts: readonly Readonly<{
     entityId: string;
     counterpartyEntityId: string;
@@ -37,6 +45,7 @@ type OfferEvidence = Readonly<{
 
 export type SettlementEvidenceResponse = Readonly<{
   runtimeHeight: number;
+  book: SettlementBookEvidence | null;
   queues: Readonly<{
     processing: QueueEvidence;
     pendingOutputs: QueueEvidence;
@@ -87,9 +96,9 @@ const requireAccountKey = (value: unknown, code: string): string => {
 
 export const decodeSettlementEvidenceRequest = (value: unknown): SettlementEvidenceRequest => {
   const request = requireBoundaryRecord(value, 'RADAPTER_SETTLEMENT_REQUEST_INVALID');
-  requireExactBoundaryKeys(request, ['type', 'accounts'], [], 'RADAPTER_SETTLEMENT_REQUEST_FIELDS_INVALID');
+  requireExactBoundaryKeys(request, ['type', 'book', 'accounts'], [], 'RADAPTER_SETTLEMENT_REQUEST_FIELDS_INVALID');
   if (request['type'] !== 'settlement-evidence' || !Array.isArray(request['accounts']) ||
-    request['accounts'].length > MAX_ACCOUNTS) throw new Error('RADAPTER_SETTLEMENT_REQUEST_ACCOUNTS_INVALID');
+    request['accounts'].length > MAX_SETTLEMENT_EVIDENCE_ACCOUNTS) throw new Error('RADAPTER_SETTLEMENT_REQUEST_ACCOUNTS_INVALID');
   let offerCount = 0;
   const accounts = request['accounts'].map((raw, index) => {
     const account = requireBoundaryRecord(raw, `RADAPTER_SETTLEMENT_ACCOUNT_INVALID:${index}`);
@@ -108,7 +117,8 @@ export const decodeSettlementEvidenceRequest = (value: unknown): SettlementEvide
   if (offerCount > MAX_OFFERS) throw new Error('RADAPTER_SETTLEMENT_REQUEST_OFFERS_EXCEEDED');
   const keys = accounts.map(account => `${account.entityId}:${account.counterpartyEntityId}`);
   if (new Set(keys).size !== keys.length) throw new Error('RADAPTER_SETTLEMENT_REQUEST_ACCOUNTS_DUPLICATE');
-  return { type: 'settlement-evidence', accounts };
+  const book = request['book'] === null ? null : decodeSettlementBookRequest(request['book']);
+  return { type: 'settlement-evidence', book, accounts };
 };
 
 const digest = (value: unknown): string => keccak256(toUtf8Bytes(safeStringify(value)));
@@ -184,6 +194,7 @@ export const buildSettlementEvidence = async (
   const infrastructure = env.infrastructure;
   return {
     runtimeHeight: env.state.height,
+    book: request.book === null ? null : buildSettlementBookEvidence(env, request.book),
     queues: {
       processing: queue(infrastructure?.processingPromise ? ['processing'] : []),
       pendingOutputs: queue(env.pendingOutputs ?? []),
@@ -246,7 +257,7 @@ const decodeResponseAccount = (value: unknown, index: number): SettlementEvidenc
 
 export const decodeSettlementEvidenceResponse = (value: unknown): SettlementEvidenceResponse => {
   const response = requireBoundaryRecord(value, 'RADAPTER_SETTLEMENT_RESPONSE_INVALID');
-  requireExactBoundaryKeys(response, ['runtimeHeight', 'queues', 'accounts'], [], 'RADAPTER_SETTLEMENT_RESPONSE_FIELDS_INVALID');
+  requireExactBoundaryKeys(response, ['runtimeHeight', 'book', 'queues', 'accounts'], [], 'RADAPTER_SETTLEMENT_RESPONSE_FIELDS_INVALID');
   const queues = requireBoundaryRecord(response['queues'], 'RADAPTER_SETTLEMENT_RESPONSE_QUEUES_INVALID');
   const queueKeys = ['processing', 'pendingOutputs', 'pendingNetworkOutputs', 'networkInbox', 'runtimeEntityInputs', 'runtimeTxs', 'runtimeJInputs', 'pendingReceipts', 'retryEntries'] as const;
   requireExactBoundaryKeys(queues, queueKeys, [], 'RADAPTER_SETTLEMENT_RESPONSE_QUEUE_FIELDS_INVALID');
@@ -255,6 +266,7 @@ export const decodeSettlementEvidenceResponse = (value: unknown): SettlementEvid
     decodeQueue(queues[key], `RADAPTER_SETTLEMENT_RESPONSE_QUEUE_INVALID:${key}`);
   return {
     runtimeHeight: requireBoundaryInteger(response['runtimeHeight'], 'RADAPTER_SETTLEMENT_RESPONSE_HEIGHT_INVALID'),
+    book: response['book'] === null ? null : decodeSettlementBookEvidence(response['book']),
     queues: {
       processing: decodedQueues('processing'),
       pendingOutputs: decodedQueues('pendingOutputs'),

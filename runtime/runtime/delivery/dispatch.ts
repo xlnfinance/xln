@@ -42,6 +42,7 @@ import { planEntityOutputs } from './plan';
 import { recordRuntimeSecurityIncident } from '../observability/security-incidents';
 import { FailureDispositionError } from '../../protocol/errors/failure-taxonomy';
 import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
+import { MAX_P2P_ENTITY_INPUTS } from '../../network/p2p/auth/entity-input-envelope';
 
 const routeLog = createStructuredLogger('network.route');
 
@@ -111,6 +112,31 @@ const requireOutputRuntimeFrame = (
 const outputEnvelopeGroupKey = (output: DeliverableEntityInput): string => {
   return safeStringify({
     runtimeId: normalizeRuntimeId(output.runtimeId),
+  });
+};
+
+const batchOrdinaryOutputsBySourceFrame = (
+  outputs: DeliverableEntityInput[],
+  graph: PreparedOutputGraph,
+): DeliverableEntityInput[][] => {
+  // One transport signature may authenticate many independent Entity lanes.
+  // Keep their reliable identities separate, but packetize exact same-frame
+  // inputs together. Cross-j cohorts were removed before this function and
+  // retain their exact two-leg atomic envelopes.
+  const byFrame = new Map<string, DeliverableEntityInput[]>();
+  for (const output of batchOutputsByTarget(outputs, graph)) {
+    const frame = requireOutputRuntimeFrame(output);
+    const key = `${frame.height}:${frame.timestamp}`;
+    const group = byFrame.get(key) ?? [];
+    group.push(output);
+    byFrame.set(key, group);
+  }
+  return [...byFrame.values()].flatMap(group => {
+    const chunks: DeliverableEntityInput[][] = [];
+    for (let offset = 0; offset < group.length; offset += MAX_P2P_ENTITY_INPUTS) {
+      chunks.push(group.slice(offset, offset + MAX_P2P_ENTITY_INPUTS));
+    }
+    return chunks;
   });
 };
 
@@ -238,9 +264,8 @@ const buildOutputEnvelopeGroups = (
       const units = groupAtomicCrossJAdmissionOutputs(group.outputs);
       const atomicUnits = units.filter(unit => unit.atomic);
       const ordinary = units.filter(unit => !unit.atomic).flatMap(unit => unit.outputs);
-      const ordinaryUnits = ordinary.length > 0
-        ? groupAtomicCrossJAdmissionOutputs(batchOutputsByTarget(ordinary, graph))
-        : [];
+      const ordinaryUnits = batchOrdinaryOutputsBySourceFrame(ordinary, graph)
+        .map(outputs => ({ outputs, atomic: false, complete: true }));
       return [...atomicUnits, ...ordinaryUnits]
         .map(unit => ({ targetRuntimeId: group.targetRuntimeId, ...unit }));
     })

@@ -64,6 +64,7 @@ import type { EntityReplica, EntityState, EntityFrame } from '../../../../entity
 import type { JurisdictionEvent } from '../../../../types/jurisdiction-events';
 import {
   buildDurableRuntimeMachineSnapshot,
+  buildStorageRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimePostStateView,
   restoreDurableRuntimeSnapshot,
 } from '../../../../storage/wal/snapshot';
@@ -662,11 +663,11 @@ describe('ordered reliable Entity catch-up', () => {
 
     const committedHistoryFrame = committedFrameTrace.snapshots.at(-1);
     if (!committedHistoryFrame) throw new Error('TEST_RELIABLE_RECOVERY_HISTORY_FRAME_MISSING');
-    const durableMachineAfterHeightOne = buildDurableRuntimeMachineSnapshot(restarted, {
-      pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
-    });
+    const durableMachineAfterHeightOne = buildStorageRuntimeMachineSnapshot(restarted);
     const replayPostStateAfterHeightOne = buildReplayVerifiableRuntimePostStateView(restarted, {
-      pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
+      pendingNetworkOutputs: [],
+      excludeDeferredNetworkMeta: true,
+      excludePersistedHistoryRecords: true,
     });
     const replicaMetaDigest = buildStorageReplicaMetaCommitment(restarted).digest;
     const journal: PersistedFrameJournal = {
@@ -681,6 +682,7 @@ describe('ordered reliable Entity catch-up', () => {
           replayPostStateAfterHeightOne,
         ),
         runtimeOutputRefs: [],
+        runtimeOutputRetryState: [],
       }),
       replicaMetaCheckpoint: true,
       replicaMetaStateMode: 'full',

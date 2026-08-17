@@ -15,7 +15,7 @@ import { encodeBinaryPayload } from './codec/binary-codec';
 import { STORAGE_FRAME_FORMAT, normalizeEntityId } from './keys';
 import { buildReplicaLookup } from './replica/replicas';
 import type { RuntimeFrame, StorageFrameEntityHash } from './types';
-import { buildDurableRuntimeMachineSnapshot } from './wal/snapshot';
+import { buildStorageRuntimeMachineSnapshot } from './wal/snapshot';
 
 const hashStable = (value: unknown): string =>
   computeIntegrityDigest(encodeBinaryPayload(value, 'msgpack'));
@@ -26,7 +26,7 @@ export const prepareStorageCanonicalStateHashes = (
   touchedEntities: string[],
   previousFrame: RuntimeFrame | null,
   replicaLookup = buildReplicaLookup(env),
-  runtimeMachine = buildDurableRuntimeMachineSnapshot(env),
+  runtimeMachine = buildStorageRuntimeMachineSnapshot(env),
 ): { canonicalStateHash: string; canonicalEntityHashes: StorageFrameEntityHash[] } => {
   void touchedEntities;
   void previousFrame;
@@ -69,6 +69,9 @@ export const computeStoragePostStateHash = (input: {
   replicaMetaDigest: string;
   runtimeComponentDigests: readonly Readonly<{ key: string; valueHash: string }>[];
   runtimeOutputRefs: readonly string[];
+  runtimeOutputRetryState: ReadonlyArray<
+    NonNullable<RuntimeFrame['runtimeOutputRetryState']>[number]
+  >;
 }): string => hashStable({
   kind: STORAGE_FRAME_FORMAT.postStateDomain,
   height: input.height,
@@ -76,6 +79,7 @@ export const computeStoragePostStateHash = (input: {
   replicaMetaDigest: input.replicaMetaDigest,
   runtimeComponentDigests: input.runtimeComponentDigests,
   runtimeOutputRefs: input.runtimeOutputRefs,
+  runtimeOutputRetryState: input.runtimeOutputRetryState ?? [],
 });
 
 /** One hash per Runtime component keeps the parent commitment O(dirty). */

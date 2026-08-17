@@ -394,6 +394,65 @@ describe('PersistentRadixValueMap', () => {
     expect(emptied.rootHash()).toBe(PersistentRadixValueMap.empty(options).rootHash());
   });
 
+  test('foldMutations updates 160 existing Account-shaped keys in one overlay', () => {
+    const accountOptions = {
+      ...options,
+      keyBytes: (key: string): Uint8Array => ethers.getBytes(key),
+    };
+    const keys = Array.from(
+      { length: 160 },
+      (_, index) => ethers.keccak256(new TextEncoder().encode(`account-${index}`)),
+    );
+    const base = fromMap(keys.map((key, index) => [key, `before-${index}`]), accountOptions);
+    const beforeRoot = base.rootHash();
+    const mutations = keys.map((key, index) => ({
+      kind: 'put' as const,
+      key,
+      value: `after-${index}`,
+    }));
+    const folded = base.foldMutations(mutations);
+    let sequential = base;
+    for (const mutation of mutations) sequential = sequential.updated(mutation.key, mutation.value);
+
+    expect(folded.size).toBe(160);
+    expect(folded.rootHash()).toBe(sequential.rootHash());
+    expect([...folded]).toEqual([...sequential]);
+    expect(base.rootHash()).toBe(beforeRoot);
+  });
+
+  test('foldMutations inserts multiple siblings across a compressed branch', () => {
+    const hexOptions = {
+      ...options,
+      keyBytes: (key: string): Uint8Array => ethers.getBytes(key),
+    };
+    const base = fromMap([
+      ['0x0000', 'base-0'],
+      ['0x0001', 'base-1'],
+    ], hexOptions);
+    const folded = base.foldMutations([
+      { kind: 'put', key: '0x0100', value: 'new-1' },
+      { kind: 'put', key: '0x0200', value: 'new-2' },
+    ]);
+    const sequential = base
+      .updated('0x0100', 'new-1')
+      .updated('0x0200', 'new-2');
+    const cold = fromMap([
+      ['0x0000', 'base-0'],
+      ['0x0001', 'base-1'],
+      ['0x0100', 'new-1'],
+      ['0x0200', 'new-2'],
+    ], hexOptions);
+
+    expect(folded.hashStats().valueHashes).toBe(0);
+    expect([...folded]).toEqual([...sequential]);
+    expect(folded.rootHash()).toBe(sequential.rootHash());
+    expect(folded.rootHash()).toBe(cold.rootHash());
+    expect([...base]).toEqual([
+      ['0x0000', 'base-0'],
+      ['0x0001', 'base-1'],
+    ]);
+  });
+
   test('foldMutations owns canonical keys and mutable values at its public boundary', () => {
     type Value = { amount: number };
     const owned = {

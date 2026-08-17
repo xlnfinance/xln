@@ -13,6 +13,7 @@ import {
 } from '../../jurisdiction/machine/local-history';
 import { ensureRuntimeInfrastructure } from '../../runtime/infrastructure/runtime-infrastructure';
 import type { RuntimeReplica } from '../../runtime/types';
+import { buildDurableOutputRetryState } from '../../runtime/delivery/durable-output-retry';
 import { clearDatabase } from '../database/clear-database';
 import { computeCanonicalEntityHash, computeCanonicalRuntimeStateHash } from '../canonical-hash';
 import { buildCertifiedEntityLineagePlan } from '../replica/entity-lineage';
@@ -28,7 +29,7 @@ import { buildStorageReplicaMetaCommitment } from '../replica/replicas';
 import { replaceRestoredStorageBase } from '../index';
 import { type StorageDbRole, withStorageWriterLock } from '../runtime-dbs';
 import type { StorageDoc, StoragePersistenceBoundaryHook } from '../types';
-import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
+import { buildStorageRuntimeMachineSnapshot } from '../wal/snapshot';
 
 export interface PersistRestoredRuntimeDeps {
   getStorageDb(env: RuntimeReplica, role?: StorageDbRole): Level<Buffer, Buffer>;
@@ -119,7 +120,9 @@ const persistRestoredRuntimeStateUnlocked = async (
     getAccountJClaimNodeStore(env),
     getLiveAccountJClaimAccumulatorStates(env),
   );
-  const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
+  const runtimeOutputs = env.pendingNetworkOutputs ?? [];
+  const runtimeOutputRetryState = buildDurableOutputRetryState(env, runtimeOutputs);
+  const runtimeMachine = buildStorageRuntimeMachineSnapshot(env);
   const canonicalStateHash = computeCanonicalRuntimeStateHash(
     coordinates.height,
     coordinates.timestamp,
@@ -151,6 +154,8 @@ const persistRestoredRuntimeStateUnlocked = async (
     canonicalEntityHashes: materialized.canonicalEntityHashes,
     canonicalStateHash,
     runtimeMachine,
+    runtimeOutputs,
+    runtimeOutputRetryState,
     certifiedBoardNodes: Array.from(boardNodes, ([hash, node]) => ({ hash, node })),
     consumptionNodes: Array.from(consumptionNodes, ([hash, node]) => ({ hash, node })),
     accountJClaimNodes: Array.from(accountJClaimNodes, ([hash, node]) => ({ hash, node })),

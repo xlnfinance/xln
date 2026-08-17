@@ -146,6 +146,7 @@ export const resolveStorageWriterLockPath = (env: RuntimeReplica): string => {
 };
 
 const activeStorageWriterLocks = new Set<string>();
+const retainedStorageWriterLocks = new Map<string, StorageWriterLockBody>();
 
 type StorageWriterLockBody = {
   owner: string;
@@ -494,10 +495,11 @@ const withBrowserStorageWriterLock = async <T>(env: RuntimeReplica, fn: () => Pr
   });
 };
 
-export const withStorageWriterLock = async <T>(
+const withStorageWriterLockMode = async <T>(
   env: RuntimeReplica,
   fn: () => Promise<T>,
   options: StorageWriterLockOptions = {},
+  retainAfterUse = false,
 ): Promise<T> => {
   if (!nodeProcess) return withBrowserStorageWriterLock(env, fn);
 
@@ -506,6 +508,18 @@ export const withStorageWriterLock = async <T>(
     throw storageWriterLockHeldError(lockPath, null);
   }
   activeStorageWriterLocks.add(lockPath);
+
+  // A live Runtime owns one namespace for its whole process lifetime. Reusing
+  // that durable ownership avoids fsyncing a candidate lock and its directory
+  // for every frame. The PID in the retained body still lets a replacement
+  // process reclaim the namespace immediately after SIGKILL.
+  if (retainedStorageWriterLocks.has(lockPath)) {
+    try {
+      return await fn();
+    } finally {
+      activeStorageWriterLocks.delete(lockPath);
+    }
+  }
 
   const fs = await import('fs/promises');
   const path = await import('path');
@@ -561,11 +575,39 @@ export const withStorageWriterLock = async <T>(
 
     return await fn();
   } finally {
-    if (acquired) {
+    if (acquired && retainAfterUse) {
+      retainedStorageWriterLocks.set(lockPath, acquired);
+    } else if (acquired) {
       await releaseStorageWriterLock(lockPath, acquired, fs);
     }
     activeStorageWriterLocks.delete(lockPath);
   }
+};
+
+export const withStorageWriterLock = <T>(
+  env: RuntimeReplica,
+  fn: () => Promise<T>,
+  options: StorageWriterLockOptions = {},
+): Promise<T> => withStorageWriterLockMode(env, fn, options, false);
+
+export const withRetainedStorageWriterLock = <T>(
+  env: RuntimeReplica,
+  fn: () => Promise<T>,
+): Promise<T> => withStorageWriterLockMode(env, fn, {}, true);
+
+export const releaseRetainedStorageWriterLock = async (
+  env: RuntimeReplica,
+): Promise<void> => {
+  if (!nodeProcess) return;
+  const lockPath = resolveStorageWriterLockPath(env);
+  if (activeStorageWriterLocks.has(lockPath)) {
+    throw storageWriterLockHeldError(lockPath, retainedStorageWriterLocks.get(lockPath) ?? null);
+  }
+  const retained = retainedStorageWriterLocks.get(lockPath);
+  if (!retained) return;
+  const fs = await import('fs/promises');
+  await releaseStorageWriterLock(lockPath, retained, fs);
+  retainedStorageWriterLocks.delete(lockPath);
 };
 
 /**

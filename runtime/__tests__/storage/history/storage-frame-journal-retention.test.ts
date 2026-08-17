@@ -700,7 +700,8 @@ describe('storage frame journal retention', () => {
     expect(Object.keys(persistence?.prepareStages ?? {})).toEqual([
       'historyRead',
       'pendingNodes',
-      'materializedHashes',
+      'materializedGraph',
+      'bookGraph',
       'runtimeMachine',
       'canonicalHashes',
       'replicaCommitment',
@@ -716,6 +717,17 @@ describe('storage frame journal retention', () => {
     const planningStageTotal = Object.values(persistence?.planningStages ?? {})
       .reduce((sum, durationMs) => sum + durationMs, 0);
     expect(planningStageTotal).toBeLessThanOrEqual((persistence?.planning ?? 0) + 0.01);
+    expect(Object.keys(persistence?.outerStages ?? {})).toEqual([
+      'historyPrepare',
+      'deadlineSetup',
+      'writerLockAcquire',
+      'storageCore',
+      'writerLockRelease',
+      'finalize',
+    ]);
+    const outerStageTotal = Object.values(persistence?.outerStages ?? {})
+      .reduce((sum, durationMs) => sum + durationMs, 0);
+    expect(outerStageTotal).toBeLessThanOrEqual((persistence?.outerTotal ?? 0) + 0.01);
     await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [], undefined, new Map())).rejects.toThrow(
       'STORAGE_APPEND_INVARIANT_FAILED',
     );

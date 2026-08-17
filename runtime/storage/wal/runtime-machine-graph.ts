@@ -229,6 +229,22 @@ const boundedRow = (key: Buffer, value: unknown): RuntimeMachineGraphRow => {
   return { key, value: encoded };
 };
 
+const assertStorageRuntimeMachineProjection = (
+  machine: Readonly<Record<string, unknown>>,
+): void => {
+  if (Object.hasOwn(machine, 'pendingNetworkOutputs')) {
+    throw new Error('STORAGE_RUNTIME_MACHINE_PENDING_OUTPUTS_DUPLICATED');
+  }
+  const infrastructure = machine['infrastructure'];
+  if (
+    infrastructure &&
+    typeof infrastructure === 'object' &&
+    Object.hasOwn(infrastructure, 'deferredNetworkMeta')
+  ) {
+    throw new Error('STORAGE_RUNTIME_MACHINE_RETRY_STATE_DUPLICATED');
+  }
+};
+
 /** Parent key already owns the common path; repeating it per child can exceed 10 KB. */
 export const storageValueGraphBranchValue = (branch: PersistentRadixBranchRecord) => ({
   children: branch.children.map(child => ({
@@ -247,6 +263,7 @@ export const prepareRuntimeMachineGraphRows = (
   rows: readonly RuntimeMachineGraphRow[];
 }> => {
   if (!machine) return { rows: [] };
+  assertStorageRuntimeMachineProjection(machine);
   const graph = buildStorageValueGraph(machine);
   const rows = [...graph.nodeRecords()].map(record => record.kind === 'branch'
     ? boundedRow(keyRuntimeMachineBranch(height, record.path), storageValueGraphBranchValue(record))
@@ -439,8 +456,10 @@ export const readRuntimeMachineGraph = async (
       `actual=${graph.rootHash()}/${graph.size}`,
     );
   }
-  return validateDurableRuntimeMachineSnapshot(
+  const machine = validateDurableRuntimeMachineSnapshot(
     rebuildStorageValueGraph(graph),
     'STORAGE_RUNTIME_MACHINE_GRAPH',
   );
+  assertStorageRuntimeMachineProjection(machine);
+  return machine;
 };

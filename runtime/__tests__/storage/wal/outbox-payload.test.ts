@@ -13,9 +13,13 @@ import {
   prepareRuntimeMachineGraphRows,
   readRuntimeMachineGraph,
 } from '../../../storage/wal/runtime-machine-graph';
-import { buildDurableRuntimeMachineSnapshot } from '../../../storage/wal/snapshot';
+import {
+  buildDurableRuntimeMachineSnapshot,
+  buildStorageRuntimeMachineSnapshot,
+} from '../../../storage/wal/snapshot';
 import { createEmptyEnv } from '../../../runtime';
 import { encodeBuffer } from '../../../storage/codec/codec';
+import { buildRouteOutputKey } from '../../../runtime/routing/output-routing';
 
 const ENTITY_ID = `0x${'11'.repeat(32)}`;
 const SIGNER_ID = `0x${'22'.repeat(20)}`;
@@ -220,6 +224,34 @@ describe('content-addressed Entity replay contexts', () => {
 });
 
 describe('Patricia-addressed Runtime checkpoints', () => {
+  test('keeps transport bodies and route keys out of the bounded WAL graph', () => {
+    const largeOutput = {
+      ...output('large-transport'),
+      debugTag: 'x'.repeat(12_000),
+    };
+    const env = createEmptyEnv('runtime-machine-bounded-outbox');
+    env.pendingNetworkOutputs = [largeOutput];
+    env.infrastructure = {
+      deferredNetworkMeta: new Map([[
+        buildRouteOutputKey(largeOutput),
+        { attempts: 7, nextRetryAt: 9_000_000_000_000 },
+      ]]),
+    };
+
+    expect(() => prepareRuntimeMachineGraphRows(
+      8,
+      buildDurableRuntimeMachineSnapshot(env),
+    )).toThrow('STORAGE_RUNTIME_MACHINE_PENDING_OUTPUTS_DUPLICATED');
+
+    const machine = buildStorageRuntimeMachineSnapshot(env);
+    expect(machine['pendingNetworkOutputs']).toBeUndefined();
+    expect((machine['infrastructure'] as Record<string, unknown> | undefined)?.['deferredNetworkMeta'])
+      .toBeUndefined();
+    expect(prepareRuntimeMachineGraphRows(8, machine).rows.every(
+      row => row.value.byteLength < 10_000,
+    )).toBe(true);
+  });
+
   test('restores an exact validated machine without a frame blob', async () => {
     const machine = buildDurableRuntimeMachineSnapshot(
       createEmptyEnv('runtime-machine-fields'),

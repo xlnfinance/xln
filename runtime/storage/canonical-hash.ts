@@ -8,7 +8,7 @@ import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/st
 import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
-import { buildDurableRuntimeMachineSnapshot } from './wal/snapshot';
+import { buildStorageRuntimeMachineSnapshot } from './wal/snapshot';
 import { buildCertifiedEntityLineagePlan } from './replica/entity-lineage';
 
 export type CanonicalFrameEntityHash = {
@@ -165,7 +165,7 @@ export const computeCanonicalStateHashFromEnv = (
 ): string =>
   computeCanonicalStateHashFromRuntimeMachine(
     env,
-    buildDurableRuntimeMachineSnapshot(env, {
+    buildStorageRuntimeMachineSnapshot(env, {
       ...(runtimeInput ? { runtimeInput } : {}),
     }),
   );

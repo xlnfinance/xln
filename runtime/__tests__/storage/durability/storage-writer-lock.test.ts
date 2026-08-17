@@ -5,6 +5,8 @@ import { dirname } from 'path';
 import {
   resolveStorageWriterLockPath,
   STORAGE_WRITER_LOCK_TTL_MS,
+  releaseRetainedStorageWriterLock,
+  withRetainedStorageWriterLock,
   withStorageWriterLock,
   type StorageWriterLockBoundary,
 } from '../../../storage/runtime-dbs';
@@ -21,6 +23,51 @@ const waitForReadyWorkers = async (directory: string, count: number): Promise<vo
 };
 
 const crashFixture = `${import.meta.dir}/../../fixtures/storage/storage-writer-lock-crash-child.ts`;
+const retainedCrashFixture =
+  `${import.meta.dir}/../../fixtures/storage/storage-writer-retained-crash-child.ts`;
+
+test('live Runtime retains one durable namespace lease across frame writes', async () => {
+  const namespace = `storage-writer-retained-${process.pid}-${Date.now()}`;
+  const env = { dbNamespace: namespace, runtimeId: namespace, state: { height: 1 } } as RuntimeReplica;
+  const lockPath = resolveStorageWriterLockPath(env);
+  let calls = 0;
+  try {
+    await withRetainedStorageWriterLock(env, async () => { calls += 1; });
+    expect(existsSync(lockPath)).toBe(true);
+    env.state.height = 2;
+    await withRetainedStorageWriterLock(env, async () => { calls += 1; });
+    expect(calls).toBe(2);
+    expect(existsSync(lockPath)).toBe(true);
+    await releaseRetainedStorageWriterLock(env);
+    expect(existsSync(lockPath)).toBe(false);
+  } finally {
+    await releaseRetainedStorageWriterLock(env);
+    rmSync(lockPath, { force: true });
+  }
+});
+
+test('replacement process reclaims a retained lease immediately after SIGKILL', async () => {
+  const namespace = `storage-writer-retained-kill-${process.pid}-${Date.now()}`;
+  const env = { dbNamespace: namespace, runtimeId: namespace, state: { height: 2 } } as RuntimeReplica;
+  const lockPath = resolveStorageWriterLockPath(env);
+  const child = Bun.spawn({
+    cmd: [process.execPath, retainedCrashFixture, namespace],
+    cwd: process.cwd(),
+    env: process.env,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const exitCode = await child.exited;
+  const stderr = await new Response(child.stderr).text();
+  expect(exitCode, stderr).toBe(137);
+  expect(child.signalCode, stderr).toBe('SIGKILL');
+  try {
+    await withStorageWriterLock(env, async () => {});
+    expect(existsSync(lockPath)).toBe(false);
+  } finally {
+    rmSync(lockPath, { force: true });
+  }
+});
 
 for (const boundary of [
   'after-candidate-sync',

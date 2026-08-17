@@ -4,10 +4,17 @@ import { deriveSwapNetAuthorization } from '../../../../../account/swap/swap-net
 import { getStaticSwapTokenDimensions } from '../../../../../orderbook';
 import type { EntityTx } from '../../../../../types/entity-tx';
 import { deriveExecutableBidForAsk } from '../boundary/worker-book-boundary';
-import { distributeLoadOrders } from './worker-lanes';
 
 export const LOAD_BASE_TOKEN_ID = 2;
 export const LOAD_QUOTE_TOKEN_ID = 1;
+
+const sustainedOrdersPerLane = (totalOrders: number, lanes: number): number[] => {
+  if (
+    !Number.isSafeInteger(totalOrders) || !Number.isSafeInteger(lanes) ||
+    totalOrders < 1 || lanes < 1 || totalOrders % lanes !== 0
+  ) throw new Error('PRODUCTION_SWAP_LOAD_SUSTAINED_LANE_PLAN_INVALID');
+  return Array.from({ length: lanes }, () => totalOrders / lanes);
+};
 
 export const buildSameLoadOffers = (
   hubEntityId: string,
@@ -65,30 +72,18 @@ export const buildSameLoadAsks = (
   }));
 };
 
-export const quoteCreditCeiling = (
-  prices: readonly bigint[],
-  minimumTradeSize: bigint,
-  swaps: number,
-): bigint => {
-  const quotes = prices.map(priceTicks =>
-    deriveExecutableBidForAsk(LOAD_BASE_TOKEN_ID, LOAD_QUOTE_TOKEN_ID, minimumTradeSize, priceTicks).quoteAmount
-  );
-  const maximum = quotes.reduce((highest, quote) => quote > highest ? quote : highest, 0n);
-  if (maximum <= 0n) throw new Error('PRODUCTION_SWAP_LOAD_MM_ASK_MISSING');
-  return maximum * BigInt(swaps);
-};
-
 export const buildParallelLaneOfferPlan = (
   hubEntityId: string,
+  offerNamespace: string,
   swaps: number,
   lanes: number,
   minimumTradeSize: bigint,
   executableLimitPriceTicks: bigint,
 ): ReadonlyArray<Readonly<{ offers: EntityTx[]; quoteCredit: bigint; baseCredit: bigint }>> =>
-  distributeLoadOrders(swaps, lanes).map((count, laneIndex) => {
+  sustainedOrdersPerLane(swaps, lanes).map((count, laneIndex) => {
     const offers = buildSameLoadOffers(
       hubEntityId,
-      `prod-load-lane-${laneIndex + 1}`,
+      `${offerNamespace}-${laneIndex + 1}`,
       Array.from({ length: count }, () => executableLimitPriceTicks),
       minimumTradeSize,
     );
@@ -101,6 +96,7 @@ export const buildParallelLaneOfferPlan = (
 
 export const buildIndependentMakerTakerPlan = (
   hubEntityId: string,
+  offerNamespace: string,
   swaps: number,
   lanesPerSide: number,
   minimumTradeSize: bigint,
@@ -109,11 +105,11 @@ export const buildIndependentMakerTakerPlan = (
   makerPlans: ReturnType<typeof buildParallelLaneOfferPlan>;
   takerPlans: ReturnType<typeof buildParallelLaneOfferPlan>;
 }> => {
-  const counts = distributeLoadOrders(swaps, lanesPerSide);
+  const counts = sustainedOrdersPerLane(swaps, lanesPerSide);
   const makerPlans = counts.map((count, laneIndex) => {
     const offers = buildSameLoadAsks(
       hubEntityId,
-      `prod-load-maker-${laneIndex + 1}`,
+      `${offerNamespace}-maker-${laneIndex + 1}`,
       count,
       minimumTradeSize,
       priceTicks,
@@ -126,6 +122,7 @@ export const buildIndependentMakerTakerPlan = (
   });
   const takerPlans = buildParallelLaneOfferPlan(
     hubEntityId,
+    `${offerNamespace}-taker`,
     swaps,
     lanesPerSide,
     minimumTradeSize,

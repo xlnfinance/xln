@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -32,6 +32,7 @@ import {
   runAdversaryProfile,
   type MeshHealthPayload,
 } from '../../../scenarios/cross-j/mm-mesh-adversary';
+import { parseSameLoadSchedule } from '../benchmark/production-swap-load/same/load-schedule';
 
 type ManagedProcess = {
   name: string;
@@ -225,6 +226,9 @@ const runProductionSwapWorker = (
   mode: string,
   swaps: string,
   lanes: string,
+  rounds: string,
+  cadenceMs: string,
+  laneOffset = '0',
   restartProcessIds?: RestartProcessIds,
 ): void => {
   const worker = join(
@@ -238,6 +242,9 @@ const runProductionSwapWorker = (
     '--mode', mode,
     '--swaps', swaps,
     '--lanes', lanes,
+    '--rounds', rounds,
+    '--cadence-ms', cadenceMs,
+    '--lane-offset', laneOffset,
     ...(restartProcessIds ? [
       '--server-pid-before-restart', String(restartProcessIds.before),
       '--server-pid-after-restart', String(restartProcessIds.after),
@@ -252,10 +259,25 @@ const runProductionSwapLoadSmoke = async (): Promise<void> => {
   if (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] !== '1') return;
   const swaps = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SWAPS'] || '1';
   const lanes = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_LANES'] || '1';
+  const rounds = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_ROUNDS'] || '1';
+  const cadenceMs = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_CADENCE_MS'] || '1000';
   const mode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || 'same';
   if (mode !== 'same' && mode !== 'cross') throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_MODE_INVALID:${mode}`);
+  const scheduleRaw = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SCHEDULE'];
+  if (scheduleRaw !== undefined) {
+    if (mode !== 'same') throw new Error('LOCAL_PROD_SMOKE_SWAP_LOAD_SCHEDULE_REQUIRES_SAME');
+    for (const stage of parseSameLoadSchedule(scheduleRaw)) {
+      recordStage('production-swap-load:start', stage);
+      runProductionSwapWorker(mode, String(stage.swaps), String(stage.lanes), rounds, cadenceMs, String(stage.laneOffset));
+      const source = join(workDir, 'production-swap-load-report.json');
+      const target = join(workDir, `production-swap-load-report-${stage.swaps}-${stage.lanes}.json`);
+      renameSync(source, target);
+      recordStage('production-swap-load:complete', { ...stage, report: target });
+    }
+    return;
+  }
   recordStage('production-swap-load:start', { mode, burstSize: swaps, lanes });
-  runProductionSwapWorker(mode, swaps, lanes);
+  runProductionSwapWorker(mode, swaps, lanes, rounds, cadenceMs);
   recordStage('production-swap-load:complete', { mode, burstSize: swaps, lanes });
   if (process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_RECOVERY'] !== '1') return;
   if (mode !== 'cross' || swaps !== '1') {
@@ -265,7 +287,7 @@ const runProductionSwapLoadSmoke = async (): Promise<void> => {
   const restartProcessIds = await restartManaged('server');
   await waitForHealth();
   recordStage('production-swap-load:restart-ready');
-  runProductionSwapWorker('cross-recovery', '1', '1', restartProcessIds);
+  runProductionSwapWorker('cross-recovery', '1', '1', '1', '1000', '0', restartProcessIds);
   recordStage('production-swap-load:recovery-complete');
 };
 

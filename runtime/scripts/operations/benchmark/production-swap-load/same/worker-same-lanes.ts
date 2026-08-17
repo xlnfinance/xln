@@ -19,10 +19,11 @@ import type { SettlementAccountPair } from '../settlement-reader';
 
 export type ParallelLaneSubmission = Readonly<{
   finalBook: LoadBookSnapshot;
-  runtimeInputBatches: 1;
+  runtimeInputBatches: number;
   enqueueAckElapsedMs: number;
   commandObservedElapsedMs: number;
   economicCompletionElapsedMs: number;
+  roundSubmissionLagMs: readonly number[];
   settlementPairs: readonly SettlementAccountPair[];
 }>;
 
@@ -35,13 +36,14 @@ export type PreparedParallelSameLoad = Readonly<{
 
 type IndependentLanePlans = PreparedParallelSameLoad['makerPlans'];
 
-const buildLaneOfferInputs = (
+export const buildLaneRoundOfferInputs = (
   identities: readonly LoadIdentity[],
   plans: IndependentLanePlans,
+  round: number,
 ): RuntimeInput['entityInputs'] => identities.map((identity, index) => ({
   entityId: identity.entityId,
   signerId: identity.signerId,
-  entityTxs: plans[index]!.offers,
+  entityTxs: [plans[index]!.offers[round]!],
 }));
 
 const settlementPairs = (
@@ -64,8 +66,10 @@ export const prepareParallelSameLoad = async (options: {
   hubIdentity: LoadIdentity;
   initialBook: LoadBookSnapshot;
   minimumTradeSize: bigint;
-  swaps: number;
+  swapsPerRound: number;
+  rounds: number;
   lanes: number;
+  laneOffset: number;
 }): Promise<PreparedParallelSameLoad> => {
   const highestVisibleAsk = options.initialBook.executableAskPriceTicks.at(-1);
   const bestVisibleAsk = options.initialBook.executableAskPriceTicks[0];
@@ -84,12 +88,15 @@ export const prepareParallelSameLoad = async (options: {
   // independently signed maker Account settled against a distinct taker lane.
   const { makerPlans, takerPlans } = buildIndependentMakerTakerPlan(
     options.hubIdentity.entityId,
-    options.swaps,
+    `prod-load-${options.laneOffset}`,
+    options.swapsPerRound * options.rounds,
     options.lanes,
     options.minimumTradeSize,
     anchor,
   );
   if (
+    makerPlans.some(plan => plan.offers.length !== options.rounds) ||
+    takerPlans.some(plan => plan.offers.length !== options.rounds) ||
     makerPlans.some(plan => plan.baseCredit <= 0n || plan.quoteCredit <= 0n) ||
     takerPlans.some(plan => plan.baseCredit <= 0n || plan.quoteCredit <= 0n)
   ) {
@@ -101,6 +108,7 @@ export const prepareParallelSameLoad = async (options: {
     load: options.load,
     hubIdentity: options.hubIdentity,
     lanes: options.lanes,
+    laneOffset: options.laneOffset,
     role: 'maker',
     laneGrantedCreditTokenId: LOAD_QUOTE_TOKEN_ID,
     laneGrantedCreditAmounts: makerPlans.map(plan => plan.quoteCredit),
@@ -113,6 +121,7 @@ export const prepareParallelSameLoad = async (options: {
     load: options.load,
     hubIdentity: options.hubIdentity,
     lanes: options.lanes,
+    laneOffset: options.laneOffset,
     role: 'taker',
     laneGrantedCreditTokenId: LOAD_BASE_TOKEN_ID,
     laneGrantedCreditAmounts: takerPlans.map(plan => plan.baseCredit),
@@ -128,32 +137,42 @@ export const submitPreparedParallelSameLoad = async (options: {
   hubIdentity: LoadIdentity;
   initialBook: LoadBookSnapshot;
   initialFrame: LoadFrame;
-  swaps: number;
+  swapsPerRound: number;
+  rounds: number;
+  cadenceMs: number;
   prepared: PreparedParallelSameLoad;
 }): Promise<ParallelLaneSubmission> => {
   const startedAt = performance.now();
-  const observed = await sendObserved(
-    options.load,
-    `prod-load-parallel-${options.initialFrame.height}-${options.initialBook.tradeCount}`,
-    {
+  let enqueueAckElapsedMs = 0;
+  let commandObservedElapsedMs = 0;
+  const roundSubmissionLagMs: number[] = [];
+  for (let round = 0; round < options.rounds; round += 1) {
+    const dueAt = startedAt + round * options.cadenceMs;
+    const remainingMs = dueAt - performance.now();
+    if (remainingMs > 0) await new Promise(resolve => setTimeout(resolve, remainingMs));
+    roundSubmissionLagMs.push(Math.max(0, Math.ceil(performance.now() - dueAt)));
+    const observed = await sendObserved(options.load, `prod-load-round-${options.initialFrame.height}-${round + 1}`, {
       runtimeTxs: [],
       entityInputs: [
-        ...buildLaneOfferInputs(options.prepared.makerIdentities, options.prepared.makerPlans),
-        ...buildLaneOfferInputs(options.prepared.takerIdentities, options.prepared.takerPlans),
+        ...buildLaneRoundOfferInputs(options.prepared.makerIdentities, options.prepared.makerPlans, round),
+        ...buildLaneRoundOfferInputs(options.prepared.takerIdentities, options.prepared.takerPlans, round),
       ],
-    },
-  );
+    });
+    enqueueAckElapsedMs += observed.enqueueAckElapsedMs;
+    commandObservedElapsedMs += observed.commandObservedElapsedMs;
+  }
   const finalBook = await waitForTradeCount(
     options.hub,
     options.hubIdentity.entityId,
-    options.initialBook.tradeCount + options.swaps,
+    options.initialBook.tradeCount + options.swapsPerRound * options.rounds,
   );
   return {
     finalBook,
-    runtimeInputBatches: 1,
-    enqueueAckElapsedMs: observed.enqueueAckElapsedMs,
-    commandObservedElapsedMs: observed.commandObservedElapsedMs,
+    runtimeInputBatches: options.rounds,
+    enqueueAckElapsedMs,
+    commandObservedElapsedMs,
     economicCompletionElapsedMs: Math.max(1, Math.ceil(performance.now() - startedAt)),
+    roundSubmissionLagMs,
     settlementPairs: [
       ...settlementPairs(options.hubIdentity.entityId, options.prepared.makerIdentities, options.prepared.makerPlans),
       ...settlementPairs(options.hubIdentity.entityId, options.prepared.takerIdentities, options.prepared.takerPlans),

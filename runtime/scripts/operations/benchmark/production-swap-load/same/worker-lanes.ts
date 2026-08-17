@@ -19,25 +19,14 @@ import {
   type ConnectedRuntime,
 } from '../worker-runtime';
 
-export const MAX_LOAD_ORDERS_PER_ACCOUNT_FRAME = 5;
-const CONTROL_CONCURRENCY = 32;
+const CONTROL_CONCURRENCY = 4;
+const CONTROL_BATCH_PAUSE_MS = 100;
+// Non-reliable route identity retains the complete transaction fingerprints.
+// Keep setup frames below the 10 KB durable Runtime-machine row limit: the
+// observed 50-Account shape encoded to 21,598 bytes, while 16 leaves headroom.
+const PROVISIONING_ACCOUNTS_PER_FRAME = 16;
 const VISIBILITY_TIMEOUT_MS = 60_000;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
-
-export const distributeLoadOrders = (swaps: number, lanes: number): number[] => {
-  if (!Number.isSafeInteger(swaps) || swaps < 1 || !Number.isSafeInteger(lanes) || lanes < 1) {
-    throw new Error('PRODUCTION_SWAP_LOAD_LANE_DISTRIBUTION_INVALID');
-  }
-  if (swaps > lanes * MAX_LOAD_ORDERS_PER_ACCOUNT_FRAME) {
-    throw new Error('PRODUCTION_SWAP_LOAD_LANE_DISTRIBUTION_EXCEEDS_FRAME_CAP');
-  }
-  const ordersPerLane = Math.floor(swaps / lanes);
-  const lanesWithOneMoreOrder = swaps % lanes;
-  return Array.from(
-    { length: lanes },
-    (_, index) => ordersPerLane + (index < lanesWithOneMoreOrder ? 1 : 0),
-  );
-};
 
 export const runtimeHttpBaseFromWsUrl = (raw: string): string => {
   const url = new URL(raw);
@@ -57,28 +46,54 @@ export const deriveLoadLaneIdentities = (
   meshRootSeed: string,
   lanes: number,
   role: 'maker' | 'taker' = 'taker',
-): ManagedEntityIdentity[] => Array.from({ length: lanes }, (_, index) => deriveManagedEntityIdentity({
-  name: `Load ${role === 'maker' ? 'Maker' : 'Taker'} ${String(index + 1).padStart(4, '0')}`,
+  laneOffset = 0,
+): ManagedEntityIdentity[] => Array.from({ length: lanes }, (_, index) => {
+  const laneNumber = laneOffset + index + 1;
+  return deriveManagedEntityIdentity({
+  name: `Load ${role === 'maker' ? 'Maker' : 'Taker'} ${String(laneNumber).padStart(4, '0')}`,
   seed: deriveMeshChildSeed(
     meshRootSeed,
     role === 'taker'
-      ? `production-swap-load:lane:${index + 1}`
-      : `production-swap-load:maker-lane:${index + 1}`,
+      ? `production-swap-load:lane:${laneNumber}`
+      : `production-swap-load:maker-lane:${laneNumber}`,
   ),
   signerLabel: 'owner',
   position: { x: index % 32, y: Math.floor(index / 32), z: 0 },
-}));
+  });
+});
+
+export const partitionLoadControlBatches = <T>(values: readonly T[]): readonly (readonly T[])[] => {
+  const batches: T[][] = [];
+  for (let offset = 0; offset < values.length; offset += CONTROL_CONCURRENCY) {
+    batches.push(values.slice(offset, offset + CONTROL_CONCURRENCY));
+  }
+  return batches;
+};
+
+export const partitionLoadProvisioningBatches = <T>(
+  values: readonly T[],
+): readonly (readonly T[])[] => {
+  const batches: T[][] = [];
+  for (let offset = 0; offset < values.length; offset += PROVISIONING_ACCOUNTS_PER_FRAME) {
+    batches.push(values.slice(offset, offset + PROVISIONING_ACCOUNTS_PER_FRAME));
+  }
+  return batches;
+};
 
 const runInBatches = async <T>(
   values: readonly T[],
   effect: (value: T, index: number) => Promise<void>,
 ): Promise<void> => {
-  for (let offset = 0; offset < values.length; offset += CONTROL_CONCURRENCY) {
-    await Promise.all(
-      values
-        .slice(offset, offset + CONTROL_CONCURRENCY)
-        .map((value, batchIndex) => effect(value, offset + batchIndex)),
-    );
+  let offset = 0;
+  const batches = partitionLoadControlBatches(values);
+  for (let index = 0; index < batches.length; index += 1) {
+    const batch = batches[index]!;
+    await Promise.all(batch.map((value, batchIndex) => effect(value, offset + batchIndex)));
+    offset += batch.length;
+    // Provisioning is outside the measured workload. Pacing it below the
+    // authenticated operator API budget avoids manufacturing a setup-only
+    // rate-limit failure that says nothing about Hub settlement capacity.
+    if (index + 1 < batches.length) await sleep(CONTROL_BATCH_PAUSE_MS);
   }
 };
 
@@ -145,6 +160,7 @@ export const setupParallelLoadLanes = async (options: {
   load: ConnectedRuntime;
   hubIdentity: LoadIdentity;
   lanes: number;
+  laneOffset: number;
   role: 'maker' | 'taker';
   laneGrantedCreditTokenId: number;
   laneGrantedCreditAmounts: readonly bigint[];
@@ -153,7 +169,7 @@ export const setupParallelLoadLanes = async (options: {
 }): Promise<LoadIdentity[]> => {
   const rootSeed = readFileSync(join(options.workDir, 'secrets', 'mesh-root.seed'), 'utf8').trim();
   if (!rootSeed) throw new Error('PRODUCTION_SWAP_LOAD_MESH_ROOT_SEED_MISSING');
-  const identities = deriveLoadLaneIdentities(rootSeed, options.lanes, options.role);
+  const identities = deriveLoadLaneIdentities(rootSeed, options.lanes, options.role, options.laneOffset);
   if (
     options.laneGrantedCreditAmounts.length !== identities.length ||
     options.hubGrantedCreditAmounts.length !== identities.length
@@ -171,7 +187,7 @@ export const setupParallelLoadLanes = async (options: {
   const existing = new Set((await control.listEntities()).map(entity => entity.entityId));
   const missing = identities.filter(identity => !existing.has(identity.entityId));
   if (missing.length > 0) {
-    await sendObserved(options.load, `prod-load-import-${options.role}-${options.lanes}`, {
+    await sendObserved(options.load, `prod-load-import-${options.role}-${options.laneOffset}-${options.lanes}`, {
       runtimeTxs: buildLaneImports(missing), entityInputs: [],
     });
   }
@@ -179,47 +195,51 @@ export const setupParallelLoadLanes = async (options: {
   const localEntityIds = (await control.listEntities()).map(entity => entity.entityId).sort();
   await control.configureP2P({ advertiseEntityIds: localEntityIds, gossipPollMs: 250 });
   await waitForVisibleEntities(options.hub, identities.map(identity => identity.entityId), 'PRODUCTION_SWAP_LOAD_LANE_PROFILES_NOT_VISIBLE');
-  await sendObserved(options.load, `prod-load-open-${options.role}-${options.lanes}`, {
-    runtimeTxs: [],
-    entityInputs: buildLaneAccountInputs(
-      identities,
-      options.hubIdentity.entityId,
-      options.laneGrantedCreditTokenId,
-      options.laneGrantedCreditAmounts,
-    ),
-  });
-  await runInBatches(identities, (identity, index) => {
-    return waitForCredit(
+  let laneOffset = 0;
+  const accountBatches = partitionLoadProvisioningBatches(identities);
+  for (let batchIndex = 0; batchIndex < accountBatches.length; batchIndex += 1) {
+    const batch = accountBatches[batchIndex]!;
+    const laneCredits = options.laneGrantedCreditAmounts.slice(laneOffset, laneOffset + batch.length);
+    const hubCredits = options.hubGrantedCreditAmounts.slice(laneOffset, laneOffset + batch.length);
+    await sendObserved(options.load, `prod-load-open-${options.role}-${options.laneOffset}-${options.lanes}-${batchIndex + 1}`, {
+      runtimeTxs: [],
+      entityInputs: buildLaneAccountInputs(
+        batch,
+        options.hubIdentity.entityId,
+        options.laneGrantedCreditTokenId,
+        laneCredits,
+      ),
+    });
+    await runInBatches(batch, (identity, index) => waitForCredit(
       options.hub,
       options.hubIdentity.entityId,
       identity.entityId,
       options.laneGrantedCreditTokenId,
-      options.laneGrantedCreditAmounts[index]!,
-    );
-  });
-  await sendObserved(options.hub, `prod-load-credit-${options.role}-lanes-${options.lanes}`, {
-    runtimeTxs: [],
-    entityInputs: [{
-      entityId: options.hubIdentity.entityId,
-      signerId: options.hubIdentity.signerId,
-      entityTxs: identities.map((identity, index) => ({
-        type: 'extendCredit' as const,
-        data: {
-          counterpartyEntityId: identity.entityId,
-          tokenId: options.hubGrantedCreditTokenId,
-          amount: options.hubGrantedCreditAmounts[index]!,
-        },
-      })),
-    }],
-  });
-  await runInBatches(identities, (identity, index) => {
-    return waitForCredit(
+      laneCredits[index]!,
+    ));
+    await sendObserved(options.hub, `prod-load-credit-${options.role}-${options.laneOffset}-${options.lanes}-${batchIndex + 1}`, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: options.hubIdentity.entityId,
+        signerId: options.hubIdentity.signerId,
+        entityTxs: batch.map((identity, index) => ({
+          type: 'extendCredit' as const,
+          data: {
+            counterpartyEntityId: identity.entityId,
+            tokenId: options.hubGrantedCreditTokenId,
+            amount: hubCredits[index]!,
+          },
+        })),
+      }],
+    });
+    await runInBatches(batch, (identity, index) => waitForCredit(
       options.load,
       identity.entityId,
       options.hubIdentity.entityId,
       options.hubGrantedCreditTokenId,
-      options.hubGrantedCreditAmounts[index]!,
-    );
-  });
+      hubCredits[index]!,
+    ));
+    laneOffset += batch.length;
+  }
   return identities.map(identity => ({ entityId: identity.entityId, signerId: identity.signerId }));
 };

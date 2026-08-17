@@ -26,7 +26,7 @@ import {
   saveRuntimeFrameToStorage,
   type RuntimeFrame,
 } from '..';
-import { withStorageWriterLock } from '../runtime-dbs';
+import { withRetainedStorageWriterLock } from '../runtime-dbs';
 import type { RuntimeFrameCommitStatus } from './commit-status';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 import {
@@ -43,6 +43,30 @@ export {
 
 const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
 const formatPerfMs = (value: number): string => value.toFixed(2);
+
+type StorageOuterPerfMarks = {
+  startedAt: number;
+  historyPreparedAt: number;
+  lockStartedAt: number;
+  lockAcquiredAt: number;
+  coreDoneAt: number;
+  lockReleasedAt: number;
+};
+
+const buildStorageOuterPerf = (
+  marks: StorageOuterPerfMarks,
+  finishedAt: number,
+): { outerStages: Record<string, number>; outerTotal: number } => ({
+  outerStages: {
+    historyPrepare: marks.historyPreparedAt - marks.startedAt,
+    deadlineSetup: marks.lockStartedAt - marks.historyPreparedAt,
+    writerLockAcquire: marks.lockAcquiredAt - marks.lockStartedAt,
+    storageCore: marks.coreDoneAt - marks.lockAcquiredAt,
+    writerLockRelease: marks.lockReleasedAt - marks.coreDoneAt,
+    finalize: finishedAt - marks.lockReleasedAt,
+  },
+  outerTotal: finishedAt - marks.startedAt,
+});
 
 class RuntimeFrameStorageError extends Error {
   constructor(
@@ -121,6 +145,7 @@ const saveRuntimeEnvironment = async (
     ReturnType<typeof saveRuntimeFrameToStorage>
   >['persistencePerfMs'];
 }> => {
+  const outerStartedAt = getPerfMs();
   if (readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
@@ -129,11 +154,21 @@ const saveRuntimeEnvironment = async (
     env.state.height,
     env.state.timestamp,
   );
+  const outerMarks: StorageOuterPerfMarks = {
+    startedAt: outerStartedAt,
+    historyPreparedAt: getPerfMs(),
+    lockStartedAt: 0,
+    lockAcquiredAt: 0,
+    coreDoneAt: 0,
+    lockReleasedAt: 0,
+  };
   let saveResult: Awaited<ReturnType<typeof saveRuntimeFrameToStorage>>;
   try {
-    saveResult = await withStorageWriteDeadline(env, markStorageProgress =>
-      withStorageWriterLock(env, () =>
-        saveRuntimeFrameToStorage({
+    saveResult = await withStorageWriteDeadline(env, markStorageProgress => {
+      outerMarks.lockStartedAt = getPerfMs();
+      return withRetainedStorageWriterLock(env, async () => {
+        outerMarks.lockAcquiredAt = getPerfMs();
+        const result = await saveRuntimeFrameToStorage({
           env,
           tryOpenDb: targetEnv =>
             deps.tryOpenStorageDb(targetEnv, 'current'),
@@ -159,9 +194,14 @@ const saveRuntimeEnvironment = async (
           onPersistenceProgress: markStorageProgress,
           onPersistenceBoundary: boundary =>
             markStorageProgress(`boundary:${boundary}`),
-        }),
-      ),
-    );
+        });
+        outerMarks.coreDoneAt = getPerfMs();
+        return result;
+      }).then(result => {
+        outerMarks.lockReleasedAt = getPerfMs();
+        return result;
+      });
+    });
   } catch (error) {
     let commitStatus: RuntimeFrameCommitStatus = 'unknown';
     if (!(error instanceof RuntimeStorageWriteTimeoutError)) {
@@ -218,10 +258,11 @@ const saveRuntimeEnvironment = async (
   if (saveResult.materialized) {
     dropOverlay(env, saveResult.materializedOverlayKeys);
   }
+  const outerPerf = buildStorageOuterPerf(outerMarks, getPerfMs());
   return {
     staleWriterStopped: false,
     ...(saveResult.persistencePerfMs
-      ? { persistencePerfMs: saveResult.persistencePerfMs }
+      ? { persistencePerfMs: { ...saveResult.persistencePerfMs, ...outerPerf } }
       : {}),
   };
 };

@@ -19,7 +19,7 @@ import {
 } from '../../replica/replicas';
 import type { PersistedFrameJournal } from '../../types';
 import {
-  buildDurableRuntimeMachineSnapshot,
+  buildStorageRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimePostStateView,
 } from '../../wal/snapshot';
 import {
@@ -82,10 +82,12 @@ export const verifyRecoveryJournalFrame = (
     runtimeComponentDigests: computeRuntimePostStateComponentDigests(
       buildReplayVerifiableRuntimePostStateView(env, {
         pendingNetworkOutputs: [],
+        excludeDeferredNetworkMeta: true,
         excludePersistedHistoryRecords: true,
       }),
     ),
     runtimeOutputRefs: frame.runtimeOutputRefs ?? [],
+    runtimeOutputRetryState: frame.runtimeOutputRetryState ?? [],
   });
   if (postStateHash !== frame.postStateHash) {
     throw new Error(
@@ -96,7 +98,7 @@ export const verifyRecoveryJournalFrame = (
   if (frame.runtimeStateHash) {
     const stateHash = computeCanonicalStateHashFromEnv(env);
     if (stateHash !== frame.runtimeStateHash) {
-      const actualMachine = buildDurableRuntimeMachineSnapshot(env);
+      const actualMachine = buildStorageRuntimeMachineSnapshot(env);
       const fields = frame.runtimeMachine
         ? listRecoveryRuntimeMachineMismatchFields(
             frame.runtimeMachine,

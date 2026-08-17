@@ -1,6 +1,11 @@
 import { encodeBuffer, writeBatch } from '../codec/codec';
 import { hashCertifiedBoardNode } from '../../jurisdiction/machine/board-registry';
 import type { CertifiedBoardPatriciaNode } from '../../types/entity-board-registry';
+import type { RoutedEntityInput } from '../../runtime/types';
+import {
+  validateDurableOutputRetryState,
+  type DurableOutputRetryState,
+} from '../../runtime/delivery/durable-output-retry';
 import { hashConsumptionNode, type ConsumptionNode } from '../../entity/consumption/consumption-accumulator';
 import {
   collectReachableAccountJClaimNodes,
@@ -44,6 +49,7 @@ import { verifyStorageSnapshotIntegrity } from '../read/verify';
 import { verifyStorageTailIntegrity } from '../read/verify';
 import { projectReplayVerifiableRuntimePostStateView } from '../wal/snapshot';
 import { prepareRuntimeMachineGraphRows } from '../wal/runtime-machine-graph';
+import { prepareRuntimeOutputPayloadRows } from '../wal/outbox-payload';
 import { buildHistoryViewPuts } from '../history/history-view';
 import type {
   RuntimeDbLike,
@@ -75,6 +81,8 @@ export type RestoredStorageBaseOptions = {
   canonicalStateHash: string;
   canonicalEntityHashes: StorageFrameEntityHash[];
   runtimeMachine: Record<string, unknown>;
+  runtimeOutputs: readonly RoutedEntityInput[];
+  runtimeOutputRetryState: readonly DurableOutputRetryState[];
   certifiedBoardNodes: Array<{ hash: string; node: CertifiedBoardPatriciaNode }>;
   consumptionNodes: Array<{ hash: string; node: ConsumptionNode }>;
   accountJClaimNodes: Array<{ hash: string; node: AccountJClaimNode }>;
@@ -255,11 +263,13 @@ const prepareCertifiedNodes = (
 };
 
 type RestoreNodeRows = ReturnType<typeof prepareCertifiedNodes>;
+type RestoreOutputPayloads = ReturnType<typeof prepareRuntimeOutputPayloadRows>;
 
 const publishNewHistoryBase = async (
   options: RestoredStorageBaseOptions,
   liveRows: readonly PhysicalRow[],
   nodes: RestoreNodeRows,
+  outputPayloads: RestoreOutputPayloads,
   replicaMetaDigest: string,
   postStateHash: string,
 ): Promise<void> => {
@@ -294,6 +304,12 @@ const publishNewHistoryBase = async (
     canonicalEntityHashes: options.canonicalEntityHashes,
     runtimeStateHash: options.canonicalStateHash,
     runtimeMachineRoot: runtimeMachineGraph.root,
+    ...(outputPayloads.refs.length > 0
+      ? { runtimeOutputRefs: [...outputPayloads.refs] }
+      : {}),
+    ...(options.runtimeOutputRetryState.length > 0
+      ? { runtimeOutputRetryState: [...options.runtimeOutputRetryState] }
+      : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     touchedEntities: Array.from(new Set(options.docs.map(doc => doc.entityId))).sort(),
     touchedAccounts,
@@ -321,6 +337,7 @@ const publishNewHistoryBase = async (
     ...nodes.certifiedBoardNodes,
     ...nodes.consumptionNodes,
     ...nodes.accountJClaimNodes,
+    ...outputPayloads.rows,
     ...runtimeMachineGraph.rows,
     ...liveRows,
   ];
@@ -377,6 +394,12 @@ export const replaceRestoredStorageBase = async (
   }
   const liveRows = [...liveStateGraph.puts, ...bookRows];
   const replicaMetaDigest = computeStorageReplicaMetaDigest(options.replicaMetas);
+  validateDurableOutputRetryState(
+    options.runtimeOutputRetryState,
+    options.runtimeOutputs,
+    'RECOVERY_IMPORT_RUNTIME_OUTPUT_RETRY_STATE_INVALID',
+  );
+  const outputPayloads = prepareRuntimeOutputPayloadRows(options.runtimeOutputs);
   const postStateHash = computeStoragePostStateHash({
     height: options.height,
     timestamp: options.timestamp,
@@ -384,7 +407,8 @@ export const replaceRestoredStorageBase = async (
     runtimeComponentDigests: computeRuntimePostStateComponentDigests(
       projectReplayVerifiableRuntimePostStateView(options.runtimeMachine),
     ),
-    runtimeOutputRefs: [],
+    runtimeOutputRefs: outputPayloads.refs,
+    runtimeOutputRetryState: options.runtimeOutputRetryState,
   });
 
   const currentBody = options.currentDb.batch();
@@ -415,6 +439,13 @@ export const replaceRestoredStorageBase = async (
     return;
   }
 
-  await publishNewHistoryBase(options, liveRows, nodes, replicaMetaDigest, postStateHash);
+  await publishNewHistoryBase(
+    options,
+    liveRows,
+    nodes,
+    outputPayloads,
+    replicaMetaDigest,
+    postStateHash,
+  );
 };
 import { Buffer } from '../../infra/platform-crypto';
