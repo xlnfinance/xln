@@ -1,3 +1,4 @@
+import { keccakTextHash } from '../../protocol/crypto/keccak-text';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
@@ -345,7 +346,7 @@ export const reliableReceiptCoversIdentity = (
 };
 
 const digestBindings = (bindings: readonly ReliableDeliveryEvidenceBinding[]): string =>
-  keccak256(toUtf8Bytes(encodeCanonicalConsensusValue(bindings))).toLowerCase();
+  keccakTextHash(encodeCanonicalConsensusValue(bindings)).toLowerCase();
 
 const mergePrecommitFrontier = (
   existing: ReliableDeliveryIdentity,

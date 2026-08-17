@@ -1,3 +1,4 @@
+import { keccakTextHash } from '../../../protocol/crypto/keccak-text';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
@@ -400,17 +401,15 @@ export const hashCertifiedEntityOutputSemantic = (
   sequence: bigint,
   entityTxs: EntityTx[],
 ): string =>
-  keccak256(
-    toUtf8Bytes(
-      encodeCanonicalConsensusValue({
-        version: 'xln:certified-entity-output-semantic:v1',
-        sourceEntityId: sourceEntityId.toLowerCase(),
-        targetEntityId: targetEntityId.toLowerCase(),
-        lane,
-        sequence,
-        entityTxs: canonicalCertifiedEntityTxs(entityTxs),
-      }),
-    ),
+  keccakTextHash(
+    encodeCanonicalConsensusValue({
+      version: 'xln:certified-entity-output-semantic:v1',
+      sourceEntityId: sourceEntityId.toLowerCase(),
+      targetEntityId: targetEntityId.toLowerCase(),
+      lane,
+      sequence,
+      entityTxs: canonicalCertifiedEntityTxs(entityTxs),
+    }),
   );
 
 export const assertCertifiedOutputSemanticIdentity = (
@@ -603,15 +602,13 @@ export const hashCertifiedEntityOutput = (
   targetEntityId: string,
   entityTxs: EntityTx[],
 ): string =>
-  keccak256(
-    toUtf8Bytes(
-      encodeCanonicalConsensusValue({
-        version: 'xln:certified-entity-output:v1',
-        origin,
-        targetEntityId: targetEntityId.toLowerCase(),
-        entityTxs: canonicalCertifiedEntityTxs(entityTxs),
-      }),
-    ),
+  keccakTextHash(
+    encodeCanonicalConsensusValue({
+      version: 'xln:certified-entity-output:v1',
+      origin,
+      targetEntityId: targetEntityId.toLowerCase(),
+      entityTxs: canonicalCertifiedEntityTxs(entityTxs),
+    }),
   );
 
 export type VerifiedCertifiedEntityOutput = {

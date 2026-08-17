@@ -1,3 +1,4 @@
+import { keccakTextHash } from '../../protocol/crypto/keccak-text';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import type { EntityTx } from '../../types/entity-tx';
 import type { RuntimeReplica, ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, RoutedEntityInput } from '../types';
@@ -67,7 +68,7 @@ const requireReliableHash = (value: unknown, code: string): string => {
 };
 
 const reliableEvidenceDigest = (value: unknown): string =>
-  keccak256(toUtf8Bytes(encodeCanonicalConsensusValue(value))).toLowerCase();
+  keccakTextHash(encodeCanonicalConsensusValue(value)).toLowerCase();
 
 const getEntityFrameBodyDigest = (output: RoutedEntityInput): string => {
   const frame = buildPreparedFrameEvidence(output.proposedFrame);
@@ -408,7 +409,7 @@ const getJFinalityIdentity = (
     height: order,
     order,
     variantOrder: 0,
-    frameHash: keccak256(toUtf8Bytes(logicalKey)).toLowerCase(),
+    frameHash: keccakTextHash(logicalKey).toLowerCase(),
     logicalKey,
     evidenceVersion: 1,
     evidenceKind: 'j-finality',
@@ -500,8 +501,39 @@ const computeReliableOutputIdentity = (output: RoutedEntityInput): ReliableOutpu
   return identities[0]!;
 };
 
-export const getReliableOutputIdentity = (output: RoutedEntityInput): ReliableOutputIdentity | null =>
-  computeReliableOutputIdentity(output);
+/*
+ * A routed output's reliable identity is a pure function of immutable
+ * consensus evidence: frame body, precommits, attestations and txs. Delivery
+ * asks for that identity from ~28 call sites across planning, dedup, dispatch,
+ * retry and receipt ingress, and each answer costs a canonical encode plus two
+ * keccak digests per tx — measured as the single largest CPU consumer on the
+ * hub. Derive it once per envelope object.
+ *
+ * Keyed by object identity, so any envelope rebuilt by
+ * `copyRoutedOutputForMerge` correctly derives its own identity rather than
+ * inheriting a stale one. `XLN_RELIABLE_IDENTITY_VERIFY_CACHE=1` recomputes and
+ * compares on every hit, which turns an illegal post-identity mutation of the
+ * evidence into a loud failure instead of a silent misroute.
+ */
+const reliableOutputIdentityCache = new WeakMap<RoutedEntityInput, ReliableOutputIdentity | null>();
+
+const verifyIdentityCache = (): boolean =>
+  typeof process !== 'undefined' && process.env?.['XLN_RELIABLE_IDENTITY_VERIFY_CACHE'] === '1';
+
+export const getReliableOutputIdentity = (output: RoutedEntityInput): ReliableOutputIdentity | null => {
+  const cached = reliableOutputIdentityCache.get(output);
+  if (cached !== undefined) {
+    if (!verifyIdentityCache()) return cached;
+    const recomputed = computeReliableOutputIdentity(output);
+    if (safeStringify(recomputed) !== safeStringify(cached)) {
+      throw new Error('ROUTE_RELIABLE_IDENTITY_CACHE_STALE');
+    }
+    return recomputed;
+  }
+  const identity = computeReliableOutputIdentity(output);
+  reliableOutputIdentityCache.set(output, identity);
+  return identity;
+};
 
 export const assertReliableEvidenceCompatible = (
   existing: ReliableOutputIdentity,

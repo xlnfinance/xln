@@ -156,6 +156,10 @@ import {
   type DirectInputDebugState,
   type HubServerSocket,
 } from './hub/hub-runtime-transport';
+import {
+  dumpRuntimeSamplingProfile,
+  startRuntimeSamplingProfiler,
+} from '../infra/performance/sampling-profiler';
 
 type Args = {
   name: string;
@@ -2792,6 +2796,7 @@ const installHubShutdownHandlers = (
   const shutdown = async (code = 0): Promise<void> => {
     if (shutdownStarted) return;
     shutdownStarted = true;
+    dumpRuntimeSamplingProfile('shutdown');
     live.shuttingDown = true;
     const failures: string[] = [];
     const runCleanup = async (label: string, cleanup: () => Promise<unknown>): Promise<void> => {
@@ -2837,6 +2842,7 @@ const run = async (): Promise<void> => {
   }
   process.env['JADAPTER_DEV_PRIVATE_KEY'] = deriveAnvilDevPrivateKey(resolveHubSignerIndex(resolvedArgs.name));
 
+  await startRuntimeSamplingProfiler(resolvedArgs.name);
   const runtimeBootStartedAt = startTiming('runtime_boot');
   const localSignerLabels = buildLocalHubSignerLabels();
   const brainVaultOwner = createHubBrainVaultOwner();

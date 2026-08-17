@@ -1,3 +1,4 @@
+import { keccakTextHash } from '../../protocol/crypto/keccak-text';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
 import type {
   DeliverableEntityInput,
@@ -45,7 +46,7 @@ import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-
 const routeLog = createStructuredLogger('network.route');
 
 const shortPairKey = (pairKey: string): string =>
-  `${keccak256(toUtf8Bytes(pairKey)).slice(0, 18)}:len=${pairKey.length}`;
+  `${keccakTextHash(pairKey).slice(0, 18)}:len=${pairKey.length}`;
 
 const summarizeAtomicUnitOutput = (
   output: RoutedEntityInput,

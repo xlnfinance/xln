@@ -1,3 +1,4 @@
+import { keccakTextHash } from '../../protocol/crypto/keccak-text';
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { buildRouteOutputKey } from '../routing/output-routing';
@@ -6,7 +7,7 @@ const OUTPUT_RETRY_DOMAIN = 'xln.durable-output-retry.v1';
 const OUTPUT_HASH_PATTERN = /^xln\.durable-output-retry\.v1:0x[0-9a-f]{64}$/;
 
 const hashOutput = (output: RoutedEntityInput): string =>
-  `${OUTPUT_RETRY_DOMAIN}:${keccak256(toUtf8Bytes(buildRouteOutputKey(output))).toLowerCase()}`;
+  `${OUTPUT_RETRY_DOMAIN}:${keccakTextHash(buildRouteOutputKey(output)).toLowerCase()}`;
 
 const indexOutputs = (
   outputs: readonly RoutedEntityInput[],

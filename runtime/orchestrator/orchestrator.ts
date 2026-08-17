@@ -1518,7 +1518,15 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   mkdirSync(child.dbPath, { recursive: true });
   clearChildRestartTimer(child);
   const spec = managedSpecForHub(child);
+  // Runtime-level profiling belongs to the process that owns the frame loop.
+  // Operators pass engine flags (e.g. --cpu-prof) per hub without the
+  // orchestrator knowing which profiler is in use.
+  const engineArgs = String(process.env[`XLN_HUB_ENGINE_ARGS_${child.name.toUpperCase()}`] ?? '')
+    .split(' ')
+    .map(part => part.trim())
+    .filter(Boolean);
   const cmd = [
+    ...engineArgs,
     'runtime/orchestrator/hub-node.ts',
     '--name', child.name,
     '--region', child.region,

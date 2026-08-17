@@ -1,3 +1,4 @@
+import { keccakTextHash } from '../../protocol/crypto/keccak-text';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 import { signAccountFrame, verifyAccountSignature } from '../../account/crypto.ts';
@@ -45,7 +46,7 @@ export const getInputReliableIdentity = (
 };
 
 const receiptDigest = (body: ReliableDeliveryReceipt['body']): string =>
-  keccak256(toUtf8Bytes(serializeTaggedJson(body))).toLowerCase();
+  keccakTextHash(serializeTaggedJson(body)).toLowerCase();
 
 export const createReliableDeliveryReceipt = (
   env: RuntimeReplica,

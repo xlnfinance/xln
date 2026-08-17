@@ -1,3 +1,4 @@
+import { keccakTextHash } from '../../protocol/crypto/keccak-text';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type { RuntimeReplica, RuntimeTx } from '../types';
 
@@ -20,14 +21,14 @@ const HASH_PATTERN = /^0x[0-9a-f]{64}$/;
 const COMMAND_ID_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/;
 
 export const runtimeAdapterCommandLaneId = (keyId: string, tokenId: string): string =>
-  keccak256(toUtf8Bytes(`xln-radapter-command-lane-v1\0${keyId}\0${tokenId}`)).toLowerCase();
+  keccakTextHash(`xln-radapter-command-lane-v1\0${keyId}\0${tokenId}`).toLowerCase();
 
 export const runtimeAdapterOwnerCommandLaneId = (runtimeIdValue: string): string => {
   const runtimeId = String(runtimeIdValue || '').trim().toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(runtimeId)) {
     throw new Error('RADAPTER_OWNER_COMMAND_LANE_RUNTIME_ID_INVALID');
   }
-  return keccak256(toUtf8Bytes(`xln-radapter-owner-command-lane-v1\0${runtimeId}`)).toLowerCase();
+  return keccakTextHash(`xln-radapter-owner-command-lane-v1\0${runtimeId}`).toLowerCase();
 };
 
 export const normalizeRuntimeAdapterCommandSequence = (value: unknown): number => {

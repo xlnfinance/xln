@@ -596,9 +596,14 @@ interface RuntimeInfrastructure {
   runtimeFrameCommitCallbacks?: Set<(frame: { height: number; runtimeInput: RuntimeInput }) => void>;
   storageDb?: Level<Buffer, Buffer> | null | undefined;
   storageDbOpenPromise?: Promise<boolean> | null | undefined;
+  /** Namespace opened once for this process; later frames must not re-check. */
+  storageDbOpened?: boolean;
   storagePreviousDb?: Level<Buffer, Buffer> | null | undefined;
   storagePreviousDbOpenPromise?: Promise<boolean> | null | undefined;
+  storagePreviousDbOpened?: boolean;
   storageCurrentProjectionVerified?: boolean;
+  /** History reconciliation is settled when the namespace opens, not per frame. */
+  storageHistoryRecovered?: boolean;
   storageVerifiedPreviousHeight?: number;
   storageVerifiedWalHeight?: number;
   storageEpochRotatePromise?: Promise<void> | null;

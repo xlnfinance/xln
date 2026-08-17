@@ -114,6 +114,13 @@ type StorageEpochRotationMarker = {
 };
 
 const storageEpochRecoveryPromises = new Map<string, Promise<void>>();
+/**
+ * An interrupted rotation can only be inherited from a previous process. Once
+ * this process has resolved that inheritance for a namespace, the answer
+ * cannot change under it — this process is the single writer. Recording the
+ * completion keeps the filesystem probes off the per-frame path.
+ */
+const storageEpochRecoveryCompleted = new Set<string>();
 
 export const resolveStorageDbPath = (env: RuntimeReplica, role: StorageDbRole = 'current'): string => {
   const base = resolveDbPath(env, 'core');
@@ -631,10 +638,12 @@ const storageStateFields = (role: StorageDbRole) =>
     ? ({
         dbField: 'storageDb',
         openField: 'storageDbOpenPromise',
+        openedField: 'storageDbOpened',
       } as const)
     : ({
         dbField: 'storagePreviousDb',
         openField: 'storagePreviousDbOpenPromise',
+        openedField: 'storagePreviousDbOpened',
       } as const);
 
 export const getStorageDb = (
@@ -665,6 +674,7 @@ export const closeStorageDb = async (
   beginRuntimeDbClose(env, handleRole);
   state[fields.dbField] = null;
   state[fields.openField] = null;
+  delete state[fields.openedField];
   if (role === 'previous') delete state.storageVerifiedPreviousHeight;
   else delete state.storageCurrentProjectionVerified;
   try {
@@ -805,6 +815,7 @@ const recoverStorageEpochRotationOnce = async (env: RuntimeReplica): Promise<voi
 const recoverStorageEpochRotation = async (env: RuntimeReplica): Promise<void> => {
   if (!nodeProcess) return;
   const key = resolveStorageRotationMarkerPath(env);
+  if (storageEpochRecoveryCompleted.has(key)) return;
   const existing = storageEpochRecoveryPromises.get(key);
   if (existing) {
     await existing;
@@ -814,9 +825,18 @@ const recoverStorageEpochRotation = async (env: RuntimeReplica): Promise<void> =
   storageEpochRecoveryPromises.set(key, recovery);
   try {
     await recovery;
+    storageEpochRecoveryCompleted.add(key);
   } finally {
     storageEpochRecoveryPromises.delete(key);
   }
+};
+
+/**
+ * A completed rotation republishes the namespace, so the inherited-state
+ * answer this process cached no longer describes what is on disk.
+ */
+export const forgetStorageEpochRecovery = (env: RuntimeReplica): void => {
+  storageEpochRecoveryCompleted.delete(resolveStorageRotationMarkerPath(env));
 };
 
 const waitForStorageEpochRotation = async (
@@ -849,6 +869,15 @@ export const tryOpenStorageDb = async (
   deps: RuntimeStorageDbDeps,
   role: StorageDbRole = 'current',
 ): Promise<boolean> => {
+  /*
+   * INVARIANT: a namespace is opened once per process, at the first frame that
+   * needs it, and every later frame reuses that handle. Rotation waits,
+   * inherited-rotation recovery and path probes belong to that one opening —
+   * a committing frame must not pay for them, and must not even await them.
+   */
+  const openedState = deps.ensureRuntimeInfrastructure(env);
+  const openedFields = storageStateFields(role);
+  if (openedState[openedFields.openedField] === true) return true;
   await waitForStorageEpochRotation(env, deps);
   await recoverStorageEpochRotation(env);
   const state = deps.ensureRuntimeInfrastructure(env);
@@ -877,7 +906,9 @@ export const tryOpenStorageDb = async (
     })();
   }
   try {
-    return await (state[fields.openField] as Promise<boolean>);
+    const opened = await (state[fields.openField] as Promise<boolean>);
+    if (opened) state[fields.openedField] = true;
+    return opened;
   } catch (error) {
     storageLog.error('storage_db.open_failed', { role, error: formatStorageError(error) });
     throw error;
@@ -932,6 +963,7 @@ export const rotateStorageEpochDb = async (
     await fs.rename(nextPath, currentPath);
     await fsyncStorageParentDirectory(currentPath);
     await removeStorageRotationMarker(env);
+    storageEpochRecoveryCompleted.delete(resolveStorageRotationMarkerPath(env));
     delete state.storageCurrentProjectionVerified;
     delete state.storageVerifiedPreviousHeight;
   })();

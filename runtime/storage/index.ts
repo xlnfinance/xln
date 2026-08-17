@@ -3,6 +3,7 @@
  * Key entrypoint: saveEnvToDB enforces durable history before cache publication.
  * Human-audit importance: 100/100 — this is the crash-consistency boundary.
  */
+import { getPerfMs } from '../infra/time';
 import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec/codec';
 import {
   deleteKeyRange,
@@ -622,13 +623,48 @@ const pruneUnreachableAccountJClaimHistoryNodes = async (
   return prunedBytes;
 };
 
+export type StorageRecoveryDiagnostics = {
+  /**
+   * `headChanged` selects the projection-rebuild path. It was designed for a
+   * cold start, so a per-frame append must never reach it. Report the decision
+   * and the cost of each rebuild step instead of inferring either from a
+   * frame's total open time.
+   */
+  headsMatch: boolean;
+  headChanged: boolean;
+  verifiedCurrent: boolean;
+  stages: Record<string, number>;
+};
+
+const EMPTY_STORAGE_RECOVERY: { recovered: boolean; diagnostics: StorageRecoveryDiagnostics } = {
+  recovered: false,
+  diagnostics: { headsMatch: true, headChanged: false, verifiedCurrent: false, stages: {} },
+};
+
 export const recoverStorageDbFromHistory = async (options: {
   db: RuntimeDbLike;
   walDb: RuntimeDbLike;
   config: Required<StorageRuntimeConfig>;
   onPersistenceProgress?: StoragePersistenceProgressHook;
   verifyCurrentProjection?: boolean;
-}): Promise<{ recovered: boolean }> => {
+}): Promise<{ recovered: boolean; diagnostics: StorageRecoveryDiagnostics }> => {
+  const recoveryStages: Record<string, number> = {};
+  let stageStartedAt = getPerfMs();
+  const markRecoveryStage = (name: string): void => {
+    const now = getPerfMs();
+    recoveryStages[name] = (recoveryStages[name] ?? 0) + (now - stageStartedAt);
+    stageStartedAt = now;
+  };
+  const diagnosticsOf = (
+    headsMatch: boolean,
+    headChanged: boolean,
+    verifiedCurrent: boolean,
+  ): StorageRecoveryDiagnostics => ({
+    headsMatch,
+    headChanged,
+    verifiedCurrent,
+    stages: recoveryStages,
+  });
   const walHead = await readHead(options.walDb, options.config);
   const rawCurrentHead = await readRawOrNull(options.db, KEY_HEAD);
   const currentHead = rawCurrentHead ? await readHead(options.db, options.config) : defaultStorageHead(options.config);
@@ -638,6 +674,7 @@ export const recoverStorageDbFromHistory = async (options: {
   const currentMaterializedHeight = materializedHeightOf(currentHead);
   const historySnapshotHeight = Math.max(0, Math.floor(Number(walHead.latestSnapshotHeight ?? 0)));
   options.onPersistenceProgress?.('recovery-heads-read');
+  markRecoveryStage('headsRead');
 
   if (
     currentLatestHeight > historyLatestHeight ||
@@ -650,7 +687,9 @@ export const recoverStorageDbFromHistory = async (options: {
         `history=${historyLatestHeight}/${historyMaterializedHeight}/${historySnapshotHeight}`,
     );
   }
-  if (historyLatestHeight === 0) return { recovered: false };
+  if (historyLatestHeight === 0) {
+    return { recovered: false, diagnostics: diagnosticsOf(false, false, false) };
+  }
 
   const headsMatch = Boolean(rawCurrentHead) && storageHeadsEqual(walHead, currentHead);
   const shouldVerifyCurrent = headsMatch && options.verifyCurrentProjection !== false;
@@ -677,6 +716,7 @@ export const recoverStorageDbFromHistory = async (options: {
       });
       options.onPersistenceProgress?.('recovery-current-invalid');
     }
+    markRecoveryStage('verifyCurrent');
   }
   const resetFromHistory =
     !rawCurrentHead ||
@@ -693,6 +733,7 @@ export const recoverStorageDbFromHistory = async (options: {
     }
     await clearCurrentRecoveryState(options.db);
     options.onPersistenceProgress?.('recovery-current-cleared');
+    markRecoveryStage('resetFromHistory');
     recovered = true;
     // The authoritative DB already holds the latest materialized Patricia
     // graph. Copy its exact physical records below; rebuilding coarse snapshot
@@ -706,6 +747,7 @@ export const recoverStorageDbFromHistory = async (options: {
     ? await synchronizeLiveStateProjection(options.walDb, options.db, batch)
     : false;
   options.onPersistenceProgress?.('recovery-live-state-synchronized');
+  if (headChanged) markRecoveryStage('syncLiveState');
   // History commits before the rebuildable current projection cache.
   // The normal append path writes both DBs and never scans the content-addressed
   // DAG. Only a lagging/current-cache recovery needs to copy immutable nodes.
@@ -713,14 +755,17 @@ export const recoverStorageDbFromHistory = async (options: {
     ? await synchronizeCertifiedBoardNodes(options.walDb, options.db, batch)
     : false;
   options.onPersistenceProgress?.('recovery-board-nodes-synchronized');
+  if (headChanged) markRecoveryStage('syncBoardNodes');
   const consumptionNodesChanged = headChanged
     ? await synchronizeConsumptionNodes(options.walDb, options.db, batch, options.walDb)
     : false;
   options.onPersistenceProgress?.('recovery-consumption-nodes-synchronized');
+  if (headChanged) markRecoveryStage('syncConsumptionNodes');
   const accountJClaimNodesChanged = headChanged
     ? await synchronizeAccountJClaimNodes(options.walDb, options.db, batch, options.walDb)
     : false;
   options.onPersistenceProgress?.('recovery-account-j-nodes-synchronized');
+  if (headChanged) markRecoveryStage('syncAccountJNodes');
   if (
     liveStateChanged ||
     boardNodesChanged ||
@@ -729,6 +774,7 @@ export const recoverStorageDbFromHistory = async (options: {
   ) {
     await writeBatch(batch);
     options.onPersistenceProgress?.('recovery-current-nodes-written');
+    markRecoveryStage('writeRecoveredNodes');
     recovered = true;
   }
   if (headChanged) {
@@ -737,17 +783,23 @@ export const recoverStorageDbFromHistory = async (options: {
     headBatch.put(KEY_HEAD, encodeBuffer(walHead));
     await writeBatch(headBatch);
     options.onPersistenceProgress?.('recovery-current-head-published');
+    markRecoveryStage('publishHead');
     recovered = true;
   }
-  if (shouldVerifyCurrent || resetFromHistory || headChanged) {
+  const reverified = shouldVerifyCurrent || resetFromHistory || headChanged;
+  if (reverified) {
     await assertCurrentProjectionIntegrity(
       options.db,
       options.walDb,
       walHead,
     );
     options.onPersistenceProgress?.('recovery-current-reverified');
+    markRecoveryStage('reverifyCurrent');
   }
-  return { recovered };
+  return {
+    recovered,
+    diagnostics: diagnosticsOf(headsMatch, headChanged, shouldVerifyCurrent || reverified),
+  };
 };
 
 export type StorageFrameSaveResult = {
@@ -774,6 +826,18 @@ type StoragePersistencePerf = {
    * history projection, or post-commit cleanup from being blamed on LevelDB.
    */
   outerStages?: Record<string, number>;
+  /**
+   * Split of the `open` window: two cached db handles plus one recovery
+   * decision. `openDecision.headChanged` selects the cold projection-rebuild
+   * path, which must never be taken by a live append.
+   */
+  openStages?: Record<string, number>;
+  openDecision?: {
+    headsMatch: boolean;
+    headChanged: boolean;
+    verifiedCurrent: boolean;
+    recovered: boolean;
+  };
   outerTotal?: number;
   open: number;
   planning: number;
@@ -981,23 +1045,51 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
     throw new Error('STORAGE_CURRENT_DB_UNAVAILABLE');
   }
   const db = options.getRuntimeDb(options.env);
+  const currentDbOpenedAt = options.getPerfMs();
   if (!(await options.tryOpenRuntimeWalDb(options.env))) {
     throw new Error('STORAGE_RUNTIME_WAL_UNAVAILABLE');
   }
   const walDb = options.getRuntimeWalDb(options.env);
+  const walDbOpenedAt = options.getPerfMs();
   const state = options.env.infrastructure ??= {};
-  await recoverStorageDbFromHistory({
-    db,
-    walDb,
-    config,
-    verifyCurrentProjection: state.storageCurrentProjectionVerified !== true,
-    ...(options.onPersistenceProgress
-      ? { onPersistenceProgress: options.onPersistenceProgress }
-      : {}),
-  });
+  /*
+   * Reconciling `current` against the WAL answers one question: what did this
+   * process inherit on disk? It is settled when the namespace opens. This
+   * process then holds the writer lock and is the only author of both DBs, so
+   * a committing frame re-reading three HEADs to re-derive an answer it just
+   * wrote is pure per-frame tax. Any divergence after that point is a defect
+   * in this process, and a silent re-sync would hide it rather than fix it.
+   */
+  const recovery = state.storageHistoryRecovered === true
+    ? EMPTY_STORAGE_RECOVERY
+    : await recoverStorageDbFromHistory({
+      db,
+      walDb,
+      config,
+      verifyCurrentProjection: state.storageCurrentProjectionVerified !== true,
+      ...(options.onPersistenceProgress
+        ? { onPersistenceProgress: options.onPersistenceProgress }
+        : {}),
+    });
   state.storageCurrentProjectionVerified = true;
+  state.storageHistoryRecovered = true;
   options.onPersistenceProgress?.('opened');
   const openMs = options.getPerfMs() - openStartedAt;
+  // The `open` window covers two cached db handles and one recovery decision.
+  // Report that split so a rebuild taken on the append path is never read as
+  // the cost of opening LevelDB.
+  const openStages: Record<string, number> = {
+    currentDb: currentDbOpenedAt - openStartedAt,
+    walDb: walDbOpenedAt - currentDbOpenedAt,
+    recovery: options.getPerfMs() - walDbOpenedAt,
+    ...recovery.diagnostics.stages,
+  };
+  const openDecision = {
+    headsMatch: recovery.diagnostics.headsMatch,
+    headChanged: recovery.diagnostics.headChanged,
+    verifiedCurrent: recovery.diagnostics.verifiedCurrent,
+    recovered: recovery.recovered,
+  };
   const head = await readHead(walDb, config);
   const appliedRuntimeInput =
     options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
@@ -1051,6 +1143,8 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
     shouldMaterialize,
     openStartedAt,
     openMs,
+    openStages,
+    openDecision,
     planningMs,
     planningStages,
     overlayRecords,
@@ -1887,6 +1981,8 @@ const finishStorageFrameSave = (
 ): StorageFrameSaveResult => {
   const persistencePerfMs: StoragePersistencePerf = {
     open: prepared.openMs,
+    openStages: prepared.openStages,
+    openDecision: prepared.openDecision,
     planning: prepared.planningMs,
     planningStages: prepared.planningStages,
     diff: 0,
