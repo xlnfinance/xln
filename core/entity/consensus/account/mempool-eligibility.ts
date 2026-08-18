@@ -2,6 +2,7 @@ import type { AccountReplica } from '../../../types/account';
 import type { EntityState } from '../../types';
 import { getSignedSettlementWorkspaceTxError } from '../../../account/tx/handlers/settlement/transition';
 import { accountTxAwaitsPostCommitHanko } from '../input/hanko-witness';
+import { LIMITS } from '../../../config/constants';
 
 /**
  * A durable Account mempool is not automatically runnable work. A signed
@@ -21,5 +22,11 @@ export const accountHasProposableMempool = (
   // finalized disputes both close the peer ACK lane.
   if ((account.status ?? 'active') !== 'active') return false;
   if (account.mempool.some((tx) => accountTxAwaitsPostCommitHanko(tx, account, state))) return false;
-  return account.mempool.some((tx) => getSignedSettlementWorkspaceTxError(account, tx) === undefined);
+  // Locks past MAX_ACCOUNT_HTLC_LOCKS wait for a resolve to commit; waking the
+  // Entity for them only produces idle Account proposals (100 users x every
+  // Runtime input hit the cross-J cascade guard).
+  const locksFull = (account.state.locks?.size ?? 0) >= LIMITS.MAX_ACCOUNT_HTLC_LOCKS;
+  return account.mempool.some((tx) =>
+    !(locksFull && tx.type === 'htlc_lock') &&
+    getSignedSettlementWorkspaceTxError(account, tx) === undefined);
 };

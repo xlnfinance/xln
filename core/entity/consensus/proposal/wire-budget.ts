@@ -85,7 +85,11 @@ export const fitEntityProposalToWireBudget = async (params: {
       entityContext,
       ...(jPrefixCertificate ? { jPrefixCertificate } : {}),
     });
-    const maxBytes = LIMITS.MAX_FRAME_SIZE_BYTES - ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES;
+    // Slack covers applied events; the sealed frame also carries hashesToSign,
+    // collectedSigs and hankos (~5-10% at 350 account inputs), so keep another
+    // tenth in reserve — a post-apply overflow costs a full re-apply.
+    const maxBytes = LIMITS.MAX_FRAME_SIZE_BYTES - ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES
+      - Math.floor(LIMITS.MAX_FRAME_SIZE_BYTES / 10);
     let candidate = allTxs.length;
     for (let attempt = 0; attempt < MAX_FIT_ATTEMPTS; attempt += 1) {
       const slice = allTxs.slice(0, candidate);
