@@ -110,28 +110,40 @@ const buildInboundBinding = (
   };
 };
 
-// The same inbound lock tx object is decrypted by the wire-budget fit (per
-// attempt), by the proposal, and again by the validator replay of the same
-// frame; the X25519+cipher round is pure in (tx, keys), so memoize per tx.
-const decryptedInboundEnvelopes = new WeakMap<HtlcLockTx, PreparedEnvelope | PreparedHtlcEntry>();
+// The same inbound lock is decrypted by the wire-budget fit (per attempt), by
+// the proposal, by the validator replay of the same frame, and again when the
+// payer re-sends its still-pending proposal (a fresh tx object each time). The
+// X25519+cipher round is pure in (ciphertext, AAD, keys), so memoize by content.
+type DecryptedInboundEnvelope = PreparedEnvelope | { rejectReason: 'decrypt_failed' | 'ciphertext_invalid' };
+const decryptedInboundEnvelopes = new Map<string, DecryptedInboundEnvelope>();
+const DECRYPTED_ENVELOPE_MEMO_MAX = 65_536;
 
 const decryptInboundEnvelope = (
   input: MaterializeHtlcPreparedContextInput,
   accountTx: HtlcLockTx,
   binding: PreparedHtlcEntry['binding'],
 ): PreparedEnvelope | PreparedHtlcEntry => {
-  const cached = decryptedInboundEnvelopes.get(accountTx);
-  if (cached !== undefined) return cached;
-  const result = decryptInboundEnvelopeUncached(input, accountTx, binding);
-  decryptedInboundEnvelopes.set(accountTx, result);
-  return result;
+  const contextHash = computeHtlcEnvelopeContextHash({
+    fromEntityId: binding.fromEntityId, toEntityId: binding.toEntityId,
+    domain: binding.domain, lockId: binding.lockId, hashlock: binding.hashlock,
+    tokenId: binding.tokenId, amount: binding.amount, timelock: binding.timelock,
+    revealBeforeHeight: binding.revealBeforeHeight,
+  });
+  const key = `${input.entityEncryptionPublicKey}|${binding.envelopeHash}|${contextHash}`;
+  let result = decryptedInboundEnvelopes.get(key);
+  if (result === undefined) {
+    result = decryptInboundEnvelopeUncached(input, accountTx, contextHash);
+    if (decryptedInboundEnvelopes.size >= DECRYPTED_ENVELOPE_MEMO_MAX) decryptedInboundEnvelopes.clear();
+    decryptedInboundEnvelopes.set(key, result);
+  }
+  return 'rejectReason' in result ? reject(binding, result.rejectReason) : result;
 };
 
 const decryptInboundEnvelopeUncached = (
   input: MaterializeHtlcPreparedContextInput,
   accountTx: HtlcLockTx,
-  binding: PreparedHtlcEntry['binding'],
-): PreparedEnvelope | PreparedHtlcEntry => {
+  contextHash: ReturnType<typeof computeHtlcEnvelopeContextHash>,
+): DecryptedInboundEnvelope => {
   const layer = encryptedHtlcLayer(accountTx.data.envelope)!;
   let plaintext: Uint8Array;
   try {
@@ -139,23 +151,18 @@ const decryptInboundEnvelopeUncached = (
       layer,
       input.entityEncryptionPublicKey,
       input.entityEncryptionPrivateKey,
-      computeHtlcEnvelopeContextHash({
-        fromEntityId: binding.fromEntityId, toEntityId: binding.toEntityId,
-        domain: binding.domain, lockId: binding.lockId, hashlock: binding.hashlock,
-        tokenId: binding.tokenId, amount: binding.amount, timelock: binding.timelock,
-        revealBeforeHeight: binding.revealBeforeHeight,
-      }),
+      contextHash,
     );
   } catch (error) {
     if (!(error instanceof HtlcCiphertextAuthenticationError)) throw error;
-    return reject(binding, 'decrypt_failed');
+    return { rejectReason: 'decrypt_failed' };
   }
   try {
     const envelope = unwrapEnvelope(plaintext);
     validateEnvelope(envelope);
     return envelope;
   } catch {
-    return reject(binding, 'ciphertext_invalid');
+    return { rejectReason: 'ciphertext_invalid' };
   }
 };
 

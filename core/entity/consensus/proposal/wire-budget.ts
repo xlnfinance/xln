@@ -6,8 +6,8 @@ import type { JPrefixCertificate } from '../../../types/jurisdiction-events';
 import {
   ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES,
   measureEntityFrameWireBytes,
-  selectEntityFrameTxPrefixForWireBudget,
 } from '../frame';
+import { LIMITS } from '../../../config/constants';
 import { getPrevFrameHash } from '../frame/lineage';
 import { entityLog } from '../entity-log';
 import { timePerfPhase } from '../../../support/performance/profile';
@@ -85,52 +85,43 @@ export const fitEntityProposalToWireBudget = async (params: {
       entityContext,
       ...(jPrefixCertificate ? { jPrefixCertificate } : {}),
     });
-    let knownFit = 0;
-    let knownFail = allTxs.length + 1;
+    const maxBytes = LIMITS.MAX_FRAME_SIZE_BYTES - ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES;
     let candidate = allTxs.length;
-    let best: { txs: EntityTx[]; entityContext: EntityInfraContext } | undefined;
     for (let attempt = 0; attempt < MAX_FIT_ATTEMPTS; attempt += 1) {
       const slice = allTxs.slice(0, candidate);
       const materialized = await materializeOrHalve(env, replica, slice);
       if (!('entityContext' in materialized)) {
-        knownFail = Math.min(knownFail, candidate);
         candidate = materialized.txs.length;
         continue;
       }
-      const fitted = selectEntityFrameTxPrefixForWireBudget(slice, rest(materialized.entityContext));
-      if (fitted.length === slice.length) {
-        if (slice.length >= 100) {
-          const wire = rest(materialized.entityContext);
+      // Context bytes track the txs (one HTLC entry per forwarded lock), so a
+      // prefix must be re-materialized before it is measured; scale the prefix
+      // by the measured ratio instead of binary-searching against a context
+      // built for the whole slice.
+      const wire = rest(materialized.entityContext);
+      const bytes = measureEntityFrameWireBytes({ ...wire, txs: slice });
+      if (bytes <= maxBytes) {
+        if (slice.length >= 100 || slice.length < allTxs.length) {
           entityLog.info('proposal.wire_budget_fit', {
             entityId: replica.state.entityId,
             txs: slice.length,
-            bytes: measureEntityFrameWireBytes({ ...wire, txs: slice }),
+            deferred: allTxs.length - slice.length,
+            bytes,
             contextBytes: measureEntityFrameWireBytes({ ...wire, txs: [] }),
             htlcEntries: materialized.entityContext.htlc.entries.length,
             originated: materialized.entityContext.htlc.originated.length,
             profiles: materialized.entityContext.gossipProfiles.length,
           });
         }
-        // First fitting prefix wins. Growing it back toward the failing size
-        // re-materialized the HTLC context per probe (hundreds of ms to
-        // seconds each at 350 payments) and burned 7.7 s of a 10 s Hub frame;
-        // the deferred tail simply rides the next frame.
         return { txs: slice, entityContext: materialized.entityContext };
       }
-      entityLog.info('proposal.wire_budget_deferred', {
-        entityId: replica.state.entityId,
-        selected: fitted.length,
-        deferred: slice.length - fitted.length,
-        slackBytes: ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES,
-      });
-      knownFail = candidate;
-      candidate = fitted.length;
-      if (candidate <= knownFit) {
-        if (best) return best;
-        throw new Error('ENTITY_FRAME_WIRE_BUDGET_FIT_EXHAUSTED');
+      const scaled = Math.floor(candidate * 0.9 * maxBytes / bytes);
+      const next = Math.min(candidate - 1, scaled);
+      if (next < 1) {
+        throw new Error(`ENTITY_FRAME_HEAD_WIRE_LIMIT_EXCEEDED:${bytes}:${maxBytes}`);
       }
+      candidate = next;
     }
-    if (best) return best;
     throw new Error('ENTITY_FRAME_WIRE_BUDGET_FIT_EXHAUSTED');
   });
 };
