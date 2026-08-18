@@ -299,7 +299,11 @@ export const drainImmediateCrossJurisdictionOutputs = async (
     const command = context.crossJCommandQueue.shift()!;
     round += 1;
     context.localEventCount += 1;
-    if (round > 64 || context.localEventCount > 1_000) {
+    // Every touched replica may legitimately queue one account-work command
+    // per input (a lane hosting 100 users takes 100 per input); the guard is
+    // against runaway cross-J cycles, so scale it with the replica count.
+    const replicaCount = env.state.eReplicas.size;
+    if (round > 64 + replicaCount || context.localEventCount > 1_000 + 64 * replicaCount) {
       throw new Error(
         `RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds=${round}:events=${context.localEventCount}`,
       );

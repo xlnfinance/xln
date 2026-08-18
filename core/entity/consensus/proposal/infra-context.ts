@@ -52,6 +52,14 @@ const resolveReplayEntityContext = (
   return legacy && legacy.height === height ? legacy : undefined;
 };
 
+/** True when the WAL holds the persisted context for this replica's next frame (replay). */
+export const hasReplayEntityContext = (env: EntityRuntimeContext, replica: EntityReplica): boolean =>
+  resolveReplayEntityContext(
+    env,
+    `${replica.entityId.trim().toLowerCase()}:${replica.signerId.trim().toLowerCase()}`,
+    replica.state.height + 1,
+  ) !== undefined;
+
 /** Materialize public infrastructure only after the proposer fixes exact frame txs. */
 export const materializeEntityInfraContext = async (
   env: EntityRuntimeContext,

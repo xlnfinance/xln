@@ -11,7 +11,7 @@ import {
 import { getPrevFrameHash } from '../frame/lineage';
 import { entityLog } from '../entity-log';
 import { timePerfPhase } from '../../../support/performance/profile';
-import { materializeEntityInfraContext } from './infra-context';
+import { hasReplayEntityContext, materializeEntityInfraContext } from './infra-context';
 import type { EntityFrameEvent } from '../../types';
 
 const DUMMY_ROOT = `0x${'00'.repeat(32)}`;
@@ -53,7 +53,10 @@ export const fitEntityProposalToWireBudget = async (params: {
   usePersistedReplayContext: boolean;
 }): Promise<{ txs: EntityTx[]; entityContext: EntityInfraContext }> => {
   const { env, replica, jPrefixCertificate, usePersistedReplayContext } = params;
-  if (usePersistedReplayContext) {
+  // Replay must keep the exact stored txs; a live proposal (no stored context
+  // for this height) must be fitted even when the flag allows replay reuse —
+  // skipping the fit here let 14 MB frames through to the post-apply check.
+  if (usePersistedReplayContext && hasReplayEntityContext(env, replica)) {
     return {
       txs: params.proposalTxs,
       entityContext: await materializeEntityInfraContext(env, replica, params.proposalTxs, {
@@ -103,6 +106,9 @@ export const fitEntityProposalToWireBudget = async (params: {
             txs: slice.length,
             bytes: measureEntityFrameWireBytes({ ...wire, txs: slice }),
             contextBytes: measureEntityFrameWireBytes({ ...wire, txs: [] }),
+            htlcEntries: materialized.entityContext.htlc.entries.length,
+            originated: materialized.entityContext.htlc.originated.length,
+            profiles: materialized.entityContext.gossipProfiles.length,
           });
         }
         // First fitting prefix wins. Growing it back toward the failing size
