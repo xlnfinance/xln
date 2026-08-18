@@ -4,8 +4,13 @@ import { cancelHook, scheduleHook } from '../../scheduler/hook-state';
 import { hasInboundHtlcRoute } from '../../htlc/route-views';
 import { getEntityCollectionValueForWrite } from '../../state/persistent-collection-map';
 
-/** Auto-dispute when the upstream peer never acknowledges a returned secret. */
-export const HTLC_SECRET_ACK_TIMEOUT_MS = 30_000;
+/**
+ * Auto-dispute when the upstream peer never acknowledges a returned secret.
+ * A slow but honest peer under load (32-lock account capacity, multi-second
+ * Hub frames, 10 s pending-frame re-sends) needs well over 30 s; the lock
+ * timelock is the real safety bound, this only starts the dispute early.
+ */
+export const HTLC_SECRET_ACK_TIMEOUT_MS = 120_000;
 
 const assertEndpoint = (
   actual: readonly [string | undefined, string | undefined],
