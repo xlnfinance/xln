@@ -128,9 +128,18 @@ const readPositiveInteger = (name: string): number | undefined => {
   return value;
 };
 
+/**
+ * A Runtime frame costs about the same whether it carries one transaction or a
+ * hundred: the fixed apply/commit/persist work dominates the marginal per-tx
+ * cost. Holding a frame back therefore buys throughput almost for free, at the
+ * price of up to this much added latency per hop. Hubs want a floor here;
+ * a single-user wallet wants zero so its own payment is not delayed.
+ */
+const runtimeMinFrameDelayMs = (): number => readPositiveInteger('XLN_RUNTIME_MIN_FRAME_DELAY_MS') ?? 0;
+
 export const ensureRuntimeConfig = (env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeConfig']> => {
   env.runtimeConfig ??= {
-    minFrameDelayMs: 0,
+    minFrameDelayMs: runtimeMinFrameDelayMs(),
     loopIntervalMs: isProductionRuntime ? 25 : 0,
     snapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
   };

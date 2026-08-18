@@ -1558,6 +1558,11 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
       XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
+      // A managed Hub batches for throughput; the operator sets the floor and
+      // the child never inherits the driver's own (wallet-shaped) value.
+      ...(process.env['XLN_HUB_MIN_FRAME_DELAY_MS']
+        ? { XLN_RUNTIME_MIN_FRAME_DELAY_MS: process.env['XLN_HUB_MIN_FRAME_DELAY_MS'] }
+        : {}),
     }),
   });
   child.proc = proc;
