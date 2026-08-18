@@ -621,15 +621,44 @@ export function signDigest(scope: SignerKeyScope, signerId: string, digestHex: s
   return `0x${sigHex}`;
 }
 
+/**
+ * ECDSA here is deterministic (RFC 6979 on both backends), so signing one
+ * digest with one key always yields the same bytes. A proposer signs every
+ * frame hash twice — once into the Hanko, once as the raw collected signature
+ * — and validators re-sign on retries; the memo makes the second sign a
+ * lookup. Keyed by the private-key object (keys are cached per signer, so the
+ * identity is stable) and the digest hex. Bounded to recent digests.
+ */
+const signatureMemo = new WeakMap<Uint8Array, Map<string, { signature: Uint8Array; recovery: number }>>();
+const SIGNATURE_MEMO_MAX = 4096;
+
 export function signDigestBytesWithPrivateKey(
   privateKey: Uint8Array,
   messageBytes: Uint8Array,
 ): { signature: Uint8Array; recovery: number } {
-  installHmacSync();
   if (messageBytes.length !== 32) {
     throw new Error(`SIGN_DIGEST_INVALID_LENGTH:${messageBytes.length}`);
   }
-  countOpWithSite('ecdsa.sign', 0, 2);
+  let byDigest = signatureMemo.get(privateKey);
+  if (!byDigest) {
+    byDigest = new Map();
+    signatureMemo.set(privateKey, byDigest);
+  }
+  const digestHex = Buffer.from(messageBytes).toString('hex');
+  const memoized = byDigest.get(digestHex);
+  if (memoized) return { signature: memoized.signature.slice(), recovery: memoized.recovery };
+  const signed = signDigestBytesWithPrivateKeyUncached(privateKey, messageBytes);
+  if (byDigest.size >= SIGNATURE_MEMO_MAX) byDigest.clear();
+  byDigest.set(digestHex, { signature: signed.signature.slice(), recovery: signed.recovery });
+  return signed;
+}
+
+function signDigestBytesWithPrivateKeyUncached(
+  privateKey: Uint8Array,
+  messageBytes: Uint8Array,
+): { signature: Uint8Array; recovery: number } {
+  installHmacSync();
+  countOpWithSite('ecdsa.sign', 0, 3);
   const native = getNativeSecp256k1();
   if (native) {
     // Same raw secp256k1 ECDSA operation as noble, only through the native

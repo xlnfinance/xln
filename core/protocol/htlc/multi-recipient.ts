@@ -36,13 +36,32 @@ export class HtlcCiphertextAuthenticationError extends Error {
   }
 }
 
+/**
+ * Public key derived from each private key seen by this process. A keypair
+ * check runs once per HTLC layer on every materialization; deriving the public
+ * key is a full X25519 scalar multiplication, so the derivation is memoized on
+ * the private-key string (a pure function of it). Bounded: an entity holds a
+ * handful of encryption keys.
+ */
+const derivedPublicKeyHexByPrivateKey = new Map<string, string>();
+const DERIVED_PUBLIC_KEY_MEMO_MAX = 64;
+
+const derivePublicKeyHex = (entityPrivateKey: string): string => {
+  const memoized = derivedPublicKeyHexByPrivateKey.get(entityPrivateKey);
+  if (memoized !== undefined) return memoized;
+  const privateKey = keyBytes(entityPrivateKey, 'HTLC_ENTITY_ENCRYPTION_PRIVATE_KEY_INVALID');
+  const derived = keyHex(x25519.getPublicKey(privateKey));
+  if (derivedPublicKeyHexByPrivateKey.size >= DERIVED_PUBLIC_KEY_MEMO_MAX) derivedPublicKeyHexByPrivateKey.clear();
+  derivedPublicKeyHexByPrivateKey.set(entityPrivateKey, derived);
+  return derived;
+};
+
 export const assertEntityEncryptionKeypair = (
   entityPublicKey: string,
   entityPrivateKey: string,
 ): void => {
   const publicKey = keyBytes(entityPublicKey, 'HTLC_ENTITY_ENCRYPTION_PUBLIC_KEY_INVALID');
-  const privateKey = keyBytes(entityPrivateKey, 'HTLC_ENTITY_ENCRYPTION_PRIVATE_KEY_INVALID');
-  if (keyHex(x25519.getPublicKey(privateKey)) !== keyHex(publicKey)) {
+  if (derivePublicKeyHex(entityPrivateKey) !== keyHex(publicKey)) {
     throw new Error('HTLC_ENTITY_ENCRYPTION_KEYPAIR_MISMATCH');
   }
 };
@@ -121,7 +140,37 @@ export const encryptOpaqueHtlcBytes = (
   });
 };
 
+/**
+ * Decryption is a pure function of (ciphertext, keypair, context) and the same
+ * layer is decrypted more than once per process: the proposer materializes it,
+ * then the validator replay re-derives it from the committed frame — the same
+ * process for a single-signer entity — and each is an X25519 scalar
+ * multiplication. Memoize the plaintext by those inputs; the private key is
+ * implied by the public key inside one process, so the key never enters the
+ * memo key. Bounded to recent layers.
+ */
+const decryptedLayerMemo = new Map<string, Uint8Array>();
+const DECRYPTED_LAYER_MEMO_MAX = 4096;
+
 export const decryptOpaqueHtlcBytes = (
+  ciphertext: OpaqueHtlcCiphertext,
+  entityPublicKey: string,
+  entityPrivateKey: string,
+  contextHash: string,
+): Uint8Array => {
+  const memoKey = `${ciphertext.ciphertext}|${entityPublicKey}|${contextHash}`;
+  const memoized = decryptedLayerMemo.get(memoKey);
+  if (memoized !== undefined) {
+    assertEntityEncryptionKeypair(entityPublicKey, entityPrivateKey);
+    return memoized.slice();
+  }
+  const plaintext = decryptOpaqueHtlcBytesUncached(ciphertext, entityPublicKey, entityPrivateKey, contextHash);
+  if (decryptedLayerMemo.size >= DECRYPTED_LAYER_MEMO_MAX) decryptedLayerMemo.clear();
+  decryptedLayerMemo.set(memoKey, plaintext.slice());
+  return plaintext;
+};
+
+const decryptOpaqueHtlcBytesUncached = (
   ciphertext: OpaqueHtlcCiphertext,
   entityPublicKey: string,
   entityPrivateKey: string,

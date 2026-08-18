@@ -381,7 +381,7 @@ const projectAccountConsensusState = (account: CoveredAccountReplica): Record<st
 
 const normalizeAuthoritySignerId = (value: string): string => value.trim().toLowerCase();
 
-const normalizeAuthorityConfig = (config: ConsensusConfig): ConsensusConfig => {
+const normalizeAuthorityConfig = (config: ConsensusConfig, shareJurisdiction = false): ConsensusConfig => {
   const shares: Record<string, bigint> = {};
   for (const [rawSignerId, share] of Object.entries(config.shares)) {
     const signerId = normalizeAuthoritySignerId(rawSignerId);
@@ -397,7 +397,12 @@ const normalizeAuthorityConfig = (config: ConsensusConfig): ConsensusConfig => {
     ...config,
     validators: config.validators.map(normalizeAuthoritySignerId),
     shares,
-    ...(config.jurisdiction ? { jurisdiction: structuredClone(config.jurisdiction) } : {}),
+    // The commitment projection below reads scalars off the jurisdiction and
+    // never lets the object escape; only callers that hand the normalized
+    // config onward (frame authority) need their own copy.
+    ...(config.jurisdiction
+      ? { jurisdiction: shareJurisdiction ? config.jurisdiction : structuredClone(config.jurisdiction) }
+      : {}),
   };
 };
 
@@ -436,7 +441,7 @@ const requireConsensusAddress = (value: unknown, field: string): string => {
  */
 const projectConsensusConfigCommitment = (config: ConsensusConfig): Record<string, unknown> => {
   assertNoConsensusConfigExtensions(config, CONSENSUS_CONFIG_KEYS);
-  const normalized = normalizeAuthorityConfig(config);
+  const normalized = normalizeAuthorityConfig(config, true);
   const jurisdiction = normalized.jurisdiction;
   if (jurisdiction) {
     assertNoConsensusConfigExtensions(jurisdiction, JURISDICTION_CONFIG_KEYS);
