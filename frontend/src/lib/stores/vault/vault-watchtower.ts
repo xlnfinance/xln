@@ -7,6 +7,7 @@ import type {
   XLNModule,
 } from '@xln/core/api/public/runtime-module';
 import { Wallet } from 'ethers';
+import { isMapLike } from '$lib/utils/runtime/liveRuntimeEnv';
 import { resolveRpcUrl } from './vault-helpers';
 import {
   derivePrivateKey,
@@ -62,7 +63,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
     if (!entityId || !signerAddress) continue;
 
     const replica = findEntityReplicaByEntityAndSigner(env, entityId, signerAddress);
-    if (!replica?.state?.accounts || !(replica.state.accounts instanceof Map)) continue;
+    if (!isMapLike(replica?.state?.accounts)) continue;
 
     const jurisdictionName =
       getEntityReplicaJurisdictionName(replica) ||

@@ -16,7 +16,7 @@ import { readRuntimeEntityProjectionFrame, readRuntimeSwapHistory } from '../../
 import { toasts } from '../../../stores/ui/toastStore';
 import { errorLog } from '../../../stores/errorLogStore';
 import { requireSignerIdForEntity } from '$lib/utils/identity/entityReplica';
-import { unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
+import { isMapLike, unwrapLiveRuntimeEnv } from '$lib/utils/runtime/liveRuntimeEnv';
 import { prewarmCounterpartyProfiles } from '$lib/utils/runtime/p2pPrefetch';
 import { requireTokenDecimals } from '../token-metadata';
 import { buildEntityPanelView } from '../core/entity-panel-model';
@@ -1641,7 +1641,7 @@ function findReplicaByEntityId(entityId: string, view: SwapPanelRuntimeView = sw
 function hasReplicaAccount(candidate: EntityReplica | null | undefined, counterpartyEntityId: string): boolean {
   const counterparty = String(counterpartyEntityId || '').trim();
   if (!candidate || !counterparty) return false;
-  return candidate.state?.accounts instanceof Map && candidate.state.accounts.has(counterparty);
+  return isMapLike(candidate.state?.accounts) && candidate.state.accounts.has(counterparty);
 }
 function isInboundCapacityValidationError(reason: string): boolean {
   if (!reason) return false;

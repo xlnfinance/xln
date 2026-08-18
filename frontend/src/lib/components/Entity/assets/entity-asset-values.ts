@@ -6,6 +6,7 @@ import type { AssetLedgerRow, AssetLedgerTotals } from './../asset-ledger';
 import { getExternalTokenIdentityKey, type ExternalToken } from './entity-asset-catalog';
 import { requireTokenDecimals } from './../token-metadata';
 import { parseTokenAmountInput as parseStrictTokenAmountInput } from './token-amount-input';
+import { isMapLike } from '$lib/utils/runtime/liveRuntimeEnv';
 
 export type AssetTokenInfo = {
   symbol?: string;
@@ -158,13 +159,13 @@ function emptyAccountPortfolioData(): AccountPortfolioData {
 }
 
 export function buildAccountPortfolioData(options: {
-  accounts: Map<string, AccountReplica> | undefined;
+  accounts: ReadonlyMap<string, AccountReplica> | undefined;
   localEntityId: string;
   deriveDelta: FrontendXlnFunctions['deriveDelta'] | undefined;
   getTokenInfo: (tokenId: number) => AssetTokenInfo;
 }): AccountPortfolioData {
   const out = emptyAccountPortfolioData();
-  if (!(options.accounts instanceof Map)) return out;
+  if (!isMapLike(options.accounts)) return out;
 
   for (const [counterpartyId, account] of options.accounts.entries()) {
     out.count++;
@@ -190,14 +191,14 @@ export function buildAccountPortfolioData(options: {
 }
 
 export function buildAccountSpendableByToken(options: {
-  accounts: Map<string, AccountReplica> | undefined;
+  accounts: ReadonlyMap<string, AccountReplica> | undefined;
   localEntityId: string;
   deriveDelta: FrontendXlnFunctions['deriveDelta'] | undefined;
 }): Map<number, bigint> {
   const totals = new Map<number, bigint>();
-  if (!options.accounts || !options.localEntityId || !options.deriveDelta) return totals;
+  if (!isMapLike(options.accounts) || !options.localEntityId || !options.deriveDelta) return totals;
   for (const [counterpartyId, account] of options.accounts.entries()) {
-    if (!(account?.state.deltas instanceof Map)) continue;
+    if (!isMapLike(account?.state.deltas)) continue;
     const isLeftEntity = options.localEntityId.toLowerCase() < String(counterpartyId || '').toLowerCase();
     for (const [tokenId, delta] of account.state.deltas.entries()) {
       const numericTokenId = Number(tokenId);

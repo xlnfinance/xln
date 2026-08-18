@@ -1,5 +1,6 @@
 import type { AccountReplica } from '@xln/core/api/public/runtime-module';
 import type { EntityReplica } from '$lib/types/ui';
+import { isMapLike } from '$lib/utils/runtime/liveRuntimeEnv';
 
 const COLLAPSED_ACCOUNT_LIMIT = 5;
 const ACCOUNT_PAGE_SIZE = 50;
@@ -42,15 +43,8 @@ function isFinalizedDisputed(account: AccountView): boolean {
   return status === 'disputed' && !activeDispute;
 }
 
-/**
- * The committed and in-flight account maps (PersistentEntityAccountMap,
- * EntityAccountCandidateMap) implement ReadonlyMap but are not `instanceof Map`.
- * Duck-type instead, mirroring isMapLike in $lib/utils/runtime/liveRuntimeEnv.ts.
- */
 export function isAccountsMapLike(value: unknown): value is ReadonlyMap<string, AccountReplica> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const candidate = value as { entries?: unknown; get?: unknown; size?: unknown };
-  return typeof candidate.entries === 'function' && typeof candidate.get === 'function' && typeof candidate.size === 'number';
+  return isMapLike(value);
 }
 
 function getAccountsMap(sourceReplica: EntityReplica | null): ReadonlyMap<string, AccountReplica> | null {

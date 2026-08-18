@@ -11,8 +11,13 @@ const LIVE_RUNTIME_ENV_KEY = '__xlnLiveEnv';
 
 type RuntimeViewEnv = RuntimeReplica & { [LIVE_RUNTIME_ENV_KEY]?: RuntimeReplica };
 
-const isMapLike = (value: object): value is ReadonlyMap<unknown, unknown> => {
-  if (Array.isArray(value)) return false;
+/**
+ * Committed/candidate Patricia maps (PersistentEntityAccountMap,
+ * EntityAccountCandidateMap, ...) implement ReadonlyMap but are not
+ * `instanceof Map`. Duck-type instead wherever code needs to recognize them.
+ */
+export const isMapLike = (value: unknown): value is ReadonlyMap<unknown, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const candidate = value as Partial<ReadonlyMap<unknown, unknown>> & { size?: unknown };
   return typeof candidate.entries === 'function'
     && typeof candidate.get === 'function'

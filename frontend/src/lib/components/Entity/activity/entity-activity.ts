@@ -4,6 +4,7 @@ import type { EntityReplica } from '$lib/types/ui';
 import { entityAvatar as resolveEntityAvatar } from '$lib/utils/identity/avatar';
 import { formatEntityId } from '$lib/utils/format';
 import { getEntityDisplayName, resolveEntityName } from '$lib/utils/identity/entityNaming';
+import { isMapLike } from '$lib/utils/runtime/liveRuntimeEnv';
 import { requireTokenDecimals } from '../token-metadata';
 
 type GossipSource = Parameters<typeof resolveEntityName>[1];
@@ -276,7 +277,7 @@ function summarizeAccountTx(
 export function buildEntityActivityRows(options: BuildEntityActivityRowsOptions): EntityActivityRow[] {
   const rows: EntityActivityRow[] = [];
   const accounts = options.replica?.state?.accounts;
-  if (accounts instanceof Map && accounts.size > 0) {
+  if (isMapLike(accounts) && accounts.size > 0) {
     for (const [counterpartyId, account] of accounts.entries()) {
       const accountId = String(counterpartyId || '');
       const accountLabel = activityAccountLabel(accountId, options.activeEnv);
