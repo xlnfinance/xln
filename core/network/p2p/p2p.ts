@@ -28,6 +28,8 @@ import {
   selectProfileBatch,
   DEFAULT_GOSSIP_ROUTE_TO_ROUTES,
   MAX_GOSSIP_ROUTE_TO_ROUTES,
+  MAX_GOSSIP_IDS_DEPTH,
+  DEFAULT_GOSSIP_PREFIX_LIMIT,
   encodeRouteToRequest,
   type GossipRouteToRequest,
   type GossipProfileBatchRequest,
@@ -1137,13 +1139,19 @@ export class RuntimeP2P {
     return this.fetchProfilesWithRetry([]);
   }
 
-  async ensureProfiles(entityIds: string[]): Promise<boolean> {
+  /**
+   * @param depth neighbourhood levels to pull with the ids (1..3): 2 brings the
+   * targets' publicAccounts peers, 3 the peers of those — enough to see the
+   * routes around a target and choose one locally.
+   */
+  async ensureProfiles(entityIds: string[], depth: number = 1): Promise<boolean> {
     const requestedEntityIds = uniqueTransportValues(entityIds.map(normalizeId)).filter(Boolean);
     if (requestedEntityIds.length === 0) return true;
-    const key = [...requestedEntityIds].sort(compareStableText).join(',');
+    const boundedDepth = Math.min(MAX_GOSSIP_IDS_DEPTH, Math.max(1, Math.floor(depth)));
+    const key = `${boundedDepth}:${[...requestedEntityIds].sort(compareStableText).join(',')}`;
     const inFlight = this.profileFetches.get(key);
     if (inFlight) return inFlight;
-    const fetch = this.ensureProfilesUncoalesced(requestedEntityIds);
+    const fetch = this.ensureProfilesUncoalesced(requestedEntityIds, boundedDepth);
     this.profileFetches.set(key, fetch);
     try {
       return await fetch;
@@ -1152,12 +1160,12 @@ export class RuntimeP2P {
     }
   }
 
-  private async ensureProfilesUncoalesced(requestedEntityIds: string[]): Promise<boolean> {
+  private async ensureProfilesUncoalesced(requestedEntityIds: string[], depth: number = 1): Promise<boolean> {
     let requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
     let missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
 
     if (missingEntityIds.length > 0) {
-      await this.fetchProfilesWithRetry(missingEntityIds);
+      await this.fetchProfilesWithRetry(missingEntityIds, depth);
     }
 
     requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
@@ -1234,7 +1242,40 @@ export class RuntimeP2P {
   }
 
   // Fetch profiles from relay with bounded retry for cold or stale caches.
-  private async fetchProfilesWithRetry(missingEntityIds: string[] = []): Promise<boolean> {
+  /**
+   * Masked directory page: profiles whose entityId starts with `prefix`
+   * (≥4 hex chars after 0x), ordered by id, `limit` per page, continuing after
+   * the exclusive `after` id. The relay does not learn which entry is wanted.
+   * Resolves the page as applied to the local cache (verified profiles only).
+   */
+  async fetchProfilesByPrefix(prefix: string, limit: number = DEFAULT_GOSSIP_PREFIX_LIMIT, after?: string): Promise<Profile[]> {
+    if (this.closing || this.closed) return [];
+    const client = this.getActiveClient();
+    if (!client) return [];
+    const normalizedPrefix = prefix.trim().toLowerCase();
+    const before = new Set((this.env.gossip?.getProfiles?.() || []).map(profile => normalizeId(profile.entityId)));
+    client.sendGossipRequest(this.runtimeId, {
+      prefix: normalizedPrefix,
+      limit,
+      ...(after ? { after: normalizeId(after) } : {}),
+    } satisfies GossipProfileBatchRequest);
+    for (const waitMs of GOSSIP_FETCH_RETRY_DELAYS_MS) {
+      if (!(await this.waitForActiveDelay(waitMs))) break;
+      const page = (this.env.gossip?.getProfiles?.() || [])
+        .filter(profile => normalizeId(profile.entityId).startsWith(normalizedPrefix)
+          && (!after || normalizeId(profile.entityId) > normalizeId(after)))
+        .sort((left, right) => compareStableText(normalizeId(left.entityId), normalizeId(right.entityId)))
+        .slice(0, limit);
+      if (page.some(profile => !before.has(normalizeId(profile.entityId)))) return page;
+    }
+    return (this.env.gossip?.getProfiles?.() || [])
+      .filter(profile => normalizeId(profile.entityId).startsWith(normalizedPrefix)
+        && (!after || normalizeId(profile.entityId) > normalizeId(after)))
+      .sort((left, right) => compareStableText(normalizeId(left.entityId), normalizeId(right.entityId)))
+      .slice(0, limit);
+  }
+
+  private async fetchProfilesWithRetry(missingEntityIds: string[] = [], depth: number = 1): Promise<boolean> {
     if (this.closing || this.closed) return false;
     if (!this.getActiveClient()) {
       this.env.warn('network', 'GOSSIP_PROFILE_FETCH_NO_CLIENT', {
@@ -1250,6 +1291,7 @@ export class RuntimeP2P {
       if (missingEntityIds.length > 0) {
         client.sendGossipRequest(this.runtimeId, {
           ids: missingEntityIds,
+          ...(depth > 1 ? { depth } : {}),
         } satisfies GossipProfileBatchRequest);
       } else {
         this.requestSeedGossip('full');

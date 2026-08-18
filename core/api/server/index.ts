@@ -573,24 +573,34 @@ const maybeHandleRuntimeInfoApi = async (
 };
 
 const gossipProfileAdmission = createGossipProfileAdmission();
+/** A missing profile is looked up on the relay at most once per minute per entity. */
+const GOSSIP_PROFILE_LOOKUP_MIN_INTERVAL_MS = 60_000;
+/** Lookups arriving within this window travel as one batched relay request. */
+const GOSSIP_PROFILE_LOOKUP_BATCH_MS = 20;
+const gossipProfileLookupAt = new Map<string, number>();
+let gossipProfileLookupBatch: { entityIds: Set<string>; done: Promise<void> } | null = null;
 
 const gossipProfileEntityId = (req: Request): string => {
   const entityId = String(new URL(req.url).searchParams.get('entityId') || '').trim().toLowerCase();
   return /^0x[0-9a-f]{64}$/.test(entityId) ? entityId : '';
 };
 
-const prepareGossipProfileApi = async (
-  req: Request,
-  env: RuntimeReplica | null,
+/**
+ * Coalesce concurrent misses into one relay request and remember when each
+ * entity was last asked for, so a caller polling for a profile that has not
+ * been announced yet costs the relay one lookup per minute, not one per poll.
+ */
+const lookupMissingGossipProfile = (
+  env: RuntimeReplica,
+  targetEntityId: string,
   clientId: string,
-  operatorAuthorized: boolean,
-): Promise<Response | null> => {
-  const targetEntityId = gossipProfileEntityId(req);
-  if (!targetEntityId || !env) return null;
-  if (env.gossip?.profiles?.has(targetEntityId)) return null;
-  // The lookup budget guards a public daemon against relay-fetch floods; the
-  // Runtime-bound operator (control plane, load drivers) is not a public client.
-  if (!operatorAuthorized && !gossipProfileAdmission.admit(clientId)) {
+): Promise<void> | Response => {
+  const now = Date.now();
+  const lastAt = gossipProfileLookupAt.get(targetEntityId) ?? 0;
+  if (now - lastAt < GOSSIP_PROFILE_LOOKUP_MIN_INTERVAL_MS) return Promise.resolve();
+  // The budget guards the relay: one batched relay request spends one unit,
+  // however many misses it carries.
+  if (!gossipProfileLookupBatch && !gossipProfileAdmission.admit(clientId)) {
     return new Response(safeStringify({ ok: false, error: 'GOSSIP_PROFILE_LOOKUP_RATE_LIMITED' }), {
       status: 429,
       headers: {
@@ -599,14 +609,42 @@ const prepareGossipProfileApi = async (
       },
     });
   }
-  try {
-    await ensureGossipProfiles(env, [targetEntityId]);
-  } catch (error) {
-    serverLog.warn('gossip.profile_ensure_failed', {
-      targetEntityId,
-      error: error instanceof Error ? error.message : String(error),
-    });
+  gossipProfileLookupAt.set(targetEntityId, now);
+  if (gossipProfileLookupAt.size > 100_000) {
+    for (const [entityId, at] of gossipProfileLookupAt) {
+      if (now - at >= GOSSIP_PROFILE_LOOKUP_MIN_INTERVAL_MS) gossipProfileLookupAt.delete(entityId);
+    }
   }
+  if (!gossipProfileLookupBatch) {
+    const entityIds = new Set<string>();
+    const done = new Promise<void>(resolve => setTimeout(resolve, GOSSIP_PROFILE_LOOKUP_BATCH_MS)).then(async () => {
+      gossipProfileLookupBatch = null;
+      try {
+        await ensureGossipProfiles(env, [...entityIds]);
+      } catch (error) {
+        serverLog.warn('gossip.profile_ensure_failed', {
+          targetEntityIds: [...entityIds],
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+    gossipProfileLookupBatch = { entityIds, done };
+  }
+  gossipProfileLookupBatch.entityIds.add(targetEntityId);
+  return gossipProfileLookupBatch.done;
+};
+
+const prepareGossipProfileApi = async (
+  req: Request,
+  env: RuntimeReplica | null,
+  clientId: string,
+): Promise<Response | null> => {
+  const targetEntityId = gossipProfileEntityId(req);
+  if (!targetEntityId || !env) return null;
+  if (env.gossip?.profiles?.has(targetEntityId)) return null;
+  const lookup = lookupMissingGossipProfile(env, targetEntityId, clientId);
+  if (lookup instanceof Response) return lookup;
+  await lookup;
   return null;
 };
 
@@ -869,7 +907,7 @@ const handleApi = async (
   if (env && req.method === 'GET' && pathname === '/api/gossip/profile') {
     // Network refresh happens before the committed-State lease. A slow public
     // relay lookup must never delay the Runtime writer/WAL commit path.
-    const rejected = await prepareGossipProfileApi(req, env, clientId, operatorAuthorized);
+    const rejected = await prepareGossipProfileApi(req, env, clientId);
     if (rejected) return rejected;
   }
   const handle = () => handleApiAgainstCommittedState(

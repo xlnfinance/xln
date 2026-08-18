@@ -249,7 +249,9 @@ export const setupParallelLoadLanes = async (options: {
     advertiseEntityIds: [...lane.hostedEntityIds],
     gossipPollMs: PROVISIONING_GOSSIP_POLL_MS,
   }));
-  await waitForVisibleEntities(options.hub, identities.map(identity => identity.entityId), 'PRODUCTION_SWAP_LOAD_LANE_PROFILES_NOT_VISIBLE');
+  // No "hub sees every user" barrier: profiles are pull-only and the Hub
+  // fetches a counterparty's runtime route by id the first time it hears from
+  // it, so a user is routable as soon as its own account frame lands.
   await runInBatches(runtimes, async (lane, index) => {
     await waitForHubProfile(lane, options.hubIdentity.entityId);
     await sendObserved(lane.runtime, `prod-load-open-${options.role}-${lane.laneKey}`, {

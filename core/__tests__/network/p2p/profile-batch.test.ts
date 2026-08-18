@@ -97,3 +97,28 @@ test('relay sinceSeq cursor returns exactly what was stored after the cursor, re
   expect(getProfileBatch(store, { set: 'default', sinceSeq: cursorAfterNewer }).map(p => p.entityId)).toEqual([ALICE]);
   expect(getProfileBatch(store, { set: 'default', sinceSeq: store.gossipSeq })).toEqual([]);
 });
+
+test('ids with depth pulls the neighbourhood along publicAccounts, bounded by depth', () => {
+  const profiles = [
+    routedProfile(ALICE, false, [H1]),
+    routedProfile(H1, true, [H2]),
+    routedProfile(H2, true, [BOB]),
+    routedProfile(BOB, false, []),
+  ];
+  const ids = (depth: number) => selectProfileBatch(profiles, { ids: [ALICE], depth }).map(p => p.entityId).sort();
+  expect(ids(1)).toEqual([ALICE]);
+  expect(ids(2)).toEqual([ALICE, H1].sort());
+  expect(ids(3)).toEqual([ALICE, H1, H2].sort());
+  expect(() => decodeGossipProfileBatchRequest({ ids: [ALICE], depth: 4 })).toThrow();
+});
+
+test('prefix lookup pages by entityId with an exclusive after cursor', () => {
+  const ids = ['0xaa01', '0xaa02', '0xaa03', '0xab01'].map(p => p + '0'.repeat(66 - p.length));
+  const profiles = ids.map(id => routedProfile(id, false, []));
+  const page1 = selectProfileBatch(profiles, { prefix: '0xaa', limit: 2 }).map(p => p.entityId);
+  expect(page1).toEqual([ids[0], ids[1]]);
+  const page2 = selectProfileBatch(profiles, { prefix: '0xaa', limit: 2, after: page1[1] }).map(p => p.entityId);
+  expect(page2).toEqual([ids[2]]);
+  expect(decodeGossipProfileBatchRequest({ prefix: '0xAA01', limit: 100 }).prefix).toBe('0xaa01');
+  expect(() => decodeGossipProfileBatchRequest({ prefix: '0xa' })).toThrow();
+});

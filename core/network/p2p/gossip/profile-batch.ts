@@ -36,6 +36,19 @@ export type GossipProfileBatchRequest = {
   includeJurisdictions?: boolean;
   routeTo?: GossipRouteToRequest;
   /**
+   * Neighbourhood depth for `ids`: 1 returns the named profiles only, 2 adds
+   * their publicAccounts peers, 3 the peers of those. Lets a sender see the
+   * surroundings of a target and pick a route itself.
+   */
+  depth?: number;
+  /**
+   * Masked lookup: every profile whose entityId starts with `prefix`, ordered
+   * by entityId, at most `limit` (default 100) per page, continuing after the
+   * exclusive `after` cursor. The responder never learns which one is wanted.
+   */
+  prefix?: string;
+  after?: string;
+  /**
    * Relay receipt cursor: only profiles the responder stored after this
    * sequence are returned. Unlike `updatedSince` (a profile-clock watermark
    * that silently drops profiles from slower clocks) it is exact, so pull-only
@@ -45,6 +58,9 @@ export type GossipProfileBatchRequest = {
 };
 
 export const DEFAULT_GOSSIP_BATCH_LIMIT = 1000;
+export const MAX_GOSSIP_IDS_DEPTH = 3;
+export const DEFAULT_GOSSIP_PREFIX_LIMIT = 100;
+const MIN_GOSSIP_PREFIX_CHARS = 4;
 export const MAX_GOSSIP_ROUTE_TO_ROUTES = 50;
 export const DEFAULT_GOSSIP_ROUTE_TO_ROUTES = 50;
 const MAX_ROUTE_TO_AMOUNT_DIGITS = 78;
@@ -157,7 +173,7 @@ export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBa
   requireExactBoundaryKeys(
     request,
     [],
-    ['ids', 'set', 'updatedSince', 'limit', 'includeJurisdictions', 'routeTo', 'sinceSeq'],
+    ['ids', 'set', 'updatedSince', 'limit', 'includeJurisdictions', 'routeTo', 'sinceSeq', 'depth', 'prefix', 'after'],
     'P2P_GOSSIP_REQUEST_FIELDS_INVALID',
   );
   const routeTo = request['routeTo'] === undefined ? undefined : decodeRouteTo(request['routeTo']);
@@ -168,6 +184,19 @@ export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBa
   const set = request['set'];
   if (set !== undefined && set !== 'default' && set !== 'hubs') {
     throw new Error('P2P_GOSSIP_REQUEST_SET_INVALID');
+  }
+  const depth = request['depth'];
+  if (depth !== undefined && (!Number.isSafeInteger(depth) || Number(depth) < 1 || Number(depth) > MAX_GOSSIP_IDS_DEPTH)) {
+    throw new Error('P2P_GOSSIP_REQUEST_DEPTH_INVALID');
+  }
+  const prefix = request['prefix'];
+  if (prefix !== undefined && (typeof prefix !== 'string' || !/^0x[0-9a-fA-F]{2,64}$/.test(prefix)
+    || prefix.length < 2 + MIN_GOSSIP_PREFIX_CHARS)) {
+    throw new Error('P2P_GOSSIP_REQUEST_PREFIX_INVALID');
+  }
+  const after = request['after'];
+  if (after !== undefined && (typeof after !== 'string' || after.length > 128)) {
+    throw new Error('P2P_GOSSIP_REQUEST_AFTER_INVALID');
   }
   for (const field of ['updatedSince', 'limit', 'sinceSeq'] as const) {
     const candidate = request[field];
@@ -185,6 +214,9 @@ export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBa
     ...(request['updatedSince'] === undefined ? {} : { updatedSince: Number(request['updatedSince']) }),
     ...(request['limit'] === undefined ? {} : { limit: Number(request['limit']) }),
     ...(request['sinceSeq'] === undefined ? {} : { sinceSeq: Number(request['sinceSeq']) }),
+    ...(depth === undefined ? {} : { depth: Number(depth) }),
+    ...(prefix === undefined ? {} : { prefix: prefix.toLowerCase() }),
+    ...(after === undefined ? {} : { after: after.toLowerCase() }),
     ...(includeJurisdictions === undefined ? {} : { includeJurisdictions }),
     ...(routeTo === undefined ? {} : { routeTo }),
   };
@@ -221,7 +253,8 @@ export const selectProfileBatch = (
       ).slice(0, maxBatchSize)
     : [];
   const routeTo = request.routeTo;
-  const set = request.set ?? (ids.length === 0 && routeTo === undefined ? 'default' : undefined);
+  const prefix = request.prefix;
+  const set = request.set ?? (ids.length === 0 && routeTo === undefined && prefix === undefined ? 'default' : undefined);
   const updatedSince = typeof request.updatedSince === 'number' && Number.isFinite(request.updatedSince)
     ? request.updatedSince
     : null;
@@ -237,6 +270,39 @@ export const selectProfileBatch = (
     if (profile) {
       explicitMatches.set(entityId, profile);
     }
+  }
+  // Neighbourhood expansion: peers of the named profiles, breadth-first, up to
+  // `depth` levels and the batch cap.
+  const depth = Math.min(MAX_GOSSIP_IDS_DEPTH, Math.max(1, Math.floor(request.depth ?? 1)));
+  let frontier = Array.from(explicitMatches.values());
+  for (let level = 1; level < depth && frontier.length > 0 && explicitMatches.size < maxBatchSize; level += 1) {
+    const next: Profile[] = [];
+    for (const profile of frontier) {
+      for (const peerId of profile.publicAccounts) {
+        const normalizedPeerId = normalizeEntityId(peerId);
+        if (explicitMatches.has(normalizedPeerId)) continue;
+        const peer = profilesByEntityId.get(normalizedPeerId);
+        if (!peer) continue;
+        explicitMatches.set(normalizedPeerId, peer);
+        next.push(peer);
+        if (explicitMatches.size >= maxBatchSize) break;
+      }
+      if (explicitMatches.size >= maxBatchSize) break;
+    }
+    frontier = next;
+  }
+
+  const prefixMatches: Profile[] = [];
+  if (prefix !== undefined) {
+    const after = request.after ?? '';
+    const pageLimit = typeof request.limit === 'number' && Number.isFinite(request.limit)
+      ? Math.min(maxBatchSize, Math.max(1, Math.floor(request.limit)))
+      : Math.min(maxBatchSize, DEFAULT_GOSSIP_PREFIX_LIMIT);
+    prefixMatches.push(...Array.from(profilesByEntityId.entries())
+      .filter(([entityId]) => entityId.startsWith(prefix) && entityId > after)
+      .sort(([left], [right]) => compareStableText(left, right))
+      .slice(0, pageLimit)
+      .map(([, profile]) => profile));
   }
 
   let setProfiles: Profile[] = [];
@@ -266,7 +332,13 @@ export const selectProfileBatch = (
     }
   }
 
-  return Array.from(new Map<string, Profile>([...setMatches, ...routeMatches, ...explicitMatches]).values())
+  if (prefix !== undefined && setMatches.size === 0 && routeMatches.size === 0 && explicitMatches.size === 0) {
+    // A masked page keeps its entityId order so the caller can continue with
+    // `after` = last returned id.
+    return prefixMatches;
+  }
+  const prefixById = new Map(prefixMatches.map(profile => [normalizeEntityId(profile.entityId), profile] as const));
+  return Array.from(new Map<string, Profile>([...setMatches, ...routeMatches, ...prefixById, ...explicitMatches]).values())
     .sort(sortProfilesForBatch)
     .slice(0, maxBatchSize);
 };

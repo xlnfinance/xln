@@ -547,7 +547,7 @@ export const getProfileBatch = (
   const changed: Profile[] = [];
   for (const entry of store.gossipProfiles.values()) if (entry.seq > sinceSeq) changed.push(entry.profile);
   const selectedSet = selectProfileBatch(changed, { set: request.set ?? 'default', ...(rest.limit === undefined ? {} : { limit: rest.limit }) }, DEFAULT_GOSSIP_SYNC_LIMIT);
-  if (rest.ids === undefined && rest.routeTo === undefined) return selectedSet;
+  if (rest.ids === undefined && rest.routeTo === undefined && rest.prefix === undefined) return selectedSet;
   const explicit = selectProfileBatch(getAllGossipProfiles(store), rest, DEFAULT_GOSSIP_SYNC_LIMIT, store.routeGraphCache);
   const merged = new Map<string, Profile>();
   for (const profile of [...selectedSet, ...explicit]) merged.set(profile.entityId.toLowerCase(), profile);
