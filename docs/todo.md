@@ -21,15 +21,34 @@ observed, what changed, and what still has to be proved.
 - [x] Dropped `crypto-js`: nothing imported it; only a bundler chunk rule and a
       knip ignore still named it.
 
-## Next: 1000 payments/s + 1000 same-swaps/s
+## Now: throughput
+
+The Hub is a single writer and a frame costs about the same whether it carries
+one transaction or a hundred (26.1 ms with ~3.4 inputs; a lane daemon with one
+Account still spends 36 ms). So frames per second is a hard ceiling and batch
+size is the only free multiplier.
+
+- [x] `XLN_RUNTIME_MIN_FRAME_DELAY_MS` sets the frame floor;
+      `XLN_HUB_MIN_FRAME_DELAY_MS` forwards it to managed Hub children only.
+- [ ] Measure delivered TPS at frame delays 0 / 50 / 100 / 200 ms at 100 users.
+- [ ] Raise transactions per frame on the driver side (payments currently submit
+      one per sender per round).
+
+## Load runs must be isolated
+
+A second agent edits this tree while runs are in flight. The 100-user run at
+18:27 consumed a half-applied mempool refactor and died on
+`cloneIsolatedRuntimeInput is not defined` and `XLN_BINARY_CODEC_UNSUPPORTED`.
+Runs now execute from a detached worktree at a known commit (`/tmp/xln-load`).
+
+## Walls
 
 Measured walls (see memory `hlt-scaling-walls-2026-08-18`):
 
 - [x] Hub gossip Profile crossed the 10 KB entity-context leaf at ~34 accounts.
       Fixed by `publicPinned` + `MAX_PROFILE_ADVERTISED_ACCOUNTS = 100`
-      (commit `06e790238`). Not yet proved under load.
-- [ ] Prove it: HLT payments run at 32+ users must reach a delivered report.
+      (commit `06e790238`). A 100-user run no longer trips it.
+- [x] The payment route barrier judged readiness from the Hub's Profile, which
+      a Hub no longer publishes for its users (commit `8da1313dd`).
 - [ ] `ACCOUNT_J_CLAIM_NODE_MISSING` halts the Hub at 128 users round 55.
 - [ ] ~0.2 core per idle lane daemon caps the stand at 150-250 users.
-- [ ] One swap costs ~0.2-0.4 core-seconds; the target needs ~0.03. The fat is
-      serialization + hashing (~25%), not signatures (~5%) or disk (~2.5%).
