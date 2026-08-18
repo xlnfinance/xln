@@ -139,11 +139,32 @@ const encodeEntityFrameTxsPayload = (canonicalTxs: unknown[]): string =>
   });
 
 const canonicalEntityTxsMemo = new WeakMap<EntityTx[], unknown[]>();
+// Per-tx memo: the wire-budget fit, the frame hash, proposal validation and
+// storage each hand a *different* txs array (slices, spreads) over the same
+// tx objects; without this every pass re-canonicalized and re-encoded ~5 MB
+// of accountInputs. accountInput/consensusOutput canonical forms are fresh
+// private objects, so their bytes are memoized too; plain txs keep sharing
+// their (possibly still mutable) data and are only memoized as a mapping.
+const canonicalEntityTxMemo = new WeakMap<EntityTx, unknown>();
+
+const canonicalEntityTxForFrameHashMemoized = (tx: EntityTx): unknown => {
+  const cached = canonicalEntityTxMemo.get(tx);
+  if (cached !== undefined) return cached;
+  const canonical = canonicalEntityTxForFrameHash(tx);
+  if (
+    (tx.type === 'accountInput' || tx.type === 'consensusOutput') &&
+    typeof canonical === 'object' && canonical !== null
+  ) {
+    memoizeCanonicalEncoding(canonical);
+  }
+  canonicalEntityTxMemo.set(tx, canonical);
+  return canonical;
+};
 
 const canonicalEntityTxsForFrameHash = (txs: EntityTx[]): unknown[] => {
   const cached = canonicalEntityTxsMemo.get(txs);
   if (cached) return cached;
-  const canonical = memoizeCanonicalEncoding(txs.map(canonicalEntityTxForFrameHash));
+  const canonical = memoizeCanonicalEncoding(txs.map(canonicalEntityTxForFrameHashMemoized));
   canonicalEntityTxsMemo.set(txs, canonical);
   return canonical;
 };
