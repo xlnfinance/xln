@@ -201,7 +201,6 @@ export class RuntimeWsClient {
   private nextReconnectAt: number = 0;
   private suppressNextClose = false;
   private helloSent = false;
-  private peerRuntimeId = '';
   private helloAcknowledged = false;
   private helloAudience: string | null = null;
   private helloNonce: string | null = null;
@@ -234,11 +233,6 @@ export class RuntimeWsClient {
     this.maxReconnectAttempts = Number.isFinite(options.maxReconnectAttempts as number)
       ? Number(options.maxReconnectAttempts)
       : RuntimeWsClient.DEFAULT_MAX_RECONNECT_ATTEMPTS;
-  }
-
-  /** Runtime id the remote side identified itself with in hello_ack ('' before ack). */
-  getPeerRuntimeId(): string {
-    return this.peerRuntimeId;
   }
 
   getUrl(): string {
@@ -589,7 +583,6 @@ export class RuntimeWsClient {
       return true;
     }
     if (msg.type === 'hello_ack') {
-      if (typeof msg.from === 'string') this.peerRuntimeId = normalizeRuntimeId(msg.from);
       const expectedRuntimeId = this.options.runtimeId.toLowerCase();
       const acknowledgedRuntimeId = String(msg.to || '').toLowerCase();
       if (!this.helloSent || acknowledgedRuntimeId !== expectedRuntimeId) {

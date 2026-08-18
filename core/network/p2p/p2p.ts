@@ -355,8 +355,8 @@ export class RuntimeP2P {
   private gossipSet: P2PGossipSet;
   private profileHeartbeatMs: number;
   private lastAnnouncedProfiles = new Map<string, { topologyKey: string; at: number }>();
-  /** Relay receipt cursor per relay runtime id (exact incremental polling). */
-  private gossipCursors = new Map<string, number>();
+  /** Relay receipt cursor per relay connection (exact incremental polling). */
+  private gossipCursors = new WeakMap<RuntimeWsClient, number>();
   private onEntityInputs: (
     from: string,
     envelope: RuntimeEntityInputsEnvelope,
@@ -515,7 +515,7 @@ export class RuntimeP2P {
         },
         onGossipResponse: (from, payload) => {
           if (!this.closing && !this.closed && this.clients.includes(client)) {
-            this.handleGossipResponse(from, payload);
+            this.handleGossipResponse(from, payload, client);
           }
         },
         onGossipAnnounce: (from, payload) => {
@@ -993,8 +993,7 @@ export class RuntimeP2P {
   private requestSeedGossip(mode: GossipRefreshMode = 'incremental') {
     const client = this.getActiveClient();
     if (!client) return;
-    const relayId = normalizeRuntimeId(client.getPeerRuntimeId());
-    const cursor = mode === 'incremental' && relayId ? this.gossipCursors.get(relayId) : undefined;
+    const cursor = mode === 'incremental' ? this.gossipCursors.get(client) : undefined;
     const updatedSince = mode === 'incremental' && cursor === undefined ? this.getLatestKnownRemoteProfileTimestamp() : 0;
     const request: GossipProfileBatchRequest = {
       set: this.gossipSet,
@@ -1484,12 +1483,9 @@ export class RuntimeP2P {
     return selectProfileBatch(allProfiles, request, DEFAULT_GOSSIP_BATCH_LIMIT);
   }
 
-  private handleGossipResponse(from: string, payload: unknown) {
+  private handleGossipResponse(from: string, payload: unknown, client?: RuntimeWsClient) {
     const decoded = decodeGossipPayload(payload);
-    if (decoded.cursor !== undefined) {
-      const relayId = normalizeRuntimeId(from);
-      if (relayId) this.gossipCursors.set(relayId, decoded.cursor);
-    }
+    if (decoded.cursor !== undefined && client) this.gossipCursors.set(client, decoded.cursor);
     this.applyIncomingJurisdictions(from, decoded.jurisdictions);
     this.applyIncomingProfiles(from, decoded.profiles).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
