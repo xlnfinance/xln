@@ -19,7 +19,7 @@ import {
   requireExactBoundaryKeys,
 } from '../protocol/boundary-validation';
 import { canonicalEntitySeed, importEntity } from '../runtime/registration/entity-creation';
-import { parseProfile } from '../entity/profile';
+import { parseProfile, type DecodedProfile } from '../entity/profile';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
@@ -115,7 +115,7 @@ type ControlRuntimeStatusResponse = {
 type GossipProfileResponse = {
   ok: boolean;
   found: boolean;
-  profile?: { entityId?: string } | null;
+  profile?: DecodedProfile | null;
 };
 
 const responseErrorMessage = (value: unknown, defaultMessage: string): string => {
@@ -474,6 +474,20 @@ export class DaemonControlClient {
       `/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`,
     ));
     return response.ok === true && response.found === true;
+  }
+
+  /**
+   * Counterparties this Runtime currently sees in `entityId`'s gossip profile.
+   * A routed payment is admitted against the sender's own gossip view, so a
+   * load driver must observe that view rather than the Hub's own state.
+   * Returns null when the profile has not propagated to this Runtime yet.
+   */
+  async gossipProfileCounterparties(entityId: string): Promise<string[] | null> {
+    const response = decodeGossipProfileResponse(await this.get(
+      `/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`,
+    ));
+    if (response.ok !== true || response.found !== true || !response.profile) return null;
+    return response.profile.accounts.map(account => account.counterpartyId.toLowerCase());
   }
 
   async configureP2P(config: {

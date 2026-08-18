@@ -54,7 +54,59 @@ const MAX_SENDER_DEBIT_MULTIPLE = 2n;
 const CREDIT_HEADROOM_MULTIPLE = 4n;
 const DELIVERY_POLL_MS = 250;
 const DELIVERY_TIMEOUT_MS = 600_000;
+const ROUTE_BARRIER_POLL_MS = 500;
+const ROUTE_BARRIER_TIMEOUT_MS = 300_000;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * A routed payment is admitted against the *sender's* gossip view: the Hub's
+ * profile must already list an Account with the receiver, and the receiver's
+ * own profile must list an Account with the Hub. Both propagate asynchronously,
+ * so a driver that starts paying as soon as provisioning returns halts the
+ * sender Runtime on HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING instead of measuring
+ * anything. This barrier waits for the view the payment will actually be
+ * judged against.
+ */
+const waitForRoutableReceivers = async (
+  senders: readonly LaneRuntime[],
+  hubEntityId: string,
+  receiverIds: readonly string[],
+): Promise<void> => {
+  const startedAt = Date.now();
+  const deadline = startedAt + ROUTE_BARRIER_TIMEOUT_MS;
+  const confirmed = senders.map(() => new Set<string>());
+  let lastPending = -1;
+  for (;;) {
+    await Promise.all(senders.map(async (lane, index) => {
+      const settled = confirmed[index]!;
+      if (settled.size === receiverIds.length) return;
+      const hubAccounts = await lane.control.gossipProfileCounterparties(hubEntityId);
+      if (!hubAccounts) return;
+      const hubSees = new Set(hubAccounts);
+      for (const receiverId of receiverIds) {
+        if (settled.has(receiverId) || !hubSees.has(receiverId)) continue;
+        const receiverAccounts = await lane.control.gossipProfileCounterparties(receiverId);
+        if (receiverAccounts?.includes(hubEntityId)) settled.add(receiverId);
+      }
+    }));
+    const pending = confirmed.reduce(
+      (total, settled) => total + (receiverIds.length - settled.size),
+      0,
+    );
+    if (pending === 0) {
+      console.log(`[load] payment routes ready senders=${senders.length} elapsedMs=${Date.now() - startedAt}`);
+      return;
+    }
+    if (pending !== lastPending) {
+      console.log(`[load] payment routes pending=${pending} elapsedMs=${Date.now() - startedAt}`);
+      lastPending = pending;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`HLT_PAYMENT_ROUTES_NOT_VISIBLE:pending=${pending}:of=${senders.length * receiverIds.length}`);
+    }
+    await sleep(ROUTE_BARRIER_POLL_MS);
+  }
+};
 
 const buildRoundPayment = (
   sender: LoadIdentity,
@@ -167,6 +219,12 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       hubGrantedCreditAmounts: perReceiver.map(total => total * CREDIT_HEADROOM_MULTIPLE),
     });
     receivers = receiverSetup.runtimes;
+
+    await waitForRoutableReceivers(
+      senders,
+      hubIdentity.entityId,
+      receivers.map(lane => lane.identity.entityId.toLowerCase()),
+    );
 
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
     const walBytesBefore = directoryBytes(walPath);

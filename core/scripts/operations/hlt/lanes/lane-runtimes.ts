@@ -12,7 +12,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { cpus } from 'node:os';
-import { readFileSync } from 'node:fs';
+import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveRuntimeAdapterCapabilityToken } from '../../../../api/runtime-adapter/security/auth';
 import {
@@ -103,6 +103,7 @@ const spawnLaneRuntime = async (options: {
   const authSeed = randomBytes(32).toString('hex');
   const audience = `load-lane-${port}`;
   const dbRoot = join(options.workDir, 'prod-mesh', 'load-lanes', `lane-${String(options.laneIndex).padStart(4, '0')}`);
+  mkdirSync(dbRoot, { recursive: true });
   const child = spawnBunChild(
     `load-lane-${options.laneIndex}`,
     ['core/api/server/index.ts', '--port', String(port), '--host', '127.0.0.1', '--server-id', `load-lane-${port}`],
@@ -126,6 +127,10 @@ const spawnLaneRuntime = async (options: {
       XLN_STORAGE_HISTORY_PATH: join(dbRoot, 'storage-health-history.json'),
       XLN_JURISDICTIONS_PATH: options.jurisdictionsPath,
       XLN_LOG_LEVEL: process.env['XLN_LOAD_LANE_LOG_LEVEL'] || 'warn',
+      // Profiling flags are opt-in on the parent and must reach the lane, or a
+      // per-user frame profile can only ever be measured on the mesh daemons.
+      ...(process.env['XLN_RUNTIME_FRAME_LOG'] ? { XLN_RUNTIME_FRAME_LOG: '1' } : {}),
+      ...(process.env['XLN_RUNTIME_APPLY_PROFILE'] ? { XLN_RUNTIME_APPLY_PROFILE: '1' } : {}),
       // The load worker is the only client of these loopback daemons and polls
       // settlement evidence from every lane concurrently; the public per-client
       // budget would rate-limit the harness itself, not the system under test.
@@ -138,6 +143,12 @@ const spawnLaneRuntime = async (options: {
     },
     { startupSignersJson: safeStringify([{ seed: options.laneSeed, label: 'owner' }]) },
   );
+  // A lane daemon that halts mid-run is otherwise silent: spawnBunChild keeps
+  // only a bounded in-memory tail that is surfaced on startup failure. A load
+  // run that dies at round fifty needs that daemon's own log on disk.
+  const daemonLog = createWriteStream(join(dbRoot, 'daemon.log'), { flags: 'a' });
+  child.proc.stdout.on('data', (chunk: Buffer) => daemonLog.write(chunk));
+  child.proc.stderr.on('data', (chunk: Buffer) => daemonLog.write(chunk));
   const token = deriveRuntimeAdapterCapabilityToken(authSeed, 'full', Date.now() + 60 * 60_000, {
     audience,
     keyId: 'load-lane',
