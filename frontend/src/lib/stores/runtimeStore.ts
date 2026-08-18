@@ -105,16 +105,19 @@ export const activeRuntimeId = derived(
   },
 );
 
-// Derived: Get active runtime's env
-export const activeRuntime = derived(
+// Derived: registry entry (env/wsUrl/type/status) for the selected runtime.
+// Named distinctly from vaultStore's unrelated `activeRuntime` (vault-side
+// signer/seed/recovery metadata) — the two were colliding under the same
+// import name across the app.
+export const activeRuntimeEntry = derived(
   [runtimes, activeRuntimeId],
   ([$runtimes, $activeId]) => $runtimes.get($activeId) || null
 );
 
 // Derived: Get active runtime's env (shorthand)
 export const activeEnv = derived(
-  activeRuntime,
-  ($activeRuntime) => $activeRuntime?.env || null
+  activeRuntimeEntry,
+  ($activeRuntimeEntry) => $activeRuntimeEntry?.env || null
 );
 
 type RuntimeAdapterStorageSnapshot = {

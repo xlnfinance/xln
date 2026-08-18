@@ -2,6 +2,7 @@ import { amountToUsd } from '$lib/utils/assetPricing';
 import { requireTokenDecimals } from './../token-metadata';
 import type { SwapBookEntry } from '@xln/core/api/public/runtime-module';
 import { toBigIntSafe } from './../swap-formatting';
+import { requireExactKeys as requireExactKeysWithOptional, requireUnknownRecord as requireRecord } from '$lib/utils/boundary';
 
 export type ClosedOrderStatus = 'filled' | 'partial' | 'canceled' | 'closed';
 
@@ -128,18 +129,8 @@ export type SwapHistoryPage = Readonly<{
   nextCursor: string | null;
 }>;
 
-type UnknownRecord = Record<string, unknown>;
-
-const requireRecord = (value: unknown, code: string): UnknownRecord => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(code);
-  return value as UnknownRecord;
-};
-
-const requireExactKeys = (value: UnknownRecord, keys: readonly string[], code: string): void => {
-  if (Object.keys(value).length !== keys.length || keys.some((key) => !Object.hasOwn(value, key))) {
-    throw new Error(code);
-  }
-};
+const requireExactKeys = (value: Record<string, unknown>, keys: readonly string[], code: string): void =>
+  requireExactKeysWithOptional(value, keys, [], code);
 
 const requireCanonicalId = (value: unknown, code: string): string => {
   if (typeof value !== 'string' || !/^0x[0-9a-f]{64}$/.test(value)) throw new Error(code);

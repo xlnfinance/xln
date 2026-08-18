@@ -1,3 +1,4 @@
+import { isUnknownRecord as isRecord } from '$lib/utils/boundary';
 import type { QaArtifact, QaRun, QaShard, QaStoryScreenshot } from './types';
 
 export type QaAdminStoryKey = 'payment' | 'swap' | 'cross-chain-swap' | 'dispute';
@@ -100,9 +101,6 @@ const MAINNET_USER_STORIES: QaAdminStoryDefinition[] = [
     keywords: ['dispute', 'challenge', 'evidence', 'finalized'],
   },
 ];
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const asString = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null;

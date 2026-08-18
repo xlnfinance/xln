@@ -16,7 +16,6 @@ import {
   nextWsTimestamp,
   pushDebugEvent,
   storeVerifiedGossipProfile,
-  getDefaultGossipProfiles,
   getProfileBatch,
   getAllGossipJurisdictions,
   storeVerifiedJurisdictionAnnouncement,
@@ -472,21 +471,15 @@ const storeAnnouncedProfiles = async (
   return result;
 };
 
-const broadcastGossipProfiles = (
+// Profiles are pull-only: the relay stores what hubs and users announce and
+// answers gossip_request (set/ids/routeTo) — it never fans profiles out. Only
+// fresh jurisdiction discovery (rare, tiny, cluster-wide) is still pushed.
+const broadcastGossipJurisdictions = (
   context: RelayRouteContext,
-  storedProfiles: Profile[],
   storedJurisdictions: JurisdictionGossipAnnouncement[] = [],
 ): number => {
-  if (storedProfiles.length === 0 && storedJurisdictions.length === 0) return 0;
+  if (storedJurisdictions.length === 0) return 0;
   const { config, fromKey, id } = context;
-  const defaultEntityIds = new Set(
-    getDefaultGossipProfiles(config.store, DEFAULT_GOSSIP_SYNC_LIMIT)
-      .map(profile => profile.entityId.toLowerCase()),
-  );
-  const profiles = storedProfiles.filter(
-    profile => defaultEntityIds.has(profile.entityId.toLowerCase()) || profile.metadata.isHub === true,
-  );
-  if (profiles.length === 0 && storedJurisdictions.length === 0) return 0;
   let targets = 0;
   for (const [runtimeId, client] of config.store.clients.entries()) {
     if (!client?.ws || (fromKey && runtimeId === fromKey)) continue;
@@ -496,7 +489,7 @@ const broadcastGossipProfiles = (
       from: config.store.serverId,
       to: runtimeId,
       timestamp: Date.now(),
-      payload: { profiles, jurisdictions: storedJurisdictions },
+      payload: { profiles: [], jurisdictions: storedJurisdictions },
       ...(id ? { inReplyTo: id } : {}),
     }));
     targets += 1;
@@ -565,7 +558,7 @@ const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean
       });
     }
   }
-  const broadcastTargets = broadcastGossipProfiles(context, stored.profiles, storedJurisdictions);
+  const broadcastTargets = broadcastGossipJurisdictions(context, storedJurisdictions);
   pushDebugEvent(config.store, {
     event: 'gossip_store',
     from,
@@ -601,7 +594,8 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
         returnedProfiles: profiles.length,
         returnedJurisdictions: jurisdictions.length,
         idCount: Array.isArray(request.ids) ? request.ids.length : 0,
-        set: request.set ?? 'default',
+        set: request.set ?? (request.routeTo || (request.ids?.length ?? 0) > 0 ? null : 'default'),
+        routeTo: request.routeTo ? { source: request.routeTo.source, target: request.routeTo.target } : null,
         updatedSince: request.updatedSince ?? null,
         limit: request.limit ?? DEFAULT_GOSSIP_SYNC_LIMIT,
         traceId,

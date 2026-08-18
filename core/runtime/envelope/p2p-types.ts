@@ -13,4 +13,6 @@ export type RuntimeP2PConfig = {
   advertiseEntityIds?: string[];
   isHub?: boolean;
   gossipPollMs?: number;
+  gossipSet?: 'default' | 'hubs';
+  profileHeartbeatMs?: number;
 };

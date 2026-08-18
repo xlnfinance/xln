@@ -18,6 +18,22 @@ export const rejectExtraKeys = (
   if (Object.keys(value).some((key) => !allowed.includes(key))) throw new Error(code);
 };
 
+export const hasOnlyAllowedKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
+  Object.keys(value).every((key) => allowed.includes(key));
+
+/** Throws unless every `required` key is present and no key falls outside `required` + `optional`. */
+export const requireExactKeys = (
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+  code: string,
+): void => {
+  const allowed = new Set([...required, ...optional]);
+  if (required.some((key) => !Object.hasOwn(value, key)) || Object.keys(value).some((key) => !allowed.has(key))) {
+    throw new Error(code);
+  }
+};
+
 export const optionalString = (value: unknown, code: string): string | undefined => {
   if (value === undefined) return undefined;
   if (typeof value !== 'string') throw new Error(code);

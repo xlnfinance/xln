@@ -8,7 +8,7 @@
 import { writable, get } from 'svelte/store';
 import { ethers } from 'ethers';
 import { compareStableText } from '$lib/utils/stableSort';
-import { parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
+import { isUnknownRecord as isRecord, parseJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
 import { errorLog } from '../errorLogStore';
 
 export interface JMachineConfig {
@@ -41,9 +41,6 @@ const defaultState: JMachineStoreState = {
   configs: [],
   activeJMachine: null,
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
 
 const normalizeAddress = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;

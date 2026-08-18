@@ -306,7 +306,7 @@ export const reconcileHistoryViews = async (options: {
     });
     const batch = options.viewDb.batch();
     putHistoryViewCommit(batch, plan);
-    await writeBatch(batch, { sync: true });
+    await writeBatch(batch, { sync: false });
     return { materializedThroughRuntimeHeight: latestWalHeight, writtenBytes: plan.writtenBytes };
   }
   const firstWalHeight = Math.max(1, Math.floor(Number(
@@ -333,7 +333,7 @@ export const reconcileHistoryViews = async (options: {
     };
     const floorBatch = options.viewDb.batch();
     floorBatch.put(KEY_HISTORY_VIEW_HEAD, encodeBuffer(head));
-    await writeBatch(floorBatch, { sync: true });
+    await writeBatch(floorBatch, { sync: false });
   }
   let writtenBytes = 0;
   for (let height = head.latestHeight + 1; height <= latestWalHeight; height += 1) {
@@ -358,7 +358,7 @@ export const reconcileHistoryViews = async (options: {
     });
     const batch = options.viewDb.batch();
     putHistoryViewCommit(batch, plan);
-    await writeBatch(batch, { sync: true });
+    await writeBatch(batch, { sync: false });
     writtenBytes += plan.writtenBytes;
   }
   return {

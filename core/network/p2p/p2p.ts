@@ -26,6 +26,10 @@ import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   decodeGossipProfileBatchRequest,
   selectProfileBatch,
+  DEFAULT_GOSSIP_ROUTE_TO_ROUTES,
+  MAX_GOSSIP_ROUTE_TO_ROUTES,
+  encodeRouteToRequest,
+  type GossipRouteToRequest,
   type GossipProfileBatchRequest,
 } from './gossip/profile-batch';
 import { createStructuredLogger, shortId } from '../../support/logger';
@@ -96,6 +100,8 @@ export const reportDirectClientError = (
   return 'transport-error';
 };
 
+export type P2PGossipSet = 'default' | 'hubs';
+
 export type P2PConfig = {
   relayUrls?: string[];
   wsUrl?: string | null;
@@ -104,6 +110,14 @@ export type P2PConfig = {
   signerId?: string;
   advertiseEntityIds?: string[];
   gossipPollMs?: number;
+  /**
+   * Which profile set the periodic poll pulls. Runtimes hosting hubs pull
+   * 'default' (everything the relay knows); user runtimes pull 'hubs' and
+   * discover everything else on demand (ids / routeTo). Nothing is pushed.
+   */
+  gossipSet?: P2PGossipSet;
+  /** Re-announce cadence for unchanged local profiles (hubs 15 s, users hourly). */
+  profileHeartbeatMs?: number;
 };
 
 type InboundEntityInputsOptions = {
@@ -120,6 +134,8 @@ type RuntimeP2POptions = {
   seedRuntimeIds?: string[];
   advertiseEntityIds?: string[];
   gossipPollMs?: number;
+  gossipSet?: P2PGossipSet;
+  profileHeartbeatMs?: number;
   onEntityInputs: (
     from: string,
     envelope: RuntimeEntityInputsEnvelope,
@@ -153,6 +169,12 @@ const decodeGossipPayload = (value: unknown): Readonly<{ profiles: unknown[]; ju
 type GossipRefreshMode = 'incremental' | 'full';
 export type EntityInputDeliveryTransport = 'direct' | 'relay';
 export type EntityInputDeliveryResult = DeliveryResult & { transport: EntityInputDeliveryTransport };
+
+const normalizeProfileHeartbeatMs = (value: number | undefined, gossipSet: P2PGossipSet): number => {
+  const fallback = gossipSet === 'default' ? HUB_PROFILE_HEARTBEAT_MS : USER_PROFILE_HEARTBEAT_MS;
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return fallback;
+  return Math.max(1_000, Math.floor(value));
+};
 
 const normalizeGossipPollMs = (value: number | undefined): number => {
   if (!Number.isFinite(Number(value))) return GOSSIP_POLL_MS;
@@ -274,8 +296,34 @@ const GOSSIP_POLL_MS = 30_000;
 // refreshes of known profiles coalesce so a peer verifies at most one profile
 // per entity per debounce window.
 const PROFILE_ANNOUNCE_DEBOUNCE_MS = 1_000;
-const PROFILE_HEARTBEAT_MS = 15_000;
+const HUB_PROFILE_HEARTBEAT_MS = 15_000;
+// A user profile changes on every payment (capacities), yet nobody routes
+// *through* a user: peers only need its topology (accounts, keys, runtime).
+// Capacity-only refreshes therefore go out at most once per heartbeat; a
+// topology change still announces at once (debounced like before).
+const USER_PROFILE_HEARTBEAT_MS = 3_600_000;
 const GOSSIP_FETCH_RETRY_DELAYS_MS = [40, 80, 160];
+const GOSSIP_ROUTE_FETCH_RETRY_DELAYS_MS = [60, 120, 240];
+
+/** Everything a peer needs from a non-hub profile except live capacities. */
+const profileTopologyKey = (profile: Profile): string => safeStringify([
+  profile.entityId,
+  profile.entityEncryptionPublicKey,
+  profile.name,
+  profile.runtimeId,
+  profile.runtimeEncPubKey,
+  profile.wsUrl,
+  profile.relays,
+  profile.publicAccounts,
+  profile.accounts.map(account => [
+    account.counterpartyId,
+    account.domain,
+    Object.keys(account.tokenCapacities instanceof Map
+      ? Object.fromEntries(account.tokenCapacities)
+      : account.tokenCapacities).sort(compareStableText),
+  ]),
+  { ...profile.metadata, profileHanko: undefined },
+]);
 const INACTIVE_TAB_STANDBY_KEY = 'xln-inactive-tab-standby';
 
 const isInactiveTabStandby = (): boolean => {
@@ -296,6 +344,9 @@ export class RuntimeP2P {
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
   private gossipPollMs: number;
+  private gossipSet: P2PGossipSet;
+  private profileHeartbeatMs: number;
+  private lastAnnouncedProfiles = new Map<string, { topologyKey: string; at: number }>();
   private onEntityInputs: (
     from: string,
     envelope: RuntimeEntityInputsEnvelope,
@@ -351,6 +402,8 @@ export class RuntimeP2P {
     this.seedRuntimeIds = uniqueTransportValues(options.seedRuntimeIds || []);
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
+    this.gossipSet = options.gossipSet ?? 'hubs';
+    this.profileHeartbeatMs = normalizeProfileHeartbeatMs(options.profileHeartbeatMs, this.gossipSet);
     this.onEntityInputs = options.onEntityInputs;
     this.onGossipProfiles = options.onGossipProfiles;
     this.onGossipJurisdictions = options.onGossipJurisdictions ?? (() => {});
@@ -386,6 +439,12 @@ export class RuntimeP2P {
     }
     if (config.advertiseEntityIds) {
       this.advertiseEntityIds = config.advertiseEntityIds;
+    }
+    if (config.gossipSet !== undefined) {
+      this.gossipSet = config.gossipSet;
+      this.profileHeartbeatMs = normalizeProfileHeartbeatMs(config.profileHeartbeatMs, this.gossipSet);
+    } else if (config.profileHeartbeatMs !== undefined) {
+      this.profileHeartbeatMs = normalizeProfileHeartbeatMs(config.profileHeartbeatMs, this.gossipSet);
     }
     if (config.gossipPollMs !== undefined) {
       const prevPollMs = this.gossipPollMs;
@@ -527,7 +586,7 @@ export class RuntimeP2P {
     const client = this.getActiveClient();
     if (!client || !client.isOpen()) return;
     const now = Date.now();
-    if (now - this.lastHeartbeatAnnounceAt < PROFILE_HEARTBEAT_MS) return;
+    if (now - this.lastHeartbeatAnnounceAt < this.profileHeartbeatMs) return;
     this.lastHeartbeatAnnounceAt = now;
     await this.announceLocalProfiles();
   }
@@ -926,11 +985,66 @@ export class RuntimeP2P {
     if (!client) return;
     const updatedSince = mode === 'incremental' ? this.getLatestKnownRemoteProfileTimestamp() : 0;
     const request: GossipProfileBatchRequest = {
-      set: 'default',
+      set: this.gossipSet,
       limit: DEFAULT_GOSSIP_BATCH_LIMIT,
       ...(updatedSince > 0 ? { updatedSince } : {}),
     };
     client.sendGossipRequest(this.runtimeId, request);
+  }
+
+  /**
+   * Pull the profile chains that route `source` → `target` from the relay
+   * (nothing is pushed; a runtime asks for exactly what a payment needs).
+   * Resolves true once the local graph yields at least one route.
+   */
+  async ensureRoutes(
+    source: string,
+    target: string,
+    amount: bigint = 1n,
+    tokenId: number = 1,
+    maxRoutes: number = DEFAULT_GOSSIP_ROUTE_TO_ROUTES,
+  ): Promise<boolean> {
+    if (this.closing || this.closed) return false;
+    const normalizedSource = normalizeId(source);
+    const normalizedTarget = normalizeId(target);
+    if (!normalizedSource || !normalizedTarget || normalizedSource === normalizedTarget) return false;
+    const hasRoute = async (): Promise<boolean> => {
+      const routes = await this.env.gossip.getNetworkGraph().findPaths(normalizedSource, normalizedTarget, amount, tokenId);
+      return routes.length > 0;
+    };
+    if (await hasRoute()) return true;
+    const key = `route:${normalizedSource}>${normalizedTarget}:${tokenId}`;
+    const inFlight = this.profileFetches.get(key);
+    if (inFlight) return inFlight;
+    const fetch = (async () => {
+      const routeTo: GossipRouteToRequest = {
+        source: normalizedSource,
+        target: normalizedTarget,
+        tokenId,
+        amount,
+        maxRoutes: Math.min(MAX_GOSSIP_ROUTE_TO_ROUTES, Math.max(1, Math.floor(maxRoutes))),
+      };
+      for (const waitMs of GOSSIP_ROUTE_FETCH_RETRY_DELAYS_MS) {
+        const client = this.getActiveClient();
+        if (!client) return false;
+        client.sendGossipRequest(this.runtimeId, { routeTo: encodeRouteToRequest(routeTo) });
+        if (!(await this.waitForActiveDelay(waitMs))) return false;
+        if (await hasRoute()) return true;
+      }
+      this.env.warn('network', 'GOSSIP_ROUTE_MISS', {
+        source: normalizedSource,
+        target: normalizedTarget,
+        tokenId,
+        retries: GOSSIP_ROUTE_FETCH_RETRY_DELAYS_MS.length,
+      });
+      return false;
+    })();
+    this.profileFetches.set(key, fetch);
+    try {
+      return await fetch;
+    } finally {
+      if (this.profileFetches.get(key) === fetch) this.profileFetches.delete(key);
+    }
   }
 
   private collectProfileEntityIdsForInput(input: RoutedEntityInput): string[] {
@@ -1163,6 +1277,7 @@ export class RuntimeP2P {
     if (profiles.length === 0 && jurisdictions.length === 0) return;
     for (const profile of profiles) {
       this.env.gossip?.announce?.(profile);
+      this.rememberAnnouncedProfile(profile);
     }
 
     // ALWAYS announce to relay for storage (relay stores regardless of 'to' field)
@@ -1225,14 +1340,36 @@ export class RuntimeP2P {
     await this.announceProfilesNow(Array.from(targets), reason);
   }
 
+  private rememberAnnouncedProfile(profile: Profile): void {
+    this.lastAnnouncedProfiles.set(normalizeId(profile.entityId), {
+      topologyKey: profileTopologyKey(profile),
+      at: Date.now(),
+    });
+  }
+
+  /**
+   * Hubs re-announce whenever their certified profile changes (debounced by
+   * the caller). Non-hub profiles only leave the runtime when their topology
+   * changed or the heartbeat elapsed; capacity-only churn stays local.
+   */
+  private shouldAnnounceProfile(profile: Profile): boolean {
+    if (profile.metadata.isHub === true) return true;
+    const previous = this.lastAnnouncedProfiles.get(normalizeId(profile.entityId));
+    if (!previous) return true;
+    if (previous.topologyKey !== profileTopologyKey(profile)) return true;
+    return Date.now() - previous.at >= this.profileHeartbeatMs;
+  }
+
   private async announceProfilesNow(entityIds: string[], reason: string) {
     if (this.closing || this.closed) return;
-    const profiles = await this.getLocalProfilesForEntities(entityIds);
+    const builtProfiles = await this.getLocalProfilesForEntities(entityIds);
     if (this.closing || this.closed) return;
+    // The freshest certified profile always lands in the local cache (local
+    // routing/UI see live capacities); only the network announce is gated.
+    for (const profile of builtProfiles) this.env.gossip?.announce?.(profile);
+    const profiles = builtProfiles.filter(profile => this.shouldAnnounceProfile(profile));
     if (profiles.length === 0) return;
-    for (const profile of profiles) {
-      this.env.gossip?.announce?.(profile);
-    }
+    for (const profile of profiles) this.rememberAnnouncedProfile(profile);
     const client = this.getActiveClient();
     if (client) {
       client.sendGossipAnnounce(this.runtimeId, {

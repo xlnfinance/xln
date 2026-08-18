@@ -1,5 +1,5 @@
 import { normalizeWsConnectUrl } from '../runtime/wsUrl';
-import { parseJsonUnknown } from '$lib/utils/boundary';
+import { isUnknownRecord as isRecord, parseJsonUnknown } from '$lib/utils/boundary';
 import { REMOTE_RUNTIME } from '@xln/core/config/constants';
 
 export const REMOTE_RUNTIME_IMPORT_HASH_PARAM = REMOTE_RUNTIME.IMPORT_HASH_PARAM;
@@ -44,9 +44,6 @@ export type StoredRemoteRuntimeImportEntry = RemoteRuntimeImportEntry & {
   hubJurisdiction?: RemoteRuntimeHubJurisdiction;
   hubEntities?: RemoteRuntimeHubSummary[];
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
 
 const normalizeAccess = (value: unknown): RemoteRuntimeImportAccess => {
   const raw = String(value || '').trim().toLowerCase();

@@ -1,5 +1,6 @@
 import { getAddress } from 'ethers';
 import { decodeProtectedVaultSecrets } from '../../security/vaultProtection';
+import { hasOnlyAllowedKeys, requireUnknownRecord as record } from '$lib/utils/boundary';
 import type {
   RecoveryTowerConfig,
   Runtime,
@@ -13,14 +14,10 @@ import { normalizeRuntimeId } from './vault-recovery';
 
 type RecordValue = Record<string, unknown>;
 
-const record = (value: unknown, code: string): RecordValue => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(code);
-  return value as RecordValue;
-};
-
 const exactKeys = (value: RecordValue, allowed: readonly string[], code: string): void => {
+  if (hasOnlyAllowedKeys(value, allowed)) return;
   const extras = Object.keys(value).filter(key => !allowed.includes(key));
-  if (extras.length > 0) throw new Error(`${code}:${extras.join(',')}`);
+  throw new Error(`${code}:${extras.join(',')}`);
 };
 
 const string = (value: unknown, code: string): string => {

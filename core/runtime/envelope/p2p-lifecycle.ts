@@ -150,6 +150,8 @@ const buildRuntimeP2POptions = (
   if (config.seedRuntimeIds !== undefined) options.seedRuntimeIds = config.seedRuntimeIds;
   if (config.advertiseEntityIds !== undefined) options.advertiseEntityIds = config.advertiseEntityIds;
   if (config.gossipPollMs !== undefined) options.gossipPollMs = config.gossipPollMs;
+  if (config.gossipSet !== undefined) options.gossipSet = config.gossipSet;
+  if (config.profileHeartbeatMs !== undefined) options.profileHeartbeatMs = config.profileHeartbeatMs;
   return options;
 };
 

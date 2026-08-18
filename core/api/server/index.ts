@@ -1562,6 +1562,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       relayUrls: [bound.internalRelayUrl],
       ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds: advertisedEntityIds } : {}),
       gossipPollMs: 250,
+      // Hub-hosting daemons keep the full relay view; plain user daemons only
+      // pull hubs and fetch counterparties / route chains on demand.
+      gossipSet: hubEntityIds.length > 0 ? 'default' : 'hubs',
     });
     serverBootPhase = 'ready';
     serverBootCompletedAt = Date.now();

@@ -15,7 +15,7 @@ test('frame commit fsyncs authoritative WAL before updating the rebuildable cach
     authoritative,
   );
   const cache = commit.indexOf(
-    'await writeBatch(batches.currentBatch, { sync: false });',
+    'writeBatch(batches.currentBatch, { sync: false })',
     boundary,
   );
 

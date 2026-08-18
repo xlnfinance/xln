@@ -10,6 +10,7 @@ import type {
 } from '@xln/core/jurisdiction/adapter/stack-manager/types';
 import { safeStringify } from '@xln/core/protocol/serialization';
 import { DEV_CHAIN_IDS } from '@xln/core/jurisdiction/adapter/chain-ids';
+import { requireExactKeys as exactKeys, requireUnknownRecord as record } from '$lib/utils/boundary';
 import {
   decodeJurisdictionGossipAnnouncementStructure,
   type JurisdictionGossipAnnouncement,
@@ -62,18 +63,7 @@ export type StackManagerDeployResult = Readonly<{
   publication: StackPublicationResult;
 }>;
 export type StackManagerDeployResponse = Readonly<{ ok: true; result: StackManagerDeployResult }>;
-type JsonRecord = Record<string, unknown>;
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-const record = (value: unknown, code: string): JsonRecord => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(code);
-  return value as JsonRecord;
-};
-const exactKeys = (value: JsonRecord, required: readonly string[], optional: readonly string[], code: string): void => {
-  const allowed = new Set([...required, ...optional]);
-  if (required.some((key) => !Object.hasOwn(value, key)) || Object.keys(value).some((key) => !allowed.has(key))) {
-    throw new Error(code);
-  }
-};
 const literal = <T extends string | number | boolean>(value: unknown, expected: T, code: string): T => {
   if (value !== expected) throw new Error(code);
   return expected;

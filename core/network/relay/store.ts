@@ -21,6 +21,8 @@ import {
 import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,
+  createRouteGraphCache,
+  type RouteGraphCache,
   type GossipProfileBatchRequest,
 } from '../p2p/gossip/profile-batch';
 import { redactTelemetryValue } from '../../support/telemetry-redaction';
@@ -95,6 +97,9 @@ export type RelayStore = {
   clients: Map<string, RelayClient>;
   maxGossipProfiles: number;
   gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
+  /** Snapshot of gossipProfiles reused across gossip requests until the map changes. */
+  gossipProfilesSnapshot?: { size: number; last?: { profile: Profile; timestamp: number } | undefined; profiles: Profile[] } | undefined;
+  routeGraphCache: RouteGraphCache;
   marketCapEntries: Map<string, EntityMarketCapEntry>;
   marketCapUpdatedAt: number;
   gossipJurisdictions: Map<string, JurisdictionGossipAnnouncement>;
@@ -170,6 +175,7 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
     clients: new Map(),
     maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
     gossipProfiles: new Map(),
+    routeGraphCache: createRouteGraphCache(),
     marketCapEntries: new Map(),
     marketCapUpdatedAt: 0,
     gossipJurisdictions: new Map(),
@@ -476,11 +482,24 @@ export const storeVerifiedGossipProfile = (store: RelayStore, profile: Profile):
     return false;
   }
   store.gossipProfiles.set(entityId, { profile: canonicalProfile, timestamp: newTs });
+  store.gossipProfilesSnapshot = undefined;
   return true;
 };
 
-export const getAllGossipProfiles = (store: RelayStore): Profile[] =>
-  Array.from(store.gossipProfiles.values()).map(v => v.profile);
+// Identity-stable while the map is unchanged so the route graph memo holds;
+// storeVerifiedGossipProfile drops the snapshot on every write, size/last catch
+// clears and external mutation.
+export const getAllGossipProfiles = (store: RelayStore): Profile[] => {
+  let last: { profile: Profile; timestamp: number } | undefined;
+  for (const entry of store.gossipProfiles.values()) last = entry;
+  const snapshot = store.gossipProfilesSnapshot;
+  if (snapshot && snapshot.size === store.gossipProfiles.size && snapshot.last === last) {
+    return snapshot.profiles;
+  }
+  const profiles = Array.from(store.gossipProfiles.values()).map(v => v.profile);
+  store.gossipProfilesSnapshot = { size: store.gossipProfiles.size, last, profiles };
+  return profiles;
+};
 
 export const storeVerifiedJurisdictionAnnouncement = (
   store: RelayStore,
@@ -515,7 +534,7 @@ export const getProfileBatch = (
   store: RelayStore,
   request: GossipProfileBatchRequest = {},
 ): Profile[] => {
-  return selectProfileBatch(getAllGossipProfiles(store), request, DEFAULT_GOSSIP_SYNC_LIMIT);
+  return selectProfileBatch(getAllGossipProfiles(store), request, DEFAULT_GOSSIP_SYNC_LIMIT, store.routeGraphCache);
 };
 
 // ---------------------------------------------------------------------------

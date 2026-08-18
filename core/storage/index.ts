@@ -1913,24 +1913,39 @@ const commitStorageFrame = async (
   let historyViewBytes = 0;
   let historyViewsMaterialized = frame.historyViewPuts.length === 0;
   let viewMaterializedThrough = 0;
+  // Only the WAL above is durability-critical. The history view and the
+  // current-state cache are both rebuildable projections of it, so they are
+  // written without fsync and concurrently with each other; the frame still
+  // does not complete until both writes returned.
   const historyViewStartedAt = options.getPerfMs();
-  if (frame.historyViewPuts.length > 0) {
-    if (!(await options.tryOpenHistoryViewDb(options.env))) {
-      throw new Error(
-        `HISTORY_VIEW_DB_OPEN_FAILED:height=${options.env.state.height}`,
-      );
-    }
-    const reconciled = await reconcileHistoryViews({
-      viewDb: options.getHistoryViewDb(options.env),
-      firstWalHeight: async () => (await listSnapshotHeights(prepared.walDb))[0] ?? 1,
-      latestWalHeight: options.env.state.height,
-      latestWalPuts: frame.historyViewPuts,
-      readWalFrame: height =>
-        readStorageFrameRecord(prepared.walDb, height),
-      readWalActivity: height =>
-        readHistoryViewRuntimeActivity(prepared.walDb, height),
-      config: prepared.config,
-    });
+  const historyViewWrite = frame.historyViewPuts.length > 0
+    ? (async () => {
+        if (!(await options.tryOpenHistoryViewDb(options.env))) {
+          throw new Error(
+            `HISTORY_VIEW_DB_OPEN_FAILED:height=${options.env.state.height}`,
+          );
+        }
+        return reconcileHistoryViews({
+          viewDb: options.getHistoryViewDb(options.env),
+          firstWalHeight: async () => (await listSnapshotHeights(prepared.walDb))[0] ?? 1,
+          latestWalHeight: options.env.state.height,
+          latestWalPuts: frame.historyViewPuts,
+          readWalFrame: height =>
+            readStorageFrameRecord(prepared.walDb, height),
+          readWalActivity: height =>
+            readHistoryViewRuntimeActivity(prepared.walDb, height),
+          config: prepared.config,
+        });
+      })()
+    : Promise.resolve(null);
+  const currentWriteStartedAt = options.getPerfMs();
+  options.onPersistenceProgress?.('current-cache-write-start');
+  let currentCacheWriteMs = 0;
+  const currentWrite = writeBatch(batches.currentBatch, { sync: false }).then(() => {
+    currentCacheWriteMs = options.getPerfMs() - currentWriteStartedAt;
+  });
+  const [reconciled] = await Promise.all([historyViewWrite, currentWrite]);
+  if (reconciled) {
     historyViewBytes = reconciled.writtenBytes;
     viewMaterializedThrough =
       reconciled.materializedThroughRuntimeHeight;
@@ -1938,10 +1953,6 @@ const commitStorageFrame = async (
     await options.onPersistenceBoundary?.('after-history-view-commit');
   }
   const historyViewMs = options.getPerfMs() - historyViewStartedAt;
-
-  const currentWriteStartedAt = options.getPerfMs();
-  options.onPersistenceProgress?.('current-cache-write-start');
-  await writeBatch(batches.currentBatch, { sync: false });
   if (prepared.shouldMaterialize) {
     options.env.infrastructure ??= {};
     const bookCache = options.env.infrastructure.storagePersistedBooks instanceof Map
@@ -1959,7 +1970,6 @@ const commitStorageFrame = async (
     }
     options.env.infrastructure.storagePersistedAccounts = accountCache;
   }
-  const currentCacheWriteMs = options.getPerfMs() - currentWriteStartedAt;
   options.onPersistenceProgress?.('current-cache-write-done');
   await options.onPersistenceBoundary?.('after-current-cache-commit');
   if (prepared.checkpointedLineagePlan) {

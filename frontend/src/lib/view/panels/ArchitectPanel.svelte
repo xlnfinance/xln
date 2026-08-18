@@ -20,7 +20,7 @@
   import type { JAdapter } from '@xln/core/jurisdiction/adapter';
   import { defaultAccountDisputeConfigForRoleEvidence } from '@xln/core/account/config/dispute-config';
   import { computeAddress, hexlify } from 'ethers';
-  import { activeRuntime as activeRuntimeStore } from '$lib/stores/runtimeStore';
+  import { activeRuntimeEntry as activeRuntimeStore } from '$lib/stores/runtimeStore';
   import { activeRuntime as activeVaultRuntime } from '$lib/stores/vault/vaultStore';
   import SolvencyPanel from './solvency/SolvencyPanel.svelte';
 

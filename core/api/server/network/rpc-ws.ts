@@ -112,7 +112,12 @@ const findPaymentRoutes = async (
   if (!profilesReady) {
     throw new RuntimeAdapterError('E_INTERNAL', 'payment route profiles are unavailable', true);
   }
-  const routes = await env.gossip.getNetworkGraph().findPaths(sourceEntityId, targetEntityId, amount, tokenId);
+  let routes = await env.gossip.getNetworkGraph().findPaths(sourceEntityId, targetEntityId, amount, tokenId);
+  if (routes.length === 0 && env.infrastructure?.p2p?.ensureRoutes) {
+    // Pull-only gossip: ask the relay for the profile chains that route here.
+    await env.infrastructure.p2p.ensureRoutes(sourceEntityId, targetEntityId, amount, tokenId);
+    routes = await env.gossip.getNetworkGraph().findPaths(sourceEntityId, targetEntityId, amount, tokenId);
+  }
   if (routes.length === 0) {
     throw new RuntimeAdapterError('E_NOT_FOUND', `no payment route from ${sourceEntityId} to ${targetEntityId}`);
   }

@@ -301,7 +301,7 @@ describe('relay-router gossip fanout', () => {
     expect(store.debugEvents.every(event => event.reason !== 'DEBUG_EVENT_TOO_LARGE')).toBe(true);
   });
 
-  test('broadcasts fresh gossip updates to other connected clients', async () => {
+  test('stores announced profiles without pushing them; peers pull by set/ids', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
@@ -337,16 +337,25 @@ describe('relay-router gossip fanout', () => {
       },
     });
 
-    const clientBMessages = sentBySocket.get(wsB) ?? [];
-    const gossipUpdate = clientBMessages.find((message) => {
-      return !!message && typeof message === 'object' && 'type' in (message as Record<string, unknown>) &&
-        (message as { type?: string }).type === 'gossip_update';
-    }) as { payload?: { profiles?: Array<{ entityId?: string }> } } | undefined;
-
-    expect(gossipUpdate).toBeDefined();
-    expect(gossipUpdate?.payload?.profiles?.[0]?.entityId).toBe(ENTITY_A);
-    expect(sentBySocket.get(wsA)?.some((message) => (message as { type?: string }).type === 'gossip_update') ?? false).toBeFalse();
+    // Profiles are pull-only: nobody receives a gossip_update for a profile.
+    const isGossipUpdate = (message: unknown) => !!message && typeof message === 'object'
+      && (message as { type?: string }).type === 'gossip_update';
+    expect((sentBySocket.get(wsB) ?? []).some(isGossipUpdate)).toBeFalse();
+    expect((sentBySocket.get(wsA) ?? []).some(isGossipUpdate)).toBeFalse();
     expect(store.gossipProfiles.get(ENTITY_A)?.profile?.name).toBe('alice');
+
+    await relayRoute(config, wsB, {
+      type: 'gossip_request',
+      id: 'req-1',
+      from: RUNTIME_B,
+      fromEncryptionPubKey: KEY_B,
+      to: SERVER_RUNTIME_ID,
+      payload: { ids: [ENTITY_A] },
+    });
+    const response = (sentBySocket.get(wsB) ?? []).find(message =>
+      !!message && typeof message === 'object' && (message as { type?: string }).type === 'gossip_response',
+    ) as { payload?: { profiles?: Array<{ entityId?: string }> } } | undefined;
+    expect(response?.payload?.profiles?.[0]?.entityId).toBe(ENTITY_A);
   });
 
   test('verifies and broadcasts signed community jurisdiction discovery', async () => {

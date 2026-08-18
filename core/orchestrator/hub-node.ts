@@ -2957,6 +2957,8 @@ const run = async (): Promise<void> => {
     wsUrl: directWsUrl,
     advertiseEntityIds: live.hubBootstraps.map((entry) => entry.entityId),
     gossipPollMs: BOOTSTRAP_POLL_MS * 5,
+    // A hub forwards for everyone, so it keeps the whole relay view.
+    gossipSet: 'default',
   });
   if (!live.p2p) throw new Error('P2P_START_FAILED');
   finishTiming('p2p_connect', p2pConnectStartedAt);

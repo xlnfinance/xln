@@ -100,6 +100,11 @@ const MAX_PROFILE_ROUTE_OVERHEAD_BYTES = new TextEncoder().encode(encodeCanonica
 
 export const MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES = LIMITS.MAX_PROFILE_BYTES - MAX_PROFILE_ROUTE_OVERHEAD_BYTES;
 
+/** Advertised profile capacities are floored to a multiple of this (privacy: no per-payment leak). */
+export const PROFILE_CAPACITY_GRANULARITY = 1000n;
+export const floorProfileCapacity = (value: bigint): bigint =>
+  value <= 0n ? 0n : value - (value % PROFILE_CAPACITY_GRANULARITY);
+
 const rankedLiquidProfileCapacities = (
   state: EntityState,
   account: EntityState['accounts'] extends ReadonlyMap<unknown, infer Value> ? Value : never,
@@ -107,8 +112,14 @@ const rankedLiquidProfileCapacities = (
   [...account.state.deltas.entries()]
     .map(([tokenId, delta]) => {
       const derived = deriveDelta(delta, getAccountPerspective(account.state, state.entityId).iAmLeft);
-      const capacity = { inCapacity: derived.inCapacity, outCapacity: derived.outCapacity };
-      return { tokenId: String(tokenId), capacity, liquidity: capacity.inCapacity + capacity.outCapacity };
+      // Advertised capacities are floored to the profile granularity so small
+      // transfers do not leak through capacity deltas; inclusion still follows
+      // the raw liquidity so topology rows stay stable across payments.
+      const capacity = {
+        inCapacity: floorProfileCapacity(derived.inCapacity),
+        outCapacity: floorProfileCapacity(derived.outCapacity),
+      };
+      return { tokenId: String(tokenId), capacity, liquidity: derived.inCapacity + derived.outCapacity };
     })
     .filter(candidate => candidate.liquidity > 0n)
     .sort((left, right) =>

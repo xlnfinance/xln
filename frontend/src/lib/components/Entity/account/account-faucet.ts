@@ -1,3 +1,5 @@
+import { hasOnlyAllowedKeys as hasOnlyKeys, isUnknownRecord as isRecord, parseJsonUnknown } from '$lib/utils/boundary';
+
 export const RESERVE_FAUCET_TIMEOUT_MS = 15_000;
 export const OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS = 3_000;
 
@@ -44,12 +46,6 @@ export type ReserveFaucetCompletion = {
   req: PendingReserveFaucet;
   currentBalance: bigint;
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
-const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
-  Object.keys(value).every((key) => allowed.includes(key));
 
 const isFaucetReceipt = (value: unknown): value is NonNullable<FaucetApiResult['receipt']> => {
   // The server embeds the full RuntimeIngressReceipt (kind, enqueuedAt,
@@ -132,4 +128,3 @@ export function reconcilePendingReserveFaucets(
   }
   return { remaining, received, timedOut };
 }
-import { parseJsonUnknown } from '$lib/utils/boundary';

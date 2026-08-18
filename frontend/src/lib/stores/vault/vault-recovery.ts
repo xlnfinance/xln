@@ -10,7 +10,8 @@ import type {
   TowerReceiptV1,
   XLNModule,
 } from '@xln/core/api/public/runtime-module';
-import { parseJsonUnknown } from '$lib/utils/boundary';
+import { isUnknownRecord as isRecord, parseJsonUnknown } from '$lib/utils/boundary';
+export { isRecord };
 import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath } from 'ethers';
 import {
   redactVaultRuntimeForPersistence,
@@ -313,9 +314,6 @@ export type TowerServerInfo = {
   maxStoredBytesPerLookupKey?: number;
   maxBundlesPerLookupKey?: number;
 };
-
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
 
 export const getRuntimeP2PHandle = (xln: XLNModule, env: RuntimeReplica): RuntimeP2PHandle | null => {
   const candidate = xln.getP2P(unwrapLiveRuntimeEnv(env) ?? env);

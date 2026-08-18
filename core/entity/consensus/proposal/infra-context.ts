@@ -83,10 +83,22 @@ export const materializeEntityInfraContext = async (
   const observeOnlineEntityIds = env.infrastructure?.observeOnlineEntityIds;
   if (needsHtlcInfra && !observeOnlineEntityIds) throw new Error('ENTITY_INFRA_LIVENESS_OBSERVER_UNAVAILABLE');
   const observedOnline = new Map<string, boolean>();
+  const profileEntityIds = new Set(canonicalProfiles.map(profile => profile.entityId.toLowerCase()));
+  // Profiles are pull-only, so a next hop can be routable before its profile
+  // reached this Runtime. Without a profile the peer cannot enter the context
+  // (validators require a profile per assertion), so it is simply "offline"
+  // for this frame — the HTLC is rejected as next_hop_offline instead of the
+  // whole proposal dying on ENTITY_INFRA_PROFILE_SET_INCOMPLETE — and the
+  // profile is fetched in the background for the retry.
+  const missingProfilePeers = new Set<string>();
   const isEntityOnline = (peerEntityId: string): boolean => {
     const canonical = peerEntityId.toLowerCase();
     const existing = observedOnline.get(canonical);
     if (existing !== undefined) return existing;
+    if (!profileEntityIds.has(canonical)) {
+      missingProfilePeers.add(canonical);
+      return false;
+    }
     const online = observeOnlineEntityIds!([canonical]).has(canonical);
     observedOnline.set(canonical, online);
     return online;
@@ -121,6 +133,12 @@ export const materializeEntityInfraContext = async (
     isEntityOnline(originated.nextHopEntityId);
   }
   for (const observedEntityId of observedOnline.keys()) routeEntityIds.add(observedEntityId);
+  if (missingProfilePeers.size > 0) {
+    const missing = [...missingProfilePeers].sort(compareStableText);
+    env.info('network', 'ENTITY_INFRA_NEXT_HOP_PROFILE_MISSING', { entityId, missing });
+    const p2p = (env.infrastructure as { p2p?: { ensureProfiles?: (ids: string[]) => Promise<boolean> } } | undefined)?.p2p;
+    void p2p?.ensureProfiles?.(missing)?.catch(() => undefined);
+  }
   const gossipProfiles = canonicalProfiles
     .filter(profile => routeEntityIds.has(profile.entityId.toLowerCase()))
     .sort((left, right) => compareStableText(left.entityId, right.entityId));

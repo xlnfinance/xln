@@ -94,10 +94,12 @@ test('profile capacity uses the owning Entity right-side perspective', () => {
     leftEntity: left,
     rightEntity: right,
     domain: { chainId: 31_337, depositoryAddress: address },
-    deltas: new Map([[1, createDefaultDelta(1, { left: 5n, right: 20n })]]),
+    deltas: new Map([[1, createDefaultDelta(1, { left: 5_432n, right: 20_999n })]]),
   } } as EntityState['accounts'] extends ReadonlyMap<unknown, infer Value> ? Value : never);
   const capacities = buildEntityProfileDescriptor(state).accounts[0]!.tokenCapacities as Record<string, { inCapacity: bigint; outCapacity: bigint }>;
-  expect(capacities['1']).toEqual({ inCapacity: 5n, outCapacity: 20n });
+  // Advertised capacities are floored to the profile granularity (000) so a
+  // small payment never shows up as a capacity delta.
+  expect(capacities['1']).toEqual({ inCapacity: 5_000n, outCapacity: 20_000n });
 });
 
 test('profile descriptor canonicalizes configured contract addresses before signing', () => {

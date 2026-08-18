@@ -18,7 +18,7 @@
 
 <script lang="ts">
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
-  import { parseJsonUnknown } from '$lib/utils/boundary';
+  import { isUnknownRecord, parseJsonUnknown } from '$lib/utils/boundary';
   import { formatEntityId } from '$lib/utils/format';
   import { resolveOrderbookRelayWsUrl } from './orderbook-relay-url';
   import {
@@ -129,10 +129,6 @@
 
   function canonicalPairId(): string {
     return canonicalPair;
-  }
-
-  function isUnknownRecord(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
   }
 
   function loadPriceStepOverrides(): void {

@@ -2174,6 +2174,7 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
     wsUrl: directWsUrl,
     advertiseEntityIds: state.contexts.map(item => item.entityId),
     gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
+    gossipSet: 'default',
   });
   if (!p2p) throw new Error('P2P_START_FAILED');
   return { server, httpDrain, primaryContext };

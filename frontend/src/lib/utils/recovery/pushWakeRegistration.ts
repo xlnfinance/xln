@@ -1,4 +1,5 @@
 import { getAddress } from 'ethers';
+import { isUnknownRecord as isRecord } from '$lib/utils/boundary';
 import {
   buildPushRegistrationMessage,
   buildPushUnregisterMessage,
@@ -42,9 +43,6 @@ const PUSH_WAKE_RECORDS_KEY = 'xln-push-wake-registrations-v1';
 const VALID_PLATFORMS = new Set<PushPlatformV1>(['ios', 'android', 'web', 'desktop']);
 const MAX_DEVICE_TOKEN_LENGTH = 4096;
 const DEFAULT_PUSH_TOKEN_TIMEOUT_MS = 15_000;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
 
 const normalizeRuntimeId = (value: unknown): string => {
   const raw = String(value || '').trim();

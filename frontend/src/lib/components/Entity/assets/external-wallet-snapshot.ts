@@ -1,4 +1,5 @@
 import type { RuntimeReplica, JAdapter } from '@xln/core/api/public/runtime-module';
+import { hasOnlyAllowedKeys as hasOnlyKeys, isUnknownRecord as isRecord } from '$lib/utils/boundary';
 import type { ExternalWalletSnapshotSource } from './../asset-ledger';
 
 export type { ExternalWalletSnapshotSource } from './../asset-ledger';
@@ -46,12 +47,6 @@ export type ExternalWalletSnapshotIngressDecision =
   | 'apply'
   | 'cancel-runtime-changed'
   | 'cancel-runtime-quiescing';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
-const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
-  Object.keys(value).every((key) => allowed.includes(key));
 
 const isOptionalString = (value: unknown): boolean => value === undefined || typeof value === 'string';
 const isOptionalFiniteNumber = (value: unknown): boolean => value === undefined || (typeof value === 'number' && Number.isFinite(value));

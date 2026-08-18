@@ -1,4 +1,4 @@
-import { parseJsonUnknown } from '$lib/utils/boundary';
+import { isUnknownRecord as isRecord, parseJsonUnknown } from '$lib/utils/boundary';
 
 export type VaultUnlockDurationMs = 600_000 | 86_400_000 | null;
 
@@ -34,9 +34,6 @@ const decodeVaultSecrets = (value: unknown): VaultSecrets => {
 
 const PROTECTED_VAULT_KEYS = ['version', 'keyId', 'iv', 'ciphertext', 'unlockUntil'] as const;
 const KEY_ID_PATTERN = /^[0-9a-f]{32}$/;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const requireExactProtectedVaultKeys = (value: Record<string, unknown>): void => {
   const allowed = new Set<string>(PROTECTED_VAULT_KEYS);
