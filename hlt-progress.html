@@ -82,19 +82,15 @@
     <line class="grid" x1="72" x2="976"
           y1="384.0" y2="384.0" />
     <text class="axis" x="60" y="388.0"
-          text-anchor="end">0</text>
+          text-anchor="end">1</text>
     <line class="grid" x1="72" x2="976"
-          y1="296.0" y2="296.0" />
-    <text class="axis" x="60" y="300.0"
-          text-anchor="end">250</text>
+          y1="266.7" y2="266.7" />
+    <text class="axis" x="60" y="270.7"
+          text-anchor="end">10</text>
     <line class="grid" x1="72" x2="976"
-          y1="208.0" y2="208.0" />
-    <text class="axis" x="60" y="212.0"
-          text-anchor="end">500</text>
-    <line class="grid" x1="72" x2="976"
-          y1="120.0" y2="120.0" />
-    <text class="axis" x="60" y="124.0"
-          text-anchor="end">750</text>
+          y1="149.3" y2="149.3" />
+    <text class="axis" x="60" y="153.3"
+          text-anchor="end">100</text>
     <line class="grid" x1="72" x2="976"
           y1="32.0" y2="32.0" />
     <text class="axis" x="60" y="36.0"
@@ -103,11 +99,11 @@
     <line class="target" x1="72" x2="976"
           y1="32.0" y2="32.0" />
     <text class="target-label" x="78.0" y="24.0">target 1000</text>
-        <path class="line payments" d="M524.0,377.8 L674.7,372.6 L976.0,373.8" />
-        <path class="line swaps" d="M72.0,303.4 L825.3,372.7" />
+        <path class="line payments" d="M524.0,237.9 L674.7,206.6 L976.0,212.2" />
+        <path class="line swaps" d="M72.0,107.1 L825.3,207.1" />
         
     <circle class="dot swaps" tabindex="0"
-            cx="72.0" cy="303.4" r="7"
+            cx="72.0" cy="107.1" r="7"
             data-when="00:00"
             data-commit="be19a1c"
             data-users="8"
@@ -115,7 +111,7 @@
             data-headline="Same-J swap baseline after the reliable-layer removal"
             data-detail="Deleting the reliable delivery layer, moving keccak to WASM, hand-writing the ABI and using native ECDSA took matched swaps from 3 to 249 per second. The profile went flat afterwards: no single site dominates any more."></circle>
     <circle class="dot payments" tabindex="0"
-            cx="524.0" cy="377.8" r="7"
+            cx="524.0" cy="237.9" r="7"
             data-when="19:36"
             data-commit="09aa485"
             data-users="32"
@@ -123,7 +119,7 @@
             data-headline="Batching walls cleared: HTLC leaves, paged manifests, duplicate collapse"
             data-detail="Four faults surfaced the moment frames carried real batches: prepared HTLCs shared one 36 KB record, the manifest naming them reached 20.9 KB, and a retransmitted proposal halted the Runtime outright. First green payment run afterwards, still limited by the driver rather than the Hub."></circle>
     <circle class="dot payments" tabindex="0"
-            cx="674.7" cy="372.6" r="7"
+            cx="674.7" cy="206.6" r="7"
             data-when="19:52"
             data-commit="c485246"
             data-users="64"
@@ -131,7 +127,7 @@
             data-headline="Payments clear 30/s with every payment delivered"
             data-detail="32 senders offering one payment per second delivered 160 of 160 in 4.9 s. The Hub spent 34 frames on them, 4.7 payments per frame, so the ceiling is still the driver&#39;s offered rate and not the Hub."></circle>
     <circle class="dot swaps" tabindex="0"
-            cx="825.3" cy="372.7" r="7"
+            cx="825.3" cy="207.1" r="7"
             data-when="20:14"
             data-commit="c485246"
             data-users="64"
@@ -139,7 +135,7 @@
             data-headline="Same-J swaps clear 30/s on the same commit"
             data-detail="64 users settled 160 of 160 swaps: 36.0 matched per second and 32.2 fully settled. Both workloads now hold above the 30/s mark on one Hub, and neither is Hub-limited yet."></circle>
     <circle class="dot payments" tabindex="0"
-            cx="976.0" cy="373.8" r="7"
+            cx="976.0" cy="212.2" r="7"
             data-when="20:25"
             data-commit="2bbdf82"
             data-users="128"

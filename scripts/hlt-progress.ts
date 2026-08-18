@@ -64,12 +64,20 @@ const layout = (runs: readonly HltRun[]) => {
   const padding = { top: 32, right: 64, bottom: 76, left: 72 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
-  const peak = Math.max(TARGET_TPS, ...runs.map(run => Math.max(run.paymentsTps, run.swapsTps)));
-  const ceiling = Math.max(10, Math.ceil(peak / 100) * 100);
+  // Progress happens in doublings, so the axis is logarithmic: on a linear
+  // scale every run under forty per second collapses onto the baseline while
+  // the thousand-per-second target eats the whole canvas.
+  const floor = 1;
+  const ceiling = TARGET_TPS;
+  const logSpan = Math.log10(ceiling) - Math.log10(floor);
   const x = (index: number): number =>
     runs.length <= 1 ? padding.left + plotWidth / 2
       : padding.left + (index / (runs.length - 1)) * plotWidth;
-  const y = (value: number): number => padding.top + plotHeight - (value / ceiling) * plotHeight;
+  const y = (value: number): number => {
+    const clamped = Math.max(floor, Math.min(ceiling, value));
+    const position = (Math.log10(clamped) - Math.log10(floor)) / logSpan;
+    return padding.top + plotHeight - position * plotHeight;
+  };
   return { width, height, padding, plotWidth, plotHeight, ceiling, x, y };
 };
 
@@ -91,7 +99,7 @@ const seriesPath = (
 export const renderProgressPage = (ledger: Ledger): string => {
   const runs = ledger.runs;
   const frame = layout(runs);
-  const gridValues = Array.from({ length: 5 }, (_, index) => Math.round((frame.ceiling / 4) * index));
+  const gridValues = [1, 10, 100, 1_000];
   const latest = runs[runs.length - 1];
 
   const grid = gridValues.map(value => `
