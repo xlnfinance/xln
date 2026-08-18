@@ -1,6 +1,6 @@
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { Profile } from '../../../entity/profile';
-import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../../../network/relay/store';
+import { normalizeRuntimeKey, type RelayStore } from '../../../network/relay/store';
 
 const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
@@ -14,17 +14,21 @@ export const buildKnownProfileBundle = (
   const target = normalizeEntityId(input.entityId);
   if (!target) return { profile: null, peers: [] };
 
-  const merged = new Map<string, Profile>();
-  for (const profile of getAllGossipProfiles(input.relayStore)) {
-    const entityId = normalizeEntityId(profile?.entityId);
-    if (entityId) merged.set(entityId, profile);
-  }
-  for (const profile of input.env?.gossip?.getProfiles?.() || []) {
-    const entityId = normalizeEntityId(profile?.entityId);
-    if (entityId) merged.set(entityId, profile);
-  }
+  // Lookup by id, then resolve only the target's peers: rebuilding a merged
+  // map of every stored profile per request was 18% of a 100-user daemon's
+  // CPU under the load driver's route polling.
+  const localProfiles = input.env?.gossip?.getProfiles?.() || [];
+  const lookup = (wanted: string): Profile | null => {
+    let found: Profile | null = input.relayStore.gossipProfiles.get(wanted)?.profile ?? null;
+    // Local Runtime profiles override relay copies (same precedence as before).
+    for (const profile of localProfiles) {
+      if (normalizeEntityId(profile?.entityId) === wanted) found = profile;
+    }
+    return found;
+  };
+  const merged = { get: lookup };
 
-  const profile = merged.get(target) || null;
+  const profile = lookup(target);
   if (!profile) return { profile: null, peers: [] };
 
   const peerIds = new Set<string>();

@@ -110,7 +110,24 @@ const buildInboundBinding = (
   };
 };
 
+// The same inbound lock tx object is decrypted by the wire-budget fit (per
+// attempt), by the proposal, and again by the validator replay of the same
+// frame; the X25519+cipher round is pure in (tx, keys), so memoize per tx.
+const decryptedInboundEnvelopes = new WeakMap<HtlcLockTx, PreparedEnvelope | PreparedHtlcEntry>();
+
 const decryptInboundEnvelope = (
+  input: MaterializeHtlcPreparedContextInput,
+  accountTx: HtlcLockTx,
+  binding: PreparedHtlcEntry['binding'],
+): PreparedEnvelope | PreparedHtlcEntry => {
+  const cached = decryptedInboundEnvelopes.get(accountTx);
+  if (cached !== undefined) return cached;
+  const result = decryptInboundEnvelopeUncached(input, accountTx, binding);
+  decryptedInboundEnvelopes.set(accountTx, result);
+  return result;
+};
+
+const decryptInboundEnvelopeUncached = (
   input: MaterializeHtlcPreparedContextInput,
   accountTx: HtlcLockTx,
   binding: PreparedHtlcEntry['binding'],
