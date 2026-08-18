@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { type Writable, type Readable } from 'svelte/store';
-  import type { RuntimeReplica, EnvSnapshot, JReplica, RuntimeAdapterViewFrame, XLNModule } from '@xln/runtime/api/public/runtime-module';
-  import type { JAdapter } from '@xln/runtime/jurisdiction/adapter';
-  import { DISPLAY, TIME_MACHINE } from '@xln/runtime/config/constants';
+  import type { RuntimeReplica, EnvSnapshot, JReplica, RuntimeAdapterViewFrame, XLNModule } from '@xln/core/api/public/runtime-module';
+  import type { JAdapter } from '@xln/core/jurisdiction/adapter';
+  import { DISPLAY, TIME_MACHINE } from '@xln/core/config/constants';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import NetworkMachineTimeline from './NetworkMachineTimeline.svelte';
   import { runtimeGraphScope } from '$lib/stores/network/runtimeGraphControlStore';

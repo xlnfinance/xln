@@ -47,7 +47,7 @@
     normalizeQaAdminHealth,
     type QaAdminHealthSnapshot,
   } from '$lib/qa/adminEvidence';
-  import { QA } from '@xln/runtime/config/constants';
+  import { QA } from '@xln/core/config/constants';
   import { readJsonUnknown } from '$lib/utils/boundary';
   import {
     decodeQaAuthInfo,

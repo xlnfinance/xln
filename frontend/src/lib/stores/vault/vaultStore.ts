@@ -11,7 +11,7 @@ import type {
   TowerAppointmentV1,
   TowerReceiptV1,
   XLNModule,
-} from '@xln/runtime/api/public/runtime-module';
+} from '@xln/core/api/public/runtime-module';
 
 import {
   activeRuntimeId,
@@ -64,7 +64,7 @@ import { isVaultAuthorityLeaseExpired } from '../../security/vault-authority-lea
 
 import { lockRuntimeCommandJournal } from '../commands/runtimeCommandJournalKeyring';
 
-import { deriveJurisdictionSignerIndex } from '../../../../../runtime/jurisdiction/machine/config/signer-derivation';
+import { deriveJurisdictionSignerIndex } from '../../../../../core/jurisdiction/machine/config/signer-derivation';
 
 import {
   findRuntimeByIdCaseInsensitive,

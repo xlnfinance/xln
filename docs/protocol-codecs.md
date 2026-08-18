@@ -12,7 +12,7 @@ this document in the same release.
   values are sorted by encoded bytes. Numbers, bigints, strings, booleans and
   null have distinct type tags.
 - Runtime storage and WebSocket transport use the tagged MessagePack codec in
-  `runtime/storage/codec/binary-codec.ts`. The leading `0x01` codec byte is part of
+  `core/storage/codec/binary-codec.ts`. The leading `0x01` codec byte is part of
   the production format. Storage and wire readers reject every other codec;
   obsolete data requires an explicit offline migration.
 - JSON is a developer representation only. `serializeWsMessageForDebug` and the
@@ -87,7 +87,7 @@ direction.
 
 ## Golden vectors
 
-`runtime/__tests__/protocol/codec/frame-hash-golden.test.ts` pins account and entity frame
-hashes. `runtime/__tests__/account/state/account-state-root.test.ts` pins field inclusion and
+`core/__tests__/protocol/codec/frame-hash-golden.test.ts` pins account and entity frame
+hashes. `core/__tests__/account/state/account-state-root.test.ts` pins field inclusion and
 ephemeral-state exclusion. Any intentional encoding change must update both the
 vectors and this specification after independently inspecting the new payload.

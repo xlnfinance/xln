@@ -1,10 +1,10 @@
 {
   "extends": "./tsconfig.runtime.json",
   "include": [
-    "runtime/__tests__/types/fints/results/apply-account-tx-result.positive.ts",
-    "runtime/__tests__/types/fints/results/account-consensus-result.positive.ts",
-    "runtime/__tests__/types/fints/entity/entity-frame-phase.positive.ts",
-    "runtime/__tests__/types/fints/entity/failure-disposition.positive.ts"
+    "core/__tests__/types/fints/results/apply-account-tx-result.positive.ts",
+    "core/__tests__/types/fints/results/account-consensus-result.positive.ts",
+    "core/__tests__/types/fints/entity/entity-frame-phase.positive.ts",
+    "core/__tests__/types/fints/entity/failure-disposition.positive.ts"
   ],
   "exclude": []
 }

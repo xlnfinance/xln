@@ -10,7 +10,7 @@
 
 import { test, expect, type Page } from '../../global-setup.mts';
 import { ethers } from 'ethers';
-import { deriveDelta } from '../../../runtime/account/utils';
+import { deriveDelta } from '../../../core/account/utils';
 import { APP_BASE_URL, API_BASE_URL, resetProdServer, waitForNamedHubs } from '../../utils/e2e-baseline';
 import {
   listRenderedCounterpartyIds,

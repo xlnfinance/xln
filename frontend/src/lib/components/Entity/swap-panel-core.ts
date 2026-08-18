@@ -1,11 +1,11 @@
 import type { EntityReplica } from '$lib/types/ui';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import { amountToUsd } from '$lib/utils/assetPricing';
-import type { SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/api/public/runtime-module';
+import type { SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/core/api/public/runtime-module';
 import {
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
-} from '@xln/runtime/account/config/dispute-config';
+} from '@xln/core/account/config/dispute-config';
 import { compareStableText } from './swap-formatting';
 import { type PreparedSwapOrderLike } from './swap/swap-order-math';
 import './swap/SwapPanel.css';

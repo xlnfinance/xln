@@ -13,7 +13,7 @@
  */
 
 import { test, expect, type BrowserContext, type Page } from '../../global-setup.mts';
-import { deriveDelta } from '../../../runtime/account/utils';
+import { deriveDelta } from '../../../core/account/utils';
 import { ensureE2EBaseline, type E2EHealthResponse } from '../../utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from '../../utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';

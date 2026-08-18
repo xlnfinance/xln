@@ -3,9 +3,9 @@
   import { writable, get } from 'svelte/store';
   import { formatUnits } from 'ethers';
   import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
-  import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
-  import type { RuntimeAdapterFrameReceiptResponse } from '@xln/runtime/api/runtime-adapter/types';
-  import type { EnvSnapshot } from '@xln/runtime/runtime/types';
+  import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
+  import type { RuntimeAdapterFrameReceiptResponse } from '@xln/core/api/runtime-adapter/types';
+  import type { EnvSnapshot } from '@xln/core/runtime/types';
   import { toasts } from '$lib/stores/ui/toastStore';
   import { paymentSpotlight } from '$lib/stores/network/paymentSpotlightStore';
   import UserModePanel from './UserModePanel.svelte';

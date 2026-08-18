@@ -73,7 +73,7 @@ import {
 } from '$lib/utils/runtime/p2pPrefetch';
 import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
 import { getXLN, xlnInstance } from './bootstrap/xlnRuntimeLoader';
-import { parseProfile } from '@xln/runtime/entity/profile';
+import { parseProfile } from '@xln/core/entity/profile';
 import type {
   XLNModule,
   RuntimeReplica,
@@ -93,8 +93,8 @@ import type {
   FinancialConstants,
   CrossJurisdictionSwapRoute,
   Profile as GossipProfile,
-} from '@xln/runtime/api/public/runtime-module';
-import { REMOTE_RUNTIME } from '@xln/runtime/config/constants';
+} from '@xln/core/api/public/runtime-module';
+import { REMOTE_RUNTIME } from '@xln/core/config/constants';
 
 let unregisterEnvChange: (() => void) | null = null;
 let unregisterRuntimeControllerChange: (() => void) | null = null;
@@ -432,7 +432,7 @@ const clearRuntimeAdapterSubscriptions = (): void => {
   remoteProjectionRefreshQueued = false;
 };
 
-const handleRuntimeProjectionRefreshError = (refreshError: unknown): void => {
+export const handleRuntimeProjectionRefreshError = (refreshError: unknown): void => {
   const message = refreshError instanceof Error ? refreshError.message : String(refreshError);
   const isRemoteProjection = getRuntimeControllerConfig()?.mode === 'remote';
   const logMessage = isRemoteProjection
@@ -785,6 +785,15 @@ const refreshRemoteRuntimeProjection = async (
       return null;
     }
     if (!view.frame) {
+      // A disconnect/timeout is already recorded on RuntimeView. Relabeling it as
+      // "entity not found" turns adapter-switch races into unhandled pageerrors.
+      const viewError = String(view.error || '');
+      if (
+        view.status !== 'connected' ||
+        /not connected|socket closed|timed out/i.test(viewError)
+      ) {
+        return null;
+      }
       if (entityId) {
         throw new Error(`Remote entity summary not found: ${entityId}`);
       }
@@ -1027,6 +1036,10 @@ export const refreshCurrentRuntimeProjection = async (): Promise<RuntimeReplica 
   }
   const generation = ++remoteProjectionRefreshGeneration;
   const promise = (async () => {
+    // Capture adapter only after the config is still current. An in-flight H1
+    // refresh that resumes after H2 connect would otherwise query H2 with H1's
+    // entity id and throw `Remote entity summary not found`.
+    if (!isCurrentRuntimeAdapterConfig(config)) return null;
     const adapter = getRuntimeControllerAdapter();
     if (!adapter || adapter.mode !== 'remote') return null;
     const projection = await refreshRemoteRuntimeProjection(adapter, config, selection, generation);

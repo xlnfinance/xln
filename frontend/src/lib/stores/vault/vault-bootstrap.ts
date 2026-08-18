@@ -1,4 +1,4 @@
-import type { JurisdictionConfig } from '@xln/runtime/api/public/runtime-module';
+import type { JurisdictionConfig } from '@xln/core/api/public/runtime-module';
 import { errorLog } from '../errorLogStore';
 import { isUnknownRecord, parseJsonUnknown, readJsonUnknown } from '$lib/utils/boundary';
 import {

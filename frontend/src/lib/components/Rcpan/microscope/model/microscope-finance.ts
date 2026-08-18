@@ -1,10 +1,10 @@
-import { deriveDelta } from '@xln/runtime/account/utils';
-import { createDefaultDelta } from '@xln/runtime/account/state/delta';
-import type { Delta, DerivedDelta } from '@xln/runtime/types/account';
+import { deriveDelta } from '@xln/core/account/utils';
+import { createDefaultDelta } from '@xln/core/account/state/delta';
+import type { Delta, DerivedDelta } from '@xln/core/types/account';
 import {
   deriveDisputeTokenFinalization,
   type DisputeTokenFinalization,
-} from '@xln/runtime/protocol/dispute/finalization';
+} from '@xln/core/protocol/dispute/finalization';
 import type { RcpanTimelineState } from './microscope-timeline';
 import type { RcpanMicroscopeToken } from './microscope-tokens';
 

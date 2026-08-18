@@ -30,7 +30,7 @@ describe('network machine demo playback', () => {
   });
 
   test('a recorded scenario is deterministic, self-contained and ephemeral', () => {
-    const source = readFileSync('runtime/scenarios/browser-api.ts', 'utf8');
+    const source = readFileSync('core/scenarios/browser-api.ts', 'utf8');
 
     // Seed: a demo must replay identically and must not require an unlocked vault.
     expect(source).toContain('xln-demo:');

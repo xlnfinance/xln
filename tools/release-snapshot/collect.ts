@@ -28,7 +28,7 @@ type SccFile = {
 
 type SccOutput = { languageSummary?: Array<{ Files?: SccFile[] }> };
 
-const ROOT_ORDER = ['runtime', 'jurisdictions', 'frontend', 'docs', 'tools', 'tests', 'native', 'custody', 'scripts'];
+const ROOT_ORDER = ['core', 'jurisdictions', 'frontend', 'docs', 'tools', 'tests', 'native', 'custody', 'scripts'];
 const GENERATED_PREFIXES = [
   'jurisdictions/artifacts/',
   'jurisdictions/cache/',

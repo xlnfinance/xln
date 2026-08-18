@@ -6,18 +6,18 @@
  * Idempotent: safe to run multiple times.
  */
 
-import { main, processRuntime } from '../runtime/runtime.ts';
+import { main, processRuntime } from '../core/runtime.ts';
 import {
   deriveSignerKeySync,
   deriveSignerAddressSync,
   registerSignerKey,
-} from '../runtime/account/crypto';
-import { encodeBoard, hashBoard } from '../runtime/entity/factory';
-import { createStructuredLogger } from '../runtime/infra/logger';
-import { requireJurisdictionBlockTimeMs } from '../runtime/orchestrator/mesh/mesh-jurisdictions';
-import type { ConsensusConfig } from '../runtime/entity/types';
-import type { RuntimeReplica } from '../runtime/runtime/types';
-import { importEntity } from '../runtime/runtime/registration/entity-creation';
+} from '../core/account/crypto';
+import { encodeBoard, hashBoard } from '../core/entity/factory';
+import { createStructuredLogger } from '../core/support/logger';
+import { requireJurisdictionBlockTimeMs } from '../core/orchestrator/mesh/mesh-jurisdictions';
+import type { ConsensusConfig } from '../core/entity/types';
+import type { RuntimeReplica } from '../core/runtime/types';
+import { importEntity } from '../core/runtime/registration/entity-creation';
 
 const args = process.argv.slice(2);
 

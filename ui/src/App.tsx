@@ -1,7 +1,7 @@
 import { Route, Routes } from 'react-router-dom';
 import { Shell } from './components/Shell';
 import { Toasts } from './components/Toasts';
-import { useApp } from './runtime/store';
+import { useApp } from './core/store';
 import { Gate } from './screens/Gate';
 import { Home } from './screens/Home';
 import { Accounts } from './screens/Accounts';

@@ -25,7 +25,7 @@ screenshots at iPhone/laptop/wide viewports, and `bun run check`.
 
 ## Local runtime security and parity
 
-The launcher creates stable local runtime/auth seeds, starts a loopback-only Bun daemon,
+The launcher creates stable local core/auth seeds, starts a loopback-only Bun daemon,
 and opens `http://localhost:8080/app` with a one-time 60-second pairing token. The token
 is exchanged same-origin for a short-lived `full` capability; the browser receives
 `access: admin`, never the persistent daemon control secret.

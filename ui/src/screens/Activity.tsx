@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
-import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
-import { useApp } from '../runtime/store';
-import { useAdapterRead } from '../runtime/hooks';
-import { useAccounts } from '../runtime/views';
-import { formatAmount, getTokenMeta, timeAgo } from '../runtime/format';
+import type { RuntimeAdapterEntitySummary } from '@xln/core/api/runtime-adapter/types';
+import { useApp } from '../core/store';
+import { useAdapterRead } from '../core/hooks';
+import { useAccounts } from '../core/views';
+import { formatAmount, getTokenMeta, timeAgo } from '../core/format';
 
 export type ActivityEventView = {
 	id?: string;

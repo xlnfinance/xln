@@ -6,7 +6,7 @@ This folder owns entity-layer transaction application.
 
 - validates entity ingress
 - mutates `EntityState`
-- bridges runtime/J-layer/account-layer events into entity decisions
+- bridges core/J-layer/account-layer events into entity decisions
 
 ## Main files
 

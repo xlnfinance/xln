@@ -17,6 +17,7 @@
   import { settings } from '$lib/stores/settingsStore';
   import {
     entityPositions,
+    handleRuntimeProjectionRefreshError,
     refreshCurrentRuntimeProjection,
   } from '$lib/stores/xlnStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
@@ -28,9 +29,9 @@
   import { runtimes, activeRuntimeId, runtimeOperations } from '$lib/stores/runtimeStore';
   import { showVaultPanel, vaultUiOperations } from '$lib/stores/vault/vaultUiStore';
   import type { Tab } from '$lib/types/ui';
-  import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
-  import type { EntityReplica } from '@xln/runtime/entity/types';
-  import type { EnvSnapshot } from '@xln/runtime/runtime/types';
+  import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
+  import type { EntityReplica } from '@xln/core/entity/types';
+  import type { EnvSnapshot } from '@xln/core/runtime/types';
   import {
     readAnyOnboardingComplete,
     readOnboardingComplete,
@@ -185,7 +186,9 @@
     selectedInitialAction = action;
     workspaceActionRevision += 1;
     setRuntimeViewActiveEntityId(nextEntityId);
-    if ($runtimeControllerHandle.mode === 'remote') void refreshCurrentRuntimeProjection();
+    if ($runtimeControllerHandle.mode === 'remote') {
+      void refreshCurrentRuntimeProjection().catch(handleRuntimeProjectionRefreshError);
+    }
   }));
 
   // Reactive: signer info from vault
@@ -751,7 +754,7 @@
     selectedJurisdictionName = null; // Clear filter to allow any entity
     setRuntimeViewActiveEntityId(entityId);
     if (isRemoteRuntime) {
-      void refreshCurrentRuntimeProjection();
+      void refreshCurrentRuntimeProjection().catch(handleRuntimeProjectionRefreshError);
     }
   }
 

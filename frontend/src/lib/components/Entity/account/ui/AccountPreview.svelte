@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Profile as GossipProfile } from '@xln/runtime/api/public/runtime-module';
+  import type { Profile as GossipProfile } from '@xln/core/api/public/runtime-module';
   import type { AccountReplica, DerivedDelta } from '$lib/types/ui';
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { xlnFunctions } from '../../../../stores/xlnStore';

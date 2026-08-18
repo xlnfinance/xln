@@ -1,7 +1,7 @@
 import { keccak256, toUtf8Bytes } from 'ethers';
-import type { RuntimeInput } from '@xln/runtime/api/public/runtime-module';
-import { safeParse, safeStringify } from '@xln/runtime/protocol/serialization';
-import { decodeRuntimeInput } from '@xln/runtime/runtime/input-schema';
+import type { RuntimeInput } from '@xln/core/api/public/runtime-module';
+import { safeParse, safeStringify } from '@xln/core/protocol/serialization';
+import { decodeRuntimeInput } from '@xln/core/runtime/decode';
 
 export type RemoteRuntimeCommandIntentStatus = 'pending' | 'accepted';
 

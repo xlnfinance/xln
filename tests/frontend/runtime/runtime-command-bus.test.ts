@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeInput } from '@xln/runtime/api/public/runtime-module';
+import type { RuntimeInput } from '@xln/core/api/public/runtime-module';
 import {
   clearRuntimeCommandReceipts,
   recordRuntimeIngressReceipt,
@@ -12,7 +12,7 @@ import {
   submitRuntimeCommand,
   type CommandReceipt,
 } from '../../../frontend/src/lib/stores/commands/runtimeCommandBus';
-import { RuntimeAdapterError } from '../../../runtime/api/runtime-adapter/errors';
+import { RuntimeAdapterError } from '../../../core/api/runtime-adapter/errors';
 import { listUnresolvedRemoteRuntimeCommandIntents } from '../../../frontend/src/lib/stores/commands/runtimeCommandIntent';
 import {
   findCommittedEmbeddedRuntimeInputHeight,
@@ -734,7 +734,7 @@ test('credit and collateral configure forms submit RuntimeInput through shared c
   const collateralSource = readFileSync('frontend/src/lib/components/Entity/account/ui/CollateralForm.svelte', 'utf8');
   const configureSource = readFileSync('frontend/src/lib/components/Entity/account/ui/AccountConfigurePanel.svelte', 'utf8');
   const accountWorkspaceSource = readFileSync('frontend/src/lib/components/Entity/workspace/AccountWorkspaceView.svelte', 'utf8');
-  const resolverSource = readFileSync('runtime/api/runtime-adapter/resolve.ts', 'utf8');
+  const resolverSource = readFileSync('core/api/runtime-adapter/resolve.ts', 'utf8');
 
   for (const source of [creditSource, collateralSource]) {
     expect(source).toContain('export let submitRuntimeInput');
@@ -882,7 +882,7 @@ test('entity panel debt enforcement submits RuntimeInput instead of calling JAda
 
   expect(existsSync('frontend/src/lib/components/Entity/debt-enforcement-command.ts')).toBe(false);
   expect(source).toContain('buildDebtEnforcementRuntimeInputFromProjection');
-  expect(source).toContain('@xln/runtime/runtime/transactions/debt-enforcement-input');
+  expect(source).toContain('@xln/core/runtime/tx/debt-enforcement-input');
   expect(enforceSource).toContain('buildDebtEnforcementRuntimeInputFromProjection');
   expect(enforceSource).toContain('jurisdictionName');
   expect(enforceSource).toMatch(/timestamp: requirePanelRuntimeTimestamp\(["']debt-enforcement["']\)/);

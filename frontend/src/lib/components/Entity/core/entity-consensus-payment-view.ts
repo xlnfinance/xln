@@ -1,5 +1,5 @@
-import type { Proposal } from '@xln/runtime/entity/types';
-import type { EntityTx } from '@xln/runtime/types/entity-tx';
+import type { Proposal } from '@xln/core/entity/types';
+import type { EntityTx } from '@xln/core/types/entity-tx';
 
 export type ConsensusPaymentProposalView = {
   recipientEntityId: string;

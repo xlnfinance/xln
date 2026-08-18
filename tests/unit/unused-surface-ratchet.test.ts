@@ -5,7 +5,7 @@ import {
   findNamedBinding,
   resolveProofTarget,
   usesNamedBinding,
-} from '../../runtime/scripts/checks/repository/check-unused-surface';
+} from '../../core/scripts/checks/repository/check-unused-surface';
 
 describe('unused surface ratchet', () => {
   test('normalizes every Knip public-surface issue deterministically', () => {
@@ -23,27 +23,27 @@ describe('unused surface ratchet', () => {
 
   test('proves exact imported usage instead of accepting a stale import or re-export', () => {
     const usedSource = `
-      import { type RuntimeId as Id } from '@xln/runtime/protocol/identity';
+      import { type RuntimeId as Id } from '@xln/core/protocol/identity';
       export type View = { id: Id };
     `;
-    const used = findNamedBinding(usedSource, '@xln/runtime/protocol/identity', 'RuntimeId');
+    const used = findNamedBinding(usedSource, '@xln/core/protocol/identity', 'RuntimeId');
     expect(used).toEqual({ localName: 'Id', reexport: false });
     expect(used && usesNamedBinding(usedSource, used)).toBe(true);
 
-    const staleSource = `import { RuntimeId } from '@xln/runtime/protocol/identity';`;
-    const stale = findNamedBinding(staleSource, '@xln/runtime/protocol/identity', 'RuntimeId');
+    const staleSource = `import { RuntimeId } from '@xln/core/protocol/identity';`;
+    const stale = findNamedBinding(staleSource, '@xln/core/protocol/identity', 'RuntimeId');
     expect(stale && usesNamedBinding(staleSource, stale)).toBe(false);
 
     const commentOnly = `
-      import { RuntimeId } from '@xln/runtime/protocol/identity';
+      import { RuntimeId } from '@xln/core/protocol/identity';
       // RuntimeId is intentionally not used.
       const label = 'RuntimeId';
     `;
-    const commentBinding = findNamedBinding(commentOnly, '@xln/runtime/protocol/identity', 'RuntimeId');
+    const commentBinding = findNamedBinding(commentOnly, '@xln/core/protocol/identity', 'RuntimeId');
     expect(commentBinding && usesNamedBinding(commentOnly, commentBinding)).toBe(false);
 
-    const reexportSource = `export type { RuntimeId } from '@xln/runtime/protocol/identity';`;
-    const reexport = findNamedBinding(reexportSource, '@xln/runtime/protocol/identity', 'RuntimeId');
+    const reexportSource = `export type { RuntimeId } from '@xln/core/protocol/identity';`;
+    const reexport = findNamedBinding(reexportSource, '@xln/core/protocol/identity', 'RuntimeId');
     expect(reexport).toEqual({ localName: 'RuntimeId', reexport: true });
     expect(reexport && usesNamedBinding(reexportSource, reexport)).toBe(false);
   });
@@ -51,8 +51,8 @@ describe('unused surface ratchet', () => {
   test('resolves proof specifiers to the exact source file', () => {
     expect(resolveProofTarget(
       'frontend/src/lib/view.svelte',
-      '@xln/runtime/protocol/identity',
-    )).toBe('runtime/protocol/identity.ts');
+      '@xln/core/protocol/identity',
+    )).toBe('core/protocol/identity.ts');
     expect(resolveProofTarget(
       'frontend/src/routes/rpc/+server.ts',
       '../rpc-proxy-safety',

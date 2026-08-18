@@ -1,8 +1,8 @@
 export default {
-  mutate: ['runtime/account/tx/handlers/settlement/workspace-views.ts'],
+  mutate: ['core/account/tx/handlers/settlement/workspace-views.ts'],
   testRunner: 'command',
   commandRunner: {
-    command: 'bun test runtime/__tests__/account/settlement/settlement-workspace-views.test.ts',
+    command: 'bun test core/__tests__/account/settlement/settlement-workspace-views.test.ts',
   },
   coverageAnalysis: 'off',
   reporters: ['clear-text', 'json'],

@@ -1,19 +1,19 @@
 import { SigningKey, hexlify } from 'ethers';
-import { deriveSignerAddressSync, deriveSignerKeySync } from '../runtime/account/crypto';
-import { createStructuredLogger } from '../runtime/infra/logger';
-import { RuntimeAdapterError } from '../runtime/api/runtime-adapter/errors';
-import { buildRuntimeAdapterOwnerBindingDigest } from '../runtime/api/runtime-adapter/security/owner-binding';
-import { RemoteRuntimeAdapter } from '../runtime/api/runtime-adapter/remote';
+import { deriveSignerAddressSync, deriveSignerKeySync } from '../core/account/crypto';
+import { createStructuredLogger } from '../core/support/logger';
+import { RuntimeAdapterError } from '../core/api/runtime-adapter/errors';
+import { buildRuntimeAdapterOwnerBindingDigest } from '../core/api/runtime-adapter/security/owner-binding';
+import { RemoteRuntimeAdapter } from '../core/api/runtime-adapter/remote';
 import type {
   RuntimeAdapterFrameLog,
   RuntimeAdapterFrameReceiptResponse,
   RuntimeAdapterPaymentRoute,
   RuntimeAdapterPaymentRoutesResponse,
   RuntimeAdapterSendResult,
-} from '../runtime/api/runtime-adapter/types';
-import type { RuntimeInput } from '../runtime/runtime/types';
-import type { EntityTx } from '../runtime/types/entity-tx';
-import type { PaymentDeliveryMode } from '../runtime/types/finance/payment';
+} from '../core/api/runtime-adapter/types';
+import type { RuntimeInput } from '../core/runtime/types';
+import type { EntityTx } from '../core/types/entity-tx';
+import type { PaymentDeliveryMode } from '../core/types/finance/payment';
 
 type DaemonAuthKeyProvider = string | (() => string);
 export type DaemonFrameLog = RuntimeAdapterFrameLog;

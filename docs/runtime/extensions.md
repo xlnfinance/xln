@@ -6,11 +6,11 @@ Extensions add products above the bilateral core. They may submit typed account/
 
 ## Source
 
-- [`runtime/extensions/cross-j/`](../../runtime/extensions/cross-j) - cross-j route and fill coordination.
-- [`runtime/orderbook/`](../../runtime/orderbook) - deterministic same-j matching and book state.
-- [`runtime/routing/`](../../runtime/routing) - payment graph and route selection.
-- [`runtime/agent-payments/`](../../runtime/agent-payments) - agent-to-agent payment integration.
-- [`runtime/extensions/lending.ts`](../../runtime/extensions/lending.ts) - lending projection pending final folder migration.
+- [`core/extensions/cross-j/`](../../core/extensions/cross-j) - cross-j route and fill coordination.
+- [`core/orderbook/`](../../core/orderbook) - deterministic same-j matching and book state.
+- [`core/pathfinding/`](../../core/routing) - payment graph and route selection.
+- [`core/agent-payments/`](../../core/agent-payments) - agent-to-agent payment integration.
+- [`core/extensions/lending.ts`](../../core/extensions/lending.ts) - lending projection pending final folder migration.
 
 ## Main Methods
 

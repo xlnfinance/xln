@@ -5,7 +5,7 @@
   import { amountToUsd } from '$lib/utils/assetPricing';
   import { getEntityDisplayName } from '$lib/utils/identity/entityNaming';
   import { compareStableText } from '$lib/utils/stableSort';
-  import type { DebtEntry, EntityState } from '@xln/runtime/api/public/runtime-module';
+  import type { DebtEntry, EntityState } from '@xln/core/api/public/runtime-module';
   import { requireTokenDecimals } from '../token-metadata';
   import type { DebtEnforceRequest } from './debt-enforce-request';
 

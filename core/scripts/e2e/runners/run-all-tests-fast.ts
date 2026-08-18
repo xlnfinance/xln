@@ -1,0 +1,158 @@
+/**
+ * One-command fast test suite:
+ * - scenario suite (parallel, isolated)
+ * - playwright e2e suite (parallel, isolated)
+ *
+ * Both run concurrently in separate isolated stacks.
+ *
+ * Usage:
+ *   bun core/scripts/e2e/runners/run-all-tests-fast.ts
+ *   bun core/scripts/e2e/runners/run-all-tests-fast.ts --scenario-workers=3 --e2e-shards=2
+ */
+
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
+import {
+  cleanupTestArtifactsBeforeRun,
+  TEST_ARTIFACT_CLEANUP_DONE_ENV,
+  withoutTestArtifactCleanupDoneEnv,
+} from '../harness/test-artifact-cleanup';
+import { sanitizeChildProcessEnv } from '../../../api/server/child-process-env';
+import { assertBroadRunHasNoUnresolvedReruns } from '../harness/selective-rerun/ledger';
+
+type CliArgs = {
+  scenarioWorkers: number;
+  e2eShards: number;
+  smoke: boolean;
+  quick: boolean;
+  skipBuild: boolean;
+  keepTestArtifacts: boolean;
+};
+
+const parseArgs = (): CliArgs => {
+  const args = process.argv.slice(2);
+  const getFlag = (name: string): string | undefined => {
+    const eq = args.find(a => a.startsWith(`--${name}=`));
+    if (eq) return eq.split('=')[1];
+    const i = args.findIndex(a => a === `--${name}`);
+    if (i >= 0 && i + 1 < args.length) {
+      const next = args[i + 1];
+      if (next && !next.startsWith('--')) return next;
+    }
+    return undefined;
+  };
+
+  const scenarioWorkersRaw = Number(getFlag('scenario-workers') || '3');
+  const e2eShardsRaw = Number(getFlag('e2e-shards') || '2');
+
+  return {
+    scenarioWorkers: Number.isFinite(scenarioWorkersRaw) && scenarioWorkersRaw > 0 ? Math.floor(scenarioWorkersRaw) : 3,
+    e2eShards: Number.isFinite(e2eShardsRaw) && e2eShardsRaw > 0 ? Math.floor(e2eShardsRaw) : 2,
+    smoke: args.includes('--smoke'),
+    quick: args.includes('--quick'),
+    skipBuild: args.includes('--skip-build'),
+    keepTestArtifacts: args.includes('--keep-test-artifacts') || args.includes('--no-cleanup'),
+  };
+};
+
+type JobResult = {
+  name: string;
+  code: number | null;
+};
+
+const runJob = async (
+  name: string,
+  cmd: string,
+  args: string[],
+  env: Record<string, string | undefined>,
+): Promise<JobResult> => {
+  const proc: ChildProcessByStdio<null, Readable, Readable> = spawn(cmd, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: sanitizeChildProcessEnv(env),
+  });
+
+  proc.stdout.on('data', chunk => process.stdout.write(`[${name}] ${chunk.toString()}`));
+  proc.stderr.on('data', chunk => process.stderr.write(`[${name}] ${chunk.toString()}`));
+
+  const code = await new Promise<number | null>((resolve, reject) => {
+    proc.once('error', reject);
+    proc.once('exit', resolve);
+  });
+
+  return { name, code };
+};
+
+async function main(): Promise<void> {
+  if (process.argv.slice(2).some(argument => argument === '--help' || argument === '-h')) {
+    console.log('Usage: bun core/scripts/e2e/runners/run-all-tests-fast.ts [--quick|--smoke] [--scenario-workers=N] [--e2e-shards=N]');
+    return;
+  }
+  const args = parseArgs();
+  assertBroadRunHasNoUnresolvedReruns();
+  console.log('\n' + '='.repeat(72));
+  console.log('Fast Full Suite (parallel + isolated)');
+  console.log('='.repeat(72));
+  console.log(`Scenario workers: ${args.scenarioWorkers}`);
+  console.log(`E2E shards      : ${args.e2eShards}`);
+  const modeLabel = args.quick ? 'quick' : args.smoke ? 'smoke' : 'full';
+  console.log(`Mode            : ${modeLabel}`);
+  console.log('='.repeat(72) + '\n');
+
+  cleanupTestArtifactsBeforeRun({
+    reason: 'all-tests',
+    argv: args.keepTestArtifacts ? ['--keep-test-artifacts'] : process.argv.slice(2),
+  });
+  const childEnv = {
+    ...process.env,
+    [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
+  };
+  const e2eEnv = withoutTestArtifactCleanupDoneEnv(childEnv);
+
+  const startedAt = Date.now();
+
+  const scenarioPromise = runJob(
+    'scenarios',
+    'bun',
+    [
+      'core/scenarios/run.ts',
+      `--workers=${args.scenarioWorkers}`,
+      ...(args.quick || args.smoke ? ['--set=smoke'] : []),
+    ],
+    childEnv,
+  );
+
+  const e2eArgs = ['core/scripts/e2e/runners/run-e2e-parallel-isolated.ts', `--shards=${args.e2eShards}`];
+  if (args.skipBuild) e2eArgs.push('--skip-build');
+  if (args.quick || args.smoke) {
+    // One critical rebalance assertion path for sub-minute feedback.
+    e2eArgs.push('--pw-project=chromium');
+    e2eArgs.push('--pw-files=tests/e2e/payments/e2e-rebalance-bar.spec.ts');
+    e2eArgs.push('--pw-grep=faucet -> request_collateral -> secured bar');
+  }
+
+  const e2ePromise = runJob(
+    'e2e',
+    'bun',
+    e2eArgs,
+    e2eEnv,
+  );
+
+  const [scenarioResult, e2eResult] = await Promise.all([scenarioPromise, e2ePromise]);
+  const totalMs = Date.now() - startedAt;
+
+  console.log('\n' + '='.repeat(72));
+  console.log('Fast Suite Summary');
+  console.log('='.repeat(72));
+  console.log(`scenarios: exit=${scenarioResult.code}`);
+  console.log(`e2e      : exit=${e2eResult.code}`);
+  console.log(`wall time: ${(totalMs / 1000).toFixed(1)}s`);
+  console.log('='.repeat(72));
+
+  const ok = scenarioResult.code === 0 && e2eResult.code === 0;
+  process.exit(ok ? 0 : 1);
+}
+
+main().catch((err) => {
+  console.error('Fast suite runner failed:', (err as Error).message);
+  process.exit(1);
+});

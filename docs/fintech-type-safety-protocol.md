@@ -28,13 +28,13 @@ This codebase moves money. Type safety rules are protocol rules, not style prefe
 
 Fix these first when reducing type risk:
 
-1. `runtime/jurisdiction/adapter/*`
-2. `runtime/storage/wal/*`
-3. `runtime/jurisdiction/machine/batch/index.ts`
-4. `runtime/protocol/dispute/proof-builder.ts`
-5. `runtime/account/tx/*`
-6. `runtime/entity/tx/*`
-7. `runtime/api/server/index.ts`
+1. `core/jurisdiction/adapter/*`
+2. `core/storage/wal/*`
+3. `core/jurisdiction/machine/batch/index.ts`
+4. `core/protocol/dispute/proof-builder.ts`
+5. `core/account/tx/*`
+6. `core/entity/tx/*`
+7. `core/api/server/index.ts`
 
 ## Review Bar
 

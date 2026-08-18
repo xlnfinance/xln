@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { toDerivedAccountData, type DerivedAccountData } from './derivedAccount';
 import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
-import type { Delta } from '@xln/runtime/api/public/runtime-module';
+import type { Delta } from '@xln/core/api/public/runtime-module';
 
 /** Minimal endpoint shape the bars need. Structurally satisfied by GraphEntityData. */
 export interface BarEndpoint {

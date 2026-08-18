@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { deriveDelta } from '@xln/runtime/account/utils';
-  import type { Delta } from '@xln/runtime/types/account';
+  import { deriveDelta } from '@xln/core/account/utils';
+  import type { Delta } from '@xln/core/types/account';
 
   interface Props {
     onClose: () => void;

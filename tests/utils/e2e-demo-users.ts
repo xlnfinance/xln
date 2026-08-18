@@ -441,7 +441,7 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
       const primaryAction = document.querySelector<HTMLButtonElement>('button.derive-btn');
       const runtimeErrorText = Array.from(document.querySelectorAll('*'))
         .map((node) => String((node as HTMLElement).innerText || '').trim())
-        .find((text) => /failed to create xln wallet|tower restore|strict restore|runtime id collision|invalid runtime/i.test(text))
+        .find((text) => /failed to create xln wallet|tower restore|strict restore|runtime id collision|invalid core/i.test(text))
         || '';
       const localStorageSummary = (() => {
         try {

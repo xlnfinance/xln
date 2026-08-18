@@ -10,7 +10,7 @@ xln Foundation Hanko attestations to the release-observability baseline.
 ### Frozen Core Integrity
 
 - Added a separate raw-byte SHA-256 Merkle tree for explicitly frozen files.
-- Froze `runtime/runtime.ts` as the first protected runtime entrypoint.
+- Froze `core/runtime.ts` as the first protected runtime entrypoint.
 - Added fail-closed checks for content, path, executable-mode, deletion, and
   rename changes.
 - Added interactive owner approval with mandatory per-file comments and no

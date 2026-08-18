@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
-import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
+import type { RuntimeAdapterEntitySummary } from '@xln/core/api/runtime-adapter/types';
 import { Icon } from '../components/Icons';
-import { peekXLN } from '../runtime/xln-loader';
-import { useAdapterRead } from '../runtime/hooks';
-import { useApp } from '../runtime/store';
-import { sendEntityTxs } from '../runtime/tx';
-import { formatAmount, getTokenMeta, knownTokenIds, parseAmount } from '../runtime/format';
-import { useAccounts, useEntityCore, useOpenSwapOffers, type AccountView } from '../runtime/views';
+import { peekXLN } from '../core/xln-loader';
+import { useAdapterRead } from '../core/hooks';
+import { useApp } from '../core/store';
+import { sendEntityTxs } from '../core/tx';
+import { formatAmount, getTokenMeta, knownTokenIds, parseAmount } from '../core/format';
+import { useAccounts, useEntityCore, useOpenSwapOffers, type AccountView } from '../core/views';
 
 type TifOption = { value: 0 | 1 | 2; label: string; description: string };
 

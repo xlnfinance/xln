@@ -8,19 +8,19 @@ import { acceptRemoteRuntimeConsent, resolveRuntimeImportAppUrl } from '../../ut
 
 import { closeRuntimeContext } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 
-import { deriveSignerAddressSync } from '../../../runtime/account/crypto';
+import { deriveSignerAddressSync } from '../../../core/account/crypto';
 
-import { HUB_MESH_CREDIT_AMOUNT } from '../../../runtime/orchestrator/mesh/mesh-common';
+import { HUB_MESH_CREDIT_AMOUNT } from '../../../core/orchestrator/mesh/mesh-common';
 
-import { decodeRuntimeAdapterRequest } from '../../../runtime/api/runtime-adapter/codec';
+import { decodeRuntimeAdapterRequest } from '../../../core/api/runtime-adapter/codec';
 
-import { signRuntimeAdapterServerIdentity } from '../../../runtime/api/runtime-adapter/security/server-identity-signer';
+import { signRuntimeAdapterServerIdentity } from '../../../core/api/runtime-adapter/security/server-identity-signer';
 
-import { deriveRuntimeAdapterCapabilityToken } from '../../../runtime/api/runtime-adapter/security/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../../../core/api/runtime-adapter/security/auth';
 
-import type { RuntimeAdapterRequest } from '../../../runtime/api/runtime-adapter/types';
+import type { RuntimeAdapterRequest } from '../../../core/api/runtime-adapter/types';
 
-import type { RuntimeReplica } from '../../../runtime/runtime/types';
+import type { RuntimeReplica } from '../../../core/runtime/types';
 
 import { captureLocatorScreenshot } from '../../utils/e2e-screenshots';
 

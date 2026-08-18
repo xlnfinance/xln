@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import type { XLNModule } from '@xln/runtime/api/public/runtime-module';
+import type { XLNModule } from '@xln/core/api/public/runtime-module';
 
 export type GraphJBlockHistoryEntry = {
   blockNumber: bigint;

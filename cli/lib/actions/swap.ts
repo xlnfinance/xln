@@ -2,7 +2,7 @@ import {
   deriveSwapNetAuthorization,
   planSwapCommand,
   prepareSwapOrder,
-} from '../../../runtime/runtime.ts';
+} from '../../../core/runtime.ts';
 import type { CliSession } from '../session';
 import { submitQueued } from '../session';
 import { findAccount } from '../accounts';

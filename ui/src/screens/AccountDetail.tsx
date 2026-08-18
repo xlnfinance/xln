@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
+import type { RuntimeAdapterEntitySummary } from '@xln/core/api/runtime-adapter/types';
 import { DeltaBar, DeltaLegend } from '../components/DeltaBar';
 import { Sheet } from '../components/Sheet';
 import { Icon } from '../components/Icons';
-import { useAdapterRead } from '../runtime/hooks';
-import { useApp } from '../runtime/store';
-import { sendEntityTxs } from '../runtime/tx';
-import { formatAmount, getTokenMeta, parseAmount } from '../runtime/format';
-import { useAccounts, useEntityCore, type AccountTokenView } from '../runtime/views';
+import { useAdapterRead } from '../core/hooks';
+import { useApp } from '../core/store';
+import { sendEntityTxs } from '../core/tx';
+import { formatAmount, getTokenMeta, parseAmount } from '../core/format';
+import { useAccounts, useEntityCore, type AccountTokenView } from '../core/views';
 
 function TokenAmount({ value, decimals, tone }: { value: bigint; decimals: number; tone?: 'coll' | 'debt' }) {
 	const color = tone === 'coll' ? '#7fae8e' : tone === 'debt' ? 'var(--danger)' : undefined;

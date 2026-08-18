@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { toEntityId } from '../../runtime/protocol/identity';
+import { toEntityId } from '../../core/protocol/identity';
 import {
   ENTITY_DIVIDEND_TOKEN_FLAG,
   ENTITY_SHARE_SUPPLY,

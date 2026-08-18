@@ -8,7 +8,7 @@ import { getRenderedExternalBalance, getRenderedReserveBalance } from '../../uti
 import { startDisputeFromManageUi } from '../../utils/e2e-account-workspace';
 import { capturePageScreenshot } from '../../utils/e2e-screenshots';
 import { enqueueEntityTxs, enqueueRuntimeInput } from '../../utils/runtime/e2e-runtime-input';
-import { deriveDelta, getTokenInfo } from '../../../runtime/account/utils';
+import { deriveDelta, getTokenInfo } from '../../../core/account/utils';
 
 const TOKEN_ID_USDC = 1;
 const TOKEN_DECIMALS = getTokenInfo(TOKEN_ID_USDC).decimals;

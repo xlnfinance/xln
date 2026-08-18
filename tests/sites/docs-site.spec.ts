@@ -45,7 +45,7 @@ test.describe('Docs site', () => {
     const body = await response.text();
     expect(body.includes('# XLN: Bilateral Settlement With Provable Credit')).toBe(true);
     expect(body.includes('//jurisdictions/contracts/Depository.sol')).toBe(true);
-    expect(body.includes('//runtime/runtime.ts')).toBe(true);
+    expect(body.includes('//core/runtime.ts')).toBe(true);
     expect(body.includes('<!doctype html>')).toBe(false);
   });
 

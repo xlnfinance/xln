@@ -1,5 +1,5 @@
-import type { QaSeverity } from '@xln/runtime/qa/severity';
-import { DISPLAY, QA } from '@xln/runtime/config/constants';
+import type { QaSeverity } from '@xln/core/qa/severity';
+import { DISPLAY, QA } from '@xln/core/config/constants';
 import type {
   QaBenchmarkComparison,
   QaBrowserHealthSummary,

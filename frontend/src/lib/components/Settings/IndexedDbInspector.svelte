@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { decodeBinaryPayload } from '@xln/runtime/storage/codec/binary-codec';
-  import { STORAGE_ACCOUNT_FIELD_BY_TAG } from '@xln/runtime/storage/schema/account-field-tags';
+  import { decodeBinaryPayload } from '@xln/core/storage/codec/binary-codec';
+  import { STORAGE_ACCOUNT_FIELD_BY_TAG } from '@xln/core/storage/schema/account-field-tags';
   import { compareStableText } from '$lib/utils/stableSort';
   import { parseJsonUnknown } from '$lib/utils/boundary';
 
@@ -202,7 +202,7 @@
       const accountHeight = readU64(bytes, 73);
       if (height !== null && entityId && counterpartyId && accountHeight !== null) {
         return {
-          label: `frame-db/account-by-runtime/${height}/${entityId}/${counterpartyId}/${accountHeight}`,
+          label: `frame-db/account-by-core/${height}/${entityId}/${counterpartyId}/${accountHeight}`,
           fields: { family: 'frame-db/account-by-runtime', runtimeHeight: height, entityId, counterpartyId, accountHeight },
         };
       }

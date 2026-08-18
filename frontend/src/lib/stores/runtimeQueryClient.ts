@@ -10,8 +10,8 @@ import type {
   RuntimeAdapterSolvencySummary,
   RuntimeAdapterTimelineIndexPage,
   RuntimeAdapterViewFrame,
-} from '@xln/runtime/api/public/runtime-module';
-import type { StorageAccountDoc, StorageHead } from '@xln/runtime/storage/types';
+} from '@xln/core/api/public/runtime-module';
+import type { StorageAccountDoc, StorageHead } from '@xln/core/storage/types';
 import {
   getRuntimeControllerAdapter,
   runtimeAdapter,

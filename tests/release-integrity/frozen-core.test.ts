@@ -18,12 +18,12 @@ function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'xln-frozen-core-'));
   roots.push(root);
   writeFileSync(join(root, 'VERSION'), '0.1.7\n');
-  mkdirSync(join(root, 'runtime/feature'), { recursive: true });
+  mkdirSync(join(root, 'core/feature'), { recursive: true });
   writeFileSync(join(root, 'shared.ts'), 'export const shared = 11;\n');
-  writeFileSync(join(root, 'runtime/helper.ts'), 'export const value = 7;\n');
-  writeFileSync(join(root, 'runtime/explicit.ts'), 'export const explicit = 13;\n');
-  writeFileSync(join(root, 'runtime/feature/index.ts'), 'export const feature = 17;\n');
-  writeFileSync(join(root, 'runtime/runtime.ts'), [
+  writeFileSync(join(root, 'core/helper.ts'), 'export const value = 7;\n');
+  writeFileSync(join(root, 'core/explicit.ts'), 'export const explicit = 13;\n');
+  writeFileSync(join(root, 'core/feature/index.ts'), 'export const feature = 17;\n');
+  writeFileSync(join(root, 'core/runtime.ts'), [
     "import { value } from './helper.js';",
     "import { shared } from '../shared.ts';",
     "import { explicit } from './explicit.ts';",
@@ -43,41 +43,41 @@ afterEach(() => {
 describe('frozen core integrity', () => {
   test('builds a stable raw-byte Merkle root and reports mutable imports', () => {
     const root = fixture();
-    const manifest = createFrozenManifest(root, ['runtime/runtime.ts'], '0.1.7', 'test baseline');
+    const manifest = createFrozenManifest(root, ['core/runtime.ts'], '0.1.7', 'test baseline');
     const first = collectFrozenCore(root, manifest, '0.1.7');
     const second = collectFrozenCore(root, manifest, '0.1.7');
 
     expect(first.rootHash).toBe(second.rootHash);
     expect(first.status).toBe('UNCHANGED');
     expect(first.mutableDependencies).toEqual([
-      { source: 'runtime/runtime.ts', dependency: 'runtime/explicit.ts' },
-      { source: 'runtime/runtime.ts', dependency: 'runtime/feature/index.ts' },
-      { source: 'runtime/runtime.ts', dependency: 'runtime/helper.ts' },
-      { source: 'runtime/runtime.ts', dependency: 'shared.ts' },
+      { source: 'core/runtime.ts', dependency: 'core/explicit.ts' },
+      { source: 'core/runtime.ts', dependency: 'core/feature/index.ts' },
+      { source: 'core/runtime.ts', dependency: 'core/helper.ts' },
+      { source: 'core/runtime.ts', dependency: 'shared.ts' },
     ]);
   });
 
   test('rejects a relative import that escapes the repository root', () => {
     const root = fixture();
-    writeFileSync(join(root, 'runtime/runtime.ts'), "import '../../outside.ts';\n");
-    const manifest = createFrozenManifest(root, ['runtime/runtime.ts'], '0.1.7', 'test baseline');
+    writeFileSync(join(root, 'core/runtime.ts'), "import '../../outside.ts';\n");
+    const manifest = createFrozenManifest(root, ['core/runtime.ts'], '0.1.7', 'test baseline');
 
     expect(() => collectFrozenCore(root, manifest, '0.1.7')).toThrow('FROZEN_CORE_PATH_ESCAPE:../outside.ts');
   });
 
   test('fails closed when one frozen byte changes', () => {
     const root = fixture();
-    const manifest = createFrozenManifest(root, ['runtime/runtime.ts'], '0.1.7', 'test baseline');
-    writeFileSync(join(root, 'runtime/runtime.ts'), "import { value } from './helper';\nexport const result = value + 1;\n");
+    const manifest = createFrozenManifest(root, ['core/runtime.ts'], '0.1.7', 'test baseline');
+    writeFileSync(join(root, 'core/runtime.ts'), "import { value } from './helper';\nexport const result = value + 1;\n");
 
     expect(() => collectFrozenCore(root, manifest, '0.1.7')).toThrow('FROZEN_CORE_VIOLATION');
   });
 
   test('renders a recorded owner approval only in its release', () => {
     const root = fixture();
-    const manifest = createFrozenManifest(root, ['runtime/runtime.ts'], '0.1.7', 'test baseline');
+    const manifest = createFrozenManifest(root, ['core/runtime.ts'], '0.1.7', 'test baseline');
     const old = manifest.files[0]!;
-    writeFileSync(join(root, 'runtime/runtime.ts'), "import { value } from './helper';\nexport const result = value + 1;\n");
+    writeFileSync(join(root, 'core/runtime.ts'), "import { value } from './helper';\nexport const result = value + 1;\n");
     const current = hashFrozenFile(root, old.path);
     manifest.approvals.push({
       path: old.path,
@@ -106,7 +106,7 @@ describe('frozen core integrity', () => {
       process.execPath,
       resolve(import.meta.dir, '../../tools/frozen-core.ts'),
       'init',
-      'runtime/runtime.ts',
+      'core/runtime.ts',
       '--reason=attacker reset attempt',
     ], { cwd: root, stdout: 'pipe', stderr: 'pipe' });
 
@@ -117,22 +117,22 @@ describe('frozen core integrity', () => {
 
   test('records owner policy changes while removing and restoring a frozen file', () => {
     const root = fixture();
-    const manifest = createFrozenManifest(root, ['runtime/runtime.ts'], '0.1.7', 'test baseline');
+    const manifest = createFrozenManifest(root, ['core/runtime.ts'], '0.1.7', 'test baseline');
 
-    unfreezeFile(root, manifest, 'runtime/runtime.ts', '0.1.8', 'Temporary maintenance window.', '2026-07-13T00:00:00.000Z');
+    unfreezeFile(root, manifest, 'core/runtime.ts', '0.1.8', 'Temporary maintenance window.', '2026-07-13T00:00:00.000Z');
     expect(manifest.files).toHaveLength(0);
     expect(manifest.policyChanges?.at(-1)).toMatchObject({
       action: 'unfreeze',
-      path: 'runtime/runtime.ts',
+      path: 'core/runtime.ts',
       reason: 'Temporary maintenance window.',
     });
     expect(collectFrozenCore(root, manifest, '0.1.8').rootHash).toBe(manifest.rootHash);
 
-    freezeFile(root, manifest, 'runtime/runtime.ts', '0.1.8', 'Maintenance complete.', '2026-07-13T01:00:00.000Z');
+    freezeFile(root, manifest, 'core/runtime.ts', '0.1.8', 'Maintenance complete.', '2026-07-13T01:00:00.000Z');
     expect(manifest.files).toHaveLength(1);
     expect(manifest.policyChanges?.at(-1)).toMatchObject({
       action: 'freeze',
-      path: 'runtime/runtime.ts',
+      path: 'core/runtime.ts',
       reason: 'Maintenance complete.',
     });
     expect(collectFrozenCore(root, manifest, '0.1.8').rootHash).toBe(manifest.rootHash);

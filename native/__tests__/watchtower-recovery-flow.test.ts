@@ -3,36 +3,36 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AbiCoder, HDNodeWallet, Interface, Mnemonic, ParamType, Wallet, getIndexedAccountPath, hexlify, keccak256, solidityPacked, toUtf8Bytes } from 'ethers';
 
-import * as xln from '../../runtime/runtime.ts';
-import { getLiveJAdapter } from '../../runtime/runtime/jurisdiction/live-jadapters';
-import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../runtime/watchtower/standalone-server';
+import * as xln from '../../core/runtime.ts';
+import { getLiveJAdapter } from '../../core/runtime/j-submit/live-jadapters';
+import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../core/watchtower/standalone-server';
 import {
   buildTowerAppointmentOwnerMessage,
   decryptTowerPayloadWithWatchSeed,
   encryptRuntimeRecoveryBundle,
-} from '../../runtime/storage/recovery/bundle/crypto';
+} from '../../core/storage/recovery/bundle/crypto';
 import type {
   JReplica,
   JurisdictionConfig,
   TowerAppointmentV1,
-} from '../../runtime/api/public/runtime-module';
+} from '../../core/api/public/runtime-module';
 import {
   buildDelayedLastResortAppointmentsForTower,
   resolveDefaultRecoveryTowerUrls,
   tryRestoreRuntimeEnvFromTower,
   type Runtime,
 } from '../../frontend/src/lib/stores/vault/vaultStore';
-import { createDefaultDelta } from '../../runtime/account/state/delta';
-import { createEmptyAccountJClaimAccumulator } from '../../runtime/account/j-claims/j-claim-accumulator';
-import type { AccountReplica } from '../../runtime/types/account';
-import { runWatchtowerSweep } from '../../runtime/watchtower/action';
+import { createDefaultDelta } from '../../core/account/state/delta';
+import { createEmptyAccountJClaimAccumulator } from '../../core/account/j-claims/j-claim-accumulator';
+import type { AccountReplica } from '../../core/types/account';
+import { runWatchtowerSweep } from '../../core/watchtower/action';
 import {
   resolveDbPath,
   resolveHistoryViewDbPath,
   resolveRuntimeWalDbPath,
   resolveStorageDbPath,
   resolveStorageWriterLockPath,
-} from '../../runtime/storage/runtime-dbs';
+} from '../../core/storage/runtime-dbs';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const servers: StandaloneWatchtowerServer[] = [];

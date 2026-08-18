@@ -6,7 +6,7 @@ XLN Wallet is local-first and self-custodial by default. The TypeScript runtime 
 
 The runtime split is:
 
-- `runtime/*`: deterministic protocol/runtime code; avoid platform forks.
+- `core/*`: deterministic protocol/runtime code; avoid platform forks.
 - `frontend/*`: shared wallet UI and runtime adapter wiring.
 - `frontend/ios` and `frontend/android`: Capacitor native shells.
 - `native/desktop`: Electron shell for always-on desktop wallet behavior.
@@ -73,7 +73,7 @@ iOS and Android should not pretend they can run an unrestricted wallet daemon fo
 Use this prompt for the next coding pass:
 
 ```text
-You are implementing the XLN self-custodial native wallet. Do not fork or rewrite runtime/*.
+You are implementing the XLN self-custodial native wallet. Do not fork or rewrite core/*.
 
 Goal:
 Build the iOS/Android/desktop wallet from the same TypeScript runtime and shared frontend. Keys must remain local by default. Servers may relay, notify, discover, and watch, but must not hold spend-capable keys.

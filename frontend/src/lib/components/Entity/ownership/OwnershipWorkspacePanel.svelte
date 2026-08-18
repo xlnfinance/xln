@@ -4,8 +4,8 @@ import type {
   JAdapter,
   RuntimeReplica,
   XLNModule,
-} from "@xln/runtime/api/public/runtime-module";
-import { isNumberedEntity, toEntityId } from "@xln/runtime/api/public/runtime-module";
+} from "@xln/core/api/public/runtime-module";
+import { isNumberedEntity, toEntityId } from "@xln/core/api/public/runtime-module";
 import type { EntityReplica } from "$lib/types/ui";
 import { getXLN, submitEntityInputs } from "$lib/stores/xlnStore";
 import { toasts } from "$lib/stores/ui/toastStore";

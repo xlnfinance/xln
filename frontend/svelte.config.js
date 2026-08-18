@@ -51,7 +51,7 @@ const config = {
 			base: ''
 		},
 		alias: {
-			'@xln/runtime': '../runtime',
+			'@xln/core': '../core',
 			'@xln/brainvault': '../brainvault'
 		}
 	}

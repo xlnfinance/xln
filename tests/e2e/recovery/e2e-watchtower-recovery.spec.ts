@@ -132,7 +132,7 @@ async function startWatchtower(): Promise<WatchtowerChild> {
   const proc = spawn(
     'bun',
     [
-      'runtime/watchtower/standalone-server.ts',
+      'core/watchtower/standalone-server.ts',
       '--host', '127.0.0.1',
       '--port', String(port),
       '--db', join(dbRoot, 'watchtower.level'),

@@ -34,8 +34,8 @@ import type {
   QaSystemVerdict,
   QaSystemVerdictStatus,
   QaUxReleasePackAudit,
-} from '@xln/runtime/qa/types';
-import type { QaSeveritySignal } from '@xln/runtime/qa/severity';
+} from '@xln/core/qa/types';
+import type { QaSeveritySignal } from '@xln/core/qa/severity';
 
 export type {
   QaArtifact,

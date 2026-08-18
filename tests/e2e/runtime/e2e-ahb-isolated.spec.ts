@@ -9,7 +9,7 @@
 
 import { test, expect, type BrowserContext, type Page } from '../../global-setup.mts';
 import { ethers } from 'ethers';
-import { deriveDelta } from '../../../runtime/account/utils';
+import { deriveDelta } from '../../../core/account/utils';
 import { ensureE2EBaseline } from '../../utils/e2e-baseline';
 import {
   getRenderedOutboundForAccount,

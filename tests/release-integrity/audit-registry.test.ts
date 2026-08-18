@@ -35,7 +35,7 @@ describe('canonical audit registry', () => {
     expect(REGISTRY.agentRuns.every(run => run.provisional || (
       run.state === 'COMPLETED' && reviewers.get(run.reviewerId)?.state === 'RANKED'
     ))).toBe(true);
-    const browserVmPath = 'runtime/jurisdiction/adapter/browservm/browservm-provider.ts';
+    const browserVmPath = 'core/jurisdiction/adapter/browservm/browservm-provider.ts';
     expect(REGISTRY.scope.exclusions.some(({ glob }) => matchesAuditGlob(browserVmPath, glob))).toBe(true);
     const jurisdictionIngress = REGISTRY.modules.find(module => module.id === 'jurisdiction-ingress')!;
     expect(jurisdictionIngress.exclusions.some(({ glob }) => matchesAuditGlob(browserVmPath, glob))).toBe(true);
@@ -62,11 +62,11 @@ describe('canonical audit registry', () => {
 
     const accountFiles = listModuleFingerprintFiles(ROOT, 'account-consensus', REGISTRY);
     for (const coupledPath of [
-      'runtime/config/constants.ts',
-      'runtime/extensions/cross-j/index.ts',
-      'runtime/jurisdiction/machine/events/event-normalization.ts',
-      'runtime/orderbook/swap-execution.ts',
-      'runtime/__tests__/payments/core/direct-payment-frame-integrity.test.ts',
+      'core/config/constants.ts',
+      'core/extensions/cross-j/index.ts',
+      'core/jurisdiction/machine/events/event-normalization.ts',
+      'core/orderbook/swap-execution.ts',
+      'core/__tests__/payments/invariants/direct-payment-frame-integrity.test.ts',
       'jurisdictions/test/dispute/DeltaTransformer.test.ts',
     ]) {
       expect(accountFiles).toContain(coupledPath);
@@ -95,7 +95,7 @@ describe('canonical audit registry', () => {
       'tests/frontend/payments/payment-panel-view.test.ts',
       'tests/frontend/payments/payment-terminal-monitor.test.ts',
       'tests/frontend/runtime/runtime-command-bus.test.ts',
-      'runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts',
+      'core/__tests__/development/frontend/frontend-xln-invoice.test.ts',
     ];
     const owns = (path: string, globs: readonly string[]): boolean =>
       globs.some(glob => matchesAuditGlob(path, glob));

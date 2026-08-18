@@ -8,9 +8,9 @@ import { acceptRemoteRuntimeConsent, resolveRuntimeImportAppUrl } from '../../ut
 
 import { closeRuntimeContext } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 
-import { HUB_MESH_CREDIT_AMOUNT } from '../../../runtime/orchestrator/mesh/mesh-common';
+import { HUB_MESH_CREDIT_AMOUNT } from '../../../core/orchestrator/mesh/mesh-common';
 
-import { deriveRuntimeAdapterCapabilityToken } from '../../../runtime/api/runtime-adapter/security/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../../../core/api/runtime-adapter/security/auth';
 
 import { captureLocatorScreenshot } from '../../utils/e2e-screenshots';
 
@@ -19,6 +19,16 @@ const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = 'xln-remote-runtime-imports';
 const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last-result';
 
 const REMOTE_E2E_WAIT_MS = 15_000;
+
+/** Dual-j hubs publish `H1 Arrakis` / `H1 Tron`; import rows still match the runtime label. */
+const runtimeEntityLabelMatches = (label: string, runtimeLabel: string): boolean => {
+  const entityLabel = String(label || '').trim().toLowerCase();
+  const expected = String(runtimeLabel || '').trim().toLowerCase();
+  if (!entityLabel || !expected) return false;
+  return entityLabel === expected
+    || entityLabel.startsWith(`${expected} `)
+    || entityLabel.startsWith(`${expected}(`);
+};
 
 const remoteRuntimeUrl = (path: string, wsUrl: string, token: string): string => {
   const hash = new URLSearchParams({ runtime: 'remote', ws: wsUrl, token });
@@ -164,7 +174,9 @@ const readAdminControlProbe = async (
         latestHeight > minHeight &&
         frameName === expectedName &&
         frameHeight >= latestHeight &&
-        projectedName === expectedName;
+        projectedName === expectedName &&
+        historyHeights.includes(minHeight) &&
+        historyHeights.includes(latestHeight);
       return {
         ok,
         latestHeight,
@@ -1232,10 +1244,11 @@ test(
     await page.waitForFunction(
       ({ targetRuntimeId }) => {
         const focus = document.querySelector('[data-testid="context-runtime-focus"]');
-        return Array.from(focus?.querySelectorAll('[data-testid="context-entity-row"]') ?? []).some(
-          row =>
-            row.getAttribute('data-runtime-id') === targetRuntimeId && row.getAttribute('data-entity-label') === 'h2',
-        );
+        return Array.from(focus?.querySelectorAll('[data-testid="context-entity-row"]') ?? []).some(row => {
+          const label = String(row.getAttribute('data-entity-label') || '').trim().toLowerCase();
+          return row.getAttribute('data-runtime-id') === targetRuntimeId
+            && (label === 'h2' || label.startsWith('h2 ') || label.startsWith('h2('));
+        });
       },
       { targetRuntimeId: h2Endpoint.runtimeId },
       { timeout: REMOTE_E2E_WAIT_MS },
@@ -1244,11 +1257,11 @@ test(
       ({ targetRuntimeId }) => {
         const focus = document.querySelector('[data-testid="context-runtime-focus"]');
         if (!focus) throw new Error('CONTEXT_RUNTIME_FOCUS_MISSING');
-        const row = Array.from(focus.querySelectorAll('[data-testid="context-entity-row"]')).find(
-          candidate =>
-            candidate.getAttribute('data-runtime-id') === targetRuntimeId &&
-            candidate.getAttribute('data-entity-label') === 'h2',
-        ) as HTMLElement | undefined;
+        const row = Array.from(focus.querySelectorAll('[data-testid="context-entity-row"]')).find(candidate => {
+          const label = String(candidate.getAttribute('data-entity-label') || '').trim().toLowerCase();
+          return candidate.getAttribute('data-runtime-id') === targetRuntimeId
+            && (label === 'h2' || label.startsWith('h2 ') || label.startsWith('h2('));
+        }) as HTMLElement | undefined;
         if (!row) throw new Error(`REMOTE_RUNTIME_ENTITY_ROW_MISSING:${targetRuntimeId}:h2`);
         row.click();
       },
@@ -1286,7 +1299,18 @@ test(
     expect(managerState.h2Import?.entityCount ?? 0).toBeGreaterThan(0);
 
     await page.waitForFunction(
-      expectedRuntimeId => String((window as any).__xln?.view?.runtimeId || '') === expectedRuntimeId,
+      expectedRuntimeId => {
+        const root = window as typeof window & {
+          __xln?: {
+            view?: { runtimeId?: string };
+            adapter?: { status?: () => { connected?: boolean; authLevel?: string | null } };
+          };
+        };
+        const status = root.__xln?.adapter?.status?.();
+        return String(root.__xln?.view?.runtimeId || '') === expectedRuntimeId
+          && status?.connected === true
+          && status.authLevel === 'admin';
+      },
       h2Endpoint.runtimeId,
       { timeout: 90_000 },
     );
@@ -1309,6 +1333,17 @@ test(
       const adapter = (view as any).__xln?.adapter;
       const submit = (view as any).__xln?.submit;
       if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+      const waitUntilConnected = async () => {
+        const deadline = Date.now() + 30_000;
+        while (Date.now() < deadline) {
+          const status = adapter.status?.();
+          if (status?.connected === true && status.authLevel === 'admin') return;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const status = adapter.status?.();
+        throw new Error(`REMOTE_ADAPTER_NOT_CONNECTED:${status?.connected}:${status?.authLevel}`);
+      };
+      await waitUntilConnected();
       (view as any).__xln?.commands?.clear?.();
 
       type ViewFrame = {
@@ -1493,6 +1528,7 @@ test(
       });
 
       await page.getByTestId('context-current').click();
+      await expect(page.getByTestId('context-runtime-focus')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
       for (const entry of importedContextEntries) {
         await page.evaluate(targetRuntimeId => {
           const runtime = document.querySelector(
@@ -1505,11 +1541,13 @@ test(
           ({ targetRuntimeId, targetLabel }) =>
             Array.from(
               document.querySelectorAll('[data-testid="context-runtime-focus"] [data-testid="context-entity-row"]'),
-            ).some(
-              row =>
-                row.getAttribute('data-runtime-id') === targetRuntimeId &&
-                row.getAttribute('data-entity-label') === targetLabel,
-            ),
+            ).some(row => {
+              const label = String(row.getAttribute('data-entity-label') || '').trim().toLowerCase();
+              return row.getAttribute('data-runtime-id') === targetRuntimeId
+                && (label === targetLabel
+                  || label.startsWith(`${targetLabel} `)
+                  || label.startsWith(`${targetLabel}(`));
+            }),
           { targetRuntimeId: entry.runtimeId, targetLabel: entry.label },
           { timeout: REMOTE_E2E_WAIT_MS },
         );
@@ -1520,12 +1558,17 @@ test(
             );
             const focus = document.querySelector('[data-testid="context-runtime-focus"]');
             const candidate = Array.from(focus?.querySelectorAll('[data-testid="context-entity-row"]') ?? []).find(
-              element =>
-                element.getAttribute('data-runtime-id') === targetRuntimeId &&
-                element.getAttribute('data-entity-label') === targetLabel,
+              element => {
+                const label = String(element.getAttribute('data-entity-label') || '').trim().toLowerCase();
+                return element.getAttribute('data-runtime-id') === targetRuntimeId
+                  && (label === targetLabel
+                    || label.startsWith(`${targetLabel} `)
+                    || label.startsWith(`${targetLabel}(`));
+              },
             ) as HTMLElement | undefined;
             if (!candidate) return null;
             return {
+              label: String(candidate.getAttribute('data-entity-label') || '').trim().toLowerCase(),
               groupText: group?.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() || '',
               text: candidate.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() || '',
               visible: candidate.getClientRects().length > 0,
@@ -1535,6 +1578,10 @@ test(
         );
         expect(row, `context row for ${entry.label} runtime ${entry.runtimeId}`).not.toBeNull();
         expect(row!.visible, `context row visible for ${entry.label}`).toBe(true);
+        expect(
+          runtimeEntityLabelMatches(row!.label, entry.label),
+          `context row label ${row!.label} for ${entry.label}`,
+        ).toBe(true);
         expect(row!.text, `context row text for ${entry.label}`).toContain(entry.label);
         expect(row!.groupText, `context group source for ${entry.label}`).toContain('remote');
         if (entry.label === 'mm' || entry.label === 'custody') {

@@ -15,9 +15,9 @@
     isRelayTimelineWarning,
     type RelayTimelineDelivery,
   } from '$lib/health/relayEventSeverity';
-  import type { RuntimeActivityEvent, RuntimeAdapterEntitySummary } from '@xln/runtime/api/public/runtime-module';
-  import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/runtime/qa/severity';
-  import { DISPLAY } from '@xln/runtime/config/constants';
+  import type { RuntimeActivityEvent, RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
+  import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/core/qa/severity';
+  import { DISPLAY } from '@xln/core/config/constants';
 
   type HealthData = {
     timestamp: number;
@@ -1001,7 +1001,7 @@
         {/each}
       </div>
       <div class="command-strip">
-        <code>bun test runtime/__tests__/testing/qa/qa-story-report.test.ts</code>
+        <code>bun test core/__tests__/testing/qa/qa-story-report.test.ts</code>
         <code>bun run prod:health:capped-testnet</code>
         <code>bun run gate:capped-testnet</code>
       </div>

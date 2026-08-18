@@ -14,5 +14,5 @@ For browser smoke coverage, use `tests/e2e/payments/e2e-payment-smoke.spec.ts`.
 For runtime scenario coverage, use:
 
 ```bash
-bun runtime/scenarios/run.ts --set=smoke
+bun core/scenarios/run.ts --set=smoke
 ```

@@ -34,7 +34,7 @@
 
 		"baseUrl": ".",
 		"paths": {
-			"@xln/runtime/*": ["../runtime/*"],
+			"@xln/core/*": ["../core/*"],
 			"@/*": ["src/*"]
 		}
 	},

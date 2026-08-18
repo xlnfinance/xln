@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT_DIR"
 
-bun --no-orphans build runtime/api/public/browser.ts \
+bun --no-orphans build core/api/public/browser.ts \
   --target=browser \
   --outfile=frontend/static/runtime.js \
   --minify \

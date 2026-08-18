@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Writable } from 'svelte/store';
-  import type { RuntimeReplica, EnvSnapshot } from '@xln/runtime/api/public/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot } from '@xln/core/api/public/runtime-module';
   import EntityMiniPanel from './EntityMiniPanel.svelte';
   import Graph3DFpsOverlay from './Graph3DFpsOverlay.svelte';
   import VRControlsHUD from './VRControlsHUD.svelte';

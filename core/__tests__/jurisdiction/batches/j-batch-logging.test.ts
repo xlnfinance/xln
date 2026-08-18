@@ -1,0 +1,210 @@
+import { expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../../../entity/frame-events';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { applyEntityTx } from '../../../entity/tx/apply';
+import { handleMintReserves } from '../../../entity/tx/handlers/j-batch/mint-reserves';
+import { handleR2R } from '../../../entity/tx/handlers/j-batch/r2r';
+import { cloneJBatch, initJBatch } from '../../../jurisdiction/machine/batch';
+import { createEmptyEnv } from '../../../runtime';
+import { hydrateEntityStateFromStorage } from '../../../storage/read/hydration';
+import { projectEntityCoreDoc } from '../../../storage/read/projections';
+import type { DebtEntry } from '../../../types/finance/debt';
+import type { EntityState } from '../../../entity/types';
+import type { RuntimeReplica } from '../../../runtime/types';
+import type { EntityTx } from '../../../types/entity-tx';
+
+const entityId = `0x${'aa'.repeat(32)}`;
+const counterpartyId = `0x${'bb'.repeat(32)}`;
+
+const makeEntityState = (): EntityState => ({
+  entityId,
+  entityEncryptionPublicKey: `0x${'44'.repeat(32)}`,
+  height: 0,
+  timestamp: 123,
+  nonces: new Map(),
+  proposals: new Map(),
+  config: {
+    mode: 'proposer-based',
+    validators: ['signer'],
+    shares: { signer: 1n },
+    threshold: 1n,
+  },
+  reserves: new Map([[1, 100n]]),
+  accounts: new Map(),
+  deferredAccountProposals: new Map(),
+  lastFinalizedJHeight: 0,
+  profile: {
+    name: 'JBatch Test Entity',
+    isHub: false,
+    avatar: '',
+    bio: '',
+    website: '',
+  },
+  htlcRoutes: new Map(),
+  htlcFeesEarned: 0n,
+  lockBook: new Map(),
+  swapTradingPairs: [],
+});
+
+test('j-batch success-path logs stay behind structured debug logging', () => {
+  const source = readFileSync(join(process.cwd(), 'core/jurisdiction/machine/batch/index.ts'), 'utf8');
+
+  expect(source).toContain("const jBatchLog = createStructuredLogger('j.batch');");
+  expect(source).not.toContain('console.log');
+  expect(source).toContain('jBatchLog.debug');
+});
+
+test('entity j-batch operation handler state transitions are unchanged', async () => {
+  const r2rTx = {
+    type: 'r2r',
+    data: { toEntityId: counterpartyId, tokenId: 1, amount: 10n },
+  } satisfies EntityTx;
+  const r2rResult = await handleR2R(makeEntityState(), r2rTx);
+  expect(r2rResult.newState.jBatchState?.batch.reserveToReserve).toEqual([{
+    receivingEntity: counterpartyId,
+    tokenId: 1,
+    amount: 10n,
+  }]);
+
+  const mintTx = { type: 'mintReserves', data: { tokenId: 1, amount: 5n } } satisfies EntityTx;
+  const mintResult = await handleMintReserves(makeEntityState(), mintTx, {} as RuntimeReplica);
+  expect(mintResult.jOutputs).toEqual([]);
+  expect(readEntityFrameEventMessages(mintResult.newState).at(-1)).toContain('Jurisdiction unavailable for mint');
+});
+
+test('r2r admission treats open debt as senior to reserve', async () => {
+  const state = makeEntityState();
+  const debt = {
+    debtId: `${entityId}:1:0:1:0x01`,
+    tokenId: 1,
+    debtor: entityId,
+    creditor: counterpartyId,
+    counterparty: counterpartyId,
+    direction: 'out',
+    createdAmount: 50n,
+    paidAmount: 0n,
+    remainingAmount: 50n,
+    createdDebtIndex: 0,
+    currentDebtIndex: 0,
+    status: 'open',
+    createdAtBlock: 1,
+    createdTxHash: `0x${'01'.repeat(32)}`,
+    lastUpdatedBlock: 1,
+    lastUpdatedTxHash: `0x${'01'.repeat(32)}`,
+    lastEventType: 'DebtCreated',
+  } satisfies DebtEntry;
+  state.outDebtsByToken = new Map([[1, new Map([[debt.debtId, debt]])]]);
+  const tx = {
+    type: 'r2r',
+    data: { toEntityId: counterpartyId, tokenId: 1, amount: 60n },
+  } satisfies EntityTx;
+
+  await expect(handleR2R(state, tx)).rejects.toThrow(
+    'Insufficient spendable reserve: have 50, need 60 token 1',
+  );
+});
+
+test('removed retired settlement commands cannot mutate the jurisdiction batch', async () => {
+  const entityTxSource = readFileSync(join(process.cwd(), 'core/types/entity-tx.ts'), 'utf8');
+  const dispatcherSource = readFileSync(join(process.cwd(), 'core/entity/tx/apply.ts'), 'utf8');
+  expect(entityTxSource).not.toContain("type: 'createSettlement'");
+  expect(entityTxSource).not.toContain("type: 'settleDiffs'");
+  expect(dispatcherSource).not.toContain('createSettlement:');
+  expect(dispatcherSource).not.toContain('settleDiffs:');
+
+  for (const type of ['createSettlement', 'settleDiffs'] as const) {
+    const state = makeEntityState();
+    state.jBatchState = initJBatch();
+    const before = cloneJBatch(state.jBatchState.batch);
+    const retiredTx = {
+      type,
+      data: {
+        counterpartyEntityId: counterpartyId,
+        diffs: [{ tokenId: 1, leftDiff: -1n, rightDiff: 1n, collateralDiff: 0n, ondeltaDiff: 0n }],
+        sig: '0x1234',
+      },
+    } as unknown as EntityTx;
+
+    const result = await applyEntityTx(createEmptyEnv(`retired-${type}`), state, retiredTx);
+
+    expect(result.skippedError).toBe(`ENTITY_TX_UNHANDLED: type=${type}`);
+    expect(result.newState.jBatchState?.batch).toEqual(before);
+  }
+});
+
+test('storage restore rejects an oversized settlement forgiveness list', () => {
+  const state = makeEntityState();
+  state.jBatchState = initJBatch();
+  state.jBatchState.batch.settlements.push({
+    leftEntity: entityId,
+    rightEntity: counterpartyId,
+    diffs: [],
+    forgiveDebtsInTokenIds: Array.from({ length: 33 }, (_, index) => index + 1),
+    sig: '0x1234',
+    entityProvider: `0x${'11'.repeat(20)}`,
+    hankoData: '0x',
+    nonce: 1,
+  });
+
+  expect(() => hydrateEntityStateFromStorage({
+    core: projectEntityCoreDoc(state),
+    accounts: new Map(),
+    books: new Map(),
+  })).toThrow(
+    'J_BATCH_LIMIT_EXCEEDED: storage.entity.jBatchState.batch: '
+    + 'settlements[0].forgiveDebtsInTokenIds 33/32',
+  );
+});
+
+test('entity j-batch operation handlers stay behind structured logging', () => {
+  for (const path of [
+    'core/entity/tx/handlers/j-batch/r2r.ts',
+    'core/entity/tx/handlers/j-batch/mint-reserves.ts',
+    'core/entity/tx/handlers/j-batch/j-broadcast.ts',
+    'core/entity/tx/handlers/j-batch/j-clear-batch.ts',
+    'core/entity/tx/handlers/j-batch/j-abort-sent-batch.ts',
+  ]) {
+    const source = readFileSync(join(process.cwd(), path), 'utf8');
+    expect(source).toContain("createStructuredLogger('entity.jbatch')");
+    expect(source).not.toContain('console.');
+    expect(source).toContain('jBatchActionLog.');
+  }
+});
+
+test('r2c handler traces stay behind structured debug logging', () => {
+  const source = readFileSync(join(process.cwd(), 'core/entity/tx/handlers/j-batch/r2c.ts'), 'utf8');
+
+  expect(source).toContain("const r2cLog = createStructuredLogger('entity.r2c');");
+  expect(source).not.toContain('console.log');
+  expect(source).toContain('r2cLog.debug');
+});
+
+test('htlc payment handler traces stay behind structured logging', () => {
+  const source = readFileSync(join(process.cwd(), 'core/entity/tx/handlers/htlc/payment.ts'), 'utf8');
+
+  expect(source).toContain("const htlcLog = createStructuredLogger('entity.htlc');");
+  expect(source).not.toContain('console.');
+  expect(source).toContain('htlcLog.debug');
+});
+
+test('dispute handler traces stay behind structured logging', () => {
+  const source = [
+    'core/entity/tx/handlers/dispute/index.ts',
+    'core/entity/tx/handlers/dispute/shared.ts',
+    'core/entity/tx/handlers/dispute/start.ts',
+    'core/entity/tx/handlers/dispute/start-admission.ts',
+    'core/entity/tx/handlers/dispute/start-evidence.ts',
+    'core/entity/tx/handlers/dispute/start-hanko.ts',
+    'core/entity/tx/handlers/dispute/finalize.ts',
+    'core/entity/tx/handlers/dispute/finalize-admission.ts',
+    'core/entity/tx/handlers/dispute/finalize-proof.ts',
+  ].map(path => readFileSync(join(process.cwd(), path), 'utf8')).join('\n');
+
+  expect(source).toContain("export const disputeLog = createStructuredLogger('entity.dispute');");
+  expect(source).not.toContain('console.');
+  expect(source).toContain('disputeLog.debug');
+  expect(source).toContain('disputeLog.error');
+  expect(source).toContain('disputeLog.warn');
+});

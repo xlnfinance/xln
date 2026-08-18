@@ -1,6 +1,6 @@
 #!/bin/bash
 # XLN standalone watchtower startup script.
-# Runs as a separate process from the main runtime/orchestrator so backup and
+# Runs as a separate process from the main core/orchestrator so backup and
 # rescue logs stay isolated from consensus/runtime logs.
 
 set -euo pipefail
@@ -47,7 +47,7 @@ fi
 xln_kill_by_port "$XLN_WATCHTOWER_PORT" start-watchtower
 
 WATCHTOWER_ARGS=(
-  runtime/watchtower/standalone-server.ts
+  core/watchtower/standalone-server.ts
   --host "$XLN_WATCHTOWER_HOST"
   --port "$XLN_WATCHTOWER_PORT"
   --db "$XLN_WATCHTOWER_DB_PATH"

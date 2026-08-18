@@ -169,11 +169,11 @@
 
 ---
 
-## batch 4: runtime/backend improvements (different directory)
+## batch 4: core/backend improvements (different directory)
 
 ### task-16: scenario-validator
 **branch:** `improve/task-16-validator`
-**files:** NEW `runtime/scenario-validator.ts`
+**files:** NEW `core/scenario-validator.ts`
 **scope:** Validate scenario JSON before execution
 **details:**
 - Check entity IDs exist
@@ -183,7 +183,7 @@
 
 ### task-17: replay-export
 **branch:** `improve/task-17-replay-export`
-**files:** NEW `runtime/replay-export.ts`
+**files:** NEW `core/replay-export.ts`
 **scope:** Export scenario replay as JSON
 **details:**
 - Capture all frames with timestamps
@@ -193,7 +193,7 @@
 
 ### task-18: metrics-collector
 **branch:** `improve/task-18-metrics`
-**files:** NEW `runtime/metrics.ts`
+**files:** NEW `core/metrics.ts`
 **scope:** Collect performance metrics
 **details:**
 - Frame processing time

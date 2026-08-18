@@ -52,7 +52,7 @@
       "state": "PASS",
       "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
       "moduleFingerprint": "sha256:54474950a5a9d384ef322bd20f45bf1930afc252406d478886fde31639572d4b",
-      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "command": "bun test tests/unit/brainvault-native.test.ts core/__tests__/server-rpc-startup-gate.test.ts core/__tests__/radapter-remote-reconnect.test.ts",
       "summary": "Injected file/directory fsync failure, unsupported durability, restore/derive race, stale sockets, malformed protocol, and superseded connect.",
       "recordedAt": "2026-08-01T00:13:00Z",
       "agentRunIds": [
@@ -206,7 +206,7 @@
       "state": "FAIL",
       "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
       "moduleFingerprint": "sha256:035c73247033ec8fee9f2434f9c214466abd49523cffd7185178740bbea21625",
-      "command": "bun test runtime/__tests__/relay-store.test.ts",
+      "command": "bun test core/__tests__/relay-store.test.ts",
       "summary": "Existing regression encoded the inverted -1 failure and 0 success contract.",
       "recordedAt": "2026-08-01T00:24:00Z",
       "agentRunIds": [

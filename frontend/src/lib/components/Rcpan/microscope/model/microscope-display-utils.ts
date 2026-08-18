@@ -1,4 +1,4 @@
-import type { DerivedDelta } from '@xln/runtime/types/account';
+import type { DerivedDelta } from '@xln/core/types/account';
 import type { RcpanMicroscopeControls } from './microscope-playground';
 import { resolveMicroscopeBarPresentation } from './microscope-playground';
 import { microscopePhaseDurationMs, type RcpanTimelineState } from './microscope-timeline';

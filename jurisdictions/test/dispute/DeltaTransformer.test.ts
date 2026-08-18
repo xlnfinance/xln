@@ -2,12 +2,12 @@ import { loadFixture, time } from "@nomicfoundation/hardhat-toolbox/network-help
 import { expect } from "chai";
 import hre from "hardhat";
 import type { DeltaTransformer } from "../../typechain-types/index.js";
-import { buildAccountProofBody } from "../../../runtime/protocol/dispute/proof-builder.ts";
-import { createEmptyAccountJClaimAccumulator } from "../../../runtime/account/j-claims/j-claim-accumulator";
-import { buildPositionalSwapFillRatioBuckets } from "../../../runtime/protocol/transform/transformer-ordering";
-import { asOfferId } from "../../../runtime/orderbook/swap-keys.ts";
-import { deriveSwapOffdeltaChanges } from "../../../runtime/orderbook/swap-execution.ts";
-import type { AccountReplica, SwapOffer } from "../../../runtime/types/account.ts";
+import { buildAccountProofBody } from "../../../core/protocol/dispute/proof-builder.ts";
+import { createEmptyAccountJClaimAccumulator } from "../../../core/account/j-claims/j-claim-accumulator";
+import { buildPositionalSwapFillRatioBuckets } from "../../../core/protocol/transform/transformer-ordering";
+import { asOfferId } from "../../../core/orderbook/swap-keys.ts";
+import { deriveSwapOffdeltaChanges } from "../../../core/orderbook/swap-execution.ts";
+import type { AccountReplica, SwapOffer } from "../../../core/types/account.ts";
 
 const { ethers } = hre;
 const MAX_FILL_RATIO = 65535n;

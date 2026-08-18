@@ -9,7 +9,7 @@ import {
   deployStack,
   fetchStackManagerStatus,
 } from '../../../frontend/src/lib/components/Settings/stack-manager-client';
-import { createJurisdictionGossipAnnouncement } from '../../../runtime/jurisdiction/gossip/announcement';
+import { createJurisdictionGossipAnnouncement } from '../../../core/jurisdiction/gossip/announcement';
 
 const ADDRESS = '0x1111111111111111111111111111111111111111';
 const MIXED_CASE_ADDRESS = '0xAbCdEfabcdefabcdefabcdefabcdefabcdefabcd';

@@ -14,12 +14,12 @@ if (unknownArgs.length > 0) {
 // dedicated owners; running them again here made release feedback slower and
 // produced conflicting verdicts from non-canonical regex scans.
 const gates: Gate[] = [
-  { name: 'eslint-ratchet', command: ['bun', 'runtime/scripts/checks/architecture/check-eslint-ratchet.ts'] },
-  { name: 'unsafe-types', command: ['bun', 'runtime/scripts/checks/architecture/check-unsafe-types.ts'] },
+  { name: 'eslint-ratchet', command: ['bun', 'core/scripts/checks/architecture/check-eslint-ratchet.ts'] },
+  { name: 'unsafe-types', command: ['bun', 'core/scripts/checks/architecture/check-unsafe-types.ts'] },
   { name: 'frontend-unsafe-types', command: ['bun', 'frontend/scripts/check-unsafe-types.ts'] },
-  { name: 'determinism', command: ['bun', 'runtime/scripts/checks/architecture/check-determinism.ts', '--static-only'] },
-  { name: 'no-weak-collections', command: ['bun', 'runtime/scripts/checks/policy/check-no-weak-collections.ts'] },
-  { name: 'runtime-dependencies', command: ['bun', 'runtime/scripts/checks/architecture/check-runtime-dependencies.ts'] },
+  { name: 'determinism', command: ['bun', 'core/scripts/checks/architecture/check-determinism.ts', '--static-only'] },
+  { name: 'no-weak-collections', command: ['bun', 'core/scripts/checks/policy/check-no-weak-collections.ts'] },
+  { name: 'runtime-dependencies', command: ['bun', 'core/scripts/checks/architecture/check-runtime-dependencies.ts'] },
   { name: 'fints-negative-types', command: ['bun', 'run', 'check:fints-negative-types'] },
   { name: 'fints-compiler-policy', command: ['bun', 'run', 'check:fints-compiler-policy'] },
   { name: 'fints-decoder-authority', command: ['bun', 'run', 'check:fints-decoder-authority'] },

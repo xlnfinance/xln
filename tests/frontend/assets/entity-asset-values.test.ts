@@ -73,8 +73,8 @@ describe('entity asset value helpers', () => {
   });
 
   test('builds account portfolio totals from derived deltas', () => {
-    const accounts = new Map<string, import('../../../runtime/types/account').AccountReplica>([
-      ['0xbb', { state: { deltas: new Map([[1, Symbol('delta')]]) } } as import('../../../runtime/types/account').AccountReplica],
+    const accounts = new Map<string, import('../../../core/types/account').AccountReplica>([
+      ['0xbb', { state: { deltas: new Map([[1, Symbol('delta')]]) } } as import('../../../core/types/account').AccountReplica],
     ]);
     const deriveDelta = (() => ({
       outCapacity: 5_000_000n,

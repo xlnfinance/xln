@@ -7,13 +7,13 @@ import type {
   DeployJurisdictionStackRequest,
   StackManagerProbe as RuntimeStackManagerProbe,
   StackManagerStatus as RuntimeStackManagerStatus,
-} from '@xln/runtime/jurisdiction/adapter/stack-manager/types';
-import { safeStringify } from '@xln/runtime/protocol/serialization';
-import { DEV_CHAIN_IDS } from '@xln/runtime/jurisdiction/adapter/chain-ids';
+} from '@xln/core/jurisdiction/adapter/stack-manager/types';
+import { safeStringify } from '@xln/core/protocol/serialization';
+import { DEV_CHAIN_IDS } from '@xln/core/jurisdiction/adapter/chain-ids';
 import {
   decodeJurisdictionGossipAnnouncementStructure,
   type JurisdictionGossipAnnouncement,
-} from '@xln/runtime/jurisdiction/gossip/announcement';
+} from '@xln/core/jurisdiction/gossip/announcement';
 export const STACK_VERSION = 'V1' as const;
 export type StackStablecoinKind = 'existing' | 'test';
 export const defaultStackStablecoinKind = (chainId: number): StackStablecoinKind =>

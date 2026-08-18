@@ -37,7 +37,7 @@ tests, formal vectors, or independent review.
 
 ## Open Manual Review
 
-- `runtime/hanko/signing.ts` still uses dynamic imports inside signing and
+- `core/hanko/signing.ts` still uses dynamic imports inside signing and
   verification helpers. Current consensus callers are statically imported, but
   the helper internals should be reviewed before treating this path as fully
   static.

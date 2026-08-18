@@ -25,8 +25,8 @@
     decodeMarketWireResponse,
     encodeMarketWireMessage,
     type MarketWireResponse,
-  } from '@xln/runtime/network/relay/market/wire';
-  import { normalizeMarketPairId as normalizePairId } from '@xln/runtime/network/relay/market/identifiers';
+  } from '@xln/core/network/relay/market/wire';
+  import { normalizeMarketPairId as normalizePairId } from '@xln/core/network/relay/market/identifiers';
 
   export let hubId: string = '';
   export let hubIds: string[] = [];

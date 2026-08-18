@@ -125,7 +125,8 @@ test('runtime view store owns the active projected RuntimeView without RuntimeRe
   expect(source).toContain('current.id === expectedRuntimeId');
   expect(source).toContain('current.mode === expectedRuntimeMode');
   expect(source).toContain('runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));');
-  expect(source).toContain('if (!requestStillCurrent()) throw error;');
+  expect(source).toContain('if (!requestStillCurrent()) return next;');
+  expect(source).not.toContain('if (!requestStillCurrent()) throw error;');
   expect(source).toContain('runtimeAdapter.subscribe');
   expect(source).toContain('resetRuntimeView();');
   expect(source).toContain('runtimeAdapterHeight.subscribe');
@@ -496,7 +497,7 @@ test('runtime controller exposes only typed debug projection queries', () => {
 });
 
 test('fast e2e target titles stay in sync with specs', () => {
-  const fastRunnerSource = readFileSync('runtime/scripts/e2e/runners/run-e2e-fast.ts', 'utf8');
+  const fastRunnerSource = readFileSync('core/scripts/e2e/runners/run-e2e-fast.ts', 'utf8');
   const targetMatches = [...fastRunnerSource.matchAll(/file: '([^']+)'[\s\S]*?title: '([^']+)'/g)];
   expect(targetMatches.length).toBeGreaterThan(0);
 

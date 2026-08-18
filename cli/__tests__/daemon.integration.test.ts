@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { connect } from 'node:net';
 
-import { createEmptyEnv } from '../../runtime/runtime';
+import { createEmptyEnv } from '../../core/runtime';
 import { callDaemon, daemonTokenPath } from '../lib/daemon/client';
 import { startDaemonServer } from '../lib/daemon/server';
 import { createFrameDecoder, encodeMessage, type DaemonRequest, type DaemonResponse } from '../lib/daemon/protocol';

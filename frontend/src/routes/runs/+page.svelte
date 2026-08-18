@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { DISPLAY, QA } from '@xln/runtime/config/constants';
-  import type { QaRegressionStatus, QaRunCategory } from '@xln/runtime/qa/report-types';
+  import { DISPLAY, QA } from '@xln/core/config/constants';
+  import type { QaRegressionStatus, QaRunCategory } from '@xln/core/qa/report-types';
   import { consumeQaTokenFromUrl, qaFetch, readQaToken, writeQaToken } from '$lib/qa/apiClient';
   import { readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
   import { decodeQaAuthInfo, isQaRunLedgerEntry } from '$lib/qa/boundary';

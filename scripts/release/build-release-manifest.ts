@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
-import { safeStringify } from '../../runtime/protocol/serialization';
+import { safeStringify } from '../../core/protocol/serialization';
 
 type VersionFile = Readonly<{ version: string }>;
 type ReleaseAsset = Readonly<{

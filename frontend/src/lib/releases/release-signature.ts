@@ -1,11 +1,11 @@
 import { ethers } from 'ethers';
-import { asHankoBytes32, encodeSignedHanko } from '../../../../runtime/hanko/codec';
+import { asHankoBytes32, encodeSignedHanko } from '../../../../core/hanko/codec';
 import {
   hashHankoBoardClaim,
   resolveHankoBoardDelays,
   verifyCanonicalHanko,
-} from '../../../../runtime/hanko/claims';
-import type { HankoHex } from '../../../../runtime/types/hanko';
+} from '../../../../core/hanko/claims';
+import type { HankoHex } from '../../../../core/types/hanko';
 
 export const RELEASE_SIGNATURE_DOMAIN = 'xln:foundation-release:v1';
 

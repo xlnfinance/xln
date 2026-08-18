@@ -6,7 +6,7 @@
  * An authored cue on the step wins when a demo wants a curated line.
  */
 
-import type { RuntimeActivityEvent } from '@xln/runtime/api/public/runtime-module';
+import type { RuntimeActivityEvent } from '@xln/core/api/public/runtime-module';
 import type { NetworkMachineCue } from '../networkMachine';
 
 export type NetworkCaption = {

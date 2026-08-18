@@ -1,10 +1,10 @@
-import type { AccountReplica, EntityReplica, RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
-import { getJurisdictionStackId } from '@xln/runtime/jurisdiction/machine/jurisdiction-stack';
+import type { AccountReplica, EntityReplica, RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/core/api/public/runtime-module';
+import { getJurisdictionStackId } from '@xln/core/jurisdiction/machine/jurisdiction-stack';
 import {
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
   type AccountRoleEvidenceSource,
-} from '@xln/runtime/account/config/dispute-config';
+} from '@xln/core/account/config/dispute-config';
 import {
   buildOpenAccountTx,
   type OpenAccountRebalancePolicy,

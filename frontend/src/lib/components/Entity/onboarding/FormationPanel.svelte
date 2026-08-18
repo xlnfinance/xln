@@ -5,7 +5,7 @@
   Features: Jurisdiction, numbered/lazy identity, validators with weights, threshold.
 -->
 <script lang="ts">
-  import { isTronChainId, type ConsensusConfig } from '@xln/runtime/api/public/runtime-module';
+  import { isTronChainId, type ConsensusConfig } from '@xln/core/api/public/runtime-module';
   import { getXLN, registerActiveNumberedEntities, submitRuntimeInput } from '../../../stores/xlnStore';
   import { errorLog } from '../../../stores/errorLogStore';
   import { activeRuntime } from '../../../stores/vault/vaultStore';

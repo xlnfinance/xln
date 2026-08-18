@@ -20,6 +20,7 @@ function makeLiveEnv() {
     history: [],
     gossip: {
       profiles,
+      jurisdictions: new Map(),
       announce: () => undefined,
       getProfiles: () => Array.from(profiles.values()),
       getHubs: () => [],
@@ -63,6 +64,55 @@ describe('live runtime env helpers', () => {
     expect(isRuntimeLikeEnv(liveEnv)).toBe(true);
     expect(isRuntimeLikeEnv(viewEnv)).toBe(true);
     expect(unwrapLiveRuntimeEnv(viewEnv)).toBe(liveEnv);
+  });
+
+  test('detached runtime view clones ReadonlyMap classes into real Maps', () => {
+    class FakePersistentMap<K, V> {
+      #inner = new Map<K, V>();
+      constructor(entries: Iterable<readonly [K, V]>) {
+        for (const [key, value] of entries) this.#inner.set(key, value);
+      }
+      get size(): number {
+        return this.#inner.size;
+      }
+      get(key: K): V | undefined {
+        return this.#inner.get(key);
+      }
+      has(key: K): boolean {
+        return this.#inner.has(key);
+      }
+      entries(): MapIterator<[K, V]> {
+        return this.#inner.entries();
+      }
+      keys(): MapIterator<K> {
+        return this.#inner.keys();
+      }
+      values(): MapIterator<V> {
+        return this.#inner.values();
+      }
+      forEach(callback: (value: V, key: K, map: Map<K, V>) => void): void {
+        this.#inner.forEach(callback);
+      }
+      [Symbol.iterator](): MapIterator<[K, V]> {
+        return this.#inner.entries();
+      }
+    }
+
+    const account = { deltas: new FakePersistentMap([[1, { offdelta: 10n }]]) };
+    const entity = { state: { accounts: new FakePersistentMap([['peer', account]]) } };
+    const liveEnv = makeLiveEnv();
+    liveEnv.state.eReplicas.set('entity:signer', entity);
+    const detached = createDetachedRuntimeViewEnv(liveEnv as never);
+    const detachedEntity = detached.state.eReplicas.get('entity:signer') as typeof entity;
+
+    expect(detachedEntity.state.accounts instanceof Map).toBe(true);
+    expect(typeof detachedEntity.state.accounts.entries).toBe('function');
+    const [counterpartyId, detachedAccount] = [...detachedEntity.state.accounts.entries()][0]!;
+    expect(counterpartyId).toBe('peer');
+    expect(detachedAccount.deltas instanceof Map).toBe(true);
+    expect(detachedAccount.deltas.get(1)?.offdelta).toBe(10n);
+    account.deltas.get(1)!.offdelta = 99n;
+    expect(detachedAccount.deltas.get(1)?.offdelta).toBe(10n);
   });
 
   test('detached runtime view env does not expose the live env handle', () => {

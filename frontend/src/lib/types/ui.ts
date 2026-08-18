@@ -6,17 +6,17 @@
  * owner. This module only gives frontend code one UI-oriented import surface.
  */
 
-import type { EnvSnapshot, RuntimeTx } from '@xln/runtime/runtime/types';
-import type { EntityInput } from '@xln/runtime/entity/types';
-import type { FrameLogEntry } from '@xln/runtime/types/logging';
+import type { EnvSnapshot, RuntimeTx } from '@xln/core/runtime/types';
+import type { EntityInput } from '@xln/core/entity/types';
+import type { FrameLogEntry } from '@xln/core/types/logging';
 
 // Re-export commonly used backend types for convenience
 export type {
   EntityReplica,
   EntityState,
   EntityInput,
-} from '@xln/runtime/entity/types';
-export type { EntityTx } from '@xln/runtime/types/entity-tx';
+} from '@xln/core/entity/types';
+export type { EntityTx } from '@xln/core/types/entity-tx';
 export type {
   AccountReplica,
   AccountState,
@@ -24,17 +24,17 @@ export type {
   DerivedDelta,
   AccountFrame,
   AccountTx,
-} from '@xln/runtime/types/account';
+} from '@xln/core/types/account';
 export type {
   RuntimeInput,
   RuntimeTx,
   EnvSnapshot as Snapshot, // Frontend historically called this Snapshot
-} from '@xln/runtime/runtime/types';
+} from '@xln/core/runtime/types';
 export type {
   LogLevel,
   LogCategory,
   FrameLogEntry,
-} from '@xln/runtime/types/logging';
+} from '@xln/core/types/logging';
 
 // Tab management for multi-entity UI
 export interface Tab {

@@ -5,7 +5,7 @@
   "files": [],
   "approvals": [
     {
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "oldContentHash": "0xe435fb13297fa65dbe27aa7bc5666610c5a1db06fa606cd9135b760114ff7f33",
       "newContentHash": "0x0cedce9c3b82e4fa53e4c0c3e304f910456fdae337b6b2be0d0589c45f3bda51",
       "oldLeafHash": "0xd6aaace3e24a744af1b80a21603f9a5bb794cfdc8c0eadbb6f588bfc6af83674",
@@ -15,7 +15,7 @@
       "comment": "Restore complete durable runtime and replica metadata for 0.1.8"
     },
     {
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "oldContentHash": "0x0cedce9c3b82e4fa53e4c0c3e304f910456fdae337b6b2be0d0589c45f3bda51",
       "newContentHash": "0x164e18f7f7d02cef51b3dd722729911e2bf0e7f0e95f4f6fa60f94ded516225d",
       "oldLeafHash": "0x1ce9ca315c37cec3f9938fe8f2c9e0c44bd879ec527c72aab6e73ceb00392eb9",
@@ -25,7 +25,7 @@
       "comment": ""
     },
     {
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "oldContentHash": "0x164e18f7f7d02cef51b3dd722729911e2bf0e7f0e95f4f6fa60f94ded516225d",
       "newContentHash": "0xf33308c286795fdf6a7b1f913cef3df794d65be608c3b60a81399f2dcb0484b9",
       "oldLeafHash": "0xd01c6a3d6231bff93a8fc05f181c3c1b6ce37c16e3a04b83f645e65ea13d9963",
@@ -35,7 +35,7 @@
       "comment": ""
     },
     {
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "oldContentHash": "0xf33308c286795fdf6a7b1f913cef3df794d65be608c3b60a81399f2dcb0484b9",
       "newContentHash": "0x605cb68410d2af84c0c266e132eeaf2a36c2a29ba5a0236273950b207b380459",
       "oldLeafHash": "0xec345f2d8055b0f27a9ed5e287b8dd71a3424fd7397d66fbbce126dade7ec25c",
@@ -45,7 +45,7 @@
       "comment": ""
     },
     {
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "oldContentHash": "0x605cb68410d2af84c0c266e132eeaf2a36c2a29ba5a0236273950b207b380459",
       "newContentHash": "0x3dc175f0a855be580f1fe5e111fae99472092ce33e1eb83e4469f2afd1e90731",
       "oldLeafHash": "0xf28f4729cf5a8c1f74804f8dac05f0ad0d7da030aee0a0b5b0fac6304ae0ecdc",
@@ -55,7 +55,7 @@
       "comment": ""
     },
     {
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "oldContentHash": "0x3dc175f0a855be580f1fe5e111fae99472092ce33e1eb83e4469f2afd1e90731",
       "newContentHash": "0x023196412e039380c80427706e26380bf2cd020ec87d48851fa5734a6e8a73c7",
       "oldLeafHash": "0x7d72fda7e620891b0035d6bc67b0f7ae277f69d6718ac14b428a8812d2ed53bc",
@@ -65,7 +65,7 @@
       "comment": "\\"
     },
     {
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "oldContentHash": "0x023196412e039380c80427706e26380bf2cd020ec87d48851fa5734a6e8a73c7",
       "newContentHash": "0x20b7353a830b1348eccd03cfea72ebc758d920fdb6035b5b29c4e18769acc6f0",
       "oldLeafHash": "0x8ae68728219007bae6b3833934872edaa9bea0a6c350bd96f9c5181120ebaef6",
@@ -75,7 +75,7 @@
       "comment": ""
     },
     {
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "oldContentHash": "0x20b7353a830b1348eccd03cfea72ebc758d920fdb6035b5b29c4e18769acc6f0",
       "newContentHash": "0x2a7419d382e90325293717a952683556c26a7b5fb0125aa5c97fee537ca6326d",
       "oldLeafHash": "0xb77645641db8174f90e624ccb1b3fe195b43964ab96b647ef7ed7d5445bf4e36",
@@ -85,7 +85,7 @@
       "comment": "Restore complete durable runtime and replica metadata for 0.1.8"
     },
     {
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "oldContentHash": "0x2a7419d382e90325293717a952683556c26a7b5fb0125aa5c97fee537ca6326d",
       "newContentHash": "0xc1b334647722ca2cce982c546c8fda0c055122a8e774df862e9b11ee1e0b1482",
       "oldLeafHash": "0xf5a01fc5971efc28e893d2750a36793d126020fdc20a7c43cec75165966d346e",
@@ -95,7 +95,7 @@
       "comment": "Restore complete durable runtime and replica metadata for 0.1.8"
     },
     {
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "oldContentHash": "0xc1b334647722ca2cce982c546c8fda0c055122a8e774df862e9b11ee1e0b1482",
       "newContentHash": "0x484f537a36ac2777e9b300fdce268f9aafe320015fc2050ca3ce62555b619a4b",
       "oldLeafHash": "0x674a286ba88b38b137011a562b4fd2af882bcfac651457a130bd541c40fb4153",
@@ -105,7 +105,7 @@
       "comment": "Restore complete durable runtime and replica metadata for 0.1.8"
     },
     {
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "oldContentHash": "0x484f537a36ac2777e9b300fdce268f9aafe320015fc2050ca3ce62555b619a4b",
       "newContentHash": "0xc2da41da791085c1e71de203bb18c17e9df3600ff3e3bd70f579980650b2aa9c",
       "oldLeafHash": "0x0bab155da90a5ba0c3104d67d957946d65987c32b8929c8ffce2246ac682c37b",
@@ -118,7 +118,7 @@
   "policyChanges": [
     {
       "action": "unfreeze",
-      "path": "runtime/runtime.ts",
+      "path": "core/runtime.ts",
       "contentHash": "0xc2da41da791085c1e71de203bb18c17e9df3600ff3e3bd70f579980650b2aa9c",
       "leafHash": "0x19227fb54e53736c8c0824caafb677df5ae2d6bf1206b8ff62250181baaa0739",
       "release": "0.1.8",

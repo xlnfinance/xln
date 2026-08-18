@@ -31,7 +31,7 @@ If classification is not explicit, stop and classify first.
 Run the narrowest honest command:
 
 ```bash
-bun runtime/scripts/e2e/runners/run-e2e-parallel-isolated.ts --shards=8 --workers-per-shard=1 --base-port=20000 --video=off --trace=off --screenshot=only-on-failure --max-failures=1
+bun core/scripts/e2e/runners/run-e2e-parallel-isolated.ts --shards=8 --workers-per-shard=1 --base-port=20000 --video=off --trace=off --screenshot=only-on-failure --max-failures=1
 ```
 
 Then read only:
@@ -49,7 +49,7 @@ Use the summary phases:
 
 - `health=0 vite=0 pw=0` means boot/orchestration failure
 - `vite>0 pw=0` means preview or harness failure
-- `pw>0` means actual test/runtime/ui failure
+- `pw>0` means actual test/core/ui failure
 
 This cuts most wasted time.
 

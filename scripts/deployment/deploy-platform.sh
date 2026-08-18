@@ -1159,23 +1159,23 @@ run_local_deploy() {
       run_or_fail_deploy "failed to pause production explorer backend" pause_production_explorer_backend
       mkdir -p logs
       pkill -TERM -f 'scripts/operations/start-custody.sh' >/dev/null 2>&1 || true
-      pkill -TERM -f 'runtime/scripts/operations/custody/start-custody-prod.ts' >/dev/null 2>&1 || true
+      pkill -TERM -f 'core/scripts/operations/custody/start-custody-prod.ts' >/dev/null 2>&1 || true
       sleep 1
       pkill -KILL -f 'scripts/operations/start-custody.sh' >/dev/null 2>&1 || true
-      pkill -KILL -f 'runtime/scripts/operations/custody/start-custody-prod.ts' >/dev/null 2>&1 || true
+      pkill -KILL -f 'core/scripts/operations/custody/start-custody-prod.ts' >/dev/null 2>&1 || true
 
       lsof -ti TCP:8087 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
       lsof -ti TCP:8088 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
       pm2 delete xln-server >/dev/null 2>&1 || true
       pm2 delete xln-watchtower >/dev/null 2>&1 || true
       pm2 delete xln-custody >/dev/null 2>&1 || true
-      pkill -TERM -f 'runtime/orchestrator/hub-node.ts' >/dev/null 2>&1 || true
-      pkill -TERM -f 'runtime/orchestrator/mm-node.ts' >/dev/null 2>&1 || true
-      pkill -TERM -f 'runtime/orchestrator/orchestrator.ts' >/dev/null 2>&1 || true
+      pkill -TERM -f 'core/orchestrator/hub-node.ts' >/dev/null 2>&1 || true
+      pkill -TERM -f 'core/orchestrator/mm-node.ts' >/dev/null 2>&1 || true
+      pkill -TERM -f 'core/orchestrator/orchestrator.ts' >/dev/null 2>&1 || true
       sleep 1
-      pkill -KILL -f 'runtime/orchestrator/hub-node.ts' >/dev/null 2>&1 || true
-      pkill -KILL -f 'runtime/orchestrator/mm-node.ts' >/dev/null 2>&1 || true
-      pkill -KILL -f 'runtime/orchestrator/orchestrator.ts' >/dev/null 2>&1 || true
+      pkill -KILL -f 'core/orchestrator/hub-node.ts' >/dev/null 2>&1 || true
+      pkill -KILL -f 'core/orchestrator/mm-node.ts' >/dev/null 2>&1 || true
+      pkill -KILL -f 'core/orchestrator/orchestrator.ts' >/dev/null 2>&1 || true
 
       export XLN_STATE_ROOT="${XLN_STATE_ROOT:-/var/lib/xln}"
       export XLN_JDB_ROOT="${XLN_JDB_ROOT:-$XLN_STATE_ROOT/jdb}"
@@ -1187,11 +1187,11 @@ run_local_deploy() {
       if [ "$RESET_PRODUCTION_MESH" = "1" ]; then
         export XLN_MESH_PRESERVE_STATE_ON_RESET=1
         echo "[deploy] resetting production anvil + runtime + chain-bound watchtower state"
-        rm -rf "$XLN_RDB_ROOT/runtime/prod-main" "$XLN_RDB_ROOT/runtime/prod-mesh" "$XLN_RDB_ROOT/custody/prod" "$XLN_RDB_ROOT/custody-tmp" "$XLN_RDB_ROOT/watchtower/prod-main" "$XLN_RDB_ROOT/watchtower/push-main"
+        rm -rf "$XLN_RDB_ROOT/core/prod-main" "$XLN_RDB_ROOT/core/prod-mesh" "$XLN_RDB_ROOT/custody/prod" "$XLN_RDB_ROOT/custody-tmp" "$XLN_RDB_ROOT/watchtower/prod-main" "$XLN_RDB_ROOT/watchtower/push-main"
         rm -f "$XLN_JDB_ROOT/anvil-state.json" "$XLN_JDB_ROOT/anvil2-state.json"
         install -d -m 700 "$XLN_RDB_ROOT/runtime"
-        rm -f "$XLN_RDB_ROOT/runtime/.mesh-reset-once" "$XLN_RDB_ROOT/runtime/.mesh-reset-once.claimed"
-        install -m 600 /dev/null "$XLN_RDB_ROOT/runtime/.mesh-reset-once"
+        rm -f "$XLN_RDB_ROOT/core/.mesh-reset-once" "$XLN_RDB_ROOT/core/.mesh-reset-once.claimed"
+        install -m 600 /dev/null "$XLN_RDB_ROOT/core/.mesh-reset-once"
         lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
         lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
         pm2 delete anvil >/dev/null 2>&1 || true

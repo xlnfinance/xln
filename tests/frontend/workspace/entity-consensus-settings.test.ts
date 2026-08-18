@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { EntityReplica } from '../../../runtime/entity/types';
+import type { EntityReplica } from '../../../core/entity/types';
 import { buildEntityConsensusSettingsView } from '../../../frontend/src/lib/components/Entity/workspace/entity-consensus-settings';
 
 const replicaFixture = (): EntityReplica => ({

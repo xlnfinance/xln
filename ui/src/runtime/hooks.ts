@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { RuntimeAdapterReadQuery } from '@xln/runtime/api/runtime-adapter/types';
+import type { RuntimeAdapterReadQuery } from '@xln/core/api/runtime-adapter/types';
 import { getAdapter } from './adapter';
 import { useApp } from './store';
 

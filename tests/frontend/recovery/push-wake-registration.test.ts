@@ -17,7 +17,7 @@ import {
   hashPushToken,
   verifyPushRegistration,
   verifyPushUnregister,
-} from '../../../runtime/watchtower/push/registration';
+} from '../../../core/watchtower/push/registration';
 
 const entityId = (n: number): string => zeroPadValue(`0x${n.toString(16).padStart(2, '0')}`, 32).toLowerCase();
 

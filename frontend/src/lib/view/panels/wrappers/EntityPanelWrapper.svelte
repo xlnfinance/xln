@@ -16,7 +16,7 @@
   import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/core/runtime-frame-context';
   import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/core/embedded-runtime-context';
   import type { Tab } from '$lib/types/ui';
-  import type { RuntimeReplica, EnvSnapshot } from '@xln/runtime/api/public/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot } from '@xln/core/api/public/runtime-module';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import type { EntityOpenAction } from '$lib/view/utils/panelBridge';
 

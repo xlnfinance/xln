@@ -15,10 +15,10 @@ import {
   summarizeRuntimeRecoveryTowerReceipt,
   tryRestoreRuntimeEnvFromTower,
 } from '../../../frontend/src/lib/stores/vault/vaultStore';
-import * as xln from '../../../runtime/runtime';
-import { decryptTowerPayloadWithWatchSeed } from '../../../runtime/storage/recovery/bundle/crypto';
-import { deserializeTaggedJson } from '../../../runtime/protocol/serialization';
-import type { EncryptedRuntimeRecoveryBundleV1, RuntimeReplica, XLNModule } from '../../../runtime/api/public/runtime-module';
+import * as xln from '../../../core/runtime';
+import { decryptTowerPayloadWithWatchSeed } from '../../../core/storage/recovery/bundle/crypto';
+import { deserializeTaggedJson } from '../../../core/protocol/serialization';
+import type { EncryptedRuntimeRecoveryBundleV1, RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
 
 test('resolveDefaultRecoveryTowerUrls uses same-origin production tower by default', () => {
   expect(resolveDefaultRecoveryTowerUrls({

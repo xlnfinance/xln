@@ -1,7 +1,7 @@
 <!--
   OnboardingPanel.svelte
 
-  Screen 2 of onboarding: runtime/seed already exists, only account configuration
+  Screen 2 of onboarding: core/seed already exists, only account configuration
   belongs here. Do not derive, rehydrate, or create wallet state in this component.
 -->
 <script lang="ts">
@@ -61,7 +61,7 @@
   import type {
     AccountRoleEvidence,
     AccountRoleEvidenceSource,
-  } from '@xln/runtime/account/config/dispute-config';
+  } from '@xln/core/account/config/dispute-config';
 
   export let entityId: string = '';
   export let runtimeProjection: OnboardingRuntimeProjection = emptyOnboardingRuntimeProjection();

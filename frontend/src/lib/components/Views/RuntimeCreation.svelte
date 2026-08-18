@@ -36,7 +36,7 @@
     getRuntimeControllerAdapter,
     runtimeControllerHandle,
   } from '$lib/stores/runtimeControllerStore';
-  import type { RuntimeAdapterBrainVaultResult } from '@xln/runtime/api/runtime-adapter/types';
+  import type { RuntimeAdapterBrainVaultResult } from '@xln/core/api/runtime-adapter/types';
   import { generateLazyEntityIdPreview } from '$lib/utils/identity/lazyEntityId';
   import {
     BRAINVAULT_WORKER_CAP_STORAGE_KEY,

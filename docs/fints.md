@@ -741,8 +741,8 @@ surfaces, including:
 - [x] incomplete cross-j atomic cohort recovery/hot-loop;
 - [x] equal-HEAD current-cache verification and healing;
 - [x] O(height) key recovery when authoritative snapshot seeds exist;
-- [x] HTLC runtime/Solidity deadline parity and clock disposition;
-- [x] duplicate forgiveness runtime/Solidity parity;
+- [x] HTLC core/Solidity deadline parity and clock disposition;
+- [x] duplicate forgiveness core/Solidity parity;
 - [x] remaining known fail-soft HTLC payment/resolve transitions;
 - [x] retired cross-token global credit-limit consensus state.
 
@@ -905,23 +905,23 @@ style or abstraction quality.
 An independent protocol reviewer SHOULD read modules in this order. The order
 follows financial authority and irreversible effects, not directory size:
 
-1. `runtime/account/consensus`, `runtime/account/tx`, `runtime/account/state`,
-   `runtime/types/account.ts`: bilateral authorization, Delta math, locks,
+1. `core/account/consensus`, `core/account/tx`, `core/account/state`,
+   `core/types/account.ts`: bilateral authorization, Delta math, locks,
    settlement, lending, replay, collision, and Account root ownership.
-2. `runtime/protocol/dispute`, `runtime/protocol/settlement`,
+2. `core/protocol/dispute`, `core/protocol/settlement`,
    `jurisdictions/contracts`: exact off-chain/on-chain parity, ProofBody,
    transformer execution, deadlines, nonces, and Hanko domains.
-3. `runtime/entity/consensus`, `runtime/entity/tx`, `runtime/entity/auth`:
+3. `core/entity/consensus`, `core/entity/tx`, `core/entity/auth`:
    validator authority, candidate isolation, child Account inputs, frame
    certification, and single-signer versus threshold application.
-4. `runtime/hanko`, `runtime/board-registry`: current/previous board authority,
+4. `core/hanko`, `core/board-registry`: current/previous board authority,
    nested claims, observer-root binding, signer roles, and grace windows.
-5. `runtime/runtime`, `runtime/frame`, `runtime/storage`: single-writer ordering,
+5. `core/runtime`, `core/frame`, `core/storage`: single-writer ordering,
    WAL-before-effects, crash recovery, cache healing, replay, and publication.
-6. `runtime/extensions/cross-j`, `runtime/routing`, `runtime/network`:
+6. `core/extensions/cross-j`, `core/routing`, `core/network`:
    two-leg atomic groups, reliable delivery, retry bounds, authenticated
    transport, gossip evidence, and unverified online assertions.
-7. `runtime/entity/profile`, `runtime/orchestrator`, `runtime/api`: route/profile
+7. `core/entity/profile`, `core/orchestrator`, `core/api`: route/profile
    certification and ingress boundaries. Review UI/CLI last; they must not own
    protocol calculations or financial authority.
 

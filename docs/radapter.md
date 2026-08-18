@@ -3,7 +3,7 @@
 This document supersedes the old v1 adapter spec. The old version proposed
 FrameView push, `assembleFrameView`, `ViewState`, client sort caches, phase-2 KV
 storage, and an 11-method interface before the storage layer in
-`runtime/storage/` shipped.
+`core/storage/` shipped.
 
 This doc is the production target: a 3-method adapter that ships embedded,
 remote, and mobile from one Svelte codebase, reuses existing storage projections,
@@ -25,7 +25,7 @@ component reactivity already provide. We deleted them.
 ## interface
 
 ```ts
-// runtime/api/runtime-adapter/types.ts (new file, ~40 LOC)
+// core/api/runtime-adapter/types.ts (new file, ~40 LOC)
 
 export interface RuntimeAdapter {
   readonly mode: 'embedded' | 'remote'
@@ -72,7 +72,7 @@ projections.
 
 | Path                                       | Returns                                | Source                                                    |
 |--------------------------------------------|----------------------------------------|-----------------------------------------------------------|
-| `head`                                     | `StorageHead`                          | `runtime/storage/index.ts` `readStorageHead`              |
+| `head`                                     | `StorageHead`                          | `core/storage/index.ts` `readStorageHead`              |
 | `entities`                                 | `Array<{ entityId, label, height }>`   | scan `KEY_LIVE_ENTITY` prefix                             |
 | `entity/:id`                               | `StorageEntityCoreDoc`                 | `KEY_LIVE_ENTITY` get, or `projectEntityCoreDoc` on live  |
 | `entity/:id/accounts`                      | `{ items: StorageAccountDoc[], nextCursor }` | `KEY_LIVE_ACCOUNT` prefix scan + cursor               |
@@ -84,7 +84,7 @@ projections.
 
 `atHeight=N` rewrites any path to read at a historical snapshot. Implementation
 calls `loadEntityStateFromStorage(db, entityId, N)` from
-`runtime/storage/index.ts:2537` and reads from the materialized state.
+`core/storage/index.ts:2537` and reads from the materialized state.
 
 For `accounts` pagination: cursor is the last `counterpartyId` from the previous
 page. Server scans `KEY_LIVE_ACCOUNT_<entityId>_<cursor>..` with `limit` and
@@ -125,7 +125,7 @@ Errors are structured: `{ code, message, retryable }`. Codes are a closed enum:
 ## embedded implementation
 
 ```
-runtime/api/runtime-adapter/embedded.ts (~150 LOC)
+core/api/runtime-adapter/embedded.ts (~150 LOC)
 
 class EmbeddedAdapter implements RuntimeAdapter {
   private env: Env
@@ -161,7 +161,7 @@ function used on the server side — embedded and remote produce bit-identical
 output by construction.
 
 ```
-runtime/api/runtime-adapter/resolve.ts (~200 LOC)
+core/api/runtime-adapter/resolve.ts (~200 LOC)
 
 resolveRead(env, path, query):
   match path:
@@ -187,7 +187,7 @@ existing projection code reused: ~600 LOC.
 ## remote implementation
 
 ```
-runtime/api/runtime-adapter/remote.ts (~250 LOC)
+core/api/runtime-adapter/remote.ts (~250 LOC)
 
 class RemoteAdapter implements RuntimeAdapter {
   private ws: WebSocket
@@ -229,7 +229,7 @@ tracking is per-component, not in the adapter.
 
 ## server-side wiring
 
-Modify `runtime/api/server/index.ts` `/rpc` handler. ~250 LOC added.
+Modify `core/api/server/index.ts` `/rpc` handler. ~250 LOC added.
 
 ```
 on connection:
@@ -288,7 +288,7 @@ Token bucket per WS connection. Default: 50 reads/sec, 5 sends/sec, burst
 + `retryAfterMs`. Frontend honors backoff; missing this opens trivial DoS.
 
 ```
-runtime/api/runtime-adapter/security/rate-limit.ts (~80 LOC)
+core/api/runtime-adapter/security/rate-limit.ts (~80 LOC)
 
 class TokenBucket {
   constructor(capacity, refillPerSec) { ... }
@@ -399,7 +399,7 @@ Components use `readStore`:
 ```
 
 `AccountRow` consumes `StorageAccountDoc` directly. Existing `deriveDelta`
-from `runtime/account/utils.ts:30` derives inbound/outbound/balance.
+from `core/account/utils.ts:30` derives inbound/outbound/balance.
 We do not introduce `AccountView` or any other intermediate type.
 
 Time machine slider: a single store `viewHeight` (defaults to live).
@@ -425,7 +425,7 @@ They are additive and do not break the wire protocol.
 ## migration from current frontend
 
 Phase A: introduce adapter without removing anything.
-- create `runtime/api/runtime-adapter/{types, resolve, embedded}.ts`
+- create `core/api/runtime-adapter/{types, resolve, embedded}.ts`
 - `xlnStore.ts` initializes embedded adapter alongside existing env logic
 - export `readStore` helper
 - existing components unchanged, keep using `$xlnEnvironment`
@@ -479,7 +479,7 @@ These were proposed in v1 and are intentionally not built:
 - Push-every-frame `{ type: 'frame', view }` broadcasts
 - `TickPayload` with `touchedEntities` / `touchedAccounts` filter sets
   (single integer height bump is enough)
-- Phase-2 KV/diff storage rewrite (already shipped in `runtime/storage/`)
+- Phase-2 KV/diff storage rewrite (already shipped in `core/storage/`)
 - `seekHeight` as adapter state (use per-call `atHeight` query instead)
 - Separate `getCheckpoints` / `getFrameAt` methods (use `read('checkpoints')`,
   `read('frame/:h')`)
@@ -505,7 +505,7 @@ re-introduction against this list.
 
 4. **schema versioning of payloads?** `StorageEntityCoreDoc` schema can
    evolve. We rely on `StorageHead.schemaVersion` (already exists in
-   `runtime/storage/index.ts:74`). Bump = breaking change, frontend pins
+   `core/storage/index.ts:74`). Bump = breaking change, frontend pins
    compatible major. Document in CHANGELOG.
 
 5. **read consistency at height boundary?** Resolved: `readStore` pins

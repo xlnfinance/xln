@@ -16,7 +16,7 @@ export default defineConfig({
 		alias: {
 			'@': fileURLToPath(new URL('./src', import.meta.url)),
 			// Types come from ../runtime source; runtime values load from /runtime.js at runtime.
-			'@xln/runtime': fileURLToPath(new URL('../runtime', import.meta.url)),
+			'@xln/core': fileURLToPath(new URL('../core', import.meta.url)),
 		},
 	},
 	build: {

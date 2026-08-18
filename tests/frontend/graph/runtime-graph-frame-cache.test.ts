@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import type { RuntimeAdapterGraphFrame } from '@xln/runtime/api/public/runtime-module';
+import type { RuntimeAdapterGraphFrame } from '@xln/core/api/public/runtime-module';
 import {
   clearRuntimeGraphFrameCache,
   refreshRuntimeGraphFrameCache,

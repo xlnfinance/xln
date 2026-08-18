@@ -1,6 +1,6 @@
 import { isAddress, ZeroAddress } from 'ethers';
-import type { JAdapter } from '@xln/runtime/api/public/runtime-module';
-import { safeParse } from '@xln/runtime/protocol/serialization';
+import type { JAdapter } from '@xln/core/api/public/runtime-module';
+import { safeParse } from '@xln/core/protocol/serialization';
 import { isUnknownRecord } from '$lib/utils/boundary';
 import type { EntityReplica } from '$lib/types/ui';
 import { readJsonResponse } from './account/account-faucet';

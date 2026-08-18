@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.runtime.json",
   "files": [
-    "runtime/__tests__/entity/consensus/core/entity-consensus-state-root.test.ts"
+    "core/__tests__/entity/consensus/invariants/entity-consensus-state-root.test.ts"
   ]
 }

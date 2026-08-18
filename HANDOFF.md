@@ -70,7 +70,7 @@ further from e2e artifacts.
 
 Structural facts established by reading the code, worth keeping:
 
-- `outputEnvelopeGroupKey` (`runtime/runtime/delivery/dispatch.ts:92`) is the
+- `outputEnvelopeGroupKey` (`core/runtime/delivery/dispatch.ts:92`) is the
   target `runtimeId` **alone**, and atomic cross-j pairing runs strictly inside
   one such group. An atomic cohort addressed to two Runtimes can never be
   complete by construction.
@@ -93,11 +93,11 @@ legs move symmetrically. Fix it; do not design it away.
 1. **Finish the cross-jurisdiction scenario.** The repo had zero of them (15
    scenarios, none cover cross-j) — that gap is why this area rotted.
 
-   `runtime/scenarios/cross-j/index.ts` exists and gets as far as applying the intent,
+   `core/scenarios/cross-j/index.ts` exists and gets as far as applying the intent,
    then stops at `CROSS_J_OWNER_RUNTIME_COLLISION`, because it runs everything
    in one process. That is the protocol refusing the shape, not a bug to work
    around: `resolveCrossJurisdictionRuntimeTopology`
-   (`runtime/extensions/cross-j/boundary.ts`) requires both users on one
+   (`core/extensions/cross-j/boundary.ts`) requires both users on one
    Runtime, both hubs on another, and the two distinct.
 
    **Build it the way this repo already does multi-Runtime — do not invent an
@@ -150,7 +150,7 @@ legs move symmetrically. Fix it; do not design it away.
 4. **Stale artifact lock.** `.logs/.test-artifact-run-lock.json` can outlive its
    process. Check the pid is dead, then delete.
 5. Scenario runs need `XLN_RUNTIME_SEED`, e.g.
-   `XLN_RUNTIME_SEED=dev-scenario-seed bun runtime/scenarios/run.ts settle`.
+   `XLN_RUNTIME_SEED=dev-scenario-seed bun core/scenarios/run.ts settle`.
 6. Diagnostics worth knowing: the MM writes
    `<shard>/rdb/mesh/mm/bootstrap-events.jsonl` (per-wave candidate/selected
    counts, and the full stall capsule on timeout), and hub crashes land in
@@ -160,10 +160,10 @@ legs move symmetrically. Fix it; do not design it away.
 
 ## 6. Invariants that must NOT be relaxed to go green
 
-- **`forwarded: for=_xln_public_proxy`** (`runtime/orchestrator/proxy.ts:39`):
+- **`forwarded: for=_xln_public_proxy`** (`core/orchestrator/proxy.ts:39`):
   everything the orchestrator forwards is marked public so a hub never treats it
   as a local operator. Operator-only routes must be asked of the hub's own port.
-- **Certified frame conflict guard** (`runtime/storage/index.ts`): compares
+- **Certified frame conflict guard** (`core/storage/index.ts`): compares
   `frame.hash`, not the whole link, because validators legitimately hold
   different certificate variants of the same committed frame. A differing hash
   is a real fork and still conflicts.

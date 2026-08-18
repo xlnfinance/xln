@@ -1,6 +1,6 @@
 /**
  * Frontend Logging Control
- * Mirrors runtime/infra/logger.ts pattern for UI code
+ * Mirrors core/support/logger.ts pattern for UI code
  *
  * @license AGPL-3.0
  * Copyright (C) 2025 XLN Finance

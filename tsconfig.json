@@ -39,7 +39,7 @@
     "typeRoots": ["./node_modules/@types", "./types"],
     "types": ["node", "bun", "qrcode"],
     "paths": {
-      "@xln/runtime/*": ["./runtime/*"],
+      "@xln/core/*": ["./core/*"],
       "@xln/brainvault/*": ["./brainvault/*"]
     }
   },

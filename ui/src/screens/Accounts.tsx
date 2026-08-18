@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
+import type { RuntimeAdapterEntitySummary } from '@xln/core/api/runtime-adapter/types';
 import { DeltaBar } from '../components/DeltaBar';
 import { Sheet } from '../components/Sheet';
-import { useAdapterRead } from '../runtime/hooks';
-import { useApp } from '../runtime/store';
-import { DEFAULT_ACCOUNT_DISPUTE_CONFIG, sendEntityTxs } from '../runtime/tx';
-import { formatAmount, getTokenMeta, parseAmount } from '../runtime/format';
-import { useAccounts, useEntityCore } from '../runtime/views';
+import { useAdapterRead } from '../core/hooks';
+import { useApp } from '../core/store';
+import { DEFAULT_ACCOUNT_DISPUTE_CONFIG, sendEntityTxs } from '../core/tx';
+import { formatAmount, getTokenMeta, parseAmount } from '../core/format';
+import { useAccounts, useEntityCore } from '../core/views';
 
 export function Accounts() {
 	const navigate = useNavigate();

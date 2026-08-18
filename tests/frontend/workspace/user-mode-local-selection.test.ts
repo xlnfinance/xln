@@ -28,5 +28,6 @@ describe('local runtime Entity selection', () => {
     expect(source).toContain('setRuntimeViewActiveEntityId(selectedEntityId);');
     expect(source).toContain('setRuntimeViewActiveEntityId(restoredEntityId);');
     expect(source).toContain('setRuntimeViewActiveEntityId(entityId);');
+    expect(source).toContain('void refreshCurrentRuntimeProjection().catch(handleRuntimeProjectionRefreshError)');
   });
 });

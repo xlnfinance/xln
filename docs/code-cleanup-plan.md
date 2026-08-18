@@ -26,7 +26,7 @@ They should still be done in small patches with targeted tests.
 ### Runtime
 
 1. Keep the current top-level split and document boundaries in
-   [runtime overview](runtime/overview.md).
+   [runtime overview](core/overview.md).
 2. Keep P2P transport and relay services under their shared `network/` owner;
    keep `routing`, `orderbook`, `orchestrator`, `account/tx`, and `entity/tx`
    as distinct responsibility boundaries.
@@ -36,7 +36,7 @@ They should still be done in small patches with targeted tests.
    - tower mode normalization;
    - non-negative integer clamping;
    - bundle/receipt sort comparators.
-4. Split persistence/replay internals out of `runtime/runtime.ts` only after a
+4. Split persistence/replay internals out of `core/runtime.ts` only after a
    no-behavior-change plan is proven by persistence and E2E gates.
 
 ### Frontend
@@ -68,7 +68,7 @@ all been checked in the current tree:
 
 ## Not Safe To Remove Blindly
 
-- anything under `runtime/scenarios/` except obvious OS junk;
+- anything under `core/scenarios/` except obvious OS junk;
 - anything in `frontend/src/lib/view/`;
 - anything in `frontend/src/lib/network3d/`;
 - anything mentioned only by docs until import and route usage are both checked;
@@ -77,7 +77,7 @@ all been checked in the current tree:
 ## E2E Standard To Keep Applying
 
 1. The first comment block in each E2E spec should state the user flow and goal.
-2. Primary assertions should combine saved runtime/event truth with visible HTML
+2. Primary assertions should combine saved core/event truth with visible HTML
    confirmation when applicable.
 3. Prefer shared helpers over file-local duplicates.
 4. Use `expect.poll` for node-side polling where possible.

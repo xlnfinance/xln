@@ -1,0 +1,1152 @@
+import { createHash } from 'node:crypto';
+import { mkdirSync, readdirSync, rmSync, statSync } from 'fs';
+import { basename, dirname, join } from 'path';
+
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { hasCliFlag, readCliOption } from '../../../config/cli';
+import { deriveAccountWatchSeed } from '../../../protocol/identity/account-watch-seed';
+import { defaultAccountDisputeConfigForParties } from '../../../account/config/dispute-config';
+import { generateLazyEntityId } from '../../../entity/factory';
+import {
+  createEntityFrameHashFromStateRoot,
+  setEntityFrameHashDebugRecorder,
+} from '../../../entity/consensus/frame';
+import { hashHtlcSecret } from '../../../protocol/htlc/utils';
+import { converge } from '../../../scenarios/harness/helpers';
+import { serializeTaggedJson } from '../../../protocol/serialization';
+import { inspectStorageDb, loadEntityStateFromStorageDb } from '../../../runtime';
+import {
+  applyRuntimeInput,
+  closeInfraDb,
+  closeRuntimeDb,
+  createEmptyEnv,
+  loadEnvFromDB,
+  processRuntime,
+  saveEnvToDB,
+} from '../../../runtime';
+import { dbRootPath } from '../../../runtime/replica/platform';
+import type { AccountReplica } from '../../../types/account';
+import type { EntityReplica, EntityState } from '../../../entity/types';
+import type { RuntimeReplica, RoutedEntityInput } from '../../../runtime/types';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { JReplica } from '../../../types/jurisdiction-runtime';
+import { getPerfMs } from '../../../support/time';
+import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
+import { buildRuntimeCheckpointSnapshot } from '../../../storage/wal/snapshot';
+import {
+  buildStorageLiveReplicaMetaCommitment,
+  inspectStorageReplicaMetaEntries,
+  summarizeStorageReplicaMetaEntries,
+  summarizeStorageReplicaMetaFields,
+  summarizeStorageReplicaMetaHeads,
+} from '../../../storage/replica/replicas';
+
+type Participant = {
+  entityId: string;
+  name: string;
+  signerId: string;
+  slot: string;
+};
+
+type DocStats = {
+  avg: number;
+  max: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  total: number;
+};
+
+type PaymentKind = 'direct' | 'htlc';
+
+const args = globalThis.process.argv.slice(2);
+
+function getArg(name: string): string | undefined;
+function getArg(name: string, defaultValue: string): string;
+function getArg(name: string, defaultValue?: string): string | undefined {
+  return defaultValue === undefined
+    ? readCliOption(args, name)
+    : readCliOption(args, name, defaultValue);
+}
+
+const hasFlag = (name: string): boolean => hasCliFlag(args, name);
+
+const parsePositiveInt = (value: string | undefined, defaultValue: number): number => {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
+};
+
+const parseNonNegativeInt = (value: string | undefined, defaultValue: number): number => {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : defaultValue;
+};
+
+const parseBigIntArg = (value: string | undefined, defaultValue: bigint): bigint => {
+  if (!value) return defaultValue;
+  try {
+    return BigInt(value);
+  } catch {
+    throw new Error(`INVALID_BIGINT_ARGUMENT:${value}`);
+  }
+};
+
+const parsePaymentKind = (value: string | undefined): PaymentKind => {
+  const kind = String(value || 'direct');
+  if (kind === 'direct' || kind === 'htlc') return kind;
+  throw new Error(`INVALID_PAYMENT_KIND:${kind}`);
+};
+
+const formatBytes = (value: number): string => {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(2)} KiB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(2)} MiB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+};
+
+const percentile = (values: number[], ratio: number): number => {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * ratio)));
+  return sorted[index] ?? 0;
+};
+
+const summarizeBytes = (values: number[]): DocStats => {
+  if (values.length === 0) {
+    return { avg: 0, max: 0, p50: 0, p95: 0, p99: 0, total: 0 };
+  }
+  const total = values.reduce((sum, value) => sum + value, 0);
+  const avg = Math.round(total / values.length);
+  const max = Math.max(...values);
+  return {
+    avg,
+    max,
+    p50: percentile(values, 0.50),
+    p95: percentile(values, 0.95),
+    p99: percentile(values, 0.99),
+    total,
+  };
+};
+
+const encodedSize = (value: unknown): number => Buffer.byteLength(serializeTaggedJson(value));
+
+const compareAccountDocs = (
+  liveAccounts: ReadonlyMap<string, AccountReplica>,
+  loadedAccounts: ReadonlyMap<string, AccountReplica>,
+): {
+  mismatches: number;
+  firstMismatchKey: string | null;
+  firstMismatchFields: string[];
+  firstMismatchLiveJson: string | null;
+  firstMismatchLoadedJson: string | null;
+} => {
+  let mismatches = 0;
+  let firstMismatchKey: string | null = null;
+  let firstMismatchFields: string[] = [];
+  let firstMismatchLiveJson: string | null = null;
+  let firstMismatchLoadedJson: string | null = null;
+  const keys = new Set<string>([...liveAccounts.keys(), ...loadedAccounts.keys()]);
+  for (const key of keys) {
+    const live = liveAccounts.get(key);
+    const loaded = loadedAccounts.get(key);
+    const liveDoc = live ? projectAccountDoc(live) : null;
+    const loadedDoc = loaded ? projectAccountDoc(loaded) : null;
+    const liveEncoded = liveDoc ? serializeTaggedJson(liveDoc) : null;
+    const loadedEncoded = loadedDoc ? serializeTaggedJson(loadedDoc) : null;
+    if (liveEncoded !== loadedEncoded) {
+      mismatches += 1;
+      if (!firstMismatchKey) {
+        firstMismatchKey = key;
+        const propKeys = new Set<string>([
+          ...Object.keys(liveDoc ?? {}),
+          ...Object.keys(loadedDoc ?? {}),
+        ]);
+        firstMismatchFields = Array.from(propKeys)
+          .filter((propKey) => serializeTaggedJson((liveDoc as Record<string, unknown> | null)?.[propKey]) !== serializeTaggedJson((loadedDoc as Record<string, unknown> | null)?.[propKey]))
+          .sort();
+        firstMismatchLiveJson = serializeTaggedJson(
+          Object.fromEntries(firstMismatchFields.map((propKey) => [propKey, (liveDoc as Record<string, unknown> | null)?.[propKey]])),
+        );
+        firstMismatchLoadedJson = serializeTaggedJson(
+          Object.fromEntries(firstMismatchFields.map((propKey) => [propKey, (loadedDoc as Record<string, unknown> | null)?.[propKey]])),
+        );
+      }
+    }
+  }
+  return { mismatches, firstMismatchKey, firstMismatchFields, firstMismatchLiveJson, firstMismatchLoadedJson };
+};
+
+const runQuiet = async <T>(enabled: boolean, fn: () => Promise<T>): Promise<T> => {
+  if (!enabled) return fn();
+  const originalLog = console.log;
+  const originalInfo = console.info;
+  const originalWarn = console.warn;
+  const originalDebug = console.debug;
+  console.log = () => {};
+  console.info = () => {};
+  console.warn = () => {};
+  console.debug = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.log = originalLog;
+    console.info = originalInfo;
+    console.warn = originalWarn;
+    console.debug = originalDebug;
+  }
+};
+
+const findReplica = (env: RuntimeReplica, participant: Participant): EntityReplica => {
+  const replica = env.state.eReplicas.get(`${participant.entityId}:${participant.signerId}`);
+  if (!replica) {
+    throw new Error(`REPLICA_NOT_FOUND: ${participant.name}`);
+  }
+  return replica;
+};
+
+const projectEntityCoreDoc = (state: EntityState): Record<string, unknown> => ({
+  entityId: state.entityId,
+  height: state.height,
+  timestamp: state.timestamp,
+  nonces: state.nonces,
+  proposals: state.proposals,
+  config: state.config,
+  prevFrameHash: state.prevFrameHash,
+  reserves: state.reserves,
+  deferredAccountProposals: state.deferredAccountProposals,
+  lastFinalizedJHeight: state.lastFinalizedJHeight,
+  crontabState: state.crontabState,
+  jBatchState: state.jBatchState,
+  profile: state.profile,
+  htlcRoutes: state.htlcRoutes,
+  htlcFeesEarned: state.htlcFeesEarned,
+  outDebtsByToken: state.outDebtsByToken,
+  inDebtsByToken: state.inDebtsByToken,
+  orderbookExt: state.orderbookExt,
+  lockBook: state.lockBook,
+  swapTradingPairs: state.swapTradingPairs,
+  hubRebalanceConfig: state.hubRebalanceConfig,
+});
+
+const projectAccountDoc = (account: AccountReplica): Record<string, unknown> => ({
+  leftEntity: account.state.leftEntity,
+  rightEntity: account.state.rightEntity,
+  status: account.status,
+  mempool: account.mempool,
+  currentFrame: account.currentFrame,
+  deltas: account.state.deltas,
+  locks: account.state.locks,
+  swapOffers: account.state.swapOffers,
+  currentHeight: account.currentHeight,
+  pendingFrame: account.pendingFrame,
+  pendingSignatures: account.pendingSignatures,
+  pendingAccountInput: account.pendingAccountInput,
+  rollbackCount: account.rollbackCount,
+  lastRollbackFrameHash: account.lastRollbackFrameHash,
+  lastFinalizedJHeight: account.state.lastFinalizedJHeight,
+  proofHeader: account.proofHeader,
+  proofBody: account.proofBody,
+  abiProofBody: account.abiProofBody,
+  disputeConfig: account.state.disputeConfig,
+  currentFrameHanko: account.currentFrameHanko,
+  counterpartyFrameHanko: account.counterpartyFrameHanko,
+  currentDisputeProofHanko: account.currentDisputeProofHanko,
+  currentDisputeProofNonce: account.currentDisputeProofNonce,
+  currentDisputeProofBodyHash: account.currentDisputeProofBodyHash,
+  currentDisputeHash: account.currentDisputeHash,
+  counterpartyDisputeProofHanko: account.counterpartyDisputeProofHanko,
+  counterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
+  counterpartyDisputeProofBodyHash: account.counterpartyDisputeProofBodyHash,
+  counterpartyDisputeHash: account.counterpartyDisputeHash,
+  counterpartySettlementHanko: account.counterpartySettlementHanko,
+  disputeProofNoncesByHash: account.disputeProofNoncesByHash,
+  disputeProofBodiesByHash: account.disputeProofBodiesByHash,
+  jNonce: account.state.jNonce,
+  settlementWorkspace: account.state.settlementWorkspace,
+  activeDispute: account.activeDispute,
+  pendingWithdrawals: account.pendingWithdrawals,
+  requestedRebalance: account.state.requestedRebalance,
+  requestedRebalanceFeeState: account.state.requestedRebalanceFeeState,
+  rebalanceFeePolicies: account.state.rebalanceFeePolicies,
+  shadow: account.shadow,
+});
+
+const getDirSize = (path: string): number => {
+  const stat = statSync(path);
+  if (stat.isFile()) return stat.size;
+  if (!stat.isDirectory()) throw new Error(`BENCH_STORAGE_PATH_TYPE_INVALID:${path}`);
+  let total = 0;
+  for (const entry of readdirSync(path)) {
+    total += getDirSize(join(path, entry));
+  }
+  return total;
+};
+
+const runtimeDbSiblingPaths = (basePath: string): string[] => {
+  const parent = dirname(basePath);
+  const prefix = basename(basePath);
+  try {
+    return readdirSync(parent)
+      .filter(entry => entry === prefix || entry.startsWith(`${prefix}-`))
+      .map(entry => join(parent, entry));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+};
+
+const removeRuntimeDbPaths = (basePath: string): void => {
+  for (const path of runtimeDbSiblingPaths(basePath)) {
+    rmSync(path, { recursive: true, force: true });
+  }
+};
+
+const getRuntimeDbBytes = (basePath: string): number =>
+  runtimeDbSiblingPaths(basePath).reduce((sum, path) => sum + getDirSize(path), 0);
+
+const makeParticipant = (seed: string, slotNumber: number, name: string): Participant => {
+  const slot = String(slotNumber);
+  const signerId = deriveSignerAddressSync(seed, slot).toLowerCase();
+  const signerKey = deriveSignerKeySync(seed, slot);
+  registerSignerKey(seed, signerId, signerKey);
+  return {
+    slot,
+    signerId,
+    entityId: generateLazyEntityId([signerId], 1n).toLowerCase(),
+    name,
+  };
+};
+
+const htlcSecretFor = (seed: string, index: number): string =>
+  `0x${createHash('sha256').update(`${seed}:soak-htlc:${index}`).digest('hex')}`;
+
+const paymentTxFor = (
+  paymentKind: PaymentKind,
+  seed: string,
+  index: number,
+  user: Participant,
+  hub: Participant,
+  tokenId: number,
+  amount: bigint,
+  description: string,
+): EntityTx => {
+  if (paymentKind === 'direct') {
+    return {
+      type: 'directPayment',
+      data: {
+        targetEntityId: hub.entityId,
+        tokenId,
+        amount,
+        route: [user.entityId, hub.entityId],
+        deliveryMode: 'direct',
+        description,
+      },
+    };
+  }
+  const secret = htlcSecretFor(seed, index);
+  return {
+    type: 'htlcPayment',
+    data: {
+      targetEntityId: hub.entityId,
+      tokenId,
+      amount,
+      maxSenderDebit: amount,
+      route: [user.entityId, hub.entityId],
+      deliveryMode: 'async',
+      description,
+      hashlock: hashHtlcSecret(secret),
+    },
+  };
+};
+
+type OpenHtlcLockStats = {
+  total: number;
+  entityLockBook: number;
+  accountLocks: number;
+  htlcRoutes: number;
+  samples: string[];
+};
+
+const accountFrameHasHtlcLock = (txs: readonly unknown[] | undefined, lockId: string): boolean =>
+  Boolean(txs?.some((tx) =>
+    typeof tx === 'object' &&
+    tx !== null &&
+    (tx as { type?: unknown }).type === 'htlc_lock' &&
+    (tx as { data?: { lockId?: unknown } }).data?.lockId === lockId
+  ));
+
+const accountFrameHasHtlcResolve = (txs: readonly unknown[] | undefined, lockId: string): boolean =>
+  Boolean(txs?.some((tx) =>
+    typeof tx === 'object' &&
+    tx !== null &&
+    (tx as { type?: unknown }).type === 'htlc_resolve' &&
+    (tx as { data?: { lockId?: unknown } }).data?.lockId === lockId
+  ));
+
+const describeRouteLockRefs = (
+  state: EntityState,
+  counterpartyId: string | undefined,
+  lockId: string | undefined,
+): string => {
+  if (!counterpartyId || !lockId) return 'refs=none';
+  const account = state.accounts.get(counterpartyId);
+  if (!account) return 'refs=no-account';
+  const refs = [
+    account.state.locks?.has(lockId) ? 'locks' : '',
+    accountFrameHasHtlcLock(account.mempool, lockId) ? 'mempool' : '',
+    accountFrameHasHtlcLock(account.pendingFrame?.accountTxs, lockId) ? `pending:${account.pendingFrame?.height ?? '?'}` : '',
+    accountFrameHasHtlcLock(account.currentFrame?.accountTxs, lockId) ? `current:${account.currentFrame?.height ?? '?'}` : '',
+    accountFrameHasHtlcResolve(account.currentFrame?.accountTxs, lockId) ? `currentResolve:${account.currentFrame?.height ?? '?'}` : '',
+  ].filter(Boolean);
+  return `refs=${refs.join(',') || 'none'}`;
+};
+
+const summarizeOpenHtlcLocks = (env: RuntimeReplica): OpenHtlcLockStats => {
+  const stats: OpenHtlcLockStats = { total: 0, entityLockBook: 0, accountLocks: 0, htlcRoutes: 0, samples: [] };
+  for (const replica of env.state.eReplicas.values()) {
+    const entityId = String(replica.state.entityId || '').slice(0, 10);
+    for (const lock of replica.state.lockBook?.values?.() ?? []) {
+      stats.entityLockBook += 1;
+      if (stats.samples.length < 8) stats.samples.push(`lockBook:${entityId}:${String(lock.lockId).slice(0, 12)}`);
+    }
+    for (const [hashlock, route] of replica.state.htlcRoutes?.entries?.() ?? []) {
+      stats.htlcRoutes += 1;
+      if (stats.samples.length < 8) {
+        const refs = describeRouteLockRefs(replica.state, route.outboundEntity, route.outboundLockId);
+        stats.samples.push(
+          `route:${entityId}:${String(hashlock).slice(0, 12)}:` +
+            `in=${String(route.inboundLockId || '').slice(0, 12) || '-'}:` +
+            `out=${String(route.outboundLockId || '').slice(0, 12) || '-'}:${refs}`,
+        );
+      }
+    }
+    for (const account of replica.state.accounts.values()) {
+      for (const lock of account.state.locks?.values?.() ?? []) {
+        stats.accountLocks += 1;
+        if (stats.samples.length < 8) stats.samples.push(`account:${entityId}:${String(lock.lockId).slice(0, 12)}`);
+      }
+    }
+  }
+  stats.total = stats.entityLockBook + stats.accountLocks + stats.htlcRoutes;
+  return stats;
+};
+
+const drainHtlcSettlements = async (
+  env: RuntimeReplica,
+  maxRounds: number,
+  maxConverge: number,
+  verbose: boolean,
+): Promise<OpenHtlcLockStats> => {
+  let stats = summarizeOpenHtlcLocks(env);
+  for (let round = 0; round < maxRounds && stats.total > 0; round += 1) {
+    await runQuiet(!verbose, () => converge(env, maxConverge));
+    stats = summarizeOpenHtlcLocks(env);
+    if (verbose || round === 0 || round === maxRounds - 1 || stats.total === 0) {
+      console.log(
+        `HTLC drain round ${round + 1}/${maxRounds}: total=${stats.total} ` +
+          `lockBook=${stats.entityLockBook} accounts=${stats.accountLocks} routes=${stats.htlcRoutes} ` +
+          `samples=${stats.samples.join(' | ') || 'none'}`,
+      );
+    }
+  }
+  return stats;
+};
+
+const importParticipants = async (
+  env: RuntimeReplica,
+  participants: Participant[],
+  importBatch: number,
+  jurisdiction: { address: string; name: string; depositoryAddress: string; entityProviderAddress: string; chainId: number },
+): Promise<void> => {
+  for (let offset = 0; offset < participants.length; offset += importBatch) {
+    const slice = participants.slice(offset, offset + importBatch);
+    const runtimeInput = {
+      runtimeTxs: slice.map((participant) => createTestEntityImportRuntimeTx(env, {
+        entityId: participant.entityId,
+        signerId: participant.signerId,
+        data: {
+          isProposer: true,
+          position: { x: 0, y: 0, z: 0 },
+          config: {
+            mode: 'proposer-based' as const,
+            threshold: 1n,
+            validators: [participant.signerId],
+            shares: { [participant.signerId]: 1n },
+            jurisdiction,
+          },
+        },
+      })),
+      entityInputs: [],
+    } as unknown as RuntimeReplica['runtimeMempool'];
+    await applyRuntimeInput(env, runtimeInput);
+    if (env.runtimeConfig?.storage?.enabled === true || env.infrastructure?.persistencePaused !== true) {
+      await saveEnvToDB(env, runtimeInput, undefined, undefined, new Map());
+    }
+  }
+};
+
+const logStats = (label: string, stats: DocStats): void => {
+  console.log(
+    `${label}: total=${formatBytes(stats.total)} avg=${formatBytes(stats.avg)} ` +
+      `p50=${formatBytes(stats.p50)} p95=${formatBytes(stats.p95)} p99=${formatBytes(stats.p99)} max=${formatBytes(stats.max)}`,
+  );
+};
+
+const isStorageAbsentAtHeightError = (error: unknown): boolean =>
+  error instanceof Error && error.message.startsWith('STORAGE_DIFF_MISSING:');
+
+const loadOptionalEntityStateFromStorageDb = async (
+  env: RuntimeReplica,
+  entityId: string,
+  height: number,
+): Promise<EntityState | null> => {
+  try {
+    return await loadEntityStateFromStorageDb(env, entityId, height);
+  } catch (error) {
+    if (isStorageAbsentAtHeightError(error)) return null;
+    throw error;
+  }
+};
+
+const requireWatchSeed = (watchSeeds: ReadonlyMap<string, string>, entityId: string): string => {
+  const watchSeed = watchSeeds.get(entityId);
+  if (!watchSeed) throw new Error(`BENCH_WATCH_SEED_MISSING:${entityId}`);
+  return watchSeed;
+};
+
+async function main() {
+  const accounts = parsePositiveInt(getArg('--accounts', '1024'), 1024);
+  const importBatch = parsePositiveInt(getArg('--import-batch', '512'), 512);
+  const openBatch = parsePositiveInt(getArg('--open-batch', '64'), 64);
+  const paymentBatch = parsePositiveInt(getArg('--payment-batch', '64'), 64);
+  const payments = parseNonNegativeInt(getArg('--payments', '0'), 0);
+  const paymentKind = parsePaymentKind(getArg('--payment-kind', 'direct'));
+  const minPaymentTps = parseNonNegativeInt(getArg('--min-payment-tps', '0'), 0);
+  const tokenId = parsePositiveInt(getArg('--token-id', '1'), 1);
+  const persist = hasFlag('--persist');
+  const storageEnabled = hasFlag('--storage');
+  const storageSnapshotPeriod = parsePositiveInt(getArg('--storage-snapshot', '256'), 256);
+  const storageMaterializePeriod = parsePositiveInt(getArg('--storage-materialize', '100'), 100);
+  const storageCanonicalPeriod = parseNonNegativeInt(getArg('--storage-canonical', '0'), 0);
+  const storageEpochMb = parsePositiveInt(getArg('--storage-epoch-mb', '256'), 256);
+  const accountMerkleRadix = getArg('--account-merkle-radix', '16') === '256' ? 256 : 16;
+  const recoveryBudgetMs = parsePositiveInt(getArg('--recovery-budget-ms', '10000'), 10000);
+  const crashRecoveryBudgetMs = parsePositiveInt(getArg('--crash-recovery-budget-ms', '10000'), 10000);
+  const crashRecover = hasFlag('--crash-recover');
+  const recoveryScanStep = parsePositiveInt(getArg('--recovery-scan-step', '1'), 1);
+  const snapshotInterval = parsePositiveInt(
+    getArg('--snapshot-interval', persist ? '100000' : String(Number.MAX_SAFE_INTEGER)),
+    persist ? 100000 : Number.MAX_SAFE_INTEGER,
+  );
+  const creditAmount = parseBigIntArg(getArg('--credit', '1000000000000000000'), 10n ** 18n);
+  const paymentAmount = parseBigIntArg(getArg('--amount', '1'), 1n);
+  const maxConverge = parsePositiveInt(getArg('--max-converge', '200'), 200);
+  const verbose = hasFlag('--verbose');
+  if (hasFlag('--debug-replica-meta')) {
+    process.env['XLN_STORAGE_DEBUG_REPLICA_META'] = '1';
+    setEntityFrameHashDebugRecorder((record) => {
+      const payload = record.payload as { txs?: Array<{ type?: unknown }> };
+      console.error('[ENTITY_FRAME_HASH]', JSON.stringify({
+        entityId: record.entityId,
+        height: record.height,
+        hash: record.hash,
+        txTypes: payload.txs?.map(tx => tx.type) ?? [],
+        payloadHash: createHash('sha256').update(JSON.stringify(record.payload)).digest('hex'),
+      }));
+    });
+  }
+  const seed = getArg('--seed', 'bench-storage-hub alpha beta gamma delta epsilon')!;
+  const requestedDbRoot = getArg('--db-root', dbRootPath)!;
+  const dbRoot = process.env['XLN_DB_PATH'] || requestedDbRoot;
+
+  const runtimeId = deriveSignerAddressSync(seed, '900000').toLowerCase();
+  registerSignerKey(seed, runtimeId, deriveSignerKeySync(seed, '900000'));
+  const dbPath = join(dbRoot, runtimeId);
+
+  if (persist) {
+    removeRuntimeDbPaths(dbPath);
+    mkdirSync(dbRoot, { recursive: true });
+  }
+
+  const env = createEmptyEnv(seed);
+  env.runtimeId = runtimeId;
+  env.dbNamespace = runtimeId;
+  env.quietRuntimeLogs = true;
+  env.scenarioMode = true;
+  env.state.timestamp = 1;
+  env.runtimeConfig = {
+    ...(env.runtimeConfig || {}),
+    snapshotIntervalFrames: snapshotInterval,
+    ...(storageEnabled
+      ? {
+          storage: {
+            enabled: true,
+            snapshotPeriodFrames: storageSnapshotPeriod,
+            materializePeriodFrames: storageMaterializePeriod,
+            canonicalHashPeriodFrames: storageCanonicalPeriod,
+            retainSnapshots: 3,
+            epochMaxBytes: storageEpochMb * 1024 * 1024,
+            accountMerkleRadix,
+          },
+        }
+      : {}),
+  };
+  if (!env.infrastructure) {
+    env.infrastructure = {} as NonNullable<RuntimeReplica['infrastructure']>;
+  }
+  env.infrastructure.persistencePaused = !persist && !storageEnabled;
+  const jurisdiction = {
+    address: 'browservm://bench',
+    name: 'bench',
+    depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+    entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+    chainId: 31337,
+  };
+  env.activeJurisdiction = jurisdiction.name;
+  const benchJReplica: JReplica = {
+    name: jurisdiction.name,
+    blockNumber: 0n,
+    stateRoot: new Uint8Array(32),
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: env.state.timestamp,
+    position: { x: 0, y: 0, z: 0 },
+    chainId: jurisdiction.chainId,
+    contracts: {
+      account: '0x000000000000000000000000000000000000ac01',
+      depository: jurisdiction.depositoryAddress,
+      entityProvider: jurisdiction.entityProviderAddress,
+      deltaTransformer: '0x000000000000000000000000000000000000de17',
+    },
+  };
+  env.state.jReplicas.set(jurisdiction.name, benchJReplica);
+
+  const hub = makeParticipant(seed, 1, 'hub');
+  const users: Participant[] = [];
+  for (let index = 0; index < accounts; index += 1) {
+    users.push(makeParticipant(seed, index + 2, `user-${index + 1}`));
+  }
+
+  console.log(`Benchmark config: accounts=${accounts} payments=${payments} paymentKind=${paymentKind} persist=${persist ? 1 : 0}`);
+  console.log(`Batches: import=${importBatch} open=${openBatch} payment=${paymentBatch} converge=${maxConverge}`);
+
+  const importStartedAt = getPerfMs();
+  await runQuiet(!verbose, () => importParticipants(env, [hub, ...users], importBatch, jurisdiction));
+  const importMs = getPerfMs() - importStartedAt;
+  console.log(`Imported replicas: ${env.state.eReplicas.size} in ${importMs.toFixed(2)}ms`);
+
+  const openStartedAt = getPerfMs();
+  for (let offset = 0; offset < users.length; offset += openBatch) {
+    const slice = users.slice(offset, offset + openBatch);
+    const watchSeeds = new Map<string, string>();
+    for (const user of slice) {
+      watchSeeds.set(
+        user.entityId,
+        deriveAccountWatchSeed({
+          runtimeSeed: seed,
+          runtimeId,
+          entityId: hub.entityId,
+          counterpartyId: user.entityId,
+        }),
+      );
+    }
+    const openInputs: RoutedEntityInput[] = [
+      ...slice.map((user) => ({
+        entityId: user.entityId,
+        signerId: user.signerId,
+        entityTxs: [
+          {
+            type: 'openAccount' as const,
+            data: {
+              targetEntityId: hub.entityId,
+              disputeConfig: defaultAccountDisputeConfigForParties(
+                user.entityId,
+                false,
+                hub.entityId,
+                true,
+              ),
+              tokenId,
+              creditAmount,
+              watchSeed: requireWatchSeed(watchSeeds, user.entityId),
+            },
+          },
+        ],
+      })),
+      {
+        entityId: hub.entityId,
+        signerId: hub.signerId,
+        entityTxs: slice.map((user) => ({
+          type: 'openAccount' as const,
+          data: {
+            targetEntityId: user.entityId,
+            disputeConfig: defaultAccountDisputeConfigForParties(
+              hub.entityId,
+              true,
+              user.entityId,
+              false,
+            ),
+            tokenId,
+            creditAmount,
+            watchSeed: requireWatchSeed(watchSeeds, user.entityId),
+          },
+        })),
+      },
+    ];
+    await runQuiet(!verbose, () => processRuntime(env, openInputs));
+
+    await runQuiet(!verbose, () => converge(env, maxConverge));
+    const expected = offset + slice.length;
+    const actual = findReplica(env, hub).state.accounts.size;
+    if (actual < expected) {
+      throw new Error(`OPEN_BATCH_INCOMPLETE: expected=${expected} actual=${actual}`);
+    }
+
+    if ((offset / openBatch) % 8 === 0) {
+      console.log(`Open progress: ${expected}/${users.length}`);
+    }
+  }
+  await converge(env, maxConverge);
+  const openMs = getPerfMs() - openStartedAt;
+
+  const hubReplica = findReplica(env, hub);
+  if (hubReplica.state.accounts.size !== users.length) {
+    throw new Error(`ACCOUNT_COUNT_MISMATCH: expected=${users.length} actual=${hubReplica.state.accounts.size}`);
+  }
+
+  const currentSnapshotBytes = encodedSize(buildRuntimeCheckpointSnapshot(env));
+  const hubEntityBytes = encodedSize(hubReplica.state);
+  const hubCoreProjectedBytes = encodedSize(projectEntityCoreDoc(hubReplica.state));
+  const userEntityProjectedBytes: number[] = [];
+  const accountDocProjectedBytes: number[] = [];
+  const accountDocCurrentBytes: number[] = [];
+
+  for (const user of users) {
+    const userReplica = findReplica(env, user);
+    const hubSideAccount = hubReplica.state.accounts.get(user.entityId);
+    if (!hubSideAccount) {
+      throw new Error(`HUB_ACCOUNT_MISSING: ${user.name}`);
+    }
+    accountDocCurrentBytes.push(encodedSize(hubSideAccount));
+    accountDocProjectedBytes.push(encodedSize(projectAccountDoc(hubSideAccount)));
+    userEntityProjectedBytes.push(encodedSize(projectEntityCoreDoc(userReplica.state)));
+  }
+
+  const accountCurrentStats = summarizeBytes(accountDocCurrentBytes);
+  const accountProjectedStats = summarizeBytes(accountDocProjectedBytes);
+  const userCoreStats = summarizeBytes(userEntityProjectedBytes);
+
+  let sampleDiffBytes = 0;
+  let paymentMs = 0;
+  let settlementMs = 0;
+  let processedPayments = 0;
+
+  if (users.length > 0 && payments > 0) {
+    const sampleUser = users[0]!;
+    const sampleUserReplicaBefore = findReplica(env, sampleUser);
+    const sampleHubAccountBefore = hubReplica.state.accounts.get(sampleUser.entityId);
+    const sampleUserAccountBefore = sampleUserReplicaBefore.state.accounts.get(hub.entityId);
+    if (!sampleHubAccountBefore || !sampleUserAccountBefore) {
+      throw new Error('SAMPLE_ACCOUNT_MISSING');
+    }
+
+    const samplePaymentInput: RoutedEntityInput[] = [
+      {
+        entityId: sampleUser.entityId,
+        signerId: sampleUser.signerId,
+        entityTxs: [
+          paymentTxFor(paymentKind, seed, 0, sampleUser, hub, tokenId, paymentAmount, `sample-${paymentKind}`),
+        ],
+      },
+    ];
+    const samplePaymentStartedAt = getPerfMs();
+    await runQuiet(!verbose, () => processRuntime(env, samplePaymentInput));
+    paymentMs += getPerfMs() - samplePaymentStartedAt;
+    const sampleSettlementStartedAt = getPerfMs();
+    await runQuiet(!verbose, () => converge(env, maxConverge));
+    settlementMs += getPerfMs() - sampleSettlementStartedAt;
+    processedPayments += 1;
+
+    const sampleUserReplicaAfter = findReplica(env, sampleUser);
+    const sampleHubReplicaAfter = findReplica(env, hub);
+    const sampleHubAccountAfter = sampleHubReplicaAfter.state.accounts.get(sampleUser.entityId);
+    const sampleUserAccountAfter = sampleUserReplicaAfter.state.accounts.get(hub.entityId);
+    if (!sampleHubAccountAfter || !sampleUserAccountAfter) {
+      throw new Error('SAMPLE_ACCOUNT_AFTER_MISSING');
+    }
+
+    sampleDiffBytes =
+      encodedSize(projectEntityCoreDoc(sampleHubReplicaAfter.state)) +
+      encodedSize(projectEntityCoreDoc(sampleUserReplicaAfter.state)) +
+      encodedSize(projectAccountDoc(sampleHubAccountAfter)) +
+      encodedSize(projectAccountDoc(sampleUserAccountAfter));
+  }
+
+  if (payments > processedPayments) {
+    const paymentUsers = users.slice(0, Math.min(users.length, payments - processedPayments));
+    for (let offset = 0; offset < paymentUsers.length; offset += paymentBatch) {
+      const slice = paymentUsers.slice(offset, offset + paymentBatch);
+      const paymentInputs: RoutedEntityInput[] = slice.map((user, index) => ({
+        entityId: user.entityId,
+        signerId: user.signerId,
+        entityTxs: [
+          paymentTxFor(
+            paymentKind,
+            seed,
+            processedPayments + offset + index,
+            user,
+            hub,
+            tokenId,
+            paymentAmount,
+            `${paymentKind}-burst-${offset + index + 1}`,
+          ),
+        ],
+      }));
+      const paymentBatchStartedAt = getPerfMs();
+      await runQuiet(!verbose, () => processRuntime(env, paymentInputs));
+      paymentMs += getPerfMs() - paymentBatchStartedAt;
+      const settlementBatchStartedAt = getPerfMs();
+      await runQuiet(!verbose, () => converge(env, maxConverge));
+      settlementMs += getPerfMs() - settlementBatchStartedAt;
+      processedPayments += slice.length;
+      if ((offset / paymentBatch) % 8 === 0) {
+        console.log(`Payment progress: ${processedPayments}/${payments}`);
+      }
+    }
+  }
+  const paymentTps = processedPayments > 0
+    ? processedPayments / Math.max(paymentMs / 1000, 0.001)
+    : 0;
+  if (minPaymentTps > 0 && paymentTps < minPaymentTps) {
+    throw new Error(`PAYMENT_TPS_BELOW_TARGET:${paymentTps.toFixed(2)}<${minPaymentTps}`);
+  }
+  const openHtlcStats = paymentKind === 'htlc'
+    ? await drainHtlcSettlements(env, 8, maxConverge, verbose)
+    : summarizeOpenHtlcLocks(env);
+  const openHtlcLocks = paymentKind === 'htlc' ? openHtlcStats.total : 0;
+  if (paymentKind === 'htlc' && openHtlcLocks !== 0) {
+    throw new Error(
+      `HTLC_LOCKS_LEFT:${openHtlcLocks}:` +
+        `lockBook=${openHtlcStats.entityLockBook}:accounts=${openHtlcStats.accountLocks}:routes=${openHtlcStats.htlcRoutes}`,
+    );
+  }
+
+  const dbBytes = persist || storageEnabled ? getRuntimeDbBytes(dbPath) : 0;
+  let storageLoadedAccountCount: number | null = null;
+  let storageHistoricalHeight: number | null = null;
+  let storageHistoricalAccountCount: number | null = null;
+  let storageLatestLoadMs: number | null = null;
+  let storageHistoricalLoadMs: number | null = null;
+  let storageWorstLoadMs: number | null = null;
+  let storageWorstLoadHeight: number | null = null;
+  let storageRecoverySamples = 0;
+  let storageFirstPresentHeight: number | null = null;
+  let storageLiveMerkleRoot: string | null = null;
+  let storageLoadedMerkleRoot: string | null = null;
+  let storageHistoricalMerkleRoot: string | null = null;
+  let storageMerkleBuildMs: number | null = null;
+  let storageLatestAccountMismatches: number | null = null;
+  let storageLatestFirstMismatchKey: string | null = null;
+  let storageLatestFirstMismatchFields: string[] = [];
+  let storageLatestFirstMismatchLiveJson: string | null = null;
+  let storageLatestFirstMismatchLoadedJson: string | null = null;
+  let storageStats: Awaited<ReturnType<typeof inspectStorageDb>> | null = null;
+  let crashRecoveryMs: number | null = null;
+  let crashRecoveredHubAccountCount: number | null = null;
+  let crashRecoveredHeight: number | null = null;
+  if (storageEnabled) {
+    if (hasFlag('--debug-replica-meta')) {
+      for (const replica of env.state.eReplicas.values()) {
+        for (const { frame } of replica.certifiedFrameHead ? [replica.certifiedFrameHead] : []) {
+          const recomputed = createEntityFrameHashFromStateRoot(
+            frame.parentFrameHash,
+            frame.height,
+            frame.timestamp,
+            frame.txs,
+            frame.events,
+            replica.entityId,
+            frame.stateRoot,
+            frame.authorityRoot,
+            frame.entityContext,
+            frame.jPrefixCertificate,
+          );
+          console.error('[ENTITY_FRAME_LINEAGE_VERIFY]', JSON.stringify({
+            entityId: replica.entityId,
+            height: frame.height,
+            declared: frame.hash,
+            recomputed,
+            txTypes: frame.txs.map(tx => tx.type),
+          }));
+        }
+      }
+      const liveReplicaMeta = buildStorageLiveReplicaMetaCommitment(env);
+      console.log(`Replica meta live digest=${liveReplicaMeta.digest} entries=${JSON.stringify(
+        summarizeStorageReplicaMetaEntries(liveReplicaMeta.entries),
+      )}`);
+      console.log(`Replica meta live fields=${JSON.stringify(
+        summarizeStorageReplicaMetaFields(liveReplicaMeta.entries),
+      )}`);
+      console.log(`Replica meta live heads=${serializeTaggedJson(
+        summarizeStorageReplicaMetaHeads(liveReplicaMeta.entries),
+      )}`);
+      console.log(`Replica meta live values=${serializeTaggedJson(
+        inspectStorageReplicaMetaEntries(liveReplicaMeta.entries),
+      )}`);
+    }
+    const liveHubReplica = findReplica(env, hub);
+    const liveMerkleStartedAt = getPerfMs();
+    storageLiveMerkleRoot = liveHubReplica.state.accounts.rootHash();
+    const latestLoadStartedAt = getPerfMs();
+    const loaded = await loadEntityStateFromStorageDb(env, hub.entityId);
+    storageLatestLoadMs = getPerfMs() - latestLoadStartedAt;
+    storageLoadedAccountCount = loaded?.accounts.size ?? null;
+    storageLoadedMerkleRoot = loaded ? loaded.accounts.rootHash() : null;
+    if (loaded) {
+      const comparison = compareAccountDocs(liveHubReplica.state.accounts, loaded.accounts);
+      storageLatestAccountMismatches = comparison.mismatches;
+      storageLatestFirstMismatchKey = comparison.firstMismatchKey;
+      storageLatestFirstMismatchFields = comparison.firstMismatchFields;
+      storageLatestFirstMismatchLiveJson = comparison.firstMismatchLiveJson;
+      storageLatestFirstMismatchLoadedJson = comparison.firstMismatchLoadedJson;
+    }
+    storageMerkleBuildMs = getPerfMs() - liveMerkleStartedAt;
+    for (let height = 1; height <= env.state.height; height += recoveryScanStep) {
+      const recoveryStartedAt = getPerfMs();
+      const recovered = await loadOptionalEntityStateFromStorageDb(env, hub.entityId, height);
+      const recoveryMs = getPerfMs() - recoveryStartedAt;
+      if (!recovered) {
+        if (storageFirstPresentHeight === null) continue;
+        throw new Error(`RECOVERY_LOAD_FAILED: height=${height}`);
+      }
+      if (storageFirstPresentHeight === null) storageFirstPresentHeight = height;
+      storageRecoverySamples += 1;
+      if (storageWorstLoadMs === null || recoveryMs > storageWorstLoadMs) {
+        storageWorstLoadMs = recoveryMs;
+        storageWorstLoadHeight = height;
+      }
+    }
+    storageHistoricalHeight = Math.max(
+      storageFirstPresentHeight ?? 1,
+      Math.min(env.state.height - 1, storageSnapshotPeriod),
+    );
+    const historicalLoadStartedAt = getPerfMs();
+    const historical = await loadOptionalEntityStateFromStorageDb(env, hub.entityId, storageHistoricalHeight);
+    storageHistoricalLoadMs = getPerfMs() - historicalLoadStartedAt;
+    if (!historical && storageFirstPresentHeight !== null) {
+      throw new Error(`HISTORICAL_LOAD_FAILED: height=${storageHistoricalHeight}`);
+    }
+    storageHistoricalAccountCount = historical?.accounts.size ?? null;
+    storageHistoricalMerkleRoot = historical ? historical.accounts.rootHash() : null;
+    if ((storageWorstLoadMs ?? 0) > recoveryBudgetMs) {
+      throw new Error(
+        `RECOVERY_BUDGET_EXCEEDED: worst=${storageWorstLoadMs?.toFixed(2)}ms ` +
+          `height=${storageWorstLoadHeight} budget=${recoveryBudgetMs}ms`,
+      );
+    }
+    storageStats = await inspectStorageDb(env);
+  }
+  await closeRuntimeDb(env);
+  await closeInfraDb(env);
+  if (storageEnabled && crashRecover) {
+    const crashStartedAt = getPerfMs();
+    const recoveredEnv = await loadEnvFromDB(runtimeId, seed);
+    crashRecoveryMs = getPerfMs() - crashStartedAt;
+    if (!recoveredEnv) throw new Error('CRASH_RECOVERY_LOAD_NULL');
+    const recoveredHub = findReplica(recoveredEnv, hub);
+    crashRecoveredHeight = recoveredEnv.state.height;
+    crashRecoveredHubAccountCount = recoveredHub.state.accounts.size;
+    await closeRuntimeDb(recoveredEnv);
+    await closeInfraDb(recoveredEnv);
+    if (crashRecoveredHubAccountCount !== users.length) {
+      throw new Error(`CRASH_RECOVERY_ACCOUNT_COUNT_MISMATCH:${crashRecoveredHubAccountCount}/${users.length}`);
+    }
+    if (crashRecoveryMs > crashRecoveryBudgetMs) {
+      throw new Error(`CRASH_RECOVERY_BUDGET_EXCEEDED:${crashRecoveryMs.toFixed(2)}>${crashRecoveryBudgetMs}`);
+    }
+  }
+
+  console.log('');
+  console.log(`Open account phase: ${openMs.toFixed(2)}ms total, ${(openMs / Math.max(1, users.length)).toFixed(3)}ms/account`);
+  if (processedPayments > 0) {
+    const effectiveAdmissionMs = Math.max(1, paymentMs);
+    console.log(
+      `Payment burst: kind=${paymentKind} count=${processedPayments} admission=${effectiveAdmissionMs.toFixed(2)}ms ` +
+        `admissionTps=${paymentTps.toFixed(2)} pay/s settlement=${settlementMs.toFixed(2)}ms ` +
+        `target=${minPaymentTps || 'none'}`,
+    );
+  }
+  console.log(`Current full runtime snapshot: ${formatBytes(currentSnapshotBytes)}`);
+  console.log(`Current hub entity blob: ${formatBytes(hubEntityBytes)}`);
+  console.log(`Projected hub core doc: ${formatBytes(hubCoreProjectedBytes)}`);
+  logStats('Projected user core docs', userCoreStats);
+  logStats('Current account docs', accountCurrentStats);
+  logStats('Projected account docs', accountProjectedStats);
+  if (sampleDiffBytes > 0) {
+    console.log(`Projected dirty-doc payload for one direct payment: ${formatBytes(sampleDiffBytes)}`);
+  }
+  if (persist) {
+    console.log(`Persisted LevelDB bytes: ${formatBytes(dbBytes)}`);
+  }
+  if (storageEnabled) {
+    console.log(`Storage load check: hub accounts=${storageLoadedAccountCount ?? 'null'}`);
+    console.log(
+      `Storage historical check: height=${storageHistoricalHeight ?? 'null'} ` +
+        `hub accounts=${storageHistoricalAccountCount ?? 'null'}`,
+    );
+    console.log(
+      `Storage loads: latest=${storageLatestLoadMs?.toFixed(2) ?? 'null'}ms ` +
+        `historical=${storageHistoricalLoadMs?.toFixed(2) ?? 'null'}ms`,
+    );
+    console.log(
+      `Storage recovery budget: worst=${storageWorstLoadMs?.toFixed(2) ?? 'null'}ms ` +
+        `height=${storageWorstLoadHeight ?? 'null'} firstPresent=${storageFirstPresentHeight ?? 'null'} ` +
+        `samples=${storageRecoverySamples} ` +
+        `budget=${recoveryBudgetMs}ms`,
+    );
+    console.log(
+      `Storage canonical Account root: read=${storageMerkleBuildMs?.toFixed(2) ?? 'null'}ms ` +
+        `live=${storageLiveMerkleRoot ?? 'null'} latest=${storageLoadedMerkleRoot ?? 'null'} ` +
+        `historical=${storageHistoricalMerkleRoot ?? 'null'}`,
+    );
+    console.log(
+      `Storage latest doc parity: mismatches=${storageLatestAccountMismatches ?? 'null'} ` +
+        `first=${storageLatestFirstMismatchKey ?? 'null'} ` +
+        `fields=${storageLatestFirstMismatchFields.join(',') || 'none'}`,
+    );
+    if (storageLatestFirstMismatchKey) {
+      console.log(
+        `Storage first mismatch live=${storageLatestFirstMismatchLiveJson} ` +
+          `loaded=${storageLatestFirstMismatchLoadedJson}`,
+      );
+    }
+    if (storageStats) {
+      const epochRows = Array.isArray((storageStats as { epochDbs?: unknown }).epochDbs)
+        ? ((storageStats as {
+            epochDbs?: Array<{
+              role: string;
+              latestHeight: number;
+              frameCount: number;
+              diffCount: number;
+              snapshotCount: number;
+              totalBytes: number;
+            }>;
+          }).epochDbs ?? [])
+        : [];
+      console.log(
+        `Storage head: latest=${storageStats.head?.latestHeight ?? 'null'} ` +
+          `snapshotPeriod=${storageStats.head?.snapshotPeriodFrames ?? 'null'} ` +
+          `latestSnapshot=${storageStats.head?.latestSnapshotHeight ?? 'null'} ` +
+          `epochMaxMb=${Math.round((storageStats.head?.epochMaxBytes ?? 0) / (1024 * 1024))}`,
+      );
+      console.log(
+        `Storage totals: epochs=${epochRows.length} rFrames=${storageStats.frameCount} ` +
+          `diffs=${storageStats.diffCount} snapshots=${storageStats.snapshotHeights.length}`,
+      );
+      console.log(
+        `Storage counts: frames=${storageStats.frameCount} diffs=${storageStats.diffCount} ` +
+          `snapshots=${storageStats.snapshotHeights.join(',') || 'none'} ` +
+          `liveEntities=${storageStats.liveEntityCount} liveAccounts=${storageStats.liveAccountCount} liveBooks=${storageStats.liveBookCount}`,
+      );
+      console.log(
+        `Storage bytes: live=${formatBytes(storageStats.liveBytes)} history=${formatBytes(storageStats.historyBytes)} ` +
+          `frames=${formatBytes(storageStats.frameBytes)} diffs=${formatBytes(storageStats.diffBytes)} ` +
+          `snapshots=${formatBytes(storageStats.snapshotBytes)} ` +
+          `total=${formatBytes(storageStats.totalBytes)}`,
+      );
+      console.log(
+        `Storage max values: frame=${formatBytes(storageStats.maxFrameBytes)} ` +
+          `diff=${formatBytes(storageStats.maxDiffBytes)} ` +
+          `snapshot=${formatBytes(storageStats.maxSnapshotBytes)}`,
+      );
+      if (epochRows.length > 0) {
+        console.log('Storage epochs:');
+        console.log('+----------+--------+------+------+------+----------+');
+        console.log('| role     | latest |  r   |  d   |  s   | total    |');
+        console.log('+----------+--------+------+------+------+----------+');
+        for (const row of epochRows) {
+          console.log(
+            `| ${row.role.padEnd(8)} | ${String(row.latestHeight).padStart(6)} | ` +
+              `${String(row.frameCount).padStart(4)} | ${String(row.diffCount).padStart(4)} | ` +
+              `${String(row.snapshotCount).padStart(4)} | ${formatBytes(row.totalBytes).padStart(8)} |`,
+          );
+        }
+        console.log('+----------+--------+------+------+------+----------+');
+      }
+    }
+    if (crashRecover) {
+      console.log(
+        `Crash recovery: load=${crashRecoveryMs?.toFixed(2) ?? 'null'}ms ` +
+          `height=${crashRecoveredHeight ?? 'null'} hubAccounts=${crashRecoveredHubAccountCount ?? 'null'} ` +
+          `budget=${crashRecoveryBudgetMs}ms`,
+      );
+    }
+  }
+
+  console.log('');
+  console.log(
+    JSON.stringify(
+      {
+        runtimeId,
+        accounts,
+        paymentsRequested: payments,
+        paymentsProcessed: processedPayments,
+        paymentKind,
+        paymentTps: Number(paymentTps.toFixed(2)),
+        minPaymentTps,
+        openHtlcLocks,
+        persist,
+        storageEnabled,
+        storageSnapshotPeriod,
+        snapshotInterval,
+        importBatch,
+        openBatch,
+        paymentBatch,
+        envHeight: env.state.height,
+        currentSnapshotBytes,
+        hubEntityBytes,
+        hubCoreProjectedBytes,
+        accountCurrentStats,
+        accountProjectedStats,
+        userCoreStats,
+        sampleDiffBytes,
+        dbBytes,
+        storageLoadedAccountCount,
+        storageHistoricalHeight,
+        storageHistoricalAccountCount,
+        storageLatestLoadMs,
+        storageHistoricalLoadMs,
+        storageWorstLoadMs,
+        storageWorstLoadHeight,
+        storageRecoverySamples,
+        storageFirstPresentHeight,
+        storageLiveMerkleRoot,
+        storageLoadedMerkleRoot,
+        storageHistoricalMerkleRoot,
+        storageMerkleBuildMs,
+        storageLatestAccountMismatches,
+        storageLatestFirstMismatchKey,
+        storageLatestFirstMismatchFields,
+        storageLatestFirstMismatchLiveJson,
+        storageLatestFirstMismatchLoadedJson,
+        storageStats,
+        crashRecover,
+        crashRecoveryMs,
+        crashRecoveryBudgetMs,
+        crashRecoveredHeight,
+        crashRecoveredHubAccountCount,
+        openMs,
+        paymentMs,
+        settlementMs,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+main()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch(async (error) => {
+    console.error('bench-storage-hub failed:', error);
+    process.exit(1);
+  });

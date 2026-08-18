@@ -289,11 +289,11 @@ Example: route $100 payment
 ## files
 
 ```
-runtime/account/tx/handlers/custody-deposit.ts
-runtime/account/tx/handlers/custody-withdraw.ts
-runtime/account/tx/handlers/custody-debit.ts
-runtime/types/account.ts            (add custody to Account state)
-runtime/entity/scheduler/index.ts   (check custody before R→C)
+core/account/tx/handlers/custody-deposit.ts
+core/account/tx/handlers/custody-withdraw.ts
+core/account/tx/handlers/custody-debit.ts
+core/types/account.ts            (add custody to Account state)
+core/entity/scheduler/index.ts   (check custody before R→C)
 frontend/src/lib/components/Entity/CustodyPanel.svelte
 docs/custody.md                     (this file)
 ```

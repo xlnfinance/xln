@@ -16,14 +16,14 @@ import { connectHub } from '../../utils/e2e-connect';
 import { startDisputeFromManageUi } from '../../utils/e2e-account-workspace';
 import { requireIsolatedBaseUrl } from '../../utils/runtime/e2e-isolated-env';
 import { quiesceRuntimePage } from '../../utils/runtime/e2e-runtime-shutdown.mts';
-import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../runtime/account/crypto';
-import { createXlnJsonRpcProvider } from '../../../runtime/jurisdiction/adapter';
-import { mineRpcToBlockExact } from '../../../runtime/scenarios/harness/rpc-block-mining';
+import { deriveSignerAddressSync, deriveSignerKeySync } from '../../../core/account/crypto';
+import { createXlnJsonRpcProvider } from '../../../core/jurisdiction/adapter';
+import { mineRpcToBlockExact } from '../../../core/scenarios/harness/rpc-block-mining';
 import {
   buildPushRegistrationMessage,
   buildPushUnregisterMessage,
   hashPushToken,
-} from '../../../runtime/watchtower/push/registration';
+} from '../../../core/watchtower/push/registration';
 
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const INIT_TIMEOUT = 30_000;
@@ -565,7 +565,7 @@ async function startPushWatchtower(port: number, options: {
 }> {
   const dbRoot = await mkdtemp(join(tmpdir(), 'xln-push-e2e-'));
   const proc = spawn('bun', [
-    'runtime/watchtower/standalone-server.ts',
+    'core/watchtower/standalone-server.ts',
     '--host', '127.0.0.1',
     '--port', String(port),
     '--enable-push-wake',
@@ -634,7 +634,7 @@ test('settings registers and revokes signed push wake token through browser UI',
       return await page.getByTestId('push-wake-register').isEnabled().catch(() => false);
     }, {
       timeout: 15_000,
-      message: 'push wake register button should become enabled after runtime/entity/tower are ready',
+      message: 'push wake register button should become enabled after core/entity/tower are ready',
     }).toBe(true);
     await page.getByTestId('push-wake-register').click();
     await expect(page.getByTestId('push-wake-status')).toContainText('Registered 1/1', { timeout: 20_000 });

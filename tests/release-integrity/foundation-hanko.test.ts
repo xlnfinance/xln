@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ethers } from 'ethers';
-import { decodeHankoEnvelope } from '../../runtime/hanko/codec.ts';
+import { decodeHankoEnvelope } from '../../core/hanko/codec.ts';
 
 import {
   buildReleaseHanko,
@@ -83,7 +83,7 @@ describe('Foundation release Hanko', () => {
 
   test('includes the canonical Bun lockfile in the signed code root', () => {
     expect(releaseSnapshotExclusion('bun.lock')).toBeNull();
-    const base = [{ path: 'runtime/runtime.ts', sha256: '11'.repeat(32) }];
+    const base = [{ path: 'core/runtime.ts', sha256: '11'.repeat(32) }];
     const withLock = [...base, { path: 'bun.lock', sha256: '22'.repeat(32) }];
     const changedLock = [...base, { path: 'bun.lock', sha256: '33'.repeat(32) }];
     expect(computeCodeSnapshotRoot(withLock)).not.toBe(computeCodeSnapshotRoot(base));

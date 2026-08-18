@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { RemoteRuntimeAdapter } from '../../runtime/api/runtime-adapter/remote';
+import { RemoteRuntimeAdapter } from '../../core/api/runtime-adapter/remote';
 import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/primitives/spec';
 
 const ROOT = resolve(import.meta.dir, '../..');
@@ -77,7 +77,7 @@ const buildPackage = (): void => {
   mkdirSync(DIST_DIR, { recursive: true });
   run('bun', [
     'build',
-    'runtime/api/server/index.ts',
+    'core/api/server/index.ts',
     '--target=bun',
     '--external=classic-level',
     '--external=@node-rs/argon2',

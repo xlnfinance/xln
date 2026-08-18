@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { RuntimeAdapterStatus } from '@xln/runtime/api/public/runtime-module';
+import type { RuntimeAdapterStatus } from '@xln/core/api/public/runtime-module';
 
 export type ThemeName = 'dark' | 'light';
 

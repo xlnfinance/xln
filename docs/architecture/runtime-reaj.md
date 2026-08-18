@@ -34,6 +34,6 @@ Naming conventions:
   messages.
 - Replay protection is the frame chain (`height + prevFrameHash`) and signed hankos. On-chain nonces are only for settlement ordering.
 
-Runtime machine types live at `runtime/runtime/types.ts`. Entity and Account
+Runtime machine types live at `core/runtime/types.ts`. Entity and Account
 types belong to their owner folders. Import from the owner directly; a neutral
 root barrel would hide the Runtime → Entity → Account cascade.

@@ -4,7 +4,7 @@ import {
   classifyRuntimeFailure,
   runtimeFailureMessage,
 } from '../../../frontend/src/lib/utils/runtime/runtimeFailure';
-import { RuntimeAdapterError } from '../../../runtime/api/runtime-adapter/errors';
+import { RuntimeAdapterError } from '../../../core/api/runtime-adapter/errors';
 
 test('runtime failure classifier fail-closes unknown errors as fatal', () => {
   expect(classifyRuntimeFailure(new Error('unexpected frame projection fault'))).toEqual({

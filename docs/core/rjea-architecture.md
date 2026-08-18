@@ -161,10 +161,10 @@ The RJEA cascade is replayable:
 
 ## Folder ownership
 
-- `runtime/runtime/`: Runtime machine, WAL boundary and output planning.
-- `runtime/entity/`: Entity transactions, candidate execution and validator
+- `core/runtime/`: Runtime machine, WAL boundary and output planning.
+- `core/entity/`: Entity transactions, candidate execution and validator
   consensus.
-- `runtime/account/`: Account transactions, bilateral consensus and financial
+- `core/account/`: Account transactions, bilateral consensus and financial
   state roots.
 - Adapters, transport, persistence, UI and QA remain outside those state
   machine folders.

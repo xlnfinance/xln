@@ -53,7 +53,7 @@ Required E2E coverage:
 Primary specs:
 
 - `tests/e2e-cross-j-swap.spec.ts`
-- `runtime/__tests__/cross-jurisdiction-swap.test.ts`
+- `core/__tests__/cross-jurisdiction-swap.test.ts`
 
 ## Enforced Contract
 

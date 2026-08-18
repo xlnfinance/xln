@@ -24,7 +24,7 @@ These endpoints must answer, for any incident:
 Single-source pipeline:
 
 1. Runtime code emits structured events through `env.warn`, `env.error`, `env.emit`.
-2. `runtime/runtime/observability/env-events.ts` forwards critical/high-signal events via P2P `debug_event`.
+2. `core/runtime/observability/env-events.ts` forwards critical/high-signal events via P2P `debug_event`.
 3. WS client sends `debug_event` messages to relay.
 4. Relay stores the high-volume network/debug timeline in an in-memory ring
    and grouped error incidents in a separate durable journal.
@@ -36,17 +36,17 @@ Single-source pipeline:
 
 Core files:
 
-- `runtime/runtime/observability/env-events.ts`
-- `runtime/network/p2p/ws-client.ts`
-- `runtime/network/p2p/p2p.ts`
-- `runtime/network/p2p/ws-protocol.ts`
-- `runtime/api/server/index.ts`
-- `runtime/network/relay/debug-http.ts`
+- `core/runtime/observability/env-events.ts`
+- `core/network/p2p/ws-client.ts`
+- `core/network/p2p/p2p.ts`
+- `core/network/p2p/ws-protocol.ts`
+- `core/api/server/index.ts`
+- `core/network/relay/debug-http.ts`
 - `frontend/src/lib/debug/browser-telemetry.ts`
 
 ## Event Model
 
-Relay event shape (from `runtime/api/server/index.ts`):
+Relay event shape (from `core/api/server/index.ts`):
 
 - `id`, `ts`, `event`
 - optional: `runtimeId`, `from`, `to`, `msgType`, `status`, `reason`, `encrypted`, `size`, `queueSize`, `details`
@@ -145,7 +145,7 @@ All critical paths MUST emit structured events through env/p2p pipeline, not ad-
 REA metadata path:
 
 - Build tx: `type: 'profile-update'`
-- Apply in runtime consensus flow (`runtime/entity/tx/apply.ts`)
+- Apply in runtime consensus flow (`core/entity/tx/apply.ts`)
 - Persist + gossip sync via name-resolution pipeline
 - Observe results in relay debug timeline (`debug_event`, `message`, `gossip_store`)
 

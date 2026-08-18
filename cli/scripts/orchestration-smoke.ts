@@ -2,7 +2,7 @@
 /**
  * CLI smoke against the canonical local orchestration stack.
  *
- * Reuses the same boot path as `runtime/scripts/operations/production/local-prod-smoke.ts`:
+ * Reuses the same boot path as `core/scripts/operations/production/local-prod-smoke.ts`:
  *   acquireLocalTestPortLease → start-anvil.sh → start-anvil2.sh → start-server.sh
  *
  * Then drives two CLI wallets: onboard → hubs → open → pay → status → daemon.
@@ -16,8 +16,8 @@ import {
   acquireLocalTestPortLease,
   buildInheritedLocalTestLeaseEnv,
   stripLocalTestLeaseEnv,
-} from '../../runtime/scripts/e2e/harness/local-test-port-lease.ts';
-import { stopProcessGroup } from '../../runtime/scripts/e2e/runners/process-group.ts';
+} from '../../core/scripts/e2e/harness/local-test-port-lease.ts';
+import { stopProcessGroup } from '../../core/scripts/e2e/runners/process-group.ts';
 
 const repoRoot = process.cwd();
 const inheritedProcessEnv = stripLocalTestLeaseEnv(process.env);

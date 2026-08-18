@@ -17,12 +17,12 @@ Context you must respect:
 Read first:
 1. Semantic overview at the top of llms.txt.
 2. contracts/Depository.sol, Account.sol, DeltaTransformer.sol.
-3. runtime/runtime/types.ts, runtime/runtime.ts, runtime/entity/consensus/index.ts, runtime/account/consensus/index.ts.
-4. runtime/cross-jurisdiction*.ts, runtime/orderbook/cross-j/orderbook.ts.
-5. runtime/entity/tx/handlers/cross-j-*.ts, swap-requests.ts, dispute.ts.
-6. runtime/entity/tx/handlers/account/orderbook-matching-*.ts.
-7. runtime/account/tx/handlers/swap/{offer,resolve,cross-fill-ack,lifecycle}/.
-8. runtime/orchestrator/mm-node.ts, runtime/api/server/health/market-maker.ts, runtime/network/relay/market/subscriptions.ts.
+3. core/runtime/types.ts, core/runtime.ts, core/entity/consensus/index.ts, core/account/consensus/index.ts.
+4. core/cross-jurisdiction*.ts, core/orderbook/cross-j/orderbook.ts.
+5. core/entity/tx/handlers/cross-j-*.ts, swap-requests.ts, dispute.ts.
+6. core/entity/tx/handlers/account/orderbook-matching-*.ts.
+7. core/account/tx/handlers/swap/{offer,resolve,cross-fill-ack,lifecycle}/.
+8. core/orchestrator/mm-node.ts, core/api/server/health/market-maker.ts, core/network/relay/market/subscriptions.ts.
 9. frontend SwapPanel.svelte, OrderbookPanel.svelte, routed-swap-planner.ts, routed-swap-execution.ts.
 10. tests/e2e-swap.spec.ts, tests/e2e-cross-j-swap.spec.ts, runtime cross-j/orderbook tests.
 
@@ -149,12 +149,12 @@ FOCUS AREAS:
 5. **Module Boundaries**: Circular dependencies? Leaky abstractions?
 
 FILES TO SCAN:
-- runtime/runtime/types.ts (Runtime interface design)
-- runtime/account/state/state-clone.ts (Account candidate isolation)
-- runtime/entity/state-clone.ts (Entity candidate isolation)
-- runtime/entity/replica/replica-clone.ts (validator-local replica isolation)
-- runtime/entity/tx/apply.ts (dispatcher pattern)
-- runtime/account/utils.ts (utility functions)
+- core/runtime/types.ts (Runtime interface design)
+- core/account/state/state-clone.ts (Account candidate isolation)
+- core/entity/state-clone.ts (Entity candidate isolation)
+- core/entity/replica/replica-clone.ts (validator-local replica isolation)
+- core/entity/tx/apply.ts (dispatcher pattern)
+- core/account/utils.ts (utility functions)
 
 OUTPUT:
 - Type safety improvements (replace `any`, add generics)
@@ -205,4 +205,4 @@ OUTPUT: Step-by-step walkthrough with code snippets and line numbers.
 **Verification:**
 - Don't trust LLM assertions blindly
 - Cross-reference: If LLM says "line 450", verify in actual file
-- Run scenarios to test claims: `bun runtime/scenarios/consensus/ahb.ts`
+- Run scenarios to test claims: `bun core/scenarios/consensus/ahb.ts`

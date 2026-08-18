@@ -46,12 +46,12 @@ XLN_RUNTIME_SEED_FILE=${XLN_RUNTIME_SEED_FILE:-$RDB_ROOT/secrets/main-runtime.se
 export XLN_RUNTIME_SEED=${XLN_RUNTIME_SEED:-$(xln_read_or_create_operator_seed "$XLN_RUNTIME_SEED_FILE")}
 XLN_MESH_ROOT_SEED_FILE=${XLN_MESH_ROOT_SEED_FILE:-$RDB_ROOT/secrets/mesh-root.seed}
 export XLN_MESH_ROOT_SEED=${XLN_MESH_ROOT_SEED:-$(xln_read_or_create_operator_seed "$XLN_MESH_ROOT_SEED_FILE")}
-export XLN_DB_PATH=${XLN_DB_PATH:-$RDB_ROOT/runtime/prod-main}
+export XLN_DB_PATH=${XLN_DB_PATH:-$RDB_ROOT/core/prod-main}
 export XLN_USE_PREDEPLOYED_ADDRESSES=${XLN_USE_PREDEPLOYED_ADDRESSES:-true}
 export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-$XLN_DB_PATH/jurisdictions.json}
-export XLN_MESH_DB_ROOT=${XLN_MESH_DB_ROOT:-$RDB_ROOT/runtime/prod-mesh}
-XLN_MESH_RESET_MARKER="$RDB_ROOT/runtime/.mesh-reset-once"
-XLN_MESH_RESET_CLAIM="$RDB_ROOT/runtime/.mesh-reset-once.claimed"
+export XLN_MESH_DB_ROOT=${XLN_MESH_DB_ROOT:-$RDB_ROOT/core/prod-mesh}
+XLN_MESH_RESET_MARKER="$RDB_ROOT/core/.mesh-reset-once"
+XLN_MESH_RESET_CLAIM="$RDB_ROOT/core/.mesh-reset-once.claimed"
 export XLN_MESH_PRESERVE_STATE_ON_RESET=1
 if [ -f "$XLN_MESH_RESET_MARKER" ]; then
   mv "$XLN_MESH_RESET_MARKER" "$XLN_MESH_RESET_CLAIM"
@@ -129,8 +129,8 @@ fi
 
 if [[ "$XLN_START_ASSERT_ONLY_ACTIVE" -ne 1 ]]; then
   xln_kill_by_pattern "scripts/operations/start-custody.sh" start-server
-  xln_kill_by_pattern "runtime/scripts/operations/custody/start-custody-prod.ts" start-server
-  xln_kill_by_pattern "runtime/api/server/index.ts --port ${XLN_MESH_CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${XLN_MESH_CUSTODY_DAEMON_PORT}" start-server
+  xln_kill_by_pattern "core/scripts/operations/custody/start-custody-prod.ts" start-server
+  xln_kill_by_pattern "core/api/server/index.ts --port ${XLN_MESH_CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${XLN_MESH_CUSTODY_DAEMON_PORT}" start-server
   xln_kill_by_port "$XLN_MESH_CUSTODY_PORT" start-server
   xln_kill_by_port "$XLN_MESH_CUSTODY_DAEMON_PORT" start-server
   xln_kill_by_port "$API_PORT" start-server
@@ -139,7 +139,7 @@ fi
 unset XLN_LOCAL_TEST_LEASE_MODE XLN_LOCAL_TEST_LEASE_POOL XLN_LOCAL_TEST_LEASE_BASE
 unset XLN_LOCAL_TEST_LEASE_GUARD XLN_LOCAL_TEST_LEASE_OWNER_PID XLN_LOCAL_TEST_LEASE_REPO_ROOT
 
-exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
+exec "${HOME}/.bun/bin/bun" core/orchestrator/orchestrator.ts \
   --host 127.0.0.1 \
   --port "$API_PORT" \
   --public-ws-base-url "$PUBLIC_WS_BASE_URL" \

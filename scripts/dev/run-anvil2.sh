@@ -10,7 +10,7 @@ RPC_PORT="$(( $(xln_rpc_port) + 1 ))"
 
 cd "$REPO_ROOT"
 
-exec bun runtime/scripts/operations/development/dev-anvil-stack.ts \
+exec bun core/scripts/operations/development/dev-anvil-stack.ts \
   --spawn-anvil \
   --keep-alive \
   --port "$RPC_PORT" \

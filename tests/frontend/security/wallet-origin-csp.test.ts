@@ -24,9 +24,9 @@ test('wallet origin ships no third-party executable code and enforces hashed scr
 });
 
 test('selected remote Runtime WebSocket pins same-origin HTTP reads', () => {
-  expect(runtimeHttpOriginFromWsUrl('wss://runtime.example/api/runtime/ws?ignored=1'))
+  expect(runtimeHttpOriginFromWsUrl('wss://runtime.example/api/core/ws?ignored=1'))
     .toBe('https://runtime.example');
-  expect(runtimeHttpOriginFromWsUrl('ws://127.0.0.1:8080/api/runtime/ws'))
+  expect(runtimeHttpOriginFromWsUrl('ws://127.0.0.1:8080/api/core/ws'))
     .toBe('http://127.0.0.1:8080');
   expect(() => runtimeHttpOriginFromWsUrl('https://runtime.example'))
     .toThrow('REMOTE_RUNTIME_WS_URL_INVALID');

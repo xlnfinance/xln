@@ -1,5 +1,5 @@
-import { calculateSolvency } from '@xln/runtime/api/public/public-utilities';
-import type { RuntimeReplica, RuntimeAdapterSolvencySummary } from '@xln/runtime/api/public/runtime-module';
+import { calculateSolvency } from '@xln/core/api/public/public-utilities';
+import type { RuntimeReplica, RuntimeAdapterSolvencySummary } from '@xln/core/api/public/runtime-module';
 
 export type SolvencyProjection = Pick<RuntimeAdapterSolvencySummary, 'assets' | 'isValid'>;
 

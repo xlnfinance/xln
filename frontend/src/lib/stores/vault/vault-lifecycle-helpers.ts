@@ -1,4 +1,4 @@
-import type { RuntimeReplica, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
+import type { RuntimeReplica, RuntimeInput } from '@xln/core/api/public/runtime-module';
 
 import { hasConnectedJurisdictionAdapter, hasRuntimeJurisdictionAddresses } from './vault-helpers';
 
@@ -20,7 +20,6 @@ export const runtimeInputWorkSummary = (input: RuntimeInput | undefined) => ({
     txs: (entityInput.entityTxs ?? []).map(tx => tx.type),
   })),
   jInputs: input?.jInputs?.length ?? 0,
-  reliableReceipts: input?.reliableReceipts?.length ?? 0,
   queuedAt: input?.queuedAt ?? null,
 });
 

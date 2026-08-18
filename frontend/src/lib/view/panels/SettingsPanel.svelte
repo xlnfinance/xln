@@ -21,7 +21,7 @@
   import { settings as appSettings, settingsOperations } from '$lib/stores/settingsStore';
   import { networkMachineConfig, networkMachineOperations } from '$lib/stores/network/networkMachineStore';
   import type { NetworkMachineTimelineMode } from '$lib/network3d/networkMachine';
-  import type { EnvSnapshot, RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
+  import type { EnvSnapshot, RuntimeReplica } from '@xln/core/api/public/runtime-module';
 
   // Props (isolated stores - reserved for future time-travel settings UI)
   export let runtimeFrameEnv: Writable<RuntimeReplica | null>; void runtimeFrameEnv;

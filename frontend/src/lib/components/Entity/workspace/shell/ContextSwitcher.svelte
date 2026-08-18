@@ -12,9 +12,10 @@
   } from '$lib/stores/runtimeStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import { resetEverything } from '$lib/utils/control/resetEverything';
   import { refreshCurrentRuntimeProjection, xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
-  import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/public/runtime-module';
+  import type { RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
   import type { Tab } from '$lib/types/ui';
   import { entityAvatar, preferredAvatar } from '$lib/utils/identity/avatar';
   import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '$lib/utils/identity/jurisdictionBadge';
@@ -441,7 +442,12 @@
       if (requestId !== runtimeSelectionRequestId) return false;
       const normalizedEntityId = normalizeId(entityId);
       setRuntimeViewActiveEntityId(normalizedEntityId);
-      await refreshCurrentRuntimeProjection();
+      try {
+        await refreshCurrentRuntimeProjection();
+      } catch (error) {
+        errorLog.log(error instanceof Error ? error.message : String(error), 'Remote Runtime Select', error);
+        return requestId === runtimeSelectionRequestId;
+      }
       return requestId === runtimeSelectionRequestId;
     });
     return selected === true;

@@ -6,4 +6,4 @@ export type {
   RuntimeInput,
   EntityReplica,
   AccountReplica,
-} from '../../runtime/api/public/runtime-module.ts';
+} from '../../core/api/public/runtime-module.ts';

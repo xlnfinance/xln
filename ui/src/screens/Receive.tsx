@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
-import { useApp } from '../runtime/store';
-import { getTokenMeta } from '../runtime/format';
+import { useApp } from '../core/store';
+import { getTokenMeta } from '../core/format';
 import { Icon } from '../components/Icons';
 
 export function Receive() {

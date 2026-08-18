@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Sheet } from '../components/Sheet';
 import { Icon } from '../components/Icons';
-import { useApp } from '../runtime/store';
-import { disconnectAdapter, getAdapter } from '../runtime/adapter';
+import { useApp } from '../core/store';
+import { disconnectAdapter, getAdapter } from '../core/adapter';
 
 export function SettingsScreen() {
 	const theme = useApp(s => s.theme);

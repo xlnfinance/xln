@@ -6,13 +6,13 @@ The E-machine is replicated state owned by one entity board. The proposer builds
 
 ## Source
 
-- [`runtime/entity/consensus/index.ts`](../../runtime/entity/consensus/index.ts) - public consensus facade.
-- [`runtime/entity/consensus/input/consensus.ts`](../../runtime/entity/consensus/input/consensus.ts) - proposal, precommit, timeout, and commit-input flow.
-- [`runtime/entity/consensus/frame/application.ts`](../../runtime/entity/consensus/frame/application.ts) - deterministic committed-frame application.
-- [`runtime/entity/consensus/`](../../runtime/entity/consensus) - frame hash, input merge, Hanko witness manifest.
-- [`runtime/entity/tx/apply.ts`](../../runtime/entity/tx/apply.ts) - entity transaction dispatcher.
-- [`runtime/entity/tx/handlers/`](../../runtime/entity/tx/handlers) - account, dispute, J-event, scheduler, and extension handlers.
-- [`runtime/entity/scheduler/index.ts`](../../runtime/entity/scheduler/index.ts) - canonical jobs and crontab execution.
+- [`core/entity/consensus/index.ts`](../../core/entity/consensus/index.ts) - public consensus facade.
+- [`core/entity/consensus/input/consensus.ts`](../../core/entity/consensus/input/consensus.ts) - proposal, precommit, timeout, and commit-input flow.
+- [`core/entity/consensus/frame/application.ts`](../../core/entity/consensus/frame/application.ts) - deterministic committed-frame application.
+- [`core/entity/consensus/`](../../core/entity/consensus) - frame hash, input merge, Hanko witness manifest.
+- [`core/entity/tx/apply.ts`](../../core/entity/tx/apply.ts) - entity transaction dispatcher.
+- [`core/entity/tx/handlers/`](../../core/entity/tx/handlers) - account, dispute, J-event, scheduler, and extension handlers.
+- [`core/entity/scheduler/index.ts`](../../core/entity/scheduler/index.ts) - canonical jobs and crontab execution.
 
 ## Main Methods
 

@@ -4,8 +4,8 @@ import type {
   RuntimeAdapterReadQuery,
   RuntimeAdapterStatus,
   RuntimeAdapterViewFrame,
-} from '@xln/runtime/api/public/runtime-module';
-import type { StorageAccountDoc, StorageHead } from '@xln/runtime/storage/types';
+} from '@xln/core/api/public/runtime-module';
+import type { StorageAccountDoc, StorageHead } from '@xln/core/storage/types';
 import {
   runtimeAdapter,
   runtimeAdapterHeight,
@@ -437,22 +437,25 @@ export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {
     }
     return next;
   } catch (error) {
-    if (!requestStillCurrent()) throw error;
-    const current = get(runtimeControllerHandle);
     const next: RuntimeView = {
       ...emptyRuntimeView(expectedAtHeight),
-      runtimeId: current.id,
-      mode: current.mode,
-      authLevel: current.authLevel,
-      status: current.status,
-      atHeight: expectedAtHeight,
-      height: expectedAtHeight ?? current.height,
       loading: false,
       error: errorMessage(error),
     };
+    // A superseded read must not overwrite a newer RuntimeView, and must not
+    // reject: void click-handlers and height catch-up would become unhandled
+    // `runtime adapter socket closed` pageerrors during a runtime switch.
+    if (!requestStillCurrent()) return next;
+    const current = get(runtimeControllerHandle);
+    next.runtimeId = current.id;
+    next.mode = current.mode;
+    next.authLevel = current.authLevel;
+    next.status = current.status;
+    next.atHeight = expectedAtHeight;
+    next.height = expectedAtHeight ?? current.height;
     runtimeViewPageInfo.set(null);
     runtimeView.set(next);
-    throw error;
+    return next;
   }
 };
 

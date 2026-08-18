@@ -22,7 +22,7 @@ Best of round: Codex; this is the audit style to repeat for capped-testnet launc
 | Reviewer | Score | One-line verdict |
 | --- | ---: | --- |
 | Claude MM liveness | 910/1000 | Strong root-cause split: traced wrong crontab resend signer, explained retarget warning as resend fallout, and identified the decisive hub-log fork between frame rejection and missing duplicate re-ACK. |
-| External MM batching | 920/1000 | Excellent production-root correction: identified runtime-frame coalescing and producer-boundary yielding as the right fix without weakening runtime/account consensus atomicity. |
+| External MM batching | 920/1000 | Excellent production-root correction: identified runtime-frame coalescing and producer-boundary yielding as the right fix without weakening core/account consensus atomicity. |
 
 Best of round: External MM batching; it explains the prod-only API starvation after the signer/liveness fixes and gives the cleanest no-hack patch boundary.
 

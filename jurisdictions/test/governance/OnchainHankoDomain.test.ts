@@ -34,7 +34,7 @@ import {
   hashFinalDisputeProofHankoPayload,
   hashReleaseControlSharesHankoPayload,
   hashWatchtowerCounterDisputeHankoPayload,
-} from '../../../runtime/hanko/onchain-domain.ts';
+} from '../../../core/hanko/onchain-domain.ts';
 import type { EntityProvider } from '../../typechain-types/contracts/EntityProvider.ts';
 import {
   buildSingleSignerHanko,

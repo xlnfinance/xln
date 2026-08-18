@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Writable } from 'svelte/store';
-  import type { EnvSnapshot, RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
+  import type { EnvSnapshot, RuntimeReplica } from '@xln/core/api/public/runtime-module';
 
   // Props for isolated mode (passed from View.svelte)
   export let runtimeFrameEnv: Writable<RuntimeReplica | null>;

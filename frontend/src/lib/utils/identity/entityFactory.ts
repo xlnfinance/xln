@@ -2,7 +2,7 @@
  * Entity Factory - Auto-create ephemeral entities for signers
  */
 
-import type { RuntimeReplica, EntityReplica } from '@xln/runtime/api/public/runtime-module';
+import type { RuntimeReplica, EntityReplica } from '@xln/core/api/public/runtime-module';
 import { unwrapLiveRuntimeEnv } from '../runtime/liveRuntimeEnv';
 import { dispatchRuntimeInputToRuntimeEnv, getXLN } from '$lib/stores/xlnStore';
 

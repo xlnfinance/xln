@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { getTokenInfo } from '../../runtime/account/utils';
+import { getTokenInfo } from '../../core/account/utils';
 import { enqueueEntityTxs } from './runtime/e2e-runtime-input';
 
 const DEFAULT_TOKEN_IDS = [1] as const;

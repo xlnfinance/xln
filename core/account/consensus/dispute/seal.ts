@@ -1,0 +1,193 @@
+import type { AccountPeerInput, AccountReplica } from '../../../types/account';
+import { createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
+import { safeStringify } from '../../../protocol/serialization';
+import { shortId } from '../../../support/logger';
+import type { AccountInputSecurityContext } from './deadline-policy';
+import {
+  accountInputAck,
+  accountInputDisputeSeal,
+  accountInputProposal,
+} from '../flush';
+import { getAccountStateDomain } from '../helpers';
+import { AccountPeerEvidenceError } from '../../input/peer-rejection';
+
+export type ValidatedCounterpartyDisputeSeal = {
+  hanko: string;
+  nonce: number;
+  hash: string;
+  proofBodyHash: string;
+  proposerIsLeft: boolean;
+};
+
+export type LocalDisputeDraft = {
+  hash: string;
+  nonce: number;
+  proofBodyHash: string;
+  proposerIsLeft: boolean;
+};
+
+/**
+ * Replace the unsigned local dispute draft as one transition.
+ *
+ * A Hanko certifies one exact hash. Keeping the previous witness while
+ * replacing its hash/body/nonce would make the Account state claim that an old
+ * signature authorizes a new proof. Entity consensus attaches the replacement
+ * witness only after the new draft reaches quorum.
+ */
+export const replaceLocalDisputeDraft = (
+  account: AccountReplica,
+  draft: LocalDisputeDraft,
+): void => {
+  delete account.currentDisputeProofHanko;
+  account.currentDisputeHash = draft.hash;
+  account.currentDisputeProofBodyHash = draft.proofBodyHash;
+  account.currentDisputeProofNonce = draft.nonce;
+  account.currentDisputeProofProposerIsLeft = draft.proposerIsLeft;
+};
+
+/**
+ * Verify the peer witness against the exact Solidity dispute message.
+ *
+ * Verifying a peer-provided hash alone is unsafe: a valid signature over an
+ * unrelated hash would look authentic off-chain but fail when submitted to
+ * Depository.sol. Rebuilding the message here binds the Account, proof body,
+ * domain and nonce before any witness is retained.
+ */
+export const validateCounterpartyDisputeSeal = async (
+  account: AccountReplica,
+  input: AccountPeerInput,
+  seal: ReturnType<typeof accountInputDisputeSeal>,
+  context: string,
+  securityContext: AccountInputSecurityContext,
+  allowPreviousBoard = true,
+): Promise<ValidatedCounterpartyDisputeSeal | undefined> => {
+  if (!seal) return undefined;
+  if (!seal.hanko) {
+    throw new AccountPeerEvidenceError(
+      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
+      `${context}:DISPUTE_SEAL_HANKO_MISSING`,
+    );
+  }
+  if (
+    !/^0x[0-9a-fA-F]{64}$/.test(seal.hash)
+    || !/^0x[0-9a-fA-F]{64}$/.test(seal.proofBodyHash)
+    || !Number.isSafeInteger(seal.proofNonce)
+    || seal.proofNonce < 0
+    || typeof seal.proposerIsLeft !== 'boolean'
+  ) {
+    throw new AccountPeerEvidenceError(
+      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
+      `${context}:DISPUTE_SEAL_SHAPE_INVALID`,
+    );
+  }
+
+  const expectedHash = createDisputeProofHashWithNonce(
+    account.state,
+    seal.proofBodyHash,
+    getAccountStateDomain(account.state),
+    seal.proofNonce,
+    seal.proposerIsLeft,
+  );
+  if (String(seal.hash).toLowerCase() !== expectedHash.toLowerCase()) {
+    throw new AccountPeerEvidenceError(
+      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
+      `${context}:DISPUTE_SEAL_HASH_MISMATCH:${safeStringify({
+        kind: input.kind,
+        currentHeight: account.currentHeight,
+        pendingHeight: account.pendingFrame?.height ?? null,
+        inputHeight: accountInputAck(input)?.height ?? null,
+        newFrameHeight: accountInputProposal(input)?.frame.height ?? null,
+        localNonce: account.proofHeader.nextProofNonce,
+        signedNonce: seal.proofNonce,
+        proofBodyHash: seal.proofBodyHash,
+        expected: expectedHash,
+        received: seal.hash,
+        from: shortId(input.fromEntityId),
+        to: shortId(input.toEntityId),
+      })}`,
+    );
+  }
+
+  const { valid } = await securityContext.verifyHanko(
+    seal.hanko,
+    expectedHash,
+    input.fromEntityId,
+    {
+      ...(securityContext.counterpartyCertifiedBoard
+        ? { registeredBoardHash: securityContext.counterpartyCertifiedBoard.boardHash }
+        : {}),
+      allowPreviousBoard,
+    },
+  );
+  if (!valid) {
+    throw new AccountPeerEvidenceError(
+      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
+      `${context}:DISPUTE_SEAL_HANKO_INVALID`,
+    );
+  }
+
+  return {
+    hanko: seal.hanko,
+    nonce: seal.proofNonce,
+    hash: expectedHash,
+    proofBodyHash: seal.proofBodyHash,
+    proposerIsLeft: seal.proposerIsLeft,
+  };
+};
+
+export const storeCounterpartyDisputeSeal = (
+  account: AccountReplica,
+  seal: ValidatedCounterpartyDisputeSeal | undefined,
+): void => {
+  if (!seal) return;
+  account.counterpartyDisputeProofHanko = seal.hanko;
+  account.counterpartyDisputeProofNonce = seal.nonce;
+  account.counterpartyDisputeProofProposerIsLeft = seal.proposerIsLeft;
+  account.counterpartyDisputeHash = seal.hash;
+  account.counterpartyDisputeProofBodyHash = seal.proofBodyHash;
+  account.disputeProofNoncesByHash = {
+    ...(account.disputeProofNoncesByHash ?? {}),
+    [seal.proofBodyHash]: seal.nonce,
+  };
+};
+
+export const getDisputeSealRequirementError = (
+  expectedProofBodyHash: string | undefined,
+  previousCounterpartyProofBodyHash: string | undefined,
+  previousCounterpartyProofNonce: number | undefined,
+  jNonce: number,
+  seal: ValidatedCounterpartyDisputeSeal | undefined,
+): string | undefined => {
+  if (!expectedProofBodyHash) {
+    return seal ? 'DISPUTE_SEAL_UNEXPECTED_WITHOUT_LOCAL_PROOF' : undefined;
+  }
+  if (seal && seal.nonce <= jNonce) {
+    return `DISPUTE_SEAL_NONCE_ALREADY_FINALIZED: received=${seal.nonce} jNonce=${jNonce}`;
+  }
+  if (
+    seal
+    && previousCounterpartyProofNonce !== undefined
+    && seal.nonce < previousCounterpartyProofNonce
+  ) {
+    return `DISPUTE_SEAL_NONCE_REGRESSION: received=${seal.nonce} previous=${previousCounterpartyProofNonce}`;
+  }
+  if (
+    seal
+    && previousCounterpartyProofNonce !== undefined
+    && seal.nonce === previousCounterpartyProofNonce
+    && previousCounterpartyProofBodyHash !== undefined
+    && seal.proofBodyHash.toLowerCase() !== previousCounterpartyProofBodyHash.toLowerCase()
+  ) {
+    return `DISPUTE_SEAL_NONCE_REUSE: nonce=${seal.nonce}`;
+  }
+  if (seal && seal.proofBodyHash.toLowerCase() !== expectedProofBodyHash.toLowerCase()) {
+    return `DISPUTE_SEAL_PROOFBODY_MISMATCH: expected=${expectedProofBodyHash} received=${seal.proofBodyHash}`;
+  }
+  const proofChanged = expectedProofBodyHash.toLowerCase()
+    !== previousCounterpartyProofBodyHash?.toLowerCase();
+  const proofNonceConsumed = Number(previousCounterpartyProofNonce ?? 0) <= jNonce;
+  if ((proofChanged || proofNonceConsumed) && !seal) {
+    return `DISPUTE_SEAL_REQUIRED: proofBodyHash=${expectedProofBodyHash} jNonce=${jNonce}`;
+  }
+  return undefined;
+};

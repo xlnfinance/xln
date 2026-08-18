@@ -20,9 +20,9 @@ import type {
   RuntimeAdapterGraphFrame,
   RuntimeAdapterTimelineIndexPage,
   RuntimeActivityEvent,
-} from '@xln/runtime/api/public/runtime-module';
-import { buildRuntimeActivityEvents } from '../../../../../runtime/api/public/activity-history';
-import { deserializeTaggedJson, serializeTaggedJson } from '@xln/runtime/protocol/serialization';
+} from '@xln/core/api/public/runtime-module';
+import { buildRuntimeActivityEvents } from '../../../../../core/api/public/activity-history';
+import { deserializeTaggedJson, serializeTaggedJson } from '@xln/core/protocol/serialization';
 import { normalizeRuntimeTimelineIndex, type RuntimeTimelineIndex } from './runtimeGraphTimeline';
 import { isUnknownRecord, rejectExtraKeys } from '$lib/utils/boundary';
 

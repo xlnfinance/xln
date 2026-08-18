@@ -4,7 +4,7 @@
 
 The frozen core is an explicitly selected set of files whose exact bytes and
 executable modes must remain stable. It is separate from the general codebase
-snapshot and intentionally starts with only `runtime/runtime.ts`.
+snapshot and intentionally starts with only `core/runtime.ts`.
 
 ## Hashing
 

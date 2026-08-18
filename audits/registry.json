@@ -3,7 +3,7 @@
   "protocol": "docs/audit-protocol.md",
   "scope": {
     "sourceGlobs": [
-      "runtime/**/*.ts",
+      "core/**/*.ts",
       "jurisdictions/contracts/**/*.sol",
       "brainvault/**/*.ts",
       "custody/**/*.ts",
@@ -17,8 +17,8 @@
       "frontend/src/lib/utils/xlnInvoice.ts"
     ],
     "testGlobs": [
-      "runtime/__tests__/**/*.ts",
-      "runtime/scenarios/**/*.ts",
+      "core/__tests__/**/*.ts",
+      "core/scenarios/**/*.ts",
       "jurisdictions/test/**/*",
       "tests/**/*.ts",
       "brainvault/**/*.test.ts",
@@ -26,7 +26,7 @@
     ],
     "exclusions": [
       {
-        "glob": "runtime/jurisdiction/adapter/browservm/*.ts",
+        "glob": "core/jurisdiction/adapter/browservm/*.ts",
         "reason": "BrowserVM is peripheral to the production remote-jurisdiction release path."
       },
       {
@@ -63,11 +63,11 @@
       "structuralDebt": 0,
       "sourceGlobs": [
         "jurisdictions/contracts/**/*.sol",
-        "runtime/hanko/**/*.ts"
+        "core/hanko/**/*.ts"
       ],
       "testGlobs": [
         "jurisdictions/test/**/*EntityProvider*",
-        "runtime/__tests__/**/*hanko*"
+        "core/__tests__/**/*hanko*"
       ],
       "dependencies": [],
       "exclusions": []
@@ -99,15 +99,15 @@
       "criticality": "critical",
       "structuralDebt": 0,
       "sourceGlobs": [
-        "runtime/protocol/**/*.ts",
-        "runtime/types/**/*.ts",
-        "runtime/routing/**/*.ts"
+        "core/protocol/**/*.ts",
+        "core/types/**/*.ts",
+        "core/pathfinding/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*crypto*",
-        "runtime/__tests__/**/*protocol*",
-        "runtime/__tests__/**/*routing*",
-        "runtime/__tests__/**/*serialization*"
+        "core/__tests__/**/*crypto*",
+        "core/__tests__/**/*protocol*",
+        "core/__tests__/**/*routing*",
+        "core/__tests__/**/*serialization*"
       ],
       "dependencies": [],
       "exclusions": []
@@ -119,13 +119,13 @@
       "criticality": "critical",
       "structuralDebt": 2,
       "sourceGlobs": [
-        "runtime/config/**/*.ts",
-        "runtime/infra/**/*.ts"
+        "core/config/**/*.ts",
+        "core/support/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*environment*",
-        "runtime/__tests__/**/*infra*",
-        "runtime/__tests__/**/*process*"
+        "core/__tests__/**/*environment*",
+        "core/__tests__/**/*infra*",
+        "core/__tests__/**/*process*"
       ],
       "dependencies": [
         "protocol-primitives"
@@ -139,10 +139,10 @@
       "criticality": "critical",
       "structuralDebt": 0,
       "sourceGlobs": [
-        "runtime/account/**/*.ts"
+        "core/account/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*account*"
+        "core/__tests__/**/*account*"
       ],
       "dependencies": [
         "protocol-primitives"
@@ -156,10 +156,10 @@
       "criticality": "critical",
       "structuralDebt": 0,
       "sourceGlobs": [
-        "runtime/entity/**/*.ts"
+        "core/entity/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*entity*"
+        "core/__tests__/**/*entity*"
       ],
       "dependencies": [
         "account-consensus",
@@ -174,13 +174,13 @@
       "criticality": "critical",
       "structuralDebt": 0,
       "sourceGlobs": [
-        "runtime/storage/**/*.ts",
-        "runtime/watchtower/**/*.ts"
+        "core/storage/**/*.ts",
+        "core/watchtower/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*storage*",
-        "runtime/__tests__/**/*recovery*",
-        "runtime/__tests__/**/*watchtower*"
+        "core/__tests__/**/*storage*",
+        "core/__tests__/**/*recovery*",
+        "core/__tests__/**/*watchtower*"
       ],
       "dependencies": [
         "protocol-primitives",
@@ -195,15 +195,15 @@
       "criticality": "critical",
       "structuralDebt": 8,
       "sourceGlobs": [
-        "runtime/network/**/*.ts",
-        "runtime/api/server/network/relay-direct.ts",
-        "runtime/scripts/checks/consensus/check-delivery-boundary-scan.ts"
+        "core/network/**/*.ts",
+        "core/api/server/network/relay-direct.ts",
+        "core/scripts/checks/consensus/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*p2p*",
-        "runtime/__tests__/**/*relay*",
-        "runtime/__tests__/network/routing/direct-runtime-bun.test.ts",
-        "runtime/scenarios/network/p2p-*.ts"
+        "core/__tests__/**/*p2p*",
+        "core/__tests__/**/*relay*",
+        "core/__tests__/network/pathfinding/direct-runtime-bun.test.ts",
+        "core/scenarios/network/p2p-*.ts"
       ],
       "dependencies": [
         "protocol-primitives",
@@ -218,14 +218,14 @@
       "criticality": "critical",
       "structuralDebt": 0,
       "sourceGlobs": [
-        "runtime/api/runtime-adapter/**/*.ts",
-        "runtime/api/server/**/*.ts",
+        "core/api/runtime-adapter/**/*.ts",
+        "core/api/server/**/*.ts",
         "brainvault/**/*.ts",
         "custody/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*radapter*",
-        "runtime/__tests__/**/*rpc*",
+        "core/__tests__/**/*radapter*",
+        "core/__tests__/**/*rpc*",
         "tests/unit/brainvault-*.test.ts",
         "brainvault/*.test.ts"
       ],
@@ -243,18 +243,18 @@
       "criticality": "critical",
       "structuralDebt": 4,
       "sourceGlobs": [
-        "runtime/api/public/**/*.ts",
-        "runtime/presentation/**/*.ts"
+        "core/api/public/**/*.ts",
+        "core/presentation/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*activity-history*",
-        "runtime/__tests__/**/*external-wallet*",
-        "runtime/__tests__/orchestrator/http/public-*.test.ts",
-        "runtime/__tests__/**/*faucet*",
-        "runtime/__tests__/api/product/reserve-faucet.test.ts",
-        "runtime/__tests__/orchestrator/http/orchestrator-rpc-public-routes.test.ts",
-        "runtime/__tests__/security/hanko/signer-public-key-binding.test.ts",
-        "runtime/__tests__/payments/htlc/htlc-dispute-secret-publication.test.ts"
+        "core/__tests__/**/*activity-history*",
+        "core/__tests__/**/*external-wallet*",
+        "core/__tests__/orchestrator/http/public-*.test.ts",
+        "core/__tests__/**/*faucet*",
+        "core/__tests__/api/product/reserve-faucet.test.ts",
+        "core/__tests__/orchestrator/http/orchestrator-rpc-public-routes.test.ts",
+        "core/__tests__/security/hanko/signer-public-key-binding.test.ts",
+        "core/__tests__/payments/htlc/htlc-dispute-secret-publication.test.ts"
       ],
       "dependencies": [
         "api-auth-custody",
@@ -270,12 +270,12 @@
       "criticality": "critical",
       "structuralDebt": 3,
       "sourceGlobs": [
-        "runtime/jurisdiction/**/*.ts",
+        "core/jurisdiction/**/*.ts",
         "jurisdictions/scripts/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*jurisdiction*",
-        "runtime/__tests__/**/*jadapter*",
+        "core/__tests__/**/*jurisdiction*",
+        "core/__tests__/**/*jadapter*",
         "jurisdictions/test/**/*"
       ],
       "dependencies": [
@@ -285,7 +285,7 @@
       ],
       "exclusions": [
         {
-          "glob": "runtime/jurisdiction/adapter/browservm/*.ts",
+          "glob": "core/jurisdiction/adapter/browservm/*.ts",
           "reason": "BrowserVM is peripheral to the production remote-jurisdiction release path and receives a lower evidence profile."
         }
       ]
@@ -297,12 +297,12 @@
       "criticality": "critical",
       "structuralDebt": 2,
       "sourceGlobs": [
-        "runtime/runtime.ts",
-        "runtime/runtime/**/*.ts"
+        "core/runtime.ts",
+        "core/runtime/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*runtime*",
-        "runtime/scenarios/**/*.ts"
+        "core/__tests__/**/*runtime*",
+        "core/scenarios/**/*.ts"
       ],
       "dependencies": [
         "entity-consensus",
@@ -319,9 +319,9 @@
       "criticality": "critical",
       "structuralDebt": 4,
       "sourceGlobs": [
-        "runtime/runtime/registration/**/*.ts",
-        "runtime/protocol/payments/**/*.ts",
-        "runtime/protocol/htlc/**/*.ts",
+        "core/runtime/registration/**/*.ts",
+        "core/protocol/payments/**/*.ts",
+        "core/protocol/htlc/**/*.ts",
         "frontend/src/lib/components/Entity/payments/PaymentPanel.svelte",
         "frontend/src/lib/components/PaymentSpotlight.svelte",
         "frontend/src/lib/stores/network/paymentSpotlightStore.ts",
@@ -330,14 +330,14 @@
         "frontend/src/lib/utils/xlnInvoice.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*payment*",
-        "runtime/__tests__/**/*htlc*",
-        "runtime/scenarios/payments/htlc-*.ts",
+        "core/__tests__/**/*payment*",
+        "core/__tests__/**/*htlc*",
+        "core/scenarios/payments/htlc-*.ts",
         "tests/e2e-payment.spec.ts",
         "tests/frontend/payments/payment-panel-view.test.ts",
         "tests/frontend/payments/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime/runtime-command-bus.test.ts",
-        "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
+        "core/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ],
       "dependencies": [
         "runtime-pipeline",
@@ -353,13 +353,13 @@
       "criticality": "high",
       "structuralDebt": 5,
       "sourceGlobs": [
-        "runtime/orderbook/**/*.ts",
-        "runtime/extensions/**/*.ts"
+        "core/orderbook/**/*.ts",
+        "core/extensions/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*orderbook*",
-        "runtime/__tests__/**/*swap*",
-        "runtime/scenarios/market/swap*.ts"
+        "core/__tests__/**/*orderbook*",
+        "core/__tests__/**/*swap*",
+        "core/scenarios/market/swap*.ts"
       ],
       "dependencies": [
         "account-consensus",
@@ -389,7 +389,7 @@
         "tests/frontend/payments/payment-panel-view.test.ts",
         "tests/frontend/payments/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime/runtime-command-bus.test.ts",
-        "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
+        "core/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ],
       "dependencies": [
         "api-auth-custody",
@@ -415,13 +415,13 @@
       "criticality": "high",
       "structuralDebt": 3,
       "sourceGlobs": [
-        "runtime/orchestrator/**/*.ts",
+        "core/orchestrator/**/*.ts",
         "scripts/deployment/**/*.sh",
-        "runtime/api/server/health/*.ts"
+        "core/api/server/health/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*health*",
-        "runtime/__tests__/**/*prod*"
+        "core/__tests__/**/*health*",
+        "core/__tests__/**/*prod*"
       ],
       "dependencies": [
         "storage-recovery",
@@ -438,8 +438,8 @@
       "structuralDebt": 2,
       "sourceGlobs": [
         "scripts/release/**/*.ts",
-        "runtime/qa/**/*.ts",
-        "runtime/scripts/**/*.ts",
+        "core/qa/**/*.ts",
+        "core/scripts/**/*.ts",
         "tools/audit.ts",
         "tools/audit/**/*.ts",
         "tools/frozen-core.ts",
@@ -454,8 +454,8 @@
       ],
       "testGlobs": [
         "tests/release-integrity/**/*.ts",
-        "runtime/__tests__/**/*.ts",
-        "runtime/scenarios/**/*.ts",
+        "core/__tests__/**/*.ts",
+        "core/scenarios/**/*.ts",
         "jurisdictions/test/**/*",
         "tests/**/*.ts",
         "brainvault/**/*.test.ts",
@@ -488,11 +488,11 @@
       ],
       "sourceGlobs": [
         "jurisdictions/contracts/**/*.sol",
-        "runtime/hanko/**/*.ts"
+        "core/hanko/**/*.ts"
       ],
       "testGlobs": [
         "jurisdictions/test/**/*EntityProvider*",
-        "runtime/__tests__/**/*hanko*"
+        "core/__tests__/**/*hanko*"
       ]
     },
     {
@@ -532,15 +532,15 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/protocol/**/*.ts",
-        "runtime/types/**/*.ts",
-        "runtime/routing/**/*.ts"
+        "core/protocol/**/*.ts",
+        "core/types/**/*.ts",
+        "core/pathfinding/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*crypto*",
-        "runtime/__tests__/**/*protocol*",
-        "runtime/__tests__/**/*routing*",
-        "runtime/__tests__/**/*serialization*"
+        "core/__tests__/**/*crypto*",
+        "core/__tests__/**/*protocol*",
+        "core/__tests__/**/*routing*",
+        "core/__tests__/**/*serialization*"
       ]
     },
     {
@@ -557,13 +557,13 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/config/**/*.ts",
-        "runtime/infra/**/*.ts"
+        "core/config/**/*.ts",
+        "core/support/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*environment*",
-        "runtime/__tests__/**/*infra*",
-        "runtime/__tests__/**/*process*"
+        "core/__tests__/**/*environment*",
+        "core/__tests__/**/*infra*",
+        "core/__tests__/**/*process*"
       ]
     },
     {
@@ -580,10 +580,10 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/account/**/*.ts"
+        "core/account/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*account*"
+        "core/__tests__/**/*account*"
       ]
     },
     {
@@ -600,10 +600,10 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/entity/**/*.ts"
+        "core/entity/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*entity*"
+        "core/__tests__/**/*entity*"
       ]
     },
     {
@@ -620,13 +620,13 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/storage/**/*.ts",
-        "runtime/watchtower/**/*.ts"
+        "core/storage/**/*.ts",
+        "core/watchtower/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*storage*",
-        "runtime/__tests__/**/*recovery*",
-        "runtime/__tests__/**/*watchtower*"
+        "core/__tests__/**/*storage*",
+        "core/__tests__/**/*recovery*",
+        "core/__tests__/**/*watchtower*"
       ]
     },
     {
@@ -643,15 +643,15 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/network/**/*.ts",
-        "runtime/api/server/network/relay-direct.ts",
-        "runtime/scripts/checks/consensus/check-delivery-boundary-scan.ts"
+        "core/network/**/*.ts",
+        "core/api/server/network/relay-direct.ts",
+        "core/scripts/checks/consensus/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*p2p*",
-        "runtime/__tests__/**/*relay*",
-        "runtime/__tests__/network/routing/direct-runtime-bun.test.ts",
-        "runtime/scenarios/network/p2p-*.ts"
+        "core/__tests__/**/*p2p*",
+        "core/__tests__/**/*relay*",
+        "core/__tests__/network/pathfinding/direct-runtime-bun.test.ts",
+        "core/scenarios/network/p2p-*.ts"
       ]
     },
     {
@@ -668,15 +668,15 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/network/**/*.ts",
-        "runtime/api/server/network/relay-direct.ts",
-        "runtime/scripts/checks/consensus/check-delivery-boundary-scan.ts"
+        "core/network/**/*.ts",
+        "core/api/server/network/relay-direct.ts",
+        "core/scripts/checks/consensus/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*p2p*",
-        "runtime/__tests__/**/*relay*",
-        "runtime/__tests__/network/routing/direct-runtime-bun.test.ts",
-        "runtime/scenarios/network/p2p-*.ts"
+        "core/__tests__/**/*p2p*",
+        "core/__tests__/**/*relay*",
+        "core/__tests__/network/pathfinding/direct-runtime-bun.test.ts",
+        "core/scenarios/network/p2p-*.ts"
       ]
     },
     {
@@ -693,15 +693,15 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/network/**/*.ts",
-        "runtime/api/server/network/relay-direct.ts",
-        "runtime/scripts/checks/consensus/check-delivery-boundary-scan.ts"
+        "core/network/**/*.ts",
+        "core/api/server/network/relay-direct.ts",
+        "core/scripts/checks/consensus/check-delivery-boundary-scan.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*p2p*",
-        "runtime/__tests__/**/*relay*",
-        "runtime/__tests__/network/routing/direct-runtime-bun.test.ts",
-        "runtime/scenarios/network/p2p-*.ts"
+        "core/__tests__/**/*p2p*",
+        "core/__tests__/**/*relay*",
+        "core/__tests__/network/pathfinding/direct-runtime-bun.test.ts",
+        "core/scenarios/network/p2p-*.ts"
       ]
     },
     {
@@ -718,14 +718,14 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/api/runtime-adapter/**/*.ts",
-        "runtime/api/server/**/*.ts",
+        "core/api/runtime-adapter/**/*.ts",
+        "core/api/server/**/*.ts",
         "brainvault/**/*.ts",
         "custody/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*radapter*",
-        "runtime/__tests__/**/*rpc*",
+        "core/__tests__/**/*radapter*",
+        "core/__tests__/**/*rpc*",
         "tests/unit/brainvault-*.test.ts",
         "brainvault/*.test.ts"
       ]
@@ -744,14 +744,14 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/api/runtime-adapter/**/*.ts",
-        "runtime/api/server/**/*.ts",
+        "core/api/runtime-adapter/**/*.ts",
+        "core/api/server/**/*.ts",
         "brainvault/**/*.ts",
         "custody/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*radapter*",
-        "runtime/__tests__/**/*rpc*",
+        "core/__tests__/**/*radapter*",
+        "core/__tests__/**/*rpc*",
         "tests/unit/brainvault-*.test.ts",
         "brainvault/*.test.ts"
       ]
@@ -762,13 +762,13 @@
       "title": "Public faucet routes are explicitly enabled, authority-bounded, and exactly capped.",
       "importance": 18,
       "sourceGlobs": [
-        "runtime/api/public/external-wallet/faucet-*.ts",
-        "runtime/api/public/external-wallet/context.ts",
-        "runtime/api/public/external-wallet/http.ts"
+        "core/api/public/external-wallet/faucet-*.ts",
+        "core/api/public/external-wallet/context.ts",
+        "core/api/public/external-wallet/http.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*faucet*",
-        "runtime/__tests__/api/product/reserve-faucet.test.ts"
+        "core/__tests__/**/*faucet*",
+        "core/__tests__/api/product/reserve-faucet.test.ts"
       ],
       "requiredEvidence": [
         "codeTrace",
@@ -785,17 +785,17 @@
       "title": "Every public command and projection is bound to its authenticated caller authority.",
       "importance": 24,
       "sourceGlobs": [
-        "runtime/api/public/browser.ts",
-        "runtime/api/public/external-wallet-api.ts",
-        "runtime/api/public/external-wallet/context.ts",
-        "runtime/api/public/external-wallet/http.ts",
-        "runtime/api/public/runtime-module-guard.ts",
-        "runtime/api/public/runtime-module.ts"
+        "core/api/public/browser.ts",
+        "core/api/public/external-wallet-api.ts",
+        "core/api/public/external-wallet/context.ts",
+        "core/api/public/external-wallet/http.ts",
+        "core/api/public/runtime-module-guard.ts",
+        "core/api/public/runtime-module.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/api/server/external-wallet-api.test.ts",
-        "runtime/__tests__/orchestrator/http/orchestrator-rpc-public-routes.test.ts",
-        "runtime/__tests__/security/hanko/signer-public-key-binding.test.ts"
+        "core/__tests__/api/server/external-wallet-api.test.ts",
+        "core/__tests__/orchestrator/http/orchestrator-rpc-public-routes.test.ts",
+        "core/__tests__/security/hanko/signer-public-key-binding.test.ts"
       ],
       "requiredEvidence": [
         "codeTrace",
@@ -812,15 +812,15 @@
       "title": "Public wallet projections derive only from durable committed state.",
       "importance": 20,
       "sourceGlobs": [
-        "runtime/api/public/activity-history.ts",
-        "runtime/api/public/external-wallet/snapshot-handler.ts",
-        "runtime/api/public/external-wallet/tokens-handler.ts",
-        "runtime/api/public/runtime-public.ts"
+        "core/api/public/activity-history.ts",
+        "core/api/public/external-wallet/snapshot-handler.ts",
+        "core/api/public/external-wallet/tokens-handler.ts",
+        "core/api/public/runtime-public.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*activity-history*",
-        "runtime/__tests__/api/server/external-wallet-state.test.ts",
-        "runtime/__tests__/orchestrator/http/public-discovery.test.ts"
+        "core/__tests__/**/*activity-history*",
+        "core/__tests__/api/server/external-wallet-state.test.ts",
+        "core/__tests__/orchestrator/http/public-discovery.test.ts"
       ],
       "requiredEvidence": [
         "codeTrace",
@@ -837,17 +837,17 @@
       "title": "Public wallet responses never disclose private keys, mnemonics, or unrevealed secrets.",
       "importance": 20,
       "sourceGlobs": [
-        "runtime/api/public/browser.ts",
-        "runtime/api/public/external-wallet-api.ts",
-        "runtime/api/public/external-wallet/snapshot-handler.ts",
-        "runtime/api/public/external-wallet/tokens-handler.ts",
-        "runtime/api/public/public-utilities.ts",
-        "runtime/api/public/runtime-public.ts"
+        "core/api/public/browser.ts",
+        "core/api/public/external-wallet-api.ts",
+        "core/api/public/external-wallet/snapshot-handler.ts",
+        "core/api/public/external-wallet/tokens-handler.ts",
+        "core/api/public/public-utilities.ts",
+        "core/api/public/runtime-public.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/api/server/external-wallet-api.test.ts",
-        "runtime/__tests__/api/server/external-wallet-state.test.ts",
-        "runtime/__tests__/payments/htlc/htlc-dispute-secret-publication.test.ts"
+        "core/__tests__/api/server/external-wallet-api.test.ts",
+        "core/__tests__/api/server/external-wallet-state.test.ts",
+        "core/__tests__/payments/htlc/htlc-dispute-secret-publication.test.ts"
       ],
       "requiredEvidence": [
         "codeTrace",
@@ -864,16 +864,16 @@
       "title": "Public balances, activities, identities, and statuses preserve their committed protocol meaning.",
       "importance": 18,
       "sourceGlobs": [
-        "runtime/api/public/activity-history.ts",
-        "runtime/api/public/external-wallet/snapshot-handler.ts",
-        "runtime/api/public/external-wallet/tokens-handler.ts",
-        "runtime/api/public/runtime-public.ts",
-        "runtime/presentation/**/*.ts"
+        "core/api/public/activity-history.ts",
+        "core/api/public/external-wallet/snapshot-handler.ts",
+        "core/api/public/external-wallet/tokens-handler.ts",
+        "core/api/public/runtime-public.ts",
+        "core/presentation/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*activity-history*",
-        "runtime/__tests__/api/server/external-wallet-state.test.ts",
-        "runtime/__tests__/orchestrator/http/public-discovery.test.ts"
+        "core/__tests__/**/*activity-history*",
+        "core/__tests__/api/server/external-wallet-state.test.ts",
+        "core/__tests__/orchestrator/http/public-discovery.test.ts"
       ],
       "requiredEvidence": [
         "codeTrace",
@@ -898,12 +898,12 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/jurisdiction/**/*.ts",
+        "core/jurisdiction/**/*.ts",
         "jurisdictions/scripts/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*jurisdiction*",
-        "runtime/__tests__/**/*jadapter*",
+        "core/__tests__/**/*jurisdiction*",
+        "core/__tests__/**/*jadapter*",
         "jurisdictions/test/**/*"
       ]
     },
@@ -921,12 +921,12 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/runtime.ts",
-        "runtime/runtime/**/*.ts"
+        "core/runtime.ts",
+        "core/runtime/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*runtime*",
-        "runtime/scenarios/**/*.ts"
+        "core/__tests__/**/*runtime*",
+        "core/scenarios/**/*.ts"
       ]
     },
     {
@@ -943,12 +943,12 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/runtime.ts",
-        "runtime/runtime/**/*.ts"
+        "core/runtime.ts",
+        "core/runtime/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*runtime*",
-        "runtime/scenarios/**/*.ts"
+        "core/__tests__/**/*runtime*",
+        "core/scenarios/**/*.ts"
       ]
     },
     {
@@ -965,9 +965,9 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/runtime/registration/**/*.ts",
-        "runtime/protocol/payments/**/*.ts",
-        "runtime/protocol/htlc/**/*.ts",
+        "core/runtime/registration/**/*.ts",
+        "core/protocol/payments/**/*.ts",
+        "core/protocol/htlc/**/*.ts",
         "frontend/src/lib/components/Entity/payments/PaymentPanel.svelte",
         "frontend/src/lib/components/PaymentSpotlight.svelte",
         "frontend/src/lib/stores/network/paymentSpotlightStore.ts",
@@ -976,14 +976,14 @@
         "frontend/src/lib/utils/xlnInvoice.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*payment*",
-        "runtime/__tests__/**/*htlc*",
-        "runtime/scenarios/payments/htlc-*.ts",
+        "core/__tests__/**/*payment*",
+        "core/__tests__/**/*htlc*",
+        "core/scenarios/payments/htlc-*.ts",
         "tests/e2e-payment.spec.ts",
         "tests/frontend/payments/payment-panel-view.test.ts",
         "tests/frontend/payments/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime/runtime-command-bus.test.ts",
-        "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
+        "core/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ]
     },
     {
@@ -1000,13 +1000,13 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "runtime/orderbook/**/*.ts",
-        "runtime/extensions/**/*.ts"
+        "core/orderbook/**/*.ts",
+        "core/extensions/**/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*orderbook*",
-        "runtime/__tests__/**/*swap*",
-        "runtime/scenarios/market/swap*.ts"
+        "core/__tests__/**/*orderbook*",
+        "core/__tests__/**/*swap*",
+        "core/scenarios/market/swap*.ts"
       ]
     },
     {
@@ -1060,7 +1060,7 @@
         "tests/frontend/payments/payment-panel-view.test.ts",
         "tests/frontend/payments/payment-terminal-monitor.test.ts",
         "tests/frontend/runtime/runtime-command-bus.test.ts",
-        "runtime/__tests__/development/frontend/frontend-xln-invoice.test.ts"
+        "core/__tests__/development/frontend/frontend-xln-invoice.test.ts"
       ]
     },
     {
@@ -1076,13 +1076,13 @@
         "l3BroadGate"
       ],
       "sourceGlobs": [
-        "runtime/orchestrator/**/*.ts",
+        "core/orchestrator/**/*.ts",
         "scripts/deployment/**/*.sh",
-        "runtime/api/server/health/*.ts"
+        "core/api/server/health/*.ts"
       ],
       "testGlobs": [
-        "runtime/__tests__/**/*health*",
-        "runtime/__tests__/**/*prod*"
+        "core/__tests__/**/*health*",
+        "core/__tests__/**/*prod*"
       ]
     },
     {
@@ -1100,8 +1100,8 @@
       ],
       "sourceGlobs": [
         "scripts/release/**/*.ts",
-        "runtime/qa/**/*.ts",
-        "runtime/scripts/**/*.ts",
+        "core/qa/**/*.ts",
+        "core/scripts/**/*.ts",
         "tools/audit.ts",
         "tools/audit/**/*.ts",
         "tools/frozen-core.ts",
@@ -1116,8 +1116,8 @@
       ],
       "testGlobs": [
         "tests/release-integrity/**/*.ts",
-        "runtime/__tests__/**/*.ts",
-        "runtime/scenarios/**/*.ts",
+        "core/__tests__/**/*.ts",
+        "core/scenarios/**/*.ts",
         "jurisdictions/test/**/*",
         "tests/**/*.ts",
         "brainvault/**/*.test.ts",
@@ -1191,7 +1191,7 @@
       "state": "PASS",
       "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
       "moduleFingerprint": "sha256:54474950a5a9d384ef322bd20f45bf1930afc252406d478886fde31639572d4b",
-      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "command": "bun test tests/unit/brainvault-native.test.ts core/__tests__/server-rpc-startup-gate.test.ts core/__tests__/radapter-remote-reconnect.test.ts",
       "summary": "Injected file/directory fsync failure, unsupported durability, restore/derive race, stale sockets, malformed protocol, and superseded connect.",
       "recordedAt": "2026-08-01T00:13:00Z",
       "agentRunIds": [
@@ -1389,7 +1389,7 @@
       "state": "FAIL",
       "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
       "moduleFingerprint": "sha256:035c73247033ec8fee9f2434f9c214466abd49523cffd7185178740bbea21625",
-      "command": "bun test runtime/__tests__/relay-store.test.ts",
+      "command": "bun test core/__tests__/relay-store.test.ts",
       "summary": "Existing regression encoded the inverted -1 failure and 0 success contract.",
       "recordedAt": "2026-08-01T00:24:00Z",
       "agentRunIds": [
@@ -1587,7 +1587,7 @@
       "state": "PASS",
       "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
       "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
-      "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'websocket send result classifier|commits an accepted prefix|fails loud and retains an invalid first send'",
+      "command": "bun test core/__tests__/relay-store.test.ts --test-name-pattern 'websocket send result classifier|commits an accepted prefix|fails loud and retains an invalid first send'",
       "summary": "Classifier, invalid-first retention, and accepted-prefix checkpoint passed 3/3 with 18 assertions.",
       "recordedAt": "2026-08-01T00:40:01Z",
       "agentRunIds": [
@@ -1605,7 +1605,7 @@
       "state": "PASS",
       "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
       "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
-      "command": "bun test runtime/__tests__/direct-runtime-bun.test.ts runtime/__tests__/relay-direct.test.ts runtime/__tests__/relay-router.test.ts runtime/__tests__/relay-store.test.ts",
+      "command": "bun test core/__tests__/direct-runtime-bun.test.ts core/__tests__/relay-direct.test.ts core/__tests__/relay-router.test.ts core/__tests__/relay-store.test.ts",
       "summary": "Direct runtime, direct relay, router, and pending-store flow passed 56/56 with 247 assertions.",
       "recordedAt": "2026-08-01T00:40:02Z",
       "agentRunIds": [
@@ -1623,7 +1623,7 @@
       "state": "PASS",
       "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
       "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
-      "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'commits an accepted prefix|fails loud and retains an invalid first send'",
+      "command": "bun test core/__tests__/relay-store.test.ts --test-name-pattern 'commits an accepted prefix|fails loud and retains an invalid first send'",
       "summary": "Invalid-first retained exact bytes; accepted prefix committed before fail-loud invalid-result propagation.",
       "recordedAt": "2026-08-01T00:40:03Z",
       "agentRunIds": [
@@ -1731,7 +1731,7 @@
       "state": "PASS",
       "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
       "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
-      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "command": "bun test tests/unit/brainvault-native.test.ts core/__tests__/server-rpc-startup-gate.test.ts core/__tests__/radapter-remote-reconnect.test.ts",
       "summary": "Fsync, spec mismatch, cancellation, startup failure, concurrent restore, and stale authority generation injections passed 12/12.",
       "recordedAt": "2026-08-01T00:41:03Z",
       "agentRunIds": [
@@ -1840,7 +1840,7 @@
       "state": "PASS",
       "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
       "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
-      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "command": "bun test tests/unit/brainvault-native.test.ts core/__tests__/server-rpc-startup-gate.test.ts core/__tests__/radapter-remote-reconnect.test.ts",
       "summary": "Malformed secret-bearing messages, stale reconnect generation, failed startup, and concurrent owner restore all failed closed.",
       "recordedAt": "2026-08-01T00:41:09Z",
       "agentRunIds": [
@@ -2308,7 +2308,7 @@
       "confidence": 100,
       "state": "CONFIRMED",
       "sourceSha": "6004b0ced0d2b40fe7a4de009638ba10a115557f",
-      "reproduction": "Proxy /api/tower/receipt/../../../api/control/runtime/quiesce to a caller-selected loopback port and observe URL normalization produce an allowed operator POST."
+      "reproduction": "Proxy /api/tower/receipt/../../../api/control/core/quiesce to a caller-selected loopback port and observe URL normalization produce an allowed operator POST."
     },
     {
       "id": "AUD-ROUTING-FEE-INVERSION-HANG",

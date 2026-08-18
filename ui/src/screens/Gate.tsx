@@ -1,16 +1,16 @@
 import { useMemo, useRef, useState } from 'react';
 import { Icon } from '../components/Icons';
-import { useApp } from '../runtime/store';
-import { bootEmbeddedDemo, connectSandbox } from '../runtime/sandbox';
+import { useApp } from '../core/store';
+import { bootEmbeddedDemo, connectSandbox } from '../core/sandbox';
 import {
 	FACTOR_PRESETS,
 	customWork,
 	deriveBrainvaultMnemonic,
 	type BrainvaultProgress,
 	type BrainvaultWork,
-} from '../runtime/brainvault';
-import { isValidMnemonic, runtimeIdForSeed } from '../runtime/keys';
-import { connectRemote } from '../runtime/adapter';
+} from '../core/brainvault';
+import { isValidMnemonic, runtimeIdForSeed } from '../core/keys';
+import { connectRemote } from '../core/adapter';
 
 type GateMode = 'landing' | 'create' | 'import' | 'remote';
 

@@ -102,7 +102,7 @@ if (value !== '0') { updateState(); }  // Hiding root cause!
 Do not create mocks/stubs unless asked. Use real integration. When debugging consensus/state-machines, dump entire data/JSON. Use bun everywhere (not npm/node).
 
 ALWAYS run `bun run check` before reporting completion.
-NEVER create .md files in /runtime or /frontend - documentation goes in /docs.
+NEVER create .md files in /core or /frontend - documentation goes in /docs.
 
 ## 🎯 AGENTIC MODE (90% Confidence Threshold)
 
@@ -139,7 +139,7 @@ Quick iteration signals (full autonomy):
 - Check imports before reading (no imports = delete, don't analyze)
 
 ## 🚨 BROWSER BUILD
-`bun build runtime/runtime.ts --target=browser --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util`
+`bun build core/runtime.ts --target=browser --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util`
 (runtime.ts runs in browser, never --target node)
 
 
@@ -191,7 +191,7 @@ Functional/declarative paradigm. Pure functions. Immutability. Small composable 
 **Bilateral consensus:** Study `.archive/2024_src/app/Channel.ts` for state verification patterns
 
 ## 📁 STRUCTURE
-Core: /runtime. Contracts: /jurisdictions. UI: /frontend. Docs: /docs. Reference: .archive/2024_src/app/Channel.ts
+Core: /core. Contracts: /jurisdictions. UI: /frontend. Docs: /docs. Reference: .archive/2024_src/app/Channel.ts
 
 ## 🛠️ PATTERNS
 Auto-rebuild: `bun run dev`. Time-travel: read from `env` not live stores. Bilateral: left=lower entityId (lexicographic).
@@ -203,7 +203,7 @@ Auto-rebuild: `bun run dev`. Time-travel: read from `env` not live stores. Bilat
 ### ASCII Mode (Quick Scan)
 ```bash
 # Run scenario with full output
-bun runtime/scenarios/payments/lock-ahb.ts > /tmp/debug.log
+bun core/scenarios/payments/lock-ahb.ts > /tmp/debug.log
 
 # Grep for specific info
 grep "Entity.*Alice" /tmp/debug.log        # Find Alice's state
@@ -211,7 +211,7 @@ grep "HTLC.*Pending" /tmp/debug.log        # Find pending locks
 grep "Frame 65" /tmp/debug.log             # Find specific frame
 ```
 
-**ASCII functions** (runtime/qa/runtime-ascii.ts):
+**ASCII functions** (core/qa/runtime-ascii.ts):
 - `formatRuntime(env)` - Full env with hierarchical boxes
 - `formatEntity(state)` - Single entity with accounts
 - `formatAccount(account, myId)` - Bilateral account detail

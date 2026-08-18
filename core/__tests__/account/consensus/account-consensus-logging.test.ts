@@ -1,0 +1,28 @@
+import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+test('account consensus core uses structured logging only', () => {
+  const source = [
+    'core/account/consensus/index.ts',
+    'core/account/consensus/incoming/preflight.ts',
+  ]
+    .map(path => readFileSync(join(process.cwd(), path), 'utf8'))
+    .join('\n');
+
+  expect(source).toContain("createStructuredLogger('account')");
+  expect(source).toContain("accountLog.debug('frame.commit.complete'");
+  expect(source).toContain("preflightLog.warn('frame.prev_hash_mismatch'");
+  expect(source).toContain("accountLog.warn('frame.state_root_mismatch'");
+  expect(source).toContain("accountLog.debug('return.no_response'");
+  expect(source).not.toContain('console.');
+});
+
+test('account consensus helper diagnostics use structured logging only', () => {
+  const source = readFileSync(join(process.cwd(), 'core/account/consensus/helpers.ts'), 'utf8');
+
+  expect(source).toContain("createStructuredLogger('account.consensus')");
+  expect(source).toContain("accountConsensusHelperLog.error('auto_rebalance_check.failed'");
+  expect(source).toContain('throw rebalanceErr;');
+  expect(source).not.toContain('console.');
+});

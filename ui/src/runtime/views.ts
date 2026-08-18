@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { Delta, DerivedDelta } from '@xln/runtime/api/public/runtime-module';
+import type { Delta, DerivedDelta } from '@xln/core/api/public/runtime-module';
 import { useAdapterRead, type ReadState } from './hooks';
 import { peekXLN } from './xln-loader';
 

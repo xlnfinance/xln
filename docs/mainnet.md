@@ -142,7 +142,7 @@ Required:
 - one coherent deployment surface;
 - runtime, relay, storage, market maker, and tower readiness visible in health;
 - bounded reconnect behavior;
-- alerting/metrics good enough to detect child/runtime/storage/tower failure;
+- alerting/metrics good enough to detect child/core/storage/tower failure;
 - backup/restore and storage incident drills exist;
 - operator/tower keys, gas funding, and RPC endpoints are explicit.
 

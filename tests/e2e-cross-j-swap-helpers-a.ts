@@ -1,8 +1,8 @@
 import { HDNodeWallet, Mnemonic, getIndexedAccountPath } from 'ethers';
-import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
-import { defaultAccountDisputeConfigForParties } from '../runtime/account/config/dispute-config';
-import { deriveJurisdictionSignerIndex } from '../runtime/jurisdiction/machine/config/signer-derivation';
-import type { MarketSnapshotPayload } from '../runtime/network/relay/market/snapshot';
+import { deriveDelta, getTokenInfo } from '../core/account/utils';
+import { defaultAccountDisputeConfigForParties } from '../core/account/config/dispute-config';
+import { deriveJurisdictionSignerIndex } from '../core/jurisdiction/machine/config/signer-derivation';
+import type { MarketSnapshotPayload } from '../core/network/relay/market/snapshot';
 import { expect, type Page } from './global-setup.mts';
 export { aggregateExpectedCrossBookDepth } from './utils/e2e-cross-book-depth';
 import { type E2EHealthResponse } from './utils/e2e-baseline';

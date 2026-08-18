@@ -31,11 +31,11 @@ Sources are listed at the end.
 
 XLN already has most of the raw material:
 
-- Account frame, height, and Hanko state in `runtime/types/account.ts`.
+- Account frame, height, and Hanko state in `core/types/account.ts`.
 - Dispute proof state: `abiProofBody`, `currentDisputeProofHanko`, `counterpartyDisputeProofHanko`, `disputeProofNoncesByHash`, and `disputeProofBodiesByHash`.
-- `buildAccountProofBody()` and `createDisputeProofHash()` in `runtime/protocol/dispute/proof-builder.ts`.
+- `buildAccountProofBody()` and `createDisputeProofHash()` in `core/protocol/dispute/proof-builder.ts`.
 - durable account frame history via `RuntimeHistoryRecord` materialized by
-  `runtime/storage/history/history-view.ts` from the authoritative Runtime WAL.
+  `core/storage/history/history-view.ts` from the authoritative Runtime WAL.
 - storage Merkle roots used by `stateHash`, documented in `docs/merkle.md`.
 - `entity-crontab.ts` already handles pending-frame resend, stale pending-frame detection, HTLC timeouts, rollback suggestions, and rebalance automation.
 - the native wallet plan already says relays/watchtowers may notify and prove, but must not hold spend-capable user keys.
@@ -672,11 +672,11 @@ Compared with adding only payments/swaps/cross-chain swaps, recovery/watchtowers
 
 Files/modules:
 
-- add `runtime/storage/recovery/bundle/types.ts`;
-- add `runtime/storage/recovery/bundle/index.ts`;
-- add `runtime/storage/recovery/verify.ts`;
-- add `runtime/storage/recovery/peer-sync.ts`;
-- extend hub/direct relay surfaces in `runtime/api/server/index.ts`, `runtime/orchestrator/hub-node.ts`, and relay server modules;
+- add `core/storage/recovery/bundle/types.ts`;
+- add `core/storage/recovery/bundle/index.ts`;
+- add `core/storage/recovery/verify.ts`;
+- add `core/storage/recovery/peer-sync.ts`;
+- extend hub/direct relay surfaces in `core/api/server/index.ts`, `core/orchestrator/hub-node.ts`, and relay server modules;
 - extend `entity-crontab.ts` to schedule PSR pings.
 
 Exit tests:
@@ -690,9 +690,9 @@ Exit tests:
 
 Files/modules:
 
-- add `runtime/storage/recovery/tower-client.ts`;
-- add `runtime/storage/recovery/tower-server.ts` or a standalone `tower` service;
-- add `runtime/storage/recovery/encryption.ts`;
+- add `core/storage/recovery/tower-client.ts`;
+- add `core/storage/recovery/tower-server.ts` or a standalone `tower` service;
+- add `core/storage/recovery/encryption.ts`;
 - add tower receipt persistence in runtime storage projection;
 - add frontend recovery coverage panel.
 
@@ -706,7 +706,7 @@ Exit tests:
 
 Current repo status:
 
-- standalone `runtime/watchtower/*` service exists;
+- standalone `core/watchtower/*` service exists;
 - blind backup uploads/restores are live and tested;
 - backup barrier defers remote side effects until backup succeeds;
 - free-tier byte quota is enforced per lookup key.
@@ -715,8 +715,8 @@ Current repo status:
 
 Files/modules:
 
-- extend `runtime/jurisdiction/adapter/watcher/index.ts` event fanout for account/dispute events;
-- add `runtime/storage/recovery/tower-action.ts`;
+- extend `core/jurisdiction/adapter/watcher/index.ts` event fanout for account/dispute events;
+- add `core/storage/recovery/tower-action.ts`;
 - add tower fee budget and action receipts;
 - add a guarded contract path, for example `watchtowerCounterDispute`, that rejects early tower action before the last-resort window;
 - update `jurisdictions` contracts if a newer proof cannot challenge an older dispute.
@@ -736,7 +736,7 @@ Current repo status:
 - guarded `watchtowerCounterDispute(...)` exists in `Depository.sol`;
 - early tower action reverts on-chain;
 - wrong tower / missing newer proof is rejected;
-- standalone watchtower sweep engine exists in `runtime/watchtower/action.ts`;
+- standalone watchtower sweep engine exists in `core/watchtower/action.ts`;
 - standalone daemon schedules sweeps and exposes health without requiring public
   `/api/watchtower/*` access;
 - last-resort remedies are encrypted to the account `watchSeed`, decrypt only
@@ -762,10 +762,10 @@ Features:
 Status key: done = implemented and covered in the current repo; open = still
 active backlog.
 
-1. done: define recovery protocol types in `runtime/storage/recovery/bundle/types.ts`.
-2. done: build bundle creation from `AccountReplica` in `runtime/storage/recovery/bundle/index.ts`.
-3. done: build deterministic verification in `runtime/storage/recovery/verify.ts`.
-4. partial: add PSR wire handling to direct runtime/hub/relay transports.
+1. done: define recovery protocol types in `core/storage/recovery/bundle/types.ts`.
+2. done: build bundle creation from `AccountReplica` in `core/storage/recovery/bundle/index.ts`.
+3. done: build deterministic verification in `core/storage/recovery/verify.ts`.
+4. partial: add PSR wire handling to direct core/hub/relay transports.
    - done: authenticated direct runtime websocket accepts
      `recovery_bundle_request` and answers with encrypted runtime recovery
      bundles through the same typed adapter resolver as `/rpc`.

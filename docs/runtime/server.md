@@ -31,4 +31,4 @@ This folder owns the runtime HTTP/WS API surface.
 ## Audit note
 
 Treat this folder as operator/API surface, not protocol truth. Bugs here can
-hurt liveness or UX, but correctness still lives in runtime/consensus/storage.
+hurt liveness or UX, but correctness still lives in core/consensus/storage.

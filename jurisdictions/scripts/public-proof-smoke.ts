@@ -4,14 +4,14 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ethers } from 'ethers';
 
-import { generateLazyEntityId } from '../../runtime/entity/factory';
-import { buildSingleSignerHanko, prepareSignedBatch } from '../../runtime/hanko/batch';
+import { generateLazyEntityId } from '../../core/entity/factory';
+import { buildSingleSignerHanko, prepareSignedBatch } from '../../core/hanko/batch';
 import {
   hashCooperativeUpdateHankoPayload,
   hashDisputeProofHankoPayload,
-} from '../../runtime/hanko/onchain-domain';
-import { createEmptyBatch, type JBatch } from '../../runtime/jurisdiction/machine/batch';
-import { PROOF_BODY_ABI } from '../../runtime/protocol/dispute/proof-body';
+} from '../../core/hanko/onchain-domain';
+import { createEmptyBatch, type JBatch } from '../../core/jurisdiction/machine/batch';
+import { PROOF_BODY_ABI } from '../../core/protocol/dispute/proof-body';
 import { Depository__factory } from '../typechain-types/factories/contracts/Depository.sol/Depository__factory';
 
 type PublicJurisdiction = Readonly<{

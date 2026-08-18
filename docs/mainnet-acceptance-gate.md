@@ -73,7 +73,7 @@ Concrete examples:
 ## xln Mental Model For The Gatekeeper
 
 - xln is a bilateral finance system, not a broadcast ledger clone. The core
-  invariant lives across runtime/entity/account/jurisdiction machines.
+  invariant lives across core/entity/account/jurisdiction machines.
 - RJEA logic must be deterministic: same previous env plus same inputs produces
   the same next env. Active infra, wall-clock time, random bytes, timers, and
   network side effects do not belong inside the state machine.
@@ -140,7 +140,7 @@ Required evidence:
 5. `bun run test:e2e:full` output.
 6. `bun run test:watchtower:smoke` output.
 7. 1-hour soak output from
-   `bun runtime/scripts/release/run-soak-gate.ts --profile=release --minutes=60`.
+   `bun core/scripts/release/run-soak-gate.ts --profile=release --minutes=60`.
 8. Production-health output proving one tower and three hubs are healthy.
 9. Browser/F12 console evidence for landing, bootstrap, recovery, payment,
    swap, dispute, and reload flows with zero uncaught errors.
@@ -186,7 +186,7 @@ Report format:
 | Last-resort dispute | Tower acts only after valid breach condition and only with newer proof | watchtower dispute unit/e2e coverage |
 | Payments | Direct payment survives reload, recovery, and hub reconnect | e2e full and browser drill |
 | Swaps | Same-account and cross-j swaps settle or fail loudly | e2e full, flow coverage, cross-j tests |
-| Lending | UI lending flows match runtime/account state and fail closed | e2e full, lending unit/e2e evidence |
+| Lending | UI lending flows match core/account state and fail closed | e2e full, lending unit/e2e evidence |
 | Landing | Landing does not bypass cap, security, recovery, or onboarding warnings | browser drill and console evidence |
 | Topology | One tower and three hubs are healthy from the production endpoint | `bun run prod:health` plus deployment health payload |
 | Ops | Rollback, secrets, RPCs, gas funding, and alerts are explicit | ops runbook drill evidence |

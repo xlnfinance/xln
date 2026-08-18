@@ -224,7 +224,7 @@ blocker list:
 
 ## Human-audit source context and lean LLM bundles
 
-- Add a concise 3–4 line header to each production `runtime/` source file:
+- Add a concise 3–4 line header to each production `core/` source file:
   purpose, key authority/invariant, principal entrypoints and audit importance
   `/100`. Do not comment obvious helpers or restate types; function-level `why`
   comments are reserved for financial, consensus, storage, crypto and other

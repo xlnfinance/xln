@@ -1,5 +1,5 @@
-import type { RuntimeInput } from '@xln/runtime/api/public/runtime-module';
-import { safeParse, safeStringify } from '@xln/runtime/protocol/serialization';
+import type { RuntimeInput } from '@xln/core/api/public/runtime-module';
+import { safeParse, safeStringify } from '@xln/core/protocol/serialization';
 import {
   MAX_RECEIPT_ID_BYTES,
   MAX_RUNTIME_INPUT_BYTES,

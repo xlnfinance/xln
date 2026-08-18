@@ -1,17 +1,17 @@
-import type { RuntimeWsMessage } from '@xln/runtime/network/p2p/ws-protocol';
+import type { RuntimeWsMessage } from '@xln/core/network/p2p/ws-protocol';
 import {
   deserializeWsMessage,
   serializeWsMessage,
-} from '@xln/runtime/network/p2p/ws-protocol';
+} from '@xln/core/network/p2p/ws-protocol';
 import {
   decodeRuntimeAdapterBrowserMessage,
   decodeRuntimeAdapterMessage,
   encodeRuntimeAdapterMessage,
-} from '@xln/runtime/api/runtime-adapter/codec';
-import type { RuntimeAdapterWireMessage } from '@xln/runtime/api/runtime-adapter/wire-schema';
-import { XLN_PROTOCOL_VERSION } from '@xln/runtime/protocol/version';
-import { deserializeTaggedJson, serializeTaggedJson } from '@xln/runtime/protocol/serialization';
-import { decodeBinaryPayload } from '@xln/runtime/storage/codec/binary-codec';
+} from '@xln/core/api/runtime-adapter/codec';
+import type { RuntimeAdapterWireMessage } from '@xln/core/api/runtime-adapter/wire-schema';
+import { XLN_PROTOCOL_VERSION } from '@xln/core/protocol/version';
+import { deserializeTaggedJson, serializeTaggedJson } from '@xln/core/protocol/serialization';
+import { decodeBinaryPayload } from '@xln/core/storage/codec/binary-codec';
 import { registerDebugSurface } from './debugSurface';
 
 type WireBytes = Uint8Array | ArrayBuffer | ArrayBufferView;

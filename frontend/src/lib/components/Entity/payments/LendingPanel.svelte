@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Banknote, RefreshCw } from 'lucide-svelte';
-  import type { RuntimeInput } from '@xln/runtime/runtime/types';
-  import type { EntityTx } from '@xln/runtime/types/entity-tx';
+  import type { RuntimeInput } from '@xln/core/runtime/types';
+  import type { EntityTx } from '@xln/core/types/entity-tx';
   import type { EntityReplica } from '$lib/types/ui';
   import { resolveConfiguredApiBase, xlnFunctions } from '../../../stores/xlnStore';
   import {

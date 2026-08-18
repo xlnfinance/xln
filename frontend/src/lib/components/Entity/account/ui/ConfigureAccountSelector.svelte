@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { Profile as GossipProfile } from '@xln/runtime/api/public/runtime-module';
+  import type { Profile as GossipProfile } from '@xln/core/api/public/runtime-module';
   import EntityInput from '../../../shared/EntityInput.svelte';
 
   export let value = '';

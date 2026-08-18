@@ -1,5 +1,5 @@
-import type { Delta, DerivedDelta, Profile as GossipProfile } from '@xln/runtime/api/public/runtime-module';
-import { getTokenCapacity } from '@xln/runtime/routing/capacity';
+import type { Delta, DerivedDelta, Profile as GossipProfile } from '@xln/core/api/public/runtime-module';
+import { getTokenCapacity } from '@xln/core/pathfinding/capacity';
 
 export type CapacitySnapshot = {
   inCapacity: bigint;

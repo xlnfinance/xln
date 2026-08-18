@@ -31,7 +31,7 @@ describe('release gate ordering', () => {
 
   test('runs one full E2E only after every cheaper release check', () => {
     const result = Bun.spawnSync({
-      cmd: ['bun', 'runtime/scripts/release/run-release-gate.ts', '--profile=release', '--plan'],
+      cmd: ['bun', 'core/scripts/release/run-release-gate.ts', '--profile=release', '--plan'],
       cwd: process.cwd(),
       stdout: 'pipe',
       stderr: 'pipe',
@@ -53,7 +53,7 @@ describe('release gate ordering', () => {
 
   test('release runtime core includes the exact recursive cross-j family', () => {
     const result = Bun.spawnSync({
-      cmd: ['bun', 'runtime/scripts/release/run-release-gate.ts', '--profile=release', '--plan'],
+      cmd: ['bun', 'core/scripts/release/run-release-gate.ts', '--profile=release', '--plan'],
       cwd: process.cwd(),
       stdout: 'pipe',
       stderr: 'pipe',
@@ -61,13 +61,13 @@ describe('release gate ordering', () => {
     const runtimeCoreCommand = result.stdout.toString()
       .split('\n')
       .map(line => line.trim())
-      .find(line => line.startsWith('bun test runtime/__tests__'));
+      .find(line => line.startsWith('bun test core/__tests__'));
     const plannedFamily = runtimeCoreCommand
       ?.split(/\s+/)
       .slice(2)
       .filter(path => isCrossJReleaseTest(path.split('/').at(-1) ?? ''))
       .sort();
-    const expectedFamily = collectCrossJReleaseTests('runtime/__tests__').sort();
+    const expectedFamily = collectCrossJReleaseTests('core/__tests__').sort();
 
     expect(result.exitCode).toBe(0);
     expect(expectedFamily).toHaveLength(20);

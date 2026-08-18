@@ -41,9 +41,9 @@ path.
 - `frontend/src/lib/stores/vault/vaultStore.ts`
   Schedules upload of encrypted runtime backups and restores from tower on a
   fresh device or missing local DB.
-- `runtime/watchtower/http.ts`
+- `core/watchtower/http.ts`
   Verifies owner-signed appointments and serves blind-backup restore payloads.
-- `runtime/watchtower/standalone-server.ts`
+- `core/watchtower/standalone-server.ts`
   Standalone tower API service backed by LevelDB.
 - `runtime.ts`
   Restores an `Env` back from a canonical checkpoint snapshot.

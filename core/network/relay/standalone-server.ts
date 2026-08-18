@@ -1,0 +1,139 @@
+/**
+ * Standalone relay process backed by the same relay router as core/api/server/index.ts.
+ */
+
+import { createRelayStore, removeClient, type RelayStore } from './store';
+import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './router';
+import {
+  canonicalizeRuntimeWsAudience,
+  deserializeWsMessage,
+  makeMessageId,
+  resolveRuntimeWsMaxMessageBytes,
+  serializeWsMessage,
+  type RuntimeWsMessage,
+} from '../p2p/ws-protocol';
+import { normalizeRuntimeId } from '../p2p/auth/runtime-id';
+import { createStructuredLogger } from '../../support/logger';
+import { createHelloChallengeRegistry } from '../p2p/auth/hello-challenge';
+
+type StandaloneRelayOptions = {
+  host?: string;
+  port: number;
+  serverId: string;
+  audience?: string;
+  serverRuntimeId?: string;
+  onEntityInput?: (from: string | undefined, msg: RuntimeWsMessage, store: RelayStore) => Promise<void> | void;
+};
+
+export type StandaloneRelayServer = {
+  server: Bun.Server<undefined>;
+  store: RelayStore;
+  close: () => void;
+  sendToRuntime: (runtimeId: string, message: RuntimeWsMessage) => void;
+};
+
+const relayStandaloneLog = createStructuredLogger('relay.standalone');
+
+const normalizeMessage = (raw: string | Buffer | ArrayBuffer): RuntimeWsMessage =>
+  deserializeWsMessage(raw);
+
+export const startStandaloneRelayServer = (options: StandaloneRelayOptions): StandaloneRelayServer => {
+  const store = createRelayStore(options.serverId);
+  const localRuntimeId = normalizeRuntimeId(options.serverRuntimeId || options.serverId) || options.serverId;
+  const helloChallenges = createHelloChallengeRegistry();
+  let serverRef: Bun.Server<undefined> | null = null;
+  let relayAudience = '';
+
+  const routerConfig: RelayRouterConfig = {
+    store,
+    localRuntimeId,
+    localDeliver: async (from, msg) => {
+      await options.onEntityInput?.(from, msg, store);
+    },
+    send: (ws, data) => ws.send(data),
+    consumeHelloChallenge: (ws, challenge) => helloChallenges.consume(ws, challenge),
+  };
+
+  const server = Bun.serve<undefined>({
+    hostname: options.host || '0.0.0.0',
+    port: options.port,
+    maxRequestBodySize: 1024 * 1024,
+    fetch(request) {
+      if (request.headers.get('upgrade') !== 'websocket') {
+        return new Response('XLN relay websocket endpoint', { status: 200 });
+      }
+      if (serverRef?.upgrade(request)) return undefined;
+      return new Response('WebSocket upgrade failed', { status: 400 });
+    },
+    websocket: {
+      maxPayloadLength: resolveRuntimeWsMaxMessageBytes(),
+      open(ws) {
+        store.wsCounter += 1;
+        helloChallenges.issue(ws, relayAudience);
+      },
+      message(ws, message) {
+        let msg: RuntimeWsMessage;
+        try {
+          msg = normalizeMessage(message as string | Buffer | ArrayBuffer);
+        } catch (error) {
+          ws.send(serializeWsMessage({ type: 'error', error: `Invalid relay message: ${(error as Error).message}` }));
+          return;
+        }
+        Promise.resolve(relayRoute(routerConfig, ws, msg)).catch(error => {
+          ws.send(serializeWsMessage({ type: 'error', error: `Relay handler failed: ${(error as Error).message}` }));
+        });
+      },
+      close(ws) {
+        helloChallenges.forget(ws);
+        forgetRelaySocketRuntimeId(ws);
+        removeClient(store, ws);
+      },
+    },
+  });
+
+  serverRef = server;
+  const audienceHost = !options.host || options.host === '0.0.0.0' || options.host === '::'
+    ? '127.0.0.1'
+    : options.host;
+  relayAudience = canonicalizeRuntimeWsAudience(
+    options.audience || `ws://${audienceHost}:${server.port}/`,
+  );
+  relayStandaloneLog.info('service.listen', {
+    serverId: options.serverId,
+    host: options.host || '0.0.0.0',
+    port: server.port,
+  });
+
+  return {
+    server,
+    store,
+    close: () => server.stop(true),
+    sendToRuntime: (runtimeId, message) => {
+      const normalized = normalizeRuntimeId(runtimeId);
+      if (!normalized) return;
+      const client = store.clients.get(normalized);
+      if (!message.id) message.id = makeMessageId();
+      if (!message.timestamp) message.timestamp = Date.now();
+      if (client?.ws) client.ws.send(serializeWsMessage(message));
+    },
+  };
+};
+
+if (import.meta.main) {
+  const args = process.argv;
+  const portArgIdx = args.indexOf('--port');
+  const hostArgIdx = args.indexOf('--host');
+  const port = portArgIdx !== -1 && args[portArgIdx + 1]
+    ? Number(args[portArgIdx + 1])
+    : Number(process.env['WS_PORT'] || 8787);
+  const host = hostArgIdx !== -1 && args[hostArgIdx + 1]
+    ? String(args[hostArgIdx + 1])
+    : process.env['WS_HOST'] || '0.0.0.0';
+  const serverId = process.env['WS_SERVER_ID'] || 'relay';
+  startStandaloneRelayServer({
+    host,
+    port,
+    serverId,
+    ...(process.env['RELAY_URL'] ? { audience: process.env['RELAY_URL'] } : {}),
+  });
+}

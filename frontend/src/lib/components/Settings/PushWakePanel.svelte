@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
+  import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
   import type { RecoveryTowerConfig, Runtime } from '$lib/stores/vault/vaultStore';
   import { vaultOperations } from '$lib/stores/vault/vaultStore';
   import {

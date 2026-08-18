@@ -6,11 +6,11 @@ The A-machine is bilateral state between two entities. `leftEntity` is always th
 
 ## Source
 
-- [`runtime/account/consensus/index.ts`](../../runtime/account/consensus/index.ts) - bilateral validation and commit facade.
-- [`runtime/account/consensus/`](../../runtime/account/consensus) - proposal, frame, deadline, flush, and dispute policies.
-- [`runtime/account/tx/apply.ts`](../../runtime/account/tx/apply.ts) - account transaction dispatcher.
-- [`runtime/account/tx/handlers/`](../../runtime/account/tx/handlers) - payments, HTLC, pulls, swaps, settlement.
-- [`runtime/account/commitment/state-root.ts`](../../runtime/account/commitment/state-root.ts) - canonical account-state commitment.
+- [`core/account/consensus/index.ts`](../../core/account/consensus/index.ts) - bilateral validation and commit facade.
+- [`core/account/consensus/`](../../core/account/consensus) - proposal, frame, deadline, flush, and dispute policies.
+- [`core/account/tx/apply.ts`](../../core/account/tx/apply.ts) - account transaction dispatcher.
+- [`core/account/tx/handlers/`](../../core/account/tx/handlers) - payments, HTLC, pulls, swaps, settlement.
+- [`core/account/commitment/state-root.ts`](../../core/account/commitment/state-root.ts) - canonical account-state commitment.
 
 ## Main Methods
 

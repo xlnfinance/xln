@@ -53,7 +53,7 @@ choose_supported_node() {
   fi
   candidates+=(
     "$ROOT_DIR/.node/bin/node"
-    "$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    "$HOME/.cache/codex-runtimes/codex-primary-core/dependencies/node/bin/node"
     "/opt/homebrew/opt/node@24/bin/node"
     "/opt/homebrew/opt/node@22/bin/node"
     "/opt/homebrew/opt/node@20/bin/node"
@@ -109,6 +109,6 @@ cd "$ROOT_DIR/frontend"
 "$NODE_BIN" copy-static-files.js
 
 echo "[contracts-sync] verifying compiler immutable metadata parity"
-bun "$ROOT_DIR/runtime/scripts/checks/contracts/check-contract-artifact-immutables.ts"
+bun "$ROOT_DIR/core/scripts/checks/contracts/check-contract-artifact-immutables.ts"
 
 echo "[contracts-sync] done"

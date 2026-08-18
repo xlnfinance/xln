@@ -54,7 +54,7 @@ import {
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from '../../utils/e2e-connect';
 import { enqueueEntityTxs } from '../../utils/runtime/e2e-runtime-input';
 import { expectUiPaymentNoRoute } from '../../utils/runtime/e2e-pay-ui';
-import { getTokenInfo } from '../../../runtime/account/utils';
+import { getTokenInfo } from '../../../core/account/utils';
 import { closeRuntimeContext } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 
 const INIT_TIMEOUT = 30_000;

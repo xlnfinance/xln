@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 export const PLAYWRIGHT_ARTIFACT_CLEANUP_CWD = resolve(__dirname, '..');
-const PLAYWRIGHT_ARTIFACT_CLEANUP_SCRIPT = resolve(__dirname, '../runtime/scripts/e2e/harness/test-artifact-cleanup.ts');
+const PLAYWRIGHT_ARTIFACT_CLEANUP_SCRIPT = resolve(__dirname, '../core/scripts/e2e/harness/test-artifact-cleanup.ts');
 
 export const runPlaywrightArtifactCleanup = (cwd = PLAYWRIGHT_ARTIFACT_CLEANUP_CWD): void => {
   const inheritedParentLease = process.env['XLN_TEST_ARTIFACT_CLEANUP_DONE'] === '1';

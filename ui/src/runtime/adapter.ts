@@ -3,8 +3,8 @@ import type {
 	RuntimeAdapterConfig,
 	RuntimeAdapterPaymentRoutesResponse,
 	RuntimeAdapterReadQuery,
-} from '@xln/runtime/api/runtime-adapter/types';
-import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
+} from '@xln/core/api/runtime-adapter/types';
+import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import { getXLN } from './xln-loader';
 import { useApp } from './store';
 

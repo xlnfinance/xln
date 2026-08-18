@@ -14,7 +14,7 @@
     "esm": false,
     "moduleTypes": {
       "../frontend/**/*.ts": "cjs",
-      "../runtime/**/*.ts": "cjs"
+      "../core/**/*.ts": "cjs"
     }
   }
 }

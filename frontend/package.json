@@ -17,10 +17,10 @@
 		"check": "bun run check:unsafe-types && bun copy-static-files.js && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold error && bun scripts/vite-build-check.ts",
 		"check:unsafe-types": "bun scripts/check-unsafe-types.ts",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"test": "bun ../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e -- playwright test",
-		"test:landing": "bun ../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-landing --scope=e2e -- playwright test tests/landing.spec.ts",
-		"test:fed": "bun ../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-fed --scope=e2e -- playwright test tests/fed-chair-demo.spec.ts",
-		"test:ui": "bun ../runtime/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-ui --scope=e2e -- playwright test --ui"
+		"test": "bun ../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e -- playwright test",
+		"test:landing": "bun ../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-landing --scope=e2e -- playwright test tests/landing.spec.ts",
+		"test:fed": "bun ../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-fed --scope=e2e -- playwright test tests/fed-chair-demo.spec.ts",
+		"test:ui": "bun ../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=frontend-ui --scope=e2e -- playwright test --ui"
 	},
 	"devDependencies": {
 		"@capacitor/android": "^8.5.0",

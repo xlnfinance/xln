@@ -1,6 +1,6 @@
-import type { RuntimeAdapterGraphFrame } from '@xln/runtime/api/public/runtime-module';
+import type { RuntimeAdapterGraphFrame } from '@xln/core/api/public/runtime-module';
 import type { Runtime } from '$lib/stores/runtimeStore';
-import type { EnvSnapshot, RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
+import type { EnvSnapshot, RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import type { NetworkMachineRuntimeState } from '$lib/stores/network/networkMachineRuntimeStore';
 import {
   projectRuntimeEnv,

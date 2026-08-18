@@ -1,0 +1,585 @@
+import type { ChildProcess } from 'node:child_process';
+import type { ServerWebSocket } from 'bun';
+import type { RuntimeFailureSignal } from '../protocol/errors/failure-taxonomy';
+import type { RuntimeSecurityIncidentTelemetry } from '../protocol/errors/security-incident';
+import type { ManagedChild, ManagedIdentity } from './bootstrap/custody-bootstrap';
+import type { StorageHealth } from '../support/storage-monitor';
+
+export type Args = {
+  host: string;
+  port: number;
+  relayUrl: string;
+  relayAudienceUrls: string[];
+  publicWsBaseUrl: string;
+  nodeApiPortBase: number;
+  nodePublicPortBase: number;
+  rpcUrl: string;
+  rpc2Url: string;
+  rpcUrls: Record<number, string>;
+  dbRoot: string;
+  mmEnabled: boolean;
+  resetAllowed: boolean;
+  resetToken: string;
+  deferInitialReset: boolean;
+  custodyEnabled: boolean;
+  custodyPort: number;
+  custodyDaemonPort: number;
+  custodyDbRoot: string;
+  walletUrl: string;
+};
+
+export type OrchestratorSocketType = 'relay' | 'market';
+
+export const resolveOrchestratorSocketType = (protocol: string | null): OrchestratorSocketType =>
+  protocol === 'market' ? 'market' : 'relay';
+
+export type OrchestratorWebSocket = ServerWebSocket<{ type: OrchestratorSocketType; clientIp: string; audience: string }>;
+
+type StageTiming = {
+  startedAt: number | null;
+  completedAt: number | null;
+  ms: number | null;
+};
+
+export type TimingMap = Record<string, StageTiming>;
+
+type BootstrapTimelineStageStatus = 'done' | 'active' | 'blocked' | 'pending' | 'disabled';
+
+type BootstrapTimelineStage = {
+  key: string;
+  label: string;
+  status: BootstrapTimelineStageStatus;
+  reason: string;
+  failure: RuntimeFailureSignal | null;
+  budgetMs: number | null;
+  actualMs: number | null;
+  startedAt: number | null;
+  completedAt: number | null;
+  evidence: Array<{
+    label: string;
+    value: string | number | boolean | null;
+    unit?: string;
+  }>;
+};
+
+type BootstrapTimelineBacklog = {
+  processing: boolean;
+  runtimeTxs: number;
+  entityInputs: number;
+  jInputs: number;
+  queuedEntityInputCount: number;
+  queuedEntityTxCount: number;
+  total: number;
+};
+
+type BootstrapTimeline = {
+  readyHash: string | null;
+  runtimeStateHash: string | null;
+  entityStateHash: string | null;
+  readyAt: number | null;
+  healthPoll: {
+    actualMs: number | null;
+    budgetMs: number;
+  };
+  backlog: BootstrapTimelineBacklog | null;
+  lastEvent: {
+    event: string;
+    stage: string | null;
+    at: string | null;
+    height: number | null;
+  } | null;
+  stages: BootstrapTimelineStage[];
+};
+
+export type ResetState = {
+  inProgress: boolean;
+  lastError: string | null;
+  startedAt: number | null;
+  completedAt: number | null;
+  failedAt: number | null;
+};
+
+type HubProcessSpec = {
+  name: 'H1' | 'H2' | 'H3';
+  region: string;
+  seed: string;
+  authSeed: string;
+  signerLabel: string;
+  apiPort: number;
+  publicPort: number;
+  dbPath: string;
+  deployTokens: boolean;
+};
+
+export type HubChild = HubProcessSpec & {
+  proc: ChildProcess | null;
+  startedAt: number | null;
+  exitedAt: number | null;
+  exitCode: number | null;
+  exitSignal: NodeJS.Signals | null;
+  restartTimer: ReturnType<typeof setTimeout> | null;
+  restartCount: number;
+  recoveryInProgress: boolean;
+  failureCounts: Record<string, number>;
+  lastHealth: HubHealthPayload | null;
+  lastInfo: HubInfoPayload | null;
+  recentStdout: string[];
+  recentStderr: string[];
+};
+
+export type HubHealthPayload = {
+  ok?: boolean;
+  name?: string;
+  height?: number;
+  entityId?: string | null;
+  runtimeId?: string | null;
+  relayUrl?: string;
+  apiUrl?: string;
+  directWsUrl?: string;
+  runtime?: {
+    halted?: boolean;
+    lifecyclePhase?: string;
+    fatalDebugPayload?: unknown;
+    securityIncidents?: RuntimeSecurityIncidentTelemetry[];
+  };
+  quiescence?: RuntimeQuiescenceHealth;
+  p2p?: {
+    directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
+  };
+  gossip?: {
+    visibleHubNames?: string[];
+    visibleHubIds?: string[];
+    ready?: boolean;
+  };
+  mesh?: {
+    ready?: boolean;
+    pairs?: Array<{
+      counterpartyId: string;
+      counterpartyName: string;
+      hasAccount: boolean;
+      currentHeight: number;
+      pendingFrameHeight: number | null;
+      pendingFrameHash: string | null;
+      grantedByMe: string;
+      grantedByPeer: string;
+      ready: boolean;
+    }>;
+  };
+  bootstrapProgress?: {
+    active: boolean;
+    startedAtMs: number;
+    lastProgressAtMs: number;
+    step: string;
+    idleMs: number;
+    totalMs: number;
+    stallTimeoutMs: number;
+  };
+  bootstrapReserves?: {
+    ok: boolean;
+    targetMet?: boolean;
+    tokens: Array<{
+      tokenId: number;
+      symbol: string;
+      decimals: number;
+      current: string;
+      expectedMin: string;
+      ready: boolean;
+      operational?: boolean;
+      targetMet?: boolean;
+    }>;
+    entities?: Array<{
+      entityId: string;
+      jurisdictionName?: string;
+      primary?: boolean;
+      ready: boolean;
+      targetMet: boolean;
+      tokens: Array<{
+        tokenId: number;
+        symbol: string;
+        decimals: number;
+        current: string;
+        expectedMin: string;
+        ready: boolean;
+        operational?: boolean;
+        targetMet?: boolean;
+      }>;
+    }>;
+  };
+  marketMaker?: {
+    enabled: boolean;
+    ok: boolean;
+    entityId: string | null;
+    startupPhase: string | null;
+    expectedOffersPerHub: number;
+    expectedOffersPerPair?: number;
+    hubs: Array<{
+      hubEntityId: string;
+      offers: number;
+      ready: boolean;
+      pairs?: Array<{
+        pairId: string;
+        offers: number;
+        ready: boolean;
+      }>;
+    }>;
+  };
+  timings?: TimingMap;
+};
+
+export type HubInfoPayload = {
+  name?: string;
+  entityId?: string;
+  hubEntities?: Array<{
+    entityId?: string;
+    signerId?: string;
+    name?: string;
+    jurisdictionName?: string;
+    chainId?: number;
+    depositoryAddress?: string;
+    entityProviderAddress?: string;
+    primary?: boolean;
+  }>;
+  runtimeId?: string;
+  apiUrl?: string;
+  relayUrl?: string;
+  directWsUrl?: string;
+  startupPhase?: string;
+  runtimeBacklog?: unknown;
+  bootstrap?: {
+    readyHash?: string | null;
+    runtimeStateHash?: string | null;
+    entityStateHash?: string | null;
+    restoredEntityStateHash?: string | null;
+    readyAt?: number | null;
+  };
+};
+
+type MarketMakerCrossRouteHealthPayload = {
+  sourceJurisdiction: string;
+  targetJurisdiction: string;
+  sourceMmEntityId?: string;
+  targetMmEntityId?: string;
+  sourceHubEntityId: string;
+  targetHubEntityId: string;
+  offers: number;
+  ready: boolean;
+  depthReady?: boolean;
+  blockers?: unknown[];
+  pairs?: Array<{
+    pairId: string;
+    bookOwnerEntityId?: string;
+    offers: number;
+    ready: boolean;
+    depthReady?: boolean;
+    expectedOffers?: number;
+    expectedBidOffers?: number;
+    expectedAskOffers?: number;
+    bidOffers?: number;
+    askOffers?: number;
+    snapshotDepthExact?: boolean;
+    sourceTokenIds?: number[];
+    targetTokenIds?: number[];
+  }>;
+};
+
+export type MarketMakerCrossHealthPayload = {
+  applicable: boolean;
+  ok: boolean;
+  expectedRoutes: number;
+  expectedOffersPerRoute: number;
+  expectedOffersPerPair: number;
+  routeCount?: number;
+  routes: MarketMakerCrossRouteHealthPayload[];
+};
+
+export type MarketMakerHealthPayload = {
+  ok?: boolean;
+  name?: string;
+  height?: number;
+  entityId?: string | null;
+  runtimeId?: string | null;
+  relayUrl?: string;
+  apiUrl?: string;
+  directWsUrl?: string;
+  startupPhase?: string;
+  runtime?: {
+    halted?: boolean;
+    lifecyclePhase?: string;
+    fatalDebugPayload?: unknown;
+    securityIncidents?: RuntimeSecurityIncidentTelemetry[];
+  };
+  p2p?: {
+    directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
+  };
+  gossip?: {
+    visibleHubNames?: string[];
+    visibleHubIds?: string[];
+    ready?: boolean;
+  };
+  marketMaker?: {
+    enabled: boolean;
+    ok: boolean;
+    entityId: string | null;
+    quiescence?: RuntimeQuiescenceHealth;
+    expectedOffersPerHub: number;
+    expectedOffersPerPair?: number;
+    cross?: MarketMakerCrossHealthPayload;
+    hubs: Array<{
+      hubEntityId: string;
+      offers: number;
+      ready: boolean;
+      depthReady?: boolean;
+      blockers?: unknown[];
+      pairs?: Array<{
+        pairId: string;
+        offers: number;
+        ready: boolean;
+        depthReady?: boolean;
+        expectedOffers?: number;
+      }>;
+    }>;
+  };
+  bootstrap?: {
+    readyHash?: string | null;
+    runtimeStateHash?: string | null;
+    entityStateHash?: string | null;
+    restoredEntityStateHash?: string | null;
+    readyAt?: number | null;
+  };
+};
+
+export type MarketMakerInfoPayload = HubInfoPayload;
+
+type ManagedRuntimeRole = 'hub' | 'market-maker';
+
+type RuntimeQuiescenceHealth = {
+  pendingRuntimeWork: number;
+  pendingAccountFrames: number;
+  accountMempoolTxs: number;
+};
+
+export type AggregatedHealth = {
+  timestamp: number;
+  source: {
+    height: number | null;
+    codeHash: string | null;
+    gitHead: string | null;
+    gitBranch: string | null;
+    dirty: boolean;
+    computedAt: number;
+    owner: string;
+  };
+  coreOk: boolean;
+  systemOk: boolean;
+  degraded: string[];
+  failures: RuntimeFailureSignal[];
+  reset: ResetState;
+  system: {
+    runtime: boolean;
+    relay: boolean;
+  };
+  relay: {
+    clientCount: number;
+    managedRuntimeIds: string[];
+    externalClientIds: string[];
+    marketSubscriptions: {
+      total: number;
+      byIp: Record<string, number>;
+      maxTotal: number;
+      maxPerIp: number;
+      maxCellsPerSubscription: number;
+    };
+  };
+  process: {
+    pid: number;
+    ownerId: string;
+    uptimeSec: number;
+    rssBytes: number;
+    heapUsedBytes: number;
+    loadavg: number[];
+    cpuCount: number;
+    memory: {
+      freeBytes: number;
+      totalBytes: number;
+      freePct: number;
+    };
+    children: Array<{
+      role: ManagedRuntimeRole;
+      name: string;
+      pid: number | null;
+      leasePid: number | null;
+      leaseOwnerId: string | null;
+      online: boolean;
+      exitCode: number | null;
+      exitSignal?: NodeJS.Signals | null;
+      startedAt: number | null;
+      exitedAt: number | null;
+      restartCount: number;
+      apiPort: number;
+      dbPath: string;
+      lastErrorLine: string | null;
+      recentStdout: string[];
+      recentStderr: string[];
+    }>;
+  };
+  disk: {
+    ok: boolean;
+    minFreeBytes: number;
+    shortfallBytes: number;
+    freeBytes: number;
+    usedBytes: number;
+    totalBytes: number;
+    shortfallGiB: number;
+    freeGiB: number;
+    usedGiB: number;
+    totalGiB: number;
+    usedPct: number;
+  };
+  storage: StorageHealth;
+  hubMesh: {
+    ok: boolean;
+    hubIds: string[];
+    pairs: Array<{ left: string; right: string; ok: boolean; expectedCreditAmount: string }>;
+    direct: {
+      openLinkCount: number;
+      links: Array<{ fromRuntimeId: string; toRuntimeId: string; endpoint: string }>;
+    };
+  };
+  marketMaker: {
+    enabled: boolean;
+    ok: boolean;
+    failure: RuntimeFailureSignal | null;
+    entityId: string | null;
+    startupPhase: string | null;
+    quiescence: RuntimeQuiescenceHealth | null;
+    expectedOffersPerHub: number;
+    expectedOffersPerPair?: number;
+    cross: MarketMakerCrossHealthPayload;
+    hubs: Array<{
+      hubEntityId: string;
+      offers: number;
+      ready: boolean;
+      depthReady?: boolean;
+      blockers?: unknown[];
+      pairs: Array<{
+        pairId: string;
+        bookOwnerEntityId?: string;
+        offers: number;
+        ready: boolean;
+        depthReady?: boolean;
+        expectedOffers?: number;
+        expectedBidOffers?: number;
+        expectedAskOffers?: number;
+        bidOffers?: number;
+        askOffers?: number;
+        snapshotDepthExact?: boolean;
+        sourceTokenIds?: number[];
+        targetTokenIds?: number[];
+      }>;
+    }>;
+  };
+  bootstrapTimeline: BootstrapTimeline;
+  custody: {
+    enabled: boolean;
+    ok: boolean;
+    entityId: string | null;
+    daemonPort: number | null;
+    servicePort: number | null;
+  };
+  bootstrapReserves: {
+    ok: boolean;
+    targetMet: boolean;
+    requiredTokenCount: number;
+    entityCount: number;
+    entities: Array<{
+      entityId: string;
+      role: 'hub' | 'market-maker';
+      ready: boolean;
+      targetMet: boolean;
+      tokens: Array<{
+        tokenId: number;
+        symbol: string;
+        decimals: number;
+        current: string;
+        expectedMin: string;
+        ready: boolean;
+        operational?: boolean;
+        targetMet?: boolean;
+      }>;
+    }>;
+  };
+  hubs: Array<{
+    entityId: string;
+    name: string;
+    online: boolean;
+    runtimeId: string;
+    selfRelayPresence: boolean;
+    pid: number | null;
+    apiPort: number;
+    apiUrl: string;
+    dbPath: string;
+    startedAt: number | null;
+    exitedAt: number | null;
+    exitCode: number | null;
+    exitSignal: NodeJS.Signals | null;
+    recoveryInProgress: boolean;
+    restartCount: number;
+    lastErrorLine: string | null;
+    quiescence: RuntimeQuiescenceHealth | null;
+    bootstrapProgress: HubHealthPayload['bootstrapProgress'] | null;
+  }>;
+  timings: TimingMap;
+};
+
+export type MarketMakerChild = {
+  name: 'MM';
+  seed: string;
+  authSeed: string;
+  signerLabel: string;
+  apiPort: number;
+  publicPort: number;
+  dbPath: string;
+  proc: ChildProcess | null;
+  startedAt: number | null;
+  exitedAt: number | null;
+  exitCode: number | null;
+  exitSignal: NodeJS.Signals | null;
+  restartTimer: ReturnType<typeof setTimeout> | null;
+  restartCount: number;
+  recoveryInProgress: boolean;
+  failureCounts: Record<string, number>;
+  lastHealth: MarketMakerHealthPayload | null;
+  lastInfo: MarketMakerInfoPayload | null;
+  lastStartupPhase: string | null;
+  recentStdout: string[];
+  recentStderr: string[];
+};
+
+export type CustodySupportState = {
+  daemonChild: ManagedChild;
+  custodyChild: ManagedChild;
+  identity: ManagedIdentity;
+  hubIds: string[];
+  custodyBaseUrl: string;
+  daemonAuthSeed: string;
+  daemonAuthAudience: string;
+  daemonAuthKey: string;
+};
+
+export type ManagedRuntimeSpec = {
+  role: ManagedRuntimeRole;
+  name: string;
+  script: 'core/orchestrator/hub-node.ts' | 'core/orchestrator/mm-node.ts';
+  apiPort: number;
+  dbPath: string;
+};
+
+export type ManagedRuntimeLease = ManagedRuntimeSpec & {
+  ownerId: string;
+  orchestratorPid: number;
+  pid: number;
+  cwd: string;
+  startedAt: number;
+  processStartedAt: number;
+  updatedAt: number;
+};

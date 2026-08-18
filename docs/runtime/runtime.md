@@ -6,11 +6,11 @@ The R-machine is the outer deterministic coordinator. It owns runtime input admi
 
 ## Source
 
-- [`runtime/runtime.ts`](../../runtime/runtime.ts) - public facade and orchestration entrypoint.
-- [`runtime/runtime/`](../../runtime/runtime) - small R-machine policies extracted from the facade.
-- [`runtime/runtime/input-pipeline/input-queue.ts`](../../runtime/runtime/input-pipeline/input-queue.ts) - deterministic input queue.
-- [`runtime/runtime/routing/output-routing.ts`](../../runtime/runtime/routing/output-routing.ts) - durable output planning and retry.
-- [`runtime/storage/`](../../runtime/storage) - persistence implementation.
+- [`core/runtime.ts`](../../core/runtime.ts) - public facade and orchestration entrypoint.
+- [`core/runtime/`](../../core/runtime) - small R-machine policies extracted from the facade.
+- [`core/runtime/mempool/input-queue.ts`](../../core/runtime/mempool/input-queue.ts) - deterministic input queue.
+- [`core/runtime/delivery/topology/output-routing.ts`](../../core/runtime/delivery/topology/output-routing.ts) - durable output planning and retry.
+- [`core/storage/`](../../core/storage) - persistence implementation.
 
 ## Main Methods
 

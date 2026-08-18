@@ -1,4 +1,4 @@
-import { deserializeTaggedJson } from '../runtime/protocol/serialization';
+import { deserializeTaggedJson } from '../core/protocol/serialization';
 import type { DaemonFrameLog } from './daemon-client';
 import type { CustodyStore } from './store';
 

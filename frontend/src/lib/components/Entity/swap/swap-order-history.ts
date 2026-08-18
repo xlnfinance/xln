@@ -1,6 +1,6 @@
 import { amountToUsd } from '$lib/utils/assetPricing';
 import { requireTokenDecimals } from './../token-metadata';
-import type { SwapBookEntry } from '@xln/runtime/api/public/runtime-module';
+import type { SwapBookEntry } from '@xln/core/api/public/runtime-module';
 import { toBigIntSafe } from './../swap-formatting';
 
 export type ClosedOrderStatus = 'filled' | 'partial' | 'canceled' | 'closed';

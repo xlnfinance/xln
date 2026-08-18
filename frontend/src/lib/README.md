@@ -5,7 +5,7 @@ The frontend is large enough that the immediate win is boundary clarity, not ano
 ## Main buckets
 
 - `components/`: user-facing UI panels and shared widgets
-- `stores/`: runtime/session/settings/view state
+- `stores/`: core/session/settings/view state
 - `utils/`: pure helpers and formatting logic
 - `types/`: frontend-facing type declarations
 - `view/`: panel workspace / 3D view system

@@ -2,7 +2,7 @@ import {
   deriveDelta,
   getTokenInfo,
   isLeftEntity,
-} from '../../runtime/runtime.ts';
+} from '../../core/runtime.ts';
 import type { AccountReplica, Delta, EntityReplica, RuntimeReplica } from './runtime-types';
 import { renderCapacityBar, formatBarLegend } from './presentation/bars';
 import { formatAmount, shortId } from './presentation/format';

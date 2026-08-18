@@ -28,13 +28,13 @@ export CUSTODY_DAEMON_PORT=${CUSTODY_DAEMON_PORT:-$DEFAULT_CUSTODY_DAEMON_PORT}
 export CUSTODY_PORT=${CUSTODY_PORT:-$DEFAULT_CUSTODY_PORT}
 export CUSTODY_DB_ROOT=${CUSTODY_DB_ROOT:-$RDB_ROOT/custody/prod}
 export XLN_USE_PREDEPLOYED_ADDRESSES=${XLN_USE_PREDEPLOYED_ADDRESSES:-true}
-export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-$RDB_ROOT/runtime/prod-main/jurisdictions.json}
+export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-$RDB_ROOT/core/prod-main/jurisdictions.json}
 
 mkdir -p "$CUSTODY_DB_ROOT"
 xln_ensure_jurisdictions_path "$XLN_JURISDICTIONS_PATH"
 
 xln_kill_by_port "$CUSTODY_PORT" start-custody
 xln_kill_by_port "$CUSTODY_DAEMON_PORT" start-custody
-xln_kill_by_pattern "runtime/api/server/index.ts --port ${CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${CUSTODY_DAEMON_PORT}" start-custody
+xln_kill_by_pattern "core/api/server/index.ts --port ${CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${CUSTODY_DAEMON_PORT}" start-custody
 
-exec "${HOME}/.bun/bin/bun" runtime/scripts/operations/custody/start-custody-prod.ts
+exec "${HOME}/.bun/bin/bun" core/scripts/operations/custody/start-custody-prod.ts

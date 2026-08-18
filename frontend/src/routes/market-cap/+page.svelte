@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { ProfileEntityKind, ProfileEntitySector } from '@xln/runtime/entity/profile';
+  import type { ProfileEntityKind, ProfileEntitySector } from '@xln/core/entity/profile';
   import {
     decodeMarketCapPublicResponse,
     type MarketCapDirection,
@@ -8,12 +8,12 @@
     type MarketCapRole,
     type MarketCapSort,
     type MarketCapTaxonomyFilter,
-  } from '@xln/runtime/network/relay/market/cap/market-cap-wire';
+  } from '@xln/core/network/relay/market/cap/market-cap-wire';
   import {
     ENTITY_SHARE_SUPPLY,
     type EntityMarketCapEntry,
     type EntityMarketCapStatus,
-  } from '@xln/runtime/network/relay/market/cap/market-cap';
+  } from '@xln/core/network/relay/market/cap/market-cap';
   import { readJsonUnknown } from '$lib/utils/boundary';
   import MarketCapBoard from './MarketCapBoard.svelte';
 

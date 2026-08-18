@@ -3,12 +3,12 @@ import { useMemo, useState } from 'react';
 import { Amount } from '../components/Amount';
 import { DeltaBar } from '../components/DeltaBar';
 import { Icon } from '../components/Icons';
-import { useAdapterRead } from '../runtime/hooks';
-import { useApp } from '../runtime/store';
-import { demoFaucet, getDemoTopology } from '../runtime/sandbox';
-import { formatAmount, getTokenMeta, parseAmount, timeAgo } from '../runtime/format';
-import { displayEntityName, useAccounts, useEntityCore, usePortfolio } from '../runtime/views';
-import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
+import { useAdapterRead } from '../core/hooks';
+import { useApp } from '../core/store';
+import { demoFaucet, getDemoTopology } from '../core/sandbox';
+import { formatAmount, getTokenMeta, parseAmount, timeAgo } from '../core/format';
+import { displayEntityName, useAccounts, useEntityCore, usePortfolio } from '../core/views';
+import type { RuntimeAdapterEntitySummary } from '@xln/core/api/runtime-adapter/types';
 
 import { formatEventAmount, isDisplayableActivityEvent, USER_ACTIVITY_TYPES, type ActivityEventView } from './Activity';
 

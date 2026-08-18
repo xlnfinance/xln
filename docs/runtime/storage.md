@@ -37,7 +37,7 @@ Runtime is an explicit ephemeral mode until the same `RuntimeStore` exists on In
 - `history/` — rebuildable certified-frame indexes
 - `queries/` — inspection APIs over history/WAL
 
-Overlays and the Patricia engine live in `runtime/protocol/state/`, not here.
+Overlays and the Patricia engine live in `core/protocol/state/`, not here.
 
 ## Called by
 

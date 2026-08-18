@@ -4,7 +4,7 @@ This folder owns the standalone recovery/watchtower API service.
 
 ## What it does
 
-- stores encrypted recovery bundles outside runtime/api/server/index.ts
+- stores encrypted recovery bundles outside core/api/server/index.ts
 - enforces per-lookup retention and byte quotas
 - signs tower receipts
 - serves restore/discovery APIs
@@ -22,7 +22,7 @@ This folder owns the standalone recovery/watchtower API service.
   Delayed last-resort sweep engine. Reads last-resort appointments, watches dispute
   state, and submits tower-only counter-disputes in the final rescue window.
 - `standalone-server.ts`
-  Bun server entrypoint. Equivalent in spirit to `runtime/network/relay/standalone-server.ts`.
+  Bun server entrypoint. Equivalent in spirit to `core/network/relay/standalone-server.ts`.
   Publishes `towerId`, `signerAddress`, and quota limits on `/` and `/healthz`
   so wallets can bind delayed authorizations to the exact tower address. Last-resort
   remedy payloads are encrypted to the account `watchSeed` and can only be opened
@@ -37,8 +37,8 @@ This folder owns the standalone recovery/watchtower API service.
 
 ## Boundary
 
-This service is intentionally not part of `runtime/api/server/index.ts`.
-Runtime correctness stays in runtime/storage/consensus. Watchtower is cheap
+This service is intentionally not part of `core/api/server/index.ts`.
+Runtime correctness stays in core/storage/consensus. Watchtower is cheap
 operator infrastructure layered on top.
 
 Current boundary:

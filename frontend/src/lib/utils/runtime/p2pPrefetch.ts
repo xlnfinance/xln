@@ -1,4 +1,4 @@
-import type { RuntimeReplica, RoutedEntityInput } from '@xln/runtime/api/public/runtime-module';
+import type { RuntimeReplica, RoutedEntityInput } from '@xln/core/api/public/runtime-module';
 
 const DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS = 1_200;
 const OPEN_ACCOUNT_PROFILE_WAIT_TIMEOUT_MS = 5_000;

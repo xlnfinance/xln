@@ -24,10 +24,10 @@ HankoClaim {
 
 | file | role |
 |------|------|
-| `runtime/hanko/core.ts` | core primitives: sign, pack, unpack, recover, flashloan governance |
-| `runtime/hanko/signing.ts` | consensus integration: signEntityHashes, buildQuorumHanko, verifyHankoForHash |
-| `runtime/account/crypto.ts` | key derivation: BIP-39 + HMAC-SHA256, signDigest, verifyAccountSignature |
-| `runtime/entity/consensus/index.ts` | entity frame consensus: proposal, hashesToSign, commit with hanko attachment |
+| `core/hanko/core.ts` | core primitives: sign, pack, unpack, recover, flashloan governance |
+| `core/hanko/signing.ts` | consensus integration: signEntityHashes, buildQuorumHanko, verifyHankoForHash |
+| `core/account/crypto.ts` | key derivation: BIP-39 + HMAC-SHA256, signDigest, verifyAccountSignature |
+| `core/entity/consensus/index.ts` | entity frame consensus: proposal, hashesToSign, commit with hanko attachment |
 | `jurisdictions/contracts/EntityProvider.sol` | on-chain verification: verifyHankoSignature, ecrecover, board hash |
 | `jurisdictions/contracts/Types.sol` | solidity struct definitions |
 
@@ -132,7 +132,7 @@ for each hash in hashesToSign:
 ### 8. buildQuorumHanko assembles final hanko
 
 ```
-runtime/hanko/signing.ts
+core/hanko/signing.ts
 1. parse each validator's signature (65 bytes: r[32] + s[32] + v[1])
 2. normalize v (< 27 -> + 27)
 3. pack all signatures: packRealSignatures(sigBuffers)
@@ -252,7 +252,7 @@ boardHash = keccak256(abi.encode(Board))
 ## off-chain verification (verifyHankoForHash)
 
 ```
-runtime/hanko/signing.ts
+core/hanko/signing.ts
 1. ABI decode hanko
 2. recoverHankoEntities (flashloan governance simulation)
 3. unpack EOA signatures, require count > 0

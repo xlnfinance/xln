@@ -3,7 +3,7 @@ import type { CliSession } from '../session';
 import { submitQueued } from '../session';
 import { findAccount } from '../accounts';
 import { ensureCliProfiles } from '../profile-barrier';
-import { quoteHtlcPaymentRoute } from '../../../runtime/runtime.ts';
+import { quoteHtlcPaymentRoute } from '../../../core/runtime.ts';
 
 export type DeliveryMode = 'direct' | 'trusted' | 'instant' | 'async';
 

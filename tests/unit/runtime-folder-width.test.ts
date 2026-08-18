@@ -7,7 +7,7 @@ import {
   collectFolderWidths,
   evaluateFolderWidths,
   FOLDER_WIDTH_DEBT,
-} from '../../runtime/scripts/checks/architecture/check-folder-width';
+} from '../../core/scripts/checks/architecture/check-folder-width';
 
 const temporaryRoots: string[] = [];
 
@@ -30,9 +30,9 @@ afterEach(() => {
 
 describe('repository source folder-width invariant', () => {
   test('allows ten direct source files and rejects the eleventh', () => {
-    expect(evaluateFolderWidths([{ path: 'runtime/ten', files: 10 }], {})).toEqual([]);
-    expect(evaluateFolderWidths([{ path: 'runtime/eleven', files: 11 }], {})).toEqual([
-      'FOLDER_TOO_WIDE runtime/eleven:11 > 10',
+    expect(evaluateFolderWidths([{ path: 'core/ten', files: 10 }], {})).toEqual([]);
+    expect(evaluateFolderWidths([{ path: 'core/eleven', files: 11 }], {})).toEqual([
+      'FOLDER_TOO_WIDE core/eleven:11 > 10',
     ]);
   });
 
@@ -64,18 +64,18 @@ describe('repository source folder-width invariant', () => {
   });
 
   test('requires debt to match exactly and rejects stale allowances', () => {
-    expect(evaluateFolderWidths([{ path: 'runtime/debt', files: 12 }], { 'runtime/debt': 12 })).toEqual([]);
-    expect(evaluateFolderWidths([{ path: 'runtime/debt', files: 13 }], { 'runtime/debt': 12 })).toEqual([
-      'FOLDER_WIDTH_DEBT_CHANGED runtime/debt:13 != 12',
+    expect(evaluateFolderWidths([{ path: 'core/debt', files: 12 }], { 'core/debt': 12 })).toEqual([]);
+    expect(evaluateFolderWidths([{ path: 'core/debt', files: 13 }], { 'core/debt': 12 })).toEqual([
+      'FOLDER_WIDTH_DEBT_CHANGED core/debt:13 != 12',
     ]);
-    expect(evaluateFolderWidths([{ path: 'runtime/debt', files: 11 }], { 'runtime/debt': 12 })).toEqual([
-      'FOLDER_WIDTH_DEBT_CHANGED runtime/debt:11 != 12',
+    expect(evaluateFolderWidths([{ path: 'core/debt', files: 11 }], { 'core/debt': 12 })).toEqual([
+      'FOLDER_WIDTH_DEBT_CHANGED core/debt:11 != 12',
     ]);
-    expect(evaluateFolderWidths([{ path: 'runtime/debt', files: 10 }], { 'runtime/debt': 12 })).toEqual([
-      'STALE_FOLDER_WIDTH_DEBT runtime/debt:10 <= 10',
+    expect(evaluateFolderWidths([{ path: 'core/debt', files: 10 }], { 'core/debt': 12 })).toEqual([
+      'STALE_FOLDER_WIDTH_DEBT core/debt:10 <= 10',
     ]);
-    expect(evaluateFolderWidths([], { 'runtime/debt': 12 })).toEqual([
-      'STALE_FOLDER_WIDTH_DEBT runtime/debt:missing allowance=12',
+    expect(evaluateFolderWidths([], { 'core/debt': 12 })).toEqual([
+      'STALE_FOLDER_WIDTH_DEBT core/debt:missing allowance=12',
     ]);
   });
 
@@ -118,7 +118,7 @@ describe('repository source folder-width invariant', () => {
 
   test('runtime retains no source-folder debt', () => {
     const repoRoot = resolve(import.meta.dir, '../..');
-    const runtimeWidths = collectFolderWidths(repoRoot, resolve(repoRoot, 'runtime'));
+    const runtimeWidths = collectFolderWidths(repoRoot, resolve(repoRoot, 'core'));
     expect(runtimeWidths.filter(entry => entry.files > 10)).toEqual([]);
   });
 });

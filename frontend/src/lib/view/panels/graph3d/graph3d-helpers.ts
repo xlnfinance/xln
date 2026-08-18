@@ -1,5 +1,5 @@
 import type { DerivedAccountData } from '$lib/network3d/derivedAccount';
-import type { Delta } from '@xln/runtime/api/public/runtime-module';
+import type { Delta } from '@xln/core/api/public/runtime-module';
 import type { GraphTransactionLike } from './graph3d-types';
 
 export type GraphAccountViewLike = {

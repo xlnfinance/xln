@@ -1,4 +1,4 @@
-import { splitAmountForDisplay } from '../runtime/format';
+import { splitAmountForDisplay } from '../core/format';
 
 /** Serif display numeral with dimmed decimals — the Sovereign signature. */
 export function Amount({

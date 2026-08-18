@@ -9,7 +9,7 @@ import type {
   TowerModeV1,
   TowerReceiptV1,
   XLNModule,
-} from '@xln/runtime/api/public/runtime-module';
+} from '@xln/core/api/public/runtime-module';
 import { parseJsonUnknown } from '$lib/utils/boundary';
 import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath } from 'ethers';
 import {

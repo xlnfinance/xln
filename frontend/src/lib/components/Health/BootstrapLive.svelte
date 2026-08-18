@@ -17,8 +17,8 @@
     Store,
     WalletCards,
   } from 'lucide-svelte';
-  import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/runtime/qa/severity';
-  import { QA } from '@xln/runtime/config/constants';
+  import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/core/qa/severity';
+  import { QA } from '@xln/core/config/constants';
 
   type IconComponent = typeof Activity;
 

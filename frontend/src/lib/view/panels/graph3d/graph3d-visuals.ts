@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Delta } from '@xln/runtime/api/public/runtime-module';
+import type { Delta } from '@xln/core/api/public/runtime-module';
 import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
 import { toDerivedAccountData, type DerivedAccountData } from '$lib/network3d/derivedAccount';
 import { getGraphThemeColors } from './graph3d-renderer';

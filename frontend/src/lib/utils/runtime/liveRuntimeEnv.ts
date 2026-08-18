@@ -4,12 +4,60 @@
  * alias the UI projection or render uncommitted financial state. [88/100]
  */
 
-import type { RuntimeReplica, EnvSnapshot } from '@xln/runtime/api/public/runtime-module';
-import type { Profile } from '@xln/runtime/api/public/runtime-module';
+import type { RuntimeReplica, EnvSnapshot } from '@xln/core/api/public/runtime-module';
+import type { Profile } from '@xln/core/api/public/runtime-module';
 
 const LIVE_RUNTIME_ENV_KEY = '__xlnLiveEnv';
 
 type RuntimeViewEnv = RuntimeReplica & { [LIVE_RUNTIME_ENV_KEY]?: RuntimeReplica };
+
+const isMapLike = (value: object): value is ReadonlyMap<unknown, unknown> => {
+  if (Array.isArray(value)) return false;
+  const candidate = value as Partial<ReadonlyMap<unknown, unknown>> & { size?: unknown };
+  return typeof candidate.entries === 'function'
+    && typeof candidate.get === 'function'
+    && typeof candidate.size === 'number';
+};
+
+/**
+ * UI snapshots cannot `structuredClone` Patricia maps: they are ReadonlyMap
+ * classes, not JS Map, so the clone is a prototype-less object without
+ * `.entries()`. Walk map-likes into real Maps so Svelte/e2e keep Map APIs.
+ */
+const cloneForRuntimeView = (value: unknown, seen: WeakMap<object, unknown>): unknown => {
+  if (value === null || typeof value !== 'object') return value;
+  const cached = seen.get(value);
+  if (cached) return cached;
+  if (isMapLike(value)) {
+    const out = new Map();
+    seen.set(value, out);
+    for (const [key, entry] of value.entries()) {
+      out.set(cloneForRuntimeView(key, seen), cloneForRuntimeView(entry, seen));
+    }
+    return out;
+  }
+  if (value instanceof Set) {
+    const out = new Set();
+    seen.set(value, out);
+    for (const entry of value) out.add(cloneForRuntimeView(entry, seen));
+    return out;
+  }
+  if (Array.isArray(value)) {
+    const out: unknown[] = [];
+    seen.set(value, out);
+    for (const entry of value) out.push(cloneForRuntimeView(entry, seen));
+    return out;
+  }
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || value instanceof Date) {
+    return structuredClone(value);
+  }
+  const out: Record<string, unknown> = {};
+  seen.set(value, out);
+  for (const [key, entry] of Object.entries(value)) {
+    out[key] = cloneForRuntimeView(entry, seen);
+  }
+  return out;
+};
 
 const detachedMutation = (): never => {
   throw new Error('DETACHED_RUNTIME_VIEW_MUTATION_FORBIDDEN');
@@ -50,7 +98,9 @@ export function isRuntimeLikeEnv(value: unknown): value is RuntimeReplica {
   const env = value as {
     state?: { eReplicas?: unknown; jReplicas?: unknown };
   };
-  return env.state?.eReplicas instanceof Map && env.state.jReplicas instanceof Map;
+  return env.state?.eReplicas instanceof Map
+    && env.state.jReplicas instanceof Map
+    && typeof (value as { gossip?: { getProfiles?: unknown } }).gossip?.getProfiles === 'function';
 }
 
 export function attachLiveRuntimeEnv<T extends object>(viewEnv: T, liveEnv: RuntimeReplica): T {
@@ -71,8 +121,9 @@ export function createDetachedRuntimeViewEnv(liveEnv: RuntimeReplica): RuntimeRe
     // an unrelated Svelte render expose candidate balances before WAL commit.
     // This UI-only projection is published after commit; cloning it does not
     // add work to headless hubs or to the consensus transition.
-    state: structuredClone(liveEnv.state),
+    state: cloneForRuntimeView(liveEnv.state, new WeakMap()) as RuntimeReplica['state'],
     runtimeMempool: structuredClone(liveEnv.runtimeMempool),
+    history: structuredClone(liveEnv.history),
     gossip: createDetachedGossip(liveEnv),
     ...(liveEnv.overlay ? { overlay: structuredClone(liveEnv.overlay) } : {}),
     ...(liveEnv.runtimeConfig ? { runtimeConfig: structuredClone(liveEnv.runtimeConfig) } : {}),

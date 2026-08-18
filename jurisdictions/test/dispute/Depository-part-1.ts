@@ -17,7 +17,7 @@ import {
   encodeBatch,
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
-import { createWatchedErc20TokenReader } from '../../../runtime/jurisdiction/adapter/rpc-watcher-inputs.ts';
+import { createWatchedErc20TokenReader } from '../../../core/jurisdiction/adapter/rpc-watcher-inputs.ts';
 const abi = ethers.AbiCoder.defaultAbiCoder();
 const COOPERATIVE_UPDATE = 0;
 const DISPUTE_PROOF = 1;

@@ -7,7 +7,7 @@ const abi = ethers.AbiCoder.defaultAbiCoder();
 
 /**
  * Cross-vector: Account.encodeDisputeHash (Solidity) must match the watchtower
- * packing in runtime/watchtower/action.ts. Without this, a TS drift silently
+ * packing in core/watchtower/action.ts. Without this, a TS drift silently
  * makes last-resort disputeHash checks compare the wrong digest.
  */
 const encodeDisputeHashTs = (

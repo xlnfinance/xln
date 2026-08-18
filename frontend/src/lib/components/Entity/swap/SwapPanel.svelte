@@ -2,15 +2,15 @@
 import { tick } from 'svelte';
 import type { EntityReplica, Tab } from '$lib/types/ui';
 import { writable } from 'svelte/store';
-import type { BookState, Profile, RuntimeReplica, SwapBookEntry } from '@xln/runtime/api/public/runtime-module';
+import type { BookState, Profile, RuntimeReplica, SwapBookEntry } from '@xln/core/api/public/runtime-module';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
   getJurisdictionStackId,
   getBestAsk,
   getBestBid,
-} from '@xln/runtime/api/public/runtime-module';
-import type { AccountRoleEvidence } from '@xln/runtime/account/config/dispute-config';
+} from '@xln/core/api/public/runtime-module';
+import type { AccountRoleEvidence } from '@xln/core/account/config/dispute-config';
 import { submitActiveCrossJurisdictionIntent, submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../../stores/xlnStore';
 import { readRuntimeEntityProjectionFrame, readRuntimeSwapHistory } from '../../../stores/runtimeViewStore';
 import { toasts } from '../../../stores/ui/toastStore';

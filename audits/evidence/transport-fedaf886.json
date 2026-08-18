@@ -24,7 +24,7 @@
       "state": "PASS",
       "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
       "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
-      "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'websocket send result classifier|commits an accepted prefix|fails loud and retains an invalid first send'",
+      "command": "bun test core/__tests__/relay-store.test.ts --test-name-pattern 'websocket send result classifier|commits an accepted prefix|fails loud and retains an invalid first send'",
       "summary": "Classifier, invalid-first retention, and accepted-prefix checkpoint passed 3/3 with 18 assertions.",
       "recordedAt": "2026-08-01T00:40:01Z",
       "agentRunIds": [
@@ -38,7 +38,7 @@
       "state": "PASS",
       "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
       "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
-      "command": "bun test runtime/__tests__/direct-runtime-bun.test.ts runtime/__tests__/relay-direct.test.ts runtime/__tests__/relay-router.test.ts runtime/__tests__/relay-store.test.ts",
+      "command": "bun test core/__tests__/direct-runtime-bun.test.ts core/__tests__/relay-direct.test.ts core/__tests__/relay-router.test.ts core/__tests__/relay-store.test.ts",
       "summary": "Direct runtime, direct relay, router, and pending-store flow passed 56/56 with 247 assertions.",
       "recordedAt": "2026-08-01T00:40:02Z",
       "agentRunIds": [
@@ -52,7 +52,7 @@
       "state": "PASS",
       "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
       "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
-      "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'commits an accepted prefix|fails loud and retains an invalid first send'",
+      "command": "bun test core/__tests__/relay-store.test.ts --test-name-pattern 'commits an accepted prefix|fails loud and retains an invalid first send'",
       "summary": "Invalid-first retained exact bytes; accepted prefix committed before fail-loud invalid-result propagation.",
       "recordedAt": "2026-08-01T00:40:03Z",
       "agentRunIds": [

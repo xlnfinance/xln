@@ -43,7 +43,7 @@ async function startExtraJurisdiction(name: string, port: number): Promise<{
   // a different funded Anvil deployer so this stack has a distinct Depository
   // instead of reproducing the primary stack's intentionally ambiguous pair.
   const proc = spawn('bun', [
-    'runtime/scripts/operations/development/dev-anvil-stack.ts',
+    'core/scripts/operations/development/dev-anvil-stack.ts',
     '--spawn-anvil',
     '--keep-alive',
     '--json-only',

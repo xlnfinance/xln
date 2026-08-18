@@ -1,9 +1,9 @@
-import type { RuntimeInput } from '@xln/runtime/api/public/runtime-module';
+import type { RuntimeInput } from '@xln/core/api/public/runtime-module';
 import {
   defaultAccountDisputeConfigForRoleEvidence,
   type AccountRoleEvidence,
   type AccountRoleEvidenceSource,
-} from '@xln/runtime/account/config/dispute-config';
+} from '@xln/core/account/config/dispute-config';
 
 import { normalizeEntityId } from '../../../utils/identity/entityReplica';
 import type { HubOpenAccountRebalancePolicy } from './hub-discovery-profile';

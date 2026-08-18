@@ -1,4 +1,4 @@
-import type { EntityTx, RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
+import type { EntityTx, RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import { getXLN, peekXLN } from './xln-loader';
 import { connectEmbedded, getEmbeddedEnv, requireAdapter } from './adapter';
 import { deriveAddress, derivePrivateKeyBytes } from './keys';

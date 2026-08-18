@@ -205,20 +205,20 @@ Missing fee state rejects the batch before any reserve or Account mutation.
 
 ## Source reading order
 
-1. `runtime/types/entity-tx.ts` — user and peer Entity intents.
-2. `runtime/types/account.ts` — Account Input, Tx, Frame, State, and Replica.
-3. `runtime/entity/tx/handlers/payments/direct-payment.ts` — direct intent routing.
-4. `runtime/entity/tx/handlers/htlc/payment.ts` — prepared onion admission.
-5. `runtime/account/consensus/index.ts` — the single Account input boundary.
-6. `runtime/account/tx/apply.ts` — validation dispatch.
-7. `runtime/account/tx/mutation.ts` — Account-owned mutation dispatch.
-8. `runtime/account/consensus/` — proposal, ACK, collision, and commit.
-9. `runtime/runtime/frame/` — enclosing Runtime frame and WAL boundary.
+1. `core/types/entity-tx.ts` — user and peer Entity intents.
+2. `core/types/account.ts` — Account Input, Tx, Frame, State, and Replica.
+3. `core/entity/tx/handlers/payments/direct-payment.ts` — direct intent routing.
+4. `core/entity/tx/handlers/htlc/payment.ts` — prepared onion admission.
+5. `core/account/consensus/index.ts` — the single Account input boundary.
+6. `core/account/tx/apply.ts` — validation dispatch.
+7. `core/account/tx/mutation.ts` — Account-owned mutation dispatch.
+8. `core/account/consensus/` — proposal, ACK, collision, and commit.
+9. `core/runtime/frame/` — enclosing Runtime frame and WAL boundary.
 
 For executable evidence, start with:
 
-- `runtime/__tests__/finance/state/derive-delta-property.test.ts`;
-- `runtime/__tests__/account/consensus/account-frame-integrity.test.ts`;
-- `runtime/scripts/operations/persistence/persistence-simultaneous-proposal-smoke.ts`;
-- `runtime/__tests__/runtime/commit/runtime-frame-atomicity.test.ts`;
+- `core/__tests__/finance/state/derive-delta-property.test.ts`;
+- `core/__tests__/account/consensus/account-frame-integrity.test.ts`;
+- `core/scripts/operations/persistence/persistence-simultaneous-proposal-smoke.ts`;
+- `core/__tests__/runtime/commit/runtime-frame-atomicity.test.ts`;
 - the focused HTLC and self-payment E2E scenarios.

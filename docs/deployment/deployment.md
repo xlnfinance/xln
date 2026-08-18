@@ -25,14 +25,14 @@ For live health, alerting, and storage incident response, use
 ### Public surface
 
 - `https://xln.finance/` and `https://app.xln.finance/` serve the frontend
-- `https://xln.finance/api/*` proxies to the runtime/orchestrator server
+- `https://xln.finance/api/*` proxies to the core/orchestrator server
 - `https://xln.finance/ws` upgrades to the runtime WS surface
 - `https://xln.finance/rpc` proxies to local anvil/RPC
 - `/c` and `/c.txt` expose the plain-text context surface for LLMs and quick reads
 
 ### Local services
 
-- runtime/orchestrator HTTP + WS: `127.0.0.1:8080`
+- core/orchestrator HTTP + WS: `127.0.0.1:8080`
 - relay: `127.0.0.1:9000` when deployed separately
 - anvil RPC: `127.0.0.1:8545`
 - custody dashboard/service: `127.0.0.1:8087`
@@ -128,7 +128,7 @@ proxying is fine.
 
 Recommended expectation:
 
-- `xln` or `xln-server` for the runtime/orchestrator
+- `xln` or `xln-server` for the core/orchestrator
 - `xln-custody` for the custody stack when enabled
 - `xln-anvil` for local anvil/testnet if used
 - `xln-relay` only if relay is still deployed as a separate process
@@ -141,7 +141,7 @@ relay deploy path alive just because an older doc mentioned it.
 If relay remains separate:
 
 ```bash
-pm2 start runtime/network/relay/standalone-server.ts \
+pm2 start core/network/relay/standalone-server.ts \
   --name xln-relay \
   --interpreter bun \
   -- --port 9000 --host 127.0.0.1

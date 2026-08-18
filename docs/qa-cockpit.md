@@ -7,11 +7,11 @@ The QA cockpit is a read-only dashboard for browsing e2e test evidence: run hist
 - Cockpit UI: `https://xln.finance/qa` (route `frontend/src/routes/qa/+page.svelte`)
 - Run drill-down: `https://xln.finance/runs` (route `frontend/src/routes/runs/+page.svelte`)
 - API client: `frontend/src/lib/qa/apiClient.ts`
-- Backend: `runtime/qa/api.ts` (HTTP routes) + `runtime/qa/report.ts` (data model, history DB, scanners)
+- Backend: `core/qa/api.ts` (HTTP routes) + `core/qa/report.ts` (data model, history DB, scanners)
 
 ## Storage layout
 
-Defined in `runtime/qa/report.ts`. Roots derive from `QA_EVIDENCE_ROOT` (default `./.logs`; prod = `/root/xln-qa-evidence`, set by `scripts/operations/start-server.sh` via checkout-path detection so it lives **outside** the git checkout that `bun run deploy` hard-resets):
+Defined in `core/qa/report.ts`. Roots derive from `QA_EVIDENCE_ROOT` (default `./.logs`; prod = `/root/xln-qa-evidence`, set by `scripts/operations/start-server.sh` via checkout-path detection so it lives **outside** the git checkout that `bun run deploy` hard-resets):
 
 - `QA_LOGS_ROOT` = `$QA_EVIDENCE_ROOT/e2e-parallel/<runId>/` — per-run artifacts (videos, traces, shard logs, screenshots)
 - `QA_HISTORY_DB_PATH` = `$QA_EVIDENCE_ROOT/qa-history.sqlite` — the run index behind the runs list

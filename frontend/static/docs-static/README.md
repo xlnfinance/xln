@@ -65,7 +65,7 @@
 
 ## 🐛 Debugging (2 files)
 
-- [debug.md](debug.md) - Single-source network debug/event-sourcing contract (MUST for runtime/network/payment code)
+- [debug.md](debug.md) - Single-source network debug/event-sourcing contract (MUST for core/network/payment code)
 - [consensus-debugging-guide.md](debugging/consensus-debugging-guide.md) - How to debug consensus failures
 
 ---

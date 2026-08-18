@@ -1,4 +1,4 @@
-import type { AccountReplica } from '@xln/runtime/api/public/runtime-module';
+import type { AccountReplica } from '@xln/core/api/public/runtime-module';
 import { compareEntityAssetText } from './../assets/entity-asset-catalog';
 
 export type DisputedAccountView = {

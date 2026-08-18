@@ -1,4 +1,4 @@
-import { getTokenInfo } from '@xln/runtime/account/utils';
+import { getTokenInfo } from '@xln/core/account/utils';
 
 const USD_MICROS = 1_000_000n;
 

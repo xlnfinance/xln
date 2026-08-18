@@ -19,7 +19,7 @@ import {
 } from '../../utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from '../../utils/e2e-connect';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, waitForNamedHubs } from '../../utils/e2e-baseline';
-import { getTokenInfo } from '../../../runtime/account/utils';
+import { getTokenInfo } from '../../../core/account/utils';
 
 const USDC_TOKEN_ID = 1;
 const USDC_UNIT = 10n ** BigInt(getTokenInfo(USDC_TOKEN_ID).decimals);

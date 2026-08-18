@@ -3,13 +3,13 @@ import {
   buildPushRegistrationMessage,
   buildPushUnregisterMessage,
   hashPushToken,
-} from '@xln/runtime/watchtower/push/registration';
+} from '@xln/core/watchtower/push/registration';
 import { Capacitor } from '@capacitor/core';
 import type {
   PushPlatformV1,
   PushRegistrationRequestV1,
   PushUnregisterRequestV1,
-} from '@xln/runtime/watchtower/push/types';
+} from '@xln/core/watchtower/push/types';
 import { requestNativePaymentWakeNotifications } from '$lib/native/capacitor';
 import { parseJsonUnknown } from '$lib/utils/boundary';
 

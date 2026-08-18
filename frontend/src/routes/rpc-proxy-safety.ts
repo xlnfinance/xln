@@ -3,4 +3,4 @@ export {
   isLocalProxyRequest,
   readRpcProxyRequest,
   RpcProxyError,
-} from '@xln/runtime/api/server/rpc/proxy-safety';
+} from '@xln/core/api/server/rpc/proxy-safety';

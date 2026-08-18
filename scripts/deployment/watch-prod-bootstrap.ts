@@ -180,7 +180,7 @@ const main = async (): Promise<void> => {
   const deployStartedAtMs = finiteNumber(process.env['XLN_PROD_DEPLOY_STARTED_AT_MS']) ?? startedAt;
   const childFailureReceiptPath = String(
     process.env['XLN_CHILD_FAILURE_RECEIPT_PATH'] ||
-    '/var/lib/xln/rdb/runtime/prod-mesh/.control-plane/diagnostics/last-fatal.json',
+    '/var/lib/xln/rdb/core/prod-mesh/.control-plane/diagnostics/last-fatal.json',
   );
   let lastAvailableAt = 0;
   let lastSignature = '';

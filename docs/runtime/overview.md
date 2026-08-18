@@ -4,70 +4,70 @@
 **Audience:** protocol implementers and auditors
 **Authority:** current source paths, enforced by `check:runtime-doc-paths`
 
-The `runtime/` tree contains three nested state machines and the infrastructure
+The `core/` tree contains three nested state machines and the infrastructure
 that drives them. Read the cascade before the services around it.
 
 ## The 90-minute path
 
 ### 1. Vocabulary and commitments
 
-1. `runtime/runtime/types.ts` — Runtime Input, Tx, Frame, and live replica.
-2. `runtime/entity/types.ts` — Entity State, candidate, Frame, and replica.
-3. `runtime/types/account.ts` — Account State, replica, Input, Tx, and Frame.
-4. `runtime/account/commitment/state-root.ts` — the exact bilateral commitment.
-5. `runtime/entity/consensus/state-root.ts` — Entity commitment, including the
+1. `core/runtime/types.ts` — Runtime Input, Tx, Frame, and live replica.
+2. `core/entity/types.ts` — Entity State, candidate, Frame, and replica.
+3. `core/types/account.ts` — Account State, replica, Input, Tx, and Frame.
+4. `core/account/commitment/state-root.ts` — the exact bilateral commitment.
+5. `core/entity/consensus/state-root.ts` — Entity commitment, including the
    deterministic Account-replica projection.
 
 ### 2. One input through all three machines
 
-6. `runtime/runtime/frame/process.ts` — the visible Runtime coordinator.
-7. `runtime/runtime/frame/lifecycle/prepare.ts` — detach one immutable Runtime input.
-8. `runtime/runtime/frame/apply.ts` — apply Runtime and routed Entity work.
-9. `runtime/entity/consensus/input/consensus.ts` — the Entity entry point.
-10. `runtime/entity/consensus/frame/application.ts` — replay a candidate.
-11. `runtime/account/consensus/index.ts` — the Account entry point.
-12. `runtime/account/tx/apply.ts` — validate one Account transaction.
-13. `runtime/account/tx/mutation.ts` — mutate Account-owned financial state.
+6. `core/runtime/frame/process.ts` — the visible Runtime coordinator.
+7. `core/runtime/frame/lifecycle/prepare.ts` — detach one immutable Runtime input.
+8. `core/runtime/frame/apply.ts` — apply Runtime and routed Entity work.
+9. `core/entity/consensus/input/consensus.ts` — the Entity entry point.
+10. `core/entity/consensus/frame/application.ts` — replay a candidate.
+11. `core/account/consensus/index.ts` — the Account entry point.
+12. `core/account/tx/apply.ts` — validate one Account transaction.
+13. `core/account/tx/mutation.ts` — mutate Account-owned financial state.
 
 ### 3. Certification and failure
 
-14. `runtime/entity/consensus/proposal/single-signer-frame.ts` — immediate local
+14. `core/entity/consensus/proposal/single-signer-frame.ts` — immediate local
     certification through the same candidate model.
-15. `runtime/entity/consensus/proposal/multi-signer.ts` — validator candidate
+15. `core/entity/consensus/proposal/multi-signer.ts` — validator candidate
     and Hanko flow.
-16. `runtime/account/consensus/incoming/collision.ts` — deterministic same-height
+16. `core/account/consensus/incoming/collision.ts` — deterministic same-height
     LEFT-wins rollback.
-17. `runtime/account/consensus/incoming/ack-commit.ts` — bilateral commit.
-18. `runtime/runtime/frame/lifecycle/storage-failure.ts` — pre/post-WAL failure rules.
-19. `runtime/storage/commit/commit.ts` — the only durable Runtime commit point.
-20. `runtime/storage/recovery/journal/replay.ts` — rebuild from durable truth.
+17. `core/account/consensus/incoming/ack-commit.ts` — bilateral commit.
+18. `core/runtime/frame/lifecycle/storage-failure.ts` — pre/post-WAL failure rules.
+19. `core/storage/commit/commit.ts` — the only durable Runtime commit point.
+20. `core/storage/recovery/journal/replay.ts` — rebuild from durable truth.
 
 ### 4. External settlement
 
-21. `runtime/jurisdiction/machine/history-consensus/index.ts` — certified J-prefix facts.
-22. `runtime/jurisdiction/adapter/events/ingress-transform.ts` — external evidence boundary.
-23. `runtime/entity/tx/j-events.ts` — certified J effects enter Entity.
-24. `runtime/account/settlement/j-finality.ts` — Account-owned settlement finality.
-25. `runtime/runtime/jurisdiction/j-submit.ts` — durable post-frame submission lifecycle.
+21. `core/jurisdiction/machine/history-consensus/index.ts` — certified J-prefix facts.
+22. `core/jurisdiction/adapter/events/ingress-transform.ts` — external evidence boundary.
+23. `core/entity/tx/j-events.ts` — certified J effects enter Entity.
+24. `core/account/settlement/j-finality.ts` — Account-owned settlement finality.
+25. `core/runtime/j-submit/j-submit.ts` — durable post-frame submission lifecycle.
 
 ## Folder ownership
 
 | Folder | Owns | Must not own |
 |---|---|---|
-| `runtime/runtime/` | Runtime input, frame, WAL ordering, routing | Entity/Account financial rules |
-| `runtime/entity/` | Entity transactions, candidates, Hanko consensus | physical storage or transport |
-| `runtime/account/` | bilateral consensus and every money mutation | Entity/Runtime orchestration |
-| `runtime/jurisdiction/machine/` | deterministic J protocol facts | RPC/provider behavior |
-| `runtime/jurisdiction/adapter/` | chain reads, authenticated receipts, submissions | consensus authority |
-| `runtime/storage/` | current state, WAL, history views, replay | protocol decisions |
-| `runtime/network/p2p/` | Runtime-to-Runtime delivery | financial state |
-| `runtime/network/relay/` | discovery and market relay services | Runtime consensus |
-| `runtime/api/public/` | public typed Runtime surface | service lifecycle |
-| `runtime/api/server/` | HTTP/WebSocket delivery | process orchestration |
-| `runtime/orchestrator/` | process startup and service composition | reducer logic |
-| `runtime/api/runtime-adapter/` | frontend projections and commands | direct state mutation |
-| `runtime/watchtower/` | encrypted appointments and chain action | spend-capable user keys |
-| `runtime/qa/` | diagnostics and human-readable state dumps | protocol behavior |
+| `core/runtime/` | Runtime input, frame, WAL ordering, routing | Entity/Account financial rules |
+| `core/entity/` | Entity transactions, candidates, Hanko consensus | physical storage or transport |
+| `core/account/` | bilateral consensus and every money mutation | Entity/Runtime orchestration |
+| `core/jurisdiction/machine/` | deterministic J protocol facts | RPC/provider behavior |
+| `core/jurisdiction/adapter/` | chain reads, authenticated receipts, submissions | consensus authority |
+| `core/storage/` | current state, WAL, history views, replay | protocol decisions |
+| `core/network/p2p/` | Runtime-to-Runtime delivery | financial state |
+| `core/network/relay/` | discovery and market relay services | Runtime consensus |
+| `core/api/public/` | public typed Runtime surface | service lifecycle |
+| `core/api/server/` | HTTP/WebSocket delivery | process orchestration |
+| `core/orchestrator/` | process startup and service composition | reducer logic |
+| `core/api/runtime-adapter/` | frontend projections and commands | direct state mutation |
+| `core/watchtower/` | encrypted appointments and chain action | spend-capable user keys |
+| `core/qa/` | diagnostics and human-readable state dumps | protocol behavior |
 
 ## The three commit boundaries
 
@@ -108,14 +108,14 @@ generic base class.
 
 ## Executable reading traces
 
-- `runtime/__tests__/runtime/commit/runtime-frame-atomicity.test.ts` — mutation/WAL/read
+- `core/__tests__/runtime/commit/runtime-frame-atomicity.test.ts` — mutation/WAL/read
   barriers and input recovery.
-- `runtime/scripts/operations/persistence/persistence-simultaneous-proposal-smoke.ts` — Account
+- `core/scripts/operations/persistence/persistence-simultaneous-proposal-smoke.ts` — Account
   collision, rollback ordering, and LEFT wins.
-- `runtime/__tests__/account/consensus/account-frame-integrity.test.ts` — exact frame validation.
-- `runtime/__tests__/finance/state/derive-delta-property.test.ts` — the single balance model.
-- `runtime/__tests__/storage/runtime/storage-canonical-hash.test.ts` — durable canonical bytes.
-- `runtime/__tests__/security/authority/multisig-secondary-hanko.test.ts` — candidate
+- `core/__tests__/account/consensus/account-frame-integrity.test.ts` — exact frame validation.
+- `core/__tests__/finance/state/derive-delta-property.test.ts` — the single balance model.
+- `core/__tests__/storage/runtime/storage-canonical-hash.test.ts` — durable canonical bytes.
+- `core/__tests__/security/authority/multisig-secondary-hanko.test.ts` — candidate
   certification.
 
 ## Supporting guides

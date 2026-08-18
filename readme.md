@@ -11,8 +11,8 @@ Byzantine consensus meets Bloomberg Terminal meets VR. Run complete economic sim
 
 ```
 xln/
-├── runtime/
-│   ├── runtime/        Runtime input, frame, WAL boundary, and output routing
+├── core/
+│   ├── core/        Runtime input, frame, WAL boundary, and output routing
 │   ├── entity/         Entity transactions, candidates, and Hanko consensus
 │   ├── account/        Bilateral consensus and all financial mutation
 │   ├── jurisdiction/
@@ -35,7 +35,7 @@ xln/
 └── .archive/           Historical implementations; never current authority
 ```
 
-`runtime/runtime.ts` is intentionally a narrow public facade. Core behavior belongs to
+`core/runtime.ts` is intentionally a narrow public facade. Core behavior belongs to
 the owning Runtime, Entity, or Account folder; physical I/O stays outside those
 state-machine folders.
 
@@ -75,7 +75,7 @@ that does not yet have a canonical owner. A low score therefore means
 | `packages/` | Published CLI and `xlnfinance` packages. | N/A | Release surface lacks direct fingerprint ownership. |
 | `prompts/` | Reusable audit and investigation prompts. | N/A | Review tooling. |
 | `release/` | Release-channel metadata. | N/A | Release input, not directly fingerprinted. |
-| `runtime/` | Deterministic R → E → A core and external boundaries. | `0*` | Conservative minimum; detailed split below. |
+| `core/` | Deterministic R → E → A core and external boundaries. | `0*` | Conservative minimum; detailed split below. |
 | `scripts/` | Build, deploy, release, and operator commands. | `0*` | Security-sensitive subsets need current release evidence. |
 | `tests/` | Browser, integration, security, and release evidence. | N/A | Tests score the production modules they exercise. |
 | `tools/` | Audit, frozen-core, snapshot, and repository gates. | `0*` | Release/supply-chain evidence must be refreshed. |
@@ -85,28 +85,28 @@ that does not yet have a canonical owner. A low score therefore means
 
 | Path | Purpose | Quality /1000 | Current audit note |
 |---|---|---:|---|
-| `runtime/runtime/` | Single-writer ingress, Runtime frames, WAL boundary, post-commit outputs. | `0*` | Runtime-pipeline evidence is stale. |
-| `runtime/entity/` | Entity transactions, validator proposals, certification, and frames. | `400*` | Entity-consensus evidence is stale. |
-| `runtime/account/` | Bilateral financial state, proposals, ACKs, proofs, and disputes. | `400*` | Account-consensus evidence is stale. |
-| `runtime/storage/` | WAL, snapshots, history, Merkle integrity, and recovery. | `400*` | Recovery evidence is stale. |
-| `runtime/network/` | Authenticated direct/relay P2P, reconnect, and backpressure. | `0*` | Transport evidence and findings need re-adjudication. |
-| `runtime/orchestrator/` | Startup, service composition, health, and recovery ordering. | `0*` | Operations evidence is stale. |
-| `runtime/api/` | Authenticated Runtime adapter, public API, HTTP, and WebSocket delivery. | `0*` | Conservative minimum across API/auth/public-wallet modules. |
-| `runtime/jurisdiction/` | Deterministic chain-event machine and external adapters. | `400*` | Finality/ingress evidence is stale. |
-| `runtime/hanko/` | Entity identity, boards, thresholds, and signatures. | `400*` | Shares governance assurance scope. |
-| `runtime/protocol/` | Canonical codecs, proofs, crypto, payments, and shared rules. | `400*` | Protocol-primitives evidence is stale. |
-| `runtime/types/` | Canonical Runtime, Entity, Account, and finance schemas. | `400*` | Deterministic schema surface. |
-| `runtime/routing/` | Deterministic route and fee mathematics. | `400*` | Protocol-primitives evidence is stale. |
-| `runtime/config/` | Validated configuration and deterministic boundaries. | `400*` | Runtime-platform evidence is stale. |
-| `runtime/infra/` | Platform services, diagnostics, redaction, and process boundaries. | `400*` | Runtime-platform evidence is stale. |
-| `runtime/orderbook/` | Order admission, matching, fills, and cancellation. | `400*` | Markets evidence is stale. |
-| `runtime/extensions/` | Cross-J swaps, lending, rebalance, and finance extensions. | `400*` | Paired-flow evidence must be refreshed. |
-| `runtime/presentation/` | Deterministic public read-model projection. | `0*` | Public-wallet evidence is stale. |
-| `runtime/watchtower/` | Recovery material and dispute observation. | `400*` | Storage/recovery evidence is stale. |
-| `runtime/qa/` | Runtime release checks and evidence probes. | `0*` | Assurance code mapped to release gates. |
-| `runtime/scripts/` | Runtime build, verification, E2E, and release commands. | `0*` | Release evidence is stale. |
-| `runtime/scenarios/` | Real deterministic integration scenarios. | N/A | Evidence producer. |
-| `runtime/__tests__/` | Narrow and targeted regression suites. | N/A | Evidence producer. |
+| `core/runtime/` | Single-writer ingress, Runtime frames, WAL boundary, post-commit outputs. | `0*` | Runtime-pipeline evidence is stale. |
+| `core/entity/` | Entity transactions, validator proposals, certification, and frames. | `400*` | Entity-consensus evidence is stale. |
+| `core/account/` | Bilateral financial state, proposals, ACKs, proofs, and disputes. | `400*` | Account-consensus evidence is stale. |
+| `core/storage/` | WAL, snapshots, history, Merkle integrity, and recovery. | `400*` | Recovery evidence is stale. |
+| `core/network/` | Authenticated direct/relay P2P, reconnect, and backpressure. | `0*` | Transport evidence and findings need re-adjudication. |
+| `core/orchestrator/` | Startup, service composition, health, and recovery ordering. | `0*` | Operations evidence is stale. |
+| `core/api/` | Authenticated Runtime adapter, public API, HTTP, and WebSocket delivery. | `0*` | Conservative minimum across API/auth/public-wallet modules. |
+| `core/jurisdiction/` | Deterministic chain-event machine and external adapters. | `400*` | Finality/ingress evidence is stale. |
+| `core/hanko/` | Entity identity, boards, thresholds, and signatures. | `400*` | Shares governance assurance scope. |
+| `core/protocol/` | Canonical codecs, proofs, crypto, payments, and shared rules. | `400*` | Protocol-primitives evidence is stale. |
+| `core/types/` | Canonical Runtime, Entity, Account, and finance schemas. | `400*` | Deterministic schema surface. |
+| `core/pathfinding/` | Deterministic route and fee mathematics. | `400*` | Protocol-primitives evidence is stale. |
+| `core/config/` | Validated configuration and deterministic boundaries. | `400*` | Runtime-platform evidence is stale. |
+| `core/support/` | Platform services, diagnostics, redaction, and process boundaries. | `400*` | Runtime-platform evidence is stale. |
+| `core/orderbook/` | Order admission, matching, fills, and cancellation. | `400*` | Markets evidence is stale. |
+| `core/extensions/` | Cross-J swaps, lending, rebalance, and finance extensions. | `400*` | Paired-flow evidence must be refreshed. |
+| `core/presentation/` | Deterministic public read-model projection. | `0*` | Public-wallet evidence is stale. |
+| `core/watchtower/` | Recovery material and dispute observation. | `400*` | Storage/recovery evidence is stale. |
+| `core/qa/` | Runtime release checks and evidence probes. | `0*` | Assurance code mapped to release gates. |
+| `core/scripts/` | Runtime build, verification, E2E, and release commands. | `0*` | Release evidence is stale. |
+| `core/scenarios/` | Real deterministic integration scenarios. | N/A | Evidence producer. |
+| `core/__tests__/` | Narrow and targeted regression suites. | N/A | Evidence producer. |
 
 ### Frontend product split
 
@@ -338,7 +338,7 @@ bun run bench:radapter:hub1m:allmem  # Same, but materialize all 1M accounts int
 - **Reset:** Refresh page = new universe
 - **Persistent:** Optional IndexedDB (resume sessions)
 
-**Implementation:** `runtime/jurisdiction/adapter/browservm/browservm.ts` and its focused
+**Implementation:** `core/jurisdiction/adapter/browservm/browservm.ts` and its focused
 `browservm-*` modules
 
 **Demo:** Load any scenario (AHB, Grid) - BrowserVM deploys contracts automatically
@@ -361,12 +361,12 @@ value is:
 
 1. [R → E → A → J architecture](docs/core/rjea-architecture.md)
 2. [Payment and HTLC flow](docs/implementation/payment-spec.md)
-3. `runtime/runtime/frame/process.ts` — Runtime transition and WAL ordering
-4. `runtime/entity/consensus/input/consensus.ts` — Entity entry point
-5. `runtime/account/consensus/index.ts` — Account entry point and collision
-6. `runtime/account/tx/apply.ts` — financial validation
-7. `runtime/account/tx/mutation.ts` — financial mutation
-8. `runtime/storage/commit/commit.ts` — the only durable Runtime commit point
+3. `core/runtime/frame/process.ts` — Runtime transition and WAL ordering
+4. `core/entity/consensus/input/consensus.ts` — Entity entry point
+5. `core/account/consensus/index.ts` — Account entry point and collision
+6. `core/account/tx/apply.ts` — financial validation
+7. `core/account/tx/mutation.ts` — financial mutation
+8. `core/storage/commit/commit.ts` — the only durable Runtime commit point
 
 Then read [the documentation index](docs/readme.md), [active release
 blockers](todo.md), and [the mainnet acceptance bar](docs/mainnet.md). Files

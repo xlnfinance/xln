@@ -105,7 +105,7 @@ Rules:
 Backup-only tower:
 
 ```bash
-bun runtime/watchtower/standalone-server.ts \
+bun core/watchtower/standalone-server.ts \
   --host 0.0.0.0 \
   --port 9100 \
   --db data/watchtower \
@@ -119,7 +119,7 @@ Backup plus last-resort disputer:
 XLN_WATCHTOWER_PRIVATE_KEY=0x... \
 XLN_WATCHTOWER_OPERATOR_TOKEN=... \
 XLN_WATCHTOWER_ALLOWED_RPC_URLS=https://xln.finance/rpc,https://xln.finance/rpc2,https://xln.finance/rpc3,https://xln.finance/rpc4,https://xln.finance/rpc5,https://xln.finance/rpc6,https://xln.finance/rpc7,https://xln.finance/rpc8 \
-bun runtime/watchtower/standalone-server.ts \
+bun core/watchtower/standalone-server.ts \
   --host 0.0.0.0 \
   --port 9100 \
   --db data/watchtower \
@@ -196,15 +196,15 @@ Use the ladder, not a broad suite first.
 L1 narrow:
 
 ```bash
-bun test runtime/__tests__/storage/recovery/recovery-tower.test.ts
-bun test runtime/__tests__/security/watchtower/watchtower-last-resort.test.ts
+bun test core/__tests__/storage/recovery/recovery-tower.test.ts
+bun test core/__tests__/security/watchtower/watchtower-last-resort.test.ts
 bun test tests/frontend/recovery/recovery-tower-config.test.ts
 ```
 
 L2 targeted contract/RPC:
 
 ```bash
-bun test runtime/__tests__/security/watchtower/watchtower-rpc-last-resort.test.ts
+bun test core/__tests__/security/watchtower/watchtower-rpc-last-resort.test.ts
 ```
 
 L2 browser restore:

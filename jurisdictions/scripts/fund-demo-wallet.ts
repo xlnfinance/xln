@@ -14,10 +14,10 @@ import {
   parseUnits,
 } from 'ethers';
 
-import { generateLazyEntityId } from '../../runtime/entity/factory';
-import { prepareSignedBatch } from '../../runtime/hanko/batch';
-import { createEmptyBatch } from '../../runtime/jurisdiction/machine/batch';
-import { deriveJurisdictionSignerIndex } from '../../runtime/jurisdiction/machine/config/signer-derivation';
+import { generateLazyEntityId } from '../../core/entity/factory';
+import { prepareSignedBatch } from '../../core/hanko/batch';
+import { createEmptyBatch } from '../../core/jurisdiction/machine/batch';
+import { deriveJurisdictionSignerIndex } from '../../core/jurisdiction/machine/config/signer-derivation';
 import { Depository__factory } from '../typechain-types/factories/contracts/Depository.sol/Depository__factory';
 
 type PublicJurisdiction = Readonly<{

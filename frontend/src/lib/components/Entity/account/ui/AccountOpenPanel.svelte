@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
+  import type { RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/core/api/public/runtime-module';
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import type { DisputedAccountView } from '../account-dispute-view';
   import EntityInput from '../../../shared/EntityInput.svelte';

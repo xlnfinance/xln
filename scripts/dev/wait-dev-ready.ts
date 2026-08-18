@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 
 import { stat } from 'node:fs/promises';
-import { deriveSignerAddressSync, signDigest } from '../../runtime/account/crypto';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../../runtime/protocol/crypto/p2p-crypto';
+import { deriveSignerAddressSync, signDigest } from '../../core/account/crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../../core/protocol/crypto/p2p-crypto';
 import {
   deserializeWsMessage,
   hashHelloMessage,
   serializeWsMessage,
-} from '../../runtime/network/p2p/ws-protocol';
-import { fetchLoopback, isLoopbackHttps } from '../../runtime/orchestrator/server/loopback-fetch';
-import { relayAudienceFromWebUrl } from '../../runtime/orchestrator/mesh/relay-audience';
+} from '../../core/network/p2p/ws-protocol';
+import { fetchLoopback, isLoopbackHttps } from '../../core/orchestrator/server/loopback-fetch';
+import { relayAudienceFromWebUrl } from '../../core/orchestrator/mesh/relay-audience';
 import {
   initialDevStartupProgressState,
   reduceDevStartupProgress,

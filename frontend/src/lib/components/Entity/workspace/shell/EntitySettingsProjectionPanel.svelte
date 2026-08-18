@@ -10,7 +10,7 @@
 
 <script lang="ts">
   import { Network, PlusCircle, Save, ShieldCheck, SlidersHorizontal } from 'lucide-svelte';
-  import type { RuntimeReplica, HubRebalanceConfig } from '@xln/runtime/api/public/runtime-module';
+  import type { RuntimeReplica, HubRebalanceConfig } from '@xln/core/api/public/runtime-module';
   import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { settings, settingsOperations } from '$lib/stores/settingsStore';

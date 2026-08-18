@@ -36,7 +36,7 @@ function discoverSourceFiles(baseDir, { excludeDirectories = [], excludeFiles = 
 // Complete production source sets are discovered rather than hand-maintained.
 // This is deliberate: a new Runtime, Entity, Account, WAL, networking,
 // orchestrator, adapter, or contract file must enter llms.txt automatically.
-const PRODUCTION_RUNTIME_FILES = discoverSourceFiles(path.join(PROJECT_ROOT, 'runtime'), {
+const PRODUCTION_RUNTIME_FILES = discoverSourceFiles(path.join(PROJECT_ROOT, 'core'), {
   excludeDirectories: ['__tests__', 'qa', 'scenarios', 'scripts'],
 }).filter((file) => file.endsWith('.ts'));
 const PRODUCTION_CONTRACT_FILES = discoverSourceFiles(path.join(PROJECT_ROOT, 'jurisdictions/contracts'), {
@@ -52,8 +52,8 @@ const PRODUCTION_CONTRACT_FILES = discoverSourceFiles(path.join(PROJECT_ROOT, 'j
 // dropping a critical authority or persistence boundary.
 const CORE_CRITICAL_RUNTIME_FILES = [
   'runtime.ts',
-  'runtime/frame/process.ts',
-  'runtime/input-pipeline/input-queue.ts',
+  'core/frame/process.ts',
+  'core/input-pipeline/input-queue.ts',
   'storage/index.ts',
   'storage/commit/commit.ts',
   'storage/wal/index.ts',
@@ -129,16 +129,16 @@ const CORE_FILES = {
   ],
   runtime: [
     // Core data structures and implementation
-    'runtime/types.ts',      // Runtime input/frame/replica interfaces
+    'core/types.ts',      // Runtime input/frame/replica interfaces
     'protocol/identity/index.ts',  // Identity system: EntityId, SignerId, JId, ReplicaKey
 
     // Main coordinators (how the system works)
     'runtime.ts',            // Narrow public facade
-    'runtime/composition.ts', // Runtime composition root and dependency wiring
-    'runtime/frame/process.ts', // take -> apply -> WAL -> install -> dispatch pipeline
-    'runtime/input-pipeline/input-queue.ts', // The single Runtime mempool
-    'runtime/routing/output-routing.ts', // Post-commit output routing
-    'runtime/recovery/live-restore.ts', // Durable Runtime restore boundary
+    'core/composition.ts', // Runtime composition root and dependency wiring
+    'core/frame/process.ts', // take -> apply -> WAL -> install -> dispatch pipeline
+    'core/input-pipeline/input-queue.ts', // The single Runtime mempool
+    'core/pathfinding/output-routing.ts', // Post-commit output routing
+    'core/recovery/live-restore.ts', // Durable Runtime restore boundary
     'entity/consensus/index.ts',   // Entity input -> candidate -> Hanko certificate -> commit
     'account/consensus/index.ts',  // Bilateral account consensus between entities
     'account/input.ts',      // Canonical AccountInput boundary
@@ -156,14 +156,14 @@ const CORE_FILES = {
     'entity/tx/processing/proposals.ts', // Proposal logic
     'entity/tx/j-events.ts',  // Jurisdiction event handling
     'entity/tx/handlers/account/index.ts',         // Account operations (openAccount, extendCredit)
-    'entity/tx/handlers/jurisdiction/r2c.ts', // Deposit collateral / reserve-to-collateral flow (R2C)
+    'entity/tx/handlers/j-batch/r2c.ts', // Deposit collateral / reserve-to-collateral flow (R2C)
     'entity/tx/handlers/htlc/payment.ts',    // HTLC payment routing
     'entity/tx/handlers/payments/settle.ts', // Settlement workspace creation, approval, and execution
-    'entity/tx/handlers/jurisdiction/mint-reserves.ts',   // Reserve minting (J-events)
+    'entity/tx/handlers/j-batch/mint-reserves.ts',   // Reserve minting (J-events)
     'entity/tx/handlers/dispute/index.ts',         // Dispute/salvage gateway and evidence handling
 
     // Swaps, orderbooks, and cross-jurisdiction markets (critical for current product)
-    'runtime/finance/swap-pairs.ts',         // Canonical same-chain swap pair orientation and policies
+    'core/swap-cmd/swap-pairs.ts',         // Canonical same-chain swap pair orientation and policies
     'orderbook/swap-execution.ts',                     // Swap lifecycle helpers and terminal settlement summaries
     'orderbook/swap-keys.ts',                          // Swap/order identifier keys and namespacing
     'orderbook/open-swap-offers.ts',                   // Open swap offer projection
@@ -208,8 +208,8 @@ const CORE_FILES = {
     'account/tx/handlers/balance/add-delta.ts', // Delta addition (payment processing)
 
     // Routing (multi-hop payments)
-    'routing/graph.ts',      // Network graph representation
-    'routing/pathfinding.ts', // Dijkstra routing algorithm
+    'pathfinding/graph.ts',      // Network graph representation
+    'pathfinding/pathfinding.ts', // Dijkstra routing algorithm
 
     // Cryptography (signature verification bugs)
     'account/crypto.ts',     // Account frame signing/verification (CRITICAL)
@@ -219,7 +219,7 @@ const CORE_FILES = {
     'entity/state-clone.ts',  // Entity candidate/snapshot isolation
     'entity/replica/replica-clone.ts', // Validator-local replica isolation
     'storage/codec/snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
-    'runtime/jurisdiction-api.ts', // J-adapter / on-chain integration surface
+    'core/j-submit/api.ts', // J-adapter / on-chain integration surface
   ],
   docs: [
     // Canonical live docs only - theory, current status, and implementation-grade specs
@@ -250,18 +250,18 @@ const CORE_FILES = {
   ],
   tests: [
     // Behavior contracts: if code and prose disagree, these tests show intended user flow
-    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-1.test.ts',
-    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2a.test.ts',
-    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2b.test.ts',
-    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-3.test.ts',
-    'runtime/__tests__/cross-j/swap/cross-jurisdiction-security.test.ts',
-    'runtime/__tests__/market/core/market-subscription-stack.test.ts',
-    'runtime/__tests__/market/core/market-maker-health.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-lifecycle.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-matching-part-1.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-matching-part-2.test.ts',
-    'runtime/__tests__/payments/swap/swap-order-preparation.test.ts',
-    'runtime/__tests__/finance/state/lending.test.ts',
+    'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-1.test.ts',
+    'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2a.test.ts',
+    'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2b.test.ts',
+    'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-3.test.ts',
+    'core/__tests__/cross-j/swap/cross-jurisdiction-security.test.ts',
+    'core/__tests__/market/invariants/market-subscription-stack.test.ts',
+    'core/__tests__/market/invariants/market-maker-health.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-lifecycle.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-matching-part-1.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-matching-part-2.test.ts',
+    'core/__tests__/payments/swap/swap-order-preparation.test.ts',
+    'core/__tests__/finance/state/lending.test.ts',
     'tests/e2e/swap/e2e-swap.spec.ts',
     'tests/e2e-cross-j-swap.spec.ts',
     'tests/e2e/product/e2e-lending.spec.ts',
@@ -317,7 +317,7 @@ const CROSS_FILES = {
     'mocks/NoReturnERC20Mock.sol',
   ],
   runtime: [
-    'runtime/types.ts',
+    'core/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'types/cross-jurisdiction.ts',
@@ -331,14 +331,14 @@ const CROSS_FILES = {
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
     'runtime.ts',
-    'runtime/composition.ts',
-    'runtime/frame/process.ts',
-    'runtime/input-pipeline/input-queue.ts',
-    'runtime/recovery/live-restore.ts',
-    'runtime/jurisdiction-api.ts',
-    'runtime/finance/swap-pairs.ts',
-    'runtime/routing/output-routing.ts',
-    'runtime/jurisdiction/j-submit.ts',
+    'core/composition.ts',
+    'core/frame/process.ts',
+    'core/input-pipeline/input-queue.ts',
+    'core/recovery/live-restore.ts',
+    'core/j-submit/api.ts',
+    'core/swap-cmd/swap-pairs.ts',
+    'core/pathfinding/output-routing.ts',
+    'core/j-submit/j-submit.ts',
     'account/input.ts',
     'account/settlement/j-finality.ts',
     'entity/consensus/index.ts',
@@ -403,7 +403,7 @@ const CROSS_FILES = {
     'orchestrator/mm-node.ts',
     'orchestrator/mesh/mesh-common.ts',
     'orchestrator/mesh/mesh-jurisdictions.ts',
-    'orchestrator/jurisdiction/jurisdictions.ts',
+    'orchestrator/j-select/jurisdictions.ts',
     'api/server/health/market-maker.ts',
     'api/server/catalog/jurisdictions.ts',
     'protocol/dispute/arguments.ts',
@@ -437,26 +437,26 @@ const CROSS_FILES = {
     'src/lib/utils/identity/jurisdictionBadge.ts',
   ],
   tests: [
-    'runtime/__tests__/helpers/cross-j.ts',
-    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-1.test.ts',
-    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2a.test.ts',
-    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2b.test.ts',
-    'runtime/__tests__/cross-j/swap/cross-jurisdiction-swap-part-3.test.ts',
-    'runtime/__tests__/cross-j/swap/cross-jurisdiction-security.test.ts',
-    'runtime/__tests__/network/jurisdiction/multi-jurisdiction-entity.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-lifecycle.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-matching-part-1.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-matching-part-2.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-validity.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-relay-url.test.ts',
-    'runtime/__tests__/payments/swap/swap-order-preparation.test.ts',
-    'runtime/__tests__/market/core/market-subscription-stack.test.ts',
-    'runtime/__tests__/market/core/market-subscription-limiter.test.ts',
-    'runtime/__tests__/market/core/market-maker-health.test.ts',
-    'runtime/__tests__/market/core/market-maker-transport.test.ts',
-    'runtime/__tests__/payments/htlc/htlc-events-and-dispute-tail.test.ts',
-    'runtime/__tests__/security/dispute/dispute-arguments.test.ts',
-    'runtime/__tests__/security/watchtower/watchtower-last-resort.test.ts',
+    'core/__tests__/helpers/cross-j.ts',
+    'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-1.test.ts',
+    'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2a.test.ts',
+    'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-2b.test.ts',
+    'core/__tests__/cross-j/swap/cross-jurisdiction-swap-part-3.test.ts',
+    'core/__tests__/cross-j/swap/cross-jurisdiction-security.test.ts',
+    'core/__tests__/network/jurisdiction/multi-jurisdiction-entity.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-lifecycle.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-matching-part-1.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-matching-part-2.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-validity.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-relay-url.test.ts',
+    'core/__tests__/payments/swap/swap-order-preparation.test.ts',
+    'core/__tests__/market/invariants/market-subscription-stack.test.ts',
+    'core/__tests__/market/invariants/market-subscription-limiter.test.ts',
+    'core/__tests__/market/invariants/market-maker-health.test.ts',
+    'core/__tests__/market/invariants/market-maker-transport.test.ts',
+    'core/__tests__/payments/htlc/htlc-events-and-dispute-tail.test.ts',
+    'core/__tests__/security/dispute/dispute-arguments.test.ts',
+    'core/__tests__/security/watchtower/watchtower-last-resort.test.ts',
     'tests/e2e-cross-j-swap.spec.ts',
   ],
   frontend: [],
@@ -465,7 +465,7 @@ const CROSS_FILES = {
 const RUNTIME_FILES = {
   contracts: [],
   runtime: uniqueFiles([
-    'runtime/types.ts',
+    'core/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'types/jurisdiction-events.ts',
@@ -473,13 +473,13 @@ const RUNTIME_FILES = {
     'protocol/identity/index.ts',
     'config/constants.ts',
     'runtime.ts',
-    'runtime/composition.ts',
-    'runtime/frame/process.ts',
-    'runtime/input-pipeline/input-queue.ts',
-    'runtime/recovery/live-restore.ts',
-    'runtime/transactions/tx-handlers.ts',
-    'runtime/routing/output-routing.ts',
-    'runtime/jurisdiction/j-submit.ts',
+    'core/composition.ts',
+    'core/frame/process.ts',
+    'core/input-pipeline/input-queue.ts',
+    'core/recovery/live-restore.ts',
+    'core/tx/tx-handlers.ts',
+    'core/pathfinding/output-routing.ts',
+    'core/j-submit/j-submit.ts',
     'entity/consensus/index.ts',
     'entity/consensus/frame.ts',
     'entity/consensus/input/hanko-witness.ts',
@@ -513,10 +513,10 @@ const RUNTIME_FILES = {
     'entity/tx/j-events-htlc/index.ts',
     'entity/tx/j-events-types.ts',
     'entity/tx/handlers/account/index.ts',
-    'entity/tx/handlers/jurisdiction/r2c.ts',
+    'entity/tx/handlers/j-batch/r2c.ts',
     'entity/tx/handlers/htlc/payment.ts',
     'entity/tx/handlers/payments/settle.ts',
-    'entity/tx/handlers/jurisdiction/mint-reserves.ts',
+    'entity/tx/handlers/j-batch/mint-reserves.ts',
     'account/tx/apply.ts',
     'account/tx/handlers/balance/add-delta.ts',
     'account/tx/handlers/balance/direct-payment.ts',
@@ -529,12 +529,12 @@ const RUNTIME_FILES = {
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
-    'runtime/observability/env-events.ts',
+    'core/observability/env-events.ts',
     'infra/logger.ts',
     'jurisdiction/machine/jurisdiction-runtime/index.ts',
-    'jurisdiction/adapter/core/config.ts',
+    'jurisdiction/adapter/kernel/config.ts',
     'jurisdiction/machine/jurisdiction-stack.ts',
-    'runtime/jurisdiction-api.ts',
+    'core/j-submit/api.ts',
     'storage/canonical-hash.ts',
     'storage/hashes.ts',
     'storage/wal/hash.ts',
@@ -548,14 +548,14 @@ const RUNTIME_FILES = {
   ],
   swapUi: [],
   tests: [
-    'runtime/__tests__/registration/core/ids.test.ts',
-    'runtime/__tests__/account/consensus/account-frame-integrity.test.ts',
-    'runtime/__tests__/runtime/transport/runtime-output-routing.test.ts',
-    'runtime/__tests__/runtime/ingress/runtime-ingress-timestamp.test.ts',
-    'runtime/__tests__/jurisdiction/batches/j-batch-reserve-availability.test.ts',
-    'runtime/__tests__/network/jurisdiction/multi-jurisdiction-entity.test.ts',
-    'runtime/__tests__/protocol/codec/serialization-utils.test.ts',
-    'runtime/__tests__/storage/runtime/storage-canonical-hash.test.ts',
+    'core/__tests__/registration/invariants/ids.test.ts',
+    'core/__tests__/account/consensus/account-frame-integrity.test.ts',
+    'core/__tests__/core/transport/runtime-output-routing.test.ts',
+    'core/__tests__/core/ingress/runtime-ingress-timestamp.test.ts',
+    'core/__tests__/jurisdiction/batches/j-batch-reserve-availability.test.ts',
+    'core/__tests__/network/jurisdiction/multi-jurisdiction-entity.test.ts',
+    'core/__tests__/protocol/codec/serialization-utils.test.ts',
+    'core/__tests__/storage/core/storage-canonical-hash.test.ts',
   ],
   frontend: [],
 };
@@ -575,7 +575,7 @@ const COMPLETE_RUNTIME_FILES = {
 const ORDERBOOK_FILES = {
   contracts: [],
   runtime: [
-    'runtime/types.ts',
+    'core/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'protocol/identity/index.ts',
@@ -584,7 +584,7 @@ const ORDERBOOK_FILES = {
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
-    'runtime/finance/swap-pairs.ts',
+    'core/swap-cmd/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
     'orderbook/open-swap-offers.ts',
@@ -621,15 +621,15 @@ const ORDERBOOK_FILES = {
     'src/lib/components/Trading/orderbook-relay-url.ts',
   ],
   tests: [
-    'runtime/__tests__/payments/orderbook/orderbook-lifecycle.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-matching-part-1.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-matching-part-2.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-validity.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-relay-url.test.ts',
-    'runtime/__tests__/market/core/market-subscription-stack.test.ts',
-    'runtime/__tests__/market/core/market-subscription-limiter.test.ts',
-    'runtime/__tests__/market/core/market-maker-health.test.ts',
-    'runtime/__tests__/market/core/market-maker-transport.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-lifecycle.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-matching-part-1.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-matching-part-2.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-validity.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-relay-url.test.ts',
+    'core/__tests__/market/invariants/market-subscription-stack.test.ts',
+    'core/__tests__/market/invariants/market-subscription-limiter.test.ts',
+    'core/__tests__/market/invariants/market-maker-health.test.ts',
+    'core/__tests__/market/invariants/market-maker-transport.test.ts',
   ],
   frontend: [],
 };
@@ -643,7 +643,7 @@ const SWAP_FILES = {
     'Account.sol',
   ],
   runtime: uniqueFiles([
-    'runtime/types.ts',
+    'core/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'protocol/identity/index.ts',
@@ -652,7 +652,7 @@ const SWAP_FILES = {
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
-    'runtime/finance/swap-pairs.ts',
+    'core/swap-cmd/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
     'orderbook/open-swap-offers.ts',
@@ -694,10 +694,10 @@ const SWAP_FILES = {
     'src/lib/components/Trading/orderbook-relay-url.ts',
   ],
   tests: uniqueFiles([
-    'runtime/__tests__/payments/orderbook/orderbook-lifecycle.test.ts',
-    'runtime/__tests__/payments/orderbook/orderbook-validity.test.ts',
-    'runtime/__tests__/payments/swap/swap-order-preparation.test.ts',
-    'runtime/__tests__/payments/core/price-improvement.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-lifecycle.test.ts',
+    'core/__tests__/payments/orderbook/orderbook-validity.test.ts',
+    'core/__tests__/payments/swap/swap-order-preparation.test.ts',
+    'core/__tests__/payments/invariants/price-improvement.test.ts',
     'tests/e2e/swap/e2e-swap.spec.ts',
   ]),
   frontend: [],
@@ -812,7 +812,7 @@ fail fast with debuggable payloads.
 
 ${overviewFileRows('Contracts', fileGroups.contracts, fileSizes, 'contracts/', 'jurisdictions/contracts/')}
 
-${overviewFileRows('Runtime', fileGroups.runtime, fileSizes, 'runtime/', 'runtime/')}
+${overviewFileRows('Runtime', fileGroups.runtime, fileSizes, 'core/', 'core/')}
 
 ${overviewFileRows('Docs', fileGroups.docs, fileSizes, 'docs/', 'docs/')}
 
@@ -843,7 +843,7 @@ ${overviewFileRows('Repository Invariants', fileGroups.root || [], fileSizes, ''
 
 ${overviewFileRows('Contracts', fileGroups.contracts, fileSizes, 'contracts/', 'jurisdictions/contracts/')}
 
-${overviewFileRows('Runtime', fileGroups.runtime, fileSizes, 'runtime/', 'runtime/')}
+${overviewFileRows('Runtime', fileGroups.runtime, fileSizes, 'core/', 'core/')}
 
 ${overviewFileRows('Docs', fileGroups.docs, fileSizes, 'docs/', 'docs/')}
 
@@ -873,7 +873,7 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir
 
   fileGroups.runtime.forEach(file => {
     const content = readFileContent(runtimeDir, file);
-    if (content) fileSizes[`runtime/${file}`] = countLines(content);
+    if (content) fileSizes[`core/${file}`] = countLines(content);
   });
 
   fileGroups.docs.forEach(file => {
@@ -1107,10 +1107,10 @@ User UI -> placeSwapOffer
 \`\`\`
 
 Same-chain orderbook matching lives in:
-- \`runtime/entity/tx/handlers/account/orderbook/index.ts\`
-- \`runtime/entity/tx/handlers/account/orderbook/helpers.ts\`
-- \`runtime/account/tx/handlers/swap/offer/index.ts\`
-- \`runtime/account/tx/handlers/swap/resolve/index.ts\`
+- \`core/entity/tx/handlers/account/orderbook/index.ts\`
+- \`core/entity/tx/handlers/account/orderbook/helpers.ts\`
+- \`core/account/tx/handlers/swap/offer/index.ts\`
+- \`core/account/tx/handlers/swap/resolve/index.ts\`
 
 The UI contract is: clicking a red/green real orderbook level must select the
 concrete hub/row and update the visible form amounts/assets. All-hubs mode must
@@ -1136,13 +1136,13 @@ requestCrossJurisdictionSwap
 \`\`\`
 
 Read these together:
-- \`runtime/extensions/cross-j/index.ts\`
-- \`runtime/extensions/cross-j/market.ts\`
-- \`runtime/extensions/cross-j/orderbook.ts\`
-- \`runtime/extensions/cross-j/boundary.ts\`
-- \`runtime/orderbook/cross-j/orderbook.ts\`
-- \`runtime/entity/tx/handlers/cross-j-*.ts\`
-- \`runtime/account/tx/handlers/swap/cross-fill-ack/index.ts\`
+- \`core/extensions/cross-j/index.ts\`
+- \`core/extensions/cross-j/market.ts\`
+- \`core/extensions/cross-j/orderbook.ts\`
+- \`core/extensions/cross-j/boundary.ts\`
+- \`core/orderbook/cross-j/orderbook.ts\`
+- \`core/entity/tx/handlers/cross-j-*.ts\`
+- \`core/account/tx/handlers/swap/cross-fill-ack/index.ts\`
 
 Design rule: expected market failures (no liquidity, no market, quote expired)
 are terminal user-visible swap failures/cancellations, not protocol fatals.
@@ -1171,12 +1171,12 @@ repayment is a direct payment back to the hub, then pool/loan state closes.
 No-liquidity is an expected terminal product state, not a protocol fatal.
 
 Read these together:
-- \`runtime/extensions/lending.ts\`
-- \`runtime/types/finance/lending.ts\`
-- \`runtime/entity/tx/handlers/payments/lending.ts\`
-- \`runtime/api/server/entities/lending.ts\`
+- \`core/extensions/lending.ts\`
+- \`core/types/finance/lending.ts\`
+- \`core/entity/tx/handlers/payments/lending.ts\`
+- \`core/api/server/entities/lending.ts\`
 - \`frontend/src/lib/components/Entity/payments/LendingPanel.svelte\`
-- \`runtime/__tests__/finance/state/lending.test.ts\`
+- \`core/__tests__/finance/state/lending.test.ts\`
 - \`tests/e2e/product/e2e-lending.spec.ts\`
 
 ### Market maker and orderbook readiness
@@ -1184,9 +1184,9 @@ Read these together:
 The test market maker must prepublish same-chain books and ETH/TRON cross-chain
 books before user swaps run. Empty books are a setup failure, not a user-flow
 failure. Health/self-test lives in:
-- \`runtime/orchestrator/mm-node.ts\`
-- \`runtime/api/server/health/market-maker.ts\`
-- \`runtime/network/relay/market/subscriptions.ts\`
+- \`core/orchestrator/mm-node.ts\`
+- \`core/api/server/health/market-maker.ts\`
+- \`core/network/relay/market/subscriptions.ts\`
 - \`tests/e2e-cross-j-swap.spec.ts\` ("market maker prepublishes...")
 
 ### Smart-contract backstop
@@ -1195,8 +1195,8 @@ The security argument depends on the on-chain exit actually working:
 - \`Depository.sol\` anchors reserves/collateral and FIFO debt enforcement
 - \`Account.sol\` verifies bilateral account settlement/dispute state
 - \`DeltaTransformer.sol\` verifies delta-transforming primitives
-- \`runtime/protocol/dispute/arguments.ts\` builds dispute arguments/evidence
-- \`runtime/entity/tx/handlers/dispute/index.ts\` gates dispute starts
+- \`core/protocol/dispute/arguments.ts\` builds dispute arguments/evidence
+- \`core/entity/tx/handlers/dispute/index.ts\` gates dispute starts
 - \`docs/security/dispute-two-arguments-spec.md\` explains the evidence model
 
 If cross-j salvage cannot lead to a valid dispute path, the backstop is broken.
@@ -1219,13 +1219,13 @@ salvage -> evidence -> dispute -> finalization path is tested.
 
 **Implementation path (read third, ~45min):**
 - Depository.sol (7min) - enforceDebts() FIFO
-- runtime/types.ts - Runtime input, frame, and replica interfaces
+- core/types.ts - Runtime input, frame, and replica interfaces
 - entity/consensus/index.ts - BFT state machine
 - account/consensus/index.ts - Bilateral consensus
 - entity/tx/apply.ts - Transaction dispatcher
 - docs/implementation/payment-spec.md - payments/HTLC/onion
 - docs/merkle.md - durable integrity root
-- docs/radapter.md - runtime/frontend contract
+- docs/radapter.md - core/frontend contract
 - docs/recovery-watchtower-protocol.md - offline recovery/dispute safety
 
 ## Codebase Structure
@@ -1240,60 +1240,60 @@ xln/
     Account.sol                ${fileSizes['contracts/Account.sol'] || '?'} lines - A-machine on-chain: bilateral accounts, settlements
     DeltaTransformer.sol       ${fileSizes['contracts/DeltaTransformer.sol'] || '?'} lines - Delta transformations: HTLCs, swaps, limit orders
 
-  runtime/
-    runtime/types.ts             ${fileSizes['runtime/runtime/types.ts'] || '?'} lines - Runtime input/frame/replica interfaces
-    protocol/identity/index.ts   ${fileSizes['runtime/protocol/identity/index.ts'] || '?'} lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   ${fileSizes['runtime/runtime.ts'] || '?'} lines - Narrow public facade
-    entity/consensus/index.ts          ${fileSizes['runtime/entity/consensus/index.ts'] || '?'} lines - Entity candidate and Hanko certification
-    account/consensus/index.ts         ${fileSizes['runtime/account/consensus/index.ts'] || '?'} lines - Bilateral consensus, left/right perspective
-    account/view-state.ts   ${fileSizes['runtime/account/view-state.ts'] || '?'} lines - Bilateral state machine
-    jurisdiction/machine/batch/index.ts     ${fileSizes['runtime/jurisdiction/machine/batch/index.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
-    account/utils.ts             ${fileSizes['runtime/account/utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
-    protocol/serialization/index.ts ${fileSizes['runtime/protocol/serialization/index.ts'] || '?'} lines - BigInt serialization
-    account/crypto.ts            ${fileSizes['runtime/account/crypto.ts'] || '?'} lines - Signature verification
-    runtime/jurisdiction-api.ts  ${fileSizes['runtime/runtime/jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
+  core/
+    core/types.ts             ${fileSizes['core/runtime/types.ts'] || '?'} lines - Runtime input/frame/replica interfaces
+    protocol/identity/index.ts   ${fileSizes['core/protocol/identity/index.ts'] || '?'} lines - Identity system: EntityId, SignerId, JId, ReplicaKey
+    runtime.ts                   ${fileSizes['core/runtime.ts'] || '?'} lines - Narrow public facade
+    entity/consensus/index.ts          ${fileSizes['core/entity/consensus/index.ts'] || '?'} lines - Entity candidate and Hanko certification
+    account/consensus/index.ts         ${fileSizes['core/account/consensus/index.ts'] || '?'} lines - Bilateral consensus, left/right perspective
+    account/view-state.ts   ${fileSizes['core/account/view-state.ts'] || '?'} lines - Bilateral state machine
+    jurisdiction/machine/batch/index.ts     ${fileSizes['core/jurisdiction/machine/batch/index.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
+    account/utils.ts             ${fileSizes['core/account/utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
+    protocol/serialization/index.ts ${fileSizes['core/protocol/serialization/index.ts'] || '?'} lines - BigInt serialization
+    account/crypto.ts            ${fileSizes['core/account/crypto.ts'] || '?'} lines - Signature verification
+    core/j-submit/api.ts  ${fileSizes['core/runtime/j-submit/api.ts'] || '?'} lines - J-adapter / on-chain integration
 
     swap/cross-j/orderbook:
-      runtime/finance/swap-pairs.ts ${fileSizes['runtime/runtime/finance/swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
-      orderbook/swap-execution.ts           ${fileSizes['runtime/orderbook/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
-      extensions/cross-j/index.ts       ${fileSizes['runtime/extensions/cross-j/index.ts'] || '?'} lines - Cross-j route hashes and fill progress
-      extensions/cross-j/market.ts ${fileSizes['runtime/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation
-      extensions/cross-j/orderbook.ts ${fileSizes['runtime/extensions/cross-j/orderbook.ts'] || '?'} lines - Cross-j book owner rules
-      orderbook/cross-j/orderbook.ts ${fileSizes['runtime/orderbook/cross-j/orderbook.ts'] || '?'} lines - Cross-j admissions
+      core/swap-cmd/swap-pairs.ts ${fileSizes['core/runtime/swap-cmd/swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
+      orderbook/swap-execution.ts           ${fileSizes['core/orderbook/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
+      extensions/cross-j/index.ts       ${fileSizes['core/extensions/cross-j/index.ts'] || '?'} lines - Cross-j route hashes and fill progress
+      extensions/cross-j/market.ts ${fileSizes['core/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation
+      extensions/cross-j/orderbook.ts ${fileSizes['core/extensions/cross-j/orderbook.ts'] || '?'} lines - Cross-j book owner rules
+      orderbook/cross-j/orderbook.ts ${fileSizes['core/orderbook/cross-j/orderbook.ts'] || '?'} lines - Cross-j admissions
       entity/tx/handlers/cross-j-*.ts - Cross-j setup/book/fill/salvage/clear/sweep
       entity/tx/handlers/account/orderbook-matching-*.ts - Same/cross matching
       account/tx/handlers/swap-*.ts - Account-level offer/resolve/cancel
-      account/tx/handlers/swap/cross-fill-ack/index.ts ${fileSizes['runtime/account/tx/handlers/swap/cross-fill-ack/index.ts'] || '?'} lines - Fill ACK processing
-      relay/market-subscriptions.ts ${fileSizes['runtime/network/relay/market/subscriptions.ts'] || '?'} lines - Book streaming
-      orchestrator/mm-node.ts     ${fileSizes['runtime/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
-      server/health/market-maker.ts ${fileSizes['runtime/api/server/health/market-maker.ts'] || '?'} lines - MM readiness health
-      lending.ts                  ${fileSizes['runtime/extensions/lending.ts'] || '?'} lines - Lending math and ids
-      types/finance/lending.ts    ${fileSizes['runtime/types/finance/lending.ts'] || '?'} lines - Lending state types
-      entity/tx/handlers/payments/lending.ts ${fileSizes['runtime/entity/tx/handlers/payments/lending.ts'] || '?'} lines - Lending tx handlers
-      server/entities/lending.ts ${fileSizes['runtime/api/server/entities/lending.ts'] || '?'} lines - Lending API handlers
+      account/tx/handlers/swap/cross-fill-ack/index.ts ${fileSizes['core/account/tx/handlers/swap/cross-fill-ack/index.ts'] || '?'} lines - Fill ACK processing
+      relay/market-subscriptions.ts ${fileSizes['core/network/relay/market/subscriptions.ts'] || '?'} lines - Book streaming
+      orchestrator/mm-node.ts     ${fileSizes['core/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
+      server/health/market-maker.ts ${fileSizes['core/api/server/health/market-maker.ts'] || '?'} lines - MM readiness health
+      lending.ts                  ${fileSizes['core/extensions/lending.ts'] || '?'} lines - Lending math and ids
+      types/finance/lending.ts    ${fileSizes['core/types/finance/lending.ts'] || '?'} lines - Lending state types
+      entity/tx/handlers/payments/lending.ts ${fileSizes['core/entity/tx/handlers/payments/lending.ts'] || '?'} lines - Lending tx handlers
+      server/entities/lending.ts ${fileSizes['core/api/server/entities/lending.ts'] || '?'} lines - Lending API handlers
 
     entity/tx/
-      apply.ts                   ${fileSizes['runtime/entity/tx/apply.ts'] || '?'} lines - Entity tx dispatcher
-      handlers/basic.ts          ${fileSizes['runtime/entity/tx/handlers/system/basic.ts'] || '?'} lines - Basic tx validation and handlers
-      processing/proposals.ts    ${fileSizes['runtime/entity/tx/processing/proposals.ts'] || '?'} lines - Proposal logic
-      j-events.ts                ${fileSizes['runtime/entity/tx/j-events.ts'] || '?'} lines - Jurisdiction events
-      handlers/account.ts              ${fileSizes['runtime/entity/tx/handlers/account/index.ts'] || '?'} lines - Account operations
-      handlers/r2c.ts                  ${fileSizes['runtime/entity/tx/handlers/jurisdiction/r2c.ts'] || '?'} lines - R2C deposits
-      handlers/htlc-payment.ts         ${fileSizes['runtime/entity/tx/handlers/htlc/payment.ts'] || '?'} lines - HTLC routing
-      handlers/mint-reserves.ts        ${fileSizes['runtime/entity/tx/handlers/jurisdiction/mint-reserves.ts'] || '?'} lines - Reserve minting
+      apply.ts                   ${fileSizes['core/entity/tx/apply.ts'] || '?'} lines - Entity tx dispatcher
+      handlers/basic.ts          ${fileSizes['core/entity/tx/handlers/system/basic.ts'] || '?'} lines - Basic tx validation and handlers
+      processing/proposals.ts    ${fileSizes['core/entity/tx/processing/proposals.ts'] || '?'} lines - Proposal logic
+      j-events.ts                ${fileSizes['core/entity/tx/j-events.ts'] || '?'} lines - Jurisdiction events
+      handlers/account.ts              ${fileSizes['core/entity/tx/handlers/account/index.ts'] || '?'} lines - Account operations
+      handlers/r2c.ts                  ${fileSizes['core/entity/tx/handlers/j-batch/r2c.ts'] || '?'} lines - R2C deposits
+      handlers/htlc-payment.ts         ${fileSizes['core/entity/tx/handlers/htlc/payment.ts'] || '?'} lines - HTLC routing
+      handlers/mint-reserves.ts        ${fileSizes['core/entity/tx/handlers/j-batch/mint-reserves.ts'] || '?'} lines - Reserve minting
 
     account/tx/
-      apply.ts                   ${fileSizes['runtime/account/tx/apply.ts'] || '?'} lines - Account tx dispatcher
-      handlers/add-delta.ts      ${fileSizes['runtime/account/tx/handlers/balance/add-delta.ts'] || '?'} lines - Delta addition
+      apply.ts                   ${fileSizes['core/account/tx/apply.ts'] || '?'} lines - Account tx dispatcher
+      handlers/add-delta.ts      ${fileSizes['core/account/tx/handlers/balance/add-delta.ts'] || '?'} lines - Delta addition
 
     routing/
-      graph.ts                   ${fileSizes['runtime/routing/graph.ts'] || '?'} lines - Network graph
-      pathfinding.ts             ${fileSizes['runtime/routing/pathfinding.ts'] || '?'} lines - Dijkstra routing
+      graph.ts                   ${fileSizes['core/pathfinding/graph.ts'] || '?'} lines - Network graph
+      pathfinding.ts             ${fileSizes['core/pathfinding/pathfinding.ts'] || '?'} lines - Dijkstra routing
 
-    account/state/state-clone.ts ${fileSizes['runtime/account/state/state-clone.ts'] || '?'} lines - Account candidate isolation
-    entity/state-clone.ts        ${fileSizes['runtime/entity/state-clone.ts'] || '?'} lines - Entity candidate isolation
-    entity/replica/replica-clone.ts      ${fileSizes['runtime/entity/replica/replica-clone.ts'] || '?'} lines - Replica-local isolation
-    storage/codec/snapshot-coder.ts            ${fileSizes['runtime/storage/codec/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
+    account/state/state-clone.ts ${fileSizes['core/account/state/state-clone.ts'] || '?'} lines - Account candidate isolation
+    entity/state-clone.ts        ${fileSizes['core/entity/state-clone.ts'] || '?'} lines - Entity candidate isolation
+    entity/replica/replica-clone.ts      ${fileSizes['core/entity/replica/replica-clone.ts'] || '?'} lines - Replica-local isolation
+    storage/codec/snapshot-coder.ts            ${fileSizes['core/storage/codec/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
   docs/
     readme.md                           ${fileSizes['docs/readme.md'] || '?'} lines - Live docs index and reading path
     constraints.md                      ${fileSizes['docs/constraints.md'] || '?'} lines - Why bilateral provable-credit settlement is necessary
@@ -1323,7 +1323,7 @@ xln/
     tests/e2e/swap/e2e-swap.spec.ts              ${fileSizes['tests/e2e/swap/e2e-swap.spec.ts'] || '?'} lines - Same-chain swap UX contract
     tests/e2e-cross-j-swap.spec.ts      ${fileSizes['tests/e2e-cross-j-swap.spec.ts'] || '?'} lines - Cross-j swap/manual recommendation UX contract
     tests/e2e/product/e2e-lending.spec.ts           ${fileSizes['tests/e2e/product/e2e-lending.spec.ts'] || '?'} lines - Lending UI contract
-    runtime/__tests__/finance/state/lending.test.ts   ${fileSizes['runtime/__tests__/finance/state/lending.test.ts'] || '?'} lines - Lending state-machine contract
+    core/__tests__/finance/state/lending.test.ts   ${fileSizes['core/__tests__/finance/state/lending.test.ts'] || '?'} lines - Lending state-machine contract
 
 ${includeFrontend ? `
   frontend/
@@ -1403,7 +1403,7 @@ function addFiles({ files, baseDir, statPrefix, outputPrefix, fileStats, allFile
 function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
   const projectRoot = path.resolve(__dirname, '../../');
   const contractsDir = path.join(projectRoot, 'jurisdictions/contracts');
-  const runtimeDir = path.join(projectRoot, 'runtime');
+  const runtimeDir = path.join(projectRoot, 'core');
   const docsDir = path.join(projectRoot, 'docs');
   const frontendDir = path.join(projectRoot, 'frontend');
   const resolvedFileGroups = solOnly
@@ -1431,7 +1431,7 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
     allFiles,
   });
 
-  // Skip runtime/docs/frontend if --sol flag is present
+  // Skip core/docs/frontend if --sol flag is present
   if (!solOnly) {
     addFiles({
       files: resolvedFileGroups.root || [],
@@ -1445,8 +1445,8 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
     addFiles({
       files: resolvedFileGroups.runtime,
       baseDir: runtimeDir,
-      statPrefix: 'runtime/',
-      outputPrefix: 'runtime/',
+      statPrefix: 'core/',
+      outputPrefix: 'core/',
       fileStats,
       allFiles,
     });
@@ -1504,7 +1504,7 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
   if (!solOnly) {
     const included = new Set(allFiles.map(file => file.path));
     for (const required of CORE_CRITICAL_RUNTIME_FILES) {
-      const requiredPath = `runtime/${required}`;
+      const requiredPath = `core/${required}`;
       if (!included.has(requiredPath)) throw new Error(`AUDIT_CONTEXT_CRITICAL_FILE_MISSING:${requiredPath}`);
     }
   }
@@ -1618,7 +1618,7 @@ Chunk token limit: ~${tokenLimit.toLocaleString()} tokens
 
 Use the chunk files below when an LLM cannot load the monolithic file. A report
 based on only the first chunk is invalid; it will mostly see contracts and miss
-runtime/UI/E2E behavior.
+core/UI/E2E behavior.
 
 Recommended audit protocol:
 1. Load every chunk in order.

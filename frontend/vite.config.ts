@@ -327,7 +327,7 @@ export default defineConfig({
 		target: 'es2022'
 	},
 	build: {
-		// The app intentionally ships runtime/3D workspaces. Keep warnings focused
+		// The app intentionally ships core/3D workspaces. Keep warnings focused
 		// on accidental multi-megabyte chunks after the explicit vendor split above.
 		chunkSizeWarningLimit: 1500,
 		rollupOptions: {

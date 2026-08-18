@@ -1,5 +1,5 @@
-import type { XLNModule } from '@xln/runtime/api/public/runtime-module';
-import { isXLNModuleLoaded } from '@xln/runtime/api/public/runtime-module-guard';
+import type { XLNModule } from '@xln/core/api/public/runtime-module';
+import { isXLNModuleLoaded } from '@xln/core/api/public/runtime-module-guard';
 
 let loaded: XLNModule | null = null;
 let loadPromise: Promise<XLNModule> | null = null;

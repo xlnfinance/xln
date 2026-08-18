@@ -2,8 +2,8 @@
   import { onMount, onDestroy, mount, unmount } from 'svelte';
   import { writable, type Writable } from 'svelte/store';
   import { DockviewComponent } from 'dockview';
-  import type { RuntimeReplica, RuntimeAdapterViewFrame } from '@xln/runtime/api/public/runtime-module';
-  import type { EnvSnapshot } from '@xln/runtime/runtime/types';
+  import type { RuntimeReplica, RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
+  import type { EnvSnapshot } from '@xln/core/runtime/types';
   import Graph3DPanel from './panels/graph3d/Graph3DPanel.svelte';
   import ConsolePanel from './panels/ConsolePanel.svelte';
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';

@@ -134,11 +134,11 @@ run_vite() {
 }
 
 wait_for_dev_chains() {
-  run_owned bun runtime/scripts/operations/development/wait-rpc-chain.ts \
+  run_owned bun core/scripts/operations/development/wait-rpc-chain.ts \
     --url "http://127.0.0.1:${RPC_PORT}" \
     --chain-id 31337 \
     --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
-  run_owned bun runtime/scripts/operations/development/wait-rpc-chain.ts \
+  run_owned bun core/scripts/operations/development/wait-rpc-chain.ts \
     --url "http://127.0.0.1:${RPC2_PORT}" \
     --chain-id 31338 \
     --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
@@ -173,7 +173,7 @@ case "$role" in
       XLN_MESH_RESET_ALLOWED=1 \
       XLN_AUTO_PROVISION_EXTERNAL_FAUCET="${XLN_AUTO_PROVISION_EXTERNAL_FAUCET:-1}" \
       XLN_PUBLIC_FAUCET="${XLN_PUBLIC_FAUCET:-1}" \
-      bun --no-orphans runtime/orchestrator/orchestrator.ts \
+      bun --no-orphans core/orchestrator/orchestrator.ts \
         --host 127.0.0.1 \
         --port "$API_PORT" \
         --public-ws-base-url "ws://127.0.0.1:${API_PORT}" \
@@ -190,7 +190,7 @@ case "$role" in
         --wallet-url "http://localhost:${WEB_HTTP_PORT}/app"
     ;;
   watchtower)
-    run_owned bun --no-orphans runtime/watchtower/standalone-server.ts \
+    run_owned bun --no-orphans core/watchtower/standalone-server.ts \
       --host 127.0.0.1 \
       --port "$WATCHTOWER_PORT" \
       --db "$XLN_RDB_ROOT/watchtower" \

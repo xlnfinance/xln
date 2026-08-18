@@ -1,4 +1,4 @@
-import type { DerivedDelta } from '@xln/runtime/api/public/runtime-module';
+import type { DerivedDelta } from '@xln/core/api/public/runtime-module';
 
 const max = (a: bigint, b: bigint): bigint => (a > b ? a : b);
 

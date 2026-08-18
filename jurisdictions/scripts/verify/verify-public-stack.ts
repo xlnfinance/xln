@@ -2,7 +2,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { safeStringify } from '../../../runtime/protocol/serialization';
+import { safeStringify } from '../../../core/protocol/serialization';
 import { verifyEntityProviderGovernanceDomains } from './entity-provider-domains';
 
 type BuildInfo = Readonly<{

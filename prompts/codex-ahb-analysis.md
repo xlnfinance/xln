@@ -14,22 +14,22 @@ Perform **forensic-level analysis** of the Alice-Hub-Bob scenario and underlying
 ## Files to Analyze (Read in Order)
 
 ### Phase 1: Understand the Flow (20 min)
-1. `runtime/runtime/types.ts` - Runtime machine types and R→E routing envelopes
-2. `runtime/scenarios/consensus/ahb.ts` (full file, ~1561 lines) - The scenario implementation
-3. `runtime/runtime.ts` (lines 372-784, 1517-1650) - applyRuntimeInput + process() tick
+1. `core/runtime/types.ts` - Runtime machine types and R→E routing envelopes
+2. `core/scenarios/consensus/ahb.ts` (full file, ~1561 lines) - The scenario implementation
+3. `core/runtime.ts` (lines 372-784, 1517-1650) - applyRuntimeInput + process() tick
 
 ### Phase 2: Trace Execution Paths (30 min)
-4. `runtime/entity/consensus/index.ts` (lines 180-674) - E-layer BFT consensus
-5. `runtime/account/consensus/index.ts` (lines 112-613) - A-layer bilateral consensus
-6. `runtime/entity/tx/apply.ts` - Entity transaction dispatcher
-7. `runtime/account/tx/apply.ts` - Account transaction dispatcher
-8. `runtime/entity/tx/handlers/jurisdiction/j-broadcast.ts` - E→J mempool queuing
-9. `runtime/jurisdiction/machine/batch/index.ts` (lines 1-150) - Batch accumulation system
+4. `core/entity/consensus/index.ts` (lines 180-674) - E-layer BFT consensus
+5. `core/account/consensus/index.ts` (lines 112-613) - A-layer bilateral consensus
+6. `core/entity/tx/apply.ts` - Entity transaction dispatcher
+7. `core/account/tx/apply.ts` - Account transaction dispatcher
+8. `core/entity/tx/handlers/j-batch/j-broadcast.ts` - E→J mempool queuing
+9. `core/jurisdiction/machine/batch/index.ts` (lines 1-150) - Batch accumulation system
 
 ### Phase 3: J-Layer Integration (20 min)
-10. `runtime/runtime.ts` (lines 1565-1650) - J-machine block processor
-11. `runtime/evms/browser-evm.ts` - BrowserVM execution
-12. `runtime/j-event-watcher.ts` - J→E event routing
+10. `core/runtime.ts` (lines 1565-1650) - J-machine block processor
+11. `core/evms/browser-evm.ts` - BrowserVM execution
+12. `core/j-event-watcher.ts` - J→E event routing
 
 ### Phase 4: Frontend Visualization (15 min)
 13. `frontend/src/lib/view/panels/Graph3DPanel.svelte` (lines 762-936) - Yellow cube rendering

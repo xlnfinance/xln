@@ -242,7 +242,7 @@ bun run bench:radapter:hub1m:allmem
 Ask an auditor to verify:
 
 1. `StorageEntityHashDoc` has no `cells[]` or hidden cache fields.
-2. `runtime/storage/hashes.ts` has one hot path: persisted root/branch/leaf editor.
+2. `core/storage/hashes.ts` has one hot path: persisted root/branch/leaf editor.
 3. Missing Merkle root with saved entity/account/book rows throws, rather than rebuilding.
 4. Merkle root/branch/leaf rows are copied during epoch seeding.
 5. Delete collapse removes obsolete branch/leaf rows and leaves no orphan rows.

@@ -14,7 +14,7 @@ import {
   startRuntimeLoop,
   waitForRuntimeWorkDrained,
   waitForRuntimeInputCommitted,
-} from '../../runtime/runtime.ts';
+} from '../../core/runtime.ts';
 import type { RuntimeInput, RuntimeReplica } from './runtime-types';
 import {
   fetchJurisdictions,

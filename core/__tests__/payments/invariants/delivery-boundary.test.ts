@@ -1,0 +1,84 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { expect, test } from 'bun:test';
+
+const repoRoot = process.cwd();
+
+const collectRuntimeSourceFiles = (dir: string): string[] =>
+  readdirSync(dir).flatMap((entry) => {
+    const fullPath = join(dir, entry);
+    const relPath = relative(repoRoot, fullPath);
+
+    if (
+      relPath.includes('/__tests__/') ||
+      relPath.includes('/scenarios/') ||
+      relPath.includes('/scripts/')
+    ) {
+      return [];
+    }
+
+    const stats = statSync(fullPath);
+    if (stats.isDirectory()) return collectRuntimeSourceFiles(fullPath);
+    return fullPath.endsWith('.ts') ? [fullPath] : [];
+  });
+
+const rawEntityInputSendAllowedFiles = new Set([
+  'core/network/p2p/p2p.ts',
+  'core/network/p2p/ws-client.ts',
+]);
+
+const deliveryOutcomeComparisonAllowedFiles = new Set([
+  'core/protocol/payments/delivery-result.ts',
+]);
+
+const deliveryFlagDecisionAllowedFiles = new Set([
+  'core/protocol/payments/delivery-result.ts',
+]);
+
+test('raw entity inputs websocket send stays behind the P2P delivery adapter', () => {
+  const offenders = collectRuntimeSourceFiles(join(repoRoot, 'core'))
+    .map((file) => {
+      const relPath = relative(repoRoot, file);
+      if (rawEntityInputSendAllowedFiles.has(relPath)) return null;
+
+      const source = readFileSync(file, 'utf8');
+      return /\bsendEntityInputsRaw\s*\(/.test(source) || /['"]sendEntityInputsRaw['"]/.test(source)
+        ? relPath
+        : null;
+    })
+    .filter((relPath): relPath is string => relPath !== null);
+
+  expect(offenders).toEqual([]);
+});
+
+test('delivery retry and terminal decisions stay behind shared helpers', () => {
+  const rawDeliveryFlagDecision =
+    /\bdelivery\.(?:retryable|fatal|terminal)\b|\bdelivery\[['"](?:retryable|fatal|terminal)['"]\]/;
+  const offenders = collectRuntimeSourceFiles(join(repoRoot, 'core'))
+    .map((file) => {
+      const relPath = relative(repoRoot, file);
+      if (deliveryFlagDecisionAllowedFiles.has(relPath)) return null;
+
+      const source = readFileSync(file, 'utf8');
+      return rawDeliveryFlagDecision.test(source) ? relPath : null;
+    })
+    .filter((relPath): relPath is string => relPath !== null);
+
+  expect(offenders).toEqual([]);
+});
+
+test('delivery outcome decisions stay behind shared helpers', () => {
+  const rawDeliveryOutcomeComparison =
+    /\.outcome\s*(?:===|!==|==|!=)\s*['"](?:delivered|queued|deferred|failed)['"]|['"](?:delivered|queued|deferred|failed)['"]\s*(?:===|!==|==|!=)[^\n]*\.outcome/;
+  const offenders = collectRuntimeSourceFiles(join(repoRoot, 'core'))
+    .map((file) => {
+      const relPath = relative(repoRoot, file);
+      if (deliveryOutcomeComparisonAllowedFiles.has(relPath)) return null;
+
+      const source = readFileSync(file, 'utf8');
+      return rawDeliveryOutcomeComparison.test(source) ? relPath : null;
+    })
+    .filter((relPath): relPath is string => relPath !== null);
+
+  expect(offenders).toEqual([]);
+});

@@ -278,7 +278,11 @@ test('stale remote entity selection fails loudly without resetting to another en
   expect(source).toContain('runtimeViewPublicationMatches(');
   expect(source).toContain('remoteProjectionRefreshGeneration,');
   expect(source).toContain('const projection = await refreshRemoteRuntimeProjection(adapter, config, selection, generation);');
+  expect(source.indexOf('if (!isCurrentRuntimeAdapterConfig(config)) return null;'))
+    .toBeLessThan(source.indexOf('const adapter = getRuntimeControllerAdapter();'));
   expect(source).toContain('Remote entity summary not found: ${entityId}');
+  expect(source).toContain("view.status !== 'connected'");
+  expect(source).toContain('/not connected|socket closed|timed out/i.test(viewError)');
   expect(source).toContain('setRuntimeViewActiveEntityId(historyFrame.activeEntityId)');
   expect(source).toContain('const frame = await refreshView(requestedEntityId);');
   expect(source).not.toContain('isStaleRemoteEntitySelectionError');
@@ -303,7 +307,7 @@ test('remote RuntimeInput command waits for observed receipt before projection r
 });
 
 test('remote runtime refresh ignores unchanged ticks and debounces projection reads', () => {
-  const remoteSource = readFileSync('runtime/api/runtime-adapter/remote.ts', 'utf8');
+  const remoteSource = readFileSync('core/api/runtime-adapter/remote.ts', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const noteHeightStart = remoteSource.indexOf('private noteHeight(');
   const noteHeightEnd = remoteSource.indexOf('private async openSocket', noteHeightStart);
@@ -544,7 +548,7 @@ test('runtime controller handle carries selected runtime identity', () => {
 
 test('authenticated remote admin authority survives transport reconnect while command readiness fail-closes', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const remoteSource = readFileSync('runtime/api/runtime-adapter/remote.ts', 'utf8');
+  const remoteSource = readFileSync('core/api/runtime-adapter/remote.ts', 'utf8');
   const switchStart = source.indexOf('export const switchAppRuntimeAdapter =');
   const callbackStart = source.indexOf('unregisterRuntimeControllerStatus = onRuntimeControllerStatus', switchStart);
   const callbackEnd = source.indexOf("if (status === 'connected')", callbackStart);
@@ -756,7 +760,7 @@ test('remote app can page through full hub account and book projections', () => 
 
 test('retryable remote adapter refresh errors do not unmount the app shell', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const handlerStart = source.indexOf('const handleRuntimeProjectionRefreshError');
+  const handlerStart = source.indexOf('export const handleRuntimeProjectionRefreshError');
   const scheduleStart = source.indexOf('const scheduleRuntimeProjectionRefresh', handlerStart);
   expect(handlerStart).toBeGreaterThanOrEqual(0);
   expect(scheduleStart).toBeGreaterThan(handlerStart);
@@ -938,6 +942,6 @@ test('projection routes never evict or duplicate an active embedded Runtime', ()
   const destroySource = layoutSource.slice(destroyStart, destroyStart + 600);
   expect(destroyStart).toBeGreaterThan(0);
   expect(destroySource).not.toContain('releaseActiveTabLock?.()');
-  const fastGateSource = readFileSync('runtime/scripts/e2e/runners/run-e2e-fast.ts', 'utf8');
+  const fastGateSource = readFileSync('core/scripts/e2e/runners/run-e2e-fast.ts', 'utf8');
   expect(fastGateSource).toContain("title: 'projection route cannot evict an active embedded Runtime owner'");
 });

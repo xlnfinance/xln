@@ -1,6 +1,6 @@
 # XLN Ops Runbook
 
-This runbook covers the production orchestrator surface exposed by `runtime/orchestrator/orchestrator.ts`.
+This runbook covers the production orchestrator surface exposed by `core/orchestrator/orchestrator.ts`.
 
 ## Health Endpoints
 

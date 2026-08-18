@@ -9,7 +9,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { createEventDispatcher } from 'svelte';
-  import type { Profile as GossipProfile } from '@xln/runtime/api/public/runtime-module';
+  import type { Profile as GossipProfile } from '@xln/core/api/public/runtime-module';
   import { xlnFunctions } from '../../stores/xlnStore';
   import { entityAvatar } from '../../utils/identity/avatar';
   import { compareStableText } from '$lib/utils/stableSort';

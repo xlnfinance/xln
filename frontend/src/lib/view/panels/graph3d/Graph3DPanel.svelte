@@ -3,7 +3,7 @@ import { onMount, onDestroy } from "svelte";
 import { get, type Writable } from "svelte/store";
 import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { EnvSnapshot, RuntimeReplica } from "@xln/runtime/api/public/runtime-module";
+import type { EnvSnapshot, RuntimeReplica } from "@xln/core/api/public/runtime-module";
 import { panelBridge } from "../../utils/panelBridge";
 import { PerformanceMonitor, type PerfMetrics } from "../../utils/perfMonitor";
 import { getXLN, entityPositions } from "$lib/stores/xlnStore";

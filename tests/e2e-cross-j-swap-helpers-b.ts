@@ -1,4 +1,4 @@
-import { deriveTransferOffdeltaChange } from '../runtime/protocol/transform/delta-movement';
+import { deriveTransferOffdeltaChange } from '../core/protocol/transform/delta-movement';
 import {
   API_BASE_URL,
   CROSS_J_SOURCE_COMMITTED_OR_ADVANCED_STATUSES,
@@ -1087,6 +1087,56 @@ export async function readCrossResolveSnapshots(
           }
         }
       };
+      const collectLiveRouteSnapshots = (state: Record<string, unknown>, replicaKey: string) => {
+        const routes = state.crossJurisdictionSwaps;
+        if (!(routes instanceof Map)) return;
+        for (const rawRoute of routes.values()) {
+          const route = recordOf(rawRoute);
+          const source = recordOf(route.source);
+          const target = recordOf(route.target);
+          const sourceUser = String(source.entityId || '').toLowerCase();
+          const sourceHub = String(source.counterpartyEntityId || '').toLowerCase();
+          const targetHub = String(target.entityId || '').toLowerCase();
+          const targetUser = String(target.counterpartyEntityId || '').toLowerCase();
+          const matchesAccount =
+            (sourceUser === owner && sourceHub === cp) ||
+            (targetUser === owner && targetHub === cp);
+          if (!matchesAccount) continue;
+          const fillRatio = Number(route.cumulativeFillRatio || 0);
+          const filledSource = BigInt(String(route.filledSourceAmount ?? '0'));
+          const filledTarget = BigInt(String(route.filledTargetAmount ?? '0'));
+          const improvement = BigInt(String(route.priceImprovementSourceAmount ?? '0'));
+          const executionGiveAmount = String(filledSource - improvement);
+          const executionWantAmount = String(filledTarget);
+          if (fillRatio <= 0 && executionGiveAmount === '0' && executionWantAmount === '0') continue;
+          const offerId = String(route.orderId || '');
+          const height = Number(route.updatedAt || route.createdAt || 0);
+          const key = [
+            String(replicaKey || ''),
+            cp,
+            offerId,
+            String(height),
+            String(fillRatio),
+            String(route.fillNumerator ?? '0'),
+            String(route.fillDenominator ?? '0'),
+            executionGiveAmount,
+            executionWantAmount,
+          ].join(':');
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push({
+            offerId,
+            height,
+            fillRatio,
+            fillNumerator: String(route.fillNumerator ?? '0'),
+            fillDenominator: String(route.fillDenominator ?? '0'),
+            cancelRemainder: String(route.clearingPolicy || '') === 'cancel_and_clear',
+            executionGiveAmount,
+            executionWantAmount,
+            comment: '',
+          });
+        }
+      };
 
       for (const [replicaKey, replica] of env?.state.eReplicas?.entries?.() || []) {
         if (!String(replicaKey).toLowerCase().startsWith(`${owner}:`)) continue;
@@ -1110,6 +1160,7 @@ export async function readCrossResolveSnapshots(
             String(accountKey || ''),
           );
         }
+        collectLiveRouteSnapshots(state, String(replicaKey || ''));
       }
       return out.sort(
         (a, b) =>
@@ -1199,6 +1250,15 @@ export async function waitForLatestCrossResolveSnapshot(
                   })),
                 }),
               ),
+            })),
+            routes: Array.from(state?.crossJurisdictionSwaps?.values?.() || []).map((route: any) => ({
+              orderId: String(route?.orderId || ''),
+              status: String(route?.status || ''),
+              fillRatio: Number(route?.cumulativeFillRatio || 0),
+              filledSourceAmount: String(route?.filledSourceAmount ?? '0'),
+              filledTargetAmount: String(route?.filledTargetAmount ?? '0'),
+              clearingPolicy: String(route?.clearingPolicy || ''),
+              updatedAt: Number(route?.updatedAt || 0),
             })),
           });
         }

@@ -108,7 +108,7 @@ export XLN_DEV_OWNER_ID
 
 DEV_RADAPTER_KEYS_JSON="$DEV_DATA_ROOT/radapter-keys.json"
 DEV_RADAPTER_KEYS_ENV="$DEV_DATA_ROOT/radapter-keys.env"
-bun runtime/scripts/operations/development/dev-radapter-keys.ts \
+bun core/scripts/operations/development/dev-radapter-keys.ts \
   --web-port "${WEB_PORT}" \
   --manager-origin "http://localhost:${WEB_HTTP_PORT}" \
   --api-port "${API_PORT}" \
@@ -118,7 +118,7 @@ bun runtime/scripts/operations/development/dev-radapter-keys.ts \
   --quiet
 source "$DEV_RADAPTER_KEYS_ENV"
 
-bun runtime/scripts/operations/development/print-dev-links.ts \
+bun core/scripts/operations/development/print-dev-links.ts \
   --web-port "${WEB_PORT}" \
   --web-http-port "${WEB_HTTP_PORT}" \
   --web-scheme "${DEV_WEB_SCHEME}" \

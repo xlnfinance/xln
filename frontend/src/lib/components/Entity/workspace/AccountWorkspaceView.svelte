@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RuntimeReplica, EnvSnapshot, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot, Profile as GossipProfile, RuntimeInput } from '@xln/core/api/public/runtime-module';
   import type { ComponentType } from 'svelte';
   import { ArrowDownLeft, ArrowUpRight, Activity, Banknote, Landmark, PlusCircle, Repeat, Settings as SettingsIcon, SlidersHorizontal } from 'lucide-svelte';
   import type { EntityReplica, Tab } from '$lib/types/ui';

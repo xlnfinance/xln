@@ -52,7 +52,7 @@
       "state": "PASS",
       "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
       "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
-      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "command": "bun test tests/unit/brainvault-native.test.ts core/__tests__/server-rpc-startup-gate.test.ts core/__tests__/radapter-remote-reconnect.test.ts",
       "summary": "Fsync, spec mismatch, cancellation, startup failure, concurrent restore, and stale authority generation injections passed 12/12.",
       "recordedAt": "2026-08-01T00:41:03Z",
       "agentRunIds": [
@@ -137,7 +137,7 @@
       "state": "PASS",
       "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
       "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
-      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "command": "bun test tests/unit/brainvault-native.test.ts core/__tests__/server-rpc-startup-gate.test.ts core/__tests__/radapter-remote-reconnect.test.ts",
       "summary": "Malformed secret-bearing messages, stale reconnect generation, failed startup, and concurrent owner restore all failed closed.",
       "recordedAt": "2026-08-01T00:41:09Z",
       "agentRunIds": [

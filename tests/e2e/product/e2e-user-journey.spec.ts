@@ -119,7 +119,6 @@ async function readHubAccountSummary(page: Page): Promise<{
             hashPrecommits?: Map<string, unknown>;
           }>;
           jInputs?: unknown[];
-          reliableReceipts?: unknown[];
         };
         pendingOutputs?: unknown[];
         networkInbox?: unknown[];
@@ -127,8 +126,6 @@ async function readHubAccountSummary(page: Page): Promise<{
         infrastructure?: {
           processingPromise?: Promise<void> | null;
           inFlightEntityInputs?: number;
-          pendingReliableIngress?: Map<string, unknown>;
-          reliableIngressCommitting?: Set<string>;
           pendingCommittedJOutbox?: unknown[];
         };
         history?: Array<{
@@ -308,7 +305,6 @@ async function readEntityIdleSnapshot(
       (runtimeMempool?.runtimeTxs?.length ?? 0) +
       (runtimeMempool?.entityInputs?.length ?? 0) +
       (runtimeMempool?.jInputs?.length ?? 0) +
-      (runtimeMempool?.reliableReceipts?.length ?? 0) +
       (env.pendingOutputs?.length ?? 0) +
       (env.networkInbox?.length ?? 0) +
       (env.pendingNetworkOutputs?.length ?? 0);

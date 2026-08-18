@@ -3,8 +3,8 @@ import type {
   EntityId,
   EntityTx,
   RoutedEntityInput,
-} from '@xln/runtime/api/public/runtime-module';
-import { toEntityId } from '@xln/runtime/api/public/runtime-module';
+} from '@xln/core/api/public/runtime-module';
+import { toEntityId } from '@xln/core/api/public/runtime-module';
 
 export const ENTITY_SHARE_SUPPLY = 100_000_000_000n;
 export const ENTITY_DIVIDEND_TOKEN_FLAG = 1n << 255n;

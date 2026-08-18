@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Writable } from 'svelte/store';
-  import type { RuntimeReplica } from '@xln/runtime/runtime/types';
+  import type { RuntimeReplica } from '@xln/core/runtime/types';
 
   const GIB = 1024 ** 3;
 

@@ -1,5 +1,5 @@
-import type { EntityTx, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
-import type { RuntimeAdapterSendResult } from '@xln/runtime/api/runtime-adapter/types';
+import type { EntityTx, RuntimeInput } from '@xln/core/api/public/runtime-module';
+import type { RuntimeAdapterSendResult } from '@xln/core/api/runtime-adapter/types';
 import { requireAdapter } from './adapter';
 
 /** Standard 24h bilateral response window — matches the protocol's non-hub default. */

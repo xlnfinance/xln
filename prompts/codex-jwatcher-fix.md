@@ -25,14 +25,14 @@ mintReserves EntityTx goes through proper flow:
 
 ## Root Cause
 
-Events emitted DURING broadcastBatch (inside applyRuntimeInput tick) get queued to `env.runtimeInput.entityInputs`, which is then cleared at end of tick (runtime/runtime.ts:727).
+Events emitted DURING broadcastBatch (inside applyRuntimeInput tick) get queued to `env.runtimeInput.entityInputs`, which is then cleared at end of tick (core/runtime.ts:727).
 
 ## Files
 
-- runtime/j-event-watcher.ts:246-304 - Queues to env.runtimeInput.entityInputs
-- runtime/runtime.ts:727 - Clears env.runtimeInput.entityInputs
-- runtime/runtime.ts:1616 - broadcastBatch called (emits events synchronously)
-- runtime/scenarios/consensus/ahb.ts:706 - processJEvents called (finds empty queue)
+- core/j-event-watcher.ts:246-304 - Queues to env.runtimeInput.entityInputs
+- core/runtime.ts:727 - Clears env.runtimeInput.entityInputs
+- core/runtime.ts:1616 - broadcastBatch called (emits events synchronously)
+- core/scenarios/consensus/ahb.ts:706 - processJEvents called (finds empty queue)
 
 ## Question
 

@@ -17,7 +17,7 @@ import { rankXlnGuideDocs } from '../../frontend/src/lib/ai/xln-guide-context';
 import {
   parseAssistantChatRequest,
   sanitizeAssistantCatalog,
-} from '../../runtime/api/server/assistant/input';
+} from '../../core/api/server/assistant/input';
 import { normalizeImportedUiSettings } from '../../frontend/src/lib/utils/ui-style';
 
 const desktop = { width: 1440, height: 900 };

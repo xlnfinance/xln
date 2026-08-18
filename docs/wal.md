@@ -399,10 +399,10 @@ one. The accumulator is strongly owned infrastructure; `WeakMap` and `WeakSet`
 are prohibited.
 
 The default materialization cadence is `100` Runtime frames and is configurable.
-Ordinary frames write only the WAL frame/input/outbox/head batch. At cadence:
+Ordinary frames write only the WAL frame/intake/outbox/head batch. At cadence:
 
 1. freeze the accumulated map for the candidate frame;
-2. include its deduplicated graph operations, the current frame/input/outbox,
+2. include its deduplicated graph operations, the current frame/intake/outbox,
    materialized height/root and HEAD in the same authoritative LevelDB batch;
 3. sync exactly once;
 4. publish the new live head;

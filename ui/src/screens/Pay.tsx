@@ -3,14 +3,14 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import type {
 	RuntimeAdapterEntitySummary,
 	RuntimeAdapterPaymentRoutesResponse,
-} from '@xln/runtime/api/runtime-adapter/types';
+} from '@xln/core/api/runtime-adapter/types';
 import { Icon } from '../components/Icons';
-import { useAdapterRead } from '../runtime/hooks';
-import { useApp } from '../runtime/store';
-import { getAdapter } from '../runtime/adapter';
-import { sendEntityTxs } from '../runtime/tx';
-import { formatAmount, getTokenMeta, knownTokenIds, parseAmount } from '../runtime/format';
-import { useAccounts, useEntityCore } from '../runtime/views';
+import { useAdapterRead } from '../core/hooks';
+import { useApp } from '../core/store';
+import { getAdapter } from '../core/adapter';
+import { sendEntityTxs } from '../core/tx';
+import { formatAmount, getTokenMeta, knownTokenIds, parseAmount } from '../core/format';
+import { useAccounts, useEntityCore } from '../core/views';
 
 type DeliveryMode = 'instant' | 'async' | 'direct' | 'trusted';
 
