@@ -2,44 +2,53 @@
 /* tslint:disable */
 /* eslint-disable */
 
-  import { Contract, Interface, type ContractRunner } from "ethers";
-  import type { IDepositoryDelegateErrorAbi, IDepositoryDelegateErrorAbiInterface } from "../../Types.sol/IDepositoryDelegateErrorAbi.js";
+import { Contract, Interface, type ContractRunner } from "ethers";
+import type {
+  IDepositoryDelegateErrorAbi,
+  IDepositoryDelegateErrorAbiInterface,
+} from "../../Types.sol/IDepositoryDelegateErrorAbi";
 
-  const _abi = [
+const _abi = [
   {
-    "inputs": [],
-    "name": "E5",
-    "type": "error"
+    inputs: [],
+    name: "E5",
+    type: "error",
   },
   {
-    "inputs": [],
-    "name": "E6",
-    "type": "error"
+    inputs: [],
+    name: "E6",
+    type: "error",
   },
   {
-    "inputs": [],
-    "name": "E9",
-    "type": "error"
+    inputs: [],
+    name: "E9",
+    type: "error",
   },
   {
-    "inputs": [],
-    "name": "TransformerExecutionFailed",
-    "type": "error"
+    inputs: [],
+    name: "TransformerExecutionFailed",
+    type: "error",
   },
   {
-    "inputs": [],
-    "name": "TransformerGasBudgetUnavailable",
-    "type": "error"
-  }
+    inputs: [],
+    name: "TransformerGasBudgetUnavailable",
+    type: "error",
+  },
 ] as const;
 
-  export class IDepositoryDelegateErrorAbi__factory {
-    static readonly abi = _abi;
-    static createInterface(): IDepositoryDelegateErrorAbiInterface {
-      return new Interface(_abi) as IDepositoryDelegateErrorAbiInterface;
-    }
-    static connect(address: string, runner?: ContractRunner | null): IDepositoryDelegateErrorAbi {
-      return new Contract(address, _abi, runner) as unknown as IDepositoryDelegateErrorAbi;
-    }
+export class IDepositoryDelegateErrorAbi__factory {
+  static readonly abi = _abi;
+  static createInterface(): IDepositoryDelegateErrorAbiInterface {
+    return new Interface(_abi) as IDepositoryDelegateErrorAbiInterface;
   }
-  
+  static connect(
+    address: string,
+    runner?: ContractRunner | null
+  ): IDepositoryDelegateErrorAbi {
+    return new Contract(
+      address,
+      _abi,
+      runner
+    ) as unknown as IDepositoryDelegateErrorAbi;
+  }
+}

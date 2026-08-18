@@ -2,61 +2,66 @@
 /* tslint:disable */
 /* eslint-disable */
 
-  import { Contract, Interface, type ContractRunner } from "ethers";
-  import type { INftCustodyERC721, INftCustodyERC721Interface } from "../../../custody/NftCustody.sol/INftCustodyERC721.js";
+import { Contract, Interface, type ContractRunner } from "ethers";
+import type {
+  INftCustodyERC721,
+  INftCustodyERC721Interface,
+} from "../../../custody/NftCustody.sol/INftCustodyERC721";
 
-  const _abi = [
+const _abi = [
   {
-    "inputs": [
+    inputs: [
       {
-        "internalType": "uint256",
-        "name": "tokenId",
-        "type": "uint256"
-      }
+        internalType: "uint256",
+        name: "tokenId",
+        type: "uint256",
+      },
     ],
-    "name": "ownerOf",
-    "outputs": [
+    name: "ownerOf",
+    outputs: [
       {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
-      }
+        internalType: "address",
+        name: "",
+        type: "address",
+      },
     ],
-    "stateMutability": "view",
-    "type": "function"
+    stateMutability: "view",
+    type: "function",
   },
   {
-    "inputs": [
+    inputs: [
       {
-        "internalType": "address",
-        "name": "from",
-        "type": "address"
+        internalType: "address",
+        name: "from",
+        type: "address",
       },
       {
-        "internalType": "address",
-        "name": "to",
-        "type": "address"
+        internalType: "address",
+        name: "to",
+        type: "address",
       },
       {
-        "internalType": "uint256",
-        "name": "tokenId",
-        "type": "uint256"
-      }
+        internalType: "uint256",
+        name: "tokenId",
+        type: "uint256",
+      },
     ],
-    "name": "transferFrom",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  }
+    name: "transferFrom",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
 ] as const;
 
-  export class INftCustodyERC721__factory {
-    static readonly abi = _abi;
-    static createInterface(): INftCustodyERC721Interface {
-      return new Interface(_abi) as INftCustodyERC721Interface;
-    }
-    static connect(address: string, runner?: ContractRunner | null): INftCustodyERC721 {
-      return new Contract(address, _abi, runner) as unknown as INftCustodyERC721;
-    }
+export class INftCustodyERC721__factory {
+  static readonly abi = _abi;
+  static createInterface(): INftCustodyERC721Interface {
+    return new Interface(_abi) as INftCustodyERC721Interface;
   }
-  
+  static connect(
+    address: string,
+    runner?: ContractRunner | null
+  ): INftCustodyERC721 {
+    return new Contract(address, _abi, runner) as unknown as INftCustodyERC721;
+  }
+}

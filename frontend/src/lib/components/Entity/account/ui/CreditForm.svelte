@@ -84,7 +84,6 @@
     let receipt: CreditRequestResponse['receipt'];
     if (receiptValue !== undefined) {
       const rawReceipt = requireUnknownRecord(receiptValue, 'CREDIT_REQUEST_RECEIPT_INVALID');
-      rejectExtraKeys(rawReceipt, ['id', 'status', 'counts', 'enqueuedHeight', 'observedHeight', 'note'], 'CREDIT_REQUEST_RECEIPT_EXTRA_FIELD');
       let counts: NonNullable<CreditRequestResponse['receipt']>['counts'];
       if (rawReceipt['counts'] !== undefined && rawReceipt['counts'] !== null) {
         const rawCounts = requireUnknownRecord(rawReceipt['counts'], 'CREDIT_REQUEST_RECEIPT_COUNTS_INVALID');

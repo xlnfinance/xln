@@ -85,7 +85,12 @@ function loadImmutableReferences(artifact) {
   const matching = [];
   for (const filename of readdirSync(buildInfoDir).filter(name => name.endsWith('.json')).sort()) {
     const buildInfo = JSON.parse(readFileSync(join(buildInfoDir, filename), 'utf8'));
-    const compiled = buildInfo?.output?.contracts?.[artifact.sourceName]?.[artifact.contractName];
+    // Hardhat 3 prefixes locally-compiled sources with "project/" in build-info
+    // output keys, but artifact.sourceName itself stays unprefixed.
+    const contracts = buildInfo?.output?.contracts;
+    const compiled =
+      contracts?.[artifact.sourceName]?.[artifact.contractName] ??
+      contracts?.[`project/${artifact.sourceName}`]?.[artifact.contractName];
     if (!compiled) continue;
     const deployed = compiled?.evm?.deployedBytecode;
     if (`0x${String(deployed?.object || '')}`.toLowerCase() !== artifact.deployedBytecode.toLowerCase()) {

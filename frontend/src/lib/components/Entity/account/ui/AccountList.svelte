@@ -4,7 +4,7 @@
   import { createEventDispatcher } from 'svelte';
   import AccountPreview from './AccountPreview.svelte';
   import { compareStableText } from '$lib/utils/stableSort';
-  import { buildAccountPageView, resolveAccountListEntityName } from '../../core/account-list-view';
+  import { buildAccountPageView, isAccountsMapLike, resolveAccountListEntityName } from '../../core/account-list-view';
 
   export let replica: EntityReplica | null;
   export let selectedAccountId: string | null = null;
@@ -82,38 +82,9 @@
 	  $: accountPageView = buildAccountPageView(replica, accountBrowserOpen, accountPage, accountSearch);
 	  $: visibleAccounts = accountPageView.entries;
 	  $: hasAccountsToShow = visibleAccounts.length > 0;
-	  $: accountTotal = replica?.state?.accounts instanceof Map
+	  $: accountTotal = isAccountsMapLike(replica?.state?.accounts)
 	    ? replica.state.accounts.size
 	    : visibleAccounts.length;
-
-	  // TEMP DIAGNOSTIC: pinpoint the "No accounts" flash. Edge-triggered so it
-	  // only fires when the panel actually flips to empty, not on every render.
-	  let lastHasAccountsToShowDiag = true;
-	  let lastAccountTotalDiag = -1;
-	  $: {
-	    if (lastHasAccountsToShowDiag && !hasAccountsToShow) {
-	      console.warn('[XLN-BLINK] AccountList flipped to empty', {
-	        entityId: replica?.state?.entityId ?? null,
-	        replicaPresent: !!replica,
-	        accountsMapIsMap: replica?.state?.accounts instanceof Map,
-	        accountsMapSize: replica?.state?.accounts instanceof Map ? replica.state.accounts.size : null,
-	        previousAccountTotal: lastAccountTotalDiag,
-	        accountBrowserOpen,
-	        entityHeight,
-	        effectiveRuntimeHeight,
-	        timestamp: Date.now(),
-	      });
-	      console.trace('[XLN-BLINK] AccountList empty-flip trace');
-	    } else if (!lastHasAccountsToShowDiag && hasAccountsToShow) {
-	      console.info('[XLN-BLINK] AccountList recovered', {
-	        entityId: replica?.state?.entityId ?? null,
-	        accountTotal,
-	        timestamp: Date.now(),
-	      });
-	    }
-	    lastHasAccountsToShowDiag = hasAccountsToShow;
-	    lastAccountTotalDiag = accountTotal;
-	  }
 
   function selectAccount(event: CustomEvent) {
     dispatch('select', event.detail);

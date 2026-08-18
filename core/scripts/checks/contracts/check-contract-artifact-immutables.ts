@@ -13,7 +13,12 @@ const buildInfos = readdirSync(buildInfoDir)
 for (const contractName of ['Account', 'Depository', 'EntityProvider', 'DeltaTransformer']) {
   const artifact = JSON.parse(readFileSync(join(staticDir, `${contractName}.json`), 'utf8'));
   const matches = buildInfos.flatMap(buildInfo => {
-    const compiled = buildInfo?.output?.contracts?.[artifact.sourceName]?.[artifact.contractName];
+    // Hardhat 3 prefixes locally-compiled sources with "project/" in build-info
+    // output keys, but artifact.sourceName itself stays unprefixed.
+    const contracts = buildInfo?.output?.contracts;
+    const compiled =
+      contracts?.[artifact.sourceName]?.[artifact.contractName] ??
+      contracts?.[`project/${artifact.sourceName}`]?.[artifact.contractName];
     const deployed = compiled?.evm?.deployedBytecode;
     return `0x${String(deployed?.object || '')}`.toLowerCase() ===
       String(artifact.deployedBytecode || '').toLowerCase()

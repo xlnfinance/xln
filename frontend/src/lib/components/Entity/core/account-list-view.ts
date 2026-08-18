@@ -42,9 +42,20 @@ function isFinalizedDisputed(account: AccountView): boolean {
   return status === 'disputed' && !activeDispute;
 }
 
-function getAccountsMap(sourceReplica: EntityReplica | null): Map<string, AccountReplica> | null {
+/**
+ * The committed and in-flight account maps (PersistentEntityAccountMap,
+ * EntityAccountCandidateMap) implement ReadonlyMap but are not `instanceof Map`.
+ * Duck-type instead, mirroring isMapLike in $lib/utils/runtime/liveRuntimeEnv.ts.
+ */
+export function isAccountsMapLike(value: unknown): value is ReadonlyMap<string, AccountReplica> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as { entries?: unknown; get?: unknown; size?: unknown };
+  return typeof candidate.entries === 'function' && typeof candidate.get === 'function' && typeof candidate.size === 'number';
+}
+
+function getAccountsMap(sourceReplica: EntityReplica | null): ReadonlyMap<string, AccountReplica> | null {
   const accounts = sourceReplica?.state?.accounts;
-  return accounts instanceof Map ? (accounts as Map<string, AccountReplica>) : null;
+  return isAccountsMapLike(accounts) ? accounts : null;
 }
 
 function accountMatchesSearch(counterpartyId: string, account: AccountReplica, query: string): boolean {
