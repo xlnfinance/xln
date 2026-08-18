@@ -9,6 +9,7 @@ import {
 } from '../frame';
 import { getPrevFrameHash } from '../frame/lineage';
 import { entityLog } from '../entity-log';
+import { timePerfPhase } from '../../../support/performance/profile';
 import { materializeEntityInfraContext } from './infra-context';
 
 const DUMMY_ROOT = `0x${'00'.repeat(32)}`;
@@ -38,6 +39,9 @@ const materializeOrHalve = async (
 /**
  * WAL replay must keep the exact stored txs. Live proposal defers the tail so
  * a Hub frame cannot halt on ENTITY_FRAME_TOTAL_BYTE_LIMIT_EXCEEDED after apply.
+ *
+ * Context size tracks the txs (HTLC routes → gossipProfiles). Measuring a
+ * prefix against the full-mempool context underpacks; rematerialize then grow.
  */
 export const fitEntityProposalToWireBudget = async (params: {
   env: EntityRuntimeContext;
@@ -55,32 +59,62 @@ export const fitEntityProposalToWireBudget = async (params: {
       }),
     };
   }
-  let txs = params.proposalTxs;
-  for (let attempt = 0; attempt < MAX_FIT_ATTEMPTS; attempt += 1) {
-    const materialized = await materializeOrHalve(env, replica, txs);
-    if (!('entityContext' in materialized)) {
-      txs = materialized.txs;
-      continue;
+  return timePerfPhase('entity.wireFit', async () => {
+    const allTxs = params.proposalTxs;
+    if (allTxs.length === 0) {
+      return {
+        txs: allTxs,
+        entityContext: await materializeEntityInfraContext(env, replica, allTxs, {
+          usePersistedReplayContext: false,
+        }),
+      };
     }
-    const fitted = selectEntityFrameTxPrefixForWireBudget(txs, {
+    const rest = (entityContext: EntityInfraContext) => ({
       prevFrameHash: getPrevFrameHash(replica.state),
       height: replica.state.height + 1,
       timestamp: env.state.timestamp,
-      events: [],
+      events: [] as const,
       entityId: replica.state.entityId,
       stateRoot: DUMMY_ROOT,
       authorityRoot: DUMMY_ROOT,
-      entityContext: materialized.entityContext,
+      entityContext,
       ...(jPrefixCertificate ? { jPrefixCertificate } : {}),
     });
-    if (fitted.length === txs.length) return { txs, entityContext: materialized.entityContext };
-    entityLog.info('proposal.wire_budget_deferred', {
-      entityId: replica.state.entityId,
-      selected: fitted.length,
-      deferred: txs.length - fitted.length,
-      slackBytes: ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES,
-    });
-    txs = fitted;
-  }
-  throw new Error('ENTITY_FRAME_WIRE_BUDGET_FIT_EXHAUSTED');
+    let knownFit = 0;
+    let knownFail = allTxs.length + 1;
+    let candidate = allTxs.length;
+    let best: { txs: EntityTx[]; entityContext: EntityInfraContext } | undefined;
+    for (let attempt = 0; attempt < MAX_FIT_ATTEMPTS; attempt += 1) {
+      const slice = allTxs.slice(0, candidate);
+      const materialized = await materializeOrHalve(env, replica, slice);
+      if (!('entityContext' in materialized)) {
+        knownFail = Math.min(knownFail, candidate);
+        candidate = materialized.txs.length;
+        continue;
+      }
+      const fitted = selectEntityFrameTxPrefixForWireBudget(slice, rest(materialized.entityContext));
+      if (fitted.length === slice.length) {
+        best = { txs: slice, entityContext: materialized.entityContext };
+        knownFit = candidate;
+        if (knownFit + 1 >= knownFail) return best;
+        candidate = Math.min(allTxs.length, Math.floor((knownFit + knownFail) / 2));
+        if (candidate <= knownFit) return best;
+        continue;
+      }
+      entityLog.info('proposal.wire_budget_deferred', {
+        entityId: replica.state.entityId,
+        selected: fitted.length,
+        deferred: slice.length - fitted.length,
+        slackBytes: ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES,
+      });
+      knownFail = candidate;
+      candidate = fitted.length;
+      if (candidate <= knownFit) {
+        if (best) return best;
+        throw new Error('ENTITY_FRAME_WIRE_BUDGET_FIT_EXHAUSTED');
+      }
+    }
+    if (best) return best;
+    throw new Error('ENTITY_FRAME_WIRE_BUDGET_FIT_EXHAUSTED');
+  });
 };

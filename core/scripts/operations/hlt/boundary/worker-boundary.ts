@@ -174,6 +174,7 @@ export const decodeHubCoreRecord = (value: unknown): Record<string, unknown> => 
     'inDebtsByToken', 'swapTradingPairs', 'crossJurisdictionSwaps',
     'pendingCrossJurisdictionFillAcks', 'crossJurisdictionBookAdmissions',
     'orderbookReferrals', 'orderbookHubProfile', 'hubRebalanceConfig',
+    'lockBookOpen',
   ], 'PRODUCTION_SWAP_LOAD_HUB_CORE_FIELDS_INVALID');
   return core;
 };
@@ -304,6 +305,49 @@ export const decodeAccountPage = (value: unknown): LoadAccountProjection | null 
   const items = decodePageItems(value, 'PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_INVALID');
   if (items.length > 1) throw new Error('PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_CARDINALITY_INVALID');
   return items[0] === undefined ? null : decodeAccountView(items[0]);
+};
+
+export const decodeAccountPageItems = (value: unknown): LoadAccountProjection[] =>
+  decodePageItems(value, 'PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_INVALID').map(decodeAccountView);
+
+export const decodeAccountPageCursor = (value: unknown): {
+  items: LoadAccountProjection[];
+  nextCursor: string | null;
+} => {
+  const page = requireBoundaryRecord(value, 'PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_INVALID');
+  requireExactBoundaryKeys(page, [
+    'items', 'nextCursor', 'prevCursor', 'firstCursor', 'lastCursor', 'pageIndex', 'pageCount', 'totalItems', 'limit',
+  ], ['summary'], 'PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_INVALID_FIELDS');
+  const nextCursor = page['nextCursor'];
+  if (nextCursor !== null && (typeof nextCursor !== 'string' || !nextCursor.trim())) {
+    throw new Error('PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_CURSOR_INVALID');
+  }
+  if (!Array.isArray(page['items'])) throw new Error('PRODUCTION_SWAP_LOAD_ACCOUNT_PAGE_ITEMS');
+  return {
+    items: page['items'].map(decodeAccountView),
+    nextCursor,
+  };
+};
+
+export type HubSettlementCounters = Readonly<{
+  height: number;
+  lockBookOpen: number;
+  htlcFeesEarned: bigint;
+}>;
+
+export const decodeHubSettlementCounters = (value: unknown): HubSettlementCounters => {
+  const core = decodeHubCoreRecord(value);
+  const lockBookOpen = core['lockBookOpen'];
+  if (!Number.isSafeInteger(lockBookOpen) || Number(lockBookOpen) < 0) {
+    throw new Error('PRODUCTION_SWAP_LOAD_HUB_LOCKBOOK_OPEN_INVALID');
+  }
+  const fees = core['htlcFeesEarned'];
+  if (typeof fees !== 'bigint' || fees < 0n) throw new Error('PRODUCTION_SWAP_LOAD_HUB_HTLC_FEES_INVALID');
+  return {
+    height: requireBoundaryInteger(core['height'], 'PRODUCTION_SWAP_LOAD_HUB_HEIGHT_INVALID', 0),
+    lockBookOpen: Number(lockBookOpen),
+    htlcFeesEarned: fees,
+  };
 };
 
 export const decodeLoadFrame = (value: unknown): LoadFrame => {

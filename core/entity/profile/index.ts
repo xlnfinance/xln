@@ -6,6 +6,7 @@
  */
 
 import { compareCanonicalText } from '../../orderbook/swap-keys';
+import { observePerfCount, timePerfPhase } from '../../support/performance/profile';
 import { utf8ByteLength } from '../../protocol/crypto/keccak-text';
 import { LIMITS, UINT16_MAX } from '../../config/constants';
 import { encodeCanonicalConsensusValue } from '../../protocol/serialization/canonical-consensus-value';
@@ -724,10 +725,16 @@ export const canonicalizeProfile = (
   profile: Profile,
   _options: { existing?: Profile | null; now?: number } = {},
 ): Profile => {
-  if (canonicalProfileOutputs.has(profile)) return profile;
-  const canonical = canonicalizeProfileUncached(profile);
-  canonicalProfileOutputs.add(canonical);
-  return canonical;
+  if (canonicalProfileOutputs.has(profile)) {
+    observePerfCount('profile.canonicalize.hit');
+    return profile;
+  }
+  return timePerfPhase('profile.canonicalize.miss', () => {
+    observePerfCount('profile.canonicalize.miss');
+    const canonical = canonicalizeProfileUncached(profile);
+    canonicalProfileOutputs.add(canonical);
+    return canonical;
+  });
 };
 
 const canonicalizeProfileUncached = (profile: Profile): Profile => {

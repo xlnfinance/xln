@@ -16,7 +16,7 @@ import {
   certifySingleSignerProfileFixture,
   deriveSingleSignerFixtureEntityId,
 } from '../../helpers/cryptographic-profile';
-import { parseProfile } from '../../../entity/profile';
+import { canonicalizeProfile, parseProfile } from '../../../entity/profile';
 import { verifyProfileSignature } from '../../../entity/profile/profile-signing';
 
 const id = (value: number): string => `0x${value.toString(16).padStart(64, '0')}`;
@@ -187,4 +187,13 @@ test('over the ceiling the most liquid pinned Accounts win, identically on every
   const advertised = buildEntityProfileDescriptor(state).accounts.map(account => account.counterpartyId);
   expect(advertised).toHaveLength(MAX_PROFILE_ADVERTISED_ACCOUNTS);
   expect(advertised.some(counterpartyId => starved.includes(counterpartyId))).toBe(false);
+});
+
+test('canonicalizeProfile is identity on a gossip-cached output', () => {
+  const canonical = buildCryptographicProfileFixture({
+    entityId: deriveSingleSignerFixtureEntityId('hlt-profile-cache'),
+    signingSeed: 'hlt-profile-cache',
+    name: 'cached',
+  });
+  expect(canonicalizeProfile(canonical)).toBe(canonical);
 });

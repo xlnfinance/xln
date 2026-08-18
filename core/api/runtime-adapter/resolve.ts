@@ -54,6 +54,8 @@ type RuntimeAdapterEntityCoreDoc = StorageEntityCoreDoc & {
   signerId?: string;
   isProposer?: boolean;
   htlcNotes?: EntityReplica['htlcNotes'];
+  /** View-only: full lockBook size. The compact map is a tail sample. */
+  lockBookOpen?: number;
 };
 import type { Profile } from '../../entity/profile';
 import {
@@ -1196,6 +1198,7 @@ const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeA
     htlcRoutes: compactMapTail(core.htlcRoutes, 20) ?? new Map(),
     htlcFeesEarned: core.htlcFeesEarned,
     lockBook: new Map(Array.from(core.lockBook.entries()).slice(-20)),
+    lockBookOpen: core.lockBook.size,
   };
 
   if (core.prevFrameHash) compact.prevFrameHash = core.prevFrameHash;

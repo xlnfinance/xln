@@ -121,6 +121,26 @@
       "paymentsTps": 0,
       "swapsTps": 100,
       "status": "green"
+    },
+    {
+      "at": "2026-08-18T21:01:05Z",
+      "commit": "9a00c8cd6",
+      "headline": "500 users green, 54.5/s: driver waited for commandObserved each round",
+      "detail": "5000/5000 delivered, offered 500/s, Hub height 393→611 (~23 payments/frame). No halt after Entity wire-fit. Round lag grew to 66 s because each of 20 rounds waited for all 250 commands to commit before the next. WAL 28→248 MB.",
+      "users": 500,
+      "paymentsTps": 54.5,
+      "swapsTps": 0,
+      "status": "green"
+    },
+    {
+      "at": "2026-08-18T23:30:00Z",
+      "commit": "9a00c8cd6",
+      "headline": "Batched hub-poll payments: 149/s at 200 users",
+      "detail": "Grow-fit plus fire-and-forget enqueue (pending) plus hub lockBook/credit poll. 1000/1000 in 6.7 s, Hub height 299→313 (14 frames, ~71 payments/frame). Offered-rate field still 100/s because cadence is 1 Hz; the driver submitted all ten rounds in one command per sender. WAL 13→30 MB.",
+      "users": 200,
+      "paymentsTps": 149.3,
+      "swapsTps": 0,
+      "status": "green"
     }
   ]
 }

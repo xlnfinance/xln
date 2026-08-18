@@ -20,6 +20,7 @@ import {
   decodeCommittedCrossRoutes,
   selectMarketMakerCrossRoute,
 } from './cross-boundary';
+import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
 import {
   decodeEntitySummaries,
   decodeLoadFrame,
@@ -238,6 +239,8 @@ export const runCrossProductionSwapLoad = async (args: WorkerArgs): Promise<void
       loadDurableBefore: loadBefore, loadDurableAfter: decodeLoadFrame(await load.adapter.read<unknown>('frame/latest')),
     });
     persistReport(join(args.workDir, 'production-cross-swap-load-report.json'), report, decodeCrossLoadReport);
+    publishHltDashboardReport('cross', report);
+    publishHltDashboardPerfFromWorkDir(args.workDir);
     console.log(safeStringify(report));
   } finally {
     hub.adapter.disconnect();

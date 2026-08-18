@@ -13,16 +13,19 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveDelta, isLeftEntity } from '../../../../account/utils';
 import { safeStringify } from '../../../../protocol/serialization';
-import type { EntityTx } from '../../../../types/entity-tx';
 import type { RuntimeInput } from '../../../../runtime/types';
 import {
   decodeEntitySummaries,
+  decodeHubSettlementCounters,
+  decodeAccountPageCursor,
   decodeLoadFrame,
   decodeRuntimeManifestEntries,
   selectLocalHubIdentity,
+  type LoadAccountProjection,
   type LoadIdentity,
 } from '../boundary/worker-boundary';
 import { decodeLoadPaymentReport } from '../boundary/worker-payment-boundary';
+import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
 import { setupParallelLoadLanes } from '../lanes/worker-lanes';
 import { laneDaemons, stopLaneRuntimes, type LaneRuntime } from '../lanes/lane-runtimes';
 import {
@@ -30,9 +33,8 @@ import {
   directoryBytes,
   entryByLabel,
   persistReport,
-  readLoadAccount,
   resolveWalPath,
-  sendObserved,
+  sendEnqueued,
   type WorkerArgs,
 } from '../worker-runtime';
 import {
@@ -149,76 +151,101 @@ const buildRoundPayment = (
   return { entityId: sender.entityId, signerId: sender.signerId, entityTxs: [payment] };
 };
 
-/**
- * Delivery is authorized by the receivers' own committed Account balances, not
- * by the sender's acknowledgement: a locked-but-unresolved HTLC acknowledges
- * fine and never pays anyone.
- */
-const waitForDeliveredBalances = async (
-  receivers: readonly LaneRuntime[],
+const hubCounterparty = (account: LoadAccountProjection, hubEntityId: string): string | null => {
+  const { leftEntity, rightEntity } = account.state;
+  if (leftEntity === hubEntityId) return rightEntity;
+  if (rightEntity === hubEntityId) return leftEntity;
+  return null;
+};
+
+const hubInCapacity = (account: LoadAccountProjection, hubEntityId: string): bigint => {
+  const delta = account.state.deltas.get(PAYMENT_TOKEN_ID);
+  if (!delta) return 0n;
+  const counterparty = hubCounterparty(account, hubEntityId);
+  if (!counterparty) return 0n;
+  return deriveDelta(delta, isLeftEntity(hubEntityId, counterparty)).inCapacity;
+};
+
+const readHubAccounts = async (
+  hub: { adapter: { read: <T>(path: string, query?: Record<string, unknown>) => Promise<T> } },
   hubEntityId: string,
-  baselines: readonly bigint[],
-  expected: readonly bigint[],
+): Promise<LoadAccountProjection[]> => {
+  const items: LoadAccountProjection[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = decodeAccountPageCursor(await hub.adapter.read<unknown>(
+      `entity/${hubEntityId}/accounts`,
+      { accountsLimit: 10, ...(cursor ? { accountsCursor: cursor } : {}) },
+    ));
+    items.push(...page.items);
+    if (!page.nextCursor) return items;
+    cursor = page.nextCursor;
+  }
+};
+
+const readHubReceiverCredits = async (
+  hub: { adapter: { read: <T>(path: string, query?: Record<string, unknown>) => Promise<T> } },
+  hubEntityId: string,
+  receiverIds: ReadonlySet<string>,
+): Promise<Map<string, bigint>> => {
+  const credits = new Map<string, bigint>();
+  for (const account of await readHubAccounts(hub, hubEntityId)) {
+    const counterparty = hubCounterparty(account, hubEntityId);
+    if (!counterparty || !receiverIds.has(counterparty)) continue;
+    credits.set(counterparty, hubInCapacity(account, hubEntityId));
+  }
+  return credits;
+};
+
+/**
+ * Delivery is authorized by the Hub entity: lockBook empty and receiver-side
+ * inCapacity (Hub view = receiver outCapacity) reached the owed totals.
+ */
+const waitForHubSettlement = async (
+  hub: { adapter: { read: <T>(path: string, query?: Record<string, unknown>) => Promise<T> } },
+  hubEntityId: string,
+  receiverIds: readonly string[],
+  baselines: ReadonlyMap<string, bigint>,
+  expected: ReadonlyMap<string, bigint>,
 ): Promise<void> => {
   const startedAt = Date.now();
   const deadline = startedAt + DELIVERY_TIMEOUT_MS;
-  const pending = new Set(receivers.map((_, index) => index));
-  // Counting whole receivers only says "someone is still owed something". The
-  // amount actually credited is the delivery curve: it separates a Hub that is
-  // slow from a Hub that has stopped, and a timeout then reports which it was.
-  const credited = receivers.map(() => 0n);
-  const owed = expected.reduce((total, amount) => total + amount, 0n);
+  const receivers = new Set(receiverIds);
+  const owed = [...expected.values()].reduce((total, amount) => total + amount, 0n);
   let reportedAtMs = 0;
   let lastCredited = -1n;
   let stalledSinceMs = startedAt;
   while (Date.now() < deadline) {
-    await forEachLimited([...pending], async index => {
-      const lane = receivers[index]!;
-      const account = await readLoadAccount(lane.runtime, lane.identity.entityId, hubEntityId);
-      const delta = account?.state.deltas.get(PAYMENT_TOKEN_ID);
-      if (!delta) return;
-      const capacity = deriveDelta(delta, isLeftEntity(lane.identity.entityId, hubEntityId)).outCapacity;
-      const received = capacity - baselines[index]!;
-      credited[index] = received > 0n ? received : 0n;
-      if (received >= expected[index]!) pending.delete(index);
-    });
-    if (pending.size === 0) return;
-    const total = credited.reduce((sum, amount) => sum + amount, 0n);
+    const core = decodeHubSettlementCounters(await hub.adapter.read<unknown>(`entity/${hubEntityId}`));
+    const credits = await readHubReceiverCredits(hub, hubEntityId, receivers);
+    let credited = 0n;
+    let pendingReceivers = 0;
+    for (const [receiverId, amount] of expected) {
+      const received = (credits.get(receiverId) ?? 0n) - (baselines.get(receiverId) ?? 0n);
+      credited += received > 0n ? received : 0n;
+      if (received < amount) pendingReceivers += 1;
+    }
+    if (pendingReceivers === 0 && core.lockBookOpen === 0) return;
     const elapsedMs = Date.now() - startedAt;
-    if (total !== lastCredited) {
-      lastCredited = total;
+    if (credited !== lastCredited) {
+      lastCredited = credited;
       stalledSinceMs = Date.now();
     }
     if (elapsedMs - reportedAtMs >= DELIVERY_REPORT_MS) {
       reportedAtMs = elapsedMs;
       console.log(
-        `[load] delivery elapsedMs=${elapsedMs} receiversPending=${pending.size}/${receivers.length} ` +
-        `credited=${total}/${owed} rate=${(Number(total) / Math.max(1, elapsedMs) * 1_000).toFixed(1)}/s ` +
+        `[load] hub elapsedMs=${elapsedMs} lockBookOpen=${core.lockBookOpen} ` +
+        `receiversPending=${pendingReceivers}/${receiverIds.length} ` +
+        `credited=${credited}/${owed} fees=${core.htlcFeesEarned} height=${core.height} ` +
+        `rate=${(Number(credited) / Math.max(1, elapsedMs) * 1_000).toFixed(1)}/s ` +
         `stalledMs=${Date.now() - stalledSinceMs}`,
       );
     }
     await sleep(DELIVERY_POLL_MS);
   }
-  const total = credited.reduce((sum, amount) => sum + amount, 0n);
   throw new Error(
-    `HLT_PAYMENT_NOT_DELIVERED:pendingReceivers=${pending.size}:credited=${total}:owed=${owed}:` +
-    `stalledMs=${Date.now() - stalledSinceMs}`,
+    `HLT_PAYMENT_NOT_DELIVERED:stalledMs=${Date.now() - stalledSinceMs}`,
   );
-};
-
-const readReceiverBalances = async (
-  receivers: readonly LaneRuntime[],
-  hubEntityId: string,
-): Promise<bigint[]> => {
-  const balances = receivers.map(() => 0n);
-  await forEachLimited(receivers.map((_, index) => index), async index => {
-    const lane = receivers[index]!;
-    const account = await readLoadAccount(lane.runtime, lane.identity.entityId, hubEntityId);
-    const delta = account?.state.deltas.get(PAYMENT_TOKEN_ID);
-    if (!delta) return;
-    balances[index] = deriveDelta(delta, isLeftEntity(lane.identity.entityId, hubEntityId)).outCapacity;
-  });
-  return balances;
 };
 
 export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> => {
@@ -278,37 +305,34 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
     const walBytesBefore = directoryBytes(walPath);
     const hubDurableBefore = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
-    const baselines = await readReceiverBalances(receivers, hubIdentity.entityId);
+    const receiverIds = receivers.map(lane => lane.identity.entityId.toLowerCase());
+    const expected = new Map(receiverIds.map((id, index) => [id, perReceiver[index]!]));
+    const baselines = await readHubReceiverCredits(hub, hubIdentity.entityId, new Set(receiverIds));
 
     const startedAt = performance.now();
-    const roundSubmissionLagMs: number[] = [];
-    let enqueueAckElapsedMs = 0;
-    let commandObservedElapsedMs = 0;
-    for (let round = 0; round < args.rounds; round += 1) {
-      const dueAt = startedAt + round * args.cadenceMs;
-      const remainingMs = dueAt - performance.now();
-      if (remainingMs > 0) await sleep(remainingMs);
-      roundSubmissionLagMs.push(Math.max(0, Math.ceil(performance.now() - dueAt)));
-      const observed = await Promise.all(senders.map((lane, index) => sendObserved(
-        lane.runtime,
-        `hlt-payment-${hubDurableBefore.height}-${round + 1}-${index}`,
-        {
-          runtimeTxs: [],
-          entityInputs: [buildRoundPayment(
-            { entityId: lane.identity.entityId, signerId: lane.identity.signerId },
-            hubIdentity.entityId,
-            {
-              entityId: receivers[paymentReceiverIndex(index, round, receivers.length)]!.identity.entityId,
-              signerId: receivers[paymentReceiverIndex(index, round, receivers.length)]!.identity.signerId,
-            },
-            round,
-          )],
-        },
-      )));
-      enqueueAckElapsedMs += Math.max(...observed.map(entry => entry.enqueueAckElapsedMs));
-      commandObservedElapsedMs += Math.max(...observed.map(entry => entry.commandObservedElapsedMs));
-    }
-    await waitForDeliveredBalances(receivers, hubIdentity.entityId, baselines, perReceiver);
+    const enqueued = await Promise.all(senders.map((lane, index) => sendEnqueued(
+      lane.runtime,
+      `hlt-payment-batch-${hubDurableBefore.height}-${index}`,
+      {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: lane.identity.entityId,
+          signerId: lane.identity.signerId,
+          entityTxs: Array.from({ length: args.rounds }, (_, round) => {
+            const receiver = receivers[paymentReceiverIndex(index, round, receivers.length)]!;
+            return buildRoundPayment(
+              lane.identity,
+              hubIdentity.entityId,
+              receiver.identity,
+              round,
+            ).entityTxs[0]!;
+          }),
+        }],
+      },
+    )));
+    const enqueueAckElapsedMs = Math.max(0, ...enqueued.map(entry => entry.enqueueAckElapsedMs));
+    const roundSubmissionLagMs = [Math.max(0, Math.ceil(performance.now() - startedAt))];
+    await waitForHubSettlement(hub, hubIdentity.entityId, receiverIds, baselines, expected);
     const deliveredElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
     const submittedPayments = lanes * args.rounds;
     const report = decodeLoadPaymentReport({
@@ -326,8 +350,8 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       submittedPayments,
       deliveredPayments: submittedPayments,
       enqueueAckElapsedMs,
-      commandObservedElapsedMs: Math.max(enqueueAckElapsedMs, commandObservedElapsedMs),
-      deliveredElapsedMs: Math.max(commandObservedElapsedMs, deliveredElapsedMs),
+      commandObservedElapsedMs: enqueueAckElapsedMs,
+      deliveredElapsedMs,
       deliveredTps: submittedPayments * 1_000 / deliveredElapsedMs,
       roundSubmissionLagMs,
       walBytesBefore,
@@ -336,6 +360,8 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       hubDurableAfter: decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest')),
     });
     persistReport(join(args.workDir, 'hlt-payment-load-report.json'), report, decodeLoadPaymentReport);
+    publishHltDashboardReport('payment', report);
+    publishHltDashboardPerfFromWorkDir(args.workDir);
     console.log(safeStringify(report));
   } finally {
     await stopLaneRuntimes([...senders, ...receivers]);

@@ -73,7 +73,7 @@
 <main>
   <h1>HLT throughput ledger</h1>
   <p class="sub">Every recorded high-load run on the way to 1000 payments/s and 1000 same-J swaps/s.
-     Hover a point for what that commit changed. Latest: Same-J swaps hold 100/s matched on the same commit.</p>
+     Hover a point for what that commit changed. Latest: Batched hub-poll payments: 149/s at 200 users.</p>
   <div class="card">
     
     <div class="chart-wrap">
@@ -99,8 +99,8 @@
     <line class="target" x1="72" x2="976"
           y1="32.0" y2="32.0" />
     <text class="target-label" x="78.0" y="24.0">target 1000</text>
-        <path class="line payments" d="M318.5,237.9 L400.7,206.6 L565.1,212.2 L647.3,185.2 L729.5,185.2 L811.6,181.7 L893.8,153.3" />
-        <path class="line swaps" d="M72.0,107.1 L482.9,207.1 L976.0,149.3" />
+        <path class="line payments" d="M280.6,237.9 L350.2,206.6 L489.2,212.2 L558.8,185.2 L628.3,185.2 L697.8,181.7 L767.4,153.3 L906.5,180.3 L976.0,128.9" />
+        <path class="line swaps" d="M72.0,107.1 L419.7,207.1 L836.9,149.3" />
         
     <circle class="dot swaps" tabindex="0"
             cx="72.0" cy="107.1" r="7"
@@ -111,7 +111,7 @@
             data-headline="Same-J swap baseline after the reliable-layer removal"
             data-detail="Deleting the reliable delivery layer, moving keccak to WASM, hand-writing the ABI and using native ECDSA took matched swaps from 3 to 249 per second. The profile went flat afterwards: no single site dominates any more."></circle>
     <circle class="dot payments" tabindex="0"
-            cx="318.5" cy="237.9" r="7"
+            cx="280.6" cy="237.9" r="7"
             data-when="19:36"
             data-commit="09aa485"
             data-users="32"
@@ -119,7 +119,7 @@
             data-headline="Batching walls cleared: HTLC leaves, paged manifests, duplicate collapse"
             data-detail="Four faults surfaced the moment frames carried real batches: prepared HTLCs shared one 36 KB record, the manifest naming them reached 20.9 KB, and a retransmitted proposal halted the Runtime outright. First green payment run afterwards, still limited by the driver rather than the Hub."></circle>
     <circle class="dot payments" tabindex="0"
-            cx="400.7" cy="206.6" r="7"
+            cx="350.2" cy="206.6" r="7"
             data-when="19:52"
             data-commit="c485246"
             data-users="64"
@@ -127,7 +127,7 @@
             data-headline="Payments clear 30/s with every payment delivered"
             data-detail="32 senders offering one payment per second delivered 160 of 160 in 4.9 s. The Hub spent 34 frames on them, 4.7 payments per frame, so the ceiling is still the driver&#39;s offered rate and not the Hub."></circle>
     <circle class="dot swaps" tabindex="0"
-            cx="482.9" cy="207.1" r="7"
+            cx="419.7" cy="207.1" r="7"
             data-when="20:14"
             data-commit="c485246"
             data-users="64"
@@ -135,7 +135,7 @@
             data-headline="Same-J swaps clear 30/s on the same commit"
             data-detail="64 users settled 160 of 160 swaps: 36.0 matched per second and 32.2 fully settled. Both workloads now hold above the 30/s mark on one Hub, and neither is Hub-limited yet."></circle>
     <circle class="dot payments" tabindex="0"
-            cx="565.1" cy="212.2" r="7"
+            cx="489.2" cy="212.2" r="7"
             data-when="20:25"
             data-commit="2bbdf82"
             data-users="128"
@@ -143,7 +143,7 @@
             data-headline="128 users saturate the stand, not the Hub"
             data-detail="64 senders offered 64 payments per second and 320 of 320 were delivered, but only at 29.1 per second while 28 of the machine&#39;s 32 cores were busy. Doubling the population did not raise throughput: one OS process per user costs about a fifth of a core just to exist."></circle>
     <circle class="dot payments" tabindex="0"
-            cx="647.3" cy="185.2" r="7"
+            cx="558.8" cy="185.2" r="7"
             data-when="20:45"
             data-commit="1eb1a38"
             data-users="100"
@@ -151,7 +151,7 @@
             data-headline="Payments clear 50/s at 100 users; per-payment cost model measured"
             data-detail="50 senders delivered 2000 of 2000 at 49.5/s (offered 50). Memoized ECDSA signatures, HTLC layer decryption and the account state root, but each 3-7% win was invisible in run totals: the Hub costs 100 ms fixed + 5.6 ms per account output per frame (~26 ms CPU/payment), the lanes 42 ms fixed + 10 ms per entity frame (~80 ms). Gossip fan-out turned out to be O(N^2): the relay pushed every profile change to every client."></circle>
     <circle class="dot payments" tabindex="0"
-            cx="729.5" cy="185.2" r="7"
+            cx="628.3" cy="185.2" r="7"
             data-when="22:18"
             data-commit="4297eff"
             data-users="100"
@@ -159,7 +159,7 @@
             data-headline="Pull-only gossip: relay pushes nothing, users ask for chains and masked pages"
             data-detail="Same 100-user run, same 49.5/s, but lane CPU fell 220 s -&gt; 185 s (-16%) and the Hub 102 s -&gt; 96 s: profile verification left the daemons. Profiles are now served only on request (hubs set, ids with depth 1..3, routeTo route chains, masked prefix pages), non-hub profiles announce hourly or on topology change, capacities floor to 000. Three pull-only regressions surfaced and were fixed on the way: a profile-clock watermark hid slow-clock profiles forever (relay receipt cursor now), the cursor was keyed by an id hello_ack never carried, and the lookup budget counted every poll."></circle>
     <circle class="dot payments" tabindex="0"
-            cx="811.6" cy="181.7" r="7"
+            cx="697.8" cy="181.7" r="7"
             data-when="22:22"
             data-commit="4297eff"
             data-users="200"
@@ -167,7 +167,7 @@
             data-headline="200 users in one process: works, but one sender daemon carries ~40 senders at 1 tx/s"
             data-detail="200 users hosted 200 per daemon, 100 offered per second, 4000 of 4000 delivered but only at 53/s: the sender daemon spends ~24 ms CPU per payment (entity frame + HTLC + storage), so 100 senders at 1 tx/s need 2.4 cores in a single-threaded process. Hub cost per payment dropped to 14 ms because 40+ payments now share one frame. Fine for real users at 0.1 tx/s; for the 100 tps bench the population must spread over more processes."></circle>
     <circle class="dot payments" tabindex="0"
-            cx="893.8" cy="153.3" r="7"
+            cx="767.4" cy="153.3" r="7"
             data-when="22:24"
             data-commit="4297eff"
             data-users="200"
@@ -175,15 +175,31 @@
             data-headline="Payments reach 100/s: 92.6 delivered of 100 offered, Hub now the wall"
             data-detail="200 users over 5 daemons (40 per process), 100 senders at 1 tx/s: 4000 of 4000 delivered in 43.2 s. The Hub ran at 100% for the whole window (453 ms wall per frame x 94 frames) at 12.8 ms CPU per payment; its profile is flat: radix rootHash 11%, hanko verify+recover 16%, account state root 8%, entity state hash 7%, storage encode 7%, followups 6%. 500/s needs ~2.5 ms per payment on the Hub, i.e. structural cuts, not one patch."></circle>
     <circle class="dot swaps" tabindex="0"
-            cx="976.0" cy="149.3" r="7"
+            cx="836.9" cy="149.3" r="7"
             data-when="22:28"
             data-commit="4297eff"
             data-users="200"
             data-metric="swaps 100/s"
             data-headline="Same-J swaps hold 100/s matched on the same commit"
             data-detail="200 users, 40 per process, 100 swaps submitted per second for 40 rounds: matched kept pace with submission the whole run (in-flight steady at 80-180, 3860 of 4000 matched at the last window, all settled at quiescence). Hub CPU 125 s for the run against 98 s for payments; both workloads now hold at the 100/s mark on one Hub."></circle>
+    <circle class="dot payments" tabindex="0"
+            cx="906.5" cy="180.3" r="7"
+            data-when="21:01"
+            data-commit="9a00c8c"
+            data-users="500"
+            data-metric="payments 54.5/s"
+            data-headline="500 users green, 54.5/s: driver waited for commandObserved each round"
+            data-detail="5000/5000 delivered, offered 500/s, Hub height 393→611 (~23 payments/frame). No halt after Entity wire-fit. Round lag grew to 66 s because each of 20 rounds waited for all 250 commands to commit before the next. WAL 28→248 MB."></circle>
+    <circle class="dot payments" tabindex="0"
+            cx="976.0" cy="128.9" r="7"
+            data-when="23:30"
+            data-commit="9a00c8c"
+            data-users="200"
+            data-metric="payments 149.3/s"
+            data-headline="Batched hub-poll payments: 149/s at 200 users"
+            data-detail="Grow-fit plus fire-and-forget enqueue (pending) plus hub lockBook/credit poll. 1000/1000 in 6.7 s, Hub height 299→313 (14 frames, ~71 payments/frame). Offered-rate field still 100/s because cadence is 1 Hz; the driver submitted all ten rounds in one command per sender. WAL 13→30 MB."></circle>
         
-    <g class="halted" tabindex="0" transform="translate(154.2,384.0)"
+    <g class="halted" tabindex="0" transform="translate(141.5,384.0)"
        data-when="15:27"
        data-commit="06e7902"
        data-users="100"
@@ -193,7 +209,7 @@
       <circle class="hit" r="11" />
       <line x1="-6" y1="-6" x2="6" y2="6" /><line x1="-6" y1="6" x2="6" y2="-6" />
     </g>
-    <g class="halted" tabindex="0" transform="translate(236.4,384.0)"
+    <g class="halted" tabindex="0" transform="translate(211.1,384.0)"
        data-when="18:37"
        data-commit="b45bd79"
        data-users="100"
@@ -208,48 +224,56 @@
           text-anchor="middle" data-run="0">00:00</text>
     <text class="tick faint" x="72.0" y="426"
           text-anchor="middle">8u</text>
-    <text class="tick" x="154.2" y="408"
+    <text class="tick" x="141.5" y="408"
           text-anchor="middle" data-run="1">15:27</text>
-    <text class="tick faint" x="154.2" y="426"
+    <text class="tick faint" x="141.5" y="426"
           text-anchor="middle">100u</text>
-    <text class="tick" x="236.4" y="408"
+    <text class="tick" x="211.1" y="408"
           text-anchor="middle" data-run="2">18:37</text>
-    <text class="tick faint" x="236.4" y="426"
+    <text class="tick faint" x="211.1" y="426"
           text-anchor="middle">100u</text>
-    <text class="tick" x="318.5" y="408"
+    <text class="tick" x="280.6" y="408"
           text-anchor="middle" data-run="3">19:36</text>
-    <text class="tick faint" x="318.5" y="426"
+    <text class="tick faint" x="280.6" y="426"
           text-anchor="middle">32u</text>
-    <text class="tick" x="400.7" y="408"
+    <text class="tick" x="350.2" y="408"
           text-anchor="middle" data-run="4">19:52</text>
-    <text class="tick faint" x="400.7" y="426"
+    <text class="tick faint" x="350.2" y="426"
           text-anchor="middle">64u</text>
-    <text class="tick" x="482.9" y="408"
+    <text class="tick" x="419.7" y="408"
           text-anchor="middle" data-run="5">20:14</text>
-    <text class="tick faint" x="482.9" y="426"
+    <text class="tick faint" x="419.7" y="426"
           text-anchor="middle">64u</text>
-    <text class="tick" x="565.1" y="408"
+    <text class="tick" x="489.2" y="408"
           text-anchor="middle" data-run="6">20:25</text>
-    <text class="tick faint" x="565.1" y="426"
+    <text class="tick faint" x="489.2" y="426"
           text-anchor="middle">128u</text>
-    <text class="tick" x="647.3" y="408"
+    <text class="tick" x="558.8" y="408"
           text-anchor="middle" data-run="7">20:45</text>
-    <text class="tick faint" x="647.3" y="426"
+    <text class="tick faint" x="558.8" y="426"
           text-anchor="middle">100u</text>
-    <text class="tick" x="729.5" y="408"
+    <text class="tick" x="628.3" y="408"
           text-anchor="middle" data-run="8">22:18</text>
-    <text class="tick faint" x="729.5" y="426"
+    <text class="tick faint" x="628.3" y="426"
           text-anchor="middle">100u</text>
-    <text class="tick" x="811.6" y="408"
+    <text class="tick" x="697.8" y="408"
           text-anchor="middle" data-run="9">22:22</text>
-    <text class="tick faint" x="811.6" y="426"
+    <text class="tick faint" x="697.8" y="426"
           text-anchor="middle">200u</text>
-    <text class="tick" x="893.8" y="408"
+    <text class="tick" x="767.4" y="408"
           text-anchor="middle" data-run="10">22:24</text>
-    <text class="tick faint" x="893.8" y="426"
+    <text class="tick faint" x="767.4" y="426"
           text-anchor="middle">200u</text>
-    <text class="tick" x="976.0" y="408"
+    <text class="tick" x="836.9" y="408"
           text-anchor="middle" data-run="11">22:28</text>
+    <text class="tick faint" x="836.9" y="426"
+          text-anchor="middle">200u</text>
+    <text class="tick" x="906.5" y="408"
+          text-anchor="middle" data-run="12">21:01</text>
+    <text class="tick faint" x="906.5" y="426"
+          text-anchor="middle">500u</text>
+    <text class="tick" x="976.0" y="408"
+          text-anchor="middle" data-run="13">23:30</text>
     <text class="tick faint" x="976.0" y="426"
           text-anchor="middle">200u</text>
       </svg>
@@ -265,6 +289,22 @@
   <table>
     <thead><tr><th>when</th><th>commit</th><th>users</th><th>pay/s</th><th>swap/s</th><th>what changed</th></tr></thead>
     <tbody>
+    <tr class="green">
+      <td class="mono">2026-08-18 23:30:00Z</td>
+      <td class="mono"><a href="https://github.com/xlnfinance/xln/commit/9a00c8cd6">9a00c8c</a></td>
+      <td class="num">200</td>
+      <td class="num">149.3</td>
+      <td class="num">—</td>
+      <td>Batched hub-poll payments: 149/s at 200 users<div class="detail">Grow-fit plus fire-and-forget enqueue (pending) plus hub lockBook/credit poll. 1000/1000 in 6.7 s, Hub height 299→313 (14 frames, ~71 payments/frame). Offered-rate field still 100/s because cadence is 1 Hz; the driver submitted all ten rounds in one command per sender. WAL 13→30 MB.</div></td>
+    </tr>
+    <tr class="green">
+      <td class="mono">2026-08-18 21:01:05Z</td>
+      <td class="mono"><a href="https://github.com/xlnfinance/xln/commit/9a00c8cd6">9a00c8c</a></td>
+      <td class="num">500</td>
+      <td class="num">54.5</td>
+      <td class="num">—</td>
+      <td>500 users green, 54.5/s: driver waited for commandObserved each round<div class="detail">5000/5000 delivered, offered 500/s, Hub height 393→611 (~23 payments/frame). No halt after Entity wire-fit. Round lag grew to 66 s because each of 20 rounds waited for all 250 commands to commit before the next. WAL 28→248 MB.</div></td>
+    </tr>
     <tr class="green">
       <td class="mono">2026-08-18 22:28:00Z</td>
       <td class="mono"><a href="https://github.com/xlnfinance/xln/commit/4297effe9">4297eff</a></td>

@@ -1,3 +1,6 @@
+import { getPerfMs } from '../time';
+import { isRuntimePerfProfileEnabled } from './runtime-flags';
+
 export type PerfMarks = Record<string, number>;
 export type PerfPhase = Readonly<{ name: string; ms: number }>;
 
@@ -89,3 +92,58 @@ export class BoundedPerfMetric {
     return sorted[index] ?? this.maximumMs;
   }
 }
+
+const phaseMetrics = new Map<string, BoundedPerfMetric>();
+const phaseCounts = new Map<string, number>();
+
+const profilingLive = (): boolean => isRuntimePerfProfileEnabled(
+  'XLN_ENTITY_FRAME_PROFILE',
+  'XLN_RUNTIME_APPLY_PROFILE',
+);
+
+export const observePerfPhase = (name: string, durationMs: number): void => {
+  if (!profilingLive()) return;
+  let metric = phaseMetrics.get(name);
+  if (!metric) {
+    metric = new BoundedPerfMetric();
+    phaseMetrics.set(name, metric);
+  }
+  metric.observe(durationMs);
+};
+
+export const observePerfCount = (name: string, delta = 1): void => {
+  if (!profilingLive() || !Number.isSafeInteger(delta) || delta === 0) return;
+  phaseCounts.set(name, (phaseCounts.get(name) ?? 0) + delta);
+};
+
+export const timePerfPhase = <T>(name: string, fn: () => T): T => {
+  if (!profilingLive()) return fn();
+  const startedAt = getPerfMs();
+  try {
+    const result = fn();
+    if (result && typeof (result as { then?: unknown }).then === 'function') {
+      return (result as Promise<unknown>).finally(() => {
+        observePerfPhase(name, getPerfMs() - startedAt);
+      }) as T;
+    }
+    observePerfPhase(name, getPerfMs() - startedAt);
+    return result;
+  } catch (error) {
+    observePerfPhase(name, getPerfMs() - startedAt);
+    throw error;
+  }
+};
+
+export const snapshotPerfPhases = (): Readonly<{
+  phases: Record<string, PerfMetricSummary>;
+  counts: Record<string, number>;
+}> => {
+  const phases: Record<string, PerfMetricSummary> = {};
+  for (const [name, metric] of phaseMetrics) phases[name] = metric.summary();
+  return { phases, counts: Object.fromEntries(phaseCounts) };
+};
+
+export const resetPerfPhases = (): void => {
+  phaseMetrics.clear();
+  phaseCounts.clear();
+};

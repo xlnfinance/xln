@@ -21,6 +21,7 @@ import {
   submitPreparedParallelSameLoad,
   type PreparedParallelSameLoad,
 } from './worker-same-lanes';
+import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
 import {
   connectRuntime,
   directoryBytes,
@@ -158,6 +159,8 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       settlementEvidence,
     });
     persistReport(join(args.workDir, 'production-swap-load-report.json'), report);
+    publishHltDashboardReport('swap', report);
+    publishHltDashboardPerfFromWorkDir(args.workDir);
     console.log(safeStringify(report));
   } finally {
     if (preparedParallel) {

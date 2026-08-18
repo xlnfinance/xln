@@ -6,6 +6,7 @@
     </div>
     <div class="panel-actions">
       <a class="panel-link" href="/qa">Open QA cockpit</a>
+      <a class="panel-link" href="/qa/hlt">HLT dashboard</a>
       <a class="panel-link" href="/qa">UX gallery</a>
     </div>
   </div>

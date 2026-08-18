@@ -61,6 +61,10 @@ const EXTERNAL_RUNTIME_CONSUMERS: Readonly<Record<string, readonly ExternalRunti
     consumer: 'frontend/src/routes/health/+page.svelte',
     specifier: '@xln/core/qa/severity',
   }],
+  'core/qa/hlt/hlt-dashboard-preview.ts': [{
+    consumer: 'frontend/src/routes/qa/hlt/+page.svelte',
+    specifier: '@xln/core/qa/hlt/hlt-dashboard-preview',
+  }],
   'core/qa/types.ts': [{
     consumer: 'frontend/src/lib/qa/types.ts',
     specifier: '@xln/core/qa/types',

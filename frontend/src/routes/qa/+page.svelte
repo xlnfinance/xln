@@ -1121,6 +1121,7 @@
       <button class:active={activeView === 'suites'} onclick={() => (activeView = 'suites')}>Suites</button>
       <button class:active={activeView === 'benchmarks'} onclick={() => (activeView = 'benchmarks')}>Benchmarks</button>
       <button class:active={activeView === 'history'} onclick={() => (activeView = 'history')}>Database</button>
+      <a href="/qa/hlt" data-testid="qa-hlt-tab">HLT</a>
     </nav>
 
     <section

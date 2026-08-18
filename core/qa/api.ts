@@ -30,6 +30,8 @@ import {
   type QaCodeFingerprint,
   type QaStorySource,
 } from './report';
+import { parseHltDashboardConfig, previewHltDashboard } from './hlt/hlt-dashboard-preview';
+import { readHltDashboardSnapshot } from './hlt/hlt-dashboard';
 
 type JsonHeaders = Record<string, string>;
 type QaAuthScope = 'read' | 'admin';
@@ -910,6 +912,32 @@ export async function maybeHandleQaRequest(
       },
       headers,
     );
+  }
+
+  if (pathname === '/api/qa/hlt' && request.method === 'GET') {
+    try {
+      const url = new URL(request.url);
+      const preview = previewHltDashboard(parseHltDashboardConfig(url.searchParams));
+      const snapshot = readHltDashboardSnapshot();
+      return jsonEtagResponse(
+        request,
+        {
+          ok: true,
+          qaAuth: authInfo,
+          preview,
+          ledger: snapshot.ledger,
+          payment: snapshot.payment,
+          swap: snapshot.swap,
+          perf: snapshot.perf,
+          hubPerf: snapshot.hubPerf,
+        },
+        headers,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message.startsWith('HLT_DASHBOARD_') || message.startsWith('HLT_') ? 400 : 500;
+      return jsonResponse({ ok: false, error: message }, status, headers);
+    }
   }
 
   if (pathname === '/api/qa/history' && request.method === 'GET') {

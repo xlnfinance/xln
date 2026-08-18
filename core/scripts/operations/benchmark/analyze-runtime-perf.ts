@@ -6,22 +6,34 @@ import {
   BoundedPerfMetric,
   cumulativeMarksToDurations,
   type PerfMarks,
+  type PerfMetricSummary,
 } from '../../../support/performance/profile';
 
 type ProfilePayload = Record<string, unknown>;
 export type ParsedProfile = { runtime: string; scope: string; event: string; payload: ProfilePayload };
+export type RuntimePerfRow = { runtime: string; metric: string } & PerfMetricSummary;
+export type RuntimePerfSummary = Readonly<{ parsedProfiles: number; rows: RuntimePerfRow[] }>;
 
-const metrics = new Map<string, BoundedPerfMetric>();
+type Observe = (runtime: string, metric: string, durationMs: number) => void;
+
 const MAX_METRIC_KEYS = 1_024;
 const METRIC_LABEL = /^[a-zA-Z0-9_.:-]{1,96}$/;
-const observe = (runtime: string, metric: string, durationMs: number): void => {
-  if (!METRIC_LABEL.test(runtime) || !METRIC_LABEL.test(metric)) return;
-  const key = `${runtime}\t${metric}`;
-  if (!metrics.has(key) && metrics.size >= MAX_METRIC_KEYS) return;
-  const accumulator = metrics.get(key) ?? new BoundedPerfMetric();
-  accumulator.observe(durationMs);
-  metrics.set(key, accumulator);
-};
+
+const makeObserve = (metrics: Map<string, BoundedPerfMetric>): Observe =>
+  (runtime, metric, durationMs) => {
+    if (!METRIC_LABEL.test(runtime) || !METRIC_LABEL.test(metric)) return;
+    const key = `${runtime}\t${metric}`;
+    if (!metrics.has(key) && metrics.size >= MAX_METRIC_KEYS) return;
+    const accumulator = metrics.get(key) ?? new BoundedPerfMetric();
+    accumulator.observe(durationMs);
+    metrics.set(key, accumulator);
+  };
+
+const rowsFrom = (metrics: Map<string, BoundedPerfMetric>): RuntimePerfRow[] =>
+  Array.from(metrics, ([key, metric]) => {
+    const [runtime = 'unknown', name = 'unknown'] = key.split('\t');
+    return { runtime, metric: name, ...metric.summary() };
+  }).sort((left, right) => right.totalMs - left.totalMs || left.metric.localeCompare(right.metric));
 
 export const asDurationMs = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
@@ -66,11 +78,11 @@ const validatedDurations = (
       durations.push([label, durationMs]);
     }
   }
-  const phaseTotal = durations.reduce((sum, [, durationMs]) => sum + durationMs, 0);
+  const phaseTotal = durations.reduce((sum, [, durationMs]) => durationMs + sum, 0);
   return phaseTotal <= totalMs + Math.max(1, totalMs * 0.01) ? durations : undefined;
 };
 
-const observePhases = (profile: ParsedProfile, prefix: string, totalMs: number): void => {
+const observePhases = (profile: ParsedProfile, prefix: string, totalMs: number, observe: Observe): void => {
   const explicitPhases = profile.payload['phases'];
   const marks = asRecord(profile.payload['marks']);
   const phases = explicitPhases ?? (marks ? cumulativeMarksToDurations(marks as PerfMarks, totalMs) : undefined);
@@ -80,11 +92,11 @@ const observePhases = (profile: ParsedProfile, prefix: string, totalMs: number):
   }
 };
 
-const consumeProfile = (profile: ParsedProfile): void => {
+const consumeProfile = (profile: ParsedProfile, observe: Observe): void => {
   const totalMs = asDurationMs(profile.payload['elapsedMs'] ?? profile.payload['totalMs']);
   if (profile.scope === 'runtime' && profile.event === 'process.profile' && totalMs !== undefined) {
     observe(profile.runtime, 'runtime.process.total', totalMs);
-    observePhases(profile, 'runtime.process', totalMs);
+    observePhases(profile, 'runtime.process', totalMs, observe);
     const storage = asRecord(profile.payload['storageMs']);
     const cpu = asRecord(profile.payload['cpuMs']);
     for (const [stage, rawDurationMs] of Object.entries(cpu ?? {})) {
@@ -113,7 +125,7 @@ const consumeProfile = (profile: ParsedProfile): void => {
   }
   if (profile.scope === 'runtime' && profile.event === 'apply.profile' && totalMs !== undefined) {
     observe(profile.runtime, 'runtime.apply.total', totalMs);
-    observePhases(profile, 'runtime.apply', totalMs);
+    observePhases(profile, 'runtime.apply', totalMs, observe);
     return;
   }
   if (profile.scope === 'runtime.entity_inputs' && profile.event === 'inputs.profile' && totalMs !== undefined) {
@@ -134,7 +146,7 @@ const consumeProfile = (profile: ParsedProfile): void => {
   }
   if (profile.scope === 'entity' && profile.event === 'frame.profile' && totalMs !== undefined) {
     observe(profile.runtime, 'entity.frame.total', totalMs);
-    observePhases(profile, 'entity.frame', totalMs);
+    observePhases(profile, 'entity.frame', totalMs, observe);
     for (const rawTotal of Array.isArray(profile.payload['txTypeTotals']) ? profile.payload['txTypeTotals'] : []) {
       const txTotal = asRecord(rawTotal);
       const type = typeof txTotal?.['type'] === 'string' ? txTotal['type'] : 'unknown';
@@ -148,18 +160,34 @@ const consumeProfile = (profile: ParsedProfile): void => {
   }
   if (profile.scope === 'entity' && profile.event === 'single_signer.profile' && totalMs !== undefined) {
     observe(profile.runtime, 'entity.single_signer.total', totalMs);
-    observePhases(profile, 'entity.single_signer', totalMs);
+    observePhases(profile, 'entity.single_signer', totalMs, observe);
     return;
   }
   if (profile.scope === 'account' && profile.event === 'proposal.profile' && totalMs !== undefined) {
     observe(profile.runtime, 'account.proposal.total', totalMs);
-    observePhases(profile, 'account.proposal', totalMs);
+    observePhases(profile, 'account.proposal', totalMs, observe);
     return;
   }
   if (profile.scope === 'account.handler' && profile.event === 'input.profile' && totalMs !== undefined) {
     observe(profile.runtime, 'account.input.total', totalMs);
-    observePhases(profile, 'account.input', totalMs);
+    observePhases(profile, 'account.input', totalMs, observe);
   }
+};
+
+export const summarizeRuntimePerfProfiles = (profiles: readonly ParsedProfile[]): RuntimePerfSummary => {
+  const metrics = new Map<string, BoundedPerfMetric>();
+  const observe = makeObserve(metrics);
+  for (const profile of profiles) consumeProfile(profile, observe);
+  return { parsedProfiles: profiles.length, rows: rowsFrom(metrics) };
+};
+
+export const summarizeRuntimePerfLines = (lines: readonly string[]): RuntimePerfSummary => {
+  const profiles: ParsedProfile[] = [];
+  for (const line of lines) {
+    const profile = parseProfileLine(line);
+    if (profile) profiles.push(profile);
+  }
+  return summarizeRuntimePerfProfiles(profiles);
 };
 
 const main = async (): Promise<void> => {
@@ -167,20 +195,13 @@ const main = async (): Promise<void> => {
   const logPath = args.find(arg => !arg.startsWith('--'));
   const jsonOutput = args.includes('--json');
   if (!logPath) throw new Error('USAGE: bun core/scripts/operations/benchmark/analyze-runtime-perf.ts <log-file> [--json]');
-  metrics.clear();
   const lines = createInterface({ input: createReadStream(logPath), crlfDelay: Number.POSITIVE_INFINITY });
-  let parsedProfiles = 0;
+  const profiles: ParsedProfile[] = [];
   for await (const line of lines) {
     const profile = parseProfileLine(line);
-    if (!profile) continue;
-    parsedProfiles += 1;
-    consumeProfile(profile);
+    if (profile) profiles.push(profile);
   }
-
-  const rows = Array.from(metrics, ([key, metric]) => {
-    const [runtime = 'unknown', name = 'unknown'] = key.split('\t');
-    return { runtime, metric: name, ...metric.summary() };
-  }).sort((left, right) => right.totalMs - left.totalMs || left.metric.localeCompare(right.metric));
+  const { parsedProfiles, rows } = summarizeRuntimePerfProfiles(profiles);
 
   if (jsonOutput) {
     console.log(JSON.stringify({ logPath, parsedProfiles, rows }, null, 2));

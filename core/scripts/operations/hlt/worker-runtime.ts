@@ -267,6 +267,30 @@ const awaitObservedRuntimeCommand = async (
   throw new Error(`PRODUCTION_SWAP_LOAD_COMMAND_NOT_OBSERVED:${commandId}`);
 };
 
+export const sendEnqueued = async (
+  runtime: ConnectedRuntime,
+  commandId: string,
+  input: RuntimeInput,
+): Promise<ObservedCommand> => {
+  const commandSequence = runtime.adapter.nextCommandSequence;
+  if (commandSequence === null) throw new Error(`PRODUCTION_SWAP_LOAD_COMMAND_FRONTIER_MISSING:${runtime.entry.label}`);
+  const startedAt = performance.now();
+  const deadline = Date.now() + COMMAND_OBSERVATION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const result = await runtime.adapter.send(input, { commandId, commandSequence });
+      const enqueueAckElapsedMs = Math.max(0, Math.ceil(performance.now() - startedAt));
+      if (result.status === 'pending' || result.status === 'observed') {
+        return { result, enqueueAckElapsedMs, commandObservedElapsedMs: enqueueAckElapsedMs };
+      }
+    } catch (error) {
+      if (!(error instanceof RuntimeAdapterError) || !error.retryable) throw error;
+    }
+    await sleep(10);
+  }
+  throw new Error(`PRODUCTION_SWAP_LOAD_COMMAND_NOT_ENQUEUED:${commandId}`);
+};
+
 export const sendObserved = async (
   runtime: ConnectedRuntime,
   commandId: string,

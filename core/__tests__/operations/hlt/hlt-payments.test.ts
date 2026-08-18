@@ -19,6 +19,9 @@ describe('hlt payment population', () => {
     expect(source).toContain('laneDaemons(senders)');
     expect(source).toContain('READ_CONCURRENCY');
     expect(source).toContain('forEachLimited');
+    expect(source).toContain('sendEnqueued');
+    expect(source).toContain('waitForHubSettlement');
+    expect(source).toContain('accountsLimit: 10');
   });
 
   test('every round pairs senders and receivers as a permutation', () => {

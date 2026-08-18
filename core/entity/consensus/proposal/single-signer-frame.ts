@@ -1,6 +1,6 @@
 import { signAccountFrame } from '../../../account/crypto';
 import { signEntityHashes } from '../../../hanko/signing';
-import { cumulativeMarksToPhases } from '../../../support/performance/profile';
+import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
 import { assertFrameJPrefix } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import { removeCommittedTxsFromMempool } from '../../../protocol/state/tx-multiset';
 import type { EntityFrame } from '../../types';
@@ -181,6 +181,7 @@ const applySingleSignerProposal = async (
     options.proposalTxs = fitted.txs;
   }
   const entityContext = fitted.entityContext;
+  options.checkpoint('wireFit');
   await assertHtlcPreparedInfraContext({
     state: workingReplica.state,
     proposalTxs: options.proposalTxs,
@@ -403,6 +404,7 @@ const logSingleSignerProfile = (
     outputs: context.entityOutbox.length,
     jOutputs: context.jOutbox.length,
     phases: cumulativeMarksToPhases(options.profileCheckpoints, elapsedMs),
+    perf: snapshotPerfPhases(),
   });
 };
 

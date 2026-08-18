@@ -4,6 +4,7 @@ import type { EntityReplica } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
 import { canonicalizeProfile } from '../../profile';
 import { compareStableText } from '../../../protocol/serialization';
+import { timePerfPhase } from '../../../support/performance/profile';
 import { getPrevFrameHash } from '../frame/lineage';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { LIMITS } from '../../../config/constants';
@@ -61,7 +62,7 @@ export const materializeEntityInfraContext = async (
   // default is unsafe: an omitted flag previously made multi-signer H+1
   // account-work reuse the external H context during replay.
   options: { usePersistedReplayContext: boolean },
-): Promise<EntityInfraContext> => {
+): Promise<EntityInfraContext> => timePerfPhase('entity.infraMaterialize', async () => {
   const entityId = replica.entityId.trim().toLowerCase();
   const proposerSignerId = replica.signerId.trim().toLowerCase();
   const replayContext = !options.usePersistedReplayContext
@@ -76,6 +77,8 @@ export const materializeEntityInfraContext = async (
   const needsHtlcInfra = htlcTxs.length > 0;
   const getProfiles = (env as ProposerInfraContext).gossip?.getProfiles;
   if (needsHtlcInfra && !getProfiles) throw new Error('ENTITY_INFRA_GOSSIP_UNAVAILABLE');
+  // Gossip already stores canonicalizeProfile() outputs. This call is identity
+  // on cache hit; a miss means a freshly built (not yet ingested) object.
   const profiles = needsHtlcInfra ? getProfiles!() : [];
   const canonicalProfiles = profiles.map(profile => canonicalizeProfile(profile));
   const routeEntityIds = new Set(htlcTxs.flatMap(tx =>
@@ -168,4 +171,4 @@ export const materializeEntityInfraContext = async (
     throw new Error(`ENTITY_INFRA_CONTEXT_BYTE_LIMIT_EXCEEDED:${byteLength}:${LIMITS.MAX_FRAME_SIZE_BYTES}`);
   }
   return context;
-};
+});

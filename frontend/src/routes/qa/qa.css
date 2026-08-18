@@ -403,6 +403,28 @@
     color: #fff4d8;
   }
 
+  .qa-tabs a {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 7px;
+    padding: 0 0.75rem;
+    color: #f1efe7;
+    background: rgba(255, 255, 255, 0.04);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .qa-tabs a:hover,
+  .qa-tabs a.active {
+    border-color: rgba(216, 175, 79, 0.58);
+    background: rgba(216, 175, 79, 0.12);
+    color: #fff4d8;
+  }
+
   .mini-action:disabled {
     cursor: not-allowed;
     opacity: 0.45;

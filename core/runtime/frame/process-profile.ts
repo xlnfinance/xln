@@ -1,5 +1,5 @@
 import type { EntityInputCausalTrace } from '../../qa/account-causal-trace';
-import { cumulativeMarksToPhases } from '../../support/performance/profile';
+import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../support/performance/profile';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../support/performance/runtime-flags';
 import { createStructuredLogger } from '../../support/logger';
 import type { EntityInput } from '../../entity/types';
@@ -225,6 +225,7 @@ export const createRuntimeProcessProfile = (
         wallStartMs: Date.now() - elapsedMs,
         ...metrics,
         phases: cumulativeMarksToPhases(marks, elapsedMs),
+        perf: snapshotPerfPhases(),
       };
       const budget = env.runtimeConfig?.performance;
       const budgetViolations = [

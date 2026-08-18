@@ -3,6 +3,9 @@ import {
   BoundedPerfMetric,
   cumulativeMarksToDurations,
   cumulativeMarksToPhases,
+  resetPerfPhases,
+  snapshotPerfPhases,
+  timePerfPhase,
 } from '../../../support/performance/profile';
 import { asDurationMs, parseProfileLine } from '../../../scripts/operations/benchmark/analyze-runtime-perf';
 
@@ -85,5 +88,17 @@ describe('runtime performance profiling', () => {
     for (const value of [null, true, false, '12', Number.NaN, Number.POSITIVE_INFINITY, -1]) {
       expect(asDurationMs(value)).toBeUndefined();
     }
+  });
+
+  test('timePerfPhase records one named phase when profiling is on', () => {
+    const previous = process.env['XLN_RUNTIME_PROCESS_PROFILE'];
+    process.env['XLN_RUNTIME_PROCESS_PROFILE'] = '1';
+    resetPerfPhases();
+    expect(timePerfPhase('test.phase', () => 7)).toBe(7);
+    const snapshot = snapshotPerfPhases();
+    expect(snapshot.phases['test.phase']?.count).toBe(1);
+    resetPerfPhases();
+    if (previous === undefined) delete process.env['XLN_RUNTIME_PROCESS_PROFILE'];
+    else process.env['XLN_RUNTIME_PROCESS_PROFILE'] = previous;
   });
 });
