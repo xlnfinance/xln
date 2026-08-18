@@ -15,12 +15,16 @@ import {
   countEntityInputTxKinds,
   type RuntimeProcessProfile,
 } from '../process-profile';
+import { runtimeInputHasExpiredAdapterCommand } from '../../command/frontier';
+import { createStructuredLogger } from '../../../support/logger';
 
 export type RuntimeFramePreparationDeps = {
   prioritizeJEventFrame(input: RuntimeInput, mempool: RuntimeInput, timestamp: number): boolean;
   applyEntityTxFrameCap(input: RuntimeInput, mempool: RuntimeInput, limit: number, timestamp: number): boolean;
   applyEntityInputFrameCap(input: RuntimeInput, mempool: RuntimeInput, limit: number, timestamp: number): boolean;
 };
+
+const prepareLog = createStructuredLogger('runtime.frame.prepare');
 
 const countEntityTxs = (input: RuntimeInput): number =>
   input.entityInputs.reduce((sum, entityInput) => sum + (entityInput.entityTxs?.length ?? 0), 0);
@@ -46,6 +50,15 @@ export const prepareRuntimeFrameInput = async (
   frame.inputDrained = true;
 
   const timestamp = queuedAt ?? env.state.timestamp ?? 0;
+  if (runtimeInputHasExpiredAdapterCommand(input.runtimeTxs, env.state.timestamp ?? 0)) {
+    prepareLog.info('adapter_command.expired_dropped', {
+      runtimeTxs: input.runtimeTxs.length,
+      entityInputs: input.entityInputs.length,
+    });
+    input.runtimeTxs = [];
+    input.entityInputs = [];
+    if (input.jInputs) input.jInputs = [];
+  }
   const jEventPrioritized = deps.prioritizeJEventFrame(input, mempool, timestamp);
   input.entityInputs = prioritizeEntityConsensusInputs(input.entityInputs, entityInput =>
     hasVerifiedEntityCommitPrecertificate(env, entityInput));

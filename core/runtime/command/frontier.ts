@@ -55,6 +55,22 @@ export const validateRuntimeAdapterCommandMarker = (
   return { laneId, sequence, commandId, inputHash, expiresAtMs };
 };
 
+export const runtimeAdapterCommandMarkerExpired = (
+  data: RuntimeAdapterCommandMarkerData,
+  nowMs: number,
+): boolean => {
+  const expiresAtMs = data.expiresAtMs === null ? null : Number(data.expiresAtMs);
+  return expiresAtMs !== null && Number.isSafeInteger(expiresAtMs) && expiresAtMs <= nowMs;
+};
+
+export const runtimeInputHasExpiredAdapterCommand = (
+  runtimeTxs: readonly RuntimeTx[],
+  nowMs: number,
+): boolean =>
+  runtimeTxs.some(tx =>
+    tx.type === 'recordRuntimeAdapterCommand' &&
+    runtimeAdapterCommandMarkerExpired(tx.data, nowMs));
+
 export const readRuntimeAdapterCommandFrontier = (
   env: RuntimeReplica,
   laneId: string,
@@ -90,9 +106,14 @@ export const applyRuntimeAdapterCommandMarker = (
   raw: RuntimeAdapterCommandMarkerData,
 ): void => {
   const data = validateRuntimeAdapterCommandMarker(raw);
+  const nowMs = Math.max(0, Number(env.state.timestamp || 0));
   env.infrastructure ??= {};
   const frontiers = env.infrastructure.runtimeAdapterCommandFrontiers ?? new Map();
-  pruneExpiredCommandFrontiers(frontiers, Math.max(0, Number(env.state.timestamp || 0)));
+  pruneExpiredCommandFrontiers(frontiers, nowMs);
+  env.infrastructure.runtimeAdapterCommandFrontiers = frontiers;
+  // Expired markers must not halt: after prune, seq>1 looks noncontiguous.
+  // Paired Entity txs are dropped in frame prepare.
+  if (runtimeAdapterCommandMarkerExpired(data, nowMs)) return;
   const prior = frontiers.get(data.laneId);
   const expectedSequence = (prior?.lastContiguousSequence ?? 0) + 1;
   if (data.sequence !== expectedSequence) {

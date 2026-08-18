@@ -137,7 +137,9 @@ const buildHealthStatus = (env: RuntimeReplica | null): HealthStatus => {
         hubs.push({
           entityId: profile.entityId,
           name: profile.name,
-          status: hasReplica ? 'healthy' : 'degraded',
+          status: env.infrastructure?.halted === true
+            ? 'down'
+            : hasReplica ? 'healthy' : 'degraded',
           ...(replica?.state?.reserves?.size ? { reserves: serializeReserves(replica.state.reserves) } : {}),
           ...(accounts !== undefined ? { accounts } : {}),
           ...(hasReplica ? {} : { error: 'hub profile visible but no local replica state' }),
@@ -154,11 +156,11 @@ const buildHealthStatus = (env: RuntimeReplica | null): HealthStatus => {
     jMachines,
     hubs,
     system: {
-      runtime: !!env,
+      runtime: env != null && env.infrastructure?.halted !== true,
       p2p: p2pState?.connected === true,
       // This endpoint is served by the local runtime HTTP/relay process; P2P
       // connectivity is reported separately above.
-      relay: !!env,
+      relay: env != null && env.infrastructure?.halted !== true,
     },
   };
 };

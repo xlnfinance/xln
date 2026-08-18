@@ -24,6 +24,11 @@ test('gossip batch caps explicit ids and never exceeds the server limit', () => 
   expect(selected.map(item => item.entityId)).toEqual(['entity-2', 'entity-1', 'entity-0']);
 });
 
+test('gossip_request rejects an uncapped ids array at decode', () => {
+  const ids = Array.from({ length: 1001 }, (_, index) => `0x${index.toString(16).padStart(64, '0')}`);
+  expect(() => decodeGossipProfileBatchRequest({ ids })).toThrow('P2P_GOSSIP_REQUEST_IDS_INVALID');
+});
+
 const ALICE = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const BOB = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const CAROL = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';

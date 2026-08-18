@@ -13,6 +13,10 @@ export const assertStorageSafetyOverridesAllowed = (): void => {
     'XLN_STORAGE_SKIP_VERIFY_ON_OPEN',
     'XLN_STORAGE_FORCE_RESTORE',
   ].filter(truthyEnv);
+  const syncWrites = String(runtimeProcessEnv?.['XLN_STORAGE_SYNC_WRITES'] ?? '').trim().toLowerCase();
+  if (syncWrites === '0' || syncWrites === 'false' || syncWrites === 'off' || syncWrites === 'no') {
+    blockedFlags.push('XLN_STORAGE_SYNC_WRITES');
+  }
 
   if (blockedFlags.length > 0) {
     throw new Error(`STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=${blockedFlags.join(',')}`);

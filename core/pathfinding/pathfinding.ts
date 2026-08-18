@@ -48,6 +48,8 @@ export class PathFinder {
 
     const routes: PaymentRoute[] = [];
     const visited = new Map<string, Set<string>>(); // node -> set of previous nodes
+    const MAX_PATHFINDER_POPS = 4_096;
+    let pops = 0;
 
     // Priority queue: [cost, node, path, totalFee]
     const queue: QueueEntry[] = [{
@@ -58,6 +60,8 @@ export class PathFinder {
     }];
 
     while (queue.length > 0 && routes.length < maxRoutes) {
+      pops += 1;
+      if (pops > MAX_PATHFINDER_POPS) break;
       // Sort by cost (simple priority queue)
       queue.sort((a, b) => {
         if (a.cost < b.cost) return -1;

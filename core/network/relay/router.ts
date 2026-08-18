@@ -581,6 +581,25 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
   const { config, ws, payload, type, from, to, id, traceId } = context;
   if (type === 'gossip_request') {
     const request = decodeGossipProfileBatchRequest(payload);
+    const requestCost = request.routeTo
+      ? 200
+      : Math.max(1, request.ids?.length ?? 1);
+    if (!consumeGossipBudget(ws, requestCost)) {
+      pushDebugEvent(config.store, {
+        event: 'error',
+        from,
+        msgType: type,
+        status: 'rejected',
+        reason: 'GOSSIP_REQUEST_RATE_LIMITED',
+        details: { requestCost, traceId },
+      });
+      config.send(ws, serializeWsMessage({
+        type: 'error',
+        error: 'GOSSIP_REQUEST_RATE_LIMITED',
+        ...(id ? { inReplyTo: id } : {}),
+      }));
+      return true;
+    }
     const profiles = getProfileBatch(config.store, request);
     const jurisdictions = request.includeJurisdictions === true
       ? getAllGossipJurisdictions(config.store)

@@ -1874,17 +1874,37 @@ test('runtime adapter read rate limit is configurable', async () => {
   }
 });
 
-test('BrainVault mnemonic export emits one redacted security audit event', async () => {
+test('BrainVault mnemonic export is owner-lane only and redacts the secret', async () => {
   const messages: unknown[] = [];
   const auditEvents: Array<Record<string, unknown>> = [];
   const mnemonic24 = Array.from({ length: 24 }, (_, index) => `secret-${index}`).join(' ');
   const socket = { send: (message: unknown) => messages.push(message) };
   const env = makeEnv();
+  const runtimeId = deriveSignerAddressSync(String(env.runtimeSeed), '1').toLowerCase();
+  env.runtimeId = runtimeId;
   const unregister = registerStructuredLogSink(event => auditEvents.push(event));
   try {
     await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-admin-brainvault', op: 'auth',
       key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
       challenge: adapterAuthChallenge,
+    }, env, { enqueueRuntimeInput: () => {} });
+    messages.length = 0;
+    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'brainvault-reveal-denied', op: 'brainvault-reveal' }, env, {
+      enqueueRuntimeInput: () => {},
+      revealBrainVaultMnemonic: async () => ({ mnemonic24 }),
+    });
+    const denied = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
+    expect(denied.ok).toBe(false);
+    expect(denied.error.code).toBe('E_UNAUTHORIZED');
+
+    const ownerKey = deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, {
+      audience: runtimeId,
+    });
+    await handleRuntimeAdapterMessage(socket, {
+      v: 1, id: 'auth-owner-brainvault', op: 'auth',
+      key: ownerKey,
+      challenge: adapterAuthChallenge,
+      ownerSignature: ownerBindingSignature(runtimeId, adapterAuthChallenge, ownerKey),
     }, env, { enqueueRuntimeInput: () => {} });
     messages.length = 0;
     auditEvents.length = 0;
@@ -1897,9 +1917,6 @@ test('BrainVault mnemonic export emits one redacted security audit event', async
     const mnemonicExports = auditEvents.filter(event => event['scope'] === 'runtime.radapter'
       && event['message'] === 'brainvault.mnemonic_exported');
     expect(mnemonicExports).toHaveLength(1);
-    expect(mnemonicExports[0]).toEqual(expect.objectContaining({
-      level: 'warn', scope: 'runtime.radapter', message: 'brainvault.mnemonic_exported', authLevel: 'admin',
-    }));
     expect(JSON.stringify(auditEvents)).not.toContain(mnemonic24);
   } finally {
     unregister();

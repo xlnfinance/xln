@@ -40,7 +40,7 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
-import { materializeEntityInfraContext } from './infra-context';
+import { fitEntityProposalToWireBudget } from './wire-budget';
 import { validateProposedEntityFrame } from '../frame/validation';
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
@@ -343,10 +343,24 @@ const buildMultiSignerProposal = async (
       };
   const leader = getReplicaProposalLeader(authorityReplica);
   assertMultiSignerProposalPrefix(env, authorityReplica, selection, leader.view);
-  const entityContext = await materializeEntityInfraContext(env, workingReplica, proposalTxs, {
+  const fitted = await fitEntityProposalToWireBudget({
+    env,
+    replica: workingReplica,
+    proposalTxs,
+    jPrefixCertificate: proposalJPrefixCertificate ?? undefined,
     usePersistedReplayContext: context.usePersistedReplayContext,
   });
-  const applied = await applyEntityFrame(env, workingReplica.state, entityContext, proposalTxs, env.state.timestamp);
+  if (fitted.txs.length !== selection.proposalTxs.length) {
+    selection.proposalTxs = fitted.txs;
+  }
+  const entityContext = fitted.entityContext;
+  const applied = await applyEntityFrame(
+    env,
+    workingReplica.state,
+    entityContext,
+    selection.proposalTxs,
+    env.state.timestamp,
+  );
   if (!shouldKeepPreparedEntityFrame(selection, applied.accountsToProposeFramesCount)) {
     return null;
   }

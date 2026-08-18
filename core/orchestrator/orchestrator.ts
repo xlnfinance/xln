@@ -776,7 +776,10 @@ const getConnectedMarketHubEntityIds = (): string[] => listConnectedMarketHubEnt
 
 const getHealthyHubChild = (): HubChild | null =>
   hubChildren.find((candidate) =>
-    candidate.proc?.exitCode === null && candidate.proc?.signalCode === null && candidate.lastHealth
+    candidate.proc?.exitCode === null &&
+    candidate.proc?.signalCode === null &&
+    candidate.lastHealth &&
+    candidate.lastHealth.runtime?.halted !== true
   ) || null;
 
 const getExitedHubChild = (): HubChild | null =>

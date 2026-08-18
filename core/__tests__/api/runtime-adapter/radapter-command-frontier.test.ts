@@ -40,6 +40,16 @@ test('runtime adapter command marker is local-only and survives durable restore'
   );
 });
 
+test('expired adapter command marker is a no-op instead of a halt loop', () => {
+  const env = createEmptyEnv('radapter-frontier-expired');
+  env.state.timestamp = 100;
+  applyRuntimeAdapterCommandMarker(env, { ...marker(1), expiresAtMs: 1_000 });
+  expect(env.infrastructure?.runtimeAdapterCommandFrontiers?.get(laneId)?.lastContiguousSequence).toBe(1);
+  env.state.timestamp = 2_000;
+  expect(() => applyRuntimeAdapterCommandMarker(env, { ...marker(2), expiresAtMs: 1_000 })).not.toThrow();
+  expect(env.infrastructure?.runtimeAdapterCommandFrontiers?.get(laneId)).toBeUndefined();
+});
+
 test('one million committed commands keep one bounded lane frontier', () => {
   const env = createEmptyEnv('radapter-frontier-million');
   env.state.timestamp = 1;

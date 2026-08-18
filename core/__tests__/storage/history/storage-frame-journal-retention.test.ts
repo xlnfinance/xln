@@ -1142,18 +1142,26 @@ describe('storage frame journal retention', () => {
     const previousNodeEnv = process.env['NODE_ENV'];
     const previousSkip = process.env['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'];
     const previousForce = process.env['XLN_STORAGE_FORCE_RESTORE'];
+    const previousSync = process.env['XLN_STORAGE_SYNC_WRITES'];
 
     try {
       process.env['NODE_ENV'] = 'production';
       for (const flag of ['XLN_STORAGE_SKIP_VERIFY_ON_OPEN', 'XLN_STORAGE_FORCE_RESTORE'] as const) {
         delete process.env['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'];
         delete process.env['XLN_STORAGE_FORCE_RESTORE'];
+        delete process.env['XLN_STORAGE_SYNC_WRITES'];
         process.env[flag] = '1';
 
         await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow(
           `STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=${flag}`,
         );
       }
+      delete process.env['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'];
+      delete process.env['XLN_STORAGE_FORCE_RESTORE'];
+      process.env['XLN_STORAGE_SYNC_WRITES'] = '0';
+      await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow(
+        'STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=XLN_STORAGE_SYNC_WRITES',
+      );
     } finally {
       if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];
       else process.env['NODE_ENV'] = previousNodeEnv;
@@ -1161,6 +1169,8 @@ describe('storage frame journal retention', () => {
       else process.env['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'] = previousSkip;
       if (previousForce === undefined) delete process.env['XLN_STORAGE_FORCE_RESTORE'];
       else process.env['XLN_STORAGE_FORCE_RESTORE'] = previousForce;
+      if (previousSync === undefined) delete process.env['XLN_STORAGE_SYNC_WRITES'];
+      else process.env['XLN_STORAGE_SYNC_WRITES'] = previousSync;
     }
   });
 

@@ -182,7 +182,9 @@ export const selectEntityFrameTxByteBudget = (txs: EntityTx[]): EntityTx[] => {
   return txs.slice(0, low);
 };
 
-export const assertEntityFrameTotalByteBudget = (input: {
+export const ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES = 256_000;
+
+export type EntityFrameWireBudgetInput = {
   prevFrameHash: string;
   height: number;
   timestamp: number;
@@ -193,7 +195,42 @@ export const assertEntityFrameTotalByteBudget = (input: {
   authorityRoot: string;
   entityContext: EntityInfraContext;
   jPrefixCertificate?: JPrefixCertificate;
-}): string => {
+};
+
+export const measureEntityFrameWireBytes = (input: EntityFrameWireBudgetInput): number =>
+  utf8ByteLength(encodeCanonicalConsensusValue({
+    domain: 'xln:entity-frame',
+    ...input,
+    txs: canonicalEntityTxsForFrameHash(input.txs),
+    jPrefixCertificate: input.jPrefixCertificate ?? null,
+  }));
+
+export const selectEntityFrameTxPrefixForWireBudget = (
+  txs: EntityTx[],
+  rest: Omit<EntityFrameWireBudgetInput, 'txs'>,
+  maxBytes = LIMITS.MAX_FRAME_SIZE_BYTES - ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES,
+): EntityTx[] => {
+  if (txs.length === 0) return txs;
+  if (measureEntityFrameWireBytes({ ...rest, txs }) <= maxBytes) return txs;
+  let low = 0;
+  let high = txs.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (measureEntityFrameWireBytes({ ...rest, txs: txs.slice(0, mid) }) <= maxBytes) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+  if (low === 0) {
+    throw new Error(
+      `ENTITY_FRAME_HEAD_WIRE_LIMIT_EXCEEDED:${measureEntityFrameWireBytes({ ...rest, txs: txs.slice(0, 1) })}:${maxBytes}`,
+    );
+  }
+  return txs.slice(0, low);
+};
+
+export const assertEntityFrameTotalByteBudget = (input: EntityFrameWireBudgetInput): string => {
   const encoded = encodeCanonicalConsensusValue({
     domain: 'xln:entity-frame',
     ...input,

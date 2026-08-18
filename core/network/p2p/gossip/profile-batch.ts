@@ -58,6 +58,7 @@ export type GossipProfileBatchRequest = {
 };
 
 export const DEFAULT_GOSSIP_BATCH_LIMIT = 1000;
+export const MAX_GOSSIP_REQUEST_IDS = DEFAULT_GOSSIP_BATCH_LIMIT;
 export const MAX_GOSSIP_IDS_DEPTH = 3;
 export const DEFAULT_GOSSIP_PREFIX_LIMIT = 100;
 const MIN_GOSSIP_PREFIX_CHARS = 4;
@@ -178,9 +179,11 @@ export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBa
   );
   const routeTo = request['routeTo'] === undefined ? undefined : decodeRouteTo(request['routeTo']);
   const ids = request['ids'];
-  if (ids !== undefined && (!Array.isArray(ids) || ids.some(
-    id => typeof id !== 'string' || id.length > 128,
-  ))) throw new Error('P2P_GOSSIP_REQUEST_IDS_INVALID');
+  if (ids !== undefined && (
+    !Array.isArray(ids) ||
+    ids.length > MAX_GOSSIP_REQUEST_IDS ||
+    ids.some(id => typeof id !== 'string' || id.length > 128)
+  )) throw new Error('P2P_GOSSIP_REQUEST_IDS_INVALID');
   const set = request['set'];
   if (set !== undefined && set !== 'default' && set !== 'hubs') {
     throw new Error('P2P_GOSSIP_REQUEST_SET_INVALID');

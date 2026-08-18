@@ -454,6 +454,13 @@ const requireAuth = (
   throw new RuntimeAdapterError('E_UNAUTHORIZED', `${level} auth required`);
 };
 
+const requireOwnerLane = (state: AdapterClientState): void => {
+  requireAuth(state, 'admin');
+  if (state.commandLaneKind !== 'owner') {
+    throw new RuntimeAdapterError('E_UNAUTHORIZED', 'vault-owner lane required');
+  }
+};
+
 const requireBucket = (bucket: TokenBucket, label: string): void => {
   if (consumeToken(bucket)) return;
   throw new RuntimeAdapterError(
@@ -899,7 +906,7 @@ const handleRuntimeAdapterBrainVaultReveal = async (
   deps: RuntimeAdapterServerDeps,
   diagnostic: RuntimeAdapterDiagnostic,
 ): Promise<void> => {
-  requireAuth(state, 'admin');
+  requireOwnerLane(state);
   requireBucket(state.sendBucket, 'brainvault');
   if (!deps.revealBrainVaultMnemonic) {
     throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault mnemonic export is unavailable');

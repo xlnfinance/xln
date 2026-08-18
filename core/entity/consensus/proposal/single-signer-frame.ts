@@ -61,7 +61,7 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
-import { materializeEntityInfraContext } from './infra-context';
+import { fitEntityProposalToWireBudget } from './wire-budget';
 import { validateProposedEntityFrame } from '../frame/validation';
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
@@ -170,17 +170,31 @@ const applySingleSignerProposal = async (
     txs: proposalTxs,
     ...(proposalJPrefixCertificate ? { jPrefixCertificate: proposalJPrefixCertificate } : {}),
   });
-  const entityContext = await materializeEntityInfraContext(env, workingReplica, proposalTxs, {
+  const fitted = await fitEntityProposalToWireBudget({
+    env,
+    replica: workingReplica,
+    proposalTxs,
+    jPrefixCertificate: proposalJPrefixCertificate ?? undefined,
     usePersistedReplayContext: context.usePersistedReplayContext,
   });
+  if (fitted.txs.length !== options.proposalTxs.length) {
+    options.proposalTxs = fitted.txs;
+  }
+  const entityContext = fitted.entityContext;
   await assertHtlcPreparedInfraContext({
     state: workingReplica.state,
-    proposalTxs,
+    proposalTxs: options.proposalTxs,
     context: entityContext,
     entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, workingReplica.entityId),
   });
   const applyFrame = context.promoteCandidateState ? applyRuntimeOwnedEntityFrame : applyEntityFrame;
-  const applied = await applyFrame(env, workingReplica.state, entityContext, proposalTxs, env.state.timestamp);
+  const applied = await applyFrame(
+    env,
+    workingReplica.state,
+    entityContext,
+    options.proposalTxs,
+    env.state.timestamp,
+  );
   options.checkpoint('frameApply');
   return { applied, entityContext };
 };
