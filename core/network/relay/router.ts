@@ -607,7 +607,7 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
       from: config.store.serverId,
       ...(from ? { to: from } : {}),
       timestamp: Date.now(),
-      payload: { profiles, jurisdictions },
+      payload: { profiles, jurisdictions, cursor: config.store.gossipSeq },
       ...(id ? { inReplyTo: id } : {}),
     }));
     return true;

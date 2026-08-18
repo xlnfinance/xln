@@ -35,6 +35,13 @@ export type GossipProfileBatchRequest = {
   limit?: number;
   includeJurisdictions?: boolean;
   routeTo?: GossipRouteToRequest;
+  /**
+   * Relay receipt cursor: only profiles the responder stored after this
+   * sequence are returned. Unlike `updatedSince` (a profile-clock watermark
+   * that silently drops profiles from slower clocks) it is exact, so pull-only
+   * polling misses nothing. The response carries the new `cursor`.
+   */
+  sinceSeq?: number;
 };
 
 export const DEFAULT_GOSSIP_BATCH_LIMIT = 1000;
@@ -150,7 +157,7 @@ export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBa
   requireExactBoundaryKeys(
     request,
     [],
-    ['ids', 'set', 'updatedSince', 'limit', 'includeJurisdictions', 'routeTo'],
+    ['ids', 'set', 'updatedSince', 'limit', 'includeJurisdictions', 'routeTo', 'sinceSeq'],
     'P2P_GOSSIP_REQUEST_FIELDS_INVALID',
   );
   const routeTo = request['routeTo'] === undefined ? undefined : decodeRouteTo(request['routeTo']);
@@ -162,7 +169,7 @@ export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBa
   if (set !== undefined && set !== 'default' && set !== 'hubs') {
     throw new Error('P2P_GOSSIP_REQUEST_SET_INVALID');
   }
-  for (const field of ['updatedSince', 'limit'] as const) {
+  for (const field of ['updatedSince', 'limit', 'sinceSeq'] as const) {
     const candidate = request[field];
     if (candidate !== undefined && (!Number.isSafeInteger(candidate) || Number(candidate) < 0)) {
       throw new Error(`P2P_GOSSIP_REQUEST_${field.toUpperCase()}_INVALID`);
@@ -177,6 +184,7 @@ export const decodeGossipProfileBatchRequest = (value: unknown): GossipProfileBa
     ...(set === undefined ? {} : { set }),
     ...(request['updatedSince'] === undefined ? {} : { updatedSince: Number(request['updatedSince']) }),
     ...(request['limit'] === undefined ? {} : { limit: Number(request['limit']) }),
+    ...(request['sinceSeq'] === undefined ? {} : { sinceSeq: Number(request['sinceSeq']) }),
     ...(includeJurisdictions === undefined ? {} : { includeJurisdictions }),
     ...(routeTo === undefined ? {} : { routeTo }),
   };

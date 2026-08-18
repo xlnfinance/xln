@@ -152,9 +152,13 @@ type GossipResponsePayload = {
   jurisdictions: JurisdictionGossipAnnouncement[];
 };
 
-const decodeGossipPayload = (value: unknown): Readonly<{ profiles: unknown[]; jurisdictions: unknown[] }> => {
+const decodeGossipPayload = (value: unknown): Readonly<{ profiles: unknown[]; jurisdictions: unknown[]; cursor?: number }> => {
   const response = requireBoundaryRecord(value, 'P2P_GOSSIP_RESPONSE_INVALID');
-  requireExactBoundaryKeys(response, ['profiles', 'jurisdictions'], [], 'P2P_GOSSIP_RESPONSE_FIELDS_INVALID');
+  requireExactBoundaryKeys(response, ['profiles', 'jurisdictions'], ['cursor'], 'P2P_GOSSIP_RESPONSE_FIELDS_INVALID');
+  const cursor = response['cursor'];
+  if (cursor !== undefined && (!Number.isSafeInteger(cursor) || Number(cursor) < 0)) {
+    throw new Error('P2P_GOSSIP_RESPONSE_CURSOR_INVALID');
+  }
   if (!Array.isArray(response['profiles'])) throw new Error('P2P_GOSSIP_RESPONSE_PROFILES_INVALID');
   if (!Array.isArray(response['jurisdictions'])) throw new Error('P2P_GOSSIP_RESPONSE_JURISDICTIONS_INVALID');
   if (response['profiles'].length > DEFAULT_GOSSIP_BATCH_LIMIT) {
@@ -163,7 +167,11 @@ const decodeGossipPayload = (value: unknown): Readonly<{ profiles: unknown[]; ju
   if (response['jurisdictions'].length > MAX_JURISDICTION_GOSSIP_BATCH_RECORDS) {
     throw new Error('P2P_GOSSIP_RESPONSE_JURISDICTION_BATCH_TOO_LARGE');
   }
-  return { profiles: response['profiles'], jurisdictions: response['jurisdictions'] };
+  return {
+    profiles: response['profiles'],
+    jurisdictions: response['jurisdictions'],
+    ...(cursor === undefined ? {} : { cursor: Number(cursor) }),
+  };
 };
 
 type GossipRefreshMode = 'incremental' | 'full';
@@ -347,6 +355,8 @@ export class RuntimeP2P {
   private gossipSet: P2PGossipSet;
   private profileHeartbeatMs: number;
   private lastAnnouncedProfiles = new Map<string, { topologyKey: string; at: number }>();
+  /** Relay receipt cursor per relay runtime id (exact incremental polling). */
+  private gossipCursors = new Map<string, number>();
   private onEntityInputs: (
     from: string,
     envelope: RuntimeEntityInputsEnvelope,
@@ -983,11 +993,13 @@ export class RuntimeP2P {
   private requestSeedGossip(mode: GossipRefreshMode = 'incremental') {
     const client = this.getActiveClient();
     if (!client) return;
-    const updatedSince = mode === 'incremental' ? this.getLatestKnownRemoteProfileTimestamp() : 0;
+    const relayId = normalizeRuntimeId(client.getPeerRuntimeId());
+    const cursor = mode === 'incremental' && relayId ? this.gossipCursors.get(relayId) : undefined;
+    const updatedSince = mode === 'incremental' && cursor === undefined ? this.getLatestKnownRemoteProfileTimestamp() : 0;
     const request: GossipProfileBatchRequest = {
       set: this.gossipSet,
       limit: DEFAULT_GOSSIP_BATCH_LIMIT,
-      ...(updatedSince > 0 ? { updatedSince } : {}),
+      ...(cursor !== undefined ? { sinceSeq: cursor } : updatedSince > 0 ? { updatedSince } : {}),
     };
     client.sendGossipRequest(this.runtimeId, request);
   }
@@ -1474,6 +1486,10 @@ export class RuntimeP2P {
 
   private handleGossipResponse(from: string, payload: unknown) {
     const decoded = decodeGossipPayload(payload);
+    if (decoded.cursor !== undefined) {
+      const relayId = normalizeRuntimeId(from);
+      if (relayId) this.gossipCursors.set(relayId, decoded.cursor);
+    }
     this.applyIncomingJurisdictions(from, decoded.jurisdictions);
     this.applyIncomingProfiles(from, decoded.profiles).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });

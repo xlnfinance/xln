@@ -83,3 +83,17 @@ test('routeTo decodes from the wire with a decimal amount and rejects unknown ke
   expect(() => decodeGossipProfileBatchRequest({ routeTo: { source: ALICE, target: BOB, extra: 1 } })).toThrow();
   expect(() => decodeGossipProfileBatchRequest({ routeTo: { source: ALICE, target: BOB, amount: -1 } })).toThrow();
 });
+
+test('relay sinceSeq cursor returns exactly what was stored after the cursor, regardless of profile clocks', async () => {
+  const { createRelayStore, getProfileBatch, storeVerifiedGossipProfile } = await import('../../../network/relay/store');
+  const store = createRelayStore('0x' + '1'.repeat(40));
+  const older = { ...routedProfile(ALICE, false, [H1]), lastUpdated: 10 };
+  const newer = { ...routedProfile(BOB, false, [H1]), lastUpdated: 1_000 };
+  storeVerifiedGossipProfile(store, newer);
+  const cursorAfterNewer = store.gossipSeq;
+  storeVerifiedGossipProfile(store, older);
+  // updatedSince watermark (1000) would hide ALICE forever; the cursor does not.
+  expect(getProfileBatch(store, { set: 'default', updatedSince: 1_000 }).map(p => p.entityId)).toEqual([]);
+  expect(getProfileBatch(store, { set: 'default', sinceSeq: cursorAfterNewer }).map(p => p.entityId)).toEqual([ALICE]);
+  expect(getProfileBatch(store, { set: 'default', sinceSeq: store.gossipSeq })).toEqual([]);
+});

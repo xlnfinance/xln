@@ -96,7 +96,9 @@ export type RelayStore = {
   serverId: string;
   clients: Map<string, RelayClient>;
   maxGossipProfiles: number;
-  gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
+  gossipProfiles: Map<string, { profile: Profile; timestamp: number; seq: number }>;
+  /** Monotonic receipt sequence; every stored profile update takes the next value. */
+  gossipSeq: number;
   /** Snapshot of gossipProfiles reused across gossip requests until the map changes. */
   gossipProfilesSnapshot?: { size: number; last?: { profile: Profile; timestamp: number } | undefined; profiles: Profile[] } | undefined;
   routeGraphCache: RouteGraphCache;
@@ -175,6 +177,7 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
     clients: new Map(),
     maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
     gossipProfiles: new Map(),
+    gossipSeq: 0,
     routeGraphCache: createRouteGraphCache(),
     marketCapEntries: new Map(),
     marketCapUpdatedAt: 0,
@@ -481,7 +484,8 @@ export const storeVerifiedGossipProfile = (store: RelayStore, profile: Profile):
     });
     return false;
   }
-  store.gossipProfiles.set(entityId, { profile: canonicalProfile, timestamp: newTs });
+  store.gossipSeq += 1;
+  store.gossipProfiles.set(entityId, { profile: canonicalProfile, timestamp: newTs, seq: store.gossipSeq });
   store.gossipProfilesSnapshot = undefined;
   return true;
 };
@@ -534,7 +538,20 @@ export const getProfileBatch = (
   store: RelayStore,
   request: GossipProfileBatchRequest = {},
 ): Profile[] => {
-  return selectProfileBatch(getAllGossipProfiles(store), request, DEFAULT_GOSSIP_SYNC_LIMIT, store.routeGraphCache);
+  if (request.sinceSeq === undefined) {
+    return selectProfileBatch(getAllGossipProfiles(store), request, DEFAULT_GOSSIP_SYNC_LIMIT, store.routeGraphCache);
+  }
+  // Exact receipt cursor: set/updatedSince selection runs over what changed
+  // since the caller's cursor; ids/routeTo still resolve over everything.
+  const { sinceSeq, set: _set, updatedSince: _updatedSince, ...rest } = request;
+  const changed: Profile[] = [];
+  for (const entry of store.gossipProfiles.values()) if (entry.seq > sinceSeq) changed.push(entry.profile);
+  const selectedSet = selectProfileBatch(changed, { set: request.set ?? 'default', ...(rest.limit === undefined ? {} : { limit: rest.limit }) }, DEFAULT_GOSSIP_SYNC_LIMIT);
+  if (rest.ids === undefined && rest.routeTo === undefined) return selectedSet;
+  const explicit = selectProfileBatch(getAllGossipProfiles(store), rest, DEFAULT_GOSSIP_SYNC_LIMIT, store.routeGraphCache);
+  const merged = new Map<string, Profile>();
+  for (const profile of [...selectedSet, ...explicit]) merged.set(profile.entityId.toLowerCase(), profile);
+  return Array.from(merged.values()).slice(0, DEFAULT_GOSSIP_SYNC_LIMIT);
 };
 
 // ---------------------------------------------------------------------------
