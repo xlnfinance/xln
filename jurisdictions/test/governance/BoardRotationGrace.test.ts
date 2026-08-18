@@ -1,4 +1,3 @@
-import { mine, time } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
 import hre from 'hardhat';
 
@@ -15,7 +14,8 @@ import {
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
 
-const { ethers } = hre;
+const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
+const { mine, time } = networkHelpers;
 
 const DEFAULT_ARTICLES = {
   controlDelay: 1_000,

@@ -1,8 +1,9 @@
 {
   "name": "xln-contracts",
   "version": "1.0.0",
+  "type": "module",
   "engines": {
-    "node": ">=20 <23"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "compile": "bunx hardhat clean && bunx hardhat compile",
@@ -19,22 +20,22 @@
     "node": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-gas-limit 60000000 --code-size-limit 65536"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-ignition": "^0.15.5",
-    "@nomicfoundation/hardhat-ignition-ethers": "^0.15.5",
-    "@nomicfoundation/hardhat-network-helpers": "^1.0.11",
-    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "@nomicfoundation/hardhat-verify": "^2.0.9",
-    "@typechain/ethers-v6": "^0.5.1",
-    "@typechain/hardhat": "^9.1.0",
-    "@types/chai": "^4.3.16",
-    "@types/mocha": ">=9.1.0",
-    "chai": "^4.3.10",
+    "@nomicfoundation/hardhat-ethers": "^4.0.15",
+    "@nomicfoundation/hardhat-ethers-chai-matchers": "^3.0.11",
+    "@nomicfoundation/hardhat-ignition": "^3.1.8",
+    "@nomicfoundation/hardhat-ignition-ethers": "^3.1.6",
+    "@nomicfoundation/hardhat-keystore": "^3.0.13",
+    "@nomicfoundation/hardhat-mocha": "^3.1.0",
+    "@nomicfoundation/hardhat-network-helpers": "^3.0.11",
+    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.7",
+    "@nomicfoundation/hardhat-typechain": "^3.1.1",
+    "@nomicfoundation/hardhat-verify": "^3.0.22",
+    "@types/chai": "^5.2.3",
+    "@types/mocha": "^10.0.10",
+    "chai": "^6.2.2",
     "ethers": "6.17.0",
-    "hardhat": "^2.22.6",
-    "hardhat-gas-reporter": "^1.0.10",
-    "solidity-coverage": "^0.8.12",
-    "ts-node": ">=8.0.0",
-    "typechain": "^8.3.2",
+    "hardhat": "^3.13.0",
+    "mocha": "^11.8.0",
     "typescript": ">=4.5.0"
   },
   "dependencies": {

@@ -1,10 +1,9 @@
-import { loadFixture, mine, time } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
-
 import { expect } from 'chai';
 
 import hre from 'hardhat';
 
-const { ethers } = hre;
+const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
+const { loadFixture, mine, time } = networkHelpers;
 
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
 
@@ -266,7 +265,7 @@ describe('Depository', () => {
   let erc1155: Contract;
 
   async function deployFixture() {
-    [user0, user1] = await hre.ethers.getSigners();
+    [user0, user1] = await ethers.getSigners();
 
     // Deploy EntityProvider
     const entityProvider = await deployEntityProvider(user0.address);
@@ -275,18 +274,18 @@ describe('Depository', () => {
     depository = stack.depository;
 
     // Deploy ERC20 mock contract
-    const ERC20Mock = await hre.ethers.getContractFactory('ERC20Mock');
+    const ERC20Mock = await ethers.getContractFactory('ERC20Mock');
     erc20 = await ERC20Mock.deploy('ERC20Mock', 'ERC20', 18, 1_000_000);
     await erc20.waitForDeployment();
 
     // Deploy ERC721 mock contract
-    const ERC721Mock = await hre.ethers.getContractFactory('ERC721Mock');
+    const ERC721Mock = await ethers.getContractFactory('ERC721Mock');
     erc721 = await ERC721Mock.deploy('ERC721Mock', 'ERC721');
     await erc721.waitForDeployment();
     await erc721.mint(user0.address, 1);
 
     // Deploy ERC1155 mock contract
-    const ERC1155Mock = await hre.ethers.getContractFactory('ERC1155Mock');
+    const ERC1155Mock = await ethers.getContractFactory('ERC1155Mock');
     erc1155 = await ERC1155Mock.deploy();
     await erc1155.waitForDeployment();
     await erc1155.mint(user0.address, 0, 100, '0x');
@@ -303,7 +302,7 @@ describe('Depository', () => {
   }
 
   async function registerFixedSupplyErc20(target: Depository, supply: bigint): Promise<bigint> {
-    const ERC20Mock = await hre.ethers.getContractFactory('ERC20Mock');
+    const ERC20Mock = await ethers.getContractFactory('ERC20Mock');
     const token = await ERC20Mock.deploy('Fixed Supply', 'FIX', 18, supply);
     await token.waitForDeployment();
     await (await target.registerExternalToken(0, await token.getAddress(), 0)).wait();
@@ -416,7 +415,7 @@ describe('Depository', () => {
 
   it('rejects watchtower counter-dispute from the wrong tower or without a newer signed proof', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const [, , tower, wrongTower] = await hre.ethers.getSigners();
+    const [, , tower, wrongTower] = await ethers.getSigners();
 
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;

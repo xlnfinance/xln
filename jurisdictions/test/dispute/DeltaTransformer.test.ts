@@ -1,4 +1,3 @@
-import { loadFixture, time } from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
 import { expect } from "chai";
 import hre from "hardhat";
 import type { DeltaTransformer } from "../../typechain-types/index.js";
@@ -9,7 +8,8 @@ import { asOfferId } from "../../../runtime/orderbook/swap-keys.ts";
 import { deriveSwapOffdeltaChanges } from "../../../runtime/orderbook/swap-execution.ts";
 import type { AccountReplica, SwapOffer } from "../../../runtime/types/account.ts";
 
-const { ethers } = hre;
+const { ethers, networkHelpers } = await hre.network.getOrCreate("hardhat");
+const { loadFixture, time } = networkHelpers;
 const MAX_FILL_RATIO = 65535n;
 const TEST_WATCH_SEED = `0x${"11".repeat(32)}`;
 const LEFT_ENTITY = `0x${"0a".repeat(32)}`;
@@ -166,10 +166,10 @@ function applyExpectedSwapBatch(
 
 describe("DeltaTransformer", function () {
   async function deployFixture() {
-    const factory = await hre.ethers.getContractFactory("DeltaTransformer");
+    const factory = await ethers.getContractFactory("DeltaTransformer");
     const transformer = await factory.deploy();
     await transformer.waitForDeployment();
-    const registryFactory = await hre.ethers.getContractFactory("MockRevealRegistry");
+    const registryFactory = await ethers.getContractFactory("MockRevealRegistry");
     const registry = await registryFactory.deploy();
     await registry.waitForDeployment();
     return { transformer: transformer as DeltaTransformer, registry };
@@ -343,7 +343,7 @@ describe("DeltaTransformer", function () {
 
     await expect(
       applyCanonical(transformer, [0], encodedBatch, "0x", rightArguments),
-    ).to.be.reverted;
+    ).to.revert(ethers);
   });
 
   it("settles pulls only from role-windowed records of this dispute", async function () {
@@ -633,7 +633,7 @@ describe("DeltaTransformer", function () {
     const firstRevealAt = await transformer.hashToTimestamp(hash);
 
     expect(firstRevealAt > 0n).to.equal(true);
-    await expect(transformer.revealSecret(secret)).not.to.be.reverted;
+    await expect(transformer.revealSecret(secret)).not.to.revert(ethers);
     expect(await transformer.hashToTimestamp(hash)).to.equal(firstRevealAt);
   });
 

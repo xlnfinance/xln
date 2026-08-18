@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import hre from "hardhat";
 
-const { ethers } = hre;
+const { ethers } = await hre.network.getOrCreate("hardhat");
 
 const abiCoder = ethers.AbiCoder.defaultAbiCoder();
 

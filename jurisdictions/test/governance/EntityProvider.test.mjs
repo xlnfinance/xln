@@ -1,5 +1,6 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
+import { expect } from "chai";
+import hre from "hardhat";
+const { ethers } = await hre.network.getOrCreate("hardhat");
 const FOUNDATION_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const FOUNDATION_ID = ethers.zeroPadValue(ethers.toBeHex(1), 32);
 
@@ -42,12 +43,12 @@ describe("EntityProvider with Automatic Governance", function () {
 
   beforeEach(async function () {
     [owner, alice, bob, carol] = await ethers.getSigners();
-    
+
     // Deploy EntityProvider
     const EntityProvider = await entityProviderFactory();
     entityProvider = await EntityProvider.deploy(owner.address);
     await entityProvider.waitForDeployment();
-    
+
     foundationEntityId = await entityProvider.FOUNDATION_ENTITY();
   });
 
@@ -65,16 +66,16 @@ describe("EntityProvider with Automatic Governance", function () {
 
     it("Should deploy with foundation entity #1 with governance", async function () {
       expect(foundationEntityId).to.equal(1);
-      
+
       const entity = await entityProvider.entities(ethers.zeroPadValue(ethers.toBeHex(1), 32));
       expect(entity.currentBoardHash).to.equal(singleSignerBoardHash(owner.address));
       expect(entity.registrationBlock).to.be.gt(0);
       expect(entity.articles.controlDelay).to.equal(1000);
-      
+
       // Check foundation governance tokens are controlled by a real deploy-time recipient.
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(1);
       const expectedSupply = 100_000_000_000n;
-      
+
       expect(await entityProvider.balanceOf(owner.address, controlTokenId)).to.equal(expectedSupply);
       expect(await entityProvider.balanceOf(owner.address, dividendTokenId)).to.equal(expectedSupply);
     });
@@ -82,11 +83,11 @@ describe("EntityProvider with Automatic Governance", function () {
     it("Should authorize foundation functions with the current Foundation Hanko", async function () {
       const [foundationControlTokenId] = await entityProvider.getTokenIds(1);
       expect(await entityProvider.balanceOf(owner.address, foundationControlTokenId)).to.equal(100_000_000_000n);
-      
+
       // Should be able to assign names
       const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
       await entityProvider.registerNumberedEntity(boardHash);
-      
+
       const argumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
         ["string", "uint256"],
         ["testname", 2],
@@ -100,7 +101,7 @@ describe("EntityProvider with Automatic Governance", function () {
         2,
         authorization.hankoData,
         authorization.actionNonce,
-      )).to.not.be.reverted;
+      )).to.not.revert(ethers);
     });
 
     it("keeps name forward and reverse mappings bijective on replacement", async function () {
@@ -142,30 +143,30 @@ describe("EntityProvider with Automatic Governance", function () {
   describe("Automatic Entity Registration", function () {
     it("Should register new numbered entity with automatic governance", async function () {
       const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
-      
+
       const tx = await entityProvider.registerNumberedEntity(boardHash);
       const receipt = await tx.wait();
-      
+
       // Check for events
       const registeredEvent = receipt.logs.some(log => entityProvider.interface.parseLog(log)?.name === 'EntityRegistered');
       const governanceEvent = receipt.logs.some(log => entityProvider.interface.parseLog(log)?.name === 'GovernanceEnabled');
       expect(registeredEvent).to.be.true;
       expect(governanceEvent).to.be.true;
-      
+
       // Next entity should be #2 (foundation is #1)
       const entityNumber = 2;
-      
+
       // Check entity has governance auto-setup
       const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
       const entity = await entityProvider.entities(entityId);
       expect(entity.currentBoardHash).to.equal(boardHash);
       expect(entity.articles.controlDelay).to.equal(1000);
-      
+
       // Check governance tokens were created with fixed supply
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
       const entityAddress = ethers.getAddress(`0x${entityNumber.toString(16).padStart(40, '0')}`);
       const expectedSupply = 100_000_000_000n;
-      
+
       expect(await entityProvider.balanceOf(entityAddress, controlTokenId)).to.equal(expectedSupply);
       expect(await entityProvider.balanceOf(entityAddress, dividendTokenId)).to.equal(expectedSupply);
     });
@@ -177,7 +178,7 @@ describe("EntityProvider with Automatic Governance", function () {
         dividendDelay: 1500,
         foundationDelay: 5000
       };
-      
+
       const argumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
         ["bytes32", "tuple(uint32 controlDelay,uint32 dividendDelay,uint32 foundationDelay)"],
         [boardHash, customArticles],
@@ -191,8 +192,8 @@ describe("EntityProvider with Automatic Governance", function () {
         customArticles,
         authorization.hankoData,
         authorization.actionNonce,
-      )).to.not.be.reverted;
-      
+      )).to.not.revert(ethers);
+
       const entityNumber = 2;
       const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
       const entity = await entityProvider.entities(entityId);
@@ -209,11 +210,11 @@ describe("EntityProvider with Automatic Governance", function () {
     it("Should generate correct token IDs using first bit flip", async function () {
       const entityNumber = 42;
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
-      
+
       expect(controlTokenId).to.equal(entityNumber);
       // 255th bit flip
       expect(dividendTokenId).to.equal(BigInt(entityNumber) | (BigInt(1) << BigInt(255)));
-      
+
       // Entity number is the low 255 bits of either token id (first-bit flip convention).
       const mask = (1n << 255n) - 1n;
       expect(BigInt(controlTokenId) & mask).to.equal(BigInt(entityNumber));
@@ -231,28 +232,28 @@ describe("EntityProvider with Automatic Governance", function () {
       entityNumber = 2;
 
       [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
-      
+
       // Note: In real usage, tokens would be distributed via Depository.sol using entity hanko signatures
       // For testing, we'll just verify tokens exist in entity address
       const entityAddress = ethers.getAddress(`0x${entityNumber.toString(16).padStart(40, '0')}`);
       const expectedSupply = 100_000_000_000n;
-      
+
       expect(await entityProvider.balanceOf(entityAddress, controlTokenId)).to.equal(expectedSupply);
       expect(await entityProvider.balanceOf(entityAddress, dividendTokenId)).to.equal(expectedSupply);
-      
+
       // For testing transfers, we'll manually transfer some tokens to test accounts
       // In production, this would be done via entityTransferTokens() with proper hanko signatures
       const foundationAddress = ethers.getAddress(`0x${(1).toString(16).padStart(40, '0')}`);
       await ethers.provider.send("hardhat_impersonateAccount", [entityAddress]);
       const entitySigner = await ethers.getSigner(entityAddress);
-      
+
       await owner.sendTransaction({ to: entityAddress, value: ethers.parseEther("1.0") });
-      
+
       await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, alice.address, controlTokenId, 1000, "0x");
       await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, bob.address, controlTokenId, 500, "0x");
       await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, alice.address, dividendTokenId, 200, "0x");
       await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, bob.address, dividendTokenId, 800, "0x");
-      
+
       await ethers.provider.send("hardhat_stopImpersonatingAccount", [entityAddress]);
     });
 
@@ -287,7 +288,7 @@ describe("EntityProvider with Automatic Governance", function () {
 
     it("Should support ERC1155 approvals", async function () {
       await entityProvider.connect(alice).setApprovalForAll(bob.address, true);
-      
+
       await entityProvider.connect(bob).safeTransferFrom(
         alice.address,
         carol.address,
@@ -326,7 +327,7 @@ describe("EntityProvider with Automatic Governance", function () {
     it("Should reject calls without a valid current Foundation Hanko", async function () {
       const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
       await entityProvider.registerNumberedEntity(boardHash);
-      
+
       // Alice doesn't have foundation tokens
       await expect(
         entityProvider.connect(alice).assignName("testname", 2, singleSignerHanko(ethers.ZeroHash), 1)
@@ -339,7 +340,7 @@ describe("EntityProvider with Automatic Governance", function () {
         // The message hash MUST be prepared according to EIP-191.
         // ethers.hashMessage() automatically prepends the required prefix.
         const testHash = ethers.hashMessage(ethers.toUtf8Bytes("test message"));
-        
+
         // This signature is from 'alice'
         const signature = await alice.signMessage(ethers.toUtf8Bytes("test message"));
 

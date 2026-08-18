@@ -1,7 +1,7 @@
-import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
 import { expect } from "chai";
 import hre from "hardhat";
-const { ethers } = hre;
+const { ethers, networkHelpers } = await hre.network.getOrCreate("hardhat");
+const { loadFixture } = networkHelpers;
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers.js";
 import type { Depository, EntityProvider } from "../../typechain-types/index.js";
 import {
@@ -112,7 +112,7 @@ describe("Hanko Authorization", function () {
   let entity2: HardhatEthersSigner;
 
   async function deployFixture() {
-    [admin, entity1, entity2] = await hre.ethers.getSigners();
+    [admin, entity1, entity2] = await ethers.getSigners();
 
     // Deploy EntityProvider
     entityProvider = await deployEntityProvider(admin.address);
@@ -188,7 +188,7 @@ describe("Hanko Authorization", function () {
       depository
         .connect(entity1)
         .processBatch(encodedBatch, hankoData, nextNonce)
-    ).to.not.be.reverted;
+    ).to.not.revert(ethers);
 
     const entity1Balance = await depository._reserves(entity1Id, tokenId);
     const entity2Balance = await depository._reserves(entity2Id, tokenId);
@@ -575,7 +575,7 @@ describe("Hanko Authorization", function () {
     const secondActionHanko = buildSingleSignerHanko(secondId, secondActionHash, deriveHardhatPrivateKey(1));
     await expect(entityProvider.entityTransferTokens(
       3, entity2.address, secondControlTokenId, 1, secondActionHanko,
-    )).to.not.be.reverted;
+    )).to.not.revert(ethers);
   });
 
   it("does not expose unsafeProcessBatch", async function () {

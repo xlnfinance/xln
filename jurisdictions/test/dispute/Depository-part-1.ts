@@ -1,7 +1,7 @@
-import { loadFixture, mine, time } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
 import hre from 'hardhat';
-const { ethers } = hre;
+const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
+const { loadFixture, mine, time } = networkHelpers;
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
 import type { Depository } from '../../typechain-types/index.js';
 import { Contract, type ContractTransactionReceipt } from 'ethers';
@@ -197,28 +197,28 @@ describe('Depository', () => {
   let erc721: Contract;
   let erc1155: Contract;
   async function deployFixture() {
-    [user0, user1] = await hre.ethers.getSigners();
+    [user0, user1] = await ethers.getSigners();
     // Deploy EntityProvider
     const entityProvider = await deployEntityProvider(user0.address);
     ({ depository } = await deployDepositoryStack(await entityProvider.getAddress()));
     // Deploy ERC20 mock contract
-    const ERC20Mock = await hre.ethers.getContractFactory('ERC20Mock');
+    const ERC20Mock = await ethers.getContractFactory('ERC20Mock');
     erc20 = await ERC20Mock.deploy('ERC20Mock', 'ERC20', 18, 1_000_000);
     await erc20.waitForDeployment();
     // Deploy ERC721 mock contract
-    const ERC721Mock = await hre.ethers.getContractFactory('ERC721Mock');
+    const ERC721Mock = await ethers.getContractFactory('ERC721Mock');
     erc721 = await ERC721Mock.deploy('ERC721Mock', 'ERC721');
     await erc721.waitForDeployment();
     await erc721.mint(user0.address, 1);
     // Deploy ERC1155 mock contract
-    const ERC1155Mock = await hre.ethers.getContractFactory('ERC1155Mock');
+    const ERC1155Mock = await ethers.getContractFactory('ERC1155Mock');
     erc1155 = await ERC1155Mock.deploy();
     await erc1155.waitForDeployment();
     await erc1155.mint(user0.address, 0, 100, '0x');
     return { depository, erc20, erc721, erc1155, user0, user1 };
   }
   async function registerFixedSupplyErc20(target: Depository, supply: bigint): Promise<bigint> {
-    const ERC20Mock = await hre.ethers.getContractFactory('ERC20Mock');
+    const ERC20Mock = await ethers.getContractFactory('ERC20Mock');
     const token = await ERC20Mock.deploy('Fixed Supply', 'FIX', 18, supply);
     await token.waitForDeployment();
     await (await target.registerExternalToken(0, await token.getAddress(), 0)).wait();
@@ -378,7 +378,7 @@ describe('Depository', () => {
   });
   it('rejects ERC721 deposits when the registered token reports a successful no-op transfer', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const NoopERC721 = await hre.ethers.getContractFactory('NoopERC721Mock');
+    const NoopERC721 = await ethers.getContractFactory('NoopERC721Mock');
     const token = await NoopERC721.deploy(user0.address);
     await token.waitForDeployment();
     await expect(depository.connect(user0).adminRegisterExternalToken({
@@ -393,7 +393,7 @@ describe('Depository', () => {
   });
   it('rejects ERC1155 deposits when the registered token reports a successful no-op transfer', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const NoopERC1155 = await hre.ethers.getContractFactory('NoopERC1155Mock');
+    const NoopERC1155 = await ethers.getContractFactory('NoopERC1155Mock');
     const token = await NoopERC1155.deploy(user0.address);
     await token.waitForDeployment();
     await expect(depository.connect(user0).adminRegisterExternalToken({
@@ -419,7 +419,7 @@ describe('Depository', () => {
     const nonce = (await depository.entityNonces(fromEntity)) + 1n;
     const batchHash = await computeDepositoryBatchHash(depository, encodedBatch, nonce);
     const hankoData = buildSingleSignerHanko(fromEntity, batchHash, deriveHardhatPrivateKey(0));
-    await expect(depository.connect(user0).processBatch(encodedBatch, hankoData, nonce)).to.not.be.reverted;
+    await expect(depository.connect(user0).processBatch(encodedBatch, hankoData, nonce)).to.not.revert(ethers);
     const reserveFrom = await depository._reserves(fromEntity, tokenId);
     const reserveTo = await depository._reserves(toEntity, tokenId);
     expect(reserveFrom).to.equal(750n);
@@ -562,7 +562,7 @@ describe('Depository', () => {
     const { depository, erc1155 } = await loadFixture(deployFixture);
     const registryLengthBefore = await depository.getTokensLength();
     await erc1155.setApprovalForAll(await depository.getAddress(), true);
-    await expect(erc1155.safeTransferFrom(user0.address, await depository.getAddress(), 0, 1, '0x')).to.not.be.reverted;
+    await expect(erc1155.safeTransferFrom(user0.address, await depository.getAddress(), 0, 1, '0x')).to.not.revert(ethers);
     expect(await depository.getTokensLength()).to.equal(registryLengthBefore);
     expect(await erc1155.balanceOf(await depository.getAddress(), 0)).to.equal(1n);
     expect(await erc1155.balanceOf(user0.address, 0)).to.equal(99n);
@@ -604,7 +604,7 @@ describe('Depository', () => {
   });
   it('processBatch supports no-return ERC20 tokens on deposit and withdrawal', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const NoReturnERC20Mock = await hre.ethers.getContractFactory('NoReturnERC20Mock');
+    const NoReturnERC20Mock = await ethers.getContractFactory('NoReturnERC20Mock');
     const noReturnToken = await NoReturnERC20Mock.deploy('NoReturn', 'NORET', 1_000_000n);
     await noReturnToken.waitForDeployment();
     const actor = lazyActor(user0, 0);
@@ -642,7 +642,7 @@ describe('Depository', () => {
   });
   it('uses exact balance deltas for false-return ERC20 deposits and withdrawals', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const FalseReturnERC20 = await hre.ethers.getContractFactory('FalseReturnERC20Mock');
+    const FalseReturnERC20 = await ethers.getContractFactory('FalseReturnERC20Mock');
     const token = await FalseReturnERC20.deploy(1_000_000n);
     await token.waitForDeployment();
     const actor = lazyActor(user0, 0);
@@ -683,7 +683,7 @@ describe('Depository', () => {
   });
   it('rejects fee-on-transfer ERC20 withdrawals without reducing reserve', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const FeeToken = await hre.ethers.getContractFactory('FeeOnTransferERC20');
+    const FeeToken = await ethers.getContractFactory('FeeOnTransferERC20');
     const token = await FeeToken.deploy(1_000_000n);
     await token.waitForDeployment();
     const actor = lazyActor(user0, 0);
@@ -751,7 +751,7 @@ describe('Depository', () => {
     const { depository } = await loadFixture(deployFixture);
     const actor = lazyActor(user0, 0);
     const recipientEntity = addressEntityId(user1.address);
-    const ToggleNoopERC721 = await hre.ethers.getContractFactory('ToggleNoopERC721Mock');
+    const ToggleNoopERC721 = await ethers.getContractFactory('ToggleNoopERC721Mock');
     const token = await ToggleNoopERC721.deploy(user0.address);
     await token.waitForDeployment();
     await depository.registerExternalToken(1, await token.getAddress(), 1);
@@ -781,7 +781,7 @@ describe('Depository', () => {
     const { depository } = await loadFixture(deployFixture);
     const actor = lazyActor(user0, 0);
     const recipientEntity = addressEntityId(user1.address);
-    const ToggleNoopERC1155 = await hre.ethers.getContractFactory('ToggleNoopERC1155Mock');
+    const ToggleNoopERC1155 = await ethers.getContractFactory('ToggleNoopERC1155Mock');
     const token = await ToggleNoopERC1155.deploy(user0.address);
     await token.waitForDeployment();
     await depository.registerExternalToken(2, await token.getAddress(), 1);
@@ -822,7 +822,7 @@ describe('Depository', () => {
     await expect(
       depository.connect(user0).processBatch(first.encodedBatch, first.hankoData, first.nonce),
     ).to.be.revertedWithCustomError(depository, 'E2');
-    await expect(depository.connect(user0).processBatch(first.encodedBatch, first.hankoData, 2n)).to.be.reverted;
+    await expect(depository.connect(user0).processBatch(first.encodedBatch, first.hankoData, 2n)).to.revert(ethers);
     const secondBatch = emptyBatch({
       reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 25n }],
     });
@@ -831,7 +831,7 @@ describe('Depository', () => {
       reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 26n }],
     });
     await expect(depository.connect(user0).processBatch(encodeBatch(tamperedBatch), second.hankoData, second.nonce)).to
-      .be.reverted;
+      .revert(ethers);
     expect(await depository.entityNonces(actor.entityId)).to.equal(1n);
     await depository.connect(user0).processBatch(second.encodedBatch, second.hankoData, second.nonce);
     expect(await depository.entityNonces(actor.entityId)).to.equal(2n);
@@ -1519,7 +1519,7 @@ describe('Depository', () => {
 
   it('rejects zero-value R2C before it can forge a victim AccountSettled event', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const signers = await hre.ethers.getSigners();
+    const signers = await ethers.getSigners();
     const attacker = lazyActor(signers[2]!, 2);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
 
@@ -2739,7 +2739,7 @@ describe('Depository', () => {
 
   it('allows a designated tower to submit a delayed last-resort counter-dispute', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const [, , tower] = await hre.ethers.getSigners();
+    const [, , tower] = await ethers.getSigners();
 
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
@@ -2938,7 +2938,7 @@ describe('Depository', () => {
 
   it('never lets a tower start a dispute when no active dispute exists', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const [, , tower] = await hre.ethers.getSigners();
+    const [, , tower] = await ethers.getSigners();
 
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;

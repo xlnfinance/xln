@@ -8,7 +8,7 @@ import {
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
 
-const { ethers } = hre;
+const { ethers } = await hre.network.getOrCreate('hardhat');
 
 const articles = {
   controlDelay: 3,
