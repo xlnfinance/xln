@@ -29,7 +29,6 @@ import { ensureLocalJPrefixAttestation } from '../j-prefix/prefix-round';
 import { preauthenticateEntityProposal } from '../proposal/preauthentication';
 import { calculateQuorumPower } from '../replica-validation';
 import { selectEntityProposal } from '../proposal/selection';
-import { commitSingleSignerFrameIfReady } from '../proposal/single-signer-frame';
 import { handleJPrefixAttestations } from '../j-prefix/prefix-input';
 import { handleLeaderTimeoutVote } from '../leader/timeout-input';
 import { resolveCommitExecution } from '../commit/catch-up';
@@ -38,8 +37,8 @@ import { handleProposedFramePrecommit } from '../proposal/input';
 import { handleHashPrecommits } from '../proposal/precommit-input';
 import {
   relayPreparedFrameIfReady,
-  startMultiSignerProposalIfReady,
-} from '../proposal/multi-signer';
+  startEntityProposalIfReady,
+} from '../proposal/start';
 import { getEntityFrameConsensusConfig } from '../authority/board-handover';
 
 export type { EntityInputOutcome } from './types';
@@ -138,32 +137,8 @@ const advanceEntityProposal = async (
     checkpoint: (label: string) => void;
   },
 ): Promise<ApplyEntityInputResult | null> => {
-  const singleSignerResult = selection.isSingleSigner
-    ? await commitSingleSignerFrameIfReady(context, {
-        accountWorkOnly: selection.accountWorkOnly,
-        localCanPropose,
-        hasProposableAccountMempool: selection.hasProposableAccountMempool,
-        proposalJPrefixCertificate: selection.proposalJPrefixCertificate,
-        proposalSelection: selection.proposalSelection,
-        proposalTxs: selection.proposalTxs,
-        shouldRollFrozenBaseJPrefixRound: selection.shouldRollFrozenBaseJPrefixRound,
-        profileStartedAt: profile.startedAt,
-        profileCheckpoints: profile.checkpoints,
-        checkpoint: profile.checkpoint,
-      })
-    : null;
-  if (singleSignerResult) return singleSignerResult;
   await relayPreparedFrameIfReady(context, localCanPropose, selection.isSingleSigner);
-  await startMultiSignerProposalIfReady(context, {
-    accountWorkOnly: selection.accountWorkOnly,
-    hasProposableAccountMempool: selection.hasProposableAccountMempool,
-    isSingleSigner: selection.isSingleSigner,
-    proposalJPrefixCertificate: selection.proposalJPrefixCertificate,
-    proposalSelection: selection.proposalSelection,
-    proposalTxs: selection.proposalTxs,
-    shouldRollFrozenBaseJPrefixRound: selection.shouldRollFrozenBaseJPrefixRound,
-  }, localCanPropose);
-  return null;
+  return startEntityProposalIfReady(context, selection, localCanPropose, profile);
 };
 
 /**

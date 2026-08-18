@@ -48,9 +48,16 @@ const buildCommitHankos = async (
   frame: EntityFrame,
   execution: EntityCandidate,
   signaturesBySigner: Map<string, string[]>,
+  localProposal: boolean,
 ): Promise<HankoBuildResult> => {
   const { env, workingReplica } = context;
   const hashes = execution.hashesToSign;
+  // A single-signer proposer sealed its own quorum hankos while building the
+  // frame; re-verifying its own fresh signatures would be one ECDSA recover
+  // per hash for nothing.
+  if (localProposal && frame.hankos && frame.hankos.length === hashes.length) {
+    return { accepted: true, hankos: frame.hankos };
+  }
   const manifestMismatch = getEntityHashManifestMismatch(
     hashes,
     frame.hashesToSign,
@@ -69,6 +76,7 @@ const buildCommitHankos = async (
   }
   for (const [signerId, signatures] of signaturesBySigner) {
     if (
+      (localProposal && signerId.toLowerCase() === workingReplica.signerId.toLowerCase()) ||
       verifyHashPrecommitSignatures(
         env,
         signerId,
@@ -212,6 +220,7 @@ const installCommittedState = (
       committedState.entityId,
       frame,
       committedState,
+      execution.authority ? { stateRoot: frame.stateRoot, authority: execution.authority } : undefined,
     ),
     candidateEffects,
   );
@@ -230,7 +239,13 @@ export const finalizeCommitNotification = async (
   frame: EntityFrame,
   execution: EntityCandidate,
   signaturesBySigner: Map<string, string[]>,
-  options: { broadcastCommit?: boolean } = {},
+  options: {
+    broadcastCommit?: boolean;
+    /** Board to notify (defaults to the committed board); a handover notifies the retired one. */
+    broadcastValidators?: readonly string[];
+    /** Frame built by this replica in this same input (single-signer board = own quorum). */
+    localProposal?: boolean;
+  } = {},
 ): Promise<ApplyEntityInputResult> => {
   const { env, entityOutbox, workingReplica } = context;
   const proof = await buildCommitHankos(
@@ -238,21 +253,24 @@ export const finalizeCommitNotification = async (
     frame,
     execution,
     signaturesBySigner,
+    options.localProposal === true,
   );
   if (!proof.accepted) return proof.result;
   attachCommitProofsAndOutputs(context, frame, execution, proof.hankos);
   installCommittedState(context, frame, execution, proof.hankos);
   // Runtime persists the exact proposer-observed context committed by this
   // frame. A validator must never reconstruct it from its own live gossip.
-  context.entityContext = structuredClone(frame.entityContext);
+  // Our own frame's context is already exclusively ours; no clone.
+  context.entityContext = options.localProposal ? frame.entityContext : structuredClone(frame.entityContext);
   if (options.broadcastCommit) {
     const precommitSigners = [...signaturesBySigner.keys()];
+    const validators = options.broadcastValidators ?? workingReplica.state.config.validators;
     entityLog.debug('commit.notify_validators', {
       frame: shortHash(frame.hash),
-      validators: workingReplica.state.config.validators.length - 1,
+      validators: validators.length - 1,
       precommitSigners: precommitSigners.map(shortId),
     });
-    for (const validatorId of workingReplica.state.config.validators) {
+    for (const validatorId of validators) {
       if (validatorId.toLowerCase() === workingReplica.signerId.toLowerCase()) {
         continue;
       }

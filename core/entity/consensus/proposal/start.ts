@@ -1,5 +1,5 @@
 import { signAccountFrame } from '../../../account/crypto';
-import { assertEntityConfigBoardAuthority } from '../../../hanko/signing';
+import { assertEntityConfigBoardAuthority, signEntityHashes } from '../../../hanko/signing';
 import { shortHash, shortId } from '../../../support/logger';
 import { assertFrameJPrefix } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import {
@@ -8,24 +8,23 @@ import {
 } from '../../state/input-clone';
 import type { EntityReplica, EntityState, EntityFrame, EntityCandidate } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
+import type { EntityTx } from '../../../types/entity-tx';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from '../frame';
 import { markEntityFrameBodyVerified } from '../frame/body-verified';
-import { applyEntityFrame } from '../frame/application';
+import { applyEntityFrame, applyRuntimeOwnedEntityFrame } from '../frame/application';
 import { copyProposableAccounts } from '../account/touched-accounts';
 import {
   buildEntityHashesToSign,
   getEntityHashManifestMismatch,
 } from '../input/hanko-witness';
-import type { ApplyEntityInputContext } from '../input/types';
+import type { ApplyEntityInputContext, ApplyEntityInputResult } from '../input/types';
 import { getReplicaProposalLeader } from '../leader';
 import { buildCertifiedEntityOutputHashes } from '../output/certification';
 import {
   shouldKeepPreparedEntityFrame,
   type EntityProposalSelection,
 } from './selection';
-import {
-  expectedCommittedLeaderState,
-} from '../leader/certificates';
+import { expectedCommittedLeaderState } from '../leader/certificates';
 import { entityLog } from '../entity-log';
 import {
   assertProposerJRangesMatchLocalHistory,
@@ -46,10 +45,24 @@ import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
 import {
+  getBoardHandoverFrameConfig,
   getBoardHandoverLeaderState,
   getEntityFrameConsensusConfig,
   withBoardAuthority,
 } from '../authority/board-handover';
+import { finalizeCommitNotification } from '../commit/finalization';
+import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
+import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
+import { entityFrameProfileEnabled, entityFrameSlowMs } from '../frame/profile';
+import { getPerfMs } from '../../../support/time';
+
+export type ProposalProfile = {
+  startedAt: number;
+  checkpoints: Record<string, number>;
+  checkpoint: (label: string) => void;
+};
+
+const noProfile: ProposalProfile = { startedAt: 0, checkpoints: {}, checkpoint: () => undefined };
 
 const replayPreparedFrameForRelay = async (
   env: EntityRuntimeContext,
@@ -199,7 +212,6 @@ const shouldStartProposal = (
     !replica.pendingLeaderCertificate.preparedFrameHash,
   );
   return (
-    !selection.isSingleSigner &&
     localCanPropose &&
     (selection.proposalTxs.length > 0 ||
       selection.shouldRollFrozenBaseJPrefixRound ||
@@ -214,7 +226,7 @@ const buildProposalState = (
   env: EntityRuntimeContext,
   replica: EntityReplica,
   appliedState: EntityState,
-  txs: readonly import('../../../types/entity-tx').EntityTx[],
+  txs: readonly EntityTx[],
   height: number,
   timestamp: number,
   view: number,
@@ -252,7 +264,7 @@ const signProposalManifest = async (
   );
 };
 
-const assertMultiSignerProposalPrefix = (
+const assertProposalPrefix = (
   env: EntityRuntimeContext,
   replica: EntityReplica,
   selection: EntityProposalSelection,
@@ -269,13 +281,14 @@ const assertMultiSignerProposalPrefix = (
   });
 };
 
-const storeMultiSignerCandidate = (
+const storeCandidate = (
   replica: EntityReplica,
   applied: Awaited<ReturnType<typeof applyEntityFrame>>,
   state: EntityState,
   frameHash: string,
   hashesToSign: ReturnType<typeof buildEntityHashesToSign>,
-): void => {
+  authority: ReturnType<typeof buildEntityFrameAuthority>,
+): EntityCandidate => {
   replica.candidate = {
     frameHash,
     height: state.height,
@@ -286,47 +299,23 @@ const storeMultiSignerCandidate = (
     candidateEffects: applied.candidateEffects,
     storageChanges: applied.storageChanges,
     proposableAccounts: copyProposableAccounts(applied.proposableAccounts),
+    authority,
     ...(applied.consumptionNodeChanges ? { consumptionNodeChanges: applied.consumptionNodeChanges } : {}),
     ...(applied.accountJClaimNodeChanges ? { accountJClaimNodeChanges: applied.accountJClaimNodeChanges } : {}),
   };
+  return replica.candidate;
 };
 
-const assembleMultiSignerFrame = (
-  replica: EntityReplica,
-  selection: EntityProposalSelection,
-  applied: Awaited<ReturnType<typeof applyEntityFrame>>,
-  state: EntityState,
-  entityContext: EntityFrame['entityContext'],
-  frameHash: string,
-  stateRoot: string,
-  authorityRoot: string,
-  hashesToSign: ReturnType<typeof buildEntityHashesToSign>,
-  selfSigs: string[],
-  timestamp: number,
-  view: number,
-): EntityFrame => ({
-  height: state.height,
-  parentFrameHash: getPrevFrameHash(replica.state),
-  stateRoot,
-  authorityRoot,
-  entityContext,
-  txs: [...selection.proposalTxs],
-  events: structuredClone(applied.events),
-  hash: frameHash,
-  timestamp,
-  leader: {
-    proposerSignerId: replica.signerId.toLowerCase(),
-    view,
-    ...(replica.pendingLeaderCertificate ? { certificate: replica.pendingLeaderCertificate } : {}),
-  },
-  ...(selection.proposalJPrefixCertificate ? { jPrefixCertificate: structuredClone(selection.proposalJPrefixCertificate) } : {}),
-  hashesToSign,
-  collectedSigs: new Map([[replica.signerId, selfSigs]]),
-});
-
-const buildMultiSignerProposal = async (
+/**
+ * Build the next Entity frame from the selected mempool txs: fit to wire,
+ * apply, hash, sign own manifest. Same for every board size; a single-signer
+ * board additionally seals its own quorum hankos here since no precommit
+ * round follows.
+ */
+const buildEntityProposal = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
+  profile: ProposalProfile,
 ): Promise<EntityFrame | null> => {
   const { env, workingReplica } = context;
   const { proposalJPrefixCertificate, proposalTxs } = selection;
@@ -342,7 +331,7 @@ const buildMultiSignerProposal = async (
         state: withBoardAuthority(workingReplica.state, authorityConfig),
       };
   const leader = getReplicaProposalLeader(authorityReplica);
-  assertMultiSignerProposalPrefix(env, authorityReplica, selection, leader.view);
+  assertProposalPrefix(env, authorityReplica, selection, leader.view);
   const fitted = await fitEntityProposalToWireBudget({
     env,
     replica: workingReplica,
@@ -353,35 +342,41 @@ const buildMultiSignerProposal = async (
   if (fitted.txs.length !== selection.proposalTxs.length) {
     selection.proposalTxs = fitted.txs;
   }
+  const txs = selection.proposalTxs;
   const entityContext = fitted.entityContext;
-  const applied = await applyEntityFrame(
+  profile.checkpoint('wireFit');
+  await assertHtlcPreparedInfraContext({
+    state: workingReplica.state,
+    proposalTxs: txs,
+    context: entityContext,
+    entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, workingReplica.entityId),
+  });
+  const applyFrame = context.promoteCandidateState && selection.isSingleSigner
+    ? applyRuntimeOwnedEntityFrame
+    : applyEntityFrame;
+  const applied = await applyFrame(
     env,
     workingReplica.state,
     entityContext,
-    selection.proposalTxs,
+    txs,
     env.state.timestamp,
   );
+  profile.checkpoint('frameApply');
   if (!shouldKeepPreparedEntityFrame(selection, applied.accountsToProposeFramesCount)) {
     return null;
   }
   const height = workingReplica.state.height + 1;
-  const state = buildProposalState(
-    env,
-    workingReplica,
-    applied.newState,
-    proposalTxs,
-    height,
-    env.state.timestamp,
-    leader.view,
-  );
+  const timestamp = env.state.timestamp;
+  const state = buildProposalState(env, workingReplica, applied.newState, txs, height, timestamp, leader.view);
   const parentFrameHash = getPrevFrameHash(workingReplica.state);
   const stateRoot = computeCanonicalEntityConsensusStateHash(state);
-  const authorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(state));
+  const authority = buildEntityFrameAuthority(state);
+  const authorityRoot = computeEntityFrameAuthorityRoot(authority);
   const frameHash = createEntityFrameHashFromStateRoot(
     parentFrameHash,
     height,
-    env.state.timestamp,
-    proposalTxs,
+    timestamp,
+    txs,
     applied.events,
     state.entityId,
     stateRoot,
@@ -389,58 +384,183 @@ const buildMultiSignerProposal = async (
     entityContext,
     proposalJPrefixCertificate ?? undefined,
   );
-  const outputHashes = buildCertifiedEntityOutputHashes(
-    state,
-    env,
-    height,
-    frameHash,
-    applied.outputs,
-  );
+  const outputHashes = buildCertifiedEntityOutputHashes(state, env, height, frameHash, applied.outputs);
   const hashesToSign = buildEntityHashesToSign(
     workingReplica.state.entityId,
     height,
     frameHash,
     [...(applied.collectedHashes ?? []), ...outputHashes],
   );
+  profile.checkpoint('commitments');
   const selfSigs = await signProposalManifest(env, workingReplica, state, hashesToSign);
-  storeMultiSignerCandidate(workingReplica, applied, state, frameHash, hashesToSign);
-  const frame = assembleMultiSignerFrame(
-    workingReplica, selection, applied, state, entityContext, frameHash,
-    stateRoot, authorityRoot, hashesToSign, selfSigs, env.state.timestamp, leader.view,
-  );
-  validateProposedEntityFrame(frame, 'MultiSignerEntityFrame');
+  // A single signer is its own quorum: seal the hankos now, no precommits.
+  const hankos = selection.isSingleSigner
+    ? await signEntityHashes(
+        env,
+        workingReplica.state.entityId,
+        workingReplica.signerId,
+        hashesToSign.map(hashInfo => hashInfo.hash),
+        state,
+      )
+    : undefined;
+  profile.checkpoint('signatures');
+  storeCandidate(workingReplica, applied, state, frameHash, hashesToSign, authority);
+  const frame: EntityFrame = {
+    height,
+    parentFrameHash,
+    stateRoot,
+    authorityRoot,
+    entityContext,
+    txs: [...txs],
+    events: structuredClone(applied.events),
+    hash: frameHash,
+    timestamp,
+    leader: {
+      proposerSignerId: workingReplica.signerId.toLowerCase(),
+      view: leader.view,
+      ...(workingReplica.pendingLeaderCertificate ? { certificate: workingReplica.pendingLeaderCertificate } : {}),
+    },
+    ...(proposalJPrefixCertificate ? { jPrefixCertificate: structuredClone(proposalJPrefixCertificate) } : {}),
+    hashesToSign,
+    collectedSigs: new Map([[workingReplica.signerId.toLowerCase(), selfSigs]]),
+    ...(hankos ? { hankos } : {}),
+  };
+  validateProposedEntityFrame(frame, selection.isSingleSigner ? 'SingleSignerEntityFrame' : 'MultiSignerEntityFrame');
   markEntityFrameBodyVerified(frame);
   return frame;
 };
 
-export const startMultiSignerProposalIfReady = async (
+const isFrameByteLimitError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('ENTITY_FRAME_TOTAL_BYTE_LIMIT_EXCEEDED') ||
+    message.includes('wire byte limit exceeded') ||
+    message.includes('ENTITY_INFRA_CONTEXT_BYTE_LIMIT_EXCEEDED');
+};
+
+/**
+ * Proposing straight from the mempool: one rejected tx (a peer's invalid
+ * certified output, a stale command) must not poison every other tx batched
+ * into the same frame — evict exactly that tx and rebuild. Invariant failures
+ * keep propagating; only `reject`-disposition frame rejections are evicted.
+ * A frame whose applied bytes outgrow the wire budget defers its tail to the
+ * next frame instead of halting.
+ */
+const buildEntityProposalEvictingRejected = async (
+  context: ApplyEntityInputContext,
+  selection: EntityProposalSelection,
+  profile: ProposalProfile,
+): Promise<EntityFrame | null> => {
+  for (let round = 0; round <= selection.proposalTxs.length; round += 1) {
+    try {
+      return await buildEntityProposal(context, selection, profile);
+    } catch (error) {
+      if (isFrameByteLimitError(error) && selection.proposalTxs.length > 1) {
+        // Both byte-limit errors end in `:<actual>:<limit>`; scale the kept
+        // prefix by that ratio (10% margin) instead of blind halving.
+        const message = error instanceof Error ? error.message : String(error);
+        const ratioMatch = /(\d+):(\d+)\s*(?::txs=|$)/.exec(message);
+        const actual = ratioMatch ? Number(ratioMatch[1]) : 0;
+        const limit = ratioMatch ? Number(ratioMatch[2]) : 0;
+        const scaled = actual > limit && limit > 0
+          ? Math.floor(selection.proposalTxs.length * 0.9 * limit / actual)
+          : Math.floor(selection.proposalTxs.length / 2);
+        const keep = Math.max(1, Math.min(scaled, selection.proposalTxs.length - 1));
+        entityLog.warn('proposal.frame_bytes_deferred', {
+          entity: shortId(context.workingReplica.entityId),
+          selected: keep,
+          deferred: selection.proposalTxs.length - keep,
+          error: message.slice(0, 120),
+        });
+        selection.proposalTxs = selection.proposalTxs.slice(0, keep);
+        continue;
+      }
+      if (!(error instanceof MalformedEntityFrameInputError) || error.frameTx === undefined) throw error;
+      const rejectedTx = error.frameTx as EntityTx;
+      const inProposal = selection.proposalTxs.includes(rejectedTx);
+      const inMempool = context.workingReplica.mempool.includes(rejectedTx);
+      if (!inProposal || !inMempool || selection.proposalTxs.length === 1) throw error;
+      entityLog.warn('proposal.tx_evicted', {
+        entity: shortId(context.workingReplica.entityId),
+        txType: error.txType,
+        rejection: error.rejection,
+        remaining: selection.proposalTxs.length - 1,
+      });
+      context.workingReplica.mempool = context.workingReplica.mempool.filter(tx => tx !== rejectedTx);
+      selection.proposalTxs = selection.proposalTxs.filter(tx => tx !== rejectedTx);
+    }
+  }
+  throw new Error('ENTITY_PROPOSAL_EVICTION_LOOP_EXHAUSTED');
+};
+
+const logProposalProfile = (
+  context: ApplyEntityInputContext,
+  frame: EntityFrame,
+  profile: ProposalProfile,
+): void => {
+  const elapsedMs = Math.round(getPerfMs() - profile.startedAt);
+  if (!entityFrameProfileEnabled() && elapsedMs < entityFrameSlowMs()) return;
+  entityLog.info('single_signer.profile', {
+    entity: String(context.workingReplica.entityId || '').slice(-8),
+    elapsedMs,
+    txs: frame.txs.length,
+    outputs: context.entityOutbox.length,
+    jOutputs: context.jOutbox.length,
+    phases: cumulativeMarksToPhases(profile.checkpoints, elapsedMs),
+    perf: snapshotPerfPhases(),
+  });
+};
+
+/**
+ * Build the next frame when this replica may propose. A single-signer board is
+ * its own quorum, so the frame commits immediately (state, overlay, outputs
+ * land in this same input); a larger board stores the frame as the open
+ * proposal and sends it to the validators for precommits.
+ */
+export const startEntityProposalIfReady = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
   localCanPropose: boolean,
-): Promise<void> => {
-  if (!shouldStartProposal(context.workingReplica, selection, localCanPropose)) return;
+  profile: ProposalProfile = noProfile,
+): Promise<ApplyEntityInputResult | null> => {
+  const { workingReplica } = context;
+  if (!shouldStartProposal(workingReplica, selection, localCanPropose)) return null;
   entityLog.debug('proposal.auto_start', {
     mempool: selection.proposalTxs.length,
     txs: selection.proposalTxs.map(tx => tx.type),
   });
-  const proposal = await buildMultiSignerProposal(context, selection);
-  if (!proposal) return;
-  context.workingReplica.proposal = proposal;
+  const priorState = workingReplica.state;
+  const frame = await buildEntityProposalEvictingRejected(context, selection, profile);
+  if (!frame) return null;
+  const candidate = workingReplica.candidate;
+  if (!candidate) throw new Error('ENTITY_PROPOSAL_CANDIDATE_MISSING');
+  if (selection.isSingleSigner) {
+    // Retired validators of a board handover remain full-state observers:
+    // deliver the certified transition to the old board, never authority.
+    const handoverConfig = getBoardHandoverFrameConfig(context.env, priorState, frame.txs);
+    const result = await finalizeCommitNotification(context, frame, candidate, frame.collectedSigs ?? new Map(), {
+      localProposal: true,
+      ...(handoverConfig ? { broadcastCommit: true, broadcastValidators: priorState.config.validators } : {}),
+    });
+    profile.checkpoint('commit');
+    logProposalProfile(context, frame, profile);
+    return result;
+  }
+  workingReplica.proposal = frame;
   entityLog.debug('proposal.created', {
-    frame: shortHash(proposal.hash),
-    txs: proposal.txs.length,
-    hashes: proposal.hashesToSign?.length ?? 0,
+    frame: shortHash(frame.hash),
+    txs: frame.txs.length,
+    hashes: frame.hashesToSign?.length ?? 0,
   });
-  const proposalValidators = proposal.txs.some(tx => tx.type === 'boardHandover')
-    ? context.workingReplica.candidate?.state.config.validators
-    : context.workingReplica.state.config.validators;
-  if (!proposalValidators) throw new Error('ENTITY_PROPOSAL_CANDIDATE_MISSING');
+  const proposalValidators = frame.txs.some(tx => tx.type === 'boardHandover')
+    ? candidate.state.config.validators
+    : workingReplica.state.config.validators;
   for (const validatorId of proposalValidators) {
-    if (validatorId === context.workingReplica.signerId) continue;
+    if (validatorId === workingReplica.signerId) continue;
     context.entityOutbox.push({
       entityId: context.entityInput.entityId,
       signerId: validatorId,
-      proposedFrame: proposal,
+      proposedFrame: frame,
     });
   }
+  return null;
 };

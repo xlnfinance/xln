@@ -5,6 +5,7 @@ import type { EntityTx } from '../../../types/entity-tx';
 import type { JPrefixCertificate } from '../../../types/jurisdiction-events';
 import {
   ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES,
+  measureEntityFrameWireBytes,
   selectEntityFrameTxPrefixForWireBudget,
 } from '../frame';
 import { getPrevFrameHash } from '../frame/lineage';
@@ -95,6 +96,15 @@ export const fitEntityProposalToWireBudget = async (params: {
       }
       const fitted = selectEntityFrameTxPrefixForWireBudget(slice, rest(materialized.entityContext));
       if (fitted.length === slice.length) {
+        if (slice.length >= 100) {
+          const wire = rest(materialized.entityContext);
+          entityLog.info('proposal.wire_budget_fit', {
+            entityId: replica.state.entityId,
+            txs: slice.length,
+            bytes: measureEntityFrameWireBytes({ ...wire, txs: slice }),
+            contextBytes: measureEntityFrameWireBytes({ ...wire, txs: [] }),
+          });
+        }
         // First fitting prefix wins. Growing it back toward the failing size
         // re-materialized the HTLC context per probe (hundreds of ms to
         // seconds each at 350 payments) and burned 7.7 s of a 10 s Hub frame;

@@ -532,6 +532,8 @@ export interface EntityCandidate {
   storageChanges: RuntimeOverlayRecord[];
   /** Proposal-envelope Account ids; unioned with storageChanges at Hanko seal. */
   proposableAccounts?: readonly string[];
+  /** Authority already computed by the proposer; lets the certified link skip a recompute. */
+  authority?: EntityFrameAuthority;
   /** Validator-computed CAS delta, published only when this exact frame commits. */
   consumptionNodeChanges?: {
     newNodes: readonly ConsumptionNodeEntry[];

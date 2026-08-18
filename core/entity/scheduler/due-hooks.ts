@@ -7,7 +7,9 @@ import type {
 } from './types';
 import { getEntityCertifiedJurisdictionHeight } from '../../jurisdiction/machine/history/height';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
-import { terminateHtlcRoute } from '../tx/j-events-htlc/route-lifecycle';
+import { HTLC_SECRET_ACK_TIMEOUT_MS, terminateHtlcRoute } from '../tx/j-events-htlc/route-lifecycle';
+import { scheduleHook } from './hook-state';
+import { J_BATCH_CONTRACT_LIMITS } from '../../jurisdiction/machine/batch';
 import { createDueHookPlan, type DueHookPlan } from './due-hook-types';
 import { processDisputeDeadlineHook } from './dispute-deadline-hook';
 import { processBoardResealHook } from './board-reseal-hook';
@@ -36,6 +38,25 @@ const processSecretAckTimeout = (
     return;
   }
   if (account.activeDispute) return;
+  // disputeStart halts the Runtime when the J batch already carries
+  // maxDisputeStarts. Under load many secret-ack deadlines fire in one tick;
+  // re-arm the ones that cannot fit and let them fire after the batch flushes.
+  const queuedStarts = replica.state.jBatchState?.batch.disputeStarts.length ?? 0;
+  if (queuedStarts + plan.disputePrepareCounterparties.size >= J_BATCH_CONTRACT_LIMITS.maxDisputeStarts
+    && !plan.disputePrepareCounterparties.has(counterpartyEntityId)) {
+    if (replica.state.crontabState) {
+      scheduleHook(replica.state.crontabState, {
+        ...hook,
+        triggerAt: replica.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
+      });
+    }
+    crontabLog.warn('htlc_secret_ack_timeout.deferred', {
+      counterparty: shortId(counterpartyEntityId),
+      hashlock: shortHash(hashlock),
+      queuedStarts,
+    });
+    return;
+  }
   plan.disputePrepareCounterparties.set(
     counterpartyEntityId,
     'auto-prepare-dispute-after-secret-ack-timeout',
