@@ -221,6 +221,7 @@ const proposalFailureDisposition = (
 ): Extract<AccountTxFailureDisposition, 'retry' | 'reject'> => {
   if (
     rejection.kind === 'settlement_signed_account_frozen' ||
+    rejection.kind === 'htlc_lock_capacity' ||
     isRefreshableStaleSettlementSeal(account, tx, rejection)
   ) {
     return ACCOUNT_TX_FAILURE_DISPOSITIONS.retry;

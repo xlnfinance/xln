@@ -108,6 +108,15 @@ export const accountTxValidationRejected = (
     events,
   );
 
+export const accountTxHtlcLockCapacityRejected = (
+  message: string,
+  events: readonly string[],
+): ApplyAccountTxRejected =>
+  accountTxRejected(
+    { kind: 'htlc_lock_capacity', code: ACCOUNT_TX_REJECTION_CODES.htlcLockCapacity, message },
+    events,
+  );
+
 export const withAccountTxCandidateEffects = (
   result: ApplyAccountTxResult,
   candidateEffects: AccountOutput[],

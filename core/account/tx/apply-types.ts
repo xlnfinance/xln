@@ -40,6 +40,7 @@ export const ACCOUNT_TX_REJECTION_CODES = {
   deltaTokenInvalid: 'ACCOUNT_DELTA_TOKEN_INVALID',
   deltaRowCountInvalid: 'ACCOUNT_DELTA_ROW_COUNT_INVALID',
   deltaRowLimitExceeded: 'ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED',
+  htlcLockCapacity: 'ACCOUNT_HTLC_LOCK_CAPACITY',
 } as const satisfies Record<string, string>;
 
 export type AccountTxRejection =
@@ -54,6 +55,12 @@ export type AccountTxRejection =
       message: string;
       status: string;
       txType: AccountTx['type'];
+    }>
+  | Readonly<{
+      /** Account already holds MAX_ACCOUNT_HTLC_LOCKS live locks; the lock waits in the mempool. */
+      kind: 'htlc_lock_capacity';
+      code: typeof ACCOUNT_TX_REJECTION_CODES.htlcLockCapacity;
+      message: string;
     }>
   | Readonly<{
       kind: 'settlement_signed_account_frozen';

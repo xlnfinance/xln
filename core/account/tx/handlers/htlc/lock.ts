@@ -20,7 +20,7 @@ import { addHold } from '../../hold-utils';
 import { isHtlcTimelockExpired } from '../../../htlc-deadline';
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../../protocol/htlc/codec/onion-layer';
 import type { ApplyAccountTxResult } from '../../apply-types';
-import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
+import { accountTxApplied, accountTxHtlcLockCapacityRejected, accountTxValidationRejected } from '../../apply-result';
 
 type HtlcLockTx = Extract<AccountTx, { type: 'htlc_lock' }>;
 type HtlcLockClock = Readonly<{
@@ -37,9 +37,6 @@ const validateHtlcLock = (
 ): string | undefined => {
   const { lockId, timelock, revealBeforeHeight, amount } = tx.data;
   if (account.state.locks.has(lockId)) return `Lock ${lockId} already exists`;
-  if (account.state.locks.size >= LIMITS.MAX_ACCOUNT_HTLC_LOCKS) {
-    return `Too many active HTLC locks: max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`;
-  }
   if (isHtlcTimelockExpired(currentTimestamp, timelock)) {
     return `Timelock ${timelock} already expired (timestamp)`;
   }
@@ -69,6 +66,15 @@ export async function handleHtlcLock(
     clock.enforcementJHeight,
   );
   if (validationError) return accountTxValidationRejected(validationError, events);
+  if (account.state.locks.size >= LIMITS.MAX_ACCOUNT_HTLC_LOCKS) {
+    // Not a bad lock: the account is full. Proposal keeps it queued and
+    // retries once earlier locks resolve (a batched payer would otherwise lose
+    // every payment past the 32nd).
+    return accountTxHtlcLockCapacityRejected(
+      `Too many active HTLC locks: max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`,
+      events,
+    );
+  }
 
   const delta = createDeltaDraft(account.state, tokenId);
 
