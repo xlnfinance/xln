@@ -152,9 +152,6 @@ const spawnLaneRuntime = async (options: {
       // per-user frame profile can only ever be measured on the mesh daemons.
       ...(process.env['XLN_RUNTIME_FRAME_LOG'] ? { XLN_RUNTIME_FRAME_LOG: '1' } : {}),
       ...(process.env['XLN_RUNTIME_APPLY_PROFILE'] ? { XLN_RUNTIME_APPLY_PROFILE: '1' } : {}),
-      // A lane hosting a hundred users otherwise runs second-long synchronous
-      // frames during which it accepts no socket; bounded frames keep it
-      // reachable for the driver and the Hub between frames.
       // Unbounded by default: a runtime frame must absorb every queued input at
       // once (10k+); set XLN_HLT_LANE_MAX_ENTITY_INPUTS_PER_FRAME only for experiments.
       ...(process.env['XLN_HLT_LANE_MAX_ENTITY_INPUTS_PER_FRAME']
