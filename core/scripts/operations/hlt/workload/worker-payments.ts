@@ -59,13 +59,14 @@ const ROUTE_BARRIER_TIMEOUT_MS = 300_000;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * A routed payment is admitted against the *sender's* gossip view: the Hub's
- * profile must already list an Account with the receiver, and the receiver's
- * own profile must list an Account with the Hub. Both propagate asynchronously,
- * so a driver that starts paying as soon as provisioning returns halts the
- * sender Runtime on HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING instead of measuring
- * anything. This barrier waits for the view the payment will actually be
- * judged against.
+ * A routed payment is admitted against the *sender's* gossip view of the hop it
+ * traverses. Only pinned Accounts are advertised, and a user pins its Hub while
+ * a Hub never pins its users, so the whole route is described by the two user
+ * Profiles: the sender's row for the Hub and the receiver's row for the Hub.
+ * Both propagate asynchronously, so a driver that starts paying as soon as
+ * provisioning returns halts the sender Runtime on
+ * HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING instead of measuring anything. This
+ * barrier waits for the exact view the payment will be judged against.
  */
 const waitForRoutableReceivers = async (
   senders: readonly LaneRuntime[],
@@ -80,11 +81,8 @@ const waitForRoutableReceivers = async (
     await Promise.all(senders.map(async (lane, index) => {
       const settled = confirmed[index]!;
       if (settled.size === receiverIds.length) return;
-      const hubAccounts = await lane.control.gossipProfileCounterparties(hubEntityId);
-      if (!hubAccounts) return;
-      const hubSees = new Set(hubAccounts);
       for (const receiverId of receiverIds) {
-        if (settled.has(receiverId) || !hubSees.has(receiverId)) continue;
+        if (settled.has(receiverId)) continue;
         const receiverAccounts = await lane.control.gossipProfileCounterparties(receiverId);
         if (receiverAccounts?.includes(hubEntityId)) settled.add(receiverId);
       }
