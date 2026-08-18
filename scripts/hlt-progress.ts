@@ -103,22 +103,31 @@ export const renderProgressPage = (ledger: Ledger): string => {
   const targetLine = `
     <line class="target" x1="${frame.padding.left}" x2="${frame.width - frame.padding.right}"
           y1="${frame.y(TARGET_TPS).toFixed(1)}" y2="${frame.y(TARGET_TPS).toFixed(1)}" />
-    <text class="target-label" x="${frame.width - frame.padding.right}" y="${(frame.y(TARGET_TPS) - 8).toFixed(1)}"
-          text-anchor="end">target ${TARGET_TPS}</text>`;
+    <text class="target-label" x="${(frame.padding.left + 6).toFixed(1)}" y="${(frame.y(TARGET_TPS) - 8).toFixed(1)}">target ${TARGET_TPS}</text>`;
 
   const points = runs.flatMap((run, index) => ([
     { run, index, value: run.paymentsTps, kind: 'payments' as const },
     { run, index, value: run.swapsTps, kind: 'swaps' as const },
   ])).filter(point => point.value > 0).map(point => `
-    <circle class="dot ${point.kind}" data-run="${point.index}"
-            cx="${frame.x(point.index).toFixed(1)}" cy="${frame.y(point.value).toFixed(1)}" r="6">
-      <title>${escapeHtml(`${clockLabel(point.run.at)} · ${point.run.commit.slice(0, 7)} · ${point.run.users} users\n${point.kind}: ${point.value} /s — ${point.run.headline}\n${point.run.detail}`)}</title>
-    </circle>`).join('');
+    <circle class="dot ${point.kind}" tabindex="0"
+            cx="${frame.x(point.index).toFixed(1)}" cy="${frame.y(point.value).toFixed(1)}" r="7"
+            data-when="${escapeHtml(clockLabel(point.run.at))}"
+            data-commit="${escapeHtml(point.run.commit.slice(0, 7))}"
+            data-users="${point.run.users}"
+            data-metric="${point.kind} ${point.value}/s"
+            data-headline="${escapeHtml(point.run.headline)}"
+            data-detail="${escapeHtml(point.run.detail)}"></circle>`).join('');
 
   const halted = runs.flatMap((run, index) => (run.status === 'green' ? [] : [`
-    <g class="halted" transform="translate(${frame.x(index).toFixed(1)},${frame.y(0).toFixed(1)})">
+    <g class="halted" tabindex="0" transform="translate(${frame.x(index).toFixed(1)},${frame.y(0).toFixed(1)})"
+       data-when="${escapeHtml(clockLabel(run.at))}"
+       data-commit="${escapeHtml(run.commit.slice(0, 7))}"
+       data-users="${run.users}"
+       data-metric="halted"
+       data-headline="${escapeHtml(run.headline)}"
+       data-detail="${escapeHtml(run.detail)}">
+      <circle class="hit" r="11" />
       <line x1="-6" y1="-6" x2="6" y2="6" /><line x1="-6" y1="6" x2="6" y2="-6" />
-      <title>${escapeHtml(`${clockLabel(run.at)} · ${run.commit.slice(0, 7)} · ${run.users} users\nhalted — ${run.headline}\n${run.detail}`)}</title>
     </g>`])).join('');
 
   const ticks = runs.map((run, index) => `
@@ -173,7 +182,29 @@ export const renderProgressPage = (ledger: Ledger): string => {
   circle.payments { fill: var(--payments); }
   circle.swaps { fill: var(--swaps); }
   g.halted line { stroke: var(--red); stroke-width: 2.5; stroke-linecap: round; }
-  g.halted { cursor: help; }
+  g.halted { cursor: pointer; }
+  g.halted circle.hit { fill: transparent; }
+  circle.dot, g.halted { transition: transform 90ms ease-out; transform-box: fill-box; transform-origin: center; }
+  circle.dot:hover, circle.dot:focus-visible { r: 9; outline: none; }
+  g.halted:hover line, g.halted:focus-visible line { stroke-width: 3.5; }
+  /* Instant, styled, and readable: the native SVG tooltip waits a beat and
+     then paints an OS box that cannot show the reason a number moved. */
+  #tip {
+    position: fixed; z-index: 10; max-width: 380px; pointer-events: none;
+    opacity: 0; transform: translateY(3px); transition: opacity 90ms ease-out, transform 90ms ease-out;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28); font-size: 13.5px; line-height: 1.5;
+  }
+  #tip[data-open="1"] { opacity: 1; transform: translateY(0); }
+  #tip .tip-meta { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11.5px;
+                   letter-spacing: 0.02em; margin-bottom: 6px; }
+  #tip .tip-metric { font-family: ui-monospace, monospace; font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+  #tip .tip-metric.payments { color: var(--payments); }
+  #tip .tip-metric.swaps { color: var(--swaps); }
+  #tip .tip-metric.halted { color: var(--red); }
+  #tip .tip-headline { font-weight: 600; margin-bottom: 5px; }
+  #tip .tip-detail { color: var(--muted); }
   .legend { display: flex; gap: 20px; margin: 16px 0 0; color: var(--muted); font-size: 13px; }
   .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
   table { width: 100%; border-collapse: collapse; margin-top: 28px; font-size: 14px; }
@@ -217,6 +248,56 @@ export const renderProgressPage = (ledger: Ledger): string => {
     <tbody>${rows}</tbody>
   </table>`}
 </main>
+<div id="tip" role="tooltip" aria-hidden="true"></div>
+<script>
+  const tip = document.getElementById('tip');
+  let hovering = false;
+
+  const place = (event) => {
+    const pad = 14;
+    const box = tip.getBoundingClientRect();
+    let left = event.clientX + pad;
+    let top = event.clientY + pad;
+    if (left + box.width > window.innerWidth - 8) left = event.clientX - box.width - pad;
+    if (top + box.height > window.innerHeight - 8) top = event.clientY - box.height - pad;
+    tip.style.left = Math.max(8, left) + 'px';
+    tip.style.top = Math.max(8, top) + 'px';
+  };
+
+  const show = (target, event) => {
+    const kind = target.dataset.metric.startsWith('payments') ? 'payments'
+      : target.dataset.metric.startsWith('swaps') ? 'swaps' : 'halted';
+    tip.innerHTML = ''
+      + '<div class="tip-meta">' + target.dataset.when + ' &middot; ' + target.dataset.commit
+      + ' &middot; ' + target.dataset.users + ' users</div>'
+      + '<div class="tip-metric ' + kind + '">' + target.dataset.metric + '</div>'
+      + '<div class="tip-headline">' + target.dataset.headline + '</div>'
+      + '<div class="tip-detail">' + target.dataset.detail + '</div>';
+    tip.dataset.open = '1';
+    tip.setAttribute('aria-hidden', 'false');
+    if (event) place(event);
+  };
+
+  const hide = () => {
+    tip.dataset.open = '0';
+    tip.setAttribute('aria-hidden', 'true');
+  };
+
+  for (const target of document.querySelectorAll('[data-metric]')) {
+    target.addEventListener('pointerenter', event => { hovering = true; show(target, event); });
+    target.addEventListener('pointermove', place);
+    target.addEventListener('pointerleave', () => { hovering = false; hide(); });
+    target.addEventListener('focus', () => { hovering = true; show(target, null);
+      const rect = target.getBoundingClientRect();
+      place({ clientX: rect.left + rect.width / 2, clientY: rect.bottom });
+    });
+    target.addEventListener('blur', () => { hovering = false; hide(); });
+  }
+
+  // The page is watched while runs land, so it refreshes itself — but never
+  // out from under a tooltip someone is still reading.
+  setInterval(() => { if (!hovering) location.reload(); }, 5000);
+</script>
 `;
 };
 
