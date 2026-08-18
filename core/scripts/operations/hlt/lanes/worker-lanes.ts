@@ -9,7 +9,7 @@ import {
   type ManagedEntityIdentity,
 } from '../../../../orchestrator/daemon-control';
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
-import { laneDaemons, spawnLaneRuntimes, type LaneRuntime } from './lane-runtimes';
+import { laneDaemons, spawnLaneRuntimes, stopLaneRuntimes, type LaneRuntime } from './lane-runtimes';
 import { importEntity } from '../../../../runtime/registration/entity-creation';
 import type { RuntimeInput } from '../../../../runtime/types';
 import { decodeEntitySummaries, type LoadIdentity } from '../boundary/worker-boundary';
@@ -232,6 +232,21 @@ export const setupParallelLoadLanes = async (options: {
     laneSeeds: seeds,
     laneIndexOffset: (options.role === 'maker' ? 0 : options.lanes) + options.laneOffset * 2,
   });
+  try {
+    return await provisionLoadLanes(options, identities, runtimes);
+  } catch (error) {
+    // A failed provisioning step must not leave daemons listening on the lane
+    // ports: the next run would connect to a halted stranger on :21000.
+    await stopLaneRuntimes(runtimes);
+    throw error;
+  }
+};
+
+const provisionLoadLanes = async (
+  options: Parameters<typeof setupParallelLoadLanes>[0],
+  identities: readonly ManagedEntityIdentity[],
+  runtimes: LaneRuntime[],
+): Promise<{ identities: LoadIdentity[]; runtimes: LaneRuntime[] }> => {
   await runInBatches(runtimes, async lane => {
     await lane.control.registerSigner(lane.identity.signerId, lane.identity.privateKeyHex);
     const existing = new Set((await lane.control.listEntities()).map(entity => entity.entityId));
