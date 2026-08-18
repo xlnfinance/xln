@@ -415,6 +415,13 @@ const logSingleSignerProfile = (
  * frame tx from the proposal and the mempool, then rebuild. Invariant failures
  * keep propagating; only `reject`-disposition frame rejections are evicted.
  */
+const isFrameByteLimitError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('ENTITY_FRAME_TOTAL_BYTE_LIMIT_EXCEEDED') ||
+    message.includes('wire byte limit exceeded') ||
+    message.includes('ENTITY_FRAME_TX_BYTE_LIMIT_EXCEEDED');
+};
+
 const buildSingleSignerFrameEvictingRejected = async (
   context: ApplyEntityInputContext,
   options: SingleSignerFrameOptions,
@@ -424,6 +431,21 @@ const buildSingleSignerFrameEvictingRejected = async (
     try {
       return await buildSingleSignerFrame(context, attempt);
     } catch (error) {
+      // The pre-apply wire fit measures txs + context with a fixed slack for
+      // events; a frame whose applied events outgrow that slack (batched HTLC
+      // payments per user) must defer half of the txs to the next frame, not
+      // halt the Runtime. The candidate State is isolated, so retrying is safe.
+      if (isFrameByteLimitError(error) && attempt.proposalTxs.length > 1) {
+        const keep = Math.max(1, Math.floor(attempt.proposalTxs.length / 2));
+        entityLog.warn('single_signer.frame_bytes_deferred', {
+          entity: shortId(context.workingReplica.entityId),
+          selected: keep,
+          deferred: attempt.proposalTxs.length - keep,
+          error: error instanceof Error ? error.message.slice(0, 120) : String(error),
+        });
+        attempt = { ...attempt, proposalTxs: attempt.proposalTxs.slice(0, keep) };
+        continue;
+      }
       if (!(error instanceof MalformedEntityFrameInputError) || error.frameTx === undefined) throw error;
       const rejectedTx = error.frameTx;
       const inProposal = attempt.proposalTxs.includes(rejectedTx as EntityTx);

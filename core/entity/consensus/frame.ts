@@ -182,7 +182,9 @@ export const selectEntityFrameTxByteBudget = (txs: EntityTx[]): EntityTx[] => {
   return txs.slice(0, low);
 };
 
-export const ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES = 256_000;
+// Events are not known before apply; batched HTLC frames outgrew a 256 KB slack
+// by 1.7 MB at 500 users. Reserve a fifth of the wire budget for them.
+export const ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES = Math.floor(LIMITS.MAX_FRAME_SIZE_BYTES / 5);
 
 export type EntityFrameWireBudgetInput = {
   prevFrameHash: string;
