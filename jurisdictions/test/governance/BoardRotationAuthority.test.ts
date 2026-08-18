@@ -1,4 +1,3 @@
-import { mine } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
 import hre from 'hardhat';
 
@@ -14,7 +13,8 @@ import {
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
 
-const { ethers } = hre;
+const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
+const { mine } = networkHelpers;
 const BOARD = 0;
 const CONTROL = 1;
 const FOUNDATION = 3;
@@ -195,7 +195,7 @@ describe('EntityProvider settled CONTROL governance', function () {
       .to.be.revertedWithCustomError(right.provider, 'InvalidShareSupportSignature');
     await left.provider.proposeBoard(TARGET_ID, boardHash, CONTROL, [leftHanko]);
     await expect(left.provider.proposeBoard(TARGET_ID, nextBoard('stale'), CONTROL, [leftHanko]))
-      .to.be.reverted;
+      .to.revert(ethers);
   });
 
   it('keeps BOARD authority current-only and activation permissionless', async function () {

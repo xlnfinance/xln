@@ -12,7 +12,7 @@ import {
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
 
-const { ethers } = hre;
+const { ethers } = await hre.network.getOrCreate('hardhat');
 
 describe('Depository current-debt forgiveness', () => {
   it('clears only the exact FIFO cursor debt in O(1)', async () => {
@@ -77,7 +77,7 @@ describe('Depository current-debt forgiveness', () => {
     await harness.harnessForgiveCurrent(debtor, creditorA, tokenId);
     expect(await harness._debtIndex(debtor, tokenId)).to.equal(0n);
     expect(await harness.debtOutstanding(debtor, tokenId)).to.equal(0n);
-    await expect(harness._debts(debtor, tokenId, 0n)).to.be.reverted;
+    await expect(harness._debts(debtor, tokenId, 0n)).to.revert(ethers);
   });
 
   it('reverts the whole settlement when a third-party FIFO head blocks bilateral forgiveness', async () => {

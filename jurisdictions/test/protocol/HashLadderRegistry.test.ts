@@ -1,8 +1,8 @@
-import { loadFixture, time } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
 import hre from 'hardhat';
 
-const { ethers } = hre;
+const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
+const { loadFixture, time } = networkHelpers;
 
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
 import type { Depository } from '../../typechain-types/index.js';
@@ -133,24 +133,24 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
   let user1: HardhatEthersSigner;
 
   async function deployFixture() {
-    [user0, user1] = await hre.ethers.getSigners();
+    [user0, user1] = await ethers.getSigners();
     const entityProvider = await deployEntityProvider(user0.address);
-    const AccountFactory = await hre.ethers.getContractFactory('Account');
+    const AccountFactory = await ethers.getContractFactory('Account');
     const accountLib = await AccountFactory.deploy();
     await accountLib.waitForDeployment();
-    const BoundsFactory = await hre.ethers.getContractFactory('DepositoryBounds');
+    const BoundsFactory = await ethers.getContractFactory('DepositoryBounds');
     const boundsLib = await BoundsFactory.deploy();
     await boundsLib.waitForDeployment();
-    const RegistryFactory = await hre.ethers.getContractFactory('HashLadderRegistry');
+    const RegistryFactory = await ethers.getContractFactory('HashLadderRegistry');
     const registryLib = await RegistryFactory.deploy();
     await registryLib.waitForDeployment();
-    const NftCustodyFactory = await hre.ethers.getContractFactory('NftCustody');
+    const NftCustodyFactory = await ethers.getContractFactory('NftCustody');
     const nftCustodyLib = await NftCustodyFactory.deploy();
     await nftCustodyLib.waitForDeployment();
-    const TransformerFactory = await hre.ethers.getContractFactory('DeltaTransformer');
+    const TransformerFactory = await ethers.getContractFactory('DeltaTransformer');
     const transformer = await TransformerFactory.deploy();
     await transformer.waitForDeployment();
-    const DepositoryFactory = await hre.ethers.getContractFactory('Depository', {
+    const DepositoryFactory = await ethers.getContractFactory('Depository', {
       libraries: {
         Account: await accountLib.getAddress(),
         DepositoryBounds: await boundsLib.getAddress(),

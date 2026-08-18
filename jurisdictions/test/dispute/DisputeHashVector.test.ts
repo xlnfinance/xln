@@ -1,8 +1,8 @@
-import { loadFixture } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
 import hre from 'hardhat';
 
-const { ethers } = hre;
+const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
+const { loadFixture } = networkHelpers;
 const abi = ethers.AbiCoder.defaultAbiCoder();
 
 /**

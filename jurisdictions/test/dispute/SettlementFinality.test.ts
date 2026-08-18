@@ -1,4 +1,3 @@
-import { loadFixture } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
 import hre from 'hardhat';
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
@@ -15,7 +14,8 @@ import {
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
 
-const { ethers } = hre;
+const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
+const { loadFixture } = networkHelpers;
 const abi = ethers.AbiCoder.defaultAbiCoder();
 const COOPERATIVE_UPDATE = 0;
 const SETTLEMENT_DIFFS_ABI =

@@ -87,7 +87,12 @@ const deployEntityProvider = async (
   await verifier.waitForDeployment();
   const verifierAddress = await verifier.getAddress();
   const bytecode = linkArtifactBytecode(EntityProvider__factory.bytecode, {
-    'contracts/HankoVerifier.sol:HankoVerifier': verifierAddress,
+    // Hardhat 3 prefixes the project's own compiled source paths with
+    // "project/" in the fully-qualified names it uses for link references
+    // (distinguishing the local project root from dependency source roots).
+    // solc derives each __$...$__ placeholder from this exact string, so the
+    // prefix must match here for manual bytecode linking to find it.
+    'project/contracts/HankoVerifier.sol:HankoVerifier': verifierAddress,
   });
   const factory = new ethers.ContractFactory(EntityProvider__factory.abi, bytecode, signer);
   const foundationRecipient = await signer.getAddress();
@@ -146,10 +151,13 @@ const deployDepository = async (
   const nftCustody = await new NftCustody__factory(signer).deploy();
   await nftCustody.waitForDeployment();
   const bytecode = linkArtifactBytecode(Depository__factory.bytecode, {
-    'contracts/Account.sol:Account': addresses.account,
-    'contracts/DepositoryBounds.sol:DepositoryBounds': await bounds.getAddress(),
-    'contracts/HashLadderRegistry.sol:HashLadderRegistry': await registry.getAddress(),
-    'contracts/custody/NftCustody.sol:NftCustody': await nftCustody.getAddress(),
+    // See the matching comment in deployEntityProvider: Hardhat 3 prefixes
+    // the project's own source paths with "project/" in fully-qualified
+    // names used for link-reference placeholders.
+    'project/contracts/Account.sol:Account': addresses.account,
+    'project/contracts/DepositoryBounds.sol:DepositoryBounds': await bounds.getAddress(),
+    'project/contracts/HashLadderRegistry.sol:HashLadderRegistry': await registry.getAddress(),
+    'project/contracts/custody/NftCustody.sol:NftCustody': await nftCustody.getAddress(),
   });
   const factory = new ethers.ContractFactory(
     Depository__factory.abi,

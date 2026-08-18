@@ -3,8 +3,9 @@
  * Tests the complete flow: Entity registration -> Share release -> Depository integration -> Reserve transfers
  */
 
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
+import { expect } from "chai";
+import hre from "hardhat";
+const { ethers } = await hre.network.getOrCreate("hardhat");
 
 async function entityProviderFactory() {
   const HankoVerifier = await ethers.getContractFactory("HankoVerifier");
@@ -123,7 +124,7 @@ describe("Entity Control-Shares System", function () {
           return false;
         }
       });
-      
+
       expect(entityRegisteredEvent).to.not.be.undefined;
       const parsedEvent = entityProvider.interface.parseLog(entityRegisteredEvent);
       const entityNumber = parsedEvent.args.entityNumber;

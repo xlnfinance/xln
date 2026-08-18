@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import hre from 'hardhat';
 
-const { ethers } = hre;
+const { ethers } = await hre.network.getOrCreate('hardhat');
 
 describe('DeltaTransformer secret reveal liveness', function () {
   it('treats an exact repeated reveal as an idempotent no-op', async function () {

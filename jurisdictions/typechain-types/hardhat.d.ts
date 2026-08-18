@@ -2,992 +2,157 @@
 /* tslint:disable */
 /* eslint-disable */
 
-import { ethers } from "ethers";
-import {
-  DeployContractOptions,
-  FactoryOptions,
-  HardhatEthersHelpers as HardhatEthersHelpersBase,
-} from "@nomicfoundation/hardhat-ethers/types";
 
-import * as Contracts from ".";
+import { ethers } from 'ethers'
+import { DeployContractOptions, FactoryOptions, HardhatEthersHelpers as HardhatEthersHelpersBase} from "@nomicfoundation/hardhat-ethers/types";
 
-declare module "hardhat/types/runtime" {
+import * as Contracts from "./index.js";
+
+declare module "@nomicfoundation/hardhat-ethers/types" {
   interface HardhatEthersHelpers extends HardhatEthersHelpersBase {
-    getContractFactory(
-      name: "IERC1155Errors",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC1155Errors__factory>;
-    getContractFactory(
-      name: "IERC20Errors",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC20Errors__factory>;
-    getContractFactory(
-      name: "IERC721Errors",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC721Errors__factory>;
-    getContractFactory(
-      name: "ERC1155",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ERC1155__factory>;
-    getContractFactory(
-      name: "ERC1155Supply",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ERC1155Supply__factory>;
-    getContractFactory(
-      name: "IERC1155MetadataURI",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC1155MetadataURI__factory>;
-    getContractFactory(
-      name: "IERC1155",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC1155__factory>;
-    getContractFactory(
-      name: "IERC1155Receiver",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC1155Receiver__factory>;
-    getContractFactory(
-      name: "ERC20",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ERC20__factory>;
-    getContractFactory(
-      name: "IERC20Metadata",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC20Metadata__factory>;
-    getContractFactory(
-      name: "IERC20",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC20__factory>;
-    getContractFactory(
-      name: "ERC721",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ERC721__factory>;
-    getContractFactory(
-      name: "IERC721Metadata",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC721Metadata__factory>;
-    getContractFactory(
-      name: "IERC721",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC721__factory>;
-    getContractFactory(
-      name: "IERC721Receiver",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC721Receiver__factory>;
-    getContractFactory(
-      name: "ERC165",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ERC165__factory>;
-    getContractFactory(
-      name: "IERC165",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC165__factory>;
-    getContractFactory(
-      name: "SafeCast",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.SafeCast__factory>;
-    getContractFactory(
-      name: "Strings",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.Strings__factory>;
-    getContractFactory(
-      name: "Account",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.Account__factory>;
-    getContractFactory(
-      name: "INftCustodyERC1155",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.INftCustodyERC1155__factory>;
-    getContractFactory(
-      name: "INftCustodyERC721",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.INftCustodyERC721__factory>;
-    getContractFactory(
-      name: "NftCustody",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.NftCustody__factory>;
-    getContractFactory(
-      name: "DeltaTransformer",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.DeltaTransformer__factory>;
-    getContractFactory(
-      name: "IHashLadderRevealRegistry",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IHashLadderRevealRegistry__factory>;
-    getContractFactory(
-      name: "Depository",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.Depository__factory>;
-    getContractFactory(
-      name: "IERC20",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC20__factory>;
-    getContractFactory(
-      name: "ReentrancyGuardLite",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ReentrancyGuardLite__factory>;
-    getContractFactory(
-      name: "DepositoryBounds",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.DepositoryBounds__factory>;
-    getContractFactory(
-      name: "EntityProvider",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.EntityProvider__factory>;
-    getContractFactory(
-      name: "ERC1155Mock",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ERC1155Mock__factory>;
-    getContractFactory(
-      name: "ERC20Mock",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ERC20Mock__factory>;
-    getContractFactory(
-      name: "ERC721Mock",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ERC721Mock__factory>;
-    getContractFactory(
-      name: "HankoCodec",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.HankoCodec__factory>;
-    getContractFactory(
-      name: "HankoVerifier",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.HankoVerifier__factory>;
-    getContractFactory(
-      name: "HashLadder",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.HashLadder__factory>;
-    getContractFactory(
-      name: "HashLadderRegistry",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.HashLadderRegistry__factory>;
-    getContractFactory(
-      name: "IEntityProvider",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IEntityProvider__factory>;
-    getContractFactory(
-      name: "IEntityShareDepository",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IEntityShareDepository__factory>;
-    getContractFactory(
-      name: "DepositoryDebtHarness",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.DepositoryDebtHarness__factory>;
-    getContractFactory(
-      name: "EntityProviderSupplyHarness",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.EntityProviderSupplyHarness__factory>;
-    getContractFactory(
-      name: "FeeOnTransferERC20",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.FeeOnTransferERC20__factory>;
-    getContractFactory(
-      name: "HashLadderHarness",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.HashLadderHarness__factory>;
-    getContractFactory(
-      name: "MockEntityProvider",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.MockEntityProvider__factory>;
-    getContractFactory(
-      name: "MockRevealRegistry",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.MockRevealRegistry__factory>;
-    getContractFactory(
-      name: "NoopERC1155Mock",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.NoopERC1155Mock__factory>;
-    getContractFactory(
-      name: "NoopERC721Mock",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.NoopERC721Mock__factory>;
-    getContractFactory(
-      name: "ToggleNoopERC1155Mock",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ToggleNoopERC1155Mock__factory>;
-    getContractFactory(
-      name: "ToggleNoopERC721Mock",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ToggleNoopERC721Mock__factory>;
-    getContractFactory(
-      name: "FalseReturnERC20Mock",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.FalseReturnERC20Mock__factory>;
-    getContractFactory(
-      name: "NoReturnERC20Mock",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.NoReturnERC20Mock__factory>;
-    getContractFactory(
-      name: "SupplyLivenessHarness",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.SupplyLivenessHarness__factory>;
-    getContractFactory(
-      name: "TransformerLivenessHarness",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.TransformerLivenessHarness__factory>;
-    getContractFactory(
-      name: "IDepositoryDelegateErrorAbi",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IDepositoryDelegateErrorAbi__factory>;
+  getContractFactory(name: 'Account', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.Account__factory>
+getContractFactory(name: 'DeltaTransformer', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.DeltaTransformer__factory>
+getContractFactory(name: 'IHashLadderRevealRegistry', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.IHashLadderRevealRegistry__factory>
+getContractFactory(name: 'Depository', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.Depository__factory>
+getContractFactory(name: 'IERC20', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.IERC20__factory>
+getContractFactory(name: 'ReentrancyGuardLite', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.ReentrancyGuardLite__factory>
+getContractFactory(name: 'DepositoryBounds', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.DepositoryBounds__factory>
+getContractFactory(name: 'ERC1155Mock', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.ERC1155Mock__factory>
+getContractFactory(name: 'ERC20Mock', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.ERC20Mock__factory>
+getContractFactory(name: 'ERC721Mock', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.ERC721Mock__factory>
+getContractFactory(name: 'EntityProvider', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.EntityProvider__factory>
+getContractFactory(name: 'HankoCodec', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.HankoCodec__factory>
+getContractFactory(name: 'HankoVerifier', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.HankoVerifier__factory>
+getContractFactory(name: 'HashLadder', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.HashLadder__factory>
+getContractFactory(name: 'HashLadderRegistry', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.HashLadderRegistry__factory>
+getContractFactory(name: 'IEntityProvider', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.IEntityProvider__factory>
+getContractFactory(name: 'IDepositoryDelegateErrorAbi', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.IDepositoryDelegateErrorAbi__factory>
+getContractFactory(name: 'INftCustodyERC1155', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.INftCustodyERC1155__factory>
+getContractFactory(name: 'INftCustodyERC721', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.INftCustodyERC721__factory>
+getContractFactory(name: 'NftCustody', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.NftCustody__factory>
+getContractFactory(name: 'IEntityShareDepository', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.IEntityShareDepository__factory>
+getContractFactory(name: 'DepositoryDebtHarness', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.DepositoryDebtHarness__factory>
+getContractFactory(name: 'EntityProviderSupplyHarness', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.EntityProviderSupplyHarness__factory>
+getContractFactory(name: 'FeeOnTransferERC20', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.FeeOnTransferERC20__factory>
+getContractFactory(name: 'HashLadderHarness', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.HashLadderHarness__factory>
+getContractFactory(name: 'MockEntityProvider', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.MockEntityProvider__factory>
+getContractFactory(name: 'MockRevealRegistry', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.MockRevealRegistry__factory>
+getContractFactory(name: 'FalseReturnERC20Mock', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.FalseReturnERC20Mock__factory>
+getContractFactory(name: 'NoReturnERC20Mock', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.NoReturnERC20Mock__factory>
+getContractFactory(name: 'NoopERC1155Mock', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.NoopERC1155Mock__factory>
+getContractFactory(name: 'NoopERC721Mock', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.NoopERC721Mock__factory>
+getContractFactory(name: 'ToggleNoopERC1155Mock', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.ToggleNoopERC1155Mock__factory>
+getContractFactory(name: 'ToggleNoopERC721Mock', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.ToggleNoopERC721Mock__factory>
+getContractFactory(name: 'SupplyLivenessHarness', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.SupplyLivenessHarness__factory>
+getContractFactory(name: 'TransformerLivenessHarness', signerOrOptions?: ethers.Signer | FactoryOptions): Promise<Contracts.TransformerLivenessHarness__factory>
 
-    getContractAt(
-      name: "IERC1155Errors",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC1155Errors>;
-    getContractAt(
-      name: "IERC20Errors",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC20Errors>;
-    getContractAt(
-      name: "IERC721Errors",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC721Errors>;
-    getContractAt(
-      name: "ERC1155",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ERC1155>;
-    getContractAt(
-      name: "ERC1155Supply",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ERC1155Supply>;
-    getContractAt(
-      name: "IERC1155MetadataURI",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC1155MetadataURI>;
-    getContractAt(
-      name: "IERC1155",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC1155>;
-    getContractAt(
-      name: "IERC1155Receiver",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC1155Receiver>;
-    getContractAt(
-      name: "ERC20",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ERC20>;
-    getContractAt(
-      name: "IERC20Metadata",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC20Metadata>;
-    getContractAt(
-      name: "IERC20",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC20>;
-    getContractAt(
-      name: "ERC721",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ERC721>;
-    getContractAt(
-      name: "IERC721Metadata",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC721Metadata>;
-    getContractAt(
-      name: "IERC721",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC721>;
-    getContractAt(
-      name: "IERC721Receiver",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC721Receiver>;
-    getContractAt(
-      name: "ERC165",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ERC165>;
-    getContractAt(
-      name: "IERC165",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC165>;
-    getContractAt(
-      name: "SafeCast",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.SafeCast>;
-    getContractAt(
-      name: "Strings",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.Strings>;
-    getContractAt(
-      name: "Account",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.Account>;
-    getContractAt(
-      name: "INftCustodyERC1155",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.INftCustodyERC1155>;
-    getContractAt(
-      name: "INftCustodyERC721",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.INftCustodyERC721>;
-    getContractAt(
-      name: "NftCustody",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.NftCustody>;
-    getContractAt(
-      name: "DeltaTransformer",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.DeltaTransformer>;
-    getContractAt(
-      name: "IHashLadderRevealRegistry",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IHashLadderRevealRegistry>;
-    getContractAt(
-      name: "Depository",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.Depository>;
-    getContractAt(
-      name: "IERC20",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC20>;
-    getContractAt(
-      name: "ReentrancyGuardLite",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ReentrancyGuardLite>;
-    getContractAt(
-      name: "DepositoryBounds",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.DepositoryBounds>;
-    getContractAt(
-      name: "EntityProvider",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.EntityProvider>;
-    getContractAt(
-      name: "ERC1155Mock",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ERC1155Mock>;
-    getContractAt(
-      name: "ERC20Mock",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ERC20Mock>;
-    getContractAt(
-      name: "ERC721Mock",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ERC721Mock>;
-    getContractAt(
-      name: "HankoCodec",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.HankoCodec>;
-    getContractAt(
-      name: "HankoVerifier",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.HankoVerifier>;
-    getContractAt(
-      name: "HashLadder",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.HashLadder>;
-    getContractAt(
-      name: "HashLadderRegistry",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.HashLadderRegistry>;
-    getContractAt(
-      name: "IEntityProvider",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IEntityProvider>;
-    getContractAt(
-      name: "IEntityShareDepository",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IEntityShareDepository>;
-    getContractAt(
-      name: "DepositoryDebtHarness",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.DepositoryDebtHarness>;
-    getContractAt(
-      name: "EntityProviderSupplyHarness",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.EntityProviderSupplyHarness>;
-    getContractAt(
-      name: "FeeOnTransferERC20",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.FeeOnTransferERC20>;
-    getContractAt(
-      name: "HashLadderHarness",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.HashLadderHarness>;
-    getContractAt(
-      name: "MockEntityProvider",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.MockEntityProvider>;
-    getContractAt(
-      name: "MockRevealRegistry",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.MockRevealRegistry>;
-    getContractAt(
-      name: "NoopERC1155Mock",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.NoopERC1155Mock>;
-    getContractAt(
-      name: "NoopERC721Mock",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.NoopERC721Mock>;
-    getContractAt(
-      name: "ToggleNoopERC1155Mock",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ToggleNoopERC1155Mock>;
-    getContractAt(
-      name: "ToggleNoopERC721Mock",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ToggleNoopERC721Mock>;
-    getContractAt(
-      name: "FalseReturnERC20Mock",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.FalseReturnERC20Mock>;
-    getContractAt(
-      name: "NoReturnERC20Mock",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.NoReturnERC20Mock>;
-    getContractAt(
-      name: "SupplyLivenessHarness",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.SupplyLivenessHarness>;
-    getContractAt(
-      name: "TransformerLivenessHarness",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.TransformerLivenessHarness>;
-    getContractAt(
-      name: "IDepositoryDelegateErrorAbi",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IDepositoryDelegateErrorAbi>;
+  getContractAt(name: 'Account', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.Account>
+getContractAt(name: 'DeltaTransformer', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.DeltaTransformer>
+getContractAt(name: 'IHashLadderRevealRegistry', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.IHashLadderRevealRegistry>
+getContractAt(name: 'Depository', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.Depository>
+getContractAt(name: 'IERC20', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.IERC20>
+getContractAt(name: 'ReentrancyGuardLite', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.ReentrancyGuardLite>
+getContractAt(name: 'DepositoryBounds', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.DepositoryBounds>
+getContractAt(name: 'ERC1155Mock', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.ERC1155Mock>
+getContractAt(name: 'ERC20Mock', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.ERC20Mock>
+getContractAt(name: 'ERC721Mock', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.ERC721Mock>
+getContractAt(name: 'EntityProvider', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.EntityProvider>
+getContractAt(name: 'HankoCodec', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.HankoCodec>
+getContractAt(name: 'HankoVerifier', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.HankoVerifier>
+getContractAt(name: 'HashLadder', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.HashLadder>
+getContractAt(name: 'HashLadderRegistry', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.HashLadderRegistry>
+getContractAt(name: 'IEntityProvider', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.IEntityProvider>
+getContractAt(name: 'IDepositoryDelegateErrorAbi', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.IDepositoryDelegateErrorAbi>
+getContractAt(name: 'INftCustodyERC1155', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.INftCustodyERC1155>
+getContractAt(name: 'INftCustodyERC721', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.INftCustodyERC721>
+getContractAt(name: 'NftCustody', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.NftCustody>
+getContractAt(name: 'IEntityShareDepository', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.IEntityShareDepository>
+getContractAt(name: 'DepositoryDebtHarness', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.DepositoryDebtHarness>
+getContractAt(name: 'EntityProviderSupplyHarness', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.EntityProviderSupplyHarness>
+getContractAt(name: 'FeeOnTransferERC20', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.FeeOnTransferERC20>
+getContractAt(name: 'HashLadderHarness', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.HashLadderHarness>
+getContractAt(name: 'MockEntityProvider', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.MockEntityProvider>
+getContractAt(name: 'MockRevealRegistry', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.MockRevealRegistry>
+getContractAt(name: 'FalseReturnERC20Mock', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.FalseReturnERC20Mock>
+getContractAt(name: 'NoReturnERC20Mock', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.NoReturnERC20Mock>
+getContractAt(name: 'NoopERC1155Mock', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.NoopERC1155Mock>
+getContractAt(name: 'NoopERC721Mock', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.NoopERC721Mock>
+getContractAt(name: 'ToggleNoopERC1155Mock', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.ToggleNoopERC1155Mock>
+getContractAt(name: 'ToggleNoopERC721Mock', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.ToggleNoopERC721Mock>
+getContractAt(name: 'SupplyLivenessHarness', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.SupplyLivenessHarness>
+getContractAt(name: 'TransformerLivenessHarness', address: string | ethers.Addressable, signer?: ethers.Signer): Promise<Contracts.TransformerLivenessHarness>
 
-    deployContract(
-      name: "IERC1155Errors",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC1155Errors>;
-    deployContract(
-      name: "IERC20Errors",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC20Errors>;
-    deployContract(
-      name: "IERC721Errors",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC721Errors>;
-    deployContract(
-      name: "ERC1155",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC1155>;
-    deployContract(
-      name: "ERC1155Supply",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC1155Supply>;
-    deployContract(
-      name: "IERC1155MetadataURI",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC1155MetadataURI>;
-    deployContract(
-      name: "IERC1155",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC1155>;
-    deployContract(
-      name: "IERC1155Receiver",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC1155Receiver>;
-    deployContract(
-      name: "ERC20",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC20>;
-    deployContract(
-      name: "IERC20Metadata",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC20Metadata>;
-    deployContract(
-      name: "IERC20",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC20>;
-    deployContract(
-      name: "ERC721",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC721>;
-    deployContract(
-      name: "IERC721Metadata",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC721Metadata>;
-    deployContract(
-      name: "IERC721",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC721>;
-    deployContract(
-      name: "IERC721Receiver",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC721Receiver>;
-    deployContract(
-      name: "ERC165",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC165>;
-    deployContract(
-      name: "IERC165",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC165>;
-    deployContract(
-      name: "SafeCast",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.SafeCast>;
-    deployContract(
-      name: "Strings",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.Strings>;
-    deployContract(
-      name: "Account",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.Account>;
-    deployContract(
-      name: "INftCustodyERC1155",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.INftCustodyERC1155>;
-    deployContract(
-      name: "INftCustodyERC721",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.INftCustodyERC721>;
-    deployContract(
-      name: "NftCustody",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.NftCustody>;
-    deployContract(
-      name: "DeltaTransformer",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.DeltaTransformer>;
-    deployContract(
-      name: "IHashLadderRevealRegistry",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IHashLadderRevealRegistry>;
-    deployContract(
-      name: "Depository",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.Depository>;
-    deployContract(
-      name: "IERC20",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC20>;
-    deployContract(
-      name: "ReentrancyGuardLite",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ReentrancyGuardLite>;
-    deployContract(
-      name: "DepositoryBounds",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.DepositoryBounds>;
-    deployContract(
-      name: "EntityProvider",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.EntityProvider>;
-    deployContract(
-      name: "ERC1155Mock",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC1155Mock>;
-    deployContract(
-      name: "ERC20Mock",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC20Mock>;
-    deployContract(
-      name: "ERC721Mock",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC721Mock>;
-    deployContract(
-      name: "HankoCodec",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HankoCodec>;
-    deployContract(
-      name: "HankoVerifier",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HankoVerifier>;
-    deployContract(
-      name: "HashLadder",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HashLadder>;
-    deployContract(
-      name: "HashLadderRegistry",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HashLadderRegistry>;
-    deployContract(
-      name: "IEntityProvider",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IEntityProvider>;
-    deployContract(
-      name: "IEntityShareDepository",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IEntityShareDepository>;
-    deployContract(
-      name: "DepositoryDebtHarness",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.DepositoryDebtHarness>;
-    deployContract(
-      name: "EntityProviderSupplyHarness",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.EntityProviderSupplyHarness>;
-    deployContract(
-      name: "FeeOnTransferERC20",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.FeeOnTransferERC20>;
-    deployContract(
-      name: "HashLadderHarness",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HashLadderHarness>;
-    deployContract(
-      name: "MockEntityProvider",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MockEntityProvider>;
-    deployContract(
-      name: "MockRevealRegistry",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MockRevealRegistry>;
-    deployContract(
-      name: "NoopERC1155Mock",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.NoopERC1155Mock>;
-    deployContract(
-      name: "NoopERC721Mock",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.NoopERC721Mock>;
-    deployContract(
-      name: "ToggleNoopERC1155Mock",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ToggleNoopERC1155Mock>;
-    deployContract(
-      name: "ToggleNoopERC721Mock",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ToggleNoopERC721Mock>;
-    deployContract(
-      name: "FalseReturnERC20Mock",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.FalseReturnERC20Mock>;
-    deployContract(
-      name: "NoReturnERC20Mock",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.NoReturnERC20Mock>;
-    deployContract(
-      name: "SupplyLivenessHarness",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.SupplyLivenessHarness>;
-    deployContract(
-      name: "TransformerLivenessHarness",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.TransformerLivenessHarness>;
-    deployContract(
-      name: "IDepositoryDelegateErrorAbi",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IDepositoryDelegateErrorAbi>;
+  deployContract(name: 'Account', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.Account>
+deployContract(name: 'DeltaTransformer', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.DeltaTransformer>
+deployContract(name: 'IHashLadderRevealRegistry', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IHashLadderRevealRegistry>
+deployContract(name: 'Depository', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.Depository>
+deployContract(name: 'IERC20', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IERC20>
+deployContract(name: 'ReentrancyGuardLite', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ReentrancyGuardLite>
+deployContract(name: 'DepositoryBounds', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.DepositoryBounds>
+deployContract(name: 'ERC1155Mock', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ERC1155Mock>
+deployContract(name: 'ERC20Mock', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ERC20Mock>
+deployContract(name: 'ERC721Mock', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ERC721Mock>
+deployContract(name: 'EntityProvider', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.EntityProvider>
+deployContract(name: 'HankoCodec', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.HankoCodec>
+deployContract(name: 'HankoVerifier', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.HankoVerifier>
+deployContract(name: 'HashLadder', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.HashLadder>
+deployContract(name: 'HashLadderRegistry', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.HashLadderRegistry>
+deployContract(name: 'IEntityProvider', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IEntityProvider>
+deployContract(name: 'IDepositoryDelegateErrorAbi', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IDepositoryDelegateErrorAbi>
+deployContract(name: 'INftCustodyERC1155', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.INftCustodyERC1155>
+deployContract(name: 'INftCustodyERC721', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.INftCustodyERC721>
+deployContract(name: 'NftCustody', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.NftCustody>
+deployContract(name: 'IEntityShareDepository', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IEntityShareDepository>
+deployContract(name: 'DepositoryDebtHarness', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.DepositoryDebtHarness>
+deployContract(name: 'EntityProviderSupplyHarness', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.EntityProviderSupplyHarness>
+deployContract(name: 'FeeOnTransferERC20', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.FeeOnTransferERC20>
+deployContract(name: 'HashLadderHarness', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.HashLadderHarness>
+deployContract(name: 'MockEntityProvider', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.MockEntityProvider>
+deployContract(name: 'MockRevealRegistry', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.MockRevealRegistry>
+deployContract(name: 'FalseReturnERC20Mock', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.FalseReturnERC20Mock>
+deployContract(name: 'NoReturnERC20Mock', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.NoReturnERC20Mock>
+deployContract(name: 'NoopERC1155Mock', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.NoopERC1155Mock>
+deployContract(name: 'NoopERC721Mock', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.NoopERC721Mock>
+deployContract(name: 'ToggleNoopERC1155Mock', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ToggleNoopERC1155Mock>
+deployContract(name: 'ToggleNoopERC721Mock', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ToggleNoopERC721Mock>
+deployContract(name: 'SupplyLivenessHarness', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.SupplyLivenessHarness>
+deployContract(name: 'TransformerLivenessHarness', signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.TransformerLivenessHarness>
 
-    deployContract(
-      name: "IERC1155Errors",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC1155Errors>;
-    deployContract(
-      name: "IERC20Errors",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC20Errors>;
-    deployContract(
-      name: "IERC721Errors",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC721Errors>;
-    deployContract(
-      name: "ERC1155",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC1155>;
-    deployContract(
-      name: "ERC1155Supply",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC1155Supply>;
-    deployContract(
-      name: "IERC1155MetadataURI",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC1155MetadataURI>;
-    deployContract(
-      name: "IERC1155",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC1155>;
-    deployContract(
-      name: "IERC1155Receiver",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC1155Receiver>;
-    deployContract(
-      name: "ERC20",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC20>;
-    deployContract(
-      name: "IERC20Metadata",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC20Metadata>;
-    deployContract(
-      name: "IERC20",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC20>;
-    deployContract(
-      name: "ERC721",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC721>;
-    deployContract(
-      name: "IERC721Metadata",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC721Metadata>;
-    deployContract(
-      name: "IERC721",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC721>;
-    deployContract(
-      name: "IERC721Receiver",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC721Receiver>;
-    deployContract(
-      name: "ERC165",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC165>;
-    deployContract(
-      name: "IERC165",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC165>;
-    deployContract(
-      name: "SafeCast",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.SafeCast>;
-    deployContract(
-      name: "Strings",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.Strings>;
-    deployContract(
-      name: "Account",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.Account>;
-    deployContract(
-      name: "INftCustodyERC1155",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.INftCustodyERC1155>;
-    deployContract(
-      name: "INftCustodyERC721",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.INftCustodyERC721>;
-    deployContract(
-      name: "NftCustody",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.NftCustody>;
-    deployContract(
-      name: "DeltaTransformer",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.DeltaTransformer>;
-    deployContract(
-      name: "IHashLadderRevealRegistry",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IHashLadderRevealRegistry>;
-    deployContract(
-      name: "Depository",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.Depository>;
-    deployContract(
-      name: "IERC20",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC20>;
-    deployContract(
-      name: "ReentrancyGuardLite",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ReentrancyGuardLite>;
-    deployContract(
-      name: "DepositoryBounds",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.DepositoryBounds>;
-    deployContract(
-      name: "EntityProvider",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.EntityProvider>;
-    deployContract(
-      name: "ERC1155Mock",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC1155Mock>;
-    deployContract(
-      name: "ERC20Mock",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC20Mock>;
-    deployContract(
-      name: "ERC721Mock",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ERC721Mock>;
-    deployContract(
-      name: "HankoCodec",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HankoCodec>;
-    deployContract(
-      name: "HankoVerifier",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HankoVerifier>;
-    deployContract(
-      name: "HashLadder",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HashLadder>;
-    deployContract(
-      name: "HashLadderRegistry",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HashLadderRegistry>;
-    deployContract(
-      name: "IEntityProvider",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IEntityProvider>;
-    deployContract(
-      name: "IEntityShareDepository",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IEntityShareDepository>;
-    deployContract(
-      name: "DepositoryDebtHarness",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.DepositoryDebtHarness>;
-    deployContract(
-      name: "EntityProviderSupplyHarness",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.EntityProviderSupplyHarness>;
-    deployContract(
-      name: "FeeOnTransferERC20",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.FeeOnTransferERC20>;
-    deployContract(
-      name: "HashLadderHarness",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.HashLadderHarness>;
-    deployContract(
-      name: "MockEntityProvider",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MockEntityProvider>;
-    deployContract(
-      name: "MockRevealRegistry",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MockRevealRegistry>;
-    deployContract(
-      name: "NoopERC1155Mock",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.NoopERC1155Mock>;
-    deployContract(
-      name: "NoopERC721Mock",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.NoopERC721Mock>;
-    deployContract(
-      name: "ToggleNoopERC1155Mock",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ToggleNoopERC1155Mock>;
-    deployContract(
-      name: "ToggleNoopERC721Mock",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ToggleNoopERC721Mock>;
-    deployContract(
-      name: "FalseReturnERC20Mock",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.FalseReturnERC20Mock>;
-    deployContract(
-      name: "NoReturnERC20Mock",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.NoReturnERC20Mock>;
-    deployContract(
-      name: "SupplyLivenessHarness",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.SupplyLivenessHarness>;
-    deployContract(
-      name: "TransformerLivenessHarness",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.TransformerLivenessHarness>;
-    deployContract(
-      name: "IDepositoryDelegateErrorAbi",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IDepositoryDelegateErrorAbi>;
+  deployContract(name: 'Account', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.Account>
+deployContract(name: 'DeltaTransformer', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.DeltaTransformer>
+deployContract(name: 'IHashLadderRevealRegistry', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IHashLadderRevealRegistry>
+deployContract(name: 'Depository', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.Depository>
+deployContract(name: 'IERC20', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IERC20>
+deployContract(name: 'ReentrancyGuardLite', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ReentrancyGuardLite>
+deployContract(name: 'DepositoryBounds', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.DepositoryBounds>
+deployContract(name: 'ERC1155Mock', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ERC1155Mock>
+deployContract(name: 'ERC20Mock', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ERC20Mock>
+deployContract(name: 'ERC721Mock', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ERC721Mock>
+deployContract(name: 'EntityProvider', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.EntityProvider>
+deployContract(name: 'HankoCodec', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.HankoCodec>
+deployContract(name: 'HankoVerifier', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.HankoVerifier>
+deployContract(name: 'HashLadder', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.HashLadder>
+deployContract(name: 'HashLadderRegistry', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.HashLadderRegistry>
+deployContract(name: 'IEntityProvider', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IEntityProvider>
+deployContract(name: 'IDepositoryDelegateErrorAbi', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IDepositoryDelegateErrorAbi>
+deployContract(name: 'INftCustodyERC1155', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.INftCustodyERC1155>
+deployContract(name: 'INftCustodyERC721', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.INftCustodyERC721>
+deployContract(name: 'NftCustody', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.NftCustody>
+deployContract(name: 'IEntityShareDepository', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.IEntityShareDepository>
+deployContract(name: 'DepositoryDebtHarness', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.DepositoryDebtHarness>
+deployContract(name: 'EntityProviderSupplyHarness', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.EntityProviderSupplyHarness>
+deployContract(name: 'FeeOnTransferERC20', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.FeeOnTransferERC20>
+deployContract(name: 'HashLadderHarness', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.HashLadderHarness>
+deployContract(name: 'MockEntityProvider', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.MockEntityProvider>
+deployContract(name: 'MockRevealRegistry', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.MockRevealRegistry>
+deployContract(name: 'FalseReturnERC20Mock', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.FalseReturnERC20Mock>
+deployContract(name: 'NoReturnERC20Mock', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.NoReturnERC20Mock>
+deployContract(name: 'NoopERC1155Mock', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.NoopERC1155Mock>
+deployContract(name: 'NoopERC721Mock', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.NoopERC721Mock>
+deployContract(name: 'ToggleNoopERC1155Mock', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ToggleNoopERC1155Mock>
+deployContract(name: 'ToggleNoopERC721Mock', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.ToggleNoopERC721Mock>
+deployContract(name: 'SupplyLivenessHarness', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.SupplyLivenessHarness>
+deployContract(name: 'TransformerLivenessHarness', args: any[], signerOrOptions?: ethers.Signer | DeployContractOptions): Promise<Contracts.TransformerLivenessHarness>
 
     // default types
     getContractFactory(
@@ -1015,3 +180,4 @@ declare module "hardhat/types/runtime" {
     ): Promise<ethers.Contract>;
   }
 }
+  

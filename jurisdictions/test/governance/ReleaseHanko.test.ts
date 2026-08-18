@@ -8,7 +8,7 @@ import {
   type ReleaseEnvelope,
 } from '../../../frontend/src/lib/releases/release-signature.ts';
 
-const { ethers } = hre;
+const { ethers } = await hre.network.getOrCreate('hardhat');
 const PRIVATE_KEYS = [
   `0x${'01'.padStart(64, '0')}`,
   `0x${'02'.padStart(64, '0')}`,

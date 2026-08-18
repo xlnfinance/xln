@@ -1,4 +1,3 @@
-import { loadFixture } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
 import type { ContractTransactionReceipt, LogDescription } from 'ethers';
 import hre from 'hardhat';
@@ -46,7 +45,8 @@ import {
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
 
-const { ethers } = hre;
+const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
+const { loadFixture } = networkHelpers;
 const DEPOSITORY_BATCH_HANKO_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1'));
 const WATCHTOWER_COUNTER_DISPUTE_HANKO_DOMAIN = ethers.keccak256(
   ethers.toUtf8Bytes('XLN_WATCHTOWER_COUNTER_DISPUTE_V1'),
@@ -635,7 +635,7 @@ describe('canonical on-chain Hanko domains', function () {
     const lazyEntityId = singleSignerLazyEntityId(recipient.address);
     const batchHash = hashDepositoryBatchHankoPayload(depositoryDomain, encodedBatch, 1);
     const batchHanko = buildSingleSignerHanko(lazyEntityId, batchHash, deriveHardhatPrivateKey(2));
-    await expect(depository.processBatch(encodedBatch, batchHanko, 1)).to.not.be.reverted;
+    await expect(depository.processBatch(encodedBatch, batchHanko, 1)).to.not.revert(ethers);
     expect(await depository.entityNonces(lazyEntityId)).to.equal(1);
   });
 
@@ -764,7 +764,7 @@ describe('canonical on-chain Hanko domains', function () {
       transferAuthorization.tokenId,
       transferAuthorization.amount,
       transferHanko,
-    )).to.not.be.reverted;
+    )).to.not.revert(ethers);
     expect(await entityProvider.entityActionNonces(numberedEntityId)).to.equal(1n);
 
     await expect(entityProvider.releaseControlShares(
@@ -929,7 +929,7 @@ describe('canonical on-chain Hanko domains', function () {
       entityNumber,
       1n,
       otherTransferHanko,
-    )).to.not.be.reverted;
+    )).to.not.revert(ethers);
     const staleOtherCancelHash = ethers.keccak256(ethers.solidityPacked(
       ['string', 'uint256', 'address', 'uint256', 'uint256', 'uint256', 'bytes32', 'uint8'],
       [

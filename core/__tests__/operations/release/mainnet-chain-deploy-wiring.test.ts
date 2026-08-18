@@ -131,19 +131,16 @@ describe('mainnet chain deployment wiring', () => {
     expect(config).toContain('key.startsWith("0x") ? key : `0x${key}`');
   });
 
-  test('hardhat TypeScript tests use the Node 20 compatible CommonJS loader', () => {
+  test('hardhat 3 TypeScript tests use the ESM loader', () => {
     const pkg = JSON.parse(readFileSync(join(repoRoot, 'jurisdictions/package.json'), 'utf8')) as {
       type?: string;
     };
     const tsconfig = JSON.parse(readFileSync(join(repoRoot, 'jurisdictions/tsconfig.json'), 'utf8')) as {
-      compilerOptions: { module: string };
-      'ts-node': { esm: boolean; moduleTypes: Record<string, string> };
+      compilerOptions: { module: string; moduleResolution: string };
     };
-    expect(pkg.type).toBeUndefined();
-    expect(tsconfig.compilerOptions.module).toBe('commonjs');
-    expect(tsconfig['ts-node'].esm).toBe(false);
-    expect(tsconfig['ts-node'].moduleTypes['../runtime/**/*.ts']).toBe('cjs');
-    expect(tsconfig['ts-node'].moduleTypes['../frontend/**/*.ts']).toBe('cjs');
+    expect(pkg.type).toBe('module');
+    expect(tsconfig.compilerOptions.module).toBe('esnext');
+    expect(tsconfig.compilerOptions.moduleResolution).toBe('bundler');
   });
 
   test('chain matrix deploys real TRON profile through TronWeb and public TRON chain IDs', () => {

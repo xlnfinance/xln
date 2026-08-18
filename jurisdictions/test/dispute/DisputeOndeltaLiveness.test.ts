@@ -1,4 +1,3 @@
-import { loadFixture, mine, time} from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
 import hre from 'hardhat';
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
@@ -15,7 +14,8 @@ import {
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
 
-const { ethers } = hre;
+const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
+const { loadFixture, mine, time } = networkHelpers;
 const abi = ethers.AbiCoder.defaultAbiCoder();
 const DISPUTE_PROOF = 1;
 const INT256_MAX = (1n << 255n) - 1n;
@@ -251,7 +251,7 @@ describe('dispute ondelta liveness', function () {
         startedByLeft: true,
         cooperative: false,
       }],
-    }))).to.not.be.reverted;
+    }))).to.not.revert(ethers);
 
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(collateralAmount);
     expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(1n << 255n);
@@ -336,7 +336,7 @@ describe('dispute ondelta liveness', function () {
           cooperative: false,
         }],
       }));
-      await expect(finalization).to.not.be.reverted;
+      await expect(finalization).to.not.revert(ethers);
     }
 
     expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(130n);
@@ -354,7 +354,7 @@ describe('dispute ondelta liveness', function () {
     const receivingEntity = ethers.zeroPadValue(reserveHolder.signer.address, 32);
     await expect(processBatch(depository, reserveHolder, emptyBatch({
       reserveToExternalToken: [{ receivingEntity, tokenId, amount: 10n }],
-    }))).to.not.be.reverted;
+    }))).to.not.revert(ethers);
     expect(await depository._reserves(reserveHolder.entityId, tokenId)).to.equal(0n);
     expect(await token.balanceOf(reserveHolder.signer.address)).to.equal(10n);
   });
@@ -422,7 +422,7 @@ describe('dispute ondelta liveness', function () {
         startedByLeft: debtorIsLeft,
         cooperative: false,
       }],
-    }))).to.not.be.reverted;
+    }))).to.not.revert(ethers);
 
     expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(requested);
     expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
@@ -482,7 +482,7 @@ describe('dispute ondelta liveness', function () {
           startedByLeft: debtorIsLeft,
           cooperative: false,
         }],
-      }), 15_000_000n)).to.not.be.reverted;
+      }), 15_000_000n)).to.not.revert(ethers);
 
       expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(60n);
       expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);

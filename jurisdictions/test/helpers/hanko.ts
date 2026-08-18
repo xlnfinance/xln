@@ -1,6 +1,6 @@
 import hre from "hardhat";
 
-const { ethers } = hre;
+const { ethers } = await hre.network.getOrCreate("hardhat");
 
 export const DEFAULT_HARDHAT_MNEMONIC = "test test test test test test test test test test test junk";
 
@@ -139,7 +139,7 @@ export const computeDepositoryBatchHash = async (
   encodedBatch: string,
   nonce: bigint,
 ): Promise<string> => {
-  const chainId = BigInt((await hre.ethers.provider.getNetwork()).chainId);
+  const chainId = BigInt((await ethers.provider.getNetwork()).chainId);
   return ethers.keccak256(ethers.solidityPacked(
     ['bytes32', 'uint256', 'address', 'bytes', 'uint256'],
     [BATCH_DOMAIN_SEPARATOR, chainId, await depository.getAddress(), encodedBatch, nonce]
