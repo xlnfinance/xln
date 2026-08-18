@@ -26,6 +26,7 @@ import {
 import { applyAccountInput } from '../../../../../account/consensus';
 import { createLocalAccountInput } from '../../../../../account/input';
 import { createEmptyAccountJClaimAccumulator } from '../../../../../account/j-claims/j-claim-accumulator';
+import { MAX_PROFILE_ADVERTISED_ACCOUNTS } from '../../../../profile/profile-descriptor';
 import { resolveJurisdictionRebalanceDefaults } from '../../../../../account/config/defaults';
 import { buildHubRebalancePolicyTx } from './admin';
 import { canonicalAccountDisputeConfig } from '../../../../../account/config/dispute-config';
@@ -62,6 +63,7 @@ const insertLocalAccount = (
   watchSeed: ReturnType<typeof normalizeAccountWatchSeed>,
   disputeConfig: ReturnType<typeof canonicalAccountDisputeConfig>,
   candidateEffects: EntityCandidateEffect[],
+  publicPinned: boolean,
 ): void => {
   candidateEffects.push({
     kind: 'runtimeEvent',
@@ -89,6 +91,7 @@ const insertLocalAccount = (
       requestedRebalanceFeeState: PersistentAccountStateMap.empty<number, RebalanceRequestFeeState>('requestedRebalanceFeeState'),
     },
     status: 'active',
+    ...(publicPinned ? { publicPinned: true } : {}),
     mempool: [],
     currentFrame: {
       height: 0,
@@ -114,6 +117,25 @@ const insertLocalAccount = (
       },
     },
   });
+};
+
+/**
+ * An Account is advertised only by the side that opened it, and only while the
+ * Entity is under the Profile's advertised-account ceiling. Reaching the
+ * ceiling must not fail the open: an Entity may hold far more Accounts than it
+ * can route through, so the surplus is simply opened unadvertised.
+ */
+const resolveOpenAccountPublicPin = (
+  state: EntityState,
+  tx: OpenAccountEntityTx,
+): boolean => {
+  if (tx.data.pinPublic === false) return false;
+  let pinned = 0;
+  for (const account of state.accounts.values()) {
+    if (account.publicPinned === true) pinned += 1;
+    if (pinned >= MAX_PROFILE_ADVERTISED_ACCOUNTS) return false;
+  }
+  return true;
 };
 
 const seedOpenAccountPolicies = async (
@@ -222,6 +244,7 @@ export const handleOpenAccountEntityTx = async (
     watchSeed,
     disputeConfig,
     candidateEffects,
+    resolveOpenAccountPublicPin(newState, entityTx),
   );
   await seedOpenAccountPolicies(accountConsensusContext, newState, entityTx, counterpartyId);
 

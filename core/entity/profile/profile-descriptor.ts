@@ -67,6 +67,16 @@ const compareTokenId = (left: string, right: string): number => {
 };
 
 const MAX_PROFILE_TOKENS_PER_ACCOUNT = 16;
+/**
+ * Hard ceiling on advertised Accounts, independent of how many an Entity owns.
+ *
+ * The Profile is gossiped to every peer and stored as one entity-context leaf,
+ * so a row per Account made a Hub's Profile grow without bound: at ~34 accounts
+ * it already exceeded the 10 KB storage leaf and fatally halted every observing
+ * Runtime. Routing only ever needs the hub-to-hub graph, so only pinned
+ * Accounts are advertised and never more than this many of them.
+ */
+export const MAX_PROFILE_ADVERTISED_ACCOUNTS = 100;
 const UTF8 = new TextEncoder();
 
 const MAX_PROFILE_ROUTE_OVERHEAD_BYTES = new TextEncoder().encode(encodeCanonicalConsensusValue({
@@ -113,9 +123,12 @@ const buildProfileAccounts = (state: EntityState): {
   extras: Array<{ counterpartyId: string; tokenId: string; capacity: ProfileTokenCapacity; liquidity: bigint }>;
 } => {
   const accounts: ProfileAccount[] = [];
-  const publicAccounts: string[] = [];
-  const extras: Array<{ counterpartyId: string; tokenId: string; capacity: ProfileTokenCapacity; liquidity: bigint }> = [];
+  let publicAccounts: string[] = [];
+  let extras: Array<{ counterpartyId: string; tokenId: string; capacity: ProfileTokenCapacity; liquidity: bigint }> = [];
   for (const [counterpartyId, account] of state.accounts.entries()) {
+    // Unpinned Accounts are invisible to routing by construction: only the side
+    // that opened an Account pins it, so the advertised graph stays hub-to-hub.
+    if (account.publicPinned !== true) continue;
     const ranked = rankedLiquidProfileCapacities(state, account);
     if (ranked.length === 0) continue;
     const first = ranked[0]!;
@@ -128,6 +141,27 @@ const buildProfileAccounts = (state: EntityState): {
       tokenCapacities: capacities,
     });
     if (hasInboundCapacity) publicAccounts.push(counterpartyId);
+  }
+  // Over the ceiling the most liquid rows are the ones worth routing through,
+  // and the tie-break keeps the choice identical on every replica.
+  if (accounts.length > MAX_PROFILE_ADVERTISED_ACCOUNTS) {
+    const liquidityByCounterparty = new Map(
+      accounts.map(entry => [
+        entry.counterpartyId,
+        Object.values(entry.tokenCapacities as Record<string, ProfileTokenCapacity>)
+          .reduce((total, capacity) => total + capacity.inCapacity + capacity.outCapacity, 0n),
+      ]),
+    );
+    accounts.sort((left, right) => {
+      const leftLiquidity = liquidityByCounterparty.get(left.counterpartyId)!;
+      const rightLiquidity = liquidityByCounterparty.get(right.counterpartyId)!;
+      if (leftLiquidity !== rightLiquidity) return leftLiquidity > rightLiquidity ? -1 : 1;
+      return compareStableText(left.counterpartyId, right.counterpartyId);
+    });
+    accounts.length = MAX_PROFILE_ADVERTISED_ACCOUNTS;
+    const advertised = new Set(accounts.map(entry => entry.counterpartyId));
+    publicAccounts = publicAccounts.filter(counterpartyId => advertised.has(counterpartyId));
+    extras = extras.filter(extra => advertised.has(extra.counterpartyId));
   }
   accounts.sort((left, right) => compareStableText(left.counterpartyId, right.counterpartyId));
   publicAccounts.sort(compareStableText);

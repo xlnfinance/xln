@@ -6,6 +6,7 @@ import {
   buildChangedEntityProfileHashToSign,
   computeEntityProfileDescriptorHash,
   MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES,
+  MAX_PROFILE_ADVERTISED_ACCOUNTS,
 } from '../../../entity/profile/profile-descriptor';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { HANKO_MAX_BYTES } from '../../../hanko/codec';
@@ -33,7 +34,7 @@ const stateWithAccounts = (entityId: string, accountCount: number, tokenCount: n
   reserves: new Map(),
   accounts: new Map(Array.from({ length: accountCount }, (_, accountIndex) => {
     const counterpartyId = id(accountIndex + 2);
-    return [counterpartyId, { state: {
+    return [counterpartyId, { publicPinned: true, state: {
       leftEntity: entityId < counterpartyId ? entityId : counterpartyId,
       rightEntity: entityId < counterpartyId ? counterpartyId : entityId,
       domain: { chainId: 31_337, depositoryAddress: address },
@@ -51,12 +52,12 @@ const stateWithAccounts = (entityId: string, accountCount: number, tokenCount: n
   lockBook: new Map(),
 });
 
-test('profile keeps one best liquid token per account, then fills globally within the exact byte budget', () => {
+test('profile caps advertised accounts, keeps one best liquid token each, then fills within the byte budget', () => {
   const descriptor = buildEntityProfileDescriptor(stateWithAccounts(id(1), 1_000, 32));
   const bytes = new TextEncoder().encode(encodeCanonicalConsensusValue(descriptor)).byteLength;
   expect(bytes).toBeLessThanOrEqual(MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES);
   expect(bytes).toBeLessThan(LIMITS.MAX_PROFILE_BYTES);
-  expect(descriptor.accounts).toHaveLength(1_000);
+  expect(descriptor.accounts).toHaveLength(MAX_PROFILE_ADVERTISED_ACCOUNTS);
   expect(descriptor.accounts.every(account => Object.keys(account.tokenCapacities).length >= 1)).toBe(true);
   expect(descriptor.accounts.every(account => Object.keys(account.tokenCapacities).length <= 16)).toBe(true);
   const fullProfile = {
@@ -89,7 +90,7 @@ test('profile capacity uses the owning Entity right-side perspective', () => {
   const right = id(9);
   const left = id(1);
   const state = stateWithAccounts(right, 0, 0);
-  state.accounts.set(left, { state: {
+  state.accounts.set(left, { publicPinned: true, state: {
     leftEntity: left,
     rightEntity: right,
     domain: { chainId: 31_337, depositoryAddress: address },
@@ -160,4 +161,28 @@ test('signed gossip profile taxonomy accepts only canonical kinds and sorted sec
   profile.metadata['sectors'] = ['technology'];
   profile.metadata['entityKind'] = 'tech-company';
   expect(() => parseProfile(profile)).toThrow('GOSSIP_PROFILE_ENTITY_KIND_INVALID');
+});
+
+test('an Account is advertised only while it is pinned', () => {
+  const state = stateWithAccounts(id(1), 3, 2);
+  const counterparties = [...state.accounts.keys()];
+  expect(buildEntityProfileDescriptor(state).accounts).toHaveLength(3);
+  const unpinned = state.accounts.get(counterparties[1]!)!;
+  delete (unpinned as { publicPinned?: boolean }).publicPinned;
+  const advertised = buildEntityProfileDescriptor(state).accounts.map(account => account.counterpartyId);
+  expect(advertised).toEqual([counterparties[0]!, counterparties[2]!].sort());
+});
+
+test('over the ceiling the most liquid pinned Accounts win, identically on every replica', () => {
+  const state = stateWithAccounts(id(1), MAX_PROFILE_ADVERTISED_ACCOUNTS + 5, 1);
+  const starved = [...state.accounts.keys()].slice(0, 5);
+  for (const counterpartyId of starved) {
+    const account = state.accounts.get(counterpartyId)!;
+    (account.state as { deltas: Map<number, unknown> }).deltas = new Map([
+      [1, createDefaultDelta(1, { left: 1n, right: 1n })],
+    ]);
+  }
+  const advertised = buildEntityProfileDescriptor(state).accounts.map(account => account.counterpartyId);
+  expect(advertised).toHaveLength(MAX_PROFILE_ADVERTISED_ACCOUNTS);
+  expect(advertised.some(counterpartyId => starved.includes(counterpartyId))).toBe(false);
 });

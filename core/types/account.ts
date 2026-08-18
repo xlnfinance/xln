@@ -239,6 +239,17 @@ export interface AccountReplica {
     response: Extract<AccountInput, { kind: 'ack' }>;
   };
 
+  /**
+   * Advertise this counterparty in the owning Entity's public routing Profile.
+   *
+   * The Profile carries one row per pinned Account, so an unpinned Account is
+   * invisible to routing and costs nothing to gossip. Only the side that opened
+   * the Account pins it, which keeps the advertised graph hub-to-hub: users pin
+   * their Hubs, Hubs pin the peer Hubs they opened toward, and a Hub never
+   * advertises the thousands of users that opened toward it.
+   */
+  publicPinned?: boolean;
+
   // Rollback support for bilateral disagreements
   rollbackCount: number;
   lastRollbackFrameHash?: string; // Track last rollback to prevent duplicate increments

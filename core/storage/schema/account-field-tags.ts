@@ -34,6 +34,7 @@ export const STORAGE_ACCOUNT_FIELD_TAG = {
   'state.rebalanceFeePolicies': 57, shadow: 58,
   currentDisputeProofProposerIsLeft: 59,
   counterpartyDisputeProofProposerIsLeft: 60,
+  publicPinned: 61,
 } as const;
 
 export type StorageAccountField = keyof typeof STORAGE_ACCOUNT_FIELD_TAG;

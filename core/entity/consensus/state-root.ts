@@ -193,6 +193,7 @@ const ACCOUNT_ROOT_COMMITTED_FIELDS = [
  */
 const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'status',
+  'publicPinned',
   'mempool',
   'currentFrame',
   'currentHeight',

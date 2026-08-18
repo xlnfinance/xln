@@ -216,6 +216,16 @@ type EntityTxPayload =
         watchSeed?: string;    // Generated at runtime ingress; fixed for this bilateral account
         creditAmount?: bigint;  // Optional: extend credit in same frame as add_delta
         tokenId?: number;       // Token for credit (default: 1 = USDC)
+        /**
+         * Advertise this counterparty in our public routing Profile.
+         *
+         * Accounts are opened toward a routable Hub, so the opener pins by
+         * default and the receiving side never pins an inbound opener. A mesh
+         * where two Hubs open toward each other therefore pins both ways, while
+         * a Hub accumulating thousands of users pins none of them. Set false to
+         * open a private bilateral account that neither side advertises.
+         */
+        pinPublic?: boolean;
         rebalancePolicy?: {
           r2cRequestSoftLimit: bigint;
           hardLimit: bigint;

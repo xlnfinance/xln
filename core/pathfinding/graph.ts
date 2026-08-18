@@ -61,7 +61,19 @@ export function buildNetworkGraph(
     nodes.add(profile.entityId);
   }
 
-  // Build edges from account relationships
+  // Build edges from account relationships.
+  //
+  // Only the side that opened an Account advertises it, so a lane appears in
+  // exactly one Profile. The advertised row still describes the whole bilateral
+  // Account, so the reverse direction is recorded from the same row with the
+  // capacities mirrored; without it a Hub that never advertises its users would
+  // have no outbound edge to deliver on.
+  const edgesByFrom = new Map<string, AccountEdge[]>();
+  const pushEdge = (edge: AccountEdge): void => {
+    const existing = edgesByFrom.get(edge.from);
+    if (existing) existing.push(edge);
+    else edgesByFrom.set(edge.from, [edge]);
+  };
   for (const profile of profiles.values()) {
     const fromEntity = profile.entityId;
     const fromEdges: AccountEdge[] = [];
@@ -117,11 +129,36 @@ export function buildNetworkGraph(
         outbound: tokenCapacity.outCapacity,
         inbound: tokenCapacity.inCapacity,
       });
+      const mirrorKey = `${toEntity}:${fromEntity}:${tokenId}`;
+      if (!accountCapacities.has(mirrorKey)) {
+        accountCapacities.set(mirrorKey, {
+          outbound: tokenCapacity.inCapacity,
+          inbound: tokenCapacity.outCapacity,
+        });
+        if (tokenCapacity.inCapacity > 0n) {
+          const mirrorProfile = profiles.get(toEntity);
+          pushEdge({
+            from: toEntity,
+            to: fromEntity,
+            tokenId,
+            capacity: tokenCapacity.inCapacity,
+            baseFee: sanitizeBaseFee(mirrorProfile?.metadata.baseFee ?? 0n),
+            feePPM: calculateDirectionalFeePPM(
+              sanitizeFeePPM(mirrorProfile?.metadata.routingFeePPM ?? 1, 1),
+              tokenCapacity.inCapacity,
+              tokenCapacity.outCapacity,
+            ),
+            disabled: false,
+          });
+        }
+      }
     }
 
-    if (fromEdges.length > 0) {
-      edges.set(fromEntity, fromEdges);
-    }
+    for (const edge of fromEdges) pushEdge(edge);
+  }
+
+  for (const [fromEntity, fromEdges] of edgesByFrom) {
+    if (fromEdges.length > 0) edges.set(fromEntity, fromEdges);
   }
 
   return {

@@ -22,6 +22,7 @@ import { rejectFailure } from '../../protocol/errors/failure-taxonomy';
 import { toJHeight, toUnixMs } from '../../protocol/units';
 import type { Profile } from '../profile';
 import type { EntityState } from '../types';
+import type { AccountStateDomain } from '../../types/account';
 
 type HtlcPaymentTx = Extract<EntityTx, { type: 'htlcPayment' }>;
 
@@ -58,6 +59,31 @@ const assertRawHtlcPayment = (tx: HtlcPaymentTx): void => {
   if (tx.data.hashlock !== undefined && !/^0x[0-9a-f]{64}$/.test(tx.data.hashlock)) {
     rejectHtlcPayment('HTLC_PAYMENT_HASHLOCK_INVALID');
   }
+};
+
+/**
+ * Domain of the `from -> to` lane as both Profiles describe it.
+ *
+ * Only the side that opened an Account advertises it, so a routed hop normally
+ * has exactly one row. Where both sides advertise, the two rows must agree:
+ * disagreeing domains mean the peers are settling on different jurisdictions
+ * and the payment must not be routed through them.
+ */
+const hopAccountDomain = (
+  profiles: readonly RoutingProfile[],
+  from: string,
+  to: string,
+  reject: (reason: string) => never,
+): AccountStateDomain => {
+  const fromAccount = uniqueProfile(profiles, from).accounts
+    .find(row => row.counterpartyId.toLowerCase() === to);
+  const toAccount = uniqueProfile(profiles, to).accounts
+    .find(row => row.counterpartyId.toLowerCase() === from);
+  if (!fromAccount && !toAccount) reject(`HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING:${from}:${to}`);
+  if (fromAccount && toAccount && !sameAccountStateDomain(fromAccount.domain, toAccount.domain)) {
+    reject(`HTLC_PAYMENT_PROFILE_ACCOUNT_DOMAIN_MISMATCH:${from}:${to}`);
+  }
+  return (fromAccount ?? toAccount!).domain;
 };
 
 const normalizeRoute = (raw: readonly string[], source: string, target: string): string[] => {
@@ -158,19 +184,14 @@ export const materializeOriginatedHtlcPayments = async (
     const publicKeys = new Map(route.map(id => [id, uniqueProfile(input.profiles, id).entityEncryptionPublicKey]));
     const domains = route.slice(0, -1).map((from, index) => {
       const to = route[index + 1]!;
-      const fromAccount = uniqueProfile(input.profiles, from).accounts.find(row => row.counterpartyId.toLowerCase() === to);
-      const toAccount = uniqueProfile(input.profiles, to).accounts.find(row => row.counterpartyId.toLowerCase() === from);
-      if (!fromAccount || !toAccount) rejectHtlcPayment(`HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING:${from}:${to}`);
-      if (!sameAccountStateDomain(fromAccount.domain, toAccount.domain)) {
-        rejectHtlcPayment(`HTLC_PAYMENT_PROFILE_ACCOUNT_DOMAIN_MISMATCH:${from}:${to}`);
-      }
+      const domain = hopAccountDomain(input.profiles, from, to, rejectHtlcPayment);
       if (index === 0) {
         const localAccount = input.state.accounts.get(to);
-        if (!localAccount || !sameAccountStateDomain(localAccount.state.domain, fromAccount.domain)) {
+        if (!localAccount || !sameAccountStateDomain(localAccount.state.domain, domain)) {
           rejectHtlcPayment(`HTLC_PAYMENT_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${source}:${to}`);
         }
       }
-      return fromAccount.domain;
+      return domain;
     });
     const envelope = await createOnionEnvelopes(
       route, secret, publicKeys, domains,
@@ -223,15 +244,10 @@ const assertOriginRouteEvidence = (
   }
   for (const [index, from] of route.slice(0, -1).entries()) {
     const to = route[index + 1]!;
-    const left = uniqueProfile(input.profiles, from).accounts.find(row => row.counterpartyId.toLowerCase() === to);
-    const right = uniqueProfile(input.profiles, to).accounts.find(row => row.counterpartyId.toLowerCase() === from);
-    if (!left || !right) rejectHtlcPayment(`HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING:${from}:${to}`);
-    if (!sameAccountStateDomain(left.domain, right.domain)) {
-      rejectHtlcPayment(`HTLC_PAYMENT_PROFILE_ACCOUNT_DOMAIN_MISMATCH:${from}:${to}`);
-    }
+    const domain = hopAccountDomain(input.profiles, from, to, rejectHtlcPayment);
     if (index === 0) {
       const local = input.state.accounts.get(to);
-      if (!local || !sameAccountStateDomain(local.state.domain, left.domain)) {
+      if (!local || !sameAccountStateDomain(local.state.domain, domain)) {
         rejectHtlcPayment(`HTLC_PAYMENT_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${source}:${to}`);
       }
     }
