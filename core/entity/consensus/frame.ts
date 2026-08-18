@@ -262,7 +262,16 @@ export const assertEntityFrameTotalByteBudget = (input: EntityFrameWireBudgetInp
   });
   const frameBytes = utf8ByteLength(encoded);
   if (frameBytes > LIMITS.MAX_FRAME_SIZE_BYTES) {
-    throw new Error(`ENTITY_FRAME_TOTAL_BYTE_LIMIT_EXCEEDED:${frameBytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}`);
+    // Failure path only: say which part is fat so the deferral log is actionable.
+    const part = (value: unknown): number => {
+      try { return utf8ByteLength(encodeCanonicalConsensusValue(value)); } catch { return -1; }
+    };
+    throw new Error(
+      `ENTITY_FRAME_TOTAL_BYTE_LIMIT_EXCEEDED:${frameBytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}` +
+      `:txs=${input.txs.length}/${part(canonicalEntityTxsForFrameHash(input.txs))}` +
+      `:events=${input.events.length}/${part(input.events)}` +
+      `:context=${part(input.entityContext)}`,
+    );
   }
   return encoded;
 };
