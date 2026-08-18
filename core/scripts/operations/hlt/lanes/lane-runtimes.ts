@@ -188,19 +188,33 @@ const spawnLaneRuntime = async (options: {
     },
   );
   const control = new DaemonControlClient({ baseUrl: `http://127.0.0.1:${port}`, authKey: token, timeoutMs: 30_000 });
-  const runtime = await connectRuntime(
-    { label: `load-lane-${options.laneIndex}`, wsUrl: `ws://127.0.0.1:${port}/rpc`, token },
-  );
   const hostedEntityIds = options.identities.map(identity => identity.entityId);
-  return options.identities.map(identity => ({
-    identity,
-    laneKey: `${port}-${identity.entityId.slice(-8)}`,
-    port,
-    child,
-    control,
-    runtime,
-    relayUrl,
-    hostedEntityIds,
+  // Adapter commands are sequenced per capability lane (keyId, tokenId). Users
+  // sharing one daemon submit rounds concurrently, so each user gets its own
+  // token and connection: an own command lane, exactly as in its own process.
+  return Promise.all(options.identities.map(async (identity, index) => {
+    const userToken = index === 0
+      ? token
+      : deriveRuntimeAdapterCapabilityToken(authSeed, 'full', Date.now() + 60 * 60_000, {
+          audience,
+          keyId: 'load-lane',
+          tokenId: randomBytes(16).toString('hex'),
+        });
+    const runtime = await connectRuntime({
+      label: `load-lane-${options.laneIndex + index}`,
+      wsUrl: `ws://127.0.0.1:${port}/rpc`,
+      token: userToken,
+    });
+    return {
+      identity,
+      laneKey: `${port}-${identity.entityId.slice(-8)}`,
+      port,
+      child,
+      control,
+      runtime,
+      relayUrl,
+      hostedEntityIds,
+    };
   }));
 };
 
@@ -265,7 +279,6 @@ export const laneDaemons = (lanes: readonly LaneRuntime[]): LaneRuntime[] => {
 };
 
 export const stopLaneRuntimes = async (lanes: readonly LaneRuntime[]): Promise<void> => {
-  const daemons = laneDaemons(lanes);
-  for (const lane of daemons) lane.runtime.adapter.disconnect();
-  await Promise.allSettled(daemons.map(lane => stopManagedChild(lane.child)));
+  for (const lane of lanes) lane.runtime.adapter.disconnect();
+  await Promise.allSettled(laneDaemons(lanes).map(lane => stopManagedChild(lane.child)));
 };

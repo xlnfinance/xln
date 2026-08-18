@@ -214,7 +214,7 @@ export const submitPreparedParallelSameLoad = async (options: {
       })),
     ];
     const observed = await Promise.all(laneInputs.map(({ lane, inputs }) =>
-      sendObserved(lane.runtime, `prod-load-round-${options.initialFrame.height}-${round + 1}`, {
+      sendObserved(lane.runtime, `prod-load-round-${options.initialFrame.height}-${round + 1}-${lane.laneKey}`, {
         runtimeTxs: [],
         entityInputs: inputs,
       })));
