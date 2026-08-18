@@ -575,10 +575,15 @@ const maybeHandleRuntimeInfoApi = async (
 const gossipProfileAdmission = createGossipProfileAdmission();
 /** A missing profile is looked up on the relay at most once per minute per entity. */
 const GOSSIP_PROFILE_LOOKUP_MIN_INTERVAL_MS = 60_000;
-/** Lookups arriving within this window travel as one batched relay request. */
-const GOSSIP_PROFILE_LOOKUP_BATCH_MS = 20;
+/**
+ * Lookups arriving within this window travel as one batched relay request; a
+ * caller walking a list sequentially keeps extending the batch until it goes
+ * quiet, so a hundred misses cost the relay one or two requests.
+ */
+const GOSSIP_PROFILE_LOOKUP_BATCH_QUIET_MS = 30;
+const GOSSIP_PROFILE_LOOKUP_BATCH_MAX_MS = 300;
 const gossipProfileLookupAt = new Map<string, number>();
-let gossipProfileLookupBatch: { entityIds: Set<string>; done: Promise<void> } | null = null;
+let gossipProfileLookupBatch: { entityIds: Set<string>; done: Promise<void>; touch: () => void } | null = null;
 
 const gossipProfileEntityId = (req: Request): string => {
   const entityId = String(new URL(req.url).searchParams.get('entityId') || '').trim().toLowerCase();
@@ -617,7 +622,17 @@ const lookupMissingGossipProfile = (
   }
   if (!gossipProfileLookupBatch) {
     const entityIds = new Set<string>();
-    const done = new Promise<void>(resolve => setTimeout(resolve, GOSSIP_PROFILE_LOOKUP_BATCH_MS)).then(async () => {
+    const openedAt = now;
+    let lastAddedAt = now;
+    const settle = (resolve: () => void) => {
+      const wait = Math.min(GOSSIP_PROFILE_LOOKUP_BATCH_QUIET_MS, openedAt + GOSSIP_PROFILE_LOOKUP_BATCH_MAX_MS - Date.now());
+      setTimeout(() => {
+        const quiet = Date.now() - lastAddedAt >= GOSSIP_PROFILE_LOOKUP_BATCH_QUIET_MS;
+        if (quiet || Date.now() - openedAt >= GOSSIP_PROFILE_LOOKUP_BATCH_MAX_MS) resolve();
+        else settle(resolve);
+      }, Math.max(1, wait));
+    };
+    const done = new Promise<void>(resolve => settle(resolve)).then(async () => {
       gossipProfileLookupBatch = null;
       try {
         await ensureGossipProfiles(env, [...entityIds]);
@@ -628,9 +643,10 @@ const lookupMissingGossipProfile = (
         });
       }
     });
-    gossipProfileLookupBatch = { entityIds, done };
+    gossipProfileLookupBatch = { entityIds, done, touch: () => { lastAddedAt = Date.now(); } };
   }
   gossipProfileLookupBatch.entityIds.add(targetEntityId);
+  gossipProfileLookupBatch.touch();
   return gossipProfileLookupBatch.done;
 };
 
@@ -1543,7 +1559,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     env.infrastructure = env.infrastructure ?? {};
     env.infrastructure.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
       sendDirectEntityInput(runtimeEnv, targetRuntimeId, envelope, ingressTimestamp);
+    // A daemon hosting many entities must not disappear into one long
+    // synchronous frame: bounded frames keep the event loop accepting sockets
+    // and answering control calls between them (same knob as hub-node).
+    const maxEntityInputsPerFrame = Math.max(0, Number(process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '0'));
+    const maxEntityTxsPerFrame = Math.max(0, Number(process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'));
     startRuntimeLoop(env, {
+      ...(maxEntityInputsPerFrame > 0 ? { maxEntityInputsPerFrame } : {}),
+      ...(maxEntityTxsPerFrame > 0 ? { maxEntityTxsPerFrame } : {}),
       onFatal: async payload => {
         serverLog.error('runtime.loop_fatal', {
           ...payload,
