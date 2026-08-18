@@ -1,0 +1,5 @@
+{
+  "schema": "xln-hlt-progress-v1",
+  "note": "Append one entry per completed HLT load run. Temporary tracking file for the 1000 TPS push.",
+  "runs": []
+}

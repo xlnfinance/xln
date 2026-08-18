@@ -10,7 +10,11 @@
  * blob, which would create a second storage layout beside the typed records.
  */
 import type { EntityInfraContext } from '../../types/entity/infra-context';
-import type { HtlcPreparedInfraContext } from '../../types/entity/htlc-infra-context';
+import type {
+  HtlcPreparedInfraContext,
+  PreparedHtlcEntry,
+  PreparedOriginatedHtlcPayment,
+} from '../../types/entity/htlc-infra-context';
 import type { Profile } from '../../entity/profile';
 import { validateEntityInfraContext } from '../../entity/consensus/frame/infra-context-validation';
 import { computeIntegrityDigest } from '../../support/integrity-checksum';
@@ -31,7 +35,15 @@ type StoredEntityContextManifest = Readonly<{
   version: 1;
   header: Omit<EntityInfraContext, 'gossipProfiles' | 'htlc'>;
   profileRefs: EntityContextPayloadHash[];
-  htlcRef: EntityContextPayloadHash;
+  /**
+   * One leaf per prepared HTLC rather than one leaf for the whole frame. A Hub
+   * that batches carries as many prepared HTLCs as the batch is wide, and a
+   * single combined leaf crossed the 10 KB record cap at 49 entries and halted
+   * the Runtime. Per-entry leaves also dedupe: an entry repeated across
+   * replicas or retried frames is stored once by content address.
+   */
+  htlcEntryRefs: EntityContextPayloadHash[];
+  htlcOriginatedRefs: EntityContextPayloadHash[];
 }>;
 
 type StoredGossipProfile = Readonly<{
@@ -40,16 +52,23 @@ type StoredGossipProfile = Readonly<{
   profile: Profile;
 }>;
 
-type StoredHtlcPrepared = Readonly<{
-  kind: 'htlcPrepared';
+type StoredHtlcEntry = Readonly<{
+  kind: 'htlcEntry';
   version: 1;
-  htlc: HtlcPreparedInfraContext;
+  entry: PreparedHtlcEntry;
+}>;
+
+type StoredHtlcOriginated = Readonly<{
+  kind: 'htlcOriginated';
+  version: 1;
+  originated: PreparedOriginatedHtlcPayment;
 }>;
 
 type StoredEntityContextRow =
   | StoredEntityContextManifest
   | StoredGossipProfile
-  | StoredHtlcPrepared;
+  | StoredHtlcEntry
+  | StoredHtlcOriginated;
 
 type PayloadRow = Readonly<{
   key: Buffer;
@@ -91,10 +110,9 @@ const exactKeys = (value: Record<string, unknown>, expected: readonly string[], 
 
 const payloadBudgetLabel = (payload: StoredEntityContextRow): string => {
   if (payload.kind === 'gossipProfile') return `gossipProfile:${payload.profile.entityId}`;
-  if (payload.kind === 'htlcPrepared') {
-    return `htlcPrepared:entries=${payload.htlc.entries.length}:originated=${payload.htlc.originated.length}`;
-  }
-  return `entityContext:profiles=${payload.profileRefs.length}`;
+  if (payload.kind === 'htlcEntry') return `htlcEntry:${payload.entry.binding.lockId}`;
+  if (payload.kind === 'htlcOriginated') return `htlcOriginated:${payload.originated.lockId}`;
+  return `entityContext:profiles=${payload.profileRefs.length}:htlc=${payload.htlcEntryRefs.length}`;
 };
 
 const prepareRow = (
@@ -130,11 +148,16 @@ export const prepareEntityContextPayloadRows = (
       version: 1,
       profile,
     }, rowsByHash));
-    const htlcRef = prepareRow({
-      kind: 'htlcPrepared',
+    const htlcEntryRefs = decoded.htlc.entries.map(entry => prepareRow({
+      kind: 'htlcEntry',
       version: 1,
-      htlc: decoded.htlc,
-    }, rowsByHash);
+      entry,
+    }, rowsByHash));
+    const htlcOriginatedRefs = decoded.htlc.originated.map(originated => prepareRow({
+      kind: 'htlcOriginated',
+      version: 1,
+      originated,
+    }, rowsByHash));
     refs.set(replicaId, prepareRow({
       kind: 'entityContext',
       version: 1,
@@ -148,7 +171,8 @@ export const prepareEntityContextPayloadRows = (
         peerAssertions: decoded.peerAssertions,
       },
       profileRefs,
-      htlcRef,
+      htlcEntryRefs,
+      htlcOriginatedRefs,
     }, rowsByHash));
   }
   return { refs, rows: [...rowsByHash.values()] };
@@ -213,20 +237,29 @@ const decodeGossipProfileLeaf = (value: unknown, replicaId: string): Profile => 
   return raw['profile'] as Profile;
 };
 
-const decodeHtlcLeaf = (value: unknown, replicaId: string): HtlcPreparedInfraContext => {
+const decodeHtlcEntryLeaf = (value: unknown, replicaId: string): PreparedHtlcEntry => {
   const raw = record(value, `STORAGE_ENTITY_CONTEXT_HTLC_INVALID:${replicaId}`);
-  exactKeys(raw, ['kind', 'version', 'htlc'], `STORAGE_ENTITY_CONTEXT_HTLC_INVALID:${replicaId}`);
-  if (raw['kind'] !== 'htlcPrepared' || raw['version'] !== 1) {
+  exactKeys(raw, ['kind', 'version', 'entry'], `STORAGE_ENTITY_CONTEXT_HTLC_INVALID:${replicaId}`);
+  if (raw['kind'] !== 'htlcEntry' || raw['version'] !== 1) {
     throw new Error(`STORAGE_ENTITY_CONTEXT_HTLC_KIND:${replicaId}`);
   }
-  return raw['htlc'] as HtlcPreparedInfraContext;
+  return raw['entry'] as PreparedHtlcEntry;
+};
+
+const decodeHtlcOriginatedLeaf = (value: unknown, replicaId: string): PreparedOriginatedHtlcPayment => {
+  const raw = record(value, `STORAGE_ENTITY_CONTEXT_HTLC_INVALID:${replicaId}`);
+  exactKeys(raw, ['kind', 'version', 'originated'], `STORAGE_ENTITY_CONTEXT_HTLC_INVALID:${replicaId}`);
+  if (raw['kind'] !== 'htlcOriginated' || raw['version'] !== 1) {
+    throw new Error(`STORAGE_ENTITY_CONTEXT_HTLC_KIND:${replicaId}`);
+  }
+  return raw['originated'] as PreparedOriginatedHtlcPayment;
 };
 
 const decodeManifest = (value: unknown, replicaId: string): StoredEntityContextManifest => {
   const raw = record(value, `STORAGE_ENTITY_CONTEXT_MANIFEST_INVALID:${replicaId}`);
   exactKeys(
     raw,
-    ['kind', 'version', 'header', 'profileRefs', 'htlcRef'],
+    ['kind', 'version', 'header', 'profileRefs', 'htlcEntryRefs', 'htlcOriginatedRefs'],
     `STORAGE_ENTITY_CONTEXT_MANIFEST_INVALID:${replicaId}`,
   );
   if (raw['kind'] !== 'entityContext' || raw['version'] !== 1) {
@@ -237,14 +270,16 @@ const decodeManifest = (value: unknown, replicaId: string): StoredEntityContextM
     'version', 'proposerReplicaId', 'entityId', 'proposerSignerId',
     'parentFrameHash', 'height', 'peerAssertions',
   ], `STORAGE_ENTITY_CONTEXT_HEADER_INVALID:${replicaId}`);
-  const htlcRefRaw = raw['htlcRef'];
-  if (typeof htlcRefRaw !== 'string') throw new Error(`STORAGE_ENTITY_CONTEXT_HTLC_REF:${replicaId}`);
   return {
     kind: 'entityContext',
     version: 1,
     header: header as StoredEntityContextManifest['header'],
     profileRefs: decodeHashList(raw['profileRefs'], `STORAGE_ENTITY_CONTEXT_PROFILE_REFS:${replicaId}`),
-    htlcRef: toEntityContextPayloadHash(htlcRefRaw.toLowerCase()),
+    htlcEntryRefs: decodeHashList(raw['htlcEntryRefs'], `STORAGE_ENTITY_CONTEXT_HTLC_REFS:${replicaId}`),
+    htlcOriginatedRefs: decodeHashList(
+      raw['htlcOriginatedRefs'],
+      `STORAGE_ENTITY_CONTEXT_HTLC_ORIGINATED_REFS:${replicaId}`,
+    ),
   };
 };
 
@@ -261,7 +296,17 @@ export const readEntityContextPayloads = async (
         decodeGossipProfileLeaf(await readVerifiedPayload(db, replicaId, profileRef), replicaId),
       );
     }
-    const htlc = decodeHtlcLeaf(await readVerifiedPayload(db, replicaId, manifest.htlcRef), replicaId);
+    const entries: PreparedHtlcEntry[] = [];
+    for (const entryRef of manifest.htlcEntryRefs) {
+      entries.push(decodeHtlcEntryLeaf(await readVerifiedPayload(db, replicaId, entryRef), replicaId));
+    }
+    const originated: PreparedOriginatedHtlcPayment[] = [];
+    for (const originatedRef of manifest.htlcOriginatedRefs) {
+      originated.push(
+        decodeHtlcOriginatedLeaf(await readVerifiedPayload(db, replicaId, originatedRef), replicaId),
+      );
+    }
+    const htlc: HtlcPreparedInfraContext = { version: 1, entries, originated };
     const context = validateEntityInfraContext({
       ...manifest.header,
       gossipProfiles,

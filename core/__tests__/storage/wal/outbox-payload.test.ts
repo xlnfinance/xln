@@ -175,12 +175,51 @@ describe('content-addressed Entity replay contexts', () => {
       new Map([[replicaId, context]]),
     );
     expect(prepared.refs.size).toBe(1);
-    expect(prepared.rows).toHaveLength(2);
+    // An empty context is the manifest alone: prepared HTLCs are stored one
+    // leaf each, so a frame that prepared none writes no HTLC rows.
+    expect(prepared.rows).toHaveLength(1);
     expect(prepared.rows.every(row => row.value.byteLength <= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
     const restored = await readEntityContextPayloads(
       memoryReader(prepared.rows),
       prepared.refs,
     );
+    expect(restored.get(replicaId)).toEqual(context);
+  });
+
+  test('a wide batch of prepared HTLCs stays inside the record cap', async () => {
+    const replicaId = `${ENTITY_ID}:${SIGNER_ID}`;
+    const entries = Array.from({ length: 120 }, (_, index) => ({
+      binding: {
+        fromEntityId: ENTITY_ID,
+        toEntityId: `0x${index.toString(16).padStart(64, '0')}`,
+        domain: { chainId: 31337, depositoryAddress: `0x${'aa'.repeat(20)}` },
+        accountFrameHash: `0x${'44'.repeat(32)}`,
+        accountHeight: index + 1,
+        lockId: `0x${index.toString(16).padStart(64, '0')}`,
+        envelopeHash: `0x${'55'.repeat(32)}`,
+        hashlock: `0x${'66'.repeat(32)}`,
+        tokenId: 1,
+        amount: 1_000n,
+        timelock: 10n,
+        revealBeforeHeight: 100,
+      },
+      outcome: { kind: 'final' as const, secret: `0x${'77'.repeat(32)}` },
+    }));
+    const context = {
+      version: 1 as const,
+      proposerReplicaId: replicaId,
+      entityId: ENTITY_ID,
+      proposerSignerId: SIGNER_ID,
+      parentFrameHash: `0x${'33'.repeat(32)}`,
+      height: 3,
+      gossipProfiles: [],
+      peerAssertions: [],
+      htlc: { version: 1 as const, entries, originated: [] },
+    };
+    const prepared = prepareEntityContextPayloadRows(new Map([[replicaId, context]]));
+    expect(prepared.rows).toHaveLength(entries.length + 1);
+    expect(prepared.rows.every(row => row.value.byteLength <= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
+    const restored = await readEntityContextPayloads(memoryReader(prepared.rows), prepared.refs);
     expect(restored.get(replicaId)).toEqual(context);
   });
 
