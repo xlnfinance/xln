@@ -23,7 +23,12 @@ import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/
 import { readEntityFrameEvents } from '../frame-events';
 import { assertEntityFrameEventByteBudget } from './frame/events';
 
-export const MAX_ENTITY_FRAME_TX_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
+// Txs may fill only half of the wire frame: the frame also carries events, the
+// entity infra context and the J-prefix certificate, and a Hub frame that
+// selected 10 MB of txs then failed the 10 MB wire assertion halted the
+// Runtime (500-user load, ~350 payments per frame). Deferring the tail of the
+// mempool to the next frame is the intended behaviour; halting is not.
+export const MAX_ENTITY_FRAME_TX_BYTES = Math.floor(LIMITS.MAX_FRAME_SIZE_BYTES / 2);
 export {
   MAX_ENTITY_FRAME_EVENT_BYTES,
   assertEntityFrameEventByteBudget,
