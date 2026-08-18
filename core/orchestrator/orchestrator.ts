@@ -27,7 +27,7 @@ import {
 import { openRelayIncidentJournal } from '../network/relay/incident-journal';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../network/relay/router';
 import { closeRelayClientsForReset } from '../network/relay/reset';
-import { canonicalizeRuntimeWsAudience, deserializeWsMessage, resolveRuntimeWsMaxMessageBytes, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import { canonicalizeRuntimeWsAudience, deserializeWsMessage, resolveRuntimeWsMaxMessageBytes, serializeWsMessage, toRuntimeWsBytes, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../network/p2p/auth/hello-challenge';
 import { type MarketSnapshotPayload } from '../network/relay/market/snapshot';
 import { createMarketSubscriptionStack } from '../network/relay/market/subscriptions';
@@ -1563,6 +1563,15 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...(process.env['XLN_HUB_MIN_FRAME_DELAY_MS']
         ? { XLN_RUNTIME_MIN_FRAME_DELAY_MS: process.env['XLN_HUB_MIN_FRAME_DELAY_MS'] }
         : {}),
+      // Profiling a load run means profiling the Hub: it is the single writer
+      // every payment and every swap passes through. The child builds none of
+      // this unless the operator asked for it.
+      ...(process.env['XLN_RUNTIME_APPLY_PROFILE']
+        ? { XLN_RUNTIME_APPLY_PROFILE: process.env['XLN_RUNTIME_APPLY_PROFILE'] }
+        : {}),
+      ...(process.env['XLN_ENTITY_FRAME_PROFILE']
+        ? { XLN_ENTITY_FRAME_PROFILE: process.env['XLN_ENTITY_FRAME_PROFILE'] }
+        : {}),
     }),
   });
   child.proc = proc;
@@ -2920,7 +2929,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
           return;
         }
         if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
-        Promise.resolve(relayRoute(routerConfig, ws, peerMessage)).catch(error => {
+        Promise.resolve(relayRoute(routerConfig, ws, peerMessage, typeof raw === 'string' ? undefined : toRuntimeWsBytes(raw as Buffer | ArrayBuffer))).catch(error => {
           const reason = serializeError(error);
           pushDebugEvent(relayStore, {
             event: 'error',
