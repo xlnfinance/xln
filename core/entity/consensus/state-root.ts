@@ -265,6 +265,9 @@ const ACCOUNT_LEAF_BODY_FIELDS = [
   'shadow',
 ] as const satisfies readonly (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number][];
 
+/** Hoisted: the projection runs once per account leaf on every root computation. */
+const ACCOUNT_LEAF_BODY_FIELD_SET: ReadonlySet<string> = new Set(ACCOUNT_LEAF_BODY_FIELDS);
+
 const compactDisputeSeal = (seal: AccountDisputeSeal): Record<string, unknown> => ({
   hash: seal.hash,
   proofBodyHash: seal.proofBodyHash,
@@ -331,9 +334,8 @@ const projectAccountConsensusState = (account: CoveredAccountReplica): Record<st
   if (!localIsLeft && localEntityId !== account.state.rightEntity.toLowerCase()) {
     throw new Error(`ENTITY_ACCOUNT_OWNER_MISMATCH:${localEntityId}`);
   }
-  const bodyFields: ReadonlySet<string> = new Set(ACCOUNT_LEAF_BODY_FIELDS);
   for (const field of ACCOUNT_ENTITY_COMMITTED_FIELDS) {
-    if (bodyFields.has(field)) continue;
+    if (ACCOUNT_LEAF_BODY_FIELD_SET.has(field)) continue;
     const value: unknown = account[field];
     if (value !== undefined) projected[field] = value;
   }
@@ -387,10 +389,14 @@ const normalizeAuthorityConfig = (config: ConsensusConfig): ConsensusConfig => {
     }
     shares[signerId] = share;
   }
+  // Only the jurisdiction survives the rebuild by value; validators and shares
+  // are replaced with fresh normalized copies, so deep-cloning the whole config
+  // on every root computation copied them twice for nothing.
   return {
-    ...structuredClone(config),
+    ...config,
     validators: config.validators.map(normalizeAuthoritySignerId),
     shares,
+    ...(config.jurisdiction ? { jurisdiction: structuredClone(config.jurisdiction) } : {}),
   };
 };
 

@@ -389,7 +389,7 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
   const route = routes
     ? getEntityCollectionValueForWrite(routes, orderId)
     : undefined;
-  if (!route) {
+  if (!routes || !route) {
     throw haltRuntimeFailure(
       'CROSS_J_CLEAR_MATERIALIZE_ROUTE_FORK_MISSING',
       `CROSS_J_CLEAR_MATERIALIZE_ROUTE_FORK_MISSING:${orderId}`,

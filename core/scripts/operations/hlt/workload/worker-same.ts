@@ -34,8 +34,12 @@ import {
 export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void> => {
   const manifestPath = join(args.workDir, 'prod-mesh', 'runtime-import-manifest.json');
   const entries = decodeRuntimeManifestEntries(JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown);
-  const hub = await connectRuntime(entryByLabel(entries, 'H1'));
-  const marketMaker = await connectRuntime(entryByLabel(entries, 'MM'));
+  // The mesh always boots H1..H3 and MM; an economy names which of them this
+  // run actually trades against, and the rest stay idle like a real network.
+  const hubLabel = args.plan?.economy.hubLabels[0] ?? 'H1';
+  const marketMakerLabel = args.plan?.economy.marketMakerLabels[0] ?? 'MM';
+  const hub = await connectRuntime(entryByLabel(entries, hubLabel));
+  const marketMaker = await connectRuntime(entryByLabel(entries, marketMakerLabel));
   let preparedParallel: PreparedParallelSameLoad | null = null;
   try {
     const hubIdentity = selectLocalHubIdentity(
@@ -68,7 +72,7 @@ export const runSameProductionSwapLoad = async (args: WorkerArgs): Promise<void>
       decodeLoadFrame(await lane.runtime.adapter.read<unknown>('frame/latest'))));
     const initialFrame = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
     const laneInitialFrames = await readLaneFrames();
-    const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', 'h1'));
+    const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
     const walBytesBefore = directoryBytes(walPath);
     const driverRssBefore = process.memoryUsage().rss;
     const startedAt = performance.now();

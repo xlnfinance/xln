@@ -11,6 +11,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { cpus } from 'node:os';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveRuntimeAdapterCapabilityToken } from '../../../../api/runtime-adapter/security/auth';
@@ -37,10 +38,46 @@ export type LaneRuntime = Readonly<{
   relayUrl: string;
 }>;
 
-/** Lane daemons live outside the 20-port smoke slot: 200 ports per slot from 21000. */
-export const laneRuntimePortBase = (portBase: number): number => 21_000 + Math.floor((portBase - 20_000) / 20) * 200;
+/**
+ * Lane daemons live outside the 20-port smoke slot. One slot reserves enough
+ * ports for a four-figure population, because the harness spawns one daemon
+ * per user and a ladder keeps adding lanes on top of the previous stage.
+ */
+export const LANE_PORTS_PER_SLOT = 4_096;
+const LANE_PORT_FLOOR = 21_000;
+const MAX_TCP_PORT = 65_535;
 
-const SPAWN_CONCURRENCY = 16;
+export const laneRuntimePortBase = (portBase: number): number =>
+  LANE_PORT_FLOOR + Math.floor((portBase - 20_000) / 20) * LANE_PORTS_PER_SLOT;
+
+/**
+ * A port that silently wraps past the TCP range would bind some unrelated
+ * listener instead of failing, so the arithmetic is checked at the call site.
+ */
+export const laneRuntimePort = (portBase: number, laneIndex: number): number => {
+  if (!Number.isSafeInteger(laneIndex) || laneIndex < 0) {
+    throw new Error(`HLT_LANE_INDEX_INVALID:${laneIndex}`);
+  }
+  if (laneIndex >= LANE_PORTS_PER_SLOT) {
+    throw new Error(`HLT_LANE_INDEX_EXCEEDS_SLOT:${laneIndex}:${LANE_PORTS_PER_SLOT}`);
+  }
+  const port = laneRuntimePortBase(portBase) + laneIndex;
+  if (port > MAX_TCP_PORT) throw new Error(`HLT_LANE_PORT_OUT_OF_RANGE:${port}`);
+  return port;
+};
+
+/**
+ * Daemon startup is dominated by waiting on health, not by CPU, so the spawn
+ * fan-out is wider than the core count. It stays bounded because a thousand
+ * simultaneous LevelDB opens would fail on file descriptors, not on time.
+ */
+const SPAWN_CONCURRENCY = Math.max(
+  8,
+  Math.min(
+    128,
+    Number(process.env['XLN_HLT_SPAWN_CONCURRENCY'] || '') || cpus().length * 2,
+  ),
+);
 const READY_TIMEOUT_MS = 180_000;
 
 const resolveJurisdictionKey = (path: string): string => {
@@ -60,7 +97,7 @@ const spawnLaneRuntime = async (options: {
   jurisdictionsPath: string;
   jurisdictionKey: string;
 }): Promise<LaneRuntime> => {
-  const port = laneRuntimePortBase(options.portBase) + options.laneIndex;
+  const port = laneRuntimePort(options.portBase, options.laneIndex);
   const rpcUrl = `http://127.0.0.1:${options.portBase}`;
   const relayUrl = `ws://127.0.0.1:${options.portBase + 4}/relay`;
   const authSeed = randomBytes(32).toString('hex');

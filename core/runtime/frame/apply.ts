@@ -113,9 +113,10 @@ export const applyPreparedRuntimeFrame = async (
       queuedJSubmitRetries = split.retries;
       jOutbox = split.maintenance;
       appliedInput = cloneIsolatedRuntimeInput(result.appliedRuntimeInput);
-      frame.entityContexts = new Map(
-        [...result.entityContexts].map(([replicaId, context]) => [replicaId, structuredClone(context)]),
-      );
+      // The reducer already returns a deep copy detached from the live
+      // execution state, and nothing else retains it; cloning it again would
+      // deep-copy every touched replica's infra context twice per frame.
+      frame.entityContexts = result.entityContexts;
       changedEntityIds = collectChangedEntityIds(input, result.appliedRuntimeInput);
       // Output planning runs due hooks before publish performs its full rebuild.
       // Refresh changed replicas now so hooks scheduled by this frame can enter

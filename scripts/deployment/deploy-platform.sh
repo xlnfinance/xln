@@ -1189,7 +1189,7 @@ run_local_deploy() {
         echo "[deploy] resetting production anvil + runtime + chain-bound watchtower state"
         rm -rf "$XLN_RDB_ROOT/core/prod-main" "$XLN_RDB_ROOT/core/prod-mesh" "$XLN_RDB_ROOT/custody/prod" "$XLN_RDB_ROOT/custody-tmp" "$XLN_RDB_ROOT/watchtower/prod-main" "$XLN_RDB_ROOT/watchtower/push-main"
         rm -f "$XLN_JDB_ROOT/anvil-state.json" "$XLN_JDB_ROOT/anvil2-state.json"
-        install -d -m 700 "$XLN_RDB_ROOT/runtime"
+        install -d -m 700 "$XLN_RDB_ROOT/core"
         rm -f "$XLN_RDB_ROOT/core/.mesh-reset-once" "$XLN_RDB_ROOT/core/.mesh-reset-once.claimed"
         install -m 600 /dev/null "$XLN_RDB_ROOT/core/.mesh-reset-once"
         lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true

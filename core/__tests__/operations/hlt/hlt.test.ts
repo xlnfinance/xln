@@ -48,6 +48,7 @@ import { parseWorkerArgs } from '../../../scripts/operations/hlt/worker-runtime'
 import {
   connectedRuntimeHttpBase,
   deriveLoadLaneIdentities,
+  CONTROL_CONCURRENCY,
   partitionLoadControlBatches,
   partitionLoadProvisioningBatches,
   runtimeHttpBaseFromWsUrl,
@@ -220,8 +221,12 @@ describe('production swap load evidence', () => {
   });
 
   test('user provisioning stays below the authenticated Runtime API burst', () => {
-    expect(partitionLoadControlBatches(Array.from({ length: 10 }, (_, index) => index)))
-      .toEqual([[0, 1, 2, 3], [4, 5, 6, 7], [8, 9]]);
+    const control = partitionLoadControlBatches(
+      Array.from({ length: CONTROL_CONCURRENCY * 2 + 1 }, (_, index) => index),
+    );
+    expect(control.map(batch => batch.length))
+      .toEqual([CONTROL_CONCURRENCY, CONTROL_CONCURRENCY, 1]);
+    expect(control.flat()).toEqual(Array.from({ length: CONTROL_CONCURRENCY * 2 + 1 }, (_, index) => index));
     const provisioning = partitionLoadProvisioningBatches(
       Array.from({ length: 101 }, (_, index) => index),
     );

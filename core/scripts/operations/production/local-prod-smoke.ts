@@ -221,6 +221,29 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 
 type RestartProcessIds = Readonly<{ before: number; after: number }>;
 
+/**
+ * Population flags for HLT. When `XLN_HLT_USERS` is set the run is described as
+ * an economy and every derived quantity comes from it; the raw lane spelling is
+ * left for the legacy schedule ladder and the cross-j single-swap workloads.
+ */
+const hltEconomyArgs = (): string[] => {
+  const users = process.env['XLN_HLT_USERS'];
+  if (!users) return [];
+  const optional = ([
+    ['--rate-per-user', 'XLN_HLT_RATE_PER_USER'],
+    ['--duration-s', 'XLN_HLT_DURATION_S'],
+    ['--mix', 'XLN_HLT_MIX'],
+    ['--base-token', 'XLN_HLT_BASE_TOKEN'],
+    ['--quote-token', 'XLN_HLT_QUOTE_TOKEN'],
+    ['--hubs', 'XLN_HLT_HUBS'],
+    ['--market-makers', 'XLN_HLT_MARKET_MAKERS'],
+  ] as const).flatMap(([flag, variable]) => {
+    const value = process.env[variable];
+    return value ? [flag, value] : [];
+  });
+  return ['--users', users, ...optional];
+};
+
 const runProductionSwapWorker = (
   mode: string,
   swaps: string,
@@ -234,15 +257,18 @@ const runProductionSwapWorker = (
     repoRoot,
     'core/scripts/operations/hlt/hlt.ts',
   );
+  const economy = mode === 'same' || mode === 'payments' ? hltEconomyArgs() : [];
   const result = spawnSync(process.execPath, [
     worker,
     '--work-dir', workDir,
     '--port-base', String(portBase),
     '--mode', mode,
-    '--swaps', swaps,
-    '--lanes', lanes,
-    '--rounds', rounds,
-    '--cadence-ms', cadenceMs,
+    ...(economy.length > 0 ? economy : [
+      '--swaps', swaps,
+      '--lanes', lanes,
+      '--rounds', rounds,
+      '--cadence-ms', cadenceMs,
+    ]),
     '--lane-offset', laneOffset,
     ...(restartProcessIds ? [
       '--server-pid-before-restart', String(restartProcessIds.before),
@@ -261,10 +287,13 @@ const runProductionSwapLoadSmoke = async (): Promise<void> => {
   const rounds = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_ROUNDS'] || '1';
   const cadenceMs = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_CADENCE_MS'] || '1000';
   const mode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || 'same';
-  if (mode !== 'same' && mode !== 'cross') throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_MODE_INVALID:${mode}`);
+  if (mode !== 'same' && mode !== 'cross' && mode !== 'payments') {
+    throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_MODE_INVALID:${mode}`);
+  }
   const scheduleRaw = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SCHEDULE'];
   if (scheduleRaw !== undefined) {
     if (mode !== 'same') throw new Error('LOCAL_PROD_SMOKE_SWAP_LOAD_SCHEDULE_REQUIRES_SAME');
+    if (process.env['XLN_HLT_USERS']) throw new Error('LOCAL_PROD_SMOKE_SWAP_LOAD_SCHEDULE_CONFLICTS_WITH_ECONOMY');
     for (const stage of parseSameLoadSchedule(scheduleRaw)) {
       recordStage('production-swap-load:start', stage);
       runProductionSwapWorker(mode, String(stage.swaps), String(stage.lanes), rounds, cadenceMs, String(stage.laneOffset));
@@ -1065,8 +1094,8 @@ const main = async (): Promise<void> => {
     copySnapshotTemplate(templateDir, workDir);
     recordStage('snapshot:copied', { templateDir, workDir });
   } else {
-    const resetMarker = join(workDir, 'runtime', '.mesh-reset-once');
-    mkdirSync(join(workDir, 'runtime'), { recursive: true });
+    const resetMarker = join(workDir, 'core', '.mesh-reset-once');
+    mkdirSync(join(workDir, 'core'), { recursive: true });
     writeFileSync(resetMarker, 'local-prod-smoke fresh bootstrap\n');
     recordStage('reset:armed', { resetMarker });
   }
@@ -1106,6 +1135,16 @@ const main = async (): Promise<void> => {
     RELAY_URL: `ws://127.0.0.1:${apiPort}/relay`,
     PUBLIC_RPC: `http://127.0.0.1:${apiPort}/rpc`,
     XLN_MIN_DISK_FREE_BYTES: '1',
+    // The load driver is the only client of this local mesh and observes the
+    // Hub's committed book to decide when a round completed. The public
+    // per-client budget would rate-limit that observation and report a driver
+    // limit instead of the Hub's settlement capacity.
+    XLN_RADAPTER_READ_BURST: process.env['XLN_RADAPTER_READ_BURST'] || '2000',
+    XLN_RADAPTER_READ_PER_SEC: process.env['XLN_RADAPTER_READ_PER_SEC'] || '1000',
+    XLN_RADAPTER_CONTROL_BURST: process.env['XLN_RADAPTER_CONTROL_BURST'] || '2000',
+    XLN_RADAPTER_CONTROL_PER_SEC: process.env['XLN_RADAPTER_CONTROL_PER_SEC'] || '1000',
+    XLN_RADAPTER_SEND_BURST: process.env['XLN_RADAPTER_SEND_BURST'] || '2000',
+    XLN_RADAPTER_SEND_PER_SEC: process.env['XLN_RADAPTER_SEND_PER_SEC'] || '1000',
     MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1',
     XLN_RUNTIME_TICK_DELAY_MS: process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '0',
     MARKET_MAKER_RUNTIME_TICK_DELAY_MS:

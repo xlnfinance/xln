@@ -15,18 +15,30 @@ import type { RuntimeInput } from '../../../../runtime/types';
 import { decodeEntitySummaries, type LoadIdentity } from '../boundary/worker-boundary';
 import {
   sendObserved,
+  waitForCounterpartyCredit,
   waitForCredit,
   type ConnectedRuntime,
 } from '../worker-runtime';
 
-const CONTROL_CONCURRENCY = 4;
+/**
+ * Provisioning fan-out. Each lane is its own daemon with its own rate budget,
+ * so this bounds the driver and the Hub-directed polls, not a per-lane quota.
+ * A four-figure population would otherwise spend minutes in setup alone.
+ */
+export const CONTROL_CONCURRENCY = Math.max(
+  4,
+  Math.min(256, Number(process.env['XLN_HLT_CONTROL_CONCURRENCY'] || '') || 32),
+);
 const LOAD_LANE_GOSSIP_POLL_MS = 10_000;
 const CONTROL_BATCH_PAUSE_MS = 100;
+/** Gossip poll while provisioning; each poll re-verifies the peers it learns. */
+const PROVISIONING_GOSSIP_POLL_MS = 1_000;
 // Non-reliable route identity retains the complete transaction fingerprints.
 // Keep setup frames below the 10 KB durable Runtime-machine row limit: the
 // observed 50-Account shape encoded to 21,598 bytes, while 16 leaves headroom.
 const PROVISIONING_ACCOUNTS_PER_FRAME = 16;
 const VISIBILITY_TIMEOUT_MS = 60_000;
+const PER_ENTITY_VISIBILITY_BUDGET_MS = 500;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 export const runtimeHttpBaseFromWsUrl = (raw: string): string => {
@@ -106,21 +118,38 @@ const runInBatches = async <T>(
   }
 };
 
+/**
+ * Every new user must become discoverable before it can trade, and each
+ * profile a peer learns costs that peer a full Hanko verification. Onboarding
+ * therefore gets a budget proportional to the population instead of one flat
+ * minute, and it reports how fast the directory is actually converging — that
+ * rate is a result, not harness noise.
+ */
 const waitForVisibleEntities = async (
   runtime: ConnectedRuntime,
   entityIds: readonly string[],
   code: string,
 ): Promise<void> => {
   const required = new Set(entityIds);
-  const deadline = Date.now() + VISIBILITY_TIMEOUT_MS;
+  const startedAt = Date.now();
+  const deadline = startedAt + VISIBILITY_TIMEOUT_MS + entityIds.length * PER_ENTITY_VISIBILITY_BUDGET_MS;
+  let lastMissing = -1;
   while (Date.now() < deadline) {
     const visible = new Set(
       decodeEntitySummaries(await runtime.adapter.read<unknown>('entities')).map(entity => entity.entityId),
     );
-    if (Array.from(required).every(entityId => visible.has(entityId))) return;
-    await sleep(100);
+    const missing = [...required].filter(entityId => !visible.has(entityId)).length;
+    if (missing === 0) {
+      console.log(`[load] gossip converged entities=${required.size} elapsedMs=${Date.now() - startedAt}`);
+      return;
+    }
+    if (missing !== lastMissing) {
+      console.log(`[load] gossip pending=${missing}/${required.size} elapsedMs=${Date.now() - startedAt}`);
+      lastMissing = missing;
+    }
+    await sleep(250);
   }
-  throw new Error(code);
+  throw new Error(`${code}:missing=${lastMissing}:of=${required.size}`);
 };
 
 const waitForHubProfile = async (lane: LaneRuntime, hubEntityId: string): Promise<void> => {
@@ -215,7 +244,7 @@ export const setupParallelLoadLanes = async (options: {
     await lane.control.configureP2P({
       relayUrls: [lane.relayUrl],
       advertiseEntityIds: [lane.identity.entityId],
-      gossipPollMs: 250,
+      gossipPollMs: PROVISIONING_GOSSIP_POLL_MS,
     });
   });
   await waitForVisibleEntities(options.hub, identities.map(identity => identity.entityId), 'PRODUCTION_SWAP_LOAD_LANE_PROFILES_NOT_VISIBLE');
@@ -230,14 +259,16 @@ export const setupParallelLoadLanes = async (options: {
         [options.laneGrantedCreditAmounts[index]!],
       ),
     });
-    await waitForCredit(
-      options.hub,
-      options.hubIdentity.entityId,
-      lane.identity.entityId,
-      options.laneGrantedCreditTokenId,
-      options.laneGrantedCreditAmounts[index]!,
-    );
   });
+  // Each lane confirms its own grant from its own replica; the Hub is the
+  // process under test and must not spend its client budget on provisioning.
+  await runInBatches(runtimes, (lane, index) => waitForCounterpartyCredit(
+    lane.runtime,
+    lane.identity.entityId,
+    options.hubIdentity.entityId,
+    options.laneGrantedCreditTokenId,
+    options.laneGrantedCreditAmounts[index]!,
+  ));
   const hubBatches = partitionLoadProvisioningBatches(runtimes);
   let laneOffset = 0;
   for (let batchIndex = 0; batchIndex < hubBatches.length; batchIndex += 1) {
