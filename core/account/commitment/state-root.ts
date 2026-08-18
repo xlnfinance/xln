@@ -486,7 +486,82 @@ export const computeAccountCommitmentSectionDetailCold = (
   account: AccountState,
 ): AccountCommitmentSectionDetail => accountCommitmentSectionDetail(account, true);
 
+/**
+ * One Account root is asked for several times per bilateral frame on both
+ * sides — transition key, exact-base check, proposal frame, commit check and
+ * the Entity leaf (twice) — while the state itself changes once. The memo
+ * lives on the AccountState object and is keyed by everything the root reads:
+ * the persistent collections by identity (they are immutable and replaced on
+ * change) and the bounded scalar sections by their exact leaf bytes. In-place
+ * mutation of any root input therefore misses instead of returning a stale
+ * root; the memo is never trusted on identity alone.
+ */
+type AccountStateRootMemo = {
+  collections: readonly unknown[];
+  scalarBytes: string;
+  root: string;
+};
+const accountStateRootMemos = new WeakMap<AccountState, AccountStateRootMemo>();
+
+const ACCOUNT_ROOT_COLLECTION_FIELDS = [
+  'deltas',
+  'locks',
+  'pulls',
+  'swapOffers',
+  'subcontracts',
+  'lendingIntents',
+  'requestedRebalance',
+  'requestedRebalanceFeeState',
+  'rebalanceFeePolicies',
+] as const satisfies readonly (keyof AccountState)[];
+
+const accountRootCollectionIdentities = (account: AccountState): unknown[] =>
+  ACCOUNT_ROOT_COLLECTION_FIELDS.map(field => account[field]);
+
+/** Every non-collection input of `accountStateRootEntries`, as exact bytes. */
+const accountRootScalarBytes = (account: AccountState): string => {
+  const domain = normalizeAccountStateDomain(account.domain);
+  return bytesToHexText(encodeAccountStateValue({
+    chainId: domain.chainId,
+    depositoryAddress: domain.depositoryAddress,
+    leftEntity: account.leftEntity,
+    rightEntity: account.rightEntity,
+    watchSeed: account.watchSeed,
+    jNonce: account.jNonce,
+    disputeConfig: account.disputeConfig,
+    settlementWorkspace: settlementWorkspaceWithoutHankos(account.settlementWorkspace),
+    lastFinalizedJHeight: account.lastFinalizedJHeight,
+    leftPendingJClaims: account.leftPendingJClaims,
+    rightPendingJClaims: account.rightPendingJClaims,
+  }));
+};
+
+const bytesToHexText = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
+
+const sameCollections = (left: readonly unknown[], right: readonly unknown[]): boolean => {
+  for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) return false;
+  return true;
+};
+
 export const computeAccountStateRoot = (
+  account: AccountState,
+  timing?: AccountStateRootTiming,
+): string => {
+  if (timing === undefined) {
+    const collections = accountRootCollectionIdentities(account);
+    const scalarBytes = accountRootScalarBytes(account);
+    const memo = accountStateRootMemos.get(account);
+    if (memo && memo.scalarBytes === scalarBytes && sameCollections(memo.collections, collections)) {
+      return memo.root;
+    }
+    const root = computeAccountStateRootUncached(account);
+    accountStateRootMemos.set(account, { collections, scalarBytes, root });
+    return root;
+  }
+  return computeAccountStateRootUncached(account, timing);
+};
+
+const computeAccountStateRootUncached = (
   account: AccountState,
   timing?: AccountStateRootTiming,
 ): string => {

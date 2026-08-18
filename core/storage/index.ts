@@ -83,7 +83,6 @@ import {
 import { readAccountStorageLayout } from './schema/account-layout';
 import {
   areStorageCheckpointReplicasQuiescent,
-  buildLiveReplicaLookup,
   buildLiveReplicaMetaPlan,
   buildStorageLiveReplicaMetaCommitment,
   buildStorageReplicaMetaCommitmentFromCheckpointPlan,
@@ -1133,8 +1132,9 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
     : null;
   const lineagePlan =
     checkpointedLineagePlan ?? buildLiveReplicaMetaPlan(options.env);
-  const replicaLookup =
-    checkpointedLineagePlan?.lookup ?? buildLiveReplicaLookup(options.env);
+  // Both plans carry the sorted live-replica lookup; building it a second
+  // time was one more O(replicas log replicas) pass per frame.
+  const replicaLookup = lineagePlan.lookup;
   checkpoint('lineage');
   // Projected and canonicalized once: post-state view, machine snapshot and
   // the WAL frame all hash/encode this same durable pending mempool tree.
