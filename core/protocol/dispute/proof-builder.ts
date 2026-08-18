@@ -25,8 +25,8 @@ import type {
   RuntimeAllowance,
   ProofBodyResult,
 } from './proof-body.ts';
-import type { ProofBodyStruct, TransformerClauseStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
-import type { DeltaTransformer } from '../../../jurisdictions/typechain-types/contracts/DeltaTransformer.sol/DeltaTransformer.ts';
+import type { ProofBodyStruct, TransformerClauseStruct } from '../../../jurisdictions/typechain-types/Depository.sol/Depository.ts';
+import type { DeltaTransformer } from '../../../jurisdictions/typechain-types/DeltaTransformer.sol/DeltaTransformer.ts';
 import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body.ts';
 import { sortTransformerEntries } from '../transform/transformer-ordering';
 import { normalizeAccountWatchSeed } from '../identity/account-watch-seed';

@@ -12,7 +12,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.js';
+import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/Depository.sol/Depository.js';
 import { validateJBatch } from '../batch-validation';
 import type { JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeFailureSignal } from '../../../protocol/errors/failure-taxonomy';

@@ -40,5 +40,5 @@ export const cloneDisputeArgumentSnapshot = (
     rightPullIds: [...snapshot.plan.rightPullIds],
   },
 });
-import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/Depository.sol/Depository';
 import { cloneProofBodyStruct } from './proof-body';

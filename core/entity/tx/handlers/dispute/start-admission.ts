@@ -5,7 +5,7 @@ import { ethers } from 'ethers';
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityTx } from '../../../../types/entity-tx';
-import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/Depository.sol/Depository';
 import { addMessage } from '../../../frame-events';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
 import { initJBatch } from '../../../../jurisdiction/machine/batch';

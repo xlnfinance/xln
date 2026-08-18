@@ -10,10 +10,10 @@
 // Re-export typechain types for external use
 export type {
   ProofBodyStruct,
-} from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
+} from '../../../jurisdictions/typechain-types/Depository.sol/Depository.ts';
 
 // Import for internal use
-import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
+import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/Depository.sol/Depository.ts';
 
 /**
  * Evidence objects cross Account, Entity, persistence, and RPC boundaries.

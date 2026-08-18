@@ -17,7 +17,7 @@ import {
 } from './event-normalization-primitives';
 import { walletEventNormalizers } from './event-normalizers-wallet';
 import { validateProofBody } from './batch-validation';
-import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/Depository.sol/Depository';
 
 const normalizeProofBody = (value: unknown): ProofBodyStruct =>
   validateProofBody(structuredClone(value), 'J_EVENT_PROOFBODY') as ProofBodyStruct;

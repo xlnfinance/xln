@@ -1,4 +1,4 @@
-import type { ProofBodyStruct } from '../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import type { ProofBodyStruct } from '../../jurisdictions/typechain-types/Depository.sol/Depository';
 
 /**
  * Common metadata for all J-events (for JBlock tracking).

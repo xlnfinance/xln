@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { deriveDelta, isLeftEntity } from '../../../../account/utils';
 import { safeStringify } from '../../../../protocol/serialization';
 import type { RuntimeInput } from '../../../../runtime/types';
+import type { EntityTx } from '../../../../types/entity-tx';
 import {
   decodeEntitySummaries,
   decodeHubSettlementCounters,
@@ -320,12 +321,15 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
           signerId: lane.identity.signerId,
           entityTxs: Array.from({ length: args.rounds }, (_, round) => {
             const receiver = receivers[paymentReceiverIndex(index, round, receivers.length)]!;
-            return buildRoundPayment(
+            const built = buildRoundPayment(
               lane.identity,
               hubIdentity.entityId,
               receiver.identity,
               round,
-            ).entityTxs[0]!;
+            );
+            const tx = built.entityTxs?.[0];
+            if (!tx) throw new Error('HLT_PAYMENT_TX_MISSING');
+            return tx;
           }),
         }],
       },

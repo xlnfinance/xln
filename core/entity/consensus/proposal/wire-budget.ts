@@ -11,6 +11,7 @@ import { getPrevFrameHash } from '../frame/lineage';
 import { entityLog } from '../entity-log';
 import { timePerfPhase } from '../../../support/performance/profile';
 import { materializeEntityInfraContext } from './infra-context';
+import type { EntityFrameEvent } from '../../types';
 
 const DUMMY_ROOT = `0x${'00'.repeat(32)}`;
 const MAX_FIT_ATTEMPTS = 16;
@@ -47,7 +48,7 @@ export const fitEntityProposalToWireBudget = async (params: {
   env: EntityRuntimeContext;
   replica: EntityReplica;
   proposalTxs: EntityTx[];
-  jPrefixCertificate?: JPrefixCertificate;
+  jPrefixCertificate?: JPrefixCertificate | undefined;
   usePersistedReplayContext: boolean;
 }): Promise<{ txs: EntityTx[]; entityContext: EntityInfraContext }> => {
   const { env, replica, jPrefixCertificate, usePersistedReplayContext } = params;
@@ -73,7 +74,7 @@ export const fitEntityProposalToWireBudget = async (params: {
       prevFrameHash: getPrevFrameHash(replica.state),
       height: replica.state.height + 1,
       timestamp: env.state.timestamp,
-      events: [] as const,
+      events: [] as EntityFrameEvent[],
       entityId: replica.state.entityId,
       stateRoot: DUMMY_ROOT,
       authorityRoot: DUMMY_ROOT,

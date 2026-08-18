@@ -416,10 +416,10 @@ export class BrowserVMProvider {
       throw new Error('Depository dependencies must be deployed first');
     }
     const linkedBytecode = Depository__factory.linkBytecode({
-      'contracts/Account.sol:Account': this.accountAddress.toString(),
-      'contracts/DepositoryBounds.sol:DepositoryBounds': this.depositoryBoundsAddress.toString(),
-      'contracts/HashLadderRegistry.sol:HashLadderRegistry': this.hashLadderRegistryAddress.toString(),
-      'contracts/custody/NftCustody.sol:NftCustody': this.nftCustodyAddress.toString(),
+      'project/contracts/Account.sol:Account': this.accountAddress.toString(),
+      'project/contracts/DepositoryBounds.sol:DepositoryBounds': this.depositoryBoundsAddress.toString(),
+      'project/contracts/HashLadderRegistry.sol:HashLadderRegistry': this.hashLadderRegistryAddress.toString(),
+      'project/contracts/custody/NftCustody.sol:NftCustody': this.nftCustodyAddress.toString(),
     });
     const constructorArgs = ethers.AbiCoder.defaultAbiCoder().encode(
       ['address', 'address'],
@@ -483,7 +483,7 @@ export class BrowserVMProvider {
       throw new Error('HankoVerifier library must be deployed before EntityProvider');
     }
     const linkedBytecode = EntityProvider__factory.linkBytecode({
-      'contracts/HankoVerifier.sol:HankoVerifier': this.hankoVerifierAddress.toString(),
+      'project/contracts/HankoVerifier.sol:HankoVerifier': this.hankoVerifierAddress.toString(),
     });
     const constructorArgs = ethers.AbiCoder.defaultAbiCoder().encode(
       ['address'],

@@ -2,7 +2,7 @@ import { haltRuntimeFailure } from "../errors/failure-taxonomy";
 
 import { ethers } from 'ethers';
 import type { AccountReplica } from '../../types/account';
-import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/Depository.sol/Depository';
 import { asOfferId, type OfferId } from '../../orderbook/swap-keys';
 import { sortTransformerEntries } from '../transform/transformer-ordering';
 import {

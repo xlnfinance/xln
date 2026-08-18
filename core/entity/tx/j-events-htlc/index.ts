@@ -30,7 +30,7 @@ import {
 } from '../../../jurisdiction/machine/batch';
 import type { JEventAccountTx } from '../j-events-types';
 import { compareStableText } from '../../../protocol/serialization';
-import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/Depository.sol/Depository';
 import { findExactSignedProofBodyPull } from '../../../account/pull-registry-settlement';
 import { hasInboundHtlcRoute } from '../../htlc/route-views';
 import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
