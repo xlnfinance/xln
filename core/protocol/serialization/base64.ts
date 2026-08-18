@@ -22,8 +22,17 @@ export const decodeBase64Bytes = (
   value: string,
   errorCode = 'PROTOCOL_BASE64_INVALID',
 ): Uint8Array => {
+  if (value.length % 4 !== 0) throw new Error(errorCode);
+  if (typeof Buffer !== 'undefined') {
+    // The unicode regex over multi-megabyte envelopes was 6% of a Hub's CPU.
+    // Two native passes (decode, re-encode) prove canonical padded RFC 4648
+    // exactly as strictly: any stray or non-canonical character changes the
+    // round trip.
+    const decoded = Buffer.from(value, 'base64');
+    if (decoded.toString('base64') !== value) throw new Error(errorCode);
+    return new Uint8Array(decoded);
+  }
   if (!CANONICAL_BASE64.test(value)) throw new Error(errorCode);
-  if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(value, 'base64'));
   const binary = atob(value);
   return Uint8Array.from(binary, character => character.charCodeAt(0));
 };
