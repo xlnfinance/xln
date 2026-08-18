@@ -203,8 +203,6 @@ import { getEffectiveEntityInputTxs } from '../../../entity/consensus/output/env
 
 import { assertRuntimeOutputAuthorization } from '../../../entity/auth/authorization';
 
-import { cloneIsolatedRoutedEntityInputs } from '../../../runtime/mempool/input-clone';
-
 import { createDueScheduledWakeInputs } from '../../../runtime/mempool/scheduled-wake';
 
 import { ACCOUNT_PENDING_RESEND_AFTER_MS } from '../../../entity/scheduler';

@@ -6,7 +6,7 @@ import type {
 } from '../types';
 import { createStructuredLogger, shortId } from '../../support/logger';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
-import { compareStableText, safeStringify } from '../../protocol/serialization';
+import { compareStableText } from '../../protocol/serialization';
 import { getWallClockMs } from '../../support/time';
 import { validateDeliverableEntityInput } from '../delivery/topology/routing-validation';
 import {
@@ -95,11 +95,8 @@ const requireOutputRuntimeFrame = (
   return frame;
 };
 
-const outputEnvelopeGroupKey = (output: DeliverableEntityInput): string => {
-  return safeStringify({
-    runtimeId: normalizeRuntimeId(output.runtimeId),
-  });
-};
+const outputEnvelopeGroupKey = (output: DeliverableEntityInput): string =>
+  normalizeRuntimeId(output.runtimeId);
 
 const batchOrdinaryOutputsBySourceFrame = (
   outputs: DeliverableEntityInput[],

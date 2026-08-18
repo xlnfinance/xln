@@ -3,7 +3,6 @@ import {
   decodeRuntimeInput,
   type DecodedRuntimeInput,
 } from '../../../runtime/decode';
-import { cloneIsolatedRuntimeSnapshot } from '../../../runtime/mempool/input-clone';
 import {
   decodeRoutedEntityInput,
   type ValidatedRoutedEntityInput,
@@ -193,5 +192,5 @@ export const validateDurableRuntimeMachineSnapshot = (
     );
   }
   validateJReplicas(snapshot['jReplicas'], `${code}_J_REPLICAS`);
-  return cloneIsolatedRuntimeSnapshot(snapshot);
+  return snapshot;
 };

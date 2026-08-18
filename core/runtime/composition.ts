@@ -22,7 +22,6 @@ import {
   createRuntimeCommandApi,
 } from './command/api';
 import {
-  cloneRuntimeFrameMempool,
   runtimeInputHasQueuedWork,
 } from './frame/transaction';
 import {
@@ -236,7 +235,6 @@ const runtimeStateApi = createRuntimeStateApi({
 
 export const prewarmRuntimeSignerCache = runtimeStateApi.prewarmRuntimeSignerCache;
 export const createEmptyEnv = runtimeStateApi.createEmptyEnv;
-export { cloneRuntimeFrameMempool };
 export { canonicalEntitySeed, importEntity } from './registration/entity-creation';
 
 const runtimeRecoveryApi = createRuntimeRecoveryApi({

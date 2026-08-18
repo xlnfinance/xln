@@ -507,7 +507,7 @@ async function commitIncomingFrameOnRealState(
     });
   }
 
-  account.currentFrame = structuredClone(receivedFrame);
+  account.currentFrame = cloneAccountFrame(receivedFrame);
   account.currentHeight = receivedFrame.height;
   const acceptedFrameHanko = accountInputProposal(input)?.frameHanko;
   if (!acceptedFrameHanko) throw new Error('ACCEPTED_ACCOUNT_FRAME_HANKO_MISSING');
@@ -517,6 +517,8 @@ async function commitIncomingFrameOnRealState(
     accountLog.debug('hanko.dispute_frame_stored', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
   }
 
+  // History and live head cannot share one object: later in-place
+  // accountStateRoot writes on currentFrame must not mutate committed history.
   const committedFrame = cloneAccountFrame(receivedFrame);
   committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });
   accountLog.debug('frame.indexed', { source: 'peerCommit', height: receivedFrame.height });

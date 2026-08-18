@@ -29,7 +29,6 @@ import {
   type GossipProfileBatchRequest,
 } from './gossip/profile-batch';
 import { createStructuredLogger, shortId } from '../../support/logger';
-import { isRuntimePerfProfileEnabled } from '../../support/performance/runtime-flags';
 import {
   isBrowserDirectWsEndpointAllowed,
   isSameWsUrlList,
@@ -107,6 +106,11 @@ export type P2PConfig = {
   gossipPollMs?: number;
 };
 
+type InboundEntityInputsOptions = {
+  envelopeSourceVerified?: boolean;
+  entityInputsValidated?: boolean;
+};
+
 type RuntimeP2POptions = {
   env: RuntimeReplica;
   runtimeId: string;
@@ -116,7 +120,12 @@ type RuntimeP2POptions = {
   seedRuntimeIds?: string[];
   advertiseEntityIds?: string[];
   gossipPollMs?: number;
-  onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => void;
+  onEntityInputs: (
+    from: string,
+    envelope: RuntimeEntityInputsEnvelope,
+    timestamp?: number,
+    options?: InboundEntityInputsOptions,
+  ) => void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
   onGossipJurisdictions?: (from: string, announcements: JurisdictionGossipAnnouncement[]) => void;
   officialFoundationSignerId?: string;
@@ -287,7 +296,12 @@ export class RuntimeP2P {
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
   private gossipPollMs: number;
-  private onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => void;
+  private onEntityInputs: (
+    from: string,
+    envelope: RuntimeEntityInputsEnvelope,
+    timestamp?: number,
+    options?: InboundEntityInputsOptions,
+  ) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private onGossipJurisdictions: (from: string, announcements: JurisdictionGossipAnnouncement[]) => void;
   private officialFoundationSignerId: string | undefined;
@@ -957,30 +971,26 @@ export class RuntimeP2P {
   }
 
   private async acceptInboundEntityInputs(
-    transport: 'relay' | 'direct',
+    _transport: 'relay' | 'direct',
     from: string,
     envelope: RuntimeEntityInputsEnvelope,
     timestamp: number | undefined,
   ): Promise<void> {
     if (this.closing || this.closed) return;
     assertRuntimeEntityInputsEnvelopeSource(this.env, from, envelope);
-    const profileStartedAt = Date.now();
     const requiredProfileIds = uniqueTransportValues(
       envelope.entityInputs.flatMap(input => this.collectProfileEntityIdsForInput(input)),
     ).filter(Boolean);
-    const profilesResolved = await this.ensureProfiles(requiredProfileIds);
-    if (this.closing || this.closed) return;
-    if (isRuntimePerfProfileEnabled('XLN_P2P_INGRESS_PROFILE')) {
-      p2pLog.info('ingress.entity_inputs', {
-        transport,
-        sourceRuntimeId: from,
-        sourceRuntimeHeight: envelope.sourceRuntimeHeight,
-        inputCount: envelope.entityInputs.length,
-        profileResolved: profilesResolved,
-        profileWaitMs: Date.now() - profileStartedAt,
+    if (requiredProfileIds.length > 0) {
+      void this.ensureProfiles(requiredProfileIds).catch(error => {
+        this.env.warn('network', 'P2P_FETCH_PROFILE_FAILED', { error: (error as Error).message });
       });
     }
-    this.onEntityInputs(from, envelope, timestamp);
+    if (this.closing || this.closed) return;
+    this.onEntityInputs(from, envelope, timestamp, {
+      envelopeSourceVerified: true,
+      entityInputsValidated: true,
+    });
   }
 
   private prefetchProfilesForInput(input: RoutedEntityInput): void {

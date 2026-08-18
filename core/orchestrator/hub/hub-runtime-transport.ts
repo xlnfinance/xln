@@ -9,6 +9,7 @@ import {
   type RuntimeAdapterSocket,
 } from '../../api/runtime-adapter/server';
 import type { createRuntimeIngressReceiptStore } from '../../runtime/mempool/ingress-receipts';
+import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/admit/entity-input-envelope-auth.ts';
 import {
   enqueueRuntimeInput,
   handleInboundP2PEntityInputs,
@@ -81,7 +82,11 @@ export const createHubDirectRuntimeRoute = (
       };
       debug.lastSeen = entry;
       try {
-        handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp);
+        assertRuntimeEntityInputsEnvelopeSource(env, from, envelope);
+        handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp, {
+          envelopeSourceVerified: true,
+          entityInputsValidated: true,
+        });
       } catch (error) {
         debug.lastError = {
           ...entry,

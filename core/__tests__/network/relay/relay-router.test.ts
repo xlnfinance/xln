@@ -241,7 +241,8 @@ describe('relay-router gossip fanout', () => {
     expect(routerSource).toContain("relayRouterLog.debug('verbose'");
     expect(routerSource).not.toContain('console.');
     expect(routerSource).not.toContain('catch { size = 0; }');
-    expect(routerSource).toContain('safeStringify(msg)');
+    expect(routerSource).toContain('relayMessageByteLength');
+    expect(routerSource).not.toContain('safeStringify(msg)');
     expect(localDeliverySource).toContain("const relayLocalDeliveryLog = createStructuredLogger('relay.local_delivery');");
     expect(localDeliverySource).toContain("relayLocalDeliveryLog.debug('verbose'");
     expect(localDeliverySource).not.toContain('console.');

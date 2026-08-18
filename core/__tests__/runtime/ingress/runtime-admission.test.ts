@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { runtimeInputRequiresOutboxCapacity } from '../../../runtime/mempool/admission';
+import { runtimeInputRequiresOutboxCapacity } from '../../../runtime/mempool/input-validation';
 import type { RoutedEntityInput } from '../../../runtime/types';
 
 const input = (type: string): RoutedEntityInput => ({

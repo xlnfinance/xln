@@ -6,12 +6,6 @@ import {
   readHistoryViewRuntimeActivity,
 } from '..';
 import {
-  cloneIsolatedRoutedEntityInputs,
-  cloneIsolatedRuntimeInput,
-  cloneIsolatedRuntimeSnapshot,
-} from '../../runtime/mempool/input-clone';
-import { cloneIsolatedEntityInput } from '../../entity/state/input-clone';
-import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,
 } from '../../api/public/activity-history';
@@ -22,7 +16,7 @@ import type {
 } from '../views/activity-types';
 import type { AccountFrame } from '../../types/account';
 import type { AccountTx } from '../../types/account';
-import type { CertifiedEntityFrameLink, EntityInput } from '../../entity/types';
+import type { CertifiedEntityFrameLink } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { findAccountByCounterparty } from '../../account/state/account-lookup';
 import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
@@ -49,10 +43,10 @@ export const buildRecoveryJournalFromStorageFrame = (
   runtimeInput: frame.runtimeInput,
   entityContexts: structuredClone(payloads.entityContexts),
   ...(frame.pendingRuntimeInput
-    ? { pendingRuntimeInput: cloneIsolatedRuntimeInput(frame.pendingRuntimeInput) }
+    ? { pendingRuntimeInput: frame.pendingRuntimeInput }
     : {}),
   ...(payloads.runtimeOutputs?.length
-    ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(payloads.runtimeOutputs) }
+    ? { runtimeOutputs: payloads.runtimeOutputs }
     : {}),
   ...(frame.runtimeOutputRefs?.length
     ? { runtimeOutputRefs: [...frame.runtimeOutputRefs] }
@@ -61,7 +55,7 @@ export const buildRecoveryJournalFromStorageFrame = (
     ? { runtimeOutputRetryState: structuredClone(frame.runtimeOutputRetryState) }
     : {}),
   ...(payloads.runtimeMachine
-    ? { runtimeMachine: cloneIsolatedRuntimeSnapshot(payloads.runtimeMachine) }
+    ? { runtimeMachine: payloads.runtimeMachine }
     : {}),
   ...(frame.runtimeStateHash ? { runtimeStateHash: frame.runtimeStateHash } : {}),
   logs,
@@ -103,10 +97,9 @@ const readRuntimeActivityJournal = async (
       timestamp: activity.timestamp,
       runtimeInput: {
         runtimeTxs: [],
-        entityInputs: activity.runtimeInput.entityInputs.map(input =>
-          cloneIsolatedEntityInput(input as EntityInput)),
+        entityInputs: activity.runtimeInput.entityInputs,
         ...(activity.runtimeInput.jInputs
-          ? { jInputs: activity.runtimeInput.jInputs.map(input => structuredClone(input)) }
+          ? { jInputs: activity.runtimeInput.jInputs }
           : {}),
       },
       logs: activity.logs.map((entry) => ({ ...entry })),

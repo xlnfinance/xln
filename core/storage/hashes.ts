@@ -17,8 +17,11 @@ import { buildReplicaLookup } from './replica/replicas';
 import type { RuntimeFrame, StorageFrameEntityHash } from './types';
 import { buildStorageRuntimeMachineSnapshot } from './wal/snapshot';
 
-const hashStable = (value: unknown): string =>
-  computeIntegrityDigest(encodeBinaryPayload(value, 'msgpack'));
+const hashStable = (
+  value: unknown,
+  options: { omitSymbolKeys?: boolean } = {},
+): string =>
+  computeIntegrityDigest(encodeBinaryPayload(value, 'msgpack', options));
 
 /** Bounded Entity roots plus durable Runtime state form the only checkpoint root. */
 export const prepareStorageCanonicalStateHashes = (
@@ -45,7 +48,12 @@ export const prepareStorageCanonicalStateHashes = (
   };
 };
 
-/** Hash the compact WAL frame; payload bodies remain content-addressed rows. */
+/** Hash the compact WAL frame; payload bodies remain content-addressed rows.
+ * Stored row bytes are `{ ...frameBase, frameHash }` and are NOT this digest
+ * domain. Hashing the packed row would change WAL identity. Nested applied /
+ * pending inputs are canonicalized once before this spread so the second pack
+ * does not re-walk those trees.
+ */
 export const computeStorageFrameHash = (record: RuntimeFrame): string => {
   const stableRecord = { ...record };
   delete stableRecord.frameHash;
@@ -59,7 +67,7 @@ export const computeStorageFrameHash = (record: RuntimeFrame): string => {
         cellCount: entry.cellCount,
       }))
       .sort((left, right) => compareStableText(left.entityId, right.entityId)),
-  });
+  }, { omitSymbolKeys: true });
 };
 
 /** Per-frame replay oracle over dirty component hashes and immutable outputs. */

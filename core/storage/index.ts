@@ -4,7 +4,7 @@
  * Human-audit importance: 100/100 — this is the crash-consistency boundary.
  */
 import { getPerfMs } from '../support/time';
-import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec/codec';
+import { decodeValidatedBuffer, encodeBuffer, encodeBufferPrepared, writeBatch } from './codec/codec';
 import {
   deleteKeyRange,
   iterateKeys,
@@ -1099,11 +1099,12 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   const head = await readHead(walDb, config);
   const appliedRuntimeInput =
     options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
+  const appliedRuntimeInputEncoded = encodeBufferPrepared(appliedRuntimeInput, { omitSymbolKeys: true });
   const snapshotRequested =
     options.env.state.height === 1 ||
     options.env.state.height - head.latestSnapshotHeight >= config.snapshotPeriodFrames;
   const snapshotRequiredByBytesRequested =
-    head.epochReplayBytes + encodeBuffer(appliedRuntimeInput).byteLength >=
+    head.epochReplayBytes + appliedRuntimeInputEncoded.buffer.byteLength >=
     config.epochMaxBytes;
   const materializationRequested =
     options.env.state.height === 1 ||
@@ -1135,11 +1136,14 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   const replicaLookup =
     checkpointedLineagePlan?.lookup ?? buildLiveReplicaLookup(options.env);
   checkpoint('lineage');
-  // Projected once: the post-state view, the machine snapshot and the frame
-  // record all commit this same durable pending mempool.
-  const durablePendingInput = buildDurableRuntimeMempool(
-    options.pendingRuntimeInput ?? options.env.runtimeMempool,
-  );
+  // Projected and canonicalized once: post-state view, machine snapshot and
+  // the WAL frame all hash/encode this same durable pending mempool tree.
+  const durablePendingInput = encodeBufferPrepared(
+    buildDurableRuntimeMempool(
+      options.pendingRuntimeInput ?? options.env.runtimeMempool,
+    ),
+    { omitSymbolKeys: true },
+  ).canonical as RuntimeInput;
   const planningMs = options.getPerfMs() - planningStartedAt;
   const planningStages = cumulativeMarksToDurations(planningMarks, planningMs);
   return {
@@ -1148,7 +1152,7 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
     db,
     walDb,
     head,
-    appliedRuntimeInput,
+    appliedRuntimeInput: appliedRuntimeInputEncoded.canonical as RuntimeInput,
     durablePendingInput,
     snapshotDue,
     snapshotRequiredByBytes,
@@ -1640,7 +1644,7 @@ const buildStorageFrameRecordPlan = (
   } satisfies RuntimeFrame;
   mark('frameEncode.frameHash');
   const frameKey = keyFrame(options.env.state.height);
-  const frameBuffer = encodeBuffer(frameRecord);
+  const frameBuffer = encodeBuffer(frameRecord, { omitSymbolKeys: true });
   mark('frameEncode.frameBuffer');
   const nodeBytes =
     pendingNodes.boardHistoryBytes +

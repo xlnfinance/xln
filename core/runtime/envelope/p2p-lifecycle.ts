@@ -16,7 +16,7 @@ import {
   provisionEntityEncryptionKey,
   requireEntityEncryptionPrivateKey,
 } from '../../entity/auth/crypto';
-import type { RuntimeInboundEntityInputsResult } from '../delivery/topology/entity-routing';
+import type { RuntimeInboundEntityInputsResult, RuntimeInboundEntityInputOptions } from '../delivery/topology/entity-routing';
 
 export type { P2PConfig } from '../../network/p2p/p2p';
 
@@ -28,6 +28,7 @@ export type RuntimeP2PLifecycleDeps = {
     from: string,
     envelope: RuntimeEntityInputsEnvelope,
     ingressTimestamp?: number,
+    options?: RuntimeInboundEntityInputOptions,
   ) => RuntimeInboundEntityInputsResult;
   enqueueRuntimeInputs: (env: RuntimeReplica, inputs: RoutedEntityInput[]) => void;
 };
@@ -113,8 +114,8 @@ const buildRuntimeP2POptions = (
   const options: ConstructorParameters<typeof RuntimeP2P>[0] = {
     env,
     runtimeId,
-    onEntityInputs: (from, envelope, ingressTimestamp) => {
-      deps.handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp);
+    onEntityInputs: (from, envelope, ingressTimestamp, options) => {
+      deps.handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp, options);
     },
     onGossipProfiles: (_from, profiles) => {
       if (profiles.length === 0) return;

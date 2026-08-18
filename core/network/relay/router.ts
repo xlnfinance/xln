@@ -215,13 +215,14 @@ const sendRelayDelivery = (
   config: RelayRouterConfig,
   ws: RelaySocketLike,
   msg: unknown,
+  wireBytes?: Uint8Array,
 ): DeliveryResult => {
   if (!isRelaySocketOpen(ws)) {
     return requireRelayDeliveryMetadata('stale-target', 'TARGET_SOCKET_NOT_OPEN');
   }
   let result: RelaySendResult;
   try {
-    result = config.send(ws, serializeWsMessage(msg as RuntimeWsMessage));
+    result = config.send(ws, wireBytes ?? serializeWsMessage(msg as RuntimeWsMessage));
   } catch (error) {
     return requireRelayDeliveryMetadata('send-failed', error instanceof Error ? error.message : String(error));
   }
@@ -235,6 +236,7 @@ const createRelayRouteContext = (
   config: RelayRouterConfig,
   ws: RelaySocketLike,
   msg: RuntimeWsMessage,
+  rawBytes?: Uint8Array,
 ) => {
   const type = String(msg.type);
   const fromKey = normalizeRuntimeKey(msg.from);
@@ -243,6 +245,8 @@ const createRelayRouteContext = (
     config,
     ws,
     msg,
+    rawBytes,
+    encodedBytes: undefined as Uint8Array | undefined,
     type,
     to: msg.to,
     from: msg.from,
@@ -267,6 +271,20 @@ const createRelayRouteContext = (
 };
 
 type RelayRouteContext = ReturnType<typeof createRelayRouteContext>;
+
+const resolveRelayWireBytes = (context: RelayRouteContext): Uint8Array => {
+  if (context.rawBytes) return context.rawBytes;
+  return context.encodedBytes ??= serializeWsMessage(context.msg);
+};
+
+const relayMessageByteLength = (context: RelayRouteContext): number => {
+  if (context.rawBytes) return context.rawBytes.byteLength;
+  try {
+    return resolveRelayWireBytes(context).byteLength;
+  } catch {
+    return 1;
+  }
+};
 
 const DEFAULT_APPLICATION_BUDGET = {
   windowMs: 60_000,
@@ -665,7 +683,7 @@ const forwardToRemoteRuntime = (
   const { config, msg, type, from, to, toKey } = context;
   const target = config.store.clients.get(toKey);
   if (!target || isLocalTarget) return false;
-  const delivery = sendRelayDelivery(config, target.ws, msg);
+  const delivery = sendRelayDelivery(config, target.ws, msg, resolveRelayWireBytes(context));
   if (isDeliveryDelivered(delivery)) {
     relayLog('[RELAY] → forwarding to WS client');
     pushDebugEvent(config.store, {
@@ -808,7 +826,7 @@ const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolea
   }
   if (
     type === 'entity_inputs' &&
-    !consumeApplicationBudget(context, new TextEncoder().encode(safeStringify(msg)).byteLength)
+    !consumeApplicationBudget(context, relayMessageByteLength(context))
   ) {
     const code = 'ENTITY_INPUT_RATE_LIMITED';
     pushDebugEvent(config.store, {
@@ -951,7 +969,7 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
     to,
     msgType: type,
     encrypted: msg.encrypted === true,
-    size: new TextEncoder().encode(safeStringify(msg)).byteLength,
+    size: relayMessageByteLength(context),
     details: { traceId, hasFromEncryptionPubKey: !!fromEncryptionPubKey },
   });
   return true;
@@ -965,6 +983,7 @@ export const relayRoute = async (
   config: RelayRouterConfig,
   ws: RelaySocketLike,
   rawMsg: unknown,
+  rawBytes?: Uint8Array,
 ): Promise<void> => {
   if (isDuplicateClosingSocket(ws)) return;
   const { store, send } = config;
@@ -986,7 +1005,7 @@ export const relayRoute = async (
     return;
   }
 
-  const context = createRelayRouteContext(config, ws, rawMsg as RuntimeWsMessage);
+  const context = createRelayRouteContext(config, ws, rawMsg as RuntimeWsMessage, rawBytes);
   if (!prepareRelaySession(context)) return;
   const { type, to, from, traceId } = context;
 

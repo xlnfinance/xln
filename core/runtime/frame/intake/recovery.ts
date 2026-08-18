@@ -3,7 +3,6 @@ import { requireRuntimeMempool } from '../../mempool/input-queue';
 import { ensureRuntimeInfrastructure } from '../../envelope/replica-envelope';
 import type { FrameExecutionState } from './execution-state';
 import {
-  cloneRuntimeFrameMempool,
   prependOlderRuntimeInput,
 } from '../transaction';
 
@@ -40,7 +39,7 @@ const restoreFailedInput = (
         const attempted =
           retainedInput ??
           frame.inputForRequeue ??
-          cloneRuntimeFrameMempool(context.runtimeInput);
+          context.runtimeInput;
         attempted.queuedAt ??= context.mempoolQueuedAt ?? context.frameTimestampBeforeTick;
         return prependOlderRuntimeInput(attempted, workingMempool);
       })()

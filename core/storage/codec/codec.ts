@@ -2,6 +2,7 @@ import {
   decodeBinaryPayload,
   decodeValidatedBinaryPayload,
   encodeBinaryPayload,
+  encodeBinaryPayloadWithCanonical,
 } from './binary-codec';
 
 export const notFound = (error: unknown): boolean => {
@@ -16,6 +17,14 @@ export const encodeBuffer = (
   options: { omitSymbolKeys?: boolean } = {},
 ): Buffer => {
   return Buffer.from(encodeBinaryPayload(value, 'msgpack', options));
+};
+
+export const encodeBufferPrepared = (
+  value: unknown,
+  options: { omitSymbolKeys?: boolean } = {},
+): { buffer: Buffer; canonical: unknown } => {
+  const encoded = encodeBinaryPayloadWithCanonical(value, 'msgpack', options);
+  return { buffer: Buffer.from(encoded.bytes), canonical: encoded.canonical };
 };
 
 const requireStorageMsgpack = (buffer: Buffer): void => {

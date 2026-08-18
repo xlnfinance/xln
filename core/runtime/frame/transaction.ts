@@ -8,8 +8,6 @@ import {
   truncateRuntimeFrameEvents,
 } from '../observability/env-events';
 
-export { cloneRuntimeFrameMempool } from './clone';
-
 /**
  * One Runtime frame owns the input detached from the live ingress queue.
  *

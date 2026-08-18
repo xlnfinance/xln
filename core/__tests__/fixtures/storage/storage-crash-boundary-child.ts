@@ -57,7 +57,6 @@ import {
   mergeJPrefixAttestations,
 } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import { applyRuntimeStorageChanges } from '../../../runtime/observability/env-events';
-import { cloneIsolatedRuntimeInput } from '../../../runtime/mempool/input-clone';
 import { collectDueJSubmitRuntimeTxs } from '../../../runtime/j-submit/j-submit-scheduler';
 import { registerPendingCommittedJOutbox } from '../../../runtime/j-submit/j-submit-state';
 import { applyRuntimeTx } from '../../../runtime/tx/tx-handlers';
@@ -517,7 +516,7 @@ env.state.timestamp += 1;
 const [retry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
 if (!retry) throw new Error('crash fixture J-submit retry missing');
 registerPendingCommittedJOutbox(env, await applyRuntimeTx(env, retry, { isReplay: true }));
-const appliedRuntimeInput = cloneIsolatedRuntimeInput({ runtimeTxs: [retry], entityInputs: [] });
+const appliedRuntimeInput = { runtimeTxs: [retry], entityInputs: [] };
 applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
 
 for (const localReplica of env.state.eReplicas.values()) {

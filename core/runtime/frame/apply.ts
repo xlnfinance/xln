@@ -3,7 +3,6 @@ import {
   causalTraceContainsWork,
   summarizeRuntimeAccountCausality,
 } from '../../qa/account-causal-trace';
-import { cloneIsolatedRuntimeInput } from '../mempool/input-clone';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/machine/input';
 import { getPerfMs } from '../../support/time';
@@ -112,10 +111,7 @@ export const applyPreparedRuntimeFrame = async (
       registerPendingCommittedJOutbox(env, split.durable);
       queuedJSubmitRetries = split.retries;
       jOutbox = split.maintenance;
-      appliedInput = cloneIsolatedRuntimeInput(result.appliedRuntimeInput);
-      // The reducer already returns a deep copy detached from the live
-      // execution state, and nothing else retains it; cloning it again would
-      // deep-copy every touched replica's infra context twice per frame.
+      appliedInput = result.appliedRuntimeInput;
       frame.entityContexts = result.entityContexts;
       changedEntityIds = collectChangedEntityIds(input, result.appliedRuntimeInput);
       // Output planning runs due hooks before publish performs its full rebuild.

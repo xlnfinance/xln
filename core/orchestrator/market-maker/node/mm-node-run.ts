@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto';
 import { drainJWatcherBacklog } from '../../../jurisdiction/adapter/operations/backlog-drain';
 import { createDirectRuntimeWsRoute } from '../../../network/p2p/direct-runtime-bun';
+import { assertRuntimeEntityInputsEnvelopeSource } from '../../../runtime/admit/entity-input-envelope-auth.ts';
 import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { decodeRuntimeAdapterRequest } from '../../../api/runtime-adapter/codec';
 import { resolveRuntimeAdapterRead } from '../../../api/runtime-adapter/resolve';
@@ -2088,7 +2089,11 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
       };
       state.lastDirectInput = debugEntry;
       try {
-        handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp);
+        assertRuntimeEntityInputsEnvelopeSource(env, from, envelope);
+        handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp, {
+          envelopeSourceVerified: true,
+          entityInputsValidated: true,
+        });
       } catch (error) {
         state.lastDirectInputError = {
           ...debugEntry,

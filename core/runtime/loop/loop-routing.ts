@@ -2,13 +2,14 @@ import { extractEntityId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../support/logger.ts';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
 import { safeStringify } from '../../protocol/serialization';
-import { runtimeInputRequiresOutboxCapacity } from '../mempool/admission.ts';
+import { runtimeInputRequiresOutboxCapacity } from '../mempool/input-validation.ts';
 import {
   createRuntimeOutputRoutingDeps,
   registerEntityRuntimeHintWithDeps,
   routeInboundP2PEntityInput,
   routeInboundP2PEntityInputs,
   type RuntimeInboundEntityInputsResult,
+  type RuntimeInboundEntityInputOptions,
   type RuntimeEntityRoutingDeps,
 } from '../delivery/topology/entity-routing.ts';
 import { enqueueRuntimeInputs } from './loop-envelope.ts';
@@ -105,6 +106,7 @@ const handleInboundP2PEntityInputs = (
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
   ingressTimestamp?: number,
+  options?: RuntimeInboundEntityInputOptions,
 ): RuntimeInboundEntityInputsResult => {
   const deps = getRuntimeEntityRoutingDeps(apiDeps);
   if (INGRESS_PROFILE) {
@@ -116,7 +118,7 @@ const handleInboundP2PEntityInputs = (
       sourceRuntimeHeight: envelope.sourceRuntimeHeight,
     });
   }
-  return routeInboundP2PEntityInputs(env, from, envelope, deps, ingressTimestamp);
+  return routeInboundP2PEntityInputs(env, from, envelope, deps, ingressTimestamp, options);
 };
 
 const getRuntimeP2PLifecycleDeps = (
@@ -125,8 +127,8 @@ const getRuntimeP2PLifecycleDeps = (
   ensureRuntimeInfrastructure,
   notifyEnvChange: apiDeps.notifyEnvChange,
   enqueueRuntimeInputs: (env, inputs) => enqueueRuntimeInputs(env, inputs),
-  handleInboundP2PEntityInputs: (env, from, envelope, timestamp) =>
-    handleInboundP2PEntityInputs(apiDeps, env, from, envelope, timestamp),
+  handleInboundP2PEntityInputs: (env, from, envelope, timestamp, options) =>
+    handleInboundP2PEntityInputs(apiDeps, env, from, envelope, timestamp, options),
 });
 
 const setRuntimeId = (
@@ -229,7 +231,8 @@ export const createRuntimeRoutingApi = (deps: RuntimeRoutingApiDeps) => {
       from: string,
       envelope: RuntimeEntityInputsEnvelope,
       timestamp?: number,
-    ) => handleInboundP2PEntityInputs(deps, env, from, envelope, timestamp),
+      options?: RuntimeInboundEntityInputOptions,
+    ) => handleInboundP2PEntityInputs(deps, env, from, envelope, timestamp, options),
     normalizeRuntimeEntityInput,
     validateRuntimeInputAdmission,
     getRuntimeEntityRoutingDeps: entityRoutingDeps,

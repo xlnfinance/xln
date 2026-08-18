@@ -52,6 +52,7 @@ import {
   resolveRuntimeWsMaxMessageBytes,
   resolveRuntimeWsRelayAudience,
   serializeWsMessage,
+  toRuntimeWsBytes,
   type RuntimeWsMessage,
 } from '../../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../../network/p2p/auth/hello-challenge';
@@ -950,13 +951,13 @@ const handleHttpRequest = async (
   return new Response('Not found', { status: 404 });
 };
 
-const routeRelaySocketMessage = (session: ServerSession, ws: RelaySocket, peerMessage: RuntimeWsMessage): void => {
+const routeRelaySocketMessage = (session: ServerSession, ws: RelaySocket, peerMessage: RuntimeWsMessage, rawBytes?: Uint8Array): void => {
   const routerConfig = session.routerConfig;
   if (!routerConfig) {
     ws.send(serializeWsMessage({ type: 'error', error: 'Runtime transport not ready' }));
     return;
   }
-  Promise.resolve(relayRoute(routerConfig, ws, peerMessage)).catch(error => {
+  Promise.resolve(relayRoute(routerConfig, ws, peerMessage, rawBytes)).catch(error => {
     const reason = getErrorMessage(error, 'relay handler error');
     serverLog.error('ws.relay_handler_error', { reason, type: peerMessage.type });
     pushDebugEvent(relayStore, {
@@ -1047,7 +1048,7 @@ const handleWebSocketMessage = (
     }
     if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
 
-    routeRelaySocketMessage(session, ws, peerMessage);
+    routeRelaySocketMessage(session, ws, peerMessage, typeof message === 'string' ? undefined : toRuntimeWsBytes(message));
   } catch (error) {
     const byteLength = wsType === 'rpc' ? runtimeAdapterMessageByteLength(message) : messageText().length;
     const errorMessage = getErrorMessage(error);
@@ -1594,6 +1595,11 @@ if (import.meta.main) {
       )
     : () => {};
   process.once('exit', stopParentWatch);
+  // Bun flushes --cpu-prof only through a normal exit; a profiled managed
+  // child therefore turns the parent's SIGTERM into process.exit.
+  if (process.env['XLN_EXIT_ON_SIGTERM'] === '1') {
+    process.on('SIGTERM', () => process.exit(0));
+  }
   const args = process.argv.slice(2);
 
   const options: Partial<XlnServerOptions> = {

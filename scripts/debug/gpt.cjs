@@ -52,8 +52,8 @@ const PRODUCTION_CONTRACT_FILES = discoverSourceFiles(path.join(PROJECT_ROOT, 'j
 // dropping a critical authority or persistence boundary.
 const CORE_CRITICAL_RUNTIME_FILES = [
   'runtime.ts',
-  'core/frame/process.ts',
-  'core/input-pipeline/input-queue.ts',
+  'runtime/frame/process.ts',
+  'runtime/mempool/input-queue.ts',
   'storage/index.ts',
   'storage/commit/commit.ts',
   'storage/wal/index.ts',
@@ -129,16 +129,16 @@ const CORE_FILES = {
   ],
   runtime: [
     // Core data structures and implementation
-    'core/types.ts',      // Runtime input/frame/replica interfaces
+    'runtime/types.ts',      // Runtime input/frame/replica interfaces
     'protocol/identity/index.ts',  // Identity system: EntityId, SignerId, JId, ReplicaKey
 
     // Main coordinators (how the system works)
     'runtime.ts',            // Narrow public facade
-    'core/composition.ts', // Runtime composition root and dependency wiring
-    'core/frame/process.ts', // take -> apply -> WAL -> install -> dispatch pipeline
-    'core/input-pipeline/input-queue.ts', // The single Runtime mempool
-    'core/pathfinding/output-routing.ts', // Post-commit output routing
-    'core/recovery/live-restore.ts', // Durable Runtime restore boundary
+    'runtime/composition.ts', // Runtime composition root and dependency wiring
+    'runtime/frame/process.ts', // take -> apply -> WAL -> install -> dispatch pipeline
+    'runtime/mempool/input-queue.ts', // The single Runtime mempool
+    'runtime/delivery/topology/output-routing.ts', // Post-commit output routing
+    'runtime/recovery/live-restore.ts', // Durable Runtime restore boundary
     'entity/consensus/index.ts',   // Entity input -> candidate -> Hanko certificate -> commit
     'account/consensus/index.ts',  // Bilateral account consensus between entities
     'account/input.ts',      // Canonical AccountInput boundary
@@ -163,7 +163,7 @@ const CORE_FILES = {
     'entity/tx/handlers/dispute/index.ts',         // Dispute/salvage gateway and evidence handling
 
     // Swaps, orderbooks, and cross-jurisdiction markets (critical for current product)
-    'core/swap-cmd/swap-pairs.ts',         // Canonical same-chain swap pair orientation and policies
+    'runtime/swap-cmd/swap-pairs.ts',         // Canonical same-chain swap pair orientation and policies
     'orderbook/swap-execution.ts',                     // Swap lifecycle helpers and terminal settlement summaries
     'orderbook/swap-keys.ts',                          // Swap/order identifier keys and namespacing
     'orderbook/open-swap-offers.ts',                   // Open swap offer projection
@@ -219,7 +219,7 @@ const CORE_FILES = {
     'entity/state-clone.ts',  // Entity candidate/snapshot isolation
     'entity/replica/replica-clone.ts', // Validator-local replica isolation
     'storage/codec/snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
-    'core/j-submit/api.ts', // J-adapter / on-chain integration surface
+    'runtime/j-submit/api.ts', // J-adapter / on-chain integration surface
   ],
   docs: [
     // Canonical live docs only - theory, current status, and implementation-grade specs
@@ -317,7 +317,7 @@ const CROSS_FILES = {
     'mocks/NoReturnERC20Mock.sol',
   ],
   runtime: [
-    'core/types.ts',
+    'runtime/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'types/cross-jurisdiction.ts',
@@ -331,14 +331,14 @@ const CROSS_FILES = {
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
     'runtime.ts',
-    'core/composition.ts',
-    'core/frame/process.ts',
-    'core/input-pipeline/input-queue.ts',
-    'core/recovery/live-restore.ts',
-    'core/j-submit/api.ts',
-    'core/swap-cmd/swap-pairs.ts',
-    'core/pathfinding/output-routing.ts',
-    'core/j-submit/j-submit.ts',
+    'runtime/composition.ts',
+    'runtime/frame/process.ts',
+    'runtime/mempool/input-queue.ts',
+    'runtime/recovery/live-restore.ts',
+    'runtime/j-submit/api.ts',
+    'runtime/swap-cmd/swap-pairs.ts',
+    'runtime/delivery/topology/output-routing.ts',
+    'runtime/j-submit/j-submit.ts',
     'account/input.ts',
     'account/settlement/j-finality.ts',
     'entity/consensus/index.ts',
@@ -387,7 +387,7 @@ const CROSS_FILES = {
     'account/tx/handlers/swap/offer/index.ts',
     'account/tx/handlers/swap/resolve/index.ts',
     'account/tx/handlers/swap/lifecycle/cancel.ts',
-    'account/tx/handlers/swap/lifecycle/history.ts',
+    'storage/queries/history.ts',
     'account/tx/handlers/swap/cross-fill-ack/index.ts',
     'account/tx/handlers/balance/add-delta.ts',
     'account/tx/handlers/j-events/claim.ts',
@@ -465,7 +465,7 @@ const CROSS_FILES = {
 const RUNTIME_FILES = {
   contracts: [],
   runtime: uniqueFiles([
-    'core/types.ts',
+    'runtime/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'types/jurisdiction-events.ts',
@@ -473,13 +473,13 @@ const RUNTIME_FILES = {
     'protocol/identity/index.ts',
     'config/constants.ts',
     'runtime.ts',
-    'core/composition.ts',
-    'core/frame/process.ts',
-    'core/input-pipeline/input-queue.ts',
-    'core/recovery/live-restore.ts',
-    'core/tx/tx-handlers.ts',
-    'core/pathfinding/output-routing.ts',
-    'core/j-submit/j-submit.ts',
+    'runtime/composition.ts',
+    'runtime/frame/process.ts',
+    'runtime/mempool/input-queue.ts',
+    'runtime/recovery/live-restore.ts',
+    'runtime/tx/tx-handlers.ts',
+    'runtime/delivery/topology/output-routing.ts',
+    'runtime/j-submit/j-submit.ts',
     'entity/consensus/index.ts',
     'entity/consensus/frame.ts',
     'entity/consensus/input/hanko-witness.ts',
@@ -529,12 +529,12 @@ const RUNTIME_FILES = {
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
-    'core/observability/env-events.ts',
-    'infra/logger.ts',
+    'runtime/observability/env-events.ts',
+    'support/logger.ts',
     'jurisdiction/machine/jurisdiction-runtime/index.ts',
     'jurisdiction/adapter/kernel/config.ts',
     'jurisdiction/machine/jurisdiction-stack.ts',
-    'core/j-submit/api.ts',
+    'runtime/j-submit/api.ts',
     'storage/canonical-hash.ts',
     'storage/hashes.ts',
     'storage/wal/hash.ts',
@@ -550,12 +550,12 @@ const RUNTIME_FILES = {
   tests: [
     'core/__tests__/registration/invariants/ids.test.ts',
     'core/__tests__/account/consensus/account-frame-integrity.test.ts',
-    'core/__tests__/core/transport/runtime-output-routing.test.ts',
-    'core/__tests__/core/ingress/runtime-ingress-timestamp.test.ts',
+    'core/__tests__/runtime/transport/runtime-output-routing.test.ts',
+    'core/__tests__/runtime/ingress/runtime-ingress-timestamp.test.ts',
     'core/__tests__/jurisdiction/batches/j-batch-reserve-availability.test.ts',
     'core/__tests__/network/jurisdiction/multi-jurisdiction-entity.test.ts',
     'core/__tests__/protocol/codec/serialization-utils.test.ts',
-    'core/__tests__/storage/core/storage-canonical-hash.test.ts',
+    'core/__tests__/storage/runtime/storage-canonical-hash.test.ts',
   ],
   frontend: [],
 };
@@ -575,7 +575,7 @@ const COMPLETE_RUNTIME_FILES = {
 const ORDERBOOK_FILES = {
   contracts: [],
   runtime: [
-    'core/types.ts',
+    'runtime/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'protocol/identity/index.ts',
@@ -584,7 +584,7 @@ const ORDERBOOK_FILES = {
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
-    'core/swap-cmd/swap-pairs.ts',
+    'runtime/swap-cmd/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
     'orderbook/open-swap-offers.ts',
@@ -599,7 +599,7 @@ const ORDERBOOK_FILES = {
     'account/tx/handlers/swap/offer/index.ts',
     'account/tx/handlers/swap/resolve/index.ts',
     'account/tx/handlers/swap/lifecycle/cancel.ts',
-    'account/tx/handlers/swap/lifecycle/history.ts',
+    'storage/queries/history.ts',
     'orderbook/index.ts',
     'orderbook/types.ts',
     'orderbook/core.ts',
@@ -643,7 +643,7 @@ const SWAP_FILES = {
     'Account.sol',
   ],
   runtime: uniqueFiles([
-    'core/types.ts',
+    'runtime/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'protocol/identity/index.ts',
@@ -652,7 +652,7 @@ const SWAP_FILES = {
     'account/state/state-clone.ts',
     'entity/state-clone.ts',
     'entity/replica/replica-clone.ts',
-    'core/swap-cmd/swap-pairs.ts',
+    'runtime/swap-cmd/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
     'orderbook/open-swap-offers.ts',
@@ -668,7 +668,7 @@ const SWAP_FILES = {
     'account/tx/handlers/swap/offer/index.ts',
     'account/tx/handlers/swap/resolve/index.ts',
     'account/tx/handlers/swap/lifecycle/cancel.ts',
-    'account/tx/handlers/swap/lifecycle/history.ts',
+    'storage/queries/history.ts',
     'account/tx/handlers/balance/add-delta.ts',
     'orderbook/index.ts',
     'orderbook/types.ts',

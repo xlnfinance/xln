@@ -217,7 +217,7 @@ import { assertRuntimeOutputAuthorization } from '../../../entity/auth/authoriza
 import { getConsumptionNodeStore } from '../../../entity/consumption/consumption-store';
 import { getAccountJClaimNodeStore } from '../../../entity/account/account-j-claim-node-store';
 
-import { cloneIsolatedRoutedEntityInputs } from '../../../runtime/mempool/input-clone';
+import { cloneIsolatedEntityInput } from '../../../entity/state/input-clone';
 
 import { createDueScheduledWakeInputs } from '../../../runtime/mempool/scheduled-wake';
 
@@ -1584,7 +1584,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       getEffectiveEntityInputTxs(input).filter(tx => tx.type === 'accountInput').length === 1,
     )).toBe(true);
     expect(selectPotentialCrossJAccountInputPairs(mergedSameFrameReplay)).toHaveLength(1);
-    const changedSameFrameReplay = cloneIsolatedRoutedEntityInputs(currentAtomicCohort);
+    const changedSameFrameReplay = currentAtomicCohort.map(cloneIsolatedEntityInput);
     const changedAccountInputTx = getEffectiveEntityInputTxs(changedSameFrameReplay[0]!)
       .find(tx => tx.type === 'accountInput');
     const changedProposal = changedAccountInputTx?.type === 'accountInput'
@@ -1828,7 +1828,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
     let reducerRejectedProposalPairs = 0;
     for (const corruption of corruptions) {
-      const corrupted = cloneIsolatedRoutedEntityInputs(proposals);
+      const corrupted = proposals.map(cloneIsolatedEntityInput);
       corruption.mutate(corrupted);
       publishTestRuntimeCheckpoint(userEnv);
       const casBefore = snapshotRuntimeCas();
@@ -1877,7 +1877,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     }
     expect(reducerRejectedProposalPairs).toBeGreaterThan(0);
 
-    const mixedCorruptPair = cloneIsolatedRoutedEntityInputs(proposals);
+    const mixedCorruptPair = proposals.map(cloneIsolatedEntityInput);
     mixedCorruptPair[1]!.sourceRuntimeFrame!.height += 1;
     mixedCorruptPair[0]!.entityTxs = [
       ...(mixedCorruptPair[0]!.entityTxs ?? []),
@@ -1900,7 +1900,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       .toEqual(['chat']);
     expect(mixedRejected.inputs[0]!.atomicCrossJurisdictionPair).toBeUndefined();
 
-    const validThenCorruptCohorts = cloneIsolatedRoutedEntityInputs(atomicRepeatedCohorts);
+    const validThenCorruptCohorts = atomicRepeatedCohorts.map(cloneIsolatedEntityInput);
     const corruptNewestTarget = validThenCorruptCohorts.find(
       input => input.entityId === targetUser && input.sourceRuntimeFrame?.height === hubFrame.height,
     );
@@ -2048,7 +2048,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const ordinaryHubInput = { entityId: sourceHub, signerId: sourceHubSigner, entityTxs: [] };
     let reducerRejectedAckPairs = 0;
     for (const corruption of ackCorruptions) {
-      const corrupted = cloneIsolatedRoutedEntityInputs(acknowledgements);
+      const corrupted = acknowledgements.map(cloneIsolatedEntityInput);
       corruption.mutate(corrupted);
       publishTestRuntimeCheckpoint(hubEnv);
       const replicasBefore = safeStringify(
@@ -2246,7 +2246,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         runtimeId: userEnv.runtimeId,
         sourceRuntimeFrame: fillFrame,
       }));
-    const adjacentFillProposals = cloneIsolatedRoutedEntityInputs(fillProposals);
+    const adjacentFillProposals = fillProposals.map(cloneIsolatedEntityInput);
     adjacentFillProposals[1]!.sourceRuntimeFrame!.height += 1;
     expect(groupAtomicCrossJAdmissionOutputs([adjacentFillProposals[0]!])).toMatchObject([
       { atomic: true, complete: false },
@@ -2256,7 +2256,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     ]);
     expect(selectPotentialCrossJAccountInputPairs(fillProposals)).toHaveLength(1);
     expect(selectMatchedCrossJAccountInputPairs(userEnv, [fillProposals[0]!]).inputs).toEqual([]);
-    const corruptFill = cloneIsolatedRoutedEntityInputs(fillProposals);
+    const corruptFill = fillProposals.map(cloneIsolatedEntityInput);
     const targetFillProposal = corruptFill.find(input => input.entityId === targetUser);
     const targetProgress = targetFillProposal && proposalFrame(targetFillProposal).frame.accountTxs.find(
       tx => tx.type === 'cross_pull_progress',

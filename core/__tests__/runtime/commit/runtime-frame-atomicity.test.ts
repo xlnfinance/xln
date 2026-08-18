@@ -4,14 +4,14 @@ import { join } from 'path';
 
 import { generateLazyEntityId } from '../../../entity/factory';
 import { initCrontab } from '../../../entity/scheduler';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { dbRootPath } from '../../../runtime/replica/platform';
 import { safeStringify } from '../../../protocol/serialization';
-import { cloneIsolatedRuntimeSnapshot } from '../../../runtime/mempool/input-clone';
 import {
   closeInfraDb,
   closeRuntimeDb,
   applyRuntimeInput,
-  cloneRuntimeFrameMempool,
   createEmptyEnv,
   enqueueRuntimeInput,
   getRuntimeWalDb,
@@ -33,14 +33,9 @@ import {
   restoreDurableRuntimeSnapshot,
 } from '../../../storage/wal/snapshot';
 import { transitionRuntimeLifecycle } from '../../../runtime/replica/lifecycle';
-import type { AccountInput } from '../../../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../../runtime/types';
 import { enableStrictScenario } from '../../../scenarios/harness/helpers';
-import {
-  buildEntityHashesToSign,
-  cloneAccountInputWithoutPostCommitHankos,
-} from '../../../entity/consensus/input/hanko-witness';
 import { markLocalJAuthorityRuntimeTx } from '../../../jurisdiction/machine/registration-evidence';
 import { readStorageFrameRecord } from '../../../storage/read/read';
 import { createTestJReplica } from '../../helpers/j-replica';
@@ -138,7 +133,7 @@ const makeEntityState = (entityId: string, config: ConsensusConfig): EntityState
   proposals: new Map(),
   config,
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   profile: {
@@ -227,6 +222,10 @@ const corruptCurrentHeadAhead = async (env: RuntimeReplica): Promise<void> => {
   const batch = currentDb.batch();
   batch.put(KEY_HEAD, encodeBuffer({ ...head, latestHeight: head.latestHeight + 1 }));
   await batch.write({ sync: true });
+  // A live Runtime reconciles inherited disk once, when the namespace opens.
+  // This helper sabotages current after that decision, so the next persist
+  // must re-read heads the way a freshly opened process would.
+  if (env.infrastructure) env.infrastructure.storageHistoryRecovered = false;
 };
 
 const closeTestEnv = async (env: RuntimeReplica): Promise<void> => {
@@ -258,243 +257,7 @@ describe('runtime frame atomicity', () => {
     expect(env.infrastructure?.processingPromise).toBeNull();
   });
 
-  test('frame input cloning preserves every shared board config without cross-message aliases', () => {
-    const { runtimeInput: source } = makeAliasedBoardRuntimeInput();
-
-    const cloned = cloneRuntimeFrameMempool(source);
-    const clonedImports = cloned.runtimeTxs.filter((tx) => tx.type === 'importReplica');
-    expect(clonedImports).toHaveLength(9);
-    for (const [index, runtimeTx] of clonedImports.entries()) {
-      expect(runtimeTx.data.config.shares).toEqual(
-        (source.runtimeTxs[index] as Extract<RuntimeTx, { type: 'importReplica' }>).data.config.shares,
-      );
-      expect(runtimeTx.data.config).not.toBe(
-        (source.runtimeTxs[index] as Extract<RuntimeTx, { type: 'importReplica' }>).data.config,
-      );
-    }
-    expect(clonedImports[4]!.data.config).not.toBe(clonedImports[5]!.data.config);
-  });
-
-  test('frame input cloning preserves repeated jurisdictions inside one registration RuntimeTx', () => {
-    const config: ConsensusConfig = {
-      mode: 'proposer-based',
-      threshold: 1n,
-      validators: [address('31')],
-      shares: { [address('31')]: 1n },
-      jurisdiction,
-    };
-    const registration: RuntimeTx = {
-      type: 'recordNumberedRegistrationIntent',
-      data: {
-        status: 'pending',
-        request: {
-          version: 1,
-          intentId: hash('32'),
-          stackKey: hash('33'),
-          payerSignerId: address('34'),
-          entityProviderAddress: jurisdiction.entityProviderAddress,
-          entities: ['first', 'second'].map(name => ({
-            name,
-            boardHash: hash('35'),
-            config,
-            localSignerId: null,
-            entitySeed: null,
-          })),
-        },
-        requestHash: hash('36'),
-        rawTransaction: '0x12',
-        transactionHash: hash('37'),
-        transactionNonce: 0,
-      },
-    };
-
-    const [cloned] = cloneRuntimeFrameMempool({ runtimeTxs: [registration], entityInputs: [] }).runtimeTxs;
-    if (cloned?.type !== 'recordNumberedRegistrationIntent') throw new Error('TEST_REGISTRATION_TX_MISSING');
-    const [first, second] = cloned.data.request.entities;
-    expect(first?.config.jurisdiction?.chainId).toBe(jurisdiction.chainId);
-    expect(second?.config.jurisdiction?.chainId).toBe(jurisdiction.chainId);
-    expect(first?.config).not.toBe(second?.config);
-    expect(first?.config.jurisdiction).not.toBe(second?.config.jurisdiction);
-  });
-
-  test('frame input cloning isolates a shared rebalance policy inside one Entity input', () => {
-    const rebalancePolicy = {
-      r2cRequestSoftLimit: 500n,
-      hardLimit: 10_000n,
-      maxAcceptableFee: 15n,
-    };
-    const source: RuntimeInput = {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId: hash('a1'),
-        signerId: address('a2'),
-        entityTxs: ['b1', 'b2', 'b3', 'b4'].map(byte => ({
-          type: 'openAccount' as const,
-          data: {
-            targetEntityId: hash(byte),
-            disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-            creditAmount: 1_000n,
-            tokenId: 1,
-            rebalancePolicy,
-          },
-        })),
-      }],
-    };
-
-    const cloned = cloneRuntimeFrameMempool(source);
-    const policies = cloned.entityInputs[0]!.entityTxs!.map(tx => {
-      if (tx.type !== 'openAccount') throw new Error(`TEST_OPEN_ACCOUNT_EXPECTED:${tx.type}`);
-      return tx.data.rebalancePolicy;
-    });
-
-    expect(policies).toEqual(Array.from({ length: 4 }, () => rebalancePolicy));
-    expect(new Set(policies).size).toBe(4);
-    expect(policies.every(policy => policy !== rebalancePolicy)).toBe(true);
-  });
-
-  test('frame input cloning isolates shared policies in proposed and prepared frames', () => {
-    const rebalancePolicy = {
-      r2cRequestSoftLimit: 500n,
-      hardLimit: 10_000n,
-      maxAcceptableFee: 15n,
-    };
-    const frameTxs = (): EntityTx[] => ['c1', 'c2', 'c3', 'c4'].map(byte => ({
-      type: 'openAccount',
-      data: {
-        targetEntityId: hash(byte),
-        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-        creditAmount: 1_000n,
-        tokenId: 1,
-        rebalancePolicy,
-      },
-    }));
-    const preparedFrame = {
-      height: 1,
-      parentFrameHash: hash('d1'),
-      stateRoot: hash('d2'),
-      authorityRoot: hash('d3'),
-      timestamp: 1_000,
-      txs: frameTxs(),
-      events: [],
-      hash: hash('d4'),
-      leader: { proposerSignerId: address('d5'), view: 0 },
-      hashesToSign: buildEntityHashesToSign(hash('d7'), 1, hash('d2')),
-    };
-    const sharedSignatures = [`0x${'d6'.repeat(65)}`];
-    const preparedVote = {
-      entityId: hash('d7'),
-      targetHeight: 2,
-      previousFrameHash: preparedFrame.hash,
-      fromView: 0,
-      toView: 1,
-      previousLeaderId: address('d5'),
-      nextLeaderId: address('da'),
-      voterId: address('db'),
-      signature: `0x${'dd'.repeat(65)}`,
-      preparedFrame,
-    };
-    const source: RuntimeInput = {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId: hash('d7'),
-        signerId: address('d8'),
-        proposedFrame: {
-          ...preparedFrame,
-          height: 2,
-          parentFrameHash: preparedFrame.hash,
-          txs: frameTxs(),
-          hash: hash('d9'),
-          hashesToSign: buildEntityHashesToSign(hash('d7'), 2, hash('d2')),
-          leader: {
-            proposerSignerId: address('da'),
-            view: 1,
-            certificate: {
-              entityId: preparedVote.entityId,
-              targetHeight: preparedVote.targetHeight,
-              previousFrameHash: preparedVote.previousFrameHash,
-              fromView: preparedVote.fromView,
-              toView: preparedVote.toView,
-              previousLeaderId: preparedVote.previousLeaderId,
-              nextLeaderId: preparedVote.nextLeaderId,
-              votes: new Map([[preparedVote.voterId, preparedVote.signature]]),
-              preparedVotes: new Map([[preparedVote.voterId, preparedVote]]),
-              preparedFrameHash: preparedFrame.hash,
-            },
-          },
-        },
-        hashPrecommitFrame: { height: 2, frameHash: hash('d9') },
-        hashPrecommits: new Map([
-          [address('db'), sharedSignatures],
-          [address('dc'), sharedSignatures],
-        ]),
-        leaderTimeoutVote: preparedVote,
-      }],
-    };
-
-    const cloned = cloneRuntimeFrameMempool(source).entityInputs[0]!;
-    const proposedPolicies = cloned.proposedFrame!.txs.map(tx => {
-      if (tx.type !== 'openAccount') throw new Error(`TEST_OPEN_ACCOUNT_EXPECTED:${tx.type}`);
-      return tx.data.rebalancePolicy;
-    });
-    const preparedPolicies = cloned.leaderTimeoutVote!.preparedFrame!.txs.map(tx => {
-      if (tx.type !== 'openAccount') throw new Error(`TEST_OPEN_ACCOUNT_EXPECTED:${tx.type}`);
-      return tx.data.rebalancePolicy;
-    });
-    const certifiedPreparedFrame = cloned.proposedFrame!.leader.certificate!
-      .preparedVotes!.get(preparedVote.voterId)!.preparedFrame!;
-    const certifiedPreparedPolicies = certifiedPreparedFrame.txs.map(tx => {
-      if (tx.type !== 'openAccount') throw new Error(`TEST_OPEN_ACCOUNT_EXPECTED:${tx.type}`);
-      return tx.data.rebalancePolicy;
-    });
-
-    expect(proposedPolicies).toEqual(Array.from({ length: 4 }, () => rebalancePolicy));
-    expect(preparedPolicies).toEqual(Array.from({ length: 4 }, () => rebalancePolicy));
-    expect(certifiedPreparedPolicies).toEqual(Array.from({ length: 4 }, () => rebalancePolicy));
-    expect(new Set(proposedPolicies).size).toBe(4);
-    expect(new Set(preparedPolicies).size).toBe(4);
-    expect(new Set(certifiedPreparedPolicies).size).toBe(4);
-    expect(cloned.hashPrecommits?.get(address('db'))).not.toBe(sharedSignatures);
-    expect(cloned.hashPrecommits?.get(address('dc'))).not.toBe(sharedSignatures);
-    expect(cloned.hashPrecommits?.get(address('db')))
-      .not.toBe(cloned.hashPrecommits?.get(address('dc')));
-  });
-
-  test('Hanko payload cloning isolates shared Account frame transaction fields', () => {
-    const route = [hash('e1'), hash('e2')];
-    const input: AccountInput = {
-      kind: 'frame',
-      fromEntityId: hash('e3'),
-      toEntityId: hash('e4'),
-      proposal: {
-        frame: {
-          height: 1,
-          timestamp: 1_000,
-          jHeight: 1,
-          accountTxs: [1n, 2n, 3n, 4n].map(amount => ({
-            type: 'direct_payment',
-            data: { tokenId: 1, amount, route },
-          })),
-          prevFrameHash: hash('e5'),
-          accountStateRoot: hash('e6'),
-          stateHash: hash('e7'),
-          deltas: [],
-        },
-      },
-    };
-
-    const cloned = cloneAccountInputWithoutPostCommitHankos(input);
-    if (cloned.kind !== 'frame') throw new Error(`TEST_ACCOUNT_FRAME_EXPECTED:${cloned.kind}`);
-    const routes = cloned.proposal.frame.accountTxs.map(tx => {
-      if (tx.type !== 'direct_payment') throw new Error(`TEST_DIRECT_PAYMENT_EXPECTED:${tx.type}`);
-      return tx.data.route;
-    });
-
-    expect(routes).toEqual(Array.from({ length: 4 }, () => route));
-    expect(new Set(routes).size).toBe(4);
-    expect(routes.every(clonedRoute => clonedRoute !== route)).toBe(true);
-  });
-
-  test('durable RuntimeInput restore isolates repeated board configs', () => {
+  test('durable RuntimeInput restore preserves repeated board config values', () => {
     const { runtimeInput } = makeAliasedBoardRuntimeInput();
     const restored = createEmptyEnv(`runtime-input-clone-restore-${TEST_RUN_ID}`);
 
@@ -505,54 +268,16 @@ describe('runtime frame atomicity', () => {
     expect(imports.slice(4, 8).map(tx => tx.data.config.validators)).toEqual(
       Array.from({ length: 4 }, () => ['6', '7', '8', '9']),
     );
-    expect(new Set(imports.slice(4, 8).map(tx => tx.data.config)).size).toBe(4);
   });
 
-  test('checkpoint cloning isolates repeated board configs across replica entries', () => {
-    const { boards } = makeAliasedBoardRuntimeInput();
-    const eReplicas = boards.flatMap(config => config.validators.map((signerId, index) => [
-      `${signerId}:${index}`,
-      {
-        entityId: signerId,
-        signerId,
-        entityEncPubKey: '',
-        mempool: [],
-        isProposer: index === 0,
-        state: {
-          entityId: signerId,
-          config,
-          profile: { name: signerId },
-          position: { x: index, y: 0, z: 0 },
-        },
-      },
-    ]));
-
-    const cloned = cloneIsolatedRuntimeSnapshot({
-      runtimeInput: { runtimeTxs: [], entityInputs: [] },
-      eReplicas,
-      jReplicas: [],
-    });
-    const replicas = cloned.eReplicas as Array<[string, { state: { config: ConsensusConfig } }]>;
-
-    expect(replicas).toHaveLength(9);
-    expect(replicas.slice(4, 8).map(([, replica]) => replica.state.config.validators)).toEqual(
-      Array.from({ length: 4 }, () => ['6', '7', '8', '9']),
-    );
-    expect(new Set(replicas.slice(4, 8).map(([, replica]) => replica.state.config)).size).toBe(4);
-  });
-
-  test('binary storage decode remains safe when the runtime snapshot is cloned', () => {
+  test('binary storage decode preserves repeated board config values', () => {
     const { runtimeInput } = makeAliasedBoardRuntimeInput();
-    const decoded = decodeBuffer(encodeBuffer({ runtimeInput })) as Record<string, unknown>;
-
-    const cloned = cloneIsolatedRuntimeSnapshot(decoded);
-    const imports = (cloned.runtimeInput as RuntimeInput).runtimeTxs
-      .filter(tx => tx.type === 'importReplica');
+    const decoded = decodeBuffer(encodeBuffer({ runtimeInput })) as { runtimeInput: RuntimeInput };
+    const imports = decoded.runtimeInput.runtimeTxs.filter(tx => tx.type === 'importReplica');
 
     expect(imports.slice(4, 8).map(tx => tx.data.config.validators)).toEqual(
       Array.from({ length: 4 }, () => ['6', '7', '8', '9']),
     );
-    expect(new Set(imports.slice(4, 8).map(tx => tx.data.config)).size).toBe(4);
   });
 
   test('strict scenarios preserve the original runtime failure instead of replacing its stack', async () => {

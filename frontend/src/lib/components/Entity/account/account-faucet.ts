@@ -52,19 +52,27 @@ const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[])
   Object.keys(value).every((key) => allowed.includes(key));
 
 const isFaucetReceipt = (value: unknown): value is NonNullable<FaucetApiResult['receipt']> => {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'status', 'counts', 'enqueuedHeight', 'observedHeight', 'note'])) return false;
+  // The server embeds the full RuntimeIngressReceipt (kind, enqueuedAt,
+  // expiresAt, inputHash, inputFingerprints, ...) here; this client only
+  // reads the fields below, so unknown extra fields must not fail decoding.
+  if (!isRecord(value)) return false;
   if (value['id'] !== undefined && value['id'] !== null && typeof value['id'] !== 'string') return false;
   if (value['status'] !== undefined && typeof value['status'] !== 'string') return false;
   if (value['enqueuedHeight'] !== undefined && value['enqueuedHeight'] !== null && (typeof value['enqueuedHeight'] !== 'number' || !Number.isFinite(value['enqueuedHeight']))) return false;
   if (value['observedHeight'] !== undefined && value['observedHeight'] !== null && (typeof value['observedHeight'] !== 'number' || !Number.isFinite(value['observedHeight']))) return false;
   if (value['note'] !== undefined && value['note'] !== null && typeof value['note'] !== 'string') return false;
   const counts = value['counts'];
-  return counts === undefined || (isRecord(counts) && hasOnlyKeys(counts, ['runtimeTxs', 'entityInputs', 'jInputs']) &&
+  return counts === undefined || (isRecord(counts) &&
     Object.values(counts).every((count) => typeof count === 'number' && Number.isFinite(count)));
 };
 
 export const isFaucetApiResult = (value: unknown): value is FaucetApiResult => {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['success', 'status', 'error', 'code', 'details', 'requestId', 'statusUrl', 'receipt', 'accountReady', 'serverDurationMs', 'events'])) return false;
+  // Server responses (success and failure bodies) carry additional diagnostic
+  // fields (type, amount, tokenId, from, to, accountState, senderOutCapacity,
+  // category, retryable, fatal, failure, and an open-ended `extra` bag) that
+  // this client does not read. Validate the fields we do use; do not reject
+  // on unknown extra keys, or every server-side field addition breaks this.
+  if (!isRecord(value)) return false;
   if (value['success'] !== undefined && typeof value['success'] !== 'boolean') return false;
   for (const field of ['status', 'error', 'code', 'requestId', 'statusUrl'] as const) if (value[field] !== undefined && typeof value[field] !== 'string') return false;
   if (value['accountReady'] !== undefined && typeof value['accountReady'] !== 'boolean') return false;

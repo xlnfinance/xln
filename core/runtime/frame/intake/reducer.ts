@@ -278,8 +278,8 @@ const applyRuntimeInputPhases = async (
   deps: RuntimeInputReducerDeps,
   profile: ApplyProfiler,
   isReplay: boolean,
+  ingress: PreparedRuntimeIngress,
 ): Promise<{ result: AppliedRuntimeInput; profiledRuntimeTxs: RuntimeTx[] }> => {
-  const ingress = validateRuntimeInputIngress(env, runtimeInput, isReplay, deps);
   const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(ingress.entityInputs);
   const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>
     hasVerifiedEntityCommitPrecertificate(env, input));
@@ -306,6 +306,23 @@ const applyRuntimeInputPhases = async (
 export const createRuntimeInputReducer = (
   deps: RuntimeInputReducerDeps,
 ): RuntimeInputReducer => {
+  let preparedIngress:
+    | { env: RuntimeReplica; runtimeInput: RuntimeInput; prepared: PreparedRuntimeIngress }
+    | null = null;
+
+  const takePreparedIngress = (
+    env: RuntimeReplica,
+    runtimeInput: RuntimeInput,
+    isReplay: boolean,
+  ): PreparedRuntimeIngress => {
+    const cached = preparedIngress;
+    preparedIngress = null;
+    if (cached && cached.env === env && cached.runtimeInput === runtimeInput) {
+      return cached.prepared;
+    }
+    return validateRuntimeInputIngress(env, runtimeInput, isReplay, deps);
+  };
+
   const reducer: RuntimeInputReducer = async (env, runtimeInput) => {
     deps.assertApplyAllowed(env);
     if (!env.emit) attachEventEmitters(env);
@@ -325,10 +342,12 @@ export const createRuntimeInputReducer = (
         deps,
         profile,
         isReplay,
+        takePreparedIngress(env, runtimeInput, isReplay),
       );
       profile.finish(env, result, profiledRuntimeTxs);
       return result;
     } catch (error) {
+      preparedIngress = null;
       if (env.strictScenario) throw error;
       runtimeLog.error('apply_input.failed', {
         error: error instanceof Error ? error.message : String(error),
@@ -338,7 +357,11 @@ export const createRuntimeInputReducer = (
     }
   };
   reducer.validate = (env, runtimeInput): void => {
-    validateRuntimeInputIngress(env, runtimeInput, deps.isReplay(env), deps);
+    preparedIngress = {
+      env,
+      runtimeInput,
+      prepared: validateRuntimeInputIngress(env, runtimeInput, deps.isReplay(env), deps),
+    };
   };
   return reducer;
 };

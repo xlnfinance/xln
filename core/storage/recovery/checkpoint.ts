@@ -2,7 +2,6 @@ import { parseProfile, type Profile } from '../../entity/profile';
 import { validateEntityReplica } from '../../entity/replica/replica-validation';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
-import { cloneIsolatedRuntimeSnapshot } from '../../runtime/mempool/input-clone';
 import { assertAccountJClaimRootsAvailable } from '../../entity/account/account-j-claim-node-store';
 import { assertConsumptionRootsAvailable } from '../../entity/consumption/consumption-store';
 import { assertCertifiedBoardRootsAvailable } from '../../jurisdiction/machine/board-registry';
@@ -129,17 +128,16 @@ export const decodeCheckpointSnapshot = async (
 ): Promise<DecodedCheckpointSnapshot> => {
   if (!snapshot || typeof snapshot !== 'object') throw new Error('RECOVERY_CHECKPOINT_INVALID');
 
-  const normalizedSnapshot = cloneIsolatedRuntimeSnapshot(snapshot);
-  const snapshotSeed = typeof normalizedSnapshot['runtimeSeed'] === 'string' ? normalizedSnapshot['runtimeSeed'] : null;
+  const snapshotSeed = typeof snapshot['runtimeSeed'] === 'string' ? snapshot['runtimeSeed'] : null;
   const env = deps.createEmptyEnv(options.runtimeSeed === undefined ? snapshotSeed : options.runtimeSeed);
   const runtimeId = normalizeRuntimeId(
-    options.runtimeId ?? String(normalizedSnapshot['runtimeId'] || env.runtimeId || ''),
+    options.runtimeId ?? String(snapshot['runtimeId'] || env.runtimeId || ''),
   );
   if (!runtimeId) throw new Error('RECOVERY_CHECKPOINT_RUNTIME_ID_REQUIRED');
   env.runtimeId = runtimeId;
   env.dbNamespace = normalizeDbNamespace(runtimeId);
 
-  const gossipProfiles = restoreCheckpointState(env, normalizedSnapshot);
+  const gossipProfiles = restoreCheckpointState(env, snapshot);
   restoreAndAssertLocalEntityCryptoKeys(env);
   assertCrossJLocalCohorts(env);
   await assertCheckpointCommitments(env);

@@ -17,6 +17,19 @@ const XLN_BINARY_CODEC_BY_MAGIC = new Map<number, XlnBinaryCodecName>(
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const ALREADY_CANONICAL = Symbol.for('xln.binary-codec.canonical');
+
+const isAlreadyCanonical = (value: object): boolean =>
+  (value as Record<symbol, unknown>)[ALREADY_CANONICAL] === true;
+
+const markCanonical = <T extends object>(value: T): T => {
+  Object.defineProperty(value, ALREADY_CANONICAL, {
+    value: true,
+    enumerable: false,
+    configurable: true,
+  });
+  return value;
+};
 const SUPPORTED_TYPED_ARRAYS = new Set([
   'Uint8Array',
   'Int8Array',
@@ -78,6 +91,7 @@ const canonicalize = (
     return unsupported(path, `type=${typeof value}`);
   }
   if (typeof value !== 'object') return unsupported(path, `type=${typeof value}`);
+  if (isAlreadyCanonical(value)) return value;
   if (stack.has(value)) throw new Error(`XLN_BINARY_CODEC_CYCLE:path=${path}`);
 
   if (value instanceof Date) {
@@ -99,10 +113,10 @@ const canonicalize = (
   stack.add(value);
   try {
     if (Array.isArray(value)) {
-      return value.map((entry, index) => {
+      return markCanonical(value.map((entry, index) => {
         if (!(index in value)) return unsupported(`${path}[${index}]`, 'sparse-array');
         return canonicalize(entry, `${path}[${index}]`, stack, preserveUndefined, omitSymbolKeys);
-      });
+      }));
     }
     if (value instanceof Map) {
       const entries = Array.from(value.entries()).map(([key, entryValue], index) => {
@@ -125,7 +139,7 @@ const canonicalize = (
         right.valueBytes ??= canonicalSortBytes(right.value);
         return compareBytes(left.valueBytes, right.valueBytes);
       });
-      return new Map(entries.map(entry => [entry.key, entry.value]));
+      return markCanonical(new Map(entries.map(entry => [entry.key, entry.value])));
     }
     if (value instanceof Set) {
       const entries = Array.from(value.values()).map((entry, index) => {
@@ -133,7 +147,7 @@ const canonicalize = (
         return { value: canonical, bytes: canonicalSortBytes(canonical) };
       });
       entries.sort((left, right) => compareBytes(left.bytes, right.bytes));
-      return new Set(entries.map(entry => entry.value));
+      return markCanonical(new Set(entries.map(entry => entry.value)));
     }
 
     const prototype = Object.getPrototypeOf(value);
@@ -149,25 +163,15 @@ const canonicalize = (
       if (!descriptor?.enumerable || !('value' in descriptor)) {
         return unsupported(`${path}.${key}`, 'non-data-property');
       }
-      Object.defineProperty(output, key, {
-        enumerable: true,
-        configurable: true,
-        writable: true,
-        value: canonicalize(descriptor.value, `${path}.${key}`, stack, preserveUndefined, omitSymbolKeys),
-      });
+      output[key] = canonicalize(descriptor.value, `${path}.${key}`, stack, preserveUndefined, omitSymbolKeys);
     }
-    return output;
+    return markCanonical(output);
   } finally {
     stack.delete(value);
   }
 };
 
-export const encodeBinaryPayload = (
-  value: unknown,
-  codec: XlnBinaryCodecName = 'msgpack',
-  options: { omitSymbolKeys?: boolean } = {},
-): Uint8Array => {
-  const canonical = canonicalize(value, '$', new Set(), codec === 'msgpack', options.omitSymbolKeys === true);
+const packCanonical = (canonical: unknown, codec: XlnBinaryCodecName): Uint8Array => {
   const body = codec === 'json'
     ? textEncoder.encode(serializeCanonicalTaggedJson(canonical))
     : asBytes(msgpackCodec.pack(canonical));
@@ -176,6 +180,21 @@ export const encodeBinaryPayload = (
   encoded.set(body, 1);
   return encoded;
 };
+
+export const encodeBinaryPayloadWithCanonical = (
+  value: unknown,
+  codec: XlnBinaryCodecName = 'msgpack',
+  options: { omitSymbolKeys?: boolean } = {},
+): { bytes: Uint8Array; canonical: unknown } => {
+  const canonical = canonicalize(value, '$', new Set(), codec === 'msgpack', options.omitSymbolKeys === true);
+  return { bytes: packCanonical(canonical, codec), canonical };
+};
+
+export const encodeBinaryPayload = (
+  value: unknown,
+  codec: XlnBinaryCodecName = 'msgpack',
+  options: { omitSymbolKeys?: boolean } = {},
+): Uint8Array => encodeBinaryPayloadWithCanonical(value, codec, options).bytes;
 
 export const decodeBinaryPayload = (
   bytes: Uint8Array,

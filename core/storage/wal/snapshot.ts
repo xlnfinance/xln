@@ -32,7 +32,6 @@ import {
   getLiveAccountJClaimAccumulatorStates,
 } from '../../entity/account/account-j-claim-node-store';
 import { assertRuntimeInputCapabilitiesAuthorized } from '../../runtime/tx/internal-tx-auth';
-import { cloneIsolatedRuntimeInput } from '../../runtime/mempool/input-clone';
 import { decodeRuntimeConfig } from './runtime-machine-schema';
 
 export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => {
@@ -177,19 +176,25 @@ const buildDurableJReplicaSnapshot = (jr: JReplica): JReplica => ({
  * into unauthenticated bytes after reload, and could also replay an obsolete
  * wake. Persist only the non-derived work; recovery regenerates due wakes.
  */
+const withoutCapabilitySymbols = <T extends object>(value: T): T =>
+  Object.getOwnPropertySymbols(value).length === 0 ? value : { ...value };
+
 const projectDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput => {
   // Process-local capability Symbols authorize admission but are never durable
-  // protocol bytes. Clone the bounded input graph through its canonical
-  // string-key projection only after authority was checked by the caller.
-  const source = cloneIsolatedRuntimeInput(
-    runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
-  );
+  // protocol bytes. Spread copies the tx/vote envelope without those keys;
+  // nested financial payloads stay shared. WAL encode still omits any leftover
+  // nested Symbols. Derived scheduled wakes are dropped so a reload cannot
+  // persist an unauthenticated marker.
+  const source = runtimeInput ?? { runtimeTxs: [], entityInputs: [] };
   const { jInputs, queuedAt, timestamp, ...requiredInput } = source;
   const entityInputs = source.entityInputs.flatMap(input => {
     const originallyEmptyTrigger = Array.isArray(input.entityTxs) && input.entityTxs.length === 0;
     const durableInput = {
       ...input,
       entityTxs: (input.entityTxs ?? []).filter(tx => tx.type !== 'scheduledWake'),
+      ...(input.leaderTimeoutVote
+        ? { leaderTimeoutVote: withoutCapabilitySymbols(input.leaderTimeoutVote) }
+        : {}),
     };
     const keep =
       originallyEmptyTrigger ||
@@ -205,6 +210,7 @@ const projectDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput
     (jInputs?.length ?? 0) > 0;
   return {
     ...requiredInput,
+    runtimeTxs: requiredInput.runtimeTxs.map(withoutCapabilitySymbols),
     entityInputs,
     ...(jInputs && jInputs.length > 0 ? { jInputs } : {}),
     ...(hasWork && timestamp !== undefined ? { timestamp } : {}),
@@ -220,9 +226,8 @@ export const buildDurableRuntimeMempool = (runtimeInput?: RuntimeInput): Runtime
 
 /**
  * One frame save projects the same pending mempool for the post-state view,
- * the machine snapshot and the frame record. The projection clones the whole
- * pending graph, so callers that already hold the durable projection pass it
- * as `durableRuntimeInput` and it is used verbatim.
+ * the machine snapshot and the frame record. Callers that already hold the
+ * durable projection pass it as `durableRuntimeInput` and it is used verbatim.
  */
 const resolveDurableRuntimeMempool = (
   env: RuntimeReplica,

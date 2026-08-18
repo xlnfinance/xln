@@ -220,11 +220,25 @@ export const spawnBunChild = (
 ): ManagedChild => {
   const mirrorStdout = process.env['XLN_CHILD_MIRROR_STDOUT'] === '1';
   const hasStartupSecrets = startupSecrets !== undefined;
-  const proc = spawn('bun', args, {
+  // Opt-in sampling profile of every managed Bun child (hubs, MM, load lanes):
+  // one grep-friendly markdown profile per child, written when it exits. The
+  // child must exit through process.exit for Bun to flush it, so the same flag
+  // asks the child to treat SIGTERM as a normal exit.
+  const cpuProfDir = process.env['XLN_BUN_CHILD_CPU_PROF_DIR'];
+  const profileArgs = cpuProfDir
+    ? [
+        '--cpu-prof',
+        '--cpu-prof-md',
+        `--cpu-prof-dir=${cpuProfDir}`,
+        `--cpu-prof-name=${name.replace(/[^A-Za-z0-9._-]/g, '_')}-${process.pid}.md`,
+      ]
+    : [];
+  const proc = spawn('bun', [...profileArgs, ...args], {
     cwd: process.cwd(),
     env: {
       ...buildManagedRuntimeChildSecretEnv(process.env, false),
       ...env,
+      ...(cpuProfDir ? { XLN_BUN_CHILD_CPU_PROF_DIR: cpuProfDir, XLN_EXIT_ON_SIGTERM: '1' } : {}),
       ...(hasStartupSecrets ? childSecretFdEnv() : {}),
       // Bun watch replaces the orchestrator without reaping grandchildren.
       // The child must therefore fail closed when this exact parent exits.

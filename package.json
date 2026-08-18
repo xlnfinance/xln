@@ -280,7 +280,6 @@
     "@noble/hashes": "^2.3.0",
     "@noble/secp256k1": "^1.7.2",
     "@node-rs/argon2": "^2.1.0",
-    "argon2": "^0.43.1",
     "bip39": "^3.1.0",
     "buffer": "^6.0.3",
     "debug": "^4.4.3",

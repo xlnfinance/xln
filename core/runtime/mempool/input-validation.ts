@@ -1,6 +1,7 @@
 import { safeStringify } from '../../protocol/serialization';
 import { MAX_ENTITY_FRAME_J_RANGE_BYTES } from '../../jurisdiction/machine/range-budget';
-import type { RuntimeReplica, RuntimeInput } from '../types';
+import type { EntityTx } from '../../types/entity-tx';
+import type { RuntimeReplica, RuntimeInput, RoutedEntityInput } from '../types';
 
 export const MAX_RUNTIME_J_INPUTS = 256;
 export const MAX_RUNTIME_J_TXS = 1_024;
@@ -81,3 +82,23 @@ export const validateRuntimeInputShapeAndLimits = (
     reject(`Too many entity inputs: ${runtimeInput.entityInputs.length} > ${MAX_RUNTIME_ENTITY_INPUTS}`);
   }
 };
+
+const OUTBOX_BACKPRESSURE_EXEMPT_TXS = new Set<EntityTx['type']>([
+  'scheduledWake',
+  'accountInput',
+  'j_event',
+  'processHtlcTimeouts',
+  'prepareDispute',
+  'disputeStart',
+  'disputeFinalize',
+  'j_broadcast',
+  'j_rebroadcast',
+  'j_abort_sent_batch',
+  'j_clear_batch',
+]);
+
+export const runtimeInputRequiresOutboxCapacity = (
+  entityInputs: readonly RoutedEntityInput[],
+): boolean => entityInputs.some(input =>
+  !input.from &&
+  (input.entityTxs ?? []).some(tx => !OUTBOX_BACKPRESSURE_EXEMPT_TXS.has(tx.type)));

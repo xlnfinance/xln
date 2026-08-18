@@ -101,6 +101,10 @@ export const createLocalDeliveryHandler = (
           from,
           envelope,
           typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
+          {
+            envelopeSourceVerified: true,
+            entityInputsValidated: true,
+          },
         );
         if (result.kind === 'ignored') {
           throw new Error('INBOUND_ENTITY_INPUTS_IGNORED');

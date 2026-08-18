@@ -1,8 +1,4 @@
 import { nodeProcess } from '../../../support/process/runtime-process';
-import {
-  cloneIsolatedRoutedEntityInputs,
-  cloneIsolatedRuntimeInput,
-} from '../../../runtime/mempool/input-clone';
 import { requireBoundaryInteger } from '../../../protocol/boundary-validation';
 import { getConsumptionNodeStore } from '../../../entity/consumption/consumption-store';
 import {
@@ -164,13 +160,9 @@ const replayOneFrame = async (
     const history = peekPendingHistoryRecords(env, env.state.height, env.state.timestamp);
     clearPendingAuditEvents(env);
     env.runtimeMempool = frame.pendingRuntimeInput
-      ? authorizeRestoredRuntimeInput(
-          cloneIsolatedRuntimeInput(frame.pendingRuntimeInput),
-        )
+      ? authorizeRestoredRuntimeInput(frame.pendingRuntimeInput)
       : { runtimeTxs: [], entityInputs: [] };
-    env.pendingNetworkOutputs = cloneIsolatedRoutedEntityInputs(
-      frame.runtimeOutputs ?? [],
-    );
+    env.pendingNetworkOutputs = frame.runtimeOutputs ?? [];
     restoreDurableOutputRetryState(
       env,
       frame.runtimeOutputRetryState ?? [],

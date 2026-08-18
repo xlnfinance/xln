@@ -36,7 +36,6 @@
     "frontend/**"
   ],
   "ignoreDependencies": [
-    "argon2",
     "buffer",
     "dockview",
     "@nomicfoundation/hardhat-toolbox",

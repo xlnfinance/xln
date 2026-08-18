@@ -22,6 +22,10 @@ type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 export type RuntimeInboundEntityInputOptions = {
   /** The transport accepted this exact input before persistence quiescing began. */
   acceptedBeforeQuiesce?: boolean;
+  /** Caller already verified envelope sourceSignature for this transport `from`. */
+  envelopeSourceVerified?: boolean;
+  /** Caller already ran validateDeliverableEntityInput on every envelope input. */
+  entityInputsValidated?: boolean;
 };
 
 export type RuntimeEntityRoutingDeps = {
@@ -1619,12 +1623,27 @@ const validateEntityInputsEnvelopeHeader = (
   env: RuntimeReplica,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
+  options: RuntimeInboundEntityInputOptions,
 ): {
   transportSource: string;
   localRuntimeId: string;
   atomicPair: AtomicCrossJPair | undefined;
 } => {
-  const authenticated = assertRuntimeEntityInputsEnvelopeSource(env, from, envelope);
+  const authenticated = options.envelopeSourceVerified === true
+    ? {
+        sourceRuntimeId: normalizeRuntimeId(from),
+        localRuntimeId: normalizeRuntimeId(env.runtimeId),
+      }
+    : assertRuntimeEntityInputsEnvelopeSource(env, from, envelope);
+  if (!authenticated.sourceRuntimeId || !authenticated.localRuntimeId) {
+    throw new Error('INBOUND_ENTITY_INPUTS_TARGET_RUNTIME_INVALID');
+  }
+  if (
+    options.envelopeSourceVerified === true &&
+    normalizeRuntimeId(envelope.sourceRuntimeId) !== authenticated.sourceRuntimeId
+  ) {
+    throw new Error('INBOUND_ENTITY_INPUTS_SOURCE_RUNTIME_MISMATCH');
+  }
   if (
     !Number.isSafeInteger(envelope.sourceRuntimeHeight) || envelope.sourceRuntimeHeight < 0 ||
     !Number.isSafeInteger(envelope.sourceRuntimeTimestamp) || envelope.sourceRuntimeTimestamp < 0
@@ -1661,7 +1680,9 @@ const validateEnvelopeEntityInputs = (
   localRuntimeId: string,
   atomicPair: AtomicCrossJPair | undefined,
 ): RoutedEntityInput[] => envelope.entityInputs.flatMap(rawInput => {
-  const input = validateDeliverableEntityInput(rawInput);
+  const input = options.entityInputsValidated === true
+    ? rawInput as RoutedEntityInput
+    : validateDeliverableEntityInput(rawInput);
   if (localRuntimeId && normalizeRuntimeId(input.runtimeId) !== localRuntimeId) {
     throw new Error(
       `INBOUND_ENTITY_INPUTS_TARGET_RUNTIME_MISMATCH:expected=${localRuntimeId}:actual=${input.runtimeId}`,
@@ -1713,7 +1734,7 @@ export const validateInboundP2PEntityInputsEnvelope = (
   options: RuntimeInboundEntityInputOptions = {},
 ): RoutedEntityInput[] => {
   const { transportSource, localRuntimeId, atomicPair } =
-    validateEntityInputsEnvelopeHeader(env, from, envelope);
+    validateEntityInputsEnvelopeHeader(env, from, envelope, options);
   const validatedInputs = validateEnvelopeEntityInputs(
     env,
     from,

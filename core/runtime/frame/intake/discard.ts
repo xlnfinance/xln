@@ -2,7 +2,6 @@ import { createStructuredLogger } from '../../../support/logger';
 import type { RoutedEntityInput, RuntimeInput, RuntimeReplica } from '../../types';
 import { RuntimeEntityInputApplyError } from '../../mempool/entity-inputs';
 import { ENV_REPLAY_MODE_KEY, readRuntimeMetadata } from '../../loop/loop-environment.ts';
-import { cloneRuntimeFrameMempool } from '../clone';
 
 const discardLog = createStructuredLogger('runtime.input_discard');
 
@@ -39,12 +38,17 @@ export const discardRejectedEntityInput = (
     return null;
   }
   const sourceRuntimeId = error.sourceRuntimeId;
-  const remaining = cloneRuntimeFrameMempool(input);
-  const rejected = remaining.entityInputs.filter(candidate =>
+  const rejected = input.entityInputs.filter(candidate =>
     sameRejectedOrigin(candidate, error, sourceRuntimeId));
   if (rejected.length === 0) return null;
-  remaining.entityInputs = remaining.entityInputs.filter(candidate =>
-    !sameRejectedOrigin(candidate, error, sourceRuntimeId));
+  const remaining: RuntimeInput = {
+    runtimeTxs: input.runtimeTxs,
+    entityInputs: input.entityInputs.filter(candidate =>
+      !sameRejectedOrigin(candidate, error, sourceRuntimeId)),
+    ...(input.jInputs !== undefined ? { jInputs: input.jInputs } : {}),
+    ...(input.timestamp !== undefined ? { timestamp: input.timestamp } : {}),
+    ...(input.queuedAt !== undefined ? { queuedAt: input.queuedAt } : {}),
+  };
 
   const payload = {
     action: 'discarded',

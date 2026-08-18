@@ -3,10 +3,6 @@
  * Key checks: canonical Runtime and per-Entity hashes before returning live state.
  * Human-audit importance: 100/100 — corrupted or mismatched recovery must fail closed.
  */
-import {
-  cloneIsolatedRoutedEntityInputs,
-  cloneIsolatedRuntimeInput,
-} from '../../runtime/mempool/input-clone';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { writeRuntimeMetadata } from '../../runtime/loop/loop-environment.ts';
 import { restoreDurableOutputRetryState } from '../../runtime/delivery/durable-output-retry';
@@ -104,13 +100,9 @@ const installRestoredRuntimeFrame = async (
     `STORAGE_RESTORE_TIMESTAMP_INVALID:height=${targetHeight}`,
   );
   env.runtimeMempool = frame.pendingRuntimeInput
-    ? authorizeRestoredRuntimeInput(
-        cloneIsolatedRuntimeInput(frame.pendingRuntimeInput),
-      )
+    ? authorizeRestoredRuntimeInput(frame.pendingRuntimeInput)
     : { runtimeTxs: [], entityInputs: [] };
-  env.pendingNetworkOutputs = cloneIsolatedRoutedEntityInputs(
-    payloads.runtimeOutputs ?? [],
-  );
+  env.pendingNetworkOutputs = payloads.runtimeOutputs ?? [];
   restoreDurableOutputRetryState(
     env,
     frame.runtimeOutputRetryState ?? [],

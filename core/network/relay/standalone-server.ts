@@ -10,6 +10,7 @@ import {
   makeMessageId,
   resolveRuntimeWsMaxMessageBytes,
   serializeWsMessage,
+  toRuntimeWsBytes,
   type RuntimeWsMessage,
 } from '../p2p/ws-protocol';
 import { normalizeRuntimeId } from '../p2p/auth/runtime-id';
@@ -79,7 +80,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
           ws.send(serializeWsMessage({ type: 'error', error: `Invalid relay message: ${(error as Error).message}` }));
           return;
         }
-        Promise.resolve(relayRoute(routerConfig, ws, msg)).catch(error => {
+        Promise.resolve(relayRoute(routerConfig, ws, msg, typeof message === 'string' ? undefined : toRuntimeWsBytes(message as Buffer | ArrayBuffer))).catch(error => {
           ws.send(serializeWsMessage({ type: 'error', error: `Relay handler failed: ${(error as Error).message}` }));
         });
       },

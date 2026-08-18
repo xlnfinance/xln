@@ -9,7 +9,6 @@ import {
 } from '../../../qa/account-causal-trace';
 import type { RuntimeReplica, RuntimeInput } from '../../types';
 import { applyEntityHeightDurabilityBarrier } from '../../mempool/entity-height-barrier';
-import { cloneRuntimeFrameMempool } from '../clone';
 import type { FrameExecutionState } from '../intake/execution-state';
 import {
   ACCOUNT_CAUSAL_TRACE,
@@ -54,7 +53,7 @@ export const prepareRuntimeFrameInput = async (
   applyEntityHeightDurabilityBarrier(env, input, mempool, timestamp);
   deps.applyEntityTxFrameCap(input, mempool, state.maxEntityTxsPerFrame ?? 0, timestamp);
   deps.applyEntityInputFrameCap(input, mempool, state.maxEntityInputsPerFrame ?? 0, timestamp);
-  frame.inputForRequeue = cloneRuntimeFrameMempool(input);
+  frame.inputForRequeue = input;
 
   if (ACCOUNT_CAUSAL_TRACE) {
     const ingress = summarizeRuntimeAccountCausality(input.entityInputs);

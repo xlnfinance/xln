@@ -212,6 +212,7 @@ export class RuntimeWsClient {
   private sessionKeys: RuntimeWsSessionKeys | null = null;
   private outboundEncSeq = 0;
   private messageTimestamp = 0;
+  private readonly encryptionPubKeyHex: string | null;
   private readonly maxReconnectAttempts: number;
   private readonly pendingRecoveryBundleRequests = new Map<string, PendingRecoveryBundleRequest>();
 
@@ -226,6 +227,9 @@ export class RuntimeWsClient {
       { runtimeId: options.runtimeId },
     );
     this.options = { ...options, runtimeId: normalizeRuntimeId(options.runtimeId) };
+    this.encryptionPubKeyHex = options.encryptionKeyPair
+      ? pubKeyToHex(options.encryptionKeyPair.publicKey)
+      : null;
     this.maxReconnectAttempts = Number.isFinite(options.maxReconnectAttempts as number)
       ? Number(options.maxReconnectAttempts)
       : RuntimeWsClient.DEFAULT_MAX_RECONNECT_ATTEMPTS;
@@ -499,7 +503,7 @@ export class RuntimeWsClient {
         );
       }
       const timestamp = Date.now();
-      const encryptionPubKey = pubKeyToHex(encryptionKeyPair.publicKey);
+      const encryptionPubKey = this.encryptionPubKeyHex ?? pubKeyToHex(encryptionKeyPair.publicKey);
       const nonce = challengeMessage.challenge;
       // Direct runtime links negotiate per-session keys: the ephemeral public
       // key rides in the runtime-signed hello so the peer can bind it.
@@ -840,7 +844,7 @@ export class RuntimeWsClient {
       type: 'entity_inputs',
       id: makeMessageId(),
       from: this.options.runtimeId,
-      fromEncryptionPubKey: pubKeyToHex(this.options.encryptionKeyPair.publicKey),
+      fromEncryptionPubKey: this.encryptionPubKeyHex ?? pubKeyToHex(this.options.encryptionKeyPair.publicKey),
       to,
       ...(encSeq !== undefined ? { encSeq } : {}),
       timestamp:
@@ -980,7 +984,7 @@ export class RuntimeWsClient {
       this.options.encryptionKeyPair && msg.from && !msg.fromEncryptionPubKey
         ? {
             ...msg,
-            fromEncryptionPubKey: pubKeyToHex(this.options.encryptionKeyPair.publicKey),
+            fromEncryptionPubKey: this.encryptionPubKeyHex ?? pubKeyToHex(this.options.encryptionKeyPair.publicKey),
           }
         : msg;
     try {

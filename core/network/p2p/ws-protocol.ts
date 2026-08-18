@@ -126,6 +126,7 @@ const requireStringFields = (
     }
     const maxBytes = WS_STRING_FIELD_MAX_BYTES[field];
     if (typeof value === 'string' && maxBytes !== undefined) {
+      if (value.length * 4 <= maxBytes) continue;
       const bytes = utf8Encoder.encode(value).byteLength;
       if (bytes > maxBytes) {
         throw new Error(`WS_MESSAGE_FIELD_TOO_LONG:field=${field}:bytes=${bytes}:max=${maxBytes}`);
@@ -261,10 +262,27 @@ const wsMessageByteLength = (raw: string | Buffer | Uint8Array | ArrayBuffer): n
   return raw.byteLength;
 };
 
+export const toRuntimeWsBytes = (raw: string | Buffer | Uint8Array | ArrayBuffer): Uint8Array => {
+  if (typeof raw === 'string') throw new Error('WS_WIRE_BINARY_REQUIRED');
+  if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
+  if (raw instanceof Uint8Array) return raw;
+  return new Uint8Array(raw);
+};
+
+let cachedWsMaxMessageEnv: string | undefined;
+let cachedWsMaxMessageBytes: number | undefined;
+
 export const resolveRuntimeWsMaxMessageBytes = (): number => {
   const configured = typeof process === 'undefined' ? undefined : process.env['XLN_WS_MAX_MESSAGE_BYTES'];
+  if (cachedWsMaxMessageBytes !== undefined && cachedWsMaxMessageEnv === configured) {
+    return cachedWsMaxMessageBytes;
+  }
   const parsed = Number(configured);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_WS_MESSAGE_BYTES;
+  cachedWsMaxMessageEnv = configured;
+  cachedWsMaxMessageBytes = Number.isSafeInteger(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_MAX_WS_MESSAGE_BYTES;
+  return cachedWsMaxMessageBytes;
 };
 
 const assertRuntimeWsMessagePack = (bytes: Uint8Array): void => {
@@ -345,11 +363,7 @@ export const deserializeWsMessage = (
   const maxBytes = resolveRuntimeWsMaxMessageBytes();
   if (byteLength > maxBytes) throw new Error(`WS_MESSAGE_TOO_LARGE:bytes=${byteLength}:max=${maxBytes}`);
   if (typeof raw === 'string') throw new Error('WS_WIRE_BINARY_REQUIRED');
-  const bytes = raw instanceof ArrayBuffer
-    ? new Uint8Array(raw)
-    : raw instanceof Uint8Array
-      ? raw
-      : new Uint8Array(raw);
+  const bytes = toRuntimeWsBytes(raw);
   return stripRuntimeWsEnvelope(runtimeWsEnvelopeCodec.decode(bytes));
 };
 
