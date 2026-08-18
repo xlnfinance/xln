@@ -95,23 +95,31 @@ export const validateEntityInfraContext = (value: unknown): DecodedEntityInfraCo
   const peerAssertions = raw['peerAssertions'].map((value, index) => {
     const peer = exactKeys(value, ['entityId', 'online'], `ENTITY_INFRA_PEER_ASSERTION_INVALID:${index}`);
     const peerEntityId = toEntityId(bytes32(peer['entityId'], `ENTITY_INFRA_PEER_ENTITY_ID_INVALID:${index}`));
-    if (peerEntityId <= previousPeerId || !profileIds.has(peerEntityId) || typeof peer['online'] !== 'boolean') {
+    if (peerEntityId <= previousPeerId || typeof peer['online'] !== 'boolean') {
       throw new Error(`ENTITY_INFRA_PEER_ASSERTION_NONCANONICAL:${index}`);
     }
     previousPeerId = peerEntityId;
     return { entityId: peerEntityId, online: peer['online'] };
   });
   const htlc = validateHtlcPreparedInfraContext(raw['htlc']);
-  const requiredProfileIds = new Set<string>(peerAssertions.map(assertion => assertion.entityId));
+  // Profiles are consumed only by originated-payment replay (fee quotes,
+  // hop encryption keys, account domains). Forward entries and peer
+  // assertions need no profile: a Hub frame that forwards to hundreds of
+  // users otherwise embedded hundreds of signed profiles (megabytes, and a
+  // signature verification each) into every frame. Contexts written before
+  // this change may still carry those profiles, so they stay admissible.
+  const requiredProfileIds = new Set<string>();
   for (const originated of htlc.originated) {
     for (const routeEntityId of originated.route) requiredProfileIds.add(routeEntityId);
   }
+  const admissibleProfileIds = new Set<string>(requiredProfileIds);
+  for (const assertion of peerAssertions) admissibleProfileIds.add(assertion.entityId);
   for (const entry of htlc.entries) {
-    if (entry.outcome.kind === 'forward') requiredProfileIds.add(entry.outcome.nextHopEntityId);
+    if (entry.outcome.kind === 'forward') admissibleProfileIds.add(entry.outcome.nextHopEntityId);
   }
   if (
-    requiredProfileIds.size !== profileIds.size ||
-    [...requiredProfileIds].some(profileId => !profileIds.has(profileId))
+    [...requiredProfileIds].some(profileId => !profileIds.has(profileId)) ||
+    [...profileIds].some(profileId => !admissibleProfileIds.has(profileId))
   ) {
     throw new Error('ENTITY_INFRA_PROFILE_SET_NOT_EXACT');
   }

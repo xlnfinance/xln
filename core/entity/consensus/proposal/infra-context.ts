@@ -80,13 +80,22 @@ export const materializeEntityInfraContext = async (
   // Gossip already stores canonicalizeProfile() outputs. This call is identity
   // on cache hit; a miss means a freshly built (not yet ingested) object.
   const profiles = needsHtlcInfra ? getProfiles!() : [];
-  const canonicalProfiles = profiles.map(profile => canonicalizeProfile(profile));
   const routeEntityIds = new Set(htlcTxs.flatMap(tx =>
     tx.type === 'htlcPayment' ? tx.data.route.map(value => String(value).toLowerCase()) : []));
+  const needsRouteResolution = htlcTxs.some(tx => tx.type === 'htlcPayment' && tx.data.route.length === 0);
+  // A Hub that only forwards needs no profile bytes at all; canonicalizing
+  // every stored profile per frame (thousands, many freshly re-announced) was
+  // ~250 ms per Hub frame. Only originated-route peers are canonicalized;
+  // route resolution inside materialization may touch any hop, so an
+  // unrouted payment falls back to the full set.
+  const originatedPeerIds = new Set<string>([entityId, ...routeEntityIds]);
+  const canonicalProfiles = profiles
+    .filter(profile => needsRouteResolution || originatedPeerIds.has(String(profile.entityId).toLowerCase()))
+    .map(profile => canonicalizeProfile(profile));
   const observeOnlineEntityIds = env.infrastructure?.observeOnlineEntityIds;
   if (needsHtlcInfra && !observeOnlineEntityIds) throw new Error('ENTITY_INFRA_LIVENESS_OBSERVER_UNAVAILABLE');
   const observedOnline = new Map<string, boolean>();
-  const profileEntityIds = new Set(canonicalProfiles.map(profile => profile.entityId.toLowerCase()));
+  const profileEntityIds = new Set(profiles.map(profile => String(profile.entityId).toLowerCase()));
   // Profiles are pull-only, so a next hop can be routable before its profile
   // reached this Runtime. Without a profile the peer cannot enter the context
   // (validators require a profile per assertion), so it is simply "offline"
@@ -106,7 +115,6 @@ export const materializeEntityInfraContext = async (
     observedOnline.set(canonical, online);
     return online;
   };
-  const needsRouteResolution = htlcTxs.some(tx => tx.type === 'htlcPayment' && tx.data.route.length === 0);
   const graph = (env as ProposerInfraContext).gossip?.getNetworkGraph?.();
   if (needsRouteResolution && !graph) throw new Error('ENTITY_INFRA_ROUTE_RESOLVER_UNAVAILABLE');
   const resolveRoute = async (tx: Extract<EntityTx, { type: 'htlcPayment' }>): Promise<readonly string[]> => {
@@ -128,14 +136,14 @@ export const materializeEntityInfraContext = async (
         resolveRoute,
       })
     : { version: 1 as const, entries: [], originated: [] };
-  for (const entry of htlc.entries) {
-    if (entry.outcome.kind === 'forward') routeEntityIds.add(entry.outcome.nextHopEntityId);
-  }
+  // Only originated routes need profiles in the context (validators replay
+  // fee quotes and hop keys from them). Forward next hops and peer assertions
+  // do not: embedding every next hop's signed profile made a Hub frame grow by
+  // ~30 KB per payment and cost a profile signature check per hop.
   for (const originated of htlc.originated) {
     for (const routeEntityId of originated.route) routeEntityIds.add(routeEntityId);
     isEntityOnline(originated.nextHopEntityId);
   }
-  for (const observedEntityId of observedOnline.keys()) routeEntityIds.add(observedEntityId);
   if (missingProfilePeers.size > 0) {
     const missing = [...missingProfilePeers].sort(compareStableText);
     env.info('network', 'ENTITY_INFRA_NEXT_HOP_PROFILE_MISSING', { entityId, missing });
