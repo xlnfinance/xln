@@ -583,11 +583,14 @@ const prepareGossipProfileApi = async (
   req: Request,
   env: RuntimeReplica | null,
   clientId: string,
+  operatorAuthorized: boolean,
 ): Promise<Response | null> => {
   const targetEntityId = gossipProfileEntityId(req);
   if (!targetEntityId || !env) return null;
   if (env.gossip?.profiles?.has(targetEntityId)) return null;
-  if (!gossipProfileAdmission.admit(clientId)) {
+  // The lookup budget guards a public daemon against relay-fetch floods; the
+  // Runtime-bound operator (control plane, load drivers) is not a public client.
+  if (!operatorAuthorized && !gossipProfileAdmission.admit(clientId)) {
     return new Response(safeStringify({ ok: false, error: 'GOSSIP_PROFILE_LOOKUP_RATE_LIMITED' }), {
       status: 429,
       headers: {
@@ -866,7 +869,7 @@ const handleApi = async (
   if (env && req.method === 'GET' && pathname === '/api/gossip/profile') {
     // Network refresh happens before the committed-State lease. A slow public
     // relay lookup must never delay the Runtime writer/WAL commit path.
-    const rejected = await prepareGossipProfileApi(req, env, clientId);
+    const rejected = await prepareGossipProfileApi(req, env, clientId, operatorAuthorized);
     if (rejected) return rejected;
   }
   const handle = () => handleApiAgainstCommittedState(
