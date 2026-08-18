@@ -71,6 +71,56 @@
       "paymentsTps": 29.1,
       "swapsTps": 0,
       "status": "green"
+    },
+    {
+      "at": "2026-08-18T20:45:00Z",
+      "commit": "1eb1a38b0",
+      "headline": "Payments clear 50/s at 100 users; per-payment cost model measured",
+      "detail": "50 senders delivered 2000 of 2000 at 49.5/s (offered 50). Memoized ECDSA signatures, HTLC layer decryption and the account state root, but each 3-7% win was invisible in run totals: the Hub costs 100 ms fixed + 5.6 ms per account output per frame (~26 ms CPU/payment), the lanes 42 ms fixed + 10 ms per entity frame (~80 ms). Gossip fan-out turned out to be O(N^2): the relay pushed every profile change to every client.",
+      "users": 100,
+      "paymentsTps": 49.5,
+      "swapsTps": 0,
+      "status": "green"
+    },
+    {
+      "at": "2026-08-18T22:18:00Z",
+      "commit": "4297effe9",
+      "headline": "Pull-only gossip: relay pushes nothing, users ask for chains and masked pages",
+      "detail": "Same 100-user run, same 49.5/s, but lane CPU fell 220 s -> 185 s (-16%) and the Hub 102 s -> 96 s: profile verification left the daemons. Profiles are now served only on request (hubs set, ids with depth 1..3, routeTo route chains, masked prefix pages), non-hub profiles announce hourly or on topology change, capacities floor to 000. Three pull-only regressions surfaced and were fixed on the way: a profile-clock watermark hid slow-clock profiles forever (relay receipt cursor now), the cursor was keyed by an id hello_ack never carried, and the lookup budget counted every poll.",
+      "users": 100,
+      "paymentsTps": 49.5,
+      "swapsTps": 0,
+      "status": "green"
+    },
+    {
+      "at": "2026-08-18T22:22:00Z",
+      "commit": "4297effe9",
+      "headline": "200 users in one process: works, but one sender daemon carries ~40 senders at 1 tx/s",
+      "detail": "200 users hosted 200 per daemon, 100 offered per second, 4000 of 4000 delivered but only at 53/s: the sender daemon spends ~24 ms CPU per payment (entity frame + HTLC + storage), so 100 senders at 1 tx/s need 2.4 cores in a single-threaded process. Hub cost per payment dropped to 14 ms because 40+ payments now share one frame. Fine for real users at 0.1 tx/s; for the 100 tps bench the population must spread over more processes.",
+      "users": 200,
+      "paymentsTps": 53.0,
+      "swapsTps": 0,
+      "status": "green"
+    },
+    {
+      "at": "2026-08-18T22:24:00Z",
+      "commit": "4297effe9",
+      "headline": "Payments reach 100/s: 92.6 delivered of 100 offered, Hub now the wall",
+      "detail": "200 users over 5 daemons (40 per process), 100 senders at 1 tx/s: 4000 of 4000 delivered in 43.2 s. The Hub ran at 100% for the whole window (453 ms wall per frame x 94 frames) at 12.8 ms CPU per payment; its profile is flat: radix rootHash 11%, hanko verify+recover 16%, account state root 8%, entity state hash 7%, storage encode 7%, followups 6%. 500/s needs ~2.5 ms per payment on the Hub, i.e. structural cuts, not one patch.",
+      "users": 200,
+      "paymentsTps": 92.6,
+      "swapsTps": 0,
+      "status": "green"
+    },
+    {
+      "at": "2026-08-18T22:28:00Z",
+      "commit": "4297effe9",
+      "headline": "Same-J swaps hold 100/s matched on the same commit",
+      "detail": "200 users, 40 per process, 100 swaps submitted per second for 40 rounds: matched kept pace with submission the whole run (in-flight steady at 80-180, 3860 of 4000 matched at the last window, all settled at quiescence). Hub CPU 125 s for the run against 98 s for payments; both workloads now hold at the 100/s mark on one Hub.",
+      "users": 200,
+      "paymentsTps": 0,
+      "swapsTps": 100,
+      "status": "green"
     }
   ]
 }
