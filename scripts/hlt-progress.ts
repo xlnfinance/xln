@@ -47,6 +47,12 @@ export const readLedger = (path = LEDGER_PATH): Ledger => {
   return parsed;
 };
 
+/** Hour and minute of a run, the axis label: the question is how values grow over time. */
+const clockLabel = (at: string): string => {
+  const time = at.slice(11, 16);
+  return time.length === 5 ? time : at;
+};
+
 /**
  * Runs are placed on the x axis by their order, not by their timestamp: two
  * runs minutes apart and two runs a day apart are equally interesting, and an
@@ -106,18 +112,18 @@ export const renderProgressPage = (ledger: Ledger): string => {
   ])).filter(point => point.value > 0).map(point => `
     <circle class="dot ${point.kind}" data-run="${point.index}"
             cx="${frame.x(point.index).toFixed(1)}" cy="${frame.y(point.value).toFixed(1)}" r="6">
-      <title>${escapeHtml(`${point.kind}: ${point.value} /s — ${point.run.headline}\n${point.run.detail}`)}</title>
+      <title>${escapeHtml(`${clockLabel(point.run.at)} · ${point.run.commit.slice(0, 7)} · ${point.run.users} users\n${point.kind}: ${point.value} /s — ${point.run.headline}\n${point.run.detail}`)}</title>
     </circle>`).join('');
 
   const halted = runs.flatMap((run, index) => (run.status === 'green' ? [] : [`
     <g class="halted" transform="translate(${frame.x(index).toFixed(1)},${frame.y(0).toFixed(1)})">
       <line x1="-6" y1="-6" x2="6" y2="6" /><line x1="-6" y1="6" x2="6" y2="-6" />
-      <title>${escapeHtml(`halted — ${run.headline}\n${run.detail}`)}</title>
+      <title>${escapeHtml(`${clockLabel(run.at)} · ${run.commit.slice(0, 7)} · ${run.users} users\nhalted — ${run.headline}\n${run.detail}`)}</title>
     </g>`])).join('');
 
   const ticks = runs.map((run, index) => `
     <text class="tick" x="${frame.x(index).toFixed(1)}" y="${frame.height - frame.padding.bottom + 24}"
-          text-anchor="middle" data-run="${index}">${escapeHtml(run.commit.slice(0, 7))}</text>
+          text-anchor="middle" data-run="${index}">${escapeHtml(clockLabel(run.at))}</text>
     <text class="tick faint" x="${frame.x(index).toFixed(1)}" y="${frame.height - frame.padding.bottom + 42}"
           text-anchor="middle">${run.users}u</text>`).join('');
 

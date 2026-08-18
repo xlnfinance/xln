@@ -31,6 +31,46 @@
       "paymentsTps": 0,
       "swapsTps": 0,
       "status": "red"
+    },
+    {
+      "at": "2026-08-18T19:36:00Z",
+      "commit": "09aa4853",
+      "headline": "Batching walls cleared: HTLC leaves, paged manifests, duplicate collapse",
+      "detail": "Four faults surfaced the moment frames carried real batches: prepared HTLCs shared one 36 KB record, the manifest naming them reached 20.9 KB, and a retransmitted proposal halted the Runtime outright. First green payment run afterwards, still limited by the driver rather than the Hub.",
+      "users": 32,
+      "paymentsTps": 17.6,
+      "swapsTps": 0,
+      "status": "green"
+    },
+    {
+      "at": "2026-08-18T19:52:00Z",
+      "commit": "c4852464",
+      "headline": "Payments clear 30/s with every payment delivered",
+      "detail": "32 senders offering one payment per second delivered 160 of 160 in 4.9 s. The Hub spent 34 frames on them, 4.7 payments per frame, so the ceiling is still the driver's offered rate and not the Hub.",
+      "users": 64,
+      "paymentsTps": 32.5,
+      "swapsTps": 0,
+      "status": "green"
+    },
+    {
+      "at": "2026-08-18T20:14:00Z",
+      "commit": "c4852464",
+      "headline": "Same-J swaps clear 30/s on the same commit",
+      "detail": "64 users settled 160 of 160 swaps: 36.0 matched per second and 32.2 fully settled. Both workloads now hold above the 30/s mark on one Hub, and neither is Hub-limited yet.",
+      "users": 64,
+      "paymentsTps": 0,
+      "swapsTps": 32.2,
+      "status": "green"
+    },
+    {
+      "at": "2026-08-18T20:25:00Z",
+      "commit": "2bbdf822",
+      "headline": "128 users saturate the stand, not the Hub",
+      "detail": "64 senders offered 64 payments per second and 320 of 320 were delivered, but only at 29.1 per second while 28 of the machine's 32 cores were busy. Doubling the population did not raise throughput: one OS process per user costs about a fifth of a core just to exist.",
+      "users": 128,
+      "paymentsTps": 29.1,
+      "swapsTps": 0,
+      "status": "green"
     }
   ]
 }

@@ -51,7 +51,7 @@
 <main>
   <h1>HLT throughput ledger</h1>
   <p class="sub">Every recorded high-load run on the way to 1000 payments/s and 1000 same-J swaps/s.
-     Hover a point for what that commit changed. Latest: Frame delay floor of 100 ms on the Hub.</p>
+     Hover a point for what that commit changed. Latest: 128 users saturate the stand, not the Hub.</p>
   <div class="card">
     
     <div class="chart-wrap">
@@ -82,38 +82,81 @@
           y1="32.0" y2="32.0" />
     <text class="target-label" x="976" y="24.0"
           text-anchor="end">target 1000</text>
-        <path class="line payments" d="" />
-        <path class="line swaps" d="M72.0,303.4" />
+        <path class="line payments" d="M524.0,377.8 L674.7,372.6 L976.0,373.8" />
+        <path class="line swaps" d="M72.0,303.4 L825.3,372.7" />
         
     <circle class="dot swaps" data-run="0"
             cx="72.0" cy="303.4" r="6">
-      <title>swaps: 229 /s — Same-J swap baseline after the reliable-layer removal
+      <title>00:00 · be19a1c · 8 users
+swaps: 229 /s — Same-J swap baseline after the reliable-layer removal
 Deleting the reliable delivery layer, moving keccak to WASM, hand-writing the ABI and using native ECDSA took matched swaps from 3 to 249 per second. The profile went flat afterwards: no single site dominates any more.</title>
     </circle>
+    <circle class="dot payments" data-run="3"
+            cx="524.0" cy="377.8" r="6">
+      <title>19:36 · 09aa485 · 32 users
+payments: 17.6 /s — Batching walls cleared: HTLC leaves, paged manifests, duplicate collapse
+Four faults surfaced the moment frames carried real batches: prepared HTLCs shared one 36 KB record, the manifest naming them reached 20.9 KB, and a retransmitted proposal halted the Runtime outright. First green payment run afterwards, still limited by the driver rather than the Hub.</title>
+    </circle>
+    <circle class="dot payments" data-run="4"
+            cx="674.7" cy="372.6" r="6">
+      <title>19:52 · c485246 · 64 users
+payments: 32.5 /s — Payments clear 30/s with every payment delivered
+32 senders offering one payment per second delivered 160 of 160 in 4.9 s. The Hub spent 34 frames on them, 4.7 payments per frame, so the ceiling is still the driver&#39;s offered rate and not the Hub.</title>
+    </circle>
+    <circle class="dot swaps" data-run="5"
+            cx="825.3" cy="372.7" r="6">
+      <title>20:14 · c485246 · 64 users
+swaps: 32.2 /s — Same-J swaps clear 30/s on the same commit
+64 users settled 160 of 160 swaps: 36.0 matched per second and 32.2 fully settled. Both workloads now hold above the 30/s mark on one Hub, and neither is Hub-limited yet.</title>
+    </circle>
+    <circle class="dot payments" data-run="6"
+            cx="976.0" cy="373.8" r="6">
+      <title>20:25 · 2bbdf82 · 128 users
+payments: 29.1 /s — 128 users saturate the stand, not the Hub
+64 senders offered 64 payments per second and 320 of 320 were delivered, but only at 29.1 per second while 28 of the machine&#39;s 32 cores were busy. Doubling the population did not raise throughput: one OS process per user costs about a fifth of a core just to exist.</title>
+    </circle>
         
-    <g class="halted" transform="translate(524.0,384.0)">
+    <g class="halted" transform="translate(222.7,384.0)">
       <line x1="-6" y1="-6" x2="6" y2="6" /><line x1="-6" y1="6" x2="6" y2="-6" />
-      <title>halted — Profile advertises only pinned hubs, capped at 100
+      <title>15:27 · 06e7902 · 100 users
+halted — Profile advertises only pinned hubs, capped at 100
 A Hub&#39;s gossip Profile carried one row per Account and crossed the 10 KB storage leaf at ~34 accounts, halting every observing Runtime. Only pinned counterparties are advertised now, so a 100-user population no longer trips it. The run still died: a second agent was rewriting the mempool mid-run.</title>
     </g>
-    <g class="halted" transform="translate(976.0,384.0)">
+    <g class="halted" transform="translate(373.3,384.0)">
       <line x1="-6" y1="-6" x2="6" y2="6" /><line x1="-6" y1="6" x2="6" y2="-6" />
-      <title>halted — Frame delay floor of 100 ms on the Hub
+      <title>18:37 · b45bd79 · 100 users
+halted — Frame delay floor of 100 ms on the Hub
 A frame costs about the same whether it carries one transaction or a hundred, so holding frames back should be free throughput. Routes converged in 901 ms and payments flowed, then the Hub halted: batching pushed 49 prepared HTLCs into one 36 KB replay leaf against a 10 KB cap.</title>
     </g>
         
     <text class="tick" x="72.0" y="408"
-          text-anchor="middle" data-run="0">be19a1c</text>
+          text-anchor="middle" data-run="0">00:00</text>
     <text class="tick faint" x="72.0" y="426"
           text-anchor="middle">8u</text>
+    <text class="tick" x="222.7" y="408"
+          text-anchor="middle" data-run="1">15:27</text>
+    <text class="tick faint" x="222.7" y="426"
+          text-anchor="middle">100u</text>
+    <text class="tick" x="373.3" y="408"
+          text-anchor="middle" data-run="2">18:37</text>
+    <text class="tick faint" x="373.3" y="426"
+          text-anchor="middle">100u</text>
     <text class="tick" x="524.0" y="408"
-          text-anchor="middle" data-run="1">06e7902</text>
+          text-anchor="middle" data-run="3">19:36</text>
     <text class="tick faint" x="524.0" y="426"
-          text-anchor="middle">100u</text>
+          text-anchor="middle">32u</text>
+    <text class="tick" x="674.7" y="408"
+          text-anchor="middle" data-run="4">19:52</text>
+    <text class="tick faint" x="674.7" y="426"
+          text-anchor="middle">64u</text>
+    <text class="tick" x="825.3" y="408"
+          text-anchor="middle" data-run="5">20:14</text>
+    <text class="tick faint" x="825.3" y="426"
+          text-anchor="middle">64u</text>
     <text class="tick" x="976.0" y="408"
-          text-anchor="middle" data-run="2">b45bd79</text>
+          text-anchor="middle" data-run="6">20:25</text>
     <text class="tick faint" x="976.0" y="426"
-          text-anchor="middle">100u</text>
+          text-anchor="middle">128u</text>
       </svg>
     </div>
     <div class="legend">
@@ -127,6 +170,38 @@ A frame costs about the same whether it carries one transaction or a hundred, so
   <table>
     <thead><tr><th>when</th><th>commit</th><th>users</th><th>pay/s</th><th>swap/s</th><th>what changed</th></tr></thead>
     <tbody>
+    <tr class="green">
+      <td class="mono">2026-08-18 20:25:00Z</td>
+      <td class="mono"><a href="https://github.com/xlnfinance/xln/commit/2bbdf822">2bbdf82</a></td>
+      <td class="num">128</td>
+      <td class="num">29.1</td>
+      <td class="num">—</td>
+      <td>128 users saturate the stand, not the Hub<div class="detail">64 senders offered 64 payments per second and 320 of 320 were delivered, but only at 29.1 per second while 28 of the machine&#39;s 32 cores were busy. Doubling the population did not raise throughput: one OS process per user costs about a fifth of a core just to exist.</div></td>
+    </tr>
+    <tr class="green">
+      <td class="mono">2026-08-18 20:14:00Z</td>
+      <td class="mono"><a href="https://github.com/xlnfinance/xln/commit/c4852464">c485246</a></td>
+      <td class="num">64</td>
+      <td class="num">—</td>
+      <td class="num">32.2</td>
+      <td>Same-J swaps clear 30/s on the same commit<div class="detail">64 users settled 160 of 160 swaps: 36.0 matched per second and 32.2 fully settled. Both workloads now hold above the 30/s mark on one Hub, and neither is Hub-limited yet.</div></td>
+    </tr>
+    <tr class="green">
+      <td class="mono">2026-08-18 19:52:00Z</td>
+      <td class="mono"><a href="https://github.com/xlnfinance/xln/commit/c4852464">c485246</a></td>
+      <td class="num">64</td>
+      <td class="num">32.5</td>
+      <td class="num">—</td>
+      <td>Payments clear 30/s with every payment delivered<div class="detail">32 senders offering one payment per second delivered 160 of 160 in 4.9 s. The Hub spent 34 frames on them, 4.7 payments per frame, so the ceiling is still the driver&#39;s offered rate and not the Hub.</div></td>
+    </tr>
+    <tr class="green">
+      <td class="mono">2026-08-18 19:36:00Z</td>
+      <td class="mono"><a href="https://github.com/xlnfinance/xln/commit/09aa4853">09aa485</a></td>
+      <td class="num">32</td>
+      <td class="num">17.6</td>
+      <td class="num">—</td>
+      <td>Batching walls cleared: HTLC leaves, paged manifests, duplicate collapse<div class="detail">Four faults surfaced the moment frames carried real batches: prepared HTLCs shared one 36 KB record, the manifest naming them reached 20.9 KB, and a retransmitted proposal halted the Runtime outright. First green payment run afterwards, still limited by the driver rather than the Hub.</div></td>
+    </tr>
     <tr class="red">
       <td class="mono">2026-08-18 18:37:00Z</td>
       <td class="mono"><a href="https://github.com/xlnfinance/xln/commit/b45bd79c">b45bd79</a></td>
