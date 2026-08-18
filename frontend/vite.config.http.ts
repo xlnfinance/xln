@@ -30,6 +30,8 @@ const API_PROXY_AGENT = API_PROXY_TARGET.startsWith('https:')
   ? new https.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 })
   : new http.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 });
 const VITE_CACHE_DIR = process.env['VITE_HTTP_CACHE_DIR'] || 'node_modules/.vite-http';
+/** Entries Vite crawls at boot so the dependency optimizer settles before traffic. */
+const WARMUP_CLIENT_FILES = ['./src/routes/+page.svelte', './src/routes/app/+page.svelte'];
 const TYPECHAIN_INDEX = fileURLToPath(new URL('../jurisdictions/typechain-types/index.ts', import.meta.url));
 
 const ENABLE_HMR = (() => {
@@ -49,6 +51,9 @@ export default defineConfig({
     host: '0.0.0.0',
     port: DEV_PORT,
     strictPort: true,
+    // Mirror the HTTPS config: warm the entry so a cold optimizer never answers
+    // the first request with 504 Outdated Optimize Dep.
+    warmup: { clientFiles: WARMUP_CLIENT_FILES },
     // NO HTTPS - plain HTTP only
     allowedHosts: ['all'],
     fs: {

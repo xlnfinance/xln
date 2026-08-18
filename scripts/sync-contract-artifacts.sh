@@ -46,6 +46,17 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 export XLN_TYPECHAIN_OUT_DIR="$TYPECHAIN_BUILD_DIR"
 
+# Hardhat needs a Node runtime, not the Bun one that runs the rest of the repo.
+# Pin the majors Hardhat states support for, but do not refuse a newer runtime:
+# the machine's default Node moves ahead of that list long before Hardhat breaks
+# on it, and a stale ceiling turns `bun run dev` into a hard stop for no reason.
+MIN_NODE_MAJOR=20
+KNOWN_GOOD_NODE_MAJORS="20 22 24"
+
+node_major_of() {
+  "$1" -p "process.versions.node.split('.')[0]" 2>/dev/null || true
+}
+
 choose_supported_node() {
   local candidates=()
   if [[ -n "${XLN_NODE_BIN:-}" ]]; then
@@ -60,21 +71,34 @@ choose_supported_node() {
     "$(command -v node || true)"
   )
 
-  local candidate major
+  local candidate major newest_bin="" newest_major=0
   for candidate in "${candidates[@]}"; do
     if [[ -z "$candidate" || ! -x "$candidate" ]]; then
       continue
     fi
-    major="$("$candidate" -p "process.versions.node.split('.')[0]" 2>/dev/null || true)"
-    case "$major" in
-      20|22|24)
-        echo "$candidate"
-        return 0
-        ;;
-    esac
+    major="$(node_major_of "$candidate")"
+    if [[ ! "$major" =~ ^[0-9]+$ ]] || (( major < MIN_NODE_MAJOR )); then
+      continue
+    fi
+    if [[ " $KNOWN_GOOD_NODE_MAJORS " == *" $major "* ]]; then
+      echo "$candidate"
+      return 0
+    fi
+    # Remember the newest untested-but-recent runtime as a fallback, so a box
+    # that only ships Node 25/26 still builds contracts.
+    if (( major > newest_major )); then
+      newest_major="$major"
+      newest_bin="$candidate"
+    fi
   done
 
-  echo "[contracts-sync] ERROR: Hardhat requires Node 20, 22, or 24. Current node: $(node -v 2>/dev/null || echo missing). Set XLN_NODE_BIN to a supported node binary." >&2
+  if [[ -n "$newest_bin" ]]; then
+    echo "[contracts-sync] no Node $(echo "$KNOWN_GOOD_NODE_MAJORS" | tr ' ' '/') found; using Node $newest_major at $newest_bin" >&2
+    echo "$newest_bin"
+    return 0
+  fi
+
+  echo "[contracts-sync] ERROR: Hardhat needs Node $MIN_NODE_MAJOR or newer. Current node: $(node -v 2>/dev/null || echo missing). Set XLN_NODE_BIN to a supported node binary." >&2
   return 1
 }
 

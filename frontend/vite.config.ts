@@ -57,6 +57,8 @@ const API_PROXY_AGENT = API_PROXY_TARGET.startsWith('https:')
 	? new https.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 })
 	: new http.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 });
 const VITE_CACHE_DIR = process.env['VITE_CACHE_DIR'] || 'node_modules/.vite';
+/** Entries Vite crawls at boot so the dependency optimizer settles before traffic. */
+const WARMUP_CLIENT_FILES = ['./src/routes/+page.svelte', './src/routes/app/+page.svelte'];
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FRONTEND_ROOT = fileURLToPath(new URL('.', import.meta.url));
 const TYPECHAIN_INDEX = fileURLToPath(new URL('../jurisdictions/typechain-types/index.ts', import.meta.url));
@@ -242,7 +244,6 @@ function manualClientChunk(id: string): string | undefined {
 		id.includes('/node_modules/@node-rs/argon2/') ||
 		id.includes('/node_modules/argon2/') ||
 		id.includes('/node_modules/bip39/') ||
-		id.includes('/node_modules/crypto-js/') ||
 		id.includes('/node_modules/hash-wasm/')
 	) {
 		return 'vendor-crypto';
@@ -278,6 +279,11 @@ export default defineConfig({
 		host: DEV_HOST,
 		port: DEV_PORT,
 		strictPort: true,
+		// Crawl the wallet entry at boot so dependency optimization finishes
+		// before the first browser request. Without it the first load races the
+		// optimizer and every discovered dependency answers 504 Outdated
+		// Optimize Dep, which reads as a broken dev server rather than a cold one.
+		warmup: { clientFiles: WARMUP_CLIENT_FILES },
 		// HTTPS for dev server only (nginx handles production HTTPS)
 		...(hasCerts && {
 			https: {
