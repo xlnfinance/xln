@@ -1,0 +1,155 @@
+<title>HLT Throughput Ledger</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --ink: #16150f; --muted: #6b6a63; --line: #dedcd4;
+    --payments: #2f6f4f; --swaps: #8a4b1f; --target: #b3271e; --red: #b3271e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14140f; --panel: #1c1c16; --ink: #f2f1e8; --muted: #9a988d; --line: #33322a;
+      --payments: #6fc296; --swaps: #e0a066; --target: #e4695f; --red: #e4695f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14140f; --panel: #1c1c16; --ink: #f2f1e8; --muted: #9a988d; --line: #33322a;
+    --payments: #6fc296; --swaps: #e0a066; --target: #e4695f; --red: #e4695f;
+  }
+  body { background: var(--bg); color: var(--ink); margin: 0; padding: 40px 24px 72px;
+         font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  .chart-wrap { overflow-x: auto; }
+  svg { display: block; min-width: 720px; }
+  .grid { stroke: var(--line); stroke-width: 1; }
+  .axis, .tick { fill: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; }
+  .tick.faint { opacity: 0.6; }
+  .target { stroke: var(--target); stroke-width: 1.5; stroke-dasharray: 5 5; opacity: 0.75; }
+  .target-label { fill: var(--target); font-size: 11px; font-family: ui-monospace, monospace; }
+  path.line { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+  path.payments { stroke: var(--payments); }
+  path.swaps { stroke: var(--swaps); }
+  circle.dot { stroke: var(--panel); stroke-width: 2; cursor: help; }
+  circle.payments { fill: var(--payments); }
+  circle.swaps { fill: var(--swaps); }
+  g.halted line { stroke: var(--red); stroke-width: 2.5; stroke-linecap: round; }
+  g.halted { cursor: help; }
+  .legend { display: flex; gap: 20px; margin: 16px 0 0; color: var(--muted); font-size: 13px; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 28px; font-size: 14px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px;
+       text-transform: uppercase; letter-spacing: 0.04em; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 12px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; }
+  td.mono, .mono { font-family: ui-monospace, monospace; font-size: 13px; }
+  tr.red td:first-child { box-shadow: inset 3px 0 0 var(--red); }
+  .detail { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  a { color: inherit; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+</style>
+<main>
+  <h1>HLT throughput ledger</h1>
+  <p class="sub">Every recorded high-load run on the way to 1000 payments/s and 1000 same-J swaps/s.
+     Hover a point for what that commit changed. Latest: Frame delay floor of 100 ms on the Hub.</p>
+  <div class="card">
+    
+    <div class="chart-wrap">
+      <svg viewBox="0 0 1040 460" role="img" aria-label="Throughput per run">
+        
+    <line class="grid" x1="72" x2="976"
+          y1="384.0" y2="384.0" />
+    <text class="axis" x="60" y="388.0"
+          text-anchor="end">0</text>
+    <line class="grid" x1="72" x2="976"
+          y1="296.0" y2="296.0" />
+    <text class="axis" x="60" y="300.0"
+          text-anchor="end">250</text>
+    <line class="grid" x1="72" x2="976"
+          y1="208.0" y2="208.0" />
+    <text class="axis" x="60" y="212.0"
+          text-anchor="end">500</text>
+    <line class="grid" x1="72" x2="976"
+          y1="120.0" y2="120.0" />
+    <text class="axis" x="60" y="124.0"
+          text-anchor="end">750</text>
+    <line class="grid" x1="72" x2="976"
+          y1="32.0" y2="32.0" />
+    <text class="axis" x="60" y="36.0"
+          text-anchor="end">1000</text>
+        
+    <line class="target" x1="72" x2="976"
+          y1="32.0" y2="32.0" />
+    <text class="target-label" x="976" y="24.0"
+          text-anchor="end">target 1000</text>
+        <path class="line payments" d="" />
+        <path class="line swaps" d="M72.0,303.4" />
+        
+    <circle class="dot swaps" data-run="0"
+            cx="72.0" cy="303.4" r="6">
+      <title>swaps: 229 /s — Same-J swap baseline after the reliable-layer removal
+Deleting the reliable delivery layer, moving keccak to WASM, hand-writing the ABI and using native ECDSA took matched swaps from 3 to 249 per second. The profile went flat afterwards: no single site dominates any more.</title>
+    </circle>
+        
+    <g class="halted" transform="translate(524.0,384.0)">
+      <line x1="-6" y1="-6" x2="6" y2="6" /><line x1="-6" y1="6" x2="6" y2="-6" />
+      <title>halted — Profile advertises only pinned hubs, capped at 100
+A Hub&#39;s gossip Profile carried one row per Account and crossed the 10 KB storage leaf at ~34 accounts, halting every observing Runtime. Only pinned counterparties are advertised now, so a 100-user population no longer trips it. The run still died: a second agent was rewriting the mempool mid-run.</title>
+    </g>
+    <g class="halted" transform="translate(976.0,384.0)">
+      <line x1="-6" y1="-6" x2="6" y2="6" /><line x1="-6" y1="6" x2="6" y2="-6" />
+      <title>halted — Frame delay floor of 100 ms on the Hub
+A frame costs about the same whether it carries one transaction or a hundred, so holding frames back should be free throughput. Routes converged in 901 ms and payments flowed, then the Hub halted: batching pushed 49 prepared HTLCs into one 36 KB replay leaf against a 10 KB cap.</title>
+    </g>
+        
+    <text class="tick" x="72.0" y="408"
+          text-anchor="middle" data-run="0">be19a1c</text>
+    <text class="tick faint" x="72.0" y="426"
+          text-anchor="middle">8u</text>
+    <text class="tick" x="524.0" y="408"
+          text-anchor="middle" data-run="1">06e7902</text>
+    <text class="tick faint" x="524.0" y="426"
+          text-anchor="middle">100u</text>
+    <text class="tick" x="976.0" y="408"
+          text-anchor="middle" data-run="2">b45bd79</text>
+    <text class="tick faint" x="976.0" y="426"
+          text-anchor="middle">100u</text>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><i class="swatch" style="background: var(--payments)"></i>payments /s</span>
+      <span><i class="swatch" style="background: var(--swaps)"></i>same-J swaps /s</span>
+      <span><i class="swatch" style="background: var(--target)"></i>target</span>
+      <span style="color: var(--red)">&#10005; halted run</span>
+    </div>
+  </div>
+  
+  <table>
+    <thead><tr><th>when</th><th>commit</th><th>users</th><th>pay/s</th><th>swap/s</th><th>what changed</th></tr></thead>
+    <tbody>
+    <tr class="red">
+      <td class="mono">2026-08-18 18:37:00Z</td>
+      <td class="mono"><a href="https://github.com/xlnfinance/xln/commit/b45bd79c">b45bd79</a></td>
+      <td class="num">100</td>
+      <td class="num">—</td>
+      <td class="num">—</td>
+      <td>Frame delay floor of 100 ms on the Hub<div class="detail">A frame costs about the same whether it carries one transaction or a hundred, so holding frames back should be free throughput. Routes converged in 901 ms and payments flowed, then the Hub halted: batching pushed 49 prepared HTLCs into one 36 KB replay leaf against a 10 KB cap.</div></td>
+    </tr>
+    <tr class="red">
+      <td class="mono">2026-08-18 15:27:00Z</td>
+      <td class="mono"><a href="https://github.com/xlnfinance/xln/commit/06e79023">06e7902</a></td>
+      <td class="num">100</td>
+      <td class="num">—</td>
+      <td class="num">—</td>
+      <td>Profile advertises only pinned hubs, capped at 100<div class="detail">A Hub&#39;s gossip Profile carried one row per Account and crossed the 10 KB storage leaf at ~34 accounts, halting every observing Runtime. Only pinned counterparties are advertised now, so a 100-user population no longer trips it. The run still died: a second agent was rewriting the mempool mid-run.</div></td>
+    </tr>
+    <tr class="green">
+      <td class="mono">2026-08-17 00:00:00Z</td>
+      <td class="mono"><a href="https://github.com/xlnfinance/xln/commit/be19a1c">be19a1c</a></td>
+      <td class="num">8</td>
+      <td class="num">—</td>
+      <td class="num">229</td>
+      <td>Same-J swap baseline after the reliable-layer removal<div class="detail">Deleting the reliable delivery layer, moving keccak to WASM, hand-writing the ABI and using native ECDSA took matched swaps from 3 to 249 per second. The profile went flat afterwards: no single site dominates any more.</div></td>
+    </tr></tbody>
+  </table>
+</main>

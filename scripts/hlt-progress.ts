@@ -55,7 +55,7 @@ export const readLedger = (path = LEDGER_PATH): Ledger => {
 const layout = (runs: readonly HltRun[]) => {
   const width = 1_040;
   const height = 460;
-  const padding = { top: 32, right: 32, bottom: 76, left: 72 };
+  const padding = { top: 32, right: 64, bottom: 76, left: 72 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const peak = Math.max(TARGET_TPS, ...runs.map(run => Math.max(run.paymentsTps, run.swapsTps)));
@@ -67,12 +67,19 @@ const layout = (runs: readonly HltRun[]) => {
   return { width, height, padding, plotWidth, plotHeight, ceiling, x, y };
 };
 
+/**
+ * Only green runs join the trend line. A halted run has no throughput to plot,
+ * and drawing it as a zero would read as a regression rather than as a run that
+ * never finished — its marker sits on the axis instead.
+ */
 const seriesPath = (
   runs: readonly HltRun[],
   pick: (run: HltRun) => number,
   frame: ReturnType<typeof layout>,
 ): string => runs
-  .map((run, index) => `${index === 0 ? 'M' : 'L'}${frame.x(index).toFixed(1)},${frame.y(pick(run)).toFixed(1)}`)
+  .flatMap((run, index) => (run.status === 'green' && pick(run) > 0 ? [{ run, index }] : []))
+  .map(({ run, index }, position) =>
+    `${position === 0 ? 'M' : 'L'}${frame.x(index).toFixed(1)},${frame.y(pick(run)).toFixed(1)}`)
   .join(' ');
 
 export const renderProgressPage = (ledger: Ledger): string => {
@@ -97,10 +104,16 @@ export const renderProgressPage = (ledger: Ledger): string => {
     { run, index, value: run.paymentsTps, kind: 'payments' as const },
     { run, index, value: run.swapsTps, kind: 'swaps' as const },
   ])).filter(point => point.value > 0).map(point => `
-    <circle class="dot ${point.kind} ${point.run.status}" data-run="${point.index}"
+    <circle class="dot ${point.kind}" data-run="${point.index}"
             cx="${frame.x(point.index).toFixed(1)}" cy="${frame.y(point.value).toFixed(1)}" r="6">
       <title>${escapeHtml(`${point.kind}: ${point.value} /s — ${point.run.headline}\n${point.run.detail}`)}</title>
     </circle>`).join('');
+
+  const halted = runs.flatMap((run, index) => (run.status === 'green' ? [] : [`
+    <g class="halted" transform="translate(${frame.x(index).toFixed(1)},${frame.y(0).toFixed(1)})">
+      <line x1="-6" y1="-6" x2="6" y2="6" /><line x1="-6" y1="6" x2="6" y2="-6" />
+      <title>${escapeHtml(`halted — ${run.headline}\n${run.detail}`)}</title>
+    </g>`])).join('');
 
   const ticks = runs.map((run, index) => `
     <text class="tick" x="${frame.x(index).toFixed(1)}" y="${frame.height - frame.padding.bottom + 24}"
@@ -153,7 +166,8 @@ export const renderProgressPage = (ledger: Ledger): string => {
   circle.dot { stroke: var(--panel); stroke-width: 2; cursor: help; }
   circle.payments { fill: var(--payments); }
   circle.swaps { fill: var(--swaps); }
-  circle.red { fill: var(--red); }
+  g.halted line { stroke: var(--red); stroke-width: 2.5; stroke-linecap: round; }
+  g.halted { cursor: help; }
   .legend { display: flex; gap: 20px; margin: 16px 0 0; color: var(--muted); font-size: 13px; }
   .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
   table { width: 100%; border-collapse: collapse; margin-top: 28px; font-size: 14px; }
@@ -180,6 +194,7 @@ export const renderProgressPage = (ledger: Ledger): string => {
         <path class="line payments" d="${seriesPath(runs, run => run.paymentsTps, frame)}" />
         <path class="line swaps" d="${seriesPath(runs, run => run.swapsTps, frame)}" />
         ${points}
+        ${halted}
         ${ticks}
       </svg>
     </div>
@@ -187,6 +202,7 @@ export const renderProgressPage = (ledger: Ledger): string => {
       <span><i class="swatch" style="background: var(--payments)"></i>payments /s</span>
       <span><i class="swatch" style="background: var(--swaps)"></i>same-J swaps /s</span>
       <span><i class="swatch" style="background: var(--target)"></i>target</span>
+      <span style="color: var(--red)">&#10005; halted run</span>
     </div>`}
   </div>
   ${runs.length === 0 ? '' : `

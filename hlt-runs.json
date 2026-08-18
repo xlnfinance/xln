@@ -1,5 +1,36 @@
 {
   "schema": "xln-hlt-progress-v1",
   "note": "Append one entry per completed HLT load run. Temporary tracking file for the 1000 TPS push.",
-  "runs": []
+  "runs": [
+    {
+      "at": "2026-08-17T00:00:00Z",
+      "commit": "be19a1c",
+      "headline": "Same-J swap baseline after the reliable-layer removal",
+      "detail": "Deleting the reliable delivery layer, moving keccak to WASM, hand-writing the ABI and using native ECDSA took matched swaps from 3 to 249 per second. The profile went flat afterwards: no single site dominates any more.",
+      "users": 8,
+      "paymentsTps": 0,
+      "swapsTps": 229,
+      "status": "green"
+    },
+    {
+      "at": "2026-08-18T15:27:00Z",
+      "commit": "06e79023",
+      "headline": "Profile advertises only pinned hubs, capped at 100",
+      "detail": "A Hub's gossip Profile carried one row per Account and crossed the 10 KB storage leaf at ~34 accounts, halting every observing Runtime. Only pinned counterparties are advertised now, so a 100-user population no longer trips it. The run still died: a second agent was rewriting the mempool mid-run.",
+      "users": 100,
+      "paymentsTps": 0,
+      "swapsTps": 0,
+      "status": "red"
+    },
+    {
+      "at": "2026-08-18T18:37:00Z",
+      "commit": "b45bd79c",
+      "headline": "Frame delay floor of 100 ms on the Hub",
+      "detail": "A frame costs about the same whether it carries one transaction or a hundred, so holding frames back should be free throughput. Routes converged in 901 ms and payments flowed, then the Hub halted: batching pushed 49 prepared HTLCs into one 36 KB replay leaf against a 10 KB cap.",
+      "users": 100,
+      "paymentsTps": 0,
+      "swapsTps": 0,
+      "status": "red"
+    }
+  ]
 }

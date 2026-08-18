@@ -217,7 +217,8 @@ describe('content-addressed Entity replay contexts', () => {
       htlc: { version: 1 as const, entries, originated: [] },
     };
     const prepared = prepareEntityContextPayloadRows(new Map([[replicaId, context]]));
-    expect(prepared.rows).toHaveLength(entries.length + 1);
+    // One leaf per entry, two reference pages holding their hashes, one manifest.
+    expect(prepared.rows).toHaveLength(entries.length + 3);
     expect(prepared.rows.every(row => row.value.byteLength <= MAX_ENTITY_CONTEXT_PAYLOAD_BYTES)).toBe(true);
     const restored = await readEntityContextPayloads(memoryReader(prepared.rows), prepared.refs);
     expect(restored.get(replicaId)).toEqual(context);
