@@ -214,17 +214,35 @@ const collectInboundEntries = (
       : []);
 });
 
+/**
+ * One Account frame can reach a proposer twice in the same Runtime frame — a
+ * peer retransmits, or the same proposal arrives over two transports — and
+ * batching makes that ordinary rather than rare, because a wider frame covers
+ * a wider delivery window. Two materializations of the same lock are the same
+ * fact, so an identical repeat collapses. Only a genuine contradiction, two
+ * different outcomes claimed for one lock, is a fault worth halting on.
+ */
 const canonicalizeInboundEntries = (entries: PreparedHtlcEntry[]): PreparedHtlcEntry[] => {
   entries.sort((left, right) =>
     preparedHtlcBindingKey(left.binding).localeCompare(preparedHtlcBindingKey(right.binding)));
-  for (let index = 1; index < entries.length; index += 1) {
-    const previous = entries[index - 1]!.binding;
-    const current = entries[index]!.binding;
-    if (previous.accountFrameHash === current.accountFrameHash && previous.lockId === current.lockId) {
-      throw new Error(`HTLC_PREPARED_BINDING_DUPLICATE:${current.accountFrameHash}:${current.lockId}`);
+  const canonical: PreparedHtlcEntry[] = [];
+  for (const entry of entries) {
+    const previous = canonical[canonical.length - 1];
+    if (
+      previous === undefined ||
+      previous.binding.accountFrameHash !== entry.binding.accountFrameHash ||
+      previous.binding.lockId !== entry.binding.lockId
+    ) {
+      canonical.push(entry);
+      continue;
+    }
+    if (encodeCanonicalConsensusValue(previous) !== encodeCanonicalConsensusValue(entry)) {
+      throw new Error(
+        `HTLC_PREPARED_BINDING_CONFLICT:${entry.binding.accountFrameHash}:${entry.binding.lockId}`,
+      );
     }
   }
-  return entries;
+  return canonical;
 };
 
 /** Proposer-only materialization. Validators replay only the returned bytes. */
