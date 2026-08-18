@@ -36,10 +36,19 @@ size is the only free multiplier.
 
 ## Load runs must be isolated
 
-A second agent edits this tree while runs are in flight. The 100-user run at
+Editing and committing happen in the main checkout, which a second agent edits
+at the same time. A load run must not read that moving tree: the 100-user run at
 18:27 consumed a half-applied mempool refactor and died on
-`cloneIsolatedRuntimeInput is not defined` and `XLN_BINARY_CODEC_UNSUPPORTED`.
-Runs now execute from a detached worktree at a known commit (`/tmp/xln-load`).
+`cloneIsolatedRuntimeInput is not defined`.
+
+So runs execute from `/tmp/xln-load`, a detached worktree of this same
+repository parked on a known commit. It shares `.git`, holds no work of its own
+and is never committed to — after committing in the main checkout, point it at
+the new commit and run:
+
+```
+git -C /tmp/xln-load checkout -q <commit>
+```
 
 ## Walls
 
