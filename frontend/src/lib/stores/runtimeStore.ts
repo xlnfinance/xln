@@ -64,18 +64,44 @@ export const registerRuntimeAdapterSwitcher = (
   runtimeAdapterSwitcher = switcher;
 };
 
+// TEMP DIAGNOSTIC: pinpoint what makes activeRuntimeId resolve to an id not
+// (yet) present in `runtimes`, or flip value entirely. Edge-triggered.
+let lastActiveRuntimeIdDiag: string | null = null;
+
 export const activeRuntimeId = derived(
   [runtimeControllerHandle, runtimes],
   ([$handle, $runtimes]) => {
     const pendingId = normalizeRuntimeId($handle.pendingRuntimeId);
+    let resolved: string;
     if (pendingId && $runtimes.has(pendingId)) {
-      return pendingId;
+      resolved = pendingId;
+    } else {
+      const controllerId = normalizeRuntimeId($handle.runtimeId || $handle.id);
+      if (controllerId && controllerId !== 'embedded' && $runtimes.has(controllerId)) {
+        resolved = controllerId;
+      } else {
+        resolved = pendingId;
+        if (pendingId) {
+          console.warn('[XLN-BLINK] activeRuntimeId resolved to an id not present in runtimes map', {
+            pendingId,
+            controllerId,
+            knownRuntimeIds: Array.from($runtimes.keys()),
+            handleStatus: $handle.status,
+            timestamp: Date.now(),
+          });
+          console.trace('[XLN-BLINK] activeRuntimeId unresolved-id trace');
+        }
+      }
     }
-    const controllerId = normalizeRuntimeId($handle.runtimeId || $handle.id);
-    if (controllerId && controllerId !== 'embedded' && $runtimes.has(controllerId)) {
-      return controllerId;
+    if (lastActiveRuntimeIdDiag !== null && lastActiveRuntimeIdDiag !== resolved) {
+      console.info('[XLN-BLINK] activeRuntimeId changed', {
+        from: lastActiveRuntimeIdDiag,
+        to: resolved,
+        timestamp: Date.now(),
+      });
     }
-    return pendingId;
+    lastActiveRuntimeIdDiag = resolved;
+    return resolved;
   },
 );
 

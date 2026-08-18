@@ -9,17 +9,45 @@ import { getXLN } from './xlnRuntimeLoader';
 
 const bootstrapEnvironment = writable<RuntimeReplica | null>(null);
 
+// TEMP DIAGNOSTIC: pinpoint what makes xlnEnvironment drop entities. Edge-
+// triggered so it only fires when this derived store's resolved env actually
+// loses its entity replicas, not on every commit-driven recompute.
+let lastXlnEnvEntityCountDiag = -1;
+
 // Active env is derived from selected runtime in dropdown. A selected remote
 // runtime intentionally has no RuntimeReplica; remote UI reads RuntimeView projections.
 export const xlnEnvironment = derived(
   [bootstrapEnvironment, runtimes, activeRuntimeId],
   ([$bootstrapEnvironment, $runtimes, $activeRuntimeId]) => {
     const selectedRuntimeId = String($activeRuntimeId || '').toLowerCase();
+    let resolved: RuntimeReplica | null;
+    let branch: string;
+    let runtimeEntryFound: boolean | null = null;
     if (selectedRuntimeId) {
       const runtimeEntry = $runtimes.get(selectedRuntimeId);
-      return runtimeEntry?.env ?? null;
+      runtimeEntryFound = !!runtimeEntry;
+      resolved = runtimeEntry?.env ?? null;
+      branch = 'runtimes.get(selectedRuntimeId)';
+    } else {
+      resolved = $bootstrapEnvironment;
+      branch = 'bootstrapEnvironment';
     }
-    return $bootstrapEnvironment;
+    const entityCount = resolved?.state?.eReplicas instanceof Map ? resolved.state.eReplicas.size : -1;
+    if (lastXlnEnvEntityCountDiag > 0 && entityCount <= 0) {
+      console.warn('[XLN-BLINK] xlnEnvironment dropped entities', {
+        branch,
+        selectedRuntimeId: selectedRuntimeId || null,
+        runtimeEntryFound,
+        knownRuntimeIds: Array.from($runtimes.keys()),
+        resolvedEnvPresent: !!resolved,
+        entityCount,
+        previousEntityCount: lastXlnEnvEntityCountDiag,
+        timestamp: Date.now(),
+      });
+      console.trace('[XLN-BLINK] xlnEnvironment drop trace');
+    }
+    lastXlnEnvEntityCountDiag = entityCount;
+    return resolved;
   },
 );
 

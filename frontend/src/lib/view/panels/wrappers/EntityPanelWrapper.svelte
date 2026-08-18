@@ -55,6 +55,25 @@
     if (isRemoteRuntime) return null;
     return runtimeFrameEnv ? ($runtimeFrameEnv ?? null) : null;
   });
+
+  // TEMP DIAGNOSTIC: pinpoint what makes this panel's env drop entities.
+  // Edge-triggered so it only fires on the transition, not every recompute.
+  let lastActiveEnvEntityCountDiag = $state(-1);
+  $effect(() => {
+    const entityCount = activeEnv?.state?.eReplicas instanceof Map ? activeEnv.state.eReplicas.size : -1;
+    if (lastActiveEnvEntityCountDiag > 0 && entityCount <= 0) {
+      console.warn('[XLN-BLINK] EntityPanelWrapper activeEnv dropped entities', {
+        entityId,
+        isRemoteRuntime,
+        hasRuntimeFrameEnv: !!runtimeFrameEnv,
+        entityCount,
+        previousEntityCount: lastActiveEnvEntityCountDiag,
+        timestamp: Date.now(),
+      });
+      console.trace('[XLN-BLINK] EntityPanelWrapper activeEnv drop trace');
+    }
+    lastActiveEnvEntityCountDiag = entityCount;
+  });
   const activeHistory = $derived.by<EnvSnapshot[]>(() => runtimeFrameHistory ? ($runtimeFrameHistory ?? []) : []);
   const activeTimeIndex = $derived.by<number>(() => runtimeFrameTimeIndex ? ($runtimeFrameTimeIndex ?? -1) : -1);
   const activeIsLive = $derived.by<boolean>(() => runtimeFrameIsLive ? ($runtimeFrameIsLive ?? true) : true);

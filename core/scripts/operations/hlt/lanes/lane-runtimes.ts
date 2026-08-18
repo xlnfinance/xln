@@ -1,13 +1,19 @@
 /**
- * One isolated Runtime process per load user.
+ * Load user Runtimes.
  *
- * Production users never share a Runtime: every maker and taker owns its own
- * process, seed, key store, database and relay session, and every bilateral
- * message to the Hub crosses the real P2P/relay path with signatures and
- * encryption. Hosting fifty lane Entities inside one Custody Runtime measured
- * that Runtime's frame time, not the Hub's, so the harness spawns exactly one
- * `core/api/server/index.ts` daemon per lane and drives each through its
- * own authenticated adapter.
+ * By default every maker and taker owns its own `core/api/server/index.ts`
+ * daemon: its own seed, key store, database and relay session, so every
+ * bilateral message to the Hub crosses the real P2P/relay path with signatures
+ * and encryption. That process-per-user shape costs a fixed ~0.2 core of
+ * ambient work per user (adapter polling, gossip, J watcher, parent watch) and
+ * caps a stand at a few hundred users.
+ *
+ * `XLN_HLT_USERS_PER_RUNTIME=N` hosts N user Entities in one daemon instead —
+ * the custody shape: one Runtime, one WAL, one relay session, many hosted
+ * Entities with their own signers. Each user still keeps its own identity and
+ * Account with the Hub; only the process boundary between users disappears.
+ * A `LaneRuntime` is still one user; lanes of one daemon share `child`,
+ * `control` and `runtime` and list each other in `hostedEntityIds`.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -31,12 +37,26 @@ import { connectRuntime, type ConnectedRuntime } from '../worker-runtime';
 
 export type LaneRuntime = Readonly<{
   identity: ManagedEntityIdentity;
+  /** Unique per user even when several users share one daemon port. */
+  laneKey: string;
   port: number;
   child: ManagedChild;
   control: DaemonControlClient;
   runtime: ConnectedRuntime;
   relayUrl: string;
+  /** Every user Entity hosted by this lane's daemon, this one included. */
+  hostedEntityIds: readonly string[];
 }>;
+
+const USERS_PER_RUNTIME = (() => {
+  const raw = process.env['XLN_HLT_USERS_PER_RUNTIME'];
+  if (!raw) return 1;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 4_096) {
+    throw new Error(`HLT_USERS_PER_RUNTIME_INVALID:${raw}`);
+  }
+  return value;
+})();
 
 /**
  * Lane daemons live outside the 20-port smoke slot. One slot reserves enough
@@ -91,13 +111,14 @@ const resolveJurisdictionKey = (path: string): string => {
 const spawnLaneRuntime = async (options: {
   workDir: string;
   portBase: number;
-  identity: ManagedEntityIdentity;
-  laneSeed: string;
+  identities: readonly ManagedEntityIdentity[];
+  laneSeeds: readonly string[];
   laneIndex: number;
   jurisdictionsPath: string;
   jurisdictionKey: string;
-}): Promise<LaneRuntime> => {
+}): Promise<LaneRuntime[]> => {
   const port = laneRuntimePort(options.portBase, options.laneIndex);
+  const runtimeSeed = options.laneSeeds[0]!;
   const rpcUrl = `http://127.0.0.1:${options.portBase}`;
   const relayUrl = `ws://127.0.0.1:${options.portBase + 4}/relay`;
   const authSeed = randomBytes(32).toString('hex');
@@ -120,7 +141,7 @@ const spawnLaneRuntime = async (options: {
       ANVIL_RPC: rpcUrl,
       PUBLIC_RPC: rpcUrl,
       RELAY_URL: relayUrl,
-      XLN_RUNTIME_SEED: `${options.laneSeed}:runtime`,
+      XLN_RUNTIME_SEED: `${runtimeSeed}:runtime`,
       XLN_DB_PATH: join(dbRoot, 'db'),
       // Storage health state is per process; fifty daemons must not share one file.
       XLN_RDB_ROOT: dbRoot,
@@ -134,14 +155,18 @@ const spawnLaneRuntime = async (options: {
       // The load worker is the only client of these loopback daemons and polls
       // settlement evidence from every lane concurrently; the public per-client
       // budget would rate-limit the harness itself, not the system under test.
-      XLN_RADAPTER_SEND_BURST: '200',
-      XLN_RADAPTER_SEND_PER_SEC: '100',
-      XLN_RADAPTER_READ_BURST: '200',
-      XLN_RADAPTER_READ_PER_SEC: '100',
-      XLN_RADAPTER_CONTROL_BURST: '200',
-      XLN_RADAPTER_CONTROL_PER_SEC: '100',
+      XLN_RADAPTER_SEND_BURST: String(200 * options.identities.length),
+      XLN_RADAPTER_SEND_PER_SEC: String(100 * options.identities.length),
+      XLN_RADAPTER_READ_BURST: String(200 * options.identities.length),
+      XLN_RADAPTER_READ_PER_SEC: String(100 * options.identities.length),
+      XLN_RADAPTER_CONTROL_BURST: String(200 * options.identities.length),
+      XLN_RADAPTER_CONTROL_PER_SEC: String(100 * options.identities.length),
     },
-    { startupSignersJson: safeStringify([{ seed: options.laneSeed, label: 'owner' }]) },
+    {
+      startupSignersJson: safeStringify(
+        options.laneSeeds.map((seed, index) => ({ seed, label: index === 0 ? 'owner' : `owner-${index}` })),
+      ),
+    },
   );
   // A lane daemon that halts mid-run is otherwise silent: spawnBunChild keeps
   // only a bounded in-memory tail that is surfaced on startup failure. A load
@@ -166,10 +191,25 @@ const spawnLaneRuntime = async (options: {
   const runtime = await connectRuntime(
     { label: `load-lane-${options.laneIndex}`, wsUrl: `ws://127.0.0.1:${port}/rpc`, token },
   );
-  return { identity: options.identity, port, child, control, runtime, relayUrl };
+  const hostedEntityIds = options.identities.map(identity => identity.entityId);
+  return options.identities.map(identity => ({
+    identity,
+    laneKey: `${port}-${identity.entityId.slice(-8)}`,
+    port,
+    child,
+    control,
+    runtime,
+    relayUrl,
+    hostedEntityIds,
+  }));
 };
 
-/** Spawn one daemon per identity; `laneIndexOffset` keeps maker/taker ports disjoint. */
+/**
+ * Spawn the user daemons; `laneIndexOffset` keeps maker/taker ports disjoint.
+ * With `XLN_HLT_USERS_PER_RUNTIME=N` every daemon hosts N consecutive users;
+ * daemon k of a role takes the port slot of that role's lane `k * N`, so the
+ * two roles' slots stay disjoint exactly as they do one-per-user.
+ */
 export const spawnLaneRuntimes = async (options: {
   workDir: string;
   portBase: number;
@@ -179,19 +219,31 @@ export const spawnLaneRuntimes = async (options: {
 }): Promise<LaneRuntime[]> => {
   const jurisdictionsPath = join(options.workDir, 'prod-mesh', 'custody', 'jurisdictions.json');
   const jurisdictionKey = resolveJurisdictionKey(jurisdictionsPath);
+  if (options.laneSeeds.length !== options.identities.length) {
+    throw new Error('HLT_LANE_SEED_CARDINALITY_INVALID');
+  }
+  const groups: Array<{ start: number; identities: ManagedEntityIdentity[]; seeds: string[] }> = [];
+  for (let start = 0; start < options.identities.length; start += USERS_PER_RUNTIME) {
+    groups.push({
+      start,
+      identities: [...options.identities.slice(start, start + USERS_PER_RUNTIME)],
+      seeds: [...options.laneSeeds.slice(start, start + USERS_PER_RUNTIME)],
+    });
+  }
   const lanes: LaneRuntime[] = [];
   try {
-    for (let offset = 0; offset < options.identities.length; offset += SPAWN_CONCURRENCY) {
-      const batch = options.identities.slice(offset, offset + SPAWN_CONCURRENCY);
-      lanes.push(...await Promise.all(batch.map((identity, index) => spawnLaneRuntime({
+    for (let offset = 0; offset < groups.length; offset += SPAWN_CONCURRENCY) {
+      const batch = groups.slice(offset, offset + SPAWN_CONCURRENCY);
+      const spawned = await Promise.all(batch.map(group => spawnLaneRuntime({
         workDir: options.workDir,
         portBase: options.portBase,
-        identity,
-        laneSeed: options.laneSeeds[offset + index]!,
-        laneIndex: options.laneIndexOffset + offset + index,
+        identities: group.identities,
+        laneSeeds: group.seeds,
+        laneIndex: options.laneIndexOffset + group.start,
         jurisdictionsPath,
         jurisdictionKey,
-      }))));
+      })));
+      lanes.push(...spawned.flat());
     }
     return lanes;
   } catch (error) {
@@ -200,7 +252,20 @@ export const spawnLaneRuntimes = async (options: {
   }
 };
 
+/** Distinct daemons behind a lane list (several lanes may share one). */
+export const laneDaemons = (lanes: readonly LaneRuntime[]): LaneRuntime[] => {
+  const seen = new Set<ManagedChild>();
+  const daemons: LaneRuntime[] = [];
+  for (const lane of lanes) {
+    if (seen.has(lane.child)) continue;
+    seen.add(lane.child);
+    daemons.push(lane);
+  }
+  return daemons;
+};
+
 export const stopLaneRuntimes = async (lanes: readonly LaneRuntime[]): Promise<void> => {
-  for (const lane of lanes) lane.runtime.adapter.disconnect();
-  await Promise.allSettled(lanes.map(lane => stopManagedChild(lane.child)));
+  const daemons = laneDaemons(lanes);
+  for (const lane of daemons) lane.runtime.adapter.disconnect();
+  await Promise.allSettled(daemons.map(lane => stopManagedChild(lane.child)));
 };

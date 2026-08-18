@@ -9,7 +9,7 @@ import {
   type ManagedEntityIdentity,
 } from '../../../../orchestrator/daemon-control';
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
-import { spawnLaneRuntimes, type LaneRuntime } from './lane-runtimes';
+import { laneDaemons, spawnLaneRuntimes, type LaneRuntime } from './lane-runtimes';
 import { importEntity } from '../../../../runtime/registration/entity-creation';
 import type { RuntimeInput } from '../../../../runtime/types';
 import { decodeEntitySummaries, type LoadIdentity } from '../boundary/worker-boundary';
@@ -158,7 +158,7 @@ const waitForHubProfile = async (lane: LaneRuntime, hubEntityId: string): Promis
     if (await lane.control.hasGossipProfile(hubEntityId)) return;
     await sleep(100);
   }
-  throw new Error(`PRODUCTION_SWAP_LOAD_HUB_PROFILE_NOT_VISIBLE:${lane.port}`);
+  throw new Error(`PRODUCTION_SWAP_LOAD_HUB_PROFILE_NOT_VISIBLE:${lane.laneKey}`);
 };
 
 const buildLaneImports = (identities: readonly ManagedEntityIdentity[]): RuntimeInput['runtimeTxs'] =>
@@ -236,21 +236,23 @@ export const setupParallelLoadLanes = async (options: {
     await lane.control.registerSigner(lane.identity.signerId, lane.identity.privateKeyHex);
     const existing = new Set((await lane.control.listEntities()).map(entity => entity.entityId));
     if (!existing.has(lane.identity.entityId)) {
-      await sendObserved(lane.runtime, `prod-load-import-${options.role}-${lane.port}`, {
+      await sendObserved(lane.runtime, `prod-load-import-${options.role}-${lane.laneKey}`, {
         runtimeTxs: buildLaneImports([lane.identity]), entityInputs: [],
       });
     }
     await waitForVisibleEntities(lane.runtime, [lane.identity.entityId], 'PRODUCTION_SWAP_LOAD_LANES_NOT_IMPORTED');
-    await lane.control.configureP2P({
-      relayUrls: [lane.relayUrl],
-      advertiseEntityIds: [lane.identity.entityId],
-      gossipPollMs: PROVISIONING_GOSSIP_POLL_MS,
-    });
   });
+  // P2P config is per daemon and replaces the advertised set, so a daemon that
+  // hosts several users advertises all of them at once, after every import.
+  await runInBatches(laneDaemons(runtimes), lane => lane.control.configureP2P({
+    relayUrls: [lane.relayUrl],
+    advertiseEntityIds: [...lane.hostedEntityIds],
+    gossipPollMs: PROVISIONING_GOSSIP_POLL_MS,
+  }));
   await waitForVisibleEntities(options.hub, identities.map(identity => identity.entityId), 'PRODUCTION_SWAP_LOAD_LANE_PROFILES_NOT_VISIBLE');
   await runInBatches(runtimes, async (lane, index) => {
     await waitForHubProfile(lane, options.hubIdentity.entityId);
-    await sendObserved(lane.runtime, `prod-load-open-${options.role}-${lane.port}`, {
+    await sendObserved(lane.runtime, `prod-load-open-${options.role}-${lane.laneKey}`, {
       runtimeTxs: [],
       entityInputs: buildLaneAccountInputs(
         [lane.identity],
@@ -300,9 +302,9 @@ export const setupParallelLoadLanes = async (options: {
   }
   // Fast polling only served setup; a real user Runtime does not ask the Hub
   // for gossip four times a second while trading.
-  await runInBatches(runtimes, lane => lane.control.configureP2P({
+  await runInBatches(laneDaemons(runtimes), lane => lane.control.configureP2P({
     relayUrls: [lane.relayUrl],
-    advertiseEntityIds: [lane.identity.entityId],
+    advertiseEntityIds: [...lane.hostedEntityIds],
     gossipPollMs: LOAD_LANE_GOSSIP_POLL_MS,
   }));
   return {
