@@ -24,7 +24,7 @@ import {
 } from '../boundary/worker-boundary';
 import { decodeLoadPaymentReport } from '../boundary/worker-payment-boundary';
 import { setupParallelLoadLanes } from '../lanes/worker-lanes';
-import { stopLaneRuntimes, type LaneRuntime } from '../lanes/lane-runtimes';
+import { laneDaemons, stopLaneRuntimes, type LaneRuntime } from '../lanes/lane-runtimes';
 import {
   connectRuntime,
   directoryBytes,
@@ -70,6 +70,21 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
  * HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING instead of measuring anything. This
  * barrier waits for the exact view the payment will be judged against.
  */
+// Bounded fan-out for the polling readers: 250 concurrent reads at three
+// daemons overflow a daemon's accept queue while it is inside a long frame.
+const READ_CONCURRENCY = 16;
+const forEachLimited = async <T>(items: readonly T[], fn: (item: T) => Promise<void>): Promise<void> => {
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < items.length) {
+      const item = items[cursor]!;
+      cursor += 1;
+      await fn(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, items.length) }, worker));
+};
+
 const waitForRoutableReceivers = async (
   senders: readonly LaneRuntime[],
   hubEntityId: string,
@@ -77,24 +92,29 @@ const waitForRoutableReceivers = async (
 ): Promise<void> => {
   const startedAt = Date.now();
   const deadline = startedAt + ROUTE_BARRIER_TIMEOUT_MS;
-  const confirmed = senders.map(() => new Set<string>());
+  // Gossip is per daemon, not per hosted user: asking every sender about every
+  // receiver was senders x receivers requests (62 500 at 500 users) fired
+  // concurrently at three daemons, which overflowed their accept queues
+  // (FailedToOpenSocket) while a daemon sat in a long frame. One sequential
+  // chain per daemon asks each receiver once.
+  const daemons = laneDaemons(senders);
+  const confirmed = daemons.map(() => new Set<string>());
   let lastPending = -1;
   for (;;) {
-    await Promise.all(senders.map(async (lane, index) => {
+    await Promise.all(daemons.map(async (lane, index) => {
       const settled = confirmed[index]!;
-      if (settled.size === receiverIds.length) return;
-      for (const receiverId of receiverIds) {
-        if (settled.has(receiverId)) continue;
+      const pendingIds = receiverIds.filter(id => !settled.has(id));
+      await forEachLimited(pendingIds, async receiverId => {
         const receiverAccounts = await lane.control.gossipProfileCounterparties(receiverId);
         if (receiverAccounts?.includes(hubEntityId)) settled.add(receiverId);
-      }
+      });
     }));
     const pending = confirmed.reduce(
       (total, settled) => total + (receiverIds.length - settled.size),
       0,
     );
     if (pending === 0) {
-      console.log(`[load] payment routes ready senders=${senders.length} elapsedMs=${Date.now() - startedAt}`);
+      console.log(`[load] payment routes ready senders=${senders.length} daemons=${daemons.length} elapsedMs=${Date.now() - startedAt}`);
       return;
     }
     if (pending !== lastPending) {
@@ -102,7 +122,7 @@ const waitForRoutableReceivers = async (
       lastPending = pending;
     }
     if (Date.now() >= deadline) {
-      throw new Error(`HLT_PAYMENT_ROUTES_NOT_VISIBLE:pending=${pending}:of=${senders.length * receiverIds.length}`);
+      throw new Error(`HLT_PAYMENT_ROUTES_NOT_VISIBLE:pending=${pending}:of=${daemons.length * receiverIds.length}`);
     }
     await sleep(ROUTE_BARRIER_POLL_MS);
   }
@@ -152,7 +172,7 @@ const waitForDeliveredBalances = async (
   let lastCredited = -1n;
   let stalledSinceMs = startedAt;
   while (Date.now() < deadline) {
-    await Promise.all([...pending].map(async index => {
+    await forEachLimited([...pending], async index => {
       const lane = receivers[index]!;
       const account = await readLoadAccount(lane.runtime, lane.identity.entityId, hubEntityId);
       const delta = account?.state.deltas.get(PAYMENT_TOKEN_ID);
@@ -161,7 +181,7 @@ const waitForDeliveredBalances = async (
       const received = capacity - baselines[index]!;
       credited[index] = received > 0n ? received : 0n;
       if (received >= expected[index]!) pending.delete(index);
-    }));
+    });
     if (pending.size === 0) return;
     const total = credited.reduce((sum, amount) => sum + amount, 0n);
     const elapsedMs = Date.now() - startedAt;
@@ -189,12 +209,17 @@ const waitForDeliveredBalances = async (
 const readReceiverBalances = async (
   receivers: readonly LaneRuntime[],
   hubEntityId: string,
-): Promise<bigint[]> => Promise.all(receivers.map(async lane => {
-  const account = await readLoadAccount(lane.runtime, lane.identity.entityId, hubEntityId);
-  const delta = account?.state.deltas.get(PAYMENT_TOKEN_ID);
-  if (!delta) return 0n;
-  return deriveDelta(delta, isLeftEntity(lane.identity.entityId, hubEntityId)).outCapacity;
-}));
+): Promise<bigint[]> => {
+  const balances = receivers.map(() => 0n);
+  await forEachLimited(receivers.map((_, index) => index), async index => {
+    const lane = receivers[index]!;
+    const account = await readLoadAccount(lane.runtime, lane.identity.entityId, hubEntityId);
+    const delta = account?.state.deltas.get(PAYMENT_TOKEN_ID);
+    if (!delta) return;
+    balances[index] = deriveDelta(delta, isLeftEntity(lane.identity.entityId, hubEntityId)).outCapacity;
+  });
+  return balances;
+};
 
 export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> => {
   const manifestPath = join(args.workDir, 'prod-mesh', 'runtime-import-manifest.json');

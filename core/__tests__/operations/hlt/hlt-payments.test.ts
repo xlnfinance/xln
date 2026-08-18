@@ -7,8 +7,20 @@ import {
 } from '../../../scripts/operations/hlt/workload/worker-payments-plan';
 import { decodeLoadPaymentReport } from '../../../scripts/operations/hlt/boundary/worker-payment-boundary';
 import { parseWorkerArgs } from '../../../scripts/operations/hlt/worker-runtime';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 describe('hlt payment population', () => {
+  test('payment route and balance readers stay bounded per daemon', () => {
+    const source = readFileSync(
+      join(import.meta.dir, '../../../scripts/operations/hlt/workload/worker-payments.ts'),
+      'utf8',
+    );
+    expect(source).toContain('laneDaemons(senders)');
+    expect(source).toContain('READ_CONCURRENCY');
+    expect(source).toContain('forEachLimited');
+  });
+
   test('every round pairs senders and receivers as a permutation', () => {
     for (const receivers of [2, 3, 8, 64, 500]) {
       for (const round of [0, 1, 7, 999]) {
