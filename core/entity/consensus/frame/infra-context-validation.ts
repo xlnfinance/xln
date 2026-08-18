@@ -28,11 +28,19 @@ const exactKeys = (value: unknown, keys: readonly string[], code: string): Recor
   return record;
 };
 
+// Gossip profiles are canonical, identity-stable objects shared by every
+// frame that routes through the same peer; parsing and re-encoding them per
+// entity frame was ~5% of a load lane. Memoized by object identity only.
+const canonicalProfileByObject = new WeakMap<object, DecodedProfile>();
+
 const canonicalProfile = (value: unknown): DecodedProfile => {
+  const cached = value && typeof value === 'object' ? canonicalProfileByObject.get(value) : undefined;
+  if (cached) return cached;
   const parsed = parseProfile(value);
   if (encodeCanonicalConsensusValue(value) !== encodeCanonicalConsensusValue(parsed)) {
     throw new Error(`ENTITY_INFRA_PROFILE_NONCANONICAL:${parsed.entityId}`);
   }
+  if (value && typeof value === 'object') canonicalProfileByObject.set(value, parsed);
   return parsed;
 };
 

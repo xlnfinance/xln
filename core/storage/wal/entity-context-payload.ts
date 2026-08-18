@@ -33,8 +33,16 @@ export const MAX_ENTITY_CONTEXT_PAYLOAD_BYTES = 10_000;
 type StoredEntityContextManifest = Readonly<{
   kind: 'entityContext';
   version: 1;
-  header: Omit<EntityInfraContext, 'gossipProfiles' | 'htlc'>;
+  header: Omit<EntityInfraContext, 'gossipProfiles' | 'htlc' | 'peerAssertions'> &
+    Partial<Pick<EntityInfraContext, 'peerAssertions'>>;
   profilePageRefs: EntityContextPayloadHash[];
+  /**
+   * A Hub frame asserts liveness for every next hop it routes to in that frame;
+   * at ~350 payments per frame the inline assertion list alone crossed the
+   * record cap and halted the Runtime. Assertions are therefore paged like the
+   * other lists (rows written before this field kept them inline in the header).
+   */
+  peerAssertionPageRefs?: EntityContextPayloadHash[];
   /**
    * One leaf per prepared HTLC rather than one leaf for the whole frame. A Hub
    * that batches carries as many prepared HTLCs as the batch is wide, and a
@@ -55,11 +63,18 @@ type StoredEntityContextManifest = Readonly<{
 type StoredReferencePage = Readonly<{
   kind: 'referencePage';
   version: 1;
-  childKind: 'gossipProfile' | 'htlcEntry' | 'htlcOriginated';
+  childKind: 'gossipProfile' | 'htlcEntry' | 'htlcOriginated' | 'peerAssertions';
   refs: EntityContextPayloadHash[];
 }>;
 
+type StoredPeerAssertionsPage = Readonly<{
+  kind: 'peerAssertions';
+  version: 1;
+  assertions: EntityInfraContext['peerAssertions'];
+}>;
+
 const REFERENCE_PAGE_SIZE = 64;
+const PEER_ASSERTION_PAGE_SIZE = 64;
 
 type StoredGossipProfile = Readonly<{
   kind: 'gossipProfile';
@@ -84,6 +99,7 @@ type StoredEntityContextRow =
   | StoredGossipProfile
   | StoredHtlcEntry
   | StoredHtlcOriginated
+  | StoredPeerAssertionsPage
   | StoredReferencePage;
 
 type PayloadRow = Readonly<{
@@ -128,6 +144,7 @@ const payloadBudgetLabel = (payload: StoredEntityContextRow): string => {
   if (payload.kind === 'gossipProfile') return `gossipProfile:${payload.profile.entityId}`;
   if (payload.kind === 'htlcEntry') return `htlcEntry:${payload.entry.binding.lockId}`;
   if (payload.kind === 'htlcOriginated') return `htlcOriginated:${payload.originated.lockId}`;
+  if (payload.kind === 'peerAssertions') return `peerAssertions:${payload.assertions.length}`;
   if (payload.kind === 'referencePage') {
     return `referencePage:${payload.childKind}:refs=${payload.refs.length}`;
   }
@@ -195,6 +212,14 @@ export const prepareEntityContextPayloadRows = (
       version: 1,
       originated,
     }, rowsByHash));
+    const peerAssertionRefs: EntityContextPayloadHash[] = [];
+    for (let offset = 0; offset < decoded.peerAssertions.length; offset += PEER_ASSERTION_PAGE_SIZE) {
+      peerAssertionRefs.push(prepareRow({
+        kind: 'peerAssertions',
+        version: 1,
+        assertions: decoded.peerAssertions.slice(offset, offset + PEER_ASSERTION_PAGE_SIZE),
+      }, rowsByHash));
+    }
     refs.set(replicaId, prepareRow({
       kind: 'entityContext',
       version: 1,
@@ -205,9 +230,9 @@ export const prepareEntityContextPayloadRows = (
         proposerSignerId: decoded.proposerSignerId,
         parentFrameHash: decoded.parentFrameHash,
         height: decoded.height,
-        peerAssertions: decoded.peerAssertions,
       },
       profilePageRefs: prepareReferencePages(profileRefs, 'gossipProfile', rowsByHash),
+      peerAssertionPageRefs: prepareReferencePages(peerAssertionRefs, 'peerAssertions', rowsByHash),
       htlcEntryPageRefs: prepareReferencePages(htlcEntryRefs, 'htlcEntry', rowsByHash),
       htlcOriginatedPageRefs: prepareReferencePages(htlcOriginatedRefs, 'htlcOriginated', rowsByHash),
     }, rowsByHash));
@@ -292,11 +317,30 @@ const decodeHtlcOriginatedLeaf = (value: unknown, replicaId: string): PreparedOr
   return raw['originated'] as PreparedOriginatedHtlcPayment;
 };
 
+const decodePeerAssertionsLeaf = (
+  value: unknown,
+  replicaId: string,
+): EntityInfraContext['peerAssertions'] => {
+  const raw = record(value, `STORAGE_ENTITY_CONTEXT_PEER_ASSERTIONS_INVALID:${replicaId}`);
+  exactKeys(raw, ['kind', 'version', 'assertions'], `STORAGE_ENTITY_CONTEXT_PEER_ASSERTIONS_INVALID:${replicaId}`);
+  if (raw['kind'] !== 'peerAssertions' || raw['version'] !== 1 || !Array.isArray(raw['assertions'])) {
+    throw new Error(`STORAGE_ENTITY_CONTEXT_PEER_ASSERTIONS_KIND:${replicaId}`);
+  }
+  if (raw['assertions'].length === 0 || raw['assertions'].length > PEER_ASSERTION_PAGE_SIZE) {
+    throw new Error(`STORAGE_ENTITY_CONTEXT_PEER_ASSERTIONS_SIZE:${replicaId}:${raw['assertions'].length}`);
+  }
+  return raw['assertions'] as EntityInfraContext['peerAssertions'];
+};
+
 const decodeManifest = (value: unknown, replicaId: string): StoredEntityContextManifest => {
   const raw = record(value, `STORAGE_ENTITY_CONTEXT_MANIFEST_INVALID:${replicaId}`);
+  const paged = 'peerAssertionPageRefs' in raw;
   exactKeys(
     raw,
-    ['kind', 'version', 'header', 'profilePageRefs', 'htlcEntryPageRefs', 'htlcOriginatedPageRefs'],
+    [
+      'kind', 'version', 'header', 'profilePageRefs', 'htlcEntryPageRefs', 'htlcOriginatedPageRefs',
+      ...(paged ? ['peerAssertionPageRefs'] : []),
+    ],
     `STORAGE_ENTITY_CONTEXT_MANIFEST_INVALID:${replicaId}`,
   );
   if (raw['kind'] !== 'entityContext' || raw['version'] !== 1) {
@@ -305,7 +349,7 @@ const decodeManifest = (value: unknown, replicaId: string): StoredEntityContextM
   const header = record(raw['header'], `STORAGE_ENTITY_CONTEXT_HEADER_INVALID:${replicaId}`);
   exactKeys(header, [
     'version', 'proposerReplicaId', 'entityId', 'proposerSignerId',
-    'parentFrameHash', 'height', 'peerAssertions',
+    'parentFrameHash', 'height', ...(paged ? [] : ['peerAssertions']),
   ], `STORAGE_ENTITY_CONTEXT_HEADER_INVALID:${replicaId}`);
   return {
     kind: 'entityContext',
@@ -315,6 +359,12 @@ const decodeManifest = (value: unknown, replicaId: string): StoredEntityContextM
       raw['profilePageRefs'],
       `STORAGE_ENTITY_CONTEXT_PROFILE_REFS:${replicaId}`,
     ),
+    ...(paged ? {
+      peerAssertionPageRefs: decodeHashList(
+        raw['peerAssertionPageRefs'],
+        `STORAGE_ENTITY_CONTEXT_PEER_ASSERTION_REFS:${replicaId}`,
+      ),
+    } : {}),
     htlcEntryPageRefs: decodeHashList(
       raw['htlcEntryPageRefs'],
       `STORAGE_ENTITY_CONTEXT_HTLC_REFS:${replicaId}`,
@@ -390,8 +440,19 @@ export const readEntityContextPayloads = async (
       );
     }
     const htlc: HtlcPreparedInfraContext = { version: 1, entries, originated };
+    let peerAssertions = manifest.header.peerAssertions ?? [];
+    if (manifest.peerAssertionPageRefs) {
+      const paged: EntityInfraContext['peerAssertions'][number][] = [];
+      for (const pageRef of await readPagedRefs(
+        db, replicaId, manifest.peerAssertionPageRefs, 'peerAssertions',
+      )) {
+        paged.push(...decodePeerAssertionsLeaf(await readVerifiedPayload(db, replicaId, pageRef), replicaId));
+      }
+      peerAssertions = paged;
+    }
     const context = validateEntityInfraContext({
       ...manifest.header,
+      peerAssertions,
       gossipProfiles,
       htlc,
     });

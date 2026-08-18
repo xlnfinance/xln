@@ -62,10 +62,20 @@ type ResolvedEntityCommandAuthor = Readonly<{
   signer: string;
 }>;
 
-export const resolveEntityCommandBoard = (
+// The board hash is a pure function of the (immutable) config object and the
+// signer directory; every entity frame otherwise re-encodes the ABI board and
+// re-hashes it, which was 4% of a load lane's CPU.
+const resolvedBoardByConfig = new WeakMap<
+  EntityState['config'],
+  Readonly<{ boardHash: string; members: readonly ResolvedBoardMember[] }>
+>();
+
+const resolveEntityBoardMembers = (
   env: EntityRuntimeContext,
   state: EntityState,
-): ResolvedEntityCommandBoard => {
+): Readonly<{ boardHash: string; members: readonly ResolvedBoardMember[] }> => {
+  const cached = resolvedBoardByConfig.get(state.config);
+  if (cached) return cached;
   const canonicalShares = resolveCanonicalEntityBoardShares(state.config);
   const aliases = new Set<string>();
   const members = state.config.validators.map((rawSignerId): ResolvedBoardMember => {
@@ -87,6 +97,16 @@ export const resolveEntityCommandBoard = (
     shares: Object.fromEntries(members.map(member => [member.signer, member.share])),
   };
   const boardHash = hashBoard(encodeBoard(resolvedConfig)).toLowerCase();
+  const resolved = { boardHash, members };
+  resolvedBoardByConfig.set(state.config, resolved);
+  return resolved;
+};
+
+export const resolveEntityCommandBoard = (
+  env: EntityRuntimeContext,
+  state: EntityState,
+): ResolvedEntityCommandBoard => {
+  const { boardHash, members } = resolveEntityBoardMembers(env, state);
   const entityId = canonicalEntityCommandEntityId(state.entityId);
   const boardEpoch = (() => {
     if (entityId === boardHash) return 0;
