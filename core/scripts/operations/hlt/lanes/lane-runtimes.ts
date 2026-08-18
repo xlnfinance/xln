@@ -155,7 +155,11 @@ const spawnLaneRuntime = async (options: {
       // A lane hosting a hundred users otherwise runs second-long synchronous
       // frames during which it accepts no socket; bounded frames keep it
       // reachable for the driver and the Hub between frames.
-      XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME: process.env['XLN_HLT_LANE_MAX_ENTITY_INPUTS_PER_FRAME'] || '32',
+      // Unbounded by default: a runtime frame must absorb every queued input at
+      // once (10k+); set XLN_HLT_LANE_MAX_ENTITY_INPUTS_PER_FRAME only for experiments.
+      ...(process.env['XLN_HLT_LANE_MAX_ENTITY_INPUTS_PER_FRAME']
+        ? { XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME: process.env['XLN_HLT_LANE_MAX_ENTITY_INPUTS_PER_FRAME'] }
+        : {}),
       // The load worker is the only client of these loopback daemons and polls
       // settlement evidence from every lane concurrently; the public per-client
       // budget would rate-limit the harness itself, not the system under test.
