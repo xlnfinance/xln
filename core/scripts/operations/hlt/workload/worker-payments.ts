@@ -54,6 +54,8 @@ const MAX_SENDER_DEBIT_MULTIPLE = 2n;
 const CREDIT_HEADROOM_MULTIPLE = 4n;
 const DELIVERY_POLL_MS = 250;
 const DELIVERY_TIMEOUT_MS = 600_000;
+/** How often the delivery curve is printed while a run is in flight. */
+const DELIVERY_REPORT_MS = 2_000;
 const ROUTE_BARRIER_POLL_MS = 500;
 const ROUTE_BARRIER_TIMEOUT_MS = 300_000;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -138,9 +140,17 @@ const waitForDeliveredBalances = async (
   baselines: readonly bigint[],
   expected: readonly bigint[],
 ): Promise<void> => {
-  const deadline = Date.now() + DELIVERY_TIMEOUT_MS;
+  const startedAt = Date.now();
+  const deadline = startedAt + DELIVERY_TIMEOUT_MS;
   const pending = new Set(receivers.map((_, index) => index));
-  let lastPending = -1;
+  // Counting whole receivers only says "someone is still owed something". The
+  // amount actually credited is the delivery curve: it separates a Hub that is
+  // slow from a Hub that has stopped, and a timeout then reports which it was.
+  const credited = receivers.map(() => 0n);
+  const owed = expected.reduce((total, amount) => total + amount, 0n);
+  let reportedAtMs = 0;
+  let lastCredited = -1n;
+  let stalledSinceMs = startedAt;
   while (Date.now() < deadline) {
     await Promise.all([...pending].map(async index => {
       const lane = receivers[index]!;
@@ -148,16 +158,32 @@ const waitForDeliveredBalances = async (
       const delta = account?.state.deltas.get(PAYMENT_TOKEN_ID);
       if (!delta) return;
       const capacity = deriveDelta(delta, isLeftEntity(lane.identity.entityId, hubEntityId)).outCapacity;
-      if (capacity - baselines[index]! >= expected[index]!) pending.delete(index);
+      const received = capacity - baselines[index]!;
+      credited[index] = received > 0n ? received : 0n;
+      if (received >= expected[index]!) pending.delete(index);
     }));
     if (pending.size === 0) return;
-    if (pending.size !== lastPending) {
-      console.log(`[load] payments pending receivers=${pending.size}/${receivers.length}`);
-      lastPending = pending.size;
+    const total = credited.reduce((sum, amount) => sum + amount, 0n);
+    const elapsedMs = Date.now() - startedAt;
+    if (total !== lastCredited) {
+      lastCredited = total;
+      stalledSinceMs = Date.now();
+    }
+    if (elapsedMs - reportedAtMs >= DELIVERY_REPORT_MS) {
+      reportedAtMs = elapsedMs;
+      console.log(
+        `[load] delivery elapsedMs=${elapsedMs} receiversPending=${pending.size}/${receivers.length} ` +
+        `credited=${total}/${owed} rate=${(Number(total) / Math.max(1, elapsedMs) * 1_000).toFixed(1)}/s ` +
+        `stalledMs=${Date.now() - stalledSinceMs}`,
+      );
     }
     await sleep(DELIVERY_POLL_MS);
   }
-  throw new Error(`HLT_PAYMENT_NOT_DELIVERED:pendingReceivers=${pending.size}`);
+  const total = credited.reduce((sum, amount) => sum + amount, 0n);
+  throw new Error(
+    `HLT_PAYMENT_NOT_DELIVERED:pendingReceivers=${pending.size}:credited=${total}:owed=${owed}:` +
+    `stalledMs=${Date.now() - stalledSinceMs}`,
+  );
 };
 
 const readReceiverBalances = async (
