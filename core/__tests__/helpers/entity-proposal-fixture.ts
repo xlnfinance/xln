@@ -5,6 +5,8 @@ import {
   registerSignerKey,
   signAccountFrame,
 } from '../../account/crypto';
+import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
+import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
 import { applyEntityInput } from '../../entity/consensus';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../../entity/consensus/input/hanko-witness';
@@ -47,7 +49,7 @@ export const createEntityProposalFixture = (
       shares: Object.fromEntries(validators.map(validator => [validator, 1n])),
     },
     reserves: new Map(),
-    accounts: new Map(),
+    accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
     lastFinalizedJHeight: 0,
     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),

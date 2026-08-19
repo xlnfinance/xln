@@ -415,6 +415,20 @@ const computeCertifiedEntityOutputSemanticHash = (
   lane: ConsensusOutputOrigin['lane'],
   sequence: bigint,
   entityTxs: EntityTx[],
+): string => computeCertifiedEntityOutputSemanticHashFromCanonical(
+  sourceEntityId,
+  targetEntityId,
+  lane,
+  sequence,
+  canonicalCertifiedEntityTxs(entityTxs),
+);
+
+const computeCertifiedEntityOutputSemanticHashFromCanonical = (
+  sourceEntityId: string,
+  targetEntityId: string,
+  lane: ConsensusOutputOrigin['lane'],
+  sequence: bigint,
+  canonicalTxs: unknown[],
 ): string =>
   keccakTextHash(
     encodeCanonicalConsensusValue({
@@ -423,7 +437,7 @@ const computeCertifiedEntityOutputSemanticHash = (
       targetEntityId: targetEntityId.toLowerCase(),
       lane,
       sequence,
-      entityTxs: canonicalCertifiedEntityTxs(entityTxs),
+      entityTxs: canonicalTxs,
     }),
   );
 
@@ -442,6 +456,7 @@ export const assertCertifiedOutputSemanticIdentity = (
   origin: ConsensusOutputOrigin,
   targetEntityId: string,
   entityTxs: EntityTx[],
+  precomputedCanonicalTxs?: unknown[],
 ): string => {
   countOp('certified.assertCertifiedOutputSemanticIdentity');
   const native = nativeOutputIdentity(entityTxs);
@@ -459,13 +474,21 @@ export const assertCertifiedOutputSemanticIdentity = (
       `CONSENSUS_OUTPUT_GENERIC_LANE_INVALID:${origin.lane}`,
     );
   }
-  const semanticHash = hashCertifiedEntityOutputSemantic(
-    origin.sourceEntityId,
-    targetEntityId,
-    origin.lane,
-    origin.sequence,
-    entityTxs,
-  );
+  const semanticHash = precomputedCanonicalTxs === undefined
+    ? hashCertifiedEntityOutputSemantic(
+        origin.sourceEntityId,
+        targetEntityId,
+        origin.lane,
+        origin.sequence,
+        entityTxs,
+      )
+    : computeCertifiedEntityOutputSemanticHashFromCanonical(
+        origin.sourceEntityId,
+        targetEntityId,
+        origin.lane,
+        origin.sequence,
+        precomputedCanonicalTxs,
+      );
   if (semanticHash !== origin.semanticHash.toLowerCase()) {
     throw rejectFailure(
       'CONSENSUS_OUTPUT_SEMANTIC_HASH_MISMATCH',
@@ -629,13 +652,23 @@ const computeCertifiedEntityOutputHash = (
   origin: ConsensusOutputOrigin,
   targetEntityId: string,
   entityTxs: EntityTx[],
+): string => computeCertifiedEntityOutputHashFromCanonical(
+  origin,
+  targetEntityId,
+  canonicalCertifiedEntityTxs(entityTxs),
+);
+
+const computeCertifiedEntityOutputHashFromCanonical = (
+  origin: ConsensusOutputOrigin,
+  targetEntityId: string,
+  canonicalTxs: unknown[],
 ): string =>
   keccakTextHash(
     encodeCanonicalConsensusValue({
       version: 'xln:certified-entity-output:v2',
       origin,
       targetEntityId: targetEntityId.toLowerCase(),
-      entityTxs: canonicalCertifiedEntityTxs(entityTxs),
+      entityTxs: canonicalTxs,
     }),
   );
 
@@ -701,8 +734,11 @@ const verifyCertifiedEntityOutputUnchecked = async (
   }
   const entityTxs = tx.data.entityTxs;
   assertCertifiedEntityOutputAuthorization(origin.sourceEntityId, targetEntityId, entityTxs, observerState);
-  const outputHash = hashCertifiedEntityOutput(origin, targetEntityId, entityTxs);
-  assertCertifiedOutputSemanticIdentity(origin, targetEntityId, entityTxs);
+  // Both hashes walk the same canonicalized tx bodies; canonicalize once.
+  const canonicalTxs = canonicalCertifiedEntityTxs(entityTxs);
+  countOp('certified.hashCertifiedEntityOutput');
+  const outputHash = computeCertifiedEntityOutputHashFromCanonical(origin, targetEntityId, canonicalTxs);
+  assertCertifiedOutputSemanticIdentity(origin, targetEntityId, entityTxs, canonicalTxs);
   try {
     assertCertifiedNestedAccountFrames(entityTxs);
   } catch (error) {

@@ -1578,6 +1578,21 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...(process.env['XLN_RUNTIME_PROCESS_PROFILE']
         ? { XLN_RUNTIME_PROCESS_PROFILE: process.env['XLN_RUNTIME_PROCESS_PROFILE'] }
         : {}),
+      ...(process.env['XLN_RUNTIME_OP_COUNTERS']
+        ? { XLN_RUNTIME_OP_COUNTERS: process.env['XLN_RUNTIME_OP_COUNTERS'] }
+        : {}),
+      ...(process.env['XLN_ENTITY_PROPOSAL_TRACE']
+        ? { XLN_ENTITY_PROPOSAL_TRACE: process.env['XLN_ENTITY_PROPOSAL_TRACE'] }
+        : {}),
+      ...(process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS']
+        ? { XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS: process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS'] }
+        : {}),
+      ...(process.env['XLN_LOG_FORMAT']
+        ? { XLN_LOG_FORMAT: process.env['XLN_LOG_FORMAT'] }
+        : {}),
+      ...(process.env['XLN_ENTITY_STATE_ROOT_PROFILE']
+        ? { XLN_ENTITY_STATE_ROOT_PROFILE: process.env['XLN_ENTITY_STATE_ROOT_PROFILE'] }
+        : {}),
     }),
   });
   child.proc = proc;

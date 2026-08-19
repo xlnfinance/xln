@@ -1,6 +1,5 @@
 import type { AccountFrame, AccountReplica, AccountTx } from '../../../types/account';
 import { HEAVY_LOGS } from '../../../support/debug-flags';
-import { decodeAccountFrame } from '../../validation/frame-validation';
 import { createStructuredLogger } from '../../../support/logger';
 import {
   createFrameHash,
@@ -114,21 +113,12 @@ export const buildProposalFrame = async (
     });
   }
 
-  let frame: AccountFrame;
-  try {
-    frame = decodeAccountFrame(frameData, 'proposeAccountFrame');
-  } catch (error) {
-    accountLog.warn('frame.validation_failed', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return {
-      ok: false,
-      result: proposeAccountFrameRejected(
-        `Frame validation failed: ${(error as Error).message}`,
-        events,
-      ),
-    };
-  }
+  // frameData is assembled in-module from already-decoded mempool txs and a
+  // typed deltas projection; re-decoding it through the adversarial-input
+  // boundary re-validated every transaction a second time (validate at source,
+  // trust at use). The wire-size guard below stays: it is the proposer's own
+  // output budget check.
+  const frame = frameData;
   const frameSize = getCanonicalAccountFrameSizeBytes(frame);
   if (frameSize > MAX_FRAME_SIZE_BYTES) {
     accountLog.warn('frame.too_large', { frameSize, limit: MAX_FRAME_SIZE_BYTES });

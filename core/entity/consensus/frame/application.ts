@@ -234,7 +234,10 @@ const applyNestedEntityTx = async (
   if (tx.type !== 'entityCommand') return { handled: false, state };
 
   const command = assertSignedEntityCommand(context.env, state, tx.data);
-  if (getEntityCommandDisposition(state, command) === 'retry') {
+  if (getEntityCommandDisposition(state, command) !== 'next') {
+    // Exact retries and cancelled slots (not-next nonce) both advance nothing;
+    // a cancelled command's nested txs must not execute against the standing
+    // committed slot.
     return { handled: true, state };
   }
   const applied = await applyEntityTxsInOrder({

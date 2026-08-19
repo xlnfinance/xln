@@ -150,6 +150,16 @@ type BootstrapMetrics = {
 };
 
 const repoRoot = process.cwd();
+const PROFILING_ENV_KEYS = [
+  'XLN_RUNTIME_PROCESS_PROFILE', 'XLN_RUNTIME_APPLY_PROFILE',
+  'XLN_RUNTIME_PROCESS_SLOW_MS', 'XLN_RUNTIME_APPLY_SLOW_MS',
+  'XLN_ENTITY_FRAME_PROFILE', 'XLN_ENTITY_FRAME_SLOW_MS',
+  'XLN_ENTITY_STATE_ROOT_PROFILE', 'XLN_ACCOUNT_STATE_ROOT_PROFILE',
+  'XLN_STORAGE_VERBOSE', 'XLN_RUNTIME_OP_COUNTERS',
+  'XLN_LOG_LEVEL', 'XLN_LOG_SCOPES',
+  'XLN_HUB_LOG_LEVEL', 'XLN_LOAD_LANE_LOG_LEVEL', 'XLN_ENTITY_PROPOSAL_TRACE',
+  'XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS',
+] as const;
 if (process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] !== undefined) {
   throw new Error('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
 }
@@ -1122,6 +1132,17 @@ const main = async (): Promise<void> => {
 
   startManaged('server', 'scripts/operations/start-server.sh', [], {
     ...buildInheritedLocalTestLeaseEnv(localTestLease, repoRoot),
+    // Perf-diagnostics passthrough: explicit allowlist only, so a polluted
+    // parent environment cannot silently change hub behavior between runs.
+    ...PROFILING_ENV_KEYS.reduce<Record<string, string>>((forward, name) => {
+      const value = process.env[name];
+      return value === undefined ? forward : { ...forward, [name]: value };
+    }, {}),
+    // Per-hub engine flags (e.g. XLN_HUB_ENGINE_ARGS_H1="--cpu-prof --cpu-prof-dir=...")
+    // forward the operator's profiler choice to the hub child unchanged.
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => name.startsWith('XLN_HUB_ENGINE_ARGS_')),
+    ),
     XLN_SERVER_PORT: String(apiPort),
     XLN_RDB_ROOT: workDir,
     XLN_DB_PATH: join(workDir, 'prod-main'),
