@@ -493,13 +493,23 @@ const buildEntityProposalEvictingRejected = async (
   throw new Error('ENTITY_PROPOSAL_EVICTION_LOOP_EXHAUSTED');
 };
 
+// The perf snapshot sorts every phase's sample window for percentiles; doing
+// that on each of ~900 frames per minute was ~9% of Hub CPU under profiling.
+// Slow frames always carry it; fast frames at most every few seconds.
+const PERF_SNAPSHOT_MIN_INTERVAL_MS = 5_000;
+let lastPerfSnapshotAtMs = -Infinity;
+
 const logProposalProfile = (
   context: ApplyEntityInputContext,
   frame: EntityFrame,
   profile: ProposalProfile,
 ): void => {
-  const elapsedMs = Math.round(getPerfMs() - profile.startedAt);
-  if (!entityFrameProfileEnabled() && elapsedMs < entityFrameSlowMs()) return;
+  const now = getPerfMs();
+  const elapsedMs = Math.round(now - profile.startedAt);
+  const slow = elapsedMs >= entityFrameSlowMs();
+  if (!entityFrameProfileEnabled() && !slow) return;
+  const withPerf = slow || now - lastPerfSnapshotAtMs >= PERF_SNAPSHOT_MIN_INTERVAL_MS;
+  if (withPerf) lastPerfSnapshotAtMs = now;
   entityLog.info('single_signer.profile', {
     entity: String(context.workingReplica.entityId || '').slice(-8),
     elapsedMs,
@@ -507,7 +517,7 @@ const logProposalProfile = (
     outputs: context.entityOutbox.length,
     jOutputs: context.jOutbox.length,
     phases: cumulativeMarksToPhases(profile.checkpoints, elapsedMs),
-    perf: snapshotPerfPhases(),
+    ...(withPerf ? { perf: snapshotPerfPhases() } : {}),
   });
 };
 
