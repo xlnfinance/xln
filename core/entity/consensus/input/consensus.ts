@@ -6,6 +6,7 @@ import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
  */
 
 import { logError, shortHash } from '../../../support/logger';
+import { nodeProcess } from '../../../support/process/runtime-process';
 import type { EntityInput, EntityReplica } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import { getPerfMs } from '../../../support/time';
@@ -25,6 +26,9 @@ import {
   normalizePrecommitBundles,
 } from '../leader/certificates';
 import { entityLog } from '../entity-log';
+// Perf diagnostics only: explains (input shape, mempool depth) at each proposal
+// so batching regressions are visible from one HLT run's log.
+const ENTITY_PROPOSAL_TRACE = nodeProcess?.env?.['XLN_ENTITY_PROPOSAL_TRACE'] === '1';
 import { ensureLocalJPrefixAttestation } from '../j-prefix/prefix-round';
 import { preauthenticateEntityProposal } from '../proposal/preauthentication';
 import { calculateQuorumPower } from '../replica-validation';
@@ -244,6 +248,20 @@ export const applyEntityInput = async (
     accountWorkOnly,
     checkpoint: checkpointConsensusProfile,
   });
+  if (ENTITY_PROPOSAL_TRACE) {
+    entityLog.info('proposal.trace', {
+      entity: String(workingReplica.entityId || '').slice(-8),
+      height: workingReplica.state.height,
+      mempoolTxs: workingReplica.mempool.length,
+      selectedTxs: proposalSelection.txs.length,
+      inputTxs: entityInput.entityTxs?.length ?? 0,
+      inputLanes: Boolean(entityInput.proposedFrame) || Boolean(entityInput.leaderTimeoutVote)
+        || (entityInput.hashPrecommits?.size ?? 0) > 0,
+      deferred: options.deferProposal === true,
+      accountWorkOnly,
+      singleSigner: proposalSelection.isSingleSigner,
+    });
+  }
   const proposalResult = await advanceEntityProposal(
     phaseContext,
     proposalSelection,

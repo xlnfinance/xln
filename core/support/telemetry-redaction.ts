@@ -1,18 +1,15 @@
 const REDACTED = '[REDACTED]';
 
 const SENSITIVE_KEYS = new Set([
-  'accounttxs',
   'authkey',
   'authorization',
   'bearertoken',
   'ciphertext',
   'encryptedpayload',
-  'entitytxs',
   'finalarguments',
   'hanko',
   'hankodata',
   'initialarguments',
-  'input',
   'mnemonic',
   'privatekey',
   'privkey',
