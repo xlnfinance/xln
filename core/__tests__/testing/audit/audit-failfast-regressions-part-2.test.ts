@@ -230,7 +230,7 @@ import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bo
 
 import { fitCrossAmountsToOrderbook } from '../../../orchestrator/mm-node';
 
-import { cloneAccountReplica } from '../../../account/state/state-clone';
+import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
@@ -765,7 +765,7 @@ describe('audit fail-fast regressions', () => {
       left.entityId,
       right.entityId,
     );
-    const receiver = cloneAccountReplica(proposer);
+    const receiver = forkAccountReplicaShell(proposer);
     receiver.mempool = [];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
@@ -815,7 +815,7 @@ describe('audit fail-fast regressions', () => {
       },
     };
     const proposer = makeProposalAccount([structuredClone(claim)], left.entityId, right.entityId);
-    const receiver = cloneAccountReplica(proposer);
+    const receiver = forkAccountReplicaShell(proposer);
     receiver.mempool = [structuredClone(claim)];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
@@ -951,7 +951,7 @@ describe('audit fail-fast regressions', () => {
       data: { lockId, outcome: 'secret', secret },
     };
     const proposer = makeProposalAccount([resolveTx], left.entityId, right.entityId);
-    const receiver = cloneAccountReplica(proposer);
+    const receiver = forkAccountReplicaShell(proposer);
     receiver.mempool = [];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
     for (const account of [proposer, receiver]) {
@@ -1080,7 +1080,7 @@ describe('audit fail-fast regressions', () => {
       proposal: { frame: invalidFrame, frameHanko },
     };
 
-    const accountResult = await applyAccountInput(createAccountConsensusContext(env), cloneAccountReplica(receiver), accountInput, {
+    const accountResult = await applyAccountInput(createAccountConsensusContext(env), forkAccountReplicaShell(receiver), accountInput, {
       entityTimestamp: env.state.timestamp,
       finalizedJHeight: 0,
     });
@@ -1187,7 +1187,7 @@ describe('audit fail-fast regressions', () => {
     const receiverState = makeEntityState(right.entityId);
     receiverState.config = makeSingleSignerConfigFor(right.signerId);
     receiverState.timestamp = env.state.timestamp;
-    receiverState.accounts.set(left.entityId, cloneAccountReplica(receiver));
+    receiverState.accounts.set(left.entityId, forkAccountReplicaShell(receiver));
     const applied = await applyEntityTx(env, receiverState, {
       type: 'accountInput',
       data: accountInput,
@@ -1566,7 +1566,7 @@ describe('audit fail-fast regressions', () => {
     const delta = createDefaultDelta(1);
     delta.leftCreditLimit = 1_000n;
     proposer.state.deltas.set(1, delta);
-    const receiver = cloneAccountReplica(proposer);
+    const receiver = forkAccountReplicaShell(proposer);
     receiver.proofHeader = { fromEntity: right, toEntity: left, nextProofNonce: 0 };
 
     const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp);
@@ -1597,8 +1597,8 @@ describe('audit fail-fast regressions', () => {
     base.state.deltas.set(1, createDefaultDelta(1));
     const committedEntityTimestamp = 1_777;
 
-    const proposer = await proposeAccountFrame(createAccountConsensusContext(proposerEnv), cloneAccountReplica(base), committedEntityTimestamp);
-    const validator = await proposeAccountFrame(createAccountConsensusContext(validatorEnv), cloneAccountReplica(base), committedEntityTimestamp);
+    const proposer = await proposeAccountFrame(createAccountConsensusContext(proposerEnv), forkAccountReplicaShell(base), committedEntityTimestamp);
+    const validator = await proposeAccountFrame(createAccountConsensusContext(validatorEnv), forkAccountReplicaShell(base), committedEntityTimestamp);
 
     expect(isProposedAccountFrame(proposer)).toBe(true);
     expect(isProposedAccountFrame(validator)).toBe(true);

@@ -6,17 +6,15 @@
 import { ethers } from 'ethers';
 import { readRuntimeEnv } from '../../support/process/runtime-process';
 import { toLowerAddressOrNull } from '../../protocol/crypto/address-cache';
-import { utf8Bytes } from '../../protocol/crypto/keccak-text';
-
 import type { AccountReplica, AccountState, AccountStateDomain } from '../../types/account';
 import type { JurisdictionConfig } from '../../protocol/config/jurisdiction-config';
-import { compareStableText } from '../../protocol/serialization';
 import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../../protocol/state/radix-merkle';
 import { computeIntegrityDigest } from '../../support/integrity-checksum';
 import { assertAccountJClaimAccumulatorState } from '../j-claims/j-claim-accumulator';
 import { createStructuredLogger } from '../../support/logger';
 import { getPerfMs } from '../../support/time';
 import { settlementWorkspaceWithoutHankos } from '../settlement/witness-projection';
+import { encodeAccountStateValue } from './account-state-value';
 import {
   requirePersistentAccountStateMap,
   type AccountStateCollection,
@@ -27,6 +25,7 @@ import {
 const accountRootLog = createStructuredLogger('account.state-root');
 
 export type { AccountStateDomain } from '../../types/account';
+export { encodeAccountStateValue, encodeAccountStateValueOracle } from './account-state-value';
 
 export const EMPTY_ACCOUNT_STATE_ROOT = `0x${'00'.repeat(32)}`;
 
@@ -110,241 +109,12 @@ export const sameAccountStateDomain = (
     canonicalLeft.depositoryAddress === canonicalRight.depositoryAddress;
 };
 
-type RlpNode = string | RlpNode[];
-
-const textNode = (value: string): string => ethers.hexlify(utf8Bytes(value));
-
-const scalarNode = (value: null | boolean | number | bigint | string): RlpNode => {
-  if (value === null) return [textNode('null')];
-  if (typeof value === 'boolean') return [textNode('bool'), value ? '0x01' : '0x00'];
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new Error(`ACCOUNT_STATE_RLP_NON_FINITE_NUMBER:${String(value)}`);
-    return [textNode('number'), textNode(String(value))];
-  }
-  if (typeof value === 'bigint') {
-    const magnitude = value < 0n ? -value : value;
-    return [textNode('bigint'), value < 0n ? '0x01' : '0x00', ethers.toBeHex(magnitude)];
-  }
-  return [textNode('string'), textNode(value)];
-};
-
-const compareBytes = (left: Uint8Array, right: Uint8Array): number => {
-  const limit = Math.min(left.byteLength, right.byteLength);
-  for (let index = 0; index < limit; index += 1) {
-    const difference = Number(left[index]) - Number(right[index]);
-    if (difference !== 0) return difference;
-  }
-  return left.byteLength - right.byteLength;
-};
-
-const rlpLengthBytes = (length: number): Uint8Array => {
-  if (!Number.isSafeInteger(length) || length < 0) {
-    throw new Error(`ACCOUNT_STATE_RLP_LENGTH_INVALID:${String(length)}`);
-  }
-  if (length === 0) return Uint8Array.of(0);
-  const bytes: number[] = [];
-  let remaining = length;
-  while (remaining > 0) {
-    bytes.push(remaining & 0xff);
-    remaining = Math.floor(remaining / 256);
-  }
-  bytes.reverse();
-  return Uint8Array.from(bytes);
-};
-
-const concatBytes = (parts: readonly Uint8Array[], totalLength: number): Uint8Array => {
-  const output = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const part of parts) {
-    output.set(part, offset);
-    offset += part.byteLength;
-  }
-  return output;
-};
-
-const encodeRlpPayload = (payload: Uint8Array, list: boolean): Uint8Array => {
-  if (!list && payload.byteLength === 1 && payload[0]! < 0x80) return payload;
-  const shortBase = list ? 0xc0 : 0x80;
-  const longBase = list ? 0xf7 : 0xb7;
-  if (payload.byteLength <= 55) {
-    return concatBytes([Uint8Array.of(shortBase + payload.byteLength), payload], payload.byteLength + 1);
-  }
-  const lengthBytes = rlpLengthBytes(payload.byteLength);
-  return concatBytes(
-    [Uint8Array.of(longBase + lengthBytes.byteLength), lengthBytes, payload],
-    1 + lengthBytes.byteLength + payload.byteLength,
-  );
-};
-
-/** Byte-identical to ethers.encodeRlp, without its recursive hex/string round trips. */
-const encodeRlpNode = (node: RlpNode): Uint8Array => {
-  if (typeof node === 'string') return encodeRlpPayload(ethers.getBytes(node), false);
-  const children = node.map(encodeRlpNode);
-  const payloadLength = children.reduce((total, child) => total + child.byteLength, 0);
-  return encodeRlpPayload(concatBytes(children, payloadLength), true);
-};
-
-/** RLP list header + children written into one buffer (no payload copy). */
-const encodeRlpList = (children: readonly Uint8Array[]): Uint8Array => {
-  let payloadLength = 0;
-  for (const child of children) payloadLength += child.byteLength;
-  const lengthBytes = payloadLength <= 55 ? null : rlpLengthBytes(payloadLength);
-  const headerLength = lengthBytes ? 1 + lengthBytes.byteLength : 1;
-  const output = new Uint8Array(headerLength + payloadLength);
-  if (lengthBytes) {
-    output[0] = 0xf7 + lengthBytes.byteLength;
-    output.set(lengthBytes, 1);
-  } else {
-    output[0] = 0xc0 + payloadLength;
-  }
-  let offset = headerLength;
-  for (const child of children) {
-    output.set(child, offset);
-    offset += child.byteLength;
-  }
-  return output;
-};
-
-// Type tags and field names repeat in every encoded value; memoize their RLP.
-const TEXT_MEMO_MAX_LENGTH = 64;
-const TEXT_MEMO_MAX = 8192;
-const textMemo = new Map<string, Uint8Array>();
-const encodeText = (value: string): Uint8Array => {
-  if (value.length > TEXT_MEMO_MAX_LENGTH) return encodeRlpPayload(utf8Bytes(value), false);
-  const cached = textMemo.get(value);
-  if (cached) return cached;
-  const encoded = encodeRlpPayload(utf8Bytes(value), false);
-  if (textMemo.size >= TEXT_MEMO_MAX) textMemo.clear();
-  textMemo.set(value, encoded);
-  return encoded;
-};
-
-const bigintMagnitudeBytes = (magnitude: bigint): Uint8Array => {
-  if (magnitude === 0n) return Uint8Array.of(0);
-  const hex = magnitude.toString(16);
-  const padded = hex.length % 2 ? `0${hex}` : hex;
-  const bytes = new Uint8Array(padded.length / 2);
-  for (let index = 0; index < bytes.length; index += 1) {
-    bytes[index] = Number.parseInt(padded.slice(index * 2, index * 2 + 2), 16);
-  }
-  return bytes;
-};
-
-const nodeSortKey = (node: RlpNode): Uint8Array => encodeRlpNode(node);
-
-const canonicalRlpNode = (value: unknown): RlpNode => {
-  if (value === null || ['boolean', 'number', 'bigint', 'string'].includes(typeof value)) {
-    return scalarNode(value as null | boolean | number | bigint | string);
-  }
-  if (Array.isArray(value)) return [textNode('array'), ...value.map(canonicalRlpNode)];
-  if (value instanceof Map) {
-    const entries = Array.from(value.entries()).map(([key, entry]) => {
-      const keyNode = canonicalRlpNode(key);
-      return {
-        node: [keyNode, canonicalRlpNode(entry)] satisfies RlpNode[],
-        sortKey: nodeSortKey(keyNode),
-      };
-    });
-    entries.sort((left, right) => compareBytes(left.sortKey, right.sortKey));
-    return [textNode('map'), ...entries.map(entry => entry.node)];
-  }
-  if (value instanceof Set) {
-    const entries = Array.from(value.values()).map((entry) => {
-      const node = canonicalRlpNode(entry);
-      return { node, sortKey: nodeSortKey(node) };
-    }).sort((left, right) => compareBytes(left.sortKey, right.sortKey));
-    return [textNode('set'), ...entries.map(entry => entry.node)];
-  }
-  if (typeof value === 'object' && value !== null) {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, entry]) => entry !== undefined)
-      .sort(([left], [right]) => compareStableText(left, right))
-      .map(([key, entry]) => [textNode(key), canonicalRlpNode(entry)] satisfies RlpNode[]);
-    return [textNode('object'), ...entries];
-  }
-  throw new Error(`ACCOUNT_STATE_RLP_UNSUPPORTED:${typeof value}`);
-};
-
-/**
- * Byte-identical to encodeRlpNode(canonicalRlpNode(value)), but emits the RLP
- * bottom-up. A cross-j pull contains a complete immutable route; building a
- * second recursive RlpNode graph for every dirty pull doubled allocation and
- * traversal cost on the hub hot path.
- */
-const encodeAccountStateValueDirect = (value: unknown): Uint8Array => {
-  if (value === null) return encodeRlpList([encodeText('null')]);
-  if (typeof value === 'boolean') {
-    return encodeRlpList([encodeText('bool'), encodeRlpPayload(Uint8Array.of(value ? 1 : 0), false)]);
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new Error(`ACCOUNT_STATE_RLP_NON_FINITE_NUMBER:${String(value)}`);
-    return encodeRlpList([encodeText('number'), encodeText(String(value))]);
-  }
-  if (typeof value === 'bigint') {
-    const magnitude = value < 0n ? -value : value;
-    return encodeRlpList([
-      encodeText('bigint'),
-      encodeRlpPayload(Uint8Array.of(value < 0n ? 1 : 0), false),
-      encodeRlpPayload(bigintMagnitudeBytes(magnitude), false),
-    ]);
-  }
-  if (typeof value === 'string') {
-    return encodeRlpList([encodeText('string'), encodeText(value)]);
-  }
-  if (Array.isArray(value)) {
-    return encodeRlpList([encodeText('array'), ...value.map(encodeAccountStateValueDirect)]);
-  }
-  if (value instanceof Map) {
-    const entries = Array.from(value.entries()).map(([key, entry]) => {
-      const encodedKey = encodeAccountStateValueDirect(key);
-      return {
-        encodedKey,
-        encodedEntry: encodeRlpList([encodedKey, encodeAccountStateValueDirect(entry)]),
-      };
-    }).sort((left, right) => compareBytes(left.encodedKey, right.encodedKey));
-    return encodeRlpList([encodeText('map'), ...entries.map(entry => entry.encodedEntry)]);
-  }
-  if (value instanceof Set) {
-    const entries = Array.from(value.values(), encodeAccountStateValueDirect).sort(compareBytes);
-    return encodeRlpList([encodeText('set'), ...entries]);
-  }
-  if (typeof value === 'object' && value !== null) {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, entry]) => entry !== undefined)
-      .sort(([left], [right]) => compareStableText(left, right))
-      .map(([key, entry]) => encodeRlpList([encodeText(key), encodeAccountStateValueDirect(entry)]));
-    return encodeRlpList([encodeText('object'), ...entries]);
-  }
-  throw new Error(`ACCOUNT_STATE_RLP_UNSUPPORTED:${typeof value}`);
-};
-
-export const encodeAccountStateValueOracle = (value: unknown): Uint8Array =>
-  encodeRlpNode(canonicalRlpNode(value));
-
-export const encodeAccountStateValue = (value: unknown): Uint8Array =>
-  encodeAccountStateValueDirect(value);
-
-// Merkle keys derive from a small fixed vocabulary of section/field names, so
-// their digests are memoized instead of re-hashed for every Account leaf.
-const MERKLE_KEY_MEMO_MAX = 4096;
-// One memo per digest algorithm: the same label hashes differently per algorithm.
-const merkleKeyMemos = new WeakMap<(label: string) => string, Map<string, string>>();
-const merkleKey = (label: string, digest: (label: string) => string): string => {
-  let memo = merkleKeyMemos.get(digest);
-  if (!memo) merkleKeyMemos.set(digest, (memo = new Map()));
-  const cached = memo.get(label);
-  if (cached !== undefined) return cached;
-  const value = digest(label);
-  if (memo.size >= MERKLE_KEY_MEMO_MAX) memo.clear();
-  memo.set(label, value);
-  return value;
-};
 const integrityLabelDigest = (label: string): string =>
   computeIntegrityDigest(new TextEncoder().encode(label));
 const keccakLabelDigest = (label: string): string => ethers.keccak256(ethers.toUtf8Bytes(label));
 
 const integrityMerkleKey = (namespace: string, path: string): string =>
-  merkleKey(`xln.${namespace}.${path}`, integrityLabelDigest);
+  integrityLabelDigest(`xln.${namespace}.${path}`);
 
 const stateLeaf = (path: string, value: unknown): { hexKey: string; value: Uint8Array } => ({
   hexKey: integrityMerkleKey('account.state', path),
@@ -358,7 +128,7 @@ export const computeCanonicalMerkleRoot = (
 ): string => buildHexKeyedMerkle(entries.map(([path, value]) => ({
     hexKey: hashAlgorithm === 'integrity'
       ? integrityMerkleKey(namespace, path)
-      : merkleKey(`xln.${namespace}.${path}`, keccakLabelDigest),
+      : keccakLabelDigest(`xln.${namespace}.${path}`),
     value: encodeAccountStateValue(value),
 })), { hashAlgorithm }).root;
 
@@ -486,82 +256,7 @@ export const computeAccountCommitmentSectionDetailCold = (
   account: AccountState,
 ): AccountCommitmentSectionDetail => accountCommitmentSectionDetail(account, true);
 
-/**
- * One Account root is asked for several times per bilateral frame on both
- * sides — transition key, exact-base check, proposal frame, commit check and
- * the Entity leaf (twice) — while the state itself changes once. The memo
- * lives on the AccountState object and is keyed by everything the root reads:
- * the persistent collections by identity (they are immutable and replaced on
- * change) and the bounded scalar sections by their exact leaf bytes. In-place
- * mutation of any root input therefore misses instead of returning a stale
- * root; the memo is never trusted on identity alone.
- */
-type AccountStateRootMemo = {
-  collections: readonly unknown[];
-  scalarBytes: string;
-  root: string;
-};
-const accountStateRootMemos = new WeakMap<AccountState, AccountStateRootMemo>();
-
-const ACCOUNT_ROOT_COLLECTION_FIELDS = [
-  'deltas',
-  'locks',
-  'pulls',
-  'swapOffers',
-  'subcontracts',
-  'lendingIntents',
-  'requestedRebalance',
-  'requestedRebalanceFeeState',
-  'rebalanceFeePolicies',
-] as const satisfies readonly (keyof AccountState)[];
-
-const accountRootCollectionIdentities = (account: AccountState): unknown[] =>
-  ACCOUNT_ROOT_COLLECTION_FIELDS.map(field => account[field]);
-
-/** Every non-collection input of `accountStateRootEntries`, as exact bytes. */
-const accountRootScalarBytes = (account: AccountState): string => {
-  const domain = normalizeAccountStateDomain(account.domain);
-  return bytesToHexText(encodeAccountStateValue({
-    chainId: domain.chainId,
-    depositoryAddress: domain.depositoryAddress,
-    leftEntity: account.leftEntity,
-    rightEntity: account.rightEntity,
-    watchSeed: account.watchSeed,
-    jNonce: account.jNonce,
-    disputeConfig: account.disputeConfig,
-    settlementWorkspace: settlementWorkspaceWithoutHankos(account.settlementWorkspace),
-    lastFinalizedJHeight: account.lastFinalizedJHeight,
-    leftPendingJClaims: account.leftPendingJClaims,
-    rightPendingJClaims: account.rightPendingJClaims,
-  }));
-};
-
-const bytesToHexText = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');
-
-const sameCollections = (left: readonly unknown[], right: readonly unknown[]): boolean => {
-  for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) return false;
-  return true;
-};
-
 export const computeAccountStateRoot = (
-  account: AccountState,
-  timing?: AccountStateRootTiming,
-): string => {
-  if (timing === undefined) {
-    const collections = accountRootCollectionIdentities(account);
-    const scalarBytes = accountRootScalarBytes(account);
-    const memo = accountStateRootMemos.get(account);
-    if (memo && memo.scalarBytes === scalarBytes && sameCollections(memo.collections, collections)) {
-      return memo.root;
-    }
-    const root = computeAccountStateRootUncached(account);
-    accountStateRootMemos.set(account, { collections, scalarBytes, root });
-    return root;
-  }
-  return computeAccountStateRootUncached(account, timing);
-};
-
-const computeAccountStateRootUncached = (
   account: AccountState,
   timing?: AccountStateRootTiming,
 ): string => {

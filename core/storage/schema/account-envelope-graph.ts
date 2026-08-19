@@ -23,6 +23,7 @@ import {
   type StorageValueGraphValue,
 } from '../wal/runtime-machine-graph';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
+import { LIMITS } from '../../config/constants';
 import { iterateKeys } from '../database/level';
 import {
   KEY_LIVE_ACCOUNT_BRANCH,
@@ -36,7 +37,7 @@ import {
 import type { RuntimeDbLike } from '../types';
 
 export const ACCOUNT_ENVELOPE_NAMESPACE_TAG = 0xff;
-export const MAX_ACCOUNT_ENVELOPE_ROW_BYTES = 10_000;
+export const MAX_ACCOUNT_ENVELOPE_ROW_BYTES = LIMITS.MAX_STORAGE_VALUE_BYTES;
 
 export type StorageAccountEnvelopeDescriptor = Readonly<{
   rootHash: string;

@@ -151,7 +151,9 @@ describe('radix overlay', () => {
 
     owner.view.put(key(1, 1), value(1, 'once'));
     expect(hashes).toBe(0);
-    prepareRadixOverlay(owner);
+    const prepared = prepareRadixOverlay(owner);
+    expect(hashes).toBe(0);
+    expect(prepared.hash).toBeDefined();
     expect(hashes).toBe(1);
   });
 
@@ -175,7 +177,7 @@ describe('radix overlay', () => {
     expect(owns).toBe(1);
   });
 
-  test('N overlay mutations do not hash until fold, then only dirty values', () => {
+  test('N overlay mutations do not hash until .hash, then only dirty values', () => {
     let hashes = 0;
     const options = makeOptions(() => { hashes += 1; });
     const first = key(1, 1);
@@ -196,10 +198,13 @@ describe('radix overlay', () => {
     expect(hashes).toBe(afterSeal);
 
     const prepared = prepareRadixOverlay(owner);
+    expect(hashes).toBe(afterSeal);
+    expect(prepared.hash).toBeDefined();
     expect(hashes).toBe(afterSeal + 2);
     expect(prepared.values.hashStats().valueHashes).toBe(2);
     const afterFold = hashes;
-    expect(prepared.values.rootHash()).toBe(prepared.root);
+    expect(prepared.values.rootHash()).toBe(prepared.hash);
+    expect(prepared.root).toBe(prepared.hash);
     expect(hashes).toBe(afterFold);
     expect(base.get(first)).toEqual(value(1, 'a'));
     expect(base.get(second)).toBe(untouched);

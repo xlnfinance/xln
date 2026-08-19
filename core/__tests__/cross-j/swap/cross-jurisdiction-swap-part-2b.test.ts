@@ -56,7 +56,7 @@ import { encodeBoard, generateLazyEntityId, hashBoard } from '../../../entity/fa
 
 import { createDefaultDelta } from '../../../account/state/delta';
 
-import { cloneAccountReplica } from '../../../account/state/state-clone';
+import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
 import { cloneEntityReplica } from '../../../entity/replica/replica-clone';
 
 import { projectAccountDoc, projectEntityCoreDoc } from '../../../storage/read/projections';
@@ -737,7 +737,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(stagedTargetClose.newState.accounts.get(targetUser)!.state.pulls?.has(route.targetPull!.pullId)).toBe(false);
 
     const accountAfterClear = materialized.newState.accounts.get(sourceUser)!;
-    const invalidProposalAccount = cloneAccountReplica(accountAfterClear);
+    const invalidProposalAccount = forkAccountReplicaShell(accountAfterClear);
     const validClose = materialized.accountTxs![0]!.tx;
     if (validClose.type !== 'cross_pull_close') throw new Error('TEST_CROSS_J_CLOSE_REQUIRED');
     const invalidClose: Extract<AccountTx, { type: 'cross_pull_close' }> = {
@@ -1240,7 +1240,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(computeAccountStateRoot(account.state)).toBe(initialRoot);
     expect(account.state.pulls?.has(sourcePull.pullId)).toBe(true);
 
-    const committedAccount = cloneAccountReplica(account);
+    const committedAccount = forkAccountReplicaShell(account);
     const binding = committedAccount.state.pulls!.get(sourcePull.pullId)!.crossJurisdiction!;
     binding.status = 'clearing';
     binding.cumulativeFillRatio = fillRatio;

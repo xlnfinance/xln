@@ -2,7 +2,7 @@ import { LIMITS } from '../../../config/constants';
 import { timePerfPhase } from '../../../support/performance/profile';
 import { utf8ByteLength } from '../../../protocol/crypto/keccak-text';
 import { parseProfile, type DecodedProfile } from '../../profile';
-import { encodeCanonicalConsensusValue, memoizeCanonicalEncoding } from '../../../protocol/serialization/canonical-consensus-value';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { validateHtlcPreparedInfraContext } from '../../htlc/prepared-context-validation';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 import type { EntityRuntimeContext } from '../../runtime-context';
@@ -29,19 +29,11 @@ const exactKeys = (value: unknown, keys: readonly string[], code: string): Recor
   return record;
 };
 
-// Gossip profiles are canonical, identity-stable objects shared by every
-// frame that routes through the same peer; parsing and re-encoding them per
-// entity frame was ~5% of a load lane. Memoized by object identity only.
-const canonicalProfileByObject = new WeakMap<object, DecodedProfile>();
-
 const canonicalProfile = (value: unknown): DecodedProfile => {
-  const cached = value && typeof value === 'object' ? canonicalProfileByObject.get(value) : undefined;
-  if (cached) return cached;
   const parsed = parseProfile(value);
   if (encodeCanonicalConsensusValue(value) !== encodeCanonicalConsensusValue(parsed)) {
     throw new Error(`ENTITY_INFRA_PROFILE_NONCANONICAL:${parsed.entityId}`);
   }
-  if (value && typeof value === 'object') canonicalProfileByObject.set(value, parsed);
   return parsed;
 };
 
@@ -57,18 +49,8 @@ export type DecodedEntityInfraContext = EntityInfraContext & Readonly<{
   }>>;
 }>;
 
-// A validated context is immutable data (its HTLC section is a fresh clone,
-// its profiles canonical objects). The same object is re-validated by the
-// wire-budget fit, the proposer's own frame check, apply, and the WAL row
-// builder — each pass re-parsed ~1300 HTLC entries and re-encoded several MB
-// on a Hub frame. Contexts this parser produced pass through by identity.
-const validatedContexts = new WeakSet<object>();
-
 /** One strict parser shared by network frame, deterministic apply, and WAL boundaries. */
 export const validateEntityInfraContext = (value: unknown): DecodedEntityInfraContext => {
-  if (typeof value === 'object' && value !== null && validatedContexts.has(value)) {
-    return value as DecodedEntityInfraContext;
-  }
   const raw = exactKeys(value, [
     'version', 'proposerReplicaId', 'entityId', 'proposerSignerId', 'parentFrameHash',
     'height', 'gossipProfiles', 'peerAssertions', 'htlc',
@@ -138,14 +120,10 @@ export const validateEntityInfraContext = (value: unknown): DecodedEntityInfraCo
     version: 1, proposerReplicaId, entityId, proposerSignerId, parentFrameHash,
     height: entityHeight, gossipProfiles, peerAssertions, htlc,
   };
-  // The byte-limit encode below is the first of several encodes of this exact
-  // object (wire fit, frame hash, total-byte assert, storage rows); keep it.
-  memoizeCanonicalEncoding(context);
   const bytes = timePerfPhase('entity.infraValidate.encode', () => utf8ByteLength(encodeCanonicalConsensusValue(context)));
   if (bytes > LIMITS.MAX_FRAME_SIZE_BYTES) {
     throw new Error(`ENTITY_INFRA_CONTEXT_BYTE_LIMIT_EXCEEDED:${bytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}`);
   }
-  validatedContexts.add(context);
   return context;
 };
 

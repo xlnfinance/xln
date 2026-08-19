@@ -28,8 +28,10 @@ import {
 } from '../../../storage/wal/snapshot';
 import { applyJEventRange } from '../../helpers/j-history';
 import { createEntityFrameCandidateState } from '../../../entity/state-clone';
-import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
-import { EntityAccountCandidateMap } from '../../../entity/state/persistent-account-map';
+import {
+  EntityAccountCandidateMap,
+  PersistentEntityAccountMap,
+} from '../../../entity/state/persistent-account-map';
 import {
   COUNTERPARTY_BOARD_RESEAL_DEADLINE_MS,
   counterpartyBoardResealDeadlineHookId,
@@ -139,14 +141,14 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   expect(restored.counterpartyBoardReseal).toEqual(account.counterpartyBoardReseal);
   expect(restored.counterpartyFrameHanko).toBe(frameHanko);
 
-  const beforeExactRetry = structuredClone(account);
+  const beforeExactRetry = projectAccountDoc(account);
   expect((await applyAccountInput(
     createAccountConsensusContext(env),
     account,
     structuredClone(input),
     certifiedResealContext(env, sourceEntityId, 19, 2),
   )).ok).toBe(true);
-  expect(account).toEqual(beforeExactRetry);
+  expect(projectAccountDoc(account)).toEqual(beforeExactRetry);
 
   const sameBlockSuccessor = structuredClone(input);
   sameBlockSuccessor.reseal.boardActivationLogIndex = 3;
@@ -159,7 +161,7 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   expect(successorRejected.ok).toBe(false);
   expect(accountInputFailureMessage(successorRejected)).toContain('ACCOUNT_BOARD_RESEAL_ACTIVATION_MISMATCH');
 
-  const beforeRejected = structuredClone(account);
+  const beforeRejected = projectAccountDoc(account);
   const tampered = structuredClone(input);
   tampered.reseal.boardActivationJHeight = Number.MAX_SAFE_INTEGER;
   tampered.reseal.boardActivationLogIndex = Number.MAX_SAFE_INTEGER;
@@ -171,7 +173,7 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   );
   expect(rejected.ok).toBe(false);
   expect(accountInputFailureMessage(rejected)).toContain('ACCOUNT_BOARD_RESEAL_ACTIVATION_MISMATCH');
-  expect(account).toEqual(beforeRejected);
+  expect(projectAccountDoc(account)).toEqual(beforeRejected);
 });
 
 test('ACK commit retains the counterparty Hanko needed for later board reseal', async () => {

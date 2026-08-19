@@ -5,14 +5,15 @@ import { clearFinalizedSettlementWorkspace } from '../settlement/transition';
 import { buildAccountProofBody } from '../../../../protocol/dispute/proof-builder';
 import { createSettlementDeltaValue } from '../../../settlement/settlement-projection';
 import { commitDeltaDraft } from '../../delta-utils';
+import { assertAccountDeltaCapacity } from '../../../state/delta';
 import { assertSettlementTokenId } from '../../../../protocol/settlement/operations';
 import {
   accountTransitionView,
   beginAccountTransition,
   countAccountTransitionNodeChanges,
-  commitAccountTransition,
   createAccountTransitionKey,
   discardAccountTransition,
+  publishAccountTransition,
 } from '../../../state/candidate-overlay';
 import { createStructuredLogger } from '../../../../support/logger';
 
@@ -45,6 +46,9 @@ const applyAccountSettledEvent = (account: AccountDraftReplica, event: Jurisdict
   if (event.type !== 'AccountSettled') return;
   const { tokenId, collateral, ondelta } = event.data;
   const tokenIdNum = assertSettlementTokenId(tokenId, 'AccountSettled');
+  if (!account.state.deltas.has(tokenIdNum)) {
+    assertAccountDeltaCapacity(account.state.deltas.size + 1, 'insert');
+  }
   const delta = createSettlementDeltaValue(account, tokenIdNum);
   const previousCollateral = delta.collateral;
   delta.collateral = BigInt(collateral);
@@ -149,16 +153,6 @@ const activatePostSettlementProof = (
   clearFinalizedSettlementWorkspace(account);
 };
 
-const installCommittedAccount = (
-  target: AccountReplica,
-  committed: AccountReplica,
-): void => {
-  // The prepared replica owns a replacement state shell. Assigning it replaces
-  // the old state object wholesale, so nested optional fields absent from the
-  // committed state disappear without a second delete pass.
-  Object.assign(target, committed);
-};
-
 const collectSettledEvents = (
   account: AccountReplica,
   events: readonly JurisdictionEvent[],
@@ -240,12 +234,11 @@ export const applyFinalizedAccountJEvents = (
       collected.finalizedNonce,
       deltaTransformerAddress,
     );
-    const committed = commitAccountTransition(overlay);
+    const committed = publishAccountTransition(account, overlay);
     jEventFinalityLog.debug('finality.overlay_committed', {
       changedPatriciaNodes: countAccountTransitionNodeChanges(committed.nodeChanges),
       jNonce: collected.finalizedNonce,
     });
-    installCommittedAccount(account, committed.account);
   } catch (error) {
     if (overlay.lifecycle.status === 'active') discardAccountTransition(overlay);
     throw error;

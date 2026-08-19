@@ -20,10 +20,10 @@ const toHexDigest = (digest: Uint8Array): string => {
 };
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
-const isWellFormed = (text: string): boolean =>
-  typeof (text as { isWellFormed?: () => boolean }).isWellFormed === 'function'
-    ? (text as unknown as { isWellFormed: () => boolean }).isWellFormed()
-    : !LONE_SURROGATE.test(text);
+const isWellFormed = (text: string): boolean => {
+  const wellFormed = (text as { isWellFormed?: () => boolean }).isWellFormed;
+  return typeof wellFormed === 'function' ? wellFormed.call(text) : !LONE_SURROGATE.test(text);
+};
 
 /**
  * UTF-8 bytes of `text`, byte-identical to `ethers.toUtf8Bytes` (which walks

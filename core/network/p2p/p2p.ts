@@ -357,8 +357,6 @@ export class RuntimeP2P {
   private gossipSet: P2PGossipSet;
   private profileHeartbeatMs: number;
   private lastAnnouncedProfiles = new Map<string, { topologyKey: string; at: number }>();
-  /** Relay receipt cursor per relay connection (exact incremental polling). */
-  private gossipCursors = new WeakMap<RuntimeWsClient, number>();
   private onEntityInputs: (
     from: string,
     envelope: RuntimeEntityInputsEnvelope,
@@ -995,7 +993,7 @@ export class RuntimeP2P {
   private requestSeedGossip(mode: GossipRefreshMode = 'incremental') {
     const client = this.getActiveClient();
     if (!client) return;
-    const cursor = mode === 'incremental' ? this.gossipCursors.get(client) : undefined;
+    const cursor = mode === 'incremental' ? client.gossipCursor : undefined;
     const updatedSince = mode === 'incremental' && cursor === undefined ? this.getLatestKnownRemoteProfileTimestamp() : 0;
     const request: GossipProfileBatchRequest = {
       set: this.gossipSet,
@@ -1527,7 +1525,7 @@ export class RuntimeP2P {
 
   private handleGossipResponse(from: string, payload: unknown, client?: RuntimeWsClient) {
     const decoded = decodeGossipPayload(payload);
-    if (decoded.cursor !== undefined && client) this.gossipCursors.set(client, decoded.cursor);
+    if (decoded.cursor !== undefined && client) client.gossipCursor = decoded.cursor;
     this.applyIncomingJurisdictions(from, decoded.jurisdictions);
     this.applyIncomingProfiles(from, decoded.profiles).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });

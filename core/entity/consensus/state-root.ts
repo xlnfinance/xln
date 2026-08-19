@@ -557,8 +557,6 @@ export const invalidateEntityAccountCommitment = (state: EntityState, counterpar
   }
 };
 
-export const forkEntityAccountCommitmentCache = (_source: EntityState, _target: EntityState): void => {};
-
 const encodeEntityAccountsSection = (state: EntityState, _cold: boolean): string => {
   return encodeCanonicalConsensusValue({
     domain: 'xln.entity.accounts.radix-merkle.v2',
@@ -601,53 +599,11 @@ const computeEntityRootFromSections = (sections: readonly EntitySectionCommitmen
     }),
   );
 
-/**
- * Same EntityState object is hashed many times per Runtime frame (propose,
- * lineage, storage checkpoint). The memo hits only when every root field still
- * has the same reference (or Account radix root). Replacing `profile` or
- * writing an Account leaf misses; in-place `map.set` after a hash remains a
- * caller bug, same as a stale Patricia node.hash.
- */
-type EntityStateRootMemo = {
-  shell: readonly unknown[];
-  hash: string;
-};
-const entityStateRootMemo = new WeakMap<EntityState, EntityStateRootMemo>();
-
-const entityStateRootShell = (state: EntityState): unknown[] =>
-  ENTITY_STATE_ROOT_FIELDS.map(field =>
-    field === 'accounts' ? state.accounts.rootHash() : state[field],
-  );
-
-const sameEntityStateRootShell = (left: readonly unknown[], right: readonly unknown[]): boolean => {
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
-};
-
-/**
- * Sealing a frame candidate is content-preserving, so the committed State
- * hashes to the root its candidate produced. Priming the memo spares lineage
- * and storage from re-encoding the whole State after every commit; the shell
- * comparison still rejects the memo the moment any root field changes.
- */
-export const primeEntityStateRootMemo = (state: EntityState, hash: string): void => {
-  if (readRuntimeEnv('XLN_ENTITY_STATE_ROOT_AUDIT') === '1') return;
-  entityStateRootMemo.set(state, { shell: entityStateRootShell(state), hash });
-};
-
 export const computeCanonicalEntityConsensusStateHash = (state: EntityState): string => {
   // Opt-in only: the audit recomputes the cold root and the byte breakdown
   // re-encodes the whole projection; either would distort a frame-level
   // process profile that enabled it implicitly.
   const audit = readRuntimeEnv('XLN_ENTITY_STATE_ROOT_AUDIT') === '1';
-  const shell = entityStateRootShell(state);
-  if (!audit) {
-    const cached = entityStateRootMemo.get(state);
-    if (cached && sameEntityStateRootShell(cached.shell, shell)) return cached.hash;
-  }
   const profile = readRuntimeEnv('XLN_ENTITY_STATE_ROOT_PROFILE') === '1';
   const startedAt = getPerfMs();
   const projected = projectEntityConsensusState(state, false);
@@ -660,7 +616,6 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
     const cold = computeCanonicalEntityConsensusStateHashCold(state);
     if (root !== cold) throw new Error(`ENTITY_STATE_ROOT_CACHE_MISMATCH:incremental=${root}:cold=${cold}`);
   }
-  entityStateRootMemo.set(state, { shell, hash: root });
   if (!profile) return root;
   const profileProjected = projectEntityConsensusState(state);
   const topLevelBytes = Object.entries(profileProjected)

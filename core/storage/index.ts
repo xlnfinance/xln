@@ -1176,13 +1176,6 @@ type PreparedStorageFrameSave = Exclude<
   { skipped: StorageFrameSaveResult }
 >;
 
-/**
- * The single writer just committed the previous frame; its hash is the only
- * thing the next append needs from it. Skip re-reading and decoding the whole
- * frame record from the WAL when the in-process memo still matches HEAD.
- */
-const lastPersistedFrameByWal = new WeakMap<RuntimeDbLike, { height: number; frameHash: string }>();
-
 const FRAME_ENCODE_SUBSTAGE_PROFILE =
   typeof process !== 'undefined' && process.env?.['XLN_STORAGE_FRAME_ENCODE_PROFILE'] === '1';
 
@@ -1211,10 +1204,6 @@ const resolveStorageAppendPosition = async (
       `STORAGE_APPEND_INVARIANT_FAILED: refusing to write frame ` +
       `${options.env.state.height} after persisted head ${head.latestHeight}`,
     );
-  }
-  const memo = lastPersistedFrameByWal.get(walDb);
-  if (memo && head.latestHeight > 0 && memo.height === head.latestHeight) {
-    return { previousFrame: null, prevFrameHash: memo.frameHash };
   }
   const previous =
     head.latestHeight > 0
@@ -1905,7 +1894,6 @@ const commitStorageFrame = async (
   // This synced WAL batch is the only frame commit point. Everything before it
   // is discardable planning; everything after it must recover forward.
   await writeBatch(batches.walBatch, { sync: true });
-  lastPersistedFrameByWal.set(prepared.walDb, { height: options.env.state.height, frameHash: frame.frameHash });
   const authoritativeWriteMs = options.getPerfMs() - prepareStartedAt;
   options.onPersistenceProgress?.('authoritative-write-done');
   await options.onPersistenceBoundary?.('after-authoritative-history-commit');

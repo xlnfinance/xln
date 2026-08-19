@@ -118,19 +118,8 @@ const manifestValue = (
   return value;
 };
 
-/**
- * Account docs are immutable rows; the previous frame's cached doc is the very
- * object diffed against on the next write. Memoizing its envelope graph turns
- * the per-write diff from two full trie builds into one.
- */
-const envelopeGraphByDoc = new WeakMap<StorageAccountDoc, ReturnType<typeof projectAccountEnvelopeGraph>>();
-const accountEnvelopeGraph = (doc: StorageAccountDoc): ReturnType<typeof projectAccountEnvelopeGraph> => {
-  const cached = envelopeGraphByDoc.get(doc);
-  if (cached) return cached;
-  const built = projectAccountEnvelopeGraph(accountEnvelopeValue(doc));
-  envelopeGraphByDoc.set(doc, built);
-  return built;
-};
+const accountEnvelopeGraph = (doc: StorageAccountDoc): ReturnType<typeof projectAccountEnvelopeGraph> =>
+  projectAccountEnvelopeGraph(accountEnvelopeValue(doc));
 
 /** Bounded Account root record used by storage hashing and physical writes. */
 export const projectAccountStorageRootValue = (doc: StorageAccountDoc): Buffer =>

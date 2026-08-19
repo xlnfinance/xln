@@ -59,7 +59,6 @@ import {
   requirePersistentAccountStateMap,
 } from '../../../account/state/persistent-state-map';
 
-import { cloneAccountReplica } from '../../../account/state/state-clone';
 import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
 import {
   applyCertifiedEntityLineagePlan,
@@ -202,9 +201,8 @@ import {
 import { applyJEventRange, buildJEventRangeData } from '../../helpers/j-history';
 
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
-import type { Profile } from '../../../entity/profile';
+import { canonicalizeProfile, type Profile } from '../../../entity/profile';
 import { computeProfileHash, computeProfileRouteHash, verifyProfileSignature } from '../../../entity/profile/profile-signing';
-import { canonicalizeProfile } from '../../../entity/profile';
 import { buildSingleSignerHanko } from '../../../hanko/batch';
 import { getSignerPrivateKey, signDigest } from '../../../account/crypto';
 

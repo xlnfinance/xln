@@ -2,7 +2,6 @@ import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 
 import type { AccountReplica, AccountTx } from '../../../types/account';
 import { prependUniqueMempoolTxs } from '../helpers';
-import { discardPendingProposalReplica } from '../../state/pending-proposal-replica';
 import { createStructuredLogger } from '../../../support/logger';
 
 const disputePolicyLog = createStructuredLogger('account.dispute-policy');
@@ -69,7 +68,6 @@ export const freezeAccountForDispute = (
   // the last signed ProofBody; late proposal/ACK traffic is rejected at ingress.
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  discardPendingProposalReplica(account);
   account.rollbackCount = 0;
   delete account.lastRollbackFrameHash;
 };

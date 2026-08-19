@@ -712,30 +712,14 @@ const canonicalizeProfileAccounts = (
   tokenCapacities: parseProfileTokenCapacities(account.tokenCapacities, entityId, account.counterpartyId),
 }));
 
-/**
- * One announce or verification canonicalizes the same profile several times,
- * each with a full canonical encode for the byte limit. Canonical outputs are
- * fresh objects nobody mutates, so re-canonicalizing one is the identity.
- * Inputs are not memoized: callers legitimately mutate a freshly built local
- * profile (e.g. attach its Hanko) between two canonicalizations.
- */
-const canonicalProfileOutputs = new WeakSet<Profile>();
-
 export const canonicalizeProfile = (
   profile: Profile,
   _options: { existing?: Profile | null; now?: number } = {},
-): Profile => {
-  if (canonicalProfileOutputs.has(profile)) {
-    observePerfCount('profile.canonicalize.hit');
-    return profile;
-  }
-  return timePerfPhase('profile.canonicalize.miss', () => {
-    observePerfCount('profile.canonicalize.miss');
-    const canonical = canonicalizeProfileUncached(profile);
-    canonicalProfileOutputs.add(canonical);
-    return canonical;
+): Profile =>
+  timePerfPhase('profile.canonicalize', () => {
+    observePerfCount('profile.canonicalize');
+    return canonicalizeProfileUncached(profile);
   });
-};
 
 const canonicalizeProfileUncached = (profile: Profile): Profile => {
   const entityId = profile.entityId.trim();

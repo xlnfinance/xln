@@ -60,10 +60,11 @@ class AccountCollectionOverlay<K extends AccountStateMapKey, V>
 
   prepare(): PreparedAccountCollection<K, V> {
     const prepared = prepareRadixOverlay(this.#radixOwner);
+    const values = PersistentAccountStateMap.fromRadixValues(this.#namespace, prepared.values);
     return Object.freeze({
       namespace: this.#namespace,
-      values: PersistentAccountStateMap.fromRadixValues(this.#namespace, prepared.values),
-      nodeChanges: prepared.nodeChanges,
+      values,
+      get nodeChanges() { return prepared.nodeChanges; },
     });
   }
 

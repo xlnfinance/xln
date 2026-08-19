@@ -176,10 +176,12 @@ describe('PersistentEntityAccountMap', () => {
 
     const asc = ascending.sealCandidate();
     expect(asc.size).toBe(total);
+    expect(hashes).toBe(0);
+    const ascRoot = asc.hash;
     expect(hashes).toBe(total);
     const desc = descending.sealCandidate();
     expect(desc.size).toBe(total);
-    expect(desc.rootHash()).toBe(asc.rootHash());
+    expect(desc.hash).toBe(ascRoot);
     expect(hashes).toBe(total * 2);
     expect(base.size).toBe(0);
   });

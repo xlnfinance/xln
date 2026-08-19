@@ -34,7 +34,10 @@ import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 
 import { buildHashLadderProof, revealHashLadder } from '../../../protocol/htlc/hash-ladder';
 
-import type { MultiRecipientCiphertext } from '../../../protocol/htlc/multi-recipient';
+import {
+  encryptBytesForValidatorManifest,
+  type MultiRecipientCiphertext,
+} from '../../../protocol/htlc/multi-recipient';
 
 import { checkAutoRebalance, handleRequestCollateral } from '../../../account/tx/handlers/rebalance/request-collateral';
 
@@ -225,8 +228,6 @@ import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
 
 import { computeHtlcEnvelopeContextHash, computeHtlcSecretOfferContextHash } from '../../../protocol/htlc/codec/envelope';
 
-import { encryptBytesForValidatorManifest } from '../../../protocol/htlc/multi-recipient';
-
 import { buildHtlcOnionAdvanceTx } from '../../../entity/htlc/onion-advance';
 import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/codec/onion-layer';
 
@@ -236,8 +237,6 @@ import { encodeHtlcSecretOffer, encodeOnionLayer } from '../../../protocol/htlc/
 import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bootstrap-fail-fast';
 
 import { fitCrossAmountsToOrderbook } from '../../../orchestrator/mm-node';
-
-import { cloneAccountReplica } from '../../../account/state/state-clone';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,

@@ -15,7 +15,6 @@ import type {
   ProposalTransactionEffects,
 } from './transactions';
 import { hasLocalCertifiedDisputeProof } from '../dispute/proof-views';
-import { stashPendingProposalReplica } from '../../state/pending-proposal-replica';
 
 type DisputeSeal = NonNullable<
   Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>['proposal']['disputeSeal']
@@ -106,7 +105,6 @@ export const finalizeAccountProposal = (
   // Late mempool arrivals survive because removal is by exact transaction
   // multiplicity, never by the proposal window's old array position.
   account.pendingFrame = frame;
-  stashPendingProposalReplica(account, candidate);
   account.mempool = removeCommittedTxsFromMempool(
     account.mempool,
     [...txsToRemove, ...validMempoolTxs],

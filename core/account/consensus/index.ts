@@ -3,8 +3,15 @@
  * off-chain account, then bubble committed effects back to the entity runtime.
  */
 
-import type { AccountReplica, AccountDisputeSeal, AccountFrame, AccountInput, AccountPeerInput, Delta } from '../../types/account';
-import type { AccountOutput } from '../../types/account';
+import type {
+  AccountReplica,
+  AccountDisputeSeal,
+  AccountFrame,
+  AccountInput,
+  AccountOutput,
+  AccountPeerInput,
+  Delta,
+} from '../../types/account';
 import type { AccountConsensusContext } from './context';
 import { cloneAccountFrame } from '../state/state-clone';
 import {
@@ -17,6 +24,7 @@ import {
   commitAccountTransition,
   createAccountTransitionKey,
   discardAccountTransition,
+  publishAccountOverlay,
 } from '../state/candidate-overlay';
 import { getAccountPerspective } from '../state/perspective';
 import { HEAVY_LOGS } from '../../support/debug-flags';
@@ -25,7 +33,7 @@ import type { AccountDraftReplica } from '../state/account-state-draft';
 import type { AccountTxRejection, ApplyAccountTxOk } from '../tx/apply-types';
 import { accountTxFailureMessage, assertNever } from '../tx/apply-result';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
-import { assertAccountFrameHash } from './frame/hash';
+import { computeFrameHash, isWithinAccountFrameBounds, assertAccountFrameHash } from './frame/hash';
 import {
   assertNoUnilateralSettlementMutation,
   buildAccountProofBodyFromJurisdictions,
@@ -101,8 +109,6 @@ const accountLog = createStructuredLogger('account');
 
 export { getIncomingAccountDeadlineViolation, HTLC_ENFORCEMENT_RESERVE_MS, isHtlcSecretEnforcementWindowClosed };
 export type { AccountInputSecurityContext };
-
-export { computeFrameHash, isWithinAccountFrameBounds } from './frame/hash';
 
 // Counter-based replay protection was intentionally replaced by the frame chain
 // (height + prevFrameHash). Nonces remain only for on-chain proof material.
@@ -472,13 +478,10 @@ async function commitIncomingFrameOnRealState(
     });
   }
 
-  // The ordinary receiver path has no mutation between validation and this
-  // commit. Install the prepared persistent Account value once; replaying the
-  // same txs here doubled handler work and rebuilt every touched Patricia path.
-  // Same-height rollback remains a distinct path because it changes the
-  // Account envelope before the incoming txs must execute.
+  // Ordinary receiver: overlay already prepared during validate. Fold into live.
+  // Collision rollback mutates the envelope first, then overlays the incoming txs.
   if (installValidatedTransition) {
-    Object.assign(account, validation.clonedMachine);
+    publishAccountOverlay(account, validation.clonedMachine);
     timedOutHashlocks.push(...validation.timedOutHashlocks);
     candidateEffects.push(...validation.candidateEffects);
     if (validation.accountJClaimNodeChanges) {

@@ -265,6 +265,10 @@ export class PersistentEntityAccountMap implements ReadonlyMap<string, AccountRe
     return this.#values.rootHash();
   }
 
+  get hash(): string {
+    return this.rootHash();
+  }
+
   get size(): number {
     return this.#values.size;
   }
@@ -441,11 +445,9 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
   }
 
   sealCandidate(): PersistentEntityAccountMap {
-    // A projection taken after the last write already holds these exact
-    // Account bytes (bounded forks sharing the Patricia collections) and their
-    // leaf hashes; committing it keeps hashed and committed content identical.
+    // Fold dirty Account shells into the Patricia base. Hash stays lazy until
+    // `.hash` / `rootHash()` is read at the Entity state-root boundary.
     const committed = this.#projection ?? this.#project(true);
-    committed.rootHash();
     this.#active = false;
     candidateLog.debug('candidate.sealed', {
       base: this.#base.size,
@@ -453,6 +455,10 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
       deleted: this.#deleted.size,
     });
     return committed;
+  }
+
+  get hash(): string {
+    return this.rootHash();
   }
 
   dirtyKeys(): ReadonlySet<string> {

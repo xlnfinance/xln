@@ -524,6 +524,11 @@ export class PersistentRadixValueMap<K, V> implements ReadonlyMap<K, V> {
       : new PersistentRadixValueMap(null, 0, this.#options);
   }
 
+  /** Overlay-facing alias: mutations never hash; first read seals dirty nodes. */
+  get hash(): string {
+    return this.rootHash();
+  }
+
   rootHash(): string {
     if (this.#options.commitment === false) {
       throw new Error('PERSISTENT_RADIX_COMMITMENT_DISABLED');

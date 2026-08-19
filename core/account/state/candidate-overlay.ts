@@ -16,6 +16,7 @@ import {
   type StateHash,
 } from '../../protocol/hashes';
 import { computeAccountStateRoot } from '../commitment/state-root';
+import { createStructuredLogger } from '../../support/logger';
 import {
   beginAccountStateDraft,
   discardAccountStateDraft,
@@ -35,6 +36,7 @@ export type AccountTransitionKey = Readonly<{
 export type AccountTransitionCommit = Readonly<{
   account: AccountReplica;
   accountStateRoot: StateHash;
+  hash: StateHash;
   cacheKey: EvidenceHash;
   nodeChanges: AccountStateDraftNodeChanges;
 }>;
@@ -128,6 +130,8 @@ const requireExactBase = (base: AccountReplica, key: AccountTransitionKey): void
   }
 };
 
+const overlayLog = createStructuredLogger('account.overlay');
+
 export const beginAccountTransition = (
   base: AccountReplica,
   key: AccountTransitionKey,
@@ -147,14 +151,71 @@ export const commitAccountTransition = (
   requireActive(overlay);
   const prepared = prepareAccountStateDraft(overlay.stateDraft, overlay.stateDraft.draft);
   const account = prepared.account;
-  const accountStateRoot = toStateHash(computeAccountStateRoot(account.state));
   overlay.lifecycle.status = 'committed';
+  overlayLog.debug('overlay.prepared', {
+    from: account.proofHeader.fromEntity.slice(-8),
+    to: account.proofHeader.toEntity.slice(-8),
+  });
   return {
     account,
-    accountStateRoot,
     cacheKey: overlay.cacheKey,
-    nodeChanges: prepared.nodeChanges,
+    get accountStateRoot() { return toStateHash(computeAccountStateRoot(account.state)); },
+    get hash() { return this.accountStateRoot; },
+    get nodeChanges() { return prepared.nodeChanges; },
   };
+};
+
+/**
+ * Bilateral money, proofs, and dispute lifecycle fold into `live`.
+ * Frame coordination stays on the live replica until ACK/accept installs it.
+ */
+const ACCOUNT_LIVE_ENVELOPE = new Set<keyof AccountReplica>([
+  'mempool',
+  'currentFrame',
+  'currentHeight',
+  'pendingFrame',
+  'pendingSignatures',
+  'pendingAccountInput',
+  'lastOutboundFrameAck',
+  'currentFrameHanko',
+  'counterpartyFrameHanko',
+  'rollbackCount',
+  'lastRollbackFrameHash',
+  'boardResealMigration',
+  'counterpartyBoardReseal',
+]);
+
+export const publishAccountOverlay = (
+  live: AccountReplica,
+  prepared: AccountReplica,
+): AccountReplica => {
+  const keys = new Set<keyof AccountReplica>([
+    ...(Object.keys(live) as (keyof AccountReplica)[]),
+    ...(Object.keys(prepared) as (keyof AccountReplica)[]),
+  ]);
+  for (const key of keys) {
+    if (ACCOUNT_LIVE_ENVELOPE.has(key)) continue;
+    const value = prepared[key];
+    if (value === undefined) delete live[key];
+    else (live as Record<string, unknown>)[key] = value;
+  }
+  overlayLog.debug('overlay.folded', {
+    from: live.proofHeader.fromEntity.slice(-8),
+    to: live.proofHeader.toEntity.slice(-8),
+    height: live.currentHeight,
+    pending: Boolean(live.pendingFrame),
+  });
+  return live;
+};
+
+/** Consume the overlay and fold it into `live`. Proposal hashing must not call this. */
+export const publishAccountTransition = (
+  live: AccountReplica,
+  overlay: AccountTransitionOverlay,
+): AccountTransitionCommit => {
+  const committed = commitAccountTransition(overlay);
+  publishAccountOverlay(live, committed.account);
+  return { ...committed, account: live };
 };
 
 export const discardAccountTransition = (overlay: AccountTransitionOverlay): void => {

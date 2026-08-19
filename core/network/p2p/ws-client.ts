@@ -215,6 +215,7 @@ export class RuntimeWsClient {
   private readonly encryptionPubKeyHex: string | null;
   private readonly maxReconnectAttempts: number;
   private readonly pendingRecoveryBundleRequests = new Map<string, PendingRecoveryBundleRequest>();
+  gossipCursor: number | undefined = undefined;
 
   constructor(options: RuntimeWsClientOptions) {
     failfastAssert(!!options.url, 'WS_INIT_URL_MISSING', 'RuntimeWsClient url is required');

@@ -236,19 +236,21 @@ export const prepareAccountStateDraft = (
         },
       },
     },
-    nodeChanges: {
-      deltas: deltas.nodeChanges,
-      locks: locks.nodeChanges,
-      swapOffers: swapOffers.nodeChanges,
-      pulls: pulls.nodeChanges,
-      subcontracts: subcontracts.nodeChanges,
-      lendingIntents: lendingIntents.nodeChanges,
-      requestedRebalance: requestedRebalance.nodeChanges,
-      requestedRebalanceFeeState: requestedRebalanceFeeState.nodeChanges,
-      rebalanceFeePolicies: rebalanceFeePolicies.nodeChanges,
-      pendingWithdrawals: pendingWithdrawals.nodeChanges,
-      rebalanceShadowPolicy: rebalanceShadowPolicy.nodeChanges,
-      rebalanceShadowSubmitted: rebalanceShadowSubmitted.nodeChanges,
+    get nodeChanges(): AccountStateDraftNodeChanges {
+      return Object.freeze({
+        deltas: deltas.nodeChanges,
+        locks: locks.nodeChanges,
+        swapOffers: swapOffers.nodeChanges,
+        pulls: pulls.nodeChanges,
+        subcontracts: subcontracts.nodeChanges,
+        lendingIntents: lendingIntents.nodeChanges,
+        requestedRebalance: requestedRebalance.nodeChanges,
+        requestedRebalanceFeeState: requestedRebalanceFeeState.nodeChanges,
+        rebalanceFeePolicies: rebalanceFeePolicies.nodeChanges,
+        pendingWithdrawals: pendingWithdrawals.nodeChanges,
+        rebalanceShadowPolicy: rebalanceShadowPolicy.nodeChanges,
+        rebalanceShadowSubmitted: rebalanceShadowSubmitted.nodeChanges,
+      });
     },
   });
 };

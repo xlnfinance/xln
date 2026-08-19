@@ -51,8 +51,7 @@ type RuntimeLoopProcessDeps = Pick<
   | 'ensureRuntimeConfig'
   | 'enqueueRuntimeInputs'
   | 'enqueueRuntimeContinuation'
-  | 'collectAccountMempoolWakeInputs'
-  | 'collectEntityMempoolWakeInputs'
+  | 'collectReplicaMempoolWakeInputs'
   | 'generateHookPings'
   | 'hasRuntimeWork'
   | 'isRuntimeFrameReady'
@@ -155,9 +154,10 @@ const buildRuntimeFrameInput = (
   mempool: RuntimeInput,
   deps: RuntimeProcessDeps,
 ): RuntimeInput => {
+  const replicaWakes = deps.loop.collectReplicaMempoolWakeInputs(env);
   const automaticInputs = [
-    ...deps.loop.collectEntityMempoolWakeInputs(env),
-    ...deps.loop.collectAccountMempoolWakeInputs(env),
+    ...replicaWakes.entityInputs,
+    ...replicaWakes.accountInputs,
   ];
   const explicitKeys = new Set(
     mempool.entityInputs.map(input =>

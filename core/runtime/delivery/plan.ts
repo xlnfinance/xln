@@ -6,7 +6,6 @@ import {
   copyRoutedOutputForMerge,
 } from './identity';
 import { createPreparedOutputGraph, type PreparedOutputGraph } from './prepared-output';
-import { matchesTraceSuffix, traceLog } from '../../support/trace-debug';
 import {
   isTriggerOnlyOutput,
   isTxBearingOutput,
@@ -257,17 +256,6 @@ export const planEntityOutputs = (
   for (const output of dedupeEntityOutputs(outputs, graph)) {
     const decision = resolveLocalEntityOutput(env, output, deps) ??
       planRemoteEntityOutput(env, output, deps);
-    // TEMP-TRACE-CP2 (pending-frame-stale investigation, gated by XLN_TRACE_ENTITY_SUFFIXES)
-    if (matchesTraceSuffix(output.entityId)) {
-      traceLog('CP2:delivery/plan.ts:planEntityOutputs', {
-        entityId: output.entityId,
-        signerId: output.signerId,
-        runtimeId: output.runtimeId ?? null,
-        decisionKind: decision.kind,
-        txTypes: (output.entityTxs ?? []).map(tx => tx.type),
-        localRuntimeId: env.runtimeId,
-      });
-    }
     if (decision.kind === 'local') {
       graph.prepare(decision.output);
       localOutputs.push(decision.output);

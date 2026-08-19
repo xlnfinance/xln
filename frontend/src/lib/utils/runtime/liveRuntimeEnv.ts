@@ -4,8 +4,7 @@
  * alias the UI projection or render uncommitted financial state. [88/100]
  */
 
-import type { RuntimeReplica, EnvSnapshot } from '@xln/core/api/public/runtime-module';
-import type { Profile } from '@xln/core/api/public/runtime-module';
+import type { EnvSnapshot, Profile, RuntimeReplica } from '@xln/core/api/public/runtime-module';
 
 const LIVE_RUNTIME_ENV_KEY = '__xlnLiveEnv';
 
@@ -29,7 +28,7 @@ export const isMapLike = (value: unknown): value is ReadonlyMap<unknown, unknown
  * classes, not JS Map, so the clone is a prototype-less object without
  * `.entries()`. Walk map-likes into real Maps so Svelte/e2e keep Map APIs.
  */
-const cloneForRuntimeView = (value: unknown, seen: WeakMap<object, unknown>): unknown => {
+const cloneForRuntimeView = (value: unknown, seen: Map<object, unknown>): unknown => {
   if (value === null || typeof value !== 'object') return value;
   const cached = seen.get(value);
   if (cached) return cached;
@@ -126,7 +125,7 @@ export function createDetachedRuntimeViewEnv(liveEnv: RuntimeReplica): RuntimeRe
     // an unrelated Svelte render expose candidate balances before WAL commit.
     // This UI-only projection is published after commit; cloning it does not
     // add work to headless hubs or to the consensus transition.
-    state: cloneForRuntimeView(liveEnv.state, new WeakMap()) as RuntimeReplica['state'],
+    state: cloneForRuntimeView(liveEnv.state, new Map()) as RuntimeReplica['state'],
     runtimeMempool: structuredClone(liveEnv.runtimeMempool),
     history: structuredClone(liveEnv.history),
     gossip: createDetachedGossip(liveEnv),

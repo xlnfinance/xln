@@ -24,7 +24,7 @@ import {
   deterministicEntityTimestamp,
   normalizeEntityRef,
 } from '../../../orderbook/cross-j/orderbook';
-import { swapKey, type WorkingOrderbookOffer } from '../../../orderbook/swap-execution';
+import { normalizeSwapOfferForOrderbook, swapKey, type WorkingOrderbookOffer } from '../../../orderbook/swap-execution';
 import { mergeStorageOverlayRecords } from '../../../protocol/state/overlay';
 import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
@@ -73,7 +73,6 @@ import {
   type SwapCancelRequestEvent,
   type SwapOfferEvent,
 } from '../../tx/handlers/account';
-import { normalizeSwapOfferForOrderbook } from '../../../orderbook/swap-execution';
 import { buildSettlementSealDraft } from '../../tx/handlers/payments/settle';
 import { assertOriginatedHtlcRoutesHaveLiveLocks, terminateHtlcRoute } from '../../tx/j-events-htlc/route-lifecycle';
 import { hasInboundHtlcRoute } from '../../htlc/route-views';
@@ -510,6 +509,18 @@ type SettlementSealTx = Omit<SettlementTransitionTx, 'data'> & {
   data: Extract<SettlementTransitionTx['data'], { kind: 'seal' }>;
 };
 
+const isStaleUncommittedSettlementSeal = (
+  tx: AccountTx,
+  revision: number,
+  workspaceHash: string,
+  expectedNonce: number,
+): tx is SettlementSealTx =>
+  tx.type === 'settle_transition'
+  && tx.data.kind === 'seal'
+  && tx.data.revision === revision
+  && tx.data.workspaceHash.toLowerCase() === workspaceHash
+  && tx.data.settlementNonce !== expectedNonce;
+
 function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChanges: RuntimeOverlayRecord[]): void {
   for (const accountId of [...getQueuedAccountIds(state)].sort(compareStableText)) {
     const visible = state.accounts.get(accountId);
@@ -518,25 +529,24 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChang
     if (!workspace || workspace.nonceAtSign !== undefined || visible.pendingFrame) continue;
     const workspaceHash = assertCanonicalSettlementWorkspace(visible.state, workspace);
     const expectedNonce = getNextSettlementNonce(visible);
-    const staleSeals = visible.mempool.filter(
-      (tx): tx is SettlementSealTx =>
-        tx.type === 'settle_transition' &&
-        tx.data.kind === 'seal' &&
-        tx.data.revision === workspace.revision &&
-        tx.data.workspaceHash.toLowerCase() === workspaceHash &&
-        tx.data.settlementNonce !== expectedNonce,
-    );
-    if (staleSeals.length === 0) continue;
+    if (!visible.mempool.some(tx => isStaleUncommittedSettlementSeal(tx, workspace.revision, workspaceHash, expectedNonce))) {
+      continue;
+    }
 
     // A same-height Account tiebreaker can restore our uncommitted seal after
     // the winning peer frame has advanced the exact proof frontier. Never
     // mutate or tolerate that signed seal: discard only the local intent and
     // deterministically request a fresh Entity-quorum witness for this exact
-    // workspace at the new nonce.
+    // workspace at the new nonce. Filter by seal fields, not object identity:
+    // getForWrite clones mempool txs.
     const account = getEntityAccountForWrite(state.accounts, accountId);
     if (!account) throw new Error(`QUEUED_ACCOUNT_INDEX_STALE:${accountId}`);
-    const staleSet = new Set<AccountTx>(staleSeals);
-    account.mempool = account.mempool.filter(tx => !staleSet.has(tx));
+    const staleNonces: number[] = [];
+    account.mempool = account.mempool.filter(tx => {
+      if (!isStaleUncommittedSettlementSeal(tx, workspace.revision, workspaceHash, expectedNonce)) return true;
+      staleNonces.push(tx.data.settlementNonce);
+      return false;
+    });
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
     state.deferredAccountProposals ??= new Map();
     const existing = state.deferredAccountProposals.get(accountId);
@@ -544,13 +554,10 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChang
       throw new Error(`SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${accountId}:${existing}:${workspaceHash}`);
     }
     state.deferredAccountProposals.set(accountId, workspaceHash);
-    // This is the expected deterministic recovery path after a same-height
-    // tiebreaker, not degraded operation. Keep the evidence without surfacing
-    // a false browser warning that would imply operator action is required.
     entityLog.info('settlement.stale_seal_refreshed', {
       account: shortId(accountId),
       expectedNonce,
-      staleNonces: staleSeals.map(tx => tx.data.settlementNonce).sort((left, right) => left - right),
+      staleNonces: staleNonces.sort((left, right) => left - right),
     });
   }
 }

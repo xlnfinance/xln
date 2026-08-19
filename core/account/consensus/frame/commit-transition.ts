@@ -16,6 +16,7 @@ import {
   commitAccountTransition,
   createAccountTransitionKey,
   discardAccountTransition,
+  publishAccountOverlay,
 } from '../../state/candidate-overlay';
 import { applyAccountTx } from '../../tx/apply';
 import {
@@ -87,7 +88,7 @@ export const commitAccountFrameTransition = async (
       if (result.outcome === 'htlc_error') timedOutHashlocks.push(result.hashlock);
     }
 
-    Object.assign(account, commitAccountTransition(owner).account);
+    publishAccountOverlay(account, commitAccountTransition(owner).account);
     return Object.freeze({
       candidateEffects: Object.freeze(candidateEffects),
       timedOutHashlocks: Object.freeze(timedOutHashlocks),

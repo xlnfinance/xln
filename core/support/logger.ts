@@ -101,29 +101,53 @@ const LOG_LEVEL_ORDER: Record<LogLevel, number> = {
   error: 40,
 };
 
-const configuredLevel = (): LogLevel => {
-  const raw = String(process.env['XLN_LOG_LEVEL'] || 'info').trim().toLowerCase();
-  if (raw === 'trace' || raw === 'debug' || raw === 'info' || raw === 'warn' || raw === 'error') return raw;
+type StructuredLogRuntime = {
+  level: LogLevel;
+  scopes: ReadonlySet<string> | null;
+  json: boolean;
+  warnStdout: boolean;
+};
+
+let structuredLogRuntimeKey = '';
+let structuredLogRuntime: StructuredLogRuntime | null = null;
+
+const parseLogLevel = (raw: string): LogLevel => {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'trace' || normalized === 'debug' || normalized === 'info' || normalized === 'warn' || normalized === 'error') {
+    return normalized;
+  }
   return 'info';
 };
 
-const shouldEmitLevel = (level: LogLevel): boolean =>
-  LOG_LEVEL_ORDER[level] >= LOG_LEVEL_ORDER[configuredLevel()];
-
-const configuredScopes = (): Set<string> | null => {
-  const raw = String(process.env['XLN_LOG_SCOPES'] || '').trim().toLowerCase();
-  if (!raw) return null;
-  const scopes = raw.split(',').map(scope => scope.trim()).filter(Boolean);
+const parseLogScopes = (raw: string): ReadonlySet<string> | null => {
+  const scopes = raw.trim().toLowerCase().split(',').map(scope => scope.trim()).filter(Boolean);
   return scopes.length > 0 ? new Set(scopes) : null;
 };
 
-const shouldEmitScope = (scope: string): boolean => {
-  const scopes = configuredScopes();
+const readStructuredLogRuntime = (): StructuredLogRuntime => {
+  const key = `${process.env['XLN_LOG_LEVEL'] ?? ''}\n${process.env['XLN_LOG_SCOPES'] ?? ''}\n${process.env['XLN_LOG_FORMAT'] ?? ''}\n${process.env['XLN_LOG_WARN_STDOUT'] ?? ''}`;
+  if (structuredLogRuntime && structuredLogRuntimeKey === key) return structuredLogRuntime;
+  structuredLogRuntime = {
+    level: parseLogLevel(process.env['XLN_LOG_LEVEL'] || 'info'),
+    scopes: parseLogScopes(process.env['XLN_LOG_SCOPES'] || ''),
+    json: process.env['XLN_LOG_FORMAT'] === 'json',
+    warnStdout: process.env['XLN_LOG_WARN_STDOUT'] === '1',
+  };
+  structuredLogRuntimeKey = key;
+  return structuredLogRuntime;
+};
+
+const scopeAllowed = (scope: string, scopes: ReadonlySet<string> | null): boolean => {
   if (!scopes) return true;
   const normalized = String(scope || '').trim().toLowerCase();
   if (scopes.has(normalized)) return true;
   const [root] = normalized.split(/[.:]/);
   return Boolean(root && scopes.has(root));
+};
+
+const canEmitStructuredLog = (level: LogLevel, scope: string): boolean => {
+  const runtime = readStructuredLogRuntime();
+  return LOG_LEVEL_ORDER[level] >= LOG_LEVEL_ORDER[runtime.level] && scopeAllowed(scope, runtime.scopes);
 };
 
 export const shortId = (value: unknown, chars = 4): string => {
@@ -158,8 +182,8 @@ const emitStructuredLog = (
   message: string,
   fields: StructuredLogFields = {},
 ): void => {
-  if (!shouldEmitLevel(level)) return;
-  if (!shouldEmitScope(scope)) return;
+  if (!canEmitStructuredLog(level, scope)) return;
+  const runtime = readStructuredLogRuntime();
   const redactedFields = redactTelemetryValue(fields) as StructuredLogFields;
   const redactedMessage = redactTelemetryValue(message) as string;
   const payload: StructuredLogEvent = {
@@ -170,28 +194,38 @@ const emitStructuredLog = (
     message: redactedMessage,
   };
   for (const sink of structuredLogSinks) sink(payload);
-  const line = process.env['XLN_LOG_FORMAT'] === 'json'
+  const line = runtime.json
     ? safeStringify(payload)
     : `[${level.toUpperCase()}][${scope}] ${redactedMessage}${Object.keys(redactedFields).length ? ` ${safeStringify(redactedFields)}` : ''}`;
   if (level === 'error') console.error(line);
   else if (level === 'warn') {
-    const warnSink = process.env['XLN_LOG_WARN_STDOUT'] === '1' ? console.log : console.warn;
+    const warnSink = runtime.warnStdout ? console.log : console.warn;
     warnSink(line);
   }
   else console.log(line);
 };
 
 export const createStructuredLogger = (scope: string, baseFields: StructuredLogFields = {}) => ({
-  trace: (message: string, fields: StructuredLogFields = {}) =>
-    emitStructuredLog('trace', scope, message, { ...baseFields, ...fields }),
-  debug: (message: string, fields: StructuredLogFields = {}) =>
-    emitStructuredLog('debug', scope, message, { ...baseFields, ...fields }),
-  info: (message: string, fields: StructuredLogFields = {}) =>
-    emitStructuredLog('info', scope, message, { ...baseFields, ...fields }),
-  warn: (message: string, fields: StructuredLogFields = {}) =>
-    emitStructuredLog('warn', scope, message, { ...baseFields, ...fields }),
-  error: (message: string, fields: StructuredLogFields = {}) =>
-    emitStructuredLog('error', scope, message, { ...baseFields, ...fields }),
+  trace: (message: string, fields: StructuredLogFields = {}) => {
+    if (!canEmitStructuredLog('trace', scope)) return;
+    emitStructuredLog('trace', scope, message, { ...baseFields, ...fields });
+  },
+  debug: (message: string, fields: StructuredLogFields = {}) => {
+    if (!canEmitStructuredLog('debug', scope)) return;
+    emitStructuredLog('debug', scope, message, { ...baseFields, ...fields });
+  },
+  info: (message: string, fields: StructuredLogFields = {}) => {
+    if (!canEmitStructuredLog('info', scope)) return;
+    emitStructuredLog('info', scope, message, { ...baseFields, ...fields });
+  },
+  warn: (message: string, fields: StructuredLogFields = {}) => {
+    if (!canEmitStructuredLog('warn', scope)) return;
+    emitStructuredLog('warn', scope, message, { ...baseFields, ...fields });
+  },
+  error: (message: string, fields: StructuredLogFields = {}) => {
+    if (!canEmitStructuredLog('error', scope)) return;
+    emitStructuredLog('error', scope, message, { ...baseFields, ...fields });
+  },
 });
 
 // Conditional logger with levels

@@ -1,5 +1,4 @@
-import type { AccountFrame, AccountInput, AccountReplica } from '../../../types/account';
-import type { AccountOutput } from '../../../types/account';
+import type { AccountFrame, AccountInput, AccountOutput, AccountReplica } from '../../../types/account';
 import type { AccountConsensusContext } from '../context';
 import { HEAVY_LOGS } from '../../../support/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../../support/logger';
@@ -20,11 +19,6 @@ import {
 import type { HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
 import { commitAccountFrameTransition } from '../frame/commit-transition';
-import {
-  discardPendingProposalReplica,
-  installPendingProposalReplica,
-  takePendingProposalReplica,
-} from '../../state/pending-proposal-replica';
 
 const ackLog = createStructuredLogger('account.ack');
 
@@ -144,24 +138,15 @@ const applyPendingFrameTransactions = async (
   timedOutHashlocks: string[],
   candidateEffects: AccountOutput[],
 ): Promise<void> => {
-  const prepared = takePendingProposalReplica(account);
-  if (prepared) {
-    // Same install as the ordinary receiver path: the proposer already applied
-    // these txs while building the pending frame. Replaying them on ACK doubled
-    // handler work and rebuilt every touched Patricia path. Keep the live
-    // signed dispute envelope; the stashed candidate is pre-Hanko.
-    installPendingProposalReplica(account, prepared);
-  } else {
-    const committed = await commitAccountFrameTransition({
-      context,
-      account,
-      frame: pendingFrame,
-      jClaimSession: committedJClaims,
-      role: 'proposer/commit',
-    });
-    candidateEffects.push(...committed.candidateEffects);
-    timedOutHashlocks.push(...committed.timedOutHashlocks);
-  }
+  const committed = await commitAccountFrameTransition({
+    context,
+    account,
+    frame: pendingFrame,
+    jClaimSession: committedJClaims,
+    role: 'proposer/commit',
+  });
+  candidateEffects.push(...committed.candidateEffects);
+  timedOutHashlocks.push(...committed.timedOutHashlocks);
   assertLiveCommitMatchesFrame(
     account,
     pendingFrame.accountStateRoot,
@@ -198,7 +183,6 @@ const installPendingFrameCommit = (
 
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  discardPendingProposalReplica(account);
   if (
     account.lastOutboundFrameAck
     && Number(account.lastOutboundFrameAck.height) < Number(pendingFrame.height)

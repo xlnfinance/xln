@@ -4,7 +4,6 @@ import { createStructuredLogger, shortHash, shortId } from '../../../support/log
 import { isLeftEntity } from '../../utils';
 import { accountInputAck, accountInputProposal } from '../flush';
 import { prependUniqueMempoolTxs } from '../helpers';
-import { discardPendingProposalReplica } from '../../state/pending-proposal-replica';
 import type { AccountCommittedFrame, HandleAccountInputResult } from '../types';
 import { accountInputApplied, rejectAccountPeerInput } from '../result';
 
@@ -217,7 +216,6 @@ export const applySameHeightIncomingFrameRollback = (
   }
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  discardPendingProposalReplica(account);
   account.rollbackCount = Math.max(1, account.rollbackCount + 1);
   account.lastRollbackFrameHash = receivedFrame.stateHash;
   if (account.rollbackCount > 1) {

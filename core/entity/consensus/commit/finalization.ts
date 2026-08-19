@@ -189,12 +189,14 @@ const installCommittedState = (
 ): void => {
   const { env, workingReplica, candidateEffects, storageChanges } = context;
   const previousState = workingReplica.state;
-  const committedState: EntityState = {
-    ...execution.state,
-    entityId: previousState.entityId,
-    height: frame.height,
-    prevFrameHash: frame.hash,
-  };
+  if (context.promoteCandidateState) {
+    commitEntityFrameCandidateState(execution.state, frame.stateRoot);
+  }
+  execution.state.entityId = previousState.entityId;
+  execution.state.height = frame.height;
+  execution.state.prevFrameHash = frame.hash;
+  // Keep the sealed overlay object. Do not spread-clone EntityState on commit.
+  const committedState = execution.state;
   const entitySizeLog = prepareCommittedEntitySizeLog(
     env,
     previousState,
@@ -203,9 +205,6 @@ const installCommittedState = (
   context.consumptionNodeChanges = execution.consumptionNodeChanges;
   context.accountJClaimNodeChanges = execution.accountJClaimNodeChanges;
   emitCommittedPendingFrameWarnings(previousState, committedState);
-  if (context.promoteCandidateState) {
-    commitEntityFrameCandidateState(committedState, frame.stateRoot);
-  }
   workingReplica.state = committedState;
   storageChanges.push(
     ...execution.storageChanges,

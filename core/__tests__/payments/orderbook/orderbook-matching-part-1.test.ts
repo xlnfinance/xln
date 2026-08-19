@@ -31,9 +31,9 @@ import { PersistentAccountStateMap } from '../../../account/state/persistent-sta
 import {
   accountTransitionView,
   beginAccountTransition,
-  commitAccountTransition,
   createAccountTransitionKey,
   discardAccountTransition,
+  publishAccountTransition,
 } from '../../../account/state/candidate-overlay';
 import {
   accountTxFailureMessage,
@@ -203,7 +203,7 @@ const applyFixtureSwapResolve = async (
       discardAccountTransition(owner);
       return result;
     }
-    Object.assign(account, commitAccountTransition(owner).account);
+    publishAccountTransition(account, owner);
     return result;
   } catch (error) {
     if (owner.lifecycle.status === 'active') discardAccountTransition(owner);

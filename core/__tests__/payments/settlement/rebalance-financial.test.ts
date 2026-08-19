@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { handleRebalanceRefund } from '../../../account/tx/handlers/rebalance/refund';
 import { handleRequestCollateral } from '../../../account/tx/handlers/rebalance/request-collateral';
-import type { AccountReplica } from '../../../types/account';
+import type { AccountReplica, AccountTx } from '../../../types/account';
 import type { RebalanceRequestFeeState } from '../../../types/finance/rebalance';
 import { createDefaultDelta } from '../../../account/state/delta';
 import { entity, makeAccount } from '../../helpers/cross-j';
@@ -13,8 +13,8 @@ import {
   commitAccountTransition,
   createAccountTransitionKey,
   discardAccountTransition,
+  publishAccountOverlay,
 } from '../../../account/state/candidate-overlay';
-import type { AccountTx } from '../../../types/account';
 
 const requestState = (
   requestId: string,
@@ -50,7 +50,10 @@ const account = (): AccountReplica => {
     [7, requestState('request-7', 1, 100n)],
     [8, requestState('request-8', 1, 100n)],
   ]);
-  replica.shadow.rebalance.submittedAtByToken = new Map([[7, 123], [8, 123]]);
+  replica.shadow.rebalance.submittedAtByToken = PersistentAccountStateMap.fromEntries(
+    'rebalanceShadowSubmitted',
+    [[7, 123], [8, 123]],
+  );
   return replica;
 };
 
@@ -68,7 +71,7 @@ const applyOnDraft = <T extends AccountTx>(
     discardAccountTransition(transition);
     return result;
   }
-  Object.assign(replica, commitAccountTransition(transition).account);
+  publishAccountOverlay(replica, commitAccountTransition(transition).account);
   return result;
 };
 

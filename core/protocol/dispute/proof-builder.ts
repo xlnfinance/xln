@@ -1,39 +1,38 @@
 import { haltRuntimeFailure } from "../errors/failure-taxonomy";
 import { exclusiveUnixMsBigIntToUnixS } from '../units';
-
-/**
- * ProofBody Builder - Constructs ABI-encoded dispute proofs from AccountReplica state
- *
- * This module bridges runtime AccountReplica state to on-chain dispute proofs.
- * The proofBodyHash is what gets signed for bilateral consensus AND dispute submission.
- *
- * Reference: 2024 Channel.ts lines 434-546, Types.sol, DeltaTransformer.sol
- *
- * CRITICAL: Deterministic ordering is essential for consensus.
- * Both sides must compute identical proofBodyHash from identical state.
- */
-
+import { Packr } from 'msgpackr';
 import { ethers } from 'ethers';
+import { LIMITS } from '../../config/constants';
 import type { AccountReplica, AccountState, Delta } from '../../types/account.js';
-import type {
-  RuntimeProofBody,
-  RuntimeTransformerClause,
-  RuntimeBatch,
-  RuntimePayment,
-  RuntimePull,
-  RuntimeSwap,
-  RuntimeAllowance,
-  ProofBodyResult,
+import {
+  BATCH_ABI,
+  PROOF_BODY_ABI,
+  type ProofBodyResult,
+  type RuntimeAllowance,
+  type RuntimeBatch,
+  type RuntimePayment,
+  type RuntimeProofBody,
+  type RuntimePull,
+  type RuntimeSwap,
+  type RuntimeTransformerClause,
 } from './proof-body.ts';
-import type { ProofBodyStruct, TransformerClauseStruct } from '../../../jurisdictions/typechain-types/Depository.sol/Depository.ts';
-import type { DeltaTransformer } from '../../../jurisdictions/typechain-types/DeltaTransformer.sol/DeltaTransformer.ts';
-import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body.ts';
 import { sortTransformerEntries } from '../transform/transformer-ordering';
 import { normalizeAccountWatchSeed } from '../identity/account-watch-seed';
 import { HASHLADDER_MAX_FILL_RATIO } from '../htlc/hash-ladder.ts';
 import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/machine/batch/index.ts';
-import { encodeBuffer } from '../../storage/codec/codec.ts';
-import { MAX_ACCOUNT_ENVELOPE_ROW_BYTES } from '../../storage/schema/account-envelope-graph.ts';
+import { compareStableText } from '../serialization';
+import { abiSchemaFromFragment, encodeAbi } from '../crypto/abi-encode';
+import { deriveSwapOffdeltaChanges } from '../../orderbook/swap-execution.ts';
+import { deriveTransferOffdeltaChange } from '../transform/delta-movement';
+import {
+  hashCooperativeDisputeProofHankoPayload,
+  hashCooperativeUpdateHankoPayload,
+  hashDisputeProofHankoPayload,
+  type DepositoryHankoDomain,
+} from '../../hanko/onchain-domain.ts';
+import { keccakHexHash } from '../crypto/keccak-text';
+
+export type { DepositoryHankoDomain } from '../../hanko/onchain-domain.ts';
 
 /**
  * Bound each scalar ProofBody atom before its hash enters consensus. The
@@ -46,7 +45,15 @@ import { MAX_ACCOUNT_ENVELOPE_ROW_BYTES } from '../../storage/schema/account-env
  * clause. Measure its exact canonical storage encoding, not ABI bytes or a
  * heuristic, so consensus never signs a value that the WAL cannot persist.
  */
-export const MAX_ACCOUNT_DISPUTE_PROOF_ATOM_BYTES = MAX_ACCOUNT_ENVELOPE_ROW_BYTES;
+export const MAX_ACCOUNT_DISPUTE_PROOF_ATOM_BYTES = LIMITS.MAX_STORAGE_VALUE_BYTES;
+
+// Same Packr + magic-byte envelope as storage msgpack rows. Protocol must not
+// import storage; this is the exact `{kind:'atom', value}` record the WAL writes.
+const ATOM_MSGPACK = new Packr({ mapsAsObjects: false, structuredClone: true });
+const storageAtomBytes = (encodedBatch: string): number => {
+  const body = ATOM_MSGPACK.pack({ kind: 'atom', value: encodedBatch });
+  return 1 + (body instanceof Uint8Array ? body.byteLength : Buffer.from(body).byteLength);
+};
 
 export class AccountDisputeProofBudgetError extends Error {
   constructor(
@@ -61,19 +68,6 @@ export class AccountDisputeProofBudgetError extends Error {
     this.name = 'AccountDisputeProofBudgetError';
   }
 }
-import { compareStableText } from '../serialization';
-import { abiSchemaFromFragment, encodeAbi } from '../crypto/abi-encode';
-import { deriveSwapOffdeltaChanges } from '../../orderbook/swap-execution.ts';
-import { deriveTransferOffdeltaChange } from '../transform/delta-movement';
-import {
-  hashCooperativeDisputeProofHankoPayload,
-  hashCooperativeUpdateHankoPayload,
-  hashDisputeProofHankoPayload,
-  type DepositoryHankoDomain,
-} from '../../hanko/onchain-domain.ts';
-import { keccakHexHash } from '../crypto/keccak-text';
-
-export type { DepositoryHankoDomain } from '../../hanko/onchain-domain.ts';
 
 type DisputeHashState = Pick<AccountState, 'leftEntity' | 'rightEntity' | 'watchSeed'>;
 type DisputeHashReplica = Pick<AccountReplica, 'state' | 'proofHeader'>;
@@ -89,19 +83,8 @@ const INT256_MAX = (1n << 255n) - 1n;
 const encodeProofBodyStruct = (proofBody: ProofBodyStruct): string =>
   encodeAbi(PROOF_BODY_SCHEMA, proofBody);
 
-// A proof body is immutable evidence addressed by its own hash; the same
-// struct instance is re-hashed by retention asserts on every Account commit
-// and by seal validation. Identity-keyed memo: a rebuilt or reloaded struct
-// is a new object and hashes afresh.
-const proofBodyHashByStruct = new WeakMap<object, string>();
-
-export const hashProofBodyStruct = (proofBody: ProofBodyStruct): string => {
-  const cached = proofBodyHashByStruct.get(proofBody);
-  if (cached !== undefined) return cached;
-  const hash = keccakHexHash(encodeProofBodyStruct(proofBody));
-  proofBodyHashByStruct.set(proofBody, hash);
-  return hash;
-};
+export const hashProofBodyStruct = (proofBody: ProofBodyStruct): string =>
+  keccakHexHash(encodeProofBodyStruct(proofBody));
 
 const isUsableContractAddress = (address: string | null | undefined): address is string =>
   typeof address === 'string' && ethers.isAddress(address) && address !== ZERO_ADDRESS;
@@ -381,13 +364,16 @@ export function buildAccountProofBody(
   // canonical failure code even when the same body also exceeds local storage.
   assertDisputeProofBodyWithinContractLimits(proofBodyStruct, 'account.signing', encodedProofBody);
   for (const [transformerIndex, transformer] of proofBodyStruct.transformers.entries()) {
-    const atomBytes = encodeBuffer({ kind: 'atom', value: transformer.encodedBatch }).byteLength;
+    const atomBytes = storageAtomBytes(
+      typeof transformer.encodedBatch === 'string'
+        ? transformer.encodedBatch
+        : ethers.hexlify(transformer.encodedBatch),
+    );
     if (atomBytes >= MAX_ACCOUNT_DISPUTE_PROOF_ATOM_BYTES) {
       throw new AccountDisputeProofBudgetError(atomBytes, transformerIndex);
     }
   }
   const proofBodyHash = keccakHexHash(encodedProofBody);
-  proofBodyHashByStruct.set(proofBodyStruct, proofBodyHash);
   return {
     runtimeProofBody,
     proofBodyStruct,

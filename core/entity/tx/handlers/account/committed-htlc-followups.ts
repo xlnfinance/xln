@@ -14,8 +14,7 @@ import { createStructuredLogger } from '../../../../support/logger';
 import type { AccountTxTarget } from './orderbook/queue';
 import { MalformedEntityFrameInputError } from '../../processing/invariant-errors';
 import type { EntityInfraContext } from '../../../../types/entity/infra-context';
-import { preparedHtlcBindingKey } from '../../../../types/entity/htlc-infra-context';
-import type { PreparedHtlcEntry } from '../../../../types/entity/htlc-infra-context';
+import { preparedHtlcBindingKey, type PreparedHtlcEntry } from '../../../../types/entity/htlc-infra-context';
 import { HTLC } from '../../../../config/constants';
 import { sameAccountStateDomain } from '../../../../account/commitment/state-root';
 import { deriveForwardHtlcLockId } from '../../../../protocol/htlc/utils';
@@ -47,25 +46,15 @@ type HtlcSecretFollowupContext = Pick<
 const getJurisdictionId = (state: EntityState, env: EntityRuntimeContext): string =>
   String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 
-// A Hub frame carries one prepared entry per forwarded lock (~1300 at 500
-// users); a linear scan per lock made this lookup quadratic in frame size.
-// Entries are immutable once the context is built, so index each entries
-// array once and reuse it for every lock of the frame.
-const preparedEntryIndexes = new WeakMap<readonly PreparedHtlcEntry[], Map<string, PreparedHtlcEntry>>();
-
 const preparedEntryLookupKey = (accountFrameHash: string, lockId: string, envelopeHash: string): string =>
   `${accountFrameHash}|${lockId}|${envelopeHash}`;
 
 const preparedEntryIndex = (entries: readonly PreparedHtlcEntry[]): Map<string, PreparedHtlcEntry> => {
-  const cached = preparedEntryIndexes.get(entries);
-  if (cached) return cached;
   const index = new Map<string, PreparedHtlcEntry>();
   for (const entry of entries) {
     const key = preparedEntryLookupKey(entry.binding.accountFrameHash, entry.binding.lockId, entry.binding.envelopeHash);
-    // First match wins, matching the previous Array.prototype.find semantics.
     if (!index.has(key)) index.set(key, entry);
   }
-  preparedEntryIndexes.set(entries, index);
   return index;
 };
 

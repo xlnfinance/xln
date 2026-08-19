@@ -244,18 +244,10 @@ const equalBytes = (left: Uint8Array, right: Uint8Array): boolean => {
   return true;
 };
 
-const derivedAddressByKey = new WeakMap<Uint8Array, string>();
-
 const privateKeyToAddress = (privateKey: Uint8Array): string => {
-  // Registered keys are immutable buffers held by the signer store; deriving
-  // the public point again on every signature only repeats the same answer.
-  const memoized = derivedAddressByKey.get(privateKey);
-  if (memoized) return memoized;
   const publicKey = secp256k1.getPublicKey(privateKey, false); // uncompressed 65 bytes
   const hash = keccak256(publicKey.slice(1));
-  const address = `0x${hash.slice(-40)}`.toLowerCase();
-  derivedAddressByKey.set(privateKey, address);
-  return address;
+  return `0x${hash.slice(-40)}`.toLowerCase();
 };
 
 const assertSignerKeyMatchesId = (signerId: string, privateKey: Uint8Array, context: string): void => {
@@ -618,17 +610,6 @@ export function signDigest(scope: SignerKeyScope, signerId: string, digestHex: s
   return `0x${sigHex}`;
 }
 
-/**
- * ECDSA here is deterministic (RFC 6979 on both backends), so signing one
- * digest with one key always yields the same bytes. A proposer signs every
- * frame hash twice — once into the Hanko, once as the raw collected signature
- * — and validators re-sign on retries; the memo makes the second sign a
- * lookup. Keyed by the private-key object (keys are cached per signer, so the
- * identity is stable) and the digest hex. Bounded to recent digests.
- */
-const signatureMemo = new WeakMap<Uint8Array, Map<string, { signature: Uint8Array; recovery: number }>>();
-const SIGNATURE_MEMO_MAX = 4096;
-
 export function signDigestBytesWithPrivateKey(
   privateKey: Uint8Array,
   messageBytes: Uint8Array,
@@ -636,24 +617,6 @@ export function signDigestBytesWithPrivateKey(
   if (messageBytes.length !== 32) {
     throw new Error(`SIGN_DIGEST_INVALID_LENGTH:${messageBytes.length}`);
   }
-  let byDigest = signatureMemo.get(privateKey);
-  if (!byDigest) {
-    byDigest = new Map();
-    signatureMemo.set(privateKey, byDigest);
-  }
-  const digestHex = Buffer.from(messageBytes).toString('hex');
-  const memoized = byDigest.get(digestHex);
-  if (memoized) return { signature: memoized.signature.slice(), recovery: memoized.recovery };
-  const signed = signDigestBytesWithPrivateKeyUncached(privateKey, messageBytes);
-  if (byDigest.size >= SIGNATURE_MEMO_MAX) byDigest.clear();
-  byDigest.set(digestHex, { signature: signed.signature.slice(), recovery: signed.recovery });
-  return signed;
-}
-
-function signDigestBytesWithPrivateKeyUncached(
-  privateKey: Uint8Array,
-  messageBytes: Uint8Array,
-): { signature: Uint8Array; recovery: number } {
   installHmacSync();
   countOpWithSite('ecdsa.sign', 0, 3);
   const native = getNativeSecp256k1();
@@ -792,13 +755,11 @@ export function verifyAccountSignature(
   }
 
   try {
-    const recovered = recoverAddressFromDigestSignature(
-      parsed.digest,
-      parsed.compact,
-      parsed.recovery,
-    );
+    // Stored-key path: one ECDSA verify binds the digest to this public key.
+    // Recover+address already proved the same fact on the no-key path above;
+    // doing both here doubled secp work on every Account/Hanko check.
     const expectedAddress = addressFromPublicKey(publicKey);
-    if (!recovered || !expectedAddress || recovered !== expectedAddress) return false;
+    if (!expectedAddress) return false;
     if (/^0x[a-f0-9]{40}$/i.test(key) && expectedAddress !== key) return false;
 
     countOp('ecdsa.verify');

@@ -77,7 +77,10 @@ import { buildCollectiveEntityProposalTx } from '../../../entity/auth/authorizat
 import { generateProposalId } from '../../../entity/tx/processing/proposals';
 
 import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-witness';
-import { publishEntityCandidateEffects } from '../../../runtime/observability/env-events';
+import {
+  applyStorageChanges,
+  publishEntityCandidateEffects,
+} from '../../../runtime/observability/env-events';
 
 import {
   buildEntityFrameAuthority,
@@ -182,8 +185,6 @@ import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../../../
 
 import { MalformedEntityFrameInputError } from '../../../entity/tx/processing/invariant-errors';
 
-import { applyStorageChanges } from '../../../runtime/observability/env-events';
-
 import { submitRuntimeJOutbox } from '../../../runtime/j-submit/j-submit';
 
 import { registerStructuredLogSink } from '../../../support/logger';
@@ -225,8 +226,6 @@ import { signEntityHashes, verifyHankoForHash } from '../../../hanko/signing';
 import { handleMeshBootstrapLoopError } from '../../../orchestrator/mesh/mesh-bootstrap-fail-fast';
 
 import { fitCrossAmountsToOrderbook } from '../../../orchestrator/mm-node';
-
-import { cloneAccountReplica } from '../../../account/state/state-clone';
 import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 import {
   clearReplayOutputSignerHints,

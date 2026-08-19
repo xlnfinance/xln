@@ -6,7 +6,7 @@ import { assertAccountFrameHash } from '../../../account/consensus/frame/hash';
 import type { AccountPeerInput } from '../../../types/account';
 import type { CertifiedBoardAuthorityBinding, CertifiedBoardRecord } from '../../../types/entity-board-registry';
 import type { ConsensusOutputOrigin, EntityTx } from '../../../types/entity-tx';
-import type { EntityInput, EntityOutput, HashToSign } from '../../types';
+import type { EntityInput, EntityOutput, EntityState, HashToSign } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import {
   canonicalAccountInputCommitment,
@@ -20,7 +20,6 @@ import {
   accountInputProposal,
 } from '../../../account/consensus/flush';
 import { verifyHankoForHash } from '../../../hanko/signing';
-import type { EntityState } from '../../types';
 import {
   createCertifiedBoardAuthorityBinding,
   getCertifiedBoardNodeStore,
@@ -428,22 +427,6 @@ const computeCertifiedEntityOutputSemanticHash = (
     }),
   );
 
-type SemanticHashMemo = { key: string; hash: string };
-
-/**
- * The semantic digest projects nested Account frames to their `stateHash`.
- * Delivery identity, ingress admission and certification each ask for the
- * same digest of the same immutable `entityTxs` array, measured at ~60 calls
- * per economic swap on the hub. Memoize per array object; the origin fields
- * are part of the memo key, so a different origin over the same txs recomputes.
- * `XLN_RELIABLE_IDENTITY_VERIFY_CACHE=1` recomputes on every hit and fails
- * loudly if the evidence was mutated after its digest was taken.
- */
-const semanticHashMemo = new WeakMap<EntityTx[], SemanticHashMemo>();
-
-const verifyMemoizedDigests = (): boolean =>
-  typeof process !== 'undefined' && process.env?.['XLN_RELIABLE_IDENTITY_VERIFY_CACHE'] === '1';
-
 export const hashCertifiedEntityOutputSemantic = (
   sourceEntityId: string,
   targetEntityId: string,
@@ -452,17 +435,7 @@ export const hashCertifiedEntityOutputSemantic = (
   entityTxs: EntityTx[],
 ): string => {
   countOp('certified.hashCertifiedEntityOutputSemantic');
-  const key = `${sourceEntityId.toLowerCase()}|${targetEntityId.toLowerCase()}|${lane}|${sequence.toString()}`;
-  const memo = semanticHashMemo.get(entityTxs);
-  if (memo && memo.key === key) {
-    if (!verifyMemoizedDigests()) return memo.hash;
-    const recomputed = computeCertifiedEntityOutputSemanticHash(sourceEntityId, targetEntityId, lane, sequence, entityTxs);
-    if (recomputed !== memo.hash) throw new Error('CONSENSUS_OUTPUT_SEMANTIC_HASH_MEMO_STALE');
-    return recomputed;
-  }
-  const hash = computeCertifiedEntityOutputSemanticHash(sourceEntityId, targetEntityId, lane, sequence, entityTxs);
-  semanticHashMemo.set(entityTxs, { key, hash });
-  return hash;
+  return computeCertifiedEntityOutputSemanticHash(sourceEntityId, targetEntityId, lane, sequence, entityTxs);
 };
 
 export const assertCertifiedOutputSemanticIdentity = (
@@ -666,77 +639,13 @@ const computeCertifiedEntityOutputHash = (
     }),
   );
 
-type OutputHashMemo = {
-  sourceEntityId: string;
-  lane: ConsensusOutputOrigin['lane'];
-  sequence: bigint;
-  semanticHash: string;
-  height: number;
-  frameHash: string;
-  outputIndex: number;
-  targetEntityId: string;
-  boardAuthority: ConsensusOutputOrigin['boardAuthority'];
-  hash: string;
-};
-
-const outputHashMemo = new WeakMap<EntityTx[], OutputHashMemo>();
-
-const sameOutputHashOrigin = (memo: OutputHashMemo, origin: ConsensusOutputOrigin, targetEntityId: string): boolean => {
-  if (
-    memo.targetEntityId !== targetEntityId ||
-    memo.sourceEntityId !== origin.sourceEntityId ||
-    memo.lane !== origin.lane ||
-    memo.sequence !== origin.sequence ||
-    memo.semanticHash !== origin.semanticHash ||
-    memo.height !== origin.height ||
-    memo.frameHash !== origin.frameHash ||
-    memo.outputIndex !== origin.outputIndex
-  ) {
-    return false;
-  }
-  const left = memo.boardAuthority;
-  const right = origin.boardAuthority;
-  if (left === right) return true;
-  if (!left || !right) return false;
-  return left.version === right.version
-    && left.stackKey === right.stackKey
-    && sameCertifiedBoardRecord(left.record, right.record);
-};
-
-/**
- * Same memo discipline as the semantic digest. Keyed by origin fields, not by
- * re-encoding the origin on every hit — `encodeCanonicalConsensusValue(origin)`
- * walked board authority on ~60 hub calls per swap even when the digest was cached.
- * Keep this field list in lockstep with `ConsensusOutputOrigin` / board binding.
- */
 export const hashCertifiedEntityOutput = (
   origin: ConsensusOutputOrigin,
   targetEntityId: string,
   entityTxs: EntityTx[],
 ): string => {
   countOp('certified.hashCertifiedEntityOutput');
-  const target = targetEntityId.toLowerCase();
-  const memo = outputHashMemo.get(entityTxs);
-  if (memo && sameOutputHashOrigin(memo, origin, target)) {
-    if (!verifyMemoizedDigests()) return memo.hash;
-    const recomputed = computeCertifiedEntityOutputHash(origin, targetEntityId, entityTxs);
-    if (recomputed !== memo.hash) throw new Error('CONSENSUS_OUTPUT_HASH_MEMO_STALE');
-    return recomputed;
-  }
-  const hash = computeCertifiedEntityOutputHash(origin, targetEntityId, entityTxs);
-  outputHashMemo.set(entityTxs, {
-    sourceEntityId: origin.sourceEntityId,
-    lane: origin.lane,
-    sequence: origin.sequence,
-    semanticHash: origin.semanticHash,
-    height: origin.height,
-    frameHash: origin.frameHash,
-    outputIndex: origin.outputIndex,
-    targetEntityId: target,
-    boardAuthority: origin.boardAuthority,
-    hash,
-  });
-  return hash;
+  return computeCertifiedEntityOutputHash(origin, targetEntityId, entityTxs);
 };
 
 export type VerifiedCertifiedEntityOutput = {

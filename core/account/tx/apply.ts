@@ -1,10 +1,9 @@
 /**
  * Account Transaction Applicator
- * Routes AccountTx to the handler that mutates one bilateral account clone/state.
+ * Routes AccountTx to the handler that mutates one bilateral account overlay.
  */
 
-import type { AccountReplica, AccountTx } from '../../types/account';
-import type { AccountOutput } from '../../types/account';
+import type { AccountOutput, AccountReplica, AccountTx } from '../../types/account';
 import type { AccountConsensusContext } from '../consensus/context';
 import type { AccountJClaimSession } from '../j-claims/j-claim-session';
 import type { HtlcEnforcementClock } from '../htlc-deadline';
@@ -12,9 +11,9 @@ import type { AccountDraftReplica } from '../state/account-state-draft';
 import {
   accountTransitionView,
   beginAccountTransition,
-  commitAccountTransition,
   createAccountTransitionKey,
   discardAccountTransition,
+  publishAccountTransition,
 } from '../state/candidate-overlay';
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
@@ -88,7 +87,7 @@ export async function applyAccountTxToMutableReplica(
       discardAccountTransition(owner);
       return result;
     }
-    Object.assign(account, commitAccountTransition(owner).account);
+    publishAccountTransition(account, owner);
     return result;
   } catch (error) {
     if (owner.lifecycle.status === 'active') discardAccountTransition(owner);

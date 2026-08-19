@@ -2,9 +2,9 @@ import { applyAccountTx } from '../../../account/tx/apply';
 import {
   accountTransitionView,
   beginAccountTransition,
-  commitAccountTransition,
   createAccountTransitionKey,
   discardAccountTransition,
+  publishAccountTransition,
 } from '../../../account/state/candidate-overlay';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import {
@@ -310,7 +310,7 @@ const applyAccountFrame = async (
       const result = await applyAccountTx(draft, tx, false, timestamp, jHeight);
       if (!result.ok) throw new Error(`SWAP_RUNTIME_BENCH_TX_REJECTED:${result.rejection.message}`);
     }
-    Object.assign(account, commitAccountTransition(owner).account);
+    publishAccountTransition(account, owner);
   } catch (error) {
     if (owner.lifecycle.status === 'active') discardAccountTransition(owner);
     throw error;

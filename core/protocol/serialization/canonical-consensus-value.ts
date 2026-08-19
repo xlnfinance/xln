@@ -89,29 +89,8 @@ const encodeChild = (value: unknown, stack: CanonicalStack, segment: string): st
   return encoded;
 };
 
-// Values registered here are private and never mutated after registration
-// (e.g. the canonical tx array of one Entity frame, encoded for budget,
-// hash, validation and storage). Their bytes are computed once; the encoding
-// of a value never depends on where it sits inside a parent.
-const immutableCanonicalValues = new WeakSet<object>();
-const immutableCanonicalEncodings = new WeakMap<object, string>();
-
-/** Register a value whose owner guarantees immutability; later encodes reuse its bytes. */
-export const memoizeCanonicalEncoding = <T extends object>(value: T): T => {
-  immutableCanonicalValues.add(value);
-  return value;
-};
-
-const encodeInner = (value: unknown, stack: CanonicalStack): string => {
-  if (typeof value === 'object' && value !== null && immutableCanonicalValues.has(value)) {
-    const cached = immutableCanonicalEncodings.get(value);
-    if (cached !== undefined) return cached;
-    const encoded = encodeUncached(value, stack);
-    immutableCanonicalEncodings.set(value, encoded);
-    return encoded;
-  }
-  return encodeUncached(value, stack);
-};
+const encodeInner = (value: unknown, stack: CanonicalStack): string =>
+  encodeUncached(value, stack);
 
 const encodeUncached = (value: unknown, stack: CanonicalStack): string => {
   if (value === null) return '["Null"]';

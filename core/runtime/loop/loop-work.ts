@@ -99,37 +99,35 @@ const entityMempoolNeedsWake = (replica: EntityReplica): boolean => {
   return true;
 };
 
-export const collectAccountMempoolWakeInputs = (env: RuntimeReplica): EntityInput[] => {
-  const inputs: EntityInput[] = [];
-  for (const replica of env.state.eReplicas.values()) {
-    const entityId = String(replica.entityId || replica.state.entityId).trim().toLowerCase();
-    const signerId = String(replica.signerId || '').trim().toLowerCase();
-    if (!entityId || !signerId) continue;
-    if (hasProposableAccount(replica.state)) {
-      inputs.push({ entityId, signerId, entityTxs: [] });
-    }
-  }
-  return inputs;
+export type ReplicaMempoolWakeInputs = {
+  entityInputs: EntityInput[];
+  accountInputs: EntityInput[];
 };
 
-export const collectEntityMempoolWakeInputs = (env: RuntimeReplica): EntityInput[] => {
-  const inputs: EntityInput[] = [];
-  for (const replica of env.state.eReplicas.values()) {
-    if (!entityMempoolNeedsWake(replica)) continue;
-    const entityId = String(replica.entityId || replica.state.entityId).trim().toLowerCase();
-    const signerId = String(replica.signerId || '').trim().toLowerCase();
-    if (entityId && signerId) inputs.push({ entityId, signerId, entityTxs: [] });
-  }
-  return inputs;
+const replicaWakeIds = (replica: EntityReplica): { entityId: string; signerId: string } | null => {
+  const entityId = String(replica.entityId || replica.state.entityId).trim().toLowerCase();
+  const signerId = String(replica.signerId || '').trim().toLowerCase();
+  if (!entityId || !signerId) return null;
+  return { entityId, signerId };
 };
 
-const hasEntityMempoolWakeInput = (env: RuntimeReplica): boolean =>
-  [...env.state.eReplicas.values()].some(entityMempoolNeedsWake);
+export const collectReplicaMempoolWakeInputs = (env: RuntimeReplica): ReplicaMempoolWakeInputs => {
+  const entityInputs: EntityInput[] = [];
+  const accountInputs: EntityInput[] = [];
+  for (const replica of env.state.eReplicas.values()) {
+    const ids = replicaWakeIds(replica);
+    if (!ids) continue;
+    if (entityMempoolNeedsWake(replica)) entityInputs.push({ ...ids, entityTxs: [] });
+    if (hasProposableAccount(replica.state)) accountInputs.push({ ...ids, entityTxs: [] });
+  }
+  return { entityInputs, accountInputs };
+};
 
-const hasAccountMempoolWakeInput = (env: RuntimeReplica): boolean =>
-  [...env.state.eReplicas.values()].some(replica =>
-    hasProposableAccount(replica.state),
-  );
+export const collectAccountMempoolWakeInputs = (env: RuntimeReplica): EntityInput[] =>
+  collectReplicaMempoolWakeInputs(env).accountInputs;
+
+export const collectEntityMempoolWakeInputs = (env: RuntimeReplica): EntityInput[] =>
+  collectReplicaMempoolWakeInputs(env).entityInputs;
 
 const runtimeWakeDeps = {
   ensureRuntimeInfrastructure,
@@ -169,8 +167,9 @@ export const resolveRuntimeWorkReason = (
   ) {
     return 'network-retry';
   }
-  if (hasEntityMempoolWakeInput(env)) return 'entity-mempool';
-  if (hasAccountMempoolWakeInput(env)) return 'account-mempool';
+  const replicaWakes = collectReplicaMempoolWakeInputs(env);
+  if (replicaWakes.entityInputs.length > 0) return 'entity-mempool';
+  if (replicaWakes.accountInputs.length > 0) return 'account-mempool';
   // Quiesce drains only work accepted before its ingress fence. Timers remain
   // durable and fire after explicit resume.
   if (!env.infrastructure?.persistenceQuiescing && hasDueEntityHooks(env)) {

@@ -134,14 +134,8 @@ const validatePreparedOrigins = (context: HtlcPreparedInfraContext): void => {
   }
 };
 
-// The clone this parser returns is immutable data owned by the validated
-// Entity context; re-validating it (proposer replay, apply, WAL rows) cloned
-// and re-checked ~1300 entries per Hub frame. Clones we produced pass through.
-const validatedPreparedContexts = new WeakSet<object>();
-
 export const validateHtlcPreparedInfraContext = (value: unknown): HtlcPreparedInfraContext => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('HTLC_PREPARED_CONTEXT_INVALID');
-  if (validatedPreparedContexts.has(value)) return value as HtlcPreparedInfraContext;
   const context = value as HtlcPreparedInfraContext;
   if (
     Object.keys(context).sort().join(',') !== 'entries,originated,version'
@@ -149,7 +143,5 @@ export const validateHtlcPreparedInfraContext = (value: unknown): HtlcPreparedIn
   ) throw new Error('HTLC_PREPARED_CONTEXT_INVALID');
   validatePreparedEntries(context);
   validatePreparedOrigins(context);
-  const cloned = structuredClone(context);
-  validatedPreparedContexts.add(cloned);
-  return cloned;
+  return structuredClone(context);
 };

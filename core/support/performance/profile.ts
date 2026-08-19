@@ -127,8 +127,8 @@ export const timePerfPhase = <T>(name: string, fn: () => T): T => {
   const startedAt = getPerfMs();
   try {
     const result = fn();
-    if (result && typeof (result as { then?: unknown }).then === 'function') {
-      return (result as unknown as Promise<unknown>).finally(() => {
+    if (result instanceof Promise) {
+      return result.finally(() => {
         observePerfPhase(name, getPerfMs() - startedAt);
       }) as T;
     }

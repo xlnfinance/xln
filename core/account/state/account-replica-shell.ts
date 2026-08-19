@@ -10,7 +10,6 @@ import {
   cloneIsolatedAccountInput,
   cloneIsolatedAccountTx,
 } from '../../protocol/state/account-input-clone';
-import { copyPendingProposalReplica } from './pending-proposal-replica';
 
 const shellLog = createStructuredLogger('entity.account.shell');
 
@@ -190,6 +189,5 @@ export const forkAccountReplicaShell = (base: AccountReplica): AccountReplica =>
     to: base.proofHeader.toEntity.slice(-8),
     height: base.currentHeight,
   });
-  copyPendingProposalReplica(base, shell);
   return shell;
 };

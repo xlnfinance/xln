@@ -131,20 +131,8 @@ const computeCanonicalAccountFrameHash = (frame: AccountFrame): string => {
   ], 'integrity');
 };
 
-/**
- * Inbound frames are immutable evidence. Certified verify and Account apply
- * both recompute this merkle of the same object; memoize only that path.
- * `createFrameHash` stays uncached so a builder can mutate txs and rehash.
- */
-const inboundFrameHashMemo = new WeakMap<AccountFrame, string>();
-
-const inboundAccountFrameHash = (frame: AccountFrame): string => {
-  const cached = inboundFrameHashMemo.get(frame);
-  if (cached !== undefined) return cached;
-  const hash = computeCanonicalAccountFrameHash(frame);
-  inboundFrameHashMemo.set(frame, hash);
-  return hash;
-};
+const inboundAccountFrameHash = (frame: AccountFrame): string =>
+  computeCanonicalAccountFrameHash(frame);
 
 export async function createFrameHash(frame: AccountFrame): Promise<string> {
   return computeCanonicalAccountFrameHash(frame);

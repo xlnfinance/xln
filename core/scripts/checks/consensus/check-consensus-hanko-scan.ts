@@ -177,7 +177,7 @@ assertOrder(accountCommitTransition, accountCommitTransitionPath, [
   'for (const tx of frame.accountTxs) {',
   'const result = await applyAccountTx(',
   'assertNoUnilateralSettlementMutation(draft, beforeSettlement, tx, options.role);',
-  'Object.assign(account, commitAccountTransition(owner).account);',
+  'publishAccountOverlay(account, commitAccountTransition(owner).account);',
 ]);
 assertDirectCallCount(accountCommitTransitionPath, 'beginAccountTransition', 1);
 assertDirectCallCount(accountCommitTransitionPath, 'commitAccountTransition', 1);
@@ -192,12 +192,18 @@ assertOrder(accountConsensus, accountConsensusPath, [
 assertOrder(accountConsensus, accountConsensusPath, [
   'async function commitIncomingFrameOnRealState',
   'if (installValidatedTransition) {',
-  'Object.assign(account, validation.clonedMachine);',
+  'publishAccountOverlay(account, validation.clonedMachine);',
   'assertLiveCommitMatchesFrame(',
-  'account.currentFrame = structuredClone(receivedFrame);',
+  'account.currentFrame = cloneAccountFrame(receivedFrame);',
   'const committedFrame = cloneAccountFrame(receivedFrame);',
   'committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });',
 ]);
+assertNotMatches(
+  accountConsensus,
+  /\bpending-proposal-replica\b|takePendingProposalReplica|stashPendingProposalReplica/,
+  accountConsensusPath,
+  'Account pending-proposal replica stash',
+);
 assertNotMatches(
   accountConsensus,
   /\brecordAccountFrameHistory\b/,

@@ -1,27 +1,24 @@
 import type { EntityReplica, EntityState } from './types';
 import type { LendingLoan, LendingPoolPosition, LendingState } from '../types/finance/lending';
 import {
+  cloneCrossJurisdictionAccountTxRoute,
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionRoute,
 } from '../extensions/cross-j';
 import { cloneJBatch, type JBatchState } from '../jurisdiction/machine/batch';
 import { structuredCloneOrThrow } from '../protocol/serialization/structured-clone';
-import { cloneCrossJurisdictionAccountTxRoute } from '../extensions/cross-j';
 import { copyEntityFrameEvents } from './frame-events';
-import { forkEntityAccountCommitmentCache, primeEntityStateRootMemo } from './consensus/state-root';
 import { forkCrossJurisdictionBookAdmissionIndex } from '../extensions/cross-j/orderbook';
 import {
-  createEntityAccountCandidateMap,
   commitEntityAccountCandidate,
+  commitEntityOrderbookCandidate,
+  createEntityAccountCandidateMap,
+  createEntityOrderbookCandidate,
 } from './state/candidate-map';
 import {
   EntityAccountCandidateMap,
   PersistentEntityAccountMap,
 } from './state/persistent-account-map';
-import {
-  commitEntityOrderbookCandidate,
-  createEntityOrderbookCandidate,
-} from './state/candidate-map';
 import {
   EntityCollectionCandidateMap,
 } from './state/persistent-collection-map';
@@ -176,6 +173,8 @@ const isolateEntityFrameShell = (
 /**
  * Entity frame replay already owns an isolated candidate. Standalone callers
  * get the same Account/Book overlay candidate, never a full Entity clone.
+ * Propose/validate mutate this overlay; commitEntityFrameCandidateState folds
+ * dirty Patricia roots into the live EntityState object.
  */
 export const prepareEntityTxState = (
   state: EntityState,
@@ -184,9 +183,8 @@ export const prepareEntityTxState = (
   mutableFrameState ? state : createEntityFrameCandidateState(state);
 
 /**
- * Build an Entity-frame candidate without copying the potentially million-entry
- * Account or Book graph. Only the bounded shell is isolated eagerly; every
- * growing collection is a path-copy candidate owned by this frame.
+ * Begin the Entity-frame overlay. Bounded shell is isolated; growing
+ * collections are dirty Patricia candidates. Rejection drops this object.
  */
 export const createEntityFrameCandidateState = (
   source: EntityState,
@@ -206,14 +204,14 @@ export const createEntityFrameCandidateState = (
   }
   copyEntityFrameEvents(source, candidate);
   installGrowingEntityCollections(candidate, source);
-  forkEntityAccountCommitmentCache(source, candidate);
   forkCrossJurisdictionBookAdmissionIndex(source, candidate);
   return candidate;
 };
 
+/** Fold the Entity overlay into this same state object. Hash stays lazy until state-root. */
 export const commitEntityFrameCandidateState = (
   state: EntityState,
-  stateRoot?: string,
+  _stateRoot?: string,
 ): EntityState => {
   state.accounts = commitEntityAccountCandidate(state.accounts);
   if (state.orderbookExt) {
@@ -237,7 +235,6 @@ export const commitEntityFrameCandidateState = (
   if (state.crossJurisdictionBookAdmissions instanceof EntityCollectionCandidateMap) {
     state.crossJurisdictionBookAdmissions = state.crossJurisdictionBookAdmissions.sealCandidate();
   }
-  if (stateRoot) primeEntityStateRootMemo(state, stateRoot);
   return state;
 };
 
@@ -245,9 +242,7 @@ export const commitEntityFrameCandidateState = (
  * Root of the certified frame this replica just committed, if it is the head.
  * A committed input that does not advance the height (mempool admission,
  * deferred proposal, precommit collection) must not write any
- * ENTITY_STATE_ROOT_FIELDS: the returned root primes the State-root memo, and
- * a covered-field write without a new frame would leave validators hashing a
- * stale root. Entity State changes only through certified frames.
+ * ENTITY_STATE_ROOT_FIELDS. Entity State changes only through certified frames.
  */
 export const committedEntityStateRoot = (replica: EntityReplica): string | undefined => {
   const head = replica.certifiedFrameHead?.frame;

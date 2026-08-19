@@ -5,13 +5,13 @@
  */
 import { computeIntegrityDigest } from '../../support/integrity-checksum';
 import { encodeRawRadixTextKey } from '../../protocol/state/radix-merkle';
-import { PersistentRadixValueMap } from '../../protocol/state/persistent-radix-value-map';
-import type { PersistentRadixValueMapOptions } from '../../protocol/state/persistent-radix-value-map';
-import type {
-  PersistentRadixNodeChanges,
-  PersistentRadixNodeRecord,
+import {
+  PersistentRadixValueMap,
+  type PersistentRadixNodeChanges,
+  type PersistentRadixNodeRecord,
+  type PersistentRadixValueMapOptions,
 } from '../../protocol/state/persistent-radix-value-map';
-import { encodeAccountStateValue } from '../commitment/state-root';
+import { encodeAccountStateValue } from '../commitment/account-state-value';
 
 export const ACCOUNT_STATE_MAP_NAMESPACES = [
   'deltas',
@@ -101,13 +101,18 @@ const commitmentValue = (
   return unsigned;
 };
 
-const valueHash = (namespace: AccountStateMapNamespace, value: unknown): string => {
+const assertAccountStateLeafSize = (
+  namespace: AccountStateMapNamespace,
+  value: unknown,
+): void => {
   const encoded = encodeAccountStateValue(commitmentValue(namespace, value));
   if (encoded.byteLength > MAX_ACCOUNT_STATE_LEAF_BYTES) {
     throw new Error(`ACCOUNT_STATE_LEAF_TOO_LARGE:${encoded.byteLength}:${MAX_ACCOUNT_STATE_LEAF_BYTES}`);
   }
-  return computeIntegrityDigest(encoded);
 };
+
+const valueHash = (namespace: AccountStateMapNamespace, value: unknown): string =>
+  computeIntegrityDigest(encodeAccountStateValue(commitmentValue(namespace, value)));
 
 const namespaceOptions = <K extends AccountStateMapKey, V>(
   namespace: AccountStateMapNamespace,
@@ -116,7 +121,11 @@ const namespaceOptions = <K extends AccountStateMapKey, V>(
   ownKey: (key: K): K => key,
   keyBytes: (key: K): Uint8Array => encodeAccountStateRadixKey(namespace, key),
   valueHash: (value: V): string => valueHash(namespace, value),
-  ownValue: (value: V): V => sealValue(value),
+  ownValue: (value: V): V => {
+    const sealed = sealValue(value);
+    assertAccountStateLeafSize(namespace, sealed);
+    return sealed;
+  },
 });
 
 /**
@@ -199,6 +208,8 @@ export class PersistentAccountStateMap<K extends AccountStateMapKey, V>
   }
 
   rootHash(): string { return this.#values.rootHash(); }
+
+  get hash(): string { return this.rootHash(); }
 
   /** Expensive independent oracle reserved for recovery checks and diagnostics. */
   coldRootHash(): string {

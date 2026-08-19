@@ -227,6 +227,8 @@ export class EntityCollectionCandidateMap<Value> implements Map<string, Value> {
 
   rootHash(): string { return this.#project().rootHash(); }
 
+  get hash(): string { return this.rootHash(); }
+
   snapshotCandidate(): PersistentEntityCollectionMap<Value> { return this.#project(); }
 
   sealCandidate(): PersistentEntityCollectionMap<Value> {

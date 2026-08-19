@@ -1,6 +1,7 @@
 /**
  * Explicit transaction overlay for one persistent Patricia collection.
  * Reads never claim values for mutation; writes accumulate by canonical key.
+ * prepare() path-copies only; `.hash` / `.root` / `.nodeChanges` seal lazily.
  * Human-audit importance: 100/100 — this replaces hidden machine cloning.
  */
 import {
@@ -45,10 +46,11 @@ export interface RadixOverlayOwner<K, V> {
 }
 
 export type PreparedRadixOverlay<K, V> = Readonly<{
-  baseRoot: string;
-  root: string;
   values: PersistentRadixValueMap<K, V>;
-  nodeChanges: PersistentRadixNodeChanges<K, V>;
+  readonly hash: string;
+  readonly root: string;
+  readonly baseRoot: string;
+  readonly nodeChanges: PersistentRadixNodeChanges<K, V>;
 }>;
 
 const compareBytes = (left: Uint8Array, right: Uint8Array): number => {
@@ -171,21 +173,21 @@ class RadixOverlayTransaction<K, V> implements RadixOverlayOwner<K, V> {
 
   prepare(): PreparedRadixOverlay<K, V> {
     this.requireActive();
-    this.#base.rootHash();
-    const values = this.#base.foldMutations(
+    const base = this.#base;
+    const values = base.foldMutations(
       this.sortedMutations().map(mutation => mutation.kind === 'put'
         ? { kind: 'put', key: mutation.key, value: mutation.value }
         : { kind: 'delete', key: mutation.key }),
       this.#reset,
     );
-    const prepared = Object.freeze({
-      baseRoot: this.#base.rootHash(),
-      root: values.rootHash(),
-      values,
-      nodeChanges: values.nodeChangesSince(this.#base),
-    });
     this.#lifecycle = 'prepared';
-    return prepared;
+    return Object.freeze({
+      values,
+      get hash() { return values.rootHash(); },
+      get root() { return values.rootHash(); },
+      get baseRoot() { return base.rootHash(); },
+      get nodeChanges() { return values.nodeChangesSince(base); },
+    });
   }
 
   discard(): void {
