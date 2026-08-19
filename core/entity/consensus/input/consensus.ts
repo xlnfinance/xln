@@ -253,7 +253,7 @@ export const applyEntityInput = async (
       entity: String(workingReplica.entityId || '').slice(-8),
       height: workingReplica.state.height,
       mempoolTxs: workingReplica.mempool.length,
-      selectedTxs: proposalSelection.txs.length,
+      selectedTxs: proposalSelection.proposalTxs.length,
       inputTxs: entityInput.entityTxs?.length ?? 0,
       inputLanes: Boolean(entityInput.proposedFrame) || Boolean(entityInput.leaderTimeoutVote)
         || (entityInput.hashPrecommits?.size ?? 0) > 0,
