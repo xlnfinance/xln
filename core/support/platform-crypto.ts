@@ -20,6 +20,10 @@ declare global {
 
 export const isBrowser = typeof window !== 'undefined';
 
+/** Stricter than `isBrowser`: also requires `window.document`, guarding against non-browser hosts that still define `window`. */
+export const isBrowserRuntime = (): boolean =>
+  typeof window !== 'undefined' && typeof window.document !== 'undefined';
+
 class XlnSha256Hash {
   private readonly hash = sha256.create();
 

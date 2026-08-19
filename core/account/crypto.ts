@@ -5,6 +5,7 @@
 
 import * as secp256k1 from '@noble/secp256k1';
 import { countOp, countOpWithSite } from '../support/performance/op-counters';
+import { isBrowserRuntime } from '../support/platform-crypto';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { concatBytes } from '@noble/hashes/utils.js';
@@ -46,10 +47,6 @@ type SignerKeyStore = {
 };
 
 let nativeSecp256k1: NativeSecp256k1 | null | undefined;
-
-const isBrowserRuntime = (): boolean =>
-  typeof window !== 'undefined' &&
-  typeof window.document !== 'undefined';
 
 const getNativeSecp256k1 = (): NativeSecp256k1 | null => {
   if (nativeSecp256k1 !== undefined) return nativeSecp256k1;

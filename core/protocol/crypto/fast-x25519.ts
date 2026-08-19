@@ -6,25 +6,10 @@
  * per hop, so this was ~4% of Hub CPU at 500 users. Browsers fall back to noble.
  */
 import { x25519 } from '@noble/curves/ed25519.js';
+import { isBrowserRuntime } from '../../support/platform-crypto';
 
 type NodeCrypto = typeof import('node:crypto');
 type KeyObject = import('node:crypto').KeyObject;
-
-const isBrowserRuntime = (): boolean =>
-  typeof window !== 'undefined' && typeof window.document !== 'undefined';
-
-// Same loading scheme as the native secp256k1 backend in account/crypto.ts.
-let nodeCrypto: NodeCrypto | null = null;
-try {
-  if (!isBrowserRuntime() && typeof require !== 'undefined') {
-    const loaded = require('crypto') as NodeCrypto;
-    if (typeof loaded?.diffieHellman === 'function' && typeof loaded?.createPrivateKey === 'function') {
-      nodeCrypto = loaded;
-    }
-  }
-} catch {
-  nodeCrypto = null;
-}
 
 const PKCS8_PREFIX = Uint8Array.from([
   0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e, 0x04, 0x22, 0x04, 0x20,
@@ -37,6 +22,63 @@ const withPrefix = (prefix: Uint8Array, raw: Uint8Array): Uint8Array => {
   out.set(raw, prefix.length);
   return out;
 };
+
+const rawDiffieHellman = (crypto: NodeCrypto, privateKey: Uint8Array, publicKey: Uint8Array): Uint8Array => {
+  const shared = crypto.diffieHellman({
+    privateKey: crypto.createPrivateKey({ key: Buffer.from(withPrefix(PKCS8_PREFIX, privateKey)), format: 'der', type: 'pkcs8' }),
+    publicKey: crypto.createPublicKey({ key: Buffer.from(withPrefix(SPKI_PREFIX, publicKey)), format: 'der', type: 'spki' }),
+  });
+  return new Uint8Array(shared.buffer, shared.byteOffset, shared.byteLength);
+};
+
+const rawPublicKey = (crypto: NodeCrypto, privateKey: Uint8Array): Uint8Array => {
+  const privateKeyObject = crypto.createPrivateKey({ key: Buffer.from(withPrefix(PKCS8_PREFIX, privateKey)), format: 'der', type: 'pkcs8' });
+  const spki = crypto.createPublicKey(privateKeyObject).export({ format: 'der', type: 'spki' }) as Buffer;
+  return new Uint8Array(spki.buffer, spki.byteOffset + spki.byteLength - 32, 32);
+};
+
+const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean =>
+  left.length === right.length && left.every((byte, index) => byte === right[index]);
+
+// Same self-test discipline as fast-keccak/fast-sha256: never trust a fast
+// backend without checking it against the audited noble implementation on a
+// fixed probe first. A wrong DER wrapping or a host where node:crypto's DH
+// diverges from RFC 7748 would otherwise corrupt HTLC onion encryption and
+// p2p session keys silently, forever.
+const probeKeyA = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+const probeKeyB = Uint8Array.from({ length: 32 }, (_, index) => index + 33);
+
+const nativeX25519PassesProbe = (crypto: NodeCrypto): boolean => {
+  try {
+    const nativePubA = rawPublicKey(crypto, probeKeyA);
+    const nativePubB = rawPublicKey(crypto, probeKeyB);
+    if (!bytesEqual(nativePubA, x25519.getPublicKey(probeKeyA))) return false;
+    if (!bytesEqual(nativePubB, x25519.getPublicKey(probeKeyB))) return false;
+    const nativeShared = rawDiffieHellman(crypto, probeKeyA, nativePubB);
+    if (!bytesEqual(nativeShared, x25519.getSharedSecret(probeKeyA, nativePubB))) return false;
+    // DH must also be commutative through the native path itself.
+    return bytesEqual(nativeShared, rawDiffieHellman(crypto, probeKeyB, nativePubA));
+  } catch {
+    return false;
+  }
+};
+
+// Same loading scheme as the native secp256k1 backend in account/crypto.ts.
+let nodeCrypto: NodeCrypto | null = null;
+try {
+  if (!isBrowserRuntime() && typeof require !== 'undefined') {
+    const loaded = require('crypto') as NodeCrypto;
+    if (
+      typeof loaded?.diffieHellman === 'function' &&
+      typeof loaded?.createPrivateKey === 'function' &&
+      nativeX25519PassesProbe(loaded)
+    ) {
+      nodeCrypto = loaded;
+    }
+  }
+} catch {
+  nodeCrypto = null;
+}
 
 const hexOf = (bytes: Uint8Array): string => {
   let hex = '';
