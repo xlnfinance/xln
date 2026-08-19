@@ -258,12 +258,14 @@ async function maintainPendingAccounts(
       throw new Error(`PENDING_ACCOUNT_INDEX_FRAME_MISSING:${counterpartyId}`);
     }
     const frameAge = now - account.pendingFrame.timestamp;
-    const cachedInputHeight = account.pendingAccountInput
-      ? accountInputProposedFrameHeight(account.pendingAccountInput)
-      : 0;
+    if (!account.pendingAccountInput) {
+      throw new Error(
+        `PENDING_ACCOUNT_RESEND_CACHE_MISSING:${counterpartyId}:h${account.pendingFrame.height}`,
+      );
+    }
+    const cachedInputHeight = accountInputProposedFrameHeight(account.pendingAccountInput);
     if (
       frameAge <= ACCOUNT_PENDING_RESEND_AFTER_MS ||
-      !account.pendingAccountInput ||
       cachedInputHeight !== account.pendingFrame.height
     ) continue;
 

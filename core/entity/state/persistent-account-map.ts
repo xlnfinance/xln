@@ -440,6 +440,12 @@ export class EntityAccountCandidateMap implements ReadonlyMap<string, AccountRep
     return this.#projection;
   }
 
+  /** Hash/seal after in-place envelope mutation must not reuse a stale fork. */
+  dropCachedProjection(): void {
+    this.#requireActive();
+    this.#projection = undefined;
+  }
+
   getCertifiedBase(entityId: string): AccountReplica | undefined {
     return this.#cleared ? undefined : this.#base.get(entityId);
   }

@@ -256,7 +256,101 @@ export const computeAccountCommitmentSectionDetailCold = (
   account: AccountState,
 ): AccountCommitmentSectionDetail => accountCommitmentSectionDetail(account, true);
 
+/**
+ * Repeat Account-root queries on one live state (transition key, exact-base,
+ * proposal, commit, Entity leaf) must not rebuild the 5-section Merkle while
+ * collections and scalars are unchanged. The memo is a non-enumerable field on
+ * the AccountState value, never a GC-by-identity collection: those caches are
+ * non-deterministic. In-place scalar edits miss via exact scalar bytes;
+ * collection replacement misses via object identity.
+ */
+const ACCOUNT_STATE_ROOT_MEMO = Symbol('ACCOUNT_STATE_ROOT_MEMO');
+
+type AccountStateRootMemo = {
+  collections: readonly unknown[];
+  scalarBytes: string;
+  root: string;
+};
+
+const ACCOUNT_ROOT_COLLECTION_FIELDS = [
+  'deltas',
+  'locks',
+  'pulls',
+  'swapOffers',
+  'subcontracts',
+  'lendingIntents',
+  'requestedRebalance',
+  'requestedRebalanceFeeState',
+  'rebalanceFeePolicies',
+] as const satisfies readonly (keyof AccountState)[];
+
+const accountRootCollectionIdentities = (account: AccountState): unknown[] =>
+  ACCOUNT_ROOT_COLLECTION_FIELDS.map(field => account[field]);
+
+const accountRootScalarBytes = (account: AccountState): string => {
+  const domain = normalizeAccountStateDomain(account.domain);
+  return ethers.hexlify(encodeAccountStateValue({
+    chainId: domain.chainId,
+    depositoryAddress: domain.depositoryAddress,
+    leftEntity: account.leftEntity,
+    rightEntity: account.rightEntity,
+    watchSeed: account.watchSeed,
+    jNonce: account.jNonce,
+    disputeConfig: account.disputeConfig,
+    settlementWorkspace: settlementWorkspaceWithoutHankos(account.settlementWorkspace),
+    lastFinalizedJHeight: account.lastFinalizedJHeight,
+    leftPendingJClaims: account.leftPendingJClaims,
+    rightPendingJClaims: account.rightPendingJClaims,
+  }));
+};
+
+const sameCollections = (left: readonly unknown[], right: readonly unknown[]): boolean => {
+  for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) return false;
+  return true;
+};
+
+const readAccountStateRootMemo = (account: AccountState): AccountStateRootMemo | undefined => {
+  const memo = Reflect.get(account, ACCOUNT_STATE_ROOT_MEMO);
+  return memo === undefined ? undefined : memo as AccountStateRootMemo;
+};
+
+const writeAccountStateRootMemo = (account: AccountState, memo: AccountStateRootMemo): void => {
+  const existing = Object.getOwnPropertyDescriptor(account, ACCOUNT_STATE_ROOT_MEMO);
+  if (existing?.writable) {
+    Reflect.set(account, ACCOUNT_STATE_ROOT_MEMO, memo);
+    return;
+  }
+  try {
+    Object.defineProperty(account, ACCOUNT_STATE_ROOT_MEMO, {
+      value: memo,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch {
+    // Frozen/sealed AccountState still hashes correctly; it cannot cache.
+  }
+};
+
 export const computeAccountStateRoot = (
+  account: AccountState,
+  timing?: AccountStateRootTiming,
+): string => {
+  if (timing === undefined && accountStateRootDebugRecorder === null) {
+    const collections = accountRootCollectionIdentities(account);
+    const scalarBytes = accountRootScalarBytes(account);
+    const memo = readAccountStateRootMemo(account);
+    if (memo && memo.scalarBytes === scalarBytes && sameCollections(memo.collections, collections)) {
+      return memo.root;
+    }
+    const root = computeAccountStateRootUncached(account);
+    writeAccountStateRootMemo(account, { collections, scalarBytes, root });
+    return root;
+  }
+  return computeAccountStateRootUncached(account, timing);
+};
+
+const computeAccountStateRootUncached = (
   account: AccountState,
   timing?: AccountStateRootTiming,
 ): string => {

@@ -183,6 +183,7 @@ const ACCOUNT_LIVE_ENVELOPE = new Set<keyof AccountReplica>([
   'lastRollbackFrameHash',
   'boardResealMigration',
   'counterpartyBoardReseal',
+  'publicPinned',
 ]);
 
 export const publishAccountOverlay = (
@@ -215,7 +216,13 @@ export const publishAccountTransition = (
 ): AccountTransitionCommit => {
   const committed = commitAccountTransition(overlay);
   publishAccountOverlay(live, committed.account);
-  return { ...committed, account: live };
+  return {
+    account: live,
+    cacheKey: committed.cacheKey,
+    get accountStateRoot() { return committed.accountStateRoot; },
+    get hash() { return committed.hash; },
+    get nodeChanges() { return committed.nodeChanges; },
+  };
 };
 
 export const discardAccountTransition = (overlay: AccountTransitionOverlay): void => {

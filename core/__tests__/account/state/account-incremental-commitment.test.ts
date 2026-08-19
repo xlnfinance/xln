@@ -151,6 +151,17 @@ describe('incremental Account commitment', () => {
     }));
   });
 
+  test('in-place scalar mutation misses the colocated Account root memo', () => {
+    const replica = account(2);
+    const first = computeAccountStateRoot(replica.state);
+    replica.state.jNonce += 1;
+    const second = computeAccountStateRoot(replica.state);
+    expect(second).not.toBe(first);
+    expect(second).toBe(computeAccountStateRootCold(replica.state));
+    const third = computeAccountStateRoot(replica.state);
+    expect(third).toBe(second);
+  });
+
   test('preserves the warm commitment through the Entity overlay boundary', () => {
     const base = accountForEntity(10_000);
     const warmRoot = computeAccountStateRoot(base.state);

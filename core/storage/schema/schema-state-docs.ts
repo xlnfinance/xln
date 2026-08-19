@@ -160,7 +160,7 @@ const ACCOUNT_REPLICA_OPTIONAL = [
   'currentDisputeProofProposerIsLeft', 'counterpartyDisputeProofProposerIsLeft',
   'counterpartyDisputeHash', 'counterpartySettlementHanko', 'disputeProofNoncesByHash',
   'disputeProofBodiesByHash', 'disputeArgumentSnapshotsByHash', 'disputePrepare',
-  'activeDispute',
+  'activeDispute', 'publicPinned',
 ] as const;
 const ACCOUNT_STATE_REQUIRED = [
   'leftEntity', 'rightEntity', 'domain', 'watchSeed', 'deltas', 'locks',
@@ -305,6 +305,9 @@ const validateStorageAccountReplicaCore = (doc: Record<string, unknown>, code: s
   });
   for (const withdrawal of requireStorageMap(doc['pendingWithdrawals'], `${code}_WITHDRAWALS`).values()) {
     requireStorageBigInt(requireBoundaryRecord(withdrawal, `${code}_WITHDRAWAL`)['amount'], `${code}_WITHDRAWAL_AMOUNT`, FINANCIAL.MIN_PAYMENT_AMOUNT, FINANCIAL.MAX_PAYMENT_AMOUNT);
+  }
+  if (doc['publicPinned'] !== undefined) {
+    requireStorageBoolean(doc['publicPinned'], `${code}_PUBLIC_PINNED`);
   }
 };
 

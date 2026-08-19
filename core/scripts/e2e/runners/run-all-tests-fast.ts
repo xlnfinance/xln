@@ -88,7 +88,7 @@ async function main(): Promise<void> {
     return;
   }
   const args = parseArgs();
-  assertBroadRunHasNoUnresolvedReruns();
+  assertBroadRunHasNoUnresolvedReruns(undefined, { kind: 'e2e' });
   console.log('\n' + '='.repeat(72));
   console.log('Fast Full Suite (parallel + isolated)');
   console.log('='.repeat(72));

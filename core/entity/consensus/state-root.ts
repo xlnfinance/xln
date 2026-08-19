@@ -549,10 +549,11 @@ export const computeEntityAccountValueHash = (account: AccountReplica): string =
   );
 
 export const invalidateEntityAccountCommitment = (state: EntityState, counterpartyId: string): void => {
-  if (
-    !(state.accounts instanceof PersistentEntityAccountMap) &&
-    !(state.accounts instanceof EntityAccountCandidateMap)
-  ) {
+  if (state.accounts instanceof EntityAccountCandidateMap) {
+    state.accounts.dropCachedProjection();
+    return;
+  }
+  if (!(state.accounts instanceof PersistentEntityAccountMap)) {
     throw new Error(`ENTITY_ACCOUNT_MAP_NOT_PERSISTENT:${counterpartyId}`);
   }
 };

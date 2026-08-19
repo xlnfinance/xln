@@ -98,7 +98,7 @@ if (passthrough.some(argument => argument === '--help' || argument === '-h')) {
   console.log('Usage: bun core/scripts/e2e/runners/run-e2e-fast.ts [isolated-runner options]');
   process.exit(0);
 }
-assertBroadRunHasNoUnresolvedReruns();
+assertBroadRunHasNoUnresolvedReruns(undefined, { kind: 'e2e' });
 const isCi = process.env['CI'] === 'true';
 // A GitHub four-core runner cannot bootstrap one five-runtime stack while
 // Playwright reads another: the second bootstrap can starve the first

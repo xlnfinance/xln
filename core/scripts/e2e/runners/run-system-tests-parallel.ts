@@ -303,7 +303,7 @@ async function main(): Promise<void> {
     return;
   }
   const args = parseArgs();
-  assertBroadRunHasNoUnresolvedReruns();
+  assertBroadRunHasNoUnresolvedReruns(undefined, { kind: 'scenario', targets: args.scenarios });
   cleanupTestArtifactsBeforeRun({ reason: 'system-tests' });
   process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
   const scenarios = args.scenarios;

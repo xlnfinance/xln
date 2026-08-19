@@ -357,4 +357,23 @@ describe('PersistentEntityAccountMap', () => {
     expect(shell.lastOutboundFrameAck.response.ack.frameHanko).toBe(`0x${'22'.repeat(65)}`);
     expect(base.get(RIGHT)?.pendingAccountInput).toBeUndefined();
   });
+
+  test('dropping the hash projection reseals in-place pendingFrame onto the committed leaf', () => {
+    const replica = productionAccount();
+    replica.currentHeight = 10;
+    const overlay = new EntityAccountCandidateMap(PersistentEntityAccountMap.fromMap(
+      new Map([[RIGHT, replica]]),
+      LEFT,
+      computeEntityAccountValueHash,
+    ));
+    const shell = overlay.getForWrite(RIGHT);
+    if (!shell) throw new Error('TEST_WRITE_SHELL_MISSING');
+    overlay.rootHash();
+    shell.pendingFrame = { ...shell.currentFrame, height: 11, stateHash: `0x${'ab'.repeat(32)}` };
+    overlay.dropCachedProjection();
+    const committed = overlay.sealCandidate();
+
+    expect(committed.get(RIGHT)?.pendingFrame?.height).toBe(11);
+    expect(committed.get(RIGHT)?.pendingFrame?.stateHash).toBe(`0x${'ab'.repeat(32)}`);
+  });
 });
