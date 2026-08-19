@@ -293,10 +293,9 @@ const getOrDeriveKey = (envSeed: Uint8Array | string, signerId: string): Uint8Ar
 
   const store = getSignerKeyStore(envSeed);
   const cached = store?.privateKeys.get(signerId) || store?.privateKeys.get(canonicalSignerId);
-  if (cached) {
-    assertSignerKeyMatchesId(canonicalSignerId, cached, 'getOrDeriveKey(cache)');
-    return cached;
-  }
+  // Registration proved the key<->address binding; cache hits do not re-derive
+  // the public point (that cost one keccak per lookup on every sign/verify).
+  if (cached) return cached;
 
   if (envSeed === undefined || envSeed === null) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getOrDeriveKey called without env.runtimeSeed for signer ${canonicalSignerId}`);
@@ -324,9 +323,7 @@ export function getCachedSignerPrivateKey(scope: SignerKeyScope, signerId: strin
     throw new Error(`NUMERIC_SIGNER_CACHE_LOOKUP_FORBIDDEN: signerId=${key}`);
   }
   const cached = getSignerKeyStore(scope)?.privateKeys.get(key) || null;
-  if (cached) {
-    assertSignerKeyMatchesId(key, cached, 'getCachedSignerPrivateKey(cache)');
-  }
+  // Binding proven at registration; no per-lookup re-derivation.
   return cached;
 }
 
@@ -353,11 +350,8 @@ const getExactRegisteredSignerPrivateKey = (
   signerId: string,
 ): Uint8Array | null => {
   const key = signerId.toLowerCase();
-  const cached = getSignerKeyStore(scope)?.privateKeys.get(key) || null;
-  if (cached) {
-    assertSignerKeyMatchesId(key, cached, 'getExactRegisteredSignerPrivateKey(cache)');
-  }
-  return cached;
+  // Binding proven at registration; no per-lookup re-derivation.
+  return getSignerKeyStore(scope)?.privateKeys.get(key) || null;
 };
 
 const getExactRegisteredSignerPublicKey = (
