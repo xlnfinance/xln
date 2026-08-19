@@ -164,7 +164,7 @@
     },
     {
       "at": "2026-08-19T03:35:00Z",
-      "commit": "HEAD",
+      "commit": "285c3135f",
       "headline": "Hub is now the wall: 248.8/s at 500 users with 10 lanes (50 users each)",
       "detail": "Same code as aaf5db645 plus perf-snapshot throttling (percentile sort on every frame was ~9% of Hub CPU under XLN_RUNTIME_APPLY_PROFILE) and no op-counters. Lanes at 100 users each were co-limiting (5 lanes peaked at 125-146% CPU); with 10 lanes the lanes idle at 20-40% avg while Hub main thread sits at 100-125% for the whole 30 s window. 7500/7500 in 30.1 s, exit 0. Hub CPU profile (m500m): storage 22% (account envelope trie 11%), state roots 14%, hanko verify 4.4%, HTLC materialize+replay 6.9%, own-frame validation/measure 4%.",
       "users": 500,
