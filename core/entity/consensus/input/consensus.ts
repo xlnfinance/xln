@@ -148,15 +148,22 @@ const advanceEntityProposal = async (
 /**
  * Main entity input processor - handles consensus, proposals, and state transitions
  */
-/** Only transaction-carrying inputs without consensus evidence may wait for the batch flush. */
+/**
+ * Inputs without consensus evidence may wait for the batch flush.
+ *
+ * A wake-only input (no txs, no lanes) is Runtime-derived work notification,
+ * never remote consensus evidence; proposing inline per poke turned a hub's
+ * wake churn into one-frame-per-poke (measured: 75% of proposals carried a
+ * single tx while the mempool held p50=1). Deferring pokes to the single
+ * end-of-batch flush restores one Entity frame per replica per Runtime frame.
+ */
 export const isProposalDeferrableEntityInput = (input: EntityInput): boolean =>
   !input.proposedFrame &&
   !(input.hashPrecommits && input.hashPrecommits.size > 0) &&
   !input.hashPrecommitFrame &&
   !input.jPrefixAttestations &&
   !input.leaderTimeoutVote &&
-  !input.localRuntimeProtocol &&
-  (input.entityTxs?.length ?? 0) > 0;
+  !input.localRuntimeProtocol;
 
 export const applyEntityInput = async (
   env: EntityRuntimeContext,
