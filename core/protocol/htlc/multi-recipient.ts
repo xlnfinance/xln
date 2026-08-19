@@ -1,5 +1,5 @@
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
-import { x25519 } from '@noble/curves/ed25519.js';
+import { x25519PublicKey, x25519SharedSecret } from '../crypto/fast-x25519';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
@@ -50,7 +50,7 @@ const derivePublicKeyHex = (entityPrivateKey: string): string => {
   const memoized = derivedPublicKeyHexByPrivateKey.get(entityPrivateKey);
   if (memoized !== undefined) return memoized;
   const privateKey = keyBytes(entityPrivateKey, 'HTLC_ENTITY_ENCRYPTION_PRIVATE_KEY_INVALID');
-  const derived = keyHex(x25519.getPublicKey(privateKey));
+  const derived = keyHex(x25519PublicKey(privateKey));
   if (derivedPublicKeyHexByPrivateKey.size >= DERIVED_PUBLIC_KEY_MEMO_MAX) derivedPublicKeyHexByPrivateKey.clear();
   derivedPublicKeyHexByPrivateKey.set(entityPrivateKey, derived);
   return derived;
@@ -126,8 +126,8 @@ export const encryptOpaqueHtlcBytes = (
   if (plaintext.length > MAX_HTLC_BINARY_LAYER_BYTES) throw new Error('HTLC_ENCRYPTION_PLAINTEXT_TOO_LARGE');
   const recipient = keyBytes(recipientPublicKey, 'HTLC_ENTITY_ENCRYPTION_PUBLIC_KEY_INVALID');
   const ephemeralSecret = keyBytes(ephemeralPrivateKey, 'HTLC_EPHEMERAL_PRIVATE_KEY_INVALID');
-  const ephemeralPublic = x25519.getPublicKey(ephemeralSecret);
-  const shared = x25519.getSharedSecret(ephemeralSecret, recipient);
+  const ephemeralPublic = x25519PublicKey(ephemeralSecret);
+  const shared = x25519SharedSecret(ephemeralSecret, recipient);
   const context = contextBytes(contextHash);
   const nonce = deriveNonce(ephemeralPublic, recipient, context);
   const encrypted = chacha20poly1305(aeadKey(shared, context), nonce, context).encrypt(plaintext);
@@ -186,7 +186,7 @@ const decryptOpaqueHtlcBytesUncached = (
   const nonce = deriveNonce(ephemeralPublic, publicKey, context);
   let plaintext: Uint8Array;
   try {
-    const shared = x25519.getSharedSecret(privateKey, ephemeralPublic);
+    const shared = x25519SharedSecret(privateKey, ephemeralPublic);
     plaintext = chacha20poly1305(aeadKey(shared, context), nonce, context).decrypt(encrypted);
   } catch (error) {
     throw new HtlcCiphertextAuthenticationError(error);

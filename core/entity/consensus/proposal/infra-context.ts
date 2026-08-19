@@ -6,8 +6,8 @@ import { canonicalizeProfile } from '../../profile';
 import { compareStableText } from '../../../protocol/serialization';
 import { timePerfPhase } from '../../../support/performance/profile';
 import { getPrevFrameHash } from '../frame/lineage';
-import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
-import { LIMITS } from '../../../config/constants';
+
+
 import {
   getEffectiveHtlcFrameTxs,
   materializeHtlcPreparedInfraContext,
@@ -132,7 +132,7 @@ export const materializeEntityInfraContext = async (
     return route;
   };
   const htlc = needsHtlcInfra
-    ? await materializeHtlcPreparedInfraContext({
+    ? await timePerfPhase('entity.infraMaterialize.htlc', () => materializeHtlcPreparedInfraContext({
         state: replica.state,
         proposalTxs,
         entityEncryptionPublicKey: replica.state.entityEncryptionPublicKey,
@@ -142,7 +142,7 @@ export const materializeEntityInfraContext = async (
         parentFrameHash: getPrevFrameHash(replica.state),
         height: replica.state.height + 1,
         resolveRoute,
-      })
+      }))
     : { version: 1 as const, entries: [], originated: [] };
   // Only originated routes need profiles in the context (validators replay
   // fee quotes and hop keys from them). Forward next hops and peer assertions
@@ -170,7 +170,7 @@ export const materializeEntityInfraContext = async (
       entityId: peerEntityId,
       online: observedOnline.get(peerEntityId) ?? isEntityOnline(peerEntityId),
     }));
-  const context = validateEntityInfraContext({
+  const context = timePerfPhase('entity.infraMaterialize.validate', () => validateEntityInfraContext({
     version: 1,
     proposerReplicaId: `${entityId}:${proposerSignerId}`,
     entityId,
@@ -180,11 +180,10 @@ export const materializeEntityInfraContext = async (
     gossipProfiles,
     peerAssertions,
     htlc,
-  });
-  await assertEntityInfraContextAuthority(env, context, replica.state);
-  const byteLength = new TextEncoder().encode(encodeCanonicalConsensusValue(context)).byteLength;
-  if (byteLength > LIMITS.MAX_FRAME_SIZE_BYTES) {
-    throw new Error(`ENTITY_INFRA_CONTEXT_BYTE_LIMIT_EXCEEDED:${byteLength}:${LIMITS.MAX_FRAME_SIZE_BYTES}`);
-  }
+  }));
+  // validateEntityInfraContext already enforces MAX_FRAME_SIZE_BYTES on the
+  // canonical encoding; re-encoding a multi-MB Hub context here was pure cost.
+  await timePerfPhase('entity.infraMaterialize.authority', () =>
+    assertEntityInfraContextAuthority(env, context, replica.state));
   return context;
 });

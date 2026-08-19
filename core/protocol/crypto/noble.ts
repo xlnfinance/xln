@@ -10,7 +10,7 @@
  */
 
 import type { CryptoProvider, CryptoKeyPair } from './provider';
-import { x25519 } from '@noble/curves/ed25519.js';
+import { x25519PublicKey, x25519RandomSecretKey, x25519SharedSecret } from './fast-x25519';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
 
@@ -27,7 +27,7 @@ export class NobleCryptoProvider implements CryptoProvider {
     // Generate X25519 key pair (32 bytes each)
     const keyPair = this.options.deterministicSeed
       ? await this.generateDeterministicKeyPair('keygen')
-      : x25519.keygen();
+      : (() => { const secretKey = x25519RandomSecretKey(); return { secretKey, publicKey: x25519PublicKey(secretKey) }; })();
 
     return {
       publicKey: encodeBase64Bytes(keyPair.publicKey),
@@ -45,7 +45,7 @@ export class NobleCryptoProvider implements CryptoProvider {
     // Deterministic providers are reserved for explicit deterministic tests.
     const ephemeral = this.options.deterministicSeed
       ? await this.generateDeterministicKeyPair('encrypt-ephemeral')
-      : x25519.keygen();
+      : (() => { const secretKey = x25519RandomSecretKey(); return { secretKey, publicKey: x25519PublicKey(secretKey) }; })();
     const ephemeralPriv = ephemeral.secretKey;
     const ephemeralPub = ephemeral.publicKey;
 
@@ -56,7 +56,7 @@ export class NobleCryptoProvider implements CryptoProvider {
     }
     let sharedSecret: Uint8Array;
     try {
-      sharedSecret = x25519.getSharedSecret(ephemeralPriv, recipientPubBytes);
+      sharedSecret = x25519SharedSecret(ephemeralPriv, recipientPubBytes);
     } catch (error) {
       const preview = recipientPubKey.slice(0, 24);
       console.error('[NOBLE_ENCRYPT_FAIL]', {
@@ -101,7 +101,7 @@ export class NobleCryptoProvider implements CryptoProvider {
     if (privKeyBytes.length !== 32) {
       throw new Error(`Invalid private key length: expected 32, got ${privKeyBytes.length}`);
     }
-    const sharedSecret = x25519.getSharedSecret(privKeyBytes, ephemeralPub);
+    const sharedSecret = x25519SharedSecret(privKeyBytes, ephemeralPub);
 
     // Derive ChaCha20-Poly1305 key
     const key = sharedSecret.slice(0, 32);
@@ -116,7 +116,7 @@ export class NobleCryptoProvider implements CryptoProvider {
   private async generateDeterministicKeyPair(label: string): Promise<{ publicKey: Uint8Array; secretKey: Uint8Array }> {
     const secretKey = await this.deterministicBytes(32, label);
     return {
-      publicKey: x25519.getPublicKey(secretKey),
+      publicKey: x25519PublicKey(secretKey),
       secretKey,
     };
   }

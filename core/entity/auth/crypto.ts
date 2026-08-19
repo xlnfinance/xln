@@ -1,5 +1,5 @@
 import { pubKeyToHex } from '../../protocol/crypto/p2p-crypto';
-import { x25519 } from '@noble/curves/ed25519.js';
+import { x25519PublicKey } from '../../protocol/crypto/fast-x25519';
 import { getBytes } from 'ethers';
 import type { EntityRuntimeContext } from '../runtime-context';
 
@@ -28,7 +28,7 @@ export const deriveEntityEncryptionPublicKey = (privateKey: string, entityId: st
   if (!/^0x[0-9a-f]{64}$/.test(normalizedPrivateKey)) {
     throw new Error(`ENTITY_ENCRYPTION_PRIVATE_KEY_INVALID:entity=${entityId}`);
   }
-  return pubKeyToHex(x25519.getPublicKey(getBytes(normalizedPrivateKey))).toLowerCase();
+  return pubKeyToHex(x25519PublicKey(getBytes(normalizedPrivateKey))).toLowerCase();
 };
 
 export const provisionEntityEncryptionKey = (

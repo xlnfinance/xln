@@ -141,6 +141,26 @@
       "paymentsTps": 149.3,
       "swapsTps": 0,
       "status": "green"
+    },
+    {
+      "at": "2026-08-19T00:20:00Z",
+      "commit": "d1bd71f72",
+      "headline": "First complete 500-user payments run: 130.5/s, 15000/15000 delivered",
+      "detail": "Unified proposal path (single-signer = build proposal → commit immediately, no precommit round). Fixes: mempool prune by frame.txs; htlc_resolve direct hashlock lookup (was ~50% hub CPU); htlc_lock capacity as retry (MAX_ACCOUNT_HTLC_LOCKS=32 stalled at 32 payments/sender); cascade guard scales with replicas; wireFit ratio fit with hasReplayEntityContext; content-keyed onion decrypt memo; secret-ack timeout 120 s; dispute-start batch re-arm. 114.9 s, exit 0, no hub warnings. Hub: 30 heavy frames = 78 s; wireFit 44 s (infraMaterialize 526 calls, avg 36 ms, max 3.3 s), frameApply 20 s.",
+      "users": 500,
+      "paymentsTps": 130.5,
+      "swapsTps": 0,
+      "status": "green"
+    },
+    {
+      "at": "2026-08-19T03:20:00Z",
+      "commit": "HEAD",
+      "headline": "Native X25519 for onion layers: 186.7/s at 500 users",
+      "detail": "node:crypto diffieHellman replaces the pure-JS noble ladder for HTLC onion and p2p session ECDH (25 us vs 330 us per scalar mult; identical RFC 7748 bytes, browsers fall back to noble). Also dropped the duplicate multi-MB canonical encode after infra-context validation and added sub-phase perf counters (infraMaterialize.htlc/validate/authority, wireFit.measure, proposal.assertHtlc). 7500/7500 in 40.2 s (30 rounds), exit 0. Hub phase totals: wireFit 4.0 s (was 7.5 s), infraMaterialize.htlc 2.6 s (was 5.7 s), assertHtlc 1.5 s.",
+      "users": 500,
+      "paymentsTps": 186.7,
+      "swapsTps": 0,
+      "status": "green"
     }
   ]
 }

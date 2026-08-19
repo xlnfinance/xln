@@ -103,7 +103,7 @@ export const fitEntityProposalToWireBudget = async (params: {
       // by the measured ratio instead of binary-searching against a context
       // built for the whole slice.
       const wire = rest(materialized.entityContext);
-      const bytes = measureEntityFrameWireBytes({ ...wire, txs: slice });
+      const bytes = timePerfPhase('entity.wireFit.measure', () => measureEntityFrameWireBytes({ ...wire, txs: slice }));
       if (bytes <= maxBytes) {
         if (slice.length >= 100 || slice.length < allTxs.length) {
           entityLog.info('proposal.wire_budget_fit', {

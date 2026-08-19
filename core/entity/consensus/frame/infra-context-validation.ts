@@ -1,4 +1,5 @@
 import { LIMITS } from '../../../config/constants';
+import { timePerfPhase } from '../../../support/performance/profile';
 import { utf8ByteLength } from '../../../protocol/crypto/keccak-text';
 import { parseProfile, type DecodedProfile } from '../../profile';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
@@ -101,7 +102,7 @@ export const validateEntityInfraContext = (value: unknown): DecodedEntityInfraCo
     previousPeerId = peerEntityId;
     return { entityId: peerEntityId, online: peer['online'] };
   });
-  const htlc = validateHtlcPreparedInfraContext(raw['htlc']);
+  const htlc = timePerfPhase('entity.infraValidate.htlc', () => validateHtlcPreparedInfraContext(raw['htlc']));
   // Profiles are consumed only by originated-payment replay (fee quotes,
   // hop encryption keys, account domains). Forward entries and peer
   // assertions need no profile: a Hub frame that forwards to hundreds of
@@ -127,7 +128,7 @@ export const validateEntityInfraContext = (value: unknown): DecodedEntityInfraCo
     version: 1, proposerReplicaId, entityId, proposerSignerId, parentFrameHash,
     height: entityHeight, gossipProfiles, peerAssertions, htlc,
   };
-  const bytes = utf8ByteLength(encodeCanonicalConsensusValue(context));
+  const bytes = timePerfPhase('entity.infraValidate.encode', () => utf8ByteLength(encodeCanonicalConsensusValue(context)));
   if (bytes > LIMITS.MAX_FRAME_SIZE_BYTES) {
     throw new Error(`ENTITY_INFRA_CONTEXT_BYTE_LIMIT_EXCEEDED:${bytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}`);
   }

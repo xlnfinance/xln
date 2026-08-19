@@ -7,7 +7,7 @@
  * Wire format: ephemeralPub (32) + nonce (12) + ciphertext (data + 16 tag)
  */
 
-import { x25519 } from '@noble/curves/ed25519.js';
+import { x25519PublicKey, x25519RandomSecretKey, x25519SharedSecret as fastX25519SharedSecret } from './fast-x25519';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { decodeBase64Bytes, encodeBase64Bytes } from '../serialization/base64';
@@ -50,7 +50,7 @@ export function deriveEncryptionKeyPair(seed: Uint8Array | string): P2PKeyPair {
   privateKey[31] = (byte31 & 127) | 64;
 
   // Derive public key
-  const publicKey = x25519.getPublicKey(privateKey);
+  const publicKey = x25519PublicKey(privateKey);
 
   return { publicKey, privateKey };
 }
@@ -65,11 +65,11 @@ function encryptMessage(
   recipientPubKey: Uint8Array
 ): Uint8Array {
   // Generate ephemeral keypair (forward secrecy)
-  const ephemeralPriv = x25519.utils.randomSecretKey();
-  const ephemeralPub = x25519.getPublicKey(ephemeralPriv);
+  const ephemeralPriv = x25519RandomSecretKey();
+  const ephemeralPub = x25519PublicKey(ephemeralPriv);
 
   // ECDH: derive shared secret
-  const sharedSecret = x25519.getSharedSecret(ephemeralPriv, recipientPubKey);
+  const sharedSecret = fastX25519SharedSecret(ephemeralPriv, recipientPubKey);
 
   // Use shared secret as ChaCha20-Poly1305 key (first 32 bytes)
   const key = sharedSecret.slice(0, 32);
@@ -107,7 +107,7 @@ function decryptMessage(
   const ciphertext = packed.slice(44);
 
   // ECDH: derive shared secret
-  const sharedSecret = x25519.getSharedSecret(privateKey, ephemeralPub);
+  const sharedSecret = fastX25519SharedSecret(privateKey, ephemeralPub);
 
   // Use shared secret as key
   const key = sharedSecret.slice(0, 32);
@@ -149,12 +149,12 @@ export function decryptJSON(
 
 /** Fresh ephemeral X25519 keypair for one transport session. */
 export function generateEphemeralKeyPair(): P2PKeyPair {
-  const privateKey = x25519.utils.randomSecretKey();
-  return { privateKey, publicKey: x25519.getPublicKey(privateKey) };
+  const privateKey = x25519RandomSecretKey();
+  return { privateKey, publicKey: x25519PublicKey(privateKey) };
 }
 
 export function x25519SharedSecret(privateKey: Uint8Array, peerPubKey: Uint8Array): Uint8Array {
-  return x25519.getSharedSecret(privateKey, peerPubKey);
+  return fastX25519SharedSecret(privateKey, peerPubKey);
 }
 
 const sessionNonce = (seq: number): Uint8Array => {

@@ -41,6 +41,7 @@ import {
 } from '../state-root';
 import { fitEntityProposalToWireBudget } from './wire-budget';
 import { validateProposedEntityFrame } from '../frame/validation';
+import { timePerfPhase } from '../../../support/performance/profile';
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
@@ -345,12 +346,12 @@ const buildEntityProposal = async (
   const txs = selection.proposalTxs;
   const entityContext = fitted.entityContext;
   profile.checkpoint('wireFit');
-  await assertHtlcPreparedInfraContext({
+  await timePerfPhase('entity.proposal.assertHtlc', () => assertHtlcPreparedInfraContext({
     state: workingReplica.state,
     proposalTxs: txs,
     context: entityContext,
     entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, workingReplica.entityId),
-  });
+  }));
   const applyFrame = context.promoteCandidateState && selection.isSingleSigner
     ? applyRuntimeOwnedEntityFrame
     : applyEntityFrame;
