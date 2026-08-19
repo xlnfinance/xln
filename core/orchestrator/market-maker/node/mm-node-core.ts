@@ -1725,10 +1725,28 @@ export const hasCrossSpecBootstrapProgress = (
   env: RuntimeReplica,
   spec: MarketMakerOfferSpec,
   getPendingCrossRequestOrderIds: PendingCrossRequestReader,
+  attemptedBootstrapIntentOrderIds?: Map<string, number>,
+  nowMs: number = Date.now(),
 ): boolean => {
   const route = spec.crossJurisdiction;
   if (!route) return false;
-  if (hasSourceAccountCrossOffer(env, route)) return true;
+  if (hasCommittedSourceAccountCrossOffer(env, route)) return true;
+  if (hasPendingSourceAccountCrossOffer(env, route)) {
+    // A pending swap_offer left in the account mempool/pendingFrame after a
+    // rejected atomic cohort (CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED) is never
+    // pruned by consensus — it just sits there forever. Counting it as
+    // progress unconditionally made the spec permanently ineligible: once
+    // stuck, `depthReady` could never recover. Treat it as progress only
+    // while its bootstrap-intent attempt is still inside
+    // MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS, matching the window
+    // `hasPendingBootstrapIntentAttempt` already uses to stop excluding the
+    // spec from candidate selection — once that window expires, both checks
+    // must agree the attempt is stale, or the pending tx blocks retry
+    // forever while callers believe the spec is eligible again.
+    if (!attemptedBootstrapIntentOrderIds) return true;
+    const attemptedAt = attemptedBootstrapIntentOrderIds.get(spec.offerId);
+    if (attemptedAt === undefined || !isBootstrapIntentAttemptExpired(attemptedAt, nowMs)) return true;
+  }
   // A committed `crossJurisdictionAuthorizations` entry is deliberately NOT
   // progress. It proves only that this MM signed the intent, never that the
   // route advanced, and nothing prunes it when the route dies — its one
@@ -2100,11 +2118,16 @@ const isMatchingCrossOfferRoute = (
   );
 };
 
-const hasSourceAccountCrossOffer = (env: RuntimeReplica, route: CrossJurisdictionSwapRoute): boolean => {
+const hasCommittedSourceAccountCrossOffer = (env: RuntimeReplica, route: CrossJurisdictionSwapRoute): boolean => {
   const account = getAccountReplica(env, route.source.entityId, route.source.counterpartyEntityId);
   if (!account) return false;
   const committed = account.state.swapOffers?.get(route.orderId);
-  if (isMatchingCrossOfferRoute(committed?.crossJurisdiction, route)) return true;
+  return isMatchingCrossOfferRoute(committed?.crossJurisdiction, route);
+};
+
+const hasPendingSourceAccountCrossOffer = (env: RuntimeReplica, route: CrossJurisdictionSwapRoute): boolean => {
+  const account = getAccountReplica(env, route.source.entityId, route.source.counterpartyEntityId);
+  if (!account) return false;
   const pendingTxs = [...(account.mempool ?? []), ...(account.pendingFrame?.accountTxs ?? [])];
   return pendingTxs.some(
     tx =>
@@ -2113,6 +2136,9 @@ const hasSourceAccountCrossOffer = (env: RuntimeReplica, route: CrossJurisdictio
       isMatchingCrossOfferRoute(tx.data?.crossJurisdiction, route),
   );
 };
+
+const hasSourceAccountCrossOffer = (env: RuntimeReplica, route: CrossJurisdictionSwapRoute): boolean =>
+  hasCommittedSourceAccountCrossOffer(env, route) || hasPendingSourceAccountCrossOffer(env, route);
 
 const getCommittedSourceAccountCrossOffer = (
   env: RuntimeReplica,

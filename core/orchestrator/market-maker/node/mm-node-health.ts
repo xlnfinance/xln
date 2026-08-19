@@ -591,7 +591,9 @@ const selectEligibleCrossOfferSpecs = (
         excludedOfferIds &&
         consumeExpiredBootstrapIntentAttempt(attemptedBootstrapIntentOrderIds, spec.offerId)
       ) return false;
-      if (hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds)) return false;
+      if (
+        hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds, attemptedBootstrapIntentOrderIds)
+      ) return false;
       const targetAccount = getAccountReplica(env, targetContext.entityId, route.target.entityId);
       if (!targetAccount || String(targetAccount.status || 'active') !== 'active') return false;
       if (!isAccountWriteLaneIdle(targetAccount)) return false;
@@ -814,10 +816,12 @@ const maintainSteadyCrossQuotes = async (
       remainingNewOffers,
     );
     if (allowedNewOffers <= 0) continue;
-    const selected = selectEligibleCrossOfferSpecs(context, specs, getPendingCrossRequestOrderIds).slice(
-      0,
-      allowedNewOffers,
-    );
+    const selected = selectEligibleCrossOfferSpecs(
+      context,
+      specs,
+      getPendingCrossRequestOrderIds,
+      existingOfferIds,
+    ).slice(0, allowedNewOffers);
     for (const spec of selected) {
       await submitCrossJurisdictionIntent(env, spec.crossJurisdiction!);
       submittedIntentCount += 1;

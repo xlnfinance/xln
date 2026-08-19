@@ -1138,7 +1138,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('collectQueuedSwapOfferIds(env, mmEntityId, hubEntityId)');
     expect(mmNode).toContain('hasQueuedExtendCredit(env, mmEntityId, hubEntityId, tokenId, creditAmount)');
     expect(mmNode).toContain(
-      'const hasSourceAccountCrossOffer = (env: RuntimeReplica, route: CrossJurisdictionSwapRoute): boolean => {',
+      'const hasCommittedSourceAccountCrossOffer = (env: RuntimeReplica, route: CrossJurisdictionSwapRoute): boolean => {',
+    );
+    expect(mmNode).toContain(
+      'const hasPendingSourceAccountCrossOffer = (env: RuntimeReplica, route: CrossJurisdictionSwapRoute): boolean => {',
     );
     expect(mmNode).toContain('if (hasSourceAccountCrossOffer(env, route)) return true;');
     expect(mmNode).not.toContain(
