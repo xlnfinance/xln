@@ -231,9 +231,10 @@ export const mergeEntityCommandTransactions = (txs: EntityTx[]): EntityTx[] => {
     const identity = encodeCanonicalConsensusValue(command);
     const prior = commands.get(slot);
     if (prior === identity) continue;
-    if (prior !== undefined) {
-      throw new Error(`ENTITY_COMMAND_NONCE_EQUIVOCATION:${command.authorSignerId}:${command.nonce.toString()}`);
-    }
+    // Nonces only grow: a rewritten same-slot command is cancelled in favor of
+    // the bytes already in this batch; a loud error here evicted whole legs on
+    // rebuilt retries and stranded the sender's account frames.
+    if (prior !== undefined) continue;
     commands.set(slot, identity);
     merged.push({ type: 'entityCommand', data: command });
   }

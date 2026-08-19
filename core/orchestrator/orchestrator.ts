@@ -1584,6 +1584,9 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...(process.env['XLN_ENTITY_PROPOSAL_TRACE']
         ? { XLN_ENTITY_PROPOSAL_TRACE: process.env['XLN_ENTITY_PROPOSAL_TRACE'] }
         : {}),
+      ...(process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS']
+        ? { XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS: process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS'] }
+        : {}),
       ...(process.env['XLN_LOG_FORMAT']
         ? { XLN_LOG_FORMAT: process.env['XLN_LOG_FORMAT'] }
         : {}),

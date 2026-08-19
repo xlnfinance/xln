@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 
 import {
   deriveSignerAddressSync,
@@ -6,7 +8,7 @@ import {
   registerSignerKey,
   signAccountFrame,
 } from '../../../account/crypto';
-import {
+import { getEntityCommandDisposition,
   advanceEntityCommandNonce,
   assertSignedEntityCommand,
   buildSignedEntityCommand,
@@ -94,7 +96,7 @@ const setup = (label: string) => {
     proposals: new Map(),
     config,
     reserves: new Map(),
-    accounts: new Map(),
+    accounts: PersistentEntityAccountMap.empty(id, computeEntityAccountValueHash),
     lastFinalizedJHeight: 0,
     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
@@ -386,26 +388,28 @@ describe('signed Entity command admission', () => {
     expect(hashEntityCommand({ ...body, boardEpoch: body.boardEpoch + 1 })).not.toBe(hashEntityCommand(body));
   });
 
-  test('accepts exact committed retry but rejects same-nonce different bytes', () => {
+  test('accepts exact committed retry and cancels same-nonce different bytes', () => {
     const { env, signerId, state } = setup('replay');
     const command = buildSignedEntityCommand(env, state, signerId, [chatCommand(signerId)]);
     const advanced = advanceEntityCommandNonce(state, assertSignedEntityCommand(env, state, command));
     expect(assertSignedEntityCommand(env, advanced, command)).toEqual(command);
     expect(advanceEntityCommandNonce(advanced, command)).toBe(advanced);
 
+    // Nonces only grow: a rewritten same-slot command is cancelled in favor of
+    // the committed bytes — no error, no state change, nested txs never run.
     const conflicting = buildSignedEntityCommand(env, state, signerId, [chatCommand(signerId, 'equivocation')]);
-    expect(() => assertSignedEntityCommand(env, advanced, conflicting))
-      .toThrow(`ENTITY_COMMAND_NONCE_EQUIVOCATION:${signerId}:1`);
+    expect(getEntityCommandDisposition(advanced, conflicting)).toBe('cancel');
+    expect(advanceEntityCommandNonce(advanced, conflicting)).toBe(advanced);
   });
 
-  test('rejects an older command after a later nonce is committed', () => {
+  test('cancels an older command after a later nonce is committed', () => {
     const { env, signerId, state } = setup('stale');
     const first = buildSignedEntityCommand(env, state, signerId, [chatCommand(signerId, 'first')]);
     const afterFirst = advanceEntityCommandNonce(state, assertSignedEntityCommand(env, state, first));
     const second = buildSignedEntityCommand(env, afterFirst, signerId, [chatCommand(signerId, 'second')]);
     const afterSecond = advanceEntityCommandNonce(afterFirst, assertSignedEntityCommand(env, afterFirst, second));
-    expect(() => assertSignedEntityCommand(env, afterSecond, first))
-      .toThrow(`ENTITY_COMMAND_NONCE_STALE:${signerId}:1:2`);
+    expect(getEntityCommandDisposition(afterSecond, first)).toBe('cancel');
+    expect(advanceEntityCommandNonce(afterSecond, first)).toBe(afterSecond);
   });
 
   test('uses a certified alias-to-EOA binding on an independent validator runtime', () => {
@@ -730,7 +734,7 @@ describe('signed Entity command admission', () => {
     const advanced = advanceEntityCommandNonce(state, assertSignedEntityCommand(env, state, command));
     const restored = hydrateEntityStateFromStorage({
       core: projectEntityCoreDoc(advanced),
-      accounts: new Map(),
+      accounts: PersistentEntityAccountMap.empty(id, computeEntityAccountValueHash),
       books: new Map(),
     });
     expect(restored.entityCommandNonces).toEqual(advanced.entityCommandNonces);

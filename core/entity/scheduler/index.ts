@@ -59,6 +59,7 @@ import type {
   ScheduledHook,
 } from './types';
 import { TIMING } from '../../config/constants';
+import { haltRuntimeFailure } from '../../protocol/errors/failure-taxonomy';
 import { createStructuredLogger, shortId } from '../../support/logger';
 import { accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
 import { hubRebalanceHandler } from './rebalance';
@@ -69,6 +70,7 @@ import {
 } from '../consensus/account/work-index';
 import {
   ACCOUNT_MAINTENANCE_INTERVAL_MS,
+  ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS,
   ACCOUNT_PENDING_RESEND_AFTER_MS,
   ACCOUNT_PENDING_STALE_WARNING_MS,
 } from './config/timing';
@@ -82,6 +84,7 @@ export {
 } from './hook-state';
 export {
   ACCOUNT_MAINTENANCE_INTERVAL_MS,
+  ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS,
   ACCOUNT_PENDING_RESEND_AFTER_MS,
   ACCOUNT_PENDING_STALE_WARNING_MS,
 } from './config/timing';
@@ -258,6 +261,22 @@ async function maintainPendingAccounts(
       throw new Error(`PENDING_ACCOUNT_INDEX_FRAME_MISSING:${counterpartyId}`);
     }
     const frameAge = now - account.pendingFrame.timestamp;
+    // Bilateral frames ack in milliseconds on a healthy mesh. An operator may
+    // set a strict ceiling (HLT/local runs: 3s): exceeding it is not retried
+    // away — the runtime halts with full account identity so the delivery
+    // fault is investigated, not absorbed.
+    const strictAckTimeoutMs = ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS;
+    if (strictAckTimeoutMs > 0 && frameAge > strictAckTimeoutMs) {
+      throw haltRuntimeFailure(
+        'ACCOUNT_ACK_TIMEOUT',
+        `ACCOUNT_ACK_TIMEOUT:counterparty=${counterpartyId}` +
+          `:height=${account.pendingFrame.height}` +
+          `:ageMs=${frameAge}` +
+          `:resendCachedHeight=${account.pendingAccountInput
+            ? accountInputProposedFrameHeight(account.pendingAccountInput)
+            : 0}`,
+      );
+    }
     const cachedInputHeight = account.pendingAccountInput
       ? accountInputProposedFrameHeight(account.pendingAccountInput)
       : 0;

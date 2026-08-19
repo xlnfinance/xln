@@ -223,7 +223,7 @@ export const nextEntityCommandNonce = (
   ) + 1n;
 };
 
-export type EntityCommandDisposition = 'next' | 'retry';
+export type EntityCommandDisposition = 'next' | 'retry' | 'cancel';
 
 /** Classify only against the bounded latest slot for this board member. */
 export const getEntityCommandDisposition = (
@@ -241,19 +241,17 @@ export const getEntityCommandDisposition = (
     return 'next';
   }
   const commandHash = hashEntityCommand(command);
+  // Entity-command nonces only grow. A nonce that is not strictly the next
+  // expected one is a cancel: the committed slot already stands, and whatever
+  // bytes arrive for an old (or same, rewritten) slot are dropped without
+  // error — the sender's authoritative state is the certified chain, not this
+  // delivery. Only an exact byte retry is acknowledged as idempotent. A gap
+  // above the frontier stays a loud mismatch: it means a signed command went
+  // missing between two committed nonces.
   if (command.nonce === latest.nonce) {
-    if (commandHash !== latest.commandHash) {
-      throw new EntityCommandRejectionError(
-        `ENTITY_COMMAND_NONCE_EQUIVOCATION:${command.authorSignerId}:${command.nonce.toString()}`,
-      );
-    }
-    return 'retry';
+    return commandHash === latest.commandHash ? 'retry' : 'cancel';
   }
-  if (command.nonce < latest.nonce) {
-    throw new EntityCommandRejectionError(
-      `ENTITY_COMMAND_NONCE_STALE:${command.authorSignerId}:${command.nonce.toString()}:${latest.nonce.toString()}`,
-    );
-  }
+  if (command.nonce < latest.nonce) return 'cancel';
   const expectedNonce = latest.nonce + 1n;
   if (command.nonce !== expectedNonce) {
     throw new EntityCommandRejectionError(
@@ -314,7 +312,7 @@ export const advanceEntityCommandNonce = (
   command: SignedEntityCommandV1,
 ): EntityState => {
   const disposition = getEntityCommandDisposition(state, command);
-  if (disposition === 'retry') return state;
+  if (disposition !== 'next') return state;
   const nonceState = canonicalCommandNonceState(state, command.boardHash, command.boardEpoch);
   const bySigner = new Map(nonceState.bySigner);
   bySigner.set(command.authorSignerId, {
@@ -449,7 +447,7 @@ export const prepareLocallyAuthoredEntityTxs = (
         }
         throw error;
       }
-      if (getEntityCommandDisposition(cursor, command) === 'retry') continue;
+      if (getEntityCommandDisposition(cursor, command) !== 'next') continue;
       prepared.push({ type: 'entityCommand', data: command });
       cursor = advanceEntityCommandNonce(cursor, command);
       continue;
