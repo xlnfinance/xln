@@ -572,7 +572,17 @@ const maybeHandleRuntimeInfoApi = async (
   return null;
 };
 
-const gossipProfileAdmission = createGossipProfileAdmission();
+// Defaults protect the relay from a single caller flooding it with lookup
+// round-trips. A legitimate simultaneous onboarding burst (many distinct new
+// entities, each needing exactly one lookup) is bounded by the same global
+// counter regardless of how well batching coalesces it, so large-scale
+// bootstrap scenarios (load-test harnesses, bulk onboarding) need a wider
+// budget without weakening the per-caller default in normal operation.
+const gossipProfileAdmission = createGossipProfileAdmission(
+  60_000,
+  readPositiveIntegerEnv('XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT', 30),
+  readPositiveIntegerEnv('XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT', 300),
+);
 /** A missing profile is looked up on the relay at most once per minute per entity. */
 const GOSSIP_PROFILE_LOOKUP_MIN_INTERVAL_MS = 60_000;
 /**
