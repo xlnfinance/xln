@@ -11,6 +11,7 @@ import {
   type RuntimeWsSessionKeys,
 } from './ws-protocol';
 import { signDigest } from '../../account/crypto';
+import { countOp } from '../../support/performance/op-counters';
 import {
   decryptJSON,
   decryptSessionJSON,
@@ -1045,6 +1046,7 @@ export class RuntimeWsClient {
       return false;
     }
     const payload = serializeWsMessage(outboundMsg);
+    countOp(`ws.send.${outboundMsg.type}`, payload.length);
     try {
       this.ws.send(payload);
       return true;
