@@ -115,6 +115,33 @@ const setup = (label: string) => {
   return { env, signerId, state, replica };
 };
 
+const cloneTestEntityState = (state: EntityState): EntityState => {
+  const cloned = structuredClone({
+    ...state,
+    accounts: new Map(),
+    htlcRoutes: new Map(),
+    lockBook: new Map(),
+    ...(state.crossJurisdictionSwaps ? { crossJurisdictionSwaps: new Map() } : {}),
+    ...(state.crossJurisdictionAuthorizations ? { crossJurisdictionAuthorizations: new Map() } : {}),
+    ...(state.pendingCrossJurisdictionFillAcks ? { pendingCrossJurisdictionFillAcks: new Map() } : {}),
+    ...(state.crossJurisdictionBookAdmissions ? { crossJurisdictionBookAdmissions: new Map() } : {}),
+  }) as EntityState;
+  cloned.accounts = PersistentEntityAccountMap.empty(cloned.entityId, computeEntityAccountValueHash);
+  cloned.htlcRoutes = new Map(state.htlcRoutes);
+  cloned.lockBook = new Map(state.lockBook);
+  if (state.crossJurisdictionSwaps) cloned.crossJurisdictionSwaps = new Map(state.crossJurisdictionSwaps);
+  if (state.crossJurisdictionAuthorizations) {
+    cloned.crossJurisdictionAuthorizations = new Map(state.crossJurisdictionAuthorizations);
+  }
+  if (state.pendingCrossJurisdictionFillAcks) {
+    cloned.pendingCrossJurisdictionFillAcks = new Map(state.pendingCrossJurisdictionFillAcks);
+  }
+  if (state.crossJurisdictionBookAdmissions) {
+    cloned.crossJurisdictionBookAdmissions = new Map(state.crossJurisdictionBookAdmissions);
+  }
+  return cloned;
+};
+
 const hubCommand = (): EntityTx => ({
   type: 'setHubConfig',
   data: { routingFeePPM: 777, baseFee: 123n },
@@ -147,7 +174,7 @@ const setupNumericAliasBoard = () => {
     env.state.eReplicas.set(`${id}:${signerId}`, {
       entityId: id,
       signerId,
-      state: structuredClone(state),
+      state: cloneTestEntityState(state),
       mempool: [],
       isProposer: signerId === proposer,
     });
@@ -434,7 +461,7 @@ describe('signed Entity command admission', () => {
     cacheCertifiedBoardNodes(verifierEnv, new Map(getCertifiedBoardNodeStore(authorEnv)));
     expect(command.authorSignerId).toBe('2');
     expect(command.authorSigner).not.toBe('2');
-    expect(assertSignedEntityCommand(verifierEnv, structuredClone(state), command)).toEqual(command);
+    expect(assertSignedEntityCommand(verifierEnv, cloneTestEntityState(state), command)).toEqual(command);
   });
 
   test('supports a trusted no-J domain and invalidates it after registration', () => {
@@ -443,9 +470,9 @@ describe('signed Entity command admission', () => {
     const command = buildSignedEntityCommand(env, state, author, [chatCommand(author, 'lazy entity')]);
     const verifierEnv = createEmptyEnv('signed-command:no-j-independent-verifier');
     verifierEnv.scenarioMode = true;
-    expect(assertSignedEntityCommand(verifierEnv, structuredClone(state), command)).toEqual(command);
+    expect(assertSignedEntityCommand(verifierEnv, cloneTestEntityState(state), command)).toEqual(command);
 
-    const registered = structuredClone(state);
+    const registered = cloneTestEntityState(state);
     registered.config = { ...registered.config, jurisdiction };
     expect(() => assertSignedEntityCommand(verifierEnv, registered, command))
       .toThrow('ENTITY_COMMAND_STACK_MISMATCH');
@@ -622,7 +649,7 @@ describe('signed Entity command admission', () => {
       mempool: [],
       isProposer: true,
       state: {
-        ...structuredClone(state),
+        ...cloneTestEntityState(state),
         entityId: targetEntityId,
         config: {
           ...state.config,
@@ -699,7 +726,7 @@ describe('signed Entity command admission', () => {
 
     const { events, newState: nextState } = await applyEntityFrameWithMaterializedTestInfraContext(
       verifierEnv,
-      structuredClone(state),
+      cloneTestEntityState(state),
       [signedEntityCommandTx(command)],
       1_001,
     );
@@ -734,7 +761,7 @@ describe('signed Entity command admission', () => {
     const advanced = advanceEntityCommandNonce(state, assertSignedEntityCommand(env, state, command));
     const restored = hydrateEntityStateFromStorage({
       core: projectEntityCoreDoc(advanced),
-      accounts: PersistentEntityAccountMap.empty(id, computeEntityAccountValueHash),
+      accounts: new Map(),
       books: new Map(),
     });
     expect(restored.entityCommandNonces).toEqual(advanced.entityCommandNonces);
@@ -817,7 +844,7 @@ describe('signed Entity command admission', () => {
       data: { proposalId: epochZeroProposal.id, voter, choice: 'yes' },
     }]);
 
-    const epochTwo = structuredClone(epochZeroApplied.newState);
+    const epochTwo = cloneTestEntityState(epochZeroApplied.newState);
     installCertifiedBoardEvents(env, epochTwo, [
       certifiedBoardEvent('BoardActivated', boardB, {
         height: 3,
@@ -920,11 +947,11 @@ describe('signed Entity command admission', () => {
   test('recomputes stack and current board from local state instead of command claims', () => {
     const { env, signerId, state } = setup('trusted-authority');
     const command = buildSignedEntityCommand(env, state, signerId, [chatCommand(signerId)]);
-    const wrongStackState = structuredClone(state);
+    const wrongStackState = cloneTestEntityState(state);
     wrongStackState.config.jurisdiction = { ...jurisdiction, chainId: jurisdiction.chainId + 1 };
     expect(() => assertSignedEntityCommand(env, wrongStackState, command)).toThrow('ENTITY_COMMAND_STACK_MISMATCH');
 
-    const rotatedState = structuredClone(state);
+    const rotatedState = cloneTestEntityState(state);
     const nextSeed = 'signed-command:rotated-board';
     const nextSigner = deriveSignerAddressSync(nextSeed, 'validator').toLowerCase();
     registerSignerKey(env, nextSigner, deriveSignerKeySync(nextSeed, 'validator'));
@@ -1178,7 +1205,7 @@ describe('signed Entity command admission', () => {
       updatedAt: 1,
     } satisfies CrossJurisdictionSwapRoute);
     const routeHash = route.routeHash!;
-    const baseState = structuredClone(setup('runtime-semantic-roles').state);
+    const baseState = cloneTestEntityState(setup('runtime-semantic-roles').state);
     baseState.crossJurisdictionSwaps = new Map([[orderId, route]]);
     baseState.crossJurisdictionBookAdmissions = new Map([['admission', {
       orderId,
@@ -1190,8 +1217,9 @@ describe('signed Entity command admission', () => {
       updatedAt: 1,
     }]]);
     const stateFor = (entityIdValue: string) => {
-      const state = structuredClone(baseState);
+      const state = cloneTestEntityState(baseState);
       state.entityId = entityIdValue;
+      state.accounts = PersistentEntityAccountMap.empty(entityIdValue, computeEntityAccountValueHash);
       return state;
     };
     const closeProof = {
