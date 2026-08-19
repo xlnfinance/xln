@@ -161,6 +161,19 @@ const waitForHubProfile = async (lane: LaneRuntime, hubEntityId: string): Promis
   throw new Error(`PRODUCTION_SWAP_LOAD_HUB_PROFILE_NOT_VISIBLE:${lane.laneKey}`);
 };
 
+/** After register+credit the user must advertise the Hub lane, or peers cannot quote a payment. */
+const waitForOwnReceiveReadyProfile = async (lane: LaneRuntime, hubEntityId: string): Promise<void> => {
+  const selfId = lane.identity.entityId.toLowerCase();
+  const hubId = hubEntityId.toLowerCase();
+  const deadline = Date.now() + VISIBILITY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const counterparties = await lane.control.gossipProfileCounterparties(selfId);
+    if (counterparties?.includes(hubId)) return;
+    await sleep(100);
+  }
+  throw new Error(`HLT_OWN_PROFILE_NOT_RECEIVE_READY:${lane.laneKey}:${selfId.slice(0, 12)}`);
+};
+
 const buildLaneImports = (identities: readonly ManagedEntityIdentity[]): RuntimeInput['runtimeTxs'] =>
   identities.map(identity => importEntity({
     entityId: identity.entityId,
@@ -264,9 +277,8 @@ const provisionLoadLanes = async (
     advertiseEntityIds: [...lane.hostedEntityIds],
     gossipPollMs: PROVISIONING_GOSSIP_POLL_MS,
   }));
-  // No "hub sees every user" barrier: profiles are pull-only and the Hub
-  // fetches a counterparty's runtime route by id the first time it hears from
-  // it, so a user is routable as soon as its own account frame lands.
+  // The Hub does not pin users. Each user must still publish a receive-ready
+  // profile (Hub counterparty in accounts) before any peer can quote a route.
   await runInBatches(runtimes, async (lane, index) => {
     await waitForHubProfile(lane, options.hubIdentity.entityId);
     await sendObserved(lane.runtime, `prod-load-open-${options.role}-${lane.laneKey}`, {
@@ -317,6 +329,7 @@ const provisionLoadLanes = async (
     ));
     laneOffset += batch.length;
   }
+  await runInBatches(runtimes, lane => waitForOwnReceiveReadyProfile(lane, options.hubIdentity.entityId));
   // Fast polling only served setup; a real user Runtime does not ask the Hub
   // for gossip four times a second while trading.
   await runInBatches(laneDaemons(runtimes), lane => lane.control.configureP2P({

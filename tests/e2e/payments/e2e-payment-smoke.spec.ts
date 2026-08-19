@@ -6,7 +6,7 @@ import {
 } from '../../utils/runtime/e2e-account-ui';
 import { requireApiBaseUrl } from '../../utils/e2e-base-url';
 import { ensureE2EBaseline } from '../../utils/e2e-baseline';
-import { connectRuntimeToHub } from '../../utils/e2e-connect';
+import { connectRuntimeToHub, waitForReceiveReadyGossipProfiles } from '../../utils/e2e-connect';
 import { APP_BASE_URL, createRuntimeIdentity, gotoApp } from '../../utils/e2e-demo-users';
 import { submitUiPayment } from '../../utils/runtime/e2e-pay-ui';
 import {
@@ -556,6 +556,7 @@ test.describe('Payment Smoke', () => {
       const senderCursor = supportsPersistedReceipts ? await getPersistedReceiptCursor(senderPage) : null;
       const recipientCursor = supportsPersistedReceipts ? await getPersistedReceiptCursor(recipientPage) : null;
 
+      await waitForReceiveReadyGossipProfiles(senderPage, [sender.entityId, hubId, recipient.entityId], hubId);
       await submitUiPayment(senderPage, {
         recipientEntityId: recipient.entityId,
         amount: PAYMENT_AMOUNT,

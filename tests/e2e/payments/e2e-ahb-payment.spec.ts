@@ -17,7 +17,7 @@ import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
 } from '../../utils/runtime/e2e-account-ui';
-import { connectHub as connectActiveRuntimeToHub } from '../../utils/e2e-connect';
+import { connectHub as connectActiveRuntimeToHub, waitForReceiveReadyGossipProfiles } from '../../utils/e2e-connect';
 import {
   createDemoUsers,
   gotoApp as gotoSharedApp,
@@ -883,6 +883,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       runtimeIdSet.has('') || runtimeIdSet.size !== 3,
       `AHB must use 3 distinct runtimes (alice/hub/bob). got alice=${aliceRuntimeId} hub=${hubRuntimeId} bob=${bobRuntimeId}`,
     ).toBe(false);
+    await waitForReceiveReadyGossipProfiles(page, [alice!.entityId, hubId, bob!.entityId], hubId);
     const forwardQuotedSpend = await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], payAmount);
 
@@ -973,6 +974,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] Bob OUT pre-pay check: ${b2check}`);
     expect(b2check, 'Bob must have account before reverse pay').toBe(b2);
 
+    await waitForReceiveReadyGossipProfiles(page, [bob!.entityId, hubId, alice!.entityId], hubId);
     const reverseQuotedSpend = await pay(page, bob!.entityId, bob!.signerId, alice!.entityId,
       [bob!.entityId, hubId, alice!.entityId], reverseAmount);
 
@@ -1048,6 +1050,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await switchToRuntime(page, 'alice');
     await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-second-forward-send');
     await assertP2PSingletonAndWsHealth(page, 'switch-alice-second-forward-send');
+    await waitForReceiveReadyGossipProfiles(page, [alice!.entityId, hubId, bob!.entityId], hubId);
     const secondForwardQuotedSpend = await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], pay2Amount);
     const pay2MinSpend = secondForwardQuotedSpend > pay2Amount ? secondForwardQuotedSpend : pay2Amount;
@@ -1128,6 +1131,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const selfBefore = await outCap(page, alice!.entityId, hubId);
     const selfCursor = await getPersistedReceiptCursor(page);
     const selfAfter = await timedStep(`ahb.self_route_${selfRoute.length - 2}_hops.send_to_outcap`, async () => {
+      await waitForReceiveReadyGossipProfiles(page, selfRoute, hubId);
       await pay(page, alice!.entityId, alice!.signerId, alice!.entityId, selfRoute, toUsdcUnits(1));
       await expect.poll(async () => {
         const info = await page.evaluate((eid) => {

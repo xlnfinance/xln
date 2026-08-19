@@ -28,8 +28,9 @@ export const buildRoutingProfileIndex = (profiles: readonly RoutingProfile[]): R
 
 /** The one canonical "exactly one Profile advertises this entity" lookup — reused by every HTLC routing helper. */
 export const lookupUniqueRoutingProfile = (index: RoutingProfileIndex, entityId: string): RoutingProfile => {
-  const matches = index.get(entityId) ?? [];
-  if (matches.length !== 1) throw new Error(`HTLC_PAYMENT_PROFILE_MATCH_COUNT:${entityId}:${matches.length}`);
+  const id = entityId.toLowerCase();
+  const matches = index.get(id) ?? [];
+  if (matches.length !== 1) throw new Error(`HTLC_PAYMENT_PROFILE_MATCH_COUNT:${id}:${matches.length}`);
   return matches[0]!;
 };
 

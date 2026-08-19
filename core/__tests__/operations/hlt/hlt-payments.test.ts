@@ -22,7 +22,11 @@ describe('hlt payment population', () => {
     expect(source).toContain('forEachLimited');
     expect(source).toContain('sendEnqueued');
     expect(source).toContain('waitForHubSettlement');
-    expect(source).toContain('accountsLimit: 10');
+    expect(source).toContain('accountsLimit: pageLimit');
+    expect(readFileSync(
+      join(import.meta.dir, '../../../scripts/operations/hlt/lanes/worker-lanes.ts'),
+      'utf8',
+    )).toContain('waitForOwnReceiveReadyProfile');
   });
 
   test('every round pairs senders and receivers as a permutation', () => {

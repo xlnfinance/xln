@@ -1614,6 +1614,84 @@ export async function connectRuntimeToHubWithCredit(
   await waitForRenderedCommittedAccountCard(page, hubId, 'connectRuntimeToHub final UI path');
 }
 
+/**
+ * Admission quotes against the sender Runtime's gossip, not relay debug.
+ * Register+faucet is incomplete until every hop has exactly one profile and
+ * every user hop advertises the Hub account (receive-ready).
+ */
+export async function waitForReceiveReadyGossipProfiles(
+  page: Page,
+  entityIds: readonly string[],
+  hubEntityId: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const targets = entityIds.map(id => id.toLowerCase());
+  const hub = hubEntityId.toLowerCase();
+  let lastMissing = 'unpolled';
+  try {
+    await expect
+      .poll(
+        async () => page.evaluate(async ({ targets, hub }) => {
+          type Connectivity = {
+            ensureProfiles?: (ids: string[]) => Promise<boolean>;
+            profiles?: Array<{
+              entityId?: string;
+              accounts?: Array<{ counterpartyId?: string }>;
+            }>;
+          };
+          const view = window as typeof window & {
+            __xln?: { runtimeConnectivity?: Connectivity };
+            isolatedEnv?: {
+              gossip?: {
+                getProfiles?: () => Array<{
+                  entityId?: string;
+                  accounts?: Array<{ counterpartyId?: string }>;
+                }>;
+              };
+            };
+          };
+          const connectivity = view.__xln?.runtimeConnectivity;
+          await connectivity?.ensureProfiles?.(targets).catch(() => false);
+          const profiles = view.isolatedEnv?.gossip?.getProfiles?.() ?? connectivity?.profiles ?? [];
+          const byId = new Map<string, (typeof profiles)[number]>();
+          for (const profile of profiles) {
+            const id = String(profile?.entityId || '').toLowerCase();
+            if (id) byId.set(id, profile);
+          }
+          const missing: string[] = [];
+          for (const id of targets) {
+            const profile = byId.get(id);
+            if (!profile) {
+              missing.push(`${id.slice(0, 10)}:absent`);
+              continue;
+            }
+            if (id === hub) continue;
+            const accounts = Array.isArray(profile.accounts) ? profile.accounts : [];
+            const hasHub = accounts.some(account =>
+              String(account?.counterpartyId || '').toLowerCase() === hub,
+            );
+            if (!hasHub) missing.push(`${id.slice(0, 10)}:no-hub-account`);
+          }
+          return missing.length === 0 ? 'ready' : missing.join(',');
+        }, { targets, hub }).then((state) => {
+          lastMissing = String(state);
+          return state;
+        }),
+        {
+          timeout: timeoutMs,
+          intervals: [200, 400, 800],
+          message: `gossip must contain receive-ready profiles for ${targets.map(id => id.slice(0, 10)).join(',')}`,
+        },
+      )
+      .toBe('ready');
+  } catch (error) {
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n` +
+      `missingReceiveReady=${lastMissing}`,
+    );
+  }
+}
+
 export async function connectHub(
   page: Page,
   hubId: string,

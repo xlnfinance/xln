@@ -171,5 +171,8 @@ describe('e2e demo user helper', () => {
     const full = helper;
     expect(full).toContain("new URL('/api/gossip/profile', origin)");
     expect(full).toContain('async function hasExportedRuntimeP2P');
+    expect(full).toContain('export async function waitForReceiveReadyGossipProfiles');
+    expect(full).toContain('ensureProfiles?.(targets)');
+    expect(full).toContain('isolatedEnv?.gossip?.getProfiles');
   });
 });

@@ -122,6 +122,7 @@ const waitForRoutableReceivers = async (
 ): Promise<void> => {
   const startedAt = Date.now();
   const deadline = startedAt + ROUTE_BARRIER_TIMEOUT_MS;
+  const hubId = hubEntityId.toLowerCase();
   // Gossip is per daemon, not per hosted user: asking every sender about every
   // receiver was senders x receivers requests (62 500 at 500 users) fired
   // concurrently at three daemons, which overflowed their accept queues
@@ -136,7 +137,7 @@ const waitForRoutableReceivers = async (
       const pendingIds = receiverIds.filter(id => !settled.has(id));
       await forEachLimited(pendingIds, async receiverId => {
         const receiverAccounts = await lane.control.gossipProfileCounterparties(receiverId);
-        if (receiverAccounts?.includes(hubEntityId)) settled.add(receiverId);
+        if (receiverAccounts?.includes(hubId)) settled.add(receiverId);
       });
     }));
     const pending = confirmed.reduce(

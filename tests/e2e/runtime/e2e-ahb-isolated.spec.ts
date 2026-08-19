@@ -15,7 +15,7 @@ import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
 } from '../../utils/runtime/e2e-account-ui';
-import { connectRuntimeToHub } from '../../utils/e2e-connect';
+import { connectRuntimeToHub, waitForReceiveReadyGossipProfiles } from '../../utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from '../../utils/e2e-demo-users';
 import {
   getPersistedReceiptCursor,
@@ -807,6 +807,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
       const bobBeforeForward = await getRenderedOutboundForAccount(bobPage, hubId);
       const bobForwardCursor = await getPersistedReceiptCursor(bobPage);
       const aliceForwardFinalizeCursor = await getPersistedReceiptCursor(alicePage);
+      await waitForReceiveReadyGossipProfiles(alicePage, [alice.entityId, hubId, bob.entityId], hubId);
       await pay(alicePage, alice.entityId, alice.signerId, bob.entityId, [alice.entityId, hubId, bob.entityId], forwardAmount);
 
       const forwardSpend = await waitForSenderSpend(alicePage, hubId, aliceAfterFaucet, expectedForwardSpend);
@@ -848,6 +849,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
       const bobBeforeReverse = await getRenderedOutboundForAccount(bobPage, hubId);
       const aliceReverseCursor = await getPersistedReceiptCursor(alicePage);
       const bobReverseFinalizeCursor = await getPersistedReceiptCursor(bobPage);
+      await waitForReceiveReadyGossipProfiles(bobPage, [bob.entityId, hubId, alice.entityId], hubId);
       await pay(bobPage, bob.entityId, bob.signerId, alice.entityId, [bob.entityId, hubId, alice.entityId], reverseAmount);
 
       const reverseSpend = await waitForSenderSpend(bobPage, hubId, bobAfterForward, expectedReverseSpend);
@@ -923,6 +925,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
         const bobSecondForwardCursor = await getPersistedReceiptCursor(bobPage);
         const aliceSecondForwardFinalizeCursor = await getPersistedReceiptCursor(alicePage);
 
+        await waitForReceiveReadyGossipProfiles(alicePage, [alice.entityId, hubId, bob.entityId], hubId);
         await pay(alicePage, alice.entityId, alice.signerId, bob.entityId, [alice.entityId, hubId, bob.entityId], secondForwardAmount);
 
         const secondForwardSpend = await waitForSenderSpendRaw(

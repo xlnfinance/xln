@@ -24,6 +24,11 @@ import {
   dumpRuntimeSamplingProfile,
   startRuntimeSamplingProfiler,
 } from '../../../support/performance/sampling-profiler';
+import {
+  formatExclusiveSampling,
+  summarizeExclusiveSampling,
+  type SamplingDump,
+} from '../../../support/performance/sampling-summary';
 
 const OUT = String(process.env['XLN_FRAME_PROFILE_DIR'] || '/tmp/xln-1000tx-prof');
 const proposalProfiles: Array<Record<string, unknown>> = [];
@@ -40,55 +45,12 @@ registerStructuredLogSink(event => {
   }
 });
 
-type SampleFrame = { name?: string; sourceURL?: string; line?: number };
-type SampleTrace = { frames?: SampleFrame[] };
-type SampleFile = { traces?: SampleTrace[] };
-
-const xlnFrame = (frame: SampleFrame): string | null => {
-  const url = String(frame.sourceURL || '');
-  if (!url.includes('/xln/core/') && !url.includes('/xln/runtime/')) return null;
-  const file = url.replace(/^.*\/(core|runtime)\//, '$1/');
-  const name = String(frame.name || '(anon)');
-  const line = Number(frame.line);
-  const loc = Number.isSafeInteger(line) && line > 0 && line < 10_000_000 ? `:${line}` : '';
-  return `${name}  ${file}${loc}`;
-};
-
 const summarizeSamples = (path: string, top = 25): string[] => {
   const raw: unknown = JSON.parse(readFileSync(path, 'utf8'));
-  const parsed = (Array.isArray(raw) ? { traces: raw } : raw) as SampleFile & {
-    stackTraces?: SampleTrace[];
-    samples?: SampleTrace[];
-  };
-  const traces = parsed.traces ?? parsed.stackTraces ?? parsed.samples ?? [];
-  if (traces.length === 0) {
-    const keys = raw && typeof raw === 'object' && !Array.isArray(raw)
-      ? Object.keys(raw as object).slice(0, 20)
-      : [`array:${Array.isArray(raw) ? raw.length : typeof raw}`];
-    return [`samples=0  file=${path}  keys=${keys.join(',')}`];
-  }
-  const leaf = new Map<string, number>();
-  const named = new Map<string, number>();
-  for (const trace of traces) {
-    const frames = (trace as SampleTrace).frames ?? [];
-    const xln = frames.map(xlnFrame).filter((value): value is string => value !== null);
-    if (xln[0]) leaf.set(xln[0], (leaf.get(xln[0]) ?? 0) + 1);
-    for (const label of xln) named.set(label, (named.get(label) ?? 0) + 1);
-  }
-  const rank = (counts: Map<string, number>): string[] =>
-    [...counts.entries()]
-      .sort((left, right) => right[1] - left[1])
-      .slice(0, top)
-      .map(([label, count], index) =>
-        `${String(index + 1).padStart(2)}  ${(100 * count / Math.max(traces.length, 1)).toFixed(1).padStart(5)}%  ${String(count).padStart(6)}  ${label}`);
+  const dump = (Array.isArray(raw) ? { traces: raw } : raw) as SamplingDump;
   return [
-    `samples=${traces.length}  file=${path}`,
-    '',
-    'LEAF (currently executing xln/core function)',
-    ...rank(leaf),
-    '',
-    'ANY-FRAME (function on the stack, inclusive)',
-    ...rank(named),
+    `file=${path}`,
+    ...formatExclusiveSampling(summarizeExclusiveSampling(dump, top)),
   ];
 };
 
