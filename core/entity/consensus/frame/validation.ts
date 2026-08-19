@@ -25,8 +25,6 @@ import {
   type EntityHeight,
   type UnixMs,
 } from '../../../protocol/units';
-import { entityFrameBodyIsVerified } from './body-verified';
-import { readRuntimeEnv } from '../../../support/process/runtime-process';
 
 export type DecodedEntityFrame = EntityFrame & Readonly<{
   height: EntityHeight;
@@ -342,14 +340,6 @@ export const validateProposedEntityFrame = (
   value: unknown,
   context: string,
 ): DecodedEntityFrame => {
-  if (
-    value !== null &&
-    typeof value === 'object' &&
-    entityFrameBodyIsVerified(value as EntityFrame) &&
-    readRuntimeEnv('XLN_ENTITY_STATE_ROOT_AUDIT') !== '1'
-  ) {
-    return value as DecodedEntityFrame;
-  }
   const frame = validateObject(value, context);
   assertProposedEntityFrame(frame, context);
   try {

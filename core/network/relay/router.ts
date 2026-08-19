@@ -40,7 +40,6 @@ import {
   type JurisdictionGossipAnnouncement,
 } from '../../jurisdiction/gossip/announcement';
 import { decodeGossipProfileBatchRequest } from '../p2p/gossip/profile-batch';
-import { matchesTraceSuffix, traceLog } from '../../support/trace-debug';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
@@ -715,21 +714,9 @@ const forwardToRemoteRuntime = (
 ): boolean => {
   const { config, msg, type, from, to, toKey } = context;
   const target = config.store.clients.get(toKey);
-  // TEMP-TRACE-CP3 (pending-frame-stale investigation, gated by XLN_TRACE_ENTITY_SUFFIXES)
-  if (type === 'entity_inputs' && matchesTraceSuffix(from, to)) {
-    traceLog('CP3:relay/router.ts:forwardToRemoteRuntime', {
-      type, from, to, toKey, hasTarget: Boolean(target), isLocalTarget,
-    });
-  }
   if (!target || isLocalTarget) return false;
   const attempt = sendRelayDelivery(config, target.ws, msg, resolveRelayWireBytes(context));
   const delivery = attempt.delivery;
-  if (type === 'entity_inputs' && matchesTraceSuffix(from, to)) {
-    traceLog('CP3b:relay/router.ts:forwardToRemoteRuntime:sent', {
-      from, to, deliveryStatus: (delivery as { status?: string }).status,
-      backpressured: attempt.backpressured,
-    });
-  }
   if (isDeliveryDelivered(delivery)) {
     if (attempt.backpressured) {
       target.consecutiveBackpressuredSends += 1;
@@ -917,10 +904,6 @@ const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolea
   const isLocalTarget = !!localRuntimeKey && toKey === localRuntimeKey;
   if (forwardToRemoteRuntime(context, isLocalTarget)) return true;
   const local = await deliverToLocalRuntime(context, isLocalTarget);
-  // TEMP-TRACE-CP3c (pending-frame-stale investigation, gated by XLN_TRACE_ENTITY_SUFFIXES)
-  if (type === 'entity_inputs' && matchesTraceSuffix(from, to)) {
-    traceLog('CP3c:relay/router.ts:route', { type, from, to, isLocalTarget, localDeliveryResult: local });
-  }
   if (local !== 'unavailable') return true;
   if (rejectUnavailableEntityInputs(context)) return true;
   const code = 'GOSSIP_TARGET_NOT_CONNECTED';

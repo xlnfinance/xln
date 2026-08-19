@@ -755,18 +755,19 @@ export function verifyAccountSignature(
   }
 
   try {
-    // Stored-key path: one ECDSA verify binds the digest to this public key.
-    // Recover+address already proved the same fact on the no-key path above;
-    // doing both here doubled secp work on every Account/Hanko check.
+    // Recover binds the canonical recovery byte to this digest. Verify against
+    // the stored key would ignore v and accept either 0/1. Address equality
+    // then binds the recovered signer to the registered public key — one EC
+    // recover, not recover-plus-verify.
+    const recovered = recoverAddressFromDigestSignature(
+      parsed.digest,
+      parsed.compact,
+      parsed.recovery,
+    );
     const expectedAddress = addressFromPublicKey(publicKey);
-    if (!expectedAddress) return false;
+    if (!recovered || !expectedAddress || recovered !== expectedAddress) return false;
     if (/^0x[a-f0-9]{40}$/i.test(key) && expectedAddress !== key) return false;
-
-    countOp('ecdsa.verify');
-    const native = getNativeSecp256k1();
-    return native
-      ? native.ecdsaVerify(parsed.compact, parsed.digest, publicKey)
-      : secp256k1.verify(parsed.compact, parsed.digest, publicKey);
+    return true;
   } catch (error) {
     console.error(`❌ Signature verification error for ${signerId.slice(-4)}:`, error);
     return false;

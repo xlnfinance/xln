@@ -24,7 +24,6 @@ import {
   type AccountHandlerResult,
 } from './lifecycle/result';
 import { addMessage } from '../../../frame-events';
-import { matchesTraceSuffix, traceLog } from '../../../../support/trace-debug';
 
 export {
   canProcessFrozenAccountInput,
@@ -89,15 +88,6 @@ const applyAccountInputPhases = async (
 ): Promise<AccountHandlerResult> => {
   const incomingAck = accountInputAck(input);
   const incomingProposal = accountInputProposal(input);
-  // TEMP-TRACE-CP4 (pending-frame-stale investigation, gated by XLN_TRACE_ENTITY_SUFFIXES)
-  if (matchesTraceSuffix(input.toEntityId, input.fromEntityId)) {
-    traceLog('CP4:entity/tx/handlers/account/index.ts:applyAccountInputPhases', {
-      from: input.fromEntityId, to: input.toEntityId, kind: input.kind,
-      height: accountInputReferenceHeight(input),
-      hasAck: Boolean(incomingAck), hasProposal: Boolean(incomingProposal),
-      entityId: state.entityId,
-    });
-  }
   accountHandlerLog.debug('input.apply', {
     // 12 chars: at 1000+ concurrent accounts, the default 4-char shortId
     // collides often enough (birthday paradox over a 65536 namespace) to
@@ -150,15 +140,6 @@ const applyAccountInputPhases = async (
   };
   checkpointProfile('preConsensus');
   const consensus = await applyAccountConsensusInput(context);
-  // TEMP-TRACE-CP4b (pending-frame-stale investigation, gated by XLN_TRACE_ENTITY_SUFFIXES)
-  if (matchesTraceSuffix(input.toEntityId, input.fromEntityId)) {
-    traceLog('CP4b:entity/tx/handlers/account/index.ts:applyAccountInputPhases:outcome', {
-      from: input.fromEntityId, to: input.toEntityId,
-      hasTerminalResult: Boolean(consensus.terminalResult),
-      hasRequiredResponse: Boolean(consensus.requiredAccountResponse),
-      responseTo: consensus.requiredAccountResponse?.toEntityId,
-    });
-  }
   if (consensus.terminalResult) return consensus.terminalResult;
 
   checkpointProfile('finalize');

@@ -19,7 +19,6 @@ import type {
   EntityReplica,
   EntityState,
 } from '../../entity/types';
-import { entityFrameBodyIsVerified, markEntityFrameBodyVerified } from '../../entity/consensus/frame/body-verified';
 import type { RuntimeReplica, RuntimeHistoryRecord } from '../types';
 import type { LogCategory, FrameLogEntry } from '../../types/logging';
 
@@ -417,9 +416,6 @@ const recordEntityFrameHistory = (
     return;
   }
   const link = structuredClone(record.link);
-  // The isolated copy carries the same bytes as the verified in-process frame;
-  // storage's write-side validation must not re-encode the body a third time.
-  if (entityFrameBodyIsVerified(record.link.frame)) markEntityFrameBodyVerified(link.frame);
   pending.push({ kind: 'entityFrame', entityId, entityHeight, link });
   applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
 };

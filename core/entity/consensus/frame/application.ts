@@ -126,7 +126,6 @@ import {
   dirtyAccountIdsFromState,
 } from '../account/touched-accounts';
 import { createCanonicalAccountWorklist } from '../account/canonical-worklist';
-import { matchesTraceSuffix, traceLog } from '../../../support/trace-debug';
 
 const recordFrameAccountChange = (
   storageChanges: RuntimeOverlayRecord[],
@@ -646,15 +645,6 @@ const routeFinalAccountInput = (
   proposal: AccountFrameProposal | undefined,
 ): void => {
   const { env, currentEntityState: state, allOutputs } = context;
-  // TEMP-TRACE-CP1 (pending-frame-stale investigation, gated by XLN_TRACE_ENTITY_SUFFIXES)
-  if (matchesTraceSuffix(input.toEntityId, input.fromEntityId)) {
-    traceLog('CP1:application.ts:routeFinalAccountInput', {
-      from: input.fromEntityId, to: input.toEntityId, kind: input.kind,
-      height: accountInputReferenceHeight(input),
-      hasAck: Boolean(accountInputAck(input)), hasProposal: Boolean(accountInputProposal(input)),
-      entityId: state.entityId,
-    });
-  }
   // Entity consensus commits the destination Entity and exact Account payload.
   // It deliberately does not choose a validator replica: validator topology,
   // local keys and recovery hints belong to the parent Runtime. Runtime binds
@@ -1585,9 +1575,3 @@ export const applyRuntimeOwnedEntityFrame = (
     frameTimestamp,
     true,
   );
-
-// === HELPER FUNCTIONS ===
-
-/**
- * Calculate quorum power based on validator shares
- */

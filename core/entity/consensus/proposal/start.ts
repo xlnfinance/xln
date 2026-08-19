@@ -10,7 +10,6 @@ import type { EntityReplica, EntityState, EntityFrame, EntityCandidate } from '.
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from '../frame';
-import { markEntityFrameBodyVerified } from '../frame/body-verified';
 import { applyEntityFrame, applyRuntimeOwnedEntityFrame } from '../frame/application';
 import { copyProposableAccounts } from '../account/touched-accounts';
 import {
@@ -433,7 +432,6 @@ const buildEntityProposal = async (
     ...(hankos ? { hankos } : {}),
   };
   validateProposedEntityFrame(frame, selection.isSingleSigner ? 'SingleSignerEntityFrame' : 'MultiSignerEntityFrame');
-  markEntityFrameBodyVerified(frame);
   return frame;
 };
 

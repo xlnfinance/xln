@@ -9,7 +9,6 @@ import {
   verifyEntityRelayCertificate,
 } from '../../entity/consensus';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
-import { entityFrameBodyIsVerified } from '../../entity/consensus/frame/body-verified';
 import { certifiedEntityFrameLinkFingerprint } from '../../entity/consensus/frame/lineage';
 import {
   buildEntityFrameAuthority,
@@ -28,7 +27,6 @@ import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, ConsensusC
 import type { RuntimeReplica } from '../../runtime/types';
 import { validateConsensusConfig } from '../../entity/consensus/config-validation';
 import { validateProposedEntityFrame } from '../../entity/consensus/frame/validation';
-import { readRuntimeEnv } from '../../support/process/runtime-process';
 import {
   getBoardHandoverFrameConfig,
   getBoardHandoverLeaderState,
@@ -216,27 +214,23 @@ const assertFrameBody = (entityId: string, link: CertifiedEntityFrameLink): Enti
         `expected=${postAuthorityRoot}:received=${frame.authorityRoot}`,
     );
   }
-  const skipBodyRehash =
-    entityFrameBodyIsVerified(frame) && readRuntimeEnv('XLN_ENTITY_STATE_ROOT_AUDIT') !== '1';
-  if (!skipBodyRehash) {
-    const bodyHash = createEntityFrameHashFromStateRoot(
-      frame.parentFrameHash,
-      frame.height,
-      frame.timestamp,
-      frame.txs,
-      frame.events,
-      entityId,
-      frame.stateRoot,
-      frame.authorityRoot,
-      frame.entityContext,
-      frame.jPrefixCertificate,
+  const bodyHash = createEntityFrameHashFromStateRoot(
+    frame.parentFrameHash,
+    frame.height,
+    frame.timestamp,
+    frame.txs,
+    frame.events,
+    entityId,
+    frame.stateRoot,
+    frame.authorityRoot,
+    frame.entityContext,
+    frame.jPrefixCertificate,
+  );
+  if (bodyHash !== frame.hash) {
+    throw new Error(
+      `STORAGE_ENTITY_LINEAGE_FRAME_HASH_MISMATCH:height=${frame.height}:` +
+        `expected=${bodyHash}:received=${frame.hash}`,
     );
-    if (bodyHash !== frame.hash) {
-      throw new Error(
-        `STORAGE_ENTITY_LINEAGE_FRAME_HASH_MISMATCH:height=${frame.height}:` +
-          `expected=${bodyHash}:received=${frame.hash}`,
-      );
-    }
   }
   const frameManifest = frame.hashesToSign?.[0];
   if (!frameManifest || frameManifest.type !== 'entityFrame' || frameManifest.hash !== frame.hash) {
