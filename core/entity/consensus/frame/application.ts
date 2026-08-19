@@ -127,6 +127,7 @@ import {
   dirtyAccountIdsFromState,
 } from '../account/touched-accounts';
 import { createCanonicalAccountWorklist } from '../account/canonical-worklist';
+import { matchesTraceSuffix, traceLog } from '../../../support/trace-debug';
 
 const recordFrameAccountChange = (
   storageChanges: RuntimeOverlayRecord[],
@@ -638,6 +639,15 @@ const routeFinalAccountInput = (
   proposal: AccountFrameProposal | undefined,
 ): void => {
   const { env, currentEntityState: state, allOutputs } = context;
+  // TEMP-TRACE-CP1 (pending-frame-stale investigation, gated by XLN_TRACE_ENTITY_SUFFIXES)
+  if (matchesTraceSuffix(input.toEntityId, input.fromEntityId)) {
+    traceLog('CP1:application.ts:routeFinalAccountInput', {
+      from: input.fromEntityId, to: input.toEntityId, kind: input.kind,
+      height: accountInputReferenceHeight(input),
+      hasAck: Boolean(accountInputAck(input)), hasProposal: Boolean(accountInputProposal(input)),
+      entityId: state.entityId,
+    });
+  }
   // Entity consensus commits the destination Entity and exact Account payload.
   // It deliberately does not choose a validator replica: validator topology,
   // local keys and recovery hints belong to the parent Runtime. Runtime binds
@@ -1452,7 +1462,9 @@ const applyEntityFrameWithIsolation = async (
   isolateState: boolean,
 ): Promise<EntityFrameResult> => {
   entityContext = validateEntityInfraContext(entityContext);
+  const profileHashStartedAt = getPerfMs();
   const previousProfileHash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(entityState));
+  const previousProfileHashMs = Math.round(getPerfMs() - profileHashStartedAt);
   const working = await prepareEntityFrameWorkingSet(
     env,
     entityState,
@@ -1468,11 +1480,24 @@ const applyEntityFrameWithIsolation = async (
   );
   working.markFrameProfile('entityTxLoop');
   const appendFinalProfileHash = (state: EntityState): void => {
+    const finalProfileHashStartedAt = getPerfMs();
     const changed = buildChangedEntityProfileHashToSign(
       state,
       entityState.height === 0 ? null : previousProfileHash,
     );
+    const finalProfileHashMs = Math.round(getPerfMs() - finalProfileHashStartedAt);
     if (changed) working.context.collectedHashes.push(changed);
+    const totalProfileHashMs = previousProfileHashMs + finalProfileHashMs;
+    if (entityFrameProfileEnabled() || totalProfileHashMs >= entityFrameSlowMs()) {
+      entityLog.info('frame.profile_descriptor', {
+        entity: shortId(entityState.entityId, 8),
+        accounts: entityState.accounts.size,
+        changed: Boolean(changed),
+        previousProfileHashMs,
+        finalProfileHashMs,
+        totalProfileHashMs,
+      });
+    }
   };
   if (working.authorityTransitionOnly) {
     working.currentEntityState = assignCertifiedOutputIdentities(

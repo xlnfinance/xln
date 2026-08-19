@@ -34,19 +34,21 @@ import {
   directoryBytes,
   entryByLabel,
   persistReport,
+  readWithRateLimitRetry,
   resolveWalPath,
   sendEnqueued,
   type WorkerArgs,
 } from '../worker-runtime';
+import { HLT_DEFAULT_PAYMENT_AMOUNT_RANGE, type HltAmountRange } from '../economy';
 import {
+  paymentAmountFor,
   paymentReceiverIndex,
-  paymentTotalPerSender,
+  paymentTotalForSender,
   paymentTotalsByReceiver,
 } from './worker-payments-plan';
 
 /** Payments move the quote token; the swap workload owns the base token. */
 const PAYMENT_TOKEN_ID = 1;
-const PAYMENT_AMOUNT = 1_000n;
 /**
  * Routing fees are quoted from live gossip at admission time, so the sender
  * declares a ceiling rather than the exact debit. Two times the amount covers
@@ -57,11 +59,36 @@ const MAX_SENDER_DEBIT_MULTIPLE = 2n;
 const CREDIT_HEADROOM_MULTIPLE = 4n;
 const DELIVERY_POLL_MS = 250;
 const DELIVERY_TIMEOUT_MS = 600_000;
+/**
+ * Fail fast on a stuck delivery instead of burning the full 10-minute
+ * deadline: unset by default (the release gate wants the long deadline so a
+ * genuinely slow-but-live run isn't killed early), but a diagnostic run can
+ * set this to abort in seconds once credited-amount progress has stopped.
+ */
+const DELIVERY_MAX_STALL_MS = Number(process.env['XLN_HLT_MAX_STALL_MS'] || 0) || Infinity;
 /** How often the delivery curve is printed while a run is in flight. */
 const DELIVERY_REPORT_MS = 2_000;
 const ROUTE_BARRIER_POLL_MS = 500;
 const ROUTE_BARRIER_TIMEOUT_MS = 300_000;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * A single settlement-poll read against a CPU-starved Hub can itself hang for
+ * the Hub's entire stall window: the read is an RPC awaiting that same
+ * single-threaded event loop. Without its own timeout, DELIVERY_MAX_STALL_MS
+ * never gets a chance to run — the loop is parked inside this await, not
+ * between polls. Race it so a live diagnostic run surfaces the stall from the
+ * read itself instead of only from the post-read stall counter.
+ */
+const withReadTimeout = <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+  if (!Number.isFinite(timeoutMs)) return promise;
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(`HLT_HUB_READ_TIMEOUT:${label}:timeoutMs=${timeoutMs}`)), timeoutMs);
+    }),
+  ]);
+};
 
 /**
  * A routed payment is admitted against the *sender's* gossip view of the hop it
@@ -135,16 +162,19 @@ const buildRoundPayment = (
   sender: LoadIdentity,
   hubEntityId: string,
   receiver: LoadIdentity,
+  senderIndex: number,
   round: number,
+  amountRange: HltAmountRange,
 ): RuntimeInput['entityInputs'][number] => {
+  const amount = paymentAmountFor(senderIndex, round, amountRange);
   const payment: EntityTx = {
     type: 'htlcPayment',
     data: {
       targetEntityId: receiver.entityId,
       route: [sender.entityId, hubEntityId, receiver.entityId],
       tokenId: PAYMENT_TOKEN_ID,
-      amount: PAYMENT_AMOUNT,
-      maxSenderDebit: PAYMENT_AMOUNT * MAX_SENDER_DEBIT_MULTIPLE,
+      amount,
+      maxSenderDebit: amount * MAX_SENDER_DEBIT_MULTIPLE,
       deliveryMode: 'async',
       description: `hlt-payment-r${round + 1}`,
     },
@@ -167,17 +197,45 @@ const hubInCapacity = (account: LoadAccountProjection, hubEntityId: string): big
   return deriveDelta(delta, isLeftEntity(hubEntityId, counterparty)).inCapacity;
 };
 
+// The API page cap (see entity-view-page.ts's pageLimit) is 500, but the
+// radapter transport itself caps one message at 1MB (codec.ts). A full
+// 500-account page measured ~3.7MB (~7.4KB/account) in one run, but a page of
+// 80 measured over 1MB (~13.4KB/account) in another under real load — account
+// size varies with HTLC/delta history, so no fixed page size is safe across
+// runs. This settlement check reruns every poll (DELIVERY_POLL_MS) for the
+// life of the run, so paging at the old default of 10 meant ~50 sequential WS
+// round-trips per poll at a 500-account Hub — the dominant cost of the whole
+// poll, compounding under any write-side contention. Start at 80 (cuts
+// round-trips ~6x over the old default) and halve on overflow, same idiom as
+// wire-budget.ts's materializeOrHalve, instead of guessing a single constant.
+const HUB_ACCOUNTS_PAGE_LIMIT_START = 80;
+const HUB_ACCOUNTS_PAGE_LIMIT_FLOOR = 4;
+
+const isMessageTooLarge = (error: unknown): boolean =>
+  error instanceof Error && error.message.includes('RADAPTER_MESSAGE_TOO_LARGE');
+
 const readHubAccounts = async (
   hub: { adapter: { read: <T>(path: string, query?: Record<string, unknown>) => Promise<T> } },
   hubEntityId: string,
 ): Promise<LoadAccountProjection[]> => {
   const items: LoadAccountProjection[] = [];
   let cursor: string | undefined;
+  let pageLimit = HUB_ACCOUNTS_PAGE_LIMIT_START;
   for (;;) {
-    const page = decodeAccountPageCursor(await hub.adapter.read<unknown>(
-      `entity/${hubEntityId}/accounts`,
-      { accountsLimit: 10, ...(cursor ? { accountsCursor: cursor } : {}) },
-    ));
+    let page;
+    for (;;) {
+      try {
+        page = decodeAccountPageCursor(await readWithRateLimitRetry<unknown>(
+          hub,
+          `entity/${hubEntityId}/accounts`,
+          { accountsLimit: pageLimit, ...(cursor ? { accountsCursor: cursor } : {}) },
+        ));
+        break;
+      } catch (error) {
+        if (!isMessageTooLarge(error) || pageLimit <= HUB_ACCOUNTS_PAGE_LIMIT_FLOOR) throw error;
+        pageLimit = Math.max(HUB_ACCOUNTS_PAGE_LIMIT_FLOOR, Math.floor(pageLimit / 2));
+      }
+    }
     items.push(...page.items);
     if (!page.nextCursor) return items;
     cursor = page.nextCursor;
@@ -217,8 +275,14 @@ const waitForHubSettlement = async (
   let lastCredited = -1n;
   let stalledSinceMs = startedAt;
   while (Date.now() < deadline) {
-    const core = decodeHubSettlementCounters(await hub.adapter.read<unknown>(`entity/${hubEntityId}`));
-    const credits = await readHubReceiverCredits(hub, hubEntityId, receivers);
+    const core = decodeHubSettlementCounters(
+      await withReadTimeout(readWithRateLimitRetry<unknown>(hub, `entity/${hubEntityId}`), DELIVERY_MAX_STALL_MS, 'entity'),
+    );
+    const credits = await withReadTimeout(
+      readHubReceiverCredits(hub, hubEntityId, receivers),
+      DELIVERY_MAX_STALL_MS,
+      'receiverCredits',
+    );
     let credited = 0n;
     let pendingReceivers = 0;
     for (const [receiverId, amount] of expected) {
@@ -232,6 +296,7 @@ const waitForHubSettlement = async (
       lastCredited = credited;
       stalledSinceMs = Date.now();
     }
+    const stalledMs = Date.now() - stalledSinceMs;
     if (elapsedMs - reportedAtMs >= DELIVERY_REPORT_MS) {
       reportedAtMs = elapsedMs;
       console.log(
@@ -239,8 +304,11 @@ const waitForHubSettlement = async (
         `receiversPending=${pendingReceivers}/${receiverIds.length} ` +
         `credited=${credited}/${owed} fees=${core.htlcFeesEarned} height=${core.height} ` +
         `rate=${(Number(credited) / Math.max(1, elapsedMs) * 1_000).toFixed(1)}/s ` +
-        `stalledMs=${Date.now() - stalledSinceMs}`,
+        `stalledMs=${stalledMs}`,
       );
+    }
+    if (stalledMs >= DELIVERY_MAX_STALL_MS) {
+      throw new Error(`HLT_PAYMENT_STALLED_FAIL_FAST:stalledMs=${stalledMs}:height=${core.height}`);
     }
     await sleep(DELIVERY_POLL_MS);
   }
@@ -258,13 +326,17 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
   let receivers: LaneRuntime[] = [];
   try {
     const hubIdentity = selectLocalHubIdentity(
-      decodeEntitySummaries(await hub.adapter.read<unknown>('entities')),
+      decodeEntitySummaries(await readWithRateLimitRetry<unknown>(hub, 'entities')),
       hub.adapter.runtimeId,
       31_337,
     );
     const lanes = args.lanes;
-    const perSender = paymentTotalPerSender(args.rounds, PAYMENT_AMOUNT);
-    const perReceiver = paymentTotalsByReceiver(lanes, lanes, args.rounds, PAYMENT_AMOUNT);
+    const amountRange = args.plan?.economy.paymentAmountRange ?? HLT_DEFAULT_PAYMENT_AMOUNT_RANGE;
+    const perSender = Array.from(
+      { length: lanes },
+      (_, senderIndex) => paymentTotalForSender(senderIndex, args.rounds, amountRange),
+    );
+    const perReceiver = paymentTotalsByReceiver(lanes, lanes, args.rounds, amountRange);
     // Senders spend toward the Hub, so the Hub grants them capacity; receivers
     // are paid by the Hub, so they grant the Hub capacity. Both directions are
     // funded with headroom because routing fees ride on top of the amount.
@@ -277,9 +349,9 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       laneOffset: args.laneOffset,
       role: 'maker',
       laneGrantedCreditTokenId: PAYMENT_TOKEN_ID,
-      laneGrantedCreditAmounts: Array.from({ length: lanes }, () => perSender * CREDIT_HEADROOM_MULTIPLE),
+      laneGrantedCreditAmounts: perSender.map(total => total * CREDIT_HEADROOM_MULTIPLE),
       hubGrantedCreditTokenId: PAYMENT_TOKEN_ID,
-      hubGrantedCreditAmounts: Array.from({ length: lanes }, () => perSender * CREDIT_HEADROOM_MULTIPLE),
+      hubGrantedCreditAmounts: perSender.map(total => total * CREDIT_HEADROOM_MULTIPLE),
     });
     senders = senderSetup.runtimes;
     const receiverSetup = await setupParallelLoadLanes({
@@ -305,7 +377,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
 
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
     const walBytesBefore = directoryBytes(walPath);
-    const hubDurableBefore = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
+    const hubDurableBefore = decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest'));
     const receiverIds = receivers.map(lane => lane.identity.entityId.toLowerCase());
     const expected = new Map(receiverIds.map((id, index) => [id, perReceiver[index]!]));
     const baselines = await readHubReceiverCredits(hub, hubIdentity.entityId, new Set(receiverIds));
@@ -325,7 +397,9 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
               lane.identity,
               hubIdentity.entityId,
               receiver.identity,
+              index,
               round,
+              amountRange,
             );
             const tx = built.entityTxs?.[0];
             if (!tx) throw new Error('HLT_PAYMENT_TX_MISSING');
@@ -349,7 +423,10 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       senders: lanes,
       receivers: lanes,
       tokenId: PAYMENT_TOKEN_ID,
-      amount: PAYMENT_AMOUNT.toString(),
+      // Amounts vary per (sender, round) within [min,max]; the report's single
+      // `amount` field predates randomization and is kept as the floor so it
+      // stays a valid, meaningful decimal without widening the report schema.
+      amount: amountRange.min.toString(),
       offeredPaymentRate: Math.round(lanes * 1_000 / args.cadenceMs),
       submittedPayments,
       deliveredPayments: submittedPayments,
@@ -361,7 +438,7 @@ export const runPaymentProductionLoad = async (args: WorkerArgs): Promise<void> 
       walBytesBefore,
       walBytesAfter: directoryBytes(walPath),
       hubDurableBefore,
-      hubDurableAfter: decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest')),
+      hubDurableAfter: decodeLoadFrame(await readWithRateLimitRetry<unknown>(hub, 'frame/latest')),
     });
     persistReport(join(args.workDir, 'hlt-payment-load-report.json'), report, decodeLoadPaymentReport);
     publishHltDashboardReport('payment', report);

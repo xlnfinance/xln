@@ -100,21 +100,62 @@ const HLT_FIXTURE = {
       cpuTps: 892.9,
     },
   ],
+  run: {
+    active: false,
+    status: 'idle',
+    pid: null,
+    workDir: null,
+    logPath: null,
+    startedAt: null,
+    finishedAt: null,
+    exitCode: null,
+    error: null,
+    logTail: '',
+  },
 };
 
 test('renders the configurable HLT dashboard across viewports', { tag: '@functional' }, async ({ page }, testInfo) => {
   test.setTimeout(60_000);
+  let run = { ...HLT_FIXTURE.run };
   await page.route('**/api/qa/hlt**', async (route) => {
+    const request = route.request();
+    const url = request.url();
+    if (url.includes('/hlt/start') && request.method() === 'POST') {
+      run = {
+        ...run,
+        active: true,
+        status: 'running',
+        pid: 4242,
+        workDir: '/tmp/xln-hlt-dash-e2e',
+        logTail: 'workDir=/tmp/xln-hlt-dash-e2e portBase=20000',
+      };
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, run }),
+      });
+      return;
+    }
+    if (url.includes('/hlt/abort') && request.method() === 'POST') {
+      run = { ...run, active: false, status: 'aborted', pid: 4242 };
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, run }),
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(HLT_FIXTURE),
+      body: JSON.stringify({ ...HLT_FIXTURE, run }),
     });
   });
 
   await page.goto('/qa/hlt');
   const dashboard = page.getByTestId('hlt-dashboard');
   await expect(dashboard).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('hlt-start')).toBeVisible();
   await expect(page.getByTestId('hlt-users')).toHaveText('200');
   await expect(page.getByTestId('hlt-users-per-process')).toHaveText('40');
   await expect(page.getByTestId('hlt-daemons')).toHaveText('5');
@@ -141,6 +182,7 @@ test('renders the configurable HLT dashboard across viewports', { tag: '@functio
   ]) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await expect(dashboard).toBeVisible();
+    await expect(page.getByTestId('hlt-start')).toBeVisible();
     const bounds = await dashboard.boundingBox();
     expect(bounds, `${viewport.name} HLT dashboard must have layout bounds`).not.toBeNull();
     expect(bounds!.x, `${viewport.name} HLT dashboard must stay in the viewport`).toBeGreaterThanOrEqual(0);
@@ -152,4 +194,8 @@ test('renders the configurable HLT dashboard across viewports', { tag: '@functio
       fullPage: true,
     });
   }
+
+  await page.getByTestId('hlt-start').click();
+  await expect(page.getByTestId('hlt-run-status')).toContainText('running');
+  await expect(page.getByTestId('hlt-abort')).toBeVisible();
 });

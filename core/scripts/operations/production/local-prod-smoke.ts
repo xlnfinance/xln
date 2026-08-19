@@ -237,6 +237,8 @@ const hltEconomyArgs = (): string[] => {
     ['--quote-token', 'XLN_HLT_QUOTE_TOKEN'],
     ['--hubs', 'XLN_HLT_HUBS'],
     ['--market-makers', 'XLN_HLT_MARKET_MAKERS'],
+    ['--payment-amount-min', 'XLN_HLT_PAYMENT_AMOUNT_MIN'],
+    ['--payment-amount-max', 'XLN_HLT_PAYMENT_AMOUNT_MAX'],
   ] as const).flatMap(([flag, variable]) => {
     const value = process.env[variable];
     return value ? [flag, value] : [];

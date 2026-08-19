@@ -117,7 +117,8 @@ export const emitCommittedPendingFrameWarnings = (
     const frameAge = committedState.timestamp - pending.timestamp;
     if (frameAge > ACCOUNT_PENDING_STALE_WARNING_MS) {
       console.warn(
-        `⏰ PENDING-FRAME-STALE: Account with ${counterpartyId.slice(-4)} h${pending.height} for ${Math.floor(frameAge / 1000)}s — consider dispute`,
+        // 12 chars: 4 collides too often across 1000+ concurrent accounts to trace one stuck pair.
+        `⏰ PENDING-FRAME-STALE: Account with ${counterpartyId.slice(-12)} h${pending.height} for ${Math.floor(frameAge / 1000)}s — consider dispute`,
       );
     }
   }
@@ -271,7 +272,7 @@ async function maintainPendingAccounts(
       entityTxs: [{ type: 'accountInput', data: account.pendingAccountInput }],
     });
     crontabLog.debug('pending_frame.resend', {
-      account: shortId(counterpartyId),
+      account: shortId(counterpartyId, 12),
       height: account.pendingFrame.height,
       ageSeconds: Math.floor(frameAge / 1000),
     });

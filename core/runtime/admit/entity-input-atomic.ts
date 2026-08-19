@@ -114,8 +114,9 @@ const recordAtomicPairRejection = (
   inputIndexes: [number, number],
   code: RuntimeEntityInputApplyResult['rejectedAtomicPairs'][number]['code'],
   detail: string,
+  entityIds: [string, string],
 ): void => {
-  context.rejectedAtomicPairs.push({ inputIndexes, code, detail });
+  context.rejectedAtomicPairs.push({ inputIndexes, code, detail, entityIds });
   for (const inputIndex of inputIndexes) {
     context.inputOutcomes.push({
       inputIndex,
@@ -162,6 +163,18 @@ export const applyAtomicEntityInputPair = async (
   options: RuntimeEntityInputApplyOptions,
   context: RuntimeEntityInputBatchContext,
 ): Promise<void> => {
+  // This path is reached only via atomicPairInputsMatch, which requires both
+  // legs to carry a matching atomicCrossJurisdictionPair stamp — a plain
+  // payment input is never tagged and never routes here. Assert it directly
+  // at the entry point rather than trusting the caller's filter transitively,
+  // so a future router bug that mis-pairs a payment input surfaces loudly
+  // instead of silently entangling payment state with cross-J atomicity.
+  if (!pair[0].atomicCrossJurisdictionPair || !pair[1].atomicCrossJurisdictionPair) {
+    throw new Error(
+      `RUNTIME_ATOMIC_PAIR_MISSING_CROSS_J_STAMP:${pair[0].entityId}:${pair[1].entityId}`,
+    );
+  }
+  const entityIds: [string, string] = [pair[0].entityId, pair[1].entityId];
   const indexes: [number, number] = [
     firstInputIndex,
     firstInputIndex + 1,
@@ -180,6 +193,7 @@ export const applyAtomicEntityInputPair = async (
       indexes,
       'CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED',
       rejection.message,
+      entityIds,
     );
     await applyRetainedNonAtomicInputs(env, pair, indexes, options, context);
     return;
@@ -199,6 +213,7 @@ export const applyAtomicEntityInputPair = async (
       indexes,
       'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED',
       'One or both signed Account legs were stale or rejected',
+      entityIds,
     );
     await applyRetainedNonAtomicInputs(env, pair, indexes, options, context);
     return;

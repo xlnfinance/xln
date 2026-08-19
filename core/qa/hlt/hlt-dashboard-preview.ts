@@ -6,6 +6,7 @@
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import {
   buildHltPlan,
+  HLT_DEFAULT_PAYMENT_AMOUNT_RANGE,
   parseHltLabels,
   parseHltMix,
 } from '../../scripts/operations/hlt/economy';
@@ -23,6 +24,9 @@ export type HltDashboardConfig = Readonly<{
   marketMakers: string;
   mode: HltDashboardMode;
   profile: boolean;
+  /** Per-payment amount is drawn uniformly (deterministically) from [min,max]. */
+  paymentAmountMin: bigint;
+  paymentAmountMax: bigint;
 }>;
 
 export const HLT_DASHBOARD_DEFAULTS: HltDashboardConfig = {
@@ -35,6 +39,8 @@ export const HLT_DASHBOARD_DEFAULTS: HltDashboardConfig = {
   marketMakers: 'MM',
   mode: 'payments',
   profile: true,
+  paymentAmountMin: HLT_DEFAULT_PAYMENT_AMOUNT_RANGE.min,
+  paymentAmountMax: HLT_DEFAULT_PAYMENT_AMOUNT_RANGE.max,
 };
 
 type HltHubShare = Readonly<{
@@ -112,6 +118,18 @@ const requireMax = (value: number, maximum: number, code: string): number => {
   return value;
 };
 
+const parsePositiveBigintParam = (raw: string | null, fallback: bigint, code: string): bigint => {
+  if (raw === null) return fallback;
+  let value: bigint;
+  try {
+    value = BigInt(raw);
+  } catch {
+    throw new Error(`${code}:${raw}`);
+  }
+  if (value <= 0n) throw new Error(`${code}:${raw}`);
+  return value;
+};
+
 const mixForMode = (mode: HltDashboardMode, mix: string): string => {
   if (mode === 'payments') return '0:1';
   if (mode === 'same') return '1:0';
@@ -157,6 +175,15 @@ export const parseHltDashboardConfig = (params: URLSearchParams): HltDashboardCo
     3_600,
     'HLT_DASHBOARD_DURATION_TOO_HIGH',
   );
+  const paymentAmountMin = parsePositiveBigintParam(
+    params.get('paymentMin'), defaults.paymentAmountMin, 'HLT_DASHBOARD_PAYMENT_AMOUNT_MIN_INVALID',
+  );
+  const paymentAmountMax = parsePositiveBigintParam(
+    params.get('paymentMax'), defaults.paymentAmountMax, 'HLT_DASHBOARD_PAYMENT_AMOUNT_MAX_INVALID',
+  );
+  if (paymentAmountMax < paymentAmountMin) {
+    throw new Error(`HLT_DASHBOARD_PAYMENT_AMOUNT_RANGE_INVALID:${paymentAmountMin}:${paymentAmountMax}`);
+  }
   return {
     users,
     usersPerRuntime,
@@ -167,6 +194,8 @@ export const parseHltDashboardConfig = (params: URLSearchParams): HltDashboardCo
     marketMakers: params.get('marketMakers') ?? defaults.marketMakers,
     mode: modeRaw,
     profile: profileRaw === null ? defaults.profile : profileRaw === '1' || profileRaw === 'true',
+    paymentAmountMin,
+    paymentAmountMax,
   };
 };
 
@@ -206,6 +235,8 @@ const isolatedCommand = (config: HltDashboardConfig): string => {
     `XLN_HLT_DURATION_S=${config.durationSeconds}`,
     `XLN_HLT_HUBS=${config.hubs}`,
     `XLN_HLT_MARKET_MAKERS=${config.marketMakers}`,
+    `XLN_HLT_PAYMENT_AMOUNT_MIN=${config.paymentAmountMin}`,
+    `XLN_HLT_PAYMENT_AMOUNT_MAX=${config.paymentAmountMax}`,
     'XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE=1',
     `XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE=${config.mode}`,
     ...profileVars,
@@ -224,6 +255,7 @@ export const previewHltDashboard = (config: HltDashboardConfig): HltDashboardPre
     quoteTokenId: 1,
     hubLabels: parseHltLabels(config.hubs, 'HLT_DASHBOARD_HUBS_INVALID'),
     marketMakerLabels: parseHltLabels(config.marketMakers, 'HLT_DASHBOARD_MM_INVALID'),
+    paymentAmountRange: { min: config.paymentAmountMin, max: config.paymentAmountMax },
   });
   return {
     config: { ...config, mix },

@@ -62,6 +62,8 @@ export interface RuntimeEntityInputApplyResult {
       | 'CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED'
       | 'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED';
     detail: string;
+    /** Both legs are stamped atomicCrossJurisdictionPair — never a payment entity. */
+    entityIds: [string, string];
   }>;
   entityFrameCommitted: boolean;
   jOutbox: JInput[];

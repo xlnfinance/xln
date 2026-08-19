@@ -65,7 +65,10 @@ const isQaJsonCacheable = (url: string, method: string, init: RequestInit): bool
   } catch {
     path = url.split('?')[0] || url;
   }
-  return path.startsWith('/api/qa/') && path !== '/api/qa/artifact' && path !== '/api/qa/story-image';
+  return path.startsWith('/api/qa/')
+    && path !== '/api/qa/artifact'
+    && path !== '/api/qa/story-image'
+    && path !== '/api/qa/hlt';
 };
 
 const cacheKeyFor = (url: string): string => `${readQaToken()}\n${url}`;

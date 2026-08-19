@@ -215,10 +215,15 @@ const applyRuntimeEntityBatch = async (
   }
   for (const [code, rejections] of rejectionGroups) {
     const inputIndexes = rejections.flatMap(rejection => rejection.inputIndexes);
+    // entityIds are always a cross-J atomic pair's own two legs (see the
+    // atomicCrossJurisdictionPair assertion in applyAtomicEntityInputPair) —
+    // surfaced here so this incident is directly verifiable as scoped to
+    // cross-jurisdiction swap entities, never a payment sender/receiver.
     env.warn('network', code, {
       rejectedPairCount: rejections.length,
       rejectedInputCount: inputIndexes.length,
       rejectedInputIndexes: inputIndexes.slice(0, 8),
+      rejectedEntityIds: rejections.slice(0, 8).map(rejection => rejection.entityIds),
       detail: rejections[0]?.detail ?? code,
     });
     recordRejectedAtomicCrossJInputs(

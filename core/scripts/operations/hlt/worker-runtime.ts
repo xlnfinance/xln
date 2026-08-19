@@ -20,6 +20,7 @@ import { safeParse, safeStringify } from '../../../protocol/serialization';
 import {
   buildHltPlan,
   HLT_DEFAULT_BASE_TOKEN_ID,
+  HLT_DEFAULT_PAYMENT_AMOUNT_RANGE,
   HLT_DEFAULT_QUOTE_TOKEN_ID,
   parseHltLabels,
   parseHltMix,
@@ -75,7 +76,19 @@ const parsePositiveInteger = (raw: string | undefined, code: string): number => 
 export const HLT_ECONOMY_FLAGS = [
   '--users', '--rate-per-user', '--duration-s', '--mix',
   '--base-token', '--quote-token', '--hubs', '--market-makers',
+  '--payment-amount-min', '--payment-amount-max',
 ] as const;
+
+const parsePositiveBigint = (raw: string | undefined, fallback: bigint, code: string): bigint => {
+  if (raw === undefined) return fallback;
+  try {
+    const value = BigInt(raw);
+    if (value <= 0n) throw new Error('non-positive');
+    return value;
+  } catch {
+    throw new Error(`${code}:${raw}`);
+  }
+};
 
 /**
  * Build the run plan from population flags, or return null when the caller
@@ -88,6 +101,16 @@ const parseHltPlanArgs = (values: ReadonlyMap<string, string>): HltPlan | null =
     if (stray.length > 0) throw new Error(`HLT_ECONOMY_REQUIRES_USERS:${stray.join(',')}`);
     return null;
   }
+  const paymentAmountMin = parsePositiveBigint(
+    values.get('--payment-amount-min'),
+    HLT_DEFAULT_PAYMENT_AMOUNT_RANGE.min,
+    'HLT_PAYMENT_AMOUNT_MIN_INVALID',
+  );
+  const paymentAmountMax = parsePositiveBigint(
+    values.get('--payment-amount-max'),
+    HLT_DEFAULT_PAYMENT_AMOUNT_RANGE.max,
+    'HLT_PAYMENT_AMOUNT_MAX_INVALID',
+  );
   return buildHltPlan({
     users: parsePositiveInteger(users, 'HLT_USERS_INVALID'),
     ratePerUserPerSecond: parsePositiveInteger(values.get('--rate-per-user') ?? '1', 'HLT_RATE_PER_USER_INVALID'),
@@ -103,6 +126,7 @@ const parseHltPlanArgs = (values: ReadonlyMap<string, string>): HltPlan | null =
     ),
     hubLabels: parseHltLabels(values.get('--hubs') ?? 'H1', 'HLT_HUB_LABELS_INVALID'),
     marketMakerLabels: parseHltLabels(values.get('--market-makers') ?? 'MM', 'HLT_MM_LABELS_INVALID'),
+    paymentAmountRange: { min: paymentAmountMin, max: paymentAmountMax },
   });
 };
 
@@ -317,26 +341,56 @@ export const findIdentity = async (
   predicate: (entity: ReturnType<typeof decodeEntitySummaries>[number]) => boolean,
   code: string,
 ) => {
-  const matches = decodeEntitySummaries(await runtime.adapter.read<unknown>('entities')).filter(predicate);
+  const matches = decodeEntitySummaries(await readWithRateLimitRetry<unknown>(runtime, 'entities')).filter(predicate);
   if (matches.length !== 1 || !matches[0]?.signerId) throw new Error(code);
   return { entityId: matches[0].entityId, signerId: matches[0].signerId };
 };
 
+export type ReadableRuntime = Readonly<{
+  adapter: { read: <T>(path: string, query?: Record<string, unknown>) => Promise<T> };
+}>;
+
+const READ_RETRY_DEADLINE_MS = 120_000;
+
+/**
+ * RemoteRuntimeAdapter.request() only checks the socket's readyState, not
+ * whether authenticateIfNeeded() (called after every openSocket(), including
+ * from scheduleReconnect()) has actually finished its own round-trip — so a
+ * read racing a fresh reconnect can reach the server before its auth level is
+ * re-established there and come back `E_UNAUTHORIZED: <level> auth required`
+ * (server.ts:454) with retryable:false, even though the credentials are
+ * fine and the very next attempt succeeds once auth catches up. A REAL
+ * credential failure never reaches here: authenticateIfNeeded() throwing
+ * inside connect()/scheduleReconnect() sets terminalAuthFailure and tears the
+ * socket down first, so a live open socket rejecting a read with this exact
+ * message is always the reconnect race, not a permission error — safe to
+ * retry the same as the transient disconnect case below.
+ */
+const isTransientAuthRace = (error: RuntimeAdapterError): boolean =>
+  error.code === 'E_UNAUTHORIZED' && error.message.endsWith('auth required');
+
 /**
  * A rate-limited read is an observation gap, not a failure: the driver waits
- * out the adapter's own retry hint. Without this a budget cap ends a load run
- * with a driver error instead of measuring the Hub.
+ * out the adapter's own retry hint. A retryable adapter error (socket closed
+ * or replaced mid-request — RemoteRuntimeAdapter.handleClose/openSocket fail
+ * every in-flight call on disconnect) is the same kind of gap: the adapter
+ * reconnects on its own schedule, so the caller only needs to wait it out
+ * instead of crashing the whole worker on the first transient hiccup. Without
+ * this a budget cap ends a load run with a driver error instead of measuring
+ * the Hub.
  */
-const readWithRateLimitRetry = async <T>(
-  runtime: ConnectedRuntime,
+export const readWithRateLimitRetry = async <T>(
+  runtime: ReadableRuntime,
   path: string,
   query?: Record<string, unknown>,
 ): Promise<T> => {
+  const deadline = Date.now() + READ_RETRY_DEADLINE_MS;
   for (;;) {
     try {
       return await runtime.adapter.read<T>(path, query);
     } catch (error) {
-      if (!(error instanceof RuntimeAdapterError) || error.code !== 'E_RATE_LIMITED') throw error;
+      if (!(error instanceof RuntimeAdapterError) || !(error.retryable || isTransientAuthRace(error))) throw error;
+      if (Date.now() >= deadline) throw error;
       await sleep(Math.max(20, error.retryAfterMs ?? 100));
     }
   }
@@ -389,7 +443,8 @@ export const waitForCredit = async (
 ): Promise<void> => {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
-    const account = decodeAccountPage(await runtime.adapter.read<unknown>(
+    const account = decodeAccountPage(await readWithRateLimitRetry<unknown>(
+      runtime,
       `entity/${entityId}/accounts`,
       { accountId: hubEntityId, accountsLimit: 1 },
     ));
@@ -404,7 +459,8 @@ export const readLoadAccount = async (
   runtime: ConnectedRuntime,
   entityId: string,
   hubEntityId: string,
-): Promise<LoadAccountProjection | null> => decodeAccountPage(await runtime.adapter.read<unknown>(
+): Promise<LoadAccountProjection | null> => decodeAccountPage(await readWithRateLimitRetry<unknown>(
+  runtime,
   `entity/${entityId}/accounts`,
   { accountId: hubEntityId, accountsLimit: 1 },
 ));

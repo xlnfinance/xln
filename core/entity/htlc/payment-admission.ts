@@ -4,7 +4,13 @@ import { sameAccountStateDomain } from '../../account/commitment/state-root';
 import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dispute/policy';
 import { deriveDelta } from '../../account/utils';
 import { HTLC, LIMITS, TOKENS } from '../../config/constants';
-import { quoteHtlcPaymentRoute, type RoutingProfile } from '../../pathfinding/htlc-quote';
+import {
+  buildRoutingProfileIndex,
+  lookupUniqueRoutingProfile,
+  quoteHtlcPaymentRouteWithIndex,
+  type RoutingProfile,
+  type RoutingProfileIndex,
+} from '../../pathfinding/htlc-quote';
 import { resolvePaymentDeadlineWindow } from '../../protocol/payments/delivery';
 import { createOnionEnvelopes } from '../../protocol/htlc/codec/envelope';
 import {
@@ -61,6 +67,18 @@ const assertRawHtlcPayment = (tx: HtlcPaymentTx): void => {
   }
 };
 
+// `lookupUniqueRoutingProfile` throws a plain Error (shared with htlc-quote.ts's
+// non-peer-rejectable callers); every HTLC payment call site here is
+// peer-rejectable data, so rewrap its message through rejectHtlcPayment to
+// keep the FailureDispositionError('reject', ...) disposition unchanged.
+const uniqueProfile = (index: RoutingProfileIndex, id: string): RoutingProfile => {
+  try {
+    return lookupUniqueRoutingProfile(index, id);
+  } catch (error) {
+    return rejectHtlcPayment(error instanceof Error ? error.message : String(error));
+  }
+};
+
 /**
  * Domain of the `from -> to` lane as both Profiles describe it.
  *
@@ -70,14 +88,14 @@ const assertRawHtlcPayment = (tx: HtlcPaymentTx): void => {
  * and the payment must not be routed through them.
  */
 const hopAccountDomain = (
-  profiles: readonly RoutingProfile[],
+  index: RoutingProfileIndex,
   from: string,
   to: string,
   reject: (reason: string) => never,
 ): AccountStateDomain => {
-  const fromAccount = uniqueProfile(profiles, from).accounts
+  const fromAccount = uniqueProfile(index, from).accounts
     .find(row => row.counterpartyId.toLowerCase() === to);
-  const toAccount = uniqueProfile(profiles, to).accounts
+  const toAccount = uniqueProfile(index, to).accounts
     .find(row => row.counterpartyId.toLowerCase() === from);
   if (!fromAccount && !toAccount) reject(`HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING:${from}:${to}`);
   if (fromAccount && toAccount && !sameAccountStateDomain(fromAccount.domain, toAccount.domain)) {
@@ -96,12 +114,6 @@ const normalizeRoute = (raw: readonly string[], source: string, target: string):
     && new Set(intermediates).size === intermediates.length && !intermediates.includes(source);
   if ((!selfRoute && new Set(route).size !== route.length) || (selfRoute && !validSelf)) rejectHtlcPayment('HTLC_PAYMENT_ROUTE_LOOP');
   return route;
-};
-
-const uniqueProfile = (profiles: readonly RoutingProfile[], id: string): RoutingProfile => {
-  const matches = profiles.filter(profile => profile.entityId.toLowerCase() === id);
-  if (matches.length !== 1) rejectHtlcPayment(`HTLC_PAYMENT_PROFILE_MATCH_COUNT:${id}:${matches.length}`);
-  return matches[0]!;
 };
 
 export const hashRawHtlcPaymentTx = (tx: HtlcPaymentTx): string =>
@@ -147,6 +159,7 @@ export const materializeOriginatedHtlcPayments = async (
 ): Promise<PreparedOriginatedHtlcPayment[]> => {
   const originated: PreparedOriginatedHtlcPayment[] = [];
   const activeHashlocks = new Set([...input.state.htlcRoutes.keys()].map(hashlock => hashlock.toLowerCase()));
+  const profileIndex = buildRoutingProfileIndex(input.profiles);
   for (const [txIndex, candidate] of input.proposalTxs.entries()) {
     if (candidate.type !== 'htlcPayment') continue;
     assertRawHtlcPayment(candidate);
@@ -166,7 +179,7 @@ export const materializeOriginatedHtlcPayments = async (
     activeHashlocks.add(hashlock);
     const startedAtMs = candidate.data.startedAtMs ?? input.state.timestamp;
     if (!Number.isSafeInteger(startedAtMs) || startedAtMs !== input.state.timestamp) rejectHtlcPayment('HTLC_PAYMENT_STARTED_AT_INVALID');
-    const quote = quoteHtlcPaymentRoute(input.profiles, route, candidate.data.tokenId, candidate.data.amount);
+    const quote = quoteHtlcPaymentRouteWithIndex(profileIndex, route, candidate.data.tokenId, candidate.data.amount);
     if (quote.senderLockAmount > candidate.data.maxSenderDebit) rejectHtlcPayment('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
     const window = resolvePaymentDeadlineWindow({
       mode: candidate.data.deliveryMode,
@@ -177,14 +190,14 @@ export const materializeOriginatedHtlcPayments = async (
     const timelock = calculateHopTimelock(window.baseTimelock, 0);
     const revealBeforeHeight = calculateHopRevealHeight(window.baseHeight, 0, route.length - 1);
     const lockId = generateLockId(hashlock, input.height, txIndex, startedAtMs).toLowerCase();
-    const sourceProfile = uniqueProfile(input.profiles, source);
+    const sourceProfile = uniqueProfile(profileIndex, source);
     if (sourceProfile.entityEncryptionPublicKey !== input.state.entityEncryptionPublicKey) {
       rejectHtlcPayment('HTLC_PAYMENT_SOURCE_PROFILE_KEY_MISMATCH');
     }
-    const publicKeys = new Map(route.map(id => [id, uniqueProfile(input.profiles, id).entityEncryptionPublicKey]));
+    const publicKeys = new Map(route.map(id => [id, uniqueProfile(profileIndex, id).entityEncryptionPublicKey]));
     const domains = route.slice(0, -1).map((from, index) => {
       const to = route[index + 1]!;
-      const domain = hopAccountDomain(input.profiles, from, to, rejectHtlcPayment);
+      const domain = hopAccountDomain(profileIndex, from, to, rejectHtlcPayment);
       if (index === 0) {
         const localAccount = input.state.accounts.get(to);
         if (!localAccount || !sameAccountStateDomain(localAccount.state.domain, domain)) {
@@ -229,6 +242,7 @@ type AssertOriginatedInput = Readonly<{
 
 const assertOriginRouteEvidence = (
   input: AssertOriginatedInput,
+  profileIndex: RoutingProfileIndex,
   tx: HtlcPaymentTx,
   origin: PreparedOriginatedHtlcPayment,
 ): void => {
@@ -238,13 +252,13 @@ const assertOriginRouteEvidence = (
   if (tx.data.route.length > 0 && encodeCanonicalConsensusValue(route) !== encodeCanonicalConsensusValue(tx.data.route)) {
     rejectHtlcPayment(`HTLC_PAYMENT_PREPARED_ROUTE_MISMATCH:${origin.txHash}`);
   }
-  const sourceProfile = uniqueProfile(input.profiles, source);
+  const sourceProfile = uniqueProfile(profileIndex, source);
   if (sourceProfile.entityEncryptionPublicKey !== input.state.entityEncryptionPublicKey) {
     rejectHtlcPayment('HTLC_PAYMENT_SOURCE_PROFILE_KEY_MISMATCH');
   }
   for (const [index, from] of route.slice(0, -1).entries()) {
     const to = route[index + 1]!;
-    const domain = hopAccountDomain(input.profiles, from, to, rejectHtlcPayment);
+    const domain = hopAccountDomain(profileIndex, from, to, rejectHtlcPayment);
     if (index === 0) {
       const local = input.state.accounts.get(to);
       if (!local || !sameAccountStateDomain(local.state.domain, domain)) {
@@ -256,13 +270,14 @@ const assertOriginRouteEvidence = (
 
 const assertOriginEconomics = (
   input: AssertOriginatedInput,
+  profileIndex: RoutingProfileIndex,
   tx: HtlcPaymentTx,
   txIndex: number,
   origin: PreparedOriginatedHtlcPayment,
 ): void => {
   const startedAtMs = tx.data.startedAtMs ?? input.state.timestamp;
   if (!Number.isSafeInteger(startedAtMs) || startedAtMs !== input.state.timestamp) rejectHtlcPayment('HTLC_PAYMENT_STARTED_AT_INVALID');
-  const quote = quoteHtlcPaymentRoute(input.profiles, [...origin.route], tx.data.tokenId, tx.data.amount);
+  const quote = quoteHtlcPaymentRouteWithIndex(profileIndex, [...origin.route], tx.data.tokenId, tx.data.amount);
   if (quote.senderLockAmount > tx.data.maxSenderDebit) rejectHtlcPayment('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
   const window = resolvePaymentDeadlineWindow({
     mode: tx.data.deliveryMode,
@@ -296,6 +311,7 @@ export const assertOriginatedHtlcPayments = (input: AssertOriginatedInput): void
   if (expectedTxs.length !== input.originated.length) rejectHtlcPayment('HTLC_PAYMENT_PREPARED_ORIGIN_COUNT_MISMATCH');
   const origins = new Map(input.originated.map(origin => [origin.txHash, origin]));
   const activeHashlocks = new Set([...input.state.htlcRoutes.keys()].map(hashlock => hashlock.toLowerCase()));
+  const profileIndex = buildRoutingProfileIndex(input.profiles);
   for (const { tx, txIndex } of expectedTxs) {
     assertRawHtlcPayment(tx);
     const txHash = hashRawHtlcPaymentTx(tx);
@@ -303,8 +319,8 @@ export const assertOriginatedHtlcPayments = (input: AssertOriginatedInput): void
     if (!origin) rejectHtlcPayment(`HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:${txHash}`);
     if (activeHashlocks.has(origin.hashlock)) rejectHtlcPayment(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${origin.hashlock}`);
     activeHashlocks.add(origin.hashlock);
-    assertOriginRouteEvidence(input, tx, origin);
-    assertOriginEconomics(input, tx, txIndex, origin);
+    assertOriginRouteEvidence(input, profileIndex, tx, origin);
+    assertOriginEconomics(input, profileIndex, tx, txIndex, origin);
   }
 };
 

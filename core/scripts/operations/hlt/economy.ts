@@ -17,6 +17,11 @@ export type HltWorkloadMix = Readonly<{
   payment: number;
 }>;
 
+export type HltAmountRange = Readonly<{ min: bigint; max: bigint }>;
+
+/** Every HLT payment before this session was this exact fixed amount. */
+export const HLT_DEFAULT_PAYMENT_AMOUNT_RANGE: HltAmountRange = { min: 1_000n, max: 1_000n };
+
 export type HltEconomy = Readonly<{
   /** Total user Runtime processes. Swap lanes pair them as maker/taker. */
   users: number;
@@ -29,6 +34,8 @@ export type HltEconomy = Readonly<{
   /** Hub labels from the mesh manifest, e.g. ['H1'] or ['H1','H2','H3']. */
   hubLabels: readonly string[];
   marketMakerLabels: readonly string[];
+  /** Per-payment amount is drawn uniformly (deterministically) from this range. */
+  paymentAmountRange?: HltAmountRange;
 }>;
 
 /**
@@ -101,6 +108,13 @@ export const buildHltPlan = (economy: HltEconomy): HltPlan => {
   const mix = requireMix(economy.mix);
   if (economy.hubLabels.length === 0) throw new Error('HLT_HUB_LABELS_EMPTY');
   if (economy.baseTokenId === economy.quoteTokenId) throw new Error('HLT_TOKENS_NOT_DISTINCT');
+  const paymentAmountRange = economy.paymentAmountRange ?? HLT_DEFAULT_PAYMENT_AMOUNT_RANGE;
+  if (paymentAmountRange.min <= 0n) {
+    throw new Error(`HLT_PAYMENT_AMOUNT_MIN_INVALID:${paymentAmountRange.min}`);
+  }
+  if (paymentAmountRange.max < paymentAmountRange.min) {
+    throw new Error(`HLT_PAYMENT_AMOUNT_RANGE_INVALID:${paymentAmountRange.min}:${paymentAmountRange.max}`);
+  }
   // One round is one action per user. Sub-millisecond cadence would make the
   // scheduler, not the Hub, the thing under test.
   if (ratePerUserPerSecond > 1_000) throw new Error(`HLT_RATE_PER_USER_TOO_HIGH:${ratePerUserPerSecond}`);
@@ -117,6 +131,7 @@ export const buildHltPlan = (economy: HltEconomy): HltPlan => {
       mix,
       hubLabels: [...economy.hubLabels],
       marketMakerLabels: [...economy.marketMakerLabels],
+      paymentAmountRange,
     },
     swapLanes,
     paymentLanes,

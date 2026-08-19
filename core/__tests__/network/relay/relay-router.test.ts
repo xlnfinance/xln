@@ -776,6 +776,94 @@ describe('relay-router gossip fanout', () => {
     });
   });
 
+  test('force-closes a target socket after 4 consecutive backpressured forwards', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const closed: Array<[number | undefined, string | undefined]> = [];
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: () => -1,
+    };
+    const wsA: FakeWs = { label: 'A', readyState: 1 };
+    const wsB: FakeWs = { label: 'B', readyState: 1, close: (code, reason) => closed.push([code, reason]) };
+
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
+
+    const sendOne = (id: string) => relayRoute(config, wsA, {
+      type: 'entity_inputs',
+      id,
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: 'encrypted-account-input',
+      encrypted: true,
+      entityId: ENTITY_B,
+      txs: 1,
+    });
+
+    await sendOne('deliver-1');
+    await sendOne('deliver-2');
+    await sendOne('deliver-3');
+    // Each of the first 3 queued sends still counts as delivered (no failover
+    // retry of a queued financial envelope) and the socket stays registered.
+    expect(closed).toEqual([]);
+    expect(store.clients.get(RUNTIME_B)?.ws).toBe(wsB);
+
+    await sendOne('deliver-4');
+    // The 4th consecutive queued send in a row means the socket is stuck, not
+    // just slow — force-close it so the peer reconnects with a fresh socket.
+    expect(closed).toEqual([[4010, 'stuck-backpressure']]);
+    expect(store.clients.has(RUNTIME_B)).toBe(false);
+    expect(store.debugEvents.find(event => event.event === 'ws_stuck_backpressure_closed')).toMatchObject({
+      runtimeId: RUNTIME_B,
+      reason: 'RELAY_STUCK_BACKPRESSURE',
+    });
+  });
+
+  test('a cleanly accepted forward resets the backpressured streak', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const closed: Array<[number | undefined, string | undefined]> = [];
+    let mode: 'backpressured' | 'accepted' = 'backpressured';
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: () => (mode === 'backpressured' ? -1 : undefined),
+    };
+    const wsA: FakeWs = { label: 'A', readyState: 1 };
+    const wsB: FakeWs = { label: 'B', readyState: 1, close: (code, reason) => closed.push([code, reason]) };
+
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
+
+    const sendOne = (id: string) => relayRoute(config, wsA, {
+      type: 'entity_inputs',
+      id,
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: 'encrypted-account-input',
+      encrypted: true,
+      entityId: ENTITY_B,
+      txs: 1,
+    });
+
+    await sendOne('deliver-1');
+    await sendOne('deliver-2');
+    await sendOne('deliver-3');
+    mode = 'accepted';
+    await sendOne('deliver-4');
+    mode = 'backpressured';
+    await sendOne('deliver-5');
+    await sendOne('deliver-6');
+    await sendOne('deliver-7');
+    // 3 queued + 1 clean accept + 3 more queued never reaches 4 in a row.
+    expect(closed).toEqual([]);
+    expect(store.clients.get(RUNTIME_B)?.ws).toBe(wsB);
+  });
+
   test('forwards encrypted accountInput to the active target runtime socket', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();

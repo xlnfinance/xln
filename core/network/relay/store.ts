@@ -44,6 +44,13 @@ type RelayClient = {
   runtimeId: string;
   lastSeen: number;
   topics: Set<string>;
+  /** Consecutive forwardToRemoteRuntime sends that landed in Bun's backpressure
+   *  queue (send() returned -1) while this socket still reported open. A
+   *  queued send is not a delivery failure — retrying the same envelope risks
+   *  double-sending a financial payload — but a socket that stays queued for
+   *  several sends in a row is stuck, not just slow; see noteSendOutcome in
+   *  core/network/p2p/direct-runtime-bun.ts for the sibling transport's fix. */
+  consecutiveBackpressuredSends: number;
 };
 
 export type RelaySocketLike = {
@@ -579,7 +586,13 @@ export const registerClient = (store: RelayStore, runtimeId: string, ws: RelaySo
       return false;
     }
   }
-  store.clients.set(key, { ws, runtimeId: key, lastSeen: nextWsTimestamp(store), topics: new Set() });
+  store.clients.set(key, {
+    ws,
+    runtimeId: key,
+    lastSeen: nextWsTimestamp(store),
+    topics: new Set(),
+    consecutiveBackpressuredSends: 0,
+  });
   return true;
 };
 

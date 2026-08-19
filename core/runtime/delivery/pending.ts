@@ -13,6 +13,7 @@ import { validateDeliverableEntityInput } from '../delivery/topology/routing-val
 import { recordRuntimeSecurityIncident } from '../observability/security-incidents';
 import { computeProfileRouteHash } from '../../entity/profile/profile-signing';
 import { recoverDigestSignerAddress } from '../../account/crypto';
+import { matchesTraceSuffix, traceAllDeferredEnabled, traceLog } from '../../support/trace-debug';
 import { ACCOUNT_PENDING_STALE_WARNING_MS } from '../../entity/scheduler/config/timing';
 
 import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output/envelope';
@@ -481,6 +482,17 @@ export const reportRetryableRouteDefer = (
 ): void => {
   const attempts = (getDeferredNetworkMeta(env, deps).get(buildRouteOutputKey(output))?.attempts ?? 0) + 1;
   const payload = { ...details, attempts };
+  // TEMP-TRACE-CP2b (pending-frame-stale investigation): unfiltered under
+  // XLN_TRACE_ALL_DEFERRED=1 since deferrals are the rare/retry path, not
+  // steady-state traffic; otherwise gated by XLN_TRACE_ENTITY_SUFFIXES.
+  if (traceAllDeferredEnabled() || matchesTraceSuffix(output.entityId)) {
+    traceLog('CP2b:delivery/pending.ts:reportRetryableRouteDefer', {
+      entityId: output.entityId,
+      signerId: output.signerId,
+      attempts,
+      details,
+    });
+  }
   routeLog.info('output.deferred', {
     ...payload,
     entityId: output.entityId,

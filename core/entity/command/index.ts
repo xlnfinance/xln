@@ -16,7 +16,8 @@ import { requireCommittedDirectPaymentRoute } from '../../protocol/payments/rout
 import type { EntityCommandNonceState, EntityTx, SignedEntityCommandV1 } from '../../types/entity-tx';
 import type { EntityState } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
-import { EntityCommandRejectionError } from '../tx/processing/invariant-errors';
+import { EntityCommandRejectionError, MalformedEntityFrameInputError } from '../tx/processing/invariant-errors';
+import { entityLog } from '../consensus/entity-log';
 import {
   assertEntityCommandTxs,
   assertEntityCommandAuthorBindings,
@@ -439,7 +440,27 @@ export const prepareLocallyAuthoredEntityTxs = (
   for (const tx of mergeEntityCommandTransactions(materializedTxs)) {
     if (tx.type === 'entityCommand') {
       flushUserRun();
-      const command = assertSignedEntityCommand(env, cursor, tx.data);
+      let command: SignedEntityCommandV1;
+      try {
+        command = assertSignedEntityCommand(env, cursor, tx.data);
+      } catch (error) {
+        // A wrapped command already sitting in this replica's mempool can go
+        // stale relative to `cursor` (e.g. a different-content command
+        // committed elsewhere at the same nonce). Unlike the commit-time path
+        // (applyNestedEntityTx / buildEntityProposalEvictingRejected), nothing
+        // upstream of this call evicts the stale mempool entry — without this
+        // catch the throw propagates past admission.ts before mempool is ever
+        // reassigned, so the same stale entry re-throws every future
+        // admission cycle forever.
+        if (error instanceof MalformedEntityFrameInputError) {
+          entityLog.warn('admission.stale_command_evicted', {
+            entity: canonicalEntityCommandEntityId(state.entityId),
+            error: error.message,
+          });
+          continue;
+        }
+        throw error;
+      }
       if (getEntityCommandDisposition(cursor, command) === 'retry') continue;
       prepared.push({ type: 'entityCommand', data: command });
       cursor = advanceEntityCommandNonce(cursor, command);

@@ -506,6 +506,16 @@ interface RuntimeInfrastructure {
   queuedFrameWriters?: number;
   frameWritersDrained?: Promise<void> | null;
   resolveFrameWritersDrained?: (() => void) | null;
+  /**
+   * Ticket counter so a committed reader only waits for writers already queued
+   * ahead of it, not every writer that queues while it waits. Under continuous
+   * write load queuedFrameWriters never hits zero, so a reader gated on
+   * frameWritersDrained alone would starve indefinitely.
+   */
+  frameWriterTicket?: number;
+  completedFrameWriters?: number;
+  frameWriterProgress?: Promise<void> | null;
+  resolveFrameWriterProgress?: (() => void) | null;
   /** Infra-only read/write barrier; never part of deterministic Runtime State. */
   activeCommittedReaders?: number;
   committedReadersDrained?: Promise<void> | null;

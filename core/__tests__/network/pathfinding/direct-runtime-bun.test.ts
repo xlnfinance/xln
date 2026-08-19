@@ -719,7 +719,7 @@ describe('direct runtime websocket route', () => {
     });
   });
 
-  test('accepts Bun backpressure and keeps a still-open socket that reports zero bytes', async () => {
+  test('defers on Bun backpressure/ambiguous-zero sends but keeps a still-open socket', async () => {
     const serverSeed = 'direct-route-server-send-contract';
     const clientSeed = 'direct-route-client-send-contract';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
@@ -745,13 +745,21 @@ describe('direct runtime websocket route', () => {
       }],
     };
 
+    // -1 means Bun only queued the write against its own backpressure limit; it did
+    // NOT confirm the bytes reached the peer. Treating that as delivered stranded a
+    // resent accountInput forever at 1000-user scale: the entity-output router's P2P
+    // failover only fires when direct reports non-delivered, so a -1 that never
+    // actually flushes must still be retryable, not a terminal success. The socket
+    // itself must still survive (asserted below) since readyState reads OPEN.
     ws.send = (raw) => {
       sent.push(deserializeWsMessage(raw));
       return -1;
     };
     expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
-      outcome: 'delivered',
-      code: 'ROUTE_DIRECT_DELIVERED',
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_SEND_FAILED',
+      retryable: true,
+      terminal: false,
     });
     expect(route.getSessionState()).toEqual([
       expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
@@ -879,6 +887,107 @@ describe('direct runtime websocket route', () => {
 
     expect(sent.at(-1)?.type).not.toBe('error');
     expect(received).toEqual([inboundEnvelope]);
+  });
+
+  test('force-closes a session after 4 consecutive failed-while-open sends', async () => {
+    // A correctly-classified retry (see the two tests above) still does
+    // nothing if it keeps landing on the SAME wedged pipe (oven-sh/bun#9368:
+    // a socket that reports failed writes indefinitely while readyState
+    // keeps reading OPEN). After STUCK_SEND_THRESHOLD consecutive
+    // failed-while-open sends to one session, the route must force-close it
+    // so the peer's own reconnect logic re-establishes a fresh socket.
+    const serverSeed = 'direct-route-server-stuck-backpressure';
+    const clientSeed = 'direct-route-client-stuck-backpressure';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      onEntityInputs: () => undefined,
+    });
+    const { ws, sent, closed } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+    const envelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
+      sourceRuntimeHeight: 1,
+      sourceRuntimeTimestamp: 1,
+      entityInputs: [],
+    };
+    ws.send = (raw) => {
+      sent.push(deserializeWsMessage(raw));
+      return -1; // Bun backpressure: always classified as failed-while-open.
+    };
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
+        outcome: 'deferred',
+        code: 'ROUTE_DIRECT_SEND_FAILED',
+      });
+      expect(closed).toEqual([]);
+      expect(route.getSessionState()).toEqual([
+        expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
+      ]);
+    }
+
+    // 4th consecutive failure trips the watchdog.
+    expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_SEND_FAILED',
+    });
+    expect(closed).toEqual([{ code: 4010, reason: 'stuck-backpressure' }]);
+    expect(route.getSessionState()).toEqual([]);
+  });
+
+  test('an accepted send resets the failed-while-open streak', async () => {
+    const serverSeed = 'direct-route-server-streak-reset';
+    const clientSeed = 'direct-route-client-streak-reset';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      onEntityInputs: () => undefined,
+    });
+    const { ws, sent, closed } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+    const envelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
+      sourceRuntimeHeight: 1,
+      sourceRuntimeTimestamp: 1,
+      entityInputs: [],
+    };
+
+    // 3 failures, then a genuine success, then 3 more failures: the streak
+    // must never accumulate across the successful send.
+    ws.send = (raw) => {
+      sent.push(deserializeWsMessage(raw));
+      return -1;
+    };
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      route.sendEntityInputsDelivery(clientRuntimeId, envelope);
+    }
+    ws.send = (raw) => {
+      sent.push(deserializeWsMessage(raw));
+      return 1;
+    };
+    expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
+      outcome: 'delivered',
+    });
+    ws.send = (raw) => {
+      sent.push(deserializeWsMessage(raw));
+      return -1;
+    };
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      route.sendEntityInputsDelivery(clientRuntimeId, envelope);
+    }
+    expect(closed).toEqual([]);
+    expect(route.getSessionState()).toEqual([
+      expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
+    ]);
   });
 
   test('preserves direct socket root errors in a retryable structured delivery result', async () => {

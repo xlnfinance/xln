@@ -32,6 +32,13 @@ import {
 } from './report';
 import { parseHltDashboardConfig, previewHltDashboard } from './hlt/hlt-dashboard-preview';
 import { readHltDashboardSnapshot } from './hlt/hlt-dashboard';
+import {
+  abortHltIsolatedRun,
+  parseHltStartConfig,
+  readHltIsolatedRun,
+  startHltIsolatedRun,
+  type SpawnFn as HltSpawnFn,
+} from './hlt/hlt-run';
 
 type JsonHeaders = Record<string, string>;
 type QaAuthScope = 'read' | 'admin';
@@ -72,6 +79,7 @@ type QaRestartIntent = {
 type QaApiDeps = {
   computeRestartFingerprint?: () => QaCodeFingerprint;
   spawnRestart?: typeof spawn;
+  spawnHlt?: HltSpawnFn;
   operatorAuthorized?: boolean;
 };
 
@@ -888,6 +896,8 @@ export async function maybeHandleQaRequest(
     (
       pathname === '/api/qa/restart' ||
       pathname === '/api/qa/restart/abort' ||
+      pathname === '/api/qa/hlt/start' ||
+      pathname === '/api/qa/hlt/abort' ||
       pathname === '/api/qa/retention' ||
       pathname === '/api/qa/history/backfill'
     ) && request.method === 'POST'
@@ -919,24 +929,51 @@ export async function maybeHandleQaRequest(
       const url = new URL(request.url);
       const preview = previewHltDashboard(parseHltDashboardConfig(url.searchParams));
       const snapshot = readHltDashboardSnapshot();
-      return jsonEtagResponse(
-        request,
-        {
-          ok: true,
-          qaAuth: authInfo,
-          preview,
-          ledger: snapshot.ledger,
-          payment: snapshot.payment,
-          swap: snapshot.swap,
-          perf: snapshot.perf,
-          hubPerf: snapshot.hubPerf,
-        },
-        headers,
-      );
+      return jsonResponse({
+        ok: true,
+        qaAuth: authInfo,
+        preview,
+        ledger: snapshot.ledger,
+        payment: snapshot.payment,
+        swap: snapshot.swap,
+        perf: snapshot.perf,
+        hubPerf: snapshot.hubPerf,
+        run: readHltIsolatedRun(),
+      }, 200, headers);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const status = message.startsWith('HLT_DASHBOARD_') || message.startsWith('HLT_') ? 400 : 500;
       return jsonResponse({ ok: false, error: message }, status, headers);
+    }
+  }
+
+  if (pathname === '/api/qa/hlt/start' && request.method === 'POST') {
+    try {
+      const body = await request.json().catch(() => null);
+      const run = startHltIsolatedRun({
+        config: parseHltStartConfig(body),
+        ...(deps.spawnHlt ? { spawn: deps.spawnHlt } : {}),
+      });
+      return jsonResponse({ ok: true, qaAuth: authInfo, run }, 202, headers);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message === 'HLT_RUN_ALREADY_RUNNING' ? 409
+        : message.startsWith('HLT_') ? 400
+        : 500;
+      return jsonResponse({ ok: false, error: message, run: readHltIsolatedRun() }, status, headers);
+    }
+  }
+
+  if (pathname === '/api/qa/hlt/abort' && request.method === 'POST') {
+    try {
+      const run = abortHltIsolatedRun();
+      return jsonResponse({ ok: true, qaAuth: authInfo, run }, 202, headers);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message === 'HLT_RUN_NOT_RUNNING' ? 409
+        : message.startsWith('HLT_') ? 400
+        : 500;
+      return jsonResponse({ ok: false, error: message, run: readHltIsolatedRun() }, status, headers);
     }
   }
 

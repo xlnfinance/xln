@@ -38,6 +38,92 @@
   align-items: center;
 }
 
+.hlt-start,
+.hlt-stop {
+  min-height: 44px;
+  padding: 0.55rem 1.15rem;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.hlt-start {
+  color: #1a1408;
+  background: linear-gradient(180deg, #efe0b4, #c49b47);
+}
+
+.hlt-stop {
+  color: #fff4d8;
+  background: rgba(120, 30, 20, 0.55);
+  border-color: rgba(196, 80, 60, 0.45);
+}
+
+.hlt-start:disabled,
+.hlt-stop:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.run-banner {
+  display: grid;
+  gap: 0.7rem;
+  border: 1px solid rgba(196, 155, 71, 0.35);
+  background: rgba(196, 155, 71, 0.08);
+  border-radius: 10px;
+  padding: 0.85rem 0.95rem;
+}
+
+.run-banner[data-status='red'],
+.run-banner[data-status='aborted'] {
+  border-color: rgba(196, 80, 60, 0.45);
+  background: rgba(120, 30, 20, 0.18);
+}
+
+.run-banner[data-status='green'] {
+  border-color: rgba(90, 160, 110, 0.45);
+  background: rgba(30, 80, 50, 0.18);
+}
+
+.run-banner span {
+  display: block;
+  color: #958e80;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.run-banner strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 1.15rem;
+  color: #fff4d8;
+}
+
+.run-meta {
+  margin-top: 0.25rem;
+  color: #cbb99a;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.run-log {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 0.65rem 0.7rem;
+  border-radius: 8px;
+  background: #050506;
+  color: #d8d0c0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
 .hlt-head h1 {
   font-size: 1.55rem;
 }

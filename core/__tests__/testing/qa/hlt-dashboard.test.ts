@@ -1,7 +1,9 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test, afterEach } from 'bun:test';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
 import { maybeHandleQaRequest } from '../../../qa/api';
 import {
@@ -11,6 +13,11 @@ import {
   readHltDashboardSnapshot,
 } from '../../../qa/hlt/hlt-dashboard';
 import { parseHltDashboardConfig, previewHltDashboard } from '../../../qa/hlt/hlt-dashboard-preview';
+import {
+  assertHltIsolatedEnv,
+  buildHltIsolatedEnv,
+  resetHltIsolatedRunForTests,
+} from '../../../qa/hlt/hlt-run';
 import { summarizeRuntimePerfLines } from '../../../scripts/operations/benchmark/analyze-runtime-perf';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -125,8 +132,151 @@ test('GET /api/qa/hlt returns a payments preview', async () => {
   const payload = await response!.json() as {
     ok?: boolean;
     preview?: { daemons?: number; offeredPayPerSecond?: number };
+    run?: { status?: string; active?: boolean };
   };
   expect(payload.ok).toBe(true);
   expect(payload.preview?.daemons).toBe(4);
   expect(payload.preview?.offeredPayPerSecond).toBe(32);
+  expect(payload.run).toEqual({
+    active: false,
+    status: 'idle',
+    pid: null,
+    workDir: null,
+    logPath: null,
+    startedAt: null,
+    finishedAt: null,
+    exitCode: null,
+    error: null,
+    logTail: '',
+  });
+});
+
+const mockHltChild = (): ChildProcess => {
+  const child = new EventEmitter() as ChildProcess & EventEmitter;
+  child.pid = 4242;
+  child.stdout = new EventEmitter() as ChildProcess['stdout'];
+  child.stderr = new EventEmitter() as ChildProcess['stderr'];
+  child.kill = () => {
+    queueMicrotask(() => child.emit('exit', 143));
+    return true;
+  };
+  child.unref = () => child;
+  return child;
+};
+
+afterEach(() => {
+  resetHltIsolatedRunForTests();
+});
+
+test('isolated HLT env keeps PATH and drops live mesh ports', () => {
+  const env = buildHltIsolatedEnv(
+    parseHltDashboardConfig(new URLSearchParams({ users: '8', usersPerRuntime: '2', mode: 'payments' })),
+    '/tmp/xln-hlt-dash-test',
+    {
+      PATH: '/usr/bin',
+      XLN_PORT_BASE: '8082',
+      ANVIL_RPC: 'http://127.0.0.1:8545',
+      XLN_MESH_API_PORT_BASE: '8082',
+      XLN_LOCAL_TEST_LEASE_BASE: '20000',
+    },
+  );
+  expect(env['PATH']).toBe('/usr/bin');
+  expect(env['XLN_HLT_USERS']).toBe('8');
+  expect(env['XLN_LOCAL_PROD_SMOKE_DIR']).toBe('/tmp/xln-hlt-dash-test');
+  expect(env['XLN_PORT_BASE']).toBeUndefined();
+  expect(env['ANVIL_RPC']).toBeUndefined();
+  expect(env['XLN_MESH_API_PORT_BASE']).toBeUndefined();
+  expect(env['XLN_LOCAL_TEST_LEASE_BASE']).toBeUndefined();
+  assertHltIsolatedEnv(env);
+  expect(() => assertHltIsolatedEnv({ XLN_PORT_BASE: '8082' })).toThrow('HLT_RUN_ENV_LEAK:XLN_PORT_BASE');
+});
+
+test('POST /api/qa/hlt/start is single-flight and abortable', async () => {
+  const previousDisabled = process.env['XLN_QA_AUTH_DISABLED'];
+  const previousAdmin = process.env['XLN_QA_ADMIN_TOKEN'];
+  process.env['XLN_QA_AUTH_DISABLED'] = '1';
+  delete process.env['XLN_QA_ADMIN_TOKEN'];
+  try {
+    let spawnedEnv: NodeJS.ProcessEnv | undefined;
+    const spawnHlt = ((_cmd: string, _args: readonly string[], options?: SpawnOptions) => {
+      spawnedEnv = options?.env as NodeJS.ProcessEnv;
+      return mockHltChild();
+    }) as typeof import('node:child_process').spawn;
+
+    const start = await maybeHandleQaRequest(
+      new Request('http://127.0.0.1:8080/api/qa/hlt/start', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ users: 8, usersPerRuntime: 2, mode: 'payments', duration: 4 }),
+      }),
+      '/api/qa/hlt/start',
+      JSON_HEADERS,
+      { operatorAuthorized: true, spawnHlt },
+    );
+    expect(start?.status).toBe(202);
+    const started = await start!.json() as { run?: { active?: boolean; status?: string; pid?: number } };
+    expect(started.run?.active).toBe(true);
+    expect(started.run?.status).toBe('running');
+    expect(started.run?.pid).toBe(4242);
+    expect(spawnedEnv?.['XLN_HLT_USERS']).toBe('8');
+    expect(spawnedEnv?.['XLN_PORT_BASE']).toBeUndefined();
+    expect(spawnedEnv?.['ANVIL_RPC']).toBeUndefined();
+
+    const conflict = await maybeHandleQaRequest(
+      new Request('http://127.0.0.1:8080/api/qa/hlt/start', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ users: 8, usersPerRuntime: 2, mode: 'payments' }),
+      }),
+      '/api/qa/hlt/start',
+      JSON_HEADERS,
+      { operatorAuthorized: true, spawnHlt },
+    );
+    expect(conflict?.status).toBe(409);
+
+    const abort = await maybeHandleQaRequest(
+      new Request('http://127.0.0.1:8080/api/qa/hlt/abort', { method: 'POST' }),
+      '/api/qa/hlt/abort',
+      JSON_HEADERS,
+      { operatorAuthorized: true },
+    );
+    expect(abort?.status).toBe(202);
+    await Bun.sleep(20);
+    const status = await maybeHandleQaRequest(
+      new Request('http://127.0.0.1:8080/api/qa/hlt'),
+      '/api/qa/hlt',
+      JSON_HEADERS,
+    );
+    const idle = await status!.json() as { run?: { active?: boolean; status?: string } };
+    expect(idle.run?.active).toBe(false);
+    expect(idle.run?.status).toBe('aborted');
+  } finally {
+    if (previousDisabled === undefined) delete process.env['XLN_QA_AUTH_DISABLED'];
+    else process.env['XLN_QA_AUTH_DISABLED'] = previousDisabled;
+    if (previousAdmin === undefined) delete process.env['XLN_QA_ADMIN_TOKEN'];
+    else process.env['XLN_QA_ADMIN_TOKEN'] = previousAdmin;
+  }
+});
+
+test('POST /api/qa/hlt/start rejects one-hub cross-j', async () => {
+  const previousDisabled = process.env['XLN_QA_AUTH_DISABLED'];
+  process.env['XLN_QA_AUTH_DISABLED'] = '1';
+  try {
+    const response = await maybeHandleQaRequest(
+      new Request('http://127.0.0.1:8080/api/qa/hlt/start', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ users: 8, usersPerRuntime: 2, mode: 'cross', hubs: 'H1' }),
+      }),
+      '/api/qa/hlt/start',
+      JSON_HEADERS,
+      { operatorAuthorized: true, spawnHlt: (() => { throw new Error('SPAWN_MUST_NOT_RUN'); }) as typeof import('node:child_process').spawn },
+    );
+    expect(response?.status).toBe(400);
+    const payload = await response!.json() as { error?: string };
+    expect(payload.error).toBe('HLT_RUN_CROSS_NEEDS_TWO_HUBS');
+  } finally {
+    if (previousDisabled === undefined) delete process.env['XLN_QA_AUTH_DISABLED'];
+    else process.env['XLN_QA_AUTH_DISABLED'] = previousDisabled;
+  }
 });

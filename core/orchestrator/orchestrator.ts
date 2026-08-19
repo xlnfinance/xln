@@ -2067,16 +2067,34 @@ const recomputeHealthWithMarketMaker = (
     marketMaker.ok === true &&
     health.custody.ok === true &&
     health.bootstrapReserves.ok === true;
+  // marketMaker.ok = hubsDepthReady && crossDepthReady (mm-node-health.ts), so
+  // systemOk is coupled to cross-jurisdiction swap route convergence even for
+  // workloads (e.g. HLT `payments` mode) that never touch cross-J swaps. Split
+  // the single 'marketMaker' bucket so a cross-only stall is distinguishable
+  // in the health payload from a same-chain (payment-relevant) one, instead of
+  // requiring a manual read of the nested hubs/cross arrays to tell them apart.
+  const sameChainOk = marketMaker.hubs.length > 0 && marketMaker.hubs.every((hub) => hub.depthReady === true);
+  const crossOk = marketMaker.cross.applicable !== true || marketMaker.cross.ok === true;
   const degraded = [
     health.storage.ok ? null : 'storage',
     health.hubs.every((hub) => hub.online) ? null : 'hubs',
     health.hubMesh.ok ? null : 'hubMesh',
     resetOk ? null : 'reset',
     marketMaker.ok ? null : 'marketMaker',
+    sameChainOk ? null : 'marketMakerSameChain',
+    crossOk ? null : 'marketMakerCross',
     health.custody.ok ? null : 'custody',
     health.bootstrapReserves.ok ? null : 'bootstrapReserves',
     health.bootstrapReserves.targetMet ? null : 'bootstrapReserveTargets',
   ].filter((value): value is string => Boolean(value));
+  if (!marketMaker.ok && sameChainOk && !crossOk) {
+    meshLog.warn('health.system_ok_blocked_by_cross_only', {
+      detail: 'same-chain market-maker depth is ready; systemOk is held back solely by cross-jurisdiction route convergence',
+      expectedRoutes: marketMaker.cross.expectedRoutes,
+      routesReady: marketMaker.cross.routes.filter((route) => route.depthReady === true).length,
+      routesTotal: marketMaker.cross.routes.length,
+    });
+  }
   const failures = buildRuntimeHealthFailures(degraded);
   return {
     ...health,

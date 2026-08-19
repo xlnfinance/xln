@@ -17,6 +17,7 @@ import {
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 import { selectPotentialCrossJAccountInputPairs } from '../delivery/topology/entity-routing';
+import { matchesTraceSuffix, traceLog } from '../../support/trace-debug';
 import { signRuntimeEntityInputsEnvelope } from '../admit/entity-input-envelope-auth.ts';
 import {
   buildPendingNetworkOutputs,
@@ -295,6 +296,14 @@ const tryDirectOutputEnvelope = (
 ): boolean => {
   const state = deps.ensureRuntimeInfrastructure(env);
   const directDispatch = state.directEntityInputsDispatch;
+  // TEMP-TRACE-CP2d (pending-frame-stale investigation, gated by XLN_TRACE_ENTITY_SUFFIXES)
+  if (sendable.some(o => matchesTraceSuffix(o.entityId))) {
+    traceLog('CP2d:delivery/dispatch.ts:tryDirectOutputEnvelope', {
+      targetRuntimeId: group.targetRuntimeId,
+      hasDirectDispatch: Boolean(directDispatch),
+      entityIds: sendable.map(o => o.entityId),
+    });
+  }
   if (!directDispatch) return false;
   const delivery = requireDeliveryResult(
     directDispatch(
@@ -324,6 +333,14 @@ const dispatchP2POutputEnvelope = (
   deps: RuntimeOutputRoutingDeps,
   deferredOutputs: RoutedEntityInput[],
 ): void => {
+  // TEMP-TRACE-CP2c (pending-frame-stale investigation, gated by XLN_TRACE_ENTITY_SUFFIXES)
+  if (sendable.some(o => matchesTraceSuffix(o.entityId))) {
+    traceLog('CP2c:delivery/dispatch.ts:dispatchP2POutputEnvelope', {
+      targetRuntimeId: group.targetRuntimeId,
+      hasP2P: Boolean(deps.getP2P(env)),
+      entityIds: sendable.map(o => o.entityId),
+    });
+  }
   const p2p = deps.getP2P(env);
   if (!p2p) {
     for (const output of sendable) {
@@ -356,7 +373,23 @@ const dispatchP2POutputEnvelope = (
         sourceRuntimeHeight: envelope.sourceRuntimeHeight,
         outputs: summarizeAccountEnvelopeOutputs(sendable),
       });
+      // TEMP-TRACE-CP2c-ok (pending-frame-stale investigation)
+      if (sendable.some(o => matchesTraceSuffix(o.entityId))) {
+        traceLog('CP2c:delivery/dispatch.ts:dispatchP2POutputEnvelope:delivered', {
+          targetRuntimeId: group.targetRuntimeId,
+          entityIds: sendable.map(o => o.entityId),
+        });
+      }
       return;
+    }
+    // TEMP-TRACE-CP2c-fail (pending-frame-stale investigation)
+    if (sendable.some(o => matchesTraceSuffix(o.entityId))) {
+      traceLog('CP2c:delivery/dispatch.ts:dispatchP2POutputEnvelope:not_delivered', {
+        targetRuntimeId: group.targetRuntimeId,
+        entityIds: sendable.map(o => o.entityId),
+        delivery,
+        willRetry: shouldRetryDelivery(delivery),
+      });
     }
     if (shouldRetryDelivery(delivery)) {
       deferOutputsAfterDeliveryFailure(

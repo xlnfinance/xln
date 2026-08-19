@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  paymentAmountFor,
   paymentReceiverIndex,
-  paymentTotalPerSender,
+  paymentTotalForSender,
   paymentTotalsByReceiver,
 } from '../../../scripts/operations/hlt/workload/worker-payments-plan';
 import { decodeLoadPaymentReport } from '../../../scripts/operations/hlt/boundary/worker-payment-boundary';
@@ -43,22 +44,42 @@ describe('hlt payment population', () => {
     expect(seen.size).toBeGreaterThan(1);
   });
 
-  test('receiver totals account for every submitted payment exactly', () => {
+  test('receiver totals account for every submitted payment exactly (fixed amount)', () => {
     const senders = 8;
     const rounds = 5;
-    const amount = 1_000n;
-    const totals = paymentTotalsByReceiver(senders, senders, rounds, amount);
+    const range = { min: 1_000n, max: 1_000n };
+    const totals = paymentTotalsByReceiver(senders, senders, rounds, range);
     expect(totals).toHaveLength(senders);
     expect(totals.reduce((sum, total) => sum + total, 0n))
-      .toBe(amount * BigInt(senders * rounds));
-    expect(paymentTotalPerSender(rounds, amount)).toBe(amount * BigInt(rounds));
+      .toBe(1_000n * BigInt(senders * rounds));
+    expect(paymentTotalForSender(0, rounds, range)).toBe(1_000n * BigInt(rounds));
+  });
+
+  test('receiver totals account for every submitted payment exactly (random range)', () => {
+    const senders = 8;
+    const rounds = 5;
+    const range = { min: 50n, max: 500n };
+    const totals = paymentTotalsByReceiver(senders, senders, rounds, range);
+    let expectedGrandTotal = 0n;
+    for (let senderIndex = 0; senderIndex < senders; senderIndex += 1) {
+      expectedGrandTotal += paymentTotalForSender(senderIndex, rounds, range);
+    }
+    expect(totals.reduce((sum, total) => sum + total, 0n)).toBe(expectedGrandTotal);
+    for (let round = 0; round < rounds; round += 1) {
+      for (let senderIndex = 0; senderIndex < senders; senderIndex += 1) {
+        const amount = paymentAmountFor(senderIndex, round, range);
+        expect(amount).toBeGreaterThanOrEqual(range.min);
+        expect(amount).toBeLessThanOrEqual(range.max);
+      }
+    }
   });
 
   test('pairing rejects an out-of-range sender instead of wrapping silently', () => {
     expect(() => paymentReceiverIndex(4, 0, 4)).toThrow('HLT_PAYMENT_SENDER_INDEX_INVALID');
     expect(() => paymentReceiverIndex(0, 0, 0)).toThrow('HLT_PAYMENT_RECEIVERS_INVALID');
-    expect(() => paymentTotalPerSender(0, 1n)).toThrow('HLT_PAYMENT_ROUNDS_INVALID');
-    expect(() => paymentTotalPerSender(1, 0n)).toThrow('HLT_PAYMENT_AMOUNT_INVALID');
+    expect(() => paymentTotalForSender(0, 0, { min: 1n, max: 1n })).toThrow('HLT_PAYMENT_ROUNDS_INVALID');
+    expect(() => paymentAmountFor(0, 0, { min: 0n, max: 1n })).toThrow('HLT_PAYMENT_AMOUNT_MIN_INVALID');
+    expect(() => paymentAmountFor(0, 0, { min: 5n, max: 1n })).toThrow('HLT_PAYMENT_AMOUNT_RANGE_INVALID');
   });
 
   test('payments mode derives its population from the payment half of the mix', () => {

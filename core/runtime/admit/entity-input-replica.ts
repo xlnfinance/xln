@@ -7,8 +7,11 @@ import { resolveEntityOutputSignerId } from '../delivery/entity-output-signer.ts
 import { decodeEntityOutput } from '../delivery/topology/routing-validation.ts';
 import { DEBUG } from '../../support/debug-flags.ts';
 import { logError, shortId } from '../../support/logger.ts';
+import { getPerfMs } from '../../support/time';
 import {
   entityInputLog,
+  entityInputProfileEnabled,
+  entityInputSlowMs,
   isCommittedEntityInput,
   RuntimeEntityInputApplyError,
 } from './entity-input-contract.ts';
@@ -165,6 +168,7 @@ export const applyEntityInputToReplica = async (
     });
   }
 
+  const applyStartedAt = getPerfMs();
   let applied: Awaited<ReturnType<typeof applyEntityInput>>;
   try {
     applied = await applyEntityInput(
@@ -182,11 +186,30 @@ export const applyEntityInputToReplica = async (
       error,
     );
   }
+  const applyEntityInputMs = Math.round(getPerfMs() - applyStartedAt);
 
   const committed = isCommittedEntityInput(applied.outcome);
   const nextReplica: EntityReplica = committed
     ? { ...applied.workingReplica, state: applied.newState }
     : entityReplica;
+  const routeOutputsStartedAt = getPerfMs();
+  const outputs = await routeEntityOutputs(
+    env,
+    nextReplica,
+    applied.outputs,
+    replicaKey,
+  );
+  const routeOutputsMs = Math.round(getPerfMs() - routeOutputsStartedAt);
+  const totalMs = applyEntityInputMs + routeOutputsMs;
+  if (entityInputProfileEnabled() || totalMs >= entityInputSlowMs()) {
+    entityInputLog.info('replica.apply_input.profile', {
+      replica: shortId(replicaKey, 8),
+      rawOutputs: applied.outputs.length,
+      applyEntityInputMs,
+      routeOutputsMs,
+      totalMs,
+    });
+  }
   return {
     outcome: applied.outcome,
     appliedInput: preserveAppliedRoutedProvenance(
@@ -200,12 +223,7 @@ export const applyEntityInputToReplica = async (
       applied.outcome,
     ),
     nextReplica,
-    outputs: await routeEntityOutputs(
-      env,
-      nextReplica,
-      applied.outputs,
-      replicaKey,
-    ),
+    outputs,
     jOutputs: applied.jOutputs || [],
     candidateEffects: applied.candidateEffects,
     storageChanges: applied.storageChanges,

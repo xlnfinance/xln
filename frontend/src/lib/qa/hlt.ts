@@ -20,12 +20,26 @@ export type HltPerfRowView = {
   totalMs: number;
 };
 
+export type HltRunView = {
+  active: boolean;
+  status: 'idle' | 'running' | 'green' | 'red' | 'aborted';
+  pid: number | null;
+  workDir: string | null;
+  logPath: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  exitCode: number | null;
+  error: string | null;
+  logTail: string;
+};
+
 export type HltDashboardPayload = {
   ledger: HltLedgerRun[];
   payment: HltPaymentCard | null;
   swap: HltSwapCard | null;
   perf: { parsedProfiles: number; rows: HltPerfRowView[] };
   hubPerf: HltHubPerfCard[];
+  run: HltRunView;
 };
 
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -124,9 +138,47 @@ const decodeHubPerf = (value: unknown, index: number): HltHubPerfCard => {
   };
 };
 
+const requireNullableNumber = (record: Record<string, unknown>, key: string, code: string): number | null => {
+  const value = record[key];
+  if (value === null) return null;
+  if (!isFiniteNumber(value)) throw new Error(code);
+  return value;
+};
+
+const requireNullableString = (record: Record<string, unknown>, key: string, code: string): string | null => {
+  const value = record[key];
+  if (value === null) return null;
+  if (typeof value !== 'string') throw new Error(code);
+  return value;
+};
+
+const decodeRun = (value: unknown): HltRunView => {
+  const record = requireUnknownRecord(value, 'HLT_RUN_INVALID');
+  rejectExtraKeys(record, [
+    'active', 'status', 'pid', 'workDir', 'logPath', 'startedAt', 'finishedAt', 'exitCode', 'error', 'logTail',
+  ], 'HLT_RUN_EXTRA_FIELD');
+  const status = record['status'];
+  if (status !== 'idle' && status !== 'running' && status !== 'green' && status !== 'red' && status !== 'aborted') {
+    throw new Error('HLT_RUN_STATUS_INVALID');
+  }
+  if (typeof record['active'] !== 'boolean') throw new Error('HLT_RUN_ACTIVE_INVALID');
+  return {
+    active: record['active'],
+    status,
+    pid: requireNullableNumber(record, 'pid', 'HLT_RUN_PID_INVALID'),
+    workDir: requireNullableString(record, 'workDir', 'HLT_RUN_WORKDIR_INVALID'),
+    logPath: requireNullableString(record, 'logPath', 'HLT_RUN_LOG_INVALID'),
+    startedAt: requireNullableNumber(record, 'startedAt', 'HLT_RUN_STARTED_INVALID'),
+    finishedAt: requireNullableNumber(record, 'finishedAt', 'HLT_RUN_FINISHED_INVALID'),
+    exitCode: requireNullableNumber(record, 'exitCode', 'HLT_RUN_EXIT_INVALID'),
+    error: requireNullableString(record, 'error', 'HLT_RUN_ERROR_INVALID'),
+    logTail: requireString(record, 'logTail', 'HLT_RUN_TAIL_INVALID'),
+  };
+};
+
 export const decodeHltDashboardPayload = (value: unknown): HltDashboardPayload => {
   const record = requireUnknownRecord(value, 'HLT_DASHBOARD_RESPONSE_INVALID');
-  rejectExtraKeys(record, ['ok', 'qaAuth', 'preview', 'ledger', 'payment', 'swap', 'perf', 'hubPerf', 'error'], 'HLT_DASHBOARD_RESPONSE_EXTRA_FIELD');
+  rejectExtraKeys(record, ['ok', 'qaAuth', 'preview', 'ledger', 'payment', 'swap', 'perf', 'hubPerf', 'run', 'error'], 'HLT_DASHBOARD_RESPONSE_EXTRA_FIELD');
   if (record['ok'] !== true) throw new Error(typeof record['error'] === 'string' ? record['error'] : 'HLT_DASHBOARD_NOT_OK');
   const ledger = record['ledger'];
   const perf = requireUnknownRecord(record['perf'], 'HLT_PERF_INVALID');
@@ -146,6 +198,18 @@ export const decodeHltDashboardPayload = (value: unknown): HltDashboardPayload =
       rows: rows.map(decodePerfRow),
     },
     hubPerf: hubPerf.map(decodeHubPerf),
+    run: record['run'] === undefined ? {
+      active: false,
+      status: 'idle',
+      pid: null,
+      workDir: null,
+      logPath: null,
+      startedAt: null,
+      finishedAt: null,
+      exitCode: null,
+      error: null,
+      logTail: '',
+    } : decodeRun(record['run']),
   };
 };
 

@@ -1,5 +1,5 @@
 import type { EntityReplica } from '../../entity/types';
-import { compareAscii } from '../../support/sorted-map-index';
+import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../../support/sorted-map-index';
 import { normalizeEntityId } from '../keys';
 import { projectAccountDoc, projectEntityCoreDoc } from '../read/projections';
 import type { StorageEntityViewPage } from '../read/read';
@@ -14,25 +14,39 @@ export type StorageEntityViewQuery = {
   sortDir?: 'asc' | 'desc';
 };
 
+const EMPTY_BOOKS_MAP: ReadonlyMap<string, unknown> = new Map();
+
 const pageLimit = (value: number | undefined): number => {
   const raw = Number(value ?? 10);
   return Number.isFinite(raw) ? Math.max(1, Math.min(500, Math.floor(raw))) : 10;
 };
 
+/**
+ * Cursor pagination over a hub-scale map (hundreds to thousands of accounts)
+ * used to resort the full key set from scratch on every single page — an
+ * O(N log N) sort plus an O(N) cursor scan per page, so draining one full
+ * listing at the default page size cost O(N^2 log N). sortedStringMapKeys
+ * caches the ascending key order on the map itself (invalidated only when a
+ * key is added/removed), and the ascending path uses a binary-search cursor
+ * seek — turning a full drain from O(N^2 log N) into O(N log N) total.
+ */
 const pageKeys = (
-  keys: readonly string[],
+  map: ReadonlyMap<string, unknown>,
   cursor: string,
   limit: number,
   sortDir: 'asc' | 'desc',
 ): { visible: string[]; nextCursor: string | null } => {
-  const ordered = [...keys].sort((left, right) =>
-    sortDir === 'desc' ? compareAscii(right, left) : compareAscii(left, right),
-  );
-  const start = cursor
-    ? ordered.findIndex(key => (
-      sortDir === 'desc' ? compareAscii(key, cursor) < 0 : compareAscii(key, cursor) > 0
-    ))
-    : 0;
+  const ascending = sortedStringMapKeys(map);
+  if (sortDir === 'asc') {
+    const start = sortedStringMapStartIndex(ascending, cursor, -1, limit);
+    const visible = ascending.slice(start, start + limit);
+    return {
+      visible,
+      nextCursor: start + limit < ascending.length ? visible[visible.length - 1] ?? null : null,
+    };
+  }
+  const ordered = [...ascending].reverse();
+  const start = cursor ? ordered.findIndex(key => compareAscii(key, cursor) < 0) : 0;
   const from = start < 0 ? ordered.length : start;
   const visible = ordered.slice(from, from + limit);
   return {
@@ -58,7 +72,7 @@ const pageAccounts = (
 ): StorageEntityViewPage['accounts'] => {
   const accounts = replica.state.accounts;
   const page = pageKeys(
-    Array.from(accounts.keys()),
+    accounts,
     normalizeEntityId(String(query?.accountsCursor ?? query?.cursor ?? '')),
     pageLimit(query?.accountsLimit ?? query?.limit),
     query?.sortDir === 'desc' ? 'desc' : 'asc',
@@ -79,7 +93,7 @@ const pageBooks = (
 ): StorageEntityViewPage['books'] => {
   const books = replica.state.orderbookExt?.books;
   const page = pageKeys(
-    Array.from(books?.keys() ?? []),
+    books ?? EMPTY_BOOKS_MAP,
     String(query?.booksCursor ?? (query?.accountsCursor ? '' : query?.cursor ?? '')).trim(),
     pageLimit(query?.booksLimit ?? query?.limit),
     'asc',

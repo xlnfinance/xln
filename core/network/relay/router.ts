@@ -40,6 +40,7 @@ import {
   type JurisdictionGossipAnnouncement,
 } from '../../jurisdiction/gossip/announcement';
 import { decodeGossipProfileBatchRequest } from '../p2p/gossip/profile-batch';
+import { matchesTraceSuffix, traceLog } from '../../support/trace-debug';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
@@ -210,25 +211,39 @@ const requireRelayDeliveryMetadata = (status: string, reason?: string): Delivery
   return delivery;
 };
 
+type RelayDeliveryAttempt = {
+  delivery: DeliveryResult;
+  /** True when Bun's send() returned -1 (queued into the backpressure buffer,
+   *  not confirmed written). Kept separate from `delivery` so callers don't
+   *  start failover-retrying a queued financial envelope — see the
+   *  consecutiveBackpressuredSends doc on RelayClient for why a socket stuck
+   *  in this state needs a force-close watchdog instead. */
+  backpressured: boolean;
+};
+
 const sendRelayDelivery = (
   config: RelayRouterConfig,
   ws: RelaySocketLike,
   msg: unknown,
   wireBytes?: Uint8Array,
-): DeliveryResult => {
+): RelayDeliveryAttempt => {
   if (!isRelaySocketOpen(ws)) {
-    return requireRelayDeliveryMetadata('stale-target', 'TARGET_SOCKET_NOT_OPEN');
+    return { delivery: requireRelayDeliveryMetadata('stale-target', 'TARGET_SOCKET_NOT_OPEN'), backpressured: false };
   }
   let result: RelaySendResult;
   try {
     result = config.send(ws, wireBytes ?? serializeWsMessage(msg as RuntimeWsMessage));
   } catch (error) {
-    return requireRelayDeliveryMetadata('send-failed', error instanceof Error ? error.message : String(error));
+    return {
+      delivery: requireRelayDeliveryMetadata('send-failed', error instanceof Error ? error.message : String(error)),
+      backpressured: false,
+    };
   }
-  if (classifyWebSocketSendResult(result) === 'dropped') {
-    return requireRelayDeliveryMetadata('send-failed', 'RELAY_SEND_DROPPED');
+  const disposition = classifyWebSocketSendResult(result);
+  if (disposition === 'dropped') {
+    return { delivery: requireRelayDeliveryMetadata('send-failed', 'RELAY_SEND_DROPPED'), backpressured: false };
   }
-  return requireRelayDeliveryMetadata('delivered');
+  return { delivery: requireRelayDeliveryMetadata('delivered'), backpressured: disposition === 'backpressured' };
 };
 
 const createRelayRouteContext = (
@@ -689,15 +704,52 @@ const routeDeliveryDetails = (context: RelayRouteContext): Record<string, unknow
   ...(context.deliveryTxCount !== undefined ? { txs: context.deliveryTxCount } : {}),
 });
 
+/** A socket that keeps queuing sends into backpressure without draining is
+ *  stuck, not just slow — matches STUCK_SEND_THRESHOLD in
+ *  core/network/p2p/direct-runtime-bun.ts's noteSendOutcome. */
+const RELAY_STUCK_BACKPRESSURE_THRESHOLD = 4;
+
 const forwardToRemoteRuntime = (
   context: RelayRouteContext,
   isLocalTarget: boolean,
 ): boolean => {
   const { config, msg, type, from, to, toKey } = context;
   const target = config.store.clients.get(toKey);
+  // TEMP-TRACE-CP3 (pending-frame-stale investigation, gated by XLN_TRACE_ENTITY_SUFFIXES)
+  if (type === 'entity_inputs' && matchesTraceSuffix(from, to)) {
+    traceLog('CP3:relay/router.ts:forwardToRemoteRuntime', {
+      type, from, to, toKey, hasTarget: Boolean(target), isLocalTarget,
+    });
+  }
   if (!target || isLocalTarget) return false;
-  const delivery = sendRelayDelivery(config, target.ws, msg, resolveRelayWireBytes(context));
+  const attempt = sendRelayDelivery(config, target.ws, msg, resolveRelayWireBytes(context));
+  const delivery = attempt.delivery;
+  if (type === 'entity_inputs' && matchesTraceSuffix(from, to)) {
+    traceLog('CP3b:relay/router.ts:forwardToRemoteRuntime:sent', {
+      from, to, deliveryStatus: (delivery as { status?: string }).status,
+      backpressured: attempt.backpressured,
+    });
+  }
   if (isDeliveryDelivered(delivery)) {
+    if (attempt.backpressured) {
+      target.consecutiveBackpressuredSends += 1;
+      if (target.consecutiveBackpressuredSends >= RELAY_STUCK_BACKPRESSURE_THRESHOLD) {
+        target.consecutiveBackpressuredSends = 0;
+        pushDebugEvent(config.store, {
+          event: 'ws_stuck_backpressure_closed',
+          runtimeId: toKey,
+          from,
+          to,
+          status: 'send-failed',
+          reason: 'RELAY_STUCK_BACKPRESSURE',
+          details: routeDeliveryDetails(context),
+        });
+        target.ws.close?.(4010, 'stuck-backpressure');
+        removeClient(config.store, target.ws);
+      }
+    } else {
+      target.consecutiveBackpressuredSends = 0;
+    }
     relayLog('[RELAY] → forwarding to WS client');
     pushDebugEvent(config.store, {
       event: 'delivery',
@@ -865,6 +917,10 @@ const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolea
   const isLocalTarget = !!localRuntimeKey && toKey === localRuntimeKey;
   if (forwardToRemoteRuntime(context, isLocalTarget)) return true;
   const local = await deliverToLocalRuntime(context, isLocalTarget);
+  // TEMP-TRACE-CP3c (pending-frame-stale investigation, gated by XLN_TRACE_ENTITY_SUFFIXES)
+  if (type === 'entity_inputs' && matchesTraceSuffix(from, to)) {
+    traceLog('CP3c:relay/router.ts:route', { type, from, to, isLocalTarget, localDeliveryResult: local });
+  }
   if (local !== 'unavailable') return true;
   if (rejectUnavailableEntityInputs(context)) return true;
   const code = 'GOSSIP_TARGET_NOT_CONNECTED';

@@ -38,6 +38,9 @@ import {
   classifyWebSocketSendResult,
   type WebSocketSendResult,
 } from '../websocket-send-result';
+import { createStructuredLogger } from '../../support/logger';
+
+const directWsLog = createStructuredLogger('network.direct_ws');
 
 type DirectRuntimeWsOptions = {
   runtimeId: string;
@@ -76,6 +79,11 @@ type DirectWsSession = {
   sessionKeys: RuntimeWsSessionKeys | null;
   outboundEncSeq: number;
   lastSeen: number;
+  /** Consecutive sendEntityInputsDelivery attempts that returned sent:false
+   *  while the socket still reported open (dropped-while-open or
+   *  backpressured-while-open — trySend collapses both to sent:false).
+   *  Reset on any attempt that returns sent:true. See STUCK_SEND_THRESHOLD. */
+  consecutiveFailedSendsWhileOpen: number;
 };
 
 type DirectRuntimeWsContext = {
@@ -162,7 +170,18 @@ const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): DirectSendAttempt 
   } catch (error) {
     return { sent: false, error: error instanceof Error ? error.message : String(error) };
   }
-  return classifyWebSocketSendResult(result) === 'dropped' ? { sent: false } : { sent: true };
+  // Bun's send() returns -1 ("backpressured") when the payload was NOT written to
+  // the socket, only queued against uWebSockets' own backpressure limit — distinct
+  // from a positive byte count (actually sent). Treating backpressure as success
+  // here permanently marks a queued-not-confirmed accountInput as ROUTE_DIRECT_DELIVERED:
+  // the entity-output router's P2P failover (dispatchOutputEnvelope in
+  // core/runtime/delivery/dispatch.ts) never fires for it, and the entity-level
+  // crontab resend (maintainPendingAccounts) never retries because the transport
+  // already claimed delivery. Under sustained per-socket backpressure (observed at
+  // 1000-user scale, not at 500) that silently strands one bilateral channel forever
+  // while unrelated traffic on the same connection keeps flowing. Only a genuine
+  // byte count counts as sent; backpressure now falls through to the P2P route.
+  return classifyWebSocketSendResult(result) === 'accepted' ? { sent: true } : { sent: false };
 };
 
 const readRecoveryLookupKey = (payload: unknown): string => {
@@ -186,6 +205,7 @@ const ensureSession = (context: DirectRuntimeWsContext, ws: DirectWebSocket): Di
     sessionKeys: null,
     outboundEncSeq: 0,
     lastSeen: Date.now(),
+    consecutiveFailedSendsWhileOpen: 0,
   };
   context.sessions.set(ws, created);
   return created;
@@ -283,6 +303,44 @@ const forgetIfDisconnected = (context: DirectRuntimeWsContext, ws: DirectWebSock
   if (!isSocketOpen(ws)) forgetSession(context, ws);
 };
 
+// trySend now correctly reports sent:false for a single dropped/backpressured
+// write, so retries are no longer masked as false-positive deliveries. But a
+// correctly-classified retry still does nothing if it keeps landing on the
+// SAME wedged pipe: Bun's ServerWebSocket has a documented failure mode where
+// a socket reports failed writes indefinitely while readyState keeps reading
+// OPEN (github.com/oven-sh/bun#9368) — a live-looking socket that never
+// actually drains again. Observed empirically at 1000-user scale: a hub's
+// resend of one pending account frame failed repeatedly over minutes to the
+// same peer while unrelated traffic on other sessions kept flowing.
+// A single failed-while-open send must stay retryable and must not forget
+// the session (see forgetIfDisconnected / the "still-open socket" test) —
+// but once MANY consecutive sends to one session fail while it keeps
+// reporting open, treat the connection as genuinely wedged and force it
+// closed so the peer's own reconnect logic re-establishes a fresh socket +
+// write queue.
+const STUCK_SEND_THRESHOLD = 4;
+
+const noteSendOutcome = (
+  context: DirectRuntimeWsContext,
+  session: DirectWsSession,
+  sent: boolean,
+): void => {
+  if (sent) {
+    session.consecutiveFailedSendsWhileOpen = 0;
+    return;
+  }
+  if (!isSocketOpen(session.ws)) return; // already dead; forgetIfDisconnected already handles this.
+  session.consecutiveFailedSendsWhileOpen += 1;
+  if (session.consecutiveFailedSendsWhileOpen < STUCK_SEND_THRESHOLD) return;
+  session.consecutiveFailedSendsWhileOpen = 0;
+  session.ws.close(4010, 'stuck-backpressure');
+  // The 'close' websocket handler runs the same forgetSession cleanup, but do
+  // it here too rather than depend on that callback's timing: the next
+  // resend must see a clean slate (missingCode failover), not a
+  // still-registered-but-now-closed session.
+  forgetSession(context, session.ws);
+};
+
 const sendEntityInputsDelivery = (
   context: DirectRuntimeWsContext,
   targetRuntimeId: string,
@@ -331,6 +389,14 @@ const sendEntityInputsDelivery = (
   }
   const attempt = trySend(target.session.ws, signSessionFrame(context, target.session, msg));
   if (!attempt.sent) forgetIfDisconnected(context, target.session.ws);
+  noteSendOutcome(context, target.session, attempt.sent);
+  directWsLog.debug('entity_inputs.send_attempt', {
+    id: msg.id,
+    to: targetRuntimeId,
+    encSeq: msg.encSeq ?? null,
+    entities: envelope.entityInputs.length,
+    sent: attempt.sent,
+  });
   return resultFromSendAttempt(attempt, 'ROUTE_DIRECT_DELIVERED', 'ROUTE_DIRECT_SEND_FAILED');
 };
 
@@ -516,12 +582,24 @@ const handleEntityInputs = async (
         ? decryptSessionJSON(msg.payload, sessionKeys.c2s, msg.encSeq)
         : decryptJSON(msg.payload, context.keyPair.privateKey),
     );
+    directWsLog.debug('entity_inputs.received', {
+      id: msg.id,
+      from: fromRuntimeId,
+      encSeq: msg.encSeq ?? null,
+      entities: envelope.entityInputs.length,
+    });
     await context.options.onEntityInputs(
       fromRuntimeId,
       envelope,
       typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
     );
   } catch (error) {
+    directWsLog.warn('entity_inputs.receive_failed', {
+      id: msg.id,
+      from: fromRuntimeId,
+      encSeq: msg.encSeq ?? null,
+      error: error instanceof Error ? error.message : String(error),
+    });
     sendSession(context, session, { type: 'error', error: `Direct delivery failed: ${(error as Error).message}` });
   }
 };
@@ -537,6 +615,10 @@ const handleDirectMessage = async (
   try {
     msg = deserializeWsMessage(raw);
   } catch (error) {
+    directWsLog.warn('wire_message.deserialize_failed', {
+      bytes: typeof raw === 'string' ? raw.length : raw.byteLength,
+      error: error instanceof Error ? error.message : String(error),
+    });
     send(ws, { type: 'error', error: `Invalid wire message: ${(error as Error).message}` });
     return;
   }

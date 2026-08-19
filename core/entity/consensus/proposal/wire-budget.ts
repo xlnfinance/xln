@@ -92,7 +92,12 @@ export const fitEntityProposalToWireBudget = async (params: {
     // tenth in reserve — a post-apply overflow costs a full re-apply.
     const maxBytes = LIMITS.MAX_FRAME_SIZE_BYTES - ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES
       - Math.floor(LIMITS.MAX_FRAME_SIZE_BYTES / 10);
-    let candidate = allTxs.length;
+    const fitHintKey = `${replica.entityId.trim().toLowerCase()}:${replica.signerId.trim().toLowerCase()}`;
+    const fitHint = env.infrastructure?.wireBudgetFitHints?.get(fitHintKey);
+    // A hint only ever narrows the first attempt, never widens it: starting
+    // above what actually fits just wastes the first materialize on the same
+    // guaranteed-oversized set attempt 0 would have tried anyway.
+    let candidate = fitHint !== undefined ? Math.min(allTxs.length, Math.ceil(fitHint * 1.15)) : allTxs.length;
     for (let attempt = 0; attempt < MAX_FIT_ATTEMPTS; attempt += 1) {
       const slice = allTxs.slice(0, candidate);
       const materialized = await materializeOrHalve(env, replica, slice);
@@ -107,6 +112,9 @@ export const fitEntityProposalToWireBudget = async (params: {
       const wire = rest(materialized.entityContext);
       const bytes = timePerfPhase('entity.wireFit.measure', () => measureEntityFrameWireBytes({ ...wire, txs: slice }));
       if (bytes <= maxBytes) {
+        if (env.infrastructure) {
+          (env.infrastructure.wireBudgetFitHints ??= new Map()).set(fitHintKey, slice.length);
+        }
         if (slice.length >= 100 || slice.length < allTxs.length) {
           entityLog.info('proposal.wire_budget_fit', {
             entityId: replica.state.entityId,

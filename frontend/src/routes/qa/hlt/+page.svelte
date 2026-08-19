@@ -10,7 +10,20 @@
     type HltDashboardMode,
   } from '@xln/core/qa/hlt/hlt-dashboard-preview';
   import { consumeQaTokenFromUrl, qaFetch } from '$lib/qa/apiClient';
-  import { decodeHltDashboardPayload, formatMs, formatTps, type HltDashboardPayload } from '$lib/qa/hlt';
+  import { decodeHltDashboardPayload, formatMs, formatTps, type HltDashboardPayload, type HltRunView } from '$lib/qa/hlt';
+
+  const IDLE_RUN: HltRunView = {
+    active: false,
+    status: 'idle',
+    pid: null,
+    workDir: null,
+    logPath: null,
+    startedAt: null,
+    finishedAt: null,
+    exitCode: null,
+    error: null,
+    logTail: '',
+  };
 
   let users = $state(HLT_DASHBOARD_DEFAULTS.users);
   let usersPerRuntime = $state(HLT_DASHBOARD_DEFAULTS.usersPerRuntime);
@@ -19,9 +32,16 @@
   let hubs = $state(HLT_DASHBOARD_DEFAULTS.hubs);
   let mode = $state<HltDashboardMode>(HLT_DASHBOARD_DEFAULTS.mode);
   let profile = $state(HLT_DASHBOARD_DEFAULTS.profile);
+  // Number inputs can't bind directly to a bigint; the config's bigint fields
+  // are derived from these at the point of use.
+  let paymentAmountMinInput = $state(Number(HLT_DASHBOARD_DEFAULTS.paymentAmountMin));
+  let paymentAmountMaxInput = $state(Number(HLT_DASHBOARD_DEFAULTS.paymentAmountMax));
+  const paymentAmountMin = $derived(BigInt(Math.max(1, Math.round(paymentAmountMinInput))));
+  const paymentAmountMax = $derived(BigInt(Math.max(Number(paymentAmountMin), Math.round(paymentAmountMaxInput))));
   let copied = $state(false);
   let loadError = $state<string | null>(null);
   let snapshot = $state<HltDashboardPayload | null>(null);
+  let actionBusy = $state(false);
 
   const config = $derived<HltDashboardConfig>({
     users,
@@ -33,15 +53,65 @@
     marketMakers: HLT_DASHBOARD_DEFAULTS.marketMakers,
     mode,
     profile,
+    paymentAmountMin,
+    paymentAmountMax,
   });
   const preview = $derived(previewHltDashboard(config));
   const chart = $derived(layoutHltTpsChart(snapshot?.ledger ?? []));
   const maxPerfTotal = $derived(Math.max(1, ...(snapshot?.perf.rows ?? []).map(row => row.totalMs)));
+  const run = $derived(snapshot?.run ?? IDLE_RUN);
+
+  const readErrorMessage = async (response: Response): Promise<string> => {
+    const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+    return typeof payload?.error === 'string' ? payload.error : `HLT_HTTP_${response.status}`;
+  };
 
   const loadSnapshot = async (): Promise<void> => {
     const response = await qaFetch('/api/qa/hlt');
     const payload = decodeHltDashboardPayload(await response.json());
     snapshot = payload;
+  };
+
+  const startIsolated = async (): Promise<void> => {
+    actionBusy = true;
+    loadError = null;
+    try {
+      const response = await qaFetch('/api/qa/hlt/start', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          users,
+          usersPerRuntime,
+          rate: ratePerUserPerSecond,
+          duration: durationSeconds,
+          hubs,
+          mode,
+          profile,
+          paymentMin: String(paymentAmountMin),
+          paymentMax: String(paymentAmountMax),
+        }),
+      });
+      if (!response.ok) throw new Error(await readErrorMessage(response));
+      await loadSnapshot();
+    } catch (error: unknown) {
+      loadError = error instanceof Error ? error.message : String(error);
+    } finally {
+      actionBusy = false;
+    }
+  };
+
+  const abortIsolated = async (): Promise<void> => {
+    actionBusy = true;
+    loadError = null;
+    try {
+      const response = await qaFetch('/api/qa/hlt/abort', { method: 'POST' });
+      if (!response.ok) throw new Error(await readErrorMessage(response));
+      await loadSnapshot();
+    } catch (error: unknown) {
+      loadError = error instanceof Error ? error.message : String(error);
+    } finally {
+      actionBusy = false;
+    }
   };
 
   const copyCommand = async (): Promise<void> => {
@@ -57,6 +127,13 @@
     void loadSnapshot().catch((error: unknown) => {
       loadError = error instanceof Error ? error.message : String(error);
     });
+    const timer = setInterval(() => {
+      if (!run.active) return;
+      void loadSnapshot().catch((error: unknown) => {
+        loadError = error instanceof Error ? error.message : String(error);
+      });
+    }, 1_000);
+    return () => clearInterval(timer);
   });
 </script>
 
@@ -65,9 +142,30 @@
     <div>
       <div class="eyebrow">Load stand</div>
       <h1>HLT</h1>
-      <p class="sub">Configure a population, copy an isolated smoke, then read the last green result.</p>
+      <p class="sub">Start launches a separate smoke shard with its own ports. Live bun run dev stays on 8080/8082.</p>
     </div>
     <div class="hlt-head-actions">
+      {#if run.active}
+        <button
+          class="hlt-stop"
+          type="button"
+          data-testid="hlt-abort"
+          disabled={actionBusy}
+          onclick={() => void abortIsolated()}
+        >
+          {actionBusy ? 'Stopping…' : 'Stop shard'}
+        </button>
+      {:else}
+        <button
+          class="hlt-start"
+          type="button"
+          data-testid="hlt-start"
+          disabled={actionBusy}
+          onclick={() => void startIsolated()}
+        >
+          {actionBusy ? 'Starting…' : 'Start isolated shard'}
+        </button>
+      {/if}
       <a class="mini-action" href="/qa">QA cockpit</a>
       <button class="mini-action" type="button" data-testid="hlt-copy-command" onclick={() => void copyCommand()}>
         {copied ? 'Copied' : 'Copy smoke'}
@@ -77,6 +175,24 @@
 
   {#if loadError}
     <div class="error-banner" data-testid="hlt-error">{loadError}</div>
+  {/if}
+
+  {#if run.status !== 'idle'}
+    <section class="run-banner" data-testid="hlt-run" data-status={run.status}>
+      <div>
+        <span>Isolated shard</span>
+        <strong data-testid="hlt-run-status">{run.status}{run.pid === null ? '' : ` · pid ${run.pid}`}</strong>
+        {#if run.workDir}
+          <p class="run-meta" data-testid="hlt-run-workdir">{run.workDir}</p>
+        {/if}
+        {#if run.error}
+          <p class="run-meta">{run.error}</p>
+        {/if}
+      </div>
+      {#if run.logTail}
+        <pre class="run-log" data-testid="hlt-run-log">{run.logTail}</pre>
+      {/if}
+    </section>
   {/if}
 
   <section class="panel">
@@ -113,6 +229,14 @@
           <option value="H1,H2">H1,H2</option>
           <option value="H1,H2,H3">H1,H2,H3</option>
         </select>
+      </label>
+      <label>
+        Payment amount min <strong>{paymentAmountMin}</strong>
+        <input type="range" min="1" max="10000" step="1" bind:value={paymentAmountMinInput} data-testid="hlt-payment-amount-min-input" />
+      </label>
+      <label>
+        Payment amount max <strong>{paymentAmountMax}</strong>
+        <input type="range" min="1" max="10000" step="1" bind:value={paymentAmountMaxInput} data-testid="hlt-payment-amount-max-input" />
       </label>
       <label>
         Hub profiles
