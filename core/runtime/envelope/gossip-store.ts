@@ -57,7 +57,6 @@ export const persistGossipProfileToInfraDb = async (
   // array loses ids when different profile announcements commit concurrently.
   const batch = db.batch();
   batch.put(Buffer.from(makeInfraGossipProfileKey(entityId)), Buffer.from(serializeTaggedJson(canonicalProfile)));
-  batch.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
   await batch.write();
 };
 

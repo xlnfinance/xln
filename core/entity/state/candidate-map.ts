@@ -350,14 +350,10 @@ export const getEntityCandidateValueForWrite = <K, V>(
   ? map.getForWrite(key)
   : map.get(key);
 
-export const createEntityValueCandidateMap = <K, V>(
-  source: Map<K, V>,
-  forkValue: (value: V) => V,
-): EntityCandidateMap<K, V> => new EntityCandidateMap(source, forkValue);
-
-export const commitEntityValueCandidateMap = <K, V>(
-  source: Map<K, V>,
-): Map<K, V> => source instanceof EntityCandidateMap ? source.commit() : source;
+import {
+  EntityAccountCandidateMap,
+  type PersistentEntityAccountMap,
+} from './persistent-account-map';
 
 /**
  * Account values are immutable committed views. getForWrite() owns a bounded
@@ -372,11 +368,6 @@ export const commitEntityAccountCandidate = (
   accounts: PersistentEntityAccountMap | EntityAccountCandidateMap,
 ): PersistentEntityAccountMap =>
   accounts instanceof EntityAccountCandidateMap ? accounts.sealCandidate() : accounts;
-
-export const entityAccountCommitmentEntries = (
-  accounts: PersistentEntityAccountMap | EntityAccountCandidateMap,
-): MapIterator<[string, AccountReplica]> =>
-  accounts.entries();
 
 const forkBook = (book: BookState): BookState => forkBookState(book);
 
@@ -480,11 +471,6 @@ export const commitEntityOrderbookCandidate = (
     hubProfile: source.hubProfile,
   };
 };
-import type { AccountReplica } from '../../types/account';
-import {
-  EntityAccountCandidateMap,
-  type PersistentEntityAccountMap,
-} from './persistent-account-map';
 export { EntityAccountCandidateMap } from './persistent-account-map';
 import {
   commitBookOverlay,
