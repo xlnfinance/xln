@@ -51,7 +51,7 @@ export const fitEntityProposalToWireBudget = async (params: {
   proposalTxs: EntityTx[];
   jPrefixCertificate?: JPrefixCertificate | undefined;
   usePersistedReplayContext: boolean;
-}): Promise<{ txs: EntityTx[]; entityContext: EntityInfraContext }> => {
+}): Promise<{ txs: EntityTx[]; entityContext: EntityInfraContext; replayed: boolean }> => {
   const { env, replica, jPrefixCertificate, usePersistedReplayContext } = params;
   // Replay must keep the exact stored txs; a live proposal (no stored context
   // for this height) must be fitted even when the flag allows replay reuse —
@@ -62,6 +62,7 @@ export const fitEntityProposalToWireBudget = async (params: {
       entityContext: await materializeEntityInfraContext(env, replica, params.proposalTxs, {
         usePersistedReplayContext: true,
       }),
+      replayed: true,
     };
   }
   return timePerfPhase('entity.wireFit', async () => {
@@ -72,6 +73,7 @@ export const fitEntityProposalToWireBudget = async (params: {
         entityContext: await materializeEntityInfraContext(env, replica, allTxs, {
           usePersistedReplayContext: false,
         }),
+        replayed: false,
       };
     }
     const rest = (entityContext: EntityInfraContext) => ({
@@ -117,7 +119,7 @@ export const fitEntityProposalToWireBudget = async (params: {
             profiles: materialized.entityContext.gossipProfiles.length,
           });
         }
-        return { txs: slice, entityContext: materialized.entityContext };
+        return { txs: slice, entityContext: materialized.entityContext, replayed: false };
       }
       const scaled = Math.floor(candidate * 0.9 * maxBytes / bytes);
       const next = Math.min(candidate - 1, scaled);

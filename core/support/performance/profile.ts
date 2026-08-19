@@ -48,6 +48,10 @@ export class BoundedPerfMetric {
   private minimumMs = Number.POSITIVE_INFINITY;
   private maximumMs = 0;
   private sampleCount = 0;
+  // Snapshots run per Runtime frame; sorting every metric's 4k-sample window
+  // three times per snapshot was measurable Hub CPU. One sort per new sample
+  // set, memoized until the next observation.
+  private summaryMemo: { sampleCount: number; summary: PerfMetricSummary } | null = null;
 
   constructor(private readonly percentileSampleLimit = DEFAULT_PERCENTILE_SAMPLE_LIMIT) {
     if (!Number.isSafeInteger(percentileSampleLimit) || percentileSampleLimit <= 0) {
@@ -74,22 +78,24 @@ export class BoundedPerfMetric {
     if (this.sampleCount === 0) {
       return { count: 0, avgMs: 0, minMs: 0, p50Ms: 0, p95Ms: 0, p99Ms: 0, maxMs: 0, totalMs: 0 };
     }
-    return {
+    if (this.summaryMemo?.sampleCount === this.sampleCount) return this.summaryMemo.summary;
+    const sorted = [...this.percentileSamples].sort((left, right) => left - right);
+    const percentile = (ratio: number): number => {
+      const index = Math.max(0, Math.ceil(sorted.length * ratio) - 1);
+      return sorted[index] ?? this.maximumMs;
+    };
+    const summary: PerfMetricSummary = {
       count: this.sampleCount,
       avgMs: this.sumMs / this.sampleCount,
       minMs: this.minimumMs,
-      p50Ms: this.percentile(0.50),
-      p95Ms: this.percentile(0.95),
-      p99Ms: this.percentile(0.99),
+      p50Ms: percentile(0.50),
+      p95Ms: percentile(0.95),
+      p99Ms: percentile(0.99),
       maxMs: this.maximumMs,
       totalMs: this.sumMs,
     };
-  }
-
-  private percentile(ratio: number): number {
-    const sorted = [...this.percentileSamples].sort((left, right) => left - right);
-    const index = Math.max(0, Math.ceil(sorted.length * ratio) - 1);
-    return sorted[index] ?? this.maximumMs;
+    this.summaryMemo = { sampleCount: this.sampleCount, summary };
+    return summary;
   }
 }
 

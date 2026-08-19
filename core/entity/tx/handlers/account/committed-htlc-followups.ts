@@ -47,15 +47,40 @@ type HtlcSecretFollowupContext = Pick<
 const getJurisdictionId = (state: EntityState, env: EntityRuntimeContext): string =>
   String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 
+// A Hub frame carries one prepared entry per forwarded lock (~1300 at 500
+// users); a linear scan per lock made this lookup quadratic in frame size.
+// Entries are immutable once the context is built, so index each entries
+// array once and reuse it for every lock of the frame.
+const preparedEntryIndexes = new WeakMap<readonly PreparedHtlcEntry[], Map<string, PreparedHtlcEntry>>();
+
+const preparedEntryLookupKey = (accountFrameHash: string, lockId: string, envelopeHash: string): string =>
+  `${accountFrameHash}|${lockId}|${envelopeHash}`;
+
+const preparedEntryIndex = (entries: readonly PreparedHtlcEntry[]): Map<string, PreparedHtlcEntry> => {
+  const cached = preparedEntryIndexes.get(entries);
+  if (cached) return cached;
+  const index = new Map<string, PreparedHtlcEntry>();
+  for (const entry of entries) {
+    const key = preparedEntryLookupKey(entry.binding.accountFrameHash, entry.binding.lockId, entry.binding.envelopeHash);
+    // First match wins, matching the previous Array.prototype.find semantics.
+    if (!index.has(key)) index.set(key, entry);
+  }
+  preparedEntryIndexes.set(entries, index);
+  return index;
+};
+
 const requirePreparedHtlcEntry = (
   ctx: HtlcFollowupContext,
   lock: HtlcLock,
   committedFrame: AccountFrame,
 ): PreparedHtlcEntry => {
-  const prepared = ctx.infraContext?.htlc.entries.find(entry =>
-    entry.binding.accountFrameHash === committedFrame.stateHash.toLowerCase()
-    && entry.binding.lockId === lock.lockId.toLowerCase()
-    && entry.binding.envelopeHash === lock.envelopeHash?.toLowerCase());
+  const prepared = ctx.infraContext && lock.envelopeHash !== undefined
+    ? preparedEntryIndex(ctx.infraContext.htlc.entries).get(preparedEntryLookupKey(
+        committedFrame.stateHash.toLowerCase(),
+        lock.lockId.toLowerCase(),
+        lock.envelopeHash.toLowerCase(),
+      ))
+    : undefined;
   if (!prepared) throw new Error(`HTLC_PREPARED_CONTEXT_REQUIRED:${lock.lockId}`);
   const key = preparedHtlcBindingKey(prepared.binding);
   if (!ctx.consumedPreparedHtlcBindings) throw new Error('HTLC_PREPARED_CONSUMPTION_TRACKER_REQUIRED');

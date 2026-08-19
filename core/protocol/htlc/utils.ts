@@ -89,12 +89,22 @@ export function deriveForwardHtlcLockId(currentLockId: string): string {
 /**
  * Hash HTLC secret using the on-chain convention (keccak256(abi.encode(secret))).
  */
+// abi.encode(bytes32) is the 32 bytes themselves; the generic ABI coder plus a
+// fresh keccak per call ran on every resolve, deadline check and route lookup
+// (~2% of Hub CPU at 500 users). Bounded memo on the secret string.
+const htlcSecretHashes = new Map<string, string>();
+const HTLC_SECRET_HASH_MEMO_MAX = 65_536;
+
 export function hashHtlcSecret(secret: string): string {
+  const memoized = htlcSecretHashes.get(secret);
+  if (memoized !== undefined) return memoized;
   if (!ethers.isHexString(secret, 32)) {
     throw new Error(`HTLC secret must be 32-byte hex (got ${secret.length} chars)`);
   }
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  return ethers.keccak256(abiCoder.encode(['bytes32'], [secret]));
+  const hashed = ethers.keccak256(secret);
+  if (htlcSecretHashes.size >= HTLC_SECRET_HASH_MEMO_MAX) htlcSecretHashes.clear();
+  htlcSecretHashes.set(secret, hashed);
+  return hashed;
 }
 
 /**

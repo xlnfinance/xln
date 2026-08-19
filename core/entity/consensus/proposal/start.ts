@@ -346,12 +346,18 @@ const buildEntityProposal = async (
   const txs = selection.proposalTxs;
   const entityContext = fitted.entityContext;
   profile.checkpoint('wireFit');
-  await timePerfPhase('entity.proposal.assertHtlc', () => assertHtlcPreparedInfraContext({
-    state: workingReplica.state,
-    proposalTxs: txs,
-    context: entityContext,
-    entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, workingReplica.entityId),
-  }));
+  // A context this proposer just materialized from these exact txs is by
+  // construction what the replay would derive; re-deriving ~1300 HTLC entries
+  // per Hub frame was pure cost. A WAL-replayed context is foreign data and is
+  // still checked against the stored txs.
+  if (fitted.replayed) {
+    await timePerfPhase('entity.proposal.assertHtlc', () => assertHtlcPreparedInfraContext({
+      state: workingReplica.state,
+      proposalTxs: txs,
+      context: entityContext,
+      entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, workingReplica.entityId),
+    }));
+  }
   const applyFrame = context.promoteCandidateState && selection.isSingleSigner
     ? applyRuntimeOwnedEntityFrame
     : applyEntityFrame;
