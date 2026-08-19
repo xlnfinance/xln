@@ -1137,6 +1137,11 @@ const main = async (): Promise<void> => {
       const value = process.env[name];
       return value === undefined ? forward : { ...forward, [name]: value };
     }, {}),
+    // Per-hub engine flags (e.g. XLN_HUB_ENGINE_ARGS_H1="--cpu-prof --cpu-prof-dir=...")
+    // forward the operator's profiler choice to the hub child unchanged.
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => name.startsWith('XLN_HUB_ENGINE_ARGS_')),
+    ),
     XLN_SERVER_PORT: String(apiPort),
     XLN_RDB_ROOT: workDir,
     XLN_DB_PATH: join(workDir, 'prod-main'),
