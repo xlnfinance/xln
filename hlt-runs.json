@@ -154,7 +154,7 @@
     },
     {
       "at": "2026-08-19T03:20:00Z",
-      "commit": "HEAD",
+      "commit": "aaf5db645",
       "headline": "Native X25519 for onion layers: 186.7/s at 500 users",
       "detail": "node:crypto diffieHellman replaces the pure-JS noble ladder for HTLC onion and p2p session ECDH (25 us vs 330 us per scalar mult; identical RFC 7748 bytes, browsers fall back to noble). Also dropped the duplicate multi-MB canonical encode after infra-context validation and added sub-phase perf counters (infraMaterialize.htlc/validate/authority, wireFit.measure, proposal.assertHtlc). 7500/7500 in 40.2 s (30 rounds), exit 0. Hub phase totals: wireFit 4.0 s (was 7.5 s), infraMaterialize.htlc 2.6 s (was 5.7 s), assertHtlc 1.5 s.",
       "users": 500,
