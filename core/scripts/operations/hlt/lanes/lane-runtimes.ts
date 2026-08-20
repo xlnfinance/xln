@@ -148,6 +148,7 @@ const spawnLaneRuntime = async (options: {
       XLN_STORAGE_HISTORY_PATH: join(dbRoot, 'storage-health-history.json'),
       XLN_JURISDICTIONS_PATH: options.jurisdictionsPath,
       XLN_LOG_LEVEL: process.env['XLN_LOAD_LANE_LOG_LEVEL'] || 'warn',
+      ...(process.env['XLN_HEAVY_LOGS'] ? { XLN_HEAVY_LOGS: '1' } : {}),
       // Profiling flags are opt-in on the parent and must reach the lane, or a
       // per-user frame profile can only ever be measured on the mesh daemons.
       ...(process.env['XLN_RUNTIME_FRAME_LOG'] ? { XLN_RUNTIME_FRAME_LOG: '1' } : {}),
