@@ -1587,6 +1587,9 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...(process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS']
         ? { XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS: process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS'] }
         : {}),
+      ...(process.env['XLN_HEAVY_LOGS']
+        ? { XLN_HEAVY_LOGS: process.env['XLN_HEAVY_LOGS'] }
+        : {}),
       ...(process.env['XLN_ACCOUNT_PENDING_RESEND_AFTER_MS']
         ? { XLN_ACCOUNT_PENDING_RESEND_AFTER_MS: process.env['XLN_ACCOUNT_PENDING_RESEND_AFTER_MS'] }
         : {}),
