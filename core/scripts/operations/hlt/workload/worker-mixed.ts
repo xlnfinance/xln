@@ -24,8 +24,8 @@ import { waitForFullySettledEvidence } from '../settlement-reader';
 import { grantBilateralTokenCredit } from '../lanes/worker-lanes';
 import { stopLaneRuntimes } from '../lanes/lane-runtimes';
 import {
-  buildLaneRoundOfferInputs,
   prepareParallelSameLoad,
+  submitPreparedParallelSameLoad,
   type PreparedParallelSameLoad,
 } from './worker-same-lanes';
 import { publishHltDashboardPerfFromWorkDir, publishHltDashboardReport } from '../../../../qa/hlt/hlt-dashboard';
@@ -36,8 +36,6 @@ import {
   persistReport,
   readLoadBook,
   resolveWalPath,
-  sendObserved,
-  waitForTradeCount,
   type WorkerArgs,
 } from '../worker-runtime';
 import {
@@ -57,8 +55,6 @@ import {
   waitForRoutableReceivers,
 } from './worker-payments';
 import type { LaneRuntime } from '../lanes/lane-runtimes';
-
-const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> => {
   const plan = args.plan;
@@ -125,135 +121,57 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     const walPath = resolveWalPath(join(args.workDir, 'prod-mesh', hubLabel.toLowerCase()));
     const walBytesBefore = directoryBytes(walPath);
     const hubDurableBefore = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
+    const driverRssBefore = process.memoryUsage().rss;
     const receiverIds = users.map(lane => lane.identity.entityId.toLowerCase());
     const expectedPayments = new Map(receiverIds.map((id, index) => [id, perReceiver[index]! / CREDIT_HEADROOM_MULTIPLE]));
     const baselines = await readHubReceiverCredits(hub, hubIdentity.entityId, new Set(receiverIds));
     const expectedSwaps = args.lanes * args.rounds * swapMatches;
+    const senderIndexByLaneKey = new Map(users.map((lane, index) => [lane.laneKey, index]));
+    const offerCadenceMs = Math.max(1, Math.floor(args.cadenceMs / swapMatches));
 
     const startedAt = performance.now();
-    let enqueueAckElapsedMs = 0;
-    const roundSubmissionLagMs: number[] = [];
-    for (let tick = 0; tick < args.rounds; tick += 1) {
-      const dueAt = startedAt + tick * args.cadenceMs;
-      const remainingMs = dueAt - performance.now();
-      if (remainingMs > 0) await sleep(remainingMs);
-      roundSubmissionLagMs.push(Math.max(0, Math.ceil(performance.now() - dueAt)));
-      const offerOffset = tick * swapMatches;
-      const swapInputs = [
-        ...prepared.makerRuntimes.map((lane, index) => ({
-          lane,
-          inputs: buildLaneRoundOfferInputs(
-            [prepared.makerIdentities[index]!],
-            [prepared.makerPlans[index]!],
-            offerOffset,
-            swapMatches,
-          ),
-        })),
-        ...prepared.takerRuntimes.map((lane, index) => ({
-          lane,
-          inputs: buildLaneRoundOfferInputs(
-            [prepared.takerIdentities[index]!],
-            [prepared.takerPlans[index]!],
-            offerOffset,
-            swapMatches,
-          ),
-        })),
-      ];
-      const paymentInputs = users.map((lane, senderIndex) => {
+    // Same-only 8u is green on 1-offer frames + hub-pipeline window. Mixed's
+    // fire-all 2-offer ticks stalled even with swap-only payloads, so reuse
+    // that submitter. Keep 1:1 by placing one offer every cadence/swapMatches
+    // and folding a payment into every swapMatches-th command (one EntityInput).
+    const submitted = await submitPreparedParallelSameLoad({
+      hub,
+      hubIdentity,
+      initialBook,
+      initialFrame: hubDurableBefore,
+      swapsPerRound: args.lanes,
+      rounds: args.rounds * swapMatches,
+      cadenceMs: offerCadenceMs,
+      prepared,
+      extraEntityTxs: ({ lane, identity, round }) => {
+        if (round % swapMatches !== 0) return [];
+        const senderIndex = senderIndexByLaneKey.get(lane.laneKey);
+        if (senderIndex === undefined) throw new Error(`HLT_MIXED_TICK_LANE_MISMATCH:${lane.laneKey}`);
+        const tick = round / swapMatches;
         const receiver = users[paymentReceiverIndexSamePopulation(senderIndex, tick, users.length)]!;
-        return {
-          lane,
-          input: buildRoundPayment(
-            lane.identity,
-            hubIdentity.entityId,
-            receiver.identity,
-            senderIndex,
-            tick,
-            amountRange,
-          ),
-        };
-      });
-      const observed = await Promise.all(users.map(async (lane, index) => {
-        const swap = swapInputs[index];
-        const payment = paymentInputs[index];
-        if (
-          !swap ||
-          swap.lane.laneKey !== lane.laneKey ||
-          !payment ||
-          payment.lane.laneKey !== lane.laneKey
-        ) {
-          throw new Error(`HLT_MIXED_TICK_LANE_MISMATCH:${lane.laneKey}`);
-        }
-        // Command lane is sequential per adapter. Concurrent swap+pay on the
-        // same connection reused commandSequence (E_BAD_QUERY). Payments-only
-        // 8u is green; mixed still halted H1 on HTLC_OPAQUE_CIPHERTEXT_INVALID
-        // even after this sequence — Hub-side swap+htlc, not the command lane.
-        const swapObserved = await sendObserved(
-          lane.runtime,
-          `hlt-mixed-swap-${tick + 1}-${lane.laneKey}`,
-          { runtimeTxs: [], entityInputs: swap.inputs },
-        );
-        const payObserved = await sendObserved(
-          lane.runtime,
-          `hlt-mixed-pay-${tick + 1}-${lane.laneKey}`,
-          { runtimeTxs: [], entityInputs: [payment.input] },
-        );
-        return {
-          enqueueAckElapsedMs: Math.max(swapObserved.enqueueAckElapsedMs, payObserved.enqueueAckElapsedMs),
-        };
-      }));
-      enqueueAckElapsedMs += Math.max(...observed.map(entry => entry.enqueueAckElapsedMs));
-    }
-
+        return buildRoundPayment(
+          identity,
+          hubIdentity.entityId,
+          receiver.identity,
+          senderIndex,
+          tick,
+          amountRange,
+        ).entityTxs;
+      },
+    });
     const submittedPayments = users.length * args.rounds;
-    const [finalBook] = await Promise.all([
-      waitForTradeCount(hub, hubIdentity.entityId, initialBook.tradeCount + expectedSwaps),
-      waitForHubSettlement(hub, hubIdentity.entityId, receiverIds, baselines, expectedPayments),
-    ]);
-    const matchedElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
+    await waitForHubSettlement(hub, hubIdentity.entityId, receiverIds, baselines, expectedPayments);
+    const finalBook = submitted.finalBook;
+    const matchedElapsedMs = submitted.economicCompletionElapsedMs;
     const settlementEvidence = await waitForFullySettledEvidence({
       hub,
       load: users.map(lane => ({
         runtime: lane.runtime,
-        pairs: [
-          ...prepared.makerIdentities.map((identity, index) => ({
-            hubEntityId: hubIdentity.entityId,
-            loadEntityId: identity.entityId,
-            offerIds: prepared.makerPlans[index]!.offers.map(tx => {
-              if (tx.type !== 'placeSwapOffer') throw new Error('HLT_MIXED_OFFER_TYPE_INVALID');
-              return tx.data.offerId;
-            }),
-          })).filter(pair => pair.loadEntityId === lane.identity.entityId),
-          ...prepared.takerIdentities.map((identity, index) => ({
-            hubEntityId: hubIdentity.entityId,
-            loadEntityId: identity.entityId,
-            offerIds: prepared.takerPlans[index]!.offers.map(tx => {
-              if (tx.type !== 'placeSwapOffer') throw new Error('HLT_MIXED_OFFER_TYPE_INVALID');
-              return tx.data.offerId;
-            }),
-          })).filter(pair => pair.loadEntityId === lane.identity.entityId),
-        ],
+        pairs: submitted.settlementPairs.filter(pair => pair.loadEntityId === lane.identity.entityId),
       })),
       marketMaker,
       hubBookEntityId: hubIdentity.entityId,
-      pairs: [
-        ...prepared.makerIdentities.map((identity, index) => ({
-          hubEntityId: hubIdentity.entityId,
-          loadEntityId: identity.entityId,
-          offerIds: prepared.makerPlans[index]!.offers.map(tx => {
-            if (tx.type !== 'placeSwapOffer') throw new Error('HLT_MIXED_OFFER_TYPE_INVALID');
-            return tx.data.offerId;
-          }),
-        })),
-        ...prepared.takerIdentities.map((identity, index) => ({
-          hubEntityId: hubIdentity.entityId,
-          loadEntityId: identity.entityId,
-          offerIds: prepared.takerPlans[index]!.offers.map(tx => {
-            if (tx.type !== 'placeSwapOffer') throw new Error('HLT_MIXED_OFFER_TYPE_INVALID');
-            return tx.data.offerId;
-          }),
-        })),
-      ],
+      pairs: submitted.settlementPairs,
       tradeCountBefore: initialBook.tradeCount,
       expectedSwaps,
       matchedElapsedMs,
@@ -277,11 +195,11 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       offeredPaymentRate: plan.offeredPaymentRatePerSecond,
       submittedPayments,
       deliveredPayments: submittedPayments,
-      enqueueAckElapsedMs,
-      commandObservedElapsedMs: enqueueAckElapsedMs,
+      enqueueAckElapsedMs: submitted.enqueueAckElapsedMs,
+      commandObservedElapsedMs: submitted.commandObservedElapsedMs,
       deliveredElapsedMs,
       deliveredTps: submittedPayments * 1_000 / deliveredElapsedMs,
-      roundSubmissionLagMs,
+      roundSubmissionLagMs: submitted.roundSubmissionLagMs,
       walBytesBefore,
       walBytesAfter: directoryBytes(walPath),
       hubDurableBefore,
@@ -293,7 +211,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     const swapReport = decodeLoadSustainedReport({
       schema: 'xln-production-swap-load-sustained-v1',
       mode: 'same',
-      schedule: 'mixed_population_two_matches_per_lane_round',
+      schedule: 'one_order_per_account_per_round',
       configuredUsers: users.length,
       configuredRounds: args.rounds,
       cadenceMs: args.cadenceMs,
@@ -302,14 +220,14 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       loadMakerAccountCount: args.lanes,
       loadTakerAccountCount: args.lanes,
       loadParticipantAccountCount: users.length,
-      maxOrdersPerAccountFrame: swapMatches,
-      runtimeInputBatches: args.rounds,
-      roundSubmissionLagMs,
+      maxOrdersPerAccountFrame: submitted.offersPerRound,
+      runtimeInputBatches: submitted.runtimeInputBatches,
+      roundSubmissionLagMs: submitted.roundSubmissionLagMs,
       completionAuthority: 'committed_trade_count_and_bilateral_runtime_quiescence',
       matchedEconomicSwaps: finalBook.tradeCount - initialBook.tradeCount,
       fullySettledEconomicSwaps: settlementEvidence.expectedSwaps,
-      enqueueAckElapsedMs,
-      commandObservedElapsedMs: enqueueAckElapsedMs,
+      enqueueAckElapsedMs: submitted.enqueueAckElapsedMs,
+      commandObservedElapsedMs: submitted.commandObservedElapsedMs,
       matchedElapsedMs,
       fullySettledElapsedMs: settlementEvidence.fullySettledElapsedMs,
       matchedTps: rates.matchedTps,
@@ -318,7 +236,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       tradeCountAfter: finalBook.tradeCount,
       submittedEconomicSwaps: expectedSwaps,
       uncompletedEconomicSwapsAfterRun: 0,
-      driverRssBefore: 0,
+      driverRssBefore,
       driverRssAfter: process.memoryUsage().rss,
       walBytesBefore,
       walBytesAfter: directoryBytes(walPath),

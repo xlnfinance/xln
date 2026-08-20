@@ -208,16 +208,17 @@ describe('hlt payment population', () => {
     expect(args.plan?.offeredSwapRatePerSecond).toBe(8);
   });
 
-  test('mixed worker sequences swap then payment on one adapter per user', () => {
+  test('mixed worker folds payments into the same-j windowed submitter', () => {
     const source = readFileSync(
       join(import.meta.dir, '../../../scripts/operations/hlt/workload/worker-mixed.ts'),
       'utf8',
     );
-    expect(source).toContain('hlt-mixed-swap-${tick + 1}-${lane.laneKey}');
-    expect(source).toContain('hlt-mixed-pay-${tick + 1}-${lane.laneKey}');
+    expect(source).toContain('submitPreparedParallelSameLoad');
+    expect(source).toContain('extraEntityTxs');
     expect(source).toContain('HLT_MIXED_TICK_LANE_MISMATCH');
-    expect(source).toContain('const swapObserved = await sendObserved(');
-    expect(source).toContain('const payObserved = await sendObserved(');
+    expect(source).toContain('round % swapMatches !== 0');
+    expect(source).not.toContain('hlt-mixed-swap-${tick + 1}');
+    expect(source).not.toContain('hlt-mixed-pay-${tick + 1}');
   });
 });
 

@@ -267,9 +267,10 @@ const finalizeRuntimeInputApply = (
   profile.mark('finalize');
   const appliedRuntimeInput = buildAppliedRuntimeInput(runtimeInput, ingress.runtimeTxs, batch.appliedEntityInputs);
   return {
-    entityContexts: new Map(
-      [...batch.entityContexts].map(([replicaId, context]) => [replicaId, structuredClone(context)]),
-    ),
+    // collectRuntimeEntityContext already snapshots each committed context.
+    // Cloning the HTLC graph again every Runtime frame doubled Hub CPU and
+    // re-introduced Bun repeated-ref aliasing of forward innerEnvelope.
+    entityContexts: new Map(batch.entityContexts),
     entityOutbox: batch.entityOutbox,
     mergedInputs: batch.appliedEntityInputs,
     jOutbox: batch.jOutbox,

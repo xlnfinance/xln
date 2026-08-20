@@ -1,6 +1,7 @@
 /** Parallel same-j load submission across independently signed Entity/Account lanes. */
 
 import type { RuntimeInput } from '../../../../runtime/types';
+import type { EntityTx } from '../../../../types/entity-tx';
 import type { LoadBookSnapshot } from '../boundary/worker-book-boundary';
 import type { LoadFrame, LoadIdentity } from '../boundary/worker-boundary';
 import { setupParallelLoadLanes } from '../lanes/worker-lanes';
@@ -40,6 +41,12 @@ export type PreparedParallelSameLoad = Readonly<{
 }>;
 
 type IndependentLanePlans = PreparedParallelSameLoad['makerPlans'];
+
+export type ParallelLoadRoundExtraTxs = (args: {
+  lane: LaneRuntime;
+  identity: LoadIdentity;
+  round: number;
+}) => readonly EntityTx[];
 
 export const buildLaneRoundOfferInputs = (
   identities: readonly LoadIdentity[],
@@ -148,6 +155,16 @@ export const prepareParallelSameLoad = async (options: {
   };
 };
 
+const withRoundExtraTxs = (
+  inputs: RuntimeInput['entityInputs'],
+  extra: readonly EntityTx[],
+): RuntimeInput['entityInputs'] => {
+  if (extra.length === 0) return inputs;
+  const input = inputs[0];
+  if (!input || inputs.length !== 1) throw new Error('PRODUCTION_SWAP_LOAD_ROUND_INPUT_CARDINALITY');
+  return [{ ...input, entityTxs: [...input.entityTxs, ...extra] }];
+};
+
 export const submitPreparedParallelSameLoad = async (options: {
   hub: ConnectedRuntime;
   hubIdentity: LoadIdentity;
@@ -157,6 +174,7 @@ export const submitPreparedParallelSameLoad = async (options: {
   rounds: number;
   cadenceMs: number;
   prepared: PreparedParallelSameLoad;
+  extraEntityTxs?: ParallelLoadRoundExtraTxs;
 }): Promise<ParallelLaneSubmission> => {
   const startedAt = performance.now();
   let enqueueAckElapsedMs = 0;
@@ -204,14 +222,26 @@ export const submitPreparedParallelSameLoad = async (options: {
     // Every user submits from its own Runtime process concurrently; the round
     // is observed when the slowest user Runtime has committed its own frame.
     const laneInputs = [
-      ...options.prepared.makerRuntimes.map((lane, index) => ({
-        lane,
-        inputs: buildLaneRoundOfferInputs([options.prepared.makerIdentities[index]!], [options.prepared.makerPlans[index]!], round, Math.min(offersPerRound, options.rounds - round)),
-      })),
-      ...options.prepared.takerRuntimes.map((lane, index) => ({
-        lane,
-        inputs: buildLaneRoundOfferInputs([options.prepared.takerIdentities[index]!], [options.prepared.takerPlans[index]!], round, Math.min(offersPerRound, options.rounds - round)),
-      })),
+      ...options.prepared.makerRuntimes.map((lane, index) => {
+        const identity = options.prepared.makerIdentities[index]!;
+        return {
+          lane,
+          inputs: withRoundExtraTxs(
+            buildLaneRoundOfferInputs([identity], [options.prepared.makerPlans[index]!], round, Math.min(offersPerRound, options.rounds - round)),
+            options.extraEntityTxs?.({ lane, identity, round }) ?? [],
+          ),
+        };
+      }),
+      ...options.prepared.takerRuntimes.map((lane, index) => {
+        const identity = options.prepared.takerIdentities[index]!;
+        return {
+          lane,
+          inputs: withRoundExtraTxs(
+            buildLaneRoundOfferInputs([identity], [options.prepared.takerPlans[index]!], round, Math.min(offersPerRound, options.rounds - round)),
+            options.extraEntityTxs?.({ lane, identity, round }) ?? [],
+          ),
+        };
+      }),
     ];
     const observed = await Promise.all(laneInputs.map(({ lane, inputs }) =>
       sendObserved(lane.runtime, `prod-load-round-${options.initialFrame.height}-${round + 1}-${lane.laneKey}`, {

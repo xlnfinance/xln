@@ -302,6 +302,15 @@ describe('production swap load evidence', () => {
     expect(new Set(round.map(input => input.entityTxs[0]!.data.offerId)).size).toBe(3);
   });
 
+  test('same-j submitter can fold extra EntityTxs into the round command', () => {
+    const source = readFileSync(new URL(
+      '../../../scripts/operations/hlt/workload/worker-same-lanes.ts',
+      import.meta.url,
+    ), 'utf8');
+    expect(source).toContain('extraEntityTxs');
+    expect(source).toContain('withRoundExtraTxs');
+  });
+
   test('hub identity selector excludes cohosted secondary and remote gossip hubs', () => {
     const localRuntimeId = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     const entity = (entityId: string, runtimeId: string, chainId: number, signerId?: string) => ({
