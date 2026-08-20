@@ -366,6 +366,7 @@ const buildEntityProposal = async (
     entityContext,
     txs,
     env.state.timestamp,
+    !fitted.replayed,
   );
   profile.checkpoint('frameApply');
   if (!shouldKeepPreparedEntityFrame(selection, applied.accountsToProposeFramesCount)) {

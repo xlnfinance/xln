@@ -49,38 +49,8 @@ export type DecodedEntityInfraContext = EntityInfraContext & Readonly<{
   }>>;
 }>;
 
-// Process-local only: canonical/WAL encoders omit symbols. A context this
-// process just decoded is the same bytes the next same-tick parse would
-// rebuild; Hub frames were paying a full HTLC walk + clone at apply, WAL,
-// and the next validator. structuredClone drops the stamp, so replay and
-// network JSON still full-parse. Do not mutate a stamped object.
-const VALIDATED_ENTITY_INFRA_CONTEXT = Symbol('VALIDATED_ENTITY_INFRA_CONTEXT');
-
-const stampValidatedEntityInfraContext = (
-  context: DecodedEntityInfraContext,
-): DecodedEntityInfraContext => {
-  Object.defineProperty(context, VALIDATED_ENTITY_INFRA_CONTEXT, {
-    value: true,
-    enumerable: false,
-    writable: false,
-    configurable: false,
-  });
-  return context;
-};
-
-export const asValidatedEntityInfraContext = (
-  value: unknown,
-): DecodedEntityInfraContext | undefined => {
-  if (!value || typeof value !== 'object') return undefined;
-  return Reflect.get(value, VALIDATED_ENTITY_INFRA_CONTEXT) === true
-    ? value as DecodedEntityInfraContext
-    : undefined;
-};
-
 /** One strict parser shared by network frame, deterministic apply, and WAL boundaries. */
 export const validateEntityInfraContext = (value: unknown): DecodedEntityInfraContext => {
-  const trusted = asValidatedEntityInfraContext(value);
-  if (trusted) return trusted;
   const raw = exactKeys(value, [
     'version', 'proposerReplicaId', 'entityId', 'proposerSignerId', 'parentFrameHash',
     'height', 'gossipProfiles', 'peerAssertions', 'htlc',
@@ -154,7 +124,7 @@ export const validateEntityInfraContext = (value: unknown): DecodedEntityInfraCo
   if (bytes > LIMITS.MAX_FRAME_SIZE_BYTES) {
     throw new Error(`ENTITY_INFRA_CONTEXT_BYTE_LIMIT_EXCEEDED:${bytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}`);
   }
-  return stampValidatedEntityInfraContext(context);
+  return context;
 };
 
 /** Authenticate every committed Profile before any key/domain/capacity is trusted. */

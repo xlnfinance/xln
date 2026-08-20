@@ -1,10 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  asValidatedEntityInfraContext,
-  validateEntityInfraContext,
-} from '../../../entity/consensus/frame/infra-context-validation';
+import { validateEntityInfraContext } from '../../../entity/consensus/frame/infra-context-validation';
+import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
 
 const makeContext = (): EntityInfraContext => ({
@@ -20,27 +18,29 @@ const makeContext = (): EntityInfraContext => ({
 });
 
 describe('Entity infra context in-process validate-once', () => {
-  test('a stamped context is identity on the next parse; a clone is not', () => {
-    const first = validateEntityInfraContext(makeContext());
-    expect(asValidatedEntityInfraContext(first)).toBe(first);
-    expect(validateEntityInfraContext(first)).toBe(first);
-    const cloned = structuredClone(first);
-    expect(asValidatedEntityInfraContext(cloned)).toBeUndefined();
-    expect(validateEntityInfraContext(cloned)).not.toBe(cloned);
-    expect(validateEntityInfraContext(cloned)).not.toBe(first);
+  test('a decoded context has no symbol keys and hashes as Entity protocol bytes', () => {
+    const decoded = validateEntityInfraContext(makeContext());
+    expect(Object.getOwnPropertySymbols(decoded)).toEqual([]);
+    expect(() => encodeCanonicalConsensusValue(decoded)).not.toThrow();
   });
 
-  test('apply and WAL still call the parser; stamp makes live Hub re-walks free', () => {
+  test('live proposal skips the second parse; WAL/network still call it', () => {
     const application = readFileSync(
       join(import.meta.dir, '../../../entity/consensus/frame/application.ts'),
+      'utf8',
+    );
+    const start = readFileSync(
+      join(import.meta.dir, '../../../entity/consensus/proposal/start.ts'),
       'utf8',
     );
     const validation = readFileSync(
       join(import.meta.dir, '../../../entity/consensus/frame/infra-context-validation.ts'),
       'utf8',
     );
+    expect(application).toContain('if (!inProcessInfraValidated)');
     expect(application).toContain('entityContext = validateEntityInfraContext(entityContext)');
-    expect(validation).toContain('VALIDATED_ENTITY_INFRA_CONTEXT');
-    expect(validation).toContain('if (trusted) return trusted');
+    expect(start).toContain('env.state.timestamp,\n    !fitted.replayed');
+    expect(validation).not.toContain('VALIDATED_ENTITY_INFRA_CONTEXT');
+    expect(validation).not.toContain('Symbol(');
   });
 });
