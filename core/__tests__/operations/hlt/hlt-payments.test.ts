@@ -11,6 +11,7 @@ import {
 import { buildHltPlan } from '../../../scripts/operations/hlt/economy';
 import { decodeLoadPaymentReport } from '../../../scripts/operations/hlt/boundary/worker-payment-boundary';
 import { parseWorkerArgs } from '../../../scripts/operations/hlt/worker-runtime';
+import { raisedCreditLimit } from '../../../scripts/operations/hlt/lanes/worker-lanes';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -206,6 +207,18 @@ describe('hlt payment population', () => {
     expect(args.lanes).toBe(4);
     expect(args.plan?.offeredPaymentRatePerSecond).toBe(8);
     expect(args.plan?.offeredSwapRatePerSecond).toBe(8);
+  });
+
+  test('mixed payment credit raises quote limits and never lowers swap grants', () => {
+    expect(raisedCreditLimit(20_000_000n, 4_000n)).toBeNull();
+    expect(raisedCreditLimit(0n, 4_000n)).toBe(4_000n);
+    expect(raisedCreditLimit(1_000n, 4_000n)).toBe(4_000n);
+    const source = readFileSync(
+      join(import.meta.dir, '../../../scripts/operations/hlt/lanes/worker-lanes.ts'),
+      'utf8',
+    );
+    expect(source).toContain('raisedCreditLimit(peerCreditLimit, needed)');
+    expect(source).toContain('raisedCreditLimit(ownCreditLimit, needed)');
   });
 
   test('mixed worker folds payments into the same-j windowed submitter', () => {
