@@ -6,6 +6,7 @@
  */
 
 import { asFailFastPayload, failfastAssert } from '../p2p/failfast';
+import { HEAVY_LOGS } from '../../support/debug-flags';
 import { serializeWsMessage, type RuntimeWsMessage } from '../p2p/ws-protocol';
 import {
   type RelaySocketLike,
@@ -787,6 +788,9 @@ const deliverToLocalRuntime = async (
   if (!isApplicationMessage || !payload || !isLocalTarget) return 'unavailable';
   try {
     await config.localDeliver(from, msg);
+    if (HEAVY_LOGS) {
+      console.debug(`[RELAY-FORWARD] entity_inputs from=${String(from || '').slice(-8)} to=${String(to || '').slice(-8)}`);
+    }
     return 'delivered';
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
