@@ -26,9 +26,6 @@ import {
   normalizePrecommitBundles,
 } from '../leader/certificates';
 import { entityLog } from '../entity-log';
-// Perf diagnostics only: explains (input shape, mempool depth) at each proposal
-// so batching regressions are visible from one HLT run's log.
-const ENTITY_PROPOSAL_TRACE = nodeProcess?.env?.['XLN_ENTITY_PROPOSAL_TRACE'] === '1';
 import { ensureLocalJPrefixAttestation } from '../j-prefix/prefix-round';
 import { preauthenticateEntityProposal } from '../proposal/preauthentication';
 import { calculateQuorumPower } from '../replica-validation';
@@ -46,6 +43,10 @@ import {
 import { getEntityFrameConsensusConfig } from '../authority/board-handover';
 
 export type { EntityInputOutcome } from './types';
+
+// Perf diagnostics only: explains (input shape, mempool depth) at each proposal
+// so batching regressions are visible from one HLT run's log.
+const ENTITY_PROPOSAL_TRACE = nodeProcess?.env?.['XLN_ENTITY_PROPOSAL_TRACE'] === '1';
 
 async function handleCommitNotification(context: ApplyEntityInputContext): Promise<ApplyEntityInputResult | null> {
   const { entityInput, workingReplica } = context;
