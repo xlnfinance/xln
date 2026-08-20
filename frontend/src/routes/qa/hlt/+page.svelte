@@ -219,6 +219,7 @@
         <select bind:value={mode} data-testid="hlt-mode">
           <option value="payments">Payments</option>
           <option value="same">Same-J swaps</option>
+          <option value="mixed">Pay + swap</option>
           <option value="cross">Cross-J swaps</option>
         </select>
       </label>

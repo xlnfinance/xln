@@ -9,12 +9,14 @@
 import { parseWorkerArgs } from './worker-runtime';
 import { runSameProductionSwapLoad } from './workload/worker-same';
 import { runPaymentProductionLoad } from './workload/worker-payments';
+import { runMixedProductionLoad } from './workload/worker-mixed';
 import { runCrossProductionSwapLoad } from './cross/worker-cross';
 import { runCrossProductionRecovery } from './cross/worker-cross-recovery';
 
 const args = parseWorkerArgs(process.argv.slice(2));
 if (args.mode === 'same') await runSameProductionSwapLoad(args);
 else if (args.mode === 'payments') await runPaymentProductionLoad(args);
+else if (args.mode === 'mixed') await runMixedProductionLoad(args);
 else if (args.mode === 'cross') await runCrossProductionSwapLoad(args);
 else if (args.mode === 'cross-recovery') await runCrossProductionRecovery(args);
 else throw new Error(`PRODUCTION_SWAP_LOAD_MODE_NOT_IMPLEMENTED:${args.mode}`);

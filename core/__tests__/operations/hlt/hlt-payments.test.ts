@@ -3,9 +3,12 @@ import { describe, expect, test } from 'bun:test';
 import {
   paymentAmountFor,
   paymentReceiverIndex,
+  paymentReceiverIndexSamePopulation,
   paymentTotalForSender,
   paymentTotalsByReceiver,
+  paymentTotalsByReceiverSamePopulation,
 } from '../../../scripts/operations/hlt/workload/worker-payments-plan';
+import { buildHltPlan } from '../../../scripts/operations/hlt/economy';
 import { decodeLoadPaymentReport } from '../../../scripts/operations/hlt/boundary/worker-payment-boundary';
 import { parseWorkerArgs } from '../../../scripts/operations/hlt/worker-runtime';
 import { readFileSync } from 'node:fs';
@@ -110,6 +113,99 @@ describe('hlt payment population', () => {
       '--users', '8',
       '--mix', '1:0',
     ])).toThrow('HLT_MODE_POPULATION_EMPTY:payments');
+  });
+
+  test('same-population pairing is a derangement bijection each round', () => {
+    for (const users of [2, 8, 64, 1000]) {
+      for (const round of [0, 1, 7, users, users + 3]) {
+        const paired = Array.from({ length: users }, (_, sender) =>
+          paymentReceiverIndexSamePopulation(sender, round, users));
+        expect(new Set(paired).size).toBe(users);
+        expect(paired.every((receiver, sender) => receiver !== sender)).toBe(true);
+      }
+    }
+  });
+
+  test('same-population receiver totals match the derangement, not the disjoint permutation', () => {
+    const users = 8;
+    const rounds = 5;
+    const range = { min: 50n, max: 500n };
+    const totals = paymentTotalsByReceiverSamePopulation(users, rounds, range);
+    expect(totals).not.toEqual(paymentTotalsByReceiver(users, users, rounds, range));
+    expect(totals.reduce((sum, total) => sum + total, 0n))
+      .toBe(Array.from({ length: users }, (_, sender) => paymentTotalForSender(sender, rounds, range))
+        .reduce((sum, total) => sum + total, 0n));
+  });
+
+  test('mix 1:1 on 1000 users offers 1000 payments/s and 1000 swaps/s', () => {
+    const plan = buildHltPlan({
+      users: 1000,
+      ratePerUserPerSecond: 1,
+      durationSeconds: 1,
+      mix: { swap: 1, payment: 1 },
+      baseTokenId: 2,
+      quoteTokenId: 1,
+      hubLabels: ['H1'],
+      marketMakerLabels: ['MM'],
+    });
+    expect(plan.totalUserRuntimes).toBe(1000);
+    expect(plan.swapLanes).toBe(500);
+    expect(plan.paymentLanes).toBe(1000);
+    expect(plan.swapMatchesPerLaneRound).toBe(2);
+    expect(plan.offeredPaymentRatePerSecond).toBe(1000);
+    expect(plan.offeredSwapRatePerSecond).toBe(1000);
+  });
+
+  test('payments-only mix still partitions; swap-only does not invent payments', () => {
+    const payments = buildHltPlan({
+      users: 8,
+      ratePerUserPerSecond: 1,
+      durationSeconds: 1,
+      mix: { swap: 0, payment: 1 },
+      baseTokenId: 2,
+      quoteTokenId: 1,
+      hubLabels: ['H1'],
+      marketMakerLabels: ['MM'],
+    });
+    expect(payments.paymentLanes).toBe(4);
+    expect(payments.offeredPaymentRatePerSecond).toBe(4);
+    expect(payments.offeredSwapRatePerSecond).toBe(0);
+    const swaps = buildHltPlan({
+      users: 8,
+      ratePerUserPerSecond: 1,
+      durationSeconds: 1,
+      mix: { swap: 1, payment: 0 },
+      baseTokenId: 2,
+      quoteTokenId: 1,
+      hubLabels: ['H1'],
+      marketMakerLabels: ['MM'],
+    });
+    expect(swaps.swapLanes).toBe(4);
+    expect(swaps.swapMatchesPerLaneRound).toBe(1);
+    expect(swaps.offeredSwapRatePerSecond).toBe(4);
+    expect(swaps.offeredPaymentRatePerSecond).toBe(0);
+  });
+
+  test('mixed mode requires both mix weights', () => {
+    expect(() => parseWorkerArgs([
+      '--work-dir', '/tmp/xln-load',
+      '--port-base', '20000',
+      '--mode', 'mixed',
+      '--users', '8',
+      '--mix', '1:0',
+    ])).toThrow('HLT_MIXED_REQUIRES_BOTH_WORKLOADS');
+    const args = parseWorkerArgs([
+      '--work-dir', '/tmp/xln-load',
+      '--port-base', '20000',
+      '--mode', 'mixed',
+      '--users', '8',
+      '--rate-per-user', '1',
+      '--duration-s', '1',
+      '--mix', '1:1',
+    ]);
+    expect(args.lanes).toBe(4);
+    expect(args.plan?.offeredPaymentRatePerSecond).toBe(8);
+    expect(args.plan?.offeredSwapRatePerSecond).toBe(8);
   });
 });
 

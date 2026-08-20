@@ -269,7 +269,7 @@ const runProductionSwapWorker = (
     repoRoot,
     'core/scripts/operations/hlt/hlt.ts',
   );
-  const economy = mode === 'same' || mode === 'payments' ? hltEconomyArgs() : [];
+  const economy = mode === 'same' || mode === 'payments' || mode === 'mixed' ? hltEconomyArgs() : [];
   const result = spawnSync(process.execPath, [
     worker,
     '--work-dir', workDir,
@@ -299,7 +299,7 @@ const runProductionSwapLoadSmoke = async (): Promise<void> => {
   const rounds = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_ROUNDS'] || '1';
   const cadenceMs = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_CADENCE_MS'] || '1000';
   const mode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || 'same';
-  if (mode !== 'same' && mode !== 'cross' && mode !== 'payments') {
+  if (mode !== 'same' && mode !== 'cross' && mode !== 'payments' && mode !== 'mixed') {
     throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_MODE_INVALID:${mode}`);
   }
   const scheduleRaw = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SCHEDULE'];

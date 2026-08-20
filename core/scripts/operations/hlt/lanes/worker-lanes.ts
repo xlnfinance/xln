@@ -342,3 +342,70 @@ const provisionLoadLanes = async (
     runtimes,
   };
 };
+
+/** Additive QUOTE credit on already-opened Hub Accounts, both directions. */
+export const grantBilateralTokenCredit = async (options: {
+  hub: ConnectedRuntime;
+  hubIdentity: LoadIdentity;
+  runtimes: readonly LaneRuntime[];
+  tokenId: number;
+  amounts: readonly bigint[];
+  label: string;
+}): Promise<void> => {
+  if (options.amounts.length !== options.runtimes.length) {
+    throw new Error('HLT_BILATERAL_CREDIT_CARDINALITY_INVALID');
+  }
+  await runInBatches(options.runtimes, async (lane, index) => {
+    await sendObserved(lane.runtime, `${options.label}-user-${lane.laneKey}`, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: lane.identity.entityId,
+        signerId: lane.identity.signerId,
+        entityTxs: [{
+          type: 'extendCredit',
+          data: {
+            counterpartyEntityId: options.hubIdentity.entityId,
+            tokenId: options.tokenId,
+            amount: options.amounts[index]!,
+          },
+        }],
+      }],
+    });
+  });
+  await runInBatches(options.runtimes, (lane, index) => waitForCounterpartyCredit(
+    lane.runtime,
+    lane.identity.entityId,
+    options.hubIdentity.entityId,
+    options.tokenId,
+    options.amounts[index]!,
+  ));
+  const hubBatches = partitionLoadProvisioningBatches(options.runtimes);
+  let laneOffset = 0;
+  for (let batchIndex = 0; batchIndex < hubBatches.length; batchIndex += 1) {
+    const batch = hubBatches[batchIndex]!;
+    const hubCredits = options.amounts.slice(laneOffset, laneOffset + batch.length);
+    await sendObserved(options.hub, `${options.label}-hub-${batchIndex + 1}`, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: options.hubIdentity.entityId,
+        signerId: options.hubIdentity.signerId,
+        entityTxs: batch.map((lane, index) => ({
+          type: 'extendCredit' as const,
+          data: {
+            counterpartyEntityId: lane.identity.entityId,
+            tokenId: options.tokenId,
+            amount: hubCredits[index]!,
+          },
+        })),
+      }],
+    });
+    await runInBatches(batch, (lane, index) => waitForCredit(
+      lane.runtime,
+      lane.identity.entityId,
+      options.hubIdentity.entityId,
+      options.tokenId,
+      hubCredits[index]!,
+    ));
+    laneOffset += batch.length;
+  }
+};

@@ -48,7 +48,7 @@ import {
 } from './worker-payments-plan';
 
 /** Payments move the quote token; the swap workload owns the base token. */
-const PAYMENT_TOKEN_ID = 1;
+export const PAYMENT_TOKEN_ID = 1;
 /**
  * Routing fees are quoted from live gossip at admission time, so the sender
  * declares a ceiling rather than the exact debit. Two times the amount covers
@@ -56,7 +56,7 @@ const PAYMENT_TOKEN_ID = 1;
  */
 const MAX_SENDER_DEBIT_MULTIPLE = 2n;
 /** Credit headroom over the exact total, so a fee cannot starve the last round. */
-const CREDIT_HEADROOM_MULTIPLE = 4n;
+export const CREDIT_HEADROOM_MULTIPLE = 4n;
 const DELIVERY_POLL_MS = 250;
 const DELIVERY_TIMEOUT_MS = 600_000;
 /**
@@ -115,7 +115,7 @@ const forEachLimited = async <T>(items: readonly T[], fn: (item: T) => Promise<v
   await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, items.length) }, worker));
 };
 
-const waitForRoutableReceivers = async (
+export const waitForRoutableReceivers = async (
   senders: readonly LaneRuntime[],
   hubEntityId: string,
   receiverIds: readonly string[],
@@ -159,7 +159,7 @@ const waitForRoutableReceivers = async (
   }
 };
 
-const buildRoundPayment = (
+export const buildRoundPayment = (
   sender: LoadIdentity,
   hubEntityId: string,
   receiver: LoadIdentity,
@@ -243,7 +243,7 @@ const readHubAccounts = async (
   }
 };
 
-const readHubReceiverCredits = async (
+export const readHubReceiverCredits = async (
   hub: { adapter: { read: <T>(path: string, query?: Record<string, unknown>) => Promise<T> } },
   hubEntityId: string,
   receiverIds: ReadonlySet<string>,
@@ -261,7 +261,7 @@ const readHubReceiverCredits = async (
  * Delivery is authorized by the Hub entity: lockBook empty and receiver-side
  * inCapacity (Hub view = receiver outCapacity) reached the owed totals.
  */
-const waitForHubSettlement = async (
+export const waitForHubSettlement = async (
   hub: { adapter: { read: <T>(path: string, query?: Record<string, unknown>) => Promise<T> } },
   hubEntityId: string,
   receiverIds: readonly string[],
