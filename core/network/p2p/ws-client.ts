@@ -754,6 +754,22 @@ export class RuntimeWsClient {
   }
 
   private async handleApplicationMessage(msg: RuntimeWsMessage): Promise<boolean> {
+    // A relay answers `entity_inputs` delivery ASYNCHRONOUSLY: sendRaw already
+    // returned true when the bytes hit our socket, so this error is the only
+    // witness that the envelope never reached the target runtime. Swallowing
+    // it made cross-relay sends (target not a client of this relay) vanish
+    // with no retry — the exact loss behind stuck bilateral ACKs.
+    if (msg.type === 'error' && typeof msg.inReplyTo === 'string') {
+      const reason = typeof msg.error === 'string' ? msg.error : String(msg.error ?? 'unknown');
+      this.sendDebugEvent({
+        level: 'error',
+        code: 'P2P_RELAY_SEND_REJECTED',
+        message: reason,
+        inReplyTo: msg.inReplyTo,
+      });
+      this.options.onError?.(new Error(`P2P_RELAY_SEND_REJECTED: ${reason}`));
+      return true;
+    }
     if (msg.type === 'gossip_request' && msg.payload && msg.from) {
       await this.options.onGossipRequest?.(msg.from, msg.payload);
       return true;

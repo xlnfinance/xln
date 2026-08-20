@@ -526,6 +526,16 @@ export class RuntimeP2P {
         },
         onError: error => {
           reportRelayClientError(this.env, url, error);
+          // An async relay rejection means an envelope this runtime already
+          // handed off was dropped: the target is not reachable through THIS
+          // relay. Without transport recovery the 8s bilateral resend keeps
+          // hitting the same dead path forever (stuck pending frames). Re-
+          // resolve the world: fresh gossip for direct endpoints, then a
+          // clean reconnect cycle.
+          if (error.message.startsWith('P2P_RELAY_SEND_REJECTED')) {
+            this.refreshGossip();
+            this.reconnect();
+          }
         },
         maxReconnectAttempts: 0,
       });
