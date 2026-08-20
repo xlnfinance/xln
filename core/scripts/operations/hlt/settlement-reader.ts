@@ -279,6 +279,50 @@ const readLoadLite = async (
   };
 };
 
+
+/**
+ * Timeout post-mortem per the drain playbook: for each stuck Hub pair, read
+ * the USER-side replica of that bilateral account and print the height diff
+ * (hub pending height vs user current/pending/ack heights). This names the
+ * side that dropped the ball instead of guessing "resend is broken".
+ */
+const dumpStuckCounterpartyState = async (
+  load: readonly LoadRuntimeGroup[],
+  sample: readonly Readonly<{ entityId: string; counterpartyEntityId: string; height: number }>[],
+): Promise<void> => {
+  for (const entry of sample.slice(0, 4)) {
+    const group = load.find(candidate =>
+      candidate.pairs.some(pair => pair.loadEntityId === entry.counterpartyEntityId));
+    if (!group) {
+      console.error(JSON.stringify({ stuckDump: 'lane-not-found', counterparty: entry.counterpartyEntityId.slice(-8), hubPendingHeight: entry.height }));
+      continue;
+    }
+    try {
+      const page = await group.runtime.adapter.read<unknown>(
+        `entity/${entry.counterpartyEntityId}/accounts`,
+        { accountId: entry.entityId, accountsLimit: 1 },
+      );
+      const account = (page as { items?: unknown[] })['items']?.[0] as
+        | { currentHeight?: number; pendingFrame?: { height?: number }; lastOutboundFrameAck?: { height?: number } }
+        | undefined;
+      console.error(JSON.stringify({
+        stuckDump: 'counterparty-view',
+        counterparty: entry.counterpartyEntityId.slice(-8),
+        hubPendingHeight: entry.height,
+        userCurrentHeight: account?.['currentHeight'] ?? null,
+        userPendingHeight: account?.['pendingFrame']?.['height'] ?? null,
+        userLastAckHeight: account?.['lastOutboundFrameAck']?.['height'] ?? null,
+      }));
+    } catch (error) {
+      console.error(JSON.stringify({
+        stuckDump: 'counterparty-read-failed',
+        counterparty: entry.counterpartyEntityId.slice(-8),
+        error: error instanceof Error ? error.message.slice(0, 120) : String(error),
+      }));
+    }
+  }
+};
+
 const queuesBusy = (response: SettlementEvidenceResponse): boolean =>
   Object.values(response.queues).some(queue => queue.count > 0);
 
@@ -304,6 +348,7 @@ export const waitForFullySettledEvidence = async (options: {
     accounts: [],
   };
   let lastProgressAt = 0;
+  let hubLiteLastSample: SettlementEvidenceResponse['pendingAccountSample'] = [];
   while (performance.now() <= deadline) {
     const [hubLite, loadLite, marketMakerLite] = await Promise.all([
       readEvidence(options.hub, hubLiteRequest),
@@ -328,6 +373,7 @@ export const waitForFullySettledEvidence = async (options: {
       continue;
     }
     if (queuesBusy(hubLite) || queuesBusy(loadLite) || queuesBusy(marketMakerLite)) {
+      hubLiteLastSample = hubLite.pendingAccountSample;
       const now = performance.now();
       if (now - lastProgressAt >= 10_000 || now + pollMs > deadline) {
         console.error('[load] settlement queues busy', JSON.stringify({
@@ -424,5 +470,6 @@ export const waitForFullySettledEvidence = async (options: {
     }
     await sleep(pollMs);
   }
+  await dumpStuckCounterpartyState(options.load, hubLiteLastSample);
   throw new Error('PRODUCTION_SWAP_SETTLEMENT_TIMEOUT');
 };
