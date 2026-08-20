@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   collectRuntimeEntityContext,
   describeEntityInputCommitShape,
@@ -100,5 +102,11 @@ describe('Runtime Entity context collection', () => {
   test('rejects an input/context Entity binding mismatch', () => {
     expect(() => collectRuntimeEntityContext(new Map(), `0x${'bb'.repeat(32)}`, `0x${'bb'.repeat(32)}:signer-b`, makeContext()))
       .toThrow('RUNTIME_ENTITY_CONTEXT_REPLICA_BINDING_INVALID');
+  });
+
+  test('Runtime intake does not re-clone already-snapshotted entityContexts', () => {
+    const source = readFileSync(join(import.meta.dir, '../../../runtime/frame/intake/reducer.ts'), 'utf8');
+    expect(source).toContain('entityContexts: new Map(batch.entityContexts)');
+    expect(source).not.toContain('structuredClone(context)');
   });
 });

@@ -48,7 +48,7 @@ import {
 } from './worker-payments-plan';
 
 /** Payments move the quote token; the swap workload owns the base token. */
-const PAYMENT_TOKEN_ID = 1;
+export const PAYMENT_TOKEN_ID = 1;
 /**
  * Routing fees are quoted from live gossip at admission time, so the sender
  * declares a ceiling rather than the exact debit. Two times the amount covers
@@ -56,7 +56,7 @@ const PAYMENT_TOKEN_ID = 1;
  */
 const MAX_SENDER_DEBIT_MULTIPLE = 2n;
 /** Credit headroom over the exact total, so a fee cannot starve the last round. */
-const CREDIT_HEADROOM_MULTIPLE = 4n;
+export const CREDIT_HEADROOM_MULTIPLE = 4n;
 const DELIVERY_POLL_MS = 250;
 const DELIVERY_TIMEOUT_MS = 600_000;
 /**
@@ -102,6 +102,8 @@ const withReadTimeout = <T>(promise: Promise<T>, timeoutMs: number, label: strin
  */
 // Bounded fan-out for the polling readers: 250 concurrent reads at three
 // daemons overflow a daemon's accept queue while it is inside a long frame.
+// Cap is process-global, not per daemon: 1000 users at 2/runtime is 500
+// daemons × 16 = 8000 sockets and FailedToOpenSocket on localhost.
 const READ_CONCURRENCY = 16;
 const forEachLimited = async <T>(items: readonly T[], fn: (item: T) => Promise<void>): Promise<void> => {
   let cursor = 0;
@@ -115,7 +117,16 @@ const forEachLimited = async <T>(items: readonly T[], fn: (item: T) => Promise<v
   await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, items.length) }, worker));
 };
 
-const waitForRoutableReceivers = async (
+const isTransientGossipSocketError = (error: unknown): boolean => {
+  const text = error instanceof Error ? error.message : String(error);
+  return text.includes('FailedToOpenSocket')
+    || text.includes('typo in the url')
+    || text.includes('ECONNRESET')
+    || text.includes('ECONNREFUSED')
+    || text.includes('GOSSIP_PROFILE_LOOKUP_RATE_LIMITED');
+};
+
+export const waitForRoutableReceivers = async (
   senders: readonly LaneRuntime[],
   hubEntityId: string,
   receiverIds: readonly string[],
@@ -123,23 +134,29 @@ const waitForRoutableReceivers = async (
   const startedAt = Date.now();
   const deadline = startedAt + ROUTE_BARRIER_TIMEOUT_MS;
   const hubId = hubEntityId.toLowerCase();
-  // Gossip is per daemon, not per hosted user: asking every sender about every
-  // receiver was senders x receivers requests (62 500 at 500 users) fired
-  // concurrently at three daemons, which overflowed their accept queues
-  // (FailedToOpenSocket) while a daemon sat in a long frame. One sequential
-  // chain per daemon asks each receiver once.
+  // Gossip is per daemon, not per hosted user. Each daemon must see every
+  // receiver Profile before that daemon's senders pay. Reads are a global
+  // 16-wide queue so 500 daemons cannot open 8000 sockets at once.
   const daemons = laneDaemons(senders);
   const confirmed = daemons.map(() => new Set<string>());
   let lastPending = -1;
   for (;;) {
-    await Promise.all(daemons.map(async (lane, index) => {
-      const settled = confirmed[index]!;
-      const pendingIds = receiverIds.filter(id => !settled.has(id));
-      await forEachLimited(pendingIds, async receiverId => {
-        const receiverAccounts = await lane.control.gossipProfileCounterparties(receiverId);
-        if (receiverAccounts?.includes(hubId)) settled.add(receiverId);
-      });
-    }));
+    const pendingReads: Array<{ daemonIndex: number; receiverId: string }> = [];
+    for (const [daemonIndex, settled] of confirmed.entries()) {
+      for (const receiverId of receiverIds) {
+        if (!settled.has(receiverId)) pendingReads.push({ daemonIndex, receiverId });
+      }
+    }
+    let socketErrors = 0;
+    await forEachLimited(pendingReads, async ({ daemonIndex, receiverId }) => {
+      try {
+        const receiverAccounts = await daemons[daemonIndex]!.control.gossipProfileCounterparties(receiverId);
+        if (receiverAccounts?.includes(hubId)) confirmed[daemonIndex]!.add(receiverId);
+      } catch (error) {
+        if (!isTransientGossipSocketError(error)) throw error;
+        socketErrors += 1;
+      }
+    });
     const pending = confirmed.reduce(
       (total, settled) => total + (receiverIds.length - settled.size),
       0,
@@ -148,8 +165,8 @@ const waitForRoutableReceivers = async (
       console.log(`[load] payment routes ready senders=${senders.length} daemons=${daemons.length} elapsedMs=${Date.now() - startedAt}`);
       return;
     }
-    if (pending !== lastPending) {
-      console.log(`[load] payment routes pending=${pending} elapsedMs=${Date.now() - startedAt}`);
+    if (pending !== lastPending || socketErrors > 0) {
+      console.log(`[load] payment routes pending=${pending} sockets=${socketErrors} elapsedMs=${Date.now() - startedAt}`);
       lastPending = pending;
     }
     if (Date.now() >= deadline) {
@@ -159,7 +176,7 @@ const waitForRoutableReceivers = async (
   }
 };
 
-const buildRoundPayment = (
+export const buildRoundPayment = (
   sender: LoadIdentity,
   hubEntityId: string,
   receiver: LoadIdentity,
@@ -209,11 +226,17 @@ const hubInCapacity = (account: LoadAccountProjection, hubEntityId: string): big
 // poll, compounding under any write-side contention. Start at 80 (cuts
 // round-trips ~6x over the old default) and halve on overflow, same idiom as
 // wire-budget.ts's materializeOrHalve, instead of guessing a single constant.
+// Mixed 100u measured 3 fat Hub accounts at 727KB items / 1.12MB wire — floor 4
+// still overflows. One account (~240KB) fits; the client error is
+// "runtime adapter response too large", not RADAPTER_MESSAGE_TOO_LARGE.
 const HUB_ACCOUNTS_PAGE_LIMIT_START = 80;
-const HUB_ACCOUNTS_PAGE_LIMIT_FLOOR = 4;
+const HUB_ACCOUNTS_PAGE_LIMIT_FLOOR = 1;
 
-const isMessageTooLarge = (error: unknown): boolean =>
-  error instanceof Error && error.message.includes('RADAPTER_MESSAGE_TOO_LARGE');
+const isMessageTooLarge = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('RADAPTER_MESSAGE_TOO_LARGE')
+    || message.includes('runtime adapter response too large');
+};
 
 const readHubAccounts = async (
   hub: { adapter: { read: <T>(path: string, query?: Record<string, unknown>) => Promise<T> } },
@@ -243,7 +266,7 @@ const readHubAccounts = async (
   }
 };
 
-const readHubReceiverCredits = async (
+export const readHubReceiverCredits = async (
   hub: { adapter: { read: <T>(path: string, query?: Record<string, unknown>) => Promise<T> } },
   hubEntityId: string,
   receiverIds: ReadonlySet<string>,
@@ -261,12 +284,13 @@ const readHubReceiverCredits = async (
  * Delivery is authorized by the Hub entity: lockBook empty and receiver-side
  * inCapacity (Hub view = receiver outCapacity) reached the owed totals.
  */
-const waitForHubSettlement = async (
+export const waitForHubSettlement = async (
   hub: { adapter: { read: <T>(path: string, query?: Record<string, unknown>) => Promise<T> } },
   hubEntityId: string,
   receiverIds: readonly string[],
   baselines: ReadonlyMap<string, bigint>,
   expected: ReadonlyMap<string, bigint>,
+  requireQuoteDelta = true,
 ): Promise<void> => {
   const startedAt = Date.now();
   const deadline = startedAt + DELIVERY_TIMEOUT_MS;
@@ -274,27 +298,39 @@ const waitForHubSettlement = async (
   const owed = [...expected.values()].reduce((total, amount) => total + amount, 0n);
   let reportedAtMs = 0;
   let lastCredited = -1n;
+  let lastLockBook = -1;
   let stalledSinceMs = startedAt;
   while (Date.now() < deadline) {
     const core = decodeHubSettlementCounters(
       await withReadTimeout(readWithRateLimitRetry<unknown>(hub, `entity/${hubEntityId}`), DELIVERY_MAX_STALL_MS, 'entity'),
     );
-    const credits = await withReadTimeout(
-      readHubReceiverCredits(hub, hubEntityId, receivers),
-      DELIVERY_MAX_STALL_MS,
-      'receiverCredits',
-    );
+    // Mixed swaps also move quote, so Hub inCapacity cannot authorize delivery.
+    // Skip the fat /accounts dump (100u mixed: 3 accounts already exceeded 1MB).
+    const credits = requireQuoteDelta
+      ? await withReadTimeout(
+        readHubReceiverCredits(hub, hubEntityId, receivers),
+        DELIVERY_MAX_STALL_MS,
+        'receiverCredits',
+      )
+      : new Map<string, bigint>();
     let credited = 0n;
     let pendingReceivers = 0;
-    for (const [receiverId, amount] of expected) {
-      const received = (credits.get(receiverId) ?? 0n) - (baselines.get(receiverId) ?? 0n);
-      credited += received > 0n ? received : 0n;
-      if (received < amount) pendingReceivers += 1;
+    if (requireQuoteDelta) {
+      for (const [receiverId, amount] of expected) {
+        const received = (credits.get(receiverId) ?? 0n) - (baselines.get(receiverId) ?? 0n);
+        credited += received > 0n ? received : 0n;
+        if (received < amount) pendingReceivers += 1;
+      }
     }
-    if (pendingReceivers === 0 && core.lockBookOpen === 0) return;
+    if (core.lockBookOpen === 0 && (pendingReceivers === 0 || !requireQuoteDelta)) return;
     const elapsedMs = Date.now() - startedAt;
-    if (credited !== lastCredited) {
-      lastCredited = credited;
+    if (requireQuoteDelta) {
+      if (credited !== lastCredited) {
+        lastCredited = credited;
+        stalledSinceMs = Date.now();
+      }
+    } else if (core.lockBookOpen !== lastLockBook) {
+      lastLockBook = core.lockBookOpen;
       stalledSinceMs = Date.now();
     }
     const stalledMs = Date.now() - stalledSinceMs;

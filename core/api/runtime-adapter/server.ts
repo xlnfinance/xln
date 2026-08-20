@@ -407,8 +407,10 @@ const sendResponse = (
         inReplyTo: response.inReplyTo,
         reason: errorMessage(error),
       });
+      ws.close?.(1009, 'runtime adapter response too large');
     }
-    ws.close?.(1009, 'runtime adapter response too large');
+    // Keep the socket. A too-large *payload* is a request error; the client
+    // must be able to retry a smaller page. Close only when even the cap fails.
     return;
   }
   sendRuntimeAdapterEncoded(ws, encoded);

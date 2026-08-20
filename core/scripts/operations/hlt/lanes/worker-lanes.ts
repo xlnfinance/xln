@@ -10,10 +10,12 @@ import {
 } from '../../../../orchestrator/daemon-control';
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
 import { laneDaemons, spawnLaneRuntimes, stopLaneRuntimes, type LaneRuntime } from './lane-runtimes';
+import { deriveDelta, isLeftEntity } from '../../../../account/utils';
 import { importEntity } from '../../../../runtime/registration/entity-creation';
 import type { RuntimeInput } from '../../../../runtime/types';
 import { decodeEntitySummaries, type LoadIdentity } from '../boundary/worker-boundary';
 import {
+  readLoadAccount,
   sendObserved,
   waitForCounterpartyCredit,
   waitForCredit,
@@ -341,4 +343,119 @@ const provisionLoadLanes = async (
     identities: identities.map(identity => ({ entityId: identity.entityId, signerId: identity.signerId })),
     runtimes,
   };
+};
+
+/**
+ * Additive credit on already-opened Hub Accounts, both directions.
+ * `extendCredit` writes `set_credit_limit` as an absolute assignment, not a
+ * delta. A later payment grant on the swap quote token must not lower the
+ * swap quote window or every taker bid is rejected and mixed HLT matches 0.
+ * Mixed payments also spend that quote, so the payment extra is summed onto
+ * the live swap window (`additive: true`) — 100c died 2000 short of a 10M fill.
+ */
+export const raisedCreditLimit = (current: bigint, needed: bigint): bigint | null =>
+  current >= needed ? null : needed;
+
+export const additiveCreditTarget = (current: bigint, extra: bigint): bigint =>
+  current + extra;
+
+const replicaCreditLimits = async (
+  runtime: ConnectedRuntime,
+  ownerEntityId: string,
+  counterpartyEntityId: string,
+  tokenId: number,
+): Promise<{ ownCreditLimit: bigint; peerCreditLimit: bigint }> => {
+  const account = await readLoadAccount(runtime, ownerEntityId, counterpartyEntityId);
+  const delta = account?.state.deltas.get(tokenId);
+  if (!delta) return { ownCreditLimit: 0n, peerCreditLimit: 0n };
+  const derived = deriveDelta(delta, isLeftEntity(ownerEntityId, counterpartyEntityId));
+  return { ownCreditLimit: derived.ownCreditLimit, peerCreditLimit: derived.peerCreditLimit };
+};
+
+export const grantBilateralTokenCredit = async (options: {
+  hub: ConnectedRuntime;
+  hubIdentity: LoadIdentity;
+  runtimes: readonly LaneRuntime[];
+  tokenId: number;
+  amounts: readonly bigint[];
+  label: string;
+  additive?: boolean;
+}): Promise<void> => {
+  if (options.amounts.length !== options.runtimes.length) {
+    throw new Error('HLT_BILATERAL_CREDIT_CARDINALITY_INVALID');
+  }
+  const userTargets: bigint[] = [];
+  await runInBatches(options.runtimes, async (lane, index) => {
+    const extra = options.amounts[index]!;
+    const { peerCreditLimit } = await replicaCreditLimits(
+      lane.runtime,
+      lane.identity.entityId,
+      options.hubIdentity.entityId,
+      options.tokenId,
+    );
+    const target = options.additive ? additiveCreditTarget(peerCreditLimit, extra) : extra;
+    userTargets[index] = target;
+    const amount = raisedCreditLimit(peerCreditLimit, target);
+    if (amount === null) return;
+    await sendObserved(lane.runtime, `${options.label}-user-${lane.laneKey}`, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: lane.identity.entityId,
+        signerId: lane.identity.signerId,
+        entityTxs: [{
+          type: 'extendCredit',
+          data: {
+            counterpartyEntityId: options.hubIdentity.entityId,
+            tokenId: options.tokenId,
+            amount,
+          },
+        }],
+      }],
+    });
+  });
+  await runInBatches(options.runtimes, (lane, index) => waitForCounterpartyCredit(
+    lane.runtime,
+    lane.identity.entityId,
+    options.hubIdentity.entityId,
+    options.tokenId,
+    userTargets[index]!,
+  ));
+  const hubTargets = await Promise.all(options.runtimes.map(async (lane, index) => {
+    const extra = options.amounts[index]!;
+    const { ownCreditLimit } = await replicaCreditLimits(
+      lane.runtime,
+      lane.identity.entityId,
+      options.hubIdentity.entityId,
+      options.tokenId,
+    );
+    const target = options.additive ? additiveCreditTarget(ownCreditLimit, extra) : extra;
+    return { lane, amount: raisedCreditLimit(ownCreditLimit, target) };
+  }));
+  const hubGrants = hubTargets.filter((entry): entry is { lane: LaneRuntime; amount: bigint } => entry.amount !== null);
+  const hubBatches = partitionLoadProvisioningBatches(hubGrants);
+  for (let batchIndex = 0; batchIndex < hubBatches.length; batchIndex += 1) {
+    const batch = hubBatches[batchIndex]!;
+    await sendObserved(options.hub, `${options.label}-hub-${batchIndex + 1}`, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: options.hubIdentity.entityId,
+        signerId: options.hubIdentity.signerId,
+        entityTxs: batch.map(entry => ({
+          type: 'extendCredit' as const,
+          data: {
+            counterpartyEntityId: entry.lane.identity.entityId,
+            tokenId: options.tokenId,
+            amount: entry.amount,
+          },
+        })),
+      }],
+    });
+    await runInBatches(batch, entry => waitForCredit(
+      entry.lane.runtime,
+      entry.lane.identity.entityId,
+      options.hubIdentity.entityId,
+      options.tokenId,
+      entry.amount,
+    ));
+  }
 };

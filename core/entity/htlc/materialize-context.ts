@@ -7,6 +7,7 @@ import { preparedHtlcBindingKey, type HtlcPreparedInfraContext, type PreparedHtl
 import { computeHtlcEnvelopeContextHash } from '../../protocol/htlc/codec/envelope';
 import {
   assertEntityEncryptionKeypair,
+  assertOpaqueHtlcCiphertext,
   decryptOpaqueHtlcBytes,
   HtlcCiphertextAuthenticationError,
 } from '../../protocol/htlc/multi-recipient';
@@ -200,7 +201,15 @@ const materializeForwardOutcome = (
   ) return reject(binding, 'deadline_unsafe');
   return {
     binding,
-    outcome: { kind: 'forward', nextHopEntityId, forwardAmount, innerEnvelope: envelope.innerEnvelope },
+    outcome: {
+      kind: 'forward',
+      nextHopEntityId,
+      forwardAmount,
+      // Own a 2-key ciphertext object. The decrypt memo returns the onion
+      // layer; sharing that innerEnvelope across bindings is the same class
+      // of Bun structuredClone aliasing as a reused domain object.
+      innerEnvelope: assertOpaqueHtlcCiphertext(envelope.innerEnvelope),
+    },
   };
 };
 
@@ -247,10 +256,10 @@ const collectInboundEntries = (
  * different outcomes claimed for one lock, is a fault worth halting on.
  */
 const canonicalizeInboundEntries = (entries: PreparedHtlcEntry[]): PreparedHtlcEntry[] => {
-  entries.sort((left, right) =>
-    preparedHtlcBindingKey(left.binding).localeCompare(preparedHtlcBindingKey(right.binding)));
+  const decorated = entries.map(entry => ({ key: preparedHtlcBindingKey(entry.binding), entry }));
+  decorated.sort((left, right) => left.key.localeCompare(right.key));
   const canonical: PreparedHtlcEntry[] = [];
-  for (const entry of entries) {
+  for (const { entry } of decorated) {
     const previous = canonical[canonical.length - 1];
     if (
       previous === undefined ||

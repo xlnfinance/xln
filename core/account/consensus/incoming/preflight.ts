@@ -79,7 +79,7 @@ const handleStaleIncomingFrame = async (
   events: string[],
   committedFrames: AccountCommittedFrame[],
 ): Promise<HandleAccountInputResult | undefined> => {
-  if (Number(receivedFrame.height) > Number(account.currentHeight ?? 0)) {
+  if (Number(receivedFrame.height) >= Number(account.currentHeight ?? 0)) {
     return undefined;
   }
   const duplicateAck = await buildDuplicateCommittedFrameAck(
@@ -90,6 +90,13 @@ const handleStaleIncomingFrame = async (
     receivedFrame,
   );
   if (duplicateAck) return duplicateAck;
+  preflightLog.warn('frame.stale_ignored', {
+    receivedHeight: receivedFrame.height,
+    currentHeight: account.currentHeight ?? 0,
+    receivedHash: receivedFrame.stateHash ?? null,
+    currentHash: account.currentFrame?.stateHash ?? null,
+    from: shortId(input.fromEntityId),
+  });
   events.push(
     `ℹ️ Ignored stale frame ${String(receivedFrame.height)} ` + `(current=${String(account.currentHeight ?? 0)})`,
   );

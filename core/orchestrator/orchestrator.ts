@@ -1587,6 +1587,12 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...(process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS']
         ? { XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS: process.env['XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS'] }
         : {}),
+      ...(process.env['XLN_ACCOUNT_PENDING_RESEND_AFTER_MS']
+        ? { XLN_ACCOUNT_PENDING_RESEND_AFTER_MS: process.env['XLN_ACCOUNT_PENDING_RESEND_AFTER_MS'] }
+        : {}),
+      ...(process.env['XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP']
+        ? { XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP: process.env['XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP'] }
+        : {}),
       ...(process.env['XLN_LOG_FORMAT']
         ? { XLN_LOG_FORMAT: process.env['XLN_LOG_FORMAT'] }
         : {}),
@@ -1697,6 +1703,9 @@ const spawnMarketMaker = async (): Promise<void> => {
         process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] ??
         join(marketMakerChild.dbPath, 'bootstrap-events.jsonl'),
       XLN_LOG_LEVEL: process.env['XLN_MARKET_MAKER_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
+      ...(process.env['XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP']
+        ? { XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP: process.env['XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP'] }
+        : {}),
     }),
   });
   marketMakerChild.proc = proc;

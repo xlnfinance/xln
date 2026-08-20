@@ -302,6 +302,15 @@ describe('production swap load evidence', () => {
     expect(new Set(round.map(input => input.entityTxs[0]!.data.offerId)).size).toBe(3);
   });
 
+  test('same-j submitter can fold extra EntityTxs into the round command', () => {
+    const source = readFileSync(new URL(
+      '../../../scripts/operations/hlt/workload/worker-same-lanes.ts',
+      import.meta.url,
+    ), 'utf8');
+    expect(source).toContain('extraEntityTxs');
+    expect(source).toContain('withRoundExtraTxs');
+  });
+
   test('hub identity selector excludes cohosted secondary and remote gossip hubs', () => {
     const localRuntimeId = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     const entity = (entityId: string, runtimeId: string, chainId: number, signerId?: string) => ({
@@ -340,9 +349,9 @@ describe('production swap load evidence', () => {
         liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
       }],
       runtimes: [
-        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0 },
-        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0 },
-        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0 },
+        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
+        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
+        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
       ],
       bestBidPriceTicks: 24_999_000n,
       bestAskPriceTicks: 25_001_000n,
@@ -395,9 +404,9 @@ describe('production swap load evidence', () => {
         liveOfferIds: [], pendingFrame: false, pendingProposal: false, mempoolTxs: 0,
       }],
       runtimes: [
-        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0 },
-        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0 },
-        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0 },
+        { role: 'hub', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
+        { role: 'load', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
+        { role: 'market-maker', processing: 0, pendingOutputs: 0, pendingNetworkOutputs: 0, networkInbox: 0, runtimeEntityInputs: 0, runtimeTxs: 0, runtimeJInputs: 0, retryEntries: 0, pendingAccountFrames: 0 },
       ],
       bestBidPriceTicks: 10n, bestAskPriceTicks: 11n,
     };
@@ -435,6 +444,15 @@ describe('production swap load evidence', () => {
     expect(source).not.toContain('.adapter.read<');
     expect(source).not.toContain('decodeLoadBookPage');
     expect(source).toContain("type: 'settlement-evidence'");
+    expect(source).toContain('error.retryable');
+    expect(source).toContain('XLN_LOAD_TRADE_DRAIN_TIMEOUT_MS');
+    expect(source).toContain('LOAD_EVIDENCE_CONCURRENCY = 8');
+    expect(source).toContain('SETTLEMENT_POLL_WIDE_MS = 2_000');
+    expect(source).toContain('settlement evidence incomplete');
+    expect(source).toContain('pendingAccountFrames');
+    expect(source).toContain('pendingAccountSample');
+    expect(source).toContain('hubPendingSample');
+    expect(source).toContain('settlement queues busy');
   });
 
   test('book projection rejects malformed network pages without minting BookState', () => {

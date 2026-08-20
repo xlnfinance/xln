@@ -548,11 +548,22 @@ export const computeEntityAccountValueHash = (account: AccountReplica): string =
     'integrity',
   );
 
+// Same-height root memo. Proposal and WAL storage projection hash the same
+// committed object twice in one frame (~36k canonical encodes per 500-payment
+// HLT run). Keyed by height + accounts radix root so replacing the Account map
+// or folding a dirty leaf cannot return a stale parent hash. Non-enumerable so
+// `{...state}` test/shell copies cannot inherit a stale memo. Crontab lastRun
+// still happens inside frame apply before the first root of that height.
+const ENTITY_ROOT_MEMO = Symbol.for('xln.entity.state-root.memo');
+type EntityRootMemo = { height: number; accountsRoot: string; root: string };
+
 export const invalidateEntityAccountCommitment = (state: EntityState, counterpartyId: string): void => {
-  if (
-    !(state.accounts instanceof PersistentEntityAccountMap) &&
-    !(state.accounts instanceof EntityAccountCandidateMap)
-  ) {
+  delete (state as { [ENTITY_ROOT_MEMO]?: EntityRootMemo })[ENTITY_ROOT_MEMO];
+  if (state.accounts instanceof EntityAccountCandidateMap) {
+    state.accounts.dropCachedProjection();
+    return;
+  }
+  if (!(state.accounts instanceof PersistentEntityAccountMap)) {
     throw new Error(`ENTITY_ACCOUNT_MAP_NOT_PERSISTENT:${counterpartyId}`);
   }
 };
@@ -599,20 +610,10 @@ const computeEntityRootFromSections = (sections: readonly EntitySectionCommitmen
     }),
   );
 
-// Same-height root memo. The proposal path computes this root, then the WAL
-// storage projection recomputes it for every replica again in the same frame;
-// each pass re-encodes every committed section (~36k canonical encodes per
-// 500-payment HLT run, the single largest CPU item on the Hub). A committed
-// EntityState only changes through a frame (height advances) — the few
-// in-place envelope mutations (crontab lastRun) all happen inside frame apply,
-// before the first root computation of that height. Symbol-keyed so the cache
-// is invisible to every string-keyed projection allowlist.
-const ENTITY_ROOT_MEMO = Symbol.for('xln.entity.state-root.memo');
-type EntityRootMemo = { state: EntityState; height: number; root: string };
-
 export const computeCanonicalEntityConsensusStateHash = (state: EntityState): string => {
+  const accountsRoot = state.accounts.rootHash();
   const memo = (state as { [ENTITY_ROOT_MEMO]?: EntityRootMemo })[ENTITY_ROOT_MEMO];
-  if (memo && memo.state === state && memo.height === state.height) return memo.root;
+  if (memo && memo.height === state.height && memo.accountsRoot === accountsRoot) return memo.root;
   // Opt-in only: the audit recomputes the cold root and the byte breakdown
   // re-encodes the whole projection; either would distort a frame-level
   // process profile that enabled it implicitly.
@@ -625,8 +626,12 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
   const sectionsAt = getPerfMs();
   const root = computeEntityRootFromSections(sections);
   const endedAt = getPerfMs();
-  (state as { [ENTITY_ROOT_MEMO]?: EntityRootMemo })[ENTITY_ROOT_MEMO] =
-    { state, height: state.height, root };
+  Object.defineProperty(state, ENTITY_ROOT_MEMO, {
+    value: { height: state.height, accountsRoot, root },
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
   if (audit) {
     const cold = computeCanonicalEntityConsensusStateHashCold(state);
     if (root !== cold) throw new Error(`ENTITY_STATE_ROOT_CACHE_MISMATCH:incremental=${root}:cold=${cold}`);

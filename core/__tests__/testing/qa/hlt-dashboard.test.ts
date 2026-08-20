@@ -74,6 +74,24 @@ describe('hlt dashboard preview', () => {
     expect(preview.warning).toContain('8082');
   });
 
+  test('mixed 1000 users at 1 action/s offer 1000 pay/s and 1000 swap/s', () => {
+    const preview = previewHltDashboard(parseHltDashboardConfig(new URLSearchParams({
+      users: '1000',
+      usersPerRuntime: '40',
+      rate: '1',
+      duration: '1',
+      mix: '0:1',
+      hubs: 'H1',
+      mode: 'mixed',
+    })));
+    expect(preview.config.mix).toBe('1:1');
+    expect(preview.offeredPayPerSecond).toBe(1000);
+    expect(preview.offeredSwapPerSecond).toBe(1000);
+    expect(preview.paymentLanes).toBe(1000);
+    expect(preview.swapLanes).toBe(500);
+    expect(preview.isolatedCommand).toContain('XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE=mixed');
+  });
+
   test('cross-j on two hubs is 100% multi-hub path', () => {
     const preview = previewHltDashboard(parseHltDashboardConfig(new URLSearchParams({
       users: '8',

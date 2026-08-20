@@ -175,9 +175,10 @@ export const selectEntityFrameTxByteBudget = (txs: EntityTx[]): EntityTx[] => {
   return txs.slice(0, low);
 };
 
-// Events are not known before apply; batched HTLC frames outgrew a 256 KB slack
-// by 1.7 MB at 500 users. Reserve a fifth of the wire budget for them.
-export const ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES = Math.floor(LIMITS.MAX_FRAME_SIZE_BYTES / 5);
+// Events are not known before apply. 500 users needed 1.7 MB beyond a 256 KB
+// slack. Mixed 1000e sealed 11.5 MB at 208 txs after a 2 MB event reserve —
+// events+hankos still overflowed validateProposedEntityFrame. Reserve a third.
+export const ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES = Math.floor(LIMITS.MAX_FRAME_SIZE_BYTES / 3);
 
 export type EntityFrameWireBudgetInput = {
   prevFrameHash: string;

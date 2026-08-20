@@ -249,6 +249,41 @@ describe('content-addressed Entity replay contexts', () => {
       .toBe(proposerReplicaId);
   });
 
+  test('in-process skip encodes the same rows as a second parse', () => {
+    const replicaId = `${ENTITY_ID}:${SIGNER_ID}`;
+    const context = {
+      version: 1 as const,
+      proposerReplicaId: replicaId,
+      entityId: ENTITY_ID,
+      proposerSignerId: SIGNER_ID,
+      parentFrameHash: `0x${'33'.repeat(32)}`,
+      height: 2,
+      gossipProfiles: [],
+      peerAssertions: [],
+      htlc: { version: 1 as const, entries: [], originated: [] },
+    };
+    const parsed = prepareEntityContextPayloadRows(new Map([[replicaId, context]]));
+    const skipped = prepareEntityContextPayloadRows(new Map([[replicaId, context]]), true);
+    expect([...skipped.refs.entries()]).toEqual([...parsed.refs.entries()]);
+    expect(skipped.rows.map(row => row.value.toString('hex')))
+      .toEqual(parsed.rows.map(row => row.value.toString('hex')));
+  });
+
+  test('in-process skip still binds the replica identity', () => {
+    const wrongReplicaId = `${`0x${'44'.repeat(32)}`}:${SIGNER_ID}`;
+    expect(() => prepareEntityContextPayloadRows(new Map([[wrongReplicaId, {
+      version: 1,
+      proposerReplicaId: `${ENTITY_ID}:${SIGNER_ID}`,
+      entityId: ENTITY_ID,
+      proposerSignerId: SIGNER_ID,
+      parentFrameHash: `0x${'33'.repeat(32)}`,
+      height: 2,
+      gossipProfiles: [],
+      peerAssertions: [],
+      htlc: { version: 1, entries: [], originated: [] },
+    }]]), true)).toThrow('STORAGE_ENTITY_CONTEXT_REPLICA_BINDING');
+  });
+
   test('rejects a context stored under another replica identity', () => {
     const wrongReplicaId = `${`0x${'44'.repeat(32)}`}:${SIGNER_ID}`;
     expect(() => prepareEntityContextPayloadRows(new Map([[wrongReplicaId, {

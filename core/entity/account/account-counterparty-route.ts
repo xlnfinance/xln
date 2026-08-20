@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { toLowerAddressOrNull } from '../../protocol/crypto/address-cache';
 
 import type { AccountReplica } from '../../types/account';
 import type { CertifiedBoardNodeStore } from '../../types/entity-board-registry';
@@ -56,5 +57,7 @@ export const resolveObserverCertifiedAccountCounterpartyProposer = (
   if (!/^0x0{24}[0-9a-f]{40}$/.test(firstMember)) {
     invalidHanko(`HANKO_PROPOSER_FIRST_MEMBER_INVALID:${firstMember || 'missing'}`);
   }
-  return ethers.getAddress(`0x${firstMember.slice(-40)}`).toLowerCase();
+  const proposer = toLowerAddressOrNull(`0x${firstMember.slice(-40)}`);
+  if (!proposer) invalidHanko(`HANKO_PROPOSER_FIRST_MEMBER_INVALID:${firstMember || 'missing'}`);
+  return proposer;
 };

@@ -45,6 +45,35 @@ describe('selective rerun ledger', () => {
     expect(() => assertBroadRunHasNoUnresolvedReruns(path)).not.toThrow();
   }));
 
+  test('broad scenario runs ignore demoted catalog failures and E2E-only evidence', () => withLedger(path => {
+    recordSelectiveRerunFailure({
+      kind: 'scenario',
+      target: 'company-ipo',
+      failedCodeHash: CODE_HASH,
+      failedAt: '2026-08-14T00:00:00.000Z',
+      reason: 'BOARD_HANDOVER_ACTIVATION_CHAIN_INVALID',
+    }, path);
+    recordSelectiveRerunFailure({
+      kind: 'e2e',
+      target: selectiveE2ETarget('tests/e2e/example.spec.ts', 'other'),
+      failedCodeHash: CODE_HASH,
+      failedAt: '2026-08-14T00:00:00.000Z',
+      reason: 'playwright:unrelated',
+    }, path);
+
+    expect(() => assertBroadRunHasNoUnresolvedReruns(path, {
+      kind: 'scenario',
+      targets: ['processbatch', 'swap-tps'],
+    })).not.toThrow();
+    expect(() => assertBroadRunHasNoUnresolvedReruns(path, { kind: 'e2e' })).toThrow(
+      'BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED',
+    );
+    expect(() => assertBroadRunHasNoUnresolvedReruns(path, {
+      kind: 'scenario',
+      targets: ['company-ipo'],
+    })).toThrow('BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED');
+  }));
+
   test('replaces one target failure without dropping other unresolved rows', () => withLedger(path => {
     const first = selectiveE2ETarget('tests/e2e/a.spec.ts', 'A');
     const second = selectiveE2ETarget('tests/e2e/b.spec.ts', 'B');

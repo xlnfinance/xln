@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { toLowerAddressOrNull } from '../../protocol/crypto/address-cache';
 
 import type {
   AccountJClaimBranchNode,
@@ -38,11 +39,9 @@ export const normalizeAccountJBytes32 = (value: unknown, label: string): string 
 };
 
 const normalizeAddress = (value: unknown): string => {
-  try {
-    return ethers.getAddress(String(value ?? '')).toLowerCase();
-  } catch {
-    throw new Error(`ACCOUNT_J_CLAIM_DEPOSITORY_INVALID:${String(value ?? '')}`);
-  }
+  const normalized = toLowerAddressOrNull(String(value ?? ''));
+  if (!normalized) throw new Error(`ACCOUNT_J_CLAIM_DEPOSITORY_INVALID:${String(value ?? '')}`);
+  return normalized;
 };
 
 const normalizeHeight = (value: unknown): number => {

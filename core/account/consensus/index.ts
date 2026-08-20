@@ -33,7 +33,7 @@ import type { AccountDraftReplica } from '../state/account-state-draft';
 import type { AccountTxRejection, ApplyAccountTxOk } from '../tx/apply-types';
 import { accountTxFailureMessage, assertNever } from '../tx/apply-result';
 import { createStructuredLogger, shortHash, shortId } from '../../support/logger';
-import { computeFrameHash, isWithinAccountFrameBounds, assertAccountFrameHash } from './frame/hash';
+import { assertAccountFrameHash } from './frame/hash';
 import {
   assertNoUnilateralSettlementMutation,
   buildAccountProofBodyFromJurisdictions,
@@ -109,6 +109,7 @@ const accountLog = createStructuredLogger('account');
 
 export { getIncomingAccountDeadlineViolation, HTLC_ENFORCEMENT_RESERVE_MS, isHtlcSecretEnforcementWindowClosed };
 export type { AccountInputSecurityContext };
+export { computeFrameHash, isWithinAccountFrameBounds } from './frame/hash';
 
 // Counter-based replay protection was intentionally replaced by the frame chain
 // (height + prevFrameHash). Nonces remain only for on-chain proof material.

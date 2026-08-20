@@ -1460,8 +1460,15 @@ const applyEntityFrameWithIsolation = async (
   entityTxs: EntityTx[],
   frameTimestamp: number | undefined,
   isolateState: boolean,
+  inProcessInfraValidated = false,
 ): Promise<EntityFrameResult> => {
-  entityContext = validateEntityInfraContext(entityContext);
+  // Live proposal already ran validateEntityInfraContext in materialize.
+  // Do not stamp that object — Entity frame/state hashing rejects symbol keys
+  // (100b: ENTITY_STATE_ROOT_SYMBOL_KEY at hub mesh). Live WAL write uses the
+  // same flag. Network/replay apply and WAL recovery keep the full parse.
+  if (!inProcessInfraValidated) {
+    entityContext = validateEntityInfraContext(entityContext);
+  }
   const profileHashStartedAt = getPerfMs();
   const previousProfileHash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(entityState));
   const previousProfileHashMs = Math.round(getPerfMs() - profileHashStartedAt);
@@ -1548,6 +1555,7 @@ export const applyEntityFrame = (
   entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
   entityTxs: EntityTx[],
   frameTimestamp?: number,
+  inProcessInfraValidated = false,
 ): Promise<EntityFrameResult> =>
   applyEntityFrameWithIsolation(
     env,
@@ -1556,6 +1564,7 @@ export const applyEntityFrame = (
     entityTxs,
     frameTimestamp,
     true,
+    inProcessInfraValidated,
   );
 
 /**
@@ -1569,6 +1578,7 @@ export const applyRuntimeOwnedEntityFrame = (
   entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
   entityTxs: EntityTx[],
   frameTimestamp?: number,
+  inProcessInfraValidated = false,
 ): Promise<EntityFrameResult> =>
   applyEntityFrameWithIsolation(
     env,
@@ -1577,4 +1587,5 @@ export const applyRuntimeOwnedEntityFrame = (
     entityTxs,
     frameTimestamp,
     true,
+    inProcessInfraValidated,
   );

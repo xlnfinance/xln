@@ -38,8 +38,8 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../state-root';
-import { fitEntityProposalToWireBudget } from './wire-budget';
-import { validateProposedEntityFrame } from '../frame/validation';
+import { fitEntityProposalToWireBudget, recordEntityWireBudgetFitHint } from './wire-budget';
+import { assertEstimatedSealedEntityFrameWire, validateProposedEntityFrame } from '../frame/validation';
 import { timePerfPhase } from '../../../support/performance/profile';
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
@@ -366,6 +366,7 @@ const buildEntityProposal = async (
     entityContext,
     txs,
     env.state.timestamp,
+    !fitted.replayed,
   );
   profile.checkpoint('frameApply');
   if (!shouldKeepPreparedEntityFrame(selection, applied.accountsToProposeFramesCount)) {
@@ -397,6 +398,26 @@ const buildEntityProposal = async (
     frameHash,
     [...(applied.collectedHashes ?? []), ...outputHashes],
   );
+  const leaderBody = {
+    proposerSignerId: workingReplica.signerId.toLowerCase(),
+    view: leader.view,
+    ...(workingReplica.pendingLeaderCertificate ? { certificate: workingReplica.pendingLeaderCertificate } : {}),
+  };
+  const sealedContext = selection.isSingleSigner ? 'SingleSignerEntityFrame' : 'MultiSignerEntityFrame';
+  assertEstimatedSealedEntityFrameWire({
+    height,
+    parentFrameHash,
+    stateRoot,
+    authorityRoot,
+    entityContext,
+    txs: [...txs],
+    events: applied.events,
+    hash: frameHash,
+    timestamp,
+    leader: leaderBody,
+    ...(proposalJPrefixCertificate ? { jPrefixCertificate: proposalJPrefixCertificate } : {}),
+    hashesToSign,
+  }, workingReplica.signerId, selection.isSingleSigner, sealedContext);
   profile.checkpoint('commitments');
   const selfSigs = await signProposalManifest(env, workingReplica, state, hashesToSign);
   // A single signer is its own quorum: seal the hankos now, no precommits.
@@ -410,7 +431,6 @@ const buildEntityProposal = async (
       )
     : undefined;
   profile.checkpoint('signatures');
-  storeCandidate(workingReplica, applied, state, frameHash, hashesToSign, authority);
   const frame: EntityFrame = {
     height,
     parentFrameHash,
@@ -421,17 +441,19 @@ const buildEntityProposal = async (
     events: structuredClone(applied.events),
     hash: frameHash,
     timestamp,
-    leader: {
-      proposerSignerId: workingReplica.signerId.toLowerCase(),
-      view: leader.view,
-      ...(workingReplica.pendingLeaderCertificate ? { certificate: workingReplica.pendingLeaderCertificate } : {}),
-    },
+    leader: leaderBody,
     ...(proposalJPrefixCertificate ? { jPrefixCertificate: structuredClone(proposalJPrefixCertificate) } : {}),
     hashesToSign,
     collectedSigs: new Map([[workingReplica.signerId.toLowerCase(), selfSigs]]),
     ...(hankos ? { hankos } : {}),
   };
-  validateProposedEntityFrame(frame, selection.isSingleSigner ? 'SingleSignerEntityFrame' : 'MultiSignerEntityFrame');
+  // Sealed bytes (events + hashesToSign + sigs + hankos) are known only after
+  // apply/sign. Fit measured empty events, so this gate must run before the
+  // candidate is stored: overflow defers the tail instead of leaving a doomed
+  // replica.candidate from the oversized attempt.
+  validateProposedEntityFrame(frame, sealedContext);
+  recordEntityWireBudgetFitHint(env, workingReplica, frame.txs.length);
+  storeCandidate(workingReplica, applied, state, frameHash, hashesToSign, authority);
   return frame;
 };
 
@@ -474,7 +496,7 @@ const buildEntityProposalEvictingRejected = async (
           entity: shortId(context.workingReplica.entityId),
           selected: keep,
           deferred: selection.proposalTxs.length - keep,
-          error: message.slice(0, 120),
+          error: message.slice(0, 400),
         });
         selection.proposalTxs = selection.proposalTxs.slice(0, keep);
         continue;

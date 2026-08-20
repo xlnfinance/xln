@@ -159,6 +159,8 @@ const PROFILING_ENV_KEYS = [
   'XLN_LOG_LEVEL', 'XLN_LOG_SCOPES',
   'XLN_HUB_LOG_LEVEL', 'XLN_LOAD_LANE_LOG_LEVEL', 'XLN_ENTITY_PROPOSAL_TRACE',
   'XLN_ACCOUNT_ACK_STRICT_TIMEOUT_MS',
+  'XLN_ACCOUNT_PENDING_RESEND_AFTER_MS',
+  'XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP',
 ] as const;
 if (process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] !== undefined) {
   throw new Error('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
@@ -167,6 +169,13 @@ const localTestLease = await acquireLocalTestPortLease({
   requiredOffsets: [0, 1, 4, 7, 8, 10, 11, 12, 13],
 });
 const inheritedProcessEnv = stripLocalTestLeaseEnv(process.env);
+const hltUsers = Number(process.env['XLN_HLT_USERS'] || '0');
+if (Number.isSafeInteger(hltUsers) && hltUsers > 0) {
+  inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'] =
+    process.env['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'] || String(Math.max(64, hltUsers));
+  inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] =
+    process.env['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] || String(Math.max(1_000, hltUsers * 4));
+}
 const portBase = localTestLease.basePort;
 
 const rpcPort = portBase;
@@ -269,7 +278,7 @@ const runProductionSwapWorker = (
     repoRoot,
     'core/scripts/operations/hlt/hlt.ts',
   );
-  const economy = mode === 'same' || mode === 'payments' ? hltEconomyArgs() : [];
+  const economy = mode === 'same' || mode === 'payments' || mode === 'mixed' ? hltEconomyArgs() : [];
   const result = spawnSync(process.execPath, [
     worker,
     '--work-dir', workDir,
@@ -299,7 +308,7 @@ const runProductionSwapLoadSmoke = async (): Promise<void> => {
   const rounds = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_ROUNDS'] || '1';
   const cadenceMs = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_CADENCE_MS'] || '1000';
   const mode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || 'same';
-  if (mode !== 'same' && mode !== 'cross' && mode !== 'payments') {
+  if (mode !== 'same' && mode !== 'cross' && mode !== 'payments' && mode !== 'mixed') {
     throw new Error(`LOCAL_PROD_SMOKE_SWAP_LOAD_MODE_INVALID:${mode}`);
   }
   const scheduleRaw = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SCHEDULE'];
@@ -832,13 +841,10 @@ const assertNoMarketMakerBootstrapBacklog = (payload: MarketMakerInfoPayload): v
   }
 };
 
-const marketMakerFullDepthReady = (health: HealthPayload): boolean => {
+const marketMakerSameChainReady = (health: HealthPayload): boolean => {
   const hubs = health.marketMaker?.hubs ?? [];
-  const routes = health.marketMaker?.cross?.routes ?? [];
   const expectedOffersPerHub = Number(health.marketMaker?.expectedOffersPerHub || 0);
-  const expectedRoutes = Number(health.marketMaker?.cross?.expectedRoutes || 0);
-  return health.marketMaker?.ok === true &&
-    health.marketMaker?.startupPhase === 'offers-ready' &&
+  return health.marketMaker?.startupPhase === 'offers-ready' &&
     expectedOffersPerHub > 0 &&
     hubs.length >= 3 &&
     hubs.every(hub =>
@@ -851,7 +857,14 @@ const marketMakerFullDepthReady = (health: HealthPayload): boolean => {
         pair.depthReady === true &&
         Number(pair.offers || 0) >= Number(pair.expectedOffers || 1)
       )
-    ) &&
+    );
+};
+
+const marketMakerFullDepthReady = (health: HealthPayload): boolean => {
+  const routes = health.marketMaker?.cross?.routes ?? [];
+  const expectedRoutes = Number(health.marketMaker?.cross?.expectedRoutes || 0);
+  return health.marketMaker?.ok === true &&
+    marketMakerSameChainReady(health) &&
     expectedRoutes > 0 &&
     health.marketMaker?.cross?.ok === true &&
     routes.length >= expectedRoutes &&
@@ -868,13 +881,23 @@ const marketMakerFullDepthReady = (health: HealthPayload): boolean => {
     );
 };
 
+const smokeSwapLoadMode = process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE'] || '';
+const smokeRequiresCrossMarketMaker =
+  process.env['XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_SMOKE'] !== '1' ||
+  smokeSwapLoadMode === 'cross';
+
+const marketMakerDepthReadyForSmoke = (health: HealthPayload): boolean =>
+  smokeRequiresCrossMarketMaker
+    ? marketMakerFullDepthReady(health)
+    : marketMakerSameChainReady(health);
+
 const healthReady = (health: HealthPayload): boolean => {
   return health.coreOk === true &&
     health.systemOk === true &&
     Number(health.hubs?.length || 0) >= 3 &&
     health.system?.relay === true &&
     health.hubMesh?.ok === true &&
-    marketMakerFullDepthReady(health) &&
+    marketMakerDepthReadyForSmoke(health) &&
     Boolean(health.marketMaker?.entityId) &&
     health.custody?.ok === true &&
     health.bootstrapReserves?.ok === true;
@@ -1168,6 +1191,12 @@ const main = async (): Promise<void> => {
     XLN_RADAPTER_CONTROL_PER_SEC: process.env['XLN_RADAPTER_CONTROL_PER_SEC'] || '1000',
     XLN_RADAPTER_SEND_BURST: process.env['XLN_RADAPTER_SEND_BURST'] || '2000',
     XLN_RADAPTER_SEND_PER_SEC: process.env['XLN_RADAPTER_SEND_PER_SEC'] || '1000',
+    ...(inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'] ? {
+      XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT:
+        inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'],
+      XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT:
+        inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] || '',
+    } : {}),
     MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1',
     XLN_RUNTIME_TICK_DELAY_MS: process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '0',
     MARKET_MAKER_RUNTIME_TICK_DELAY_MS:
@@ -1201,6 +1230,7 @@ const main = async (): Promise<void> => {
       XLN_MARKET_MAKER_DISABLE_RESTORE:
         process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] || '0',
     } : {}),
+    ...(!smokeRequiresCrossMarketMaker ? { XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP: '1' } : {}),
   });
   recordStage('server:started', { apiPort, marketMakerApiPort });
 
@@ -1245,7 +1275,7 @@ const main = async (): Promise<void> => {
     const postBootstrapInfo = process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] === '1'
       ? await assertMarketMakerInfoResponsive()
       : null;
-    if (!marketMakerFullDepthReady(postBootstrapHealth)) {
+    if (!marketMakerDepthReadyForSmoke(postBootstrapHealth)) {
       throw new Error(
         `LOCAL_PROD_SMOKE_POST_BOOTSTRAP_DEPTH_REGRESSED last=${JSON.stringify(summarizeHealth(postBootstrapHealth))}`,
       );
@@ -1295,7 +1325,7 @@ const main = async (): Promise<void> => {
         const mmChild = (health.process?.children ?? []).find(
           (child) => child.role === 'market-maker' && String(child.name || '').toUpperCase() === 'MM',
         );
-        return mmChild?.online === true && marketMakerFullDepthReady(health as HealthPayload);
+        return mmChild?.online === true && marketMakerDepthReadyForSmoke(health as HealthPayload);
       },
       timeoutMs: 180_000,
     });

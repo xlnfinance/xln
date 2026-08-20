@@ -24,7 +24,7 @@ const leftId = entity('11');
 const rightId = entity('22');
 const offerId = 'settlement-offer-1';
 
-const makeSettlementEnv = () => {
+const makeSettlementEnv = (pending = false) => {
   const env = createEmptyEnv('settlement-evidence');
   const signerId = addr('aa');
   const jurisdiction = makeJurisdiction('J1', 31_337, 'dd', 'ee');
@@ -62,6 +62,7 @@ const makeSettlementEnv = () => {
     accountStateRoot: `0x${'12'.repeat(32)}`,
     stateHash: `0x${'34'.repeat(32)}`,
   };
+  if (pending) account.pendingFrame = account.currentFrame;
   const accounts = openWritableEntityAccounts(state);
   accounts.set(rightId, account);
   state.accounts = accounts.sealCandidate();
@@ -84,6 +85,19 @@ test('settlement evidence returns exact queue digests and certified-frame lifecy
     await buildSettlementEvidence(env, decodedRequest, readFrames),
   );
   expect(response.queues.pendingOutputs.count).toBe(0);
+  expect(response.queues.pendingAccountFrames.count).toBe(0);
+  expect(response.pendingAccountSample).toEqual([]);
+  const pendingEnv = makeSettlementEnv(true);
+  const pendingAccount = Array.from(pendingEnv.state.eReplicas.values())[0]!.state.accounts.get(rightId)!;
+  const pending = decodeSettlementEvidenceResponse(
+    await buildSettlementEvidence(pendingEnv, decodedRequest, async () => [pendingAccount.currentFrame]),
+  );
+  expect(pending.queues.pendingAccountFrames.count).toBe(1);
+  expect(pending.pendingAccountSample).toEqual([{
+    entityId: leftId,
+    counterpartyEntityId: rightId,
+    height: 2,
+  }]);
   expect(response.queues.pendingOutputs.digest).toMatch(/^0x[0-9a-f]{64}$/);
   expect(response.book).toEqual({
     entityId: leftId,

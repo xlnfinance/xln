@@ -48,9 +48,11 @@ type RelayClient = {
    *  queue (send() returned -1) while this socket still reported open. A
    *  queued send is not a delivery failure — retrying the same envelope risks
    *  double-sending a financial payload — but a socket that stays queued for
-   *  several sends in a row is stuck, not just slow; see noteSendOutcome in
-   *  core/network/p2p/direct-runtime-bun.ts for the sibling transport's fix. */
+   *  several sends *and* several seconds is stuck, not just slow; see
+   *  noteSendOutcome in core/network/p2p/direct-runtime-bun.ts. */
   consecutiveBackpressuredSends: number;
+  /** Timestamp of the first -1 in the current streak; 0 when none. */
+  backpressureStartedAt: number;
 };
 
 export type RelaySocketLike = {
@@ -592,6 +594,7 @@ export const registerClient = (store: RelayStore, runtimeId: string, ws: RelaySo
     lastSeen: nextWsTimestamp(store),
     topics: new Set(),
     consecutiveBackpressuredSends: 0,
+    backpressureStartedAt: 0,
   });
   return true;
 };

@@ -60,11 +60,12 @@ const DEFAULT_PARALLEL_SET = [
   'settle-rebalance',
   'swap-tps',
   'lock-ahb',
-  'company-ipo',
   'dispute-lifecycle',
   'dispute-transformer',
 ];
 
+// company-ipo stays in ALL: BOARD_HANDOVER_ACTIVATION_CHAIN_INVALID is a real
+// invariant, not a scenario skip. Exact-rerun it before putting it back in default.
 const ALL_PARALLEL_SET = [
   'processbatch',
   'rebalance',
@@ -113,6 +114,13 @@ async function reserveFreeLocalPort(): Promise<number> {
     });
   });
 }
+
+const resolveParallelSet = (setName?: string): readonly string[] => {
+  const set = (setName || process.env['SCENARIO_SET'] || 'full').toLowerCase();
+  if (set === 'smoke') return SMOKE_PARALLEL_SET;
+  if (set === 'all' || set === 'everything' || set === 'full-catalog') return ALL_PARALLEL_SET;
+  return DEFAULT_PARALLEL_SET;
+};
 
 const unique = <T>(items: T[]): T[] => Array.from(new Set(items));
 
@@ -243,12 +251,7 @@ type ParallelResult = {
 async function runParallelScenarios(mode: string, workersArg?: number, setName?: string): Promise<number> {
   cleanupTestArtifactsBeforeRun({ reason: 'scenarios', argv: process.argv.slice(2) });
   const set = (setName || process.env['SCENARIO_SET'] || 'full').toLowerCase();
-  const selectedSet = set === 'smoke'
-    ? SMOKE_PARALLEL_SET
-    : (set === 'all' || set === 'everything' || set === 'full-catalog')
-      ? ALL_PARALLEL_SET
-      : DEFAULT_PARALLEL_SET;
-  const scenarios = selectedSet.filter(s => SCENARIOS[s]);
+  const scenarios = resolveParallelSet(setName).filter(s => SCENARIOS[s]);
   if (scenarios.length === 0) {
     console.error('No scenarios configured for parallel run');
     return 1;
@@ -402,7 +405,8 @@ async function main() {
   const runAll = !single && (!scenario || scenario === 'all');
 
   if (runAll) {
-    assertBroadRunHasNoUnresolvedReruns();
+    const selected = resolveParallelSet(set).filter(name => SCENARIOS[name]);
+    assertBroadRunHasNoUnresolvedReruns(undefined, { kind: 'scenario', targets: selected });
     const code = await runParallelScenarios(requestedMode, workers, set);
     process.exit(code);
   }

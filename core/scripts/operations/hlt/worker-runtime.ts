@@ -176,7 +176,12 @@ export const parseWorkerArgs = (argv: readonly string[]): WorkerArgs => {
   }
   // `same` and `payments` describe a population that acts every round; the
   // cross-j workloads prove one atomic swap and have no population at all.
-  const isPopulationMode = mode === 'same' || mode === 'payments';
+  const isPopulationMode = mode === 'same' || mode === 'payments' || mode === 'mixed';
+  if (mode === 'mixed') {
+    if (!plan || plan.economy.mix.swap === 0 || plan.economy.mix.payment === 0) {
+      throw new Error('HLT_MIXED_REQUIRES_BOTH_WORKLOADS');
+    }
+  }
   if (mode === 'same' && swaps < lanes) {
     throw new Error('PRODUCTION_SWAP_LOAD_LANES_WITHOUT_ORDERS');
   }

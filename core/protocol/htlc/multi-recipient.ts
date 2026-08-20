@@ -91,9 +91,23 @@ const deriveNonce = (ephemeralPublicKey: Uint8Array, recipientPublicKey: Uint8Ar
   return sha256(material).slice(0, 12);
 };
 
+const opaqueHtlcCiphertextShape = (value: unknown): string => {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  const valueType = typeof value;
+  if (valueType !== 'object') return valueType;
+  const record = value as Record<string, unknown>;
+  const ciphertext = record['ciphertext'];
+  return [
+    `keys=${Object.keys(record).sort().join(',')}`,
+    `version=${typeof record['version']}:${String(record['version'] ?? '').slice(0, 40)}`,
+    `ciphertext=${typeof ciphertext}:${typeof ciphertext === 'string' ? ciphertext.length : -1}`,
+  ].join(':');
+};
+
 export const assertOpaqueHtlcCiphertext = (value: unknown): OpaqueHtlcCiphertext => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('HTLC_OPAQUE_CIPHERTEXT_INVALID');
+    throw new Error(`HTLC_OPAQUE_CIPHERTEXT_INVALID:${opaqueHtlcCiphertextShape(value)}`);
   }
   const record = value as Record<string, unknown>;
   if (
@@ -102,7 +116,7 @@ export const assertOpaqueHtlcCiphertext = (value: unknown): OpaqueHtlcCiphertext
     typeof record['ciphertext'] !== 'string' ||
     record['ciphertext'].length === 0 ||
     record['ciphertext'].length > Math.ceil(MAX_PACKED_BYTES / 3) * 4
-  ) throw new Error('HTLC_OPAQUE_CIPHERTEXT_INVALID');
+  ) throw new Error(`HTLC_OPAQUE_CIPHERTEXT_INVALID:${opaqueHtlcCiphertextShape(value)}`);
   const packed = decodeBase64Bytes(record['ciphertext'], 'HTLC_OPAQUE_CIPHERTEXT_BASE64_INVALID');
   if (packed.length < EPHEMERAL_PUBLIC_KEY_BYTES + AUTH_TAG_BYTES || packed.length > MAX_PACKED_BYTES) {
     throw new Error('HTLC_OPAQUE_CIPHERTEXT_SIZE_INVALID');
@@ -111,10 +125,19 @@ export const assertOpaqueHtlcCiphertext = (value: unknown): OpaqueHtlcCiphertext
   return { version: HTLC_OPAQUE_CIPHERTEXT_VERSION, ciphertext: record['ciphertext'] };
 };
 
+const opaqueCiphertextHashMemo = new Map<string, string>();
+const OPAQUE_CIPHERTEXT_HASH_MEMO_MAX = 8192;
+
 export const hashOpaqueHtlcCiphertext = (value: OpaqueHtlcCiphertext): string => {
-  const packed = decodeBase64Bytes(assertOpaqueHtlcCiphertext(value).ciphertext);
+  const ciphertext = assertOpaqueHtlcCiphertext(value).ciphertext;
+  const memoized = opaqueCiphertextHashMemo.get(ciphertext);
+  if (memoized !== undefined) return memoized;
+  const packed = decodeBase64Bytes(ciphertext);
   const digest = sha256(packed);
-  return `0x${Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+  const hash = `0x${Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+  if (opaqueCiphertextHashMemo.size >= OPAQUE_CIPHERTEXT_HASH_MEMO_MAX) opaqueCiphertextHashMemo.clear();
+  opaqueCiphertextHashMemo.set(ciphertext, hash);
+  return hash;
 };
 
 export const encryptOpaqueHtlcBytes = (

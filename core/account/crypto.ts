@@ -4,7 +4,7 @@
  */
 
 import * as secp256k1 from '@noble/secp256k1';
-import { countOp, countOpWithSite } from '../support/performance/op-counters';
+import { countOpWithSite } from '../support/performance/op-counters';
 import { isBrowserRuntime } from '../support/platform-crypto';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';

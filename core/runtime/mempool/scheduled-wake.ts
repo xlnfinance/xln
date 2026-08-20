@@ -1,7 +1,7 @@
 import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
-import { crontabTaskHasPendingWork } from '../../entity/scheduler';
+import { crontabTaskDueAt, crontabTaskHasPendingWork } from '../../entity/scheduler';
 import {
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   type ScheduledWakeJob,
@@ -114,7 +114,7 @@ export const collectDueScheduledWakeJobs = (
   }
   if (includePeriodicTasks) {
     for (const task of state.crontabState?.tasks?.values() ?? []) {
-      const dueAt = task.lastRun + task.intervalMs;
+      const dueAt = crontabTaskDueAt(task);
       if (
         task.enabled &&
         crontabTaskHasPendingWork(state, task.method) &&
@@ -143,8 +143,7 @@ const nextReplicaDeadline = (replica: EntityReplica): number | null => {
     for (const task of replica.state.crontabState?.tasks?.values() ?? []) {
       if (!task.enabled) continue;
       if (!crontabTaskHasPendingWork(replica.state, task.method)) continue;
-      const dueAt = task.lastRun + task.intervalMs;
-      next = Math.min(next, dueAt);
+      next = Math.min(next, crontabTaskDueAt(task));
     }
   }
   return Number.isFinite(next) ? next : null;

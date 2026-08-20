@@ -17,6 +17,7 @@ describe('account overlay publish', () => {
     live.currentDisputeProofHanko = '0xhanko';
     live.currentDisputeProofBodyHash = `0x${'bb'.repeat(32)}`;
     live.currentDisputeProofNonce = 2;
+    live.publicPinned = true;
     const pendingFrame = live.pendingFrame;
     const liveHanko = live.currentFrameHanko;
 
@@ -37,7 +38,21 @@ describe('account overlay publish', () => {
     expect(live.currentDisputeProofHanko).toBe('0xhanko');
     expect(live.currentDisputeProofBodyHash).toBe(`0x${'bb'.repeat(32)}`);
     expect(live.currentDisputeProofNonce).toBe(2);
+    expect(live.publicPinned).toBe(true);
     expect(committed.hash).toBe(committed.accountStateRoot);
     expect(committed.account).toBe(live);
+  });
+
+  test('does not un-pin a live Account when the draft omits publicPinned', () => {
+    const live = makeAccount(entity('11'), entity('22'));
+    live.publicPinned = true;
+    const overlay = beginAccountTransition(
+      live,
+      createAccountTransitionKey(live, { purpose: 'publish-pin' }),
+    );
+    const draft = accountTransitionView(overlay);
+    delete (draft as { publicPinned?: boolean }).publicPinned;
+    publishAccountTransition(live, overlay);
+    expect(live.publicPinned).toBe(true);
   });
 });

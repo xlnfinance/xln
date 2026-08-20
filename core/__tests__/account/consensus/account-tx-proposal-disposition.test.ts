@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { validateProposalTransactions } from '../../../account/consensus/proposal/transactions';
+import { validateProposalTransactions, proposalWindowCanUseOptimisticBatch } from '../../../account/consensus/proposal/transactions';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
 import { applyAccountTxToMutableReplica } from '../../../account/tx/apply';
 import { ACCOUNT_TX_REJECTION_CODES } from '../../../account/tx/apply-types';
@@ -136,5 +136,19 @@ describe('Account tx proposal disposition', () => {
     expect(account.state.locks.has(lockId)).toBe(false);
     expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
     expect(account.state.deltas.get(1)?.offdelta).toBe(-10n);
+  });
+
+  test('mixed swap+htlc proposal windows share one overlay', () => {
+    expect(proposalWindowCanUseOptimisticBatch([
+      { type: 'swap_offer', data: {} as never },
+    ])).toBe(false);
+    expect(proposalWindowCanUseOptimisticBatch([
+      { type: 'swap_offer', data: {} as never },
+      { type: 'htlc_lock', data: {} as never },
+    ])).toBe(true);
+    expect(proposalWindowCanUseOptimisticBatch([
+      { type: 'swap_offer', data: {} as never },
+      { type: 'j_event_claim', data: {} as never },
+    ])).toBe(false);
   });
 });

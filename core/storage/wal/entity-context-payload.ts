@@ -187,12 +187,19 @@ const prepareRow = (
 
 export const prepareEntityContextPayloadRows = (
   contexts: ReadonlyMap<string, EntityInfraContext>,
+  inProcessInfraValidated = false,
 ) => {
   const refs = new Map<string, EntityContextPayloadHash>();
   const rowsByHash = new Map<EntityContextPayloadHash, PayloadRow>();
   for (const [replicaId, context] of contexts) {
     assertReplicaId(replicaId, 'STORAGE_ENTITY_CONTEXT_REPLICA_ID_INVALID');
-    const decoded = validateEntityInfraContext(context);
+    // Live saveEnvToDB never runs during WAL replay. Each collected context
+    // already passed materialize or apply this tick; re-parse is a second
+    // HTLC graph walk. Recovery read still full-parses. Default false keeps
+    // tests and foreign callers on the strict decoder.
+    const decoded = inProcessInfraValidated
+      ? context
+      : validateEntityInfraContext(context);
     // A catch-up frame is proposed by one signer and applied by another local
     // replica. The map key binds the recipient Entity; the payload's validated
     // proposerReplicaId independently binds the proposer identity.

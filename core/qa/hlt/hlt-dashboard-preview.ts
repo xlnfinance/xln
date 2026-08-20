@@ -11,7 +11,7 @@ import {
   parseHltMix,
 } from '../../scripts/operations/hlt/economy';
 
-const HLT_DASHBOARD_MODES = ['payments', 'same', 'cross'] as const;
+const HLT_DASHBOARD_MODES = ['payments', 'same', 'mixed', 'cross'] as const;
 export type HltDashboardMode = (typeof HLT_DASHBOARD_MODES)[number];
 
 export type HltDashboardConfig = Readonly<{
@@ -133,13 +133,14 @@ const parsePositiveBigintParam = (raw: string | null, fallback: bigint, code: st
 const mixForMode = (mode: HltDashboardMode, mix: string): string => {
   if (mode === 'payments') return '0:1';
   if (mode === 'same') return '1:0';
+  if (mode === 'mixed') return '1:1';
   return mix;
 };
 
 export const parseHltDashboardConfig = (params: URLSearchParams): HltDashboardConfig => {
   const defaults = HLT_DASHBOARD_DEFAULTS;
   const modeRaw = params.get('mode') ?? defaults.mode;
-  if (modeRaw !== 'payments' && modeRaw !== 'same' && modeRaw !== 'cross') {
+  if (modeRaw !== 'payments' && modeRaw !== 'same' && modeRaw !== 'mixed' && modeRaw !== 'cross') {
     throw new Error(`HLT_DASHBOARD_MODE_INVALID:${modeRaw}`);
   }
   const profileRaw = params.get('profile');
@@ -217,7 +218,7 @@ const hubShareFor = (mode: HltDashboardMode, hubCount: number): HltHubShare => {
     workerSingleHubPct: 100,
     workerMultiHubPct: 0,
     routing: 'pin_first_hub',
-    note: 'Payment and same-J workers pin hubLabels[0]. Extra labels describe mesh topology, not a traffic split.',
+    note: 'Payment, same-J, and mixed workers pin hubLabels[0]. Extra labels describe mesh topology, not a traffic split.',
   };
 };
 

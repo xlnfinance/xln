@@ -5,7 +5,7 @@ import { txFingerprint } from '../../protocol/state/tx-multiset';
 import { safeStringify } from '../../protocol/serialization';
 import { hashEntityLeaderVoteBody } from '../../entity/consensus/leader';
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output/envelope';
-import { accountInputProposal } from '../../account/consensus/flush';
+import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
 
 export const carriesEntityCommitNotification = (output: RoutedEntityInput): boolean =>
   hasEntityCommitCertificate(output.proposedFrame);
@@ -121,14 +121,19 @@ const senderAccountForProposal = (
  * proposal is live in the outbox for exactly as long as it *is* that frame.
  * Asking whether the sender still holds the frame covers both terminals
  * (commit and rollback) with one question and cannot leave a duplicate behind.
+ *
+ * A `frame_ack` also carries the ACK for the previous height. That ACK is still
+ * owed after the successor proposal leaves `pendingFrame`. Pruning the whole
+ * envelope then strands the peer as proposer: receiver idle, proposer pending.
  */
 export const accountProposalSettledBySender = (env: RuntimeReplica, output: RoutedEntityInput): boolean => {
   const proposals = getEffectiveEntityInputTxs(output).flatMap(tx => {
     if (tx.type !== 'accountInput') return [];
     const proposal = accountInputProposal(tx.data);
-    return proposal ? [{ accountInput: tx.data, proposal }] : [];
+    return proposal ? [{ accountInput: tx.data, proposal, ack: accountInputAck(tx.data) }] : [];
   });
   if (proposals.length === 0) return false;
+  if (proposals.some(part => part.ack)) return false;
   return proposals.every(({ accountInput, proposal }) => {
     const account = senderAccountForProposal(env, accountInput.fromEntityId, accountInput.toEntityId);
     // An account the sender no longer hosts cannot advance this proposal either.

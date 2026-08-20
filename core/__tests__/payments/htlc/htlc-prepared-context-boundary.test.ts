@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { validateHtlcPreparedInfraContext } from '../../../entity/htlc/prepared-context-validation';
 import { getEffectiveHtlcFrameTxs } from '../../../entity/htlc/materialize-context';
 import type { EntityTx } from '../../../types/entity-tx';
@@ -62,6 +64,27 @@ describe('HTLC prepared Entity context boundary', () => {
     })).toThrow('HTLC_PREPARED_ORIGIN_ECONOMICS_INVALID');
   });
 
+  test('forward innerEnvelope extra keys name their shape', () => {
+    const binding = {
+      fromEntityId: id('1'), toEntityId: id('2'),
+      domain: { chainId: 31337, depositoryAddress: `0x${'11'.repeat(20)}` },
+      accountFrameHash: id('3'), accountHeight: 1, lockId: id('4'), envelopeHash: id('5'),
+      hashlock: id('6'), tokenId: 1, amount: 10n, timelock: 100n, revealBeforeHeight: 9,
+    };
+    expect(() => validateHtlcPreparedInfraContext({
+      version: 1, originated: [],
+      entries: [{
+        binding,
+        outcome: {
+          kind: 'forward',
+          nextHopEntityId: id('3'),
+          forwardAmount: 9n,
+          innerEnvelope: { ...envelope, extra: true },
+        },
+      }],
+    })).toThrow('HTLC_OPAQUE_CIPHERTEXT_INVALID:keys=ciphertext,extra,version');
+  });
+
   test('final outcome contains only the canonical raw preimage', () => {
     const binding = {
       fromEntityId: id('1'), toEntityId: id('2'),
@@ -78,5 +101,18 @@ describe('HTLC prepared Entity context boundary', () => {
       ...context,
       entries: [{ binding, outcome: { kind: 'final', secret: id('7'), retiredField: id('8') } }],
     })).toThrow('HTLC_PREPARED_FINAL_FIELDS_INVALID');
+  });
+
+  test('does not spanning-structuredClone the HTLC graph', () => {
+    const source = readFileSync(join(import.meta.dir, '../../../entity/htlc/prepared-context-validation.ts'), 'utf8');
+    expect(source).toContain('cloneIsolatedProtocolValue(context');
+    expect(source).not.toContain('structuredClone(context)');
+  });
+
+  test('inbound canonicalize decorate-sorts binding keys once', () => {
+    const source = readFileSync(join(import.meta.dir, '../../../entity/htlc/materialize-context.ts'), 'utf8');
+    expect(source).toContain('const decorated = entries.map(entry => ({ key: preparedHtlcBindingKey(entry.binding), entry }))');
+    expect(source).toContain('decorated.sort((left, right) => left.key.localeCompare(right.key))');
+    expect(source).not.toContain('preparedHtlcBindingKey(left.binding).localeCompare(preparedHtlcBindingKey(right.binding))');
   });
 });

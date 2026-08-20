@@ -4,6 +4,7 @@
  */
 
 import { ethers } from 'ethers';
+import { cachedChecksumAddress } from '../protocol/crypto/address-cache';
 import { normalizeEntityId } from '../protocol/identity/entity-id';
 
 export { compareEntityIds, isLeftEntity, normalizeEntityId } from '../protocol/identity/entity-id';
@@ -46,7 +47,7 @@ export interface ParsedEntityId {
  */
 export function createProviderScopedEntityId(provider: string, entityId: string): string {
   // Normalize inputs
-  const providerAddr = ethers.getAddress(provider); // Checksum address
+  const providerAddr = cachedChecksumAddress(provider);
   const normalizedEntity = normalizeEntityId(entityId);
 
   // ABI encode packed: address (20 bytes) + bytes32 (32 bytes)

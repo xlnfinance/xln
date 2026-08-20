@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-import { validateProposedEntityFrame } from '../../../entity/consensus/frame/validation';
-import { assertEntityFrameTotalByteBudget, measureEntityFrameWireBytes, selectEntityFrameTxPrefixForWireBudget } from '../../../entity/consensus/frame';
+import { validateProposedEntityFrame, assertEstimatedSealedEntityFrameWire } from '../../../entity/consensus/frame/validation';
+import { assertEntityFrameTotalByteBudget, ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES, measureEntityFrameWireBytes, selectEntityFrameTxPrefixForWireBudget } from '../../../entity/consensus/frame';
 import { LIMITS } from '../../../config/constants';
 
 const entityId = `0x${'01'.repeat(32)}`;
@@ -97,4 +99,54 @@ test('proposed Entity frames require the exact signed-hash manifest', () => {
     ...frameWithoutManifest,
     hashesToSign: [],
   }, 'EntityFrame')).toThrow('EntityFrame.hashesToSign cannot be empty');
+});
+
+test('Entity frame wire fit reserves a third of the 10 MB limit for apply-time events', () => {
+  expect(ENTITY_FRAME_WIRE_EVENT_SLACK_BYTES).toBe(Math.floor(LIMITS.MAX_FRAME_SIZE_BYTES / 3));
+});
+
+test('sealed Entity frame wire errors name hashesToSign separately from the hash payload', () => {
+  const pad = 'x'.repeat(LIMITS.MAX_FRAME_SIZE_BYTES);
+  const frame = {
+    height: 1,
+    parentFrameHash: 'genesis',
+    stateRoot: `0x${'11'.repeat(32)}`,
+    authorityRoot: `0x${'22'.repeat(32)}`,
+    timestamp: 1,
+    entityContext: emptyContext,
+    txs: [],
+    events: [],
+    hash: `0x${'33'.repeat(32)}`,
+    leader: { proposerSignerId: signerId, view: 0 },
+    hashesToSign: [{ hash: `0x${'44'.repeat(32)}`, type: 'entityFrame', context: pad }],
+    collectedSigs: new Map([[signerId, [`0x${'55'.repeat(65)}`]]]),
+  };
+  expect(() => validateProposedEntityFrame(frame, 'EntityFrame')).toThrow(/hashesToSign=\d+:sigs=/);
+});
+
+test('unsigned Entity frames estimate sealed bytes before sign', () => {
+  const pad = 'x'.repeat(LIMITS.MAX_FRAME_SIZE_BYTES);
+  const frame = {
+    height: 1,
+    parentFrameHash: 'genesis',
+    stateRoot: `0x${'11'.repeat(32)}`,
+    authorityRoot: `0x${'22'.repeat(32)}`,
+    timestamp: 1,
+    entityContext: emptyContext,
+    txs: [],
+    events: [],
+    hash: `0x${'33'.repeat(32)}`,
+    leader: { proposerSignerId: signerId, view: 0 },
+    hashesToSign: [{ hash: `0x${'44'.repeat(32)}`, type: 'entityFrame', context: pad }],
+  };
+  expect(() => assertEstimatedSealedEntityFrameWire(frame, signerId, true, 'SingleSignerEntityFrame'))
+    .toThrow(/hashesToSign=\d+:sigs=/);
+});
+
+test('proposal signs only after the estimated sealed wire fits', () => {
+  const start = readFileSync(join(import.meta.dir, '../../../entity/consensus/proposal/start.ts'), 'utf8');
+  const estimateAt = start.indexOf('assertEstimatedSealedEntityFrameWire');
+  const signAt = start.indexOf('signProposalManifest');
+  expect(estimateAt).toBeGreaterThan(0);
+  expect(estimateAt).toBeLessThan(signAt);
 });

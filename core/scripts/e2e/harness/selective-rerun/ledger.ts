@@ -225,10 +225,21 @@ export const recordSelectiveRerunPass = (
   });
 };
 
+export type BroadRunLedgerFilter = Readonly<{
+  kind?: SelectiveRerunKind;
+  targets?: readonly string[];
+}>;
+
 export const assertBroadRunHasNoUnresolvedReruns = (
   path = DEFAULT_LEDGER_PATH,
+  filter?: BroadRunLedgerFilter,
 ): void => {
-  const unresolved = readSelectiveRerunLedger(path).unresolved;
+  const targetSet = filter?.targets === undefined ? undefined : new Set(filter.targets);
+  const unresolved = readSelectiveRerunLedger(path).unresolved.filter(entry => {
+    if (filter?.kind !== undefined && entry.kind !== filter.kind) return false;
+    if (targetSet !== undefined && !targetSet.has(entry.target)) return false;
+    return true;
+  });
   if (unresolved.length === 0) return;
   const table = unresolved
     .map(entry => {

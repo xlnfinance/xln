@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { getBytes } from 'ethers';
 import { createOnionEnvelopes, computeHtlcEnvelopeContextHash, deriveHtlcLockIdAtHop, unwrapEnvelope } from '../../../protocol/htlc/codec/envelope';
-import { decryptOpaqueHtlcBytes } from '../../../protocol/htlc/multi-recipient';
+import { assertOpaqueHtlcCiphertext, decryptOpaqueHtlcBytes, hashOpaqueHtlcCiphertext } from '../../../protocol/htlc/multi-recipient';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const hex = (bytes: Uint8Array): string =>
   `0x${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -67,8 +69,10 @@ describe('opaque Entity HTLC encryption', () => {
       }),
     ));
     expect('finalRecipient' in hubLayer).toBe(false);
-    expect(JSON.stringify(hubLayer)).not.toContain(preimage.slice(2));
     if ('finalRecipient' in hubLayer) throw new Error('expected intermediary layer');
+    expect(Object.keys(hubLayer.innerEnvelope).sort()).toEqual(['ciphertext', 'version']);
+    expect(assertOpaqueHtlcCiphertext(hubLayer.innerEnvelope)).toEqual(hubLayer.innerEnvelope);
+    expect(JSON.stringify(hubLayer)).not.toContain(preimage.slice(2));
     expect(() => decryptOpaqueHtlcBytes(
       hubLayer.innerEnvelope, publicKeys.get(target)!, hubSecret,
       computeHtlcEnvelopeContextHash({
@@ -85,5 +89,22 @@ describe('opaque Entity HTLC encryption', () => {
       { version: 'xln:htlc-opaque:v1', ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
       publicKey, `0x${'31'.repeat(32)}`, `0x${'41'.repeat(32)}`,
     )).toThrow('HTLC_ENTITY_ENCRYPTION_KEYPAIR_MISMATCH');
+  });
+
+  test('content-keyed hash memos are byte-identical to a cold hash', () => {
+    const opaque = {
+      version: 'xln:htlc-opaque:v1' as const,
+      ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    };
+    const context = {
+      fromEntityId: entity('a'), toEntityId: entity('b'), domain, lockId: `0x${'41'.repeat(32)}`,
+      hashlock: `0x${'51'.repeat(32)}`, tokenId: 1, amount: 10n, timelock: 100_000n, revealBeforeHeight: 100,
+    };
+    expect(hashOpaqueHtlcCiphertext(opaque)).toBe(hashOpaqueHtlcCiphertext({ ...opaque }));
+    expect(computeHtlcEnvelopeContextHash(context)).toBe(computeHtlcEnvelopeContextHash({ ...context }));
+    expect(readFileSync(join(import.meta.dir, '../../../protocol/htlc/multi-recipient.ts'), 'utf8'))
+      .toContain('opaqueCiphertextHashMemo');
+    expect(readFileSync(join(import.meta.dir, '../../../protocol/htlc/codec/envelope.ts'), 'utf8'))
+      .toContain('envelopeContextHashMemo');
   });
 });

@@ -383,4 +383,44 @@ describe('aggregated market maker health', () => {
     expect(mergedDirections.ok).toBe(true);
     expect(mergedDirections.cross.routes.every(route => route.depthReady)).toBe(true);
   });
+
+  test('same-chain HLT skip-cross is ready without unused cross-j routes', () => {
+    const aggregated = buildAggregatedMarketMakerHealth({
+      mmEnabled: true,
+      marketMakerActive: true,
+      marketMakerHealth: {
+        marketMaker: {
+          enabled: true,
+          ok: true,
+          entityId: '0xmm',
+          expectedOffersPerHub: 60,
+          hubs: ['0xhub1', '0xhub2', '0xhub3'].map(hubEntityId => ({
+            hubEntityId,
+            offers: 60,
+            ready: true,
+            depthReady: true,
+            pairs: [{ pairId: '1/2', offers: 20, ready: true, depthReady: true, expectedOffers: 20 }],
+          })),
+          cross: {
+            applicable: false,
+            ok: true,
+            expectedRoutes: 0,
+            expectedOffersPerRoute: 0,
+            expectedOffersPerPair: 0,
+            routeCount: 0,
+            routes: [],
+          },
+        },
+      },
+      hubEntityIds: ['0xhub1', '0xhub2', '0xhub3'],
+      expectedHubCount: 3,
+      entityId: '0xmm',
+      startupPhase: 'offers-ready',
+    });
+
+    expect(aggregated.ok).toBe(true);
+    expect(aggregated.failure).toBeNull();
+    expect(aggregated.cross.applicable).toBe(false);
+    expect(aggregated.cross.ok).toBe(true);
+  });
 });

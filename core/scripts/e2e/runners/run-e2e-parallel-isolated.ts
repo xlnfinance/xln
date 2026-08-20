@@ -2428,7 +2428,7 @@ async function main(): Promise<void> {
   }
   const args = parseArgs();
   const exactRequestedTarget = args.pwFiles.length === 1 && /^.+\.spec\.ts::.+$/.test(args.pwFiles[0] ?? '');
-  if (!exactRequestedTarget) assertBroadRunHasNoUnresolvedReruns();
+  if (!exactRequestedTarget) assertBroadRunHasNoUnresolvedReruns(undefined, { kind: 'e2e' });
   // Artifact retention changes only deletion policy. Every top-level run must
   // still acquire a fresh lease so Playwright children can prove that their
   // parent owns the shared evidence workspace.

@@ -65,6 +65,26 @@ export const paymentReceiverIndex = (
 };
 
 /**
+ * Same-population pairing: every user both sends and receives. A rotation
+ * whose shift is in 1..n-1 is a derangement, so nobody pays themselves.
+ */
+export const paymentReceiverIndexSamePopulation = (
+  senderIndex: number,
+  round: number,
+  users: number,
+): number => {
+  if (!Number.isSafeInteger(users) || users < 2) {
+    throw new Error(`HLT_PAYMENT_SAME_POPULATION_INVALID:${users}`);
+  }
+  if (!Number.isSafeInteger(senderIndex) || senderIndex < 0 || senderIndex >= users) {
+    throw new Error(`HLT_PAYMENT_SENDER_INDEX_INVALID:${senderIndex}`);
+  }
+  if (!Number.isSafeInteger(round) || round < 0) throw new Error(`HLT_PAYMENT_ROUND_INVALID:${round}`);
+  const shift = 1 + (round % (users - 1));
+  return (senderIndex + shift) % users;
+};
+
+/**
  * How much each receiver is owed after `rounds` rounds. With a permutation per
  * round every receiver is paid exactly once per round, so the expectation is
  * uniform — but it is derived rather than assumed, because a future pairing
@@ -80,6 +100,22 @@ export const paymentTotalsByReceiver = (
   for (let round = 0; round < rounds; round += 1) {
     for (let senderIndex = 0; senderIndex < senders; senderIndex += 1) {
       const receiver = paymentReceiverIndex(senderIndex, round, receivers);
+      totals[receiver] = totals[receiver]! + paymentAmountFor(senderIndex, round, range);
+    }
+  }
+  return totals;
+};
+
+/** Same-population derangement totals; must match `paymentReceiverIndexSamePopulation`. */
+export const paymentTotalsByReceiverSamePopulation = (
+  users: number,
+  rounds: number,
+  range: HltAmountRange,
+): bigint[] => {
+  const totals = Array.from({ length: users }, () => 0n);
+  for (let round = 0; round < rounds; round += 1) {
+    for (let senderIndex = 0; senderIndex < users; senderIndex += 1) {
+      const receiver = paymentReceiverIndexSamePopulation(senderIndex, round, users);
       totals[receiver] = totals[receiver]! + paymentAmountFor(senderIndex, round, range);
     }
   }
