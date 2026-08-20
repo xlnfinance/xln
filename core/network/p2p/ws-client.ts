@@ -653,6 +653,10 @@ export class RuntimeWsClient {
   }
 
   private verifyInboundDirectFrame(msg: RuntimeWsMessage): boolean {
+    // Relay error frames carry no `from`/auth — they come from the transport
+    // itself, not the peer. Dropping them on the identity check silently
+    // swallowed every async delivery rejection (586 lost bilateral ACKs).
+    if (msg.type === 'error') return true;
     const directPeerRuntimeId = this.helloAudience?.startsWith('xln-runtime:')
       ? normalizeRuntimeId(this.helloAudience.slice('xln-runtime:'.length))
       : '';
