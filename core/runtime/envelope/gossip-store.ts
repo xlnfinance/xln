@@ -10,7 +10,6 @@ type InfraDbAccess = {
   getInfraDb: (env: RuntimeReplica) => Level<Buffer, Buffer>;
 };
 
-const INFRA_GOSSIP_INDEX_KEY = 'gossip:index';
 const INFRA_GOSSIP_PROFILE_PREFIX = 'gossip:profile:';
 const makeInfraGossipProfileKey = (entityId: string): string => `gossip:profile:${String(entityId).toLowerCase()}`;
 const infraGossipLog = createStructuredLogger('runtime.envelope_gossip');
@@ -36,7 +35,6 @@ const pruneInfraGossipProfile = async (db: Level<Buffer, Buffer>, entityId: stri
   if (!normalizedEntityId) return;
   const batch = db.batch();
   batch.del(Buffer.from(makeInfraGossipProfileKey(normalizedEntityId)));
-  batch.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
   await batch.write();
 };
 
@@ -82,9 +80,6 @@ export const loadGossipProfilesFromInfraDb = async (
       await pruneInfraGossipProfile(db, entityId);
     }
   }
-  const migration = db.batch();
-  migration.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
-  await migration.write();
 };
 
 export const clearInfraGossipProfiles = async (
@@ -106,6 +101,5 @@ export const clearInfraGossipProfiles = async (
     }
     batch.del(Buffer.from(makeInfraGossipProfileKey(entityId)));
   }
-  batch.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
   await batch.write();
 };

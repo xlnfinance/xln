@@ -75,7 +75,6 @@ test('loadGossipProfilesFromInfraDb prunes malformed persisted profile', async (
   process.env['XLN_LOG_LEVEL'] = 'error';
   const entityId = `0x${'aa'.repeat(32)}`;
   const db = new FakeInfraDb();
-  db.store.set('gossip:index', Buffer.from(serializeTaggedJson([entityId])));
   db.store.set(`gossip:profile:${entityId}`, Buffer.from(serializeTaggedJson({ entityId })));
 
   const announced: unknown[] = [];
@@ -95,7 +94,6 @@ test('loadGossipProfilesFromInfraDb prunes malformed persisted profile', async (
 
     expect(announced).toHaveLength(0);
     expect(db.store.has(`gossip:profile:${entityId}`)).toBe(false);
-    expect(db.store.has('gossip:index')).toBe(false);
   } finally {
     if (previousLogLevel === undefined) delete process.env['XLN_LOG_LEVEL'];
     else process.env['XLN_LOG_LEVEL'] = previousLogLevel;
@@ -111,7 +109,6 @@ test('infra gossip restore discovers every durable profile when the retired inde
 
   // The old read/modify/write index could publish only one id even though both
   // profile records had already committed in independent LevelDB batches.
-  db.store.set('gossip:index', Buffer.from(serializeTaggedJson([firstEntityId])));
   db.store.set(
     `gossip:profile:${firstEntityId}`,
     Buffer.from(serializeTaggedJson(buildCryptographicProfileFixture({
