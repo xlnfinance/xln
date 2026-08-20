@@ -26,6 +26,7 @@ describe('hlt payment population', () => {
     expect(source).toContain('forEachLimited');
     expect(source).toContain('sendEnqueued');
     expect(source).toContain('waitForHubSettlement');
+    expect(source).toContain('requireQuoteDelta');
     expect(source).toContain('accountsLimit: pageLimit');
     expect(readFileSync(
       join(import.meta.dir, '../../../scripts/operations/hlt/lanes/worker-lanes.ts'),
@@ -230,6 +231,7 @@ describe('hlt payment population', () => {
     expect(source).toContain('extraEntityTxs');
     expect(source).toContain('HLT_MIXED_TICK_LANE_MISMATCH');
     expect(source).toContain('round % swapMatches !== 0');
+    expect(source).toContain('expectedPayments,\n      false');
     expect(source).not.toContain('hlt-mixed-swap-${tick + 1}');
     expect(source).not.toContain('hlt-mixed-pay-${tick + 1}');
   });

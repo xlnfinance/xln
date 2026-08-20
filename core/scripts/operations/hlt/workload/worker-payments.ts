@@ -267,6 +267,7 @@ export const waitForHubSettlement = async (
   receiverIds: readonly string[],
   baselines: ReadonlyMap<string, bigint>,
   expected: ReadonlyMap<string, bigint>,
+  requireQuoteDelta = true,
 ): Promise<void> => {
   const startedAt = Date.now();
   const deadline = startedAt + DELIVERY_TIMEOUT_MS;
@@ -291,7 +292,7 @@ export const waitForHubSettlement = async (
       credited += received > 0n ? received : 0n;
       if (received < amount) pendingReceivers += 1;
     }
-    if (pendingReceivers === 0 && core.lockBookOpen === 0) return;
+    if (core.lockBookOpen === 0 && (pendingReceivers === 0 || !requireQuoteDelta)) return;
     const elapsedMs = Date.now() - startedAt;
     if (credited !== lastCredited) {
       lastCredited = credited;

@@ -160,7 +160,6 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       },
     });
     const submittedPayments = users.length * args.rounds;
-    await waitForHubSettlement(hub, hubIdentity.entityId, receiverIds, baselines, expectedPayments);
     const finalBook = submitted.finalBook;
     const matchedElapsedMs = submitted.economicCompletionElapsedMs;
     const settlementEvidence = await waitForFullySettledEvidence({
@@ -178,6 +177,17 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       startedAt,
     });
     const rates = assertProductionSwapFullySettled(settlementEvidence);
+    // Swaps also move the quote token, so receiver inCapacity cannot authorize
+    // mixed payment delivery. Bilateral swap quiescence plus an empty Hub
+    // lockBook is the mixed completion signal; payments-only still uses deltas.
+    await waitForHubSettlement(
+      hub,
+      hubIdentity.entityId,
+      receiverIds,
+      baselines,
+      expectedPayments,
+      false,
+    );
     const deliveredElapsedMs = Math.max(1, Math.ceil(performance.now() - startedAt));
     const hubDurableAfter = decodeLoadFrame(await hub.adapter.read<unknown>('frame/latest'));
 
