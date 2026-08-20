@@ -865,6 +865,11 @@ export type StorageFrameSaveOptions = {
   pendingRuntimeInput?: RuntimeInput;
   historyRecords?: RuntimeHistoryRecord[];
   entityContexts: Map<string, import('../types/entity/infra-context').EntityInfraContext>;
+  /**
+   * True only for the live Runtime commit that just applied these objects.
+   * Recovery, tests, and any other writer keep the default full parse.
+   */
+  inProcessInfraValidated?: boolean;
   tryOpenDb: (env: RuntimeReplica) => Promise<boolean>;
   getRuntimeDb: (env: RuntimeReplica) => RuntimeDbLike;
   tryOpenRuntimeWalDb: (env: RuntimeReplica) => Promise<boolean>;
@@ -1609,6 +1614,7 @@ const buildStorageFrameRecordPlan = (
   mark('frameEncode.outputPayloads');
   const entityContextPayloads = prepareEntityContextPayloadRows(
     options.entityContexts,
+    options.inProcessInfraValidated === true,
   );
   mark('frameEncode.entityContexts');
   const runtimeMachineGraph = prepareRuntimeMachineGraphRows(

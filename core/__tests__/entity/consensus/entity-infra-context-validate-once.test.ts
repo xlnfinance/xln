@@ -24,7 +24,7 @@ describe('Entity infra context in-process validate-once', () => {
     expect(() => encodeCanonicalConsensusValue(decoded)).not.toThrow();
   });
 
-  test('live proposal skips the second parse; WAL/network still call it', () => {
+  test('live proposal and live WAL write skip the second parse; recovery still calls it', () => {
     const application = readFileSync(
       join(import.meta.dir, '../../../entity/consensus/frame/application.ts'),
       'utf8',
@@ -37,10 +37,22 @@ describe('Entity infra context in-process validate-once', () => {
       join(import.meta.dir, '../../../entity/consensus/frame/infra-context-validation.ts'),
       'utf8',
     );
+    const walWrite = readFileSync(
+      join(import.meta.dir, '../../../storage/wal/entity-context-payload.ts'),
+      'utf8',
+    );
+    const walCommit = readFileSync(
+      join(import.meta.dir, '../../../storage/commit/commit.ts'),
+      'utf8',
+    );
     expect(application).toContain('if (!inProcessInfraValidated)');
     expect(application).toContain('entityContext = validateEntityInfraContext(entityContext)');
     expect(start).toContain('env.state.timestamp,\n    !fitted.replayed');
+    expect(walWrite).toContain('inProcessInfraValidated\n      ? context\n      : validateEntityInfraContext(context)');
+    expect(walWrite).toContain('const context = validateEntityInfraContext({');
+    expect(walCommit).toContain('inProcessInfraValidated: true');
     expect(validation).not.toContain('VALIDATED_ENTITY_INFRA_CONTEXT');
     expect(validation).not.toContain('Symbol(');
+    expect(walWrite).not.toContain('Symbol(');
   });
 });

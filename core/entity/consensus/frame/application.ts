@@ -1464,8 +1464,8 @@ const applyEntityFrameWithIsolation = async (
 ): Promise<EntityFrameResult> => {
   // Live proposal already ran validateEntityInfraContext in materialize.
   // Do not stamp that object — Entity frame/state hashing rejects symbol keys
-  // (100b: ENTITY_STATE_ROOT_SYMBOL_KEY at hub mesh). WAL/network/replay
-  // keep the full parse via the default false flag.
+  // (100b: ENTITY_STATE_ROOT_SYMBOL_KEY at hub mesh). Live WAL write uses the
+  // same flag. Network/replay apply and WAL recovery keep the full parse.
   if (!inProcessInfraValidated) {
     entityContext = validateEntityInfraContext(entityContext);
   }

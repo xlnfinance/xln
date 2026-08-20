@@ -183,6 +183,7 @@ const saveRuntimeEnvironment = async (
           formatPerfMs,
           historyRecords: pendingHistoryRecords,
           entityContexts,
+          inProcessInfraValidated: true,
           stopStaleWriterOnHeadAhead: runtimeIsBrowser && !env.scenarioMode,
           ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
           ...(currentFrameOutputs === undefined
