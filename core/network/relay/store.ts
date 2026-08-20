@@ -401,7 +401,8 @@ const updateDebugIncident = (store: RelayStore, event: RelayDebugEvent): RelayDe
   return persisted ?? null;
 };
 
-export const pushDebugEvent = (
+export const relayDeliveryWarnAt = new Map<string, number>();
+const pushDebugEvent = (
   store: RelayStore,
   event: Omit<RelayDebugEvent, 'id' | 'ts'>,
 ): RelayDebugIncident | null => {
@@ -423,6 +424,20 @@ export const pushDebugEvent = (
     throw new Error(`DEBUG_EVENT_TOO_LARGE:bytes=${eventBytes}:max=${MAX_DEBUG_EVENT_BYTES}`);
   }
   store.debugId = nextDebugId;
+  // Drain investigations live on these events: a stuck bilateral ACK leaves
+  // no other trace. Surface non-delivered outcomes at warn (rate-limited per
+  // reason) so one HLT run's log answers "where did the ACK die".
+  if (storedEvent.event === 'delivery') {
+    const reason = String((storedEvent as { reason?: unknown }).reason ?? 'unknown');
+    const now = Date.now();
+    const lastAt = relayDeliveryWarnAt.get(reason) ?? 0;
+    if (now - lastAt >= 10_000) {
+      relayDeliveryWarnAt.set(reason, now);
+      console.warn(
+        `[RELAY-DELIVERY] non-delivered reason=${reason} from=${String(storedEvent.from ?? '').slice(-8)} to=${String(storedEvent.to ?? '').slice(-8)} msgType=${String((storedEvent as { msgType?: unknown }).msgType ?? '')}`,
+      );
+    }
+  }
   store.debugEvents.push(storedEvent);
   store.debugEventByteLengths.push(eventBytes);
   store.debugEventBytes += eventBytes;
