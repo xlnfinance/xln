@@ -166,6 +166,11 @@ const spawnLaneRuntime = async (options: {
       XLN_RADAPTER_READ_PER_SEC: String(100 * options.identities.length),
       XLN_RADAPTER_CONTROL_BURST: String(200 * options.identities.length),
       XLN_RADAPTER_CONTROL_PER_SEC: String(100 * options.identities.length),
+      // Same budget hlt-run.ts gives the mesh: a 1000-user barrier asks each
+      // daemon about every receiver, and the default 30 lookups / 60s 429s
+      // the worker (1000b: GOSSIP_PROFILE_LOOKUP_RATE_LIMITED).
+      XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT: String(Math.max(64, Number(process.env['XLN_HLT_USERS'] || '0') || 64)),
+      XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT: String(Math.max(1_000, (Number(process.env['XLN_HLT_USERS'] || '0') || 64) * 4)),
     },
     {
       startupSignersJson: safeStringify(

@@ -122,7 +122,8 @@ const isTransientGossipSocketError = (error: unknown): boolean => {
   return text.includes('FailedToOpenSocket')
     || text.includes('typo in the url')
     || text.includes('ECONNRESET')
-    || text.includes('ECONNREFUSED');
+    || text.includes('ECONNREFUSED')
+    || text.includes('GOSSIP_PROFILE_LOOKUP_RATE_LIMITED');
 };
 
 export const waitForRoutableReceivers = async (

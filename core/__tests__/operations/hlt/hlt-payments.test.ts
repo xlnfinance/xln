@@ -26,7 +26,7 @@ describe('hlt payment population', () => {
     expect(source).toContain('forEachLimited');
     expect(source).toContain('pendingReads');
     expect(source).toContain('isTransientGossipSocketError');
-    expect(source).toContain('FailedToOpenSocket');
+    expect(source).toContain('GOSSIP_PROFILE_LOOKUP_RATE_LIMITED');
     expect(source).toContain('sendEnqueued');
     expect(source).toContain('waitForHubSettlement');
     expect(source).toContain('requireQuoteDelta');
@@ -38,6 +38,10 @@ describe('hlt payment population', () => {
       join(import.meta.dir, '../../../scripts/operations/hlt/lanes/worker-lanes.ts'),
       'utf8',
     )).toContain('waitForOwnReceiveReadyProfile');
+    expect(readFileSync(
+      join(import.meta.dir, '../../../scripts/operations/hlt/lanes/lane-runtimes.ts'),
+      'utf8',
+    )).toContain('XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT');
   });
 
   test('every round pairs senders and receivers as a permutation', () => {

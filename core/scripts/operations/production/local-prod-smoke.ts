@@ -169,6 +169,13 @@ const localTestLease = await acquireLocalTestPortLease({
   requiredOffsets: [0, 1, 4, 7, 8, 10, 11, 12, 13],
 });
 const inheritedProcessEnv = stripLocalTestLeaseEnv(process.env);
+const hltUsers = Number(process.env['XLN_HLT_USERS'] || '0');
+if (Number.isSafeInteger(hltUsers) && hltUsers > 0) {
+  inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'] =
+    process.env['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'] || String(Math.max(64, hltUsers));
+  inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] =
+    process.env['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] || String(Math.max(1_000, hltUsers * 4));
+}
 const portBase = localTestLease.basePort;
 
 const rpcPort = portBase;
@@ -1184,6 +1191,12 @@ const main = async (): Promise<void> => {
     XLN_RADAPTER_CONTROL_PER_SEC: process.env['XLN_RADAPTER_CONTROL_PER_SEC'] || '1000',
     XLN_RADAPTER_SEND_BURST: process.env['XLN_RADAPTER_SEND_BURST'] || '2000',
     XLN_RADAPTER_SEND_PER_SEC: process.env['XLN_RADAPTER_SEND_PER_SEC'] || '1000',
+    ...(inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'] ? {
+      XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT:
+        inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_PER_CLIENT_LIMIT'],
+      XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT:
+        inheritedProcessEnv['XLN_GOSSIP_PROFILE_LOOKUP_GLOBAL_LIMIT'] || '',
+    } : {}),
     MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1',
     XLN_RUNTIME_TICK_DELAY_MS: process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '0',
     MARKET_MAKER_RUNTIME_TICK_DELAY_MS:
