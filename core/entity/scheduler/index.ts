@@ -304,7 +304,7 @@ async function maintainPendingAccounts(
           `:cached=${cachedInputHeight}`,
       );
     }
-    if (frameAge <= ACCOUNT_PENDING_RESEND_AFTER_MS) continue;
+    if (frameAge < ACCOUNT_PENDING_RESEND_AFTER_MS) continue;
 
     outputs.push({
       entityId: account.pendingAccountInput.toEntityId,

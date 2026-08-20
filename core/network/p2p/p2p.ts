@@ -532,7 +532,11 @@ export class RuntimeP2P {
           // hitting the same dead path forever (stuck pending frames). Re-
           // resolve the world: fresh gossip for direct endpoints, then a
           // clean reconnect cycle.
-          if (error.message.startsWith('P2P_RELAY_SEND_REJECTED')) {
+          if (
+            error.message.includes('TARGET_NOT_CONNECTED') ||
+            error.message.includes('TARGET_OFFLINE') ||
+            error.message.includes('RATE_LIMITED')
+          ) {
             this.refreshGossip();
             this.reconnect();
           }
