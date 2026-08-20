@@ -35,6 +35,7 @@ import {
   type GossipProfileBatchRequest,
 } from './gossip/profile-batch';
 import { createStructuredLogger, shortId } from '../../support/logger';
+import { HEAVY_LOGS } from '../../support/debug-flags';
 import {
   isBrowserDirectWsEndpointAllowed,
   isSameWsUrlList,
@@ -1102,6 +1103,12 @@ export class RuntimeP2P {
     timestamp: number | undefined,
   ): Promise<void> {
     if (this.closing || this.closed) return;
+    // Drain witness: the last trace of an inbound bilateral ACK before the
+    // deterministic intake. One debug line per envelope, scoped so an HLT run
+    // can answer "did the lost ACK reach this runtime's transport at all".
+    if (HEAVY_LOGS) {
+      console.debug(`[P2P-INBOUND] entity_inputs from=${from.slice(-8)} inputs=${envelope.entityInputs.length}`);
+    }
     assertRuntimeEntityInputsEnvelopeSource(this.env, from, envelope);
     const requiredProfileIds = uniqueTransportValues(
       envelope.entityInputs.flatMap(input => this.collectProfileEntityIdsForInput(input)),
