@@ -401,8 +401,9 @@ const updateDebugIncident = (store: RelayStore, event: RelayDebugEvent): RelayDe
   return persisted ?? null;
 };
 
-export const relayDeliveryWarnAt = new Map<string, number>();
-const pushDebugEvent = (
+const relayDeliveryWarnAt = new Map<string, number>();
+
+export const pushDebugEvent = (
   store: RelayStore,
   event: Omit<RelayDebugEvent, 'id' | 'ts'>,
 ): RelayDebugIncident | null => {
