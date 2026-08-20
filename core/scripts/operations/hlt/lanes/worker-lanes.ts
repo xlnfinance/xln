@@ -350,9 +350,14 @@ const provisionLoadLanes = async (
  * `extendCredit` writes `set_credit_limit` as an absolute assignment, not a
  * delta. A later payment grant on the swap quote token must not lower the
  * swap quote window or every taker bid is rejected and mixed HLT matches 0.
+ * Mixed payments also spend that quote, so the payment extra is summed onto
+ * the live swap window (`additive: true`) — 100c died 2000 short of a 10M fill.
  */
 export const raisedCreditLimit = (current: bigint, needed: bigint): bigint | null =>
   current >= needed ? null : needed;
+
+export const additiveCreditTarget = (current: bigint, extra: bigint): bigint =>
+  current + extra;
 
 const replicaCreditLimits = async (
   runtime: ConnectedRuntime,
@@ -374,19 +379,23 @@ export const grantBilateralTokenCredit = async (options: {
   tokenId: number;
   amounts: readonly bigint[];
   label: string;
+  additive?: boolean;
 }): Promise<void> => {
   if (options.amounts.length !== options.runtimes.length) {
     throw new Error('HLT_BILATERAL_CREDIT_CARDINALITY_INVALID');
   }
+  const userTargets: bigint[] = [];
   await runInBatches(options.runtimes, async (lane, index) => {
-    const needed = options.amounts[index]!;
+    const extra = options.amounts[index]!;
     const { peerCreditLimit } = await replicaCreditLimits(
       lane.runtime,
       lane.identity.entityId,
       options.hubIdentity.entityId,
       options.tokenId,
     );
-    const amount = raisedCreditLimit(peerCreditLimit, needed);
+    const target = options.additive ? additiveCreditTarget(peerCreditLimit, extra) : extra;
+    userTargets[index] = target;
+    const amount = raisedCreditLimit(peerCreditLimit, target);
     if (amount === null) return;
     await sendObserved(lane.runtime, `${options.label}-user-${lane.laneKey}`, {
       runtimeTxs: [],
@@ -409,17 +418,18 @@ export const grantBilateralTokenCredit = async (options: {
     lane.identity.entityId,
     options.hubIdentity.entityId,
     options.tokenId,
-    options.amounts[index]!,
+    userTargets[index]!,
   ));
   const hubTargets = await Promise.all(options.runtimes.map(async (lane, index) => {
-    const needed = options.amounts[index]!;
+    const extra = options.amounts[index]!;
     const { ownCreditLimit } = await replicaCreditLimits(
       lane.runtime,
       lane.identity.entityId,
       options.hubIdentity.entityId,
       options.tokenId,
     );
-    return { lane, amount: raisedCreditLimit(ownCreditLimit, needed) };
+    const target = options.additive ? additiveCreditTarget(ownCreditLimit, extra) : extra;
+    return { lane, amount: raisedCreditLimit(ownCreditLimit, target) };
   }));
   const hubGrants = hubTargets.filter((entry): entry is { lane: LaneRuntime; amount: bigint } => entry.amount !== null);
   const hubBatches = partitionLoadProvisioningBatches(hubGrants);

@@ -105,6 +105,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       runtimes: users,
       tokenId: PAYMENT_TOKEN_ID,
       amounts: quoteCredit,
+      additive: true,
       label: 'hlt-mixed-pay-credit',
     });
     await waitForRoutableReceivers(

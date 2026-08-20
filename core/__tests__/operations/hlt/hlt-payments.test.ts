@@ -11,7 +11,7 @@ import {
 import { buildHltPlan } from '../../../scripts/operations/hlt/economy';
 import { decodeLoadPaymentReport } from '../../../scripts/operations/hlt/boundary/worker-payment-boundary';
 import { parseWorkerArgs } from '../../../scripts/operations/hlt/worker-runtime';
-import { raisedCreditLimit } from '../../../scripts/operations/hlt/lanes/worker-lanes';
+import { raisedCreditLimit, additiveCreditTarget } from '../../../scripts/operations/hlt/lanes/worker-lanes';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -217,12 +217,14 @@ describe('hlt payment population', () => {
     expect(raisedCreditLimit(20_000_000n, 4_000n)).toBeNull();
     expect(raisedCreditLimit(0n, 4_000n)).toBe(4_000n);
     expect(raisedCreditLimit(1_000n, 4_000n)).toBe(4_000n);
+    expect(additiveCreditTarget(20_000_000n, 4_000n)).toBe(20_004_000n);
+    expect(raisedCreditLimit(20_000_000n, additiveCreditTarget(20_000_000n, 4_000n))).toBe(20_004_000n);
     const source = readFileSync(
       join(import.meta.dir, '../../../scripts/operations/hlt/lanes/worker-lanes.ts'),
       'utf8',
     );
-    expect(source).toContain('raisedCreditLimit(peerCreditLimit, needed)');
-    expect(source).toContain('raisedCreditLimit(ownCreditLimit, needed)');
+    expect(source).toContain('additive ? additiveCreditTarget(peerCreditLimit, extra)');
+    expect(source).toContain('additive ? additiveCreditTarget(ownCreditLimit, extra)');
   });
 
   test('mixed worker folds payments into the same-j windowed submitter', () => {
@@ -235,6 +237,7 @@ describe('hlt payment population', () => {
     expect(source).toContain('HLT_MIXED_TICK_LANE_MISMATCH');
     expect(source).toContain('round % swapMatches !== 0');
     expect(source).toContain('expectedPayments,\n      false');
+    expect(source).toContain('additive: true');
     expect(source).not.toContain('readHubReceiverCredits');
     expect(source).not.toContain('hlt-mixed-swap-${tick + 1}');
     expect(source).not.toContain('hlt-mixed-pay-${tick + 1}');
