@@ -256,10 +256,10 @@ const collectInboundEntries = (
  * different outcomes claimed for one lock, is a fault worth halting on.
  */
 const canonicalizeInboundEntries = (entries: PreparedHtlcEntry[]): PreparedHtlcEntry[] => {
-  entries.sort((left, right) =>
-    preparedHtlcBindingKey(left.binding).localeCompare(preparedHtlcBindingKey(right.binding)));
+  const decorated = entries.map(entry => ({ key: preparedHtlcBindingKey(entry.binding), entry }));
+  decorated.sort((left, right) => left.key.localeCompare(right.key));
   const canonical: PreparedHtlcEntry[] = [];
-  for (const entry of entries) {
+  for (const { entry } of decorated) {
     const previous = canonical[canonical.length - 1];
     if (
       previous === undefined ||

@@ -125,10 +125,19 @@ export const assertOpaqueHtlcCiphertext = (value: unknown): OpaqueHtlcCiphertext
   return { version: HTLC_OPAQUE_CIPHERTEXT_VERSION, ciphertext: record['ciphertext'] };
 };
 
+const opaqueCiphertextHashMemo = new Map<string, string>();
+const OPAQUE_CIPHERTEXT_HASH_MEMO_MAX = 8192;
+
 export const hashOpaqueHtlcCiphertext = (value: OpaqueHtlcCiphertext): string => {
-  const packed = decodeBase64Bytes(assertOpaqueHtlcCiphertext(value).ciphertext);
+  const ciphertext = assertOpaqueHtlcCiphertext(value).ciphertext;
+  const memoized = opaqueCiphertextHashMemo.get(ciphertext);
+  if (memoized !== undefined) return memoized;
+  const packed = decodeBase64Bytes(ciphertext);
   const digest = sha256(packed);
-  return `0x${Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+  const hash = `0x${Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+  if (opaqueCiphertextHashMemo.size >= OPAQUE_CIPHERTEXT_HASH_MEMO_MAX) opaqueCiphertextHashMemo.clear();
+  opaqueCiphertextHashMemo.set(ciphertext, hash);
+  return hash;
 };
 
 export const encryptOpaqueHtlcBytes = (

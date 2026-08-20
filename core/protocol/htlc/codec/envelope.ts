@@ -46,8 +46,11 @@ export type HtlcEnvelopeContext = Readonly<{
   revealBeforeHeight: number;
 }>;
 
-export const computeHtlcEnvelopeContextHash = (context: HtlcEnvelopeContext): string =>
-  keccak256(new TextEncoder().encode(safeStringify({
+const envelopeContextHashMemo = new Map<string, string>();
+const ENVELOPE_CONTEXT_HASH_MEMO_MAX = 8192;
+
+export const computeHtlcEnvelopeContextHash = (context: HtlcEnvelopeContext): string => {
+  const encoded = safeStringify({
     version: 'xln:htlc-envelope-context:v1',
     fromEntityId: context.fromEntityId.toLowerCase(),
     toEntityId: context.toEntityId.toLowerCase(),
@@ -61,7 +64,14 @@ export const computeHtlcEnvelopeContextHash = (context: HtlcEnvelopeContext): st
     amount: context.amount,
     timelock: context.timelock,
     revealBeforeHeight: context.revealBeforeHeight,
-  })));
+  });
+  const memoized = envelopeContextHashMemo.get(encoded);
+  if (memoized !== undefined) return memoized;
+  const hash = keccak256(new TextEncoder().encode(encoded));
+  if (envelopeContextHashMemo.size >= ENVELOPE_CONTEXT_HASH_MEMO_MAX) envelopeContextHashMemo.clear();
+  envelopeContextHashMemo.set(encoded, hash);
+  return hash;
+};
 
 export const deriveHtlcLockIdAtHop = (rootLockId: string, hopIndex: number): string => {
   let lockId = rootLockId;
