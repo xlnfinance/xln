@@ -20,6 +20,7 @@ import {
 } from './settlement-book-evidence';
 
 export const MAX_SETTLEMENT_EVIDENCE_ACCOUNTS = 512;
+export const MAX_PENDING_ACCOUNT_SAMPLE = 8;
 const MAX_OFFERS = 4_096;
 const ENTITY_ID = /^0x[0-9a-f]{64}$/;
 const HASH = /^0x[0-9a-f]{64}$/;
@@ -43,6 +44,12 @@ type OfferEvidence = Readonly<{
   closed: boolean;
 }>;
 
+type PendingAccountSample = Readonly<{
+  entityId: string;
+  counterpartyEntityId: string;
+  height: number;
+}>;
+
 export type SettlementEvidenceResponse = Readonly<{
   runtimeHeight: number;
   book: SettlementBookEvidence | null;
@@ -55,7 +62,9 @@ export type SettlementEvidenceResponse = Readonly<{
     runtimeTxs: QueueEvidence;
     runtimeJInputs: QueueEvidence;
     retryEntries: QueueEvidence;
+    pendingAccountFrames: QueueEvidence;
   }>;
+  pendingAccountSample: readonly PendingAccountSample[];
   accounts: readonly Readonly<{
     entityId: string;
     counterpartyEntityId: string;
@@ -122,8 +131,31 @@ export const decodeSettlementEvidenceRequest = (value: unknown): SettlementEvide
 
 const digest = (value: unknown): string => keccak256(toUtf8Bytes(safeStringify(value)));
 const queue = (values: readonly unknown[]): QueueEvidence => ({ count: values.length, digest: digest(values) });
+const countedQueue = (count: number): QueueEvidence => ({ count, digest: digest(count) });
 const mapEntries = (value: ReadonlyMap<string, unknown> | undefined): readonly unknown[] =>
   Array.from(value?.entries() ?? []).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+
+/** RAM-only; drain must not walk Account history to learn Hub ACK backlog. */
+const pendingAccountFrameSnapshot = (
+  env: RuntimeReplica,
+): Readonly<{ count: number; sample: readonly PendingAccountSample[] }> => {
+  const sample: PendingAccountSample[] = [];
+  let count = 0;
+  for (const replica of env.state.eReplicas.values()) {
+    for (const [counterpartyEntityId, account] of replica.state.accounts) {
+      if (!account.pendingFrame) continue;
+      count += 1;
+      if (sample.length < MAX_PENDING_ACCOUNT_SAMPLE) {
+        sample.push({
+          entityId: replica.state.entityId,
+          counterpartyEntityId,
+          height: account.pendingFrame.height,
+        });
+      }
+    }
+  }
+  return { count, sample };
+};
 
 const committedOfferFlags = (
   frames: readonly AccountFrame[],
@@ -191,6 +223,7 @@ export const buildSettlementEvidence = async (
   const request = decodeSettlementEvidenceRequest(input);
   const mempool = env.runtimeMempool;
   const infrastructure = env.infrastructure;
+  const pending = pendingAccountFrameSnapshot(env);
   return {
     runtimeHeight: env.state.height,
     book: request.book === null ? null : buildSettlementBookEvidence(env, request.book),
@@ -203,7 +236,9 @@ export const buildSettlementEvidence = async (
       runtimeTxs: queue(mempool.runtimeTxs),
       runtimeJInputs: queue(mempool.jInputs ?? []),
       retryEntries: queue(mapEntries(infrastructure?.deferredNetworkMeta)),
+      pendingAccountFrames: countedQueue(pending.count),
     },
+    pendingAccountSample: pending.sample,
     accounts: await Promise.all(request.accounts.map(account =>
       accountEvidence(env, account, readAccountFrames))),
   };
@@ -253,11 +288,34 @@ const decodeResponseAccount = (value: unknown, index: number): SettlementEvidenc
   };
 };
 
+const decodePendingAccountSample = (value: unknown): SettlementEvidenceResponse['pendingAccountSample'] => {
+  if (!Array.isArray(value) || value.length > MAX_PENDING_ACCOUNT_SAMPLE) {
+    throw new Error('RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_INVALID');
+  }
+  return value.map((raw, index) => {
+    const entry = requireBoundaryRecord(raw, `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_ENTRY_INVALID:${index}`);
+    requireExactBoundaryKeys(
+      entry,
+      ['entityId', 'counterpartyEntityId', 'height'],
+      [],
+      `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_FIELDS_INVALID:${index}`,
+    );
+    return {
+      entityId: requireEntityId(entry['entityId'], `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_ENTITY_INVALID:${index}`),
+      counterpartyEntityId: requireEntityId(
+        entry['counterpartyEntityId'],
+        `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_COUNTERPARTY_INVALID:${index}`,
+      ),
+      height: requireBoundaryInteger(entry['height'], `RADAPTER_SETTLEMENT_RESPONSE_PENDING_SAMPLE_HEIGHT_INVALID:${index}`),
+    };
+  });
+};
+
 export const decodeSettlementEvidenceResponse = (value: unknown): SettlementEvidenceResponse => {
   const response = requireBoundaryRecord(value, 'RADAPTER_SETTLEMENT_RESPONSE_INVALID');
-  requireExactBoundaryKeys(response, ['runtimeHeight', 'book', 'queues', 'accounts'], [], 'RADAPTER_SETTLEMENT_RESPONSE_FIELDS_INVALID');
+  requireExactBoundaryKeys(response, ['runtimeHeight', 'book', 'queues', 'accounts', 'pendingAccountSample'], [], 'RADAPTER_SETTLEMENT_RESPONSE_FIELDS_INVALID');
   const queues = requireBoundaryRecord(response['queues'], 'RADAPTER_SETTLEMENT_RESPONSE_QUEUES_INVALID');
-  const queueKeys = ['processing', 'pendingOutputs', 'pendingNetworkOutputs', 'networkInbox', 'runtimeEntityInputs', 'runtimeTxs', 'runtimeJInputs', 'retryEntries'] as const;
+  const queueKeys = ['processing', 'pendingOutputs', 'pendingNetworkOutputs', 'networkInbox', 'runtimeEntityInputs', 'runtimeTxs', 'runtimeJInputs', 'retryEntries', 'pendingAccountFrames'] as const;
   requireExactBoundaryKeys(queues, queueKeys, [], 'RADAPTER_SETTLEMENT_RESPONSE_QUEUE_FIELDS_INVALID');
   if (!Array.isArray(response['accounts'])) throw new Error('RADAPTER_SETTLEMENT_RESPONSE_ACCOUNTS_INVALID');
   const decodedQueues = (key: typeof queueKeys[number]): QueueEvidence =>
@@ -274,7 +332,9 @@ export const decodeSettlementEvidenceResponse = (value: unknown): SettlementEvid
       runtimeTxs: decodedQueues('runtimeTxs'),
       runtimeJInputs: decodedQueues('runtimeJInputs'),
       retryEntries: decodedQueues('retryEntries'),
+      pendingAccountFrames: decodedQueues('pendingAccountFrames'),
     },
+    pendingAccountSample: decodePendingAccountSample(response['pendingAccountSample']),
     accounts: response['accounts'].map(decodeResponseAccount),
   };
 };

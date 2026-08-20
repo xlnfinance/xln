@@ -190,4 +190,59 @@ describe('pending Account resend cache', () => {
     expect(outputs).toHaveLength(1);
     expect(outputs[0]?.entityTxs).toEqual([{ type: 'accountInput', data: account.pendingAccountInput }]);
   });
+
+  test('crontab fail-fasts when pendingAccountInput height does not match pendingFrame', async () => {
+    const env = createEmptyEnv('pending-resend-height-mismatch');
+    env.quietRuntimeLogs = true;
+    const jurisdiction = makeJurisdiction('resend-height-mismatch', 31_337, 'a1', 'a2');
+    const account = makeAccount(FROM, TO, {
+      chainId: jurisdiction.chainId,
+      depositoryAddress: jurisdiction.depositoryAddress,
+    });
+    const pendingFrame = {
+      ...accountFrame(11, `0x${'cd'.repeat(32)}`),
+      timestamp: 1_000,
+    };
+    const cachedFrame = {
+      ...accountFrame(10, `0x${'ab'.repeat(32)}`),
+      timestamp: 1_000,
+    };
+    account.pendingFrame = pendingFrame;
+    account.pendingAccountInput = {
+      kind: 'frame',
+      fromEntityId: FROM,
+      toEntityId: TO,
+      domain: { ...account.state.domain },
+      disputeConfig: { ...account.state.disputeConfig },
+      proposal: { frame: cachedFrame, frameHanko: `0x${'34'.repeat(65)}` },
+    };
+    const replica = {
+      entityId: FROM,
+      signerId: '1',
+      mempool: [],
+      isProposer: true,
+      state: {
+        entityId: FROM,
+        height: 1,
+        timestamp: 100_000,
+        nonces: new Map(),
+        proposals: new Map(),
+        config: makeConfig('1', jurisdiction),
+        reserves: new Map(),
+        accounts: PersistentEntityAccountMap.fromMap(
+          new Map([[TO, account]]),
+          FROM,
+          computeEntityAccountValueHash,
+        ),
+        lastFinalizedJHeight: 0,
+        profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
+        crontabState: initCrontab(),
+      },
+    } as EntityReplica;
+
+    await expect(executeCrontab(env, replica, replica.state.crontabState!, {
+      manualBroadcastInInput: false,
+      accountChanges: new Set(),
+    })).rejects.toThrow('PENDING_ACCOUNT_RESEND_HEIGHT_MISMATCH');
+  });
 });

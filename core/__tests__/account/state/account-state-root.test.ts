@@ -139,6 +139,31 @@ describe('canonical account state root', () => {
     expect(computeAccountStateRoot(base.state)).toBe(root);
   });
 
+  test('replacing jNonce or settlementWorkspace misses the Account-root memo', () => {
+    const base = account();
+    const root = computeAccountStateRoot(base.state);
+    expect(computeAccountStateRoot(base.state)).toBe(root);
+
+    base.state.jNonce = 1;
+    const afterNonce = computeAccountStateRoot(base.state);
+    expect(afterNonce).not.toBe(root);
+    expect(computeAccountStateRoot(base.state)).toBe(afterNonce);
+
+    base.state.settlementWorkspace = {
+      workspaceHash: `0x${'88'.repeat(32)}`,
+      revision: 1,
+      status: 'awaiting_counterparty',
+      lastModifiedByLeft: true,
+      ops: [],
+      createdAt: 10,
+      lastUpdatedAt: 10,
+      executorIsLeft: true,
+    };
+    const afterWorkspace = computeAccountStateRoot(base.state);
+    expect(afterWorkspace).not.toBe(afterNonce);
+    expect(computeAccountStateRoot(base.state)).toBe(afterWorkspace);
+  });
+
   test('excludes mempool, signatures, pending frames, and proof caches', () => {
     const base = account();
     const root = computeAccountStateRoot(base.state);

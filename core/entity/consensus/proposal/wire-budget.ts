@@ -72,13 +72,13 @@ const initialFitCandidate = (
   allTxs: EntityTx[],
 ): number => {
   const fitHint = env.infrastructure?.wireBudgetFitHints?.get(fitHintKeyFor(replica));
-  // A hint only ever narrows the first attempt, never widens it: starting
-  // above what actually fits just wastes the first materialize on the same
-  // guaranteed-oversized set attempt 0 would have tried anyway.
+  // Hint is the last *sealed* tx count, not the empty-events fit. It only
+  // ever narrows the first attempt, never widens it.
   return fitHint !== undefined ? Math.min(allTxs.length, Math.ceil(fitHint * 1.15)) : allTxs.length;
 };
 
-const rememberFitHint = (
+/** Last sealed Entity-frame tx count. Empty-events fit must not write this. */
+export const recordEntityWireBudgetFitHint = (
   env: EntityRuntimeContext,
   replica: EntityReplica,
   fittedCount: number,
@@ -104,7 +104,6 @@ const fitTxsToPersistedWireContext = (
       initialFitCandidate(env, replica, allTxs),
     ),
   );
-  rememberFitHint(env, replica, fitted.length);
   return fitted;
 };
 
@@ -193,7 +192,6 @@ export const fitEntityProposalToWireBudget = async (params: {
       const wire = rest(materialized.entityContext);
       const bytes = timePerfPhase('entity.wireFit.measure', () => measureEntityFrameWireBytes({ ...wire, txs: slice }));
       if (bytes <= maxBytes) {
-        rememberFitHint(env, replica, slice.length);
         if (slice.length >= 100 || slice.length < allTxs.length) {
           entityLog.info('proposal.wire_budget_fit', {
             entityId: replica.state.entityId,

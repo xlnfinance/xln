@@ -44,6 +44,7 @@ type RuntimeSettlementEvidence = Readonly<{
   runtimeTxs: number;
   runtimeJInputs: number;
   retryEntries: number;
+  pendingAccountFrames: number;
 }>;
 
 export type ProductionSwapSettlementRates = Readonly<{
@@ -91,6 +92,7 @@ const decodeRuntimeEvidence = (value: unknown, index: number): RuntimeSettlement
   requireExactBoundaryKeys(runtime, [
     'role', 'processing', 'pendingOutputs', 'pendingNetworkOutputs', 'networkInbox',
     'runtimeEntityInputs', 'runtimeTxs', 'runtimeJInputs', 'retryEntries',
+    'pendingAccountFrames',
   ], [], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_FIELDS_INVALID:${index}`);
   const role = runtime['role'];
   if (role !== 'hub' && role !== 'load' && role !== 'market-maker') {
@@ -106,6 +108,7 @@ const decodeRuntimeEvidence = (value: unknown, index: number): RuntimeSettlement
     runtimeTxs: requireBoundaryInteger(runtime['runtimeTxs'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_TXS_INVALID:${index}`),
     runtimeJInputs: requireBoundaryInteger(runtime['runtimeJInputs'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_J_INPUTS_INVALID:${index}`),
     retryEntries: requireBoundaryInteger(runtime['retryEntries'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_RETRIES_INVALID:${index}`),
+    pendingAccountFrames: requireBoundaryInteger(runtime['pendingAccountFrames'], `PRODUCTION_SWAP_SETTLEMENT_RUNTIME_PENDING_FRAMES_INVALID:${index}`),
   };
 };
 

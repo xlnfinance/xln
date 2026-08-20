@@ -6,6 +6,7 @@
 
 import {
   decodeSettlementEvidenceResponse,
+  MAX_PENDING_ACCOUNT_SAMPLE,
   MAX_SETTLEMENT_EVIDENCE_ACCOUNTS,
   type SettlementEvidenceRequest,
   type SettlementEvidenceResponse,
@@ -26,6 +27,26 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 // Evidence reads walk history views on the Hub under test; polling every few
 // milliseconds would measure the poller, not settlement.
 const SETTLEMENT_POLL_MS = 250;
+const SETTLEMENT_POLL_WIDE_MS = 2_000;
+const LOAD_EVIDENCE_CONCURRENCY = 8;
+const settlementPollMs = (pairCount: number): number =>
+  pairCount > 64 ? SETTLEMENT_POLL_WIDE_MS : SETTLEMENT_POLL_MS;
+
+const forEachLimited = async <T>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> => {
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < items.length) {
+      const item = items[cursor]!;
+      cursor += 1;
+      await fn(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+};
 type AccountResponse = SettlementEvidenceResponse['accounts'][number];
 
 export const sameBilateralAccountHead = (
@@ -68,6 +89,14 @@ const readEvidencePage = async (
       // socket (1000c: runtime adapter socket closed after trades 5000/5000).
       // That is an observation gap; the adapter reconnects.
       await sleep(Math.max(20, error.retryAfterMs ?? 200));
+      if (request.book !== null) {
+        console.error('[load] hub evidence miss', JSON.stringify({
+          code: error.code,
+          retryable: error.retryable,
+          message: error.message.slice(0, 160),
+          accounts: request.accounts.length,
+        }));
+      }
       return null;
     }
     throw error;
@@ -109,8 +138,11 @@ const readEvidence = async (
   if (!first) throw new Error('PRODUCTION_SWAP_SETTLEMENT_EVIDENCE_PAGE_MISSING');
   const queueFingerprint = safeStringify(first.queues);
   const bookFingerprint = safeStringify(first.book);
+  const sampleFingerprint = safeStringify(first.pendingAccountSample);
   if (pages.some(page => page.runtimeHeight !== first.runtimeHeight ||
-    safeStringify(page.queues) !== queueFingerprint || safeStringify(page.book) !== bookFingerprint)) {
+    safeStringify(page.queues) !== queueFingerprint ||
+    safeStringify(page.book) !== bookFingerprint ||
+    safeStringify(page.pendingAccountSample) !== sampleFingerprint)) {
     return null;
   }
   return { ...first, accounts: pages.flatMap(page => page.accounts) };
@@ -129,6 +161,7 @@ const runtimeEvidence = (
   runtimeTxs: response.queues.runtimeTxs.count,
   runtimeJInputs: response.queues.runtimeJInputs.count,
   retryEntries: response.queues.retryEntries.count,
+  pendingAccountFrames: response.queues.pendingAccountFrames.count,
 });
 
 const requireAccount = (
@@ -193,16 +226,61 @@ const sumQueues = (
   ])) as SettlementEvidenceResponse['queues'];
 };
 
+const mergePendingAccountSample = (
+  responses: readonly SettlementEvidenceResponse[],
+): SettlementEvidenceResponse['pendingAccountSample'] =>
+  responses.flatMap(page => page.pendingAccountSample).slice(0, MAX_PENDING_ACCOUNT_SAMPLE);
+
 const readLoadEvidence = async (
   groups: readonly LoadRuntimeGroup[],
   hubBookEntityId: string,
 ): Promise<SettlementEvidenceResponse | null> => {
-  const responses = await Promise.all(groups.map(group =>
-    readEvidence(group.runtime, requestFor(group.pairs, 'load', hubBookEntityId))));
+  const responses: Array<SettlementEvidenceResponse | null> = groups.map(() => null);
+  await forEachLimited(
+    groups.map((group, index) => ({ group, index })),
+    LOAD_EVIDENCE_CONCURRENCY,
+    async ({ group, index }) => {
+      responses[index] = await readEvidence(
+        group.runtime,
+        requestFor(group.pairs, 'load', hubBookEntityId),
+      );
+    },
+  );
   if (responses.some(response => response === null)) return null;
   const pages = responses as SettlementEvidenceResponse[];
-  return { ...pages[0]!, accounts: pages.flatMap(page => page.accounts), queues: sumQueues(pages) };
+  return {
+    ...pages[0]!,
+    accounts: pages.flatMap(page => page.accounts),
+    queues: sumQueues(pages),
+    pendingAccountSample: mergePendingAccountSample(pages),
+  };
 };
+
+const EMPTY_ACCOUNTS_REQUEST: SettlementEvidenceRequest = { type: 'settlement-evidence', book: null, accounts: [] };
+
+const readLoadLite = async (
+  groups: readonly LoadRuntimeGroup[],
+): Promise<SettlementEvidenceResponse | null> => {
+  const responses: Array<SettlementEvidenceResponse | null> = groups.map(() => null);
+  await forEachLimited(
+    groups.map((group, index) => ({ group, index })),
+    LOAD_EVIDENCE_CONCURRENCY,
+    async ({ group, index }) => {
+      responses[index] = await readEvidence(group.runtime, EMPTY_ACCOUNTS_REQUEST);
+    },
+  );
+  if (responses.some(response => response === null)) return null;
+  const pages = responses as SettlementEvidenceResponse[];
+  return {
+    ...pages[0]!,
+    accounts: [],
+    queues: sumQueues(pages),
+    pendingAccountSample: mergePendingAccountSample(pages),
+  };
+};
+
+const queuesBusy = (response: SettlementEvidenceResponse): boolean =>
+  Object.values(response.queues).some(queue => queue.count > 0);
 
 export const waitForFullySettledEvidence = async (options: {
   hub: ConnectedRuntime;
@@ -219,15 +297,73 @@ export const waitForFullySettledEvidence = async (options: {
   const deadline = performance.now() + (
     options.timeoutMs ?? Number(process.env['XLN_LOAD_TRADE_DRAIN_TIMEOUT_MS'] || 60_000)
   );
-  const emptyRequest: SettlementEvidenceRequest = { type: 'settlement-evidence', book: null, accounts: [] };
+  const pollMs = settlementPollMs(options.pairs.length);
+  const hubLiteRequest: SettlementEvidenceRequest = {
+    type: 'settlement-evidence',
+    book: { entityId: options.hubBookEntityId, pairId: PRODUCTION_SWAP_LOAD_PAIR_ID },
+    accounts: [],
+  };
+  let lastProgressAt = 0;
   while (performance.now() <= deadline) {
+    const [hubLite, loadLite, marketMakerLite] = await Promise.all([
+      readEvidence(options.hub, hubLiteRequest),
+      readLoadLite(options.load),
+      readEvidence(options.marketMaker, EMPTY_ACCOUNTS_REQUEST),
+    ]);
+    if (hubLite === null || loadLite === null || marketMakerLite === null) {
+      const now = performance.now();
+      if (now - lastProgressAt >= 10_000 || now + pollMs > deadline) {
+        console.error('[load] settlement evidence incomplete', JSON.stringify({
+          hub: hubLite !== null, load: loadLite !== null, marketMaker: marketMakerLite !== null,
+          pairs: options.pairs.length, elapsedMs: Math.round(now - options.startedAt),
+          hubQueues: hubLite?.queues ?? null,
+          hubPendingSample: hubLite?.pendingAccountSample ?? null,
+          loadQueues: loadLite?.queues ?? null,
+          loadPendingSample: loadLite?.pendingAccountSample ?? null,
+        }));
+        lastProgressAt = now;
+      }
+      if (now + pollMs > deadline) break;
+      await sleep(pollMs);
+      continue;
+    }
+    if (queuesBusy(hubLite) || queuesBusy(loadLite) || queuesBusy(marketMakerLite)) {
+      const now = performance.now();
+      if (now - lastProgressAt >= 10_000 || now + pollMs > deadline) {
+        console.error('[load] settlement queues busy', JSON.stringify({
+          elapsedMs: Math.round(now - options.startedAt),
+          hubQueues: hubLite.queues,
+          hubPendingSample: hubLite.pendingAccountSample,
+          loadQueues: loadLite.queues,
+          loadPendingSample: loadLite.pendingAccountSample,
+          marketMakerQueues: marketMakerLite.queues,
+        }));
+        lastProgressAt = now;
+      }
+      if (now + pollMs > deadline) break;
+      await sleep(pollMs);
+      continue;
+    }
     const [hub, load, marketMaker] = await Promise.all([
       readEvidence(options.hub, requestFor(options.pairs, 'hub', options.hubBookEntityId)),
       readLoadEvidence(options.load, options.hubBookEntityId),
-      readEvidence(options.marketMaker, emptyRequest),
+      Promise.resolve(marketMakerLite),
     ]);
     if (hub === null || load === null || marketMaker === null) {
-      await sleep(SETTLEMENT_POLL_MS);
+      const now = performance.now();
+      if (now - lastProgressAt >= 10_000 || now + pollMs > deadline) {
+        console.error('[load] settlement evidence incomplete', JSON.stringify({
+          hub: hub !== null, load: load !== null, marketMaker: marketMaker !== null,
+          pairs: options.pairs.length, elapsedMs: Math.round(now - options.startedAt),
+          hubQueues: hub?.queues ?? null,
+          hubPendingSample: hub?.pendingAccountSample ?? null,
+          loadQueues: load?.queues ?? null,
+          loadPendingSample: load?.pendingAccountSample ?? null,
+        }));
+        lastProgressAt = now;
+      }
+      if (now + pollMs > deadline) break;
+      await sleep(pollMs);
       continue;
     }
     const accounts: ProductionSwapSettlementEvidence['accounts'][number][] = [];
@@ -237,7 +373,15 @@ export const waitForFullySettledEvidence = async (options: {
       accounts.push(account);
     }
     if (accounts.length !== options.pairs.length) {
-      await sleep(SETTLEMENT_POLL_MS);
+      const now = performance.now();
+      if (now - lastProgressAt >= 10_000 || now + pollMs > deadline) {
+        console.error('[load] settlement heads diverged', JSON.stringify({
+          assembled: accounts.length, pairs: options.pairs.length,
+          elapsedMs: Math.round(now - options.startedAt),
+        }));
+        lastProgressAt = now;
+      }
+      await sleep(pollMs);
       continue;
     }
     const book = hub.book;
@@ -267,16 +411,18 @@ export const waitForFullySettledEvidence = async (options: {
       assertProductionSwapFullySettled(evidence);
       return evidence;
     }
-    if (performance.now() + SETTLEMENT_POLL_MS > deadline) {
+    if (performance.now() + pollMs > deadline) {
       console.error('[load] settlement not ready', JSON.stringify({
         accounts: evidence.accounts.filter(account => account.liveOfferIds.length || account.pendingFrame ||
           account.pendingProposal || account.mempoolTxs ||
           account.committedOfferIds.length !== account.createdOfferIds.length ||
           account.committedResolveIds.length !== account.createdOfferIds.length).slice(0, 3),
         runtimes: evidence.runtimes,
+        hubPendingSample: hub.pendingAccountSample,
+        loadPendingSample: load.pendingAccountSample,
       }));
     }
-    await sleep(SETTLEMENT_POLL_MS);
+    await sleep(pollMs);
   }
   throw new Error('PRODUCTION_SWAP_SETTLEMENT_TIMEOUT');
 };

@@ -261,14 +261,28 @@ export const computeAccountCommitmentSectionDetailCold = (
  * proposal, commit, Entity leaf) must not rebuild the 5-section Merkle while
  * collections and scalars are unchanged. The memo is a non-enumerable field on
  * the AccountState value, never a GC-by-identity collection: those caches are
- * non-deterministic. In-place scalar edits miss via exact scalar bytes;
- * collection replacement misses via object identity.
+ * non-deterministic. Collection and scalar *replacement* miss via object
+ * identity. Overlay handlers replace `settlementWorkspace` and accumulators;
+ * they must not mutate those objects in place on a memoized state.
  */
 const ACCOUNT_STATE_ROOT_MEMO = Symbol('ACCOUNT_STATE_ROOT_MEMO');
 
+type AccountRootScalarIdentities = {
+  domain: AccountState['domain'];
+  disputeConfig: AccountState['disputeConfig'];
+  settlementWorkspace: AccountState['settlementWorkspace'];
+  leftPendingJClaims: AccountState['leftPendingJClaims'];
+  rightPendingJClaims: AccountState['rightPendingJClaims'];
+  leftEntity: string;
+  rightEntity: string;
+  watchSeed: string;
+  jNonce: number;
+  lastFinalizedJHeight: number;
+};
+
 type AccountStateRootMemo = {
   collections: readonly unknown[];
-  scalarBytes: Uint8Array;
+  scalars: AccountRootScalarIdentities;
   root: string;
 };
 
@@ -287,35 +301,35 @@ const ACCOUNT_ROOT_COLLECTION_FIELDS = [
 const accountRootCollectionIdentities = (account: AccountState): unknown[] =>
   ACCOUNT_ROOT_COLLECTION_FIELDS.map(field => account[field]);
 
-const accountRootScalarBytes = (account: AccountState): Uint8Array => {
-  const domain = normalizeAccountStateDomain(account.domain);
-  return encodeAccountStateValue({
-    chainId: domain.chainId,
-    depositoryAddress: domain.depositoryAddress,
-    leftEntity: account.leftEntity,
-    rightEntity: account.rightEntity,
-    watchSeed: account.watchSeed,
-    jNonce: account.jNonce,
-    disputeConfig: account.disputeConfig,
-    settlementWorkspace: settlementWorkspaceWithoutHankos(account.settlementWorkspace),
-    lastFinalizedJHeight: account.lastFinalizedJHeight,
-    leftPendingJClaims: account.leftPendingJClaims,
-    rightPendingJClaims: account.rightPendingJClaims,
-  });
-};
+const accountRootScalarIdentities = (account: AccountState): AccountRootScalarIdentities => ({
+  domain: account.domain,
+  disputeConfig: account.disputeConfig,
+  settlementWorkspace: account.settlementWorkspace,
+  leftPendingJClaims: account.leftPendingJClaims,
+  rightPendingJClaims: account.rightPendingJClaims,
+  leftEntity: account.leftEntity,
+  rightEntity: account.rightEntity,
+  watchSeed: account.watchSeed,
+  jNonce: account.jNonce,
+  lastFinalizedJHeight: account.lastFinalizedJHeight,
+});
 
 const sameCollections = (left: readonly unknown[], right: readonly unknown[]): boolean => {
   for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) return false;
   return true;
 };
 
-const sameScalarBytes = (left: Uint8Array, right: Uint8Array): boolean => {
-  if (left.byteLength !== right.byteLength) return false;
-  for (let index = 0; index < left.byteLength; index += 1) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
-};
+const sameScalarIdentities = (left: AccountRootScalarIdentities, account: AccountState): boolean =>
+  left.domain === account.domain &&
+  left.disputeConfig === account.disputeConfig &&
+  left.settlementWorkspace === account.settlementWorkspace &&
+  left.leftPendingJClaims === account.leftPendingJClaims &&
+  left.rightPendingJClaims === account.rightPendingJClaims &&
+  left.leftEntity === account.leftEntity &&
+  left.rightEntity === account.rightEntity &&
+  left.watchSeed === account.watchSeed &&
+  left.jNonce === account.jNonce &&
+  left.lastFinalizedJHeight === account.lastFinalizedJHeight;
 
 const readAccountStateRootMemo = (account: AccountState): AccountStateRootMemo | undefined => {
   const memo = Reflect.get(account, ACCOUNT_STATE_ROOT_MEMO);
@@ -346,13 +360,12 @@ export const computeAccountStateRoot = (
 ): string => {
   if (timing === undefined && accountStateRootDebugRecorder === null) {
     const collections = accountRootCollectionIdentities(account);
-    const scalarBytes = accountRootScalarBytes(account);
     const memo = readAccountStateRootMemo(account);
-    if (memo && sameScalarBytes(memo.scalarBytes, scalarBytes) && sameCollections(memo.collections, collections)) {
+    if (memo && sameCollections(memo.collections, collections) && sameScalarIdentities(memo.scalars, account)) {
       return memo.root;
     }
     const root = computeAccountStateRootUncached(account);
-    writeAccountStateRootMemo(account, { collections, scalarBytes, root });
+    writeAccountStateRootMemo(account, { collections, scalars: accountRootScalarIdentities(account), root });
     return root;
   }
   return computeAccountStateRootUncached(account, timing);

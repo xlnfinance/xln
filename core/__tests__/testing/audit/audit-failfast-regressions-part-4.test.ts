@@ -1846,7 +1846,7 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.pendingFrame?.height).toBe(11);
   });
 
-  test('applyAccountInput fails loud when the full duplicate ACK cache was lost', async () => {
+  test('applyAccountInput rebuilds ACK when duplicate cache was lost', async () => {
     const seed = 'account-frame-duplicate-reack-cache-miss';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -1874,13 +1874,20 @@ describe('audit fail-fast regressions', () => {
         frame: {
           ...accountMachine.currentFrame,
           prevFrameHash: `0x${'34'.repeat(32)}`,
+          stateHash: `0x${'EF'.repeat(32)}`,
         },
         frameHanko: `0x${'56'.repeat(65)}`,
       },
     });
 
-    expect(result.ok).toBe(false);
-    expect(accountInputFailureMessage(result)).toBe('DUPLICATE_ACK_CACHE_MISSING: height=10');
+    expect(result.ok).toBe(true);
+    expect(result.response?.kind).toBe('ack');
+    expect(result.response?.kind === 'ack' ? result.response.ack.height : undefined).toBe(10);
+    expect(result.response?.kind === 'ack' ? result.response.ack.frameHash : undefined)
+      .toBe(accountMachine.currentFrame.stateHash);
+    expect(result.hashesToSign?.some(entry => entry.type === 'accountFrame')).toBe(true);
+    expect(accountMachine.lastOutboundFrameAck?.height).toBe(10);
+    expect(accountMachine.currentHeight).toBe(10);
   });
 
   test('applyAccountInput ignores obsolete ACK after dispute freeze clears pending frame', async () => {

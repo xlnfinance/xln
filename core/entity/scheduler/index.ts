@@ -297,16 +297,20 @@ async function maintainPendingAccounts(
       );
     }
     const cachedInputHeight = accountInputProposedFrameHeight(account.pendingAccountInput);
-    if (
-      frameAge <= ACCOUNT_PENDING_RESEND_AFTER_MS ||
-      cachedInputHeight !== account.pendingFrame.height
-    ) continue;
+    if (cachedInputHeight !== account.pendingFrame.height) {
+      throw new Error(
+        `PENDING_ACCOUNT_RESEND_HEIGHT_MISMATCH:${counterpartyId}` +
+          `:pending=${account.pendingFrame.height}` +
+          `:cached=${cachedInputHeight}`,
+      );
+    }
+    if (frameAge <= ACCOUNT_PENDING_RESEND_AFTER_MS) continue;
 
     outputs.push({
       entityId: account.pendingAccountInput.toEntityId,
       entityTxs: [{ type: 'accountInput', data: account.pendingAccountInput }],
     });
-    crontabLog.debug('pending_frame.resend', {
+    crontabLog.warn('pending_frame.resend', {
       account: shortId(counterpartyId, 12),
       height: account.pendingFrame.height,
       ageSeconds: Math.floor(frameAge / 1000),

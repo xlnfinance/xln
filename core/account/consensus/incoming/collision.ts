@@ -168,6 +168,12 @@ export const resolveSameHeightIncomingFrame = (
   }
   if (localIsLeft) {
     events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height} ` + `(waiting for their ACK)`);
+    collisionLog.warn('frame.left_wins_ignored', {
+      from: shortId(account.proofHeader.fromEntity),
+      to: shortId(account.proofHeader.toEntity),
+      height: receivedFrame.height,
+      pendingHeight: account.pendingFrame.height,
+    });
     if (account.mempool.length > 0) {
       events.push(`⚠️ LEFT has ${account.mempool.length} pending txs while waiting for RIGHT's ACK`);
     }

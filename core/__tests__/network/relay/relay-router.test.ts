@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Wallet, getBytes } from 'ethers';
 import type { Profile } from '../../../entity/profile';
-import { relayRoute as productionRelayRoute } from '../../../network/relay/router';
+import { relayRoute as productionRelayRoute, RELAY_STUCK_BACKPRESSURE_MS } from '../../../network/relay/router';
 import {
   cacheEncryptionKey,
   createRelayStore,
@@ -776,7 +776,7 @@ describe('relay-router gossip fanout', () => {
     });
   });
 
-  test('force-closes a target socket after 4 consecutive backpressured forwards', async () => {
+  test('force-closes a target socket after sustained backpressure', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const closed: Array<[number | undefined, string | undefined]> = [];
     const config = {
@@ -806,14 +806,19 @@ describe('relay-router gossip fanout', () => {
     await sendOne('deliver-1');
     await sendOne('deliver-2');
     await sendOne('deliver-3');
-    // Each of the first 3 queued sends still counts as delivered (no failover
-    // retry of a queued financial envelope) and the socket stays registered.
+    // Four rapid queued 10 MB-class sends are slow, not wedged. Closing the
+    // Hub socket here dropped in-flight Account ACKs at mixed 1000g.
     expect(closed).toEqual([]);
     expect(store.clients.get(RUNTIME_B)?.ws).toBe(wsB);
 
     await sendOne('deliver-4');
-    // The 4th consecutive queued send in a row means the socket is stuck, not
-    // just slow — force-close it so the peer reconnects with a fresh socket.
+    expect(closed).toEqual([]);
+    expect(store.clients.has(RUNTIME_B)).toBe(true);
+
+    const client = store.clients.get(RUNTIME_B);
+    if (!client) throw new Error('TEST_RELAY_TARGET_MISSING');
+    client.backpressureStartedAt = Date.now() - RELAY_STUCK_BACKPRESSURE_MS - 1;
+    await sendOne('deliver-5');
     expect(closed).toEqual([[4010, 'stuck-backpressure']]);
     expect(store.clients.has(RUNTIME_B)).toBe(false);
     expect(store.debugEvents.find(event => event.event === 'ws_stuck_backpressure_closed')).toMatchObject({

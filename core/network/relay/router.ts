@@ -705,8 +705,11 @@ const routeDeliveryDetails = (context: RelayRouteContext): Record<string, unknow
 
 /** A socket that keeps queuing sends into backpressure without draining is
  *  stuck, not just slow — matches STUCK_SEND_THRESHOLD in
- *  core/network/p2p/direct-runtime-bun.ts's noteSendOutcome. */
-const RELAY_STUCK_BACKPRESSURE_THRESHOLD = 4;
+ *  core/network/p2p/direct-runtime-bun.ts's noteSendOutcome. Count alone is
+ *  wrong at 1000-user mixed load: four 10 MB Hub frames in one burst are
+ *  queued, not wedged; closing the Hub socket drops in-flight Account ACKs. */
+export const RELAY_STUCK_BACKPRESSURE_THRESHOLD = 4;
+export const RELAY_STUCK_BACKPRESSURE_MS = 10_000;
 
 const forwardToRemoteRuntime = (
   context: RelayRouteContext,
@@ -719,9 +722,15 @@ const forwardToRemoteRuntime = (
   const delivery = attempt.delivery;
   if (isDeliveryDelivered(delivery)) {
     if (attempt.backpressured) {
+      const now = Date.now();
       target.consecutiveBackpressuredSends += 1;
-      if (target.consecutiveBackpressuredSends >= RELAY_STUCK_BACKPRESSURE_THRESHOLD) {
+      if (target.backpressureStartedAt === 0) target.backpressureStartedAt = now;
+      if (
+        target.consecutiveBackpressuredSends >= RELAY_STUCK_BACKPRESSURE_THRESHOLD &&
+        now - target.backpressureStartedAt >= RELAY_STUCK_BACKPRESSURE_MS
+      ) {
         target.consecutiveBackpressuredSends = 0;
+        target.backpressureStartedAt = 0;
         pushDebugEvent(config.store, {
           event: 'ws_stuck_backpressure_closed',
           runtimeId: toKey,
@@ -736,6 +745,7 @@ const forwardToRemoteRuntime = (
       }
     } else {
       target.consecutiveBackpressuredSends = 0;
+      target.backpressureStartedAt = 0;
     }
     relayLog('[RELAY] → forwarding to WS client');
     pushDebugEvent(config.store, {

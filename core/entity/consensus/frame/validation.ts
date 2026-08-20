@@ -336,6 +336,50 @@ const validateHashManifest = (value: unknown, context: string): void => {
   });
 };
 
+const PLACEHOLDER_ECDSA_SIG = `0x${'11'.repeat(65)}`;
+// 1000i sealed hankos were 3.60–3.82 MB (~4.2 KB each). A 2 KB placeholder let
+// pre-sign pass at ~8.7 MB and post-sign fail at 10.54–12.29 MB.
+const PLACEHOLDER_HANKO = `0x${'22'.repeat(2_200)}`;
+
+const assertEntityFrameSealedWireBudget = (
+  frame: Record<string, unknown>,
+  context: string,
+): void => {
+  const wireBytes = utf8ByteLength(encodeCanonicalConsensusValue(frame));
+  if (wireBytes <= LIMITS.MAX_FRAME_SIZE_BYTES) return;
+  const part = (value: unknown): number => {
+    try { return utf8ByteLength(encodeCanonicalConsensusValue(value)); } catch { return -1; }
+  };
+  throw new FinancialDataCorruptionError(
+    `${context} wire byte limit exceeded: ${wireBytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}` +
+    `:txs=${Array.isArray(frame['txs']) ? (frame['txs'] as unknown[]).length : 0}/${part(frame['txs'])}` +
+    `:events=${Array.isArray(frame['events']) ? (frame['events'] as unknown[]).length : 0}/${part(frame['events'])}` +
+    `:context=${part(frame['entityContext'])}` +
+    `:hashesToSign=${part(frame['hashesToSign'])}` +
+    `:sigs=${part(frame['collectedSigs'])}` +
+    `:hankos=${part(frame['hankos'])}`,
+  );
+};
+
+/** Sealed bytes include hashesToSign + sigs + hankos. Fit measured empty events;
+ *  throw here after apply, before sign, so eviction does not pay for a doomed seal. */
+export const assertEstimatedSealedEntityFrameWire = (
+  frame: Record<string, unknown>,
+  signerId: string,
+  includeHankos: boolean,
+  context: string,
+): void => {
+  const hashes = frame['hashesToSign'];
+  if (!Array.isArray(hashes) || hashes.length === 0) {
+    throw new FinancialDataCorruptionError(`${context}.hashesToSign cannot be empty`);
+  }
+  assertEntityFrameSealedWireBudget({
+    ...frame,
+    collectedSigs: new Map([[signerId.toLowerCase(), hashes.map(() => PLACEHOLDER_ECDSA_SIG)]]),
+    ...(includeHankos ? { hankos: hashes.map(() => PLACEHOLDER_HANKO) } : {}),
+  }, context);
+};
+
 export const validateProposedEntityFrame = (
   value: unknown,
   context: string,
@@ -360,11 +404,6 @@ export const validateProposedEntityFrame = (
       `${context} total byte limit invalid: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const wireBytes = utf8ByteLength(encodeCanonicalConsensusValue(frame));
-  if (wireBytes > LIMITS.MAX_FRAME_SIZE_BYTES) {
-    throw new FinancialDataCorruptionError(
-      `${context} wire byte limit exceeded: ${wireBytes}:${LIMITS.MAX_FRAME_SIZE_BYTES}`,
-    );
-  }
+  assertEntityFrameSealedWireBudget(frame, context);
   return frame;
 };
