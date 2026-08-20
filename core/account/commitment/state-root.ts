@@ -268,7 +268,7 @@ const ACCOUNT_STATE_ROOT_MEMO = Symbol('ACCOUNT_STATE_ROOT_MEMO');
 
 type AccountStateRootMemo = {
   collections: readonly unknown[];
-  scalarBytes: string;
+  scalarBytes: Uint8Array;
   root: string;
 };
 
@@ -287,9 +287,9 @@ const ACCOUNT_ROOT_COLLECTION_FIELDS = [
 const accountRootCollectionIdentities = (account: AccountState): unknown[] =>
   ACCOUNT_ROOT_COLLECTION_FIELDS.map(field => account[field]);
 
-const accountRootScalarBytes = (account: AccountState): string => {
+const accountRootScalarBytes = (account: AccountState): Uint8Array => {
   const domain = normalizeAccountStateDomain(account.domain);
-  return ethers.hexlify(encodeAccountStateValue({
+  return encodeAccountStateValue({
     chainId: domain.chainId,
     depositoryAddress: domain.depositoryAddress,
     leftEntity: account.leftEntity,
@@ -301,11 +301,19 @@ const accountRootScalarBytes = (account: AccountState): string => {
     lastFinalizedJHeight: account.lastFinalizedJHeight,
     leftPendingJClaims: account.leftPendingJClaims,
     rightPendingJClaims: account.rightPendingJClaims,
-  }));
+  });
 };
 
 const sameCollections = (left: readonly unknown[], right: readonly unknown[]): boolean => {
   for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) return false;
+  return true;
+};
+
+const sameScalarBytes = (left: Uint8Array, right: Uint8Array): boolean => {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
   return true;
 };
 
@@ -340,7 +348,7 @@ export const computeAccountStateRoot = (
     const collections = accountRootCollectionIdentities(account);
     const scalarBytes = accountRootScalarBytes(account);
     const memo = readAccountStateRootMemo(account);
-    if (memo && memo.scalarBytes === scalarBytes && sameCollections(memo.collections, collections)) {
+    if (memo && sameScalarBytes(memo.scalarBytes, scalarBytes) && sameCollections(memo.collections, collections)) {
       return memo.root;
     }
     const root = computeAccountStateRootUncached(account);

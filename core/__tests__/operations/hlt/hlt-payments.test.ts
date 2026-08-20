@@ -207,6 +207,18 @@ describe('hlt payment population', () => {
     expect(args.plan?.offeredPaymentRatePerSecond).toBe(8);
     expect(args.plan?.offeredSwapRatePerSecond).toBe(8);
   });
+
+  test('mixed worker sequences swap then payment on one adapter per user', () => {
+    const source = readFileSync(
+      join(import.meta.dir, '../../../scripts/operations/hlt/workload/worker-mixed.ts'),
+      'utf8',
+    );
+    expect(source).toContain('hlt-mixed-swap-${tick + 1}-${lane.laneKey}');
+    expect(source).toContain('hlt-mixed-pay-${tick + 1}-${lane.laneKey}');
+    expect(source).toContain('HLT_MIXED_TICK_LANE_MISMATCH');
+    expect(source).toContain('const swapObserved = await sendObserved(');
+    expect(source).toContain('const payObserved = await sendObserved(');
+  });
 });
 
 describe('hlt payment report boundary', () => {

@@ -173,18 +173,35 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
           ),
         };
       });
-      const observed = await Promise.all([
-        ...swapInputs.map(({ lane, inputs }) => sendObserved(
+      const observed = await Promise.all(users.map(async (lane, index) => {
+        const swap = swapInputs[index];
+        const payment = paymentInputs[index];
+        if (
+          !swap ||
+          swap.lane.laneKey !== lane.laneKey ||
+          !payment ||
+          payment.lane.laneKey !== lane.laneKey
+        ) {
+          throw new Error(`HLT_MIXED_TICK_LANE_MISMATCH:${lane.laneKey}`);
+        }
+        // Command lane is sequential per adapter. Concurrent swap+pay on the
+        // same connection reused commandSequence (E_BAD_QUERY). Payments-only
+        // 8u is green; mixed still halted H1 on HTLC_OPAQUE_CIPHERTEXT_INVALID
+        // even after this sequence — Hub-side swap+htlc, not the command lane.
+        const swapObserved = await sendObserved(
           lane.runtime,
           `hlt-mixed-swap-${tick + 1}-${lane.laneKey}`,
-          { runtimeTxs: [], entityInputs: inputs },
-        )),
-        ...paymentInputs.map(({ lane, input }) => sendObserved(
+          { runtimeTxs: [], entityInputs: swap.inputs },
+        );
+        const payObserved = await sendObserved(
           lane.runtime,
           `hlt-mixed-pay-${tick + 1}-${lane.laneKey}`,
-          { runtimeTxs: [], entityInputs: [input] },
-        )),
-      ]);
+          { runtimeTxs: [], entityInputs: [payment.input] },
+        );
+        return {
+          enqueueAckElapsedMs: Math.max(swapObserved.enqueueAckElapsedMs, payObserved.enqueueAckElapsedMs),
+        };
+      }));
       enqueueAckElapsedMs += Math.max(...observed.map(entry => entry.enqueueAckElapsedMs));
     }
 

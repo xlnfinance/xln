@@ -76,9 +76,10 @@ const createTransactionEffects = (): ProposalTransactionEffects => ({
 });
 
 /**
- * One overlay for a multi-tx Account proposal. Mixed HLT dumps swap_offer and
- * htlc_lock into the same user Runtime frame (Promise.all of two sendObserved
- * calls); the old swap-only predicate fell back to begin/commit per tx.
+ * One overlay for a multi-tx Account proposal. Mixed HLT sequences swap then
+ * payment per user adapter; Hub may still see both in one Entity proposal.
+ * If both txs share a proposal window, keep one overlay; the old swap-only
+ * predicate fell back to begin/commit per tx.
  * A failed tx still discards the whole overlay and retries per-tx.
  */
 const OPTIMISTIC_ACCOUNT_TX_TYPES = new Set<AccountTx['type']>([

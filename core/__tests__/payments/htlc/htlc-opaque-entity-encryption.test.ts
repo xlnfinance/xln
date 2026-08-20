@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { getBytes } from 'ethers';
 import { createOnionEnvelopes, computeHtlcEnvelopeContextHash, deriveHtlcLockIdAtHop, unwrapEnvelope } from '../../../protocol/htlc/codec/envelope';
-import { decryptOpaqueHtlcBytes } from '../../../protocol/htlc/multi-recipient';
+import { assertOpaqueHtlcCiphertext, decryptOpaqueHtlcBytes } from '../../../protocol/htlc/multi-recipient';
 
 const hex = (bytes: Uint8Array): string =>
   `0x${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -67,8 +67,10 @@ describe('opaque Entity HTLC encryption', () => {
       }),
     ));
     expect('finalRecipient' in hubLayer).toBe(false);
-    expect(JSON.stringify(hubLayer)).not.toContain(preimage.slice(2));
     if ('finalRecipient' in hubLayer) throw new Error('expected intermediary layer');
+    expect(Object.keys(hubLayer.innerEnvelope).sort()).toEqual(['ciphertext', 'version']);
+    expect(assertOpaqueHtlcCiphertext(hubLayer.innerEnvelope)).toEqual(hubLayer.innerEnvelope);
+    expect(JSON.stringify(hubLayer)).not.toContain(preimage.slice(2));
     expect(() => decryptOpaqueHtlcBytes(
       hubLayer.innerEnvelope, publicKeys.get(target)!, hubSecret,
       computeHtlcEnvelopeContextHash({

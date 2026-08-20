@@ -132,6 +132,13 @@ describe('canonical account state root', () => {
     }
   });
 
+  test('repeat Account-root queries on unchanged scalars and maps reuse the memo', () => {
+    const base = account();
+    const root = computeAccountStateRoot(base.state);
+    expect(computeAccountStateRoot(base.state)).toBe(root);
+    expect(computeAccountStateRoot(base.state)).toBe(root);
+  });
+
   test('excludes mempool, signatures, pending frames, and proof caches', () => {
     const base = account();
     const root = computeAccountStateRoot(base.state);

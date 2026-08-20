@@ -7,6 +7,7 @@ import { preparedHtlcBindingKey, type HtlcPreparedInfraContext, type PreparedHtl
 import { computeHtlcEnvelopeContextHash } from '../../protocol/htlc/codec/envelope';
 import {
   assertEntityEncryptionKeypair,
+  assertOpaqueHtlcCiphertext,
   decryptOpaqueHtlcBytes,
   HtlcCiphertextAuthenticationError,
 } from '../../protocol/htlc/multi-recipient';
@@ -200,7 +201,15 @@ const materializeForwardOutcome = (
   ) return reject(binding, 'deadline_unsafe');
   return {
     binding,
-    outcome: { kind: 'forward', nextHopEntityId, forwardAmount, innerEnvelope: envelope.innerEnvelope },
+    outcome: {
+      kind: 'forward',
+      nextHopEntityId,
+      forwardAmount,
+      // Own a 2-key ciphertext object. The decrypt memo returns the onion
+      // layer; sharing that innerEnvelope across bindings is the same class
+      // of Bun structuredClone aliasing as a reused domain object.
+      innerEnvelope: assertOpaqueHtlcCiphertext(envelope.innerEnvelope),
+    },
   };
 };
 
