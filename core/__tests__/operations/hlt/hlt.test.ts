@@ -444,6 +444,8 @@ describe('production swap load evidence', () => {
     expect(source).not.toContain('.adapter.read<');
     expect(source).not.toContain('decodeLoadBookPage');
     expect(source).toContain("type: 'settlement-evidence'");
+    expect(source).toContain('error.retryable');
+    expect(source).toContain('XLN_LOAD_TRADE_DRAIN_TIMEOUT_MS');
   });
 
   test('book projection rejects malformed network pages without minting BookState', () => {

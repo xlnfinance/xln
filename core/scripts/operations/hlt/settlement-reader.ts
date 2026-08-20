@@ -60,7 +60,13 @@ const readEvidencePage = async (
   try {
     return decodeSettlementEvidenceResponse(await runtime.adapter.control<unknown>(request));
   } catch (error) {
-    if (error instanceof RuntimeAdapterError && error.code === 'E_RATE_LIMITED') {
+    if (
+      error instanceof RuntimeAdapterError &&
+      (error.code === 'E_RATE_LIMITED' || error.retryable)
+    ) {
+      // Hub frames at 1000 users can block the adapter for >10s and close the
+      // socket (1000c: runtime adapter socket closed after trades 5000/5000).
+      // That is an observation gap; the adapter reconnects.
       await sleep(Math.max(20, error.retryAfterMs ?? 200));
       return null;
     }
@@ -210,7 +216,9 @@ export const waitForFullySettledEvidence = async (options: {
   startedAt: number;
   timeoutMs?: number;
 }): Promise<ProductionSwapSettlementEvidence> => {
-  const deadline = performance.now() + (options.timeoutMs ?? 60_000);
+  const deadline = performance.now() + (
+    options.timeoutMs ?? Number(process.env['XLN_LOAD_TRADE_DRAIN_TIMEOUT_MS'] || 60_000)
+  );
   const emptyRequest: SettlementEvidenceRequest = { type: 'settlement-evidence', book: null, accounts: [] };
   while (performance.now() <= deadline) {
     const [hub, load, marketMaker] = await Promise.all([
