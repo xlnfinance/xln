@@ -47,12 +47,37 @@ export const resolveRequestClientIp = (request: Request, peerAddress?: string | 
 
 export const getRelayClientIp = (ws: RelaySocket): string => String(ws.data?.clientIp || 'unknown');
 
-export const hasConnectedEncryptedRelayClient = (relayStore: RelayStore, targetRuntimeId: string): boolean => {
+export const hasConnectedEncryptedRelayClient = (
+  relayStore: RelayStore,
+  targetRuntimeId: string,
+  encryptionKeyForRuntime?: (runtimeId: string) => string | null,
+): boolean => {
   const targetKey = normalizeRuntimeKey(targetRuntimeId);
   if (!targetKey) return false;
   const target = relayStore.clients.get(targetKey);
-  return Boolean(target && isRelaySocketOpen(target.ws) && resolveEncryptionPublicKeyHex(relayStore, targetKey));
+  // Socket liveness stays transport-local; the peer's X25519 key is read from
+  // its admitted gossip profile — one canonical key path for every sender.
+  return Boolean(
+    target &&
+    isRelaySocketOpen(target.ws) &&
+    (encryptionKeyForRuntime ? encryptionKeyForRuntime(targetKey) : resolveEncryptionPublicKeyHex(relayStore, targetKey)),
+  );
 };
+
+
+/**
+ * One key policy: the peer's admitted gossip profile (local infra DB, refreshed
+ * by the background batch poll) is the directory; a WS hello adds the freshest
+ * binding for a directly connected runtime. There is no third lookup path.
+ */
+const peerEncryptionKey = (
+  env: RuntimeReplica,
+  relayStore: RelayStore,
+  runtimeId: string,
+): string | null =>
+  env.gossip?.encryptionKeyForRuntime?.(runtimeId)
+  ?? relayStore.runtimeEncryptionKeys.get(normalizeRuntimeKey(runtimeId))
+  ?? null;
 
 const deferredDirectRelayDelivery = (code: string): DeliveryResult =>
   deliveryDeferred({ outcome: 'deferred', code });
@@ -133,7 +158,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     return delivery;
   }
   const targetKey = normalizeRuntimeKey(targetRuntimeId);
-  const targetPubKeyHex = resolveEncryptionPublicKeyHex(relayStore, targetKey);
+  const targetPubKeyHex = peerEncryptionKey(env, relayStore, targetKey);
   if (!targetPubKeyHex) {
     logOneShot(
       `direct-dispatch-missing-key:${targetRuntimeId}`,
@@ -151,7 +176,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     });
     return delivery;
   }
-  const fromPubKeyHex = resolveEncryptionPublicKeyHex(relayStore, fromRuntimeId);
+  const fromPubKeyHex = peerEncryptionKey(env, relayStore, fromRuntimeId);
   if (!fromPubKeyHex) {
     logOneShot(
       `direct-dispatch-missing-source-key:${fromRuntimeId}`,

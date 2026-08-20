@@ -628,18 +628,7 @@ export const cacheEncryptionKey = (store: RelayStore, runtimeId: string, pubKeyH
 export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId: string): string | null => {
   const normalizedTarget = normalizeRuntimeKey(targetRuntimeId);
   if (!normalizedTarget) return null;
-
   const directKey = store.runtimeEncryptionKeys.get(normalizedTarget);
   if (typeof directKey === 'string' && directKey.length > 0) return directKey;
-
-  for (const { profile } of store.gossipProfiles.values()) {
-    const profileRuntimeId = normalizeRuntimeKey(profile.runtimeId || '');
-    if (!profileRuntimeId || profileRuntimeId !== normalizedTarget) continue;
-    const key = profile.runtimeEncPubKey;
-    if (typeof key === 'string' && key.length > 0) {
-      return key.startsWith('0x') ? key : `0x${key}`;
-    }
-  }
-
   return null;
 };

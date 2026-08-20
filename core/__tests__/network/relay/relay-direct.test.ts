@@ -4,6 +4,8 @@ import { deriveSignerAddressSync } from '../../../account/crypto';
 import { deriveEncryptionKeyPair, decryptJSON, pubKeyToHex } from '../../../protocol/crypto/p2p-crypto';
 import { deserializeWsMessage } from '../../../network/p2p/ws-protocol';
 import { cacheEncryptionKey, createRelayStore, registerClient } from '../../../network/relay/store';
+import { createGossipLayer } from '../../../network/p2p/gossip/index';
+import { buildCryptographicProfileFixture } from '../../helpers/cryptographic-profile';
 import {
   hasConnectedEncryptedRelayClient,
   resolveRequestClientIp,
@@ -507,5 +509,79 @@ describe('relay direct entity delivery', () => {
         txs: 0,
       },
     });
+  });
+
+  test('profile-keyed send: gossip profile supplies both peer and own X25519 keys', () => {
+    const sourceSeed = 'relay-direct-profile-source';
+    const targetSeed = 'relay-direct-profile-target';
+    const sourceRuntimeId = deriveSignerAddressSync(sourceSeed, '1').toLowerCase();
+    const targetRuntimeId = deriveSignerAddressSync(targetSeed, '1').toLowerCase();
+    const sourceKeyPair = deriveEncryptionKeyPair(sourceSeed);
+    const targetKeyPair = deriveEncryptionKeyPair(targetSeed);
+    const store = createRelayStore(sourceRuntimeId);
+    const targetSocket = makeSocket();
+    const logs: string[] = [];
+
+    // No WS-hello key cache at all: the only key source is admitted profiles.
+    expect(registerClient(store, targetRuntimeId, targetSocket.ws)).toBe(true);
+    const gossip = createGossipLayer({});
+    gossip.announce(buildCryptographicProfileFixture({
+      entityId: `0x${'ce'.repeat(32)}`,
+      runtimeId: targetRuntimeId,
+      runtimeEncPubKey: pubKeyToHex(targetKeyPair.publicKey),
+      name: 'ProfileTarget',
+      signingSeed: 'relay-direct-profile-target',
+    }));
+    gossip.announce(buildCryptographicProfileFixture({
+      entityId: `0x${'cd'.repeat(32)}`,
+      runtimeId: sourceRuntimeId,
+      runtimeEncPubKey: pubKeyToHex(sourceKeyPair.publicKey),
+      name: 'ProfileSource',
+      signingSeed: 'relay-direct-profile-source',
+    }));
+
+    const input: DeliverableEntityInput = {
+      runtimeId: targetRuntimeId,
+      entityId: `0x${'de'.repeat(32)}`,
+      signerId: targetRuntimeId,
+      entityTxs: [],
+    };
+    const envelope = signedEnvelope(sourceSeed, targetRuntimeId, 12, 1, [input]);
+    const env = { runtimeId: sourceRuntimeId, gossip } as unknown as RuntimeReplica;
+
+    const delivery = sendEntityInputDirectViaRelaySocketDelivery(
+      store,
+      env,
+      targetRuntimeId,
+      envelope,
+      (_key, message) => logs.push(message),
+    );
+
+    expect(delivery).toMatchObject({ outcome: 'delivered', code: 'ROUTE_DIRECT_DELIVERED' });
+    expect(targetSocket.sent.length).toBe(1);
+    const message = targetSocket.sent[0]!;
+    expect(message.fromEncryptionPubKey).toBe(pubKeyToHex(sourceKeyPair.publicKey));
+    const decrypted = decryptJSON(message.payload as string, targetKeyPair.privateKey, pubKeyToHex(sourceKeyPair.publicKey));
+    expect((decrypted as { entityInputs: unknown[] }).entityInputs.length).toBe(1);
+    expect(logs).toEqual([]);
+    // Reachability gate agrees once the profile key exists.
+    expect(hasConnectedEncryptedRelayClient(store, targetRuntimeId, gossip.encryptionKeyForRuntime)).toBe(true);
+    expect(hasConnectedEncryptedRelayClient(store, targetRuntimeId)).toBe(false);
+  });
+
+  test('profile without a valid runtime key never reaches the directory', () => {
+    const targetRuntimeId = deriveSignerAddressSync('relay-direct-profile-nokey', '1').toLowerCase();
+    const gossip = createGossipLayer({});
+    expect(gossip.encryptionKeyForRuntime(targetRuntimeId)).toBeNull();
+    // Canonicalization rejects an invalid X25519 binding outright, so the
+    // send-ready directory can only ever hold well-formed keys.
+    expect(() => gossip.announce(buildCryptographicProfileFixture({
+      entityId: `0x${'cf'.repeat(32)}`,
+      runtimeId: targetRuntimeId,
+      runtimeEncPubKey: 'not-a-key',
+      name: 'NoKey',
+      signingSeed: 'relay-direct-profile-nokey',
+    }))).toThrow('GOSSIP_PROFILE_RUNTIME_ENC_PUBKEY_REQUIRED');
+    expect(gossip.encryptionKeyForRuntime(targetRuntimeId)).toBeNull();
   });
 });

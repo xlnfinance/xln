@@ -299,7 +299,7 @@ const getReplicaSignerId = (replicaKey: string): string => {
 
 // Relay push handles normal updates; exact cache misses use bounded on-demand
 // requests. This slow reconciliation only repairs missed push notifications.
-const GOSSIP_POLL_MS = 30_000;
+const GOSSIP_POLL_MS = 60_000;
 // A busy entity re-certifies its routing profile (live capacities) on every
 // commit; each announcement costs every peer a full Hanko verification. New
 // entities still announce immediately (`announceProfilesForEntitiesNow`);

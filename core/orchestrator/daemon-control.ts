@@ -477,6 +477,22 @@ export class DaemonControlClient {
   }
 
   /**
+   * Send-readiness for encrypting straight to a runtime: the admitted profile
+   * must bind the exact hub `runtimeId` and carry a valid X25519 key. A
+   * `found: true` profile belonging to a retired hub runtime is not
+   * send-ready, and neither is one whose key never propagated.
+   */
+  async hubProfileSendReady(entityId: string, hubRuntimeId: string): Promise<boolean> {
+    const response = decodeGossipProfileResponse(await this.get(
+      `/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`,
+    ));
+    if (response.ok !== true || response.found !== true || !response.profile) return false;
+    const profile = response.profile as { runtimeId?: unknown; runtimeEncPubKey?: unknown };
+    return String(profile.runtimeId ?? '').trim().toLowerCase() === hubRuntimeId.trim().toLowerCase()
+      && /^0x[0-9a-f]{64}$/.test(String(profile.runtimeEncPubKey ?? ''));
+  }
+
+  /**
    * Counterparties this Runtime currently sees in `entityId`'s gossip profile.
    * A routed payment is admitted against the sender's own gossip view, so a
    * load driver must observe that view rather than the Hub's own state.

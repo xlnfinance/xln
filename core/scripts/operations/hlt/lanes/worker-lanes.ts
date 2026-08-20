@@ -154,13 +154,22 @@ const waitForVisibleEntities = async (
   throw new Error(`${code}:missing=${lastMissing}:of=${required.size}`);
 };
 
-const waitForHubProfile = async (lane: LaneRuntime, hubEntityId: string): Promise<void> => {
+const waitForHubProfile = async (
+  lane: LaneRuntime,
+  hubEntityId: string,
+  hubRuntimeId: string,
+): Promise<void> => {
   const deadline = Date.now() + VISIBILITY_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (await lane.control.hasGossipProfile(hubEntityId)) return;
+    if (await lane.control.hubProfileSendReady(hubEntityId, hubRuntimeId)) return;
     await sleep(100);
   }
-  throw new Error(`PRODUCTION_SWAP_LOAD_HUB_PROFILE_NOT_VISIBLE:${lane.laneKey}`);
+  // `found` alone is not send-ready: the profile must bind this exact hub
+  // runtime and carry its X25519 key, or every encrypted send will miss.
+  throw new Error(
+    `PRODUCTION_SWAP_LOAD_HUB_PROFILE_NOT_SEND_READY:${lane.laneKey}` +
+      `:entityId=${hubEntityId.slice(-8)}:runtimeId=${hubRuntimeId.slice(-8)}`,
+  );
 };
 
 /** After register+credit the user must advertise the Hub lane, or peers cannot quote a payment. */
@@ -282,7 +291,7 @@ const provisionLoadLanes = async (
   // The Hub does not pin users. Each user must still publish a receive-ready
   // profile (Hub counterparty in accounts) before any peer can quote a route.
   await runInBatches(runtimes, async (lane, index) => {
-    await waitForHubProfile(lane, options.hubIdentity.entityId);
+    await waitForHubProfile(lane, options.hubIdentity.entityId, options.hub.adapter.runtimeId);
     await sendObserved(lane.runtime, `prod-load-open-${options.role}-${lane.laneKey}`, {
       runtimeTxs: [],
       entityInputs: buildLaneAccountInputs(

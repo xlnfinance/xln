@@ -25,6 +25,8 @@ export interface GossipLayer {
   profiles: Map<string, Profile>;
   jurisdictions: Map<string, JurisdictionGossipAnnouncement>;
   announce: (profile: Profile) => void;
+  /** Canonical X25519 binding for a peer: read from its admitted profile. */
+  encryptionKeyForRuntime: (runtimeId: string) => string | null;
   announceJurisdiction: (
     announcement: JurisdictionGossipAnnouncement,
     officialFoundationSignerId?: string,
@@ -48,6 +50,18 @@ type GossipLayerOptions = {
 export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer {
   const profiles = new Map<string, Profile>();
   const jurisdictions = new Map<string, JurisdictionGossipAnnouncement>();
+  // runtimeId -> X25519 pub key. One admission path (announce) maintains it;
+  // sends resolve peer keys from profiles, never from a transport socket map.
+  const runtimeKeys = new Map<string, string>();
+  const normalizeRuntimeIdKey = (value: string): string => String(value || '').trim().toLowerCase();
+  const validX25519Hex = (value: string): boolean => /^0x[0-9a-f]{64}$/.test(value);
+  const indexRuntimeKey = (profile: Profile): void => {
+    const runtimeId = normalizeRuntimeIdKey(profile.runtimeId || '');
+    const key = String((profile as { runtimeEncPubKey?: unknown }).runtimeEncPubKey || '');
+    if (runtimeId && validX25519Hex(key)) runtimeKeys.set(runtimeId, key);
+  };
+  const encryptionKeyForRuntime = (runtimeId: string): string | null =>
+    runtimeKeys.get(normalizeRuntimeIdKey(runtimeId)) ?? null;
 
   const announce = (profile: Profile): void => {
     logDebug('GOSSIP', `📢 gossip.announce INPUT: ${profile.entityId.slice(-4)} accounts=${profile.accounts.length}`);
@@ -68,6 +82,7 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
       return;
     }
     profiles.set(profile.entityId, normalized);
+    indexRuntimeKey(normalized);
     logDebug('GOSSIP', `📡 Gossip SAVED: ${profile.entityId.slice(-4)} ts=${newTimestamp} accounts=${normalized.accounts.length}`);
     try {
       options.onAnnounce?.(normalized);
@@ -105,6 +120,7 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
   };
   const setProfiles = (incoming: Iterable<Profile>): void => {
     profiles.clear();
+    runtimeKeys.clear();
     for (const profile of incoming) announce(profile);
   };
   const getNetworkGraph = () => ({
@@ -122,6 +138,7 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
     profiles,
     jurisdictions,
     announce,
+    encryptionKeyForRuntime,
     announceJurisdiction,
     getProfiles,
     getJurisdictions,
