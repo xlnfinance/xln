@@ -50,7 +50,6 @@ import {
   buildRoundPayment,
   CREDIT_HEADROOM_MULTIPLE,
   PAYMENT_TOKEN_ID,
-  readHubReceiverCredits,
   waitForHubSettlement,
   waitForRoutableReceivers,
 } from './worker-payments';
@@ -124,7 +123,6 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
     const driverRssBefore = process.memoryUsage().rss;
     const receiverIds = users.map(lane => lane.identity.entityId.toLowerCase());
     const expectedPayments = new Map(receiverIds.map((id, index) => [id, perReceiver[index]! / CREDIT_HEADROOM_MULTIPLE]));
-    const baselines = await readHubReceiverCredits(hub, hubIdentity.entityId, new Set(receiverIds));
     const expectedSwaps = args.lanes * args.rounds * swapMatches;
     const senderIndexByLaneKey = new Map(users.map((lane, index) => [lane.laneKey, index]));
     const offerCadenceMs = Math.max(1, Math.floor(args.cadenceMs / swapMatches));
@@ -184,7 +182,7 @@ export const runMixedProductionLoad = async (args: WorkerArgs): Promise<void> =>
       hub,
       hubIdentity.entityId,
       receiverIds,
-      baselines,
+      new Map(),
       expectedPayments,
       false,
     );

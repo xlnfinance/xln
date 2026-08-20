@@ -1998,7 +1998,7 @@ test('runtime adapter drops expired clients before broadcasting ticks', async ()
   expect(messages).toHaveLength(0);
 });
 
-test('runtime adapter caps outgoing responses and closes oversized sockets', async () => {
+test('runtime adapter caps outgoing responses and leaves the socket open for a smaller retry', async () => {
   const previous = process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'];
   const previousLogLevel = process.env['XLN_LOG_LEVEL'];
   process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = '512';
@@ -2032,7 +2032,7 @@ test('runtime adapter caps outgoing responses and closes oversized sockets', asy
     const response = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages[0]);
     expect(response.ok).toBe(false);
     expect(response.error.code).toBe('E_INTERNAL');
-    expect(closeCode).toBe(1009);
+    expect(closeCode).toBeUndefined();
   } finally {
     if (previous === undefined) {
       delete process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'];

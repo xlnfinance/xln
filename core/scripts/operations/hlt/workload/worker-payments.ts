@@ -209,11 +209,17 @@ const hubInCapacity = (account: LoadAccountProjection, hubEntityId: string): big
 // poll, compounding under any write-side contention. Start at 80 (cuts
 // round-trips ~6x over the old default) and halve on overflow, same idiom as
 // wire-budget.ts's materializeOrHalve, instead of guessing a single constant.
+// Mixed 100u measured 3 fat Hub accounts at 727KB items / 1.12MB wire — floor 4
+// still overflows. One account (~240KB) fits; the client error is
+// "runtime adapter response too large", not RADAPTER_MESSAGE_TOO_LARGE.
 const HUB_ACCOUNTS_PAGE_LIMIT_START = 80;
-const HUB_ACCOUNTS_PAGE_LIMIT_FLOOR = 4;
+const HUB_ACCOUNTS_PAGE_LIMIT_FLOOR = 1;
 
-const isMessageTooLarge = (error: unknown): boolean =>
-  error instanceof Error && error.message.includes('RADAPTER_MESSAGE_TOO_LARGE');
+const isMessageTooLarge = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('RADAPTER_MESSAGE_TOO_LARGE')
+    || message.includes('runtime adapter response too large');
+};
 
 const readHubAccounts = async (
   hub: { adapter: { read: <T>(path: string, query?: Record<string, unknown>) => Promise<T> } },
@@ -275,27 +281,39 @@ export const waitForHubSettlement = async (
   const owed = [...expected.values()].reduce((total, amount) => total + amount, 0n);
   let reportedAtMs = 0;
   let lastCredited = -1n;
+  let lastLockBook = -1;
   let stalledSinceMs = startedAt;
   while (Date.now() < deadline) {
     const core = decodeHubSettlementCounters(
       await withReadTimeout(readWithRateLimitRetry<unknown>(hub, `entity/${hubEntityId}`), DELIVERY_MAX_STALL_MS, 'entity'),
     );
-    const credits = await withReadTimeout(
-      readHubReceiverCredits(hub, hubEntityId, receivers),
-      DELIVERY_MAX_STALL_MS,
-      'receiverCredits',
-    );
+    // Mixed swaps also move quote, so Hub inCapacity cannot authorize delivery.
+    // Skip the fat /accounts dump (100u mixed: 3 accounts already exceeded 1MB).
+    const credits = requireQuoteDelta
+      ? await withReadTimeout(
+        readHubReceiverCredits(hub, hubEntityId, receivers),
+        DELIVERY_MAX_STALL_MS,
+        'receiverCredits',
+      )
+      : new Map<string, bigint>();
     let credited = 0n;
     let pendingReceivers = 0;
-    for (const [receiverId, amount] of expected) {
-      const received = (credits.get(receiverId) ?? 0n) - (baselines.get(receiverId) ?? 0n);
-      credited += received > 0n ? received : 0n;
-      if (received < amount) pendingReceivers += 1;
+    if (requireQuoteDelta) {
+      for (const [receiverId, amount] of expected) {
+        const received = (credits.get(receiverId) ?? 0n) - (baselines.get(receiverId) ?? 0n);
+        credited += received > 0n ? received : 0n;
+        if (received < amount) pendingReceivers += 1;
+      }
     }
     if (core.lockBookOpen === 0 && (pendingReceivers === 0 || !requireQuoteDelta)) return;
     const elapsedMs = Date.now() - startedAt;
-    if (credited !== lastCredited) {
-      lastCredited = credited;
+    if (requireQuoteDelta) {
+      if (credited !== lastCredited) {
+        lastCredited = credited;
+        stalledSinceMs = Date.now();
+      }
+    } else if (core.lockBookOpen !== lastLockBook) {
+      lastLockBook = core.lockBookOpen;
       stalledSinceMs = Date.now();
     }
     const stalledMs = Date.now() - stalledSinceMs;

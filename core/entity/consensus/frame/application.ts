@@ -1461,6 +1461,7 @@ const applyEntityFrameWithIsolation = async (
   frameTimestamp: number | undefined,
   isolateState: boolean,
 ): Promise<EntityFrameResult> => {
+  // Identity on an in-process stamped context. WAL/network JSON still full-parse.
   entityContext = validateEntityInfraContext(entityContext);
   const profileHashStartedAt = getPerfMs();
   const previousProfileHash = computeEntityProfileDescriptorHash(buildEntityProfileDescriptor(entityState));

@@ -1,6 +1,7 @@
 import type { HtlcPreparedInfraContext } from '../../types/entity/htlc-infra-context';
 import { assertOpaqueHtlcCiphertext } from '../../protocol/htlc/multi-recipient';
 import { normalizeAccountStateDomain } from '../../account/commitment/state-root';
+import { cloneIsolatedProtocolValue } from '../../protocol/state/isolated-value-clone';
 import { LIMITS, TOKENS } from '../../config/constants';
 
 const bytes32 = (value: unknown, code: string): string => {
@@ -143,5 +144,8 @@ export const validateHtlcPreparedInfraContext = (value: unknown): HtlcPreparedIn
   ) throw new Error('HTLC_PREPARED_CONTEXT_INVALID');
   validatePreparedEntries(context);
   validatePreparedOrigins(context);
-  return structuredClone(context);
+  // One spanning structuredClone of a Hub HTLC graph re-arms Bun 1.3.x
+  // repeated-ref corruption when follow-up/payment alias innerEnvelope.
+  // Isolate per graph so aliases become distinct copies; canonical bytes stay equal.
+  return cloneIsolatedProtocolValue(context, 'HTLC_PREPARED_CONTEXT_CLONE');
 };

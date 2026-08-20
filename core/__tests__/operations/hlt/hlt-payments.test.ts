@@ -28,6 +28,9 @@ describe('hlt payment population', () => {
     expect(source).toContain('waitForHubSettlement');
     expect(source).toContain('requireQuoteDelta');
     expect(source).toContain('accountsLimit: pageLimit');
+    expect(source).toContain('HUB_ACCOUNTS_PAGE_LIMIT_FLOOR = 1');
+    expect(source).toContain('runtime adapter response too large');
+    expect(source).toContain('Skip the fat /accounts dump');
     expect(readFileSync(
       join(import.meta.dir, '../../../scripts/operations/hlt/lanes/worker-lanes.ts'),
       'utf8',
@@ -232,6 +235,7 @@ describe('hlt payment population', () => {
     expect(source).toContain('HLT_MIXED_TICK_LANE_MISMATCH');
     expect(source).toContain('round % swapMatches !== 0');
     expect(source).toContain('expectedPayments,\n      false');
+    expect(source).not.toContain('readHubReceiverCredits');
     expect(source).not.toContain('hlt-mixed-swap-${tick + 1}');
     expect(source).not.toContain('hlt-mixed-pay-${tick + 1}');
   });

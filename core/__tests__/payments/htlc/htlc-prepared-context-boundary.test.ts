@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { validateHtlcPreparedInfraContext } from '../../../entity/htlc/prepared-context-validation';
 import { getEffectiveHtlcFrameTxs } from '../../../entity/htlc/materialize-context';
 import type { EntityTx } from '../../../types/entity-tx';
@@ -99,5 +101,11 @@ describe('HTLC prepared Entity context boundary', () => {
       ...context,
       entries: [{ binding, outcome: { kind: 'final', secret: id('7'), retiredField: id('8') } }],
     })).toThrow('HTLC_PREPARED_FINAL_FIELDS_INVALID');
+  });
+
+  test('does not spanning-structuredClone the HTLC graph', () => {
+    const source = readFileSync(join(import.meta.dir, '../../../entity/htlc/prepared-context-validation.ts'), 'utf8');
+    expect(source).toContain('cloneIsolatedProtocolValue(context');
+    expect(source).not.toContain('structuredClone(context)');
   });
 });
