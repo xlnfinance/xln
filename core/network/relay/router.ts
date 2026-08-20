@@ -721,6 +721,11 @@ const forwardToRemoteRuntime = (
   if (!target || isLocalTarget) return false;
   const attempt = sendRelayDelivery(config, target.ws, msg, resolveRelayWireBytes(context));
   const delivery = attempt.delivery;
+  if (type === 'entity_inputs' && HEAVY_LOGS) {
+    console.debug(
+      `[RELAY-REMOTE] entity_inputs from=${String(from || '').slice(-8)} to=${String(to || '').slice(-8)} outcome=${delivery.outcome}:${delivery.code}`,
+    );
+  }
   if (isDeliveryDelivered(delivery)) {
     if (attempt.backpressured) {
       const now = Date.now();
