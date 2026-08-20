@@ -101,6 +101,7 @@ import {
   MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
   MARKET_MAKER_QUOTE_LOOP_MS,
   MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
+  MARKET_MAKER_SKIP_CROSS_BOOTSTRAP,
   MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK,
   type MarketMakerConnectivityBudget,
   type MarketMakerEntityContext,
@@ -334,7 +335,11 @@ const computeMarketMakerHealthSnapshot = (
   const allVisibleHubs = readVisibleHubProfiles(env, true);
   const crossOverride = options.crossOverride;
   const includeCross = !crossOverride && options.includeCross !== false;
+  // Same-j HLT never fills cross-j books. Reporting applicable:true with
+  // empty routes made MM.ok false and crashed finalize
+  // (MARKET_MAKER_BOOTSTRAP_INCOMPLETE) even after hubs were depth-ready.
   const crossApplicable =
+    !MARKET_MAKER_SKIP_CROSS_BOOTSTRAP &&
     contexts.length > 1 &&
     allVisibleHubs.some(
       profile =>
@@ -686,6 +691,7 @@ const createMarketMakerHealthController = (deps: MarketMakerHealthControllerDeps
     return publish({ includeCross: false, crossOverride: buildPlannedMarketMakerCrossHealth(plan) });
   };
   const publishReady = (): MarketMakerHealth | null => {
+    if (MARKET_MAKER_SKIP_CROSS_BOOTSTRAP) return publish({ includeCross: false });
     if (!currentHealth || !isMarketMakerCrossDepthComplete(currentHealth)) return publish({ includeCross: true });
     return publish({ includeCross: false, crossOverride: currentHealth.cross });
   };
@@ -1554,7 +1560,10 @@ const createMarketMakerBootstrapFinalizer = (deps: MarketMakerBootstrapFinalizer
       );
     }
     const assertStartedAt = Date.now();
-    const health = assertMarketMakerBootstrapFinalized(deps.env, deps.health.publish({ includeCross: true }));
+    const health = assertMarketMakerBootstrapFinalized(
+      deps.env,
+      deps.health.publish({ includeCross: !MARKET_MAKER_SKIP_CROSS_BOOTSTRAP }),
+    );
     deps.emit('finalize-step', { step: 'assert-finalized', durationMs: Date.now() - assertStartedAt });
     const fingerprintStartedAt = Date.now();
     const fingerprint = buildMarketMakerBootstrapFingerprint(
@@ -1651,7 +1660,9 @@ const createMarketMakerMaintenanceLoops = (deps: MarketMakerMaintenanceLoopDeps)
       if (isMarketMakerFullDepthComplete(before)) return;
       await deps.driveQuotes('steady');
       const after = deps.health.publishReady();
-      if (!isMarketMakerFullDepthComplete(after)) deps.health.publish({ includeCross: true });
+      if (!isMarketMakerFullDepthComplete(after) && !MARKET_MAKER_SKIP_CROSS_BOOTSTRAP) {
+        deps.health.publish({ includeCross: true });
+      }
       return;
     }
     const enqueued = await deps.driveQuotes();
@@ -1734,11 +1745,14 @@ const createMarketMakerQuoteReadModel = (deps: MarketMakerQuoteReadModelDeps) =>
     });
   };
   const isBootstrapDepthComplete = (health: MarketMakerHealth | null): boolean =>
-    allSameDepthReady(readVisibleHubProfiles(deps.env, true)) && isMarketMakerDepthComplete(health);
+    allSameDepthReady(readVisibleHubProfiles(deps.env, true)) &&
+    (MARKET_MAKER_SKIP_CROSS_BOOTSTRAP
+      ? isMarketMakerSameDepthComplete(health)
+      : isMarketMakerDepthComplete(health));
   const buildCompletionHealth = (): MarketMakerHealth | null => {
     if (completionHealthHeight === deps.env.state.height) return completionHealth;
     completionHealthHeight = deps.env.state.height;
-    completionHealth = deps.health.buildSnapshot({ includeCross: true });
+    completionHealth = deps.health.buildSnapshot({ includeCross: !MARKET_MAKER_SKIP_CROSS_BOOTSTRAP });
     if (completionHealth) {
       deps.health.setCurrentHealth(completionHealth);
       deps.health.rebuildHealthResponse();
@@ -1749,8 +1763,10 @@ const createMarketMakerQuoteReadModel = (deps: MarketMakerQuoteReadModelDeps) =>
     completionHealthHeight = -1;
   };
   const canCheckCompletion = (): boolean => {
+    if (hasMarketMakerRuntimeBacklog(deps.env)) return false;
+    if (MARKET_MAKER_SKIP_CROSS_BOOTSTRAP) return true;
     const bootstrapCross = deps.bootstrapCross();
-    if (!bootstrapCross.started || hasMarketMakerRuntimeBacklog(deps.env)) return false;
+    if (!bootstrapCross.started) return false;
     const visibleHubs = readVisibleHubProfiles(deps.env, true);
     const plan = buildMarketMakerCrossPlanSummary([...deps.contexts()], visibleHubs, new Map(deps.tokenIdsByContext()));
     if (plan.expectedRoutes > 0 && !bootstrapCross.producerAttempted) return false;
@@ -1937,6 +1953,7 @@ const driveMarketMakerQuotes = async (
         if (!shouldContinue()) return false;
       }
     }
+    if (MARKET_MAKER_SKIP_CROSS_BOOTSTRAP) return false;
     if (mode === 'bootstrap') {
       if (!(primarySameDepthReady && deps.readModel.allSameDepthReady(visibleHubs))) return false;
       if (!deps.bootstrapCross.isStarted()) {
@@ -2281,7 +2298,9 @@ const createMarketMakerQuoteLifecycle = (
   const refreshBootstrapPhase = (currentHealth: MarketMakerHealth | null): void => {
     if (readModel.isBootstrapDepthComplete(currentHealth)) return;
     const previousPhase = state.phase;
-    if (state.bootstrapCrossStarted) {
+    if (MARKET_MAKER_SKIP_CROSS_BOOTSTRAP) {
+      state.phase = 'bootstrap-same-chain';
+    } else if (state.bootstrapCrossStarted) {
       state.phase = 'bootstrap-cross';
     } else if (
       readModel.allSameDepthReady(readVisibleHubProfiles(env, true)) &&

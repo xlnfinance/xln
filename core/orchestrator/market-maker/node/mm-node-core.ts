@@ -422,6 +422,8 @@ export const MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL = String(
   process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] || '',
 ).trim();
 export const MARKET_MAKER_BOOTSTRAP_LOG_BACKLOG = process.env['XLN_MARKET_MAKER_BOOTSTRAP_LOG_BACKLOG'] === '1';
+/** Same-j HLT (payments/same/mixed) must not wait on unused cross-j MM routes. */
+export const MARKET_MAKER_SKIP_CROSS_BOOTSTRAP = process.env['XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP'] === '1';
 
 export const emitMarketMakerBootstrapDebugEvent = (event: string, fields: Record<string, unknown> = {}): void => {
   if (!MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL) return;

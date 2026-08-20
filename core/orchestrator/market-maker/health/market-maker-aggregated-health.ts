@@ -199,7 +199,7 @@ export const buildAggregatedMarketMakerHealth = ({
   });
 
   const childReady = marketMakerHealth?.marketMaker?.ok === true;
-  const crossReady = Boolean(rawCross) && cross.ok;
+  const crossReady = !cross.applicable || cross.ok;
   const failure = resolveMarketMakerFailure({
     mmEnabled,
     marketMakerActive,

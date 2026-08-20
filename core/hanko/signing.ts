@@ -8,6 +8,7 @@ import type { ConsensusConfig, EntityState } from '../entity/types';
 import type { EntityRuntimeContext } from '../entity/runtime-context';
 import type { HankoBoardDelays, HankoString } from '../types/hanko';
 import { ethers } from 'ethers';
+import { cachedChecksumAddress, toLowerAddressOrNull } from '../protocol/crypto/address-cache';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import {
   getSignerAddress,
@@ -80,13 +81,7 @@ const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncod
   return new Uint8Array(data) as Buffer;
 };
 
-const normalizeAddress = (value: string): string | null => {
-  try {
-    return ethers.getAddress(value).toLowerCase();
-  } catch {
-    return null;
-  }
-};
+const normalizeAddress = (value: string): string | null => toLowerAddressOrNull(value);
 
 const publicKeyToAddress = (value: string): string | null => {
   const hex = value.startsWith('0x') ? value : `0x${value}`;
@@ -124,7 +119,8 @@ export async function inspectHankoForHash(
   countOp('hanko.inspectHankoForHash');
   const hanko = decodeHankoEnvelope(hankoBytes);
   const recovered = recoverHankoSignatures(hash, hanko.packedSignatures);
-  const recoveredAddresses = recovered.map((signature) => ethers.getAddress(`0x${signature.signerEntityId.slice(-40)}`));
+  const recoveredAddresses = recovered.map((signature) =>
+    cachedChecksumAddress(`0x${signature.signerEntityId.slice(-40)}`));
   const entityIds = [
     ...hanko.placeholders,
     ...recovered.map((signature) => signature.signerEntityId),
@@ -671,5 +667,7 @@ export async function resolveHankoDefaultProposerSignerId(
   if (!/^0x0{24}[0-9a-f]{40}$/.test(firstMember)) {
     invalidHanko(`HANKO_PROPOSER_FIRST_MEMBER_INVALID:${firstMember || 'missing'}`);
   }
-  return ethers.getAddress(`0x${firstMember.slice(-40)}`).toLowerCase();
+  const proposer = toLowerAddressOrNull(`0x${firstMember.slice(-40)}`);
+  if (!proposer) invalidHanko(`HANKO_PROPOSER_FIRST_MEMBER_INVALID:${firstMember || 'missing'}`);
+  return proposer;
 }

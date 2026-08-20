@@ -147,6 +147,19 @@ const createTaskState = (
 });
 
 /**
+ * Pending-account resend must run on the resend clock, not the 10s generic
+ * maintenance slot. A 3s ACK halt with an 8s first-resend never retried.
+ */
+export const crontabTaskIntervalMs = (
+  task: Pick<CrontabTaskState, 'method' | 'intervalMs'>,
+): number =>
+  task.method === 'maintainPendingAccounts' ? ACCOUNT_PENDING_RESEND_AFTER_MS : task.intervalMs;
+
+export const crontabTaskDueAt = (
+  task: Pick<CrontabTaskState, 'method' | 'intervalMs' | 'lastRun'>,
+): number => task.lastRun + crontabTaskIntervalMs(task);
+
+/**
  * Initialize crontab state for an entity
  */
 export function initCrontab(): CrontabState {
@@ -220,7 +233,7 @@ export async function executeCrontab(
     if (!task.enabled) continue;
     const timeSinceLastRun = now - task.lastRun;
 
-    if (timeSinceLastRun >= task.intervalMs) {
+    if (timeSinceLastRun >= crontabTaskIntervalMs(task)) {
       const handler = CRONTAB_TASK_HANDLERS[task.method];
       if (!handler) throw new Error(`Unknown crontab task method: ${task.method}`);
       const outputs = await handler(env, replica, task, context);
@@ -262,9 +275,10 @@ async function maintainPendingAccounts(
     }
     const frameAge = now - account.pendingFrame.timestamp;
     // Bilateral frames ack in milliseconds on a healthy mesh. An operator may
-    // set a strict ceiling (HLT/local runs: 3s): exceeding it is not retried
-    // away — the runtime halts with full account identity so the delivery
-    // fault is investigated, not absorbed.
+    // set a strict ceiling that MUST exceed ACCOUNT_PENDING_RESEND_AFTER_MS
+    // (timing.ts throws at boot otherwise). Exceeding it is not retried away —
+    // the runtime halts with full account identity so the delivery fault is
+    // investigated, not absorbed.
     const strictAckTimeoutMs = ACCOUNT_PENDING_ACK_STRICT_TIMEOUT_MS;
     if (strictAckTimeoutMs > 0 && frameAge > strictAckTimeoutMs) {
       throw haltRuntimeFailure(

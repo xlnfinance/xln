@@ -745,6 +745,9 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain(
       "XLN_LOG_LEVEL: process.env['XLN_MARKET_MAKER_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn'",
     );
+    expect(orchestrator).toContain(
+      "XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP: process.env['XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP']",
+    );
     expect(orchestrator).toContain('const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {');
     expect(orchestrator).toContain(
       'const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {\n  // Reset may atomically replace',
@@ -1158,6 +1161,9 @@ describe('production startup wiring', () => {
       'type MarketMakerHttpHandlerDeps =',
     );
     expect(healthControllerBlock).toContain('const publishReady = (): MarketMakerHealth | null => {');
+    expect(healthControllerBlock).toContain(
+      'if (MARKET_MAKER_SKIP_CROSS_BOOTSTRAP) return publish({ includeCross: false });',
+    );
     expect(healthControllerBlock).toContain(
       'if (!currentHealth || !isMarketMakerCrossDepthComplete(currentHealth)) return publish({ includeCross: true });',
     );
@@ -1687,7 +1693,7 @@ describe('production startup wiring', () => {
       'return publish({ includeCross: false, crossOverride: buildPlannedMarketMakerCrossHealth(plan) });',
     );
     expect(mmNode).toContain('const buildCompletionHealth = (): MarketMakerHealth | null => {');
-    expect(mmNode).toContain('completionHealth = deps.health.buildSnapshot({ includeCross: true });');
+    expect(mmNode).toContain('completionHealth = deps.health.buildSnapshot({ includeCross: !MARKET_MAKER_SKIP_CROSS_BOOTSTRAP });');
     expect(mmNode).toContain('deps.health.setCurrentHealth(completionHealth);');
     expect(mmNode).toContain('deps.health.rebuildHealthResponse();');
     expect(readMarketMakerNodeModule('market-maker/node/mm-node-health.ts')).toContain('computeCanonicalEntityHashesFromEnv');
@@ -1711,6 +1717,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("emit('cross-plan'");
     expect(mmNode).toContain('const plan = buildMarketMakerCrossPlanSummary(');
     expect(mmNode).toContain('const canCheckCompletion = (): boolean =>');
+    expect(mmNode).toContain('if (MARKET_MAKER_SKIP_CROSS_BOOTSTRAP) return true;');
+    expect(mmNode).toContain('!MARKET_MAKER_SKIP_CROSS_BOOTSTRAP &&');
     expect(mmNode).toContain('if (plan.expectedRoutes > 0 && !bootstrapCross.producerAttempted) return false;');
     expect(mmNode).toContain('return plan.expectedRoutes === 0 || !hasCrossAccountBacklog(visibleHubs);');
     expect(mmNode).not.toContain('const completionBeforeDrive = buildBootstrapCompletionHealth();');
@@ -1726,7 +1734,7 @@ describe('production startup wiring', () => {
       'await markOffersReady();\n      publishMarketMakerHealthSnapshot({ includeCross: true });',
     );
     expect(mmNode).toContain("state.phase = 'bootstrap-same-chain';\n    health.publishBootstrap();");
-    expect(mmNode).toContain('if (state.bootstrapCrossStarted) {');
+    expect(mmNode).toContain('} else if (state.bootstrapCrossStarted) {');
     expect(mmNode).toContain('readModel.allSameDepthReady(readVisibleHubProfiles(env, true)) &&');
     expect(mmNode).toContain('isMarketMakerSameDepthComplete(currentHealth)');
     expect(mmNode).not.toContain('bootstrapCrossStarted || isMarketMakerSameReady(health)');
@@ -1847,7 +1855,9 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('const expectedRoutes = Number(health.marketMaker?.cross?.expectedRoutes || 0);');
     expect(smoke).toContain('hub.depthReady === true');
     expect(smoke).toContain('route.depthReady === true');
-    expect(smoke).toContain('marketMakerFullDepthReady(health) &&');
+    expect(smoke).toContain('const marketMakerDepthReadyForSmoke = (health: HealthPayload): boolean =>');
+    expect(smoke).toContain('marketMakerDepthReadyForSmoke(health) &&');
+    expect(smoke).toContain("XLN_MARKET_MAKER_SKIP_CROSS_BOOTSTRAP: '1'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_SAME_CHAIN_BUDGET_MS'] || '30000'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '300000'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_MAX_MS'] || '2000'");

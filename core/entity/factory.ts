@@ -4,6 +4,7 @@
  */
 
 import { ethers } from 'ethers';
+import { cachedChecksumAddress } from '../protocol/crypto/address-cache';
 
 import { getSignerAddress } from '../account/crypto';
 import { DEBUG } from '../support/debug-flags';
@@ -64,7 +65,7 @@ const boardConfig = (
 
 const resolveValidatorAddress = (validator: string, env?: BoardSignerContext): string => {
   if (validator.startsWith('0x') && validator.length === 42) {
-    return ethers.getAddress(validator);
+    return cachedChecksumAddress(validator);
   }
   if (validator.startsWith('0x') && (validator.length === 68 || validator.length === 132)) {
     return ethers.computeAddress(validator);
@@ -76,7 +77,7 @@ const resolveValidatorAddress = (validator: string, env?: BoardSignerContext): s
         (env ? '' : ':numeric aliases require explicit EntityRuntimeContext'),
     );
   }
-  return ethers.getAddress(derived);
+  return cachedChecksumAddress(derived);
 };
 
 const toBoardEntityId = (validator: string, env?: BoardSignerContext): string => {
@@ -108,7 +109,7 @@ export const encodeBoard = (config: ConsensusConfig, env?: BoardSignerContext): 
   if (!/^0x[0-9a-f]{40}$/i.test(proposer)) {
     throw new Error(`BOARD_PROPOSER_EOA_REQUIRED:${proposer}`);
   }
-  ethers.getAddress(proposer);
+  cachedChecksumAddress(proposer);
   const normalizedShares = new Map<string, bigint>();
   for (const [rawSignerId, share] of Object.entries(config.shares)) {
     const signerId = rawSignerId.trim().toLowerCase();

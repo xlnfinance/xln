@@ -75,13 +75,27 @@ const createTransactionEffects = (): ProposalTransactionEffects => ({
   failedHtlcLocks: [],
 });
 
+/**
+ * One overlay for a multi-tx Account proposal. Mixed HLT dumps swap_offer and
+ * htlc_lock into the same user Runtime frame (Promise.all of two sendObserved
+ * calls); the old swap-only predicate fell back to begin/commit per tx.
+ * A failed tx still discards the whole overlay and retries per-tx.
+ */
+const OPTIMISTIC_ACCOUNT_TX_TYPES = new Set<AccountTx['type']>([
+  'swap_resolve',
+  'cross_swap_fill_ack',
+  'cross_pull_lock',
+  'swap_offer',
+  'htlc_lock',
+  'htlc_resolve',
+  'direct_payment',
+]);
+
+export const proposalWindowCanUseOptimisticBatch = (txs: readonly AccountTx[]): boolean =>
+  txs.length > 1 && txs.every(tx => OPTIMISTIC_ACCOUNT_TX_TYPES.has(tx.type));
+
 const shouldUseOptimisticProposalBatch = (txs: readonly AccountTx[]): boolean =>
-  txs.length > 1 &&
-  txs.every(tx =>
-    tx.type === 'swap_resolve' ||
-    tx.type === 'cross_swap_fill_ack' ||
-    tx.type === 'cross_pull_lock' ||
-    tx.type === 'swap_offer');
+  proposalWindowCanUseOptimisticBatch(txs);
 
 const isRefreshableStaleSettlementSeal = (
   account: AccountReplica,
