@@ -98,7 +98,7 @@
       "headline": "200 users in one process: works, but one sender daemon carries ~40 senders at 1 tx/s",
       "detail": "200 users hosted 200 per daemon, 100 offered per second, 4000 of 4000 delivered but only at 53/s: the sender daemon spends ~24 ms CPU per payment (entity frame + HTLC + storage), so 100 senders at 1 tx/s need 2.4 cores in a single-threaded process. Hub cost per payment dropped to 14 ms because 40+ payments now share one frame. Fine for real users at 0.1 tx/s; for the 100 tps bench the population must spread over more processes.",
       "users": 200,
-      "paymentsTps": 53.0,
+      "paymentsTps": 53,
       "swapsTps": 0,
       "status": "green"
     },
@@ -169,6 +169,16 @@
       "detail": "Same code as aaf5db645 plus perf-snapshot throttling (percentile sort on every frame was ~9% of Hub CPU under XLN_RUNTIME_APPLY_PROFILE) and no op-counters. Lanes at 100 users each were co-limiting (5 lanes peaked at 125-146% CPU); with 10 lanes the lanes idle at 20-40% avg while Hub main thread sits at 100-125% for the whole 30 s window. 7500/7500 in 30.1 s, exit 0. Hub CPU profile (m500m): storage 22% (account envelope trie 11%), state roots 14%, hanko verify 4.4%, HTLC materialize+replay 6.9%, own-frame validation/measure 4%.",
       "users": 500,
       "paymentsTps": 248.8,
+      "swapsTps": 0,
+      "status": "green"
+    },
+    {
+      "at": "2026-08-20T23:39:00Z",
+      "commit": "2aeb5f432",
+      "headline": "Radapter 1013 kick storm: 7.4/s at 200 users (1000/1000 delivered)",
+      "detail": "First 736 payments landed in 9.3 s (~79/s), then hub CPU saturation pushed runtime-adapter socket buffers past the 2 MB guard; the 1013 kick, reconnect and resync loop stretched the tail to 134.8 s. Hub height 298 to 338, WAL +16.4 MB, stalledMs stayed 0 mid-run. Next experiment: XLN_RADAPTER_BACKPRESSURE_BYTES=32M to confirm causality.",
+      "users": 200,
+      "paymentsTps": 7.4,
       "swapsTps": 0,
       "status": "green"
     }
