@@ -16,10 +16,6 @@ import {
   buildAccountProofBody,
   createDisputeProofHashWithNonce,
 } from '../../../../protocol/dispute/proof-builder';
-import {
-  captureDisputeArgumentSnapshot,
-  storeDisputeArgumentSnapshot,
-} from '../../../../protocol/dispute/arguments';
 import { createEmptyEnv } from '../../../../runtime';
 import { createEntityFrameCandidateState } from '../../../../entity/state-clone';
 import type { EntityState } from '../../../../entity/types';
@@ -33,6 +29,7 @@ import {
   makeJurisdiction,
   makeAccount,
   makeState,
+  openWritableEntityAccounts,
 } from '../../../helpers/cross-j';
 
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
@@ -64,14 +61,9 @@ const baseState = (): EntityState => {
 };
 
 const installDispute = (state: EntityState, timeout: number, accountId = counterpartyId): void => {
-  const account = state.accounts.get(accountId)!;
+  const account = openWritableEntityAccounts(state).getForWrite(accountId)!;
   account.proofHeader.nextProofNonce = 1;
   const proof = buildAccountProofBody(account, '');
-  storeDisputeArgumentSnapshot(
-    account,
-    captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
-  );
-  account.disputeProofBodiesByHash = { [proof.proofBodyHash]: proof.proofBodyStruct };
   account.activeDispute = {
     startedByLeft: true,
     initialProofbodyHash: proof.proofBodyHash,
@@ -141,9 +133,7 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     const proof = finalized.newState.jBatchState?.batch.disputeFinalizations[0];
 
     expect(proof?.finalNonce).toBe(1);
-    const expectedFinalBody = account.disputeProofBodiesByHash?.[initialHash];
-    expect(expectedFinalBody).toBeDefined();
-    if (!expectedFinalBody) throw new Error('expected dispute proof body fixture');
+    const expectedFinalBody = buildAccountProofBody(account, '').proofBodyStruct;
     expect(proof?.finalProofbody).toEqual({
       ...expectedFinalBody,
       // ABI canonicalization returns uint32 fields as bigint. Compare that
@@ -221,7 +211,10 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
   test('same-tick dispute deadlines emit one legal finalization and retain the next hook', async () => {
     const secondCounterparty = entity('03');
     const state = baseState();
-    state.accounts.set(secondCounterparty, makeAccount(entityId, secondCounterparty, jurisdiction));
+    openWritableEntityAccounts(state).set(
+      secondCounterparty,
+      makeAccount(entityId, secondCounterparty, jurisdiction),
+    );
     installDispute(state, 1, counterpartyId);
     installDispute(state, 1, secondCounterparty);
     state.leaderState = { view: 0, activeValidatorId: signerId, changedAtHeight: 0 };
@@ -274,17 +267,11 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     const state = makeState(starterEntityId, signerA, jurisdiction, peerEntityId);
     state.lastFinalizedJHeight = 100;
     state.timestamp = 120_001;
-    const account = state.accounts.get(peerEntityId)!;
+    const account = openWritableEntityAccounts(state).getForWrite(peerEntityId)!;
     account.proofHeader.nextProofNonce = 1;
     const proof = buildAccountProofBody(account, '');
-    storeDisputeArgumentSnapshot(
-      account,
-      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
-    );
-    account.disputeProofBodiesByHash = { [proof.proofBodyHash]: proof.proofBodyStruct };
     account.counterpartyDisputeProofBodyHash = proof.proofBodyHash;
     account.counterpartyDisputeProofNonce = 1;
-    account.disputeProofNoncesByHash = { [proof.proofBodyHash]: 1 };
     const disputeHash = createDisputeProofHashWithNonce(account.state, proof.proofBodyHash, {
       chainId: jurisdiction.chainId!,
       depositoryAddress: jurisdiction.depositoryAddress!,

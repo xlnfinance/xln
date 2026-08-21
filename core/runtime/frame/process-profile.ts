@@ -119,6 +119,156 @@ export const countEntityInputTxKinds = (
   return { txKinds, senders: senders.size };
 };
 
+type CpuUsage = { user: number; system: number };
+type ProcessProfileState = {
+  liveEnv: RuntimeReplica;
+  enabled: boolean;
+  startedAt: number;
+  cpuStart: CpuUsage | undefined;
+  opsStart: OpCounterSnapshot | undefined;
+  marks: Record<string, number>;
+  cpuMarks: Array<{ name: string; cpuMs: number }>;
+  lastCpu: CpuUsage | undefined;
+  phaseOps: Record<string, OpCounterSnapshot>;
+  lastOps: OpCounterSnapshot | undefined;
+  metrics: RuntimeProcessProfileMetrics;
+};
+
+const createProfileMetrics = (
+  env: RuntimeReplica,
+  enabled: boolean,
+  triggerReason: string | null | undefined,
+): RuntimeProcessProfileMetrics => ({
+  ...(enabled && triggerReason ? { triggerReason } : {}),
+  heightBefore: env.state.height,
+  heightAfter: env.state.height,
+  timestampBefore: env.state.timestamp,
+  timestampAfter: env.state.timestamp,
+  runtimeTxs: 0,
+  entityInputs: 0,
+  entityTxs: 0,
+  jInputs: 0,
+  localOutputs: 0,
+  remoteOutputs: 0,
+  deferredOutputs: 0,
+  pendingNetworkBefore: env.pendingNetworkOutputs?.length ?? 0,
+  readyPendingOutputs: 0,
+  waitingPendingOutputs: 0,
+  pendingNetworkAfter: env.pendingNetworkOutputs?.length ?? 0,
+  deferredNetworkMeta: env.infrastructure?.deferredNetworkMeta?.size ?? 0,
+  jOutputs: 0,
+  frameAdvanced: false,
+});
+
+const markRuntimeProcessProfile = (state: ProcessProfileState, label: string): void => {
+  state.marks[label] = Math.round(getPerfMs() - state.startedAt);
+  if (state.lastCpu && nodeProcess?.cpuUsage) {
+    const now = nodeProcess.cpuUsage();
+    state.cpuMarks.push({
+      name: label,
+      cpuMs: Math.round(((now.user - state.lastCpu.user) + (now.system - state.lastCpu.system)) / 100) / 10,
+    });
+    state.lastCpu = now;
+  }
+  if (state.lastOps) {
+    const delta = diffOpCounters(state.lastOps, 'frame');
+    if (Object.keys(delta).length > 0) state.phaseOps[label] = delta;
+    state.lastOps = snapshotOpCounters('frame');
+  }
+  state.liveEnv.activeProcessProgressAt = Date.now();
+  state.liveEnv.activeProcessProgressStep = label;
+};
+
+const finishProfileCounters = (state: ProcessProfileState): void => {
+  if (state.cpuStart && nodeProcess?.cpuUsage) {
+    const cpu = nodeProcess.cpuUsage(state.cpuStart);
+    const user = cpu.user / 1_000;
+    const system = cpu.system / 1_000;
+    state.metrics.cpuMs = { user, system, total: user + system };
+    if (state.lastCpu) {
+      const now = nodeProcess.cpuUsage();
+      state.cpuMarks.push({
+        name: 'remainder',
+        cpuMs: Math.round(((now.user - state.lastCpu.user) + (now.system - state.lastCpu.system)) / 100) / 10,
+      });
+      state.metrics.phasesCpu = state.cpuMarks;
+    }
+  }
+  if (!state.opsStart) return;
+  state.metrics.ops = diffOpCounters(state.opsStart, 'frame');
+  if (state.lastOps) {
+    const delta = diffOpCounters(state.lastOps, 'frame');
+    if (Object.keys(delta).length > 0) state.phaseOps['remainder'] = delta;
+  }
+  state.metrics.phasesOps = state.phaseOps;
+};
+
+const logRuntimeFrameProfile = (
+  env: RuntimeReplica,
+  metrics: RuntimeProcessProfileMetrics,
+  elapsedMs: number,
+): void => {
+  if (!FRAME_LOG || !metrics.frameAdvanced) return;
+  runtimeLog.info('frame', {
+    h: metrics.heightAfter,
+    ms: Math.round(elapsedMs),
+    cpu: metrics.cpuMs?.total ?? null,
+    inputs: metrics.entityInputs,
+    txs: metrics.entityTxs,
+    txKinds: metrics.txKinds ?? {},
+    senders: metrics.senders ?? 0,
+    mempool: env.runtimeMempool?.entityInputs.length ?? 0,
+    storageMs: (metrics.storageMs as { total?: number } | undefined)?.total ?? null,
+  });
+};
+
+const profileBudgetViolations = (
+  env: RuntimeReplica,
+  metrics: RuntimeProcessProfileMetrics,
+): string[] => {
+  const budget = env.runtimeConfig?.performance;
+  return [
+    budget?.maxCloneBytes !== undefined && (metrics.cloneBytes ?? 0) > budget.maxCloneBytes
+      ? `cloneBytes:${metrics.cloneBytes}>${budget.maxCloneBytes}` : '',
+    budget?.maxCloneMs !== undefined && (metrics.cloneMs ?? 0) > budget.maxCloneMs
+      ? `cloneMs:${metrics.cloneMs}>${budget.maxCloneMs}` : '',
+    budget?.maxReducerMs !== undefined && (metrics.reducerMs ?? 0) > budget.maxReducerMs
+      ? `reducerMs:${metrics.reducerMs}>${budget.maxReducerMs}` : '',
+    budget?.maxWalMs !== undefined && (metrics.walMs ?? 0) > budget.maxWalMs
+      ? `walMs:${metrics.walMs}>${budget.maxWalMs}` : '',
+  ].filter(Boolean);
+};
+
+const finishRuntimeProcessProfile = (
+  profile: RuntimeProcessProfile,
+  state: ProcessProfileState,
+  env: RuntimeReplica,
+): void => {
+  state.metrics.heightAfter = env.state.height;
+  state.metrics.timestampAfter = env.state.timestamp;
+  const elapsedMs = Math.round(getPerfMs() - state.startedAt);
+  finishProfileCounters(state);
+  logRuntimeFrameProfile(env, state.metrics, elapsedMs);
+  if ((!state.enabled || !profileHasWork(state.metrics)) && elapsedMs < slowThresholdMs()) return;
+  const fields = {
+    outcome: profile.outcome,
+    elapsedMs,
+    wallStartMs: Date.now() - elapsedMs,
+    ...state.metrics,
+    phases: cumulativeMarksToPhases(state.marks, elapsedMs),
+    perf: snapshotPerfPhases(),
+  };
+  const violations = profileBudgetViolations(env, state.metrics);
+  if (violations.length > 0) {
+    runtimeLog.warn('process.perf_budget_exceeded', {
+      height: state.metrics.heightAfter,
+      violations,
+    });
+  }
+  if (profile.outcome === 'completed') runtimeLog.info('process.profile', fields);
+  else runtimeLog.warn('process.profile', fields);
+};
+
 export const createRuntimeProcessProfile = (
   liveEnv: RuntimeReplica,
   triggerReason: string | null | undefined,
@@ -127,129 +277,19 @@ export const createRuntimeProcessProfile = (
   const startedAt = getPerfMs();
   const cpuStart = (enabled || FRAME_LOG) && nodeProcess?.cpuUsage ? nodeProcess.cpuUsage() : undefined;
   const opsStart = enabled && OP_COUNTERS_ENABLED ? snapshotOpCounters('frame') : undefined;
-  const marks: Record<string, number> = {};
-  const cpuMarks: Array<{ name: string; cpuMs: number }> = [];
-  let lastCpu = cpuStart;
-  const phaseOps: Record<string, OpCounterSnapshot> = {};
-  let lastOps = opsStart;
-  const metrics: RuntimeProcessProfileMetrics = {
-    ...(enabled && triggerReason ? { triggerReason } : {}),
-    heightBefore: liveEnv.state.height,
-    heightAfter: liveEnv.state.height,
-    timestampBefore: liveEnv.state.timestamp,
-    timestampAfter: liveEnv.state.timestamp,
-    runtimeTxs: 0,
-    entityInputs: 0,
-    entityTxs: 0,
-    jInputs: 0,
-    localOutputs: 0,
-    remoteOutputs: 0,
-    deferredOutputs: 0,
-    pendingNetworkBefore: liveEnv.pendingNetworkOutputs?.length ?? 0,
-    readyPendingOutputs: 0,
-    waitingPendingOutputs: 0,
-    pendingNetworkAfter: liveEnv.pendingNetworkOutputs?.length ?? 0,
-    deferredNetworkMeta: liveEnv.infrastructure?.deferredNetworkMeta?.size ?? 0,
-    jOutputs: 0,
-    frameAdvanced: false,
+  const metrics = createProfileMetrics(liveEnv, enabled, triggerReason);
+  const state: ProcessProfileState = {
+    liveEnv, enabled, startedAt, cpuStart, opsStart,
+    marks: {}, cpuMarks: [], lastCpu: cpuStart,
+    phaseOps: {}, lastOps: opsStart, metrics,
   };
-  const profile: RuntimeProcessProfile = {
+  let profile: RuntimeProcessProfile;
+  profile = {
     enabled,
     metrics,
     outcome: 'unknown',
-    mark(label) {
-      marks[label] = Math.round(getPerfMs() - startedAt);
-      if (lastCpu && nodeProcess?.cpuUsage) {
-        const now = nodeProcess.cpuUsage();
-        cpuMarks.push({
-          name: label,
-          cpuMs: Math.round(((now.user - lastCpu.user) + (now.system - lastCpu.system)) / 100) / 10,
-        });
-        lastCpu = now;
-      }
-      if (lastOps) {
-        const delta = diffOpCounters(lastOps, 'frame');
-        if (Object.keys(delta).length > 0) phaseOps[label] = delta;
-        lastOps = snapshotOpCounters('frame');
-      }
-      liveEnv.activeProcessProgressAt = Date.now();
-      liveEnv.activeProcessProgressStep = label;
-    },
-    finish(env) {
-      metrics.heightAfter = env.state.height;
-      metrics.timestampAfter = env.state.timestamp;
-      const elapsedMs = Math.round(getPerfMs() - startedAt);
-      if (cpuStart && nodeProcess?.cpuUsage) {
-        const cpu = nodeProcess.cpuUsage(cpuStart);
-        const user = cpu.user / 1_000;
-        const system = cpu.system / 1_000;
-        metrics.cpuMs = { user, system, total: user + system };
-        if (lastCpu) {
-          const now = nodeProcess.cpuUsage();
-          cpuMarks.push({
-            name: 'remainder',
-            cpuMs: Math.round(((now.user - lastCpu.user) + (now.system - lastCpu.system)) / 100) / 10,
-          });
-          metrics.phasesCpu = cpuMarks;
-        }
-      }
-      if (opsStart) {
-        metrics.ops = diffOpCounters(opsStart, 'frame');
-        if (lastOps) {
-          const delta = diffOpCounters(lastOps, 'frame');
-          if (Object.keys(delta).length > 0) phaseOps['remainder'] = delta;
-        }
-        metrics.phasesOps = phaseOps;
-      }
-      if (FRAME_LOG && metrics.frameAdvanced) {
-        // One line per Runtime frame: what it applied and what still waits.
-        runtimeLog.info('frame', {
-          h: metrics.heightAfter,
-          ms: Math.round(elapsedMs),
-          cpu: metrics.cpuMs?.total ?? null,
-          inputs: metrics.entityInputs ?? 0,
-          txs: metrics.entityTxs,
-          txKinds: metrics.txKinds ?? {},
-          senders: metrics.senders ?? 0,
-          mempool: env.runtimeMempool?.entityInputs.length ?? 0,
-          storageMs: (metrics.storageMs as { total?: number } | undefined)?.total ?? null,
-        });
-      }
-      if ((!enabled || !profileHasWork(metrics)) && elapsedMs < slowThresholdMs()) return;
-      const fields = {
-        outcome: profile.outcome,
-        elapsedMs,
-        // Wall clock of the frame start lets a log reader correlate frames
-        // with ingress events across processes.
-        wallStartMs: Date.now() - elapsedMs,
-        ...metrics,
-        phases: cumulativeMarksToPhases(marks, elapsedMs),
-        perf: snapshotPerfPhases(),
-      };
-      const budget = env.runtimeConfig?.performance;
-      const budgetViolations = [
-        budget?.maxCloneBytes !== undefined && (metrics.cloneBytes ?? 0) > budget.maxCloneBytes
-          ? `cloneBytes:${metrics.cloneBytes}>${budget.maxCloneBytes}`
-          : '',
-        budget?.maxCloneMs !== undefined && (metrics.cloneMs ?? 0) > budget.maxCloneMs
-          ? `cloneMs:${metrics.cloneMs}>${budget.maxCloneMs}`
-          : '',
-        budget?.maxReducerMs !== undefined && (metrics.reducerMs ?? 0) > budget.maxReducerMs
-          ? `reducerMs:${metrics.reducerMs}>${budget.maxReducerMs}`
-          : '',
-        budget?.maxWalMs !== undefined && (metrics.walMs ?? 0) > budget.maxWalMs
-          ? `walMs:${metrics.walMs}>${budget.maxWalMs}`
-          : '',
-      ].filter(Boolean);
-      if (budgetViolations.length > 0) {
-        runtimeLog.warn('process.perf_budget_exceeded', {
-          height: metrics.heightAfter,
-          violations: budgetViolations,
-        });
-      }
-      if (profile.outcome === 'completed') runtimeLog.info('process.profile', fields);
-      else runtimeLog.warn('process.profile', fields);
-    },
+    mark: label => markRuntimeProcessProfile(state, label),
+    finish: env => finishRuntimeProcessProfile(profile, state, env),
   };
   return profile;
 };

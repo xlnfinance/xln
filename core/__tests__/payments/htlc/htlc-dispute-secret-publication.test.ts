@@ -2,10 +2,6 @@ import { describe, expect, test } from 'bun:test';
 
 import { executeCrontab, initCrontab, scheduleHook } from '../../../entity/scheduler';
 import { handleDisputeFinalize } from '../../../entity/tx/handlers/dispute/index';
-import {
-  captureDisputeArgumentSnapshot,
-  storeDisputeArgumentSnapshot,
-} from '../../../protocol/dispute/arguments';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { createEmptyEnv } from '../../../runtime';
@@ -16,6 +12,7 @@ import {
   entity,
   makeJurisdiction,
   makeState,
+  openWritableEntityAccounts,
   secret,
 } from '../../helpers/cross-j';
 
@@ -40,10 +37,10 @@ const installTrustedJurisdiction = (env: ReturnType<typeof createEmptyEnv>): voi
 };
 
 const installObservedDispute = (state: ReturnType<typeof makeState>): string => {
-  const account = state.accounts.get(counterpartyId)!;
+  const account = openWritableEntityAccounts(state).getForWrite(counterpartyId)!;
   const proofSecret = secret('61');
   const hashlock = hashHtlcSecret(proofSecret);
-  account.state.locks.set(proofLockId, {
+  account.state.locks = account.state.locks.updated(proofLockId, {
     lockId: proofLockId,
     hashlock,
     timelock: 1_000_000n,
@@ -56,11 +53,6 @@ const installObservedDispute = (state: ReturnType<typeof makeState>): string => 
   });
   account.proofHeader.nextProofNonce = 2;
   const proof = buildAccountProofBody(account, transformerAddress);
-  storeDisputeArgumentSnapshot(
-    account,
-    captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
-  );
-  account.disputeProofBodiesByHash = { [proof.proofBodyHash]: proof.proofBodyStruct };
   account.status = 'disputed';
   account.activeDispute = {
     startedByLeft: false,

@@ -25,7 +25,11 @@ const requireBigInt = (value: unknown, path: string): bigint => {
 };
 
 const requireResponseSeconds = (value: unknown, path: string): bigint => {
-  const seconds = requireBigInt(value, path);
+  const seconds = typeof value === 'bigint'
+    ? value
+    : Number.isSafeInteger(value)
+      ? BigInt(value as number)
+      : (() => { throw new Error(`TOWER_PROOF_BODY_UINT32_REQUIRED:${path}`); })();
   if (seconds < 0n || seconds > 0xffff_ffffn) {
     throw new Error(`TOWER_PROOF_BODY_RESPONSE_SECONDS_INVALID:${path}`);
   }
@@ -40,11 +44,12 @@ const requireArray = (value: unknown, path: string): unknown[] => {
 };
 
 /**
- * Decode persisted dispute evidence before giving it to a watchtower.
+ * Normalize a freshly rebuilt frozen-state ProofBody before giving it to a
+ * watchtower. Solidity `uint32` fields are numbers in the generated struct;
+ * the encrypted tower payload stores them as bigint with the other ABI ints.
  *
- * Account evidence is persisted as unknown because storage can contain bytes
- * written by older or corrupt processes. A watchtower must never sign or
- * publish an object merely because it resembles a Solidity ProofBody.
+ * A watchtower must never sign or publish an object merely because it resembles
+ * a Solidity ProofBody: every field is checked after the frozen hash matched.
  */
 export const decodeTowerProofBody = (value: unknown): TowerProofBody => {
   const body = requireRecord(value, 'root');

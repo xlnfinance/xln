@@ -16,6 +16,7 @@ import {
   decodeEntityId,
   keyLiveAccount,
   keyLiveAccountField,
+  keyLiveAccountFieldChunk,
   keyLiveAccountPrefix,
   keyLiveBook,
   keyLiveBookPrefix,
@@ -104,7 +105,14 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
     const parsed = parseLiveAccountFieldKey(key);
     assertExactKey(
       key,
-      keyLiveAccountField(parsed.entityId, parsed.counterpartyId, parsed.fieldTag),
+      parsed.chunkIndex === undefined
+        ? keyLiveAccountField(parsed.entityId, parsed.counterpartyId, parsed.fieldTag)
+        : keyLiveAccountFieldChunk(
+            parsed.entityId,
+            parsed.counterpartyId,
+            parsed.fieldTag,
+            parsed.chunkIndex,
+          ),
       'STORAGE_LIVE_ACCOUNT_FIELD_KEY_MISMATCH',
     );
     const owner = accountOwnerKey(parsed.entityId, parsed.counterpartyId);

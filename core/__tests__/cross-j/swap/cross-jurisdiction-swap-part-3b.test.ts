@@ -123,12 +123,7 @@ import { cloneJBatch, createEmptyBatch, initJBatch } from '../../../jurisdiction
 import { applyHankoBatchProcessedEvent } from '../../../entity/tx/j-events-batch';
 
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
-
-import {
-  buildDisputeArgumentsFromSnapshot,
-  captureDisputeArgumentSnapshot,
-  storeDisputeArgumentSnapshot,
-} from '../../../protocol/dispute/arguments';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 import { signEntityHashes } from '../../../hanko/signing';
 
@@ -175,6 +170,7 @@ import {
   makeAccount,
   makeJurisdiction,
   makeState,
+  openWritableEntityAccounts,
   partialBinary,
   registerTestSigner,
   secret,
@@ -247,10 +243,9 @@ describe('cross-jurisdiction hashledger swap', () => {
     route: CrossJurisdictionSwapRoute,
     role: 'source' | 'target',
   ) => {
-    const account = state.accounts.get(accountCounterparty)!;
+    const account = openWritableEntityAccounts(state).getForWrite(accountCounterparty)!;
     const pull = role === 'source' ? route.sourcePull! : route.targetPull!;
-    account.state.pulls ??= new Map();
-    account.state.pulls.set(pull.pullId, {
+    account.state.pulls = (account.state.pulls ?? PersistentAccountStateMap.empty('pulls')).updated(pull.pullId, {
       pullId: pull.pullId,
       tokenId: pull.tokenId,
       amount: pull.signedAmount,
@@ -262,18 +257,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
     const proof = buildAccountProofBody(account, addr('99'));
     account.counterpartyDisputeProofBodyHash = proof.proofBodyHash;
-    account.disputeProofBodiesByHash = {
-      ...(account.disputeProofBodiesByHash ?? {}),
-      [proof.proofBodyHash]: proof.proofBodyStruct,
-    };
-    account.disputeProofNoncesByHash = {
-      ...(account.disputeProofNoncesByHash ?? {}),
-      [proof.proofBodyHash]: 1,
-    };
-    storeDisputeArgumentSnapshot(
-      account,
-      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
-    );
     const startSeconds = Math.max(1, Math.floor(state.timestamp / 1_000));
     account.status = 'disputed';
     account.activeDispute = {
@@ -361,9 +344,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       fillRatio,
       deriveCrossJurisdictionPrivateSeed(scenario, route),
     ).binary;
-    const sourceAccount = sourceState.accounts.get(sourceHub)!;
-    sourceAccount.state.pulls ??= new Map();
-    sourceAccount.state.pulls.set(route.sourcePull!.pullId, {
+    const sourceAccount = openWritableEntityAccounts(sourceState).getForWrite(sourceHub)!;
+    sourceAccount.state.pulls = (sourceAccount.state.pulls ?? PersistentAccountStateMap.empty('pulls')).updated(route.sourcePull!.pullId, {
       pullId: route.sourcePull!.pullId,
       tokenId: route.sourcePull!.tokenId,
       amount: route.sourcePull!.signedAmount,
@@ -373,23 +355,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 1,
       createdTimestamp: env.state.timestamp,
     });
-    const finalizedProof = buildAccountProofBody(sourceAccount, addr('99'));
-    sourceAccount.disputeProofBodiesByHash = {
-      [finalizedProof.proofBodyHash]: finalizedProof.proofBodyStruct,
-    };
-    storeDisputeArgumentSnapshot(
-      sourceAccount,
-      captureDisputeArgumentSnapshot(
-        sourceAccount,
-        finalizedProof.proofBodyHash,
-        1,
-        true,
-        finalizedProof.proofBodyStruct,
-      ),
-    );
-    const targetAccount = targetState.accounts.get(targetHub)!;
-    targetAccount.state.pulls ??= new Map();
-    targetAccount.state.pulls.set(route.targetPull!.pullId, {
+    const targetAccount = openWritableEntityAccounts(targetState).getForWrite(targetHub)!;
+    targetAccount.state.pulls = (targetAccount.state.pulls ?? PersistentAccountStateMap.empty('pulls')).updated(route.targetPull!.pullId, {
       pullId: route.targetPull!.pullId,
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
@@ -401,14 +368,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
     const targetProof = buildAccountProofBody(targetAccount, addr('99'));
     targetAccount.counterpartyDisputeProofBodyHash = targetProof.proofBodyHash;
-    targetAccount.disputeProofBodiesByHash = {
-      [targetProof.proofBodyHash]: targetProof.proofBodyStruct,
-    };
-    targetAccount.disputeProofNoncesByHash = { [targetProof.proofBodyHash]: 1 };
-    storeDisputeArgumentSnapshot(
-      targetAccount,
-      captureDisputeArgumentSnapshot(targetAccount, targetProof.proofBodyHash, 1, true, targetProof.proofBodyStruct),
-    );
 
     // The target registry write is authorized only by the exact initial body
     // of an observed active dispute, never by the unauthenticated route cache.
@@ -1046,9 +1005,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     applyExactTestFill(route, 0x1234);
     targetState.crossJurisdictionSwaps?.set(route.orderId, { ...route });
 
-    const targetAccount = targetState.accounts.get(targetHub)!;
-    targetAccount.state.pulls ??= new Map();
-    targetAccount.state.pulls.set(route.targetPull!.pullId, {
+    const targetAccount = openWritableEntityAccounts(targetState).getForWrite(targetHub)!;
+    targetAccount.state.pulls = (targetAccount.state.pulls ?? PersistentAccountStateMap.empty('pulls')).updated(route.targetPull!.pullId, {
       pullId: route.targetPull!.pullId,
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
@@ -1059,14 +1017,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdTimestamp: env.state.timestamp,
     });
     const targetProof = buildAccountProofBody(targetAccount, addr('99'));
-    targetAccount.disputeProofBodiesByHash = {
-      [targetProof.proofBodyHash]: targetProof.proofBodyStruct,
-    };
-    targetAccount.disputeProofNoncesByHash = { [targetProof.proofBodyHash]: 1 };
-    storeDisputeArgumentSnapshot(
-      targetAccount,
-      captureDisputeArgumentSnapshot(targetAccount, targetProof.proofBodyHash, 1, true, targetProof.proofBodyStruct),
-    );
 
     // Competing same-block start race: the counterparty can mine the exact
     // signed start before our start+Target-registration batch. The observed

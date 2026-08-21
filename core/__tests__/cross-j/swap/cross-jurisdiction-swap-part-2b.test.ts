@@ -142,7 +142,6 @@ import {
 
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 
-import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../../protocol/dispute/arguments';
 
 import { signEntityHashes } from '../../../hanko/signing';
 

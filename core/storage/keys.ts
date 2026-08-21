@@ -15,7 +15,7 @@ import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../support/integrity-checksum';
  * migration readers: an incompatible database is rejected and the operator
  * starts a new network instead of replaying ambiguous historical bytes.
  */
-export const STORAGE_SCHEMA_VERSION = 4;
+export const STORAGE_SCHEMA_VERSION = 5;
 
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -288,13 +288,37 @@ export const keyLiveAccountField = (
   ]);
 };
 
+/**
+ * Static continuation row for a large Account envelope field.
+ *
+ * The key is owner + permanent field tag + deterministic chunk index. Content
+ * hashes are verification data in the Account manifest, never addresses. This
+ * keeps overwrites bounded without creating a second content-addressed graph.
+ */
+export const keyLiveAccountFieldChunk = (
+  entityId: string,
+  counterpartyId: string,
+  fieldTag: number,
+  chunkIndex: number,
+): Buffer => {
+  if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0 || chunkIndex > 0xffff_ffff) {
+    throw new Error(`STORAGE_ACCOUNT_FIELD_CHUNK_INDEX_INVALID:${String(chunkIndex)}`);
+  }
+  const index = Buffer.allocUnsafe(4);
+  index.writeUInt32BE(chunkIndex);
+  return Buffer.concat([
+    keyLiveAccountField(entityId, counterpartyId, fieldTag),
+    index,
+  ]);
+};
+
 export const keyLiveAccountFieldPrefix = (
   entityId: string,
   counterpartyId: string,
 ): Buffer => liveAccountFieldOwnerKey(entityId, counterpartyId);
 
 export const parseLiveAccountFieldKey = (key: Buffer) => {
-  if (key.byteLength !== 66 || key[0] !== KEY_LIVE_ACCOUNT_FIELD) {
+  if ((key.byteLength !== 66 && key.byteLength !== 70) || key[0] !== KEY_LIVE_ACCOUNT_FIELD) {
     throw new Error(`STORAGE_ACCOUNT_FIELD_KEY_INVALID:${key.toString('hex')}`);
   }
   const fieldTag = key[65];
@@ -303,6 +327,7 @@ export const parseLiveAccountFieldKey = (key: Buffer) => {
     entityId: decodeEntityId(key.subarray(1, 33)),
     counterpartyId: decodeEntityId(key.subarray(33, 65)),
     fieldTag,
+    ...(key.byteLength === 70 ? { chunkIndex: key.readUInt32BE(66) } : {}),
   };
 };
 

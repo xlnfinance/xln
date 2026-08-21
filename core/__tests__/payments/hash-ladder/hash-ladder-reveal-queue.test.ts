@@ -9,10 +9,8 @@ import {
 } from '../../../entity/tx/j-events-htlc';
 import type { CrossJurisdictionSwapRoute , CrossJurisdictionPullLeg } from '../../../types/cross-jurisdiction';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
-import {
-  captureDisputeArgumentSnapshot,
-  storeDisputeArgumentSnapshot,
-} from '../../../protocol/dispute/arguments';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { createEntityFrameCandidateState } from '../../../entity/state-clone';
 import { initJBatch } from '../../../jurisdiction/machine/batch';
 import {
   addReplica,
@@ -21,6 +19,7 @@ import {
   makeJurisdiction,
   makeAccount,
   makeState,
+  openWritableEntityAccounts,
   registerTestSigner,
 } from '../../helpers/cross-j';
 
@@ -58,15 +57,14 @@ const installActiveSignedPull = (
   pullId = pull.pullId,
   draftStart = false,
 ): CrossJurisdictionPullLeg => {
-  const account = state.accounts.get(counterparty)!;
+  const account = openWritableEntityAccounts(state).getForWrite(counterparty)!;
   const selfIsLeft = account.state.leftEntity.toLowerCase() === state.entityId.toLowerCase();
   const signedPull = {
     ...pull,
     pullId,
     signedAmount: selfIsLeft ? pull.amount : -pull.amount,
   };
-  account.state.pulls ??= new Map();
-  account.state.pulls.set(signedPull.pullId, {
+  account.state.pulls = (account.state.pulls ?? PersistentAccountStateMap.empty('pulls')).updated(signedPull.pullId, {
     pullId: signedPull.pullId,
     tokenId: signedPull.tokenId,
     amount: signedPull.signedAmount,
@@ -81,11 +79,6 @@ const installActiveSignedPull = (
     createdTimestamp: state.timestamp,
   });
   const proof = buildAccountProofBody(account, addr('99'));
-  account.disputeProofBodiesByHash = { [proof.proofBodyHash]: proof.proofBodyStruct };
-  storeDisputeArgumentSnapshot(
-    account,
-    captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, false, proof.proofBodyStruct),
-  );
   account.status = 'disputed';
   // Runtime timestamps are unix milliseconds; jurisdiction dispute clocks are
   // unix seconds. Both signed roles open at their own account's S.
@@ -153,7 +146,7 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const hub = entity('a0');
     const user = entity('a1');
-    const state = makeState(hub, addr('a2'), eth, user);
+    const state = createEntityFrameCandidateState(makeState(hub, addr('a2'), eth, user));
     const signedPull = installActiveSignedPull(state, user);
     const route: CrossJurisdictionSwapRoute = {
       orderId: 'capacity-deferred',
@@ -168,7 +161,7 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
       createdAt: 1,
       updatedAt: 1,
     };
-    state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
+    state.crossJurisdictionSwaps?.set(route.orderId, route);
     state.jBatchState = initJBatch();
     state.jBatchState.batch.hashLadderRegistrations = Array.from({ length: 32 }, (_, index) => ({
       counterpartyEntity: user,
@@ -211,7 +204,7 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
     const user = entity('61');
     const hub = entity('62');
     const signer = registerTestSigner(env, 'reveal-queue-exact-once', 'hub');
-    const state = makeState(hub, signer, eth, user);
+    const state = createEntityFrameCandidateState(makeState(hub, signer, eth, user));
     addReplica(env, state, signer);
     const signedPull = installActiveSignedPull(state, user);
 
@@ -234,7 +227,7 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
     const user = entity('71');
     const hub = entity('72');
     const signer = registerTestSigner(env, 'reveal-queue-same-ratio', 'hub');
-    const state = makeState(hub, signer, eth, user);
+    const state = createEntityFrameCandidateState(makeState(hub, signer, eth, user));
     const signedPull = installActiveSignedPull(state, user);
 
     expect(queueHashLadderRevealRegistration(state, user, signedPull, reveal(0x0123), false)).toBe('queued');
@@ -249,7 +242,7 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
     const user = entity('81');
     const hub = entity('82');
     const signer = addr('91');
-    const state = makeState(hub, signer, eth, user);
+    const state = createEntityFrameCandidateState(makeState(hub, signer, eth, user));
     const signedPull = installActiveSignedPull(state, user);
     const route: CrossJurisdictionSwapRoute = {
       orderId: 'latch-route',
@@ -292,7 +285,7 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
     const user = entity('a1');
     const hub = entity('a2');
     const signer = addr('a3');
-    const state = makeState(user, signer, eth, hub);
+    const state = createEntityFrameCandidateState(makeState(user, signer, eth, hub));
     const signedPull = installActiveSignedPull(state, hub, true);
 
     expect(queueHashLadderRevealRegistration(state, hub, signedPull, reveal(0x1000), true)).toBe('queued');
@@ -313,7 +306,7 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const user = entity('b1');
     const hub = entity('b2');
-    const state = makeState(user, addr('b3'), eth, hub);
+    const state = createEntityFrameCandidateState(makeState(user, addr('b3'), eth, hub));
     const signedPull = installActiveSignedPull(state, hub, true);
     const route: CrossJurisdictionSwapRoute = {
       orderId: 'early-target',
@@ -343,7 +336,7 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const user = entity('c1');
     const hub = entity('c2');
-    const state = makeState(user, addr('c3'), eth, hub);
+    const state = createEntityFrameCandidateState(makeState(user, addr('c3'), eth, hub));
     const signedPull = installActiveSignedPull(state, hub, true, pull.pullId, true);
 
     // Zero-second windows are valid bilateral policy. Waiting for the
@@ -362,8 +355,8 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
     const hub = entity('f0');
     const userA = entity('01');
     const userB = entity('02');
-    const state = makeState(hub, addr('f1'), eth, userA);
-    state.accounts.set(userB, makeAccount(hub, userB, eth));
+    const state = createEntityFrameCandidateState(makeState(hub, addr('f1'), eth, userA));
+    openWritableEntityAccounts(state).set(userB, makeAccount(hub, userB, eth));
     const pullA = installActiveSignedPull(state, userA);
     const pullB = installActiveSignedPull(state, userB, false, 'test-pull-b');
     const routeFor = (orderId: string, user: string, sourcePull: CrossJurisdictionPullLeg): CrossJurisdictionSwapRoute => ({
@@ -402,7 +395,7 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
     const user = entity('91');
     const hub = entity('92');
     const signer = addr('93');
-    const state = makeState(hub, signer, eth, user);
+    const state = createEntityFrameCandidateState(makeState(hub, signer, eth, user));
     const signedPull = installActiveSignedPull(state, user);
     const route: CrossJurisdictionSwapRoute = {
       orderId: 'foreign-vs-own',

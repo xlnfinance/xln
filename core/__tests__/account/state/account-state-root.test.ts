@@ -162,14 +162,12 @@ describe('canonical account state root', () => {
     expect(computeAccountStateRoot(base.state)).toBe(afterWorkspace);
   });
 
-  test('excludes mempool, pending frames, and proof caches', () => {
+  test('excludes Entity-owned mempool, pending frames, and dispute Hankos', () => {
     const base = account();
     const root = computeAccountStateRoot(base.state);
     base.mempool.push({ type: 'direct_payment', data: { tokenId: 1, amount: 5n } });
     base.pendingFrame = { stateHash: '0xdead' } as never;
     base.currentDisputeProofHanko = '0xbeef';
-    base.disputeProofBodiesByHash = { '0x01': { local: true } };
-
     expect(computeAccountStateRoot(base.state)).toBe(root);
   });
 

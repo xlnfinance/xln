@@ -85,16 +85,17 @@ describe('Account transition overlay', () => {
     const base = makePersistentAccount();
     const transition = beginAccountTransition(base, ['optional-record']);
     const view = accountTransitionView(transition);
-    view.disputeProofBodiesByHash ??= {};
-    view.disputeProofBodiesByHash['proof'] = { tokenIds: [], deltas: [], encodedBatch: '0x' };
+    view.disputePrepare = {
+      startedAt: 1,
+      readyAfter: 2,
+      reason: 'test',
+      startIntent: { description: 'before' },
+    };
+    view.disputePrepare.startIntent!.description = 'after';
 
     const committed = commitAccountTransition(transition).account;
-    expect(committed.disputeProofBodiesByHash?.['proof']).toEqual({
-      tokenIds: [],
-      deltas: [],
-      encodedBatch: '0x',
-    });
-    expect(base.disputeProofBodiesByHash).toBeUndefined();
+    expect(committed.disputePrepare?.startIntent?.description).toBe('after');
+    expect(base.disputePrepare).toBeUndefined();
   });
 
   test('late collection failure preserves its cause and leaves the base untouched', () => {

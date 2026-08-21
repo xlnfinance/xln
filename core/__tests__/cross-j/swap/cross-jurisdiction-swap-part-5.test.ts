@@ -8,10 +8,18 @@ import {
   buildPreparedCrossJurisdictionRoute as buildPreparedCrossJurisdictionRouteCanonical,
 } from '../../../extensions/cross-j/index';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
-import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../../protocol/dispute/arguments';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { planCrossJurisdictionTargetRecovery } from '../../../entity/tx/j-events-htlc';
 import { handlePrepareDispute } from '../../../entity/tx/handlers/dispute/index';
-import { addReplica, addr, entity, jref, makeJurisdiction, makeState } from '../../helpers/cross-j';
+import {
+  addReplica,
+  addr,
+  entity,
+  jref,
+  makeJurisdiction,
+  makeState,
+  openWritableEntityAccounts,
+} from '../../helpers/cross-j';
 
 const TEST_DISPUTE_CONFIG = { leftResponseSeconds: 10, rightResponseSeconds: 10 } as const;
 type TestRouteInput = Omit<CrossJurisdictionSwapRoute, 'sourceDisputeConfig' | 'targetDisputeConfig'>;
@@ -104,11 +112,11 @@ describe('cross-jurisdiction target dispute route selection', () => {
     };
 
     const plan = (suppliedResults: Readonly<Record<string, string>> = {}) => {
-      const account = state.accounts.get(targetHub)!;
-      account.state.pulls = new Map();
+      const account = openWritableEntityAccounts(state).getForWrite(targetHub)!;
+      account.state.pulls = PersistentAccountStateMap.empty('pulls');
       for (const route of state.crossJurisdictionSwaps?.values() ?? []) {
         if (!route.targetPull || route.target.entityId !== targetHub) continue;
-        account.state.pulls.set(route.targetPull.pullId, {
+        account.state.pulls = account.state.pulls.updated(route.targetPull.pullId, {
           pullId: route.targetPull.pullId,
           tokenId: route.targetPull.tokenId,
           amount: route.targetPull.signedAmount,
@@ -119,12 +127,7 @@ describe('cross-jurisdiction target dispute route selection', () => {
           createdTimestamp: state.timestamp,
         });
       }
-      const proof = buildAccountProofBody(account, addr('99'));
-      storeDisputeArgumentSnapshot(
-        account,
-        captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
-      );
-      return planCrossJurisdictionTargetRecovery(state, account, targetHub, [proof.proofBodyHash], suppliedResults);
+      return planCrossJurisdictionTargetRecovery(state, account, targetHub, suppliedResults);
     };
 
     return { env, state, targetHub, buildRoute, plan };
@@ -167,8 +170,8 @@ describe('cross-jurisdiction target dispute route selection', () => {
     const selected = fixture.buildRoute('a-selected');
     const later = fixture.buildRoute('z-later');
     fixture.state.crossJurisdictionSwaps?.set(selected.orderId, selected);
-    const account = fixture.state.accounts.get(fixture.targetHub)!;
-    account.state.pulls = new Map([
+    const account = openWritableEntityAccounts(fixture.state).getForWrite(fixture.targetHub)!;
+    account.state.pulls = PersistentAccountStateMap.fromEntries('pulls', [
       [
         selected.targetPull!.pullId,
         {
@@ -183,18 +186,12 @@ describe('cross-jurisdiction target dispute route selection', () => {
         },
       ],
     ]);
-    const proof = buildAccountProofBody(account, addr('99'));
-    storeDisputeArgumentSnapshot(
-      account,
-      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
-    );
     fixture.state.crossJurisdictionSwaps?.set(later.orderId, later);
 
     const plan = planCrossJurisdictionTargetRecovery(
       fixture.state,
       account,
       fixture.targetHub,
-      [proof.proofBodyHash],
       {},
     );
     expect(plan?.recovery.requiredPullIds).toEqual([selected.targetPull!.pullId]);
@@ -240,11 +237,11 @@ describe('cross-jurisdiction target dispute route selection', () => {
     const fixture = makeTargetDisputeRouteSelectionFixture('cross-target-dispute-empty-recovery');
     const route = fixture.buildRoute('empty-recovery');
     fixture.state.crossJurisdictionSwaps?.set(route.orderId, route);
-    const account = fixture.state.accounts.get(fixture.targetHub)!;
     const recovery = fixture.plan({ [route.targetPull!.pullId]: '0x' });
     expect(recovery?.recovery.requiredPullIds).toEqual([route.targetPull!.pullId]);
 
-    const proofBodyHash = Object.keys(account.disputeArgumentSnapshotsByHash ?? {})[0]!;
+    const account = openWritableEntityAccounts(fixture.state).getForWrite(fixture.targetHub)!;
+    const proofBodyHash = buildAccountProofBody(account, addr('99')).proofBodyHash;
     account.counterpartyDisputeProofBodyHash = proofBodyHash;
     account.counterpartyDisputeProofNonce = 1;
     account.counterpartyDisputeProofProposerIsLeft = true;

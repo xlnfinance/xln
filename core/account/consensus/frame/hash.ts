@@ -12,43 +12,17 @@ import { utf8ByteLength } from '../../../protocol/crypto/keccak-text';
 import { accountTxWithoutPostCommitHankos } from '../../settlement/witness-projection';
 
 export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
+export const MAX_FRAME_SIZE_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 // A peer controls its proposed timestamp. Reject future time because it could
 // prematurely satisfy payer-side deadlines. Do not reject old signed frames:
 // exact retransmission must remain available after an arbitrary outage.
 // Financial expiry decisions are separately checked against receiver-local
 // Entity time/J-height before an incoming frame is applied.
 const MAX_FRAME_FUTURE_SKEW_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
-export const MAX_FRAME_SIZE_BYTES = 10_000_000;
 
-/** Exact UTF-8 wire size of the canonical Account frame encoding. */
+/** Exact UTF-8 wire size checked once while building the outbound frame. */
 export const getCanonicalAccountFrameSizeBytes = (frame: AccountFrame): number =>
   utf8ByteLength(serializeCanonicalTaggedJson(frame));
-
-export function isWithinAccountFrameBounds(
-  frame: AccountFrame,
-  currentTimestamp?: number,
-): boolean {
-  return getAccountFrameBoundsError(frame, currentTimestamp) === '';
-}
-
-export function getAccountFrameBoundsError(
-  frame: AccountFrame,
-  currentTimestamp?: number,
-): string {
-  const structuralError = getAccountFrameStructuralError(frame, currentTimestamp);
-  if (structuralError) return structuralError;
-  const frameSizeBytes = getCanonicalAccountFrameSizeBytes(frame);
-  if (frameSizeBytes > MAX_FRAME_SIZE_BYTES) {
-    return `frame size ${frameSizeBytes} bytes > ${MAX_FRAME_SIZE_BYTES}`;
-  }
-  try {
-    assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
-  } catch (error) {
-    return `delta integrity failed: ${(error as Error).message}`;
-  }
-  return '';
-}
-
 /**
  * Cheap shape checks used by inbound Account consensus before signature work.
  *

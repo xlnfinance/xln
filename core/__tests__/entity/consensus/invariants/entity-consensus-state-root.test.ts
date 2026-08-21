@@ -499,8 +499,7 @@ test('Entity consensus root commits peer Hankos while own post-quorum subsets st
     account.currentDisputeProofHanko = ownHanko;
     account.counterpartyDisputeProofHanko = peerHanko;
     account.counterpartySettlementHanko = peerHanko;
-    account.hankoSignature = ownHanko;
-    account.pendingWithdrawals = new Map([
+    account.pendingWithdrawals = PersistentAccountStateMap.fromEntries('pendingWithdrawals', [
         [
           'withdrawal',
           {

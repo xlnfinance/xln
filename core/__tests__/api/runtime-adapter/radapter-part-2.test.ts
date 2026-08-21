@@ -516,23 +516,6 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
     type: 'queued_memo',
     data: { index, note: 'z'.repeat(160) },
   }));
-  account.abiProofBody = {
-    encodedProofBody: `0x${'ab'.repeat(500_000)}`,
-    proofBodyHash: `0x${'cd'.repeat(32)}`,
-    lastUpdatedHeight: 1,
-  };
-  account.disputeProofBodiesByHash = Object.fromEntries(
-    Array.from({ length: 1_000 }, (_, index) => [
-      `0x${index.toString(16).padStart(64, '0')}`,
-      { proof: 'p'.repeat(800) },
-    ]),
-  );
-  account.disputeArgumentSnapshotsByHash = Object.fromEntries(
-    Array.from({ length: 1_000 }, (_, index) => [
-      `0x${(index + 1).toString(16).padStart(64, '0')}`,
-      { args: 'a'.repeat(800) },
-    ]),
-  );
   account.state.settlementWorkspace = { notes: 's'.repeat(500_000) };
   prepareAccountFixtureForGraph(account);
 
@@ -544,9 +527,6 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
           mempool: unknown[];
           currentFrame: { accountTxs: unknown[]; deltas: unknown[] };
           pendingFrame?: { accountTxs: unknown[]; deltas: unknown[] };
-          abiProofBody?: unknown;
-          disputeProofBodiesByHash?: unknown;
-          disputeArgumentSnapshotsByHash?: unknown;
           settlementWorkspace?: unknown;
           swapOrderHistory?: Map<string, unknown>;
           swapClosedOrders?: Map<string, unknown>;
@@ -571,9 +551,6 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(compact?.currentFrame.deltas.length ?? 0).toBeLessThanOrEqual(100);
   expect(compact?.pendingFrame?.accountTxs.length ?? 0).toBeLessThanOrEqual(20);
   expect(compact?.pendingFrame?.deltas.length ?? 0).toBeLessThanOrEqual(100);
-  expect(compact?.abiProofBody).toBeUndefined();
-  expect(compact?.disputeProofBodiesByHash).toBeUndefined();
-  expect(compact?.disputeArgumentSnapshotsByHash).toBeUndefined();
   expect(compact?.state.settlementWorkspace).toBeUndefined();
   expect(compact?.swapOrderHistory).toBeUndefined();
   expect(compact?.swapClosedOrders).toBeUndefined();

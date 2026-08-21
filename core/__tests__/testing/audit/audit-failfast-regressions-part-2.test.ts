@@ -10,8 +10,12 @@ import {
   HTLC_ENFORCEMENT_RESERVE_MS,
   isHtlcSecretEnforcementWindowClosed,
   proposeAccountFrame,
-  isWithinAccountFrameBounds,
 } from '../../../account/consensus/index';
+import {
+  createFrameHash,
+  getAccountFrameStructuralError,
+  MAX_ACCOUNT_FRAME_TXS,
+} from '../../../account/consensus/frame/hash';
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../../../account/commitment/state-root';
 
@@ -42,9 +46,11 @@ import { checkAutoRebalance, handleRequestCollateral } from '../../../account/tx
 import { handleSwapOffer } from '../../../account/tx/handlers/swap/offer/index';
 import { recordSwapOfferLifecycle } from '../../../account/tx/handlers/swap/lifecycle/history';
 
-import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../../../account/consensus/frame/hash';
-
-import { resolveAutoRebalanceFeePolicy, runPostFrameAutoRebalanceCheck } from '../../../account/consensus/helpers';
+import {
+  buildAccountProofBodyFromJurisdictions,
+  resolveAutoRebalanceFeePolicy,
+  runPostFrameAutoRebalanceCheck,
+} from '../../../account/consensus/helpers';
 
 import { HTLC, LIMITS } from '../../../config/constants';
 
@@ -206,12 +212,7 @@ import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/code
 import { createDefaultDelta } from '../../../account/state/delta';
 
 
-import { buildDisputeArgumentsForSnapshot } from '../../../entity/dispute-arguments';
-import {
-  captureDisputeArgumentSnapshot,
-  storeDisputeArgumentSnapshot,
-} from '../../../protocol/dispute/arguments';
-
+import { buildDisputeArgumentsForCurrentState } from '../../../entity/dispute-arguments';
 import {
   buildAccountProofBody,
   createDisputeProofHashWithNonce,
@@ -616,15 +617,12 @@ const provisionEntityState = (env: RuntimeReplica, state: EntityState): EntitySt
   return state;
 };
 
-const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStruct, storeFinalProofbody: boolean) => {
+const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStruct) => {
   const entityId = `0x${'12'.repeat(32)}`;
   const counterpartyId = `0x${'34'.repeat(32)}`;
   const state = makeEntityState(entityId);
   const account = makeProposalAccount([], entityId, counterpartyId);
   const finalProofbodyHash = hashProofBodyStruct(finalProofbody);
-  if (storeFinalProofbody) {
-    account.disputeProofBodiesByHash = { [finalProofbodyHash]: finalProofbody };
-  }
   account.activeDispute = {
     startedByLeft: true,
     disputeTimeout: 1700000123,
@@ -852,7 +850,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.accountJClaimNodeChanges?.replacedNodeHashes).toEqual([]);
   });
 
-  test('account frame freshness rejects future skew but permits old and regressed signed frames', () => {
+  test('account frame structure rejects future skew but permits old and regressed signed frames', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const oldFrame = makeIncomingAccountFrame(
       account,
@@ -862,15 +860,9 @@ describe('audit fail-fast regressions', () => {
     );
     const futureFrame = { ...oldFrame, timestamp: 130_001 };
     const regressedFrame = { ...oldFrame, timestamp: 999 };
-    const oversizedUtf8Frame = {
-      ...oldFrame,
-      accountTxs: [{ type: 'fixture', data: { note: 'é'.repeat(5_100_000) } }],
-    } as typeof oldFrame;
-
-    expect(isWithinAccountFrameBounds(oldFrame, 100_000)).toBe(true);
-    expect(isWithinAccountFrameBounds(futureFrame, 100_000)).toBe(false);
-    expect(isWithinAccountFrameBounds(regressedFrame, 100_000)).toBe(true);
-    expect(isWithinAccountFrameBounds(oversizedUtf8Frame, 100_000)).toBe(false);
+    expect(getAccountFrameStructuralError(oldFrame, 100_000)).toBe('');
+    expect(getAccountFrameStructuralError(futureFrame, 100_000)).not.toBe('');
+    expect(getAccountFrameStructuralError(regressedFrame, 100_000)).toBe('');
   });
 
   test('HTLC secret enforcement reserve closes on either entity time or finalized J-height', () => {
@@ -1024,14 +1016,11 @@ describe('audit fail-fast regressions', () => {
       },
     });
 
-    const proofbodyHash = `0x${'ab'.repeat(32)}`;
-    storeDisputeArgumentSnapshot(
-      rejectedAccount,
-      captureDisputeArgumentSnapshot(rejectedAccount, proofbodyHash, 0, true, makeEmptyProofBody()),
-    );
-    const { leftArguments } = buildDisputeArgumentsForSnapshot(
+    const proofbodyHash = buildAccountProofBodyFromJurisdictions(env.state, rejectedAccount).proofBodyHash;
+    const { leftArguments } = buildDisputeArgumentsForCurrentState(
       rejectedAccount,
       applied.newState,
+      env.state,
       left.entityId,
       proofbodyHash,
       { secretsSide: 'left' },

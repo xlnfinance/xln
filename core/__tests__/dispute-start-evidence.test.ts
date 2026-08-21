@@ -7,7 +7,6 @@ const proofBodyHash = `0x${'11'.repeat(32)}`;
 const sealedAccount = (overrides: Partial<AccountReplica> = {}): AccountReplica => ({
   counterpartyDisputeProofBodyHash: proofBodyHash,
   counterpartyDisputeProofNonce: 2,
-  disputeProofNoncesByHash: { [proofBodyHash]: 3 },
   ...overrides,
 } as AccountReplica);
 

@@ -95,6 +95,7 @@ export {
 export { buildSingleSignerHanko } from '../../hanko/batch';
 export { buildCrossJurisdictionPullReveal, getCrossJurisdictionPrivateSeed } from '../../extensions/cross-j/index';
 export { buildDisputeArgumentsForCurrentState } from '../../entity/dispute-arguments';
+export { buildAccountProofBodyFromJurisdictions } from '../../account/consensus/helpers';
 export {
   buildMppChallengeHeader,
   buildMppCredentialHeader,

@@ -146,6 +146,58 @@ const advanceEntityProposal = async (
   return startEntityProposalIfReady(context, selection, localCanPropose, profile);
 };
 
+type EntityConsensusProfile = Readonly<{
+  startedAt: number;
+  checkpoints: Record<string, number>;
+  checkpoint(label: string): void;
+}>;
+
+const createEntityConsensusProfile = (): EntityConsensusProfile => {
+  const startedAt = getPerfMs();
+  const checkpoints: Record<string, number> = {};
+  return {
+    startedAt,
+    checkpoints,
+    checkpoint(label) {
+      checkpoints[label] = Math.round(getPerfMs() - startedAt);
+    },
+  };
+};
+
+const currentEntityInputResult = (context: ApplyEntityInputContext): ApplyEntityInputResult => ({
+  outcome: { kind: 'committed' },
+  newState: context.workingReplica.state,
+  outputs: context.entityOutbox,
+  jOutputs: context.jOutbox,
+  workingReplica: context.workingReplica,
+  candidateEffects: context.candidateEffects,
+  storageChanges: context.storageChanges,
+  ...(context.canonicalAppliedInput ? { canonicalAppliedInput: context.canonicalAppliedInput } : {}),
+  ...(context.entityContext ? { entityContext: context.entityContext } : {}),
+});
+
+const traceEntityProposal = (
+  context: ApplyEntityInputContext,
+  selection: EntityProposalSelection,
+  input: EntityInput,
+  deferProposal: boolean,
+  accountWorkOnly: boolean,
+): void => {
+  if (!ENTITY_PROPOSAL_TRACE) return;
+  entityLog.info('proposal.trace', {
+    entity: String(context.workingReplica.entityId || '').slice(-8),
+    height: context.workingReplica.state.height,
+    mempoolTxs: context.workingReplica.mempool.length,
+    selectedTxs: selection.proposalTxs.length,
+    inputTxs: input.entityTxs?.length ?? 0,
+    inputLanes: Boolean(input.proposedFrame) || Boolean(input.leaderTimeoutVote)
+      || (input.hashPrecommits?.size ?? 0) > 0,
+    deferred: deferProposal,
+    accountWorkOnly,
+    singleSigner: selection.isSingleSigner,
+  });
+};
+
 /**
  * Main entity input processor - handles consensus, proposals, and state transitions
  */
@@ -181,11 +233,7 @@ export const applyEntityInput = async (
     deferProposal?: boolean;
   } = {},
 ): Promise<ApplyEntityInputResult> => {
-  const consensusProfileStartedAt = getPerfMs();
-  const consensusProfileCheckpoints: Record<string, number> = {};
-  const checkpointConsensusProfile = (label: string): void => {
-    consensusProfileCheckpoints[label] = Math.round(getPerfMs() - consensusProfileStartedAt);
-  };
+  const profile = createEntityConsensusProfile();
   const trustedLocalCrossJurisdiction = options.trustedLocalRuntimeProtocol === 'cross-j';
   const accountWorkOnly = options.trustedLocalRuntimeProtocol === 'account-work';
   const ingress = prepareEntityInputIngress(
@@ -198,8 +246,8 @@ export const applyEntityInput = async (
   if (!ingress.accepted) return ingress.result;
   const phaseContext = ingress.context;
   entityInput = phaseContext.entityInput;
-  const { entityOutbox, jOutbox, workingReplica } = phaseContext;
-  checkpointConsensusProfile('ingress');
+  const { entityOutbox, workingReplica } = phaseContext;
+  profile.checkpoint('ingress');
 
   const leaderVoteResult = await handleLeaderTimeoutVote(phaseContext);
   if (leaderVoteResult) return leaderVoteResult;
@@ -211,7 +259,7 @@ export const applyEntityInput = async (
       trustedLocalCrossJurisdiction,
       accountWorkOnly,
     );
-  checkpointConsensusProfile('admission');
+  profile.checkpoint('admission');
 
   const commitNotificationResult = await handleCommitNotification(phaseContext);
   if (commitNotificationResult) return commitNotificationResult;
@@ -222,18 +270,8 @@ export const applyEntityInput = async (
     !accountWorkOnly &&
     isProposalDeferrableEntityInput(entityInput)
   ) {
-    checkpointConsensusProfile('deferred');
-    return {
-      outcome: { kind: 'committed' },
-      newState: workingReplica.state,
-      outputs: entityOutbox,
-      jOutputs: jOutbox,
-      workingReplica,
-      candidateEffects: phaseContext.candidateEffects,
-      storageChanges: phaseContext.storageChanges,
-      ...(phaseContext.canonicalAppliedInput ? { canonicalAppliedInput: phaseContext.canonicalAppliedInput } : {}),
-      ...(phaseContext.entityContext ? { entityContext: phaseContext.entityContext } : {}),
-    };
+    profile.checkpoint('deferred');
+    return currentEntityInputResult(phaseContext);
   }
 
   const proposedFramePrecommitResult = await handleProposedFramePrecommit(phaseContext);
@@ -254,31 +292,14 @@ export const applyEntityInput = async (
     trustedLocalCrossJurisdiction,
     trustedLocalEntityTxs,
     accountWorkOnly,
-    checkpoint: checkpointConsensusProfile,
+    checkpoint: profile.checkpoint,
   });
-  if (ENTITY_PROPOSAL_TRACE) {
-    entityLog.info('proposal.trace', {
-      entity: String(workingReplica.entityId || '').slice(-8),
-      height: workingReplica.state.height,
-      mempoolTxs: workingReplica.mempool.length,
-      selectedTxs: proposalSelection.proposalTxs.length,
-      inputTxs: entityInput.entityTxs?.length ?? 0,
-      inputLanes: Boolean(entityInput.proposedFrame) || Boolean(entityInput.leaderTimeoutVote)
-        || (entityInput.hashPrecommits?.size ?? 0) > 0,
-      deferred: options.deferProposal === true,
-      accountWorkOnly,
-      singleSigner: proposalSelection.isSingleSigner,
-    });
-  }
+  traceEntityProposal(phaseContext, proposalSelection, entityInput, options.deferProposal === true, accountWorkOnly);
   const proposalResult = await advanceEntityProposal(
     phaseContext,
     proposalSelection,
     localCanPropose,
-    {
-      startedAt: consensusProfileStartedAt,
-      checkpoints: consensusProfileCheckpoints,
-      checkpoint: checkpointConsensusProfile,
-    },
+    profile,
   );
   if (proposalResult) return proposalResult;
 
@@ -287,15 +308,5 @@ export const applyEntityInput = async (
         `proposal=${workingReplica.proposal?.hash ?? 'none'}:txs=${trustedLocalEntityTxs.length}`);
   }
 
-  return {
-    outcome: { kind: 'committed' },
-    newState: workingReplica.state,
-    outputs: entityOutbox,
-    jOutputs: jOutbox,
-    workingReplica,
-    candidateEffects: phaseContext.candidateEffects,
-    storageChanges: phaseContext.storageChanges,
-    ...(phaseContext.canonicalAppliedInput ? { canonicalAppliedInput: phaseContext.canonicalAppliedInput } : {}),
-    ...(phaseContext.entityContext ? { entityContext: phaseContext.entityContext } : {}),
-  };
+  return currentEntityInputResult(phaseContext);
 };

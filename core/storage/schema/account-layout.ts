@@ -29,6 +29,7 @@ import {
 import { validateStorageAccountDocValue } from './schema-state-docs';
 import {
   keyLiveAccountField,
+  keyLiveAccountFieldChunk,
   keyLiveAccountFieldPrefix,
 } from '../keys';
 
@@ -37,7 +38,7 @@ export { STORAGE_ACCOUNT_FIELD_TAG } from './account-field-tags';
 export const MAX_INLINE_STORAGE_VALUE_BYTES = 10_000;
 
 type AccountGraphManifest = Readonly<{
-  version: 3;
+  version: 4;
   fields: readonly StorageAccountFieldDescriptor[];
   trees: readonly StorageAccountTreeDescriptor[];
 }>;
@@ -45,14 +46,16 @@ type AccountGraphManifest = Readonly<{
 type StorageAccountFieldDescriptor = Readonly<{
   tag: number;
   valueHash: string;
+  byteLength: number;
+  chunkCount: number;
 }>;
 
 type EncodedAccountField = Readonly<{
   field: StorageAccountField;
   tag: number;
-  key: Buffer;
   value: Buffer;
   valueHash: string;
+  rows: Array<Readonly<{ key: Buffer; value: Buffer }>>;
 }>;
 
 export type AccountStorageLayout = Readonly<{
@@ -117,15 +120,26 @@ const encodedAccountFields = (
     if (TREE_FIELDS.has(field) || !hasAccountField(doc, field)) return [];
     const tag = STORAGE_ACCOUNT_FIELD_TAG[field];
     const value = encodeBuffer(accountFieldValue(doc, field));
-    if (value.byteLength >= MAX_INLINE_STORAGE_VALUE_BYTES) {
-      throw new Error(`STORAGE_ACCOUNT_FIELD_TOO_LARGE:${field}:${value.byteLength}`);
-    }
+    const chunks = value.byteLength < MAX_INLINE_STORAGE_VALUE_BYTES
+      ? []
+      : Array.from(
+          { length: Math.ceil(value.byteLength / (MAX_INLINE_STORAGE_VALUE_BYTES - 1)) },
+          (_, index) => value.subarray(
+            index * (MAX_INLINE_STORAGE_VALUE_BYTES - 1),
+            (index + 1) * (MAX_INLINE_STORAGE_VALUE_BYTES - 1),
+          ),
+        );
     return [{
       field,
       tag,
-      key: keyLiveAccountField(entityId, counterpartyId, tag),
       value,
       valueHash: computeIntegrityDigest(value),
+      rows: chunks.length === 0
+        ? [{ key: keyLiveAccountField(entityId, counterpartyId, tag), value }]
+        : chunks.map((chunk, index) => ({
+            key: keyLiveAccountFieldChunk(entityId, counterpartyId, tag, index),
+            value: chunk,
+          })),
     }];
   }).sort((left, right) => left.tag - right.tag);
 };
@@ -135,7 +149,7 @@ const manifestValue = (
   trees: readonly StorageAccountTreeDescriptor[],
 ): Buffer => {
   const value = encodeBuffer({
-    version: 3,
+    version: 4,
     fields,
     trees,
   } satisfies AccountGraphManifest);
@@ -147,14 +161,12 @@ const manifestValue = (
 
 const fieldDescriptors = (
   fields: readonly EncodedAccountField[],
-): StorageAccountFieldDescriptor[] => fields.map(({ tag, valueHash }) => ({ tag, valueHash }));
-
-/** Bounded Account root record used by storage hashing and physical writes. */
-export const projectAccountStorageRootValue = (doc: StorageAccountDoc): Buffer =>
-  manifestValue(
-    fieldDescriptors(encodedAccountFields(doc.state.leftEntity, doc.state.rightEntity, doc)),
-    projectAccountTreeDescriptors(doc),
-  );
+): StorageAccountFieldDescriptor[] => fields.map(({ tag, value, valueHash, rows }) => ({
+  tag,
+  valueHash,
+  byteLength: value.byteLength,
+  chunkCount: rows.length === 1 && rows[0]?.key.byteLength === 66 ? 0 : rows.length,
+}));
 
 const record = (value: unknown, code: string): Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(code);
@@ -194,7 +206,11 @@ const decodeTreeDescriptor = (value: unknown, index: number): StorageAccountTree
 
 const decodeFieldDescriptor = (value: unknown, index: number): StorageAccountFieldDescriptor => {
   const field = record(value, `STORAGE_ACCOUNT_MANIFEST_FIELD_${index}`);
-  exactKeys(field, ['tag', 'valueHash'], `STORAGE_ACCOUNT_MANIFEST_FIELD_${index}`);
+  exactKeys(
+    field,
+    ['tag', 'valueHash', 'byteLength', 'chunkCount'],
+    `STORAGE_ACCOUNT_MANIFEST_FIELD_${index}`,
+  );
   const tag = field['tag'];
   if (!Number.isSafeInteger(tag) || Number(tag) < 1 || Number(tag) > 0xff) {
     throw new Error(`STORAGE_ACCOUNT_MANIFEST_FIELD_TAG:${String(tag)}`);
@@ -202,9 +218,30 @@ const decodeFieldDescriptor = (value: unknown, index: number): StorageAccountFie
   if (!STORAGE_ACCOUNT_FIELD_BY_TAG.has(Number(tag))) {
     throw new Error(`STORAGE_ACCOUNT_MANIFEST_FIELD_UNKNOWN:${String(tag)}`);
   }
+  const byteLength = field['byteLength'];
+  const chunkCount = field['chunkCount'];
+  if (!Number.isSafeInteger(byteLength) || Number(byteLength) < 1) {
+    throw new Error(`STORAGE_ACCOUNT_MANIFEST_FIELD_BYTES:${String(byteLength)}`);
+  }
+  if (!Number.isSafeInteger(chunkCount) || Number(chunkCount) < 0) {
+    throw new Error(`STORAGE_ACCOUNT_MANIFEST_FIELD_CHUNKS:${String(chunkCount)}`);
+  }
+  if (
+    (Number(chunkCount) === 0 && Number(byteLength) >= MAX_INLINE_STORAGE_VALUE_BYTES) ||
+    (Number(chunkCount) > 0 && Number(byteLength) < MAX_INLINE_STORAGE_VALUE_BYTES) ||
+    Number(chunkCount) !== (
+      Number(byteLength) < MAX_INLINE_STORAGE_VALUE_BYTES
+        ? 0
+        : Math.ceil(Number(byteLength) / (MAX_INLINE_STORAGE_VALUE_BYTES - 1))
+    )
+  ) {
+    throw new Error(`STORAGE_ACCOUNT_MANIFEST_FIELD_LAYOUT:${String(byteLength)}:${String(chunkCount)}`);
+  }
   return {
     tag: Number(tag),
     valueHash: decodeHash(field['valueHash'], 'STORAGE_ACCOUNT_MANIFEST_FIELD_HASH'),
+    byteLength: Number(byteLength),
+    chunkCount: Number(chunkCount),
   };
 };
 
@@ -212,7 +249,7 @@ const decodeFieldDescriptor = (value: unknown, index: number): StorageAccountFie
 export const decodeAccountGraphManifest = (value: Buffer): AccountGraphManifest => {
   const manifest = record(decodeBuffer(value), 'STORAGE_ACCOUNT_MANIFEST_INVALID');
   exactKeys(manifest, ['version', 'fields', 'trees'], 'STORAGE_ACCOUNT_MANIFEST');
-  if (manifest['version'] !== 3 || !Array.isArray(manifest['fields']) || !Array.isArray(manifest['trees'])) {
+  if (manifest['version'] !== 4 || !Array.isArray(manifest['fields']) || !Array.isArray(manifest['trees'])) {
     throw new Error('STORAGE_ACCOUNT_MANIFEST_VERSION');
   }
   const fields = manifest['fields'].map((raw, index) => decodeFieldDescriptor(raw, index));
@@ -222,7 +259,7 @@ export const decodeAccountGraphManifest = (value: Buffer): AccountGraphManifest 
   const trees = manifest['trees'].map((raw, index) => decodeTreeDescriptor(raw, index));
   if (new Set(trees.map(tree => tree.namespace)).size !== trees.length) throw new Error('STORAGE_ACCOUNT_MANIFEST_TREE_DUPLICATE');
   return {
-    version: 3,
+    version: 4,
     fields,
     trees,
   };
@@ -243,6 +280,11 @@ export const prepareAccountStorageLayout = async (
   const trees = projectAccountTreeDescriptors(doc);
   const rootValue = manifestValue(fieldDescriptors(fields), trees);
   const graph = projectAccountTreeChanges(entityId, counterpartyId, doc, previous);
+  const changedFields = fields.filter(field => priorByTag.get(field.tag)?.valueHash !== field.valueHash);
+  const nextRowKeysByTag = new Map(changedFields.map(field => [
+    field.tag,
+    new Set(field.rows.map(row => row.key.toString('hex'))),
+  ]));
   return {
     representation: 'graph',
     logicalValue: rootValue,
@@ -250,14 +292,59 @@ export const prepareAccountStorageLayout = async (
     rootValue,
     puts: [
       { key: rootKey, value: rootValue },
-      ...fields.filter(field => priorByTag.get(field.tag)?.valueHash !== field.valueHash),
+      ...changedFields.flatMap(field => field.rows),
       ...graph.puts,
     ],
     dels: [
-      ...priorFields.filter(field => !nextTags.has(field.tag)).map(field => field.key),
+      ...priorFields.flatMap(field => {
+        const nextRowKeys = nextRowKeysByTag.get(field.tag);
+        if (nextTags.has(field.tag) && !nextRowKeys) return [];
+        return field.rows
+          .filter(row => !nextRowKeys?.has(row.key.toString('hex')))
+          .map(row => row.key);
+      }),
       ...graph.dels,
     ],
   };
+};
+
+const readAccountField = async (
+  db: RuntimeDbLike,
+  entityId: string,
+  counterpartyId: string,
+  descriptor: StorageAccountFieldDescriptor,
+): Promise<Buffer> => {
+  if (descriptor.chunkCount === 0) {
+    const value = await readRawOrNull(
+      db,
+      keyLiveAccountField(entityId, counterpartyId, descriptor.tag),
+    );
+    if (!value) throw new Error(`STORAGE_ACCOUNT_FIELD_ROW_MISSING:${descriptor.tag}`);
+    if (value.byteLength !== descriptor.byteLength) {
+      throw new Error(
+        `STORAGE_ACCOUNT_FIELD_BYTES_MISMATCH:${descriptor.tag}:` +
+        `${descriptor.byteLength}:${value.byteLength}`,
+      );
+    }
+    return value;
+  }
+  const chunks = await Promise.all(Array.from(
+    { length: descriptor.chunkCount },
+    (_, index) => readRawOrNull(
+      db,
+      keyLiveAccountFieldChunk(entityId, counterpartyId, descriptor.tag, index),
+    ),
+  ));
+  const missing = chunks.findIndex(chunk => chunk === null);
+  if (missing >= 0) throw new Error(`STORAGE_ACCOUNT_FIELD_CHUNK_MISSING:${descriptor.tag}:${missing}`);
+  const value = Buffer.concat(chunks as Buffer[]);
+  if (value.byteLength !== descriptor.byteLength) {
+    throw new Error(
+      `STORAGE_ACCOUNT_FIELD_BYTES_MISMATCH:${descriptor.tag}:` +
+      `${descriptor.byteLength}:${value.byteLength}`,
+    );
+  }
+  return value;
 };
 
 export const prepareAccountStorageDelete = async (
@@ -321,8 +408,7 @@ export const readAccountStorageLayout = async (
   for (const descriptor of manifest.fields) {
     const field = STORAGE_ACCOUNT_FIELD_BY_TAG.get(descriptor.tag);
     if (!field) throw new Error(`STORAGE_ACCOUNT_MANIFEST_FIELD_UNKNOWN:${descriptor.tag}`);
-    const value = await readRawOrNull(db, keyLiveAccountField(entityId, counterpartyId, descriptor.tag));
-    if (!value) throw new Error(`STORAGE_ACCOUNT_FIELD_MISSING:${field}`);
+    const value = await readAccountField(db, entityId, counterpartyId, descriptor);
     const actualHash = computeIntegrityDigest(value);
     if (actualHash !== descriptor.valueHash) {
       throw new Error(`STORAGE_ACCOUNT_FIELD_HASH_MISMATCH:${field}:${descriptor.valueHash}:${actualHash}`);

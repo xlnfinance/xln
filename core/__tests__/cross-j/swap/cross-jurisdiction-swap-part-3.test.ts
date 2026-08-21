@@ -129,11 +129,10 @@ import { cloneJBatch, createEmptyBatch, initJBatch } from '../../../jurisdiction
 import { applyHankoBatchProcessedEvent } from '../../../entity/tx/j-events-batch';
 
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 import {
-  buildDisputeArgumentsFromSnapshot,
-  captureDisputeArgumentSnapshot,
-  storeDisputeArgumentSnapshot,
+  buildDisputeArgumentsFromState,
 } from '../../../protocol/dispute/arguments';
 
 import { signEntityHashes } from '../../../hanko/signing';
@@ -181,6 +180,7 @@ import {
   makeAccount,
   makeJurisdiction,
   makeState,
+  openWritableEntityAccounts,
   partialBinary,
   registerTestSigner,
   secret,
@@ -253,10 +253,9 @@ describe('cross-jurisdiction hashledger swap', () => {
     route: CrossJurisdictionSwapRoute,
     role: 'source' | 'target',
   ) => {
-    const account = state.accounts.get(accountCounterparty)!;
+    const account = openWritableEntityAccounts(state).getForWrite(accountCounterparty)!;
     const pull = role === 'source' ? route.sourcePull! : route.targetPull!;
-    account.state.pulls ??= new Map();
-    account.state.pulls.set(pull.pullId, {
+    account.state.pulls = (account.state.pulls ?? PersistentAccountStateMap.empty('pulls')).updated(pull.pullId, {
       pullId: pull.pullId,
       tokenId: pull.tokenId,
       amount: pull.signedAmount,
@@ -268,18 +267,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
     const proof = buildAccountProofBody(account, addr('99'));
     account.counterpartyDisputeProofBodyHash = proof.proofBodyHash;
-    account.disputeProofBodiesByHash = {
-      ...(account.disputeProofBodiesByHash ?? {}),
-      [proof.proofBodyHash]: proof.proofBodyStruct,
-    };
-    account.disputeProofNoncesByHash = {
-      ...(account.disputeProofNoncesByHash ?? {}),
-      [proof.proofBodyHash]: 1,
-    };
-    storeDisputeArgumentSnapshot(
-      account,
-      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
-    );
     const startSeconds = Math.max(1, Math.floor(state.timestamp / 1_000));
     account.status = 'disputed';
     account.activeDispute = {
@@ -367,9 +354,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       fillRatio,
       deriveCrossJurisdictionPrivateSeed(scenario, route),
     ).binary;
-    const sourceAccount = sourceState.accounts.get(sourceHub)!;
-    sourceAccount.state.pulls ??= new Map();
-    sourceAccount.state.pulls.set(route.sourcePull!.pullId, {
+    const sourceAccount = openWritableEntityAccounts(sourceState).getForWrite(sourceHub)!;
+    sourceAccount.state.pulls = (sourceAccount.state.pulls ?? PersistentAccountStateMap.empty('pulls')).updated(route.sourcePull!.pullId, {
       pullId: route.sourcePull!.pullId,
       tokenId: route.sourcePull!.tokenId,
       amount: route.sourcePull!.signedAmount,
@@ -379,23 +365,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 1,
       createdTimestamp: env.state.timestamp,
     });
-    const finalizedProof = buildAccountProofBody(sourceAccount, addr('99'));
-    sourceAccount.disputeProofBodiesByHash = {
-      [finalizedProof.proofBodyHash]: finalizedProof.proofBodyStruct,
-    };
-    storeDisputeArgumentSnapshot(
-      sourceAccount,
-      captureDisputeArgumentSnapshot(
-        sourceAccount,
-        finalizedProof.proofBodyHash,
-        1,
-        true,
-        finalizedProof.proofBodyStruct,
-      ),
-    );
-    const targetAccount = targetState.accounts.get(targetHub)!;
-    targetAccount.state.pulls ??= new Map();
-    targetAccount.state.pulls.set(route.targetPull!.pullId, {
+    const targetAccount = openWritableEntityAccounts(targetState).getForWrite(targetHub)!;
+    targetAccount.state.pulls = (targetAccount.state.pulls ?? PersistentAccountStateMap.empty('pulls')).updated(route.targetPull!.pullId, {
       pullId: route.targetPull!.pullId,
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
@@ -407,14 +378,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
     const targetProof = buildAccountProofBody(targetAccount, addr('99'));
     targetAccount.counterpartyDisputeProofBodyHash = targetProof.proofBodyHash;
-    targetAccount.disputeProofBodiesByHash = {
-      [targetProof.proofBodyHash]: targetProof.proofBodyStruct,
-    };
-    targetAccount.disputeProofNoncesByHash = { [targetProof.proofBodyHash]: 1 };
-    storeDisputeArgumentSnapshot(
-      targetAccount,
-      captureDisputeArgumentSnapshot(targetAccount, targetProof.proofBodyHash, 1, true, targetProof.proofBodyStruct),
-    );
 
     // The target registry write is authorized only by the exact initial body
     // of an observed active dispute, never by the unauthenticated route cache.
@@ -1841,9 +1804,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     const starterInitialArguments = abiCoder.encode(['bytes[]'], [[paymentArgs]]);
     const disputeProof = buildAccountProofBody(state.accounts.get(hub)!, '');
     const proofbodyHash = disputeProof.proofBodyHash;
-    state.accounts.get(hub)!.disputeProofBodiesByHash = {
-      [proofbodyHash]: disputeProof.proofBodyStruct,
-    };
     state.jBatchState = initJBatch();
     state.jBatchState.autoBroadcastDraft = true;
     state.jBatchState.batch.disputeStarts.push({
@@ -1978,14 +1938,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
     const counterProof = buildAccountProofBody(account, addr('99'));
     const counterProposerIsLeft = account.state.leftEntity.toLowerCase() === sourceUser.toLowerCase();
-    account.disputeProofBodiesByHash = {
-      [initialProof.proofBodyHash]: initialProof.proofBodyStruct,
-      [counterProof.proofBodyHash]: counterProof.proofBodyStruct,
-    };
-    account.disputeProofNoncesByHash = {
-      [initialProof.proofBodyHash]: 1,
-      [counterProof.proofBodyHash]: 2,
-    };
     account.counterpartyDisputeProofBodyHash = counterProof.proofBodyHash;
     account.counterpartyDisputeProofNonce = 2;
     account.counterpartyDisputeProofProposerIsLeft = counterProposerIsLeft;
@@ -1996,10 +1948,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       { chainId: eth.chainId!, depositoryAddress: eth.depositoryAddress! },
       2,
       counterProposerIsLeft,
-    );
-    storeDisputeArgumentSnapshot(
-      account,
-      captureDisputeArgumentSnapshot(account, counterProof.proofBodyHash, 2, counterProposerIsLeft, counterProof.proofBodyStruct),
     );
 
     const startSec = 1_700_000_000;
@@ -2495,11 +2443,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     // The signed proof keeps the pull (it is account state), and the dispute
     // arguments for it carry nothing: pulls settle from the on-chain registry.
     expect(proof.runtimeProofBody.transformers[0]?.batch.pulls).toHaveLength(1);
-    storeDisputeArgumentSnapshot(
-      account,
-      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
-    );
-    const built = buildDisputeArgumentsFromSnapshot(account, proof.proofBodyHash, { secretsSide: 'none' }, []);
+    const built = buildDisputeArgumentsFromState(account, { secretsSide: 'none' }, []);
     expect(built.leftArguments).toBe('0x');
     expect(built.rightArguments).toBe('0x');
   });

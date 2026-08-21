@@ -10,7 +10,6 @@ import {
   HTLC_ENFORCEMENT_RESERVE_MS,
   isHtlcSecretEnforcementWindowClosed,
   proposeAccountFrame,
-  isWithinAccountFrameBounds,
 } from '../../../account/consensus/index';
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../../../account/commitment/state-root';
@@ -219,12 +218,6 @@ import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/code
 
 import { createDefaultDelta } from '../../../account/state/delta';
 
-
-import { buildDisputeArgumentsForSnapshot } from '../../../entity/dispute-arguments';
-import {
-  captureDisputeArgumentSnapshot,
-  storeDisputeArgumentSnapshot,
-} from '../../../protocol/dispute/arguments';
 
 import {
   buildAccountProofBody,
@@ -628,15 +621,12 @@ const makeEntityState = (entityId: string): EntityState => ({
   crontabState: initCrontab(),
 });
 
-const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStruct, storeFinalProofbody: boolean) => {
+const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStruct) => {
   const entityId = `0x${'12'.repeat(32)}`;
   const counterpartyId = `0x${'34'.repeat(32)}`;
   const state = makeEntityState(entityId);
   const account = makeProposalAccount([], entityId, counterpartyId);
   const finalProofbodyHash = hashProofBodyStruct(finalProofbody);
-  if (storeFinalProofbody) {
-    account.disputeProofBodiesByHash = { [finalProofbodyHash]: finalProofbody };
-  }
   account.activeDispute = {
     startedByLeft: true,
     disputeTimeout: 1700000123,

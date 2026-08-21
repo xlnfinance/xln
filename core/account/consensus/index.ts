@@ -107,7 +107,7 @@ const accountLog = createStructuredLogger('account');
 
 export { getIncomingAccountDeadlineViolation, HTLC_ENFORCEMENT_RESERVE_MS, isHtlcSecretEnforcementWindowClosed };
 export type { AccountInputSecurityContext };
-export { computeFrameHash, isWithinAccountFrameBounds } from './frame/hash';
+export { computeFrameHash } from './frame/hash';
 
 // Counter-based replay protection was intentionally replaced by the frame chain
 // (height + prevFrameHash). Nonces remain only for on-chain proof material.
@@ -319,6 +319,32 @@ const replayIncomingFrameOnClone = async (
   return { kind: 'continue', replay };
 };
 
+const validateIncomingCommittedState = (
+  account: AccountReplica,
+  accountStateRoot: string,
+  receivedFrame: AccountFrame,
+  events: string[],
+): HandleAccountInputResult | undefined => {
+  const { deltas } = collectReceiverValidationDeltas(account);
+  if (
+    accountStateRoot === receivedFrame.accountStateRoot &&
+    accountFrameDeltasEqual(deltas, receivedFrame.deltas)
+  ) return undefined;
+  accountLog.warn('frame.state_root_mismatch', {
+    height: receivedFrame.height,
+    txs: receivedFrame.accountTxs.map(tx => tx.type),
+    localAccountStateRoot: accountStateRoot,
+    receivedAccountStateRoot: receivedFrame.accountStateRoot,
+    localDeltas: summarizeDeltasForLog(new Map(deltas.map(delta => [delta.tokenId, delta]))),
+    receivedDeltas: summarizeDeltasForLog(new Map(receivedFrame.deltas.map(delta => [delta.tokenId, delta]))),
+    localAccountStateSectionHashes: computeAccountStateSectionHashes(account.state),
+    lastFinalizedJHeight: account.state.lastFinalizedJHeight,
+    leftPendingJClaims: account.state.leftPendingJClaims,
+    rightPendingJClaims: account.state.rightPendingJClaims,
+  });
+  return accountInputValidationRejected('Bilateral account state root mismatch', events);
+};
+
 async function validateIncomingFrameOnDraft(
   context: AccountConsensusContext,
   account: AccountReplica,
@@ -373,26 +399,13 @@ async function validateIncomingFrameOnDraft(
     const committed = commitAccountTransition(transition);
     sealed = true;
     const validatedMachine = committed.account;
-    const { deltas: ourFinalDeltas } = collectReceiverValidationDeltas(validatedMachine);
-    const localAccountStateRoot = committed.accountStateRoot;
-    if (
-      localAccountStateRoot !== receivedFrame.accountStateRoot ||
-      !accountFrameDeltasEqual(ourFinalDeltas, receivedFrame.deltas)
-    ) {
-      accountLog.warn('frame.state_root_mismatch', {
-        height: receivedFrame.height,
-        txs: receivedFrame.accountTxs.map(tx => tx.type),
-        localAccountStateRoot,
-        receivedAccountStateRoot: receivedFrame.accountStateRoot,
-        localDeltas: summarizeDeltasForLog(new Map(ourFinalDeltas.map(delta => [delta.tokenId, delta]))),
-        receivedDeltas: summarizeDeltasForLog(new Map(receivedFrame.deltas.map(delta => [delta.tokenId, delta]))),
-        localAccountStateSectionHashes: computeAccountStateSectionHashes(validatedMachine.state),
-        lastFinalizedJHeight: validatedMachine.state.lastFinalizedJHeight,
-        leftPendingJClaims: validatedMachine.state.leftPendingJClaims,
-        rightPendingJClaims: validatedMachine.state.rightPendingJClaims,
-      });
-      return { kind: 'return', result: accountInputValidationRejected('Bilateral account state root mismatch', events) };
-    }
+    const stateMismatch = validateIncomingCommittedState(
+      validatedMachine,
+      committed.accountStateRoot,
+      receivedFrame,
+      events,
+    );
+    if (stateMismatch) return { kind: 'return', result: stateMismatch };
     const proofResult = buildAccountProofBodyFromJurisdictions(context, validatedMachine);
     const localProofBodyHash = proofResult.proofBodyHash;
     const frameSealError = getDisputeSealRequirementError(

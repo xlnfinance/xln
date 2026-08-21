@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
-import { AbiCoder, HDNodeWallet, Mnemonic, ParamType, Wallet, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
+import { HDNodeWallet, Mnemonic, Wallet, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
 
 import {
   buildDelayedLastResortAppointmentsForTower,
@@ -19,6 +19,7 @@ import * as xln from '../../../core/runtime';
 import { decryptTowerPayloadWithWatchSeed } from '../../../core/storage/recovery/bundle/crypto';
 import { deserializeTaggedJson } from '../../../core/protocol/serialization';
 import type { EncryptedRuntimeRecoveryBundleV1, RuntimeReplica, XLNModule } from '../../../core/api/public/runtime-module';
+import { makeAccount } from '../../../core/__tests__/helpers/cross-j';
 
 test('resolveDefaultRecoveryTowerUrls uses same-origin production tower by default', () => {
   expect(resolveDefaultRecoveryTowerUrls({
@@ -209,7 +210,7 @@ test('vaultStore diagnostics do not use raw console output', () => {
 
   expect(source).toContain("errorLog.log('Resume refresh failed', 'Runtime Resume', error)");
   expect(source).toContain('Broadcast refresh failed');
-  expect(source).toContain("errorLog.log('Failed to load runtimes; clearing corrupted storage', 'Runtime Storage', error)");
+  expect(source).toContain("errorLog.log('Failed to load runtimes; preserved corrupted storage for recovery', 'Runtime Storage', error)");
   expect(source).toContain("errorLog.log('Failed to save runtimes', 'Runtime Storage', error)");
   expect(source).toContain('createRuntime failed for ${id.slice(0, 12)}');
   expect(source).toContain("errorLog.log('Failed to register key/create entity', 'Runtime Creation'");
@@ -222,12 +223,6 @@ test('vaultStore diagnostics do not use raw console output', () => {
 
 const testMnemonic = 'test test test test test test test test test test test junk';
 const testWatchSeed = `0x${'42'.repeat(32)}`;
-const abiCoder = AbiCoder.defaultAbiCoder();
-const proofBodyParam = ParamType.from(
-  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)',
-);
-const proofBodyHashOf = (proofBody: Record<string, unknown>): string =>
-  keccak256(abiCoder.encode([proofBodyParam], [proofBody]));
 
 const deriveTestAddress = (index = 0): string =>
   HDNodeWallet.fromMnemonic(Mnemonic.fromPhrase(testMnemonic), getIndexedAccountPath(index)).address.toLowerCase();
@@ -251,15 +246,23 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
     },
   } as RuntimeReplica['state']['jReplicas'] extends Map<string, infer T> ? T : never);
 
-  const proofBody = {
-    watchSeed: testWatchSeed,
-    leftResponseSeconds: 3_600n,
-    rightResponseSeconds: 86_400n,
-    offdeltas: [0n],
-    tokenIds: [1n],
-    transformers: [],
+  const account = makeAccount(entityId, counterpartyId, {
+    chainId: 31337,
+    depositoryAddress: '0x1111111111111111111111111111111111111111',
+  });
+  account.state.watchSeed = testWatchSeed;
+  account.state.disputeConfig = {
+    leftResponseSeconds: 3_600,
+    rightResponseSeconds: 86_400,
   };
-  const proofBodyHash = proofBodyHashOf(proofBody);
+  const proof = xln.buildAccountProofBodyFromJurisdictions(
+    { jReplicas: env.state.jReplicas },
+    account,
+  );
+  account.counterpartyDisputeProofNonce = 7;
+  account.counterpartyDisputeProofProposerIsLeft = false;
+  account.counterpartyDisputeProofBodyHash = proof.proofBodyHash;
+  account.counterpartyDisputeProofHanko = '0xcafe';
   env.state.eReplicas.set(`${entityId}:${runtimeId}`, {
     entityId,
     signerId: runtimeId,
@@ -278,18 +281,7 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
           entityProviderAddress: '0x2222222222222222222222222222222222222222',
         },
       },
-      accounts: new Map([[counterpartyId, {
-        state: {
-          watchSeed: testWatchSeed,
-        },
-        counterpartyDisputeProofNonce: 7,
-        counterpartyDisputeProofProposerIsLeft: false,
-        counterpartyDisputeProofBodyHash: proofBodyHash,
-        counterpartyDisputeProofHanko: '0xcafe',
-        disputeProofBodiesByHash: {
-          [proofBodyHash]: proofBody,
-        },
-      }]]),
+      accounts: new Map([[counterpartyId, account]]),
     },
   } as unknown as RuntimeReplica['eReplicas'] extends Map<string, infer T> ? T : never);
 

@@ -207,26 +207,35 @@ export const createEmptyPairBook = (bucketWidthTicks: number): BookState =>
     stpPolicy: 1,
   });
 
+const deriveSameOrderbookAmounts = (
+  offer: SameJurisdictionWorkingOrderbookOffer,
+  base: number,
+  quote: number,
+): { baseAmount: bigint; quoteAmount: bigint } | SameOrderbookMaterializationResult => {
+  if (offer.giveTokenId === base && offer.wantTokenId === quote) {
+    return { baseAmount: offer.giveAmount, quoteAmount: offer.wantAmount };
+  }
+  if (offer.giveTokenId === quote && offer.wantTokenId === base) {
+    return { baseAmount: offer.wantAmount, quoteAmount: offer.giveAmount };
+  }
+  return {
+    kind: 'reject',
+    reason: 'invalid-direction',
+    message:
+      `ORDERBOOK_REJECT: invalid token direction offer=${offer.offerId} give=${offer.giveTokenId} ` +
+      `want=${offer.wantTokenId} base=${base} quote=${quote}`,
+  };
+};
+
 export const deriveSameOrderbookMaterialization = (
   offer: SameJurisdictionWorkingOrderbookOffer,
   minTradeSize: bigint,
 ): SameOrderbookMaterializationResult => {
   const { pairId, base, quote } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
   const side = deriveSide(offer.giveTokenId, offer.wantTokenId);
-  const isSellBase = offer.giveTokenId === base && offer.wantTokenId === quote;
-  const isBuyBase = offer.giveTokenId === quote && offer.wantTokenId === base;
-  if (!isSellBase && !isBuyBase) {
-    return {
-      kind: 'reject',
-      reason: 'invalid-direction',
-      message:
-        `ORDERBOOK_REJECT: invalid token direction offer=${offer.offerId} give=${offer.giveTokenId} ` +
-        `want=${offer.wantTokenId} base=${base} quote=${quote}`,
-    };
-  }
-
-  const baseAmount = isSellBase ? offer.giveAmount : offer.wantAmount;
-  const quoteAmount = isSellBase ? offer.wantAmount : offer.giveAmount;
+  const amounts = deriveSameOrderbookAmounts(offer, base, quote);
+  if ('kind' in amounts) return amounts;
+  const { baseAmount, quoteAmount } = amounts;
   const { baseTokenDecimals, quoteTokenDecimals } = getSwapPairDimensions(side, offer);
   const pairPolicy = getSwapPairPolicyForDimensions(
     base,

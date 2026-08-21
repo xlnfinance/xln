@@ -93,17 +93,6 @@ const makeCrossJurisdictionRoute = () => ({
   updatedAt: 2,
 });
 
-const makeProofBodyStruct = () => ({
-  watchSeed: `0x${'11'.repeat(32)}`,
-  offdeltas: [1n],
-  tokenIds: [1],
-  transformers: [{
-    transformerAddress: `0x${'22'.repeat(20)}`,
-    encodedBatch: '0x1234',
-    allowances: [{ deltaIndex: 0, leftAllowance: 1n, rightAllowance: 2n }],
-  }],
-});
-
 const makeCanonicalAccountFixture = () => ({
   state: {
     leftEntity: 'left',
@@ -176,30 +165,11 @@ const makeCanonicalAccountFixture = () => ({
   currentHeight: 0,
   rollbackCount: 0,
   proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 0 },
-  proofBody: { tokenIds: [1], deltas: [0n] },
   pendingWithdrawals: PersistentAccountStateMap.empty('pendingWithdrawals'),
   shadow: { rebalance: {
     policy: PersistentAccountStateMap.empty('rebalanceShadowPolicy'),
     submittedAtByToken: PersistentAccountStateMap.empty('rebalanceShadowSubmitted'),
   } },
-  disputeProofBodiesByHash: {
-    proof: makeProofBodyStruct(),
-  },
-  disputeArgumentSnapshotsByHash: {
-    proof: {
-      proofbodyHash: 'proof',
-      nonce: 1,
-      side: 'left',
-      proofBodyStruct: makeProofBodyStruct(),
-      plan: {
-        paymentHashlocks: ['hashlock-1'],
-        leftSwapOfferIds: ['left-offer-1'],
-        rightSwapOfferIds: [],
-        leftPullIds: [],
-        rightPullIds: [],
-      },
-    },
-  },
   uncloneable: () => undefined,
 });
 
@@ -489,7 +459,7 @@ describe('state cloning', () => {
     // A persisted context is bound to the exact height it applied at: the
     // external replay of the recorded input reuses it at that height.
     env.infrastructure.replayEntityContexts = new Map([
-      [`${replica.entityId}:${replica.signerId}`, persisted],
+      [`${replica.entityId}:${replica.signerId}:${persisted.height}`, persisted],
     ]);
     const externalReplay = await materializeEntityInfraContext(env, replica, [], {
       usePersistedReplayContext: true,

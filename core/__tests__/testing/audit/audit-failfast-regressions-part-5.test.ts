@@ -10,7 +10,6 @@ import {
   HTLC_ENFORCEMENT_RESERVE_MS,
   isHtlcSecretEnforcementWindowClosed,
   proposeAccountFrame,
-  isWithinAccountFrameBounds,
 } from '../../../account/consensus/index';
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../../../account/commitment/state-root';
@@ -207,12 +206,6 @@ import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/code
 import { createDefaultDelta } from '../../../account/state/delta';
 
 import { createEntityFrameCandidateState } from '../../../entity/state-clone';
-
-import { buildDisputeArgumentsForSnapshot } from '../../../entity/dispute-arguments';
-import {
-  captureDisputeArgumentSnapshot,
-  storeDisputeArgumentSnapshot,
-} from '../../../protocol/dispute/arguments';
 
 import {
   buildAccountProofBody,
@@ -632,15 +625,12 @@ const makeEntityState = (entityId: string): EntityState => ({
   crontabState: initCrontab(),
 });
 
-const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStruct, storeFinalProofbody: boolean) => {
+const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStruct) => {
   const entityId = `0x${'12'.repeat(32)}`;
   const counterpartyId = `0x${'34'.repeat(32)}`;
   const state = makeEntityState(entityId);
   const account = makeProposalAccount([], entityId, counterpartyId);
   const finalProofbodyHash = hashProofBodyStruct(finalProofbody);
-  if (storeFinalProofbody) {
-    account.disputeProofBodiesByHash = { [finalProofbodyHash]: finalProofbody };
-  }
   account.activeDispute = {
     startedByLeft: true,
     initialProposerIsLeft: true,
@@ -909,9 +899,6 @@ describe('audit fail-fast regressions', () => {
       leftHold: 11n,
       rightHold: 13n,
     });
-    account.disputeProofBodiesByHash = {
-      [finalProofbodyHash]: finalProofbody,
-    };
     account.activeDispute = {
       startedByLeft: true,
       initialProposerIsLeft: true,
@@ -1121,7 +1108,7 @@ describe('audit fail-fast regressions', () => {
       tokenIds: [1n],
       transformers: [],
     };
-    const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-missing', finalProofbody, false);
+    const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-missing', finalProofbody);
     delete (fixture.event.data as { finalProofbody?: ProofBodyStruct }).finalProofbody;
     fixture.account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
     const stateBefore = safeStringify(fixture.state);
@@ -1142,7 +1129,6 @@ describe('audit fail-fast regressions', () => {
     const fixture = makeDisputeFinalizedFixture(
       'dispute-finalized-nonce-boundary',
       finalProofbody,
-      true,
     );
     fixture.event.data.initialNonce = '9007199254740993';
     const stateBefore = safeStringify(fixture.state);
@@ -1151,24 +1137,6 @@ describe('audit fail-fast regressions', () => {
       'J_EVENT_DISPUTE_INITIAL_NONCE_INVALID:9007199254740993',
     );
     expect(safeStringify(fixture.state)).toBe(stateBefore);
-  });
-
-  test('DisputeFinalized replaces stale local proof cache with authenticated calldata evidence', async () => {
-    const finalProofbody: ProofBodyStruct = {
-      watchSeed: `0x${'f1'.repeat(32)}`,
-      leftResponseSeconds: 10,
-      rightResponseSeconds: 10,
-      offdeltas: [50n],
-      tokenIds: [1n],
-      transformers: [],
-    };
-    const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-hash-mismatch', finalProofbody, true);
-    fixture.account.disputeProofBodiesByHash![fixture.finalProofbodyHash] = {
-      ...finalProofbody,
-      offdeltas: [51n],
-    };
-
-    await expect(applyDisputeFinalizedFixture(fixture)).resolves.toBeDefined();
   });
 
   test('selected equal-nonce LEFT finality adopts N instead of inventing N+1', async () => {
@@ -1180,7 +1148,7 @@ describe('audit fail-fast regressions', () => {
       tokenIds: [1n],
       transformers: [],
     };
-    const fixture = makeDisputeFinalizedFixture('selected-equal-nonce-left-finality', finalProofbody, false);
+    const fixture = makeDisputeFinalizedFixture('selected-equal-nonce-left-finality', finalProofbody);
     fixture.account.activeDispute!.initialProposerIsLeft = false;
     fixture.account.activeDispute!.selectedCounterNonce = 7;
     fixture.account.activeDispute!.selectedCounterProposerIsLeft = true;
@@ -1212,7 +1180,7 @@ describe('audit fail-fast regressions', () => {
       tokenIds: [1n],
       transformers: [],
     };
-    const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-shape', malformedProofbody, true);
+    const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-shape', malformedProofbody);
     fixture.account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
 
     await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow('J_DISPUTE_PROOFBODY_LENGTH_MISMATCH');
@@ -1227,20 +1195,7 @@ describe('audit fail-fast regressions', () => {
       tokenIds: [1n],
       transformers: [],
     };
-    const fixture = makeDisputeFinalizedFixture('dispute-finalized-exact-token-cleanup', finalProofbody, true);
-    const staleHash = `0x${'ab'.repeat(32)}`;
-    fixture.account.disputeProofBodiesByHash![staleHash] = makeEmptyProofBody();
-    fixture.account.disputeProofNoncesByHash = { [fixture.finalProofbodyHash]: 7, [staleHash]: 6 };
-    fixture.account.disputeArgumentSnapshotsByHash = {
-      [fixture.finalProofbodyHash]: captureDisputeArgumentSnapshot(
-        fixture.account,
-        fixture.finalProofbodyHash,
-        7,
-        true,
-        finalProofbody,
-      ),
-      [staleHash]: captureDisputeArgumentSnapshot(fixture.account, staleHash, 6, true, makeEmptyProofBody()),
-    };
+    const fixture = makeDisputeFinalizedFixture('dispute-finalized-exact-token-cleanup', finalProofbody);
     fixture.account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
     fixture.account.state.deltas.set(2, {
       ...createDefaultDelta(2),
@@ -1265,22 +1220,13 @@ describe('audit fail-fast regressions', () => {
       leftAllowance: 0n,
       rightAllowance: 0n,
     });
-    expect(account.disputeProofBodiesByHash).toBeUndefined();
-    expect(account.disputeProofNoncesByHash).toBeUndefined();
-    expect(account.disputeArgumentSnapshotsByHash).toBeUndefined();
-    expect(projectAccountDoc(account).disputeProofBodiesByHash).toBeUndefined();
-    expect(projectAccountDoc(account).disputeProofNoncesByHash).toBeUndefined();
-    expect(projectAccountDoc(account).disputeArgumentSnapshotsByHash).toBeUndefined();
-
-    const nextProofbody: ProofBodyStruct = { ...finalProofbody, offdeltas: [75n], tokenIds: [2n] };
-    const nextHash = hashProofBodyStruct(nextProofbody);
-    account.disputeProofBodiesByHash = { [nextHash]: nextProofbody };
-    account.disputeProofNoncesByHash = { [nextHash]: 8 };
-    storeDisputeArgumentSnapshot(account, captureDisputeArgumentSnapshot(account, nextHash, 8, true, nextProofbody));
+    expect(Object.hasOwn(account, 'disputeProofBodiesByHash')).toBeFalse();
+    expect(Object.hasOwn(account, 'disputeProofNoncesByHash')).toBeFalse();
+    expect(Object.hasOwn(account, 'disputeArgumentSnapshotsByHash')).toBeFalse();
     const persisted = hydrateAccountDocFromStorage(structuredClone(projectAccountDoc(account)));
-    expect(Object.keys(persisted.disputeProofBodiesByHash ?? {})).toEqual([nextHash]);
-    expect(Object.keys(persisted.disputeProofNoncesByHash ?? {})).toEqual([nextHash]);
-    expect(Object.keys(persisted.disputeArgumentSnapshotsByHash ?? {})).toEqual([nextHash]);
+    expect(Object.hasOwn(persisted, 'disputeProofBodiesByHash')).toBeFalse();
+    expect(Object.hasOwn(persisted, 'disputeProofNoncesByHash')).toBeFalse();
+    expect(Object.hasOwn(persisted, 'disputeArgumentSnapshotsByHash')).toBeFalse();
   });
 
   test('DisputeFinalized invalidates a competing settlement workspace and its deferred retry', async () => {
@@ -1292,7 +1238,7 @@ describe('audit fail-fast regressions', () => {
       tokenIds: [1n],
       transformers: [],
     };
-    const fixture = makeDisputeFinalizedFixture('dispute-finalized-settlement-race', finalProofbody, true);
+    const fixture = makeDisputeFinalizedFixture('dispute-finalized-settlement-race', finalProofbody);
     fixture.account.state.deltas.set(1, {
       ...createDefaultDelta(1),
       collateral: 100n,
@@ -1333,9 +1279,6 @@ describe('audit fail-fast regressions', () => {
     const state = makeEntityState(finalizerId);
     const account = makeProposalAccount([], starterId, finalizerId);
     const initialProof = buildAccountProofBody(account, '');
-    account.disputeProofBodiesByHash = {
-      [initialProof.proofBodyHash]: initialProof.proofBodyStruct,
-    };
     account.activeDispute = {
       startedByLeft: true,
       initialProofbodyHash: initialProof.proofBodyHash,
@@ -1389,21 +1332,8 @@ describe('audit fail-fast regressions', () => {
     account.state.deltas.set(1, { ...createDefaultDelta(1), offdelta: 50n });
 
     const initialProof = buildAccountProofBody(account, '');
-    storeDisputeArgumentSnapshot(
-      account,
-      captureDisputeArgumentSnapshot(account, initialProof.proofBodyHash, 1, true, initialProof.proofBodyStruct),
-    );
-
     account.state.deltas.set(1, { ...createDefaultDelta(1), offdelta: 75n });
     const counterProof = buildAccountProofBody(account, '');
-    storeDisputeArgumentSnapshot(
-      account,
-      captureDisputeArgumentSnapshot(account, counterProof.proofBodyHash, 2, true, counterProof.proofBodyStruct),
-    );
-    account.disputeProofBodiesByHash = {
-      [initialProof.proofBodyHash]: initialProof.proofBodyStruct,
-      [counterProof.proofBodyHash]: counterProof.proofBodyStruct,
-    };
     account.counterpartyDisputeProofBodyHash = counterProof.proofBodyHash;
     account.counterpartyDisputeProofNonce = 2;
     account.counterpartyDisputeProofProposerIsLeft = true;
@@ -1609,7 +1539,7 @@ describe('audit fail-fast regressions', () => {
     expect(account.counterpartyDisputeHash).toBe(postDisputeHash);
     expect(account.currentDisputeProofBodyHash).toBe(postProof.proofBodyHash);
     expect(account.counterpartyDisputeProofBodyHash).toBe(postProof.proofBodyHash);
-    expect(account.disputeProofNoncesByHash?.[postProof.proofBodyHash]).toBe(2);
+    expect(account.currentDisputeProofNonce).toBe(2);
     expect(account.state.jNonce).toBe(1);
   });
 

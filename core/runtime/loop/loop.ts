@@ -86,6 +86,44 @@ const throwSettledErrors = (
   if (errors.length > 1) throw new AggregateError(errors, code);
 };
 
+type RuntimeLifecycleApi = ReturnType<typeof createRuntimeLifecycleApi>;
+type RuntimeRoutingApi = ReturnType<typeof createRuntimeRoutingApi>;
+
+const createRuntimeDbCloser = (
+  lifecycle: RuntimeLifecycleApi,
+  routing: RuntimeRoutingApi,
+) => async (env: RuntimeReplica): Promise<void> => {
+  // A read-only replay env borrows the live WAL handle. Closing it must not
+  // stop the live loop or drop the namespace writer lock; those belong to
+  // the source Runtime that still owns the durable lease.
+  const borrowedWal = env.infrastructure?.runtimeWalDbBorrowed === true;
+  if (!borrowedWal) {
+    await lifecycle.stopJurisdictionWatchersAndWait(env);
+    const shutdown = await Promise.allSettled([
+      lifecycle.stopRuntimeLoopAndWait(env, 10_000).then(stopped => {
+        if (!stopped) throw new Error('RUNTIME_DB_CLOSE_LOOP_DRAIN_TIMEOUT');
+      }),
+      routing.stopP2PAndWait(env, 10_000),
+    ]);
+    throwSettledErrors(shutdown, 'RUNTIME_DB_CLOSE_QUIESCE_FAILED');
+    lifecycle.detachRuntimeEnv(env);
+  }
+  const closed = await Promise.allSettled([
+    closeStorageDb(env, 'current'),
+    closeStorageDb(env, 'previous'),
+    closeRuntimeWalDb(env),
+    closeHistoryViewDb(env),
+  ]);
+  throwSettledErrors(closed, 'RUNTIME_DB_CLOSE_FAILED');
+  if (!borrowedWal) await releaseRetainedStorageWriterLock(env);
+};
+
+const closeManagedInfraDb = async (env: RuntimeReplica): Promise<void> => {
+  ensureRuntimeInfrastructure(env).infraDbClosing = true;
+  await drainInfraDbWrites(env);
+  await closeInfraDb(env);
+};
+
 /**
  * Runtime's public composition root. Consensus, transport, lifecycle and
  * persistence keep their own modules; this file only wires their dependencies
@@ -108,39 +146,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
       resolveNextWallClockWakeTimestamp(env, workDeps),
   });
 
-  const closeRuntimeDb = async (env: RuntimeReplica): Promise<void> => {
-    // A read-only replay env borrows the live WAL handle. Closing it must not
-    // stop the live loop or drop the namespace writer lock; those belong to
-    // the source Runtime that still owns the durable lease.
-    const borrowedWal = env.infrastructure?.runtimeWalDbBorrowed === true;
-    if (!borrowedWal) {
-      await lifecycle.stopJurisdictionWatchersAndWait(env);
-      const shutdown = await Promise.allSettled([
-        lifecycle.stopRuntimeLoopAndWait(env, 10_000).then(stopped => {
-          if (!stopped) throw new Error('RUNTIME_DB_CLOSE_LOOP_DRAIN_TIMEOUT');
-        }),
-        routing.stopP2PAndWait(env, 10_000),
-      ]);
-      throwSettledErrors(shutdown, 'RUNTIME_DB_CLOSE_QUIESCE_FAILED');
-      lifecycle.detachRuntimeEnv(env);
-    }
-    const closed = await Promise.allSettled([
-      closeStorageDb(env, 'current'),
-      closeStorageDb(env, 'previous'),
-      closeRuntimeWalDb(env),
-      closeHistoryViewDb(env),
-    ]);
-    throwSettledErrors(closed, 'RUNTIME_DB_CLOSE_FAILED');
-    if (!borrowedWal) {
-      await releaseRetainedStorageWriterLock(env);
-    }
-  };
-
-  const closeManagedInfraDb = async (env: RuntimeReplica): Promise<void> => {
-    ensureRuntimeInfrastructure(env).infraDbClosing = true;
-    await drainInfraDbWrites(env);
-    await closeInfraDb(env);
-  };
+  const closeRuntimeDb = createRuntimeDbCloser(lifecycle, routing);
 
   return {
     registerRuntimePublishedCallback,

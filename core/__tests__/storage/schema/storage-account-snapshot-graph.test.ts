@@ -7,6 +7,7 @@ import { createSnapshot, readSnapshotDocs } from '../../../storage/database/life
 import {
   KEY_HEAD,
   KEY_LIVE_ACCOUNT_BRANCH,
+  KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_ACCOUNT_LEAF,
   KEY_SNAPSHOT_GRAPH,
   STORAGE_SCHEMA_VERSION,
@@ -18,14 +19,30 @@ import {
 } from '../../../storage/keys';
 import { inspectSnapshotGraphRows } from '../../../storage/read/integrity/snapshot-graph';
 import {
+  MAX_INLINE_STORAGE_VALUE_BYTES,
   prepareAccountStorageLayout,
+  readAccountStorageLayout,
 } from '../../../storage/schema/account-layout';
+import type { AccountTx } from '../../../types/account';
 import type { StorageHead } from '../../../storage/types';
 import { MemoryRuntimeDb } from '../../fixtures/storage/memory-runtime-db';
 import { makeAccount } from '../../helpers/cross-j';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
+
+const payment = (index: number): AccountTx => ({
+  type: 'direct_payment',
+  data: {
+    tokenId: 1,
+    amount: BigInt(index + 1),
+    route: [entityId, counterpartyId],
+    deliveryMode: 'direct',
+    fromEntityId: entityId,
+    toEntityId: counterpartyId,
+    description: `chunked-payment-${index}`,
+  },
+});
 
 const head = (): StorageHead => ({
   schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -79,6 +96,42 @@ test('Account snapshot copies and relinks the exact Patricia graph without live 
   if (!corruptKey) throw new Error('TEST_SNAPSHOT_ACCOUNT_GRAPH_MISSING');
   snapshot.rows.get(corruptKey)![0] ^= 0xff;
   await expect(readSnapshotDocs(snapshot, 1)).rejects.toThrow();
+});
+
+test('large Account envelope fields use bounded static-key chunks and round-trip exactly', async () => {
+  const db = new MemoryRuntimeDb();
+  const account = makeAccount(entityId, counterpartyId);
+  account.mempool = Array.from({ length: 1_000 }, (_, index) => payment(index));
+  const rootKey = keyLiveAccount(entityId, counterpartyId);
+  const layout = await prepareAccountStorageLayout(
+    db,
+    entityId,
+    counterpartyId,
+    rootKey,
+    account,
+  );
+  const batch = db.batch();
+  for (const row of layout.puts) batch.put(row.key, row.value);
+  await batch.write();
+
+  const fieldRows = layout.puts.filter(row => row.key[0] === KEY_LIVE_ACCOUNT_FIELD);
+  expect(fieldRows.some(row => row.key.byteLength === 70)).toBeTrue();
+  expect(Math.max(...fieldRows.map(row => row.value.byteLength)))
+    .toBeLessThan(MAX_INLINE_STORAGE_VALUE_BYTES);
+  expect((await readAccountStorageLayout(db, entityId, counterpartyId, rootKey))?.doc.mempool)
+    .toEqual(account.mempool);
+
+  const chunkRow = fieldRows.find(row => row.key.byteLength === 70);
+  if (!chunkRow) throw new Error('TEST_ACCOUNT_FIELD_CHUNK_MISSING');
+  const chunkHex = chunkRow.key.toString('hex');
+  db.rows.delete(chunkHex);
+  await expect(readAccountStorageLayout(db, entityId, counterpartyId, rootKey))
+    .rejects.toThrow('STORAGE_ACCOUNT_FIELD_CHUNK_MISSING');
+  const corruptChunk = Buffer.from(chunkRow.value);
+  corruptChunk[0] ^= 0xff;
+  db.rows.set(chunkHex, corruptChunk);
+  await expect(readAccountStorageLayout(db, entityId, counterpartyId, rootKey))
+    .rejects.toThrow('STORAGE_ACCOUNT_FIELD_HASH_MISMATCH');
 });
 
 test('snapshot graph verification rejects an orphan row', async () => {

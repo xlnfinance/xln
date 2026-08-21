@@ -14,7 +14,7 @@ import {
   makeState,
 } from '../../helpers/cross-j';
 import { applyJEventRange } from '../../helpers/j-history';
-import { hashProofBodyStruct } from '../../../protocol/dispute/proof-builder';
+import { buildAccountProofBody, hashProofBodyStruct } from '../../../protocol/dispute/proof-builder';
 
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
 const jurisdiction = makeJurisdiction('Ethereum', 1, '11', '12');
@@ -89,16 +89,7 @@ describe('canonical DisputeStarted timeout', () => {
     registerSignerKey('certified-j-height:event-runtime', validatorId, privateKey);
     const state = makeState(entityId, validatorId, jurisdiction, counterpartyId);
     const account = state.accounts.get(counterpartyId)!;
-    const proofbody = {
-      watchSeed: account.state.watchSeed,
-      leftResponseSeconds: 10,
-      rightResponseSeconds: 10,
-      offdeltas: [],
-      tokenIds: [],
-      transformers: [],
-    };
-    const proofbodyHash = hashProofBodyStruct(proofbody);
-    account.disputeProofBodiesByHash = { [proofbodyHash]: proofbody };
+    const { proofBodyStruct: proofbody, proofBodyHash: proofbodyHash } = buildAccountProofBody(account, `0x${'99'.repeat(20)}`);
     const event = normalizeJurisdictionEvent({
       type: 'DisputeStarted',
       data: {
@@ -147,14 +138,11 @@ describe('canonical DisputeStarted timeout', () => {
     registerSignerKey('dispute-nonce-boundary-runtime', validatorId, privateKey);
     const state = makeState(entityId, validatorId, jurisdiction, counterpartyId);
     const before = computeCanonicalEntityConsensusStateHash(state);
-    const initialProofbody = {
-      watchSeed: `0x${'66'.repeat(32)}`,
-      leftResponseSeconds: 10,
-      rightResponseSeconds: 10,
-      offdeltas: [],
-      tokenIds: [],
-      transformers: [],
-    };
+    const account = state.accounts.get(counterpartyId)!;
+    const { proofBodyStruct: initialProofbody, proofBodyHash } = buildAccountProofBody(
+      account,
+      `0x${'99'.repeat(20)}`,
+    );
     const event = normalizeJurisdictionEvent({
       type: 'DisputeStarted',
       data: {
@@ -162,9 +150,9 @@ describe('canonical DisputeStarted timeout', () => {
         counterentity: counterpartyId,
         nonce: '9007199254740993',
         proposerIsLeft: true,
-        proofbodyHash: hashProofBodyStruct(initialProofbody),
+        proofbodyHash: proofBodyHash,
         initialProofbody,
-        watchSeed: `0x${'66'.repeat(32)}`,
+        watchSeed: account.state.watchSeed,
         starterInitialArguments: '0x',
         starterCounterArguments: '0x',
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',

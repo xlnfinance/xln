@@ -42,9 +42,11 @@ export async function buildDelayedLastResortAppointmentsForTower(
     typeof xln.computeWatchtowerCounterDisputeAuthorizationHash !== 'function' ||
     typeof xln.buildTowerAppointmentOwnerMessage !== 'function' ||
     typeof xln.buildSingleSignerHanko !== 'function' ||
-    typeof xln.encryptTowerPayloadForWatchSeed !== 'function'
+    typeof xln.encryptTowerPayloadForWatchSeed !== 'function' ||
+    typeof xln.buildAccountProofBodyFromJurisdictions !== 'function' ||
+    typeof xln.buildDisputeArgumentsForCurrentState !== 'function'
   ) {
-    return [];
+    throw new Error('WATCHTOWER_RUNTIME_CAPABILITIES_MISSING');
   }
 
   const normalizedRuntimeId = normalizeRuntimeId(runtime.id);
@@ -94,7 +96,6 @@ export async function buildDelayedLastResortAppointmentsForTower(
         .trim()
         .toLowerCase();
       const proofHanko = String(account?.counterpartyDisputeProofHanko || '').trim();
-      const proofBody = proofBodyHash ? account?.disputeProofBodiesByHash?.[proofBodyHash] : null;
       const watchSeed = String(account?.state.watchSeed || '')
         .trim()
         .toLowerCase();
@@ -104,15 +105,25 @@ export async function buildDelayedLastResortAppointmentsForTower(
         typeof proposerIsLeft !== 'boolean' ||
         !proofBodyHash ||
         !proofHanko ||
-        !proofBody ||
-        typeof proofBody !== 'object' ||
         !/^0x[0-9a-f]{64}$/.test(watchSeed)
       ) {
         continue;
       }
 
       const appointmentSequence = proofNonce;
-      const finalProofbody = xln.decodeTowerProofBody(proofBody);
+      // A disputing Account is frozen. Rebuild the one proof from that state;
+      // never resurrect a historical ProofBody cache as a second authority.
+      const currentProof = xln.buildAccountProofBodyFromJurisdictions(
+        { jReplicas: env.state.jReplicas },
+        account,
+      );
+      if (currentProof.proofBodyHash.toLowerCase() !== proofBodyHash) {
+        throw new Error(
+          `WATCHTOWER_FROZEN_PROOF_MISMATCH:${entityId}:${counterpartyId}:` +
+          `${proofBodyHash}:${currentProof.proofBodyHash}`,
+        );
+      }
+      const finalProofbody = xln.decodeTowerProofBody(currentProof.proofBodyStruct);
       const leftResponseSeconds = Number(finalProofbody.leftResponseSeconds);
       const rightResponseSeconds = Number(finalProofbody.rightResponseSeconds);
       const totalResponseSeconds = leftResponseSeconds + rightResponseSeconds;
@@ -149,9 +160,6 @@ export async function buildDelayedLastResortAppointmentsForTower(
       let leftArguments = '0x';
       let rightArguments = '0x';
       if (Array.isArray(transformers) && transformers.length > 0) {
-        if (typeof xln.buildDisputeArgumentsForSnapshot !== 'function') {
-          throw new Error('WATCHTOWER_ARGUMENT_BUILDER_UNAVAILABLE');
-        }
         const leftEntityId = normalizeEntityId(account.state.leftEntity);
         const rightEntityId = normalizeEntityId(account.state.rightEntity);
         const watchedSide = leftEntityId === entityId ? 'left' : rightEntityId === entityId ? 'right' : null;
@@ -163,9 +171,10 @@ export async function buildDelayedLastResortAppointmentsForTower(
         // bound by DisputeStarted and must be injected by tower action from the
         // on-chain event, otherwise a stale/local guess can fail the hash check or
         // reveal the wrong transformer evidence.
-        const builtArguments = xln.buildDisputeArgumentsForSnapshot(
+        const builtArguments = xln.buildDisputeArgumentsForCurrentState(
           account,
           replica.state,
+          { jReplicas: env.state.jReplicas },
           counterpartyId,
           proofBodyHash,
           { secretsSide: watchedSide },

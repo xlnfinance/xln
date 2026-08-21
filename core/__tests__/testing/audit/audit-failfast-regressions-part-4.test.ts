@@ -10,7 +10,6 @@ import {
   HTLC_ENFORCEMENT_RESERVE_MS,
   isHtlcSecretEnforcementWindowClosed,
   proposeAccountFrame,
-  isWithinAccountFrameBounds,
 } from '../../../account/consensus/index';
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../../../account/commitment/state-root';
@@ -206,12 +205,6 @@ import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/code
 
 import { createDefaultDelta } from '../../../account/state/delta';
 
-
-import { buildDisputeArgumentsForSnapshot } from '../../../entity/dispute-arguments';
-import {
-  captureDisputeArgumentSnapshot,
-  storeDisputeArgumentSnapshot,
-} from '../../../protocol/dispute/arguments';
 
 import {
   buildAccountProofBody,
@@ -615,15 +608,12 @@ const makeEntityState = (entityId: string): EntityState => ({
   crontabState: initCrontab(),
 });
 
-const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStruct, storeFinalProofbody: boolean) => {
+const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStruct) => {
   const entityId = `0x${'12'.repeat(32)}`;
   const counterpartyId = `0x${'34'.repeat(32)}`;
   const state = makeEntityState(entityId);
   const account = makeProposalAccount([], entityId, counterpartyId);
   const finalProofbodyHash = hashProofBodyStruct(finalProofbody);
-  if (storeFinalProofbody) {
-    account.disputeProofBodiesByHash = { [finalProofbodyHash]: finalProofbody };
-  }
   account.activeDispute = {
     startedByLeft: true,
     disputeTimeout: 1700000123,
@@ -1181,7 +1171,7 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.proofHeader.nextProofNonce).toBe(nonceBefore);
   });
 
-  test('consumed dispute proof nonce opens a fresh persisted evidence epoch', async () => {
+  test('consumed dispute proof nonce reseals current state without historical evidence caches', async () => {
     const seed = 'account-consumed-proof-opens-evidence-epoch';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -1201,9 +1191,6 @@ describe('audit fail-fast regressions', () => {
     accountMachine.currentDisputeProofBodyHash = proof.proofBodyHash;
     accountMachine.currentDisputeProofNonce = 7;
     accountMachine.state.jNonce = 8;
-    accountMachine.disputeProofBodiesByHash = undefined;
-    accountMachine.disputeProofNoncesByHash = undefined;
-    accountMachine.disputeArgumentSnapshotsByHash = undefined;
     attachSigningReplica(env, left.entityId, left.signerId);
 
     const result = await proposeAccountFrame(createAccountConsensusContext(env), accountMachine, env.state.timestamp);
@@ -1213,13 +1200,13 @@ describe('audit fail-fast regressions', () => {
       proofBodyHash: proof.proofBodyHash,
       proofNonce: 9,
     });
-    expect(Object.keys(accountMachine.disputeProofBodiesByHash ?? {})).toEqual([proof.proofBodyHash]);
-    expect(accountMachine.disputeProofNoncesByHash).toEqual({ [proof.proofBodyHash]: 9 });
-    expect(Object.keys(accountMachine.disputeArgumentSnapshotsByHash ?? {})).toEqual([proof.proofBodyHash]);
+    expect(Object.hasOwn(accountMachine, 'disputeProofBodiesByHash')).toBeFalse();
+    expect(Object.hasOwn(accountMachine, 'disputeProofNoncesByHash')).toBeFalse();
+    expect(Object.hasOwn(accountMachine, 'disputeArgumentSnapshotsByHash')).toBeFalse();
     const persisted = hydrateAccountDocFromStorage(structuredClone(projectAccountDoc(accountMachine)));
-    expect(Object.keys(persisted.disputeProofBodiesByHash ?? {})).toEqual([proof.proofBodyHash]);
-    expect(persisted.disputeProofNoncesByHash).toEqual({ [proof.proofBodyHash]: 9 });
-    expect(Object.keys(persisted.disputeArgumentSnapshotsByHash ?? {})).toEqual([proof.proofBodyHash]);
+    expect(Object.hasOwn(persisted, 'disputeProofBodiesByHash')).toBeFalse();
+    expect(Object.hasOwn(persisted, 'disputeProofNoncesByHash')).toBeFalse();
+    expect(Object.hasOwn(persisted, 'disputeArgumentSnapshotsByHash')).toBeFalse();
   });
 
   test('account frame property matrix preserves explicit zero jHeight through receive, replay, and ACK commit', async () => {
@@ -1359,7 +1346,6 @@ describe('audit fail-fast regressions', () => {
         ack: { height: 8, frameHash: `0x${'08'.repeat(32)}`, frameHanko: `0x${'aa'.repeat(65)}` },
       },
     };
-    accountMachine.hankoSignature = `0x${'bb'.repeat(65)}`;
     accountMachine.pendingForwards = [
       {
         route: [hex20('33'), hex20('44')],
@@ -1372,7 +1358,6 @@ describe('audit fail-fast regressions', () => {
     const doc = projectAccountDoc(accountMachine);
 
     expect(doc.lastOutboundFrameAck).toEqual(accountMachine.lastOutboundFrameAck);
-    expect(doc.hankoSignature).toBe(accountMachine.hankoSignature);
     expect(doc.pendingForwards).toEqual(accountMachine.pendingForwards);
   });
 

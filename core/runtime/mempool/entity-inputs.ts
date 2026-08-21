@@ -36,6 +36,100 @@ export {
   validateExternalEntityInputTargets,
 } from '../admit/entity-input-admission.ts';
 
+type EntityInputBatchContext = ReturnType<typeof createRuntimeEntityInputBatchContext>;
+
+const createDeferredProposalBatch = (
+  env: RuntimeReplica,
+  initialFlushIndex: number,
+  options: RuntimeEntityInputApplyOptions,
+  context: EntityInputBatchContext,
+) => {
+  const replicas = new Map<string, { entityId: string; signerId: string }>();
+  const outcomeSlots = new Map<string, number[]>();
+  let flushIndex = initialFlushIndex;
+  const noteStaged = (staged: StagedEntityInput, deferred: boolean): void => {
+    if (staged.result.entityFrameCommitted) {
+      replicas.delete(staged.replicaKey);
+      for (const slot of outcomeSlots.get(staged.replicaKey) ?? []) {
+        context.inputOutcomes[slot]!.entityFrameCommitted = true;
+      }
+      outcomeSlots.delete(staged.replicaKey);
+    }
+    if (!deferred || !isCommittedEntityInput(staged.result.outcome) || staged.result.entityFrameCommitted) return;
+    replicas.set(staged.replicaKey, {
+      entityId: staged.input.entityId,
+      signerId: staged.signerId,
+    });
+    const slot = context.inputOutcomes.findLastIndex(entry => entry.inputIndex === staged.inputIndex);
+    if (slot < 0) return;
+    const slots = outcomeSlots.get(staged.replicaKey) ?? [];
+    slots.push(slot);
+    outcomeSlots.set(staged.replicaKey, slots);
+  };
+  const flush = async (): Promise<void> => {
+    for (const { entityId, signerId } of [...replicas.values()]) {
+      const input: RoutedEntityInput = { entityId, signerId, entityTxs: [] };
+      for (let eviction = 0; ; eviction += 1) {
+        try {
+          const staged = await applyExternalEntityInput(env, input, flushIndex, options, context, false);
+          const appliedIndex = context.appliedEntityInputs.lastIndexOf(staged.result.appliedInput);
+          if (appliedIndex >= 0) context.appliedEntityInputs.splice(appliedIndex, 1);
+          noteStaged(staged, false);
+          break;
+        } catch (error) {
+          // This is deterministic local mempool cleanup, not transport retry:
+          // the exact rejected tx is removed once and the remaining admitted
+          // batch is evaluated. No envelope is resent or silently accepted.
+          const cause = error instanceof RuntimeEntityInputApplyError ? error.cause : undefined;
+          const replica = resolveEntityInputReplica(env, input).replica;
+          if (
+            !(cause instanceof MalformedEntityFrameInputError) ||
+            cause.frameTx === undefined ||
+            !replica.mempool.includes(cause.frameTx as EntityTx) ||
+            eviction >= 8
+          ) throw error;
+          entityInputLog.warn('entity_input.batch_tx_evicted', {
+            entity: entityId,
+            signer: signerId,
+            txType: cause.txType,
+            rejection: cause.rejection,
+          });
+          replica.mempool = replica.mempool.filter(tx => tx !== cause.frameTx);
+        }
+      }
+      flushIndex += 1;
+      await drainImmediateCrossJurisdictionOutputs(env, options, context);
+    }
+    replicas.clear();
+  };
+  return { noteStaged, flush };
+};
+
+const logEntityInputBatchProfile = (
+  env: RuntimeReplica,
+  inputs: readonly RoutedEntityInput[],
+  context: EntityInputBatchContext,
+  elapsedMs: number,
+): void => {
+  if (!entityInputProfileEnabled() && elapsedMs < entityInputSlowMs()) return;
+  entityInputLog.info('inputs.profile', {
+    height: env.state.height,
+    elapsedMs,
+    mergedInputs: inputs.length,
+    appliedInputs: context.appliedEntityInputs.length,
+    outputs: context.entityOutbox.length,
+    jOutputs: context.jOutbox.length,
+    phaseTotals: {
+      externalApply: context.externalApplyMs,
+      immediateCrossJApply: context.immediateCrossJApplyMs,
+      remainder: Math.max(0, elapsedMs - context.externalApplyMs - context.immediateCrossJApplyMs),
+    },
+    slowInputs: context.profiledInputs
+      .sort((left, right) => Number(right['elapsedMs'] || 0) - Number(left['elapsedMs'] || 0))
+      .slice(0, 16),
+  });
+};
+
 /**
  * Runtime composition root for ordered Entity inputs.
  *
@@ -54,79 +148,14 @@ export const applyMergedEntityInputs = async (
   // R → E → A cascade: plain transaction inputs only fill their replica's
   // mempool; each touched replica then proposes once, so a Runtime frame with
   // hundreds of user inputs yields one Entity frame per Entity, not hundreds.
-  const deferredReplicas = new Map<string, { entityId: string; signerId: string }>();
-  // Outcome slots of admissions still waiting for their replica's frame; the
-  // frame that later proposes the mempool commits them, and their outcome
-  // reports `entityFrameCommitted` exactly as an immediate proposal would have.
-  const deferredOutcomeSlots = new Map<string, number[]>();
-  const noteStaged = (staged: StagedEntityInput, deferred: boolean): void => {
-    // Any later frame proposes from the replica mempool, so it carries every
-    // admission deferred before it; only unframed admissions still need a flush.
-    if (staged.result.entityFrameCommitted) {
-      deferredReplicas.delete(staged.replicaKey);
-      for (const slot of deferredOutcomeSlots.get(staged.replicaKey) ?? []) {
-        context.inputOutcomes[slot]!.entityFrameCommitted = true;
-      }
-      deferredOutcomeSlots.delete(staged.replicaKey);
-    }
-    if (deferred && isCommittedEntityInput(staged.result.outcome) && !staged.result.entityFrameCommitted) {
-      deferredReplicas.set(staged.replicaKey, { entityId: staged.input.entityId, signerId: staged.signerId });
-      const slot = context.inputOutcomes.findLastIndex(entry => entry.inputIndex === staged.inputIndex);
-      if (slot >= 0) {
-        const slots = deferredOutcomeSlots.get(staged.replicaKey) ?? [];
-        slots.push(slot);
-        deferredOutcomeSlots.set(staged.replicaKey, slots);
-      }
-    }
-  };
-  let flushIndex = inputs.length;
-  const flushDeferredReplicas = async (): Promise<void> => {
-    for (const { entityId, signerId } of [...deferredReplicas.values()]) {
-      // Deferred admissions are durable in the replica mempool; a malformed or
-      // stale later input for the same replica cannot leave them unproposed.
-      const flush: RoutedEntityInput = { entityId, signerId, entityTxs: [] };
-      for (let attempt = 0; ; attempt += 1) {
-        try {
-          const staged = await applyExternalEntityInput(env, flush, flushIndex, options, context, false);
-          // The flush is Runtime-derived: replay re-derives it from the
-          // recorded external inputs, so it is not part of the applied input.
-          const appliedIndex = context.appliedEntityInputs.lastIndexOf(staged.result.appliedInput);
-          if (appliedIndex >= 0) context.appliedEntityInputs.splice(appliedIndex, 1);
-          noteStaged(staged, false);
-          break;
-        } catch (error) {
-          // The proposer evicts a rejected mempool tx while others remain; the
-          // last remaining rejected tx surfaces here. Drop it the way a lone
-          // malformed remote input was dropped before batching, then re-flush.
-          const cause = error instanceof RuntimeEntityInputApplyError ? error.cause : undefined;
-          const replica = resolveEntityInputReplica(env, flush).replica;
-          if (
-            !(cause instanceof MalformedEntityFrameInputError) ||
-            cause.frameTx === undefined ||
-            !replica.mempool.includes(cause.frameTx as EntityTx) ||
-            attempt >= 8
-          ) throw error;
-          entityInputLog.warn('entity_input.batch_tx_evicted', {
-            entity: entityId,
-            signer: signerId,
-            txType: cause.txType,
-            rejection: cause.rejection,
-          });
-          replica.mempool = replica.mempool.filter(tx => tx !== cause.frameTx);
-        }
-      }
-      flushIndex += 1;
-      await drainImmediateCrossJurisdictionOutputs(env, options, context);
-    }
-    deferredReplicas.clear();
-  };
+  const deferred = createDeferredProposalBatch(env, inputs.length, options, context);
   for (let index = 0; index < inputs.length;) {
     const input = inputs[index]!;
     const next = inputs[index + 1];
     if (atomicPairInputsMatch(input, next)) {
       // A tagged pair must see every earlier admission already framed, exactly
       // as when each input framed on its own.
-      await flushDeferredReplicas();
+      await deferred.flush();
       await applyAtomicEntityInputPair(
         env,
         [input, next],
@@ -138,7 +167,10 @@ export const applyMergedEntityInputs = async (
     } else {
       const deferProposal = isProposalDeferrableEntityInput(input);
       try {
-        noteStaged(await applyExternalEntityInput(env, input, index, options, context, deferProposal), deferProposal);
+        deferred.noteStaged(
+          await applyExternalEntityInput(env, input, index, options, context, deferProposal),
+          deferProposal,
+        );
       } catch (error) {
         if (
           !rejectMalformedEntityInput(
@@ -156,35 +188,9 @@ export const applyMergedEntityInputs = async (
     }
     await drainImmediateCrossJurisdictionOutputs(env, options, context);
   }
-  await flushDeferredReplicas();
+  await deferred.flush();
 
   const elapsedMs = Math.round(getPerfMs() - startedAt);
-  if (entityInputProfileEnabled() || elapsedMs >= entityInputSlowMs()) {
-    entityInputLog.info('inputs.profile', {
-      height: env.state.height,
-      elapsedMs,
-      mergedInputs: inputs.length,
-      appliedInputs: context.appliedEntityInputs.length,
-      outputs: context.entityOutbox.length,
-      jOutputs: context.jOutbox.length,
-      phaseTotals: {
-        externalApply: context.externalApplyMs,
-        immediateCrossJApply: context.immediateCrossJApplyMs,
-        remainder: Math.max(
-          0,
-          elapsedMs -
-            context.externalApplyMs -
-            context.immediateCrossJApplyMs,
-        ),
-      },
-      slowInputs: context.profiledInputs
-        .sort(
-          (left, right) =>
-            Number(right['elapsedMs'] || 0) -
-            Number(left['elapsedMs'] || 0),
-        )
-        .slice(0, 16),
-    });
-  }
+  logEntityInputBatchProfile(env, inputs, context, elapsedMs);
   return context;
 };

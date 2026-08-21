@@ -80,47 +80,49 @@ const resolveLaneHeight = (
   return importingLanes.has(key) ? 0 : null;
 };
 
-/**
- * One R-frame may make at most one new certified Entity height durable per
- * entity+signer lane. Different lanes remain independent. Higher certificates
- * stay in the runtime mempool and are applied only after H is durably saved.
- */
-export const applyEntityHeightDurabilityBarrier = (
-  env: RuntimeReplica,
-  runtimeInput: RuntimeInput,
-  mempool: RuntimeInput,
-  queuedAt: number,
-): number => {
-  const importingLanes = importingReplicaLanes(runtimeInput.runtimeTxs);
-  const laneState = new Map<string, { currentHeight: number; firstFutureHeight: number }>();
+type LaneDurabilityState = Readonly<{
+  currentHeight: number;
+  firstFutureHeight: number;
+}>;
 
-  for (const input of runtimeInput.entityInputs) {
-    const key = laneKey(input);
+const collectLaneDurabilityState = (
+  env: RuntimeReplica,
+  input: RuntimeInput,
+  importingLanes: ReadonlySet<string>,
+): Map<string, LaneDurabilityState> => {
+  const lanes = new Map<string, LaneDurabilityState>();
+  for (const entityInput of input.entityInputs) {
+    const key = laneKey(entityInput);
     if (!key) continue;
     const currentHeight = resolveLaneHeight(env, key, importingLanes);
     if (currentHeight === null) continue;
-    const candidateHeight = possibleCommittedHeight(input, currentHeight);
+    const candidateHeight = possibleCommittedHeight(entityInput, currentHeight);
     if (candidateHeight === null || candidateHeight <= currentHeight) continue;
-    const prior = laneState.get(key);
+    const prior = lanes.get(key);
     if (!prior || candidateHeight < prior.firstFutureHeight) {
-      laneState.set(key, { currentHeight, firstFutureHeight: candidateHeight });
+      lanes.set(key, { currentHeight, firstFutureHeight: candidateHeight });
     }
   }
+  return lanes;
+};
 
-  if (laneState.size === 0) return 0;
-  const certificateLanes = new Set<string>();
-  for (const input of runtimeInput.entityInputs) {
+const collectCertificateLanes = (inputs: readonly RoutedEntityInput[]): Set<string> => {
+  const lanes = new Set<string>();
+  for (const input of inputs) {
     const key = laneKey(input);
-    if (key && carriesHeightCertificate(input)) certificateLanes.add(key);
+    if (key && carriesHeightCertificate(input)) lanes.add(key);
   }
-  // Walk in arrival order. On lanes that carry a height certificate keep the
-  // first H+1 merge group so same-`from` txs can still collapse, then defer the
-  // tail; a later same-key tx after a distinct loopback must not jump ahead of
-  // that deferred work. Plain-input lanes only defer future heights.
+  return lanes;
+};
+
+const createCommitBlocker = (
+  laneState: ReadonlyMap<string, LaneDurabilityState>,
+  certificateLanes: ReadonlySet<string>,
+): ((input: RoutedEntityInput) => boolean) => {
   const acceptedMergeKeyByLane = new Map<string, string>();
   const acceptedScheduledWakeByLane = new Map<string, string>();
   const closedLanes = new Set<string>();
-  const commitBlocked = (input: RoutedEntityInput): boolean => {
+  return input => {
     const key = laneKey(input);
     const state = key ? laneState.get(key) : undefined;
     if (!key || !state) return false;
@@ -137,41 +139,34 @@ export const applyEntityHeightDurabilityBarrier = (
       if (scheduledWakeKey) acceptedScheduledWakeByLane.set(key, scheduledWakeKey);
       return false;
     }
-    if (mergeKey !== accepted && !certificateLanes.has(key)) {
-      // A distinct origin on a plain lane commits its own following height;
-      // it does not merge with the accepted group, so no wake conflict arises.
-      return false;
-    }
+    if (mergeKey !== accepted && !certificateLanes.has(key)) return false;
     if (mergeKey === accepted) {
       const acceptedWake = acceptedScheduledWakeByLane.get(key);
       if (scheduledWakeKey && acceptedWake && scheduledWakeKey !== acceptedWake) {
-        // Scheduler payloads are state-derived snapshots. Merging two distinct
-        // snapshots would create an invalid Entity frame with two wake txs.
-        // Preserve the first frame and retry the later snapshot after its
-        // predecessor is durable; ordinary same-origin commands may still
-        // merge beside the unique wake, which is ordered first by Entity.
         closedLanes.add(key);
         return true;
       }
-      if (scheduledWakeKey && !acceptedWake) {
-        acceptedScheduledWakeByLane.set(key, scheduledWakeKey);
-      }
+      if (scheduledWakeKey && !acceptedWake) acceptedScheduledWakeByLane.set(key, scheduledWakeKey);
       return false;
     }
     closedLanes.add(key);
     return true;
   };
-  const heightBlocked = runtimeInput.entityInputs.map(input => commitBlocked(input));
+};
+
+const partitionDurableEntityInputs = (
+  inputs: readonly RoutedEntityInput[],
+  heightBlocked: readonly boolean[],
+): { selected: RoutedEntityInput[]; deferred: RoutedEntityInput[] } => {
   const blockedAtomicCohorts = new Set<string>();
-  runtimeInput.entityInputs.forEach((input, index) => {
+  inputs.forEach((input, index) => {
     if (!heightBlocked[index]) return;
     const cohortKey = atomicCrossJInputCohortKey(input);
     if (cohortKey) blockedAtomicCohorts.add(cohortKey);
   });
-
   const selected: RoutedEntityInput[] = [];
   const deferred: RoutedEntityInput[] = [];
-  runtimeInput.entityInputs.forEach((input, index) => {
+  inputs.forEach((input, index) => {
     const cohortKey = atomicCrossJInputCohortKey(input);
     if (heightBlocked[index] || (cohortKey !== null && blockedAtomicCohorts.has(cohortKey))) {
       deferred.push(input);
@@ -179,6 +174,30 @@ export const applyEntityHeightDurabilityBarrier = (
       selected.push(input);
     }
   });
+  return { selected, deferred };
+};
+
+/**
+ * One R-frame may make at most one new certified Entity height durable per
+ * entity+signer lane. Different lanes remain independent. Higher certificates
+ * stay in the runtime mempool and are applied only after H is durably saved.
+ */
+export const applyEntityHeightDurabilityBarrier = (
+  env: RuntimeReplica,
+  runtimeInput: RuntimeInput,
+  mempool: RuntimeInput,
+  queuedAt: number,
+): number => {
+  const importingLanes = importingReplicaLanes(runtimeInput.runtimeTxs);
+  const laneState = collectLaneDurabilityState(env, runtimeInput, importingLanes);
+  if (laneState.size === 0) return 0;
+  // Walk in arrival order. On lanes that carry a height certificate keep the
+  // first H+1 merge group so same-`from` txs can still collapse, then defer the
+  // tail; a later same-key tx after a distinct loopback must not jump ahead of
+  // that deferred work. Plain-input lanes only defer future heights.
+  const commitBlocked = createCommitBlocker(laneState, collectCertificateLanes(runtimeInput.entityInputs));
+  const heightBlocked = runtimeInput.entityInputs.map(input => commitBlocked(input));
+  const { selected, deferred } = partitionDurableEntityInputs(runtimeInput.entityInputs, heightBlocked);
 
   if (deferred.length === 0) return 0;
   runtimeInput.entityInputs = selected;

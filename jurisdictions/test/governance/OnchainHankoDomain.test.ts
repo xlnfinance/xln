@@ -34,7 +34,7 @@ import {
   hashReleaseControlSharesHankoPayload,
   hashWatchtowerCounterDisputeHankoPayload,
 } from '../../../core/hanko/onchain-domain.ts';
-import type { EntityProvider } from '../../typechain-types/contracts/EntityProvider.ts';
+import type { EntityProvider } from '../../typechain-types/EntityProvider.ts';
 import {
   buildSingleSignerHanko,
   deriveHardhatPrivateKey,

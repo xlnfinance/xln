@@ -95,6 +95,26 @@ const waitForOfferedRate = async (
   if (remaining > 0) await Bun.sleep(remaining);
 };
 
+const assertReplayTerminalEquivalent = (finalHeight: number): true => {
+  if (finalHeight !== artifact.recording.targetHeight) {
+    throw new Error(
+      `HLT_REPLAY_TERMINAL_HEIGHT_MISMATCH:` +
+      `${artifact.recording.targetHeight}:${finalHeight}`,
+    );
+  }
+  const finalFrame = frames.at(-1);
+  if (!finalFrame || finalFrame.height !== finalHeight) {
+    throw new Error(
+      `HLT_REPLAY_TERMINAL_FRAME_MISMATCH:` +
+      `${finalHeight}:${String(finalFrame?.height ?? 'missing')}`,
+    );
+  }
+  // replayRecoveryFrameJournals already fails each frame on postStateHash,
+  // Runtime-machine state and exact ordered outbox refs. Reaching this terminal
+  // boundary proves the complete Build recording, not merely equal counters.
+  return true;
+};
+
 const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
   const env = await restoreEnvFromRecoveryBundles([snapshot as RuntimeRecoveryBundleV1], {
     runtimeSeed,
@@ -129,7 +149,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
       cpuAccountTxTps: artifact.totals.accountTxs / cpuSeconds,
       finalHeight: env.state.height,
       finalPendingOutbox: env.pendingNetworkOutputs?.length ?? 0,
-      equivalent: true,
+      equivalent: assertReplayTerminalEquivalent(env.state.height),
     };
   } finally {
     await closeRuntimeDb(env);

@@ -656,12 +656,6 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
       collateral: 0n,
     })),
   };
-  account.disputeProofBodiesByHash = {
-    [`0x${'aa'.repeat(32)}`]: { proof: 'p'.repeat(100_000) },
-  };
-  account.disputeArgumentSnapshotsByHash = {
-    [`0x${'bb'.repeat(32)}`]: { args: 'a'.repeat(100_000) },
-  };
   account.state.settlementWorkspace = { notes: 'w'.repeat(100_000) };
   account.swapOrderHistory = new Map([['history', { note: 'h'.repeat(100_000), resolves: [] }]]);
   account.swapClosedOrders = new Map([['closed', { note: 'c'.repeat(100_000), resolves: [] }]]);
@@ -715,8 +709,6 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     watchSeed: string;
     mempool: unknown[];
     currentFrame: { accountTxs: unknown[]; deltas: unknown[] };
-    disputeProofBodiesByHash?: unknown;
-    disputeArgumentSnapshotsByHash?: unknown;
     settlementWorkspace?: unknown;
     swapOffers: Map<string, { offerId: string }>;
     swapOrderHistory?: unknown;
@@ -767,8 +759,6 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     expect(doc.mempool).toHaveLength(0);
     expect(doc.currentFrame.accountTxs.length).toBeLessThanOrEqual(20);
     expect(doc.currentFrame.deltas.length).toBeLessThanOrEqual(100);
-    expect(doc.disputeProofBodiesByHash).toBeUndefined();
-    expect(doc.disputeArgumentSnapshotsByHash).toBeUndefined();
     expect(doc.state.settlementWorkspace).toBeUndefined();
     expect(doc.state.swapOffers.size).toBe(100);
     expect(doc.state.swapOffers.has('offer-0')).toBe(false);

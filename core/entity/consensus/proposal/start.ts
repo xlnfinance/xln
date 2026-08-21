@@ -305,30 +305,25 @@ const storeCandidate = (
   return replica.candidate;
 };
 
-/**
- * Build the next Entity frame from the selected mempool txs: fit to wire,
- * apply, hash, sign own manifest. Same for every board size; a single-signer
- * board additionally seals its own quorum hankos here since no precommit
- * round follows.
- */
-const buildEntityProposal = async (
+type PreparedEntityProposal = Readonly<{
+  txs: EntityTx[];
+  entityContext: EntityFrame['entityContext'];
+  applied: Awaited<ReturnType<typeof applyEntityFrame>>;
+  leader: ReturnType<typeof getReplicaProposalLeader>;
+  jPrefixCertificate: EntityFrame['jPrefixCertificate'] | undefined;
+}>;
+
+const fitAndApplyEntityProposal = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
   profile: ProposalProfile,
-): Promise<EntityFrame | null> => {
+): Promise<PreparedEntityProposal | null> => {
   const { env, workingReplica } = context;
   const { proposalJPrefixCertificate, proposalTxs } = selection;
-  const authorityConfig = getEntityFrameConsensusConfig(
-    env,
-    workingReplica.state,
-    proposalTxs,
-  );
+  const authorityConfig = getEntityFrameConsensusConfig(env, workingReplica.state, proposalTxs);
   const authorityReplica = authorityConfig === workingReplica.state.config
     ? workingReplica
-    : {
-        ...workingReplica,
-        state: withBoardAuthority(workingReplica.state, authorityConfig),
-      };
+    : { ...workingReplica, state: withBoardAuthority(workingReplica.state, authorityConfig) };
   const leader = getReplicaProposalLeader(authorityReplica);
   assertProposalPrefix(env, authorityReplica, selection, leader.view);
   const fitted = await fitEntityProposalToWireBudget({
@@ -338,21 +333,13 @@ const buildEntityProposal = async (
     jPrefixCertificate: proposalJPrefixCertificate ?? undefined,
     usePersistedReplayContext: context.usePersistedReplayContext,
   });
-  if (fitted.txs.length !== selection.proposalTxs.length) {
-    selection.proposalTxs = fitted.txs;
-  }
-  const txs = selection.proposalTxs;
-  const entityContext = fitted.entityContext;
+  if (fitted.txs.length !== selection.proposalTxs.length) selection.proposalTxs = fitted.txs;
   profile.checkpoint('wireFit');
-  // A context this proposer just materialized from these exact txs is by
-  // construction what the replay would derive; re-deriving ~1300 HTLC entries
-  // per Hub frame was pure cost. A WAL-replayed context is foreign data and is
-  // still checked against the stored txs.
   if (fitted.replayed) {
     await timePerfPhase('entity.proposal.assertHtlc', () => assertHtlcPreparedInfraContext({
       state: workingReplica.state,
-      proposalTxs: txs,
-      context: entityContext,
+      proposalTxs: selection.proposalTxs,
+      context: fitted.entityContext,
       entityEncryptionPrivateKey: requireEntityEncryptionPrivateKey(env, workingReplica.entityId),
     }));
   }
@@ -362,15 +349,30 @@ const buildEntityProposal = async (
   const applied = await applyFrame(
     env,
     workingReplica.state,
-    entityContext,
-    txs,
+    fitted.entityContext,
+    selection.proposalTxs,
     env.state.timestamp,
     !fitted.replayed,
   );
   profile.checkpoint('frameApply');
-  if (!shouldKeepPreparedEntityFrame(selection, applied.accountsToProposeFramesCount)) {
-    return null;
-  }
+  if (!shouldKeepPreparedEntityFrame(selection, applied.accountsToProposeFramesCount)) return null;
+  return {
+    txs: selection.proposalTxs,
+    entityContext: fitted.entityContext,
+    applied,
+    leader,
+    jPrefixCertificate: proposalJPrefixCertificate ?? undefined,
+  };
+};
+
+const sealEntityProposal = async (
+  context: ApplyEntityInputContext,
+  selection: EntityProposalSelection,
+  prepared: PreparedEntityProposal,
+  profile: ProposalProfile,
+): Promise<EntityFrame> => {
+  const { env, workingReplica } = context;
+  const { txs, entityContext, applied, leader, jPrefixCertificate } = prepared;
   const height = workingReplica.state.height + 1;
   const timestamp = env.state.timestamp;
   const state = buildProposalState(env, workingReplica, applied.newState, txs, height, timestamp, leader.view);
@@ -379,16 +381,8 @@ const buildEntityProposal = async (
   const authority = buildEntityFrameAuthority(state);
   const authorityRoot = computeEntityFrameAuthorityRoot(authority);
   const frameHash = createEntityFrameHashFromStateRoot(
-    parentFrameHash,
-    height,
-    timestamp,
-    txs,
-    applied.events,
-    state.entityId,
-    stateRoot,
-    authorityRoot,
-    entityContext,
-    proposalJPrefixCertificate ?? undefined,
+    parentFrameHash, height, timestamp, txs, applied.events, state.entityId,
+    stateRoot, authorityRoot, entityContext, jPrefixCertificate,
   );
   const outputHashes = buildCertifiedEntityOutputHashes(state, env, height, frameHash, applied.outputs);
   const hashesToSign = buildEntityHashesToSign(
@@ -404,22 +398,14 @@ const buildEntityProposal = async (
   };
   const sealedContext = selection.isSingleSigner ? 'SingleSignerEntityFrame' : 'MultiSignerEntityFrame';
   assertEstimatedSealedEntityFrameWire({
-    height,
-    parentFrameHash,
-    stateRoot,
-    authorityRoot,
-    entityContext,
-    txs: [...txs],
-    events: applied.events,
-    hash: frameHash,
-    timestamp,
+    height, parentFrameHash, stateRoot, authorityRoot, entityContext,
+    txs: [...txs], events: applied.events, hash: frameHash, timestamp,
     leader: leaderBody,
-    ...(proposalJPrefixCertificate ? { jPrefixCertificate: proposalJPrefixCertificate } : {}),
+    ...(jPrefixCertificate ? { jPrefixCertificate } : {}),
     hashesToSign,
   }, workingReplica.signerId, selection.isSingleSigner, sealedContext);
   profile.checkpoint('commitments');
   const selfSigs = await signProposalManifest(env, workingReplica, state, hashesToSign);
-  // A single signer is its own quorum: seal the hankos now, no precommits.
   const hankos = selection.isSingleSigner
     ? await signEntityHashes(
         env,
@@ -431,29 +417,33 @@ const buildEntityProposal = async (
     : undefined;
   profile.checkpoint('signatures');
   const frame: EntityFrame = {
-    height,
-    parentFrameHash,
-    stateRoot,
-    authorityRoot,
-    entityContext,
-    txs: [...txs],
-    events: structuredClone(applied.events),
-    hash: frameHash,
-    timestamp,
+    height, parentFrameHash, stateRoot, authorityRoot, entityContext,
+    txs: [...txs], events: structuredClone(applied.events), hash: frameHash, timestamp,
     leader: leaderBody,
-    ...(proposalJPrefixCertificate ? { jPrefixCertificate: structuredClone(proposalJPrefixCertificate) } : {}),
+    ...(jPrefixCertificate ? { jPrefixCertificate: structuredClone(jPrefixCertificate) } : {}),
     hashesToSign,
     collectedSigs: new Map([[workingReplica.signerId.toLowerCase(), selfSigs]]),
     ...(hankos ? { hankos } : {}),
   };
-  // Sealed bytes (events + hashesToSign + sigs + hankos) are known only after
-  // apply/sign. Fit measured empty events, so this gate must run before the
-  // candidate is stored: overflow defers the tail instead of leaving a doomed
-  // replica.candidate from the oversized attempt.
   validateProposedEntityFrame(frame, sealedContext);
   recordEntityWireBudgetFitHint(env, workingReplica, frame.txs.length);
   storeCandidate(workingReplica, applied, state, frameHash, hashesToSign, authority);
   return frame;
+};
+
+/**
+ * Build the next Entity frame from the selected mempool txs: fit to wire,
+ * apply, hash, sign own manifest. Same for every board size; a single-signer
+ * board additionally seals its own quorum hankos here since no precommit
+ * round follows.
+ */
+const buildEntityProposal = async (
+  context: ApplyEntityInputContext,
+  selection: EntityProposalSelection,
+  profile: ProposalProfile,
+): Promise<EntityFrame | null> => {
+  const prepared = await fitAndApplyEntityProposal(context, selection, profile);
+  return prepared ? sealEntityProposal(context, selection, prepared, profile) : null;
 };
 
 const isFrameByteLimitError = (error: unknown): boolean => {
