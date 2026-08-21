@@ -68,6 +68,8 @@ const accountInputSlowMs = (): number => {
     : ACCOUNT_INPUT_SLOW_MS;
 };
 
+const precisePerfMs = (value: number): number => Math.round(value * 1_000) / 1_000;
+
 const createCommittedAccountEffects = (): CommittedAccountEffects => ({
   outputs: [],
   accountTxs: [],
@@ -170,7 +172,7 @@ const logAccountInputProfile = (
   startedAt: number,
   marks: Record<string, number>,
 ): void => {
-  const elapsedMs = Math.round(getPerfMs() - startedAt);
+  const elapsedMs = precisePerfMs(getPerfMs() - startedAt);
   if (!accountInputProfileEnabled() && elapsedMs < accountInputSlowMs()) return;
   accountHandlerLog.info('input.profile', {
     entity: shortId(state.entityId, 8),
@@ -194,7 +196,7 @@ export async function applyAccountInputToEntity(
   const startedAt = getPerfMs();
   const marks: Record<string, number> = {};
   const checkpoint = (label: string): void => {
-    marks[label] = Math.round(getPerfMs() - startedAt);
+    marks[label] = precisePerfMs(getPerfMs() - startedAt);
   };
   let outcome = 'returned';
   try {

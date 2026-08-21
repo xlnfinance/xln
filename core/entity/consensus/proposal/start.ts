@@ -377,20 +377,26 @@ const sealEntityProposal = async (
   const timestamp = env.state.timestamp;
   const state = buildProposalState(env, workingReplica, applied.newState, txs, height, timestamp, leader.view);
   const parentFrameHash = getPrevFrameHash(workingReplica.state);
+  profile.checkpoint('proposalState');
   const stateRoot = computeCanonicalEntityConsensusStateHash(state);
+  profile.checkpoint('stateRoot');
   const authority = buildEntityFrameAuthority(state);
   const authorityRoot = computeEntityFrameAuthorityRoot(authority);
+  profile.checkpoint('authorityRoot');
   const frameHash = createEntityFrameHashFromStateRoot(
     parentFrameHash, height, timestamp, txs, applied.events, state.entityId,
     stateRoot, authorityRoot, entityContext, jPrefixCertificate,
   );
+  profile.checkpoint('frameHash');
   const outputHashes = buildCertifiedEntityOutputHashes(state, env, height, frameHash, applied.outputs);
+  profile.checkpoint('outputHashes');
   const hashesToSign = buildEntityHashesToSign(
     workingReplica.state.entityId,
     height,
     frameHash,
     [...(applied.collectedHashes ?? []), ...outputHashes],
   );
+  profile.checkpoint('hashManifest');
   const leaderBody = {
     proposerSignerId: workingReplica.signerId.toLowerCase(),
     view: leader.view,
@@ -404,8 +410,9 @@ const sealEntityProposal = async (
     ...(jPrefixCertificate ? { jPrefixCertificate } : {}),
     hashesToSign,
   }, workingReplica.signerId, selection.isSingleSigner, sealedContext);
-  profile.checkpoint('commitments');
+  profile.checkpoint('wireEstimate');
   const selfSigs = await signProposalManifest(env, workingReplica, state, hashesToSign);
+  profile.checkpoint('manifestSignatures');
   const hankos = selection.isSingleSigner
     ? await signEntityHashes(
         env,
@@ -415,7 +422,7 @@ const sealEntityProposal = async (
         state,
       )
     : undefined;
-  profile.checkpoint('signatures');
+  profile.checkpoint('hankoEncoding');
   const frame: EntityFrame = {
     height, parentFrameHash, stateRoot, authorityRoot, entityContext,
     txs: [...txs], events: structuredClone(applied.events), hash: frameHash, timestamp,
