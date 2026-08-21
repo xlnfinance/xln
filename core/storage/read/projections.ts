@@ -15,7 +15,7 @@ export {
 } from './hydration';
 
 /** Storage codecs accept boundary-native maps, never live overlay containers. */
-export const projectStorageMap = <Key, Value>(source: ReadonlyMap<Key, Value>): Map<Key, Value> =>
+const projectStorageMap = <Key, Value>(source: ReadonlyMap<Key, Value>): Map<Key, Value> =>
   new Map(source.entries());
 
 const projectCrossJurisdictionRoutes = (

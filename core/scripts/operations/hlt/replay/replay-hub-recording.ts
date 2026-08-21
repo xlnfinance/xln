@@ -5,6 +5,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { deriveSignerAddressSync, prewarmSignerLabels } from '../../../../account/crypto';
 import { deriveMeshChildSeed } from '../../../../orchestrator/mesh/mesh-seeds';
 import { safeStringify } from '../../../../protocol/serialization';
 import {
@@ -79,6 +80,33 @@ const meshRootSeed = readFileSync(seedPath, 'utf8').trim();
 if (!meshRootSeed) throw new Error('HLT_REPLAY_MESH_ROOT_SEED_MISSING');
 const runtimeSeed = deriveMeshChildSeed(meshRootSeed, 'runtime:h1');
 
+const prewarmRecordedHubSigners = (
+  env: Awaited<ReturnType<typeof restoreEnvFromRecoveryBundles>>,
+): void => {
+  const requiredSignerIds = new Set(
+    Array.from(env.state.eReplicas.values(), replica => replica.signerId.toLowerCase()),
+  );
+  const baseLabel = 'h1-hub';
+  const candidateLabels = [
+    baseLabel,
+    ...Array.from(env.state.jReplicas.keys(), jurisdiction => `${baseLabel}:${jurisdiction}`),
+  ];
+  const matchedLabels = candidateLabels.filter(label =>
+    requiredSignerIds.has(deriveSignerAddressSync(runtimeSeed, label).toLowerCase()),
+  );
+  const matchedSignerIds = new Set(
+    matchedLabels.map(label => deriveSignerAddressSync(runtimeSeed, label).toLowerCase()),
+  );
+  const missingSignerIds = Array.from(requiredSignerIds).filter(id => !matchedSignerIds.has(id));
+  if (missingSignerIds.length > 0) {
+    throw new Error(`HLT_REPLAY_LOCAL_SIGNER_UNRESOLVED:${missingSignerIds.join(',')}`);
+  }
+  // Replay owns the same sovereign H1 seed as Build. Recover keys only after
+  // proving that every derived label binds to an exact checkpoint replica;
+  // never persist private keys or guess an unrelated signer during recovery.
+  prewarmSignerLabels(runtimeSeed, matchedLabels);
+};
+
 const frameUnits = (frame: PersistedFrameJournal): number => {
   const totals = summarizeHltHubFrames([frame]);
   return totals.accountTxs > 0 ? totals.accountTxs : totals.accountInputs;
@@ -122,6 +150,7 @@ const runTrial = async (offeredTps: number): Promise<ReplayTrial> => {
     targetHeight: artifact.recording.baseHeight,
     readOnly: true,
   });
+  prewarmRecordedHubSigners(env);
   const startedAt = performance.now();
   const cpuStarted = process.cpuUsage();
   let cumulativeUnits = 0;

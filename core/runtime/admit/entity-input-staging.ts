@@ -144,7 +144,13 @@ export const stageExternalEntityInput = async (
     );
   }
   const { signerId, replicaKey, replica } = resolved;
-  options.beforeEntityApply?.(input.entityId);
+  // A deferred input can only append transactions to the isolated Entity
+  // mempool; by contract it cannot publish an Entity frame. Refreshing the
+  // certified checkpoint lineage here used to hash the complete Hub Entity
+  // once per AccountInput (3059 times in a 37-R-frame HLT tail). The batch's
+  // single non-deferred flush performs the one required refresh immediately
+  // before the actual E-frame transition.
+  if (!deferProposal) options.beforeEntityApply?.(input.entityId);
   const result = await applyEntityInputToReplica(
     env,
     replica,

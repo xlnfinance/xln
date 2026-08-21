@@ -33,30 +33,28 @@ import {
 } from '../../entity/account/account-j-claim-node-store';
 import { assertRuntimeInputCapabilitiesAuthorized } from '../../runtime/tx/internal-tx-auth';
 import { decodeRuntimeConfig } from './runtime-machine-schema';
-import { projectPortableAccountDoc, projectStorageMap } from '../read/projections';
+import {
+  projectEntityCoreDoc,
+  projectPortableAccountDoc,
+} from '../read/projections';
+import { projectPortableBook } from '../schema/book/portable';
 
 const projectPortableEntityState = (state: EntityState): Record<string, unknown> => {
   const accounts = new Map<string, ReturnType<typeof projectPortableAccountDoc>>();
   for (const [counterpartyId, account] of state.accounts) {
     accounts.set(counterpartyId, projectPortableAccountDoc(account));
   }
+  const books = new Map<string, ReturnType<typeof projectPortableBook>>();
+  for (const [pairId, book] of state.orderbookExt?.books ?? []) {
+    books.set(pairId, projectPortableBook(state.entityId, pairId, book));
+  }
   return {
-    ...state,
+    // Portable recovery is a storage graph, not a shallow EntityState clone.
+    // Keeping this exact core/accounts/books split makes every custom Patricia
+    // container cross one explicit codec and prevents private-field `{}` loss.
+    core: projectEntityCoreDoc(state),
     accounts,
-    htlcRoutes: projectStorageMap(state.htlcRoutes),
-    lockBook: projectStorageMap(state.lockBook),
-    ...(state.crossJurisdictionSwaps
-      ? { crossJurisdictionSwaps: projectStorageMap(state.crossJurisdictionSwaps) }
-      : {}),
-    ...(state.crossJurisdictionAuthorizations
-      ? { crossJurisdictionAuthorizations: projectStorageMap(state.crossJurisdictionAuthorizations) }
-      : {}),
-    ...(state.pendingCrossJurisdictionFillAcks
-      ? { pendingCrossJurisdictionFillAcks: projectStorageMap(state.pendingCrossJurisdictionFillAcks) }
-      : {}),
-    ...(state.crossJurisdictionBookAdmissions
-      ? { crossJurisdictionBookAdmissions: projectStorageMap(state.crossJurisdictionBookAdmissions) }
-      : {}),
+    books,
   };
 };
 

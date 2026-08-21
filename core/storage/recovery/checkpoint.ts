@@ -18,10 +18,20 @@ import { validateJReplicas } from '../wal/runtime-machine-schema/j';
 import { assertCrossJLocalCohorts } from '../../runtime/delivery/topology/cross-j-topology';
 import { restoreAndAssertLocalEntityCryptoKeys } from './machine';
 import type { EntityState } from '../../entity/types';
-import { computeEntityAccountValueHash } from '../../entity/consensus/state-root';
-import { PersistentEntityAccountMap } from '../../entity/state/persistent-account-map';
-import { PersistentEntityCollectionMap } from '../../entity/state/persistent-collection-map';
-import { hydrateAccountDocFromStorage } from '../read/projections';
+import type { StorageAccountDoc, StorageEntityCoreDoc } from '../types';
+import { hydrateEntityStateFromStorage } from '../read/projections';
+import {
+  assertStorageAccountDocBinding,
+  assertStorageEntityDocBinding,
+  validateStorageAccountDocValue,
+  validateStorageEntityCoreDocValue,
+} from '../schema/schema-state-docs';
+import { decodePortableBook } from '../schema/book/portable';
+import {
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+  requireStorageMap,
+} from '../schema/schema-primitives';
 
 type RuntimeModule = typeof import('../../runtime');
 
@@ -40,31 +50,40 @@ export type DecodedCheckpointSnapshot = {
   gossipProfiles: Profile[];
 };
 
-const hydrateCheckpointEntityState = (state: EntityState): EntityState => ({
-  ...state,
-  accounts: PersistentEntityAccountMap.fromEntries(
-    Array.from(state.accounts, ([counterpartyId, account]) => [
-      counterpartyId,
-      hydrateAccountDocFromStorage(account),
-    ] as const),
-    state.entityId,
-    computeEntityAccountValueHash,
-  ),
-  htlcRoutes: PersistentEntityCollectionMap.from(state.htlcRoutes),
-  lockBook: PersistentEntityCollectionMap.from(state.lockBook),
-  ...(state.crossJurisdictionSwaps
-    ? { crossJurisdictionSwaps: PersistentEntityCollectionMap.from(state.crossJurisdictionSwaps) }
-    : {}),
-  ...(state.crossJurisdictionAuthorizations
-    ? { crossJurisdictionAuthorizations: PersistentEntityCollectionMap.from(state.crossJurisdictionAuthorizations) }
-    : {}),
-  ...(state.pendingCrossJurisdictionFillAcks
-    ? { pendingCrossJurisdictionFillAcks: PersistentEntityCollectionMap.from(state.pendingCrossJurisdictionFillAcks) }
-    : {}),
-  ...(state.crossJurisdictionBookAdmissions
-    ? { crossJurisdictionBookAdmissions: PersistentEntityCollectionMap.from(state.crossJurisdictionBookAdmissions) }
-    : {}),
-});
+const hydrateCheckpointEntityState = (value: unknown, context: string): EntityState => {
+  const portable = requireBoundaryRecord(value, context);
+  requireExactBoundaryKeys(portable, ['core', 'accounts', 'books'], [], `${context}_FIELDS`);
+  const core = validateStorageEntityCoreDocValue(portable['core']);
+  const accounts = new Map<string, StorageAccountDoc>();
+  for (const [rawCounterpartyId, rawAccount] of requireStorageMap(
+    portable['accounts'],
+    `${context}_ACCOUNTS`,
+  )) {
+    if (typeof rawCounterpartyId !== 'string') throw new Error(`${context}_ACCOUNT_KEY`);
+    const account = validateStorageAccountDocValue(rawAccount);
+    accounts.set(rawCounterpartyId, assertStorageAccountDocBinding(
+      account,
+      core.entityId,
+      rawCounterpartyId,
+      context,
+    ));
+  }
+  const books = new Map<string, ReturnType<typeof decodePortableBook>>();
+  for (const [rawPairId, rawBook] of requireStorageMap(portable['books'], `${context}_BOOKS`)) {
+    if (typeof rawPairId !== 'string' || rawPairId.length === 0) throw new Error(`${context}_BOOK_KEY`);
+    books.set(rawPairId, decodePortableBook(
+      rawBook,
+      core.entityId,
+      rawPairId,
+      `${context}_BOOK_${rawPairId}`,
+    ));
+  }
+  return hydrateEntityStateFromStorage({
+    core: assertStorageEntityDocBinding(core as StorageEntityCoreDoc, core.entityId, context),
+    accounts,
+    books,
+  });
+};
 
 const requireCheckpointEntries = (
   raw: unknown,
@@ -118,8 +137,12 @@ const restoreCheckpointState = (env: RuntimeReplica, snapshot: Record<string, un
   restoreDurableRuntimeSnapshot(env, validatedRuntimeMachine);
   env.state.eReplicas = new Map();
   for (const [index, [key, replica]] of entityEntries.entries()) {
-    const validated = validateEntityReplica(replica, `RecoveryCheckpoint.EntityReplica[${index}]`);
-    validated.state = hydrateCheckpointEntityState(validated.state);
+    const context = `RecoveryCheckpoint.EntityReplica[${index}]`;
+    const rawReplica = requireBoundaryRecord(replica, context);
+    const validated = validateEntityReplica({
+      ...rawReplica,
+      state: hydrateCheckpointEntityState(rawReplica['state'], `${context}.state`),
+    }, context);
     env.state.eReplicas.set(key, validated);
   }
   env.state.jReplicas = new Map();

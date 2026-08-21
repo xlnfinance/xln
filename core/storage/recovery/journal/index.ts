@@ -122,6 +122,11 @@ const replayOneFrame = async (
   frame: PersistedFrameJournal,
   height: number,
 ): Promise<void> => {
+  // Reaching a later committed frame proves that the preceding frame crossed
+  // its synchronous post-WAL dispatch boundary. Keep only this frame's outbox
+  // after verification so a crash at the replay tip can redeliver it; carrying
+  // older outputs forward would duplicate already accepted AccountInputs.
+  env.pendingNetworkOutputs = [];
   env.state.timestamp = requireBoundaryInteger(
     frame.timestamp,
     `RECOVERY_JOURNAL_TIMESTAMP_INVALID:height=${height}`,
