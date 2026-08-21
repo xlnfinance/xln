@@ -57,6 +57,7 @@ import {
   buildParallelLaneOfferPlan,
 } from '../../../scripts/operations/hlt/workload/worker-same-plan';
 import {
+  assertOpenLoopOfferBudget,
   buildLaneRoundOfferInputs,
   resolveLoadBatchRounds,
 } from '../../../scripts/operations/hlt/workload/worker-same-lanes';
@@ -326,6 +327,13 @@ describe('production swap load evidence', () => {
     expect(batches.every(batch => batch.length >= 1 && batch.length <= 3)).toBe(true);
     expect(batches.every(batch => batch.some(round => round % 2 === 0))).toBe(true);
     expect(batches.flat()).toEqual(Array.from({ length: 40 }, (_, round) => round));
+  });
+
+  test('open-loop load scales with users before it can exceed the production Account offer bound', () => {
+    expect(() => assertOpenLoopOfferBudget(20)).not.toThrow();
+    expect(() => assertOpenLoopOfferBudget(21)).toThrow(
+      'HLT_OPEN_LOOP_OFFER_CAP_EXCEEDED:perAccount=21:cap=20:increase-users-or-split-settled-windows',
+    );
   });
 
   test('same-j submitter can fold extra EntityTxs into the round command', () => {

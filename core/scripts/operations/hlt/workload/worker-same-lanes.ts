@@ -2,6 +2,7 @@
 
 import type { RuntimeInput } from '../../../../runtime/types';
 import type { EntityTx } from '../../../../types/entity-tx';
+import { LIMITS } from '../../../../config/constants';
 import type { LoadBookSnapshot } from '../boundary/worker-book-boundary';
 import type { LoadIdentity } from '../boundary/worker-boundary';
 import { setupParallelLoadLanes } from '../lanes/worker-lanes';
@@ -89,6 +90,24 @@ export const resolveLoadBatchRounds = (
     : Math.min(actionsPerFrame, remainingRounds);
 };
 
+/**
+ * Open-loop HLT cannot assume that an earlier order settled before the last
+ * wave was admitted. Keep each sovereign Account inside the production
+ * dispute-proof bound; scale throughput with more users, never by silently
+ * manufacturing offers that Account consensus must reject.
+ */
+export const assertOpenLoopOfferBudget = (offersPerAccount: number): void => {
+  if (!Number.isSafeInteger(offersPerAccount) || offersPerAccount < 1) {
+    throw new Error(`HLT_OPEN_LOOP_OFFERS_PER_ACCOUNT_INVALID:${offersPerAccount}`);
+  }
+  if (offersPerAccount > LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS) {
+    throw new Error(
+      `HLT_OPEN_LOOP_OFFER_CAP_EXCEEDED:perAccount=${offersPerAccount}:` +
+      `cap=${LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS}:increase-users-or-split-settled-windows`,
+    );
+  }
+};
+
 const settlementPairs = (
   hubEntityId: string,
   identities: readonly LoadIdentity[],
@@ -114,6 +133,7 @@ export const prepareParallelSameLoad = async (options: {
   lanes: number;
   laneOffset: number;
 }): Promise<PreparedParallelSameLoad> => {
+  assertOpenLoopOfferBudget(options.rounds);
   const highestVisibleAsk = options.initialBook.executableAskPriceTicks.at(-1);
   const bestVisibleAsk = options.initialBook.executableAskPriceTicks[0];
   const bestBid = options.initialBook.bestBidPriceTicks;
