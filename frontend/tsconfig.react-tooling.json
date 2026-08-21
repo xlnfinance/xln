@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.react-base.json",
+  "compilerOptions": {
+    "types": ["bun", "node"]
+  },
+  "include": [
+    "apps/*/vite.config.ts",
+    "config/create-react-app-config.ts",
+    "config/surfaces.ts",
+    "scripts/build.ts",
+    "scripts/check.ts",
+    "scripts/command-runner.ts",
+    "scripts/surface-selection.ts"
+  ]
+}

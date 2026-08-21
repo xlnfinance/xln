@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.react-base.json",
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "../../config/surfaces.ts",
+    "../../packages/ui/src/**/*.ts",
+    "../../packages/ui/src/**/*.tsx"
+  ]
+}

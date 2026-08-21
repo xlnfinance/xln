@@ -221,7 +221,7 @@ questions are recorded without blocking unrelated work.
 
 ### WP1 — Add scoped tooling and React roots
 
-**Status:** `READY`
+**Status:** `DONE — FOUR ISOLATED ROOTS AND LOCAL CHECK/BUILD COMMANDS VERIFIED`
 
 - Add the React/Vite/TypeScript configuration needed by the four app roots.
 - Create independent minimal roots and separate `.artifacts/<application>`
