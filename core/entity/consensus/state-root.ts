@@ -470,6 +470,7 @@ const projectEntityConsensusState = (state: CoveredEntityState, expandAccounts =
       .filter((field) => ![
         'htlcRoutes',
         'lockBook',
+        'crontabState',
         'crossJurisdictionSwaps',
         'crossJurisdictionAuthorizations',
         'pendingCrossJurisdictionFillAcks',
@@ -492,6 +493,14 @@ const projectEntityConsensusState = (state: CoveredEntityState, expandAccounts =
       : state.accounts,
     htlcRoutes: entityCollectionCommitment(state.htlcRoutes),
     lockBook: entityCollectionCommitment(state.lockBook),
+    ...(state.crontabState
+      ? {
+          crontabState: {
+            tasks: state.crontabState.tasks,
+            hooks: entityCollectionCommitment(state.crontabState.hooks),
+          },
+        }
+      : {}),
     ...(state.crossJurisdictionSwaps
       ? { crossJurisdictionSwaps: entityCollectionCommitment(state.crossJurisdictionSwaps) }
       : {}),
@@ -644,8 +653,6 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
     earliestHookAt = earliestHookAt === null ? hook.triggerAt : Math.min(earliestHookAt, hook.triggerAt);
     latestHookAt = latestHookAt === null ? hook.triggerAt : Math.max(latestHookAt, hook.triggerAt);
   }
-  const proposalStatuses = { pending: 0, executed: 0, rejected: 0 };
-  for (const proposal of state.proposals.values()) proposalStatuses[proposal.status] += 1;
   entityRootLog.info('profile', {
     entity: state.entityId.slice(-8),
     height: state.height,
@@ -654,7 +661,7 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
     rootInputBytes: sections.length * 32,
     topSectionBytes,
     topLevelBytes,
-    proposals: { total: state.proposals.size, statuses: proposalStatuses },
+    proposals: { pending: state.proposals.size },
     hooks: {
       total: state.crontabState?.hooks.size ?? 0,
       types: hookTypes,

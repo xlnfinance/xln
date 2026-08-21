@@ -62,6 +62,8 @@ import { createStructuredLogger, shortId } from '../../support/logger';
 import { hubRebalanceHandler } from './rebalance';
 import { processDueHooks } from './due-hooks';
 import { getRebalanceAccountIds } from '../consensus/account/work-index';
+import { PersistentEntityCollectionMap } from '../state/persistent-collection-map';
+import { cancelHook } from './hook-state';
 
 export {
   HUB_PENDING_BROADCAST_STALE_MS,
@@ -105,7 +107,10 @@ export function initCrontab(): CrontabState {
     tasks: new Map<CrontabTaskMethod, CrontabTaskState>([
       ['hubRebalance', createTaskState('hubRebalance', HUB_REBALANCE_INTERVAL_MS)],
     ]),
-    hooks: new Map(),
+    // Hooks are a growing consensus index. Keep the committed empty Patricia
+    // root from genesis so the first checkpoint never has to discover or
+    // rebuild a flat collection.
+    hooks: PersistentEntityCollectionMap.empty<ScheduledHook>(),
   };
 }
 
@@ -144,7 +149,7 @@ export async function executeCrontab(
     for (const [id, hook] of crontabState.hooks) {
       if (hook.triggerAt <= now) {
         dueHooks.push(hook);
-        crontabState.hooks.delete(id); // One-shot: remove after firing
+        cancelHook(crontabState, id); // One-shot: remove after firing
       }
     }
 

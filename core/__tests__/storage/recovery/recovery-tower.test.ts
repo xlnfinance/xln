@@ -49,6 +49,13 @@ import { createTestJReplica } from '../.././helpers/j-replica';
 import { buildEntityHashesToSign } from '../../../entity/consensus/input/hanko-witness';
 import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { requireEntityEncryptionPrivateKey } from '../../../entity/auth/crypto';
+import { scheduleHook } from '../../../entity/scheduler/hook-state';
+import { PersistentEntityCollectionMap } from '../../../entity/state/persistent-collection-map';
+import {
+  hydrateEntityStateFromStorage,
+  projectEntityCoreDoc,
+} from '../../../storage/read/projections';
+import { validateStorageEntityCoreDocValue } from '../../../storage/schema/schema-state-docs';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const x25519 = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -253,6 +260,26 @@ describe('runtime recovery tower', () => {
       .toBe(requireEntityEncryptionPrivateKey(env, entityId));
     expect(restoredEnv.pendingOutputs).toEqual(env.pendingOutputs);
     expect(restoredEnv.networkInbox).toEqual(env.networkInbox);
+  });
+
+  test('portable Entity projection preserves persistent crontab hooks', async () => {
+    const { env, runtimeId, entityId } = await buildRuntimeEnv();
+    const source = env.state.eReplicas.get(`${entityId}:${runtimeId}`)?.state;
+    if (!source?.crontabState) throw new Error('RECOVERY_TEST_CRONTAB_STATE_MISSING');
+    const hook = {
+      id: 'watchdog:recovery-roundtrip',
+      triggerAt: 5_900,
+      type: 'watchdog' as const,
+      data: {},
+    };
+    scheduleHook(source.crontabState, hook);
+
+    const wire = serializeTaggedJson(projectEntityCoreDoc(source));
+    const core = validateStorageEntityCoreDocValue(deserializeTaggedJson(wire));
+    const restored = hydrateEntityStateFromStorage({ core, accounts: new Map(), books: new Map() });
+
+    expect(restored.crontabState?.hooks).toBeInstanceOf(PersistentEntityCollectionMap);
+    expect(restored.crontabState?.hooks.get(hook.id)).toEqual(hook);
   });
 
   test('recovery checkpoint carries gossip profiles needed for restored openAccount routing', async () => {

@@ -12,7 +12,12 @@ import {
   getEntityCandidateValueForWrite,
  EntityCandidateMap } from '../../../entity/state/candidate-map';
 import { getEntityAccountForWrite , PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
-import { getEntityCollectionValueForWrite } from '../../../entity/state/persistent-collection-map';
+import {
+  EntityCollectionCandidateMap,
+  getEntityCollectionValueForWrite,
+  PersistentEntityCollectionMap,
+} from '../../../entity/state/persistent-collection-map';
+import { initCrontab, scheduleHook } from '../../../entity/scheduler';
 import {
   computeCanonicalEntityConsensusStateHash,
   computeCanonicalEntityConsensusStateHashCold,
@@ -218,6 +223,34 @@ const makeProjectionReplica = () => ({
 });
 
 describe('state cloning', () => {
+  test('Entity frame candidate path-copies only changed crontab hooks', () => {
+    const source = makeProjectionReplica().state as EntityState;
+    source.crontabState = initCrontab();
+    scheduleHook(source.crontabState, {
+      id: 'watchdog:base',
+      triggerAt: 10,
+      type: 'watchdog',
+      data: {},
+    });
+    const sourceHooks = source.crontabState.hooks;
+    expect(sourceHooks).toBeInstanceOf(PersistentEntityCollectionMap);
+
+    const candidate = createEntityFrameCandidateState(source);
+    expect(candidate.crontabState?.hooks).toBeInstanceOf(EntityCollectionCandidateMap);
+    scheduleHook(candidate.crontabState!, {
+      id: 'watchdog:next',
+      triggerAt: 20,
+      type: 'watchdog',
+      data: {},
+    });
+    expect(sourceHooks.has('watchdog:next')).toBeFalse();
+
+    commitEntityFrameCandidateState(candidate);
+    expect(candidate.crontabState?.hooks).toBeInstanceOf(PersistentEntityCollectionMap);
+    expect(candidate.crontabState?.hooks.has('watchdog:next')).toBeTrue();
+    expect(sourceHooks.has('watchdog:next')).toBeFalse();
+  });
+
   test('Entity frame candidate clones only an Account it touches', () => {
     const source = makeProjectionReplica().state as EntityState;
     const counterpartyId = `0x${'bb'.repeat(32)}`;

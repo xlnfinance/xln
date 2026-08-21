@@ -22,6 +22,7 @@ import {
 import {
   EntityCollectionCandidateMap,
 } from './state/persistent-collection-map';
+import type { ScheduledHook } from './scheduler/types';
 
 const cloneJBatchState = (state: JBatchState): JBatchState => {
   const cloned: JBatchState = {
@@ -116,12 +117,29 @@ const forkHtlcRoute = (
     : {}),
 });
 
+const forkScheduledHook = <Hook extends ScheduledHook>(hook: Hook): Hook => ({
+  ...hook,
+  data: { ...hook.data },
+});
+
 const installGrowingEntityCollections = (
   target: EntityState,
   source: EntityState,
 ): void => {
   target.htlcRoutes = new EntityCollectionCandidateMap(source.htlcRoutes, forkHtlcRoute);
   target.lockBook = new EntityCollectionCandidateMap(source.lockBook, value => ({ ...value }));
+  if (source.crontabState) {
+    target.crontabState = {
+      tasks: new Map([...source.crontabState.tasks].map(([method, task]) => [
+        method,
+        { ...task, params: { ...task.params } },
+      ])),
+      hooks: new EntityCollectionCandidateMap<ScheduledHook>(
+        source.crontabState.hooks,
+        forkScheduledHook,
+      ),
+    };
+  }
   cloneCrossJurisdictionState(target, source);
 };
 
@@ -142,6 +160,7 @@ const isolateEntityFrameShell = (
     orderbookExt: _orderbookExt,
     htlcRoutes: _htlcRoutes,
     lockBook: _lockBook,
+    crontabState: _crontabState,
     jBatchState: _jBatchState,
     lending: _lending,
     crossJurisdictionSwaps: _crossJurisdictionSwaps,
@@ -222,6 +241,9 @@ export const commitEntityFrameCandidateState = (
   }
   if (state.lockBook instanceof EntityCollectionCandidateMap) {
     state.lockBook = state.lockBook.sealCandidate();
+  }
+  if (state.crontabState?.hooks instanceof EntityCollectionCandidateMap) {
+    state.crontabState.hooks = state.crontabState.hooks.sealCandidate();
   }
   if (state.crossJurisdictionSwaps instanceof EntityCollectionCandidateMap) {
     state.crossJurisdictionSwaps = state.crossJurisdictionSwaps.sealCandidate();

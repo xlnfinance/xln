@@ -1,7 +1,7 @@
 import type { EntityState, Proposal, ProposalAction } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import { createHash } from '../../../support/platform-crypto';
-import { compareStableText, safeStringify } from '../../../protocol/serialization';
+import { safeStringify } from '../../../protocol/serialization';
 import { createStructuredLogger, shortHash } from '../../../support/logger';
 import { canonicalEntityBoardSignerId, hashEntityProposalAction } from '../../auth/authorization';
 import { addMessage } from '../../frame-events';
@@ -43,49 +43,33 @@ export const generateProposalId = (
 };
 
 const MAX_PENDING_ENTITY_PROPOSALS = LIMITS.MAX_PENDING_PROPOSALS_PER_ENTITY;
-const MAX_TERMINAL_ENTITY_PROPOSALS = LIMITS.MAX_TERMINAL_PROPOSALS_PER_ENTITY;
 
 export const assertEntityProposalCapacity = (state: EntityState, rawProposer: string): void => {
   const proposer = canonicalEntityBoardSignerId(rawProposer);
-  const pending = Array.from(state.proposals.values())
-    .filter(proposal => proposal.status === 'pending').length;
-  if (pending >= MAX_PENDING_ENTITY_PROPOSALS) {
-    throw new Error(`ENTITY_PROPOSAL_PENDING_LIMIT_EXCEEDED:${pending}:${MAX_PENDING_ENTITY_PROPOSALS}`);
+  if (state.proposals.size >= MAX_PENDING_ENTITY_PROPOSALS) {
+    throw new Error(
+      `ENTITY_PROPOSAL_PENDING_LIMIT_EXCEEDED:${state.proposals.size}:${MAX_PENDING_ENTITY_PROPOSALS}`,
+    );
   }
   const existing = Array.from(state.proposals.values())
-    .find(proposal =>
-      proposal.status === 'pending' &&
-      canonicalEntityBoardSignerId(proposal.proposer) === proposer,
-    );
+    .find(proposal => canonicalEntityBoardSignerId(proposal.proposer) === proposer);
   if (existing) {
     throw new Error(`ENTITY_PROPOSAL_PROPOSER_PENDING_LIMIT:${proposer}:${existing.id}`);
   }
 };
 
-export const pruneTerminalEntityProposals = (state: EntityState): EntityState => {
-  const terminal = Array.from(state.proposals.values())
-    .filter(proposal => proposal.status !== 'pending')
-    .sort((left, right) => left.created - right.created || compareStableText(left.id, right.id));
-  const removeCount = Math.max(0, terminal.length - MAX_TERMINAL_ENTITY_PROPOSALS);
-  if (removeCount === 0) return state;
-  const proposals = new Map(state.proposals);
-  for (const proposal of terminal.slice(0, removeCount)) proposals.delete(proposal.id);
-  return { ...state, proposals };
-};
-
 /**
- * A board rotation is a new governance authority namespace. Old-board pending
- * proposals must remain as terminal forensic evidence, but can never consume
- * capacity or be completed by the new board.
+ * A board rotation is a new governance authority namespace. Pending work from
+ * the old board is deleted: presence means live, while the certified Entity
+ * frame history is the terminal audit record. Retaining executed/rejected
+ * proposal bodies in every future root would turn history into unbounded live
+ * consensus state and duplicate the Runtime WAL.
  */
 export const normalizeEntityProposalBoard = (env: EntityRuntimeContext, state: EntityState): EntityState => {
-  if (!Array.from(state.proposals.values()).some(proposal => proposal.status === 'pending')) {
-    return pruneTerminalEntityProposals(state);
-  }
+  if (state.proposals.size === 0) return state;
   const currentBoard = resolveEntityCommandBoard(env, state);
   let proposals: Map<string, Proposal> | undefined;
   for (const [id, proposal] of state.proposals) {
-    if (proposal.status !== 'pending') continue;
     const proposalBoardHash = String(proposal.boardHash ?? '').trim().toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(proposalBoardHash)) {
       throw new Error(`ENTITY_PROPOSAL_BOARD_HASH_INVALID:${id}:${proposalBoardHash || 'missing'}`);
@@ -98,9 +82,9 @@ export const normalizeEntityProposalBoard = (env: EntityRuntimeContext, state: E
       proposal.boardEpoch === currentBoard.boardEpoch
     ) continue;
     proposals ??= new Map(state.proposals);
-    proposals.set(id, { ...proposal, status: 'rejected' });
+    proposals.delete(id);
   }
-  return pruneTerminalEntityProposals(proposals ? { ...state, proposals } : state);
+  return proposals ? { ...state, proposals } : state;
 };
 
 export const executeProposal = (entityState: EntityState, proposal: Proposal): EntityState => {

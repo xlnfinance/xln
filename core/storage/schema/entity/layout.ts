@@ -67,7 +67,7 @@ export type EntityStorageLayout = Readonly<{
   dels: readonly Buffer[];
 }>;
 
-const TREE_FIELDS = new Set<StorageEntityField>(ENTITY_COLLECTION_NAMESPACES);
+const TREE_FIELDS = new Set<string>(ENTITY_COLLECTION_NAMESPACES);
 
 const encodedEntityFields = (
   entityId: string,
@@ -279,7 +279,17 @@ export const readEntityStorageLayout = async (
     raw[field] = decodeBuffer(await readEntityField(db, entityId, descriptor));
   }
   const trees = await hydrateEntityTrees(db, entityId, manifest.trees);
-  for (const [namespace, tree] of trees) raw[namespace] = tree;
+  for (const [namespace, tree] of trees) {
+    if (namespace !== 'crontabHooks') {
+      raw[namespace] = tree;
+      continue;
+    }
+    const crontab = raw['crontabState'];
+    if (typeof crontab !== 'object' || crontab === null || Array.isArray(crontab)) {
+      throw new Error('STORAGE_ENTITY_CRONTAB_TASKS_MISSING');
+    }
+    raw['crontabState'] = { ...crontab, hooks: tree };
+  }
   const validated = validateStorageEntityCoreDocValue(raw);
   return { doc: validated, rootValue };
 };

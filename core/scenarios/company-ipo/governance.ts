@@ -16,21 +16,12 @@ const requireValidator = (actor: CompanyActor, index: number): string => {
   return validator;
 };
 
-const newestProposalId = (before: Set<string>, actor: CompanyActor, env: RuntimeReplica): string => {
-  const proposal = [...requireReplica(env, actor.id, requireValidator(actor, 0)).state.proposals.values()]
-    .find(candidate => !before.has(candidate.id));
-  if (!proposal) throw new Error(`COMPANY_GOVERNANCE_PROPOSAL_MISSING:${actor.id}`);
-  return proposal.id;
-};
-
 const executeSingleBoard = async (
   env: RuntimeReplica,
   actor: CompanyActor,
   txs: EntityTx[],
-): Promise<string> => {
+): Promise<void> => {
   const proposer = requireValidator(actor, 0);
-  const replica = requireReplica(env, actor.id, proposer);
-  const before = new Set(replica.state.proposals.keys());
   await processWithOffline(env, [{
     entityId: actor.id,
     signerId: proposer,
@@ -41,24 +32,22 @@ const executeSingleBoard = async (
   // stopping when only the origin proposal is executed leaves the target's
   // read model behind the chain event this action just produced.
   await converge(env, 50);
-  const proposalId = newestProposalId(before, actor, env);
-  const proposal = requireReplica(env, actor.id, proposer).state.proposals.get(proposalId);
-  if (proposal?.status !== 'executed') {
-    throw new Error(`COMPANY_SINGLE_BOARD_ACTION_NOT_EXECUTED:${proposalId}:${proposal?.status ?? 'missing'}`);
+  const pending = requireReplica(env, actor.id, proposer).state.proposals.size;
+  if (pending !== 0) {
+    throw new Error(`COMPANY_SINGLE_BOARD_GOVERNANCE_NOT_DRAINED:${actor.id}:${pending}`);
   }
-  return proposalId;
 };
 
 export const executeCompanyAction = async (
   env: RuntimeReplica,
   actor: CompanyActor,
   txs: EntityTx[],
-): Promise<string> => {
+): Promise<void> => {
   if (actor.config.threshold === 1n) return executeSingleBoard(env, actor, txs);
   if (actor.config.threshold !== 2n || actor.validators.length !== 3) {
     throw new Error(`COMPANY_BOARD_SHAPE_UNSUPPORTED:${actor.config.threshold}:${actor.validators.length}`);
   }
-  return executeCollectiveWithVotes(env, {
+  await executeCollectiveWithVotes(env, {
     entityId: actor.id,
     validators: actor.validators,
     proposer: requireValidator(actor, 0),

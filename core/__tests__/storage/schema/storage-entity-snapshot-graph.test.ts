@@ -3,6 +3,8 @@ import { expect, test } from 'bun:test';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { PersistentEntityCollectionMap } from '../../../entity/state/persistent-collection-map';
+import { initCrontab, scheduleHook } from '../../../entity/scheduler';
+import type { ScheduledHook } from '../../../entity/scheduler/types';
 import type { EntityState } from '../../../entity/types';
 import type { HtlcRoute } from '../../../types/account';
 import { encodeBuffer } from '../../../storage/codec/codec';
@@ -73,6 +75,20 @@ const head = (): StorageHead => ({
   retainedHistoryBytes: 0,
 });
 
+const stateWithHooks = (count: number): EntityState => {
+  const next = state();
+  next.crontabState = initCrontab();
+  for (let index = 0; index < count; index += 1) {
+    scheduleHook(next.crontabState, {
+      id: `watchdog:${index}`,
+      triggerAt: 10_000 + index,
+      type: 'watchdog',
+      data: {},
+    });
+  }
+  return next;
+};
+
 const install = async (
   db: MemoryRuntimeDb,
   next: EntityState,
@@ -132,6 +148,44 @@ test('Entity snapshot copies and relinks its graph without live rows', async () 
     Number.parseInt(key.slice(0, 2), 16) === KEY_SNAPSHOT_GRAPH);
   expect(await inspectSnapshotGraphRows(snapshot, 1)).toBe(graphKeys.length);
   expect(created.docCount).toBe(graphKeys.length + 1);
+});
+
+test('growing crontab hooks persist as bounded dirty Patricia rows', async () => {
+  const db = new MemoryRuntimeDb();
+  const previous = stateWithHooks(256);
+  const initial = await install(db, previous);
+  expect(Math.max(...initial.puts.map(row => row.value.byteLength)))
+    .toBeLessThan(MAX_ENTITY_STORAGE_VALUE_BYTES);
+
+  const previousHooks = previous.crontabState?.hooks;
+  if (!(previousHooks instanceof PersistentEntityCollectionMap)) {
+    throw new Error('TEST_CRONTAB_HOOK_TREE_REQUIRED');
+  }
+  const changedHook: ScheduledHook = {
+    id: 'watchdog:128',
+    triggerAt: 99_999,
+    type: 'watchdog',
+    data: {},
+  };
+  const next: EntityState = {
+    ...previous,
+    height: 2,
+    crontabState: {
+      tasks: previous.crontabState.tasks,
+      hooks: previousHooks.updated(changedHook.id, changedHook),
+    },
+  };
+  const changed = await install(db, next, previous);
+  const initialTreeRows = initial.puts.filter(row =>
+    row.key[0] === KEY_LIVE_ENTITY_BRANCH || row.key[0] === KEY_LIVE_ENTITY_LEAF);
+  const changedTreeRows = changed.puts.filter(row =>
+    row.key[0] === KEY_LIVE_ENTITY_BRANCH || row.key[0] === KEY_LIVE_ENTITY_LEAF);
+  expect(changedTreeRows.length).toBeGreaterThan(0);
+  expect(changedTreeRows.length).toBeLessThan(initialTreeRows.length / 4);
+
+  const restored = await readEntityStorageLayout(db, entityId, keyLiveEntity(entityId));
+  expect(restored?.doc.crontabState?.hooks.size).toBe(256);
+  expect(restored?.doc.crontabState?.hooks.get(changedHook.id)).toEqual(changedHook);
 });
 
 test('live integrity rejects an Entity field row absent from its manifest', async () => {

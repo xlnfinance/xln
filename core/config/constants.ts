@@ -37,12 +37,6 @@ export const LIMITS = {
   /** Maximum live proposals per entity; at most one pending per board signer. */
   MAX_PENDING_PROPOSALS_PER_ENTITY: 100,
 
-  /** Maximum retained terminal proposal receipts per entity. */
-  MAX_TERMINAL_PROPOSALS_PER_ENTITY: 100,
-
-  /** Aggregate proposal state bound (pending + terminal). */
-  MAX_PROPOSALS_PER_ENTITY: 200,
-
   /** Maximum validators per entity (BFT performance limit) */
   MAX_VALIDATORS: 100,
 

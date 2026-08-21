@@ -9,6 +9,9 @@ import { createEmptyEnv } from '../../../runtime';
 import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 import type { EntityState } from '../../../entity/types';
 import type { EntityTx } from '../../../types/entity-tx';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { PersistentEntityCollectionMap } from '../../../entity/state/persistent-collection-map';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 
 test('basic entity proposal and vote traces stay behind structured logging', () => {
   const handler = readFileSync(join(process.cwd(), 'core/entity/tx/handlers/system/basic.ts'), 'utf8');
@@ -35,7 +38,7 @@ const makeEntityState = (validators: readonly [string, string], entityId: string
     threshold: 2n,
   },
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   profile: {
@@ -45,9 +48,9 @@ const makeEntityState = (validators: readonly [string, string], entityId: string
     bio: '',
     website: '',
   },
-  htlcRoutes: new Map(),
+  htlcRoutes: PersistentEntityCollectionMap.empty(),
   htlcFeesEarned: 0n,
-  lockBook: new Map(),
+  lockBook: PersistentEntityCollectionMap.empty(),
   swapTradingPairs: [],
 });
 
@@ -65,13 +68,12 @@ test('basic proposal and vote state transitions are unchanged', () => {
 
   expect(initial.proposals.size).toBe(0);
   expect(readEntityFrameEventMessages(proposed)).toEqual([]);
-  expect(proposal.status).toBe('pending');
+  expect(proposal.proposer).toBe(validators[0]);
   expect(proposal.votes.get(validators[0])).toBe('yes');
 
   const voteTx = { type: 'vote' as const, data: { proposalId, voter: validators[1], choice: 'yes' as const } } satisfies EntityTx;
   const voted = handleVoteEntityTx(env, proposed, voteTx).newState;
 
-  expect(voted.proposals.get(proposalId)?.status).toBe('executed');
+  expect(voted.proposals.has(proposalId)).toBe(false);
   expect(readEntityFrameEventMessages(voted)).toEqual(['[COLLECTIVE] ship mainnet discipline']);
-  expect(voted.proposals.get(proposalId)?.votes.get(validators[1])).toBe('yes');
 });

@@ -12,6 +12,10 @@ import type {
   ScheduledHook,
   ScheduledHookType,
 } from './types';
+import {
+  EntityCollectionCandidateMap,
+  isPersistentEntityCollectionMap,
+} from '../state/persistent-collection-map';
 
 const isTaskMethod = (value: unknown): value is CrontabTaskMethod =>
   value === 'hubRebalance';
@@ -223,7 +227,14 @@ function assertCrontabState(
   context: string,
 ): asserts state is Record<string, unknown> & CrontabState {
   const tasks = validateMapInstance(state['tasks'], `${context}.tasks`);
-  const hooks = validateMapInstance(state['hooks'], `${context}.hooks`);
+  const hooks = state['hooks'];
+  if (
+    !(hooks instanceof Map) &&
+    !(hooks instanceof EntityCollectionCandidateMap) &&
+    !isPersistentEntityCollectionMap(hooks)
+  ) {
+    throw new FinancialDataCorruptionError(`${context}.hooks must be a canonical Map or Patricia map`);
+  }
   for (const [taskKey, taskValue] of tasks) {
     if (!isTaskMethod(taskKey)) {
       throw new FinancialDataCorruptionError(`${context}.tasks key is unknown`);

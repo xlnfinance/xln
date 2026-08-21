@@ -329,7 +329,7 @@ test('certified final onion context indexes the recipient private note', () => {
   expect(replica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('recipient invoice');
 });
 
-test('certified proposal and executed vote frames index nested HTLC descriptions', () => {
+test('certified proposal frames index nested HTLC descriptions without terminal proposal state', () => {
   const hashlock = `0x${'45'.repeat(32)}`;
   const nestedPayment = {
     type: 'htlcPayment',
@@ -356,9 +356,8 @@ test('certified proposal and executed vote frames index nested HTLC descriptions
   }] });
   expect(proposedReplica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('nested invoice');
 
-  const votedReplica = makeReplica();
   const proposalId = `0x${'78'.repeat(32)}`;
-  votedReplica.state.proposals.set(proposalId, {
+  proposedReplica.state.proposals.set(proposalId, {
     id: proposalId,
     proposer,
     boardHash: `0x${'89'.repeat(32)}`,
@@ -366,14 +365,13 @@ test('certified proposal and executed vote frames index nested HTLC descriptions
     action,
     actionHash: action.data.actionHash,
     votes: new Map(),
-    status: 'executed',
     created: 1,
   } satisfies Proposal);
-  indexCertifiedEntityFrameNotes(votedReplica, { txs: [{
+  indexCertifiedEntityFrameNotes(proposedReplica, { txs: [{
     type: 'vote',
     data: { proposalId, voter: proposer, choice: 'yes' },
   }] });
-  expect(votedReplica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('nested invoice');
+  expect(proposedReplica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('nested invoice');
 });
 
 test('decode validation rejects oversized swap history, resolve history, and HTLC notes', () => {

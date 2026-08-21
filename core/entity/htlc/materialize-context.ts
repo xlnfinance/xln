@@ -58,7 +58,7 @@ export const getEffectiveHtlcFrameTxs = (
     }
     if (tx.type === 'vote') {
       const proposal = state.proposals.get(tx.data.proposalId);
-      if (!proposal || proposal.status !== 'pending' || tx.data.choice !== 'yes') return [];
+      if (!proposal || tx.data.choice !== 'yes') return [];
       const currentYes = [...proposal.votes.entries()].reduce((total, [signerId, rawVote]) => {
         const choice = typeof rawVote === 'object' ? rawVote.choice : rawVote;
         return choice === 'yes' ? total + (shares.bySigner.get(signerId) ?? 0n) : total;

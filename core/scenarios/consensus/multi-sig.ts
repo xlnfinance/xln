@@ -77,14 +77,22 @@ const assertGovernanceProposal = (
   validators: string[],
   offlineSigners: Set<string>,
   proposalId: string,
-  expectedStatus: 'pending' | 'executed' | 'rejected',
+  expectedPresence: 'pending' | 'absent',
   expectedVotes: GovernanceVote[],
 ): void => {
   for (const signerId of validators.filter(validator => !offlineSigners.has(validator))) {
     const proposal = requireReplica(env, entityId, signerId).state.proposals.get(proposalId);
+    if (expectedPresence === 'absent') {
+      assert(
+        proposal === undefined,
+        `${signerId} removed terminal governance proposal ${proposalId.slice(0, 14)}`,
+        env,
+      );
+      continue;
+    }
     assert(
-      proposal?.status === expectedStatus,
-      `${signerId} sees governance proposal ${proposalId.slice(0, 14)} as ${expectedStatus}`,
+      proposal !== undefined,
+      `${signerId} sees pending governance proposal ${proposalId.slice(0, 14)}`,
       env,
     );
     assert(
@@ -194,17 +202,17 @@ export const executeCollectiveWithVotes = async (
       params.convergenceCycles,
     );
     votes.push([voter, 'yes']);
-    const expectedStatus = index === params.voters.length - 1 ? 'executed' : 'pending';
+    const expectedPresence = index === params.voters.length - 1 ? 'absent' : 'pending';
     assertGovernanceProposal(
       env,
       params.entityId,
       params.validators,
       params.offlineSigners,
       proposalId,
-      expectedStatus,
+      expectedPresence,
       votes,
     );
-    if (expectedStatus === 'pending') params.assertBeforeQuorum?.();
+    if (expectedPresence === 'pending') params.assertBeforeQuorum?.();
   }
   return proposalId;
 };
@@ -518,7 +526,7 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
       testEntity.validators,
       offlineSigners,
       negativeProposalId,
-      'rejected',
+      'absent',
       [
         [testEntity.validators[0]!, 'yes'],
         [testEntity.validators[1]!, 'no'],

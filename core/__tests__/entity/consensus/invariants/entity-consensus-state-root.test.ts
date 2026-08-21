@@ -18,6 +18,7 @@ import { makeAccount as makeAccountReplica } from '../../../helpers/cross-j';
 import { PersistentEntityAccountMap } from '../../../../entity/state/persistent-account-map';
 import { createBook } from '../../../../orderbook/core';
 import { PersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
+import { initCrontab } from '../../../../entity/scheduler';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
@@ -154,7 +155,10 @@ const mutators = {
     state.certifiedBoardState!.boardRegistryRoot = `0x${'77'.repeat(32)}`;
   },
   crontabState: state => {
-    state.crontabState = { marker: 'cron' } as never;
+    state.crontabState = initCrontab();
+    const task = state.crontabState.tasks.get('hubRebalance');
+    if (!task) throw new Error('TEST_CRONTAB_TASK_MISSING');
+    task.lastRun = 1;
   },
   jBatchState: state => {
     state.jBatchState = { marker: 'jbatch' } as never;

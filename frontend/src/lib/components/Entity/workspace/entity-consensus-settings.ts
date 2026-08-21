@@ -22,7 +22,6 @@ export type ConsensusProposalView = {
   id: string;
   proposer: string;
   actionType: string;
-  status: Proposal['status'];
   created: number;
   yesShares: bigint;
   noShares: bigint;
@@ -104,7 +103,6 @@ const proposalView = (
     id: proposal.id,
     proposer: proposal.proposer,
     actionType: proposal.action.type,
-    status: proposal.status,
     created: proposal.created,
     yesShares,
     noShares,

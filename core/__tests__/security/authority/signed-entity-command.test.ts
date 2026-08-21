@@ -285,7 +285,7 @@ describe('signed Entity command admission', () => {
       replica => replica.entityId === state.entityId && replica.signerId === signerId,
     );
     expect(committed?.state.hubRebalanceConfig?.routingFeePPM).toBe(777);
-    expect(Array.from(committed?.state.proposals.values() ?? []).at(-1)?.status).toBe('executed');
+    expect(committed?.state.proposals.size).toBe(0);
     expect(committed?.state.entityCommandNonces?.bySigner.get(signerId)?.nonce).toBe(1n);
   });
 
@@ -486,7 +486,7 @@ describe('signed Entity command admission', () => {
     const proposed = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [signedEntityCommandTx(proposalCommand)], 2_001);
     expect(proposed.newState.hubRebalanceConfig).toBeUndefined();
     const proposal = Array.from(proposed.newState.proposals.values())[0];
-    expect(proposal?.status).toBe('pending');
+    expect(proposal?.proposer).toBe(proposer);
     expect(proposal?.actionHash).toBe(hashEntityProposalAction(
       buildEntityTransactionProposalAction([hubCommand()]),
     ));
@@ -503,7 +503,7 @@ describe('signed Entity command admission', () => {
       2_002,
     );
     expect(committed.newState.hubRebalanceConfig?.routingFeePPM).toBe(777);
-    expect(committed.newState.proposals.get(proposal!.id)?.status).toBe('executed');
+    expect(committed.newState.proposals.has(proposal!.id)).toBe(false);
 
     const retry = await applyEntityFrameWithMaterializedTestInfraContext(
       env,
@@ -528,8 +528,8 @@ describe('signed Entity command admission', () => {
       2_001,
     );
 
-    expect(applied.newState.proposals.size).toBe(2);
-    expect(new Set(applied.newState.proposals.keys()).size).toBe(2);
+    expect(applied.newState.proposals.size).toBe(0);
+    expect(applied.newState.hubRebalanceConfig?.routingFeePPM).toBe(777);
     expect(applied.newState.entityCommandNonces?.bySigner.get(proposer)?.nonce).toBe(2n);
   });
 
@@ -569,7 +569,7 @@ describe('signed Entity command admission', () => {
     )], 2_001);
     expect(proposed.outputs).toHaveLength(0);
     const proposal = Array.from(proposed.newState.proposals.values())[0];
-    expect(proposal?.status).toBe('pending');
+    expect(proposal?.proposer).toBe(proposer);
 
     const vote: EntityTx = {
       type: 'vote',
@@ -578,7 +578,7 @@ describe('signed Entity command admission', () => {
     const committed = await applyEntityFrameWithMaterializedTestInfraContext(env, proposed.newState, [signedEntityCommandTx(
       buildSignedEntityCommand(env, proposed.newState, voter, [vote]),
     )], 2_002);
-    expect(committed.newState.proposals.get(proposal!.id)?.status).toBe('executed');
+    expect(committed.newState.proposals.has(proposal!.id)).toBe(false);
     expect(committed.outputs).toHaveLength(1);
     expect(committed.outputs[0]?.certifiedOutputIdentity).toEqual({
       lane: 'generic',
@@ -837,7 +837,7 @@ describe('signed Entity command admission', () => {
       2_001,
     );
     const epochZeroProposal = Array.from(epochZeroApplied.newState.proposals.values())[0]!;
-    expect(epochZeroProposal.status).toBe('pending');
+    expect(epochZeroProposal.proposer).toBe(proposer);
     const voter = signers[1]!;
     const epochZeroVote = buildSignedEntityCommand(env, epochZeroApplied.newState, voter, [{
       type: 'vote',
@@ -883,11 +883,9 @@ describe('signed Entity command admission', () => {
       2_002,
     );
     const proposals = Array.from(epochTwoApplied.newState.proposals.values());
-    const oldProposal = proposals.find(proposal => proposal.id === epochZeroProposal.id)!;
-    const newProposal = proposals.find(proposal => proposal.id !== epochZeroProposal.id)!;
-    expect(oldProposal.status).toBe('rejected');
-    expect((oldProposal as Proposal & { boardEpoch?: number }).boardEpoch).toBe(0);
-    expect(newProposal.status).toBe('pending');
+    const newProposal = proposals[0]!;
+    expect(epochTwoApplied.newState.proposals.has(epochZeroProposal.id)).toBe(false);
+    expect(proposals).toHaveLength(1);
     expect((newProposal as Proposal & { boardEpoch?: number }).boardEpoch).toBe(2);
     expect(newProposal.id).not.toBe(epochZeroProposal.id);
     const epochTwoVote = buildSignedEntityCommand(env, epochTwoApplied.newState, voter, [{
@@ -900,8 +898,7 @@ describe('signed Entity command admission', () => {
       [signedEntityCommandTx(epochTwoVote)],
       2_003,
     );
-    expect(executed.newState.proposals.get(epochZeroProposal.id)?.status).toBe('rejected');
-    expect(executed.newState.proposals.get(newProposal.id)?.status).toBe('executed');
+    expect(executed.newState.proposals.size).toBe(0);
   });
 
   test('rejects signed impersonation in every identity-bearing user transaction', () => {
@@ -989,8 +986,7 @@ describe('signed Entity command admission', () => {
       [signedEntityCommandTx(proposalBatch)],
       1_002,
     );
-    expect(proposed.newState.proposals.size).toBe(100);
-    expect(Array.from(proposed.newState.proposals.values()).every(proposal => proposal.status === 'executed')).toBe(true);
+    expect(proposed.newState.proposals.size).toBe(0);
     const proposalEvents = readEntityFrameEventMessages(proposed.newState);
     expect(proposalEvents).toHaveLength(101);
     expect(proposalEvents[0]).toContain('terminal-0');
@@ -1010,7 +1006,7 @@ describe('signed Entity command admission', () => {
     const first = buildSignedEntityCommand(env, state, proposer, [firstTx]);
     const pending = await applyEntityFrameWithMaterializedTestInfraContext(env, state, [signedEntityCommandTx(first)], 2_001);
     expect(Array.from(pending.newState.proposals.values())).toHaveLength(1);
-    expect(Array.from(pending.newState.proposals.values())[0]?.status).toBe('pending');
+    expect(Array.from(pending.newState.proposals.values())[0]?.proposer).toBe(proposer);
 
     const spam = buildSignedEntityCommand(env, pending.newState, proposer, [{
       type: 'propose',
@@ -1057,14 +1053,14 @@ describe('signed Entity command admission', () => {
       type: 'vote', data: { proposalId: proposal.id, voter: noVoter, choice: 'no' },
     }]);
     const rejected = await applyEntityFrameWithMaterializedTestInfraContext(env, proposed.newState, [signedEntityCommandTx(blockingNo)], 3_002);
-    expect(rejected.newState.proposals.get(proposal.id)?.status).toBe('rejected');
+    expect(rejected.newState.proposals.has(proposal.id)).toBe(false);
 
     const replacement = buildSignedEntityCommand(env, rejected.newState, proposer, [{
       type: 'propose',
       data: { proposer, action: { type: 'collective_message', data: { message: 'capacity is free' } } },
     }]);
     const replaced = await applyEntityFrameWithMaterializedTestInfraContext(env, rejected.newState, [signedEntityCommandTx(replacement)], 3_003);
-    expect(Array.from(replaced.newState.proposals.values()).filter(item => item.status === 'pending')).toHaveLength(1);
+    expect(Array.from(replaced.newState.proposals.values())).toHaveLength(1);
   });
 
   test('board rotation rejects old pending proposals before accepting new-board governance', async () => {
@@ -1113,9 +1109,8 @@ describe('signed Entity command admission', () => {
       data: { proposer: nextSigner, action: { type: 'collective_message', data: { message: 'new board' } } },
     }]);
     const applied = await applyEntityFrameWithMaterializedTestInfraContext(env, rotated, [signedEntityCommandTx(nextCommand)], 2_002);
-    expect(applied.newState.proposals.get(oldProposal.id)?.status).toBe('rejected');
-    expect(Array.from(applied.newState.proposals.values()).some(proposal =>
-      proposal.proposer === nextSigner && proposal.status === 'executed')).toBe(true);
+    expect(applied.newState.proposals.has(oldProposal.id)).toBe(false);
+    expect(applied.newState.proposals.size).toBe(0);
   });
 
   test('canonicalizes mixed-case EOA board shares for proposer and voter power', async () => {
@@ -1137,7 +1132,7 @@ describe('signed Entity command admission', () => {
     ]);
     const proposed = await applyEntityFrameWithMaterializedTestInfraContext(env, mixedState, [signedEntityCommandTx(proposalCommand)], 2_001);
     const proposal = Array.from(proposed.newState.proposals.values())[0]!;
-    expect(proposal.status).toBe('pending');
+    expect(proposal.proposer).toBe(proposer);
     const voteCommand = buildSignedEntityCommand(env, proposed.newState, voter, [{
       type: 'vote', data: { proposalId: proposal.id, voter, choice: 'yes' },
     }]);
@@ -1413,7 +1408,7 @@ describe('signed Entity command admission', () => {
     });
     expect(result.outcome.kind).toBe('committed');
     expect(result.newState.hubRebalanceConfig?.routingFeePPM).toBe(777);
-    expect(Array.from(result.newState.proposals.values())[0]?.status).toBe('executed');
+    expect(result.newState.proposals.size).toBe(0);
     expect(result.newState.entityCommandNonces?.bySigner.get(replica.signerId)?.nonce).toBe(1n);
   });
 

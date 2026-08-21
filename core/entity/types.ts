@@ -149,7 +149,6 @@ export interface Proposal {
   actionHash: string;
   // Votes: signerId → vote (string for simple votes, object for commented votes)
   votes: Map<string, 'yes' | 'no' | 'abstain' | { choice: 'yes' | 'no' | 'abstain'; comment: string }>;
-  status: 'pending' | 'executed' | 'rejected';
   created: number; // entity timestamp when proposal was created (deterministic)
 }
 

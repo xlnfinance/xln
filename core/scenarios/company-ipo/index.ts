@@ -18,16 +18,15 @@ import {
   settleInvestorControlReserve,
 } from './takeover';
 
-const assertBoardThresholdEvidence = (
+const assertBoardGovernanceDrained = (
   env: RuntimeReplica,
   entityId: string,
   validators: string[],
 ): void => {
   for (const validator of validators) {
-    const proposals = [...requireReplica(env, entityId, validator).state.proposals.values()];
-    const executed = proposals.filter(proposal => proposal.status === 'executed');
-    if (executed.length === 0 || executed.some(proposal => proposal.votes.size < 2)) {
-      throw new Error(`COMPANY_BOARD_THRESHOLD_EVIDENCE_MISSING:${entityId}:${validator}`);
+    const pending = requireReplica(env, entityId, validator).state.proposals.size;
+    if (pending !== 0) {
+      throw new Error(`COMPANY_BOARD_GOVERNANCE_NOT_DRAINED:${entityId}:${validator}:${pending}`);
     }
   }
 };
@@ -44,7 +43,7 @@ export async function companyIpo(env: RuntimeReplica): Promise<RuntimeReplica> {
     await prepareCompanyAccounts(env, actors, shares);
     await proveOrdinaryCompanyPayment(env, actors);
     await runCompanyMarket(env, actors, shares);
-    assertBoardThresholdEvidence(env, actors.boardCompany.id, actors.boardCompany.validators);
+    assertBoardGovernanceDrained(env, actors.boardCompany.id, actors.boardCompany.validators);
     await settleInvestorControlReserve(env, actors, shares);
     const investorBoard = await proposeInvestorBoard(env, actors);
     await activateInvestorBoardAndHandover(env, actors, investorBoard);

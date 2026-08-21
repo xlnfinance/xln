@@ -29,13 +29,21 @@ export const ENTITY_COLLECTION_NAMESPACES = [
   'crossJurisdictionAuthorizations',
   'pendingCrossJurisdictionFillAcks',
   'crossJurisdictionBookAdmissions',
+  'crontabHooks',
 ] as const;
 
 export type EntityCollectionNamespace = (typeof ENTITY_COLLECTION_NAMESPACES)[number];
 
-export const ENTITY_COLLECTION_NAMESPACE_TAG = Object.freeze(Object.fromEntries(
-  ENTITY_COLLECTION_NAMESPACES.map((namespace, index) => [namespace, index + 1]),
-) as Record<EntityCollectionNamespace, number>);
+/** Permanent physical graph keys. Never derive these from array order. */
+export const ENTITY_COLLECTION_NAMESPACE_TAG = Object.freeze({
+  htlcRoutes: 1,
+  lockBook: 2,
+  crossJurisdictionSwaps: 3,
+  crossJurisdictionAuthorizations: 4,
+  pendingCrossJurisdictionFillAcks: 5,
+  crossJurisdictionBookAdmissions: 6,
+  crontabHooks: 7,
+} as const satisfies Record<EntityCollectionNamespace, number>);
 
 const NAMESPACE_BY_TAG = new Map<number, EntityCollectionNamespace>(
   Object.entries(ENTITY_COLLECTION_NAMESPACE_TAG).map(([namespace, tag]) => [
@@ -65,7 +73,9 @@ const entityTreeFromState = (
   state: EntityState,
   namespace: EntityCollectionNamespace,
 ): EntityTree | undefined => {
-  const value = state[namespace];
+  const value = namespace === 'crontabHooks'
+    ? state.crontabState?.hooks
+    : state[namespace];
   return value === undefined ? undefined : entityTree(value, namespace);
 };
 

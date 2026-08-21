@@ -34,7 +34,6 @@ const proposal = (payment: EntityTx): Proposal => ({
   },
   actionHash: `0x${'88'.repeat(32)}`,
   votes: new Map([[signer, 'yes']]),
-  status: 'pending',
   created: 123,
 });
 

@@ -8,6 +8,7 @@ import {
 } from './entity-core-boundary';
 import { pruneFinalizedValidatorJHistory } from '../../jurisdiction/machine/local-history';
 import { cloneCrossJurisdictionRoute } from '../../extensions/cross-j';
+import type { CrontabState } from '../../entity/scheduler/types';
 
 export {
   hydrateAccountDocFromStorage,
@@ -31,7 +32,14 @@ export type EntityStorageTreeField =
   | 'pendingCrossJurisdictionFillAcks'
   | 'crossJurisdictionBookAdmissions';
 
-export type StorageEntityScalarDoc = Omit<StorageEntityCoreDoc, EntityStorageTreeField>;
+type StorageCrontabScalarState = Pick<CrontabState, 'tasks'>;
+
+export type StorageEntityScalarDoc = Omit<
+  StorageEntityCoreDoc,
+  EntityStorageTreeField | 'crontabState'
+> & {
+  crontabState?: StorageCrontabScalarState;
+};
 
 /**
  * Static Entity envelope only. Growing collections are the authoritative RAM
@@ -57,7 +65,10 @@ export const projectEntityScalarDoc = (state: EntityState): StorageEntityScalarD
   ...withDefinedProperty('leaderState', state.leaderState),
   ...withDefinedProperty('deferredAccountProposals', state.deferredAccountProposals),
   ...withDefinedProperty('settlementContinuations', state.settlementContinuations),
-  ...withDefinedProperty('crontabState', state.crontabState),
+  ...withDefinedProperty(
+    'crontabState',
+    state.crontabState ? { tasks: state.crontabState.tasks } : undefined,
+  ),
   ...withDefinedProperty('jBatchState', state.jBatchState),
   ...withDefinedProperty('entityProviderActionState', state.entityProviderActionState),
   ...withDefinedProperty('consumptionAccumulator', state.consumptionAccumulator),
@@ -80,27 +91,39 @@ export const projectEntityScalarDoc = (state: EntityState): StorageEntityScalarD
 
 export const projectEntityCoreDoc = (
   state: EntityState,
-): StorageEntityCoreDoc => ({
-  ...projectEntityScalarDoc(state),
-  htlcRoutes: projectStorageMap(state.htlcRoutes),
-  lockBook: projectStorageMap(state.lockBook),
-  ...withDefinedProperty(
-    'crossJurisdictionSwaps',
-    state.crossJurisdictionSwaps && projectCrossJurisdictionRoutes(state.crossJurisdictionSwaps),
-  ),
-  ...withDefinedProperty(
-    'crossJurisdictionAuthorizations',
-    state.crossJurisdictionAuthorizations && projectCrossJurisdictionRoutes(state.crossJurisdictionAuthorizations),
-  ),
-  ...withDefinedProperty(
-    'pendingCrossJurisdictionFillAcks',
-    state.pendingCrossJurisdictionFillAcks && projectStorageMap(state.pendingCrossJurisdictionFillAcks),
-  ),
-  ...withDefinedProperty(
-    'crossJurisdictionBookAdmissions',
-    state.crossJurisdictionBookAdmissions && projectStorageMap(state.crossJurisdictionBookAdmissions),
-  ),
-});
+): StorageEntityCoreDoc => {
+  const { crontabState: _storageCrontabState, ...scalar } = projectEntityScalarDoc(state);
+  return {
+    ...scalar,
+    ...withDefinedProperty(
+      'crontabState',
+      state.crontabState && {
+        tasks: projectStorageMap(state.crontabState.tasks),
+        // Portable recovery cannot serialize private Patricia fields. Flatten
+        // this one cold boundary; hydration rebuilds the canonical live root.
+        hooks: projectStorageMap(state.crontabState.hooks),
+      },
+    ),
+    htlcRoutes: projectStorageMap(state.htlcRoutes),
+    lockBook: projectStorageMap(state.lockBook),
+    ...withDefinedProperty(
+      'crossJurisdictionSwaps',
+      state.crossJurisdictionSwaps && projectCrossJurisdictionRoutes(state.crossJurisdictionSwaps),
+    ),
+    ...withDefinedProperty(
+      'crossJurisdictionAuthorizations',
+      state.crossJurisdictionAuthorizations && projectCrossJurisdictionRoutes(state.crossJurisdictionAuthorizations),
+    ),
+    ...withDefinedProperty(
+      'pendingCrossJurisdictionFillAcks',
+      state.pendingCrossJurisdictionFillAcks && projectStorageMap(state.pendingCrossJurisdictionFillAcks),
+    ),
+    ...withDefinedProperty(
+      'crossJurisdictionBookAdmissions',
+      state.crossJurisdictionBookAdmissions && projectStorageMap(state.crossJurisdictionBookAdmissions),
+    ),
+  };
+};
 
 export type EntityReplicaCoreViewDoc = StorageEntityCoreDoc & {
   signerId: string;

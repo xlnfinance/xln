@@ -17,7 +17,6 @@ import {
   assertEntityProposalCapacity,
   executeProposal,
   generateProposalId,
-  pruneTerminalEntityProposals,
 } from '../../processing/proposals';
 import {
   assertEntityProposalAction,
@@ -124,7 +123,6 @@ export const handleProposeEntityTx = (
     votes: new Map<string, 'yes' | 'no' | 'abstain' | { choice: 'yes' | 'no' | 'abstain'; comment: string }>([
       [proposer, 'yes'],
     ]),
-    status: 'pending',
     created: entityState.timestamp,
   };
 
@@ -132,7 +130,6 @@ export const handleProposeEntityTx = (
   let newEntityState = prepareEntityTxState(entityState, mutableFrameState);
 
   if (shouldExecuteImmediately) {
-    proposal.status = 'executed';
     newEntityState = executeProposal(newEntityState, proposal);
     basicLog.debug('proposal.executed_immediately', {
       proposal: shortHash(proposalId),
@@ -140,6 +137,8 @@ export const handleProposeEntityTx = (
       proposerPower: proposerPower.toString(),
       threshold: entityState.config.threshold.toString(),
     });
+    // Presence is pending. Certified frame history records completion; keeping
+    // a terminal proposal here would re-hash the same body forever.
   } else {
     basicLog.debug('proposal.pending_votes', {
       proposal: shortHash(proposalId),
@@ -147,14 +146,13 @@ export const handleProposeEntityTx = (
       proposerPower: proposerPower.toString(),
       threshold: entityState.config.threshold.toString(),
     });
+    newEntityState.proposals.set(proposalId, proposal);
   }
 
-  newEntityState.proposals.set(proposalId, proposal);
-  newEntityState = pruneTerminalEntityProposals(newEntityState);
   return {
     newState: newEntityState,
     outputs: [],
-    ...(proposal.status === 'executed' && action.type === 'entity_transaction'
+    ...(shouldExecuteImmediately && action.type === 'entity_transaction'
       ? { approvedEntityTxs: structuredClone(action.data.txs) }
       : {}),
   };
@@ -171,7 +169,6 @@ export const handleVoteEntityTx = (
   const proposal = entityState.proposals.get(proposalId);
 
   if (!proposal) throw new Error(`ENTITY_PROPOSAL_VOTE_TARGET_MISSING:${proposalId}`);
-  if (proposal.status !== 'pending') throw new Error(`ENTITY_PROPOSAL_VOTE_NOT_PENDING:${proposalId}:${proposal.status}`);
   const shares = resolveCanonicalEntityBoardShares(entityState.config);
   if (!shares.bySigner.has(voter)) throw new Error(`ENTITY_PROPOSAL_VOTER_UNKNOWN:${voter}`);
   const board = resolveEntityCommandBoard(env, entityState);
@@ -216,12 +213,10 @@ export const handleVoteEntityTx = (
   });
 
   if (totalYesPower >= entityState.config.threshold) {
-    updatedProposal.status = 'executed';
     const executedState = executeProposal(newEntityState, updatedProposal);
-    executedState.proposals.set(proposalId, updatedProposal);
-    const boundedState = pruneTerminalEntityProposals(executedState);
+    executedState.proposals.delete(proposalId);
     return {
-      newState: boundedState,
+      newState: executedState,
       outputs: [],
       ...(updatedProposal.action.type === 'entity_transaction'
         ? { approvedEntityTxs: structuredClone(updatedProposal.action.data.txs) }
@@ -232,9 +227,8 @@ export const handleVoteEntityTx = (
   // Reject as soon as the remaining possible yes power cannot reach the exact
   // threshold configured by this board.
   if (totalNoPower >= noPowerToBlockQuorum) {
-    updatedProposal.status = 'rejected';
-    newEntityState.proposals.set(proposalId, updatedProposal);
-    return { newState: pruneTerminalEntityProposals(newEntityState), outputs: [] };
+    newEntityState.proposals.delete(proposalId);
+    return { newState: newEntityState, outputs: [] };
   }
 
   newEntityState.proposals.set(proposalId, updatedProposal);

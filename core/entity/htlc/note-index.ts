@@ -11,7 +11,6 @@ type NoteBinding = Readonly<{
 
 const nestedEntityTxs = (
   tx: EntityTx,
-  replica: EntityReplica,
 ): readonly EntityTx[] => {
   switch (tx.type) {
     case 'entityCommand':
@@ -24,13 +23,11 @@ const nestedEntityTxs = (
       return tx.data.action.type === 'entity_transaction'
         ? tx.data.action.data.txs
         : [];
-    case 'vote': {
-      const proposal = replica.state.proposals.get(tx.data.proposalId);
-      return proposal?.status === 'executed'
-        && proposal.action.type === 'entity_transaction'
-        ? proposal.action.data.txs
-        : [];
-    }
+    // Vote completion deletes the pending proposal from live state. Private
+    // HTLC notes are indexed from the exact certified frame context below;
+    // terminal proposal bodies belong only to Entity history/WAL.
+    case 'vote':
+      return [];
     default:
       return [];
   }
@@ -70,7 +67,6 @@ const putNote = (
 };
 
 const indexTx = (
-  replica: EntityReplica,
   notes: Map<HtlcNoteKey, string>,
   tx: EntityTx,
 ): void => {
@@ -78,7 +74,7 @@ const indexTx = (
   if (binding) {
     putNote(notes, `hashlock:${binding.hashlock}`, binding.description);
   }
-  for (const nested of nestedEntityTxs(tx, replica)) indexTx(replica, notes, nested);
+  for (const nested of nestedEntityTxs(tx)) indexTx(notes, nested);
 };
 
 /**
@@ -91,7 +87,7 @@ export const indexCertifiedEntityFrameNotes = (
   frame: Pick<EntityFrame, 'txs'> & { entityContext?: EntityInfraContext },
 ): void => {
   const notes = replica.htlcNotes ?? new Map<HtlcNoteKey, string>();
-  for (const tx of frame.txs) indexTx(replica, notes, tx);
+  for (const tx of frame.txs) indexTx(notes, tx);
   // The final recipient learns the private note only by decrypting its onion;
   // it never sees the sender's htlcPayment tx. Index the exact certified
   // prepared outcome so the later ACK-backed HtlcReceived event can attach it.

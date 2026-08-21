@@ -108,7 +108,7 @@
       <div class="rows" data-testid="settings-consensus-proposals">
         {#each view.proposals as proposal (proposal.id)}
           <div class="proposal">
-            <div><strong>{proposal.actionType}</strong><b class:ok={proposal.status === 'executed'}>{proposal.status}</b></div>
+            <div><strong>{proposal.actionType}</strong><b>pending</b></div>
             <code title={proposal.id}>{shortHash(proposal.id)}</code>
             <small>{proposal.yesShares.toString()} yes · {proposal.noShares.toString()} no · {proposal.abstainShares.toString()} abstain · threshold {view.threshold.toString()}</small>
             {#each proposal.payments as payment, paymentIndex (`${proposal.id}:${paymentIndex}`)}
@@ -180,7 +180,6 @@
   .row, .proposal { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; border-top: 1px solid color-mix(in srgb, var(--theme-card-border, #27272a) 70%, transparent); padding-top: 8px; }
   .row code { margin-right: auto; }
   b { border: 1px solid color-mix(in srgb, var(--theme-accent, #fbbf24) 35%, transparent); border-radius: 999px; color: var(--theme-accent, #fbbf24); font-size: 10px; padding: 3px 6px; text-transform: uppercase; }
-  b.ok { color: #34d399; }
   .proposal { display: grid; }
   .proposal div { display: flex; justify-content: space-between; gap: 8px; }
   .payment-intent { display: grid; gap: 9px; margin-top: 4px; border: 1px solid color-mix(in srgb, var(--theme-accent, #fbbf24) 24%, var(--theme-card-border, #27272a)); border-radius: 7px; background: color-mix(in srgb, var(--theme-accent, #fbbf24) 4%, transparent); padding: 11px; }

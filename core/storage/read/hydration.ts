@@ -152,7 +152,13 @@ export const hydrateEntityStateFromStorage = (options: {
     ...withDefinedProperty('leaderState', core.leaderState),
     ...withDefinedProperty('deferredAccountProposals', core.deferredAccountProposals),
     ...withDefinedProperty('settlementContinuations', core.settlementContinuations),
-    ...withDefinedProperty('crontabState', core.crontabState),
+    ...withDefinedProperty(
+      'crontabState',
+      core.crontabState && {
+        tasks: core.crontabState.tasks,
+        hooks: PersistentEntityCollectionMap.from(core.crontabState.hooks),
+      },
+    ),
     ...withDefinedProperty('jBatchState', core.jBatchState),
     ...withDefinedProperty('entityProviderActionState', core.entityProviderActionState),
     ...withDefinedProperty('consumptionAccumulator', core.consumptionAccumulator),
