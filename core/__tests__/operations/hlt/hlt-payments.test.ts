@@ -39,7 +39,7 @@ describe('hlt payment population', () => {
     );
     expect(laneSource).toContain('waitForOwnReceiveReadyProfile');
     expect(laneSource).toContain('lane.runtime.control.waitForDirectEntityRoutes([options.hubIdentity.entityId])');
-    expect(laneSource).toContain('options.hub.control.waitForDirectEntityRoutes([lane.identity.entityId])');
+    expect(laneSource).not.toContain('options.hub.control.waitForDirectEntityRoutes');
     expect(readFileSync(
       join(import.meta.dir, '../../../scripts/operations/hlt/lanes/lane-runtimes.ts'),
       'utf8',
