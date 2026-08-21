@@ -206,7 +206,7 @@ describe technical order only.
 
 ### WP0 — Discover the live baseline
 
-**Status:** `READY`
+**Status:** `IN PROGRESS — ROUTE, CAPABILITY, AND GENERATED-INPUT OWNERSHIP SEEDED`
 
 - Inventory routes, edge exclusions, static assets, generated inputs, storage,
   workers, native/PWA consumers, tests, and major capability registries.
