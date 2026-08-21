@@ -183,8 +183,10 @@ export const publishAccountOverlay = (
   for (const key of keys) {
     if (ACCOUNT_LIVE_ENVELOPE.has(key)) continue;
     const value = prepared[key];
-    if (value === undefined) delete live[key];
-    else (live as unknown as Record<string, unknown>)[key] = value;
+    const applied = value === undefined
+      ? Reflect.deleteProperty(live, key)
+      : Reflect.set(live, key, value);
+    if (!applied) throw new Error(`ACCOUNT_OVERLAY_PUBLISH_FAILED:${String(key)}`);
   }
   overlayLog.debug('overlay.folded', {
     from: live.proofHeader.fromEntity.slice(-8),

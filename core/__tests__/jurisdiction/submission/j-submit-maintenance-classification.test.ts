@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { splitJOutboxForDurableSubmit } from '../../../runtime/j-submit/j-submit-state';
-import { registerPendingCommittedJOutbox } from '../../../runtime/j-submit/j-submit-state';
+import { splitJOutboxForDurableSubmit , registerPendingCommittedJOutbox } from '../../../runtime/j-submit/j-submit-state';
 import { createEmptyEnv } from '../../../runtime';
 import {
   applyGovernanceSubmitResultRuntimeTx,

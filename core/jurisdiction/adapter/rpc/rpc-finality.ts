@@ -1,5 +1,4 @@
-import { DEV_CHAIN_IDS } from '../chain-ids';
-import { isTronChainId } from '../chain-ids';
+import { DEV_CHAIN_IDS , isTronChainId } from '../chain-ids';
 import type { JAdapterConfig } from '../types';
 
 export const resolveRpcFinalityDepth = (

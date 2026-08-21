@@ -1,7 +1,7 @@
 import { getCachedSignerPrivateKey } from '../../../account/crypto';
 import { safeStringify } from '../../../protocol/serialization';
 import type { RuntimeInputApplyResult } from '../../../runtime/frame/apply';
-import type { RuntimeReplica } from '../../../runtime/types';
+import type { RuntimeReplica , RoutedEntityInput } from '../../../runtime/types';
 import { computeStoragePostStateHash } from '../..';
 import { computeRuntimePostStateComponentDigests } from '../../hashes';
 import { computeCanonicalStateHashFromEnv } from '../../canonical-hash';
@@ -28,7 +28,6 @@ import {
 } from '../machine';
 import { encodeCanonicalConsensusValue } from '../../../protocol/serialization/canonical-consensus-value';
 import { prepareRuntimeOutputPayloadRows } from '../../wal/outbox-payload';
-import type { RoutedEntityInput } from '../../../runtime/types';
 
 export const assertRecoveryOutboxMatches = (
   expectedOutputs: readonly RoutedEntityInput[],

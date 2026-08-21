@@ -1,5 +1,4 @@
-import type { AccountTx } from '../../../../types/account';
-import type { AccountOutput } from '../../../../types/account';
+import type { AccountTx , AccountOutput } from '../../../../types/account';
 import type { AccountJClaimSession } from '../../../j-claims/j-claim-session';
 import { getAccountPerspective } from '../../../state/perspective';
 import { applyAccountJClaimTransition } from '../../../j-claims/j-claim-transition';

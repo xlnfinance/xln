@@ -1,6 +1,5 @@
 import type { JInput } from '../../../jurisdiction/machine/input';
-import type { JReplica } from '../../../types/jurisdiction-runtime';
-import type { JTx } from '../../../types/jurisdiction-runtime';
+import type { JReplica , JTx } from '../../../types/jurisdiction-runtime';
 import {
   toEntityId,
   toJId,

@@ -1,5 +1,4 @@
-import type { AccountFrame, AccountPeerInput, AccountTx } from '../../types/account';
-import type { AccountOutput } from '../../types/account';
+import type { AccountFrame, AccountPeerInput, AccountTx , AccountOutput } from '../../types/account';
 import type { HankoString } from '../../types/hanko';
 import type { AccountJClaimNodeChanges } from '../../types/finance/account-j-claims';
 import type { AccountDisputeFinalityResult } from '../settlement/j-finality';

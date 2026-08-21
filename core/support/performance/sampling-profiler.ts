@@ -18,6 +18,12 @@ type SamplingProfilerModule = {
   samplingProfilerStackTraces: () => unknown;
 };
 
+const isSamplingProfilerModule = (value: unknown): value is SamplingProfilerModule =>
+  typeof value === 'object'
+  && value !== null
+  && typeof Reflect.get(value, 'startSamplingProfiler') === 'function'
+  && typeof Reflect.get(value, 'samplingProfilerStackTraces') === 'function';
+
 let dumpSamplingProfile: ((reason: string) => void) | null = null;
 
 const resolveDumpDirectory = (): string =>
@@ -32,12 +38,11 @@ export const startRuntimeSamplingProfiler = async (label: string): Promise<boole
   if (dumpSamplingProfile) return true;
   let jsc: SamplingProfilerModule;
   try {
-    const imported = await import('bun:jsc');
-    const candidate = imported as unknown as Partial<SamplingProfilerModule>;
-    if (typeof candidate.startSamplingProfiler !== 'function' || typeof candidate.samplingProfilerStackTraces !== 'function') {
+    const candidate: unknown = await import('bun:jsc');
+    if (!isSamplingProfilerModule(candidate)) {
       throw new Error('SAMPLING_PROFILER_API_MISSING');
     }
-    jsc = candidate as SamplingProfilerModule;
+    jsc = candidate;
   } catch (error) {
     profilerLog.warn('sampling.unavailable', {
       label,

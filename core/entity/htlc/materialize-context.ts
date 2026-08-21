@@ -4,7 +4,7 @@ import { accountInputProposal } from '../../account/consensus/flush';
 import type { AccountTx } from '../../types/account';
 import type { EntityTx } from '../../types/entity-tx';
 import { preparedHtlcBindingKey, type HtlcPreparedInfraContext, type PreparedHtlcEntry } from '../../types/entity/htlc-infra-context';
-import { computeHtlcEnvelopeContextHash } from '../../protocol/htlc/codec/envelope';
+import { computeHtlcEnvelopeContextHash , unwrapEnvelope, validateEnvelope } from '../../protocol/htlc/codec/envelope';
 import {
   assertEntityEncryptionKeypair,
   assertOpaqueHtlcCiphertext,
@@ -12,7 +12,6 @@ import {
   HtlcCiphertextAuthenticationError,
 } from '../../protocol/htlc/multi-recipient';
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../protocol/htlc/codec/onion-layer';
-import { unwrapEnvelope, validateEnvelope } from '../../protocol/htlc/codec/envelope';
 import type { EntityState } from '../types';
 import { findAccountKey } from '../tx/account-key';
 import { HTLC } from '../../config/constants';

@@ -4,8 +4,7 @@ import { handleJAbortSentBatch } from '../../../entity/tx/handlers/j-batch/j-abo
 import { createEmptyBatch } from '../../../jurisdiction/machine/batch';
 import { createEmptyEnv } from '../../../runtime';
 import { addr, entity, makeJurisdiction, makeState } from '../../helpers/cross-j';
-import { EntityAccountCandidateMap } from '../../../entity/state/persistent-account-map';
-import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { EntityAccountCandidateMap , PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { requirePersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 const LEFT = entity('11');

@@ -47,8 +47,7 @@ import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } f
 import type { Profile } from '../../../entity/profile';
 import { buildLocalEntityProfile } from '../../../network/p2p/gossip/helper';
 import { announceCertifiedLocalProfiles } from '../../../network/p2p/gossip/local-profile-lifecycle';
-import { canonicalJurisdictionEventsHash } from '../../../jurisdiction/machine/event-observation';
-import { getJEventJurisdictionRef } from '../../../jurisdiction/machine/event-observation';
+import { canonicalJurisdictionEventsHash , getJEventJurisdictionRef } from '../../../jurisdiction/machine/event-observation';
 import { foldJHistoryRoot, EMPTY_J_HISTORY_ROOT } from '../../../jurisdiction/machine/history-consensus';
 import { buildLocalJPrefixAttestation } from '../../../jurisdiction/machine/history/j-prefix-consensus';
 import { recordValidatorJHistory } from '../../../jurisdiction/machine/local-history';

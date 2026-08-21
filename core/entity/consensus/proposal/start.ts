@@ -40,7 +40,7 @@ import {
 } from '../state-root';
 import { fitEntityProposalToWireBudget, recordEntityWireBudgetFitHint } from './wire-budget';
 import { assertEstimatedSealedEntityFrameWire, validateProposedEntityFrame } from '../frame/validation';
-import { timePerfPhase } from '../../../support/performance/profile';
+import { timePerfPhase , cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';
@@ -52,7 +52,6 @@ import {
 } from '../authority/board-handover';
 import { finalizeCommitNotification } from '../commit/finalization';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
-import { cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
 import { entityFrameProfileEnabled, entityFrameSlowMs } from '../frame/profile';
 import { getPerfMs } from '../../../support/time';
 

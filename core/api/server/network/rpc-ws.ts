@@ -21,8 +21,7 @@ import type {
   RuntimeAdapterFrameReceiptResponse,
   RuntimeAdapterPaymentRoutesResponse,
   RuntimeAdapterReadQuery,
-} from '../../runtime-adapter/types';
-import type { RuntimeAdapterRequest } from '../../runtime-adapter/types';
+ RuntimeAdapterRequest } from '../../runtime-adapter/types';
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { RelaySocket } from './relay-direct';
 

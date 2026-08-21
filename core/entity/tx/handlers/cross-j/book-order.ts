@@ -1,6 +1,6 @@
 import { haltRuntimeFailure } from "../../../../protocol/errors/failure-taxonomy";
 
-import { normalizeEntityRef } from '../../account-key';
+import { normalizeEntityRef , findAccountKey } from '../../account-key';
 import { getTokenInfo } from '../../../../account/utils';
 import {
   deterministicEntityTimestamp,
@@ -42,7 +42,6 @@ import {
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import { getEntityAccountForWrite } from '../../../state/persistent-account-map';
-import { findAccountKey } from '../../account-key';
 import {
   mergeCrossJurisdictionRoute,
   validateCrossJurisdictionRouteTransition,

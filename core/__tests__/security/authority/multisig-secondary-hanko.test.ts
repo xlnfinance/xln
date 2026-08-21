@@ -57,16 +57,15 @@ import type { EntityInput, EntityReplica, EntityState, JurisdictionConfig } from
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
-import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
+import { PersistentEntityAccountMap ,
+  getEntityAccountForWrite,
+  putEntityAccountCandidate,
+} from '../../../entity/state/persistent-account-map';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
 import {
   createEntityFrameCandidateState,
 } from '../../../entity/state-clone';
-import {
-  getEntityAccountForWrite,
-  putEntityAccountCandidate,
-} from '../../../entity/state/persistent-account-map';
 import { refreshRuntimeCheckpointLineageForEntity } from '../../../storage/replica/entity-lineage';
 
 const seed = 'multisig-secondary-hanko alpha beta gamma';

@@ -7,7 +7,7 @@ import {
   registerSignerKey,
   signAccountFrame,
 } from '../../../account/crypto';
-import { provisionTestEntityEncryptionKey } from '../../../qa/entity-creation-fixture';
+import { provisionTestEntityEncryptionKey , createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { buildSignedEntityCommand } from '../../../entity/command';
 import { signedEntityCommandTx } from '../../../entity/command/command-codec';
 import { selectPreparedFrameFromCertificate } from '../../../entity/consensus';
@@ -31,7 +31,6 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { initCrontab } from '../../../entity/scheduler';
 import { applyRuntimeTx } from '../../../runtime/tx/tx-handlers';
 import { createEmptyEnv } from '../../../runtime';
-import { createTestEntityImportRuntimeTx } from '../../../qa/entity-creation-fixture';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
 import { decodeBuffer } from '../../../storage/codec/codec';
 import {

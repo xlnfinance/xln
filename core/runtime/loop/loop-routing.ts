@@ -2,7 +2,13 @@ import { extractEntityId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../support/logger.ts';
 import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
 import { safeStringify } from '../../protocol/serialization';
-import { runtimeInputRequiresOutboxCapacity } from '../mempool/input-validation.ts';
+import { runtimeInputRequiresOutboxCapacity ,
+  MAX_RUNTIME_J_INPUT_BYTES,
+  MAX_RUNTIME_J_INPUTS,
+  MAX_RUNTIME_J_TXS,
+  MAX_RUNTIME_J_TXS_PER_JURISDICTION,
+  validateRuntimeInputShapeAndLimits,
+} from '../mempool/input-validation.ts';
 import {
   createRuntimeOutputRoutingDeps,
   registerEntityRuntimeHintWithDeps,
@@ -28,13 +34,6 @@ import {
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
 import { assertScheduledWakeTxAuthorized } from '../mempool/scheduled-wake.ts';
 import { assertRuntimeCommandReady } from '../replica/lifecycle.ts';
-import {
-  MAX_RUNTIME_J_INPUT_BYTES,
-  MAX_RUNTIME_J_INPUTS,
-  MAX_RUNTIME_J_TXS,
-  MAX_RUNTIME_J_TXS_PER_JURISDICTION,
-  validateRuntimeInputShapeAndLimits,
-} from '../mempool/input-validation.ts';
 import { MAX_PENDING_NETWORK_OUTPUTS, sendEntityInputWithRouting } from '../delivery/topology/output-routing.ts';
 import { normalizeDbNamespace } from '../../storage/runtime-dbs.ts';
 import { decodeRoutedEntityInput } from '../delivery/topology/routing-validation.ts';

@@ -27,8 +27,7 @@ import {
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { JurisdictionConfig } from '../../../entity/types';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
-import { attachLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
-import { getLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
+import { attachLiveJAdapter , getLiveJAdapter } from '../../../runtime/j-submit/live-jadapters';
 import { markLocalRuntimeAdapterCommandTx } from '../../../runtime/command/frontier-auth';
 import { runtimeAdapterCommandLaneId } from '../../../runtime/command/frontier';
 import { dbRootPath } from '../../../runtime/replica/platform';

@@ -2,7 +2,7 @@ import {
   assertCrossJurisdictionPriceImprovementMode,
   getCrossJurisdictionCommittedFillAmounts,
   getCrossJurisdictionCommittedProofRatio,
-} from '../../../../../extensions/cross-j';
+ cloneCrossJurisdictionSwapOfferRoute } from '../../../../../extensions/cross-j';
 import type {
   CrossSwapFillAckAdmission,
   CrossSwapFillAckResult,
@@ -10,7 +10,6 @@ import type {
   PreparedCrossSwapFillAck,
 } from './types';
 import type { AccountDraftReplica } from '../../../../state/account-state-draft';
-import { cloneCrossJurisdictionSwapOfferRoute } from '../../../../../extensions/cross-j';
 import { accountTxValidationRejected } from '../../../apply-result';
 
 const reject = (

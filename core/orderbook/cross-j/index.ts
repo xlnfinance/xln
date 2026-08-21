@@ -3,7 +3,6 @@ import { haltRuntimeFailure } from "../../protocol/errors/failure-taxonomy";
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeOverlayRecord } from '../../types/account';
-import type { OrderbookExtState } from '..';
 import {
   applyCommand,
   getBookOrder,
@@ -12,6 +11,7 @@ import {
   MAX_ORDERBOOK_QTY_LOTS,
   reduceBookOrderQuantity,
   replaceOrderbookPair,
+  type OrderbookExtState,
   type Side,
 } from '..';
 

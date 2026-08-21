@@ -7,8 +7,7 @@ import {
   isSourceRevealWindowExpired,
   queueHashLadderRevealRegistration,
 } from '../../../entity/tx/j-events-htlc';
-import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
-import type { CrossJurisdictionPullLeg } from '../../../types/cross-jurisdiction';
+import type { CrossJurisdictionSwapRoute , CrossJurisdictionPullLeg } from '../../../types/cross-jurisdiction';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
 import {
   captureDisputeArgumentSnapshot,

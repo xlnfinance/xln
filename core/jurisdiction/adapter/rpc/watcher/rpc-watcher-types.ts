@@ -11,8 +11,7 @@ import type {
   PendingWatcherJBlockMap,
   PendingWatcherJHistoryRange,
 } from '../../watcher';
-import type { WatchedErc20Token } from '../../rpc-watcher-inputs';
-import type { AuthenticatedTxLocation } from '../../rpc-watcher-inputs';
+import type { WatchedErc20Token , AuthenticatedTxLocation } from '../../rpc-watcher-inputs';
 
 type RpcWatcherScanProgress = {
   scannedThroughHeight: number;

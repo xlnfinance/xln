@@ -26,8 +26,7 @@ import type {
 } from '../../storage/types';
 import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../../support/sorted-map-index';
 import { RuntimeAdapterError } from './errors';
-import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './codec';
-import { detachRuntimeAdapterPayload } from './codec';
+import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes , detachRuntimeAdapterPayload } from './codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
 import { copyAccountStateDomain } from '../../protocol/state/account-input-clone';
 import { buildRuntimeRecoveryBundle } from '../../storage/recovery/bundle';

@@ -1,5 +1,4 @@
-import type { AccountReplica, AccountTx, Delta } from '../../types/account';
-import type { AccountOutput } from '../../types/account';
+import type { AccountReplica, AccountTx, Delta , AccountOutput } from '../../types/account';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import { createStructuredLogger } from '../../support/logger';
 import { txFingerprint } from '../../protocol/state/tx-multiset';

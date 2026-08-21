@@ -37,11 +37,10 @@ import {
   registerSignerKey,
 } from '../../account/crypto';
 import type { JAdapter } from '../../jurisdiction/adapter/types';
-import type { JurisdictionConfig } from '../../entity/types';
+import type { JurisdictionConfig , EntityReplica } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { readCliOption } from '../../config/cli';
 import { buildCrossJurisdictionSwapSubmission } from '../../runtime/j-submit/api';
-import type { EntityReplica } from '../../entity/types';
 import { createTestEntityImportRuntimeTx } from '../../qa/entity-creation-fixture';
 import { advanceScenarioTime } from '../harness/helpers';
 import {

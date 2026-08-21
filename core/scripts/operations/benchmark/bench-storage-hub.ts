@@ -14,8 +14,7 @@ import {
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { converge } from '../../../scenarios/harness/helpers';
 import { serializeTaggedJson } from '../../../protocol/serialization';
-import { inspectStorageDb, loadEntityStateFromStorageDb } from '../../../runtime';
-import {
+import { inspectStorageDb, loadEntityStateFromStorageDb ,
   applyRuntimeInput,
   closeInfraDb,
   closeRuntimeDb,

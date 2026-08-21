@@ -13,7 +13,7 @@ import { getEntityAccountForWrite, putEntityAccountCandidate } from '../../../..
 import { prepareEntityTxState } from '../../../../state-clone';
 import { addMessage } from '../../../../frame-events';
 import { findAccountKey, normalizeEntityRef } from '../../../account-key';
-import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../../../account/config/defaults';
+import { DEFAULT_ACCOUNT_TOKEN_IDS , resolveJurisdictionRebalanceDefaults } from '../../../../../account/config/defaults';
 import { normalizeAccountWatchSeed } from '../../../../../protocol/identity/account-watch-seed';
 import { createStructuredLogger, shortId } from '../../../../../support/logger';
 import {
@@ -27,7 +27,6 @@ import { applyAccountInput } from '../../../../../account/consensus';
 import { createLocalAccountInput } from '../../../../../account/input';
 import { createEmptyAccountJClaimAccumulator } from '../../../../../account/j-claims/j-claim-accumulator';
 import { MAX_PROFILE_ADVERTISED_ACCOUNTS } from '../../../../profile/profile-descriptor';
-import { resolveJurisdictionRebalanceDefaults } from '../../../../../account/config/defaults';
 import { buildHubRebalancePolicyTx } from './admin';
 import { canonicalAccountDisputeConfig } from '../../../../../account/config/dispute-config';
 

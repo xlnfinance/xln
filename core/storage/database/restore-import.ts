@@ -46,8 +46,7 @@ import {
   keySnapshotGraph,
 } from '../keys';
 import { readStorageFrameRecord, readStorageHead } from '../read/read';
-import { verifyStorageSnapshotIntegrity } from '../read/verify';
-import { verifyStorageTailIntegrity } from '../read/verify';
+import { verifyStorageSnapshotIntegrity , verifyStorageTailIntegrity } from '../read/verify';
 import { projectReplayVerifiableRuntimePostStateView } from '../wal/snapshot';
 import { prepareRuntimeMachineGraphRows } from '../wal/runtime-machine-graph';
 import { prepareRuntimeOutputPayloadRows } from '../wal/outbox-payload';

@@ -20,7 +20,7 @@ import type {
   NormalizedOrderbookOffer,
   SameJurisdictionWorkingOrderbookOffer,
 } from '../../../../../../orderbook/swap-execution';
-import { normalizeSwapOfferForOrderbook } from '../../../../../../orderbook/swap-execution';
+import { normalizeSwapOfferForOrderbook , swapKey } from '../../../../../../orderbook/swap-execution';
 import {
   hasQueuedSwapResolveForEntityState,
   queueUniqueSwapResolveForEntityState,
@@ -33,7 +33,6 @@ import {
   parseNamespacedOrderId,
   resolvePairBandReference,
 } from '../helpers';
-import { swapKey } from '../../../../../../orderbook/swap-execution';
 
 const orderbookSameLog = createStructuredLogger('orderbook.same');
 

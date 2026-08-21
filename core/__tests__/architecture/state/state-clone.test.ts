@@ -10,20 +10,19 @@ import {
   commitEntityAccountCandidate,
   EntityAccountCandidateMap,
   getEntityCandidateValueForWrite,
-} from '../../../entity/state/candidate-map';
-import { getEntityAccountForWrite } from '../../../entity/state/persistent-account-map';
+ EntityCandidateMap } from '../../../entity/state/candidate-map';
+import { getEntityAccountForWrite , PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { getEntityCollectionValueForWrite } from '../../../entity/state/persistent-collection-map';
 import {
   computeCanonicalEntityConsensusStateHash,
   computeCanonicalEntityConsensusStateHashCold,
-} from '../../../entity/consensus/state-root';
+ computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import {
   applyRuntimeOwnedEntityFrame,
 } from '../../../entity/consensus/frame/application';
 import { materializeEntityInfraContext } from '../../../entity/consensus/proposal/infra-context';
 import { prepareEntityInputIngress } from '../../../entity/consensus/input/ingress';
 import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
-import { EntityCandidateMap } from '../../../entity/state/candidate-map';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 import {
   applyCommand,
@@ -37,8 +36,6 @@ import { validateEntityReplica } from '../../../entity/replica/replica-validatio
 import { createEmptyEnv } from '../../../runtime';
 import type { AccountReplica } from '../../../types/account';
 import type { EntityState } from '../../../entity/types';
-import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
-import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 const TEST_RIGHT_ENTITY_ID = `0x${'bb'.repeat(32)}`;

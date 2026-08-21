@@ -1,6 +1,5 @@
 import { ethers } from 'ethers';
-import type { JurisdictionEvent } from '../../types/jurisdiction-events';
-import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
+import type { JurisdictionEvent , DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
 import { getJurisdictionIdentityRef } from './jurisdiction-runtime';
 import {
   canonicalJurisdictionEventKey,

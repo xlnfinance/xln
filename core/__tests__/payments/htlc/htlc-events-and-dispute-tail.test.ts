@@ -20,12 +20,10 @@ import type { EntityCandidateEffect, EntityReplica } from '../../../entity/types
 import {
   getEntityAccountForWrite,
   PersistentEntityAccountMap,
-} from '../../../entity/state/persistent-account-map';
+ EntityAccountCandidateMap } from '../../../entity/state/persistent-account-map';
 import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { createEntityFrameCandidateState } from '../../../entity/state-clone';
-import { EntityAccountCandidateMap } from '../../../entity/state/persistent-account-map';
-import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
-import { requirePersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { PersistentAccountStateMap , requirePersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 const makeReplica = (entityId: string, counterpartyId: string): EntityReplica => {
   const account: AccountReplica = {

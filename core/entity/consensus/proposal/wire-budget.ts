@@ -1,5 +1,5 @@
 import type { EntityInfraContext } from '../../../types/entity/infra-context';
-import type { EntityReplica } from '../../types';
+import type { EntityReplica , EntityFrameEvent } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JPrefixCertificate } from '../../../types/jurisdiction-events';
@@ -12,7 +12,6 @@ import { getPrevFrameHash } from '../frame/lineage';
 import { entityLog } from '../entity-log';
 import { timePerfPhase } from '../../../support/performance/profile';
 import { hasReplayEntityContext, materializeEntityInfraContext } from './infra-context';
-import type { EntityFrameEvent } from '../../types';
 
 const DUMMY_ROOT = `0x${'00'.repeat(32)}`;
 const MAX_FIT_ATTEMPTS = 16;

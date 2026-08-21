@@ -13,8 +13,7 @@ import {
 } from '../../../api/server/network/relay-direct';
 import type { DeliverableEntityInput, RuntimeReplica, RuntimeEntityInputsEnvelope } from '../../../runtime/types';
 import { createEmptyEnv } from '../../../runtime';
-import { signRuntimeEntityInputsEnvelope } from '../../../runtime/admit/entity-input-envelope-auth.ts';
-import { assertRuntimeEntityInputsEnvelopeSource } from '../../../runtime/admit/entity-input-envelope-auth.ts';
+import { signRuntimeEntityInputsEnvelope , assertRuntimeEntityInputsEnvelopeSource } from '../../../runtime/admit/entity-input-envelope-auth.ts';
 import { decodeRuntimeEntityInputsEnvelope } from '../../../network/p2p/auth/entity-input-envelope';
 
 type SentMessage = {

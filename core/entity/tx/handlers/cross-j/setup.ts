@@ -23,7 +23,7 @@ import {
   validateCrossJurisdictionLocalBinding,
   validateCrossJurisdictionRouteTransition,
 } from '../../j-events-htlc/cross-jurisdiction-helpers';
-import { normalizeEntityRef } from '../../account-key';
+import { normalizeEntityRef , findAccountKey } from '../../account-key';
 import { prepareEntityTxState } from '../../../state-clone';
 import { ensureEntityCollectionCandidate } from '../../../state/persistent-collection-map';
 import { addMessage } from '../../../frame-events';
@@ -35,7 +35,6 @@ import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import type { ApplyEntityTxOptions } from '../../apply';
 import type { AccountTxTarget } from '../account';
-import { findAccountKey } from '../../account-key';
 import {
   getCrossJurisdictionLocalUsdCapError,
   isCrossJurisdictionBookRiskRejection,

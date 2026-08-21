@@ -14,8 +14,7 @@ import type {
   RuntimeActivityEvent,
   RuntimeActivityFilters,
 } from '../views/activity-types';
-import type { AccountFrame } from '../../types/account';
-import type { AccountTx } from '../../types/account';
+import type { AccountFrame , AccountTx } from '../../types/account';
 import type { CertifiedEntityFrameLink } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { findAccountByCounterparty } from '../../account/state/account-lookup';
