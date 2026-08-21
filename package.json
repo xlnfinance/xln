@@ -290,6 +290,7 @@
     "@noble/hashes": "^2.3.0",
     "@noble/secp256k1": "^1.7.2",
     "@node-rs/argon2": "^2.1.0",
+    "@openzeppelin/contracts": "5.4.0",
     "bip39": "^3.1.0",
     "buffer": "^6.0.3",
     "debug": "^4.4.3",
