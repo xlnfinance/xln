@@ -90,7 +90,7 @@ const entityConsensusPaths = [
   'core/entity/consensus/input/consensus.ts',
   'core/entity/consensus/frame/application.ts',
   'core/entity/consensus/commit/finalization.ts',
-  'core/entity/consensus/proposal/single-signer-frame.ts',
+  'core/entity/consensus/proposal/start.ts',
 ];
 const entityConsensusPath = entityConsensusPaths.join(', ');
 const envEventsPath = 'core/runtime/observability/env-events.ts';

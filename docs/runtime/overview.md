@@ -31,10 +31,10 @@ that drives them. Read the cascade before the services around it.
 
 ### 3. Certification and failure
 
-14. `core/entity/consensus/proposal/single-signer-frame.ts` — immediate local
-    certification through the same candidate model.
-15. `core/entity/consensus/proposal/multi-signer.ts` — validator candidate
-    and Hanko flow.
+14. `core/entity/consensus/proposal/start.ts` — one canonical proposal builder;
+    a one-member board seals its own quorum without a second implementation.
+15. `core/entity/consensus/proposal/precommit-input.ts` — multi-validator
+    precommit collection and threshold certification.
 16. `core/account/consensus/incoming/collision.ts` — deterministic same-height
     LEFT-wins rollback.
 17. `core/account/consensus/incoming/ack-commit.ts` — bilateral commit.

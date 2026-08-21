@@ -16,7 +16,7 @@ import {
   keySnapshotGraph,
   parseSnapshotGraphKey,
 } from '../../../storage/keys';
-import { inspectSnapshotGraphRows } from '../../../storage/read/snapshot-graph-integrity';
+import { inspectSnapshotGraphRows } from '../../../storage/read/integrity/snapshot-graph';
 import {
   prepareAccountStorageLayout,
 } from '../../../storage/schema/account-layout';

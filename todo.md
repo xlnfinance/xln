@@ -42,6 +42,8 @@ same bytes and an independent contract/runtime audit reports no blocker:
 - `bun run gate:release`
 - `bun run gate:mainnet-preflight` (owner explicitly excluded the soak gate)
 - post-deploy `bun run prod:health`
+- fully green unit tests, deterministic scenarios, and browser E2E on the same
+  immutable candidate bytes
 
 Completed work and stale findings are deleted rather than retained as open
 checkboxes. Any new blocker must be added here immediately and removes release

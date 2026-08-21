@@ -2,7 +2,7 @@ import { computeCanonicalRuntimeStateHash } from '../canonical-hash';
 import { computeStorageFrameHash } from '../hashes';
 import { computeStorageReplicaMetaDigest } from '../replica/replica-meta-digest';
 import { readSnapshotDocs } from '../database/lifecycle';
-import { verifyLiveStorageIntegrity } from './live-integrity';
+import { verifyLiveStorageIntegrity } from './integrity/live';
 import {
   KEY_LIVE_REPLICA_META,
   STORAGE_VERIFY_TAIL_FRAMES,
@@ -16,7 +16,7 @@ import {
 } from '../keys';
 import { countKeys, iterateKeys, readValidatedOrNull } from '../database/level';
 import { validateStorageSnapshotManifestValue } from '../schema/authoritative-schema';
-import { inspectSnapshotGraphRows } from './snapshot-graph-integrity';
+import { inspectSnapshotGraphRows } from './integrity/snapshot-graph';
 import {
   readStorageFramePayloads,
   readStorageFrameRecord,

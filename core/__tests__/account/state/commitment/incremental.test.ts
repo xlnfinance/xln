@@ -1,19 +1,19 @@
 import { describe, expect, test } from 'bun:test';
-import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
-import { computeAccountStateRoot, computeAccountStateRootCold } from '../../../account/commitment/state-root';
-import { forkAccountReplicaShell } from '../../../account/state/account-replica-shell';
-import { createEntityFrameCandidateState } from '../../../entity/state-clone';
+import { PersistentAccountStateMap } from '../../../../account/state/persistent-state-map';
+import { computeAccountStateRoot, computeAccountStateRootCold } from '../../../../account/commitment/state-root';
+import { forkAccountReplicaShell } from '../../../../account/state/account-replica-shell';
+import { createEntityFrameCandidateState } from '../../../../entity/state-clone';
 import {
   EntityAccountCandidateMap,
   PersistentEntityAccountMap,
-} from '../../../entity/state/persistent-account-map';
-import { PersistentEntityCollectionMap } from '../../../entity/state/persistent-collection-map';
-import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
-import { safeStringify } from '../../../protocol/serialization';
-import type { SwapOffer } from '../../../types/account';
-import type { EntityState } from '../../../entity/types';
-import { createDefaultDelta } from '../../../account/state/delta';
-import { makeAccount } from '../../helpers/cross-j';
+} from '../../../../entity/state/persistent-account-map';
+import { PersistentEntityCollectionMap } from '../../../../entity/state/persistent-collection-map';
+import { computeEntityAccountValueHash } from '../../../../entity/consensus/state-root';
+import { safeStringify } from '../../../../protocol/serialization';
+import type { SwapOffer } from '../../../../types/account';
+import type { EntityState } from '../../../../entity/types';
+import { createDefaultDelta } from '../../../../account/state/delta';
+import { makeAccount } from '../../../helpers/cross-j';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;

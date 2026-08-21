@@ -133,7 +133,7 @@ import {
   verifyStorageSnapshotIntegrity,
   verifyStorageTailIntegrity,
 } from './read/verify';
-import { verifyLiveStorageIntegrity } from './read/live-integrity';
+import { verifyLiveStorageIntegrity } from './read/integrity/live';
 import {
   validateAccountJClaimNodeValue,
   validateCertifiedBoardNodeValue,

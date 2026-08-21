@@ -6,20 +6,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ethers } from 'ethers';
 
-import { registerSignerKey, signAccountFrame } from '../../../account/crypto';
-import { generateLazyEntityId } from '../../../entity/factory';
-import { buildSingleSignerHanko } from '../../../hanko/batch';
+import { registerSignerKey, signAccountFrame } from '../../../../account/crypto';
+import { generateLazyEntityId } from '../../../../entity/factory';
+import { buildSingleSignerHanko } from '../../../../hanko/batch';
 import {
   hashBoardProposalCancelHankoPayload,
   hashBoardProposalHankoPayload,
   hashCancelEntityProviderActionHankoPayload,
   hashEntityTransferHankoPayload,
-} from '../../../hanko/onchain-domain';
-import { buildQuorumHanko } from '../../../hanko/signing';
-import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../../../jurisdiction/adapter';
-import { computeBatchHankoHash, createEmptyBatch, encodeJBatch } from '../../../jurisdiction/machine/batch';
-import { createSettlementHashWithNonce } from '../../../protocol/dispute/proof-builder';
-import { createEmptyEnv } from '../../../runtime';
+} from '../../../../hanko/onchain-domain';
+import { buildQuorumHanko } from '../../../../hanko/signing';
+import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../../../../jurisdiction/adapter';
+import { computeBatchHankoHash, createEmptyBatch, encodeJBatch } from '../../../../jurisdiction/machine/batch';
+import { createSettlementHashWithNonce } from '../../../../protocol/dispute/proof-builder';
+import { createEmptyEnv } from '../../../../runtime';
 
 const CHAIN_A = 31_337;
 const CHAIN_B = 31_338;

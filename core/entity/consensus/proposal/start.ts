@@ -40,7 +40,7 @@ import {
 } from '../state-root';
 import { fitEntityProposalToWireBudget, recordEntityWireBudgetFitHint } from './wire-budget';
 import { assertEstimatedSealedEntityFrameWire, validateProposedEntityFrame } from '../frame/validation';
-import { timePerfPhase , cumulativeMarksToPhases, snapshotPerfPhases } from '../../../support/performance/profile';
+import { cumulativeMarksToPhases, snapshotPerfPhases, timePerfPhase } from '../../../support/performance/profile';
 import { assertHtlcPreparedInfraContext } from '../../htlc/materialize-context';
 import { requireEntityEncryptionPrivateKey } from '../../auth/crypto';
 import { assertEntityInfraContextAuthority } from '../frame/infra-context-validation';

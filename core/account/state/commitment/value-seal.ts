@@ -1,5 +1,5 @@
-import type { AccountReplica, AccountState } from '../../types/account';
-import { isPersistentAccountStateMap } from './persistent-state-map';
+import type { AccountReplica, AccountState } from '../../../types/account';
+import { isPersistentAccountStateMap } from '../persistent-state-map';
 
 /** Top-level AccountState maps only. Nested graphs are not walked. */
 const ACCOUNT_STATE_MAP_FIELDS = [

@@ -57,7 +57,7 @@ import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
 
 import { prepareAccountStorageLayout } from '../../../storage/schema/account-layout';
 
-import { verifyLiveStorageIntegrity } from '../../../storage/read/live-integrity';
+import { verifyLiveStorageIntegrity } from '../../../storage/read/integrity/live';
 
 import {
   KEY_HEAD,

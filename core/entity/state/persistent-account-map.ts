@@ -7,7 +7,7 @@ import {
 } from '../../protocol/state/persistent-radix-value-map';
 import { createStructuredLogger } from '../../support/logger';
 import { forkAccountReplicaShell } from '../../account/state/account-replica-shell';
-import { sealCommittedAccountValue } from '../../account/state/account-value-seal';
+import { sealCommittedAccountValue } from '../../account/state/commitment/value-seal';
 import {
   ACCOUNT_WORK_PENDING,
   ACCOUNT_WORK_QUEUED,

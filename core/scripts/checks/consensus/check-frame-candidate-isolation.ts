@@ -1,9 +1,9 @@
 const frameApplicationPath =
   'core/entity/consensus/frame/application.ts';
 const singleSignerPath =
-  'core/entity/consensus/proposal/single-signer-frame.ts';
+  'core/entity/consensus/proposal/start.ts';
 const multiSignerPath =
-  'core/entity/consensus/proposal/multi-signer.ts';
+  'core/entity/consensus/proposal/precommit-input.ts';
 const runtimeProcessPath = 'core/runtime/frame/process.ts';
 const entityInputStagingPath =
   'core/runtime/admit/entity-input-staging.ts';
@@ -27,7 +27,7 @@ if (
 if (frameApplication.includes('cloneEntityState(normalized)')) {
   throw new Error('ENTITY_FRAME_FULL_STATE_CLONE_FORBIDDEN');
 }
-if (!/export const applyRuntimeOwnedEntityFrame[\s\S]*?frameTimestamp,\s*true,\s*\);/.test(frameApplication)) {
+if (!/export const applyRuntimeOwnedEntityFrame[\s\S]*?frameTimestamp,\s*true,\s*inProcessInfraValidated,\s*\);/.test(frameApplication)) {
   throw new Error('SINGLE_SIGNER_ENTITY_CANDIDATE_BOUNDARY_MISSING');
 }
 if (!singleSigner.includes('? applyRuntimeOwnedEntityFrame')) {
