@@ -1548,7 +1548,10 @@ export class RuntimeP2P {
     this.applyIncomingProfiles(from, decoded.profiles)
       .then(() => {
         if (decoded.cursor === undefined || !client || this.closing || this.closed) return;
-        client.gossipCursor = Math.max(client.gossipCursor ?? 0, decoded.cursor);
+        // The cursor belongs to this relay session, not to the Runtime. A relay
+        // restart or an explicit full refresh may legitimately rewind it; a
+        // monotonic client watermark would then skip every new profile forever.
+        client.gossipCursor = decoded.cursor;
         if (decoded.hasMore === true) this.requestSeedGossip('incremental');
       })
       .catch(err => {

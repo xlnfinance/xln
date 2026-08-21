@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test';
 
 import { decodeGossipProfileBatchRequest, selectProfileBatch } from '../../../network/p2p/gossip/profile-batch';
+import { RuntimeP2P } from '../../../network/p2p/p2p';
 import type { Profile } from '../../../entity/profile';
+import { createEmptyEnv } from '../../../runtime';
 
 const profile = (index: number): Profile => ({
   entityId: `entity-${index}`,
@@ -120,6 +122,35 @@ test('relay sequence pages cannot skip profiles beyond one batch', async () => {
   expect(second.cursor).toBe(store.gossipSeq);
   expect(second.hasMore).toBe(false);
   expect(new Set([...first.profiles, ...second.profiles].map(item => item.entityId)).size).toBe(count);
+});
+
+test('a full gossip response rewinds the relay-session cursor before continuing pagination', async () => {
+  const p2p = new RuntimeP2P({
+    env: createEmptyEnv('gossip-cursor-rewind'),
+    runtimeId: `0x${'12'.repeat(20)}`,
+    onEntityInputs: () => {},
+    onGossipProfiles: () => {},
+  });
+  const client = { gossipCursor: 5_000 };
+  let incrementalRequests = 0;
+  const internals = p2p as unknown as {
+    handleGossipResponse: (from: string, payload: unknown, client: { gossipCursor: number }) => void;
+    requestSeedGossip: (mode: 'incremental' | 'full') => void;
+  };
+  internals.requestSeedGossip = mode => {
+    if (mode === 'incremental') incrementalRequests += 1;
+  };
+
+  internals.handleGossipResponse('relay', {
+    profiles: [],
+    jurisdictions: [],
+    cursor: 41,
+    hasMore: true,
+  }, client);
+  await Promise.resolve();
+
+  expect(client.gossipCursor).toBe(41);
+  expect(incrementalRequests).toBe(1);
 });
 
 test('explicit gossip lookup never advances the directory cursor', async () => {

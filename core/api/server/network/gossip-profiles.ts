@@ -15,21 +15,14 @@ const buildKnownProfileBundle = (
   const target = normalizeEntityId(input.entityId);
   if (!target) return { profile: null, peers: [] };
 
-  // Lookup by id, then resolve only the target's peers: rebuilding a merged
-  // map of every stored profile per request was 18% of a 100-user daemon's
-  // CPU under the load driver's route polling.
-  const localProfiles = input.env?.gossip?.getProfiles?.() || [];
-  const lookup = (wanted: string): Profile | null => {
-    let found: Profile | null = input.relayStore === null
-      ? null
-      : input.relayStore.gossipProfiles.get(wanted)?.profile ?? null;
-    // Local Runtime profiles override relay copies (same precedence as before).
-    for (const profile of localProfiles) {
-      if (normalizeEntityId(profile?.entityId) === wanted) found = profile;
-    }
-    return found;
-  };
-  const merged = { get: lookup };
+  // Both stores are already keyed by canonical EntityId. Never rebuild or scan
+  // the directory here: one Hub profile can reference thousands of peers, so a
+  // linear lookup per peer turns this inspection route into an O(N²) Runtime
+  // stall. Live Runtime data intentionally overrides a relay cache copy.
+  const lookup = (wanted: string): Profile | null =>
+    input.env?.gossip?.profiles.get(wanted)
+    ?? input.relayStore?.gossipProfiles.get(wanted)?.profile
+    ?? null;
 
   const profile = lookup(target);
   if (!profile) return { profile: null, peers: [] };
@@ -46,7 +39,7 @@ const buildKnownProfileBundle = (
 
   const peers: Profile[] = [];
   for (const peerId of peerIds) {
-    const peer = merged.get(peerId);
+    const peer = lookup(peerId);
     if (peer) peers.push(peer);
   }
   return { profile, peers };
