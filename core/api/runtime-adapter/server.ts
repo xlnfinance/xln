@@ -388,7 +388,12 @@ const sendResponse = (
       v: XLN_PROTOCOL_VERSION,
       inReplyTo: response.inReplyTo,
       ok: false,
-      error: toRuntimeAdapterErrorPayload(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter response too large', true)),
+      // retryable=false: response size is deterministic for an identical
+      // query, so an unchanged retry can never succeed. Generic retry loops
+      // (readWithRateLimitRetry, 120 s deadline) must see the failure
+      // immediately; only a caller that shrinks the request (page halving)
+      // may try again.
+      error: toRuntimeAdapterErrorPayload(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter response too large', false)),
     } satisfies RuntimeAdapterResponse);
     try {
       assertRuntimeAdapterMessageSize(capped);
