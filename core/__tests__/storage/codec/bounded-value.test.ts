@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  BOUNDED_STORAGE_DELETE_BATCH_SIZE,
   MAX_PHYSICAL_STORAGE_VALUE_BYTES,
   deleteBoundedStorageValue,
+  deleteBoundedStorageValues,
   prepareBoundedStorageValueRows,
   readBoundedEncodedValue,
   readBoundedValidatedValue,
@@ -93,5 +95,24 @@ describe('bounded physical storage values', () => {
     expect(result.removedKeys).toBe(rows.length);
     expect(result.removedBytes).toBeGreaterThan(23_000);
     expect(committed).toBe(1);
+  });
+
+  test('bulk deletion commits once per bounded owner group', async () => {
+    const ownerKeys = Array.from(
+      { length: BOUNDED_STORAGE_DELETE_BATCH_SIZE + 1 },
+      (_, index) => Buffer.from([0x02, index >>> 8, index & 0xff]),
+    );
+    const rows = ownerKeys.flatMap((ownerKey, index) =>
+      prepareBoundedStorageValueRows(ownerKey, encodeBuffer({ index })),
+    );
+    const { db, store } = makeMemoryDb(rows);
+    let commits = 0;
+    const result = await deleteBoundedStorageValues(db, ownerKeys, () => {
+      commits += 1;
+    });
+
+    expect(result.removedKeys).toBe(ownerKeys.length);
+    expect(store.size).toBe(0);
+    expect(commits).toBe(2);
   });
 });

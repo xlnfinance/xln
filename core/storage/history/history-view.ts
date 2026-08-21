@@ -4,8 +4,9 @@ import type { AccountTx } from '../../types/account';
 import { decodeValidatedBuffer, encodeBuffer, writeBatch } from '../codec/codec';
 import { iterateKeys, readRawOrNull } from '../database/level';
 import {
+  BOUNDED_STORAGE_DELETE_BATCH_SIZE,
   boundedStorageRowsBytes,
-  deleteBoundedStorageValue,
+  deleteBoundedStorageValues,
   prepareBoundedStorageValueRows,
   readBoundedValidatedValue,
 } from '../codec/bounded-value';
@@ -368,14 +369,22 @@ const pruneHistoryViewBeforeRuntimeHeight = async (
   const onPruneBatch = async (): Promise<void> => {
     await onPersistenceBoundary?.('after-history-view-prune');
   };
+  let ownerKeys: Buffer[] = [];
+  const flush = async (): Promise<void> => {
+    if (ownerKeys.length === 0) return;
+    const pruned = await deleteBoundedStorageValues(db, ownerKeys, onPruneBatch);
+    removedBytes += pruned.removedBytes;
+    removedKeys += pruned.removedKeys;
+    ownerKeys = [];
+  };
   for await (const key of iterateKeys(db, {
     gte: Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY]),
     lt: Buffer.concat([Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY]), encodeHeight(cutoff + 1)]),
   })) {
-    const pruned = await deleteBoundedStorageValue(db, key, onPruneBatch);
-    removedBytes += pruned.removedBytes;
-    removedKeys += pruned.removedKeys;
+    ownerKeys.push(key);
+    if (ownerKeys.length >= BOUNDED_STORAGE_DELETE_BATCH_SIZE) await flush();
   }
+  await flush();
 
   return { removedBytes, removedKeys };
 };

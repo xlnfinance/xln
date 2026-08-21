@@ -12,6 +12,7 @@ import {
 } from './codec';
 
 export const MAX_PHYSICAL_STORAGE_VALUE_BYTES = 10_000;
+export const BOUNDED_STORAGE_DELETE_BATCH_SIZE = 256;
 const BOUNDED_VALUE_CHUNK_PAYLOAD_BYTES = 9_000;
 
 type BoundedValueManifest = Readonly<{
@@ -217,14 +218,17 @@ export const readBoundedValidatedValue = async <T>(
   return decodeValidatedBuffer(await readManifestValue(db, ownerKey, manifest), validator);
 };
 
-/** Delete one logical value and every continuation in one LevelDB batch. */
-export const deleteBoundedStorageValue = async (
+type BoundedStorageDeletePlan = Readonly<{
+  keys: readonly Buffer[];
+  removedBytes: number;
+}>;
+
+const prepareBoundedStorageDelete = async (
   db: RuntimeDbLike,
   ownerKey: Buffer,
-  onCommitted?: () => void | Promise<void>,
-): Promise<{ removedBytes: number; removedKeys: number }> => {
+): Promise<BoundedStorageDeletePlan | null> => {
   const ownerValue = await readRawOrNull(db, ownerKey);
-  if (!ownerValue) return { removedBytes: 0, removedKeys: 0 };
+  if (!ownerValue) return null;
   const manifest = maybeManifest(decodeBuffer(ownerValue));
   const chunkKeys = manifest
     ? Array.from({ length: manifest.chunkCount }, (_, index) => keyBoundedValueChunk(ownerKey, index))
@@ -234,16 +238,52 @@ export const deleteBoundedStorageValue = async (
   if (missingIndex >= 0) {
     throw new Error(`STORAGE_BOUNDED_CHUNK_MISSING_ON_DELETE:${ownerKey.toString('hex')}:${missingIndex}`);
   }
-  const batch = db.batch();
-  for (const key of chunkKeys) batch.del(key);
-  batch.del(ownerKey);
-  await writeBatch(batch);
-  await onCommitted?.();
   let removedBytes = ownerKey.byteLength + ownerValue.byteLength;
   for (const [index, key] of chunkKeys.entries()) {
     const value = chunkValues[index];
     if (!value) throw new Error(`STORAGE_BOUNDED_CHUNK_MISSING_ON_DELETE:${ownerKey.toString('hex')}:${index}`);
     removedBytes += key.byteLength + value.byteLength;
   }
-  return { removedBytes, removedKeys: 1 + chunkKeys.length };
+  return { keys: [...chunkKeys, ownerKey], removedBytes };
+};
+
+/**
+ * Delete logical values in bounded LevelDB batches. Every owner's manifest and
+ * continuations share one batch, while range pruning never regresses to one
+ * fsync per owner.
+ */
+export const deleteBoundedStorageValues = async (
+  db: RuntimeDbLike,
+  ownerKeys: readonly Buffer[],
+  onCommitted?: () => void | Promise<void>,
+): Promise<{ removedBytes: number; removedKeys: number }> => {
+  let removedBytes = 0;
+  let removedKeys = 0;
+  for (let offset = 0; offset < ownerKeys.length; offset += BOUNDED_STORAGE_DELETE_BATCH_SIZE) {
+    const plans = await Promise.all(
+      ownerKeys
+        .slice(offset, offset + BOUNDED_STORAGE_DELETE_BATCH_SIZE)
+        .map(ownerKey => prepareBoundedStorageDelete(db, ownerKey)),
+    );
+    const presentPlans = plans.filter((plan): plan is BoundedStorageDeletePlan => plan !== null);
+    if (presentPlans.length === 0) continue;
+    const batch = db.batch();
+    for (const plan of presentPlans) {
+      for (const key of plan.keys) batch.del(key);
+      removedBytes += plan.removedBytes;
+      removedKeys += plan.keys.length;
+    }
+    await writeBatch(batch);
+    await onCommitted?.();
+  }
+  return { removedBytes, removedKeys };
+};
+
+/** Delete one logical value and every continuation in one LevelDB batch. */
+export const deleteBoundedStorageValue = (
+  db: RuntimeDbLike,
+  ownerKey: Buffer,
+  onCommitted?: () => void | Promise<void>,
+): Promise<{ removedBytes: number; removedKeys: number }> => {
+  return deleteBoundedStorageValues(db, [ownerKey], onCommitted);
 };
